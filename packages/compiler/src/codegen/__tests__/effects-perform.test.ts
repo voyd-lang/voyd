@@ -13,6 +13,7 @@ import type { CodegenContext } from "../context.js";
 import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
+import { createProgramHelperRegistry } from "../program-helpers.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -43,6 +44,7 @@ const buildLoweringSnapshot = () => {
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const diagnostics = new DiagnosticEmitter();
+  const programHelpers = createProgramHelperRegistry();
   const ctx: CodegenContext = {
     mod,
     moduleId: semantics.moduleId,
@@ -57,6 +59,7 @@ const buildLoweringSnapshot = () => {
       continuationBackend: {},
       testMode: false,
     },
+    programHelpers,
     functions: new Map(),
     functionInstances: new Map() as any,
     itemsToSymbols: new Map(),

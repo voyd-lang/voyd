@@ -9,6 +9,7 @@ import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
+import { createProgramHelperRegistry } from "../program-helpers.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -89,6 +90,7 @@ const buildCodegenProgram = (
   const runtimeTypeIdsByKey = new Map<string, number>();
   const runtimeTypeIdCounter = { value: 1 };
   const diagnostics = new DiagnosticEmitter();
+  const programHelpers = createProgramHelperRegistry();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     program,
     module: program.modules.get(sem.moduleId)!,
@@ -97,6 +99,7 @@ const buildCodegenProgram = (
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     diagnostics,
     options: DEFAULT_OPTIONS,
+    programHelpers,
     functions,
     functionInstances,
     itemsToSymbols: new Map(),

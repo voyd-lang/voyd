@@ -18,6 +18,7 @@ import type { Diagnostic } from "../diagnostics/index.js";
 import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
 import { buildModuleSymbolIndex, type ModuleSymbolIndex } from "./symbol-index.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
+import { assignModuleTestIds } from "../tests/ids.js";
 
 export interface SemanticsPipelineResult {
   binding: BindingResult;
@@ -49,6 +50,8 @@ export const semanticsPipeline = (
   if (!form.callsInternal("ast")) {
     throw new Error("semantics pipeline expects the expanded AST root form");
   }
+
+  assignModuleTestIds({ ast: form, modulePath: module.path });
 
   const modulePath = form.location?.filePath ?? "<module>";
   const symbolTable: SymbolTable = new SymbolTable({

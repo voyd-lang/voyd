@@ -41,6 +41,7 @@ import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
 import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
+import type { ProgramHelperRegistry } from "./program-helpers.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -136,6 +137,7 @@ export interface CodegenContext {
   module: ModuleCodegenView;
   diagnostics: DiagnosticEmitter;
   options: Required<CodegenOptions>;
+  programHelpers: ProgramHelperRegistry;
   functions: Map<string, Map<number, FunctionMetadata[]>>;
   functionInstances: Map<ProgramFunctionInstanceId, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;

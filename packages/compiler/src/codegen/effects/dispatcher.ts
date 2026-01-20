@@ -5,19 +5,8 @@ import type { CodegenContext } from "../context.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
-export const ensureDispatcher = (ctx: CodegenContext): string => {
-  const existing = ctx.effectsState.dispatcherName;
-  if (existing) return existing;
+export const emitDispatcher = (ctx: CodegenContext): string => {
   const fnName = "__voyd_dispatch";
-  try {
-    const moduleEntry = ctx.mod.getFunction(fnName);
-    if (moduleEntry) {
-      ctx.effectsState.dispatcherName = fnName;
-      return fnName;
-    }
-  } catch {
-    // Binaryen throws when the function is missing; ignore and continue.
-  }
   const handlerType = ctx.effectsRuntime.handlerFrameType;
   const outcomeType = ctx.effectsRuntime.outcomeType;
   const requestType = ctx.effectsRuntime.effectRequestType;
@@ -160,3 +149,6 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
   ctx.effectsState.dispatcherName = fnName;
   return fnName;
 };
+
+export const ensureDispatcher = (ctx: CodegenContext): string =>
+  ctx.programHelpers.ensureDispatcher(ctx);
