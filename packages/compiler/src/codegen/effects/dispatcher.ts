@@ -9,6 +9,15 @@ export const ensureDispatcher = (ctx: CodegenContext): string => {
   const existing = ctx.effectsState.dispatcherName;
   if (existing) return existing;
   const fnName = "__voyd_dispatch";
+  try {
+    const moduleEntry = ctx.mod.getFunction(fnName);
+    if (moduleEntry) {
+      ctx.effectsState.dispatcherName = fnName;
+      return fnName;
+    }
+  } catch {
+    // Binaryen throws when the function is missing; ignore and continue.
+  }
   const handlerType = ctx.effectsRuntime.handlerFrameType;
   const outcomeType = ctx.effectsRuntime.outcomeType;
   const requestType = ctx.effectsRuntime.effectRequestType;

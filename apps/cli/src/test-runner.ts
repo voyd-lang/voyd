@@ -1,127 +1,25 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { parse } from "@voyd/compiler/parser/parser.js";
-import { isForm } from "@voyd/compiler/parser/index.js";
-import type { Form } from "@voyd/compiler/parser/index.js";
-import type { TestAttribute } from "@voyd/compiler/parser/attributes.js";
 import {
-  analyzeModules,
-  emitProgram,
-  loadModuleGraph,
-} from "@voyd/compiler/pipeline.js";
-import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
-import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
+  createSdk,
+  type TestEvent,
+  type TestReporter,
+  type TestRunSummary,
+} from "@voyd/sdk";
 import {
+  createFsModuleHost,
   modulePathFromFile,
-  modulePathToString,
-} from "@voyd/compiler/modules/path.js";
-import { createFsModuleHost } from "@voyd/compiler/modules/fs-host.js";
-import type {
-  ModulePathAdapter,
-  ModuleRoots,
-} from "@voyd/compiler/modules/types.js";
-import {
-  runEffectfulExport,
-  parseEffectTable,
-  type EffectHandler,
-} from "@voyd/compiler/codegen/effects/host-runner.js";
+  type ModuleRoots,
+} from "@voyd/sdk/compiler";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
-import { getWasmInstance } from "@voyd/lib/wasm.js";
 
-type TestModifiers = {
-  skip: boolean;
-  only: boolean;
-};
+const sdk = createSdk();
 
-type DiscoveredTest = {
-  filePath: string;
-  fnName: string;
-  description?: string;
-  modifiers: TestModifiers;
-  location?: {
-    filePath: string;
-    startLine: number;
-    startColumn: number;
-  };
-};
-
-type PlannedTest = DiscoveredTest & {
-  moduleLabel: string;
+type CliTestResult = {
   displayName: string;
-  status: "pending" | "skipped";
-  skipReason?: string;
-};
-
-type TestResult = Omit<PlannedTest, "status"> & {
   status: "passed" | "failed" | "skipped";
   durationMs: number;
   error?: unknown;
-};
-
-type TestRunSummary = {
-  total: number;
-  passed: number;
-  failed: number;
-  skipped: number;
-  durationMs: number;
-};
-
-class TestFailure extends Error {
-  constructor() {
-    super("Test failed");
-    this.name = "TestFailure";
-  }
-}
-
-class TestSkip extends Error {
-  constructor() {
-    super("Test skipped");
-    this.name = "TestSkip";
-  }
-}
-
-type TestOpKind = "fail" | "skip" | "log";
-
-const TEST_OP_HANDLERS: Record<TestOpKind, EffectHandler> = {
-  fail: () => {
-    throw new TestFailure();
-  },
-  skip: () => {
-    throw new TestSkip();
-  },
-  log: () => null,
-};
-
-const testOpKind = (label: string): TestOpKind | undefined => {
-  if (label.endsWith(".fail")) return "fail";
-  if (label.endsWith(".skip")) return "skip";
-  if (label.endsWith(".log")) return "log";
-  return undefined;
-};
-
-const buildTestEffectHandlers = (
-  wasm: Uint8Array
-): Record<string, EffectHandler> => {
-  const table = parseEffectTable(wasm);
-  let testOps: typeof table.ops | undefined;
-  let bestScore = 0;
-  table.opsByEffectId.forEach((ops) => {
-    const score = ops.reduce((count, op) => {
-      return testOpKind(op.label) ? count + 1 : count;
-    }, 0);
-    if (score === 0 || score <= bestScore) return;
-    bestScore = score;
-    testOps = ops;
-  });
-  if (!testOps || bestScore === 0) return {};
-
-  const handlers: Record<string, EffectHandler> = {};
-  testOps.forEach((op) => {
-    const kind = testOpKind(op.label);
-    if (!kind) return;
-    handlers[`${op.opIndex}`] = TEST_OP_HANDLERS[kind];
-  });
-  return handlers;
 };
 
 const shouldSkipDir = (name: string): boolean => {
@@ -166,108 +64,86 @@ const findVoydFiles = async (rootPath: string): Promise<string[]> => {
   return files;
 };
 
-const parseTestsFromAst = (ast: Form, filePath: string): DiscoveredTest[] => {
-  if (!ast.callsInternal("ast")) {
-    return [];
-  }
-
-  const tests: DiscoveredTest[] = [];
-
-  ast.rest.forEach((entry) => {
-    if (!isForm(entry)) return;
-    const attributes = entry.attributes as { test?: TestAttribute } | undefined;
-    const test = attributes?.test;
-    if (!test) return;
-
-    const modifiers = {
-      skip: test.modifiers?.skip === true,
-      only: test.modifiers?.only === true,
-    };
-
-    const location = entry.location
-      ? {
-          filePath: entry.location.filePath,
-          startLine: entry.location.startLine,
-          startColumn: entry.location.startColumn + 1,
-        }
-      : undefined;
-
-    tests.push({
-      filePath,
-      fnName: test.id,
-      description: test.description,
-      modifiers,
-      location,
-    });
-  });
-
-  return tests;
+const resolveRoots = (
+  rootPath: string,
+): { scanRoot: string; roots: ModuleRoots } => {
+  const resolved = resolve(rootPath);
+  const scanRoot = resolved;
+  const srcRoot = resolved.endsWith(".voyd") ? dirname(resolved) : resolved;
+  return { scanRoot, roots: { src: srcRoot, std: resolveStdRoot() } };
 };
 
-const buildModuleLabel = (
-  filePath: string,
-  roots: ModuleRoots,
-  pathAdapter: ModulePathAdapter
-): string => {
+const SIMPLE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+const escapeIdentifier = (value: string): string =>
+  value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+
+const formatSegment = (segment: string): string =>
+  SIMPLE_IDENTIFIER.test(segment) ? segment : `'${escapeIdentifier(segment)}'`;
+
+const formatModulePathForUse = ({
+  namespace,
+  segments,
+  packageName,
+}: ReturnType<typeof modulePathFromFile>): string => {
+  const prefix =
+    namespace === "pkg" && packageName
+      ? [namespace, packageName]
+      : [namespace];
+  return [...prefix, ...segments].map(formatSegment).join("::");
+};
+
+const buildModulePath = ({
+  filePath,
+  roots,
+  pathAdapter,
+}: {
+  filePath: string;
+  roots: ModuleRoots;
+  pathAdapter: ReturnType<typeof createFsModuleHost>["path"];
+}): string => {
   const modulePath = modulePathFromFile(filePath, roots, pathAdapter);
-  return modulePathToString(modulePath);
+  return formatModulePathForUse(modulePath);
 };
 
-const buildDisplayName = (
-  test: DiscoveredTest,
-  moduleLabel: string
-): string => {
-  if (test.description) {
-    return `${moduleLabel}::${test.description}`;
+const buildTestEntrySource = ({
+  modulePaths,
+}: {
+  modulePaths: string[];
+}): string => {
+  return modulePaths
+    .map(
+      (modulePath, index) =>
+        `use ${modulePath}::self as test_mod_${index}`
+    )
+    .join("\n");
+};
+
+const resolveTestEntryPath = ({
+  roots,
+  existingFiles,
+}: {
+  roots: ModuleRoots;
+  existingFiles: string[];
+}): string => {
+  const existing = new Set(existingFiles.map((filePath) => resolve(filePath)));
+  const base = join(roots.src, "__voyd_test_entry__");
+  let index = 0;
+  let candidate = `${base}.voyd`;
+  while (existing.has(resolve(candidate))) {
+    index += 1;
+    candidate = `${base}_${index}.voyd`;
   }
-
-  if (test.location) {
-    return `${moduleLabel}::<${test.location.filePath}:${test.location.startLine}:${test.location.startColumn}>`;
-  }
-
-  return `${moduleLabel}::<${test.fnName}>`;
+  return candidate;
 };
 
-const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
-  diagnostics.some((diagnostic) => diagnostic.severity === "error");
-
-const assertNoDiagnostics = (diagnostics: readonly Diagnostic[]): void => {
-  const error = diagnostics.find(
-    (diagnostic) => diagnostic.severity === "error"
-  );
-  if (error) {
-    throw new DiagnosticError(error);
-  }
-};
-
-const runPureTest = (wasm: Uint8Array, exportName: string): void => {
-  const instance = getWasmInstance(wasm);
-  const target = instance.exports[exportName];
-  if (typeof target !== "function") {
-    throw new Error(`Missing export ${exportName}`);
-  }
-  (target as CallableFunction)();
-};
-
-const runEffectfulTest = async (
-  wasm: Uint8Array,
-  exportName: string
-): Promise<void> => {
-  const handlers = buildTestEffectHandlers(wasm);
-  await runEffectfulExport({
-    wasm,
-    entryName: `${exportName}_effectful`,
-    handlers,
-  });
-};
-
-const formatResultLabel = (result: TestResult): string => {
+const formatResultLabel = (result: CliTestResult): string => {
   if (result.status === "passed") return "PASS";
   if (result.status === "skipped") return "SKIP";
   return "FAIL";
 };
 
-const reportResult = (result: TestResult, reporter: string): void => {
+const reportResult = (result: CliTestResult, reporter: string): void => {
   if (reporter === "silent") {
     return;
   }
@@ -294,13 +170,19 @@ const reportSummary = (summary: TestRunSummary, reporter: string): void => {
   console.log(`\n${details} (${summary.total} total)`);
 };
 
-const resolveRoots = (
-  rootPath: string
-): { scanRoot: string; roots: ModuleRoots } => {
-  const resolved = resolve(rootPath);
-  const scanRoot = resolved;
-  const srcRoot = resolved.endsWith(".voyd") ? dirname(resolved) : resolved;
-  return { scanRoot, roots: { src: srcRoot, std: resolveStdRoot() } };
+const createCliReporter = (reporter: string): TestReporter => {
+  if (reporter === "silent") {
+    return { onEvent: () => undefined };
+  }
+
+  return {
+    onEvent: (event: TestEvent) => {
+      if (event.type !== "test:result") {
+        return;
+      }
+      reportResult(event.result, reporter);
+    },
+  };
 };
 
 export const runTests = async ({
@@ -313,15 +195,9 @@ export const runTests = async ({
   const host = createFsModuleHost();
   const { scanRoot, roots } = resolveRoots(rootPath);
   const files = await findVoydFiles(scanRoot);
+  const cliReporter = createCliReporter(reporter);
 
-  const discovered: DiscoveredTest[] = [];
-  for (const filePath of files) {
-    const source = await readFile(filePath, "utf8");
-    const ast = parse(source, filePath);
-    discovered.push(...parseTestsFromAst(ast, filePath));
-  }
-
-  if (discovered.length === 0) {
+  if (files.length === 0) {
     if (reporter !== "silent") {
       console.log("No tests found.");
     }
@@ -334,157 +210,43 @@ export const runTests = async ({
     };
   }
 
-  const hasOnly = discovered.some((test) => test.modifiers.only);
-  const planned: PlannedTest[] = discovered.map((test) => {
-    const moduleLabel = buildModuleLabel(test.filePath, roots, host.path);
-    const displayName = buildDisplayName(test, moduleLabel);
-
-    if (hasOnly && !test.modifiers.only) {
-      return {
-        ...test,
-        moduleLabel,
-        displayName,
-        status: "skipped",
-        skipReason: "only",
-      };
-    }
-
-    if (test.modifiers.skip) {
-      return {
-        ...test,
-        moduleLabel,
-        displayName,
-        status: "skipped",
-        skipReason: "skip",
-      };
-    }
-
-    return { ...test, moduleLabel, displayName, status: "pending" };
-  });
-
-  const byFile = new Map<string, PlannedTest[]>();
-  const results: TestResult[] = [];
-
-  planned.forEach((test) => {
-    if (test.status === "skipped") {
-      const result: TestResult = {
-        ...test,
-        status: "skipped",
-        durationMs: 0,
-      };
-      results.push(result);
-      reportResult(result, reporter);
-      return;
-    }
-
-    const tests = byFile.get(test.filePath) ?? [];
-    tests.push(test);
-    byFile.set(test.filePath, tests);
-  });
+  const modulePaths = files.map((filePath) =>
+    buildModulePath({ filePath, roots, pathAdapter: host.path })
+  );
+  const entryPath = resolveTestEntryPath({ roots, existingFiles: files });
+  const entrySource = buildTestEntrySource({ modulePaths });
 
   const startRun = Date.now();
+  const result = await sdk.compile({
+    entryPath,
+    source: entrySource,
+    includeTests: true,
+    testsOnly: true,
+    roots,
+  });
 
-  for (const [filePath, tests] of byFile.entries()) {
-    const graph = await loadModuleGraph({ entryPath: filePath, roots, host });
-    const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
-      graph,
-      includeTests: true,
-    });
-    const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
-    if (hasErrorDiagnostics(diagnostics)) {
-      assertNoDiagnostics(diagnostics);
+  const tests = result.tests;
+  if (!tests || tests.cases.length === 0) {
+    if (reporter !== "silent") {
+      console.log("No tests found.");
     }
-
-    const { wasm, diagnostics: codegenDiagnostics } = await emitProgram({
-      graph,
-      semantics,
-      codegenOptions: { testMode: true },
-    });
-    const allDiagnostics = [...diagnostics, ...codegenDiagnostics];
-    if (hasErrorDiagnostics(allDiagnostics)) {
-      assertNoDiagnostics(allDiagnostics);
-    }
-
-    const entrySemantics = semantics.get(graph.entry);
-    if (!entrySemantics) {
-      throw new Error("No semantics available for entry module");
-    }
-
-    for (const test of tests) {
-      const start = Date.now();
-      const fnDecl = entrySemantics.binding.functions.find(
-        (fn) => fn.name === test.fnName
-      );
-      if (!fnDecl) {
-        const error = new Error(`Missing test function ${test.fnName}`);
-        const result: TestResult = {
-          ...test,
-          status: "failed",
-          durationMs: Date.now() - start,
-          error,
-        };
-        results.push(result);
-        reportResult(result, reporter);
-        continue;
-      }
-
-      const effectRow = entrySemantics.typing.effects.getFunctionEffect(
-        fnDecl.symbol
-      );
-      const isEffectful =
-        typeof effectRow === "number" &&
-        !entrySemantics.typing.effects.isEmpty(effectRow);
-
-      try {
-        if (isEffectful) {
-          await runEffectfulTest(wasm, test.fnName);
-        } else {
-          runPureTest(wasm, test.fnName);
-        }
-        const result: TestResult = {
-          ...test,
-          status: "passed",
-          durationMs: Date.now() - start,
-        };
-        results.push(result);
-        reportResult(result, reporter);
-      } catch (error) {
-        if (error instanceof TestSkip) {
-          const result: TestResult = {
-            ...test,
-            status: "skipped",
-            durationMs: Date.now() - start,
-          };
-          results.push(result);
-          reportResult(result, reporter);
-          continue;
-        }
-
-        const result: TestResult = {
-          ...test,
-          status: "failed",
-          durationMs: Date.now() - start,
-          error,
-        };
-        results.push(result);
-        reportResult(result, reporter);
-      }
-    }
+    return {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      durationMs: Date.now() - startRun,
+    };
   }
 
-  const summary: TestRunSummary = {
-    total: results.length,
-    passed: results.filter((r) => r.status === "passed").length,
-    failed: results.filter((r) => r.status === "failed").length,
-    skipped: results.filter((r) => r.status === "skipped").length,
-    durationMs: Date.now() - startRun,
-  };
+  const summary = await tests.run({ reporter: cliReporter });
+  const finalSummary = { ...summary, durationMs: Date.now() - startRun };
 
-  reportSummary(summary, reporter);
+  reportSummary(finalSummary, reporter);
 
-  if (summary.failed > 0) {
+  if (finalSummary.failed > 0) {
     process.exitCode = 1;
   }
 
-  return summary;
+  return finalSummary;
 };

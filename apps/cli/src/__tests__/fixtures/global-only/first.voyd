@@ -1,0 +1,5 @@
+test only "runs only here":
+  1
+
+test "skips in same module":
+  1

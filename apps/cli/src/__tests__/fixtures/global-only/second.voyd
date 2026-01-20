@@ -1,0 +1,2 @@
+test "skips in other module":
+  1
