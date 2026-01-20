@@ -229,7 +229,8 @@ const runPlannedTest = async ({
   const startedAt = Date.now();
 
   try {
-    await host.run(plan.test.id);
+    const exportName = plan.test.exportName ?? plan.test.id;
+    await host.run(exportName);
     return createPlannedResult({
       plan,
       status: "passed",

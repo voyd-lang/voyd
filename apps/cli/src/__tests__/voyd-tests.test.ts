@@ -6,6 +6,7 @@ import { runTests } from "../test-runner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const skipFixturePath = resolve(__dirname, "fixtures", "skip-effect.voyd");
+const onlyFixturePath = resolve(__dirname, "fixtures", "global-only");
 
 describe("voyd test runner", () => {
   it("runs std optional tests", async () => {
@@ -27,5 +28,17 @@ describe("voyd test runner", () => {
     expect(result.total).toBe(1);
     expect(result.failed).toBe(0);
     expect(result.skipped).toBe(1);
+  });
+
+  it("respects global only across modules", async () => {
+    const result = await runTests({
+      rootPath: onlyFixturePath,
+      reporter: "silent",
+    });
+
+    expect(result.total).toBe(3);
+    expect(result.passed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.skipped).toBe(2);
   });
 });

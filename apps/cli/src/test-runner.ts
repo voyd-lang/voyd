@@ -9,7 +9,6 @@ import {
 import {
   createFsModuleHost,
   modulePathFromFile,
-  modulePathToString,
   type ModuleRoots,
 } from "@voyd/sdk/compiler";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
@@ -74,6 +73,26 @@ const resolveRoots = (
   return { scanRoot, roots: { src: srcRoot, std: resolveStdRoot() } };
 };
 
+const SIMPLE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+const escapeIdentifier = (value: string): string =>
+  value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+
+const formatSegment = (segment: string): string =>
+  SIMPLE_IDENTIFIER.test(segment) ? segment : `'${escapeIdentifier(segment)}'`;
+
+const formatModulePathForUse = ({
+  namespace,
+  segments,
+  packageName,
+}: ReturnType<typeof modulePathFromFile>): string => {
+  const prefix =
+    namespace === "pkg" && packageName
+      ? [namespace, packageName]
+      : [namespace];
+  return [...prefix, ...segments].map(formatSegment).join("::");
+};
+
 const buildModulePath = ({
   filePath,
   roots,
@@ -84,7 +103,38 @@ const buildModulePath = ({
   pathAdapter: ReturnType<typeof createFsModuleHost>["path"];
 }): string => {
   const modulePath = modulePathFromFile(filePath, roots, pathAdapter);
-  return modulePathToString(modulePath);
+  return formatModulePathForUse(modulePath);
+};
+
+const buildTestEntrySource = ({
+  modulePaths,
+}: {
+  modulePaths: string[];
+}): string => {
+  return modulePaths
+    .map(
+      (modulePath, index) =>
+        `use ${modulePath}::self as test_mod_${index}`
+    )
+    .join("\n");
+};
+
+const resolveTestEntryPath = ({
+  roots,
+  existingFiles,
+}: {
+  roots: ModuleRoots;
+  existingFiles: string[];
+}): string => {
+  const existing = new Set(existingFiles.map((filePath) => resolve(filePath)));
+  const base = join(roots.src, "__voyd_test_entry__");
+  let index = 0;
+  let candidate = `${base}.voyd`;
+  while (existing.has(resolve(candidate))) {
+    index += 1;
+    candidate = `${base}_${index}.voyd`;
+  }
+  return candidate;
 };
 
 const formatResultLabel = (result: CliTestResult): string => {
@@ -147,69 +197,56 @@ export const runTests = async ({
   const files = await findVoydFiles(scanRoot);
   const cliReporter = createCliReporter(reporter);
 
-  const summary: TestRunSummary = {
-    total: 0,
-    passed: 0,
-    failed: 0,
-    skipped: 0,
-    durationMs: 0,
-  };
-
-  let hadTests = false;
-  const startRun = Date.now();
-
-  for (const filePath of files) {
-    const modulePath = buildModulePath({
-      filePath,
-      roots,
-      pathAdapter: host.path,
-    });
-    const result = await sdk.compile({
-      entryPath: filePath,
-      includeTests: true,
-      testsOnly: true,
-      roots,
-    });
-
-    const tests = result.tests;
-    if (!tests) {
-      continue;
-    }
-
-    const hasModuleTests = tests.cases.some(
-      (test) => test.modulePath === modulePath,
-    );
-    if (!hasModuleTests) {
-      continue;
-    }
-
-    hadTests = true;
-
-    const moduleSummary = await tests.run({
-      reporter: cliReporter,
-      filter: (info) => info.modulePath === modulePath,
-    });
-
-    summary.total += moduleSummary.total;
-    summary.passed += moduleSummary.passed;
-    summary.failed += moduleSummary.failed;
-    summary.skipped += moduleSummary.skipped;
-  }
-
-  summary.durationMs = Date.now() - startRun;
-
-  if (!hadTests) {
+  if (files.length === 0) {
     if (reporter !== "silent") {
       console.log("No tests found.");
     }
-    return summary;
+    return {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      durationMs: 0,
+    };
   }
 
-  reportSummary(summary, reporter);
+  const modulePaths = files.map((filePath) =>
+    buildModulePath({ filePath, roots, pathAdapter: host.path })
+  );
+  const entryPath = resolveTestEntryPath({ roots, existingFiles: files });
+  const entrySource = buildTestEntrySource({ modulePaths });
 
-  if (summary.failed > 0) {
+  const startRun = Date.now();
+  const result = await sdk.compile({
+    entryPath,
+    source: entrySource,
+    includeTests: true,
+    testsOnly: true,
+    roots,
+  });
+
+  const tests = result.tests;
+  if (!tests || tests.cases.length === 0) {
+    if (reporter !== "silent") {
+      console.log("No tests found.");
+    }
+    return {
+      total: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      durationMs: Date.now() - startRun,
+    };
+  }
+
+  const summary = await tests.run({ reporter: cliReporter });
+  const finalSummary = { ...summary, durationMs: Date.now() - startRun };
+
+  reportSummary(finalSummary, reporter);
+
+  if (finalSummary.failed > 0) {
     process.exitCode = 1;
   }
 
-  return summary;
+  return finalSummary;
 };

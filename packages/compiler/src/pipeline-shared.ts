@@ -21,6 +21,7 @@ import { ModuleExportTable } from "./semantics/modules.js";
 import { createTypeArena } from "./semantics/typing/type-arena.js";
 import { createEffectInterner, createEffectTable } from "./semantics/effects/effect-table.js";
 import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
+import { formatTestExportName } from "./tests/exports.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -41,6 +42,7 @@ export type AnalyzeModulesResult = {
 
 export type TestCase = {
   id: string;
+  exportName?: string;
   moduleId: string;
   modulePath: string;
   description?: string;
@@ -170,6 +172,7 @@ const collectTests = ({
 
       tests.push({
         id: test.id,
+        exportName: formatTestExportName({ moduleId, testId: test.id }),
         moduleId,
         modulePath,
         description: test.description,

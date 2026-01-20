@@ -29,6 +29,7 @@ import {
 } from "./effects/host-boundary.js";
 import { effectsFacade } from "./effects/facade.js";
 import { emitPureSurfaceWrapper } from "./effects/abi-wrapper.js";
+import { formatTestExportName } from "../tests/exports.js";
 
 const getFunctionMetas = (
   ctx: CodegenContext,
@@ -311,103 +312,116 @@ export const emitModuleExports = (
   contexts: readonly CodegenContext[] = [ctx]
 ): void => {
   const exportedNames = new Set<string>();
-  const publicExports = ctx.module.hir.module.exports.filter((entry) =>
-    isPublicVisibility(entry.visibility)
-  );
-  const baseEntries =
-    ctx.module.meta.isPackageRoot || publicExports.length > 0
-      ? publicExports
-      : ctx.module.hir.module.exports.filter((entry) =>
-          isPackageVisible(entry.visibility)
-        );
-  const isTestExport = (entry: HirExportEntry): boolean => {
-    const name = entry.alias ?? symbolName(ctx, ctx.moduleId, entry.symbol);
-    return name.startsWith("__test__");
-  };
-  const exportEntries = ctx.options.testMode
-    ? baseEntries.filter(isTestExport)
-    : baseEntries;
-
   const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
-  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
 
   const emitEffectfulWasmExportWrapper = ({
+    ctx: exportCtx,
     meta,
     exportName,
   }: {
+    ctx: CodegenContext;
     meta: FunctionMetadata;
     exportName: string;
   }): void => {
+    const handlerParamType = exportCtx.effectsRuntime.handlerFrameType;
     const userParamTypes = meta.paramTypes.slice(1) as number[];
     const wrapperName = `${meta.wasmName}__wasm_export_${sanitizeIdentifier(exportName)}`;
 
     emitPureSurfaceWrapper({
-      ctx,
+      ctx: exportCtx,
       wrapperName,
       wrapperParamTypes: userParamTypes,
-      wrapperResultType: wasmTypeFor(meta.resultTypeId, ctx),
+      wrapperResultType: wasmTypeFor(meta.resultTypeId, exportCtx),
       implName: meta.wasmName,
       buildImplCallArgs: () => [
-        ctx.mod.ref.null(handlerParamType),
-        ...userParamTypes.map((type, index) => ctx.mod.local.get(index, type)),
+        exportCtx.mod.ref.null(handlerParamType),
+        ...userParamTypes.map((type, index) => exportCtx.mod.local.get(index, type)),
       ],
     });
-    ctx.mod.addFunctionExport(wrapperName, exportName);
+    exportCtx.mod.addFunctionExport(wrapperName, exportName);
   };
 
-  exportEntries.forEach((entry) => {
-    const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      programSymbolIdOf(ctx, ctx.moduleId, entry.symbol)
+  const exportContexts = ctx.options.testMode ? contexts : [ctx];
+  exportContexts.forEach((exportCtx) => {
+    const publicExports = exportCtx.module.hir.module.exports.filter((entry) =>
+      isPublicVisibility(entry.visibility)
     );
-    if (
-      intrinsicMetadata.intrinsic &&
-      intrinsicMetadata.intrinsicUsesSignature !== true
-    ) {
-      return;
-    }
-    const metas = getFunctionMetas(ctx, ctx.moduleId, entry.symbol);
-    const meta = metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
-    if (!meta) {
-      reportMissingExportedGenericInstantiation({ ctx, entry });
-      return;
-    }
-    const exportName =
-      entry.alias ?? symbolName(ctx, ctx.moduleId, entry.symbol);
-    if (exportedNames.has(exportName)) {
-      return;
-    }
-    exportedNames.add(exportName);
-    if (meta.effectful) {
-      emitEffectfulWasmExportWrapper({ meta, exportName });
+    const baseEntries =
+      exportCtx.module.meta.isPackageRoot || publicExports.length > 0
+        ? publicExports
+        : exportCtx.module.hir.module.exports.filter((entry) =>
+            isPackageVisible(entry.visibility)
+          );
+    const isTestExport = (entry: HirExportEntry): boolean => {
+      const name =
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
+      return name.startsWith("__test__");
+    };
+    const exportEntries = exportCtx.options.testMode
+      ? baseEntries.filter(isTestExport)
+      : baseEntries;
 
-      if (meta.paramTypes.length > 1) {
+    exportEntries.forEach((entry) => {
+      const intrinsicMetadata = exportCtx.program.symbols.getIntrinsicFunctionFlags(
+        programSymbolIdOf(exportCtx, exportCtx.moduleId, entry.symbol)
+      );
+      if (
+        intrinsicMetadata.intrinsic &&
+        intrinsicMetadata.intrinsicUsesSignature !== true
+      ) {
         return;
       }
-      const valueType = wasmTypeFor(meta.resultTypeId, ctx);
-      const supportedReturn =
-        valueType === binaryen.none ||
-        valueType === binaryen.i32 ||
-        valueType === binaryen.i64 ||
-        valueType === binaryen.f32 ||
-        valueType === binaryen.f64;
-      if (!supportedReturn) {
-        ctx.diagnostics.report(
-          diagnosticFromCode({
-            code: "CG0002",
-            params: {
-              kind: "unsupported-effectful-export-return",
-              exportName,
-              returnType: formatWasmType(valueType),
-            },
-            span: entry.span,
+      const metas = getFunctionMetas(exportCtx, exportCtx.moduleId, entry.symbol);
+      const meta =
+        metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
+      if (!meta) {
+        reportMissingExportedGenericInstantiation({ ctx: exportCtx, entry });
+        return;
+      }
+      const baseExportName =
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
+      const exportName = exportCtx.options.testMode
+        ? formatTestExportName({
+            moduleId: exportCtx.moduleId,
+            testId: baseExportName,
           })
-        );
+        : baseExportName;
+      if (exportedNames.has(exportName)) {
         return;
       }
-      effectfulExports.push({ meta, exportName });
-      return;
-    }
-    ctx.mod.addFunctionExport(meta.wasmName, exportName);
+      exportedNames.add(exportName);
+      if (meta.effectful) {
+        emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
+
+        if (meta.paramTypes.length > 1) {
+          return;
+        }
+        const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
+        const supportedReturn =
+          valueType === binaryen.none ||
+          valueType === binaryen.i32 ||
+          valueType === binaryen.i64 ||
+          valueType === binaryen.f32 ||
+          valueType === binaryen.f64;
+        if (!supportedReturn) {
+          exportCtx.diagnostics.report(
+            diagnosticFromCode({
+              code: "CG0002",
+              params: {
+                kind: "unsupported-effectful-export-return",
+                exportName,
+                returnType: formatWasmType(valueType),
+              },
+              span: entry.span,
+            })
+          );
+          return;
+        }
+        effectfulExports.push({ meta, exportName });
+        return;
+      }
+      exportCtx.mod.addFunctionExport(meta.wasmName, exportName);
+    });
   });
 
   if (effectfulExports.length === 0) {
