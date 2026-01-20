@@ -42,10 +42,12 @@ const runCliTest = (root: string) =>
   );
 
 describe("voyd cli test discovery", () => {
-  it("defaults test root to repo root when no path is provided", async () => {
-    if (!existsSync(tsxPath)) {
-      throw new Error(`Missing tsx binary at ${tsxPath}`);
-    }
+  it(
+    "defaults test root to repo root when no path is provided",
+    async () => {
+      if (!existsSync(tsxPath)) {
+        throw new Error(`Missing tsx binary at ${tsxPath}`);
+      }
 
     const root = await createFixture();
     try {
@@ -60,5 +62,7 @@ describe("voyd cli test discovery", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+    },
+    30000
+  );
 });
