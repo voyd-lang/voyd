@@ -1,14 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "baseUrl": "./",
     "declaration": true,
     "declarationMap": true,
     "outDir": "./dist",
-    "rootDir": "./src",
-    "paths": {
-      "@voyd/compiler/*": ["./src/*"]
-    }
+    "rootDir": "./src/lib"
   },
-  "include": ["src/**/*"]
+  "include": ["src/lib/**/*"]
 }
