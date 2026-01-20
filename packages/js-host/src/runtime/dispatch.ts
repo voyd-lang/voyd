@@ -79,12 +79,13 @@ export const createMsgPackHost = (): MsgPackHost => {
     payload: unknown;
   }): number => {
     const encoded = encode(payload, MSGPACK_OPTS) as Uint8Array;
-    latestLength = encoded.length;
     if (encoded.length > len) {
       // eslint-disable-next-line no-console
       console.error("msgpack overflow", { len, needed: encoded.length });
+      latestLength = 0;
       return -1;
     }
+    latestLength = encoded.length;
     new Uint8Array(memoryView(), ptr, encoded.length).set(encoded);
     return 0;
   };
