@@ -7,7 +7,7 @@ import type { ModuleHost, ModuleRoots } from "@voyd/compiler/modules/types.js";
 import { loadModuleGraph } from "@voyd/compiler/pipeline.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { compileWithLoader } from "./shared/compile.js";
-import { createHost, runWithHandlers } from "./shared/host.js";
+import { runWithHandlers } from "./shared/host.js";
 import { createCompileResult } from "./shared/result.js";
 import type { CompileArtifacts } from "./shared/compile.js";
 import type { CompileOptions, CompileResult, VoydSdk } from "./shared/types.js";
@@ -17,7 +17,6 @@ const DEFAULT_VIRTUAL_ROOT = ".voyd";
 
 export const createSdk = (): VoydSdk => ({
   compile: compileSdk,
-  createHost,
   run: runWithHandlers,
 });
 
@@ -242,16 +241,15 @@ export type {
   CompileOptions,
   CompileResult,
   EffectHandler,
-  HostInitOptions,
   ModuleRoots,
   RunOptions,
   TestCase,
   TestCollection,
   TestEvent,
+  TestInfo,
   TestReporter,
   TestResult,
   TestRunOptions,
   TestRunSummary,
-  VoydHost,
   VoydSdk,
 } from "./shared/types.js";

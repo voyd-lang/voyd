@@ -87,9 +87,6 @@ const buildModulePath = ({
   return modulePathToString(modulePath);
 };
 
-const escapeRegExp = (value: string): string =>
-  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
 const formatResultLabel = (result: CliTestResult): string => {
   if (result.status === "passed") return "PASS";
   if (result.status === "skipped") return "SKIP";
@@ -188,10 +185,9 @@ export const runTests = async ({
 
     hadTests = true;
 
-    const match = new RegExp(`^${escapeRegExp(modulePath)}$`);
     const moduleSummary = await tests.run({
       reporter: cliReporter,
-      filter: { match },
+      filter: (info) => info.modulePath === modulePath,
     });
 
     summary.total += moduleSummary.total;

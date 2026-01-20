@@ -1,7 +1,7 @@
 import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
 import { loadModuleGraph } from "@voyd/compiler/pipeline-browser.js";
 import { compileWithLoader } from "./shared/compile.js";
-import { createHost, runWithHandlers } from "./shared/host.js";
+import { runWithHandlers } from "./shared/host.js";
 import { createCompileResult } from "./shared/result.js";
 import type { CompileOptions, CompileResult, VoydSdk } from "./shared/types.js";
 import {
@@ -14,7 +14,6 @@ import {
 
 export const createSdk = (): VoydSdk => ({
   compile: compileSdk,
-  createHost,
   run: runWithHandlers,
 });
 
@@ -66,16 +65,15 @@ export type {
   CompileOptions,
   CompileResult,
   EffectHandler,
-  HostInitOptions,
   ModuleRoots,
   RunOptions,
   TestCase,
   TestCollection,
   TestEvent,
+  TestInfo,
   TestReporter,
   TestResult,
   TestRunOptions,
   TestRunSummary,
-  VoydHost,
   VoydSdk,
 } from "./shared/types.js";

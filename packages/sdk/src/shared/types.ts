@@ -1,15 +1,9 @@
 import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
 import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
 import type { TestCase as CompilerTestCase } from "@voyd/compiler/pipeline-shared.js";
-import type { EffectHandler, HostInitOptions, VoydHost } from "@voyd/js-host";
+import type { EffectHandler } from "@voyd/js-host";
 
-export type {
-  Diagnostic,
-  EffectHandler,
-  HostInitOptions,
-  ModuleRoots,
-  VoydHost,
-};
+export type { Diagnostic, EffectHandler, ModuleRoots };
 
 export type TestCase = CompilerTestCase;
 
@@ -30,7 +24,6 @@ export type CompileResult = {
   wasmText?: string;
   diagnostics: Diagnostic[];
   tests?: TestCollection;
-  host: VoydHost;
   run: <T = unknown>(opts: Omit<RunOptions, "wasm">) => Promise<T>;
 };
 
@@ -47,6 +40,16 @@ export type TestCollection = {
   cases: readonly TestCase[];
   hasOnly: boolean;
   run: (opts: TestRunOptions) => Promise<TestRunSummary>;
+};
+
+export type TestInfo = {
+  id: string;
+  moduleId: string;
+  modulePath: string;
+  description?: string;
+  displayName: string;
+  modifiers: { skip?: boolean; only?: boolean };
+  location?: { filePath: string; startLine: number; startColumn: number };
 };
 
 export type TestResult = {
@@ -74,8 +77,8 @@ export type TestRunOptions = {
   handlers?: Record<string, EffectHandler>;
   imports?: WebAssembly.Imports;
   bufferSize?: number;
-  filter?: { only?: boolean; skip?: boolean; match?: string | RegExp };
-  reuseHost?: boolean;
+  filter?: (info: TestInfo) => boolean;
+  isolation?: "per-test" | "shared";
 };
 
 export type TestRunSummary = {
@@ -88,6 +91,5 @@ export type TestRunSummary = {
 
 export type VoydSdk = {
   compile: (opts: CompileOptions) => Promise<CompileResult>;
-  createHost: (opts: HostInitOptions) => Promise<VoydHost>;
   run: <T = unknown>(opts: RunOptions) => Promise<T>;
 };

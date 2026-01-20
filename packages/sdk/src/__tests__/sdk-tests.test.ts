@@ -32,13 +32,12 @@ test only "only runs when respected":
     const events: TestEvent[] = [];
     const summary = await result.tests!.run({
       reporter: { onEvent: (event) => { events.push(event); } },
-      filter: { only: false },
     });
 
     expect(summary.total).toBe(4);
-    expect(summary.passed).toBe(2);
+    expect(summary.passed).toBe(1);
     expect(summary.failed).toBe(0);
-    expect(summary.skipped).toBe(2);
+    expect(summary.skipped).toBe(3);
 
     const resultEvents = events.filter(
       (event) => event.type === "test:result",
