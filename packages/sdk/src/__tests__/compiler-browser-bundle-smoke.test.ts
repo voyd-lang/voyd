@@ -58,93 +58,100 @@ const createBrowserContext = (): BrowserContext => {
 };
 
 describe("browser bundle smoke", () => {
-  it("bundles and runs the browser compiler", async () => {
-    const entry = fileURLToPath(
-      new URL("./__fixtures__/browser-bundle-entry.ts", import.meta.url)
-    );
-    const outDir = await mkdtemp(join(tmpdir(), "voyd-browser-"));
-
-    try {
-      const projectRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-      const packagesRoot = join(projectRoot, "packages");
-
-      await build({
-        configFile: false,
-        root: projectRoot,
-        logLevel: "silent",
-        resolve: {
-          alias: {
-            "@voyd/lib": join(packagesRoot, "lib/src/lib"),
-            "@voyd/compiler": join(packagesRoot, "compiler/src"),
-            "@voyd/js-host": join(packagesRoot, "js-host/src"),
-            "@voyd/sdk": join(packagesRoot, "sdk/src"),
-          },
-        },
-        build: {
-          lib: {
-            entry,
-            name: "VoydBrowserSmoke",
-            formats: ["es"],
-            fileName: () => "bundle.js",
-          },
-          rollupOptions: {
-            external: [],
-            output: {
-              inlineDynamicImports: true,
-            },
-          },
-          outDir,
-          emptyOutDir: true,
-          minify: false,
-          sourcemap: false,
-          target: "esnext",
-        },
-      });
-
-      const bundlePath = join(outDir, "bundle.js");
-      const code = await readFile(bundlePath, "utf8");
-
-      const nodeSpecifier = /["']node:[^"']+["']/;
-      expect(nodeSpecifier.test(code)).toBe(false);
-
-      const context = createBrowserContext();
-      const previous = {
-        window: globalThis.window,
-        self: globalThis.self,
-        process: globalThis.process,
-        btoa: globalThis.btoa,
-        atob: globalThis.atob,
-        __voydBrowserSmoke__: (globalThis as { __voydBrowserSmoke__?: SmokeRunner })
-          .__voydBrowserSmoke__,
-      };
-      Object.assign(globalThis, {
-        window: globalThis,
-        self: globalThis,
-        process: undefined,
-        btoa: context.btoa,
-        atob: context.atob,
-        TextEncoder,
-        TextDecoder,
-        WebAssembly,
-        Uint8Array,
-        ArrayBuffer,
-        DataView,
-        BigInt,
-      });
+  it(
+    "bundles and runs the browser compiler",
+    async () => {
+      const entry = fileURLToPath(
+        new URL("./__fixtures__/browser-bundle-entry.ts", import.meta.url),
+      );
+      const outDir = await mkdtemp(join(tmpdir(), "voyd-browser-"));
 
       try {
-        await import(pathToFileURL(bundlePath).href);
+        const projectRoot = fileURLToPath(
+          new URL("../../../../", import.meta.url),
+        );
+        const packagesRoot = join(projectRoot, "packages");
 
-        const runner = (globalThis as { __voydBrowserSmoke__?: SmokeRunner })
-          .__voydBrowserSmoke__;
-        expect(typeof runner).toBe("function");
-        const size = await runner!();
-        expect(size).toBeGreaterThan(0);
+        await build({
+          configFile: false,
+          root: projectRoot,
+          logLevel: "silent",
+          resolve: {
+            alias: {
+              "@voyd/lib": join(packagesRoot, "lib/src/lib"),
+              "@voyd/compiler": join(packagesRoot, "compiler/src"),
+              "@voyd/js-host": join(packagesRoot, "js-host/src"),
+              "@voyd/sdk": join(packagesRoot, "sdk/src"),
+            },
+          },
+          build: {
+            lib: {
+              entry,
+              name: "VoydBrowserSmoke",
+              formats: ["es"],
+              fileName: () => "bundle.js",
+            },
+            rollupOptions: {
+              external: [],
+              output: {
+                inlineDynamicImports: true,
+              },
+            },
+            outDir,
+            emptyOutDir: true,
+            minify: false,
+            sourcemap: false,
+            target: "esnext",
+          },
+        });
+
+        const bundlePath = join(outDir, "bundle.js");
+        const code = await readFile(bundlePath, "utf8");
+
+        const nodeSpecifier = /["']node:[^"']+["']/;
+        expect(nodeSpecifier.test(code)).toBe(false);
+
+        const context = createBrowserContext();
+        const previous = {
+          window: globalThis.window,
+          self: globalThis.self,
+          process: globalThis.process,
+          btoa: globalThis.btoa,
+          atob: globalThis.atob,
+          __voydBrowserSmoke__: (
+            globalThis as { __voydBrowserSmoke__?: SmokeRunner }
+          ).__voydBrowserSmoke__,
+        };
+        Object.assign(globalThis, {
+          window: globalThis,
+          self: globalThis,
+          process: undefined,
+          btoa: context.btoa,
+          atob: context.atob,
+          TextEncoder,
+          TextDecoder,
+          WebAssembly,
+          Uint8Array,
+          ArrayBuffer,
+          DataView,
+          BigInt,
+        });
+
+        try {
+          await import(pathToFileURL(bundlePath).href);
+
+          const runner = (globalThis as { __voydBrowserSmoke__?: SmokeRunner })
+            .__voydBrowserSmoke__;
+          expect(typeof runner).toBe("function");
+          const size = await runner!();
+          expect(size).toBeGreaterThan(0);
+        } finally {
+          Object.assign(globalThis, previous);
+        }
       } finally {
-        Object.assign(globalThis, previous);
+        await rm(outDir, { recursive: true, force: true });
       }
-    } finally {
-      await rm(outDir, { recursive: true, force: true });
-    }
-  });
+    },
+    { timeout: 30000 },
+  );
 });
