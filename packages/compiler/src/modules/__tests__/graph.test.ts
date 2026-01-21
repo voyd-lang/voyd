@@ -132,4 +132,28 @@ describe("buildModuleGraph", () => {
     expect(diagnostic.span.file).toContain("main.voyd");
     expect(diagnostic.message).toMatch(/src::util/);
   });
+
+  it("tracks missing modules without importer path collisions", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: "use a::all\nuse a::src::all",
+      [`${root}${sep}a.voyd`]: "use src::src::b::all",
+      [`${root}${sep}a${sep}src.voyd`]: "use src::b::all",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(2);
+    const messages = graph.diagnostics.map((diagnostic) => diagnostic.message);
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        "Unable to resolve module src::src::b",
+        "Unable to resolve module src::b",
+      ])
+    );
+  });
 });

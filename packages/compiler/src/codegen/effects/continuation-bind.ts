@@ -15,19 +15,15 @@ const bin = binaryen as unknown as AugmentedBinaryen;
 
 const BIND_STATE_KEY = Symbol("voyd.effects.continuationBind");
 
-const bindState = (ctx: CodegenContext): {
+type BindState = {
   bindFnName?: string;
   bindFnRefType?: binaryen.Type;
   bindEnvType?: binaryen.Type;
   contCallRefType?: binaryen.Type;
-} => {
-  const memo = ctx.effectsState.memo;
-  const existing = memo.get(BIND_STATE_KEY);
-  if (existing) return existing as any;
-  const created = {};
-  memo.set(BIND_STATE_KEY, created);
-  return created as any;
 };
+
+const bindState = (ctx: CodegenContext): BindState =>
+  ctx.programHelpers.getHelperState(BIND_STATE_KEY, () => ({}));
 
 const ensureContCallRefType = (ctx: CodegenContext): binaryen.Type => {
   const state = bindState(ctx);

@@ -45,6 +45,19 @@ export const buildModuleGraph = async ({
   const modules = new Map<string, ModuleNode>();
   const modulesByPath = new Map<string, ModuleNode>();
   const moduleDiagnostics: ModuleDiagnostic[] = [];
+  const missingModules = new Map<string, Set<string>>();
+
+  const hasMissingModule = (importer: string, pathKey: string): boolean =>
+    missingModules.get(importer)?.has(pathKey) ?? false;
+
+  const addMissingModule = (importer: string, pathKey: string) => {
+    const entries = missingModules.get(importer);
+    if (entries) {
+      entries.add(pathKey);
+      return;
+    }
+    missingModules.set(importer, new Set([pathKey]));
+  };
 
   const entryFile = host.path.resolve(entryPath);
   const entryModulePath = modulePathFromFile(entryFile, roots, host.path);
@@ -59,9 +72,28 @@ export const buildModuleGraph = async ({
   const pending: PendingDependency[] = [];
   enqueueDependencies(entryModule, pending);
 
+  const hasNestedModule = (pathKey: string): boolean => {
+    const prefix = `${pathKey}::`;
+    for (const key of modulesByPath.keys()) {
+      if (key.startsWith(prefix)) {
+        return true;
+      }
+    }
+    for (const entry of pending) {
+      const depKey = modulePathToString(entry.dependency.path);
+      if (depKey.startsWith(prefix)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   while (pending.length) {
     const { dependency, importer } = pending.shift()!;
     const pathKey = modulePathToString(dependency.path);
+    if (hasMissingModule(importer, pathKey)) {
+      continue;
+    }
     if (modulesByPath.has(pathKey)) {
       continue;
     }
@@ -80,6 +112,7 @@ export const buildModuleGraph = async ({
         importer,
         span: dependency.span,
       });
+      addMissingModule(importer, pathKey);
       continue;
     }
 
@@ -88,6 +121,21 @@ export const buildModuleGraph = async ({
       roots,
       host.path
     );
+    const resolvedKey = modulePathToString(resolvedModulePath);
+    if (modulesByPath.has(resolvedKey)) {
+      if (hasNestedModule(pathKey)) {
+        continue;
+      }
+      moduleDiagnostics.push({
+        kind: "missing-module",
+        message: `Unable to resolve module ${pathKey}`,
+        requested: dependency.path,
+        importer,
+        span: dependency.span,
+      });
+      addMissingModule(importer, pathKey);
+      continue;
+    }
     const nextModule = await loadFileModule({
       filePath: resolvedPath,
       modulePath: resolvedModulePath,
@@ -95,6 +143,16 @@ export const buildModuleGraph = async ({
     });
     addModuleTree(nextModule, modules, modulesByPath);
     enqueueDependencies(nextModule, pending);
+    if (!modulesByPath.has(pathKey) && !hasNestedModule(pathKey)) {
+      moduleDiagnostics.push({
+        kind: "missing-module",
+        message: `Unable to resolve module ${pathKey}`,
+        requested: dependency.path,
+        importer,
+        span: dependency.span,
+      });
+      addMissingModule(importer, pathKey);
+    }
   }
 
   const diagnostics = moduleDiagnostics.map(moduleDiagnosticToDiagnostic);

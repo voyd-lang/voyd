@@ -4,6 +4,7 @@ import { createEffectRuntime } from "../../effects/runtime-abi.js";
 import { createEffectsState } from "../../effects/state.js";
 import { selectEffectsBackend } from "../../effects/codegen-backend.js";
 import { DiagnosticEmitter } from "../../../diagnostics/index.js";
+import { createProgramHelperRegistry } from "../../program-helpers.js";
 
 type TypeDescriptor =
   | { kind: "primitive"; name: string }
@@ -19,6 +20,7 @@ export const createTestCodegenContext = (): {
   mod.setFeatures(binaryen.Features.All);
   const effectsRuntime = createEffectRuntime(mod);
   const diagnostics = new DiagnosticEmitter();
+  const programHelpers = createProgramHelperRegistry();
 
   const descriptors = new Map<TypeId, TypeDescriptor>();
   const exprTypes = new Map<HirExprId, TypeId>();
@@ -148,6 +150,7 @@ export const createTestCodegenContext = (): {
       continuationBackend: {},
       testMode: false,
     },
+    programHelpers,
     functions: new Map(),
     functionInstances: new Map() as any,
     itemsToSymbols: new Map(),

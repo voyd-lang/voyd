@@ -10,18 +10,23 @@ export const EFFECT_OP_ID_HELPER = "__voyd_effect_op_id";
 export const EFFECT_RESUME_KIND_HELPER = "__voyd_effect_resume_kind";
 
 const addExportedFunction = ({
+  ctx,
   name,
   params,
   result,
   body,
-  mod,
 }: {
+  ctx: CodegenContext;
   name: string;
   params: readonly binaryen.Type[];
   result: binaryen.Type;
   body: binaryen.ExpressionRef;
-  mod: binaryen.Module;
 }) => {
+  if (ctx.programHelpers.hasHelper(name)) {
+    return;
+  }
+  ctx.programHelpers.recordHelper(name);
+  const { mod } = ctx;
   mod.addFunction(
     name,
     binaryen.createType(params as number[]),
@@ -29,7 +34,9 @@ const addExportedFunction = ({
     [],
     body
   );
-  mod.addFunctionExport(name, name);
+  if (ctx.programHelpers.registerExportName(name)) {
+    mod.addFunctionExport(name, name);
+  }
 };
 
 export const addEffectRuntimeHelpers = (ctx: CodegenContext): void => {
@@ -37,14 +44,15 @@ export const addEffectRuntimeHelpers = (ctx: CodegenContext): void => {
   const outcomeType = effectsRuntime.outcomeType;
 
   addExportedFunction({
+    ctx,
     name: OUTCOME_TAG_HELPER,
     params: [outcomeType],
     result: binaryen.i32,
     body: effectsRuntime.outcomeTag(mod.local.get(0, outcomeType)),
-    mod,
   });
 
   addExportedFunction({
+    ctx,
     name: OUTCOME_UNWRAP_I32_HELPER,
     params: [outcomeType],
     result: binaryen.i32,
@@ -55,7 +63,6 @@ export const addEffectRuntimeHelpers = (ctx: CodegenContext): void => {
       valueType: binaryen.i32,
       ctx,
     }),
-    mod,
   });
 
   const requestField = (
@@ -70,26 +77,26 @@ export const addEffectRuntimeHelpers = (ctx: CodegenContext): void => {
     );
 
   addExportedFunction({
+    ctx,
     name: EFFECT_ID_HELPER,
     params: [outcomeType],
     result: binaryen.i64,
     body: requestField(effectsRuntime.requestEffectId),
-    mod,
   });
 
   addExportedFunction({
+    ctx,
     name: EFFECT_OP_ID_HELPER,
     params: [outcomeType],
     result: binaryen.i32,
     body: requestField(effectsRuntime.requestOpId),
-    mod,
   });
 
   addExportedFunction({
+    ctx,
     name: EFFECT_RESUME_KIND_HELPER,
     params: [outcomeType],
     result: binaryen.i32,
     body: requestField(effectsRuntime.requestResumeKind),
-    mod,
   });
 };

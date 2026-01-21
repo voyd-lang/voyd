@@ -19,7 +19,6 @@ import {
   emitEffectTableSection,
 } from "./effects/effect-table.js";
 import { buildEffectRegistry } from "./effects/effect-registry.js";
-import { addEffectRuntimeHelpers } from "./effects/runtime-helpers.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
 import {
   selectEffectsBackend,
@@ -34,6 +33,7 @@ import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../semantics/ids.js";
 import { DiagnosticEmitter } from "../diagnostics/index.js";
 import { createMultiMemoryModule } from "./wasm-module.js";
+import { createProgramHelperRegistry } from "./program-helpers.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
@@ -86,6 +86,7 @@ export const codegenProgram = ({
   const runtimeTypeIdsByKey = new Map<string, number>();
   const runtimeTypeIdCounter = { value: 1 };
   const diagnostics = new DiagnosticEmitter();
+  const programHelpers = createProgramHelperRegistry();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
@@ -94,6 +95,7 @@ export const codegenProgram = ({
     module: sem,
     diagnostics,
     options: mergedOptions,
+    programHelpers,
     functions,
     functionInstances,
     itemsToSymbols: new Map(),
@@ -146,7 +148,7 @@ export const codegenProgram = ({
     exportName: EFFECT_TABLE_EXPORT,
   });
   if (mergedOptions.emitEffectHelpers) {
-    addEffectRuntimeHelpers(entryCtx);
+    entryCtx.programHelpers.ensureEffectHelpers(entryCtx);
   }
 
   if (mergedOptions.optimize) {

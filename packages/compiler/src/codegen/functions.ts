@@ -311,7 +311,6 @@ export const emitModuleExports = (
   ctx: CodegenContext,
   contexts: readonly CodegenContext[] = [ctx]
 ): void => {
-  const exportedNames = new Set<string>();
   const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
 
   const emitEffectfulWasmExportWrapper = ({
@@ -386,10 +385,9 @@ export const emitModuleExports = (
             testId: baseExportName,
           })
         : baseExportName;
-      if (exportedNames.has(exportName)) {
+      if (!exportCtx.programHelpers.registerExportName(exportName)) {
         return;
       }
-      exportedNames.add(exportName);
       if (meta.effectful) {
         emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
 
