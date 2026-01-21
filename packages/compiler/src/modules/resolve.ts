@@ -145,21 +145,6 @@ export const matchesDependencyPath = ({
         }
       }
     }
-
-    const hasModulePrefix =
-      dependencyPath.segments.length > currentModulePath.segments.length &&
-      dependencyPath.segments
-        .slice(0, currentModulePath.segments.length)
-        .every((segment, index) => segment === currentModulePath.segments[index]);
-    if (hasModulePrefix) {
-      const relativeSegments = dependencyPath.segments.slice(
-        currentModulePath.segments.length
-      );
-      const relativeKey = relativeSegments.join("::");
-      if (entryKeys.some((key) => key === relativeKey)) {
-        return true;
-      }
-    }
   }
   return false;
 };

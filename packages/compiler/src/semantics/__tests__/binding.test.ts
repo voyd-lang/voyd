@@ -807,6 +807,58 @@ describe("binding pipeline", () => {
     expect(innerImport?.import?.moduleId).toBe(nestedId);
   });
 
+  it("resolves unqualified uses against the parent directory, not submodules", () => {
+    const source = "use utils";
+    const ast = parse(source, "bar.voyd");
+
+    const modulePath = {
+      namespace: "src" as const,
+      segments: ["utils", "bar"] as const,
+    };
+    const moduleId = modulePathToString(modulePath);
+    const siblingPath = {
+      namespace: "src" as const,
+      segments: ["utils", "utils"] as const,
+    };
+    const siblingId = modulePathToString(siblingPath);
+    const submodulePath = {
+      namespace: "src" as const,
+      segments: ["utils", "bar", "utils"] as const,
+    };
+
+    const dependencies: ModuleDependency[] = [
+      { kind: "use", path: siblingPath },
+      { kind: "export", path: submodulePath },
+    ];
+
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "bar.voyd" },
+      ast,
+      source,
+      dependencies,
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "bar.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports: new Map(),
+    });
+
+    const [use] = binding.uses;
+    expect(use.entries[0]?.moduleId).toBe(siblingId);
+  });
+
   it("reports unsupported mod declarations", () => {
     const source = "pub mod util";
     const ast = parse(source, "main.voyd");

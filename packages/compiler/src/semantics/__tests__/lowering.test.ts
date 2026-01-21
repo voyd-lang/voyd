@@ -387,7 +387,10 @@ describe("lowering pipeline", () => {
     });
 
     const modulePath = { namespace: "src" as const, segments: ["main"] as const };
-    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const utilPath = {
+      namespace: "src" as const,
+      segments: ["main", "util"] as const,
+    };
     const moduleId = modulePathToString(modulePath);
     const utilId = modulePathToString(utilPath);
     const useForm = ast.rest.find(

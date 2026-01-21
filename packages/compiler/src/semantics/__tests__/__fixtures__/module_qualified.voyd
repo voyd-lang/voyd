@@ -1,4 +1,4 @@
-use util
+use self::util
 
 pub fn main() -> i32
   util::helper()

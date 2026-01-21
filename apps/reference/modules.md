@@ -192,7 +192,22 @@ use utils::goodbye::jupiter
 If a `use` path does not start with `src`, `std`, or `pkg`, it is resolved
 relative to the current module's directory.
 
-Example layout:
+Example layout (self vs adjacent):
+
+```
+src/foo.voyd
+src/foo/
+  bar.voyd
+src/bar.voyd
+```
+
+```voyd
+// src/foo.voyd
+use self::bar   // imports src::foo::bar
+use bar         // imports src::bar
+```
+
+Example layout (siblings in the same directory):
 
 ```
 src/utils/foo.voyd
