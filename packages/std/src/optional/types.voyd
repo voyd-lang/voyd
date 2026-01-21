@@ -1,6 +1,6 @@
 @intrinsic_type(type: "optional-some")
 pub obj Some<T> {
-  value: T
+  api value: T
 }
 
 @intrinsic_type(type: "optional-none")
@@ -10,4 +10,3 @@ pub obj None {}
 pub type Optional<T> = Some<T> | None
 
 pub type Option<T> = Optional<T>
-

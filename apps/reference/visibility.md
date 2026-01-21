@@ -93,6 +93,9 @@ Level 3 (public API) is controlled **exclusively** by the package root file, `pk
 
 > Only `pkg.voyd` can make things visible to other packages.
 
+For the standard library, `std/pkg.voyd` defines the public API, but consumers
+still import via `std::...` paths. `std::pkg` is not a user-facing module.
+
 Example:
 
 ```voyd

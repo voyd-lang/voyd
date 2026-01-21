@@ -239,7 +239,17 @@ export const runTests = async ({
     };
   }
 
-  const summary = await tests.run({ reporter: cliReporter });
+  const allowedFiles = new Set(files.map((filePath) => resolve(filePath)));
+  const allowedModules = new Set(modulePaths);
+  const summary = await tests.run({
+    reporter: cliReporter,
+    filter: (info) => {
+      if (info.location?.filePath) {
+        return allowedFiles.has(resolve(info.location.filePath));
+      }
+      return allowedModules.has(info.modulePath);
+    },
+  });
   const finalSummary = { ...summary, durationMs: Date.now() - startRun };
 
   reportSummary(finalSummary, reporter);

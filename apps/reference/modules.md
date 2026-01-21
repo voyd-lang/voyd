@@ -138,6 +138,10 @@ use std::log
 use pkg::json
 ```
 
+The standard library's public API is defined in `std/pkg.voyd`, but consumers
+import it directly through `std::...` paths. `std::pkg` is not a user-facing
+module path.
+
 ## **Importing relative to the source root**
 
 ```voyd
@@ -168,6 +172,31 @@ To import `jupiter`:
 ```voyd
 use utils::goodbye::jupiter
 ```
+
+---
+
+# **Relative Imports**
+
+If a `use` path does not start with `src`, `std`, or `pkg`, it is resolved
+relative to the current module's directory.
+
+Example layout:
+
+```
+src/utils/foo.voyd
+src/utils/bar.voyd
+```
+
+```voyd
+// src/utils/bar.voyd
+use foo          // imports module src::utils::foo
+use foo::all     // imports pub exports from src::utils::foo
+
+foo::id()
+```
+
+Use `src::...` (or `pkg::...`) to import from the package root explicitly.
+If there is any ambiguity, prefer an explicit namespace.
 
 ---
 

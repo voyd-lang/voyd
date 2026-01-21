@@ -61,7 +61,8 @@ pub fn sub(a: i32, b: i32) -> i32
 
 pub fn main() -> i32
   id(5)`,
-      [`${std}${sep}util.voyd`]: `pub fn id<T>(value: T) -> T
+      [`${std}${sep}pkg.voyd`]: "pub use std::util::all",
+      [`${std}${sep}util.voyd`]: `pub fn id<T>(value: T): () -> T
   value`,
     });
 
@@ -107,7 +108,8 @@ pub fn main() -> i32
 pub fn main() -> i32
   let x = id(1.0)
   id(5)`,
-      [`${std}${sep}util.voyd`]: `pub fn id<T>(value: T) -> T
+      [`${std}${sep}pkg.voyd`]: "pub use std::util::all",
+      [`${std}${sep}util.voyd`]: `pub fn id<T>(value: T): () -> T
   value`,
     });
 

@@ -37,6 +37,7 @@ import {
   parseUsePaths,
   type NormalizedUseEntry,
 } from "../../../modules/use-path.js";
+import { matchesDependencyPath } from "../../../modules/resolve.js";
 import {
   type HirVisibility,
   isPackageVisible,
@@ -64,6 +65,79 @@ const importedSymbolTargetFrom = (
   return typeof moduleId === "string" && typeof symbol === "number"
     ? { moduleId, symbol }
     : undefined;
+};
+
+const exportTargetFor = (
+  entry: ModuleExportEntry,
+  ctx: BindingContext
+): { moduleId: string; symbol: SymbolId } | undefined => {
+  const dependency = ctx.dependencies.get(entry.moduleId);
+  if (!dependency) {
+    return { moduleId: entry.moduleId, symbol: entry.symbol };
+  }
+  const sourceMetadata = dependency.symbolTable.getSymbol(entry.symbol)
+    .metadata as Record<string, unknown> | undefined;
+  const imported = importedSymbolTargetFrom(sourceMetadata);
+  if (imported) {
+    return imported;
+  }
+  return { moduleId: entry.moduleId, symbol: entry.symbol };
+};
+
+const stdPkgExportsFor = ({
+  moduleId,
+  ctx,
+}: {
+  moduleId: string;
+  ctx: BindingContext;
+}): Map<string, ModuleExportEntry> | undefined => {
+  const stdPkgExports = ctx.moduleExports.get("std::pkg");
+  if (!stdPkgExports) {
+    return undefined;
+  }
+  const filtered = new Map<string, ModuleExportEntry>();
+  for (const entry of stdPkgExports.values()) {
+    if (!isPublicVisibility(entry.visibility)) {
+      continue;
+    }
+    const target = exportTargetFor(entry, ctx);
+    if (!target) {
+      continue;
+    }
+    if (
+      target.moduleId === moduleId ||
+      target.moduleId.startsWith(`${moduleId}::`)
+    ) {
+      filtered.set(entry.name, entry);
+    }
+  }
+  return filtered.size > 0 ? filtered : undefined;
+};
+
+const isStdPkgExportedTarget = ({
+  target,
+  ctx,
+}: {
+  target: { moduleId: string; symbol: SymbolId };
+  ctx: BindingContext;
+}): boolean => {
+  const exports = stdPkgExportsFor({ moduleId: target.moduleId, ctx });
+  if (!exports) {
+    return false;
+  }
+  for (const entry of exports.values()) {
+    const entryTarget = exportTargetFor(entry, ctx);
+    if (!entryTarget) {
+      continue;
+    }
+    if (
+      entryTarget.moduleId === target.moduleId &&
+      entryTarget.symbol === target.symbol
+    ) {
+      return true;
+    }
+  }
+  return false;
 };
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
@@ -261,11 +335,24 @@ const resolveUseEntry = ({
   decl: ParsedUseDecl;
   ctx: BindingContext;
 }): BoundUseEntry => {
-  const dependencyPath = resolveDependencyPath({ entry, ctx });
-  const moduleId = dependencyPath
-    ? modulePathToString(dependencyPath)
-    : undefined;
-  if (!moduleId) {
+  let dependencyPath = resolveDependencyPath({ entry, ctx });
+  let blockedStdImport = false;
+
+  if (dependencyPath && isStdImportBlocked({ dependencyPath, ctx })) {
+    recordImportDiagnostic({
+      params: {
+        kind: "module-unavailable",
+        moduleId: modulePathToString(dependencyPath),
+      },
+      span: entry.span,
+      ctx,
+    });
+    dependencyPath = undefined;
+    blockedStdImport = true;
+  }
+
+  const moduleId = dependencyPath ? modulePathToString(dependencyPath) : undefined;
+  if (!moduleId && !blockedStdImport) {
     recordImportDiagnostic({
       params: { kind: "unresolved-use-path", path: entry.path },
       span: entry.span,
@@ -302,6 +389,29 @@ const resolveUseEntry = ({
     alias: entry.alias,
     imports: imports ?? [],
   };
+};
+
+const isStdImportBlocked = ({
+  dependencyPath,
+  ctx,
+}: {
+  dependencyPath: ModulePath;
+  ctx: BindingContext;
+}): boolean => {
+  if (dependencyPath.namespace !== "std") {
+    return false;
+  }
+  if (ctx.module.path.namespace === "std") {
+    return false;
+  }
+  if (
+    dependencyPath.segments.length === 1 &&
+    dependencyPath.segments[0] === "pkg"
+  ) {
+    return false;
+  }
+  const moduleId = modulePathToString(dependencyPath);
+  return !stdPkgExportsFor({ moduleId, ctx });
 };
 
 const resolveDependencyPath = ({
@@ -358,7 +468,14 @@ const bindImportsFromModule = ({
   declaredAt: Form;
   visibility: HirVisibility;
 }): BoundImport[] => {
-  const exports = ctx.moduleExports.get(moduleId);
+  let exports = ctx.moduleExports.get(moduleId);
+  if (
+    moduleId.startsWith("std::") &&
+    moduleId !== "std::pkg" &&
+    ctx.module.path.namespace !== "std"
+  ) {
+    exports = stdPkgExportsFor({ moduleId, ctx });
+  }
   if (!exports) {
     recordImportDiagnostic({
       params: { kind: "module-unavailable", moduleId },
@@ -621,9 +738,13 @@ const canAccessExport = ({
     return true;
   }
 
-  if (exported.packageId === "std") {
-    return isPackageVisible(exported.visibility);
-  }
+  const isStdPkgExported = (): boolean => {
+    if (exported.packageId !== "std") {
+      return false;
+    }
+    const target = exportTargetFor(exported, ctx);
+    return target ? isStdPkgExportedTarget({ target, ctx }) : false;
+  };
 
   const samePackage =
     exported.packageId === ctx.packageId ||
@@ -633,7 +754,11 @@ const canAccessExport = ({
     return isPackageVisible(exported.visibility);
   }
 
-  return isPublicVisibility(exported.visibility);
+  if (isPublicVisibility(exported.visibility)) {
+    return true;
+  }
+
+  return isStdPkgExported();
 };
 
 const recordImportDiagnostic = (
@@ -654,67 +779,4 @@ const recordImportDiagnostic = (
       span,
     })
   );
-};
-
-const matchesDependencyPath = ({
-  dependencyPath,
-  entry,
-  currentModulePath,
-}: {
-  dependencyPath: ModulePath;
-  entry: ParsedUseEntry;
-  currentModulePath: ModulePath;
-}): boolean => {
-  const entryKeys = [
-    entry.moduleSegments.length > 0 ? entry.moduleSegments.join("::") : undefined,
-    entry.path.length > 0 ? entry.path.join("::") : undefined,
-  ].filter((value): value is string => Boolean(value));
-
-  const depSegments = dependencyPath.segments.join("::");
-  const namespacedDepKey = [dependencyPath.namespace, ...dependencyPath.segments].join(
-    "::"
-  );
-  if (entryKeys.some((key) => key === depSegments || key === namespacedDepKey)) {
-    return true;
-  }
-
-  if (dependencyPath.namespace === "pkg" && dependencyPath.packageName) {
-    const packageKey = `${dependencyPath.namespace}::${dependencyPath.packageName}`;
-    const pkgKey = [dependencyPath.packageName, ...dependencyPath.segments].join("::");
-    const namespacedPkgKey = [
-      dependencyPath.namespace,
-      dependencyPath.packageName,
-      ...dependencyPath.segments,
-    ].join("::");
-    if (
-      entryKeys.some(
-        (key) =>
-          key === packageKey ||
-          key === dependencyPath.packageName ||
-          key === pkgKey ||
-          key === namespacedPkgKey
-      )
-    ) {
-      return true;
-    }
-  }
-  const sameNamespace = dependencyPath.namespace === currentModulePath.namespace;
-  const samePackage = dependencyPath.packageName === currentModulePath.packageName;
-  if (sameNamespace && samePackage) {
-    const hasModulePrefix =
-      dependencyPath.segments.length > currentModulePath.segments.length &&
-      dependencyPath.segments
-        .slice(0, currentModulePath.segments.length)
-        .every((segment, index) => segment === currentModulePath.segments[index]);
-    if (hasModulePrefix) {
-      const relativeSegments = dependencyPath.segments.slice(
-        currentModulePath.segments.length
-      );
-      const relativeKey = relativeSegments.join("::");
-      if (entryKeys.some((key) => key === relativeKey)) {
-        return true;
-      }
-    }
-  }
-  return false;
 };

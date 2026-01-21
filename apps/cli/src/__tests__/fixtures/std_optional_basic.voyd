@@ -14,4 +14,3 @@ pub fn main() -> i32
   let b3 = OptionalBox { ...s }
 
   sum(b1.v) + sum(b2.v) + sum() + sum(b3.v)
-

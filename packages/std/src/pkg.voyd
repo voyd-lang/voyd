@@ -1,0 +1,15 @@
+pub use optional
+pub use std::optional::types::{ Optional, Option, Some, None }
+pub use std::optional::fns::{
+  some,
+  none,
+  is_some,
+  is_none,
+  unwrap_or,
+  unwrap_or_else,
+  map,
+  and_then,
+  or_value,
+  or_else
+}
+pub use std::test::assertions::{ Test, assert }

@@ -13,6 +13,7 @@ import {
   modulePathToString,
   resolveModuleFile,
 } from "./path.js";
+import { resolveModuleRequest } from "./resolve.js";
 import { parseUsePaths } from "./use-path.js";
 import { moduleDiagnosticToDiagnostic } from "./diagnostics.js";
 import type {
@@ -98,11 +99,7 @@ export const buildModuleGraph = async ({
       continue;
     }
 
-    const resolvedPath = await resolveModuleFile(
-      dependency.path,
-      roots,
-      host
-    );
+    const resolvedPath = await resolveModuleFile(dependency.path, roots, host);
 
     if (!resolvedPath) {
       moduleDiagnostics.push({
@@ -119,7 +116,7 @@ export const buildModuleGraph = async ({
     const resolvedModulePath = modulePathFromFile(
       resolvedPath,
       roots,
-      host.path
+      host.path,
     );
     const resolvedKey = modulePathToString(resolvedModulePath);
     if (modulesByPath.has(resolvedKey)) {
@@ -163,7 +160,7 @@ export const buildModuleGraph = async ({
 const addModuleTree = (
   root: LoadedModule,
   modules: Map<string, ModuleNode>,
-  modulesByPath: Map<string, ModuleNode>
+  modulesByPath: Map<string, ModuleNode>,
 ) => {
   const allModules = [root.node, ...root.inlineModules];
   allModules.forEach((module) => {
@@ -174,13 +171,13 @@ const addModuleTree = (
 
 const enqueueDependencies = (
   loaded: LoadedModule,
-  queue: PendingDependency[]
+  queue: PendingDependency[],
 ) => {
   const modules = [loaded.node, ...loaded.inlineModules];
   modules.forEach((module) =>
     module.dependencies.forEach((dependency) =>
-      queue.push({ dependency, importer: module.id })
-    )
+      queue.push({ dependency, importer: module.id }),
+    ),
   );
 };
 
@@ -245,6 +242,7 @@ const collectModuleInfo = ({
 }): ModuleInfo => {
   const dependencies: ModuleDependency[] = [];
   const inlineModules: ModuleNode[] = [];
+  let needsStdPkg = false;
   const entries = formCallsInternal(ast, "ast") ? ast.rest : [];
 
   entries.forEach((entry) => {
@@ -257,8 +255,8 @@ const collectModuleInfo = ({
         .map((entryPath) =>
           resolveModuleRequest(
             { segments: entryPath.moduleSegments, span: entryPath.span },
-            modulePath
-          )
+            modulePath,
+          ),
         )
         .forEach((path) => {
           if (!path.segments.length && !path.packageName) return;
@@ -268,6 +266,14 @@ const collectModuleInfo = ({
             span: usePath.span ?? span,
           });
         });
+      if (modulePath.namespace !== "std") {
+        const hasStdImport = usePath.entries.some(
+          (entryPath) => entryPath.moduleSegments.at(0) === "std",
+        );
+        if (hasStdImport) {
+          needsStdPkg = true;
+        }
+      }
       return;
     }
 
@@ -278,8 +284,8 @@ const collectModuleInfo = ({
           resolveModuleRequest(
             { segments: entryPath.path, span: entryPath.span },
             modulePath,
-            { anchorToSelf: true }
-          )
+            { anchorToSelf: true },
+          ),
         )
         .forEach((path) => {
           if (!path.segments.length && !path.packageName) return;
@@ -298,17 +304,27 @@ const collectModuleInfo = ({
     }
   });
 
+  if (needsStdPkg) {
+    const already = dependencies.some(
+      (dependency) =>
+        dependency.path.namespace === "std" &&
+        dependency.path.segments.length === 1 &&
+        dependency.path.segments[0] === "pkg",
+    );
+    if (!already) {
+      dependencies.push({
+        kind: "use",
+        path: { namespace: "std", segments: ["pkg"] },
+      });
+    }
+  }
+
   return { dependencies, inlineModules };
 };
 
-type ModuleRequest = {
-  segments: readonly string[];
-  namespace?: ModulePath["namespace"];
-  packageName?: string;
-  span?: SourceSpan;
-};
-
-const parseUse = (form: Form):
+const parseUse = (
+  form: Form,
+):
   | { entries: ReturnType<typeof parseUsePaths>; span?: SourceSpan }
   | undefined => {
   if (form.calls("use")) {
@@ -329,7 +345,9 @@ const parseUse = (form: Form):
   return undefined;
 };
 
-const parseExportMod = (form: Form):
+const parseExportMod = (
+  form: Form,
+):
   | { entries: ReturnType<typeof parseUsePaths>; span?: SourceSpan }
   | undefined => {
   const isPub = form.calls("pub");
@@ -338,13 +356,11 @@ const parseExportMod = (form: Form):
   const keyword = form.at(keywordIndex);
   const body = form.at(keywordIndex + 2);
 
-  const keywordIsMod = isPub && isIdentifierAtom(keyword) && keyword.value === "mod";
+  const keywordIsMod =
+    isPub && isIdentifierAtom(keyword) && keyword.value === "mod";
   const hasBlockBody = isForm(body) && body.calls("block");
 
-  if (
-    (!form.calls("mod") && !keywordIsMod) ||
-    hasBlockBody
-  ) {
+  if ((!form.calls("mod") && !keywordIsMod) || hasBlockBody) {
     return undefined;
   }
 
@@ -363,7 +379,7 @@ type InlineModuleTree = {
 const parseInlineModule = (
   form: Form,
   parentPath: ModulePath,
-  source: string
+  source: string,
 ): InlineModuleTree | undefined => {
   const match = matchInlineModule(form);
   if (!match) return undefined;
@@ -394,7 +410,7 @@ const parseInlineModule = (
 };
 
 const matchInlineModule = (
-  form: Form
+  form: Form,
 ): { name: string; body: Form; span: SourceSpan } | undefined => {
   const first = form.at(0);
   const isPub = first && isIdentifierAtom(first) && first.value === "pub";
@@ -426,94 +442,6 @@ const toModuleAst = (block: Form): Form => {
 
 const sliceSource = (source: string, span: SourceSpan): string =>
   source.slice(span.start, span.end);
-
-const resolveModuleRequest = (
-  request: ModuleRequest,
-  importer: ModulePath,
-  options: { anchorToSelf?: boolean } = {}
-): ModulePath => {
-  const normalized = normalizeRequest(request);
-  const prefixSrcWithinPackage =
-    importer.namespace === "pkg" && normalized.namespace === "src";
-  const namespace = prefixSrcWithinPackage
-    ? "pkg"
-    : normalized.namespace ?? importer.namespace;
-  const packageName =
-    namespace === "pkg"
-      ? normalized.packageName ?? importer.packageName
-      : normalized.packageName;
-  const requestedSegments =
-    prefixSrcWithinPackage && normalized.segments[0] !== "src"
-      ? ["src", ...normalized.segments]
-      : normalized.segments;
-  const normalizedSegments =
-    namespace === "pkg" && requestedSegments.length === 0
-      ? ["pkg"]
-      : requestedSegments;
-
-  const anchorToSelf = options.anchorToSelf ?? false;
-  const importerRoot = importer.segments.at(0);
-  const firstRequestSegment = normalizedSegments.at(0);
-  const parentSegments = importer.segments.slice(0, -1);
-  const useParentSegments =
-    !anchorToSelf &&
-    !normalized.namespace &&
-    parentSegments.length > 0 &&
-    firstRequestSegment !== importerRoot;
-
-  const baseSegments = anchorToSelf
-    ? importer.segments
-    : useParentSegments
-    ? parentSegments
-    : [];
-  const suffix = anchorToSelf
-    ? firstRequestSegment === importer.segments.at(0)
-      ? normalizedSegments.slice(1)
-      : normalizedSegments
-    : useParentSegments && firstRequestSegment === parentSegments.at(-1)
-    ? normalizedSegments.slice(1)
-    : normalizedSegments;
-
-  const segments = [...baseSegments, ...suffix];
-
-  if (namespace === "pkg") {
-    return {
-      namespace,
-      packageName,
-      segments: segments.length === 0 ? ["pkg"] : segments,
-    };
-  }
-
-  return {
-    namespace,
-    segments,
-  };
-};
-
-const normalizeRequest = (request: ModuleRequest): ModuleRequest => {
-  const segments = [...request.segments];
-  const first = segments.at(0);
-  const namespace =
-    request.namespace ??
-    (first === "src" ? "src" : first === "std" ? "std" : first === "pkg" ? "pkg" : undefined);
-
-  if (namespace && (first === "src" || first === "std" || first === "pkg")) {
-    segments.shift();
-  }
-
-  const last = segments.at(-1);
-  if (last === "all" || last === "self") {
-    segments.pop();
-  }
-
-  const packageName = namespace === "pkg" ? request.packageName ?? segments.shift() : request.packageName;
-
-  return {
-    namespace,
-    packageName,
-    segments,
-  };
-};
 
 const discoverSubmodules = async ({
   filePath,
