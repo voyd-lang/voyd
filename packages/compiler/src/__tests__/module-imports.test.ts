@@ -32,4 +32,27 @@ describe("module imports", () => {
     expect(mathSemantics?.exports.has("add")).toBe(true);
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
+
+  it("resolves relative module imports", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}util${sep}foo.voyd`]: "pub fn id() -> i32 7",
+      [`${root}${sep}util${sep}bar.voyd`]:
+        "use foo\npub fn main() -> i32\n  foo::id()",
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}util${sep}bar.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const barId = "src::util::bar";
+    const fooId = "src::util::foo";
+
+    expect(graph.modules.has(barId)).toBe(true);
+    expect(graph.modules.has(fooId)).toBe(true);
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
 });

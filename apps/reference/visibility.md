@@ -93,6 +93,9 @@ Level 3 (public API) is controlled **exclusively** by the package root file, `pk
 
 > Only `pkg.voyd` can make things visible to other packages.
 
+For the standard library, `std/pkg.voyd` defines the public API, but consumers
+still import via `std::...` paths. `std::pkg` is not a user-facing module.
+
 Example:
 
 ```voyd
@@ -108,6 +111,7 @@ pub fn work() ...
 Rules:
 
 * Only items referenced in `pub use` (or `pub fn`, `pub obj` declared in `pkg.voyd` itself) are visible to other packages.
+* Submodules are re-exported from their parent modules with `pub use self::submodule` (module name) or `pub use self::submodule::all` (flattened).
 * Other packages can import using:
 
   ```voyd

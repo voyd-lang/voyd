@@ -52,7 +52,7 @@ fn caller(): Async -> i32
 test "alpha":
   1
 
-pub mod util
+pub use self::util::all
 `,
         [`${root}${sep}main${sep}util.voyd`]: `eff Async
   await(tail) -> i32
@@ -111,7 +111,7 @@ fn caller(): Async -> i32
 test "alpha":
   1
 
-pub mod util
+pub use self::util::all
 `,
         [`${root}${sep}main${sep}util.voyd`]: `eff Async
   await(tail) -> i32

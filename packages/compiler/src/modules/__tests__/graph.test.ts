@@ -13,7 +13,7 @@ describe("buildModuleGraph", () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}main.voyd`]: "use internal",
-      [`${root}${sep}internal.voyd`]: "pub mod hey",
+      [`${root}${sep}internal.voyd`]: "pub use self::hey::all",
       [`${root}${sep}internal${sep}hey.voyd`]: "pub fn hey()\n  1",
     });
 
@@ -39,7 +39,7 @@ describe("buildModuleGraph", () => {
       [`${root}${sep}server.voyd`]: "",
       [`${root}${sep}server${sep}api.voyd`]: "use users::get_user",
       [`${root}${sep}server${sep}users${sep}get_user.voyd`]:
-        "use server::fetch",
+        "use src::server::fetch",
       [`${root}${sep}server${sep}fetch.voyd`]: "fn fetch()\n  1",
     });
 
@@ -58,6 +58,28 @@ describe("buildModuleGraph", () => {
         "src::server::fetch",
       ])
     );
+  });
+
+  it("anchors relative imports to the module directory", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}utils.voyd`]: "pub fn root() -> i32\n  1",
+      [`${root}${sep}utils${sep}bar.voyd`]: "use utils",
+      [`${root}${sep}utils${sep}utils.voyd`]: "pub fn nested() -> i32\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}utils${sep}bar.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const moduleKeys = Array.from(graph.modules.keys());
+    expect(moduleKeys).toEqual(
+      expect.arrayContaining(["src::utils::bar", "src::utils::utils"])
+    );
+    expect(moduleKeys).not.toEqual(expect.arrayContaining(["src::utils"]));
   });
 
   it("registers inline modules and resolves imports against them", async () => {
@@ -88,10 +110,10 @@ describe("buildModuleGraph", () => {
     }
   });
 
-  it("discovers dependencies for grouped mod declarations", async () => {
+  it("discovers dependencies for grouped self-relative selections", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}grouped.voyd`]: "mod util::{self, helpers::math}",
+      [`${root}${sep}grouped.voyd`]: "use self::util::{self, helpers::math}",
       [`${root}${sep}grouped${sep}util.voyd`]: "",
       [`${root}${sep}grouped${sep}util${sep}helpers${sep}math.voyd`]: "",
     });

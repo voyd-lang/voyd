@@ -307,7 +307,10 @@ describe("binding pipeline", () => {
     symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
 
     const modulePath = { namespace: "src" as const, segments: ["main"] as const };
-    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const utilPath = {
+      namespace: "src" as const,
+      segments: ["main", "util"] as const,
+    };
     const moduleId = modulePathToString(modulePath);
     const utilId = modulePathToString(utilPath);
     const dependency = { kind: "use" as const, path: utilPath, span };
@@ -526,19 +529,22 @@ describe("binding pipeline", () => {
     expect(methodNames).toContain("copy");
   });
 
-  it("resolves non-inline mod declarations using module export dependencies", () => {
-    const source = "mod util";
+  it("resolves self-relative use declarations using module export dependencies", () => {
+    const source = "use self::util::all";
     const ast = parse(source, "main.voyd");
-    const modForm = ast.rest.find((entry) => isForm(entry) && entry.calls("mod"));
-    expect(modForm).toBeDefined();
-    if (!isForm(modForm)) return;
+    const useForm = ast.rest.find((entry) => isForm(entry) && entry.calls("use"));
+    expect(useForm).toBeDefined();
+    if (!isForm(useForm)) return;
 
     const modulePath = { namespace: "src" as const, segments: ["main"] as const };
-    const utilPath = { namespace: "src" as const, segments: ["util"] as const };
+    const utilPath = {
+      namespace: "src" as const,
+      segments: ["main", "util"] as const,
+    };
     const moduleId = modulePathToString(modulePath);
     const utilId = modulePathToString(utilPath);
     const dependencies: ModuleDependency[] = [
-      { kind: "export", path: utilPath, span: toSourceSpan(modForm) },
+      { kind: "export", path: utilPath, span: toSourceSpan(useForm) },
     ];
     const moduleNode: ModuleNode = {
       id: moduleId,
@@ -595,13 +601,13 @@ describe("binding pipeline", () => {
     expect(helperImport?.import?.moduleId).toBe(utilId);
   });
 
-  it("preserves grouped mod selections when importing submodules", () => {
-    const source = "mod util::{self, helpers::math as math}";
+  it("preserves grouped self-relative selections when importing submodules", () => {
+    const source = "use self::util::{self, helpers::math as math}";
     const ast = parse(source, "grouped.voyd");
-    const modForm = ast.rest.find((entry) => isForm(entry) && entry.calls("mod"));
-    expect(modForm).toBeDefined();
-    if (!isForm(modForm)) return;
-    const span = toSourceSpan(modForm);
+    const useForm = ast.rest.find((entry) => isForm(entry) && entry.calls("use"));
+    expect(useForm).toBeDefined();
+    if (!isForm(useForm)) return;
+    const span = toSourceSpan(useForm);
 
     const modulePath = { namespace: "src" as const, segments: ["grouped"] as const };
     const utilPath = {
@@ -678,10 +684,10 @@ describe("binding pipeline", () => {
     expect(mathImport?.import?.moduleId).toBe(mathId);
   });
 
-  it("populates module graph dependencies for grouped mod selections", async () => {
+  it("populates module graph dependencies for grouped self-relative selections", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}grouped.voyd`]: "mod util::{self, helpers::math as math}",
+      [`${root}${sep}grouped.voyd`]: "use self::util::{self, helpers::math as math}",
       [`${root}${sep}grouped${sep}util.voyd`]: "",
       [`${root}${sep}grouped${sep}util${sep}helpers${sep}math.voyd`]: "pub fn math()\n  1",
     });
@@ -746,8 +752,8 @@ describe("binding pipeline", () => {
     expect(use.entries[1]?.alias).toBe("math");
   });
 
-  it("prefers nested export modules when resolving relative use paths", () => {
-    const source = "pub use inner::self";
+  it("prefers nested export modules when resolving self-relative use paths", () => {
+    const source = "pub use self::inner";
     const ast = parse(source, "outer.voyd");
 
     const modulePath = { namespace: "src" as const, segments: ["outer"] as const };
@@ -799,5 +805,68 @@ describe("binding pipeline", () => {
     const innerImport = symbolTable.getSymbol(innerSymbol)
       .metadata as { import?: { moduleId: string } } | undefined;
     expect(innerImport?.import?.moduleId).toBe(nestedId);
+  });
+
+  it("resolves unqualified uses against the parent directory, not submodules", () => {
+    const source = "use utils";
+    const ast = parse(source, "bar.voyd");
+
+    const modulePath = {
+      namespace: "src" as const,
+      segments: ["utils", "bar"] as const,
+    };
+    const moduleId = modulePathToString(modulePath);
+    const siblingPath = {
+      namespace: "src" as const,
+      segments: ["utils", "utils"] as const,
+    };
+    const siblingId = modulePathToString(siblingPath);
+    const submodulePath = {
+      namespace: "src" as const,
+      segments: ["utils", "bar", "utils"] as const,
+    };
+
+    const dependencies: ModuleDependency[] = [
+      { kind: "use", path: siblingPath },
+      { kind: "export", path: submodulePath },
+    ];
+
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "bar.voyd" },
+      ast,
+      source,
+      dependencies,
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "bar.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports: new Map(),
+    });
+
+    const [use] = binding.uses;
+    expect(use.entries[0]?.moduleId).toBe(siblingId);
+  });
+
+  it("reports unsupported mod declarations", () => {
+    const source = "pub mod util";
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const diagnostic = binding.diagnostics.find((entry) => entry.code === "BD0005");
+    expect(diagnostic).toBeDefined();
   });
 });

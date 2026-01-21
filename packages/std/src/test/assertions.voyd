@@ -3,14 +3,14 @@ pub eff Test
   skip(resume) -> void
   log(resume) -> void
 
-pub fn assert(cond: boolean) -> void
+pub fn assert(cond: boolean): fail -> void
   if not cond then:
     Test::fail()
 
-pub fn assert<T>(value: T, { eq expected: T }) -> void
+pub fn assert<T>(value: T, { eq expected: T }): fail -> void
   if value != expected then:
     Test::fail()
 
-pub fn assert<T>(value: T, { neq expected: T }) -> void
+pub fn assert<T>(value: T, { neq expected: T }): fail -> void
   if value == expected then:
     Test::fail()
