@@ -256,6 +256,7 @@ const collectModuleInfo = ({
           resolveModuleRequest(
             { segments: entryPath.moduleSegments, span: entryPath.span },
             modulePath,
+            { anchorToSelf: entryPath.anchorToSelf === true }
           ),
         )
         .forEach((path) => {
@@ -274,27 +275,6 @@ const collectModuleInfo = ({
           needsStdPkg = true;
         }
       }
-      return;
-    }
-
-    const exported = parseExportMod(entry);
-    if (exported) {
-      exported.entries
-        .map((entryPath) =>
-          resolveModuleRequest(
-            { segments: entryPath.path, span: entryPath.span },
-            modulePath,
-            { anchorToSelf: true },
-          ),
-        )
-        .forEach((path) => {
-          if (!path.segments.length && !path.packageName) return;
-          dependencies.push({
-            kind: "export",
-            path,
-            span: exported.span ?? span,
-          });
-        });
       return;
     }
 
@@ -343,32 +323,6 @@ const parseUse = (
   }
 
   return undefined;
-};
-
-const parseExportMod = (
-  form: Form,
-):
-  | { entries: ReturnType<typeof parseUsePaths>; span?: SourceSpan }
-  | undefined => {
-  const isPub = form.calls("pub");
-  const keywordIndex = isPub ? 1 : 0;
-
-  const keyword = form.at(keywordIndex);
-  const body = form.at(keywordIndex + 2);
-
-  const keywordIsMod =
-    isPub && isIdentifierAtom(keyword) && keyword.value === "mod";
-  const hasBlockBody = isForm(body) && body.calls("block");
-
-  if ((!form.calls("mod") && !keywordIsMod) || hasBlockBody) {
-    return undefined;
-  }
-
-  const pathExpr = form.calls("mod") ? form.at(1) : form.at(keywordIndex + 1);
-  const span = toSourceSpan(form);
-  const entries = pathExpr ? parseUsePaths(pathExpr, span) : [];
-
-  return { entries, span };
 };
 
 type InlineModuleTree = {

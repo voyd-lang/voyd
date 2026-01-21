@@ -111,6 +111,7 @@ pub fn work() ...
 Rules:
 
 * Only items referenced in `pub use` (or `pub fn`, `pub obj` declared in `pkg.voyd` itself) are visible to other packages.
+* Submodules are re-exported from their parent modules with `pub use self::submodule` (module name) or `pub use self::submodule::all` (flattened).
 * Other packages can import using:
 
   ```voyd

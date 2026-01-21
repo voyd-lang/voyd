@@ -1,10 +1,4 @@
-import {
-  type Expr,
-  type Form,
-  type IdentifierAtom,
-  isForm,
-  isIdentifierAtom,
-} from "../../../parser/index.js";
+import { type Form, isForm, isIdentifierAtom } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import {
   parseFunctionDecl,
@@ -159,9 +153,14 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
       continue;
     }
 
-    const modDecl = parseModDecl(entry);
-    if (modDecl) {
-      bindUseDecl(modDecl, ctx);
+    if (isModDeclWithoutBody(entry)) {
+      ctx.diagnostics.push(
+        diagnosticFromCode({
+          code: "BD0005",
+          params: { kind: "unsupported-mod-decl" },
+          span: toSourceSpan(entry),
+        })
+      );
       continue;
     }
     const parsed = parseFunctionDecl(entry);
@@ -244,54 +243,6 @@ const parseUseDecl = (form: Form): ParsedUseDecl | null => {
   return { form, visibility, entries };
 };
 
-const containsObjectLiteral = (expr?: Expr): boolean => {
-  if (!isForm(expr)) return false;
-  if (expr.callsInternal("object_literal") || expr.calls("object_literal")) {
-    return true;
-  }
-  return expr.rest.some((child) => containsObjectLiteral(child));
-};
-
-const parseModDecl = (form: Form): ParsedUseDecl | null => {
-  let index = 0;
-  let visibility: HirVisibility = moduleVisibility();
-  const first = form.at(0);
-
-  if (isIdentifierAtom(first) && first.value === "pub") {
-    visibility = packageVisibility();
-    index += 1;
-  }
-
-  const keyword = form.at(index);
-  if (!isIdentifierAtom(keyword) || keyword.value !== "mod") {
-    return null;
-  }
-
-  const pathExpr = form.at(index + 1);
-  const maybeBody = form.at(index + 2);
-  if (isForm(maybeBody) && maybeBody.calls("block")) {
-    return null;
-  }
-
-  if (!pathExpr) {
-    throw new Error("mod declaration missing a path");
-  }
-
-  const span = toSourceSpan(form);
-  const isGrouped = containsObjectLiteral(pathExpr);
-  const entries = parseUsePaths(pathExpr, span).map((entry) =>
-    isGrouped
-      ? entry
-      : {
-          ...entry,
-          importKind: "all" as const,
-          targetName: undefined,
-        }
-  );
-
-  return { form, visibility, entries };
-};
-
 const isInlineModuleDecl = (form: Form): boolean => {
   const first = form.at(0);
   const isPub = isIdentifierAtom(first) && first.value === "pub";
@@ -307,6 +258,18 @@ const isInlineModuleDecl = (form: Form): boolean => {
     isForm(body) &&
     body.calls("block")
   );
+};
+
+const isModDeclWithoutBody = (form: Form): boolean => {
+  const first = form.at(0);
+  const isPub = isIdentifierAtom(first) && first.value === "pub";
+  const offset = isPub ? 1 : 0;
+  const keyword = form.at(offset);
+  if (!isIdentifierAtom(keyword) || keyword.value !== "mod") {
+    return false;
+  }
+  const body = form.at(offset + 2);
+  return !(isForm(body) && body.calls("block"));
 };
 
 const isTestEntry = (form: Form): boolean => {

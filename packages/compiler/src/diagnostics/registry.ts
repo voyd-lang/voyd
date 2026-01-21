@@ -51,6 +51,7 @@ type DiagnosticParamsMap = {
   BD0004:
     | { kind: "missing-annotation"; functionName: string; parameter: string }
     | { kind: "conflicting-overload" };
+  BD0005: { kind: "unsupported-mod-decl" };
   CG0001: { kind: "codegen-error"; message: string };
   CG0002: {
     kind: "unsupported-effectful-export-return";
@@ -183,6 +184,12 @@ export const diagnosticsRegistry: {
         : "conflicting overload declared here",
     severity: "error",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0004"]>,
+  BD0005: {
+    code: "BD0005",
+    message: () =>
+      "mod declarations without a body are no longer supported; use `use` or `pub use self::...` instead",
+    severity: "error",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0005"]>,
   CG0001: {
     code: "CG0001",
     message: (params) => params.message,

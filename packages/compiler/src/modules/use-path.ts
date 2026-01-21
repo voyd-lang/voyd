@@ -13,6 +13,7 @@ export type NormalizedUseEntry = {
   targetName?: string;
   alias?: string;
   importKind: UsePathImportKind;
+  anchorToSelf?: boolean;
   span: SourceSpan;
 };
 
@@ -39,9 +40,24 @@ export const parseUsePaths = (
   }
 
   if (expr.calls("::")) {
-    const left = parseUsePaths(expr.at(1), span, base);
+    const leftExpr = expr.at(1);
+    const rightExpr = expr.at(2);
+    if (
+      base.length === 0 &&
+      isIdentifierAtom(leftExpr) &&
+      leftExpr.value === "self"
+    ) {
+      return parseUsePaths(rightExpr, span, base).map((entry) => ({
+        ...entry,
+        anchorToSelf: true,
+      }));
+    }
+    const left = parseUsePaths(leftExpr, span, base);
     return left.flatMap((entry) =>
-      parseUsePaths(expr.at(2), span, entry.path)
+      parseUsePaths(rightExpr, span, entry.path).map((next) => ({
+        ...next,
+        anchorToSelf: entry.anchorToSelf || next.anchorToSelf,
+      }))
     );
   }
 

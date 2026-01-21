@@ -21,9 +21,9 @@ pub fn main() -> i32
 
 pub fn delta() -> i32
   sub(8, 3)`,
-      [`${root}${sep}util.voyd`]: "pub mod math\npub mod ops",
+      [`${root}${sep}util.voyd`]: "pub use self::math::all\npub use self::ops::all",
       [`${root}${sep}util${sep}math.voyd`]: "pub use util::ops::math::all",
-      [`${root}${sep}util${sep}ops.voyd`]: "pub mod math\npub use math::all",
+      [`${root}${sep}util${sep}ops.voyd`]: "pub use self::math::all",
       [`${root}${sep}util${sep}ops${sep}math.voyd`]: `pub fn add(a: i32, b: i32) -> i32
   a + b
 
@@ -136,7 +136,7 @@ pub fn main() -> i32
   let a = assert(5, eq: 5)
   let b = assert(true)
   a + b`,
-      [`${root}${sep}util.voyd`]: "pub mod assertions",
+      [`${root}${sep}util.voyd`]: "pub use self::assertions::all",
       [`${root}${sep}util${sep}assertions.voyd`]: `pub fn assert(cond: boolean) -> i32
   if cond then: 1 else: 0
 

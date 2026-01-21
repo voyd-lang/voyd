@@ -1,62 +1,62 @@
 use std::optional::types::all
 use std::test::assertions::all
 
-pub fn some<T>(value: T) -> Optional<T>
+pub fn some<T>(value: T): () -> Optional<T>
   Some { value: value }
 
-pub fn none<T>() -> Optional<T>
+pub fn none<T>(): () -> Optional<T>
   None {}
 
-pub fn is_some<T>(opt: Optional<T>) -> boolean
+pub fn is_some<T>(opt: Optional<T>): () -> boolean
   match(opt)
     Some:
       true
     None:
       false
 
-pub fn is_none<T>(opt: Optional<T>) -> boolean
+pub fn is_none<T>(opt: Optional<T>): () -> boolean
   match(opt)
     Some:
       false
     None:
       true
 
-pub fn unwrap_or<T>(opt: Optional<T>, default: T) -> T
+pub fn unwrap_or<T>(opt: Optional<T>, default: T): () -> T
   match(opt)
     Some { value }:
       value
     None:
       default
 
-pub fn unwrap_or_else<T>(opt: Optional<T>, default: () -> T) -> T
+pub fn unwrap_or_else<T>(opt: Optional<T>, default: () -> T): () -> T
   match(opt)
     Some { value }:
       value
     None:
       default()
 
-pub fn map<T, U>(opt: Optional<T>, f: (v: T) -> U) -> Optional<U>
+pub fn map<T, U>(opt: Optional<T>, f: (v: T) -> U): () -> Optional<U>
   match(opt)
     Some { value }:
       Some { value: f(value) }
     None:
       None {}
 
-pub fn and_then<T, U>(opt: Optional<T>, f: (v: T) -> Optional<U>) -> Optional<U>
+pub fn and_then<T, U>(opt: Optional<T>, f: (v: T) -> Optional<U>): () -> Optional<U>
   match(opt)
     Some { value }:
       f(value)
     None:
       None {}
 
-pub fn or_value<T>(opt: Optional<T>, fallback: Optional<T>) -> Optional<T>
+pub fn or_value<T>(opt: Optional<T>, fallback: Optional<T>): () -> Optional<T>
   match(opt)
     Some:
       opt
     None:
       fallback
 
-pub fn or_else<T>(opt: Optional<T>, fallback: () -> Optional<T>) -> Optional<T>
+pub fn or_else<T>(opt: Optional<T>, fallback: () -> Optional<T>): () -> Optional<T>
   match(opt)
     Some:
       opt

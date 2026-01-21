@@ -11,6 +11,7 @@ export type ModuleRequest = {
 export type ModulePathMatchEntry = {
   moduleSegments: readonly string[];
   path: readonly string[];
+  anchorToSelf?: boolean;
 };
 
 export const resolveModuleRequest = (
@@ -89,6 +90,27 @@ export const matchesDependencyPath = ({
     entry.moduleSegments.length > 0 ? entry.moduleSegments.join("::") : undefined,
     entry.path.length > 0 ? entry.path.join("::") : undefined,
   ].filter((value): value is string => Boolean(value));
+
+  if (entry.anchorToSelf) {
+    const sameNamespace = dependencyPath.namespace === currentModulePath.namespace;
+    const samePackage = dependencyPath.packageName === currentModulePath.packageName;
+    if (!sameNamespace || !samePackage) {
+      return false;
+    }
+    const hasModulePrefix =
+      dependencyPath.segments.length >= currentModulePath.segments.length &&
+      dependencyPath.segments
+        .slice(0, currentModulePath.segments.length)
+        .every((segment, index) => segment === currentModulePath.segments[index]);
+    if (!hasModulePrefix) {
+      return false;
+    }
+    const relativeSegments = dependencyPath.segments.slice(
+      currentModulePath.segments.length
+    );
+    const relativeKey = relativeSegments.join("::");
+    return entryKeys.some((key) => key === relativeKey);
+  }
 
   const depSegments = dependencyPath.segments.join("::");
   const namespacedDepKey = [dependencyPath.namespace, ...dependencyPath.segments].join(

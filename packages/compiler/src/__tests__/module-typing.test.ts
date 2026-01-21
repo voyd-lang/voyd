@@ -254,7 +254,7 @@ pub fn main() -> i32
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}outer${sep}inner.voyd`]: "pub obj Foo { x: i32 }",
-      [`${root}${sep}outer.voyd`]: "pub use inner::self",
+      [`${root}${sep}outer.voyd`]: "pub use self::inner",
       [`${root}${sep}main.voyd`]: `
 use outer::self
 

@@ -13,7 +13,7 @@ describe("buildModuleGraph", () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}main.voyd`]: "use internal",
-      [`${root}${sep}internal.voyd`]: "pub mod hey",
+      [`${root}${sep}internal.voyd`]: "pub use self::hey::all",
       [`${root}${sep}internal${sep}hey.voyd`]: "pub fn hey()\n  1",
     });
 
@@ -88,10 +88,10 @@ describe("buildModuleGraph", () => {
     }
   });
 
-  it("discovers dependencies for grouped mod declarations", async () => {
+  it("discovers dependencies for grouped self-relative selections", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}grouped.voyd`]: "mod util::{self, helpers::math}",
+      [`${root}${sep}grouped.voyd`]: "use self::util::{self, helpers::math}",
       [`${root}${sep}grouped${sep}util.voyd`]: "",
       [`${root}${sep}grouped${sep}util${sep}helpers${sep}math.voyd`]: "",
     });
