@@ -371,7 +371,7 @@ fn work()
 ### **server/users/get_user.voyd**
 
 ```voyd
-use server::fetch       // valid: server is ancestor & fetch is exported
+use src::server::fetch  // valid: explicit root import
 use api::start_api      // error: api is sibling-of-ancestor, not ancestor
 
 pub fn get()
@@ -382,7 +382,7 @@ pub fn get()
 
 ```voyd
 pub fn add()
-  server::fetch()       // valid: fetch is exported
+  src::server::fetch()  // valid: fetch is exported
 ```
 
 ### **server/api.voyd**

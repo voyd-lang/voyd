@@ -39,29 +39,14 @@ export const resolveModuleRequest = (
       : requestedSegments;
 
   const anchorToSelf = options.anchorToSelf ?? false;
-  const importerRoot = importer.segments.at(0);
-  const firstRequestSegment = normalizedSegments.at(0);
   const parentSegments = importer.segments.slice(0, -1);
-  const useParentSegments =
-    !anchorToSelf &&
-    !normalized.namespace &&
-    parentSegments.length > 0 &&
-    firstRequestSegment !== importerRoot;
-
+  const hasExplicitNamespace = normalized.namespace !== undefined;
   const baseSegments = anchorToSelf
     ? importer.segments
-    : useParentSegments
+    : !hasExplicitNamespace && parentSegments.length > 0
     ? parentSegments
     : [];
-  const suffix = anchorToSelf
-    ? firstRequestSegment === importer.segments.at(0)
-      ? normalizedSegments.slice(1)
-      : normalizedSegments
-    : useParentSegments && firstRequestSegment === parentSegments.at(-1)
-    ? normalizedSegments.slice(1)
-    : normalizedSegments;
-
-  const segments = [...baseSegments, ...suffix];
+  const segments = [...baseSegments, ...normalizedSegments];
 
   if (namespace === "pkg") {
     return {

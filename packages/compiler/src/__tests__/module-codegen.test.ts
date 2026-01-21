@@ -22,7 +22,7 @@ pub fn main() -> i32
 pub fn delta() -> i32
   sub(8, 3)`,
       [`${root}${sep}util.voyd`]: "pub use self::math::all\npub use self::ops::all",
-      [`${root}${sep}util${sep}math.voyd`]: "pub use util::ops::math::all",
+      [`${root}${sep}util${sep}math.voyd`]: "pub use ops::math::all",
       [`${root}${sep}util${sep}ops.voyd`]: "pub use self::math::all",
       [`${root}${sep}util${sep}ops${sep}math.voyd`]: `pub fn add(a: i32, b: i32) -> i32
   a + b

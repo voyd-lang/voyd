@@ -39,7 +39,7 @@ describe("buildModuleGraph", () => {
       [`${root}${sep}server.voyd`]: "",
       [`${root}${sep}server${sep}api.voyd`]: "use users::get_user",
       [`${root}${sep}server${sep}users${sep}get_user.voyd`]:
-        "use server::fetch",
+        "use src::server::fetch",
       [`${root}${sep}server${sep}fetch.voyd`]: "fn fetch()\n  1",
     });
 
@@ -58,6 +58,28 @@ describe("buildModuleGraph", () => {
         "src::server::fetch",
       ])
     );
+  });
+
+  it("anchors relative imports to the module directory", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}utils.voyd`]: "pub fn root() -> i32\n  1",
+      [`${root}${sep}utils${sep}bar.voyd`]: "use utils",
+      [`${root}${sep}utils${sep}utils.voyd`]: "pub fn nested() -> i32\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}utils${sep}bar.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const moduleKeys = Array.from(graph.modules.keys());
+    expect(moduleKeys).toEqual(
+      expect.arrayContaining(["src::utils::bar", "src::utils::utils"])
+    );
+    expect(moduleKeys).not.toEqual(expect.arrayContaining(["src::utils"]));
   });
 
   it("registers inline modules and resolves imports against them", async () => {
