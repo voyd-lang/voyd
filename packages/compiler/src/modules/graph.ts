@@ -45,7 +45,19 @@ export const buildModuleGraph = async ({
   const modules = new Map<string, ModuleNode>();
   const modulesByPath = new Map<string, ModuleNode>();
   const moduleDiagnostics: ModuleDiagnostic[] = [];
-  const missingModules = new Set<string>();
+  const missingModules = new Map<string, Set<string>>();
+
+  const hasMissingModule = (importer: string, pathKey: string): boolean =>
+    missingModules.get(importer)?.has(pathKey) ?? false;
+
+  const addMissingModule = (importer: string, pathKey: string) => {
+    const entries = missingModules.get(importer);
+    if (entries) {
+      entries.add(pathKey);
+      return;
+    }
+    missingModules.set(importer, new Set([pathKey]));
+  };
 
   const entryFile = host.path.resolve(entryPath);
   const entryModulePath = modulePathFromFile(entryFile, roots, host.path);
@@ -79,8 +91,7 @@ export const buildModuleGraph = async ({
   while (pending.length) {
     const { dependency, importer } = pending.shift()!;
     const pathKey = modulePathToString(dependency.path);
-    const missingKey = `${importer}::${pathKey}`;
-    if (missingModules.has(missingKey)) {
+    if (hasMissingModule(importer, pathKey)) {
       continue;
     }
     if (modulesByPath.has(pathKey)) {
@@ -101,7 +112,7 @@ export const buildModuleGraph = async ({
         importer,
         span: dependency.span,
       });
-      missingModules.add(missingKey);
+      addMissingModule(importer, pathKey);
       continue;
     }
 
@@ -122,7 +133,7 @@ export const buildModuleGraph = async ({
         importer,
         span: dependency.span,
       });
-      missingModules.add(missingKey);
+      addMissingModule(importer, pathKey);
       continue;
     }
     const nextModule = await loadFileModule({
@@ -140,7 +151,7 @@ export const buildModuleGraph = async ({
         importer,
         span: dependency.span,
       });
-      missingModules.add(missingKey);
+      addMissingModule(importer, pathKey);
     }
   }
 
