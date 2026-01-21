@@ -4,7 +4,6 @@ ast.json
 *output*.json
 *output*.wat
 .env
-test.voyd
 /playground.*
 /playground
 /sb

@@ -1,0 +1,3 @@
+pub mod assertions
+
+pub use std::test::assertions::all
