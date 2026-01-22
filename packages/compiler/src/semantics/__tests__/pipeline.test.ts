@@ -503,9 +503,10 @@ describe("semanticsPipeline", () => {
       expect(callExprId).toBeDefined();
       const callExpr = hir.expressions.get(callExprId!);
       expect(callExpr?.exprKind).toBe("call");
-      expect(typing.callTargets.get(callExpr!.id)?.get(instanceKey)).toBe(
-        expectedTarget
-      );
+      expect(typing.callTargets.get(callExpr!.id)?.get(instanceKey)).toEqual({
+        moduleId: result.moduleId,
+        symbol: expectedTarget,
+      });
       const callee = hir.expressions.get((callExpr as HirCallExpr)!.callee);
       expect(callee?.exprKind).toBe("identifier");
       expect((callee as HirIdentifierExpr).symbol).toBe(expectedTarget);
@@ -572,8 +573,14 @@ describe("semanticsPipeline", () => {
     const targets = typing.callTargets.get(callExprId!);
     const intKey = `${chooseSymbol}<${typing.arena.internPrimitive("i32")}>`;
     const floatKey = `${chooseSymbol}<${typing.arena.internPrimitive("f64")}>`;
-    expect(targets?.get(intKey)).toBe(intOverload);
-    expect(targets?.get(floatKey)).toBe(floatOverload);
+    expect(targets?.get(intKey)).toEqual({
+      moduleId: semantics.moduleId,
+      symbol: intOverload,
+    });
+    expect(targets?.get(floatKey)).toEqual({
+      moduleId: semantics.moduleId,
+      symbol: floatOverload,
+    });
   });
 
   it("lowers nominal constructor overloads across modules", () => {

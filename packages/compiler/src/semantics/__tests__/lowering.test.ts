@@ -11,6 +11,7 @@ import {
   type HirIfExpr,
   type HirImplDecl,
   type HirLetStatement,
+  type HirMethodCallExpr,
   type HirObjectLiteralExpr,
   type HirTypeAlias,
   type HirTraitDecl,
@@ -172,7 +173,7 @@ describe("lowering pipeline", () => {
     );
   });
 
-  it("lowers UFCS calls into plain function calls", () => {
+  it("lowers dot calls into method-call expressions", () => {
     const name = "ufcs.voyd";
     const ast = loadAst(name);
     const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
@@ -198,7 +199,6 @@ describe("lowering pipeline", () => {
       isPackageRoot: binding.isPackageRoot,
     });
 
-    const sumSymbol = symbolTable.resolve("sum", symbolTable.rootScope)!;
     const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
 
     const mainFn = Array.from(hir.items.values()).find(
@@ -208,25 +208,18 @@ describe("lowering pipeline", () => {
     expect(mainFn).toBeDefined();
 
     const sumCalls = Array.from(hir.expressions.values()).filter(
-      (expr): expr is HirCallExpr => {
-        if (expr.exprKind !== "call") return false;
-        const callee = hir.expressions.get(expr.callee);
-        return (
-          callee?.exprKind === "identifier" &&
-          (callee as HirIdentifierExpr).symbol === sumSymbol
-        );
-      }
+      (expr): expr is HirMethodCallExpr =>
+        expr.exprKind === "method-call" && expr.method === "sum"
     );
 
     expect(sumCalls).toHaveLength(2);
-    const argNames = sumCalls.map((call) => {
-      expect(call.args).toHaveLength(1);
-      const argExpr = hir.expressions.get(call.args[0]!.expr);
-      expect(argExpr?.exprKind).toBe("identifier");
-      return symbolTable.getSymbol((argExpr as HirIdentifierExpr).symbol).name;
+    const targetNames = sumCalls.map((call) => {
+      const targetExpr = hir.expressions.get(call.target);
+      expect(targetExpr?.exprKind).toBe("identifier");
+      return symbolTable.getSymbol((targetExpr as HirIdentifierExpr).symbol).name;
     });
 
-    expect(argNames.sort()).toEqual(["v1", "v2"]);
+    expect(targetNames.sort()).toEqual(["v1", "v2"]);
   });
 
   it("lowers impl methods into functions and impl items", () => {
@@ -273,14 +266,8 @@ describe("lowering pipeline", () => {
     }
 
     const callExpressions = Array.from(hir.expressions.values()).filter(
-      (expr): expr is HirCallExpr => {
-        if (expr.exprKind !== "call") return false;
-        const callee = hir.expressions.get(expr.callee);
-        return (
-          callee?.exprKind === "identifier" &&
-          (callee as HirIdentifierExpr).symbol === doubleSymbol
-        );
-      }
+      (expr): expr is HirMethodCallExpr =>
+        expr.exprKind === "method-call" && expr.method === "double"
     );
 
     expect(callExpressions.length).toBeGreaterThan(0);

@@ -1,6 +1,7 @@
 import type {
   HirCallExpr,
   HirExpression,
+  HirMethodCallExpr,
   HirOverloadSetExpr,
   HirTypeExpr,
 } from "../../hir/index.js";
@@ -11,6 +12,7 @@ import type {
   TypeId,
   TypeParamId,
 } from "../../ids.js";
+import type { ModuleExportEntry } from "../../modules.js";
 import {
   bindTypeParamsFromType,
   ensureTypeMatches,
@@ -43,7 +45,6 @@ import { typeExpression } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
 import { getValueType } from "./identifier.js";
 import { assertMutableObjectBinding, findBindingSymbol } from "./mutability.js";
-import { importTargetFor, resolveImportedValue } from "../imports.js";
 import type {
   Arg,
   FunctionSignature,
@@ -53,7 +54,26 @@ import type {
   TypingState,
 } from "../types.js";
 import { assertMemberAccess } from "../visibility.js";
-import { canonicalSymbolRef, localSymbolForSymbolRef } from "../symbol-ref-utils.js";
+import type { SymbolRef } from "../symbol-ref.js";
+import {
+  canonicalSymbolRefForTypingContext,
+  localSymbolForSymbolRef,
+} from "../symbol-ref-utils.js";
+
+type SymbolNameResolver = (symbol: SymbolId) => string;
+
+type MethodCallCandidate = {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  symbolRef: SymbolRef;
+  nameForSymbol?: SymbolNameResolver;
+  exported?: ModuleExportEntry;
+};
+
+type MethodCallResolution = {
+  candidates: MethodCallCandidate[];
+  receiverName?: string;
+};
 
 export const typeCallExpr = (
   expr: HirCallExpr,
@@ -135,31 +155,19 @@ export const typeCallExpr = (
   }
 
   if (calleeExpr.exprKind === "identifier") {
-    let record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
-    let metadata = (record.metadata ?? {}) as {
+    const record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
+    const metadata = (record.metadata ?? {}) as {
       intrinsic?: boolean;
       intrinsicName?: string;
       intrinsicUsesSignature?: boolean;
       unresolved?: boolean;
     };
-    if (metadata.unresolved) {
-      const resolved = resolveUnresolvedInstanceMethodCall({
-        calleeSymbol: calleeExpr.symbol,
-        methodName: record.name,
-        args,
+    if (metadata.unresolved === true) {
+      return reportUnknownFunction({
+        name: record.name,
+        span: calleeExpr.span,
         ctx,
-        state,
-        span: normalizeSpan(calleeExpr.span, expr.span),
       });
-      if (!resolved) {
-        return reportUnknownFunction({
-          name: record.name,
-          span: calleeExpr.span,
-          ctx,
-        });
-      }
-      record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
-      metadata = (record.metadata ?? {}) as typeof metadata;
     }
     assertMemberAccess({
       symbol: calleeExpr.symbol,
@@ -264,6 +272,7 @@ export const typeCallExpr = (
     ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
 
     if (signature) {
+      const calleeRef = canonicalSymbolRefForTypingContext(calleeExpr.symbol, ctx);
       const { returnType, effectRow } = typeFunctionCall({
         args,
         signature,
@@ -272,6 +281,7 @@ export const typeCallExpr = (
         expectedReturnType,
         callId: expr.id,
         calleeExprId: calleeExpr.id,
+        calleeModuleId: calleeRef.moduleId,
         ctx,
         state,
       });
@@ -351,6 +361,170 @@ export const typeCallExpr = (
     latentEffectRow,
     calleeEffectRow: getExprEffectRow(expr.callee, ctx),
   });
+};
+
+const resolveSymbolName = (
+  symbol: SymbolId,
+  ctx: TypingContext,
+  nameForSymbol?: SymbolNameResolver
+): string => (nameForSymbol ? nameForSymbol(symbol) : getSymbolName(symbol, ctx));
+
+export const typeMethodCallExpr = (
+  expr: HirMethodCallExpr,
+  ctx: TypingContext,
+  state: TypingState,
+  expectedReturnType?: TypeId
+): TypeId => {
+  const typeArguments =
+    expr.typeArguments && expr.typeArguments.length > 0
+      ? resolveTypeArguments(expr.typeArguments, ctx, state)
+      : undefined;
+
+  const targetType = typeExpression(expr.target, ctx, state);
+  const args: Arg[] = [
+    { type: targetType, exprId: expr.target },
+    ...expr.args.map((arg) => ({
+      label: arg.label,
+      type: typeExpression(arg.expr, ctx, state),
+      exprId: arg.expr,
+    })),
+  ];
+
+  const argEffectRow = composeEffectRows(
+    ctx.effects,
+    args.map((arg) =>
+      typeof arg.exprId === "number"
+        ? getExprEffectRow(arg.exprId, ctx)
+        : ctx.effects.emptyRow
+    )
+  );
+
+  const finalizeCall = ({
+    returnType,
+    latentEffectRow = ctx.effects.emptyRow,
+  }: {
+    returnType: TypeId;
+    latentEffectRow?: number;
+  }): TypeId => {
+    const callEffect = composeEffectRows(ctx.effects, [
+      argEffectRow,
+      latentEffectRow,
+    ]);
+    ctx.effects.setExprEffect(expr.id, callEffect);
+    return returnType;
+  };
+
+  if (targetType === ctx.primitives.unknown) {
+    return finalizeCall({ returnType: ctx.primitives.unknown });
+  }
+
+  const resolution = resolveMethodCallCandidates({
+    receiverType: targetType,
+    methodName: expr.method,
+    ctx,
+  });
+  if (!resolution || resolution.candidates.length === 0) {
+    reportUnknownMethod({
+      methodName: expr.method,
+      receiverName: resolution?.receiverName,
+      span: expr.span,
+      ctx,
+    });
+    return finalizeCall({ returnType: ctx.primitives.unknown });
+  }
+
+  const matches = resolution.candidates.filter(({ symbol, signature }) =>
+    matchesOverloadSignature(symbol, signature, args, ctx, state, typeArguments)
+  );
+  const traitDispatch =
+    matches.length === 0
+      ? resolveTraitDispatchOverload({
+          candidates: resolution.candidates,
+          args,
+          ctx,
+          state,
+        })
+      : undefined;
+  let selected = traitDispatch;
+
+  if (!selected) {
+    if (matches.length === 0) {
+      emitDiagnostic({
+        ctx,
+        code: "TY0008",
+        params: { kind: "no-overload", name: expr.method },
+        span: expr.span,
+      });
+    }
+
+    if (matches.length > 1) {
+      emitDiagnostic({
+        ctx,
+        code: "TY0007",
+        params: { kind: "ambiguous-overload", name: expr.method },
+        span: expr.span,
+      });
+    }
+
+    selected = matches[0];
+  }
+
+  if (!selected) {
+    return finalizeCall({ returnType: ctx.primitives.unknown });
+  }
+
+  const instanceKey = state.currentFunction?.instanceKey;
+  if (!instanceKey) {
+    throw new Error(
+      `missing function instance key for method call ${expr.id}`
+    );
+  }
+
+  if (traitDispatch) {
+    ctx.callResolution.traitDispatches.add(expr.id);
+  } else {
+    ctx.callResolution.traitDispatches.delete(expr.id);
+  }
+
+  if (selected.exported) {
+    assertExportedMemberAccess({
+      exported: selected.exported,
+      methodName: expr.method,
+      ctx,
+      state,
+      span: expr.span,
+    });
+  } else {
+    assertMemberAccess({
+      symbol: selected.symbol,
+      ctx,
+      state,
+      span: expr.span,
+      context: "calling member",
+    });
+  }
+
+  const selectedRef =
+    selected.symbolRef ?? canonicalSymbolRefForTypingContext(selected.symbol, ctx);
+  const targets =
+    ctx.callResolution.targets.get(expr.id) ?? new Map<string, SymbolRef>();
+  targets.set(instanceKey, selectedRef);
+  ctx.callResolution.targets.set(expr.id, targets);
+
+  const { returnType, effectRow } = typeFunctionCall({
+    args,
+    signature: selected.signature,
+    calleeSymbol: selected.symbol,
+    typeArguments,
+    expectedReturnType,
+    callId: expr.id,
+    ctx,
+    state,
+    calleeModuleId: selectedRef.moduleId,
+    nameForSymbol: selected.nameForSymbol,
+  });
+
+  return finalizeCall({ returnType, latentEffectRow: effectRow });
 };
 
 const getExpectedCallParameters = ({
@@ -873,134 +1047,352 @@ const reportUnknownFunction = ({
     span: normalizeSpan(span),
   });
 
-const resolveUnresolvedInstanceMethodCall = ({
-  calleeSymbol,
+const reportUnknownMethod = ({
   methodName,
-  args,
+  receiverName,
+  span,
+  ctx,
+}: {
+  methodName: string;
+  receiverName?: string;
+  span?: SourceSpan;
+  ctx: TypingContext;
+}): void => {
+  emitDiagnostic({
+    ctx,
+    code: "TY0022",
+    params: {
+      kind: "unknown-method",
+      name: methodName,
+      ...(receiverName ? { receiver: receiverName } : {}),
+    },
+    span: normalizeSpan(span),
+  });
+};
+
+const formatVisibilityLabel = (visibility: ModuleExportEntry["visibility"]): string => {
+  const base = visibility.level === "object" ? "pri" : visibility.level;
+  return visibility.api ? `${base} (api)` : base;
+};
+
+const canAccessExportedMember = ({
+  exported,
+  ctx,
+  state,
+}: {
+  exported: ModuleExportEntry;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const visibility = exported.visibility;
+  if (!visibility) {
+    return true;
+  }
+  if (visibility.level === "object") {
+    return (
+      typeof exported.memberOwner === "number" &&
+      state.currentFunction?.memberOf === exported.memberOwner
+    );
+  }
+  if (visibility.level === "module") {
+    return false;
+  }
+  const samePackage = exported.packageId === ctx.packageId;
+  if (samePackage) {
+    return visibility.level === "package" || visibility.level === "public";
+  }
+  return visibility.api === true;
+};
+
+const assertExportedMemberAccess = ({
+  exported,
+  methodName,
   ctx,
   state,
   span,
 }: {
-  calleeSymbol: SymbolId;
+  exported: ModuleExportEntry;
   methodName: string;
-  args: readonly Arg[];
   ctx: TypingContext;
   state: TypingState;
-  span: SourceSpan;
-}): boolean => {
-  if (args.length === 0) {
-    return false;
+  span?: SourceSpan;
+}): void => {
+  if (canAccessExportedMember({ exported, ctx, state })) {
+    return;
   }
+  emitDiagnostic({
+    ctx,
+    code: "TY0009",
+    params: {
+      kind: "member-access",
+      memberKind: "method",
+      name: methodName,
+      visibility: formatVisibilityLabel(exported.visibility),
+      context: "calling member",
+    },
+    span: normalizeSpan(span),
+  });
+};
 
-  const receiverType = args[0]?.type;
-  const receiverNominal =
-    typeof receiverType === "number"
-      ? getNominalComponent(receiverType, ctx)
-      : undefined;
+const resolveMethodCallCandidates = ({
+  receiverType,
+  methodName,
+  ctx,
+}: {
+  receiverType: TypeId;
+  methodName: string;
+  ctx: TypingContext;
+}): MethodCallResolution | undefined => {
+  const receiverDesc = ctx.arena.get(receiverType);
+  if (receiverDesc.kind === "trait") {
+    const traitResolution = resolveTraitMethodCandidates({
+      receiverDesc,
+      methodName,
+      ctx,
+    });
+    if (traitResolution.candidates.length > 0) {
+      return traitResolution;
+    }
+    return {
+      candidates: resolveFreeFunctionCandidates({ methodName, ctx }),
+      receiverName: traitResolution.receiverName,
+    };
+  }
+  const nominalResolution = resolveNominalMethodCandidates({
+    receiverType,
+    methodName,
+    ctx,
+  });
+  if (nominalResolution && nominalResolution.candidates.length > 0) {
+    return nominalResolution;
+  }
+  return {
+    candidates: resolveFreeFunctionCandidates({ methodName, ctx }),
+    receiverName: nominalResolution?.receiverName,
+  };
+};
+
+const resolveNominalMethodCandidates = ({
+  receiverType,
+  methodName,
+  ctx,
+}: {
+  receiverType: TypeId;
+  methodName: string;
+  ctx: TypingContext;
+}): MethodCallResolution | undefined => {
+  const receiverNominal = getNominalComponent(receiverType, ctx);
   if (typeof receiverNominal !== "number") {
-    return false;
+    return undefined;
   }
 
   const receiverDesc = ctx.arena.get(receiverNominal);
   if (receiverDesc.kind !== "nominal-object") {
-    return false;
+    return undefined;
   }
 
-  const candidates = findInstanceMethodCandidates({
-    owner: receiverDesc.owner,
-    methodName,
-    ctx,
-  });
+  const ownerRef = receiverDesc.owner;
+  const candidates =
+    ownerRef.moduleId === ctx.moduleId
+      ? findLocalMethodCandidates({
+          owner: localSymbolForSymbolRef(ownerRef, ctx),
+          methodName,
+          ctx,
+        })
+      : findExportedMethodCandidates({
+          ownerRef,
+          methodName,
+          ctx,
+        });
+  const receiverName =
+    ownerRef.moduleId === ctx.moduleId
+      ? (() => {
+          const owner = localSymbolForSymbolRef(ownerRef, ctx);
+          return typeof owner === "number"
+            ? ctx.symbolTable.getSymbol(owner).name
+            : undefined;
+        })()
+      : (() => {
+          const dependency = ctx.dependencies.get(ownerRef.moduleId);
+          return dependency
+            ? dependency.symbolTable.getSymbol(ownerRef.symbol).name
+            : undefined;
+        })();
 
-  if (candidates.length === 0) {
-    return false;
-  }
-
-  if (candidates.length > 1) {
-    emitDiagnostic({
-      ctx,
-      code: "TY0007",
-      params: { kind: "ambiguous-overload", name: methodName },
-      span,
-    });
-  }
-
-  const [target] = candidates;
-  if (!target) {
-    return false;
-  }
-
-  ctx.symbolTable.setSymbolMetadata(calleeSymbol, {
-    unresolved: false,
-    import: target,
-  });
-  ctx.importsByLocal.set(calleeSymbol, target);
-  const bucket = ctx.importAliasesByModule.get(target.moduleId) ?? new Map();
-  bucket.set(target.symbol, calleeSymbol);
-  ctx.importAliasesByModule.set(target.moduleId, bucket);
-
-  const imported = resolveImportedValue({ symbol: calleeSymbol, ctx });
-  if (!imported) {
-    return false;
-  }
-
-  assertMemberAccess({
-    symbol: calleeSymbol,
-    ctx,
-    state,
-    span,
-    context: "calling member",
-  });
-
-  return true;
+  return { candidates, receiverName };
 };
 
-const findInstanceMethodCandidates = ({
+const resolveTraitMethodCandidates = ({
+  receiverDesc,
+  methodName,
+  ctx,
+}: {
+  receiverDesc: ReturnType<TypingContext["arena"]["get"]>;
+  methodName: string;
+  ctx: TypingContext;
+}): MethodCallResolution => {
+  if (receiverDesc.kind !== "trait") {
+    return { candidates: [] };
+  }
+  const traitSymbol = localSymbolForSymbolRef(receiverDesc.owner, ctx);
+  if (typeof traitSymbol !== "number") {
+    return { candidates: [] };
+  }
+  const traitDecl = ctx.traits.getDecl(traitSymbol);
+  const traitName = ctx.symbolTable.getSymbol(traitSymbol).name;
+  const traitMethod = traitDecl?.methods.find(
+    (method) => ctx.symbolTable.getSymbol(method.symbol).name === methodName
+  );
+  if (!traitMethod) {
+    return { candidates: [], receiverName: traitName };
+  }
+
+  const implMethods = new Set<SymbolId>();
+  const impls = ctx.traitImplsByTrait.get(traitSymbol) ?? [];
+  impls.forEach((impl) => {
+    const methodSymbol = impl.methods.get(traitMethod.symbol);
+    if (typeof methodSymbol === "number") {
+      implMethods.add(methodSymbol);
+    }
+  });
+  const templates = ctx.traits.getImplTemplatesForTrait(traitSymbol);
+  templates.forEach((template) => {
+    const methodSymbol = template.methods.get(traitMethod.symbol);
+    if (typeof methodSymbol === "number") {
+      implMethods.add(methodSymbol);
+    }
+  });
+
+  const candidates = Array.from(implMethods)
+    .map((symbol) => {
+      const signature = ctx.functions.getSignature(symbol);
+      if (!signature) {
+        throw new Error(
+          `missing type signature for trait method ${getSymbolName(symbol, ctx)}`
+        );
+      }
+      return {
+        symbol,
+        signature,
+        symbolRef: { moduleId: ctx.moduleId, symbol },
+      };
+    });
+
+  return { candidates, receiverName: traitName };
+};
+
+const resolveFreeFunctionCandidates = ({
+  methodName,
+  ctx,
+}: {
+  methodName: string;
+  ctx: TypingContext;
+}): MethodCallCandidate[] => {
+  const symbols = ctx.symbolTable.resolveAll(methodName, ctx.symbolTable.rootScope);
+  if (!symbols || symbols.length === 0) {
+    return [];
+  }
+
+  return symbols
+    .map((symbol) => {
+      const record = ctx.symbolTable.getSymbol(symbol);
+      if (record.kind !== "value") {
+        return undefined;
+      }
+      const signature = ctx.functions.getSignature(symbol);
+      if (!signature) {
+        return undefined;
+      }
+      return {
+        symbol,
+        signature,
+        symbolRef: canonicalSymbolRefForTypingContext(symbol, ctx),
+      };
+    })
+    .filter((entry): entry is MethodCallCandidate => Boolean(entry));
+};
+
+const findLocalMethodCandidates = ({
   owner,
   methodName,
   ctx,
 }: {
-  owner: { moduleId: string; symbol: SymbolId };
+  owner: SymbolId | undefined;
   methodName: string;
   ctx: TypingContext;
-}): { moduleId: string; symbol: SymbolId }[] => {
-  const priority = ctx.dependencies.get(owner.moduleId);
-  const ordered = [
-    ...(priority ? [priority] : []),
-    ...Array.from(ctx.dependencies.values()).filter(
-      (dependency) => dependency.moduleId !== owner.moduleId
-    ),
-  ];
+}): MethodCallCandidate[] => {
+  if (typeof owner !== "number") {
+    return [];
+  }
 
-  const matches: { moduleId: string; symbol: SymbolId }[] = [];
-  ordered.forEach((dependency) => {
-    const exported = dependency.exports.get(methodName);
-    if (!exported || typeof exported.memberOwner !== "number") {
-      return;
-    }
-    if (exported.isStatic === true) {
-      return;
-    }
+  return Array.from(ctx.memberMetadata.entries())
+    .filter(([, metadata]) => metadata.owner === owner)
+    .map(([symbol]) => {
+      const record = ctx.symbolTable.getSymbol(symbol);
+      const metadata = (record.metadata ?? {}) as { static?: boolean };
+      if (metadata.static === true || record.name !== methodName) {
+        return undefined;
+      }
+      const signature = ctx.functions.getSignature(symbol);
+      if (!signature) {
+        throw new Error(
+          `missing type signature for method ${getSymbolName(symbol, ctx)}`
+        );
+      }
+      return {
+        symbol,
+        signature,
+        symbolRef: { moduleId: ctx.moduleId, symbol },
+      };
+    })
+    .filter((entry): entry is MethodCallCandidate => Boolean(entry));
+};
 
-    const ownerRef = canonicalSymbolRef({
-      symbol: exported.memberOwner,
-      symbolTable: dependency.symbolTable,
-      moduleId: dependency.moduleId,
-    });
-    if (ownerRef.moduleId !== owner.moduleId || ownerRef.symbol !== owner.symbol) {
-      return;
-    }
+const findExportedMethodCandidates = ({
+  ownerRef,
+  methodName,
+  ctx,
+}: {
+  ownerRef: SymbolRef;
+  methodName: string;
+  ctx: TypingContext;
+}): MethodCallCandidate[] => {
+  const dependency = ctx.dependencies.get(ownerRef.moduleId);
+  if (!dependency) {
+    return [];
+  }
+  const exported = dependency.exports.get(methodName);
+  if (
+    !exported ||
+    typeof exported.memberOwner !== "number" ||
+    exported.memberOwner !== ownerRef.symbol
+  ) {
+    return [];
+  }
+  if (exported.isStatic === true) {
+    return [];
+  }
 
-    const symbols =
-      exported.symbols && exported.symbols.length > 0
-        ? exported.symbols
-        : [exported.symbol];
-    symbols.forEach((symbol) => {
-      matches.push({ moduleId: dependency.moduleId, symbol });
-    });
+  const symbols =
+    exported.symbols && exported.symbols.length > 0
+      ? exported.symbols
+      : [exported.symbol];
+  const nameForSymbol = (symbol: SymbolId): string =>
+    dependency.symbolTable.getSymbol(symbol).name;
+
+  return symbols.map((symbol): MethodCallCandidate => {
+    const signature = dependency.typing.functions.getSignature(symbol);
+    if (!signature) {
+      throw new Error(`missing type signature for method ${nameForSymbol(symbol)}`);
+    }
+    return {
+      symbol,
+      signature,
+      symbolRef: { moduleId: dependency.moduleId, symbol },
+      nameForSymbol,
+      exported,
+    };
   });
-
-  return matches;
 };
 
 const resolveCurriedCallReturnType = ({
@@ -1057,6 +1449,8 @@ const typeFunctionCall = ({
   ctx,
   state,
   calleeExprId,
+  calleeModuleId,
+  nameForSymbol,
 }: {
   args: readonly Arg[];
   signature: FunctionSignature;
@@ -1067,12 +1461,20 @@ const typeFunctionCall = ({
   ctx: TypingContext;
   state: TypingState;
   calleeExprId?: HirExprId;
+  calleeModuleId?: string;
+  nameForSymbol?: SymbolNameResolver;
 }): { returnType: TypeId; effectRow: number } => {
-  const record = ctx.symbolTable.getSymbol(calleeSymbol);
-  const intrinsicMetadata = (record.metadata ?? {}) as {
-    intrinsic?: boolean;
-    intrinsicUsesSignature?: boolean;
-  };
+  const resolvedModuleId = calleeModuleId ?? ctx.moduleId;
+  const isExternal = resolvedModuleId !== ctx.moduleId;
+  const record = isExternal ? undefined : ctx.symbolTable.getSymbol(calleeSymbol);
+  const intrinsicMetadata = record
+    ? ((record.metadata ?? {}) as {
+        intrinsic?: boolean;
+        intrinsicUsesSignature?: boolean;
+      })
+    : {};
+  const resolveName = (symbol: SymbolId): string =>
+    resolveSymbolName(symbol, ctx, nameForSymbol);
   const hasTypeParams = signature.typeParams && signature.typeParams.length > 0;
   const instantiation = hasTypeParams
     ? instantiateFunctionCall({
@@ -1083,6 +1485,7 @@ const typeFunctionCall = ({
         calleeSymbol,
         ctx,
         state,
+        nameForSymbol: resolveName,
       })
     : {
         substitution: new Map<TypeParamId, TypeId>(),
@@ -1138,6 +1541,7 @@ const typeFunctionCall = ({
       substitution: mergedSubstitution,
       symbol: calleeSymbol,
       ctx,
+      nameForSymbol: resolveName,
     });
     const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
     ctx.callResolution.typeArguments.set(callId, appliedTypeArgs);
@@ -1145,14 +1549,7 @@ const typeFunctionCall = ({
     const skipGenericBody =
       intrinsicMetadata.intrinsic === true &&
       intrinsicMetadata.intrinsicUsesSignature !== true;
-    const importedTarget = importTargetFor(calleeSymbol, ctx);
-    const isImportedFunction =
-      importedTarget?.moduleId !== undefined &&
-      importedTarget.moduleId !== ctx.moduleId &&
-      typeof importedTarget.symbol === "number";
-    if (!skipGenericBody && isImportedFunction) {
-      ctx.functions.recordInstantiation(calleeSymbol, callKey, appliedTypeArgs);
-    } else if (!skipGenericBody) {
+    if (!skipGenericBody && !isExternal) {
       typeGenericFunctionBody({
         symbol: calleeSymbol,
         signature,
@@ -1160,6 +1557,8 @@ const typeFunctionCall = ({
         ctx,
         state,
       });
+    } else if (!skipGenericBody && isExternal) {
+      ctx.functions.recordInstantiation(calleeSymbol, callKey, appliedTypeArgs);
     }
   } else {
     ctx.callResolution.typeArguments.delete(callId);
@@ -1176,6 +1575,7 @@ const instantiateFunctionCall = ({
   calleeSymbol,
   ctx,
   state,
+  nameForSymbol,
 }: {
   signature: FunctionSignature;
   args: readonly Arg[];
@@ -1184,6 +1584,7 @@ const instantiateFunctionCall = ({
   calleeSymbol: SymbolId;
   ctx: TypingContext;
   state: TypingState;
+  nameForSymbol?: SymbolNameResolver;
 }): {
   substitution: ReadonlyMap<TypeParamId, TypeId>;
   parameters: readonly ParamSignature[];
@@ -1193,9 +1594,10 @@ const instantiateFunctionCall = ({
 
   if (typeArguments && typeArguments.length > typeParams.length) {
     throw new Error(
-      `function ${getSymbolName(
+      `function ${resolveSymbolName(
         calleeSymbol,
-        ctx
+        ctx,
+        nameForSymbol
       )} received too many type arguments`
     );
   }
@@ -1234,14 +1636,20 @@ const instantiateFunctionCall = ({
   const missing = typeParams.filter((param) => !substitution.has(param.typeParam));
   if (missing.length > 0) {
     throw new Error(
-      `function ${getSymbolName(calleeSymbol, ctx)} is missing ${
+      `function ${resolveSymbolName(calleeSymbol, ctx, nameForSymbol)} is missing ${
         missing.length
       } type argument(s)`
     );
   }
 
   typeParams.forEach((param) =>
-    enforceTypeParamConstraint(param, substitution, ctx, state)
+    enforceTypeParamConstraint(
+      param,
+      substitution,
+      ctx,
+      state,
+      nameForSymbol
+    )
   );
 
   const parameters = signature.parameters.map((param) => ({
@@ -1257,7 +1665,8 @@ export const enforceTypeParamConstraint = (
   param: FunctionTypeParam,
   substitution: ReadonlyMap<TypeParamId, TypeId>,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  nameForSymbol?: SymbolNameResolver
 ): void => {
   if (!param.constraint) {
     return;
@@ -1269,9 +1678,10 @@ export const enforceTypeParamConstraint = (
   const constraint = ctx.arena.substitute(param.constraint, substitution);
   if (!typeSatisfies(applied, constraint, ctx, state)) {
     throw new Error(
-      `type argument for ${getSymbolName(
+      `type argument for ${resolveSymbolName(
         param.symbol,
-        ctx
+        ctx,
+        nameForSymbol
       )} does not satisfy its constraint`
     );
   }
@@ -1424,29 +1834,41 @@ const getAppliedTypeArguments = ({
   substitution,
   symbol,
   ctx,
+  nameForSymbol,
 }: {
   signature: FunctionSignature;
   substitution: ReadonlyMap<TypeParamId, TypeId>;
   symbol: SymbolId;
   ctx: TypingContext;
+  nameForSymbol?: SymbolNameResolver;
 }): readonly TypeId[] => {
   const typeParams = signature.typeParams ?? [];
   return typeParams.map((param) => {
     const applied = substitution.get(param.typeParam);
     if (typeof applied !== "number") {
       throw new Error(
-        `function ${getSymbolName(
+        `function ${resolveSymbolName(
           symbol,
-          ctx
-        )} is missing a type argument for ${getSymbolName(param.symbol, ctx)}`
+          ctx,
+          nameForSymbol
+        )} is missing a type argument for ${resolveSymbolName(
+          param.symbol,
+          ctx,
+          nameForSymbol
+        )}`
       );
     }
     if (applied === ctx.primitives.unknown) {
       throw new Error(
-        `function ${getSymbolName(
+        `function ${resolveSymbolName(
           symbol,
-          ctx
-        )} has unresolved type argument for ${getSymbolName(param.symbol, ctx)}`
+          ctx,
+          nameForSymbol
+        )} has unresolved type argument for ${resolveSymbolName(
+          param.symbol,
+          ctx,
+          nameForSymbol
+        )}`
       );
     }
     return applied;
@@ -1539,9 +1961,10 @@ const typeOverloadedCall = (
     span: call.span,
     context: "calling member",
   });
+  const selectedRef = canonicalSymbolRefForTypingContext(selected.symbol, ctx);
   const targets =
-    ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolId>();
-  targets.set(instanceKey, selected.symbol);
+    ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
+  targets.set(instanceKey, selectedRef);
   ctx.callResolution.targets.set(call.id, targets);
   return typeFunctionCall({
     args: argTypes,
@@ -1553,20 +1976,23 @@ const typeOverloadedCall = (
     ctx,
     state,
     calleeExprId: callee.id,
+    calleeModuleId: selectedRef.moduleId,
   });
 };
 
-const resolveTraitDispatchOverload = ({
+const resolveTraitDispatchOverload = <
+  T extends { symbol: SymbolId; signature: FunctionSignature }
+>({
   candidates,
   args,
   ctx,
   state,
 }: {
-  candidates: readonly { symbol: SymbolId; signature: FunctionSignature }[];
+  candidates: readonly T[];
   args: readonly Arg[];
   ctx: TypingContext;
   state: TypingState;
-}): { symbol: SymbolId; signature: FunctionSignature } | undefined => {
+}): T | undefined => {
   if (args.length === 0) {
     return undefined;
   }
@@ -1645,6 +2071,10 @@ const resolveTraitDispatchOverload = ({
       ctx,
     }) ?? candidate.signature.parameters;
 
+  if (params === candidate.signature.parameters) {
+    return candidate;
+  }
+
   const signatureDesc = ctx.arena.get(candidate.signature.typeId);
   const effectRow =
     signatureDesc.kind === "function"
@@ -1661,17 +2091,14 @@ const resolveTraitDispatchOverload = ({
   });
 
   return {
-    symbol: candidate.symbol,
-    signature:
-      params === candidate.signature.parameters
-        ? candidate.signature
-        : {
-            ...candidate.signature,
-            parameters: params,
-            typeId: adjustedType,
-            effectRow,
-          },
-  };
+    ...candidate,
+    signature: {
+      ...candidate.signature,
+      parameters: params,
+      typeId: adjustedType,
+      effectRow,
+    },
+  } as T;
 };
 
 const matchesOverloadSignature = (
@@ -1679,13 +2106,30 @@ const matchesOverloadSignature = (
   signature: FunctionSignature,
   args: readonly Arg[],
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  typeArguments?: readonly TypeId[]
 ): boolean => {
-  if (!callArgumentsSatisfyParams({ args, params: signature.parameters, ctx, state })) {
+  const explicitSubstitution =
+    signature.typeParams && signature.typeParams.length > 0
+      ? applyExplicitTypeArguments({
+          signature,
+          typeArguments,
+          calleeSymbol: symbol,
+          ctx,
+        })
+      : undefined;
+  const params = explicitSubstitution
+    ? signature.parameters.map((param) => ({
+        ...param,
+        type: ctx.arena.substitute(param.type, explicitSubstitution),
+      }))
+    : signature.parameters;
+
+  if (!callArgumentsSatisfyParams({ args, params, ctx, state })) {
     return false;
   }
 
-  signature.parameters.forEach(({ type }) => {
+  params.forEach(({ type }) => {
     if (type === ctx.primitives.unknown) {
       throw new Error(
         `overloaded function ${getSymbolName(

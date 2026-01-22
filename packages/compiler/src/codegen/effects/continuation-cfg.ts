@@ -72,6 +72,30 @@ const siteOrdersFromExpr = ({
         )
       );
       break;
+    case "method-call":
+      unionInto(
+        sites,
+        siteOrdersFromExpr({
+          exprId: expr.target,
+          ctx,
+          memo,
+          siteOrderByExpr,
+          visitStmt,
+        })
+      );
+      expr.args.forEach((arg) =>
+        unionInto(
+          sites,
+          siteOrdersFromExpr({
+            exprId: arg.expr,
+            ctx,
+            memo,
+            siteOrderByExpr,
+            visitStmt,
+          })
+        )
+      );
+      break;
     case "block":
       expr.statements.forEach((stmtId) =>
         unionInto(sites, visitStmt(stmtId))

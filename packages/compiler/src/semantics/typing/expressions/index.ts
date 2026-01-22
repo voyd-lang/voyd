@@ -5,6 +5,7 @@ export {
   formatFunctionInstanceKey,
   mergeSubstitutions,
   typeCallExpr,
+  typeMethodCallExpr,
 } from "./call.js";
 export { typeFieldAccessExpr } from "./field-access.js";
 export { typeIdentifierExpr, getValueType } from "./identifier.js";

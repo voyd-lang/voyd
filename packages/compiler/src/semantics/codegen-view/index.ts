@@ -338,7 +338,7 @@ export const buildProgramCodegenView = (
       {
         functionInstantiationInfo: ReadonlyMap<SymbolId, ReadonlyMap<string, readonly TypeId[]>>;
         functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
-        callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
+        callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
         callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
         callInstanceKeys: ReadonlyMap<HirExprId, string>;
         callTraitDispatches: ReadonlySet<HirExprId>;
@@ -378,7 +378,7 @@ export const buildProgramCodegenView = (
   const callsByModuleRaw = new Map<
     string,
     {
-      targets: Map<HirExprId, ReadonlyMap<string, SymbolId>>;
+      targets: Map<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
       typeArgs: Map<HirExprId, readonly TypeId[]>;
       traitDispatches: Set<HirExprId>;
     }
@@ -989,9 +989,9 @@ export const buildProgramCodegenView = (
     >();
     data.targets.forEach((targets, exprId) => {
       const mapped = new Map<ProgramFunctionInstanceId, ProgramFunctionId>();
-      targets.forEach((targetSymbol, instanceKey) => {
+      targets.forEach((targetRef, instanceKey) => {
         const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
-        const targetFunctionId = getProgramFunctionId({ moduleId, symbol: targetSymbol });
+        const targetFunctionId = getProgramFunctionId(toSymbolRef(targetRef));
         if (callerInstanceId === undefined || targetFunctionId === undefined) {
           return;
         }

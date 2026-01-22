@@ -621,6 +621,72 @@ const buildCfg = ({
           siteNodes: [...graph.siteNodes, ...(nodes[applyNode]!.site ? [applyNode] : [])],
         };
       }
+      case "method-call": {
+        const calleeGraph = buildExpr(expr.target, flow);
+        const argGraphs = expr.args.map((arg) => buildExpr(arg.expr, flow));
+        const kind = effectsFacade(ctx).callKind(expr.id);
+        const applyNode = addNode({
+          site:
+            kind === "perform"
+              ? (() => {
+                  throw new Error("perform site missing callee symbol");
+                })()
+              : kind === "effectful-call"
+                ? {
+                    kind: "call",
+                    exprId: expr.id,
+                  }
+                : undefined,
+        });
+
+        const hasSitesInArg = argGraphs.map((graph) => graph.siteNodes.length > 0);
+        const needsTemp = new Array(expr.args.length).fill(false);
+        let suffixHasSites = false;
+        for (let index = expr.args.length - 2; index >= 0; index -= 1) {
+          suffixHasSites ||= hasSitesInArg[index + 1] ?? false;
+          needsTemp[index] = suffixHasSites;
+        }
+
+        const tempCapturesByIndex: Array<TempCaptureDraft | undefined> = new Array(
+          expr.args.length
+        ).fill(undefined);
+        needsTemp.forEach((needed, argIndex) => {
+          if (!needed) return;
+          const argExprId = expr.args[argIndex]!.expr;
+          const typeId =
+            ctx.module.types.getResolvedExprType(argExprId) ??
+            ctx.module.types.getExprType(argExprId) ??
+            ctx.program.primitives.unknown;
+          tempCapturesByIndex[argIndex] = {
+            key: callArgTempKey({ callExprId: expr.id, argIndex }),
+            callExprId: expr.id,
+            argIndex,
+            typeId,
+          };
+        });
+
+        for (let argIndex = 0; argIndex < argGraphs.length; argIndex += 1) {
+          const graph = argGraphs[argIndex]!;
+          if (graph.siteNodes.length === 0) continue;
+          const captures = tempCapturesByIndex
+            .slice(0, argIndex)
+            .filter((capture): capture is TempCaptureDraft => !!capture);
+          if (captures.length === 0) continue;
+          graph.siteNodes.forEach((siteNodeId) => {
+            const node = nodes[siteNodeId];
+            if (!node?.site) return;
+            appendTempCaptures(node, captures);
+          });
+        }
+
+        const graph = sequence([calleeGraph, ...argGraphs]);
+        graph.exits.forEach((exit) => addEdge(exit, applyNode));
+        return {
+          entry: graph.entry,
+          exits: [applyNode],
+          siteNodes: [...graph.siteNodes, ...(nodes[applyNode]!.site ? [applyNode] : [])],
+        };
+      }
     }
   };
 

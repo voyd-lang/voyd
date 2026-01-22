@@ -1,0 +1,5 @@
+obj Box { value: i32 }
+
+pub fn main() -> i32
+  let b = Box { value: 1 }
+  b.nope()
