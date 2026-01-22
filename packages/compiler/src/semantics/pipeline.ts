@@ -5,7 +5,12 @@ import { SymbolTable } from "./binder/index.js";
 import { runBindingPipeline } from "./binding/binding.js";
 import type { BindingResult, BoundOverloadSet } from "./binding/binding.js";
 import type { HirGraph } from "./hir/index.js";
-import { createHirBuilder, type HirVisibility, maxVisibility } from "./hir/index.js";
+import {
+  createHirBuilder,
+  moduleVisibility,
+  type HirVisibility,
+  maxVisibility,
+} from "./hir/index.js";
 import { runLoweringPipeline } from "./lowering/lowering.js";
 import { analyzeLambdaCaptures } from "./lowering/captures.js";
 import { runTypingPipeline, type TypingResult } from "./typing/typing.js";
@@ -122,6 +127,7 @@ export const semanticsPipeline = (
   });
 
   specializeOverloadCallees(hir, typing);
+  applyImplicitImports({ binding, symbolTable, hir });
 
   const exportsTable = collectModuleExports({
     hir,
@@ -166,6 +172,40 @@ const ensureNoBindingErrors = (binding: BindingResult): void => {
     return;
   }
   throw new DiagnosticError(errors[0]!);
+};
+
+const applyImplicitImports = ({
+  binding,
+  symbolTable,
+  hir,
+}: {
+  binding: BindingResult;
+  symbolTable: SymbolTable;
+  hir: HirGraph;
+}): void => {
+  const importedLocals = new Set(binding.imports.map((entry) => entry.local));
+  const snapshot = symbolTable.snapshot();
+  snapshot.symbols.forEach((record) => {
+    const metadata = (record.metadata ?? {}) as {
+      import?: { moduleId?: unknown; symbol?: unknown };
+    };
+    const moduleId = metadata.import?.moduleId;
+    const symbol = metadata.import?.symbol;
+    if (typeof moduleId !== "string" || typeof symbol !== "number") {
+      return;
+    }
+    if (importedLocals.has(record.id)) {
+      return;
+    }
+    binding.imports.push({
+      name: record.name,
+      local: record.id,
+      target: { moduleId, symbol },
+      visibility: moduleVisibility(),
+      span: hir.module.span,
+    });
+    importedLocals.add(record.id);
+  });
 };
 
 const collectOverloadOptions = (

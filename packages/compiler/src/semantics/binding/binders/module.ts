@@ -80,6 +80,9 @@ const exportTargetFor = (
   return { moduleId: entry.moduleId, symbol: entry.symbol };
 };
 
+const isSameOrDescendantModuleId = (moduleId: string, parent: string): boolean =>
+  moduleId === parent || moduleId.startsWith(`${parent}::`);
+
 const stdPkgExportsFor = ({
   moduleId,
   ctx,
@@ -101,8 +104,8 @@ const stdPkgExportsFor = ({
       continue;
     }
     if (
-      target.moduleId === moduleId ||
-      target.moduleId.startsWith(`${moduleId}::`)
+      isSameOrDescendantModuleId(target.moduleId, moduleId) ||
+      isSameOrDescendantModuleId(moduleId, target.moduleId)
     ) {
       filtered.set(entry.name, entry);
     }
@@ -112,12 +115,14 @@ const stdPkgExportsFor = ({
 
 const isStdPkgExportedTarget = ({
   target,
+  importedFromModuleId,
   ctx,
 }: {
   target: { moduleId: string; symbol: SymbolId };
+  importedFromModuleId: string;
   ctx: BindingContext;
 }): boolean => {
-  const exports = stdPkgExportsFor({ moduleId: target.moduleId, ctx });
+  const exports = stdPkgExportsFor({ moduleId: importedFromModuleId, ctx });
   if (!exports) {
     return false;
   }
@@ -125,6 +130,12 @@ const isStdPkgExportedTarget = ({
     const entryTarget = exportTargetFor(entry, ctx);
     if (!entryTarget) {
       continue;
+    }
+    if (
+      entry.kind === "module" &&
+      isSameOrDescendantModuleId(importedFromModuleId, entryTarget.moduleId)
+    ) {
+      return true;
     }
     if (
       entryTarget.moduleId === target.moduleId &&
@@ -724,7 +735,9 @@ const canAccessExport = ({
       return false;
     }
     const target = exportTargetFor(exported, ctx);
-    return target ? isStdPkgExportedTarget({ target, ctx }) : false;
+    return target
+      ? isStdPkgExportedTarget({ target, importedFromModuleId: moduleId, ctx })
+      : false;
   };
 
   const samePackage =
