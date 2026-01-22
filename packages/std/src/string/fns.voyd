@@ -1,0 +1,265 @@
+use std::array::all
+use std::fixed_array::fns::{ new_fixed_array }
+use std::test::assertions::all
+
+pub obj String {
+  bytes: Array<i32>,
+  byte_count: i32
+}
+
+pub fn new_string(from_bytes: FixedArray<i32>): () -> String
+  let input_length = __array_len(from_bytes)
+  var bytes = Array<i32>::with_capacity(input_length)
+  var index = 0
+  while index < input_length do:
+    let read = decode_utf8_at(from_bytes, input_length, index)
+    bytes = append_codepoint(bytes, read.codepoint)
+    index = index + read.width
+  let byte_count = bytes.length()
+  String { bytes: bytes, byte_count: byte_count }
+
+impl String
+  pub fn byte_length(self): () -> i32
+    self.byte_count
+
+  pub fn codepoint_length(self): () -> i32
+    var index = 0
+    var count = 0
+    let source = self.bytes.raw_storage()
+    while index < self.byte_count do:
+      let read = decode_utf8_at(source, self.byte_count, index)
+      count = count + 1
+      index = index + read.width
+    count
+
+  pub fn codepoint_at(self, index: i32): () -> i32
+    if index < 0 then:
+      return -1
+
+    var byte_index = 0
+    var codepoint_index = 0
+    let source = self.bytes.raw_storage()
+    while byte_index < self.byte_count do:
+      let read = decode_utf8_at(source, self.byte_count, byte_index)
+      if codepoint_index == index then:
+        return read.codepoint
+      codepoint_index = codepoint_index + 1
+      byte_index = byte_index + read.width
+    -1
+
+  pub fn slice_bytes(self, start: i32, len: i32): () -> String
+    if len <= 0 then:
+      return empty_string()
+
+    let clamped_start = if start < 0 then: 0 else: start
+    if clamped_start >= self.byte_count then:
+      return empty_string()
+
+    let raw_end = clamped_start + len
+    let end = if raw_end > self.byte_count then: self.byte_count else: raw_end
+    let slice_len = end - clamped_start
+    if slice_len <= 0 then:
+      return empty_string()
+
+    let source = self.bytes.raw_storage()
+    let storage = new_fixed_array<i32>(slice_len)
+    __array_copy(storage, {
+      from: source,
+      to_index: 0,
+      from_index: clamped_start,
+      count: slice_len
+    })
+    new_string(storage)
+
+  pub fn slice_codepoints(self, start: i32, len: i32): () -> String
+    if len <= 0 then:
+      return empty_string()
+    if start < 0 then:
+      return empty_string()
+
+    let target_end = start + len
+    var byte_index = 0
+    var codepoint_index = 0
+    var slice_start = -1
+    var slice_end = -1
+    let source = self.bytes.raw_storage()
+    while byte_index < self.byte_count do:
+      if codepoint_index == start then:
+        slice_start = byte_index
+      if codepoint_index == target_end then:
+        slice_end = byte_index
+        break
+
+      let read = decode_utf8_at(source, self.byte_count, byte_index)
+      byte_index = byte_index + read.width
+      codepoint_index = codepoint_index + 1
+
+    if slice_start < 0 then:
+      return empty_string()
+
+    let final_end = if slice_end < 0 then: byte_index else: slice_end
+    let slice_len = final_end - slice_start
+    if slice_len <= 0 then:
+      return empty_string()
+
+    let storage = new_fixed_array<i32>(slice_len)
+    __array_copy(storage, {
+      from: source,
+      to_index: 0,
+      from_index: slice_start,
+      count: slice_len
+    })
+    new_string(storage)
+
+obj Utf8Read {
+  api codepoint: i32,
+  api width: i32
+}
+
+fn decode_utf8_at(source: FixedArray<i32>, limit: i32, index: i32) -> Utf8Read
+  if index < 0 then:
+    return utf8_replacement()
+  if index >= limit then:
+    return utf8_replacement()
+
+  let b0 = __array_get(source, index)
+  if not is_byte(b0) then:
+    return utf8_replacement()
+  if b0 <= 127 then:
+    return Utf8Read { codepoint: b0, width: 1 }
+
+  if b0 >= 194 and b0 <= 223 then:
+    let next_index = index + 1
+    if next_index >= limit then:
+      return utf8_replacement()
+    let b1 = __array_get(source, next_index)
+    if not is_continuation_byte(b1) then:
+      return utf8_replacement()
+    let codepoint = (b0 - 192) * 64 + (b1 - 128)
+    return Utf8Read { codepoint: codepoint, width: 2 }
+
+  if b0 >= 224 and b0 <= 239 then:
+    let next_index = index + 1
+    let next_index2 = index + 2
+    if next_index2 >= limit then:
+      return utf8_replacement()
+    let b1 = __array_get(source, next_index)
+    let b2 = __array_get(source, next_index2)
+    if not valid_three_byte_lead(b0, b1, b2) then:
+      return utf8_replacement()
+    let codepoint = (b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)
+    return Utf8Read { codepoint: codepoint, width: 3 }
+
+  if b0 >= 240 and b0 <= 244 then:
+    let next_index = index + 1
+    let next_index2 = index + 2
+    let next_index3 = index + 3
+    if next_index3 >= limit then:
+      return utf8_replacement()
+    let b1 = __array_get(source, next_index)
+    let b2 = __array_get(source, next_index2)
+    let b3 = __array_get(source, next_index3)
+    if not valid_four_byte_lead(b0, b1, b2, b3) then:
+      return utf8_replacement()
+    let codepoint = (b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)
+    return Utf8Read { codepoint: codepoint, width: 4 }
+
+  utf8_replacement()
+
+fn is_byte(value: i32) -> bool
+  value >= 0 and value <= 255
+
+fn is_continuation_byte(value: i32) -> bool
+  value >= 128 and value <= 191
+
+fn valid_three_byte_lead(b0: i32, b1: i32, b2: i32) -> bool
+  if not is_continuation_byte(b1) then:
+    return false
+  if not is_continuation_byte(b2) then:
+    return false
+  if b0 == 224 and b1 < 160 then:
+    return false
+  if b0 == 237 and b1 > 159 then:
+    return false
+  true
+
+fn valid_four_byte_lead(b0: i32, b1: i32, b2: i32, b3: i32) -> bool
+  if not is_continuation_byte(b1) then:
+    return false
+  if not is_continuation_byte(b2) then:
+    return false
+  if not is_continuation_byte(b3) then:
+    return false
+  if b0 == 240 and b1 < 144 then:
+    return false
+  if b0 == 244 and b1 > 143 then:
+    return false
+  true
+
+fn append_codepoint(bytes: Array<i32>, codepoint: i32) -> Array<i32>
+  if codepoint < 0 then:
+    return append_replacement(bytes)
+  if codepoint <= 127 then:
+    return bytes.push(codepoint)
+  if codepoint <= 2047 then:
+    let first = 192 + (codepoint / 64)
+    let second = 128 + (codepoint - (codepoint / 64) * 64)
+    var out = bytes.push(first)
+    out = out.push(second)
+    return out
+  if codepoint <= 65535 then:
+    if codepoint >= 55296 and codepoint <= 57343 then:
+      return append_replacement(bytes)
+    let first = 224 + (codepoint / 4096)
+    let second = 128 + ((codepoint / 64) - (codepoint / 4096) * 64)
+    let third = 128 + (codepoint - (codepoint / 64) * 64)
+    var out = bytes.push(first)
+    out = out.push(second)
+    out = out.push(third)
+    return out
+  if codepoint <= 1114111 then:
+    let first = 240 + (codepoint / 262144)
+    let second = 128 + ((codepoint / 4096) - (codepoint / 262144) * 64)
+    let third = 128 + ((codepoint / 64) - (codepoint / 4096) * 64)
+    let fourth = 128 + (codepoint - (codepoint / 64) * 64)
+    var out = bytes.push(first)
+    out = out.push(second)
+    out = out.push(third)
+    out = out.push(fourth)
+    return out
+  append_replacement(bytes)
+
+fn append_replacement(bytes: Array<i32>) -> Array<i32>
+  var out = bytes.push(239)
+  out = out.push(191)
+  out = out.push(189)
+  out
+
+fn utf8_replacement() -> Utf8Read
+  Utf8Read { codepoint: 65533, width: 1 }
+
+fn empty_string() -> String
+  new_string(new_fixed_array<i32>(0))
+
+test "string lengths for ascii":
+  let value = "hello"
+  assert(value.byte_length(), eq: 5)
+  assert(value.codepoint_length(), eq: 5)
+  assert(value.codepoint_at(1), eq: 101)
+
+test "string lengths for non-bmp":
+  let value = "😀"
+  assert(value.byte_length(), eq: 4)
+  assert(value.codepoint_length(), eq: 1)
+  assert(value.codepoint_at(0), eq: 128512)
+
+test "string lengths for mixed utf8":
+  let value = "a😀b"
+  assert(value.byte_length(), eq: 6)
+  assert(value.codepoint_length(), eq: 3)
+  assert(value.codepoint_at(1), eq: 128512)
+
+  let sliced = value.slice_codepoints(1, 1)
+  assert(sliced.byte_length(), eq: 4)
+  assert(sliced.codepoint_length(), eq: 1)
+  assert(sliced.codepoint_at(0), eq: 128512)

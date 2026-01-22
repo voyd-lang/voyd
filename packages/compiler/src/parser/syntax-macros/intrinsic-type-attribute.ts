@@ -1,14 +1,13 @@
 import {
-  IntAtom,
   type Expr,
   type Form,
   isForm,
   isIdentifierAtom,
-  formCallsInternal,
 } from "../ast/index.js";
 import { call } from "../ast/init-helpers.js";
 import { cloneAttributes } from "../ast/syntax.js";
 import { SyntaxMacro } from "./types.js";
+import { parseStringValue } from "./string-value.js";
 
 type PendingIntrinsicTypeAttribute = { intrinsicType: string; source: Form };
 
@@ -195,73 +194,6 @@ const parseIntrinsicTypeArgs = (args: readonly Expr[]): string => {
   return intrinsicType;
 };
 
-const parseStringValue = (expr?: Expr): string | null => {
-  if (!expr) {
-    return null;
-  }
-
-  if (isIdentifierAtom(expr)) {
-    return expr.value;
-  }
-
-  if (
-    !isForm(expr) ||
-    (!expr.calls("new_string") && !expr.callsInternal("new_string"))
-  ) {
-    return null;
-  }
-
-  const rawValue = expr.at(1);
-  if (!isForm(rawValue) || !formCallsInternal(rawValue, "object_literal")) {
-    return null;
-  }
-
-  const fromField = rawValue.rest.find((entry) => {
-    if (!isForm(entry) || !entry.calls(":")) {
-      return false;
-    }
-    const key = entry.at(1);
-    return isIdentifierAtom(key) && key.value === "from";
-  });
-
-  if (!fromField || !isForm(fromField)) {
-    return null;
-  }
-
-  const fromValue = fromField.at(2);
-  if (!isForm(fromValue)) {
-    return null;
-  }
-
-  const codes: number[] = [];
-  fromValue.rest.forEach((entry, index) => {
-    if (index === 0 && isForm(entry) && entry.callsInternal("generics")) {
-      return;
-    }
-
-    if (entry instanceof IntAtom) {
-      const parsed = Number.parseInt(entry.value, 10);
-      if (Number.isFinite(parsed)) {
-        codes.push(parsed);
-      }
-      return;
-    }
-
-    if (isIdentifierAtom(entry)) {
-      const parsed = Number.parseInt(entry.value, 10);
-      if (Number.isFinite(parsed)) {
-        codes.push(parsed);
-      }
-    }
-  });
-
-  if (codes.length === 0) {
-    return null;
-  }
-
-  return String.fromCharCode(...codes);
-};
-
 const attachIntrinsicTypeAttribute = (
   form: Form,
   attr: PendingIntrinsicTypeAttribute
@@ -274,4 +206,3 @@ const attachIntrinsicTypeAttribute = (
   (attributes as { intrinsicType: string }).intrinsicType = attr.intrinsicType;
   form.attributes = attributes;
 };
-
