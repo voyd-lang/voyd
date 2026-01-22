@@ -5,6 +5,7 @@ import {
   getObjectTemplate,
   resolveTypeAlias,
 } from "./type-system.js";
+import { cloneNestedMap } from "./call-resolution.js";
 import {
   applyImportableMetadata,
   importableMetadataFrom,
@@ -958,22 +959,9 @@ const makeDependencyContext = (
   valueTypes: new Map(dependency.typing.valueTypes),
   tailResumptions: new Map(dependency.typing.tailResumptions),
   callResolution: {
-    targets: new Map(
-      Array.from(dependency.typing.callTargets.entries()).map(
-        ([exprId, targets]) => [exprId, new Map(targets)]
-      )
-    ),
-    typeArguments: new Map(
-      Array.from(dependency.typing.callTypeArguments.entries()).map(
-        ([exprId, args]) => [exprId, new Map(args)] as const
-      )
-    ),
-    instanceKeys: new Map(
-      Array.from(dependency.typing.callInstanceKeys.entries()).map(([exprId, keys]) => [
-        exprId,
-        new Map(keys),
-      ])
-    ),
+    targets: cloneNestedMap(dependency.typing.callTargets),
+    typeArguments: cloneNestedMap(dependency.typing.callTypeArguments),
+    instanceKeys: cloneNestedMap(dependency.typing.callInstanceKeys),
     traitDispatches: new Set(dependency.typing.callTraitDispatches),
   },
   functions: dependency.typing.functions,

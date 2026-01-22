@@ -21,6 +21,7 @@ import {
   registerImportedObjectTemplate,
   resolveImportedValue,
 } from "./imports.js";
+import { cloneNestedMap } from "./call-resolution.js";
 
 export * from "./types.js";
 
@@ -58,24 +59,10 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     valueTypes: new Map(ctx.valueTypes),
     tailResumptions: new Map(ctx.tailResumptions),
     objectsByNominal: ctx.objects.snapshotByNominal(),
-    callTargets: new Map(
-      Array.from(ctx.callResolution.targets.entries()).map(([callId, targets]) => [
-        callId,
-        new Map(targets),
-      ])
-    ),
+    callTargets: cloneNestedMap(ctx.callResolution.targets),
     functionInstances: ctx.functions.snapshotInstances(),
-    callTypeArguments: new Map(
-      Array.from(ctx.callResolution.typeArguments.entries()).map(
-        ([callId, typeArgs]) => [callId, new Map(typeArgs)] as const
-      )
-    ),
-    callInstanceKeys: new Map(
-      Array.from(ctx.callResolution.instanceKeys.entries()).map(([callId, keys]) => [
-        callId,
-        new Map(keys),
-      ])
-    ),
+    callTypeArguments: cloneNestedMap(ctx.callResolution.typeArguments),
+    callInstanceKeys: cloneNestedMap(ctx.callResolution.instanceKeys),
     callTraitDispatches: new Set(ctx.callResolution.traitDispatches),
     functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
     functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),

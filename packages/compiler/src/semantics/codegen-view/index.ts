@@ -33,6 +33,7 @@ import type {
   TraitImplInstance,
   TraitMethodImpl,
 } from "../typing/types.js";
+import { cloneNestedMap } from "../typing/call-resolution.js";
 import {
   getOptionalInfo,
   type OptionalResolverContext,
@@ -771,19 +772,15 @@ export const buildProgramCodegenView = (
     });
 
 	    const callSource = moduleTyping.get(mod.moduleId);
-	    const callTargets = callSource?.callTargets ?? mod.typing.callTargets;
-	    const callTypeArgs = callSource?.callTypeArguments ?? mod.typing.callTypeArguments;
-	    callsByModuleRaw.set(mod.moduleId, {
-	      targets: new Map(
-	        Array.from(callTargets, ([exprId, targets]) => [exprId, new Map(targets)] as const)
-	      ),
-	      typeArgs: new Map(
-	        Array.from(callTypeArgs, ([exprId, args]) => [exprId, new Map(args)] as const)
-	      ),
-	      traitDispatches: new Set(
-	        callSource?.callTraitDispatches ?? mod.typing.callTraitDispatches
-	      ),
-	    });
+    const callTargets = callSource?.callTargets ?? mod.typing.callTargets;
+    const callTypeArgs = callSource?.callTypeArguments ?? mod.typing.callTypeArguments;
+    callsByModuleRaw.set(mod.moduleId, {
+      targets: cloneNestedMap(callTargets),
+      typeArgs: cloneNestedMap(callTypeArgs),
+      traitDispatches: new Set(
+        callSource?.callTraitDispatches ?? mod.typing.callTraitDispatches
+      ),
+    });
 
     // Instances come from the explicit monomorphization pass when available.
   });
@@ -1370,8 +1367,8 @@ export const buildProgramCodegenView = (
           mod.typing.table.getExprType(expr) ?? first.typing.primitives.unknown,
         getResolvedExprType: (expr) => mod.typing.resolvedExprTypes.get(expr),
         getValueType: (symbol) =>
-          mod.typing.valueTypes.get(symbol) ??
-          moduleTyping.get(mod.moduleId)?.valueTypes.get(symbol),
+          moduleTyping.get(mod.moduleId)?.valueTypes.get(symbol) ??
+          mod.typing.valueTypes.get(symbol),
         getTailResumption: (expr) => mod.typing.tailResumptions.get(expr),
       },
       effectsInfo: buildEffectsLoweringInfo({

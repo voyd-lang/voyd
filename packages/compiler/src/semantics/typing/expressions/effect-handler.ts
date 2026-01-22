@@ -50,10 +50,12 @@ const collectEffectOperationTypeArguments = ({
   rootExprId,
   operation,
   ctx,
+  callerInstanceKey,
 }: {
   rootExprId: HirExprId;
   operation: SymbolId;
   ctx: TypingContext;
+  callerInstanceKey?: string;
 }): readonly TypeId[][] => {
   const collected: TypeId[][] = [];
   walkExpression({
@@ -72,6 +74,13 @@ const collectEffectOperationTypeArguments = ({
       if (!typeArgsByInstance) {
         return;
       }
+      if (callerInstanceKey) {
+        const typeArgs = typeArgsByInstance.get(callerInstanceKey);
+        if (typeArgs && typeArgs.length > 0) {
+          collected.push([...typeArgs]);
+        }
+        return;
+      }
       typeArgsByInstance.forEach((typeArgs) => {
         if (typeArgs.length > 0) {
           collected.push([...typeArgs]);
@@ -87,11 +96,13 @@ const resolveHandlerTypeArguments = ({
   clause,
   signature,
   ctx,
+  state,
 }: {
   handlerBody: HirExprId;
   clause: HirEffectHandlerExpr["handlers"][number];
   signature: NonNullable<ReturnType<TypingContext["functions"]["getSignature"]>>;
   ctx: TypingContext;
+  state: TypingState;
 }): readonly TypeId[] | undefined => {
   const typeParams = signature.typeParams ?? [];
   if (typeParams.length === 0) {
@@ -102,6 +113,7 @@ const resolveHandlerTypeArguments = ({
     rootExprId: handlerBody,
     operation: clause.operation,
     ctx,
+    callerInstanceKey: state.currentFunction?.instanceKey,
   });
   if (candidates.length === 0) {
     return undefined;
@@ -285,6 +297,7 @@ const typeHandlerClause = ({
     clause,
     signature,
     ctx,
+    state,
   });
   const instantiated = applyTypeArgumentsToSignature({
     signature,

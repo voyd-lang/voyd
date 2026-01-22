@@ -4,6 +4,7 @@ import type { DependencySemantics, SymbolRefKey, TypingContext } from "./typing/
 import {
   typeGenericFunctionBody,
 } from "./typing/expressions/call.js";
+import { cloneNestedMap } from "./typing/call-resolution.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import type { MonomorphizedInstanceRequest } from "./codegen-view/index.js";
@@ -293,24 +294,9 @@ export const monomorphizeProgram = ({
     moduleTyping.set(moduleId, {
       functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
       functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
-      callTargets: new Map(
-        Array.from(ctx.callResolution.targets.entries()).map(([exprId, targets]) => [
-          exprId,
-          new Map(targets),
-        ])
-      ),
-      callTypeArguments: new Map(
-        Array.from(ctx.callResolution.typeArguments.entries()).map(([exprId, args]) => [
-          exprId,
-          new Map(args),
-        ])
-      ),
-      callInstanceKeys: new Map(
-        Array.from(ctx.callResolution.instanceKeys.entries()).map(([exprId, keys]) => [
-          exprId,
-          new Map(keys),
-        ])
-      ),
+      callTargets: cloneNestedMap(ctx.callResolution.targets),
+      callTypeArguments: cloneNestedMap(ctx.callResolution.typeArguments),
+      callInstanceKeys: cloneNestedMap(ctx.callResolution.instanceKeys),
       callTraitDispatches: new Set(ctx.callResolution.traitDispatches),
       valueTypes: new Map(ctx.valueTypes),
     });
@@ -407,23 +393,9 @@ const createTypingContextFactory = ({
       valueTypes: new Map(entry.typing.valueTypes),
       tailResumptions: new Map(entry.typing.tailResumptions),
       callResolution: {
-        targets: new Map(
-          Array.from(entry.typing.callTargets.entries()).map(
-            ([exprId, targets]) => [exprId, new Map(targets)]
-          )
-        ),
-        typeArguments: new Map(
-          Array.from(entry.typing.callTypeArguments.entries()).map(([exprId, args]) => [
-            exprId,
-            new Map(args),
-          ])
-        ),
-        instanceKeys: new Map(
-          Array.from(entry.typing.callInstanceKeys.entries()).map(([exprId, keys]) => [
-            exprId,
-            new Map(keys),
-          ])
-        ),
+        targets: cloneNestedMap(entry.typing.callTargets),
+        typeArguments: cloneNestedMap(entry.typing.callTypeArguments),
+        instanceKeys: cloneNestedMap(entry.typing.callInstanceKeys),
         traitDispatches: new Set(entry.typing.callTraitDispatches),
       },
       functions: entry.typing.functions,
