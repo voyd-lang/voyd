@@ -1,0 +1,9 @@
+use dep::add1
+
+fn make()
+  (x: i32) -> i32 => add1(x)
+
+pub fn main() -> i32
+  let f = make()
+  f(1)
+

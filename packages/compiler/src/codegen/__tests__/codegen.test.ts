@@ -141,6 +141,65 @@ const buildCodegenProgram = (
 };
 
 describe("next codegen", () => {
+  it("does not register RTT during metadata registration", () => {
+    const ast = loadAst("recursive_type_alias.voyd");
+    const semantics = semanticsPipeline(ast);
+    const program = buildProgramCodegenView([semantics]);
+    const mod = new binaryen.Module();
+    mod.setFeatures(binaryen.Features.All);
+    const rtt = createRttContext(mod);
+    const effectsRuntime = createEffectRuntime(mod);
+    const functions = new Map<string, Map<number, FunctionMetadata[]>>();
+    const functionInstances = new Map<ProgramFunctionInstanceId, FunctionMetadata>();
+    const outcomeValueTypes = new Map<string, OutcomeValueBox>();
+    const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
+    const runtimeTypeIdsByKey = new Map<string, number>();
+    const runtimeTypeIdCounter = { value: 1 };
+    const diagnostics = new DiagnosticEmitter();
+    const programHelpers = createProgramHelperRegistry();
+
+    const ctx: CodegenContext = {
+      program,
+      module: program.modules.get(semantics.moduleId)!,
+      mod,
+      moduleId: semantics.moduleId,
+      moduleLabel: sanitizeIdentifier(semantics.hir.module.path),
+      diagnostics,
+      options: DEFAULT_OPTIONS,
+      programHelpers,
+      functions,
+      functionInstances,
+      itemsToSymbols: new Map(),
+      structTypes: new Map(),
+      fixedArrayTypes: new Map(),
+      closureTypes: new Map(),
+      functionRefTypes: new Map(),
+      runtimeTypeRegistry,
+      runtimeTypeIds: { byKey: runtimeTypeIdsByKey, nextId: runtimeTypeIdCounter },
+      lambdaEnvs: new Map(),
+      lambdaFunctions: new Map(),
+      rtt,
+      effectsRuntime,
+      effectsBackend: undefined as any,
+      effectsState: createEffectsState(),
+      effectLowering: {
+        sitesByExpr: new Map(),
+        sites: [],
+        callArgTemps: new Map(),
+        tempTypeIds: new Map(),
+      },
+      outcomeValueTypes,
+    };
+
+    const siteCounter = { current: 0 };
+    ctx.effectsBackend = selectEffectsBackend(ctx);
+    ctx.effectLowering = ctx.effectsBackend.buildLowering({ ctx, siteCounter });
+    registerFunctionMetadata(ctx);
+    registerImportMetadata(ctx);
+
+    expect(runtimeTypeRegistry.size).toBe(0);
+  });
+
   it("emits wasm for the fib sample and runs main()", () => {
     const main = loadMain("fib.voyd");
     expect(main()).toBe(55);

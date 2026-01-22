@@ -42,6 +42,9 @@ const createTypeValidator = (ctx: TypingContext): TypeValidator => {
     switch (desc.kind) {
       case "primitive":
         return;
+      case "recursive":
+        ensureKnownType(desc.body, `${context} recursive body`);
+        return;
       case "trait":
       case "nominal-object":
         desc.typeArgs.forEach((arg, index) =>
@@ -101,6 +104,11 @@ const collectReferencedParams = (
   switch (desc.kind) {
     case "type-param-ref":
       return new Set([desc.param]);
+    case "recursive": {
+      const referenced = collectReferencedParams(desc.body, ctx, seen);
+      referenced.delete(desc.binder);
+      return referenced;
+    }
     case "trait":
     case "nominal-object":
       return desc.typeArgs.reduce((acc, arg) => {
@@ -314,6 +322,9 @@ const enforceStructuralSubstitution = (
 
   const desc = ctx.arena.get(typeId);
   switch (desc.kind) {
+    case "recursive":
+      enforceStructuralSubstitution(desc.body, ctx, context, seen);
+      return;
     case "structural-object": {
       desc.fields.forEach((field) => {
         if (!field.declaringParams?.length) {

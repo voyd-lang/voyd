@@ -48,6 +48,8 @@ const runtimeTypeKeyFor = (
   switch (desc.kind) {
     case "primitive":
       return `prim:${desc.name}`;
+    case "recursive":
+      return `mu:${desc.binder}.${runtimeTypeKeyFor(desc.body, ctx, seen)}`;
     case "type-param-ref":
       return `typeparam:${desc.param}`;
     case "nominal-object":
@@ -298,7 +300,8 @@ export const getClosureTypeInfo = (
 export const getFixedArrayWasmTypes = (
   typeId: TypeId,
   ctx: CodegenContext,
-  seen: Set<TypeId> = new Set()
+  seen: Set<TypeId> = new Set(),
+  mode: WasmTypeMode = "runtime"
 ): FixedArrayWasmType => {
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "fixed-array") {
@@ -308,7 +311,7 @@ export const getFixedArrayWasmTypes = (
   if (cached) {
     return cached;
   }
-  const elementType = wasmTypeFor(desc.element, ctx, seen);
+  const elementType = wasmTypeFor(desc.element, ctx, seen, mode);
   const type = defineArrayType(ctx.mod, elementType, true);
   const heapType = binaryenTypeToHeapType(type);
   const fixedArrayType: FixedArrayWasmType = { type, heapType };
@@ -334,12 +337,19 @@ export const wasmTypeFor = (
 
   try {
     const desc = ctx.program.types.getTypeDesc(typeId);
+    if (desc.kind === "recursive") {
+      const unfolded = ctx.program.types.substitute(
+        desc.body,
+        new Map([[desc.binder, typeId]])
+      );
+      return wasmTypeFor(unfolded, ctx, seen, mode);
+    }
     if (desc.kind === "primitive") {
       return mapPrimitiveToWasm(desc.name);
     }
 
     if (desc.kind === "fixed-array") {
-      return getFixedArrayWasmTypes(typeId, ctx, seen).type;
+      return getFixedArrayWasmTypes(typeId, ctx, seen, mode).type;
     }
 
     if (desc.kind === "function") {
@@ -378,7 +388,7 @@ export const wasmTypeFor = (
         throw new Error("cannot map empty union to wasm");
       }
       const memberTypes = desc.members.map((member) =>
-        wasmTypeFor(member, ctx, seen)
+        wasmTypeFor(member, ctx, seen, mode)
       );
       const first = memberTypes[0]!;
       if (!memberTypes.every((candidate) => candidate === first)) {
@@ -725,6 +735,13 @@ export const resolveStructuralTypeId = (
   ctx: CodegenContext
 ): TypeId | undefined => {
   const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    const unfolded = ctx.program.types.substitute(
+      desc.body,
+      new Map([[desc.binder, typeId]])
+    );
+    return resolveStructuralTypeId(unfolded, ctx);
+  }
   if (desc.kind === "structural-object") {
     return typeId;
   }
@@ -977,6 +994,13 @@ const getNominalComponentId = (
   ctx: CodegenContext
 ): TypeId | undefined => {
   const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    const unfolded = ctx.program.types.substitute(
+      desc.body,
+      new Map([[desc.binder, typeId]])
+    );
+    return getNominalComponentId(unfolded, ctx);
+  }
   if (desc.kind === "nominal-object") {
     return typeId;
   }

@@ -62,6 +62,7 @@ export type CodegenFunctionParameter = {
 
 export type CodegenTypeDesc =
   | { kind: "primitive"; name: string }
+  | { kind: "recursive"; binder: TypeParamId; body: TypeId }
   | { kind: "trait"; owner: ProgramSymbolId; name?: string; typeArgs: readonly TypeId[] }
   | { kind: "nominal-object"; owner: ProgramSymbolId; name?: string; typeArgs: readonly TypeId[] }
   | { kind: "structural-object"; fields: readonly CodegenStructuralField[] }
@@ -469,7 +470,8 @@ export const buildProgramCodegenView = (
 
   const typeContainsUnresolvedParam = (
     typeId: TypeId,
-    seen: Set<TypeId>
+    seen: Set<TypeId>,
+    boundParams: ReadonlySet<TypeParamId> = new Set()
   ): boolean => {
     if (seen.has(typeId)) {
       return false;
@@ -478,36 +480,41 @@ export const buildProgramCodegenView = (
     const desc = arena.get(typeId);
     switch (desc.kind) {
       case "type-param-ref":
-        return true;
+        return !boundParams.has(desc.param);
+      case "recursive": {
+        const nextBound = new Set(boundParams);
+        nextBound.add(desc.binder);
+        return typeContainsUnresolvedParam(desc.body, seen, nextBound);
+      }
       case "primitive":
         return desc.name === "unknown";
       case "trait":
       case "nominal-object":
         return desc.typeArgs.some((arg) =>
-          typeContainsUnresolvedParam(arg, seen)
+          typeContainsUnresolvedParam(arg, seen, boundParams)
         );
       case "fixed-array":
-        return typeContainsUnresolvedParam(desc.element, seen);
+        return typeContainsUnresolvedParam(desc.element, seen, boundParams);
       case "structural-object":
         return desc.fields.some((field) =>
-          typeContainsUnresolvedParam(field.type, seen)
+          typeContainsUnresolvedParam(field.type, seen, boundParams)
         );
       case "function":
         return (
           desc.parameters.some((param) =>
-            typeContainsUnresolvedParam(param.type, seen)
-          ) || typeContainsUnresolvedParam(desc.returnType, seen)
+            typeContainsUnresolvedParam(param.type, seen, boundParams)
+          ) || typeContainsUnresolvedParam(desc.returnType, seen, boundParams)
         );
       case "union":
         return desc.members.some((member) =>
-          typeContainsUnresolvedParam(member, seen)
+          typeContainsUnresolvedParam(member, seen, boundParams)
         );
       case "intersection":
         return (
           (typeof desc.nominal === "number" &&
-            typeContainsUnresolvedParam(desc.nominal, seen)) ||
+            typeContainsUnresolvedParam(desc.nominal, seen, boundParams)) ||
           (typeof desc.structural === "number" &&
-            typeContainsUnresolvedParam(desc.structural, seen))
+            typeContainsUnresolvedParam(desc.structural, seen, boundParams))
         );
       default:
         return false;
@@ -552,6 +559,12 @@ export const buildProgramCodegenView = (
     switch (desc.kind) {
       case "primitive":
         return cacheTypeDesc(typeId, { kind: "primitive", name: desc.name });
+      case "recursive":
+        return cacheTypeDesc(typeId, {
+          kind: "recursive",
+          binder: desc.binder,
+          body: desc.body,
+        });
       case "type-param-ref":
         return cacheTypeDesc(typeId, { kind: "type-param-ref", param: desc.param });
       case "trait":
