@@ -1,6 +1,6 @@
 import type { SymbolId } from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
-import type { TypingContext } from "./types.js";
+import type { SymbolRefKey, TypingContext } from "./types.js";
 import type { SymbolRef } from "./symbol-ref.js";
 
 export const canonicalSymbolRef = ({
@@ -28,6 +28,23 @@ export const canonicalSymbolRefForTypingContext = (
   ctx: TypingContext
 ): SymbolRef => canonicalSymbolRef({ symbol, symbolTable: ctx.symbolTable, moduleId: ctx.moduleId });
 
+export const symbolRefKey = (ref: SymbolRef): SymbolRefKey =>
+  `${ref.moduleId}::${ref.symbol}`;
+
+export const parseSymbolRefKey = (key: SymbolRefKey): SymbolRef | undefined => {
+  const delimiter = key.lastIndexOf("::");
+  if (delimiter < 0) {
+    return undefined;
+  }
+  const moduleId = key.slice(0, delimiter);
+  const symbolText = key.slice(delimiter + 2);
+  const symbol = Number(symbolText);
+  if (!Number.isInteger(symbol)) {
+    return undefined;
+  }
+  return { moduleId, symbol };
+};
+
 export const localSymbolForSymbolRef = (
   ref: SymbolRef,
   ctx: TypingContext
@@ -38,4 +55,3 @@ export const localSymbolForSymbolRef = (
   const bucket = ctx.importAliasesByModule.get(ref.moduleId);
   return bucket?.get(ref.symbol);
 };
-

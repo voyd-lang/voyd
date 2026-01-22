@@ -1,1 +1,1 @@
-export { functionalMacroExpander } from "./syntax-macro.js";
+export { expandFunctionalMacros, functionalMacroExpander } from "./syntax-macro.js";

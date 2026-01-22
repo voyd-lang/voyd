@@ -58,6 +58,7 @@ import type { SymbolRef } from "../symbol-ref.js";
 import {
   canonicalSymbolRefForTypingContext,
   localSymbolForSymbolRef,
+  symbolRefKey,
 } from "../symbol-ref-utils.js";
 
 type SymbolNameResolver = (symbol: SymbolId) => string;
@@ -1015,6 +1016,98 @@ const adjustTraitDispatchParameters = ({
   return updated;
 };
 
+const instantiationRefKeyForCall = ({
+  calleeSymbol,
+  calleeModuleId,
+  ctx,
+}: {
+  calleeSymbol: SymbolId;
+  calleeModuleId?: string;
+  ctx: TypingContext;
+}): string => {
+  const imported = ctx.importsByLocal.get(calleeSymbol);
+  if (imported) {
+    return symbolRefKey(imported);
+  }
+  if (calleeModuleId && calleeModuleId !== ctx.moduleId) {
+    return symbolRefKey({ moduleId: calleeModuleId, symbol: calleeSymbol });
+  }
+  return symbolRefKey(canonicalSymbolRefForTypingContext(calleeSymbol, ctx));
+};
+
+const getTraitMethodTypeBindings = ({
+  calleeSymbol,
+  receiverType,
+  signature,
+  ctx,
+  state,
+}: {
+  calleeSymbol: SymbolId;
+  receiverType: TypeId;
+  signature: FunctionSignature;
+  ctx: TypingContext;
+  state: TypingState;
+}): ReadonlyMap<TypeParamId, TypeId> | undefined => {
+  if (!signature.typeParams || signature.typeParams.length === 0) {
+    return undefined;
+  }
+  const receiverDesc = ctx.arena.get(receiverType);
+  if (receiverDesc.kind !== "trait") {
+    return undefined;
+  }
+  const methodMetadata = ctx.traitMethodImpls.get(calleeSymbol);
+  if (!methodMetadata) {
+    return undefined;
+  }
+  const receiverTraitSymbol = localSymbolForSymbolRef(receiverDesc.owner, ctx);
+  if (
+    typeof receiverTraitSymbol !== "number" ||
+    receiverTraitSymbol !== methodMetadata.traitSymbol
+  ) {
+    return undefined;
+  }
+  const template = ctx.traits
+    .getImplTemplatesForTrait(receiverTraitSymbol)
+    .find(
+      (entry) =>
+        entry.methods.get(methodMetadata.traitMethodSymbol) === calleeSymbol
+    );
+  if (!template) {
+    return undefined;
+  }
+
+  const allowUnknown = state.mode === "relaxed";
+  const match = ctx.arena.unify(receiverType, template.trait, {
+    location: ctx.hir.module.ast,
+    reason: "trait method inference",
+    variance: "covariant",
+    allowUnknown,
+  });
+  if (!match.ok) {
+    return undefined;
+  }
+
+  const symbolBindings = new Map<SymbolId, TypeId>();
+  template.typeParams.forEach((param) => {
+    const applied = match.substitution.get(param.typeParam);
+    if (typeof applied === "number") {
+      symbolBindings.set(param.symbol, applied);
+    }
+  });
+  if (symbolBindings.size === 0) {
+    return undefined;
+  }
+
+  const bindings = new Map<TypeParamId, TypeId>();
+  signature.typeParams.forEach((param) => {
+    const applied = symbolBindings.get(param.symbol);
+    if (typeof applied === "number") {
+      bindings.set(param.typeParam, applied);
+    }
+  });
+  return bindings.size > 0 ? bindings : undefined;
+};
+
 const reportNonFunctionCallee = ({
   callSpan,
   calleeSpan,
@@ -1476,6 +1569,16 @@ const typeFunctionCall = ({
   const resolveName = (symbol: SymbolId): string =>
     resolveSymbolName(symbol, ctx, nameForSymbol);
   const hasTypeParams = signature.typeParams && signature.typeParams.length > 0;
+  const prefilledSubstitution =
+    hasTypeParams && args.length > 0
+      ? getTraitMethodTypeBindings({
+          calleeSymbol,
+          receiverType: args[0]!.type,
+          signature,
+          ctx,
+          state,
+        })
+      : undefined;
   const instantiation = hasTypeParams
     ? instantiateFunctionCall({
         signature,
@@ -1483,6 +1586,7 @@ const typeFunctionCall = ({
         typeArguments,
         expectedReturnType,
         calleeSymbol,
+        prefilledSubstitution,
         ctx,
         state,
         nameForSymbol: resolveName,
@@ -1546,6 +1650,11 @@ const typeFunctionCall = ({
     const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
     ctx.callResolution.typeArguments.set(callId, appliedTypeArgs);
     ctx.callResolution.instanceKeys.set(callId, callKey);
+    const instantiationKey = instantiationRefKeyForCall({
+      calleeSymbol,
+      calleeModuleId,
+      ctx,
+    });
     const skipGenericBody =
       intrinsicMetadata.intrinsic === true &&
       intrinsicMetadata.intrinsicUsesSignature !== true;
@@ -1558,7 +1667,11 @@ const typeFunctionCall = ({
         state,
       });
     } else if (!skipGenericBody && isExternal) {
-      ctx.functions.recordInstantiation(calleeSymbol, callKey, appliedTypeArgs);
+      ctx.functions.recordInstantiation(
+        instantiationKey,
+        callKey,
+        appliedTypeArgs
+      );
     }
   } else {
     ctx.callResolution.typeArguments.delete(callId);
@@ -1573,6 +1686,7 @@ const instantiateFunctionCall = ({
   typeArguments,
   expectedReturnType,
   calleeSymbol,
+  prefilledSubstitution,
   ctx,
   state,
   nameForSymbol,
@@ -1582,6 +1696,7 @@ const instantiateFunctionCall = ({
   typeArguments?: readonly TypeId[];
   expectedReturnType?: TypeId;
   calleeSymbol: SymbolId;
+  prefilledSubstitution?: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
   state: TypingState;
   nameForSymbol?: SymbolNameResolver;
@@ -1602,7 +1717,7 @@ const instantiateFunctionCall = ({
     );
   }
 
-  const substitution = new Map<TypeParamId, TypeId>();
+  const substitution = new Map<TypeParamId, TypeId>(prefilledSubstitution);
   typeParams.forEach((param, index) => {
     const explicit = typeArguments?.[index];
     if (typeof explicit === "number") {
@@ -1804,7 +1919,11 @@ export const typeGenericFunctionBody = ({
       }
     }
     ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
-    ctx.functions.recordInstantiation(symbol, key, appliedTypeArgs);
+    ctx.functions.recordInstantiation(
+      symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx)),
+      key,
+      appliedTypeArgs
+    );
   } finally {
     state.currentFunction = previousFunction;
     ctx.resolvedExprTypes = previousResolved;

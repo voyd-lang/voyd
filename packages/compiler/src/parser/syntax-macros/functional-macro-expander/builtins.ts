@@ -35,27 +35,29 @@ export type BuiltinsDeps = {
   evalMacroExpr: (
     expr: Expr,
     scope: MacroScope,
-    opts?: EvalOpts
+    opts?: EvalOpts,
   ) => MacroEvalResult;
   callLambda: (lambda: MacroLambdaValue, args: Expr[]) => MacroEvalResult;
 };
 
 export const fnsToSkipArgEval = new Set([
   "if",
+  "let",
   "syntax_template",
+  "`",
   "=>",
   "define",
   "=",
 ]);
 
 export const createBuiltins = (
-  deps: BuiltinsDeps
+  deps: BuiltinsDeps,
 ): Record<string, BuiltinFn | undefined> => {
   const { evalMacroExpr, callLambda } = deps;
 
   const getMacroTimeValue = (
     expr: Expr | MacroEvalResult | undefined,
-    scope: MacroScope
+    scope: MacroScope,
   ): any => {
     if (!expr) return undefined;
 
@@ -90,7 +92,7 @@ export const createBuiltins = (
 
   const evaluateMacroValue = (
     expr: Expr | undefined,
-    scope: MacroScope
+    scope: MacroScope,
   ): unknown => {
     if (!expr) return undefined;
     const evaluated = evalMacroExpr(cloneExpr(expr), scope);
@@ -99,7 +101,7 @@ export const createBuiltins = (
 
   const binaryLogic = (
     { originalArgs, scope }: BuiltinContext,
-    fn: (l: any, r: any) => boolean
+    fn: (l: any, r: any) => boolean,
   ): boolean => {
     const left = evaluateMacroValue(originalArgs.at(0), scope);
     const right = evaluateMacroValue(originalArgs.at(1), scope);
@@ -108,7 +110,7 @@ export const createBuiltins = (
 
   const arithmetic = (
     { originalArgs, scope }: BuiltinContext,
-    fn: (l: number, r: number) => number | string
+    fn: (l: number, r: number) => number | string,
   ): Expr => {
     const evaluatedLeft = evaluateMacroValue(originalArgs.at(0), scope);
     const evaluatedRight = evaluateMacroValue(originalArgs.at(1), scope);
@@ -138,7 +140,7 @@ export const createBuiltins = (
         return elements
           .slice(1)
           .map((item, index) =>
-            expectIdentifier(item, `lambda parameter ${index + 1}`)
+            expectIdentifier(item, `lambda parameter ${index + 1}`),
           )
           .map((identifier) => identifier.clone());
       }
@@ -151,13 +153,13 @@ export const createBuiltins = (
       return elements
         .slice(1)
         .map((item, index) =>
-          expectIdentifier(item, `lambda tuple parameter ${index + 1}`)
+          expectIdentifier(item, `lambda tuple parameter ${index + 1}`),
         )
         .map((identifier) => identifier.clone());
     }
 
     return elements.map((item, index) =>
-      expectIdentifier(item, `lambda parameter ${index + 1}`)
+      expectIdentifier(item, `lambda parameter ${index + 1}`),
     );
   };
 
@@ -242,7 +244,7 @@ export const createBuiltins = (
 
   const getOptionalFormLabel = (
     form: Form,
-    label: string
+    label: string,
   ): Expr | undefined => {
     const args = collectFormLabels(form, label);
     return args.at(0);
@@ -259,7 +261,7 @@ export const createBuiltins = (
     evaluated: MacroEvalResult | undefined,
     original: Expr | undefined,
     scope: MacroScope,
-    context: string
+    context: string,
   ): Form => {
     if (evaluated) {
       const expr =
@@ -274,6 +276,12 @@ export const createBuiltins = (
     }
 
     throw new Error(`Expected form for ${context}`);
+  };
+
+  const syntaxTemplateBuiltin: BuiltinFn = ({ originalArgs, scope }) => {
+    const expanded = expandSyntaxTemplate(originalArgs, scope);
+    if (expanded.length === 1) return cloneExpr(expanded[0]!);
+    return new Form(expanded.map(cloneExpr));
   };
 
   return {
@@ -297,10 +305,29 @@ export const createBuiltins = (
       });
       return new IdentifierAtom("nop");
     },
+    let: ({ originalArgs, scope }) => {
+      const assignment = expectForm(originalArgs.at(0), "let assignment");
+      const operator = assignment.at(0);
+      if (!isIdentifierAtom(operator) || operator.value !== "=") {
+        throw new Error("let expects an assignment expression");
+      }
+      const identifier = expectIdentifier(assignment.at(1), "let identifier");
+      const valueExpr = assignment.at(2);
+      if (!valueExpr) {
+        throw new Error("let requires an initializer");
+      }
+      const value = evalMacroExpr(cloneExpr(valueExpr), scope);
+      scope.defineVariable({
+        name: identifier.clone(),
+        value: cloneMacroEvalResult(value),
+        mutable: false,
+      });
+      return new IdentifierAtom("nop");
+    },
     "=": ({ originalArgs, scope }) => {
       const identifier = expectIdentifier(
         originalArgs.at(0),
-        "assignment target"
+        "assignment target",
       );
       const value = evalMacroExpr(cloneExpr(originalArgs.at(1)!), scope);
       scope.assignVariable(identifier.value, cloneMacroEvalResult(value));
@@ -370,22 +397,12 @@ export const createBuiltins = (
     identifier: ({ args }) => {
       const prefix = expectIdentifier(args.at(0), "identifier prefix");
       const identifier = new IdentifierAtom(
-        `${prefix.value}$macro_id$${getSyntaxId()}`
+        `${prefix.value}$macro_id$${getSyntaxId()}`,
       );
       return identifier;
     },
-    mark_moved: ({ args }) => {
-      const variable = expectIdentifier(
-        args.at(0),
-        "mark_moved target"
-      ).clone();
-      return variable;
-    },
-    syntax_template: ({ originalArgs, scope }) => {
-      const expanded = expandSyntaxTemplate(originalArgs, scope);
-      if (expanded.length === 1) return cloneExpr(expanded[0]!);
-      return new Form(expanded.map(cloneExpr));
-    },
+    syntax_template: syntaxTemplateBuiltin,
+    "`": syntaxTemplateBuiltin,
     if: ({ originalArgs, scope }) => {
       const [condition, truthy, falsy] = originalArgs;
       if (!condition || !truthy) {
@@ -394,7 +411,7 @@ export const createBuiltins = (
 
       const condResult = evalMacroExpr(
         handleOptionalConditionParenthesis(cloneExpr(condition)),
-        scope
+        scope,
       );
 
       if (getMacroTimeValue(condResult, scope)) {
@@ -412,7 +429,7 @@ export const createBuiltins = (
         args.at(0),
         originalArgs.at(0),
         scope,
-        "slice target"
+        "slice target",
       );
       const start = Number(getMacroTimeValue(args.at(1), scope));
       const endVal = args.at(2)
@@ -425,7 +442,7 @@ export const createBuiltins = (
         args.at(0),
         originalArgs.at(0),
         scope,
-        "extract target"
+        "extract target",
       );
       const index = Number(getMacroTimeValue(args.at(1), scope));
       return cloneExpr(list.at(index) ?? new IdentifierAtom("nop"));
@@ -435,7 +452,7 @@ export const createBuiltins = (
         args.at(0),
         originalArgs.at(0),
         scope,
-        "get target"
+        "get target",
       );
       const index = Number(getMacroTimeValue(args.at(1), scope));
       return cloneExpr(list.at(index) ?? new IdentifierAtom("nop"));
@@ -447,7 +464,7 @@ export const createBuiltins = (
         ? lambdaCandidate
         : evalMacroExpr(
             expectExpr(lambdaCandidate ?? new IdentifierAtom("nop")),
-            scope
+            scope,
           );
       if (!isMacroLambdaValue(lambda)) {
         throw new Error("map requires a macro lambda as the second argument");
@@ -459,7 +476,7 @@ export const createBuiltins = (
             cloneExpr(value),
             createInt(index),
             new Form(array.map(cloneExpr)),
-          ])
+          ]),
         )
         .map((res) => expectExpr(res));
       return new Form(mapped.map(cloneExpr));
@@ -472,7 +489,7 @@ export const createBuiltins = (
         ? lambdaCandidate
         : evalMacroExpr(
             expectExpr(lambdaCandidate ?? new IdentifierAtom("nop")),
-            scope
+            scope,
           );
       if (!isMacroLambdaValue(lambdaResult)) {
         throw new Error("reduce requires a macro lambda as the third argument");
@@ -511,8 +528,8 @@ export const createBuiltins = (
       const list = isForm(first)
         ? first
         : isIdentifierAtom(first)
-        ? new Form([cloneExpr(first)])
-        : expectForm(first, "concat target");
+          ? new Form([cloneExpr(first)])
+          : expectForm(first, "concat target");
       const values = args.slice(1).flatMap((expr) => {
         const item = expectExpr(expr);
         return isForm(item) ? item.toArray() : [item];
@@ -533,7 +550,7 @@ export const createBuiltins = (
           const atom = new IdentifierAtom(part);
           atom.setIsQuoted(true);
           return atom;
-        })
+        }),
       );
     },
     char_to_code: ({ args }) => {

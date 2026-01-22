@@ -162,6 +162,10 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
       continue;
     }
 
+    if (isMacroDecl(entry)) {
+      continue;
+    }
+
     if (isInlineModuleDecl(entry)) {
       continue;
     }
@@ -254,6 +258,29 @@ const parseUseDecl = (form: Form): ParsedUseDecl | null => {
 
   const entries = parseUsePaths(pathExpr, toSourceSpan(form));
   return { form, visibility, entries };
+};
+
+const isMacroDecl = (form: Form): boolean => {
+  if (form.calls("functional-macro") || form.calls("define-macro-variable")) {
+    return true;
+  }
+
+  if (form.calls("macro") || form.calls("macro_let")) {
+    return true;
+  }
+
+  const first = form.at(0);
+  const second = form.at(1);
+  if (
+    isIdentifierAtom(first) &&
+    first.value === "pub" &&
+    isIdentifierAtom(second) &&
+    (second.value === "macro" || second.value === "macro_let")
+  ) {
+    return true;
+  }
+
+  return false;
 };
 
 const isInlineModuleDecl = (form: Form): boolean => {
