@@ -1,0 +1,18 @@
+eff Async
+  await(tail) -> i32
+
+obj Box { value: i32 }
+
+impl Box
+  fn add(self, value: i32) -> i32
+    self.value + value
+
+pub fn main() -> i32
+  var counter = 0
+  let next = () -> Box =>
+    counter = counter + 1
+    Box { value: counter }
+  try
+    next().add(Async::await())
+  Async::await(tail):
+    tail(5)

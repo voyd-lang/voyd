@@ -327,10 +327,9 @@ impl<T> Array<T>
     var index = 0
     while index < self.count do:
       let value = __array_get(self.storage, index)
-      if pred(value) then:
-        index = index + 1
-      else:
+      if not pred(value) then:
         return false
+      index = index + 1
     true
 
   api fn index_of(self, value: T): () -> i32
