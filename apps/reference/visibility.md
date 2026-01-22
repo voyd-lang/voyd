@@ -5,7 +5,7 @@ This document defines Voyd’s visibility model for types, members, and modules,
 The goals are:
 
 * **Safe by default**: nothing leaks across modules or packages unless explicitly allowed.
-* **Ergonomic inside a package**: if you can see a type, you can usually use its non-private members.
+* **Ergonomic inside a package**: if you can see a type, you can usually use its non-`pri` members.
 * **Explicit public APIs**: only things listed in the package root (`pkg.voyd`) are visible to other packages.
 
 ---
@@ -13,8 +13,8 @@ The goals are:
 ## At a Glance
 
 * Top-level default: module-only (level 1).
-* `pub` top-level: package-visible (level 2), **not** exported to other packages.
-* Public API (level 3): only what `pkg.voyd` exports with `pub use` (or items declared there).
+* `pub` top-level (in non-`pkg.voyd` modules): package-visible (level 2).
+* Public API (level 3): only what `pkg.voyd` exports with `pub use` (and any `pub` items declared in `pkg.voyd` itself).
 * Members inherit their type’s visibility; `pri` narrows to the object; `api` makes a member exportable but not wider internally.
 
 ---
@@ -27,7 +27,7 @@ Voyd has three structural scopes:
 * **Module** – a `.voyd` file.
 * **Package** – a directory tree (`src/` + `pkg.voyd`), imported by other packages.
 
-On top of this, there are five effective *visibility levels* (conceptual, not all named explicitly):
+On top of this, there are four effective *visibility levels* (conceptual, not all named explicitly):
 
 | Level | Name            | Scope                                   |
 | ----- | --------------- | --------------------------------------- |
@@ -36,7 +36,7 @@ On top of this, there are five effective *visibility levels* (conceptual, not al
 | 2     | Package-visible | Any module in the same package          |
 | 3     | Public API      | Visible to other packages (via exports) |
 
-Levels are *monotone*: you can always move “outward” by adding markers/exports, and “inward” by marking things private/protected, but not the other way around.
+Levels are *monotone*: you can always move “outward” by adding markers/exports, and “inward” by removing those markers/exports or using `pri` to restrict members to the owning type.
 
 ---
 
@@ -73,7 +73,9 @@ Rules:
 * `pub` on a top-level item:
 
   * makes it **package-visible (level 2)**;
-  * it is *not* automatically visible to other packages.
+  * it is *not* automatically visible to other packages (exports are controlled by `pkg.voyd`).
+
+Note: `pkg.voyd` is special. A `pub` top-level item declared in `pkg.voyd` is part of the package’s public API (level 3).
 
 Other modules in the same package can import these using normal `use`:
 
@@ -93,8 +95,8 @@ Level 3 (public API) is controlled **exclusively** by the package root file, `pk
 
 > Only `pkg.voyd` can make things visible to other packages.
 
-For the standard library, `std/pkg.voyd` defines the public API, but consumers
-still import via `std::...` paths. `std::pkg` is not a user-facing module.
+For the standard library, `std/pkg.voyd` defines the public API, and consumers
+import via `std::...` paths (a shortcut for `pkg::std::...`).
 
 Example:
 
@@ -112,6 +114,7 @@ Rules:
 
 * Only items referenced in `pub use` (or `pub fn`, `pub obj` declared in `pkg.voyd` itself) are visible to other packages.
 * Submodules are re-exported from their parent modules with `pub use self::submodule` (module name) or `pub use self::submodule::all` (flattened).
+* `pub use` supports the same selectors as `use`, so you can export `all` or export specific names with a group: `pub use std::optional::fns::{ some, none }`.
 * Other packages can import using:
 
   ```voyd
@@ -172,7 +175,7 @@ Use `pri` to restrict a member to the defining type only:
 ```voyd
 pub obj Vec
   x: i32,
-  pri z: i32,    // private to Vec
+  pri z: i32,    // object-private to Vec
 
 impl Vec
   fn inc(self)
@@ -263,7 +266,7 @@ pub fn work()
   let vec = make_vec()   // OK
   vec.x                  // OK (same package)
   vec.y                  // OK
-  vec.z                  // ERROR (pri z, private)
+  vec.z                  // ERROR (pri z, object-private)
   make_hi()              // ERROR, module-private in module_a
 
 fn hi()
@@ -286,9 +289,30 @@ fn main()
   vec.double() // OK: `api` + exported
 
   vec.y        // ERROR: not `api`
-  vec.z        // ERROR: private
+  vec.z        // ERROR: object-private
   vec.triple() // ERROR: not `api` (internal-only)
 ```
+
+### 4.2 Construction and hidden fields (intentional)
+
+Voyd’s `api` marker is designed to let you keep fields/methods internal by default while still exporting a stable public API.
+
+As a consequence, if an exported type contains any non-`api` fields, external packages cannot construct it using an object literal (`Type { ... }`), because object literal construction must provide *all* fields, including the hidden ones.
+
+The intended pattern is to provide one or more `api` constructor overloads via `init`, and have those constructors set internal fields:
+
+```voyd
+pub obj Counter {
+  api value: i32,
+  pri secret: i32,
+}
+
+impl Counter
+  api fn init(value: i32) -> Counter
+    Counter { value, secret: 0 }
+```
+
+With this pattern, other packages can construct the type via `Counter(123)` (assuming `Counter` is exported from `pkg.voyd`), without being able to observe or mutate hidden fields.
 ---
 
 ## 5. `use` Behavior and Levels
@@ -313,7 +337,7 @@ Given:
 * Declaration:
 
   * type `T` is module-private or `pub`
-  * member annotated with `pri` / `private` / `api` / nothing
+  * member annotated with `pri` / `api` / nothing
   * exported or not in `pkg.voyd`
 
 Access is allowed if:
@@ -328,7 +352,7 @@ Access is allowed if:
 
 2. **Member internal visibility**
 
-   * If member is `pri` / `private`:
+   * If member is `pri`:
 
      * Caller must be within the same type.
    * Otherwise:

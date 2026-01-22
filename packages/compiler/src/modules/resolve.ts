@@ -75,6 +75,9 @@ export const matchesDependencyPath = ({
     entry.moduleSegments.length > 0 ? entry.moduleSegments.join("::") : undefined,
     entry.path.length > 0 ? entry.path.join("::") : undefined,
   ].filter((value): value is string => Boolean(value));
+  if (entry.moduleSegments.length === 1 && entry.moduleSegments[0] === "std") {
+    entryKeys.push("std::pkg");
+  }
 
   if (entry.anchorToSelf) {
     const sameNamespace = dependencyPath.namespace === currentModulePath.namespace;
@@ -163,6 +166,10 @@ const normalizeRequest = (request: ModuleRequest): ModuleRequest => {
   const last = segments.at(-1);
   if (last === "all" || last === "self") {
     segments.pop();
+  }
+
+  if (namespace === "std" && segments.length === 0) {
+    segments.push("pkg");
   }
 
   const packageName =
