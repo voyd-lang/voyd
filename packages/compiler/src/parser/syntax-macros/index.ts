@@ -11,19 +11,34 @@ import { functionalMacroExpander } from "./functional-macro-expander/index.js";
 import { testBlockMacro } from "./test-block.js";
 
 /** Caution: Order matters */
-const SYNTAX_MACROS: SyntaxMacro[] = [
+export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
   interpretWhitespace,
   primary,
   attachColonClauses,
   constructorObjectLiteral,
-  functionalMacroExpander,
+];
+
+export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
   intrinsicAttributeMacro,
   intrinsicTypeAttributeMacro,
   effectAttributeMacro,
   testBlockMacro,
 ];
 
+/** Caution: Order matters */
+const SYNTAX_MACROS: SyntaxMacro[] = [
+  ...BASE_SYNTAX_MACROS,
+  functionalMacroExpander,
+  ...POST_SYNTAX_MACROS,
+];
+
 export const expandSyntaxMacros = (
   expr: Form,
   syntaxMacros = SYNTAX_MACROS
 ): Form => syntaxMacros.reduce((ast, macro) => macro(ast), expr);
+
+export const expandBaseSyntaxMacros = (expr: Form): Form =>
+  expandSyntaxMacros(expr, BASE_SYNTAX_MACROS);
+
+export const expandPostSyntaxMacros = (expr: Form): Form =>
+  expandSyntaxMacros(expr, POST_SYNTAX_MACROS);

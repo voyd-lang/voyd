@@ -42,7 +42,9 @@ export type BuiltinsDeps = {
 
 export const fnsToSkipArgEval = new Set([
   "if",
+  "let",
   "syntax_template",
+  "`",
   "=>",
   "define",
   "=",
@@ -276,6 +278,12 @@ export const createBuiltins = (
     throw new Error(`Expected form for ${context}`);
   };
 
+  const syntaxTemplateBuiltin: BuiltinFn = ({ originalArgs, scope }) => {
+    const expanded = expandSyntaxTemplate(originalArgs, scope);
+    if (expanded.length === 1) return cloneExpr(expanded[0]!);
+    return new Form(expanded.map(cloneExpr));
+  };
+
   return {
     block: ({ args }) => {
       const value = args.at(-1);
@@ -290,6 +298,25 @@ export const createBuiltins = (
     define: ({ originalArgs, scope }) => {
       const identifier = expectIdentifier(originalArgs.at(0), "define target");
       const value = evalMacroExpr(cloneExpr(originalArgs.at(1)!), scope);
+      scope.defineVariable({
+        name: identifier.clone(),
+        value: cloneMacroEvalResult(value),
+        mutable: false,
+      });
+      return new IdentifierAtom("nop");
+    },
+    let: ({ originalArgs, scope }) => {
+      const assignment = expectForm(originalArgs.at(0), "let assignment");
+      const operator = assignment.at(0);
+      if (!isIdentifierAtom(operator) || operator.value !== "=") {
+        throw new Error("let expects an assignment expression");
+      }
+      const identifier = expectIdentifier(assignment.at(1), "let identifier");
+      const valueExpr = assignment.at(2);
+      if (!valueExpr) {
+        throw new Error("let requires an initializer");
+      }
+      const value = evalMacroExpr(cloneExpr(valueExpr), scope);
       scope.defineVariable({
         name: identifier.clone(),
         value: cloneMacroEvalResult(value),
@@ -381,11 +408,8 @@ export const createBuiltins = (
       ).clone();
       return variable;
     },
-    syntax_template: ({ originalArgs, scope }) => {
-      const expanded = expandSyntaxTemplate(originalArgs, scope);
-      if (expanded.length === 1) return cloneExpr(expanded[0]!);
-      return new Form(expanded.map(cloneExpr));
-    },
+    syntax_template: syntaxTemplateBuiltin,
+    "`": syntaxTemplateBuiltin,
     if: ({ originalArgs, scope }) => {
       const [condition, truthy, falsy] = originalArgs;
       if (!condition || !truthy) {

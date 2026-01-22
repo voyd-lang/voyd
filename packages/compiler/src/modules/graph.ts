@@ -5,7 +5,7 @@ import {
   formCallsInternal,
   isForm,
   isIdentifierAtom,
-  parse,
+  parseBase,
 } from "../parser/index.js";
 import { toSourceSpan } from "../semantics/utils.js";
 import {
@@ -25,6 +25,7 @@ import type {
   ModulePath,
   ModuleRoots,
 } from "./types.js";
+import { expandModuleMacros } from "./macro-expansion.js";
 import type { SourceSpan } from "../semantics/ids.js";
 
 type BuildGraphOptions = {
@@ -153,8 +154,9 @@ export const buildModuleGraph = async ({
   }
 
   const diagnostics = moduleDiagnostics.map(moduleDiagnosticToDiagnostic);
-
-  return { entry: entryModule.node.id, modules, diagnostics };
+  const graph = { entry: entryModule.node.id, modules, diagnostics };
+  expandModuleMacros(graph);
+  return graph;
 };
 
 const addModuleTree = (
@@ -196,7 +198,7 @@ const loadFileModule = async ({
   host: ModuleHost;
 }): Promise<LoadedModule> => {
   const source = await host.readFile(filePath);
-  const ast = parse(source, filePath);
+  const ast = parseBase(source, filePath);
 
   const info = collectModuleInfo({
     modulePath,

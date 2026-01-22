@@ -20,16 +20,34 @@ import { evalMacroExpr, expandMacroCall } from "./evaluator.js";
 import type { MacroDefinition, MacroVariableBinding } from "./types.js";
 import { nextMacroId } from "./macro-id.js";
 
-export const functionalMacroExpander: SyntaxMacro = (form: Form): Form => {
-  const scope = new MacroScope();
-  return ensureForm(expandExpr(form, scope));
+type MacroDefinitionInput = {
+  signature: Form;
+  bodyExpressions: Expr[];
+  visibility: "pub" | "module";
 };
 
-const expandExpr = (expr: Expr, scope: MacroScope): Expr => {
+export const functionalMacroExpander: SyntaxMacro = (form: Form): Form =>
+  expandFunctionalMacros(form).form;
+
+export const expandFunctionalMacros = (
+  form: Form,
+  options: { scope?: MacroScope } = {}
+): { form: Form; exports: MacroDefinition[] } => {
+  const scope = options.scope ?? new MacroScope();
+  const exports: MacroDefinition[] = [];
+  return { form: ensureForm(expandExpr(form, scope, exports)), exports };
+};
+
+const expandExpr = (
+  expr: Expr,
+  scope: MacroScope,
+  exports: MacroDefinition[]
+): Expr => {
   if (!isForm(expr)) return expr;
 
-  if (expr.calls("macro")) {
-    return expandMacroDefinition(expr, scope);
+  const macroDefinition = parseMacroDefinition(expr);
+  if (macroDefinition) {
+    return expandMacroDefinition(macroDefinition, scope, exports);
   }
 
   if (expr.calls("macro_let")) {
@@ -40,13 +58,17 @@ const expandExpr = (expr: Expr, scope: MacroScope): Expr => {
   const macro = isIdentifierAtom(head) ? scope.getMacro(head.value) : undefined;
   if (macro) {
     const expanded = expandMacroCall(expr, macro, scope);
-    return expandExpr(expanded, scope);
+    return expandExpr(expanded, scope, exports);
   }
 
-  return expandForm(expr, scope);
+  return expandForm(expr, scope, exports);
 };
 
-const expandForm = (form: Form, scope: MacroScope): Form => {
+const expandForm = (
+  form: Form,
+  scope: MacroScope,
+  exports: MacroDefinition[]
+): Form => {
   const head = form.at(0);
   const bodyScope = createsScopeFor(head) ? scope.child() : scope;
   const elements = form.toArray();
@@ -58,14 +80,18 @@ const expandForm = (form: Form, scope: MacroScope): Form => {
       return;
     }
 
-    result.push(expandExpr(child, bodyScope));
+    result.push(expandExpr(child, bodyScope, exports));
   });
 
   return recreateForm(form, result);
 };
 
-const expandMacroDefinition = (form: Form, scope: MacroScope): Expr => {
-  const signature = expectForm(form.at(1), "macro signature");
+const expandMacroDefinition = (
+  definition: MacroDefinitionInput,
+  scope: MacroScope,
+  exports: MacroDefinition[]
+): Expr => {
+  const signature = definition.signature;
   const name = expectIdentifier(signature.at(0), "macro name");
   const parameters = signature
     .toArray()
@@ -77,17 +103,18 @@ const expandMacroDefinition = (form: Form, scope: MacroScope): Expr => {
       ).clone()
     );
 
-  const bodyExpressions = form.toArray().slice(2).map(cloneExpr);
-
   const macro: MacroDefinition = {
     name: name.clone(),
     parameters,
-    body: bodyExpressions,
+    body: definition.bodyExpressions,
     scope,
     id: new IdentifierAtom(`${name.value}#${nextMacroId()}`),
   };
 
   scope.defineMacro(macro);
+  if (definition.visibility === "pub") {
+    exports.push(macro);
+  }
   return renderFunctionalMacro(macro);
 };
 
@@ -123,3 +150,32 @@ const createsScopeFor = (expr: Expr | undefined): boolean =>
 
 const isModuleName = (head: Expr | undefined, index: number): boolean =>
   isIdentifierAtom(head) && head.value === "module" && index === 1;
+
+const parseMacroDefinition = (form: Form): MacroDefinitionInput | null => {
+  let index = 0;
+  let visibility: MacroDefinitionInput["visibility"] = "module";
+  const first = form.at(0);
+
+  if (isIdentifierAtom(first) && first.value === "pub") {
+    visibility = "pub";
+    index = 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierAtom(keyword) || keyword.value !== "macro") {
+    return null;
+  }
+
+  const signatureExpr = form.at(index + 1);
+  if (!signatureExpr) {
+    throw new Error("macro missing signature");
+  }
+
+  const signature = expectForm(signatureExpr, "macro signature");
+  const bodyExpressions = form
+    .toArray()
+    .slice(index + 2)
+    .map(cloneExpr);
+
+  return { signature, bodyExpressions, visibility };
+};
