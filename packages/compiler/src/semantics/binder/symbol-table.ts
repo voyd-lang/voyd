@@ -12,6 +12,8 @@ interface ScopeBucket {
   nameIndex: Map<string, SymbolId[]>;
 }
 
+const RESERVED_SYMBOL_NAMES = new Set(["void"]);
+
 const cloneScopeInfo = (info: ScopeInfo): ScopeInfo => ({ ...info });
 
 const cloneSymbolRecord = (symbol: SymbolRecord): SymbolRecord => ({
@@ -94,6 +96,9 @@ export class SymbolTable {
     symbol: Omit<SymbolRecord, "id" | "scope">,
     scope: ScopeId = this.currentScope()
   ): SymbolId {
+    if (RESERVED_SYMBOL_NAMES.has(symbol.name)) {
+      throw new Error(`cannot declare reserved identifier ${symbol.name}`);
+    }
     const id = this.nextSymbol++;
     const record: SymbolRecord = { ...symbol, id, scope };
     this.symbolRecords[id] = record;

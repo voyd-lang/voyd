@@ -210,6 +210,11 @@ describe("next codegen", () => {
     expect(main()).toBe(55);
   });
 
+  it("coerces declared bindings to annotated optional types", () => {
+    const main = loadMain("optional_binding_coercion.voyd");
+    expect(main()).toBe(5);
+  });
+
   it("handles functions declared with `=` syntax and calls them", () => {
     const instance = loadWasmInstance("function_equals_syntax.voyd");
 

@@ -142,12 +142,10 @@ export const compilePatternInitialization = ({
     ctx,
     typeInstanceId
   );
+  const targetTypeId = getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
   const binding = options.declare
-    ? declareLocalWithTypeId(pattern.symbol, initializerType, ctx, fnCtx)
+    ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
-  const targetTypeId = options.declare
-    ? initializerType
-    : getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
   const value = compileExpr({ exprId: initializer, ctx, fnCtx });
 
   ops.push(
@@ -185,12 +183,10 @@ export const compilePatternInitializationFromValue = ({
   }
 
   if (pattern.kind === "identifier") {
+    const targetTypeId = getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
     const binding = options.declare
-      ? declareLocalWithTypeId(pattern.symbol, valueTypeId, ctx, fnCtx)
+      ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(pattern.symbol, ctx, fnCtx);
-    const targetTypeId = options.declare
-      ? valueTypeId
-      : getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
     ops.push(
       storeIntoBinding({
         binding,
@@ -221,12 +217,10 @@ export const compilePatternInitializationFromValue = ({
   });
 
   pending.forEach(({ pattern: subPattern, tempIndex, tempType, typeId }) => {
+    const targetTypeId = getSymbolTypeId(subPattern.symbol, ctx, typeInstanceId);
     const binding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, typeId, ctx, fnCtx)
+      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
-    const targetTypeId = options.declare
-      ? typeId
-      : getSymbolTypeId(subPattern.symbol, ctx, typeInstanceId);
     ops.push(
       storeIntoBinding({
         binding,
@@ -275,12 +269,10 @@ const compileTuplePattern = ({
     ops,
   });
   pending.forEach(({ pattern: subPattern, tempIndex, tempType, typeId }) => {
+    const targetTypeId = getSymbolTypeId(subPattern.symbol, ctx, typeInstanceId);
     const binding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, typeId, ctx, fnCtx)
+      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
-    const targetTypeId = options.declare
-      ? typeId
-      : getSymbolTypeId(subPattern.symbol, ctx, typeInstanceId);
     ops.push(
       storeIntoBinding({
         binding,
@@ -329,12 +321,10 @@ const compileDestructurePattern = ({
     ops,
   });
   pending.forEach(({ pattern: subPattern, tempIndex, tempType, typeId }) => {
+    const targetTypeId = getSymbolTypeId(subPattern.symbol, ctx, typeInstanceId);
     const binding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, typeId, ctx, fnCtx)
+      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
-    const targetTypeId = options.declare
-      ? typeId
-      : getSymbolTypeId(subPattern.symbol, ctx, typeInstanceId);
     ops.push(
       storeIntoBinding({
         binding,

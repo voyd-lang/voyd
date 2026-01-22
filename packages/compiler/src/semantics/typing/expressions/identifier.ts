@@ -20,15 +20,6 @@ export const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
   }
 
   const record = ctx.symbolTable.getSymbol(symbol);
-  if (record.name === "void") {
-    const voidType = ctx.primitives.void;
-    ctx.valueTypes.set(symbol, voidType);
-    if (!ctx.table.getSymbolScheme(symbol)) {
-      const scheme = ctx.arena.newScheme([], voidType);
-      ctx.table.setSymbolScheme(symbol, scheme);
-    }
-    return voidType;
-  }
   const metadata = (record.metadata ?? {}) as {
     intrinsic?: boolean;
     intrinsicName?: string;

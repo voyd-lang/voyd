@@ -9,7 +9,6 @@ import type {
 import type { ProgramFunctionInstanceId } from "../semantics/ids.js";
 import { compileExpression } from "./expressions/index.js";
 import { wasmTypeFor } from "./types.js";
-import { wasmSignatureTypeFor } from "./signature-types.js";
 import {
   isPackageVisible,
   isPublicVisibility,
@@ -153,14 +152,14 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
       }
 
       const userParamTypes = descriptor.parameters.map((param) =>
-        wasmSignatureTypeFor(param.type, ctx, new Set())
+        wasmTypeFor(param.type, ctx, new Set(), "signature")
       );
       const paramTypes = effectful
         ? [handlerParamType, ...userParamTypes]
         : userParamTypes;
       const resultType = effectful
         ? ctx.effectsRuntime.outcomeType
-        : wasmSignatureTypeFor(descriptor.returnType, ctx, new Set());
+        : wasmTypeFor(descriptor.returnType, ctx, new Set(), "signature");
 
       const metadata: FunctionMetadata = {
         moduleId: ctx.moduleId,
@@ -273,14 +272,14 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         }
 
         const userParamTypes = instantiatedTypeDesc.parameters.map((param) =>
-          wasmSignatureTypeFor(param.type, ctx, new Set())
+          wasmTypeFor(param.type, ctx, new Set(), "signature")
         );
         const paramTypes = effectful
           ? [handlerParamType, ...userParamTypes]
           : userParamTypes;
         const resultType = effectful
           ? ctx.effectsRuntime.outcomeType
-          : wasmSignatureTypeFor(instantiatedTypeDesc.returnType, ctx, new Set());
+          : wasmTypeFor(instantiatedTypeDesc.returnType, ctx, new Set(), "signature");
       const metadata: FunctionMetadata = {
           moduleId: ctx.moduleId,
           symbol: imp.local,
