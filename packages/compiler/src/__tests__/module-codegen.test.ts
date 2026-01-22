@@ -6,6 +6,7 @@ import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleHost } from "../modules/types.js";
 import { compileProgram } from "../pipeline.js";
 import { monomorphizeProgram } from "../semantics/linking.js";
+import { symbolRefKey } from "../semantics/typing/symbol-ref-utils.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
@@ -129,7 +130,9 @@ pub fn main() -> i32
     });
     const instantiations = monomorphized.moduleTyping
       .get("std::util")
-      ?.functionInstantiationInfo.get(idSymbol);
+      ?.functionInstantiationInfo.get(
+        symbolRefKey({ moduleId: utilSemantics.moduleId, symbol: idSymbol })
+      );
     expect(instantiations?.size ?? 0).toBeGreaterThan(0);
   });
 

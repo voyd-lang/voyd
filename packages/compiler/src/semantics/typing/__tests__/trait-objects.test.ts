@@ -82,4 +82,10 @@ describe("trait objects", () => {
       expect(typing.callTraitDispatches.has(doDoubleCall.id)).toBe(true);
     }
   });
+
+  it("infers trait method type args from trait object receivers", () => {
+    expect(() =>
+      semanticsPipeline(loadAst("trait_object_dispatch_infer_return.voyd"))
+    ).not.toThrow();
+  });
 });

@@ -30,6 +30,7 @@ import type { Diagnostic } from "../ids.js";
 import type { SymbolRef } from "./symbol-ref.js";
 
 export type TypeCheckMode = "relaxed" | "strict";
+export type SymbolRefKey = string;
 
 export interface TypingInputs {
   symbolTable: SymbolTable;
@@ -69,7 +70,7 @@ export interface TypingResult {
   callInstanceKeys: ReadonlyMap<HirExprId, string>;
   callTraitDispatches: ReadonlySet<HirExprId>;
   functionInstantiationInfo: ReadonlyMap<
-    SymbolId,
+    SymbolRefKey,
     ReadonlyMap<string, readonly TypeId[]>
   >;
   functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
@@ -138,7 +139,7 @@ export class FunctionStore {
   #signatures = new Map<SymbolId, FunctionSignature>();
   #bySymbol = new Map<SymbolId, HirFunction>();
   #instances = new Map<string, TypeId>();
-  #instantiationInfo = new Map<SymbolId, Map<string, readonly TypeId[]>>();
+  #instantiationInfo = new Map<SymbolRefKey, Map<string, readonly TypeId[]>>();
   #instanceExprTypes = new Map<string, Map<HirExprId, TypeId>>();
   #activeInstantiations = new Set<string>();
 
@@ -192,14 +193,14 @@ export class FunctionStore {
   }
 
   recordInstantiation(
-    symbol: SymbolId,
+    symbolRefKey: SymbolRefKey,
     key: string,
     typeArgs: readonly TypeId[]
   ): void {
-    let bySymbol = this.#instantiationInfo.get(symbol);
+    let bySymbol = this.#instantiationInfo.get(symbolRefKey);
     if (!bySymbol) {
       bySymbol = new Map();
-      this.#instantiationInfo.set(symbol, bySymbol);
+      this.#instantiationInfo.set(symbolRefKey, bySymbol);
     }
     if (!bySymbol.has(key)) {
       bySymbol.set(key, typeArgs);
@@ -217,10 +218,10 @@ export class FunctionStore {
     return new Map(this.#instances);
   }
 
-  snapshotInstantiationInfo(): Map<SymbolId, Map<string, readonly TypeId[]>> {
+  snapshotInstantiationInfo(): Map<SymbolRefKey, Map<string, readonly TypeId[]>> {
     return new Map(
-      Array.from(this.#instantiationInfo.entries()).map(([symbol, info]) => [
-        symbol,
+      Array.from(this.#instantiationInfo.entries()).map(([symbolRefKey, info]) => [
+        symbolRefKey,
         new Map(info),
       ])
     );

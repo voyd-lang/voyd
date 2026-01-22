@@ -1,6 +1,6 @@
 import { DiagnosticEmitter } from "../diagnostics/index.js";
 import { createTypingState } from "./typing/context.js";
-import type { DependencySemantics, TypingContext } from "./typing/types.js";
+import type { DependencySemantics, SymbolRefKey, TypingContext } from "./typing/types.js";
 import {
   typeGenericFunctionBody,
 } from "./typing/expressions/call.js";
@@ -12,6 +12,7 @@ import type { HirExprId, SymbolId, TypeId } from "./ids.js";
 import { buildProgramSymbolArena, type SymbolRef as ProgramSymbolRef } from "./program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "./canonical-symbol-ref.js";
 import type { SymbolRef as TypingSymbolRef } from "./typing/symbol-ref.js";
+import { parseSymbolRefKey } from "./typing/symbol-ref-utils.js";
 
 export const monomorphizeProgram = ({
   modules,
@@ -25,7 +26,7 @@ export const monomorphizeProgram = ({
     string,
     {
       functionInstantiationInfo: ReadonlyMap<
-        SymbolId,
+        SymbolRefKey,
         ReadonlyMap<string, readonly TypeId[]>
       >;
       functionInstanceExprTypes: ReadonlyMap<
@@ -124,33 +125,21 @@ export const monomorphizeProgram = ({
       });
     });
 
-    const sortedLocalSymbols = Array.from(
+    const sortedRefKeys = Array.from(
       caller.typing.functionInstantiationInfo.keys()
-    ).sort((a, b) => a - b);
-    sortedLocalSymbols.forEach((localSymbol) => {
+    ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    sortedRefKeys.forEach((refKey) => {
       const instantiations =
-        caller.typing.functionInstantiationInfo.get(localSymbol);
+        caller.typing.functionInstantiationInfo.get(refKey);
       if (!instantiations) {
         return;
       }
-      const metadata = (getSymbolTable(caller).getSymbol(localSymbol)
-        .metadata ?? {}) as
-        | { import?: { moduleId?: unknown; symbol?: unknown } }
-        | undefined;
-      const importModuleId = metadata?.import?.moduleId;
-      const importSymbol = metadata?.import?.symbol;
-
-      if (
-        typeof importModuleId !== "string" ||
-        typeof importSymbol !== "number"
-      ) {
+      const parsed = parseSymbolRefKey(refKey);
+      if (!parsed || parsed.moduleId === caller.moduleId) {
         return;
       }
 
-      const canonicalCallee = canonicalSymbolRef({
-        moduleId: importModuleId,
-        symbol: importSymbol,
-      });
+      const canonicalCallee = canonicalSymbolRef(parsed);
       const callee = semantics.get(canonicalCallee.moduleId);
       const calleeCtx = callee ? typingContextFor(callee.moduleId) : undefined;
       if (!callee || !calleeCtx) {
@@ -229,7 +218,7 @@ export const monomorphizeProgram = ({
     string,
     {
       functionInstantiationInfo: ReadonlyMap<
-        SymbolId,
+        SymbolRefKey,
         ReadonlyMap<string, readonly TypeId[]>
       >;
       functionInstanceExprTypes: ReadonlyMap<

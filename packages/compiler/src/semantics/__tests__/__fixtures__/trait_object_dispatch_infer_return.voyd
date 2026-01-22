@@ -1,0 +1,27 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+trait Iterator<T>
+  fn next(~self) -> Optional<T>
+
+obj Box<T> {
+  value: Optional<T>
+}
+
+impl<T> Iterator<T> for Box<T>
+  fn next(~self) -> Optional<T>
+    self.value
+
+pub fn main() -> i32
+  var iter: Iterator<i32> = ~Box<i32> { value: Some<i32> { value: 42 } }
+  let value = (~iter).next()
+  value.match
+    Some<i32>:
+      value.value
+    None:
+      0

@@ -9,6 +9,7 @@ import type {
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
+import { symbolRefKey } from "../symbol-ref-utils.js";
 
 describe("nested generic instantiation", () => {
   it("isolates expression typing when a generic calls another generic", () => {
@@ -33,8 +34,9 @@ describe("nested generic instantiation", () => {
       return;
     }
 
-    const combineInstantiations =
-      typing.functionInstantiationInfo.get(combineSymbol);
+    const combineInstantiations = typing.functionInstantiationInfo.get(
+      symbolRefKey({ moduleId: semantics.moduleId, symbol: combineSymbol })
+    );
     expect(combineInstantiations).toBeDefined();
     if (!combineInstantiations) {
       return;

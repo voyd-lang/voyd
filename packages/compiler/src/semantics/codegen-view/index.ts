@@ -29,6 +29,7 @@ import type { SymbolRef as TypingSymbolRef } from "../typing/symbol-ref.js";
 import type {
   ObjectTemplate,
   ObjectTypeInfo,
+  SymbolRefKey,
   TraitImplInstance,
   TraitMethodImpl,
 } from "../typing/types.js";
@@ -39,6 +40,7 @@ import {
 import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
+import { parseSymbolRefKey } from "../typing/symbol-ref-utils.js";
 
 export type { SymbolRef } from "../program-symbol-arena.js";
 
@@ -336,7 +338,7 @@ export const buildProgramCodegenView = (
     moduleTyping?: ReadonlyMap<
       string,
       {
-        functionInstantiationInfo: ReadonlyMap<SymbolId, ReadonlyMap<string, readonly TypeId[]>>;
+        functionInstantiationInfo: ReadonlyMap<SymbolRefKey, ReadonlyMap<string, readonly TypeId[]>>;
         functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
         callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
         callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
@@ -838,6 +840,26 @@ export const buildProgramCodegenView = (
   };
 
   stableModules.forEach((mod) => {
+    const instantiationSources = [
+      moduleTyping.get(mod.moduleId)?.functionInstantiationInfo,
+      mod.typing.functionInstantiationInfo,
+    ];
+    instantiationSources.forEach((info) => {
+      info?.forEach((instantiations, refKey) => {
+        const parsed = parseSymbolRefKey(refKey);
+        if (!parsed || parsed.moduleId !== mod.moduleId) {
+          return;
+        }
+        const functionId = getProgramFunctionId(parsed);
+        if (functionId === undefined) {
+          return;
+        }
+        instantiations.forEach((typeArgs) => {
+          recordInstantiation(functionId, typeArgs);
+        });
+      });
+    });
+
     const functionSymbols = Array.from(mod.typing.functions.signatures, ([symbol]) => symbol).sort(
       (a, b) => a - b
     );
@@ -848,15 +870,6 @@ export const buildProgramCodegenView = (
       if (functionId === undefined) {
         return;
       }
-      const instantiationSources = [
-        moduleTyping.get(mod.moduleId)?.functionInstantiationInfo.get(symbol),
-        mod.typing.functionInstantiationInfo.get(symbol),
-      ];
-      instantiationSources.forEach((info) => {
-        info?.forEach((typeArgs) => {
-          recordInstantiation(functionId, typeArgs);
-        });
-      });
       if (typeParamCount === 0) {
         recordInstantiation(functionId, []);
       }

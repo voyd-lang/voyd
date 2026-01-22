@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
+import { symbolRefKey } from "../symbol-ref-utils.js";
 
 describe("trait implementations", () => {
   it("registers trait types and allows impls that satisfy required methods", () => {
@@ -46,7 +47,9 @@ describe("trait implementations", () => {
     const scaleSymbol = symbolTable.resolve("scale", symbolTable.rootScope);
     expect(scaleSymbol).toBeDefined();
     if (!scaleSymbol) return;
-    const instantiations = typing.functionInstantiationInfo.get(scaleSymbol);
+    const instantiations = typing.functionInstantiationInfo.get(
+      symbolRefKey({ moduleId: semantics.moduleId, symbol: scaleSymbol })
+    );
     expect(instantiations?.size).toBeGreaterThan(0);
   });
 
@@ -58,7 +61,9 @@ describe("trait implementations", () => {
     const sumSymbol = symbolTable.resolve("sum", symbolTable.rootScope);
     expect(sumSymbol).toBeDefined();
     if (!sumSymbol) return;
-    const instantiations = typing.functionInstantiationInfo.get(sumSymbol);
+    const instantiations = typing.functionInstantiationInfo.get(
+      symbolRefKey({ moduleId: semantics.moduleId, symbol: sumSymbol })
+    );
     expect(instantiations?.size).toBeGreaterThanOrEqual(2);
   });
 });
