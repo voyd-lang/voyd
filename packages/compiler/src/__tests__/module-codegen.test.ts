@@ -53,6 +53,40 @@ pub fn sub(a: i32, b: i32) -> i32
     expect((exports.delta as () => number)()).toBe(5);
   });
 
+  it("supports dot calls to imported instance methods without importing the member", async () => {
+    const root = resolve("/proj/src");
+    const std = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use std::{ Box }
+
+pub fn main() -> i32
+  Box { value: 7 }.get()
+`,
+      [`${std}${sep}pkg.voyd`]: "pub use std::box::{ Box }",
+      [`${std}${sep}box.voyd`]: `pub obj Box {
+  api value: i32
+}
+
+impl Box
+  api fn get(self): () -> i32
+    self.value
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root, std },
+      host,
+    });
+
+    if (result.diagnostics.length > 0) {
+      throw new Error(JSON.stringify(result.diagnostics, null, 2));
+    }
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(7);
+  });
+
   it("links imported generic instantiations across modules", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");

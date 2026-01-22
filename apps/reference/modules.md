@@ -30,7 +30,7 @@ src/math/
 
 If a directory exists with the module name, every file inside that directory becomes a submodule.
 
-Package root: `pkg.voyd` is the package entry that defines what is exported to other packages (via `pub use` / top-level `pub` declarations). Other modules are normal.
+Package root: `pkg.voyd` is the package entry that defines what is exported to other packages (via `pub use` / top-level `pub` declarations). Other modules are normal: `pub` in those modules is only package-visible.
 If `pkg.voyd` defines `pub fn main`, that function is the executable entry point; otherwise the package is a library.
 
 ---
@@ -41,7 +41,7 @@ If `pkg.voyd` defines `pub fn main`, that function is the executable entry point
 
 ```voyd
 // src/internal.voyd
-api fn hey()
+pub fn hey()
   "hey"
 ```
 
@@ -62,7 +62,7 @@ src/
 ```
 
 `internal/hey.voyd` defines the module `internal::hey` automatically.
-To expose a submodule from it's parent, export it with `pub use self::<submodule-name>
+To expose a submodule from its parent, export it with `pub use self::<submodule-name>`.
 
 ```voyd
 // src/internal.voyd
@@ -89,7 +89,7 @@ For small cases you may define modules directly inside a file:
 // src/main.voyd
 
 mod internal
-  api fn hey()
+  pub fn hey()
     "hey"
 
 internal::hey()
@@ -150,9 +150,21 @@ use std::log
 use pkg::json
 ```
 
-The standard library's public API is defined in `std/pkg.voyd`, but consumers
-import it directly through `std::...` paths. `std::pkg` is not a user-facing
-module path.
+Installed packages are imported via `pkg::<package_name>`. The package root
+module is `pkg.voyd`, which defines the public API with `pub use` and top-level
+`pub` declarations.
+
+The standard library is always installed as the `std` package. `std::...` is a
+shortcut for `pkg::std::...`, so both paths resolve to the same modules and
+exports from `std/pkg.voyd`.
+
+```voyd
+use std::{ some }
+use pkg::json::{ encode }
+```
+
+Re-exporting a module from `my_lib/src/pkg.voyd` (e.g. `pub use my_submod`) makes
+`use pkg::my_lib::my_subumod` possible for consumers.
 
 ## **Importing relative to the source root**
 
@@ -236,7 +248,7 @@ Voyd is safe-by-default.
 | **(none)** | Private to the defining module                   |
 | **pub**    | Package-visible (any module in the same package) |
 
-Public API (visible to other packages) comes only from `pkg.voyd` exports.
+Public API (visible to other packages) comes only from `pkg.voyd` exports. `pkg.voyd` is special: a `pub` item declared in `pkg.voyd` is public API, while `pub` elsewhere is only package-visible.
 
 Members (the methods and fields of a type) have their own markers for added
 safety
@@ -245,7 +257,7 @@ safety
 | ---------- | ---------------------------------------------------------- |
 | **pri**    | Private to the type, only accessible from internal methods |
 | **(none)** | Package visible when parent type is `pub`                  |
-| **api**    | Public API visible                                         |
+| **api**    | Eligible for public API (when the parent type is exported) |
 
 Note that even if a type is exported from `pkg.voyd` only members marked with
 `api` will be visible to other packages.
@@ -271,7 +283,7 @@ impl Vec
     Vec { x: fill, y: fill, z: fill }
 ```
 
-To expose `Vec` to other export them from `pkg.voyd`:
+To expose `Vec` to other packages, export it from `pkg.voyd`:
 
 ```voyd
 // my_lib/src/pkg.voyd
@@ -286,6 +298,7 @@ pub fn main()
   let v = Vec(1)
   v.x // Ok, x is part of the api
   v.y // Error, y is not part of the API
+```
 ---
 
 # **Exporting From a Module**
@@ -416,14 +429,13 @@ fn start_api()
 
 ### **Module commands**
 
-* `pub` — Export with full visibility
-* `api` — Export within package only
+* `pub` — Make top-level items package-visible (exports to other packages come from `pkg.voyd`)
 * `mod` — Define an inline module
 * `use` — Bring modules into scope
 
 ### **Path keywords**
 
-* `all` — Import/export all public items from a module
+* `all` — Import/export all `pub` items from a module
 * `self` — Refer to the module itself inside group imports
 * `std` — Standard library
 * `src` — Source root

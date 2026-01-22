@@ -336,4 +336,88 @@ pub fn read() -> i32
       })
     ).not.toThrow();
   });
+
+  it("allows std root imports from pkg exports", () => {
+    const mainPath: ModulePath = { namespace: "src", segments: ["std-root"] };
+    const mainSource = `
+use std::{ id }
+
+pub fn read() -> i32
+  id()
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, stdPkgPath)],
+    });
+
+    expect(() =>
+      semanticsPipeline({
+        module: main.module,
+        graph: main.graph,
+        exports: new Map([
+          [stdPkg.module.id, stdPkgSemantics.exports],
+          [stdUtil.module.id, stdUtilSemantics.exports],
+        ]),
+        dependencies: new Map([
+          [stdPkg.module.id, stdPkgSemantics],
+          [stdUtil.module.id, stdUtilSemantics],
+        ]),
+      })
+    ).not.toThrow();
+  });
+
+  it("allows std module imports when pkg exports the module", () => {
+    const moduleStdPkgSource = `
+pub use util
+`;
+    const moduleStdPkgAst = parse(
+      moduleStdPkgSource,
+      modulePathToString(stdPkgPath)
+    );
+    const moduleStdPkg = buildModule({
+      source: moduleStdPkgSource,
+      path: stdPkgPath,
+      ast: moduleStdPkgAst,
+      dependencies: [dependencyForUse(moduleStdPkgAst, stdUtilPath)],
+    });
+    const moduleStdPkgSemantics = semanticsPipeline({
+      module: moduleStdPkg.module,
+      graph: moduleStdPkg.graph,
+      exports: new Map([[stdUtil.module.id, stdUtilSemantics.exports]]),
+      dependencies: new Map([[stdUtil.module.id, stdUtilSemantics]]),
+    });
+
+    const mainPath: ModulePath = { namespace: "src", segments: ["std-module"] };
+    const mainSource = `
+use std::util::{ id }
+
+pub fn read() -> i32
+  id()
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, stdUtilPath)],
+    });
+
+    expect(() =>
+      semanticsPipeline({
+        module: main.module,
+        graph: main.graph,
+        exports: new Map([
+          [moduleStdPkg.module.id, moduleStdPkgSemantics.exports],
+          [stdUtil.module.id, stdUtilSemantics.exports],
+        ]),
+        dependencies: new Map([
+          [moduleStdPkg.module.id, moduleStdPkgSemantics],
+          [stdUtil.module.id, stdUtilSemantics],
+        ]),
+      })
+    ).not.toThrow();
+  });
 });

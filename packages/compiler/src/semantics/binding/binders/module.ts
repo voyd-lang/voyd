@@ -11,16 +11,10 @@ import {
 import { bindFunctionDecl } from "./function.js";
 import { bindObjectDecl } from "./object.js";
 import { bindTypeAlias } from "./type-alias.js";
-import {
-  bindTraitDecl,
-} from "./trait.js";
+import { bindTraitDecl } from "./trait.js";
 import { bindImplDecl, flushPendingStaticMethods } from "./impl.js";
 import { bindEffectDecl } from "./effect.js";
-import type {
-  BindingContext,
-  BoundUseEntry,
-  BoundImport,
-} from "../types.js";
+import type { BindingContext, BoundUseEntry, BoundImport } from "../types.js";
 import {
   diagnosticFromCode,
   type DiagnosticParams,
@@ -48,12 +42,14 @@ import {
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
 
+type ModuleMetadata =
+  | { import?: { moduleId?: unknown; symbol?: unknown } | undefined }
+  | undefined;
+
 const importedSymbolTargetFrom = (
-  source?: Record<string, unknown>
+  source?: Record<string, unknown>,
 ): { moduleId: string; symbol: SymbolId } | undefined => {
-  const meta = source as
-    | { import?: { moduleId?: unknown; symbol?: unknown } | undefined }
-    | undefined;
+  const meta = source as ModuleMetadata;
   const moduleId = meta?.import?.moduleId;
   const symbol = meta?.import?.symbol;
   return typeof moduleId === "string" && typeof symbol === "number"
@@ -63,7 +59,7 @@ const importedSymbolTargetFrom = (
 
 const exportTargetFor = (
   entry: ModuleExportEntry,
-  ctx: BindingContext
+  ctx: BindingContext,
 ): { moduleId: string; symbol: SymbolId } | undefined => {
   const dependency = ctx.dependencies.get(entry.moduleId);
   if (!dependency) {
@@ -71,12 +67,21 @@ const exportTargetFor = (
   }
   const sourceMetadata = dependency.symbolTable.getSymbol(entry.symbol)
     .metadata as Record<string, unknown> | undefined;
+  if (entry.kind === "module") {
+    const moduleId = importedModuleIdFrom(sourceMetadata);
+    if (moduleId) {
+      return { moduleId, symbol: entry.symbol };
+    }
+  }
   const imported = importedSymbolTargetFrom(sourceMetadata);
   if (imported) {
     return imported;
   }
   return { moduleId: entry.moduleId, symbol: entry.symbol };
 };
+
+const isSameOrDescendantModuleId = (moduleId: string, parent: string): boolean =>
+  moduleId === parent || moduleId.startsWith(`${parent}::`);
 
 const stdPkgExportsFor = ({
   moduleId,
@@ -99,8 +104,8 @@ const stdPkgExportsFor = ({
       continue;
     }
     if (
-      target.moduleId === moduleId ||
-      target.moduleId.startsWith(`${moduleId}::`)
+      isSameOrDescendantModuleId(target.moduleId, moduleId) ||
+      isSameOrDescendantModuleId(moduleId, target.moduleId)
     ) {
       filtered.set(entry.name, entry);
     }
@@ -110,12 +115,14 @@ const stdPkgExportsFor = ({
 
 const isStdPkgExportedTarget = ({
   target,
+  importedFromModuleId,
   ctx,
 }: {
   target: { moduleId: string; symbol: SymbolId };
+  importedFromModuleId: string;
   ctx: BindingContext;
 }): boolean => {
-  const exports = stdPkgExportsFor({ moduleId: target.moduleId, ctx });
+  const exports = stdPkgExportsFor({ moduleId: importedFromModuleId, ctx });
   if (!exports) {
     return false;
   }
@@ -123,6 +130,12 @@ const isStdPkgExportedTarget = ({
     const entryTarget = exportTargetFor(entry, ctx);
     if (!entryTarget) {
       continue;
+    }
+    if (
+      entry.kind === "module" &&
+      isSameOrDescendantModuleId(importedFromModuleId, entryTarget.moduleId)
+    ) {
+      return true;
     }
     if (
       entryTarget.moduleId === target.moduleId &&
@@ -159,7 +172,7 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
           code: "BD0005",
           params: { kind: "unsupported-mod-decl" },
           span: toSourceSpan(entry),
-        })
+        }),
       );
       continue;
     }
@@ -188,10 +201,10 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     }
 
     const implDecl = parseImplDecl(entry);
-  if (implDecl) {
-    bindImplDecl(implDecl, ctx, tracker);
-    continue;
-  }
+    if (implDecl) {
+      bindImplDecl(implDecl, ctx, tracker);
+      continue;
+    }
 
     const effectDecl = parseEffectDecl(entry);
     if (effectDecl) {
@@ -200,7 +213,7 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     }
 
     throw new Error(
-      "unsupported top-level form; expected a function or type declaration"
+      "unsupported top-level form; expected a function or type declaration",
     );
   }
 
@@ -279,7 +292,7 @@ const isTestEntry = (form: Form): boolean => {
 
 const bindUseDecl = (decl: ParsedUseDecl, ctx: BindingContext): void => {
   const entries = decl.entries.map((entry) =>
-    resolveUseEntry({ entry, decl, ctx })
+    resolveUseEntry({ entry, decl, ctx }),
   );
   ctx.uses.push({
     form: decl.form,
@@ -314,7 +327,9 @@ const resolveUseEntry = ({
     blockedStdImport = true;
   }
 
-  const moduleId = dependencyPath ? modulePathToString(dependencyPath) : undefined;
+  const moduleId = dependencyPath
+    ? modulePathToString(dependencyPath)
+    : undefined;
   if (!moduleId && !blockedStdImport) {
     recordImportDiagnostic({
       params: { kind: "unresolved-use-path", path: entry.path },
@@ -334,14 +349,14 @@ const resolveUseEntry = ({
           visibility: decl.visibility,
         })
       : moduleId
-      ? bindImportsFromModule({
-          moduleId,
-          entry,
-          ctx,
-          declaredAt: decl.form,
-          visibility: decl.visibility,
-        })
-      : [];
+        ? bindImportsFromModule({
+            moduleId,
+            entry,
+            ctx,
+            declaredAt: decl.form,
+            visibility: decl.visibility,
+          })
+        : [];
 
   return {
     path: entry.path,
@@ -389,7 +404,7 @@ const resolveDependencyPath = ({
       dependencyPath: dep.path,
       entry,
       currentModulePath: ctx.module.path,
-    })
+    }),
   );
   if (matches.length === 0) {
     return undefined;
@@ -404,16 +419,21 @@ const resolveDependencyPath = ({
     return preferred?.path;
   }
 
-  const longest = matches.reduce<(typeof matches)[number] | undefined>((best, dep) => {
-    if (!best) return dep;
-    if (dep.path.segments.length !== best.path.segments.length) {
-      return dep.path.segments.length > best.path.segments.length ? dep : best;
-    }
-    if (dep.kind !== best.kind) {
-      return dep.kind === "export" ? dep : best;
-    }
-    return best;
-  }, undefined);
+  const longest = matches.reduce<(typeof matches)[number] | undefined>(
+    (best, dep) => {
+      if (!best) return dep;
+      if (dep.path.segments.length !== best.path.segments.length) {
+        return dep.path.segments.length > best.path.segments.length
+          ? dep
+          : best;
+      }
+      if (dep.kind !== best.kind) {
+        return dep.kind === "export" ? dep : best;
+      }
+      return best;
+    },
+    undefined,
+  );
 
   return longest?.path;
 };
@@ -432,12 +452,15 @@ const bindImportsFromModule = ({
   visibility: HirVisibility;
 }): BoundImport[] => {
   let exports = ctx.moduleExports.get(moduleId);
-  if (
+  const isStdImport =
     moduleId.startsWith("std::") &&
     moduleId !== "std::pkg" &&
-    ctx.module.path.namespace !== "std"
-  ) {
-    exports = stdPkgExportsFor({ moduleId, ctx });
+    ctx.module.path.namespace !== "std";
+  const stdPkgExports = isStdImport
+    ? stdPkgExportsFor({ moduleId, ctx })
+    : undefined;
+  if (isStdImport && !stdPkgExports) {
+    exports = undefined;
   }
   if (!exports) {
     recordImportDiagnostic({
@@ -505,7 +528,7 @@ const bindImportsFromModule = ({
         declaredAt,
         span: entry.span,
         visibility,
-      })
+      }),
     );
   }
 
@@ -582,9 +605,10 @@ const declareImportedSymbol = ({
   span: SourceSpan;
   visibility: HirVisibility;
 }): BoundImport[] => {
-  const symbols = exported.symbols && exported.symbols.length > 0
-    ? exported.symbols
-    : [exported.symbol];
+  const symbols =
+    exported.symbols && exported.symbols.length > 0
+      ? exported.symbols
+      : [exported.symbol];
   const locals: BoundImport[] = [];
 
   symbols.forEach((symbol) => {
@@ -593,20 +617,23 @@ const declareImportedSymbol = ({
       ? dependency.symbolTable.getSymbol(symbol).metadata
       : undefined;
     const importableMetadata = importableMetadataFrom(
-      sourceMetadata as Record<string, unknown> | undefined
+      sourceMetadata as Record<string, unknown> | undefined,
     );
     const importedSymbolTarget =
       exported.kind !== "module"
-        ? importedSymbolTargetFrom(sourceMetadata as Record<string, unknown> | undefined)
+        ? importedSymbolTargetFrom(
+            sourceMetadata as Record<string, unknown> | undefined,
+          )
         : undefined;
     const importedModuleId =
       exported.kind === "module"
-        ? importedModuleIdFrom(sourceMetadata as Record<string, unknown> | undefined) ??
-          exported.moduleId
-        : importedSymbolTarget?.moduleId ?? exported.moduleId;
+        ? (importedModuleIdFrom(
+            sourceMetadata as Record<string, unknown> | undefined,
+          ) ?? exported.moduleId)
+        : (importedSymbolTarget?.moduleId ?? exported.moduleId);
     const importedSymbolId =
       exported.kind !== "module"
-        ? importedSymbolTarget?.symbol ?? symbol
+        ? (importedSymbolTarget?.symbol ?? symbol)
         : undefined;
     const local = ctx.symbolTable.declare({
       name: alias,
@@ -626,7 +653,10 @@ const declareImportedSymbol = ({
       target:
         exported.kind === "module"
           ? undefined
-          : { moduleId: importedModuleId, symbol: importedSymbolId as SymbolId },
+          : {
+              moduleId: importedModuleId,
+              symbol: importedSymbolId as SymbolId,
+            },
       visibility,
       span,
     };
@@ -635,8 +665,7 @@ const declareImportedSymbol = ({
   });
 
   if (symbols.length > 1 && exported.overloadSet !== undefined) {
-    const nextId =
-      Math.max(-1, ...ctx.importedOverloadOptions.keys()) + 1;
+    const nextId = Math.max(-1, ...ctx.importedOverloadOptions.keys()) + 1;
     const localSymbols = locals.map((entry) => entry.local);
     ctx.importedOverloadOptions.set(nextId, localSymbols);
     localSymbols.forEach((local) => ctx.overloadBySymbol.set(local, nextId));
@@ -706,7 +735,9 @@ const canAccessExport = ({
       return false;
     }
     const target = exportTargetFor(exported, ctx);
-    return target ? isStdPkgExportedTarget({ target, ctx }) : false;
+    return target
+      ? isStdPkgExportedTarget({ target, importedFromModuleId: moduleId, ctx })
+      : false;
   };
 
   const samePackage =
@@ -724,22 +755,20 @@ const canAccessExport = ({
   return isStdPkgExported();
 };
 
-const recordImportDiagnostic = (
-  {
-    params,
-    span,
-    ctx,
-  }: {
-    params: DiagnosticParams<"BD0001">;
-    span: SourceSpan;
-    ctx: BindingContext;
-  }
-): void => {
+const recordImportDiagnostic = ({
+  params,
+  span,
+  ctx,
+}: {
+  params: DiagnosticParams<"BD0001">;
+  span: SourceSpan;
+  ctx: BindingContext;
+}): void => {
   ctx.diagnostics.push(
     diagnosticFromCode({
       code: "BD0001",
       params,
       span,
-    })
+    }),
   );
 };
