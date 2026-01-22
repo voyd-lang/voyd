@@ -326,6 +326,58 @@ const buildCfg = ({
     return { entry, exits, siteNodes };
   };
 
+  const attachCallArgTempCaptures = ({
+    callExprId,
+    argExprIds,
+    argGraphs,
+  }: {
+    callExprId: HirExprId;
+    argExprIds: readonly HirExprId[];
+    argGraphs: readonly Subgraph[];
+  }): void => {
+    if (argExprIds.length === 0) return;
+
+    const hasSitesInArg = argGraphs.map((graph) => graph.siteNodes.length > 0);
+    const needsTemp = new Array(argExprIds.length).fill(false);
+    let suffixHasSites = false;
+    for (let index = argExprIds.length - 2; index >= 0; index -= 1) {
+      suffixHasSites ||= hasSitesInArg[index + 1] ?? false;
+      needsTemp[index] = suffixHasSites;
+    }
+
+    const tempCapturesByIndex: Array<TempCaptureDraft | undefined> = new Array(
+      argExprIds.length
+    ).fill(undefined);
+    needsTemp.forEach((needed, argIndex) => {
+      if (!needed) return;
+      const argExprId = argExprIds[argIndex]!;
+      const typeId =
+        ctx.module.types.getResolvedExprType(argExprId) ??
+        ctx.module.types.getExprType(argExprId) ??
+        ctx.program.primitives.unknown;
+      tempCapturesByIndex[argIndex] = {
+        key: callArgTempKey({ callExprId, argIndex }),
+        callExprId,
+        argIndex,
+        typeId,
+      };
+    });
+
+    for (let argIndex = 0; argIndex < argGraphs.length; argIndex += 1) {
+      const graph = argGraphs[argIndex]!;
+      if (graph.siteNodes.length === 0) continue;
+      const captures = tempCapturesByIndex
+        .slice(0, argIndex)
+        .filter((capture): capture is TempCaptureDraft => !!capture);
+      if (captures.length === 0) continue;
+      graph.siteNodes.forEach((siteNodeId) => {
+        const node = nodes[siteNodeId];
+        if (!node?.site) return;
+        appendTempCaptures(node, captures);
+      });
+    }
+  };
+
   const buildStmt = (stmtId: HirStmtId, flow: FlowTargets): Subgraph => {
     const stmt = ctx.module.hir.statements.get(stmtId);
     if (!stmt) {
@@ -573,45 +625,11 @@ const buildCfg = ({
                 : undefined,
         });
 
-        const hasSitesInArg = argGraphs.map((graph) => graph.siteNodes.length > 0);
-        const needsTemp = new Array(expr.args.length).fill(false);
-        let suffixHasSites = false;
-        for (let index = expr.args.length - 2; index >= 0; index -= 1) {
-          suffixHasSites ||= hasSitesInArg[index + 1] ?? false;
-          needsTemp[index] = suffixHasSites;
-        }
-
-        const tempCapturesByIndex: Array<TempCaptureDraft | undefined> = new Array(
-          expr.args.length
-        ).fill(undefined);
-        needsTemp.forEach((needed, argIndex) => {
-          if (!needed) return;
-          const argExprId = expr.args[argIndex]!.expr;
-          const typeId =
-            ctx.module.types.getResolvedExprType(argExprId) ??
-            ctx.module.types.getExprType(argExprId) ??
-            ctx.program.primitives.unknown;
-          tempCapturesByIndex[argIndex] = {
-            key: callArgTempKey({ callExprId: expr.id, argIndex }),
-            callExprId: expr.id,
-            argIndex,
-            typeId,
-          };
+        attachCallArgTempCaptures({
+          callExprId: expr.id,
+          argExprIds: expr.args.map((arg) => arg.expr),
+          argGraphs,
         });
-
-        for (let argIndex = 0; argIndex < argGraphs.length; argIndex += 1) {
-          const graph = argGraphs[argIndex]!;
-          if (graph.siteNodes.length === 0) continue;
-          const captures = tempCapturesByIndex
-            .slice(0, argIndex)
-            .filter((capture): capture is TempCaptureDraft => !!capture);
-          if (captures.length === 0) continue;
-          graph.siteNodes.forEach((siteNodeId) => {
-            const node = nodes[siteNodeId];
-            if (!node?.site) return;
-            appendTempCaptures(node, captures);
-          });
-        }
 
         const graph = sequence([calleeGraph, ...argGraphs]);
         graph.exits.forEach((exit) => addEdge(exit, applyNode));
@@ -622,8 +640,9 @@ const buildCfg = ({
         };
       }
       case "method-call": {
-        const calleeGraph = buildExpr(expr.target, flow);
+        const receiverGraph = buildExpr(expr.target, flow);
         const argGraphs = expr.args.map((arg) => buildExpr(arg.expr, flow));
+        const callArgGraphs = [receiverGraph, ...argGraphs];
         const kind = effectsFacade(ctx).callKind(expr.id);
         const applyNode = addNode({
           site:
@@ -639,47 +658,13 @@ const buildCfg = ({
                 : undefined,
         });
 
-        const hasSitesInArg = argGraphs.map((graph) => graph.siteNodes.length > 0);
-        const needsTemp = new Array(expr.args.length).fill(false);
-        let suffixHasSites = false;
-        for (let index = expr.args.length - 2; index >= 0; index -= 1) {
-          suffixHasSites ||= hasSitesInArg[index + 1] ?? false;
-          needsTemp[index] = suffixHasSites;
-        }
-
-        const tempCapturesByIndex: Array<TempCaptureDraft | undefined> = new Array(
-          expr.args.length
-        ).fill(undefined);
-        needsTemp.forEach((needed, argIndex) => {
-          if (!needed) return;
-          const argExprId = expr.args[argIndex]!.expr;
-          const typeId =
-            ctx.module.types.getResolvedExprType(argExprId) ??
-            ctx.module.types.getExprType(argExprId) ??
-            ctx.program.primitives.unknown;
-          tempCapturesByIndex[argIndex] = {
-            key: callArgTempKey({ callExprId: expr.id, argIndex }),
-            callExprId: expr.id,
-            argIndex,
-            typeId,
-          };
+        attachCallArgTempCaptures({
+          callExprId: expr.id,
+          argExprIds: [expr.target, ...expr.args.map((arg) => arg.expr)],
+          argGraphs: callArgGraphs,
         });
 
-        for (let argIndex = 0; argIndex < argGraphs.length; argIndex += 1) {
-          const graph = argGraphs[argIndex]!;
-          if (graph.siteNodes.length === 0) continue;
-          const captures = tempCapturesByIndex
-            .slice(0, argIndex)
-            .filter((capture): capture is TempCaptureDraft => !!capture);
-          if (captures.length === 0) continue;
-          graph.siteNodes.forEach((siteNodeId) => {
-            const node = nodes[siteNodeId];
-            if (!node?.site) return;
-            appendTempCaptures(node, captures);
-          });
-        }
-
-        const graph = sequence([calleeGraph, ...argGraphs]);
+        const graph = sequence([receiverGraph, ...argGraphs]);
         graph.exits.forEach((exit) => addEdge(exit, applyNode));
         return {
           entry: graph.entry,

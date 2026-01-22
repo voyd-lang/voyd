@@ -577,6 +577,11 @@ describe("next codegen", () => {
     expect(main()).toBe(30);
   });
 
+  it("resumes correctly when a method-call receiver precedes a suspending arg", () => {
+    const main = loadMain("effects-method-call-resume.voyd");
+    expect(main()).toBe(6);
+  });
+
   it("handles attribute-tagged intrinsics through codegen", () => {
     const instance = loadWasmInstance("intrinsic_attributes_codegen.voyd");
     const main = instance.exports.main;
