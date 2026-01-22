@@ -1,6 +1,37 @@
 import type { ProgramFunctionInstanceId, TypeId, TypeParamId } from "../semantics/ids.js";
 import type { CodegenContext } from "./context.js";
 
+const buildSubstitutionFromSignature = ({
+  signature,
+  typeArgs,
+  ctx,
+}: {
+  signature: { scheme: number; typeParams?: readonly { typeParam: TypeParamId }[] };
+  typeArgs: readonly TypeId[];
+  ctx: CodegenContext;
+}): Map<TypeParamId, TypeId> | undefined => {
+  if (typeArgs.length === 0) {
+    return undefined;
+  }
+
+  const paramIds =
+    signature.typeParams && signature.typeParams.length > 0
+      ? signature.typeParams.map((param) => param.typeParam)
+      : [];
+  if (paramIds.length === typeArgs.length) {
+    return new Map(paramIds.map((param, index) => [param, typeArgs[index]!] as const));
+  }
+
+  const scheme = ctx.program.types.getScheme(signature.scheme);
+  if (scheme.params.length === typeArgs.length) {
+    return new Map(
+      scheme.params.map((param, index) => [param, typeArgs[index]!] as const)
+    );
+  }
+
+  return undefined;
+};
+
 export const buildInstanceSubstitution = ({
   ctx,
   typeInstanceId,
@@ -14,18 +45,10 @@ export const buildInstanceSubstitution = ({
   const meta = ctx.functionInstances.get(typeInstanceId);
   if (meta) {
     const signature = ctx.program.functions.getSignature(meta.moduleId, meta.symbol);
-    if (!signature || signature.typeParams.length === 0) {
+    if (!signature) {
       return undefined;
     }
-    if (signature.typeParams.length !== meta.typeArgs.length) {
-      return undefined;
-    }
-    return new Map(
-      signature.typeParams.map((param, index) => [
-        param.typeParam,
-        meta.typeArgs[index]!,
-      ])
-    );
+    return buildSubstitutionFromSignature({ signature, typeArgs: meta.typeArgs, ctx });
   }
 
   const instance = ctx.program.functions.getInstance(typeInstanceId);
@@ -36,16 +59,8 @@ export const buildInstanceSubstitution = ({
     instance.symbolRef.moduleId,
     instance.symbolRef.symbol
   );
-  if (!signature || signature.typeParams.length === 0) {
+  if (!signature) {
     return undefined;
   }
-  if (signature.typeParams.length !== instance.typeArgs.length) {
-    return undefined;
-  }
-  return new Map(
-    signature.typeParams.map((param, index) => [
-      param.typeParam,
-      instance.typeArgs[index]!,
-    ])
-  );
+  return buildSubstitutionFromSignature({ signature, typeArgs: instance.typeArgs, ctx });
 };

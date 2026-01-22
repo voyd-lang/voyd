@@ -196,6 +196,7 @@ const emitClauseFunction = ({
     handlerBody: expr.body,
     operation: clause.operation,
     ctx,
+    typeInstanceId,
   });
   const substitution = buildEffectTypeSubstitution({
     ctx,

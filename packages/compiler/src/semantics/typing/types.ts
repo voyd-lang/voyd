@@ -66,8 +66,8 @@ export interface TypingResult {
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
   callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolRef>>;
   functionInstances: ReadonlyMap<string, TypeId>;
-  callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
-  callInstanceKeys: ReadonlyMap<HirExprId, string>;
+  callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
+  callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
   callTraitDispatches: ReadonlySet<HirExprId>;
   functionInstantiationInfo: ReadonlyMap<
     SymbolRefKey,
@@ -130,8 +130,8 @@ export interface Arg {
 
 export interface CallResolution {
   targets: Map<HirExprId, Map<string, SymbolRef>>;
-  typeArguments: Map<HirExprId, readonly TypeId[]>;
-  instanceKeys: Map<HirExprId, string>;
+  typeArguments: Map<HirExprId, Map<string, readonly TypeId[]>>;
+  instanceKeys: Map<HirExprId, Map<string, string>>;
   traitDispatches: Set<HirExprId>;
 }
 

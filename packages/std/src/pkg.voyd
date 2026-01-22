@@ -14,6 +14,7 @@ pub use std::optional::fns::{
   or_else
 }
 pub use std::array::{ Array, ArrayPop, new_array }
+pub use std::map::{ Map, MapEntry, new_map }
 pub use std::string::types::{ String }
 pub use std::string::fns::{ new_string }
 pub use std::test::assertions::{ Test, assert }

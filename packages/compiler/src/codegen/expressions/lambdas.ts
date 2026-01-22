@@ -294,7 +294,7 @@ export const compileLambdaExpr = (
         const typeId =
           typeof bindingTypeId === "number"
             ? bindingTypeId
-            : getSymbolTypeId(capture.symbol, ctx);
+            : getSymbolTypeId(capture.symbol, ctx, typeInstanceId);
         return {
           symbol: capture.symbol,
           typeId,

@@ -1556,10 +1556,14 @@ const typeFunctionCall = ({
   calleeExprId?: HirExprId;
   calleeModuleId?: string;
   nameForSymbol?: SymbolNameResolver;
-}): { returnType: TypeId; effectRow: number } => {
-  const resolvedModuleId = calleeModuleId ?? ctx.moduleId;
-  const isExternal = resolvedModuleId !== ctx.moduleId;
-  const record = isExternal ? undefined : ctx.symbolTable.getSymbol(calleeSymbol);
+	}): { returnType: TypeId; effectRow: number } => {
+	  const callerInstanceKey = state.currentFunction?.instanceKey;
+	  if (!callerInstanceKey) {
+	    throw new Error(`missing function instance key for call ${callId}`);
+	  }
+	  const resolvedModuleId = calleeModuleId ?? ctx.moduleId;
+	  const isExternal = resolvedModuleId !== ctx.moduleId;
+	  const record = isExternal ? undefined : ctx.symbolTable.getSymbol(calleeSymbol);
   const intrinsicMetadata = record
     ? ((record.metadata ?? {}) as {
         intrinsic?: boolean;
@@ -1646,14 +1650,32 @@ const typeFunctionCall = ({
       symbol: calleeSymbol,
       ctx,
       nameForSymbol: resolveName,
-    });
-    const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
-    ctx.callResolution.typeArguments.set(callId, appliedTypeArgs);
-    ctx.callResolution.instanceKeys.set(callId, callKey);
-    const instantiationKey = instantiationRefKeyForCall({
-      calleeSymbol,
-      calleeModuleId,
-      ctx,
+	    });
+	    const codegenTypeArgs = getAppliedTypeArguments({
+	      signature,
+	      substitution: instantiation.substitution,
+	      symbol: calleeSymbol,
+	      ctx,
+	      nameForSymbol: resolveName,
+	    });
+	    const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
+	    if (typeof calleeExprId === "number") {
+	      const calleeRef = canonicalSymbolRefForTypingContext(calleeSymbol, ctx);
+	      const existingTargets =
+	        ctx.callResolution.targets.get(callId) ?? new Map();
+	      existingTargets.set(callerInstanceKey, calleeRef);
+	      ctx.callResolution.targets.set(callId, existingTargets);
+	    }
+	    const existingTypeArgs = ctx.callResolution.typeArguments.get(callId) ?? new Map();
+	    existingTypeArgs.set(callerInstanceKey, codegenTypeArgs);
+	    ctx.callResolution.typeArguments.set(callId, existingTypeArgs);
+	    const existingKeys = ctx.callResolution.instanceKeys.get(callId) ?? new Map();
+	    existingKeys.set(callerInstanceKey, callKey);
+	    ctx.callResolution.instanceKeys.set(callId, existingKeys);
+	    const instantiationKey = instantiationRefKeyForCall({
+	      calleeSymbol,
+	      calleeModuleId,
+	      ctx,
     });
     const skipGenericBody =
       intrinsicMetadata.intrinsic === true &&
@@ -1672,10 +1694,11 @@ const typeFunctionCall = ({
         callKey,
         appliedTypeArgs
       );
-    }
-  } else {
-    ctx.callResolution.typeArguments.delete(callId);
-  }
+	    }
+	  } else {
+	    ctx.callResolution.typeArguments.delete(callId);
+	    ctx.callResolution.instanceKeys.delete(callId);
+	  }
 
   return { returnType: instantiation.returnType, effectRow: signature.effectRow };
 };

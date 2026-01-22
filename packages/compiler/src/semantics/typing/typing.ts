@@ -65,8 +65,17 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
       ])
     ),
     functionInstances: ctx.functions.snapshotInstances(),
-    callTypeArguments: new Map(ctx.callResolution.typeArguments),
-    callInstanceKeys: new Map(ctx.callResolution.instanceKeys),
+    callTypeArguments: new Map(
+      Array.from(ctx.callResolution.typeArguments.entries()).map(
+        ([callId, typeArgs]) => [callId, new Map(typeArgs)] as const
+      )
+    ),
+    callInstanceKeys: new Map(
+      Array.from(ctx.callResolution.instanceKeys.entries()).map(([callId, keys]) => [
+        callId,
+        new Map(keys),
+      ])
+    ),
     callTraitDispatches: new Set(ctx.callResolution.traitDispatches),
     functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
     functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),

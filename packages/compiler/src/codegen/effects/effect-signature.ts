@@ -265,10 +265,12 @@ const inferEffectTypeArgsFromCall = ({
 
 export const collectEffectTypeArgs = ({
   ctx,
+  typeInstanceId,
   handlerBody,
   operation,
 }: {
   ctx: CodegenContext;
+  typeInstanceId?: ProgramFunctionInstanceId;
   handlerBody: HirExprId;
   operation: SymbolId;
 }): readonly TypeId[] | undefined => {
@@ -290,9 +292,18 @@ export const collectEffectTypeArgs = ({
         if (!callee || callee.exprKind !== "identifier") return;
         if (callee.symbol !== operation) return;
         const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
+        const resolvedTypeArgs = (() => {
+          if (typeof typeInstanceId === "number") {
+            return callInfo.typeArgs?.get(typeInstanceId);
+          }
+          if (callInfo.typeArgs && callInfo.typeArgs.size === 1) {
+            return callInfo.typeArgs.values().next().value;
+          }
+          return undefined;
+        })();
         const inferredTypeArgs =
-          callInfo.typeArgs && callInfo.typeArgs.length > 0
-            ? callInfo.typeArgs
+          resolvedTypeArgs && resolvedTypeArgs.length > 0
+            ? resolvedTypeArgs
             : inferEffectTypeArgsFromCall({
                 ctx,
                 signature,

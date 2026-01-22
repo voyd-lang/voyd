@@ -107,7 +107,7 @@ export const compileAssignExpr = (
   }
 
   const binding = getRequiredBinding(targetExpr.symbol, ctx, fnCtx);
-  const targetTypeId = getSymbolTypeId(targetExpr.symbol, ctx);
+  const targetTypeId = getSymbolTypeId(targetExpr.symbol, ctx, typeInstanceId);
   const coerced = coerceValueToType({
     value: valueExpr.expr,
     actualType: valueTypeId,

@@ -73,7 +73,10 @@ describe("array literals", () => {
     });
     expect(callId).toBeDefined();
     if (!callId) return;
-    const typeArgs = typing.callTypeArguments.get(callId);
+    const typeArgsByInstance = typing.callTypeArguments.get(callId);
+    const typeArgs = typeArgsByInstance
+      ? Array.from(typeArgsByInstance.values())[0]
+      : undefined;
     expect(typeArgs).toBeDefined();
     if (!typeArgs) return;
     expect(typeArgs).toHaveLength(1);

@@ -30,46 +30,50 @@ export const initExtensionHelpers = (mod: binaryen.Module): ExtensionHelpers => 
     bin.createType([bin.i32, i32Array]),
     bin.i32,
     [bin.i32, bin.i32],
-    mod.block(null, [
-      mod.local.set(2, mod.i32.const(0)),
-      mod.local.set(3, mod.i32.const(0)),
-      mod.block("break", [
-        mod.loop(
-          "loop",
-          mod.block(null, [
-            mod.br_if(
-              "break",
-              mod.i32.eq(
-                mod.local.get(2, bin.i32),
-                arrayLen(mod, mod.local.get(1, i32Array))
-              )
-            ),
-            mod.if(
-              mod.i32.eq(
-                mod.local.get(0, bin.i32),
-                arrayGet(
-                  mod,
-                  mod.local.get(1, i32Array),
+    mod.block(
+      null,
+      [
+        mod.local.set(2, mod.i32.const(0)),
+        mod.local.set(3, mod.i32.const(0)),
+        mod.block("break", [
+          mod.loop(
+            "loop",
+            mod.block(null, [
+              mod.br_if(
+                "break",
+                mod.i32.eq(
                   mod.local.get(2, bin.i32),
-                  bin.i32,
-                  false
+                  arrayLen(mod, mod.local.get(1, i32Array))
                 )
               ),
-              mod.block(null, [
-                mod.local.set(3, mod.i32.const(1)),
-                mod.br("break"),
-              ])
-            ),
-            mod.local.set(
-              2,
-              mod.i32.add(mod.local.get(2, bin.i32), mod.i32.const(1))
-            ),
-            mod.br("loop"),
-          ])
-        ),
-      ]),
-      mod.local.get(3, bin.i32),
-    ])
+              mod.if(
+                mod.i32.eq(
+                  mod.local.get(0, bin.i32),
+                  arrayGet(
+                    mod,
+                    mod.local.get(1, i32Array),
+                    mod.local.get(2, bin.i32),
+                    bin.i32,
+                    false
+                  )
+                ),
+                mod.block(null, [
+                  mod.local.set(3, mod.i32.const(1)),
+                  mod.br("break"),
+                ])
+              ),
+              mod.local.set(
+                2,
+                mod.i32.add(mod.local.get(2, bin.i32), mod.i32.const(1))
+              ),
+              mod.br("loop"),
+            ])
+          ),
+        ]),
+        mod.local.get(3, bin.i32),
+      ],
+      bin.i32
+    )
   );
 
   mod.addFunction(
@@ -77,19 +81,29 @@ export const initExtensionHelpers = (mod: binaryen.Module): ExtensionHelpers => 
     bin.createType([bin.i32, i32Array]),
     bin.i32,
     [],
-    mod.block(null, [
-      mod.if(
-        mod.i32.eq(
-          arrayLen(mod, mod.local.get(1, i32Array)),
-          mod.i32.const(0)
+    mod.block(
+      null,
+      [
+        mod.if(
+          mod.i32.eq(
+            arrayLen(mod, mod.local.get(1, i32Array)),
+            mod.i32.const(0)
+          ),
+          mod.return(mod.i32.const(0))
         ),
-        mod.return(mod.i32.const(0))
-      ),
-      mod.i32.eq(
-        mod.local.get(0, bin.i32),
-        arrayGet(mod, mod.local.get(1, i32Array), mod.i32.const(0), bin.i32, false)
-      ),
-    ])
+        mod.i32.eq(
+          mod.local.get(0, bin.i32),
+          arrayGet(
+            mod,
+            mod.local.get(1, i32Array),
+            mod.i32.const(0),
+            bin.i32,
+            false
+          )
+        ),
+      ],
+      bin.i32
+    )
   );
 
   return { i32Array, initExtensionArray };

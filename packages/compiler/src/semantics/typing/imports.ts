@@ -963,8 +963,17 @@ const makeDependencyContext = (
         ([exprId, targets]) => [exprId, new Map(targets)]
       )
     ),
-    typeArguments: new Map(dependency.typing.callTypeArguments),
-    instanceKeys: new Map(dependency.typing.callInstanceKeys),
+    typeArguments: new Map(
+      Array.from(dependency.typing.callTypeArguments.entries()).map(
+        ([exprId, args]) => [exprId, new Map(args)] as const
+      )
+    ),
+    instanceKeys: new Map(
+      Array.from(dependency.typing.callInstanceKeys.entries()).map(([exprId, keys]) => [
+        exprId,
+        new Map(keys),
+      ])
+    ),
     traitDispatches: new Set(dependency.typing.callTraitDispatches),
   },
   functions: dependency.typing.functions,
