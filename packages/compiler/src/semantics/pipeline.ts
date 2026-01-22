@@ -21,7 +21,10 @@ import type { ModuleExportEffect, ModuleExportTable } from "./modules.js";
 import type { DependencySemantics } from "./typing/types.js";
 import type { Diagnostic } from "../diagnostics/index.js";
 import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
-import { buildModuleSymbolIndex, type ModuleSymbolIndex } from "./symbol-index.js";
+import {
+  buildModuleSymbolIndex,
+  type ModuleSymbolIndex,
+} from "./symbol-index.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import { assignModuleTestIds } from "../tests/ids.js";
 
@@ -47,10 +50,15 @@ export interface SemanticsPipelineOptions {
 type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
 
 export const semanticsPipeline = (
-  input: SemanticsPipelineInput
+  input: SemanticsPipelineInput,
 ): SemanticsPipelineResult => {
-  const { module, graph, exports, dependencies, typing: typingState } =
-    normalizeSemanticsInput(input);
+  const {
+    module,
+    graph,
+    exports,
+    dependencies,
+    typing: typingState,
+  } = normalizeSemanticsInput(input);
   const form = module.ast;
   if (!form.callsInternal("ast")) {
     throw new Error("semantics pipeline expects the expanded AST root form");
@@ -79,11 +87,10 @@ export const semanticsPipeline = (
           Array.from(dependencies.entries()).map(([id, entry]) => [
             id,
             entry.binding,
-          ])
+          ]),
         )
       : undefined,
-    includeTests:
-      "includeTests" in input ? input.includeTests === true : false,
+    includeTests: "includeTests" in input ? input.includeTests === true : false,
   });
   ensureNoBindingErrors(binding);
 
@@ -114,7 +121,7 @@ export const semanticsPipeline = (
     hir,
     overloads: collectOverloadOptions(
       binding.overloads,
-      binding.importedOverloadOptions
+      binding.importedOverloadOptions,
     ),
     decls: binding.decls,
     arena: typingState?.arena,
@@ -160,13 +167,13 @@ export const semanticsPipeline = (
     exports: exportsTable,
     diagnostics,
     // Intentionally not part of the public result type; semantics-internal only.
-    ...( { symbolTable } as unknown as {} ),
+    ...({ symbolTable } as unknown as {}),
   } as SemanticsPipelineResult;
 };
 
 const ensureNoBindingErrors = (binding: BindingResult): void => {
   const errors = binding.diagnostics.filter(
-    (diag) => diag.severity === "error"
+    (diag) => diag.severity === "error",
   );
   if (errors.length === 0) {
     return;
@@ -197,7 +204,8 @@ const applyImplicitImports = ({
     if (importedLocals.has(record.id)) {
       return;
     }
-    binding.imports.push({
+    // TODO: This is a hack. Should be fixed by docs/proposals/hir-method-calls.md
+    (binding.imports as any).push({
       name: record.name,
       local: record.id,
       target: { moduleId, symbol },
@@ -210,13 +218,13 @@ const applyImplicitImports = ({
 
 const collectOverloadOptions = (
   overloads: ReadonlyMap<OverloadSetId, BoundOverloadSet>,
-  imported?: ReadonlyMap<OverloadSetId, readonly SymbolId[]>
+  imported?: ReadonlyMap<OverloadSetId, readonly SymbolId[]>,
 ): Map<OverloadSetId, readonly SymbolId[]> => {
   const entries = new Map<OverloadSetId, readonly SymbolId[]>(
     Array.from(overloads.entries()).map(([id, set]) => [
       id,
       set.functions.map((fn) => fn.symbol),
-    ])
+    ]),
   );
   if (imported) {
     imported.forEach((symbols, id) => {
@@ -247,7 +255,7 @@ const collectModuleExports = ({
 
   const mergeEffects = (
     existing: readonly ModuleExportEffect[] | undefined,
-    next?: ModuleExportEffect
+    next?: ModuleExportEffect,
   ): readonly ModuleExportEffect[] | undefined => {
     if (!next) {
       return existing;
@@ -259,14 +267,14 @@ const collectModuleExports = ({
   };
 
   const exportEffectFor = (
-    symbol: SymbolId
+    symbol: SymbolId,
   ): ModuleExportEffect | undefined => {
     const signature = typing.functions.getSignature(symbol);
     if (!signature) {
       return undefined;
     }
     const desc = typing.effects.getRow(
-      signature.effectRow ?? typing.primitives.defaultEffectRow
+      signature.effectRow ?? typing.primitives.defaultEffectRow,
     );
     return {
       symbol,
@@ -307,12 +315,9 @@ const collectModuleExports = ({
       : visibility;
     const owner = existing?.memberOwner ?? memberOwner;
     const mergedStatic =
-      existing?.isStatic === true ? true : isStatic ?? existing?.isStatic;
+      existing?.isStatic === true ? true : (isStatic ?? existing?.isStatic);
     const projected = existing?.apiProjection || apiProjection === true;
-    const effects = mergeEffects(
-      existing?.effects,
-      exportEffectFor(symbol)
-    );
+    const effects = mergeEffects(existing?.effects, exportEffectFor(symbol));
     table.set(name, {
       name,
       symbol: existing?.symbol ?? symbol,
@@ -331,11 +336,13 @@ const collectModuleExports = ({
   };
 
   const memberInfoFor = (
-    symbol: SymbolId
+    symbol: SymbolId,
   ): { owner?: SymbolId; isStatic?: boolean } => {
     const memberMetadata = typing.memberMetadata.get(symbol);
     const owner =
-      typeof memberMetadata?.owner === "number" ? memberMetadata.owner : undefined;
+      typeof memberMetadata?.owner === "number"
+        ? memberMetadata.owner
+        : undefined;
     const recordMetadata = symbolTable.getSymbol(symbol).metadata as
       | { static?: boolean }
       | undefined;
@@ -361,9 +368,9 @@ const collectModuleExports = ({
       Array.from(table.values())
         .filter(
           (entry) =>
-            entry.kind === "type" && entry.visibility.level === "public"
+            entry.kind === "type" && entry.visibility.level === "public",
         )
-        .map((entry) => entry.symbol)
+        .map((entry) => entry.symbol),
     );
 
     typing.memberMetadata.forEach((metadata, symbol) => {
@@ -394,7 +401,7 @@ const formatEffectOp = (op: { name: string; region?: number }): string =>
 
 const formatEffectRow = (
   row: number,
-  effects: TypingResult["effects"]
+  effects: TypingResult["effects"],
 ): string => {
   const desc = effects.getRow(row);
   const ops = desc.operations.map(formatEffectOp);
@@ -442,7 +449,7 @@ const enforcePkgRootEffectRules = ({
           code: "TY0016",
           params: { kind: "pkg-effect-annotation", functionName: name },
           span: entry.span,
-        })
+        }),
       );
     }
 
@@ -461,7 +468,7 @@ const enforcePkgRootEffectRules = ({
             code: "TY0017",
             params: { kind: "effectful-main", effects: effectsText },
             span: entry.span,
-          })
+          }),
         );
       }
     }
@@ -471,7 +478,7 @@ const enforcePkgRootEffectRules = ({
 };
 
 const projectDependencySemantics = (
-  dependencies?: Map<string, SemanticsPipelineResult>
+  dependencies?: Map<string, SemanticsPipelineResult>,
 ): Map<string, DependencySemantics> => {
   if (!dependencies || dependencies.size === 0) {
     return new Map();
@@ -490,12 +497,12 @@ const projectDependencySemantics = (
         overloads: collectOverloadOptions(entry.binding.overloads),
         exports: entry.exports,
       },
-    ])
+    ]),
   );
 };
 
 const normalizeSemanticsInput = (
-  input: SemanticsPipelineInput
+  input: SemanticsPipelineInput,
 ): SemanticsPipelineOptions => {
   if (!isForm(input)) {
     return input;
