@@ -3,9 +3,14 @@ import {
   type Form,
   formCallsInternal,
   isForm,
+  isIdentifierAtom,
+  isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import type { HirExprId } from "../../ids.js";
+import type { HirTypeExpr } from "../../hir/index.js";
+import { toSourceSpan } from "../../utils.js";
 import { lowerCallFromElements } from "./call.js";
+import { lowerTypeExpr } from "../type-expressions.js";
 import { lowerMatch } from "./match.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 
@@ -74,22 +79,42 @@ const lowerMethodCallExpr = ({
   }
 
   const calleeExpr = elements[0]!;
+  if (!isIdentifierAtom(calleeExpr) && !isInternalIdentifierAtom(calleeExpr)) {
+    throw new Error("method name must be an identifier");
+  }
+
   const potentialGenerics = elements[1];
-  const hasGenerics =
+  const hasTypeArguments =
     isForm(potentialGenerics) &&
     formCallsInternal(potentialGenerics, "generics");
-  const argsStartIndex = hasGenerics ? 2 : 1;
-  const args = elements.slice(argsStartIndex);
-  const callArgs: Expr[] = hasGenerics
-    ? [potentialGenerics!, targetExpr, ...args]
-    : [targetExpr, ...args];
+  const typeArguments = hasTypeArguments
+    ? ((potentialGenerics as Form).rest
+        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+        .filter(Boolean) as HirTypeExpr[])
+    : undefined;
+  const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
+    if (isForm(arg) && arg.calls(":")) {
+      const labelExpr = arg.at(1);
+      const valueExpr = arg.at(2);
+      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
+        throw new Error("Invalid labeled argument");
+      }
+      return {
+        label: labelExpr.value,
+        expr: lowerExpr(valueExpr, ctx, scopes),
+      };
+    }
+    return { expr: lowerExpr(arg, ctx, scopes) };
+  });
 
-  return lowerCallFromElements({
-    calleeExpr,
-    argsExprs: callArgs,
-    ast: dotForm,
-    ctx,
-    scopes,
-    lowerExpr,
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "method-call",
+    ast: dotForm.syntaxId,
+    span: toSourceSpan(dotForm),
+    target: lowerExpr(targetExpr, ctx, scopes),
+    method: calleeExpr.value,
+    args,
+    typeArguments,
   });
 };

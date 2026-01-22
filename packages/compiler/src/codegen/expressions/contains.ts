@@ -25,6 +25,11 @@ export const exprContainsTarget = (
         exprContainsTarget(expr.callee, target, ctx) ||
         expr.args.some((arg) => exprContainsTarget(arg.expr, target, ctx))
       );
+    case "method-call":
+      return (
+        exprContainsTarget(expr.target, target, ctx) ||
+        expr.args.some((arg) => exprContainsTarget(arg.expr, target, ctx))
+      );
     case "block":
       return (
         expr.statements.some((stmtId) =>

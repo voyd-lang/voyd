@@ -230,8 +230,11 @@ export const buildEffectsLoweringInfo = ({
 
   const calls = new Map<HirExprId, EffectsLoweringCallInfo>();
   hir.expressions.forEach((expr) => {
-    if (expr.exprKind !== "call") return;
-    const calleeExpr = hir.expressions.get(expr.callee);
+    if (expr.exprKind !== "call" && expr.exprKind !== "method-call") return;
+    const calleeExpr =
+      expr.exprKind === "call"
+        ? hir.expressions.get(expr.callee)
+        : undefined;
     const effectRow = exprEffectRow({ expr: expr.id, typing });
     calls.set(expr.id, {
       expr: expr.id,

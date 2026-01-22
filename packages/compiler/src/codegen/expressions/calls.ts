@@ -7,6 +7,7 @@ import type {
   FunctionContext,
   FunctionMetadata,
   HirCallExpr,
+  HirMethodCallExpr,
   HirExprId,
   SymbolId,
   TypeId,
@@ -233,21 +234,19 @@ export const compileCallExpr = (
   if (callee.exprKind === "overload-set") {
     const targets = callInfo.targets;
     const targetFunctionId =
-      (callInstanceId && targets?.get(callInstanceId)) ??
-      (typeInstanceId && targets?.get(typeInstanceId)) ??
+      (typeof callInstanceId === "number" ? targets?.get(callInstanceId) : undefined) ??
+      (typeof typeInstanceId === "number" ? targets?.get(typeInstanceId) : undefined) ??
       (targets && targets.size === 1
         ? targets.values().next().value
         : undefined);
-    const targetSymbol =
-      typeof targetFunctionId === "number"
-        ? localSymbolForProgramSymbolId(targetFunctionId as ProgramSymbolId, ctx)
-        : undefined;
-    if (typeof targetSymbol !== "number") {
+    if (typeof targetFunctionId !== "number") {
       throw new Error("codegen missing overload resolution for indirect call");
     }
+    const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
     const traitDispatch = compileTraitDispatchCall({
       expr,
-      calleeSymbol: targetSymbol,
+      calleeSymbol: targetRef.symbol,
+      calleeModuleId: targetRef.moduleId,
       ctx,
       fnCtx,
       compileExpr,
@@ -263,12 +262,15 @@ export const compileCallExpr = (
       );
     }
     const targetMeta = getFunctionMetadataForCall({
-      symbol: targetSymbol,
+      symbol: targetRef.symbol,
       callId: expr.id,
       ctx,
+      moduleId: targetRef.moduleId,
     });
     if (!targetMeta) {
-      throw new Error(`codegen cannot call symbol ${targetSymbol}`);
+      throw new Error(
+        `codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`
+      );
     }
     const args = compileCallArguments(
       expr,
@@ -396,9 +398,78 @@ export const compileCallExpr = (
   throw new Error("codegen only supports function and closure calls today");
 };
 
+const toMethodCallView = (expr: HirMethodCallExpr): HirCallExpr => ({
+  kind: "expr",
+  exprKind: "call",
+  id: expr.id,
+  ast: expr.ast,
+  span: expr.span,
+  callee: expr.target,
+  args: [{ expr: expr.target }, ...expr.args],
+  typeArguments: expr.typeArguments,
+});
+
+export const compileMethodCallExpr = (
+  expr: HirMethodCallExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  compileExpr: ExpressionCompiler,
+  options: CompileCallOptions = {}
+): CompiledExpression => {
+  const { tailPosition = false, expectedResultTypeId } = options;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const callInstanceId = fnCtx.instanceId ?? typeInstanceId;
+  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
+  const targets = callInfo.targets;
+  const targetFunctionId =
+    (typeof callInstanceId === "number" ? targets?.get(callInstanceId) : undefined) ??
+    (typeof typeInstanceId === "number" ? targets?.get(typeInstanceId) : undefined) ??
+    (targets && targets.size === 1 ? targets.values().next().value : undefined);
+  if (typeof targetFunctionId !== "number") {
+    throw new Error("codegen missing method call target");
+  }
+
+  const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
+  const callView = toMethodCallView(expr);
+  const traitDispatch = compileTraitDispatchCall({
+    expr: callView,
+    calleeSymbol: targetRef.symbol,
+    calleeModuleId: targetRef.moduleId,
+    ctx,
+    fnCtx,
+    compileExpr,
+    tailPosition,
+    expectedResultTypeId,
+  });
+  if (traitDispatch) {
+    return traitDispatch;
+  }
+  if (callInfo.traitDispatch) {
+    throw new Error("codegen missing trait dispatch target for method call");
+  }
+
+  const meta = getFunctionMetadataForCall({
+    symbol: targetRef.symbol,
+    callId: expr.id,
+    ctx,
+    moduleId: targetRef.moduleId,
+  });
+  if (!meta) {
+    throw new Error(`codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`);
+  }
+
+  const args = compileCallArguments(callView, meta, ctx, fnCtx, compileExpr);
+  return emitResolvedCall(meta, args, expr.id, ctx, fnCtx, {
+    tailPosition,
+    expectedResultTypeId,
+    typeInstanceId,
+  });
+};
+
 const compileTraitDispatchCall = ({
   expr,
   calleeSymbol,
+  calleeModuleId,
   ctx,
   fnCtx,
   compileExpr,
@@ -407,6 +478,7 @@ const compileTraitDispatchCall = ({
 }: {
   expr: HirCallExpr;
   calleeSymbol: SymbolId;
+  calleeModuleId?: string;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -417,8 +489,9 @@ const compileTraitDispatchCall = ({
     return undefined;
   }
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resolvedModuleId = calleeModuleId ?? ctx.moduleId;
   const mapping = ctx.program.traits.getTraitMethodImpl(
-    ctx.program.symbols.canonicalIdOf(ctx.moduleId, calleeSymbol)
+    ctx.program.symbols.canonicalIdOf(resolvedModuleId, calleeSymbol)
   );
   if (!mapping) {
     return undefined;
@@ -442,6 +515,7 @@ const compileTraitDispatchCall = ({
     symbol: calleeSymbol,
     callId: expr.id,
     ctx,
+    moduleId: resolvedModuleId,
   });
   if (!meta) {
     return undefined;
@@ -532,17 +606,6 @@ const compileTraitDispatchCall = ({
     expr: ops.length === 1 ? ops[0]! : ctx.mod.block(null, ops, binaryenResult),
     usedReturnCall: lowered.usedReturnCall,
   };
-};
-
-const localSymbolForProgramSymbolId = (
-  symbolId: ProgramSymbolId,
-  ctx: CodegenContext
-): SymbolId | undefined => {
-  const ref = ctx.program.symbols.refOf(symbolId);
-  if (ref.moduleId === ctx.moduleId) {
-    return ref.symbol;
-  }
-  return ctx.program.imports.getLocal(ctx.moduleId, symbolId);
 };
 
 const emitResolvedCall = (
@@ -1101,15 +1164,18 @@ const getFunctionMetadataForCall = ({
   symbol,
   callId,
   ctx,
+  moduleId,
 }: {
   symbol: number;
   callId: HirExprId;
   ctx: CodegenContext;
+  moduleId?: string;
 }): FunctionMetadata | undefined => {
+  const targetModuleId = moduleId ?? ctx.moduleId;
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, callId);
   const typeArgs = callInfo.typeArgs ?? [];
   const instanceId = ctx.program.functions.getInstanceId(
-    ctx.moduleId,
+    targetModuleId,
     symbol,
     typeArgs
   );
@@ -1118,7 +1184,7 @@ const getFunctionMetadataForCall = ({
   if (instance) {
     return instance;
   }
-  const metas = ctx.functions.get(ctx.moduleId)?.get(symbol);
+  const metas = ctx.functions.get(targetModuleId)?.get(symbol);
   if (!metas || metas.length === 0) {
     return undefined;
   }

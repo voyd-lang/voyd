@@ -409,6 +409,7 @@ export type HirExpression =
   | HirIdentifierExpr
   | HirOverloadSetExpr
   | HirCallExpr
+  | HirMethodCallExpr
   | HirBlockExpr
   | HirTupleExpr
   | HirLoopExpr
@@ -435,6 +436,7 @@ export type HirExprKind =
   | "identifier"
   | "overload-set"
   | "call"
+  | "method-call"
   | "block"
   | "tuple"
   | "loop"
@@ -478,6 +480,14 @@ export interface HirOverloadSetExpr extends HirExpressionBase {
 export interface HirCallExpr extends HirExpressionBase {
   exprKind: "call";
   callee: HirExprId;
+  args: readonly { label?: string; expr: HirExprId }[];
+  typeArguments?: readonly HirTypeExpr[];
+}
+
+export interface HirMethodCallExpr extends HirExpressionBase {
+  exprKind: "method-call";
+  target: HirExprId;
+  method: string;
   args: readonly { label?: string; expr: HirExprId }[];
   typeArguments?: readonly HirTypeExpr[];
 }

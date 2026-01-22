@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { HirBlockExpr, HirCallExpr, HirFunction } from "../../hir/nodes.js";
+import type {
+  HirBlockExpr,
+  HirCallExpr,
+  HirFunction,
+} from "../../hir/nodes.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
@@ -19,9 +23,10 @@ describe("trait objects", () => {
     expect(mainSymbol).toBeDefined();
     expect(traitSymbol).toBeDefined();
 
-    const signature = typeof doDouble === "number"
-      ? typing.functions.getSignature(doDouble)
-      : undefined;
+    const signature =
+      typeof doDouble === "number"
+        ? typing.functions.getSignature(doDouble)
+        : undefined;
     expect(signature?.parameters[0]).toBeDefined();
     if (signature?.parameters[0]) {
       const paramDesc = typing.arena.get(signature.parameters[0].type);
@@ -37,7 +42,7 @@ describe("trait objects", () => {
           typeof doDouble === "number" &&
           calleeExpr.symbol === doDouble
         );
-      }
+      },
     );
     expect(mainCall).toBeDefined();
     if (mainCall) {
@@ -57,7 +62,7 @@ describe("trait objects", () => {
 
     const doDoubleFn = Array.from(hir.items.values()).find(
       (item): item is HirFunction =>
-        item.kind === "function" && item.symbol === doDouble
+        item.kind === "function" && item.symbol === doDouble,
     );
     expect(doDoubleFn).toBeDefined();
     const doDoubleBody = doDoubleFn?.body;
@@ -67,13 +72,13 @@ describe("trait objects", () => {
     const blockValue =
       doDoubleExpr?.exprKind === "block" ? doDoubleExpr.value : undefined;
     const doDoubleCall =
-      doDoubleExpr?.exprKind === "call"
+      doDoubleExpr?.exprKind === "method-call"
         ? doDoubleExpr
         : typeof blockValue === "number"
           ? hir.expressions.get(blockValue)
           : undefined;
-    expect(doDoubleCall?.exprKind).toBe("call");
-    if (doDoubleCall) {
+    expect(doDoubleCall?.exprKind).toBe("method-call");
+    if (doDoubleCall?.exprKind === "method-call") {
       expect(typing.callTraitDispatches.has(doDoubleCall.id)).toBe(true);
     }
   });

@@ -573,6 +573,15 @@ const validateExpressionTypeExprs = (
         )
       );
       return;
+    case "method-call":
+      expr.typeArguments?.forEach((arg, index) =>
+        visitTypeExpr(
+          arg,
+          validateType,
+          `method call type argument ${index + 1}`
+        )
+      );
+      return;
     case "lambda":
       visitTypeParameters(expr.typeParameters, validateType);
       expr.parameters.forEach((param) =>

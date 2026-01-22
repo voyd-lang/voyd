@@ -9,8 +9,9 @@ import type { SemanticsPipelineResult } from "./pipeline.js";
 import type { MonomorphizedInstanceRequest } from "./codegen-view/index.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type { HirExprId, SymbolId, TypeId } from "./ids.js";
-import { buildProgramSymbolArena, type SymbolRef } from "./program-symbol-arena.js";
+import { buildProgramSymbolArena, type SymbolRef as ProgramSymbolRef } from "./program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "./canonical-symbol-ref.js";
+import type { SymbolRef as TypingSymbolRef } from "./typing/symbol-ref.js";
 
 export const monomorphizeProgram = ({
   modules,
@@ -31,7 +32,7 @@ export const monomorphizeProgram = ({
         string,
         ReadonlyMap<HirExprId, TypeId>
       >;
-      callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
+      callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
       callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
       callInstanceKeys: ReadonlyMap<HirExprId, string>;
       callTraitDispatches: ReadonlySet<HirExprId>;
@@ -44,9 +45,9 @@ export const monomorphizeProgram = ({
   );
   const programSymbols = buildProgramSymbolArena(stableModules);
 
-  const importTargetsByModule = new Map<string, Map<SymbolId, SymbolRef>>();
+  const importTargetsByModule = new Map<string, Map<SymbolId, ProgramSymbolRef>>();
   stableModules.forEach((mod) => {
-    const byLocal = new Map<SymbolId, SymbolRef>();
+    const byLocal = new Map<SymbolId, ProgramSymbolRef>();
     mod.binding.imports.forEach((imp) => {
       if (!imp.target) return;
       byLocal.set(imp.local, { moduleId: imp.target.moduleId, symbol: imp.target.symbol });
@@ -54,7 +55,7 @@ export const monomorphizeProgram = ({
     importTargetsByModule.set(mod.moduleId, byLocal);
   });
 
-  const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined =>
+  const resolveImportTarget = (ref: ProgramSymbolRef): ProgramSymbolRef | undefined =>
     importTargetsByModule.get(ref.moduleId)?.get(ref.symbol);
 
   const canonicalSymbolRef = createCanonicalSymbolRefResolver({ resolveImportTarget });
@@ -73,6 +74,56 @@ export const monomorphizeProgram = ({
   const requestedInstances: MonomorphizedInstanceRequest[] = [];
 
   modules.forEach((caller) => {
+    const callTargets = caller.typing.callTargets;
+    const callTypeArguments = caller.typing.callTypeArguments;
+
+    callTargets.forEach((targets, callId) => {
+      const typeArgs = callTypeArguments.get(callId);
+      if (!typeArgs || typeArgs.length === 0) {
+        return;
+      }
+      targets.forEach((targetRef) => {
+        if (targetRef.moduleId === caller.moduleId) {
+          return;
+        }
+        const canonicalCallee = canonicalSymbolRef({
+          moduleId: targetRef.moduleId,
+          symbol: targetRef.symbol,
+        });
+        const callee = semantics.get(canonicalCallee.moduleId);
+        const calleeCtx = callee ? typingContextFor(canonicalCallee.moduleId) : undefined;
+        if (!callee || !calleeCtx) {
+          return;
+        }
+        const calleeSignature =
+          callee.typing.functions.getSignature(canonicalCallee.symbol);
+        const typeParams = calleeSignature?.typeParams ?? [];
+        if (!calleeSignature || typeParams.length === 0) {
+          return;
+        }
+        if (typeArgs.length !== typeParams.length) {
+          return;
+        }
+        requestedInstances.push({
+          callee: programSymbols.idOf(canonicalCallee),
+          typeArgs,
+        });
+        const substitution = new Map(
+          typeParams.map(
+            (param, index) => [param.typeParam, typeArgs[index]!] as const
+          )
+        );
+        typeGenericFunctionBody({
+          symbol: canonicalCallee.symbol,
+          signature: calleeSignature,
+          substitution,
+          ctx: calleeCtx,
+          state: createTypingState("relaxed"),
+        });
+        touchedModules.add(canonicalCallee.moduleId);
+      });
+    });
+
     const sortedLocalSymbols = Array.from(
       caller.typing.functionInstantiationInfo.keys()
     ).sort((a, b) => a - b);
@@ -185,7 +236,7 @@ export const monomorphizeProgram = ({
         string,
         ReadonlyMap<HirExprId, TypeId>
       >;
-      callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
+      callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
       callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
       callInstanceKeys: ReadonlyMap<HirExprId, string>;
       callTraitDispatches: ReadonlySet<HirExprId>;
