@@ -237,6 +237,9 @@ describe("overload resolution", () => {
 
     const instanceKey = `${mainSymbol}<>`;
     const callTarget = typing.callTargets.get(callExpr);
-    expect(callTarget?.get(instanceKey)).toBe(fooPointSymbol);
+    expect(callTarget?.get(instanceKey)).toEqual({
+      moduleId: "local",
+      symbol: fooPointSymbol,
+    });
   });
 });

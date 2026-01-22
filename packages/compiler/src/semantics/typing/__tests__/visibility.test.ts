@@ -10,6 +10,8 @@ import { modulePathToString } from "../../../modules/path.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { DiagnosticError } from "../../../diagnostics/index.js";
 import { toSourceSpan } from "../../utils.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
+import type { HirMethodCallExpr } from "../../hir/nodes.js";
 
 const buildModule = ({
   source,
@@ -269,6 +271,53 @@ pub fn call_private() -> i32
     if (caught instanceof DiagnosticError) {
       expect(caught.diagnostic.code).toBe("TY0009");
     }
+  });
+
+  it("allows calling api methods across packages", () => {
+    const mainPath: ModulePath = { namespace: "src", segments: ["api-methods"] };
+    const mainSource = `
+use pkg::dep::all
+
+pub fn call() -> i32
+  make().expose()
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, externalPath)],
+    });
+
+    const result = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[external.module.id, externalSemantics.exports]]),
+      dependencies: new Map([[external.module.id, externalSemantics]]),
+    });
+
+    const methodCall = Array.from(result.hir.expressions.values()).find(
+      (expr): expr is HirMethodCallExpr =>
+        expr.exprKind === "method-call" && expr.method === "expose"
+    );
+    expect(methodCall).toBeDefined();
+
+    const symbolTable = getSymbolTable(result);
+    const callSymbol = symbolTable.resolve("call", symbolTable.rootScope);
+    expect(typeof callSymbol).toBe("number");
+    if (typeof callSymbol !== "number" || !methodCall) return;
+
+    const externalSymbols = getSymbolTable(externalSemantics);
+    const exposeSymbol = externalSymbols.resolve("expose", externalSymbols.rootScope);
+    expect(typeof exposeSymbol).toBe("number");
+    if (typeof exposeSymbol !== "number") return;
+
+    const instanceKey = `${callSymbol}<>`;
+    const target = result.typing.callTargets.get(methodCall.id)?.get(instanceKey);
+    expect(target).toEqual({
+      moduleId: external.module.id,
+      symbol: exposeSymbol,
+    });
   });
 
   it("rejects constructing external types that require hidden fields", () => {

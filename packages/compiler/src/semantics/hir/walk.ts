@@ -175,6 +175,12 @@ export const walkExpression = ({
             if (visitExpression(arg.expr)) return true;
           }
           break;
+        case "method-call":
+          if (visitExpression(expr.target)) return true;
+          for (const arg of expr.args) {
+            if (visitExpression(arg.expr)) return true;
+          }
+          break;
         case "tuple":
           for (const entry of expr.elements) {
             if (visitExpression(entry)) return true;

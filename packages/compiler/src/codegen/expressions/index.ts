@@ -3,7 +3,7 @@ import type {
   ExpressionCompiler,
   ExpressionCompilerParams,
 } from "../context.js";
-import { compileCallExpr } from "./calls.js";
+import { compileCallExpr, compileMethodCallExpr } from "./calls.js";
 import { compileBlockExpr } from "./blocks.js";
 import {
   compileBreakExpr,
@@ -46,6 +46,11 @@ export const compileExpression: ExpressionCompiler = ({
       throw new Error("overload sets cannot be evaluated directly");
     case "call":
       return compileCallExpr(expr, ctx, fnCtx, compileExpression, {
+        tailPosition,
+        expectedResultTypeId,
+      });
+    case "method-call":
+      return compileMethodCallExpr(expr, ctx, fnCtx, compileExpression, {
         tailPosition,
         expectedResultTypeId,
       });

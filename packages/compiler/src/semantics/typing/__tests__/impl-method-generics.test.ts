@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HirCallExpr } from "../../hir/nodes.js";
+import type { HirMethodCallExpr } from "../../hir/nodes.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
@@ -18,15 +18,8 @@ describe("impl method generics", () => {
     expect(mainSymbol).toBeDefined();
 
     const pickCall = Array.from(hir.expressions.values()).find(
-      (expr): expr is HirCallExpr => {
-        if (expr.exprKind !== "call") {
-          return false;
-        }
-        const callee = hir.expressions.get(expr.callee);
-        return (
-          callee?.exprKind === "identifier" && callee.symbol === pickSymbol
-        );
-      }
+      (expr): expr is HirMethodCallExpr =>
+        expr.exprKind === "method-call" && expr.method === "pick"
     );
     expect(pickCall).toBeDefined();
 
@@ -57,15 +50,8 @@ describe("impl method generics", () => {
     expect(unwrapSymbol).toBeDefined();
 
     const unwrapCall = Array.from(hir.expressions.values()).find(
-      (expr): expr is HirCallExpr => {
-        if (expr.exprKind !== "call") return false;
-        const callee = hir.expressions.get(expr.callee);
-        return (
-          callee?.exprKind === "identifier" &&
-          typeof unwrapSymbol === "number" &&
-          callee.symbol === unwrapSymbol
-        );
-      }
+      (expr): expr is HirMethodCallExpr =>
+        expr.exprKind === "method-call" && expr.method === "unwrap"
     );
     expect(unwrapCall).toBeDefined();
 

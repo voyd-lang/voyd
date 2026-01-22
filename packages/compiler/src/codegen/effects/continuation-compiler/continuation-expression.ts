@@ -6,6 +6,7 @@ import type {
   FunctionContext,
   HirBlockExpr,
   HirCallExpr,
+  HirMethodCallExpr,
   HirExprId,
   HirIfExpr,
   HirMatchExpr,
@@ -15,7 +16,7 @@ import type {
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
 import { getExprBinaryenType, getRequiredExprType, wasmTypeFor } from "../../types.js";
-import { compileCallExpr } from "../../expressions/calls.js";
+import { compileCallExpr, compileMethodCallExpr } from "../../expressions/calls.js";
 import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
 import {
   compileBreakExpr,
@@ -332,6 +333,11 @@ export const createContinuationExpressionCompiler = ({
         throw new Error("overload sets cannot be evaluated directly");
       case "call":
         return compileCallExpr(expr as HirCallExpr, ctx, fnCtx, compileExpr, {
+          tailPosition,
+          expectedResultTypeId,
+        });
+      case "method-call":
+        return compileMethodCallExpr(expr as HirMethodCallExpr, ctx, fnCtx, compileExpr, {
           tailPosition,
           expectedResultTypeId,
         });

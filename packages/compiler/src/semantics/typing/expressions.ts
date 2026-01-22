@@ -4,6 +4,7 @@ import {
   typeAssignExpr,
   typeBlockExpr,
   typeCallExpr,
+  typeMethodCallExpr,
   formatFunctionInstanceKey,
   typeFieldAccessExpr,
   typeIdentifierExpr,
@@ -88,6 +89,8 @@ const resolveExpressionType = (
       return typeOverloadSetExpr(expr, ctx);
     case "call":
       return typeCallExpr(expr, ctx, state, expectedType);
+    case "method-call":
+      return typeMethodCallExpr(expr, ctx, state, expectedType);
     case "block":
       return typeBlockExpr(expr, ctx, state, expectedType);
     case "if":

@@ -119,6 +119,7 @@ type DiagnosticParamsMap = {
     | { kind: "call-missing-argument"; paramName: string }
     | { kind: "call-missing-labeled-argument"; label: string }
     | { kind: "call-extra-arguments"; extra: number };
+  TY0022: { kind: "unknown-method"; name: string; receiver?: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -412,6 +413,15 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0021"]>,
+  TY0022: {
+    code: "TY0022",
+    message: (params) =>
+      params.receiver
+        ? `method '${params.name}' is not defined on ${params.receiver}`
+        : `method '${params.name}' is not defined`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0022"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

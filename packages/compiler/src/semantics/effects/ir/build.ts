@@ -36,9 +36,12 @@ export const buildEffectsIr = ({
       handlerExprs.add(expr.id);
       return;
     }
-    if (expr.exprKind !== "call") return;
+    if (expr.exprKind !== "call" && expr.exprKind !== "method-call") return;
 
-    const calleeSymbol = callTarget(hir.expressions.get(expr.callee));
+    const calleeSymbol =
+      expr.exprKind === "call"
+        ? callTarget(hir.expressions.get(expr.callee))
+        : undefined;
     const kind = callKindFor({ callId: expr.id, calleeSymbol, info });
     calls.set(expr.id, {
       exprId: expr.id,
@@ -53,4 +56,3 @@ export const buildEffectsIr = ({
 
   return { info, calls, handlerExprs };
 };
-

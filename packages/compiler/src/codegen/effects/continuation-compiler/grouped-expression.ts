@@ -6,6 +6,7 @@ import type {
   FunctionContext,
   HirBlockExpr,
   HirCallExpr,
+  HirMethodCallExpr,
   HirCondExpr,
   HirExprId,
   HirIfExpr,
@@ -16,7 +17,7 @@ import type {
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
 import { getExprBinaryenType, getRequiredExprType, wasmTypeFor } from "../../types.js";
-import { compileCallExpr } from "../../expressions/calls.js";
+import { compileCallExpr, compileMethodCallExpr } from "../../expressions/calls.js";
 import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
 import {
   compileBreakExpr,
@@ -454,7 +455,7 @@ export const createGroupedContinuationExpressionCompiler = ({
 
     const siteOrder = cfg.siteOrderByExpr.get(exprId);
     if (typeof siteOrder === "number") {
-      if (expr.exprKind !== "call") {
+      if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
         throw new Error("continuation targets must be call expressions");
       }
       const site = cfg.siteByExprId.get(exprId);
@@ -469,13 +470,19 @@ export const createGroupedContinuationExpressionCompiler = ({
         ctx.mod.i32.eqz(started()),
         ctx.mod.i32.eq(activeSiteOrder(), ctx.mod.i32.const(siteOrder))
       );
-      const normal = compileCallExpr(
-        expr as HirCallExpr,
-        ctx,
-        fnCtx,
-        compileExpr,
-        { tailPosition, expectedResultTypeId }
-      );
+      const normal =
+        expr.exprKind === "call"
+          ? compileCallExpr(expr as HirCallExpr, ctx, fnCtx, compileExpr, {
+              tailPosition,
+              expectedResultTypeId,
+            })
+          : compileMethodCallExpr(
+              expr as HirMethodCallExpr,
+              ctx,
+              fnCtx,
+              compileExpr,
+              { tailPosition, expectedResultTypeId }
+            );
       const resumeSet = ctx.mod.local.set(startedLocal.index, ctx.mod.i32.const(1));
       const resumeBox = resumeLocal
         ? ctx.mod.local.get(resumeLocal.index, resumeLocal.type)
@@ -555,6 +562,11 @@ export const createGroupedContinuationExpressionCompiler = ({
         throw new Error("overload sets cannot be evaluated directly");
       case "call":
         return compileCallExpr(expr, ctx, fnCtx, compileExpr, {
+          tailPosition,
+          expectedResultTypeId,
+        });
+      case "method-call":
+        return compileMethodCallExpr(expr, ctx, fnCtx, compileExpr, {
           tailPosition,
           expectedResultTypeId,
         });

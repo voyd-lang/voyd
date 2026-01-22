@@ -27,6 +27,7 @@ import type { StructuralField, TypeArena } from "./type-arena.js";
 import type { TypeTable } from "./type-table.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import type { Diagnostic } from "../ids.js";
+import type { SymbolRef } from "./symbol-ref.js";
 
 export type TypeCheckMode = "relaxed" | "strict";
 
@@ -62,7 +63,7 @@ export interface TypingResult {
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
   tailResumptions: ReadonlyMap<HirExprId, HirEffectHandlerClause["tailResumption"]>;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
-  callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolId>>;
+  callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolRef>>;
   functionInstances: ReadonlyMap<string, TypeId>;
   callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
   callInstanceKeys: ReadonlyMap<HirExprId, string>;
@@ -127,7 +128,7 @@ export interface Arg {
 }
 
 export interface CallResolution {
-  targets: Map<HirExprId, Map<string, SymbolId>>;
+  targets: Map<HirExprId, Map<string, SymbolRef>>;
   typeArguments: Map<HirExprId, readonly TypeId[]>;
   instanceKeys: Map<HirExprId, string>;
   traitDispatches: Set<HirExprId>;
