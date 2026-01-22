@@ -43,7 +43,7 @@ import { typeExpression } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
 import { getValueType } from "./identifier.js";
 import { assertMutableObjectBinding, findBindingSymbol } from "./mutability.js";
-import { importTargetFor } from "../imports.js";
+import { importTargetFor, resolveImportedValue } from "../imports.js";
 import type {
   Arg,
   FunctionSignature,
@@ -53,7 +53,7 @@ import type {
   TypingState,
 } from "../types.js";
 import { assertMemberAccess } from "../visibility.js";
-import { localSymbolForSymbolRef } from "../symbol-ref-utils.js";
+import { canonicalSymbolRef, localSymbolForSymbolRef } from "../symbol-ref-utils.js";
 
 export const typeCallExpr = (
   expr: HirCallExpr,
@@ -135,19 +135,31 @@ export const typeCallExpr = (
   }
 
   if (calleeExpr.exprKind === "identifier") {
-    const record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
-    const metadata = (record.metadata ?? {}) as {
+    let record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
+    let metadata = (record.metadata ?? {}) as {
       intrinsic?: boolean;
       intrinsicName?: string;
       intrinsicUsesSignature?: boolean;
       unresolved?: boolean;
     };
     if (metadata.unresolved) {
-      return reportUnknownFunction({
-        name: record.name,
-        span: calleeExpr.span,
+      const resolved = resolveUnresolvedInstanceMethodCall({
+        calleeSymbol: calleeExpr.symbol,
+        methodName: record.name,
+        args,
         ctx,
+        state,
+        span: normalizeSpan(calleeExpr.span, expr.span),
       });
+      if (!resolved) {
+        return reportUnknownFunction({
+          name: record.name,
+          span: calleeExpr.span,
+          ctx,
+        });
+      }
+      record = ctx.symbolTable.getSymbol(calleeExpr.symbol);
+      metadata = (record.metadata ?? {}) as typeof metadata;
     }
     assertMemberAccess({
       symbol: calleeExpr.symbol,
@@ -860,6 +872,136 @@ const reportUnknownFunction = ({
     params: { kind: "unknown-function", name },
     span: normalizeSpan(span),
   });
+
+const resolveUnresolvedInstanceMethodCall = ({
+  calleeSymbol,
+  methodName,
+  args,
+  ctx,
+  state,
+  span,
+}: {
+  calleeSymbol: SymbolId;
+  methodName: string;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  span: SourceSpan;
+}): boolean => {
+  if (args.length === 0) {
+    return false;
+  }
+
+  const receiverType = args[0]?.type;
+  const receiverNominal =
+    typeof receiverType === "number"
+      ? getNominalComponent(receiverType, ctx)
+      : undefined;
+  if (typeof receiverNominal !== "number") {
+    return false;
+  }
+
+  const receiverDesc = ctx.arena.get(receiverNominal);
+  if (receiverDesc.kind !== "nominal-object") {
+    return false;
+  }
+
+  const candidates = findInstanceMethodCandidates({
+    owner: receiverDesc.owner,
+    methodName,
+    ctx,
+  });
+
+  if (candidates.length === 0) {
+    return false;
+  }
+
+  if (candidates.length > 1) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0007",
+      params: { kind: "ambiguous-overload", name: methodName },
+      span,
+    });
+  }
+
+  const [target] = candidates;
+  if (!target) {
+    return false;
+  }
+
+  ctx.symbolTable.setSymbolMetadata(calleeSymbol, {
+    unresolved: false,
+    import: target,
+  });
+  ctx.importsByLocal.set(calleeSymbol, target);
+  const bucket = ctx.importAliasesByModule.get(target.moduleId) ?? new Map();
+  bucket.set(target.symbol, calleeSymbol);
+  ctx.importAliasesByModule.set(target.moduleId, bucket);
+
+  const imported = resolveImportedValue({ symbol: calleeSymbol, ctx });
+  if (!imported) {
+    return false;
+  }
+
+  assertMemberAccess({
+    symbol: calleeSymbol,
+    ctx,
+    state,
+    span,
+    context: "calling member",
+  });
+
+  return true;
+};
+
+const findInstanceMethodCandidates = ({
+  owner,
+  methodName,
+  ctx,
+}: {
+  owner: { moduleId: string; symbol: SymbolId };
+  methodName: string;
+  ctx: TypingContext;
+}): { moduleId: string; symbol: SymbolId }[] => {
+  const priority = ctx.dependencies.get(owner.moduleId);
+  const ordered = [
+    ...(priority ? [priority] : []),
+    ...Array.from(ctx.dependencies.values()).filter(
+      (dependency) => dependency.moduleId !== owner.moduleId
+    ),
+  ];
+
+  const matches: { moduleId: string; symbol: SymbolId }[] = [];
+  ordered.forEach((dependency) => {
+    const exported = dependency.exports.get(methodName);
+    if (!exported || typeof exported.memberOwner !== "number") {
+      return;
+    }
+    if (exported.isStatic === true) {
+      return;
+    }
+
+    const ownerRef = canonicalSymbolRef({
+      symbol: exported.memberOwner,
+      symbolTable: dependency.symbolTable,
+      moduleId: dependency.moduleId,
+    });
+    if (ownerRef.moduleId !== owner.moduleId || ownerRef.symbol !== owner.symbol) {
+      return;
+    }
+
+    const symbols =
+      exported.symbols && exported.symbols.length > 0
+        ? exported.symbols
+        : [exported.symbol];
+    symbols.forEach((symbol) => {
+      matches.push({ moduleId: dependency.moduleId, symbol });
+    });
+  });
+
+  return matches;
+};
 
 const resolveCurriedCallReturnType = ({
   args,
