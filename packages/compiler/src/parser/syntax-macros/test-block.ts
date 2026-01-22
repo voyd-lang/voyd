@@ -2,14 +2,13 @@ import {
   type Expr,
   Form,
   IdentifierAtom,
-  IntAtom,
-  formCallsInternal,
   isForm,
   isIdentifierAtom,
 } from "../ast/index.js";
 import { cloneAttributes } from "../ast/syntax.js";
 import { TestAttribute } from "../attributes.js";
 import type { SyntaxMacro } from "./types.js";
+import { parseStringValue } from "./string-value.js";
 
 type TestModifiers = {
   skip: boolean;
@@ -20,69 +19,6 @@ type ParsedTest = {
   description?: string;
   modifiers: TestModifiers;
   body: Form;
-};
-
-const parseStringLiteral = (expr?: Expr): string | null => {
-  if (!expr) {
-    return null;
-  }
-
-  if (
-    !isForm(expr) ||
-    (!expr.calls("new_string") && !expr.callsInternal("new_string"))
-  ) {
-    return null;
-  }
-
-  const rawValue = expr.at(1);
-  if (!isForm(rawValue) || !formCallsInternal(rawValue, "object_literal")) {
-    return null;
-  }
-
-  const fromField = rawValue.rest.find((entry) => {
-    if (!isForm(entry) || !entry.calls(":")) {
-      return false;
-    }
-    const key = entry.at(1);
-    return isIdentifierAtom(key) && key.value === "from";
-  });
-
-  if (!fromField || !isForm(fromField)) {
-    return null;
-  }
-
-  const fromValue = fromField.at(2);
-  if (!isForm(fromValue)) {
-    return null;
-  }
-
-  const codes: number[] = [];
-  fromValue.rest.forEach((entry, index) => {
-    if (index === 0 && isForm(entry) && entry.callsInternal("generics")) {
-      return;
-    }
-
-    if (entry instanceof IntAtom) {
-      const parsed = Number.parseInt(entry.value, 10);
-      if (Number.isFinite(parsed)) {
-        codes.push(parsed);
-      }
-      return;
-    }
-
-    if (isIdentifierAtom(entry)) {
-      const parsed = Number.parseInt(entry.value, 10);
-      if (Number.isFinite(parsed)) {
-        codes.push(parsed);
-      }
-    }
-  });
-
-  if (codes.length === 0) {
-    return null;
-  }
-
-  return String.fromCharCode(...codes);
 };
 
 const parseTestForm = (form: Form): ParsedTest | null => {
@@ -121,7 +57,7 @@ const parseTestForm = (form: Form): ParsedTest | null => {
   let description: string | undefined;
 
   if (label) {
-    const parsed = parseStringLiteral(label);
+    const parsed = isIdentifierAtom(label) ? null : parseStringValue(label);
     if (parsed !== null) {
       description = parsed;
     } else if (

@@ -807,28 +807,17 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                       [
                         "new_string",
                         [
-                          "object_literal",
-                          [
-                            ":",
-                            "from",
-                            [
-                              "FixedArray",
-                              [
-                                "generics",
-                                "i32",
-                              ],
-                              "72",
-                              "101",
-                              "121",
-                              "32",
-                              "116",
-                              "104",
-                              "101",
-                              "114",
-                              "101",
-                              "33",
-                            ],
-                          ],
+                          "fixed_array_literal",
+                          "72",
+                          "101",
+                          "121",
+                          "32",
+                          "116",
+                          "104",
+                          "101",
+                          "114",
+                          "101",
+                          "33",
                         ],
                       ],
                     ],
@@ -1081,21 +1070,10 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
             [
               "new_string",
               [
-                "object_literal",
-                [
-                  ":",
-                  "from",
-                  [
-                    "FixedArray",
-                    [
-                      "generics",
-                      "i32",
-                    ],
-                    "100",
-                    "105",
-                    "118",
-                  ],
-                ],
+                "fixed_array_literal",
+                "100",
+                "105",
+                "118",
               ],
             ],
             [
@@ -1103,41 +1081,19 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
               [
                 "new_string",
                 [
-                  "object_literal",
-                  [
-                    ":",
-                    "from",
-                    [
-                      "FixedArray",
-                      [
-                        "generics",
-                        "i32",
-                      ],
-                      "104",
-                      "105",
-                    ],
-                  ],
+                  "fixed_array_literal",
+                  "104",
+                  "105",
                 ],
               ],
               [
                 "new_string",
                 [
-                  "object_literal",
-                  [
-                    ":",
-                    "from",
-                    [
-                      "FixedArray",
-                      [
-                        "generics",
-                        "i32",
-                      ],
-                      "116",
-                      "114",
-                      "117",
-                      "101",
-                    ],
-                  ],
+                  "fixed_array_literal",
+                  "116",
+                  "114",
+                  "117",
+                  "101",
                 ],
               ],
               [
@@ -1145,38 +1101,16 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                 [
                   "new_string",
                   [
-                    "object_literal",
-                    [
-                      ":",
-                      "from",
-                      [
-                        "FixedArray",
-                        [
-                          "generics",
-                          "i32",
-                        ],
-                        "105",
-                      ],
-                    ],
+                    "fixed_array_literal",
+                    "105",
                   ],
                 ],
                 [
                   "new_string",
                   [
-                    "object_literal",
-                    [
-                      ":",
-                      "from",
-                      [
-                        "FixedArray",
-                        [
-                          "generics",
-                          "i32",
-                        ],
-                        "97",
-                        "109",
-                      ],
-                    ],
+                    "fixed_array_literal",
+                    "97",
+                    "109",
                   ],
                 ],
               ],
@@ -1188,18 +1122,31 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                 [
                   "new_string",
                   [
-                    "object_literal",
+                    "fixed_array_literal",
+                    "112",
+                  ],
+                ],
+                [
+                  "array_literal",
+                  [
+                    "new_string",
                     [
-                      ":",
-                      "from",
-                      [
-                        "FixedArray",
-                        [
-                          "generics",
-                          "i32",
-                        ],
-                        "112",
-                      ],
+                      "fixed_array_literal",
+                      "114",
+                      "101",
+                      "97",
+                      "100",
+                      "121",
+                    ],
+                  ],
+                  [
+                    "new_string",
+                    [
+                      "fixed_array_literal",
+                      "116",
+                      "114",
+                      "117",
+                      "101",
                     ],
                   ],
                 ],
@@ -1208,78 +1155,21 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                   [
                     "new_string",
                     [
-                      "object_literal",
-                      [
-                        ":",
-                        "from",
-                        [
-                          "FixedArray",
-                          [
-                            "generics",
-                            "i32",
-                          ],
-                          "114",
-                          "101",
-                          "97",
-                          "100",
-                          "121",
-                        ],
-                      ],
-                    ],
-                  ],
-                  [
-                    "new_string",
-                    [
-                      "object_literal",
-                      [
-                        ":",
-                        "from",
-                        [
-                          "FixedArray",
-                          [
-                            "generics",
-                            "i32",
-                          ],
-                          "116",
-                          "114",
-                          "117",
-                          "101",
-                        ],
-                      ],
-                    ],
-                  ],
-                ],
-                [
-                  "array_literal",
-                  [
-                    "new_string",
-                    [
-                      "object_literal",
-                      [
-                        ":",
-                        "from",
-                        [
-                          "FixedArray",
-                          [
-                            "generics",
-                            "i32",
-                          ],
-                          "72",
-                          "101",
-                          "108",
-                          "108",
-                          "111",
-                          "32",
-                          "116",
-                          "104",
-                          "101",
-                          "114",
-                          "101",
-                          "33",
-                          "33",
-                          "32",
-                        ],
-                      ],
+                      "fixed_array_literal",
+                      "72",
+                      "101",
+                      "108",
+                      "108",
+                      "111",
+                      "32",
+                      "116",
+                      "104",
+                      "101",
+                      "114",
+                      "101",
+                      "33",
+                      "33",
+                      "32",
                     ],
                   ],
                 ],
@@ -1289,19 +1179,8 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                 [
                   "new_string",
                   [
-                    "object_literal",
-                    [
-                      ":",
-                      "from",
-                      [
-                        "FixedArray",
-                        [
-                          "generics",
-                          "i32",
-                        ],
-                        "112",
-                      ],
-                    ],
+                    "fixed_array_literal",
+                    "112",
                   ],
                 ],
                 [
@@ -1312,36 +1191,25 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                   [
                     "new_string",
                     [
-                      "object_literal",
-                      [
-                        ":",
-                        "from",
-                        [
-                          "FixedArray",
-                          [
-                            "generics",
-                            "i32",
-                          ],
-                          "72",
-                          "111",
-                          "119",
-                          "32",
-                          "97",
-                          "114",
-                          "101",
-                          "32",
-                          "121",
-                          "111",
-                          "117",
-                          "32",
-                          "116",
-                          "111",
-                          "100",
-                          "97",
-                          "121",
-                          "32",
-                        ],
-                      ],
+                      "fixed_array_literal",
+                      "72",
+                      "111",
+                      "119",
+                      "32",
+                      "97",
+                      "114",
+                      "101",
+                      "32",
+                      "121",
+                      "111",
+                      "117",
+                      "32",
+                      "116",
+                      "111",
+                      "100",
+                      "97",
+                      "121",
+                      "32",
                     ],
                   ],
                 ],

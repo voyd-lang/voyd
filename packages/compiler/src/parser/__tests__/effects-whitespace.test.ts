@@ -149,19 +149,11 @@ fn handled()
                 [
                   "new_string",
                   [
-                    "object_literal",
-                    [
-                      ":",
-                      "from",
-                      [
-                        "FixedArray",
-                        ["generics", "i32"],
-                        "100",
-                        "111",
-                        "110",
-                        "101",
-                      ],
-                    ],
+                    "fixed_array_literal",
+                    "100",
+                    "111",
+                    "110",
+                    "101",
                   ],
                 ],
               ],
@@ -214,19 +206,11 @@ fn handled()
                 [
                   "new_string",
                   [
-                    "object_literal",
-                    [
-                      ":",
-                      "from",
-                      [
-                        "FixedArray",
-                        ["generics", "i32"],
-                        "100",
-                        "111",
-                        "110",
-                        "101",
-                      ],
-                    ],
+                    "fixed_array_literal",
+                    "100",
+                    "111",
+                    "110",
+                    "101",
                   ],
                 ],
               ],

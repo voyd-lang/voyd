@@ -1,4 +1,5 @@
 pub use optional
+pub use string
 pub use std::optional::types::{ Optional, Option, Some, None }
 pub use std::optional::fns::{
   some,
@@ -12,4 +13,7 @@ pub use std::optional::fns::{
   or_value,
   or_else
 }
+pub use std::array::{ Array, ArrayPop, new_array }
+pub use std::string::types::{ String }
+pub use std::string::fns::{ new_string }
 pub use std::test::assertions::{ Test, assert }

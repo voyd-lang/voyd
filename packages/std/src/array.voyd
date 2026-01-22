@@ -1,0 +1,417 @@
+use std::fixed_array::fns::{ new_fixed_array }
+use std::optional::types::all
+use std::test::assertions::all
+
+pub obj Array<T> {
+  storage: FixedArray<T>,
+  count: i32
+}
+
+pub obj ArrayPop<T> {
+  array: Array<T>,
+  value: Optional<T>
+}
+
+pub fn new_array<T>({ from source: FixedArray<T> }): () -> Array<T>
+  Array<T> { storage: source, count: __array_len(source) }
+
+impl<T> Array<T>
+  api fn new(): () -> Array<T>
+    Array<T> { storage: new_fixed_array<T>(4), count: 0 }
+
+  api fn with_capacity(size: i32): () -> Array<T>
+    let capacity = if size > 0 then: size else: 0
+    Array<T> { storage: new_fixed_array<T>(capacity), count: 0 }
+
+  api fn from(source: FixedArray<T>): () -> Array<T>
+    Array<T> { storage: source, count: __array_len(source) }
+
+  api fn length(self): () -> i32
+    self.count
+
+  api fn capacity(self): () -> i32
+    __array_len(self.storage)
+
+  api fn is_empty(self): () -> bool
+    self.count == 0
+
+  api fn reserve(self, additional: i32): () -> Array<T>
+    if additional <= 0 then:
+      return self
+
+    let required = self.count + additional
+    if required <= __array_len(self.storage) then:
+      return self
+
+    let storage = resized_storage(self.storage, self.count, required)
+    Array<T> { storage: storage, count: self.count }
+
+  api fn clear(self): () -> Array<T>
+    Array<T> { storage: self.storage, count: 0 }
+
+  api fn first(self): () -> Optional<T>
+    self.get(0)
+
+  api fn last(self): () -> Optional<T>
+    self.get(-1)
+
+  api fn get(self, index: i32): () -> Optional<T>
+    let computed_index = compute_index(index, self.count)
+    if computed_index < 0 then:
+      return None {}
+    if computed_index >= self.count then:
+      return None {}
+    Some<T> { value: __array_get(self.storage, computed_index) }
+
+  api fn set(self, index: i32, value: T): () -> Array<T>
+    let computed_index = compute_index(index, self.count)
+    if computed_index < 0 then:
+      return self
+    if computed_index >= self.count then:
+      return self
+
+    __array_set(self.storage, computed_index, value)
+    Array<T> { storage: self.storage, count: self.count }
+
+  api fn push(self, value: T): () -> Array<T>
+    let storage =
+      if self.count >= __array_len(self.storage) then:
+        resized_storage(self.storage, self.count, self.count + 1)
+      else:
+        self.storage
+
+    __array_set(storage, self.count, value)
+    Array<T> { storage: storage, count: self.count + 1 }
+
+  api fn pop(self): () -> ArrayPop<T>
+    if self.count == 0 then:
+      return ArrayPop<T> { array: self, value: None {} }
+
+    let index = self.count - 1
+    let value = __array_get(self.storage, index)
+    let next_array = Array<T> { storage: self.storage, count: index }
+    ArrayPop<T> { array: next_array, value: Some<T> { value: value } }
+
+  api fn extend(self, other: Array<T>): () -> Array<T>
+    if other.count == 0 then:
+      return self
+
+    let required = self.count + other.count
+    let storage =
+      if required > __array_len(self.storage) then:
+        resized_storage(self.storage, self.count, required)
+      else:
+        self.storage
+
+    __array_copy(storage, {
+      from: other.storage,
+      to_index: self.count,
+      from_index: 0,
+      count: other.count
+    })
+
+    Array<T> { storage: storage, count: required }
+
+  api fn concat(self, other: Array<T>): () -> Array<T>
+    let new_length = self.count + other.count
+    let new_storage = new_fixed_array<T>(new_length)
+
+    __array_copy(new_storage, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.count
+    })
+
+    __array_copy(new_storage, {
+      from: other.storage,
+      to_index: self.count,
+      from_index: 0,
+      count: other.count
+    })
+
+    Array<T> { storage: new_storage, count: new_length }
+
+  api fn raw_storage(self): () -> FixedArray<T>
+    self.storage
+
+  api fn to_fixed_array(self): () -> FixedArray<T>
+    let new_storage = new_fixed_array<T>(self.count)
+    __array_copy(new_storage, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.count
+    })
+    new_storage
+
+  api fn remove(self, index: i32): () -> Array<T>
+    let computed_index = compute_index(index, self.count)
+    if computed_index < 0 then:
+      return self
+    if computed_index >= self.count then:
+      return self
+
+    let new_length = self.count - 1
+    let new_storage = new_fixed_array<T>(new_length)
+
+    __array_copy(new_storage, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: computed_index
+    })
+
+    __array_copy(new_storage, {
+      from: self.storage,
+      to_index: computed_index,
+      from_index: computed_index + 1,
+      count: new_length - computed_index
+    })
+
+    Array<T> { storage: new_storage, count: new_length }
+
+  api fn insert(self, index: i32, value: T): () -> Array<T>
+    let computed_index = compute_index(index, self.count)
+    if computed_index < 0 then:
+      return self
+    if computed_index >= self.count then:
+      return self.push(value)
+
+    let new_length = self.count + 1
+    let new_storage = new_fixed_array<T>(new_length)
+
+    __array_copy(new_storage, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: computed_index
+    })
+
+    __array_set(new_storage, computed_index, value)
+
+    __array_copy(new_storage, {
+      from: self.storage,
+      to_index: computed_index + 1,
+      from_index: computed_index,
+      count: self.count - computed_index
+    })
+
+    Array<T> { storage: new_storage, count: new_length }
+
+  api fn slice(self, start: i32, end: i32): () -> Array<T>
+    let computed_start = compute_index(start, self.count)
+    if computed_start < 0 then:
+      return Array<T> { storage: new_fixed_array<T>(0), count: 0 }
+    if computed_start >= self.count then:
+      return Array<T> { storage: new_fixed_array<T>(0), count: 0 }
+
+    let computed_end = compute_index(end, self.count)
+    if computed_end < 0 then:
+      return Array<T> { storage: new_fixed_array<T>(0), count: 0 }
+
+    let clamped_end = if computed_end > self.count then: self.count else: computed_end
+    if computed_start >= clamped_end then:
+      return Array<T> { storage: new_fixed_array<T>(0), count: 0 }
+
+    let new_length = clamped_end - computed_start
+    let new_storage = new_fixed_array<T>(new_length)
+    __array_copy(new_storage, {
+      from: self.storage,
+      to_index: 0,
+      from_index: computed_start,
+      count: new_length
+    })
+
+    Array<T> { storage: new_storage, count: new_length }
+
+  api fn splice(self, opts: {
+    start: i32,
+    delete_count: i32,
+    items: Array<T>
+  }): () -> Array<T>
+    let computed_start = compute_index(opts.start, self.count)
+    if computed_start < 0 then:
+      return self
+    if computed_start >= self.count then:
+      return self
+
+    let safe_delete = if opts.delete_count < 0 then: 0 else: opts.delete_count
+    let remaining = self.count - computed_start
+    let clamped_delete = if safe_delete > remaining then: remaining else: safe_delete
+
+    let new_length = self.count - clamped_delete + opts.items.count
+    let new_storage = new_fixed_array<T>(new_length)
+
+    __array_copy(new_storage, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: computed_start
+    })
+
+    __array_copy(new_storage, {
+      from: opts.items.storage,
+      to_index: computed_start,
+      from_index: 0,
+      count: opts.items.count
+    })
+
+    __array_copy(new_storage, {
+      from: self.storage,
+      to_index: computed_start + opts.items.count,
+      from_index: computed_start + clamped_delete,
+      count: self.count - computed_start - clamped_delete
+    })
+
+    Array<T> { storage: new_storage, count: new_length }
+
+  api fn each(self, f: (v: T) -> void): () -> void
+    var index = 0
+    while index < self.count do:
+      f(__array_get(self.storage, index))
+      index = index + 1
+
+  api fn filter(self, pred: (v: T) -> bool): () -> Array<T>
+    let initial_capacity = if self.count > 0 then: self.count else: 4
+    var acc = Array<T>::with_capacity(initial_capacity)
+    var index = 0
+    while index < self.count do:
+      let value = __array_get(self.storage, index)
+      if pred(value) then:
+        acc = acc.push(value)
+      index = index + 1
+    acc
+
+  api fn map<O>(self, f: (v: T) -> O): () -> Array<O>
+    if self.count == 0 then:
+      return Array<O> { storage: new_fixed_array<O>(0), count: 0 }
+
+    let new_storage = new_fixed_array<O>(self.count)
+    var index = 0
+    while index < self.count do:
+      let value = __array_get(self.storage, index)
+      __array_set(new_storage, index, f(value))
+      index = index + 1
+
+    Array<O> { storage: new_storage, count: self.count }
+
+  api fn reduce<O>(self, init: O, f: (acc: O, v: T) -> O): () -> O
+    var acc = init
+    var index = 0
+    while index < self.count do:
+      let value = __array_get(self.storage, index)
+      acc = f(acc, value)
+      index = index + 1
+    acc
+
+  api fn find(self, pred: (v: T) -> bool): () -> Optional<T>
+    var index = 0
+    while index < self.count do:
+      let value = __array_get(self.storage, index)
+      if pred(value) then:
+        return Some<T> { value: value }
+      index = index + 1
+    None {}
+
+  api fn some(self, pred: (v: T) -> bool): () -> bool
+    var index = 0
+    while index < self.count do:
+      let value = __array_get(self.storage, index)
+      if pred(value) then:
+        return true
+      index = index + 1
+    false
+
+  api fn every(self, pred: (v: T) -> bool): () -> bool
+    var index = 0
+    while index < self.count do:
+      let value = __array_get(self.storage, index)
+      if pred(value) then:
+        index = index + 1
+      else:
+        return false
+    true
+
+  api fn index_of(self, value: T): () -> i32
+    var index = 0
+    while index < self.count do:
+      if __array_get(self.storage, index) == value then:
+        return index
+      index = index + 1
+    -1
+
+  api fn contains(self, value: T): () -> bool
+    self.index_of(value) >= 0
+
+fn compute_index(index: i32, length: i32) -> i32
+  if index < 0 then: length + index else: index
+
+fn resized_storage<T>(storage: FixedArray<T>, count: i32, required: i32) -> FixedArray<T>
+  let current_capacity = __array_len(storage)
+  if required <= current_capacity then:
+    return storage
+
+  let base_capacity = if current_capacity > 0 then: current_capacity else: 4
+  var new_capacity = base_capacity
+  while new_capacity < required do:
+    new_capacity = new_capacity * 2
+
+  let new_storage = new_fixed_array<T>(new_capacity)
+  __array_copy(new_storage, {
+    from: storage,
+    to_index: 0,
+    from_index: 0,
+    count: count
+  })
+  new_storage
+
+test "array new from fixed array preserves length":
+  var fixed = new_fixed_array<i32>(2)
+  fixed = __array_set(fixed, 0, 4)
+  fixed = __array_set(fixed, 1, 9)
+
+  let arr = Array<i32>::from(fixed)
+  let first = arr.get(0)
+  let last = arr.get(-1)
+
+  match(first)
+    Some<i32> { value }:
+      assert(value, eq: 4)
+    None:
+      assert(false)
+
+  match(last)
+    Some<i32> { value }:
+      assert(value, eq: 9)
+    None:
+      assert(false)
+
+  assert(arr.length(), eq: 2)
+
+test "array push increments length":
+  var arr = Array<i32>::new()
+  arr = arr.push(1)
+  arr = arr.push(2)
+  assert(arr.length(), eq: 2)
+
+test "array pop returns tail value":
+  var arr = Array<i32>::new()
+  arr = arr.push(1)
+  arr = arr.push(2)
+
+  let result = arr.pop()
+  match(result.value)
+    Some<i32> { value }:
+      assert(value, eq: 2)
+    None:
+      assert(false)
+
+test "array pop decrements length":
+  var arr = Array<i32>::new()
+  arr = arr.push(1)
+  arr = arr.push(2)
+
+  let result = arr.pop()
+  arr = result.array
+  assert(arr.length(), eq: 1)

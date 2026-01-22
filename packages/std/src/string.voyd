@@ -1,0 +1,2 @@
+pub use self::types::all
+pub use std::string::fns::{ new_string }
