@@ -16,6 +16,7 @@ import {
   registerFunctionMetadata,
   registerImportMetadata,
 } from "../functions.js";
+import { buildRuntimeTypeArtifacts } from "../runtime-pass.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
@@ -134,6 +135,7 @@ const buildCodegenProgram = (
 
   contexts.forEach(registerFunctionMetadata);
   contexts.forEach(registerImportMetadata);
+  buildRuntimeTypeArtifacts(contexts);
   contexts.forEach(compileFunctions);
   emitModuleExports(contexts[0]!, contexts);
 
@@ -198,6 +200,9 @@ describe("next codegen", () => {
     registerImportMetadata(ctx);
 
     expect(runtimeTypeRegistry.size).toBe(0);
+
+    buildRuntimeTypeArtifacts([ctx]);
+    expect(runtimeTypeRegistry.size).toBeGreaterThan(0);
   });
 
   it("emits wasm for the fib sample and runs main()", () => {

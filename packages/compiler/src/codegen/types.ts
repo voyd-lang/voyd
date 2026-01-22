@@ -1,11 +1,14 @@
 import binaryen from "binaryen";
 import {
   binaryenTypeToHeapType,
-  defineArrayType,
   defineStructType,
   refFunc,
   refCast,
 } from "@voyd/lib/binaryen-gc/index.js";
+import { mapPrimitiveToWasm } from "./primitive-types.js";
+export { getFunctionRefType } from "./closure-types.js";
+import { ensureClosureTypeInfo } from "./closure-types.js";
+import { ensureFixedArrayWasmTypes } from "./fixed-array-types.js";
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
@@ -123,40 +126,6 @@ const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
     ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
   ) ?? `${symbol}`;
 
-export const getFunctionRefType = ({
-  params,
-  result,
-  ctx,
-  label,
-}: {
-  params: readonly binaryen.Type[];
-  result: binaryen.Type;
-  ctx: CodegenContext;
-  label?: string;
-}): binaryen.Type => {
-  const key = `${params.join(",")}->${result}`;
-  const cached = ctx.functionRefTypes.get(key);
-  if (cached) {
-    return cached;
-  }
-  const safeLabel = label ? `_${sanitizeIdentifier(label)}` : "";
-  const tempName = `__fn_sig_${ctx.functionRefTypes.size}${safeLabel}`;
-  const fnRef = ctx.mod.addFunction(
-    tempName,
-    binaryen.createType(params as number[]),
-    result,
-    [],
-    ctx.mod.nop()
-  );
-  const fnType = bin._BinaryenTypeFromHeapType(
-    bin._BinaryenFunctionGetType(fnRef),
-    false
-  );
-  ctx.functionRefTypes.set(key, fnType);
-  ctx.mod.removeFunction(tempName);
-  return fnType;
-};
-
 const functionKey = (moduleId: string, symbol: number): string =>
   `${moduleId}::${symbol}`;
 
@@ -167,118 +136,6 @@ const traitMethodHash = ({
   traitSymbol: number;
   methodSymbol: number;
 }): number => murmurHash3(`${traitSymbol}:${methodSymbol}`);
-
-const closureSignatureKey = ({
-  moduleId,
-  parameters,
-  returnType,
-  effectRow,
-}: {
-  moduleId: string;
-  parameters: ReadonlyArray<{
-    type: TypeId;
-    label?: string;
-    optional?: boolean;
-  }>;
-  returnType: TypeId;
-  effectRow: unknown;
-}): string => {
-  const params = parameters
-    .map((param) => {
-      const label = param.label ?? "_";
-      const optional = param.optional ? "?" : "";
-      return `${label}:${param.type}${optional}`;
-    })
-    .join("|");
-  return `${moduleId}::(${params})->${returnType}|${effectRow}`;
-};
-
-const closureStructName = ({
-  moduleLabel,
-  key,
-}: {
-  moduleLabel: string;
-  key: string;
-}): string => `${moduleLabel}__closure_base_${sanitizeIdentifier(key)}`;
-
-const getClosureFunctionRefType = ({
-  params,
-  result,
-  ctx,
-}: {
-  params: readonly binaryen.Type[];
-  result: binaryen.Type;
-  ctx: CodegenContext;
-}): binaryen.Type => {
-  return getFunctionRefType({ params, result, ctx, label: "closure" });
-};
-
-const ensureClosureTypeInfo = ({
-  typeId,
-  desc,
-  ctx,
-  seen,
-  mode,
-}: {
-  typeId: TypeId;
-  desc: {
-    parameters: ReadonlyArray<{
-      type: TypeId;
-      label?: string;
-      optional?: boolean;
-    }>;
-    returnType: TypeId;
-    effectRow: unknown;
-  };
-  ctx: CodegenContext;
-  seen: Set<TypeId>;
-  mode: WasmTypeMode;
-}): ClosureTypeInfo => {
-  const key = closureSignatureKey({
-    moduleId: ctx.moduleId,
-    parameters: desc.parameters,
-    returnType: desc.returnType,
-    effectRow: desc.effectRow,
-  });
-  const cached = ctx.closureTypes.get(key);
-  if (cached) {
-    return cached;
-  }
-
-  const effectful =
-    typeof desc.effectRow === "number" &&
-    !ctx.program.effects.isEmpty(desc.effectRow);
-  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
-  const userParamTypes = desc.parameters.map((param) =>
-    wasmTypeFor(param.type, ctx, seen, mode)
-  );
-  const paramTypes = effectful
-    ? [handlerParamType, ...userParamTypes]
-    : userParamTypes;
-  const resultType = effectful
-    ? ctx.effectsRuntime.outcomeType
-    : wasmTypeFor(desc.returnType, ctx, seen, mode);
-  const interfaceType = defineStructType(ctx.mod, {
-    name: closureStructName({ moduleLabel: ctx.moduleLabel, key }),
-    fields: [{ name: "__fn", type: binaryen.funcref, mutable: false }],
-    final: false,
-  });
-  const fnRefType = getClosureFunctionRefType({
-    params: [interfaceType, ...paramTypes],
-    result: resultType,
-    ctx,
-  });
-  const info: ClosureTypeInfo = {
-    key,
-    typeId,
-    interfaceType,
-    fnRefType,
-    paramTypes,
-    resultType,
-  };
-  ctx.closureTypes.set(key, info);
-  return info;
-};
 
 export const getClosureTypeInfo = (
   typeId: TypeId,
@@ -294,6 +151,7 @@ export const getClosureTypeInfo = (
     ctx,
     seen: new Set<TypeId>(),
     mode: "runtime",
+    lowerType: (id, ctx, seen, mode) => wasmTypeFor(id, ctx, seen, mode),
   });
 };
 
@@ -303,20 +161,13 @@ export const getFixedArrayWasmTypes = (
   seen: Set<TypeId> = new Set(),
   mode: WasmTypeMode = "runtime"
 ): FixedArrayWasmType => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  if (desc.kind !== "fixed-array") {
-    throw new Error("intrinsic requires a fixed-array type");
-  }
-  const cached = ctx.fixedArrayTypes.get(desc.element);
-  if (cached) {
-    return cached;
-  }
-  const elementType = wasmTypeFor(desc.element, ctx, seen, mode);
-  const type = defineArrayType(ctx.mod, elementType, true);
-  const heapType = binaryenTypeToHeapType(type);
-  const fixedArrayType: FixedArrayWasmType = { type, heapType };
-  ctx.fixedArrayTypes.set(desc.element, fixedArrayType);
-  return fixedArrayType;
+  return ensureFixedArrayWasmTypes({
+    typeId,
+    ctx,
+    seen,
+    mode,
+    lowerType: (id, ctx, seen, mode) => wasmTypeFor(id, ctx, seen, mode),
+  });
 };
 
 export const wasmTypeFor = (
@@ -353,7 +204,14 @@ export const wasmTypeFor = (
     }
 
     if (desc.kind === "function") {
-      const info = ensureClosureTypeInfo({ typeId, desc, ctx, seen, mode });
+      const info = ensureClosureTypeInfo({
+        typeId,
+        desc,
+        ctx,
+        seen,
+        mode,
+        lowerType: (id, ctx, seen, mode) => wasmTypeFor(id, ctx, seen, mode),
+      });
       return info.interfaceType;
     }
 
@@ -419,28 +277,6 @@ export const wasmTypeFor = (
     );
   } finally {
     seen.delete(typeId);
-  }
-};
-
-export const mapPrimitiveToWasm = (name: string): binaryen.Type => {
-  switch (name) {
-    case "i32":
-    case "bool":
-    case "boolean":
-    case "unknown":
-      return binaryen.i32;
-    case "i64":
-      return binaryen.i64;
-    case "f32":
-      return binaryen.f32;
-    case "f64":
-      return binaryen.f64;
-    case "voyd":
-    case "void":
-    case "Voyd":
-      return binaryen.none;
-    default:
-      throw new Error(`unsupported primitive type ${name}`);
   }
 };
 

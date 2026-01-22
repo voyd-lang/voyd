@@ -68,10 +68,15 @@ const collectEffectOperationTypeArguments = ({
       if (callee?.exprKind !== "identifier" || callee.symbol !== operation) {
         return;
       }
-      const typeArgs = ctx.callResolution.typeArguments.get(expr.id);
-      if (typeArgs && typeArgs.length > 0) {
-        collected.push([...typeArgs]);
+      const typeArgsByInstance = ctx.callResolution.typeArguments.get(expr.id);
+      if (!typeArgsByInstance) {
+        return;
       }
+      typeArgsByInstance.forEach((typeArgs) => {
+        if (typeArgs.length > 0) {
+          collected.push([...typeArgs]);
+        }
+      });
     },
   });
   return collected;

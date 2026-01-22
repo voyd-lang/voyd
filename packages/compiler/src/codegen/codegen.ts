@@ -14,6 +14,7 @@ import {
   registerImportMetadata,
   registerFunctionMetadata,
 } from "./functions.js";
+import { buildRuntimeTypeArtifacts } from "./runtime-pass.js";
 import {
   EFFECT_TABLE_EXPORT,
   emitEffectTableSection,
@@ -136,6 +137,7 @@ export const codegenProgram = ({
     ctx.effectsState.effectRegistry = effectRegistry;
   });
   contexts.forEach(registerImportMetadata);
+  buildRuntimeTypeArtifacts(contexts);
   contexts.forEach(compileFunctions);
 
   const entryCtx =
