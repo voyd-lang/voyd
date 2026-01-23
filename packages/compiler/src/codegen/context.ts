@@ -50,6 +50,7 @@ export interface CodegenOptions {
   emitEffectHelpers?: boolean;
   continuationBackend?: ContinuationBackendOptions;
   testMode?: boolean;
+  testScope?: "all" | "entry";
 }
 
 export interface CodegenResult {
@@ -143,7 +144,7 @@ export interface CodegenContext {
   functionInstances: Map<ProgramFunctionInstanceId, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
-  fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
+  fixedArrayTypes: Map<number, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;
   runtimeTypeRegistry: Map<TypeId, RuntimeTypeIdRegistryEntry>;

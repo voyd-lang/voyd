@@ -37,10 +37,10 @@ const createContext = () => {
 
 const cacheArrayType = (
   ctx: CodegenContext,
-  element: TypeId,
+  elementType: binaryen.Type,
   type: binaryen.Type
 ): void => {
-  ctx.fixedArrayTypes.set(element, {
+  ctx.fixedArrayTypes.set(elementType, {
     type,
     heapType: modBinaryenTypeToHeapType(ctx.mod, type),
   });
@@ -89,7 +89,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
       modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
       true
     );
-    cacheArrayType(ctx, i32Type, cachedArrayType);
+    cacheArrayType(ctx, binaryen.i32, cachedArrayType);
 
     registerExpr(
       { expressions, exprTypes, typeId: i32Type },
@@ -119,7 +119,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
       modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
       true
     );
-    cacheArrayType(ctx, i32Type, cachedArrayType);
+    cacheArrayType(ctx, binaryen.i32, cachedArrayType);
 
     registerExpr(
       { expressions, exprTypes, typeId: i32Type },
@@ -155,7 +155,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
       modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
       true
     );
-    cacheArrayType(ctx, i32Type, cachedArrayType);
+    cacheArrayType(ctx, binaryen.i32, cachedArrayType);
 
     registerExpr(
       { expressions, exprTypes, typeId: arrayType },
@@ -271,7 +271,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
       modBinaryenTypeToHeapType(ctx.mod, binaryen.eqref),
       true
     );
-    cacheArrayType(ctx, i32Type, cachedArrayType);
+    cacheArrayType(ctx, binaryen.i32, cachedArrayType);
 
     registerExpr(
       { expressions, exprTypes, typeId: arrayType },
@@ -287,7 +287,7 @@ describe("compileIntrinsicCall array intrinsics", () => {
       fnCtx,
     });
 
-    const expected = ctx.fixedArrayTypes.get(i32Type)!.heapType;
+    const expected = ctx.fixedArrayTypes.get(binaryen.i32)!.heapType;
     expect(expr).toBe(expected);
   });
 

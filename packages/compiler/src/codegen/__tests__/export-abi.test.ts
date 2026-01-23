@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
-import { parseExportAbi } from "@voyd/js-host";
+import { createVoydHost, parseExportAbi } from "@voyd/js-host";
 import { compileProgram } from "../../pipeline.js";
 import { createFsModuleHost } from "../../modules/fs-host.js";
 
@@ -34,5 +34,13 @@ describe("export abi metadata", () => {
       { name: "add", abi: "direct" },
       { name: "echo", abi: "serialized", formatId: "msgpack" },
     ]);
+  });
+
+  it("round-trips msgpack values for serialized exports", async () => {
+    const wasm = await buildModule();
+    const host = await createVoydHost({ wasm });
+    const payload = [1, "hi", [true, 2]];
+    const result = await host.runPure("echo", [payload]);
+    expect(result).toEqual(payload);
   });
 });

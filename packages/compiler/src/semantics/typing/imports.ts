@@ -405,6 +405,20 @@ export const resolveImportedTypeExpr = ({
   const depCtx = makeDependencyContext(dependency, ctx);
   const depState = createTypingState(state.mode);
 
+  const sharedArena = depCtx.arena === ctx.arena;
+  const sharedEffects = depCtx.effects.internRow === ctx.effects.internRow;
+  if (sharedArena && sharedEffects) {
+    const aliasResolved = resolveImportedAlias(target.symbol, typeArgs, depCtx, depState);
+    const resolved =
+      aliasResolved ??
+      resolveImportedObject(target.symbol, typeArgs, depCtx, depState) ??
+      resolveImportedTrait(target.symbol, typeArgs, depCtx, depState);
+    if (typeof aliasResolved === "number") {
+      ctx.typeAliases.recordInstanceSymbol(aliasResolved, symbol);
+    }
+    return resolved;
+  }
+
   const forwardParamMap = new Map<TypeParamId, TypeParamId>();
   const forward = createTranslation({
     sourceArena: ctx.arena,

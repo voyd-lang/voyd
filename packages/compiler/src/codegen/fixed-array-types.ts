@@ -3,6 +3,24 @@ import type { CodegenContext, FixedArrayWasmType, TypeId } from "./context.js";
 
 type WasmTypeMode = "runtime" | "signature";
 
+export const ensureFixedArrayWasmTypesByElement = ({
+  elementType,
+  ctx,
+}: {
+  elementType: number;
+  ctx: CodegenContext;
+}): FixedArrayWasmType => {
+  const cached = ctx.fixedArrayTypes.get(elementType);
+  if (cached) {
+    return cached;
+  }
+  const type = defineArrayType(ctx.mod, elementType, true);
+  const heapType = binaryenTypeToHeapType(type);
+  const fixedArrayType: FixedArrayWasmType = { type, heapType };
+  ctx.fixedArrayTypes.set(elementType, fixedArrayType);
+  return fixedArrayType;
+};
+
 export const ensureFixedArrayWasmTypes = ({
   typeId,
   ctx,
@@ -25,15 +43,7 @@ export const ensureFixedArrayWasmTypes = ({
   if (desc.kind !== "fixed-array") {
     throw new Error("intrinsic requires a fixed-array type");
   }
-  const cached = ctx.fixedArrayTypes.get(desc.element);
-  if (cached) {
-    return cached;
-  }
   // Arrays are invariant, so signatures must use the concrete runtime element type.
   const elementType = lowerType(desc.element, ctx, seen, "runtime");
-  const type = defineArrayType(ctx.mod, elementType, true);
-  const heapType = binaryenTypeToHeapType(type);
-  const fixedArrayType: FixedArrayWasmType = { type, heapType };
-  ctx.fixedArrayTypes.set(desc.element, fixedArrayType);
-  return fixedArrayType;
+  return ensureFixedArrayWasmTypesByElement({ elementType, ctx });
 };

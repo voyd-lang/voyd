@@ -42,6 +42,7 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   emitEffectHelpers: false,
   continuationBackend: {},
   testMode: false,
+  testScope: "all",
 };
 
 export type CodegenProgramParams = {
@@ -86,6 +87,7 @@ export const codegenProgram = ({
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
   const runtimeTypeIdCounter = { value: 1 };
+  const fixedArrayTypes = new Map<number, FixedArrayWasmType>();
   const diagnostics = new DiagnosticEmitter();
   const programHelpers = createProgramHelperRegistry();
   const contexts: CodegenContext[] = modules.map((sem) => ({
@@ -101,7 +103,7 @@ export const codegenProgram = ({
     functionInstances,
     itemsToSymbols: new Map(),
     structTypes: new Map(),
-    fixedArrayTypes: new Map(),
+    fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),
     runtimeTypeRegistry,

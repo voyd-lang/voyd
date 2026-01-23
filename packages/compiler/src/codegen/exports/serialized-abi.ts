@@ -1,7 +1,8 @@
 import binaryen from "binaryen";
 import { arrayGet, refCast } from "@voyd/lib/binaryen-gc/index.js";
-import type { CodegenContext, FunctionMetadata } from "../context.js";
+import type { CodegenContext, FunctionContext, FunctionMetadata } from "../context.js";
 import { findSerializerForType, resolveSerializerForTypes } from "../serializer.js";
+import { coerceValueToType } from "../structural.js";
 import { wasmTypeFor } from "../types.js";
 import { requireFunctionMeta } from "../function-lookup.js";
 import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
@@ -48,6 +49,7 @@ export const emitSerializedExportWrapper = ({
   });
 
   const wrapperName = `${meta.wasmName}__serialized_export_${sanitizeIdentifier(exportName)}`;
+  const paramCount = 4;
   const params = binaryen.createType([
     binaryen.i32,
     binaryen.i32,
@@ -68,6 +70,14 @@ export const emitSerializedExportWrapper = ({
   const argsArrayLocal = 5;
   const storageLocal = 6;
   const argsCountLocal = 7;
+  const fnCtx: FunctionContext = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals,
+    nextLocalIndex: paramCount + locals.length,
+    returnTypeId: meta.resultTypeId,
+    effectful: false,
+  };
 
   const decoded = ctx.mod.call(
     decodeMeta.wasmName,
@@ -77,10 +87,17 @@ export const emitSerializedExportWrapper = ({
     ],
     msgPackType
   );
+  const decodedValue = coerceValueToType({
+    value: decoded,
+    actualType: decodeMeta.resultTypeId,
+    targetType: msgpack.msgPackTypeId,
+    ctx,
+    fnCtx,
+  });
 
   const argsArray = ctx.mod.call(
     msgpack.unpackArray.wasmName,
-    [decoded],
+    [decodedValue],
     arrayType
   );
   const argsCount = ctx.mod.call(
@@ -137,10 +154,21 @@ export const emitSerializedExportWrapper = ({
     typeId: meta.resultTypeId,
     label: `${exportName} result`,
   });
+  const encodeParamType = encodeMeta.paramTypeIds[0];
+  if (typeof encodeParamType !== "number") {
+    throw new Error(`missing serializer input type for ${exportName}`);
+  }
+  const encodeValue = coerceValueToType({
+    value: msgpackResult,
+    actualType: msgpack.msgPackTypeId,
+    targetType: encodeParamType,
+    ctx,
+    fnCtx,
+  });
   const encodedLength = ctx.mod.call(
     encodeMeta.wasmName,
     [
-      msgpackResult,
+      encodeValue,
       ctx.mod.local.get(outPtrLocal, binaryen.i32),
       ctx.mod.local.get(outLenLocal, binaryen.i32),
     ],
@@ -153,7 +181,7 @@ export const emitSerializedExportWrapper = ({
     binaryen.i32,
     locals,
     ctx.mod.block(null, [
-      ctx.mod.local.set(decodedLocal, decoded),
+      ctx.mod.local.set(decodedLocal, decodedValue),
       ctx.mod.local.set(argsArrayLocal, argsArray),
       ctx.mod.local.set(storageLocal, storage),
       ctx.mod.local.set(argsCountLocal, argsCount),

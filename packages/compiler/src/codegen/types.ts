@@ -8,7 +8,10 @@ import {
 import { mapPrimitiveToWasm } from "./primitive-types.js";
 export { getFunctionRefType } from "./closure-types.js";
 import { ensureClosureTypeInfo } from "./closure-types.js";
-import { ensureFixedArrayWasmTypes } from "./fixed-array-types.js";
+import {
+  ensureFixedArrayWasmTypes,
+  ensureFixedArrayWasmTypesByElement,
+} from "./fixed-array-types.js";
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
@@ -27,7 +30,11 @@ import type {
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
 import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
-import type { ProgramFunctionInstanceId, ProgramSymbolId } from "../semantics/ids.js";
+import type {
+  ProgramFunctionInstanceId,
+  ProgramSymbolId,
+  TypeParamId,
+} from "../semantics/ids.js";
 import { buildInstanceSubstitution } from "./type-substitution.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
@@ -40,28 +47,36 @@ type WasmTypeMode = "runtime" | "signature";
 const runtimeTypeKeyFor = (
   typeId: TypeId,
   ctx: CodegenContext,
-  seen: Set<TypeId>
+  seen: Map<TypeId, number>,
+  recursiveParams: Map<TypeParamId, number>
 ): string => {
-  if (seen.has(typeId)) {
-    return `recursive:${typeId}`;
+  const seenIndex = seen.get(typeId);
+  if (seenIndex !== undefined) {
+    return `recursive:${seenIndex}`;
   }
-  seen.add(typeId);
+  seen.set(typeId, seen.size);
 
   const desc = ctx.program.types.getTypeDesc(typeId);
   switch (desc.kind) {
     case "primitive":
       return `prim:${desc.name}`;
     case "recursive":
-      return `mu:${desc.binder}.${runtimeTypeKeyFor(desc.body, ctx, seen)}`;
+      if (!recursiveParams.has(desc.binder)) {
+        recursiveParams.set(desc.binder, recursiveParams.size);
+      }
+      return `mu:${runtimeTypeKeyFor(desc.body, ctx, seen, recursiveParams)}`;
     case "type-param-ref":
+      if (recursiveParams.has(desc.param)) {
+        return `recursive-param:${recursiveParams.get(desc.param)}`;
+      }
       return `typeparam:${desc.param}`;
     case "nominal-object":
       return `nominal:${desc.owner}<${desc.typeArgs
-        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
+        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen, recursiveParams))
         .join(",")}>`;
     case "trait":
       return `trait:${desc.owner}<${desc.typeArgs
-        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
+        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen, recursiveParams))
         .join(",")}>`;
     case "structural-object":
       return `struct:{${desc.fields
@@ -70,33 +85,34 @@ const runtimeTypeKeyFor = (
             `${field.name}${field.optional ? "?" : ""}:${runtimeTypeKeyFor(
               field.type,
               ctx,
-              seen
+              seen,
+              recursiveParams
             )}`
         )
         .join(",")}}`;
     case "function":
       return `fn:(${desc.parameters
-        .map((param) => runtimeTypeKeyFor(param.type, ctx, seen))
-        .join(",")})->${runtimeTypeKeyFor(desc.returnType, ctx, seen)}`;
+        .map((param) => runtimeTypeKeyFor(param.type, ctx, seen, recursiveParams))
+        .join(",")})->${runtimeTypeKeyFor(desc.returnType, ctx, seen, recursiveParams)}`;
     case "union": {
       const members = desc.members
-        .map((member) => runtimeTypeKeyFor(member, ctx, seen))
+        .map((member) => runtimeTypeKeyFor(member, ctx, seen, recursiveParams))
         .sort();
       return `union:${members.join("|")}`;
     }
     case "intersection": {
       const nominal =
         typeof desc.nominal === "number"
-          ? runtimeTypeKeyFor(desc.nominal, ctx, seen)
+          ? runtimeTypeKeyFor(desc.nominal, ctx, seen, recursiveParams)
           : "none";
       const structural =
         typeof desc.structural === "number"
-          ? runtimeTypeKeyFor(desc.structural, ctx, seen)
+          ? runtimeTypeKeyFor(desc.structural, ctx, seen, recursiveParams)
           : "none";
       return `intersection:${nominal}&${structural}`;
     }
     case "fixed-array":
-      return `fixed-array:${runtimeTypeKeyFor(desc.element, ctx, seen)}`;
+      return `fixed-array:${runtimeTypeKeyFor(desc.element, ctx, seen, recursiveParams)}`;
     default:
       return `${(desc as { kind: string }).kind}:${typeId}`;
   }
@@ -104,7 +120,7 @@ const runtimeTypeKeyFor = (
 
 const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
   (() => {
-    const key = runtimeTypeKeyFor(typeId, ctx, new Set());
+    const key = runtimeTypeKeyFor(typeId, ctx, new Map(), new Map());
     const existing = ctx.runtimeTypeRegistry.get(typeId);
     if (!existing) {
       ctx.runtimeTypeRegistry.set(typeId, { key, moduleId: ctx.moduleId, typeId });
@@ -181,6 +197,12 @@ export const wasmTypeFor = (
     const desc = ctx.program.types.getTypeDesc(typeId);
     if (desc.kind === "function") {
       return binaryen.funcref;
+    }
+    if (desc.kind === "fixed-array") {
+      const elementType = seen.has(desc.element)
+        ? ctx.rtt.baseType
+        : wasmTypeFor(desc.element, ctx, seen, "runtime");
+      return ensureFixedArrayWasmTypesByElement({ elementType, ctx }).type;
     }
     return ctx.rtt.baseType;
   }
@@ -691,7 +713,15 @@ const buildRuntimeAncestors = ({
           reason: "nominal instantiation compatibility",
           variance: "covariant",
         });
-        return forward.ok;
+        if (!forward.ok) {
+          return false;
+        }
+        const reverse = ctx.program.types.unify(targetArg, arg, {
+          location: ctx.module.hir.module.ast,
+          reason: "nominal instantiation compatibility",
+          variance: "covariant",
+        });
+        return reverse.ok;
       });
 
       if (compatible) {

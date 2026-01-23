@@ -342,7 +342,9 @@ export const emitModuleExports = (
     exportCtx.mod.addFunctionExport(wrapperName, exportName);
   };
 
-  const exportContexts = ctx.options.testMode ? contexts : [ctx];
+  const testScope = ctx.options.testScope ?? "all";
+  const exportContexts =
+    ctx.options.testMode && testScope === "all" ? contexts : [ctx];
   exportContexts.forEach((exportCtx) => {
     const publicExports = exportCtx.module.hir.module.exports.filter((entry) =>
       isPublicVisibility(entry.visibility)

@@ -647,6 +647,7 @@ const ensureStaticMethodImport = ({
     const samePackage = dependency.packageId === ctx.packageId;
     const visibilityAllowed =
       isPublicVisibility(fn.visibility) ||
+      fn.visibility.api === true ||
       (samePackage && isPackageVisible(fn.visibility));
     if (!visibilityAllowed) {
       return;

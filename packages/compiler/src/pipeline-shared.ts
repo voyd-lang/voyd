@@ -32,6 +32,7 @@ export type LoadModulesOptions = {
 export type AnalyzeModulesOptions = {
   graph: ModuleGraph;
   includeTests?: boolean;
+  testScope?: TestScope;
 };
 
 export type AnalyzeModulesResult = {
@@ -39,6 +40,8 @@ export type AnalyzeModulesResult = {
   diagnostics: Diagnostic[];
   tests: readonly TestCase[];
 };
+
+export type TestScope = "all" | "entry";
 
 export type TestCase = {
   id: string;
@@ -87,6 +90,7 @@ export type CompileProgramResult = {
 export const analyzeModules = ({
   graph,
   includeTests,
+  testScope,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
   const order = sortModules(graph);
   const semantics = new Map<string, SemanticsPipelineResult>();
@@ -135,20 +139,28 @@ export const analyzeModules = ({
     }
   });
 
-  const tests = includeTests ? collectTests({ graph, semantics }) : [];
+  const tests = includeTests
+    ? collectTests({ graph, semantics, scope: testScope ?? "all" })
+    : [];
   return { semantics, diagnostics, tests };
 };
 
 const collectTests = ({
   graph,
   semantics,
+  scope,
 }: {
   graph: ModuleGraph;
   semantics: Map<string, SemanticsPipelineResult>;
+  scope: TestScope;
 }): TestCase[] => {
   const tests: TestCase[] = [];
+  const entryId = graph.entry ?? semantics.keys().next().value;
 
   semantics.forEach((entry, moduleId) => {
+    if (scope === "entry" && moduleId !== entryId) {
+      return;
+    }
     const moduleNode = graph.modules.get(moduleId);
     if (!moduleNode) {
       return;
