@@ -69,10 +69,62 @@ export const buildModuleGraph = async ({
     host,
   });
 
+  const entryNode = entryModule.node as ModuleNode & {
+    dependencies: ModuleDependency[];
+  };
+  const implicitStdDeps: ModuleDependency[] = [
+    { kind: "use", path: { namespace: "std", segments: ["msgpack"] } },
+    { kind: "use", path: { namespace: "std", segments: ["string"] } },
+  ];
+  const existingDeps = new Set(
+    entryNode.dependencies.map((dependency) => modulePathToString(dependency.path))
+  );
+  const nextDeps = implicitStdDeps.filter(
+    (dependency) => !existingDeps.has(modulePathToString(dependency.path))
+  );
+  if (nextDeps.length > 0) {
+    entryNode.dependencies = [...entryNode.dependencies, ...nextDeps];
+  }
+
   addModuleTree(entryModule, modules, modulesByPath);
 
   const pending: PendingDependency[] = [];
   enqueueDependencies(entryModule, pending);
+
+  const addImplicitModule = async (path: ModulePath): Promise<void> => {
+    const pathKey = modulePathToString(path);
+    if (modulesByPath.has(pathKey)) {
+      return;
+    }
+    const resolvedPath = await resolveModuleFile(path, roots, host);
+    if (!resolvedPath) {
+      moduleDiagnostics.push({
+        kind: "missing-module",
+        message: `Unable to resolve module ${pathKey}`,
+        requested: path,
+        importer: entryModule.node.id,
+      });
+      addMissingModule(entryModule.node.id, pathKey);
+      return;
+    }
+    const resolvedModulePath = modulePathFromFile(
+      resolvedPath,
+      roots,
+      host.path
+    );
+    const nextModule = await loadFileModule({
+      filePath: resolvedPath,
+      modulePath: resolvedModulePath,
+      host,
+    });
+    addModuleTree(nextModule, modules, modulesByPath);
+    enqueueDependencies(nextModule, pending);
+  };
+
+  await Promise.all([
+    addImplicitModule({ namespace: "std", segments: ["msgpack"] }),
+    addImplicitModule({ namespace: "std", segments: ["string"] }),
+  ]);
 
   const hasNestedModule = (pathKey: string): boolean => {
     const prefix = `${pathKey}::`;

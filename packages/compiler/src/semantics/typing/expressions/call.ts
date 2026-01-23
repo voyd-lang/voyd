@@ -209,7 +209,8 @@ export const typeCallExpr = (
         ctx,
         state,
         typeArguments,
-        allowIntrinsicTypeArgs
+        allowIntrinsicTypeArgs,
+        expr.span
       );
       const calleeType =
         signature?.typeId ??
@@ -248,7 +249,8 @@ export const typeCallExpr = (
             ctx,
             state,
             typeArguments,
-            allowIntrinsicTypeArgs
+            allowIntrinsicTypeArgs,
+            expr.span
           );
           return ctx.arena.internFunction({
             parameters: args.map(({ type, label }) => ({
@@ -298,7 +300,8 @@ export const typeCallExpr = (
           ctx,
           state,
           typeArguments,
-          allowIntrinsicTypeArgs
+          allowIntrinsicTypeArgs,
+          expr.span
         ),
         latentEffectRow: ctx.primitives.defaultEffectRow,
       });
@@ -2291,8 +2294,10 @@ const typeIntrinsicCall = (
   ctx: TypingContext,
   state: TypingState,
   typeArguments?: readonly TypeId[],
-  allowTypeArguments = false
+  allowTypeArguments = false,
+  span?: SourceSpan
 ): TypeId => {
+  const callSpan = normalizeSpan(span);
   switch (name) {
     case "~":
       return typeMutableIntrinsic({ args, ctx, state, typeArguments });
@@ -2337,6 +2342,37 @@ const typeIntrinsicCall = (
         typeArguments,
         allowTypeArguments,
       });
+    case "__memory_size":
+      return typeMemorySizeIntrinsic({ args, ctx, typeArguments });
+    case "__memory_grow":
+      return typeMemoryGrowIntrinsic({ args, ctx, state, typeArguments });
+    case "__memory_load_u8":
+    case "__memory_load_u16":
+    case "__memory_load_u32":
+      return typeMemoryLoadIntrinsic({ name, args, ctx, state, typeArguments });
+    case "__memory_store_u8":
+    case "__memory_store_u16":
+    case "__memory_store_u32":
+      return typeMemoryStoreIntrinsic({ name, args, ctx, state, typeArguments });
+    case "__memory_copy":
+      return typeMemoryCopyIntrinsic({ args, ctx, state, typeArguments });
+    case "__shift_l":
+    case "__shift_ru":
+      return typeShiftIntrinsic({ name, args, ctx, state, typeArguments });
+    case "__bit_and":
+    case "__bit_or":
+    case "__bit_xor":
+      return typeBitwiseIntrinsic({ name, args, ctx, state, typeArguments });
+    case "__i32_wrap_i64":
+      return typeWrapIntrinsic({ args, ctx, state, typeArguments });
+    case "__i64_extend_u":
+    case "__i64_extend_s":
+      return typeExtendIntrinsic({ name, args, ctx, state, typeArguments });
+    case "__reinterpret_f32_to_i32":
+    case "__reinterpret_i32_to_f32":
+    case "__reinterpret_f64_to_i64":
+    case "__reinterpret_i64_to_f64":
+      return typeReinterpretIntrinsic({ name, args, ctx, state, typeArguments });
     default: {
       const signatures = intrinsicSignaturesFor(name, ctx);
       if (signatures.length === 0) {
@@ -2348,11 +2384,23 @@ const typeIntrinsicCall = (
       );
 
       if (matches.length === 0) {
-        throw new Error(`no matching overload for intrinsic ${name}`);
+        emitDiagnostic({
+          ctx,
+          code: "TY0008",
+          params: { kind: "no-overload", name },
+          span: callSpan,
+        });
+        return ctx.primitives.unknown;
       }
 
       if (matches.length > 1) {
-        throw new Error(`ambiguous intrinsic overload for ${name}`);
+        emitDiagnostic({
+          ctx,
+          code: "TY0007",
+          params: { kind: "ambiguous-overload", name },
+          span: callSpan,
+        });
+        return ctx.primitives.unknown;
       }
 
       return matches[0]!.returnType;
@@ -2778,6 +2826,224 @@ const typeArrayCopyIntrinsic = ({
     "__array_copy element type"
   );
   return array;
+};
+
+const typeMemorySizeIntrinsic = ({
+  args,
+  ctx,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name: "__memory_size", args, expected: 0 });
+  assertNoIntrinsicTypeArgs("__memory_size", typeArguments);
+  return getPrimitiveType(ctx, "i32");
+};
+
+const typeMemoryGrowIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name: "__memory_grow", args, expected: 1, detail: "pages" });
+  assertNoIntrinsicTypeArgs("__memory_grow", typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[0]!.type, int32, ctx, state, "__memory_grow pages");
+  return int32;
+};
+
+const typeMemoryLoadIntrinsic = ({
+  name,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  name: string;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name, args, expected: 1, detail: "ptr" });
+  assertNoIntrinsicTypeArgs(name, typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[0]!.type, int32, ctx, state, `${name} ptr`);
+  return int32;
+};
+
+const typeMemoryStoreIntrinsic = ({
+  name,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  name: string;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name, args, expected: 2, detail: "ptr and value" });
+  assertNoIntrinsicTypeArgs(name, typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[0]!.type, int32, ctx, state, `${name} ptr`);
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, `${name} value`);
+  return ctx.primitives.void;
+};
+
+const typeMemoryCopyIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name: "__memory_copy", args, expected: 3 });
+  assertNoIntrinsicTypeArgs("__memory_copy", typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[0]!.type, int32, ctx, state, "__memory_copy dest");
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__memory_copy src");
+  ensureTypeMatches(args[2]!.type, int32, ctx, state, "__memory_copy len");
+  return ctx.primitives.void;
+};
+
+const typeShiftIntrinsic = ({
+  name,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  name: string;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name, args, expected: 2, detail: "value and bits" });
+  assertNoIntrinsicTypeArgs(name, typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  const int64 = getPrimitiveType(ctx, "i64");
+  if (args[0]!.type !== int32 && args[0]!.type !== int64) {
+    throw new Error(`intrinsic ${name} expects i32 or i64`);
+  }
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, `${name} bits`);
+  return args[0]!.type;
+};
+
+const typeBitwiseIntrinsic = ({
+  name,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  name: string;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name, args, expected: 2 });
+  assertNoIntrinsicTypeArgs(name, typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  const int64 = getPrimitiveType(ctx, "i64");
+  if (args[0]!.type !== int32 && args[0]!.type !== int64) {
+    throw new Error(`intrinsic ${name} expects i32 or i64`);
+  }
+  ensureTypeMatches(args[1]!.type, args[0]!.type, ctx, state, `${name} rhs`);
+  return args[0]!.type;
+};
+
+const typeWrapIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name: "__i32_wrap_i64", args, expected: 1 });
+  assertNoIntrinsicTypeArgs("__i32_wrap_i64", typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  const int64 = getPrimitiveType(ctx, "i64");
+  ensureTypeMatches(args[0]!.type, int64, ctx, state, "__i32_wrap_i64 value");
+  return int32;
+};
+
+const typeExtendIntrinsic = ({
+  name,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  name: string;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name, args, expected: 1 });
+  assertNoIntrinsicTypeArgs(name, typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  const int64 = getPrimitiveType(ctx, "i64");
+  ensureTypeMatches(args[0]!.type, int32, ctx, state, `${name} value`);
+  return int64;
+};
+
+const typeReinterpretIntrinsic = ({
+  name,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  name: string;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name, args, expected: 1 });
+  assertNoIntrinsicTypeArgs(name, typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  const int64 = getPrimitiveType(ctx, "i64");
+  const float32 = getPrimitiveType(ctx, "f32");
+  const float64 = getPrimitiveType(ctx, "f64");
+  switch (name) {
+    case "__reinterpret_f32_to_i32":
+      ensureTypeMatches(args[0]!.type, float32, ctx, state, name);
+      return int32;
+    case "__reinterpret_i32_to_f32":
+      ensureTypeMatches(args[0]!.type, int32, ctx, state, name);
+      return float32;
+    case "__reinterpret_f64_to_i64":
+      ensureTypeMatches(args[0]!.type, float64, ctx, state, name);
+      return int64;
+    case "__reinterpret_i64_to_f64":
+      ensureTypeMatches(args[0]!.type, int64, ctx, state, name);
+      return float64;
+    default:
+      throw new Error(`unsupported intrinsic ${name}`);
+  }
 };
 
 const assertIntrinsicArgCount = ({

@@ -42,6 +42,10 @@ export const monomorphizeProgram = ({
     }
   >;
 } => {
+  modules.forEach((mod) => {
+    mod.typing.functions.resetInstances();
+  });
+
   const normalizeCallerInstanceKey = (key: string): string => {
     const lambdaIndex = key.indexOf("::lambda");
     return lambdaIndex >= 0 ? key.slice(0, lambdaIndex) : key;

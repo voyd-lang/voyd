@@ -1,0 +1,88 @@
+use self::fns::self as msgpack_fns
+use self::fns::MsgPack
+use std::array::Array
+use std::map::Map
+use std::string::types::String
+pub use self::fns::MsgPack
+pub use self::types::{ Binary, Null, Numeric }
+
+pub fn pack_null(): () -> MsgPack
+  msgpack_fns::pack_null()
+
+pub fn pack_bool(value: bool): () -> MsgPack
+  msgpack_fns::pack_bool(value)
+
+pub fn pack_string(value: String): () -> MsgPack
+  msgpack_fns::pack_string(value)
+
+pub fn pack_binary(value: Binary): () -> MsgPack
+  msgpack_fns::pack_binary(value)
+
+pub fn pack_array(value: Array<MsgPack>): () -> MsgPack
+  msgpack_fns::pack_array(value)
+
+pub fn pack_f32(value: f32): () -> MsgPack
+  msgpack_fns::pack_f32(value)
+
+pub fn pack_f64(value: f64): () -> MsgPack
+  msgpack_fns::pack_f64(value)
+
+pub fn pack_i32(value: i32): () -> MsgPack
+  msgpack_fns::pack_i32(value)
+
+pub fn pack_i64(value: i64): () -> MsgPack
+  msgpack_fns::pack_i64(value)
+
+pub fn pack_map(value: Map<MsgPack>): () -> MsgPack
+  msgpack_fns::pack_map(value)
+
+pub fn unpack_bool(value: MsgPack): () -> bool
+  msgpack_fns::unpack_bool(value)
+
+pub fn unpack_string(value: MsgPack): () -> String
+  msgpack_fns::unpack_string(value)
+
+pub fn unpack_binary(value: MsgPack): () -> Binary
+  msgpack_fns::unpack_binary(value)
+
+pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
+  msgpack_fns::unpack_array(value)
+
+pub fn unpack_f32(value: MsgPack): () -> f32
+  msgpack_fns::unpack_f32(value)
+
+pub fn unpack_f64(value: MsgPack): () -> f64
+  msgpack_fns::unpack_f64(value)
+
+pub fn unpack_i32(value: MsgPack): () -> i32
+  msgpack_fns::unpack_i32(value)
+
+pub fn unpack_i64(value: MsgPack): () -> i64
+  msgpack_fns::unpack_i64(value)
+
+pub fn unpack_map(value: MsgPack): () -> Map<MsgPack>
+  msgpack_fns::unpack_map(value)
+
+fn msgpack_array_with_capacity(size: i32): () -> Array<MsgPack>
+  Array<MsgPack>::with_capacity(size)
+
+fn msgpack_array_push(array: Array<MsgPack>, value: MsgPack): () -> Array<MsgPack>
+  array.push(value)
+
+fn msgpack_array_length(array: Array<MsgPack>): () -> i32
+  array.length()
+
+fn msgpack_array_raw_storage(array: Array<MsgPack>): () -> FixedArray<MsgPack>
+  array.raw_storage()
+
+fn msgpack_map_new(): () -> Map<MsgPack>
+  Map<MsgPack>::new()
+
+fn msgpack_map_set(map: Map<MsgPack>, key: String, value: MsgPack): () -> Map<MsgPack>
+  map.set(key, value)
+
+pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
+  msgpack_fns::encode_value(value, ptr, len)
+
+pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
+  msgpack_fns::decode_value(ptr, len)

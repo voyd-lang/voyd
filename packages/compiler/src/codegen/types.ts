@@ -293,7 +293,7 @@ export const getSymbolTypeId = (
     `codegen missing type information for symbol ${getLocalSymbolName(
       symbol,
       ctx
-    )}`
+    )} (module ${ctx.moduleId}, symbol ${symbol})`
   );
 };
 

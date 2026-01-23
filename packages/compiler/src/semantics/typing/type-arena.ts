@@ -220,7 +220,9 @@ export const createTypeArena = (): TypeArena => {
   ): TypeId => {
     const self = nextTypeId++;
     const placeholderParam = nextTypeParamId++;
-    descriptors[self] = { kind: "type-param-ref", param: placeholderParam };
+    const placeholderDesc = { kind: "type-param-ref", param: placeholderParam };
+    descriptors[self] = placeholderDesc;
+    descriptorCache.set(keyFor(placeholderDesc), self);
 
     const desc = build(self, placeholderParam);
 
@@ -1051,6 +1053,25 @@ export const createTypeArena = (): TypeArena => {
       const leftDesc = getDescriptor(resolvedLeft);
       const rightDesc = getDescriptor(resolvedRight);
 
+      if (leftDesc.kind === "type-param-ref") {
+        return bindParam(
+          leftDesc.param,
+          resolvedRight,
+          currentVariance,
+          subst,
+          localSeen
+        );
+      }
+      if (rightDesc.kind === "type-param-ref") {
+        return bindParam(
+          rightDesc.param,
+          resolvedLeft,
+          currentVariance,
+          subst,
+          localSeen
+        );
+      }
+
       if (leftDesc.kind === "union" || rightDesc.kind === "union") {
         return unifyUnion(
           resolvedLeft,
@@ -1068,25 +1089,6 @@ export const createTypeArena = (): TypeArena => {
         return unifyIntersection(
           resolvedLeft,
           resolvedRight,
-          currentVariance,
-          subst,
-          localSeen
-        );
-      }
-
-      if (leftDesc.kind === "type-param-ref") {
-        return bindParam(
-          leftDesc.param,
-          resolvedRight,
-          currentVariance,
-          subst,
-          localSeen
-        );
-      }
-      if (rightDesc.kind === "type-param-ref") {
-        return bindParam(
-          rightDesc.param,
-          resolvedLeft,
           currentVariance,
           subst,
           localSeen

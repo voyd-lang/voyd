@@ -1,7 +1,6 @@
 import binaryen from "binaryen";
 import type { CodegenContext } from "../../context.js";
 import { wasmTypeFor } from "../../types.js";
-import { VALUE_TAG } from "./constants.js";
 import type { EffectOpSignature } from "./types.js";
 import { stateFor } from "./state.js";
 import type { ContinuationSite } from "../effect-lowering/types.js";
@@ -18,23 +17,6 @@ import {
 import { ensureEffectArgsType } from "../args-type.js";
 
 const OP_SIGNATURES_KEY = Symbol("voyd.effects.hostBoundary.opSignatures");
-
-export const supportedValueTag = ({
-  wasmType,
-  label,
-}: {
-  wasmType: binaryen.Type;
-  label: string;
-}): number => {
-  if (wasmType === binaryen.none) return VALUE_TAG.none;
-  if (wasmType === binaryen.i32) return VALUE_TAG.i32;
-  if (wasmType === binaryen.i64) return VALUE_TAG.i64;
-  if (wasmType === binaryen.f32) return VALUE_TAG.f32;
-  if (wasmType === binaryen.f64) return VALUE_TAG.f64;
-  throw new Error(
-    `unsupported value type ${wasmType} for host boundary (${label})`
-  );
-};
 
 const isPerformSite = (
   site: ContinuationSite
@@ -131,7 +113,9 @@ export const collectEffectOperationSignatures = (
               resumeKind: opInfo.resumeKind,
               signatureHash: opInfo.signatureHash,
               params,
+              paramTypeIds: signature.params,
               returnType,
+              returnTypeId: signature.returnType,
               argsType,
               label: opInfo.label,
             });

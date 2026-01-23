@@ -20,16 +20,17 @@ import {
   collectEffectOperationSignatures,
   createEffectfulEntry,
   createHandleOutcomeDynamic,
-  createReadValue,
   createResumeContinuation,
   createResumeEffectful,
   ensureEffectResultAccessors,
   ensureEffectsMemory,
-  ensureMsgPackImports,
 } from "./effects/host-boundary.js";
 import { effectsFacade } from "./effects/facade.js";
 import { emitPureSurfaceWrapper } from "./effects/abi-wrapper.js";
 import { formatTestExportName } from "../tests/exports.js";
+import { emitSerializedExportWrapper } from "./exports/serialized-abi.js";
+import { emitExportAbiSection, type ExportAbiEntry } from "./exports/export-abi.js";
+import { resolveSerializerForTypes } from "./serializer.js";
 
 const getFunctionMetas = (
   ctx: CodegenContext,
@@ -312,6 +313,7 @@ export const emitModuleExports = (
   contexts: readonly CodegenContext[] = [ctx]
 ): void => {
   const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
+  const exportAbiEntries: ExportAbiEntry[] = [];
 
   const emitEffectfulWasmExportWrapper = ({
     ctx: exportCtx,
@@ -395,12 +397,14 @@ export const emitModuleExports = (
           return;
         }
         const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
+        const serializer = resolveSerializerForTypes([meta.resultTypeId], exportCtx);
         const supportedReturn =
           valueType === binaryen.none ||
           valueType === binaryen.i32 ||
           valueType === binaryen.i64 ||
           valueType === binaryen.f32 ||
-          valueType === binaryen.f64;
+          valueType === binaryen.f64 ||
+          serializer?.formatId === "msgpack";
         if (!supportedReturn) {
           exportCtx.diagnostics.report(
             diagnosticFromCode({
@@ -418,28 +422,67 @@ export const emitModuleExports = (
         effectfulExports.push({ meta, exportName });
         return;
       }
+      let serializer: ReturnType<typeof resolveSerializerForTypes> | undefined;
+      try {
+        serializer = resolveSerializerForTypes(
+          [...meta.paramTypeIds, meta.resultTypeId],
+          exportCtx
+        );
+      } catch (error) {
+        exportCtx.diagnostics.report(
+          diagnosticFromCode({
+            code: "CG0001",
+            params: { message: (error as Error).message },
+            span: entry.span,
+          })
+        );
+        return;
+      }
+
+      if (serializer) {
+        try {
+          emitSerializedExportWrapper({ ctx: exportCtx, meta, exportName });
+          exportAbiEntries.push({
+            name: exportName,
+            abi: "serialized",
+            formatId: serializer.formatId,
+          });
+        } catch (error) {
+          exportCtx.diagnostics.report(
+            diagnosticFromCode({
+              code: "CG0001",
+              params: { message: (error as Error).message },
+              span: entry.span,
+            })
+          );
+        }
+        return;
+      }
+
       exportCtx.mod.addFunctionExport(meta.wasmName, exportName);
+      exportAbiEntries.push({ name: exportName, abi: "direct" });
     });
   });
+
+  if (exportAbiEntries.length > 0) {
+    emitExportAbiSection({ mod: ctx.mod, entries: exportAbiEntries });
+  }
 
   if (effectfulExports.length === 0) {
     return;
   }
 
   ensureEffectsMemory(ctx);
-  const imports = ensureMsgPackImports(ctx);
   const signatures = collectEffectOperationSignatures(ctx, contexts);
   const handleOutcome = createHandleOutcomeDynamic({
     ctx,
     runtime: ctx.effectsRuntime,
     signatures,
-    imports,
   });
   const resumeContinuation = createResumeContinuation({
     ctx,
     runtime: ctx.effectsRuntime,
     signatures,
-    imports,
   });
   createResumeEffectful({
     ctx,
@@ -447,7 +490,6 @@ export const emitModuleExports = (
     handleOutcome,
     resumeContinuation,
   });
-  createReadValue({ ctx, imports });
   ensureEffectResultAccessors({ ctx, runtime: ctx.effectsRuntime });
 
   effectfulExports.forEach(({ meta, exportName }) => {

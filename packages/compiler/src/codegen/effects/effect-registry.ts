@@ -15,6 +15,7 @@ import { walkHirExpression } from "../hir-walk.js";
 import type { ContinuationSite } from "./effect-lowering/types.js";
 import { performSiteArgTypes } from "./perform-site.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
+import { findSerializerForType, serializerKeyFor } from "../serializer.js";
 
 const encoder = new TextEncoder();
 const FNV_OFFSET = 14695981039346656037n;
@@ -118,6 +119,10 @@ const signatureTypeKeyFor = (
   ctx: CodegenContext,
   seen: Set<TypeId>
 ): string => {
+  const serializer = findSerializerForType(typeId, ctx);
+  if (serializer) {
+    return serializerKeyFor(serializer);
+  }
   if (seen.has(typeId)) {
     return `recursive:${typeId}`;
   }

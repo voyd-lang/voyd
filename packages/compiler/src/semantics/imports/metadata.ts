@@ -7,6 +7,7 @@ const IMPORTABLE_KEYS = [
   "intrinsicName",
   "intrinsicUsesSignature",
   "intrinsicType",
+  "serializer",
 ] as const;
 
 type ImportableMetadata = Partial<

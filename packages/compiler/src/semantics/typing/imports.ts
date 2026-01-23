@@ -432,12 +432,17 @@ export const resolveImportedTypeExpr = ({
   forwardParamMap.forEach((targetParam, sourceParam) => {
     reverseParamMap.set(targetParam, sourceParam);
   });
+  const aliasResolved = resolveImportedAlias(target.symbol, depArgs, depCtx, depState);
   const resolved =
-    resolveImportedAlias(target.symbol, depArgs, depCtx, depState) ??
+    aliasResolved ??
     resolveImportedObject(target.symbol, depArgs, depCtx, depState) ??
     resolveImportedTrait(target.symbol, depArgs, depCtx, depState);
 
-  return typeof resolved === "number" ? back(resolved) : undefined;
+  const localType = typeof resolved === "number" ? back(resolved) : undefined;
+  if (typeof aliasResolved === "number" && typeof localType === "number") {
+    ctx.typeAliases.recordInstanceSymbol(localType, symbol);
+  }
+  return localType;
 };
 
 const resolveImportedAlias = (
@@ -558,6 +563,24 @@ const createTranslation = ({
       case "type-param-ref": {
         const mapped = mapTypeParam(desc.param, paramMap, { arena: targetArena });
         result = targetArena.internTypeParamRef(mapped);
+        break;
+      }
+      case "recursive": {
+        result = targetArena.createRecursiveType((self, _placeholder) => {
+          cache.set(type, self);
+          const translateWithSelf = (inner: TypeId): TypeId => {
+            const innerDesc = sourceArena.get(inner);
+            if (
+              innerDesc.kind === "type-param-ref" &&
+              innerDesc.param === desc.binder
+            ) {
+              return self;
+            }
+            return translate(inner);
+          };
+          const translated = translateWithSelf(desc.body);
+          return targetArena.get(translated);
+        });
         break;
       }
       case "nominal-object": {

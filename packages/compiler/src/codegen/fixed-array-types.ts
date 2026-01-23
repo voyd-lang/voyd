@@ -29,7 +29,8 @@ export const ensureFixedArrayWasmTypes = ({
   if (cached) {
     return cached;
   }
-  const elementType = lowerType(desc.element, ctx, seen, mode);
+  // Arrays are invariant, so signatures must use the concrete runtime element type.
+  const elementType = lowerType(desc.element, ctx, seen, "runtime");
   const type = defineArrayType(ctx.mod, elementType, true);
   const heapType = binaryenTypeToHeapType(type);
   const fixedArrayType: FixedArrayWasmType = { type, heapType };

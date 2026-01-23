@@ -1,5 +1,8 @@
 pub use optional
 pub use string
+pub use box
+pub use memory
+pub use msgpack
 pub use std::optional::types::{ Optional, Option, Some, None }
 pub use std::optional::fns::{
   some,
@@ -17,4 +20,5 @@ pub use std::array::{ Array, ArrayPop, new_array }
 pub use std::map::{ Map, MapEntry, new_map }
 pub use std::string::types::{ String }
 pub use std::string::fns::{ new_string }
+pub use std::box::{ Box }
 pub use std::test::assertions::{ Test, assert }

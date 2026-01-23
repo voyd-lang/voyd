@@ -1,0 +1,3 @@
+pub obj Box<T> {
+  api value: T
+}

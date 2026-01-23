@@ -204,6 +204,7 @@ export type TypeLoweringIndex = {
   getNominalAncestry(typeId: TypeId): readonly { nominalId: TypeId; typeId: TypeId }[];
   getStructuralLayout(typeId: TypeId): StructuralLayout | undefined;
   getRuntimeTypeId(typeId: TypeId): number;
+  getAliasSymbols(typeId: TypeId): readonly ProgramSymbolId[];
 };
 
 export type ObjectLayoutIndex = {
@@ -374,6 +375,7 @@ export const buildProgramCodegenView = (
   const objectInfoByNominal = new Map<TypeId, CodegenObjectTypeInfo>();
   const nominalOwnerByNominal = new Map<TypeId, ProgramSymbolId>();
   const nominalsByOwner = new Map<ProgramSymbolId, TypeId[]>();
+  const aliasSymbolsByType = new Map<TypeId, Set<ProgramSymbolId>>();
 
   const traitImplsByNominal = new Map<TypeId, CodegenTraitImplInstance[]>();
   const traitImplsByTrait = new Map<ProgramSymbolId, CodegenTraitImplInstance[]>();
@@ -417,6 +419,16 @@ export const buildProgramCodegenView = (
   );
 
   const symbols = buildProgramSymbolArena(stableModules);
+
+  stableModules.forEach((mod) => {
+    for (const [typeId, symbolSet] of mod.typing.typeAliases.instanceSymbolEntries()) {
+      const bucket = aliasSymbolsByType.get(typeId) ?? new Set<ProgramSymbolId>();
+      symbolSet.forEach((symbol) => {
+        bucket.add(symbols.idOf({ moduleId: mod.moduleId, symbol }));
+      });
+      aliasSymbolsByType.set(typeId, bucket);
+    }
+  });
 
   const moduleMetaById = new Map<string, ModuleCodegenMetadata>();
   const importTargetsByModule = new Map<string, Map<SymbolId, SymbolRef>>();
@@ -1202,6 +1214,10 @@ export const buildProgramCodegenView = (
       return { kind: "other", kindName: desc.kind };
     },
     getRuntimeTypeId: (typeId) => typeId,
+    getAliasSymbols: (typeId) => {
+      const symbolsForType = aliasSymbolsByType.get(typeId);
+      return symbolsForType ? Array.from(symbolsForType).sort((a, b) => a - b) : [];
+    },
   };
 
   const optionals = {

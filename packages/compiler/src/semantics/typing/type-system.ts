@@ -838,7 +838,46 @@ export const resolveTypeAlias = (
       };
 
       if (containsUnboundTypeParam(resolved)) {
-        throw new Error("cyclic type alias instantiation");
+        const formatType = (type: TypeId): string => {
+          try {
+            return JSON.stringify({ id: type, desc: ctx.arena.get(type) });
+          } catch {
+            return String(type);
+          }
+        };
+        const resolvedDesc = ctx.arena.get(resolved);
+        const describeType = (type: TypeId): string => {
+          const desc = ctx.arena.get(type);
+          if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+            const nominal = ctx.arena.get(desc.nominal);
+            if (nominal.kind === "nominal-object") {
+              const args = nominal.typeArgs.map(formatType).join(", ");
+              return `${nominal.name}${args.length > 0 ? `<${args}>` : ""}`;
+            }
+          }
+          return formatType(type);
+        };
+        const detail =
+          resolvedDesc.kind === "union"
+            ? (() => {
+                const memberDetails = resolvedDesc.members
+                  .map((member) => ({
+                    member,
+                    unbound: containsUnboundTypeParam(member),
+                  }))
+                  .map(
+                    ({ member, unbound }) =>
+                      `${describeType(member)}${unbound ? " (unbound)" : ""}`
+                  )
+                  .join(", ");
+                return `\nunion members: ${memberDetails}`;
+              })()
+            : "";
+        throw new Error(
+          `cyclic type alias instantiation for ${aliasName} (unbound type param)\nresolved: ${formatType(
+            resolved
+          )}${detail}`
+        );
       }
     }
 
@@ -949,7 +988,9 @@ const resolveNamedTypeExpr = (
   ) {
     const activeDesc = ctx.arena.get(activeAlias);
     if (activeDesc.kind === "type-param-ref") {
-      throw new Error("cyclic type alias instantiation");
+      throw new Error(
+        `cyclic type alias instantiation for ${name} (resolution mismatch)`
+      );
     }
   }
 

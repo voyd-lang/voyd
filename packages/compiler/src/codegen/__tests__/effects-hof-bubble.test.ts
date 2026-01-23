@@ -50,7 +50,7 @@ describe("effects higher-order functions", () => {
     const wasmBinary = new Uint8Array(module.emitBinary());
     const instance = new WebAssembly.Instance(
       new WebAssembly.Module(wasmBinary),
-      createEffectsImports({ includeMsgPack: true })
+      createEffectsImports()
     );
     const handled = instance.exports.handled as CallableFunction;
     expect(handled()).toBe(15);

@@ -42,6 +42,7 @@ const CONTINUATION_FIELDS = {
 const EFFECT_RESULT_FIELDS = {
   status: 0,
   cont: 1,
+  payloadLen: 2,
 } as const;
 
 const TAIL_GUARD_FIELDS = {
@@ -109,6 +110,7 @@ export interface EffectRuntime {
   makeEffectResult: (params: {
     status: binaryen.ExpressionRef;
     cont?: binaryen.ExpressionRef;
+    payloadLen?: binaryen.ExpressionRef;
   }) => binaryen.ExpressionRef;
   continuationFn: (
     continuation: binaryen.ExpressionRef
@@ -140,6 +142,7 @@ export interface EffectRuntime {
     result: binaryen.ExpressionRef
   ) => binaryen.ExpressionRef;
   effectResultCont: (result: binaryen.ExpressionRef) => binaryen.ExpressionRef;
+  effectResultLen: (result: binaryen.ExpressionRef) => binaryen.ExpressionRef;
 }
 
 export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
@@ -205,6 +208,7 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     fields: [
       { name: "status", type: binaryen.i32, mutable: false },
       { name: "cont", type: binaryen.anyref, mutable: false },
+      { name: "payloadLen", type: binaryen.i32, mutable: false },
     ],
     final: true,
   });
@@ -239,13 +243,16 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
   const makeEffectResult = ({
     status,
     cont = mod.ref.null(binaryen.anyref),
+    payloadLen = mod.i32.const(0),
   }: {
     status: binaryen.ExpressionRef;
     cont?: binaryen.ExpressionRef;
+    payloadLen?: binaryen.ExpressionRef;
   }) =>
     initStruct(mod, effectResultType, [
       status,
       cont,
+      payloadLen,
     ]);
 
   const makeTailGuard = ({
@@ -489,6 +496,10 @@ export const createEffectRuntime = (mod: binaryen.Module): EffectRuntime => {
     effectResultCont: getEffectResultField(
       EFFECT_RESULT_FIELDS.cont,
       binaryen.anyref
+    ),
+    effectResultLen: getEffectResultField(
+      EFFECT_RESULT_FIELDS.payloadLen,
+      binaryen.i32
     ),
   };
 };

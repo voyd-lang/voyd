@@ -7,6 +7,17 @@ export type { Diagnostic, EffectHandler, ModuleRoots };
 
 export type TestCase = CompilerTestCase;
 
+export type ExportAbiEntry = {
+  name: string;
+  abi: "direct" | "serialized";
+  formatId?: string;
+};
+
+export type ExportAbiMetadata = {
+  version: number;
+  exports: ExportAbiEntry[];
+};
+
 export type CompileOptions = {
   entryPath?: string;
   source?: string;

@@ -1,2 +1,5 @@
+use self::fns::self as string_fns
 pub use self::types::all
-pub use std::string::fns::{ new_string }
+
+pub fn new_string(from_bytes: FixedArray<i32>): () -> String
+  string_fns::new_string(from_bytes)

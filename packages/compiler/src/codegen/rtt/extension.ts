@@ -70,9 +70,9 @@ export const initExtensionHelpers = (mod: binaryen.Module): ExtensionHelpers => 
             ])
           ),
         ]),
-        mod.local.get(3, bin.i32),
+        mod.return(mod.local.get(3, bin.i32)),
       ],
-      bin.i32
+      bin.none
     )
   );
 
@@ -91,18 +91,20 @@ export const initExtensionHelpers = (mod: binaryen.Module): ExtensionHelpers => 
           ),
           mod.return(mod.i32.const(0))
         ),
-        mod.i32.eq(
-          mod.local.get(0, bin.i32),
-          arrayGet(
-            mod,
-            mod.local.get(1, i32Array),
-            mod.i32.const(0),
-            bin.i32,
-            false
+        mod.return(
+          mod.i32.eq(
+            mod.local.get(0, bin.i32),
+            arrayGet(
+              mod,
+              mod.local.get(1, i32Array),
+              mod.i32.const(0),
+              bin.i32,
+              false
+            )
           )
         ),
       ],
-      bin.i32
+      bin.none
     )
   );
 

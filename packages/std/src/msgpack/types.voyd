@@ -1,0 +1,28 @@
+use std::array::Array
+use std::box::Box
+use std::map::Map
+use std::string::types::String
+
+pub obj I32 {
+  api value: i32
+}
+
+pub obj I64 {
+  api value: i64
+}
+
+pub obj F32 {
+  api value: f32
+}
+
+pub obj F64 {
+  api value: f64
+}
+
+pub type Numeric = I32 | I64 | F32 | F64
+
+pub obj Null {}
+
+pub obj Binary {
+  api bytes: Array<i32>
+}

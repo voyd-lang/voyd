@@ -12,10 +12,10 @@ describe("boolean intrinsics typing", () => {
   it("rejects non-boolean operands", () => {
     expect(() =>
       semanticsPipeline(loadAst("boolean_intrinsics_type_mismatch.voyd"))
-    ).toThrow(/no matching overload for intrinsic and/);
+    ).toThrow(/no overload of and matches argument types/);
 
     expect(() =>
       semanticsPipeline(loadAst("boolean_intrinsics_not_type_mismatch.voyd"))
-    ).toThrow(/no matching overload for intrinsic not/);
+    ).toThrow(/no overload of not matches argument types/);
   });
 });

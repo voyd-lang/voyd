@@ -1,0 +1,7 @@
+use std::msgpack::MsgPack
+
+pub fn echo(value: MsgPack) -> MsgPack
+  value
+
+pub fn add(a: i32, b: i32) -> i32
+  a + b

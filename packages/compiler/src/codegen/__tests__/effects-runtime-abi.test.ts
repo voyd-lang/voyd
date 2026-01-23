@@ -49,6 +49,7 @@ describe("effect runtime ABI helpers", () => {
     expect(text).toContain("type $voydTailGuard");
     expect(text).toContain("type $voydEffectResult");
     expect(text).toContain("(field $site i32)");
+    expect(text).toContain("(field $payloadLen i32)");
   });
 
   it("builds well-typed outcomes and effect requests", () => {
@@ -109,6 +110,7 @@ describe("effect runtime ABI helpers", () => {
     expect(text).toContain("(field $cont (ref null $voydContinuation))");
     expect(text).toContain("(field $tailGuard (ref null $voydTailGuard))");
     expect(text).toContain("(field $status i32)");
+    expect(text).toContain("(field $payloadLen i32)");
   });
 
   it("exposes tag values for value vs effect outcomes", () => {

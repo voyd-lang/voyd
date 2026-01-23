@@ -1,10 +1,5 @@
 import type binaryen from "binaryen";
-
-export type MsgPackImports = {
-  writeValue: string;
-  writeEffect: string;
-  readValue: string;
-};
+import type { TypeId } from "../../../semantics/ids.js";
 
 export type EffectOpSignature = {
   opIndex: number;
@@ -13,7 +8,9 @@ export type EffectOpSignature = {
   resumeKind: number;
   signatureHash: number;
   params: readonly binaryen.Type[];
+  paramTypeIds: readonly TypeId[];
   returnType: binaryen.Type;
+  returnTypeId: TypeId;
   argsType?: binaryen.Type;
   label: string;
 };

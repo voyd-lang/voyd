@@ -1,13 +1,14 @@
 import binaryen from "binaryen";
 import { callRef, refCast } from "@voyd/lib/binaryen-gc/index.js";
+import { findSerializerForType } from "../../serializer.js";
+import { wasmTypeFor, getFunctionRefType } from "../../types.js";
 import { boxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
-import { getFunctionRefType } from "../../types.js";
-import { supportedValueTag } from "./signatures.js";
-import type { EffectOpSignature, MsgPackImports } from "./types.js";
+import { ensureMsgPackFunctions } from "./msgpack.js";
 import { stateFor } from "./state.js";
+import type { EffectOpSignature } from "./types.js";
 
 const RESUME_CONTINUATION_KEY = Symbol("voyd.effects.hostBoundary.resumeContinuation");
 const RESUME_EFFECTFUL_KEY = Symbol("voyd.effects.hostBoundary.resumeEffectful");
@@ -22,32 +23,81 @@ const functionRefType = ({
   ctx: CodegenContext;
 }): binaryen.Type => getFunctionRefType({ params, result, ctx, label: "host" });
 
+const decodeValueForType = ({
+  decoded,
+  typeId,
+  msgPackType,
+  msgpack,
+  ctx,
+  label,
+}: {
+  decoded: binaryen.ExpressionRef;
+  typeId: number;
+  msgPackType: binaryen.Type;
+  msgpack: ReturnType<typeof ensureMsgPackFunctions>;
+  ctx: CodegenContext;
+  label: string;
+}): binaryen.ExpressionRef => {
+  const serializer = findSerializerForType(typeId, ctx);
+  if (serializer) {
+    if (serializer.formatId !== "msgpack") {
+      throw new Error(`unsupported serializer format for ${label}: ${serializer.formatId}`);
+    }
+    return refCast(ctx.mod, decoded, wasmTypeFor(typeId, ctx));
+  }
+  if (typeId === ctx.program.primitives.bool) {
+    return ctx.mod.call(msgpack.unpackBool.wasmName, [decoded], binaryen.i32);
+  }
+  if (typeId === ctx.program.primitives.i32) {
+    return ctx.mod.call(msgpack.unpackI32.wasmName, [decoded], binaryen.i32);
+  }
+  if (typeId === ctx.program.primitives.i64) {
+    return ctx.mod.call(msgpack.unpackI64.wasmName, [decoded], binaryen.i64);
+  }
+  if (typeId === ctx.program.primitives.f32) {
+    return ctx.mod.call(msgpack.unpackF32.wasmName, [decoded], binaryen.f32);
+  }
+  if (typeId === ctx.program.primitives.f64) {
+    return ctx.mod.call(msgpack.unpackF64.wasmName, [decoded], binaryen.f64);
+  }
+  if (typeId === ctx.program.primitives.void) {
+    return ctx.mod.nop();
+  }
+  throw new Error(`unsupported resume value for ${label}`);
+};
+
 export const createResumeContinuation = ({
   ctx,
   runtime,
   signatures,
-  imports,
   exportName = "resume_continuation",
 }: {
   ctx: CodegenContext;
   runtime: EffectRuntime;
   signatures: readonly EffectOpSignature[];
-  imports: MsgPackImports;
   exportName?: string;
 }): string =>
   stateFor(ctx, RESUME_CONTINUATION_KEY, () => {
+    const msgpack = ensureMsgPackFunctions(ctx);
+    const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+
     const name = `${ctx.moduleLabel}__resume_continuation`;
     const params = binaryen.createType([
       runtime.effectRequestType,
       binaryen.i32,
       binaryen.i32,
     ]);
-    const locals: binaryen.Type[] = [runtime.tailGuardType, runtime.continuationType];
+    const locals: binaryen.Type[] = [
+      runtime.tailGuardType,
+      runtime.continuationType,
+      msgPackType,
+    ];
     const requestLocal = 0;
     const bufPtrLocal = 1;
-    const bufLenLocal = 2;
+    const resumeLenLocal = 2;
     const guardLocal = 3;
     const contLocal = 4;
+    const decodedLocal = 5;
     const opIndexExpr = runtime.requestOpIndex(
       ctx.mod.local.get(requestLocal, runtime.effectRequestType)
     );
@@ -81,45 +131,22 @@ export const createResumeContinuation = ({
         opIndexExpr,
         ctx.mod.i32.const(sig.opIndex)
       );
-      const tag = (() => {
-        try {
-          return supportedValueTag({ wasmType: sig.returnType, label: sig.label });
-        } catch {
-          return undefined;
-        }
-      })();
-      if (typeof tag !== "number") {
-        return ctx.mod.if(matches, ctx.mod.unreachable());
-      }
-      const bits =
-        sig.returnType === binaryen.none
-          ? ctx.mod.i64.const(0, 0)
-          : ctx.mod.call(
-              imports.readValue,
-              [
-                ctx.mod.i32.const(tag),
-                ctx.mod.local.get(bufPtrLocal, binaryen.i32),
-                ctx.mod.local.get(bufLenLocal, binaryen.i32),
-              ],
-              binaryen.i64
-            );
-      const resumedValue =
+      const resumeValue =
         sig.returnType === binaryen.none
           ? ctx.mod.nop()
-          : sig.returnType === binaryen.i32
-            ? ctx.mod.i32.wrap(bits)
-            : sig.returnType === binaryen.i64
-              ? bits
-              : sig.returnType === binaryen.f32
-                ? ctx.mod.f32.reinterpret(ctx.mod.i32.wrap(bits))
-                : sig.returnType === binaryen.f64
-                  ? ctx.mod.f64.reinterpret(bits)
-                  : ctx.mod.unreachable();
+          : decodeValueForType({
+              decoded: ctx.mod.local.get(decodedLocal, msgPackType),
+              typeId: sig.returnTypeId,
+              msgPackType,
+              msgpack,
+              ctx,
+              label: sig.label,
+            });
       const resumeBox =
         sig.returnType === binaryen.none
           ? ctx.mod.ref.null(binaryen.eqref)
           : boxOutcomeValue({
-              value: resumedValue,
+              value: resumeValue,
               valueType: sig.returnType,
               ctx,
             });
@@ -149,6 +176,17 @@ export const createResumeContinuation = ({
         ),
         guardInit,
         ...guardOps,
+        ctx.mod.local.set(
+          decodedLocal,
+          ctx.mod.call(
+            msgpack.decodeValue.wasmName,
+            [
+              ctx.mod.local.get(bufPtrLocal, binaryen.i32),
+              ctx.mod.local.get(resumeLenLocal, binaryen.i32),
+            ],
+            msgPackType
+          )
+        ),
         ...branches,
         ctx.mod.return(
           runtime.makeOutcomeEffect(ctx.mod.local.get(requestLocal, runtime.effectRequestType))
@@ -174,17 +212,23 @@ export const createResumeEffectful = ({
 }): string =>
   stateFor(ctx, RESUME_EFFECTFUL_KEY, () => {
     const name = `${ctx.moduleLabel}__resume_effectful`;
-    const params = binaryen.createType([runtime.effectRequestType, binaryen.i32, binaryen.i32]);
+    const params = binaryen.createType([
+      runtime.effectRequestType,
+      binaryen.i32,
+      binaryen.i32,
+      binaryen.i32,
+    ]);
     const contParam = 0;
     const bufPtrParam = 1;
-    const bufLenParam = 2;
+    const resumeLenParam = 2;
+    const bufCapParam = 3;
 
     const resumedOutcome = ctx.mod.call(
       resumeContinuation,
       [
         ctx.mod.local.get(contParam, runtime.effectRequestType),
         ctx.mod.local.get(bufPtrParam, binaryen.i32),
-        ctx.mod.local.get(bufLenParam, binaryen.i32),
+        ctx.mod.local.get(resumeLenParam, binaryen.i32),
       ],
       runtime.outcomeType
     );
@@ -203,7 +247,7 @@ export const createResumeEffectful = ({
             runtime.outcomeType
           ),
           ctx.mod.local.get(bufPtrParam, binaryen.i32),
-          ctx.mod.local.get(bufLenParam, binaryen.i32),
+          ctx.mod.local.get(bufCapParam, binaryen.i32),
         ],
         runtime.effectResultType
       )

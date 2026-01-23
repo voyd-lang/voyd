@@ -1,0 +1,26 @@
+@intrinsic(name: "__memory_size")
+pub fn size(): () -> i32 __memory_size()
+
+@intrinsic(name: "__memory_grow")
+pub fn grow(pages: i32): () -> i32 __memory_grow(pages)
+
+@intrinsic(name: "__memory_load_u8")
+pub fn load_u8(ptr: i32): () -> i32 __memory_load_u8(ptr)
+
+@intrinsic(name: "__memory_store_u8")
+pub fn store_u8(ptr: i32, value: i32): () -> void __memory_store_u8(ptr, value)
+
+@intrinsic(name: "__memory_load_u16")
+pub fn load_u16(ptr: i32): () -> i32 __memory_load_u16(ptr)
+
+@intrinsic(name: "__memory_store_u16")
+pub fn store_u16(ptr: i32, value: i32): () -> void __memory_store_u16(ptr, value)
+
+@intrinsic(name: "__memory_load_u32")
+pub fn load_u32(ptr: i32): () -> i32 __memory_load_u32(ptr)
+
+@intrinsic(name: "__memory_store_u32")
+pub fn store_u32(ptr: i32, value: i32): () -> void __memory_store_u32(ptr, value)
+
+@intrinsic(name: "__memory_copy")
+pub fn copy(dest: i32, src: i32, len: i32): () -> void __memory_copy(dest, src, len)
