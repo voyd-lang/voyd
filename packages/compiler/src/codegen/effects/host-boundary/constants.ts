@@ -14,4 +14,13 @@ export const EFFECT_RESULT_STATUS = {
   effect: 1,
 } as const;
 
+export const EFFECT_REQUEST_MSGPACK_KEYS = {
+  effectId: "effectId",
+  opId: "opId",
+  opIndex: "opIndex",
+  resumeKind: "resumeKind",
+  handle: "handle",
+  args: "args",
+} as const;
+
 export const MIN_EFFECT_BUFFER_SIZE = 4 * 1024;

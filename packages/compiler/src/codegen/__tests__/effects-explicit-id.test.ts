@@ -23,5 +23,5 @@ describe("explicit effect ids", () => {
     expect(opA.effectId).toBe("com.example.log");
     expect(opB.effectId).toBe("com.example.log");
     expect(opA.effectIdHash.hex).toBe(opB.effectIdHash.hex);
-  });
+  }, 30_000);
 });

@@ -1,11 +1,15 @@
 import binaryen from "binaryen";
-import { arrayGet, refCast } from "@voyd/lib/binaryen-gc/index.js";
+import { arrayGet } from "@voyd/lib/binaryen-gc/index.js";
 import type { CodegenContext, FunctionContext, FunctionMetadata } from "../context.js";
 import { findSerializerForType, resolveSerializerForTypes } from "../serializer.js";
 import { coerceValueToType } from "../structural.js";
 import { wasmTypeFor } from "../types.js";
 import { requireFunctionMeta } from "../function-lookup.js";
 import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
+import {
+  packMsgPackValueForType,
+  unpackMsgPackValueForType,
+} from "../effects/host-boundary/msgpack-values.js";
 
 type ExportSerializer = ReturnType<typeof resolveSerializerForTypes>;
 
@@ -128,10 +132,9 @@ export const emitSerializedExportWrapper = ({
       msgPackType,
       false
     );
-    return decodeValueForType({
+    return unpackMsgPackValueForType({
       ctx,
       msgpack,
-      msgPackType,
       value: element,
       typeId,
       label: `${exportName} arg${index}`,
@@ -146,13 +149,14 @@ export const emitSerializedExportWrapper = ({
     callArgs as number[],
     wasmTypeFor(meta.resultTypeId, ctx)
   );
-  const msgpackResult = encodeValueForType({
+  const msgpackResult = packMsgPackValueForType({
     ctx,
     msgpack,
     msgPackType,
     value: resultValue,
     typeId: meta.resultTypeId,
     label: `${exportName} result`,
+    onUnsupported: "throw",
   });
   const encodeParamType = encodeMeta.paramTypeIds[0];
   if (typeof encodeParamType !== "number") {
@@ -192,86 +196,6 @@ export const emitSerializedExportWrapper = ({
 
   ctx.mod.addFunctionExport(wrapperName, exportName);
   return { wrapperName, serializer };
-};
-
-const encodeValueForType = ({
-  ctx,
-  msgpack,
-  msgPackType,
-  value,
-  typeId,
-  label,
-}: {
-  ctx: CodegenContext;
-  msgpack: ReturnType<typeof ensureMsgPackFunctions>;
-  msgPackType: binaryen.Type;
-  value: binaryen.ExpressionRef;
-  typeId: number;
-  label: string;
-}): binaryen.ExpressionRef => {
-  const serializer = findSerializerForType(typeId, ctx);
-  if (serializer) {
-    return refCast(ctx.mod, value, msgPackType);
-  }
-  if (typeId === ctx.program.primitives.bool) {
-    return ctx.mod.call(msgpack.packBool.wasmName, [value], msgPackType);
-  }
-  if (typeId === ctx.program.primitives.i32) {
-    return ctx.mod.call(msgpack.packI32.wasmName, [value], msgPackType);
-  }
-  if (typeId === ctx.program.primitives.i64) {
-    return ctx.mod.call(msgpack.packI64.wasmName, [value], msgPackType);
-  }
-  if (typeId === ctx.program.primitives.f32) {
-    return ctx.mod.call(msgpack.packF32.wasmName, [value], msgPackType);
-  }
-  if (typeId === ctx.program.primitives.f64) {
-    return ctx.mod.call(msgpack.packF64.wasmName, [value], msgPackType);
-  }
-  if (typeId === ctx.program.primitives.void) {
-    return ctx.mod.call(msgpack.packNull.wasmName, [], msgPackType);
-  }
-  throw new Error(`unsupported encoded value for ${label}`);
-};
-
-const decodeValueForType = ({
-  ctx,
-  msgpack,
-  msgPackType,
-  value,
-  typeId,
-  label,
-}: {
-  ctx: CodegenContext;
-  msgpack: ReturnType<typeof ensureMsgPackFunctions>;
-  msgPackType: binaryen.Type;
-  value: binaryen.ExpressionRef;
-  typeId: number;
-  label: string;
-}): binaryen.ExpressionRef => {
-  const serializer = findSerializerForType(typeId, ctx);
-  if (serializer) {
-    return refCast(ctx.mod, value, wasmTypeFor(typeId, ctx));
-  }
-  if (typeId === ctx.program.primitives.bool) {
-    return ctx.mod.call(msgpack.unpackBool.wasmName, [value], binaryen.i32);
-  }
-  if (typeId === ctx.program.primitives.i32) {
-    return ctx.mod.call(msgpack.unpackI32.wasmName, [value], binaryen.i32);
-  }
-  if (typeId === ctx.program.primitives.i64) {
-    return ctx.mod.call(msgpack.unpackI64.wasmName, [value], binaryen.i64);
-  }
-  if (typeId === ctx.program.primitives.f32) {
-    return ctx.mod.call(msgpack.unpackF32.wasmName, [value], binaryen.f32);
-  }
-  if (typeId === ctx.program.primitives.f64) {
-    return ctx.mod.call(msgpack.unpackF64.wasmName, [value], binaryen.f64);
-  }
-  if (typeId === ctx.program.primitives.void) {
-    return ctx.mod.nop();
-  }
-  throw new Error(`unsupported decoded value for ${label}`);
 };
 
 const validateExportTypes = ({

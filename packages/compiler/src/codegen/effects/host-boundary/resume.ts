@@ -1,12 +1,12 @@
 import binaryen from "binaryen";
 import { callRef, refCast } from "@voyd/lib/binaryen-gc/index.js";
-import { findSerializerForType } from "../../serializer.js";
-import { wasmTypeFor, getFunctionRefType } from "../../types.js";
+import { getFunctionRefType, wasmTypeFor } from "../../types.js";
 import { boxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
 import { ensureMsgPackFunctions } from "./msgpack.js";
+import { unpackMsgPackValueForType } from "./msgpack-values.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
 
@@ -22,49 +22,6 @@ const functionRefType = ({
   result: binaryen.Type;
   ctx: CodegenContext;
 }): binaryen.Type => getFunctionRefType({ params, result, ctx, label: "host" });
-
-const decodeValueForType = ({
-  decoded,
-  typeId,
-  msgPackType,
-  msgpack,
-  ctx,
-  label,
-}: {
-  decoded: binaryen.ExpressionRef;
-  typeId: number;
-  msgPackType: binaryen.Type;
-  msgpack: ReturnType<typeof ensureMsgPackFunctions>;
-  ctx: CodegenContext;
-  label: string;
-}): binaryen.ExpressionRef => {
-  const serializer = findSerializerForType(typeId, ctx);
-  if (serializer) {
-    if (serializer.formatId !== "msgpack") {
-      throw new Error(`unsupported serializer format for ${label}: ${serializer.formatId}`);
-    }
-    return refCast(ctx.mod, decoded, wasmTypeFor(typeId, ctx));
-  }
-  if (typeId === ctx.program.primitives.bool) {
-    return ctx.mod.call(msgpack.unpackBool.wasmName, [decoded], binaryen.i32);
-  }
-  if (typeId === ctx.program.primitives.i32) {
-    return ctx.mod.call(msgpack.unpackI32.wasmName, [decoded], binaryen.i32);
-  }
-  if (typeId === ctx.program.primitives.i64) {
-    return ctx.mod.call(msgpack.unpackI64.wasmName, [decoded], binaryen.i64);
-  }
-  if (typeId === ctx.program.primitives.f32) {
-    return ctx.mod.call(msgpack.unpackF32.wasmName, [decoded], binaryen.f32);
-  }
-  if (typeId === ctx.program.primitives.f64) {
-    return ctx.mod.call(msgpack.unpackF64.wasmName, [decoded], binaryen.f64);
-  }
-  if (typeId === ctx.program.primitives.void) {
-    return ctx.mod.nop();
-  }
-  throw new Error(`unsupported resume value for ${label}`);
-};
 
 export const createResumeContinuation = ({
   ctx,
@@ -134,10 +91,9 @@ export const createResumeContinuation = ({
       const resumeValue =
         sig.returnType === binaryen.none
           ? ctx.mod.nop()
-          : decodeValueForType({
-              decoded: ctx.mod.local.get(decodedLocal, msgPackType),
+          : unpackMsgPackValueForType({
+              value: ctx.mod.local.get(decodedLocal, msgPackType),
               typeId: sig.returnTypeId,
-              msgPackType,
               msgpack,
               ctx,
               label: sig.label,

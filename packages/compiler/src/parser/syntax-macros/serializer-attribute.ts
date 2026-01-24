@@ -68,7 +68,11 @@ const processSequence = (
     }
 
     if (pending && allowAttributes) {
-      if (isForm(processed) && isTypeDeclForm(processed)) {
+      const kind = isForm(processed) ? getTypeDeclKind(processed) : null;
+      if (kind === "trait") {
+        throw new Error("@serializer is not supported on trait declarations");
+      }
+      if (kind) {
         attachSerializerAttribute(processed, pending);
         changed = true;
         pending = null;
@@ -87,23 +91,31 @@ const processSequence = (
   return { elements: result, changed };
 };
 
-const isTypeDeclForm = (form: Form): boolean => {
+const getTypeDeclKind = (form: Form): "obj" | "type" | "trait" | null => {
   const head = form.at(0);
   if (!isIdentifierAtom(head)) {
-    return false;
+    return null;
   }
 
   if (head.value === "pub") {
     const keyword = form.at(1);
-    return (
-      isIdentifierAtom(keyword) &&
-      (keyword.value === "obj" ||
-        keyword.value === "type" ||
-        keyword.value === "trait")
-    );
+    if (!isIdentifierAtom(keyword)) {
+      return null;
+    }
+    if (
+      keyword.value === "obj" ||
+      keyword.value === "type" ||
+      keyword.value === "trait"
+    ) {
+      return keyword.value;
+    }
+    return null;
   }
 
-  return head.value === "obj" || head.value === "type" || head.value === "trait";
+  if (head.value === "obj" || head.value === "type" || head.value === "trait") {
+    return head.value;
+  }
+  return null;
 };
 
 const isSerializerAttributeForm = (expr: Expr): expr is Form =>

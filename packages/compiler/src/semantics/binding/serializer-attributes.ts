@@ -24,9 +24,6 @@ const pathFromExpr = (expr: Expr): string[] | null => {
   if (isIdentifierAtom(right)) {
     return [...leftPath, right.value];
   }
-  if (isForm(right) && isIdentifierAtom(right.at(0))) {
-    return [...leftPath, right.at(0)!.value];
-  }
   return null;
 };
 

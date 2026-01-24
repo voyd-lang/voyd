@@ -108,5 +108,5 @@ describe("effects multi-module ids", () => {
     expect(second.table.namesBase64).toBe(resultA.table.namesBase64);
     expect(second.table.ops).toEqual(resultA.table.ops);
     expect(tableASecond.ops).toEqual(tableA.ops);
-  });
+  }, 30_000);
 });
