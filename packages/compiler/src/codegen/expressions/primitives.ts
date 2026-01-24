@@ -59,6 +59,13 @@ export const compileIdentifierExpr = (
   ctx: CodegenContext,
   fnCtx: FunctionContext
 ): CompiledExpression => {
+  const name =
+    ctx.program.symbols.getName(
+      ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: expr.symbol })
+    ) ?? `${expr.symbol}`;
+  if (name === "void") {
+    return { expr: ctx.mod.nop(), usedReturnCall: false };
+  }
   const binding = getRequiredBinding(expr.symbol, ctx, fnCtx);
   return { expr: loadBindingValue(binding, ctx), usedReturnCall: false };
 };

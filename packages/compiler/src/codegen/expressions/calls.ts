@@ -266,6 +266,7 @@ export const compileCallExpr = (
       callId: expr.id,
       ctx,
       moduleId: targetRef.moduleId,
+      typeInstanceId,
     });
     if (!targetMeta) {
       throw new Error(
@@ -360,6 +361,7 @@ export const compileCallExpr = (
       symbol: callee.symbol,
       callId: expr.id,
       ctx,
+      typeInstanceId,
     });
     if (meta) {
       const args = compileCallArguments(expr, meta, ctx, fnCtx, compileExpr);
@@ -453,6 +455,7 @@ export const compileMethodCallExpr = (
     callId: expr.id,
     ctx,
     moduleId: targetRef.moduleId,
+    typeInstanceId,
   });
   if (!meta) {
     throw new Error(`codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`);
@@ -516,6 +519,7 @@ const compileTraitDispatchCall = ({
     callId: expr.id,
     ctx,
     moduleId: resolvedModuleId,
+    typeInstanceId,
   });
   if (!meta) {
     return undefined;
@@ -714,7 +718,9 @@ const compileCallArgumentsForParams = (
     return callee.exprKind;
   })();
   const fail = (detail: string): never => {
-    throw new Error(`call argument count mismatch for ${calleeName}: ${detail}`);
+    throw new Error(
+      `call argument count mismatch for ${calleeName} (call ${call.id} in ${ctx.moduleId}): ${detail}`
+    );
   };
   const expectedParamLabel = (param: CallParam): string | undefined =>
     param.label ?? param.name;
@@ -1165,44 +1171,85 @@ const getFunctionMetadataForCall = ({
   callId,
   ctx,
   moduleId,
+  typeInstanceId,
 }: {
   symbol: number;
   callId: HirExprId;
   ctx: CodegenContext;
   moduleId?: string;
+  typeInstanceId?: ProgramFunctionInstanceId;
 }): FunctionMetadata | undefined => {
-  const targetModuleId = moduleId ?? ctx.moduleId;
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, callId);
-  const typeArgs = callInfo.typeArgs ?? [];
-  const instanceId = ctx.program.functions.getInstanceId(
-    targetModuleId,
-    symbol,
-    typeArgs
-  );
-  const instance =
-    instanceId === undefined ? undefined : ctx.functionInstances.get(instanceId);
-  if (instance) {
-    return instance;
-  }
-  const metas = ctx.functions.get(targetModuleId)?.get(symbol);
-  if (!metas || metas.length === 0) {
-    return undefined;
-  }
-  if (typeArgs.length === 0) {
-    const genericMeta = metas.find((meta) => meta.typeArgs.length === 0);
-    if (genericMeta) {
-      return genericMeta;
+  const rawTypeArgs = (() => {
+    if (typeof typeInstanceId === "number") {
+      const resolved = callInfo.typeArgs?.get(typeInstanceId);
+      if (resolved) {
+        return resolved;
+      }
+    }
+    const singleton =
+      callInfo.typeArgs && callInfo.typeArgs.size === 1
+        ? callInfo.typeArgs.values().next().value
+        : undefined;
+    if (singleton) {
+      return singleton;
+    }
+    return [];
+  })();
+  const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
+  const typeArgs = substitution
+    ? rawTypeArgs.map((arg) => ctx.program.types.substitute(arg, substitution))
+    : rawTypeArgs;
+
+  const candidates: { moduleId: string; symbol: number }[] = [
+    { moduleId: moduleId ?? ctx.moduleId, symbol },
+  ];
+  if (!moduleId) {
+    const targetId = ctx.program.imports.getTarget(ctx.moduleId, symbol);
+    if (targetId) {
+      const resolved = ctx.program.symbols.refOf(targetId);
+      if (
+        resolved.moduleId !== ctx.moduleId ||
+        resolved.symbol !== symbol
+      ) {
+        candidates.push({ moduleId: resolved.moduleId, symbol: resolved.symbol });
+      }
     }
   }
-  const exact = metas.find(
-    (meta) =>
-      meta.typeArgs.length === typeArgs.length &&
-      meta.typeArgs.every((arg, index) => arg === typeArgs[index])
-  );
-  if (exact) {
-    return exact;
+
+  for (const candidate of candidates) {
+    const instanceId = ctx.program.functions.getInstanceId(
+      candidate.moduleId,
+      candidate.symbol,
+      typeArgs
+    );
+    const instance =
+      instanceId === undefined ? undefined : ctx.functionInstances.get(instanceId);
+    if (instance) {
+      return instance;
+    }
+    const metas = ctx.functions.get(candidate.moduleId)?.get(candidate.symbol);
+    if (!metas || metas.length === 0) {
+      continue;
+    }
+    if (typeArgs.length === 0) {
+      const genericMeta = metas.find((meta) => meta.typeArgs.length === 0);
+      if (genericMeta) {
+        return genericMeta;
+      }
+    }
+    const exact = metas.find(
+      (meta) =>
+        meta.typeArgs.length === typeArgs.length &&
+        meta.typeArgs.every((arg, index) => arg === typeArgs[index])
+    );
+    if (exact) {
+      return exact;
+    }
+    return metas[0];
   }
-  return metas[0];
+
+  return undefined;
 };
 
 // Function metadata is stored per-module in `ctx.functions`.

@@ -25,11 +25,14 @@ import type {
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
 import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
 import type { ProgramFunctionInstanceId, ProgramSymbolId } from "../semantics/ids.js";
+import { buildInstanceSubstitution } from "./type-substitution.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+type WasmTypeMode = "runtime" | "signature";
 
 const runtimeTypeKeyFor = (
   typeId: TypeId,
@@ -213,6 +216,7 @@ const ensureClosureTypeInfo = ({
   desc,
   ctx,
   seen,
+  mode,
 }: {
   typeId: TypeId;
   desc: {
@@ -226,6 +230,7 @@ const ensureClosureTypeInfo = ({
   };
   ctx: CodegenContext;
   seen: Set<TypeId>;
+  mode: WasmTypeMode;
 }): ClosureTypeInfo => {
   const key = closureSignatureKey({
     moduleId: ctx.moduleId,
@@ -243,14 +248,14 @@ const ensureClosureTypeInfo = ({
     !ctx.program.effects.isEmpty(desc.effectRow);
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   const userParamTypes = desc.parameters.map((param) =>
-    wasmTypeFor(param.type, ctx, seen)
+    wasmTypeFor(param.type, ctx, seen, mode)
   );
   const paramTypes = effectful
     ? [handlerParamType, ...userParamTypes]
     : userParamTypes;
   const resultType = effectful
     ? ctx.effectsRuntime.outcomeType
-    : wasmTypeFor(desc.returnType, ctx, seen);
+    : wasmTypeFor(desc.returnType, ctx, seen, mode);
   const interfaceType = defineStructType(ctx.mod, {
     name: closureStructName({ moduleLabel: ctx.moduleLabel, key }),
     fields: [{ name: "__fn", type: binaryen.funcref, mutable: false }],
@@ -286,6 +291,7 @@ export const getClosureTypeInfo = (
     desc,
     ctx,
     seen: new Set<TypeId>(),
+    mode: "runtime",
   });
 };
 
@@ -313,7 +319,8 @@ export const getFixedArrayWasmTypes = (
 export const wasmTypeFor = (
   typeId: TypeId,
   ctx: CodegenContext,
-  seen: Set<TypeId> = new Set()
+  seen: Set<TypeId> = new Set(),
+  mode: WasmTypeMode = "runtime"
 ): binaryen.Type => {
   const already = seen.has(typeId);
   if (already) {
@@ -336,7 +343,7 @@ export const wasmTypeFor = (
     }
 
     if (desc.kind === "function") {
-      const info = ensureClosureTypeInfo({ typeId, desc, ctx, seen });
+      const info = ensureClosureTypeInfo({ typeId, desc, ctx, seen, mode });
       return info.interfaceType;
     }
 
@@ -344,7 +351,21 @@ export const wasmTypeFor = (
       return ctx.rtt.baseType;
     }
 
+    if (desc.kind === "nominal-object") {
+      if (mode === "signature") {
+        return ctx.rtt.baseType;
+      }
+      const structInfo = getStructuralTypeInfo(typeId, ctx, seen);
+      if (!structInfo) {
+        throw new Error("missing structural type info");
+      }
+      return structInfo.interfaceType;
+    }
+
     if (desc.kind === "structural-object") {
+      if (mode === "signature") {
+        return ctx.rtt.baseType;
+      }
       const structInfo = getStructuralTypeInfo(typeId, ctx, seen);
       if (!structInfo) {
         throw new Error("missing structural type info");
@@ -367,7 +388,14 @@ export const wasmTypeFor = (
     }
 
     if (desc.kind === "intersection" && typeof desc.structural === "number") {
-      return wasmTypeFor(desc.structural, ctx, seen);
+      if (mode === "signature") {
+        return ctx.rtt.baseType;
+      }
+      const structInfo = getStructuralTypeInfo(typeId, ctx, seen);
+      if (!structInfo) {
+        throw new Error("missing structural type info");
+      }
+      return structInfo.interfaceType;
     }
 
     if (desc.kind === "type-param-ref") {
@@ -408,11 +436,12 @@ export const mapPrimitiveToWasm = (name: string): binaryen.Type => {
 
 export const getSymbolTypeId = (
   symbol: SymbolId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  instanceId?: ProgramFunctionInstanceId
 ): TypeId => {
   const typeId = ctx.module.types.getValueType(symbol);
   if (typeof typeId === "number") {
-    return typeId;
+    return substituteTypeForInstance({ typeId, ctx, instanceId });
   }
   throw new Error(
     `codegen missing type information for symbol ${getLocalSymbolName(
@@ -434,6 +463,19 @@ const getInstanceExprType = (
   return typeof instanceType === "number" ? instanceType : undefined;
 };
 
+function substituteTypeForInstance({
+  typeId,
+  ctx,
+  instanceId,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+  instanceId?: ProgramFunctionInstanceId;
+}): TypeId {
+  const substitution = buildInstanceSubstitution({ ctx, typeInstanceId: instanceId });
+  return substitution ? ctx.program.types.substitute(typeId, substitution) : typeId;
+}
+
 export const getRequiredExprType = (
   exprId: HirExprId,
   ctx: CodegenContext,
@@ -441,15 +483,15 @@ export const getRequiredExprType = (
 ): TypeId => {
   const instanceType = getInstanceExprType(exprId, ctx, instanceId);
   if (typeof instanceType === "number") {
-    return instanceType;
+    return substituteTypeForInstance({ typeId: instanceType, ctx, instanceId });
   }
   const resolved = ctx.module.types.getResolvedExprType(exprId);
   if (typeof resolved === "number") {
-    return resolved;
+    return substituteTypeForInstance({ typeId: resolved, ctx, instanceId });
   }
   const typeId = ctx.module.types.getExprType(exprId);
   if (typeof typeId === "number") {
-    return typeId;
+    return substituteTypeForInstance({ typeId, ctx, instanceId });
   }
   throw new Error(`codegen missing type information for expression ${exprId}`);
 };
@@ -461,14 +503,14 @@ export const getExprBinaryenType = (
 ): binaryen.Type => {
   const instanceType = getInstanceExprType(exprId, ctx, instanceId);
   if (typeof instanceType === "number") {
-    return wasmTypeFor(instanceType, ctx);
+    const typeId = substituteTypeForInstance({ typeId: instanceType, ctx, instanceId });
+    return wasmTypeFor(typeId, ctx);
   }
   const resolved = ctx.module.types.getResolvedExprType(exprId);
-  const typeId =
-    typeof resolved === "number"
-      ? resolved
-      : ctx.module.types.getExprType(exprId);
-  if (typeof typeId === "number") {
+  const baseTypeId =
+    typeof resolved === "number" ? resolved : ctx.module.types.getExprType(exprId);
+  if (typeof baseTypeId === "number") {
+    const typeId = substituteTypeForInstance({ typeId: baseTypeId, ctx, instanceId });
     return wasmTypeFor(typeId, ctx);
   }
   return binaryen.none;
@@ -499,6 +541,13 @@ export const getStructuralTypeInfo = (
   ctx: CodegenContext,
   seen: Set<TypeId> = new Set()
 ): StructuralTypeInfo | undefined => {
+  const typeDesc = ctx.program.types.getTypeDesc(typeId);
+  if (typeDesc.kind === "nominal-object") {
+    const info = ctx.program.objects.getInfoByNominal(typeId);
+    if (info && info.type !== typeId) {
+      return getStructuralTypeInfo(info.type, ctx, seen);
+    }
+  }
   const structuralId = resolveStructuralTypeId(typeId, ctx);
   if (typeof structuralId !== "number") {
     return undefined;
@@ -519,15 +568,51 @@ export const getStructuralTypeInfo = (
       return undefined;
     }
 
-    const fields: StructuralFieldInfo[] = desc.fields.map((field, index) => ({
-      name: field.name,
-      typeId: field.type,
-      wasmType: wasmTypeFor(field.type, ctx, seen),
-      runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
-      optional: field.optional,
-      hash: 0,
-    }));
     const nominalId = getNominalComponentId(typeId, ctx);
+    const substitution = (() => {
+      if (typeof nominalId !== "number") {
+        return undefined;
+      }
+      const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
+      if (nominalDesc.kind !== "nominal-object") {
+        return undefined;
+      }
+      const owner = ctx.program.objects.getNominalOwnerRef(nominalId);
+      if (!owner) {
+        return undefined;
+      }
+      const template = ctx.program.objects.getTemplate(owner);
+      if (!template) {
+        return undefined;
+      }
+      if (template.params.length !== nominalDesc.typeArgs.length) {
+        return undefined;
+      }
+      return new Map(
+        template.params.map(
+          (param, index) => [param.typeParam, nominalDesc.typeArgs[index]!] as const
+        )
+      );
+    })();
+    const objectInfo =
+      typeof nominalId === "number"
+        ? ctx.program.objects.getInfoByNominal(nominalId)
+        : undefined;
+    const sourceFields = objectInfo?.fields ?? desc.fields;
+    const fields: StructuralFieldInfo[] = sourceFields.map((field, index) => {
+      const fieldTypeId =
+        substitution && substitution.size > 0
+          ? ctx.program.types.substitute(field.type, substitution)
+          : field.type;
+      return {
+        name: field.name,
+        typeId: fieldTypeId,
+        wasmType: wasmTypeFor(fieldTypeId, ctx, seen),
+        runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
+        optional: field.optional,
+        hash: 0,
+      };
+    });
     const nominalAncestry = getNominalAncestry(nominalId, ctx);
     const nominalAncestors = nominalAncestry.map((entry) => entry.nominalId);
     const typeLabel = makeRuntimeTypeLabel({
@@ -642,6 +727,9 @@ export const resolveStructuralTypeId = (
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "structural-object") {
     return typeId;
+  }
+  if (desc.kind === "nominal-object") {
+    return ctx.program.objects.getInfoByNominal(typeId)?.structural;
   }
   if (desc.kind === "intersection" && typeof desc.structural === "number") {
     return desc.structural;

@@ -89,9 +89,20 @@ export const analyzeLambdaCaptures = ({
       expr: HirExpression & { exprKind: "identifier"; symbol: SymbolId }
     ) => {
       const record = symbolTable.getSymbol(expr.symbol);
-      const metadata = (record.metadata ?? {}) as { intrinsic?: boolean; mutable?: boolean };
+      const metadata = (record.metadata ?? {}) as {
+        intrinsic?: boolean;
+        mutable?: boolean;
+        import?: unknown;
+      };
       if (metadata.intrinsic) return;
+      if (metadata.import) return;
       if (record.scope === symbolTable.rootScope) {
+        return;
+      }
+      const scopeKind = getScope(record.scope).kind;
+      const captureAllowed =
+        scopeKind === "function" || scopeKind === "lambda" || scopeKind === "block";
+      if (!captureAllowed) {
         return;
       }
 

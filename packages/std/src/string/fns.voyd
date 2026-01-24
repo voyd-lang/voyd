@@ -22,6 +22,30 @@ impl String
   pub fn byte_length(self): () -> i32
     self.byte_count
 
+  api fn equals(self, other: String): () -> bool
+    if self.byte_count != other.byte_count then:
+      return false
+    if self.byte_count == 0 then:
+      return true
+
+    let self_source = self.bytes.raw_storage()
+    let other_source = other.bytes.raw_storage()
+    var index = 0
+    while index < self.byte_count do:
+      if __array_get(self_source, index) != __array_get(other_source, index) then:
+        return false
+      index = index + 1
+    true
+
+  api fn hash_i32(self): () -> i32
+    let source = self.bytes.raw_storage()
+    var index = 0
+    var hash = 0
+    while index < self.byte_count do:
+      hash = hash * 31 + __array_get(source, index)
+      index = index + 1
+    hash
+
   pub fn codepoint_length(self): () -> i32
     var index = 0
     var count = 0
@@ -263,3 +287,14 @@ test "string lengths for mixed utf8":
   assert(sliced.byte_length(), eq: 4)
   assert(sliced.codepoint_length(), eq: 1)
   assert(sliced.codepoint_at(0), eq: 128512)
+
+test "string equals compares bytes":
+  assert("hello".equals("hello"), eq: true)
+  assert("hello".equals("hell"), eq: false)
+  assert("😀".equals("😀"), eq: true)
+  assert("😀".equals("😁"), eq: false)
+
+test "string hash matches for identical strings":
+  assert("hello".hash_i32(), eq: "hello".hash_i32())
+  let empty = empty_string()
+  assert(empty.hash_i32(), eq: empty.hash_i32())

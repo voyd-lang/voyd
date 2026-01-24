@@ -121,7 +121,7 @@ export type StructuralLayout =
 
 export type CallLoweringInfo = {
   targets?: ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>;
-  typeArgs?: readonly TypeId[];
+  typeArgs?: ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>;
   traitDispatch: boolean;
 };
 
@@ -335,19 +335,19 @@ export const buildProgramCodegenView = (
   modules: readonly SemanticsPipelineResult[],
   options?: {
     instances?: readonly MonomorphizedInstanceRequest[];
-    moduleTyping?: ReadonlyMap<
-      string,
-      {
-        functionInstantiationInfo: ReadonlyMap<SymbolRefKey, ReadonlyMap<string, readonly TypeId[]>>;
-        functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
-        callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
-        callTypeArguments: ReadonlyMap<HirExprId, readonly TypeId[]>;
-        callInstanceKeys: ReadonlyMap<HirExprId, string>;
-        callTraitDispatches: ReadonlySet<HirExprId>;
-        valueTypes: ReadonlyMap<SymbolId, TypeId>;
-      }
-    >;
-  }
+	    moduleTyping?: ReadonlyMap<
+	      string,
+	      {
+	        functionInstantiationInfo: ReadonlyMap<SymbolRefKey, ReadonlyMap<string, readonly TypeId[]>>;
+	        functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+	        callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
+	        callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
+	        callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
+	        callTraitDispatches: ReadonlySet<HirExprId>;
+	        valueTypes: ReadonlyMap<SymbolId, TypeId>;
+	      }
+	    >;
+	  }
 ): ProgramCodegenView => {
   type ModuleTypingOverride = NonNullable<NonNullable<typeof options>["moduleTyping"]> extends ReadonlyMap<
     string,
@@ -377,22 +377,22 @@ export const buildProgramCodegenView = (
   const traitImplsByTrait = new Map<ProgramSymbolId, CodegenTraitImplInstance[]>();
   const traitMethodImpls = new Map<ProgramSymbolId, CodegenTraitMethodImpl>();
 
-  const callsByModuleRaw = new Map<
-    string,
-    {
-      targets: Map<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
-      typeArgs: Map<HirExprId, readonly TypeId[]>;
-      traitDispatches: Set<HirExprId>;
-    }
-  >();
-  const callsByModule = new Map<
-    string,
-    {
-      targets: Map<HirExprId, ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>>;
-      typeArgs: Map<HirExprId, readonly TypeId[]>;
-      traitDispatches: Set<HirExprId>;
-    }
-  >();
+	  const callsByModuleRaw = new Map<
+	    string,
+	    {
+	      targets: Map<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
+	      typeArgs: Map<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
+	      traitDispatches: Set<HirExprId>;
+	    }
+	  >();
+	  const callsByModule = new Map<
+	    string,
+	    {
+	      targets: Map<HirExprId, ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>>;
+	      typeArgs: Map<HirExprId, ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>>;
+	      traitDispatches: Set<HirExprId>;
+	    }
+	  >();
 
   const allInstances: MonomorphizedInstanceInfo[] = [];
   const instanceById = new Map<ProgramFunctionInstanceId, MonomorphizedInstanceInfo>();
@@ -467,10 +467,65 @@ export const buildProgramCodegenView = (
     Map<string, readonly TypeId[]>
   >();
 
+  const typeContainsUnresolvedParam = (
+    typeId: TypeId,
+    seen: Set<TypeId>
+  ): boolean => {
+    if (seen.has(typeId)) {
+      return false;
+    }
+    seen.add(typeId);
+    const desc = arena.get(typeId);
+    switch (desc.kind) {
+      case "type-param-ref":
+        return true;
+      case "primitive":
+        return desc.name === "unknown";
+      case "trait":
+      case "nominal-object":
+        return desc.typeArgs.some((arg) =>
+          typeContainsUnresolvedParam(arg, seen)
+        );
+      case "fixed-array":
+        return typeContainsUnresolvedParam(desc.element, seen);
+      case "structural-object":
+        return desc.fields.some((field) =>
+          typeContainsUnresolvedParam(field.type, seen)
+        );
+      case "function":
+        return (
+          desc.parameters.some((param) =>
+            typeContainsUnresolvedParam(param.type, seen)
+          ) || typeContainsUnresolvedParam(desc.returnType, seen)
+        );
+      case "union":
+        return desc.members.some((member) =>
+          typeContainsUnresolvedParam(member, seen)
+        );
+      case "intersection":
+        return (
+          (typeof desc.nominal === "number" &&
+            typeContainsUnresolvedParam(desc.nominal, seen)) ||
+          (typeof desc.structural === "number" &&
+            typeContainsUnresolvedParam(desc.structural, seen))
+        );
+      default:
+        return false;
+    }
+  };
+
+  const instantiationTypeArgsAreConcrete = (typeArgs: readonly TypeId[]): boolean =>
+    !typeArgs.some((typeArg) =>
+      typeContainsUnresolvedParam(typeArg, new Set())
+    );
+
   const recordInstantiation = (
     functionId: ProgramFunctionId,
     typeArgs: readonly TypeId[]
   ): void => {
+    if (!instantiationTypeArgsAreConcrete(typeArgs)) {
+      return;
+    }
     const key = typeArgs.join(",");
     const bucket = instantiationsByFunctionId.get(functionId) ?? new Map();
     if (!bucket.has(key)) {
@@ -702,18 +757,20 @@ export const buildProgramCodegenView = (
       })),
     });
 
-    const callSource = moduleTyping.get(mod.moduleId);
-    const callTargets = callSource?.callTargets ?? mod.typing.callTargets;
-    const callTypeArgs = callSource?.callTypeArguments ?? mod.typing.callTypeArguments;
-    callsByModuleRaw.set(mod.moduleId, {
-      targets: new Map(
-        Array.from(callTargets, ([exprId, targets]) => [exprId, new Map(targets)] as const)
-      ),
-      typeArgs: new Map(callTypeArgs),
-      traitDispatches: new Set(
-        callSource?.callTraitDispatches ?? mod.typing.callTraitDispatches
-      ),
-    });
+	    const callSource = moduleTyping.get(mod.moduleId);
+	    const callTargets = callSource?.callTargets ?? mod.typing.callTargets;
+	    const callTypeArgs = callSource?.callTypeArguments ?? mod.typing.callTypeArguments;
+	    callsByModuleRaw.set(mod.moduleId, {
+	      targets: new Map(
+	        Array.from(callTargets, ([exprId, targets]) => [exprId, new Map(targets)] as const)
+	      ),
+	      typeArgs: new Map(
+	        Array.from(callTypeArgs, ([exprId, args]) => [exprId, new Map(args)] as const)
+	      ),
+	      traitDispatches: new Set(
+	        callSource?.callTraitDispatches ?? mod.typing.callTraitDispatches
+	      ),
+	    });
 
     // Instances come from the explicit monomorphization pass when available.
   });
@@ -995,30 +1052,46 @@ export const buildProgramCodegenView = (
     );
   };
 
-  callsByModuleRaw.forEach((data, moduleId) => {
-    const mappedTargets = new Map<
-      HirExprId,
-      ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>
-    >();
-    data.targets.forEach((targets, exprId) => {
-      const mapped = new Map<ProgramFunctionInstanceId, ProgramFunctionId>();
-      targets.forEach((targetRef, instanceKey) => {
-        const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
-        const targetFunctionId = getProgramFunctionId(toSymbolRef(targetRef));
-        if (callerInstanceId === undefined || targetFunctionId === undefined) {
-          return;
-        }
-        mapped.set(callerInstanceId, targetFunctionId);
-      });
-      mappedTargets.set(exprId, mapped);
-    });
+	  callsByModuleRaw.forEach((data, moduleId) => {
+	    const mappedTargets = new Map<
+	      HirExprId,
+	      ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>
+	    >();
+	    data.targets.forEach((targets, exprId) => {
+	      const mapped = new Map<ProgramFunctionInstanceId, ProgramFunctionId>();
+	      targets.forEach((targetRef, instanceKey) => {
+	        const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
+	        const targetFunctionId = getProgramFunctionId(toSymbolRef(targetRef));
+	        if (callerInstanceId === undefined || targetFunctionId === undefined) {
+	          return;
+	        }
+	        mapped.set(callerInstanceId, targetFunctionId);
+	      });
+	      mappedTargets.set(exprId, mapped);
+	    });
 
-    callsByModule.set(moduleId, {
-      targets: mappedTargets,
-      typeArgs: new Map(data.typeArgs),
-      traitDispatches: new Set(data.traitDispatches),
-    });
-  });
+	    const mappedTypeArgs = new Map<
+	      HirExprId,
+	      ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>
+	    >();
+	    data.typeArgs.forEach((argsByInstanceKey, exprId) => {
+	      const mapped = new Map<ProgramFunctionInstanceId, readonly TypeId[]>();
+	      argsByInstanceKey.forEach((typeArgs, instanceKey) => {
+	        const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
+	        if (callerInstanceId === undefined) {
+	          return;
+	        }
+	        mapped.set(callerInstanceId, typeArgs);
+	      });
+	      mappedTypeArgs.set(exprId, mapped);
+	    });
+
+	    callsByModule.set(moduleId, {
+	      targets: mappedTargets,
+	      typeArgs: mappedTypeArgs,
+	      traitDispatches: new Set(data.traitDispatches),
+	    });
+	  });
 
   (options?.instances ?? []).forEach((info) => {
     const instanceId = getInstanceIdForFunctionAndArgs(info.callee, info.typeArgs);
@@ -1284,7 +1357,8 @@ export const buildProgramCodegenView = (
           mod.typing.table.getExprType(expr) ?? first.typing.primitives.unknown,
         getResolvedExprType: (expr) => mod.typing.resolvedExprTypes.get(expr),
         getValueType: (symbol) =>
-          moduleTyping.get(mod.moduleId)?.valueTypes.get(symbol) ?? mod.typing.valueTypes.get(symbol),
+          mod.typing.valueTypes.get(symbol) ??
+          moduleTyping.get(mod.moduleId)?.valueTypes.get(symbol),
         getTailResumption: (expr) => mod.typing.tailResumptions.get(expr),
       },
       effectsInfo: buildEffectsLoweringInfo({

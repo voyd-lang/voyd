@@ -712,8 +712,8 @@ const defaultValueForType = (
       }
       break;
     case "fixed-array": {
-      const { heapType } = getFixedArrayWasmTypes(typeId, ctx);
-      return ctx.mod.ref.null(heapType);
+      const { type } = getFixedArrayWasmTypes(typeId, ctx);
+      return ctx.mod.ref.null(type);
     }
     case "structural-object":
     case "nominal-object":
@@ -721,7 +721,12 @@ const defaultValueForType = (
     case "intersection":
     case "union": {
       const wasmType = wasmTypeFor(typeId, ctx);
-      return ctx.mod.ref.null(modBinaryenTypeToHeapType(ctx.mod, wasmType));
+      if (wasmType === binaryen.i32) return ctx.mod.i32.const(0);
+      if (wasmType === binaryen.i64) return ctx.mod.i64.const(0, 0);
+      if (wasmType === binaryen.f32) return ctx.mod.f32.const(0);
+      if (wasmType === binaryen.f64) return ctx.mod.f64.const(0);
+
+      return ctx.mod.ref.null(wasmType);
     }
   }
   throw new Error(`unsupported intrinsic default value for ${desc.kind}`);

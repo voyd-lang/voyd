@@ -54,7 +54,16 @@ export const typeLambdaExpr = (
       ? expectedFn.returnType
       : undefined;
 
+  const outerTypeParams = state.currentFunction?.typeParams;
   const typeParamMap = new Map<SymbolId, TypeId>();
+  const typeParamsForAnnotations = (): ReadonlyMap<SymbolId, TypeId> | undefined => {
+    if (outerTypeParams && outerTypeParams.size > 0) {
+      return typeParamMap.size > 0
+        ? new Map([...outerTypeParams.entries(), ...typeParamMap.entries()])
+        : outerTypeParams;
+    }
+    return typeParamMap.size > 0 ? typeParamMap : undefined;
+  };
   const typeParams =
     expr.typeParameters?.map((param) => {
       const typeParam = ctx.arena.freshTypeParam();
@@ -66,7 +75,7 @@ export const typeLambdaExpr = (
             ctx,
             state,
             ctx.primitives.unknown,
-            typeParamMap
+            typeParamsForAnnotations()
           )
         : undefined;
       const defaultType = param.defaultType
@@ -75,7 +84,7 @@ export const typeLambdaExpr = (
             ctx,
             state,
             ctx.primitives.unknown,
-            typeParamMap
+            typeParamsForAnnotations()
           )
         : undefined;
       return {
@@ -96,7 +105,7 @@ export const typeLambdaExpr = (
           ctx,
           state,
           ctx.primitives.unknown,
-          typeParamMap
+          typeParamsForAnnotations()
         )
       : typeof expectedParamType === "number"
       ? expectedParamType
@@ -119,7 +128,7 @@ export const typeLambdaExpr = (
         ctx,
         state,
         ctx.primitives.unknown,
-        typeParamMap
+        typeParamsForAnnotations()
       )
     : undefined;
 

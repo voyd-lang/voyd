@@ -993,93 +993,224 @@ export const createTypeArena = (): TypeArena => {
       return type;
     }
 
-    const desc = getDescriptor(type);
-    switch (desc.kind) {
-      case "primitive":
-        return type;
-      case "trait": {
-        const mapped = desc.typeArgs.map((arg) => substitute(arg, subst));
-        return mapped.every((arg, idx) => arg === desc.typeArgs[idx])
-          ? type
-          : internTrait({
-              owner: desc.owner,
-              name: desc.name,
-              typeArgs: mapped,
-            });
+    const mappedParams = new Set(subst.keys());
+    const needsCache = new Map<TypeId, boolean>();
+    const needsInProgress = new Set<TypeId>();
+
+    const needsSubstitution = (current: TypeId): boolean => {
+      const cached = needsCache.get(current);
+      if (typeof cached === "boolean") {
+        return cached;
       }
-      case "nominal-object": {
-        const mapped = desc.typeArgs.map((arg) => substitute(arg, subst));
-        return mapped.every((arg, idx) => arg === desc.typeArgs[idx])
-          ? type
-          : internNominalObject({
-              owner: desc.owner,
-              name: desc.name,
-              typeArgs: mapped,
-            });
+      if (needsInProgress.has(current)) {
+        return false;
       }
-      case "structural-object": {
-        let changed = false;
-        const fields = desc.fields.map((field) => {
-          const substituted = substitute(field.type, subst);
-          changed ||= substituted !== field.type;
-          return {
-            name: field.name,
-            type: substituted,
-            optional: field.optional,
-            declaringParams: field.declaringParams,
-            visibility: field.visibility,
-            owner: field.owner,
-            packageId: field.packageId,
-          };
-        });
-        return changed ? internStructuralObject({ fields }) : type;
-      }
-      case "function": {
-        let changed = false;
-        const parameters = desc.parameters.map((param) => {
-          const substituted = substitute(param.type, subst);
-          changed ||= substituted !== param.type;
-          return { type: substituted, label: param.label, optional: param.optional };
-        });
-        const returnType = substitute(desc.returnType, subst);
-        changed ||= returnType !== desc.returnType;
-        return changed
-          ? internFunction({
-              parameters,
-              returnType,
-              effectRow: desc.effectRow,
-            })
-          : type;
-      }
-      case "union": {
-        const members = desc.members.map((member) => substitute(member, subst));
-        return members.every((member, idx) => member === desc.members[idx])
-          ? type
-          : internUnion(members);
-      }
-      case "intersection": {
-        const nominal = desc.nominal
-          ? substitute(desc.nominal, subst)
-          : undefined;
-        const structural = desc.structural
-          ? substitute(desc.structural, subst)
-          : undefined;
-        if (nominal === desc.nominal && structural === desc.structural) {
-          return type;
+      needsInProgress.add(current);
+
+      const desc = getDescriptor(current);
+      const result = (() => {
+        switch (desc.kind) {
+          case "primitive":
+            return false;
+          case "type-param-ref":
+            return mappedParams.has(desc.param);
+          case "fixed-array":
+            return needsSubstitution(desc.element);
+          case "union":
+            return desc.members.some((member) => needsSubstitution(member));
+          case "intersection":
+            return (
+              (typeof desc.nominal === "number" && needsSubstitution(desc.nominal)) ||
+              (typeof desc.structural === "number" &&
+                needsSubstitution(desc.structural))
+            );
+          case "trait":
+          case "nominal-object":
+            return desc.typeArgs.some((arg) => needsSubstitution(arg));
+          case "structural-object":
+            return desc.fields.some((field) => needsSubstitution(field.type));
+          case "function":
+            return (
+              desc.parameters.some((param) => needsSubstitution(param.type)) ||
+              needsSubstitution(desc.returnType)
+            );
+          default:
+            return false;
         }
-        return internIntersection({ nominal, structural });
-      }
-      case "fixed-array": {
-        const element = substitute(desc.element, subst);
-        return element === desc.element ? type : internFixedArray(element);
-      }
-      case "type-param-ref": {
-        const replacement = subst.get(desc.param);
-        return replacement ?? type;
-      }
-      default:
-        return type;
+      })();
+
+      needsInProgress.delete(current);
+      needsCache.set(current, result);
+      return result;
+    };
+
+    if (!needsSubstitution(type)) {
+      return type;
     }
+
+    const allocatePlaceholder = (): TypeId => {
+      const self = nextTypeId++;
+      const placeholderParam = nextTypeParamId++;
+      descriptors[self] = { kind: "type-param-ref", param: placeholderParam };
+      return self;
+    };
+
+    const resolved = new Map<TypeId, TypeId>();
+    const inProgress = new Map<TypeId, TypeId | null>();
+
+    const substituteInternal = (current: TypeId): TypeId => {
+      if (!needsSubstitution(current)) {
+        return current;
+      }
+
+      const cached = resolved.get(current);
+      if (typeof cached === "number") {
+        return cached;
+      }
+
+      const active = inProgress.get(current);
+      if (active !== undefined) {
+        if (typeof active === "number") {
+          return active;
+        }
+        const placeholder = allocatePlaceholder();
+        inProgress.set(current, placeholder);
+        return placeholder;
+      }
+
+      inProgress.set(current, null);
+
+      const desc = getDescriptor(current);
+      const rebuilt = (() => {
+        switch (desc.kind) {
+          case "primitive":
+            return { type: current, changed: false };
+          case "type-param-ref": {
+            const replacement = subst.get(desc.param);
+            return replacement === undefined
+              ? { type: current, changed: false }
+              : { type: replacement, changed: replacement !== current };
+          }
+          case "fixed-array": {
+            const element = substituteInternal(desc.element);
+            return element === desc.element
+              ? { type: current, changed: false }
+              : { type: internFixedArray(element), changed: true };
+          }
+          case "union": {
+            const members = desc.members.map((member) => substituteInternal(member));
+            const changed = members.some(
+              (member, idx) => member !== desc.members[idx]
+            );
+            return changed
+              ? { type: internUnion(members), changed: true }
+              : { type: current, changed: false };
+          }
+          case "intersection": {
+            const nominal =
+              typeof desc.nominal === "number"
+                ? substituteInternal(desc.nominal)
+                : undefined;
+            const structural =
+              typeof desc.structural === "number"
+                ? substituteInternal(desc.structural)
+                : undefined;
+            const changed = nominal !== desc.nominal || structural !== desc.structural;
+            return changed
+              ? { type: internIntersection({ nominal, structural }), changed: true }
+              : { type: current, changed: false };
+          }
+          case "trait": {
+            const typeArgs = desc.typeArgs.map((arg) => substituteInternal(arg));
+            const changed = typeArgs.some((arg, idx) => arg !== desc.typeArgs[idx]);
+            return changed
+              ? {
+                  type: internTrait({
+                    owner: desc.owner,
+                    name: desc.name,
+                    typeArgs,
+                  }),
+                  changed: true,
+                }
+              : { type: current, changed: false };
+          }
+          case "nominal-object": {
+            const typeArgs = desc.typeArgs.map((arg) => substituteInternal(arg));
+            const changed = typeArgs.some((arg, idx) => arg !== desc.typeArgs[idx]);
+            return changed
+              ? {
+                  type: internNominalObject({
+                    owner: desc.owner,
+                    name: desc.name,
+                    typeArgs,
+                  }),
+                  changed: true,
+                }
+              : { type: current, changed: false };
+          }
+          case "structural-object": {
+            let changed = false;
+            const fields = desc.fields.map((field) => {
+              const substituted = substituteInternal(field.type);
+              changed ||= substituted !== field.type;
+              return substituted === field.type
+                ? field
+                : {
+                    name: field.name,
+                    type: substituted,
+                    optional: field.optional,
+                    declaringParams: field.declaringParams,
+                    visibility: field.visibility,
+                    owner: field.owner,
+                    packageId: field.packageId,
+                  };
+            });
+            return changed
+              ? { type: internStructuralObject({ fields }), changed: true }
+              : { type: current, changed: false };
+          }
+          case "function": {
+            let changed = false;
+            const parameters = desc.parameters.map((param) => {
+              const substituted = substituteInternal(param.type);
+              changed ||= substituted !== param.type;
+              return substituted === param.type
+                ? param
+                : { type: substituted, label: param.label, optional: param.optional };
+            });
+            const returnType = substituteInternal(desc.returnType);
+            changed ||= returnType !== desc.returnType;
+            return changed
+              ? {
+                  type: internFunction({
+                    parameters,
+                    returnType,
+                    effectRow: desc.effectRow,
+                  }),
+                  changed: true,
+                }
+              : { type: current, changed: false };
+          }
+          default:
+            return { type: current, changed: false };
+        }
+      })();
+
+      const placeholder = inProgress.get(current);
+      if (typeof placeholder === "number" && rebuilt.type !== current) {
+        const replacementDesc = getDescriptor(rebuilt.type);
+        descriptors[placeholder] = replacementDesc;
+        resolved.set(current, placeholder);
+        inProgress.delete(current);
+        return placeholder;
+      }
+
+      resolved.set(current, rebuilt.type);
+      inProgress.delete(current);
+      return rebuilt.type;
+    };
+
+    return substituteInternal(type);
   };
 
   const widen = (type: TypeId, _constraint: ConstraintSet): TypeId => type;

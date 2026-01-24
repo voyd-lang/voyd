@@ -199,7 +199,16 @@ export const resolvePerformSignature = ({
   typeInstanceId?: ProgramFunctionInstanceId;
 }): { params: readonly TypeId[]; returnType: TypeId } => {
   const signature = ctx.program.functions.getSignature(ctx.moduleId, site.effectSymbol);
-  const callTypeArgs = ctx.program.calls.getCallInfo(ctx.moduleId, site.exprId).typeArgs;
+  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, site.exprId);
+  const callTypeArgs = (() => {
+    if (typeof typeInstanceId === "number") {
+      return callInfo.typeArgs?.get(typeInstanceId);
+    }
+    if (callInfo.typeArgs && callInfo.typeArgs.size === 1) {
+      return callInfo.typeArgs.values().next().value;
+    }
+    return undefined;
+  })();
   const signatureTypeParams = signature?.typeParams ?? [];
   const hasCallTypeArgs =
     signatureTypeParams.length > 0 &&

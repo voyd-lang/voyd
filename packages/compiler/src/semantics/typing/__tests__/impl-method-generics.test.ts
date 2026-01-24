@@ -32,7 +32,10 @@ describe("impl method generics", () => {
     }
     expect(callDesc.name).toBe("bool");
 
-    const typeArgs = typing.callTypeArguments.get(pickCall!.id);
+    const typeArgsByInstance = typing.callTypeArguments.get(pickCall!.id);
+    const typeArgs = typeArgsByInstance
+      ? Array.from(typeArgsByInstance.values())[0]
+      : undefined;
     expect(typeArgs).toBeDefined();
     const boolType = typing.arena.internPrimitive("bool");
     const intType = typing.arena.internPrimitive("i32");
@@ -55,7 +58,10 @@ describe("impl method generics", () => {
     );
     expect(unwrapCall).toBeDefined();
 
-    const typeArgs = typing.callTypeArguments.get(unwrapCall!.id);
+    const typeArgsByInstance = typing.callTypeArguments.get(unwrapCall!.id);
+    const typeArgs = typeArgsByInstance
+      ? Array.from(typeArgsByInstance.values())[0]
+      : undefined;
     expect(typeArgs).toBeDefined();
     const intType = typing.arena.internPrimitive("i32");
     expect(typeArgs).toEqual([intType]);

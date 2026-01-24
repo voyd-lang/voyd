@@ -9,6 +9,23 @@ import type {
 import { refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 import { getSymbolTypeId, wasmTypeFor } from "./types.js";
 
+export const declareLocalWithTypeId = (
+  symbol: SymbolId,
+  typeId: number,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext
+): LocalBinding => {
+  const existing = fnCtx.bindings.get(symbol);
+  if (existing) {
+    return existing;
+  }
+
+  const wasmType = wasmTypeFor(typeId, ctx);
+  const binding = allocateTempLocal(wasmType, fnCtx, typeId);
+  fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
+  return binding;
+};
+
 export const declareLocal = (
   symbol: SymbolId,
   ctx: CodegenContext,
@@ -19,7 +36,8 @@ export const declareLocal = (
     return existing;
   }
 
-  const typeId = getSymbolTypeId(symbol, ctx);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const typeId = getSymbolTypeId(symbol, ctx, typeInstanceId);
   const wasmType = wasmTypeFor(typeId, ctx);
   const binding = allocateTempLocal(wasmType, fnCtx, typeId);
   fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
