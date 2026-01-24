@@ -27,7 +27,11 @@ import type {
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
 import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
-import type { ProgramFunctionInstanceId, ProgramSymbolId } from "../semantics/ids.js";
+import type {
+  ProgramFunctionInstanceId,
+  ProgramSymbolId,
+  TypeParamId,
+} from "../semantics/ids.js";
 import { buildInstanceSubstitution } from "./type-substitution.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
@@ -37,74 +41,145 @@ const sanitizeIdentifier = (value: string): string =>
 
 type WasmTypeMode = "runtime" | "signature";
 
-const runtimeTypeKeyFor = (
-  typeId: TypeId,
-  ctx: CodegenContext,
-  seen: Set<TypeId>
-): string => {
-  if (seen.has(typeId)) {
-    return `recursive:${typeId}`;
-  }
-  seen.add(typeId);
+type RuntimeTypeKeyState = {
+  typeId: TypeId;
+  ctx: CodegenContext;
+  active: Map<TypeId, number>;
+  binders: Map<TypeParamId, number>;
+};
 
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  switch (desc.kind) {
-    case "primitive":
-      return `prim:${desc.name}`;
-    case "recursive":
-      return `mu:${desc.binder}.${runtimeTypeKeyFor(desc.body, ctx, seen)}`;
-    case "type-param-ref":
-      return `typeparam:${desc.param}`;
-    case "nominal-object":
-      return `nominal:${desc.owner}<${desc.typeArgs
-        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
-        .join(",")}>`;
-    case "trait":
-      return `trait:${desc.owner}<${desc.typeArgs
-        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
-        .join(",")}>`;
-    case "structural-object":
-      return `struct:{${desc.fields
-        .map(
-          (field) =>
-            `${field.name}${field.optional ? "?" : ""}:${runtimeTypeKeyFor(
-              field.type,
-              ctx,
-              seen
-            )}`
-        )
-        .join(",")}}`;
-    case "function":
-      return `fn:(${desc.parameters
-        .map((param) => runtimeTypeKeyFor(param.type, ctx, seen))
-        .join(",")})->${runtimeTypeKeyFor(desc.returnType, ctx, seen)}`;
-    case "union": {
-      const members = desc.members
-        .map((member) => runtimeTypeKeyFor(member, ctx, seen))
-        .sort();
-      return `union:${members.join("|")}`;
+const runtimeTypeKeyFor = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): string =>
+  runtimeTypeKeyForInternal({
+    typeId,
+    ctx,
+    active: new Map<TypeId, number>(),
+    binders: new Map<TypeParamId, number>(),
+  });
+
+const runtimeTypeKeyForInternal = ({
+  typeId,
+  ctx,
+  active,
+  binders,
+}: RuntimeTypeKeyState): string => {
+  const activeIndex = active.get(typeId);
+  if (typeof activeIndex === "number") {
+    return `recursive:${activeIndex}`;
+  }
+  active.set(typeId, active.size);
+
+  try {
+    const desc = ctx.program.types.getTypeDesc(typeId);
+    switch (desc.kind) {
+      case "primitive":
+        return `prim:${desc.name}`;
+      case "recursive": {
+        const binderIndex = binders.size;
+        const nextBinders = new Map(binders);
+        nextBinders.set(desc.binder, binderIndex);
+        return `mu:${binderIndex}.${runtimeTypeKeyForInternal({
+          typeId: desc.body,
+          ctx,
+          active,
+          binders: nextBinders,
+        })}`;
+      }
+      case "type-param-ref": {
+        const binderIndex = binders.get(desc.param);
+        return typeof binderIndex === "number"
+          ? `recparam:${binderIndex}`
+          : `typeparam:${desc.param}`;
+      }
+      case "nominal-object":
+        return `nominal:${desc.owner}<${desc.typeArgs
+          .map((arg) =>
+            runtimeTypeKeyForInternal({ typeId: arg, ctx, active, binders })
+          )
+          .join(",")}>`;
+      case "trait":
+        return `trait:${desc.owner}<${desc.typeArgs
+          .map((arg) =>
+            runtimeTypeKeyForInternal({ typeId: arg, ctx, active, binders })
+          )
+          .join(",")}>`;
+      case "structural-object":
+        return `struct:{${desc.fields
+          .map(
+            (field) =>
+              `${field.name}${field.optional ? "?" : ""}:${runtimeTypeKeyForInternal(
+                {
+                  typeId: field.type,
+                  ctx,
+                  active,
+                  binders,
+                }
+              )}`
+          )
+          .join(",")}}`;
+      case "function":
+        return `fn:(${desc.parameters
+          .map((param) =>
+            runtimeTypeKeyForInternal({ typeId: param.type, ctx, active, binders })
+          )
+          .join(",")})->${runtimeTypeKeyForInternal({
+          typeId: desc.returnType,
+          ctx,
+          active,
+          binders,
+        })}`;
+      case "union": {
+        const members = desc.members
+          .map((member) =>
+            runtimeTypeKeyForInternal({ typeId: member, ctx, active, binders })
+          )
+          .sort();
+        return `union:${members.join("|")}`;
+      }
+      case "intersection": {
+        const nominal =
+          typeof desc.nominal === "number"
+            ? runtimeTypeKeyForInternal({
+                typeId: desc.nominal,
+                ctx,
+                active,
+                binders,
+              })
+            : "none";
+        const structural =
+          typeof desc.structural === "number"
+            ? runtimeTypeKeyForInternal({
+                typeId: desc.structural,
+                ctx,
+                active,
+                binders,
+              })
+            : "none";
+        return `intersection:${nominal}&${structural}`;
+      }
+      case "fixed-array":
+        return `fixed-array:${runtimeTypeKeyForInternal({
+          typeId: desc.element,
+          ctx,
+          active,
+          binders,
+        })}`;
+      default:
+        return `${(desc as { kind: string }).kind}:${typeId}`;
     }
-    case "intersection": {
-      const nominal =
-        typeof desc.nominal === "number"
-          ? runtimeTypeKeyFor(desc.nominal, ctx, seen)
-          : "none";
-      const structural =
-        typeof desc.structural === "number"
-          ? runtimeTypeKeyFor(desc.structural, ctx, seen)
-          : "none";
-      return `intersection:${nominal}&${structural}`;
-    }
-    case "fixed-array":
-      return `fixed-array:${runtimeTypeKeyFor(desc.element, ctx, seen)}`;
-    default:
-      return `${(desc as { kind: string }).kind}:${typeId}`;
+  } finally {
+    active.delete(typeId);
   }
 };
 
 const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
   (() => {
-    const key = runtimeTypeKeyFor(typeId, ctx, new Set());
+    const key = runtimeTypeKeyFor({ typeId, ctx });
     const existing = ctx.runtimeTypeRegistry.get(typeId);
     if (!existing) {
       ctx.runtimeTypeRegistry.set(typeId, { key, moduleId: ctx.moduleId, typeId });

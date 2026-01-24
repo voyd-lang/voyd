@@ -17,6 +17,8 @@ import {
   registerImportMetadata,
 } from "../functions.js";
 import { buildRuntimeTypeArtifacts } from "../runtime-pass.js";
+import { wasmRuntimeTypeFor } from "../runtime-types.js";
+import { resolveStructuralTypeId } from "../types.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
@@ -203,6 +205,47 @@ describe("next codegen", () => {
 
     buildRuntimeTypeArtifacts([ctx]);
     expect(runtimeTypeRegistry.size).toBeGreaterThan(0);
+  });
+
+  it("canonicalizes recursive RTT keys for alpha-equivalent aliases", () => {
+    const ast = loadAst("recursive_alias_alpha_equivalence.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { contexts: [ctx] } = buildCodegenProgram([semantics]);
+
+    const resolveAliasType = (name: string): TypeId => {
+      const symbol = semantics.symbols.resolveTopLevel(name);
+      if (typeof symbol !== "number") {
+        throw new Error(`missing type alias symbol for ${name}`);
+      }
+      const key = `${symbol}<>`;
+      const typeId = semantics.typing.typeAliases.getCachedInstance(key);
+      if (typeof typeId !== "number") {
+        throw new Error(`missing type alias instance for ${name}`);
+      }
+      return typeId;
+    };
+
+    const listA = resolveAliasType("ListA");
+    const listB = resolveAliasType("ListB");
+    const listAStructural = resolveStructuralTypeId(listA, ctx);
+    const listBStructural = resolveStructuralTypeId(listB, ctx);
+    if (typeof listAStructural !== "number" || typeof listBStructural !== "number") {
+      throw new Error("missing structural type ids for recursive aliases");
+    }
+
+    wasmRuntimeTypeFor(listA, ctx);
+    wasmRuntimeTypeFor(listB, ctx);
+
+    const entryA = ctx.runtimeTypeRegistry.get(listAStructural);
+    const entryB = ctx.runtimeTypeRegistry.get(listBStructural);
+    expect(entryA?.key).toBeDefined();
+    expect(entryA?.key).toBe(entryB?.key);
+    const runtimeIdA =
+      entryA?.key === undefined ? undefined : ctx.runtimeTypeIds.byKey.get(entryA.key);
+    const runtimeIdB =
+      entryB?.key === undefined ? undefined : ctx.runtimeTypeIds.byKey.get(entryB.key);
+    expect(runtimeIdA).toBeDefined();
+    expect(runtimeIdA).toBe(runtimeIdB);
   });
 
   it("emits wasm for the fib sample and runs main()", () => {
