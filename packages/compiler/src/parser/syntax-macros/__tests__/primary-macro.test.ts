@@ -29,6 +29,14 @@ describe("primary syntax macro", () => {
     ]);
   });
 
+  it("binds prefix operators after member access", () => {
+    const ast = expand("pub fn main() not self.ok");
+    expect(ast).toEqual([
+      "ast",
+      ["pub", "fn", ["main"], ["not", [".", "self", "ok"]]],
+    ]);
+  });
+
   it("parses tuple destructuring", () => {
     const ast = expand("let (x, y) = (1, 2)");
     expect(ast).toEqual([
