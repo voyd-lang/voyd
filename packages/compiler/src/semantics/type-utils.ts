@@ -14,8 +14,7 @@ type TypeDescriptorLike =
     }
   | { kind: "union"; members: readonly TypeId[] }
   | { kind: "intersection"; nominal?: TypeId; structural?: TypeId }
-  | { kind: "fixed-array"; element: TypeId }
-  | { kind: string };
+  | { kind: "fixed-array"; element: TypeId };
 
 export const typeContainsUnresolvedParam = ({
   typeId,
