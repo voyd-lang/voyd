@@ -42,6 +42,7 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
   validate: true,
   emitEffectHelpers: false,
+  effectsHostBoundary: "msgpack",
   continuationBackend: {},
   testMode: false,
   testScope: "all",

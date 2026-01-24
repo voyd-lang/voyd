@@ -69,81 +69,10 @@ export const buildModuleGraph = async ({
     host,
   });
 
-  const entryNode = entryModule.node as ModuleNode & {
-    dependencies: ModuleDependency[];
-  };
-  const hasStdRoot = typeof roots.std === "string" && roots.std.length > 0;
-  const implicitStdPaths = hasStdRoot
-    ? [
-        { namespace: "std", segments: ["msgpack"] },
-        { namespace: "std", segments: ["string"] },
-      ]
-    : [];
-  const availableImplicitStd = hasStdRoot
-    ? (
-        await Promise.all(
-          implicitStdPaths.map(async (path) => ({
-            path,
-            resolved: await resolveModuleFile(path, roots, host),
-          }))
-        )
-      )
-        .filter((entry) => Boolean(entry.resolved))
-        .map((entry) => entry.path)
-    : [];
-  if (availableImplicitStd.length > 0) {
-    const implicitStdDeps: ModuleDependency[] = availableImplicitStd.map(
-      (path) => ({ kind: "use", path })
-    );
-    const existingDeps = new Set(
-      entryNode.dependencies.map((dependency) => modulePathToString(dependency.path))
-    );
-    const nextDeps = implicitStdDeps.filter(
-      (dependency) => !existingDeps.has(modulePathToString(dependency.path))
-    );
-    if (nextDeps.length > 0) {
-      entryNode.dependencies = [...entryNode.dependencies, ...nextDeps];
-    }
-  }
-
   addModuleTree(entryModule, modules, modulesByPath);
 
   const pending: PendingDependency[] = [];
   enqueueDependencies(entryModule, pending);
-
-  const addImplicitModule = async (path: ModulePath): Promise<void> => {
-    const pathKey = modulePathToString(path);
-    if (modulesByPath.has(pathKey)) {
-      return;
-    }
-    const resolvedPath = await resolveModuleFile(path, roots, host);
-    if (!resolvedPath) {
-      moduleDiagnostics.push({
-        kind: "missing-module",
-        message: `Unable to resolve module ${pathKey}`,
-        requested: path,
-        importer: entryModule.node.id,
-      });
-      addMissingModule(entryModule.node.id, pathKey);
-      return;
-    }
-    const resolvedModulePath = modulePathFromFile(
-      resolvedPath,
-      roots,
-      host.path
-    );
-    const nextModule = await loadFileModule({
-      filePath: resolvedPath,
-      modulePath: resolvedModulePath,
-      host,
-    });
-    addModuleTree(nextModule, modules, modulesByPath);
-    enqueueDependencies(nextModule, pending);
-  };
-
-  if (availableImplicitStd.length > 0) {
-    await Promise.all(availableImplicitStd.map((path) => addImplicitModule(path)));
-  }
 
   const hasNestedModule = (pathKey: string): boolean => {
     const prefix = `${pathKey}::`;

@@ -76,7 +76,7 @@ const loadSemanticsWithTyping = (
 const loadWasmInstance = (fixtureName: string) => {
   const ast = loadAst(fixtureName);
   const semantics = semanticsPipeline(ast);
-  const { module } = codegen(semantics);
+  const { module } = codegen(semantics, { effectsHostBoundary: "off" });
   return getWasmInstance(module);
 };
 
@@ -107,6 +107,7 @@ const DEFAULT_OPTIONS = {
   emitEffectHelpers: false,
   continuationBackend: {},
   testMode: false,
+  effectsHostBoundary: "off",
 } as const;
 
 const sanitizeIdentifier = (value: string): string =>
@@ -340,7 +341,7 @@ describe("next codegen", () => {
   it("uses return_call for tail-recursive functions", () => {
     const ast = loadAst("tail_fib.voyd");
     const semantics = semanticsPipeline(ast);
-    const { module } = codegen(semantics);
+    const { module } = codegen(semantics, { effectsHostBoundary: "off" });
     const text = module.emitText();
     expect(text).toContain("return_call");
     const instance = getWasmInstance(module);
@@ -352,7 +353,7 @@ describe("next codegen", () => {
   it("handles return statements and preserves tail-call optimization", () => {
     const ast = loadAst("return_statements.voyd");
     const semantics = semanticsPipeline(ast);
-    const { module } = codegen(semantics);
+    const { module } = codegen(semantics, { effectsHostBoundary: "off" });
     const text = module.emitText();
     expect(text).toContain("return_call");
     const instance = getWasmInstance(module);
@@ -510,7 +511,7 @@ describe("next codegen", () => {
   it("preserves nominal identity for structurally identical types in match guards", () => {
     const ast = loadAst("nominal_identity_match.voyd");
     const semantics = semanticsPipeline(ast);
-    const { module } = codegen(semantics);
+    const { module } = codegen(semantics, { effectsHostBoundary: "off" });
     const instance = getWasmInstance(module);
     const main = instance.exports.main;
     expect(typeof main).toBe("function");
@@ -574,7 +575,7 @@ describe("next codegen", () => {
   it("fails codegen for exported generic functions without instantiations", () => {
     const ast = loadAst("uninstantiated_export_generic.voyd");
     const semantics = semanticsPipeline(ast);
-    const result = codegen(semantics);
+    const result = codegen(semantics, { effectsHostBoundary: "off" });
     expect(
       result.diagnostics.some((diag) => diag.code === "CG0003")
     ).toBe(true);
@@ -685,7 +686,7 @@ describe("next codegen", () => {
   it("marks lambda captures mutable and reuses the canonical closure call_ref heap type", () => {
     const ast = loadAst("lambdas.voyd");
     const semantics = semanticsPipeline(ast);
-    const { module } = codegen(semantics);
+    const { module } = codegen(semantics, { effectsHostBoundary: "off" });
     const text = module.emitText();
     const typeLines = text
       .split("\n")

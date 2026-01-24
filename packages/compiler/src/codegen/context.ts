@@ -48,6 +48,7 @@ export interface CodegenOptions {
   optimize?: boolean;
   validate?: boolean;
   emitEffectHelpers?: boolean;
+  effectsHostBoundary?: "msgpack" | "off";
   continuationBackend?: ContinuationBackendOptions;
   testMode?: boolean;
   testScope?: "all" | "entry";

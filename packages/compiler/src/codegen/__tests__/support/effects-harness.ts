@@ -121,8 +121,22 @@ export const compileEffectFixture = async ({
   const srcRoot = dirname(entryPath);
   const roots = { src: srcRoot, std: STD_ROOT };
 
+  const includeMsgpack =
+    codegenOptions?.effectsHostBoundary !== "off";
+  const msgpackEntry = includeMsgpack
+    ? resolve(STD_ROOT, "msgpack.voyd")
+    : undefined;
+  const stringEntry = includeMsgpack
+    ? resolve(STD_ROOT, "string.voyd")
+    : undefined;
+  const entrySet = new Set([
+    entryPath,
+    ...(extraEntries ?? []),
+    ...(msgpackEntry ? [msgpackEntry] : []),
+    ...(stringEntry ? [stringEntry] : []),
+  ]);
   const graphs = await Promise.all(
-    [entryPath, ...(extraEntries ?? [])].map((path) =>
+    Array.from(entrySet).map((path) =>
       buildModuleGraph({ entryPath: path, host, roots })
     )
   );

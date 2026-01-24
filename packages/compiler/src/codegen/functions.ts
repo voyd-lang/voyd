@@ -477,6 +477,30 @@ export const emitModuleExports = (
     return;
   }
 
+  const hostBoundary = ctx.options.effectsHostBoundary ?? "msgpack";
+  if (hostBoundary === "off") {
+    return;
+  }
+
+  const missingStdModules = ["std::msgpack", "std::string"].filter(
+    (moduleId) => !ctx.program.modules.has(moduleId)
+  );
+  if (missingStdModules.length > 0) {
+    ctx.diagnostics.report(
+      diagnosticFromCode({
+        code: "CG0001",
+        params: {
+          kind: "codegen-error",
+          message: `effectful exports require ${missingStdModules.join(
+            " and "
+          )} (provide a std root or disable the host boundary via effectsHostBoundary: "off")`,
+        },
+        span: ctx.module.hir.module.span,
+      })
+    );
+    return;
+  }
+
   ensureEffectsMemory(ctx);
   const signatures = collectEffectOperationSignatures(ctx, contexts);
   const handleOutcome = createHandleOutcomeDynamic({
