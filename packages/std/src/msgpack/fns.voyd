@@ -4,8 +4,10 @@ use std::fixed_array::fns::{ new_fixed_array }
 use std::map::Map
 use std::memory::self as memory
 use std::msgpack::types::{ Binary, F32, F64, I32, I64, Null, Numeric }
+use std::optional::types::all
 use std::string::fns::{ new_string }
 use std::string::types::String
+use std::test::assertions::all
 
 @serializer("msgpack", encode_value, decode_value)
 pub type MsgPack = Null | Box<Numeric> | Box<bool> | Box<String> | Binary | Array<MsgPack> | Map<MsgPack>
@@ -162,6 +164,49 @@ pub fn unpack_map(value: MsgPack): () -> Map<MsgPack>
       boxed
     else:
       empty_map()
+
+test "msgpack encode/decode roundtrip for nested values":
+  let base = memory::size() * 65536
+  memory::grow(1)
+
+  var items = Array<MsgPack>::new()
+  items = items.push(pack_i32(1))
+  items = items.push(pack_string("hi"))
+
+  var map = Map<MsgPack>::new()
+  map = map.set("items", pack_array(items))
+  map = map.set("flag", pack_bool(true))
+
+  let value = pack_map(map)
+  let written = encode_value(value, base, 1024)
+  assert(written > 0, eq: true)
+
+  let decoded = decode_value(base, written)
+  let decoded_map = unpack_map(decoded)
+
+  match(decoded_map.get("flag"))
+    Some<MsgPack> { value: flag_value }:
+      assert(unpack_bool(flag_value), eq: true)
+    None:
+      assert(false, eq: true)
+
+  match(decoded_map.get("items"))
+    Some<MsgPack> { value: items_value }:
+      let arr = unpack_array(items_value)
+      assert(arr.length(), eq: 2)
+      match(arr.get(0))
+        Some<MsgPack> { value: first }:
+          assert(unpack_i32(first), eq: 1)
+        None:
+          assert(false, eq: true)
+      match(arr.get(1))
+        Some<MsgPack> { value: second }:
+          let text = unpack_string(second)
+          assert(text.equals("hi"), eq: true)
+        None:
+          assert(false, eq: true)
+    None:
+      assert(false, eq: true)
 
 impl Encoder
   pub fn init(ptr: i32, len: i32)

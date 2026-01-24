@@ -43,4 +43,38 @@ describe("export abi metadata", () => {
     const result = await host.runPure("echo", [payload]);
     expect(result).toEqual(payload);
   });
+
+  it("round-trips complex msgpack values", async () => {
+    const wasm = await buildModule();
+    const host = await createVoydHost({ wasm });
+    const payload = {
+      user: { name: "Ada", tags: ["math", "logic"] },
+      counts: [1, 2, 3],
+      ok: true,
+      nested: [{ id: 1 }, { id: 2, flags: [true, false] }],
+    };
+    const result = await host.runPure("echo", [payload]);
+
+    const normalize = (value: unknown): unknown => {
+      if (Array.isArray(value)) {
+        return value.map(normalize);
+      }
+      if (value instanceof Map) {
+        return Object.fromEntries(
+          Array.from(value.entries()).map(([key, entry]) => [
+            String(key),
+            normalize(entry),
+          ])
+        );
+      }
+      if (value && typeof value === "object") {
+        return Object.fromEntries(
+          Object.entries(value).map(([key, entry]) => [key, normalize(entry)])
+        );
+      }
+      return value;
+    };
+
+    expect(normalize(result)).toEqual(payload);
+  });
 });

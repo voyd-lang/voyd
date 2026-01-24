@@ -1,5 +1,7 @@
 # Voyd Testing System Spec (`spec.md`)
 
+Status: Implemented
+
 This document specifies Voyd’s first-class testing system: syntax, discovery, execution, CLI behavior, reporting, and extension points.
 
 The design goals are:

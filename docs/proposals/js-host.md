@@ -1,7 +1,7 @@
 # JS Host Package
 
-Status: Draft  
-Owner: Runtime + Tooling  
+Status: Implemented
+Owner: Runtime + Tooling
 Scope: `packages/js-host`
 
 ## Overview

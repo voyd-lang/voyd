@@ -158,45 +158,53 @@ const signatureTypeKeyForInternal = ({
 }: SignatureTypeKeyState): string => {
   const activeIndex = active.get(typeId);
   if (typeof activeIndex === "number") {
-    return `recursive:${activeIndex}`;
+    const serializer = findSerializerForType(typeId, ctx);
+    const suffix = serializer ? `#${serializerKeyFor(serializer)}` : "";
+    return `recursive:${activeIndex}${suffix}`;
   }
   active.set(typeId, active.size);
   try {
     const desc = ctx.program.types.getTypeDesc(typeId);
+    let baseKey: string;
     switch (desc.kind) {
       case "primitive":
-        return `prim:${desc.name}`;
+        baseKey = `prim:${desc.name}`;
+        break;
       case "recursive": {
         const binderIndex = binders.size;
         const nextBinders = new Map(binders);
         nextBinders.set(desc.binder, binderIndex);
-        return `mu:${binderIndex}.${signatureTypeKeyForInternal({
+        baseKey = `mu:${binderIndex}.${signatureTypeKeyForInternal({
           typeId: desc.body,
           ctx,
           active,
           binders: nextBinders,
         })}`;
+        break;
       }
       case "type-param-ref": {
         const binderIndex = binders.get(desc.param);
-        return typeof binderIndex === "number"
+        baseKey = typeof binderIndex === "number"
           ? `recparam:${binderIndex}`
           : `typeparam:${desc.param}`;
+        break;
       }
       case "nominal-object":
-        return `nominal:${desc.owner}<${desc.typeArgs
+        baseKey = `nominal:${desc.owner}<${desc.typeArgs
           .map((arg) =>
             signatureTypeKeyForInternal({ typeId: arg, ctx, active, binders }),
           )
           .join(",")}>`;
+        break;
       case "trait":
-        return `trait:${desc.owner}<${desc.typeArgs
+        baseKey = `trait:${desc.owner}<${desc.typeArgs
           .map((arg) =>
             signatureTypeKeyForInternal({ typeId: arg, ctx, active, binders }),
           )
           .join(",")}>`;
+        break;
       case "structural-object":
-        return `struct:{${desc.fields
+        baseKey = `struct:{${desc.fields
           .map(
             (field) =>
               `${field.name}${field.optional ? "?" : ""}:${signatureTypeKeyForInternal(
@@ -209,8 +217,9 @@ const signatureTypeKeyForInternal = ({
               )}`,
           )
           .join(",")}}`;
+        break;
       case "function":
-        return `fn:(${desc.parameters
+        baseKey = `fn:(${desc.parameters
           .map((param) =>
             signatureTypeKeyForInternal({
               typeId: param.type,
@@ -225,6 +234,7 @@ const signatureTypeKeyForInternal = ({
           active,
           binders,
         })}`;
+        break;
       case "union": {
         const members = desc.members
           .map((member) =>
@@ -236,7 +246,8 @@ const signatureTypeKeyForInternal = ({
             }),
           )
           .sort();
-        return `union:${members.join("|")}`;
+        baseKey = `union:${members.join("|")}`;
+        break;
       }
       case "intersection": {
         const nominal =
@@ -257,18 +268,23 @@ const signatureTypeKeyForInternal = ({
                 binders,
               })
             : "none";
-        return `intersection:${nominal}&${structural}`;
+        baseKey = `intersection:${nominal}&${structural}`;
+        break;
       }
       case "fixed-array":
-        return `fixed-array:${signatureTypeKeyForInternal({
+        baseKey = `fixed-array:${signatureTypeKeyForInternal({
           typeId: desc.element,
           ctx,
           active,
           binders,
         })}`;
+        break;
       default:
-        return `${(desc as { kind: string }).kind}:${typeId}`;
+        baseKey = `${(desc as { kind: string }).kind}:${typeId}`;
+        break;
     }
+    const serializer = findSerializerForType(typeId, ctx);
+    return serializer ? `${baseKey}#${serializerKeyFor(serializer)}` : baseKey;
   } finally {
     active.delete(typeId);
   }
