@@ -136,6 +136,16 @@ export const compileStatement = (
             binaryen.none
           );
         }
+        if (binaryen.getExpressionType(coerced) === binaryen.none) {
+          if (cleanup.length === 0) {
+            return ctx.mod.block(null, [coerced, ctx.mod.return()], binaryen.none);
+          }
+          return ctx.mod.block(
+            null,
+            [...cleanup, coerced, ctx.mod.return()],
+            binaryen.none
+          );
+        }
         if (cleanup.length === 0) {
           return ctx.mod.return(coerced);
         }

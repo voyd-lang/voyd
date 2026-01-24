@@ -1941,6 +1941,7 @@ export const typeGenericFunctionBody = ({
         );
       }
     }
+    ctx.functions.cacheInstanceValueTypes(key, ctx.valueTypes);
     ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
     ctx.functions.recordInstantiation(
       symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx)),

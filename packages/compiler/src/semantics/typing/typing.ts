@@ -66,6 +66,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     callTraitDispatches: new Set(ctx.callResolution.traitDispatches),
     functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
     functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
+    functionInstanceValueTypes: ctx.functions.snapshotInstanceValueTypes(),
     traitImplsByNominal: new Map(
       Array.from(ctx.traitImplsByNominal.entries()).map(([nominal, impls]) => [
         nominal,

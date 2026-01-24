@@ -4,7 +4,9 @@ import type {
   CodegenOptions,
   CodegenResult,
   FunctionMetadata,
+  FixedArrayWasmType,
   RuntimeTypeIdRegistryEntry,
+  StructuralTypeInfo,
 } from "./context.js";
 import { createRttContext } from "./rtt/index.js";
 import { createEffectRuntime } from "./effects/runtime-abi.js";
@@ -88,6 +90,8 @@ export const codegenProgram = ({
   const runtimeTypeIdCounter = { value: 1 };
   const diagnostics = new DiagnosticEmitter();
   const programHelpers = createProgramHelperRegistry();
+  const structTypes = new Map<string, StructuralTypeInfo>();
+  const fixedArrayTypes = new Map<TypeId, FixedArrayWasmType>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
@@ -100,8 +104,8 @@ export const codegenProgram = ({
     functions,
     functionInstances,
     itemsToSymbols: new Map(),
-    structTypes: new Map(),
-    fixedArrayTypes: new Map(),
+    structTypes,
+    fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),
     runtimeTypeRegistry,
