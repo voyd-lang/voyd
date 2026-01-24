@@ -157,6 +157,10 @@ export type FunctionLoweringIndex = {
     instanceId: ProgramFunctionInstanceId,
     expr: HirExprId
   ): TypeId | undefined;
+  getInstanceValueType(
+    instanceId: ProgramFunctionInstanceId,
+    symbol: SymbolId
+  ): TypeId | undefined;
   getFunctionId(ref: SymbolRef): ProgramFunctionId | undefined;
   getInstanceId(
     moduleId: string,
@@ -343,6 +347,7 @@ export const buildProgramCodegenView = (
 	      {
 	        functionInstantiationInfo: ReadonlyMap<SymbolRefKey, ReadonlyMap<string, readonly TypeId[]>>;
 	        functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+	        functionInstanceValueTypes: ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>;
 	        callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
 	        callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
 	        callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
@@ -1027,6 +1032,7 @@ export const buildProgramCodegenView = (
   });
 
   const instanceExprTypesById = new Map<ProgramFunctionInstanceId, Map<HirExprId, TypeId>>();
+  const instanceValueTypesById = new Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>>();
 
   stableModules.forEach((mod) => {
     const instanceExprSources = [
@@ -1055,6 +1061,39 @@ export const buildProgramCodegenView = (
         exprTypes.forEach((typeId, exprId) => {
           if (!bucket.has(exprId)) {
             bucket.set(exprId, typeId);
+          }
+        });
+      });
+    });
+  });
+
+  stableModules.forEach((mod) => {
+    const instanceValueSources = [
+      moduleTyping.get(mod.moduleId)?.functionInstanceValueTypes,
+      mod.typing.functionInstanceValueTypes,
+    ];
+    instanceValueSources.forEach((instanceValueTypes) => {
+      instanceValueTypes?.forEach((valueTypes, instanceKey) => {
+        const normalized = normalizeCallerInstanceKey(instanceKey);
+        const parsed = parseFunctionInstanceKey(normalized);
+        if (!parsed) {
+          return;
+        }
+        const instanceId = getProgramFunctionInstanceId(
+          { moduleId: mod.moduleId, symbol: parsed.symbol },
+          parsed.typeArgs
+        );
+        if (instanceId === undefined) {
+          return;
+        }
+        const bucket = instanceValueTypesById.get(instanceId);
+        if (!bucket) {
+          instanceValueTypesById.set(instanceId, new Map(valueTypes));
+          return;
+        }
+        valueTypes.forEach((typeId, symbol) => {
+          if (!bucket.has(symbol)) {
+            bucket.set(symbol, typeId);
           }
         });
       });
@@ -1301,6 +1340,8 @@ export const buildProgramCodegenView = (
     },
     getInstanceExprType: (instanceId, expr) =>
       instanceExprTypesById.get(instanceId)?.get(expr),
+    getInstanceValueType: (instanceId, symbol) =>
+      instanceValueTypesById.get(instanceId)?.get(symbol),
     getFunctionId: (ref) => getProgramFunctionId(ref),
     getInstanceId: (moduleId, symbol, typeArgs) => {
       if (!typeArgs) return undefined;
@@ -1383,8 +1424,8 @@ export const buildProgramCodegenView = (
           mod.typing.table.getExprType(expr) ?? first.typing.primitives.unknown,
         getResolvedExprType: (expr) => mod.typing.resolvedExprTypes.get(expr),
         getValueType: (symbol) =>
-          moduleTyping.get(mod.moduleId)?.valueTypes.get(symbol) ??
-          mod.typing.valueTypes.get(symbol),
+          mod.typing.valueTypes.get(symbol) ??
+          moduleTyping.get(mod.moduleId)?.valueTypes.get(symbol),
         getTailResumption: (expr) => mod.typing.tailResumptions.get(expr),
       },
       effectsInfo: buildEffectsLoweringInfo({

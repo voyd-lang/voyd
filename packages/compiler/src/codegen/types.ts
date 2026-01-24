@@ -222,7 +222,9 @@ export const wasmTypeFor = (
     }
 
     if (desc.kind === "fixed-array") {
-      return getFixedArrayWasmTypes(typeId, ctx, seen, mode).type;
+      // Fixed arrays are invariant in wasm GC, so signatures must use the concrete
+      // runtime array type to remain type-correct.
+      return getFixedArrayWasmTypes(typeId, ctx, seen, "runtime").type;
     }
 
     if (desc.kind === "function") {
@@ -307,7 +309,13 @@ export const getSymbolTypeId = (
   ctx: CodegenContext,
   instanceId?: ProgramFunctionInstanceId
 ): TypeId => {
-  const typeId = ctx.module.types.getValueType(symbol);
+  const instanceType =
+    typeof instanceId === "number"
+      ? ctx.program.functions.getInstanceValueType(instanceId, symbol)
+      : undefined;
+  const typeId = typeof instanceType === "number"
+    ? instanceType
+    : ctx.module.types.getValueType(symbol);
   if (typeof typeId === "number") {
     return substituteTypeForInstance({ typeId, ctx, instanceId });
   }
@@ -846,8 +854,8 @@ const createMethodLookupEntries = ({
   return entries;
 };
 
-const structuralTypeKey = (moduleId: string, typeId: TypeId): string =>
-  `${moduleId}::${typeId}`;
+const structuralTypeKey = (_moduleId: string, typeId: TypeId): string =>
+  `${typeId}`;
 
 const getNominalAncestry = (
   nominalId: TypeId | undefined,

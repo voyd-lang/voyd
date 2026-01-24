@@ -34,6 +34,10 @@ export const monomorphizeProgram = ({
         string,
         ReadonlyMap<HirExprId, TypeId>
       >;
+      functionInstanceValueTypes: ReadonlyMap<
+        string,
+        ReadonlyMap<SymbolId, TypeId>
+      >;
       callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
       callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
       callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
@@ -284,6 +288,10 @@ export const monomorphizeProgram = ({
         string,
         ReadonlyMap<HirExprId, TypeId>
       >;
+      functionInstanceValueTypes: ReadonlyMap<
+        string,
+        ReadonlyMap<SymbolId, TypeId>
+      >;
       callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
       callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
       callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
@@ -298,6 +306,7 @@ export const monomorphizeProgram = ({
     moduleTyping.set(moduleId, {
       functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
       functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
+      functionInstanceValueTypes: ctx.functions.snapshotInstanceValueTypes(),
       callTargets: cloneNestedMap(ctx.callResolution.targets),
       callTypeArguments: cloneNestedMap(ctx.callResolution.typeArguments),
       callInstanceKeys: cloneNestedMap(ctx.callResolution.instanceKeys),

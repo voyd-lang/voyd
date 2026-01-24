@@ -1873,6 +1873,8 @@ export const typeGenericFunctionBody = ({
   ctx.table.pushExprTypeScope();
   const previousResolved = ctx.resolvedExprTypes;
   ctx.resolvedExprTypes = new Map();
+  const previousValueTypes = ctx.valueTypes;
+  ctx.valueTypes = new Map(previousValueTypes);
   const nextTypeParams =
     signature.typeParamMap && previousFunction?.typeParams
       ? new Map([
@@ -1944,6 +1946,7 @@ export const typeGenericFunctionBody = ({
         );
       }
     }
+    ctx.functions.cacheInstanceValueTypes(key, ctx.valueTypes);
     ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
     ctx.functions.recordInstantiation(
       symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx)),
@@ -1951,8 +1954,13 @@ export const typeGenericFunctionBody = ({
       appliedTypeArgs
     );
   } finally {
+    const updatedFunctionType = ctx.valueTypes.get(symbol);
+    if (typeof updatedFunctionType === "number") {
+      previousValueTypes.set(symbol, updatedFunctionType);
+    }
     state.currentFunction = previousFunction;
     ctx.resolvedExprTypes = previousResolved;
+    ctx.valueTypes = previousValueTypes;
     ctx.table.popExprTypeScope();
     ctx.functions.endInstantiation(key);
   }

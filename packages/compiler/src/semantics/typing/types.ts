@@ -74,6 +74,7 @@ export interface TypingResult {
     ReadonlyMap<string, readonly TypeId[]>
   >;
   functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+  functionInstanceValueTypes: ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>;
   traitImplsByNominal: ReadonlyMap<TypeId, readonly TraitImplInstance[]>;
   traitImplsByTrait: ReadonlyMap<SymbolId, readonly TraitImplInstance[]>;
   traitMethodImpls: ReadonlyMap<SymbolId, TraitMethodImpl>;
@@ -141,6 +142,7 @@ export class FunctionStore {
   #instances = new Map<string, TypeId>();
   #instantiationInfo = new Map<SymbolRefKey, Map<string, readonly TypeId[]>>();
   #instanceExprTypes = new Map<string, Map<HirExprId, TypeId>>();
+  #instanceValueTypes = new Map<string, Map<SymbolId, TypeId>>();
   #activeInstantiations = new Set<string>();
 
   register(fn: HirFunction): void {
@@ -184,12 +186,23 @@ export class FunctionStore {
     this.#instanceExprTypes.set(key, new Map(exprTypes));
   }
 
+  cacheInstanceValueTypes(
+    key: string,
+    valueTypes: ReadonlyMap<SymbolId, TypeId>
+  ): void {
+    this.#instanceValueTypes.set(key, new Map(valueTypes));
+  }
+
   getInstance(key: string): TypeId | undefined {
     return this.#instances.get(key);
   }
 
   getInstanceExprTypes(key: string): ReadonlyMap<HirExprId, TypeId> | undefined {
     return this.#instanceExprTypes.get(key);
+  }
+
+  getInstanceValueTypes(key: string): ReadonlyMap<SymbolId, TypeId> | undefined {
+    return this.#instanceValueTypes.get(key);
   }
 
   recordInstantiation(
@@ -211,6 +224,7 @@ export class FunctionStore {
     this.#instances.clear();
     this.#instantiationInfo.clear();
     this.#instanceExprTypes.clear();
+    this.#instanceValueTypes.clear();
     this.#activeInstantiations.clear();
   }
 
@@ -232,6 +246,15 @@ export class FunctionStore {
       Array.from(this.#instanceExprTypes.entries()).map(([key, exprs]) => [
         key,
         new Map(exprs),
+      ])
+    );
+  }
+
+  snapshotInstanceValueTypes(): Map<string, Map<SymbolId, TypeId>> {
+    return new Map(
+      Array.from(this.#instanceValueTypes.entries()).map(([key, types]) => [
+        key,
+        new Map(types),
       ])
     );
   }

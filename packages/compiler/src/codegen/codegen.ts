@@ -4,7 +4,9 @@ import type {
   CodegenOptions,
   CodegenResult,
   FunctionMetadata,
+  FixedArrayWasmType,
   RuntimeTypeIdRegistryEntry,
+  StructuralTypeInfo,
 } from "./context.js";
 import { createRttContext } from "./rtt/index.js";
 import { createEffectRuntime } from "./effects/runtime-abi.js";
@@ -55,7 +57,7 @@ export type ContinuationBackendKind = "gc-trampoline" | "stack-switch";
 
 export const codegen = (
   semantics: SemanticsPipelineResult,
-  options: CodegenOptions = {}
+  options: CodegenOptions = {},
 ): CodegenResult =>
   codegenProgram({
     program: buildProgramCodegenView([semantics]),
@@ -82,14 +84,18 @@ export const codegenProgram = ({
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, Map<number, FunctionMetadata[]>>();
-  const functionInstances = new Map<ProgramFunctionInstanceId, FunctionMetadata>();
+  const functionInstances = new Map<
+    ProgramFunctionInstanceId,
+    FunctionMetadata
+  >();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
   const runtimeTypeIdCounter = { value: 1 };
-  const fixedArrayTypes = new Map<number, FixedArrayWasmType>();
   const diagnostics = new DiagnosticEmitter();
   const programHelpers = createProgramHelperRegistry();
+  const structTypes = new Map<string, StructuralTypeInfo>();
+  const fixedArrayTypes = new Map<TypeId, FixedArrayWasmType>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
@@ -102,7 +108,7 @@ export const codegenProgram = ({
     functions,
     functionInstances,
     itemsToSymbols: new Map(),
-    structTypes: new Map(),
+    structTypes,
     fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),
@@ -166,7 +172,11 @@ export const codegenProgram = ({
     }
   }
 
-  return { module: mod, effectTable, diagnostics: [...diagnostics.diagnostics] };
+  return {
+    module: mod,
+    effectTable,
+    diagnostics: [...diagnostics.diagnostics],
+  };
 };
 
 export const codegenProgramWithContinuationFallback = ({
@@ -224,7 +234,7 @@ const emitWasmBytes = (mod: binaryen.Module): Uint8Array => {
   const emitted = mod.emitBinary();
   return emitted instanceof Uint8Array
     ? emitted
-    : (emitted as { binary?: Uint8Array; output?: Uint8Array }).output ??
+    : ((emitted as { binary?: Uint8Array; output?: Uint8Array }).output ??
         (emitted as { binary?: Uint8Array }).binary ??
-        new Uint8Array();
+        new Uint8Array());
 };

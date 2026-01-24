@@ -6,10 +6,20 @@ import {
   freshOpenEffectRow,
   getExprEffectRow,
 } from "../effects.js";
-import { ensureTypeMatches, resolveTypeExpr, typeSatisfies } from "../type-system.js";
+import {
+  ensureTypeMatches,
+  resolveTypeExpr,
+  typeSatisfies,
+} from "../type-system.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { emitDiagnostic } from "../../../diagnostics/index.js";
-import type { HirExprId, SymbolId, SourceSpan, TypeId, TypeParamId } from "../../ids.js";
+import type {
+  HirExprId,
+  SymbolId,
+  SourceSpan,
+  TypeId,
+  TypeParamId,
+} from "../../ids.js";
 
 const dropHandledOperation = ({
   row,
@@ -31,12 +41,14 @@ const typesMatch = (
   left: TypeId,
   right: TypeId,
   ctx: TypingContext,
-  state: TypingState
-): boolean => typeSatisfies(left, right, ctx, state) && typeSatisfies(right, left, ctx, state);
+  state: TypingState,
+): boolean =>
+  typeSatisfies(left, right, ctx, state) &&
+  typeSatisfies(right, left, ctx, state);
 
 const overloadOptionsFor = (
   symbol: SymbolId,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): readonly SymbolId[] | undefined => {
   for (const options of ctx.overloads.values()) {
     if (options.includes(symbol)) {
@@ -100,7 +112,9 @@ const resolveHandlerTypeArguments = ({
 }: {
   handlerBody: HirExprId;
   clause: HirEffectHandlerExpr["handlers"][number];
-  signature: NonNullable<ReturnType<TypingContext["functions"]["getSignature"]>>;
+  signature: NonNullable<
+    ReturnType<TypingContext["functions"]["getSignature"]>
+  >;
   ctx: TypingContext;
   state: TypingState;
 }): readonly TypeId[] | undefined => {
@@ -152,7 +166,9 @@ const applyTypeArgumentsToSignature = ({
   typeArguments,
   ctx,
 }: {
-  signature: NonNullable<ReturnType<TypingContext["functions"]["getSignature"]>>;
+  signature: NonNullable<
+    ReturnType<TypingContext["functions"]["getSignature"]>
+  >;
   typeArguments: readonly TypeId[] | undefined;
   ctx: TypingContext;
 }): {
@@ -161,7 +177,10 @@ const applyTypeArgumentsToSignature = ({
 } => {
   const typeParams = signature.typeParams ?? [];
   if (!typeArguments || typeArguments.length === 0 || typeParams.length === 0) {
-    return { parameters: signature.parameters, returnType: signature.returnType };
+    return {
+      parameters: signature.parameters,
+      returnType: signature.returnType,
+    };
   }
 
   const substitution = new Map<TypeParamId, TypeId>();
@@ -173,7 +192,10 @@ const applyTypeArgumentsToSignature = ({
   });
 
   if (substitution.size === 0) {
-    return { parameters: signature.parameters, returnType: signature.returnType };
+    return {
+      parameters: signature.parameters,
+      returnType: signature.returnType,
+    };
   }
 
   return {
@@ -225,7 +247,7 @@ const resolveHandlerOperation = ({
   }
 
   const resolvedArgTypes = argParams.map((param) =>
-    resolveTypeExpr(param.type, ctx, state, ctx.primitives.unknown)
+    resolveTypeExpr(param.type, ctx, state, ctx.primitives.unknown),
   );
 
   const matches = overloads.filter((candidate) => {
@@ -237,7 +259,7 @@ const resolveHandlerOperation = ({
       return false;
     }
     return signature.parameters.every((param, index) =>
-      typesMatch(param.type, resolvedArgTypes[index]!, ctx, state)
+      typesMatch(param.type, resolvedArgTypes[index]!, ctx, state),
     );
   });
 
@@ -287,8 +309,8 @@ const typeHandlerClause = ({
     throw new Error(
       `missing effect operation signature for ${effectOpName(
         clause.operation,
-        ctx
-      )}`
+        ctx,
+      )}`,
     );
   }
 
@@ -330,14 +352,19 @@ const typeHandlerClause = ({
     ctx.valueTypes.set(param.symbol, paramType);
   });
 
-  const clauseReturn = typeExpression(clause.body, ctx, state, handlerReturnTypeId);
+  const clauseReturn = typeExpression(
+    clause.body,
+    ctx,
+    state,
+    handlerReturnTypeId,
+  );
   if (handlerReturnTypeId !== ctx.primitives.unknown) {
     ensureTypeMatches(
       clauseReturn,
       handlerReturnTypeId,
       ctx,
       state,
-      "handler body"
+      "handler body",
     );
   }
 
@@ -348,7 +375,7 @@ type ContinuationUsage = { min: number; max: number; escapes: boolean };
 
 const mergeUsage = (
   left: ContinuationUsage,
-  right: ContinuationUsage
+  right: ContinuationUsage,
 ): ContinuationUsage => ({
   min: left.min + right.min,
   max: left.max + right.max,
@@ -365,7 +392,7 @@ const mergeBranches = (branches: ContinuationUsage[]): ContinuationUsage => {
       max: Math.max(acc.max, branch.max),
       escapes: acc.escapes || branch.escapes,
     }),
-    { min: Number.POSITIVE_INFINITY, max: 0, escapes: false }
+    { min: Number.POSITIVE_INFINITY, max: 0, escapes: false },
   );
 };
 
@@ -384,7 +411,7 @@ const analyzeContinuationUsage = ({
   const usageByExpr = new Map<number, ContinuationUsage>();
   const usageByStmt = new Map<number, ContinuationUsage>();
   const usageForExpr = (id?: number): ContinuationUsage =>
-    typeof id === "number" ? usageByExpr.get(id) ?? emptyUsage : emptyUsage;
+    typeof id === "number" ? (usageByExpr.get(id) ?? emptyUsage) : emptyUsage;
   const usageForStmt = (id: number): ContinuationUsage =>
     usageByStmt.get(id) ?? emptyUsage;
   const toLoopUsage = (usage: ContinuationUsage): ContinuationUsage => ({
@@ -430,7 +457,9 @@ const analyzeContinuationUsage = ({
           break;
         case "break":
           usage =
-            typeof expr.value === "number" ? usageForExpr(expr.value) : emptyUsage;
+            typeof expr.value === "number"
+              ? usageForExpr(expr.value)
+              : emptyUsage;
           break;
         case "call": {
           const callee = ctx.hir.expressions.get(expr.callee);
@@ -446,7 +475,7 @@ const analyzeContinuationUsage = ({
         case "block":
           usage = expr.statements.reduce(
             (acc, stmtId) => mergeUsage(acc, usageForStmt(stmtId)),
-            emptyUsage
+            emptyUsage,
           );
           if (typeof expr.value === "number") {
             usage = mergeUsage(usage, usageForExpr(expr.value));
@@ -455,7 +484,7 @@ const analyzeContinuationUsage = ({
         case "tuple":
           usage = expr.elements.reduce(
             (acc, entry) => mergeUsage(acc, usageForExpr(entry)),
-            emptyUsage
+            emptyUsage,
           );
           break;
         case "loop":
@@ -464,7 +493,7 @@ const analyzeContinuationUsage = ({
         case "while":
           usage = mergeUsage(
             usageForExpr(expr.condition),
-            toLoopUsage(usageForExpr(expr.body))
+            toLoopUsage(usageForExpr(expr.body)),
           );
           break;
         case "cond":
@@ -472,8 +501,8 @@ const analyzeContinuationUsage = ({
           const branchUsages = expr.branches.map((branch) =>
             mergeUsage(
               usageForExpr(branch.condition),
-              usageForExpr(branch.value)
-            )
+              usageForExpr(branch.value),
+            ),
           );
           const defaultUsage =
             typeof expr.defaultBranch === "number"
@@ -507,7 +536,7 @@ const analyzeContinuationUsage = ({
         case "object-literal":
           usage = expr.entries.reduce(
             (acc, entry) => mergeUsage(acc, usageForExpr(entry.value)),
-            emptyUsage
+            emptyUsage,
           );
           break;
         case "field-access":
@@ -565,7 +594,8 @@ const enforceTailResumption = ({
 
   const staticallyExactOnce =
     !usage.escapes && usage.min === 1 && usage.max === 1;
-  const definitelyMissing = !usage.escapes && usage.min === 0 && usage.max === 0;
+  const definitelyMissing =
+    !usage.escapes && usage.min === 0 && usage.max === 0;
   const definitelyMultiple = !usage.escapes && usage.min > 1 && usage.max > 1;
   const enforcement: "static" | "runtime" =
     usage.escapes || !staticallyExactOnce ? "runtime" : "static";
@@ -597,7 +627,7 @@ export const typeEffectHandlerExpr = (
   expr: HirEffectHandlerExpr,
   ctx: TypingContext,
   state: TypingState,
-  expectedType?: TypeId
+  expectedType?: TypeId,
 ): number => {
   const bodyType = typeExpression(expr.body, ctx, state, expectedType);
   const bodyEffectRow = getExprEffectRow(expr.body, ctx);
@@ -620,11 +650,11 @@ export const typeEffectHandlerExpr = (
   let remainingRow = bodyEffectRow;
   const reRaisedOps = new Set<string>();
   const handledOpNames = new Set(
-    expr.handlers.map((clause) => effectOpName(clause.operation, ctx))
+    expr.handlers.map((clause) => effectOpName(clause.operation, ctx)),
   );
   const continuationEffectRow = Array.from(handledOpNames).reduce(
     (row, opName) => dropHandledOperation({ row, opName, ctx }),
-    bodyEffectRow
+    bodyEffectRow,
   );
 
   expr.handlers.forEach((clause) => {
@@ -645,8 +675,7 @@ export const typeEffectHandlerExpr = (
     } else {
       remainingRow = dropHandledOperation({ row: remainingRow, opName, ctx });
     }
-    const clauseSpan =
-      ctx.hir.expressions.get(clause.body)?.span ?? expr.span;
+    const clauseSpan = ctx.hir.expressions.get(clause.body)?.span ?? expr.span;
     enforceTailResumption({ clause, ctx, opName, span: clauseSpan });
   });
 
@@ -654,7 +683,12 @@ export const typeEffectHandlerExpr = (
   let effectRow = composeEffectRows(ctx.effects, [remainingRow, handlersRow]);
 
   if (typeof expr.finallyBranch === "number") {
-    const finallyType = typeExpression(expr.finallyBranch, ctx, state, bodyType);
+    const finallyType = typeExpression(
+      expr.finallyBranch,
+      ctx,
+      state,
+      bodyType,
+    );
     if (bodyType !== ctx.primitives.unknown) {
       ensureTypeMatches(finallyType, bodyType, ctx, state, "handler finally");
     }
@@ -666,7 +700,7 @@ export const typeEffectHandlerExpr = (
 
   const remainingDesc = ctx.effects.getRow(remainingRow);
   const unhandled = remainingDesc.operations.filter(
-    (op) => !reRaisedOps.has(op.name)
+    (op) => !reRaisedOps.has(op.name),
   );
   if (unhandled.length > 0 && !remainingDesc.tailVar) {
     const opList = unhandled.map((op) => op.name).join(", ");
