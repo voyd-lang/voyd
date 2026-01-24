@@ -1,0 +1,22 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+type ListA = { value: i32, next: Optional<ListA> }
+
+type ListB = { value: i32, next: Optional<ListB> }
+
+fn depthA(list: ListA) -> i32
+  1
+
+fn depthB(list: ListB) -> i32
+  1
+
+pub fn main() -> i32
+  let a = { value: 1, next: Some<ListA> { value: { value: 2, next: None {} } } }
+  let b = { value: 3, next: Some<ListB> { value: { value: 4, next: None {} } } }
+  depthA(a) + depthB(b)

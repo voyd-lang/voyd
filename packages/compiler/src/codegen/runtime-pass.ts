@@ -38,6 +38,16 @@ const collectTypesForInstance = ({
     const typedPattern = pattern as HirPattern & { typeId?: unknown };
     record(typeof typedPattern.typeId === "number" ? (typedPattern.typeId as TypeId) : undefined);
   };
+  const getExprTypeForInstance = (exprId: HirExprId): TypeId | undefined => {
+    const instanceType = ctx.program.functions.getInstanceExprType(instanceId, exprId);
+    if (typeof instanceType === "number") {
+      return instanceType;
+    }
+    return (
+      ctx.module.types.getResolvedExprType(exprId) ??
+      ctx.module.types.getExprType(exprId)
+    );
+  };
 
   walkHirExpression({
     exprId: rootExprId,
@@ -46,7 +56,7 @@ const collectTypesForInstance = ({
     visitHandlerBodies: true,
     visitor: {
       onExpr: (exprId) => {
-        const exprType = ctx.program.functions.getInstanceExprType(instanceId, exprId);
+        const exprType = getExprTypeForInstance(exprId);
         record(exprType);
       },
       onPattern: (pattern) => {

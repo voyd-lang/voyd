@@ -42,6 +42,7 @@ import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
 import { parseSymbolRefKey } from "../typing/symbol-ref-utils.js";
+import { typeContainsUnresolvedParam } from "../type-utils.js";
 
 export type { SymbolRef } from "../program-symbol-arena.js";
 
@@ -374,6 +375,13 @@ export const buildProgramCodegenView = (
   }
 
   const arena = first.typing.arena;
+  const mismatchedArena = modules.find((mod) => mod.typing.arena !== arena);
+  if (mismatchedArena) {
+    throw new Error(
+      `buildProgramCodegenView requires all modules to share a TypeArena; ` +
+        `module ${mismatchedArena.moduleId} uses a different arena`
+    );
+  }
   const effectsInterner: EffectInterner = first.typing.effects;
 
   const objectTemplateByOwner = new Map<ProgramSymbolId, CodegenObjectTemplate>();
@@ -486,62 +494,12 @@ export const buildProgramCodegenView = (
     Map<string, readonly TypeId[]>
   >();
 
-  const typeContainsUnresolvedParam = (
-    typeId: TypeId,
-    seen: Set<TypeId>,
-    boundParams: ReadonlySet<TypeParamId> = new Set()
-  ): boolean => {
-    if (seen.has(typeId)) {
-      return false;
-    }
-    seen.add(typeId);
-    const desc = arena.get(typeId);
-    switch (desc.kind) {
-      case "type-param-ref":
-        return !boundParams.has(desc.param);
-      case "recursive": {
-        const nextBound = new Set(boundParams);
-        nextBound.add(desc.binder);
-        return typeContainsUnresolvedParam(desc.body, seen, nextBound);
-      }
-      case "primitive":
-        return desc.name === "unknown";
-      case "trait":
-      case "nominal-object":
-        return desc.typeArgs.some((arg) =>
-          typeContainsUnresolvedParam(arg, seen, boundParams)
-        );
-      case "fixed-array":
-        return typeContainsUnresolvedParam(desc.element, seen, boundParams);
-      case "structural-object":
-        return desc.fields.some((field) =>
-          typeContainsUnresolvedParam(field.type, seen, boundParams)
-        );
-      case "function":
-        return (
-          desc.parameters.some((param) =>
-            typeContainsUnresolvedParam(param.type, seen, boundParams)
-          ) || typeContainsUnresolvedParam(desc.returnType, seen, boundParams)
-        );
-      case "union":
-        return desc.members.some((member) =>
-          typeContainsUnresolvedParam(member, seen, boundParams)
-        );
-      case "intersection":
-        return (
-          (typeof desc.nominal === "number" &&
-            typeContainsUnresolvedParam(desc.nominal, seen, boundParams)) ||
-          (typeof desc.structural === "number" &&
-            typeContainsUnresolvedParam(desc.structural, seen, boundParams))
-        );
-      default:
-        return false;
-    }
-  };
-
   const instantiationTypeArgsAreConcrete = (typeArgs: readonly TypeId[]): boolean =>
     !typeArgs.some((typeArg) =>
-      typeContainsUnresolvedParam(typeArg, new Set())
+      typeContainsUnresolvedParam({
+        typeId: typeArg,
+        getTypeDesc: (id) => arena.get(id),
+      })
     );
 
   const recordInstantiation = (
