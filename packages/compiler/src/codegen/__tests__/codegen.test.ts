@@ -16,11 +16,20 @@ import {
   registerFunctionMetadata,
   registerImportMetadata,
 } from "../functions.js";
+import { buildRuntimeTypeArtifacts } from "../runtime-pass.js";
+import { wasmRuntimeTypeFor } from "../runtime-types.js";
+import { resolveStructuralTypeId } from "../types.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
+import type { ModuleGraph, ModuleNode, ModulePath } from "../../modules/types.js";
+import {
+  createEffectInterner,
+  createEffectTable,
+} from "../../semantics/effects/effect-table.js";
+import { createTypeArena } from "../../semantics/typing/type-arena.js";
 import type {
   CodegenContext,
   FunctionMetadata,
@@ -34,6 +43,34 @@ const loadAst = (fixtureName: string) => {
     "utf8"
   );
   return parse(source, fixtureName);
+};
+
+const loadSemanticsWithTyping = (
+  fixtureName: string,
+  typing: { arena: any; effects: any }
+) => {
+  const form = loadAst(fixtureName);
+  const path: ModulePath = { namespace: "src", segments: [] };
+  const module: ModuleNode = {
+    id: fixtureName,
+    path,
+    origin: { kind: "file", filePath: fixtureName },
+    ast: form,
+    source: "",
+    dependencies: [],
+  };
+  const graph: ModuleGraph = {
+    entry: module.id,
+    modules: new Map([[module.id, module]]),
+    diagnostics: [],
+  };
+  return semanticsPipeline({
+    module,
+    graph,
+    exports: new Map(),
+    dependencies: new Map(),
+    typing,
+  });
 };
 
 const loadWasmInstance = (fixtureName: string) => {
@@ -134,6 +171,7 @@ const buildCodegenProgram = (
 
   contexts.forEach(registerFunctionMetadata);
   contexts.forEach(registerImportMetadata);
+  buildRuntimeTypeArtifacts(contexts);
   contexts.forEach(compileFunctions);
   emitModuleExports(contexts[0]!, contexts);
 
@@ -141,9 +179,117 @@ const buildCodegenProgram = (
 };
 
 describe("next codegen", () => {
+  it("does not register RTT during metadata registration", () => {
+    const ast = loadAst("recursive_type_alias.voyd");
+    const semantics = semanticsPipeline(ast);
+    const program = buildProgramCodegenView([semantics]);
+    const mod = new binaryen.Module();
+    mod.setFeatures(binaryen.Features.All);
+    const rtt = createRttContext(mod);
+    const effectsRuntime = createEffectRuntime(mod);
+    const functions = new Map<string, Map<number, FunctionMetadata[]>>();
+    const functionInstances = new Map<ProgramFunctionInstanceId, FunctionMetadata>();
+    const outcomeValueTypes = new Map<string, OutcomeValueBox>();
+    const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
+    const runtimeTypeIdsByKey = new Map<string, number>();
+    const runtimeTypeIdCounter = { value: 1 };
+    const diagnostics = new DiagnosticEmitter();
+    const programHelpers = createProgramHelperRegistry();
+
+    const ctx: CodegenContext = {
+      program,
+      module: program.modules.get(semantics.moduleId)!,
+      mod,
+      moduleId: semantics.moduleId,
+      moduleLabel: sanitizeIdentifier(semantics.hir.module.path),
+      diagnostics,
+      options: DEFAULT_OPTIONS,
+      programHelpers,
+      functions,
+      functionInstances,
+      itemsToSymbols: new Map(),
+      structTypes: new Map(),
+      fixedArrayTypes: new Map(),
+      closureTypes: new Map(),
+      functionRefTypes: new Map(),
+      runtimeTypeRegistry,
+      runtimeTypeIds: { byKey: runtimeTypeIdsByKey, nextId: runtimeTypeIdCounter },
+      lambdaEnvs: new Map(),
+      lambdaFunctions: new Map(),
+      rtt,
+      effectsRuntime,
+      effectsBackend: undefined as any,
+      effectsState: createEffectsState(),
+      effectLowering: {
+        sitesByExpr: new Map(),
+        sites: [],
+        callArgTemps: new Map(),
+        tempTypeIds: new Map(),
+      },
+      outcomeValueTypes,
+    };
+
+    const siteCounter = { current: 0 };
+    ctx.effectsBackend = selectEffectsBackend(ctx);
+    ctx.effectLowering = ctx.effectsBackend.buildLowering({ ctx, siteCounter });
+    registerFunctionMetadata(ctx);
+    registerImportMetadata(ctx);
+
+    expect(runtimeTypeRegistry.size).toBe(0);
+
+    buildRuntimeTypeArtifacts([ctx]);
+    expect(runtimeTypeRegistry.size).toBeGreaterThan(0);
+  });
+
+  it("canonicalizes recursive RTT keys for alpha-equivalent aliases", () => {
+    const ast = loadAst("recursive_alias_alpha_equivalence.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { contexts: [ctx] } = buildCodegenProgram([semantics]);
+
+    const resolveAliasType = (name: string): TypeId => {
+      const symbol = semantics.symbols.resolveTopLevel(name);
+      if (typeof symbol !== "number") {
+        throw new Error(`missing type alias symbol for ${name}`);
+      }
+      const key = `${symbol}<>`;
+      const typeId = semantics.typing.typeAliases.getCachedInstance(key);
+      if (typeof typeId !== "number") {
+        throw new Error(`missing type alias instance for ${name}`);
+      }
+      return typeId;
+    };
+
+    const listA = resolveAliasType("ListA");
+    const listB = resolveAliasType("ListB");
+    const listAStructural = resolveStructuralTypeId(listA, ctx);
+    const listBStructural = resolveStructuralTypeId(listB, ctx);
+    if (typeof listAStructural !== "number" || typeof listBStructural !== "number") {
+      throw new Error("missing structural type ids for recursive aliases");
+    }
+
+    wasmRuntimeTypeFor(listA, ctx);
+    wasmRuntimeTypeFor(listB, ctx);
+
+    const entryA = ctx.runtimeTypeRegistry.get(listAStructural);
+    const entryB = ctx.runtimeTypeRegistry.get(listBStructural);
+    expect(entryA?.key).toBeDefined();
+    expect(entryA?.key).toBe(entryB?.key);
+    const runtimeIdA =
+      entryA?.key === undefined ? undefined : ctx.runtimeTypeIds.byKey.get(entryA.key);
+    const runtimeIdB =
+      entryB?.key === undefined ? undefined : ctx.runtimeTypeIds.byKey.get(entryB.key);
+    expect(runtimeIdA).toBeDefined();
+    expect(runtimeIdA).toBe(runtimeIdB);
+  });
+
   it("emits wasm for the fib sample and runs main()", () => {
     const main = loadMain("fib.voyd");
     expect(main()).toBe(55);
+  });
+
+  it("coerces declared bindings to annotated optional types", () => {
+    const main = loadMain("optional_binding_coercion.voyd");
+    expect(main()).toBe(5);
   });
 
   it("handles functions declared with `=` syntax and calls them", () => {
@@ -596,8 +742,16 @@ describe("next codegen", () => {
   });
 
   it("keeps closure heap caches scoped per module and deterministic", () => {
-    const moduleA = semanticsPipeline(loadAst("lambda_multi_module_a.voyd"));
-    const moduleB = semanticsPipeline(loadAst("lambda_multi_module_b.voyd"));
+    const arena = createTypeArena();
+    const effectInterner = createEffectInterner();
+    const moduleA = loadSemanticsWithTyping("lambda_multi_module_a.voyd", {
+      arena,
+      effects: createEffectTable({ interner: effectInterner }),
+    });
+    const moduleB = loadSemanticsWithTyping("lambda_multi_module_b.voyd", {
+      arena,
+      effects: createEffectTable({ interner: effectInterner }),
+    });
     const {
       mod: combined,
       contexts: [ctxA, ctxB],

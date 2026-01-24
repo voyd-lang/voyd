@@ -85,24 +85,32 @@ export const analyzeLambdaCaptures = ({
     const captures: HirCapture[] = [];
     const seen = new Set<SymbolId>();
 
+    const isCapturableValue = (symbol: SymbolId): boolean => {
+      const record = symbolTable.getSymbol(symbol);
+      const metadata = (record.metadata ?? {}) as {
+        intrinsic?: boolean;
+        import?: unknown;
+      };
+
+      if (metadata.intrinsic) return false;
+      if (metadata.import) return false;
+      if (record.scope === symbolTable.rootScope) return false;
+
+      const capturableKind = record.kind === "value" || record.kind === "parameter";
+      if (!capturableKind) return false;
+
+      const scopeKind = getScope(record.scope).kind;
+      return scopeKind === "function" || scopeKind === "lambda" || scopeKind === "block";
+    };
+
     const visitIdentifier = (
       expr: HirExpression & { exprKind: "identifier"; symbol: SymbolId }
     ) => {
       const record = symbolTable.getSymbol(expr.symbol);
       const metadata = (record.metadata ?? {}) as {
-        intrinsic?: boolean;
         mutable?: boolean;
-        import?: unknown;
       };
-      if (metadata.intrinsic) return;
-      if (metadata.import) return;
-      if (record.scope === symbolTable.rootScope) {
-        return;
-      }
-      const scopeKind = getScope(record.scope).kind;
-      const captureAllowed =
-        scopeKind === "function" || scopeKind === "lambda" || scopeKind === "block";
-      if (!captureAllowed) {
+      if (!isCapturableValue(expr.symbol)) {
         return;
       }
 

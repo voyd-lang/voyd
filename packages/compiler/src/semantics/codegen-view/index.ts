@@ -33,6 +33,7 @@ import type {
   TraitImplInstance,
   TraitMethodImpl,
 } from "../typing/types.js";
+import { cloneNestedMap } from "../typing/call-resolution.js";
 import {
   getOptionalInfo,
   type OptionalResolverContext,
@@ -41,6 +42,7 @@ import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
 import { parseSymbolRefKey } from "../typing/symbol-ref-utils.js";
+import { typeContainsUnresolvedParam } from "../type-utils.js";
 
 export type { SymbolRef } from "../program-symbol-arena.js";
 
@@ -62,6 +64,7 @@ export type CodegenFunctionParameter = {
 
 export type CodegenTypeDesc =
   | { kind: "primitive"; name: string }
+  | { kind: "recursive"; binder: TypeParamId; body: TypeId }
   | { kind: "trait"; owner: ProgramSymbolId; name?: string; typeArgs: readonly TypeId[] }
   | { kind: "nominal-object"; owner: ProgramSymbolId; name?: string; typeArgs: readonly TypeId[] }
   | { kind: "structural-object"; fields: readonly CodegenStructuralField[] }
@@ -154,6 +157,10 @@ export type FunctionLoweringIndex = {
   getInstanceExprType(
     instanceId: ProgramFunctionInstanceId,
     expr: HirExprId
+  ): TypeId | undefined;
+  getInstanceValueType(
+    instanceId: ProgramFunctionInstanceId,
+    symbol: SymbolId
   ): TypeId | undefined;
   getFunctionId(ref: SymbolRef): ProgramFunctionId | undefined;
   getInstanceId(
@@ -340,6 +347,7 @@ export const buildProgramCodegenView = (
 	      {
 	        functionInstantiationInfo: ReadonlyMap<SymbolRefKey, ReadonlyMap<string, readonly TypeId[]>>;
 	        functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
+	        functionInstanceValueTypes: ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>;
 	        callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
 	        callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
 	        callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
@@ -366,6 +374,13 @@ export const buildProgramCodegenView = (
   }
 
   const arena = first.typing.arena;
+  const mismatchedArena = modules.find((mod) => mod.typing.arena !== arena);
+  if (mismatchedArena) {
+    throw new Error(
+      `buildProgramCodegenView requires all modules to share a TypeArena; ` +
+        `module ${mismatchedArena.moduleId} uses a different arena`
+    );
+  }
   const effectsInterner: EffectInterner = first.typing.effects;
 
   const objectTemplateByOwner = new Map<ProgramSymbolId, CodegenObjectTemplate>();
@@ -467,56 +482,12 @@ export const buildProgramCodegenView = (
     Map<string, readonly TypeId[]>
   >();
 
-  const typeContainsUnresolvedParam = (
-    typeId: TypeId,
-    seen: Set<TypeId>
-  ): boolean => {
-    if (seen.has(typeId)) {
-      return false;
-    }
-    seen.add(typeId);
-    const desc = arena.get(typeId);
-    switch (desc.kind) {
-      case "type-param-ref":
-        return true;
-      case "primitive":
-        return desc.name === "unknown";
-      case "trait":
-      case "nominal-object":
-        return desc.typeArgs.some((arg) =>
-          typeContainsUnresolvedParam(arg, seen)
-        );
-      case "fixed-array":
-        return typeContainsUnresolvedParam(desc.element, seen);
-      case "structural-object":
-        return desc.fields.some((field) =>
-          typeContainsUnresolvedParam(field.type, seen)
-        );
-      case "function":
-        return (
-          desc.parameters.some((param) =>
-            typeContainsUnresolvedParam(param.type, seen)
-          ) || typeContainsUnresolvedParam(desc.returnType, seen)
-        );
-      case "union":
-        return desc.members.some((member) =>
-          typeContainsUnresolvedParam(member, seen)
-        );
-      case "intersection":
-        return (
-          (typeof desc.nominal === "number" &&
-            typeContainsUnresolvedParam(desc.nominal, seen)) ||
-          (typeof desc.structural === "number" &&
-            typeContainsUnresolvedParam(desc.structural, seen))
-        );
-      default:
-        return false;
-    }
-  };
-
   const instantiationTypeArgsAreConcrete = (typeArgs: readonly TypeId[]): boolean =>
     !typeArgs.some((typeArg) =>
-      typeContainsUnresolvedParam(typeArg, new Set())
+      typeContainsUnresolvedParam({
+        typeId: typeArg,
+        getTypeDesc: (id) => arena.get(id),
+      })
     );
 
   const recordInstantiation = (
@@ -552,6 +523,12 @@ export const buildProgramCodegenView = (
     switch (desc.kind) {
       case "primitive":
         return cacheTypeDesc(typeId, { kind: "primitive", name: desc.name });
+      case "recursive":
+        return cacheTypeDesc(typeId, {
+          kind: "recursive",
+          binder: desc.binder,
+          body: desc.body,
+        });
       case "type-param-ref":
         return cacheTypeDesc(typeId, { kind: "type-param-ref", param: desc.param });
       case "trait":
@@ -758,19 +735,15 @@ export const buildProgramCodegenView = (
     });
 
 	    const callSource = moduleTyping.get(mod.moduleId);
-	    const callTargets = callSource?.callTargets ?? mod.typing.callTargets;
-	    const callTypeArgs = callSource?.callTypeArguments ?? mod.typing.callTypeArguments;
-	    callsByModuleRaw.set(mod.moduleId, {
-	      targets: new Map(
-	        Array.from(callTargets, ([exprId, targets]) => [exprId, new Map(targets)] as const)
-	      ),
-	      typeArgs: new Map(
-	        Array.from(callTypeArgs, ([exprId, args]) => [exprId, new Map(args)] as const)
-	      ),
-	      traitDispatches: new Set(
-	        callSource?.callTraitDispatches ?? mod.typing.callTraitDispatches
-	      ),
-	    });
+    const callTargets = callSource?.callTargets ?? mod.typing.callTargets;
+    const callTypeArgs = callSource?.callTypeArguments ?? mod.typing.callTypeArguments;
+    callsByModuleRaw.set(mod.moduleId, {
+      targets: cloneNestedMap(callTargets),
+      typeArgs: cloneNestedMap(callTypeArgs),
+      traitDispatches: new Set(
+        callSource?.callTraitDispatches ?? mod.typing.callTraitDispatches
+      ),
+    });
 
     // Instances come from the explicit monomorphization pass when available.
   });
@@ -1005,6 +978,7 @@ export const buildProgramCodegenView = (
   });
 
   const instanceExprTypesById = new Map<ProgramFunctionInstanceId, Map<HirExprId, TypeId>>();
+  const instanceValueTypesById = new Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>>();
 
   stableModules.forEach((mod) => {
     const instanceExprSources = [
@@ -1033,6 +1007,39 @@ export const buildProgramCodegenView = (
         exprTypes.forEach((typeId, exprId) => {
           if (!bucket.has(exprId)) {
             bucket.set(exprId, typeId);
+          }
+        });
+      });
+    });
+  });
+
+  stableModules.forEach((mod) => {
+    const instanceValueSources = [
+      moduleTyping.get(mod.moduleId)?.functionInstanceValueTypes,
+      mod.typing.functionInstanceValueTypes,
+    ];
+    instanceValueSources.forEach((instanceValueTypes) => {
+      instanceValueTypes?.forEach((valueTypes, instanceKey) => {
+        const normalized = normalizeCallerInstanceKey(instanceKey);
+        const parsed = parseFunctionInstanceKey(normalized);
+        if (!parsed) {
+          return;
+        }
+        const instanceId = getProgramFunctionInstanceId(
+          { moduleId: mod.moduleId, symbol: parsed.symbol },
+          parsed.typeArgs
+        );
+        if (instanceId === undefined) {
+          return;
+        }
+        const bucket = instanceValueTypesById.get(instanceId);
+        if (!bucket) {
+          instanceValueTypesById.set(instanceId, new Map(valueTypes));
+          return;
+        }
+        valueTypes.forEach((typeId, symbol) => {
+          if (!bucket.has(symbol)) {
+            bucket.set(symbol, typeId);
           }
         });
       });
@@ -1275,6 +1282,8 @@ export const buildProgramCodegenView = (
     },
     getInstanceExprType: (instanceId, expr) =>
       instanceExprTypesById.get(instanceId)?.get(expr),
+    getInstanceValueType: (instanceId, symbol) =>
+      instanceValueTypesById.get(instanceId)?.get(symbol),
     getFunctionId: (ref) => getProgramFunctionId(ref),
     getInstanceId: (moduleId, symbol, typeArgs) => {
       if (!typeArgs) return undefined;

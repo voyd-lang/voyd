@@ -5,6 +5,7 @@ import type {
   ProgramFunctionInstanceId,
   SymbolId,
   TypeId,
+  TypeParamId,
 } from "../../semantics/ids.js";
 import { isPackageVisible, type HirVisibility } from "../../semantics/hir/index.js";
 import { diagnosticFromCode, normalizeSpan } from "../../diagnostics/index.js";
@@ -113,65 +114,138 @@ const resolveEffectId = ({
   return { id, hash: hashEffectId(id) };
 };
 
-const signatureTypeKeyFor = (
-  typeId: TypeId,
-  ctx: CodegenContext,
-  seen: Set<TypeId>
-): string => {
-  if (seen.has(typeId)) {
-    return `recursive:${typeId}`;
+type SignatureTypeKeyState = {
+  typeId: TypeId;
+  ctx: CodegenContext;
+  active: Map<TypeId, number>;
+  binders: Map<TypeParamId, number>;
+};
+
+const signatureTypeKeyFor = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): string =>
+  signatureTypeKeyForInternal({
+    typeId,
+    ctx,
+    active: new Map<TypeId, number>(),
+    binders: new Map<TypeParamId, number>(),
+  });
+
+const signatureTypeKeyForInternal = ({
+  typeId,
+  ctx,
+  active,
+  binders,
+}: SignatureTypeKeyState): string => {
+  const activeIndex = active.get(typeId);
+  if (typeof activeIndex === "number") {
+    return `recursive:${activeIndex}`;
   }
-  seen.add(typeId);
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  switch (desc.kind) {
-    case "primitive":
-      return `prim:${desc.name}`;
-    case "type-param-ref":
-      return `typeparam:${desc.param}`;
-    case "nominal-object":
-      return `nominal:${desc.owner}<${desc.typeArgs
-        .map((arg) => signatureTypeKeyFor(arg, ctx, seen))
-        .join(",")}>`;
-    case "trait":
-      return `trait:${desc.owner}<${desc.typeArgs
-        .map((arg) => signatureTypeKeyFor(arg, ctx, seen))
-        .join(",")}>`;
-    case "structural-object":
-      return `struct:{${desc.fields
-        .map(
-          (field) =>
-            `${field.name}${field.optional ? "?" : ""}:${signatureTypeKeyFor(
-              field.type,
-              ctx,
-              seen
-            )}`
-        )
-        .join(",")}}`;
-    case "function":
-      return `fn:(${desc.parameters
-        .map((param) => signatureTypeKeyFor(param.type, ctx, seen))
-        .join(",")})->${signatureTypeKeyFor(desc.returnType, ctx, seen)}`;
-    case "union": {
-      const members = desc.members
-        .map((member) => signatureTypeKeyFor(member, ctx, seen))
-        .sort();
-      return `union:${members.join("|")}`;
+  active.set(typeId, active.size);
+  try {
+    const desc = ctx.program.types.getTypeDesc(typeId);
+    switch (desc.kind) {
+      case "primitive":
+        return `prim:${desc.name}`;
+      case "recursive": {
+        const binderIndex = binders.size;
+        const nextBinders = new Map(binders);
+        nextBinders.set(desc.binder, binderIndex);
+        return `mu:${binderIndex}.${signatureTypeKeyForInternal({
+          typeId: desc.body,
+          ctx,
+          active,
+          binders: nextBinders,
+        })}`;
+      }
+      case "type-param-ref": {
+        const binderIndex = binders.get(desc.param);
+        return typeof binderIndex === "number"
+          ? `recparam:${binderIndex}`
+          : `typeparam:${desc.param}`;
+      }
+      case "nominal-object":
+        return `nominal:${desc.owner}<${desc.typeArgs
+          .map((arg) =>
+            signatureTypeKeyForInternal({ typeId: arg, ctx, active, binders })
+          )
+          .join(",")}>`;
+      case "trait":
+        return `trait:${desc.owner}<${desc.typeArgs
+          .map((arg) =>
+            signatureTypeKeyForInternal({ typeId: arg, ctx, active, binders })
+          )
+          .join(",")}>`;
+      case "structural-object":
+        return `struct:{${desc.fields
+          .map(
+            (field) =>
+              `${field.name}${field.optional ? "?" : ""}:${signatureTypeKeyForInternal(
+                {
+                  typeId: field.type,
+                  ctx,
+                  active,
+                  binders,
+                }
+              )}`
+          )
+          .join(",")}}`;
+      case "function":
+        return `fn:(${desc.parameters
+          .map((param) =>
+            signatureTypeKeyForInternal({ typeId: param.type, ctx, active, binders })
+          )
+          .join(",")})->${signatureTypeKeyForInternal({
+          typeId: desc.returnType,
+          ctx,
+          active,
+          binders,
+        })}`;
+      case "union": {
+        const members = desc.members
+          .map((member) =>
+            signatureTypeKeyForInternal({ typeId: member, ctx, active, binders })
+          )
+          .sort();
+        return `union:${members.join("|")}`;
+      }
+      case "intersection": {
+        const nominal =
+          typeof desc.nominal === "number"
+            ? signatureTypeKeyForInternal({
+                typeId: desc.nominal,
+                ctx,
+                active,
+                binders,
+              })
+            : "none";
+        const structural =
+          typeof desc.structural === "number"
+            ? signatureTypeKeyForInternal({
+                typeId: desc.structural,
+                ctx,
+                active,
+                binders,
+              })
+            : "none";
+        return `intersection:${nominal}&${structural}`;
+      }
+      case "fixed-array":
+        return `fixed-array:${signatureTypeKeyForInternal({
+          typeId: desc.element,
+          ctx,
+          active,
+          binders,
+        })}`;
+      default:
+        return `${(desc as { kind: string }).kind}:${typeId}`;
     }
-    case "intersection": {
-      const nominal =
-        typeof desc.nominal === "number"
-          ? signatureTypeKeyFor(desc.nominal, ctx, seen)
-          : "none";
-      const structural =
-        typeof desc.structural === "number"
-          ? signatureTypeKeyFor(desc.structural, ctx, seen)
-          : "none";
-      return `intersection:${nominal}&${structural}`;
-    }
-    case "fixed-array":
-      return `fixed-array:${signatureTypeKeyFor(desc.element, ctx, seen)}`;
-    default:
-      return `${(desc as { kind: string }).kind}:${typeId}`;
+  } finally {
+    active.delete(typeId);
   }
 };
 
@@ -184,8 +258,8 @@ export const signatureHashFor = ({
   returnType: TypeId;
   ctx: CodegenContext;
 }): number => {
-  const paramKeys = params.map((param) => signatureTypeKeyFor(param, ctx, new Set()));
-  const returnKey = signatureTypeKeyFor(returnType, ctx, new Set());
+  const paramKeys = params.map((param) => signatureTypeKeyFor({ typeId: param, ctx }));
+  const returnKey = signatureTypeKeyFor({ typeId: returnType, ctx });
   return murmurHash3(`(${paramKeys.join(",")})->${returnKey}`);
 };
 

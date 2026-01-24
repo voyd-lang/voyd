@@ -1,0 +1,13 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+pub fn main() -> i32
+  let value: Optional<i32> = 5
+  match(value)
+    Some<i32>: value.value
+    None: 0

@@ -1,11 +1,14 @@
 import binaryen from "binaryen";
 import {
   binaryenTypeToHeapType,
-  defineArrayType,
   defineStructType,
   refFunc,
   refCast,
 } from "@voyd/lib/binaryen-gc/index.js";
+import { mapPrimitiveToWasm } from "./primitive-types.js";
+export { getFunctionRefType } from "./closure-types.js";
+import { ensureClosureTypeInfo } from "./closure-types.js";
+import { ensureFixedArrayWasmTypes } from "./fixed-array-types.js";
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
@@ -24,7 +27,11 @@ import type {
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
 import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
-import type { ProgramFunctionInstanceId, ProgramSymbolId } from "../semantics/ids.js";
+import type {
+  ProgramFunctionInstanceId,
+  ProgramSymbolId,
+  TypeParamId,
+} from "../semantics/ids.js";
 import { buildInstanceSubstitution } from "./type-substitution.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
@@ -34,72 +41,145 @@ const sanitizeIdentifier = (value: string): string =>
 
 type WasmTypeMode = "runtime" | "signature";
 
-const runtimeTypeKeyFor = (
-  typeId: TypeId,
-  ctx: CodegenContext,
-  seen: Set<TypeId>
-): string => {
-  if (seen.has(typeId)) {
-    return `recursive:${typeId}`;
-  }
-  seen.add(typeId);
+type RuntimeTypeKeyState = {
+  typeId: TypeId;
+  ctx: CodegenContext;
+  active: Map<TypeId, number>;
+  binders: Map<TypeParamId, number>;
+};
 
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  switch (desc.kind) {
-    case "primitive":
-      return `prim:${desc.name}`;
-    case "type-param-ref":
-      return `typeparam:${desc.param}`;
-    case "nominal-object":
-      return `nominal:${desc.owner}<${desc.typeArgs
-        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
-        .join(",")}>`;
-    case "trait":
-      return `trait:${desc.owner}<${desc.typeArgs
-        .map((arg) => runtimeTypeKeyFor(arg, ctx, seen))
-        .join(",")}>`;
-    case "structural-object":
-      return `struct:{${desc.fields
-        .map(
-          (field) =>
-            `${field.name}${field.optional ? "?" : ""}:${runtimeTypeKeyFor(
-              field.type,
-              ctx,
-              seen
-            )}`
-        )
-        .join(",")}}`;
-    case "function":
-      return `fn:(${desc.parameters
-        .map((param) => runtimeTypeKeyFor(param.type, ctx, seen))
-        .join(",")})->${runtimeTypeKeyFor(desc.returnType, ctx, seen)}`;
-    case "union": {
-      const members = desc.members
-        .map((member) => runtimeTypeKeyFor(member, ctx, seen))
-        .sort();
-      return `union:${members.join("|")}`;
+const runtimeTypeKeyFor = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): string =>
+  runtimeTypeKeyForInternal({
+    typeId,
+    ctx,
+    active: new Map<TypeId, number>(),
+    binders: new Map<TypeParamId, number>(),
+  });
+
+const runtimeTypeKeyForInternal = ({
+  typeId,
+  ctx,
+  active,
+  binders,
+}: RuntimeTypeKeyState): string => {
+  const activeIndex = active.get(typeId);
+  if (typeof activeIndex === "number") {
+    return `recursive:${activeIndex}`;
+  }
+  active.set(typeId, active.size);
+
+  try {
+    const desc = ctx.program.types.getTypeDesc(typeId);
+    switch (desc.kind) {
+      case "primitive":
+        return `prim:${desc.name}`;
+      case "recursive": {
+        const binderIndex = binders.size;
+        const nextBinders = new Map(binders);
+        nextBinders.set(desc.binder, binderIndex);
+        return `mu:${binderIndex}.${runtimeTypeKeyForInternal({
+          typeId: desc.body,
+          ctx,
+          active,
+          binders: nextBinders,
+        })}`;
+      }
+      case "type-param-ref": {
+        const binderIndex = binders.get(desc.param);
+        return typeof binderIndex === "number"
+          ? `recparam:${binderIndex}`
+          : `typeparam:${desc.param}`;
+      }
+      case "nominal-object":
+        return `nominal:${desc.owner}<${desc.typeArgs
+          .map((arg) =>
+            runtimeTypeKeyForInternal({ typeId: arg, ctx, active, binders })
+          )
+          .join(",")}>`;
+      case "trait":
+        return `trait:${desc.owner}<${desc.typeArgs
+          .map((arg) =>
+            runtimeTypeKeyForInternal({ typeId: arg, ctx, active, binders })
+          )
+          .join(",")}>`;
+      case "structural-object":
+        return `struct:{${desc.fields
+          .map(
+            (field) =>
+              `${field.name}${field.optional ? "?" : ""}:${runtimeTypeKeyForInternal(
+                {
+                  typeId: field.type,
+                  ctx,
+                  active,
+                  binders,
+                }
+              )}`
+          )
+          .join(",")}}`;
+      case "function":
+        return `fn:(${desc.parameters
+          .map((param) =>
+            runtimeTypeKeyForInternal({ typeId: param.type, ctx, active, binders })
+          )
+          .join(",")})->${runtimeTypeKeyForInternal({
+          typeId: desc.returnType,
+          ctx,
+          active,
+          binders,
+        })}`;
+      case "union": {
+        const members = desc.members
+          .map((member) =>
+            runtimeTypeKeyForInternal({ typeId: member, ctx, active, binders })
+          )
+          .sort();
+        return `union:${members.join("|")}`;
+      }
+      case "intersection": {
+        const nominal =
+          typeof desc.nominal === "number"
+            ? runtimeTypeKeyForInternal({
+                typeId: desc.nominal,
+                ctx,
+                active,
+                binders,
+              })
+            : "none";
+        const structural =
+          typeof desc.structural === "number"
+            ? runtimeTypeKeyForInternal({
+                typeId: desc.structural,
+                ctx,
+                active,
+                binders,
+              })
+            : "none";
+        return `intersection:${nominal}&${structural}`;
+      }
+      case "fixed-array":
+        return `fixed-array:${runtimeTypeKeyForInternal({
+          typeId: desc.element,
+          ctx,
+          active,
+          binders,
+        })}`;
+      default:
+        return `${(desc as { kind: string }).kind}:${typeId}`;
     }
-    case "intersection": {
-      const nominal =
-        typeof desc.nominal === "number"
-          ? runtimeTypeKeyFor(desc.nominal, ctx, seen)
-          : "none";
-      const structural =
-        typeof desc.structural === "number"
-          ? runtimeTypeKeyFor(desc.structural, ctx, seen)
-          : "none";
-      return `intersection:${nominal}&${structural}`;
-    }
-    case "fixed-array":
-      return `fixed-array:${runtimeTypeKeyFor(desc.element, ctx, seen)}`;
-    default:
-      return `${(desc as { kind: string }).kind}:${typeId}`;
+  } finally {
+    active.delete(typeId);
   }
 };
 
 const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
   (() => {
-    const key = runtimeTypeKeyFor(typeId, ctx, new Set());
+    const key = runtimeTypeKeyFor({ typeId, ctx });
     const existing = ctx.runtimeTypeRegistry.get(typeId);
     if (!existing) {
       ctx.runtimeTypeRegistry.set(typeId, { key, moduleId: ctx.moduleId, typeId });
@@ -121,40 +201,6 @@ const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
     ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
   ) ?? `${symbol}`;
 
-export const getFunctionRefType = ({
-  params,
-  result,
-  ctx,
-  label,
-}: {
-  params: readonly binaryen.Type[];
-  result: binaryen.Type;
-  ctx: CodegenContext;
-  label?: string;
-}): binaryen.Type => {
-  const key = `${params.join(",")}->${result}`;
-  const cached = ctx.functionRefTypes.get(key);
-  if (cached) {
-    return cached;
-  }
-  const safeLabel = label ? `_${sanitizeIdentifier(label)}` : "";
-  const tempName = `__fn_sig_${ctx.functionRefTypes.size}${safeLabel}`;
-  const fnRef = ctx.mod.addFunction(
-    tempName,
-    binaryen.createType(params as number[]),
-    result,
-    [],
-    ctx.mod.nop()
-  );
-  const fnType = bin._BinaryenTypeFromHeapType(
-    bin._BinaryenFunctionGetType(fnRef),
-    false
-  );
-  ctx.functionRefTypes.set(key, fnType);
-  ctx.mod.removeFunction(tempName);
-  return fnType;
-};
-
 const functionKey = (moduleId: string, symbol: number): string =>
   `${moduleId}::${symbol}`;
 
@@ -165,118 +211,6 @@ const traitMethodHash = ({
   traitSymbol: number;
   methodSymbol: number;
 }): number => murmurHash3(`${traitSymbol}:${methodSymbol}`);
-
-const closureSignatureKey = ({
-  moduleId,
-  parameters,
-  returnType,
-  effectRow,
-}: {
-  moduleId: string;
-  parameters: ReadonlyArray<{
-    type: TypeId;
-    label?: string;
-    optional?: boolean;
-  }>;
-  returnType: TypeId;
-  effectRow: unknown;
-}): string => {
-  const params = parameters
-    .map((param) => {
-      const label = param.label ?? "_";
-      const optional = param.optional ? "?" : "";
-      return `${label}:${param.type}${optional}`;
-    })
-    .join("|");
-  return `${moduleId}::(${params})->${returnType}|${effectRow}`;
-};
-
-const closureStructName = ({
-  moduleLabel,
-  key,
-}: {
-  moduleLabel: string;
-  key: string;
-}): string => `${moduleLabel}__closure_base_${sanitizeIdentifier(key)}`;
-
-const getClosureFunctionRefType = ({
-  params,
-  result,
-  ctx,
-}: {
-  params: readonly binaryen.Type[];
-  result: binaryen.Type;
-  ctx: CodegenContext;
-}): binaryen.Type => {
-  return getFunctionRefType({ params, result, ctx, label: "closure" });
-};
-
-const ensureClosureTypeInfo = ({
-  typeId,
-  desc,
-  ctx,
-  seen,
-  mode,
-}: {
-  typeId: TypeId;
-  desc: {
-    parameters: ReadonlyArray<{
-      type: TypeId;
-      label?: string;
-      optional?: boolean;
-    }>;
-    returnType: TypeId;
-    effectRow: unknown;
-  };
-  ctx: CodegenContext;
-  seen: Set<TypeId>;
-  mode: WasmTypeMode;
-}): ClosureTypeInfo => {
-  const key = closureSignatureKey({
-    moduleId: ctx.moduleId,
-    parameters: desc.parameters,
-    returnType: desc.returnType,
-    effectRow: desc.effectRow,
-  });
-  const cached = ctx.closureTypes.get(key);
-  if (cached) {
-    return cached;
-  }
-
-  const effectful =
-    typeof desc.effectRow === "number" &&
-    !ctx.program.effects.isEmpty(desc.effectRow);
-  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
-  const userParamTypes = desc.parameters.map((param) =>
-    wasmTypeFor(param.type, ctx, seen, mode)
-  );
-  const paramTypes = effectful
-    ? [handlerParamType, ...userParamTypes]
-    : userParamTypes;
-  const resultType = effectful
-    ? ctx.effectsRuntime.outcomeType
-    : wasmTypeFor(desc.returnType, ctx, seen, mode);
-  const interfaceType = defineStructType(ctx.mod, {
-    name: closureStructName({ moduleLabel: ctx.moduleLabel, key }),
-    fields: [{ name: "__fn", type: binaryen.funcref, mutable: false }],
-    final: false,
-  });
-  const fnRefType = getClosureFunctionRefType({
-    params: [interfaceType, ...paramTypes],
-    result: resultType,
-    ctx,
-  });
-  const info: ClosureTypeInfo = {
-    key,
-    typeId,
-    interfaceType,
-    fnRefType,
-    paramTypes,
-    resultType,
-  };
-  ctx.closureTypes.set(key, info);
-  return info;
-};
 
 export const getClosureTypeInfo = (
   typeId: TypeId,
@@ -292,28 +226,23 @@ export const getClosureTypeInfo = (
     ctx,
     seen: new Set<TypeId>(),
     mode: "runtime",
+    lowerType: (id, ctx, seen, mode) => wasmTypeFor(id, ctx, seen, mode),
   });
 };
 
 export const getFixedArrayWasmTypes = (
   typeId: TypeId,
   ctx: CodegenContext,
-  seen: Set<TypeId> = new Set()
+  seen: Set<TypeId> = new Set(),
+  mode: WasmTypeMode = "runtime"
 ): FixedArrayWasmType => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  if (desc.kind !== "fixed-array") {
-    throw new Error("intrinsic requires a fixed-array type");
-  }
-  const cached = ctx.fixedArrayTypes.get(desc.element);
-  if (cached) {
-    return cached;
-  }
-  const elementType = wasmTypeFor(desc.element, ctx, seen);
-  const type = defineArrayType(ctx.mod, elementType, true);
-  const heapType = binaryenTypeToHeapType(type);
-  const fixedArrayType: FixedArrayWasmType = { type, heapType };
-  ctx.fixedArrayTypes.set(desc.element, fixedArrayType);
-  return fixedArrayType;
+  return ensureFixedArrayWasmTypes({
+    typeId,
+    ctx,
+    seen,
+    mode,
+    lowerType: (id, ctx, seen, mode) => wasmTypeFor(id, ctx, seen, mode),
+  });
 };
 
 export const wasmTypeFor = (
@@ -325,6 +254,7 @@ export const wasmTypeFor = (
   const already = seen.has(typeId);
   if (already) {
     const desc = ctx.program.types.getTypeDesc(typeId);
+    // Recursive heap types are widened for now; see docs/proposals/recursive-heap-types.md.
     if (desc.kind === "function") {
       return binaryen.funcref;
     }
@@ -334,16 +264,32 @@ export const wasmTypeFor = (
 
   try {
     const desc = ctx.program.types.getTypeDesc(typeId);
+    if (desc.kind === "recursive") {
+      const unfolded = ctx.program.types.substitute(
+        desc.body,
+        new Map([[desc.binder, typeId]])
+      );
+      return wasmTypeFor(unfolded, ctx, seen, mode);
+    }
     if (desc.kind === "primitive") {
       return mapPrimitiveToWasm(desc.name);
     }
 
     if (desc.kind === "fixed-array") {
-      return getFixedArrayWasmTypes(typeId, ctx, seen).type;
+      // Fixed arrays are invariant in wasm GC, so signatures must use the concrete
+      // runtime array type to remain type-correct.
+      return getFixedArrayWasmTypes(typeId, ctx, seen, "runtime").type;
     }
 
     if (desc.kind === "function") {
-      const info = ensureClosureTypeInfo({ typeId, desc, ctx, seen, mode });
+      const info = ensureClosureTypeInfo({
+        typeId,
+        desc,
+        ctx,
+        seen,
+        mode,
+        lowerType: (id, ctx, seen, mode) => wasmTypeFor(id, ctx, seen, mode),
+      });
       return info.interfaceType;
     }
 
@@ -378,7 +324,7 @@ export const wasmTypeFor = (
         throw new Error("cannot map empty union to wasm");
       }
       const memberTypes = desc.members.map((member) =>
-        wasmTypeFor(member, ctx, seen)
+        wasmTypeFor(member, ctx, seen, mode)
       );
       const first = memberTypes[0]!;
       if (!memberTypes.every((candidate) => candidate === first)) {
@@ -412,34 +358,18 @@ export const wasmTypeFor = (
   }
 };
 
-export const mapPrimitiveToWasm = (name: string): binaryen.Type => {
-  switch (name) {
-    case "i32":
-    case "bool":
-    case "boolean":
-    case "unknown":
-      return binaryen.i32;
-    case "i64":
-      return binaryen.i64;
-    case "f32":
-      return binaryen.f32;
-    case "f64":
-      return binaryen.f64;
-    case "voyd":
-    case "void":
-    case "Voyd":
-      return binaryen.none;
-    default:
-      throw new Error(`unsupported primitive type ${name}`);
-  }
-};
-
 export const getSymbolTypeId = (
   symbol: SymbolId,
   ctx: CodegenContext,
   instanceId?: ProgramFunctionInstanceId
 ): TypeId => {
-  const typeId = ctx.module.types.getValueType(symbol);
+  const instanceType =
+    typeof instanceId === "number"
+      ? ctx.program.functions.getInstanceValueType(instanceId, symbol)
+      : undefined;
+  const typeId = typeof instanceType === "number"
+    ? instanceType
+    : ctx.module.types.getValueType(symbol);
   if (typeof typeId === "number") {
     return substituteTypeForInstance({ typeId, ctx, instanceId });
   }
@@ -725,6 +655,13 @@ export const resolveStructuralTypeId = (
   ctx: CodegenContext
 ): TypeId | undefined => {
   const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    const unfolded = ctx.program.types.substitute(
+      desc.body,
+      new Map([[desc.binder, typeId]])
+    );
+    return resolveStructuralTypeId(unfolded, ctx);
+  }
   if (desc.kind === "structural-object") {
     return typeId;
   }
@@ -963,8 +900,8 @@ const createMethodLookupEntries = ({
   return entries;
 };
 
-const structuralTypeKey = (moduleId: string, typeId: TypeId): string =>
-  `${moduleId}::${typeId}`;
+const structuralTypeKey = (_moduleId: string, typeId: TypeId): string =>
+  `${typeId}`;
 
 const getNominalAncestry = (
   nominalId: TypeId | undefined,
@@ -977,6 +914,13 @@ const getNominalComponentId = (
   ctx: CodegenContext
 ): TypeId | undefined => {
   const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    const unfolded = ctx.program.types.substitute(
+      desc.body,
+      new Map([[desc.binder, typeId]])
+    );
+    return getNominalComponentId(unfolded, ctx);
+  }
   if (desc.kind === "nominal-object") {
     return typeId;
   }

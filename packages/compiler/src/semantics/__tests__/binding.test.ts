@@ -869,4 +869,15 @@ describe("binding pipeline", () => {
     const diagnostic = binding.diagnostics.find((entry) => entry.code === "BD0005");
     expect(diagnostic).toBeDefined();
   });
+
+  it("rejects bindings named void", () => {
+    const source = "pub fn main() -> void\n  let void = 1";
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    expect(() => runBindingPipeline({ moduleForm: ast, symbolTable })).toThrow(
+      /reserved identifier void/
+    );
+  });
 });

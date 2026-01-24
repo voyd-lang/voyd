@@ -191,6 +191,8 @@ const containsUnknownType = (
     case "primitive":
     case "type-param-ref":
       return false;
+    case "recursive":
+      return containsUnknownType(desc.body, ctx, seen);
     case "trait":
     case "nominal-object":
       return desc.typeArgs.some((arg) => containsUnknownType(arg, ctx, seen));
@@ -237,6 +239,8 @@ const containsTypeParam = (
   switch (desc.kind) {
     case "type-param-ref":
       return desc.param === param;
+    case "recursive":
+      return containsTypeParam(desc.body, param, ctx, seen);
     case "trait":
     case "nominal-object":
       return desc.typeArgs.some((arg) =>
@@ -311,6 +315,15 @@ const containsAliasSelfUnguarded = (
     case "primitive":
     case "type-param-ref":
       return false;
+    case "recursive":
+      return containsAliasSelfUnguarded(
+        desc.body,
+        aliasSymbol,
+        aliasRoot,
+        ctx,
+        guarded,
+        seen
+      );
     case "trait":
       return desc.typeArgs.some((arg) =>
         containsAliasSelfUnguarded(arg, aliasSymbol, aliasRoot, ctx, true, seen)
@@ -417,6 +430,67 @@ const assertAliasContractive = ({
   ctx: TypingContext;
 }): void => {
   recordAliasInstanceSymbol(type, aliasSymbol, ctx);
+
+  const rootDesc = ctx.arena.get(type);
+  if (rootDesc.kind === "recursive") {
+    const containsBinderUnguarded = (
+      current: TypeId,
+      binder: TypeParamId,
+      guarded: boolean,
+      seen: Set<TypeId> = new Set()
+    ): boolean => {
+      if (seen.has(current)) {
+        return false;
+      }
+      seen.add(current);
+
+      const desc = ctx.arena.get(current);
+      switch (desc.kind) {
+        case "primitive":
+          return false;
+        case "type-param-ref":
+          return desc.param === binder ? !guarded : false;
+        case "recursive":
+          return containsBinderUnguarded(desc.body, binder, guarded, seen);
+        case "trait":
+        case "nominal-object":
+          return desc.typeArgs.some((arg) =>
+            containsBinderUnguarded(arg, binder, true, seen)
+          );
+        case "structural-object":
+          return desc.fields.some((field) =>
+            containsBinderUnguarded(field.type, binder, true, seen)
+          );
+        case "function":
+          return (
+            desc.parameters.some((param) =>
+              containsBinderUnguarded(param.type, binder, guarded, seen)
+            ) || containsBinderUnguarded(desc.returnType, binder, guarded, seen)
+          );
+        case "union":
+          return desc.members.some((member) =>
+            containsBinderUnguarded(member, binder, guarded, seen)
+          );
+        case "intersection":
+          return (
+            (typeof desc.nominal === "number" &&
+              containsBinderUnguarded(desc.nominal, binder, guarded, seen)) ||
+            (typeof desc.structural === "number" &&
+              containsBinderUnguarded(desc.structural, binder, guarded, seen))
+          );
+        case "fixed-array":
+          return containsBinderUnguarded(desc.element, binder, true, seen);
+        default:
+          return false;
+      }
+    };
+
+    if (containsBinderUnguarded(rootDesc.body, rootDesc.binder, false)) {
+      throw new Error(`type alias ${aliasName} is not contractive`);
+    }
+    return;
+  }
+
   if (
     containsAliasSelfUnguarded(
       type,
@@ -474,6 +548,22 @@ export const getPrimitiveType = (ctx: TypingContext, name: string): TypeId => {
     return cached;
   }
   return registerPrimitive(ctx, name);
+};
+
+export const unfoldRecursiveType = (type: TypeId, ctx: TypingContext): TypeId => {
+  let current = type;
+  const seen = new Set<TypeId>();
+
+  while (!seen.has(current)) {
+    seen.add(current);
+    const desc = ctx.arena.get(current);
+    if (desc.kind !== "recursive") {
+      return current;
+    }
+    current = ctx.arena.substitute(desc.body, new Map([[desc.binder, current]]));
+  }
+
+  return current;
 };
 
 export const resolveTypeExpr = (
@@ -572,10 +662,9 @@ export const resolveTypeAlias = (
   }
 
   let resolved: TypeId;
-  let placeholderParam: TypeParamId | undefined;
   try {
     resolved = ctx.arena.createRecursiveType((self, placeholder) => {
-      placeholderParam = placeholder;
+      void placeholder;
       ctx.typeAliases.beginResolution(key, self);
 
       const paramMap = new Map<SymbolId, TypeId>();
@@ -630,11 +719,127 @@ export const resolveTypeAlias = (
       return ctx.arena.get(targetType);
     });
 
-    if (
-      typeof placeholderParam === "number" &&
-      containsTypeParam(resolved, placeholderParam, ctx)
-    ) {
-      throw new Error("cyclic type alias instantiation");
+    if (ctx.typeAliases.resolutionDepth() === 1) {
+      const allowedParams = (() => {
+        const collected = new Set<TypeParamId>();
+        const seen = new Set<TypeId>();
+
+        const collect = (
+          type: TypeId,
+          boundRecursive: ReadonlySet<TypeParamId> = new Set()
+        ): void => {
+          if (seen.has(type)) {
+            return;
+          }
+          seen.add(type);
+
+          const desc = ctx.arena.get(type);
+          switch (desc.kind) {
+            case "type-param-ref":
+              if (!boundRecursive.has(desc.param)) {
+                collected.add(desc.param);
+              }
+              return;
+            case "recursive": {
+              const nextBound = new Set(boundRecursive);
+              nextBound.add(desc.binder);
+              collect(desc.body, nextBound);
+              return;
+            }
+            case "trait":
+            case "nominal-object":
+              desc.typeArgs.forEach((arg) => collect(arg, boundRecursive));
+              return;
+            case "structural-object":
+              desc.fields.forEach((field) => collect(field.type, boundRecursive));
+              return;
+            case "function":
+              desc.parameters.forEach((param) =>
+                collect(param.type, boundRecursive)
+              );
+              collect(desc.returnType, boundRecursive);
+              return;
+            case "union":
+              desc.members.forEach((member) => collect(member, boundRecursive));
+              return;
+            case "intersection":
+              if (typeof desc.nominal === "number") {
+                collect(desc.nominal, boundRecursive);
+              }
+              if (typeof desc.structural === "number") {
+                collect(desc.structural, boundRecursive);
+              }
+              return;
+            case "fixed-array":
+              collect(desc.element, boundRecursive);
+              return;
+            default:
+              return;
+          }
+        };
+
+        normalized.applied.forEach((arg) => collect(arg));
+        return collected;
+      })();
+
+      const containsUnboundTypeParam = (
+        type: TypeId,
+        boundRecursive: ReadonlySet<TypeParamId> = new Set(),
+        seen: Set<TypeId> = new Set()
+      ): boolean => {
+        if (seen.has(type)) {
+          return false;
+        }
+        seen.add(type);
+
+        const desc = ctx.arena.get(type);
+        switch (desc.kind) {
+          case "type-param-ref":
+            return (
+              !allowedParams.has(desc.param) && !boundRecursive.has(desc.param)
+            );
+          case "recursive": {
+            const nextBound = new Set(boundRecursive);
+            nextBound.add(desc.binder);
+            return containsUnboundTypeParam(desc.body, nextBound, seen);
+          }
+          case "trait":
+          case "nominal-object":
+            return desc.typeArgs.some((arg) =>
+              containsUnboundTypeParam(arg, boundRecursive, seen)
+            );
+          case "structural-object":
+            return desc.fields.some((field) =>
+              containsUnboundTypeParam(field.type, boundRecursive, seen)
+            );
+          case "function":
+            return (
+              desc.parameters.some((param) =>
+                containsUnboundTypeParam(param.type, boundRecursive, seen)
+              ) ||
+              containsUnboundTypeParam(desc.returnType, boundRecursive, seen)
+            );
+          case "union":
+            return desc.members.some((member) =>
+              containsUnboundTypeParam(member, boundRecursive, seen)
+            );
+          case "intersection":
+            return (
+              (typeof desc.nominal === "number" &&
+                containsUnboundTypeParam(desc.nominal, boundRecursive, seen)) ||
+              (typeof desc.structural === "number" &&
+                containsUnboundTypeParam(desc.structural, boundRecursive, seen))
+            );
+          case "fixed-array":
+            return containsUnboundTypeParam(desc.element, boundRecursive, seen);
+          default:
+            return false;
+        }
+      };
+
+      if (containsUnboundTypeParam(resolved)) {
+        throw new Error("cyclic type alias instantiation");
+      }
     }
 
     assertAliasContractive({

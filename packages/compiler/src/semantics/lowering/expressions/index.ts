@@ -157,6 +157,16 @@ export const lowerExpr: LowerExprFn = (
     if (isContinueExpr(expr)) {
       return lowerContinue({ ast: expr, ctx });
     }
+    if (identifierAtom.value === "void") {
+      return ctx.builder.addExpression({
+        kind: "expr",
+        exprKind: "literal",
+        ast: expr.syntaxId,
+        span: toSourceSpan(expr),
+        literalKind: "void",
+        value: "void",
+      });
+    }
     const resolution = resolveIdentifierValue(
       identifierAtom.value,
       scopes.current(),

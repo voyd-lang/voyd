@@ -41,6 +41,7 @@ import type { GroupContinuationCfg } from "../effects/continuation-cfg.js";
 import { effectsFacade } from "../effects/facade.js";
 import { buildInstanceSubstitution } from "../type-substitution.js";
 import { compileOptionalNoneValue } from "../optionals.js";
+import { typeContainsUnresolvedParam } from "../../semantics/type-utils.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
@@ -1186,6 +1187,19 @@ const getFunctionMetadataForCall = ({
       if (resolved) {
         return resolved;
       }
+    }
+    const template =
+      callInfo.typeArgs &&
+      Array.from(callInfo.typeArgs.values()).find((args) =>
+        args.some((arg) =>
+          typeContainsUnresolvedParam({
+            typeId: arg,
+            getTypeDesc: (id) => ctx.program.types.getTypeDesc(id),
+          })
+        )
+      );
+    if (template) {
+      return template;
     }
     const singleton =
       callInfo.typeArgs && callInfo.typeArgs.size === 1

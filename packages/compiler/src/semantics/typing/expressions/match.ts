@@ -8,6 +8,7 @@ import {
   narrowTypeForPattern,
   ensureTypeMatches,
   resolveTypeExpr,
+  unfoldRecursiveType,
   getStructuralFields,
   getSymbolName,
 } from "../type-system.js";
@@ -26,7 +27,8 @@ export const typeMatchExpr = (
   ctx: TypingContext,
   state: TypingState
 ): TypeId => {
-  const discriminantType = typeExpression(expr.discriminant, ctx, state);
+  const rawDiscriminantType = typeExpression(expr.discriminant, ctx, state);
+  const discriminantType = unfoldRecursiveType(rawDiscriminantType, ctx);
   const discriminantExpr = ctx.hir.expressions.get(expr.discriminant);
   const discriminantSymbol =
     discriminantExpr?.exprKind === "identifier"

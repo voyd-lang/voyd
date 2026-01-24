@@ -45,6 +45,17 @@ const createContext = () => {
   return { ctx, state, symbolTable };
 };
 
+const unfoldRecursiveType = (
+  typeId: TypeId,
+  arena: ReturnType<typeof createContext>["ctx"]["arena"]
+): TypeId => {
+  const desc = arena.get(typeId);
+  if (desc.kind !== "recursive") {
+    return typeId;
+  }
+  return arena.substitute(desc.body, new Map([[desc.binder, typeId]]));
+};
+
 const primeBoxTemplate = (
   ctx: ReturnType<typeof createContext>["ctx"],
   symbolTable: SymbolTable,
@@ -655,7 +666,7 @@ describe("instantiation argument handling", () => {
     });
 
     const resolved = resolveTypeAlias(aliasSymbol, ctx, state, []);
-    const desc = ctx.arena.get(resolved);
+    const desc = ctx.arena.get(unfoldRecursiveType(resolved, ctx.arena));
     expect(desc.kind).toBe("union");
     if (desc.kind !== "union") {
       return;
@@ -760,8 +771,8 @@ describe("instantiation argument handling", () => {
     expect(ctx.typeAliases.getCachedInstance(`${leftSymbol}<>`)).toBe(leftAlias);
     expect(ctx.typeAliases.getCachedInstance(`${rightSymbol}<>`)).toBe(rightAlias);
 
-    const leftDesc = ctx.arena.get(leftAlias);
-    const rightDesc = ctx.arena.get(rightAlias);
+    const leftDesc = ctx.arena.get(unfoldRecursiveType(leftAlias, ctx.arena));
+    const rightDesc = ctx.arena.get(unfoldRecursiveType(rightAlias, ctx.arena));
     expect(leftDesc.kind).toBe("union");
     expect(rightDesc.kind).toBe("union");
     if (rightDesc.kind === "union") {
@@ -835,7 +846,7 @@ describe("instantiation argument handling", () => {
     const resolved = resolveTypeAlias(listSymbol, ctx, state, [ctx.primitives.bool]);
     const key = `${listSymbol}<${ctx.primitives.bool}>`;
     expect(ctx.typeAliases.getCachedInstance(key)).toBe(resolved);
-    const desc = ctx.arena.get(resolved);
+    const desc = ctx.arena.get(unfoldRecursiveType(resolved, ctx.arena));
     expect(desc.kind).toBe("union");
   });
 

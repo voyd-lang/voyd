@@ -8,7 +8,8 @@ import { createProgramHelperRegistry } from "../../program-helpers.js";
 
 type TypeDescriptor =
   | { kind: "primitive"; name: string }
-  | { kind: "fixed-array"; element: TypeId };
+  | { kind: "fixed-array"; element: TypeId }
+  | { kind: "structural-object"; fields: { name: string; type: TypeId; optional: boolean }[] };
 
 export const createTestCodegenContext = (): {
   ctx: CodegenContext;

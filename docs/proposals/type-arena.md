@@ -32,6 +32,7 @@ The type arena is an intern pool and constraint engine for all type information 
 | Variant          | Purpose                                                            |
 | ---------------- | ------------------------------------------------------------------ |
 | Primitive        | Built-in scalar types (`i32`, `String`, `voyd`, etc.)              |
+| Recursive        | Recursive binder (`μT. ...`) for recursive type aliases            |
 | Trait            | Traits declared with `trait`; referenced by `SymbolId`             |
 | NominalObject    | Objects declared with `obj`; referenced by `SymbolId`              |
 | StructuralObject | Reference types defined via structural object literals (`{ ... }`) |
@@ -42,6 +43,21 @@ The type arena is an intern pool and constraint engine for all type information 
 | TypeParameterRef | Placeholder referring to a `TypeParamId` within a scheme           |
 
 Separating traits from nominal objects mirrors the language surface: traits carry behavioral contracts, while nominal objects describe concrete data layouts. Distinguishing their `kind` values keeps downstream passes (effects, impl resolution, code generation) from relying on ad-hoc metadata checks.
+
+### Recursive types
+
+Recursive types are represented as a first-class arena node:
+
+```ts
+type RecursiveTypeDesc = {
+  kind: "recursive";
+  binder: TypeParamId;
+  body: TypeId;
+};
+```
+
+- `binder` acts like a local `μ`-binder (alpha-renamable); `body` may reference itself via `type-param-ref(binder)`.
+- Substitution must treat `recursive` as a binder: substitutions that mention `binder` are not applied under the binder.
 
 ## API
 
@@ -110,6 +126,7 @@ interface StructuralPredicate {
 interface TypeDescriptor {
   kind:
     | "primitive"
+    | "recursive"
     | "trait"
     | "nominal-object"
     | "structural-object"

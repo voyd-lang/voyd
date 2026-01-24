@@ -5,6 +5,16 @@ import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegenProgram } from "../index.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
+import type {
+  ModuleGraph,
+  ModuleNode,
+  ModulePath,
+} from "../../modules/types.js";
+import {
+  createEffectInterner,
+  createEffectTable,
+} from "../../semantics/effects/effect-table.js";
+import { createTypeArena } from "../../semantics/typing/type-arena.js";
 import {
   runEffectfulExport,
   parseEffectTable,
@@ -14,15 +24,44 @@ import {
 const fixturePath = (name: string) =>
   resolve(import.meta.dirname, "__fixtures__", name);
 
-const loadSemantics = (name: string) => {
+const loadSemantics = (name: string, typing?: { arena: any; effects: any }) => {
   const source = readFileSync(fixturePath(name), "utf8");
-  return semanticsPipeline(parse(source, name));
+  const form = parse(source, name);
+  const path: ModulePath = { namespace: "src", segments: [] };
+  const module: ModuleNode = {
+    id: name,
+    path,
+    origin: { kind: "file", filePath: name },
+    ast: form,
+    source,
+    dependencies: [],
+  };
+  const graph: ModuleGraph = {
+    entry: module.id,
+    modules: new Map([[module.id, module]]),
+    diagnostics: [],
+  };
+  return semanticsPipeline({
+    module,
+    graph,
+    exports: new Map(),
+    dependencies: new Map(),
+    typing,
+  });
 };
 
 describe("effects multi-module ids", () => {
   it("keeps effect ids stable across modules and consistent with the effect table", async () => {
-    const moduleA = loadSemantics("effects_multi_module_a.voyd");
-    const moduleB = loadSemantics("effects_multi_module_b.voyd");
+    const arena = createTypeArena();
+    const effectInterner = createEffectInterner();
+    const moduleA = loadSemantics("effects_multi_module_a.voyd", {
+      arena,
+      effects: createEffectTable({ interner: effectInterner }),
+    });
+    const moduleB = loadSemantics("effects_multi_module_b.voyd", {
+      arena,
+      effects: createEffectTable({ interner: effectInterner }),
+    });
     const program = buildProgramCodegenView([moduleA, moduleB]);
 
     const buildA = () =>
