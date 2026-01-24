@@ -24,6 +24,12 @@ import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
+import type { ModuleGraph, ModuleNode, ModulePath } from "../../modules/types.js";
+import {
+  createEffectInterner,
+  createEffectTable,
+} from "../../semantics/effects/effect-table.js";
+import { createTypeArena } from "../../semantics/typing/type-arena.js";
 import type {
   CodegenContext,
   FunctionMetadata,
@@ -37,6 +43,34 @@ const loadAst = (fixtureName: string) => {
     "utf8"
   );
   return parse(source, fixtureName);
+};
+
+const loadSemanticsWithTyping = (
+  fixtureName: string,
+  typing: { arena: any; effects: any }
+) => {
+  const form = loadAst(fixtureName);
+  const path: ModulePath = { namespace: "src", segments: [] };
+  const module: ModuleNode = {
+    id: fixtureName,
+    path,
+    origin: { kind: "file", filePath: fixtureName },
+    ast: form,
+    source: "",
+    dependencies: [],
+  };
+  const graph: ModuleGraph = {
+    entry: module.id,
+    modules: new Map([[module.id, module]]),
+    diagnostics: [],
+  };
+  return semanticsPipeline({
+    module,
+    graph,
+    exports: new Map(),
+    dependencies: new Map(),
+    typing,
+  });
 };
 
 const loadWasmInstance = (fixtureName: string) => {
@@ -708,8 +742,16 @@ describe("next codegen", () => {
   });
 
   it("keeps closure heap caches scoped per module and deterministic", () => {
-    const moduleA = semanticsPipeline(loadAst("lambda_multi_module_a.voyd"));
-    const moduleB = semanticsPipeline(loadAst("lambda_multi_module_b.voyd"));
+    const arena = createTypeArena();
+    const effectInterner = createEffectInterner();
+    const moduleA = loadSemanticsWithTyping("lambda_multi_module_a.voyd", {
+      arena,
+      effects: createEffectTable({ interner: effectInterner }),
+    });
+    const moduleB = loadSemanticsWithTyping("lambda_multi_module_b.voyd", {
+      arena,
+      effects: createEffectTable({ interner: effectInterner }),
+    });
     const {
       mod: combined,
       contexts: [ctxA, ctxB],

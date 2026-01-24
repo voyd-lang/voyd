@@ -41,6 +41,7 @@ import type { GroupContinuationCfg } from "../effects/continuation-cfg.js";
 import { effectsFacade } from "../effects/facade.js";
 import { buildInstanceSubstitution } from "../type-substitution.js";
 import { compileOptionalNoneValue } from "../optionals.js";
+import { typeContainsUnresolvedParam } from "../../semantics/type-utils.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
@@ -1180,58 +1181,6 @@ const getFunctionMetadataForCall = ({
   typeInstanceId?: ProgramFunctionInstanceId;
 }): FunctionMetadata | undefined => {
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, callId);
-  const typeContainsUnresolvedParam = (
-    typeId: TypeId,
-    seen: Set<TypeId> = new Set(),
-    boundParams: ReadonlySet<number> = new Set()
-  ): boolean => {
-    if (seen.has(typeId)) {
-      return false;
-    }
-    seen.add(typeId);
-    const desc = ctx.program.types.getTypeDesc(typeId);
-    switch (desc.kind) {
-      case "type-param-ref":
-        return !boundParams.has(desc.param);
-      case "recursive": {
-        const nextBound = new Set(boundParams);
-        nextBound.add(desc.binder);
-        return typeContainsUnresolvedParam(desc.body, seen, nextBound);
-      }
-      case "primitive":
-        return desc.name === "unknown";
-      case "trait":
-      case "nominal-object":
-        return desc.typeArgs.some((arg) =>
-          typeContainsUnresolvedParam(arg, seen, boundParams)
-        );
-      case "fixed-array":
-        return typeContainsUnresolvedParam(desc.element, seen, boundParams);
-      case "structural-object":
-        return desc.fields.some((field) =>
-          typeContainsUnresolvedParam(field.type, seen, boundParams)
-        );
-      case "function":
-        return (
-          desc.parameters.some((param) =>
-            typeContainsUnresolvedParam(param.type, seen, boundParams)
-          ) || typeContainsUnresolvedParam(desc.returnType, seen, boundParams)
-        );
-      case "union":
-        return desc.members.some((member) =>
-          typeContainsUnresolvedParam(member, seen, boundParams)
-        );
-      case "intersection":
-        return (
-          (typeof desc.nominal === "number" &&
-            typeContainsUnresolvedParam(desc.nominal, seen, boundParams)) ||
-          (typeof desc.structural === "number" &&
-            typeContainsUnresolvedParam(desc.structural, seen, boundParams))
-        );
-      default:
-        return false;
-    }
-  };
   const rawTypeArgs = (() => {
     if (typeof typeInstanceId === "number") {
       const resolved = callInfo.typeArgs?.get(typeInstanceId);
@@ -1242,7 +1191,12 @@ const getFunctionMetadataForCall = ({
     const template =
       callInfo.typeArgs &&
       Array.from(callInfo.typeArgs.values()).find((args) =>
-        args.some((arg) => typeContainsUnresolvedParam(arg))
+        args.some((arg) =>
+          typeContainsUnresolvedParam({
+            typeId: arg,
+            getTypeDesc: (id) => ctx.program.types.getTypeDesc(id),
+          })
+        )
       );
     if (template) {
       return template;

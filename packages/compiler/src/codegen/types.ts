@@ -254,6 +254,7 @@ export const wasmTypeFor = (
   const already = seen.has(typeId);
   if (already) {
     const desc = ctx.program.types.getTypeDesc(typeId);
+    // Recursive heap types are widened for now; see docs/proposals/recursive-heap-types.md.
     if (desc.kind === "function") {
       return binaryen.funcref;
     }
