@@ -113,6 +113,7 @@ export const codegenProgram = ({
     fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),
+    recursiveBinders: new Map(),
     runtimeTypeRegistry,
     runtimeTypeIds: {
       byKey: runtimeTypeIdsByKey,

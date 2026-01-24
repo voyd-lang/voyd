@@ -70,6 +70,7 @@ const buildLoweringSnapshot = () => {
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),
+    recursiveBinders: new Map(),
     runtimeTypeRegistry: new Map(),
     runtimeTypeIds: { byKey: new Map(), nextId: { value: 1 } },
     lambdaEnvs: new Map(),

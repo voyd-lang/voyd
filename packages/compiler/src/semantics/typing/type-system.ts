@@ -711,7 +711,9 @@ export const resolveTypeAlias = (
         paramMap
       );
       if (targetType === self) {
-        throw new Error(`type alias ${aliasName} cannot resolve to itself`);
+        throw new Error(
+          `cyclic type alias instantiation: type alias ${aliasName} cannot resolve to itself`
+        );
       }
       if (containsUnknownType(targetType, ctx)) {
         throw new Error(`type alias ${aliasName} could not be fully resolved`);

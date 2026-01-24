@@ -67,7 +67,7 @@ const packValueForType = ({
   if (typeId === ctx.program.primitives.void) {
     return ctx.mod.call(msgpack.packNull.wasmName, [], msgPackType);
   }
-  throw new Error(`unsupported msgpack value for ${label}`);
+  return ctx.mod.block(null, [ctx.mod.unreachable()], msgPackType);
 };
 
 const buildArgsArray = ({

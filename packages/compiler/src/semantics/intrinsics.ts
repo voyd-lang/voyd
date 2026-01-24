@@ -44,6 +44,8 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ["__i64_extend_s", { intrinsicUsesSignature: false }],
   ["__reinterpret_f32_to_i32", { intrinsicUsesSignature: false }],
   ["__reinterpret_i32_to_f32", { intrinsicUsesSignature: false }],
+  ["__f32_demote_f64", { intrinsicUsesSignature: false }],
+  ["__f64_promote_f32", { intrinsicUsesSignature: false }],
   ["__reinterpret_f64_to_i64", { intrinsicUsesSignature: false }],
   ["__reinterpret_i64_to_f64", { intrinsicUsesSignature: false }],
   ["+", {}],

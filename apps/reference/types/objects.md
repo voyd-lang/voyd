@@ -181,6 +181,17 @@ take_person({ id: 3 }) // Error - structural object cannot satisfy Person
 let base: Object = { any: 1 } // Ok - structural types satisfy Object
 ```
 
+## Generic Variance (Known Gap)
+
+Today, nominal type parameters are treated as **covariant** during compatibility
+checks. That means `Box<Dog>` is accepted where `Box<Animal>` is expected, even
+if the parameter is used in a mutable or input position where invariance or
+contravariance would be required for soundness.
+
+This is a known gap that will be addressed by adding variance annotations on
+nominal type parameters and making both the type checker and runtime RTT
+ancestry honor them.
+
 
 ## Nominal Object Initializers
 

@@ -289,6 +289,8 @@ export const createTypeArena = (): TypeArena => {
       return bodyId;
     }
 
+    const placeholderKey = keyFor(placeholderDesc);
+    descriptorCache.delete(placeholderKey);
     const binderRef = internTypeParamRef(placeholderParam);
 
     const allocatePlaceholder = (): TypeId => {

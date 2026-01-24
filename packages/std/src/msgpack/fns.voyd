@@ -108,6 +108,8 @@ pub fn unpack_f32(value: MsgPack): () -> f32
       boxed.value.match(numeric)
         F32:
           numeric.value
+        F64:
+          demote_f64(numeric.value)
         else:
           reinterpret_i32_to_f32(0)
     else:
@@ -119,6 +121,8 @@ pub fn unpack_f64(value: MsgPack): () -> f64
       boxed.value.match(numeric)
         F64:
           numeric.value
+        F32:
+          promote_f32(numeric.value)
         else:
           0.0
     else:
@@ -556,6 +560,12 @@ fn reinterpret_f32_to_i32(value: f32): () -> i32 __reinterpret_f32_to_i32(value)
 
 @intrinsic(name: "__reinterpret_i32_to_f32")
 fn reinterpret_i32_to_f32(value: i32): () -> f32 __reinterpret_i32_to_f32(value)
+
+@intrinsic(name: "__f32_demote_f64")
+fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+@intrinsic(name: "__f64_promote_f32")
+fn promote_f32(value: f32): () -> f64 __f64_promote_f32(value)
 
 @intrinsic(name: "__reinterpret_f64_to_i64")
 fn reinterpret_f64_to_i64(value: f64): () -> i64 __reinterpret_f64_to_i64(value)

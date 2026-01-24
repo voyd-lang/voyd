@@ -1,6 +1,6 @@
 # MsgPack Host Interop and Std Module
 
-Status: Draft
+Status: in progress
 Owner: Runtime + Stdlib
 Scope: `packages/std/src`, `packages/compiler/src`, `packages/sdk/src/shared/types.ts`, `packages/js-host/src`
 

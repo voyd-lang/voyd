@@ -28,7 +28,11 @@ describe("effects multi-module ids", () => {
       moduleTyping: monomorphized.moduleTyping,
     });
     const moduleAId = graph.entry ?? moduleAPath;
-    const moduleBId = resolve(moduleBPath);
+    const moduleBNode = Array.from(graph.modules.values()).find(
+      (node) =>
+        node.origin.kind === "file" && node.origin.filePath === moduleBPath
+    );
+    const moduleBId = moduleBNode?.id ?? moduleBPath;
 
     const buildA = () =>
       codegenProgram({

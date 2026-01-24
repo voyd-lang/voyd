@@ -275,6 +275,14 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 1);
       return ctx.mod.f64.reinterpret(args[0]!);
     }
+    case "__f32_demote_f64": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f32.demote(args[0]!);
+    }
+    case "__f64_promote_f32": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f64.promote(args[0]!);
+    }
     case "+":
     case "-":
     case "*":

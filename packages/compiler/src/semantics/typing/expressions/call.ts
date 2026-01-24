@@ -2381,6 +2381,15 @@ const typeIntrinsicCall = (
     case "__reinterpret_f64_to_i64":
     case "__reinterpret_i64_to_f64":
       return typeReinterpretIntrinsic({ name, args, ctx, state, typeArguments });
+    case "__f32_demote_f64":
+    case "__f64_promote_f32":
+      return typeFloatConvertIntrinsic({
+        name,
+        args,
+        ctx,
+        state,
+        typeArguments,
+      });
     default: {
       const signatures = intrinsicSignaturesFor(name, ctx);
       if (signatures.length === 0) {
@@ -3048,6 +3057,35 @@ const typeReinterpretIntrinsic = ({
       return int64;
     case "__reinterpret_i64_to_f64":
       ensureTypeMatches(args[0]!.type, int64, ctx, state, name);
+      return float64;
+    default:
+      throw new Error(`unsupported intrinsic ${name}`);
+  }
+};
+
+const typeFloatConvertIntrinsic = ({
+  name,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  name: string;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name, args, expected: 1 });
+  assertNoIntrinsicTypeArgs(name, typeArguments);
+  const float32 = getPrimitiveType(ctx, "f32");
+  const float64 = getPrimitiveType(ctx, "f64");
+  switch (name) {
+    case "__f32_demote_f64":
+      ensureTypeMatches(args[0]!.type, float64, ctx, state, name);
+      return float32;
+    case "__f64_promote_f32":
+      ensureTypeMatches(args[0]!.type, float32, ctx, state, name);
       return float64;
     default:
       throw new Error(`unsupported intrinsic ${name}`);

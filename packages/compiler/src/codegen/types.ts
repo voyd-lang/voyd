@@ -283,6 +283,7 @@ export const wasmTypeFor = (
   try {
     const desc = ctx.program.types.getTypeDesc(typeId);
     if (desc.kind === "recursive") {
+      ctx.recursiveBinders.set(desc.binder, typeId);
       const unfolded = ctx.program.types.substitute(
         desc.body,
         new Map([[desc.binder, typeId]]),
@@ -363,6 +364,20 @@ export const wasmTypeFor = (
     }
 
     if (desc.kind === "type-param-ref") {
+      const binderRecursive = ctx.recursiveBinders.get(desc.param);
+      if (typeof binderRecursive === "number") {
+        return wasmTypeFor(binderRecursive, ctx, seen, mode);
+      }
+      const inScopeRecursive = Array.from(seen).find((candidate) => {
+        const candidateDesc = ctx.program.types.getTypeDesc(candidate);
+        return candidateDesc.kind === "recursive" && candidateDesc.binder === desc.param;
+      });
+      if (typeof inScopeRecursive === "number") {
+        return wasmTypeFor(inScopeRecursive, ctx, seen, mode);
+      }
+      if (mode === "runtime") {
+        return ctx.rtt.baseType;
+      }
       throw new Error(
         `codegen cannot map unresolved type parameter to wasm (module ${ctx.moduleId}, type ${typeId}, param ${desc.param})`,
       );
@@ -544,8 +559,8 @@ export const getStructuralTypeInfo = (
       if (nominalDesc.kind !== "nominal-object") {
         return undefined;
       }
-      const owner = ctx.program.objects.getNominalOwnerRef(nominalId);
-      if (!owner) {
+      const owner = nominalDesc.owner;
+      if (typeof owner !== "number") {
         return undefined;
       }
       const template = ctx.program.objects.getTemplate(owner);
@@ -704,7 +719,27 @@ export const resolveStructuralTypeId = (
     return typeId;
   }
   if (desc.kind === "nominal-object") {
-    return ctx.program.objects.getInfoByNominal(typeId)?.structural;
+    const info = ctx.program.objects.getInfoByNominal(typeId);
+    if (info) {
+      return info.structural;
+    }
+    const owner = desc.owner;
+    if (typeof owner !== "number") {
+      return undefined;
+    }
+    const template = ctx.program.objects.getTemplate(owner);
+    if (!template) {
+      return undefined;
+    }
+    if (template.params.length !== desc.typeArgs.length) {
+      return undefined;
+    }
+    const substitution = new Map(
+      template.params.map(
+        (param, index) => [param.typeParam, desc.typeArgs[index]!] as const,
+      ),
+    );
+    return ctx.program.types.substitute(template.structural, substitution);
   }
   if (desc.kind === "intersection" && typeof desc.structural === "number") {
     return desc.structural;
@@ -815,15 +850,7 @@ const buildRuntimeAncestors = ({
           reason: "nominal instantiation compatibility",
           variance: "covariant",
         });
-        if (!forward.ok) {
-          return false;
-        }
-        const reverse = ctx.program.types.unify(targetArg, arg, {
-          location: ctx.module.hir.module.ast,
-          reason: "nominal instantiation compatibility",
-          variance: "covariant",
-        });
-        return reverse.ok;
+        return forward.ok;
       });
 
       if (compatible) {

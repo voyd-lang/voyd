@@ -26,6 +26,7 @@ import type {
   ProgramFunctionInstanceId,
   SymbolId,
   TypeId,
+  TypeParamId,
   EffectRowId,
 } from "../semantics/ids.js";
 import type { createRttContext } from "./rtt/index.js";
@@ -148,6 +149,7 @@ export interface CodegenContext {
   fixedArrayTypes: Map<number, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;
+  recursiveBinders: Map<TypeParamId, TypeId>;
   runtimeTypeRegistry: Map<TypeId, RuntimeTypeIdRegistryEntry>;
   runtimeTypeIds: RuntimeTypeIdState;
   lambdaEnvs: Map<
