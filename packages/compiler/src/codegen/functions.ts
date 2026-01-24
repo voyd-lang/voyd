@@ -31,6 +31,7 @@ import { formatTestExportName } from "../tests/exports.js";
 import { emitSerializedExportWrapper } from "./exports/serialized-abi.js";
 import { emitExportAbiSection, type ExportAbiEntry } from "./exports/export-abi.js";
 import { resolveSerializerForTypes } from "./serializer.js";
+import { EFFECTS_HOST_BOUNDARY_STD_DEPS } from "./effects/host-boundary/constants.js";
 
 const debugEffects = (): boolean =>
   typeof process !== "undefined" && process.env?.DEBUG_EFFECTS === "1";
@@ -482,7 +483,7 @@ export const emitModuleExports = (
     return;
   }
 
-  const missingStdModules = ["std::msgpack", "std::string"].filter(
+  const missingStdModules = EFFECTS_HOST_BOUNDARY_STD_DEPS.filter(
     (moduleId) => !ctx.program.modules.has(moduleId)
   );
   if (missingStdModules.length > 0) {

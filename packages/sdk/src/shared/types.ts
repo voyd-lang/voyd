@@ -26,6 +26,8 @@ export type CompileOptions = {
   includeTests?: boolean;
   /** Emit a test-only wasm module. */
   testsOnly?: boolean;
+  /** Control which modules contribute test cases. */
+  testScope?: "all" | "entry";
   optimize?: boolean;
   emitWasmText?: boolean;
 };

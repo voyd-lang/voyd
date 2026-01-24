@@ -22,4 +22,6 @@ export type VoydConfig = {
   test?: boolean;
   /** Select test reporter */
   testReporter?: string;
+  /** Exit with status 1 if no tests are found */
+  failOnEmptyTests?: boolean;
 };

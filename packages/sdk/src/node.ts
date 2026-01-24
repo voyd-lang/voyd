@@ -48,7 +48,8 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       })
     : createFsModuleHost();
 
-  const testScope = options.source ? "entry" : "all";
+  const testScope =
+    options.testScope ?? (options.source ? "entry" : "all");
   const result = await compileWithLoader({
     entryPath,
     roots,

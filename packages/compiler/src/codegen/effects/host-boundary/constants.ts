@@ -4,6 +4,11 @@ export const LINEAR_MEMORY_INTERNAL = "0";
 export const EFFECTS_MEMORY_EXPORT = "effects_memory";
 export const EFFECTS_MEMORY_INTERNAL = "1";
 
+export const EFFECTS_HOST_BOUNDARY_STD_DEPS = [
+  "std::msgpack",
+  "std::string",
+] as const;
+
 export const EFFECT_RESULT_STATUS = {
   value: 0,
   effect: 1,

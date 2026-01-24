@@ -34,33 +34,42 @@ export const buildHandlersByLabelSuffix = ({
 
   const opsByEffectId = groupOpsByEffect(table.ops);
   let bestScore = 0;
-  let matchingOps: HostProtocolTable["ops"] | undefined;
+  const matchingGroups: HostProtocolTable["ops"][] = [];
 
   opsByEffectId.forEach((ops) => {
     const score = ops.reduce((count, op) => {
       return findMatchingSuffix(op.label, suffixes) ? count + 1 : count;
     }, 0);
-    if (score === 0 || score <= bestScore) return;
-    bestScore = score;
-    matchingOps = ops;
+    if (score === 0) return;
+    if (score > bestScore) {
+      bestScore = score;
+      matchingGroups.length = 0;
+      matchingGroups.push(ops);
+      return;
+    }
+    if (score === bestScore) {
+      matchingGroups.push(ops);
+    }
   });
 
-  if (!matchingOps || bestScore === 0) return [];
+  if (matchingGroups.length === 0 || bestScore === 0) return [];
 
-  return matchingOps.flatMap((op) => {
-    const suffix = findMatchingSuffix(op.label, suffixes);
-    if (!suffix) return [];
-    const handler = handlersByLabelSuffix[suffix];
-    if (!handler) return [];
-    return [
-      {
-        effectId: op.effectId,
-        opId: op.opId,
-        signatureHash: op.signatureHash,
-        handler,
-      },
-    ];
-  });
+  return matchingGroups.flatMap((ops) =>
+    ops.flatMap((op) => {
+      const suffix = findMatchingSuffix(op.label, suffixes);
+      if (!suffix) return [];
+      const handler = handlersByLabelSuffix[suffix];
+      if (!handler) return [];
+      return [
+        {
+          effectId: op.effectId,
+          opId: op.opId,
+          signatureHash: op.signatureHash,
+          handler,
+        },
+      ];
+    })
+  );
 };
 
 export type LabelHandlerHost = {

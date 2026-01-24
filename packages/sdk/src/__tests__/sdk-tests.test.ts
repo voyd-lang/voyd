@@ -6,7 +6,10 @@ describe("sdk tests collection", () => {
     const sdk = createSdk();
     const result = await sdk.compile({
       includeTests: true,
-      source: `eff Test
+      source: `use std::msgpack::self as __std_msgpack
+use std::string::self as __std_string
+
+eff Test
   fail(resume) -> void
   skip(resume) -> void
   log(resume) -> void

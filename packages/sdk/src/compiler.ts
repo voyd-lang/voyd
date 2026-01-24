@@ -14,6 +14,7 @@ export type {
   SourceSpan,
 } from "@voyd/compiler/diagnostics/index.js";
 export { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
+export { EFFECTS_HOST_BOUNDARY_STD_DEPS } from "@voyd/compiler/codegen/effects/host-boundary/constants.js";
 export {
   modulePathFromFile,
   modulePathToString,
