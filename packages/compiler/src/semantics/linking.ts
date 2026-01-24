@@ -194,6 +194,9 @@ export const monomorphizeProgram = ({
     }
     queuedModules.delete(callerModuleId);
     const callerCtx = typingContextFor(callerModuleId);
+    if (!callerCtx) {
+      continue;
+    }
 
     const callTargets = callerCtx.callResolution.targets;
     const callTypeArguments = callerCtx.callResolution.typeArguments;
