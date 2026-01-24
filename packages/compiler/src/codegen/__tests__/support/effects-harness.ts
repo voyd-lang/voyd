@@ -1,4 +1,5 @@
 import type binaryen from "binaryen";
+import { dirname, resolve } from "node:path";
 import {
   createVoydHost,
   formatSignatureHash,
@@ -6,6 +7,15 @@ import {
   type ParsedEffectOp,
   type ParsedEffectTable,
 } from "@voyd/js-host";
+import type { Diagnostic } from "../../../diagnostics/index.js";
+import type { CodegenOptions } from "../../context.js";
+import { codegenProgram } from "../../codegen.js";
+import { buildModuleGraph } from "../../../modules/graph.js";
+import { createFsModuleHost } from "../../../modules/fs-host.js";
+import type { ModuleGraph, ModuleNode } from "../../../modules/types.js";
+import { analyzeModules } from "../../../pipeline-shared.js";
+import { buildProgramCodegenView } from "../../../semantics/codegen-view/index.js";
+import { monomorphizeProgram } from "../../../semantics/linking.js";
 
 export type EffectHandlerRequest = {
   handle: number;
@@ -58,6 +68,93 @@ const toModule = (wasm: WasmSource): WebAssembly.Module => {
   throw new Error("Unsupported wasm input");
 };
 
+const STD_ROOT = resolve(import.meta.dirname, "../../../../../std/src");
+
+const mergeGraphs = (graphs: ModuleGraph[]): ModuleGraph => {
+  const modules = new Map<string, ModuleNode>();
+  const diagnostics: Diagnostic[] = [];
+
+  graphs.forEach((graph) => {
+    graph.modules.forEach((node, id) => {
+      if (!modules.has(id)) {
+        modules.set(id, node);
+      }
+    });
+    diagnostics.push(...graph.diagnostics);
+  });
+
+  return {
+    entry: graphs[0]?.entry,
+    modules,
+    diagnostics,
+  };
+};
+
+const toWasmBytes = (module: binaryen.Module): Uint8Array => {
+  const binary = module.emitBinary();
+  if (binary instanceof Uint8Array) {
+    return binary;
+  }
+  return (
+    (binary as { binary?: Uint8Array; output?: Uint8Array }).output ??
+    (binary as { binary?: Uint8Array }).binary ??
+    new Uint8Array()
+  );
+};
+
+const throwIfErrors = (diagnostics: Diagnostic[]) => {
+  if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    throw new Error(JSON.stringify(diagnostics, null, 2));
+  }
+};
+
+export const compileEffectFixture = async ({
+  entryPath,
+  extraEntries,
+  codegenOptions,
+}: {
+  entryPath: string;
+  extraEntries?: readonly string[];
+  codegenOptions?: CodegenOptions;
+}) => {
+  const host = createFsModuleHost();
+  const srcRoot = dirname(entryPath);
+  const roots = { src: srcRoot, std: STD_ROOT };
+
+  const graphs = await Promise.all(
+    [entryPath, ...(extraEntries ?? [])].map((path) =>
+      buildModuleGraph({ entryPath: path, host, roots })
+    )
+  );
+  const graph = graphs.length > 1 ? mergeGraphs(graphs) : graphs[0]!;
+  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
+    graph,
+  });
+  const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
+  throwIfErrors(diagnostics);
+
+  const modules = Array.from(semantics.values());
+  const monomorphized = monomorphizeProgram({ modules, semantics });
+  const program = buildProgramCodegenView(modules, {
+    instances: monomorphized.instances,
+    moduleTyping: monomorphized.moduleTyping,
+  });
+  const entryModuleId = graph.entry ?? entryPath;
+  const result = codegenProgram({ program, entryModuleId, options: codegenOptions });
+  const allDiagnostics = [...diagnostics, ...result.diagnostics];
+  throwIfErrors(allDiagnostics);
+
+  return {
+    ...result,
+    wasm: toWasmBytes(result.module),
+    diagnostics: allDiagnostics,
+    entryModuleId,
+    graph,
+    semantics,
+    entrySemantics: semantics.get(entryModuleId),
+  };
+};
+
 const resumeKindName = (value: number): string => (value === 1 ? "tail" : "resume");
 
 const handlerKeyCandidates = (op: ParsedEffectOp): string[] => [
@@ -87,6 +184,14 @@ const lookupHandler = (
   return undefined;
 };
 
+const isTestAssertionOp = (op: ParsedEffectOp): boolean =>
+  op.effectId.endsWith("std::test::assertions::Test") ||
+  op.label.startsWith("std::test::assertions::Test.");
+
+const defaultTestAssertionHandler: EffectHandler = (request) => {
+  throw new Error(`Unhandled std::test::assertions effect: ${request.label}`);
+};
+
 export const runEffectfulExport = async <T = unknown>({
   wasm,
   entryName,
@@ -110,7 +215,9 @@ export const runEffectfulExport = async <T = unknown>({
 
   table.ops.forEach((op) => {
     const handler = lookupHandler(handlers, op);
-    if (!handler) return;
+    const resolvedHandler =
+      handler ?? (isTestAssertionOp(op) ? defaultTestAssertionHandler : undefined);
+    if (!resolvedHandler) return;
     const request: EffectHandlerRequest = {
       handle: op.opIndex,
       opIndex: op.opIndex,
@@ -126,7 +233,7 @@ export const runEffectfulExport = async <T = unknown>({
       op.effectId,
       op.opId,
       formatSignatureHash(op.signatureHash),
-      (...args) => handler(request, ...args)
+      (...args) => resolvedHandler(request, ...args)
     );
   });
 

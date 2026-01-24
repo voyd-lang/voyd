@@ -45,6 +45,8 @@ import { typeContainsUnresolvedParam } from "../../semantics/type-utils.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
+const debugEffects = (): boolean =>
+  typeof process !== "undefined" && process.env?.DEBUG_EFFECTS === "1";
 
 const currentHandlerValue = (
   ctx: CodegenContext,
@@ -960,7 +962,7 @@ const compileClosureCall = ({
   const effectful =
     typeof resolvedDesc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(resolvedDesc.effectRow);
-  if (effectful && process.env.DEBUG_EFFECTS === "1") {
+  if (effectful && debugEffects()) {
     console.log("[effects] closure call", {
       returnType: resolvedDesc.returnType,
       row: ctx.program.effects.getRow(resolvedDesc.effectRow),
@@ -1085,7 +1087,7 @@ const compileCurriedClosureCall = ({
       currentDesc.kind === "function" &&
       typeof currentDesc.effectRow === "number" &&
       !ctx.program.effects.isEmpty(currentDesc.effectRow);
-    if (effectful && process.env.DEBUG_EFFECTS === "1") {
+    if (effectful && debugEffects()) {
       console.log("[effects] curried closure call", {
         returnType: currentDesc.returnType,
         row: ctx.program.effects.getRow(currentDesc.effectRow),

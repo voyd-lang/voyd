@@ -16,7 +16,7 @@ const STD_ROOT = "/std";
 const SRC_ROOT = "/src";
 const DEFAULT_ENTRY = "index.voyd";
 
-const STD_SOURCES = import.meta.glob<string>("/packages/std/src/**/*.voyd", {
+const STD_SOURCES = import.meta.glob<string>("../../std/src/**/*.voyd", {
   query: "?raw",
   import: "default",
   eager: true,
@@ -153,12 +153,14 @@ const buildStdFiles = (stdRoot: string): Record<string, string> => {
 
 const toStdRelativePath = (path: string): string => {
   const normalized = normalizePath(path);
-  const marker = "/packages/std/src/";
-  const index = normalized.indexOf(marker);
-  if (index >= 0) {
-    return normalized.slice(index + marker.length);
+  const withoutQuery = normalized.split("?")[0] ?? normalized;
+  const markers = ["/packages/std/src/", "/std/src/", "std/src/"];
+  const marker = markers.find((value) => withoutQuery.includes(value));
+  if (marker) {
+    const index = withoutQuery.indexOf(marker);
+    return withoutQuery.slice(index + marker.length);
   }
-  return normalized.replace(/^\/+/, "");
+  return withoutQuery.replace(/^(\.\.\/)+/, "").replace(/^\/+/, "");
 };
 
 const normalizeFilePath = (filePath: string, root: string): string => {

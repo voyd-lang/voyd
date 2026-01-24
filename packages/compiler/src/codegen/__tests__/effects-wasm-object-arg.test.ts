@@ -1,10 +1,7 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/index.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { codegen } from "../index.js";
 import { createEffectsImports } from "./support/wasm-imports.js";
+import { compileEffectFixture } from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -12,18 +9,12 @@ const fixturePath = resolve(
   "effects-wasm-object-arg.voyd"
 );
 
-const buildModule = () => {
-  const source = readFileSync(fixturePath, "utf8");
-  const semantics = semanticsPipeline(
-    parse(source, "/proj/src/effects-wasm-object-arg.voyd")
-  );
-  return codegen(semantics);
-};
+const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
 
 describe("effects wasm object args", () => {
-  it("passes object arguments to in-wasm handlers", () => {
-    const { module } = buildModule();
-    const wasmBinary = new Uint8Array(module.emitBinary());
+  it("passes object arguments to in-wasm handlers", async () => {
+    const { wasm } = await buildModule();
+    const wasmBinary = wasm instanceof Uint8Array ? wasm : new Uint8Array(wasm);
     const instance = new WebAssembly.Instance(
       new WebAssembly.Module(wasmBinary),
       createEffectsImports()

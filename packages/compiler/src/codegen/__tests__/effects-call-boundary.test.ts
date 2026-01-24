@@ -1,10 +1,7 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/parser.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { codegen } from "../index.js";
 import {
+  compileEffectFixture,
   runEffectfulExport,
   type EffectHandler,
   parseEffectTable,
@@ -18,11 +15,7 @@ const fixturePath = resolve(
 
 describe("effects call boundary", () => {
   it("resumes into caller after effectful call", async () => {
-    const source = readFileSync(fixturePath, "utf8");
-    const semantics = semanticsPipeline(
-      parse(source, "/proj/src/effects-call-boundary.voyd")
-    );
-    const { module } = codegen(semantics);
+    const { module } = await compileEffectFixture({ entryPath: fixturePath });
     const parsed = parseEffectTable(module);
     const awaitOp = parsed.ops.find((op) => op.label.endsWith("Async.await"));
     if (!awaitOp) {

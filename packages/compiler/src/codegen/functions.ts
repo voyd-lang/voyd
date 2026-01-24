@@ -32,6 +32,9 @@ import { emitSerializedExportWrapper } from "./exports/serialized-abi.js";
 import { emitExportAbiSection, type ExportAbiEntry } from "./exports/export-abi.js";
 import { resolveSerializerForTypes } from "./serializer.js";
 
+const debugEffects = (): boolean =>
+  typeof process !== "undefined" && process.env?.DEBUG_EFFECTS === "1";
+
 const getFunctionMetas = (
   ctx: CodegenContext,
   moduleId: string,
@@ -139,7 +142,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         );
       }
       const effectful = effectInfo.typeEffectful;
-      if (effectful && process.env.DEBUG_EFFECTS === "1") {
+      if (effectful && debugEffects()) {
         console.log(
           `[effects] effectful ${ctx.moduleLabel}::${symbolName(ctx, ctx.moduleId, item.symbol)}`,
           {

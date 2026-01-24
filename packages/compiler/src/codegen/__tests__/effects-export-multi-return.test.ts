@@ -1,10 +1,10 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/index.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { codegen } from "../index.js";
-import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
+import {
+  compileEffectFixture,
+  runEffectfulExport,
+  parseEffectTable,
+} from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -12,14 +12,11 @@ const fixturePath = resolve(
   "effects-export-multi-return.voyd"
 );
 
-const buildModule = () => {
-  const source = readFileSync(fixturePath, "utf8");
-  return codegen(semanticsPipeline(parse(source, "/proj/src/effects-export-multi-return.voyd")));
-};
+const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
 
 describe("effectful exports with different return types", () => {
   it("runs both i32 and void effectful exports through the host boundary", async () => {
-    const { module } = buildModule();
+    const { module } = await buildModule();
     const parsed = parseEffectTable(module);
     const pickOp = (suffix: string) =>
       parsed.ops.find((op) => op.label.endsWith(suffix));

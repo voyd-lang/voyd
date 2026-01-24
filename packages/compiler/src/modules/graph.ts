@@ -72,18 +72,38 @@ export const buildModuleGraph = async ({
   const entryNode = entryModule.node as ModuleNode & {
     dependencies: ModuleDependency[];
   };
-  const implicitStdDeps: ModuleDependency[] = [
-    { kind: "use", path: { namespace: "std", segments: ["msgpack"] } },
-    { kind: "use", path: { namespace: "std", segments: ["string"] } },
-  ];
-  const existingDeps = new Set(
-    entryNode.dependencies.map((dependency) => modulePathToString(dependency.path))
-  );
-  const nextDeps = implicitStdDeps.filter(
-    (dependency) => !existingDeps.has(modulePathToString(dependency.path))
-  );
-  if (nextDeps.length > 0) {
-    entryNode.dependencies = [...entryNode.dependencies, ...nextDeps];
+  const hasStdRoot = typeof roots.std === "string" && roots.std.length > 0;
+  const implicitStdPaths = hasStdRoot
+    ? [
+        { namespace: "std", segments: ["msgpack"] },
+        { namespace: "std", segments: ["string"] },
+      ]
+    : [];
+  const availableImplicitStd = hasStdRoot
+    ? (
+        await Promise.all(
+          implicitStdPaths.map(async (path) => ({
+            path,
+            resolved: await resolveModuleFile(path, roots, host),
+          }))
+        )
+      )
+        .filter((entry) => Boolean(entry.resolved))
+        .map((entry) => entry.path)
+    : [];
+  if (availableImplicitStd.length > 0) {
+    const implicitStdDeps: ModuleDependency[] = availableImplicitStd.map(
+      (path) => ({ kind: "use", path })
+    );
+    const existingDeps = new Set(
+      entryNode.dependencies.map((dependency) => modulePathToString(dependency.path))
+    );
+    const nextDeps = implicitStdDeps.filter(
+      (dependency) => !existingDeps.has(modulePathToString(dependency.path))
+    );
+    if (nextDeps.length > 0) {
+      entryNode.dependencies = [...entryNode.dependencies, ...nextDeps];
+    }
   }
 
   addModuleTree(entryModule, modules, modulesByPath);
@@ -121,10 +141,9 @@ export const buildModuleGraph = async ({
     enqueueDependencies(nextModule, pending);
   };
 
-  await Promise.all([
-    addImplicitModule({ namespace: "std", segments: ["msgpack"] }),
-    addImplicitModule({ namespace: "std", segments: ["string"] }),
-  ]);
+  if (availableImplicitStd.length > 0) {
+    await Promise.all(availableImplicitStd.map((path) => addImplicitModule(path)));
+  }
 
   const hasNestedModule = (pathKey: string): boolean => {
     const prefix = `${pathKey}::`;

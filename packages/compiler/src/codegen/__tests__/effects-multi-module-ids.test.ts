@@ -1,78 +1,44 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/index.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegenProgram } from "../index.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
-import type {
-  ModuleGraph,
-  ModuleNode,
-  ModulePath,
-} from "../../modules/types.js";
 import {
-  createEffectInterner,
-  createEffectTable,
-} from "../../semantics/effects/effect-table.js";
-import { createTypeArena } from "../../semantics/typing/type-arena.js";
-import {
+  compileEffectFixture,
   runEffectfulExport,
   parseEffectTable,
   type EffectHandler,
 } from "./support/effects-harness.js";
+import { monomorphizeProgram } from "../../semantics/linking.js";
 
 const fixturePath = (name: string) =>
   resolve(import.meta.dirname, "__fixtures__", name);
 
-const loadSemantics = (name: string, typing?: { arena: any; effects: any }) => {
-  const source = readFileSync(fixturePath(name), "utf8");
-  const form = parse(source, name);
-  const path: ModulePath = { namespace: "src", segments: [] };
-  const module: ModuleNode = {
-    id: name,
-    path,
-    origin: { kind: "file", filePath: name },
-    ast: form,
-    source,
-    dependencies: [],
-  };
-  const graph: ModuleGraph = {
-    entry: module.id,
-    modules: new Map([[module.id, module]]),
-    diagnostics: [],
-  };
-  return semanticsPipeline({
-    module,
-    graph,
-    exports: new Map(),
-    dependencies: new Map(),
-    typing,
-  });
-};
-
 describe("effects multi-module ids", () => {
   it("keeps effect ids stable across modules and consistent with the effect table", async () => {
-    const arena = createTypeArena();
-    const effectInterner = createEffectInterner();
-    const moduleA = loadSemantics("effects_multi_module_a.voyd", {
-      arena,
-      effects: createEffectTable({ interner: effectInterner }),
+    const moduleAPath = fixturePath("effects_multi_module_a.voyd");
+    const moduleBPath = fixturePath("effects_multi_module_b.voyd");
+    const { semantics, graph } = await compileEffectFixture({
+      entryPath: moduleAPath,
+      extraEntries: [moduleBPath],
     });
-    const moduleB = loadSemantics("effects_multi_module_b.voyd", {
-      arena,
-      effects: createEffectTable({ interner: effectInterner }),
+    const modules = Array.from(semantics.values());
+    const monomorphized = monomorphizeProgram({ modules, semantics });
+    const program = buildProgramCodegenView(modules, {
+      instances: monomorphized.instances,
+      moduleTyping: monomorphized.moduleTyping,
     });
-    const program = buildProgramCodegenView([moduleA, moduleB]);
+    const moduleAId = graph.entry ?? moduleAPath;
+    const moduleBId = resolve(moduleBPath);
 
     const buildA = () =>
       codegenProgram({
         program,
-        entryModuleId: moduleA.moduleId,
+        entryModuleId: moduleAId,
       });
     const buildB = () =>
       codegenProgram({
         program,
-        entryModuleId: moduleB.moduleId,
+        entryModuleId: moduleBId,
       });
 
     const { module: wasmA } = buildA();
@@ -97,7 +63,7 @@ describe("effects multi-module ids", () => {
     });
     expect(resultA.value).toBe(4);
     expect(seenA[0]?.effectId).toBe(alphaOp.effectId);
-    expect(seenA[0]?.label).toContain("effects_multi_module_a.voyd::Alpha.ping");
+    expect(seenA[0]?.label).toContain("effects_multi_module_a::Alpha.ping");
 
     const { module: wasmB } = buildB();
     const tableB = parseEffectTable(wasmB);
@@ -121,7 +87,7 @@ describe("effects multi-module ids", () => {
     });
     expect(resultB.value).toBe(8);
     expect(seenB[0]?.effectId).toBe(betaOp.effectId);
-    expect(seenB[0]?.label).toContain("effects_multi_module_b.voyd::Beta.pong");
+    expect(seenB[0]?.label).toContain("effects_multi_module_b::Beta.pong");
 
     const { module: wasmASecond } = buildA();
     const tableASecond = parseEffectTable(wasmASecond);

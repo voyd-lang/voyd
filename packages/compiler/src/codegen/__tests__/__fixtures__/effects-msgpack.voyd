@@ -1,5 +1,6 @@
 use std::array::Array
 use std::msgpack::{ MsgPack, pack_array, pack_i32, pack_string }
+use std::string::fns::{ new_string }
 
 eff Exchange
   roundtrip(resume, value: MsgPack) -> MsgPack
