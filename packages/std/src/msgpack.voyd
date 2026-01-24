@@ -4,7 +4,7 @@ use std::array::Array
 use std::map::Map
 use std::string::types::String
 pub use self::fns::MsgPack
-pub use self::types::{ Binary, Null, Numeric }
+pub use self::types::{ Binary, Bool, Null, Numeric }
 
 pub fn pack_null(): () -> MsgPack
   msgpack_fns::pack_null()

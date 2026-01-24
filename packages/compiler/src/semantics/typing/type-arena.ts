@@ -220,7 +220,10 @@ export const createTypeArena = (): TypeArena => {
   ): TypeId => {
     const self = nextTypeId++;
     const placeholderParam = nextTypeParamId++;
-    const placeholderDesc = { kind: "type-param-ref", param: placeholderParam };
+    const placeholderDesc: TypeParamRef = {
+    kind: "type-param-ref",
+    param: placeholderParam,
+  };
     descriptors[self] = placeholderDesc;
     descriptorCache.set(keyFor(placeholderDesc), self);
 
@@ -296,10 +299,11 @@ export const createTypeArena = (): TypeArena => {
     const allocatePlaceholder = (): TypeId => {
       const placeholderType = nextTypeId++;
       const placeholderTypeParam = nextTypeParamId++;
-      descriptors[placeholderType] = {
+      const placeholderTypeDesc: TypeParamRef = {
         kind: "type-param-ref",
         param: placeholderTypeParam,
       };
+      descriptors[placeholderType] = placeholderTypeDesc;
       return placeholderType;
     };
 

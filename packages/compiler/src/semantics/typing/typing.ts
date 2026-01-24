@@ -16,6 +16,7 @@ import type {
   TypingContext,
   TypingInputs,
   TypingResult,
+  TypingState,
 } from "./types.js";
 import {
   registerImportedObjectTemplate,

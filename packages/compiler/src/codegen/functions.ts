@@ -29,7 +29,10 @@ import { effectsFacade } from "./effects/facade.js";
 import { emitPureSurfaceWrapper } from "./effects/abi-wrapper.js";
 import { formatTestExportName } from "../tests/exports.js";
 import { emitSerializedExportWrapper } from "./exports/serialized-abi.js";
-import { emitExportAbiSection, type ExportAbiEntry } from "./exports/export-abi.js";
+import {
+  emitExportAbiSection,
+  type ExportAbiEntry,
+} from "./exports/export-abi.js";
 import { resolveSerializerForTypes } from "./serializer.js";
 import { EFFECTS_HOST_BOUNDARY_STD_DEPS } from "./effects/host-boundary/constants.js";
 
@@ -39,25 +42,37 @@ const debugEffects = (): boolean =>
 const getFunctionMetas = (
   ctx: CodegenContext,
   moduleId: string,
-  symbol: number
+  symbol: number,
 ): FunctionMetadata[] | undefined => ctx.functions.get(moduleId)?.get(symbol);
 
-const programSymbolIdOf = (ctx: CodegenContext, moduleId: string, symbol: number) =>
-  ctx.program.symbols.idOf({ moduleId, symbol });
+const programSymbolIdOf = (
+  ctx: CodegenContext,
+  moduleId: string,
+  symbol: number,
+) => ctx.program.symbols.idOf({ moduleId, symbol });
 
-const canonicalProgramSymbolIdOf = (ctx: CodegenContext, moduleId: string, symbol: number) =>
-  ctx.program.symbols.canonicalIdOf(moduleId, symbol);
+const canonicalProgramSymbolIdOf = (
+  ctx: CodegenContext,
+  moduleId: string,
+  symbol: number,
+) => ctx.program.symbols.canonicalIdOf(moduleId, symbol);
 
-const symbolName = (ctx: CodegenContext, moduleId: string, symbol: number): string =>
-  ctx.program.symbols.getName(programSymbolIdOf(ctx, moduleId, symbol)) ?? `${symbol}`;
+const symbolName = (
+  ctx: CodegenContext,
+  moduleId: string,
+  symbol: number,
+): string =>
+  ctx.program.symbols.getName(programSymbolIdOf(ctx, moduleId, symbol)) ??
+  `${symbol}`;
 
 const pushFunctionMeta = (
   ctx: CodegenContext,
   moduleId: string,
   symbol: number,
-  meta: FunctionMetadata
+  meta: FunctionMetadata,
 ): void => {
-  const bySymbol = ctx.functions.get(moduleId) ?? new Map<number, FunctionMetadata[]>();
+  const bySymbol =
+    ctx.functions.get(moduleId) ?? new Map<number, FunctionMetadata[]>();
   const existing = bySymbol.get(symbol);
   if (existing) {
     existing.push(meta);
@@ -73,30 +88,41 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
   const unknown = ctx.program.primitives.unknown;
   const exportedItems = new Set(
-    ctx.module.hir.module.exports.map((entry) => entry.item)
+    ctx.module.hir.module.exports.map((entry) => entry.item),
   );
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
 
   for (const [itemId, item] of ctx.module.hir.items) {
     if (item.kind !== "function") continue;
-    ctx.itemsToSymbols.set(itemId, { moduleId: ctx.moduleId, symbol: item.symbol });
+    ctx.itemsToSymbols.set(itemId, {
+      moduleId: ctx.moduleId,
+      symbol: item.symbol,
+    });
 
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      programSymbolIdOf(ctx, ctx.moduleId, item.symbol)
+      programSymbolIdOf(ctx, ctx.moduleId, item.symbol),
     );
-    if (intrinsicMetadata.intrinsic && intrinsicMetadata.intrinsicUsesSignature !== true) {
+    if (
+      intrinsicMetadata.intrinsic &&
+      intrinsicMetadata.intrinsicUsesSignature !== true
+    ) {
       continue;
     }
 
-    const signature = ctx.program.functions.getSignature(ctx.moduleId, item.symbol);
+    const signature = ctx.program.functions.getSignature(
+      ctx.moduleId,
+      item.symbol,
+    );
     if (!signature) {
-      throw new Error(`codegen missing type information for function ${item.symbol}`);
+      throw new Error(
+        `codegen missing type information for function ${item.symbol}`,
+      );
     }
 
     const schemeInfo = ctx.program.types.getScheme(signature.scheme);
     const instantiationInfo = ctx.program.functions.getInstantiationInfo(
       ctx.moduleId,
-      item.symbol
+      item.symbol,
     );
     const recordedInstantiations =
       instantiationInfo && instantiationInfo.size > 0
@@ -117,11 +143,9 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
     instantiations.forEach(([instanceId, typeArgs]) => {
       if (typeArgs.some((arg) => arg === unknown)) {
         const name = symbolName(ctx, ctx.moduleId, item.symbol);
-        const instanceLabel = ctx.program.functions.formatInstance(
-          instanceId
-        );
+        const instanceLabel = ctx.program.functions.formatInstance(instanceId);
         throw new Error(
-          `codegen cannot emit ${name} without resolved type arguments (instance ${instanceLabel})`
+          `codegen cannot emit ${name} without resolved type arguments (instance ${instanceLabel})`,
         );
       }
       if (ctx.functionInstances.has(instanceId)) {
@@ -132,14 +156,14 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
       const descriptor = ctx.program.types.getTypeDesc(typeId);
       if (descriptor.kind !== "function") {
         throw new Error(
-          `codegen expected function type for symbol ${item.symbol}`
+          `codegen expected function type for symbol ${item.symbol}`,
         );
       }
 
       const effectInfo = effects.functionAbi(item.symbol);
       if (!effectInfo) {
         throw new Error(
-          `codegen missing effect information for function ${item.symbol}`
+          `codegen missing effect information for function ${item.symbol}`,
         );
       }
       const effectful = effectInfo.typeEffectful;
@@ -150,14 +174,14 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
             effectRow: effectInfo.effectRow,
             row: ctx.program.effects.getRow(effectInfo.effectRow),
             hasOps:
-              ctx.program.effects.getRow(effectInfo.effectRow).operations.length >
-              0,
-          }
+              ctx.program.effects.getRow(effectInfo.effectRow).operations
+                .length > 0,
+          },
         );
       }
 
       const userParamTypes = descriptor.parameters.map((param) =>
-        wasmTypeFor(param.type, ctx, new Set(), "signature")
+        wasmTypeFor(param.type, ctx, new Set(), "signature"),
       );
       const paramTypes = effectful
         ? [handlerParamType, ...userParamTypes]
@@ -199,17 +223,30 @@ export const compileFunctions = (ctx: CodegenContext): void => {
   for (const item of ctx.module.hir.items.values()) {
     if (item.kind !== "function") continue;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      programSymbolIdOf(ctx, ctx.moduleId, item.symbol)
+      programSymbolIdOf(ctx, ctx.moduleId, item.symbol),
     );
-    if (intrinsicMetadata.intrinsic && intrinsicMetadata.intrinsicUsesSignature !== true) {
+    if (
+      intrinsicMetadata.intrinsic &&
+      intrinsicMetadata.intrinsicUsesSignature !== true
+    ) {
       continue;
     }
     const metas = getFunctionMetas(ctx, ctx.moduleId, item.symbol);
     if (!metas || metas.length === 0) {
-      const signature = ctx.program.functions.getSignature(ctx.moduleId, item.symbol);
-      const scheme = signature ? ctx.program.types.getScheme(signature.scheme) : undefined;
-      const instantiationInfo = ctx.program.functions.getInstantiationInfo(ctx.moduleId, item.symbol);
-      const hasInstantiations = Boolean(instantiationInfo && instantiationInfo.size > 0);
+      const signature = ctx.program.functions.getSignature(
+        ctx.moduleId,
+        item.symbol,
+      );
+      const scheme = signature
+        ? ctx.program.types.getScheme(signature.scheme)
+        : undefined;
+      const instantiationInfo = ctx.program.functions.getInstantiationInfo(
+        ctx.moduleId,
+        item.symbol,
+      );
+      const hasInstantiations = Boolean(
+        instantiationInfo && instantiationInfo.size > 0,
+      );
       if (scheme && scheme.params.length > 0 && !hasInstantiations) {
         continue;
       }
@@ -228,16 +265,26 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
     const targetRef = ctx.program.symbols.refOf(targetId);
     if (targetRef.moduleId === ctx.moduleId) return;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      canonicalProgramSymbolIdOf(ctx, ctx.moduleId, imp.local)
+      canonicalProgramSymbolIdOf(ctx, ctx.moduleId, imp.local),
     );
-    if (intrinsicMetadata.intrinsic && intrinsicMetadata.intrinsicUsesSignature !== true) {
+    if (
+      intrinsicMetadata.intrinsic &&
+      intrinsicMetadata.intrinsicUsesSignature !== true
+    ) {
       return;
     }
 
-    const signature = ctx.program.functions.getSignature(ctx.moduleId, imp.local);
+    const signature = ctx.program.functions.getSignature(
+      ctx.moduleId,
+      imp.local,
+    );
     if (!signature) return;
 
-    const targetMetas = getFunctionMetas(ctx, targetRef.moduleId, targetRef.symbol);
+    const targetMetas = getFunctionMetas(
+      ctx,
+      targetRef.moduleId,
+      targetRef.symbol,
+    );
     if (!targetMetas || targetMetas.length === 0) {
       return;
     }
@@ -247,7 +294,10 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
       signature.typeParams.length > 0
         ? signature.typeParams.length
         : scheme.params.length;
-    const instantiationInfo = ctx.program.functions.getInstantiationInfo(ctx.moduleId, imp.local);
+    const instantiationInfo = ctx.program.functions.getInstantiationInfo(
+      ctx.moduleId,
+      imp.local,
+    );
     const recordedInstantiations =
       instantiationInfo && instantiationInfo.size > 0
         ? Array.from(instantiationInfo.entries())
@@ -260,44 +310,53 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         ? recordedInstantiations
         : getDefaultInstantiationArgs({ ctx, symbol: imp.local, params: 0 });
 
-      instantiations.forEach(([instanceId, typeArgs]) => {
-        const targetMeta = pickTargetMeta(targetMetas, typeArgs);
-        const effectInfo = effects.functionAbi(imp.local);
-        const effectful =
-          targetMeta?.effectful ?? (effectInfo ? effectInfo.typeEffectful : false);
-        const instantiatedTypeId =
-          typeof signature.scheme === "number"
-            ? ctx.program.types.instantiate(signature.scheme, typeArgs)
-            : signature.typeId;
-        const instantiatedTypeDesc = ctx.program.types.getTypeDesc(instantiatedTypeId);
-        if (instantiatedTypeDesc.kind !== "function") {
-          throw new Error(
-            `codegen expected function type for import ${imp.local} (type ${instantiatedTypeId})`
-          );
-        }
-
-        const userParamTypes = instantiatedTypeDesc.parameters.map((param) =>
-          wasmTypeFor(param.type, ctx, new Set(), "signature")
+    instantiations.forEach(([instanceId, typeArgs]) => {
+      const targetMeta = pickTargetMeta(targetMetas, typeArgs);
+      const effectInfo = effects.functionAbi(imp.local);
+      const effectful =
+        targetMeta?.effectful ??
+        (effectInfo ? effectInfo.typeEffectful : false);
+      const instantiatedTypeId =
+        typeof signature.scheme === "number"
+          ? ctx.program.types.instantiate(signature.scheme, typeArgs)
+          : signature.typeId;
+      const instantiatedTypeDesc =
+        ctx.program.types.getTypeDesc(instantiatedTypeId);
+      if (instantiatedTypeDesc.kind !== "function") {
+        throw new Error(
+          `codegen expected function type for import ${imp.local} (type ${instantiatedTypeId})`,
         );
-        const paramTypes = effectful
-          ? [handlerParamType, ...userParamTypes]
-          : userParamTypes;
-        const resultType = effectful
-          ? ctx.effectsRuntime.outcomeType
-          : wasmTypeFor(instantiatedTypeDesc.returnType, ctx, new Set(), "signature");
+      }
+
+      const userParamTypes = instantiatedTypeDesc.parameters.map((param) =>
+        wasmTypeFor(param.type, ctx, new Set(), "signature"),
+      );
+      const paramTypes = effectful
+        ? [handlerParamType, ...userParamTypes]
+        : userParamTypes;
+      const resultType = effectful
+        ? ctx.effectsRuntime.outcomeType
+        : wasmTypeFor(
+            instantiatedTypeDesc.returnType,
+            ctx,
+            new Set(),
+            "signature",
+          );
       const metadata: FunctionMetadata = {
-          moduleId: ctx.moduleId,
-          symbol: imp.local,
-          wasmName: (targetMeta ?? targetMetas[0]!).wasmName,
-          paramTypes,
-          resultType,
-        paramTypeIds: instantiatedTypeDesc.parameters.map((param) => param.type),
+        moduleId: ctx.moduleId,
+        symbol: imp.local,
+        wasmName: (targetMeta ?? targetMetas[0]!).wasmName,
+        paramTypes,
+        resultType,
+        paramTypeIds: instantiatedTypeDesc.parameters.map(
+          (param) => param.type,
+        ),
         parameters: instantiatedTypeDesc.parameters.map((param, index) => ({
           typeId: param.type,
           label: param.label,
           optional: param.optional,
           name: signature.parameters[index]?.name,
-          })),
+        })),
         resultTypeId: instantiatedTypeDesc.returnType,
         typeArgs,
         instanceId,
@@ -314,7 +373,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
 
 export const emitModuleExports = (
   ctx: CodegenContext,
-  contexts: readonly CodegenContext[] = [ctx]
+  contexts: readonly CodegenContext[] = [ctx],
 ): void => {
   const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
   const exportAbiEntries: ExportAbiEntry[] = [];
@@ -340,7 +399,9 @@ export const emitModuleExports = (
       implName: meta.wasmName,
       buildImplCallArgs: () => [
         exportCtx.mod.ref.null(handlerParamType),
-        ...userParamTypes.map((type, index) => exportCtx.mod.local.get(index, type)),
+        ...userParamTypes.map((type, index) =>
+          exportCtx.mod.local.get(index, type),
+        ),
       ],
     });
     exportCtx.mod.addFunctionExport(wrapperName, exportName);
@@ -351,13 +412,13 @@ export const emitModuleExports = (
     ctx.options.testMode && testScope === "all" ? contexts : [ctx];
   exportContexts.forEach((exportCtx) => {
     const publicExports = exportCtx.module.hir.module.exports.filter((entry) =>
-      isPublicVisibility(entry.visibility)
+      isPublicVisibility(entry.visibility),
     );
     const baseEntries =
       exportCtx.module.meta.isPackageRoot || publicExports.length > 0
         ? publicExports
         : exportCtx.module.hir.module.exports.filter((entry) =>
-            isPackageVisible(entry.visibility)
+            isPackageVisible(entry.visibility),
           );
     const isTestExport = (entry: HirExportEntry): boolean => {
       const name =
@@ -369,18 +430,24 @@ export const emitModuleExports = (
       : baseEntries;
 
     exportEntries.forEach((entry) => {
-      const intrinsicMetadata = exportCtx.program.symbols.getIntrinsicFunctionFlags(
-        programSymbolIdOf(exportCtx, exportCtx.moduleId, entry.symbol)
-      );
+      const intrinsicMetadata =
+        exportCtx.program.symbols.getIntrinsicFunctionFlags(
+          programSymbolIdOf(exportCtx, exportCtx.moduleId, entry.symbol),
+        );
       if (
         intrinsicMetadata.intrinsic &&
         intrinsicMetadata.intrinsicUsesSignature !== true
       ) {
         return;
       }
-      const metas = getFunctionMetas(exportCtx, exportCtx.moduleId, entry.symbol);
+      const metas = getFunctionMetas(
+        exportCtx,
+        exportCtx.moduleId,
+        entry.symbol,
+      );
       const meta =
-        metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
+        metas?.find((candidate) => candidate.typeArgs.length === 0) ??
+        metas?.[0];
       if (!meta) {
         reportMissingExportedGenericInstantiation({ ctx: exportCtx, entry });
         return;
@@ -403,7 +470,10 @@ export const emitModuleExports = (
           return;
         }
         const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
-        const serializer = resolveSerializerForTypes([meta.resultTypeId], exportCtx);
+        const serializer = resolveSerializerForTypes(
+          [meta.resultTypeId],
+          exportCtx,
+        );
         const supportedReturn =
           valueType === binaryen.none ||
           valueType === binaryen.i32 ||
@@ -421,7 +491,7 @@ export const emitModuleExports = (
                 returnType: formatWasmType(valueType),
               },
               span: entry.span,
-            })
+            }),
           );
           return;
         }
@@ -432,15 +502,18 @@ export const emitModuleExports = (
       try {
         serializer = resolveSerializerForTypes(
           [...meta.paramTypeIds, meta.resultTypeId],
-          exportCtx
+          exportCtx,
         );
       } catch (error) {
         exportCtx.diagnostics.report(
           diagnosticFromCode({
             code: "CG0001",
-            params: { message: (error as Error).message },
+            params: {
+              kind: "codegen-error",
+              message: (error as Error).message,
+            },
             span: entry.span,
-          })
+          }),
         );
         return;
       }
@@ -457,9 +530,12 @@ export const emitModuleExports = (
           exportCtx.diagnostics.report(
             diagnosticFromCode({
               code: "CG0001",
-              params: { message: (error as Error).message },
+              params: {
+                kind: "codegen-error",
+                message: (error as Error).message,
+              },
               span: entry.span,
-            })
+            }),
           );
         }
         return;
@@ -484,7 +560,7 @@ export const emitModuleExports = (
   }
 
   const missingStdModules = EFFECTS_HOST_BOUNDARY_STD_DEPS.filter(
-    (moduleId) => !ctx.program.modules.has(moduleId)
+    (moduleId) => !ctx.program.modules.has(moduleId),
   );
   if (missingStdModules.length > 0) {
     ctx.diagnostics.report(
@@ -493,11 +569,11 @@ export const emitModuleExports = (
         params: {
           kind: "codegen-error",
           message: `effectful exports require ${missingStdModules.join(
-            " and "
+            " and ",
           )} (provide a std root or disable the host boundary via effectsHostBoundary: "off")`,
         },
         span: ctx.module.hir.module.span,
-      })
+      }),
     );
     return;
   }
@@ -549,7 +625,10 @@ const reportMissingExportedGenericInstantiation = ({
   ctx: CodegenContext;
   entry: HirExportEntry;
 }): void => {
-  const signature = ctx.program.functions.getSignature(ctx.moduleId, entry.symbol);
+  const signature = ctx.program.functions.getSignature(
+    ctx.moduleId,
+    entry.symbol,
+  );
   if (!signature) return;
 
   const scheme = ctx.program.types.getScheme(signature.scheme);
@@ -567,20 +646,23 @@ const reportMissingExportedGenericInstantiation = ({
         functionName,
       },
       span: entry.span,
-    })
+    }),
   );
 };
 
 const compileFunctionItem = (
   fn: HirFunction,
   meta: FunctionMetadata,
-  ctx: CodegenContext
+  ctx: CodegenContext,
 ): void => {
   const effectInfo = effectsFacade(ctx).functionAbi(fn.symbol);
   if (!effectInfo) {
-    throw new Error(`codegen missing effect information for function ${fn.symbol}`);
+    throw new Error(
+      `codegen missing effect information for function ${fn.symbol}`,
+    );
   }
-  const needsWrapper = effectInfo.abiEffectful && effectInfo.typeEffectful === false;
+  const needsWrapper =
+    effectInfo.abiEffectful && effectInfo.typeEffectful === false;
   const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   if (needsWrapper) {
     const implName = `${meta.wasmName}__effectful_impl`;
@@ -600,7 +682,7 @@ const compileFunctionItem = (
       const type = meta.paramTypes[index];
       if (typeof type !== "number") {
         throw new Error(
-          `codegen missing parameter type for symbol ${param.symbol}`
+          `codegen missing parameter type for symbol ${param.symbol}`,
         );
       }
       implCtx.bindings.set(param.symbol, {
@@ -635,7 +717,7 @@ const compileFunctionItem = (
       binaryen.createType([handlerParamType, ...(meta.paramTypes as number[])]),
       ctx.effectsRuntime.outcomeType,
       implCtx.locals,
-      functionBody
+      functionBody,
     );
 
     emitPureSurfaceWrapper({
@@ -647,7 +729,7 @@ const compileFunctionItem = (
       buildImplCallArgs: () => [
         ctx.mod.ref.null(handlerParamType),
         ...fn.parameters.map((_, index) =>
-          ctx.mod.local.get(index, meta.paramTypes[index] as number)
+          ctx.mod.local.get(index, meta.paramTypes[index] as number),
         ),
       ],
     });
@@ -677,7 +759,7 @@ const compileFunctionItem = (
     const type = meta.paramTypes[wasmIndex];
     if (typeof type !== "number") {
       throw new Error(
-        `codegen missing parameter type for symbol ${param.symbol}`
+        `codegen missing parameter type for symbol ${param.symbol}`,
       );
     }
     fnCtx.bindings.set(param.symbol, {
@@ -697,8 +779,7 @@ const compileFunctionItem = (
   });
   const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
   const shouldWrapOutcome =
-    meta.effectful &&
-    binaryen.getExpressionType(body.expr) === returnValueType;
+    meta.effectful && binaryen.getExpressionType(body.expr) === returnValueType;
   const functionBody = shouldWrapOutcome
     ? wrapValueInOutcome({
         valueExpr: body.expr,
@@ -712,18 +793,22 @@ const compileFunctionItem = (
     binaryen.createType(meta.paramTypes as number[]),
     meta.resultType,
     fnCtx.locals,
-    functionBody
+    functionBody,
   );
 };
 
 const makeFunctionName = (
   fn: HirFunction,
   ctx: CodegenContext,
-  typeArgs: readonly TypeId[]
+  typeArgs: readonly TypeId[],
 ): string => {
-  const safeSymbolName = sanitizeIdentifier(symbolName(ctx, ctx.moduleId, fn.symbol));
+  const safeSymbolName = sanitizeIdentifier(
+    symbolName(ctx, ctx.moduleId, fn.symbol),
+  );
   const suffix =
-    typeArgs.length === 0 ? "" : `__inst_${sanitizeIdentifier(typeArgs.join("_"))}`;
+    typeArgs.length === 0
+      ? ""
+      : `__inst_${sanitizeIdentifier(typeArgs.join("_"))}`;
   return `${ctx.moduleLabel}__${safeSymbolName}_${fn.symbol}${suffix}`;
 };
 
@@ -750,28 +835,36 @@ const getDefaultInstantiationArgs = ({
 }): [ProgramFunctionInstanceId, readonly TypeId[]][] => {
   if (params !== 0) {
     throw new Error(
-      "getDefaultInstantiationArgs should only be used for non-generic functions"
+      "getDefaultInstantiationArgs should only be used for non-generic functions",
     );
   }
-  const instanceId = ctx.program.functions.getInstanceId(ctx.moduleId, symbol, []);
+  const instanceId = ctx.program.functions.getInstanceId(
+    ctx.moduleId,
+    symbol,
+    [],
+  );
   if (instanceId === undefined) {
-    throw new Error(`codegen missing instance id for non-generic symbol ${symbol}`);
+    throw new Error(
+      `codegen missing instance id for non-generic symbol ${symbol}`,
+    );
   }
   return [[instanceId, []]];
 };
 
 const pickTargetMeta = (
   metas: readonly FunctionMetadata[],
-  typeArgs: readonly TypeId[]
+  typeArgs: readonly TypeId[],
 ): FunctionMetadata | undefined => {
   const exact = metas.find(
     (meta) =>
       meta.typeArgs.length === typeArgs.length &&
-      meta.typeArgs.every((arg, index) => arg === typeArgs[index])
+      meta.typeArgs.every((arg, index) => arg === typeArgs[index]),
   );
   if (exact) {
     return exact;
   }
-  const byArity = metas.find((meta) => meta.typeArgs.length === typeArgs.length);
+  const byArity = metas.find(
+    (meta) => meta.typeArgs.length === typeArgs.length,
+  );
   return byArity ?? metas[0];
 };

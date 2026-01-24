@@ -6,6 +6,7 @@ import {
   runEffectfulExport,
   parseEffectTable,
 } from "./support/effects-harness.js";
+import { wasmBufferSource } from "./support/wasm-utils.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -41,11 +42,8 @@ describe("effects higher-order functions", () => {
 
   it("resumes into lambdas with captured variables", async () => {
     const { wasm } = await buildModule();
-    const wasmBinary = wasm instanceof Uint8Array ? wasm : new Uint8Array(wasm);
-    const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(wasmBinary),
-      createEffectsImports()
-    );
+    const wasmModule = new WebAssembly.Module(wasmBufferSource(wasm));
+    const instance = new WebAssembly.Instance(wasmModule, createEffectsImports());
     const handled = instance.exports.handled as CallableFunction;
     expect(handled()).toBe(15);
   });

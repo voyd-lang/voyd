@@ -61,6 +61,8 @@ const buildLoweringSnapshot = () => {
       emitEffectHelpers: false,
       continuationBackend: {},
       testMode: false,
+      effectsHostBoundary: "off",
+      testScope: "all",
     },
     programHelpers,
     functions: new Map(),

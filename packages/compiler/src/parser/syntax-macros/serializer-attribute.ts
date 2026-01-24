@@ -58,11 +58,15 @@ const processSequence = (
       changed = true;
     }
 
+    let serializerAttributeForm: Form | null = null;
     if (allowAttributes && isSerializerAttributeForm(processed)) {
+      serializerAttributeForm = processed;
+    }
+    if (serializerAttributeForm) {
       if (pending) {
         throw new Error("duplicate @serializer attribute");
       }
-      pending = parseSerializerAttribute(processed);
+      pending = parseSerializerAttribute(serializerAttributeForm as Form);
       changed = true;
       continue;
     }
@@ -73,7 +77,7 @@ const processSequence = (
         throw new Error("@serializer is not supported on trait declarations");
       }
       if (kind) {
-        attachSerializerAttribute(processed, pending);
+        attachSerializerAttribute(processed as Form, pending);
         changed = true;
         pending = null;
       } else {
@@ -132,7 +136,11 @@ const isSerializerHead = (expr?: Expr): boolean => {
   return isIdentifierAtom(head) && head.value === "serializer";
 };
 
-const parseSerializerAttribute = (form: Form): PendingSerializerAttribute => {
+const parseSerializerAttribute = (expr: Expr): PendingSerializerAttribute => {
+  if (!isForm(expr)) {
+    throw new Error("serializer attribute requires a form");
+  }
+  const form = expr;
   const target = form.at(1);
   const attributeCall = getAttributeCall(target);
   if (!attributeCall || attributeCall.name !== "serializer") {

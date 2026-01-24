@@ -51,22 +51,25 @@ explicit, testable, and contained to a single stdlib module.
 Create a new standard module under `packages/std/src/msgpack` with a canonical
 recursive data type that is the required host boundary shape.
 
-Proposed definitions (unions must be made up of objects, so scalars are boxed):
+Proposed definitions:
 
 ```
-// std::box
-pub obj Box<T> { value: T }
+pub obj I32 { value: i32 }
+pub obj I64 { value: i64 }
+pub obj F32 { value: f32 }
+pub obj F64 { value: f64 }
+pub obj Bool { value: bool }
 
-pub type Numeric = i32 | i64 | f32 | f64
+pub type Numeric = I32 | I64 | F32 | F64
 
 pub obj Null {}
 pub obj Binary { bytes: Array<i32> }
 
 pub type MsgPack =
   Null
-  | Box<Numeric>
-  | Box<bool>
-  | Box<String>
+  | Numeric
+  | Bool
+  | String
   | Binary
   | Array<MsgPack>
   | Map<MsgPack>

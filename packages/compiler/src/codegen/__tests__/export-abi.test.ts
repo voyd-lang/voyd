@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { createVoydHost, parseExportAbi } from "@voyd/js-host";
 import { compileProgram } from "../../pipeline.js";
 import { createFsModuleHost } from "../../modules/fs-host.js";
+import { wasmBufferSource } from "./support/wasm-utils.js";
 
 const fixtureRoot = resolve(import.meta.dirname, "__fixtures__");
 const stdRoot = resolve(import.meta.dirname, "../../../../std/src");
@@ -26,13 +27,14 @@ const buildModule = async (): Promise<Uint8Array> => {
 describe("export abi metadata", () => {
   it("marks msgpack signatures as serialized", async () => {
     const wasm = await buildModule();
-    const module = new WebAssembly.Module(wasm);
+    const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const abi = parseExportAbi(module);
 
     expect(abi.version).toBe(1);
     expect(abi.exports).toEqual([
       { name: "add", abi: "direct" },
       { name: "echo", abi: "serialized", formatId: "msgpack" },
+      { name: "fetch", abi: "serialized", formatId: "msgpack" },
     ]);
   });
 
@@ -42,6 +44,13 @@ describe("export abi metadata", () => {
     const payload = [1, "hi", [true, 2]];
     const result = await host.runPure("echo", [payload]);
     expect(result).toEqual(payload);
+  });
+
+  it("fetches msgpack values for serialized exports", async () => {
+    const wasm = await buildModule();
+    const host = await createVoydHost({ wasm });
+    const result = await host.runPure("fetch", []);
+    expect(result).toEqual(["a", "b", "c"]);
   });
 
   it("round-trips complex msgpack values", async () => {
@@ -64,12 +73,12 @@ describe("export abi metadata", () => {
           Array.from(value.entries()).map(([key, entry]) => [
             String(key),
             normalize(entry),
-          ])
+          ]),
         );
       }
       if (value && typeof value === "object") {
         return Object.fromEntries(
-          Object.entries(value).map(([key, entry]) => [key, normalize(entry)])
+          Object.entries(value).map(([key, entry]) => [key, normalize(entry)]),
         );
       }
       return value;

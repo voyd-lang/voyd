@@ -108,6 +108,7 @@ const DEFAULT_OPTIONS = {
   continuationBackend: {},
   testMode: false,
   effectsHostBoundary: "off",
+  testScope: "all",
 } as const;
 
 const sanitizeIdentifier = (value: string): string =>

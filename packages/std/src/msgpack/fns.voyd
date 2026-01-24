@@ -1,16 +1,15 @@
 use std::array::Array
-use std::box::Box
 use std::fixed_array::fns::{ new_fixed_array }
 use std::map::Map
 use std::memory::self as memory
-use std::msgpack::types::{ Binary, F32, F64, I32, I64, Null, Numeric }
+use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 use std::optional::types::all
 use std::string::fns::{ new_string }
 use std::string::types::String
 use std::test::assertions::all
 
 @serializer("msgpack", encode_value, decode_value)
-pub type MsgPack = Null | Box<Numeric> | Box<bool> | Box<String> | Binary | Array<MsgPack> | Map<MsgPack>
+pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | Map<MsgPack>
 
 obj Encoder {
   ptr: i32,
@@ -52,22 +51,22 @@ pub fn pack_null(): () -> MsgPack
   Null {}
 
 pub fn pack_i32(value: i32): () -> MsgPack
-  Box<Numeric> { value: I32 { value: value } }
+  I32 { value }
 
 pub fn pack_i64(value: i64): () -> MsgPack
-  Box<Numeric> { value: I64 { value: value } }
+  I64 { value }
 
 pub fn pack_f32(value: f32): () -> MsgPack
-  Box<Numeric> { value: F32 { value: value } }
+  F32 { value }
 
 pub fn pack_f64(value: f64): () -> MsgPack
-  Box<Numeric> { value: F64 { value: value } }
+  F64 { value }
 
 pub fn pack_bool(value: bool): () -> MsgPack
-  Box<bool> { value: value }
+  Bool { value }
 
 pub fn pack_string(value: String): () -> MsgPack
-  Box<String> { value: value }
+  value
 
 pub fn pack_binary(value: Binary): () -> MsgPack
   value
@@ -79,68 +78,52 @@ pub fn pack_map(value: Map<MsgPack>): () -> MsgPack
   value
 
 pub fn unpack_i32(value: MsgPack): () -> i32
-  value.match(boxed)
-    Box<Numeric>:
-      boxed.value.match(numeric)
-        I32:
-          numeric.value
-        I64:
-          wrap_i64(numeric.value)
-        else:
-          0
+  value.match(decoded)
+    I32:
+      decoded.value
+    I64:
+      wrap_i64(decoded.value)
     else:
       0
 
 pub fn unpack_i64(value: MsgPack): () -> i64
-  value.match(boxed)
-    Box<Numeric>:
-      boxed.value.match(numeric)
-        I64:
-          numeric.value
-        I32:
-          extend_i32_s(numeric.value)
-        else:
-          extend_i32_s(0)
+  value.match(decoded)
+    I64:
+      decoded.value
+    I32:
+      extend_i32_s(decoded.value)
     else:
       extend_i32_s(0)
 
 pub fn unpack_f32(value: MsgPack): () -> f32
-  value.match(boxed)
-    Box<Numeric>:
-      boxed.value.match(numeric)
-        F32:
-          numeric.value
-        F64:
-          demote_f64(numeric.value)
-        else:
-          reinterpret_i32_to_f32(0)
+  value.match(decoded)
+    F32:
+      decoded.value
+    F64:
+      demote_f64(decoded.value)
     else:
       reinterpret_i32_to_f32(0)
 
 pub fn unpack_f64(value: MsgPack): () -> f64
-  value.match(boxed)
-    Box<Numeric>:
-      boxed.value.match(numeric)
-        F64:
-          numeric.value
-        F32:
-          promote_f32(numeric.value)
-        else:
-          0.0
+  value.match(decoded)
+    F64:
+      decoded.value
+    F32:
+      promote_f32(decoded.value)
     else:
       0.0
 
 pub fn unpack_bool(value: MsgPack): () -> bool
-  value.match(boxed)
-    Box<bool>:
-      boxed.value
+  value.match(decoded)
+    Bool:
+      decoded.value
     else:
       false
 
 pub fn unpack_string(value: MsgPack): () -> String
-  value.match(boxed)
-    Box<String>:
-      boxed.value
+  value.match(decoded)
+    String:
+      decoded
     else:
       empty_text()
 
@@ -372,13 +355,19 @@ impl Encoder
     value.match(decoded)
       Null:
         self.write_u8(192)
-      Box<bool>:
+      Bool:
         let flag = if decoded.value then: 195 else: 194
         self.write_u8(flag)
-      Box<Numeric>:
-        self.encode_numeric(decoded.value)
-      Box<String>:
-        self.encode_string(decoded.value)
+      I32:
+        self.encode_numeric(decoded)
+      I64:
+        self.encode_numeric(decoded)
+      F32:
+        self.encode_numeric(decoded)
+      F64:
+        self.encode_numeric(decoded)
+      String:
+        self.encode_string(decoded)
       Binary:
         self.encode_binary(decoded.bytes)
       Array<MsgPack>:
@@ -488,8 +477,8 @@ impl Decoder
       let key = self.decode_any()
       let value = self.decode_any()
       key.match(decoded_key)
-        Box<String>:
-          out = out.set(decoded_key.value, value)
+        String:
+          out = out.set(decoded_key, value)
         else:
           out = out
       index = index + 1
