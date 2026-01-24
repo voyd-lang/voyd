@@ -77,6 +77,11 @@ type DiagnosticParamsMap = {
         errorMessage?: string;
       }
     | { kind: "requested-from"; importer: string };
+  MD0003: {
+    kind: "macro-expansion-failed";
+    macro: string;
+    errorMessage?: string;
+  };
   TY0001:
     | { kind: "immutable-assignment"; name: string }
     | { kind: "binding-declaration"; name: string };
@@ -236,6 +241,15 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "module-graph",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0002"]>,
+  MD0003: {
+    code: "MD0003",
+    message: (params) =>
+      `Macro expansion failed (${params.macro})${
+        params.errorMessage ? `: ${params.errorMessage}` : ""
+      }`,
+    severity: "error",
+    phase: "module-graph",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0003"]>,
   TY0001: {
     code: "TY0001",
     message: (params) =>
