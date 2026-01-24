@@ -9,3 +9,4 @@ ast.json
 /sb
 /*.sb.*
 .turbo
+.tmp-voyd-sdk-*

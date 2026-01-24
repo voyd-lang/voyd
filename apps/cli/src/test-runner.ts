@@ -1,5 +1,5 @@
 import { readdir, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   createSdk,
   type TestEvent,
@@ -8,6 +8,7 @@ import {
 } from "@voyd/sdk";
 import {
   createFsModuleHost,
+  EFFECTS_HOST_BOUNDARY_STD_DEPS,
   modulePathFromFile,
   type ModuleRoots,
 } from "@voyd/sdk/compiler";
@@ -73,6 +74,11 @@ const resolveRoots = (
   return { scanRoot, roots: { src: srcRoot, std: resolveStdRoot() } };
 };
 
+const isWithinRoot = (root: string, target: string): boolean => {
+  const rel = relative(root, target);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+};
+
 const SIMPLE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const escapeIdentifier = (value: string): string =>
@@ -111,12 +117,18 @@ const buildTestEntrySource = ({
 }: {
   modulePaths: string[];
 }): string => {
-  return modulePaths
-    .map(
-      (modulePath, index) =>
-        `use ${modulePath}::self as test_mod_${index}`
-    )
-    .join("\n");
+  const prelude: string[] = [];
+  EFFECTS_HOST_BOUNDARY_STD_DEPS.forEach((moduleId) => {
+    if (!modulePaths.includes(moduleId)) {
+      const alias = moduleId.replace(/[^A-Za-z0-9_]/g, "_");
+      prelude.push(`use ${moduleId}::self as ${alias}`);
+    }
+  });
+
+  const uses = modulePaths.map(
+    (modulePath, index) => `use ${modulePath}::self as test_mod_${index}`
+  );
+  return [...prelude, ...uses].join("\n");
 };
 
 const resolveTestEntryPath = ({
@@ -188,18 +200,25 @@ const createCliReporter = (reporter: string): TestReporter => {
 export const runTests = async ({
   rootPath,
   reporter = "default",
+  failOnEmptyTests = false,
 }: {
   rootPath: string;
   reporter?: string;
+  failOnEmptyTests?: boolean;
 }): Promise<TestRunSummary> => {
   const host = createFsModuleHost();
   const { scanRoot, roots } = resolveRoots(rootPath);
+  const stdRoot = roots.std ?? resolveStdRoot();
+  const isTestingStd = isWithinRoot(stdRoot, scanRoot);
   const files = await findVoydFiles(scanRoot);
   const cliReporter = createCliReporter(reporter);
 
   if (files.length === 0) {
     if (reporter !== "silent") {
       console.log("No tests found.");
+    }
+    if (failOnEmptyTests) {
+      process.exitCode = 1;
     }
     return {
       total: 0,
@@ -222,6 +241,7 @@ export const runTests = async ({
     source: entrySource,
     includeTests: true,
     testsOnly: true,
+    testScope: "all",
     roots,
   });
 
@@ -229,6 +249,9 @@ export const runTests = async ({
   if (!tests || tests.cases.length === 0) {
     if (reporter !== "silent") {
       console.log("No tests found.");
+    }
+    if (failOnEmptyTests) {
+      process.exitCode = 1;
     }
     return {
       total: 0,
@@ -244,6 +267,17 @@ export const runTests = async ({
   const summary = await tests.run({
     reporter: cliReporter,
     filter: (info) => {
+      if (!isTestingStd) {
+        if (info.modulePath.startsWith("std::")) {
+          return false;
+        }
+        if (
+          info.location?.filePath &&
+          isWithinRoot(stdRoot, resolve(info.location.filePath))
+        ) {
+          return false;
+        }
+      }
       if (info.location?.filePath) {
         return allowedFiles.has(resolve(info.location.filePath));
       }

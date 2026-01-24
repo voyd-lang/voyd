@@ -3,6 +3,7 @@ import type { ProgramFunctionInstanceId } from "../semantics/ids.js";
 import { wasmRuntimeTypeFor } from "./runtime-types.js";
 import { buildInstanceSubstitution } from "./type-substitution.js";
 import { walkHirExpression } from "./hir-walk.js";
+import { typeContainsUnresolvedParam } from "../semantics/type-utils.js";
 
 const isMaterialTypeId = (typeId: TypeId, ctx: CodegenContext): boolean => {
   const desc = ctx.program.types.getTypeDesc(typeId);
@@ -30,6 +31,13 @@ const collectTypesForInstance = ({
     }
     const resolved = subst ? ctx.program.types.substitute(typeId, subst) : typeId;
     if (isMaterialTypeId(resolved, ctx)) {
+      const hasUnresolved = typeContainsUnresolvedParam({
+        typeId: resolved,
+        getTypeDesc: (id) => ctx.program.types.getTypeDesc(id),
+      });
+      if (hasUnresolved) {
+        return;
+      }
       collected.add(resolved);
     }
   };

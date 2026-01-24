@@ -153,10 +153,10 @@ export const buildModuleGraph = async ({
     }
   }
 
-  const diagnostics = moduleDiagnostics.map(moduleDiagnosticToDiagnostic);
-  const graph = { entry: entryModule.node.id, modules, diagnostics };
-  expandModuleMacros(graph);
-  return graph;
+  const baseDiagnostics = moduleDiagnostics.map(moduleDiagnosticToDiagnostic);
+  const graph = { entry: entryModule.node.id, modules, diagnostics: baseDiagnostics };
+  const macroDiagnostics = expandModuleMacros(graph);
+  return { ...graph, diagnostics: [...baseDiagnostics, ...macroDiagnostics] };
 };
 
 const addModuleTree = (

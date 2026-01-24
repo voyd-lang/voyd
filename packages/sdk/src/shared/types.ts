@@ -7,6 +7,17 @@ export type { Diagnostic, EffectHandler, ModuleRoots };
 
 export type TestCase = CompilerTestCase;
 
+export type ExportAbiEntry = {
+  name: string;
+  abi: "direct" | "serialized";
+  formatId?: string;
+};
+
+export type ExportAbiMetadata = {
+  version: number;
+  exports: ExportAbiEntry[];
+};
+
 export type CompileOptions = {
   entryPath?: string;
   source?: string;
@@ -15,6 +26,8 @@ export type CompileOptions = {
   includeTests?: boolean;
   /** Emit a test-only wasm module. */
   testsOnly?: boolean;
+  /** Control which modules contribute test cases. */
+  testScope?: "all" | "entry";
   optimize?: boolean;
   emitWasmText?: boolean;
 };

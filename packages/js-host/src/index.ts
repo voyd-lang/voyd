@@ -10,11 +10,13 @@ export {
   formatSignatureHash,
   normalizeSignatureHash,
 } from "./protocol/table.js";
+export { EXPORT_ABI_SECTION, parseExportAbi } from "./protocol/export-abi.js";
 export type {
   ParsedEffectOp,
   ParsedEffectTable,
   ResumeKindCode,
 } from "./protocol/table.js";
+export type { ExportAbiEntry, ParsedExportAbi } from "./protocol/export-abi.js";
 export type {
   EffectDescriptor,
   EffectHandler,

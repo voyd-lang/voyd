@@ -1,10 +1,8 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/parser.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { codegen } from "../index.js";
 import {
+  compileEffectFixture,
   parseEffectTable,
   runEffectfulExport,
   type EffectHandler,
@@ -18,11 +16,7 @@ const fixturePath = resolve(
 
 describe("continuation compiler", () => {
   it("resumes without re-running prefix control flow", async () => {
-    const source = readFileSync(fixturePath, "utf8");
-    const semantics = semanticsPipeline(
-      parse(source, "/proj/src/effects-continuation-compiler.voyd")
-    );
-    const { module } = codegen(semantics);
+    const { module } = await compileEffectFixture({ entryPath: fixturePath });
     if (process.env.DEBUG_EFFECTS_WAT === "1") {
       writeFileSync(
         "debug-effects-continuation-compiler.wat",

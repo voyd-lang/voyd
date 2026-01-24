@@ -6,6 +6,7 @@ import {
   analyzeModules,
   emitProgram,
   type LoadModuleGraphFn,
+  type TestScope,
 } from "@voyd/compiler/pipeline-shared.js";
 import type { TestCase } from "./types.js";
 
@@ -30,6 +31,7 @@ export const compileWithLoader = async ({
   includeTests,
   testsOnly,
   loadModuleGraph,
+  testScope,
 }: {
   entryPath: string;
   roots: ModuleRoots;
@@ -37,12 +39,15 @@ export const compileWithLoader = async ({
   includeTests?: boolean;
   testsOnly?: boolean;
   loadModuleGraph: LoadModuleGraphFn;
+  testScope?: TestScope;
 }): Promise<CompileArtifacts> => {
   const graph = await loadModuleGraph({ entryPath, roots, host });
   const shouldIncludeTests = includeTests || testsOnly;
+  const scopedTestScope = testScope ?? "all";
   const { semantics, diagnostics: semanticDiagnostics, tests } = analyzeModules({
     graph,
     includeTests: shouldIncludeTests,
+    testScope: scopedTestScope,
   });
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
   const testCases = shouldIncludeTests ? tests : undefined;
@@ -54,7 +59,7 @@ export const compileWithLoader = async ({
       const testResult = await emitProgram({
         graph,
         semantics,
-        codegenOptions: { testMode: true },
+        codegenOptions: { testMode: true, testScope: scopedTestScope },
       });
       const allDiagnostics = [...diagnostics, ...testResult.diagnostics];
       throwIfError(allDiagnostics);
@@ -77,7 +82,7 @@ export const compileWithLoader = async ({
       const testResult = await emitProgram({
         graph,
         semantics,
-        codegenOptions: { testMode: true },
+        codegenOptions: { testMode: true, testScope: scopedTestScope },
       });
       allDiagnostics = [...baseDiagnostics, ...testResult.diagnostics];
       throwIfError(allDiagnostics);

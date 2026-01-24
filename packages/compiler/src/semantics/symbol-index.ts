@@ -6,6 +6,12 @@ export type IntrinsicFunctionFlags = {
   intrinsicUsesSignature: boolean;
 };
 
+export type SerializerMetadata = {
+  formatId: string;
+  encode: { moduleId: string; symbol: SymbolId };
+  decode: { moduleId: string; symbol: SymbolId };
+};
+
 export type ModuleSymbolIndex = {
   moduleId: string;
   packageId: string;
@@ -15,6 +21,7 @@ export type ModuleSymbolIndex = {
   getIntrinsicType(symbol: SymbolId): string | undefined;
   getIntrinsicName(symbol: SymbolId): string | undefined;
   getIntrinsicFunctionFlags(symbol: SymbolId): IntrinsicFunctionFlags;
+  getSerializer(symbol: SymbolId): SerializerMetadata | undefined;
 };
 
 export const buildModuleSymbolIndex = ({
@@ -32,6 +39,7 @@ export const buildModuleSymbolIndex = ({
   const intrinsicTypeBySymbol = new Map<SymbolId, string>();
   const intrinsicNameBySymbol = new Map<SymbolId, string>();
   const intrinsicFlagsBySymbol = new Map<SymbolId, IntrinsicFunctionFlags>();
+  const serializerBySymbol = new Map<SymbolId, SerializerMetadata>();
 
   const snapshot = symbolTable.snapshot();
   snapshot.symbols.forEach((record) => {
@@ -48,6 +56,7 @@ export const buildModuleSymbolIndex = ({
       intrinsicName?: unknown;
       intrinsic?: unknown;
       intrinsicUsesSignature?: unknown;
+      serializer?: unknown;
     };
 
     if (typeof metadata.intrinsicType === "string") {
@@ -61,6 +70,9 @@ export const buildModuleSymbolIndex = ({
         intrinsic: metadata.intrinsic === true,
         intrinsicUsesSignature: metadata.intrinsicUsesSignature === true,
       });
+    }
+    if (isSerializerMetadata(metadata.serializer)) {
+      serializerBySymbol.set(symbol, metadata.serializer);
     }
   });
 
@@ -77,5 +89,24 @@ export const buildModuleSymbolIndex = ({
         intrinsic: false,
         intrinsicUsesSignature: false,
       },
+    getSerializer: (symbol) => serializerBySymbol.get(symbol),
   };
+};
+
+const isSerializerMetadata = (value: unknown): value is SerializerMetadata => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as {
+    formatId?: unknown;
+    encode?: { moduleId?: unknown; symbol?: unknown };
+    decode?: { moduleId?: unknown; symbol?: unknown };
+  };
+  return (
+    typeof record.formatId === "string" &&
+    typeof record.encode?.moduleId === "string" &&
+    typeof record.encode?.symbol === "number" &&
+    typeof record.decode?.moduleId === "string" &&
+    typeof record.decode?.symbol === "number"
+  );
 };

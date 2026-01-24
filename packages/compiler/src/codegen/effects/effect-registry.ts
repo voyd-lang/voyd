@@ -7,7 +7,10 @@ import type {
   TypeId,
   TypeParamId,
 } from "../../semantics/ids.js";
-import { isPackageVisible, type HirVisibility } from "../../semantics/hir/index.js";
+import {
+  isPackageVisible,
+  type HirVisibility,
+} from "../../semantics/hir/index.js";
 import { diagnosticFromCode, normalizeSpan } from "../../diagnostics/index.js";
 import type { SourceSpan } from "../../diagnostics/types.js";
 import { getRequiredExprType } from "../types.js";
@@ -16,6 +19,7 @@ import { walkHirExpression } from "../hir-walk.js";
 import type { ContinuationSite } from "./effect-lowering/types.js";
 import { performSiteArgTypes } from "./perform-site.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
+import { findSerializerForType, serializerKeyFor } from "../serializer.js";
 
 const encoder = new TextEncoder();
 const FNV_OFFSET = 14695981039346656037n;
@@ -49,8 +53,15 @@ export type EffectRegistry = {
   effectIdsByModule: ReadonlyMap<string, readonly EffectIdInfo[]>;
   getEntry: (key: EffectOpKey) => EffectOpEntry | undefined;
   getOpIndex: (key: EffectOpKey) => number | undefined;
-  getEffectId: (moduleId: string, localEffectIndex: number) => EffectIdInfo | undefined;
-  keyFor: (effectId: EffectIdHash, opId: number, signatureHash: number) => EffectOpKey;
+  getEffectId: (
+    moduleId: string,
+    localEffectIndex: number,
+  ) => EffectIdInfo | undefined;
+  keyFor: (
+    effectId: EffectIdHash,
+    opId: number,
+    signatureHash: number,
+  ) => EffectOpKey;
 };
 
 export type EffectOpInstanceInfo = {
@@ -64,7 +75,11 @@ export type EffectOpInstanceInfo = {
 
 export type EffectOpKey = string;
 
-const toEffectOpKey = (effectId: EffectIdHash, opId: number, signatureHash: number): EffectOpKey =>
+const toEffectOpKey = (
+  effectId: EffectIdHash,
+  opId: number,
+  signatureHash: number,
+): EffectOpKey =>
   `${effectId.high.toString(16).padStart(8, "0")}${effectId.low.toString(16).padStart(8, "0")}:${opId}:${signatureHash}`;
 
 const hashEffectId = (value: string): EffectIdHash => {
@@ -107,7 +122,7 @@ const resolveEffectId = ({
         span: normalizeSpan(spanHint, ctx.module.hir.module.span),
         severity: "warning",
         phase: "codegen",
-      })
+      }),
     );
   }
   const id = explicitId ?? fallbackId;
@@ -143,45 +158,53 @@ const signatureTypeKeyForInternal = ({
 }: SignatureTypeKeyState): string => {
   const activeIndex = active.get(typeId);
   if (typeof activeIndex === "number") {
-    return `recursive:${activeIndex}`;
+    const serializer = findSerializerForType(typeId, ctx);
+    const suffix = serializer ? `#${serializerKeyFor(serializer)}` : "";
+    return `recursive:${activeIndex}${suffix}`;
   }
   active.set(typeId, active.size);
   try {
     const desc = ctx.program.types.getTypeDesc(typeId);
+    let baseKey: string;
     switch (desc.kind) {
       case "primitive":
-        return `prim:${desc.name}`;
+        baseKey = `prim:${desc.name}`;
+        break;
       case "recursive": {
         const binderIndex = binders.size;
         const nextBinders = new Map(binders);
         nextBinders.set(desc.binder, binderIndex);
-        return `mu:${binderIndex}.${signatureTypeKeyForInternal({
+        baseKey = `mu:${binderIndex}.${signatureTypeKeyForInternal({
           typeId: desc.body,
           ctx,
           active,
           binders: nextBinders,
         })}`;
+        break;
       }
       case "type-param-ref": {
         const binderIndex = binders.get(desc.param);
-        return typeof binderIndex === "number"
+        baseKey = typeof binderIndex === "number"
           ? `recparam:${binderIndex}`
           : `typeparam:${desc.param}`;
+        break;
       }
       case "nominal-object":
-        return `nominal:${desc.owner}<${desc.typeArgs
+        baseKey = `nominal:${desc.owner}<${desc.typeArgs
           .map((arg) =>
-            signatureTypeKeyForInternal({ typeId: arg, ctx, active, binders })
+            signatureTypeKeyForInternal({ typeId: arg, ctx, active, binders }),
           )
           .join(",")}>`;
+        break;
       case "trait":
-        return `trait:${desc.owner}<${desc.typeArgs
+        baseKey = `trait:${desc.owner}<${desc.typeArgs
           .map((arg) =>
-            signatureTypeKeyForInternal({ typeId: arg, ctx, active, binders })
+            signatureTypeKeyForInternal({ typeId: arg, ctx, active, binders }),
           )
           .join(",")}>`;
+        break;
       case "structural-object":
-        return `struct:{${desc.fields
+        baseKey = `struct:{${desc.fields
           .map(
             (field) =>
               `${field.name}${field.optional ? "?" : ""}:${signatureTypeKeyForInternal(
@@ -190,14 +213,20 @@ const signatureTypeKeyForInternal = ({
                   ctx,
                   active,
                   binders,
-                }
-              )}`
+                },
+              )}`,
           )
           .join(",")}}`;
+        break;
       case "function":
-        return `fn:(${desc.parameters
+        baseKey = `fn:(${desc.parameters
           .map((param) =>
-            signatureTypeKeyForInternal({ typeId: param.type, ctx, active, binders })
+            signatureTypeKeyForInternal({
+              typeId: param.type,
+              ctx,
+              active,
+              binders,
+            }),
           )
           .join(",")})->${signatureTypeKeyForInternal({
           typeId: desc.returnType,
@@ -205,13 +234,20 @@ const signatureTypeKeyForInternal = ({
           active,
           binders,
         })}`;
+        break;
       case "union": {
         const members = desc.members
           .map((member) =>
-            signatureTypeKeyForInternal({ typeId: member, ctx, active, binders })
+            signatureTypeKeyForInternal({
+              typeId: member,
+              ctx,
+              active,
+              binders,
+            }),
           )
           .sort();
-        return `union:${members.join("|")}`;
+        baseKey = `union:${members.join("|")}`;
+        break;
       }
       case "intersection": {
         const nominal =
@@ -232,18 +268,23 @@ const signatureTypeKeyForInternal = ({
                 binders,
               })
             : "none";
-        return `intersection:${nominal}&${structural}`;
+        baseKey = `intersection:${nominal}&${structural}`;
+        break;
       }
       case "fixed-array":
-        return `fixed-array:${signatureTypeKeyForInternal({
+        baseKey = `fixed-array:${signatureTypeKeyForInternal({
           typeId: desc.element,
           ctx,
           active,
           binders,
         })}`;
+        break;
       default:
-        return `${(desc as { kind: string }).kind}:${typeId}`;
+        baseKey = `${(desc as { kind: string }).kind}:${typeId}`;
+        break;
     }
+    const serializer = findSerializerForType(typeId, ctx);
+    return serializer ? `${baseKey}#${serializerKeyFor(serializer)}` : baseKey;
   } finally {
     active.delete(typeId);
   }
@@ -258,7 +299,9 @@ export const signatureHashFor = ({
   returnType: TypeId;
   ctx: CodegenContext;
 }): number => {
-  const paramKeys = params.map((param) => signatureTypeKeyFor({ typeId: param, ctx }));
+  const paramKeys = params.map((param) =>
+    signatureTypeKeyFor({ typeId: param, ctx }),
+  );
   const returnKey = signatureTypeKeyFor({ typeId: returnType, ctx });
   return murmurHash3(`(${paramKeys.join(",")})->${returnKey}`);
 };
@@ -272,7 +315,10 @@ export const resolvePerformSignature = ({
   ctx: CodegenContext;
   typeInstanceId?: ProgramFunctionInstanceId;
 }): { params: readonly TypeId[]; returnType: TypeId } => {
-  const signature = ctx.program.functions.getSignature(ctx.moduleId, site.effectSymbol);
+  const signature = ctx.program.functions.getSignature(
+    ctx.moduleId,
+    site.effectSymbol,
+  );
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, site.exprId);
   const callTypeArgs = (() => {
     if (typeof typeInstanceId === "number") {
@@ -301,7 +347,8 @@ export const resolvePerformSignature = ({
       fallbackReturnType: signature.returnType,
     });
   }
-  const signatureParams = signature?.parameters.map((param) => param.typeId) ?? [];
+  const signatureParams =
+    signature?.parameters.map((param) => param.typeId) ?? [];
   const paramTypes = performSiteArgTypes({
     exprId: site.exprId,
     ctx,
@@ -352,12 +399,12 @@ const collectEffectIds = (ctx: CodegenContext): EffectIdInfo[] => {
       explicitId: effect.effectId,
       visibility: effect.visibility,
       spanHint: effectItems.get(effect.symbol)?.span,
-    })
+    }),
   );
 };
 
 export const buildEffectRegistry = (
-  contexts: readonly CodegenContext[]
+  contexts: readonly CodegenContext[],
 ): EffectRegistry => {
   const entriesByKey = new Map<EffectOpKey, EffectOpEntry>();
   const effectIdsByModule = new Map<string, EffectIdInfo[]>();
@@ -388,7 +435,9 @@ export const buildEffectRegistry = (
       }
       const effectId = effectIds[info.localEffectIndex];
       if (!effectId) {
-        throw new Error(`missing effect id for ${ctx.moduleId}:${info.localEffectIndex}`);
+        throw new Error(
+          `missing effect id for ${ctx.moduleId}:${info.localEffectIndex}`,
+        );
       }
       const effectMeta = ctx.module.meta.effects[info.localEffectIndex];
       const opMeta = effectMeta?.operations[info.opIndex];
@@ -398,7 +447,7 @@ export const buildEffectRegistry = (
       const resumeKind =
         info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
       const owners = ownerByExpr.get(site.exprId);
-      const instances = owners ? instancesBySymbol.get(owners) ?? [] : [];
+      const instances = owners ? (instancesBySymbol.get(owners) ?? []) : [];
       const instanceList = instances.length > 0 ? instances : [undefined];
 
       instanceList.forEach((instanceId) => {
@@ -448,7 +497,11 @@ export const buildEffectRegistry = (
 
   const byKey = new Map<EffectOpKey, EffectOpEntry>();
   entries.forEach((entry) => {
-    const key = toEffectOpKey(entry.effectId.hash, entry.opId, entry.signatureHash);
+    const key = toEffectOpKey(
+      entry.effectId.hash,
+      entry.opId,
+      entry.signatureHash,
+    );
     byKey.set(key, entry);
   });
 
@@ -481,11 +534,15 @@ export const getEffectOpInstanceInfo = ({
   }
   const effectMeta = ctx.module.meta.effects[info.localEffectIndex];
   if (!effectMeta) {
-    throw new Error(`missing effect metadata for ${ctx.moduleId}:${info.localEffectIndex}`);
+    throw new Error(
+      `missing effect metadata for ${ctx.moduleId}:${info.localEffectIndex}`,
+    );
   }
   const effectId = registry.getEffectId(ctx.moduleId, info.localEffectIndex);
   if (!effectId) {
-    throw new Error(`missing effect id for ${ctx.moduleId}:${info.localEffectIndex}`);
+    throw new Error(
+      `missing effect id for ${ctx.moduleId}:${info.localEffectIndex}`,
+    );
   }
   const resumeKind =
     info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
@@ -502,7 +559,7 @@ export const getEffectOpInstanceInfo = ({
   const opIndex = registry.getOpIndex(key);
   if (opIndex === undefined) {
     throw new Error(
-      `missing effect op entry for ${label} (effect=${effectId.id}, op=${info.opIndex}, signature=${signatureHash})`
+      `missing effect op entry for ${label} (effect=${effectId.id}, op=${info.opIndex}, signature=${signatureHash})`,
     );
   }
   return {

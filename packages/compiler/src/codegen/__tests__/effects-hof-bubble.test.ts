@@ -1,11 +1,12 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/index.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { codegen } from "../index.js";
 import { createEffectsImports } from "./support/wasm-imports.js";
-import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
+import {
+  compileEffectFixture,
+  runEffectfulExport,
+  parseEffectTable,
+} from "./support/effects-harness.js";
+import { wasmBufferSource } from "./support/wasm-utils.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -13,17 +14,11 @@ const fixturePath = resolve(
   "effects-hof-bubble.voyd"
 );
 
-const buildModule = () => {
-  const source = readFileSync(fixturePath, "utf8");
-  const semantics = semanticsPipeline(
-    parse(source, "/proj/src/effects-hof-bubble.voyd")
-  );
-  return codegen(semantics);
-};
+const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
 
 describe("effects higher-order functions", () => {
   it("bubbles lambda effects through effect-polymorphic callers", async () => {
-    const { module } = buildModule();
+    const { module } = await buildModule();
     const parsed = parseEffectTable(module);
     const awaitOp = parsed.ops.find((op) => op.label.endsWith("Async.await"));
     if (!awaitOp) {
@@ -45,13 +40,10 @@ describe("effects higher-order functions", () => {
     expect(seen.length).toBe(1);
   });
 
-  it("resumes into lambdas with captured variables", () => {
-    const { module } = buildModule();
-    const wasmBinary = new Uint8Array(module.emitBinary());
-    const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(wasmBinary),
-      createEffectsImports({ includeMsgPack: true })
-    );
+  it("resumes into lambdas with captured variables", async () => {
+    const { wasm } = await buildModule();
+    const wasmModule = new WebAssembly.Module(wasmBufferSource(wasm));
+    const instance = new WebAssembly.Instance(wasmModule, createEffectsImports());
     const handled = instance.exports.handled as CallableFunction;
     expect(handled()).toBe(15);
   });

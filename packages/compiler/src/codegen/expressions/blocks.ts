@@ -108,6 +108,27 @@ export const compileStatement = (
         if (valueExpr.usedReturnCall) {
           return valueExpr.expr;
         }
+        if (fnCtx.returnTypeId === ctx.program.primitives.void) {
+          const cleanup = handlerCleanupOps({ ctx, fnCtx });
+          const valueStmt = asStatement(ctx, valueExpr.expr);
+          if (fnCtx.effectful) {
+            const wrapped = wrapValueInOutcome({
+              valueExpr: ctx.mod.nop(),
+              valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
+              ctx,
+            });
+            const ops =
+              cleanup.length === 0
+                ? [valueStmt, ctx.mod.return(wrapped)]
+                : [valueStmt, ...cleanup, ctx.mod.return(wrapped)];
+            return ctx.mod.block(null, ops, binaryen.none);
+          }
+          const ops =
+            cleanup.length === 0
+              ? [valueStmt, ctx.mod.return()]
+              : [valueStmt, ...cleanup, ctx.mod.return()];
+          return ctx.mod.block(null, ops, binaryen.none);
+        }
         const actualType = getRequiredExprType(
           stmt.value,
           ctx,

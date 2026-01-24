@@ -2,6 +2,7 @@ import type { BindingInputs, BindingResult } from "./types.js";
 import { bindModule } from "./binders/index.js";
 import { createBindingContext, toBindingResult } from "./context.js";
 import { finalizeEffectOperationOverloadSets, finalizeOverloadSets } from "./overloads.js";
+import { resolveSerializerAttributes } from "./serializer-attributes.js";
 
 export * from "./types.js";
 
@@ -27,6 +28,7 @@ export const runBindingPipeline = ({
   bindModule(moduleForm, bindingContext);
   finalizeOverloadSets(bindingContext);
   finalizeEffectOperationOverloadSets(bindingContext);
+  resolveSerializerAttributes(bindingContext);
 
   return toBindingResult(bindingContext);
 };

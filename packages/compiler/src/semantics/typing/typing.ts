@@ -16,12 +16,14 @@ import type {
   TypingContext,
   TypingInputs,
   TypingResult,
+  TypingState,
 } from "./types.js";
 import {
   registerImportedObjectTemplate,
   resolveImportedValue,
 } from "./imports.js";
 import { cloneNestedMap } from "./call-resolution.js";
+import { resolveTypeAlias } from "./type-system.js";
 
 export * from "./types.js";
 
@@ -36,6 +38,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   registerTypeAliases(ctx, state);
   registerObjectDecls(ctx);
   registerTraits(ctx);
+  primeTypeAliases(ctx, state);
   registerFunctionSignatures(ctx, state);
   registerEffectOperations(ctx, state);
   registerImpls(ctx, state);
@@ -83,6 +86,15 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     memberMetadata: new Map(ctx.memberMetadata),
     diagnostics: ctx.diagnostics.diagnostics,
   };
+};
+
+const primeTypeAliases = (ctx: TypingContext, state: TypingState): void => {
+  for (const template of ctx.typeAliases.templates()) {
+    if (template.params.length > 0) {
+      continue;
+    }
+    resolveTypeAlias(template.symbol, ctx, state, []);
+  }
 };
 
 const primeImportedValues = (ctx: TypingContext): void => {

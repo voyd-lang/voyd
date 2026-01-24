@@ -1,16 +1,6 @@
 import binaryen from "binaryen";
 
-const defaultImports = (): WebAssembly.Imports => {
-  const noop = () => 0;
-  const noopI64 = () => 0n;
-  return {
-    env: {
-      __voyd_msgpack_write_value: noop,
-      __voyd_msgpack_write_effect: noop,
-      __voyd_msgpack_read_value: noopI64,
-    },
-  };
-};
+const defaultImports = (): WebAssembly.Imports => ({ env: {} });
 
 const toBinary = (mod: Uint8Array | binaryen.Module): BufferSource =>
   (mod instanceof Uint8Array ? mod : mod.emitBinary()) as unknown as BufferSource;

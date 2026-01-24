@@ -25,6 +25,7 @@ async function main() {
     return runTests({
       rootPath: config.index,
       reporter: config.testReporter,
+      failOnEmptyTests: config.failOnEmptyTests,
     });
   }
 

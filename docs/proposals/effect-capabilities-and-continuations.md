@@ -1,7 +1,7 @@
 # Effect Capabilities and Continuation Instance Keying
 
-Status: Draft  
-Owner: Compiler + Runtime  
+Status: Implemented
+Owner: Compiler + Runtime
 Scope: effects codegen, host ABI, runtime ABI
 
 ## Summary

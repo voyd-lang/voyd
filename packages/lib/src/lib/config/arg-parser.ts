@@ -27,6 +27,7 @@ export const getConfigFromCli = (): VoydConfig => {
     .option("--internal-test", "run the internal test script")
     .option("--test", "run voyd tests")
     .option("--reporter <name>", "test reporter (default: minimal)")
+    .option("--fail-empty-tests", "exit 1 if no tests are found")
     .helpOption("-h, --help", "display help for command")
     .allowExcessArguments();
 
@@ -51,5 +52,6 @@ export const getConfigFromCli = (): VoydConfig => {
     internalTest: opts.internalTest,
     test: testMode,
     testReporter: opts.reporter,
+    failOnEmptyTests: opts.failEmptyTests,
   };
 };

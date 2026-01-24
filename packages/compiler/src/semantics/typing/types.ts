@@ -505,6 +505,10 @@ export class TypeAliasStore {
     return this.#instanceSymbols.get(type);
   }
 
+  instanceSymbolEntries(): IterableIterator<[TypeId, ReadonlySet<SymbolId>]> {
+    return this.#instanceSymbols.entries();
+  }
+
   instanceEntries(): IterableIterator<[string, TypeId]> {
     return this.#instances.entries();
   }

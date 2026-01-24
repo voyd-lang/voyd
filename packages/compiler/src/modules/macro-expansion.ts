@@ -4,17 +4,25 @@ import { parseUsePaths, type NormalizedUseEntry } from "./use-path.js";
 import { resolveModuleRequest } from "./resolve.js";
 import { modulePathToString } from "./path.js";
 import type { ModuleGraph, ModuleNode } from "./types.js";
-import { expandPostSyntaxMacros } from "../parser/syntax-macros/index.js";
+import { POST_SYNTAX_MACROS } from "../parser/syntax-macros/index.js";
 import {
   expandFunctionalMacros,
 } from "../parser/syntax-macros/functional-macro-expander/index.js";
 import type { MacroDefinition } from "../parser/syntax-macros/functional-macro-expander/types.js";
 import { MacroScope } from "../parser/syntax-macros/functional-macro-expander/scope.js";
 import { cloneExpr } from "../parser/syntax-macros/functional-macro-expander/helpers.js";
+import type { Diagnostic } from "../diagnostics/index.js";
+import { diagnosticFromCode } from "../diagnostics/index.js";
+import { SyntaxMacroError } from "../parser/syntax-macros/macro-error.js";
+import {
+  serializerAttributeMacro,
+  stripSerializerAttributeForms,
+} from "../parser/syntax-macros/serializer-attribute.js";
 
-export const expandModuleMacros = (graph: ModuleGraph): void => {
+export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
   const order = sortModules(graph);
   const exportsByModule = new Map<string, MacroExportTable>();
+  const diagnostics: Diagnostic[] = [];
 
   order.forEach((id) => {
     const module = graph.modules.get(id);
@@ -32,7 +40,7 @@ export const expandModuleMacros = (graph: ModuleGraph): void => {
     importedMacros.forEach((macro) => scope.defineMacro(macro));
 
     const { form, exports } = expandFunctionalMacros(module.ast, { scope });
-    module.ast = expandPostSyntaxMacros(form);
+    module.ast = applyPostSyntaxMacros(form, diagnostics);
     const localExports = indexExports(exports);
     const exportedMacros = collectMacroReexports({
       module,
@@ -42,11 +50,45 @@ export const expandModuleMacros = (graph: ModuleGraph): void => {
     });
     exportsByModule.set(id, exportedMacros);
   });
+
+  return diagnostics;
 };
 
 type MacroExportTable = Map<string, MacroDefinition>;
 type UseEntryWithVisibility = NormalizedUseEntry & {
   visibility: "module" | "pub";
+};
+
+const applyPostSyntaxMacros = (form: Form, diagnostics: Diagnostic[]): Form => {
+  let current = form;
+
+  POST_SYNTAX_MACROS.forEach((macro) => {
+    try {
+      current = macro(current);
+    } catch (error) {
+      const macroName = macro.name || "<syntax-macro>";
+      const message = error instanceof Error ? error.message : String(error);
+      const syntax = error instanceof SyntaxMacroError ? error.syntax : current;
+
+      diagnostics.push(
+        diagnosticFromCode({
+          code: "MD0003",
+          params: {
+            kind: "macro-expansion-failed",
+            macro: macroName,
+            errorMessage: message,
+          },
+          span: toSourceSpan(syntax),
+        })
+      );
+
+      if (macro === serializerAttributeMacro) {
+        current = stripSerializerAttributeForms(current);
+      }
+    }
+  });
+
+  return current;
 };
 
 const indexExports = (exports: MacroDefinition[]): MacroExportTable => {

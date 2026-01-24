@@ -1,6 +1,6 @@
 # MsgPack Host Interop and Std Module
 
-Status: Draft
+Status: Implemented
 Owner: Runtime + Stdlib
 Scope: `packages/std/src`, `packages/compiler/src`, `packages/sdk/src/shared/types.ts`, `packages/js-host/src`
 
@@ -13,17 +13,14 @@ boundary.
 
 ## Current State
 
-- Legacy stdlib has `packages/std/src_legacy/msg_pack` with a hand-rolled
-  encoder/decoder that writes directly to linear memory.
-- The new compiler uses MsgPack for effectful host boundary payloads via host
-  imports (`__voyd_msgpack_write_value`, `__voyd_msgpack_write_effect`,
-  `__voyd_msgpack_read_value`), but only supports primitive values.
-- Effectful exports reject non-primitive return types in
-  `packages/compiler/src/codegen/functions.ts`.
-- There is no standard library module in `packages/std/src` for MsgPack or
-  linear memory access.
-- `@voyd/js-host` has `run`, `runPure`, and `runEffectful`, but no way to call
-  pure exports with complex args/returns.
+- `std::memory` and `std::msgpack` exist, including a canonical `MsgPack` type
+  annotated with `@serializer("msgpack", encode_value, decode_value)`.
+- The compiler emits a `voyd.export_abi` custom section and serialized export
+  wrappers for serializer-marked signatures.
+- `@voyd/js-host` reads `voyd.export_abi` to route direct vs serialized calls
+  and can round-trip complex values for pure exports.
+- Effects host boundary payloads are encoded/decoded in Wasm via `std::msgpack`,
+  and the runtime ABI includes `effect_len` and resume length for MsgPack buffers.
 
 ## Proposal
 
@@ -54,22 +51,25 @@ explicit, testable, and contained to a single stdlib module.
 Create a new standard module under `packages/std/src/msgpack` with a canonical
 recursive data type that is the required host boundary shape.
 
-Proposed definitions (unions must be made up of objects, so scalars are boxed):
+Proposed definitions:
 
 ```
-// std::box
-pub obj Box<T> { value: T }
+pub obj I32 { value: i32 }
+pub obj I64 { value: i64 }
+pub obj F32 { value: f32 }
+pub obj F64 { value: f64 }
+pub obj Bool { value: bool }
 
-pub type Numeric = i32 | i64 | f32 | f64
+pub type Numeric = I32 | I64 | F32 | F64
 
 pub obj Null {}
 pub obj Binary { bytes: Array<i32> }
 
 pub type MsgPack =
   Null
-  | Box<Numeric>
-  | Box<bool>
-  | Box<String>
+  | Numeric
+  | Bool
+  | String
   | Binary
   | Array<MsgPack>
   | Map<MsgPack>
@@ -146,6 +146,22 @@ Host behavior:
   (and the serializer `format_id`).
 - `run` chooses the right call path based on that metadata.
 
+Export ABI schema (`voyd.export_abi` custom section, JSON):
+
+```
+{
+  "version": 1,
+  "exports": [
+    { "name": "add", "abi": "direct" },
+    { "name": "echo", "abi": "serialized", "formatId": "msgpack" }
+  ]
+}
+```
+
+Notes:
+- Entries are sorted by export name for a stable payload.
+- `formatId` is present only when `abi` is `"serialized"`.
+
 Example (pure export):
 
 ```voyd
@@ -169,11 +185,8 @@ Single-step design (breaking change):
 
 Why this is necessary:
 
-- The existing host boundary imports can only encode/decode primitives because
-  the host cannot introspect arbitrary Wasm data layouts. Supporting complex
-  values therefore requires Wasm-side serialization.
-- This change makes the current MsgPack host imports (`__voyd_msgpack_*`)
-  redundant; they can be removed once the Wasm-side payload path is in place.
+- The host cannot introspect arbitrary Wasm data layouts, so complex values
+  must be serialized inside the module.
 
 Proposed runtime shape:
 
@@ -253,10 +266,8 @@ or allocate via a simple bump allocator in `std::msgpack` (future work).
 
 ## Open Questions
 
-- What should the `voyd.export_abi` section format be (JSON vs MsgPack vs a
-  small binary table)?
-- Should `format_id` be a string, number, or interned symbol?
-- What is the canonical mapping for enums/unions (tagged map vs tuple)?
+- None for this phase. Revisit only if we add non-string map keys or new
+  serializer formats.
 
 ## Refactor Direction
 

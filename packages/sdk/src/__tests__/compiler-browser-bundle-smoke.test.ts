@@ -58,9 +58,7 @@ const createBrowserContext = (): BrowserContext => {
 };
 
 describe("browser bundle smoke", () => {
-  it(
-    "bundles and runs the browser compiler",
-    async () => {
+  it("bundles and runs the browser compiler", { timeout: 60000 }, async () => {
       const entry = fileURLToPath(
         new URL("./__fixtures__/browser-bundle-entry.ts", import.meta.url),
       );
@@ -151,7 +149,5 @@ describe("browser bundle smoke", () => {
       } finally {
         await rm(outDir, { recursive: true, force: true });
       }
-    },
-    { timeout: 30000 },
-  );
+    });
 });

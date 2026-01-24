@@ -1,5 +1,5 @@
 import type { ProgramSymbolId, SymbolId } from "./ids.js";
-import type { IntrinsicFunctionFlags } from "./symbol-index.js";
+import type { IntrinsicFunctionFlags, SerializerMetadata } from "./symbol-index.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 
@@ -17,6 +17,7 @@ export type ProgramSymbolArena = {
   getIntrinsicType(id: ProgramSymbolId): string | undefined;
   getIntrinsicName(id: ProgramSymbolId): string | undefined;
   getIntrinsicFunctionFlags(id: ProgramSymbolId): IntrinsicFunctionFlags;
+  getSerializer(id: ProgramSymbolId): SerializerMetadata | undefined;
   isModuleScoped(id: ProgramSymbolId): boolean;
 };
 
@@ -44,6 +45,7 @@ export const buildProgramSymbolArena = (
   const intrinsicTypesById: (string | undefined)[] = [];
   const intrinsicNamesById: (string | undefined)[] = [];
   const intrinsicFlagsById: IntrinsicFunctionFlags[] = [];
+  const serializerById: (SerializerMetadata | undefined)[] = [];
   const moduleScopedById: boolean[] = [];
 
   let nextId = 0;
@@ -69,6 +71,7 @@ export const buildProgramSymbolArena = (
       intrinsicTypesById[id] = mod.symbols.getIntrinsicType(symbol);
       intrinsicNamesById[id] = mod.symbols.getIntrinsicName(symbol);
       intrinsicFlagsById[id] = mod.symbols.getIntrinsicFunctionFlags(symbol);
+      serializerById[id] = mod.symbols.getSerializer(symbol);
       moduleScopedById[id] = mod.symbols.isModuleScoped(symbol);
     });
   });
@@ -115,7 +118,7 @@ export const buildProgramSymbolArena = (
         intrinsic: false,
         intrinsicUsesSignature: false,
       },
+    getSerializer: (id) => serializerById[id],
     isModuleScoped: (id) => moduleScopedById[id] === true,
   };
 };
-

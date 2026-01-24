@@ -1,10 +1,10 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/parser.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { codegen } from "../index.js";
-import { parseEffectTable, runEffectfulExport } from "./support/effects-harness.js";
+import {
+  compileEffectFixture,
+  parseEffectTable,
+  runEffectfulExport,
+} from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -14,11 +14,7 @@ const fixturePath = resolve(
 
 describe("effect signature validation", () => {
   it("fails fast on signature hash mismatches", async () => {
-    const source = readFileSync(fixturePath, "utf8");
-    const semantics = semanticsPipeline(
-      parse(source, "/proj/src/effects-export-generic-op-arg.voyd")
-    );
-    const { module } = codegen(semantics);
+    const { module } = await compileEffectFixture({ entryPath: fixturePath });
     const table = parseEffectTable(module);
     const op = table.ops[0];
     if (!op) {

@@ -1,0 +1,12 @@
+use std::msgpack::MsgPack
+use std::array::all
+use std::string::all
+
+pub fn echo(value: MsgPack) -> MsgPack
+  value
+
+pub fn fetch() -> MsgPack
+  ["a", "b", "c"]
+
+pub fn add(a: i32, b: i32) -> i32
+  a + b

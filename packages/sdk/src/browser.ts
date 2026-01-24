@@ -47,6 +47,7 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
     host,
     includeTests: options.includeTests,
     testsOnly: options.testsOnly,
+    testScope: options.testScope ?? "entry",
     loadModuleGraph,
   });
   return createCompileResult(result);

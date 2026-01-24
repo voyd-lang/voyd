@@ -4,13 +4,16 @@ import { describe, expect, it } from "vitest";
 import binaryen from "binaryen";
 import { parse } from "../../parser/parser.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
-import { runEffectfulExport, parseEffectTable } from "./support/effects-harness.js";
+import {
+  compileEffectFixture,
+  runEffectfulExport,
+  parseEffectTable,
+} from "./support/effects-harness.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
@@ -58,6 +61,8 @@ const buildLoweringSnapshot = () => {
       emitEffectHelpers: false,
       continuationBackend: {},
       testMode: false,
+      effectsHostBoundary: "off",
+      testScope: "all",
     },
     programHelpers,
     functions: new Map(),
@@ -67,6 +72,7 @@ const buildLoweringSnapshot = () => {
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),
+    recursiveBinders: new Map(),
     runtimeTypeRegistry: new Map(),
     runtimeTypeIds: { byKey: new Map(), nextId: { value: 1 } },
     lambdaEnvs: new Map(),
@@ -128,8 +134,11 @@ describe("effect perform lowering", () => {
     ).toBe(true);
   });
 
-  it("emits continuation env captures and effect requests in Wasm", () => {
-    const { module } = codegen(loadSemantics(), { emitEffectHelpers: true });
+  it("emits continuation env captures and effect requests in Wasm", async () => {
+    const { module } = await compileEffectFixture({
+      entryPath: fixturePath,
+      codegenOptions: { emitEffectHelpers: true },
+    });
     const text = module.emitText();
     expect(text).toContain("voydEffectRequest");
     expect(text).toContain("voydContEnvBase");
@@ -138,10 +147,7 @@ describe("effect perform lowering", () => {
   });
 
   it("does not re-evaluate guards when resuming after a perform", async () => {
-    const semantics = semanticsPipeline(
-      parse(readFileSync(guardFixturePath, "utf8"), "/proj/src/effects-perform-guard.voyd")
-    );
-    const { module } = codegen(semantics);
+    const { module } = await compileEffectFixture({ entryPath: guardFixturePath });
     if (process.env.DEBUG_EFFECTS_WAT === "1") {
       writeFileSync(
         "debug-effects-perform-guard.wat",

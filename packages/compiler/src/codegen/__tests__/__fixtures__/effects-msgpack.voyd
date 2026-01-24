@@ -1,0 +1,20 @@
+use std::array::Array
+use std::msgpack::{ MsgPack, pack_array, pack_i32, pack_string }
+use std::string::fns::{ new_string }
+
+eff Exchange
+  roundtrip(resume, value: MsgPack) -> MsgPack
+
+fn build_payload(): () -> MsgPack
+  var items = Array<MsgPack>::with_capacity(3)
+  items = items.push(pack_i32(1))
+  items = items.push(pack_string("hi"))
+  var nested = Array<MsgPack>::with_capacity(2)
+  nested = nested.push(pack_i32(2))
+  nested = nested.push(pack_i32(3))
+  items = items.push(pack_array(nested))
+  pack_array(items)
+
+pub fn main(): Exchange -> MsgPack
+  let payload = build_payload()
+  Exchange::roundtrip(payload)

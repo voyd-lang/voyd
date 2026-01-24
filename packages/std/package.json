@@ -6,7 +6,7 @@
   "scripts": {
     "build": "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/.placeholder','standard library source bundle');\"",
     "typecheck": "echo 'no types for voyd std'",
-    "test": "VOYD_USE_SRC=1 node ../../scripts/voyd test ./src",
+    "test": "VOYD_USE_SRC=1 node ../../scripts/voyd test ./src --fail-empty-tests",
     "lint": "echo 'no lint configured'"
   }
 }

@@ -1,10 +1,8 @@
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../parser/index.js";
-import { semanticsPipeline } from "../../semantics/pipeline.js";
-import { codegen } from "../index.js";
 import { createEffectsImports } from "./support/wasm-imports.js";
+import { compileEffectFixture } from "./support/effects-harness.js";
+import { wasmBufferSource } from "./support/wasm-utils.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -12,22 +10,13 @@ const fixturePath = resolve(
   "effects-generic-e2e.voyd"
 );
 
-const buildModule = () => {
-  const source = readFileSync(fixturePath, "utf8");
-  const semantics = semanticsPipeline(
-    parse(source, "/proj/src/effects-generic-e2e.voyd")
-  );
-  return codegen(semantics);
-};
+const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
 
 describe("generic effects wasm e2e", () => {
-  it("runs multiple instantiations of a generic effect", () => {
-    const { module } = buildModule();
-    const wasmBinary = new Uint8Array(module.emitBinary());
-    const instance = new WebAssembly.Instance(
-      new WebAssembly.Module(wasmBinary),
-      createEffectsImports()
-    );
+  it("runs multiple instantiations of a generic effect", async () => {
+    const { wasm } = await buildModule();
+    const wasmModule = new WebAssembly.Module(wasmBufferSource(wasm));
+    const instance = new WebAssembly.Instance(wasmModule, createEffectsImports());
     const test1 = instance.exports.test1 as CallableFunction;
     const test2 = instance.exports.test2 as CallableFunction;
     expect(test1()).toBe(20);

@@ -23,6 +23,7 @@ import {
 } from "./expressions/index.js";
 import { applyCurrentSubstitution } from "./expressions/shared.js";
 import { ensureTypeMatches } from "./type-system.js";
+import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
 import type { TypingContext, TypingState } from "./types.js";
 
 export { formatFunctionInstanceKey };
@@ -47,13 +48,26 @@ export const typeExpression = (
       typeof appliedExpected === "number" &&
       appliedExpected !== ctx.primitives.unknown
     ) {
-      ensureTypeMatches(
-        applied,
-        appliedExpected,
-        ctx,
-        state,
-        "expression context"
-      );
+      try {
+        ensureTypeMatches(
+          applied,
+          appliedExpected,
+          ctx,
+          state,
+          "expression context"
+        );
+      } catch (error) {
+        const span = normalizeSpan(ctx.hir.expressions.get(exprId)?.span);
+        emitDiagnostic({
+          ctx,
+          code: "TY9999",
+          params: {
+            kind: "unexpected-error",
+            message: error instanceof Error ? error.message : String(error),
+          },
+          span,
+        });
+      }
     }
     ctx.resolvedExprTypes.set(exprId, applied);
     return applied;

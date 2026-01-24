@@ -26,6 +26,7 @@ import type {
   ProgramFunctionInstanceId,
   SymbolId,
   TypeId,
+  TypeParamId,
   EffectRowId,
 } from "../semantics/ids.js";
 import type { createRttContext } from "./rtt/index.js";
@@ -48,8 +49,10 @@ export interface CodegenOptions {
   optimize?: boolean;
   validate?: boolean;
   emitEffectHelpers?: boolean;
+  effectsHostBoundary?: "msgpack" | "off";
   continuationBackend?: ContinuationBackendOptions;
   testMode?: boolean;
+  testScope?: "all" | "entry";
 }
 
 export interface CodegenResult {
@@ -143,9 +146,10 @@ export interface CodegenContext {
   functionInstances: Map<ProgramFunctionInstanceId, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
-  fixedArrayTypes: Map<TypeId, FixedArrayWasmType>;
+  fixedArrayTypes: Map<number, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;
+  recursiveBinders: Map<TypeParamId, TypeId>;
   runtimeTypeRegistry: Map<TypeId, RuntimeTypeIdRegistryEntry>;
   runtimeTypeIds: RuntimeTypeIdState;
   lambdaEnvs: Map<

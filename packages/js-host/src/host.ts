@@ -3,6 +3,7 @@ import type {
   HostProtocolTable,
   SignatureHash,
 } from "./protocol/types.js";
+import { decode, encode } from "@msgpack/msgpack";
 import {
   EFFECT_TABLE_EXPORT,
   formatSignatureHash,
@@ -15,10 +16,11 @@ import {
   LINEAR_MEMORY_EXPORT,
   MIN_EFFECT_BUFFER_SIZE,
 } from "./runtime/constants.js";
-import { runEffectLoop, createMsgPackHost } from "./runtime/dispatch.js";
+import { runEffectLoop } from "./runtime/dispatch.js";
 import { ensureMemoryCapacity } from "./runtime/memory.js";
 import type { ParsedEffectOp, ParsedEffectTable } from "./protocol/table.js";
 import { registerHandlersByLabelSuffix } from "./handlers.js";
+import { parseExportAbi } from "./protocol/export-abi.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
@@ -44,6 +46,8 @@ export type VoydHost = {
   run: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
 };
 
+const MSGPACK_OPTS = { useBigInt64: true } as const;
+
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   if (
     bytes.buffer instanceof ArrayBuffer &&
@@ -62,21 +66,6 @@ const toModule = (wasm: Uint8Array | WebAssembly.Module): WebAssembly.Module =>
   wasm instanceof WebAssembly.Module
     ? wasm
     : new WebAssembly.Module(toArrayBuffer(wasm));
-
-const mergeImports = ({
-  imports,
-  msgpackImports,
-}: {
-  imports?: WebAssembly.Imports;
-  msgpackImports: WebAssembly.Imports;
-}): WebAssembly.Imports => ({
-  ...(imports ?? {}),
-  ...msgpackImports,
-  env: {
-    ...(imports?.env ?? {}),
-    ...(msgpackImports.env ?? {}),
-  },
-});
 
 const requireExportedFunction = ({
   instance,
@@ -229,12 +218,11 @@ export const createVoydHost = async ({
   const module = toModule(wasm);
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
   const table = toHostProtocolTable(parsedTable);
-  const msgpackHost = createMsgPackHost();
-  const mergedImports = mergeImports({
-    imports,
-    msgpackImports: msgpackHost.imports,
-  });
-  const instance = new WebAssembly.Instance(module, mergedImports);
+  const exportAbi = parseExportAbi(module);
+  const exportAbiByName = new Map(
+    exportAbi.exports.map((entry) => [entry.name, entry] as const)
+  );
+  const instance = new WebAssembly.Instance(module, imports ?? {});
 
   const handlersByKey = new Map<string, EffectHandler>();
   const opByKey = new Map<string, ParsedEffectOp>();
@@ -285,10 +273,57 @@ export const createVoydHost = async ({
     initialized = true;
   };
 
+  const runSerialized = async <T = unknown>(
+    entryName: string,
+    args: unknown[] = []
+  ): Promise<T> => {
+    const entry = requireExportedFunction({ instance, name: entryName });
+    const msgpackMemory = requireExportedMemory({
+      instance,
+      name: LINEAR_MEMORY_EXPORT,
+    });
+    ensureMemoryCapacity({
+      memory: msgpackMemory,
+      requiredBytes: bufferSize * 2,
+      label: LINEAR_MEMORY_EXPORT,
+    });
+
+    const encodedArgs = encode(args, MSGPACK_OPTS) as Uint8Array;
+    if (encodedArgs.length > bufferSize) {
+      throw new Error("serialized args exceed buffer size");
+    }
+    const inPtr = 0;
+    const outPtr = bufferSize;
+    new Uint8Array(msgpackMemory.buffer, inPtr, encodedArgs.length).set(
+      encodedArgs
+    );
+    const written = (entry as CallableFunction)(
+      inPtr,
+      encodedArgs.length,
+      outPtr,
+      bufferSize
+    ) as number;
+    if (written < 0) {
+      throw new Error("serialized export encoding failed");
+    }
+    if (written > bufferSize) {
+      throw new Error("serialized export payload exceeds buffer size");
+    }
+    const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
+    return decode(bytes, MSGPACK_OPTS) as T;
+  };
+
   const runPure = async <T = unknown>(
     entryName: string,
     args: unknown[] = []
   ): Promise<T> => {
+    const abi = exportAbiByName.get(entryName);
+    if (abi?.abi === "serialized") {
+      if (abi.formatId !== "msgpack") {
+        throw new Error(`unsupported serializer format ${abi.formatId}`);
+      }
+      return runSerialized<T>(entryName, args);
+    }
     const entry = requireExportedFunction({ instance, name: entryName });
     return (entry as (...params: unknown[]) => T)(...args);
   };
@@ -316,6 +351,10 @@ export const createVoydHost = async ({
       instance,
       name: "effect_cont",
     });
+    const effectLen = requireExportedFunction({
+      instance,
+      name: "effect_len",
+    });
     const resumeEffectful = requireExportedFunction({
       instance,
       name: "resume_effectful",
@@ -325,7 +364,6 @@ export const createVoydHost = async ({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
-    msgpackHost.setMemory(msgpackMemory);
     ensureMemoryCapacity({
       memory: msgpackMemory,
       requiredBytes: bufferSize,
@@ -336,11 +374,11 @@ export const createVoydHost = async ({
       entry,
       effectStatus,
       effectCont,
+      effectLen,
       resumeEffectful,
       table: parsedTable,
       handlersByOpIndex,
       msgpackMemory,
-      msgpackHost,
       bufferPtr: 0,
       bufferSize,
     });

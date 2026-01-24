@@ -32,6 +32,7 @@
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2",
+    "@voyd/std": "0.0.0",
     "binaryen": "^123.0.0",
     "commander": "^14.0.0"
   }

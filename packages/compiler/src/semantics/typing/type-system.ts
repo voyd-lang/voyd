@@ -711,7 +711,9 @@ export const resolveTypeAlias = (
         paramMap
       );
       if (targetType === self) {
-        throw new Error(`type alias ${aliasName} cannot resolve to itself`);
+        throw new Error(
+          `cyclic type alias instantiation: type alias ${aliasName} cannot resolve to itself`
+        );
       }
       if (containsUnknownType(targetType, ctx)) {
         throw new Error(`type alias ${aliasName} could not be fully resolved`);
@@ -719,127 +721,166 @@ export const resolveTypeAlias = (
       return ctx.arena.get(targetType);
     });
 
-    if (ctx.typeAliases.resolutionDepth() === 1) {
-      const allowedParams = (() => {
-        const collected = new Set<TypeParamId>();
-        const seen = new Set<TypeId>();
+    const allowedParams = (() => {
+      const collected = new Set<TypeParamId>();
+      const seen = new Set<TypeId>();
 
-        const collect = (
-          type: TypeId,
-          boundRecursive: ReadonlySet<TypeParamId> = new Set()
-        ): void => {
-          if (seen.has(type)) {
-            return;
-          }
-          seen.add(type);
-
-          const desc = ctx.arena.get(type);
-          switch (desc.kind) {
-            case "type-param-ref":
-              if (!boundRecursive.has(desc.param)) {
-                collected.add(desc.param);
-              }
-              return;
-            case "recursive": {
-              const nextBound = new Set(boundRecursive);
-              nextBound.add(desc.binder);
-              collect(desc.body, nextBound);
-              return;
-            }
-            case "trait":
-            case "nominal-object":
-              desc.typeArgs.forEach((arg) => collect(arg, boundRecursive));
-              return;
-            case "structural-object":
-              desc.fields.forEach((field) => collect(field.type, boundRecursive));
-              return;
-            case "function":
-              desc.parameters.forEach((param) =>
-                collect(param.type, boundRecursive)
-              );
-              collect(desc.returnType, boundRecursive);
-              return;
-            case "union":
-              desc.members.forEach((member) => collect(member, boundRecursive));
-              return;
-            case "intersection":
-              if (typeof desc.nominal === "number") {
-                collect(desc.nominal, boundRecursive);
-              }
-              if (typeof desc.structural === "number") {
-                collect(desc.structural, boundRecursive);
-              }
-              return;
-            case "fixed-array":
-              collect(desc.element, boundRecursive);
-              return;
-            default:
-              return;
-          }
-        };
-
-        normalized.applied.forEach((arg) => collect(arg));
-        return collected;
-      })();
-
-      const containsUnboundTypeParam = (
+      const collect = (
         type: TypeId,
-        boundRecursive: ReadonlySet<TypeParamId> = new Set(),
-        seen: Set<TypeId> = new Set()
-      ): boolean => {
+        boundRecursive: ReadonlySet<TypeParamId> = new Set()
+      ): void => {
         if (seen.has(type)) {
-          return false;
+          return;
         }
         seen.add(type);
 
         const desc = ctx.arena.get(type);
         switch (desc.kind) {
           case "type-param-ref":
-            return (
-              !allowedParams.has(desc.param) && !boundRecursive.has(desc.param)
-            );
+            if (!boundRecursive.has(desc.param)) {
+              collected.add(desc.param);
+            }
+            return;
           case "recursive": {
             const nextBound = new Set(boundRecursive);
             nextBound.add(desc.binder);
-            return containsUnboundTypeParam(desc.body, nextBound, seen);
+            collect(desc.body, nextBound);
+            return;
           }
           case "trait":
           case "nominal-object":
-            return desc.typeArgs.some((arg) =>
-              containsUnboundTypeParam(arg, boundRecursive, seen)
-            );
+            desc.typeArgs.forEach((arg) => collect(arg, boundRecursive));
+            return;
           case "structural-object":
-            return desc.fields.some((field) =>
-              containsUnboundTypeParam(field.type, boundRecursive, seen)
-            );
+            desc.fields.forEach((field) => collect(field.type, boundRecursive));
+            return;
           case "function":
-            return (
-              desc.parameters.some((param) =>
-                containsUnboundTypeParam(param.type, boundRecursive, seen)
-              ) ||
-              containsUnboundTypeParam(desc.returnType, boundRecursive, seen)
+            desc.parameters.forEach((param) =>
+              collect(param.type, boundRecursive)
             );
+            collect(desc.returnType, boundRecursive);
+            return;
           case "union":
-            return desc.members.some((member) =>
-              containsUnboundTypeParam(member, boundRecursive, seen)
-            );
+            desc.members.forEach((member) => collect(member, boundRecursive));
+            return;
           case "intersection":
-            return (
-              (typeof desc.nominal === "number" &&
-                containsUnboundTypeParam(desc.nominal, boundRecursive, seen)) ||
-              (typeof desc.structural === "number" &&
-                containsUnboundTypeParam(desc.structural, boundRecursive, seen))
-            );
+            if (typeof desc.nominal === "number") {
+              collect(desc.nominal, boundRecursive);
+            }
+            if (typeof desc.structural === "number") {
+              collect(desc.structural, boundRecursive);
+            }
+            return;
           case "fixed-array":
-            return containsUnboundTypeParam(desc.element, boundRecursive, seen);
+            collect(desc.element, boundRecursive);
+            return;
           default:
-            return false;
+            return;
         }
       };
 
-      if (containsUnboundTypeParam(resolved)) {
-        throw new Error("cyclic type alias instantiation");
+      normalized.applied.forEach((arg) => collect(arg));
+      return collected;
+    })();
+
+    const containsUnboundTypeParam = (
+      type: TypeId,
+      boundRecursive: ReadonlySet<TypeParamId> = new Set(),
+      seen: Set<TypeId> = new Set()
+    ): boolean => {
+      if (seen.has(type)) {
+        return false;
       }
+      seen.add(type);
+
+      const desc = ctx.arena.get(type);
+      switch (desc.kind) {
+        case "type-param-ref":
+          return (
+            !allowedParams.has(desc.param) && !boundRecursive.has(desc.param)
+          );
+        case "recursive": {
+          const nextBound = new Set(boundRecursive);
+          nextBound.add(desc.binder);
+          return containsUnboundTypeParam(desc.body, nextBound, seen);
+        }
+        case "trait":
+        case "nominal-object":
+          return desc.typeArgs.some((arg) =>
+            containsUnboundTypeParam(arg, boundRecursive, seen)
+          );
+        case "structural-object":
+          return desc.fields.some((field) =>
+            containsUnboundTypeParam(field.type, boundRecursive, seen)
+          );
+        case "function":
+          return (
+            desc.parameters.some((param) =>
+              containsUnboundTypeParam(param.type, boundRecursive, seen)
+            ) ||
+            containsUnboundTypeParam(desc.returnType, boundRecursive, seen)
+          );
+        case "union":
+          return desc.members.some((member) =>
+            containsUnboundTypeParam(member, boundRecursive, seen)
+          );
+        case "intersection":
+          return (
+            (typeof desc.nominal === "number" &&
+              containsUnboundTypeParam(desc.nominal, boundRecursive, seen)) ||
+            (typeof desc.structural === "number" &&
+              containsUnboundTypeParam(desc.structural, boundRecursive, seen))
+          );
+        case "fixed-array":
+          return containsUnboundTypeParam(desc.element, boundRecursive, seen);
+        default:
+          return false;
+      }
+    };
+
+    const hasUnboundTypeParam = containsUnboundTypeParam(resolved);
+
+    if (hasUnboundTypeParam && ctx.typeAliases.resolutionDepth() === 1) {
+      const formatType = (type: TypeId): string => {
+        try {
+          return JSON.stringify({ id: type, desc: ctx.arena.get(type) });
+        } catch {
+          return String(type);
+        }
+      };
+      const resolvedDesc = ctx.arena.get(resolved);
+      const describeType = (type: TypeId): string => {
+        const desc = ctx.arena.get(type);
+        if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+          const nominal = ctx.arena.get(desc.nominal);
+          if (nominal.kind === "nominal-object") {
+            const args = nominal.typeArgs.map(formatType).join(", ");
+            return `${nominal.name}${args.length > 0 ? `<${args}>` : ""}`;
+          }
+        }
+        return formatType(type);
+      };
+      const detail =
+        resolvedDesc.kind === "union"
+          ? (() => {
+              const memberDetails = resolvedDesc.members
+                .map((member) => ({
+                  member,
+                  unbound: containsUnboundTypeParam(member),
+                }))
+                .map(
+                  ({ member, unbound }) =>
+                    `${describeType(member)}${unbound ? " (unbound)" : ""}`
+                )
+                .join(", ");
+              return `\nunion members: ${memberDetails}`;
+            })()
+          : "";
+      throw new Error(
+        `cyclic type alias instantiation for ${aliasName} (unbound type param)\nresolved: ${formatType(
+          resolved
+        )}${detail}`
+      );
     }
 
     assertAliasContractive({
@@ -849,7 +890,7 @@ export const resolveTypeAlias = (
       ctx,
     });
 
-    const canCacheNow = cacheable && ctx.typeAliases.resolutionDepth() === 1;
+    const canCacheNow = cacheable && !hasUnboundTypeParam;
     if (canCacheNow) {
       ctx.typeAliases.cacheInstance(key, resolved);
       ctx.typeAliases.markValidated(key);
@@ -949,7 +990,9 @@ const resolveNamedTypeExpr = (
   ) {
     const activeDesc = ctx.arena.get(activeAlias);
     if (activeDesc.kind === "type-param-ref") {
-      throw new Error("cyclic type alias instantiation");
+      throw new Error(
+        `cyclic type alias instantiation for ${name} (resolution mismatch)`
+      );
     }
   }
 

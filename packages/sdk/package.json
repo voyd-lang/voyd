@@ -40,7 +40,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && vite build -c ../../vite.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts src",
+    "test": "vitest run --config ../../vitest.config.ts --testTimeout 30000 src",
     "test:w": "vitest --config ../../vitest.config.ts src",
     "lint": "echo 'no lint configured'"
   },

@@ -1,0 +1,608 @@
+use std::array::Array
+use std::fixed_array::fns::{ new_fixed_array }
+use std::map::Map
+use std::memory::self as memory
+use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
+use std::optional::types::all
+use std::string::fns::{ new_string }
+use std::string::types::String
+use std::test::assertions::all
+
+@serializer("msgpack", encode_value, decode_value)
+pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | Map<MsgPack>
+
+obj Encoder {
+  ptr: i32,
+  pos: i32,
+  len: i32,
+  ok: bool
+}
+
+obj Decoder {
+  ptr: i32,
+  pos: i32,
+  end: i32,
+  ok: bool
+}
+
+pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
+  let ~encoder = Encoder(ptr, len)
+  encoder.encode_any(value)
+  if encoder.ok then: encoder.pos else: -1
+
+pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
+  let ~decoder = Decoder(ptr, len)
+  let value = decoder.decode_any()
+  if decoder.ok then: value else: pack_null()
+
+fn empty_binary(): () -> Binary
+  Binary { bytes: Array<i32>::new() }
+
+fn empty_array(): () -> Array<MsgPack>
+  Array<MsgPack>::new()
+
+fn empty_map(): () -> Map<MsgPack>
+  Map<MsgPack>::new()
+
+fn empty_text(): () -> String
+  new_string(new_fixed_array<i32>(0))
+
+pub fn pack_null(): () -> MsgPack
+  Null {}
+
+pub fn pack_i32(value: i32): () -> MsgPack
+  I32 { value }
+
+pub fn pack_i64(value: i64): () -> MsgPack
+  I64 { value }
+
+pub fn pack_f32(value: f32): () -> MsgPack
+  F32 { value }
+
+pub fn pack_f64(value: f64): () -> MsgPack
+  F64 { value }
+
+pub fn pack_bool(value: bool): () -> MsgPack
+  Bool { value }
+
+pub fn pack_string(value: String): () -> MsgPack
+  value
+
+pub fn pack_binary(value: Binary): () -> MsgPack
+  value
+
+pub fn pack_array(value: Array<MsgPack>): () -> MsgPack
+  value
+
+pub fn pack_map(value: Map<MsgPack>): () -> MsgPack
+  value
+
+pub fn unpack_i32(value: MsgPack): () -> i32
+  value.match(decoded)
+    I32:
+      decoded.value
+    I64:
+      wrap_i64(decoded.value)
+    else:
+      0
+
+pub fn unpack_i64(value: MsgPack): () -> i64
+  value.match(decoded)
+    I64:
+      decoded.value
+    I32:
+      extend_i32_s(decoded.value)
+    else:
+      extend_i32_s(0)
+
+pub fn unpack_f32(value: MsgPack): () -> f32
+  value.match(decoded)
+    F32:
+      decoded.value
+    F64:
+      demote_f64(decoded.value)
+    else:
+      reinterpret_i32_to_f32(0)
+
+pub fn unpack_f64(value: MsgPack): () -> f64
+  value.match(decoded)
+    F64:
+      decoded.value
+    F32:
+      promote_f32(decoded.value)
+    else:
+      0.0
+
+pub fn unpack_bool(value: MsgPack): () -> bool
+  value.match(decoded)
+    Bool:
+      decoded.value
+    else:
+      false
+
+pub fn unpack_string(value: MsgPack): () -> String
+  value.match(decoded)
+    String:
+      decoded
+    else:
+      empty_text()
+
+pub fn unpack_binary(value: MsgPack): () -> Binary
+  value.match(boxed)
+    Binary:
+      boxed
+    else:
+      empty_binary()
+
+pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
+  value.match(boxed)
+    Array<MsgPack>:
+      boxed
+    else:
+      empty_array()
+
+pub fn unpack_map(value: MsgPack): () -> Map<MsgPack>
+  value.match(boxed)
+    Map<MsgPack>:
+      boxed
+    else:
+      empty_map()
+
+test "msgpack encode/decode roundtrip for nested values":
+  let base = memory::size() * 65536
+  memory::grow(1)
+
+  var items = Array<MsgPack>::new()
+  items = items.push(pack_i32(1))
+  items = items.push(pack_string("hi"))
+
+  var map = Map<MsgPack>::new()
+  map = map.set("items", pack_array(items))
+  map = map.set("flag", pack_bool(true))
+
+  let value = pack_map(map)
+  let written = encode_value(value, base, 1024)
+  assert(written > 0, eq: true)
+
+  let decoded = decode_value(base, written)
+  let decoded_map = unpack_map(decoded)
+
+  match(decoded_map.get("flag"))
+    Some<MsgPack> { value: flag_value }:
+      assert(unpack_bool(flag_value), eq: true)
+    None:
+      assert(false, eq: true)
+
+  match(decoded_map.get("items"))
+    Some<MsgPack> { value: items_value }:
+      let arr = unpack_array(items_value)
+      assert(arr.length(), eq: 2)
+      match(arr.get(0))
+        Some<MsgPack> { value: first }:
+          assert(unpack_i32(first), eq: 1)
+        None:
+          assert(false, eq: true)
+      match(arr.get(1))
+        Some<MsgPack> { value: second }:
+          let text = unpack_string(second)
+          assert(text.equals("hi"), eq: true)
+        None:
+          assert(false, eq: true)
+    None:
+      assert(false, eq: true)
+
+impl Encoder
+  pub fn init(ptr: i32, len: i32)
+    Encoder { ptr: ptr, pos: 0, len: len, ok: true }
+
+  fn can_write(~self, count: i32) -> bool
+    if self.ok == false then:
+      return false
+    if count <= 0 then:
+      return true
+    let next = self.pos + count
+    if next > self.len then:
+      self.ok = false
+      return false
+    let memory_end = memory::size() * 65536
+    if (self.ptr + next) > memory_end then:
+      self.ok = false
+      return false
+    true
+
+  fn write_u8(~self, value: i32) -> void
+    if self.can_write(1) == false then:
+      return void
+    memory::store_u8(self.ptr + self.pos, value)
+    self.pos = self.pos + 1
+
+  fn write_u16(~self, value: i32) -> void
+    if self.can_write(2) == false then:
+      return void
+    self.write_u8(shift_ru(value, 8))
+    self.write_u8(bit_and(value, 255))
+
+  fn write_u32(~self, value: i32) -> void
+    if self.can_write(4) == false then:
+      return void
+    self.write_u8(shift_ru(value, 24))
+    self.write_u8(bit_and(shift_ru(value, 16), 255))
+    self.write_u8(bit_and(shift_ru(value, 8), 255))
+    self.write_u8(bit_and(value, 255))
+
+  fn write_u64(~self, value: i64) -> void
+    if self.can_write(8) == false then:
+      return void
+    self.write_u8(bit_and(wrap_i64(shift_ru(value, 56)), 255))
+    self.write_u8(bit_and(wrap_i64(shift_ru(value, 48)), 255))
+    self.write_u8(bit_and(wrap_i64(shift_ru(value, 40)), 255))
+    self.write_u8(bit_and(wrap_i64(shift_ru(value, 32)), 255))
+    self.write_u8(bit_and(wrap_i64(shift_ru(value, 24)), 255))
+    self.write_u8(bit_and(wrap_i64(shift_ru(value, 16)), 255))
+    self.write_u8(bit_and(wrap_i64(shift_ru(value, 8)), 255))
+    self.write_u8(bit_and(wrap_i64(value), 255))
+
+  fn encode_numeric(~self, value: Numeric) -> void
+    value.match(number)
+      I32:
+        self.encode_i32(number.value)
+      I64:
+        self.encode_i64(number.value)
+      F32:
+        self.encode_f32(number.value)
+      F64:
+        self.encode_f64(number.value)
+
+  fn encode_i32(~self, value: i32) -> void
+    if value >= 0 and value < 128 then:
+      self.write_u8(value)
+      return void
+    if value >= -32 and value < 0 then:
+      self.write_u8(value + 256)
+      return void
+    self.write_u8(210)
+    self.write_u32(value)
+
+  fn encode_i64(~self, value: i64) -> void
+    self.write_u8(211)
+    self.write_u64(value)
+
+  fn encode_f32(~self, value: f32) -> void
+    self.write_u8(202)
+    self.write_u32(reinterpret_f32_to_i32(value))
+
+  fn encode_f64(~self, value: f64) -> void
+    self.write_u8(203)
+    self.write_u64(reinterpret_f64_to_i64(value))
+
+  fn encode_string(~self, value: String) -> void
+    let len = value.byte_length()
+    if len < 32 then:
+      self.write_u8(160 + len)
+    elif: len < 256 then:
+      self.write_u8(217)
+      self.write_u8(len)
+    elif: len < 65536 then:
+      self.write_u8(218)
+      self.write_u16(len)
+    else:
+      self.write_u8(219)
+      self.write_u32(len)
+
+    let source = value.bytes.raw_storage()
+    var index = 0
+    while index < len do:
+      self.write_u8(__array_get(source, index))
+      index = index + 1
+
+  fn encode_binary(~self, bytes: Array<i32>) -> void
+    let len = bytes.length()
+    if len < 256 then:
+      self.write_u8(196)
+      self.write_u8(len)
+    elif: len < 65536 then:
+      self.write_u8(197)
+      self.write_u16(len)
+    else:
+      self.write_u8(198)
+      self.write_u32(len)
+
+    let source = bytes.raw_storage()
+    var index = 0
+    while index < len do:
+      self.write_u8(__array_get(source, index))
+      index = index + 1
+
+  fn encode_array(~self, value: Array<MsgPack>) -> void
+    let len = value.length()
+    if len < 16 then:
+      self.write_u8(144 + len)
+    elif: len < 65536 then:
+      self.write_u8(220)
+      self.write_u16(len)
+    else:
+      self.write_u8(221)
+      self.write_u32(len)
+
+    let source = value.raw_storage()
+    var index = 0
+    while index < len do:
+      self.encode_any(__array_get(source, index))
+      index = index + 1
+
+  fn encode_map(~self, value: Map<MsgPack>) -> void
+    let len = value.size()
+    if len < 16 then:
+      self.write_u8(128 + len)
+    elif: len < 65536 then:
+      self.write_u8(222)
+      self.write_u16(len)
+    else:
+      self.write_u8(223)
+      self.write_u32(len)
+
+    let entries = value.entries()
+    let storage = entries.raw_storage()
+    let entry_count = entries.length()
+    var index = 0
+    while index < entry_count do:
+      let entry = __array_get(storage, index)
+      self.encode_string(entry.key)
+      self.encode_any(entry.value)
+      index = index + 1
+
+  fn encode_any(~self, value: MsgPack) -> void
+    value.match(decoded)
+      Null:
+        self.write_u8(192)
+      Bool:
+        let flag = if decoded.value then: 195 else: 194
+        self.write_u8(flag)
+      I32:
+        self.encode_numeric(decoded)
+      I64:
+        self.encode_numeric(decoded)
+      F32:
+        self.encode_numeric(decoded)
+      F64:
+        self.encode_numeric(decoded)
+      String:
+        self.encode_string(decoded)
+      Binary:
+        self.encode_binary(decoded.bytes)
+      Array<MsgPack>:
+        self.encode_array(decoded)
+      Map<MsgPack>:
+        self.encode_map(decoded)
+      else:
+        self.ok = false
+
+impl Decoder
+  pub fn init(ptr: i32, len: i32)
+    Decoder { ptr: ptr, pos: 0, end: ptr + len, ok: true }
+
+  fn can_read(~self, count: i32) -> bool
+    if self.ok == false then:
+      return false
+    if count <= 0 then:
+      return true
+    let next = self.ptr + self.pos + count
+    let memory_end = memory::size() * 65536
+    if next > self.end then:
+      self.ok = false
+      return false
+    if next > memory_end then:
+      self.ok = false
+      return false
+    true
+
+  fn read_u8(~self) -> i32
+    if self.can_read(1) == false then:
+      return 0
+    let value = memory::load_u8(self.ptr + self.pos)
+    self.pos = self.pos + 1
+    value
+
+  fn read_u16(~self) -> i32
+    if self.can_read(2) == false then:
+      return 0
+    let high = self.read_u8()
+    let low = self.read_u8()
+    bit_or(shift_l(high, 8), low)
+
+  fn read_u32(~self) -> i32
+    if self.can_read(4) == false then:
+      return 0
+    let b1 = self.read_u8()
+    let b2 = self.read_u8()
+    let b3 = self.read_u8()
+    let b4 = self.read_u8()
+    var value = bit_or(shift_l(b1, 24), shift_l(b2, 16))
+    value = bit_or(value, shift_l(b3, 8))
+    bit_or(value, b4)
+
+  fn read_u64(~self) -> i64
+    if self.can_read(8) == false then:
+      return extend_i32_u(0)
+    let b1 = extend_i32_u(self.read_u8())
+    let b2 = extend_i32_u(self.read_u8())
+    let b3 = extend_i32_u(self.read_u8())
+    let b4 = extend_i32_u(self.read_u8())
+    let b5 = extend_i32_u(self.read_u8())
+    let b6 = extend_i32_u(self.read_u8())
+    let b7 = extend_i32_u(self.read_u8())
+    let b8 = extend_i32_u(self.read_u8())
+
+    var value = bit_or(shift_l(b1, 56), shift_l(b2, 48))
+    value = bit_or(value, shift_l(b3, 40))
+    value = bit_or(value, shift_l(b4, 32))
+    value = bit_or(value, shift_l(b5, 24))
+    value = bit_or(value, shift_l(b6, 16))
+    value = bit_or(value, shift_l(b7, 8))
+    bit_or(value, b8)
+
+  fn decode_string(~self, length: i32) -> String
+    if length <= 0 then:
+      return empty_text()
+    let storage = new_fixed_array<i32>(length)
+    var index = 0
+    while index < length do:
+      __array_set(storage, index, self.read_u8())
+      index = index + 1
+    new_string(storage)
+
+  fn decode_binary(~self, length: i32) -> Binary
+    if length <= 0 then:
+      return Binary { bytes: Array<i32>::with_capacity(0) }
+    var bytes = Array<i32>::with_capacity(length)
+    var index = 0
+    while index < length do:
+      bytes = bytes.push(self.read_u8())
+      index = index + 1
+    Binary { bytes: bytes }
+
+  fn decode_array(~self, length: i32) -> Array<MsgPack>
+    let capacity = if length < 0 then: 0 else: length
+    var out = Array<MsgPack>::with_capacity(capacity)
+    var index = 0
+    while index < length do:
+      out = out.push(self.decode_any())
+      index = index + 1
+    out
+
+  fn decode_map(~self, length: i32) -> Map<MsgPack>
+    var out = Map<MsgPack>::new()
+    var index = 0
+    while index < length do:
+      let key = self.decode_any()
+      let value = self.decode_any()
+      key.match(decoded_key)
+        String:
+          out = out.set(decoded_key, value)
+        else:
+          out = out
+      index = index + 1
+    out
+
+  fn decode_integer(~self, prefix: i32) -> MsgPack
+    if prefix < 128 then:
+      return pack_i32(prefix)
+    if prefix >= 224 then:
+      return pack_i32(prefix - 256)
+    if prefix == 204 then:
+      return pack_i32(self.read_u8())
+    if prefix == 205 then:
+      return pack_i32(self.read_u16())
+    if prefix == 206 then:
+      let value = self.read_u32()
+      if value < 0 then:
+        let extended = extend_i32_u(value)
+        return pack_i64(extended)
+      return pack_i32(value)
+    if prefix == 207 then:
+      return pack_i64(self.read_u64())
+    if prefix == 208 then:
+      return pack_i32(self.read_u8() - 256)
+    if prefix == 209 then:
+      let value = self.read_u16()
+      if value >= 32768 then:
+        return pack_i32(value - 65536)
+      return pack_i32(value)
+    if prefix == 210 then:
+      return pack_i32(self.read_u32())
+    if prefix == 211 then:
+      return pack_i64(self.read_u64())
+    pack_i32(0)
+
+  fn decode_any(~self) -> MsgPack
+    let prefix = self.read_u8()
+    if self.ok == false then:
+      return pack_null()
+    if prefix == 192 then:
+      return pack_null()
+    if prefix == 194 then:
+      return pack_bool(false)
+    if prefix == 195 then:
+      return pack_bool(true)
+    if prefix >= 160 and prefix < 192 then:
+      let len = prefix - 160
+      return pack_string(self.decode_string(len))
+    if prefix >= 144 and prefix < 160 then:
+      return pack_array(self.decode_array(prefix - 144))
+    if prefix >= 128 and prefix < 144 then:
+      return pack_map(self.decode_map(prefix - 128))
+    if prefix == 217 then:
+      return pack_string(self.decode_string(self.read_u8()))
+    if prefix == 218 then:
+      return pack_string(self.decode_string(self.read_u16()))
+    if prefix == 219 then:
+      return pack_string(self.decode_string(self.read_u32()))
+    if prefix == 220 then:
+      return pack_array(self.decode_array(self.read_u16()))
+    if prefix == 221 then:
+      return pack_array(self.decode_array(self.read_u32()))
+    if prefix == 222 then:
+      return pack_map(self.decode_map(self.read_u16()))
+    if prefix == 223 then:
+      return pack_map(self.decode_map(self.read_u32()))
+    if prefix == 196 then:
+      return pack_binary(self.decode_binary(self.read_u8()))
+    if prefix == 197 then:
+      return pack_binary(self.decode_binary(self.read_u16()))
+    if prefix == 198 then:
+      return pack_binary(self.decode_binary(self.read_u32()))
+    if prefix == 202 then:
+      let raw = self.read_u32()
+      return pack_f32(reinterpret_i32_to_f32(raw))
+    if prefix == 203 then:
+      let raw = self.read_u64()
+      return pack_f64(reinterpret_i64_to_f64(raw))
+    self.decode_integer(prefix)
+
+@intrinsic(name: "__shift_l")
+fn shift_l(value: i32, bits: i32): () -> i32 __shift_l(value, bits)
+
+@intrinsic(name: "__shift_l")
+fn shift_l(value: i64, bits: i32): () -> i64 __shift_l(value, bits)
+
+@intrinsic(name: "__shift_ru")
+fn shift_ru(value: i32, bits: i32): () -> i32 __shift_ru(value, bits)
+
+@intrinsic(name: "__shift_ru")
+fn shift_ru(value: i64, bits: i32): () -> i64 __shift_ru(value, bits)
+
+@intrinsic(name: "__bit_and")
+fn bit_and(value: i32, mask: i32): () -> i32 __bit_and(value, mask)
+
+@intrinsic(name: "__bit_or")
+fn bit_or(value: i32, other: i32): () -> i32 __bit_or(value, other)
+
+@intrinsic(name: "__bit_or")
+fn bit_or(value: i64, other: i64): () -> i64 __bit_or(value, other)
+
+@intrinsic(name: "__i32_wrap_i64")
+fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)
+
+@intrinsic(name: "__i64_extend_u")
+fn extend_i32_u(value: i32): () -> i64 __i64_extend_u(value)
+
+@intrinsic(name: "__i64_extend_s")
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
+
+@intrinsic(name: "__reinterpret_f32_to_i32")
+fn reinterpret_f32_to_i32(value: f32): () -> i32 __reinterpret_f32_to_i32(value)
+
+@intrinsic(name: "__reinterpret_i32_to_f32")
+fn reinterpret_i32_to_f32(value: i32): () -> f32 __reinterpret_i32_to_f32(value)
+
+@intrinsic(name: "__f32_demote_f64")
+fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+@intrinsic(name: "__f64_promote_f32")
+fn promote_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+@intrinsic(name: "__reinterpret_f64_to_i64")
+fn reinterpret_f64_to_i64(value: f64): () -> i64 __reinterpret_f64_to_i64(value)
+
+@intrinsic(name: "__reinterpret_i64_to_f64")
+fn reinterpret_i64_to_f64(value: i64): () -> f64 __reinterpret_i64_to_f64(value)

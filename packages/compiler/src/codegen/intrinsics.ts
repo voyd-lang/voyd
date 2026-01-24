@@ -26,10 +26,12 @@ import {
   modBinaryenTypeToHeapType,
 } from "@voyd/lib/binaryen-gc/index.js";
 import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
+import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
 type BooleanKind = "bool";
+type IntegerKind = "i32" | "i64";
 
 interface CompileIntrinsicCallParams {
   name: string;
@@ -153,6 +155,133 @@ export const compileIntrinsicCall = ({
     case "__type_to_heap_type": {
       assertArgCount(name, args, 1);
       return getHeapTypeArg({ call, ctx, index: 0, instanceId, name });
+    }
+    case "__memory_size": {
+      assertArgCount(name, args, 0);
+      return ctx.mod.memory.size(LINEAR_MEMORY_INTERNAL);
+    }
+    case "__memory_grow": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.memory.grow(args[0]!, LINEAR_MEMORY_INTERNAL);
+    }
+    case "__memory_load_u8": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i32.load8_u(0, 1, args[0]!, LINEAR_MEMORY_INTERNAL);
+    }
+    case "__memory_store_u8": {
+      assertArgCount(name, args, 2);
+      return ctx.mod.i32.store8(0, 1, args[0]!, args[1]!, LINEAR_MEMORY_INTERNAL);
+    }
+    case "__memory_load_u16": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i32.load16_u(0, 2, args[0]!, LINEAR_MEMORY_INTERNAL);
+    }
+    case "__memory_store_u16": {
+      assertArgCount(name, args, 2);
+      return ctx.mod.i32.store16(0, 2, args[0]!, args[1]!, LINEAR_MEMORY_INTERNAL);
+    }
+    case "__memory_load_u32": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i32.load(0, 4, args[0]!, LINEAR_MEMORY_INTERNAL);
+    }
+    case "__memory_store_u32": {
+      assertArgCount(name, args, 2);
+      return ctx.mod.i32.store(0, 4, args[0]!, args[1]!, LINEAR_MEMORY_INTERNAL);
+    }
+    case "__memory_copy": {
+      assertArgCount(name, args, 3);
+      return ctx.mod.memory.copy(
+        args[0]!,
+        args[1]!,
+        args[2]!,
+        LINEAR_MEMORY_INTERNAL,
+        LINEAR_MEMORY_INTERNAL
+      );
+    }
+    case "__shift_l":
+    case "__shift_ru": {
+      assertArgCount(name, args, 2);
+      const valueKind = requireIntegerKind(
+        getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
+        ctx
+      );
+      if (valueKind === "i32") {
+        return name === "__shift_l"
+          ? ctx.mod.i32.shl(args[0]!, args[1]!)
+          : ctx.mod.i32.shr_u(args[0]!, args[1]!);
+      }
+      const shiftType = getRequiredExprType(call.args[1]!.expr, ctx, instanceId);
+      const shiftExpr =
+        shiftType === ctx.program.primitives.i32
+          ? ctx.mod.i64.extend_u(args[1]!)
+          : args[1]!;
+      return name === "__shift_l"
+        ? ctx.mod.i64.shl(args[0]!, shiftExpr)
+        : ctx.mod.i64.shr_u(args[0]!, shiftExpr);
+    }
+    case "__bit_and":
+    case "__bit_or":
+    case "__bit_xor": {
+      assertArgCount(name, args, 2);
+      const valueKind = requireIntegerKind(
+        getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
+        ctx
+      );
+      if (valueKind === "i32") {
+        switch (name) {
+          case "__bit_and":
+            return ctx.mod.i32.and(args[0]!, args[1]!);
+          case "__bit_or":
+            return ctx.mod.i32.or(args[0]!, args[1]!);
+          case "__bit_xor":
+            return ctx.mod.i32.xor(args[0]!, args[1]!);
+        }
+      }
+      switch (name) {
+        case "__bit_and":
+          return ctx.mod.i64.and(args[0]!, args[1]!);
+        case "__bit_or":
+          return ctx.mod.i64.or(args[0]!, args[1]!);
+        case "__bit_xor":
+          return ctx.mod.i64.xor(args[0]!, args[1]!);
+      }
+      return ctx.mod.unreachable();
+    }
+    case "__i32_wrap_i64": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i32.wrap(args[0]!);
+    }
+    case "__i64_extend_u": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i64.extend_u(args[0]!);
+    }
+    case "__i64_extend_s": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i64.extend_s(args[0]!);
+    }
+    case "__reinterpret_f32_to_i32": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i32.reinterpret(args[0]!);
+    }
+    case "__reinterpret_i32_to_f32": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f32.reinterpret(args[0]!);
+    }
+    case "__reinterpret_f64_to_i64": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i64.reinterpret(args[0]!);
+    }
+    case "__reinterpret_i64_to_f64": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f64.reinterpret(args[0]!);
+    }
+    case "__f32_demote_f64": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f32.demote(args[0]!);
+    }
+    case "__f64_promote_f32": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f64.promote(args[0]!);
     }
     case "+":
     case "-":
@@ -495,6 +624,19 @@ const requireBooleanKind = ({
   return firstKind;
 };
 
+const requireIntegerKind = (typeId: TypeId, ctx: CodegenContext): IntegerKind => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "primitive") {
+    switch (desc.name) {
+      case "i32":
+        return "i32";
+      case "i64":
+        return "i64";
+    }
+  }
+  throw new Error("intrinsic arguments must be i32 or i64");
+};
+
 const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {
   const descriptor = ctx.program.types.getTypeDesc(typeId);
   if (descriptor.kind === "primitive") {
@@ -719,7 +861,8 @@ const defaultValueForType = (
     case "nominal-object":
     case "trait":
     case "intersection":
-    case "union": {
+    case "union":
+    case "recursive": {
       const wasmType = wasmTypeFor(typeId, ctx);
       if (wasmType === binaryen.i32) return ctx.mod.i32.const(0);
       if (wasmType === binaryen.i64) return ctx.mod.i64.const(0, 0);
