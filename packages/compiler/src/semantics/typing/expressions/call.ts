@@ -2350,6 +2350,8 @@ const typeIntrinsicCall = (
         typeArguments,
         allowTypeArguments,
       });
+    case "__ref_is_null":
+      return typeRefIsNullIntrinsic({ args, ctx });
     case "__memory_size":
       return typeMemorySizeIntrinsic({ args, ctx, typeArguments });
     case "__memory_grow":
@@ -2843,6 +2845,22 @@ const typeArrayCopyIntrinsic = ({
     "__array_copy element type"
   );
   return array;
+};
+
+const typeRefIsNullIntrinsic = ({
+  args,
+  ctx,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__ref_is_null",
+    args,
+    expected: 1,
+    detail: "value",
+  });
+  return ctx.primitives.bool;
 };
 
 const typeMemorySizeIntrinsic = ({
