@@ -31,7 +31,7 @@ import type {
 const declarePatternLocals = (
   pattern: HirPattern,
   ctx: CodegenContext,
-  fnCtx: FunctionContext
+  fnCtx: FunctionContext,
 ): void => {
   switch (pattern.kind) {
     case "wildcard":
@@ -41,12 +41,12 @@ const declarePatternLocals = (
       return;
     case "tuple":
       pattern.elements.forEach((entry) =>
-        declarePatternLocals(entry, ctx, fnCtx)
+        declarePatternLocals(entry, ctx, fnCtx),
       );
       return;
     case "destructure":
       pattern.fields.forEach((field) =>
-        declarePatternLocals(field.pattern, ctx, fnCtx)
+        declarePatternLocals(field.pattern, ctx, fnCtx),
       );
       if (pattern.spread) {
         declarePatternLocals(pattern.spread, ctx, fnCtx);
@@ -64,7 +64,10 @@ const declarePatternLocals = (
   }
 };
 
-const getNominalComponent = (type: TypeId, ctx: CodegenContext): TypeId | undefined => {
+const getNominalComponent = (
+  type: TypeId,
+  ctx: CodegenContext,
+): TypeId | undefined => {
   const desc = ctx.program.types.getTypeDesc(type);
   if (desc.kind === "nominal-object") {
     return type;
@@ -86,7 +89,7 @@ export const compileIfExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
   tailPosition: boolean,
-  expectedResultTypeId?: TypeId
+  expectedResultTypeId?: TypeId,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
@@ -124,11 +127,13 @@ export const compileIfExpr = (
       expectedResultTypeId,
     });
     const typedThen =
-      resultType === binaryen.none || binaryen.getExpressionType(value.expr) === resultType
+      resultType === binaryen.none ||
+      binaryen.getExpressionType(value.expr) === resultType
         ? value.expr
         : ctx.mod.block(null, [value.expr], resultType);
-    const typedElse =
-      resultType === binaryen.none || binaryen.getExpressionType(fallback.expr) === resultType
+    const typedElse: number =
+      resultType === binaryen.none ||
+      binaryen.getExpressionType(fallback.expr) === resultType
         ? fallback.expr
         : ctx.mod.block(null, [fallback.expr], resultType);
     fallback = {
@@ -146,19 +151,19 @@ export const compileMatchExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
   tailPosition: boolean,
-  expectedResultTypeId?: TypeId
+  expectedResultTypeId?: TypeId,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   const discriminantTypeId = getRequiredExprType(
     expr.discriminant,
     ctx,
-    typeInstanceId
+    typeInstanceId,
   );
   const discriminantType = getExprBinaryenType(
     expr.discriminant,
     ctx,
-    typeInstanceId
+    typeInstanceId,
   );
   const discriminantTemp = allocateTempLocal(discriminantType, fnCtx);
   const discriminantValue = compileExpr({
@@ -201,7 +206,7 @@ export const compileMatchExpr = (
 
   const initDiscriminant = ctx.mod.local.set(
     discriminantTemp.index,
-    discriminantValue
+    discriminantValue,
   );
 
   let chain: CompiledExpression | undefined;
@@ -228,14 +233,16 @@ export const compileMatchExpr = (
 
     const patternTypeId = patternTypeIdFor(arm.pattern);
     if (typeof patternTypeId !== "number") {
-      throw new Error(`match pattern missing type annotation (${arm.pattern.kind})`);
+      throw new Error(
+        `match pattern missing type annotation (${arm.pattern.kind})`,
+      );
     }
 
     const condition = compileMatchCondition(
       patternTypeId,
       discriminantTemp,
       ctx,
-      duplicateNominals
+      duplicateNominals,
     );
 
     const bindingOps: binaryen.ExpressionRef[] = [];
@@ -268,7 +275,7 @@ export const compileMatchExpr = (
             expr: ctx.mod.block(
               null,
               [...bindingOps, armValue.expr],
-              binaryen.getExpressionType(armValue.expr)
+              binaryen.getExpressionType(armValue.expr),
             ),
             usedReturnCall: armValue.usedReturnCall,
           };
@@ -281,11 +288,13 @@ export const compileMatchExpr = (
       } as CompiledExpression);
 
     const typedThen =
-      resultType === binaryen.none || binaryen.getExpressionType(armExpr.expr) === resultType
+      resultType === binaryen.none ||
+      binaryen.getExpressionType(armExpr.expr) === resultType
         ? armExpr.expr
         : ctx.mod.block(null, [armExpr.expr], resultType);
     const typedElse =
-      resultType === binaryen.none || binaryen.getExpressionType(fallback.expr) === resultType
+      resultType === binaryen.none ||
+      binaryen.getExpressionType(fallback.expr) === resultType
         ? fallback.expr
         : ctx.mod.block(null, [fallback.expr], resultType);
 
@@ -301,11 +310,7 @@ export const compileMatchExpr = (
   };
 
   return {
-    expr: ctx.mod.block(
-      null,
-      [initDiscriminant, finalExpr.expr],
-      resultType
-    ),
+    expr: ctx.mod.block(null, [initDiscriminant, finalExpr.expr], resultType),
     usedReturnCall: finalExpr.usedReturnCall,
   };
 };
@@ -314,12 +319,12 @@ const compileMatchCondition = (
   patternTypeId: TypeId,
   discriminant: LocalBindingLocal,
   ctx: CodegenContext,
-  duplicateNominals: ReadonlySet<TypeId>
+  duplicateNominals: ReadonlySet<TypeId>,
 ): binaryen.ExpressionRef => {
   const patternNominals = new Set<TypeId>();
   collectNominalComponents(patternTypeId, ctx, patternNominals);
   const useStrict = Array.from(patternNominals).some((nominal) =>
-    duplicateNominals.has(nominal)
+    duplicateNominals.has(nominal),
   );
   const makeAncestors = () =>
     structGetFieldValue({
@@ -338,14 +343,14 @@ const compileMatchCondition = (
     return ctx.mod.call(
       useStrict ? "__has_type" : "__extends",
       [ctx.mod.i32.const(structInfo.runtimeTypeId), makeAncestors()],
-      binaryen.i32
+      binaryen.i32,
     );
   };
 
   const collectTargets = (
     typeId: TypeId,
     seen: Set<TypeId>,
-    targets: TypeId[]
+    targets: TypeId[],
   ): void => {
     if (seen.has(typeId)) {
       return;
@@ -365,18 +370,19 @@ const compileMatchCondition = (
     throw new Error("match pattern requires a structural type");
   }
 
-  return targets.slice(1).reduce(
-    (condition, typeId) =>
-      ctx.mod.i32.or(condition, compileTypeTest(typeId)),
-    compileTypeTest(targets[0]!)
-  );
+  return targets
+    .slice(1)
+    .reduce(
+      (condition, typeId) => ctx.mod.i32.or(condition, compileTypeTest(typeId)),
+      compileTypeTest(targets[0]!),
+    );
 };
 
 export const compileWhileExpr = (
   expr: HirWhileExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
 ): CompiledExpression => {
   const loopLabel = `while_loop_${expr.id}`;
   const breakLabel = `${loopLabel}_break`;
@@ -389,31 +395,25 @@ export const compileWhileExpr = (
 
   const conditionCheck = ctx.mod.if(
     ctx.mod.i32.eqz(conditionExpr),
-    ctx.mod.br(breakLabel)
+    ctx.mod.br(breakLabel),
   );
 
   const body = withLoopScope(
     fnCtx,
     { breakLabel, continueLabel: loopLabel },
-    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr
+    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr,
   );
   const loopBody = ctx.mod.block(
     null,
-    [
-      conditionCheck,
-      body,
-      ctx.mod.br(loopLabel),
-    ],
-    binaryen.none
+    [conditionCheck, body, ctx.mod.br(loopLabel)],
+    binaryen.none,
   );
 
   return {
     expr: ctx.mod.block(
       breakLabel,
-      [
-        ctx.mod.loop(loopLabel, loopBody),
-      ],
-      binaryen.none
+      [ctx.mod.loop(loopLabel, loopBody)],
+      binaryen.none,
     ),
     usedReturnCall: false,
   };
@@ -423,18 +423,26 @@ export const compileLoopExpr = (
   expr: HirLoopExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
 ): CompiledExpression => {
   const loopLabel = `loop_${expr.id}`;
   const breakLabel = `${loopLabel}_break`;
   const body = withLoopScope(
     fnCtx,
     { breakLabel, continueLabel: loopLabel },
-    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr
+    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr,
   );
-  const loopBody = ctx.mod.block(null, [body, ctx.mod.br(loopLabel)], binaryen.none);
+  const loopBody = ctx.mod.block(
+    null,
+    [body, ctx.mod.br(loopLabel)],
+    binaryen.none,
+  );
   return {
-    expr: ctx.mod.block(breakLabel, [ctx.mod.loop(loopLabel, loopBody)], binaryen.none),
+    expr: ctx.mod.block(
+      breakLabel,
+      [ctx.mod.loop(loopLabel, loopBody)],
+      binaryen.none,
+    ),
     usedReturnCall: false,
   };
 };
@@ -443,7 +451,7 @@ export const compileBreakExpr = (
   expr: HirBreakExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
 ): CompiledExpression => {
   const target = resolveLoopScope({ fnCtx, label: expr.label });
   const ops: binaryen.ExpressionRef[] = [];
@@ -453,7 +461,7 @@ export const compileBreakExpr = (
     ops.push(
       binaryen.getExpressionType(valueExpr) === binaryen.none
         ? valueExpr
-        : ctx.mod.drop(valueExpr)
+        : ctx.mod.drop(valueExpr),
     );
   }
   ops.push(ctx.mod.br(target.breakLabel));
@@ -467,7 +475,7 @@ export const compileBreakExpr = (
 export const compileContinueExpr = (
   expr: HirContinueExpr,
   ctx: CodegenContext,
-  fnCtx: FunctionContext
+  fnCtx: FunctionContext,
 ): CompiledExpression => {
   const target = resolveLoopScope({ fnCtx, label: expr.label });
   return { expr: ctx.mod.br(target.continueLabel), usedReturnCall: false };
@@ -475,7 +483,7 @@ export const compileContinueExpr = (
 const collectNominalComponents = (
   typeId: TypeId,
   ctx: CodegenContext,
-  acc: Set<TypeId>
+  acc: Set<TypeId>,
 ): void => {
   const nominal = getNominalComponent(typeId, ctx);
   if (typeof nominal === "number") {
@@ -485,7 +493,7 @@ const collectNominalComponents = (
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "union") {
     desc.members.forEach((member) =>
-      collectNominalComponents(member, ctx, acc)
+      collectNominalComponents(member, ctx, acc),
     );
   }
 };
