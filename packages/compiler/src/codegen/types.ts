@@ -45,7 +45,7 @@ const bin = binaryen as unknown as AugmentedBinaryen;
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
-type WasmTypeMode = "runtime" | "signature";
+export type WasmTypeMode = "runtime" | "signature";
 
 type RuntimeTypeKeyState = {
   typeId: TypeId;
@@ -256,7 +256,9 @@ export const getFixedArrayWasmTypes = (
     ctx,
     seen,
     mode,
-    lowerType: (id, ctx, seen, mode) => wasmTypeFor(id, ctx, seen, mode),
+    // Wasm GC arrays are invariant, so fixed-array element heap types must stay
+    // concrete even when the caller is lowering a signature.
+    lowerType: (id, ctx, seen) => wasmHeapFieldTypeFor(id, ctx, seen, "runtime"),
   });
 };
 
@@ -274,9 +276,7 @@ export const wasmTypeFor = (
       return binaryen.funcref;
     }
     if (desc.kind === "fixed-array") {
-      const elementType = seen.has(desc.element)
-        ? ctx.rtt.baseType
-        : wasmTypeFor(desc.element, ctx, seen, mode);
+      const elementType = wasmHeapFieldTypeFor(desc.element, ctx, seen, "runtime");
       return ensureFixedArrayWasmTypesByElement({ elementType, ctx }).type;
     }
     return ctx.rtt.baseType;
@@ -407,12 +407,49 @@ const directStructuralDeps = (
     return [];
   }
   const deps = new Set<TypeId>();
-  desc.fields.forEach((field) => {
-    const dep = resolveStructuralTypeId(field.type, ctx);
-    if (typeof dep === "number") {
-      deps.add(dep);
+
+  const collect = (root: TypeId): void => {
+    const active = new Set<TypeId>();
+    const pending: TypeId[] = [root];
+    while (pending.length > 0) {
+      const current = pending.pop()!;
+      if (active.has(current)) {
+        continue;
+      }
+      active.add(current);
+
+      const resolved = resolveStructuralTypeId(current, ctx);
+      if (typeof resolved === "number") {
+        deps.add(resolved);
+        continue;
+      }
+
+      const inner = ctx.program.types.getTypeDesc(current);
+      if (inner.kind === "fixed-array") {
+        pending.push(inner.element);
+        continue;
+      }
+      if (inner.kind === "union") {
+        inner.members.forEach((member) => pending.push(member));
+        continue;
+      }
+      if (inner.kind === "intersection") {
+        if (typeof inner.nominal === "number") {
+          pending.push(inner.nominal);
+        }
+        if (typeof inner.structural === "number") {
+          pending.push(inner.structural);
+        }
+        continue;
+      }
+      if (inner.kind === "function") {
+        inner.parameters.forEach((param) => pending.push(param.type));
+        pending.push(inner.returnType);
+      }
     }
-  });
+  };
+
+  desc.fields.forEach((field) => collect(field.type));
   return Array.from(deps).sort((a, b) => a - b);
 };
 
@@ -550,11 +587,26 @@ const wasmStructFieldTypeFor = (
   typeId: TypeId,
   ctx: CodegenContext,
 ): binaryen.Type => {
+  return wasmHeapFieldTypeFor(typeId, ctx);
+};
+
+export const wasmHeapFieldTypeFor = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  seen: Set<TypeId> = new Set(),
+  mode: WasmTypeMode = "signature",
+): binaryen.Type => {
   const structuralId = resolveStructuralTypeId(typeId, ctx);
   if (typeof structuralId === "number") {
     return ensureStructuralRuntimeType(structuralId, ctx);
   }
-  return wasmTypeFor(typeId, ctx, new Set(), "signature");
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    // Avoid unfolding arbitrary recursive wrappers for field heap types; if a recursive
+    // type doesn't resolve to a structural heap type, treat it conservatively.
+    return ctx.rtt.baseType;
+  }
+  return wasmTypeFor(typeId, ctx, seen, mode);
 };
 
 export const getSymbolTypeId = (
@@ -631,6 +683,24 @@ export const getRequiredExprType = (
   if (typeof typeId === "number") {
     return substituteTypeForInstance({ typeId, ctx, instanceId });
   }
+  throw new Error(`codegen missing type information for expression ${exprId}`);
+};
+
+export const getUnresolvedExprType = (
+  exprId: HirExprId,
+  ctx: CodegenContext,
+  instanceId?: ProgramFunctionInstanceId,
+): TypeId => {
+  const instanceType = getInstanceExprType(exprId, ctx, instanceId);
+  if (typeof instanceType === "number") {
+    return substituteTypeForInstance({ typeId: instanceType, ctx, instanceId });
+  }
+
+  const baseTypeId = ctx.module.types.getExprType(exprId);
+  if (typeof baseTypeId === "number") {
+    return substituteTypeForInstance({ typeId: baseTypeId, ctx, instanceId });
+  }
+
   throw new Error(`codegen missing type information for expression ${exprId}`);
 };
 
@@ -842,44 +912,62 @@ export const resolveStructuralTypeId = (
   typeId: TypeId,
   ctx: CodegenContext,
 ): TypeId | undefined => {
+  const cached = ctx.structuralIdCache.get(typeId);
+  if (cached !== undefined || ctx.structuralIdCache.has(typeId)) {
+    return cached ?? undefined;
+  }
+  if (ctx.resolvingStructuralIds.has(typeId)) {
+    return undefined;
+  }
+  ctx.resolvingStructuralIds.add(typeId);
+
   const desc = ctx.program.types.getTypeDesc(typeId);
-  if (desc.kind === "recursive") {
-    const unfolded = ctx.program.types.substitute(
-      desc.body,
-      new Map([[desc.binder, typeId]]),
-    );
-    return resolveStructuralTypeId(unfolded, ctx);
-  }
-  if (desc.kind === "structural-object") {
-    return typeId;
-  }
-  if (desc.kind === "nominal-object") {
-    const info = ctx.program.objects.getInfoByNominal(typeId);
-    if (info) {
-      return info.structural;
-    }
-    const owner = desc.owner;
-    if (typeof owner !== "number") {
+  try {
+    const resolved = (() => {
+      if (desc.kind === "recursive") {
+        const unfolded = ctx.program.types.substitute(
+          desc.body,
+          new Map([[desc.binder, typeId]]),
+        );
+        return resolveStructuralTypeId(unfolded, ctx);
+      }
+      if (desc.kind === "structural-object") {
+        return typeId;
+      }
+      if (desc.kind === "nominal-object") {
+        const info = ctx.program.objects.getInfoByNominal(typeId);
+        if (info) {
+          return info.structural;
+        }
+        const owner = desc.owner;
+        if (typeof owner !== "number") {
+          return undefined;
+        }
+        const template = ctx.program.objects.getTemplate(owner);
+        if (!template) {
+          return undefined;
+        }
+        if (template.params.length !== desc.typeArgs.length) {
+          return undefined;
+        }
+        const substitution = new Map(
+          template.params.map(
+            (param, index) => [param.typeParam, desc.typeArgs[index]!] as const,
+          ),
+        );
+        return ctx.program.types.substitute(template.structural, substitution);
+      }
+      if (desc.kind === "intersection" && typeof desc.structural === "number") {
+        return desc.structural;
+      }
       return undefined;
-    }
-    const template = ctx.program.objects.getTemplate(owner);
-    if (!template) {
-      return undefined;
-    }
-    if (template.params.length !== desc.typeArgs.length) {
-      return undefined;
-    }
-    const substitution = new Map(
-      template.params.map(
-        (param, index) => [param.typeParam, desc.typeArgs[index]!] as const,
-      ),
-    );
-    return ctx.program.types.substitute(template.structural, substitution);
+    })();
+
+    ctx.structuralIdCache.set(typeId, typeof resolved === "number" ? resolved : null);
+    return resolved;
+  } finally {
+    ctx.resolvingStructuralIds.delete(typeId);
   }
-  if (desc.kind === "intersection" && typeof desc.structural === "number") {
-    return desc.structural;
-  }
-  return undefined;
 };
 
 const makeRuntimeTypeLabel = ({
@@ -961,6 +1049,7 @@ const buildRuntimeAncestors = ({
     const candidates = ctx.program.objects.getNominalInstancesByOwner(
       sourceDesc.owner,
     );
+
     candidates.forEach((candidateNominal) => {
       if (candidateNominal === nominalId) {
         return;

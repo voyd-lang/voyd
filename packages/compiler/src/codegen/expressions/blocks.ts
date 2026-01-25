@@ -42,12 +42,12 @@ export const compileBlockExpr = (
       tailPosition,
       expectedResultTypeId,
     });
-    const actualType = getRequiredExprType(expr.value, ctx, typeInstanceId);
+    const requiredActualType = getRequiredExprType(expr.value, ctx, typeInstanceId);
     const coerced =
       typeof expectedResultTypeId === "number" && !usedReturnCall
         ? coerceValueToType({
             value: valueExpr,
-            actualType,
+            actualType: requiredActualType,
             targetType: expectedResultTypeId,
             ctx,
             fnCtx,
@@ -129,14 +129,14 @@ export const compileStatement = (
               : [valueStmt, ...cleanup, ctx.mod.return()];
           return ctx.mod.block(null, ops, binaryen.none);
         }
-        const actualType = getRequiredExprType(
+        const requiredActualType = getRequiredExprType(
           stmt.value,
           ctx,
           typeInstanceId
         );
         const coerced = coerceValueToType({
           value: valueExpr.expr,
-          actualType,
+          actualType: requiredActualType,
           targetType: fnCtx.returnTypeId,
           ctx,
           fnCtx,

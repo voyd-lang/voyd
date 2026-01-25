@@ -148,6 +148,8 @@ export interface CodegenContext {
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
   structHeapTypes: Map<TypeId, binaryen.Type>;
+  structuralIdCache: Map<TypeId, TypeId | null>;
+  resolvingStructuralIds: Set<TypeId>;
   fixedArrayTypes: Map<number, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;

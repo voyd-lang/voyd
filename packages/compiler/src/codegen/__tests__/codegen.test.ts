@@ -142,6 +142,8 @@ const buildCodegenProgram = (
   const programHelpers = createProgramHelperRegistry();
   const structTypes = new Map();
   const structHeapTypes = new Map();
+  const structuralIdCache = new Map<TypeId, TypeId | null>();
+  const resolvingStructuralIds = new Set<TypeId>();
   const fixedArrayTypes = new Map();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     program,
@@ -157,6 +159,8 @@ const buildCodegenProgram = (
     itemsToSymbols: new Map(),
     structTypes,
     structHeapTypes,
+    structuralIdCache,
+    resolvingStructuralIds,
     fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),
@@ -220,6 +224,8 @@ describe("next codegen", () => {
     const programHelpers = createProgramHelperRegistry();
     const structTypes = new Map();
     const structHeapTypes = new Map();
+    const structuralIdCache = new Map<TypeId, TypeId | null>();
+    const resolvingStructuralIds = new Set<TypeId>();
     const fixedArrayTypes = new Map();
 
     const ctx: CodegenContext = {
@@ -236,6 +242,8 @@ describe("next codegen", () => {
       itemsToSymbols: new Map(),
       structTypes,
       structHeapTypes,
+      structuralIdCache,
+      resolvingStructuralIds,
       fixedArrayTypes,
       closureTypes: new Map(),
       functionRefTypes: new Map(),

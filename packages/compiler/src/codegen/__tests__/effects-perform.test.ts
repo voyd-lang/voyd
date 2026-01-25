@@ -17,6 +17,7 @@ import {
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
+import type { TypeId } from "../../semantics/ids.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -50,6 +51,8 @@ const buildLoweringSnapshot = () => {
   const programHelpers = createProgramHelperRegistry();
   const structTypes = new Map();
   const structHeapTypes = new Map();
+  const structuralIdCache = new Map<TypeId, TypeId | null>();
+  const resolvingStructuralIds = new Set<TypeId>();
   const fixedArrayTypes = new Map();
   const ctx: CodegenContext = {
     mod,
@@ -73,6 +76,8 @@ const buildLoweringSnapshot = () => {
     itemsToSymbols: new Map(),
     structTypes,
     structHeapTypes,
+    structuralIdCache,
+    resolvingStructuralIds,
     fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),

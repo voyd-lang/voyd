@@ -12,10 +12,12 @@ import {
   getRequiredExprType,
   getStructuralTypeInfo,
   getFixedArrayWasmTypes,
+  wasmHeapFieldTypeFor,
   wasmTypeFor,
 } from "./types.js";
 import { allocateTempLocal } from "./locals.js";
 import { loadStructuralField } from "./structural.js";
+import { coerceExprToWasmType } from "./wasm-type-coercions.js";
 import {
   arrayCopy,
   arrayGet,
@@ -79,7 +81,12 @@ export const compileIntrinsicCall = ({
     case "__array_new_fixed": {
       const arrayType = getRequiredExprType(call.id, ctx, instanceId);
       const heapType = getFixedArrayHeapType(arrayType, ctx);
-      return arrayNewFixed(ctx.mod, heapType, args as number[]);
+      const desc = getFixedArrayDescriptor(arrayType, ctx);
+      const elementType = wasmHeapFieldTypeFor(desc.element, ctx, new Set(), "runtime");
+      const values = args.map((value) =>
+        coerceExprToWasmType({ expr: value!, targetType: elementType, ctx })
+      );
+      return arrayNewFixed(ctx.mod, heapType, values as number[]);
     }
     case "__array_get": {
       if (args.length === 2) {
@@ -87,7 +94,7 @@ export const compileIntrinsicCall = ({
           getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
           ctx
         );
-        const elementType = wasmTypeFor(arrayType.element, ctx);
+        const elementType = wasmHeapFieldTypeFor(arrayType.element, ctx, new Set(), "runtime");
         return arrayGet(ctx.mod, args[0]!, args[1]!, elementType, false);
       }
       assertArgCount(name, args, 4);
@@ -108,13 +115,17 @@ export const compileIntrinsicCall = ({
         ctx,
         instanceId
       );
+      const arrayTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      const desc = getFixedArrayDescriptor(arrayTypeId, ctx);
+      const elementType = wasmHeapFieldTypeFor(desc.element, ctx, new Set(), "runtime");
+      const value = coerceExprToWasmType({ expr: args[2]!, targetType: elementType, ctx });
       const temp = allocateTempLocal(arrayType, fnCtx);
       const target = ctx.mod.local.get(temp.index, arrayType);
       return ctx.mod.block(
         null,
         [
           ctx.mod.local.set(temp.index, args[0]!),
-          arraySet(ctx.mod, target, args[1]!, args[2]!),
+          arraySet(ctx.mod, target, args[1]!, value),
           ctx.mod.local.get(temp.index, arrayType),
         ],
         getExprBinaryenType(call.id, ctx, instanceId)
@@ -863,7 +874,7 @@ const defaultValueForType = (
     case "intersection":
     case "union":
     case "recursive": {
-      const wasmType = wasmTypeFor(typeId, ctx);
+      const wasmType = wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime");
       if (wasmType === binaryen.i32) return ctx.mod.i32.const(0);
       if (wasmType === binaryen.i64) return ctx.mod.i64.const(0, 0);
       if (wasmType === binaryen.f32) return ctx.mod.f32.const(0);
