@@ -1,0 +1,33 @@
+obj Box<T> {
+  v: T
+}
+
+type Node = { value: i32, next: Box<Node> }
+
+type Self = { value: i32, next: Self }
+
+fn null_value<T>() -> T
+  let arr = __array_new<T>(1)
+  __array_get(arr, 0)
+
+fn build_node(value: i32) -> Node
+  let null_node: Node = null_value<Node>()
+  let next = Box<Node> { v: null_node }
+  { value, next }
+
+fn node_roundtrip() -> i32
+  let ~n = build_node(7)
+  n.next.v = n
+  n.next.v.value
+
+fn build_self(value: i32) -> Self
+  let null_self: Self = null_value<Self>()
+  { value, next: null_self }
+
+fn self_roundtrip() -> i32
+  let ~s = build_self(11)
+  s.next = s
+  s.next.value
+
+pub fn main() -> i32
+  node_roundtrip() + self_roundtrip()

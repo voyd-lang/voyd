@@ -23,6 +23,7 @@ import {
   wasmTypeFor,
 } from "./types.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
+import { coerceExprToWasmType } from "./wasm-type-coercions.js";
 
 export const requiresStructuralConversion = (
   actualType: TypeId,
@@ -91,6 +92,12 @@ export const coerceValueToType = ({
         ctx,
         fnCtx,
       });
+      const someField = someInfo.fields[0]!;
+      const innerValue = coerceExprToWasmType({
+        expr: inner,
+        targetType: someField.heapWasmType,
+        ctx,
+      });
       return initStruct(ctx.mod, someInfo.runtimeType, [
         ctx.mod.global.get(
           someInfo.ancestorsGlobal,
@@ -104,7 +111,7 @@ export const coerceValueToType = ({
           someInfo.methodTableGlobal,
           ctx.rtt.methodLookupHelpers.lookupTableType
         ),
-        inner,
+        innerValue,
       ]);
     }
   }
@@ -289,7 +296,19 @@ export const emitStructuralConversion = ({
       binaryen.funcref
     );
     const getter = refCast(ctx.mod, accessor, sourceField.getterType!);
-    return callRef(ctx.mod, getter, [sourceRef], sourceField.wasmType);
+    const raw = callRef(ctx.mod, getter, [sourceRef], sourceField.wasmType);
+    const coerced = coerceValueToType({
+      value: raw,
+      actualType: sourceField.typeId,
+      targetType: field.typeId,
+      ctx,
+      fnCtx,
+    });
+    return coerceExprToWasmType({
+      expr: coerced,
+      targetType: field.heapWasmType,
+      ctx,
+    });
   });
 
   const converted = initStruct(ctx.mod, target.runtimeType, [

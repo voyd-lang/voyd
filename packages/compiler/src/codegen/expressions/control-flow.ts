@@ -123,8 +123,16 @@ export const compileIfExpr = (
       tailPosition,
       expectedResultTypeId,
     });
+    const typedThen =
+      resultType === binaryen.none || binaryen.getExpressionType(value.expr) === resultType
+        ? value.expr
+        : ctx.mod.block(null, [value.expr], resultType);
+    const typedElse =
+      resultType === binaryen.none || binaryen.getExpressionType(fallback.expr) === resultType
+        ? fallback.expr
+        : ctx.mod.block(null, [fallback.expr], resultType);
     fallback = {
-      expr: ctx.mod.if(condition, value.expr, fallback.expr),
+      expr: ctx.mod.if(condition, typedThen, typedElse),
       usedReturnCall: value.usedReturnCall && fallback.usedReturnCall,
     };
   }
@@ -141,6 +149,7 @@ export const compileMatchExpr = (
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   const discriminantTypeId = getRequiredExprType(
     expr.discriminant,
     ctx,
@@ -271,8 +280,17 @@ export const compileMatchExpr = (
         usedReturnCall: false,
       } as CompiledExpression);
 
+    const typedThen =
+      resultType === binaryen.none || binaryen.getExpressionType(armExpr.expr) === resultType
+        ? armExpr.expr
+        : ctx.mod.block(null, [armExpr.expr], resultType);
+    const typedElse =
+      resultType === binaryen.none || binaryen.getExpressionType(fallback.expr) === resultType
+        ? fallback.expr
+        : ctx.mod.block(null, [fallback.expr], resultType);
+
     chain = {
-      expr: ctx.mod.if(condition, armExpr.expr, fallback.expr),
+      expr: ctx.mod.if(condition, typedThen, typedElse),
       usedReturnCall: armExpr.usedReturnCall && fallback.usedReturnCall,
     };
   }
@@ -286,7 +304,7 @@ export const compileMatchExpr = (
     expr: ctx.mod.block(
       null,
       [initDiscriminant, finalExpr.expr],
-      getExprBinaryenType(expr.id, ctx, typeInstanceId)
+      resultType
     ),
     usedReturnCall: finalExpr.usedReturnCall,
   };

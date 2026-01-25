@@ -20,6 +20,7 @@ import { allocateTempLocal } from "../locals.js";
 import { coerceValueToType, loadStructuralField } from "../structural.js";
 import { compileOptionalNoneValue } from "../optionals.js";
 import { getExprBinaryenType, getRequiredExprType, getStructuralTypeInfo } from "../types.js";
+import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 
 export const compileObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
@@ -169,7 +170,12 @@ export const compileObjectLiteralExpr = (
       if (!binding) {
         throw new Error(`missing binding for field ${field.name}`);
       }
-      return ctx.mod.local.get(binding.index, binding.type);
+      const value = ctx.mod.local.get(binding.index, binding.type);
+      return coerceExprToWasmType({
+        expr: value,
+        targetType: field.heapWasmType,
+        ctx,
+      });
     }),
   ];
   const literal = initStruct(ctx.mod, structInfo.runtimeType, values);
@@ -241,7 +247,12 @@ export const compileTupleExpr = (
       if (!temp) {
         throw new Error(`missing binding for tuple field ${field.name}`);
       }
-      return ctx.mod.local.get(temp.index, temp.type);
+      const value = ctx.mod.local.get(temp.index, temp.type);
+      return coerceExprToWasmType({
+        expr: value,
+        targetType: field.heapWasmType,
+        ctx,
+      });
     }),
   ];
 

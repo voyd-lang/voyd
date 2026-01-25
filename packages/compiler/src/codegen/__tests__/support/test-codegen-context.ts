@@ -158,6 +158,7 @@ export const createTestCodegenContext = (): {
     functionInstances: new Map() as any,
     itemsToSymbols: new Map(),
     structTypes: new Map(),
+    structHeapTypes: new Map(),
     fixedArrayTypes: new Map(),
     closureTypes: new Map(),
     functionRefTypes: new Map(),

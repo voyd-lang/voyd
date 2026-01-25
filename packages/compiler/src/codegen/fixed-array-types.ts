@@ -43,7 +43,8 @@ export const ensureFixedArrayWasmTypes = ({
   if (desc.kind !== "fixed-array") {
     throw new Error("intrinsic requires a fixed-array type");
   }
-  // Arrays are invariant, so signatures must use the concrete runtime element type.
-  const elementType = lowerType(desc.element, ctx, seen, "runtime");
+  // Arrays are invariant, so signatures must use a concrete array heap type.
+  // Use the caller-provided mode to avoid forcing RTT emission during signature lowering.
+  const elementType = lowerType(desc.element, ctx, seen, mode);
   return ensureFixedArrayWasmTypesByElement({ elementType, ctx });
 };

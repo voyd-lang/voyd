@@ -18,7 +18,7 @@ import {
 } from "../functions.js";
 import { buildRuntimeTypeArtifacts } from "../runtime-pass.js";
 import { wasmRuntimeTypeFor } from "../runtime-types.js";
-import { resolveStructuralTypeId } from "../types.js";
+import { getStructuralTypeInfo, resolveStructuralTypeId } from "../types.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
@@ -130,6 +130,9 @@ const buildCodegenProgram = (
   const runtimeTypeIdCounter = { value: 1 };
   const diagnostics = new DiagnosticEmitter();
   const programHelpers = createProgramHelperRegistry();
+  const structTypes = new Map();
+  const structHeapTypes = new Map();
+  const fixedArrayTypes = new Map();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     program,
     module: program.modules.get(sem.moduleId)!,
@@ -142,8 +145,9 @@ const buildCodegenProgram = (
     functions,
     functionInstances,
     itemsToSymbols: new Map(),
-    structTypes: new Map(),
-    fixedArrayTypes: new Map(),
+    structTypes,
+    structHeapTypes,
+    fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),
     recursiveBinders: new Map(),
@@ -198,6 +202,9 @@ describe("next codegen", () => {
     const runtimeTypeIdCounter = { value: 1 };
     const diagnostics = new DiagnosticEmitter();
     const programHelpers = createProgramHelperRegistry();
+    const structTypes = new Map();
+    const structHeapTypes = new Map();
+    const fixedArrayTypes = new Map();
 
     const ctx: CodegenContext = {
       program,
@@ -211,8 +218,9 @@ describe("next codegen", () => {
       functions,
       functionInstances,
       itemsToSymbols: new Map(),
-      structTypes: new Map(),
-      fixedArrayTypes: new Map(),
+      structTypes,
+      structHeapTypes,
+      fixedArrayTypes,
       closureTypes: new Map(),
       functionRefTypes: new Map(),
       recursiveBinders: new Map(),
@@ -284,6 +292,58 @@ describe("next codegen", () => {
       entryB?.key === undefined ? undefined : ctx.runtimeTypeIds.byKey.get(entryB.key);
     expect(runtimeIdA).toBeDefined();
     expect(runtimeIdA).toBe(runtimeIdB);
+  });
+
+  it("emits recursive wasm heap types for recursive objects", () => {
+    const ast = loadAst("recursive_heap_types.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { contexts: [ctx] } = buildCodegenProgram([semantics]);
+
+    const resolveAliasType = (name: string): TypeId => {
+      const symbol = semantics.symbols.resolveTopLevel(name);
+      if (typeof symbol !== "number") {
+        throw new Error(`missing type alias symbol for ${name}`);
+      }
+      const key = `${symbol}<>`;
+      const typeId = semantics.typing.typeAliases.getCachedInstance(key);
+      if (typeof typeId !== "number") {
+        throw new Error(`missing type alias instance for ${name}`);
+      }
+      return typeId;
+    };
+
+    const typeNode = resolveAliasType("Node");
+    const typeSelf = resolveAliasType("Self");
+
+    wasmRuntimeTypeFor(typeNode, ctx);
+    wasmRuntimeTypeFor(typeSelf, ctx);
+
+    const infoNode = getStructuralTypeInfo(typeNode, ctx);
+    const infoSelf = getStructuralTypeInfo(typeSelf, ctx);
+    if (!infoNode || !infoSelf) {
+      throw new Error("missing structural type info for recursive heap type test");
+    }
+
+    const nextType = infoNode.fieldMap.get("next")?.typeId;
+    if (typeof nextType !== "number") {
+      throw new Error("missing Node.next type");
+    }
+    const infoBox = getStructuralTypeInfo(nextType, ctx);
+    if (!infoBox) {
+      throw new Error("missing structural info for Box<Node>");
+    }
+
+    expect(infoNode.fieldMap.get("next")?.heapWasmType).toBe(infoBox.runtimeType);
+    expect(infoBox.fieldMap.get("v")?.heapWasmType).toBe(infoNode.runtimeType);
+    expect(infoSelf.fieldMap.get("next")?.heapWasmType).toBe(infoSelf.runtimeType);
+
+    expect(infoNode.fieldMap.get("next")?.heapWasmType).not.toBe(ctx.rtt.baseType);
+    expect(infoSelf.fieldMap.get("next")?.heapWasmType).not.toBe(ctx.rtt.baseType);
+  });
+
+  it("runs recursive heap types fixture", () => {
+    const main = loadMain("recursive_heap_types.voyd");
+    expect(main()).toBe(18);
   });
 
   it("emits wasm for the fib sample and runs main()", () => {

@@ -1,9 +1,12 @@
 import binaryen from "binaryen";
 import {
+  annotateStructNames,
   binaryenTypeToHeapType,
   defineStructType,
   refFunc,
   refCast,
+  TypeBuilder,
+  TypeBuilderBuildError,
 } from "@voyd/lib/binaryen-gc/index.js";
 import { mapPrimitiveToWasm } from "./primitive-types.js";
 export { getFunctionRefType } from "./closure-types.js";
@@ -263,21 +266,21 @@ export const wasmTypeFor = (
   seen: Set<TypeId> = new Set(),
   mode: WasmTypeMode = "runtime",
 ): binaryen.Type => {
-  const already = seen.has(typeId);
-  if (already) {
-    const desc = ctx.program.types.getTypeDesc(typeId);
-    // Recursive heap types are widened for now; see docs/proposals/recursive-heap-types.md.
-    if (desc.kind === "function") {
-      return binaryen.funcref;
-    }
-    if (desc.kind === "fixed-array") {
-      const elementType = seen.has(desc.element)
-        ? ctx.rtt.baseType
-        : wasmTypeFor(desc.element, ctx, seen, "runtime");
-      return ensureFixedArrayWasmTypesByElement({ elementType, ctx }).type;
-    }
-    return ctx.rtt.baseType;
-  }
+	  const already = seen.has(typeId);
+	  if (already) {
+	    const desc = ctx.program.types.getTypeDesc(typeId);
+	    // Recursive heap types are widened for now; see docs/proposals/recursive-heap-types.md.
+	    if (desc.kind === "function") {
+	      return binaryen.funcref;
+	    }
+	    if (desc.kind === "fixed-array") {
+	      const elementType = seen.has(desc.element)
+	        ? ctx.rtt.baseType
+	        : wasmTypeFor(desc.element, ctx, seen, mode);
+	      return ensureFixedArrayWasmTypesByElement({ elementType, ctx }).type;
+	    }
+	    return ctx.rtt.baseType;
+	  }
   seen.add(typeId);
 
   try {
@@ -294,11 +297,11 @@ export const wasmTypeFor = (
       return mapPrimitiveToWasm(desc.name);
     }
 
-    if (desc.kind === "fixed-array") {
-      // Fixed arrays are invariant in wasm GC, so signatures must use the concrete
-      // runtime array type to remain type-correct.
-      return getFixedArrayWasmTypes(typeId, ctx, seen, "runtime").type;
-    }
+	    if (desc.kind === "fixed-array") {
+	      // Fixed arrays are invariant in wasm GC, so signatures must use the concrete
+	      // runtime array type to remain type-correct.
+	      return getFixedArrayWasmTypes(typeId, ctx, seen, mode).type;
+	    }
 
     if (desc.kind === "function") {
       const info = ensureClosureTypeInfo({
@@ -363,25 +366,21 @@ export const wasmTypeFor = (
       return structInfo.interfaceType;
     }
 
-    if (desc.kind === "type-param-ref") {
-      const binderRecursive = ctx.recursiveBinders.get(desc.param);
-      if (typeof binderRecursive === "number") {
-        return wasmTypeFor(binderRecursive, ctx, seen, mode);
-      }
+	    if (desc.kind === "type-param-ref") {
+	      const binderRecursive = ctx.recursiveBinders.get(desc.param);
+	      if (typeof binderRecursive === "number") {
+	        return wasmTypeFor(binderRecursive, ctx, seen, mode);
+	      }
       const inScopeRecursive = Array.from(seen).find((candidate) => {
         const candidateDesc = ctx.program.types.getTypeDesc(candidate);
         return candidateDesc.kind === "recursive" && candidateDesc.binder === desc.param;
       });
-      if (typeof inScopeRecursive === "number") {
-        return wasmTypeFor(inScopeRecursive, ctx, seen, mode);
-      }
-      if (mode === "runtime") {
-        return ctx.rtt.baseType;
-      }
-      throw new Error(
-        `codegen cannot map unresolved type parameter to wasm (module ${ctx.moduleId}, type ${typeId}, param ${desc.param})`,
-      );
-    }
+	      if (typeof inScopeRecursive === "number") {
+	        return wasmTypeFor(inScopeRecursive, ctx, seen, mode);
+	      }
+	      // wasm has no type parameters; treat unresolved params conservatively.
+	      return ctx.rtt.baseType;
+	    }
 
     throw new Error(
       `codegen cannot map ${desc.kind} types to wasm yet (module ${ctx.moduleId}, type ${typeId})`,
@@ -389,6 +388,317 @@ export const wasmTypeFor = (
   } finally {
     seen.delete(typeId);
   }
+};
+
+const STRUCTURAL_HEAP_TYPE_PREFIX = "voyd_struct_shape";
+
+const structuralHeapTypeName = (structuralId: TypeId): string =>
+  `${STRUCTURAL_HEAP_TYPE_PREFIX}_${structuralId}`;
+
+const directStructuralDeps = (structuralId: TypeId, ctx: CodegenContext): TypeId[] => {
+  const desc = ctx.program.types.getTypeDesc(structuralId);
+  if (desc.kind !== "structural-object") {
+    return [];
+  }
+  const deps = new Set<TypeId>();
+  desc.fields.forEach((field) => {
+    const dep = resolveStructuralTypeId(field.type, ctx);
+    if (typeof dep === "number") {
+      deps.add(dep);
+    }
+  });
+  return Array.from(deps).sort((a, b) => a - b);
+};
+
+const ensureStructuralRuntimeType = (structuralId: TypeId, ctx: CodegenContext): binaryen.Type => {
+  const cached = ctx.structHeapTypes.get(structuralId);
+  if (cached) {
+    return cached;
+  }
+
+  const depsCache = new Map<TypeId, readonly TypeId[]>();
+  const getDeps = (id: TypeId): readonly TypeId[] => {
+    const existing = depsCache.get(id);
+    if (existing) {
+      return existing;
+    }
+    const computed = directStructuralDeps(id, ctx);
+    depsCache.set(id, computed);
+    return computed;
+  };
+
+  const scc = (() => {
+    const root = structuralId;
+
+    const adjacency = new Map<TypeId, readonly TypeId[]>();
+    const reachable = new Set<TypeId>();
+    const pending = [root];
+    while (pending.length > 0) {
+      const id = pending.pop()!;
+      if (reachable.has(id)) {
+        continue;
+      }
+      reachable.add(id);
+      const deps = getDeps(id);
+      adjacency.set(id, deps);
+      deps.forEach((dep) => {
+        if (!reachable.has(dep)) {
+          pending.push(dep);
+        }
+      });
+    }
+
+    const nodes = Array.from(reachable).sort((a, b) => a - b);
+
+    const reverseAdj = new Map<TypeId, TypeId[]>();
+    nodes.forEach((id) => reverseAdj.set(id, []));
+    adjacency.forEach((deps, from) => {
+      deps.forEach((to) => {
+        const list = reverseAdj.get(to);
+        if (list) {
+          list.push(from);
+        }
+      });
+    });
+    reverseAdj.forEach((list) => list.sort((a, b) => a - b));
+
+    const order: TypeId[] = [];
+    const visited = new Set<TypeId>();
+    nodes.forEach((start) => {
+      if (visited.has(start)) {
+        return;
+      }
+      visited.add(start);
+      const stack: { node: TypeId; nextIndex: number }[] = [
+        { node: start, nextIndex: 0 },
+      ];
+      while (stack.length > 0) {
+        const top = stack[stack.length - 1]!;
+        const deps = adjacency.get(top.node) ?? [];
+        if (top.nextIndex < deps.length) {
+          const dep = deps[top.nextIndex]!;
+          top.nextIndex += 1;
+          if (!visited.has(dep)) {
+            visited.add(dep);
+            stack.push({ node: dep, nextIndex: 0 });
+          }
+          continue;
+        }
+        stack.pop();
+        order.push(top.node);
+      }
+    });
+
+    const visitedRev = new Set<TypeId>();
+    for (let i = order.length - 1; i >= 0; i -= 1) {
+      const start = order[i]!;
+      if (visitedRev.has(start)) {
+        continue;
+      }
+      const component: TypeId[] = [];
+      visitedRev.add(start);
+      const stack = [start];
+      while (stack.length > 0) {
+        const node = stack.pop()!;
+        component.push(node);
+        const incoming = reverseAdj.get(node) ?? [];
+        incoming.forEach((pred) => {
+          if (!visitedRev.has(pred)) {
+            visitedRev.add(pred);
+            stack.push(pred);
+          }
+        });
+      }
+      if (component.includes(root)) {
+        return component.sort((a, b) => a - b);
+      }
+    }
+
+    return [root];
+  })();
+
+  const isRecursive =
+    scc.length > 1 || getDeps(structuralId).some((dep) => dep === structuralId);
+
+  const baseHeapType = binaryenTypeToHeapType(ctx.rtt.baseType);
+
+  const lowerNonStructural = (typeId: TypeId): binaryen.Type =>
+    wasmTypeFor(typeId, ctx, new Set(), "signature");
+
+  const buildNonRecursive = (id: TypeId): binaryen.Type => {
+    getDeps(id).forEach((dep) => {
+      if (dep !== id) {
+        ensureStructuralRuntimeType(dep, ctx);
+      }
+    });
+
+    const desc = ctx.program.types.getTypeDesc(id);
+    if (desc.kind !== "structural-object") {
+      throw new Error(`expected structural-object type ${id}`);
+    }
+
+    const structType = defineStructType(ctx.mod, {
+      name: structuralHeapTypeName(id),
+      fields: [
+        {
+          name: "__ancestors_table",
+          type: ctx.rtt.extensionHelpers.i32Array,
+          mutable: false,
+        },
+        {
+          name: "__field_index_table",
+          type: ctx.rtt.fieldLookupHelpers.lookupTableType,
+          mutable: false,
+        },
+        {
+          name: "__method_lookup_table",
+          type: ctx.rtt.methodLookupHelpers.lookupTableType,
+          mutable: false,
+        },
+        ...desc.fields.map((field) => {
+          const fieldStructural = resolveStructuralTypeId(field.type, ctx);
+          const type =
+            typeof fieldStructural === "number"
+              ? ensureStructuralRuntimeType(fieldStructural, ctx)
+              : lowerNonStructural(field.type);
+          return { name: field.name, type, mutable: true };
+        }),
+      ],
+      supertype: baseHeapType,
+      final: true,
+    });
+    ctx.structHeapTypes.set(id, structType);
+    return structType;
+  };
+
+  const buildRecursiveGroup = (component: readonly TypeId[]): void => {
+    const inGroup = new Set(component);
+    component.forEach((id) => {
+      getDeps(id).forEach((dep) => {
+        if (!inGroup.has(dep)) {
+          ensureStructuralRuntimeType(dep, ctx);
+        }
+      });
+    });
+
+    const indexByType = new Map<TypeId, number>(
+      component.map((id, index) => [id, index] as const),
+    );
+
+    const builder = new TypeBuilder(component.length);
+    const defs: {
+      id: TypeId;
+      name: string;
+      fields: {
+        name?: string;
+        type: binaryen.Type;
+        mutable: boolean;
+        packedType?: number;
+      }[];
+    }[] = [];
+
+    component.forEach((id, index) => {
+      const desc = ctx.program.types.getTypeDesc(id);
+      if (desc.kind !== "structural-object") {
+        throw new Error(`expected structural-object type ${id}`);
+      }
+
+      const structName = structuralHeapTypeName(id);
+      const fields = [
+        {
+          name: "__ancestors_table",
+          type: ctx.rtt.extensionHelpers.i32Array,
+          mutable: false,
+        },
+        {
+          name: "__field_index_table",
+          type: ctx.rtt.fieldLookupHelpers.lookupTableType,
+          mutable: false,
+        },
+        {
+          name: "__method_lookup_table",
+          type: ctx.rtt.methodLookupHelpers.lookupTableType,
+          mutable: false,
+        },
+        ...desc.fields.map((field) => {
+          const fieldStructural = resolveStructuralTypeId(field.type, ctx);
+          if (typeof fieldStructural === "number") {
+            const groupIndex = indexByType.get(fieldStructural);
+            const type =
+              typeof groupIndex === "number"
+                ? builder.getTempRefType(groupIndex, true)
+                : ensureStructuralRuntimeType(fieldStructural, ctx);
+            return { name: field.name, type, mutable: true };
+          }
+          return { name: field.name, type: lowerNonStructural(field.type), mutable: true };
+        }),
+      ];
+
+      builder.setStruct(index, { name: structName, fields });
+      builder.setSubType(index, baseHeapType);
+      defs.push({ id, name: structName, fields });
+    });
+
+    try {
+      const heapTypes = builder.buildAll();
+      heapTypes.forEach((heapType, index) => {
+        const def = defs[index]!;
+        annotateStructNames(ctx.mod, heapType, { name: def.name, fields: def.fields });
+        const typeRef = bin._BinaryenTypeFromHeapType(heapType, true);
+        ctx.structHeapTypes.set(def.id, typeRef);
+      });
+    } catch (error) {
+      if (error instanceof TypeBuilderBuildError) {
+        ctx.diagnostics.report({
+          code: "CG_RECURSIVE_HEAP_TYPE_BUILDER_FAILED",
+          phase: "codegen",
+          message: [
+            "failed to build recursive heap type group",
+            `module: ${ctx.moduleId}`,
+            `structural type: ${structuralId}`,
+            `error index: ${error.errorIndex}`,
+            `error reason: ${error.errorReason}`,
+          ].join("\n"),
+          span: { file: ctx.moduleId, start: 0, end: 0 },
+        });
+      }
+      throw error;
+    } finally {
+      builder.dispose();
+    }
+  };
+
+  if (!isRecursive) {
+    return buildNonRecursive(structuralId);
+  }
+
+  const alreadyBuilt = scc.filter((id) => ctx.structHeapTypes.has(id));
+  if (alreadyBuilt.length > 0) {
+    const missing = scc.filter((id) => !ctx.structHeapTypes.has(id));
+    if (missing.length > 0) {
+      throw new Error(
+        `partial recursive heap type cache: built [${alreadyBuilt.join(
+          ",",
+        )}], missing [${missing.join(",")}]`,
+      );
+    }
+    return ctx.structHeapTypes.get(structuralId)!;
+  }
+
+  buildRecursiveGroup(scc);
+  const built = ctx.structHeapTypes.get(structuralId);
+  if (!built) {
+    throw new Error(`failed to cache runtime heap type for structural id ${structuralId}`);
+  }
+  return built;
+};
+
+const wasmStructFieldTypeFor = (typeId: TypeId, ctx: CodegenContext): binaryen.Type => {
+  const structuralId = resolveStructuralTypeId(typeId, ctx);
+  if (typeof structuralId === "number") {
+    return ensureStructuralRuntimeType(structuralId, ctx);
+  }
+  return wasmTypeFor(typeId, ctx, new Set(), "signature");
 };
 
 export const getSymbolTypeId = (
@@ -541,14 +851,13 @@ export const getStructuralTypeInfo = (
     return cached;
   }
 
-  seen.add(structuralId);
-  seen.add(typeId);
-
   try {
     const desc = ctx.program.types.getTypeDesc(structuralId);
     if (desc.kind !== "structural-object") {
       return undefined;
     }
+
+    const runtimeType = ensureStructuralRuntimeType(structuralId, ctx);
 
     const nominalId = getNominalComponentId(typeId, ctx);
     const substitution = (() => {
@@ -576,21 +885,20 @@ export const getStructuralTypeInfo = (
             [param.typeParam, nominalDesc.typeArgs[index]!] as const,
         ),
       );
-    })();
-    const objectInfo =
-      typeof nominalId === "number"
-        ? ctx.program.objects.getInfoByNominal(nominalId)
-        : undefined;
-    const sourceFields = objectInfo?.fields ?? desc.fields;
-    const fields: StructuralFieldInfo[] = sourceFields.map((field, index) => {
-      const fieldTypeId =
-        substitution && substitution.size > 0
-          ? ctx.program.types.substitute(field.type, substitution)
+	    })();
+	    const sourceFields = desc.fields;
+	    const fields: StructuralFieldInfo[] = sourceFields.map((field, index) => {
+	      const fieldTypeId =
+	        substitution && substitution.size > 0
+	          ? ctx.program.types.substitute(field.type, substitution)
           : field.type;
+      const wasmType = wasmTypeFor(fieldTypeId, ctx, new Set(), "signature");
+      const heapWasmType = wasmStructFieldTypeFor(fieldTypeId, ctx);
       return {
         name: field.name,
         typeId: fieldTypeId,
-        wasmType: wasmTypeFor(fieldTypeId, ctx, seen),
+        wasmType,
+        heapWasmType,
         runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
         optional: field.optional,
         hash: 0,
@@ -610,33 +918,6 @@ export const getStructuralTypeInfo = (
       structuralId,
       nominalAncestry,
       ctx,
-    });
-    const runtimeType = defineStructType(ctx.mod, {
-      name: typeLabel,
-      fields: [
-        {
-          name: "__ancestors_table",
-          type: ctx.rtt.extensionHelpers.i32Array,
-          mutable: false,
-        },
-        {
-          name: "__field_index_table",
-          type: ctx.rtt.fieldLookupHelpers.lookupTableType,
-          mutable: false,
-        },
-        {
-          name: "__method_lookup_table",
-          type: ctx.rtt.methodLookupHelpers.lookupTableType,
-          mutable: false,
-        },
-        ...fields.map((field) => ({
-          name: field.name,
-          type: field.wasmType,
-          mutable: true,
-        })),
-      ],
-      supertype: binaryenTypeToHeapType(ctx.rtt.baseType),
-      final: true,
     });
     const fieldTableExpr = ctx.rtt.fieldLookupHelpers.registerType({
       typeLabel,
@@ -698,8 +979,6 @@ export const getStructuralTypeInfo = (
     ctx.structTypes.set(cacheKey, info);
     return info;
   } finally {
-    seen.delete(structuralId);
-    seen.delete(typeId);
   }
 };
 

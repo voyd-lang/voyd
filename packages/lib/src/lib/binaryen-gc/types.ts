@@ -64,6 +64,11 @@ export type AugmentedBinaryen = typeof binaryen & {
   _BinaryenStructTypeGetNumFields(heapType: HeapTypeRef): Index;
   _BinaryenStructTypeGetFieldType(heapType: HeapTypeRef, index: Index): TypeRef;
   _TypeBuilderCreate(size: Index): TypeBuilderRef;
+  _TypeBuilderCreateRecGroup(
+    builder: TypeBuilderRef,
+    index: Index,
+    length: Index
+  ): void;
   _TypeBuilderSetArrayType(
     builder: TypeBuilderRef,
     index: Index,

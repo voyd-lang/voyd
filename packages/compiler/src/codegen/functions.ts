@@ -702,8 +702,13 @@ const compileFunctionItem = (
     });
 
     const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
+    const implExprType = binaryen.getExpressionType(implBody.expr);
     const shouldWrapOutcome =
-      binaryen.getExpressionType(implBody.expr) === returnValueType;
+      implExprType === returnValueType ||
+      (returnValueType === ctx.rtt.baseType &&
+        implExprType !== binaryen.none &&
+        implExprType !== binaryen.unreachable &&
+        implExprType !== ctx.effectsRuntime.outcomeType);
     const functionBody = shouldWrapOutcome
       ? wrapValueInOutcome({
           valueExpr: implBody.expr,
@@ -778,8 +783,14 @@ const compileFunctionItem = (
     expectedResultTypeId: fnCtx.returnTypeId,
   });
   const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
+  const bodyExprType = binaryen.getExpressionType(body.expr);
   const shouldWrapOutcome =
-    meta.effectful && binaryen.getExpressionType(body.expr) === returnValueType;
+    meta.effectful &&
+    (bodyExprType === returnValueType ||
+      (returnValueType === ctx.rtt.baseType &&
+        bodyExprType !== binaryen.none &&
+        bodyExprType !== binaryen.unreachable &&
+        bodyExprType !== ctx.effectsRuntime.outcomeType));
   const functionBody = shouldWrapOutcome
     ? wrapValueInOutcome({
         valueExpr: body.expr,

@@ -22,6 +22,7 @@ export const LOOKUP_FIELD_ACCESSOR = "__lookup_field_accessor";
 export interface FieldAccessorField {
   name: string;
   wasmType: binaryen.Type;
+  heapWasmType: binaryen.Type;
   runtimeIndex: number;
   hash?: number;
   getterType?: binaryen.Type;
@@ -164,16 +165,21 @@ export const initFieldLookupHelpers = (
         bin.createType([opts.baseType]),
         field.wasmType,
         [],
-        structGetFieldValue({
-          mod,
-          fieldType: field.wasmType,
-          fieldIndex: field.runtimeIndex,
-          exprRef: refCast(
+        (() => {
+          const loaded = structGetFieldValue({
             mod,
-            mod.local.get(0, opts.baseType),
-            opts.runtimeType
-          ),
-        })
+            fieldType: field.heapWasmType,
+            fieldIndex: field.runtimeIndex,
+            exprRef: refCast(
+              mod,
+              mod.local.get(0, opts.baseType),
+              opts.runtimeType
+            ),
+          });
+          return field.wasmType === field.heapWasmType
+            ? loaded
+            : mod.block(null, [loaded], field.wasmType);
+        })()
       );
 
       const setter = mod.addFunction(
@@ -189,7 +195,10 @@ export const initFieldLookupHelpers = (
             mod.local.get(0, opts.baseType),
             opts.runtimeType
           ),
-          value: mod.local.get(1, field.wasmType),
+          value:
+            field.wasmType === field.heapWasmType
+              ? mod.local.get(1, field.wasmType)
+              : refCast(mod, mod.local.get(1, field.wasmType), field.heapWasmType),
         })
       );
 
