@@ -142,7 +142,7 @@ export interface TypeArena {
   getScheme(id: TypeSchemeId): Readonly<TypeScheme>;
   internPrimitive(name: string): TypeId;
   createRecursiveType(
-    build: (self: TypeId, placeholderParam: TypeParamId) => TypeDescriptor
+    build: (self: TypeId, placeholderParam: TypeParamId) => TypeDescriptor,
   ): TypeId;
   internTrait(desc: Omit<TraitType, "kind">): TypeId;
   internNominalObject(desc: Omit<NominalObjectType, "kind">): TypeId;
@@ -156,12 +156,12 @@ export interface TypeArena {
   newScheme(
     params: readonly TypeParamId[],
     body: TypeId,
-    constraints?: ConstraintSet
+    constraints?: ConstraintSet,
   ): TypeSchemeId;
   instantiate(
     scheme: TypeSchemeId,
     args: readonly TypeId[],
-    ctx?: UnificationContext
+    ctx?: UnificationContext,
   ): TypeId;
   unify(a: TypeId, b: TypeId, ctx: UnificationContext): UnificationResult;
   substitute(type: TypeId, subst: Substitution): TypeId;
@@ -217,7 +217,8 @@ export const createTypeArena = (): TypeArena => {
       case "function": {
         const paramsKey = desc.parameters
           .map((param) => {
-            const labelKey = param.label === undefined ? "u" : jsonStringKey(param.label);
+            const labelKey =
+              param.label === undefined ? "u" : jsonStringKey(param.label);
             const optionalKey = param.optional ? "1" : "0";
             return `${param.type}:${labelKey}:${optionalKey}`;
           })
@@ -257,17 +258,21 @@ export const createTypeArena = (): TypeArena => {
     storeDescriptor({ kind: "primitive", name });
 
   const internRecursive = (desc: Omit<RecursiveType, "kind">): TypeId =>
-    storeDescriptor({ kind: "recursive", binder: desc.binder, body: desc.body });
+    storeDescriptor({
+      kind: "recursive",
+      binder: desc.binder,
+      body: desc.body,
+    });
 
   const createRecursiveType = (
-    build: (self: TypeId, placeholderParam: TypeParamId) => TypeDescriptor
+    build: (self: TypeId, placeholderParam: TypeParamId) => TypeDescriptor,
   ): TypeId => {
     const self = nextTypeId++;
     const placeholderParam = nextTypeParamId++;
     const placeholderDesc: TypeParamRef = {
-    kind: "type-param-ref",
-    param: placeholderParam,
-  };
+      kind: "type-param-ref",
+      param: placeholderParam,
+    };
     descriptors[self] = placeholderDesc;
     descriptorCache.set(keyFor(placeholderDesc), self);
 
@@ -278,7 +283,7 @@ export const createTypeArena = (): TypeArena => {
     const containsTypeId = (
       root: TypeId,
       needle: TypeId,
-      seen: Set<TypeId> = new Set()
+      seen: Set<TypeId> = new Set(),
     ): boolean => {
       if (root === needle) {
         return true;
@@ -299,7 +304,7 @@ export const createTypeArena = (): TypeArena => {
           return containsTypeId(rootDesc.element, needle, seen);
         case "union":
           return rootDesc.members.some((member) =>
-            containsTypeId(member, needle, seen)
+            containsTypeId(member, needle, seen),
           );
         case "intersection":
           return (
@@ -311,16 +316,16 @@ export const createTypeArena = (): TypeArena => {
         case "trait":
         case "nominal-object":
           return rootDesc.typeArgs.some((arg) =>
-            containsTypeId(arg, needle, seen)
+            containsTypeId(arg, needle, seen),
           );
         case "structural-object":
           return rootDesc.fields.some((field) =>
-            containsTypeId(field.type, needle, seen)
+            containsTypeId(field.type, needle, seen),
           );
         case "function":
           return (
             rootDesc.parameters.some((param) =>
-              containsTypeId(param.type, needle, seen)
+              containsTypeId(param.type, needle, seen),
             ) || containsTypeId(rootDesc.returnType, needle, seen)
           );
         default:
@@ -396,10 +401,10 @@ export const createTypeArena = (): TypeArena => {
           }
           case "union": {
             const members = currentDesc.members.map((member) =>
-              cloneReplacingSelf(member)
+              cloneReplacingSelf(member),
             );
             const changed = members.some(
-              (member, index) => member !== currentDesc.members[index]
+              (member, index) => member !== currentDesc.members[index],
             );
             return changed ? internUnion(members) : current;
           }
@@ -413,7 +418,8 @@ export const createTypeArena = (): TypeArena => {
                 ? cloneReplacingSelf(currentDesc.structural)
                 : undefined;
             const changed =
-              nominal !== currentDesc.nominal || structural !== currentDesc.structural;
+              nominal !== currentDesc.nominal ||
+              structural !== currentDesc.structural;
             return changed
               ? internIntersection({ nominal, structural })
               : current;
@@ -422,13 +428,17 @@ export const createTypeArena = (): TypeArena => {
             return internTrait({
               owner: currentDesc.owner,
               name: currentDesc.name,
-              typeArgs: currentDesc.typeArgs.map((arg) => cloneReplacingSelf(arg)),
+              typeArgs: currentDesc.typeArgs.map((arg) =>
+                cloneReplacingSelf(arg),
+              ),
             });
           case "nominal-object":
             return internNominalObject({
               owner: currentDesc.owner,
               name: currentDesc.name,
-              typeArgs: currentDesc.typeArgs.map((arg) => cloneReplacingSelf(arg)),
+              typeArgs: currentDesc.typeArgs.map((arg) =>
+                cloneReplacingSelf(arg),
+              ),
             });
           case "structural-object":
             return internStructuralObject({
@@ -502,7 +512,7 @@ export const createTypeArena = (): TypeArena => {
     });
 
   const internStructuralObject = (
-    desc: Omit<StructuralObjectType, "kind">
+    desc: Omit<StructuralObjectType, "kind">,
   ): TypeId =>
     storeDescriptor({
       kind: "structural-object",
@@ -517,7 +527,7 @@ export const createTypeArena = (): TypeArena => {
               : undefined,
         }))
         .sort((a, b) =>
-          a.name.localeCompare(b.name, undefined, { numeric: true })
+          a.name.localeCompare(b.name, undefined, { numeric: true }),
         ),
     });
 
@@ -566,7 +576,7 @@ export const createTypeArena = (): TypeArena => {
   const newScheme = (
     params: readonly TypeParamId[],
     body: TypeId,
-    constraints?: ConstraintSet
+    constraints?: ConstraintSet,
   ): TypeSchemeId => {
     const id = nextSchemeId++;
     schemes.set(id, {
@@ -580,7 +590,7 @@ export const createTypeArena = (): TypeArena => {
   };
 
   const structuralFieldsOf = (
-    type: TypeId
+    type: TypeId,
   ): readonly StructuralField[] | undefined => {
     const desc = getDescriptor(type);
     if (desc.kind === "structural-object") {
@@ -600,7 +610,7 @@ export const createTypeArena = (): TypeArena => {
   const instantiate = (
     schemeId: TypeSchemeId,
     args: readonly TypeId[],
-    ctx?: UnificationContext
+    ctx?: UnificationContext,
   ): TypeId => {
     const scheme = schemes.get(schemeId);
 
@@ -611,7 +621,7 @@ export const createTypeArena = (): TypeArena => {
     if (scheme.params.length !== args.length) {
       const where = ctx ? ` at ${ctx.reason}` : "";
       throw new Error(
-        `scheme parameter mismatch: expected ${scheme.params.length}, received ${args.length}${where}`
+        `scheme parameter mismatch: expected ${scheme.params.length}, received ${args.length}${where}`,
       );
     }
 
@@ -623,7 +633,7 @@ export const createTypeArena = (): TypeArena => {
   const unify = (
     a: TypeId,
     b: TypeId,
-    ctx: UnificationContext
+    ctx: UnificationContext,
   ): UnificationResult => {
     const variance: Variance = ctx.variance ?? "invariant";
     // unknown can be treated as a wildcard when explicitly allowed.
@@ -641,7 +651,7 @@ export const createTypeArena = (): TypeArena => {
     const conflict = (
       left: TypeId,
       right: TypeId,
-      message?: string
+      message?: string,
     ): UnificationResult => ({
       ok: false,
       conflict: {
@@ -656,7 +666,7 @@ export const createTypeArena = (): TypeArena => {
       predicates: readonly StructuralPredicate[],
       currentVariance: Variance,
       subst: Substitution,
-      localSeen: Set<string>
+      localSeen: Set<string>,
     ): UnificationResult => {
       const desc = getDescriptor(type);
       if (desc.kind === "union") {
@@ -667,7 +677,7 @@ export const createTypeArena = (): TypeArena => {
             predicates,
             currentVariance,
             working,
-            localSeen
+            localSeen,
           );
           if (!result.ok) {
             return result;
@@ -682,20 +692,20 @@ export const createTypeArena = (): TypeArena => {
         return conflict(
           type,
           type,
-          `type does not satisfy structural constraints (${ctx.reason})`
+          `type does not satisfy structural constraints (${ctx.reason})`,
         );
       }
 
       let working = subst;
       for (const predicate of predicates) {
         const candidate = fields.find(
-          (field) => field.name === predicate.field
+          (field) => field.name === predicate.field,
         );
         if (!candidate) {
           return conflict(
             type,
             type,
-            `missing field ${predicate.field} (${ctx.reason})`
+            `missing field ${predicate.field} (${ctx.reason})`,
           );
         }
         const varianceForField =
@@ -705,7 +715,7 @@ export const createTypeArena = (): TypeArena => {
           predicate.type,
           varianceForField,
           working,
-          localSeen
+          localSeen,
         );
         if (!comparison.ok) {
           return comparison;
@@ -720,7 +730,7 @@ export const createTypeArena = (): TypeArena => {
       constraint: ConstraintSet,
       currentVariance: Variance,
       subst: Substitution,
-      localSeen: Set<string>
+      localSeen: Set<string>,
     ): UnificationResult => {
       let working = subst;
       if (constraint.traits) {
@@ -730,7 +740,7 @@ export const createTypeArena = (): TypeArena => {
             trait,
             "covariant",
             working,
-            localSeen
+            localSeen,
           );
           if (!result.ok) {
             return result;
@@ -744,7 +754,7 @@ export const createTypeArena = (): TypeArena => {
           constraint.structural,
           currentVariance,
           working,
-          localSeen
+          localSeen,
         );
         if (!result.ok) {
           return result;
@@ -759,7 +769,7 @@ export const createTypeArena = (): TypeArena => {
       target: TypeId,
       currentVariance: Variance,
       subst: Substitution,
-      localSeen: Set<string>
+      localSeen: Set<string>,
     ): UnificationResult => {
       const bound = subst.get(param);
       if (typeof bound === "number") {
@@ -772,7 +782,7 @@ export const createTypeArena = (): TypeArena => {
           constraint,
           currentVariance,
           subst,
-          localSeen
+          localSeen,
         );
         if (!constrained.ok) {
           return constrained;
@@ -789,7 +799,7 @@ export const createTypeArena = (): TypeArena => {
       right: TypeId,
       currentVariance: Variance,
       subst: Substitution,
-      localSeen: Set<string>
+      localSeen: Set<string>,
     ): UnificationResult => {
       const leftFields = structuralFieldsOf(left);
       const rightFields = structuralFieldsOf(right);
@@ -797,7 +807,7 @@ export const createTypeArena = (): TypeArena => {
         return conflict(
           left,
           right,
-          `structural comparison failed (${ctx.reason})`
+          `structural comparison failed (${ctx.reason})`,
         );
       }
 
@@ -808,20 +818,20 @@ export const createTypeArena = (): TypeArena => {
         return conflict(
           left,
           right,
-          `structural arity mismatch (${ctx.reason})`
+          `structural arity mismatch (${ctx.reason})`,
         );
       }
 
       let working = subst;
       for (const expectedField of rightFields) {
         const candidate = leftFields.find(
-          (field) => field.name === expectedField.name
+          (field) => field.name === expectedField.name,
         );
         if (!candidate) {
           return conflict(
             left,
             right,
-            `missing field ${expectedField.name} (${ctx.reason})`
+            `missing field ${expectedField.name} (${ctx.reason})`,
           );
         }
         const comparison = unifyInternal(
@@ -829,7 +839,7 @@ export const createTypeArena = (): TypeArena => {
           expectedField.type,
           currentVariance === "invariant" ? "invariant" : "covariant",
           working,
-          localSeen
+          localSeen,
         );
         if (!comparison.ok) {
           return comparison;
@@ -843,7 +853,7 @@ export const createTypeArena = (): TypeArena => {
             return conflict(
               left,
               right,
-              `unexpected field ${candidate.name} (${ctx.reason})`
+              `unexpected field ${candidate.name} (${ctx.reason})`,
             );
           }
         }
@@ -857,7 +867,7 @@ export const createTypeArena = (): TypeArena => {
       right: TypeId,
       currentVariance: Variance,
       subst: Substitution,
-      localSeen: Set<string>
+      localSeen: Set<string>,
     ): UnificationResult => {
       const leftDesc = getDescriptor(left);
       const rightDesc = getDescriptor(right);
@@ -870,7 +880,7 @@ export const createTypeArena = (): TypeArena => {
               right,
               currentVariance,
               working,
-              localSeen
+              localSeen,
             );
             if (!result.ok) {
               return result;
@@ -886,7 +896,7 @@ export const createTypeArena = (): TypeArena => {
               member,
               currentVariance,
               subst,
-              localSeen
+              localSeen,
             );
             if (result.ok) {
               return result;
@@ -895,7 +905,7 @@ export const createTypeArena = (): TypeArena => {
           return conflict(
             left,
             right,
-            `no union member satisfied (${ctx.reason})`
+            `no union member satisfied (${ctx.reason})`,
           );
         }
       }
@@ -914,7 +924,7 @@ export const createTypeArena = (): TypeArena => {
               candidate,
               currentVariance,
               working,
-              localSeen
+              localSeen,
             );
             if (result.ok) {
               working = result.substitution;
@@ -927,7 +937,7 @@ export const createTypeArena = (): TypeArena => {
             return conflict(
               left,
               right,
-              `union members incompatible (${ctx.reason})`
+              `union members incompatible (${ctx.reason})`,
             );
           }
         }
@@ -942,7 +952,7 @@ export const createTypeArena = (): TypeArena => {
       right: TypeId,
       currentVariance: Variance,
       subst: Substitution,
-      localSeen: Set<string>
+      localSeen: Set<string>,
     ): UnificationResult => {
       const leftDesc = getDescriptor(left);
       const rightDesc = getDescriptor(right);
@@ -955,7 +965,7 @@ export const createTypeArena = (): TypeArena => {
             rightDesc.nominal,
             currentVariance,
             working,
-            localSeen
+            localSeen,
           );
           if (!nominalResult.ok) {
             return nominalResult;
@@ -968,7 +978,7 @@ export const createTypeArena = (): TypeArena => {
             rightDesc.structural,
             currentVariance,
             working,
-            localSeen
+            localSeen,
           );
           if (!structuralResult.ok) {
             return structuralResult;
@@ -987,8 +997,8 @@ export const createTypeArena = (): TypeArena => {
               right,
               currentVariance,
               subst,
-              localSeen
-            )
+              localSeen,
+            ),
           );
         }
         if (typeof leftDesc.structural === "number") {
@@ -998,8 +1008,8 @@ export const createTypeArena = (): TypeArena => {
               right,
               currentVariance,
               subst,
-              localSeen
-            )
+              localSeen,
+            ),
           );
         }
         const successAttempt = attempts.find((candidate) => candidate.ok);
@@ -1008,7 +1018,7 @@ export const createTypeArena = (): TypeArena => {
           conflict(
             left,
             right,
-            `intersection comparison failed (${ctx.reason})`
+            `intersection comparison failed (${ctx.reason})`,
           )
         );
       }
@@ -1016,7 +1026,7 @@ export const createTypeArena = (): TypeArena => {
       return conflict(
         left,
         right,
-        `intersection comparison failed (${ctx.reason})`
+        `intersection comparison failed (${ctx.reason})`,
       );
     };
 
@@ -1048,7 +1058,7 @@ export const createTypeArena = (): TypeArena => {
       right: TypeId,
       currentVariance: Variance,
       subst: Substitution,
-      localSeen: Set<string>
+      localSeen: Set<string>,
     ): UnificationResult => {
       const substitutedLeft = substitute(left, subst);
       const substitutedRight = substitute(right, subst);
@@ -1063,7 +1073,7 @@ export const createTypeArena = (): TypeArena => {
           unfoldedRight,
           currentVariance,
           subst,
-          localSeen
+          localSeen,
         );
       }
 
@@ -1083,7 +1093,7 @@ export const createTypeArena = (): TypeArena => {
           resolvedLeft,
           "covariant",
           subst,
-          localSeen
+          localSeen,
         );
       }
 
@@ -1096,7 +1106,7 @@ export const createTypeArena = (): TypeArena => {
         return conflict(
           resolvedLeft,
           resolvedRight,
-          `unknown types are not allowed (${ctx.reason})`
+          `unknown types are not allowed (${ctx.reason})`,
         );
       }
 
@@ -1109,7 +1119,7 @@ export const createTypeArena = (): TypeArena => {
           resolvedRight,
           currentVariance,
           subst,
-          localSeen
+          localSeen,
         );
       }
       if (rightDesc.kind === "type-param-ref") {
@@ -1118,7 +1128,7 @@ export const createTypeArena = (): TypeArena => {
           resolvedLeft,
           currentVariance,
           subst,
-          localSeen
+          localSeen,
         );
       }
 
@@ -1128,7 +1138,7 @@ export const createTypeArena = (): TypeArena => {
           resolvedRight,
           currentVariance,
           subst,
-          localSeen
+          localSeen,
         );
       }
 
@@ -1141,7 +1151,7 @@ export const createTypeArena = (): TypeArena => {
           resolvedRight,
           currentVariance,
           subst,
-          localSeen
+          localSeen,
         );
       }
 
@@ -1181,7 +1191,7 @@ export const createTypeArena = (): TypeArena => {
               rightDesc.typeArgs[index]!,
               argVariance,
               working,
-              localSeen
+              localSeen,
             );
             if (!unified.ok) {
               return unified;
@@ -1199,7 +1209,7 @@ export const createTypeArena = (): TypeArena => {
             resolvedRight,
             currentVariance,
             subst,
-            localSeen
+            localSeen,
           );
         case "function": {
           if (rightDesc.kind !== "function") {
@@ -1209,7 +1219,7 @@ export const createTypeArena = (): TypeArena => {
             return conflict(
               resolvedLeft,
               resolvedRight,
-              `function arity mismatch (${ctx.reason})`
+              `function arity mismatch (${ctx.reason})`,
             );
           }
           let working = subst;
@@ -1222,7 +1232,7 @@ export const createTypeArena = (): TypeArena => {
               return conflict(
                 resolvedLeft,
                 resolvedRight,
-                `parameter optionality mismatch (${ctx.reason})`
+                `parameter optionality mismatch (${ctx.reason})`,
               );
             }
             const paramResult = unifyInternal(
@@ -1230,7 +1240,7 @@ export const createTypeArena = (): TypeArena => {
               leftParam.type,
               argVariance,
               working,
-              localSeen
+              localSeen,
             );
             if (!paramResult.ok) {
               return paramResult;
@@ -1242,7 +1252,7 @@ export const createTypeArena = (): TypeArena => {
             rightDesc.returnType,
             currentVariance,
             working,
-            localSeen
+            localSeen,
           );
           if (!returnResult.ok) {
             return returnResult;
@@ -1258,7 +1268,7 @@ export const createTypeArena = (): TypeArena => {
             rightDesc.element,
             currentVariance,
             subst,
-            localSeen
+            localSeen,
           );
         }
         default:
@@ -1269,399 +1279,411 @@ export const createTypeArena = (): TypeArena => {
     return unifyInternal(a, b, variance, new Map(), seen);
   };
 
-	  const substitute = (type: TypeId, subst: Substitution): TypeId => {
-	    if (subst.size === 0) {
-	      return type;
-	    }
-	
-	    const mappedParams = new Set(subst.keys());
-	    const needsCache = new Map<TypeId, boolean>();
-	
-	    const needsSubstitution = (root: TypeId): boolean => {
-	      const cachedRoot = needsCache.get(root);
-	      if (typeof cachedRoot === "boolean") {
-	        return cachedRoot;
-	      }
-	
-	      const inProgress = new Set<TypeId>();
-	      const stack: Array<{ id: TypeId; stage: 0 | 1 }> = [
-	        { id: root, stage: 0 },
-	      ];
-	
-	      while (stack.length > 0) {
-	        const frame = stack.pop();
-	        if (!frame) break;
-	
-	        const cached = needsCache.get(frame.id);
-	        if (typeof cached === "boolean") {
-	          continue;
-	        }
-	
-	        if (frame.stage === 0) {
-	          if (inProgress.has(frame.id)) {
-	            continue;
-	          }
-	          inProgress.add(frame.id);
-	          stack.push({ id: frame.id, stage: 1 });
-	
-	          const desc = getDescriptor(frame.id);
-	          switch (desc.kind) {
-	            case "recursive":
-	              stack.push({ id: desc.body, stage: 0 });
-	              break;
-	            case "fixed-array":
-	              stack.push({ id: desc.element, stage: 0 });
-	              break;
-	            case "union":
-	              desc.members.forEach((member) => stack.push({ id: member, stage: 0 }));
-	              break;
-	            case "intersection":
-	              if (typeof desc.nominal === "number") {
-	                stack.push({ id: desc.nominal, stage: 0 });
-	              }
-	              if (typeof desc.structural === "number") {
-	                stack.push({ id: desc.structural, stage: 0 });
-	              }
-	              break;
-	            case "trait":
-	            case "nominal-object":
-	              desc.typeArgs.forEach((arg) => stack.push({ id: arg, stage: 0 }));
-	              break;
-	            case "structural-object":
-	              desc.fields.forEach((field) =>
-	                stack.push({ id: field.type, stage: 0 })
-	              );
-	              break;
-	            case "function":
-	              desc.parameters.forEach((param) =>
-	                stack.push({ id: param.type, stage: 0 })
-	              );
-	              stack.push({ id: desc.returnType, stage: 0 });
-	              break;
-	            default:
-	              break;
-	          }
-	          continue;
-	        }
-	
-	        const desc = getDescriptor(frame.id);
-	        const result = (() => {
-	          switch (desc.kind) {
-	            case "type-param-ref":
-	              return mappedParams.has(desc.param);
-	            case "recursive":
-	              return needsCache.get(desc.body) ?? false;
-	            case "fixed-array":
-	              return needsCache.get(desc.element) ?? false;
-	            case "union":
-	              return desc.members.some((member) => needsCache.get(member) ?? false);
-	            case "intersection":
-	              return (
-	                (typeof desc.nominal === "number" &&
-	                  (needsCache.get(desc.nominal) ?? false)) ||
-	                (typeof desc.structural === "number" &&
-	                  (needsCache.get(desc.structural) ?? false))
-	              );
-	            case "trait":
-	            case "nominal-object":
-	              return desc.typeArgs.some((arg) => needsCache.get(arg) ?? false);
-	            case "structural-object":
-	              return desc.fields.some(
-	                (field) => needsCache.get(field.type) ?? false
-	              );
-	            case "function":
-	              return (
-	                desc.parameters.some(
-	                  (param) => needsCache.get(param.type) ?? false
-	                ) || (needsCache.get(desc.returnType) ?? false)
-	              );
-	            default:
-	              return false;
-	          }
-	        })();
-	
-	        inProgress.delete(frame.id);
-	        needsCache.set(frame.id, result);
-	      }
-	
-	      return needsCache.get(root) ?? false;
-	    };
+  const substitute = (type: TypeId, subst: Substitution): TypeId => {
+    if (subst.size === 0) {
+      return type;
+    }
+
+    const mappedParams = new Set(subst.keys());
+    const needsCache = new Map<TypeId, boolean>();
+
+    const needsSubstitution = (root: TypeId): boolean => {
+      const cachedRoot = needsCache.get(root);
+      if (typeof cachedRoot === "boolean") {
+        return cachedRoot;
+      }
+
+      const inProgress = new Set<TypeId>();
+      const stack: Array<{ id: TypeId; stage: 0 | 1 }> = [
+        { id: root, stage: 0 },
+      ];
+
+      while (stack.length > 0) {
+        const frame = stack.pop();
+        if (!frame) break;
+
+        const cached = needsCache.get(frame.id);
+        if (typeof cached === "boolean") {
+          continue;
+        }
+
+        if (frame.stage === 0) {
+          if (inProgress.has(frame.id)) {
+            continue;
+          }
+          inProgress.add(frame.id);
+          stack.push({ id: frame.id, stage: 1 });
+
+          const desc = getDescriptor(frame.id);
+          switch (desc.kind) {
+            case "recursive":
+              stack.push({ id: desc.body, stage: 0 });
+              break;
+            case "fixed-array":
+              stack.push({ id: desc.element, stage: 0 });
+              break;
+            case "union":
+              desc.members.forEach((member) =>
+                stack.push({ id: member, stage: 0 }),
+              );
+              break;
+            case "intersection":
+              if (typeof desc.nominal === "number") {
+                stack.push({ id: desc.nominal, stage: 0 });
+              }
+              if (typeof desc.structural === "number") {
+                stack.push({ id: desc.structural, stage: 0 });
+              }
+              break;
+            case "trait":
+            case "nominal-object":
+              desc.typeArgs.forEach((arg) => stack.push({ id: arg, stage: 0 }));
+              break;
+            case "structural-object":
+              desc.fields.forEach((field) =>
+                stack.push({ id: field.type, stage: 0 }),
+              );
+              break;
+            case "function":
+              desc.parameters.forEach((param) =>
+                stack.push({ id: param.type, stage: 0 }),
+              );
+              stack.push({ id: desc.returnType, stage: 0 });
+              break;
+            default:
+              break;
+          }
+          continue;
+        }
+
+        const desc = getDescriptor(frame.id);
+        const result = (() => {
+          switch (desc.kind) {
+            case "type-param-ref":
+              return mappedParams.has(desc.param);
+            case "recursive":
+              return needsCache.get(desc.body) ?? false;
+            case "fixed-array":
+              return needsCache.get(desc.element) ?? false;
+            case "union":
+              return desc.members.some(
+                (member) => needsCache.get(member) ?? false,
+              );
+            case "intersection":
+              return (
+                (typeof desc.nominal === "number" &&
+                  (needsCache.get(desc.nominal) ?? false)) ||
+                (typeof desc.structural === "number" &&
+                  (needsCache.get(desc.structural) ?? false))
+              );
+            case "trait":
+            case "nominal-object":
+              return desc.typeArgs.some((arg) => needsCache.get(arg) ?? false);
+            case "structural-object":
+              return desc.fields.some(
+                (field) => needsCache.get(field.type) ?? false,
+              );
+            case "function":
+              return (
+                desc.parameters.some(
+                  (param) => needsCache.get(param.type) ?? false,
+                ) ||
+                (needsCache.get(desc.returnType) ?? false)
+              );
+            default:
+              return false;
+          }
+        })();
+
+        inProgress.delete(frame.id);
+        needsCache.set(frame.id, result);
+      }
+
+      return needsCache.get(root) ?? false;
+    };
 
     if (!needsSubstitution(type)) {
       return type;
     }
 
-	    const allocatePlaceholder = (): TypeId => {
-	      const self = nextTypeId++;
-	      const placeholderParam = nextTypeParamId++;
-	      const placeholderDesc: TypeParamRef = {
-	        kind: "type-param-ref",
-	        param: placeholderParam,
-	      };
-	      descriptors[self] = placeholderDesc;
-	      descriptorCache.set(keyFor(placeholderDesc), self);
-	      return self;
-	    };
-	
-	    const resolved = new Map<TypeId, TypeId>();
-	    const inProgress = new Map<TypeId, TypeId | null>();
-	
-	    const substituteInternal = (root: TypeId): TypeId => {
-	      type Frame = { id: TypeId; stage: 0 | 1 };
-	
-	      const getSubstituted = (id: TypeId): TypeId => {
-	        const cached = resolved.get(id);
-	        if (typeof cached === "number") {
-	          return cached;
-	        }
-	
-	        const active = inProgress.get(id);
-	        if (typeof active === "number") {
-	          return active;
-	        }
-	        if (active === null) {
-	          const placeholder = allocatePlaceholder();
-	          inProgress.set(id, placeholder);
-	          return placeholder;
-	        }
-	
-	        return id;
-	      };
-	
-	      const stack: Frame[] = [{ id: root, stage: 0 }];
-	      while (stack.length > 0) {
-	        const frame = stack.pop();
-	        if (!frame) break;
-	
-	        if (frame.stage === 0) {
-	          if (!needsSubstitution(frame.id)) {
-	            resolved.set(frame.id, frame.id);
-	            continue;
-	          }
-	
-	          const cached = resolved.get(frame.id);
-	          if (typeof cached === "number") {
-	            continue;
-	          }
-	
-	          if (inProgress.has(frame.id)) {
-	            continue;
-	          }
-	
-	          inProgress.set(frame.id, null);
-	          stack.push({ id: frame.id, stage: 1 });
-	
-	          const desc = getDescriptor(frame.id);
-	          switch (desc.kind) {
-	            case "recursive":
-	              if (!subst.has(desc.binder)) {
-	                stack.push({ id: desc.body, stage: 0 });
-	              }
-	              break;
-	            case "fixed-array":
-	              stack.push({ id: desc.element, stage: 0 });
-	              break;
-	            case "union":
-	              desc.members.forEach((member) => stack.push({ id: member, stage: 0 }));
-	              break;
-	            case "intersection":
-	              if (typeof desc.nominal === "number") {
-	                stack.push({ id: desc.nominal, stage: 0 });
-	              }
-	              if (typeof desc.structural === "number") {
-	                stack.push({ id: desc.structural, stage: 0 });
-	              }
-	              break;
-	            case "trait":
-	            case "nominal-object":
-	              desc.typeArgs.forEach((arg) => stack.push({ id: arg, stage: 0 }));
-	              break;
-	            case "structural-object":
-	              desc.fields.forEach((field) =>
-	                stack.push({ id: field.type, stage: 0 })
-	              );
-	              break;
-	            case "function":
-	              desc.parameters.forEach((param) =>
-	                stack.push({ id: param.type, stage: 0 })
-	              );
-	              stack.push({ id: desc.returnType, stage: 0 });
-	              break;
-	            default:
-	              break;
-	          }
-	          continue;
-	        }
-	
-	        const current = frame.id;
-	        const desc = getDescriptor(current);
-	        const rebuilt = (() => {
-	          switch (desc.kind) {
-	            case "primitive":
-	              return { type: current, changed: false };
-	            case "recursive": {
-	              const filteredSubst =
-	                subst.has(desc.binder) && subst.size > 1
-	                  ? new Map(
-	                      Array.from(subst.entries()).filter(
-	                        ([param]) => param !== desc.binder
-	                      )
-	                    )
-	                  : subst.has(desc.binder)
-	                    ? new Map<TypeParamId, TypeId>()
-	                    : subst;
-	              const body =
-	                filteredSubst === subst
-	                  ? getSubstituted(desc.body)
-	                  : substitute(desc.body, filteredSubst);
-	              const changed = body !== desc.body;
-	              return changed
-	                ? {
-	                    type: internRecursive({ binder: desc.binder, body }),
-	                    changed: true,
-	                  }
-	                : { type: current, changed: false };
-	            }
-	            case "type-param-ref": {
-	              const replacement = subst.get(desc.param);
-	              return replacement === undefined
-	                ? { type: current, changed: false }
-	                : { type: replacement, changed: replacement !== current };
-	            }
-	            case "fixed-array": {
-	              const element = getSubstituted(desc.element);
-	              return element === desc.element
-	                ? { type: current, changed: false }
-	                : { type: internFixedArray(element), changed: true };
-	            }
-	            case "union": {
-	              const members = desc.members.map((member) => getSubstituted(member));
-	              const changed = members.some(
-	                (member, idx) => member !== desc.members[idx]
-	              );
-	              return changed
-	                ? { type: internUnion(members), changed: true }
-	                : { type: current, changed: false };
-	            }
-	            case "intersection": {
-	              const nominal =
-	                typeof desc.nominal === "number"
-	                  ? getSubstituted(desc.nominal)
-	                  : undefined;
-	              const structural =
-	                typeof desc.structural === "number"
-	                  ? getSubstituted(desc.structural)
-	                  : undefined;
-	              const changed =
-	                nominal !== desc.nominal || structural !== desc.structural;
-	              return changed
-	                ? { type: internIntersection({ nominal, structural }), changed: true }
-	                : { type: current, changed: false };
-	            }
-	            case "trait": {
-	              const typeArgs = desc.typeArgs.map((arg) => getSubstituted(arg));
-	              const changed = typeArgs.some(
-	                (arg, idx) => arg !== desc.typeArgs[idx]
-	              );
-	              return changed
-	                ? {
-	                    type: internTrait({
-	                      owner: desc.owner,
-	                      name: desc.name,
-	                      typeArgs,
-	                    }),
-	                    changed: true,
-	                  }
-	                : { type: current, changed: false };
-	            }
-	            case "nominal-object": {
-	              const typeArgs = desc.typeArgs.map((arg) => getSubstituted(arg));
-	              const changed = typeArgs.some(
-	                (arg, idx) => arg !== desc.typeArgs[idx]
-	              );
-	              return changed
-	                ? {
-	                    type: internNominalObject({
-	                      owner: desc.owner,
-	                      name: desc.name,
-	                      typeArgs,
-	                    }),
-	                    changed: true,
-	                  }
-	                : { type: current, changed: false };
-	            }
-	            case "structural-object": {
-	              let changed = false;
-	              const fields = desc.fields.map((field) => {
-	                const substituted = getSubstituted(field.type);
-	                changed ||= substituted !== field.type;
-	                return substituted === field.type
-	                  ? field
-	                  : {
-	                      name: field.name,
-	                      type: substituted,
-	                      optional: field.optional,
-	                      declaringParams: field.declaringParams,
-	                      visibility: field.visibility,
-	                      owner: field.owner,
-	                      packageId: field.packageId,
-	                    };
-	              });
-	              return changed
-	                ? { type: internStructuralObject({ fields }), changed: true }
-	                : { type: current, changed: false };
-	            }
-	            case "function": {
-	              let changed = false;
-	              const parameters = desc.parameters.map((param) => {
-	                const substituted = getSubstituted(param.type);
-	                changed ||= substituted !== param.type;
-	                return substituted === param.type
-	                  ? param
-	                  : {
-	                      type: substituted,
-	                      label: param.label,
-	                      optional: param.optional,
-	                    };
-	              });
-	              const returnType = getSubstituted(desc.returnType);
-	              changed ||= returnType !== desc.returnType;
-	              return changed
-	                ? {
-	                    type: internFunction({
-	                      parameters,
-	                      returnType,
-	                      effectRow: desc.effectRow,
-	                    }),
-	                    changed: true,
-	                  }
-	                : { type: current, changed: false };
-	            }
-	            default:
-	              return { type: current, changed: false };
-	          }
-	        })();
-	
-	        const placeholder = inProgress.get(current);
-	        if (typeof placeholder === "number") {
-	          const replacementDesc =
-	            rebuilt.type === current ? desc : getDescriptor(rebuilt.type);
-	          descriptors[placeholder] = replacementDesc;
-	          descriptorCache.set(keyFor(replacementDesc), placeholder);
-	          resolved.set(current, placeholder);
-	          inProgress.delete(current);
-	          continue;
-	        }
-	
-	        resolved.set(current, rebuilt.type);
-	        inProgress.delete(current);
-	      }
-	
-	      return resolved.get(root) ?? root;
-	    };
-	
-	    return substituteInternal(type);
-	  };
+    const allocatePlaceholder = (): TypeId => {
+      const self = nextTypeId++;
+      const placeholderParam = nextTypeParamId++;
+      const placeholderDesc: TypeParamRef = {
+        kind: "type-param-ref",
+        param: placeholderParam,
+      };
+      descriptors[self] = placeholderDesc;
+      descriptorCache.set(keyFor(placeholderDesc), self);
+      return self;
+    };
+
+    const resolved = new Map<TypeId, TypeId>();
+    const inProgress = new Map<TypeId, TypeId | null>();
+
+    const substituteInternal = (root: TypeId): TypeId => {
+      type Frame = { id: TypeId; stage: 0 | 1 };
+
+      const getSubstituted = (id: TypeId): TypeId => {
+        const cached = resolved.get(id);
+        if (typeof cached === "number") {
+          return cached;
+        }
+
+        const active = inProgress.get(id);
+        if (typeof active === "number") {
+          return active;
+        }
+        if (active === null) {
+          const placeholder = allocatePlaceholder();
+          inProgress.set(id, placeholder);
+          return placeholder;
+        }
+
+        return id;
+      };
+
+      const stack: Frame[] = [{ id: root, stage: 0 }];
+      while (stack.length > 0) {
+        const frame = stack.pop();
+        if (!frame) break;
+
+        if (frame.stage === 0) {
+          if (!needsSubstitution(frame.id)) {
+            resolved.set(frame.id, frame.id);
+            continue;
+          }
+
+          const cached = resolved.get(frame.id);
+          if (typeof cached === "number") {
+            continue;
+          }
+
+          if (inProgress.has(frame.id)) {
+            continue;
+          }
+
+          inProgress.set(frame.id, null);
+          stack.push({ id: frame.id, stage: 1 });
+
+          const desc = getDescriptor(frame.id);
+          switch (desc.kind) {
+            case "recursive":
+              if (!subst.has(desc.binder)) {
+                stack.push({ id: desc.body, stage: 0 });
+              }
+              break;
+            case "fixed-array":
+              stack.push({ id: desc.element, stage: 0 });
+              break;
+            case "union":
+              desc.members.forEach((member) =>
+                stack.push({ id: member, stage: 0 }),
+              );
+              break;
+            case "intersection":
+              if (typeof desc.nominal === "number") {
+                stack.push({ id: desc.nominal, stage: 0 });
+              }
+              if (typeof desc.structural === "number") {
+                stack.push({ id: desc.structural, stage: 0 });
+              }
+              break;
+            case "trait":
+            case "nominal-object":
+              desc.typeArgs.forEach((arg) => stack.push({ id: arg, stage: 0 }));
+              break;
+            case "structural-object":
+              desc.fields.forEach((field) =>
+                stack.push({ id: field.type, stage: 0 }),
+              );
+              break;
+            case "function":
+              desc.parameters.forEach((param) =>
+                stack.push({ id: param.type, stage: 0 }),
+              );
+              stack.push({ id: desc.returnType, stage: 0 });
+              break;
+            default:
+              break;
+          }
+          continue;
+        }
+
+        const current = frame.id;
+        const desc = getDescriptor(current);
+        const rebuilt = (() => {
+          switch (desc.kind) {
+            case "primitive":
+              return { type: current, changed: false };
+            case "recursive": {
+              const filteredSubst =
+                subst.has(desc.binder) && subst.size > 1
+                  ? new Map(
+                      Array.from(subst.entries()).filter(
+                        ([param]) => param !== desc.binder,
+                      ),
+                    )
+                  : subst.has(desc.binder)
+                    ? new Map<TypeParamId, TypeId>()
+                    : subst;
+              const body =
+                filteredSubst === subst
+                  ? getSubstituted(desc.body)
+                  : substitute(desc.body, filteredSubst);
+              const changed = body !== desc.body;
+              return changed
+                ? {
+                    type: internRecursive({ binder: desc.binder, body }),
+                    changed: true,
+                  }
+                : { type: current, changed: false };
+            }
+            case "type-param-ref": {
+              const replacement = subst.get(desc.param);
+              return replacement === undefined
+                ? { type: current, changed: false }
+                : { type: replacement, changed: replacement !== current };
+            }
+            case "fixed-array": {
+              const element = getSubstituted(desc.element);
+              return element === desc.element
+                ? { type: current, changed: false }
+                : { type: internFixedArray(element), changed: true };
+            }
+            case "union": {
+              const members = desc.members.map((member) =>
+                getSubstituted(member),
+              );
+              const changed = members.some(
+                (member, idx) => member !== desc.members[idx],
+              );
+              return changed
+                ? { type: internUnion(members), changed: true }
+                : { type: current, changed: false };
+            }
+            case "intersection": {
+              const nominal =
+                typeof desc.nominal === "number"
+                  ? getSubstituted(desc.nominal)
+                  : undefined;
+              const structural =
+                typeof desc.structural === "number"
+                  ? getSubstituted(desc.structural)
+                  : undefined;
+              const changed =
+                nominal !== desc.nominal || structural !== desc.structural;
+              return changed
+                ? {
+                    type: internIntersection({ nominal, structural }),
+                    changed: true,
+                  }
+                : { type: current, changed: false };
+            }
+            case "trait": {
+              const typeArgs = desc.typeArgs.map((arg) => getSubstituted(arg));
+              const changed = typeArgs.some(
+                (arg, idx) => arg !== desc.typeArgs[idx],
+              );
+              return changed
+                ? {
+                    type: internTrait({
+                      owner: desc.owner,
+                      name: desc.name,
+                      typeArgs,
+                    }),
+                    changed: true,
+                  }
+                : { type: current, changed: false };
+            }
+            case "nominal-object": {
+              const typeArgs = desc.typeArgs.map((arg) => getSubstituted(arg));
+              const changed = typeArgs.some(
+                (arg, idx) => arg !== desc.typeArgs[idx],
+              );
+              return changed
+                ? {
+                    type: internNominalObject({
+                      owner: desc.owner,
+                      name: desc.name,
+                      typeArgs,
+                    }),
+                    changed: true,
+                  }
+                : { type: current, changed: false };
+            }
+            case "structural-object": {
+              let changed = false;
+              const fields = desc.fields.map((field) => {
+                const substituted = getSubstituted(field.type);
+                changed ||= substituted !== field.type;
+                return substituted === field.type
+                  ? field
+                  : {
+                      name: field.name,
+                      type: substituted,
+                      optional: field.optional,
+                      declaringParams: field.declaringParams,
+                      visibility: field.visibility,
+                      owner: field.owner,
+                      packageId: field.packageId,
+                    };
+              });
+              return changed
+                ? { type: internStructuralObject({ fields }), changed: true }
+                : { type: current, changed: false };
+            }
+            case "function": {
+              let changed = false;
+              const parameters = desc.parameters.map((param) => {
+                const substituted = getSubstituted(param.type);
+                changed ||= substituted !== param.type;
+                return substituted === param.type
+                  ? param
+                  : {
+                      type: substituted,
+                      label: param.label,
+                      optional: param.optional,
+                    };
+              });
+              const returnType = getSubstituted(desc.returnType);
+              changed ||= returnType !== desc.returnType;
+              return changed
+                ? {
+                    type: internFunction({
+                      parameters,
+                      returnType,
+                      effectRow: desc.effectRow,
+                    }),
+                    changed: true,
+                  }
+                : { type: current, changed: false };
+            }
+            default:
+              return { type: current, changed: false };
+          }
+        })();
+
+        const placeholder = inProgress.get(current);
+        if (typeof placeholder === "number") {
+          const replacementDesc =
+            rebuilt.type === current ? desc : getDescriptor(rebuilt.type);
+          descriptors[placeholder] = replacementDesc;
+          descriptorCache.set(keyFor(replacementDesc), placeholder);
+          resolved.set(current, placeholder);
+          inProgress.delete(current);
+          continue;
+        }
+
+        resolved.set(current, rebuilt.type);
+        inProgress.delete(current);
+      }
+
+      return resolved.get(root) ?? root;
+    };
+
+    return substituteInternal(type);
+  };
 
   const widen = (type: TypeId, _constraint: ConstraintSet): TypeId => type;
 

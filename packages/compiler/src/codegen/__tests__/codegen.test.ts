@@ -24,7 +24,11 @@ import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import type { HirMatchExpr } from "../../semantics/hir/index.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
-import type { ModuleGraph, ModuleNode, ModulePath } from "../../modules/types.js";
+import type {
+  ModuleGraph,
+  ModuleNode,
+  ModulePath,
+} from "../../modules/types.js";
 import {
   createEffectInterner,
   createEffectTable,
@@ -40,14 +44,14 @@ import type {
 const loadAst = (fixtureName: string) => {
   const source = readFileSync(
     resolve(import.meta.dirname, "__fixtures__", fixtureName),
-    "utf8"
+    "utf8",
   );
   return parse(source, fixtureName);
 };
 
 const loadSemanticsWithTyping = (
   fixtureName: string,
-  typing: { arena: any; effects: any }
+  typing: { arena: any; effects: any },
 ) => {
   const form = loadAst(fixtureName);
   const path: ModulePath = { namespace: "src", segments: [] };
@@ -87,7 +91,10 @@ const loadMain = (fixtureName: string) => {
   return main as (...params: unknown[]) => unknown;
 };
 
-const getNominalPatternDesc = (typeId: TypeId, arena: { get: (typeId: TypeId) => any }) => {
+const getNominalPatternDesc = (
+  typeId: TypeId,
+  arena: { get: (typeId: TypeId) => any },
+) => {
   const desc = arena.get(typeId);
   if (desc.kind === "nominal-object") {
     return desc;
@@ -115,7 +122,7 @@ const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
 const buildCodegenProgram = (
-  modules: readonly ReturnType<typeof semanticsPipeline>[]
+  modules: readonly ReturnType<typeof semanticsPipeline>[],
 ): { mod: binaryen.Module; contexts: CodegenContext[] } => {
   const program = buildProgramCodegenView(modules);
   const mod = new binaryen.Module();
@@ -123,7 +130,10 @@ const buildCodegenProgram = (
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, Map<number, FunctionMetadata[]>>();
-  const functionInstances = new Map<ProgramFunctionInstanceId, FunctionMetadata>();
+  const functionInstances = new Map<
+    ProgramFunctionInstanceId,
+    FunctionMetadata
+  >();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
@@ -152,7 +162,10 @@ const buildCodegenProgram = (
     functionRefTypes: new Map(),
     recursiveBinders: new Map(),
     runtimeTypeRegistry,
-    runtimeTypeIds: { byKey: runtimeTypeIdsByKey, nextId: runtimeTypeIdCounter },
+    runtimeTypeIds: {
+      byKey: runtimeTypeIdsByKey,
+      nextId: runtimeTypeIdCounter,
+    },
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
     rtt,
@@ -195,7 +208,10 @@ describe("next codegen", () => {
     const rtt = createRttContext(mod);
     const effectsRuntime = createEffectRuntime(mod);
     const functions = new Map<string, Map<number, FunctionMetadata[]>>();
-    const functionInstances = new Map<ProgramFunctionInstanceId, FunctionMetadata>();
+    const functionInstances = new Map<
+      ProgramFunctionInstanceId,
+      FunctionMetadata
+    >();
     const outcomeValueTypes = new Map<string, OutcomeValueBox>();
     const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
     const runtimeTypeIdsByKey = new Map<string, number>();
@@ -225,7 +241,10 @@ describe("next codegen", () => {
       functionRefTypes: new Map(),
       recursiveBinders: new Map(),
       runtimeTypeRegistry,
-      runtimeTypeIds: { byKey: runtimeTypeIdsByKey, nextId: runtimeTypeIdCounter },
+      runtimeTypeIds: {
+        byKey: runtimeTypeIdsByKey,
+        nextId: runtimeTypeIdCounter,
+      },
       lambdaEnvs: new Map(),
       lambdaFunctions: new Map(),
       rtt,
@@ -256,7 +275,9 @@ describe("next codegen", () => {
   it("canonicalizes recursive RTT keys for alpha-equivalent aliases", () => {
     const ast = loadAst("recursive_alias_alpha_equivalence.voyd");
     const semantics = semanticsPipeline(ast);
-    const { contexts: [ctx] } = buildCodegenProgram([semantics]);
+    const {
+      contexts: [ctx],
+    } = buildCodegenProgram([semantics]);
 
     const resolveAliasType = (name: string): TypeId => {
       const symbol = semantics.symbols.resolveTopLevel(name);
@@ -275,7 +296,10 @@ describe("next codegen", () => {
     const listB = resolveAliasType("ListB");
     const listAStructural = resolveStructuralTypeId(listA, ctx);
     const listBStructural = resolveStructuralTypeId(listB, ctx);
-    if (typeof listAStructural !== "number" || typeof listBStructural !== "number") {
+    if (
+      typeof listAStructural !== "number" ||
+      typeof listBStructural !== "number"
+    ) {
       throw new Error("missing structural type ids for recursive aliases");
     }
 
@@ -287,9 +311,13 @@ describe("next codegen", () => {
     expect(entryA?.key).toBeDefined();
     expect(entryA?.key).toBe(entryB?.key);
     const runtimeIdA =
-      entryA?.key === undefined ? undefined : ctx.runtimeTypeIds.byKey.get(entryA.key);
+      entryA?.key === undefined
+        ? undefined
+        : ctx.runtimeTypeIds.byKey.get(entryA.key);
     const runtimeIdB =
-      entryB?.key === undefined ? undefined : ctx.runtimeTypeIds.byKey.get(entryB.key);
+      entryB?.key === undefined
+        ? undefined
+        : ctx.runtimeTypeIds.byKey.get(entryB.key);
     expect(runtimeIdA).toBeDefined();
     expect(runtimeIdA).toBe(runtimeIdB);
   });
@@ -297,7 +325,9 @@ describe("next codegen", () => {
   it("emits recursive wasm heap types for recursive objects", () => {
     const ast = loadAst("recursive_heap_types.voyd");
     const semantics = semanticsPipeline(ast);
-    const { contexts: [ctx] } = buildCodegenProgram([semantics]);
+    const {
+      contexts: [ctx],
+    } = buildCodegenProgram([semantics]);
 
     const resolveAliasType = (name: string): TypeId => {
       const symbol = semantics.symbols.resolveTopLevel(name);
@@ -321,7 +351,9 @@ describe("next codegen", () => {
     const infoNode = getStructuralTypeInfo(typeNode, ctx);
     const infoSelf = getStructuralTypeInfo(typeSelf, ctx);
     if (!infoNode || !infoSelf) {
-      throw new Error("missing structural type info for recursive heap type test");
+      throw new Error(
+        "missing structural type info for recursive heap type test",
+      );
     }
 
     const nextType = infoNode.fieldMap.get("next")?.typeId;
@@ -333,12 +365,20 @@ describe("next codegen", () => {
       throw new Error("missing structural info for Box<Node>");
     }
 
-    expect(infoNode.fieldMap.get("next")?.heapWasmType).toBe(infoBox.runtimeType);
+    expect(infoNode.fieldMap.get("next")?.heapWasmType).toBe(
+      infoBox.runtimeType,
+    );
     expect(infoBox.fieldMap.get("v")?.heapWasmType).toBe(infoNode.runtimeType);
-    expect(infoSelf.fieldMap.get("next")?.heapWasmType).toBe(infoSelf.runtimeType);
+    expect(infoSelf.fieldMap.get("next")?.heapWasmType).toBe(
+      infoSelf.runtimeType,
+    );
 
-    expect(infoNode.fieldMap.get("next")?.heapWasmType).not.toBe(ctx.rtt.baseType);
-    expect(infoSelf.fieldMap.get("next")?.heapWasmType).not.toBe(ctx.rtt.baseType);
+    expect(infoNode.fieldMap.get("next")?.heapWasmType).not.toBe(
+      ctx.rtt.baseType,
+    );
+    expect(infoSelf.fieldMap.get("next")?.heapWasmType).not.toBe(
+      ctx.rtt.baseType,
+    );
   });
 
   it("runs recursive heap types fixture", () => {
@@ -372,21 +412,21 @@ describe("next codegen", () => {
     expect((main as () => number)()).toBe(3);
   });
 
-	  it("supports optional fields and parameters", () => {
-	    const instance = loadWasmInstance("optional_syntax.voyd");
-	    const {
-	      test1_optional_obj_field,
-	      test2_passed_optional_param,
-	      test3_not_passed_optional_param,
-	      test4_pass_optional_label_arg,
-	      test5_no_pass_optional_label,
-	      test6_pass_optional_object_for_label,
-	      test7_skip_optional_labeled,
-	      test8_closure_with_arg,
-	      test9_closure_without_arg,
-	      test10_optional_spread_wraps_some,
-	      main,
-	    } = instance.exports as Record<string, unknown>;
+  it("supports optional fields and parameters", () => {
+    const instance = loadWasmInstance("optional_syntax.voyd");
+    const {
+      test1_optional_obj_field,
+      test2_passed_optional_param,
+      test3_not_passed_optional_param,
+      test4_pass_optional_label_arg,
+      test5_no_pass_optional_label,
+      test6_pass_optional_object_for_label,
+      test7_skip_optional_labeled,
+      test8_closure_with_arg,
+      test9_closure_without_arg,
+      test10_optional_spread_wraps_some,
+      main,
+    } = instance.exports as Record<string, unknown>;
 
     expect((test1_optional_obj_field as () => number)()).toBe(7);
     expect((test2_passed_optional_param as () => number)()).toBe(2);
@@ -394,12 +434,12 @@ describe("next codegen", () => {
     expect((test4_pass_optional_label_arg as () => number)()).toBe(2);
     expect((test5_no_pass_optional_label as () => number)()).toBe(1);
     expect((test6_pass_optional_object_for_label as () => number)()).toBe(1);
-	    expect((test7_skip_optional_labeled as () => number)()).toBe(3);
-	    expect((test8_closure_with_arg as () => number)()).toBe(2);
-	    expect((test9_closure_without_arg as () => number)()).toBe(1);
-	    expect((test10_optional_spread_wraps_some as () => number)()).toBe(5);
-	    expect((main as () => number)()).toBe(25);
-	  });
+    expect((test7_skip_optional_labeled as () => number)()).toBe(3);
+    expect((test8_closure_with_arg as () => number)()).toBe(2);
+    expect((test9_closure_without_arg as () => number)()).toBe(1);
+    expect((test10_optional_spread_wraps_some as () => number)()).toBe(5);
+    expect((main as () => number)()).toBe(25);
+  });
 
   it("uses return_call for tail-recursive functions", () => {
     const ast = loadAst("tail_fib.voyd");
@@ -451,7 +491,7 @@ describe("next codegen", () => {
   it("rejects incompatible primitive return branches", () => {
     const ast = loadAst("return_mixed_primitives.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(
-      /(branch type mismatch|type mismatch)/
+      /(branch type mismatch|type mismatch)/,
     );
   });
 
@@ -639,9 +679,9 @@ describe("next codegen", () => {
     const ast = loadAst("uninstantiated_export_generic.voyd");
     const semantics = semanticsPipeline(ast);
     const result = codegen(semantics, { effectsHostBoundary: "off" });
-    expect(
-      result.diagnostics.some((diag) => diag.code === "CG0003")
-    ).toBe(true);
+    expect(result.diagnostics.some((diag) => diag.code === "CG0003")).toBe(
+      true,
+    );
   });
 
   it("emits wasm for generic functions", () => {
@@ -658,7 +698,7 @@ describe("next codegen", () => {
     const ast = loadAst("generic_union_exact_match.voyd");
     const { hir, typing } = semanticsPipeline(ast);
     const matches = Array.from(hir.expressions.values()).filter(
-      (expr): expr is HirMatchExpr => expr.exprKind === "match"
+      (expr): expr is HirMatchExpr => expr.exprKind === "match",
     );
 
     expect(matches.length).toBeGreaterThan(0);
@@ -669,13 +709,13 @@ describe("next codegen", () => {
           expect(typeof arm.pattern.typeId).toBe("number");
           const patternDesc = getNominalPatternDesc(
             arm.pattern.typeId!,
-            typing.arena
+            typing.arena,
           );
           const arg = typing.arena.get(patternDesc.typeArgs[0]!);
           expect(arg.kind).toBe("primitive");
           if (arg.kind !== "primitive") throw new Error("Expected primitive");
           expect(arg.name).toBe("i32");
-        })
+        }),
     );
   });
 
@@ -683,7 +723,7 @@ describe("next codegen", () => {
     const ast = loadAst("generic_union_match.voyd");
     const { hir, typing } = semanticsPipeline(ast);
     const match = Array.from(hir.expressions.values()).find(
-      (expr): expr is HirMatchExpr => expr.exprKind === "match"
+      (expr): expr is HirMatchExpr => expr.exprKind === "match",
     );
 
     expect(match).toBeDefined();
@@ -694,7 +734,7 @@ describe("next codegen", () => {
           expect(typeof arm.pattern.typeId).toBe("number");
           const patternDesc = getNominalPatternDesc(
             arm.pattern.typeId!,
-            typing.arena
+            typing.arena,
           );
           const arg = typing.arena.get(patternDesc.typeArgs[0]!);
           if (arg.kind !== "primitive") {
@@ -756,13 +796,13 @@ describe("next codegen", () => {
       .map((line) => line.trim())
       .filter((line) => line.startsWith("(type"));
     expect(
-      typeLines.some((line) => line.includes("__closure_base_lambdas_voyd"))
+      typeLines.some((line) => line.includes("__closure_base_lambdas_voyd")),
     ).toBe(true);
     expect(
       typeLines.some(
         (line) =>
-          line.includes("__lambda_env_12_") && line.includes("(mut i32")
-      )
+          line.includes("__lambda_env_12_") && line.includes("(mut i32"),
+      ),
     ).toBe(true);
     const callRefs = text
       .split("\n")
@@ -823,19 +863,19 @@ describe("next codegen", () => {
 
     const lambdaCount = (sem: typeof moduleA) =>
       Array.from(sem.hir.expressions.values()).filter(
-        (expr) => expr.exprKind === "lambda"
+        (expr) => expr.exprKind === "lambda",
       ).length;
 
     const envKeysA = Array.from(ctxA.lambdaEnvs.keys());
     const envKeysB = Array.from(ctxB.lambdaEnvs.keys());
     expect(
-      envKeysA.every((key) => key.startsWith(`${moduleA.moduleId}::`))
+      envKeysA.every((key) => key.startsWith(`${moduleA.moduleId}::`)),
     ).toBe(true);
     expect(
-      envKeysB.every((key) => key.startsWith(`${moduleB.moduleId}::`))
+      envKeysB.every((key) => key.startsWith(`${moduleB.moduleId}::`)),
     ).toBe(true);
     expect(new Set([...envKeysA, ...envKeysB]).size).toBe(
-      envKeysA.length + envKeysB.length
+      envKeysA.length + envKeysB.length,
     );
     expect(ctxA.lambdaEnvs.size).toBe(lambdaCount(moduleA));
     expect(ctxB.lambdaEnvs.size).toBe(lambdaCount(moduleB));
@@ -843,13 +883,13 @@ describe("next codegen", () => {
     const closureKeysA = Array.from(ctxA.closureTypes.keys());
     const closureKeysB = Array.from(ctxB.closureTypes.keys());
     expect(
-      closureKeysA.every((key) => key.startsWith(`${moduleA.moduleId}::`))
+      closureKeysA.every((key) => key.startsWith(`${moduleA.moduleId}::`)),
     ).toBe(true);
     expect(
-      closureKeysB.every((key) => key.startsWith(`${moduleB.moduleId}::`))
+      closureKeysB.every((key) => key.startsWith(`${moduleB.moduleId}::`)),
     ).toBe(true);
     expect(new Set([...closureKeysA, ...closureKeysB]).size).toBe(
-      closureKeysA.length + closureKeysB.length
+      closureKeysA.length + closureKeysB.length,
     );
 
     const {
