@@ -1,0 +1,16 @@
+obj String {
+  value: i32
+}
+
+impl String
+  api fn equals(self, other: String): () -> bool
+    self.value == other.value
+
+  api fn '=='(self, other: String): () -> bool
+    self.equals(other)
+
+pub fn main(): () -> bool
+  let a = String { value: 1 }
+  let b = String { value: 1 }
+  a == b
+

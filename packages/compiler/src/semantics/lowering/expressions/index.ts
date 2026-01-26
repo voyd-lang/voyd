@@ -168,7 +168,10 @@ export const lowerExpr: LowerExprFn = (
       });
     }
     const resolution = resolveIdentifierValue(
-      identifierAtom.value,
+      {
+        name: identifierAtom.value,
+        isQuoted: isIdentifierAtom(identifierAtom) ? identifierAtom.isQuoted : false,
+      },
       scopes.current(),
       ctx
     );

@@ -315,6 +315,51 @@ export const compileCallExpr = (
     const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
     const intrinsicName = ctx.program.symbols.getIntrinsicName(calleeId);
+
+    const targets = callInfo.targets;
+    const targetFunctionId =
+      (typeof callInstanceId === "number" ? targets?.get(callInstanceId) : undefined) ??
+      (typeof typeInstanceId === "number" ? targets?.get(typeInstanceId) : undefined) ??
+      (targets && targets.size === 1 ? targets.values().next().value : undefined);
+    if (typeof targetFunctionId === "number" && targetFunctionId !== calleeId) {
+      const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
+      const traitDispatch = compileTraitDispatchCall({
+        expr,
+        calleeSymbol: targetRef.symbol,
+        calleeModuleId: targetRef.moduleId,
+        ctx,
+        fnCtx,
+        compileExpr,
+        tailPosition,
+        expectedResultTypeId,
+      });
+      if (traitDispatch) {
+        return traitDispatch;
+      }
+      if (expectTraitDispatch) {
+        throw new Error("codegen missing trait dispatch target for call");
+      }
+
+      const targetMeta = getFunctionMetadataForCall({
+        symbol: targetRef.symbol,
+        callId: expr.id,
+        ctx,
+        moduleId: targetRef.moduleId,
+        typeInstanceId,
+      });
+      if (!targetMeta) {
+        throw new Error(
+          `codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`
+        );
+      }
+      const args = compileCallArguments(expr, targetMeta, ctx, fnCtx, compileExpr);
+      return emitResolvedCall(targetMeta, args, expr.id, ctx, fnCtx, {
+        tailPosition,
+        expectedResultTypeId,
+        typeInstanceId,
+      });
+    }
+
     const traitDispatch = compileTraitDispatchCall({
       expr,
       calleeSymbol: callee.symbol,

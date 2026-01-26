@@ -660,6 +660,60 @@ describe("semanticsPipeline", () => {
     expectAnimalConstructorBindings(mainSemantics);
   });
 
+  it("resolves operator calls to impl overloads", () => {
+    const ast = loadAst("operator_overload_eq.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+
+    const { hir, typing } = result;
+    const symbolTable = getSymbolTable(result);
+    const rootScope = symbolTable.rootScope;
+
+    const mainSymbol = symbolTable.resolve("main", rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") {
+      throw new Error("missing main symbol");
+    }
+
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction => item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) return;
+
+    const body = hir.expressions.get(mainFn.body);
+    expect(body?.exprKind).toBe("block");
+    if (!body || body.exprKind !== "block") return;
+
+    const callExprId = body.value;
+    expect(typeof callExprId).toBe("number");
+    if (typeof callExprId !== "number") return;
+    const callExpr = hir.expressions.get(callExprId);
+    expect(callExpr?.exprKind).toBe("call");
+    if (!callExpr || callExpr.exprKind !== "call") return;
+
+    const instanceKey = `${mainSymbol}<>`;
+    const target = typing.callTargets.get(callExpr.id)?.get(instanceKey);
+    expect(target).toBeDefined();
+    if (!target) return;
+
+    const eqSymbols = symbolTable.resolveAll("==", rootScope) ?? [];
+    const intrinsicEq = eqSymbols.find((symbol) => {
+      const record = symbolTable.getSymbol(symbol);
+      const meta = (record.metadata ?? {}) as { intrinsic?: boolean };
+      return meta.intrinsic === true;
+    });
+    expect(target.symbol).not.toBe(intrinsicEq);
+
+    const targetRecord = symbolTable.getSymbol(target.symbol);
+    const targetMeta = (targetRecord.metadata ?? {}) as { intrinsic?: boolean };
+    expect(targetRecord.name).toBe("==");
+    expect(targetMeta.intrinsic).not.toBe(true);
+
+    const callType = typing.table.getExprType(callExpr.id);
+    expectPrimitiveType(typing, callType, "bool");
+  });
+
   it("rejects ambiguous overloaded calls", () => {
     const ast = loadAst("function_overloads_ambiguous.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(/ambiguous overload for add/);
