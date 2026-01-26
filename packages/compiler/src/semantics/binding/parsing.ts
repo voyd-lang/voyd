@@ -476,6 +476,18 @@ const parseFunctionHead = (
 };
 
 const parseParameter = (expr: Expr): SignatureParam | SignatureParam[] => {
+  if (isIdentifierAtom(expr) && expr.value === "`") {
+    throw new Error(
+      "backticks (`) are not valid in function parameter lists; use single quotes for operator names (e.g. fn '=='(...))"
+    );
+  }
+
+  if (isForm(expr) && expr.calls("`")) {
+    throw new Error(
+      "backticks (`) are not valid in function parameter lists; use single quotes for operator names (e.g. fn '=='(...))"
+    );
+  }
+
   if (isIdentifierAtom(expr)) {
     return { name: expr.value, ast: expr };
   }

@@ -188,6 +188,27 @@ export const typeCallExpr = (
         ? intrinsicSignaturesFor(intrinsicName, ctx)
         : undefined;
     const intrinsicSignatureCount = intrinsicSignatures?.length ?? 0;
+
+    const operatorOverload =
+      metadata.intrinsic === true && intrinsicSignatureCount > 0
+        ? typeOperatorOverloadCall({
+            call: expr,
+            callee: calleeExpr,
+            operatorName: record.name,
+            args,
+            ctx,
+            state,
+            typeArguments,
+            expectedReturnType,
+          })
+        : undefined;
+    if (operatorOverload) {
+      return finalizeCall({
+        returnType: operatorOverload.returnType,
+        latentEffectRow: operatorOverload.effectRow,
+      });
+    }
+
     const hasIntrinsicHandler =
       metadata.intrinsicUsesSignature === false || intrinsicSignatureCount > 0;
 
@@ -1268,6 +1289,165 @@ const resolveMethodCallCandidates = ({
   };
 };
 
+const resolveOperatorOverloadCandidates = ({
+  receiverType,
+  operatorName,
+  ctx,
+}: {
+  receiverType: TypeId;
+  operatorName: string;
+  ctx: TypingContext;
+}): MethodCallResolution | undefined => {
+  const receiverDesc = ctx.arena.get(receiverType);
+  if (receiverDesc.kind === "trait") {
+    const traitResolution = resolveTraitMethodCandidates({
+      receiverDesc,
+      methodName: operatorName,
+      ctx,
+    });
+    return traitResolution.candidates.length > 0 ? traitResolution : undefined;
+  }
+
+  const nominalResolution = resolveNominalMethodCandidates({
+    receiverType,
+    methodName: operatorName,
+    ctx,
+  });
+  return nominalResolution && nominalResolution.candidates.length > 0
+    ? nominalResolution
+    : undefined;
+};
+
+const typeOperatorOverloadCall = ({
+  call,
+  callee,
+  operatorName,
+  args,
+  ctx,
+  state,
+  typeArguments,
+  expectedReturnType,
+}: {
+  call: HirCallExpr;
+  callee: HirExpression;
+  operatorName: string;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments: readonly TypeId[] | undefined;
+  expectedReturnType: TypeId | undefined;
+}): { returnType: TypeId; effectRow: number } | undefined => {
+  if (callee.exprKind !== "identifier") {
+    return undefined;
+  }
+  if (args.length === 0) {
+    return undefined;
+  }
+
+  const receiverType = args[0]!.type;
+  if (receiverType === ctx.primitives.unknown) {
+    return undefined;
+  }
+
+  const resolution = resolveOperatorOverloadCandidates({
+    receiverType,
+    operatorName,
+    ctx,
+  });
+  if (!resolution || resolution.candidates.length === 0) {
+    return undefined;
+  }
+
+  const matches = resolution.candidates.filter(({ symbol, signature }) =>
+    matchesOverloadSignature(symbol, signature, args, ctx, state, typeArguments)
+  );
+  const traitDispatch =
+    matches.length === 0
+      ? resolveTraitDispatchOverload({
+          candidates: resolution.candidates,
+          args,
+          ctx,
+          state,
+        })
+      : undefined;
+  let selected = traitDispatch;
+
+  if (!selected) {
+    if (matches.length === 0) {
+      emitDiagnostic({
+        ctx,
+        code: "TY0008",
+        params: { kind: "no-overload", name: operatorName },
+        span: call.span,
+      });
+    }
+
+    if (matches.length > 1) {
+      emitDiagnostic({
+        ctx,
+        code: "TY0007",
+        params: { kind: "ambiguous-overload", name: operatorName },
+        span: call.span,
+      });
+    }
+
+    selected = matches[0];
+  }
+
+  if (!selected) {
+    return { returnType: ctx.primitives.unknown, effectRow: ctx.effects.emptyRow };
+  }
+
+  const instanceKey = state.currentFunction?.instanceKey;
+  if (!instanceKey) {
+    throw new Error(
+      `missing function instance key for operator resolution at call ${call.id}`
+    );
+  }
+
+  if (traitDispatch) {
+    ctx.callResolution.traitDispatches.add(call.id);
+  } else {
+    ctx.callResolution.traitDispatches.delete(call.id);
+  }
+
+  if (selected.exported) {
+    assertExportedMemberAccess({
+      exported: selected.exported,
+      methodName: operatorName,
+      ctx,
+      state,
+      span: call.span,
+    });
+  } else {
+    assertMemberAccess({
+      symbol: selected.symbol,
+      ctx,
+      state,
+      span: call.span,
+      context: "calling member",
+    });
+  }
+
+  const targets =
+    ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
+  targets.set(instanceKey, selected.symbolRef);
+  ctx.callResolution.targets.set(call.id, targets);
+
+  return typeFunctionCall({
+    args,
+    signature: selected.signature,
+    calleeSymbol: selected.symbol,
+    typeArguments,
+    expectedReturnType,
+    callId: call.id,
+    ctx,
+    state,
+    calleeModuleId: selected.symbolRef.moduleId,
+    nameForSymbol: selected.nameForSymbol,
+  });
+};
+
 const resolveNominalMethodCandidates = ({
   receiverType,
   methodName,
@@ -1663,7 +1843,22 @@ const typeFunctionCall = ({
 	    });
 	    const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
 	    if (typeof calleeExprId === "number") {
-	      const calleeRef = canonicalSymbolRefForTypingContext(calleeSymbol, ctx);
+	      // Avoid re-canonicalizing external overload symbols.
+	      // Some call paths resolve directly to dependency symbols (methods, operator overloads, etc).
+	      // Those symbols are not guaranteed to exist in the caller's symbol table, so fall back to
+	      // the provided `calleeModuleId` when we can't canonicalize via local import metadata.
+	      const imported = ctx.importsByLocal.get(calleeSymbol);
+	      const calleeRef =
+	        imported ??
+	        (calleeModuleId && calleeModuleId !== ctx.moduleId
+	          ? { moduleId: calleeModuleId, symbol: calleeSymbol }
+	          : (() => {
+	              try {
+	                return canonicalSymbolRefForTypingContext(calleeSymbol, ctx);
+	              } catch {
+	                return { moduleId: ctx.moduleId, symbol: calleeSymbol };
+	              }
+	            })());
 	      const existingTargets =
 	        ctx.callResolution.targets.get(callId) ?? new Map();
 	      existingTargets.set(callerInstanceKey, calleeRef);

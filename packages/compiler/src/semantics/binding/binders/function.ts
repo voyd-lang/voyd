@@ -34,6 +34,9 @@ export const bindFunctionDecl = (
     entity: "function",
     ...options.metadata,
   };
+  if (decl.signature.name.isQuoted) {
+    symbolMetadata.quotedName = true;
+  }
 
   if (intrinsicMetadata) {
     symbolMetadata.intrinsic = true;

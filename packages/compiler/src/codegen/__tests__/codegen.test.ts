@@ -284,6 +284,11 @@ describe("next codegen", () => {
     expect(runtimeTypeRegistry.size).toBeGreaterThan(0);
   });
 
+  it("supports operator overload methods", () => {
+    const main = loadMain("operator_overload_eq.voyd");
+    expect(main()).toBe(1);
+  });
+
   it("canonicalizes recursive RTT keys for alpha-equivalent aliases", () => {
     const ast = loadAst("recursive_alias_alpha_equivalence.voyd");
     const semantics = semanticsPipeline(ast);

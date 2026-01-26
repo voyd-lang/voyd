@@ -6,11 +6,18 @@ import {
 } from "../intrinsics.js";
 
 export const resolveIdentifierValue = (
-  name: string,
+  identifier: { name: string; isQuoted: boolean },
   scope: ScopeId,
   ctx: LowerContext
 ): IdentifierResolution => {
-  const resolved = ctx.symbolTable.resolve(name, scope);
+  const name = identifier.name;
+  const symbols = ctx.symbolTable.resolveAll(name, scope);
+  const resolved = symbols.find((symbol) => {
+    const record = ctx.symbolTable.getSymbol(symbol);
+    const meta = (record.metadata ?? {}) as { quotedName?: boolean };
+    const declQuoted = meta.quotedName === true;
+    return identifier.isQuoted ? declQuoted : !declQuoted;
+  });
   if (typeof resolved === "number") {
     const record = ctx.symbolTable.getSymbol(resolved);
     if (record.kind === "type") {
