@@ -362,7 +362,9 @@ describe("semanticsPipeline", () => {
     const rootScope = symbolTable.rootScope;
     const mainSymbol = symbolTable.resolve("main", rootScope)!;
     const doubleSymbol = Array.from(hir.items.values()).find(
-      (item) => item.kind === "function" && symbolTable.getSymbol(item.symbol).name === "double"
+      (item): item is HirFunction =>
+        item.kind === "function" &&
+        symbolTable.getSymbol(item.symbol).name === "double"
     )?.symbol;
     expect(typeof doubleSymbol).toBe("number");
     if (typeof doubleSymbol !== "number") {
