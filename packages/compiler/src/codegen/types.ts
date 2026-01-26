@@ -251,6 +251,26 @@ export const getFixedArrayWasmTypes = (
   seen: Set<TypeId> = new Set(),
   mode: WasmTypeMode = "runtime",
 ): FixedArrayWasmType => {
+  const activeGroup = ctx.activeRecursiveHeapTypeGroup;
+  if (activeGroup) {
+    const desc = ctx.program.types.getTypeDesc(typeId);
+    if (desc.kind === "fixed-array") {
+      const elementStructural = resolveStructuralTypeId(desc.element, ctx);
+      if (
+        typeof elementStructural === "number" &&
+        activeGroup.structuralIds.has(elementStructural)
+      ) {
+        const tempArrayType =
+          activeGroup.fixedArrayTempRefsByElementStructuralId.get(
+            elementStructural,
+          );
+        if (typeof tempArrayType === "number") {
+          return { type: tempArrayType, heapType: binaryenTypeToHeapType(tempArrayType) };
+        }
+      }
+    }
+  }
+
   return ensureFixedArrayWasmTypes({
     typeId,
     ctx,

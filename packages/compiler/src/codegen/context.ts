@@ -134,6 +134,11 @@ export interface ClosureTypeInfo {
   resultType: binaryen.Type;
 }
 
+export interface ActiveRecursiveHeapTypeGroup {
+  structuralIds: ReadonlySet<TypeId>;
+  fixedArrayTempRefsByElementStructuralId: ReadonlyMap<TypeId, binaryen.Type>;
+}
+
 export interface CodegenContext {
   mod: binaryen.Module;
   moduleId: string;
@@ -150,6 +155,7 @@ export interface CodegenContext {
   structHeapTypes: Map<TypeId, binaryen.Type>;
   structuralIdCache: Map<TypeId, TypeId | null>;
   resolvingStructuralIds: Set<TypeId>;
+  activeRecursiveHeapTypeGroup?: ActiveRecursiveHeapTypeGroup;
   fixedArrayTypes: Map<number, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;

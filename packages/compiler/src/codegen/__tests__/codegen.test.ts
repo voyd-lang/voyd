@@ -18,7 +18,11 @@ import {
 } from "../functions.js";
 import { buildRuntimeTypeArtifacts } from "../runtime-pass.js";
 import { wasmRuntimeTypeFor } from "../runtime-types.js";
-import { getStructuralTypeInfo, resolveStructuralTypeId } from "../types.js";
+import {
+  getFixedArrayWasmTypes,
+  getStructuralTypeInfo,
+  resolveStructuralTypeId,
+} from "../types.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
@@ -389,9 +393,52 @@ describe("next codegen", () => {
     );
   });
 
+  it("emits recursive wasm heap types for recursive FixedArray elements", () => {
+    const ast = loadAst("recursive_fixed_array_heap_types.voyd");
+    const semantics = semanticsPipeline(ast);
+    const {
+      contexts: [ctx],
+    } = buildCodegenProgram([semantics]);
+
+    const resolveAliasType = (name: string): TypeId => {
+      const symbol = semantics.symbols.resolveTopLevel(name);
+      if (typeof symbol !== "number") {
+        throw new Error(`missing type alias symbol for ${name}`);
+      }
+      const key = `${symbol}<>`;
+      const typeId = semantics.typing.typeAliases.getCachedInstance(key);
+      if (typeof typeId !== "number") {
+        throw new Error(`missing type alias instance for ${name}`);
+      }
+      return typeId;
+    };
+
+    const typeNode = resolveAliasType("Node");
+    wasmRuntimeTypeFor(typeNode, ctx);
+
+    const infoNode = getStructuralTypeInfo(typeNode, ctx);
+    if (!infoNode) {
+      throw new Error("missing structural type info for FixedArray recursion test");
+    }
+
+    const nextField = infoNode.fieldMap.get("next");
+    if (!nextField || typeof nextField.typeId !== "number") {
+      throw new Error("missing Node.next field info");
+    }
+
+    const fixedArray = getFixedArrayWasmTypes(nextField.typeId, ctx);
+    expect(nextField.heapWasmType).toBe(fixedArray.type);
+    expect(nextField.heapWasmType).not.toBe(ctx.rtt.baseType);
+  });
+
   it("runs recursive heap types fixture", () => {
     const main = loadMain("recursive_heap_types.voyd");
     expect(main()).toBe(18);
+  });
+
+  it("runs recursive fixed-array heap types fixture", () => {
+    const main = loadMain("recursive_fixed_array_heap_types.voyd");
+    expect(main()).toBe(7);
   });
 
   it("emits wasm for the fib sample and runs main()", () => {
