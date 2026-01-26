@@ -113,7 +113,11 @@ export const compileIntrinsicCall = ({
         valueType === binaryen.f32 ||
         valueType === binaryen.f64
       ) {
-        return ctx.mod.i32.const(0);
+        return ctx.mod.block(
+          null,
+          [ctx.mod.drop(args[0]!), ctx.mod.i32.const(0)],
+          binaryen.i32
+        );
       }
       return ctx.mod.ref.is_null(args[0]!);
     }
