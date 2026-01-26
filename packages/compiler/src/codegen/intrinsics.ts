@@ -108,6 +108,26 @@ export const compileIntrinsicCall = ({
       const signed = getBooleanLiteralArg({ name, call, ctx, index: 3 });
       return arrayGet(ctx.mod, args[0]!, args[1]!, elementType, signed);
     }
+    case "__ref_is_null": {
+      assertArgCount(name, args, 1);
+      const valueType = wasmTypeFor(
+        getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
+        ctx
+      );
+      if (
+        valueType === binaryen.i32 ||
+        valueType === binaryen.i64 ||
+        valueType === binaryen.f32 ||
+        valueType === binaryen.f64
+      ) {
+        return ctx.mod.block(
+          null,
+          [ctx.mod.drop(args[0]!), ctx.mod.i32.const(0)],
+          binaryen.i32
+        );
+      }
+      return ctx.mod.ref.is_null(args[0]!);
+    }
     case "__array_set": {
       assertArgCount(name, args, 3);
       const arrayType = getExprBinaryenType(
