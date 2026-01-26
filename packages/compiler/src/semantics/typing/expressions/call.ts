@@ -1443,7 +1443,6 @@ const typeOperatorOverloadCall = ({
     callId: call.id,
     ctx,
     state,
-    calleeExprId: callee.id,
     calleeModuleId: selected.symbolRef.moduleId,
     nameForSymbol: selected.nameForSymbol,
   });
@@ -1844,7 +1843,22 @@ const typeFunctionCall = ({
 	    });
 	    const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
 	    if (typeof calleeExprId === "number") {
-	      const calleeRef = canonicalSymbolRefForTypingContext(calleeSymbol, ctx);
+	      // Avoid re-canonicalizing external overload symbols.
+	      // Some call paths resolve directly to dependency symbols (methods, operator overloads, etc).
+	      // Those symbols are not guaranteed to exist in the caller's symbol table, so fall back to
+	      // the provided `calleeModuleId` when we can't canonicalize via local import metadata.
+	      const imported = ctx.importsByLocal.get(calleeSymbol);
+	      const calleeRef =
+	        imported ??
+	        (calleeModuleId && calleeModuleId !== ctx.moduleId
+	          ? { moduleId: calleeModuleId, symbol: calleeSymbol }
+	          : (() => {
+	              try {
+	                return canonicalSymbolRefForTypingContext(calleeSymbol, ctx);
+	              } catch {
+	                return { moduleId: ctx.moduleId, symbol: calleeSymbol };
+	              }
+	            })());
 	      const existingTargets =
 	        ctx.callResolution.targets.get(callId) ?? new Map();
 	      existingTargets.set(callerInstanceKey, calleeRef);
