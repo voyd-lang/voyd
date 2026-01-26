@@ -47,28 +47,6 @@ interface PendingPatternAssignment {
   typeId: TypeId;
 }
 
-const selectBindingTypeId = ({
-  targetTypeId,
-  initializerTypeId,
-  ctx,
-}: {
-  targetTypeId: TypeId;
-  initializerTypeId: TypeId;
-  ctx: CodegenContext;
-}): TypeId => {
-  if (targetTypeId === initializerTypeId) {
-    return targetTypeId;
-  }
-  const targetDesc = ctx.program.types.getTypeDesc(targetTypeId);
-  const initDesc = ctx.program.types.getTypeDesc(initializerTypeId);
-  if (targetDesc.kind !== "fixed-array" || initDesc.kind !== "fixed-array") {
-    return targetTypeId;
-  }
-  const targetWasmType = wasmTypeFor(targetTypeId, ctx);
-  const initWasmType = wasmTypeFor(initializerTypeId, ctx);
-  return targetWasmType === initWasmType ? targetTypeId : initializerTypeId;
-};
-
 const storeIntoBinding = ({
   binding,
   value,
@@ -164,11 +142,7 @@ export const compilePatternInitialization = ({
     ctx,
     typeInstanceId
   );
-  const targetTypeId = selectBindingTypeId({
-    targetTypeId: getSymbolTypeId(pattern.symbol, ctx, typeInstanceId),
-    initializerTypeId: initializerType,
-    ctx,
-  });
+  const targetTypeId = getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
   const binding = options.declare
     ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
@@ -209,11 +183,7 @@ export const compilePatternInitializationFromValue = ({
   }
 
   if (pattern.kind === "identifier") {
-    const targetTypeId = selectBindingTypeId({
-      targetTypeId: getSymbolTypeId(pattern.symbol, ctx, typeInstanceId),
-      initializerTypeId: valueTypeId,
-      ctx,
-    });
+    const targetTypeId = getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
     const binding = options.declare
       ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(pattern.symbol, ctx, fnCtx);

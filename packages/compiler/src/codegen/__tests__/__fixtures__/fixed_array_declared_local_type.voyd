@@ -1,0 +1,14 @@
+obj A { value: i32 }
+obj B { value: i32 }
+type AB = A | B
+
+fn make_a() -> FixedArray<A>
+  __array_new<A>(0)
+
+fn make_b() -> FixedArray<B>
+  __array_new<B>(0)
+
+pub fn main() -> i32
+  var xs: FixedArray<AB> = make_a()
+  xs = make_b()
+  __array_len(xs)

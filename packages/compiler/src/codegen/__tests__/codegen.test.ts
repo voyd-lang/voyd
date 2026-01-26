@@ -441,6 +441,11 @@ describe("next codegen", () => {
     expect(main()).toBe(7);
   });
 
+  it("preserves declared types when allocating locals for fixed-array bindings", () => {
+    const main = loadMain("fixed_array_declared_local_type.voyd");
+    expect(main()).toBe(0);
+  });
+
   it("emits wasm for the fib sample and runs main()", () => {
     const main = loadMain("fib.voyd");
     expect(main()).toBe(55);
