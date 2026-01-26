@@ -85,6 +85,7 @@ export interface StructuralFieldInfo {
   name: string;
   typeId: TypeId;
   wasmType: binaryen.Type;
+  heapWasmType: binaryen.Type;
   runtimeIndex: number;
   optional?: boolean;
   hash: number;
@@ -133,6 +134,11 @@ export interface ClosureTypeInfo {
   resultType: binaryen.Type;
 }
 
+export interface ActiveRecursiveHeapTypeGroup {
+  structuralIds: ReadonlySet<TypeId>;
+  fixedArrayTempRefsByElementStructuralId: ReadonlyMap<TypeId, binaryen.Type>;
+}
+
 export interface CodegenContext {
   mod: binaryen.Module;
   moduleId: string;
@@ -146,6 +152,10 @@ export interface CodegenContext {
   functionInstances: Map<ProgramFunctionInstanceId, FunctionMetadata>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
+  structHeapTypes: Map<TypeId, binaryen.Type>;
+  structuralIdCache: Map<TypeId, TypeId | null>;
+  resolvingStructuralIds: Set<TypeId>;
+  activeRecursiveHeapTypeGroup?: ActiveRecursiveHeapTypeGroup;
   fixedArrayTypes: Map<number, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
   functionRefTypes: Map<string, binaryen.Type>;

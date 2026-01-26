@@ -8,7 +8,7 @@ import {
   TypeRef,
 } from "./types.js";
 import { TypeBuilder } from "./type-builder.js";
-export { TypeBuilder } from "./type-builder.js";
+export { TypeBuilder, TypeBuilderBuildError } from "./type-builder.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 

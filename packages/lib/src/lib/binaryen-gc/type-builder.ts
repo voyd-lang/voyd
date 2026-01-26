@@ -9,6 +9,25 @@ import {
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
+export class TypeBuilderBuildError extends Error {
+  errorIndex: number;
+  errorReason: number;
+
+  constructor({
+    errorIndex,
+    errorReason,
+  }: {
+    errorIndex: number;
+    errorReason: number;
+  }) {
+    super(
+      `_TypeBuilderBuildAndDispose failed: index ${errorIndex}, reason ${errorReason}`,
+    );
+    this.errorIndex = errorIndex;
+    this.errorReason = errorReason;
+  }
+}
+
 export class TypeBuilder {
   private builder: number;
   private allocations: number[] = [];
@@ -16,6 +35,9 @@ export class TypeBuilder {
 
   constructor(size: number) {
     this.builder = bin._TypeBuilderCreate(size);
+    if (size > 1) {
+      bin._TypeBuilderCreateRecGroup(this.builder, 0, size);
+    }
   }
 
   getTempRefType(index: number, nullable = true): TypeRef {
@@ -74,7 +96,7 @@ export class TypeBuilder {
     bin._TypeBuilderSetOpen(this.builder, index);
   }
 
-  build(): HeapTypeRef {
+  buildAll(): HeapTypeRef[] {
     const size = bin._TypeBuilderGetSize(this.builder);
     // The underlying binaryen routine expects three separate pointers:
     // 1. an array of resulting heap types (`size` * 4 bytes)
@@ -95,20 +117,25 @@ export class TypeBuilder {
           errorReasonPtr
         )
       ) {
-        // Provide some additional context when a build fails so debugging is
-        // easier in tests.
         const errorIndex = bin.__i32_load(errorIndexPtr);
         const errorReason = bin.__i32_load(errorReasonPtr);
-        throw new Error(
-          `_TypeBuilderBuildAndDispose failed: index ${errorIndex}, reason ${errorReason}`
-        );
+        throw new TypeBuilderBuildError({ errorIndex, errorReason });
       }
-      const result = bin.__i32_load(heapTypesPtr);
-      return result;
+      return Array.from({ length: size }, (_, i) => {
+        return bin.HEAPU32[(heapTypesPtr >>> 2) + i]!;
+      });
     } finally {
       bin._free(out);
       this.dispose();
     }
+  }
+
+  build(): HeapTypeRef {
+    const [first] = this.buildAll();
+    if (typeof first !== "number") {
+      throw new Error("TypeBuilder.build() expected at least one heap type");
+    }
+    return first;
   }
 
   dispose(): void {

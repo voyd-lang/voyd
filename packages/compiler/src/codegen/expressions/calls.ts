@@ -656,6 +656,8 @@ const emitResolvedCall = (
   const allowReturnCall =
     tailPosition &&
     !fnCtx.effectful &&
+    meta.resultTypeId === expectedTypeId &&
+    returnTypeId === expectedTypeId &&
     !requiresStructuralConversion(returnTypeId, expectedTypeId, ctx);
 
   if (allowReturnCall) {
@@ -669,12 +671,13 @@ const emitResolvedCall = (
     };
   }
 
+  const callExpr = ctx.mod.call(
+    meta.wasmName,
+    callArgs as number[],
+    getExprBinaryenType(callId, ctx, lookupKey)
+  );
   return {
-    expr: ctx.mod.call(
-      meta.wasmName,
-      callArgs as number[],
-      getExprBinaryenType(callId, ctx, lookupKey)
-    ),
+    expr: callExpr,
     usedReturnCall: false,
   };
 };

@@ -1652,7 +1652,12 @@ export const getStructuralFields = (
     return undefined;
   }
 
-  const desc = ctx.arena.get(type);
+  const unfolded = unfoldRecursiveType(type, ctx);
+  if (unfolded !== type) {
+    return getStructuralFields(unfolded, ctx, state, options);
+  }
+
+  const desc = ctx.arena.get(unfolded);
   if (desc.kind === "structural-object") {
     ensureFieldsSubstituted(desc.fields, ctx, "structural object access");
     return options.includeInaccessible

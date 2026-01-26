@@ -212,7 +212,14 @@ describe("compileIntrinsicCall array intrinsics", () => {
   });
 
   it("emits array.set", () => {
-    const { ctx, fnCtx } = createContext();
+    const { ctx, descriptors, exprTypes, fnCtx } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
+    exprTypes.set(0 as HirExprId, arrayType);
+    exprTypes.set(1 as HirExprId, arrayType);
+    exprTypes.set(2 as HirExprId, i32Type);
+    exprTypes.set(3 as HirExprId, i32Type);
+    fnCtx.returnTypeId = arrayType;
     const expr = compileIntrinsicCall({
       name: "__array_set",
       call: makeCall([1 as HirExprId, 2 as HirExprId, 3 as HirExprId]),

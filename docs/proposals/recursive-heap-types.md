@@ -1,7 +1,7 @@
 # Recursive Heap Types in Codegen
 
-Status: Proposed  
-Owner: Compiler Architecture Working Group  
+Status: Implemented
+Owner: Compiler Architecture Working Group
 Scope: `packages/compiler/src/codegen/*`, `packages/lib/src/lib/binaryen-gc/type-builder.ts`, `docs/proposals/compiler-type-lowering-phases-and-recursive-types.md`
 
 ## Goal
@@ -95,4 +95,3 @@ Add tests that verify:
   “precise ref” type for internal field typing?
 - What is the best place to store SCC metadata so that it is available to both
   RTT building and codegen passes without re-traversal?
-

@@ -1,0 +1,9 @@
+type Node = { value: i32, next: FixedArray<Node> }
+
+fn build_node(value: i32) -> Node
+  let next = __array_new<Node>(1)
+  { value, next }
+
+pub fn main() -> i32
+  let node = build_node(7)
+  node.value

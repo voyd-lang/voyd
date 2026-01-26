@@ -254,9 +254,14 @@ const emitLambdaFunction = ({
     expectedResultTypeId: desc.returnType,
   });
   const returnWasmType = wasmTypeFor(desc.returnType, ctx);
+  const bodyExprType = binaryen.getExpressionType(body.expr);
   const shouldWrapOutcome =
     effectful &&
-    binaryen.getExpressionType(body.expr) === returnWasmType;
+    (bodyExprType === returnWasmType ||
+      (returnWasmType === ctx.rtt.baseType &&
+        bodyExprType !== binaryen.none &&
+        bodyExprType !== binaryen.unreachable &&
+        bodyExprType !== ctx.effectsRuntime.outcomeType));
   const functionBody = shouldWrapOutcome
     ? wrapValueInOutcome({
         valueExpr: body.expr,

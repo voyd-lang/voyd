@@ -43,7 +43,10 @@ export const ensureFixedArrayWasmTypes = ({
   if (desc.kind !== "fixed-array") {
     throw new Error("intrinsic requires a fixed-array type");
   }
-  // Arrays are invariant, so signatures must use the concrete runtime element type.
-  const elementType = lowerType(desc.element, ctx, seen, "runtime");
+  // Wasm GC arrays are invariant, so any `FixedArray<T>` used in a signature must
+  // lower to the *same* concrete array heap type as runtime values. In practice,
+  // this means the element type lowering must stay concrete for structural/nominal
+  // types even when the caller is lowering in signature mode.
+  const elementType = lowerType(desc.element, ctx, seen, mode);
   return ensureFixedArrayWasmTypesByElement({ elementType, ctx });
 };
