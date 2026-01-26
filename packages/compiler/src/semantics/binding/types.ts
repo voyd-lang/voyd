@@ -115,6 +115,7 @@ export interface BindingContext {
   imports: BoundImport[];
   staticMethods: StaticMethodTable;
   moduleMembers: ModuleMemberTable;
+  memberDeclarationScopesByOwner: Map<SymbolId, ScopeId>;
   pendingStaticMethods: PendingStaticMethod[];
   importedOverloadOptions: Map<OverloadSetId, readonly SymbolId[]>;
   includeTests: boolean;

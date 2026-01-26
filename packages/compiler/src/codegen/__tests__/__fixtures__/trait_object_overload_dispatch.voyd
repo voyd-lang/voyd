@@ -13,7 +13,7 @@ impl Doubleable<i32> for Alt
     self.value * 3
 
 fn do_double(~b: Doubleable<i32>) -> i32
-  double(b)
+  b.double()
 
 pub fn main() -> i32
   let ~b = Box { value: 7 }

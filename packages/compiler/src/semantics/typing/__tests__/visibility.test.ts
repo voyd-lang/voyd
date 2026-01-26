@@ -308,7 +308,11 @@ pub fn call() -> i32
     if (typeof callSymbol !== "number" || !methodCall) return;
 
     const externalSymbols = getSymbolTable(externalSemantics);
-    const exposeSymbol = externalSymbols.resolve("expose", externalSymbols.rootScope);
+    const exposeSymbol = Array.from(externalSemantics.hir.items.values()).find(
+      (item) =>
+        item.kind === "function" &&
+        externalSymbols.getSymbol(item.symbol).name === "expose"
+    )?.symbol;
     expect(typeof exposeSymbol).toBe("number");
     if (typeof exposeSymbol !== "number") return;
 

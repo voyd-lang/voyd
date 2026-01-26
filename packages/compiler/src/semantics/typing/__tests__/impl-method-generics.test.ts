@@ -9,13 +9,6 @@ describe("impl method generics", () => {
     const ast = loadAst("impl_method_generics.voyd");
     const semantics = semanticsPipeline(ast);
     const { hir, typing } = semantics;
-    const symbolTable = getSymbolTable(semantics);
-    const root = symbolTable.rootScope;
-
-    const pickSymbol = symbolTable.resolve("pick", root);
-    const mainSymbol = symbolTable.resolve("main", root);
-    expect(pickSymbol).toBeDefined();
-    expect(mainSymbol).toBeDefined();
 
     const pickCall = Array.from(hir.expressions.values()).find(
       (expr): expr is HirMethodCallExpr =>
@@ -46,11 +39,6 @@ describe("impl method generics", () => {
     const ast = loadAst("method_impl_type_inference.voyd");
     const semantics = semanticsPipeline(ast);
     const { hir, typing } = semantics;
-    const symbolTable = getSymbolTable(semantics);
-    const root = symbolTable.rootScope;
-
-    const unwrapSymbol = symbolTable.resolve("unwrap", root);
-    expect(unwrapSymbol).toBeDefined();
 
     const unwrapCall = Array.from(hir.expressions.values()).find(
       (expr): expr is HirMethodCallExpr =>

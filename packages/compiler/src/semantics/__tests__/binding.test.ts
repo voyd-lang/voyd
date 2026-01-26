@@ -175,7 +175,7 @@ describe("binding pipeline", () => {
     }
   });
 
-  it("binds impl blocks and exposes methods as module-level functions", () => {
+  it("binds impl blocks and keeps methods out of the root scope", () => {
     const name = "impl_methods.voyd";
     const ast = loadAst(name);
     const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
@@ -194,7 +194,7 @@ describe("binding pipeline", () => {
 
     const rootScope = symbolTable.rootScope;
     const doubleSymbol = symbolTable.resolve("double", rootScope);
-    expect(doubleSymbol).toBe(method.symbol);
+    expect(doubleSymbol).toBeUndefined();
 
     const implScope = binding.scopeByNode.get(impl.form!.syntaxId);
     expect(implScope).toBeDefined();
@@ -266,9 +266,9 @@ describe("binding pipeline", () => {
     );
     const rootScope = symbolTable.rootScope;
     if (instanceMethod) {
-      expect(symbolTable.getSymbol(instanceMethod.symbol).scope).toBe(
-        rootScope
-      );
+      expect(symbolTable.getSymbol(instanceMethod.symbol).scope).not.toBe(rootScope);
+      const scopeInfo = symbolTable.getScope(symbolTable.getSymbol(instanceMethod.symbol).scope);
+      expect(scopeInfo.kind).toBe("members");
     }
 
     const counterSymbol = symbolTable.resolve("Counter", implScope);

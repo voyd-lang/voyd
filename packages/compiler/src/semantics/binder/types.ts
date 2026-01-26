@@ -11,6 +11,7 @@ export type ScopeKind =
   | "lambda"
   | "block"
   | "impl"
+  | "members"
   | "trait"
   | "macro";
 
