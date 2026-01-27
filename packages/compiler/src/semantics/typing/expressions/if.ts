@@ -1,5 +1,5 @@
 import type { HirIfExpr } from "../../hir/index.js";
-import { typeExpression } from "../expressions.js";
+import { typeExpression, type TypeExpressionOptions } from "../expressions.js";
 import { composeEffectRows, getExprEffectRow } from "../effects.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { ensureTypeMatches } from "../type-system.js";
@@ -9,9 +9,11 @@ import type { TypeId } from "../../ids.js";
 export const typeIfExpr = (
   expr: HirIfExpr,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  options: TypeExpressionOptions
 ): TypeId => {
   const hasDefault = typeof expr.defaultBranch === "number";
+  const discardValue = options.discardValue === true || !hasDefault;
   let branchType: TypeId | undefined;
   let effectRow = ctx.effects.emptyRow;
 
@@ -25,7 +27,7 @@ export const typeIfExpr = (
       `if condition ${index + 1}`
     );
 
-    const valueType = typeExpression(branch.value, ctx, state);
+    const valueType = typeExpression(branch.value, ctx, state, { discardValue });
     effectRow = ctx.effects.compose(
       effectRow,
       composeEffectRows(ctx.effects, [
@@ -33,23 +35,31 @@ export const typeIfExpr = (
         getExprEffectRow(branch.value, ctx),
       ])
     );
-    branchType = mergeBranchType({
-      acc: branchType,
-      next: valueType,
-      ctx,
-      state,
-      span: ctx.hir.expressions.get(branch.value)?.span,
-      context: "if branch",
-    });
+    if (!discardValue) {
+      branchType = mergeBranchType({
+        acc: branchType,
+        next: valueType,
+        ctx,
+        state,
+        span: ctx.hir.expressions.get(branch.value)?.span,
+        context: "if branch",
+      });
+    }
   });
 
   if (hasDefault) {
-    const defaultType = typeExpression(expr.defaultBranch!, ctx, state);
+    const defaultType = typeExpression(expr.defaultBranch!, ctx, state, {
+      discardValue,
+    });
     effectRow = ctx.effects.compose(
       effectRow,
       getExprEffectRow(expr.defaultBranch!, ctx)
     );
     ctx.effects.setExprEffect(expr.id, effectRow);
+    if (discardValue) {
+      return ctx.primitives.void;
+    }
+
     branchType = mergeBranchType({
       acc: branchType,
       next: defaultType,

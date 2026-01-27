@@ -11,3 +11,14 @@ export const asStatement = (
   }
   return ctx.mod.drop(expr);
 };
+
+export const coerceToBinaryenType = (
+  ctx: CodegenContext,
+  expr: binaryen.ExpressionRef,
+  type: binaryen.Type
+): binaryen.ExpressionRef =>
+  type === binaryen.none
+    ? asStatement(ctx, expr)
+    : binaryen.getExpressionType(expr) === type
+      ? expr
+      : ctx.mod.block(null, [expr], type);

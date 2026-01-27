@@ -1,6 +1,6 @@
 import type { HirBlockExpr, HirLetStatement } from "../../hir/index.js";
 import type { HirStmtId, TypeId } from "../../ids.js";
-import { typeExpression } from "../expressions.js";
+import { typeExpression, type TypeExpressionOptions } from "../expressions.js";
 import { getExprEffectRow } from "../effects.js";
 import {
   bindTuplePatternFromExpr,
@@ -22,8 +22,10 @@ export const typeBlockExpr = (
   expr: HirBlockExpr,
   ctx: TypingContext,
   state: TypingState,
-  expectedType?: TypeId
+  options: TypeExpressionOptions
 ): TypeId => {
+  const expectedType = options.expectedType;
+  const discardValue = options.discardValue === true;
   let returnType: TypeId | undefined;
   let effectRow = ctx.effects.emptyRow;
 
@@ -48,12 +50,18 @@ export const typeBlockExpr = (
   });
 
   if (typeof expr.value === "number") {
-    const valueType = typeExpression(expr.value, ctx, state, expectedType);
+    const valueType = typeExpression(expr.value, ctx, state, {
+      expectedType,
+      discardValue,
+    });
     effectRow = ctx.effects.compose(
       effectRow,
       getExprEffectRow(expr.value, ctx)
     );
     ctx.effects.setExprEffect(expr.id, effectRow);
+    if (discardValue) {
+      return ctx.primitives.void;
+    }
     return mergeBranchType({
       acc: returnType,
       next: valueType,
@@ -80,7 +88,7 @@ const typeStatement = (
 
   switch (stmt.kind) {
     case "expr-stmt":
-      typeExpression(stmt.expr, ctx, state);
+      typeExpression(stmt.expr, ctx, state, { discardValue: true });
       return { effect: getExprEffectRow(stmt.expr, ctx) };
     case "return":
       if (typeof state.currentFunction?.returnType !== "number") {
@@ -102,7 +110,7 @@ const typeStatement = (
           stmt.value,
           ctx,
           state,
-          expectedReturnType
+          { expectedType: expectedReturnType }
         );
         if (
           enforceReturnType &&
@@ -188,7 +196,7 @@ const typeLetStatement = (
         stmt.initializer,
         ctx,
         state,
-        annotated
+        { expectedType: annotated }
       );
       if (initializerType !== ctx.primitives.unknown) {
         ensureTypeMatches(
@@ -239,7 +247,7 @@ const typeLetStatement = (
       stmt.initializer,
       ctx,
       state,
-      expectedType
+      { expectedType }
     );
 
     if (
@@ -281,7 +289,7 @@ const typeLetStatement = (
     stmt.initializer,
     ctx,
     state,
-    expectedType
+    { expectedType }
   );
 
   if (

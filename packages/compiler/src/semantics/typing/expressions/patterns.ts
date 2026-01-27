@@ -327,7 +327,7 @@ export const bindTuplePatternFromExpr = (
     );
   }
   const initializerType = expected
-    ? typeExpression(exprId, ctx, state, expected)
+    ? typeExpression(exprId, ctx, state, { expectedType: expected })
     : typeExpression(exprId, ctx, state);
   if (
     expected &&
