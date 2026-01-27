@@ -22,6 +22,7 @@ import {
   getMatchPatternTypeId,
 } from "../types.js";
 import { compilePatternInitializationFromValue } from "../patterns.js";
+import { asStatement } from "./utils.js";
 import type {
   HirBreakExpr,
   HirContinueExpr,
@@ -93,6 +94,14 @@ export const compileIfExpr = (
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const coerceBranchValue = (compiled: CompiledExpression): binaryen.ExpressionRef => {
+    if (resultType === binaryen.none) {
+      return asStatement(ctx, compiled.expr);
+    }
+    return binaryen.getExpressionType(compiled.expr) === resultType
+      ? compiled.expr
+      : ctx.mod.block(null, [compiled.expr], resultType);
+  };
   let fallback =
     typeof expr.defaultBranch === "number"
       ? compileExpr({
@@ -126,16 +135,8 @@ export const compileIfExpr = (
       tailPosition,
       expectedResultTypeId,
     });
-    const typedThen =
-      resultType === binaryen.none ||
-      binaryen.getExpressionType(value.expr) === resultType
-        ? value.expr
-        : ctx.mod.block(null, [value.expr], resultType);
-    const typedElse: number =
-      resultType === binaryen.none ||
-      binaryen.getExpressionType(fallback.expr) === resultType
-        ? fallback.expr
-        : ctx.mod.block(null, [fallback.expr], resultType);
+    const typedThen = coerceBranchValue(value);
+    const typedElse = coerceBranchValue(fallback);
     fallback = {
       expr: ctx.mod.if(condition, typedThen, typedElse),
       usedReturnCall: value.usedReturnCall && fallback.usedReturnCall,
@@ -155,6 +156,14 @@ export const compileMatchExpr = (
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const coerceBranchValue = (compiled: CompiledExpression): binaryen.ExpressionRef => {
+    if (resultType === binaryen.none) {
+      return asStatement(ctx, compiled.expr);
+    }
+    return binaryen.getExpressionType(compiled.expr) === resultType
+      ? compiled.expr
+      : ctx.mod.block(null, [compiled.expr], resultType);
+  };
   const discriminantTypeId = getRequiredExprType(
     expr.discriminant,
     ctx,
@@ -287,16 +296,8 @@ export const compileMatchExpr = (
         usedReturnCall: false,
       } as CompiledExpression);
 
-    const typedThen =
-      resultType === binaryen.none ||
-      binaryen.getExpressionType(armExpr.expr) === resultType
-        ? armExpr.expr
-        : ctx.mod.block(null, [armExpr.expr], resultType);
-    const typedElse =
-      resultType === binaryen.none ||
-      binaryen.getExpressionType(fallback.expr) === resultType
-        ? fallback.expr
-        : ctx.mod.block(null, [fallback.expr], resultType);
+    const typedThen = coerceBranchValue(armExpr);
+    const typedElse = coerceBranchValue(fallback);
 
     chain = {
       expr: ctx.mod.if(condition, typedThen, typedElse),

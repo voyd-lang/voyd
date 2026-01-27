@@ -656,6 +656,16 @@ describe("next codegen", () => {
     expect(main()).toBe(5);
   });
 
+  it("drops statement-if branch values to keep wasm valid", () => {
+    const main = loadMain("if_statement_drops_branch_values.voyd");
+    expect(main()).toBe(0);
+  });
+
+  it("drops statement-match arm values to keep wasm valid", () => {
+    const main = loadMain("match_statement_drops_arm_values.voyd");
+    expect(main()).toBe(0);
+  });
+
   it("emits wasm for trait object dispatch", () => {
     const main = loadMain("trait_object_dispatch.voyd");
     expect(main()).toBe(53);
