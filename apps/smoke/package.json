@@ -1,0 +1,16 @@
+{
+  "name": "@voyd/smoke",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end smoke tests for voyd",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'no build for smoke tests'",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config ../../vitest.config.ts --testTimeout 30000 src",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@voyd/sdk": "*"
+  }
+}

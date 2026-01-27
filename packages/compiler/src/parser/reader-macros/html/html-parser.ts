@@ -97,7 +97,7 @@ export class HTMLParser {
     const nameExpr = string(tagName);
     const attributes = propsOrAttrs;
     const children = selfClosing ? arrayLiteral() : this.parseChildren(tagName);
-    const args = [label("name", nameExpr), label("children", children)];
+    const args = [label("name", nameExpr)];
 
     if (attributes.length) {
       args.push(
@@ -111,6 +111,8 @@ export class HTMLParser {
         ),
       );
     }
+
+    args.push(label("children", children));
 
     return surfaceCall("create_element", ...args).setLocation(
       this.stream.currentSourceLocation(),
@@ -259,7 +261,7 @@ export class HTMLParser {
     if (normalized) node.push(string(normalized));
     location.setEndToStartOf(this.stream.currentSourceLocation());
 
-    return arrayLiteral(...node).setLocation(location);
+    return call("array_literal", ...node).setLocation(location);
   }
 
   private consumeWhitespace(): void {

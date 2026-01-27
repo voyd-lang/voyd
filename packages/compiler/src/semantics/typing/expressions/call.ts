@@ -2748,82 +2748,60 @@ const inferArrayLiteralElementType = ({
     return ctx.primitives.unknown;
   }
 
-  const first = nonUnknown[0]!;
-  if (nonUnknown.every((type) => type === first)) {
-    return first;
+  const unique = [...new Set(nonUnknown)];
+  if (unique.length === 1) {
+    return unique[0]!;
   }
 
-  const primitives = new Set<TypeId>();
-  const nominalTypes: TypeId[] = [];
-  const structuralTypes: TypeId[] = [];
-  const others: TypeId[] = [];
-
-  const addUnique = (bucket: TypeId[], type: TypeId) => {
-    if (!bucket.includes(type)) bucket.push(type);
-  };
-
-  nonUnknown.forEach((type) => {
+  const primitives = unique.filter((type) => {
     const desc = ctx.arena.get(type);
-    switch (desc.kind) {
-      case "primitive":
-        primitives.add(type);
-        return;
-      default: {
-        const nominalComponent = getNominalComponent(type, ctx);
-        const structuralFields = getStructuralFields(type, ctx, state);
-        const isBaseNominal =
-          typeof nominalComponent === "number" &&
-          nominalComponent === ctx.objects.base.nominal;
-
-        if (nominalComponent && !isBaseNominal) {
-          addUnique(nominalTypes, type);
-          return;
-        }
-
-        if (structuralFields) {
-          addUnique(structuralTypes, type);
-          return;
-        }
-
-        if (nominalComponent) {
-          addUnique(structuralTypes, type);
-          return;
-        }
-
-        others.push(type);
-      }
-    }
+    return desc.kind === "primitive";
   });
 
-  if (
-    primitives.size > 1 ||
-    (primitives.size > 0 &&
-      (nominalTypes.length > 0 ||
-        structuralTypes.length > 0 ||
-        others.length > 0))
-  ) {
+  if (primitives.length > 0) {
+    const first = primitives[0]!;
+    const allPrimitive = primitives.length === unique.length;
+    const homogeneous = primitives.every((type) => type === first);
+    if (allPrimitive && homogeneous) {
+      return first;
+    }
     throw new Error("array literal elements must not mix primitive types");
   }
 
-  if (others.length > 0) {
-    throw new Error("array literal elements must share a compatible type");
+  const candidates = unique.filter((candidate) =>
+    unique.every((member) => typeSatisfies(member, candidate, ctx, state))
+  );
+
+  const bestCandidate = candidates.find((candidate) =>
+    candidates.every((other) => typeSatisfies(candidate, other, ctx, state))
+  );
+
+  if (bestCandidate) {
+    return bestCandidate;
   }
 
-  if (
-    nominalTypes.length > 0 &&
-    structuralTypes.length === 0 &&
-    primitives.size === 0
-  ) {
-    return nominalTypes.length === 1
-      ? nominalTypes[0]!
-      : ctx.arena.internUnion(nominalTypes);
+  if (candidates.length > 0) {
+    return candidates[0]!;
   }
 
-  if (
-    structuralTypes.length > 0 &&
-    nominalTypes.length === 0 &&
-    primitives.size === 0
-  ) {
+  const allNominalObjects = unique.every((type) => {
+    const nominal = getNominalComponent(type, ctx);
+    if (typeof nominal !== "number") return false;
+    return nominal !== ctx.objects.base.nominal;
+  });
+
+  if (allNominalObjects) {
+    return ctx.arena.internUnion(unique);
+  }
+
+  const allStructural = unique.every((type) => {
+    const structuralFields = getStructuralFields(type, ctx, state);
+    if (!structuralFields) return false;
+    const nominalComponent = getNominalComponent(type, ctx);
+    return nominalComponent === undefined;
+  });
+
+  if (allStructural) {
     return ctx.objects.base.type;
   }
 
