@@ -3,12 +3,12 @@ import {
   isIdentifierAtom,
   type Syntax,
 } from "../../../parser/index.js";
-import { parseIfBranches } from "../../utils.js";
+import { parseIfBranches, toSourceSpan } from "../../utils.js";
 import type { HirCondBranch, HirMatchArm, HirPattern } from "../../hir/index.js";
 import type { HirExprId } from "../../ids.js";
-import { toSourceSpan } from "../../utils.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import type { LoweringFormParams } from "./types.js";
+import { createVoidLiteralExpr } from "./literal-helpers.js";
 
 export const lowerIf = ({
   form,
@@ -92,7 +92,11 @@ const tryLowerIfAsMatch = ({
     const loweredValue = lowerExpr(branch.value, ctx, scopes);
     const value = hasDefault
       ? loweredValue
-      : wrapExpressionAsVoidBlock({ exprAst: branch.value, exprId: loweredValue, ctx });
+      : wrapExpressionAsVoidBlock({
+          exprAst: branch.value,
+          exprId: loweredValue,
+          ctx,
+        });
 
     arms.push({
       pattern,
@@ -102,7 +106,7 @@ const tryLowerIfAsMatch = ({
 
   const defaultValue = hasDefault
     ? lowerExpr(defaultBranch!, ctx, scopes)
-    : createVoidLiteralExpr({ spanSource: form, ctx });
+    : createVoidLiteralExpr(form, ctx);
 
   arms.push({
     pattern: { kind: "wildcard", span: toSourceSpan(form) },
@@ -118,22 +122,6 @@ const tryLowerIfAsMatch = ({
     arms,
   });
 };
-
-const createVoidLiteralExpr = ({
-  spanSource,
-  ctx,
-}: {
-  spanSource: Syntax;
-  ctx: LoweringFormParams["ctx"];
-}): HirExprId =>
-  ctx.builder.addExpression({
-    kind: "expr",
-    exprKind: "literal",
-    ast: spanSource.syntaxId,
-    span: toSourceSpan(spanSource),
-    literalKind: "void",
-    value: "void",
-  });
 
 const wrapExpressionAsVoidBlock = ({
   exprAst,
@@ -151,7 +139,7 @@ const wrapExpressionAsVoidBlock = ({
     expr: exprId,
   });
 
-  const value = createVoidLiteralExpr({ spanSource: exprAst, ctx });
+  const value = createVoidLiteralExpr(exprAst, ctx);
 
   return ctx.builder.addExpression({
     kind: "expr",

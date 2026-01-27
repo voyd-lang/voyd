@@ -34,6 +34,7 @@ import type { LowerExprFn } from "./types.js";
 import { lowerStaticAccessExpr } from "./static-access.js";
 import { lowerTupleExpr } from "./tuple.js";
 import { lowerWhile } from "./while.js";
+import { createVoidLiteralExpr } from "./literal-helpers.js";
 
 export { isObjectLiteralForm } from "./object-literal.js";
 
@@ -158,14 +159,7 @@ export const lowerExpr: LowerExprFn = (
       return lowerContinue({ ast: expr, ctx });
     }
     if (identifierAtom.value === "void") {
-      return ctx.builder.addExpression({
-        kind: "expr",
-        exprKind: "literal",
-        ast: expr.syntaxId,
-        span: toSourceSpan(expr),
-        literalKind: "void",
-        value: "void",
-      });
+      return createVoidLiteralExpr(expr, ctx);
     }
     const resolution = resolveIdentifierValue(
       {
