@@ -10,10 +10,10 @@ const assertNoCompileErrors = (
   throw new Error(errors.map((d) => d.message).join("\n"));
 };
 
-describe("smoke: sb/test.voyd", () => {
+describe("smoke: html.voyd", () => {
   it("returns the expected MsgPack object", async () => {
     const sdk = createSdk();
-    const entryPath = path.join(process.cwd(), "fixtures", "test.voyd");
+    const entryPath = path.join(process.cwd(), "fixtures", "html.voyd");
     const result = await sdk.compile({ entryPath });
     assertNoCompileErrors(result.diagnostics);
 

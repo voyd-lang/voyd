@@ -11,9 +11,6 @@ fn create_element({
   element = element.set("children", children)
   if attributes is Some:
     element = element.set("attributes", attributes.value)
-    void
-  else:
-    void
   element
 
 pub fn main()
