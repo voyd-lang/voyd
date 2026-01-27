@@ -114,7 +114,7 @@ const resolveExpressionType = (
     case "method-call":
       return typeMethodCallExpr(expr, ctx, state, expectedType);
     case "block":
-      return typeBlockExpr(expr, ctx, state, expectedType);
+      return typeBlockExpr(expr, ctx, state, options);
     case "if":
       return typeIfExpr(expr, ctx, state, options);
     case "match":

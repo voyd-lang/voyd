@@ -1,0 +1,8 @@
+pub fn main()
+  var i = 0
+  while i < 1 do:
+    i = i + 1
+    if true then:
+      1
+    else:
+      1.0
