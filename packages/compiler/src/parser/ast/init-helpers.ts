@@ -24,7 +24,10 @@ export const paren = (...args: FormInitElements) => call("paren", ...args);
 export const tuple = (...args: FormInitElements) => call("tuple", ...args);
 
 export const arrayLiteral = (...args: FormInitElements) =>
-  call("array_literal", ...args);
+  surfaceCall(
+    "new_array",
+    label("from", surfaceCall("fixed_array_literal", ...args)),
+  );
 
 export const objectLiteral = (...args: FormInitElements) =>
   call("object_literal", ...args);
@@ -55,7 +58,7 @@ const appendUtf8Bytes = (bytes: number[], codePoint: number) => {
     bytes.push(
       0xe0 | (codePoint >> 12),
       0x80 | ((codePoint >> 6) & 0x3f),
-      0x80 | (codePoint & 0x3f)
+      0x80 | (codePoint & 0x3f),
     );
     return;
   }
@@ -63,7 +66,7 @@ const appendUtf8Bytes = (bytes: number[], codePoint: number) => {
     0xf0 | (codePoint >> 18),
     0x80 | ((codePoint >> 12) & 0x3f),
     0x80 | ((codePoint >> 6) & 0x3f),
-    0x80 | (codePoint & 0x3f)
+    0x80 | (codePoint & 0x3f),
   );
 };
 
@@ -74,8 +77,7 @@ const encodeUtf8Bytes = (value: string): number[] => {
     if (code >= 0xd800 && code <= 0xdbff) {
       const next = value.charCodeAt(i + 1);
       if (next >= 0xdc00 && next <= 0xdfff) {
-        const codePoint =
-          (code - 0xd800) * 0x400 + (next - 0xdc00) + 0x10000;
+        const codePoint = (code - 0xd800) * 0x400 + (next - 0xdc00) + 0x10000;
         appendUtf8Bytes(bytes, codePoint);
         i += 1;
         continue;
