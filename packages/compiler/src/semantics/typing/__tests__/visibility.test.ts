@@ -11,7 +11,7 @@ import { semanticsPipeline } from "../../pipeline.js";
 import { DiagnosticError } from "../../../diagnostics/index.js";
 import { toSourceSpan } from "../../utils.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
-import type { HirMethodCallExpr } from "../../hir/nodes.js";
+import type { HirFunction, HirMethodCallExpr } from "../../hir/nodes.js";
 
 const buildModule = ({
   source,
@@ -308,7 +308,11 @@ pub fn call() -> i32
     if (typeof callSymbol !== "number" || !methodCall) return;
 
     const externalSymbols = getSymbolTable(externalSemantics);
-    const exposeSymbol = externalSymbols.resolve("expose", externalSymbols.rootScope);
+    const exposeSymbol = Array.from(externalSemantics.hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" &&
+        externalSymbols.getSymbol(item.symbol).name === "expose"
+    )?.symbol;
     expect(typeof exposeSymbol).toBe("number");
     if (typeof exposeSymbol !== "number") return;
 

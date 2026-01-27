@@ -79,6 +79,22 @@ export const bindImplDecl = (
   const implTargetDecl = resolveObjectDecl(decl.target, ctx, implScope);
   const implTargetSymbol = implTargetDecl?.symbol;
   const ownerVisibility = implTargetDecl?.visibility ?? moduleVisibility();
+  const memberDeclarationScope = (() => {
+    if (typeof implTargetSymbol !== "number") {
+      return undefined;
+    }
+    const existing = ctx.memberDeclarationScopesByOwner.get(implTargetSymbol);
+    if (typeof existing === "number") {
+      return existing;
+    }
+    const next = ctx.symbolTable.createScope({
+      parent: tracker.current(),
+      kind: "members",
+      owner: decl.form.syntaxId,
+    });
+    ctx.memberDeclarationScopesByOwner.set(implTargetSymbol, next);
+    return next;
+  })();
   tracker.enterScope(implScope, () => {
     decl.typeParameters.forEach((param) => {
       rememberSyntax(param, ctx);
@@ -127,7 +143,7 @@ export const bindImplDecl = (
       const method = bindFunctionDecl(parsedFn, ctx, tracker, {
         declarationScope: staticMethod
           ? implScope
-          : ctx.symbolTable.rootScope,
+          : memberDeclarationScope ?? ctx.symbolTable.rootScope,
         scopeParent: implScope,
         metadata,
         selfTypeExpr: staticMethod ? undefined : decl.target,

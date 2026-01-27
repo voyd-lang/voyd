@@ -361,7 +361,15 @@ describe("semanticsPipeline", () => {
     const symbolTable = getSymbolTable(result);
     const rootScope = symbolTable.rootScope;
     const mainSymbol = symbolTable.resolve("main", rootScope)!;
-    const doubleSymbol = symbolTable.resolve("double", rootScope)!;
+    const doubleSymbol = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" &&
+        symbolTable.getSymbol(item.symbol).name === "double"
+    )?.symbol;
+    expect(typeof doubleSymbol).toBe("number");
+    if (typeof doubleSymbol !== "number") {
+      throw new Error("missing impl method symbol for double");
+    }
 
     expectFunctionReturnPrimitive(typing, mainSymbol, "i32");
     const doubleSignature = typing.functions.getSignature(doubleSymbol);

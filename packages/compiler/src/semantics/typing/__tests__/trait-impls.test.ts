@@ -3,6 +3,7 @@ import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
 import { symbolRefKey } from "../symbol-ref-utils.js";
+import type { HirFunction } from "../../hir/nodes.js";
 
 describe("trait implementations", () => {
   it("registers trait types and allows impls that satisfy required methods", () => {
@@ -44,8 +45,12 @@ describe("trait implementations", () => {
     const semantics = semanticsPipeline(ast);
     const { typing } = semantics;
     const symbolTable = getSymbolTable(semantics);
-    const scaleSymbol = symbolTable.resolve("scale", symbolTable.rootScope);
-    expect(scaleSymbol).toBeDefined();
+    const scaleSymbol = Array.from(semantics.hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" &&
+        symbolTable.getSymbol(item.symbol).name === "scale"
+    )?.symbol;
+    expect(typeof scaleSymbol).toBe("number");
     if (!scaleSymbol) return;
     const instantiations = typing.functionInstantiationInfo.get(
       symbolRefKey({ moduleId: semantics.moduleId, symbol: scaleSymbol })
@@ -58,8 +63,12 @@ describe("trait implementations", () => {
     const semantics = semanticsPipeline(ast);
     const { typing } = semantics;
     const symbolTable = getSymbolTable(semantics);
-    const sumSymbol = symbolTable.resolve("sum", symbolTable.rootScope);
-    expect(sumSymbol).toBeDefined();
+    const sumSymbol = Array.from(semantics.hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" &&
+        symbolTable.getSymbol(item.symbol).name === "sum"
+    )?.symbol;
+    expect(typeof sumSymbol).toBe("number");
     if (!sumSymbol) return;
     const instantiations = typing.functionInstantiationInfo.get(
       symbolRefKey({ moduleId: semantics.moduleId, symbol: sumSymbol })

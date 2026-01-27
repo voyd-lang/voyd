@@ -248,7 +248,11 @@ describe("lowering pipeline", () => {
       isPackageRoot: binding.isPackageRoot,
     });
 
-    const doubleSymbol = symbolTable.resolve("double", symbolTable.rootScope)!;
+    const doubleSymbol = binding.impls[0]?.methods[0]?.symbol;
+    expect(typeof doubleSymbol).toBe("number");
+    if (typeof doubleSymbol !== "number") {
+      throw new Error("missing impl method symbol for double");
+    }
     const doubleFn = Array.from(hir.items.values()).find(
       (item): item is HirFunction =>
         item.kind === "function" && item.symbol === doubleSymbol

@@ -656,7 +656,7 @@ describe("next codegen", () => {
     expect(main()).toBe(53);
   });
 
-  it("emits wasm for trait object dispatch via overload sets", () => {
+  it("emits wasm for trait object dispatch via borrowed values", () => {
     const main = loadMain("trait_object_overload_dispatch.voyd");
     expect(main()).toBe(29);
   });
