@@ -2512,6 +2512,7 @@ const typeIntrinsicCall = (
         ctx,
         state,
         typeArguments,
+        span: callSpan,
       });
     case "__array_get":
       return typeArrayGetIntrinsic({
@@ -2686,11 +2687,13 @@ const typeArrayNewFixedIntrinsic = ({
   ctx,
   state,
   typeArguments,
+  span,
 }: {
   args: readonly Arg[];
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  span?: SourceSpan;
 }): TypeId => {
   let elementType: TypeId;
   if (typeArguments && typeArguments.length > 0) {
@@ -2709,7 +2712,7 @@ const typeArrayNewFixedIntrinsic = ({
       )
     );
   } else {
-    elementType = inferArrayLiteralElementType({ args, ctx, state });
+    elementType = inferArrayLiteralElementType({ args, ctx, state, span });
     args.forEach((arg) => {
       if (arg.type === ctx.primitives.unknown) return;
       ensureTypeMatches(
@@ -2729,15 +2732,22 @@ const inferArrayLiteralElementType = ({
   args,
   ctx,
   state,
+  span,
 }: {
   args: readonly Arg[];
   ctx: TypingContext;
   state: TypingState;
+  span?: SourceSpan;
 }): TypeId => {
+  const callSpan = normalizeSpan(span, ctx.hir.module.span);
+
   if (args.length === 0) {
-    throw new Error(
-      "__array_new_fixed requires at least one element to infer the element type"
-    );
+    return emitDiagnostic({
+      ctx,
+      code: "TY0023",
+      params: { kind: "array-literal-empty" },
+      span: callSpan,
+    });
   }
 
   const nonUnknown = args
@@ -2765,7 +2775,12 @@ const inferArrayLiteralElementType = ({
     if (allPrimitive && homogeneous) {
       return first;
     }
-    throw new Error("array literal elements must not mix primitive types");
+    return emitDiagnostic({
+      ctx,
+      code: "TY0024",
+      params: { kind: "array-literal-mixed-primitives" },
+      span: callSpan,
+    });
   }
 
   const candidates = unique.filter((candidate) =>
@@ -2805,7 +2820,12 @@ const inferArrayLiteralElementType = ({
     return ctx.objects.base.type;
   }
 
-  throw new Error("array literal elements must share a compatible type");
+  return emitDiagnostic({
+    ctx,
+    code: "TY0025",
+    params: { kind: "array-literal-incompatible" },
+    span: callSpan,
+  });
 };
 
 const typeArrayGetIntrinsic = ({

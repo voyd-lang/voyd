@@ -45,6 +45,24 @@ describe("array literals", () => {
     }
   });
 
+  it("unions multiple nominal object elements", () => {
+    const { typing, hir } = semanticsPipeline(
+      loadAst("array_literal_nominal_union_three.voyd")
+    );
+    const call = getFirstCall(hir);
+    expect(call).toBeDefined();
+    if (!call) return;
+    const typeId = typing.table.getExprType(call.id);
+    const desc = typing.arena.get(typeId!);
+    expect(desc.kind).toBe("fixed-array");
+    if (desc.kind !== "fixed-array") return;
+    const elementDesc = typing.arena.get(desc.element);
+    expect(elementDesc.kind).toBe("union");
+    if (elementDesc.kind === "union") {
+      expect(elementDesc.members).toHaveLength(3);
+    }
+  });
+
   it("collapses mixed structural objects to Object", () => {
     const { typing, hir } = semanticsPipeline(
       loadAst("array_literal_structural_mix.voyd")
@@ -110,7 +128,7 @@ describe("array literals", () => {
     expect(() =>
       semanticsPipeline(loadAst("array_literal_empty.voyd"))
     ).toThrow(
-      /__array_new_fixed requires at least one element to infer the element type/
+      /cannot infer element type for empty array literal/
     );
   });
 

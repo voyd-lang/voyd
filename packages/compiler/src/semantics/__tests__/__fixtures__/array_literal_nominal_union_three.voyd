@@ -1,0 +1,9 @@
+obj A { value: i32 }
+obj B {}
+obj C { value: i32 }
+
+pub fn new_array({ from source: FixedArray<A | B | C> }) -> FixedArray<A | B | C>
+  source
+
+fn make() -> FixedArray<A | B | C>
+  [A { value: 1 }, B {}, C { value: 2 }]

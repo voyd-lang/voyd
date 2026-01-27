@@ -125,6 +125,9 @@ type DiagnosticParamsMap = {
     | { kind: "call-missing-labeled-argument"; label: string }
     | { kind: "call-extra-arguments"; extra: number };
   TY0022: { kind: "unknown-method"; name: string; receiver?: string };
+  TY0023: { kind: "array-literal-empty" };
+  TY0024: { kind: "array-literal-mixed-primitives" };
+  TY0025: { kind: "array-literal-incompatible" };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -436,6 +439,31 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0022"]>,
+  TY0023: {
+    code: "TY0023",
+    message: () => "cannot infer element type for empty array literal",
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Add at least one element, or use a helper that constructs an empty array with a known element type.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0023"]>,
+  TY0024: {
+    code: "TY0024",
+    message: () => "array literal elements must not mix primitive types",
+    severity: "error",
+    phase: "typing",
+    hints: [{ message: "Convert elements so they share a single primitive type." }],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0024"]>,
+  TY0025: {
+    code: "TY0025",
+    message: () => "array literal elements must share a compatible type",
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0025"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
