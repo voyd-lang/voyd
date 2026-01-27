@@ -9,8 +9,7 @@ export const typeLoopExpr = (
   ctx: TypingContext,
   state: TypingState
 ): TypeId => {
-  typeExpression(expr.body, ctx, state);
+  typeExpression(expr.body, ctx, state, { discardValue: true });
   ctx.effects.setExprEffect(expr.id, getExprEffectRow(expr.body, ctx));
   return ctx.primitives.void;
 };
-

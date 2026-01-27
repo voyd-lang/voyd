@@ -193,7 +193,7 @@ export const typeLambdaExpr = (
         param.defaultValue,
         ctx,
         state,
-        param.appliedType
+        { expectedType: param.appliedType }
       );
       ensureTypeMatches(
         defaultType,
@@ -228,7 +228,9 @@ export const typeLambdaExpr = (
 
   let bodyType: TypeId;
   try {
-    bodyType = typeExpression(expr.body, ctx, state, appliedReturnHint);
+    bodyType = typeExpression(expr.body, ctx, state, {
+      expectedType: appliedReturnHint,
+    });
   } finally {
     state.currentFunction = previousFunction;
   }

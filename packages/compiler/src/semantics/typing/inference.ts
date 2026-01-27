@@ -87,7 +87,9 @@ const typeFunction = (
   let observedReturnType: number | undefined;
   let updated = false;
   try {
-    bodyType = typeExpression(fn.body, ctx, state, signature.returnType);
+    bodyType = typeExpression(fn.body, ctx, state, {
+      expectedType: signature.returnType,
+    });
     observedReturnType = state.currentFunction?.observedReturnType;
   } finally {
     state.currentFunction = previousFunction;

@@ -1,0 +1,7 @@
+pub fn main() -> i32
+  var out = 0
+  if true then:
+    out = 7
+  else:
+    return 3
+  out
