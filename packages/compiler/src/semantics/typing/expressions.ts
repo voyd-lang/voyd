@@ -28,12 +28,19 @@ import type { TypingContext, TypingState } from "./types.js";
 
 export { formatFunctionInstanceKey };
 
+export type TypeExpressionOptions = {
+  expectedType?: TypeId;
+  /** When true, the expression's resulting value is not used (statement context). */
+  discardValue?: boolean;
+};
+
 export const typeExpression = (
   exprId: HirExprId,
   ctx: TypingContext,
   state: TypingState,
-  expectedType?: TypeId
+  options: TypeExpressionOptions = {}
 ): TypeId => {
+  const expectedType = options.expectedType;
   const cached = ctx.table.getExprType(exprId);
   if (typeof cached === "number") {
     if (ctx.effects.getExprEffect(exprId) === undefined) {
@@ -78,7 +85,7 @@ export const typeExpression = (
     throw new Error(`missing HirExpression ${exprId}`);
   }
 
-  const type = resolveExpressionType(expr, ctx, state, expectedType);
+  const type = resolveExpressionType(expr, ctx, state, options);
   const appliedType = applyCurrentSubstitution(type, ctx, state);
   ctx.table.setExprType(exprId, type);
   ctx.resolvedExprTypes.set(exprId, appliedType);
@@ -92,8 +99,9 @@ const resolveExpressionType = (
   expr: HirExpression,
   ctx: TypingContext,
   state: TypingState,
-  expectedType?: TypeId
+  options: TypeExpressionOptions
 ): TypeId => {
+  const expectedType = options.expectedType;
   switch (expr.exprKind) {
     case "literal":
       return typeLiteralExpr(expr, ctx);
@@ -108,9 +116,9 @@ const resolveExpressionType = (
     case "block":
       return typeBlockExpr(expr, ctx, state, expectedType);
     case "if":
-      return typeIfExpr(expr, ctx, state);
+      return typeIfExpr(expr, ctx, state, options);
     case "match":
-      return typeMatchExpr(expr, ctx, state);
+      return typeMatchExpr(expr, ctx, state, options);
     case "effect-handler":
       return typeEffectHandlerExpr(expr, ctx, state, expectedType);
     case "tuple":

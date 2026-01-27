@@ -651,6 +651,11 @@ describe("next codegen", () => {
     expect(main()).toBe(5);
   });
 
+  it("narrows `if x is Type` without else", () => {
+    const main = loadMain("if_is_match_shorthand_no_else.voyd");
+    expect(main()).toBe(5);
+  });
+
   it("emits wasm for trait object dispatch", () => {
     const main = loadMain("trait_object_dispatch.voyd");
     expect(main()).toBe(53);

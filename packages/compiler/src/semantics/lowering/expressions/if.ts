@@ -1,7 +1,7 @@
 import {
-  type Form,
   isForm,
   isIdentifierAtom,
+  type Syntax,
 } from "../../../parser/index.js";
 import { parseIfBranches } from "../../utils.js";
 import type { HirCondBranch, HirMatchArm, HirPattern } from "../../hir/index.js";
@@ -50,9 +50,7 @@ const tryLowerIfAsMatch = ({
   lowerExpr,
 }: LoweringFormParams): HirExprId | undefined => {
   const { branches, defaultBranch } = parseIfBranches(form);
-  if (!defaultBranch) {
-    return;
-  }
+  const hasDefault = Boolean(defaultBranch);
 
   const firstCondition = branches.at(0)?.condition;
   if (!isForm(firstCondition) || !firstCondition.calls("is")) {
@@ -91,15 +89,24 @@ const tryLowerIfAsMatch = ({
       span: toSourceSpan(condition),
     };
 
+    const loweredValue = lowerExpr(branch.value, ctx, scopes);
+    const value = hasDefault
+      ? loweredValue
+      : wrapExpressionAsVoidBlock({ exprAst: branch.value, exprId: loweredValue, ctx });
+
     arms.push({
       pattern,
-      value: lowerExpr(branch.value, ctx, scopes),
+      value,
     });
   }
 
+  const defaultValue = hasDefault
+    ? lowerExpr(defaultBranch!, ctx, scopes)
+    : createVoidLiteralExpr({ spanSource: form, ctx });
+
   arms.push({
     pattern: { kind: "wildcard", span: toSourceSpan(form) },
-    value: lowerExpr(defaultBranch, ctx, scopes),
+    value: defaultValue,
   });
 
   return ctx.builder.addExpression({
@@ -109,5 +116,49 @@ const tryLowerIfAsMatch = ({
     span: toSourceSpan(form),
     discriminant,
     arms,
+  });
+};
+
+const createVoidLiteralExpr = ({
+  spanSource,
+  ctx,
+}: {
+  spanSource: Syntax;
+  ctx: LoweringFormParams["ctx"];
+}): HirExprId =>
+  ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "literal",
+    ast: spanSource.syntaxId,
+    span: toSourceSpan(spanSource),
+    literalKind: "void",
+    value: "void",
+  });
+
+const wrapExpressionAsVoidBlock = ({
+  exprAst,
+  exprId,
+  ctx,
+}: {
+  exprAst: Syntax;
+  exprId: HirExprId;
+  ctx: LoweringFormParams["ctx"];
+}): HirExprId => {
+  const statement = ctx.builder.addStatement({
+    kind: "expr-stmt",
+    ast: exprAst.syntaxId,
+    span: toSourceSpan(exprAst),
+    expr: exprId,
+  });
+
+  const value = createVoidLiteralExpr({ spanSource: exprAst, ctx });
+
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "block",
+    ast: exprAst.syntaxId,
+    span: toSourceSpan(exprAst),
+    statements: [statement],
+    value,
   });
 };

@@ -356,7 +356,7 @@ const typeHandlerClause = ({
     clause.body,
     ctx,
     state,
-    handlerReturnTypeId,
+    { expectedType: handlerReturnTypeId },
   );
   if (handlerReturnTypeId !== ctx.primitives.unknown) {
     ensureTypeMatches(
@@ -629,7 +629,7 @@ export const typeEffectHandlerExpr = (
   state: TypingState,
   expectedType?: TypeId,
 ): number => {
-  const bodyType = typeExpression(expr.body, ctx, state, expectedType);
+  const bodyType = typeExpression(expr.body, ctx, state, { expectedType });
   const bodyEffectRow = getExprEffectRow(expr.body, ctx);
   const handlerReturnTypeId =
     expectedType ?? state.currentFunction?.returnType ?? bodyType;
@@ -687,7 +687,7 @@ export const typeEffectHandlerExpr = (
       expr.finallyBranch,
       ctx,
       state,
-      bodyType,
+      { expectedType: bodyType },
     );
     if (bodyType !== ctx.primitives.unknown) {
       ensureTypeMatches(finallyType, bodyType, ctx, state, "handler finally");

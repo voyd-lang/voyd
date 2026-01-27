@@ -102,7 +102,9 @@ export const typeCallExpr = (
 
   const args = expr.args.map((arg, index) => ({
     label: arg.label,
-    type: typeExpression(arg.expr, ctx, state, expectedParams?.[index]),
+    type: typeExpression(arg.expr, ctx, state, {
+      expectedType: expectedParams?.[index],
+    }),
     exprId: arg.expr,
   }));
 
@@ -353,7 +355,7 @@ export const typeCallExpr = (
     expr.callee,
     ctx,
     state,
-    expectedCalleeType(args, ctx)
+    { expectedType: expectedCalleeType(args, ctx) }
   );
 
   if (expr.typeArguments && expr.typeArguments.length > 0) {
@@ -2094,7 +2096,9 @@ export const typeGenericFunctionBody = ({
   let bodyType: TypeId | undefined;
 
   try {
-    bodyType = typeExpression(fn.body, ctx, state, expectedReturn);
+    bodyType = typeExpression(fn.body, ctx, state, {
+      expectedType: expectedReturn,
+    });
     ensureTypeMatches(
       bodyType,
       expectedReturn,

@@ -48,7 +48,7 @@ export const typeBlockExpr = (
   });
 
   if (typeof expr.value === "number") {
-    const valueType = typeExpression(expr.value, ctx, state, expectedType);
+    const valueType = typeExpression(expr.value, ctx, state, { expectedType });
     effectRow = ctx.effects.compose(
       effectRow,
       getExprEffectRow(expr.value, ctx)
@@ -80,7 +80,7 @@ const typeStatement = (
 
   switch (stmt.kind) {
     case "expr-stmt":
-      typeExpression(stmt.expr, ctx, state);
+      typeExpression(stmt.expr, ctx, state, { discardValue: true });
       return { effect: getExprEffectRow(stmt.expr, ctx) };
     case "return":
       if (typeof state.currentFunction?.returnType !== "number") {
@@ -102,7 +102,7 @@ const typeStatement = (
           stmt.value,
           ctx,
           state,
-          expectedReturnType
+          { expectedType: expectedReturnType }
         );
         if (
           enforceReturnType &&
@@ -188,7 +188,7 @@ const typeLetStatement = (
         stmt.initializer,
         ctx,
         state,
-        annotated
+        { expectedType: annotated }
       );
       if (initializerType !== ctx.primitives.unknown) {
         ensureTypeMatches(
@@ -239,7 +239,7 @@ const typeLetStatement = (
       stmt.initializer,
       ctx,
       state,
-      expectedType
+      { expectedType }
     );
 
     if (
@@ -281,7 +281,7 @@ const typeLetStatement = (
     stmt.initializer,
     ctx,
     state,
-    expectedType
+    { expectedType }
   );
 
   if (
