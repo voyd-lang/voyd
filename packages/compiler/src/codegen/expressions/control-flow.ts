@@ -22,6 +22,7 @@ import {
   getMatchPatternTypeId,
 } from "../types.js";
 import { compilePatternInitializationFromValue } from "../patterns.js";
+import { coerceToBinaryenType } from "./utils.js";
 import type {
   HirBreakExpr,
   HirContinueExpr,
@@ -126,16 +127,8 @@ export const compileIfExpr = (
       tailPosition,
       expectedResultTypeId,
     });
-    const typedThen =
-      resultType === binaryen.none ||
-      binaryen.getExpressionType(value.expr) === resultType
-        ? value.expr
-        : ctx.mod.block(null, [value.expr], resultType);
-    const typedElse: number =
-      resultType === binaryen.none ||
-      binaryen.getExpressionType(fallback.expr) === resultType
-        ? fallback.expr
-        : ctx.mod.block(null, [fallback.expr], resultType);
+    const typedThen = coerceToBinaryenType(ctx, value.expr, resultType);
+    const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
     fallback = {
       expr: ctx.mod.if(condition, typedThen, typedElse),
       usedReturnCall: value.usedReturnCall && fallback.usedReturnCall,
@@ -287,16 +280,8 @@ export const compileMatchExpr = (
         usedReturnCall: false,
       } as CompiledExpression);
 
-    const typedThen =
-      resultType === binaryen.none ||
-      binaryen.getExpressionType(armExpr.expr) === resultType
-        ? armExpr.expr
-        : ctx.mod.block(null, [armExpr.expr], resultType);
-    const typedElse =
-      resultType === binaryen.none ||
-      binaryen.getExpressionType(fallback.expr) === resultType
-        ? fallback.expr
-        : ctx.mod.block(null, [fallback.expr], resultType);
+    const typedThen = coerceToBinaryenType(ctx, armExpr.expr, resultType);
+    const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
 
     chain = {
       expr: ctx.mod.if(condition, typedThen, typedElse),

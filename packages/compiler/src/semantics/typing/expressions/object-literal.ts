@@ -198,7 +198,9 @@ const bindNominalObjectEntry = (
       context: `constructing ${typeName}`,
       allowOwnerPrivate: true,
     });
-    const valueType = typeExpression(entry.value, ctx, state, expectedField.type);
+    const valueType = typeExpression(entry.value, ctx, state, {
+      expectedType: expectedField.type,
+    });
     bindTypeParamsFromType(expectedField.type, valueType, bindings, ctx, state);
     provided.add(entry.name);
     return;
@@ -250,7 +252,9 @@ const mergeNominalObjectEntry = (
       context: `constructing ${typeName}`,
       allowOwnerPrivate: true,
     });
-    const valueType = typeExpression(entry.value, ctx, state, expectedField.type);
+    const valueType = typeExpression(entry.value, ctx, state, {
+      expectedType: expectedField.type,
+    });
     if (expectedField.type !== ctx.primitives.unknown) {
       ensureTypeMatches(
         valueType,

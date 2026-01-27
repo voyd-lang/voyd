@@ -18,7 +18,7 @@ export const typeWhileExpr = (
     state,
     "while condition"
   );
-  typeExpression(expr.body, ctx, state);
+  typeExpression(expr.body, ctx, state, { discardValue: true });
   const effectRow = composeEffectRows(ctx.effects, [
     getExprEffectRow(expr.condition, ctx),
     getExprEffectRow(expr.body, ctx),

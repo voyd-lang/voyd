@@ -1,14 +1,14 @@
 import {
-  type Form,
   isForm,
   isIdentifierAtom,
+  type Syntax,
 } from "../../../parser/index.js";
-import { parseIfBranches } from "../../utils.js";
+import { parseIfBranches, toSourceSpan } from "../../utils.js";
 import type { HirCondBranch, HirMatchArm, HirPattern } from "../../hir/index.js";
 import type { HirExprId } from "../../ids.js";
-import { toSourceSpan } from "../../utils.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import type { LoweringFormParams } from "./types.js";
+import { createVoidLiteralExpr } from "./literal-helpers.js";
 
 export const lowerIf = ({
   form,
@@ -50,9 +50,7 @@ const tryLowerIfAsMatch = ({
   lowerExpr,
 }: LoweringFormParams): HirExprId | undefined => {
   const { branches, defaultBranch } = parseIfBranches(form);
-  if (!defaultBranch) {
-    return;
-  }
+  const hasDefault = Boolean(defaultBranch);
 
   const firstCondition = branches.at(0)?.condition;
   if (!isForm(firstCondition) || !firstCondition.calls("is")) {
@@ -91,15 +89,28 @@ const tryLowerIfAsMatch = ({
       span: toSourceSpan(condition),
     };
 
+    const loweredValue = lowerExpr(branch.value, ctx, scopes);
+    const value = hasDefault
+      ? loweredValue
+      : wrapExpressionAsVoidBlock({
+          exprAst: branch.value,
+          exprId: loweredValue,
+          ctx,
+        });
+
     arms.push({
       pattern,
-      value: lowerExpr(branch.value, ctx, scopes),
+      value,
     });
   }
 
+  const defaultValue = hasDefault
+    ? lowerExpr(defaultBranch!, ctx, scopes)
+    : createVoidLiteralExpr(form, ctx);
+
   arms.push({
     pattern: { kind: "wildcard", span: toSourceSpan(form) },
-    value: lowerExpr(defaultBranch, ctx, scopes),
+    value: defaultValue,
   });
 
   return ctx.builder.addExpression({
@@ -109,5 +120,33 @@ const tryLowerIfAsMatch = ({
     span: toSourceSpan(form),
     discriminant,
     arms,
+  });
+};
+
+const wrapExpressionAsVoidBlock = ({
+  exprAst,
+  exprId,
+  ctx,
+}: {
+  exprAst: Syntax;
+  exprId: HirExprId;
+  ctx: LoweringFormParams["ctx"];
+}): HirExprId => {
+  const statement = ctx.builder.addStatement({
+    kind: "expr-stmt",
+    ast: exprAst.syntaxId,
+    span: toSourceSpan(exprAst),
+    expr: exprId,
+  });
+
+  const value = createVoidLiteralExpr(exprAst, ctx);
+
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "block",
+    ast: exprAst.syntaxId,
+    span: toSourceSpan(exprAst),
+    statements: [statement],
+    value,
   });
 };

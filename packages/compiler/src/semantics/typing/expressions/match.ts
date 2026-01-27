@@ -1,6 +1,6 @@
 import type { HirMatchExpr, HirPattern, HirTypeExpr } from "../../hir/index.js";
 import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
-import { typeExpression } from "../expressions.js";
+import { typeExpression, type TypeExpressionOptions } from "../expressions.js";
 import { composeEffectRows, getExprEffectRow } from "../effects.js";
 import {
   getNominalComponent,
@@ -25,8 +25,10 @@ import { bindPatternFromType, recordPatternType } from "./patterns.js";
 export const typeMatchExpr = (
   expr: HirMatchExpr,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  options: TypeExpressionOptions
 ): TypeId => {
+  const discardValue = options.discardValue === true;
   const rawDiscriminantType = typeExpression(expr.discriminant, ctx, state);
   const discriminantType = unfoldRecursiveType(rawDiscriminantType, ctx);
   const discriminantExpr = ctx.hir.expressions.get(expr.discriminant);
@@ -86,21 +88,23 @@ export const typeMatchExpr = (
       discriminantSymbol,
       narrowed,
       ctx,
-      () => typeExpression(arm.value, ctx, state)
+      () => typeExpression(arm.value, ctx, state, { discardValue })
     );
     armEffectRow = ctx.effects.compose(
       armEffectRow,
       getExprEffectRow(arm.value, ctx)
     );
     effectRow = ctx.effects.compose(effectRow, armEffectRow);
-    branchType = mergeBranchType({
-      acc: branchType,
-      next: valueType,
-      ctx,
-      state,
-      span: ctx.hir.expressions.get(arm.value)?.span,
-      context: "match arm",
-    });
+    if (!discardValue) {
+      branchType = mergeBranchType({
+        acc: branchType,
+        next: valueType,
+        ctx,
+        state,
+        span: ctx.hir.expressions.get(arm.value)?.span,
+        context: "match arm",
+      });
+    }
 
     if (!remainingMembers) {
       return;
@@ -141,7 +145,7 @@ export const typeMatchExpr = (
   }
 
   ctx.effects.setExprEffect(expr.id, effectRow);
-  return branchType ?? ctx.primitives.void;
+  return discardValue ? ctx.primitives.void : (branchType ?? ctx.primitives.void);
 };
 
 const narrowMatchPattern = (

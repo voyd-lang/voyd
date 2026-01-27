@@ -57,7 +57,9 @@ export const typeAssignExpr = (
   }
 
   const targetType = typeExpression(expr.target, ctx, state);
-  const valueType = typeExpression(expr.value, ctx, state, targetType);
+  const valueType = typeExpression(expr.value, ctx, state, {
+    expectedType: targetType,
+  });
   ensureTypeMatches(valueType, targetType, ctx, state, "assignment target");
   const effectRow = composeEffectRows(ctx.effects, [
     getExprEffectRow(expr.target, ctx),
@@ -86,7 +88,9 @@ const typeTupleAssignment = (
       ctx.primitives.unknown
     );
   if (typeof annotated === "number" && annotated !== ctx.primitives.unknown) {
-    const valueType = typeExpression(valueExpr, ctx, state, annotated);
+    const valueType = typeExpression(valueExpr, ctx, state, {
+      expectedType: annotated,
+    });
     if (valueType !== ctx.primitives.unknown) {
       ensureTypeMatches(
         valueType,
