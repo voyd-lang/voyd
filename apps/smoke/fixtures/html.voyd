@@ -1,0 +1,21 @@
+use std::all
+use std::msgpack::MsgPack
+
+fn create_element({
+  name: String,
+  attributes?: Array<Array<String>>,
+  children: Array<MsgPack>
+}) -> MsgPack
+  var element = Map<MsgPack>::new()
+  element = element.set("name", name)
+  element = element.set("children", children)
+  if attributes is Some:
+    element = element.set("attributes", attributes.value)
+  element
+
+pub fn main()
+  <div class="greeting" visible>
+    Hi there
+    <span class="big">hi</span>
+    <i>This is italic</i>
+  </div>

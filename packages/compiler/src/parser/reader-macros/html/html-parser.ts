@@ -59,9 +59,7 @@ export class HTMLParser {
     const lastSegment = tagName.split("::").pop() ?? "";
     const isComponent = /^[A-Z]/.test(lastSegment);
     // Parse attributes/props before closing the tag
-    const propsOrAttrs = isComponent
-      ? this.parseComponentPropsObject()
-      : this.parseAttributes();
+    const propsOrAttrs = this.parseAttributes();
 
     const selfClosing = this.stream.next === "/";
     if (selfClosing) this.stream.consumeChar();
@@ -69,26 +67,29 @@ export class HTMLParser {
 
     // Component: translate to function call with props object and children
     if (isComponent) {
-      const props =
-        !selfClosing && formCallsInternal(propsOrAttrs, "object_literal")
-          ? this.withChildrenProp(propsOrAttrs, tagName)
-          : propsOrAttrs;
+      const props = !selfClosing
+        ? this.withChildrenProp(propsOrAttrs, tagName)
+        : propsOrAttrs;
+
+      const propsObj = objectLiteral(
+        ...props.map(({ name, value }) => label(name, value)),
+      ).setLocation(this.stream.currentSourceLocation());
 
       // Namespaced component: e.g., UI::Card or UI::Elements::Card
       if (tagName.includes("::")) {
         const parts = tagName.split("::").filter(Boolean);
         const last = parts.pop()!;
         const left = buildModulePathLeft(parts);
-        const inner = call(identifier(last), props).setLocation(
-          this.stream.currentSourceLocation()
+        const inner = call(identifier(last), propsObj).setLocation(
+          this.stream.currentSourceLocation(),
         );
         return surfaceCall("::", left, inner).setLocation(
-          this.stream.currentSourceLocation()
+          this.stream.currentSourceLocation(),
         );
       }
 
-      return surfaceCall(tagName, props).setLocation(
-        this.stream.currentSourceLocation()
+      return surfaceCall(tagName, propsObj).setLocation(
+        this.stream.currentSourceLocation(),
       );
     }
 
@@ -96,12 +97,26 @@ export class HTMLParser {
     const nameExpr = string(tagName);
     const attributes = propsOrAttrs;
     const children = selfClosing ? arrayLiteral() : this.parseChildren(tagName);
-    return surfaceCall(
-      "create_element",
-      nameExpr,
-      attributes,
-      children
-    ).setLocation(this.stream.currentSourceLocation());
+    const args = [label("name", nameExpr)];
+
+    if (attributes.length) {
+      args.push(
+        label(
+          "attributes",
+          arrayLiteral(
+            ...attributes.map(({ name, value }) =>
+              arrayLiteral(string(name), value),
+            ),
+          ),
+        ),
+      );
+    }
+
+    args.push(label("children", children));
+
+    return surfaceCall("create_element", ...args).setLocation(
+      this.stream.currentSourceLocation(),
+    );
   }
 
   private parseTagName(): string {
@@ -113,8 +128,7 @@ export class HTMLParser {
   }
 
   private parseAttributes() {
-    // Attributes: Array<(String, String)> represented as array-literal of tuple-literals
-    const items: Expr[] = [];
+    const items: { name: string; value: Expr }[] = [];
     while (this.stream.next !== ">" && this.stream.next !== "/") {
       this.consumeWhitespace();
       const name = this.parseAttributeName();
@@ -122,40 +136,14 @@ export class HTMLParser {
       if (this.stream.next === "=") {
         this.stream.consumeChar(); // Consume '='
         const value = this.parseAttributeValue();
-        items.push(tuple(string(name), value));
+        items.push({ name, value });
       } else {
         // Boolean attribute -> "true" string
-        items.push(tuple(string(name), string("true")));
+        items.push({ name, value: string("true") });
       }
       this.consumeWhitespace();
     }
-
-    return arrayLiteral(...items);
-  }
-
-  // Parse attributes into an object-literal for component calls
-  private parseComponentPropsObject() {
-    const fields: Form[] = [];
-    while (this.stream.next !== ">" && this.stream.next !== "/") {
-      this.consumeWhitespace();
-      const name = this.parseAttributeName();
-      if (!name) break;
-
-      let value: Expr;
-      if (this.stream.next === "=") {
-        this.stream.consumeChar();
-        value = this.parseAttributeValue();
-      } else {
-        // Boolean attribute -> "true" string (consistent with HTML attributes)
-        value = string("true");
-      }
-
-      fields.push(label(name, value));
-      this.consumeWhitespace();
-    }
-    return objectLiteral(...fields).setLocation(
-      this.stream.currentSourceLocation()
-    );
+    return items;
   }
 
   private parseAttributeName(): string {
@@ -173,7 +161,7 @@ export class HTMLParser {
 
       if (!expr) {
         throw new Error(
-          "Unescaped curly brace must be followed by an expression"
+          "Unescaped curly brace must be followed by an expression",
         );
       }
 
@@ -236,7 +224,7 @@ export class HTMLParser {
       const closingTagName = this.parseTagName();
       if (closingTagName !== tagName) {
         throw new Error(
-          `Mismatched closing tag, expected </${tagName}> but got </${closingTagName}>`
+          `Mismatched closing tag, expected </${tagName}> but got </${closingTagName}>`,
         );
       }
       if (this.stream.consumeChar() !== ">") {
@@ -273,7 +261,7 @@ export class HTMLParser {
     if (normalized) node.push(string(normalized));
     location.setEndToStartOf(this.stream.currentSourceLocation());
 
-    return arrayLiteral(...node).setLocation(location);
+    return call("array_literal", ...node).setLocation(location);
   }
 
   private consumeWhitespace(): void {
@@ -296,9 +284,12 @@ export class HTMLParser {
     return collapsed.length > 0 ? collapsed : "";
   }
 
-  private withChildrenProp(props: Form, tagName: string) {
+  private withChildrenProp(
+    props: { name: string; value: Expr }[],
+    tagName: string,
+  ) {
     const children = this.parseChildren(tagName);
-    return props.append(label("children", children));
+    return [...props, { name: "children", value: children }];
   }
 }
 
