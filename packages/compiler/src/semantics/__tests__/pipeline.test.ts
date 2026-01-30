@@ -739,6 +739,13 @@ describe("semanticsPipeline", () => {
     expect(() => semanticsPipeline(ast)).toThrow(/label mismatch/);
   });
 
+  it("diagnoses undefined types in generic arguments", () => {
+    const ast = loadAst("undefined_type_generic_arg.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0026: undefined type 'stringg'/
+    );
+  });
+
   it("exposes binder overload metadata", () => {
     const binding = bindFixture("function_overloads.voyd");
     expect(binding.overloads.size).toBe(1);

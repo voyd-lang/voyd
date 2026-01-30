@@ -32,6 +32,7 @@ import {
   localSymbolForSymbolRef,
 } from "./symbol-ref-utils.js";
 import { symbolRefEquals } from "./symbol-ref.js";
+import { emitDiagnostic } from "../../diagnostics/index.js";
 
 const isFixedArrayReference = (
   name: string,
@@ -1032,7 +1033,12 @@ const resolveNamedTypeExpr = (
     return resolved;
   }
 
-  return getPrimitiveType(ctx, name);
+  return emitDiagnostic({
+    ctx,
+    code: "TY0026",
+    params: { kind: "undefined-type", name },
+    span: expr.span,
+  });
 };
 
 const findTypeParamByName = (
@@ -1891,6 +1897,7 @@ export const ensureTypeMatches = (
       return String(type);
     }
   };
+  
   throw new Error(
     `type mismatch for ${reason}\nactual: ${format(actual)}\nexpected: ${format(
       expected
