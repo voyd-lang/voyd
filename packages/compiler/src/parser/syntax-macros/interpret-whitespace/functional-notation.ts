@@ -17,7 +17,8 @@ export const applyFunctionalNotation = (form: Form): Form => {
   const cursor = form.cursor();
   const result: Expr[] = [];
 
-  if (isParams(form)) {
+  // Keeps tuple identifiers as the callee
+  if (isParamsLike(form)) {
     result.push(cursor.consume()!);
   }
 
@@ -44,7 +45,7 @@ export const applyFunctionalNotation = (form: Form): Form => {
     if (nextExpr.callsInternal("generics")) {
       cursor.consume();
       const params = cursor.peek();
-      const paramsForm = isParams(params) ? params : undefined;
+      const paramsForm = isParamsLike(params) ? params : undefined;
       if (paramsForm) cursor.consume();
       const normalizedParams = paramsForm
         ? applyFunctionalNotation(paramsForm)
@@ -58,10 +59,12 @@ export const applyFunctionalNotation = (form: Form): Form => {
       continue;
     }
 
-    if (isParams(nextExpr)) {
+    if (isParamsLike(nextExpr)) {
       cursor.consume();
       const normalizedParams = applyFunctionalNotation(nextExpr);
-      const call = new CallForm([expr, ...normalizedParams.rest]);
+      const call = isCallForm(form)
+        ? new CallForm([expr, normalizedParams])
+        : new CallForm([expr, ...normalizedParams.rest]);
       result.push(call);
       continue;
     }
@@ -77,5 +80,5 @@ export const applyFunctionalNotation = (form: Form): Form => {
   return isCallForm(form) ? newForm.toCall() : newForm;
 };
 
-const isParams = (expr: unknown): expr is Form =>
+const isParamsLike = (expr: unknown): expr is Form =>
   isForm(expr) && (expr.callsInternal("paren") || expr.callsInternal("tuple"));
