@@ -5,7 +5,7 @@ export const parenReader: ReaderMacro = {
   macro: (file, { reader }) => {
     const v = reader(file, ")");
     const split = v.split();
-    if (split.length > 1) return split.insert("tuple");
-    return split.insert("paren");
+    if (split.length > 1) return split.insert("tuple").toCall();
+    return split.insert("paren").toCall();
   },
 };
