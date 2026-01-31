@@ -980,6 +980,7 @@ const makeDependencyContext = (
   dependency: DependencySemantics,
   ctx: TypingContext
 ): TypingContext => ({
+  activeValueTypeComputations: new Set(),
   symbolTable: dependency.symbolTable,
   hir: dependency.hir,
   overloads: dependency.overloads,

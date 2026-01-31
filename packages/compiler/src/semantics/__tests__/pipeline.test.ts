@@ -753,6 +753,23 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("diagnoses undefined identifiers in expressions", () => {
+    const ast = loadAst("undefined_identifier_value.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(/TY0030: undefined identifier 'y'/);
+  });
+
+  it("diagnoses tuple indices that are out of range", () => {
+    const ast = loadAst("tuple_index_out_of_range.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(/TY0032: tuple index 3 is out of range/);
+  });
+
+  it("diagnoses self-referential let initializers", () => {
+    const ast = loadAst("self_referential_let_initializer.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0031: cannot reference 'x' in its own initializer/
+    );
+  });
+
   it("exposes binder overload metadata", () => {
     const binding = bindFixture("function_overloads.voyd");
     expect(binding.overloads.size).toBe(1);

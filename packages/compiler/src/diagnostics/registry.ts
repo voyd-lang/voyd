@@ -145,6 +145,11 @@ type DiagnosticParamsMap = {
     left: string;
     right: string;
   };
+  TY0030: { kind: "undefined-identifier"; name: string };
+  TY0031: { kind: "self-referential-initializer"; name: string };
+  TY0032: { kind: "tuple-index-out-of-range"; index: number; length: number };
+  TY0033: { kind: "unknown-field"; name: string; receiver?: string };
+  TY0034: { kind: "return-type-inference-failed"; functionName: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -527,6 +532,49 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0029"]>,
+  TY0030: {
+    code: "TY0030",
+    message: (params) => `undefined identifier '${params.name}'`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0030"]>,
+  TY0031: {
+    code: "TY0031",
+    message: (params) =>
+      `cannot reference '${params.name}' in its own initializer`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0031"]>,
+  TY0032: {
+    code: "TY0032",
+    message: (params) =>
+      `tuple index ${params.index} is out of range (length ${params.length})`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Tuple indices are 0-based; the last valid index is length - 1.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0032"]>,
+  TY0033: {
+    code: "TY0033",
+    message: (params) =>
+      params.receiver
+        ? `unknown field '${params.name}' on '${params.receiver}'`
+        : `unknown field '${params.name}'`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0033"]>,
+  TY0034: {
+    code: "TY0034",
+    message: (params) =>
+      `could not infer return type for function '${params.functionName}'`,
+    severity: "error",
+    phase: "typing",
+    hints: [{ message: "Add an explicit return type annotation." }],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0034"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
