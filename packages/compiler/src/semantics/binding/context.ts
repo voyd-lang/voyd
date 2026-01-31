@@ -66,6 +66,7 @@ export const createBindingContext = ({
     staticMethods: new Map(),
     moduleMembers: new Map(),
     memberDeclarationScopesByOwner: new Map(),
+    memberDeclarationScopesByOwnerAndTrait: new Map(),
     pendingStaticMethods: [],
     importedOverloadOptions: new Map(),
     includeTests: includeTests ?? false,

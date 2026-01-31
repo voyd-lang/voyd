@@ -41,6 +41,21 @@ export const lowerStaticAccessExpr = ({
     ctx
   );
   if (typeof targetSymbol === "number") {
+    const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
+    if (targetRecord.kind === "trait") {
+      if (!isForm(memberExpr)) {
+        throw new Error("qualified trait access must be a call expression");
+      }
+      return lowerQualifiedTraitCall({
+        accessForm: form,
+        traitSymbol: targetSymbol,
+        memberForm: memberExpr,
+        ctx,
+        scopes,
+        lowerExpr,
+      });
+    }
+
     const targetTypeArguments = extractStaticTargetTypeArguments({
       targetExpr,
       ctx,
@@ -95,6 +110,90 @@ export const lowerStaticAccessExpr = ({
   }
 
   throw new Error("static access target must be a type or module");
+};
+
+const lowerQualifiedTraitCall = ({
+  accessForm,
+  traitSymbol,
+  memberForm,
+  ctx,
+  scopes,
+  lowerExpr,
+}: {
+  accessForm: Form;
+  traitSymbol: SymbolId;
+  memberForm: Form;
+} & LoweringParams): HirExprId => {
+  const elements = memberForm.toArray();
+  if (elements.length === 0) {
+    throw new Error("qualified trait call missing callee");
+  }
+
+  const calleeExpr = elements[0]!;
+  if (!isIdentifierAtom(calleeExpr) && !isInternalIdentifierAtom(calleeExpr)) {
+    throw new Error("qualified trait method name must be an identifier");
+  }
+
+  const traitDecl = ctx.decls.getTrait(traitSymbol);
+  const traitRecord = ctx.symbolTable.getSymbol(traitSymbol);
+  const traitMethod = traitDecl?.methods.find(
+    (method) => ctx.symbolTable.getSymbol(method.symbol).name === calleeExpr.value,
+  );
+  if (!traitMethod) {
+    throw new Error(
+      `trait ${traitRecord.name} does not declare method ${calleeExpr.value}`,
+    );
+  }
+  if (traitMethod.params[0]?.name !== "self") {
+    throw new Error(
+      `qualified trait call requires a self receiver (method ${traitRecord.name}::${calleeExpr.value})`,
+    );
+  }
+
+  const potentialGenerics = elements[1];
+  const hasTypeArguments =
+    isForm(potentialGenerics) && formCallsInternal(potentialGenerics, "generics");
+  const typeArguments = hasTypeArguments
+    ? ((potentialGenerics as Form).rest
+        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+        .filter(Boolean) as HirTypeExpr[])
+    : undefined;
+
+  const receiverIndex = hasTypeArguments ? 2 : 1;
+  const receiverExpr = elements[receiverIndex];
+  if (!receiverExpr) {
+    throw new Error(
+      `qualified trait call ${traitRecord.name}::${calleeExpr.value} missing receiver`,
+    );
+  }
+
+  const args = elements.slice(receiverIndex + 1).map((arg) => {
+    if (isForm(arg) && arg.calls(":")) {
+      const labelExpr = arg.at(1);
+      const valueExpr = arg.at(2);
+      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
+        throw new Error("Invalid labeled argument");
+      }
+      return {
+        label: labelExpr.value,
+        expr: lowerExpr(valueExpr, ctx, scopes),
+      };
+    }
+    const exprId = lowerExpr(arg, ctx, scopes);
+    return { expr: exprId };
+  });
+
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "method-call",
+    ast: accessForm.syntaxId,
+    span: toSourceSpan(accessForm),
+    traitSymbol,
+    target: lowerExpr(receiverExpr, ctx, scopes),
+    method: calleeExpr.value,
+    args,
+    typeArguments,
+  });
 };
 
 const lowerModuleAccess = ({
