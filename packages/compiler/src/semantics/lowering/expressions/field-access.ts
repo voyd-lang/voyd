@@ -1,4 +1,8 @@
-import { type Form, isIdentifierAtom } from "../../../parser/index.js";
+import {
+  type Form,
+  isIdentifierAtom,
+  isIntAtom,
+} from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import type { HirExprId } from "../../ids.js";
 import type { LoweringFormParams } from "./types.js";
@@ -9,7 +13,7 @@ export const isFieldAccessForm = (form: Form): boolean => {
   }
   const targetExpr = form.at(1);
   const fieldExpr = form.at(2);
-  return !!targetExpr && isIdentifierAtom(fieldExpr);
+  return !!targetExpr && (isIdentifierAtom(fieldExpr) || isIntAtom(fieldExpr));
 };
 
 export const lowerFieldAccessExpr = ({
@@ -20,7 +24,7 @@ export const lowerFieldAccessExpr = ({
 }: LoweringFormParams): HirExprId => {
   const targetExpr = form.at(1);
   const fieldExpr = form.at(2);
-  if (!targetExpr || !isIdentifierAtom(fieldExpr)) {
+  if (!targetExpr || !(isIdentifierAtom(fieldExpr) || isIntAtom(fieldExpr))) {
     throw new Error("invalid field access expression");
   }
   return ctx.builder.addExpression({
