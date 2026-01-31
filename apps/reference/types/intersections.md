@@ -106,15 +106,14 @@ type Abomination = Cat & Dog
 
 ## Intersection Types and Traits
 
-An intersection type can combine multiple traits to define a type that must
-satisfy all of the traits.
+An intersection type can combine multiple traits to define a type that must satisfy all of the traits.
 
 ```voyd
 trait Image
-  fn draw(self) -> Array[Rgb]
+  fn draw(self) -> Array<Rgb>
 
 trait Movable
-  fn move(&self, x: i32, y: i32) -> void
+  fn move(~self, x: i32, y: i32) -> void
 
 type MoveableImage = Movable & Drawable
 
@@ -124,12 +123,12 @@ obj Shape {
   y: i32
 }
 
-impl Image for: Shape
+impl Image for Shape
   fn draw(self) -> Array<Rgb>
     self.image
 
-impl Movable for: Shape
-  fn move(&self, x: i32, y: i32) -> void
+impl Movable for Shape
+  fn move(~self, x: i32, y: i32) -> void
     self.x += x
     self.y += y
 
