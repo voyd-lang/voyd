@@ -1,0 +1,25 @@
+trait Foo
+  fn baz(self) -> i32
+
+trait Bar
+  fn baz(self) -> i32
+
+obj X {
+  x: i32
+}
+
+impl Foo for X
+  fn baz(self) -> i32
+    self.x + 10
+
+impl Bar for X
+  fn baz(self) -> i32
+    self.x + 20
+
+type Both = Foo & Bar
+
+fn run(v: Both) -> i32
+  v.Foo::baz() + v.Bar::baz()
+
+pub fn main() -> i32
+  run(X { x: 10 })

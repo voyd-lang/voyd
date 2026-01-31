@@ -37,4 +37,26 @@ describe("qualified trait methods codegen e2e", () => {
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(50);
   });
+
+  it("supports `.Trait::method()` when the receiver is a trait intersection", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("qualified_trait_methods_intersection_conflict.voyd"),
+    });
+
+    const result = await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    });
+
+    if (result.diagnostics.length > 0) {
+      throw new Error(JSON.stringify(result.diagnostics, null, 2));
+    }
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(50);
+  });
 });

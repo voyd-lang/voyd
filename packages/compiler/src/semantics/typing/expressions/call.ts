@@ -1458,6 +1458,29 @@ const resolveQualifiedTraitMethodCallCandidates = ({
     return { ...resolution, receiverName: traitName };
   }
 
+  if (receiverDesc.kind === "intersection" && receiverDesc.traits) {
+    const candidates = receiverDesc.traits.flatMap((traitType) => {
+      const traitTypeDesc = ctx.arena.get(traitType);
+      if (traitTypeDesc.kind !== "trait") {
+        return [];
+      }
+      const symbol = localSymbolForSymbolRef(traitTypeDesc.owner, ctx);
+      if (symbol !== traitSymbol) {
+        return [];
+      }
+      const resolution = resolveTraitMethodCandidates({
+        receiverDesc: traitTypeDesc,
+        methodName,
+        ctx,
+      });
+      return resolution.candidates.map((candidate) => ({
+        ...candidate,
+        receiverTypeOverride: traitType,
+      }));
+    });
+    return { candidates, receiverName: traitName };
+  }
+
   const nominalResolution = resolveNominalMethodCandidates({
     receiverType,
     methodName,
