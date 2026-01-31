@@ -64,6 +64,7 @@ closure_param_test(1, () => a, 3, () =>
 )
 
 let (x, y) = (1, 2)
+let tuples = [(1, 2), hi(), 1 + 2]
 
 Array<Hey, There>(1, 2, 3) + 3
 

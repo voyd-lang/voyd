@@ -456,6 +456,36 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
     ],
   ],
   [
+    "let",
+    [
+      "=",
+      "tuples",
+      [
+        "new_array",
+        [
+          ":",
+          "from",
+          [
+            "fixed_array_literal",
+            [
+              "tuple",
+              "1",
+              "2",
+            ],
+            [
+              "hi",
+            ],
+            [
+              "+",
+              "1",
+              "2",
+            ],
+          ],
+        ],
+      ],
+    ],
+  ],
+  [
     "+",
     [
       "Array",

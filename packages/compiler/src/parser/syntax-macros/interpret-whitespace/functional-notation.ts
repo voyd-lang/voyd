@@ -17,8 +17,8 @@ export const applyFunctionalNotation = (form: Form): Form => {
   const cursor = form.cursor();
   const result: Expr[] = [];
 
-  // Keeps tuple identifiers as the callee
-  if (isParamsLike(form)) {
+  // Prevent existing calls from being misinterpreted.
+  if (isCallForm(form)) {
     result.push(cursor.consume()!);
   }
 
@@ -62,9 +62,7 @@ export const applyFunctionalNotation = (form: Form): Form => {
     if (isParamsLike(nextExpr)) {
       cursor.consume();
       const normalizedParams = applyFunctionalNotation(nextExpr);
-      const call = isCallForm(form)
-        ? new CallForm([expr, normalizedParams])
-        : new CallForm([expr, ...normalizedParams.rest]);
+      const call = new CallForm([expr, ...normalizedParams.rest]);
       result.push(call);
       continue;
     }
