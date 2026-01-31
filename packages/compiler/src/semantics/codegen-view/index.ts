@@ -70,7 +70,12 @@ export type CodegenTypeDesc =
   | { kind: "structural-object"; fields: readonly CodegenStructuralField[] }
   | { kind: "function"; parameters: readonly CodegenFunctionParameter[]; returnType: TypeId; effectRow: number }
   | { kind: "union"; members: readonly TypeId[] }
-  | { kind: "intersection"; nominal?: TypeId; structural?: TypeId }
+  | {
+      kind: "intersection";
+      nominal?: TypeId;
+      structural?: TypeId;
+      traits?: readonly TypeId[];
+    }
   | { kind: "fixed-array"; element: TypeId }
   | { kind: "type-param-ref"; param: TypeParamId };
 
@@ -580,6 +585,7 @@ export const buildProgramCodegenView = (
           kind: "intersection",
           nominal: desc.nominal,
           structural: desc.structural,
+          traits: desc.traits ? [...desc.traits] : undefined,
         });
       case "fixed-array":
         return cacheTypeDesc(typeId, { kind: "fixed-array", element: desc.element });

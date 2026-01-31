@@ -1,0 +1,115 @@
+fn new_array<T>({ from source: FixedArray<T> }) -> FixedArray<T>
+  source
+
+obj Foo {
+  a: i32
+}
+
+obj Bar: Foo {
+  a: i32,
+  b: i32
+}
+
+obj Baz: Foo {
+  a: i32,
+  b: i32
+}
+
+type AB = Foo & {
+  b: i32
+}
+
+fn cross_ab(ab1: AB, ab2: AB)
+  ab1.a + ab2.b
+
+pub fn test_nominal_intersections()
+  let bar = Bar {
+    a: 10,
+    b: 20
+  }
+
+  let baz = Baz {
+    a: 5,
+    b: 15
+  }
+
+  cross_ab(bar, baz)
+
+type Vec1 = { x: i32, y: i32 }
+type Vec2 = { y: i32, z: i32 }
+type Vec3 = Vec1 & Vec2
+
+fn sum_vec3(v: Vec3) -> i32
+  v.x + v.y + v.z
+
+pub fn test_structural_intersections()
+  sum_vec3({ x: 1, y: 2, z: 3 })
+
+trait Image
+  fn draw(self) -> FixedArray<i32>
+
+trait Movable
+  fn move(~self, x: i32, y: i32) -> void
+  fn coords(self) -> (i32, i32)
+
+type MoveableImage = Movable & Image
+
+obj Shape {
+  image: FixedArray<i32>,
+  x: i32,
+  y: i32
+}
+
+impl Image for Shape
+  fn draw(self) -> FixedArray<i32>
+    self.image
+
+impl Movable for Shape
+  fn move(~self, x: i32, y: i32) -> void
+    self.x = self.x + x
+    self.y = self.y + y
+
+  fn coords(self) -> (i32, i32)
+    (self.x, self.y)
+
+fn work(~shape: MoveableImage)
+  shape.move(10, 15)
+  let (x, y) = shape.coords()
+  let r = __array_get(shape.draw(), 0)
+  let g = __array_get(shape.draw(), 1)
+  let b = __array_get(shape.draw(), 2)
+  x + y + r + g + b
+
+pub fn test_trait_intersections()
+  let ~shape = Shape { image: [255, 128, 64], x: 1, y: 2 }
+  work(~shape)
+
+type XYMovable = { x: i32, y: i32 } & Movable
+
+fn sum_xy_movable(~v: XYMovable) -> i32
+  v.move(1, 2)
+  let (x, y) = v.coords()
+  x * 100 + y
+
+pub fn test_structural_trait_intersection() -> i32
+  let ~shape = Shape { image: [1, 2, 3], x: 5, y: 6 }
+  sum_xy_movable(~shape)
+
+type FooMovableB = Foo & { b: i32 } & Movable
+
+impl Movable for Bar
+  fn move(~self, x: i32, y: i32) -> void
+    self.a = self.a + x
+    self.b = self.b + y
+
+  fn coords(self) -> (i32, i32)
+    (self.a, self.b)
+
+fn sum_foo_movable_b(~v: FooMovableB) -> i32
+  v.move(1, 2)
+  let (a, b) = v.coords()
+  v.a + v.b + a + b
+
+pub fn test_nominal_structural_trait_intersection() -> i32
+  let ~bar = Bar { a: 3, b: 4 }
+  sum_foo_movable_b(~bar)

@@ -28,9 +28,6 @@ pub fn unwrap_or<T>(opt: Optional<T>, default: T): () -> T
     None:
       default
 
-fn unwrap_more<T>(opt: Optional<T>, default: T): () -> T
-  3
-
 pub fn unwrap_or_else<T>(opt: Optional<T>, default: () -> T): () -> T
   match(opt)
     Some { value }:

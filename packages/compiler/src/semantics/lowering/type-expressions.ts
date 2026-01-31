@@ -69,6 +69,10 @@ export const lowerTypeExpr = (
     return lowerUnionTypeExpr(expr, ctx, currentScope);
   }
 
+  if (isForm(expr) && expr.calls("&")) {
+    return lowerIntersectionTypeExpr(expr, ctx, currentScope);
+  }
+
   if (
     isForm(expr) &&
     (expr.calls("->") || expr.calls(":") || expr.calls("fn"))
@@ -170,6 +174,22 @@ const lowerObjectTypeField = (
     name: nameExpr.value,
     type,
     span: toSourceSpan(entry),
+  };
+};
+
+const lowerIntersectionTypeExpr = (
+  form: Form,
+  ctx: LowerContext,
+  scope: ScopeId,
+): HirTypeExpr => {
+  const members = form.rest
+    .map((entry) => lowerTypeExpr(entry, ctx, scope))
+    .filter(Boolean) as HirTypeExpr[];
+  return {
+    typeKind: "intersection",
+    ast: form.syntaxId,
+    span: toSourceSpan(form),
+    members,
   };
 };
 

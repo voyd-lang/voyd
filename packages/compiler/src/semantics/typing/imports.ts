@@ -663,6 +663,7 @@ const createTranslation = ({
         result = targetArena.internIntersection({
           nominal: desc.nominal ? translate(desc.nominal) : undefined,
           structural: desc.structural ? translate(desc.structural) : undefined,
+          traits: desc.traits ? desc.traits.map(translate) : undefined,
         });
         break;
       case "fixed-array":

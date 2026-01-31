@@ -194,6 +194,16 @@ const bindTypeParamsFromType = ({
         conflict,
       });
     }
+    expectedDesc.traits?.forEach((trait) =>
+      bindTypeParamsFromType({
+        expected: trait,
+        actual,
+        bindings,
+        ctx,
+        seen,
+        conflict,
+      }),
+    );
   }
 };
 

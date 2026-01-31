@@ -42,6 +42,14 @@ const defaultValueForWasmType = (
   return ctx.mod.ref.null(wasmType);
 };
 
+const typeHasTraitRequirements = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): boolean => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  return desc.kind === "intersection" && (desc.traits?.length ?? 0) > 0;
+};
+
 const pickUnionCoercionTarget = ({
   actualType,
   targetType,
@@ -98,6 +106,10 @@ export const requiresStructuralConversion = (
     return false;
   }
 
+  if (typeHasTraitRequirements(targetType, ctx)) {
+    return false;
+  }
+
   const targetInfo = getStructuralTypeInfo(targetType, ctx);
   if (!targetInfo) {
     return false;
@@ -108,7 +120,7 @@ export const requiresStructuralConversion = (
     return false;
   }
 
-  return actualInfo.typeId !== targetInfo.typeId;
+  return actualInfo.structuralId !== targetInfo.structuralId;
 };
 
 export const coerceValueToType = ({
@@ -348,6 +360,13 @@ export const coerceValueToType = ({
   const actualInfo = getStructuralTypeInfo(actualType, ctx);
   if (!actualInfo) {
     throw new Error("cannot coerce non-structural value to structural type");
+  }
+  if (actualInfo.structuralId === targetInfo.structuralId) {
+    return value;
+  }
+
+  if (typeHasTraitRequirements(targetType, ctx)) {
+    return value;
   }
 
   const tryArrayLikeConversion = (): binaryen.ExpressionRef | undefined => {

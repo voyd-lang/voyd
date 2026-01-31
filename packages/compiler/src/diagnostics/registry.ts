@@ -138,6 +138,13 @@ type DiagnosticParamsMap = {
   TY0025: { kind: "array-literal-incompatible" };
   TY0026: { kind: "undefined-type"; name: string };
   TY0027: { kind: "type-mismatch"; expected: string; actual: string };
+  TY0028: { kind: "intersection-nominal-conflict"; left: string; right: string };
+  TY0029: {
+    kind: "intersection-field-conflict";
+    field: string;
+    left: string;
+    right: string;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -494,6 +501,32 @@ export const diagnosticsRegistry: {
     phase: "typing",
     hints: [],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0027"]>,
+  TY0028: {
+    code: "TY0028",
+    message: (params) =>
+      `intersection nominal conflict: '${params.left}' is incompatible with '${params.right}'`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Intersections can only contain nominal objects that are in the same inheritance chain.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0028"]>,
+  TY0029: {
+    code: "TY0029",
+    message: (params) =>
+      `intersection field '${params.field}' conflicts: '${params.left}' is incompatible with '${params.right}'`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Rename one of the fields, or make sure both intersected types agree on the field type.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0029"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

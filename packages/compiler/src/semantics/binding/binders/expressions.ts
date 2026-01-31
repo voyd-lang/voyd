@@ -38,7 +38,7 @@ import {
 export const bindExpr = (
   expr: Expr | undefined,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   if (!expr || !isForm(expr)) return;
 
@@ -94,7 +94,7 @@ export const bindExpr = (
 const bindTry = (
   form: Form,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   const handlerEntries: Form[] = [];
   const body = form.at(1);
@@ -113,7 +113,7 @@ const bindTry = (
   }
 
   handlerEntries.push(
-    ...form.rest.slice(1).filter((entry): entry is Form => isForm(entry))
+    ...form.rest.slice(1).filter((entry): entry is Form => isForm(entry)),
   );
   handlerEntries.forEach((entry) => {
     if (!isForm(entry) || !entry.calls(":")) {
@@ -140,7 +140,7 @@ const bindTry = (
 const declareHandlerParams = (
   head: Expr | undefined,
   ctx: BindingContext,
-  scope: number
+  scope: number,
 ): void => {
   if (!head || (!isForm(head) && !isIdentifierAtom(head))) {
     return;
@@ -156,7 +156,8 @@ const declareHandlerParams = (
       }
       if (isForm(param) && param.calls(":")) {
         const candidate = param.at(1);
-        return isIdentifierAtom(candidate) || isInternalIdentifierAtom(candidate)
+        return isIdentifierAtom(candidate) ||
+          isInternalIdentifierAtom(candidate)
           ? candidate
           : undefined;
       }
@@ -169,14 +170,16 @@ const declareHandlerParams = (
         kind: "parameter",
         declaredAt: nameExpr.syntaxId,
       },
-      scope
+      scope,
     );
     ctx.scopeByNode.set(nameExpr.syntaxId, scope);
     rememberSyntax(nameExpr, ctx);
   });
 };
 
-const extractHandlerParams = (head: Expr): readonly (IdentifierAtom | InternalIdentifierAtom | Expr)[] => {
+const extractHandlerParams = (
+  head: Expr,
+): readonly (IdentifierAtom | InternalIdentifierAtom | Expr)[] => {
   if (isForm(head) && head.calls("::")) {
     const opCall = head.at(2);
     return isForm(opCall) ? opCall.rest : [];
@@ -208,7 +211,7 @@ const findHandlerClauses = (expr: Expr): Form[] => {
 const bindBlock = (
   form: Form,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   const scope = ctx.symbolTable.createScope({
     parent: tracker.current(),
@@ -230,7 +233,7 @@ const bindBlock = (
 const bindIf = (
   form: Form,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   const { branches, defaultBranch } = parseIfBranches(form);
   branches.forEach(({ condition, value }) => {
@@ -246,7 +249,7 @@ const bindIf = (
 const bindMatch = (
   form: Form,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   const operandExpr = form.at(1);
   const potentialBinder = form.at(2);
@@ -269,7 +272,7 @@ const bindMatch = (
         potentialBinder.value,
         matchScope,
         potentialBinder,
-        ctx
+        ctx,
       );
       ctx.symbolTable.declare({
         name: potentialBinder.value,
@@ -304,7 +307,7 @@ const bindMatch = (
 const bindWhile = (
   form: Form,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   const condition = form.at(1);
   if (!condition) {
@@ -320,11 +323,11 @@ const bindWhile = (
 const bindVar = (
   form: Form,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   const assignment = ensureForm(
     form.at(1),
-    "var statement expects an assignment"
+    "var statement expects an assignment",
   );
   if (!assignment.calls("=")) {
     throw new Error("var statement must be an assignment form");
@@ -344,7 +347,7 @@ const bindVar = (
 const bindLambda = (
   form: Form,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   const signatureExpr = form.at(1);
   const bodyExpr = form.at(2);
@@ -375,7 +378,7 @@ const bindLambda = (
     });
 
     signature.parameters.forEach((param) =>
-      declareLambdaParam(param, scope, ctx)
+      declareLambdaParam(param, scope, ctx),
     );
     bindExpr(bodyExpr, ctx, tracker);
   });
@@ -384,7 +387,7 @@ const bindLambda = (
 const declareLambdaParam = (
   param: Expr,
   scope: ScopeId,
-  ctx: BindingContext
+  ctx: BindingContext,
 ): void => {
   const declarationSpan = toSourceSpan(param as Syntax);
 
@@ -398,7 +401,7 @@ const declareLambdaParam = (
         declaredAt: param.syntaxId,
         metadata: { declarationSpan },
       },
-      scope
+      scope,
     );
     return;
   }
@@ -417,7 +420,7 @@ const declareLambdaParam = (
         declaredAt: param.syntaxId,
         metadata: { bindingKind: "mutable-ref", declarationSpan },
       },
-      scope
+      scope,
     );
     return;
   }
@@ -438,7 +441,7 @@ const declareLambdaParam = (
         declaredAt: param.syntaxId,
         metadata: { bindingKind, declarationSpan },
       },
-      scope
+      scope,
     );
     return;
   }
@@ -454,7 +457,7 @@ const declareLambdaParam = (
 const maybeBindConstructorCall = (
   form: Form,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   if (form.length < 2) {
     return;
@@ -471,7 +474,7 @@ const maybeBindConstructorCall = (
 const bindNamespaceAccess = (
   form: Form,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   const target = form.at(1);
   const member = form.at(2);
@@ -540,7 +543,7 @@ const bindNamespaceAccess = (
 const resolveNamespaceModuleSymbol = (
   target: Expr | undefined,
   scope: ScopeId,
-  ctx: BindingContext
+  ctx: BindingContext,
 ): number | undefined => {
   if (!target) {
     return undefined;
@@ -601,6 +604,8 @@ const resolveNamespaceModuleSymbol = (
   return undefined;
 };
 
+type ImportMeta = { import?: { moduleId?: string; symbol?: number } };
+
 const ensureStaticMethodImport = ({
   targetSymbol,
   memberName,
@@ -615,9 +620,7 @@ const ensureStaticMethodImport = ({
   ctx: BindingContext;
 }): void => {
   const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
-  const importMeta = targetRecord.metadata as
-    | { import?: { moduleId?: string; symbol?: number } }
-    | undefined;
+  const importMeta = targetRecord.metadata as ImportMeta | undefined;
   const moduleId = importMeta?.import?.moduleId;
   const exportedSymbol = importMeta?.import?.symbol;
   if (!moduleId || typeof exportedSymbol !== "number") {
@@ -639,7 +642,7 @@ const ensureStaticMethodImport = ({
   const imported: { local: SymbolId; overloadId?: number }[] = [];
   methodSymbols.forEach((methodSymbol) => {
     const fn = dependency.functions.find(
-      (entry) => entry.symbol === methodSymbol
+      (entry) => entry.symbol === methodSymbol,
     );
     if (!fn) {
       return;
@@ -660,7 +663,7 @@ const ensureStaticMethodImport = ({
         declaredAt: syntax.syntaxId,
         metadata: { import: { moduleId, symbol: methodSymbol } },
       },
-      scope
+      scope,
     );
     ctx.imports.push({
       name: memberName,
@@ -685,7 +688,7 @@ const ensureStaticMethodImport = ({
   const importedOverloadIds = new Set(
     imported
       .map((entry) => entry.overloadId)
-      .filter((entry): entry is number => typeof entry === "number")
+      .filter((entry): entry is number => typeof entry === "number"),
   );
   const needsImportedSet = locals.length > 1 || importedOverloadIds.size === 1;
   if (needsImportedSet) {
@@ -693,7 +696,7 @@ const ensureStaticMethodImport = ({
       Math.max(
         -1,
         ...ctx.importedOverloadOptions.keys(),
-        ...ctx.overloads.keys()
+        ...ctx.overloads.keys(),
       ) + 1;
     const setId = importedOverloadIds.size === 1 ? nextId : nextId;
     const existing = ctx.importedOverloadOptions.get(setId);
@@ -787,10 +790,7 @@ const ensureModuleMemberImport = ({
   scope: ScopeId;
   ctx: BindingContext;
 }): void => {
-  const cached = ctx.moduleMembers
-    .get(moduleSymbol)
-    ?.get(memberName)
-    ?.size;
+  const cached = ctx.moduleMembers.get(moduleSymbol)?.get(memberName)?.size;
   if (cached) {
     return;
   }
@@ -802,7 +802,7 @@ const ensureModuleMemberImport = ({
         code: "BD0001",
         params: { kind: "missing-export", moduleId, target: memberName },
         span: toSourceSpan(syntax),
-      })
+      }),
     );
     return;
   }
@@ -823,7 +823,7 @@ const ensureModuleMemberImport = ({
 
 const createMemberBucket = (
   table: ModuleMemberTable,
-  key: number
+  key: number,
 ): Map<string, Set<number>> => {
   const bucket = new Map<string, Set<number>>();
   table.set(key, bucket);
@@ -841,21 +841,22 @@ const declareModuleMemberImport = ({
   scope: ScopeId;
   ctx: BindingContext;
 }): number[] => {
-  const symbols = exported.symbols && exported.symbols.length > 0
-    ? exported.symbols
-    : [exported.symbol];
+  const symbols =
+    exported.symbols && exported.symbols.length > 0
+      ? exported.symbols
+      : [exported.symbol];
   const locals: number[] = [];
   const dependency = ctx.dependencies.get(exported.moduleId);
   symbols.forEach((symbol) => {
     const dependencyRecord = dependency?.symbolTable.getSymbol(symbol);
     const importableMetadata = importableMetadataFrom(
-      dependencyRecord?.metadata as Record<string, unknown> | undefined
+      dependencyRecord?.metadata as Record<string, unknown> | undefined,
     );
     const importedModuleId =
       exported.kind === "module"
-        ? importedModuleIdFrom(
-            dependencyRecord?.metadata as Record<string, unknown> | undefined
-          ) ?? exported.moduleId
+        ? (importedModuleIdFrom(
+            dependencyRecord?.metadata as Record<string, unknown> | undefined,
+          ) ?? exported.moduleId)
         : exported.moduleId;
     const local = ctx.symbolTable.declare(
       {
@@ -870,7 +871,7 @@ const declareModuleMemberImport = ({
           ...(importableMetadata ?? {}),
         },
       },
-      scope
+      scope,
     );
     ctx.imports.push({
       name: exported.name,
@@ -886,8 +887,7 @@ const declareModuleMemberImport = ({
   });
 
   if (locals.length > 1 && exported.overloadSet !== undefined) {
-    const nextId =
-      Math.max(-1, ...ctx.importedOverloadOptions.keys()) + 1;
+    const nextId = Math.max(-1, ...ctx.importedOverloadOptions.keys()) + 1;
     ctx.importedOverloadOptions.set(nextId, locals);
     locals.forEach((local) => ctx.overloadBySymbol.set(local, nextId));
   } else if (exported.overloadSet !== undefined && locals.length === 1) {
@@ -904,7 +904,7 @@ const declarePatternBindings = (
   options: {
     mutable?: boolean;
     declarationSpan?: ReturnType<typeof toSourceSpan>;
-  } = {}
+  } = {},
 ): void => {
   if (!pattern) {
     throw new Error("missing pattern");
@@ -944,7 +944,7 @@ const declarePatternBindings = (
       declarePatternBindings(entry, ctx, scope, {
         mutable: options.mutable,
         declarationSpan: toSourceSpan(entry as Syntax),
-      })
+      }),
     );
     return;
   }
@@ -1026,7 +1026,7 @@ const declarePatternBindings = (
 const declareMatchPatternBindings = (
   pattern: Expr | undefined,
   ctx: BindingContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): void => {
   if (!pattern) {
     throw new Error("match case missing pattern");
@@ -1067,7 +1067,7 @@ const declareMatchPatternBindings = (
 };
 
 const unwrapMutablePattern = (
-  pattern: Expr | undefined
+  pattern: Expr | undefined,
 ): { target: Expr; bindingKind?: HirBindingKind } => {
   if (!pattern) {
     throw new Error("missing pattern");

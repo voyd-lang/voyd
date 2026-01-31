@@ -171,7 +171,21 @@ const runtimeTypeKeyForInternal = ({
                 binders,
               })
             : "none";
-        return `intersection:${nominal}&${structural}`;
+        const traits =
+          desc.traits && desc.traits.length > 0
+            ? desc.traits
+                .map((trait) =>
+                  runtimeTypeKeyForInternal({
+                    typeId: trait,
+                    ctx,
+                    active,
+                    binders,
+                  }),
+                )
+                .sort()
+                .join("|")
+            : "none";
+        return `intersection:${nominal}&${structural}&traits:${traits}`;
       }
       case "fixed-array":
         return `fixed-array:${runtimeTypeKeyForInternal({
@@ -265,7 +279,10 @@ export const getFixedArrayWasmTypes = (
             elementStructural,
           );
         if (typeof tempArrayType === "number") {
-          return { type: tempArrayType, heapType: binaryenTypeToHeapType(tempArrayType) };
+          return {
+            type: tempArrayType,
+            heapType: binaryenTypeToHeapType(tempArrayType),
+          };
         }
       }
     }
@@ -278,7 +295,8 @@ export const getFixedArrayWasmTypes = (
     mode,
     // Wasm GC arrays are invariant, so fixed-array element heap types must stay
     // concrete even when the caller is lowering a signature.
-    lowerType: (id, ctx, seen) => wasmHeapFieldTypeFor(id, ctx, seen, "runtime"),
+    lowerType: (id, ctx, seen) =>
+      wasmHeapFieldTypeFor(id, ctx, seen, "runtime"),
   });
 };
 
@@ -296,7 +314,12 @@ export const wasmTypeFor = (
       return binaryen.funcref;
     }
     if (desc.kind === "fixed-array") {
-      const elementType = wasmHeapFieldTypeFor(desc.element, ctx, seen, "runtime");
+      const elementType = wasmHeapFieldTypeFor(
+        desc.element,
+        ctx,
+        seen,
+        "runtime",
+      );
       return ensureFixedArrayWasmTypesByElement({ elementType, ctx }).type;
     }
     return ctx.rtt.baseType;
@@ -305,6 +328,7 @@ export const wasmTypeFor = (
 
   try {
     const desc = ctx.program.types.getTypeDesc(typeId);
+    const descKind = desc.kind;
     if (desc.kind === "recursive") {
       ctx.recursiveBinders.set(desc.binder, typeId);
       const unfolded = ctx.program.types.substitute(
@@ -385,6 +409,9 @@ export const wasmTypeFor = (
       }
       return structInfo.interfaceType;
     }
+    if (desc.kind === "intersection") {
+      return ctx.rtt.baseType;
+    }
 
     if (desc.kind === "type-param-ref") {
       const binderRecursive = ctx.recursiveBinders.get(desc.param);
@@ -406,7 +433,7 @@ export const wasmTypeFor = (
     }
 
     throw new Error(
-      `codegen cannot map ${desc.kind} types to wasm yet (module ${ctx.moduleId}, type ${typeId})`,
+      `codegen cannot map ${descKind} types to wasm yet (module ${ctx.moduleId}, type ${typeId})`,
     );
   } finally {
     seen.delete(typeId);
@@ -460,6 +487,11 @@ const directStructuralDeps = (
         if (typeof inner.structural === "number") {
           pending.push(inner.structural);
         }
+        inner.traits?.forEach((trait) => pending.push(trait));
+        continue;
+      }
+      if (inner.kind === "trait") {
+        inner.typeArgs.forEach((arg) => pending.push(arg));
         continue;
       }
       if (inner.kind === "function") {
@@ -983,7 +1015,10 @@ export const resolveStructuralTypeId = (
       return undefined;
     })();
 
-    ctx.structuralIdCache.set(typeId, typeof resolved === "number" ? resolved : null);
+    ctx.structuralIdCache.set(
+      typeId,
+      typeof resolved === "number" ? resolved : null,
+    );
     return resolved;
   } finally {
     ctx.resolvingStructuralIds.delete(typeId);
