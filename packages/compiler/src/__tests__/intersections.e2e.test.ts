@@ -41,11 +41,19 @@ describe("intersections e2e", () => {
 
     expect(exportedFunctions).toEqual([
       "test_nominal_intersections",
+      "test_nominal_structural_trait_intersection",
       "test_structural_intersections",
+      "test_structural_trait_intersection",
       "test_trait_intersections",
     ]);
 
+    expect(
+      (exports.test_nominal_structural_trait_intersection as () => number)(),
+    ).toBe(20);
     expect((exports.test_nominal_intersections as () => number)()).toBe(25);
+    expect((exports.test_structural_trait_intersection as () => number)()).toBe(
+      608,
+    );
     expect((exports.test_structural_intersections as () => number)()).toBe(6);
     expect((exports.test_trait_intersections as () => number)()).toBe(475);
   });

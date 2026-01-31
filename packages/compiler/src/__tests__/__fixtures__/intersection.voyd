@@ -83,3 +83,33 @@ fn work(~shape: MoveableImage)
 pub fn test_trait_intersections()
   let ~shape = Shape { image: [255, 128, 64], x: 1, y: 2 }
   work(~shape)
+
+type XYMovable = { x: i32, y: i32 } & Movable
+
+fn sum_xy_movable(~v: XYMovable) -> i32
+  v.move(1, 2)
+  let (x, y) = v.coords()
+  x * 100 + y
+
+pub fn test_structural_trait_intersection() -> i32
+  let ~shape = Shape { image: [1, 2, 3], x: 5, y: 6 }
+  sum_xy_movable(~shape)
+
+type FooMovableB = Foo & { b: i32 } & Movable
+
+impl Movable for Bar
+  fn move(~self, x: i32, y: i32) -> void
+    self.a = self.a + x
+    self.b = self.b + y
+
+  fn coords(self) -> (i32, i32)
+    (self.a, self.b)
+
+fn sum_foo_movable_b(~v: FooMovableB) -> i32
+  v.move(1, 2)
+  let (a, b) = v.coords()
+  v.a + v.b + a + b
+
+pub fn test_nominal_structural_trait_intersection() -> i32
+  let ~bar = Bar { a: 3, b: 4 }
+  sum_foo_movable_b(~bar)
