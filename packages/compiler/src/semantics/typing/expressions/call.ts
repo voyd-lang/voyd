@@ -445,11 +445,19 @@ export const typeMethodCallExpr = (
     return finalizeCall({ returnType: ctx.primitives.unknown });
   }
 
-  const resolution = resolveMethodCallCandidates({
-    receiverType: targetType,
-    methodName: expr.method,
-    ctx,
-  });
+  const resolution =
+    typeof expr.traitSymbol === "number"
+      ? resolveQualifiedTraitMethodCallCandidates({
+          receiverType: targetType,
+          traitSymbol: expr.traitSymbol,
+          methodName: expr.method,
+          ctx,
+        })
+      : resolveMethodCallCandidates({
+          receiverType: targetType,
+          methodName: expr.method,
+          ctx,
+        });
   if (!resolution || resolution.candidates.length === 0) {
     reportUnknownMethod({
       methodName: expr.method,
@@ -1416,6 +1424,77 @@ const resolveMethodCallCandidates = ({
     candidates: resolveFreeFunctionCandidates({ methodName, ctx }),
     receiverName: nominalResolution?.receiverName,
   };
+};
+
+const resolveQualifiedTraitMethodCallCandidates = ({
+  receiverType,
+  traitSymbol,
+  methodName,
+  ctx,
+}: {
+  receiverType: TypeId;
+  traitSymbol: SymbolId;
+  methodName: string;
+  ctx: TypingContext;
+}): MethodCallResolution => {
+  const traitRecord = ctx.symbolTable.getSymbol(traitSymbol);
+  const traitName = traitRecord.name;
+
+  if (receiverType === ctx.primitives.unknown) {
+    return { candidates: [], receiverName: traitName };
+  }
+
+  const receiverDesc = ctx.arena.get(receiverType);
+  if (receiverDesc.kind === "trait") {
+    const receiverTraitSymbol = localSymbolForSymbolRef(receiverDesc.owner, ctx);
+    if (receiverTraitSymbol !== traitSymbol) {
+      return { candidates: [], receiverName: traitName };
+    }
+    const resolution = resolveTraitMethodCandidates({
+      receiverDesc,
+      methodName,
+      ctx,
+    });
+    return { ...resolution, receiverName: traitName };
+  }
+
+  if (receiverDesc.kind === "intersection" && receiverDesc.traits) {
+    const candidates = receiverDesc.traits.flatMap((traitType) => {
+      const traitTypeDesc = ctx.arena.get(traitType);
+      if (traitTypeDesc.kind !== "trait") {
+        return [];
+      }
+      const symbol = localSymbolForSymbolRef(traitTypeDesc.owner, ctx);
+      if (symbol !== traitSymbol) {
+        return [];
+      }
+      const resolution = resolveTraitMethodCandidates({
+        receiverDesc: traitTypeDesc,
+        methodName,
+        ctx,
+      });
+      return resolution.candidates.map((candidate) => ({
+        ...candidate,
+        receiverTypeOverride: traitType,
+      }));
+    });
+    return { candidates, receiverName: traitName };
+  }
+
+  const nominalResolution = resolveNominalMethodCandidates({
+    receiverType,
+    methodName,
+    ctx,
+  });
+  if (!nominalResolution || nominalResolution.candidates.length === 0) {
+    return { candidates: [], receiverName: traitName };
+  }
+
+  const candidates = nominalResolution.candidates.filter(
+    (candidate) => ctx.traitMethodImpls.get(candidate.symbol)?.traitSymbol === traitSymbol,
+  );
+
+  return { candidates, receiverName: traitName };
 };
 
 const resolveOperatorOverloadCandidates = ({

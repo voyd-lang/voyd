@@ -19,6 +19,7 @@ const precedence = {
   bitOr: 6,
   prefix: 7,
   access: 8,
+  namespace: 9,
 } as const;
 
 export const infixOps: OpMap = new Map([
@@ -49,7 +50,7 @@ export const infixOps: OpMap = new Map([
   [":", precedence.assign],
   ["?:", precedence.assign],
   [":=", precedence.assign],
-  ["::", precedence.access],
+  ["::", precedence.namespace],
   [";", precedence.pipe],
   ["??", precedence.compare],
   ["?.", precedence.access],

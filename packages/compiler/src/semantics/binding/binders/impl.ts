@@ -79,6 +79,23 @@ export const bindImplDecl = (
   const implTargetDecl = resolveObjectDecl(decl.target, ctx, implScope);
   const implTargetSymbol = implTargetDecl?.symbol;
   const ownerVisibility = implTargetDecl?.visibility ?? moduleVisibility();
+  const traitSymbolForMemberScope = (() => {
+    if (!decl.trait) {
+      return undefined;
+    }
+    const resolved = resolveTraitDecl(decl.trait, ctx, tracker.current());
+    if (resolved) {
+      return resolved.symbol;
+    }
+    if (isIdentifierAtom(decl.trait)) {
+      return ctx.symbolTable.resolve(decl.trait.value, tracker.current());
+    }
+    if (isForm(decl.trait) && isIdentifierAtom(decl.trait.first)) {
+      return ctx.symbolTable.resolve(decl.trait.first.value, tracker.current());
+    }
+    return undefined;
+  })();
+
   const memberDeclarationScope = (() => {
     if (typeof implTargetSymbol !== "number") {
       return undefined;
@@ -95,6 +112,35 @@ export const bindImplDecl = (
     ctx.memberDeclarationScopesByOwner.set(implTargetSymbol, next);
     return next;
   })();
+
+  const traitMemberDeclarationScope = (() => {
+    if (
+      typeof implTargetSymbol !== "number" ||
+      typeof traitSymbolForMemberScope !== "number"
+    ) {
+      return undefined;
+    }
+
+    const byTrait =
+      ctx.memberDeclarationScopesByOwnerAndTrait.get(implTargetSymbol) ?? new Map();
+    const existing = byTrait.get(traitSymbolForMemberScope);
+    if (typeof existing === "number") {
+      return existing;
+    }
+    const next = ctx.symbolTable.createScope({
+      parent: tracker.current(),
+      kind: "members",
+      owner: decl.form.syntaxId,
+    });
+    byTrait.set(traitSymbolForMemberScope, next);
+    ctx.memberDeclarationScopesByOwnerAndTrait.set(implTargetSymbol, byTrait);
+    return next;
+  })();
+
+  const methodDeclarationScope = decl.trait
+    ? traitMemberDeclarationScope ?? memberDeclarationScope
+    : memberDeclarationScope;
+
   tracker.enterScope(implScope, () => {
     decl.typeParameters.forEach((param) => {
       rememberSyntax(param, ctx);
@@ -143,7 +189,7 @@ export const bindImplDecl = (
       const method = bindFunctionDecl(parsedFn, ctx, tracker, {
         declarationScope: staticMethod
           ? implScope
-          : memberDeclarationScope ?? ctx.symbolTable.rootScope,
+          : methodDeclarationScope ?? ctx.symbolTable.rootScope,
         scopeParent: implScope,
         metadata,
         selfTypeExpr: staticMethod ? undefined : decl.target,

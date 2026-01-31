@@ -487,6 +487,8 @@ export interface HirCallExpr extends HirExpressionBase {
 export interface HirMethodCallExpr extends HirExpressionBase {
   exprKind: "method-call";
   target: HirExprId;
+  /** When present, restricts resolution to methods from this trait. */
+  traitSymbol?: SymbolId;
   method: string;
   args: readonly { label?: string; expr: HirExprId }[];
   typeArguments?: readonly HirTypeExpr[];
