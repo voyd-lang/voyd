@@ -704,6 +704,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
       "block",
       [
         "let",
+        "~",
         "a",
         "=",
         [
@@ -712,7 +713,6 @@ exports[`it correctly handles the kitchen sink 1`] = `
           ".",
           "hey",
           "+",
-          "&",
           "other",
           ".",
           "now",
@@ -885,7 +885,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
         "x",
         "=",
         [
-          "&",
+          "not",
           "hey",
         ],
       ],

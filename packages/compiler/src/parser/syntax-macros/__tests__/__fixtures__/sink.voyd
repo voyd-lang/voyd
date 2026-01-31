@@ -101,7 +101,7 @@ arr.pop()
 fn test<T>(a: 1) -> i32
 
 fn main()
-  let a = ...test.hey + &other.now
+  let ~a = ...test.hey + other.now
   let x = 10 +
     20 +
     30
@@ -124,7 +124,7 @@ fn main()
   let a = hello.boop(1)
   let test_spacing = fib n
   let result = fib(n)
-  let x = &hey
+  let x = not hey
   $hey
   $@(hey)
   $(hey)
