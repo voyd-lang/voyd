@@ -27,10 +27,7 @@ import {
   getOptionalInfo,
   optionalResolverContextForTypingContext,
 } from "../optionals.js";
-import {
-  emitDiagnostic,
-  normalizeSpan,
-} from "../../../diagnostics/index.js";
+import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 import {
   composeEffectRows,
   freshOpenEffectRow,
@@ -80,7 +77,7 @@ export const typeCallExpr = (
   expr: HirCallExpr,
   ctx: TypingContext,
   state: TypingState,
-  expectedReturnType?: TypeId
+  expectedReturnType?: TypeId,
 ): TypeId => {
   const calleeExpr = ctx.hir.expressions.get(expr.callee);
   if (!calleeExpr) {
@@ -113,8 +110,8 @@ export const typeCallExpr = (
     args.map((arg) =>
       typeof arg.exprId === "number"
         ? getExprEffectRow(arg.exprId, ctx)
-        : ctx.effects.emptyRow
-    )
+        : ctx.effects.emptyRow,
+    ),
   );
 
   const finalizeCall = ({
@@ -138,7 +135,7 @@ export const typeCallExpr = (
   if (calleeExpr.exprKind === "overload-set") {
     if (typeArguments && typeArguments.length > 0) {
       throw new Error(
-        "type arguments are not supported with overload sets yet"
+        "type arguments are not supported with overload sets yet",
       );
     }
     ctx.table.setExprType(calleeExpr.id, ctx.primitives.unknown);
@@ -149,7 +146,7 @@ export const typeCallExpr = (
       args,
       ctx,
       state,
-      expectedReturnType
+      expectedReturnType,
     );
     return finalizeCall({
       returnType: overloaded.returnType,
@@ -233,7 +230,7 @@ export const typeCallExpr = (
         state,
         typeArguments,
         allowIntrinsicTypeArgs,
-        expr.span
+        expr.span,
       );
       const calleeType =
         signature?.typeId ??
@@ -249,11 +246,12 @@ export const typeCallExpr = (
       ctx.table.setExprType(calleeExpr.id, calleeType);
       ctx.resolvedExprTypes.set(
         calleeExpr.id,
-        applyCurrentSubstitution(calleeType, ctx, state)
+        applyCurrentSubstitution(calleeType, ctx, state),
       );
       return finalizeCall({
         returnType,
-        latentEffectRow: signature?.effectRow ?? ctx.primitives.defaultEffectRow,
+        latentEffectRow:
+          signature?.effectRow ?? ctx.primitives.defaultEffectRow,
       });
     }
 
@@ -273,7 +271,7 @@ export const typeCallExpr = (
             state,
             typeArguments,
             allowIntrinsicTypeArgs,
-            expr.span
+            expr.span,
           );
           return ctx.arena.internFunction({
             parameters: args.map(({ type, label }) => ({
@@ -286,19 +284,22 @@ export const typeCallExpr = (
           });
         })()
       : signature ||
-        !metadata.intrinsic ||
-        (intrinsicSignatures && intrinsicSignatures.length > 0)
-      ? getValueType(calleeExpr.symbol, ctx)
-      : expectedCalleeType(args, ctx);
+          !metadata.intrinsic ||
+          (intrinsicSignatures && intrinsicSignatures.length > 0)
+        ? getValueType(calleeExpr.symbol, ctx)
+        : expectedCalleeType(args, ctx);
     ctx.table.setExprType(calleeExpr.id, calleeType);
     ctx.resolvedExprTypes.set(
       calleeExpr.id,
-      applyCurrentSubstitution(calleeType, ctx, state)
+      applyCurrentSubstitution(calleeType, ctx, state),
     );
     ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
 
     if (signature) {
-      const calleeRef = canonicalSymbolRefForTypingContext(calleeExpr.symbol, ctx);
+      const calleeRef = canonicalSymbolRefForTypingContext(
+        calleeExpr.symbol,
+        ctx,
+      );
       const { returnType, effectRow } = typeFunctionCall({
         args,
         signature,
@@ -324,7 +325,7 @@ export const typeCallExpr = (
           state,
           typeArguments,
           allowIntrinsicTypeArgs,
-          expr.span
+          expr.span,
         ),
         latentEffectRow: ctx.primitives.defaultEffectRow,
       });
@@ -351,12 +352,9 @@ export const typeCallExpr = (
     });
   }
 
-  const calleeType = typeExpression(
-    expr.callee,
-    ctx,
-    state,
-    { expectedType: expectedCalleeType(args, ctx) }
-  );
+  const calleeType = typeExpression(expr.callee, ctx, state, {
+    expectedType: expectedCalleeType(args, ctx),
+  });
 
   if (expr.typeArguments && expr.typeArguments.length > 0) {
     throw new Error("call does not accept type arguments");
@@ -393,14 +391,15 @@ export const typeCallExpr = (
 const resolveSymbolName = (
   symbol: SymbolId,
   ctx: TypingContext,
-  nameForSymbol?: SymbolNameResolver
-): string => (nameForSymbol ? nameForSymbol(symbol) : getSymbolName(symbol, ctx));
+  nameForSymbol?: SymbolNameResolver,
+): string =>
+  nameForSymbol ? nameForSymbol(symbol) : getSymbolName(symbol, ctx);
 
 export const typeMethodCallExpr = (
   expr: HirMethodCallExpr,
   ctx: TypingContext,
   state: TypingState,
-  expectedReturnType?: TypeId
+  expectedReturnType?: TypeId,
 ): TypeId => {
   const typeArguments =
     expr.typeArguments && expr.typeArguments.length > 0
@@ -422,8 +421,8 @@ export const typeMethodCallExpr = (
     args.map((arg) =>
       typeof arg.exprId === "number"
         ? getExprEffectRow(arg.exprId, ctx)
-        : ctx.effects.emptyRow
-    )
+        : ctx.effects.emptyRow,
+    ),
   );
 
   const finalizeCall = ({
@@ -461,7 +460,14 @@ export const typeMethodCallExpr = (
   }
 
   const matches = resolution.candidates.filter(({ symbol, signature }) =>
-    matchesOverloadSignature(symbol, signature, args, ctx, state, typeArguments)
+    matchesOverloadSignature(
+      symbol,
+      signature,
+      args,
+      ctx,
+      state,
+      typeArguments,
+    ),
   );
   const traitDispatch =
     matches.length === 0
@@ -502,9 +508,7 @@ export const typeMethodCallExpr = (
 
   const instanceKey = state.currentFunction?.instanceKey;
   if (!instanceKey) {
-    throw new Error(
-      `missing function instance key for method call ${expr.id}`
-    );
+    throw new Error(`missing function instance key for method call ${expr.id}`);
   }
 
   if (traitDispatch) {
@@ -532,7 +536,8 @@ export const typeMethodCallExpr = (
   }
 
   const selectedRef =
-    selected.symbolRef ?? canonicalSymbolRefForTypingContext(selected.symbol, ctx);
+    selected.symbolRef ??
+    canonicalSymbolRefForTypingContext(selected.symbol, ctx);
   const targets =
     ctx.callResolution.targets.get(expr.id) ?? new Map<string, SymbolRef>();
   targets.set(instanceKey, selectedRef);
@@ -580,7 +585,7 @@ const getExpectedCallParameters = ({
       .map((symbol) => ctx.functions.getSignature(symbol))
       .filter((entry): entry is FunctionSignature => Boolean(entry));
     const matchingReturn = candidates.filter((signature) =>
-      typeSatisfies(signature.returnType, expectedReturnType, ctx, state)
+      typeSatisfies(signature.returnType, expectedReturnType, ctx, state),
     );
     if (matchingReturn.length !== 1) {
       return undefined;
@@ -605,7 +610,7 @@ const getExpectedCallParameters = ({
         })
       : undefined;
   return signature.parameters.map((param) =>
-    substitution ? ctx.arena.substitute(param.type, substitution) : param.type
+    substitution ? ctx.arena.substitute(param.type, substitution) : param.type,
   );
 };
 
@@ -628,8 +633,8 @@ const applyExplicitTypeArguments = ({
     throw new Error(
       `function ${getSymbolName(
         calleeSymbol,
-        ctx
-      )} received too many type arguments`
+        ctx,
+      )} received too many type arguments`,
     );
   }
   const substitution = new Map<TypeParamId, TypeId>();
@@ -656,7 +661,7 @@ const expectedCalleeType = (args: readonly Arg[], ctx: TypingContext): TypeId =>
 const resolveTypeArguments = (
   typeArguments: readonly HirTypeExpr[] | undefined,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): TypeId[] | undefined =>
   typeArguments && typeArguments.length > 0
     ? typeArguments.map((entry) =>
@@ -665,8 +670,8 @@ const resolveTypeArguments = (
           ctx,
           state,
           ctx.primitives.unknown,
-          state.currentFunction?.typeParams
-        )
+          state.currentFunction?.typeParams,
+        ),
       )
     : undefined;
 
@@ -675,7 +680,7 @@ const expectedParamLabel = (param: ParamSignature): string | undefined =>
 
 const labelsCompatible = (
   param: ParamSignature,
-  argLabel: string | undefined
+  argLabel: string | undefined,
 ): boolean => {
   const expected = expectedParamLabel(param);
   if (!expected) {
@@ -687,12 +692,43 @@ const labelsCompatible = (
   return argLabel === undefined || argLabel === expected;
 };
 
+const spanForArg = (arg: Arg, ctx: TypingContext): SourceSpan | undefined => {
+  if (typeof arg.exprId !== "number") {
+    return undefined;
+  }
+  return ctx.hir.expressions.get(arg.exprId)?.span;
+};
+
+const spanForObjectLiteralFieldValue = (
+  arg: Arg,
+  fieldName: string,
+  ctx: TypingContext,
+): SourceSpan | undefined => {
+  if (typeof arg.exprId !== "number") {
+    return undefined;
+  }
+
+  const argExpr = ctx.hir.expressions.get(arg.exprId);
+  if (argExpr?.exprKind !== "object-literal") {
+    return spanForArg(arg, ctx);
+  }
+
+  const field = argExpr.entries.find(
+    (entry) => entry.kind === "field" && entry.name === fieldName,
+  );
+  if (!field || field.kind !== "field") {
+    return argExpr.span;
+  }
+
+  return ctx.hir.expressions.get(field.value)?.span ?? field.span;
+};
+
 const validateCallArgs = (
   args: readonly Arg[],
   params: readonly ParamSignature[],
   ctx: TypingContext,
   state: TypingState,
-  callSpan?: SourceSpan
+  callSpan?: SourceSpan,
 ): void => {
   const span = callSpan ?? ctx.hir.module.span;
 
@@ -705,9 +741,10 @@ const validateCallArgs = (
 
     if (!arg) {
       if (param.optional) {
+        // TODO: Not sure this optional check is doing anything useful here
         const optionalInfo = getOptionalInfo(
           param.type,
-          optionalResolverContextForTypingContext(ctx)
+          optionalResolverContextForTypingContext(ctx),
         );
         if (!optionalInfo) {
           throw new Error("optional parameter type must be Optional");
@@ -717,7 +754,8 @@ const validateCallArgs = (
           param.type,
           ctx,
           state,
-          `call argument ${paramIndex + 1}`
+          `call argument ${paramIndex + 1}`,
+          normalizeSpan(callSpan, param.span, span),
         );
         paramIndex += 1;
         continue;
@@ -745,15 +783,20 @@ const validateCallArgs = (
             break;
           }
           const match = structuralFields.find(
-            (field) => field.name === runParam.label
+            (field) => field.name === runParam.label,
           );
           if (match) {
+            const fieldSpan =
+              runParam.label !== undefined
+                ? spanForObjectLiteralFieldValue(arg, runParam.label, ctx)
+                : spanForArg(arg, ctx);
             ensureTypeMatches(
               match.type,
               runParam.type,
               ctx,
               state,
-              `call argument ${cursor + 1}`
+              `call argument ${cursor + 1}`,
+              normalizeSpan(fieldSpan, runParam.span, span),
             );
             const mutabilityExprId = (() => {
               if (typeof arg.exprId !== "number") {
@@ -764,12 +807,19 @@ const validateCallArgs = (
                 return arg.exprId;
               }
               const directField = argExpr.entries.find(
-                (entry) => entry.kind === "field" && entry.name === runParam.label
+                (entry) =>
+                  entry.kind === "field" && entry.name === runParam.label,
               );
-              return directField?.kind === "field" ? directField.value : arg.exprId;
+              return directField?.kind === "field"
+                ? directField.value
+                : arg.exprId;
             })();
             ensureMutableArgument({
-              arg: { ...arg, type: match.type, exprId: mutabilityExprId ?? arg.exprId },
+              arg: {
+                ...arg,
+                type: match.type,
+                exprId: mutabilityExprId ?? arg.exprId,
+              },
               param: runParam,
               index: cursor,
               ctx,
@@ -781,7 +831,7 @@ const validateCallArgs = (
           if (runParam.optional) {
             const optionalInfo = getOptionalInfo(
               runParam.type,
-              optionalResolverContextForTypingContext(ctx)
+              optionalResolverContextForTypingContext(ctx),
             );
             if (!optionalInfo) {
               throw new Error("optional parameter type must be Optional");
@@ -791,7 +841,8 @@ const validateCallArgs = (
               runParam.type,
               ctx,
               state,
-              `call argument ${cursor + 1}`
+              `call argument ${cursor + 1}`,
+              normalizeSpan(callSpan, runParam.span, span),
             );
             cursor += 1;
             continue;
@@ -800,10 +851,12 @@ const validateCallArgs = (
           emitDiagnostic({
             ctx,
             code: "TY0021",
-            params: { kind: "call-missing-labeled-argument", label: runParam.label },
+            params: {
+              kind: "call-missing-labeled-argument",
+              label: runParam.label,
+            },
             span,
           });
-          throw new Error("call argument count mismatch");
         }
 
         if (cursor > paramIndex) {
@@ -820,7 +873,8 @@ const validateCallArgs = (
         param.type,
         ctx,
         state,
-        `call argument ${paramIndex + 1}`
+        `call argument ${paramIndex + 1}`,
+        normalizeSpan(spanForArg(arg, ctx), param.span, span),
       );
       ensureMutableArgument({ arg, param, index: paramIndex, ctx });
       argIndex += 1;
@@ -831,7 +885,7 @@ const validateCallArgs = (
     if (param.optional) {
       const optionalInfo = getOptionalInfo(
         param.type,
-        optionalResolverContextForTypingContext(ctx)
+        optionalResolverContextForTypingContext(ctx),
       );
       if (!optionalInfo) {
         throw new Error("optional parameter type must be Optional");
@@ -841,7 +895,8 @@ const validateCallArgs = (
         param.type,
         ctx,
         state,
-        `call argument ${paramIndex + 1}`
+        `call argument ${paramIndex + 1}`,
+        normalizeSpan(callSpan, param.span, span),
       );
       paramIndex += 1;
       continue;
@@ -852,7 +907,7 @@ const validateCallArgs = (
     throw new Error(
       `call argument ${
         paramIndex + 1
-      } label mismatch: expected ${expectedLabel}, got ${actualLabel}`
+      } label mismatch: expected ${expectedLabel}, got ${actualLabel}`,
     );
   }
 
@@ -904,7 +959,7 @@ const callArgumentsSatisfyParams = ({
             break;
           }
           const match = structuralFields.find(
-            (field) => field.name === runParam.label
+            (field) => field.name === runParam.label,
           );
           if (match) {
             if (
@@ -1096,7 +1151,7 @@ const getTraitMethodTypeBindings = ({
     .getImplTemplatesForTrait(receiverTraitSymbol)
     .find(
       (entry) =>
-        entry.methods.get(methodMetadata.traitMethodSymbol) === calleeSymbol
+        entry.methods.get(methodMetadata.traitMethodSymbol) === calleeSymbol,
     );
   if (!template) {
     return undefined;
@@ -1189,7 +1244,9 @@ const reportUnknownMethod = ({
   });
 };
 
-const formatVisibilityLabel = (visibility: ModuleExportEntry["visibility"]): string => {
+const formatVisibilityLabel = (
+  visibility: ModuleExportEntry["visibility"],
+): string => {
   const base = visibility.level === "object" ? "pri" : visibility.level;
   return visibility.api ? `${base} (api)` : base;
 };
@@ -1361,7 +1418,14 @@ const typeOperatorOverloadCall = ({
   }
 
   const matches = resolution.candidates.filter(({ symbol, signature }) =>
-    matchesOverloadSignature(symbol, signature, args, ctx, state, typeArguments)
+    matchesOverloadSignature(
+      symbol,
+      signature,
+      args,
+      ctx,
+      state,
+      typeArguments,
+    ),
   );
   const traitDispatch =
     matches.length === 0
@@ -1397,13 +1461,16 @@ const typeOperatorOverloadCall = ({
   }
 
   if (!selected) {
-    return { returnType: ctx.primitives.unknown, effectRow: ctx.effects.emptyRow };
+    return {
+      returnType: ctx.primitives.unknown,
+      effectRow: ctx.effects.emptyRow,
+    };
   }
 
   const instanceKey = state.currentFunction?.instanceKey;
   if (!instanceKey) {
     throw new Error(
-      `missing function instance key for operator resolution at call ${call.id}`
+      `missing function instance key for operator resolution at call ${call.id}`,
     );
   }
 
@@ -1519,7 +1586,7 @@ const resolveTraitMethodCandidates = ({
   const traitDecl = ctx.traits.getDecl(traitSymbol);
   const traitName = ctx.symbolTable.getSymbol(traitSymbol).name;
   const traitMethod = traitDecl?.methods.find(
-    (method) => ctx.symbolTable.getSymbol(method.symbol).name === methodName
+    (method) => ctx.symbolTable.getSymbol(method.symbol).name === methodName,
   );
   if (!traitMethod) {
     return { candidates: [], receiverName: traitName };
@@ -1541,20 +1608,19 @@ const resolveTraitMethodCandidates = ({
     }
   });
 
-  const candidates = Array.from(implMethods)
-    .map((symbol) => {
-      const signature = ctx.functions.getSignature(symbol);
-      if (!signature) {
-        throw new Error(
-          `missing type signature for trait method ${getSymbolName(symbol, ctx)}`
-        );
-      }
-      return {
-        symbol,
-        signature,
-        symbolRef: { moduleId: ctx.moduleId, symbol },
-      };
-    });
+  const candidates = Array.from(implMethods).map((symbol) => {
+    const signature = ctx.functions.getSignature(symbol);
+    if (!signature) {
+      throw new Error(
+        `missing type signature for trait method ${getSymbolName(symbol, ctx)}`,
+      );
+    }
+    return {
+      symbol,
+      signature,
+      symbolRef: { moduleId: ctx.moduleId, symbol },
+    };
+  });
 
   return { candidates, receiverName: traitName };
 };
@@ -1566,7 +1632,10 @@ const resolveFreeFunctionCandidates = ({
   methodName: string;
   ctx: TypingContext;
 }): MethodCallCandidate[] => {
-  const symbols = ctx.symbolTable.resolveAll(methodName, ctx.symbolTable.rootScope);
+  const symbols = ctx.symbolTable.resolveAll(
+    methodName,
+    ctx.symbolTable.rootScope,
+  );
   if (!symbols || symbols.length === 0) {
     return [];
   }
@@ -1614,7 +1683,7 @@ const findLocalMethodCandidates = ({
       const signature = ctx.functions.getSignature(symbol);
       if (!signature) {
         throw new Error(
-          `missing type signature for method ${getSymbolName(symbol, ctx)}`
+          `missing type signature for method ${getSymbolName(symbol, ctx)}`,
         );
       }
       return {
@@ -1661,7 +1730,9 @@ const findExportedMethodCandidates = ({
   return symbols.map((symbol): MethodCallCandidate => {
     const signature = dependency.typing.functions.getSignature(symbol);
     if (!signature) {
-      throw new Error(`missing type signature for method ${nameForSymbol(symbol)}`);
+      throw new Error(
+        `missing type signature for method ${nameForSymbol(symbol)}`,
+      );
     }
     return {
       symbol,
@@ -1741,14 +1812,16 @@ const typeFunctionCall = ({
   calleeExprId?: HirExprId;
   calleeModuleId?: string;
   nameForSymbol?: SymbolNameResolver;
-	}): { returnType: TypeId; effectRow: number } => {
-	  const callerInstanceKey = state.currentFunction?.instanceKey;
-	  if (!callerInstanceKey) {
-	    throw new Error(`missing function instance key for call ${callId}`);
-	  }
-	  const resolvedModuleId = calleeModuleId ?? ctx.moduleId;
-	  const isExternal = resolvedModuleId !== ctx.moduleId;
-	  const record = isExternal ? undefined : ctx.symbolTable.getSymbol(calleeSymbol);
+}): { returnType: TypeId; effectRow: number } => {
+  const callerInstanceKey = state.currentFunction?.instanceKey;
+  if (!callerInstanceKey) {
+    throw new Error(`missing function instance key for call ${callId}`);
+  }
+  const resolvedModuleId = calleeModuleId ?? ctx.moduleId;
+  const isExternal = resolvedModuleId !== ctx.moduleId;
+  const record = isExternal
+    ? undefined
+    : ctx.symbolTable.getSymbol(calleeSymbol);
   const intrinsicMetadata = record
     ? ((record.metadata ?? {}) as {
         intrinsic?: boolean;
@@ -1813,7 +1886,7 @@ const typeFunctionCall = ({
     ctx.table.setExprType(calleeExprId, calleeType);
     ctx.resolvedExprTypes.set(
       calleeExprId,
-      applyCurrentSubstitution(calleeType, ctx, state)
+      applyCurrentSubstitution(calleeType, ctx, state),
     );
   }
 
@@ -1821,7 +1894,7 @@ const typeFunctionCall = ({
     const mergedSubstitution = mergeSubstitutions(
       instantiation.substitution,
       state.currentFunction?.substitution,
-      ctx
+      ctx,
     );
     args.forEach((arg) => {
       if (typeof arg.exprId === "number") {
@@ -1835,47 +1908,49 @@ const typeFunctionCall = ({
       symbol: calleeSymbol,
       ctx,
       nameForSymbol: resolveName,
-	    });
-	    const codegenTypeArgs = getAppliedTypeArguments({
-	      signature,
-	      substitution: instantiation.substitution,
-	      symbol: calleeSymbol,
-	      ctx,
-	      nameForSymbol: resolveName,
-	    });
-	    const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
-	    if (typeof calleeExprId === "number") {
-	      // Avoid re-canonicalizing external overload symbols.
-	      // Some call paths resolve directly to dependency symbols (methods, operator overloads, etc).
-	      // Those symbols are not guaranteed to exist in the caller's symbol table, so fall back to
-	      // the provided `calleeModuleId` when we can't canonicalize via local import metadata.
-	      const imported = ctx.importsByLocal.get(calleeSymbol);
-	      const calleeRef =
-	        imported ??
-	        (calleeModuleId && calleeModuleId !== ctx.moduleId
-	          ? { moduleId: calleeModuleId, symbol: calleeSymbol }
-	          : (() => {
-	              try {
-	                return canonicalSymbolRefForTypingContext(calleeSymbol, ctx);
-	              } catch {
-	                return { moduleId: ctx.moduleId, symbol: calleeSymbol };
-	              }
-	            })());
-	      const existingTargets =
-	        ctx.callResolution.targets.get(callId) ?? new Map();
-	      existingTargets.set(callerInstanceKey, calleeRef);
-	      ctx.callResolution.targets.set(callId, existingTargets);
-	    }
-	    const existingTypeArgs = ctx.callResolution.typeArguments.get(callId) ?? new Map();
-	    existingTypeArgs.set(callerInstanceKey, codegenTypeArgs);
-	    ctx.callResolution.typeArguments.set(callId, existingTypeArgs);
-	    const existingKeys = ctx.callResolution.instanceKeys.get(callId) ?? new Map();
-	    existingKeys.set(callerInstanceKey, callKey);
-	    ctx.callResolution.instanceKeys.set(callId, existingKeys);
-	    const instantiationKey = instantiationRefKeyForCall({
-	      calleeSymbol,
-	      calleeModuleId,
-	      ctx,
+    });
+    const codegenTypeArgs = getAppliedTypeArguments({
+      signature,
+      substitution: instantiation.substitution,
+      symbol: calleeSymbol,
+      ctx,
+      nameForSymbol: resolveName,
+    });
+    const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
+    if (typeof calleeExprId === "number") {
+      // Avoid re-canonicalizing external overload symbols.
+      // Some call paths resolve directly to dependency symbols (methods, operator overloads, etc).
+      // Those symbols are not guaranteed to exist in the caller's symbol table, so fall back to
+      // the provided `calleeModuleId` when we can't canonicalize via local import metadata.
+      const imported = ctx.importsByLocal.get(calleeSymbol);
+      const calleeRef =
+        imported ??
+        (calleeModuleId && calleeModuleId !== ctx.moduleId
+          ? { moduleId: calleeModuleId, symbol: calleeSymbol }
+          : (() => {
+              try {
+                return canonicalSymbolRefForTypingContext(calleeSymbol, ctx);
+              } catch {
+                return { moduleId: ctx.moduleId, symbol: calleeSymbol };
+              }
+            })());
+      const existingTargets =
+        ctx.callResolution.targets.get(callId) ?? new Map();
+      existingTargets.set(callerInstanceKey, calleeRef);
+      ctx.callResolution.targets.set(callId, existingTargets);
+    }
+    const existingTypeArgs =
+      ctx.callResolution.typeArguments.get(callId) ?? new Map();
+    existingTypeArgs.set(callerInstanceKey, codegenTypeArgs);
+    ctx.callResolution.typeArguments.set(callId, existingTypeArgs);
+    const existingKeys =
+      ctx.callResolution.instanceKeys.get(callId) ?? new Map();
+    existingKeys.set(callerInstanceKey, callKey);
+    ctx.callResolution.instanceKeys.set(callId, existingKeys);
+    const instantiationKey = instantiationRefKeyForCall({
+      calleeSymbol,
+      calleeModuleId,
+      ctx,
     });
     const skipGenericBody =
       intrinsicMetadata.intrinsic === true &&
@@ -1892,15 +1967,18 @@ const typeFunctionCall = ({
       ctx.functions.recordInstantiation(
         instantiationKey,
         callKey,
-        appliedTypeArgs
+        appliedTypeArgs,
       );
-	    }
-	  } else {
-	    ctx.callResolution.typeArguments.delete(callId);
-	    ctx.callResolution.instanceKeys.delete(callId);
-	  }
+    }
+  } else {
+    ctx.callResolution.typeArguments.delete(callId);
+    ctx.callResolution.instanceKeys.delete(callId);
+  }
 
-  return { returnType: instantiation.returnType, effectRow: signature.effectRow };
+  return {
+    returnType: instantiation.returnType,
+    effectRow: signature.effectRow,
+  };
 };
 
 const instantiateFunctionCall = ({
@@ -1935,8 +2013,8 @@ const instantiateFunctionCall = ({
       `function ${resolveSymbolName(
         calleeSymbol,
         ctx,
-        nameForSymbol
-      )} received too many type arguments`
+        nameForSymbol,
+      )} received too many type arguments`,
     );
   }
 
@@ -1967,27 +2045,23 @@ const instantiateFunctionCall = ({
       applyCurrentSubstitution(expectedReturnType, ctx, state),
       substitution,
       ctx,
-      state
+      state,
     );
   }
 
-  const missing = typeParams.filter((param) => !substitution.has(param.typeParam));
+  const missing = typeParams.filter(
+    (param) => !substitution.has(param.typeParam),
+  );
   if (missing.length > 0) {
     throw new Error(
       `function ${resolveSymbolName(calleeSymbol, ctx, nameForSymbol)} is missing ${
         missing.length
-      } type argument(s)`
+      } type argument(s)`,
     );
   }
 
   typeParams.forEach((param) =>
-    enforceTypeParamConstraint(
-      param,
-      substitution,
-      ctx,
-      state,
-      nameForSymbol
-    )
+    enforceTypeParamConstraint(param, substitution, ctx, state, nameForSymbol),
   );
 
   const parameters = signature.parameters.map((param) => ({
@@ -2004,7 +2078,7 @@ export const enforceTypeParamConstraint = (
   substitution: ReadonlyMap<TypeParamId, TypeId>,
   ctx: TypingContext,
   state: TypingState,
-  nameForSymbol?: SymbolNameResolver
+  nameForSymbol?: SymbolNameResolver,
 ): void => {
   if (!param.constraint) {
     return;
@@ -2019,8 +2093,8 @@ export const enforceTypeParamConstraint = (
       `type argument for ${resolveSymbolName(
         param.symbol,
         ctx,
-        nameForSymbol
-      )} does not satisfy its constraint`
+        nameForSymbol,
+      )} does not satisfy its constraint`,
     );
   }
 };
@@ -2048,7 +2122,7 @@ export const typeGenericFunctionBody = ({
   const mergedSubstitution = mergeSubstitutions(
     substitution,
     previousFunction?.substitution,
-    ctx
+    ctx,
   );
   const appliedTypeArgs = getAppliedTypeArguments({
     signature,
@@ -2078,10 +2152,10 @@ export const typeGenericFunctionBody = ({
           ...previousFunction.typeParams.entries(),
           ...signature.typeParamMap.entries(),
         ])
-      : signature.typeParamMap ?? previousFunction?.typeParams;
+      : (signature.typeParamMap ?? previousFunction?.typeParams);
   const expectedReturn = ctx.arena.substitute(
     signature.returnType,
-    mergedSubstitution
+    mergedSubstitution,
   );
 
   state.currentFunction = {
@@ -2104,7 +2178,7 @@ export const typeGenericFunctionBody = ({
       expectedReturn,
       ctx,
       state,
-      `function ${getSymbolName(symbol, ctx)} return type`
+      `function ${getSymbolName(symbol, ctx)} return type`,
     );
     const inferredEffectRow = getExprEffectRow(fn.body, ctx);
     if (signature.annotatedEffects) {
@@ -2129,7 +2203,7 @@ export const typeGenericFunctionBody = ({
       });
       const scheme = ctx.arena.newScheme(
         signature.typeParams?.map((param) => param.typeParam) ?? [],
-        functionType
+        functionType,
       );
       signature.typeId = functionType;
       signature.scheme = scheme;
@@ -2141,7 +2215,7 @@ export const typeGenericFunctionBody = ({
         ctx.effects.setFunctionEffect(
           symbol,
           signature.scheme,
-          signature.effectRow ?? ctx.primitives.defaultEffectRow
+          signature.effectRow ?? ctx.primitives.defaultEffectRow,
         );
       }
     }
@@ -2150,7 +2224,7 @@ export const typeGenericFunctionBody = ({
     ctx.functions.recordInstantiation(
       symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx)),
       key,
-      appliedTypeArgs
+      appliedTypeArgs,
     );
   } finally {
     const updatedFunctionType = ctx.valueTypes.get(symbol);
@@ -2168,7 +2242,7 @@ export const typeGenericFunctionBody = ({
 export const mergeSubstitutions = (
   current: ReadonlyMap<TypeParamId, TypeId>,
   previous: ReadonlyMap<TypeParamId, TypeId> | undefined,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): ReadonlyMap<TypeParamId, TypeId> => {
   if (!previous || previous.size === 0) {
     return current;
@@ -2202,12 +2276,12 @@ const getAppliedTypeArguments = ({
         `function ${resolveSymbolName(
           symbol,
           ctx,
-          nameForSymbol
+          nameForSymbol,
         )} is missing a type argument for ${resolveSymbolName(
           param.symbol,
           ctx,
-          nameForSymbol
-        )}`
+          nameForSymbol,
+        )}`,
       );
     }
     if (applied === ctx.primitives.unknown) {
@@ -2215,12 +2289,12 @@ const getAppliedTypeArguments = ({
         `function ${resolveSymbolName(
           symbol,
           ctx,
-          nameForSymbol
+          nameForSymbol,
         )} has unresolved type argument for ${resolveSymbolName(
           param.symbol,
           ctx,
-          nameForSymbol
-        )}`
+          nameForSymbol,
+        )}`,
       );
     }
     return applied;
@@ -2229,7 +2303,7 @@ const getAppliedTypeArguments = ({
 
 export const formatFunctionInstanceKey = (
   symbol: SymbolId,
-  typeArgs: readonly TypeId[]
+  typeArgs: readonly TypeId[],
 ): string => `${symbol}<${typeArgs.join(",")}>`;
 
 const typeOverloadedCall = (
@@ -2238,12 +2312,12 @@ const typeOverloadedCall = (
   argTypes: readonly Arg[],
   ctx: TypingContext,
   state: TypingState,
-  expectedReturnType?: TypeId
+  expectedReturnType?: TypeId,
 ): { returnType: TypeId; effectRow: number } => {
   const options = ctx.overloads.get(callee.set);
   if (!options) {
     throw new Error(
-      `missing overload metadata for ${callee.name} (set ${callee.set})`
+      `missing overload metadata for ${callee.name} (set ${callee.set})`,
     );
   }
 
@@ -2253,14 +2327,14 @@ const typeOverloadedCall = (
       throw new Error(
         `missing type signature for overloaded function ${getSymbolName(
           symbol,
-          ctx
-        )}`
+          ctx,
+        )}`,
       );
     }
     return { symbol, signature };
   });
   const matches = candidates.filter(({ symbol, signature }) =>
-    matchesOverloadSignature(symbol, signature, argTypes, ctx, state)
+    matchesOverloadSignature(symbol, signature, argTypes, ctx, state),
   );
 
   const traitDispatch =
@@ -2298,7 +2372,7 @@ const typeOverloadedCall = (
   const instanceKey = state.currentFunction?.instanceKey;
   if (!instanceKey) {
     throw new Error(
-      `missing function instance key for overload resolution at call ${call.id}`
+      `missing function instance key for overload resolution at call ${call.id}`,
     );
   }
   if (traitDispatch) {
@@ -2333,7 +2407,7 @@ const typeOverloadedCall = (
 };
 
 const resolveTraitDispatchOverload = <
-  T extends { symbol: SymbolId; signature: FunctionSignature }
+  T extends { symbol: SymbolId; signature: FunctionSignature },
 >({
   candidates,
   args,
@@ -2380,12 +2454,12 @@ const resolveTraitDispatchOverload = <
       impls?.some(
         (entry) =>
           entry.methods.get(methodMetadata.traitMethodSymbol) === symbol &&
-          typeSatisfies(receiver.type, entry.trait, ctx, state)
+          typeSatisfies(receiver.type, entry.trait, ctx, state),
       ) === true;
     const hasCompatibleTemplate =
       templates?.some((template) => {
         const implMethod = template.methods.get(
-          methodMetadata.traitMethodSymbol
+          methodMetadata.traitMethodSymbol,
         );
         if (implMethod !== symbol) {
           return false;
@@ -2408,7 +2482,12 @@ const resolveTraitDispatchOverload = <
         calleeSymbol: symbol,
         ctx,
       }) ?? signature.parameters;
-    return callArgumentsSatisfyParams({ args, params: adjustedParams, ctx, state });
+    return callArgumentsSatisfyParams({
+      args,
+      params: adjustedParams,
+      ctx,
+      state,
+    });
   });
 
   if (!candidate) {
@@ -2459,7 +2538,7 @@ const matchesOverloadSignature = (
   args: readonly Arg[],
   ctx: TypingContext,
   state: TypingState,
-  typeArguments?: readonly TypeId[]
+  typeArguments?: readonly TypeId[],
 ): boolean => {
   const explicitSubstitution =
     signature.typeParams && signature.typeParams.length > 0
@@ -2486,8 +2565,8 @@ const matchesOverloadSignature = (
       throw new Error(
         `overloaded function ${getSymbolName(
           symbol,
-          ctx
-        )} must declare parameter types`
+          ctx,
+        )} must declare parameter types`,
       );
     }
   });
@@ -2502,7 +2581,7 @@ const typeIntrinsicCall = (
   state: TypingState,
   typeArguments?: readonly TypeId[],
   allowTypeArguments = false,
-  span?: SourceSpan
+  span?: SourceSpan,
 ): TypeId => {
   const callSpan = normalizeSpan(span);
   switch (name) {
@@ -2563,7 +2642,13 @@ const typeIntrinsicCall = (
     case "__memory_store_u8":
     case "__memory_store_u16":
     case "__memory_store_u32":
-      return typeMemoryStoreIntrinsic({ name, args, ctx, state, typeArguments });
+      return typeMemoryStoreIntrinsic({
+        name,
+        args,
+        ctx,
+        state,
+        typeArguments,
+      });
     case "__memory_copy":
       return typeMemoryCopyIntrinsic({ args, ctx, state, typeArguments });
     case "__shift_l":
@@ -2582,7 +2667,13 @@ const typeIntrinsicCall = (
     case "__reinterpret_i32_to_f32":
     case "__reinterpret_f64_to_i64":
     case "__reinterpret_i64_to_f64":
-      return typeReinterpretIntrinsic({ name, args, ctx, state, typeArguments });
+      return typeReinterpretIntrinsic({
+        name,
+        args,
+        ctx,
+        state,
+        typeArguments,
+      });
     case "__f32_demote_f64":
     case "__f64_promote_f32":
       return typeFloatConvertIntrinsic({
@@ -2599,7 +2690,7 @@ const typeIntrinsicCall = (
       }
 
       const matches = signatures.filter((signature) =>
-        intrinsicSignatureMatches(signature, args, ctx)
+        intrinsicSignatureMatches(signature, args, ctx),
       );
 
       if (matches.length === 0) {
@@ -2652,7 +2743,8 @@ const typeMutableIntrinsic = ({
       target.type,
       ctx,
       state,
-      "mutable expression target"
+      "mutable expression target",
+      spanForArg(value, ctx),
     );
     return target.type;
   }
@@ -2682,7 +2774,14 @@ const typeArrayNewIntrinsic = ({
     detail: "element type",
   });
   const sizeType = getPrimitiveType(ctx, "i32");
-  ensureTypeMatches(args[0]!.type, sizeType, ctx, state, "__array_new size");
+  ensureTypeMatches(
+    args[0]!.type,
+    sizeType,
+    ctx,
+    state,
+    "__array_new size",
+    spanForArg(args[0]!, ctx),
+  );
   return ctx.arena.internFixedArray(elementType);
 };
 
@@ -2712,8 +2811,9 @@ const typeArrayNewFixedIntrinsic = ({
         elementType,
         ctx,
         state,
-        "__array_new_fixed element"
-      )
+        "__array_new_fixed element",
+        spanForArg(arg, ctx),
+      ),
     );
   } else {
     elementType = inferArrayLiteralElementType({ args, ctx, state, span });
@@ -2724,7 +2824,8 @@ const typeArrayNewFixedIntrinsic = ({
         elementType,
         ctx,
         state,
-        "__array_new_fixed element"
+        "__array_new_fixed element",
+        spanForArg(arg, ctx),
       );
     });
   }
@@ -2788,11 +2889,11 @@ const inferArrayLiteralElementType = ({
   }
 
   const candidates = unique.filter((candidate) =>
-    unique.every((member) => typeSatisfies(member, candidate, ctx, state))
+    unique.every((member) => typeSatisfies(member, candidate, ctx, state)),
   );
 
   const bestCandidate = candidates.find((candidate) =>
-    candidates.every((other) => typeSatisfies(candidate, other, ctx, state))
+    candidates.every((other) => typeSatisfies(candidate, other, ctx, state)),
   );
 
   if (bestCandidate) {
@@ -2866,7 +2967,14 @@ const typeArrayGetIntrinsic = ({
     state,
   });
   const int32 = getPrimitiveType(ctx, "i32");
-  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_get index");
+  ensureTypeMatches(
+    args[1]!.type,
+    int32,
+    ctx,
+    state,
+    "__array_get index",
+    spanForArg(args[1]!, ctx),
+  );
   return element;
 };
 
@@ -2904,8 +3012,22 @@ const typeArraySetIntrinsic = ({
     state,
   });
   const int32 = getPrimitiveType(ctx, "i32");
-  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_set index");
-  ensureTypeMatches(args[2]!.type, element, ctx, state, "__array_set value");
+  ensureTypeMatches(
+    args[1]!.type,
+    int32,
+    ctx,
+    state,
+    "__array_set index",
+    spanForArg(args[1]!, ctx),
+  );
+  ensureTypeMatches(
+    args[2]!.type,
+    element,
+    ctx,
+    state,
+    "__array_set value",
+    spanForArg(args[2]!, ctx),
+  );
   return array;
 };
 
@@ -3006,20 +3128,49 @@ const typeArrayCopyIntrinsic = ({
       name: "count",
     });
 
-    ensureTypeMatches(toIndex, int32, ctx, state, "__array_copy to_index");
-    ensureTypeMatches(fromIndex, int32, ctx, state, "__array_copy from_index");
-    ensureTypeMatches(count, int32, ctx, state, "__array_copy count");
+    ensureTypeMatches(
+      toIndex,
+      int32,
+      ctx,
+      state,
+      "__array_copy to_index",
+      spanForObjectLiteralFieldValue(args[1]!, "to_index", ctx),
+    );
+    ensureTypeMatches(
+      fromIndex,
+      int32,
+      ctx,
+      state,
+      "__array_copy from_index",
+      spanForObjectLiteralFieldValue(args[1]!, "from_index", ctx),
+    );
+    ensureTypeMatches(
+      count,
+      int32,
+      ctx,
+      state,
+      "__array_copy count",
+      spanForObjectLiteralFieldValue(args[1]!, "count", ctx),
+    );
     ensureTypeMatches(
       fromArray.element,
       element,
       ctx,
       state,
-      "__array_copy element type"
+      "__array_copy element type",
+      spanForObjectLiteralFieldValue(args[1]!, "from", ctx),
     );
     return array;
   }
 
-  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__array_copy to_index");
+  ensureTypeMatches(
+    args[1]!.type,
+    int32,
+    ctx,
+    state,
+    "__array_copy to_index",
+    spanForArg(args[1]!, ctx),
+  );
   const fromArray = requireFixedArrayArg({
     arg: args[2]!.type,
     ctx,
@@ -3031,15 +3182,24 @@ const typeArrayCopyIntrinsic = ({
     int32,
     ctx,
     state,
-    "__array_copy from_index"
+    "__array_copy from_index",
+    spanForArg(args[3]!, ctx),
   );
-  ensureTypeMatches(args[4]!.type, int32, ctx, state, "__array_copy count");
+  ensureTypeMatches(
+    args[4]!.type,
+    int32,
+    ctx,
+    state,
+    "__array_copy count",
+    spanForArg(args[4]!, ctx),
+  );
   ensureTypeMatches(
     fromArray.element,
     element,
     ctx,
     state,
-    "__array_copy element type"
+    "__array_copy element type",
+    spanForArg(args[2]!, ctx),
   );
   return array;
 };
@@ -3085,7 +3245,12 @@ const typeMemoryGrowIntrinsic = ({
   state: TypingState;
   typeArguments?: readonly TypeId[];
 }): TypeId => {
-  assertIntrinsicArgCount({ name: "__memory_grow", args, expected: 1, detail: "pages" });
+  assertIntrinsicArgCount({
+    name: "__memory_grow",
+    args,
+    expected: 1,
+    detail: "pages",
+  });
   assertNoIntrinsicTypeArgs("__memory_grow", typeArguments);
   const int32 = getPrimitiveType(ctx, "i32");
   ensureTypeMatches(args[0]!.type, int32, ctx, state, "__memory_grow pages");
@@ -3166,7 +3331,12 @@ const typeShiftIntrinsic = ({
   state: TypingState;
   typeArguments?: readonly TypeId[];
 }): TypeId => {
-  assertIntrinsicArgCount({ name, args, expected: 2, detail: "value and bits" });
+  assertIntrinsicArgCount({
+    name,
+    args,
+    expected: 2,
+    detail: "value and bits",
+  });
   assertNoIntrinsicTypeArgs(name, typeArguments);
   const int32 = getPrimitiveType(ctx, "i32");
   const int64 = getPrimitiveType(ctx, "i64");
@@ -3323,7 +3493,7 @@ const assertIntrinsicArgCount = ({
   }
   const descriptor = detail ? ` (${detail})` : "";
   throw new Error(
-    `intrinsic ${name} expects ${expected} argument(s)${descriptor}, received ${args.length}`
+    `intrinsic ${name} expects ${expected} argument(s)${descriptor}, received ${args.length}`,
   );
 };
 
@@ -3341,7 +3511,7 @@ const assertIntrinsicArgCountOneOf = ({
   }
   const descriptor = expected.join(" or ");
   throw new Error(
-    `intrinsic ${name} expects ${descriptor} argument(s), received ${args.length}`
+    `intrinsic ${name} expects ${descriptor} argument(s), received ${args.length}`,
   );
 };
 
@@ -3360,13 +3530,13 @@ const requireSingleTypeArgument = ({
   }
   const descriptor = detail ? ` for ${detail}` : "";
   throw new Error(
-    `intrinsic ${name} requires exactly 1 type argument${descriptor}, received ${count}`
+    `intrinsic ${name} requires exactly 1 type argument${descriptor}, received ${count}`,
   );
 };
 
 const assertNoIntrinsicTypeArgs = (
   name: string,
-  typeArguments: readonly TypeId[] | undefined
+  typeArguments: readonly TypeId[] | undefined,
 ): void => {
   if (!typeArguments || typeArguments.length === 0) {
     return;
@@ -3406,7 +3576,7 @@ const validateIntrinsicTypeArguments = ({
     expectedType,
     ctx,
     state,
-    `${name} type argument`
+    `${name} type argument`,
   );
 };
 
@@ -3449,7 +3619,7 @@ const requireFixedArrayArg = ({
 const intrinsicSignatureMatches = (
   signature: IntrinsicSignature,
   args: readonly Arg[],
-  ctx: TypingContext
+  ctx: TypingContext,
 ): boolean => {
   if (signature.parameters.length !== args.length) {
     return false;

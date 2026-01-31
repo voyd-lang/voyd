@@ -14,6 +14,7 @@ import {
 } from "../type-system.js";
 import {
   diagnosticFromCode,
+  DiagnosticError,
   emitDiagnostic,
   normalizeSpan,
 } from "../../../diagnostics/index.js";
@@ -195,14 +196,49 @@ const narrowMatchPattern = (
       return narrowed;
     }
     case "type": {
-      const patternType = resolveMatchPatternType({
-        pattern,
-        ctx,
-        state,
-        hints: patternHints,
-        discriminantSpan: spans.discriminantSpan,
-        patternSpan: spans.patternSpan,
-      });
+      let patternType: TypeId;
+      try {
+        patternType = resolveMatchPatternType({
+          pattern,
+          ctx,
+          state,
+          hints: patternHints,
+          discriminantSpan: spans.discriminantSpan,
+          patternSpan: spans.patternSpan,
+        });
+      } catch (error) {
+        if (
+          error instanceof DiagnosticError &&
+          error.diagnostic.code === "TY0026"
+        ) {
+          const related = spans.discriminantSpan
+            ? [
+                diagnosticFromCode({
+                  code: "TY0002",
+                  params: { kind: "discriminant-note" },
+                  severity: "note",
+                  span: spans.discriminantSpan,
+                }),
+              ]
+            : undefined;
+          const patternLabel =
+            pattern.type.typeKind === "named"
+              ? pattern.type.path.join("::")
+              : pattern.kind;
+          emitDiagnostic({
+            ctx,
+            code: "TY0002",
+            params: {
+              kind: "pattern-mismatch",
+              patternLabel,
+              reason,
+            },
+            span: spans.patternSpan,
+            related,
+          });
+        }
+        throw error;
+      }
       const narrowed = narrowTypeForPattern(
         discriminantType,
         patternType,

@@ -739,6 +739,20 @@ describe("semanticsPipeline", () => {
     expect(() => semanticsPipeline(ast)).toThrow(/label mismatch/);
   });
 
+  it("diagnoses undefined types in generic arguments", () => {
+    const ast = loadAst("undefined_type_generic_arg.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0026: undefined type 'stringg'/
+    );
+  });
+
+  it("diagnoses type mismatches in call arguments", () => {
+    const ast = loadAst("call_arg_type_mismatch.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0027: type mismatch: expected 'i32', received 'bool'/
+    );
+  });
+
   it("exposes binder overload metadata", () => {
     const binding = bindFixture("function_overloads.voyd");
     expect(binding.overloads.size).toBe(1);

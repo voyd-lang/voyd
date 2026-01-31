@@ -1,0 +1,6 @@
+fn takes(value: i32) -> void
+  void
+
+pub fn main() -> void
+  takes(true)
+  void

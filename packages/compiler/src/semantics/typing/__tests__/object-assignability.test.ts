@@ -18,7 +18,9 @@ const findValueSymbol = (
 describe("object assignability", () => {
   it("rejects satisfying nominal expectations with structural objects", () => {
     const ast = loadAst("structural_to_nominal_rejection.voyd");
-    expect(() => semanticsPipeline(ast)).toThrow(/call argument 1/i);
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0027: type mismatch: expected 'object Person/i
+    );
   });
 
   it("allows nominal objects where structural types are expected", () => {

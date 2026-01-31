@@ -117,8 +117,16 @@ type DiagnosticParamsMap = {
   TY0015: { kind: "tail-resume-count"; operation: string; count: number };
   TY0016: { kind: "pkg-effect-annotation"; functionName: string };
   TY0017: { kind: "effectful-main"; effects: string };
-  TY0018: { kind: "effect-generic-mismatch"; operation: string; message: string };
-  TY0019: { kind: "effect-handler-overload"; operation: string; message: string };
+  TY0018: {
+    kind: "effect-generic-mismatch";
+    operation: string;
+    message: string;
+  };
+  TY0019: {
+    kind: "effect-handler-overload";
+    operation: string;
+    message: string;
+  };
   TY0020: { kind: "ambiguous-nominal-match-pattern"; typeName: string };
   TY0021:
     | { kind: "call-missing-argument"; paramName: string }
@@ -128,6 +136,8 @@ type DiagnosticParamsMap = {
   TY0023: { kind: "array-literal-empty" };
   TY0024: { kind: "array-literal-mixed-primitives" };
   TY0025: { kind: "array-literal-incompatible" };
+  TY0026: { kind: "undefined-type"; name: string };
+  TY0027: { kind: "type-mismatch"; expected: string; actual: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -239,7 +249,7 @@ export const diagnosticsRegistry: {
     code: "MD0002",
     message: (params) =>
       params.kind === "load-failed"
-        ? params.errorMessage ?? `Unable to load module ${params.requested}`
+        ? (params.errorMessage ?? `Unable to load module ${params.requested}`)
         : `Requested by ${params.importer}`,
     severity: "error",
     phase: "module-graph",
@@ -354,15 +364,13 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0012"]>,
   TY0013: {
     code: "TY0013",
-    message: (params) =>
-      `unhandled effect operations: ${params.operations}`,
+    message: (params) => `unhandled effect operations: ${params.operations}`,
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0013"]>,
   TY0014: {
     code: "TY0014",
-    message: (params) =>
-      `effect annotation mismatch: ${params.message}`,
+    message: (params) => `effect annotation mismatch: ${params.message}`,
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0014"]>,
@@ -456,7 +464,9 @@ export const diagnosticsRegistry: {
     message: () => "array literal elements must not mix primitive types",
     severity: "error",
     phase: "typing",
-    hints: [{ message: "Convert elements so they share a single primitive type." }],
+    hints: [
+      { message: "Convert elements so they share a single primitive type." },
+    ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0024"]>,
   TY0025: {
     code: "TY0025",
@@ -464,6 +474,26 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0025"]>,
+  TY0026: {
+    code: "TY0026",
+    message: (params) => `undefined type '${params.name}'`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Check for typos and ensure the type is declared or imported into the current module.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0026"]>,
+  TY0027: {
+    code: "TY0027",
+    message: (params) =>
+      `type mismatch: expected '${params.expected}', received '${params.actual}'`,
+    severity: "error",
+    phase: "typing",
+    hints: [],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0027"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
@@ -474,7 +504,7 @@ export const diagnosticsRegistry: {
 
 export const formatDiagnosticMessage = <K extends DiagnosticCode>(
   code: K,
-  params: DiagnosticParams<K>
+  params: DiagnosticParams<K>,
 ): string => diagnosticsRegistry[code].message(params);
 
 export const getDiagnosticDefinition = <K extends DiagnosticCode>(code: K) =>

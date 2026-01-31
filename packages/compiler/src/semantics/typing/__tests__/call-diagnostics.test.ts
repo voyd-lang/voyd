@@ -100,6 +100,39 @@ describe("call diagnostics", () => {
     );
     const source = readFileSync(fixturePath, "utf8");
     const { start, end } = caught.diagnostic.span;
-    expect(source.slice(start, end)).toBe(".nope");
+    expect(source.slice(start, end)).toBe("b.nope");
+  });
+
+  it("reports diagnostics with spans for call argument type mismatches", () => {
+    const ast = loadAst("call_arg_type_mismatch.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/
+    );
+
+    const fixturePath = resolve(
+      import.meta.dirname,
+      "..",
+      "..",
+      "__tests__",
+      "__fixtures__",
+      "call_arg_type_mismatch.voyd"
+    );
+    const source = readFileSync(fixturePath, "utf8");
+    const { start, end } = caught.diagnostic.span;
+    expect(source.slice(start, end)).toBe("true");
   });
 });
