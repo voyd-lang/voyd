@@ -171,7 +171,21 @@ const runtimeTypeKeyForInternal = ({
                 binders,
               })
             : "none";
-        return `intersection:${nominal}&${structural}`;
+        const traits =
+          desc.traits && desc.traits.length > 0
+            ? desc.traits
+                .map((trait) =>
+                  runtimeTypeKeyForInternal({
+                    typeId: trait,
+                    ctx,
+                    active,
+                    binders,
+                  }),
+                )
+                .sort()
+                .join("|")
+            : "none";
+        return `intersection:${nominal}&${structural}&traits:${traits}`;
       }
       case "fixed-array":
         return `fixed-array:${runtimeTypeKeyForInternal({
@@ -385,6 +399,9 @@ export const wasmTypeFor = (
       }
       return structInfo.interfaceType;
     }
+    if (desc.kind === "intersection") {
+      return ctx.rtt.baseType;
+    }
 
     if (desc.kind === "type-param-ref") {
       const binderRecursive = ctx.recursiveBinders.get(desc.param);
@@ -460,6 +477,11 @@ const directStructuralDeps = (
         if (typeof inner.structural === "number") {
           pending.push(inner.structural);
         }
+        inner.traits?.forEach((trait) => pending.push(trait));
+        continue;
+      }
+      if (inner.kind === "trait") {
+        inner.typeArgs.forEach((arg) => pending.push(arg));
         continue;
       }
       if (inner.kind === "function") {

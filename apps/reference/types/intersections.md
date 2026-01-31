@@ -115,7 +115,7 @@ trait Image
 trait Movable
   fn move(~self, x: i32, y: i32) -> void
 
-type MoveableImage = Movable & Drawable
+type MoveableImage = Movable & Image
 
 obj Shape {
   image: Array<Rgb>

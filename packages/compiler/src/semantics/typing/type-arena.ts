@@ -85,6 +85,7 @@ export interface IntersectionType {
   kind: "intersection";
   nominal?: TypeId;
   structural?: TypeId;
+  traits?: readonly TypeId[];
 }
 
 export interface FixedArrayType {
@@ -196,7 +197,10 @@ export const createTypeArena = (): TypeArena => {
       case "union":
         return `union:[${desc.members.join(",")}]`;
       case "intersection":
-        return `intersection:${desc.nominal ?? "u"}:${desc.structural ?? "u"}`;
+        return `intersection:${desc.nominal ?? "u"}:${desc.structural ?? "u"}:[${(desc.traits ?? [])
+          .slice()
+          .sort((a, b) => a - b)
+          .join(",")}]`;
       case "trait":
         return `trait:${symbolRefKeyForCache(desc.owner)}:${desc.name === undefined ? "u" : jsonStringKey(desc.name)}:[${desc.typeArgs.join(",")}]`;
       case "nominal-object":
@@ -563,6 +567,10 @@ export const createTypeArena = (): TypeArena => {
       kind: "intersection",
       nominal: desc.nominal,
       structural: desc.structural,
+      traits:
+        desc.traits && desc.traits.length > 0
+          ? [...new Set(desc.traits)].sort((a, b) => a - b)
+          : undefined,
     });
 
   const internFixedArray = (element: TypeId): TypeId =>
@@ -1736,6 +1744,11 @@ export const typeDescriptorToUserString = (
       const parts: string[] = [];
       if (typeof type.nominal === "number") {
         parts.push(typeDescriptorToUserString(arena.get(type.nominal), arena));
+      }
+      if (type.traits && type.traits.length > 0) {
+        type.traits.forEach((trait) =>
+          parts.push(typeDescriptorToUserString(arena.get(trait), arena)),
+        );
       }
       if (typeof type.structural === "number") {
         parts.push(

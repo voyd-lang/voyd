@@ -87,6 +87,7 @@ export const emitRecursiveStructuralHeapTypeGroup = ({
           if (typeof desc.structural === "number") {
             pending.push(desc.structural);
           }
+          desc.traits?.forEach((trait) => pending.push(trait));
           break;
         default:
           break;

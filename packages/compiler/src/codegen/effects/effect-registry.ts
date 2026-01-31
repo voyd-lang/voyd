@@ -268,7 +268,21 @@ const signatureTypeKeyForInternal = ({
                 binders,
               })
             : "none";
-        baseKey = `intersection:${nominal}&${structural}`;
+        const traits =
+          desc.traits && desc.traits.length > 0
+            ? desc.traits
+                .map((trait) =>
+                  signatureTypeKeyForInternal({
+                    typeId: trait,
+                    ctx,
+                    active,
+                    binders,
+                  }),
+                )
+                .sort()
+                .join("|")
+            : "none";
+        baseKey = `intersection:${nominal}&${structural}&traits:${traits}`;
         break;
       }
       case "fixed-array":

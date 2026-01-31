@@ -4,6 +4,7 @@ import type {
   HirNamedTypeExpr,
   HirTupleTypeExpr,
   HirUnionTypeExpr,
+  HirIntersectionTypeExpr,
   HirFunctionTypeExpr,
 } from "../hir/index.js";
 import { resolveImportedTypeExpr } from "./imports.js";
@@ -619,6 +620,9 @@ export const resolveTypeExpr = (
     case "union":
       resolved = resolveUnionTypeExpr(expr, ctx, state, activeTypeParams);
       break;
+    case "intersection":
+      resolved = resolveIntersectionTypeExpr(expr, ctx, state, activeTypeParams);
+      break;
     default:
       throw new Error(`unsupported type expression kind: ${expr.typeKind}`);
   }
@@ -1186,6 +1190,195 @@ const resolveUnionTypeExpr = (
   return ctx.arena.internUnion(members);
 };
 
+const resolveIntersectionTypeExpr = (
+  expr: HirIntersectionTypeExpr,
+  ctx: TypingContext,
+  state: TypingState,
+  typeParams?: ReadonlyMap<SymbolId, TypeId>,
+): TypeId => {
+  const members = expr.members.map((member) =>
+    resolveTypeExpr(member, ctx, state, ctx.primitives.unknown, typeParams),
+  );
+
+  const mergedFields = new Map<string, StructuralField>();
+  const traits: TypeId[] = [];
+  let nominal: TypeId | undefined;
+
+  const mergeField = (field: StructuralField): void => {
+    const existing = mergedFields.get(field.name);
+    if (!existing) {
+      mergedFields.set(field.name, field);
+      return;
+    }
+
+    const requiredOptional =
+      existing.optional === true && field.optional === true ? true : undefined;
+    const compatible = ctx.arena.unify(existing.type, field.type, {
+      location: ctx.hir.module.ast,
+      reason: `intersection field ${field.name} compatibility`,
+      variance: "invariant",
+      allowUnknown: state.mode === "relaxed",
+    });
+    if (!compatible.ok) {
+      emitDiagnostic({
+        ctx,
+        code: "TY0029",
+        params: {
+          kind: "intersection-field-conflict",
+          field: field.name,
+          left: typeDescriptorToUserString(ctx.arena.get(existing.type), ctx.arena),
+          right: typeDescriptorToUserString(ctx.arena.get(field.type), ctx.arena),
+        },
+        span: expr.span,
+      });
+      return;
+    }
+
+    const mergedVisibility =
+      existing.visibility || field.visibility
+        ? {
+            level:
+              existing.visibility?.level === "object" ||
+              field.visibility?.level === "object"
+                ? "object"
+                : existing.visibility?.level ?? field.visibility?.level ?? "module",
+            api: (existing.visibility?.api ?? true) && (field.visibility?.api ?? true),
+          }
+        : undefined;
+
+    mergedFields.set(field.name, {
+      ...existing,
+      type: existing.type,
+      optional: requiredOptional,
+      visibility: mergedVisibility,
+      owner: existing.owner ?? field.owner,
+      packageId: existing.packageId ?? field.packageId,
+    });
+  };
+
+  const mergeNominal = (candidate: TypeId): void => {
+    if (candidate === ctx.objects.base.nominal) {
+      nominal ??= candidate;
+      return;
+    }
+    if (!nominal) {
+      nominal = candidate;
+      return;
+    }
+    if (nominalSatisfies(candidate, nominal, ctx, state)) {
+      nominal = candidate;
+      return;
+    }
+    if (nominalSatisfies(nominal, candidate, ctx, state)) {
+      return;
+    }
+    emitDiagnostic({
+      ctx,
+      code: "TY0028",
+      params: {
+        kind: "intersection-nominal-conflict",
+        left: typeDescriptorToUserString(ctx.arena.get(nominal), ctx.arena),
+        right: typeDescriptorToUserString(ctx.arena.get(candidate), ctx.arena),
+      },
+      span: expr.span,
+    });
+  };
+
+  const structuralTypeOf = (type: TypeId): TypeId | undefined => {
+    if (type === ctx.primitives.unknown) {
+      return undefined;
+    }
+
+    const unfolded = unfoldRecursiveType(type, ctx);
+    const desc = ctx.arena.get(unfolded);
+    if (desc.kind === "structural-object") {
+      ensureFieldsSubstituted(desc.fields, ctx, "intersection fields");
+      return unfolded;
+    }
+    if (desc.kind === "nominal-object") {
+      const owner = localSymbolForSymbolRef(desc.owner, ctx);
+      const info =
+        typeof owner === "number"
+          ? ensureObjectType(owner, ctx, state, desc.typeArgs)
+          : undefined;
+      return info?.structural;
+    }
+    if (desc.kind === "intersection") {
+      if (desc.traits && desc.traits.length > 0) {
+        traits.push(...desc.traits);
+      }
+      if (typeof desc.structural === "number") {
+        return structuralTypeOf(desc.structural);
+      }
+      if (typeof desc.nominal === "number") {
+        return structuralTypeOf(desc.nominal);
+      }
+      return undefined;
+    }
+    if (desc.kind === "trait") {
+      traits.push(unfolded);
+      return undefined;
+    }
+
+    emitDiagnostic({
+      ctx,
+      code: "TY0027",
+      params: {
+        kind: "type-mismatch",
+        actual: typeDescriptorToUserString(desc, ctx.arena),
+        expected: "an object or trait type",
+      },
+      span: expr.span,
+    });
+    return undefined;
+  };
+
+  members.forEach((member) => {
+    const memberDesc = ctx.arena.get(member);
+    if (memberDesc.kind === "trait") {
+      traits.push(member);
+      return;
+    }
+    if (memberDesc.kind === "intersection" && memberDesc.traits) {
+      traits.push(...memberDesc.traits);
+    }
+
+    const memberNominal = getNominalComponent(member, ctx);
+    if (typeof memberNominal === "number") {
+      mergeNominal(memberNominal);
+    }
+
+    const structural = structuralTypeOf(member);
+    if (typeof structural !== "number") {
+      return;
+    }
+    const structuralDesc = ctx.arena.get(structural);
+    if (structuralDesc.kind !== "structural-object") {
+      return;
+    }
+    structuralDesc.fields.forEach((field) => mergeField(field));
+  });
+
+  const canonicalTraits =
+    traits.length > 0 ? [...new Set(traits)].sort((a, b) => a - b) : undefined;
+
+  const structural =
+    mergedFields.size > 0
+      ? ctx.arena.internStructuralObject({
+          fields: Array.from(mergedFields.values()),
+        })
+      : undefined;
+
+  const finalNominal =
+    nominal ?? (typeof structural === "number" ? ctx.objects.base.nominal : undefined);
+
+  return ctx.arena.internIntersection({
+    nominal: finalNominal,
+    structural,
+    traits: canonicalTraits,
+  });
+};
+
 export const getSymbolName = (symbol: SymbolId, ctx: TypingContext): string =>
   ctx.symbolTable.getSymbol(symbol).name;
 
@@ -1717,20 +1910,68 @@ export const getStructuralFields = (
   }
 
   if (desc.kind === "intersection") {
-    const info =
+    const merge = (
+      base: readonly StructuralField[],
+      extra: readonly StructuralField[],
+    ): StructuralField[] => {
+      if (extra.length === 0) {
+        return [...base];
+      }
+      const byName = new Map<string, StructuralField>(
+        base.map((field) => [field.name, field]),
+      );
+      extra.forEach((field) => {
+        const existing = byName.get(field.name);
+        if (!existing) {
+          byName.set(field.name, field);
+          return;
+        }
+        const optional =
+          existing.optional === true && field.optional === true ? true : undefined;
+        byName.set(field.name, {
+          ...existing,
+          optional,
+          // preserve the base field's visibility/owner/packageId, so intersections never widen access.
+          visibility: existing.visibility ?? field.visibility,
+          owner: existing.owner ?? field.owner,
+          packageId: existing.packageId ?? field.packageId,
+        });
+      });
+      return Array.from(byName.values());
+    };
+
+    const structuralFields =
+      typeof desc.structural === "number"
+        ? getStructuralFields(desc.structural, ctx, state, {
+            includeInaccessible: true,
+            allowOwnerPrivate: true,
+          })
+        : undefined;
+
+    const nominalInfo =
       typeof desc.nominal === "number"
         ? getObjectInfoForNominal(desc.nominal, ctx, state)
         : undefined;
-    if (info) {
-      const fields = info.fields;
+
+    if (nominalInfo) {
+      const fields = merge(nominalInfo.fields, structuralFields ?? []);
       return options.includeInaccessible
         ? fields
         : filterAccessibleFields(fields, ctx, state, {
             allowOwnerPrivate: options.allowOwnerPrivate,
           });
     }
-    if (typeof desc.structural === "number") {
-      return getStructuralFields(desc.structural, ctx, state, options);
+
+    if (structuralFields) {
+      return options.includeInaccessible
+        ? structuralFields
+        : filterAccessibleFields(structuralFields, ctx, state, {
+            allowOwnerPrivate: options.allowOwnerPrivate,
+          });
+    }
+
+    if (typeof desc.nominal === "number") {
+      return getStructuralFields(desc.nominal, ctx, state, options);
     }
   }
 
@@ -1808,6 +2049,30 @@ export const typeSatisfies = (
       ? traitSatisfies(actual, expected, owner, ctx, state)
       : false;
   }
+  if (
+    expectedDesc.kind === "intersection" &&
+    expectedDesc.traits &&
+    expectedDesc.traits.length > 0
+  ) {
+    const ok = expectedDesc.traits.every((trait) => {
+      const traitDesc = ctx.arena.get(trait);
+      if (traitDesc.kind !== "trait") {
+        return false;
+      }
+      const owner = localSymbolForSymbolRef(traitDesc.owner, ctx);
+      return typeof owner === "number"
+        ? traitSatisfies(actual, trait, owner, ctx, state)
+        : false;
+    });
+    if (!ok) {
+      return false;
+    }
+    const stripped = ctx.arena.internIntersection({
+      nominal: expectedDesc.nominal,
+      structural: expectedDesc.structural,
+    });
+    return typeSatisfies(actual, stripped, ctx, state);
+  }
 
   const optionalInfo = getOptionalInfo(
     expected,
@@ -1868,6 +2133,20 @@ const traitSatisfies = (
   const allowUnknown = state.mode === "relaxed";
   const expectedDesc = ctx.arena.get(expected);
   const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind === "intersection" && actualDesc.traits) {
+    const allowUnknown = state.mode === "relaxed";
+    const matches = actualDesc.traits.some((trait) =>
+      ctx.arena.unify(trait, expected, {
+        location: ctx.hir.module.ast,
+        reason: "trait compatibility",
+        variance: "covariant",
+        allowUnknown,
+      }).ok,
+    );
+    if (matches) {
+      return true;
+    }
+  }
   if (actualDesc.kind === "trait" && expectedDesc.kind === "trait") {
     const match = ctx.arena.unify(actual, expected, {
       location: ctx.hir.module.ast,

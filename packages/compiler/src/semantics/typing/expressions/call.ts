@@ -66,6 +66,7 @@ type MethodCallCandidate = {
   symbolRef: SymbolRef;
   nameForSymbol?: SymbolNameResolver;
   exported?: ModuleExportEntry;
+  receiverTypeOverride?: TypeId;
 };
 
 type MethodCallResolution = {
@@ -459,24 +460,50 @@ export const typeMethodCallExpr = (
     return finalizeCall({ returnType: ctx.primitives.unknown });
   }
 
-  const matches = resolution.candidates.filter(({ symbol, signature }) =>
-    matchesOverloadSignature(
-      symbol,
-      signature,
-      args,
-      ctx,
-      state,
-      typeArguments,
-    ),
+  const matches = resolution.candidates.filter(
+    ({ symbol, signature, receiverTypeOverride }) =>
+      matchesOverloadSignature(
+        symbol,
+        signature,
+        receiverTypeOverride
+          ? [{ ...args[0]!, type: receiverTypeOverride }, ...args.slice(1)]
+          : args,
+        ctx,
+        state,
+        typeArguments,
+      ),
   );
   const traitDispatch =
     matches.length === 0
-      ? resolveTraitDispatchOverload({
-          candidates: resolution.candidates,
-          args,
-          ctx,
-          state,
-        })
+      ? (() => {
+          const direct = resolveTraitDispatchOverload({
+            candidates: resolution.candidates,
+            args,
+            ctx,
+            state,
+          });
+          if (direct) {
+            return direct;
+          }
+
+          const overrides = Array.from(
+            new Set(
+              resolution.candidates
+                .map((candidate) => candidate.receiverTypeOverride)
+                .filter((type): type is TypeId => typeof type === "number"),
+            ),
+          );
+          return overrides
+            .map((receiverTypeOverride) =>
+              resolveTraitDispatchOverload({
+                candidates: resolution.candidates,
+                args: [{ ...args[0]!, type: receiverTypeOverride }, ...args.slice(1)],
+                ctx,
+                state,
+              }),
+            )
+            .find((candidate) => candidate !== undefined);
+        })()
       : undefined;
   let selected = traitDispatch;
 
@@ -543,8 +570,16 @@ export const typeMethodCallExpr = (
   targets.set(instanceKey, selectedRef);
   ctx.callResolution.targets.set(expr.id, targets);
 
+  const callArgs =
+    selected.receiverTypeOverride && args.length > 0
+      ? [{ ...args[0]!, type: selected.receiverTypeOverride }, ...args.slice(1)]
+      : args;
+  if (selected.receiverTypeOverride && args.length > 0) {
+    ctx.resolvedExprTypes.set(expr.target, selected.receiverTypeOverride);
+  }
+
   const { returnType, effectRow } = typeFunctionCall({
-    args,
+    args: callArgs,
     signature: selected.signature,
     calleeSymbol: selected.symbol,
     typeArguments,
@@ -1333,6 +1368,41 @@ const resolveMethodCallCandidates = ({
       candidates: resolveFreeFunctionCandidates({ methodName, ctx }),
       receiverName: traitResolution.receiverName,
     };
+  }
+
+  if (receiverDesc.kind === "intersection" && receiverDesc.traits) {
+    const traitCandidates = receiverDesc.traits.flatMap((traitType) => {
+      const traitDesc = ctx.arena.get(traitType);
+      if (traitDesc.kind !== "trait") {
+        return [];
+      }
+      const resolution = resolveTraitMethodCandidates({
+        receiverDesc: traitDesc,
+        methodName,
+        ctx,
+      });
+      return resolution.candidates.map((candidate) => ({
+        ...candidate,
+        receiverTypeOverride: traitType,
+      }));
+    });
+
+    if (traitCandidates.length > 0) {
+      const receiverName = receiverDesc.traits
+        .map((traitType) => {
+          const traitDesc = ctx.arena.get(traitType);
+          if (traitDesc.kind !== "trait") {
+            return undefined;
+          }
+          const symbol = localSymbolForSymbolRef(traitDesc.owner, ctx);
+          return typeof symbol === "number"
+            ? ctx.symbolTable.getSymbol(symbol).name
+            : undefined;
+        })
+        .filter((entry): entry is string => Boolean(entry))
+        .join(" & ");
+      return { candidates: traitCandidates, receiverName };
+    }
   }
   const nominalResolution = resolveNominalMethodCandidates({
     receiverType,
