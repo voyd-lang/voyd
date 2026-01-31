@@ -1710,3 +1710,45 @@ export const createTypeArena = (): TypeArena => {
     widen,
   };
 };
+
+export const typeDescriptorToUserString = (
+  type: TypeDescriptor,
+  arena: TypeArena,
+): string => {
+  switch (type.kind) {
+    case "primitive":
+      return type.name;
+    case "trait":
+      return `trait ${type.name}`;
+    case "nominal-object":
+      return `object ${type.name}`;
+    case "structural-object":
+      return `{ ${type.fields.map((f) => `${f.name}: ${typeDescriptorToUserString(arena.get(f.type), arena)}`).join(", ")} }`;
+    case "function":
+      return `function`;
+    case "fixed-array":
+      return `Array`;
+    case "union":
+      return type.members
+        .map((member) => typeDescriptorToUserString(arena.get(member), arena))
+        .join(" | ");
+    case "intersection": {
+      const parts: string[] = [];
+      if (typeof type.nominal === "number") {
+        parts.push(typeDescriptorToUserString(arena.get(type.nominal), arena));
+      }
+      if (typeof type.structural === "number") {
+        parts.push(
+          typeDescriptorToUserString(arena.get(type.structural), arena),
+        );
+      }
+      return parts.join(" & ");
+    }
+    case "recursive":
+      return `recursive`;
+    case "type-param-ref":
+      return `type parameter`;
+    default:
+      return "unknown";
+  }
+};

@@ -11,6 +11,30 @@ import { infixOps, isInfixOp, isPrefixOp, prefixOps } from "../grammar.js";
 
 export const primary = (form: Form): Form => parseForm(form);
 
+const mergeLocation = (
+  start: Expr | undefined,
+  end: Expr | undefined,
+): SourceLocation | undefined => {
+  const startLoc = start?.location;
+  const endLoc = end?.location ?? startLoc;
+  if (!startLoc) {
+    return endLoc?.clone();
+  }
+  const merged = startLoc.clone();
+  merged.setEndToEndOf(endLoc);
+  return merged;
+};
+
+const formWithLocation = (
+  original: Form,
+  elements: Expr[],
+  location?: SourceLocation,
+): Form =>
+  new Form({
+    location: location ?? original.location?.clone(),
+    elements,
+  });
+
 const parseExpression = (expr: Expr): Expr =>
   isForm(expr) ? parseForm(expr) : expr;
 
@@ -123,27 +147,3 @@ const restructureOperatorTail = (form: Form): Form => {
     elements: [op, left, parsedTail],
   });
 };
-
-const mergeLocation = (
-  start: Expr | undefined,
-  end: Expr | undefined,
-): SourceLocation | undefined => {
-  const startLoc = start?.location;
-  const endLoc = end?.location ?? startLoc;
-  if (!startLoc) {
-    return endLoc?.clone();
-  }
-  const merged = startLoc.clone();
-  merged.setEndToEndOf(endLoc);
-  return merged;
-};
-
-const formWithLocation = (
-  original: Form,
-  elements: Expr[],
-  location?: SourceLocation,
-): Form =>
-  new Form({
-    location: location ?? original.location?.clone(),
-    elements,
-  });

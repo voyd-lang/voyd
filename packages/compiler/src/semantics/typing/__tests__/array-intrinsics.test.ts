@@ -28,13 +28,13 @@ describe("array intrinsics typing", () => {
   it("enforces element types for __array_set", () => {
     expect(() =>
       semanticsPipeline(loadAst("array_intrinsics_set_value_type_mismatch.voyd"))
-    ).toThrow(/type mismatch for __array_set value/);
+    ).toThrow(/TY0027: type mismatch: expected 'i32', received 'bool'/);
   });
 
   it("requires matching elements for positional __array_copy", () => {
     expect(() =>
       semanticsPipeline(loadAst("array_intrinsics_copy_mismatch_positional.voyd"))
-    ).toThrow(/__array_copy element type/);
+    ).toThrow(/TY0027: type mismatch: expected 'i32', received 'bool'/);
   });
 
   it("validates options form of __array_copy", () => {
@@ -43,7 +43,7 @@ describe("array intrinsics typing", () => {
     ).toThrow(/options missing field from/);
     expect(() =>
       semanticsPipeline(loadAst("array_intrinsics_copy_options_type_mismatch.voyd"))
-    ).toThrow(/__array_copy element type/);
+    ).toThrow(/TY0027: type mismatch: expected 'i32', received 'bool'/);
   });
 
   it("enforces __array_len arity", () => {

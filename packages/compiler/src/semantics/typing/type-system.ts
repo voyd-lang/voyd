@@ -7,8 +7,11 @@ import type {
   HirFunctionTypeExpr,
 } from "../hir/index.js";
 import { resolveImportedTypeExpr } from "./imports.js";
-import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
-import type { StructuralField } from "./type-arena.js";
+import type { SourceSpan, SymbolId, TypeId, TypeParamId } from "../ids.js";
+import {
+  typeDescriptorToUserString,
+  type StructuralField,
+} from "./type-arena.js";
 import { freshOpenEffectRow, resolveEffectAnnotation } from "./effects.js";
 import {
   BASE_OBJECT_NAME,
@@ -37,7 +40,7 @@ import { emitDiagnostic } from "../../diagnostics/index.js";
 const isFixedArrayReference = (
   name: string,
   symbol: SymbolId | undefined,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): boolean => {
   if (name === "FixedArray") {
     return true;
@@ -69,7 +72,7 @@ const resolveFixedArrayType = ({
 
   if (normalized.missingCount > 0 && state.mode === "strict") {
     throw new Error(
-      `FixedArray is missing ${normalized.missingCount} type argument(s)`
+      `FixedArray is missing ${normalized.missingCount} type argument(s)`,
     );
   }
 
@@ -80,7 +83,7 @@ const paramsReferencedInType = (
   type: TypeId,
   allowed: ReadonlySet<TypeParamId>,
   ctx: TypingContext,
-  seen: Set<TypeId> = new Set()
+  seen: Set<TypeId> = new Set(),
 ): Set<TypeParamId> => {
   if (seen.has(type)) {
     return new Set();
@@ -95,7 +98,7 @@ const paramsReferencedInType = (
     case "nominal-object": {
       return desc.typeArgs.reduce((acc, arg) => {
         paramsReferencedInType(arg, allowed, ctx, seen).forEach((entry) =>
-          acc.add(entry)
+          acc.add(entry),
         );
         return acc;
       }, new Set<TypeParamId>());
@@ -103,7 +106,7 @@ const paramsReferencedInType = (
     case "structural-object":
       return desc.fields.reduce((acc, field) => {
         paramsReferencedInType(field.type, allowed, ctx, seen).forEach(
-          (entry) => acc.add(entry)
+          (entry) => acc.add(entry),
         );
         return acc;
       }, new Set<TypeParamId>());
@@ -111,18 +114,18 @@ const paramsReferencedInType = (
       const acc = new Set<TypeParamId>();
       desc.parameters.forEach((param) =>
         paramsReferencedInType(param.type, allowed, ctx, seen).forEach(
-          (entry) => acc.add(entry)
-        )
+          (entry) => acc.add(entry),
+        ),
       );
       paramsReferencedInType(desc.returnType, allowed, ctx, seen).forEach(
-        (entry) => acc.add(entry)
+        (entry) => acc.add(entry),
       );
       return acc;
     }
     case "union":
       return desc.members.reduce((acc, member) => {
         paramsReferencedInType(member, allowed, ctx, seen).forEach((entry) =>
-          acc.add(entry)
+          acc.add(entry),
         );
         return acc;
       }, new Set<TypeParamId>());
@@ -130,12 +133,12 @@ const paramsReferencedInType = (
       const acc = new Set<TypeParamId>();
       if (typeof desc.nominal === "number") {
         paramsReferencedInType(desc.nominal, allowed, ctx, seen).forEach(
-          (entry) => acc.add(entry)
+          (entry) => acc.add(entry),
         );
       }
       if (typeof desc.structural === "number") {
         paramsReferencedInType(desc.structural, allowed, ctx, seen).forEach(
-          (entry) => acc.add(entry)
+          (entry) => acc.add(entry),
         );
       }
       return acc;
@@ -150,7 +153,7 @@ const paramsReferencedInType = (
 const declaringParamsForField = (
   type: TypeId,
   allowed: ReadonlySet<TypeParamId>,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): readonly TypeParamId[] | undefined => {
   const referenced = paramsReferencedInType(type, allowed, ctx);
   return referenced.size > 0
@@ -160,7 +163,7 @@ const declaringParamsForField = (
 
 const paramIdSetFrom = (
   params: ReadonlyMap<SymbolId, TypeId> | undefined,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): ReadonlySet<TypeParamId> | undefined => {
   if (!params) {
     return undefined;
@@ -177,7 +180,7 @@ const paramIdSetFrom = (
 const containsUnknownType = (
   type: TypeId,
   ctx: TypingContext,
-  seen: Set<TypeId> = new Set()
+  seen: Set<TypeId> = new Set(),
 ): boolean => {
   if (type === ctx.primitives.unknown) {
     return true;
@@ -199,17 +202,17 @@ const containsUnknownType = (
       return desc.typeArgs.some((arg) => containsUnknownType(arg, ctx, seen));
     case "structural-object":
       return desc.fields.some((field) =>
-        containsUnknownType(field.type, ctx, seen)
+        containsUnknownType(field.type, ctx, seen),
       );
     case "function":
       return (
         desc.parameters.some((param) =>
-          containsUnknownType(param.type, ctx, seen)
+          containsUnknownType(param.type, ctx, seen),
         ) || containsUnknownType(desc.returnType, ctx, seen)
       );
     case "union":
       return desc.members.some((member) =>
-        containsUnknownType(member, ctx, seen)
+        containsUnknownType(member, ctx, seen),
       );
     case "intersection":
       return (
@@ -229,7 +232,7 @@ const containsTypeParam = (
   type: TypeId,
   param: TypeParamId,
   ctx: TypingContext,
-  seen: Set<TypeId> = new Set()
+  seen: Set<TypeId> = new Set(),
 ): boolean => {
   if (seen.has(type)) {
     return false;
@@ -245,21 +248,21 @@ const containsTypeParam = (
     case "trait":
     case "nominal-object":
       return desc.typeArgs.some((arg) =>
-        containsTypeParam(arg, param, ctx, seen)
+        containsTypeParam(arg, param, ctx, seen),
       );
     case "structural-object":
       return desc.fields.some((field) =>
-        containsTypeParam(field.type, param, ctx, seen)
+        containsTypeParam(field.type, param, ctx, seen),
       );
     case "function":
       return (
         desc.parameters.some((paramDesc) =>
-          containsTypeParam(paramDesc.type, param, ctx, seen)
+          containsTypeParam(paramDesc.type, param, ctx, seen),
         ) || containsTypeParam(desc.returnType, param, ctx, seen)
       );
     case "union":
       return desc.members.some((member) =>
-        containsTypeParam(member, param, ctx, seen)
+        containsTypeParam(member, param, ctx, seen),
       );
     case "intersection":
       return (
@@ -282,7 +285,7 @@ const containsAliasSelfUnguarded = (
   ctx: TypingContext,
   guarded: boolean,
   seen: Set<string> = new Set(),
-  isRoot = false
+  isRoot = false,
 ): boolean => {
   const isAliasInstance = (): boolean => {
     if (type === aliasRoot) {
@@ -323,15 +326,29 @@ const containsAliasSelfUnguarded = (
         aliasRoot,
         ctx,
         guarded,
-        seen
+        seen,
       );
     case "trait":
       return desc.typeArgs.some((arg) =>
-        containsAliasSelfUnguarded(arg, aliasSymbol, aliasRoot, ctx, true, seen)
+        containsAliasSelfUnguarded(
+          arg,
+          aliasSymbol,
+          aliasRoot,
+          ctx,
+          true,
+          seen,
+        ),
       );
     case "nominal-object":
       return desc.typeArgs.some((arg) =>
-        containsAliasSelfUnguarded(arg, aliasSymbol, aliasRoot, ctx, true, seen)
+        containsAliasSelfUnguarded(
+          arg,
+          aliasSymbol,
+          aliasRoot,
+          ctx,
+          true,
+          seen,
+        ),
       );
     case "structural-object":
       return desc.fields.some((field) =>
@@ -341,8 +358,8 @@ const containsAliasSelfUnguarded = (
           aliasRoot,
           ctx,
           true,
-          seen
-        )
+          seen,
+        ),
       );
     case "function":
       return (
@@ -353,8 +370,8 @@ const containsAliasSelfUnguarded = (
             aliasRoot,
             ctx,
             guarded,
-            seen
-          )
+            seen,
+          ),
         ) ||
         containsAliasSelfUnguarded(
           desc.returnType,
@@ -362,7 +379,7 @@ const containsAliasSelfUnguarded = (
           aliasRoot,
           ctx,
           guarded,
-          seen
+          seen,
         )
       );
     case "union":
@@ -373,8 +390,8 @@ const containsAliasSelfUnguarded = (
           aliasRoot,
           ctx,
           guarded,
-          seen
-        )
+          seen,
+        ),
       );
     case "intersection":
       return (
@@ -385,7 +402,7 @@ const containsAliasSelfUnguarded = (
             aliasRoot,
             ctx,
             guarded,
-            seen
+            seen,
           )) ||
         (typeof desc.structural === "number" &&
           containsAliasSelfUnguarded(
@@ -394,7 +411,7 @@ const containsAliasSelfUnguarded = (
             aliasRoot,
             ctx,
             guarded,
-            seen
+            seen,
           ))
       );
     case "fixed-array":
@@ -404,7 +421,7 @@ const containsAliasSelfUnguarded = (
         aliasRoot,
         ctx,
         true,
-        seen
+        seen,
       );
     default:
       return false;
@@ -414,7 +431,7 @@ const containsAliasSelfUnguarded = (
 const recordAliasInstanceSymbol = (
   type: TypeId,
   symbol: SymbolId,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): void => {
   ctx.typeAliases.recordInstanceSymbol(type, symbol);
 };
@@ -438,7 +455,7 @@ const assertAliasContractive = ({
       current: TypeId,
       binder: TypeParamId,
       guarded: boolean,
-      seen: Set<TypeId> = new Set()
+      seen: Set<TypeId> = new Set(),
     ): boolean => {
       if (seen.has(current)) {
         return false;
@@ -456,21 +473,21 @@ const assertAliasContractive = ({
         case "trait":
         case "nominal-object":
           return desc.typeArgs.some((arg) =>
-            containsBinderUnguarded(arg, binder, true, seen)
+            containsBinderUnguarded(arg, binder, true, seen),
           );
         case "structural-object":
           return desc.fields.some((field) =>
-            containsBinderUnguarded(field.type, binder, true, seen)
+            containsBinderUnguarded(field.type, binder, true, seen),
           );
         case "function":
           return (
             desc.parameters.some((param) =>
-              containsBinderUnguarded(param.type, binder, guarded, seen)
+              containsBinderUnguarded(param.type, binder, guarded, seen),
             ) || containsBinderUnguarded(desc.returnType, binder, guarded, seen)
           );
         case "union":
           return desc.members.some((member) =>
-            containsBinderUnguarded(member, binder, guarded, seen)
+            containsBinderUnguarded(member, binder, guarded, seen),
           );
         case "intersection":
           return (
@@ -500,7 +517,7 @@ const assertAliasContractive = ({
       ctx,
       false,
       undefined,
-      true
+      true,
     )
   ) {
     throw new Error(`type alias ${aliasName} is not contractive`);
@@ -510,7 +527,7 @@ const assertAliasContractive = ({
 const ensureFieldsSubstituted = (
   fields: readonly StructuralField[],
   ctx: TypingContext,
-  context: string
+  context: string,
 ): void => {
   fields.forEach((field) => {
     if (!field.declaringParams?.length) {
@@ -519,11 +536,11 @@ const ensureFieldsSubstituted = (
     const remaining = paramsReferencedInType(
       field.type,
       new Set(field.declaringParams),
-      ctx
+      ctx,
     );
     if (remaining.size > 0) {
       throw new Error(
-        `${context} is missing substitutions for field ${field.name}`
+        `${context} is missing substitutions for field ${field.name}`,
       );
     }
   });
@@ -551,7 +568,10 @@ export const getPrimitiveType = (ctx: TypingContext, name: string): TypeId => {
   return registerPrimitive(ctx, name);
 };
 
-export const unfoldRecursiveType = (type: TypeId, ctx: TypingContext): TypeId => {
+export const unfoldRecursiveType = (
+  type: TypeId,
+  ctx: TypingContext,
+): TypeId => {
   let current = type;
   const seen = new Set<TypeId>();
 
@@ -561,7 +581,10 @@ export const unfoldRecursiveType = (type: TypeId, ctx: TypingContext): TypeId =>
     if (desc.kind !== "recursive") {
       return current;
     }
-    current = ctx.arena.substitute(desc.body, new Map([[desc.binder, current]]));
+    current = ctx.arena.substitute(
+      desc.body,
+      new Map([[desc.binder, current]]),
+    );
   }
 
   return current;
@@ -572,7 +595,7 @@ export const resolveTypeExpr = (
   ctx: TypingContext,
   state: TypingState,
   fallback: TypeId,
-  typeParams?: ReadonlyMap<SymbolId, TypeId>
+  typeParams?: ReadonlyMap<SymbolId, TypeId>,
 ): TypeId => {
   const activeTypeParams = typeParams ?? state.currentFunction?.typeParams;
   if (!expr) {
@@ -605,14 +628,14 @@ export const resolveTypeExpr = (
 
 const makeTypeAliasInstanceKey = (
   symbol: SymbolId,
-  typeArgs: readonly TypeId[]
+  typeArgs: readonly TypeId[],
 ): string => `${symbol}<${typeArgs.join(",")}>`;
 
 export const resolveTypeAlias = (
   symbol: SymbolId,
   ctx: TypingContext,
   state: TypingState,
-  typeArgs: readonly TypeId[] = []
+  typeArgs: readonly TypeId[] = [],
 ): TypeId => {
   const aliasName = getSymbolName(symbol, ctx);
   const template = ctx.typeAliases.getTemplate(symbol);
@@ -630,7 +653,7 @@ export const resolveTypeAlias = (
 
   if (normalized.missingCount > 0) {
     throw new Error(
-      `type alias ${aliasName} is missing ${normalized.missingCount} type argument(s)`
+      `type alias ${aliasName} is missing ${normalized.missingCount} type argument(s)`,
     );
   }
 
@@ -672,8 +695,8 @@ export const resolveTypeAlias = (
       template.params.forEach((param, index) =>
         paramMap.set(
           param.symbol,
-          normalized.applied[index] ?? ctx.primitives.unknown
-        )
+          normalized.applied[index] ?? ctx.primitives.unknown,
+        ),
       );
 
       template.params.forEach((param, index) => {
@@ -689,17 +712,17 @@ export const resolveTypeAlias = (
           ctx,
           state,
           ctx.primitives.unknown,
-          paramMap
+          paramMap,
         );
         if (!typeSatisfies(applied, resolvedConstraint, ctx, state)) {
           throw new Error(
             `type argument for ${getSymbolName(
               param.symbol,
-              ctx
+              ctx,
             )} does not satisfy constraint for type alias ${getSymbolName(
               symbol,
-              ctx
-            )}`
+              ctx,
+            )}`,
           );
         }
       });
@@ -709,11 +732,11 @@ export const resolveTypeAlias = (
         ctx,
         state,
         ctx.primitives.unknown,
-        paramMap
+        paramMap,
       );
       if (targetType === self) {
         throw new Error(
-          `cyclic type alias instantiation: type alias ${aliasName} cannot resolve to itself`
+          `cyclic type alias instantiation: type alias ${aliasName} cannot resolve to itself`,
         );
       }
       if (containsUnknownType(targetType, ctx)) {
@@ -728,7 +751,7 @@ export const resolveTypeAlias = (
 
       const collect = (
         type: TypeId,
-        boundRecursive: ReadonlySet<TypeParamId> = new Set()
+        boundRecursive: ReadonlySet<TypeParamId> = new Set(),
       ): void => {
         if (seen.has(type)) {
           return;
@@ -757,7 +780,7 @@ export const resolveTypeAlias = (
             return;
           case "function":
             desc.parameters.forEach((param) =>
-              collect(param.type, boundRecursive)
+              collect(param.type, boundRecursive),
             );
             collect(desc.returnType, boundRecursive);
             return;
@@ -787,7 +810,7 @@ export const resolveTypeAlias = (
     const containsUnboundTypeParam = (
       type: TypeId,
       boundRecursive: ReadonlySet<TypeParamId> = new Set(),
-      seen: Set<TypeId> = new Set()
+      seen: Set<TypeId> = new Set(),
     ): boolean => {
       if (seen.has(type)) {
         return false;
@@ -808,22 +831,21 @@ export const resolveTypeAlias = (
         case "trait":
         case "nominal-object":
           return desc.typeArgs.some((arg) =>
-            containsUnboundTypeParam(arg, boundRecursive, seen)
+            containsUnboundTypeParam(arg, boundRecursive, seen),
           );
         case "structural-object":
           return desc.fields.some((field) =>
-            containsUnboundTypeParam(field.type, boundRecursive, seen)
+            containsUnboundTypeParam(field.type, boundRecursive, seen),
           );
         case "function":
           return (
             desc.parameters.some((param) =>
-              containsUnboundTypeParam(param.type, boundRecursive, seen)
-            ) ||
-            containsUnboundTypeParam(desc.returnType, boundRecursive, seen)
+              containsUnboundTypeParam(param.type, boundRecursive, seen),
+            ) || containsUnboundTypeParam(desc.returnType, boundRecursive, seen)
           );
         case "union":
           return desc.members.some((member) =>
-            containsUnboundTypeParam(member, boundRecursive, seen)
+            containsUnboundTypeParam(member, boundRecursive, seen),
           );
         case "intersection":
           return (
@@ -871,7 +893,7 @@ export const resolveTypeAlias = (
                 }))
                 .map(
                   ({ member, unbound }) =>
-                    `${describeType(member)}${unbound ? " (unbound)" : ""}`
+                    `${describeType(member)}${unbound ? " (unbound)" : ""}`,
                 )
                 .join(", ");
               return `\nunion members: ${memberDetails}`;
@@ -879,8 +901,8 @@ export const resolveTypeAlias = (
           : "";
       throw new Error(
         `cyclic type alias instantiation for ${aliasName} (unbound type param)\nresolved: ${formatType(
-          resolved
-        )}${detail}`
+          resolved,
+        )}${detail}`,
       );
     }
 
@@ -909,12 +931,12 @@ const resolveNamedTypeExpr = (
   expr: HirNamedTypeExpr,
   ctx: TypingContext,
   state: TypingState,
-  typeParams?: ReadonlyMap<SymbolId, TypeId>
+  typeParams?: ReadonlyMap<SymbolId, TypeId>,
 ): TypeId => {
   const name = expr.path.at(-1)!;
   const resolvedTypeArgs =
     expr.typeArguments?.map((arg) =>
-      resolveTypeExpr(arg, ctx, state, ctx.primitives.unknown, typeParams)
+      resolveTypeExpr(arg, ctx, state, ctx.primitives.unknown, typeParams),
     ) ?? [];
   const importedType = resolveImportedTypeExpr({
     expr,
@@ -992,7 +1014,7 @@ const resolveNamedTypeExpr = (
     const activeDesc = ctx.arena.get(activeAlias);
     if (activeDesc.kind === "type-param-ref") {
       throw new Error(
-        `cyclic type alias instantiation for ${name} (resolution mismatch)`
+        `cyclic type alias instantiation for ${name} (resolution mismatch)`,
       );
     }
   }
@@ -1022,7 +1044,12 @@ const resolveNamedTypeExpr = (
       ? expr.symbol
       : undefined) ?? ctx.traits.resolveName(name);
   if (traitSymbol !== undefined) {
-    const traitType = ensureTraitType(traitSymbol, ctx, state, resolvedTypeArgs);
+    const traitType = ensureTraitType(
+      traitSymbol,
+      ctx,
+      state,
+      resolvedTypeArgs,
+    );
     if (typeof traitType === "number") {
       return traitType;
     }
@@ -1044,7 +1071,7 @@ const resolveNamedTypeExpr = (
 const findTypeParamByName = (
   name: string,
   typeParams: ReadonlyMap<SymbolId, TypeId> | undefined,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): TypeId | undefined => {
   if (!typeParams) {
     return undefined;
@@ -1063,7 +1090,7 @@ const resolveObjectTypeExpr = (
   expr: HirObjectTypeExpr,
   ctx: TypingContext,
   state: TypingState,
-  typeParams?: ReadonlyMap<SymbolId, TypeId>
+  typeParams?: ReadonlyMap<SymbolId, TypeId>,
 ): TypeId => {
   const allowedParams = paramIdSetFrom(typeParams, ctx);
   const fields = expr.fields.map((field) => {
@@ -1072,7 +1099,7 @@ const resolveObjectTypeExpr = (
       ctx,
       state,
       ctx.primitives.unknown,
-      typeParams
+      typeParams,
     );
     return {
       name: field.name,
@@ -1089,7 +1116,7 @@ const resolveFunctionTypeExpr = (
   expr: HirFunctionTypeExpr,
   ctx: TypingContext,
   state: TypingState,
-  typeParams?: ReadonlyMap<SymbolId, TypeId>
+  typeParams?: ReadonlyMap<SymbolId, TypeId>,
 ): TypeId => {
   if (expr.typeParameters && expr.typeParameters.length > 0) {
     throw new Error("function type parameters are not supported yet");
@@ -1100,7 +1127,7 @@ const resolveFunctionTypeExpr = (
       ctx,
       state,
       ctx.primitives.unknown,
-      typeParams
+      typeParams,
     ),
     optional: param.optional ?? false,
   }));
@@ -1109,7 +1136,7 @@ const resolveFunctionTypeExpr = (
     ctx,
     state,
     ctx.primitives.unknown,
-    typeParams
+    typeParams,
   );
   const effectRow =
     resolveEffectAnnotation(expr.effectType, ctx, state) ??
@@ -1125,7 +1152,7 @@ const resolveTupleTypeExpr = (
   expr: HirTupleTypeExpr,
   ctx: TypingContext,
   state: TypingState,
-  typeParams?: ReadonlyMap<SymbolId, TypeId>
+  typeParams?: ReadonlyMap<SymbolId, TypeId>,
 ): TypeId => {
   const allowedParams = paramIdSetFrom(typeParams, ctx);
   const fields = expr.elements.map((element, index) => {
@@ -1134,7 +1161,7 @@ const resolveTupleTypeExpr = (
       ctx,
       state,
       ctx.primitives.unknown,
-      typeParams
+      typeParams,
     );
     return {
       name: `${index}`,
@@ -1151,10 +1178,10 @@ const resolveUnionTypeExpr = (
   expr: HirUnionTypeExpr,
   ctx: TypingContext,
   state: TypingState,
-  typeParams?: ReadonlyMap<SymbolId, TypeId>
+  typeParams?: ReadonlyMap<SymbolId, TypeId>,
 ): TypeId => {
   const members = expr.members.map((member) =>
-    resolveTypeExpr(member, ctx, state, ctx.primitives.unknown, typeParams)
+    resolveTypeExpr(member, ctx, state, ctx.primitives.unknown, typeParams),
   );
   return ctx.arena.internUnion(members);
 };
@@ -1164,13 +1191,13 @@ export const getSymbolName = (symbol: SymbolId, ctx: TypingContext): string =>
 
 const makeObjectInstanceKey = (
   symbol: SymbolId,
-  typeArgs: readonly TypeId[]
+  typeArgs: readonly TypeId[],
 ): string => `${symbol}<${typeArgs.join(",")}>`;
 
 export const getObjectTemplate = (
   symbol: SymbolId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): ObjectTemplate | undefined => {
   const cached = ctx.objects.getTemplate(symbol);
   if (cached) {
@@ -1205,7 +1232,7 @@ export const getObjectTemplate = (
           ctx,
           state,
           ctx.primitives.unknown,
-          paramMap
+          paramMap,
         );
       }
     });
@@ -1217,24 +1244,18 @@ export const getObjectTemplate = (
       ctx,
       state,
       ctx.objects.base.type,
-      paramMap
+      paramMap,
     );
     const baseFields = (
       getStructuralFields(baseType, ctx, state, {
         includeInaccessible: true,
         allowOwnerPrivate: true,
       }) ?? []
-    ).map(
-      (field) => ({
-        ...field,
-        declaringParams: declaringParamsForField(
-          field.type,
-          templateParams,
-          ctx
-        ),
-        packageId: field.packageId ?? ctx.packageId,
-      })
-    );
+    ).map((field) => ({
+      ...field,
+      declaringParams: declaringParamsForField(field.type, templateParams, ctx),
+      packageId: field.packageId ?? ctx.packageId,
+    }));
     const baseNominal = getNominalComponent(baseType, ctx);
 
     const ownFields = decl.fields.map((field) => {
@@ -1243,7 +1264,7 @@ export const getObjectTemplate = (
         ctx,
         state,
         ctx.primitives.unknown,
-        paramMap
+        paramMap,
       );
       return {
         name: field.name,
@@ -1258,7 +1279,7 @@ export const getObjectTemplate = (
 
     if (baseFields.length > 0) {
       const declaredFields = new Map(
-        ownFields.map((field) => [field.name, field])
+        ownFields.map((field) => [field.name, field]),
       );
       baseFields.forEach((baseField) => {
         const declared = declaredFields.get(baseField.name);
@@ -1266,8 +1287,8 @@ export const getObjectTemplate = (
           throw new Error(
             `object ${getSymbolName(
               symbol,
-              ctx
-            )} must redeclare inherited field ${baseField.name}`
+              ctx,
+            )} must redeclare inherited field ${baseField.name}`,
           );
         }
         const compatibility = ctx.arena.unify(declared.type, baseField.type, {
@@ -1278,8 +1299,8 @@ export const getObjectTemplate = (
           throw new Error(
             `field ${baseField.name} in object ${getSymbolName(
               symbol,
-              ctx
-            )} must match base object type`
+              ctx,
+            )} must match base object type`,
           );
         }
       });
@@ -1318,7 +1339,7 @@ export const ensureObjectType = (
   symbol: SymbolId,
   ctx: TypingContext,
   state: TypingState,
-  typeArgs: readonly TypeId[] = []
+  typeArgs: readonly TypeId[] = [],
 ): ObjectTypeInfo | undefined => {
   if (ctx.objects.isResolving(symbol)) {
     return undefined;
@@ -1329,7 +1350,7 @@ export const ensureObjectType = (
     return undefined;
   }
   const templateParamSet = new Set(
-    template.params.map((param) => param.typeParam)
+    template.params.map((param) => param.typeParam),
   );
 
   const normalized = normalizeTypeArgs({
@@ -1343,7 +1364,7 @@ export const ensureObjectType = (
     throw new Error(
       `object ${getSymbolName(symbol, ctx)} is missing ${
         normalized.missingCount
-      } type argument(s)`
+      } type argument(s)`,
     );
   }
 
@@ -1358,7 +1379,7 @@ export const ensureObjectType = (
 
   const subst = new Map<TypeParamId, TypeId>();
   template.params.forEach((param, index) =>
-    subst.set(param.typeParam, normalized.applied[index]!)
+    subst.set(param.typeParam, normalized.applied[index]!),
   );
 
   template.params.forEach((param, index) => {
@@ -1374,8 +1395,8 @@ export const ensureObjectType = (
       throw new Error(
         `type argument for ${getSymbolName(
           param.symbol,
-          ctx
-        )} does not satisfy constraint for object ${getSymbolName(symbol, ctx)}`
+          ctx,
+        )} does not satisfy constraint for object ${getSymbolName(symbol, ctx)}`,
       );
     }
   });
@@ -1385,14 +1406,14 @@ export const ensureObjectType = (
   const unresolvedStructuralParams = paramsReferencedInType(
     structural,
     templateParamSet,
-    ctx
+    ctx,
   );
   if (unresolvedStructuralParams.size > 0) {
     throw new Error(
       `object ${getSymbolName(
         symbol,
-        ctx
-      )} is missing substitutions for its structural fields`
+        ctx,
+      )} is missing substitutions for its structural fields`,
     );
   }
   const type = ctx.arena.substitute(template.type, subst);
@@ -1408,7 +1429,7 @@ export const ensureObjectType = (
   ensureFieldsSubstituted(
     fields,
     ctx,
-    `object ${getSymbolName(symbol, ctx)} instantiation`
+    `object ${getSymbolName(symbol, ctx)} instantiation`,
   );
   const baseNominal = template.baseNominal
     ? ctx.arena.substitute(template.baseNominal, subst)
@@ -1443,7 +1464,7 @@ export const ensureTraitType = (
   symbol: SymbolId,
   ctx: TypingContext,
   state: TypingState,
-  typeArgs: readonly TypeId[] = []
+  typeArgs: readonly TypeId[] = [],
 ): TypeId | undefined => {
   const decl = ctx.traits.getDecl(symbol) ?? ctx.decls.getTrait(symbol);
   if (!decl) {
@@ -1462,7 +1483,7 @@ export const ensureTraitType = (
     throw new Error(
       `trait ${getSymbolName(symbol, ctx)} is missing ${
         normalized.missingCount
-      } type argument(s)`
+      } type argument(s)`,
     );
   }
 
@@ -1503,7 +1524,7 @@ const instantiateTraitImplsFor = ({
     }
     const appliedTrait = ctx.arena.substitute(
       template.trait,
-      match.substitution
+      match.substitution,
     );
     const traitDesc = ctx.arena.get(appliedTrait);
     if (traitDesc.kind !== "trait") {
@@ -1511,7 +1532,7 @@ const instantiateTraitImplsFor = ({
     }
     const appliedTarget = ctx.arena.substitute(
       template.target,
-      match.substitution
+      match.substitution,
     );
     implementations.push({
       trait: appliedTrait,
@@ -1534,7 +1555,7 @@ const instantiateTraitImplsFor = ({
 
 const mergeDeclaredFields = (
   inherited: readonly StructuralField[],
-  own: readonly StructuralField[]
+  own: readonly StructuralField[],
 ): StructuralField[] => {
   const fields = new Map<string, StructuralField>();
   inherited.forEach((field) => fields.set(field.name, field));
@@ -1545,7 +1566,7 @@ const mergeDeclaredFields = (
 export const getObjectInfoForNominal = (
   nominal: TypeId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): ObjectTypeInfo | undefined => {
   const cached = ctx.objects.getInstanceByNominal(nominal);
   if (cached) {
@@ -1564,7 +1585,7 @@ export const getObjectInfoForNominal = (
 
 export const getNominalComponent = (
   type: TypeId,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): TypeId | undefined => {
   if (type === ctx.primitives.unknown) {
     return undefined;
@@ -1592,7 +1613,7 @@ export const nominalSatisfies = (
   expected: TypeId,
   ctx: TypingContext,
   state: TypingState,
-  seen: Set<TypeId> = new Set()
+  seen: Set<TypeId> = new Set(),
 ): boolean => {
   if (actual === expected) {
     return true;
@@ -1630,7 +1651,12 @@ export const nominalSatisfies = (
         return true;
       }
       if (state.mode === "relaxed") {
-        return typeSatisfies(actualDesc.typeArgs[index]!, expectedArg, ctx, state);
+        return typeSatisfies(
+          actualDesc.typeArgs[index]!,
+          expectedArg,
+          ctx,
+          state,
+        );
       }
       return false;
     });
@@ -1652,7 +1678,7 @@ export const getStructuralFields = (
   type: TypeId,
   ctx: TypingContext,
   state: TypingState,
-  options: { includeInaccessible?: boolean; allowOwnerPrivate?: boolean } = {}
+  options: { includeInaccessible?: boolean; allowOwnerPrivate?: boolean } = {},
 ): readonly StructuralField[] | undefined => {
   if (type === ctx.primitives.unknown) {
     return undefined;
@@ -1714,7 +1740,7 @@ export const getStructuralFields = (
 const structuralExpectationOf = (
   type: TypeId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): TypeId | undefined => {
   if (type === ctx.primitives.unknown) {
     return undefined;
@@ -1755,7 +1781,7 @@ export const typeSatisfies = (
   actual: TypeId,
   expected: TypeId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): boolean => {
   if (actual === expected) {
     return true;
@@ -1785,16 +1811,19 @@ export const typeSatisfies = (
 
   const optionalInfo = getOptionalInfo(
     expected,
-    optionalResolverContextForTypingContext(ctx)
+    optionalResolverContextForTypingContext(ctx),
   );
-  if (optionalInfo && typeSatisfies(actual, optionalInfo.innerType, ctx, state)) {
+  if (
+    optionalInfo &&
+    typeSatisfies(actual, optionalInfo.innerType, ctx, state)
+  ) {
     return true;
   }
 
   const forceNominalUnion =
     expectedDesc.kind === "union" &&
     expectedDesc.members.every(
-      (member) => typeof getNominalComponent(member, ctx) === "number"
+      (member) => typeof getNominalComponent(member, ctx) === "number",
     );
   const expectedNominal = getNominalComponent(expected, ctx);
   let nominalMatches = false;
@@ -1834,7 +1863,7 @@ const traitSatisfies = (
   expected: TypeId,
   traitSymbol: SymbolId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): boolean => {
   const allowUnknown = state.mode === "relaxed";
   const expectedDesc = ctx.arena.get(expected);
@@ -1855,8 +1884,7 @@ const traitSatisfies = (
   }
 
   const info = getObjectInfoForNominal(actualNominal, ctx, state);
-  let impls =
-    ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls;
+  let impls = ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls;
   if (!impls || impls.length === 0) {
     impls = instantiateTraitImplsFor({
       nominal: actualNominal,
@@ -1879,12 +1907,14 @@ const traitSatisfies = (
   });
 };
 
+// TODO: Deprecate reason and convert args to object
 export const ensureTypeMatches = (
   actual: TypeId,
   expected: TypeId,
   ctx: TypingContext,
   state: TypingState,
-  reason: string
+  reason: string,
+  span?: SourceSpan,
 ): void => {
   if (typeSatisfies(actual, expected, ctx, state)) {
     return;
@@ -1897,19 +1927,24 @@ export const ensureTypeMatches = (
       return String(type);
     }
   };
-  
-  throw new Error(
-    `type mismatch for ${reason}\nactual: ${format(actual)}\nexpected: ${format(
-      expected
-    )}`
-  );
+
+  emitDiagnostic({
+    ctx,
+    code: "TY0027",
+    params: {
+      kind: "type-mismatch",
+      actual: typeDescriptorToUserString(ctx.arena.get(actual), ctx.arena),
+      expected: typeDescriptorToUserString(ctx.arena.get(expected), ctx.arena),
+    },
+    span: span ?? ctx.hir.module.span,
+  });
 };
 
 const nominalInstantiationMatches = (
   candidate: TypeId,
   expected: TypeId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): boolean => {
   const seen = new Set<TypeId>();
   let current: TypeId | undefined = candidate;
@@ -1952,12 +1987,17 @@ const unionMemberMatchesPattern = (
   member: TypeId,
   patternType: TypeId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): boolean => {
   const patternNominal = getNominalComponent(patternType, ctx);
   const memberNominal = getNominalComponent(member, ctx);
   if (typeof patternNominal === "number" && typeof memberNominal === "number") {
-    return nominalInstantiationMatches(memberNominal, patternNominal, ctx, state);
+    return nominalInstantiationMatches(
+      memberNominal,
+      patternNominal,
+      ctx,
+      state,
+    );
   }
   return typeSatisfies(member, patternType, ctx, state);
 };
@@ -1966,13 +2006,13 @@ export const matchedUnionMembers = (
   patternType: TypeId,
   remaining: Set<TypeId>,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): TypeId[] => {
   if (patternType === ctx.primitives.unknown) {
     return [];
   }
   return Array.from(remaining).filter((member) =>
-    unionMemberMatchesPattern(member, patternType, ctx, state)
+    unionMemberMatchesPattern(member, patternType, ctx, state),
   );
 };
 
@@ -1980,7 +2020,7 @@ export const narrowTypeForPattern = (
   discriminantType: TypeId,
   patternType: TypeId,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): TypeId | undefined => {
   if (discriminantType === ctx.primitives.unknown) {
     return patternType;
@@ -1988,7 +2028,7 @@ export const narrowTypeForPattern = (
   const desc = ctx.arena.get(discriminantType);
   if (desc.kind === "union") {
     const matches = desc.members.filter((member) =>
-      unionMemberMatchesPattern(member, patternType, ctx, state)
+      unionMemberMatchesPattern(member, patternType, ctx, state),
     );
     if (matches.length === 0) {
       return undefined;
@@ -2005,7 +2045,7 @@ export const bindTypeParamsFromType = (
   actual: TypeId,
   bindings: Map<TypeParamId, TypeId>,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): void => {
   if (
     expected === ctx.primitives.unknown ||
@@ -2059,7 +2099,13 @@ export const bindTypeParamsFromType = (
     expectedDesc.fields.forEach((field) => {
       const candidate = actualFields.find((entry) => entry.name === field.name);
       if (candidate) {
-        bindTypeParamsFromType(field.type, candidate.type, bindings, ctx, state);
+        bindTypeParamsFromType(
+          field.type,
+          candidate.type,
+          bindings,
+          ctx,
+          state,
+        );
       }
     });
     return;
@@ -2075,14 +2121,20 @@ export const bindTypeParamsFromType = (
       actualDesc.element,
       bindings,
       ctx,
-      state
+      state,
     );
     return;
   }
 
   if (expectedDesc.kind === "intersection") {
     if (typeof expectedDesc.nominal === "number") {
-      bindTypeParamsFromType(expectedDesc.nominal, actual, bindings, ctx, state);
+      bindTypeParamsFromType(
+        expectedDesc.nominal,
+        actual,
+        bindings,
+        ctx,
+        state,
+      );
     }
     if (typeof expectedDesc.structural === "number") {
       bindTypeParamsFromType(
@@ -2090,7 +2142,7 @@ export const bindTypeParamsFromType = (
         actual,
         bindings,
         ctx,
-        state
+        state,
       );
     }
   }

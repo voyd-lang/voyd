@@ -137,6 +137,7 @@ type DiagnosticParamsMap = {
   TY0024: { kind: "array-literal-mixed-primitives" };
   TY0025: { kind: "array-literal-incompatible" };
   TY0026: { kind: "undefined-type"; name: string };
+  TY0027: { kind: "type-mismatch"; expected: string; actual: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -485,6 +486,14 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0026"]>,
+  TY0027: {
+    code: "TY0027",
+    message: (params) =>
+      `type mismatch: expected '${params.expected}', received '${params.actual}'`,
+    severity: "error",
+    phase: "typing",
+    hints: [],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0027"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

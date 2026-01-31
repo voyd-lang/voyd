@@ -153,6 +153,6 @@ describe("array literals", () => {
   it("enforces explicit type arguments for provided elements", () => {
     expect(() =>
       semanticsPipeline(loadAst("array_literal_type_arg_mismatch.voyd"))
-    ).toThrow(/type mismatch for __array_new_fixed element/);
+    ).toThrow(/TY0027: type mismatch: expected 'i32', received 'bool'/);
   });
 });
