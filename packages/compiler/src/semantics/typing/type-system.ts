@@ -6,6 +6,7 @@ import type {
   HirUnionTypeExpr,
   HirIntersectionTypeExpr,
   HirFunctionTypeExpr,
+  HirVisibility,
 } from "../hir/index.js";
 import { resolveImportedTypeExpr } from "./imports.js";
 import type { SourceSpan, SymbolId, TypeId, TypeParamId } from "../ids.js";
@@ -621,7 +622,12 @@ export const resolveTypeExpr = (
       resolved = resolveUnionTypeExpr(expr, ctx, state, activeTypeParams);
       break;
     case "intersection":
-      resolved = resolveIntersectionTypeExpr(expr, ctx, state, activeTypeParams);
+      resolved = resolveIntersectionTypeExpr(
+        expr,
+        ctx,
+        state,
+        activeTypeParams,
+      );
       break;
     default:
       throw new Error(`unsupported type expression kind: ${expr.typeKind}`);
@@ -1226,25 +1232,35 @@ const resolveIntersectionTypeExpr = (
         params: {
           kind: "intersection-field-conflict",
           field: field.name,
-          left: typeDescriptorToUserString(ctx.arena.get(existing.type), ctx.arena),
-          right: typeDescriptorToUserString(ctx.arena.get(field.type), ctx.arena),
+          left: typeDescriptorToUserString(
+            ctx.arena.get(existing.type),
+            ctx.arena,
+          ),
+          right: typeDescriptorToUserString(
+            ctx.arena.get(field.type),
+            ctx.arena,
+          ),
         },
         span: expr.span,
       });
       return;
     }
 
-    const mergedVisibility =
-      existing.visibility || field.visibility
-        ? {
-            level:
-              existing.visibility?.level === "object" ||
-              field.visibility?.level === "object"
-                ? "object"
-                : existing.visibility?.level ?? field.visibility?.level ?? "module",
-            api: (existing.visibility?.api ?? true) && (field.visibility?.api ?? true),
-          }
-        : undefined;
+    const visibilityCandidate = existing.visibility ?? field.visibility;
+    const mergedVisibility: HirVisibility | undefined = visibilityCandidate
+      ? {
+          level:
+            existing.visibility?.level === "object" ||
+            field.visibility?.level === "object"
+              ? "object"
+              : (existing.visibility?.level ??
+                field.visibility?.level ??
+                "module"),
+          api:
+            (existing.visibility?.api ?? true) &&
+            (field.visibility?.api ?? true),
+        }
+      : undefined;
 
     mergedFields.set(field.name, {
       ...existing,
@@ -1370,7 +1386,8 @@ const resolveIntersectionTypeExpr = (
       : undefined;
 
   const finalNominal =
-    nominal ?? (typeof structural === "number" ? ctx.objects.base.nominal : undefined);
+    nominal ??
+    (typeof structural === "number" ? ctx.objects.base.nominal : undefined);
 
   return ctx.arena.internIntersection({
     nominal: finalNominal,
@@ -1927,7 +1944,9 @@ export const getStructuralFields = (
           return;
         }
         const optional =
-          existing.optional === true && field.optional === true ? true : undefined;
+          existing.optional === true && field.optional === true
+            ? true
+            : undefined;
         byName.set(field.name, {
           ...existing,
           optional,
@@ -2135,13 +2154,14 @@ const traitSatisfies = (
   const actualDesc = ctx.arena.get(actual);
   if (actualDesc.kind === "intersection" && actualDesc.traits) {
     const allowUnknown = state.mode === "relaxed";
-    const matches = actualDesc.traits.some((trait) =>
-      ctx.arena.unify(trait, expected, {
-        location: ctx.hir.module.ast,
-        reason: "trait compatibility",
-        variance: "covariant",
-        allowUnknown,
-      }).ok,
+    const matches = actualDesc.traits.some(
+      (trait) =>
+        ctx.arena.unify(trait, expected, {
+          location: ctx.hir.module.ast,
+          reason: "trait compatibility",
+          variance: "covariant",
+          allowUnknown,
+        }).ok,
     );
     if (matches) {
       return true;
