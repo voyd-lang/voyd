@@ -178,4 +178,47 @@ describe("buildModuleGraph", () => {
       ])
     );
   });
+
+  it("does not implicitly add std modules when compiling a std entry module", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}map.voyd`]: "",
+      [`${stdRoot}${sep}msgpack.voyd`]: "use std::map::Map",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${stdRoot}${sep}map.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const moduleIds = Array.from(graph.modules.keys());
+    expect(moduleIds).toEqual(expect.arrayContaining(["std::map"]));
+    expect(moduleIds).not.toContain("std::pkg");
+    expect(moduleIds).not.toContain("std::msgpack");
+  });
+
+  it("injects std::pkg for src modules that import std", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use std::map::Map",
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use msgpack",
+      [`${stdRoot}${sep}map.voyd`]: "",
+      [`${stdRoot}${sep}msgpack.voyd`]: "use std::map::Map",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining(["src::main", "std::pkg", "std::msgpack", "std::map"]),
+    );
+  });
 });

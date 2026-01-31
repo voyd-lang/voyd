@@ -56,6 +56,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     effects,
     resolvedExprTypes: new Map(),
     valueTypes: new Map(),
+    activeValueTypeComputations: new Set(),
     tailResumptions: new Map(),
     callResolution: {
       targets: new Map(),

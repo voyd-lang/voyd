@@ -4,6 +4,7 @@ import type { FunctionSignature, TypingContext, TypingState } from "./types.js";
 import { formatFunctionInstanceKey, typeExpression } from "./expressions.js";
 import { mergeBranchType } from "./expressions/branching.js";
 import { ensureEffectCompatibility, getExprEffectRow } from "./effects.js";
+import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
 
 export const runInferencePass = (
   ctx: TypingContext,
@@ -17,16 +18,6 @@ export const runInferencePass = (
     ctx.resolvedExprTypes.clear();
     changed = typeAllFunctions(ctx, state, { collectChanges: true });
   } while (changed);
-
-  const unresolved = Array.from(ctx.functions.signatures).filter(
-    ([, signature]) => !signature.hasExplicitReturn
-  );
-  if (unresolved.length > 0) {
-    const names = unresolved.map(([symbol]) => ctx.symbolTable.getSymbol(symbol).name);
-    throw new Error(
-      `could not infer return type for function(s): ${names.join(", ")}`
-    );
-  }
 };
 
 export const runStrictTypeCheck = (
@@ -38,6 +29,33 @@ export const runStrictTypeCheck = (
   ctx.table.clearExprTypes();
   ctx.resolvedExprTypes.clear();
   typeAllFunctions(ctx, state, { collectChanges: false });
+};
+
+export const requireInferredReturnTypes = (
+  ctx: TypingContext,
+): void => {
+  const unresolved = Array.from(ctx.functions.signatures).find(
+    ([, signature]) => !signature.hasExplicitReturn
+  );
+  if (!unresolved) {
+    return;
+  }
+
+  const [symbol] = unresolved;
+  const name = ctx.symbolTable.getSymbol(symbol).name;
+  const fn = Array.from(ctx.hir.items.values()).find(
+    (item) => item.kind === "function" && item.symbol === symbol
+  );
+  const span = fn?.span ?? ctx.hir.module.span;
+
+  // Note: this is intentionally checked after strict typing so that we report
+  // the root cause (e.g. member access issues) before falling back to this.
+  return emitDiagnostic({
+    ctx,
+    code: "TY0034",
+    params: { kind: "return-type-inference-failed", functionName: name },
+    span: normalizeSpan(span),
+  });
 };
 
 export const typeAllFunctions = (

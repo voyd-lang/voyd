@@ -1,5 +1,5 @@
 import type { HirBlockExpr, HirLetStatement } from "../../hir/index.js";
-import type { HirStmtId, TypeId } from "../../ids.js";
+import type { HirStmtId, SymbolId, TypeId } from "../../ids.js";
 import { typeExpression, type TypeExpressionOptions } from "../expressions.js";
 import { getExprEffectRow } from "../effects.js";
 import {
@@ -179,6 +179,9 @@ const typeLetStatement = (
   ctx: TypingContext,
   state: TypingState
 ): number => {
+  const boundSymbols = collectPatternSymbols(stmt.pattern);
+  boundSymbols.forEach((symbol) => ctx.activeValueTypeComputations.add(symbol));
+  try {
   if (stmt.pattern.kind === "tuple") {
     const annotated =
       stmt.pattern.typeAnnotation &&
@@ -310,4 +313,27 @@ const typeLetStatement = (
   recordPatternType(stmt.pattern, declaredType, ctx, state, "declare");
   stmt.pattern.typeId = declaredType;
   return getExprEffectRow(stmt.initializer, ctx);
+  } finally {
+    boundSymbols.forEach((symbol) =>
+      ctx.activeValueTypeComputations.delete(symbol)
+    );
+  }
+};
+
+const collectPatternSymbols = (pattern: HirLetStatement["pattern"]): SymbolId[] => {
+  switch (pattern.kind) {
+    case "identifier":
+      return [pattern.symbol];
+    case "tuple":
+      return pattern.elements.flatMap(collectPatternSymbols);
+    case "destructure":
+      return [
+        ...pattern.fields.flatMap((field) => collectPatternSymbols(field.pattern)),
+        ...(pattern.spread ? collectPatternSymbols(pattern.spread) : []),
+      ];
+    case "type":
+      return pattern.binding ? collectPatternSymbols(pattern.binding) : [];
+    case "wildcard":
+      return [];
+  }
 };

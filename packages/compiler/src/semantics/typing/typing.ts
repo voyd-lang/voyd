@@ -1,5 +1,5 @@
 import { createTypingContext, createTypingState } from "./context.js";
-import { runInferencePass, runStrictTypeCheck } from "./inference.js";
+import { requireInferredReturnTypes, runInferencePass, runStrictTypeCheck } from "./inference.js";
 import {
   registerFunctionSignatures,
   registerObjectDecls,
@@ -46,6 +46,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
 
   runInferencePass(ctx, state);
   runStrictTypeCheck(ctx, state);
+  requireInferredReturnTypes(ctx);
   validateTypedProgram(ctx);
 
   return {

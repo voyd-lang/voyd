@@ -5,6 +5,7 @@ import { getStructuralFields } from "../type-system.js";
 import { getExprEffectRow } from "../effects.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { assertFieldAccess } from "../visibility.js";
+import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 
 export const typeFieldAccessExpr = (
   expr: HirFieldAccessExpr,
@@ -28,7 +29,25 @@ export const typeFieldAccessExpr = (
     if (state.mode === "relaxed") {
       return ctx.primitives.unknown;
     }
-    throw new Error(`object type is missing field ${expr.field}`);
+    const tupleInfo = inferTupleFieldInfo(fields);
+    if (tupleInfo && isTupleIndex(expr.field) && tupleInfo.length <= Number(expr.field)) {
+      return emitDiagnostic({
+        ctx,
+        code: "TY0032",
+        params: {
+          kind: "tuple-index-out-of-range",
+          index: Number(expr.field),
+          length: tupleInfo.length,
+        },
+        span: normalizeSpan(expr.span),
+      });
+    }
+    return emitDiagnostic({
+      ctx,
+      code: "TY0033",
+      params: { kind: "unknown-field", name: expr.field },
+      span: normalizeSpan(expr.span),
+    });
   }
 
   assertFieldAccess({
@@ -40,4 +59,25 @@ export const typeFieldAccessExpr = (
   });
   ctx.effects.setExprEffect(expr.id, getExprEffectRow(expr.target, ctx));
   return field.type;
+};
+
+const isTupleIndex = (field: string): boolean => /^\d+$/.test(field);
+
+const inferTupleFieldInfo = (
+  fields: readonly { name: string }[]
+): { length: number } | undefined => {
+  if (fields.length === 0) return undefined;
+  const names = fields.map((field) => field.name);
+  if (!names.every(isTupleIndex)) return undefined;
+  const indices = names.map((name) => Number(name));
+  if (!indices.every((index) => Number.isSafeInteger(index) && index >= 0)) {
+    return undefined;
+  }
+  const max = Math.max(...indices);
+  const expected = max + 1;
+  const set = new Set(indices);
+  for (let index = 0; index < expected; index += 1) {
+    if (!set.has(index)) return undefined;
+  }
+  return { length: expected };
 };

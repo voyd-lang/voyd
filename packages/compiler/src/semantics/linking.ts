@@ -404,6 +404,7 @@ const createTypingContextFactory = ({
       effects: entry.typing.effects,
       resolvedExprTypes: new Map(entry.typing.resolvedExprTypes),
       valueTypes: new Map(entry.typing.valueTypes),
+      activeValueTypeComputations: new Set(),
       tailResumptions: new Map(entry.typing.tailResumptions),
       callResolution: {
         targets: cloneNestedMap(entry.typing.callTargets),

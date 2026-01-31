@@ -1,19 +1,24 @@
 import type { HirExpression } from "../../hir/index.js";
-import type { SymbolId, TypeId } from "../../ids.js";
+import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
 import { resolveImportedValue } from "../imports.js";
 import type { TypingContext } from "../types.js";
 import { getSymbolName } from "../type-system.js";
 import { getIntrinsicType } from "./intrinsics.js";
+import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 
 export const typeIdentifierExpr = (
   expr: HirExpression & { exprKind: "identifier"; symbol: SymbolId },
   ctx: TypingContext
 ): TypeId => {
   ctx.effects.setExprEffect(expr.id, ctx.effects.emptyRow);
-  return getValueType(expr.symbol, ctx);
+  return getValueType(expr.symbol, ctx, { span: expr.span });
 };
 
-export const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
+export const getValueType = (
+  symbol: SymbolId,
+  ctx: TypingContext,
+  options: { span?: SourceSpan } = {}
+): TypeId => {
   const cached = ctx.valueTypes.get(symbol);
   if (typeof cached === "number") {
     return cached;
@@ -24,7 +29,26 @@ export const getValueType = (symbol: SymbolId, ctx: TypingContext): TypeId => {
     intrinsic?: boolean;
     intrinsicName?: string;
     intrinsicUsesSignature?: boolean;
+    unresolved?: boolean;
   };
+
+  if (metadata.unresolved === true) {
+    return emitDiagnostic({
+      ctx,
+      code: "TY0030",
+      params: { kind: "undefined-identifier", name: record.name },
+      span: normalizeSpan(options.span),
+    });
+  }
+
+  if (ctx.activeValueTypeComputations.has(symbol)) {
+    return emitDiagnostic({
+      ctx,
+      code: "TY0031",
+      params: { kind: "self-referential-initializer", name: record.name },
+      span: normalizeSpan(options.span),
+    });
+  }
 
   if (metadata.intrinsic && metadata.intrinsicUsesSignature === true) {
     const signature = ctx.functions.getSignature(symbol);

@@ -551,6 +551,8 @@ export interface TypingContext {
   effects: EffectTable;
   resolvedExprTypes: Map<HirExprId, TypeId>;
   valueTypes: Map<SymbolId, TypeId>;
+  /** Symbols currently being typed; used for better diagnostics (e.g. self-referential let initializers). */
+  activeValueTypeComputations: Set<SymbolId>;
   tailResumptions: Map<HirExprId, HirEffectHandlerClause["tailResumption"]>;
   callResolution: CallResolution;
   functions: FunctionStore;
