@@ -1,0 +1,10 @@
+eff Async
+  fn await(tail) -> i32
+
+pub obj Thing {
+  api x: i32,
+}
+
+impl Thing
+  api fn request(self): Async -> i32
+    Async::await()

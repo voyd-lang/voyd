@@ -1,0 +1,14 @@
+use std::msgpack::self as __std_msgpack
+use std::string::self as __std_string
+
+eff Async
+  await(resume, value: i32) -> i32
+
+fn inner(x: i32): Async -> i32
+  let y = Async::await(x)
+  y + 1
+
+pub fn main(): Async -> i32
+  let a = inner(10)
+  let b = inner(20)
+  a * 100 + b

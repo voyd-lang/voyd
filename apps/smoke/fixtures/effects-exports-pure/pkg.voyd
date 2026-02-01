@@ -1,0 +1,5 @@
+pub use src::thing::{ Thing }
+
+pub fn main(): () -> i32
+  let t = Thing { x: 7 }
+  t.get()

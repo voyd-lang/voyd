@@ -15,7 +15,7 @@ import { analyzeLambdaCaptures } from "./lowering/captures.js";
 import { runTypingPipeline, type TypingResult } from "./typing/typing.js";
 import { specializeOverloadCallees } from "./typing/specialize-overloads.js";
 import { toSourceSpan } from "./utils.js";
-import type { OverloadSetId, SymbolId } from "./ids.js";
+import type { OverloadSetId, SourceSpan, SymbolId } from "./ids.js";
 import type { ModuleExportEffect, ModuleExportTable } from "./modules.js";
 import type { DependencySemantics } from "./typing/types.js";
 import type { Diagnostic } from "../diagnostics/index.js";
@@ -26,6 +26,7 @@ import {
 } from "./symbol-index.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import { assignModuleTestIds } from "../tests/ids.js";
+import { formatEffectRow } from "./effects/format.js";
 
 export interface SemanticsPipelineResult {
   binding: BindingResult;
@@ -363,25 +364,6 @@ const collectModuleExports = ({
   return table;
 };
 
-const formatEffectOp = (op: { name: string; region?: number }): string =>
-  typeof op.region === "number" ? `${op.name}@${op.region}` : op.name;
-
-const formatEffectRow = (
-  row: number,
-  effects: TypingResult["effects"],
-): string => {
-  const desc = effects.getRow(row);
-  const ops = desc.operations.map(formatEffectOp);
-  if (ops.length === 0 && desc.tailVar) {
-    return "open effect row";
-  }
-  if (ops.length === 0) {
-    return "()";
-  }
-  const suffix = desc.tailVar ? ", ..." : "";
-  return `${ops.join(", ")}${suffix}`;
-};
-
 const enforcePkgRootEffectRules = ({
   binding,
   hir,
@@ -399,46 +381,69 @@ const enforcePkgRootEffectRules = ({
   const diagnostics: Diagnostic[] = [];
   const seen = new Set<SymbolId>();
 
-  hir.module.exports.forEach((entry) => {
-    if (entry.visibility.level !== "public") return;
-    if (seen.has(entry.symbol)) return;
-    seen.add(entry.symbol);
-
-    const signature = typing.functions.getSignature(entry.symbol);
-    if (!signature) {
-      return;
+  const getEffectInfo = (
+    effectRow: number,
+  ): { isPure: boolean; effectsText: string } => {
+    try {
+      const isPure = typing.effects.isEmpty(effectRow);
+      return { isPure, effectsText: formatEffectRow(effectRow, typing.effects) };
+    } catch {
+      return { isPure: false, effectsText: "unknown effects" };
     }
-    const name = symbolTable.getSymbol(entry.symbol).name;
+  };
 
-    if (!signature.annotatedEffects) {
+  const checkExportedFunction = ({
+    symbol,
+    span,
+    displayName,
+  }: {
+    symbol: SymbolId;
+    span: SourceSpan;
+    displayName: string;
+  }): void => {
+    if (seen.has(symbol)) return;
+    seen.add(symbol);
+
+    const signature = typing.functions.getSignature(symbol);
+    if (!signature) return;
+
+    const { isPure, effectsText } = getEffectInfo(signature.effectRow);
+
+    if (!signature.annotatedEffects && !isPure && displayName !== "main") {
       diagnostics.push(
         diagnosticFromCode({
           code: "TY0016",
-          params: { kind: "pkg-effect-annotation", functionName: name },
-          span: entry.span,
+          params: {
+            kind: "pkg-effect-annotation",
+            functionName: displayName,
+            effects: effectsText,
+          },
+          span,
         }),
       );
     }
 
-    if (name === "main") {
-      let isPure = false;
-      let effectsText = "unknown effects";
-      try {
-        isPure = typing.effects.isEmpty(signature.effectRow);
-        effectsText = formatEffectRow(signature.effectRow, typing.effects);
-      } catch {
-        isPure = false;
-      }
+    if (displayName === "main") {
       if (!isPure) {
         diagnostics.push(
           diagnosticFromCode({
             code: "TY0017",
             params: { kind: "effectful-main", effects: effectsText },
-            span: entry.span,
+            span,
           }),
         );
       }
     }
+  };
+
+  hir.module.exports.forEach((entry) => {
+    if (entry.visibility.level !== "public") return;
+    const name = symbolTable.getSymbol(entry.symbol).name;
+    checkExportedFunction({
+      symbol: entry.symbol,
+      span: entry.span,
+      displayName: name,
+    });
   });
 
   return diagnostics;

@@ -41,6 +41,34 @@ pub fn pure(): () -> i32
     expect(pureExport?.effects?.[0]?.operations).toHaveLength(0);
   });
 
+  it("accepts unannotated pure exports from pkg.voyd", async () => {
+    const root = resolve("/proj/app/src");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const helpersPath = `${root}${sep}utils${sep}helpers.voyd`;
+    const host = createMemoryHost({
+      [pkgPath]: `
+use src::utils::helpers::all
+
+pub use src::utils::helpers::pure
+pub fn main(): () -> i32
+  pure()
+`,
+      [helpersPath]: `
+pub fn pure() -> i32
+  5
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
   it("rejects unannotated effectful exports from pkg.voyd", async () => {
     const root = resolve("/proj/app/src");
     const pkgPath = `${root}${sep}pkg.voyd`;

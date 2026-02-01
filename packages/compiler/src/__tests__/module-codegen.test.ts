@@ -22,7 +22,8 @@ pub fn main() -> i32
 
 pub fn delta() -> i32
   sub(8, 3)`,
-      [`${root}${sep}util.voyd`]: "pub use self::math::all\npub use self::ops::all",
+      [`${root}${sep}util.voyd`]:
+        "pub use self::math::all\npub use self::ops::all",
       [`${root}${sep}util${sep}math.voyd`]: "pub use ops::math::all",
       [`${root}${sep}util${sep}ops.voyd`]: "pub use self::math::all",
       [`${root}${sep}util${sep}ops${sep}math.voyd`]: `pub fn add(a: i32, b: i32) -> i32
@@ -69,7 +70,7 @@ pub fn main() -> i32
 }
 
 impl Box
-  api fn get(self): () -> i32
+  api fn get(self) -> i32
     self.value
 `,
     });
@@ -131,7 +132,7 @@ pub fn main() -> i32
     const instantiations = monomorphized.moduleTyping
       .get("std::util")
       ?.functionInstantiationInfo.get(
-        symbolRefKey({ moduleId: utilSemantics.moduleId, symbol: idSymbol })
+        symbolRefKey({ moduleId: utilSemantics.moduleId, symbol: idSymbol }),
       );
     expect(instantiations?.size ?? 0).toBeGreaterThan(0);
   });
