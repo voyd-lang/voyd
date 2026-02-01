@@ -22,6 +22,9 @@ import { createTypeArena } from "./semantics/typing/type-arena.js";
 import { createEffectInterner, createEffectTable } from "./semantics/effects/effect-table.js";
 import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
 import { formatTestExportName } from "./tests/exports.js";
+import type { SourceSpan, SymbolId } from "./semantics/ids.js";
+import { getSymbolTable } from "./semantics/_internal/symbol-table.js";
+import { formatEffectRow } from "./semantics/effects/format.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -139,10 +142,161 @@ export const analyzeModules = ({
     }
   });
 
+  if (!halted) {
+    diagnostics.push(...enforcePublicApiMethodEffectAnnotations({ semantics }));
+  }
+
   const tests = includeTests
     ? collectTests({ graph, semantics, scope: testScope ?? "all" })
     : [];
   return { semantics, diagnostics, tests };
+};
+
+const enforcePublicApiMethodEffectAnnotations = ({
+  semantics,
+}: {
+  semantics: Map<string, SemanticsPipelineResult>;
+}): Diagnostic[] => {
+  const diagnostics: Diagnostic[] = [];
+
+  const importTargetsByModule = new Map<
+    string,
+    ReadonlyMap<SymbolId, { moduleId: string; symbol: SymbolId }>
+  >();
+
+  const importTargetsFor = (
+    moduleId: string,
+  ): ReadonlyMap<SymbolId, { moduleId: string; symbol: SymbolId }> => {
+    const cached = importTargetsByModule.get(moduleId);
+    if (cached) return cached;
+    const mod = semantics.get(moduleId);
+    if (!mod) return new Map();
+    const mapped = new Map<SymbolId, { moduleId: string; symbol: SymbolId }>();
+    mod.binding.imports.forEach((entry) => {
+      if (!entry.target) return;
+      mapped.set(entry.local, entry.target);
+    });
+    importTargetsByModule.set(moduleId, mapped);
+    return mapped;
+  };
+
+  const resolveImportedTarget = ({
+    moduleId,
+    symbol,
+  }: {
+    moduleId: string;
+    symbol: SymbolId;
+  }): { moduleId: string; symbol: SymbolId } => {
+    const seen = new Set<string>();
+    let currentModuleId = moduleId;
+    let currentSymbol = symbol;
+
+    while (true) {
+      const key = `${currentModuleId}:${currentSymbol}`;
+      if (seen.has(key)) return { moduleId: currentModuleId, symbol: currentSymbol };
+      seen.add(key);
+
+      const next = importTargetsFor(currentModuleId).get(currentSymbol);
+      if (!next) return { moduleId: currentModuleId, symbol: currentSymbol };
+      currentModuleId = next.moduleId;
+      currentSymbol = next.symbol;
+    }
+  };
+
+  const packageRoots = Array.from(semantics.entries()).filter(
+    ([, entry]) => entry.binding.isPackageRoot,
+  );
+
+  packageRoots.forEach(([rootModuleId, root]) => {
+    const rootSymbolTable = getSymbolTable(root);
+    const packageId = root.binding.packageId;
+
+    const exportedObjectTargets = new Set<string>();
+    root.hir.module.exports.forEach((entry) => {
+      if (entry.visibility.level !== "public") return;
+      if (rootSymbolTable.getSymbol(entry.symbol).kind !== "type") return;
+      const resolved = resolveImportedTarget({
+        moduleId: rootModuleId,
+        symbol: entry.symbol,
+      });
+      const targetModule = semantics.get(resolved.moduleId);
+      if (!targetModule) return;
+      if (targetModule.binding.packageId !== packageId) return;
+      exportedObjectTargets.add(`${resolved.moduleId}:${resolved.symbol}`);
+    });
+
+    if (exportedObjectTargets.size === 0) return;
+
+    const seen = new Set<string>();
+
+    semantics.forEach((mod, moduleId) => {
+      if (mod.binding.packageId !== packageId) return;
+
+      const symbolTable = getSymbolTable(mod);
+
+      const functionSpanFor = (symbol: SymbolId): SourceSpan => {
+        for (const item of mod.hir.items.values()) {
+          if (item.kind !== "function") continue;
+          if (item.symbol === symbol) return item.span;
+        }
+        return mod.hir.module.span;
+      };
+
+      const effectInfoFor = (
+        effectRow: number,
+      ): { isPure: boolean; effectsText: string } => {
+        try {
+          const isPure = mod.typing.effects.isEmpty(effectRow);
+          return {
+            isPure,
+            effectsText: formatEffectRow(effectRow, mod.typing.effects),
+          };
+        } catch {
+          return { isPure: false, effectsText: "unknown effects" };
+        }
+      };
+
+      mod.typing.memberMetadata.forEach((metadata, symbol) => {
+        if (!metadata.visibility?.api) return;
+        if (typeof metadata.owner !== "number") return;
+
+        const resolvedOwner = resolveImportedTarget({
+          moduleId,
+          symbol: metadata.owner,
+        });
+        if (!exportedObjectTargets.has(`${resolvedOwner.moduleId}:${resolvedOwner.symbol}`)) {
+          return;
+        }
+
+        const signature = mod.typing.functions.getSignature(symbol);
+        if (!signature) return;
+
+        const { isPure, effectsText } = effectInfoFor(signature.effectRow);
+        if (signature.annotatedEffects || isPure) return;
+
+        const seenKey = `${moduleId}:${symbol}`;
+        if (seen.has(seenKey)) return;
+        seen.add(seenKey);
+
+        const ownerName = symbolTable.getSymbol(metadata.owner).name;
+        const memberName = symbolTable.getSymbol(symbol).name;
+
+        diagnostics.push(
+          diagnosticFromCode({
+            code: "TY0016",
+            params: {
+              kind: "pkg-effect-annotation",
+              functionName: `${ownerName}.${memberName}`,
+              effects: effectsText,
+            },
+            span: functionSpanFor(symbol),
+          }),
+        );
+      });
+    });
+  });
+
+  return diagnostics;
 };
 
 const collectTests = ({

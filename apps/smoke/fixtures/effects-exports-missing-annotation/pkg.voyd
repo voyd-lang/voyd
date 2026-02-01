@@ -1,0 +1,4 @@
+pub use src::thing::{ Thing }
+
+pub fn main(): () -> i32
+  0

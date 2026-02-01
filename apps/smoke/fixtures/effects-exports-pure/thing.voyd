@@ -1,0 +1,7 @@
+pub obj Thing {
+  api x: i32,
+}
+
+impl Thing
+  api fn get(self) -> i32
+    self.x

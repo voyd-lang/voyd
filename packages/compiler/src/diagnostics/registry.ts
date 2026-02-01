@@ -115,7 +115,11 @@ type DiagnosticParamsMap = {
   TY0013: { kind: "unhandled-effects"; operations: string };
   TY0014: { kind: "effect-annotation-mismatch"; message: string };
   TY0015: { kind: "tail-resume-count"; operation: string; count: number };
-  TY0016: { kind: "pkg-effect-annotation"; functionName: string };
+  TY0016: {
+    kind: "pkg-effect-annotation";
+    functionName: string;
+    effects: string;
+  };
   TY0017: { kind: "effectful-main"; effects: string };
   TY0018: {
     kind: "effect-generic-mismatch";
@@ -396,9 +400,15 @@ export const diagnosticsRegistry: {
   TY0016: {
     code: "TY0016",
     message: (params) =>
-      `exported function ${params.functionName} must declare an effect row in pkg.voyd (use () when pure)`,
+      `exported function ${params.functionName} is missing an effect annotation; unhandled effects: ${params.effects}`,
     severity: "error",
     phase: "typing",
+    hints: [
+      {
+        message:
+          "Either annotate the remaining effects in the function signature, or handle them inside the function so it becomes pure (and then omit the annotation or use '()').",
+      },
+    ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0016"]>,
   TY0017: {
     code: "TY0017",
