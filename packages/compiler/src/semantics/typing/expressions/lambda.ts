@@ -237,8 +237,8 @@ export const typeLambdaExpr = (
 
   if (typeof expectedReturn === "number") {
     bindTypeParamsFromType(
-      annotatedReturn ?? bodyType,
       expectedReturn,
+      annotatedReturn ?? bodyType,
       typeParamBindings,
       ctx,
       state

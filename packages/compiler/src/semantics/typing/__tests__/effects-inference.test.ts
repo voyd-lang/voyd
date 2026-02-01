@@ -100,6 +100,34 @@ fn log_it(): Async -> void
     expect(caught && (caught as any).diagnostic?.code).toBe("TY0014");
   });
 
+  it("allows effect annotations to include ops not used by the body", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(resume, value: i32) -> i32
+  fn log(resume, msg: i32) -> void
+
+fn inner(x: i32): Async -> i32
+  Async::await(x) + 1
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const innerSymbol = symbolTable.resolve("inner", symbolTable.rootScope);
+    expect(typeof innerSymbol).toBe("number");
+    if (typeof innerSymbol !== "number") return;
+
+    const signature = typing.functions.getSignature(innerSymbol);
+    expect(signature).toBeDefined();
+    if (!signature) return;
+
+    const ops = effectOps(signature.effectRow, typing.effects);
+    expect(ops).toEqual(["Async.await(i32)", "Async.log(i32)"]);
+  });
+
   it("eliminates handled operations", () => {
     const ast = parse(
       `

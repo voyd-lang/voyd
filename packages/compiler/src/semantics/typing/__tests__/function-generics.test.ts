@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { HirCallExpr, HirIdentifierExpr } from "../../hir/index.js";
+import { parse } from "../../../parser/parser.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
@@ -53,5 +54,56 @@ describe("generic functions", () => {
       return;
     }
     expect(typing.table.getExprType(addCall.id)).toBe(i32);
+  });
+
+  it("infers generic type arguments from lambda return types", () => {
+    const ast = parse(
+      `
+fn hold<T>(cb: fn() -> T): () -> (fn() -> T)
+  cb
+
+pub fn main(): () -> i32
+  let cb = hold(() => 1)
+  cb()
+`,
+      "infer.voyd",
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const root = symbolTable.rootScope;
+
+    const holdSymbol = symbolTable.resolve("hold", root);
+    expect(typeof holdSymbol).toBe("number");
+    if (typeof holdSymbol !== "number") {
+      return;
+    }
+
+    const holdCall = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") {
+          return false;
+        }
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          (callee as HirIdentifierExpr).symbol === holdSymbol
+        );
+      }
+    );
+
+    expect(holdCall).toBeDefined();
+    if (!holdCall) {
+      return;
+    }
+
+    const typeArgsByInstance = typing.callTypeArguments.get(holdCall.id);
+    const typeArgs = typeArgsByInstance
+      ? Array.from(typeArgsByInstance.values())[0]
+      : undefined;
+    expect(typeArgs).toBeDefined();
+    const intType = typing.arena.internPrimitive("i32");
+    expect(typeArgs).toEqual([intType]);
   });
 });
