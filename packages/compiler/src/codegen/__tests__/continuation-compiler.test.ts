@@ -11,7 +11,7 @@ import {
 const fixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-continuation-compiler.voyd"
+  "effects-continuation-compiler.voyd",
 );
 
 describe("continuation compiler", () => {
@@ -20,7 +20,7 @@ describe("continuation compiler", () => {
     if (process.env.DEBUG_EFFECTS_WAT === "1") {
       writeFileSync(
         "debug-effects-continuation-compiler.wat",
-        module.emitText()
+        module.emitText(),
       );
     }
 
@@ -40,7 +40,7 @@ describe("continuation compiler", () => {
     };
     const blockResult = await runEffectfulExport<number>({
       wasm: module,
-      entryName: "block_test_effectful",
+      entryName: "block_test",
       handlers: {
         [awaitKey]: handler,
         [pingKey]: handler,
@@ -52,7 +52,7 @@ describe("continuation compiler", () => {
 
     const whileResult = await runEffectfulExport<number>({
       wasm: module,
-      entryName: "while_test_effectful",
+      entryName: "while_test",
       handlers: {
         [awaitKey]: handler,
         [pingKey]: handler,
