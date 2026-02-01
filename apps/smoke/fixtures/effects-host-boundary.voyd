@@ -3,9 +3,7 @@ use std::string::self as __std_string
 
 eff Async
   await(resume, value: i32) -> i32
-
-eff AsyncTail
-  await(tail, value: i32) -> i32
+  await_tail(tail, value: i32) -> i32
 
 eff IO
   read(tail) -> i32
@@ -24,7 +22,7 @@ fn hold<T>(cb: fn() -> T): () -> (fn() -> T)
   cb
 
 pub fn main(): () -> i32
-  let cb = hold<i32>(() => Async::await(5))
+  let cb = hold(() => Async::await(5))
   try
     cb()
   Async::await(resume, value):
@@ -35,8 +33,8 @@ pub fn host_boundary_basic(): Async -> i32
   let b = inner(20)
   a * 100 + b
 
-pub fn host_boundary_tail(): AsyncTail -> i32
-  AsyncTail::await(7) * 2
+pub fn host_boundary_tail(): Async -> i32
+  Async::await_tail(7) * 2
 
 pub fn host_boundary_multi(): (Async, IO, Log) -> void
   let a = Async::await(10)

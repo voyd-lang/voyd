@@ -103,18 +103,18 @@ describe("smoke: effects host boundary", () => {
     expect(output).toBe(1222);
   });
 
-  it("runs tail effects across the host boundary (AsyncTail.await)", async () => {
+  it("runs tail effects across the host boundary (Async.await_tail)", async () => {
     const awaitOp = findUniqueOpByLabelSuffix(effectTable, "Async.await");
-    const awaitTailOp = findUniqueOpByLabelSuffix(effectTable, "AsyncTail.await");
+    const awaitTailOp = findUniqueOpByLabelSuffix(effectTable, "Async.await_tail");
     expect(awaitOp.resumeKind).not.toBe(awaitTailOp.resumeKind);
 
     const handlers = buildHandlers({
       table: effectTable,
       overridesByLabelSuffix: {
-        "AsyncTail.await": (value: unknown): number => {
+        "Async.await_tail": (value: unknown): number => {
           if (typeof value !== "number") {
             throw new Error(
-              `expected AsyncTail.await arg to be a number, got ${typeof value}`,
+              `expected Async.await_tail arg to be a number, got ${typeof value}`,
             );
           }
           return value + 3;

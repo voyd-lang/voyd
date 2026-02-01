@@ -2425,6 +2425,36 @@ export const bindTypeParamsFromType = (
     return;
   }
 
+  if (expectedDesc.kind === "function") {
+    const actualDesc = ctx.arena.get(actual);
+    if (actualDesc.kind !== "function") {
+      return;
+    }
+
+    const count = Math.min(
+      expectedDesc.parameters.length,
+      actualDesc.parameters.length,
+    );
+    for (let index = 0; index < count; index += 1) {
+      bindTypeParamsFromType(
+        expectedDesc.parameters[index]!.type,
+        actualDesc.parameters[index]!.type,
+        bindings,
+        ctx,
+        state,
+      );
+    }
+
+    bindTypeParamsFromType(
+      expectedDesc.returnType,
+      actualDesc.returnType,
+      bindings,
+      ctx,
+      state,
+    );
+    return;
+  }
+
   if (expectedDesc.kind === "intersection") {
     if (typeof expectedDesc.nominal === "number") {
       bindTypeParamsFromType(
