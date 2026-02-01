@@ -155,6 +155,7 @@ export const ensureEffectCompatibility = ({
   span,
   location,
   reason,
+  mode = "upper-bound",
 }: {
   inferred: EffectRowId;
   annotated: EffectRowId;
@@ -162,6 +163,7 @@ export const ensureEffectCompatibility = ({
   span: SourceSpan;
   location: NodeId;
   reason: string;
+  mode?: "upper-bound" | "exact";
 }): boolean => {
   const forward = ctx.effects.constrain(inferred, annotated, {
     location,
@@ -179,21 +181,24 @@ export const ensureEffectCompatibility = ({
     });
     return false;
   }
-  const backward = ctx.effects.constrain(annotated, inferred, {
-    location,
-    reason,
-  });
-  if (!backward.ok) {
-    emitDiagnostic({
-      ctx,
-      code: "TY0014",
-      params: {
-        kind: "effect-annotation-mismatch",
-        message: backward.conflict.message,
-      },
-      span,
-    });
-    return false;
+
+  if (mode === "upper-bound") {
+    return true;
   }
-  return true;
+
+  const backward = ctx.effects.constrain(annotated, inferred, { location, reason });
+  if (backward.ok) {
+    return true;
+  }
+
+  emitDiagnostic({
+    ctx,
+    code: "TY0014",
+    params: {
+      kind: "effect-annotation-mismatch",
+      message: backward.conflict.message,
+    },
+    span,
+  });
+  return false;
 };
