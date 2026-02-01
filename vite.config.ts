@@ -40,7 +40,7 @@ export default defineConfig({
     },
     target: "esnext",
     sourcemap: true,
-    outDir: "packages/sdk/dist",
+    outDir: resolve(projectRoot, "packages/sdk/dist"),
     emptyOutDir: false,
   },
 });

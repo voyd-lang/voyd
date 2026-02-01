@@ -1,0 +1,23 @@
+{
+  "name": "@voyd/reference",
+  "version": "0.9.0",
+  "description": "Voyd language reference documentation",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs",
+    "dev": "node ./scripts/build.mjs --watch",
+    "typecheck": "npm run build",
+    "test": "echo 'no tests for reference docs'",
+    "lint": "echo 'no lint configured'"
+  }
+}

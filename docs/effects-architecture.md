@@ -1,6 +1,6 @@
 # Effects Architecture (Wasm GC, Minimal Codegen Surface)
 
-This document explains how to implement the effects runtime semantics from `apps/reference/types/effects.md` using a small, isolated translation layer that sits **between semantics and codegen**. The goal is to keep core codegen changes minimal while enabling a future stack-switch backend. Think of this as a CPS/delimited-continuation lowering that emits the stable Outcome/EffectRequest ABI.
+This document explains how to implement the effects runtime semantics from `packages/reference/types/effects.md` using a small, isolated translation layer that sits **between semantics and codegen**. The goal is to keep core codegen changes minimal while enabling a future stack-switch backend. Think of this as a CPS/delimited-continuation lowering that emits the stable Outcome/EffectRequest ABI.
 
 ## Goals
 - Preserve pure call paths: functions with empty effect rows keep the existing Wasm signatures and exports.
