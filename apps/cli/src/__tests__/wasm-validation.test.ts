@@ -57,6 +57,26 @@ describe(
       const exports = instance.exports as Record<string, unknown>;
       expect((exports.main as () => number)()).toBe(12);
     });
+
+    it("compiles MsgPack recursive unions used by sb/vx.voyd", async () => {
+      const entryPath = resolve(import.meta.dirname, "../../../../sb/vx.voyd");
+      const roots = { src: dirname(entryPath), std: resolveStdRoot() };
+      const graph = await loadModuleGraph({ entryPath, roots });
+      const { semantics, diagnostics } = analyzeModules({ graph });
+      const error = [...graph.diagnostics, ...diagnostics].find(
+        (diag) => diag.severity === "error",
+      );
+      if (error) {
+        throw new Error(`${error.code}: ${error.message}`);
+      }
+      const { module } = await emitProgram({ graph, semantics });
+      const wasm = assertRunnableWasm(module);
+      expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
+      const instance = getWasmInstance(wasm);
+      const exports = instance.exports as Record<string, unknown>;
+      expect(typeof exports.main).toBe("function");
+      (exports.main as () => unknown)();
+    });
   },
   { timeout: 20_000 },
 );

@@ -196,11 +196,11 @@ export const monomorphizeProgram = ({
     enqueueModule(canonicalCallee.moduleId);
   };
 
-  while (moduleQueue.length > 0) {
-    const callerModuleId = moduleQueue.shift();
-    if (!callerModuleId) {
-      continue;
-    }
+	  while (moduleQueue.length > 0) {
+	    const callerModuleId = moduleQueue.shift();
+	    if (!callerModuleId) {
+	      continue;
+	    }
     queuedModules.delete(callerModuleId);
     const callerCtx = typingContextFor(callerModuleId);
     if (!callerCtx) {
@@ -209,42 +209,48 @@ export const monomorphizeProgram = ({
 
     const callTargets = callerCtx.callResolution.targets;
     const callTypeArguments = callerCtx.callResolution.typeArguments;
-    callTargets.forEach((targets, callId) => {
-      targets.forEach((targetRef, callerInstanceKey) => {
-        const rawTypeArgs = callTypeArguments.get(callId)?.get(callerInstanceKey);
-        if (!rawTypeArgs || rawTypeArgs.length === 0) {
-          return;
-        }
-        const typeArgs = applyCallerInstanceSubstitution({
-          callerCtx,
-          callerInstanceKey,
-          typeArgs: rawTypeArgs,
-        });
-        requestInstantiation({ callerModuleId, calleeRef: targetRef, typeArgs });
-      });
-    });
+	    callTargets.forEach((targets, callId) => {
+	      targets.forEach((targetRef, callerInstanceKey) => {
+	        const rawTypeArgs = callTypeArguments.get(callId)?.get(callerInstanceKey);
+	        if (!rawTypeArgs || rawTypeArgs.length === 0) {
+	          return;
+	        }
+	        const typeArgs = applyCallerInstanceSubstitution({
+	          callerCtx,
+	          callerInstanceKey,
+	          typeArgs: rawTypeArgs,
+	        });
+	        requestInstantiation({ callerModuleId, calleeRef: targetRef, typeArgs });
+	      });
+	    });
 
-    const instantiationInfo = callerCtx.functions.snapshotInstantiationInfo();
-    const sortedRefKeys = Array.from(instantiationInfo.keys()).sort((a, b) =>
-      a.localeCompare(b, undefined, { numeric: true })
-    );
-    sortedRefKeys.forEach((refKey) => {
-      const instantiations = instantiationInfo.get(refKey);
-      if (!instantiations) {
-        return;
-      }
-      const parsed = parseSymbolRefKey(refKey);
-      if (!parsed || parsed.moduleId === callerModuleId) {
-        return;
-      }
-      const sortedInstantiations = Array.from(instantiations.entries()).sort(([a], [b]) =>
-        a.localeCompare(b, undefined, { numeric: true })
-      );
-      sortedInstantiations.forEach(([, typeArgs]) => {
-        requestInstantiation({ callerModuleId, calleeRef: parsed, typeArgs });
-      });
-    });
-  }
+	    const instantiationSources = [
+	      callerCtx.functions.snapshotInstantiationInfo(),
+	      semantics.get(callerModuleId)?.typing.functionInstantiationInfo,
+	    ].filter(Boolean);
+
+	    instantiationSources.forEach((instantiationInfo) => {
+	      const sortedRefKeys = Array.from(instantiationInfo.keys()).sort((a, b) =>
+	        a.localeCompare(b, undefined, { numeric: true })
+	      );
+	      sortedRefKeys.forEach((refKey) => {
+	        const instantiations = instantiationInfo.get(refKey);
+	        if (!instantiations) {
+	          return;
+	        }
+	        const parsed = parseSymbolRefKey(refKey);
+	        if (!parsed || parsed.moduleId === callerModuleId) {
+	          return;
+	        }
+	        const sortedInstantiations = Array.from(instantiations.entries()).sort(([a], [b]) =>
+	          a.localeCompare(b, undefined, { numeric: true })
+	        );
+	        sortedInstantiations.forEach(([, typeArgs]) => {
+	          requestInstantiation({ callerModuleId, calleeRef: parsed, typeArgs });
+	        });
+	      });
+	    });
+	  }
 
   const getOrCreateMap = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
     const existing = map.get(key);

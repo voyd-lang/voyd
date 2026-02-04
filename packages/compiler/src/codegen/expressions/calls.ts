@@ -1310,6 +1310,9 @@ const getFunctionMetadataForCall = ({
     if (exact) {
       return exact;
     }
+    if (typeArgs.length > 0) {
+      continue;
+    }
     return metas[0];
   }
 
