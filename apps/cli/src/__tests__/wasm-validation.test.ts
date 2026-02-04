@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { dirname, resolve } from "node:path";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
+import { createVoydHost } from "@voyd/js-host";
 import {
   analyzeModules,
   emitProgram,
@@ -72,10 +73,34 @@ describe(
       const { module } = await emitProgram({ graph, semantics });
       const wasm = assertRunnableWasm(module);
       expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
-      const instance = getWasmInstance(wasm);
-      const exports = instance.exports as Record<string, unknown>;
-      expect(typeof exports.main).toBe("function");
-      (exports.main as () => unknown)();
+
+      const host = await createVoydHost({ wasm });
+      const result = await host.runPure("main");
+
+      const normalize = (value: unknown): unknown => {
+        if (Array.isArray(value)) {
+          return value.map(normalize);
+        }
+        if (value instanceof Map) {
+          return Object.fromEntries(
+            Array.from(value.entries()).map(([key, entry]) => [
+              String(key),
+              normalize(entry),
+            ]),
+          );
+        }
+        if (value && typeof value === "object") {
+          return Object.fromEntries(
+            Object.entries(value).map(([key, entry]) => [key, normalize(entry)]),
+          );
+        }
+        return value;
+      };
+
+      const normalized = normalize(result) as Record<string, unknown>;
+      expect(normalized).toEqual(expect.objectContaining({ name: "div" }));
+      expect(normalized.attributes).toBeTypeOf("object");
+      expect(normalized.children).toBeInstanceOf(Array);
     });
   },
   { timeout: 20_000 },

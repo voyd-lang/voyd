@@ -169,7 +169,8 @@ export const resolveImportedValue = ({
   }
 
   const sharedInterners =
-    dependency.typing.arena === ctx.arena && dependency.typing.effects === ctx.effects;
+    dependency.typing.arena === ctx.arena &&
+    dependency.typing.effects.internRow === ctx.effects.internRow;
 
   if (sharedInterners) {
     const scheme = dependency.typing.table.getSymbolScheme(target.symbol);
@@ -199,7 +200,10 @@ export const resolveImportedValue = ({
     }
 
     const resolvedType = ctx.valueTypes.get(symbol);
-    return typeof resolvedType === "number" ? { type: resolvedType, scheme: ctx.table.getSymbolScheme(symbol) } : undefined;
+    if (typeof resolvedType !== "number") {
+      return undefined;
+    }
+    return { type: resolvedType, scheme: ctx.table.getSymbolScheme(symbol) };
   }
 
   const paramMap = new Map<TypeParamId, TypeParamId>();
