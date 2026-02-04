@@ -13,7 +13,7 @@
     },
     "./browser": {
       "types": "./dist/browser.d.ts",
-      "development": "./src/browser.ts",
+      "development": "./dist/browser/index.js",
       "import": "./dist/browser/index.js",
       "default": "./dist/browser/index.js"
     },
@@ -47,6 +47,7 @@
   "dependencies": {
     "@voyd/compiler": "0.9.0",
     "@voyd/js-host": "0.9.0",
+    "@voyd/std": "0.9.0",
     "@voyd/lib": "0.9.0",
     "binaryen": "^123.0.0"
   }

@@ -110,8 +110,8 @@ move(from: from, to: to)
 
 const VsxExample = () => {
   const vsxCode = `
-use std::vsx::all
-use std::msg_pack::MsgPack
+use std::all
+use std::vx::all
 
 fn App()
   let features = ["WASM speed", "Tiny runtime", "Clean syntax"]
@@ -152,7 +152,7 @@ fn List({ value: Array<String> })
 
 
 pub fn main()
-  msg_pack::encode(App())
+  App()
 `;
 
   return (
