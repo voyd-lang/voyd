@@ -159,7 +159,7 @@ async function emitWasm(entryPath: string, optimize = false) {
 async function runWasm(entryPath: string, optimize = false) {
   const { wasm } = await sdk.compile({ entryPath, optimize });
   const result = await sdk.run({ wasm, entryName: "main" });
-  console.log(result);
+  emit(result);
 }
 
 function emit(json: any) {

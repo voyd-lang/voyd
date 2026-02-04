@@ -1,0 +1,11 @@
+obj Vec<T> { marker: i32 }
+
+impl<T> Vec<T>
+  fn map<O>(self, f: (v: T) -> O): () -> Vec<O>
+    let _ = f(self.marker)
+    Vec<O> { marker: 0 }
+
+pub fn main() -> i32
+  let vec = Vec<i32> { marker: 41 }
+  let _ = vec.map(x => x + 1)
+  0

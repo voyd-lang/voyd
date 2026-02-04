@@ -408,33 +408,41 @@ export const typeMethodCallExpr = (
       : undefined;
 
   const targetType = typeExpression(expr.target, ctx, state);
-  const args: Arg[] = [
+  ctx.table.pushExprTypeScope();
+  const probeArgs: Arg[] = [
     { type: targetType, exprId: expr.target },
     ...expr.args.map((arg) => ({
       label: arg.label,
-      type: typeExpression(arg.expr, ctx, state),
+      type:
+        ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda"
+          ? ctx.primitives.unknown
+          : typeExpression(arg.expr, ctx, state),
       exprId: arg.expr,
     })),
   ];
+  ctx.table.popExprTypeScope();
 
-  const argEffectRow = composeEffectRows(
-    ctx.effects,
-    args.map((arg) =>
-      typeof arg.exprId === "number"
-        ? getExprEffectRow(arg.exprId, ctx)
-        : ctx.effects.emptyRow,
-    ),
-  );
+  const argEffectRowFor = (args: readonly Arg[]): number =>
+    composeEffectRows(
+      ctx.effects,
+      args.map((arg) =>
+        typeof arg.exprId === "number"
+          ? getExprEffectRow(arg.exprId, ctx)
+          : ctx.effects.emptyRow,
+      ),
+    );
 
   const finalizeCall = ({
     returnType,
     latentEffectRow = ctx.effects.emptyRow,
+    argsForEffects = probeArgs,
   }: {
     returnType: TypeId;
     latentEffectRow?: number;
+    argsForEffects?: readonly Arg[];
   }): TypeId => {
     const callEffect = composeEffectRows(ctx.effects, [
-      argEffectRow,
+      argEffectRowFor(argsForEffects),
       latentEffectRow,
     ]);
     ctx.effects.setExprEffect(expr.id, callEffect);
@@ -474,8 +482,11 @@ export const typeMethodCallExpr = (
         symbol,
         signature,
         receiverTypeOverride
-          ? [{ ...args[0]!, type: receiverTypeOverride }, ...args.slice(1)]
-          : args,
+          ? [
+              { ...probeArgs[0]!, type: receiverTypeOverride },
+              ...probeArgs.slice(1),
+            ]
+          : probeArgs,
         ctx,
         state,
         typeArguments,
@@ -486,7 +497,7 @@ export const typeMethodCallExpr = (
       ? (() => {
           const direct = resolveTraitDispatchOverload({
             candidates: resolution.candidates,
-            args,
+            args: probeArgs,
             ctx,
             state,
           });
@@ -505,7 +516,10 @@ export const typeMethodCallExpr = (
             .map((receiverTypeOverride) =>
               resolveTraitDispatchOverload({
                 candidates: resolution.candidates,
-                args: [{ ...args[0]!, type: receiverTypeOverride }, ...args.slice(1)],
+                args: [
+                  { ...probeArgs[0]!, type: receiverTypeOverride },
+                  ...probeArgs.slice(1),
+                ],
                 ctx,
                 state,
               }),
@@ -578,16 +592,76 @@ export const typeMethodCallExpr = (
   targets.set(instanceKey, selectedRef);
   ctx.callResolution.targets.set(expr.id, targets);
 
-  const callArgs =
-    selected.receiverTypeOverride && args.length > 0
-      ? [{ ...args[0]!, type: selected.receiverTypeOverride }, ...args.slice(1)]
-      : args;
-  if (selected.receiverTypeOverride && args.length > 0) {
-    ctx.resolvedExprTypes.set(expr.target, selected.receiverTypeOverride);
+  const receiverType = selected.receiverTypeOverride ?? targetType;
+  if (selected.receiverTypeOverride) {
+    ctx.resolvedExprTypes.set(expr.target, receiverType);
   }
 
+  const hintSubstitution = (() => {
+    const hasTypeParams =
+      selected.signature.typeParams && selected.signature.typeParams.length > 0;
+    if (!hasTypeParams) {
+      return undefined;
+    }
+
+    const merged = new Map<TypeParamId, TypeId>(
+      getTraitMethodTypeBindings({
+        calleeSymbol: selected.symbol,
+        receiverType,
+        signature: selected.signature,
+        ctx,
+        state,
+      }) ?? [],
+    );
+
+    applyExplicitTypeArguments({
+      signature: selected.signature,
+      typeArguments,
+      calleeSymbol: selected.symbol,
+      ctx,
+    })?.forEach((value, key) => merged.set(key, value));
+
+    const hintArgs =
+      selected.receiverTypeOverride && probeArgs.length > 0
+        ? [{ ...probeArgs[0]!, type: receiverType }, ...probeArgs.slice(1)]
+        : probeArgs;
+
+    hintArgs.forEach((arg, index) => {
+      const param = selected.signature.parameters[index];
+      if (!param) {
+        return;
+      }
+      const expected = ctx.arena.substitute(param.type, merged);
+      bindTypeParamsFromType(expected, arg.type, merged, ctx, state);
+    });
+
+    return merged.size > 0 ? merged : undefined;
+  })();
+
+  const expectedParamTypeAt = (index: number): TypeId | undefined => {
+    const param = selected.signature.parameters[index];
+    if (!param) {
+      return undefined;
+    }
+    return hintSubstitution
+      ? ctx.arena.substitute(param.type, hintSubstitution)
+      : param.type;
+  };
+
+  const args: Arg[] = [
+    { type: receiverType, exprId: expr.target },
+    ...expr.args.map((arg, index) => {
+      const expectedType = expectedParamTypeAt(index + 1);
+      return {
+        label: arg.label,
+        type: typeExpression(arg.expr, ctx, state, { expectedType }),
+        exprId: arg.expr,
+      };
+    }),
+  ];
+
   const { returnType, effectRow } = typeFunctionCall({
-    args: callArgs,
+    args,
     signature: selected.signature,
     calleeSymbol: selected.symbol,
     typeArguments,
@@ -599,7 +673,11 @@ export const typeMethodCallExpr = (
     nameForSymbol: selected.nameForSymbol,
   });
 
-  return finalizeCall({ returnType, latentEffectRow: effectRow });
+  return finalizeCall({
+    returnType,
+    latentEffectRow: effectRow,
+    argsForEffects: args,
+  });
 };
 
 const getExpectedCallParameters = ({
