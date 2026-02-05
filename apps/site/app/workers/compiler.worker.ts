@@ -1,5 +1,4 @@
-import { compile } from "@voyd/sdk/browser";
-import { createVoydHost } from "@voyd/js-host";
+import { createSdk } from "@voyd/sdk/browser";
 
 type Inbound = { id: number; code: string };
 type Outbound =
@@ -19,10 +18,9 @@ self.postMessage({ type: "ready" });
 self.addEventListener("message", async (event: MessageEvent<Inbound>) => {
   const { id, code } = event.data || {};
   try {
-    const mod = await compile(code);
-    const wasm = toBytes(mod.emitBinary());
-    const host = await createVoydHost({ wasm, bufferSize: 256 * 1024 });
-    const tree = await host.run("main");
+    const { compile } = createSdk();
+    const program = await compile({ source: code });
+    const tree = await program.run({ entryName: "main" });
     const message: Outbound = { id, ok: true, tree };
     (self as unknown as Worker).postMessage(message);
   } catch (err) {
