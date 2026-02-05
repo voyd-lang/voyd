@@ -13,6 +13,7 @@ const fixtureEntryPath = path.join(
   "effects-e2e.voyd"
 );
 const ASYNC_EFFECT_ID = "com.example.async";
+const GENERIC_EFFECT_ID = "com.example.generic";
 
 const assertNoCompileErrors = (
   diagnostics: { severity: string; message: string }[]
@@ -334,5 +335,69 @@ describe("smoke: effects e2e", () => {
 
     expect(output).toBe(6);
     expect(logs).toEqual([6]);
+  });
+
+  it("runs a generic effect with an external handler using inferred type args", async () => {
+    const output = await compiled.run<number>({
+      entryName: "host_generic_effect_inferred",
+      handlers: {
+        [`${GENERIC_EFFECT_ID}::pass`]: ({ resume }, value: unknown) =>
+          resume(asNumber("Gen::pass", value) + 10),
+      },
+    });
+
+    expect(output).toBe(19);
+  });
+
+  it("runs a generic effect with an external handler using explicit type args", async () => {
+    const output = await compiled.run<number>({
+      entryName: "host_generic_effect_explicit",
+      handlers: {
+        [`${GENERIC_EFFECT_ID}::pass`]: ({ resume }, value: unknown) =>
+          resume(asNumber("Gen::pass", value) + 20),
+      },
+    });
+
+    expect(output).toBe(29);
+  });
+
+  it("runs a generic tail effect with an external handler using explicit type args", async () => {
+    const output = await compiled.run<number>({
+      entryName: "host_generic_effect_tail_explicit",
+      handlers: {
+        [`${GENERIC_EFFECT_ID}::pass_tail`]: ({ tail }, value: unknown) =>
+          tail(asNumber("Gen::pass_tail", value) + 2),
+      },
+    });
+
+    expect(output).toBe(8);
+  });
+
+  it("runs a generic effect with an internal handler using inferred type args", async () => {
+    const output = await compiled.run<number>({
+      entryName: "internal_generic_effect_inferred",
+    });
+    expect(output).toBe(11);
+  });
+
+  it("runs a generic effect with an internal handler using explicit type args", async () => {
+    const output = await compiled.run<number>({
+      entryName: "internal_generic_effect_explicit",
+    });
+    expect(output).toBe(12);
+  });
+
+  it("supports generic internal handlers that choose not to resume", async () => {
+    const output = await compiled.run<number>({
+      entryName: "internal_generic_effect_no_resume",
+    });
+    expect(output).toBe(4);
+  });
+
+  it("supports generic internal tail handlers that mutate host locals", async () => {
+    const output = await compiled.run<number>({
+      entryName: "internal_generic_effect_tail_mutation",
+    });
+    expect(output).toBe(9);
   });
 });

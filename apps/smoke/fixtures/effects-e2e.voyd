@@ -8,6 +8,11 @@ eff Async
   gather(resume, left: i32, right: i32) -> i32
   notify(resume, value: i32) -> void
 
+@effect(id: "com.example.generic")
+eff Gen<T>
+  pass(resume, value: T) -> T
+  pass_tail(tail, value: T) -> T
+
 eff IO
   read(tail) -> i32
 
@@ -168,3 +173,46 @@ pub fn internal_resume_then_tail(): () -> i32
     resume(value + 1)
   IntCombo::await_tail(tail, value):
     tail(value * 2)
+
+pub fn host_generic_effect_inferred(): Gen<i32> -> i32
+  let value = Gen::pass(8)
+  value + 1
+
+pub fn host_generic_effect_explicit(): Gen<i32> -> i32
+  let value: i32 = Gen::pass(8)
+  value + 1
+
+pub fn host_generic_effect_tail_explicit(): Gen<i32> -> i32
+  let value: i32 = Gen::pass_tail(6)
+  value
+
+pub fn internal_generic_effect_inferred(): () -> i32
+  try
+    let value = Gen::pass(8)
+    value + 1
+  Gen::pass(resume, value):
+    resume(value + 2)
+
+pub fn internal_generic_effect_explicit(): () -> i32
+  try
+    let value: i32 = Gen::pass(8)
+    value + 1
+  Gen::pass(resume, value):
+    resume(value + 3)
+
+pub fn internal_generic_effect_no_resume(): () -> i32
+  try
+    let value = Gen::pass(8)
+    value + 1
+  Gen::pass(resume, value):
+    if value > 9 then:
+      resume(value)
+    value / 2
+
+pub fn internal_generic_effect_tail_mutation(): () -> i32
+  var total = 3
+  try
+    Gen::pass_tail(4)
+  Gen::pass_tail(tail, value):
+    total = total + value
+    tail(total + 2)
