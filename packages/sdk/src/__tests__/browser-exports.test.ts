@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 describe("sdk exports", () => {
-  it("does not expose browser source entry via development exports", async () => {
+  it("exposes browser source entry via development exports", async () => {
     const packageJsonPath = fileURLToPath(
       new URL("../../package.json", import.meta.url)
     );
@@ -13,7 +13,7 @@ describe("sdk exports", () => {
     };
 
     expect(json.exports?.["./browser"]?.development).toBe(
-      "./dist/browser/index.js"
+      "./src/browser.ts"
     );
   });
 });

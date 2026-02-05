@@ -19,6 +19,13 @@ export default defineConfig({
   resolve: {
     // Keep symlinked packages under node_modules path
     preserveSymlinks: true,
+    dedupe: [
+      "@voyd/compiler",
+      "@voyd/js-host",
+      "@voyd/lib",
+      "@voyd/sdk",
+      "@voyd/std",
+    ],
     alias: [
       // Avoid bundling Node-only deps pulled via optional paths in `voyd`
       { find: /^glob(\/.*)?$/, replacement: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "stubs/glob.ts") },
@@ -29,6 +36,9 @@ export default defineConfig({
   optimizeDeps: {
     // Ensure binaryen (voyd's dependency) is pre-bundled by Vite
     include: ["binaryen"],
+    // Workspace packages are already ESM and can be large; pre-bundling them
+    // can lead to duplicated module instances (breaking `instanceof` checks).
+    exclude: ["@voyd/compiler", "@voyd/js-host", "@voyd/lib", "@voyd/sdk", "@voyd/std"],
     esbuildOptions: {
       supported: {
         "top-level-await": true,

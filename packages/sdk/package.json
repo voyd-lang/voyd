@@ -13,7 +13,7 @@
     },
     "./browser": {
       "types": "./dist/browser.d.ts",
-      "development": "./dist/browser/index.js",
+      "development": "./src/browser.ts",
       "import": "./dist/browser/index.js",
       "default": "./dist/browser/index.js"
     },
