@@ -111,6 +111,7 @@ move(from: from, to: to)
 const VsxExample = () => {
   const vsxCode = `
 use std::all
+use std::msgpack::MsgPack
 use std::vx::all
 
 fn App()

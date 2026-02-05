@@ -37,6 +37,11 @@ const compileToBinaryenModule = async (entryPath: string) => {
   return module;
 };
 
+type BinaryenLikeModule = {
+  emitBinary: () => unknown;
+  validate: () => unknown;
+};
+
 const emitWasmBytes = (mod: { emitBinary: () => unknown }): Uint8Array => {
   const emitted = mod.emitBinary();
   return emitted instanceof Uint8Array
@@ -46,10 +51,7 @@ const emitWasmBytes = (mod: { emitBinary: () => unknown }): Uint8Array => {
         new Uint8Array();
 };
 
-const assertRunnableWasm = (mod: {
-  emitBinary: () => unknown;
-  validate: () => boolean;
-}): Uint8Array => {
+const assertRunnableWasm = (mod: BinaryenLikeModule): Uint8Array => {
   const wasm = emitWasmBytes(mod);
   if (WebAssembly.validate(wasm as BufferSource)) {
     return wasm;
@@ -83,17 +85,18 @@ describe(
       const module = await compileToBinaryenModule(
         fixturePath("match_destructure_fields.voyd"),
       );
+      const mod = module as unknown as BinaryenLikeModule;
 
-      const originalValidate = module.validate.bind(module);
-      (module as unknown as { validate: () => boolean }).validate = () => {
+      const originalValidate = mod.validate.bind(module);
+      mod.validate = () => {
         throw new Error("binaryen validate should not run when wasm validates");
       };
 
-      const wasm = assertRunnableWasm(module);
+      const wasm = assertRunnableWasm(mod);
       expect(wasm).toBeInstanceOf(Uint8Array);
       expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
 
-      (module as unknown as { validate: () => boolean }).validate = originalValidate;
+      mod.validate = originalValidate;
     });
 
     it("compiles std::optional and preserves optional semantics", async () => {
@@ -120,4 +123,3 @@ describe(
   },
   { timeout: 20_000 },
 );
-

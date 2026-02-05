@@ -224,10 +224,14 @@ export const monomorphizeProgram = ({
 	      });
 	    });
 
-	    const instantiationSources = [
-	      callerCtx.functions.snapshotInstantiationInfo(),
-	      semantics.get(callerModuleId)?.typing.functionInstantiationInfo,
-	    ].filter(Boolean);
+	    const instantiationSources: Array<
+	      ReadonlyMap<SymbolRefKey, ReadonlyMap<string, readonly TypeId[]>>
+	    > = [callerCtx.functions.snapshotInstantiationInfo()];
+	    const priorInstantiationInfo =
+	      semantics.get(callerModuleId)?.typing.functionInstantiationInfo;
+	    if (priorInstantiationInfo) {
+	      instantiationSources.push(priorInstantiationInfo);
+	    }
 
 	    instantiationSources.forEach((instantiationInfo) => {
 	      const sortedRefKeys = Array.from(instantiationInfo.keys()).sort((a, b) =>
