@@ -8,11 +8,12 @@ export type NoResume<T = unknown> = {
   readonly value: T;
 };
 
-export type EffectHandlerResult = unknown | NoResume;
+export type EffectHandlerResult<T = unknown> = T | NoResume<T>;
 
-export type EffectHandler = (
-  ...args: unknown[]
-) => EffectHandlerResult | Promise<EffectHandlerResult>;
+export type EffectHandler<
+  TArgs extends unknown[] = unknown[],
+  TResult = unknown,
+> = (...args: TArgs) => EffectHandlerResult<TResult> | Promise<EffectHandlerResult<TResult>>;
 
 export type EffectDescriptor = {
   opIndex: number;

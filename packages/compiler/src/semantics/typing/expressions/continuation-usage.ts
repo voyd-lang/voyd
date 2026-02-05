@@ -1,6 +1,5 @@
-import { walkExpression } from "../../hir/index.js";
+import { walkExpression, type HirGraph } from "../../hir/index.js";
 import type { HirExprId, SymbolId } from "../../ids.js";
-import type { TypingContext } from "../types.js";
 
 export type ContinuationUsage = { min: number; max: number; escapes: boolean };
 
@@ -15,12 +14,12 @@ type ContinuationFlowUsage = {
 export function analyzeContinuationUsage({
   exprId,
   targetSymbol,
-  ctx,
+  hir,
   nested,
 }: {
   exprId: HirExprId;
   targetSymbol: SymbolId;
-  ctx: TypingContext;
+  hir: HirGraph;
   nested?: boolean;
 }): ContinuationUsage {
   const emptyUsage: ContinuationFlowUsage = {
@@ -38,7 +37,7 @@ export function analyzeContinuationUsage({
 
   walkExpression({
     exprId,
-    hir: ctx.hir,
+    hir,
     onEnterExpression: (_id, expr) => {
       if (expr.exprKind === "lambda") {
         nestedLambdaDepth += 1;
@@ -83,7 +82,7 @@ export function analyzeContinuationUsage({
               : emptyUsage;
           break;
         case "call": {
-          const callee = ctx.hir.expressions.get(expr.callee);
+          const callee = hir.expressions.get(expr.callee);
           const argsUsage = expr.args.reduce(
             (acc, arg) => sequenceUsage({ left: acc, right: usageForExpr(arg.expr) }),
             emptyUsage,

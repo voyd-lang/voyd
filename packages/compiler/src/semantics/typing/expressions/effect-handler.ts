@@ -397,7 +397,7 @@ const enforceResumptionUsage = ({
       ? analyzeContinuationUsage({
           exprId: clause.body,
           targetSymbol: continuationSymbol,
-          ctx,
+          hir: ctx.hir,
         })
       : { min: 0, max: 0, escapes: false };
 

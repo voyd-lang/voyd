@@ -120,10 +120,15 @@ export interface EffectHandlerRequest {
   label: string;
 }
 
-export type EffectHandler = (
+export type EffectHandlerResult<T = unknown> = T | NoResume<T>;
+
+export type EffectHandler<
+  TArgs extends unknown[] = unknown[],
+  TResult = unknown,
+> = (
   request: EffectHandlerRequest,
-  ...args: unknown[]
-) => unknown | Promise<unknown>;
+  ...args: TArgs
+) => EffectHandlerResult<TResult> | Promise<EffectHandlerResult<TResult>>;
 
 const toBytes = (wasm: WasmSource): Uint8Array => {
   if (wasm instanceof Uint8Array) return normalizeBinary(wasm);

@@ -34,6 +34,16 @@ const hostNoResumeFixturePath = resolve(
   "__fixtures__",
   "effects-host-no-resume.voyd"
 );
+const hostTailNoResumeFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-host-tail-no-resume.voyd"
+);
+const handlerHostMutationFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-handler-host-mutation.voyd"
+);
 
 const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
 
@@ -135,5 +145,47 @@ describe("effects wasm e2e", () => {
       handlers: { [awaitLabel]: handler },
     });
     expect(stopped.value).toBe(2);
+  });
+
+  it("rejects host noResume for tail handlers", async () => {
+    const { wasm } = await compileEffectFixture({ entryPath: hostTailNoResumeFixturePath });
+    const awaitLabel = (() => {
+      const table = parseEffectTable(wasm);
+      const op = table.ops.find((entry) =>
+        entry.label.endsWith("Async.await") || entry.label.includes("Async.await")
+      );
+      if (!op) {
+        throw new Error("missing Async.await op entry");
+      }
+      return op.label;
+    })();
+
+    await expect(
+      runEffectfulExport<number>({
+        wasm,
+        entryName: "host_tail",
+        handlers: {
+          [awaitLabel]: (_request, x) => {
+            if (typeof x !== "number") {
+              throw new Error(`expected i32 arg, got ${typeof x}`);
+            }
+            return noResume(x);
+          },
+        },
+      }),
+    ).rejects.toThrow(/Missing tail resumption/);
+  });
+
+  it("allows handler clauses to mutate hosting locals for resume and tail", async () => {
+    const { wasm } = await compileEffectFixture({ entryPath: handlerHostMutationFixturePath });
+    const instance = instantiateEffectsModule(wasm);
+
+    const resumeTarget = instance.exports
+      .resume_handler_mutates_host as CallableFunction;
+    const tailTarget = instance.exports.tail_handler_mutates_host as CallableFunction;
+
+    expect(resumeTarget(1)).toBe(5);
+    expect(resumeTarget(0)).toBe(15);
+    expect(tailTarget()).toBe(7);
   });
 });
