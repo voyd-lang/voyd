@@ -15,6 +15,23 @@ const OP_ENTRY_SIZE = 28;
 const MSGPACK_OPTS = { useBigInt64: true } as const;
 const WASM_PAGE_SIZE = 64 * 1024;
 
+const NO_RESUME_BRAND = Symbol.for("voyd.no-resume");
+
+export type NoResume<T = unknown> = {
+  readonly [NO_RESUME_BRAND]: true;
+  readonly value: T;
+};
+
+export const noResume = <T>(value: T): NoResume<T> => ({
+  [NO_RESUME_BRAND]: true,
+  value,
+});
+
+const isNoResume = (value: unknown): value is NoResume => {
+  if (!value || typeof value !== "object") return false;
+  return (value as Record<symbol, unknown>)[NO_RESUME_BRAND] === true;
+};
+
 const ensureMemoryCapacity = (
   memory: WebAssembly.Memory,
   requiredBytes: number,
@@ -472,8 +489,19 @@ export const runEffectfulExport = async <T = unknown>({
           `Unhandled effect ${request.label} (${resumeKindName(request.resumeKind)})`
         );
       }
-      const resumeValue = await handler(request, ...(decodedRequest.args ?? []));
-      const encoded = encode(resumeValue, MSGPACK_OPTS) as Uint8Array;
+      const handlerResult = await handler(request, ...(decodedRequest.args ?? []));
+      if (isNoResume(handlerResult)) {
+        if (resumeKind === RESUME_KIND.tail) {
+          throw new Error(`Missing tail resumption for ${request.label}`);
+        }
+        return {
+          value: handlerResult.value as T,
+          table,
+          instance,
+        };
+      }
+
+      const encoded = encode(handlerResult, MSGPACK_OPTS) as Uint8Array;
       if (encoded.length > bufferSize) {
         throw new Error("resume payload exceeds buffer size");
       }

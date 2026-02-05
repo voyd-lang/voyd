@@ -43,6 +43,7 @@ export type CompileResult = {
 export type RunOptions = {
   wasm: Uint8Array;
   entryName: string;
+  args?: unknown[];
   /** handlers keyed as "effectId:opId:signatureHash" */
   handlers?: Record<string, EffectHandler>;
   imports?: WebAssembly.Imports;

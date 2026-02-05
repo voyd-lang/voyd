@@ -567,7 +567,7 @@ const analyzeContinuationUsage = ({
   return usageByExpr.get(exprId) ?? emptyUsage;
 };
 
-const enforceTailResumption = ({
+const enforceResumptionUsage = ({
   clause,
   ctx,
   opName,
@@ -579,7 +579,8 @@ const enforceTailResumption = ({
   span: SourceSpan;
 }): void => {
   const operationDecl = ctx.decls.getEffectOperation(clause.operation);
-  if (operationDecl?.operation.resumable !== "tail") {
+  const resumable = operationDecl?.operation.resumable;
+  if (resumable !== "tail" && resumable !== "resume") {
     return;
   }
   const continuationSymbol = clause.parameters[0]?.symbol;
@@ -592,31 +593,45 @@ const enforceTailResumption = ({
         })
       : { min: 0, max: 0, escapes: false };
 
-  const staticallyExactOnce =
-    !usage.escapes && usage.min === 1 && usage.max === 1;
-  const definitelyMissing =
-    !usage.escapes && usage.min === 0 && usage.max === 0;
-  const definitelyMultiple = !usage.escapes && usage.min > 1 && usage.max > 1;
-  const enforcement: "static" | "runtime" =
-    usage.escapes || !staticallyExactOnce ? "runtime" : "static";
+  if (resumable === "tail") {
+    const staticallyExactOnce =
+      !usage.escapes && usage.min === 1 && usage.max === 1;
+    clause.tailResumption = {
+      enforcement: staticallyExactOnce ? "static" : "runtime",
+      calls: usage.max,
+      minCalls: usage.min,
+      escapes: usage.escapes,
+    };
+    ctx.tailResumptions.set(clause.body, clause.tailResumption);
+    if (!staticallyExactOnce) {
+      emitDiagnostic({
+        ctx,
+        code: "TY0015",
+        params: {
+          kind: "tail-resume-count",
+          operation: opName,
+          minCalls: usage.min,
+          maxCalls: usage.max,
+          escapes: usage.escapes,
+        },
+        span,
+      });
+    }
+    return;
+  }
 
-  clause.tailResumption = {
-    enforcement,
-    calls: usage.max,
-    minCalls: usage.min,
-    escapes: usage.escapes,
-  };
-
-  ctx.tailResumptions.set(clause.body, clause.tailResumption);
-
-  if (definitelyMissing || definitelyMultiple) {
+  // resumable === "resume"
+  const resumableOk = !usage.escapes && usage.max <= 1;
+  if (!resumableOk) {
     emitDiagnostic({
       ctx,
-      code: "TY0015",
+      code: "TY0035",
       params: {
-        kind: "tail-resume-count",
+        kind: "resume-call-count",
         operation: opName,
-        count: usage.max,
+        minCalls: usage.min,
+        maxCalls: usage.max,
+        escapes: usage.escapes,
       },
       span,
     });
@@ -676,7 +691,7 @@ export const typeEffectHandlerExpr = (
       remainingRow = dropHandledOperation({ row: remainingRow, opName, ctx });
     }
     const clauseSpan = ctx.hir.expressions.get(clause.body)?.span ?? expr.span;
-    enforceTailResumption({ clause, ctx, opName, span: clauseSpan });
+    enforceResumptionUsage({ clause, ctx, opName, span: clauseSpan });
   });
 
   const handlersRow = composeEffectRows(ctx.effects, handlerEffects);

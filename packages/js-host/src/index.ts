@@ -1,5 +1,7 @@
 export { createVoydHost } from "./host.js";
 export type { HostInitOptions, VoydHost } from "./host.js";
+export { noResume } from "./runtime/no-resume.js";
+export type { NoResume } from "./runtime/no-resume.js";
 export {
   buildHandlersByLabelSuffix,
   registerHandlersByLabelSuffix,

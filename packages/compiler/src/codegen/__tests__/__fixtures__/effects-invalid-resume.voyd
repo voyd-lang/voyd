@@ -1,0 +1,10 @@
+eff Async
+  log(resume, msg: i32) -> i32
+
+pub fn main(): () -> i32
+  try
+    Async::log(1)
+  Async::log(resume, msg):
+    resume(msg)
+    resume(msg + 1)
+

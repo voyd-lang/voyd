@@ -9,17 +9,18 @@ const createRun = ({ wasm }: { wasm: Uint8Array }): CompileResult["run"] => {
     handlers,
     imports,
     bufferSize,
+    args,
   }: Omit<RunOptions, "wasm">): Promise<T> => {
     const host = await createHost({ wasm, imports, bufferSize });
     if (handlers) {
       registerHandlers({ host, handlers });
     }
-    return host.run<T>(entryName);
+    return host.run<T>(entryName, args);
   };
 };
 
 export const createCompileResult = async (
-  artifacts: CompileArtifacts
+  artifacts: CompileArtifacts,
 ): Promise<CompileResult> => {
   const run = createRun({ wasm: artifacts.wasm });
   const testsWasm = artifacts.testsWasm ?? artifacts.wasm;

@@ -15,26 +15,6 @@ pub fn main(): () -> i32
   Async::log(resume, msg):
     resume(msg)
 
-pub fn double_resume(): () -> i32
-  try
-    worker()
-  Async::await(tail):
-    tail(3)
-  Async::log(resume, msg):
-    resume(msg)
-    resume(msg + 1)
-
-pub fn missing_tail(): () -> i32
-  try
-    worker()
-  Async::await(tail):
-    if 1 == 0 then:
-      tail(1)
-    else:
-      0
-  Async::log(resume, msg):
-    resume(msg)
-
 pub fn perform_in_try(): () -> i32
   try
     let value = Async::await()

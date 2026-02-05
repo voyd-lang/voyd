@@ -5,6 +5,7 @@ import {
   EFFECT_RESULT_STATUS,
   RESUME_KIND,
 } from "./constants.js";
+import { isNoResume } from "./no-resume.js";
 
 const MSGPACK_OPTS = { useBigInt64: true } as const;
 
@@ -124,8 +125,15 @@ export const runEffectLoop = async <T = unknown>({
           `Unhandled effect ${opEntry.label} (${resumeKindName(opEntry.resumeKind)})`
         );
       }
-      const resumeValue = await handler(...(decodedEffect.args ?? []));
-      const encoded = encode(resumeValue, MSGPACK_OPTS) as Uint8Array;
+      const handlerResult = await handler(...(decodedEffect.args ?? []));
+      if (isNoResume(handlerResult)) {
+        if (resumeKind === RESUME_KIND.tail) {
+          throw new Error(`Missing tail resumption for ${opEntry.label}`);
+        }
+        return handlerResult.value as T;
+      }
+
+      const encoded = encode(handlerResult, MSGPACK_OPTS) as Uint8Array;
       if (encoded.length > bufferSize) {
         throw new Error("resume payload exceeds buffer size");
       }
