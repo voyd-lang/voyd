@@ -20,7 +20,9 @@ const groupOpsByEffect = (
 const findMatchingSuffix = (
   label: string | undefined,
   suffixes: string[]
-): string | undefined => suffixes.find((suffix) => label?.endsWith(suffix));
+): string | undefined => {
+  return suffixes.find((suffix) => label?.endsWith(suffix));
+};
 
 export const buildHandlersByLabelSuffix = ({
   table,

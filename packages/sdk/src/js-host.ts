@@ -1,5 +1,7 @@
 export { createVoydHost } from "@voyd/js-host";
 export type {
+  EffectContinuation,
+  EffectContinuationCall,
   EffectHandler,
   HostInitOptions,
   HostProtocolTable,

@@ -1,12 +1,8 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { noResume } from "@voyd/js-host";
+import { createVoydHost } from "@voyd/js-host";
 import { createEffectsImports } from "./support/wasm-imports.js";
-import {
-  compileEffectFixture,
-  parseEffectTable,
-  runEffectfulExport,
-} from "./support/effects-harness.js";
+import { compileEffectFixture } from "./support/effects-harness.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";
 
 const fixturePath = resolve(
@@ -57,6 +53,21 @@ describe("effects wasm e2e", () => {
       ),
       createEffectsImports(),
     );
+
+  const registerStdTestFallbackHandlers = async (
+    host: Awaited<ReturnType<typeof createVoydHost>>
+  ): Promise<void> => {
+    host.table.ops
+      .filter((op) => op.effectId.endsWith("std::std::test::assertions::Test"))
+      .forEach((op) => {
+        host.registerHandler(
+          op.effectId,
+          op.opId,
+          op.signatureHash,
+          ({ resume, tail }) => (op.resumeKind === "tail" ? tail() : resume())
+        );
+      });
+  };
 
   it("runs handlers inside wasm", async () => {
     const { wasm } = await buildModule();
@@ -113,67 +124,42 @@ describe("effects wasm e2e", () => {
 
   it("supports host handlers that can choose not to resume", async () => {
     const { wasm } = await compileEffectFixture({ entryPath: hostNoResumeFixturePath });
-    const handler = (_request: unknown, x: unknown) => {
-      if (typeof x !== "number") {
-        throw new Error(`expected i32 arg, got ${typeof x}`);
-      }
-      if (x > 4) return x;
-      return noResume(Math.trunc(x / 2));
+    const runHostEntry = async (entryName: string): Promise<number> => {
+      const host = await createVoydHost({ wasm });
+      await registerStdTestFallbackHandlers(host);
+      const count = host.registerHandlersByLabelSuffix({
+        "Async.await": ({ resume, end }, x) => {
+          if (typeof x !== "number") {
+            throw new Error(`expected i32 arg, got ${typeof x}`);
+          }
+          return x > 4 ? resume(x) : end(Math.trunc(x / 2));
+        },
+      });
+      expect(count).toBe(1);
+      return host.run<number>(entryName);
     };
 
-    const awaitLabel = (() => {
-      const table = parseEffectTable(wasm);
-      const op = table.ops.find((entry) =>
-        entry.label.endsWith("Async.await") || entry.label.includes("Async.await")
-      );
-      if (!op) {
-        throw new Error("missing Async.await op entry");
-      }
-      return op.label;
-    })();
-
-    const resumed = await runEffectfulExport<number>({
-      wasm,
-      entryName: "host_resume",
-      handlers: { [awaitLabel]: handler },
-    });
-    expect(resumed.value).toBe(10);
-
-    const stopped = await runEffectfulExport<number>({
-      wasm,
-      entryName: "host_no_resume",
-      handlers: { [awaitLabel]: handler },
-    });
-    expect(stopped.value).toBe(2);
+    expect(await runHostEntry("host_resume")).toBe(10);
+    expect(await runHostEntry("host_no_resume")).toBe(2);
   });
 
-  it("rejects host noResume for tail handlers", async () => {
+  it("rejects host end(...) for tail handlers", async () => {
     const { wasm } = await compileEffectFixture({ entryPath: hostTailNoResumeFixturePath });
-    const awaitLabel = (() => {
-      const table = parseEffectTable(wasm);
-      const op = table.ops.find((entry) =>
-        entry.label.endsWith("Async.await") || entry.label.includes("Async.await")
-      );
-      if (!op) {
-        throw new Error("missing Async.await op entry");
-      }
-      return op.label;
-    })();
+    const host = await createVoydHost({ wasm });
+    await registerStdTestFallbackHandlers(host);
+    const count = host.registerHandlersByLabelSuffix({
+      "Async.await": ({ end }, x) => {
+        if (typeof x !== "number") {
+          throw new Error(`expected i32 arg, got ${typeof x}`);
+        }
+        return end(x);
+      },
+    });
+    expect(count).toBe(1);
 
     await expect(
-      runEffectfulExport<number>({
-        wasm,
-        entryName: "host_tail",
-        handlers: {
-          [awaitLabel]: (_request, x) => {
-            if (typeof x !== "number") {
-              throw new Error(`expected i32 arg, got ${typeof x}`);
-            }
-            return noResume(x);
-          },
-        },
-      }),
-    ).rejects.toThrow(/Missing tail resumption/);
+      host.run<number>("host_tail"),
+    ).rejects.toThrow(/must return tail/i);
   });
 
   it("allows handler clauses to mutate hosting locals for resume and tail", async () => {

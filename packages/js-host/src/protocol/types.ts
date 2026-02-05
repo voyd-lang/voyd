@@ -4,21 +4,32 @@ export type SignatureHash = string;
 export type Handle = number;
 export type ResumeKind = "resume" | "tail";
 
-export type NoResume<T = unknown> = {
-  readonly value: T;
-};
-
-export type EffectHandlerResult<T = unknown> = T | NoResume<T>;
+export type EffectContinuationKind = "resume" | "tail" | "end";
 
 export type EffectHandler<
   TArgs extends unknown[] = unknown[],
   TResult = unknown,
-> = (...args: TArgs) => EffectHandlerResult<TResult> | Promise<EffectHandlerResult<TResult>>;
+> = (
+  continuation: EffectContinuation,
+  ...args: TArgs
+) => EffectContinuationCall<TResult> | Promise<EffectContinuationCall<TResult>>;
+
+export type EffectContinuationCall<TResult = unknown> = {
+  readonly kind: EffectContinuationKind;
+  readonly value: TResult;
+};
+
+export type EffectContinuation = {
+  resume: (...args: unknown[]) => EffectContinuationCall;
+  tail: (...args: unknown[]) => EffectContinuationCall;
+  end: (result: unknown) => EffectContinuationCall;
+};
 
 export type EffectDescriptor = {
   opIndex: number;
   effectId: EffectId;
   opId: OpId;
+  opName: string;
   resumeKind: ResumeKind;
   signatureHash: SignatureHash;
   label?: string;

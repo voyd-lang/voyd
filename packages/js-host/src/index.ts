@@ -1,7 +1,5 @@
 export { createVoydHost } from "./host.js";
 export type { HostInitOptions, VoydHost } from "./host.js";
-export { noResume } from "./runtime/no-resume.js";
-export type { NoResume } from "./runtime/no-resume.js";
 export {
   buildHandlersByLabelSuffix,
   registerHandlersByLabelSuffix,
@@ -11,8 +9,21 @@ export {
   parseEffectTable,
   formatSignatureHash,
   normalizeSignatureHash,
+  toHostProtocolTable,
 } from "./protocol/table.js";
+export {
+  buildEffectOpKey,
+  buildParsedEffectOpMap,
+  parseResumeKind,
+  resolveParsedEffectOp,
+  resumeKindName,
+} from "./effect-op.js";
 export { EXPORT_ABI_SECTION, parseExportAbi } from "./protocol/export-abi.js";
+export type {
+  EffectOpKey,
+  EffectOpKeyInput,
+  EffectOpRequest,
+} from "./effect-op.js";
 export type {
   ParsedEffectOp,
   ParsedEffectTable,
@@ -20,6 +31,8 @@ export type {
 } from "./protocol/table.js";
 export type { ExportAbiEntry, ParsedExportAbi } from "./protocol/export-abi.js";
 export type {
+  EffectContinuation,
+  EffectContinuationCall,
   EffectDescriptor,
   EffectHandler,
   EffectId,

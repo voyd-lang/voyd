@@ -1,0 +1,170 @@
+use std::msgpack::self as __std_msgpack
+use std::string::self as __std_string
+
+@effect(id: "com.example.async")
+eff Async
+  await(resume, value: i32) -> i32
+  await_tail(tail, value: i32) -> i32
+  gather(resume, left: i32, right: i32) -> i32
+  notify(resume, value: i32) -> void
+
+eff IO
+  read(tail) -> i32
+
+eff Log
+  info(resume, msg: i32) -> void
+
+eff IntAwait
+  await(resume, value: i32) -> i32
+
+eff IntTail
+  await_tail(tail, value: i32) -> i32
+
+eff IntNotify
+  notify(resume, value: i32) -> void
+
+eff IntGather
+  await(resume, value: i32) -> i32
+  gather(resume, left: i32, right: i32) -> i32
+
+eff IntCombo
+  await(resume, value: i32) -> i32
+  await_tail(tail, value: i32) -> i32
+
+fn inner(x: i32): Async -> i32
+  let y = Async::await(x)
+  y + 1
+
+fn run_cb<T>(cb: fn() -> T) -> T
+  cb()
+
+fn hold<T>(cb: fn() -> T): () -> (fn() -> T)
+  cb
+
+fn async_worker_basic(x: i32): IntAwait -> i32
+  let value = IntAwait::await(x)
+  value * 2
+
+fn async_worker_notify(): IntNotify -> i32
+  IntNotify::notify(7)
+  10
+
+pub fn main(): () -> i32
+  let cb = hold(() => Async::await(5))
+  try
+    cb()
+  Async::await(resume, value):
+    resume(value + 10)
+
+pub fn host_boundary_basic(): Async -> i32
+  let a = inner(10)
+  let b = inner(20)
+  a * 100 + b
+
+pub fn host_boundary_tail(): Async -> i32
+  Async::await_tail(7) * 2
+
+pub fn host_boundary_multi(): (Async, IO, Log) -> void
+  let a = Async::await(10)
+  let b = IO::read()
+  Log::info(a + b)
+
+pub fn host_boundary_generic(): (Async, Log) -> i32
+  run_cb(() =>
+    let value = Async::await(5)
+    Log::info(value)
+    value
+  )
+
+pub fn host_boundary_multi_arg_op(): Async -> i32
+  let seed = Async::await(2)
+  let combined = Async::gather(seed, 5)
+  combined + 1
+
+pub fn host_boundary_host_state_updates(): Async -> i32
+  let a = Async::await(3)
+  let b = Async::await(4)
+  let c = Async::await(5)
+  a + b + c
+
+pub fn host_boundary_end_on_void(): Async -> i32
+  Async::notify(9)
+  99
+
+pub fn host_boundary_resume_then_tail(): Async -> i32
+  let first = Async::await(3)
+  Async::await_tail(first + 2)
+
+pub fn host_boundary_tail_chain(): Async -> i32
+  let first = Async::await_tail(2)
+  let second = Async::await_tail(first + 1)
+  second + 1
+
+pub fn internal_resume_all(): () -> i32
+  try
+    async_worker_basic(5)
+  IntAwait::await(resume, value):
+    resume(value + 1)
+
+pub fn internal_no_resume_end(): () -> i32
+  try
+    async_worker_basic(4)
+  IntAwait::await(resume, value):
+    if value > 4 then:
+      resume(value + 1)
+    value / 2
+
+pub fn internal_tail_mutates_host(): () -> i32
+  var total = 2
+  try
+    IntTail::await_tail(4)
+  IntTail::await_tail(tail, value):
+    total = total + value
+    tail(total + 1)
+
+pub fn internal_resume_mutates_host(use_resume: bool): () -> i32
+  var total = 10
+  try
+    IntAwait::await(2)
+  IntAwait::await(resume, value):
+    total = total + value
+    if use_resume then:
+      resume(total)
+    total = total + 5
+    total
+
+pub fn internal_resume_mutates_host_resume(): () -> i32
+  internal_resume_mutates_host(true)
+
+pub fn internal_resume_mutates_host_no_resume(): () -> i32
+  internal_resume_mutates_host(false)
+
+pub fn internal_notify_resume(): () -> i32
+  try
+    async_worker_notify()
+  IntNotify::notify(resume, value):
+    resume()
+
+pub fn internal_notify_no_resume(): () -> i32
+  try
+    async_worker_notify()
+  IntNotify::notify(resume, value):
+    value + 100
+
+pub fn internal_multi_arg_resume(): () -> i32
+  try
+    let base = IntGather::await(2)
+    IntGather::gather(base, 5)
+  IntGather::await(resume, value):
+    resume(value + 3)
+  IntGather::gather(resume, left, right):
+    resume(left * 10 + right)
+
+pub fn internal_resume_then_tail(): () -> i32
+  try
+    let first = IntCombo::await(3)
+    IntCombo::await_tail(first + 2)
+  IntCombo::await(resume, value):
+    resume(value + 1)
+  IntCombo::await_tail(tail, value):
+    tail(value * 2)
