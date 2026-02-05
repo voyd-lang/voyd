@@ -1,4 +1,5 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { getWasmInstance } from "@voyd/lib/wasm.js";
@@ -16,7 +17,7 @@ type Diagnostic = {
 };
 
 const fixturePath = (name: string): string =>
-  path.join(process.cwd(), "fixtures", name);
+  fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 
 const findFirstError = (diagnostics: readonly Diagnostic[]): Diagnostic | undefined =>
   diagnostics.find((diag) => diag.severity === "error");
@@ -80,6 +81,7 @@ const normalize = (value: unknown): unknown => {
 
 describe(
   "smoke: wasm validation",
+  { timeout: 20_000 },
   () => {
     it("accepts wasm-gc modules that Node can validate", async () => {
       const module = await compileToBinaryenModule(
@@ -120,6 +122,5 @@ describe(
       expect(normalized.attributes).toBeTypeOf("object");
       expect(normalized.children).toBeInstanceOf(Array);
     });
-  },
-  { timeout: 20_000 },
+  }
 );

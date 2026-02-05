@@ -3,10 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "npm -w @voyd/reference run build",
     "build": "react-router build",
+    "predev": "npm -w @voyd/reference run build",
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
     "preview": "npm run build && react-router-serve ./build/server/index.js",
+    "pretypecheck": "npm -w @voyd/reference run build",
     "typecheck": "react-router typegen && tsc",
     "test": "echo 'no tests for site'",
     "lint": "echo 'no lint configured'"
