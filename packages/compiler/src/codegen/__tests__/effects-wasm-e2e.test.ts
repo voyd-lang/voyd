@@ -55,7 +55,7 @@ describe("effects wasm e2e", () => {
     expect(main()).toBe(3);
   });
 
-  it("rejects double resume at compile time", async () => {
+  it("rejects escaped resume at compile time", async () => {
     let caught: unknown;
     try {
       await compileEffectFixture({ entryPath: invalidResumeFixturePath });

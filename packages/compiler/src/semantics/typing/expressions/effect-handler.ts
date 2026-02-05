@@ -373,27 +373,85 @@ const typeHandlerClause = ({
 
 type ContinuationUsage = { min: number; max: number; escapes: boolean };
 
-const mergeUsage = (
-  left: ContinuationUsage,
-  right: ContinuationUsage,
-): ContinuationUsage => ({
+type UsageRange = { min: number; max: number };
+
+type ContinuationFlowUsage = {
+  fallthrough?: UsageRange;
+  terminal?: UsageRange;
+  escapes: boolean;
+};
+
+const zeroRange = (): UsageRange => ({ min: 0, max: 0 });
+
+const addRanges = (left: UsageRange, right: UsageRange): UsageRange => ({
   min: left.min + right.min,
   max: left.max + right.max,
-  escapes: left.escapes || right.escapes,
 });
 
-const mergeBranches = (branches: ContinuationUsage[]): ContinuationUsage => {
-  if (branches.length === 0) {
-    return { min: 0, max: 0, escapes: false };
-  }
-  return branches.reduce(
-    (acc, branch) => ({
-      min: Math.min(acc.min, branch.min),
-      max: Math.max(acc.max, branch.max),
-      escapes: acc.escapes || branch.escapes,
-    }),
-    { min: Number.POSITIVE_INFINITY, max: 0, escapes: false },
+const unionRanges = (
+  left?: UsageRange,
+  right?: UsageRange,
+): UsageRange | undefined => {
+  if (!left) return right;
+  if (!right) return left;
+  return {
+    min: Math.min(left.min, right.min),
+    max: Math.max(left.max, right.max),
+  };
+};
+
+const unionRangeList = (
+  ranges: Array<UsageRange | undefined>,
+): UsageRange | undefined =>
+  ranges.reduce<UsageRange | undefined>(
+    (acc, range) => unionRanges(acc, range),
+    undefined,
   );
+
+const summarizeUsage = (
+  usage: ContinuationFlowUsage,
+): ContinuationUsage => {
+  const total = unionRanges(usage.fallthrough, usage.terminal);
+  if (!total) {
+    return { min: 0, max: 0, escapes: usage.escapes };
+  }
+  return { min: total.min, max: total.max, escapes: usage.escapes };
+};
+
+const sequenceUsage = (
+  left: ContinuationFlowUsage,
+  right: ContinuationFlowUsage,
+): ContinuationFlowUsage => {
+  const canContinue = !!left.fallthrough;
+  const terminalFromRight =
+    left.fallthrough && right.terminal
+      ? addRanges(left.fallthrough, right.terminal)
+      : undefined;
+  return {
+    fallthrough:
+      left.fallthrough && right.fallthrough
+        ? addRanges(left.fallthrough, right.fallthrough)
+        : undefined,
+    terminal: unionRanges(left.terminal, terminalFromRight),
+    escapes: left.escapes || (canContinue ? right.escapes : false),
+  };
+};
+
+const mergeBranches = (
+  branches: ContinuationFlowUsage[],
+): ContinuationFlowUsage => {
+  if (branches.length === 0) {
+    return { fallthrough: zeroRange(), escapes: false };
+  }
+  return {
+    fallthrough: unionRangeList(
+      branches.map((branch) => branch.fallthrough),
+    ),
+    terminal: unionRangeList(
+      branches.map((branch) => branch.terminal),
+    ),
+    escapes: branches.some((branch) => branch.escapes),
+  };
 };
 
 const analyzeContinuationUsage = ({
@@ -407,16 +465,31 @@ const analyzeContinuationUsage = ({
   ctx: TypingContext;
   nested?: boolean;
 }): ContinuationUsage => {
-  const emptyUsage: ContinuationUsage = { min: 0, max: 0, escapes: false };
-  const usageByExpr = new Map<number, ContinuationUsage>();
-  const usageByStmt = new Map<number, ContinuationUsage>();
-  const usageForExpr = (id?: number): ContinuationUsage =>
+  const emptyUsage: ContinuationFlowUsage = {
+    fallthrough: zeroRange(),
+    escapes: false,
+  };
+  const usageByExpr = new Map<number, ContinuationFlowUsage>();
+  const usageByStmt = new Map<number, ContinuationFlowUsage>();
+  const usageForExpr = (id?: number): ContinuationFlowUsage =>
     typeof id === "number" ? (usageByExpr.get(id) ?? emptyUsage) : emptyUsage;
-  const usageForStmt = (id: number): ContinuationUsage =>
+  const usageForStmt = (id: number): ContinuationFlowUsage =>
     usageByStmt.get(id) ?? emptyUsage;
-  const toLoopUsage = (usage: ContinuationUsage): ContinuationUsage => ({
-    min: 0,
-    max: usage.max > 0 ? Number.POSITIVE_INFINITY : 0,
+  const toLoopUsage = (usage: ContinuationFlowUsage): ContinuationFlowUsage => {
+    const summarized = summarizeUsage(usage);
+    return {
+      fallthrough: {
+        min: 0,
+        max: summarized.max > 0 ? Number.POSITIVE_INFINITY : 0,
+      },
+      escapes: usage.escapes,
+    };
+  };
+
+  const terminateUsage = (
+    usage: ContinuationFlowUsage,
+  ): ContinuationFlowUsage => ({
+    terminal: unionRanges(usage.terminal, usage.fallthrough),
     escapes: usage.escapes,
   });
 
@@ -431,14 +504,20 @@ const analyzeContinuationUsage = ({
       }
     },
     onExitStatement: (stmtId, stmt) => {
-      const usage =
-        stmt.kind === "let"
-          ? usageForExpr(stmt.initializer)
-          : stmt.kind === "expr-stmt"
-            ? usageForExpr(stmt.expr)
-            : typeof stmt.value === "number"
-              ? usageForExpr(stmt.value)
-              : emptyUsage;
+      const usage = (() => {
+        switch (stmt.kind) {
+          case "let":
+            return usageForExpr(stmt.initializer);
+          case "expr-stmt":
+            return usageForExpr(stmt.expr);
+          case "return":
+            return terminateUsage(
+              typeof stmt.value === "number"
+                ? usageForExpr(stmt.value)
+                : emptyUsage,
+            );
+        }
+      })();
       usageByStmt.set(stmtId, usage);
     },
     onExitExpression: (id, expr) => {
@@ -447,7 +526,7 @@ const analyzeContinuationUsage = ({
         case "identifier":
           usage =
             expr.symbol === targetSymbol
-              ? { min: 0, max: 0, escapes: true }
+              ? { fallthrough: zeroRange(), escapes: true }
               : emptyUsage;
           break;
         case "literal":
@@ -463,27 +542,34 @@ const analyzeContinuationUsage = ({
           break;
         case "call": {
           const callee = ctx.hir.expressions.get(expr.callee);
+          const argsUsage = expr.args.reduce(
+            (acc, arg) => sequenceUsage(acc, usageForExpr(arg.expr)),
+            emptyUsage,
+          );
           usage =
             callee?.exprKind === "identifier" && callee.symbol === targetSymbol
-              ? { min: 1, max: 1, escapes: nestedLambdaDepth > 0 }
-              : usageForExpr(expr.callee);
-          expr.args.forEach((arg) => {
-            usage = mergeUsage(usage, usageForExpr(arg.expr));
-          });
+              ? sequenceUsage(argsUsage, {
+                  terminal: { min: 1, max: 1 },
+                  escapes: nestedLambdaDepth > 0,
+                })
+              : expr.args.reduce(
+                  (acc, arg) => sequenceUsage(acc, usageForExpr(arg.expr)),
+                  usageForExpr(expr.callee),
+                );
           break;
         }
         case "block":
           usage = expr.statements.reduce(
-            (acc, stmtId) => mergeUsage(acc, usageForStmt(stmtId)),
+            (acc, stmtId) => sequenceUsage(acc, usageForStmt(stmtId)),
             emptyUsage,
           );
           if (typeof expr.value === "number") {
-            usage = mergeUsage(usage, usageForExpr(expr.value));
+            usage = sequenceUsage(usage, usageForExpr(expr.value));
           }
           break;
         case "tuple":
           usage = expr.elements.reduce(
-            (acc, entry) => mergeUsage(acc, usageForExpr(entry)),
+            (acc, entry) => sequenceUsage(acc, usageForExpr(entry)),
             emptyUsage,
           );
           break;
@@ -491,7 +577,7 @@ const analyzeContinuationUsage = ({
           usage = toLoopUsage(usageForExpr(expr.body));
           break;
         case "while":
-          usage = mergeUsage(
+          usage = sequenceUsage(
             usageForExpr(expr.condition),
             toLoopUsage(usageForExpr(expr.body)),
           );
@@ -499,7 +585,7 @@ const analyzeContinuationUsage = ({
         case "cond":
         case "if": {
           const branchUsages = expr.branches.map((branch) =>
-            mergeUsage(
+            sequenceUsage(
               usageForExpr(branch.condition),
               usageForExpr(branch.value),
             ),
@@ -518,24 +604,24 @@ const analyzeContinuationUsage = ({
               typeof arm.guard === "number"
                 ? usageForExpr(arm.guard)
                 : emptyUsage;
-            return mergeUsage(guardUsage, usageForExpr(arm.value));
+            return sequenceUsage(guardUsage, usageForExpr(arm.value));
           });
-          usage = mergeUsage(discriminantUsage, mergeBranches(armUsages));
+          usage = sequenceUsage(discriminantUsage, mergeBranches(armUsages));
           break;
         }
         case "effect-handler": {
           usage = usageForExpr(expr.body);
           expr.handlers.forEach((handler) => {
-            usage = mergeUsage(usage, usageForExpr(handler.body));
+            usage = sequenceUsage(usage, usageForExpr(handler.body));
           });
           if (typeof expr.finallyBranch === "number") {
-            usage = mergeUsage(usage, usageForExpr(expr.finallyBranch));
+            usage = sequenceUsage(usage, usageForExpr(expr.finallyBranch));
           }
           break;
         }
         case "object-literal":
           usage = expr.entries.reduce(
-            (acc, entry) => mergeUsage(acc, usageForExpr(entry.value)),
+            (acc, entry) => sequenceUsage(acc, usageForExpr(entry.value)),
             emptyUsage,
           );
           break;
@@ -547,15 +633,18 @@ const analyzeContinuationUsage = ({
             typeof expr.target === "number"
               ? usageForExpr(expr.target)
               : emptyUsage;
-          usage = mergeUsage(targetUsage, usageForExpr(expr.value));
+          usage = sequenceUsage(targetUsage, usageForExpr(expr.value));
           break;
         }
         case "lambda": {
-          const inner = usageForExpr(expr.body);
+          const inner = summarizeUsage(usageForExpr(expr.body));
           usage =
             inner.min > 0 || inner.max > 0 || inner.escapes
-              ? { min: inner.min, max: inner.max, escapes: true }
-              : inner;
+              ? {
+                  fallthrough: { min: inner.min, max: inner.max },
+                  escapes: true,
+                }
+              : emptyUsage;
           nestedLambdaDepth -= 1;
           break;
         }
@@ -564,7 +653,7 @@ const analyzeContinuationUsage = ({
     },
   });
 
-  return usageByExpr.get(exprId) ?? emptyUsage;
+  return summarizeUsage(usageByExpr.get(exprId) ?? emptyUsage);
 };
 
 const enforceResumptionUsage = ({
