@@ -1,0 +1,7 @@
+use src::animal
+
+pub fn make_animal(name: i32) -> animal::Animal
+  animal::Animal { name }
+
+pub fn main() -> i32
+  make_animal(42).name

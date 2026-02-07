@@ -2,7 +2,6 @@ import {
   type Expr,
   type Form,
   type Syntax,
-  formCallsInternal,
   isForm,
   isIdentifierAtom,
 } from "../../parser/index.js";
@@ -14,6 +13,7 @@ import type {
   HirTypeParameter,
 } from "../hir/index.js";
 import { resolveTypeSymbol } from "./resolution.js";
+import { resolveNamedTypeTarget } from "./named-type-resolution.js";
 import type { LowerContext } from "./types.js";
 import type { ScopeId, SymbolId } from "../ids.js";
 import { parseLambdaSignature } from "../lambda.js";
@@ -107,27 +107,27 @@ const lowerNamedTypeForm = (
   ctx: LowerContext,
   scope: ScopeId
 ): HirTypeExpr | undefined => {
-  if (
-    !isIdentifierAtom(form.first) ||
-    !isForm(form.second) ||
-    !formCallsInternal(form.second, "generics")
-  ) {
+  const target = resolveNamedTypeTarget({
+    expr: form,
+    scope,
+    ctx,
+    parseTypeArguments: (entries) =>
+      entries
+        .map((entry) => lowerTypeExpr(entry, ctx, scope))
+        .filter(Boolean) as HirTypeExpr[],
+    allowNamespacedSymbolKind: (kind) => kind === "type" || kind === "trait",
+  });
+  if (!target) {
     return undefined;
   }
-
-  const name = form.first;
-  const genericsForm = form.second;
-  const typeArguments = genericsForm.rest
-    .map((entry) => lowerTypeExpr(entry, ctx, scope))
-    .filter(Boolean) as HirTypeExpr[];
 
   return {
     typeKind: "named",
     ast: form.syntaxId,
     span: toSourceSpan(form),
-    path: [name.value],
-    symbol: resolveTypeSymbol(name.value, scope, ctx),
-    typeArguments,
+    path: target.path,
+    symbol: target.symbol,
+    typeArguments: target.typeArguments,
   };
 };
 

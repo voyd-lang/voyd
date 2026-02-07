@@ -38,6 +38,10 @@ import {
   intrinsicSignaturesFor,
   type IntrinsicSignature,
 } from "./intrinsics.js";
+import {
+  buildCallArgumentHintSubstitution,
+  typeCallArgsWithSignatureContext,
+} from "./call-arg-context.js";
 import { typeExpression } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
 import { getValueType } from "./identifier.js";
@@ -97,14 +101,23 @@ export const typeCallExpr = (
     ctx,
     state,
   });
+  const shouldDeferLambdaProbeTyping = calleeExpr.exprKind === "overload-set";
 
-  const args = expr.args.map((arg, index) => ({
-    label: arg.label,
-    type: typeExpression(arg.expr, ctx, state, {
-      expectedType: expectedParams?.[index],
-    }),
-    exprId: arg.expr,
-  }));
+  const args = expr.args.map((arg, index) => {
+    const expectedType = expectedParams?.[index];
+    const shouldDeferLambdaArgTyping =
+      shouldDeferLambdaProbeTyping &&
+      ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda" &&
+      (typeof expectedType !== "number" ||
+        expectedType === ctx.primitives.unknown);
+    return {
+      label: arg.label,
+      type: shouldDeferLambdaArgTyping
+        ? ctx.primitives.unknown
+        : typeExpression(arg.expr, ctx, state, { expectedType }),
+      exprId: arg.expr,
+    };
+  });
 
   const argEffectRow = composeEffectRows(
     ctx.effects,
@@ -139,12 +152,13 @@ export const typeCallExpr = (
         "type arguments are not supported with overload sets yet",
       );
     }
+    const probeArgs = args;
     ctx.table.setExprType(calleeExpr.id, ctx.primitives.unknown);
     ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
     const overloaded = typeOverloadedCall(
       expr,
       calleeExpr,
-      args,
+      probeArgs,
       ctx,
       state,
       expectedReturnType,
@@ -597,66 +611,43 @@ export const typeMethodCallExpr = (
     ctx.resolvedExprTypes.set(expr.target, receiverType);
   }
 
-  const hintSubstitution = (() => {
-    const hasTypeParams =
-      selected.signature.typeParams && selected.signature.typeParams.length > 0;
-    if (!hasTypeParams) {
-      return undefined;
-    }
-
-    const merged = new Map<TypeParamId, TypeId>(
-      getTraitMethodTypeBindings({
-        calleeSymbol: selected.symbol,
-        receiverType,
-        signature: selected.signature,
-        ctx,
-        state,
-      }) ?? [],
-    );
-
-    applyExplicitTypeArguments({
-      signature: selected.signature,
-      typeArguments,
+  const hintArgs =
+    selected.receiverTypeOverride && probeArgs.length > 0
+      ? [{ ...probeArgs[0]!, type: receiverType }, ...probeArgs.slice(1)]
+      : probeArgs;
+  const seedSubstitution = new Map<TypeParamId, TypeId>(
+    getTraitMethodTypeBindings({
       calleeSymbol: selected.symbol,
+      receiverType,
+      signature: selected.signature,
       ctx,
-    })?.forEach((value, key) => merged.set(key, value));
-
-    const hintArgs =
-      selected.receiverTypeOverride && probeArgs.length > 0
-        ? [{ ...probeArgs[0]!, type: receiverType }, ...probeArgs.slice(1)]
-        : probeArgs;
-
-    hintArgs.forEach((arg, index) => {
-      const param = selected.signature.parameters[index];
-      if (!param) {
-        return;
-      }
-      const expected = ctx.arena.substitute(param.type, merged);
-      bindTypeParamsFromType(expected, arg.type, merged, ctx, state);
-    });
-
-    return merged.size > 0 ? merged : undefined;
-  })();
-
-  const expectedParamTypeAt = (index: number): TypeId | undefined => {
-    const param = selected.signature.parameters[index];
-    if (!param) {
-      return undefined;
-    }
-    return hintSubstitution
-      ? ctx.arena.substitute(param.type, hintSubstitution)
-      : param.type;
-  };
+      state,
+    }) ?? [],
+  );
+  applyExplicitTypeArguments({
+    signature: selected.signature,
+    typeArguments,
+    calleeSymbol: selected.symbol,
+    ctx,
+  })?.forEach((value, key) => seedSubstitution.set(key, value));
+  const hintSubstitution = buildCallArgumentHintSubstitution({
+    signature: selected.signature,
+    probeArgs: hintArgs,
+    expectedReturnType,
+    seedSubstitution,
+    ctx,
+    state,
+  });
 
   const args: Arg[] = [
     { type: receiverType, exprId: expr.target },
-    ...expr.args.map((arg, index) => {
-      const expectedType = expectedParamTypeAt(index + 1);
-      return {
-        label: arg.label,
-        type: typeExpression(arg.expr, ctx, state, { expectedType }),
-        exprId: arg.expr,
-      };
+    ...typeCallArgsWithSignatureContext({
+      args: expr.args,
+      signature: selected.signature,
+      paramOffset: 1,
+      hintSubstitution,
+      ctx,
+      state,
     }),
   ];
 
@@ -2536,7 +2527,7 @@ export const formatFunctionInstanceKey = (
 const typeOverloadedCall = (
   call: HirCallExpr,
   callee: HirOverloadSetExpr,
-  argTypes: readonly Arg[],
+  probeArgs: readonly Arg[],
   ctx: TypingContext,
   state: TypingState,
   expectedReturnType?: TypeId,
@@ -2561,14 +2552,14 @@ const typeOverloadedCall = (
     return { symbol, signature };
   });
   const matches = candidates.filter(({ symbol, signature }) =>
-    matchesOverloadSignature(symbol, signature, argTypes, ctx, state),
+    matchesOverloadSignature(symbol, signature, probeArgs, ctx, state),
   );
 
   const traitDispatch =
     matches.length === 0
       ? resolveTraitDispatchOverload({
           candidates,
-          args: argTypes,
+          args: probeArgs,
           ctx,
           state,
         })
@@ -2619,8 +2610,24 @@ const typeOverloadedCall = (
     ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
   targets.set(instanceKey, selectedRef);
   ctx.callResolution.targets.set(call.id, targets);
+  const hintSubstitution = buildCallArgumentHintSubstitution({
+    signature: selected.signature,
+    probeArgs,
+    expectedReturnType,
+    ctx,
+    state,
+  });
+  const args = typeCallArgsWithSignatureContext({
+    args: call.args,
+    signature: selected.signature,
+    paramOffset: 0,
+    hintSubstitution,
+    ctx,
+    state,
+  });
+
   return typeFunctionCall({
-    args: argTypes,
+    args,
     signature: selected.signature,
     calleeSymbol: selected.symbol,
     typeArguments: undefined,
