@@ -373,6 +373,18 @@ describe("smoke: effects e2e", () => {
     expect(output).toBe(8);
   });
 
+  it("runs a generic f64 effect with an external handler", async () => {
+    const output = await compiled.run<number>({
+      entryName: "host_generic_effect_f64",
+      handlers: {
+        [`${GENERIC_EFFECT_ID}::pass_f64`]: ({ resume }, value: unknown) =>
+          resume(asNumber("Gen::pass_f64", value) + 2),
+      },
+    });
+
+    expect(output).toBe(5);
+  });
+
   it("runs a generic effect with an internal handler using inferred type args", async () => {
     const output = await compiled.run<number>({
       entryName: "internal_generic_effect_inferred",
@@ -399,5 +411,12 @@ describe("smoke: effects e2e", () => {
       entryName: "internal_generic_effect_tail_mutation",
     });
     expect(output).toBe(9);
+  });
+
+  it("runs a generic f64 effect with an internal handler", async () => {
+    const output = await compiled.run<number>({
+      entryName: "internal_generic_effect_f64",
+    });
+    expect(output).toBe(4);
   });
 });

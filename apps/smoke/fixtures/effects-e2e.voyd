@@ -12,6 +12,7 @@ eff Async
 eff Gen<T>
   pass(resume, value: T) -> T
   pass_tail(tail, value: T) -> T
+  pass_f64(resume, value: T) -> T
 
 eff IO
   read(tail) -> i32
@@ -186,6 +187,10 @@ pub fn host_generic_effect_tail_explicit(): Gen<i32> -> i32
   let value: i32 = Gen::pass_tail(6)
   value
 
+pub fn host_generic_effect_f64(): Gen<f64> -> f64
+  let value: f64 = Gen::pass_f64(2.5)
+  value + 0.5
+
 pub fn internal_generic_effect_inferred(): () -> i32
   try
     let value = Gen::pass(8)
@@ -216,3 +221,10 @@ pub fn internal_generic_effect_tail_mutation(): () -> i32
   Gen::pass_tail(tail, value):
     total = total + value
     tail(total + 2)
+
+pub fn internal_generic_effect_f64(): () -> f64
+  try
+    let value = Gen::pass_f64(2.5)
+    value + 0.5
+  Gen::pass_f64(resume, value):
+    resume(value + 1.0)
