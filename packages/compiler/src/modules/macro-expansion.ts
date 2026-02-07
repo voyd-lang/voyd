@@ -110,6 +110,9 @@ const collectMacroImports = ({
 }): Map<string, MacroDefinition> => {
   const imports = new Map<string, MacroDefinition>();
   entries.forEach((entry) => {
+    if (!entry.hasExplicitPrefix) {
+      return;
+    }
     if (entry.importKind === "self") {
       return;
     }
@@ -117,7 +120,10 @@ const collectMacroImports = ({
     const resolvedPath = resolveModuleRequest(
       { segments: entry.moduleSegments, span: entry.span },
       module.path,
-      { anchorToSelf: entry.anchorToSelf }
+      {
+        anchorToSelf: entry.anchorToSelf,
+        parentHops: entry.parentHops ?? 0,
+      }
     );
     const moduleId = modulePathToString(resolvedPath);
     const exportedMacros = exportsByModule.get(moduleId);
@@ -167,6 +173,9 @@ const collectMacroReexports = ({
   entries
     .filter((entry) => entry.visibility === "pub")
     .forEach((entry) => {
+      if (!entry.hasExplicitPrefix) {
+        return;
+      }
       if (entry.importKind === "self") {
         return;
       }
@@ -174,7 +183,10 @@ const collectMacroReexports = ({
       const resolvedPath = resolveModuleRequest(
         { segments: entry.moduleSegments, span: entry.span },
         module.path,
-        { anchorToSelf: entry.anchorToSelf }
+        {
+          anchorToSelf: entry.anchorToSelf,
+          parentHops: entry.parentHops ?? 0,
+        }
       );
       const moduleId = modulePathToString(resolvedPath);
       const exportedMacros = exportsByModule.get(moduleId);

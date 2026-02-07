@@ -6,11 +6,22 @@ export type ModuleNamespace = "src" | "std" | "pkg";
 export interface ModuleRoots {
   src: string;
   std?: string;
-  /** Directory that contains installed packages. */
+  /**
+   * Legacy package search directory that contains installed packages.
+   * Prefer `pkgDirs` for new callers.
+   */
   pkg?: string;
   /**
+   * Additional directories that contain installed packages. Packages are
+   * discovered at `<pkgDir>/<packageName>/src`.
+   */
+  pkgDirs?: readonly string[];
+  /**
    * Optional hook for resolving a package name to an absolute path. If
-   * provided it takes precedence over `pkg`.
+   * provided it takes precedence over `pkg` and `pkgDirs`.
+   * The returned path can point to either the package directory
+   * (`.../<packageName>`) or directly to the package source directory
+   * (`.../<packageName>/src`).
    */
   resolvePackageRoot?: (packageName: string) => string | undefined | Promise<string | undefined>;
 }

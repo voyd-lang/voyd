@@ -12,7 +12,7 @@ describe("module imports", () => {
   it("binds imports across modules using the module graph exports", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: "use util::math::all\npub fn main() 1",
+      [`${root}${sep}main.voyd`]: "use src::util::math::all\npub fn main() 1",
       [`${root}${sep}util${sep}math.voyd`]: "pub fn add(a: i32, b: i32) a",
     });
 
@@ -38,7 +38,7 @@ describe("module imports", () => {
     const host = createMemoryHost({
       [`${root}${sep}util${sep}foo.voyd`]: "pub fn id() -> i32 7",
       [`${root}${sep}util${sep}bar.voyd`]:
-        "use foo\npub fn main() -> i32\n  foo::id()",
+        "use super::foo\npub fn main() -> i32\n  foo::id()",
     });
 
     const graph = await loadModuleGraph({

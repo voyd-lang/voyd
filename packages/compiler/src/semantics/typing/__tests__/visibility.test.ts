@@ -145,7 +145,7 @@ describe("typing visibility", () => {
   it("allows package-visible members within the same package", () => {
     const mainPath: ModulePath = { namespace: "src", segments: ["main"] };
     const mainSource = `
-use lib::all
+use src::lib::all
 
 pub fn read() -> i32
   make().value
@@ -171,7 +171,7 @@ pub fn read() -> i32
   it("rejects object-private members outside their impl even in the same package", () => {
     const mainPath: ModulePath = { namespace: "src", segments: ["main"] };
     const mainSource = `
-use lib::all
+use src::lib::all
 
 pub fn read() -> i32
   make().secret
@@ -424,7 +424,7 @@ pub fn read() -> i32
 
   it("allows std module imports when pkg exports the module", () => {
     const moduleStdPkgSource = `
-pub use util
+pub use self::util
 `;
     const moduleStdPkgAst = parse(
       moduleStdPkgSource,

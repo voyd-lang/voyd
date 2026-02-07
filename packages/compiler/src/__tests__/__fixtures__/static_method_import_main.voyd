@@ -1,4 +1,4 @@
-use util::Counter
+use src::util::Counter
 
 pub fn main() -> i32
   Counter::make(40)

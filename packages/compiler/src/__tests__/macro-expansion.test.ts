@@ -26,7 +26,7 @@ describe("functional macros across modules", () => {
     const macrosPath = `${root}${sep}macros.voyd`;
     const host = createMemoryHost({
       [mainPath]: `
-use macros::all
+use src::macros::all
 
 pub fn main() -> f64
   inc(2.0)
@@ -84,7 +84,7 @@ pub macro add_two(value)
     const reexportPath = `${root}${sep}macro_exports.voyd`;
     const host = createMemoryHost({
       [mainPath]: `
-use macro_exports::all
+use src::macro_exports::all
 
 pub fn main() -> f64
   inc(2.0)
@@ -94,7 +94,7 @@ pub macro inc(value)
   syntax_template (+ $value 1.0)
 `,
       [reexportPath]: `
-pub use base_macros::all
+pub use src::base_macros::all
 `,
     });
 
