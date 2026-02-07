@@ -9,8 +9,7 @@
     "dev": "react-router dev",
     "start": "react-router-serve ./build/server/index.js",
     "preview": "npm run build && react-router-serve ./build/server/index.js",
-    "pretypecheck": "npm -w @voyd/reference run build",
-    "typecheck": "react-router typegen && tsc",
+    "typecheck": "react-router typegen && tsc -p tsconfig.typecheck.json",
     "test": "echo 'no tests for site'",
     "lint": "echo 'no lint configured'"
   },

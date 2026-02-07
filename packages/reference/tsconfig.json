@@ -1,8 +1,7 @@
 {
   "extends": "../../tsconfig.dev.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "./"
+    "noEmit": true
   },
-  "include": []
+  "include": ["index.d.ts"]
 }
