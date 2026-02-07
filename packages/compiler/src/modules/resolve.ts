@@ -12,41 +12,47 @@ export type ModulePathMatchEntry = {
   moduleSegments: readonly string[];
   path: readonly string[];
   anchorToSelf?: boolean;
+  parentHops?: number;
 };
 
 export const resolveModuleRequest = (
   request: ModuleRequest,
   importer: ModulePath,
-  options: { anchorToSelf?: boolean } = {}
+  options: { anchorToSelf?: boolean; parentHops?: number } = {}
 ): ModulePath => {
   const normalized = normalizeRequest(request);
-  const prefixSrcWithinPackage =
+  const resolveSrcWithinPackage =
     importer.namespace === "pkg" && normalized.namespace === "src";
-  const namespace = prefixSrcWithinPackage
-    ? "pkg"
-    : normalized.namespace ?? importer.namespace;
+  const namespace = resolveSrcWithinPackage ? "pkg" : normalized.namespace ?? importer.namespace;
   const packageName =
     namespace === "pkg"
       ? normalized.packageName ?? importer.packageName
       : normalized.packageName;
-  const requestedSegments =
-    prefixSrcWithinPackage && normalized.segments[0] !== "src"
-      ? ["src", ...normalized.segments]
-      : normalized.segments;
   const normalizedSegments =
-    namespace === "pkg" && requestedSegments.length === 0
+    namespace === "pkg" && normalized.segments.length === 0
       ? ["pkg"]
-      : requestedSegments;
+      : normalized.segments;
 
   const anchorToSelf = options.anchorToSelf ?? false;
-  const parentSegments = importer.segments.slice(0, -1);
-  const hasExplicitNamespace = normalized.namespace !== undefined;
+  const parentHops = options.parentHops ?? 0;
+  const importerIsPackageRoot =
+    importer.segments.length === 1 && importer.segments[0] === "pkg";
+  const importerAnchorSegments = importerIsPackageRoot ? [] : importer.segments;
+  const superBaseSegments =
+    parentHops > 0
+      ? importer.segments.slice(
+          0,
+          Math.max(importer.segments.length - parentHops, 0),
+        )
+      : [];
   const baseSegments = anchorToSelf
-    ? importer.segments
-    : !hasExplicitNamespace && parentSegments.length > 0
-    ? parentSegments
+    ? importerIsPackageRoot
+      ? []
+      : importer.segments
+    : parentHops > 0
+    ? superBaseSegments
     : [];
-  const segments = [...baseSegments, ...normalizedSegments];
+  const segments = [...(anchorToSelf ? importerAnchorSegments : baseSegments), ...normalizedSegments];
 
   if (namespace === "pkg") {
     return {
@@ -75,8 +81,19 @@ export const matchesDependencyPath = ({
     entry.moduleSegments.length > 0 ? entry.moduleSegments.join("::") : undefined,
     entry.path.length > 0 ? entry.path.join("::") : undefined,
   ].filter((value): value is string => Boolean(value));
+  const srcAliasEntryKeys =
+    currentModulePath.namespace === "pkg"
+      ? entryKeys.flatMap((key) =>
+          key === "src"
+            ? ["pkg"]
+            : key.startsWith("src::")
+            ? [key.slice("src::".length)]
+            : [],
+        )
+      : [];
+  const allEntryKeys = [...entryKeys, ...srcAliasEntryKeys];
   if (entry.moduleSegments.length === 1 && entry.moduleSegments[0] === "std") {
-    entryKeys.push("std::pkg");
+    allEntryKeys.push("std::pkg");
   }
 
   if (entry.anchorToSelf) {
@@ -85,26 +102,57 @@ export const matchesDependencyPath = ({
     if (!sameNamespace || !samePackage) {
       return false;
     }
+    const currentAnchorSegments =
+      currentModulePath.segments.length === 1 &&
+      currentModulePath.segments[0] === "pkg"
+        ? []
+        : currentModulePath.segments;
     const hasModulePrefix =
-      dependencyPath.segments.length >= currentModulePath.segments.length &&
+      dependencyPath.segments.length >= currentAnchorSegments.length &&
       dependencyPath.segments
-        .slice(0, currentModulePath.segments.length)
-        .every((segment, index) => segment === currentModulePath.segments[index]);
+        .slice(0, currentAnchorSegments.length)
+        .every((segment, index) => segment === currentAnchorSegments[index]);
     if (!hasModulePrefix) {
       return false;
     }
     const relativeSegments = dependencyPath.segments.slice(
-      currentModulePath.segments.length
+      currentAnchorSegments.length
     );
     const relativeKey = relativeSegments.join("::");
-    return entryKeys.some((key) => key === relativeKey);
+    return allEntryKeys.some((key) => key === relativeKey);
+  }
+
+  if ((entry.parentHops ?? 0) > 0) {
+    const sameNamespace = dependencyPath.namespace === currentModulePath.namespace;
+    const samePackage = dependencyPath.packageName === currentModulePath.packageName;
+    if (!sameNamespace || !samePackage) {
+      return false;
+    }
+    const hops = entry.parentHops ?? 0;
+    const parentAnchorSegments = currentModulePath.segments.slice(
+      0,
+      Math.max(currentModulePath.segments.length - hops, 0),
+    );
+    const hasParentPrefix =
+      dependencyPath.segments.length >= parentAnchorSegments.length &&
+      dependencyPath.segments
+        .slice(0, parentAnchorSegments.length)
+        .every((segment, index) => segment === parentAnchorSegments[index]);
+    if (!hasParentPrefix) {
+      return false;
+    }
+    const relativeSegments = dependencyPath.segments.slice(
+      parentAnchorSegments.length,
+    );
+    const relativeKey = relativeSegments.join("::");
+    return allEntryKeys.some((key) => key === relativeKey);
   }
 
   const depSegments = dependencyPath.segments.join("::");
   const namespacedDepKey = [dependencyPath.namespace, ...dependencyPath.segments].join(
     "::"
   );
-  if (entryKeys.some((key) => key === depSegments || key === namespacedDepKey)) {
+  if (allEntryKeys.some((key) => key === depSegments || key === namespacedDepKey)) {
     return true;
   }
 
@@ -117,7 +165,7 @@ export const matchesDependencyPath = ({
       ...dependencyPath.segments,
     ].join("::");
     if (
-      entryKeys.some(
+      allEntryKeys.some(
         (key) =>
           key === packageKey ||
           key === dependencyPath.packageName ||
@@ -126,27 +174,6 @@ export const matchesDependencyPath = ({
       )
     ) {
       return true;
-    }
-  }
-  const sameNamespace = dependencyPath.namespace === currentModulePath.namespace;
-  const samePackage = dependencyPath.packageName === currentModulePath.packageName;
-  if (sameNamespace && samePackage) {
-    const parentSegments = currentModulePath.segments.slice(0, -1);
-    if (parentSegments.length > 0) {
-      const hasParentPrefix =
-        dependencyPath.segments.length >= parentSegments.length &&
-        dependencyPath.segments
-          .slice(0, parentSegments.length)
-          .every((segment, index) => segment === parentSegments[index]);
-      if (hasParentPrefix) {
-        const relativeSegments = dependencyPath.segments.slice(
-          parentSegments.length
-        );
-        const relativeKey = relativeSegments.join("::");
-        if (entryKeys.some((key) => key === relativeKey)) {
-          return true;
-        }
-      }
     }
   }
   return false;
@@ -174,6 +201,14 @@ const normalizeRequest = (request: ModuleRequest): ModuleRequest => {
 
   const packageName =
     namespace === "pkg" ? request.packageName ?? segments.shift() : request.packageName;
+
+  if (namespace === "pkg" && packageName === "std") {
+    const stdSegments = segments.length === 0 ? ["pkg"] : segments;
+    return {
+      namespace: "std",
+      segments: stdSegments,
+    };
+  }
 
   return {
     namespace,

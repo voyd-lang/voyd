@@ -11,7 +11,7 @@ import {
   loadModuleGraph,
   parse,
 } from "@voyd/sdk/compiler";
-import type { Diagnostic, HirGraph } from "@voyd/sdk/compiler";
+import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd/sdk/compiler";
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
 import { runTests } from "./test-runner.js";
@@ -27,10 +27,15 @@ async function main() {
       rootPath: config.index,
       reporter: config.testReporter,
       failOnEmptyTests: config.failOnEmptyTests,
+      pkgDirs: config.pkgDirs,
     });
   }
 
   const entryPath = resolveEntryPath(config.index);
+  const roots = getModuleRoots({
+    entryPath,
+    additionalPkgDirs: config.pkgDirs,
+  });
 
   if (config.emitParserAst) {
     return printJson(await getParserAst(entryPath));
@@ -41,21 +46,21 @@ async function main() {
   }
 
   if (config.emitIrAst) {
-    return printJson(await getIrAST(entryPath));
+    return printJson(await getIrAST(entryPath, roots));
   }
 
   if (config.emitWasmText) {
     return console.log(
-      await getWasmText(entryPath, config.runBinaryenOptimizationPass),
+      await getWasmText(entryPath, roots, config.runBinaryenOptimizationPass),
     );
   }
 
   if (config.emitWasm) {
-    return emitWasm(entryPath, config.runBinaryenOptimizationPass);
+    return emitWasm(entryPath, roots, config.runBinaryenOptimizationPass);
   }
 
   if (config.run) {
-    return runWasm(entryPath, config.runBinaryenOptimizationPass);
+    return runWasm(entryPath, roots, config.runBinaryenOptimizationPass);
   }
 
   if (config.internalTest) {
@@ -92,10 +97,46 @@ const resolveEntryPath = (index: string): string => {
   );
 };
 
-const getModuleRoots = (entryPath: string) => ({
-  src: dirname(entryPath),
-  std: resolveStdRoot(),
-});
+const getModuleRoots = ({
+  entryPath,
+  additionalPkgDirs = [],
+}: {
+  entryPath: string;
+  additionalPkgDirs?: readonly string[];
+}): ModuleRoots => {
+  const srcRoot = dirname(entryPath);
+  return {
+    src: srcRoot,
+    std: resolveStdRoot(),
+    pkgDirs: resolvePackageDirs({ srcRoot, additionalPkgDirs }),
+  };
+};
+
+const resolvePackageDirs = ({
+  srcRoot,
+  additionalPkgDirs,
+}: {
+  srcRoot: string;
+  additionalPkgDirs: readonly string[];
+}): string[] => {
+  const configured = additionalPkgDirs.map((dir) => resolve(dir));
+  const nodeModules = collectNodeModulesDirs(srcRoot);
+  return Array.from(new Set([...configured, ...nodeModules]));
+};
+
+const collectNodeModulesDirs = (startDir: string): string[] => {
+  const dirs: string[] = [];
+  let current = resolve(startDir);
+  while (true) {
+    dirs.push(join(current, "node_modules"));
+    const parent = dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return dirs;
+};
 
 const assertNoDiagnostics = (diagnostics: readonly Diagnostic[]): void => {
   const error = diagnostics.find(
@@ -122,8 +163,7 @@ async function getCoreAst(entryPath: string) {
   return await getParserAst(entryPath);
 }
 
-async function getIrAST(entryPath: string) {
-  const roots = getModuleRoots(entryPath);
+async function getIrAST(entryPath: string, roots: ModuleRoots) {
   const graph = await loadModuleGraph({ entryPath, roots });
   const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
     graph,
@@ -140,9 +180,14 @@ async function getIrAST(entryPath: string) {
   return serializeHir(entrySemantics.hir);
 }
 
-async function getWasmText(entryPath: string, optimize = false) {
+async function getWasmText(
+  entryPath: string,
+  roots: ModuleRoots,
+  optimize = false,
+) {
   const { wasmText } = await sdk.compile({
     entryPath,
+    roots,
     optimize,
     emitWasmText: true,
   });
@@ -152,13 +197,13 @@ async function getWasmText(entryPath: string, optimize = false) {
   return wasmText;
 }
 
-async function emitWasm(entryPath: string, optimize = false) {
-  const { wasm } = await sdk.compile({ entryPath, optimize });
+async function emitWasm(entryPath: string, roots: ModuleRoots, optimize = false) {
+  const { wasm } = await sdk.compile({ entryPath, roots, optimize });
   stdout.write(wasm);
 }
 
-async function runWasm(entryPath: string, optimize = false) {
-  const { wasm } = await sdk.compile({ entryPath, optimize });
+async function runWasm(entryPath: string, roots: ModuleRoots, optimize = false) {
+  const { wasm } = await sdk.compile({ entryPath, roots, optimize });
   const result = await sdk.run({ wasm, entryName: "main" });
   printValue(result);
 }

@@ -67,11 +67,48 @@ const findVoydFiles = async (rootPath: string): Promise<string[]> => {
 
 const resolveRoots = (
   rootPath: string,
+  pkgDirs: readonly string[] = [],
 ): { scanRoot: string; roots: ModuleRoots } => {
   const resolved = resolve(rootPath);
   const scanRoot = resolved;
   const srcRoot = resolved.endsWith(".voyd") ? dirname(resolved) : resolved;
-  return { scanRoot, roots: { src: srcRoot, std: resolveStdRoot() } };
+  return {
+    scanRoot,
+    roots: {
+      src: srcRoot,
+      std: resolveStdRoot(),
+      pkgDirs: resolvePackageDirs({
+        srcRoot,
+        additionalPkgDirs: pkgDirs,
+      }),
+    },
+  };
+};
+
+const resolvePackageDirs = ({
+  srcRoot,
+  additionalPkgDirs,
+}: {
+  srcRoot: string;
+  additionalPkgDirs: readonly string[];
+}): string[] => {
+  const configured = additionalPkgDirs.map((dir) => resolve(dir));
+  const nodeModules = collectNodeModulesDirs(srcRoot);
+  return Array.from(new Set([...configured, ...nodeModules]));
+};
+
+const collectNodeModulesDirs = (startDir: string): string[] => {
+  const dirs: string[] = [];
+  let current = resolve(startDir);
+  while (true) {
+    dirs.push(join(current, "node_modules"));
+    const parent = dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return dirs;
 };
 
 const isWithinRoot = (root: string, target: string): boolean => {
@@ -201,13 +238,15 @@ export const runTests = async ({
   rootPath,
   reporter = "default",
   failOnEmptyTests = false,
+  pkgDirs = [],
 }: {
   rootPath: string;
   reporter?: string;
   failOnEmptyTests?: boolean;
+  pkgDirs?: readonly string[];
 }): Promise<TestRunSummary> => {
   const host = createFsModuleHost();
-  const { scanRoot, roots } = resolveRoots(rootPath);
+  const { scanRoot, roots } = resolveRoots(rootPath, pkgDirs);
   const stdRoot = roots.std ?? resolveStdRoot();
   const isTestingStd = isWithinRoot(stdRoot, scanRoot);
   const files = await findVoydFiles(scanRoot);

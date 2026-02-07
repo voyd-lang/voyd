@@ -338,6 +338,25 @@ const resolveUseEntry = ({
   decl: ParsedUseDecl;
   ctx: BindingContext;
 }): BoundUseEntry => {
+  if (!entry.hasExplicitPrefix) {
+    recordImportDiagnostic({
+      params: {
+        kind: "missing-path-prefix",
+        path: entry.path,
+      },
+      span: entry.span,
+      ctx,
+    });
+    return {
+      path: entry.path,
+      span: entry.span,
+      importKind: entry.importKind,
+      targetName: entry.targetName,
+      alias: entry.alias,
+      imports: [],
+    };
+  }
+
   let dependencyPath = resolveDependencyPath({ entry, ctx });
   let blockedStdImport = false;
 

@@ -1,4 +1,4 @@
-# **📦 Modules**
+# 📦 Modules
 
 Voyd uses a file-and-folder based module system similar to modern Rust.
 A module is defined by a file, and submodules are defined inside a directory of the same name.
@@ -7,9 +7,9 @@ Voyd's module system aims to be predictable, easy to navigate, and friendly to t
 
 ---
 
-# **Defining Modules**
+# Defining Modules
 
-## **Module Layout**
+## Module Layout
 
 A module named `math` can be defined in either of these equivalent ways:
 
@@ -24,8 +24,8 @@ src/math.voyd
 ```
 src/math.voyd      // root of the math module
 src/math/
-  add.voyd         // submodule math::add
-  sub.voyd         // submodule math::sub
+  add.voyd         // submodule src::math::add
+  sub.voyd         // submodule src::math::sub
 ```
 
 If a directory exists with the module name, every file inside that directory becomes a submodule.
@@ -35,9 +35,9 @@ If `pkg.voyd` defines `pub fn main`, that function is the executable entry point
 
 ---
 
-# **Examples**
+# Examples
 
-### **From a file**
+### From a file
 
 ```voyd
 // src/internal.voyd
@@ -47,12 +47,12 @@ pub fn hey()
 
 ```voyd
 // src/main.voyd
-use internal
+use src::internal
 
-internal::hey()
+src::internal::hey()
 ```
 
-### **From a directory**
+### From a directory
 
 ```
 src/
@@ -61,7 +61,7 @@ src/
     hey.voyd
 ```
 
-`internal/hey.voyd` defines the module `internal::hey` automatically.
+`internal/hey.voyd` defines the module `src::internal::hey` automatically.
 To expose a submodule from its parent, export it with `pub use self::<submodule-name>`.
 
 ```voyd
@@ -71,13 +71,13 @@ pub use self::hey  // export the module name
 
 ```voyd
 // src/main.voyd
-use internal::hey
+use src::internal::hey
 
-hey::hey()
+src::internal::hey::hey()
 ```
 
 If you want to re-export everything from the submodule (flattened into `internal`),
-use `pub use self::hey::all`.
+write `pub use self::hey::all`.
 
 ---
 
@@ -92,7 +92,7 @@ mod internal
   pub fn hey()
     "hey"
 
-internal::hey()
+self::internal::hey()
 ```
 
 Inline modules behave exactly like file-based modules.
@@ -102,27 +102,29 @@ Inline modules behave exactly like file-based modules.
 # **Module Imports (`use`)**
 
 The `use` statement brings modules or items into scope.
+Import paths must always start with one of these prefixes:
+`self::`, `super::`, `src::`, `std::`, or `pkg::`.
 
 ```voyd
-use my_module
+use src::my_module
 
-my_module::hello()
+src::my_module::hello()
 ```
 
-## **Selective imports**
+## Selective imports
 
 ```voyd
-use my_module::hello
+use src::my_module::hello
 hello()
 ```
 
-## **Group imports**
+## Group imports
 
 ```voyd
-use my_module::{ self, a, b }
+use src::my_module::{ self, a, b }
 ```
 
-## **Self-relative imports**
+## Self-relative imports
 
 Use `self::` to refer to submodules of the current module explicitly:
 
@@ -131,19 +133,28 @@ use self::my_module
 pub use self::my_module::all
 ```
 
-## **Renaming**
+## Renaming
 
 ```voyd
-use my_module::hello as hi
+use src::my_module::hello as hi
 ```
 
-## **Importing all exports**
+## Importing all exports
 
 ```voyd
-use my_module::all
+use src::my_module::all
 ```
 
-## **Standard library and package imports**
+## Parent-relative imports
+
+Use `super::` to refer to modules relative to the parent module:
+
+```voyd
+use super::helpers
+use super::helpers::math::all
+```
+
+## Standard library and package imports
 
 ```voyd
 use std::log
@@ -163,10 +174,10 @@ use std::{ some }
 use pkg::json::{ encode }
 ```
 
-Re-exporting a module from `my_lib/src/pkg.voyd` (e.g. `pub use my_submod`) makes
-`use pkg::my_lib::my_subumod` possible for consumers.
+Re-exporting a module from `my_lib/src/pkg.voyd` (e.g. `pub use self::my_submod`) makes
+`use pkg::my_lib::my_submod` possible for consumers.
 
-## **Importing relative to the source root**
+## Importing relative to the source root
 
 ```voyd
 use src::logger
@@ -174,17 +185,17 @@ use src::logger
 
 ---
 
-# **Module Path Rules**
+# Module Path Rules
 
 Module paths behave like directory paths:
 
 ```
-a::b::c
+src::a::b::c
 ```
 
-…represents the file `a/b/c.voyd` or directory `a/b/c/`.
+…represents the file `src/a/b/c.voyd` or directory `src/a/b/c/`.
 
-### **Examples**
+### Examples
 
 ```
 src/utils/hello/world.voyd   // You are here
@@ -194,15 +205,18 @@ src/utils/goodbye/jupiter.voyd
 To import `jupiter`:
 
 ```voyd
-use utils::goodbye::jupiter
+use src::utils::goodbye::jupiter
 ```
 
 ---
 
-# **Relative Imports**
+# Relative Imports
 
-If a `use` path does not start with `src`, `std`, or `pkg`, it is resolved
-relative to the current module's directory.
+Relative imports are explicit:
+
+- `self::...` starts from the current module.
+- `super::...` starts from the parent module (and may be repeated, e.g. `super::super::...`).
+- Bare/unprefixed paths are invalid.
 
 Example layout (self vs adjacent):
 
@@ -210,28 +224,29 @@ Example layout (self vs adjacent):
 src/foo.voyd
 src/foo/
   bar.voyd
-src/bar.voyd
+src/baz.voyd
 ```
 
 ```voyd
 // src/foo.voyd
 use self::bar   // imports src::foo::bar
-use bar         // imports src::bar
+use src::baz    // imports src::baz
 ```
 
 Example layout (siblings in the same directory):
 
 ```
-src/utils/foo.voyd
-src/utils/bar.voyd
+src/utils/
+  foo.voyd
+  baz.voyd
 ```
 
 ```voyd
-// src/utils/bar.voyd
-use foo          // imports module src::utils::foo
-use foo::all     // imports pub exports from src::utils::foo
+// src/utils/baz.voyd
+use super::foo          // imports module src::utils::foo
+use super::foo::all     // imports pub exports from src::utils::foo
 
-foo::id()
+src::utils::foo::id()
 ```
 
 Use `src::...` (or `pkg::...`) to import from the package root explicitly.
@@ -239,7 +254,7 @@ If there is any ambiguity, prefer an explicit namespace.
 
 ---
 
-# **Visibility**
+# Visibility
 
 Voyd is safe-by-default.
 
@@ -301,35 +316,35 @@ pub fn main()
 ```
 ---
 
-# **Exporting From a Module**
+# Exporting From a Module
 
 Exports are controlled with `pub use`. Use `self::` to target submodules explicitly.
 
-### **Export a submodule name**
+### Export a submodule name
 
 ```voyd
 pub use self::math
 ```
 
-### **Flatten a submodule into the parent**
+### Flatten a submodule into the parent
 
 ```voyd
 pub use self::math::all
 ```
 
-### **Export a specific item from a submodule**
+### Export a specific item from a submodule
 
 ```voyd
-pub use self::math::{ add }   // exposes math::add
+pub use self::math::{ add }   // exposes self::math::add
 ```
 
-### **Rename on export**
+### Rename on export
 
 ```voyd
 pub use self::math::{ mul as multiply }
 ```
 
-### **Export all public items from a submodule**
+### Export all public items from a submodule
 
 ```voyd
 pub use self::strings::all
@@ -337,7 +352,7 @@ pub use self::strings::all
 
 ---
 
-# **Export Examples**
+# Export Examples
 
 ```voyd
 // src/lib.voyd
@@ -351,7 +366,7 @@ pub use self::sub
 // Export mul as multiply
 pub use self::mul::{ self as multiply }
 
-// Export div::div as divide
+// Export self::div::div as divide
 pub use self::div::{ div as divide }
 
 // Export and bring into this module’s scope
@@ -360,7 +375,7 @@ pub use self::strings::all
 
 ---
 
-# **More Complex Example**
+# More Complex Example
 
 ```
 src/
@@ -388,9 +403,9 @@ pub fn mul(a: Vec, b: Vec) -> Vec
 
 ```voyd
 pub fn log_vec()
-  log vec::Vec {}  // valid, vec is sibling and exported
+  log Vec {}  // valid, Vec is imported from src::utils::vec
 
-use vec::{ Vec, mul }
+use super::vec::{ Vec, mul }
 
 fn work()
   mul(Vec {}, Vec {})
@@ -400,7 +415,7 @@ fn work()
 
 ```voyd
 use src::server::fetch  // valid: explicit root import
-use api::start_api      // error: api is sibling-of-ancestor, not ancestor
+use super::api::start_api // error: resolves to src::server::users::api (does not exist)
 
 pub fn get()
   fetch()
@@ -416,8 +431,8 @@ pub fn add()
 ### **server/api.voyd**
 
 ```voyd
-use users::get_user     // valid: sibling module users exports get_user
-use users::add_user     // error: add_user is not exported
+use super::users::get_user     // valid: sibling module users exports get_user
+use super::users::add_user     // error: add_user is not exported
 
 fn start_api()
   ...
@@ -425,22 +440,23 @@ fn start_api()
 
 ---
 
-# **Module Keywords**
+# Module Keywords
 
-### **Module commands**
+### Module commands
 
 * `pub` — Make top-level items package-visible (exports to other packages come from `pkg.voyd`)
 * `mod` — Define an inline module
 * `use` — Bring modules into scope
 
-### **Path keywords**
+### Path keywords
 
 * `all` — Import/export all `pub` items from a module
-* `self` — Refer to the module itself inside group imports
+* `self` — Refer to the current module
+* `super` — Refer to the parent module
 * `std` — Standard library
 * `src` — Source root
 * `pkg` — Installed packages
 
-### **Reserved**
+### Reserved
 
 * Modules cannot use keywords as names.

@@ -5,6 +5,11 @@ import { VoydConfig } from "./types.js";
 const require = createRequire(import.meta.url);
 const { version } = require("@voyd/lib/package.json") as { version: string };
 
+const appendOptionValue = (value: string, previous: string[]): string[] => [
+  ...previous,
+  value,
+];
+
 export const getConfigFromCli = (): VoydConfig => {
   const program = new Command();
 
@@ -28,6 +33,12 @@ export const getConfigFromCli = (): VoydConfig => {
     .option("--test", "run voyd tests")
     .option("--reporter <name>", "test reporter (default: minimal)")
     .option("--fail-empty-tests", "exit 1 if no tests are found")
+    .option(
+      "--pkg-dir <path>",
+      "additional package directory (repeatable)",
+      appendOptionValue,
+      [],
+    )
     .helpOption("-h, --help", "display help for command")
     .allowExcessArguments();
 
@@ -53,5 +64,6 @@ export const getConfigFromCli = (): VoydConfig => {
     test: testMode,
     testReporter: opts.reporter,
     failOnEmptyTests: opts.failEmptyTests,
+    pkgDirs: opts.pkgDir,
   };
 };

@@ -115,8 +115,41 @@ const resolveRoots = ({
   src: srcRoot,
   std: roots?.std ? path.resolve(roots.std) : resolveStdRoot(),
   pkg: roots?.pkg ? path.resolve(roots.pkg) : roots?.pkg,
+  pkgDirs: resolvePackageDirs({ roots, srcRoot }),
   resolvePackageRoot: roots?.resolvePackageRoot,
 });
+
+const resolvePackageDirs = ({
+  roots,
+  srcRoot,
+}: {
+  roots?: ModuleRoots;
+  srcRoot: string;
+}): string[] => {
+  const configured = [
+    ...(roots?.pkgDirs ?? []),
+    ...(roots?.pkg ? [roots.pkg] : []),
+  ].map((dir) => path.resolve(dir));
+  const nodeModulesDirs = collectNodeModulesDirs(srcRoot);
+  return dedupePaths([...configured, ...nodeModulesDirs]);
+};
+
+const collectNodeModulesDirs = (startDir: string): string[] => {
+  const dirs: string[] = [];
+  let current = path.resolve(startDir);
+  while (true) {
+    dirs.push(path.join(current, "node_modules"));
+    const parent = path.dirname(current);
+    if (parent === current) {
+      break;
+    }
+    current = parent;
+  }
+  return dirs;
+};
+
+const dedupePaths = (paths: readonly string[]): string[] =>
+  Array.from(new Set(paths));
 
 const buildMemoryFiles = ({
   entryPath,

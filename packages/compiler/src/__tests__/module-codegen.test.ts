@@ -15,7 +15,7 @@ describe("module codegen", () => {
   it("links imported functions across modules and exports only entry functions", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: `use util::math::all
+      [`${root}${sep}main.voyd`]: `use src::util::math::all
 
 pub fn main() -> i32
   add(10, sub(5, 2))
@@ -24,7 +24,7 @@ pub fn delta() -> i32
   sub(8, 3)`,
       [`${root}${sep}util.voyd`]:
         "pub use self::math::all\npub use self::ops::all",
-      [`${root}${sep}util${sep}math.voyd`]: "pub use ops::math::all",
+      [`${root}${sep}util${sep}math.voyd`]: "pub use super::ops::math::all",
       [`${root}${sep}util${sep}ops.voyd`]: "pub use self::math::all",
       [`${root}${sep}util${sep}ops${sep}math.voyd`]: `pub fn add(a: i32, b: i32) -> i32
   a + b
@@ -168,7 +168,7 @@ pub fn main() -> i32
   it("runs generic overloads across modules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: `use util::assertions::all
+      [`${root}${sep}main.voyd`]: `use src::util::assertions::all
 
 pub fn main() -> i32
   let a = assert(5, eq: 5)
@@ -244,7 +244,7 @@ pub fn assert<T>(value: T, { neq expected: T }) -> i32
   it("runs nominal constructor overloads across modules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: `use animal_e2e::Animal
+      [`${root}${sep}main.voyd`]: `use src::animal_e2e::Animal
 
 pub fn main() -> i32
   let a = Animal { name: 1 }

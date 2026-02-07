@@ -1,5 +1,5 @@
-use dep::dep_intrinsic
-use dep::make_external
+use src::dep::dep_intrinsic
+use src::dep::make_external
 
 pub fn main() -> i32
   let item = make_external(2)

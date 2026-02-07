@@ -117,6 +117,7 @@ const normalizeRoots = (roots?: ModuleRoots): ModuleRoots => ({
   src: normalizePath(roots?.src ?? SRC_ROOT),
   std: normalizePath(roots?.std ?? STD_ROOT),
   pkg: roots?.pkg ? normalizePath(roots.pkg) : roots?.pkg,
+  pkgDirs: roots?.pkgDirs?.map((dir) => normalizePath(dir)),
   resolvePackageRoot: roots?.resolvePackageRoot,
 });
 

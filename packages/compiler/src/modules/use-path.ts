@@ -14,6 +14,8 @@ export type NormalizedUseEntry = {
   alias?: string;
   importKind: UsePathImportKind;
   anchorToSelf?: boolean;
+  parentHops?: number;
+  hasExplicitPrefix: boolean;
   span: SourceSpan;
 };
 
@@ -21,18 +23,57 @@ type RawUseEntry = {
   segments: readonly string[];
   span: SourceSpan;
   alias?: string;
+  anchorToSelf?: boolean;
+  parentHops?: number;
+  hasExplicitPrefix?: boolean;
 };
+
+type ParseUsePathState = {
+  anchorToSelf?: boolean;
+  parentHops?: number;
+  hasExplicitPrefix?: boolean;
+};
+
+const ROOT_PREFIXES = new Set(["self", "super", "src", "std", "pkg"]);
 
 export const parseUsePaths = (
   expr: Expr | undefined,
   span: SourceSpan,
-  base: readonly string[] = []
+  base: readonly string[] = [],
+  state: ParseUsePathState = {}
 ): NormalizedUseEntry[] => {
   if (!expr) {
     return [];
   }
   if (isIdentifierAtom(expr)) {
-    return [normalizeUseEntry({ segments: [...base, expr.value], span })];
+    const isRootPrefix = base.length === 0 && ROOT_PREFIXES.has(expr.value);
+    const nextState = isRootPrefix
+      ? expr.value === "self"
+        ? {
+            ...state,
+            anchorToSelf: true,
+            hasExplicitPrefix: true,
+          }
+        : expr.value === "super"
+        ? {
+            ...state,
+            parentHops: (state.parentHops ?? 0) + 1,
+            hasExplicitPrefix: true,
+          }
+        : {
+            ...state,
+            hasExplicitPrefix: true,
+          }
+      : state;
+    return [
+      normalizeUseEntry({
+        segments: [...base, expr.value],
+        span,
+        anchorToSelf: nextState.anchorToSelf,
+        parentHops: nextState.parentHops,
+        hasExplicitPrefix: nextState.hasExplicitPrefix,
+      }),
+    ];
   }
 
   if (!isForm(expr)) {
@@ -47,31 +88,44 @@ export const parseUsePaths = (
       isIdentifierAtom(leftExpr) &&
       leftExpr.value === "self"
     ) {
-      return parseUsePaths(rightExpr, span, base).map((entry) => ({
-        ...entry,
+      return parseUsePaths(rightExpr, span, base, {
+        ...state,
         anchorToSelf: true,
-      }));
+        hasExplicitPrefix: true,
+      });
     }
-    const left = parseUsePaths(leftExpr, span, base);
+    if (
+      base.length === 0 &&
+      isIdentifierAtom(leftExpr) &&
+      leftExpr.value === "super"
+    ) {
+      return parseUsePaths(rightExpr, span, base, {
+        ...state,
+        parentHops: (state.parentHops ?? 0) + 1,
+        hasExplicitPrefix: true,
+      });
+    }
+    const left = parseUsePaths(leftExpr, span, base, state);
     return left.flatMap((entry) =>
-      parseUsePaths(rightExpr, span, entry.path).map((next) => ({
-        ...next,
-        anchorToSelf: entry.anchorToSelf || next.anchorToSelf,
-      }))
+      parseUsePaths(rightExpr, span, entry.path, {
+        anchorToSelf: entry.anchorToSelf,
+        parentHops: entry.parentHops,
+        hasExplicitPrefix: entry.hasExplicitPrefix,
+      })
     );
   }
 
   if (expr.calls("as")) {
     const aliasExpr = expr.at(2);
     const alias = isIdentifierAtom(aliasExpr) ? aliasExpr.value : undefined;
-    return parseUsePaths(expr.at(1), span, base).map((entry) => ({
+    return parseUsePaths(expr.at(1), span, base, state).map((entry) => ({
       ...entry,
       alias: alias ?? entry.alias,
     }));
   }
 
   if (expr.callsInternal("object_literal")) {
-    return expr.rest.flatMap((entry) => parseUsePaths(entry, span, base));
+    return expr.rest.flatMap((entry) => parseUsePaths(entry, span, base, state));
   }
 
   return [];
@@ -81,51 +135,97 @@ const normalizeUseEntry = ({
   segments,
   span,
   alias,
+  anchorToSelf,
+  parentHops,
+  hasExplicitPrefix: explicitPrefix,
 }: RawUseEntry): NormalizedUseEntry => {
-  const last = segments.at(-1);
+  const normalizedSegments =
+    segments[0] === "pkg" && segments[1] === "std"
+      ? ["std", ...segments.slice(2)]
+      : segments;
+  const last = normalizedSegments.at(-1);
+  const startsWithNamespace =
+    normalizedSegments[0] === "src" ||
+    normalizedSegments[0] === "std" ||
+    normalizedSegments[0] === "pkg";
+  const hasExplicitPrefix =
+    explicitPrefix === true ||
+    anchorToSelf === true ||
+    (parentHops ?? 0) > 0 ||
+    startsWithNamespace;
   if (last === "all") {
-    const moduleSegments = segments.slice(0, -1);
+    const moduleSegments = normalizedSegments.slice(0, -1);
     return {
       moduleSegments,
       path: moduleSegments,
       importKind: "all",
       alias,
+      anchorToSelf,
+      parentHops,
+      hasExplicitPrefix,
       span,
     };
   }
 
   if (last === "self") {
-    const moduleSegments = segments.slice(0, -1);
+    const moduleSegments = normalizedSegments.slice(0, -1);
     const name = moduleSegments.at(-1) ?? "self";
     return {
       moduleSegments,
       path: moduleSegments,
       importKind: "self",
       alias: alias ?? name,
+      anchorToSelf,
+      parentHops,
+      hasExplicitPrefix,
       span,
     };
   }
 
-  if (segments.length === 1 && last) {
+  if (normalizedSegments.length === 1 && last) {
     return {
-      moduleSegments: segments,
-      path: segments,
+      moduleSegments: normalizedSegments,
+      path: normalizedSegments,
       targetName: last,
       alias: alias ?? last,
       importKind: "self",
+      anchorToSelf,
+      parentHops,
+      hasExplicitPrefix,
+      span,
+    };
+  }
+
+  const first = normalizedSegments[0];
+  if (
+    normalizedSegments.length === 2 &&
+    last &&
+    (first === "src" || first === "pkg")
+  ) {
+    return {
+      moduleSegments: normalizedSegments,
+      path: normalizedSegments,
+      importKind: "self",
+      alias: alias ?? last,
+      anchorToSelf,
+      parentHops,
+      hasExplicitPrefix,
       span,
     };
   }
 
   const targetName = last;
-  const moduleSegments = segments.slice(0, -1);
-  const name = targetName ?? segments.at(-1) ?? "self";
+  const moduleSegments = normalizedSegments.slice(0, -1);
+  const name = targetName ?? normalizedSegments.at(-1) ?? "self";
   return {
     moduleSegments,
     path: targetName ? [...moduleSegments, targetName] : moduleSegments,
     targetName,
     alias: alias ?? name,
     importKind: "name",
+    anchorToSelf,
+    parentHops,
+    hasExplicitPrefix,
     span,
   };
 };
