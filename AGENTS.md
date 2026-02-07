@@ -10,6 +10,9 @@ Always build with long term maintainability in mind. Avoid short term hacks.
 If you encounter code or an architecture that could benefit from a refactor,
 report on it and suggest direction in your final response.
 
+Voyd has not yet been released. Breaking changes to public APIs are ok. Just
+note the breaking changes if made.
+
 # Debugging
 
 A cli is available after `npm link`
@@ -22,6 +25,7 @@ Helpful commands:
 # Testing
 
 - `npm test` (runs vitest suite). Always confirm this passes before finishing.
+- `npm typecheck`.
 - `npx vitest <path-to-test>`
 
 You should generally add unit tests (especially e2e ones)
