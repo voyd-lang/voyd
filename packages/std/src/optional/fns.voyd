@@ -1,4 +1,4 @@
-use std::optional::types::all
+use super::types::all
 use std::test::assertions::all
 
 pub fn some<T>(value: T): () -> Optional<T>

@@ -1,1 +1,1 @@
-pub use std::string::fns::{ String }
+pub use super::fns::{ String }

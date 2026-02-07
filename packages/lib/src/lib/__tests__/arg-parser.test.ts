@@ -29,4 +29,16 @@ describe("getConfigFromCli", () => {
     expect(config.index).toBe(".");
     expect(config.test).toBe(true);
   });
+
+  it("collects repeatable --pkg-dir options", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "--pkg-dir",
+      "./node_modules",
+      "--pkg-dir",
+      "../vendor/packages",
+    ]);
+    expect(config.pkgDirs).toEqual(["./node_modules", "../vendor/packages"]);
+  });
 });

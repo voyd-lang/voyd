@@ -24,4 +24,6 @@ export type VoydConfig = {
   testReporter?: string;
   /** Exit with status 1 if no tests are found */
   failOnEmptyTests?: boolean;
+  /** Additional package search directories */
+  pkgDirs?: string[];
 };
