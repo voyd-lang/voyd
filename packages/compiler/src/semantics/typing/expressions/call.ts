@@ -103,17 +103,21 @@ export const typeCallExpr = (
   });
   const shouldDeferLambdaProbeTyping = calleeExpr.exprKind === "overload-set";
 
-  const args = expr.args.map((arg, index) => ({
-    label: arg.label,
-    type:
+  const args = expr.args.map((arg, index) => {
+    const expectedType = expectedParams?.[index];
+    const shouldDeferLambdaArgTyping =
       shouldDeferLambdaProbeTyping &&
-      ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda"
+      ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda" &&
+      (typeof expectedType !== "number" ||
+        expectedType === ctx.primitives.unknown);
+    return {
+      label: arg.label,
+      type: shouldDeferLambdaArgTyping
         ? ctx.primitives.unknown
-        : typeExpression(arg.expr, ctx, state, {
-            expectedType: expectedParams?.[index],
-          }),
-    exprId: arg.expr,
-  }));
+        : typeExpression(arg.expr, ctx, state, { expectedType }),
+      exprId: arg.expr,
+    };
+  });
 
   const argEffectRow = composeEffectRows(
     ctx.effects,
