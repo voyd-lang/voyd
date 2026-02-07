@@ -473,6 +473,123 @@ describe("lowering pipeline", () => {
     expect(callee.symbol).toBe(helper);
   });
 
+  it("preserves target type args for namespace-qualified effect ops", () => {
+    const source = `use self::util
+
+fn main()
+  util::Gen<i32>::pass()`;
+    const ast = parse(source, "module_qualified_effect_target.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "module_qualified_effect_target.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const utilPath = {
+      namespace: "src" as const,
+      segments: ["main", "util"] as const,
+    };
+    const moduleId = modulePathToString(modulePath);
+    const utilId = modulePathToString(utilPath);
+    const useForm = ast.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const dependency = {
+      kind: "use" as const,
+      path: utilPath,
+      span: toSourceSpan((useForm as any) ?? ast),
+    };
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "module_qualified_effect_target.voyd" },
+      ast,
+      source,
+      dependencies: [dependency],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+
+    const exportedEffect = 401;
+    const exportedOp = 402;
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        utilId,
+        new Map([
+          [
+            "Gen",
+            {
+              name: "Gen",
+              symbol: exportedEffect,
+              moduleId: utilId,
+              modulePath: utilPath,
+              packageId: packageIdFromPath(utilPath),
+              kind: "effect",
+              visibility: packageVisibility(),
+            },
+          ],
+          [
+            "pass",
+            {
+              name: "pass",
+              symbol: exportedOp,
+              moduleId: utilId,
+              modulePath: utilPath,
+              packageId: packageIdFromPath(utilPath),
+              kind: "effect-op",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const builder = createHirBuilder({
+      path: "module_qualified_effect_target.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) return;
+
+    const block = hir.expressions.get(mainFn.body) as HirBlockExpr;
+    const call = hir.expressions.get(block.value!) as HirCallExpr;
+    expect(call.exprKind).toBe("call");
+    expect(call.typeArguments).toHaveLength(1);
+    expect(call.typeArguments?.[0]?.typeKind).toBe("named");
+    if (call.typeArguments?.[0]?.typeKind === "named") {
+      expect(call.typeArguments[0].path).toEqual(["i32"]);
+    }
+  });
+
   it("lowers traits and their default methods", () => {
     const name = "trait_area.voyd";
     const ast = loadAst(name);

@@ -486,7 +486,9 @@ const extractStaticTargetTypeArguments = ({
 }: {
   targetExpr: Expr;
 } & LoweringParams): HirTypeExpr[] | undefined => {
-  const genericArgs = extractTypeArgumentForms(targetExpr);
+  const genericArgs = extractTypeArgumentForms(
+    extractNamespaceTailExpr(targetExpr),
+  );
   if (!genericArgs || genericArgs.length === 0) {
     return undefined;
   }
@@ -494,6 +496,15 @@ const extractStaticTargetTypeArguments = ({
     .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
     .filter(Boolean) as HirTypeExpr[];
   return typeArguments.length > 0 ? typeArguments : undefined;
+};
+
+const extractNamespaceTailExpr = (expr: Expr): Expr => {
+  if (!isForm(expr) || !expr.calls("::") || expr.length !== 3) {
+    return expr;
+  }
+
+  const member = expr.at(2);
+  return member ? extractNamespaceTailExpr(member) : expr;
 };
 
 const extractTypeArgumentForms = (
