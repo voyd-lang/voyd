@@ -1,6 +1,7 @@
 import {
   type Expr,
   type Form,
+  formCallsInternal,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -12,6 +13,30 @@ import { resolveModuleMemberResolution } from "./resolution-helpers.js";
 
 const isNamespaceAccess = (expr: Expr | undefined): expr is Form =>
   isForm(expr) && expr.calls("::") && expr.length === 3;
+
+const stripTypeArguments = (expr: Expr): Expr => {
+  if (!isForm(expr)) {
+    return expr;
+  }
+
+  if (formCallsInternal(expr, "generics")) {
+    const target = expr.at(1);
+    return target ?? expr;
+  }
+
+  const head = expr.at(0);
+  const second = expr.at(1);
+  if (
+    expr.length === 2 &&
+    (isIdentifierAtom(head) || isInternalIdentifierAtom(head)) &&
+    isForm(second) &&
+    formCallsInternal(second, "generics")
+  ) {
+    return head;
+  }
+
+  return expr;
+};
 
 const extractNamespaceMemberName = (expr: Expr | undefined): string | undefined => {
   if (!expr) return undefined;
@@ -32,6 +57,10 @@ export const extractNamespaceSegments = (
   expr: Expr | undefined
 ): string[] | undefined => {
   if (!expr) return undefined;
+  const stripped = stripTypeArguments(expr);
+  if (stripped !== expr) {
+    return extractNamespaceSegments(stripped);
+  }
   if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
     return [expr.value];
   }
@@ -51,6 +80,11 @@ export const resolveModulePathSymbol = (
   scope: ScopeId,
   ctx: LowerContext
 ): SymbolId | undefined => {
+  const stripped = stripTypeArguments(expr);
+  if (stripped !== expr) {
+    return resolveModulePathSymbol(stripped, scope, ctx);
+  }
+
   if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
     const symbol = resolveSymbol(expr.value, scope, ctx);
     if (typeof symbol !== "number") {
@@ -102,4 +136,3 @@ export const resolveModulePathSymbol = (
     ? resolution.symbol
     : undefined;
 };
-

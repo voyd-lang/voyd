@@ -35,6 +35,12 @@ export const lowerStaticAccessExpr = ({
     throw new Error("static access expression missing target or member");
   }
 
+  const targetTypeArguments = extractStaticTargetTypeArguments({
+    targetExpr,
+    ctx,
+    scopes,
+    lowerExpr,
+  });
   const targetSymbol = resolveStaticTargetSymbol(
     targetExpr,
     scopes.current(),
@@ -56,12 +62,6 @@ export const lowerStaticAccessExpr = ({
       });
     }
 
-    const targetTypeArguments = extractStaticTargetTypeArguments({
-      targetExpr,
-      ctx,
-      scopes,
-      lowerExpr,
-    });
     const methodTable = ctx.staticMethods.get(targetSymbol);
     if (!methodTable) {
       const targetName = ctx.symbolTable.getSymbol(targetSymbol).name;
@@ -101,6 +101,7 @@ export const lowerStaticAccessExpr = ({
     accessForm: form,
     targetExpr,
     memberExpr,
+    targetTypeArguments,
     ctx,
     scopes,
     lowerExpr,
@@ -200,6 +201,7 @@ const lowerModuleAccess = ({
   accessForm,
   targetExpr,
   memberExpr,
+  targetTypeArguments,
   ctx,
   scopes,
   lowerExpr,
@@ -207,6 +209,7 @@ const lowerModuleAccess = ({
   accessForm: Form;
   targetExpr: Expr;
   memberExpr: Expr;
+  targetTypeArguments?: HirTypeExpr[];
 } & LoweringParams): HirExprId | undefined => {
   const moduleSymbol = resolveModulePathSymbol(
     targetExpr,
@@ -232,6 +235,7 @@ const lowerModuleAccess = ({
       memberForm: memberExpr,
       memberTable,
       moduleSymbol,
+      targetTypeArguments,
       ctx,
       scopes,
       lowerExpr,
@@ -362,6 +366,7 @@ const lowerModuleQualifiedCall = ({
   memberForm,
   memberTable,
   moduleSymbol,
+  targetTypeArguments,
   ctx,
   scopes,
   lowerExpr,
@@ -370,6 +375,7 @@ const lowerModuleQualifiedCall = ({
   memberForm: Form;
   memberTable: ReadonlyMap<string, Set<SymbolId>>;
   moduleSymbol: SymbolId;
+  targetTypeArguments?: HirTypeExpr[];
 } & LoweringParams): HirExprId => {
   const elements = memberForm.toArray();
   if (elements.length === 0) {
@@ -393,6 +399,12 @@ const lowerModuleQualifiedCall = ({
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
         .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
     : undefined;
+  const combinedTypeArguments =
+    targetTypeArguments &&
+    targetTypeArguments.length > 0 &&
+    ctx.symbolTable.getSymbol(moduleSymbol).kind === "effect"
+      ? [...(typeArguments ?? []), ...targetTypeArguments]
+      : typeArguments;
 
   const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
     if (isForm(arg) && arg.calls(":")) {
@@ -448,7 +460,10 @@ const lowerModuleQualifiedCall = ({
     span: toSourceSpan(accessForm),
     callee,
     args,
-    typeArguments,
+    typeArguments:
+      combinedTypeArguments && combinedTypeArguments.length > 0
+        ? combinedTypeArguments
+        : undefined,
   });
 };
 
@@ -471,7 +486,9 @@ const extractStaticTargetTypeArguments = ({
 }: {
   targetExpr: Expr;
 } & LoweringParams): HirTypeExpr[] | undefined => {
-  const genericArgs = extractTypeArgumentForms(targetExpr);
+  const genericArgs = extractTypeArgumentForms(
+    extractNamespaceTailExpr(targetExpr),
+  );
   if (!genericArgs || genericArgs.length === 0) {
     return undefined;
   }
@@ -479,6 +496,15 @@ const extractStaticTargetTypeArguments = ({
     .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
     .filter(Boolean) as HirTypeExpr[];
   return typeArguments.length > 0 ? typeArguments : undefined;
+};
+
+const extractNamespaceTailExpr = (expr: Expr): Expr => {
+  if (!isForm(expr) || !expr.calls("::") || expr.length !== 3) {
+    return expr;
+  }
+
+  const member = expr.at(2);
+  return member ? extractNamespaceTailExpr(member) : expr;
 };
 
 const extractTypeArgumentForms = (
