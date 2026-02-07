@@ -10,12 +10,12 @@
   "type": "module",
   "packageManager": "npm@11.4.2",
   "scripts": {
-    "build": "turbo run build",
-    "test": "turbo run test --output-logs=errors-only",
-    "typecheck": "turbo run typecheck",
-    "lint": "turbo run lint --parallel",
-    "dev": "turbo run dev --parallel",
-    "clean": "turbo run clean --parallel"
+    "build": "turbo run build --affected",
+    "test": "turbo run test --affected --output-logs=errors-only",
+    "typecheck": "turbo run typecheck --affected",
+    "lint": "turbo run lint --affected --parallel",
+    "dev": "turbo run dev --affected --parallel",
+    "clean": "turbo run clean --affected --parallel"
   },
   "devDependencies": {
     "@types/node": "^22.5.1",

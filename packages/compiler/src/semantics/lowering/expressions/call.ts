@@ -10,8 +10,8 @@ import {
 import { literalProvidesAllFields } from "../../constructors.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirTypeExpr } from "../../hir/index.js";
-import { resolveTypeSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
+import { resolveNamedTypeTarget } from "../named-type-resolution.js";
 import { toSourceSpan } from "../../utils.js";
 import {
   isObjectLiteralForm,
@@ -22,11 +22,6 @@ import {
   lowerConstructorArgFromEntry,
   lowerConstructorLiteralCall,
 } from "./constructor-call.js";
-import { resolveModuleMemberResolution } from "./resolution-helpers.js";
-import {
-  extractNamespaceSegments,
-  resolveModulePathSymbol,
-} from "./namespace-resolution.js";
 
 type LowerCallFromElementsParams = LoweringParams & {
   calleeExpr: Expr;
@@ -179,36 +174,6 @@ type NominalTargetResolution = {
   typeArguments?: HirTypeExpr[];
 };
 
-const isGenericsForm = (expr: Expr | undefined): expr is Form =>
-  isForm(expr) && formCallsInternal(expr, "generics");
-
-const extractCalleeTypeArguments = ({
-  callee,
-  ctx,
-  scope,
-}: {
-  callee: Expr;
-  ctx: LoweringParams["ctx"];
-  scope: ReturnType<LoweringParams["scopes"]["current"]>;
-}): { name: IdentifierAtom; typeArguments?: HirTypeExpr[] } | undefined => {
-  if (isIdentifierAtom(callee)) {
-    return { name: callee, typeArguments: undefined };
-  }
-
-  if (isForm(callee)) {
-    const head = callee.at(0);
-    const second = callee.at(1);
-    if (isIdentifierAtom(head) && isGenericsForm(second) && callee.length === 2) {
-      const typeArguments = (second as Form).rest
-        .map((entry) => lowerTypeExpr(entry, ctx, scope))
-        .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[];
-      return { name: head, typeArguments };
-    }
-  }
-
-  return undefined;
-};
-
 const resolveNominalTarget = ({
   callee,
   ctx,
@@ -218,61 +183,26 @@ const resolveNominalTarget = ({
   ctx: LoweringParams["ctx"];
   scope: ReturnType<LoweringParams["scopes"]["current"]>;
 }): NominalTargetResolution | undefined => {
-  if (isIdentifierAtom(callee)) {
-    const symbol = resolveTypeSymbol(callee.value, scope, ctx);
-    if (typeof symbol !== "number") return undefined;
-    return { symbol, path: [callee.value], calleeSyntax: callee };
+  const target = resolveNamedTypeTarget({
+    expr: callee,
+    scope,
+    ctx,
+    parseTypeArguments: (entries) =>
+      entries
+        .map((entry) => lowerTypeExpr(entry, ctx, scope))
+        .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[],
+    allowNamespacedSymbolKind: (kind) => kind === "type",
+    requireResolvedLocalSymbol: true,
+  });
+  if (!target || typeof target.symbol !== "number") {
+    return undefined;
   }
-
-  const calleeTypeArgs = extractCalleeTypeArguments({ callee, ctx, scope });
-  if (calleeTypeArgs) {
-    const symbol = resolveTypeSymbol(calleeTypeArgs.name.value, scope, ctx);
-    if (typeof symbol !== "number") return undefined;
-    return {
-      symbol,
-      path: [calleeTypeArgs.name.value],
-      calleeSyntax: calleeTypeArgs.name,
-      typeArguments: calleeTypeArgs.typeArguments,
-    };
-  }
-
-  if (isForm(callee) && callee.calls("::") && callee.length === 3) {
-    const moduleExpr = callee.at(1);
-    const memberExpr = callee.at(2);
-    if (!moduleExpr || !memberExpr) return undefined;
-
-    const moduleSymbol = resolveModulePathSymbol(moduleExpr, scope, ctx);
-    if (typeof moduleSymbol !== "number") return undefined;
-
-    const memberTypeArgs = extractCalleeTypeArguments({ callee: memberExpr, ctx, scope });
-    const memberName = memberTypeArgs?.name ?? (isIdentifierAtom(memberExpr) ? memberExpr : undefined);
-    if (!memberName) return undefined;
-
-    const memberTable = ctx.moduleMembers.get(moduleSymbol);
-    if (!memberTable) return undefined;
-
-    const resolution = resolveModuleMemberResolution({
-      name: memberName.value,
-      moduleSymbol,
-      memberTable,
-      ctx,
-    });
-    if (!resolution || resolution.kind !== "symbol") return undefined;
-
-    const record = ctx.symbolTable.getSymbol(resolution.symbol);
-    if (record.kind !== "type") return undefined;
-
-    const moduleSegments =
-      extractNamespaceSegments(moduleExpr) ?? [ctx.symbolTable.getSymbol(moduleSymbol).name];
-    return {
-      symbol: resolution.symbol,
-      path: [...moduleSegments, memberName.value],
-      calleeSyntax: memberName,
-      typeArguments: memberTypeArgs?.typeArguments,
-    };
-  }
-
-  return undefined;
+  return {
+    symbol: target.symbol,
+    path: target.path,
+    calleeSyntax: target.name,
+    typeArguments: target.typeArguments,
+  };
 };
 
 export const lowerCall = ({
