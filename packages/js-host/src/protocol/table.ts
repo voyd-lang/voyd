@@ -129,6 +129,18 @@ const effectIdHashFromParts = (low: number, high: number): EffectIdHash => {
 export const formatSignatureHash = (value: number): string =>
   `0x${value.toString(16).padStart(8, "0")}`;
 
+const withDoubleColonOpSeparator = (label: string): string => {
+  const opSeparator = label.lastIndexOf(".");
+  if (opSeparator < 0) return label;
+  return `${label.slice(0, opSeparator)}::${label.slice(opSeparator + 1)}`;
+};
+
+const opNameFromLabel = (label: string): string => {
+  const opSeparator = label.lastIndexOf("::");
+  if (opSeparator < 0) return label;
+  return label.slice(opSeparator + 2);
+};
+
 export const normalizeSignatureHash = (hash: string): number => {
   const trimmed = hash.trim();
   if (!trimmed) {
@@ -229,12 +241,16 @@ export const toHostProtocolTable = (
   table: ParsedEffectTable
 ): HostProtocolTable => ({
   version: table.version,
-  ops: table.ops.map((op) => ({
-    opIndex: op.opIndex,
-    effectId: op.effectId,
-    opId: op.opId,
-    resumeKind: resumeKindName(op.resumeKind),
-    signatureHash: formatSignatureHash(op.signatureHash),
-    ...(op.label ? { label: op.label } : {}),
-  })),
+  ops: table.ops.map((op) => {
+    const label = withDoubleColonOpSeparator(op.label);
+    return {
+      opIndex: op.opIndex,
+      effectId: op.effectId,
+      opId: op.opId,
+      opName: opNameFromLabel(label),
+      resumeKind: resumeKindName(op.resumeKind),
+      signatureHash: formatSignatureHash(op.signatureHash),
+      ...(label ? { label } : {}),
+    };
+  }),
 });

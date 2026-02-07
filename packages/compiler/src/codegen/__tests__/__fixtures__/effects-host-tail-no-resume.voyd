@@ -1,0 +1,9 @@
+eff Async
+  await(tail, x: i32) -> i32
+
+fn worker(x: i32): Async -> i32
+  let value = Async::await(x)
+  value * 2
+
+pub fn host_tail(): Async -> i32
+  worker(4)

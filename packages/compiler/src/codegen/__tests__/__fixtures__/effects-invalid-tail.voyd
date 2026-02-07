@@ -1,0 +1,12 @@
+eff Async
+  await(tail) -> i32
+
+pub fn main(): () -> i32
+  try
+    Async::await()
+  Async::await(tail):
+    if 1 == 0 then:
+      tail(1)
+    else:
+      0
+

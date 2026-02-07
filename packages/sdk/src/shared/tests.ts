@@ -142,18 +142,18 @@ const registerTestHandlers = ({
   }
 
   host.registerHandlersByLabelSuffix({
-    ".fail": (...args: unknown[]) => {
+    "::fail": (_continuation, ...args: unknown[]) => {
       throw new TestFailure(extractMessage(args[0]));
     },
-    ".skip": (...args: unknown[]) => {
+    "::skip": (_continuation, ...args: unknown[]) => {
       throw new TestSkip(extractMessage(args[0]));
     },
-    ".log": (...args: unknown[]) => {
+    "::log": ({ resume }, ...args: unknown[]) => {
       if (!onLog) {
-        return null;
+        return resume();
       }
       onLog(buildLogMessage(args));
-      return null;
+      return resume();
     },
   });
 };

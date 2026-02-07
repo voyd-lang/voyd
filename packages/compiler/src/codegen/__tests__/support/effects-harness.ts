@@ -4,6 +4,7 @@ import {
   createVoydHost,
   formatSignatureHash,
   parseEffectTable,
+  type EffectContinuation,
   type ParsedEffectOp,
   type ParsedEffectTable,
 } from "@voyd/js-host";
@@ -206,6 +207,19 @@ const defaultTestAssertionHandler: EffectHandler = (request) => {
   throw new Error(`Unhandled std::test::assertions effect: ${request.label}`);
 };
 
+const toContinuationResult = ({
+  continuation,
+  request,
+  value,
+}: {
+  continuation: EffectContinuation;
+  request: EffectHandlerRequest;
+  value: unknown;
+}) =>
+  request.resumeKind === 1
+    ? continuation.tail(value)
+    : continuation.resume(value);
+
 export const runEffectfulExport = async <T = unknown>({
   wasm,
   entryName,
@@ -247,7 +261,12 @@ export const runEffectfulExport = async <T = unknown>({
       op.effectId,
       op.opId,
       formatSignatureHash(op.signatureHash),
-      (...args) => resolvedHandler(request, ...args)
+      async (continuation, ...args) =>
+        toContinuationResult({
+          continuation,
+          request,
+          value: await resolvedHandler(request, ...args),
+        })
     );
   });
 

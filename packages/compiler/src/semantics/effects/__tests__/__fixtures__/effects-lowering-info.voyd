@@ -13,15 +13,7 @@ fn handle_static(): () -> i32
   Async::await(tail):
     tail(7)
 
-fn handle_runtime(): () -> i32
-  try
-    effectful()
-  Async::await(tail):
-    let thunk = () => tail(1)
-    thunk()
-
 fn call_mix(cb: fn() -> i32): Async -> i32
   pure_add(1, 2)
   cb()
   effectful()
-

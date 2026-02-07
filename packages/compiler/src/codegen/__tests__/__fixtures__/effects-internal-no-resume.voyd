@@ -1,0 +1,18 @@
+eff Async
+  await(resume) -> i32
+  log(resume, msg: i32) -> i32
+
+fn worker(): Async -> i32
+  let value = Async::await()
+  Async::log(value)
+  value * 2
+
+pub fn internal_no_resume(x: i32): () -> i32
+  try
+    worker()
+  Async::await(resume):
+    if x > 4 then:
+      resume(x)
+    x / 2
+  Async::log(resume, msg):
+    resume(msg)

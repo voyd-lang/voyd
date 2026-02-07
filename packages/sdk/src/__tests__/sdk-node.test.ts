@@ -1,7 +1,52 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createSdk } from "@voyd/sdk";
+import {
+  createSdk,
+  type EffectContinuation,
+  type EffectHandler,
+} from "@voyd/sdk";
+
+const EFFECT_SOURCE = `use std::msgpack::self as __std_msgpack
+use std::string::self as __std_string
+
+@effect(id: "com.example.async")
+eff Async
+  await(resume, value: i32) -> i32
+
+pub fn main(): Async -> i32
+  Async::await(2) + 1
+`;
+const ASYNC_EFFECT_ID = "com.example.async";
+
+const buildFallbackHandlers = ({
+  result,
+  exclude = [],
+}: {
+  result: Awaited<ReturnType<ReturnType<typeof createSdk>["compile"]>>;
+  exclude?: Array<{ effectId: string; opName: string; signatureHash: string }>;
+}): Record<string, EffectHandler> =>
+  Object.fromEntries(
+    result.effects.table.ops
+      .filter(
+        (op) =>
+          !exclude.some(
+            (entry) =>
+              entry.effectId === op.effectId &&
+              entry.opName === op.opName &&
+              entry.signatureHash === op.signatureHash
+          )
+      )
+      .map((op) => [
+        result.effects.handlerKeyFor({
+          effectId: op.effectId,
+          opName: op.opName,
+          signatureHash: op.signatureHash,
+        }),
+        ({ resume, tail }: EffectContinuation) =>
+          op.resumeKind === "tail" ? tail() : resume(),
+      ])
+  ) as Record<string, EffectHandler>;
 
 describe("node sdk", () => {
   it("compiles and runs a source module", async () => {
@@ -38,5 +83,73 @@ describe("node sdk", () => {
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("supports handlersByLabelSuffix using :: separators", async () => {
+    const sdk = createSdk();
+    const result = await sdk.compile({ source: EFFECT_SOURCE });
+    const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
+    const output = await result.run<number>({
+      entryName: "main",
+      handlers: buildFallbackHandlers({
+        result,
+        exclude: [
+          {
+            effectId: op.effectId,
+            opName: op.opName,
+            signatureHash: op.signatureHash,
+          },
+        ],
+      }),
+      handlersByLabelSuffix: {
+        "Async::await": ({ resume }, value: unknown) =>
+          resume((value as number) + 40),
+      },
+    });
+    expect(output).toBe(43);
+  });
+
+  it("supports effectId::opName keys without signatureHash for non-overloaded ops", async () => {
+    const sdk = createSdk();
+    const result = await sdk.compile({ source: EFFECT_SOURCE });
+    const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
+    expect(op.effectId).toBe(ASYNC_EFFECT_ID);
+    const handlers: Record<string, EffectHandler> = {
+      ...buildFallbackHandlers({ result }),
+      [`${ASYNC_EFFECT_ID}::${op.opName}`]: ({ resume }, value: unknown) =>
+        resume((value as number) + 40),
+    };
+    const output = await result.run<number>({
+      entryName: "main",
+      handlers,
+    });
+    expect(output).toBe(43);
+  });
+
+  it("exposes signatureHashFor and handlerKeyFor helpers", async () => {
+    const sdk = createSdk();
+    const result = await sdk.compile({ source: EFFECT_SOURCE });
+    const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
+    expect(op.effectId).toBe(ASYNC_EFFECT_ID);
+    const signatureHash = result.effects.signatureHashFor({
+      effectId: ASYNC_EFFECT_ID,
+      opName: op.opName,
+    });
+    const key = result.effects.handlerKeyFor({
+      effectId: ASYNC_EFFECT_ID,
+      opName: op.opName,
+      signatureHash,
+    });
+    const handlers: Record<string, EffectHandler> = {
+      ...buildFallbackHandlers({ result }),
+      [key]: ({ resume }, value: unknown) =>
+        resume((value as number) + 40),
+    };
+
+    const output = await result.run<number>({
+      entryName: "main",
+      handlers,
+    });
+    expect(output).toBe(43);
   });
 });

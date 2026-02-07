@@ -114,7 +114,13 @@ type DiagnosticParamsMap = {
   TY0012: { kind: "branch-type-mismatch"; context?: string };
   TY0013: { kind: "unhandled-effects"; operations: string };
   TY0014: { kind: "effect-annotation-mismatch"; message: string };
-  TY0015: { kind: "tail-resume-count"; operation: string; count: number };
+  TY0015: {
+    kind: "tail-resume-count";
+    operation: string;
+    minCalls: number;
+    maxCalls: number;
+    escapes: boolean;
+  };
   TY0016: {
     kind: "pkg-effect-annotation";
     functionName: string;
@@ -154,6 +160,13 @@ type DiagnosticParamsMap = {
   TY0032: { kind: "tuple-index-out-of-range"; index: number; length: number };
   TY0033: { kind: "unknown-field"; name: string; receiver?: string };
   TY0034: { kind: "return-type-inference-failed"; functionName: string };
+  TY0035: {
+    kind: "resume-call-count";
+    operation: string;
+    minCalls: number;
+    maxCalls: number;
+    escapes: boolean;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -392,8 +405,15 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0014"]>,
   TY0015: {
     code: "TY0015",
-    message: (params) =>
-      `tail-resumptive operation ${params.operation} must call tail exactly once (observed ${params.count})`,
+    message: (params) => {
+      const min =
+        params.minCalls === Number.POSITIVE_INFINITY ? "∞" : `${params.minCalls}`;
+      const max =
+        params.maxCalls === Number.POSITIVE_INFINITY ? "∞" : `${params.maxCalls}`;
+      const range = min === max ? min : `${min}..${max}`;
+      const suffix = params.escapes ? "; continuation escapes" : "";
+      return `tail-resumptive operation ${params.operation} must call tail exactly once (observed ${range}${suffix})`;
+    },
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0015"]>,
@@ -585,6 +605,20 @@ export const diagnosticsRegistry: {
     phase: "typing",
     hints: [{ message: "Add an explicit return type annotation." }],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0034"]>,
+  TY0035: {
+    code: "TY0035",
+    message: (params) => {
+      const min =
+        params.minCalls === Number.POSITIVE_INFINITY ? "∞" : `${params.minCalls}`;
+      const max =
+        params.maxCalls === Number.POSITIVE_INFINITY ? "∞" : `${params.maxCalls}`;
+      const range = min === max ? min : `${min}..${max}`;
+      const suffix = params.escapes ? "; continuation escapes" : "";
+      return `resumptive operation ${params.operation} must call resume at most once (observed ${range}${suffix})`;
+    },
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0035"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

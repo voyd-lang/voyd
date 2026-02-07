@@ -191,18 +191,48 @@ fn missing_tail()
     expect(diagnostic?.message).toMatch(/observed 0/);
   });
 
-  it("rejects multiple tail resumes", () => {
+  it("allows sequential tail resumptions because the first call terminates", () => {
     const ast = parse(
       `
 eff Async
   fn await(tail) -> i32
 
-fn doubled()
+fn handled()
   try
     Async::await()
   Async::await(tail):
     tail(1)
     tail(2)
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const handledSymbol = symbolTable.resolve("handled", symbolTable.rootScope);
+    expect(typeof handledSymbol).toBe("number");
+    if (typeof handledSymbol !== "number") return;
+    const signature = typing.functions.getSignature(handledSymbol);
+    expect(signature).toBeDefined();
+    if (!signature) return;
+    expect(effectOps(signature.effectRow, typing.effects)).toHaveLength(0);
+  });
+
+  it("rejects resumptions when the continuation escapes", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(resume, value: i32) -> i32
+
+fn forward(cb: fn(i32) -> i32, value: i32) -> i32
+  cb(value)
+
+fn handled(value: i32)
+  try
+    Async::await(value)
+  Async::await(resume, value):
+    forward(resume, value)
 `,
       "effects.voyd"
     );
@@ -215,21 +245,51 @@ fn doubled()
     }
 
     const diagnostic = (caught as any)?.diagnostic;
-    expect(diagnostic?.code).toBe("TY0015");
-    expect(diagnostic?.message).toMatch(/observed 2/);
+    expect(diagnostic?.code).toBe("TY0035");
+    expect(diagnostic?.message).toMatch(/continuation escapes/);
   });
 
-  it("allows multiple resumes for resumable operations", () => {
+  it("allows tail resumptions when later calls are unreachable", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+
+fn handled(flag: bool)
+  try
+    Async::await()
+  Async::await(tail):
+    if flag then:
+      tail(1)
+    tail(2)
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const handledSymbol = symbolTable.resolve("handled", symbolTable.rootScope);
+    expect(typeof handledSymbol).toBe("number");
+    if (typeof handledSymbol !== "number") return;
+    const signature = typing.functions.getSignature(handledSymbol);
+    expect(signature).toBeDefined();
+    if (!signature) return;
+    expect(effectOps(signature.effectRow, typing.effects)).toHaveLength(0);
+  });
+
+  it("allows resumptions when later calls are unreachable", () => {
     const ast = parse(
       `
 eff Async
   fn await(resume) -> i32
 
-fn handled()
+fn handled(flag: bool)
   try
     Async::await()
   Async::await(resume):
-    resume(1)
+    if flag then:
+      resume(1)
     resume(2)
 `,
       "effects.voyd"
@@ -244,10 +304,10 @@ fn handled()
     const signature = typing.functions.getSignature(handledSymbol);
     expect(signature).toBeDefined();
     if (!signature) return;
-    expect(typing.effects.getRow(signature.effectRow).operations).toHaveLength(0);
+    expect(effectOps(signature.effectRow, typing.effects)).toHaveLength(0);
   });
 
-  it("defers tail enforcement to runtime when continuation escapes", () => {
+  it("rejects tail continuations that escape", () => {
     const ast = parse(
       `
 eff Async
@@ -265,17 +325,19 @@ fn main()
       "effects.voyd"
     );
 
-    const { hir } = semanticsPipeline(ast);
-    const handler = findEffectHandler(hir);
-    expect(handler).toBeDefined();
-    if (!handler || handler.exprKind !== "effect-handler") return;
-    const clause = handler.handlers[0];
-    expect(clause?.tailResumption?.enforcement).toBe("runtime");
-    expect(clause?.tailResumption?.calls).toBe(0);
-    expect(clause?.tailResumption?.escapes).toBe(true);
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    const diagnostic = (caught as any)?.diagnostic;
+    expect(diagnostic?.code).toBe("TY0015");
+    expect(diagnostic?.message).toMatch(/continuation escapes/);
   });
 
-  it("falls back to runtime enforcement for uncertain control flow", () => {
+  it("rejects tail resumptions with uncertain control flow", () => {
     const ast = parse(
       `
 eff Async
@@ -293,19 +355,16 @@ fn maybe(x: bool)
       "effects.voyd"
     );
 
-    const { hir, typing } = semanticsPipeline(ast);
-    const handler = findEffectHandler(hir);
-    expect(handler).toBeDefined();
-    if (!handler || handler.exprKind !== "effect-handler") return;
-    const clause = handler.handlers[0];
-    const metadata = clause?.tailResumption;
-    expect(metadata?.enforcement).toBe("runtime");
-    expect(metadata?.escapes).toBe(false);
-    expect(metadata?.calls).toBe(1);
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
 
-    const recorded = typing.tailResumptions.get(clause.body);
-    expect(recorded?.enforcement).toBe("runtime");
-    expect(recorded?.minCalls).toBe(0);
+    const diagnostic = (caught as any)?.diagnostic;
+    expect(diagnostic?.code).toBe("TY0015");
+    expect(diagnostic?.message).toMatch(/observed 0\.\.1/);
   });
 
   it("allows resumable handlers to call resume()", () => {

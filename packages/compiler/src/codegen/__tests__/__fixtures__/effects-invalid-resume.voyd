@@ -1,0 +1,11 @@
+eff Async
+  log(resume, msg: i32) -> i32
+
+fn forward(cb: fn(i32) -> i32, value: i32): () -> i32
+  cb(value)
+
+pub fn main(): () -> i32
+  try
+    Async::log(1)
+  Async::log(resume, msg):
+    forward(resume, msg)
