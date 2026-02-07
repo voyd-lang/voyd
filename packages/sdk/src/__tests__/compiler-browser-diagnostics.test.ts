@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
 import { compile } from "@voyd/sdk/browser";
 
 describe("browser compiler diagnostics", () => {
-  it("preserves structured codegen diagnostics when throwing", async () => {
+  it("preserves structured codegen diagnostics without throwing", async () => {
     const source = `
 pub fn identity<T>(value: T) -> T
   value
@@ -12,20 +11,19 @@ pub fn main()
   0
 `;
 
-    let caught: unknown;
-    try {
-      await compile(source);
-    } catch (error) {
-      caught = error;
+    const result = await compile(source);
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("Expected compile failure");
     }
 
-    expect(caught).toBeInstanceOf(DiagnosticError);
-    if (!(caught instanceof DiagnosticError)) {
-      throw new Error("Expected DiagnosticError");
+    const diagnostic = result.diagnostics.find((entry) => entry.code === "CG0003");
+    expect(diagnostic).toBeDefined();
+    if (!diagnostic) {
+      throw new Error("Expected CG0003 diagnostic");
     }
 
-    expect(caught.diagnostic.code).toBe("CG0003");
-    expect(caught.diagnostic.span.file).toBe("/src/index.voyd");
-    expect(caught.diagnostic.span.end).toBeGreaterThan(caught.diagnostic.span.start);
+    expect(diagnostic.span.file).toBe("/src/index.voyd");
+    expect(diagnostic.span.end).toBeGreaterThan(diagnostic.span.start);
   });
 });

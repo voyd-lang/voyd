@@ -17,7 +17,7 @@ pub fn main() -> i32
   add(20, sub(30, 10))
 `;
 
-    const module = await compile(source, {
+    const result = await compile(source, {
       files: {
         "util/math.voyd": `pub fn add(a: i32, b: i32) -> i32
   a + b
@@ -27,8 +27,12 @@ pub fn main() -> i32
 `,
       },
     });
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+    }
 
-    const bytes = toBytes(module.emitBinary());
+    const bytes = toBytes(result.module.emitBinary());
     expect(bytes.length).toBeGreaterThan(0);
   });
 });

@@ -57,8 +57,11 @@ const toBytes = (
     : result.output ?? result.binary ?? new Uint8Array();
 
 const run: SmokeRunner = async () => {
-  const module = await compile(source);
-  const wasm = toBytes(module.emitBinary());
+  const result = await compile(source);
+  if (!result.success) {
+    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+  }
+  const wasm = toBytes(result.module.emitBinary());
   const host = await createVoydHost({ wasm, bufferSize: 256 * 1024 });
   const tree = await host.run<any>("main");
   if (!tree || typeof tree !== "object" || typeof tree.name !== "string") {

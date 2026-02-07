@@ -9,20 +9,25 @@ import {
   type TestScope,
 } from "@voyd/compiler/pipeline-shared.js";
 import type { TestCase } from "./types.js";
+import { diagnosticsFromUnknownError } from "./diagnostics.js";
 
-export type CompileArtifacts = {
+export type CompileArtifactsSuccess = {
+  success: true;
   wasm: Uint8Array;
   wasmText?: string;
-  diagnostics: Diagnostic[];
   tests?: readonly TestCase[];
   testsWasm?: Uint8Array;
 };
 
-const throwIfError = (diagnostics: Diagnostic[]): void => {
-  const error = diagnostics.find((diagnostic) => diagnostic.severity === "error");
-  if (!error) return;
-  throw new DiagnosticError(error);
+export type CompileArtifactsFailure = {
+  success: false;
+  diagnostics: Diagnostic[];
 };
+
+export type CompileArtifacts = CompileArtifactsSuccess | CompileArtifactsFailure;
+
+const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
+  diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
 export const compileWithLoader = async ({
   entryPath,
@@ -41,7 +46,19 @@ export const compileWithLoader = async ({
   loadModuleGraph: LoadModuleGraphFn;
   testScope?: TestScope;
 }): Promise<CompileArtifacts> => {
-  const graph = await loadModuleGraph({ entryPath, roots, host });
+  let graph: Awaited<ReturnType<LoadModuleGraphFn>>;
+  try {
+    graph = await loadModuleGraph({ entryPath, roots, host });
+  } catch (error) {
+    return {
+      success: false,
+      diagnostics: diagnosticsFromUnknownError({
+        error,
+        fallbackFile: entryPath,
+      }),
+    };
+  }
+
   const shouldIncludeTests = includeTests || testsOnly;
   const scopedTestScope = testScope ?? "all";
   const { semantics, diagnostics: semanticDiagnostics, tests } = analyzeModules({
@@ -52,7 +69,12 @@ export const compileWithLoader = async ({
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
   const testCases = shouldIncludeTests ? tests : undefined;
 
-  throwIfError(diagnostics);
+  if (hasErrorDiagnostics(diagnostics)) {
+    return {
+      success: false,
+      diagnostics,
+    };
+  }
 
   try {
     if (testsOnly) {
@@ -62,10 +84,13 @@ export const compileWithLoader = async ({
         codegenOptions: { testMode: true, testScope: scopedTestScope },
       });
       const allDiagnostics = [...diagnostics, ...testResult.diagnostics];
-      throwIfError(allDiagnostics);
+      if (hasErrorDiagnostics(allDiagnostics)) {
+        return { success: false, diagnostics: allDiagnostics };
+      }
+
       return {
+        success: true,
         wasm: testResult.wasm,
-        diagnostics: allDiagnostics,
         tests: testCases,
         testsWasm: testResult.wasm,
       };
@@ -73,10 +98,11 @@ export const compileWithLoader = async ({
 
     const wasmResult = await emitProgram({ graph, semantics });
     const baseDiagnostics = [...diagnostics, ...wasmResult.diagnostics];
-    throwIfError(baseDiagnostics);
+    if (hasErrorDiagnostics(baseDiagnostics)) {
+      return { success: false, diagnostics: baseDiagnostics };
+    }
 
     let testsWasm: Uint8Array | undefined;
-    let allDiagnostics = baseDiagnostics;
 
     if (shouldIncludeTests && tests.length > 0) {
       const testResult = await emitProgram({
@@ -84,21 +110,31 @@ export const compileWithLoader = async ({
         semantics,
         codegenOptions: { testMode: true, testScope: scopedTestScope },
       });
-      allDiagnostics = [...baseDiagnostics, ...testResult.diagnostics];
-      throwIfError(allDiagnostics);
+      const allDiagnostics = [...baseDiagnostics, ...testResult.diagnostics];
+      if (hasErrorDiagnostics(allDiagnostics)) {
+        return { success: false, diagnostics: allDiagnostics };
+      }
       testsWasm = testResult.wasm;
     }
 
     return {
+      success: true,
       wasm: wasmResult.wasm,
-      diagnostics: allDiagnostics,
       tests: testCases,
       testsWasm,
     };
   } catch (error) {
-    const diagnostic = codegenErrorToDiagnostic(error, {
-      moduleId: graph.entry ?? entryPath,
-    });
-    throw new DiagnosticError(diagnostic);
+    const codegenDiagnostics =
+      error instanceof DiagnosticError
+        ? error.diagnostics
+        : [
+            codegenErrorToDiagnostic(error, {
+              moduleId: graph.entry ?? entryPath,
+            }),
+          ];
+    return {
+      success: false,
+      diagnostics: [...diagnostics, ...codegenDiagnostics],
+    };
   }
 };

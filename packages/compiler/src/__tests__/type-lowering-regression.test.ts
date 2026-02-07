@@ -9,13 +9,23 @@ import { createTestCodegenContext } from "../codegen/__tests__/support/test-code
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleGraph, ModuleHost, ModuleNode } from "../modules/types.js";
-import { compileProgram } from "../pipeline.js";
+import { compileProgram, type CompileProgramResult } from "../pipeline.js";
 import { modulePathToString } from "../modules/path.js";
 import type { HirLambdaExpr } from "../semantics/hir/index.js";
 import { getSymbolTable } from "../semantics/_internal/symbol-table.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
+
+const expectCompileSuccess = (
+  result: CompileProgramResult,
+): Extract<CompileProgramResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(JSON.stringify(result.diagnostics, null, 2));
+  }
+  return result;
+};
 
 describe("type lowering regression", () => {
   it("keeps signature lowering free of RTT side effects", () => {
@@ -158,15 +168,11 @@ impl Countable for Box
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: `${root}${sep}main.voyd`,
       roots: { src: root },
       host,
-    });
-
-    if (result.diagnostics.length > 0) {
-      throw new Error(JSON.stringify(result.diagnostics, null, 2));
-    }
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(42);

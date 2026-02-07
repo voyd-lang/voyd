@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolve, sep } from "node:path";
-import { compileProgram } from "../pipeline.js";
+import { compileProgram, type CompileProgramResult } from "../pipeline.js";
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleHost } from "../modules/types.js";
@@ -8,6 +8,16 @@ import { getWasmInstance } from "@voyd/lib/wasm.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
+
+const expectCompileSuccess = (
+  result: CompileProgramResult,
+): Extract<CompileProgramResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(JSON.stringify(result.diagnostics, null, 2));
+  }
+  return result;
+};
 
 describe("functional macros across modules", () => {
   it("expands pub macros from sibling modules", async () => {
@@ -27,13 +37,11 @@ pub macro inc(value)
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);
@@ -58,13 +66,11 @@ pub macro add_two(value)
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: appRoot, pkg: pkgRoot },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);
@@ -92,13 +98,11 @@ pub use src::base_macros::all
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);

@@ -1,21 +1,22 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createSdk } from "@voyd/sdk";
+import { createSdk, type CompileResult } from "@voyd/sdk";
 
-const assertNoCompileErrors = (
-  diagnostics: { severity: string; message: string }[],
-): void => {
-  const errors = diagnostics.filter((d) => d.severity === "error");
-  if (errors.length === 0) return;
-  throw new Error(errors.map((d) => d.message).join("\n"));
+const expectCompileSuccess = (
+  result: CompileResult,
+): Extract<CompileResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+  }
+  return result;
 };
 
 describe("smoke: html.voyd", () => {
   it("returns the expected MsgPack object", async () => {
     const sdk = createSdk();
     const entryPath = path.join(process.cwd(), "fixtures", "html.voyd");
-    const result = await sdk.compile({ entryPath });
-    assertNoCompileErrors(result.diagnostics);
+    const result = expectCompileSuccess(await sdk.compile({ entryPath }));
 
     const output = await result.run<Record<string, unknown>>({
       entryName: "main",

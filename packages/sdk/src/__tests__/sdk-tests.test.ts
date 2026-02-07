@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { createSdk, type TestEvent } from "@voyd/sdk";
+import { createSdk, type CompileResult, type TestEvent } from "@voyd/sdk";
+
+const expectCompileSuccess = (
+  result: CompileResult,
+): Extract<CompileResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+  }
+  return result;
+};
 
 describe("sdk tests collection", () => {
   it("discovers and runs tests", async () => {
     const sdk = createSdk();
-    const result = await sdk.compile({
+    const result = expectCompileSuccess(await sdk.compile({
       includeTests: true,
       source: `use std::msgpack::self as __std_msgpack
 use std::string::self as __std_string
@@ -26,7 +36,7 @@ test "effect skip":
 test only "only runs when respected":
   1
 `,
-    });
+    }));
 
     expect(result.tests).toBeDefined();
     expect(result.tests?.cases.length).toBe(4);

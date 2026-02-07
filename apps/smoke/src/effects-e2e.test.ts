@@ -2,6 +2,7 @@ import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   createSdk,
+  type CompileResult,
   type EffectHandler,
   type EffectsInfo,
 } from "@voyd/sdk";
@@ -15,12 +16,14 @@ const fixtureEntryPath = path.join(
 const ASYNC_EFFECT_ID = "com.example.async";
 const GENERIC_EFFECT_ID = "com.example.generic";
 
-const assertNoCompileErrors = (
-  diagnostics: { severity: string; message: string }[]
-): void => {
-  const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error");
-  if (errors.length === 0) return;
-  throw new Error(errors.map((diagnostic) => diagnostic.message).join("\n"));
+const expectCompileSuccess = (
+  result: CompileResult,
+): Extract<CompileResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+  }
+  return result;
 };
 
 const asNumber = (label: string, value: unknown): number => {
@@ -33,13 +36,12 @@ const unsafeHandler = (
 ): EffectHandler => handler as unknown as EffectHandler;
 
 describe("smoke: effects e2e", () => {
-  let compiled: Awaited<ReturnType<ReturnType<typeof createSdk>["compile"]>>;
+  let compiled: Extract<CompileResult, { success: true }>;
   let effects: EffectsInfo;
 
   beforeAll(async () => {
     const sdk = createSdk();
-    compiled = await sdk.compile({ entryPath: fixtureEntryPath });
-    assertNoCompileErrors(compiled.diagnostics);
+    compiled = expectCompileSuccess(await sdk.compile({ entryPath: fixtureEntryPath }));
     effects = compiled.effects;
   });
 

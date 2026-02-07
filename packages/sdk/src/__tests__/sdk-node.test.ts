@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   createSdk,
+  type CompileResult,
   type EffectContinuation,
   type EffectHandler,
 } from "@voyd/sdk";
@@ -19,11 +20,21 @@ pub fn main(): Async -> i32
 `;
 const ASYNC_EFFECT_ID = "com.example.async";
 
+const expectCompileSuccess = (
+  result: CompileResult,
+): Extract<CompileResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+  }
+  return result;
+};
+
 const buildFallbackHandlers = ({
   result,
   exclude = [],
 }: {
-  result: Awaited<ReturnType<ReturnType<typeof createSdk>["compile"]>>;
+  result: Extract<CompileResult, { success: true }>;
   exclude?: Array<{ effectId: string; opName: string; signatureHash: string }>;
 }): Record<string, EffectHandler> =>
   Object.fromEntries(
@@ -49,13 +60,29 @@ const buildFallbackHandlers = ({
   ) as Record<string, EffectHandler>;
 
 describe("node sdk", () => {
-  it("compiles and runs a source module", async () => {
+  it("returns diagnostics on compile failure instead of throwing", async () => {
     const sdk = createSdk();
     const result = await sdk.compile({
       source: `pub fn main() -> i32
-  42
+  missing_value
 `,
     });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("Expected compile failure");
+    }
+
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === "TY0030")).toBe(true);
+  });
+
+  it("compiles and runs a source module", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(await sdk.compile({
+      source: `pub fn main() -> i32
+  42
+`,
+    }));
 
     const output = await result.run<number>({ entryName: "main" });
     expect(output).toBe(42);
@@ -77,7 +104,9 @@ describe("node sdk", () => {
     );
 
     try {
-      const result = await sdk.compile({ entryPath: relativeEntryPath });
+      const result = expectCompileSuccess(
+        await sdk.compile({ entryPath: relativeEntryPath }),
+      );
       const output = await result.run<number>({ entryName: "main" });
       expect(output).toBe(7);
     } finally {
@@ -178,7 +207,7 @@ pub fn main() -> i32
 
   it("supports handlersByLabelSuffix using :: separators", async () => {
     const sdk = createSdk();
-    const result = await sdk.compile({ source: EFFECT_SOURCE });
+    const result = expectCompileSuccess(await sdk.compile({ source: EFFECT_SOURCE }));
     const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
     const output = await result.run<number>({
       entryName: "main",
@@ -202,7 +231,7 @@ pub fn main() -> i32
 
   it("supports effectId::opName keys without signatureHash for non-overloaded ops", async () => {
     const sdk = createSdk();
-    const result = await sdk.compile({ source: EFFECT_SOURCE });
+    const result = expectCompileSuccess(await sdk.compile({ source: EFFECT_SOURCE }));
     const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
     expect(op.effectId).toBe(ASYNC_EFFECT_ID);
     const handlers: Record<string, EffectHandler> = {
@@ -219,7 +248,7 @@ pub fn main() -> i32
 
   it("exposes signatureHashFor and handlerKeyFor helpers", async () => {
     const sdk = createSdk();
-    const result = await sdk.compile({ source: EFFECT_SOURCE });
+    const result = expectCompileSuccess(await sdk.compile({ source: EFFECT_SOURCE }));
     const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
     expect(op.effectId).toBe(ASYNC_EFFECT_ID);
     const signatureHash = result.effects.signatureHashFor({

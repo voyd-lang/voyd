@@ -9,7 +9,11 @@ import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { compileWithLoader } from "./shared/compile.js";
 import { runWithHandlers } from "./shared/host.js";
 import { createCompileResult } from "./shared/result.js";
-import type { CompileArtifacts } from "./shared/compile.js";
+import type { CompileArtifactsSuccess } from "./shared/compile.js";
+import {
+  createUnexpectedDiagnostic,
+  diagnosticsFromUnknownError,
+} from "./shared/diagnostics.js";
 import type { CompileOptions, CompileResult, VoydSdk } from "./shared/types.js";
 
 const DEFAULT_ENTRY = "index.voyd";
@@ -22,46 +26,68 @@ export const createSdk = (): VoydSdk => ({
 
 const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
   if (!options.entryPath && options.source === undefined) {
-    throw new Error("compile requires entryPath or source");
+    return {
+      success: false,
+      diagnostics: [
+        createUnexpectedDiagnostic({
+          message: "compile requires entryPath or source",
+          file: "<sdk>",
+        }),
+      ],
+    };
   }
 
   const entryName = options.entryPath ?? DEFAULT_ENTRY;
-  const srcRoot = resolveSrcRoot({
-    roots: options.roots,
-    entryPath: entryName,
-    source: options.source,
-  });
-  const entryPath = resolveEntryPath({ entryPath: entryName, srcRoot });
-  const roots = resolveRoots({ roots: options.roots, srcRoot });
-  const host = options.source
-    ? createOverlayModuleHost({
-        primary: createMemoryModuleHost({
-          files: buildMemoryFiles({
-            entryPath,
-            source: options.source,
-            files: options.files ?? {},
-            srcRoot,
+
+  try {
+    const srcRoot = resolveSrcRoot({
+      roots: options.roots,
+      entryPath: entryName,
+      source: options.source,
+    });
+    const entryPath = resolveEntryPath({ entryPath: entryName, srcRoot });
+    const roots = resolveRoots({ roots: options.roots, srcRoot });
+    const host = options.source
+      ? createOverlayModuleHost({
+          primary: createMemoryModuleHost({
+            files: buildMemoryFiles({
+              entryPath,
+              source: options.source,
+              files: options.files ?? {},
+              srcRoot,
+            }),
+            pathAdapter: createNodePathAdapter(),
           }),
-          pathAdapter: createNodePathAdapter(),
-        }),
-        fallback: createFsModuleHost(),
-      })
-    : createFsModuleHost();
+          fallback: createFsModuleHost(),
+        })
+      : createFsModuleHost();
 
-  const testScope =
-    options.testScope ?? (options.source ? "entry" : "all");
-  const result = await compileWithLoader({
-    entryPath,
-    roots,
-    host,
-    includeTests: options.includeTests,
-    testsOnly: options.testsOnly,
-    testScope,
-    loadModuleGraph,
-  });
+    const testScope = options.testScope ?? (options.source ? "entry" : "all");
+    const result = await compileWithLoader({
+      entryPath,
+      roots,
+      host,
+      includeTests: options.includeTests,
+      testsOnly: options.testsOnly,
+      testScope,
+      loadModuleGraph,
+    });
 
-  const finalized = finalizeCompile({ options, result });
-  return createCompileResult(finalized);
+    if (!result.success) {
+      return result;
+    }
+
+    const finalized = finalizeCompile({ options, result });
+    return createCompileResult(finalized);
+  } catch (error) {
+    return {
+      success: false,
+      diagnostics: diagnosticsFromUnknownError({
+        error,
+        fallbackFile: entryName,
+      }),
+    };
+  }
 };
 
 const resolveSrcRoot = ({
@@ -202,8 +228,8 @@ const finalizeCompile = ({
   result,
 }: {
   options: CompileOptions;
-  result: CompileArtifacts;
-}): CompileArtifacts => {
+  result: CompileArtifactsSuccess;
+}): CompileArtifactsSuccess => {
   if (!options.optimize && !options.emitWasmText) {
     return result;
   }

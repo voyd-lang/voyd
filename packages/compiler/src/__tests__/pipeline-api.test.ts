@@ -3,6 +3,7 @@ import { resolve, sep } from "node:path";
 import {
   analyzeModules,
   compileProgram,
+  type CompileProgramResult,
   loadModuleGraph,
   lowerProgram,
 } from "../pipeline.js";
@@ -14,6 +15,26 @@ import { getWasmInstance } from "@voyd/lib/wasm.js";
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
 
+const expectCompileSuccess = (
+  result: CompileProgramResult,
+): Extract<CompileProgramResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(JSON.stringify(result.diagnostics, null, 2));
+  }
+  return result;
+};
+
+const expectCompileFailure = (
+  result: CompileProgramResult,
+): Extract<CompileProgramResult, { success: false }> => {
+  expect(result.success).toBe(false);
+  if (result.success) {
+    throw new Error("expected compile failure");
+  }
+  return result;
+};
+
 describe("next pipeline API", () => {
   it("compiles a program from the module graph through codegen", async () => {
     const root = resolve("/proj/src");
@@ -23,13 +44,11 @@ describe("next pipeline API", () => {
       [`${std}${sep}math.voyd`]: "pub fn add(a: i32, b: i32) a",
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: `${root}${sep}main.voyd`,
       roots: { src: root, std },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm?.length ?? 0).toBeGreaterThan(0);
     expect(result.semantics?.has("src::main")).toBe(true);
   });
@@ -46,16 +65,59 @@ pub fn main()
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileFailure(await compileProgram({
       entryPath: `${root}${sep}main.voyd`,
       roots: { src: root },
       host,
-    });
-
-    expect(result.wasm).toBeUndefined();
+    }));
+    expect(result.diagnostics.length).toBeGreaterThan(0);
     expect(result.diagnostics.some((diag) => diag.code === "CG0003")).toBe(
       true
     );
+  });
+
+  it("collects diagnostics from multiple modules instead of halting early", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use a::all
+use b::all
+
+pub fn main() -> i32
+  0
+`,
+      [`${root}${sep}a.voyd`]: `
+pub fn broken_a() -> i32
+  missing_a
+`,
+      [`${root}${sep}b.voyd`]: `
+pub fn broken_b() -> i32
+  missing_b
+`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    const undefinedIdentifierDiagnostics = result.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "TY0030",
+    );
+
+    expect(
+      undefinedIdentifierDiagnostics.some((diagnostic) =>
+        diagnostic.message.includes("missing_a"),
+      ),
+    ).toBe(true);
+    expect(
+      undefinedIdentifierDiagnostics.some((diagnostic) =>
+        diagnostic.message.includes("missing_b"),
+      ),
+    ).toBe(true);
   });
 
   it("orders modules topologically for lowering", async () => {
@@ -97,13 +159,11 @@ pub fn internal_fn(): () -> i32
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: pkgPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);
@@ -132,13 +192,11 @@ pub fn leak(box: SecretBox) -> i32
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileFailure(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.wasm).toBeUndefined();
+    }));
     expect(result.diagnostics.some((diag) => diag.code === "TY0009")).toBe(
       true
     );
@@ -188,13 +246,11 @@ pub fn make_external(): () -> External
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: appRoot, pkg: packagesRoot },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);
@@ -244,13 +300,11 @@ pub fn make_external(): () -> External
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileFailure(await compileProgram({
       entryPath: mainPath,
       roots: { src: appRoot, pkg: packagesRoot },
       host,
-    });
-
-    expect(result.wasm).toBeUndefined();
+    }));
     expect(result.diagnostics.some((diag) => diag.code === "TY0009")).toBe(
       true
     );
@@ -281,13 +335,11 @@ pub fn make_external(): () -> External
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileFailure(await compileProgram({
       entryPath: pkgPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.wasm).toBeUndefined();
+    }));
     expect(
       result.diagnostics.some(
         (diag) =>
@@ -324,13 +376,11 @@ impl Counter
 `,
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: pkgPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(8);

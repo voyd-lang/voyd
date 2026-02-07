@@ -20,6 +20,13 @@ self.addEventListener("message", async (event: MessageEvent<Inbound>) => {
   try {
     const { compile } = createSdk();
     const program = await compile({ source: code });
+    if (!program.success) {
+      const message = program.diagnostics
+        .map((diagnostic) => diagnostic.message)
+        .join("\n");
+      throw new Error(message);
+    }
+
     const tree = await program.run({ entryName: "main" });
     const message: Outbound = { id, ok: true, tree };
     (self as unknown as Worker).postMessage(message);

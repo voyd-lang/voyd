@@ -283,6 +283,9 @@ export const runTests = async ({
     testScope: "all",
     roots,
   });
+  if (!result.success) {
+    throw { diagnostics: result.diagnostics };
+  }
 
   const tests = result.tests;
   if (!tests || tests.cases.length === 0) {
