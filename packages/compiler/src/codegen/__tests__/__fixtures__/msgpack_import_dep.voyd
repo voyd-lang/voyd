@@ -1,0 +1,4 @@
+use std::msgpack::{ MsgPack, pack_null }
+
+pub fn payload() -> MsgPack
+  pack_null()
