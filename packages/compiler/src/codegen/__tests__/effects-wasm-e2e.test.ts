@@ -128,7 +128,7 @@ describe("effects wasm e2e", () => {
       const host = await createVoydHost({ wasm });
       await registerStdTestFallbackHandlers(host);
       const count = host.registerHandlersByLabelSuffix({
-        "Async.await": ({ resume, end }, x) => {
+        "Async::await": ({ resume, end }, x) => {
           if (typeof x !== "number") {
             throw new Error(`expected i32 arg, got ${typeof x}`);
           }
@@ -148,7 +148,7 @@ describe("effects wasm e2e", () => {
     const host = await createVoydHost({ wasm });
     await registerStdTestFallbackHandlers(host);
     const count = host.registerHandlersByLabelSuffix({
-      "Async.await": ({ end }, x) => {
+      "Async::await": ({ end }, x) => {
         if (typeof x !== "number") {
           throw new Error(`expected i32 arg, got ${typeof x}`);
         }
