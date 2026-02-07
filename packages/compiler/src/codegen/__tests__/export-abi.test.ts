@@ -11,15 +11,17 @@ const stdRoot = resolve(import.meta.dirname, "../../../../std/src");
 const expectCompileSuccess = (
   result: CompileProgramResult,
 ): Extract<CompileProgramResult, { success: true }> => {
-  expect(result.success).toBe(true);
   if (!result.success) {
     throw new Error(JSON.stringify(result.diagnostics, null, 2));
   }
+  expect(result.success).toBe(true);
   return result;
 };
 
-const buildModule = async (): Promise<Uint8Array> => {
-  const entryPath = resolve(fixtureRoot, "msgpack-export.voyd");
+const buildModule = async ({
+  entryFile = "msgpack-export.voyd",
+}: { entryFile?: string } = {}): Promise<Uint8Array> => {
+  const entryPath = resolve(fixtureRoot, entryFile);
   const result = expectCompileSuccess(await compileProgram({
     entryPath,
     roots: { src: fixtureRoot, std: stdRoot },
@@ -92,5 +94,15 @@ describe("export abi metadata", () => {
     };
 
     expect(normalize(result)).toEqual(payload);
+  });
+
+  it("marks imported recursive msgpack aliases as serialized", async () => {
+    const wasm = await buildModule({ entryFile: "msgpack_import_main.voyd" });
+    const module = new WebAssembly.Module(wasmBufferSource(wasm));
+    const abi = parseExportAbi(module);
+
+    expect(abi.exports).toEqual([
+      { name: "fetch", abi: "serialized", formatId: "msgpack" },
+    ]);
   });
 });
