@@ -5,34 +5,57 @@ const normalizeBigInt = (value: bigint): string => `${value}n`;
 const normalizeArrayBufferView = (value: ArrayBufferView): number[] =>
   Array.from(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
 
+const normalizeWithTraversalTracking = ({
+  value,
+  ancestors,
+  normalize,
+}: {
+  value: object;
+  ancestors: WeakSet<object>;
+  normalize: () => unknown;
+}): unknown => {
+  if (ancestors.has(value)) {
+    return CIRCULAR_REFERENCE;
+  }
+
+  ancestors.add(value);
+  try {
+    return normalize();
+  } finally {
+    ancestors.delete(value);
+  }
+};
+
 const normalizeObjectEntries = ({
   value,
-  seen,
+  ancestors,
 }: {
   value: Record<string, unknown>;
-  seen: WeakSet<object>;
+  ancestors: WeakSet<object>;
 }): Record<string, unknown> =>
   Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [key, normalizeOutput(entry, seen)])
+    Object.entries(value).map(([key, entry]) => [
+      key,
+      normalizeOutput({ value: entry, ancestors }),
+    ])
   );
 
 const normalizeMapEntries = ({
   value,
-  seen,
+  ancestors,
 }: {
   value: Map<unknown, unknown>;
-  seen: WeakSet<object>;
+  ancestors: WeakSet<object>;
 }): Record<string, unknown> =>
   Object.fromEntries(
     Array.from(value.entries()).map(([key, entry]) => [
-      String(normalizeOutput(key, seen)),
-      normalizeOutput(entry, seen),
+      String(normalizeOutput({ value: key, ancestors })),
+      normalizeOutput({ value: entry, ancestors }),
     ])
   );
 
 const normalizeOutput = (
-  value: unknown,
-  seen: WeakSet<object> = new WeakSet()
+  { value, ancestors = new WeakSet() }: { value: unknown; ancestors?: WeakSet<object> }
 ): unknown => {
   if (typeof value === "bigint") {
     return normalizeBigInt(value);
@@ -42,39 +65,42 @@ const normalizeOutput = (
     return value;
   }
 
-  if (seen.has(value)) {
-    return CIRCULAR_REFERENCE;
-  }
-  seen.add(value);
+  return normalizeWithTraversalTracking({
+    value,
+    ancestors,
+    normalize: () => {
+      if (value instanceof Map) {
+        return normalizeMapEntries({ value, ancestors });
+      }
 
-  if (value instanceof Map) {
-    return normalizeMapEntries({ value, seen });
-  }
+      if (value instanceof Set) {
+        return Array.from(value).map((entry) =>
+          normalizeOutput({ value: entry, ancestors })
+        );
+      }
 
-  if (value instanceof Set) {
-    return Array.from(value).map((entry) => normalizeOutput(entry, seen));
-  }
+      if (ArrayBuffer.isView(value)) {
+        return normalizeArrayBufferView(value);
+      }
 
-  if (ArrayBuffer.isView(value)) {
-    return normalizeArrayBufferView(value);
-  }
+      if (value instanceof ArrayBuffer) {
+        return normalizeArrayBufferView(new Uint8Array(value));
+      }
 
-  if (value instanceof ArrayBuffer) {
-    return normalizeArrayBufferView(new Uint8Array(value));
-  }
+      if (Array.isArray(value)) {
+        return value.map((entry) => normalizeOutput({ value: entry, ancestors }));
+      }
 
-  if (Array.isArray(value)) {
-    return value.map((entry) => normalizeOutput(entry, seen));
-  }
-
-  return normalizeObjectEntries({
-    value: value as Record<string, unknown>,
-    seen,
+      return normalizeObjectEntries({
+        value: value as Record<string, unknown>,
+        ancestors,
+      });
+    },
   });
 };
 
 export const stringifyOutput = (value: unknown): string =>
-  JSON.stringify(normalizeOutput(value), undefined, 2);
+  JSON.stringify(normalizeOutput({ value }), undefined, 2);
 
 export const printJson = (value: unknown): void => {
   console.log(stringifyOutput(value));
@@ -93,4 +119,3 @@ export const printValue = (value: unknown): void => {
 
   printJson(value);
 };
-

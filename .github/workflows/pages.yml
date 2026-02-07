@@ -31,7 +31,7 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      - run: npm ci --include=optional
 
       - name: Build reference docs package
         run: npm -w @voyd/reference run build

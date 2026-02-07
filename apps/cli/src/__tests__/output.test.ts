@@ -51,5 +51,24 @@ describe("cli output", () => {
       logSpy.mockRestore();
     }
   });
-});
 
+  it("serializes shared references without marking them as circular", () => {
+    const shared = { count: 2 };
+    const value = {
+      first: shared,
+      second: shared,
+    };
+
+    const output = stringifyOutput(value);
+    const parsed = JSON.parse(output) as {
+      first: { count: number };
+      second: { count: number };
+    };
+
+    expect(parsed).toEqual({
+      first: { count: 2 },
+      second: { count: 2 },
+    });
+    expect(output).not.toContain("[Circular]");
+  });
+});

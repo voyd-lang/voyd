@@ -29,5 +29,9 @@
     "vite": "^7.1.4",
     "vite-node": "^3.2.4",
     "vitest": "^3.2.4"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-darwin-arm64": "4.46.2",
+    "@rollup/rollup-linux-x64-gnu": "4.46.2"
   }
 }
