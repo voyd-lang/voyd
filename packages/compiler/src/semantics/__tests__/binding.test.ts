@@ -807,8 +807,8 @@ describe("binding pipeline", () => {
     expect(innerImport?.import?.moduleId).toBe(nestedId);
   });
 
-  it("resolves unqualified uses against the parent directory, not submodules", () => {
-    const source = "use utils";
+  it("resolves super-relative uses against the parent directory, not submodules", () => {
+    const source = "use super::utils";
     const ast = parse(source, "bar.voyd");
 
     const modulePath = {

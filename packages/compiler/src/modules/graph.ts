@@ -103,9 +103,9 @@ export const buildModuleGraph = async ({
       continue;
     }
 
-    let resolvedPath: string | undefined;
+    let resolved: Awaited<ReturnType<typeof resolveModuleFile>>;
     try {
-      resolvedPath = await resolveModuleFile(dependency.path, roots, host);
+      resolved = await resolveModuleFile(dependency.path, roots, host);
     } catch (error) {
       moduleDiagnostics.push({
         kind: "io-error",
@@ -118,7 +118,7 @@ export const buildModuleGraph = async ({
       continue;
     }
 
-    if (!resolvedPath) {
+    if (!resolved) {
       moduleDiagnostics.push({
         kind: "missing-module",
         message: `Unable to resolve module ${pathKey}`,
@@ -130,11 +130,8 @@ export const buildModuleGraph = async ({
       continue;
     }
 
-    const resolvedModulePath = modulePathFromFile(
-      resolvedPath,
-      roots,
-      host.path,
-    );
+    const resolvedPath = resolved.filePath;
+    const resolvedModulePath = resolved.modulePath;
     const resolvedKey = modulePathToString(resolvedModulePath);
     if (modulesByPath.has(resolvedKey)) {
       if (hasNestedModule(pathKey)) {
@@ -183,7 +180,11 @@ export const buildModuleGraph = async ({
   }
 
   const baseDiagnostics = moduleDiagnostics.map(moduleDiagnosticToDiagnostic);
-  const graph = { entry: entryModule.node.id, modules, diagnostics: baseDiagnostics };
+  const graph = {
+    entry: entryModule.node.id,
+    modules,
+    diagnostics: baseDiagnostics,
+  };
   const macroDiagnostics = expandModuleMacros(graph);
   return { ...graph, diagnostics: [...baseDiagnostics, ...macroDiagnostics] };
 };
@@ -282,30 +283,29 @@ const collectModuleInfo = ({
 
     const usePath = parseUse(entry);
     if (usePath) {
-      usePath.entries
+      const resolvedEntries = usePath.entries
+        .filter((entryPath) => entryPath.hasExplicitPrefix)
         .map((entryPath) =>
           resolveModuleRequest(
             { segments: entryPath.moduleSegments, span: entryPath.span },
             modulePath,
-            { anchorToSelf: entryPath.anchorToSelf === true }
+            {
+              anchorToSelf: entryPath.anchorToSelf === true,
+              parentHops: entryPath.parentHops ?? 0,
+            },
           ),
-        )
-        .forEach((path) => {
-          if (!path.segments.length && !path.packageName) return;
-          dependencies.push({
-            kind: "use",
-            path,
-            span: usePath.span ?? span,
-          });
-        });
-      if (modulePath.namespace !== "std") {
-        const hasStdImport = usePath.entries.some(
-          (entryPath) => entryPath.moduleSegments.at(0) === "std",
         );
-        if (hasStdImport) {
+      resolvedEntries.forEach((path) => {
+        if (!path.segments.length && !path.packageName) return;
+        dependencies.push({
+          kind: "use",
+          path,
+          span: usePath.span ?? span,
+        });
+        if (modulePath.namespace !== "std" && path.namespace === "std") {
           needsStdPkg = true;
         }
-      }
+      });
       return;
     }
 

@@ -2,8 +2,8 @@ import { compile } from "@voyd/sdk/browser";
 
 type SmokeRunner = () => Promise<number>;
 
-const source = `use util::math::all
-use util::ops::all
+const source = `use src::util::math::all
+use src::util::ops::all
 
 pub fn main() -> i32
   add(20, sub(30, 10))

@@ -21,6 +21,7 @@ const mutableBindingHint: DiagnosticHint = {
 type DiagnosticParamsMap = {
   BD0001:
     | { kind: "unresolved-use-path"; path: readonly string[] }
+    | { kind: "missing-path-prefix"; path: readonly string[] }
     | { kind: "module-unavailable"; moduleId: string }
     | { kind: "missing-target" }
     | { kind: "missing-export"; moduleId: string; target: string }
@@ -183,6 +184,8 @@ export const diagnosticsRegistry: {
       switch (params.kind) {
         case "unresolved-use-path":
           return `Unable to resolve module for use path ${params.path.join("::")}`;
+        case "missing-path-prefix":
+          return `Use path ${params.path.join("::")} must start with one of: self::, super::, src::, std::, pkg::`;
         case "module-unavailable":
           return `Module ${params.moduleId} is not available for import`;
         case "missing-target":

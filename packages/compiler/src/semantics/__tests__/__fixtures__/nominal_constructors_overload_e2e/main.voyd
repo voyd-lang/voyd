@@ -1,4 +1,4 @@
-use animal_e2e::Animal
+use src::animal_e2e::Animal
 
 pub fn main() -> i32
   let a = Animal { name: 1 }

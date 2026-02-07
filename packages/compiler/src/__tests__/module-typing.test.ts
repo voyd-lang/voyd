@@ -89,7 +89,7 @@ describe("module typing across imports", () => {
       [`${root}${sep}util${sep}math.voyd`]:
         "pub fn add(a: i32, b: i32) -> i32\n  a",
       [`${root}${sep}main.voyd`]:
-        "use util::math::all\n\npub fn total(a: i32, b: i32) -> i32\n  add(a, b)",
+        "use src::util::math::all\n\npub fn total(a: i32, b: i32) -> i32\n  add(a, b)",
     });
 
     const graph = await loadModuleGraph({
@@ -124,7 +124,7 @@ describe("module typing across imports", () => {
       [`${root}${sep}util${sep}math.voyd`]:
         "pub fn add(a: i32, b: i32) -> i32\n  a",
       [`${root}${sep}main.voyd`]:
-        'use util::math::all\n\npub fn bad() i32\n  add("oops", 2)',
+        'use src::util::math::all\n\npub fn bad() i32\n  add("oops", 2)',
     });
 
     const graph = await loadModuleGraph({
@@ -143,9 +143,9 @@ describe("module typing across imports", () => {
     const hostFiles = {
       [`${root}${sep}shapes${sep}point.voyd`]:
         "pub obj Point { x: i32 }\n\npub fn new_point(x: i32) -> Point\n  Point { x }",
-      [`${root}${sep}api.voyd`]: "pub use shapes::point::all",
+      [`${root}${sep}api.voyd`]: "pub use src::shapes::point::all",
       [`${root}${sep}consumer.voyd`]:
-        "use api::all\n\npub fn origin(p: Point) -> Point\n  p\n\npub fn origin_point()\n  new_point(0)",
+        "use src::api::all\n\npub fn origin(p: Point) -> Point\n  p\n\npub fn origin_point()\n  new_point(0)",
     };
     const host = createMemoryHost(hostFiles);
 
@@ -169,7 +169,7 @@ describe("module typing across imports", () => {
       [`${root}${sep}shapes${sep}point.voyd`]:
         "pub obj Point { x: i32 }\n\npub fn make(x: i32) -> Point\n  Point { x }",
       [`${root}${sep}consumer.voyd`]:
-        "use shapes::point::all\n\npub fn id(p: Point) -> Point\n  p",
+        "use src::shapes::point::all\n\npub fn id(p: Point) -> Point\n  p",
     });
 
     const graph = await loadModuleGraph({
@@ -212,7 +212,7 @@ pub fn make() -> Foo
   Foo { x: 41 }
 `,
       [`${root}${sep}main.voyd`]: `
-use a::make
+use src::a::make
 
 pub fn main() -> i32
   make().x
@@ -256,7 +256,7 @@ pub fn main() -> i32
       [`${root}${sep}outer${sep}inner.voyd`]: "pub obj Foo { x: i32 }",
       [`${root}${sep}outer.voyd`]: "pub use self::inner",
       [`${root}${sep}main.voyd`]: `
-use outer::self
+use src::outer::self
 
 pub fn main() -> i32
   let foo = outer::inner::Foo { x: 5 }
