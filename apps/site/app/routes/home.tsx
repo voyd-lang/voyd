@@ -1,7 +1,8 @@
 import type { Route } from "./+types/home";
 import logo from "../../assets/dark-star2.svg";
 
-import { useRef, type ReactNode } from "react";
+import { type ReactNode } from "react";
+import { Link } from "react-router";
 import { VsxPlayground } from "~/components/VsxPlayground";
 import CodeBlock from "~/components/CodeBlock";
 
@@ -187,12 +188,12 @@ const Section = ({
 
 const Links = () => (
   <div className="w-full items-center justify-center flex gap-4">
-    <a
-      href="/docs"
+    <Link
+      to="/docs"
       className="px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-500"
     >
       Read the Docs
-    </a>
+    </Link>
     <a
       href="https://github.com/voyd-lang/voyd"
       className="px-4 py-2 rounded-md border border-indigo-600 text-indigo-400 hover:bg-indigo-600 hover:text-white"
