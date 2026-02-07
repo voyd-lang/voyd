@@ -12,6 +12,10 @@ import {
   typeSatisfies,
 } from "../type-system.js";
 import type { TypingContext, TypingState } from "../types.js";
+import {
+  analyzeContinuationUsage,
+  type ContinuationUsage,
+} from "./continuation-usage.js";
 import { emitDiagnostic } from "../../../diagnostics/index.js";
 import type {
   HirExprId,
@@ -371,203 +375,7 @@ const typeHandlerClause = ({
   return getExprEffectRow(clause.body, ctx);
 };
 
-type ContinuationUsage = { min: number; max: number; escapes: boolean };
-
-const mergeUsage = (
-  left: ContinuationUsage,
-  right: ContinuationUsage,
-): ContinuationUsage => ({
-  min: left.min + right.min,
-  max: left.max + right.max,
-  escapes: left.escapes || right.escapes,
-});
-
-const mergeBranches = (branches: ContinuationUsage[]): ContinuationUsage => {
-  if (branches.length === 0) {
-    return { min: 0, max: 0, escapes: false };
-  }
-  return branches.reduce(
-    (acc, branch) => ({
-      min: Math.min(acc.min, branch.min),
-      max: Math.max(acc.max, branch.max),
-      escapes: acc.escapes || branch.escapes,
-    }),
-    { min: Number.POSITIVE_INFINITY, max: 0, escapes: false },
-  );
-};
-
-const analyzeContinuationUsage = ({
-  exprId,
-  targetSymbol,
-  ctx,
-  nested,
-}: {
-  exprId: HirExprId;
-  targetSymbol: SymbolId;
-  ctx: TypingContext;
-  nested?: boolean;
-}): ContinuationUsage => {
-  const emptyUsage: ContinuationUsage = { min: 0, max: 0, escapes: false };
-  const usageByExpr = new Map<number, ContinuationUsage>();
-  const usageByStmt = new Map<number, ContinuationUsage>();
-  const usageForExpr = (id?: number): ContinuationUsage =>
-    typeof id === "number" ? (usageByExpr.get(id) ?? emptyUsage) : emptyUsage;
-  const usageForStmt = (id: number): ContinuationUsage =>
-    usageByStmt.get(id) ?? emptyUsage;
-  const toLoopUsage = (usage: ContinuationUsage): ContinuationUsage => ({
-    min: 0,
-    max: usage.max > 0 ? Number.POSITIVE_INFINITY : 0,
-    escapes: usage.escapes,
-  });
-
-  let nestedLambdaDepth = nested ? 1 : 0;
-
-  walkExpression({
-    exprId,
-    hir: ctx.hir,
-    onEnterExpression: (_id, expr) => {
-      if (expr.exprKind === "lambda") {
-        nestedLambdaDepth += 1;
-      }
-    },
-    onExitStatement: (stmtId, stmt) => {
-      const usage =
-        stmt.kind === "let"
-          ? usageForExpr(stmt.initializer)
-          : stmt.kind === "expr-stmt"
-            ? usageForExpr(stmt.expr)
-            : typeof stmt.value === "number"
-              ? usageForExpr(stmt.value)
-              : emptyUsage;
-      usageByStmt.set(stmtId, usage);
-    },
-    onExitExpression: (id, expr) => {
-      let usage = emptyUsage;
-      switch (expr.exprKind) {
-        case "identifier":
-          usage =
-            expr.symbol === targetSymbol
-              ? { min: 0, max: 0, escapes: true }
-              : emptyUsage;
-          break;
-        case "literal":
-        case "overload-set":
-        case "continue":
-          usage = emptyUsage;
-          break;
-        case "break":
-          usage =
-            typeof expr.value === "number"
-              ? usageForExpr(expr.value)
-              : emptyUsage;
-          break;
-        case "call": {
-          const callee = ctx.hir.expressions.get(expr.callee);
-          usage =
-            callee?.exprKind === "identifier" && callee.symbol === targetSymbol
-              ? { min: 1, max: 1, escapes: nestedLambdaDepth > 0 }
-              : usageForExpr(expr.callee);
-          expr.args.forEach((arg) => {
-            usage = mergeUsage(usage, usageForExpr(arg.expr));
-          });
-          break;
-        }
-        case "block":
-          usage = expr.statements.reduce(
-            (acc, stmtId) => mergeUsage(acc, usageForStmt(stmtId)),
-            emptyUsage,
-          );
-          if (typeof expr.value === "number") {
-            usage = mergeUsage(usage, usageForExpr(expr.value));
-          }
-          break;
-        case "tuple":
-          usage = expr.elements.reduce(
-            (acc, entry) => mergeUsage(acc, usageForExpr(entry)),
-            emptyUsage,
-          );
-          break;
-        case "loop":
-          usage = toLoopUsage(usageForExpr(expr.body));
-          break;
-        case "while":
-          usage = mergeUsage(
-            usageForExpr(expr.condition),
-            toLoopUsage(usageForExpr(expr.body)),
-          );
-          break;
-        case "cond":
-        case "if": {
-          const branchUsages = expr.branches.map((branch) =>
-            mergeUsage(
-              usageForExpr(branch.condition),
-              usageForExpr(branch.value),
-            ),
-          );
-          const defaultUsage =
-            typeof expr.defaultBranch === "number"
-              ? usageForExpr(expr.defaultBranch)
-              : emptyUsage;
-          usage = mergeBranches([...branchUsages, defaultUsage]);
-          break;
-        }
-        case "match": {
-          const discriminantUsage = usageForExpr(expr.discriminant);
-          const armUsages = expr.arms.map((arm) => {
-            const guardUsage =
-              typeof arm.guard === "number"
-                ? usageForExpr(arm.guard)
-                : emptyUsage;
-            return mergeUsage(guardUsage, usageForExpr(arm.value));
-          });
-          usage = mergeUsage(discriminantUsage, mergeBranches(armUsages));
-          break;
-        }
-        case "effect-handler": {
-          usage = usageForExpr(expr.body);
-          expr.handlers.forEach((handler) => {
-            usage = mergeUsage(usage, usageForExpr(handler.body));
-          });
-          if (typeof expr.finallyBranch === "number") {
-            usage = mergeUsage(usage, usageForExpr(expr.finallyBranch));
-          }
-          break;
-        }
-        case "object-literal":
-          usage = expr.entries.reduce(
-            (acc, entry) => mergeUsage(acc, usageForExpr(entry.value)),
-            emptyUsage,
-          );
-          break;
-        case "field-access":
-          usage = usageForExpr(expr.target);
-          break;
-        case "assign": {
-          const targetUsage =
-            typeof expr.target === "number"
-              ? usageForExpr(expr.target)
-              : emptyUsage;
-          usage = mergeUsage(targetUsage, usageForExpr(expr.value));
-          break;
-        }
-        case "lambda": {
-          const inner = usageForExpr(expr.body);
-          usage =
-            inner.min > 0 || inner.max > 0 || inner.escapes
-              ? { min: inner.min, max: inner.max, escapes: true }
-              : inner;
-          nestedLambdaDepth -= 1;
-          break;
-        }
-      }
-      usageByExpr.set(id, usage);
-    },
-  });
-
-  return usageByExpr.get(exprId) ?? emptyUsage;
-};
-
-const enforceTailResumption = ({
+const enforceResumptionUsage = ({
   clause,
   ctx,
   opName,
@@ -579,44 +387,59 @@ const enforceTailResumption = ({
   span: SourceSpan;
 }): void => {
   const operationDecl = ctx.decls.getEffectOperation(clause.operation);
-  if (operationDecl?.operation.resumable !== "tail") {
+  const resumable = operationDecl?.operation.resumable;
+  if (resumable !== "tail" && resumable !== "resume") {
     return;
   }
   const continuationSymbol = clause.parameters[0]?.symbol;
-  const usage =
+  const usage: ContinuationUsage =
     typeof continuationSymbol === "number"
       ? analyzeContinuationUsage({
           exprId: clause.body,
           targetSymbol: continuationSymbol,
-          ctx,
+          hir: ctx.hir,
         })
       : { min: 0, max: 0, escapes: false };
 
-  const staticallyExactOnce =
-    !usage.escapes && usage.min === 1 && usage.max === 1;
-  const definitelyMissing =
-    !usage.escapes && usage.min === 0 && usage.max === 0;
-  const definitelyMultiple = !usage.escapes && usage.min > 1 && usage.max > 1;
-  const enforcement: "static" | "runtime" =
-    usage.escapes || !staticallyExactOnce ? "runtime" : "static";
+  if (resumable === "tail") {
+    const staticallyExactOnce =
+      !usage.escapes && usage.min === 1 && usage.max === 1;
+    clause.tailResumption = {
+      enforcement: staticallyExactOnce ? "static" : "runtime",
+      calls: usage.max,
+      minCalls: usage.min,
+      escapes: usage.escapes,
+    };
+    ctx.tailResumptions.set(clause.body, clause.tailResumption);
+    if (!staticallyExactOnce) {
+      emitDiagnostic({
+        ctx,
+        code: "TY0015",
+        params: {
+          kind: "tail-resume-count",
+          operation: opName,
+          minCalls: usage.min,
+          maxCalls: usage.max,
+          escapes: usage.escapes,
+        },
+        span,
+      });
+    }
+    return;
+  }
 
-  clause.tailResumption = {
-    enforcement,
-    calls: usage.max,
-    minCalls: usage.min,
-    escapes: usage.escapes,
-  };
-
-  ctx.tailResumptions.set(clause.body, clause.tailResumption);
-
-  if (definitelyMissing || definitelyMultiple) {
+  // resumable === "resume"
+  const resumableOk = !usage.escapes && usage.max <= 1;
+  if (!resumableOk) {
     emitDiagnostic({
       ctx,
-      code: "TY0015",
+      code: "TY0035",
       params: {
-        kind: "tail-resume-count",
+        kind: "resume-call-count",
         operation: opName,
-        count: usage.max,
+        minCalls: usage.min,
+        maxCalls: usage.max,
+        escapes: usage.escapes,
       },
       span,
     });
@@ -676,7 +499,7 @@ export const typeEffectHandlerExpr = (
       remainingRow = dropHandledOperation({ row: remainingRow, opName, ctx });
     }
     const clauseSpan = ctx.hir.expressions.get(clause.body)?.span ?? expr.span;
-    enforceTailResumption({ clause, ctx, opName, span: clauseSpan });
+    enforceResumptionUsage({ clause, ctx, opName, span: clauseSpan });
   });
 
   const handlersRow = composeEffectRows(ctx.effects, handlerEffects);

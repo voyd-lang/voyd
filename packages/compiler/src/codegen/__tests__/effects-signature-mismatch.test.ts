@@ -13,7 +13,7 @@ const fixturePath = resolve(
 );
 
 describe("effect signature validation", () => {
-  it("fails fast on signature hash mismatches", async () => {
+  it("throws when a mismatched signature key leaves a performed op unhandled", async () => {
     const { module } = await compileEffectFixture({ entryPath: fixturePath });
     const table = parseEffectTable(module);
     const op = table.ops[0];
@@ -27,6 +27,6 @@ describe("effect signature validation", () => {
         entryName: "main_effectful",
         handlers: { [badKey]: () => 1 },
       })
-    ).rejects.toThrow(/Missing handlers/);
+    ).rejects.toThrow(/Unhandled effect/);
   });
 });

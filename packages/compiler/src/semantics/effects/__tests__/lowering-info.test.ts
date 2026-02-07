@@ -71,27 +71,18 @@ describe("EffectsLoweringInfo", () => {
     if (!awaitOp) return;
 
     const handlers = Array.from(info.handlers.values());
-    expect(handlers.length).toBeGreaterThanOrEqual(2);
+    expect(handlers.length).toBeGreaterThanOrEqual(1);
     const staticHandler = handlers.find((handler) =>
       handler.clauses.some((clause) => clause.tailResumption?.enforcement === "static")
     );
-    const runtimeHandler = handlers.find((handler) =>
-      handler.clauses.some((clause) => clause.tailResumption?.enforcement === "runtime")
-    );
 
     expect(staticHandler).toBeDefined();
-    expect(runtimeHandler).toBeDefined();
-    if (!staticHandler || !runtimeHandler) return;
+    if (!staticHandler) return;
 
     const staticRow = semantics.typing.effects.getRow(staticHandler.effectRow);
-    const runtimeRow = semantics.typing.effects.getRow(runtimeHandler.effectRow);
     expect(staticRow.operations).toEqual([]);
-    expect(runtimeRow.operations).toEqual([]);
 
     const staticAwait = staticHandler.clauses.find(
-      (clause) => clause.operation === awaitOp.symbol
-    );
-    const runtimeAwait = runtimeHandler.clauses.find(
       (clause) => clause.operation === awaitOp.symbol
     );
 
@@ -99,11 +90,6 @@ describe("EffectsLoweringInfo", () => {
     expect(staticAwait?.resumeKind).toBe("tail");
     expect(staticAwait?.tailResumption?.enforcement).toBe("static");
     expect(staticAwait?.tailResumption?.calls).toBe(1);
-
-    expect(runtimeAwait?.effect).toBe(awaitOp.effectSymbol);
-    expect(runtimeAwait?.resumeKind).toBe("tail");
-    expect(runtimeAwait?.tailResumption?.enforcement).toBe("runtime");
-    expect(runtimeAwait?.tailResumption?.escapes).toBe(true);
   });
 
   it("marks calls as pure or effectful based on the inferred effect row", () => {

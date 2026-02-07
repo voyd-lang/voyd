@@ -1,9 +1,23 @@
 import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
 import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
 import type { TestCase as CompilerTestCase } from "@voyd/compiler/pipeline-shared.js";
-import type { EffectHandler } from "@voyd/js-host";
+import type {
+  EffectContinuation,
+  EffectContinuationCall,
+  EffectHandler,
+  HostProtocolTable,
+  SignatureHash,
+} from "@voyd/js-host";
 
-export type { Diagnostic, EffectHandler, ModuleRoots };
+export type {
+  Diagnostic,
+  EffectContinuation,
+  EffectContinuationCall,
+  EffectHandler,
+  HostProtocolTable,
+  ModuleRoots,
+  SignatureHash,
+};
 
 export type TestCase = CompilerTestCase;
 
@@ -36,15 +50,35 @@ export type CompileResult = {
   wasm: Uint8Array;
   wasmText?: string;
   diagnostics: Diagnostic[];
+  effects: EffectsInfo;
   tests?: TestCollection;
   run: <T = unknown>(opts: Omit<RunOptions, "wasm">) => Promise<T>;
+};
+
+export type EffectsInfo = {
+  table: HostProtocolTable;
+  findUniqueOpByLabelSuffix: (
+    labelSuffix: string
+  ) => HostProtocolTable["ops"][number];
+  signatureHashFor: (opts: {
+    effectId: string;
+    opName: string;
+  }) => SignatureHash;
+  handlerKeyFor: (opts: {
+    effectId: string;
+    opName: string;
+    signatureHash?: SignatureHash;
+  }) => string;
 };
 
 export type RunOptions = {
   wasm: Uint8Array;
   entryName: string;
-  /** handlers keyed as "effectId:opId:signatureHash" */
+  args?: unknown[];
+  /** handlers keyed as "effectId::opName" or "effectId::opName::signatureHash", each returning resume(...), tail(...), or end(...) */
   handlers?: Record<string, EffectHandler>;
+  /** handlers matched against effect labels by suffix (prefer "::", e.g. "Async::await") */
+  handlersByLabelSuffix?: Record<string, EffectHandler>;
   imports?: WebAssembly.Imports;
   bufferSize?: number;
 };

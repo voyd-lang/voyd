@@ -4,10 +4,9 @@ import type {
   SignatureHash,
 } from "./protocol/types.js";
 import { decode, encode } from "@msgpack/msgpack";
+import { buildEffectOpKey, buildParsedEffectOpMap } from "./effect-op.js";
 import {
   EFFECT_TABLE_EXPORT,
-  formatSignatureHash,
-  normalizeSignatureHash,
   parseEffectTable,
   toHostProtocolTable,
 } from "./protocol/table.js";
@@ -98,30 +97,6 @@ const requireExportedMemory = ({
 const effectfulExportNameFor = (entryName: string): string =>
   entryName.endsWith("_effectful") ? entryName : `${entryName}_effectful`;
 
-const buildOpKey = ({
-  effectId,
-  opId,
-  signatureHash,
-}: {
-  effectId: string;
-  opId: number;
-  signatureHash: number;
-}): string => `${effectId}:${opId}:${signatureHash}`;
-
-const missingHandlerMessage = (missing: ParsedEffectOp[]): string => {
-  const preview = missing
-    .slice(0, 3)
-    .map(
-      (entry) =>
-        `${entry.effectId}:${entry.opId}:${formatSignatureHash(
-          entry.signatureHash
-        )}`
-    )
-    .join(", ");
-  const suffix = missing.length > 3 ? "..." : "";
-  return `Missing handlers for ${missing.length} effect ops (${preview}${suffix})`;
-};
-
 const registerHandlerInternal = ({
   handler,
   signatureHash,
@@ -137,13 +112,14 @@ const registerHandlerInternal = ({
   opByKey: Map<string, ParsedEffectOp>;
   handlersByKey: Map<string, EffectHandler>;
 }): ParsedEffectOp => {
-  const signatureHashValue = normalizeSignatureHash(signatureHash);
-  const key = buildOpKey({ effectId, opId, signatureHash: signatureHashValue });
+  const key = buildEffectOpKey({
+    effectId,
+    opId,
+    signatureHash,
+  });
   const opEntry = opByKey.get(key);
   if (!opEntry) {
-    throw new Error(
-      `Unknown effect op for ${effectId}:${opId}:${signatureHash}`
-    );
+    throw new Error(`Unknown effect op for ${key}`);
   }
   handlersByKey.set(key, handler);
   return opEntry;
@@ -166,18 +142,6 @@ const initEffectsInternal = ({
     return;
   }
 
-  const missing = table.ops.filter((op) => {
-    const key = buildOpKey({
-      effectId: op.effectId,
-      opId: op.opId,
-      signatureHash: op.signatureHash,
-    });
-    return !handlersByKey.has(key);
-  });
-  if (missing.length > 0) {
-    throw new Error(missingHandlerMessage(missing));
-  }
-
   const effectsMemory = requireExportedMemory({
     instance,
     name: EFFECTS_MEMORY_EXPORT,
@@ -192,7 +156,7 @@ const initEffectsInternal = ({
   table.ops.forEach((op) => {
     const handle = op.opIndex;
     handleView.setUint32(op.opIndex * 4, handle, true);
-    const key = buildOpKey({
+    const key = buildEffectOpKey({
       effectId: op.effectId,
       opId: op.opId,
       signatureHash: op.signatureHash,
@@ -225,15 +189,7 @@ export const createVoydHost = async ({
   const instance = new WebAssembly.Instance(module, imports ?? {});
 
   const handlersByKey = new Map<string, EffectHandler>();
-  const opByKey = new Map<string, ParsedEffectOp>();
-  parsedTable.ops.forEach((op) => {
-    const key = buildOpKey({
-      effectId: op.effectId,
-      opId: op.opId,
-      signatureHash: op.signatureHash,
-    });
-    opByKey.set(key, op);
-  });
+  const opByKey = buildParsedEffectOpMap({ ops: parsedTable.ops });
 
   let initialized = false;
   const handlersByOpIndex: Array<EffectHandler | undefined> = Array.from({

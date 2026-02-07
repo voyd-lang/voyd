@@ -13,7 +13,6 @@ import { boxOutcomeValue } from "../outcome-values.js";
 import { coerceValueToType } from "../../structural.js";
 import { getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { functionRefType } from "./shared.js";
-import { lowerEffectfulCallResult } from "./lower-effectful-call.js";
 
 export const compileContinuationCall = ({
   expr,
@@ -36,6 +35,9 @@ export const compileContinuationCall = ({
   const resumeWasmType = wasmTypeFor(resumeTypeId, ctx);
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const callReturnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
+  if (!fnCtx.effectful) {
+    throw new Error("continuation calls are only supported in effectful contexts");
+  }
   if (resumeWasmType === binaryen.none && expr.args.length > 0) {
     throw new Error("continuation does not take a value");
   }
@@ -105,14 +107,13 @@ export const compileContinuationCall = ({
       ? continuationCall
       : ctx.mod.block(null, [...guardOps, continuationCall], ctx.effectsRuntime.outcomeType);
 
-  return lowerEffectfulCallResult({
-    callExpr,
-    callId: expr.id,
-    returnTypeId: callReturnTypeId,
-    expectedResultTypeId,
-    tailPosition,
-    typeInstanceId,
-    ctx,
-    fnCtx,
-  });
+  // Semantics: calling a resumption does not return to the handler clause body.
+  return {
+    expr: ctx.mod.block(
+      null,
+      [ctx.mod.return(callExpr), ctx.mod.unreachable()],
+      wasmTypeFor(callReturnTypeId, ctx)
+    ),
+    usedReturnCall: false,
+  };
 };

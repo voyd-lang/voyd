@@ -1,0 +1,30 @@
+eff ResumeFx
+  resumable(resume, x: i32) -> i32
+
+eff TailFx
+  tailable(tail, x: i32) -> i32
+
+fn worker_resume(): ResumeFx -> i32
+  ResumeFx::resumable(3)
+
+fn worker_tail(): TailFx -> i32
+  TailFx::tailable(4)
+
+pub fn resume_handler_mutates_host(use_resume: bool): () -> i32
+  var total = 2
+  try
+    worker_resume()
+  ResumeFx::resumable(resume, x):
+    total = total + x
+    if use_resume then:
+      resume(total)
+    total = total + 10
+    total
+
+pub fn tail_handler_mutates_host(): () -> i32
+  var total = 2
+  try
+    worker_tail()
+  TailFx::tailable(tail, x):
+    total = total + x
+    tail(total + 1)

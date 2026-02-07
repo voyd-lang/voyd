@@ -108,14 +108,14 @@ describe("effect table + harness", () => {
     expect(result.value).toBe(0);
   });
 
-  it("throws when no handler is available", async () => {
+  it("throws when a performed op has no handler", async () => {
     const { module } = await buildFixtureEffectModule();
     await expect(
       runEffectfulExport({
         wasm: module,
         entryName: "main_effectful",
       })
-    ).rejects.toThrow(/Missing handlers/);
+    ).rejects.toThrow(/Unhandled effect/);
   });
 
   it("snapshots the perform fixture via codegen", async () => {
