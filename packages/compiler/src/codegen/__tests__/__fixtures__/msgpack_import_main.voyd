@@ -1,0 +1,4 @@
+use msgpack_import_dep::payload
+
+pub fn fetch()
+  payload()

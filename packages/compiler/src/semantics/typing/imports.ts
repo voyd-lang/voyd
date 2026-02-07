@@ -28,6 +28,10 @@ import type {
 import type { ModuleExportEntry } from "../modules.js";
 import type { EffectTable } from "../effects/effect-table.js";
 import { symbolRefKey, type SymbolRef } from "./symbol-ref.js";
+import {
+  effectsShareInterner,
+  typingContextsShareInterners,
+} from "./shared-interners.js";
 
 type ImportTarget = { moduleId: string; symbol: SymbolId };
 
@@ -50,7 +54,7 @@ const translateEffectRow = ({
   sourceEffects: EffectTable;
   targetEffects: EffectTable;
 }): EffectRowId => {
-  if (sourceEffects === targetEffects) {
+  if (effectsShareInterner(sourceEffects, targetEffects)) {
     return effectRow;
   }
   if (effectRow === sourceEffects.emptyRow) {
@@ -85,7 +89,12 @@ export const createTypeTranslation = ({
   targetEffects: EffectTable;
   mapSymbol: (symbol: SymbolId) => SymbolId;
 }): ((id: TypeId) => TypeId) =>
-  sourceArena === targetArena && sourceEffects === targetEffects
+  typingContextsShareInterners({
+    sourceArena,
+    targetArena,
+    sourceEffects,
+    targetEffects,
+  })
     ? (id) => id
     : createTranslation({
         sourceArena,
@@ -168,9 +177,12 @@ export const resolveImportedValue = ({
     );
   }
 
-  const sharedInterners =
-    dependency.typing.arena === ctx.arena &&
-    dependency.typing.effects.internRow === ctx.effects.internRow;
+  const sharedInterners = typingContextsShareInterners({
+    sourceArena: dependency.typing.arena,
+    targetArena: ctx.arena,
+    sourceEffects: dependency.typing.effects,
+    targetEffects: ctx.effects,
+  });
 
   if (sharedInterners) {
     const scheme = dependency.typing.table.getSymbolScheme(target.symbol);
@@ -409,9 +421,14 @@ export const resolveImportedTypeExpr = ({
   const depCtx = makeDependencyContext(dependency, ctx);
   const depState = createTypingState(state.mode);
 
-  const sharedArena = depCtx.arena === ctx.arena;
-  const sharedEffects = depCtx.effects.internRow === ctx.effects.internRow;
-  if (sharedArena && sharedEffects) {
+  if (
+    typingContextsShareInterners({
+      sourceArena: depCtx.arena,
+      targetArena: ctx.arena,
+      sourceEffects: depCtx.effects,
+      targetEffects: ctx.effects,
+    })
+  ) {
     const aliasResolved = resolveImportedAlias(target.symbol, typeArgs, depCtx, depState);
     const resolved =
       aliasResolved ??
