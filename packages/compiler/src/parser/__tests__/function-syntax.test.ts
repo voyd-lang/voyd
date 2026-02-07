@@ -84,3 +84,21 @@ fn choose(x: i32) -> None | Some | Other
     ],
   ]);
 });
+
+test("parses module-qualified return types", (t) => {
+  const code = `
+fn build() -> my_module::MyType
+  my_module::MyType { value: 1 }`;
+
+  t.expect(toPlain(code)).toEqual([
+    "ast",
+    [
+      "fn",
+      ["->", ["build"], ["::", "my_module", "MyType"]],
+      [
+        "block",
+        [["::", "my_module", "MyType"], ["object_literal", [":", "value", "1"]]],
+      ],
+    ],
+  ]);
+});

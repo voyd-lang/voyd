@@ -109,6 +109,14 @@ describe(
       expect((exports.main as () => number)()).toBe(12);
     });
 
+    it("supports module-qualified return type annotations", async () => {
+      const module = await compileToBinaryenModule(fixturePath("sink.test.voyd"));
+      const wasm = assertRunnableWasm(module);
+      const instance = getWasmInstance(wasm);
+      const exports = instance.exports as Record<string, unknown>;
+      expect((exports.main as () => number)()).toBe(42);
+    });
+
     it("compiles MsgPack recursive unions used by vx.voyd", async () => {
       const module = await compileToBinaryenModule(fixturePath("vx.voyd"));
       const wasm = assertRunnableWasm(module);
