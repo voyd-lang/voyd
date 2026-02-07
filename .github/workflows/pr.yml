@@ -6,8 +6,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+      TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:

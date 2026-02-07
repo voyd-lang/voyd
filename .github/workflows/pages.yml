@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/configure-pages@v5
         id: pages
@@ -31,6 +33,18 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Set Turbo SCM range
+        run: |
+          ZERO_SHA="0000000000000000000000000000000000000000"
+          BEFORE_SHA="${{ github.event.before }}"
+          if [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "$ZERO_SHA" ]; then
+            echo "TURBO_SCM_BASE=$BEFORE_SHA" >> "$GITHUB_ENV"
+          else
+            BASE_FALLBACK="$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)"
+            echo "TURBO_SCM_BASE=$BASE_FALLBACK" >> "$GITHUB_ENV"
+          fi
+          echo "TURBO_SCM_HEAD=${{ github.sha }}" >> "$GITHUB_ENV"
 
       - run: npm ci --include=optional
 

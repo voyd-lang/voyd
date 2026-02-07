@@ -4,10 +4,10 @@
   "description": "Voyd language reference documentation",
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "types": "./index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
@@ -16,7 +16,7 @@
   "scripts": {
     "build": "node ./scripts/build.mjs",
     "dev": "node ./scripts/build.mjs --watch",
-    "typecheck": "npm run build",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo 'no tests for reference docs'",
     "lint": "echo 'no lint configured'"
   }
