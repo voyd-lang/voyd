@@ -32,6 +32,8 @@
   },
   "optionalDependencies": {
     "@rollup/rollup-darwin-arm64": "4.46.2",
-    "@rollup/rollup-linux-x64-gnu": "4.46.2"
+    "@rollup/rollup-linux-x64-gnu": "4.46.2",
+    "@tailwindcss/oxide-darwin-arm64": "4.1.18",
+    "@tailwindcss/oxide-linux-x64-gnu": "4.1.18"
   }
 }
