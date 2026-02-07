@@ -1,4 +1,4 @@
-use msgpack_import_dep::payload
+use src::msgpack_import_dep::payload
 
 pub fn fetch()
   payload()
