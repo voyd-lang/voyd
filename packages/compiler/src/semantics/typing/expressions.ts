@@ -40,20 +40,28 @@ export const typeExpression = (
   state: TypingState,
   options: TypeExpressionOptions = {}
 ): TypeId => {
+  const expr = ctx.hir.expressions.get(exprId);
+  if (!expr) {
+    throw new Error(`missing HirExpression ${exprId}`);
+  }
+
   const expectedType = options.expectedType;
-  const cached = ctx.table.getExprType(exprId);
-  if (typeof cached === "number") {
+  const cached = ctx.table.getExprTypeEntry(exprId);
+  const appliedExpected = resolveExpectedType(expectedType, ctx, state);
+  const hasConcreteExpected = isConcreteExpectedType(appliedExpected, ctx);
+  const shouldRetypeWeakCache =
+    Boolean(cached?.weak) &&
+    hasConcreteExpected &&
+    isContextDependentExpr(expr);
+
+  if (cached && !shouldRetypeWeakCache) {
     if (ctx.effects.getExprEffect(exprId) === undefined) {
       ctx.effects.setExprEffect(exprId, ctx.effects.emptyRow);
     }
-    const applied = applyCurrentSubstitution(cached, ctx, state);
-    const appliedExpected =
-      typeof expectedType === "number"
-        ? applyCurrentSubstitution(expectedType, ctx, state)
-        : undefined;
+    const applied = applyCurrentSubstitution(cached.type, ctx, state);
     if (
-      typeof appliedExpected === "number" &&
-      appliedExpected !== ctx.primitives.unknown
+      hasConcreteExpected &&
+      typeof appliedExpected === "number"
     ) {
       try {
         ensureTypeMatches(
@@ -80,20 +88,42 @@ export const typeExpression = (
     return applied;
   }
 
-  const expr = ctx.hir.expressions.get(exprId);
-  if (!expr) {
-    throw new Error(`missing HirExpression ${exprId}`);
-  }
-
   const type = resolveExpressionType(expr, ctx, state, options);
   const appliedType = applyCurrentSubstitution(type, ctx, state);
-  ctx.table.setExprType(exprId, type);
+  ctx.table.setExprType(exprId, type, {
+    weak: shouldStoreWeakExprType(expr, appliedExpected, ctx),
+  });
   ctx.resolvedExprTypes.set(exprId, appliedType);
   if (ctx.effects.getExprEffect(exprId) === undefined) {
     ctx.effects.setExprEffect(exprId, ctx.effects.emptyRow);
   }
   return appliedType;
 };
+
+const resolveExpectedType = (
+  expectedType: TypeId | undefined,
+  ctx: TypingContext,
+  state: TypingState,
+): TypeId | undefined =>
+  typeof expectedType === "number"
+    ? applyCurrentSubstitution(expectedType, ctx, state)
+    : undefined;
+
+const isConcreteExpectedType = (
+  expectedType: TypeId | undefined,
+  ctx: TypingContext,
+): boolean =>
+  typeof expectedType === "number" && expectedType !== ctx.primitives.unknown;
+
+const isContextDependentExpr = (expr: HirExpression): boolean =>
+  expr.exprKind === "lambda";
+
+const shouldStoreWeakExprType = (
+  expr: HirExpression,
+  expectedType: TypeId | undefined,
+  ctx: TypingContext,
+): boolean =>
+  isContextDependentExpr(expr) && !isConcreteExpectedType(expectedType, ctx);
 
 const resolveExpressionType = (
   expr: HirExpression,

@@ -97,12 +97,17 @@ export const typeCallExpr = (
     ctx,
     state,
   });
+  const shouldDeferLambdaProbeTyping = calleeExpr.exprKind === "overload-set";
 
   const args = expr.args.map((arg, index) => ({
     label: arg.label,
-    type: typeExpression(arg.expr, ctx, state, {
-      expectedType: expectedParams?.[index],
-    }),
+    type:
+      shouldDeferLambdaProbeTyping &&
+      ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda"
+        ? ctx.primitives.unknown
+        : typeExpression(arg.expr, ctx, state, {
+            expectedType: expectedParams?.[index],
+          }),
     exprId: arg.expr,
   }));
 
@@ -139,12 +144,13 @@ export const typeCallExpr = (
         "type arguments are not supported with overload sets yet",
       );
     }
+    const probeArgs = args;
     ctx.table.setExprType(calleeExpr.id, ctx.primitives.unknown);
     ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
     const overloaded = typeOverloadedCall(
       expr,
       calleeExpr,
-      args,
+      probeArgs,
       ctx,
       state,
       expectedReturnType,
@@ -2536,7 +2542,7 @@ export const formatFunctionInstanceKey = (
 const typeOverloadedCall = (
   call: HirCallExpr,
   callee: HirOverloadSetExpr,
-  argTypes: readonly Arg[],
+  probeArgs: readonly Arg[],
   ctx: TypingContext,
   state: TypingState,
   expectedReturnType?: TypeId,
@@ -2561,14 +2567,14 @@ const typeOverloadedCall = (
     return { symbol, signature };
   });
   const matches = candidates.filter(({ symbol, signature }) =>
-    matchesOverloadSignature(symbol, signature, argTypes, ctx, state),
+    matchesOverloadSignature(symbol, signature, probeArgs, ctx, state),
   );
 
   const traitDispatch =
     matches.length === 0
       ? resolveTraitDispatchOverload({
           candidates,
-          args: argTypes,
+          args: probeArgs,
           ctx,
           state,
         })
@@ -2619,8 +2625,17 @@ const typeOverloadedCall = (
     ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
   targets.set(instanceKey, selectedRef);
   ctx.callResolution.targets.set(call.id, targets);
+  const args = retypeOverloadedCallArgs({
+    call,
+    signature: selected.signature,
+    probeArgs,
+    expectedReturnType,
+    ctx,
+    state,
+  });
+
   return typeFunctionCall({
-    args: argTypes,
+    args,
     signature: selected.signature,
     calleeSymbol: selected.symbol,
     typeArguments: undefined,
@@ -2631,6 +2646,74 @@ const typeOverloadedCall = (
     calleeExprId: callee.id,
     calleeModuleId: selectedRef.moduleId,
   });
+};
+
+const retypeOverloadedCallArgs = ({
+  call,
+  signature,
+  probeArgs,
+  expectedReturnType,
+  ctx,
+  state,
+}: {
+  call: HirCallExpr;
+  signature: FunctionSignature;
+  probeArgs: readonly Arg[];
+  expectedReturnType: TypeId | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly Arg[] => {
+  const hintSubstitution = (() => {
+    const hasTypeParams =
+      signature.typeParams && signature.typeParams.length > 0;
+    if (!hasTypeParams) {
+      return undefined;
+    }
+
+    const merged = new Map<TypeParamId, TypeId>();
+    probeArgs.forEach((arg, index) => {
+      const param = signature.parameters[index];
+      if (!param) {
+        return;
+      }
+      const expected = ctx.arena.substitute(param.type, merged);
+      bindTypeParamsFromType(expected, arg.type, merged, ctx, state);
+    });
+
+    if (
+      typeof expectedReturnType === "number" &&
+      expectedReturnType !== ctx.primitives.unknown
+    ) {
+      const expected = ctx.arena.substitute(signature.returnType, merged);
+      bindTypeParamsFromType(
+        expected,
+        applyCurrentSubstitution(expectedReturnType, ctx, state),
+        merged,
+        ctx,
+        state,
+      );
+    }
+
+    return merged.size > 0 ? merged : undefined;
+  })();
+
+  const expectedParamTypeAt = (index: number): TypeId | undefined => {
+    const param = signature.parameters[index];
+    if (!param) {
+      return undefined;
+    }
+    return hintSubstitution
+      ? ctx.arena.substitute(param.type, hintSubstitution)
+      : param.type;
+  };
+
+  return call.args.map((arg, index) => ({
+    label: arg.label,
+    type: typeExpression(arg.expr, ctx, state, {
+      expectedType: expectedParamTypeAt(index),
+    }),
+    exprId: arg.expr,
+  }));
 };
 
 const resolveTraitDispatchOverload = <
