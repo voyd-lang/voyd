@@ -33,11 +33,8 @@ jobs:
 
       - run: npm ci --include=optional
 
-      - name: Build reference docs package
-        run: npm -w @voyd/reference run build
-
-      - name: Build site
-        run: npm -w voyd.dev run build
+      - name: Build
+        run: npm run build
 
       - uses: actions/upload-pages-artifact@v3
         with:
