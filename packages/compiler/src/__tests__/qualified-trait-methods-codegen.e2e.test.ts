@@ -5,7 +5,7 @@ import { getWasmInstance } from "@voyd/lib/wasm.js";
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleHost } from "../modules/types.js";
-import { compileProgram } from "../pipeline.js";
+import { compileProgram, type CompileProgramResult } from "../pipeline.js";
 
 const fixturesDir = resolve(import.meta.dirname, "__fixtures__");
 
@@ -15,6 +15,16 @@ const loadFixture = (name: string): string =>
 const createFixtureHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
 
+const expectCompileSuccess = (
+  result: CompileProgramResult,
+): Extract<CompileProgramResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(JSON.stringify(result.diagnostics, null, 2));
+  }
+  return result;
+};
+
 describe("qualified trait methods codegen e2e", () => {
   it("supports `.Trait::method()` to disambiguate conflicting trait methods", async () => {
     const root = resolve("/proj/src");
@@ -23,15 +33,11 @@ describe("qualified trait methods codegen e2e", () => {
       [mainPath]: loadFixture("qualified_trait_methods_conflict.voyd"),
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    if (result.diagnostics.length > 0) {
-      throw new Error(JSON.stringify(result.diagnostics, null, 2));
-    }
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);
@@ -45,15 +51,11 @@ describe("qualified trait methods codegen e2e", () => {
       [mainPath]: loadFixture("qualified_trait_methods_intersection_conflict.voyd"),
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    if (result.diagnostics.length > 0) {
-      throw new Error(JSON.stringify(result.diagnostics, null, 2));
-    }
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);

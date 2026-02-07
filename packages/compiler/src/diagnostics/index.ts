@@ -88,10 +88,15 @@ export const formatDiagnostic = (diagnostic: Diagnostic): string => {
 
 export class DiagnosticError extends Error {
   diagnostic: Diagnostic;
+  diagnostics: readonly Diagnostic[];
 
-  constructor(diagnostic: Diagnostic) {
+  constructor(diagnostic: Diagnostic, diagnostics?: readonly Diagnostic[]) {
     super(formatDiagnostic(diagnostic));
     this.diagnostic = diagnostic;
+    this.diagnostics =
+      diagnostics && diagnostics.length > 0
+        ? [...diagnostics]
+        : [diagnostic];
   }
 }
 
@@ -106,7 +111,7 @@ export class DiagnosticEmitter {
 
   error(input: DiagnosticInput): never {
     const diagnostic = this.report(input);
-    throw new DiagnosticError(diagnostic);
+    throw new DiagnosticError(diagnostic, this.#diagnostics);
   }
 
   get diagnostics(): readonly Diagnostic[] {

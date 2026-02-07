@@ -5,7 +5,7 @@ import { getWasmInstance } from "@voyd/lib/wasm.js";
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleHost } from "../modules/types.js";
-import { compileProgram } from "../pipeline.js";
+import { compileProgram, type CompileProgramResult } from "../pipeline.js";
 
 const fixturesDir = resolve(import.meta.dirname, "__fixtures__");
 
@@ -15,6 +15,16 @@ const loadFixture = (name: string): string =>
 const createFixtureHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
 
+const expectCompileSuccess = (
+  result: CompileProgramResult,
+): Extract<CompileProgramResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(JSON.stringify(result.diagnostics, null, 2));
+  }
+  return result;
+};
+
 describe("static access e2e", () => {
   it("instantiates static methods using target type arguments", async () => {
     const root = resolve("/proj/src");
@@ -23,13 +33,11 @@ describe("static access e2e", () => {
       [mainPath]: loadFixture("static_method_generic.voyd"),
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);
@@ -45,13 +53,11 @@ describe("static access e2e", () => {
       [utilPath]: loadFixture("module_access_util.voyd"),
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);
@@ -67,13 +73,11 @@ describe("static access e2e", () => {
       [utilPath]: loadFixture("static_method_import_util.voyd"),
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     expect(result.wasm).toBeInstanceOf(Uint8Array);
 
     const instance = getWasmInstance(result.wasm!);
@@ -89,13 +93,11 @@ describe("static access e2e", () => {
       [modPath]: loadFixture("overload_mod.voyd"),
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(5);
   });
@@ -109,13 +111,11 @@ describe("static access e2e", () => {
       [modPath]: loadFixture("overload_mod.voyd"),
     });
 
-    const result = await compileProgram({
+    const result = expectCompileSuccess(await compileProgram({
       entryPath: mainPath,
       roots: { src: root },
       host,
-    });
-
-    expect(result.diagnostics).toHaveLength(0);
+    }));
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(5);
   });

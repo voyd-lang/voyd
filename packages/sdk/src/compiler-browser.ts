@@ -8,9 +8,13 @@ import {
 } from "@voyd/compiler/pipeline-browser.js";
 import { codegenErrorToDiagnostic } from "@voyd/compiler/codegen/diagnostics.js";
 import type { CodegenOptions } from "@voyd/compiler/codegen/context.js";
-import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
+import {
+  DiagnosticError,
+  type Diagnostic,
+} from "@voyd/compiler/diagnostics/index.js";
 import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
 import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
+import { diagnosticsFromUnknownError } from "./shared/diagnostics.js";
 
 const STD_ROOT = "/std";
 const SRC_ROOT = "/src";
@@ -36,33 +40,74 @@ export type ParsedModule = {
   roots?: ModuleRoots;
 };
 
+export type BrowserCompileSuccessResult = {
+  success: true;
+  module: binaryen.Module;
+};
+
+export type BrowserCompileFailureResult = {
+  success: false;
+  diagnostics: Diagnostic[];
+};
+
+export type BrowserCompileResult =
+  | BrowserCompileSuccessResult
+  | BrowserCompileFailureResult;
+
+const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
+  diagnostics.some((diagnostic) => diagnostic.severity === "error");
+
 export const compile = async (
   text: string,
   options: BrowserCompileOptions = {}
-): Promise<binaryen.Module> => {
-  const parsedModule = await browserParseModule(text, options);
-  return compileParsedModule(parsedModule, options);
+): Promise<BrowserCompileResult> => {
+  try {
+    const parsedModule = await browserParseModule(text, options);
+    return compileParsedModule(parsedModule, options);
+  } catch (error) {
+    return {
+      success: false,
+      diagnostics: diagnosticsFromUnknownError({
+        error,
+        fallbackFile: options.entryPath ?? DEFAULT_ENTRY,
+      }),
+    };
+  }
 };
 
 export const compileParsedModule = async (
   module: ParsedModule,
   options: BrowserCompileOptions = {}
-): Promise<binaryen.Module> => {
+): Promise<BrowserCompileResult> => {
   const roots = normalizeRoots(module.roots);
   const host = createMemoryModuleHost({
     files: normalizeFileMap(module.files),
   });
   const entryPath = normalizeEntryPath(module.entryPath, roots);
-  const graph = await loadModuleGraph({
-    entryPath,
-    host,
-    roots,
-  });
+  let graph: Awaited<ReturnType<typeof loadModuleGraph>>;
+  try {
+    graph = await loadModuleGraph({
+      entryPath,
+      host,
+      roots,
+    });
+  } catch (error) {
+    return {
+      success: false,
+      diagnostics: diagnosticsFromUnknownError({
+        error,
+        fallbackFile: entryPath,
+      }),
+    };
+  }
+
   const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({ graph });
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
-  const error = diagnostics.find((diag) => diag.severity === "error");
-  if (error) {
-    throw new DiagnosticError(error);
+  if (hasErrorDiagnostics(diagnostics)) {
+    return {
+      success: false,
+      diagnostics,
+    };
   }
 
   try {
@@ -72,21 +117,30 @@ export const compileParsedModule = async (
       codegenOptions: options.codegenOptions,
       entryModuleId: options.entryModuleId,
     });
-    const codegenError = result.diagnostics.find(
-      (diagnostic) => diagnostic.severity === "error"
-    );
-    if (codegenError) {
-      throw new DiagnosticError(codegenError);
+    const allDiagnostics = [...diagnostics, ...result.diagnostics];
+    if (hasErrorDiagnostics(allDiagnostics)) {
+      return {
+        success: false,
+        diagnostics: allDiagnostics,
+      };
     }
-    return result.module;
-  } catch (errorThrown) {
-    if (errorThrown instanceof DiagnosticError) {
-      throw errorThrown;
-    }
-    const diagnostic = codegenErrorToDiagnostic(errorThrown, {
-      moduleId: options.entryModuleId ?? graph.entry,
-    });
-    throw new DiagnosticError(diagnostic);
+    return {
+      success: true,
+      module: result.module,
+    };
+  } catch (error) {
+    const codegenDiagnostics =
+      error instanceof DiagnosticError
+        ? error.diagnostics
+        : [
+            codegenErrorToDiagnostic(error, {
+              moduleId: options.entryModuleId ?? graph.entry,
+            }),
+          ];
+    return {
+      success: false,
+      diagnostics: [...diagnostics, ...codegenDiagnostics],
+    };
   }
 };
 

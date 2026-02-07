@@ -1,5 +1,5 @@
-import type { CompileArtifacts } from "./compile.js";
-import type { CompileResult, RunOptions } from "./types.js";
+import type { CompileArtifactsSuccess } from "./compile.js";
+import type { CompileSuccessResult, RunOptions } from "./types.js";
 import {
   buildHandlerKey,
   createHost,
@@ -50,7 +50,7 @@ const createEffectsInfo = ({
   table,
 }: {
   table: HostProtocolTable;
-}): CompileResult["effects"] => ({
+}): CompileSuccessResult["effects"] => ({
   table,
   findUniqueOpByLabelSuffix: (labelSuffix) =>
     findUniqueOpByLabelSuffix({ table, labelSuffix }),
@@ -74,7 +74,11 @@ const createEffectsInfo = ({
   },
 });
 
-const createRun = ({ wasm }: { wasm: Uint8Array }): CompileResult["run"] => {
+const createRun = ({
+  wasm,
+}: {
+  wasm: Uint8Array;
+}): CompileSuccessResult["run"] => {
   return async <T = unknown>({
     entryName,
     handlers,
@@ -95,8 +99,8 @@ const createRun = ({ wasm }: { wasm: Uint8Array }): CompileResult["run"] => {
 };
 
 export const createCompileResult = async (
-  artifacts: CompileArtifacts,
-): Promise<CompileResult> => {
+  artifacts: CompileArtifactsSuccess,
+): Promise<CompileSuccessResult> => {
   const run = createRun({ wasm: artifacts.wasm });
   const effects = createEffectsInfo({
     table: buildEffectsTable(artifacts.wasm),
@@ -110,9 +114,9 @@ export const createCompileResult = async (
     : undefined;
 
   return {
+    success: true,
     wasm: artifacts.wasm,
     wasmText: artifacts.wasmText,
-    diagnostics: artifacts.diagnostics,
     effects,
     run,
     tests,

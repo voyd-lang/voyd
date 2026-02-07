@@ -4,10 +4,9 @@ import { dirname, join, resolve } from "node:path";
 import { getConfig } from "@voyd/lib/config/index.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { testGc } from "@voyd/lib/binaryen-gc/test.js";
-import { createSdk } from "@voyd/sdk";
+import { createSdk, type CompileResult } from "@voyd/sdk";
 import {
   analyzeModules,
-  DiagnosticError,
   loadModuleGraph,
   parse,
 } from "@voyd/sdk/compiler";
@@ -97,12 +96,25 @@ const getModuleRoots = (entryPath: string) => ({
   std: resolveStdRoot(),
 });
 
+const failWithDiagnostics = (diagnostics: readonly Diagnostic[]): never => {
+  throw { diagnostics: [...diagnostics] };
+};
+
+const requireCompileSuccess = (
+  result: CompileResult,
+): Extract<CompileResult, { success: true }> => {
+  if (!result.success) {
+    failWithDiagnostics(result.diagnostics);
+  }
+  return result as Extract<CompileResult, { success: true }>;
+};
+
 const assertNoDiagnostics = (diagnostics: readonly Diagnostic[]): void => {
-  const error = diagnostics.find(
+  const hasErrors = diagnostics.some(
     (diagnostic) => diagnostic.severity === "error",
   );
-  if (error) {
-    throw new DiagnosticError(error);
+  if (hasErrors) {
+    failWithDiagnostics(diagnostics);
   }
 };
 
@@ -141,11 +153,15 @@ async function getIrAST(entryPath: string) {
 }
 
 async function getWasmText(entryPath: string, optimize = false) {
-  const { wasmText } = await sdk.compile({
-    entryPath,
-    optimize,
-    emitWasmText: true,
-  });
+  const result = requireCompileSuccess(
+    await sdk.compile({
+      entryPath,
+      optimize,
+      emitWasmText: true,
+    }),
+  );
+
+  const { wasmText } = result;
   if (!wasmText) {
     throw new Error("Wasm text output was not produced");
   }
@@ -153,20 +169,30 @@ async function getWasmText(entryPath: string, optimize = false) {
 }
 
 async function emitWasm(entryPath: string, optimize = false) {
-  const { wasm } = await sdk.compile({ entryPath, optimize });
-  stdout.write(wasm);
+  const result = requireCompileSuccess(
+    await sdk.compile({ entryPath, optimize }),
+  );
+  stdout.write(result.wasm);
 }
 
 async function runWasm(entryPath: string, optimize = false) {
-  const { wasm } = await sdk.compile({ entryPath, optimize });
-  const result = await sdk.run({ wasm, entryName: "main" });
+  const compiled = requireCompileSuccess(
+    await sdk.compile({ entryPath, optimize }),
+  );
+
+  const result = await sdk.run({ wasm: compiled.wasm, entryName: "main" });
   printValue(result);
 }
 
 function errorHandler(error: unknown) {
-  const diagnostic = extractDiagnostic(error);
-  if (diagnostic) {
-    console.error(formatCliDiagnostic(diagnostic));
+  const diagnostics = extractDiagnostics(error);
+  if (diagnostics) {
+    diagnostics.forEach((diagnostic, index) => {
+      if (index > 0) {
+        console.error("");
+      }
+      console.error(formatCliDiagnostic(diagnostic));
+    });
     process.exit(1);
   }
 
@@ -174,17 +200,29 @@ function errorHandler(error: unknown) {
   process.exit(1);
 }
 
-const extractDiagnostic = (error: unknown): Diagnostic | undefined => {
-  if (error instanceof DiagnosticError) {
-    return error.diagnostic;
-  }
-
-  if (!error || typeof error !== "object" || !("diagnostic" in error)) {
+const extractDiagnostics = (error: unknown): Diagnostic[] | undefined => {
+  if (!error || typeof error !== "object") {
     return undefined;
   }
 
-  const candidate = (error as { diagnostic?: unknown }).diagnostic;
-  return isDiagnostic(candidate) ? candidate : undefined;
+  if ("diagnostics" in error) {
+    const values = (error as { diagnostics?: unknown }).diagnostics;
+    if (!Array.isArray(values)) {
+      return undefined;
+    }
+
+    const diagnostics = values.filter((value): value is Diagnostic =>
+      isDiagnostic(value),
+    );
+    return diagnostics.length > 0 ? diagnostics : undefined;
+  }
+
+  if ("diagnostic" in error) {
+    const candidate = (error as { diagnostic?: unknown }).diagnostic;
+    return isDiagnostic(candidate) ? [candidate] : undefined;
+  }
+
+  return undefined;
 };
 
 const isDiagnostic = (value: unknown): value is Diagnostic => {

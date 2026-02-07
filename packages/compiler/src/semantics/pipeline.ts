@@ -116,22 +116,33 @@ export const semanticsPipeline = (
     scopeByNode: binding.scopeByNode,
   });
 
-  const typing = runTypingPipeline({
-    symbolTable,
-    hir,
-    overloads: collectOverloadOptions(
-      binding.overloads,
-      binding.importedOverloadOptions,
-    ),
-    decls: binding.decls,
-    arena: typingState?.arena,
-    effects: typingState?.effects,
-    imports: binding.imports,
-    moduleId: module.id,
-    packageId: binding.packageId,
-    moduleExports: exports ?? new Map(),
-    availableSemantics: projectDependencySemantics(dependencies),
-  });
+  let typing: TypingResult;
+  try {
+    typing = runTypingPipeline({
+      symbolTable,
+      hir,
+      overloads: collectOverloadOptions(
+        binding.overloads,
+        binding.importedOverloadOptions,
+      ),
+      decls: binding.decls,
+      arena: typingState?.arena,
+      effects: typingState?.effects,
+      imports: binding.imports,
+      moduleId: module.id,
+      packageId: binding.packageId,
+      moduleExports: exports ?? new Map(),
+      availableSemantics: projectDependencySemantics(dependencies),
+    });
+  } catch (error) {
+    if (error instanceof DiagnosticError) {
+      throw new DiagnosticError(error.diagnostic, [
+        ...binding.diagnostics,
+        ...error.diagnostics,
+      ]);
+    }
+    throw error;
+  }
 
   specializeOverloadCallees({
     hir,
@@ -181,7 +192,7 @@ const ensureNoBindingErrors = (binding: BindingResult): void => {
   if (errors.length === 0) {
     return;
   }
-  throw new DiagnosticError(errors[0]!);
+  throw new DiagnosticError(errors[0]!, binding.diagnostics);
 };
 
 const collectOverloadOptions = (
