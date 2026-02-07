@@ -38,6 +38,10 @@ import {
   intrinsicSignaturesFor,
   type IntrinsicSignature,
 } from "./intrinsics.js";
+import {
+  buildCallArgumentHintSubstitution,
+  typeCallArgsWithSignatureContext,
+} from "./call-arg-context.js";
 import { typeExpression } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
 import { getValueType } from "./identifier.js";
@@ -603,66 +607,43 @@ export const typeMethodCallExpr = (
     ctx.resolvedExprTypes.set(expr.target, receiverType);
   }
 
-  const hintSubstitution = (() => {
-    const hasTypeParams =
-      selected.signature.typeParams && selected.signature.typeParams.length > 0;
-    if (!hasTypeParams) {
-      return undefined;
-    }
-
-    const merged = new Map<TypeParamId, TypeId>(
-      getTraitMethodTypeBindings({
-        calleeSymbol: selected.symbol,
-        receiverType,
-        signature: selected.signature,
-        ctx,
-        state,
-      }) ?? [],
-    );
-
-    applyExplicitTypeArguments({
-      signature: selected.signature,
-      typeArguments,
+  const hintArgs =
+    selected.receiverTypeOverride && probeArgs.length > 0
+      ? [{ ...probeArgs[0]!, type: receiverType }, ...probeArgs.slice(1)]
+      : probeArgs;
+  const seedSubstitution = new Map<TypeParamId, TypeId>(
+    getTraitMethodTypeBindings({
       calleeSymbol: selected.symbol,
+      receiverType,
+      signature: selected.signature,
       ctx,
-    })?.forEach((value, key) => merged.set(key, value));
-
-    const hintArgs =
-      selected.receiverTypeOverride && probeArgs.length > 0
-        ? [{ ...probeArgs[0]!, type: receiverType }, ...probeArgs.slice(1)]
-        : probeArgs;
-
-    hintArgs.forEach((arg, index) => {
-      const param = selected.signature.parameters[index];
-      if (!param) {
-        return;
-      }
-      const expected = ctx.arena.substitute(param.type, merged);
-      bindTypeParamsFromType(expected, arg.type, merged, ctx, state);
-    });
-
-    return merged.size > 0 ? merged : undefined;
-  })();
-
-  const expectedParamTypeAt = (index: number): TypeId | undefined => {
-    const param = selected.signature.parameters[index];
-    if (!param) {
-      return undefined;
-    }
-    return hintSubstitution
-      ? ctx.arena.substitute(param.type, hintSubstitution)
-      : param.type;
-  };
+      state,
+    }) ?? [],
+  );
+  applyExplicitTypeArguments({
+    signature: selected.signature,
+    typeArguments,
+    calleeSymbol: selected.symbol,
+    ctx,
+  })?.forEach((value, key) => seedSubstitution.set(key, value));
+  const hintSubstitution = buildCallArgumentHintSubstitution({
+    signature: selected.signature,
+    probeArgs: hintArgs,
+    expectedReturnType,
+    seedSubstitution,
+    ctx,
+    state,
+  });
 
   const args: Arg[] = [
     { type: receiverType, exprId: expr.target },
-    ...expr.args.map((arg, index) => {
-      const expectedType = expectedParamTypeAt(index + 1);
-      return {
-        label: arg.label,
-        type: typeExpression(arg.expr, ctx, state, { expectedType }),
-        exprId: arg.expr,
-      };
+    ...typeCallArgsWithSignatureContext({
+      args: expr.args,
+      signature: selected.signature,
+      paramOffset: 1,
+      hintSubstitution,
+      ctx,
+      state,
     }),
   ];
 
@@ -2625,11 +2606,18 @@ const typeOverloadedCall = (
     ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
   targets.set(instanceKey, selectedRef);
   ctx.callResolution.targets.set(call.id, targets);
-  const args = retypeOverloadedCallArgs({
-    call,
+  const hintSubstitution = buildCallArgumentHintSubstitution({
     signature: selected.signature,
     probeArgs,
     expectedReturnType,
+    ctx,
+    state,
+  });
+  const args = typeCallArgsWithSignatureContext({
+    args: call.args,
+    signature: selected.signature,
+    paramOffset: 0,
+    hintSubstitution,
     ctx,
     state,
   });
@@ -2646,74 +2634,6 @@ const typeOverloadedCall = (
     calleeExprId: callee.id,
     calleeModuleId: selectedRef.moduleId,
   });
-};
-
-const retypeOverloadedCallArgs = ({
-  call,
-  signature,
-  probeArgs,
-  expectedReturnType,
-  ctx,
-  state,
-}: {
-  call: HirCallExpr;
-  signature: FunctionSignature;
-  probeArgs: readonly Arg[];
-  expectedReturnType: TypeId | undefined;
-  ctx: TypingContext;
-  state: TypingState;
-}): readonly Arg[] => {
-  const hintSubstitution = (() => {
-    const hasTypeParams =
-      signature.typeParams && signature.typeParams.length > 0;
-    if (!hasTypeParams) {
-      return undefined;
-    }
-
-    const merged = new Map<TypeParamId, TypeId>();
-    probeArgs.forEach((arg, index) => {
-      const param = signature.parameters[index];
-      if (!param) {
-        return;
-      }
-      const expected = ctx.arena.substitute(param.type, merged);
-      bindTypeParamsFromType(expected, arg.type, merged, ctx, state);
-    });
-
-    if (
-      typeof expectedReturnType === "number" &&
-      expectedReturnType !== ctx.primitives.unknown
-    ) {
-      const expected = ctx.arena.substitute(signature.returnType, merged);
-      bindTypeParamsFromType(
-        expected,
-        applyCurrentSubstitution(expectedReturnType, ctx, state),
-        merged,
-        ctx,
-        state,
-      );
-    }
-
-    return merged.size > 0 ? merged : undefined;
-  })();
-
-  const expectedParamTypeAt = (index: number): TypeId | undefined => {
-    const param = signature.parameters[index];
-    if (!param) {
-      return undefined;
-    }
-    return hintSubstitution
-      ? ctx.arena.substitute(param.type, hintSubstitution)
-      : param.type;
-  };
-
-  return call.args.map((arg, index) => ({
-    label: arg.label,
-    type: typeExpression(arg.expr, ctx, state, {
-      expectedType: expectedParamTypeAt(index),
-    }),
-    exprId: arg.expr,
-  }));
 };
 
 const resolveTraitDispatchOverload = <
