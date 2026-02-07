@@ -1,4 +1,4 @@
-use animal
+use src::animal
 
 pub fn make_animal(name: i32) -> animal::Animal
   animal::Animal { name }

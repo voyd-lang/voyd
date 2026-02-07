@@ -2,7 +2,6 @@ import {
   type Expr,
   type Form,
   type Syntax,
-  formCallsInternal,
   isForm,
   isIdentifierAtom,
 } from "../../parser/index.js";
@@ -14,11 +13,7 @@ import type {
   HirTypeParameter,
 } from "../hir/index.js";
 import { resolveTypeSymbol } from "./resolution.js";
-import { resolveModuleMemberResolution } from "./expressions/resolution-helpers.js";
-import {
-  extractNamespaceSegments,
-  resolveModulePathSymbol,
-} from "./expressions/namespace-resolution.js";
+import { resolveNamedTypeTarget } from "./named-type-resolution.js";
 import type { LowerContext } from "./types.js";
 import type { ScopeId, SymbolId } from "../ids.js";
 import { parseLambdaSignature } from "../lambda.js";
@@ -112,24 +107,16 @@ const lowerNamedTypeForm = (
   ctx: LowerContext,
   scope: ScopeId
 ): HirTypeExpr | undefined => {
-  const local = lowerLocalNamedTypeForm(form, ctx, scope);
-  if (local) {
-    return local;
-  }
-
-  if (!form.calls("::") || form.length !== 3) {
-    return undefined;
-  }
-
-  return lowerNamespacedNamedTypeForm(form, ctx, scope);
-};
-
-const lowerLocalNamedTypeForm = (
-  form: Form,
-  ctx: LowerContext,
-  scope: ScopeId
-): HirTypeExpr | undefined => {
-  const target = extractNamedTypeTarget(form, ctx, scope);
+  const target = resolveNamedTypeTarget({
+    expr: form,
+    scope,
+    ctx,
+    parseTypeArguments: (entries) =>
+      entries
+        .map((entry) => lowerTypeExpr(entry, ctx, scope))
+        .filter(Boolean) as HirTypeExpr[],
+    allowNamespacedSymbolKind: (kind) => kind === "type" || kind === "trait",
+  });
   if (!target) {
     return undefined;
   }
@@ -138,95 +125,9 @@ const lowerLocalNamedTypeForm = (
     typeKind: "named",
     ast: form.syntaxId,
     span: toSourceSpan(form),
-    path: [target.name],
-    symbol: resolveTypeSymbol(target.name, scope, ctx),
+    path: target.path,
+    symbol: target.symbol,
     typeArguments: target.typeArguments,
-  };
-};
-
-const lowerNamespacedNamedTypeForm = (
-  form: Form,
-  ctx: LowerContext,
-  scope: ScopeId
-): HirTypeExpr | undefined => {
-  const moduleExpr = form.at(1);
-  const memberExpr = form.at(2);
-  if (!moduleExpr || !memberExpr) {
-    return undefined;
-  }
-
-  const moduleSymbol = resolveModulePathSymbol(moduleExpr, scope, ctx);
-  if (typeof moduleSymbol !== "number") {
-    return undefined;
-  }
-
-  const member = extractNamedTypeTarget(memberExpr, ctx, scope);
-  if (!member) {
-    return undefined;
-  }
-
-  const memberTable = ctx.moduleMembers.get(moduleSymbol);
-  if (!memberTable) {
-    return undefined;
-  }
-
-  const resolution = resolveModuleMemberResolution({
-    name: member.name,
-    moduleSymbol,
-    memberTable,
-    ctx,
-  });
-  if (!resolution || resolution.kind !== "symbol") {
-    return undefined;
-  }
-
-  const symbolRecord = ctx.symbolTable.getSymbol(resolution.symbol);
-  if (symbolRecord.kind !== "type" && symbolRecord.kind !== "trait") {
-    return undefined;
-  }
-
-  const moduleSegments =
-    extractNamespaceSegments(moduleExpr) ??
-    [ctx.symbolTable.getSymbol(moduleSymbol).name];
-
-  return {
-    typeKind: "named",
-    ast: form.syntaxId,
-    span: toSourceSpan(form),
-    path: [...moduleSegments, member.name],
-    symbol: resolution.symbol,
-    typeArguments: member.typeArguments,
-  };
-};
-
-const isGenericsForm = (expr: Expr | undefined): expr is Form =>
-  isForm(expr) && formCallsInternal(expr, "generics");
-
-const extractNamedTypeTarget = (
-  expr: Expr,
-  ctx: LowerContext,
-  scope: ScopeId
-): { name: string; typeArguments?: HirTypeExpr[] } | undefined => {
-  if (isIdentifierAtom(expr)) {
-    return { name: expr.value };
-  }
-
-  if (!isForm(expr)) {
-    return undefined;
-  }
-
-  const name = expr.at(0);
-  const generics = expr.at(1);
-  if (!isIdentifierAtom(name) || !isGenericsForm(generics) || expr.length !== 2) {
-    return undefined;
-  }
-
-  const typeArguments = generics.rest
-    .map((entry) => lowerTypeExpr(entry, ctx, scope))
-    .filter(Boolean) as HirTypeExpr[];
-  return {
-    name: name.value,
-    typeArguments,
   };
 };
 
