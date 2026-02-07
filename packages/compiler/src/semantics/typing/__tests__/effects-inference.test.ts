@@ -28,6 +28,22 @@ const findCallByCallee = (
   return undefined;
 };
 
+const findCallsByCallee = (
+  hir: ReturnType<typeof semanticsPipeline>["hir"],
+  symbolName: string,
+  symbolTable: SymbolTable
+): HirCallExpr[] =>
+  Array.from(hir.expressions.values()).filter((expr): expr is HirCallExpr => {
+    if (expr.exprKind !== "call") {
+      return false;
+    }
+    const callee = hir.expressions.get(expr.callee);
+    if (callee?.exprKind !== "identifier") {
+      return false;
+    }
+    return symbolTable.getSymbol(callee.symbol).name === symbolName;
+  });
+
 const findEffectHandler = (
   hir: ReturnType<typeof semanticsPipeline>["hir"]
 ): HirExpression | undefined =>
@@ -69,6 +85,46 @@ fn main()
     if (!mainSig) return;
     const fnOps = effectOps(mainSig.effectRow, typing.effects);
     expect(fnOps).toEqual(["Async.await"]);
+  });
+
+  it("types explicit effect operation type arguments in both namespace positions", () => {
+    const ast = parse(
+      `
+eff Gen<T>
+  fn pass(resume, value: T) -> T
+
+fn from_target(): () -> i32
+  try
+    Gen<i32>::pass(1)
+  Gen::pass(resume, value):
+    resume(value)
+
+fn from_member(): () -> i32
+  try
+    Gen::pass<i32>(2)
+  Gen::pass(resume, value):
+    resume(value)
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const passCalls = findCallsByCallee(hir, "pass", symbolTable).filter(
+      (expr) => expr.args.length === 1
+    );
+    expect(passCalls).toHaveLength(2);
+
+    const i32 = typing.arena.internPrimitive("i32");
+    passCalls.forEach((call) => {
+      const typeArgsByInstance = typing.callTypeArguments.get(call.id);
+      const typeArgs = typeArgsByInstance
+        ? Array.from(typeArgsByInstance.values())[0]
+        : undefined;
+      expect(typeArgs).toEqual([i32]);
+      expect(typing.table.getExprType(call.id)).toBe(i32);
+    });
   });
 
   it("diagnoses mismatched annotations", () => {

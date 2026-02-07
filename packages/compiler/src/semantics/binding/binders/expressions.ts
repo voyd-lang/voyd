@@ -4,6 +4,7 @@ import {
   type IdentifierAtom,
   type Syntax,
   type InternalIdentifierAtom,
+  formCallsInternal,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -549,6 +550,11 @@ const resolveNamespaceModuleSymbol = (
     return undefined;
   }
 
+  const stripped = stripTypeArguments(target);
+  if (stripped !== target) {
+    return resolveNamespaceModuleSymbol(stripped, scope, ctx);
+  }
+
   if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
     const symbol = ctx.symbolTable.resolve(target.value, scope);
     if (typeof symbol !== "number") {
@@ -602,6 +608,30 @@ const resolveNamespaceModuleSymbol = (
   }
 
   return undefined;
+};
+
+const stripTypeArguments = (expr: Expr): Expr => {
+  if (!isForm(expr)) {
+    return expr;
+  }
+
+  if (formCallsInternal(expr, "generics")) {
+    const target = expr.at(1);
+    return target ?? expr;
+  }
+
+  const head = expr.at(0);
+  const second = expr.at(1);
+  if (
+    expr.length === 2 &&
+    (isIdentifierAtom(head) || isInternalIdentifierAtom(head)) &&
+    isForm(second) &&
+    formCallsInternal(second, "generics")
+  ) {
+    return head;
+  }
+
+  return expr;
 };
 
 type ImportMeta = { import?: { moduleId?: string; symbol?: number } };
