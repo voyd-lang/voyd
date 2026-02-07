@@ -25,7 +25,9 @@ const expectCompileSuccess = (
 ): Extract<CompileResult, { success: true }> => {
   expect(result.success).toBe(true);
   if (!result.success) {
-    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+    throw new Error(
+      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    );
   }
   return result;
 };
@@ -45,8 +47,8 @@ const buildFallbackHandlers = ({
             (entry) =>
               entry.effectId === op.effectId &&
               entry.opName === op.opName &&
-              entry.signatureHash === op.signatureHash
-          )
+              entry.signatureHash === op.signatureHash,
+          ),
       )
       .map((op) => [
         result.effects.handlerKeyFor({
@@ -56,7 +58,7 @@ const buildFallbackHandlers = ({
         }),
         ({ resume, tail }: EffectContinuation) =>
           op.resumeKind === "tail" ? tail() : resume(),
-      ])
+      ]),
   ) as Record<string, EffectHandler>;
 
 describe("node sdk", () => {
@@ -73,16 +75,20 @@ describe("node sdk", () => {
       throw new Error("Expected compile failure");
     }
 
-    expect(result.diagnostics.some((diagnostic) => diagnostic.code === "TY0030")).toBe(true);
+    expect(
+      result.diagnostics.some((diagnostic) => diagnostic.code === "TY0030"),
+    ).toBe(true);
   });
 
   it("compiles and runs a source module", async () => {
     const sdk = createSdk();
-    const result = expectCompileSuccess(await sdk.compile({
-      source: `pub fn main() -> i32
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `pub fn main() -> i32
   42
 `,
-    }));
+      }),
+    );
 
     const output = await result.run<number>({ entryName: "main" });
     expect(output).toBe(42);
@@ -100,7 +106,7 @@ describe("node sdk", () => {
       entryPath,
       `pub fn main() -> i32
   7
-`
+`,
     );
 
     try {
@@ -114,9 +120,104 @@ describe("node sdk", () => {
     }
   });
 
+  it("resolves packages from the default node_modules search path", async () => {
+    const sdk = createSdk();
+    const repoRoot = process.cwd();
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-node-modules-"),
+    );
+    const srcDir = path.join(projectRoot, "src");
+    const entryPath = path.join(srcDir, "main.voyd");
+    const packageSrcDir = path.join(
+      projectRoot,
+      "node_modules",
+      "my_pkg",
+      "src",
+    );
+
+    await fs.mkdir(srcDir, { recursive: true });
+    await fs.mkdir(packageSrcDir, { recursive: true });
+    await fs.writeFile(
+      entryPath,
+      `use pkg::my_pkg::all
+
+pub fn main() -> i32
+  plus_one(41)
+`,
+    );
+    await fs.writeFile(
+      path.join(packageSrcDir, "pkg.voyd"),
+      `pub use src::math::plus_one
+`,
+    );
+    await fs.writeFile(
+      path.join(packageSrcDir, "math.voyd"),
+      `pub fn plus_one(value: i32) -> i32
+  value + 1
+`,
+    );
+
+    try {
+      const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+      const output = await result.run<number>({ entryName: "main" });
+      expect(output).toBe(42);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves packages from additional configured pkgDirs", async () => {
+    const sdk = createSdk();
+    const repoRoot = process.cwd();
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-pkg-dirs-"),
+    );
+    const srcDir = path.join(projectRoot, "src");
+    const entryPath = path.join(srcDir, "main.voyd");
+    const packageRoot = path.join(projectRoot, "vendor_packages");
+    const packageSrcDir = path.join(packageRoot, "vendor_lib", "src");
+
+    await fs.mkdir(srcDir, { recursive: true });
+    await fs.mkdir(packageSrcDir, { recursive: true });
+    await fs.writeFile(
+      entryPath,
+      `use pkg::vendor_lib::all
+
+pub fn main() -> i32
+  ten()
+`,
+    );
+    await fs.writeFile(
+      path.join(packageSrcDir, "pkg.voyd"),
+      `pub use src::api::ten
+`,
+    );
+    await fs.writeFile(
+      path.join(packageSrcDir, "api.voyd"),
+      `pub fn ten() -> i32
+  10
+`,
+    );
+
+    try {
+      const result = expectCompileSuccess(
+        await sdk.compile({
+          entryPath,
+          roots: { pkgDirs: [packageRoot], src: srcDir },
+        }),
+      );
+      const output = await result.run<number>({ entryName: "main" });
+      expect(output).toBe(10);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("supports handlersByLabelSuffix using :: separators", async () => {
     const sdk = createSdk();
-    const result = expectCompileSuccess(await sdk.compile({ source: EFFECT_SOURCE }));
+    const result = expectCompileSuccess(
+      await sdk.compile({ source: EFFECT_SOURCE }),
+    );
     const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
     const output = await result.run<number>({
       entryName: "main",
@@ -140,7 +241,9 @@ describe("node sdk", () => {
 
   it("supports effectId::opName keys without signatureHash for non-overloaded ops", async () => {
     const sdk = createSdk();
-    const result = expectCompileSuccess(await sdk.compile({ source: EFFECT_SOURCE }));
+    const result = expectCompileSuccess(
+      await sdk.compile({ source: EFFECT_SOURCE }),
+    );
     const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
     expect(op.effectId).toBe(ASYNC_EFFECT_ID);
     const handlers: Record<string, EffectHandler> = {
@@ -157,7 +260,9 @@ describe("node sdk", () => {
 
   it("exposes signatureHashFor and handlerKeyFor helpers", async () => {
     const sdk = createSdk();
-    const result = expectCompileSuccess(await sdk.compile({ source: EFFECT_SOURCE }));
+    const result = expectCompileSuccess(
+      await sdk.compile({ source: EFFECT_SOURCE }),
+    );
     const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
     expect(op.effectId).toBe(ASYNC_EFFECT_ID);
     const signatureHash = result.effects.signatureHashFor({
@@ -171,8 +276,7 @@ describe("node sdk", () => {
     });
     const handlers: Record<string, EffectHandler> = {
       ...buildFallbackHandlers({ result }),
-      [key]: ({ resume }, value: unknown) =>
-        resume((value as number) + 40),
+      [key]: ({ resume }, value: unknown) => resume((value as number) + 40),
     };
 
     const output = await result.run<number>({

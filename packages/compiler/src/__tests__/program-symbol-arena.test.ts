@@ -14,11 +14,11 @@ describe("ProgramSymbolArena", () => {
   it("assigns deterministic ids independent of module order", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: `use util::all
+      [`${root}${sep}main.voyd`]: `use src::util::all
 
 pub fn main() -> i32
   add(1, 2)`,
-      [`${root}${sep}util.voyd`]: `pub use util::math::all`,
+      [`${root}${sep}util.voyd`]: `pub use self::math::all`,
       [`${root}${sep}util${sep}math.voyd`]: `pub fn add(a: i32, b: i32) -> i32
   a + b`,
     });

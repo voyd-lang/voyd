@@ -12,7 +12,7 @@ describe("buildModuleGraph", () => {
   it("loads dependencies via use statements and auto-discovers submodules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: "use internal",
+      [`${root}${sep}main.voyd`]: "use src::internal",
       [`${root}${sep}internal.voyd`]: "pub use self::hey::all",
       [`${root}${sep}internal${sep}hey.voyd`]: "pub fn hey()\n  1",
     });
@@ -37,7 +37,7 @@ describe("buildModuleGraph", () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}server.voyd`]: "",
-      [`${root}${sep}server${sep}api.voyd`]: "use users::get_user",
+      [`${root}${sep}server${sep}api.voyd`]: "use super::users::get_user",
       [`${root}${sep}server${sep}users${sep}get_user.voyd`]:
         "use src::server::fetch",
       [`${root}${sep}server${sep}fetch.voyd`]: "fn fetch()\n  1",
@@ -64,7 +64,7 @@ describe("buildModuleGraph", () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}utils.voyd`]: "pub fn root() -> i32\n  1",
-      [`${root}${sep}utils${sep}bar.voyd`]: "use utils",
+      [`${root}${sep}utils${sep}bar.voyd`]: "use super::utils",
       [`${root}${sep}utils${sep}utils.voyd`]: "pub fn nested() -> i32\n  1",
     });
 
@@ -85,7 +85,7 @@ describe("buildModuleGraph", () => {
   it("registers inline modules and resolves imports against them", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: "use internal::nested",
+      [`${root}${sep}main.voyd`]: "use src::internal::nested",
       [`${root}${sep}internal.voyd`]: "mod nested\n  pub fn hi()\n    1",
     });
 
@@ -137,7 +137,7 @@ describe("buildModuleGraph", () => {
   it("emits structured diagnostics for missing modules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: "use util::missing",
+      [`${root}${sep}main.voyd`]: "use src::util::missing",
     });
 
     const graph = await buildModuleGraph({
@@ -158,7 +158,7 @@ describe("buildModuleGraph", () => {
   it("tracks missing modules without importer path collisions", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: "use a::all\nuse a::src::all",
+      [`${root}${sep}main.voyd`]: "use src::a::all\nuse src::a::src::all",
       [`${root}${sep}a.voyd`]: "use src::src::b::all",
       [`${root}${sep}a${sep}src.voyd`]: "use src::b::all",
     });
@@ -205,7 +205,7 @@ describe("buildModuleGraph", () => {
     const stdRoot = resolve("/proj/std");
     const host = createMemoryHost({
       [`${srcRoot}${sep}main.voyd`]: "use std::map::Map",
-      [`${stdRoot}${sep}pkg.voyd`]: "pub use msgpack",
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::msgpack",
       [`${stdRoot}${sep}map.voyd`]: "",
       [`${stdRoot}${sep}msgpack.voyd`]: "use std::map::Map",
     });
@@ -219,6 +219,75 @@ describe("buildModuleGraph", () => {
     expect(graph.diagnostics).toHaveLength(0);
     expect(Array.from(graph.modules.keys())).toEqual(
       expect.arrayContaining(["src::main", "std::pkg", "std::msgpack", "std::map"]),
+    );
+  });
+
+  it("resolves self-relative imports from std pkg.voyd", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use std::math::all",
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::math::all",
+      [`${stdRoot}${sep}math.voyd`]: "pub fn one() -> i32\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining(["src::main", "std::pkg", "std::math"]),
+    );
+  });
+
+  it("treats pkg::std imports as std namespace imports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use pkg::std::math::all",
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use std::math::all",
+      [`${stdRoot}${sep}math.voyd`]: "pub fn one() -> i32\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining(["src::main", "std::pkg", "std::math"]),
+    );
+  });
+
+  it("resolves installed packages from configured pkgDirs", async () => {
+    const appRoot = resolve("/proj/app");
+    const pkgDir = resolve("/proj/node_modules");
+    const host = createMemoryHost({
+      [`${appRoot}${sep}main.voyd`]: "use pkg::my_pkg::all",
+      [`${pkgDir}${sep}my_pkg${sep}src${sep}pkg.voyd`]:
+        "pub use src::math::all",
+      [`${pkgDir}${sep}my_pkg${sep}src${sep}math.voyd`]:
+        "pub fn plus_one(v: i32) -> i32\n  v + 1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${appRoot}${sep}main.voyd`,
+      host,
+      roots: { src: appRoot, pkgDirs: [pkgDir] },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "pkg:my_pkg::pkg",
+        "pkg:my_pkg::math",
+      ]),
     );
   });
 });

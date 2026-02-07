@@ -1,4 +1,4 @@
-use dep::add1
+use src::dep::add1
 
 fn make()
   (x: i32) -> i32 => add1(x)
@@ -6,4 +6,3 @@ fn make()
 pub fn main() -> i32
   let f = make()
   f(1)
-

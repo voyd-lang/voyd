@@ -80,8 +80,8 @@ pub fn main()
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}main.voyd`]: `
-use a::all
-use b::all
+use src::a::all
+use src::b::all
 
 pub fn main() -> i32
   0

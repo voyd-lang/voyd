@@ -75,7 +75,7 @@ describe("type lowering regression", () => {
       segments: ["dep"],
     });
     const main = buildModule({
-      source: `use dep::{ add }
+      source: `use src::dep::{ add }
 
 pub fn main() -> i32
   let thunk = () -> i32 =>
@@ -146,8 +146,8 @@ pub fn main() -> i32
   it("links cross-module trait impls without order hazards", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: `use traits::{ Countable }
-use impls::{ Box }
+      [`${root}${sep}main.voyd`]: `use src::traits::{ Countable }
+use src::impls::{ Box }
 
 pub fn main() -> i32
   let value = Box { value: 41 }
@@ -156,7 +156,7 @@ pub fn main() -> i32
       [`${root}${sep}traits.voyd`]: `pub trait Countable
   fn count(self) -> i32
 `,
-      [`${root}${sep}impls.voyd`]: `use traits::{ Countable }
+      [`${root}${sep}impls.voyd`]: `use src::traits::{ Countable }
 
 pub obj Box {
   value: i32,

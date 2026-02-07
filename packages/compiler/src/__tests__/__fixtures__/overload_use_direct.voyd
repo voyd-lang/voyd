@@ -1,4 +1,4 @@
-use overload_mod::my_overloaded_func
+use src::overload_mod::my_overloaded_func
 
 pub fn main() -> i32
   my_overloaded_func(a: 1) + my_overloaded_func(b: 1)
