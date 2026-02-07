@@ -36,6 +36,7 @@ export default function VoydEditor({
       <Editor
         className="size-full"
         height={height}
+        theme="github-dark"
         defaultLanguage="voyd"
         defaultValue={value}
         options={{
