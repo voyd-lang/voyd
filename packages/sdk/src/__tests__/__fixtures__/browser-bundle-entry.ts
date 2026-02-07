@@ -26,8 +26,11 @@ const toBytes = (
     : result.output ?? result.binary ?? new Uint8Array();
 
 const run: SmokeRunner = async () => {
-  const module = await compile(source, { files });
-  return toBytes(module.emitBinary()).length;
+  const result = await compile(source, { files });
+  if (!result.success) {
+    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+  }
+  return toBytes(result.module.emitBinary()).length;
 };
 
 (globalThis as { __voydBrowserSmoke__?: SmokeRunner }).__voydBrowserSmoke__ =

@@ -12,7 +12,10 @@ describe("smoke: exported effects annotations", () => {
       "pkg.voyd",
     );
     const result = await sdk.compile({ entryPath });
-    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+    }
     const output = await result.run<number>({ entryName: "main" });
     expect(output).toBe(7);
   });
@@ -26,7 +29,10 @@ describe("smoke: exported effects annotations", () => {
       "pkg.voyd",
     );
     const result = await sdk.compile({ entryPath });
-    expect(result.diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+    }
   });
 
   it("emits a helpful diagnostic for missing effect annotations on exported api methods", async () => {
@@ -37,13 +43,16 @@ describe("smoke: exported effects annotations", () => {
       "effects-exports-missing-annotation",
       "pkg.voyd",
     );
-    try {
-      await sdk.compile({ entryPath });
+    const result = await sdk.compile({ entryPath });
+    expect(result.success).toBe(false);
+    if (result.success) {
       throw new Error("expected compile to fail");
-    } catch (error) {
-      const message = String(error);
-      expect(message).toMatch(/TY0016/);
-      expect(message).toMatch(/Async.*await/);
     }
+
+    const message = result.diagnostics
+      .map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`)
+      .join("\n");
+    expect(message).toMatch(/TY0016/);
+    expect(message).toMatch(/Async.*await/);
   });
 });

@@ -46,14 +46,21 @@ export type CompileOptions = {
   emitWasmText?: boolean;
 };
 
-export type CompileResult = {
+export type CompileSuccessResult = {
+  success: true;
   wasm: Uint8Array;
   wasmText?: string;
-  diagnostics: Diagnostic[];
   effects: EffectsInfo;
   tests?: TestCollection;
   run: <T = unknown>(opts: Omit<RunOptions, "wasm">) => Promise<T>;
 };
+
+export type CompileFailureResult = {
+  success: false;
+  diagnostics: Diagnostic[];
+};
+
+export type CompileResult = CompileSuccessResult | CompileFailureResult;
 
 export type EffectsInfo = {
   table: HostProtocolTable;

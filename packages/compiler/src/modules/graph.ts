@@ -39,6 +39,9 @@ type PendingDependency = {
   importer: string;
 };
 
+const formatErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 export const buildModuleGraph = async ({
   entryPath,
   host,
@@ -100,7 +103,20 @@ export const buildModuleGraph = async ({
       continue;
     }
 
-    const resolvedPath = await resolveModuleFile(dependency.path, roots, host);
+    let resolvedPath: string | undefined;
+    try {
+      resolvedPath = await resolveModuleFile(dependency.path, roots, host);
+    } catch (error) {
+      moduleDiagnostics.push({
+        kind: "io-error",
+        message: formatErrorMessage(error),
+        requested: dependency.path,
+        importer,
+        span: dependency.span,
+      });
+      addMissingModule(importer, pathKey);
+      continue;
+    }
 
     if (!resolvedPath) {
       moduleDiagnostics.push({
@@ -134,11 +150,24 @@ export const buildModuleGraph = async ({
       addMissingModule(importer, pathKey);
       continue;
     }
-    const nextModule = await loadFileModule({
-      filePath: resolvedPath,
-      modulePath: resolvedModulePath,
-      host,
-    });
+    let nextModule: LoadedModule;
+    try {
+      nextModule = await loadFileModule({
+        filePath: resolvedPath,
+        modulePath: resolvedModulePath,
+        host,
+      });
+    } catch (error) {
+      moduleDiagnostics.push({
+        kind: "io-error",
+        message: formatErrorMessage(error),
+        requested: dependency.path,
+        importer,
+        span: dependency.span,
+      });
+      addMissingModule(importer, pathKey);
+      continue;
+    }
     addModuleTree(nextModule, modules, modulesByPath);
     enqueueDependencies(nextModule, pending);
     if (!modulesByPath.has(pathKey) && !hasNestedModule(pathKey)) {

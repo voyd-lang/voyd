@@ -83,12 +83,21 @@ export type CompileProgramOptions = LoadModulesOptions &
     skipSemantics?: boolean;
   };
 
-export type CompileProgramResult = {
+export type CompileProgramSuccessResult = {
+  success: true;
   graph: ModuleGraph;
   semantics?: Map<string, SemanticsPipelineResult>;
   wasm?: Uint8Array;
+};
+
+export type CompileProgramFailureResult = {
+  success: false;
   diagnostics: Diagnostic[];
 };
+
+export type CompileProgramResult =
+  | CompileProgramSuccessResult
+  | CompileProgramFailureResult;
 
 export const analyzeModules = ({
   graph,
@@ -99,13 +108,11 @@ export const analyzeModules = ({
   const semantics = new Map<string, SemanticsPipelineResult>();
   const exports = new Map<string, ModuleExportTable>();
   const diagnostics: Diagnostic[] = [];
-  let halted = false;
 
   const arena = createTypeArena();
   const effectInterner = createEffectInterner();
 
   order.forEach((id) => {
-    if (halted) return;
     const module = graph.modules.get(id);
     if (!module) {
       return;
@@ -124,8 +131,7 @@ export const analyzeModules = ({
       diagnostics.push(...result.diagnostics);
     } catch (error) {
       if (error instanceof DiagnosticError) {
-        diagnostics.push(error.diagnostic);
-        halted = true;
+        diagnostics.push(...error.diagnostics);
         return;
       }
       const fallback = diagnosticFromCode({
@@ -137,14 +143,11 @@ export const analyzeModules = ({
         span: { file: module.id, start: 0, end: 0 },
       });
       diagnostics.push(fallback);
-      halted = true;
       return;
     }
   });
 
-  if (!halted) {
-    diagnostics.push(...enforcePublicApiMethodEffectAnnotations({ semantics }));
-  }
+  diagnostics.push(...enforcePublicApiMethodEffectAnnotations({ semantics }));
 
   const tests = includeTests
     ? collectTests({ graph, semantics, scope: testScope ?? "all" })
@@ -503,14 +506,67 @@ export type LoadModuleGraphFn = (
   options: LoadModulesOptions
 ) => Promise<ModuleGraph>;
 
+const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
+  diagnostics.some((diagnostic) => diagnostic.severity === "error");
+
+const compileProgramFailure = (
+  diagnostics: readonly Diagnostic[]
+): CompileProgramFailureResult => ({
+  success: false,
+  diagnostics: [...diagnostics],
+});
+
+const compileProgramSuccess = (
+  result: Omit<CompileProgramSuccessResult, "success">
+): CompileProgramSuccessResult => ({
+  success: true,
+  ...result,
+});
+
+const diagnosticsFromUnexpectedError = ({
+  error,
+  moduleId,
+}: {
+  error: unknown;
+  moduleId: string;
+}): Diagnostic[] => {
+  if (error instanceof DiagnosticError) {
+    return [...error.diagnostics];
+  }
+
+  return [
+    diagnosticFromCode({
+      code: "TY9999",
+      params: {
+        kind: "unexpected-error",
+        message: error instanceof Error ? error.message : String(error),
+      },
+      span: { file: moduleId, start: 0, end: 0 },
+    }),
+  ];
+};
+
 export const compileProgramWithLoader = async (
   options: CompileProgramOptions,
   loadModuleGraph: LoadModuleGraphFn
 ): Promise<CompileProgramResult> => {
-  const graph = await loadModuleGraph(options);
+  let graph: ModuleGraph;
+  try {
+    graph = await loadModuleGraph(options);
+  } catch (error) {
+    return compileProgramFailure(
+      diagnosticsFromUnexpectedError({
+        error,
+        moduleId: options.entryPath,
+      }),
+    );
+  }
 
   if (options.skipSemantics) {
-    return { graph, diagnostics: [...graph.diagnostics] };
+    const diagnostics = [...graph.diagnostics];
+    return hasErrorDiagnostics(diagnostics)
+      ? compileProgramFailure(diagnostics)
+      : compileProgramSuccess({ graph });
   }
 
   const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
@@ -518,8 +574,8 @@ export const compileProgramWithLoader = async (
   });
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
 
-  if (diagnostics.some((diag) => diag.severity === "error")) {
-    return { graph, semantics, diagnostics };
+  if (hasErrorDiagnostics(diagnostics)) {
+    return compileProgramFailure(diagnostics);
   }
 
   const shouldLinkSemantics = options.linkSemantics !== false;
@@ -535,18 +591,22 @@ export const compileProgramWithLoader = async (
 
     diagnostics.push(...wasmResult.diagnostics);
 
-    if (diagnostics.some((diag) => diag.severity === "error")) {
-      return { graph, semantics, diagnostics };
+    if (hasErrorDiagnostics(diagnostics)) {
+      return compileProgramFailure(diagnostics);
     }
 
-    return { graph, semantics, wasm: wasmResult.wasm, diagnostics };
+    return compileProgramSuccess({
+      graph,
+      semantics,
+      wasm: wasmResult.wasm,
+    });
   } catch (error) {
-    diagnostics.push(
+    return compileProgramFailure([
+      ...diagnostics,
       codegenErrorToDiagnostic(error, {
         moduleId: options.entryModuleId ?? graph.entry,
-      })
-    );
-    return { graph, semantics, diagnostics };
+      }),
+    ]);
   }
 };
 
