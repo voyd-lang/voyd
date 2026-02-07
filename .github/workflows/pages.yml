@@ -25,6 +25,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/configure-pages@v5
+        id: pages
 
       - uses: actions/setup-node@v4
         with:
@@ -34,11 +35,13 @@ jobs:
       - run: npm ci --include=optional
 
       - name: Build
+        env:
+          GITHUB_PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
         run: npm run build
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: apps/site/build/client
+          path: apps/site/build/client${{ steps.pages.outputs.base_path }}
 
   deploy:
     needs: build

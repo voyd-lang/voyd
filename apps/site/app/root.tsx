@@ -1,5 +1,6 @@
 import {
   isRouteErrorResponse,
+  Link,
   Links,
   Meta,
   Outlet,
@@ -36,14 +37,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <body className="bg-background text-white max-w-screen">
         <header className="bg-gray-800 backdrop-blur-sm">
           <div className="max-w-5xl mx-auto flex items-center justify-between p-4">
-            <a href="/" className="flex items-center gap-2 font-bold text-xl">
+            <Link to="/" className="flex items-center gap-2 font-bold text-xl">
               <img src={logo} alt="Voyd logo" className="h-8 w-8" />
               <span>voyd</span>
-            </a>
+            </Link>
             <nav className="flex gap-4">
-              <a href="/docs" className="hover:underline text-[#58a6ff]">
+              <Link to="/docs" className="hover:underline text-[#58a6ff]">
                 Docs
-              </a>
+              </Link>
               <a
                 href="https://github.com/voyd-lang/voyd"
                 className="hover:underline text-[#58a6ff]"

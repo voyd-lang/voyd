@@ -25,7 +25,7 @@ Helpful commands:
 # Testing
 
 - `npm test` (runs vitest suite). Always confirm this passes before finishing.
-- `npm typecheck`.
+- `npm run typecheck`.
 - `npx vitest <path-to-test>`
 
 You should generally add unit tests (especially e2e ones)

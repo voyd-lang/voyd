@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import CodeBlock from "../components/CodeBlock";
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useHref, useSearchParams } from "react-router";
 
 export const prerender = true;
 
@@ -26,6 +26,7 @@ export default function Docs() {
   const navRef = useRef<HTMLDivElement>(null);
   const articleRef = useRef<HTMLDivElement>(null);
   const [searchParams, setSearchParams] = useSearchParams();
+  const docsPath = useHref("/docs");
 
   const requestedSlug = searchParams.get("p") ?? "";
   const doc = getReferenceDoc(requestedSlug) ?? getReferenceDoc("")!;
@@ -105,7 +106,9 @@ export default function Docs() {
             {referenceNav.map((p) => {
               const depth = p.slug ? p.slug.split("/").length - 1 : 0;
               const isActive = p.slug === doc.slug;
-              const href = p.slug ? `?p=${encodeURIComponent(p.slug)}` : "/docs";
+              const href = p.slug
+                ? `?p=${encodeURIComponent(p.slug)}`
+                : docsPath;
               return (
                 <a
                   key={p.slug || "index"}

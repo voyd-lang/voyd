@@ -7,7 +7,15 @@ import compression from "vite-plugin-compression";
 // Some environments import CJS default slightly differently. Normalize below.
 import tsconfigPaths from "vite-tsconfig-paths";
 
+const basePath = process.env.GITHUB_PAGES_BASE_PATH?.trim() || "/";
+const baseDir = basePath.replace(/^\/|\/$/g, "");
+const assetsDir = baseDir ? `${baseDir}/assets` : "assets";
+
 export default defineConfig({
+  base: "/",
+  build: {
+    assetsDir,
+  },
   plugins: [
     tailwindcss(),
     reactRouter(),
