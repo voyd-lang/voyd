@@ -499,13 +499,51 @@ export const buildProgramCodegenView = (
     Map<string, readonly TypeId[]>
   >();
 
-  const instantiationTypeArgsAreConcrete = (typeArgs: readonly TypeId[]): boolean =>
-    !typeArgs.some((typeArg) =>
-      typeContainsUnresolvedParam({
-        typeId: typeArg,
-        getTypeDesc: (id) => arena.get(id),
-      })
-    );
+  const typeContainsUnknownPrimitive = (typeId: TypeId, seen: Set<TypeId> = new Set()): boolean => {
+    if (seen.has(typeId)) {
+      return false;
+    }
+    seen.add(typeId);
+    const desc = arena.get(typeId);
+    switch (desc.kind) {
+      case "primitive":
+        return desc.name === "unknown";
+      case "recursive":
+        return typeContainsUnknownPrimitive(desc.body, seen);
+      case "trait":
+      case "nominal-object":
+        return desc.typeArgs.some((arg) => typeContainsUnknownPrimitive(arg, seen));
+      case "fixed-array":
+        return typeContainsUnknownPrimitive(desc.element, seen);
+      case "structural-object":
+        return desc.fields.some((field) => typeContainsUnknownPrimitive(field.type, seen));
+      case "function":
+        return (
+          desc.parameters.some((param) => typeContainsUnknownPrimitive(param.type, seen)) ||
+          typeContainsUnknownPrimitive(desc.returnType, seen)
+        );
+      case "union":
+        return desc.members.some((member) => typeContainsUnknownPrimitive(member, seen));
+      case "intersection":
+        return (
+          (typeof desc.nominal === "number" && typeContainsUnknownPrimitive(desc.nominal, seen)) ||
+          (typeof desc.structural === "number" &&
+            typeContainsUnknownPrimitive(desc.structural, seen))
+        );
+      default:
+        return false;
+    }
+  };
+
+  const instantiationTypeArgsAreConcrete = (typeArgs: readonly TypeId[]): boolean => {
+    if (typeArgs.length === 0) {
+      return true;
+    }
+    if (typeArgs.some((typeArg) => arena.get(typeArg).kind === "type-param-ref")) {
+      return false;
+    }
+    return !typeArgs.some((typeArg) => typeContainsUnknownPrimitive(typeArg));
+  };
 
   const recordInstantiation = (
     functionId: ProgramFunctionId,
@@ -887,22 +925,28 @@ export const buildProgramCodegenView = (
     recordInstantiation(functionId, parsed.typeArgs);
   };
 
-  stableModules.forEach((mod) => {
-    const instantiationSources = [
-      moduleTyping.get(mod.moduleId)?.functionInstantiationInfo,
-      mod.typing.functionInstantiationInfo,
-    ];
+	  stableModules.forEach((mod) => {
+	    const instantiationSources = [
+	      moduleTyping.get(mod.moduleId)?.functionInstantiationInfo,
+	      mod.typing.functionInstantiationInfo,
+	    ];
     instantiationSources.forEach((info) => {
       info?.forEach((instantiations, refKey) => {
         const parsed = parseSymbolRefKey(refKey);
-        if (!parsed || parsed.moduleId !== mod.moduleId) {
+        if (!parsed) {
           return;
         }
         const functionId = getProgramFunctionId(parsed);
         if (functionId === undefined) {
           return;
         }
+        const calleeModule = modulesById.get(parsed.moduleId);
+        const signature = calleeModule?.typing.functions.getSignature(parsed.symbol);
+        const expectedTypeParams = signature?.typeParams?.length ?? 0;
         instantiations.forEach((typeArgs) => {
+          if (typeArgs.length !== expectedTypeParams) {
+            return;
+          }
           recordInstantiation(functionId, typeArgs);
         });
       });
@@ -937,20 +981,30 @@ export const buildProgramCodegenView = (
       moduleTyping.get(mod.moduleId)?.callTargets,
       mod.typing.callTargets,
     ];
-    callTargetsSources.forEach((callTargets) => {
-      callTargets?.forEach((targets) => {
-        targets.forEach((_targetSymbol, instanceKey) => {
-          recordInstanceKey(mod.moduleId, instanceKey);
-        });
-      });
-    });
-  });
+	    callTargetsSources.forEach((callTargets) => {
+	      callTargets?.forEach((targets) => {
+	        targets.forEach((_targetSymbol, instanceKey) => {
+	          recordInstanceKey(mod.moduleId, instanceKey);
+	        });
+	      });
+	    });
+	  });
 
-  const getInstanceIdForFunctionAndArgs = (
-    functionId: ProgramFunctionId,
-    typeArgs: readonly TypeId[]
-  ): ProgramFunctionInstanceId | undefined =>
-    instanceIdsByFunctionId.get(functionId)?.get(typeArgs.join(","));
+	  (options?.instances ?? []).forEach((instance) => {
+	    const ref = symbols.refOf(instance.callee);
+	    const signature = modulesById.get(ref.moduleId)?.typing.functions.getSignature(ref.symbol);
+	    const expectedTypeParams = signature?.typeParams?.length ?? 0;
+	    if (expectedTypeParams !== instance.typeArgs.length) {
+	      return;
+	    }
+	    recordInstantiation(instance.callee, instance.typeArgs);
+	  });
+
+	  const getInstanceIdForFunctionAndArgs = (
+	    functionId: ProgramFunctionId,
+	    typeArgs: readonly TypeId[]
+	  ): ProgramFunctionInstanceId | undefined =>
+	    instanceIdsByFunctionId.get(functionId)?.get(typeArgs.join(","));
 
   const getProgramFunctionInstanceId = (
     ref: SymbolRef,

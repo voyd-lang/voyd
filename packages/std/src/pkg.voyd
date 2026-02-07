@@ -3,6 +3,7 @@ pub use string
 pub use box
 pub use memory
 pub use msgpack
+pub use msg_pack
 pub use std::optional::types::{ Optional, Option, Some, None }
 pub use std::optional::fns::{
   some,
@@ -22,3 +23,4 @@ pub use std::string::types::{ String }
 pub use std::string::fns::{ new_string }
 pub use std::box::{ Box }
 pub use std::test::assertions::{ Test, assert }
+pub use vx

@@ -53,7 +53,8 @@ export function callComponentFn(
 function resolveMemory(options: CallOptions) {
   if ("memory" in options && options.memory) return options.memory;
   if ("instance" in options && options.instance?.exports) {
-    const mem = (options.instance.exports as any)["main_memory"];
+    const exports = options.instance.exports as any;
+    const mem = exports["main_memory"] ?? exports["memory"];
     if (isMemory(mem)) return mem as WebAssembly.Memory;
   }
   return undefined;

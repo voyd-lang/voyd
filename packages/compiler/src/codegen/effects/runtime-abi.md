@@ -5,4 +5,4 @@
 - `$Continuation` (`voydContinuation`): `{ fn: funcref /*(env:anyref, resume:eqref) -> ref null $Outcome*/, env: anyref, site: i32 }`.
 - `$TailGuard` (`voydTailGuard`): `{ expected: i32, observed: i32 }`. Tail handlers allocate with `expected=1`; runtime increments/validates.
 - Helpers in `runtime-abi.ts` construct and read these structs; pure values and multi-value returns remain boxed per existing tuple boxing helpers and flow through `$Outcome.payload` when `tag=0`.
-- Semantics reference: `docs/effects-backend.md` and `apps/reference/types/effects.md` (resume ≤1, tail =1, handler result vs continuation result).
+- Semantics reference: `docs/effects-backend.md` and `packages/reference/types/effects.md` (resume ≤1, tail =1, handler result vs continuation result).

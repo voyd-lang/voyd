@@ -13,6 +13,7 @@ import {
 } from "@voyd/sdk/compiler";
 import type { Diagnostic, HirGraph } from "@voyd/sdk/compiler";
 import { formatCliDiagnostic } from "./diagnostics.js";
+import { printJson, printValue } from "./output.js";
 import { runTests } from "./test-runner.js";
 
 export const exec = () => main().catch(errorHandler);
@@ -32,15 +33,15 @@ async function main() {
   const entryPath = resolveEntryPath(config.index);
 
   if (config.emitParserAst) {
-    return emit(await getParserAst(entryPath));
+    return printJson(await getParserAst(entryPath));
   }
 
   if (config.emitCoreAst) {
-    return emit(await getCoreAst(entryPath));
+    return printJson(await getCoreAst(entryPath));
   }
 
   if (config.emitIrAst) {
-    return emit(await getIrAST(entryPath));
+    return printJson(await getIrAST(entryPath));
   }
 
   if (config.emitWasmText) {
@@ -159,11 +160,7 @@ async function emitWasm(entryPath: string, optimize = false) {
 async function runWasm(entryPath: string, optimize = false) {
   const { wasm } = await sdk.compile({ entryPath, optimize });
   const result = await sdk.run({ wasm, entryName: "main" });
-  console.log(result);
-}
-
-function emit(json: any) {
-  console.log(JSON.stringify(json, undefined, 2));
+  printValue(result);
 }
 
 function errorHandler(error: unknown) {

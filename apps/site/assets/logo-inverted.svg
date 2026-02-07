@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="300mm"
+   height="300mm"
+   viewBox="0 0 300 300"
+   version="1.1"
+   id="svg5"
+   sodipodi:docname="logo-inverted.svg"
+   inkscape:version="1.2.2 (b0a84865, 2022-12-01)"
+   inkscape:export-filename="logo.png"
+   inkscape:export-xdpi="96"
+   inkscape:export-ydpi="96"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview7"
+     pagecolor="#505050"
+     bordercolor="#ffffff"
+     borderopacity="1"
+     inkscape:showpageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="1"
+     inkscape:deskcolor="#505050"
+     inkscape:document-units="mm"
+     showgrid="false"
+     inkscape:zoom="0.59476163"
+     inkscape:cx="419.49579"
+     inkscape:cy="622.09796"
+     inkscape:window-width="1440"
+     inkscape:window-height="900"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="layer1"
+     inkscape:lockguides="true" />
+  <defs
+     id="defs2">
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect54751"
+       is_visible="true"
+       lpeversion="1"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false" />
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect44941"
+       is_visible="true"
+       lpeversion="1"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false" />
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect1117"
+       is_visible="true"
+       lpeversion="1"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false" />
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect1113"
+       is_visible="true"
+       lpeversion="1"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false" />
+    <inkscape:path-effect
+       effect="bspline"
+       id="path-effect54751-1"
+       is_visible="true"
+       lpeversion="1"
+       weight="33.333333"
+       steps="2"
+       helper_size="0"
+       apply_no_weight="true"
+       apply_with_weight="true"
+       only_selected="false" />
+    <filter
+       style="color-interpolation-filters:sRGB;"
+       inkscape:label="Clean Edges"
+       id="filter54878"
+       x="-0.020963074"
+       y="-0.051951041"
+       width="1.0419261"
+       height="1.1039021">
+      <feGaussianBlur
+         stdDeviation="2.0369636"
+         result="blur"
+         id="feGaussianBlur54872" />
+      <feComposite
+         in="SourceGraphic"
+         in2="blur"
+         operator="in"
+         result="composite1"
+         id="feComposite54874" />
+      <feComposite
+         in="composite1"
+         in2="composite1"
+         k2="1"
+         operator="in"
+         result="composite2"
+         id="feComposite54876" />
+    </filter>
+    <filter
+       style="color-interpolation-filters:sRGB;"
+       inkscape:label="Clean Edges"
+       id="filter54886"
+       x="-0.048711968"
+       y="-0.084929732"
+       width="1.0974239"
+       height="1.1698595">
+      <feGaussianBlur
+         stdDeviation="2.0296674"
+         result="blur"
+         id="feGaussianBlur54880" />
+      <feComposite
+         in="SourceGraphic"
+         in2="blur"
+         operator="in"
+         result="composite1"
+         id="feComposite54882" />
+      <feComposite
+         in="composite1"
+         in2="composite1"
+         k2="1"
+         operator="in"
+         result="composite2"
+         id="feComposite54884" />
+    </filter>
+    <filter
+       style="color-interpolation-filters:sRGB;"
+       inkscape:label="Clean Edges"
+       id="filter54894"
+       x="-0.048887129"
+       y="-0.048887129"
+       width="1.0977743"
+       height="1.0977743">
+      <feGaussianBlur
+         stdDeviation="2.0369636"
+         result="blur"
+         id="feGaussianBlur54888" />
+      <feComposite
+         in="SourceGraphic"
+         in2="blur"
+         operator="in"
+         result="composite1"
+         id="feComposite54890" />
+      <feComposite
+         in="composite1"
+         in2="composite1"
+         k2="1"
+         operator="in"
+         result="composite2"
+         id="feComposite54892" />
+    </filter>
+    <filter
+       style="color-interpolation-filters:sRGB;"
+       inkscape:label="Clean Edges"
+       id="filter54902"
+       x="-0.037605484"
+       y="-0.075210967"
+       width="1.075211"
+       height="1.1504219">
+      <feGaussianBlur
+         stdDeviation="2.0369636"
+         result="blur"
+         id="feGaussianBlur54896" />
+      <feComposite
+         in="SourceGraphic"
+         in2="blur"
+         operator="in"
+         result="composite1"
+         id="feComposite54898" />
+      <feComposite
+         in="composite1"
+         in2="composite1"
+         k2="1"
+         operator="in"
+         result="composite2"
+         id="feComposite54900" />
+    </filter>
+  </defs>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <rect
+       style="opacity:1;fill:#e9f0fc;fill-opacity:1;stroke:none;stroke-width:2.5;stroke-dasharray:none;stroke-opacity:1"
+       id="rect57989"
+       width="250"
+       height="250"
+       x="25"
+       y="25"
+       ry="30.000002" />
+    <g
+       id="g57995"
+       transform="rotate(-25.431177,150,150.53952)">
+      <path
+         style="fill:#030a16;fill-opacity:1;stroke:none;stroke-width:2.88625;stroke-dasharray:none;stroke-opacity:1;filter:url(#filter54902)"
+         id="path54561-9"
+         sodipodi:type="arc"
+         sodipodi:cx="150"
+         sodipodi:cy="150"
+         sodipodi:rx="65"
+         sodipodi:ry="65"
+         sodipodi:start="0"
+         sodipodi:end="3.1415927"
+         sodipodi:arc-type="slice"
+         d="m 215,150 a 65,65 0 0 1 -32.5,56.29165 65,65 0 0 1 -65,0 A 65,65 0 0 1 85,150 h 65 z" />
+      <circle
+         style="display:inline;opacity:1;fill:#e9f0fc;fill-opacity:1;stroke:none;stroke-width:2.22019;stroke-dasharray:none;stroke-opacity:1;filter:url(#filter54894)"
+         id="path54561"
+         cx="150"
+         cy="150"
+         r="50" />
+      <path
+         id="path54561-9-6"
+         style="fill:#030a16;fill-opacity:1;stroke:none;stroke-width:2.58667;stroke-dasharray:none;stroke-opacity:1;filter:url(#filter54878)"
+         d="M 149.99974,86.079051 A 65,65 0 0 0 94.13906,117.99235 l -0.03772,-0.0351 c -0.14963,0.29882 -0.30066,0.59745 -0.45475,0.89555 a 65,65 0 0 0 -1.01699,1.77664 c -1.16277,1.78989 -2.82577,3.49897 -6.01876,4.96042 -1.75159,0.80171 -3.96451,1.52844 -6.36912,2.20141 a 116.60284,29.102367 0 0 0 -46.84468,23.28799 116.60284,29.102367 0 0 0 116.6027,29.1021 116.60284,29.102367 0 0 0 116.60322,-29.1021 116.60284,29.102367 0 0 0 -16.8367,-15.03371 c -0.96772,-0.47547 -2.08344,-0.92032 -3.24993,-1.35857 -3.73277,-1.40242 -7.98725,-2.73484 -14.19087,-4.21577 -0.7425,-0.17725 -1.5161,-0.35731 -2.30528,-0.5395 a 116.60284,29.102367 0 0 0 -2.85254,-0.65784 c -5.0685,-1.17207 -10.43943,-2.48108 -13.95729,-4.09122 -3.54991,-1.62482 -5.21085,-3.5556 -6.39289,-5.56349 a 65,65 0 0 0 -0.11421,-0.19895 c -0.35436,-0.61916 -0.66952,-1.24437 -0.98288,-1.87017 l -0.0574,0.0532 A 65,65 0 0 0 149.99974,86.079051 Z" />
+      <path
+         id="path54561-0-8"
+         style="fill:#e9f0fc;fill-opacity:1;stroke:none;stroke-width:2.22019;stroke-dasharray:none;stroke-opacity:1;filter:url(#filter54886)"
+         d="m 150.00015,100.0001 a 50,50 0 0 0 -50.00005,50.00005 50,7.3555946 0 0 0 50.00005,7.35562 50,7.3555946 0 0 0 50.00005,-7.35562 50,50 0 0 0 -50.00005,-50.00005 z" />
+    </g>
+  </g>
+</svg>

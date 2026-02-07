@@ -11,7 +11,6 @@ export default defineConfig({
     alias: {
       "@voyd/lib": resolve(packagesRoot, "lib/src/lib"),
       "@voyd/compiler": resolve(packagesRoot, "compiler/src"),
-      "@voyd/browser-compiler": resolve(packagesRoot, "browser-compiler/src"),
       "@voyd/sdk": resolve(packagesRoot, "sdk/src"),
       "@voyd/js-host": resolve(packagesRoot, "js-host/src"),
     },
@@ -40,7 +39,7 @@ export default defineConfig({
     },
     target: "esnext",
     sourcemap: true,
-    outDir: "packages/sdk/dist",
+    outDir: resolve(projectRoot, "packages/sdk/dist"),
     emptyOutDir: false,
   },
 });

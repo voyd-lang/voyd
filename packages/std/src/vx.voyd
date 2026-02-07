@@ -1,0 +1,40 @@
+use std::array::Array
+use std::map::Map
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::string::fns::all
+use std::string::types::all
+
+pub fn create_element({
+  name: String,
+  attributes?: Array<Array<MsgPack>>,
+  children: Array<MsgPack>
+}) -> MsgPack
+  var element = Map<MsgPack>::new()
+  element = element.set("name", name)
+  element = element.set("children", children)
+  if attributes is Some:
+    let attrs = attributes_to_map(attributes.value)
+    element = element.set("attributes", attrs)
+  element
+
+fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Map<MsgPack>
+  var acc = Map<MsgPack>::new()
+  var index = 0
+  while index < attributes.length() do:
+    match(attributes.get(index))
+      Some<Array<MsgPack>> { value: pair }:
+        match(pair.get(0))
+          Some<MsgPack> { value: key }:
+            match(pair.get(1))
+              Some<MsgPack> { value: value }:
+                acc = acc.set(msgpack::unpack_string(key), value)
+              None:
+                void
+          None:
+            void
+      None:
+        void
+    index = index + 1
+  acc

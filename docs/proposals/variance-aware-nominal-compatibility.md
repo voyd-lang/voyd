@@ -2,7 +2,7 @@
 
 Status: Proposed  
 Owner: Compiler Architecture Working Group  
-Scope: `packages/compiler/src/semantics/typing/*`, `packages/compiler/src/codegen/types.ts`, `packages/compiler/src/semantics/codegen-view/*`, `apps/reference/types/*`
+Scope: `packages/compiler/src/semantics/typing/*`, `packages/compiler/src/codegen/types.ts`, `packages/compiler/src/semantics/codegen-view/*`, `packages/reference/types/*`
 
 ## Goal
 
@@ -77,7 +77,7 @@ Add tests that demonstrate:
 
 ## Docs updates
 
-- **Reference:** update `apps/reference/types/objects.md` to document variance and remove the “covariance-only” gap note.
+- **Reference:** update `packages/reference/types/objects.md` to document variance and remove the “covariance-only” gap note.
 - **Proposal:** note in this document that the reference has been updated after implementation.
 
 ## Open Questions

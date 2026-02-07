@@ -1,0 +1,54 @@
+{
+  "name": "voyd.dev",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prebuild": "npm -w @voyd/reference run build",
+    "build": "react-router build",
+    "predev": "npm -w @voyd/reference run build",
+    "dev": "react-router dev",
+    "start": "react-router-serve ./build/server/index.js",
+    "preview": "npm run build && react-router-serve ./build/server/index.js",
+    "pretypecheck": "npm -w @voyd/reference run build",
+    "typecheck": "react-router typegen && tsc",
+    "test": "echo 'no tests for site'",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
+    "@react-router/node": "^7.7.1",
+    "@react-router/serve": "^7.7.1",
+    "@shikijs/monaco": "^3.12.2",
+    "@voyd/lib": "0.9.0",
+    "@voyd/reference": "0.9.0",
+    "@voyd/sdk": "0.9.0",
+    "binaryen": "^123.0.0",
+    "isbot": "^5.1.27",
+    "modern-monaco": "^0.1.8",
+    "monaco-editor-core": "^0.52.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "react-router": "^7.7.1",
+    "rehype-slug": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "shiki": "^3.12.2"
+  },
+  "devDependencies": {
+    "@react-router/dev": "^7.7.1",
+    "@tailwindcss/typography": "^0.5.16",
+    "@tailwindcss/vite": "^4.1.4",
+    "@types/node": "^20",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "tailwindcss": "^4.1.4",
+    "typescript": "^5.8.3",
+    "vite": "^7.1.4",
+    "vite-plugin-compression": "^0.5.1",
+    "vite-tsconfig-paths": "^5.1.4"
+  },
+  "optionalDependencies": {
+    "lightningcss-darwin-arm64": "1.30.2",
+    "lightningcss-linux-x64-gnu": "1.30.2"
+  }
+}
