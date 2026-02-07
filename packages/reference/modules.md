@@ -402,10 +402,10 @@ pub fn mul(a: Vec, b: Vec) -> Vec
 ### **utils/logger.voyd**
 
 ```voyd
+use super::vec::{ Vec, mul }
+
 pub fn log_vec()
   log Vec {}  // valid, Vec is imported from src::utils::vec
-
-use super::vec::{ Vec, mul }
 
 fn work()
   mul(Vec {}, Vec {})
