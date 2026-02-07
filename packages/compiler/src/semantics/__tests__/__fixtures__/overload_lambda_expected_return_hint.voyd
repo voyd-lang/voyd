@@ -1,0 +1,9 @@
+fn pick(mapper: fn(i32) -> i32) -> i32
+  mapper(1)
+
+fn pick(mapper: fn(bool) -> bool) -> bool
+  mapper(true)
+
+pub fn main() -> i32
+  let value: i32 = pick(x => x + 1)
+  value
