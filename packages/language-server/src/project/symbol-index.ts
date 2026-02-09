@@ -29,6 +29,7 @@ import {
   parseTypeAliasDecl,
 } from "@voyd/compiler/semantics/binding/parsing.js";
 import { collectVoydFiles, toFileUri } from "./files.js";
+import { scanExportsFromSource } from "./export-scan.js";
 import {
   LineIndex,
   locationRange,
@@ -43,8 +44,6 @@ type SymbolIndex = {
   exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
   moduleIdByFilePath: ReadonlyMap<string, string>;
 };
-
-type ExportKind = "value" | "type" | "trait" | "effect";
 
 const keyForSymbol = ({ moduleId, symbol }: SymbolRef): string => `${moduleId}::${symbol}`;
 
@@ -307,50 +306,20 @@ const collectNamedTypeReferences = (
   return results;
 };
 
-const exportRegexByKind: Record<ExportKind, RegExp> = {
-  value: /(?:^|\n)\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_']*)/g,
-  type: /(?:^|\n)\s*pub\s+(?:type|obj)\s+([A-Za-z_][A-Za-z0-9_]*)/g,
-  trait: /(?:^|\n)\s*pub\s+trait\s+([A-Za-z_][A-Za-z0-9_]*)/g,
-  effect: /(?:^|\n)\s*pub\s+eff\s+([A-Za-z_][A-Za-z0-9_]*)/g,
-};
-
-const scanExportsFromSource = (source: string): ExportCandidate[] => {
-  const exports: ExportCandidate[] = [];
-
-  (Object.entries(exportRegexByKind) as Array<[ExportKind, RegExp]>).forEach(
-    ([kind, regex]) => {
-      regex.lastIndex = 0;
-      let match = regex.exec(source);
-      while (match) {
-        const name = match[1];
-        if (name) {
-          exports.push({
-            moduleId: "",
-            symbol: -1,
-            name,
-            kind,
-          });
-        }
-        match = regex.exec(source);
-      }
-    },
-  );
-
-  return exports;
-};
-
 export const buildSymbolIndex = async ({
   graph,
   semantics,
   roots,
   sourceByFile,
   lineIndexByFile,
+  includeWorkspaceExports = true,
 }: {
   graph: ModuleGraph;
   semantics: ReadonlyMap<string, SemanticsPipelineResult>;
-  roots: ModuleRoots;
+  roots?: ModuleRoots;
   sourceByFile: ReadonlyMap<string, string>;
   lineIndexByFile: ReadonlyMap<string, LineIndex>;
+  includeWorkspaceExports?: boolean;
 }): Promise<SymbolIndex> => {
   const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined => {
     const module = semantics.get(ref.moduleId);
@@ -749,7 +718,7 @@ export const buildSymbolIndex = async ({
     });
   });
 
-  if (roots.src) {
+  if (includeWorkspaceExports && roots?.src) {
     const sourceFiles = await collectVoydFiles(path.resolve(roots.src));
     for (const filePath of sourceFiles) {
       const normalized = path.resolve(filePath);
@@ -770,7 +739,9 @@ export const buildSymbolIndex = async ({
         exportDedup.add(dedupeKey);
         const existing = exportsByName.get(exported.name) ?? [];
         existing.push({
-          ...exported,
+          symbol: -1,
+          name: exported.name,
+          kind: exported.kind,
           moduleId,
         });
         exportsByName.set(exported.name, existing);

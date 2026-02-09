@@ -8,7 +8,7 @@ import {
 } from "vscode-languageserver/lib/node/main.js";
 import { LineIndex } from "./text.js";
 import { toFilePath } from "./files.js";
-import type { ProjectAnalysis } from "./types.js";
+import type { AutoImportAnalysis } from "./types.js";
 
 const extractMissingSymbolName = (diagnostic: Diagnostic): string | undefined => {
   const match = /'([^']+)'/.exec(diagnostic.message);
@@ -35,7 +35,7 @@ const insertImportEdit = ({
   documentUri,
   importLine,
 }: {
-  analysis: ProjectAnalysis;
+  analysis: AutoImportAnalysis;
   documentUri: string;
   importLine: string;
 }): TextEdit | undefined => {
@@ -79,7 +79,7 @@ const importActionsForDiagnostic = ({
   documentUri,
   diagnostic,
 }: {
-  analysis: ProjectAnalysis;
+  analysis: AutoImportAnalysis;
   documentUri: string;
   diagnostic: Diagnostic;
 }): LspCodeAction[] => {
@@ -137,7 +137,7 @@ export const autoImportActions = ({
   documentUri,
   diagnostics,
 }: {
-  analysis: ProjectAnalysis;
+  analysis: AutoImportAnalysis;
   documentUri: string;
   diagnostics: readonly Diagnostic[];
 }): LspCodeAction[] =>

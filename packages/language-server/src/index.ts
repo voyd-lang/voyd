@@ -1,6 +1,8 @@
 export {
   analyzeProject,
+  analyzeProjectCore,
   autoImportActions,
+  buildProjectNavigationIndex,
   definitionsAtPosition,
   prepareRenameAtPosition,
   renameAtPosition,
@@ -8,5 +10,7 @@ export {
   resolveModuleRoots,
   toFileUri,
   type ProjectAnalysis,
+  type ProjectCoreAnalysis,
+  type ProjectNavigationIndex,
   type SymbolOccurrence,
 } from "./project.js";

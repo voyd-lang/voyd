@@ -6,14 +6,14 @@ import type {
   WorkspaceEdit,
 } from "vscode-languageserver/lib/node/main.js";
 import { isInRange } from "./text.js";
-import type { ProjectAnalysis, SymbolOccurrence } from "./types.js";
+import type { NavigationAnalysis, SymbolOccurrence } from "./types.js";
 
 const findSymbolAtPosition = ({
   analysis,
   uri,
   position,
 }: {
-  analysis: ProjectAnalysis;
+  analysis: NavigationAnalysis;
   uri: string;
   position: Position;
 }): SymbolOccurrence | undefined => {
@@ -30,7 +30,7 @@ export const definitionsAtPosition = ({
   uri,
   position,
 }: {
-  analysis: ProjectAnalysis;
+  analysis: NavigationAnalysis;
   uri: string;
   position: Position;
 }): Location[] => {
@@ -51,7 +51,7 @@ export const prepareRenameAtPosition = ({
   uri,
   position,
 }: {
-  analysis: ProjectAnalysis;
+  analysis: NavigationAnalysis;
   uri: string;
   position: Position;
 }): { range: Range; placeholder: string } | null => {
@@ -69,7 +69,7 @@ export const renameAtPosition = ({
   position,
   newName,
 }: {
-  analysis: ProjectAnalysis;
+  analysis: NavigationAnalysis;
   uri: string;
   position: Position;
   newName: string;

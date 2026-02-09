@@ -4,7 +4,6 @@ import { access, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { URI } from "vscode-uri";
 import { createFsModuleHost } from "@voyd/compiler/modules/fs-host.js";
-import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
 import { createNodePathAdapter } from "@voyd/compiler/modules/node-path-adapter.js";
 import type { ModuleHost, ModuleRoots } from "@voyd/compiler/modules/types.js";
 
@@ -104,24 +103,32 @@ export const resolveModuleRoots = (entryPath: string): ModuleRoots => {
 
 export const createOverlayModuleHost = ({
   openDocuments,
+  fallbackHost,
 }: {
   openDocuments: ReadonlyMap<string, string>;
+  fallbackHost?: ModuleHost;
 }): ModuleHost => {
-  const primary = createMemoryModuleHost({
-    files: Object.fromEntries(openDocuments.entries()),
-    pathAdapter: createNodePathAdapter(),
-  });
-  const fallback = createFsModuleHost();
+  const pathAdapter = createNodePathAdapter();
+  const fallback = fallbackHost ?? createFsModuleHost();
+  const resolvePath = (targetPath: string): string => pathAdapter.resolve(targetPath);
+  const openFilesInDir = (dirPath: string): string[] => {
+    const normalizedDir = resolvePath(dirPath);
+    const prefix = `${normalizedDir}${path.sep}`;
+    return Array.from(openDocuments.keys()).filter(
+      (filePath) =>
+        filePath.startsWith(prefix) &&
+        pathAdapter.dirname(filePath) === normalizedDir,
+    );
+  };
 
   return {
-    path: primary.path,
+    path: pathAdapter,
     readFile: async (filePath: string) =>
-      (await primary.fileExists(filePath))
-        ? primary.readFile(filePath)
-        : fallback.readFile(filePath),
+      openDocuments.get(resolvePath(filePath)) ?? fallback.readFile(filePath),
     readDir: async (dirPath: string) => {
+      const openEntries = openFilesInDir(dirPath);
       const [primaryDir, fallbackDir] = await Promise.all([
-        primary.isDirectory(dirPath),
+        Promise.resolve(openEntries.length > 0),
         fallback.isDirectory(dirPath),
       ]);
 
@@ -129,16 +136,14 @@ export const createOverlayModuleHost = ({
         return [];
       }
 
-      const [primaryEntries, fallbackEntries] = await Promise.all([
-        primaryDir ? primary.readDir(dirPath) : Promise.resolve([]),
-        fallbackDir ? fallback.readDir(dirPath) : Promise.resolve([]),
-      ]);
-
-      return dedupe([...primaryEntries, ...fallbackEntries]);
+      const fallbackEntries = await (fallbackDir
+        ? fallback.readDir(dirPath)
+        : Promise.resolve([]));
+      return dedupe([...openEntries, ...fallbackEntries]);
     },
     fileExists: async (filePath: string) =>
-      (await primary.fileExists(filePath)) || fallback.fileExists(filePath),
+      openDocuments.has(resolvePath(filePath)) || fallback.fileExists(filePath),
     isDirectory: async (dirPath: string) =>
-      (await primary.isDirectory(dirPath)) || fallback.isDirectory(dirPath),
+      openFilesInDir(dirPath).length > 0 || fallback.isDirectory(dirPath),
   };
 };
