@@ -1,0 +1,37 @@
+{
+  "name": "@voyd/language-server",
+  "version": "0.9.0",
+  "description": "Voyd language server",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "voyd-language-server": "./dist/server.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "development": "./src/server.ts",
+      "import": "./dist/server.js",
+      "default": "./dist/server.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config ../../vitest.config.ts src",
+    "test:w": "vitest --config ../../vitest.config.ts src",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@voyd/compiler": "0.9.0",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12",
+    "vscode-uri": "^3.0.8"
+  }
+}

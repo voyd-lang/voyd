@@ -15,14 +15,19 @@
   "engines": {
     "vscode": "^1.74.0"
   },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:voyd"
+  ],
   "scripts": {
     "build": "npm run package",
-    "typecheck": "echo 'no typecheck configured'",
+    "compile": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo 'no tests configured'",
     "lint": "echo 'no lint configured'",
     "clean": "rm -rf dist",
-    "publish:patch": "vsce publish patch --no-dependencies",
-    "package": "mkdir -p dist && vsce package --no-dependencies -o dist/voyd-vscode.vsix",
+    "publish:patch": "npm run compile && vsce publish patch",
+    "package": "npm run compile && mkdir -p dist && vsce package -o dist/voyd-vscode.vsix",
     "install:local": "npm run package && code --install-extension dist/voyd-vscode.vsix"
   },
   "categories": [
@@ -34,7 +39,8 @@
     "README.md",
     "language-configuration.json",
     "images/**",
-    "syntaxes/**"
+    "syntaxes/**",
+    "dist/**"
   ],
   "contributes": {
     "languages": [
@@ -82,7 +88,14 @@
       }
     ]
   },
+  "dependencies": {
+    "@voyd/language-server": "0.9.0",
+    "tsx": "^4.20.4",
+    "vscode-languageclient": "^8.1.0"
+  },
   "devDependencies": {
-    "@vscode/vsce": "^3.6.2"
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^3.6.2",
+    "typescript": "^5.6.2"
   }
 }
