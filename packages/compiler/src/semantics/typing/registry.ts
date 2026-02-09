@@ -7,6 +7,7 @@ import {
 import type { SymbolId, TypeId } from "../ids.js";
 import {
   BASE_OBJECT_NAME,
+  type TraitImplTemplate,
   type TypingContext,
   type TypingState,
 } from "./types.js";
@@ -488,14 +489,21 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       typeof implTarget === "number" &&
       typeof traitType === "number"
     ) {
-      ctx.traits.registerImplTemplate({
+      const template: TraitImplTemplate = {
         trait: traitType,
         traitSymbol,
         target: implTarget,
         typeParams,
         methods: methodMap,
         implSymbol: item.symbol,
+      };
+      assertNoOverlappingTraitImpl({
+        impl: item,
+        template,
+        ctx,
+        state,
       });
+      ctx.traits.registerImplTemplate(template);
       methodMap.forEach((implMethodSymbol, traitMethodSymbol) => {
         ctx.traitMethodImpls.set(implMethodSymbol, {
           traitSymbol,
@@ -531,6 +539,71 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       );
     });
   }
+};
+
+const assertNoOverlappingTraitImpl = ({
+  impl,
+  template,
+  ctx,
+  state,
+}: {
+  impl: HirImplDecl;
+  template: TraitImplTemplate;
+  ctx: TypingContext;
+  state: TypingState;
+}): void => {
+  const conflictingImpl = ctx.traits
+    .getImplTemplatesForTrait(template.traitSymbol)
+    .find((existing) =>
+      traitImplTemplatesOverlap({
+        left: existing,
+        right: template,
+        ctx,
+        state,
+      })
+    );
+  if (!conflictingImpl) {
+    return;
+  }
+
+  const traitName = getSymbolName(template.traitSymbol, ctx);
+  const targetName = typeExprKey(impl.target) ?? "impl target";
+  throw new Error(
+    `duplicate trait implementation for ${traitName} on ${targetName}`
+  );
+};
+
+const traitImplTemplatesOverlap = ({
+  left,
+  right,
+  ctx,
+  state,
+}: {
+  left: TraitImplTemplate;
+  right: TraitImplTemplate;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const allowUnknown = state.mode === "relaxed";
+  const targetMatch = ctx.arena.unify(left.target, right.target, {
+    location: ctx.hir.module.ast,
+    reason: "trait impl overlap check (target)",
+    variance: "invariant",
+    allowUnknown,
+  });
+  if (!targetMatch.ok) {
+    return false;
+  }
+
+  const leftTrait = ctx.arena.substitute(left.trait, targetMatch.substitution);
+  const rightTrait = ctx.arena.substitute(right.trait, targetMatch.substitution);
+  const traitMatch = ctx.arena.unify(leftTrait, rightTrait, {
+    location: ctx.hir.module.ast,
+    reason: "trait impl overlap check (trait)",
+    variance: "invariant",
+    allowUnknown,
+  });
+  return traitMatch.ok;
 };
 
 const validateImplTraitMethods = ({
