@@ -21,26 +21,19 @@
   ],
   "scripts": {
     "build": "npm run compile",
-    "compile": "tsc -p tsconfig.json",
+    "compile": "npm run clean && npm run bundle && npm run bundle:std",
+    "bundle": "vite build -c vite.extension.config.ts && vite build -c vite.server.config.ts",
+    "bundle:std": "node ./scripts/copy-std.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo 'no tests configured'",
     "lint": "echo 'no lint configured'",
     "clean": "rm -rf dist",
-    "publish:patch": "npm run compile && vsce publish patch",
-    "package": "npm run compile && mkdir -p dist && vsce package -o dist/voyd-vscode.vsix",
+    "publish:patch": "npm run compile && vsce publish patch --no-dependencies",
+    "package": "npm run compile && vsce package --no-dependencies -o dist/voyd-vscode.vsix",
     "install:local": "npm run package && code --install-extension dist/voyd-vscode.vsix"
   },
   "categories": [
     "Programming Languages"
-  ],
-  "files": [
-    "CHANGELOG.md",
-    "LICENSE.md",
-    "README.md",
-    "language-configuration.json",
-    "images/**",
-    "syntaxes/**",
-    "dist/**"
   ],
   "contributes": {
     "languages": [
@@ -88,14 +81,11 @@
       }
     ]
   },
-  "dependencies": {
-    "@voyd/language-server": "0.9.0",
-    "tsx": "^4.20.4",
-    "vscode-languageclient": "^8.1.0"
-  },
   "devDependencies": {
     "@types/vscode": "^1.74.0",
     "@vscode/vsce": "^3.6.2",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vite": "^7.1.4",
+    "vscode-languageclient": "^8.1.0"
   }
 }

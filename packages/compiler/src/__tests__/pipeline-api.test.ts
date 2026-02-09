@@ -120,6 +120,41 @@ pub fn broken_b() -> i32
     ).toBe(true);
   });
 
+  it("collects multiple undefined call diagnostics in the same function body", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub fn main() -> i32
+  hey(2)
+  hi(4)
+`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    const unknownFunctionDiagnostics = result.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "TY0006",
+    );
+    expect(unknownFunctionDiagnostics.length).toBeGreaterThanOrEqual(2);
+    expect(
+      unknownFunctionDiagnostics.some((diagnostic) =>
+        diagnostic.message.includes("function 'hey' is not defined"),
+      ),
+    ).toBe(true);
+    expect(
+      unknownFunctionDiagnostics.some((diagnostic) =>
+        diagnostic.message.includes("function 'hi' is not defined"),
+      ),
+    ).toBe(true);
+  });
+
   it("orders modules topologically for lowering", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");

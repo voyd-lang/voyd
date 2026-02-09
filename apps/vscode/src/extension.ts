@@ -10,44 +10,28 @@ import {
 let client: LanguageClient | undefined;
 
 const resolveServerEntry = (context: vscode.ExtensionContext): string =>
-  require.resolve("@voyd/language-server/src/server.ts", {
-    paths: [
-      context.extensionPath,
-      path.resolve(context.extensionPath, ".."),
-      path.resolve(context.extensionPath, "..", ".."),
-    ],
-  });
+  context.asAbsolutePath(path.join("dist", "server.js"));
 
-const resolveTsxLoader = (context: vscode.ExtensionContext): string =>
-  require.resolve("tsx", {
-    paths: [
-      context.extensionPath,
-      path.resolve(context.extensionPath, ".."),
-      path.resolve(context.extensionPath, "..", ".."),
-    ],
-  });
+const resolveStdRoot = (context: vscode.ExtensionContext): string =>
+  context.asAbsolutePath(path.join("dist", "std"));
 
 export const activate = (context: vscode.ExtensionContext): void => {
   const serverEntry = resolveServerEntry(context);
-  const tsxLoader = resolveTsxLoader(context);
+  const stdRoot = resolveStdRoot(context);
+  const env = { ...process.env, VOYD_STD_ROOT: stdRoot };
 
   const run: Executable = {
     command: process.execPath,
-    args: ["--conditions=development", "--import", tsxLoader, serverEntry, "--stdio"],
+    args: [serverEntry, "--stdio"],
+    options: { env },
   };
 
   const serverOptions: ServerOptions = {
     run,
     debug: {
       command: process.execPath,
-      args: [
-        "--inspect=6009",
-        "--conditions=development",
-        "--import",
-        tsxLoader,
-        serverEntry,
-        "--stdio",
-      ],
+      args: ["--inspect=6009", serverEntry, "--stdio"],
+      options: { env },
     },
   };
 

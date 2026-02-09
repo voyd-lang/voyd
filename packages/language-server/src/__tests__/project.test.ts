@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   analyzeProject,
@@ -31,6 +32,30 @@ const createProject = async (
 };
 
 describe("language server project analysis", () => {
+  it("uses VOYD_STD_ROOT when provided", () => {
+    const previousStdRoot = process.env.VOYD_STD_ROOT;
+    const stdRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "std",
+      "src",
+    );
+    process.env.VOYD_STD_ROOT = stdRoot;
+
+    try {
+      const roots = resolveModuleRoots(path.join(os.tmpdir(), "voyd-main.voyd"));
+      expect(roots.std).toBe(stdRoot);
+    } finally {
+      if (previousStdRoot === undefined) {
+        delete process.env.VOYD_STD_ROOT;
+      } else {
+        process.env.VOYD_STD_ROOT = previousStdRoot;
+      }
+    }
+  });
+
   it("resolves go-to-definition for imported functions", async () => {
     const project = await createProject({
       "src/main.voyd": `use src::util::helper\n\nfn main() -> i32\n  helper(1)\n`,
