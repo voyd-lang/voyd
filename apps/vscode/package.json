@@ -1,0 +1,88 @@
+{
+  "name": "voyd-vscode",
+  "private": true,
+  "displayName": "Voyd Language",
+  "description": "VSCode Support For The Voyd Programming Language",
+  "version": "0.0.28",
+  "icon": "images/logo.png",
+  "homepage": "https://voyd.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/voyd-lang/voyd.git",
+    "directory": "apps/vscode"
+  },
+  "publisher": "voyd-lang",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "scripts": {
+    "build": "npm run package",
+    "typecheck": "echo 'no typecheck configured'",
+    "test": "echo 'no tests configured'",
+    "lint": "echo 'no lint configured'",
+    "clean": "rm -rf dist",
+    "publish:patch": "vsce publish patch --no-dependencies",
+    "package": "mkdir -p dist && vsce package --no-dependencies -o dist/voyd-vscode.vsix",
+    "install:local": "npm run package && code --install-extension dist/voyd-vscode.vsix"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "files": [
+    "CHANGELOG.md",
+    "LICENSE.md",
+    "README.md",
+    "language-configuration.json",
+    "images/**",
+    "syntaxes/**"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "voyd",
+        "aliases": [
+          "Voyd",
+          "voyd",
+          "Voyd Lang",
+          "Voyd Language",
+          "Voyd Programming Language",
+          "voyd-lang",
+          "voydlanguage"
+        ],
+        "extensions": [
+          ".vd",
+          ".voyd"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/icons/voyd-icon.png",
+          "dark": "./images/icons/voyd-icon.png"
+        }
+      },
+      {
+        "id": "voyd-markdown-injection"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "voyd",
+        "scopeName": "source.voyd",
+        "path": "./syntaxes/voyd.tmLanguage.json"
+      },
+      {
+        "language": "voyd-markdown-injection",
+        "scopeName": "markdown.voyd.codeblock",
+        "path": "./syntaxes/voyd-markdown-injection.json",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.voyd": "voyd"
+        }
+      }
+    ]
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.2"
+  }
+}
