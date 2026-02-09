@@ -506,7 +506,6 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
         impl: item,
         template,
         ctx,
-        state,
       });
       methodMap.forEach((implMethodSymbol, traitMethodSymbol) => {
         ctx.traitMethodImpls.set(implMethodSymbol, {
@@ -549,12 +548,10 @@ const registerTraitImplTemplate = ({
   impl,
   template,
   ctx,
-  state,
 }: {
   impl: HirImplDecl;
   template: TraitImplTemplate;
   ctx: TypingContext;
-  state: TypingState;
 }): void => {
   const conflictingImpl = ctx.traits.registerImplTemplateChecked({
     template,
@@ -563,7 +560,6 @@ const registerTraitImplTemplate = ({
         left,
         right,
         ctx,
-        state,
       }),
   });
   if (!conflictingImpl) {
@@ -611,19 +607,16 @@ const traitImplTemplatesOverlap = ({
   left,
   right,
   ctx,
-  state,
 }: {
   left: TraitImplTemplate;
   right: TraitImplTemplate;
   ctx: TypingContext;
-  state: TypingState;
 }): boolean => {
-  const allowUnknown = state.mode === "relaxed";
   const targetMatch = ctx.arena.unify(left.target, right.target, {
     location: ctx.hir.module.ast,
     reason: "trait impl overlap check (target)",
     variance: "invariant",
-    allowUnknown,
+    allowUnknown: false,
   });
   if (!targetMatch.ok) {
     return false;
@@ -635,7 +628,7 @@ const traitImplTemplatesOverlap = ({
     location: ctx.hir.module.ast,
     reason: "trait impl overlap check (trait)",
     variance: "invariant",
-    allowUnknown,
+    allowUnknown: false,
   });
   return traitMatch.ok;
 };

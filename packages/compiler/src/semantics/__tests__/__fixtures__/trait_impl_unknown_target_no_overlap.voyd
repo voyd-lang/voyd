@@ -1,0 +1,18 @@
+trait Hashable
+  fn hash(self) -> i32
+
+obj Box<T> {
+  value: T
+}
+
+impl Hashable for Box
+  fn hash(self) -> i32
+    1
+
+impl Hashable for Box<i32>
+  fn hash(self) -> i32
+    2
+
+fn main() -> i32
+  let b = Box<i32> { value: 1 }
+  b.hash()
