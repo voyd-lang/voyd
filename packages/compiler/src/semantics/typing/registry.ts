@@ -497,13 +497,12 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
         methods: methodMap,
         implSymbol: item.symbol,
       };
-      assertNoOverlappingTraitImpl({
+      registerTraitImplTemplate({
         impl: item,
         template,
         ctx,
         state,
       });
-      ctx.traits.registerImplTemplate(template);
       methodMap.forEach((implMethodSymbol, traitMethodSymbol) => {
         ctx.traitMethodImpls.set(implMethodSymbol, {
           traitSymbol,
@@ -541,7 +540,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
   }
 };
 
-const assertNoOverlappingTraitImpl = ({
+const registerTraitImplTemplate = ({
   impl,
   template,
   ctx,
@@ -552,16 +551,16 @@ const assertNoOverlappingTraitImpl = ({
   ctx: TypingContext;
   state: TypingState;
 }): void => {
-  const conflictingImpl = ctx.traits
-    .getImplTemplatesForTrait(template.traitSymbol)
-    .find((existing) =>
+  const conflictingImpl = ctx.traits.registerImplTemplateChecked({
+    template,
+    conflictsWith: (left, right) =>
       traitImplTemplatesOverlap({
-        left: existing,
-        right: template,
+        left,
+        right,
         ctx,
         state,
-      })
-    );
+      }),
+  });
   if (!conflictingImpl) {
     return;
   }
