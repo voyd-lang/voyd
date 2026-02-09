@@ -1,20 +1,17 @@
 import { defineConfig } from "vite";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import tsconfigPaths from "vite-tsconfig-paths";
 
 const projectRoot = fileURLToPath(new URL(".", import.meta.url));
-const packagesRoot = resolve(projectRoot, "packages");
 
 // Build a browser-friendly ESM bundle that avoids Node-only paths.
 export default defineConfig({
-  resolve: {
-    alias: {
-      "@voyd/lib": resolve(packagesRoot, "lib/src/lib"),
-      "@voyd/compiler": resolve(packagesRoot, "compiler/src"),
-      "@voyd/sdk": resolve(packagesRoot, "sdk/src"),
-      "@voyd/js-host": resolve(packagesRoot, "js-host/src"),
-    },
-  },
+  plugins: [
+    tsconfigPaths({
+      projects: [resolve(projectRoot, "tsconfig.typecheck.base.json")],
+    }),
+  ],
   test: {
     reporters: ["dot"],
     silent: "passed-only",

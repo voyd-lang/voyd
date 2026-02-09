@@ -147,11 +147,6 @@ export const typeCallExpr = (
   };
 
   if (calleeExpr.exprKind === "overload-set") {
-    if (typeArguments && typeArguments.length > 0) {
-      throw new Error(
-        "type arguments are not supported with overload sets yet",
-      );
-    }
     const probeArgs = args;
     ctx.table.setExprType(calleeExpr.id, ctx.primitives.unknown);
     ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
@@ -162,6 +157,7 @@ export const typeCallExpr = (
       ctx,
       state,
       expectedReturnType,
+      typeArguments,
     );
     return finalizeCall({
       returnType: overloaded.returnType,
@@ -490,22 +486,17 @@ export const typeMethodCallExpr = (
     return finalizeCall({ returnType: ctx.primitives.unknown });
   }
 
-  const matches = resolution.candidates.filter(
-    ({ symbol, signature, receiverTypeOverride }) =>
-      matchesOverloadSignature(
-        symbol,
-        signature,
-        receiverTypeOverride
-          ? [
-              { ...probeArgs[0]!, type: receiverTypeOverride },
-              ...probeArgs.slice(1),
-            ]
-          : probeArgs,
-        ctx,
-        state,
-        typeArguments,
-      ),
-  );
+  const matches = findMatchingOverloadCandidates({
+    candidates: resolution.candidates,
+    args: probeArgs,
+    ctx,
+    state,
+    typeArguments,
+    argsForCandidate: ({ receiverTypeOverride }) =>
+      receiverTypeOverride
+        ? [{ ...probeArgs[0]!, type: receiverTypeOverride }, ...probeArgs.slice(1)]
+        : probeArgs,
+  });
   const traitDispatch =
     matches.length === 0
       ? (() => {
@@ -615,26 +606,23 @@ export const typeMethodCallExpr = (
     selected.receiverTypeOverride && probeArgs.length > 0
       ? [{ ...probeArgs[0]!, type: receiverType }, ...probeArgs.slice(1)]
       : probeArgs;
-  const seedSubstitution = new Map<TypeParamId, TypeId>(
-    getTraitMethodTypeBindings({
-      calleeSymbol: selected.symbol,
-      receiverType,
-      signature: selected.signature,
-      ctx,
-      state,
-    }) ?? [],
-  );
-  applyExplicitTypeArguments({
-    signature: selected.signature,
-    typeArguments,
-    calleeSymbol: selected.symbol,
-    ctx,
-  })?.forEach((value, key) => seedSubstitution.set(key, value));
   const hintSubstitution = buildCallArgumentHintSubstitution({
     signature: selected.signature,
     probeArgs: hintArgs,
     expectedReturnType,
-    seedSubstitution,
+    seedSubstitution: mergeExplicitTypeArgumentSubstitution({
+      signature: selected.signature,
+      typeArguments,
+      calleeSymbol: selected.symbol,
+      seedSubstitution: getTraitMethodTypeBindings({
+        calleeSymbol: selected.symbol,
+        receiverType,
+        signature: selected.signature,
+        ctx,
+        state,
+      }),
+      ctx,
+    }),
     ctx,
     state,
   });
@@ -758,6 +746,69 @@ const applyExplicitTypeArguments = ({
   });
   return substitution.size > 0 ? substitution : undefined;
 };
+
+const mergeExplicitTypeArgumentSubstitution = ({
+  signature,
+  typeArguments,
+  calleeSymbol,
+  seedSubstitution,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  typeArguments: readonly TypeId[] | undefined;
+  calleeSymbol: SymbolId;
+  seedSubstitution?: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+}): ReadonlyMap<TypeParamId, TypeId> | undefined => {
+  const explicitSubstitution =
+    signature.typeParams && signature.typeParams.length > 0
+      ? applyExplicitTypeArguments({
+          signature,
+          typeArguments,
+          calleeSymbol,
+          ctx,
+        })
+      : undefined;
+
+  if (!seedSubstitution || seedSubstitution.size === 0) {
+    return explicitSubstitution;
+  }
+  if (!explicitSubstitution || explicitSubstitution.size === 0) {
+    return seedSubstitution;
+  }
+
+  const merged = new Map<TypeParamId, TypeId>(seedSubstitution);
+  explicitSubstitution.forEach((value, key) => merged.set(key, value));
+  return merged;
+};
+
+const findMatchingOverloadCandidates = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  candidates,
+  args,
+  ctx,
+  state,
+  typeArguments,
+  argsForCandidate,
+}: {
+  candidates: readonly T[];
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+}): T[] =>
+  candidates.filter((candidate) =>
+    matchesOverloadSignature(
+      candidate.symbol,
+      candidate.signature,
+      argsForCandidate ? argsForCandidate(candidate) : args,
+      ctx,
+      state,
+      typeArguments,
+    ),
+  );
 
 const expectedCalleeType = (args: readonly Arg[], ctx: TypingContext): TypeId =>
   ctx.arena.internFunction({
@@ -1635,16 +1686,13 @@ const typeOperatorOverloadCall = ({
     return undefined;
   }
 
-  const matches = resolution.candidates.filter(({ symbol, signature }) =>
-    matchesOverloadSignature(
-      symbol,
-      signature,
-      args,
-      ctx,
-      state,
-      typeArguments,
-    ),
-  );
+  const matches = findMatchingOverloadCandidates({
+    candidates: resolution.candidates,
+    args,
+    ctx,
+    state,
+    typeArguments,
+  });
   const traitDispatch =
     matches.length === 0
       ? resolveTraitDispatchOverload({
@@ -2531,6 +2579,7 @@ const typeOverloadedCall = (
   ctx: TypingContext,
   state: TypingState,
   expectedReturnType?: TypeId,
+  typeArguments?: readonly TypeId[],
 ): { returnType: TypeId; effectRow: number } => {
   const options = ctx.overloads.get(callee.set);
   if (!options) {
@@ -2551,12 +2600,16 @@ const typeOverloadedCall = (
     }
     return { symbol, signature };
   });
-  const matches = candidates.filter(({ symbol, signature }) =>
-    matchesOverloadSignature(symbol, signature, probeArgs, ctx, state),
-  );
+  const matches = findMatchingOverloadCandidates({
+    candidates,
+    args: probeArgs,
+    ctx,
+    state,
+    typeArguments,
+  });
 
   const traitDispatch =
-    matches.length === 0
+    matches.length === 0 && (!typeArguments || typeArguments.length === 0)
       ? resolveTraitDispatchOverload({
           candidates,
           args: probeArgs,
@@ -2587,6 +2640,12 @@ const typeOverloadedCall = (
 
     selected = matches[0];
   }
+  if (!selected) {
+    return {
+      returnType: ctx.primitives.unknown,
+      effectRow: ctx.effects.emptyRow,
+    };
+  }
   const instanceKey = state.currentFunction?.instanceKey;
   if (!instanceKey) {
     throw new Error(
@@ -2614,6 +2673,12 @@ const typeOverloadedCall = (
     signature: selected.signature,
     probeArgs,
     expectedReturnType,
+    seedSubstitution: mergeExplicitTypeArgumentSubstitution({
+      signature: selected.signature,
+      typeArguments,
+      calleeSymbol: selected.symbol,
+      ctx,
+    }),
     ctx,
     state,
   });
@@ -2630,7 +2695,7 @@ const typeOverloadedCall = (
     args,
     signature: selected.signature,
     calleeSymbol: selected.symbol,
-    typeArguments: undefined,
+    typeArguments,
     expectedReturnType,
     callId: call.id,
     ctx,
@@ -2774,6 +2839,10 @@ const matchesOverloadSignature = (
   state: TypingState,
   typeArguments?: readonly TypeId[],
 ): boolean => {
+  const typeParamCount = signature.typeParams?.length ?? 0;
+  if (typeArguments && typeArguments.length > typeParamCount) {
+    return false;
+  }
   const explicitSubstitution =
     signature.typeParams && signature.typeParams.length > 0
       ? applyExplicitTypeArguments({
