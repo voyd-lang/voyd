@@ -2640,6 +2640,12 @@ const typeOverloadedCall = (
 
     selected = matches[0];
   }
+  if (!selected) {
+    return {
+      returnType: ctx.primitives.unknown,
+      effectRow: ctx.effects.emptyRow,
+    };
+  }
   const instanceKey = state.currentFunction?.instanceKey;
   if (!instanceKey) {
     throw new Error(

@@ -5,6 +5,7 @@ import { semanticsPipeline } from "../../pipeline.js";
 import type { HirCallExpr, HirExpression } from "../../hir/index.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
 import type { SymbolTable } from "../../binder/index.js";
+import { DiagnosticError } from "../../../diagnostics/index.js";
 
 const effectOps = (
   row: number,
@@ -161,6 +162,29 @@ fn from_target(): () -> i32
       : undefined;
     expect(typeArgs).toEqual([i32]);
     expect(typing.table.getExprType(call.id)).toBe(i32);
+  });
+
+  it("diagnoses no-overload for explicit type args with mismatched argument types", () => {
+    const ast = parse(
+      `
+eff Gen<T>
+  fn pass(resume, value: T) -> T
+  fn pass(resume) -> T
+
+fn bad()
+  Gen<i32>::pass(true)
+`,
+      "effects.voyd"
+    );
+
+    let caught: DiagnosticError | undefined;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error as DiagnosticError;
+    }
+
+    expect(caught?.diagnostic.code).toBe("TY0008");
   });
 
   it("diagnoses mismatched annotations", () => {
