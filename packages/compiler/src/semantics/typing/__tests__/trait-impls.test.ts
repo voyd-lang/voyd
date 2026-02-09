@@ -40,6 +40,40 @@ describe("trait implementations", () => {
     );
   });
 
+  it("errors when a trait is implemented twice for the same target", () => {
+    const ast = loadAst("trait_impl_duplicate_direct.voyd");
+    expect(() => semanticsPipeline(ast)).toThrowError(
+      /duplicate trait implementation|already defines overload/i
+    );
+  });
+
+  it("errors when blanket and concrete trait impls overlap", () => {
+    const ast = loadAst("trait_impl_duplicate_blanket_overlap.voyd");
+    expect(() => semanticsPipeline(ast)).toThrowError(/TY0036/);
+  });
+
+  it("errors when equivalent generic trait impl templates are duplicated", () => {
+    const ast = loadAst("trait_impl_duplicate_generic_equivalent.voyd");
+    expect(() => semanticsPipeline(ast)).toThrowError(/TY0036/);
+  });
+
+  it("does not report duplicate trait impl when overlap depends on unknown targets", () => {
+    const ast = loadAst("trait_impl_unknown_target_no_overlap.voyd");
+    try {
+      semanticsPipeline(ast);
+      throw new Error("expected typing to fail");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `${error}`;
+      expect(message).not.toMatch(/TY0036/);
+      expect(message).toMatch(/TY0007|missing 1 type argument|unknown type/i);
+    }
+  });
+
+  it("allows multiple non-trait object extension impl blocks", () => {
+    const ast = loadAst("impl_object_extension_multiple_blocks.voyd");
+    expect(() => semanticsPipeline(ast)).not.toThrow();
+  });
+
   it("type-checks blanket impls over type parameters", () => {
     const ast = loadAst("blanket_scalable.voyd");
     const semantics = semanticsPipeline(ast);

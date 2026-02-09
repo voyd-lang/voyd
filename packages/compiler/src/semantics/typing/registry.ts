@@ -7,6 +7,7 @@ import {
 import type { SymbolId, TypeId } from "../ids.js";
 import {
   BASE_OBJECT_NAME,
+  type TraitImplTemplate,
   type TypingContext,
   type TypingState,
 } from "./types.js";
@@ -22,6 +23,11 @@ import {
   effectOpName,
   resolveEffectAnnotation,
 } from "./effects.js";
+import {
+  diagnosticFromCode,
+  emitDiagnostic,
+  normalizeSpan,
+} from "../../diagnostics/index.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
@@ -488,13 +494,18 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       typeof implTarget === "number" &&
       typeof traitType === "number"
     ) {
-      ctx.traits.registerImplTemplate({
+      const template: TraitImplTemplate = {
         trait: traitType,
         traitSymbol,
         target: implTarget,
         typeParams,
         methods: methodMap,
         implSymbol: item.symbol,
+      };
+      registerTraitImplTemplate({
+        impl: item,
+        template,
+        ctx,
       });
       methodMap.forEach((implMethodSymbol, traitMethodSymbol) => {
         ctx.traitMethodImpls.set(implMethodSymbol, {
@@ -531,6 +542,95 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       );
     });
   }
+};
+
+const registerTraitImplTemplate = ({
+  impl,
+  template,
+  ctx,
+}: {
+  impl: HirImplDecl;
+  template: TraitImplTemplate;
+  ctx: TypingContext;
+}): void => {
+  const conflictingImpl = ctx.traits.registerImplTemplateChecked({
+    template,
+    conflictsWith: (left, right) =>
+      traitImplTemplatesOverlap({
+        left,
+        right,
+        ctx,
+      }),
+  });
+  if (!conflictingImpl) {
+    return;
+  }
+
+  const traitName = getSymbolName(template.traitSymbol, ctx);
+  const targetName = typeExprKey(impl.target) ?? "impl target";
+  const previousImpl = findImplBySymbol(conflictingImpl.implSymbol, ctx);
+  emitDiagnostic({
+    code: "TY0036",
+    ctx,
+    span: normalizeSpan(impl.span, impl.target.span),
+    params: {
+      kind: "duplicate-trait-implementation",
+      traitName,
+      targetName,
+    },
+    related: previousImpl
+      ? [
+          diagnosticFromCode({
+            code: "TY0036",
+            span: normalizeSpan(previousImpl.span, previousImpl.target.span),
+            severity: "note",
+            params: {
+              kind: "previous-trait-implementation",
+              traitName,
+              targetName,
+            },
+          }),
+        ]
+      : undefined,
+  });
+};
+
+const findImplBySymbol = (
+  symbol: SymbolId,
+  ctx: TypingContext
+): HirImplDecl | undefined =>
+  Array.from(ctx.hir.items.values()).find(
+    (item): item is HirImplDecl => item.kind === "impl" && item.symbol === symbol
+  );
+
+const traitImplTemplatesOverlap = ({
+  left,
+  right,
+  ctx,
+}: {
+  left: TraitImplTemplate;
+  right: TraitImplTemplate;
+  ctx: TypingContext;
+}): boolean => {
+  const targetMatch = ctx.arena.unify(left.target, right.target, {
+    location: ctx.hir.module.ast,
+    reason: "trait impl overlap check (target)",
+    variance: "invariant",
+    allowUnknown: false,
+  });
+  if (!targetMatch.ok) {
+    return false;
+  }
+
+  const leftTrait = ctx.arena.substitute(left.trait, targetMatch.substitution);
+  const rightTrait = ctx.arena.substitute(right.trait, targetMatch.substitution);
+  const traitMatch = ctx.arena.unify(leftTrait, rightTrait, {
+    location: ctx.hir.module.ast,
+    reason: "trait impl overlap check (trait)",
+    variance: "invariant",
+    allowUnknown: false,
+  });
+  return traitMatch.ok;
 };
 
 const validateImplTraitMethods = ({

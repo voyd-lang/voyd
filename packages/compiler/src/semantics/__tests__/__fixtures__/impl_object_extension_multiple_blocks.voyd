@@ -1,0 +1,15 @@
+obj Counter {
+  value: i32
+}
+
+impl Counter
+  fn inc(self) -> Counter
+    Counter { value: self.value + 1 }
+
+impl Counter
+  fn dec(self) -> Counter
+    Counter { value: self.value - 1 }
+
+fn main() -> i32
+  let c = Counter { value: 5 }
+  c.inc().dec().value
