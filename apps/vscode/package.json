@@ -20,7 +20,7 @@
     "onLanguage:voyd"
   ],
   "scripts": {
-    "build": "npm run package",
+    "build": "npm run compile",
     "compile": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo 'no tests configured'",
