@@ -366,6 +366,7 @@ export class TraitStore {
   #decls = new Map<SymbolId, HirTraitDecl>();
   #byName = new Map<string, SymbolId>();
   #implTemplates: TraitImplTemplate[] = [];
+  #implTemplatesByTrait = new Map<SymbolId, TraitImplTemplate[]>();
 
   registerDecl(decl: HirTraitDecl): void {
     this.#decls.set(decl.symbol, decl);
@@ -389,6 +390,29 @@ export class TraitStore {
 
   registerImplTemplate(template: TraitImplTemplate): void {
     this.#implTemplates.push(template);
+    const bucket = this.#implTemplatesByTrait.get(template.traitSymbol) ?? [];
+    bucket.push(template);
+    this.#implTemplatesByTrait.set(template.traitSymbol, bucket);
+  }
+
+  registerImplTemplateChecked({
+    template,
+    conflictsWith,
+  }: {
+    template: TraitImplTemplate;
+    conflictsWith: (
+      existing: TraitImplTemplate,
+      candidate: TraitImplTemplate
+    ) => boolean;
+  }): TraitImplTemplate | undefined {
+    const conflict = this.getImplTemplatesForTrait(template.traitSymbol).find(
+      (existing) => conflictsWith(existing, template)
+    );
+    if (conflict) {
+      return conflict;
+    }
+    this.registerImplTemplate(template);
+    return undefined;
   }
 
   getImplTemplates(): readonly TraitImplTemplate[] {
@@ -396,7 +420,7 @@ export class TraitStore {
   }
 
   getImplTemplatesForTrait(symbol: SymbolId): readonly TraitImplTemplate[] {
-    return this.#implTemplates.filter((template) => template.traitSymbol === symbol);
+    return this.#implTemplatesByTrait.get(symbol) ?? [];
   }
 }
 

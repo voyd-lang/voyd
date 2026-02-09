@@ -168,6 +168,17 @@ type DiagnosticParamsMap = {
     maxCalls: number;
     escapes: boolean;
   };
+  TY0036:
+    | {
+        kind: "duplicate-trait-implementation";
+        traitName: string;
+        targetName: string;
+      }
+    | {
+        kind: "previous-trait-implementation";
+        traitName: string;
+        targetName: string;
+      };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -622,6 +633,15 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0035"]>,
+  TY0036: {
+    code: "TY0036",
+    message: (params) =>
+      params.kind === "duplicate-trait-implementation"
+        ? `duplicate trait implementation: '${params.traitName}' is already implemented for '${params.targetName}'`
+        : `previous implementation of trait '${params.traitName}' for '${params.targetName}' declared here`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0036"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
