@@ -127,6 +127,42 @@ fn from_member(): () -> i32
     });
   });
 
+  it("types explicit effect operation type args for overloaded operations", () => {
+    const ast = parse(
+      `
+eff Gen<T>
+  fn pass(resume, value: T) -> T
+  fn pass(resume) -> T
+
+fn from_target(): () -> i32
+  try
+    Gen<i32>::pass(1)
+  Gen::pass(resume, value: i32):
+    resume(value)
+  Gen::pass(resume):
+    resume(0)
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const passCalls = findCallsByCallee(hir, "pass", symbolTable).filter(
+      (expr) => expr.args.length === 1
+    );
+    expect(passCalls).toHaveLength(1);
+    const call = passCalls[0]!;
+
+    const i32 = typing.arena.internPrimitive("i32");
+    const typeArgsByInstance = typing.callTypeArguments.get(call.id);
+    const typeArgs = typeArgsByInstance
+      ? Array.from(typeArgsByInstance.values())[0]
+      : undefined;
+    expect(typeArgs).toEqual([i32]);
+    expect(typing.table.getExprType(call.id)).toBe(i32);
+  });
+
   it("diagnoses mismatched annotations", () => {
     const ast = parse(
       `

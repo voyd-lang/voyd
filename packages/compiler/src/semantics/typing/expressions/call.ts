@@ -147,11 +147,6 @@ export const typeCallExpr = (
   };
 
   if (calleeExpr.exprKind === "overload-set") {
-    if (typeArguments && typeArguments.length > 0) {
-      throw new Error(
-        "type arguments are not supported with overload sets yet",
-      );
-    }
     const probeArgs = args;
     ctx.table.setExprType(calleeExpr.id, ctx.primitives.unknown);
     ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
@@ -162,6 +157,7 @@ export const typeCallExpr = (
       ctx,
       state,
       expectedReturnType,
+      typeArguments,
     );
     return finalizeCall({
       returnType: overloaded.returnType,
@@ -2531,6 +2527,7 @@ const typeOverloadedCall = (
   ctx: TypingContext,
   state: TypingState,
   expectedReturnType?: TypeId,
+  typeArguments?: readonly TypeId[],
 ): { returnType: TypeId; effectRow: number } => {
   const options = ctx.overloads.get(callee.set);
   if (!options) {
@@ -2552,11 +2549,18 @@ const typeOverloadedCall = (
     return { symbol, signature };
   });
   const matches = candidates.filter(({ symbol, signature }) =>
-    matchesOverloadSignature(symbol, signature, probeArgs, ctx, state),
+    matchesOverloadSignature(
+      symbol,
+      signature,
+      probeArgs,
+      ctx,
+      state,
+      typeArguments,
+    ),
   );
 
   const traitDispatch =
-    matches.length === 0
+    matches.length === 0 && (!typeArguments || typeArguments.length === 0)
       ? resolveTraitDispatchOverload({
           candidates,
           args: probeArgs,
@@ -2614,6 +2618,15 @@ const typeOverloadedCall = (
     signature: selected.signature,
     probeArgs,
     expectedReturnType,
+    seedSubstitution:
+      selected.signature.typeParams && selected.signature.typeParams.length > 0
+        ? applyExplicitTypeArguments({
+            signature: selected.signature,
+            typeArguments,
+            calleeSymbol: selected.symbol,
+            ctx,
+          })
+        : undefined,
     ctx,
     state,
   });
@@ -2630,7 +2643,7 @@ const typeOverloadedCall = (
     args,
     signature: selected.signature,
     calleeSymbol: selected.symbol,
-    typeArguments: undefined,
+    typeArguments,
     expectedReturnType,
     callId: call.id,
     ctx,
@@ -2774,6 +2787,10 @@ const matchesOverloadSignature = (
   state: TypingState,
   typeArguments?: readonly TypeId[],
 ): boolean => {
+  const typeParamCount = signature.typeParams?.length ?? 0;
+  if (typeArguments && typeArguments.length > typeParamCount) {
+    return false;
+  }
   const explicitSubstitution =
     signature.typeParams && signature.typeParams.length > 0
       ? applyExplicitTypeArguments({
