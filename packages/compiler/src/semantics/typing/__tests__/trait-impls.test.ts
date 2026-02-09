@@ -49,16 +49,12 @@ describe("trait implementations", () => {
 
   it("errors when blanket and concrete trait impls overlap", () => {
     const ast = loadAst("trait_impl_duplicate_blanket_overlap.voyd");
-    expect(() => semanticsPipeline(ast)).toThrowError(
-      /duplicate trait implementation/i
-    );
+    expect(() => semanticsPipeline(ast)).toThrowError(/TY0036/);
   });
 
   it("errors when equivalent generic trait impl templates are duplicated", () => {
     const ast = loadAst("trait_impl_duplicate_generic_equivalent.voyd");
-    expect(() => semanticsPipeline(ast)).toThrowError(
-      /duplicate trait implementation/i
-    );
+    expect(() => semanticsPipeline(ast)).toThrowError(/TY0036/);
   });
 
   it("allows multiple non-trait object extension impl blocks", () => {

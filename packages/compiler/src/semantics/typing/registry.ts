@@ -23,6 +23,11 @@ import {
   effectOpName,
   resolveEffectAnnotation,
 } from "./effects.js";
+import {
+  diagnosticFromCode,
+  emitDiagnostic,
+  normalizeSpan,
+} from "../../diagnostics/index.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
@@ -567,10 +572,40 @@ const registerTraitImplTemplate = ({
 
   const traitName = getSymbolName(template.traitSymbol, ctx);
   const targetName = typeExprKey(impl.target) ?? "impl target";
-  throw new Error(
-    `duplicate trait implementation for ${traitName} on ${targetName}`
-  );
+  const previousImpl = findImplBySymbol(conflictingImpl.implSymbol, ctx);
+  emitDiagnostic({
+    code: "TY0036",
+    ctx,
+    span: normalizeSpan(impl.span, impl.target.span),
+    params: {
+      kind: "duplicate-trait-implementation",
+      traitName,
+      targetName,
+    },
+    related: previousImpl
+      ? [
+          diagnosticFromCode({
+            code: "TY0036",
+            span: normalizeSpan(previousImpl.span, previousImpl.target.span),
+            severity: "note",
+            params: {
+              kind: "previous-trait-implementation",
+              traitName,
+              targetName,
+            },
+          }),
+        ]
+      : undefined,
+  });
 };
+
+const findImplBySymbol = (
+  symbol: SymbolId,
+  ctx: TypingContext
+): HirImplDecl | undefined =>
+  Array.from(ctx.hir.items.values()).find(
+    (item): item is HirImplDecl => item.kind === "impl" && item.symbol === symbol
+  );
 
 const traitImplTemplatesOverlap = ({
   left,
