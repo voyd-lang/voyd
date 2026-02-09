@@ -1,0 +1,11 @@
+obj Num { value: i32 }
+
+impl Num
+  fn reduce(self, amount: bool) -> i32
+    self.value
+
+fn reduce(num: Num, amount: i32) -> i32
+  num.value + amount
+
+pub fn main() -> i32
+  Num { value: 2 }.reduce(3)

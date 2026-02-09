@@ -76,6 +76,7 @@ type MethodCallCandidate = {
 type MethodCallResolution = {
   candidates: MethodCallCandidate[];
   receiverName?: string;
+  includesMethodCandidates?: boolean;
 };
 
 export const typeCallExpr = (
@@ -486,22 +487,27 @@ export const typeMethodCallExpr = (
     return finalizeCall({ returnType: ctx.primitives.unknown });
   }
 
-  const matches = findMatchingOverloadCandidates({
-    candidates: resolution.candidates,
+  const argsForCandidate = ({
+    receiverTypeOverride,
+  }: MethodCallCandidate): readonly Arg[] =>
+    receiverTypeOverride
+      ? [{ ...probeArgs[0]!, type: receiverTypeOverride }, ...probeArgs.slice(1)]
+      : probeArgs;
+
+  let candidates = resolution.candidates;
+  let matches = findMatchingOverloadCandidates({
+    candidates,
     args: probeArgs,
     ctx,
     state,
     typeArguments,
-    argsForCandidate: ({ receiverTypeOverride }) =>
-      receiverTypeOverride
-        ? [{ ...probeArgs[0]!, type: receiverTypeOverride }, ...probeArgs.slice(1)]
-        : probeArgs,
+    argsForCandidate,
   });
-  const traitDispatch =
+  let traitDispatch =
     matches.length === 0
       ? (() => {
           const direct = resolveTraitDispatchOverload({
-            candidates: resolution.candidates,
+            candidates,
             args: probeArgs,
             ctx,
             state,
@@ -512,7 +518,7 @@ export const typeMethodCallExpr = (
 
           const overrides = Array.from(
             new Set(
-              resolution.candidates
+              candidates
                 .map((candidate) => candidate.receiverTypeOverride)
                 .filter((type): type is TypeId => typeof type === "number"),
             ),
@@ -520,7 +526,7 @@ export const typeMethodCallExpr = (
           return overrides
             .map((receiverTypeOverride) =>
               resolveTraitDispatchOverload({
-                candidates: resolution.candidates,
+                candidates,
                 args: [
                   { ...probeArgs[0]!, type: receiverTypeOverride },
                   ...probeArgs.slice(1),
@@ -533,6 +539,40 @@ export const typeMethodCallExpr = (
         })()
       : undefined;
   let selected = traitDispatch;
+
+  if (
+    !selected &&
+    matches.length === 0 &&
+    resolution.includesMethodCandidates === true &&
+    typeof expr.traitSymbol !== "number"
+  ) {
+    // Preserve method precedence, but allow UFCS-style free functions when
+    // same-named methods exist and none of them match the call shape.
+    const fallbackCandidates = resolveFreeFunctionCandidates({
+      methodName: expr.method,
+      ctx,
+    }).filter(
+      (fallback) =>
+        !candidates.some(
+          (candidate) =>
+            candidate.symbol === fallback.symbol &&
+            candidate.symbolRef.moduleId === fallback.symbolRef.moduleId,
+        ),
+    );
+
+    if (fallbackCandidates.length > 0) {
+      candidates = fallbackCandidates;
+      matches = findMatchingOverloadCandidates({
+        candidates,
+        args: probeArgs,
+        ctx,
+        state,
+        typeArguments,
+        argsForCandidate,
+      });
+      traitDispatch = undefined;
+    }
+  }
 
   if (!selected) {
     if (matches.length === 0) {
@@ -1490,11 +1530,15 @@ const resolveMethodCallCandidates = ({
       ctx,
     });
     if (traitResolution.candidates.length > 0) {
-      return traitResolution;
+      return {
+        ...traitResolution,
+        includesMethodCandidates: true,
+      };
     }
     return {
       candidates: resolveFreeFunctionCandidates({ methodName, ctx }),
       receiverName: traitResolution.receiverName,
+      includesMethodCandidates: false,
     };
   }
 
@@ -1529,7 +1573,11 @@ const resolveMethodCallCandidates = ({
         })
         .filter((entry): entry is string => Boolean(entry))
         .join(" & ");
-      return { candidates: traitCandidates, receiverName };
+      return {
+        candidates: traitCandidates,
+        receiverName,
+        includesMethodCandidates: true,
+      };
     }
   }
   const nominalResolution = resolveNominalMethodCandidates({
@@ -1538,11 +1586,15 @@ const resolveMethodCallCandidates = ({
     ctx,
   });
   if (nominalResolution && nominalResolution.candidates.length > 0) {
-    return nominalResolution;
+    return {
+      ...nominalResolution,
+      includesMethodCandidates: true,
+    };
   }
   return {
     candidates: resolveFreeFunctionCandidates({ methodName, ctx }),
     receiverName: nominalResolution?.receiverName,
+    includesMethodCandidates: false,
   };
 };
 
