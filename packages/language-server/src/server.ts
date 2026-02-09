@@ -69,24 +69,23 @@ class ServerState {
   }
 }
 
-const publishDiagnostics = async ({
+const publishDiagnosticsForOpenDocuments = async ({
   state,
   connection,
-  targetUri,
 }: {
   state: ServerState;
   connection: ReturnType<typeof createConnection>;
-  targetUri: string;
 }): Promise<void> => {
-  const analysis = await state.getAnalysisForUri(targetUri);
-
-  state.documents.all().forEach((document: TextDocument) => {
-    const diagnostics = analysis.diagnosticsByUri.get(document.uri) ?? [];
-    connection.sendDiagnostics({
-      uri: document.uri,
-      diagnostics,
-    });
-  });
+  await Promise.all(
+    state.documents.all().map(async (document: TextDocument) => {
+      const analysis = await state.getAnalysisForUri(document.uri);
+      const diagnostics = analysis.diagnosticsByUri.get(document.uri) ?? [];
+      connection.sendDiagnostics({
+        uri: document.uri,
+        diagnostics,
+      });
+    }),
+  );
 };
 
 const handleDefinition = async ({
@@ -169,25 +168,27 @@ export const startServer = ({
 
   state.documents.onDidOpen(async ({ document }: { document: TextDocument }) => {
     state.updateDocument(document);
-    await publishDiagnostics({
+    await publishDiagnosticsForOpenDocuments({
       state,
       connection,
-      targetUri: document.uri,
     });
   });
 
   state.documents.onDidChangeContent(async ({ document }: { document: TextDocument }) => {
     state.updateDocument(document);
-    await publishDiagnostics({
+    await publishDiagnosticsForOpenDocuments({
       state,
       connection,
-      targetUri: document.uri,
     });
   });
 
   state.documents.onDidClose(async ({ document }: { document: TextDocument }) => {
     state.removeDocument(document);
     connection.sendDiagnostics({ uri: document.uri, diagnostics: [] });
+    await publishDiagnosticsForOpenDocuments({
+      state,
+      connection,
+    });
   });
 
   connection.onDefinition(async (params: DefinitionParams) =>
