@@ -79,6 +79,11 @@ type MethodCallResolution = {
   includesMethodCandidates?: boolean;
 };
 
+type MethodCallSelection = {
+  selected?: MethodCallCandidate;
+  usedTraitDispatch: boolean;
+};
+
 export const typeCallExpr = (
   expr: HirCallExpr,
   ctx: TypingContext,
@@ -477,124 +482,15 @@ export const typeMethodCallExpr = (
           methodName: expr.method,
           ctx,
         });
-  if (!resolution || resolution.candidates.length === 0) {
-    reportUnknownMethod({
-      methodName: expr.method,
-      receiverName: resolution?.receiverName,
-      span: expr.span,
-      ctx,
-    });
-    return finalizeCall({ returnType: ctx.primitives.unknown });
-  }
-
-  const argsForCandidate = ({
-    receiverTypeOverride,
-  }: MethodCallCandidate): readonly Arg[] =>
-    receiverTypeOverride
-      ? [{ ...probeArgs[0]!, type: receiverTypeOverride }, ...probeArgs.slice(1)]
-      : probeArgs;
-
-  let candidates = resolution.candidates;
-  let matches = findMatchingOverloadCandidates({
-    candidates,
-    args: probeArgs,
+  const selection = selectMethodCallCandidate({
+    expr,
+    resolution,
+    probeArgs,
+    typeArguments,
     ctx,
     state,
-    typeArguments,
-    argsForCandidate,
   });
-  let traitDispatch =
-    matches.length === 0
-      ? (() => {
-          const direct = resolveTraitDispatchOverload({
-            candidates,
-            args: probeArgs,
-            ctx,
-            state,
-          });
-          if (direct) {
-            return direct;
-          }
-
-          const overrides = Array.from(
-            new Set(
-              candidates
-                .map((candidate) => candidate.receiverTypeOverride)
-                .filter((type): type is TypeId => typeof type === "number"),
-            ),
-          );
-          return overrides
-            .map((receiverTypeOverride) =>
-              resolveTraitDispatchOverload({
-                candidates,
-                args: [
-                  { ...probeArgs[0]!, type: receiverTypeOverride },
-                  ...probeArgs.slice(1),
-                ],
-                ctx,
-                state,
-              }),
-            )
-            .find((candidate) => candidate !== undefined);
-        })()
-      : undefined;
-  let selected = traitDispatch;
-
-  if (
-    !selected &&
-    matches.length === 0 &&
-    resolution.includesMethodCandidates === true &&
-    typeof expr.traitSymbol !== "number"
-  ) {
-    // Preserve method precedence, but allow UFCS-style free functions when
-    // same-named methods exist and none of them match the call shape.
-    const fallbackCandidates = resolveFreeFunctionCandidates({
-      methodName: expr.method,
-      ctx,
-    }).filter(
-      (fallback) =>
-        !candidates.some(
-          (candidate) =>
-            candidate.symbol === fallback.symbol &&
-            candidate.symbolRef.moduleId === fallback.symbolRef.moduleId,
-        ),
-    );
-
-    if (fallbackCandidates.length > 0) {
-      candidates = fallbackCandidates;
-      matches = findMatchingOverloadCandidates({
-        candidates,
-        args: probeArgs,
-        ctx,
-        state,
-        typeArguments,
-        argsForCandidate,
-      });
-      traitDispatch = undefined;
-    }
-  }
-
-  if (!selected) {
-    if (matches.length === 0) {
-      emitDiagnostic({
-        ctx,
-        code: "TY0008",
-        params: { kind: "no-overload", name: expr.method },
-        span: expr.span,
-      });
-    }
-
-    if (matches.length > 1) {
-      emitDiagnostic({
-        ctx,
-        code: "TY0007",
-        params: { kind: "ambiguous-overload", name: expr.method },
-        span: expr.span,
-      });
-    }
-
-    selected = matches[0];
-  }
+  const selected = selection.selected;
 
   if (!selected) {
     return finalizeCall({ returnType: ctx.primitives.unknown });
@@ -605,7 +501,7 @@ export const typeMethodCallExpr = (
     throw new Error(`missing function instance key for method call ${expr.id}`);
   }
 
-  if (traitDispatch) {
+  if (selection.usedTraitDispatch) {
     ctx.callResolution.traitDispatches.add(expr.id);
   } else {
     ctx.callResolution.traitDispatches.delete(expr.id);
@@ -1511,6 +1407,184 @@ const assertExportedMemberAccess = ({
     },
     span: normalizeSpan(span),
   });
+};
+
+const argsForMethodCallCandidate = ({
+  probeArgs,
+  receiverTypeOverride,
+}: {
+  probeArgs: readonly Arg[];
+  receiverTypeOverride?: TypeId;
+}): readonly Arg[] =>
+  receiverTypeOverride
+    ? [{ ...probeArgs[0]!, type: receiverTypeOverride }, ...probeArgs.slice(1)]
+    : probeArgs;
+
+const resolveMethodTraitDispatchCandidate = ({
+  candidates,
+  probeArgs,
+  ctx,
+  state,
+}: {
+  candidates: readonly MethodCallCandidate[];
+  probeArgs: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+}): MethodCallCandidate | undefined => {
+  const direct = resolveTraitDispatchOverload({
+    candidates,
+    args: probeArgs,
+    ctx,
+    state,
+  });
+  if (direct) {
+    return direct;
+  }
+
+  const overrides = Array.from(
+    new Set(
+      candidates
+        .map((candidate) => candidate.receiverTypeOverride)
+        .filter((type): type is TypeId => typeof type === "number"),
+    ),
+  );
+
+  return overrides
+    .map((receiverTypeOverride) =>
+      resolveTraitDispatchOverload({
+        candidates,
+        args: argsForMethodCallCandidate({ probeArgs, receiverTypeOverride }),
+        ctx,
+        state,
+      }),
+    )
+    .find((candidate) => candidate !== undefined);
+};
+
+const resolveFreeFunctionFallbackCandidates = ({
+  methodName,
+  existing,
+  ctx,
+}: {
+  methodName: string;
+  existing: readonly MethodCallCandidate[];
+  ctx: TypingContext;
+}): MethodCallCandidate[] =>
+  resolveFreeFunctionCandidates({
+    methodName,
+    ctx,
+  }).filter(
+    (fallback) =>
+      !existing.some(
+        (candidate) =>
+          candidate.symbol === fallback.symbol &&
+          candidate.symbolRef.moduleId === fallback.symbolRef.moduleId,
+      ),
+  );
+
+const selectMethodCallCandidate = ({
+  expr,
+  resolution,
+  probeArgs,
+  typeArguments,
+  ctx,
+  state,
+}: {
+  expr: HirMethodCallExpr;
+  resolution: MethodCallResolution | undefined;
+  probeArgs: readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): MethodCallSelection => {
+  if (!resolution || resolution.candidates.length === 0) {
+    reportUnknownMethod({
+      methodName: expr.method,
+      receiverName: resolution?.receiverName,
+      span: expr.span,
+      ctx,
+    });
+    return { usedTraitDispatch: false };
+  }
+
+  const argsForCandidate = (candidate: MethodCallCandidate): readonly Arg[] =>
+    argsForMethodCallCandidate({
+      probeArgs,
+      receiverTypeOverride: candidate.receiverTypeOverride,
+    });
+
+  let candidates = resolution.candidates;
+  let matches = findMatchingOverloadCandidates({
+    candidates,
+    args: probeArgs,
+    ctx,
+    state,
+    typeArguments,
+    argsForCandidate,
+  });
+
+  let traitDispatch =
+    matches.length === 0
+      ? resolveMethodTraitDispatchCandidate({
+          candidates,
+          probeArgs,
+          ctx,
+          state,
+        })
+      : undefined;
+
+  if (
+    !traitDispatch &&
+    matches.length === 0 &&
+    resolution.includesMethodCandidates === true &&
+    typeof expr.traitSymbol !== "number"
+  ) {
+    // Preserve method precedence, but allow UFCS-style free functions when
+    // same-named methods exist and none of them match the call shape.
+    const fallbackCandidates = resolveFreeFunctionFallbackCandidates({
+      methodName: expr.method,
+      existing: candidates,
+      ctx,
+    });
+
+    if (fallbackCandidates.length > 0) {
+      candidates = fallbackCandidates;
+      matches = findMatchingOverloadCandidates({
+        candidates,
+        args: probeArgs,
+        ctx,
+        state,
+        typeArguments,
+        argsForCandidate,
+      });
+    }
+  }
+
+  if (traitDispatch) {
+    return { selected: traitDispatch, usedTraitDispatch: true };
+  }
+
+  if (matches.length === 0) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0008",
+      params: { kind: "no-overload", name: expr.method },
+      span: expr.span,
+    });
+    return { usedTraitDispatch: false };
+  }
+
+  if (matches.length > 1) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0007",
+      params: { kind: "ambiguous-overload", name: expr.method },
+      span: expr.span,
+    });
+    return { usedTraitDispatch: false };
+  }
+
+  return { selected: matches[0], usedTraitDispatch: false };
 };
 
 const resolveMethodCallCandidates = ({
