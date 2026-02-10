@@ -36,6 +36,7 @@ export interface TypingInputs {
   symbolTable: SymbolTable;
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
+  recoverDiagnosticErrors?: boolean;
   decls?: DeclTable;
   arena?: TypeArena;
   effects?: EffectTable;

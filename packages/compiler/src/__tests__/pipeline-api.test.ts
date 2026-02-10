@@ -120,6 +120,99 @@ pub fn broken_b() -> i32
     ).toBe(true);
   });
 
+  it("collects multiple undefined call diagnostics in the same function body", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub fn main() -> i32
+  hey(2)
+  hi(4)
+`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    const unknownFunctionDiagnostics = result.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "TY0006",
+    );
+    expect(unknownFunctionDiagnostics.length).toBeGreaterThanOrEqual(2);
+    expect(
+      unknownFunctionDiagnostics.some((diagnostic) =>
+        diagnostic.message.includes("function 'hey' is not defined"),
+      ),
+    ).toBe(true);
+    expect(
+      unknownFunctionDiagnostics.some((diagnostic) =>
+        diagnostic.message.includes("function 'hi' is not defined"),
+      ),
+    ).toBe(true);
+  });
+
+  it("reports generic missing return annotations as typing diagnostics", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub fn identity<T>(value: T)
+  value
+
+pub fn main() -> i32
+  0
+`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    const diagnostics = result.diagnostics.filter((diagnostic) => diagnostic.code === "TY0034");
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(diagnostics[0]?.span.file).toBe(mainPath);
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(false);
+  });
+
+  it("retains semantics for modules with typing diagnostics when recovery is enabled", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub fn identity<T>(value: T)
+  value
+
+pub fn main() -> i32
+  let counter = 1
+  counter
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({
+      graph,
+      recoverFromTypingErrors: true,
+    });
+
+    expect(semantics.has("src::main")).toBe(true);
+    expect(diagnostics.some((diagnostic) => diagnostic.code === "TY0034")).toBe(
+      true,
+    );
+  });
+
   it("reports missing nominal object fields as typing diagnostics", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;
@@ -137,21 +230,23 @@ pub fn main() -> voyd
 `,
     });
 
-    const result = expectCompileFailure(await compileProgram({
-      entryPath: mainPath,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(
       result.diagnostics.some(
         (diag) =>
           diag.code === "TY0037" &&
-          diag.message.includes("missing required field 'b'")
-      )
+          diag.message.includes("missing required field 'b'"),
+      ),
     ).toBe(true);
     expect(result.diagnostics.some((diag) => diag.code === "TY9999")).toBe(
-      false
+      false,
     );
   });
 
@@ -171,21 +266,22 @@ pub fn main()
 `,
     });
 
-    const result = expectCompileFailure(await compileProgram({
-      entryPath: mainPath,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(
       result.diagnostics.some(
         (diag) =>
           diag.code === "TY0027" &&
-          diag.message.includes("expected 'structural object'")
-      )
+          diag.message.includes("expected 'structural object'"),
+      ),
     ).toBe(true);
   });
-
   it("orders modules topologically for lowering", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");

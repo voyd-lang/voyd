@@ -1,0 +1,306 @@
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import {
+  analyzeProject,
+  autoImportActions,
+  definitionsAtPosition,
+  renameAtPosition,
+  resolveModuleRoots,
+  toFileUri,
+} from "../project.js";
+
+const createProject = async (
+  files: Record<string, string>,
+): Promise<{ rootDir: string; filePathFor: (relativePath: string) => string }> => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "voyd-ls-test-"));
+
+  await Promise.all(
+    Object.entries(files).map(async ([relativePath, contents]) => {
+      const fullPath = path.join(rootDir, relativePath);
+      await mkdir(path.dirname(fullPath), { recursive: true });
+      await writeFile(fullPath, contents, "utf8");
+    }),
+  );
+
+  return {
+    rootDir,
+    filePathFor: (relativePath: string) => path.join(rootDir, relativePath),
+  };
+};
+
+describe("language server project analysis", () => {
+  it("uses VOYD_STD_ROOT when provided", () => {
+    const previousStdRoot = process.env.VOYD_STD_ROOT;
+    const stdRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      "std",
+      "src",
+    );
+    process.env.VOYD_STD_ROOT = stdRoot;
+
+    try {
+      const roots = resolveModuleRoots(path.join(os.tmpdir(), "voyd-main.voyd"));
+      expect(roots.std).toBe(stdRoot);
+    } finally {
+      if (previousStdRoot === undefined) {
+        delete process.env.VOYD_STD_ROOT;
+      } else {
+        process.env.VOYD_STD_ROOT = previousStdRoot;
+      }
+    }
+  });
+
+  it("resolves go-to-definition for imported functions", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::util::helper\n\nfn main() -> i32\n  helper(1)\n`,
+      "src/util.voyd": `pub fn helper(value: i32) -> i32\n  value\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const definitions = definitionsAtPosition({
+        analysis,
+        uri: toFileUri(entryPath),
+        position: { line: 3, character: 3 },
+      });
+
+      expect(definitions).toHaveLength(1);
+      expect(definitions[0]?.uri).toBe(toFileUri(project.filePathFor("src/util.voyd")));
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats symbol ranges as end-exclusive for navigation", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::util::helper\n\nfn main() -> i32\n  helper(1)\n`,
+      "src/util.voyd": `pub fn helper(value: i32) -> i32\n  value\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const definitions = definitionsAtPosition({
+        analysis,
+        uri: toFileUri(entryPath),
+        position: { line: 3, character: 8 },
+      });
+
+      expect(definitions).toHaveLength(0);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("renames local variables and references", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn main() -> i32\n  let counter = 1\n  counter\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const edit = renameAtPosition({
+        analysis,
+        uri: toFileUri(entryPath),
+        position: { line: 2, character: 3 },
+        newName: "total",
+      });
+
+      const changes = edit?.changes?.[toFileUri(entryPath)] ?? [];
+      expect(changes.length).toBeGreaterThanOrEqual(2);
+      expect(changes.every((change: { newText: string }) => change.newText === "total")).toBe(
+        true,
+      );
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("renames imported symbols in use statements and call sites", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::util::helper\n\nfn main() -> i32\n  helper(1)\n`,
+      "src/util.voyd": `pub fn helper(value: i32) -> i32\n  value\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const utilPath = project.filePathFor("src/util.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const edit = renameAtPosition({
+        analysis,
+        uri: toFileUri(entryPath),
+        position: { line: 3, character: 3 },
+        newName: "assist",
+      });
+
+      const mainChanges = edit?.changes?.[toFileUri(entryPath)] ?? [];
+      const utilChanges = edit?.changes?.[toFileUri(utilPath)] ?? [];
+      expect(mainChanges.some((change) => change.range.start.line === 0)).toBe(true);
+      expect(mainChanges.some((change) => change.range.start.line === 3)).toBe(true);
+      expect(utilChanges.some((change) => change.range.start.line === 0)).toBe(true);
+      expect(
+        [...mainChanges, ...utilChanges].every(
+          (change: { newText: string }) => change.newText === "assist",
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("offers auto-import quick fixes for unknown functions", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn main() -> i32\n  helper(1)\n`,
+      "src/util.voyd": `pub fn helper(value: i32) -> i32\n  value\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      const codeActions = autoImportActions({
+        analysis,
+        documentUri: uri,
+        diagnostics,
+      });
+
+      expect(
+        codeActions.some((action) =>
+          action.title.includes("Import helper from src::util"),
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces typing diagnostics when generics miss return annotations", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn identity<T>(value: T)\n  value\n\nfn main() -> i32\n  let counter = 1\n  counter\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      expect(diagnostics.some((diagnostic) => diagnostic.code === "TY0034")).toBe(true);
+
+      const rename = renameAtPosition({
+        analysis,
+        uri,
+        position: { line: 5, character: 3 },
+        newName: "total",
+      });
+      const changes = rename?.changes?.[uri] ?? [];
+      expect(changes.length).toBeGreaterThanOrEqual(2);
+      expect(changes.every((change) => change.newText === "total")).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it(
+    "renames labeled parameters, including external labels",
+    async () => {
+      const source = `use std::all\n\nfn reduce<T>(ay: Array<T>, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  start\n\nfn main() -> i32\n  [1, 2, 3].reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
+      const project = await createProject({
+        "src/main.voyd": source,
+      });
+
+      try {
+        const entryPath = project.filePathFor("src/main.voyd");
+        const uri = toFileUri(entryPath);
+        const analysis = await analyzeProject({
+          entryPath,
+          roots: resolveModuleRoots(entryPath),
+          openDocuments: new Map(),
+        });
+        const lines = source.split("\n");
+        const callLine = lines.findIndex((line) => line.includes("reducer:"));
+        const callChar = lines[callLine]?.indexOf("reducer") ?? -1;
+        const reducerDeclLine = lines.findIndex((line) => line.includes("reducer cb"));
+        const startBodyLine = lines.findIndex((line) => line.trim() === "start");
+        expect(callLine).toBeGreaterThanOrEqual(0);
+        expect(callChar).toBeGreaterThanOrEqual(0);
+        expect(reducerDeclLine).toBeGreaterThanOrEqual(0);
+        expect(startBodyLine).toBeGreaterThanOrEqual(0);
+
+        const externalLabelRename = renameAtPosition({
+          analysis,
+          uri,
+          position: { line: callLine, character: callChar + 1 },
+          newName: "combine",
+        });
+        const externalLabelChanges = externalLabelRename?.changes?.[uri] ?? [];
+        expect(
+          externalLabelChanges.some((change) => change.range.start.line === reducerDeclLine),
+        ).toBe(true);
+        expect(externalLabelChanges.some((change) => change.range.start.line === callLine)).toBe(
+          true,
+        );
+        expect(externalLabelChanges.every((change) => change.newText === "combine")).toBe(true);
+
+        const startCallChar = lines[callLine]?.indexOf("start") ?? -1;
+        expect(startCallChar).toBeGreaterThanOrEqual(0);
+        const startRename = renameAtPosition({
+          analysis,
+          uri,
+          position: { line: callLine, character: startCallChar + 1 },
+          newName: "initial",
+        });
+        const startChanges = startRename?.changes?.[uri] ?? [];
+        expect(startChanges.some((change) => change.range.start.line === reducerDeclLine)).toBe(
+          true,
+        );
+        expect(startChanges.some((change) => change.range.start.line === startBodyLine)).toBe(
+          true,
+        );
+        expect(startChanges.some((change) => change.range.start.line === callLine)).toBe(true);
+        expect(startChanges.every((change) => change.newText === "initial")).toBe(true);
+      } finally {
+        await rm(project.rootDir, { recursive: true, force: true });
+      }
+    },
+    15000,
+  );
+});

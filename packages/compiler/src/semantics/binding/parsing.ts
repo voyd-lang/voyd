@@ -106,6 +106,7 @@ interface ParsedFunctionSignature {
 interface SignatureParam {
   name: string;
   label?: string;
+  labelAst?: Syntax;
   ast: Syntax;
   typeExpr?: Expr;
   optional?: boolean;
@@ -660,6 +661,7 @@ const parseLabeledParameters = (form: Form): SignatureParam[] =>
       return {
         ...param,
         label: param.name,
+        labelAst: param.ast,
       };
     }
 
@@ -672,6 +674,7 @@ const parseLabeledParameters = (form: Form): SignatureParam[] =>
       const labelExpr = expr.first;
       return {
         label: labelExpr.value,
+        labelAst: labelExpr,
         ...parseSingleParam(expr.second),
       };
     }

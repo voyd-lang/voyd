@@ -1,0 +1,16 @@
+export {
+  analyzeProject,
+  analyzeProjectCore,
+  autoImportActions,
+  buildProjectNavigationIndex,
+  definitionsAtPosition,
+  prepareRenameAtPosition,
+  renameAtPosition,
+  resolveEntryPath,
+  resolveModuleRoots,
+  toFileUri,
+  type ProjectAnalysis,
+  type ProjectCoreAnalysis,
+  type ProjectNavigationIndex,
+  type SymbolOccurrence,
+} from "./project.js";

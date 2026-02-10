@@ -54,4 +54,48 @@ pub fn main() -> void
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it("highlights only the let initializer expression for TY0027", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), `voyd-span-${Date.now()}-`));
+    try {
+      const entryPath = join(projectRoot, "main.voyd");
+      writeFileSync(
+        entryPath,
+        `use std::all
+
+pub fn main() -> i32
+  let x: i32 = 5.0
+  let y: i32 = 1
+  y
+`,
+        "utf8",
+      );
+
+      const stdRoot = resolve(
+        import.meta.dirname,
+        "..",
+        "..",
+        "..",
+        "std",
+        "src",
+      );
+      const graph = await loadModuleGraph({
+        entryPath,
+        roots: { src: projectRoot, std: stdRoot },
+      });
+
+      const { diagnostics } = analyzeModules({ graph });
+      const mismatch = diagnostics.find((diag) => diag.code === "TY0027");
+      expect(mismatch).toBeDefined();
+      if (!mismatch) {
+        return;
+      }
+
+      expect(mismatch.span.file).toBe(entryPath);
+      const source = readFileSync(entryPath, "utf8");
+      expect(source.slice(mismatch.span.start, mismatch.span.end)).toBe("5.0");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
 });

@@ -168,10 +168,14 @@ const bindTraitMethodParameters = (
       },
     });
     rememberSyntax(param.ast, ctx);
+    if (param.labelAst) {
+      rememberSyntax(param.labelAst, ctx);
+    }
     rememberSyntax(param.typeExpr as Syntax, ctx);
     return {
       name: param.name,
       label: param.label,
+      labelAst: param.labelAst,
       optional: param.optional,
       symbol: paramSymbol,
       ast: param.ast,
@@ -242,6 +246,10 @@ export const makeParsedFunctionFromTraitMethod = (
       throw new Error("trait method parameter missing syntax");
     }
     const clonedAst = param.ast.clone();
+    const clonedLabelAst =
+      param.labelAst?.syntaxId === param.ast.syntaxId
+        ? clonedAst
+        : param.labelAst?.clone();
     const typeExpr = substituteTypeParamExpr(
       param.typeExpr?.clone(),
       options?.typeParamSubstitutions
@@ -249,6 +257,7 @@ export const makeParsedFunctionFromTraitMethod = (
     return {
       name: param.name,
       label: param.label,
+      labelAst: clonedLabelAst,
       optional: param.optional,
       ast: clonedAst,
       typeExpr,

@@ -3,6 +3,7 @@ import { modulePathToString } from "./modules/path.js";
 import type {
   ModuleGraph,
   ModuleHost,
+  ModuleNode,
   ModulePath,
   ModuleRoots,
 } from "./modules/types.js";
@@ -36,6 +37,7 @@ export type AnalyzeModulesOptions = {
   graph: ModuleGraph;
   includeTests?: boolean;
   testScope?: TestScope;
+  recoverFromTypingErrors?: boolean;
 };
 
 export type AnalyzeModulesResult = {
@@ -103,6 +105,7 @@ export const analyzeModules = ({
   graph,
   includeTests,
   testScope,
+  recoverFromTypingErrors,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
   const order = sortModules(graph);
   const semantics = new Map<string, SemanticsPipelineResult>();
@@ -125,6 +128,7 @@ export const analyzeModules = ({
         dependencies: semantics,
         typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
         includeTests,
+        recoverFromTypingErrors,
       });
       semantics.set(id, result);
       exports.set(id, result.exports);
@@ -140,7 +144,7 @@ export const analyzeModules = ({
           kind: "unexpected-error",
           message: error instanceof Error ? error.message : String(error),
         },
-        span: { file: module.id, start: 0, end: 0 },
+        span: { file: moduleDiagnosticFilePath(module), start: 0, end: 0 },
       });
       diagnostics.push(fallback);
       return;
@@ -611,6 +615,10 @@ export const compileProgramWithLoader = async (
 };
 
 const moduleIdForPath = (path: ModulePath): string => modulePathToString(path);
+
+const moduleDiagnosticFilePath = (module: ModuleNode): string =>
+  module.ast.location?.filePath ??
+  (module.origin.kind === "file" ? module.origin.filePath : module.id);
 
 const sortModules = (graph: ModuleGraph): string[] => {
   const visited = new Set<string>();
