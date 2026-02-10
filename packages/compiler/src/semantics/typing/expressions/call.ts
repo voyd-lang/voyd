@@ -48,6 +48,7 @@ import { getValueType } from "./identifier.js";
 import { assertMutableObjectBinding, findBindingSymbol } from "./mutability.js";
 import type {
   Arg,
+  DependencySemantics,
   FunctionSignature,
   FunctionTypeParam,
   ParamSignature,
@@ -61,6 +62,9 @@ import {
   localSymbolForSymbolRef,
   symbolRefKey,
 } from "../symbol-ref-utils.js";
+import { createTranslation, translateFunctionSignature } from "../import-type-translation.js";
+import { typingContextsShareInterners } from "../shared-interners.js";
+import { mapDependencySymbolToLocal } from "../import-symbol-mapping.js";
 
 type SymbolNameResolver = (symbol: SymbolId) => string;
 
@@ -82,6 +86,75 @@ type MethodCallResolution = {
 type MethodCallSelection = {
   selected?: MethodCallCandidate;
   usedTraitDispatch: boolean;
+};
+
+const dependencyMethodSignatureCache = new WeakMap<
+  TypingContext,
+  Map<string, FunctionSignature>
+>();
+
+const getDependencyMethodSignature = ({
+  dependency,
+  symbol,
+  ctx,
+}: {
+  dependency: DependencySemantics;
+  symbol: SymbolId;
+  ctx: TypingContext;
+}): FunctionSignature | undefined => {
+  const signature = dependency.typing.functions.getSignature(symbol);
+  if (!signature) {
+    return undefined;
+  }
+  if (
+    typingContextsShareInterners({
+      sourceArena: dependency.typing.arena,
+      targetArena: ctx.arena,
+      sourceEffects: dependency.typing.effects,
+      targetEffects: ctx.effects,
+    })
+  ) {
+    return signature;
+  }
+
+  const cache =
+    dependencyMethodSignatureCache.get(ctx) ??
+    (() => {
+      const created = new Map<string, FunctionSignature>();
+      dependencyMethodSignatureCache.set(ctx, created);
+      return created;
+    })();
+  const key = `${dependency.moduleId}:${symbol}`;
+  const cached = cache.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  const paramMap = new Map<TypeParamId, TypeParamId>();
+  const translation = createTranslation({
+    sourceArena: dependency.typing.arena,
+    targetArena: ctx.arena,
+    sourceEffects: dependency.typing.effects,
+    targetEffects: ctx.effects,
+    paramMap,
+    cache: new Map(),
+    mapSymbol: (owner) =>
+      mapDependencySymbolToLocal({
+        owner,
+        dependency,
+        ctx,
+        allowUnexported: true,
+      }),
+  });
+  const translated = translateFunctionSignature({
+    signature,
+    translation,
+    dependency,
+    ctx,
+    paramMap,
+  }).signature;
+  cache.set(key, translated);
+  return translated;
 };
 
 export const typeCallExpr = (
@@ -2182,13 +2255,13 @@ const resolveTraitMethodCandidates = ({
   const collectFromModule = ({
     moduleId,
     symbolTable,
-    functions,
+    getSignature,
     traitMethodImpls,
     nameForSymbol,
   }: {
     moduleId: string;
     symbolTable: TypingContext["symbolTable"];
-    functions: TypingContext["functions"];
+    getSignature: (symbol: SymbolId) => FunctionSignature | undefined;
     traitMethodImpls: ReadonlyMap<
       SymbolId,
       { traitSymbol: SymbolId; traitMethodSymbol: SymbolId }
@@ -2212,7 +2285,7 @@ const resolveTraitMethodCandidates = ({
       if (!symbolRefEquals(traitMethodRef, receiverMethodRef)) {
         return;
       }
-      const signature = functions.getSignature(implMethod);
+      const signature = getSignature(implMethod);
       if (!signature) {
         throw new Error(
           `missing type signature for trait method ${symbolTable.getSymbol(implMethod).name}`,
@@ -2225,14 +2298,19 @@ const resolveTraitMethodCandidates = ({
   collectFromModule({
     moduleId: ctx.moduleId,
     symbolTable: ctx.symbolTable,
-    functions: ctx.functions,
+    getSignature: (symbol) => ctx.functions.getSignature(symbol),
     traitMethodImpls: ctx.traitMethodImpls,
   });
   ctx.dependencies.forEach((dependency) => {
     collectFromModule({
       moduleId: dependency.moduleId,
       symbolTable: dependency.symbolTable,
-      functions: dependency.typing.functions,
+      getSignature: (symbol) =>
+        getDependencyMethodSignature({
+          dependency,
+          symbol,
+          ctx,
+        }),
       traitMethodImpls: dependency.typing.traitMethodImpls,
       nameForSymbol: (symbol) => dependency.symbolTable.getSymbol(symbol).name,
     });
@@ -2344,7 +2422,11 @@ const findExportedMethodCandidates = ({
     dependency.symbolTable.getSymbol(symbol).name;
 
   return symbols.map((symbol): MethodCallCandidate => {
-    const signature = dependency.typing.functions.getSignature(symbol);
+    const signature = getDependencyMethodSignature({
+      dependency,
+      symbol,
+      ctx,
+    });
     if (!signature) {
       throw new Error(
         `missing type signature for method ${nameForSymbol(symbol)}`,
@@ -3126,6 +3208,36 @@ const resolveTraitDispatchOverload = <
             ?.typing.traits.getImplTemplatesForTrait(
               methodMetadata.metadata.traitSymbol,
             );
+    const dependency =
+      methodMetadata.moduleId === ctx.moduleId
+        ? undefined
+        : ctx.dependencies.get(methodMetadata.moduleId);
+    const translateDependencyType =
+      dependency &&
+      !typingContextsShareInterners({
+        sourceArena: dependency.typing.arena,
+        targetArena: ctx.arena,
+        sourceEffects: dependency.typing.effects,
+        targetEffects: ctx.effects,
+      })
+        ? createTranslation({
+            sourceArena: dependency.typing.arena,
+            targetArena: ctx.arena,
+            sourceEffects: dependency.typing.effects,
+            targetEffects: ctx.effects,
+            paramMap: new Map<TypeParamId, TypeParamId>(),
+            cache: new Map(),
+            mapSymbol: (owner) =>
+              mapDependencySymbolToLocal({
+                owner,
+                dependency,
+                ctx,
+                allowUnexported: true,
+              }),
+          })
+        : undefined;
+    const toLocalType = (type: TypeId): TypeId =>
+      translateDependencyType ? translateDependencyType(type) : type;
 
     if ((!impls || impls.length === 0) && (!templates || templates.length === 0)) {
       return false;
@@ -3136,7 +3248,7 @@ const resolveTraitDispatchOverload = <
         (entry) =>
           entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
             symbol &&
-          typeSatisfies(receiver.type, entry.trait, ctx, state),
+          typeSatisfies(receiver.type, toLocalType(entry.trait), ctx, state),
       ) === true;
     const hasCompatibleTemplate =
       templates?.some((template) => {
@@ -3146,7 +3258,7 @@ const resolveTraitDispatchOverload = <
         if (implMethod !== symbol) {
           return false;
         }
-        const comparison = ctx.arena.unify(receiver.type, template.trait, {
+        const comparison = ctx.arena.unify(receiver.type, toLocalType(template.trait), {
           location: ctx.hir.module.ast,
           reason: "trait object dispatch",
           variance: "covariant",
