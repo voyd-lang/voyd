@@ -250,7 +250,7 @@ export const diagnosticsRegistry: {
   BD0005: {
     code: "BD0005",
     message: () =>
-      "mod declarations without a body are no longer supported; use `use` or `pub use self::...` instead",
+      "mod declarations without a body are no longer supported; use `use`, `pub use self::...`, or `pub self::...` instead",
     severity: "error",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0005"]>,
   CG0001: {

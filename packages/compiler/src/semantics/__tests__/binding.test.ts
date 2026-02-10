@@ -813,6 +813,138 @@ describe("binding pipeline", () => {
     expect(innerImport?.import?.moduleId).toBe(nestedId);
   });
 
+  it("keeps pub use name imports in local scope while exporting them", () => {
+    const source = "pub use self::inner::Thing";
+    const ast = parse(source, "outer.voyd");
+
+    const modulePath = { namespace: "src" as const, segments: ["outer"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const innerPath = {
+      namespace: "src" as const,
+      segments: ["outer", "inner"] as const,
+    };
+    const innerId = modulePathToString(innerPath);
+    const dependencies: ModuleDependency[] = [{ kind: "export", path: innerPath }];
+
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "outer.voyd" },
+      ast,
+      source,
+      dependencies,
+    };
+
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "outer.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        innerId,
+        new Map([
+          [
+            "Thing",
+            {
+              name: "Thing",
+              symbol: 1,
+              moduleId: innerId,
+              modulePath: innerPath,
+              packageId: packageIdFromPath(innerPath),
+              kind: "type",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const useDecl = binding.uses[0];
+    expect(useDecl?.visibility.level).toBe("package");
+    expect(useDecl?.entries[0]?.imports).toHaveLength(1);
+    const importedSymbol = symbolTable.resolve("Thing", symbolTable.rootScope);
+    expect(typeof importedSymbol).toBe("number");
+  });
+
+  it("supports bare pub module-expression exports", () => {
+    const source = "pub self::inner::Thing";
+    const ast = parse(source, "outer.voyd");
+
+    const modulePath = { namespace: "src" as const, segments: ["outer"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const innerPath = {
+      namespace: "src" as const,
+      segments: ["outer", "inner"] as const,
+    };
+    const innerId = modulePathToString(innerPath);
+    const dependencies: ModuleDependency[] = [{ kind: "export", path: innerPath }];
+
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "outer.voyd" },
+      ast,
+      source,
+      dependencies,
+    };
+
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "outer.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        innerId,
+        new Map([
+          [
+            "Thing",
+            {
+              name: "Thing",
+              symbol: 1,
+              moduleId: innerId,
+              modulePath: innerPath,
+              packageId: packageIdFromPath(innerPath),
+              kind: "type",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const useDecl = binding.uses[0];
+    expect(useDecl?.visibility.level).toBe("package");
+    expect(useDecl?.entries[0]?.imports).toHaveLength(1);
+    const importedSymbol = symbolTable.resolve("Thing", symbolTable.rootScope);
+    expect(typeof importedSymbol).toBe("number");
+  });
+
   it("resolves super-relative uses against the parent directory, not submodules", () => {
     const source = "use super::utils";
     const ast = parse(source, "bar.voyd");
