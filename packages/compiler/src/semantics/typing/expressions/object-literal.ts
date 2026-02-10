@@ -2,7 +2,7 @@ import type {
   HirObjectLiteralEntry,
   HirObjectLiteralExpr,
 } from "../../hir/index.js";
-import type { TypeId, TypeParamId } from "../../ids.js";
+import type { SourceSpan, TypeId, TypeParamId } from "../../ids.js";
 import { typeExpression } from "../expressions.js";
 import { composeEffectRows, getExprEffectRow } from "../effects.js";
 import {
@@ -22,6 +22,7 @@ import {
   filterAccessibleFields,
   reportInaccessibleFieldRequirement,
 } from "../visibility.js";
+import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 
 export const typeObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
@@ -71,7 +72,15 @@ const mergeObjectLiteralEntry = (
     allowOwnerPrivate: true,
   });
   if (!spreadFields) {
-    throw new Error("object spread requires a structural object");
+    ensureTypeMatches(
+      spreadType,
+      ctx.objects.base.type,
+      ctx,
+      state,
+      "object spread",
+      normalizeSpan(entry.span)
+    );
+    return;
   }
   filterAccessibleFields(spreadFields, ctx, state).forEach((field) =>
     fields.set(field.name, field.type)
@@ -162,7 +171,12 @@ const typeNominalObjectLiteral = (
       if (field.optional) {
         return;
       }
-      throw new Error(`missing initializer for field ${name}`);
+      emitMissingObjectFieldDiagnostic({
+        field: name,
+        receiver: typeName,
+        span: expr.span,
+        ctx,
+      });
     }
   });
 
@@ -186,7 +200,12 @@ const bindNominalObjectEntry = (
   if (entry.kind === "field") {
     const expectedField = declared.get(entry.name);
     if (!expectedField) {
-      throw new Error(`nominal object does not declare field ${entry.name}`);
+      return emitUnknownObjectFieldDiagnostic({
+        field: entry.name,
+        receiver: typeName,
+        span: entry.span,
+        ctx,
+      });
     }
     const valueSpan =
       ctx.hir.expressions.get(entry.value)?.span ?? entry.span;
@@ -216,13 +235,28 @@ const bindNominalObjectEntry = (
     allowOwnerPrivate: true,
   });
   if (!spreadFields) {
-    throw new Error("object spread requires a structural object");
+    ensureTypeMatches(
+      spreadType,
+      ctx.objects.base.type,
+      ctx,
+      state,
+      "object spread",
+      normalizeSpan(entry.span)
+    );
+    return;
   }
 
-  filterAccessibleFields(spreadFields, ctx, state, { allowOwnerPrivate: true }).forEach((field) => {
+  filterAccessibleFields(spreadFields, ctx, state, {
+    allowOwnerPrivate: true,
+  }).forEach((field) => {
     const expectedField = declared.get(field.name);
     if (!expectedField) {
-      throw new Error(`nominal object does not declare field ${field.name}`);
+      return emitUnknownObjectFieldDiagnostic({
+        field: field.name,
+        receiver: typeName,
+        span: entry.span,
+        ctx,
+      });
     }
     bindTypeParamsFromType(expectedField.type, field.type, bindings, ctx, state);
     provided.add(field.name);
@@ -240,7 +274,12 @@ const mergeNominalObjectEntry = (
   if (entry.kind === "field") {
     const expectedField = declared.get(entry.name);
     if (!expectedField) {
-      throw new Error(`nominal object does not declare field ${entry.name}`);
+      return emitUnknownObjectFieldDiagnostic({
+        field: entry.name,
+        receiver: typeName,
+        span: entry.span,
+        ctx,
+      });
     }
     const valueSpan =
       ctx.hir.expressions.get(entry.value)?.span ?? entry.span;
@@ -278,13 +317,28 @@ const mergeNominalObjectEntry = (
     allowOwnerPrivate: true,
   });
   if (!spreadFields) {
-    throw new Error("object spread requires a structural object");
+    ensureTypeMatches(
+      spreadType,
+      ctx.objects.base.type,
+      ctx,
+      state,
+      "object spread",
+      normalizeSpan(entry.span)
+    );
+    return;
   }
 
-  filterAccessibleFields(spreadFields, ctx, state, { allowOwnerPrivate: true }).forEach((field) => {
+  filterAccessibleFields(spreadFields, ctx, state, {
+    allowOwnerPrivate: true,
+  }).forEach((field) => {
     const expectedField = declared.get(field.name);
     if (!expectedField) {
-      throw new Error(`nominal object does not declare field ${field.name}`);
+      return emitUnknownObjectFieldDiagnostic({
+        field: field.name,
+        receiver: typeName,
+        span: entry.span,
+        ctx,
+      });
     }
     if (expectedField.type !== ctx.primitives.unknown) {
       ensureTypeMatches(
@@ -298,3 +352,39 @@ const mergeNominalObjectEntry = (
     provided.add(field.name);
   });
 };
+
+const emitUnknownObjectFieldDiagnostic = ({
+  field,
+  receiver,
+  span,
+  ctx,
+}: {
+  field: string;
+  receiver: string;
+  span: SourceSpan;
+  ctx: TypingContext;
+}): never =>
+  emitDiagnostic({
+    ctx,
+    code: "TY0033",
+    params: { kind: "unknown-field", name: field, receiver },
+    span: normalizeSpan(span),
+  });
+
+const emitMissingObjectFieldDiagnostic = ({
+  field,
+  receiver,
+  span,
+  ctx,
+}: {
+  field: string;
+  receiver: string;
+  span: SourceSpan;
+  ctx: TypingContext;
+}): never =>
+  emitDiagnostic({
+    ctx,
+    code: "TY0037",
+    params: { kind: "missing-object-field", field, receiver },
+    span: normalizeSpan(span),
+  });
