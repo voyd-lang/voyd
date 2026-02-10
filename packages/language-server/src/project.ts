@@ -1,5 +1,5 @@
 import path from "node:path";
-import { buildModuleGraph } from "@voyd/compiler/modules/graph.js";
+import { loadModuleGraph } from "@voyd/compiler/pipeline.js";
 import { analyzeModules } from "@voyd/compiler/pipeline-shared.js";
 import { buildDiagnosticsByUri } from "./project/diagnostics.js";
 import {
@@ -96,7 +96,7 @@ export const analyzeProjectCore = async ({
   const normalizedOpenDocuments = normalizeOpenDocumentMap(openDocuments);
   const overlayHost =
     host ?? createOverlayModuleHost({ openDocuments: normalizedOpenDocuments });
-  const graph = await buildModuleGraph({
+  const graph = await loadModuleGraph({
     entryPath: path.resolve(entryPath),
     roots,
     host: overlayHost,

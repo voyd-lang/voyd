@@ -43,3 +43,7 @@ You should generally add unit tests (especially e2e ones)
 - Use a single parameter object for functions containing more than three params to name the parameters on call.
 
 # Agent Notes
+
+- Prefer consuming compiler functionality through public pipeline entrypoints (`@voyd/compiler` or `@voyd/compiler/pipeline.js`) instead of deep-importing internal module graph files from other packages.
+- In `@voyd/compiler` exports, keep `.js` subpath mappings (`"./*.js"`) unambiguous. A broad `./*` export can break bundlers that resolve `*.js` subpaths in development mode.
+- `apps/vscode` server bundling resolves compiler imports during the build; keep `@voyd/compiler` declared in `apps/vscode` devDependencies so Turbo/CI task isolation can resolve it consistently.

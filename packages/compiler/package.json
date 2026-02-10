@@ -16,12 +16,6 @@
       "development": "./src/*.ts",
       "import": "./dist/*.js",
       "default": "./dist/*.js"
-    },
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "development": "./src/*.ts",
-      "import": "./dist/*.js",
-      "default": "./dist/*.js"
     }
   },
   "scripts": {
