@@ -14,7 +14,10 @@ import {
   getSymbolName,
   resolveTypeExpr,
 } from "../type-system.js";
-import type { StructuralField } from "../type-arena.js";
+import {
+  typeDescriptorToUserString,
+  type StructuralField,
+} from "../type-arena.js";
 import type { TypingContext, TypingState } from "../types.js";
 import {
   assertFieldAccess,
@@ -346,15 +349,16 @@ const resolveAccessibleObjectSpreadFields = ({
     allowOwnerPrivate,
   });
   if (!spreadFields) {
-    ensureTypeMatches(
-      spreadType,
-      ctx.objects.base.type,
+    return emitDiagnostic({
       ctx,
-      state,
-      "object spread",
-      normalizeSpan(entry.span)
-    );
-    return undefined;
+      code: "TY0027",
+      params: {
+        kind: "type-mismatch",
+        expected: "structural object",
+        actual: typeDescriptorToUserString(ctx.arena.get(spreadType), ctx.arena),
+      },
+      span: normalizeSpan(entry.span),
+    });
   }
   return filterAccessibleFields(spreadFields, ctx, state, { allowOwnerPrivate });
 };
