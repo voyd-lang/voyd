@@ -1,4 +1,4 @@
-import { type Form, isForm, isIdentifierAtom } from "../../../parser/index.js";
+import { type Form, isForm } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import {
   parseFunctionDecl,
@@ -21,6 +21,10 @@ import {
 } from "../../../diagnostics/index.js";
 import { modulePathToString } from "../../../modules/path.js";
 import type { ModulePath } from "../../../modules/types.js";
+import {
+  classifyTopLevelDecl,
+  type TopLevelDeclClassification,
+} from "../../../modules/use-decl.js";
 import {
   parseUsePaths,
   type NormalizedUseEntry,
@@ -156,21 +160,22 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     if (!ctx.includeTests && isTestEntry(entry)) {
       continue;
     }
-    const useDecl = parseUseDecl(entry);
+    const topLevelDecl = classifyTopLevelDecl(entry);
+    const useDecl = parseUseDecl(entry, topLevelDecl);
     if (useDecl) {
       bindUseDecl(useDecl, ctx);
       continue;
     }
 
-    if (isMacroDecl(entry)) {
+    if (topLevelDecl.kind === "macro-decl") {
       continue;
     }
 
-    if (isInlineModuleDecl(entry)) {
+    if (topLevelDecl.kind === "inline-module-decl") {
       continue;
     }
 
-    if (isModDeclWithoutBody(entry)) {
+    if (topLevelDecl.kind === "unsupported-mod-decl") {
       ctx.diagnostics.push(
         diagnosticFromCode({
           code: "BD0005",
@@ -236,80 +241,17 @@ type ParsedUseDecl = {
   entries: readonly ParsedUseEntry[];
 };
 
-const parseUseDecl = (form: Form): ParsedUseDecl | null => {
-  let index = 0;
-  let visibility: HirVisibility = moduleVisibility();
-  const first = form.at(0);
-
-  if (isIdentifierAtom(first) && first.value === "pub") {
-    visibility = packageVisibility();
-    index += 1;
-  }
-
-  const keyword = form.at(index);
-  if (!isIdentifierAtom(keyword) || keyword.value !== "use") {
+const parseUseDecl = (
+  form: Form,
+  classified: TopLevelDeclClassification,
+): ParsedUseDecl | null => {
+  if (classified.kind !== "use-decl") {
     return null;
   }
-
-  const pathExpr = form.at(index + 1);
-  if (!pathExpr) {
-    throw new Error("use statement missing a path");
-  }
-
-  const entries = parseUsePaths(pathExpr, toSourceSpan(form));
+  const visibility: HirVisibility =
+    classified.visibility === "pub" ? packageVisibility() : moduleVisibility();
+  const entries = parseUsePaths(classified.pathExpr, toSourceSpan(form));
   return { form, visibility, entries };
-};
-
-const isMacroDecl = (form: Form): boolean => {
-  if (form.calls("functional-macro") || form.calls("define-macro-variable")) {
-    return true;
-  }
-
-  if (form.calls("macro") || form.calls("macro_let")) {
-    return true;
-  }
-
-  const first = form.at(0);
-  const second = form.at(1);
-  if (
-    isIdentifierAtom(first) &&
-    first.value === "pub" &&
-    isIdentifierAtom(second) &&
-    (second.value === "macro" || second.value === "macro_let")
-  ) {
-    return true;
-  }
-
-  return false;
-};
-
-const isInlineModuleDecl = (form: Form): boolean => {
-  const first = form.at(0);
-  const isPub = isIdentifierAtom(first) && first.value === "pub";
-  const offset = isPub ? 1 : 0;
-  const keyword = form.at(offset);
-  const nameExpr = form.at(offset + 1);
-  const body = form.at(offset + 2);
-
-  return (
-    isIdentifierAtom(keyword) &&
-    keyword.value === "mod" &&
-    isIdentifierAtom(nameExpr) &&
-    isForm(body) &&
-    body.calls("block")
-  );
-};
-
-const isModDeclWithoutBody = (form: Form): boolean => {
-  const first = form.at(0);
-  const isPub = isIdentifierAtom(first) && first.value === "pub";
-  const offset = isPub ? 1 : 0;
-  const keyword = form.at(offset);
-  if (!isIdentifierAtom(keyword) || keyword.value !== "mod") {
-    return false;
-  }
-  const body = form.at(offset + 2);
-  return !(isForm(body) && body.calls("block"));
 };
 
 const isTestEntry = (form: Form): boolean => {

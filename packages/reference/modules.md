@@ -318,7 +318,7 @@ pub fn main()
 
 # Exporting From a Module
 
-Exports are controlled with `pub use`. Use `self::` to target submodules explicitly.
+Exports are controlled with `pub use` (or shorthand `pub <module-expression>`). Use `self::` to target submodules explicitly.
 
 ### Export a submodule name
 
@@ -371,6 +371,9 @@ pub use self::div::{ div as divide }
 
 // Export and bring into this module’s scope
 pub use self::strings::all
+
+// Shorthand for `pub use self::json::encode`
+pub self::json::encode
 ```
 
 ---

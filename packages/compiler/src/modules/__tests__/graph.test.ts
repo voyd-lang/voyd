@@ -33,6 +33,30 @@ describe("buildModuleGraph", () => {
     );
   });
 
+  it("loads dependencies via bare pub module-expression exports", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: "use src::internal",
+      [`${root}${sep}internal.voyd`]: "pub self::hey::all",
+      [`${root}${sep}internal${sep}hey.voyd`]: "pub fn hey()\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "src::internal",
+        "src::internal::hey",
+      ])
+    );
+  });
+
   it("resolves sibling modules relative to the parent module", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
