@@ -16,14 +16,12 @@ describe("parseUsePaths selection intent", () => {
   it("treats direct std module imports as module selections", () => {
     const [entry] = parseEntries("use std::msgpack");
     expect(entry?.selectionKind).toBe("module");
-    expect(entry?.importKind).toBe("self");
     expect(entry?.path).toEqual(["std", "msgpack"]);
   });
 
   it("treats grouped std selectors as named selections", () => {
     const [entry] = parseEntries("use std::{ id }");
     expect(entry?.selectionKind).toBe("name");
-    expect(entry?.importKind).toBe("name");
     expect(entry?.moduleSegments).toEqual(["std"]);
     expect(entry?.targetName).toBe("id");
   });
@@ -31,14 +29,12 @@ describe("parseUsePaths selection intent", () => {
   it("keeps grouped self selectors as module selections", () => {
     const [entry] = parseEntries("use std::{ self }");
     expect(entry?.selectionKind).toBe("module");
-    expect(entry?.importKind).toBe("self");
     expect(entry?.path).toEqual(["std"]);
   });
 
   it("treats all selectors as all selections", () => {
     const [entry] = parseEntries("use std::all");
     expect(entry?.selectionKind).toBe("all");
-    expect(entry?.importKind).toBe("all");
     expect(entry?.path).toEqual(["std"]);
   });
 });

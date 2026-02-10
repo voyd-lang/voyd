@@ -6,7 +6,6 @@ import {
 import type { SourceSpan } from "../semantics/ids.js";
 
 export type UsePathSelectionKind = "all" | "module" | "name";
-export type UsePathImportKind = "all" | "self" | "name";
 
 export type NormalizedUseEntry = {
   moduleSegments: readonly string[];
@@ -14,7 +13,6 @@ export type NormalizedUseEntry = {
   targetName?: string;
   alias?: string;
   selectionKind: UsePathSelectionKind;
-  importKind: UsePathImportKind;
   anchorToSelf?: boolean;
   parentHops?: number;
   hasExplicitPrefix: boolean;
@@ -171,7 +169,6 @@ const normalizeUseEntry = ({
       moduleSegments,
       path: moduleSegments,
       selectionKind: "all",
-      importKind: "all",
       alias,
       anchorToSelf,
       parentHops,
@@ -187,7 +184,6 @@ const normalizeUseEntry = ({
       moduleSegments,
       path: moduleSegments,
       selectionKind: "module",
-      importKind: "self",
       alias: alias ?? name,
       anchorToSelf,
       parentHops,
@@ -203,7 +199,6 @@ const normalizeUseEntry = ({
       targetName: last,
       alias: alias ?? last,
       selectionKind: "module",
-      importKind: "self",
       anchorToSelf,
       parentHops,
       hasExplicitPrefix,
@@ -223,7 +218,6 @@ const normalizeUseEntry = ({
       moduleSegments: normalizedSegments,
       path: normalizedSegments,
       selectionKind: "module",
-      importKind: "self",
       alias: alias ?? last,
       anchorToSelf,
       parentHops,
@@ -241,7 +235,6 @@ const normalizeUseEntry = ({
     targetName,
     alias: alias ?? name,
     selectionKind: "name",
-    importKind: "name",
     anchorToSelf,
     parentHops,
     hasExplicitPrefix,

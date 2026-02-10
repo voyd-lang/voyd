@@ -135,7 +135,6 @@ export interface BoundUseEntry {
   moduleId?: string;
   span: SourceSpan;
   selectionKind: UsePathSelectionKind;
-  importKind: "all" | "self" | "name";
   targetName?: string;
   alias?: string;
   imports: readonly BoundImport[];
