@@ -179,6 +179,7 @@ type DiagnosticParamsMap = {
         traitName: string;
         targetName: string;
       };
+  TY0037: { kind: "missing-object-field"; field: string; receiver?: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -642,6 +643,15 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0036"]>,
+  TY0037: {
+    code: "TY0037",
+    message: (params) =>
+      params.receiver
+        ? `missing required field '${params.field}' when constructing '${params.receiver}'`
+        : `missing required field '${params.field}'`,
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0037"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

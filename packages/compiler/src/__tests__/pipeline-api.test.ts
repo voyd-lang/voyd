@@ -120,6 +120,72 @@ pub fn broken_b() -> i32
     ).toBe(true);
   });
 
+  it("reports missing nominal object fields as typing diagnostics", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub obj A { x: i32 }
+pub obj B { a: i32, b: i32 }
+
+pub fn new_array<T>({ from source: FixedArray<T> }) -> FixedArray<T>
+  source
+
+pub fn main() -> voyd
+  let a = [A { x: 1 }]
+  let a = [B { a: 1 }]
+`,
+    });
+
+    const result = expectCompileFailure(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+
+    expect(
+      result.diagnostics.some(
+        (diag) =>
+          diag.code === "TY0037" &&
+          diag.message.includes("missing required field 'b'")
+      )
+    ).toBe(true);
+    expect(result.diagnostics.some((diag) => diag.code === "TY9999")).toBe(
+      false
+    );
+  });
+
+  it("rejects spreads from union values that are not structurally enumerable", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub obj A { x: i32 }
+pub obj B { y: i32 }
+
+fn spread(v: A | B)
+  { ...v }
+
+pub fn main()
+  spread(A { x: 1 })
+`,
+    });
+
+    const result = expectCompileFailure(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+
+    expect(
+      result.diagnostics.some(
+        (diag) =>
+          diag.code === "TY0027" &&
+          diag.message.includes("expected 'structural object'")
+      )
+    ).toBe(true);
+  });
+
   it("orders modules topologically for lowering", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");
