@@ -13,7 +13,7 @@ report on it and suggest direction in your final response.
 Voyd has not yet been released. Breaking changes to public APIs are ok. Just
 note the breaking changes if made.
 
-Keep this AGENTS.md file up to date. Add notes to agent notes that can assist future development. Remove notes that are no longer useful.
+Keep this AGENTS.md file up to date.
 
 # Debugging
 
@@ -41,12 +41,3 @@ You should generally add unit tests (especially e2e ones)
 - Prefer functional control flow (`map`, `filter`, etc) to imperative loop constructs.
 - Files should be ordered by importance. The main export of a file at the top.
 - Use a single parameter object for functions containing more than three params to name the parameters on call.
-
-# Agent Notes
-
-- Prefer consuming compiler functionality through public pipeline entrypoints (`@voyd/compiler` or `@voyd/compiler/pipeline.js`) instead of deep-importing internal module graph files from other packages.
-- In `@voyd/compiler` exports, keep `.js` subpath mappings (`"./*.js"`) unambiguous. A broad `./*` export can break bundlers that resolve `*.js` subpaths in development mode.
-- `apps/vscode` server bundling resolves compiler imports during the build; keep `@voyd/compiler` declared in `apps/vscode` devDependencies so Turbo/CI task isolation can resolve it consistently.
-- `@voyd/language-server` publishes runtime entrypoints from `dist/`; its `build` script should emit JS with `tsconfig.build.json` (not `--noEmit`).
-- Keep language-server source range checks end-exclusive (`[start, end)`) to match LSP cursor semantics at token boundaries.
-- Keep top-level declaration semantics centralized in `packages/compiler/src/modules/use-decl.ts` (`classifyTopLevelDecl`). Module graph loading, semantic binding, and macro re-export collection should consume this shared classifier to avoid drift.
