@@ -196,7 +196,7 @@ export type MonomorphizedInstanceInfo = {
 };
 
 export type MonomorphizedInstanceRequest = {
-  callee: ProgramFunctionId;
+  callee: SymbolRef;
   typeArgs: readonly TypeId[];
 };
 
@@ -557,7 +557,7 @@ export const buildProgramCodegenView = (
 
   const recordInstantiation = (
     functionId: ProgramFunctionId,
-    typeArgs: readonly TypeId[]
+    typeArgs: readonly TypeId[],
   ): void => {
     if (!instantiationTypeArgsAreConcrete(typeArgs)) {
       return;
@@ -1052,15 +1052,19 @@ export const buildProgramCodegenView = (
 	    });
 	  });
 
-	  (options?.instances ?? []).forEach((instance) => {
-	    const ref = symbols.refOf(instance.callee);
-	    const signature = modulesById.get(ref.moduleId)?.typing.functions.getSignature(ref.symbol);
-	    const expectedTypeParams = signature?.typeParams?.length ?? 0;
-	    if (expectedTypeParams !== instance.typeArgs.length) {
-	      return;
-	    }
-	    recordInstantiation(instance.callee, instance.typeArgs);
-	  });
+  (options?.instances ?? []).forEach((instance) => {
+    const functionId = getProgramFunctionId(instance.callee);
+    if (functionId === undefined) {
+      return;
+    }
+    const ref = symbols.refOf(functionId);
+    const signature = modulesById.get(ref.moduleId)?.typing.functions.getSignature(ref.symbol);
+    const expectedTypeParams = signature?.typeParams?.length ?? 0;
+    if (expectedTypeParams !== instance.typeArgs.length) {
+      return;
+    }
+    recordInstantiation(functionId, instance.typeArgs);
+  });
 
 	  const getInstanceIdForFunctionAndArgs = (
 	    functionId: ProgramFunctionId,
@@ -1235,12 +1239,16 @@ export const buildProgramCodegenView = (
 	  });
 
   (options?.instances ?? []).forEach((info) => {
-    const instanceId = getInstanceIdForFunctionAndArgs(info.callee, info.typeArgs);
+    const functionId = getProgramFunctionId(info.callee);
+    if (functionId === undefined) {
+      return;
+    }
+    const instanceId = getInstanceIdForFunctionAndArgs(functionId, info.typeArgs);
     if (instanceId === undefined) {
       return;
     }
     const data: MonomorphizedInstanceInfo = {
-      callee: info.callee,
+      callee: functionId,
       typeArgs: info.typeArgs,
       instanceId,
     };
