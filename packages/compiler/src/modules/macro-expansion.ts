@@ -1,5 +1,6 @@
-import { Form, IdentifierAtom, isForm, isIdentifierAtom } from "../parser/index.js";
+import { Form, IdentifierAtom, isForm } from "../parser/index.js";
 import { toSourceSpan } from "../semantics/utils.js";
+import { parseTopLevelUseDecl } from "./use-decl.js";
 import { parseUsePaths, type NormalizedUseEntry } from "./use-path.js";
 import { resolveModuleRequest } from "./resolve.js";
 import { modulePathToString } from "./path.js";
@@ -250,26 +251,14 @@ const collectUseEntries = (form: Form): UseEntryWithVisibility[] => {
 const parseUseDecl = (
   form: Form
 ): { entries: NormalizedUseEntry[]; visibility: "module" | "pub" } | null => {
-  let index = 0;
-  let visibility: "module" | "pub" = "module";
-  const first = form.at(0);
-
-  if (isIdentifierAtom(first) && first.value === "pub") {
-    visibility = "pub";
-    index += 1;
-  }
-
-  const keyword = form.at(index);
-  if (!isIdentifierAtom(keyword) || keyword.value !== "use") {
+  const parsed = parseTopLevelUseDecl(form);
+  if (!parsed) {
     return null;
   }
-
-  const pathExpr = form.at(index + 1);
-  if (!pathExpr) {
-    throw new Error("use statement missing a path");
-  }
-
-  return { entries: parseUsePaths(pathExpr, toSourceSpan(form)), visibility };
+  return {
+    entries: parseUsePaths(parsed.pathExpr, toSourceSpan(form)),
+    visibility: parsed.visibility,
+  };
 };
 
 const cloneMacroWithAlias = (

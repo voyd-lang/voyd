@@ -21,6 +21,7 @@ import {
 } from "../../../diagnostics/index.js";
 import { modulePathToString } from "../../../modules/path.js";
 import type { ModulePath } from "../../../modules/types.js";
+import { parseTopLevelUseDecl } from "../../../modules/use-decl.js";
 import {
   parseUsePaths,
   type NormalizedUseEntry,
@@ -237,26 +238,13 @@ type ParsedUseDecl = {
 };
 
 const parseUseDecl = (form: Form): ParsedUseDecl | null => {
-  let index = 0;
-  let visibility: HirVisibility = moduleVisibility();
-  const first = form.at(0);
-
-  if (isIdentifierAtom(first) && first.value === "pub") {
-    visibility = packageVisibility();
-    index += 1;
-  }
-
-  const keyword = form.at(index);
-  if (!isIdentifierAtom(keyword) || keyword.value !== "use") {
+  const parsed = parseTopLevelUseDecl(form);
+  if (!parsed) {
     return null;
   }
-
-  const pathExpr = form.at(index + 1);
-  if (!pathExpr) {
-    throw new Error("use statement missing a path");
-  }
-
-  const entries = parseUsePaths(pathExpr, toSourceSpan(form));
+  const visibility: HirVisibility =
+    parsed.visibility === "pub" ? packageVisibility() : moduleVisibility();
+  const entries = parseUsePaths(parsed.pathExpr, toSourceSpan(form));
   return { form, visibility, entries };
 };
 

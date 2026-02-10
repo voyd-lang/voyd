@@ -89,7 +89,7 @@ fn f()
   let w: Vec = v       // OK
 ```
 
-### 2.3 Public API (`pub use` in `pkg.voyd`)
+### 2.3 Public API (`pub use` / `pub <module-expression>` in `pkg.voyd`)
 
 Level 3 (public API) is controlled **exclusively** by the package root file, `pkg.voyd`.
 
@@ -106,13 +106,14 @@ use src::module_a::all
 
 pub use src::module_a::Vec
 pub use src::module_a::make_vec
+pub src::module_a::helper
 
 pub fn work() ...
 ```
 
 Rules:
 
-* Only items referenced in `pub use` (or `pub fn`, `pub obj` declared in `pkg.voyd` itself) are visible to other packages.
+* Only items referenced in `pub use` / `pub <module-expression>` (or `pub fn`, `pub obj` declared in `pkg.voyd` itself) are visible to other packages.
 * Submodules are re-exported from their parent modules with `pub use self::submodule` (module name) or `pub use self::submodule::all` (flattened).
 * `pub use` supports the same selectors as `use`, so you can export `all` or export specific names with a group: `pub use std::optional::fns::{ some, none }`.
 * Other packages can import using:

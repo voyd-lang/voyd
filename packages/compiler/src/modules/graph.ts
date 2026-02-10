@@ -14,6 +14,7 @@ import {
   resolveModuleFile,
 } from "./path.js";
 import { resolveModuleRequest } from "./resolve.js";
+import { parseTopLevelUseDecl } from "./use-decl.js";
 import { parseUsePaths } from "./use-path.js";
 import { moduleDiagnosticToDiagnostic } from "./diagnostics.js";
 import type {
@@ -338,22 +339,12 @@ const parseUse = (
 ):
   | { entries: ReturnType<typeof parseUsePaths>; span?: SourceSpan }
   | undefined => {
-  if (form.calls("use")) {
-    const span = toSourceSpan(form);
-    return { entries: parseUsePaths(form.at(1), span), span };
+  const parsed = parseTopLevelUseDecl(form);
+  if (!parsed) {
+    return undefined;
   }
-
-  const keyword = form.at(1);
-  if (
-    form.calls("pub") &&
-    isIdentifierAtom(keyword) &&
-    keyword.value === "use"
-  ) {
-    const span = toSourceSpan(form);
-    return { entries: parseUsePaths(form.at(2), span), span };
-  }
-
-  return undefined;
+  const span = toSourceSpan(form);
+  return { entries: parseUsePaths(parsed.pathExpr, span), span };
 };
 
 type InlineModuleTree = {
