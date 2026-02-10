@@ -239,6 +239,31 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("does not emit false unresolved-import diagnostics for std src aliases", async () => {
+    const project = await createProject({
+      "std/msgpack.voyd": `use src::msgpack::fns::marker\n\npub fn top() -> i32\n  marker()\n`,
+      "std/msgpack/fns.voyd": `use std::fixed_array::fns::hidden\n\npub fn marker() -> i32\n  hidden()\n`,
+      "std/fixed_array/fns.voyd": `pub fn hidden() -> i32\n  1\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("std/msgpack.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: {
+          src: project.filePathFor("std"),
+          std: project.filePathFor("std"),
+        },
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      expect(diagnostics).toHaveLength(0);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it(
     "renames labeled parameters, including external labels",
     async () => {
