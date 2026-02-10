@@ -27,29 +27,48 @@ type MacroDefinitionInput = {
   visibility: "pub" | "module";
 };
 
+type ExpandFunctionalMacroOptions = {
+  scope?: MacroScope;
+  strictMacroSignatures?: boolean;
+  onError?: (error: SyntaxMacroError) => void;
+};
+
 export const functionalMacroExpander: SyntaxMacro = (form: Form): Form =>
   expandFunctionalMacros(form).form;
 
 export const expandFunctionalMacros = (
   form: Form,
-  options: { scope?: MacroScope } = {}
+  options: ExpandFunctionalMacroOptions = {}
 ): { form: Form; exports: MacroDefinition[] } => {
   const scope = options.scope ?? new MacroScope();
   const exports: MacroDefinition[] = [];
-  return { form: ensureForm(expandExpr(form, scope, exports)), exports };
+  try {
+    return { form: ensureForm(expandExpr(form, scope, exports, options)), exports };
+  } catch (error) {
+    const macroError = toSyntaxMacroError(error, form);
+    if (!options.onError) {
+      throw macroError;
+    }
+    options.onError(macroError);
+    return { form, exports };
+  }
 };
 
 const expandExpr = (
   expr: Expr,
   scope: MacroScope,
-  exports: MacroDefinition[]
+  exports: MacroDefinition[],
+  options: ExpandFunctionalMacroOptions
 ): Expr => {
   if (!isForm(expr)) {
     return expr;
   }
 
   try {
-    const macroDefinition = parseMacroDefinition(expr);
+    const macroDefinition = parseMacroDefinition({
+      form: expr,
+      strictMacroSignatures: options.strictMacroSignatures === true,
+    });
     if (macroDefinition) {
       return expandMacroDefinition(macroDefinition, scope, exports);
     }
@@ -62,10 +81,10 @@ const expandExpr = (
     const macro = isIdentifierAtom(head) ? scope.getMacro(head.value) : undefined;
     if (macro) {
       const expanded = expandMacroCall(expr, macro, scope);
-      return expandExpr(expanded, scope, exports);
+      return expandExpr(expanded, scope, exports, options);
     }
 
-    return expandForm(expr, scope, exports);
+    return expandForm(expr, scope, exports, options);
   } catch (error) {
     throw toSyntaxMacroError(error, expr);
   }
@@ -74,7 +93,8 @@ const expandExpr = (
 const expandForm = (
   form: Form,
   scope: MacroScope,
-  exports: MacroDefinition[]
+  exports: MacroDefinition[],
+  options: ExpandFunctionalMacroOptions
 ): Form => {
   const head = form.at(0);
   const bodyScope = createsScopeFor(head) ? scope.child() : scope;
@@ -87,7 +107,7 @@ const expandForm = (
       return;
     }
 
-    result.push(expandExpr(child, bodyScope, exports));
+    result.push(expandExpr(child, bodyScope, exports, options));
   });
 
   return recreateForm(form, result);
@@ -158,7 +178,13 @@ const createsScopeFor = (expr: Expr | undefined): boolean =>
 const isModuleName = (head: Expr | undefined, index: number): boolean =>
   isIdentifierAtom(head) && head.value === "module" && index === 1;
 
-const parseMacroDefinition = (form: Form): MacroDefinitionInput | null => {
+const parseMacroDefinition = ({
+  form,
+  strictMacroSignatures,
+}: {
+  form: Form;
+  strictMacroSignatures: boolean;
+}): MacroDefinitionInput | null => {
   let index = 0;
   let visibility: MacroDefinitionInput["visibility"] = "module";
   const first = form.at(0);
@@ -174,7 +200,16 @@ const parseMacroDefinition = (form: Form): MacroDefinitionInput | null => {
   }
 
   const signatureExpr = form.at(index + 1);
-  if (!signatureExpr || !isForm(signatureExpr)) {
+  if (!signatureExpr) {
+    if (strictMacroSignatures) {
+      throw new Error("macro missing signature");
+    }
+    return null;
+  }
+  if (!isForm(signatureExpr)) {
+    if (strictMacroSignatures) {
+      throw new Error("Expected form for macro signature");
+    }
     return null;
   }
 

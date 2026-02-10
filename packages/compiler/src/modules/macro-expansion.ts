@@ -40,10 +40,16 @@ export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
     const scope = new MacroScope();
     importedMacros.forEach((macro) => scope.defineMacro(macro));
 
-    const functionalResult = tryExpandFunctionalMacros({
-      ast: module.ast,
+    const functionalResult = expandFunctionalMacros(module.ast, {
       scope,
-      diagnostics,
+      strictMacroSignatures: true,
+      onError: (error) =>
+        reportMacroExpansionError({
+          diagnostics,
+          macroName: "functionalMacroExpander",
+          error,
+          fallbackSyntax: module.ast,
+        }),
     });
     module.ast = applyPostSyntaxMacros(functionalResult.form, diagnostics);
     const { exports } = functionalResult;
@@ -63,28 +69,6 @@ export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
 type MacroExportTable = Map<string, MacroDefinition>;
 type UseEntryWithVisibility = NormalizedUseEntry & {
   visibility: "module" | "pub";
-};
-
-const tryExpandFunctionalMacros = ({
-  ast,
-  scope,
-  diagnostics,
-}: {
-  ast: Form;
-  scope: MacroScope;
-  diagnostics: Diagnostic[];
-}): { form: Form; exports: MacroDefinition[] } => {
-  try {
-    return expandFunctionalMacros(ast, { scope });
-  } catch (error) {
-    reportMacroExpansionError({
-      diagnostics,
-      macroName: "functionalMacroExpander",
-      error,
-      fallbackSyntax: ast,
-    });
-    return { form: ast, exports: [] };
-  }
 };
 
 const applyPostSyntaxMacros = (form: Form, diagnostics: Diagnostic[]): Form => {
