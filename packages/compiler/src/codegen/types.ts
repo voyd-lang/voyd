@@ -906,11 +906,10 @@ export const getStructuralTypeInfo = (
     const methodEntries = createMethodLookupEntries({
       impls:
         typeof nominalId === "number"
-          ? ctx.program.traits.getImplsByNominal(nominalId)
+          ? instantiateTraitImplsForNominal({ nominal: nominalId, ctx })
           : [],
       ctx,
       typeLabel,
-      runtimeType,
     });
     const methodTableExpr =
       ctx.rtt.methodLookupHelpers.createTable(methodEntries);
@@ -1154,16 +1153,71 @@ const pickMethodMetadata = (
   return concrete ?? metas[0];
 };
 
+const instantiateTraitImplsForNominal = ({
+  nominal,
+  ctx,
+}: {
+  nominal: TypeId;
+  ctx: CodegenContext;
+}): readonly CodegenTraitImplInstance[] => {
+  const existing = ctx.program.traits.getImplsByNominal(nominal);
+  if (existing.length > 0) {
+    return existing;
+  }
+
+  const nominalDesc = ctx.program.types.getTypeDesc(nominal);
+  if (nominalDesc.kind !== "nominal-object") {
+    return [];
+  }
+
+  const templates = ctx.program.traits.getImplTemplates();
+  if (templates.length === 0) {
+    return [];
+  }
+
+  const instances = templates.flatMap((template) => {
+    const match = ctx.program.types.unify(nominal, template.target, {
+      location: ctx.module.hir.module.ast,
+      reason: "codegen trait impl instantiation",
+      variance: "invariant",
+    });
+    if (!match.ok) {
+      return [];
+    }
+    const trait = ctx.program.types.substitute(template.trait, match.substitution);
+    const target = ctx.program.types.substitute(template.target, match.substitution);
+    return [
+      {
+        trait,
+        traitSymbol: template.traitSymbol,
+        target,
+        methods: template.methods.map(({ traitMethod, implMethod }) => ({
+          traitMethod,
+          implMethod,
+        })),
+        implSymbol: template.implSymbol,
+      },
+    ] satisfies readonly CodegenTraitImplInstance[];
+  });
+
+  const seen = new Set<ProgramSymbolId>();
+  return instances.filter((impl) => {
+    if (seen.has(impl.implSymbol)) {
+      return false;
+    }
+    seen.add(impl.implSymbol);
+    return true;
+  });
+};
+
 const createMethodLookupEntries = ({
   impls,
   ctx,
   typeLabel,
-  runtimeType,
 }: {
   impls: readonly CodegenTraitImplInstance[];
   ctx: CodegenContext;
   typeLabel: string;
-  runtimeType: binaryen.Type;
 }): MethodAccessorEntry[] => {
   if (impls.length === 0) {
     return [];
@@ -1177,16 +1231,55 @@ const createMethodLookupEntries = ({
       const metas = ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
       const meta = pickMethodMetadata(metas);
       if (!meta) {
+        const signature = ctx.program.functions.getSignature(
+          implRef.moduleId,
+          implRef.symbol,
+        );
+        if (signature?.typeParams.length) {
+          // Generic impl methods may be unreachable in this compilation unit.
+          // Skip unresolved entries so unrelated RTT generation can continue.
+          return;
+        }
         throw new Error(
-          `codegen missing metadata for trait method impl ${implMethod}`,
+          `codegen missing metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
       }
-      const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+      if (!meta.wasmName) {
+        throw new Error(
+          `codegen missing wasm symbol for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
+        );
+      }
+      if (meta.paramTypes.length === 0) {
+        throw new Error(
+          `codegen missing receiver parameter type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
+        );
+      }
+      if (meta.effectful && meta.paramTypes.length < 2) {
+        throw new Error(
+          `codegen missing effectful receiver parameter type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
+        );
+      }
       const receiverTypeIndex = meta.effectful ? 1 : 0;
-      const receiverType = meta.paramTypes[receiverTypeIndex] ?? runtimeType;
+      const receiverType = meta.paramTypes[receiverTypeIndex];
+      if (typeof receiverType !== "number") {
+        throw new Error(
+          `codegen missing receiver wasm type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
+        );
+      }
       const userParamTypes = meta.effectful
         ? meta.paramTypes.slice(2)
         : meta.paramTypes.slice(1);
+      if (meta.effectful && userParamTypes.length + 2 !== meta.paramTypes.length) {
+        throw new Error(
+          `codegen malformed effectful parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
+        );
+      }
+      if (!meta.effectful && userParamTypes.length + 1 !== meta.paramTypes.length) {
+        throw new Error(
+          `codegen malformed parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
+        );
+      }
+      const handlerParamType = ctx.effectsRuntime.handlerFrameType;
       const params = meta.effectful
         ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
         : [ctx.rtt.baseType, ...userParamTypes];

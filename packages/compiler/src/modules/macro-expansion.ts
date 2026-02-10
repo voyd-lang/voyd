@@ -49,6 +49,7 @@ export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
       exportsByModule,
       localExports,
     });
+    module.macroExports = Array.from(exportedMacros.keys());
     exportsByModule.set(id, exportedMacros);
   });
 

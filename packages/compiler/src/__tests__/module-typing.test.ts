@@ -297,4 +297,92 @@ pub fn main() -> i32
     const { diagnostics } = analyzeModules({ graph });
     expect(diagnostics).toHaveLength(0);
   });
+
+  it("resolves trait-object method calls for traits imported from another module", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::iterator
+pub use self::counter
+pub use std::counter::{ Counter, new_counter }
+pub use std::iterator::{ Iterable, Iterator }
+`,
+      [`${stdRoot}${sep}iterator.voyd`]: `
+pub trait Iterable
+  fn iterate(self) -> Iterator
+
+pub trait Iterator
+  fn next(~self) -> i32
+`,
+      [`${stdRoot}${sep}counter.voyd`]: `
+use std::iterator::all
+
+pub obj Counter { value: i32 }
+
+pub fn new_counter(value: i32) -> Counter
+  Counter { value }
+
+impl Iterable for Counter
+  api fn iterate(self) -> Iterator
+    self
+
+impl Iterator for Counter
+  api fn next(~self) -> i32
+    self.value
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+pub fn main() -> i32
+  let ~iter = new_counter(7).iterate()
+  iter.next()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("allows named macro re-exports in std package imports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::iterator
+pub use std::iterator::{ Iterable, Iterator, for }
+`,
+      [`${stdRoot}${sep}iterator.voyd`]: `
+pub trait Iterable<T>
+  fn iterate(self) -> Iterator<T>
+
+pub trait Iterator<T>
+  fn next(~self) -> i32
+
+pub macro for(case)
+  0
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+pub fn main() -> i32
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
 });

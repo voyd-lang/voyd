@@ -227,6 +227,7 @@ export type ObjectLayoutIndex = {
 export type TraitDispatchIndex = {
   getImplsByNominal(nominal: TypeId): readonly CodegenTraitImplInstance[];
   getImplsByTrait(traitSymbol: ProgramSymbolId): readonly CodegenTraitImplInstance[];
+  getImplTemplates(): readonly CodegenTraitImplTemplate[];
   getTraitMethodImpl(symbol: ProgramSymbolId): CodegenTraitMethodImpl | undefined;
 };
 
@@ -336,6 +337,14 @@ export type CodegenTraitMethodImpl = {
   traitMethodSymbol: ProgramSymbolId;
 };
 
+export type CodegenTraitImplTemplate = {
+  trait: TypeId;
+  traitSymbol: ProgramSymbolId;
+  target: TypeId;
+  methods: readonly { traitMethod: ProgramSymbolId; implMethod: ProgramSymbolId }[];
+  implSymbol: ProgramSymbolId;
+};
+
 export type CodegenTraitImplInstance = {
   trait: TypeId;
   traitSymbol: ProgramSymbolId;
@@ -398,6 +407,7 @@ export const buildProgramCodegenView = (
   const traitImplsByNominal = new Map<TypeId, CodegenTraitImplInstance[]>();
   const traitImplsByTrait = new Map<ProgramSymbolId, CodegenTraitImplInstance[]>();
   const traitMethodImpls = new Map<ProgramSymbolId, CodegenTraitMethodImpl>();
+  const traitImplTemplates: CodegenTraitImplTemplate[] = [];
 
 	  const callsByModuleRaw = new Map<
 	    string,
@@ -767,6 +777,24 @@ export const buildProgramCodegenView = (
       const target = { moduleId: imp.target.moduleId, symbol: imp.target.symbol };
       importsByLocal.set(imp.local, target);
     });
+    getSymbolTable(mod)
+      .snapshot()
+      .symbols.forEach((symbol) => {
+        const metadata = (symbol.metadata ?? {}) as {
+          import?: { moduleId?: unknown; symbol?: unknown };
+        };
+        const importModuleId = metadata.import?.moduleId;
+        const importSymbol = metadata.import?.symbol;
+        if (
+          typeof importModuleId === "string" &&
+          typeof importSymbol === "number"
+        ) {
+          importsByLocal.set(symbol.id, {
+            moduleId: importModuleId,
+            symbol: importSymbol,
+          });
+        }
+      });
 
     importTargetsByModule.set(mod.moduleId, importsByLocal);
 
@@ -851,9 +879,34 @@ export const buildProgramCodegenView = (
       .map(([traitMethod, implMethod]) => ({
         traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
         implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
-      }));
+    }));
     return toCodegenTraitImplInstance({ impl, traitSymbol, implSymbol, methods });
   };
+
+  const toCodegenTraitImplTemplateForModule = ({
+    template,
+    moduleId,
+  }: {
+    template: {
+      trait: TypeId;
+      traitSymbol: SymbolId;
+      target: TypeId;
+      methods: ReadonlyMap<SymbolId, SymbolId>;
+      implSymbol: SymbolId;
+    };
+    moduleId: string;
+  }): CodegenTraitImplTemplate => ({
+    trait: template.trait,
+    traitSymbol: canonicalProgramSymbolIdOf(moduleId, template.traitSymbol),
+    target: template.target,
+    methods: Array.from(template.methods.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([traitMethod, implMethod]) => ({
+        traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
+        implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
+      })),
+    implSymbol: canonicalProgramSymbolIdOf(moduleId, template.implSymbol),
+  });
 
   stableModules.forEach((mod) => {
     for (const template of mod.typing.objects.templates()) {
@@ -902,6 +955,15 @@ export const buildProgramCodegenView = (
       const bucket = traitImplsByTrait.get(traitSymbolId) ?? [];
       bucket.push(...impls.map((impl) => toCodegenTraitImplInstanceForModule(impl, mod.moduleId)));
       traitImplsByTrait.set(traitSymbolId, bucket);
+    });
+
+    mod.typing.traits.getImplTemplates().forEach((template) => {
+      traitImplTemplates.push(
+        toCodegenTraitImplTemplateForModule({
+          template,
+          moduleId: mod.moduleId,
+        }),
+      );
     });
 
     mod.typing.traitMethodImpls.forEach((info, symbol) => {
@@ -1213,6 +1275,14 @@ export const buildProgramCodegenView = (
     traitImplsByTrait.set(symbol, unique);
   });
 
+  traitImplTemplates.sort((a, b) => a.implSymbol - b.implSymbol);
+  const seenTraitImplTemplates = new Set<ProgramSymbolId>();
+  const uniqueTraitImplTemplates = traitImplTemplates.filter((template) => {
+    if (seenTraitImplTemplates.has(template.implSymbol)) return false;
+    seenTraitImplTemplates.add(template.implSymbol);
+    return true;
+  });
+
   allInstances.sort((a, b) => a.instanceId - b.instanceId);
 
   const types: TypeLoweringIndex = {
@@ -1308,6 +1378,7 @@ export const buildProgramCodegenView = (
   const traits: TraitDispatchIndex = {
     getImplsByNominal: (nominal) => traitImplsByNominal.get(nominal) ?? [],
     getImplsByTrait: (traitSymbol) => traitImplsByTrait.get(traitSymbol) ?? [],
+    getImplTemplates: () => uniqueTraitImplTemplates,
     getTraitMethodImpl: (symbol) => traitMethodImpls.get(symbol),
   };
 

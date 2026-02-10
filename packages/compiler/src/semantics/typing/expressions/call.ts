@@ -55,7 +55,7 @@ import type {
   TypingState,
 } from "../types.js";
 import { assertMemberAccess } from "../visibility.js";
-import type { SymbolRef } from "../symbol-ref.js";
+import { symbolRefEquals, type SymbolRef } from "../symbol-ref.js";
 import {
   canonicalSymbolRefForTypingContext,
   localSymbolForSymbolRef,
@@ -515,7 +515,7 @@ export const typeMethodCallExpr = (
       state,
       span: expr.span,
     });
-  } else {
+  } else if (selected.symbolRef.moduleId === ctx.moduleId) {
     assertMemberAccess({
       symbol: selected.symbol,
       ctx,
@@ -552,6 +552,7 @@ export const typeMethodCallExpr = (
       calleeSymbol: selected.symbol,
       seedSubstitution: getTraitMethodTypeBindings({
         calleeSymbol: selected.symbol,
+        calleeModuleId: selectedRef.moduleId,
         receiverType,
         signature: selected.signature,
         ctx,
@@ -1162,34 +1163,142 @@ const ensureMutableArgument = ({
   });
 };
 
+const traitMethodImplMetadataFor = ({
+  symbol,
+  moduleId,
+  ctx,
+}: {
+  symbol: SymbolId;
+  moduleId?: string;
+  ctx: TypingContext;
+}):
+  | {
+      metadata: NonNullable<ReturnType<TypingContext["traitMethodImpls"]["get"]>>;
+      moduleId: string;
+    }
+  | undefined => {
+  const resolvedModuleId = moduleId ?? ctx.moduleId;
+  if (resolvedModuleId === ctx.moduleId) {
+    const metadata = ctx.traitMethodImpls.get(symbol);
+    return metadata ? { metadata, moduleId: resolvedModuleId } : undefined;
+  }
+  const dependency = ctx.dependencies.get(resolvedModuleId);
+  const metadata = dependency?.typing.traitMethodImpls.get(symbol);
+  return metadata ? { metadata, moduleId: resolvedModuleId } : undefined;
+};
+
+const symbolNameForRef = ({
+  ref,
+  ctx,
+}: {
+  ref: SymbolRef;
+  ctx: TypingContext;
+}): string | undefined => {
+  if (ref.moduleId === ctx.moduleId) {
+    const local = localSymbolForSymbolRef(ref, ctx);
+    return typeof local === "number"
+      ? ctx.symbolTable.getSymbol(local).name
+      : undefined;
+  }
+  const dependency = ctx.dependencies.get(ref.moduleId);
+  return dependency
+    ? dependency.symbolTable.getSymbol(ref.symbol).name
+    : undefined;
+};
+
+const traitSymbolRefFor = ({
+  traitSymbol,
+  moduleId,
+  ctx,
+}: {
+  traitSymbol: SymbolId;
+  moduleId: string;
+  ctx: TypingContext;
+}): SymbolRef =>
+  canonicalSymbolRefForModuleSymbol({
+    moduleId,
+    symbol: traitSymbol,
+    ctx,
+  });
+
+const traitMethodRefFor = ({
+  traitRef,
+  methodName,
+  ctx,
+}: {
+  traitRef: SymbolRef;
+  methodName: string;
+  ctx: TypingContext;
+}): SymbolRef | undefined => {
+  const traitScope =
+    traitRef.moduleId === ctx.moduleId
+      ? { symbolTable: ctx.symbolTable, traits: ctx.traits }
+      : (() => {
+          const dependency = ctx.dependencies.get(traitRef.moduleId);
+          return dependency
+            ? {
+                symbolTable: dependency.symbolTable,
+                traits: dependency.typing.traits,
+              }
+            : undefined;
+        })();
+  if (!traitScope) {
+    return undefined;
+  }
+
+  const traitDecl = traitScope.traits.getDecl(traitRef.symbol);
+  if (!traitDecl) {
+    return undefined;
+  }
+  const traitMethod = traitDecl.methods.find(
+    (method) => traitScope.symbolTable.getSymbol(method.symbol).name === methodName,
+  );
+  if (!traitMethod) {
+    return undefined;
+  }
+
+  return canonicalSymbolRefForModuleSymbol({
+    moduleId: traitRef.moduleId,
+    symbol: traitMethod.symbol,
+    ctx,
+  });
+};
+
 const adjustTraitDispatchParameters = ({
   args,
   params,
   calleeSymbol,
+  calleeModuleId,
   ctx,
 }: {
   args: readonly Arg[];
   params: readonly ParamSignature[];
   calleeSymbol: SymbolId;
+  calleeModuleId?: string;
   ctx: TypingContext;
 }): readonly ParamSignature[] | undefined => {
   if (args.length === 0 || params.length === 0) {
     return undefined;
   }
-  const methodMetadata = ctx.traitMethodImpls.get(calleeSymbol);
+  const methodMetadata = traitMethodImplMetadataFor({
+    symbol: calleeSymbol,
+    moduleId: calleeModuleId,
+    ctx,
+  });
   if (!methodMetadata) {
     return undefined;
   }
   const receiverType = args[0].type;
   const receiverDesc = ctx.arena.get(receiverType);
-  const receiverTraitSymbol =
-    receiverDesc.kind === "trait"
-      ? localSymbolForSymbolRef(receiverDesc.owner, ctx)
-      : undefined;
-  if (
-    receiverDesc.kind !== "trait" ||
-    receiverTraitSymbol !== methodMetadata.traitSymbol
-  ) {
+  if (receiverDesc.kind !== "trait") {
+    return undefined;
+  }
+  const methodTraitRef = traitSymbolRefFor({
+    traitSymbol: methodMetadata.metadata.traitSymbol,
+    moduleId: methodMetadata.moduleId,
+    ctx,
+  });
+  if (!symbolRefEquals(receiverDesc.owner, methodTraitRef)) {
     return undefined;
   }
   const updated = [{ ...params[0]!, type: receiverType }, ...params.slice(1)];
@@ -1217,12 +1326,14 @@ const instantiationRefKeyForCall = ({
 
 const getTraitMethodTypeBindings = ({
   calleeSymbol,
+  calleeModuleId,
   receiverType,
   signature,
   ctx,
   state,
 }: {
   calleeSymbol: SymbolId;
+  calleeModuleId?: string;
   receiverType: TypeId;
   signature: FunctionSignature;
   ctx: TypingContext;
@@ -1235,22 +1346,35 @@ const getTraitMethodTypeBindings = ({
   if (receiverDesc.kind !== "trait") {
     return undefined;
   }
-  const methodMetadata = ctx.traitMethodImpls.get(calleeSymbol);
+  const methodMetadata = traitMethodImplMetadataFor({
+    symbol: calleeSymbol,
+    moduleId: calleeModuleId,
+    ctx,
+  });
   if (!methodMetadata) {
     return undefined;
   }
-  const receiverTraitSymbol = localSymbolForSymbolRef(receiverDesc.owner, ctx);
-  if (
-    typeof receiverTraitSymbol !== "number" ||
-    receiverTraitSymbol !== methodMetadata.traitSymbol
-  ) {
+  const methodTraitRef = traitSymbolRefFor({
+    traitSymbol: methodMetadata.metadata.traitSymbol,
+    moduleId: methodMetadata.moduleId,
+    ctx,
+  });
+  if (!symbolRefEquals(receiverDesc.owner, methodTraitRef)) {
     return undefined;
   }
-  const template = ctx.traits
-    .getImplTemplatesForTrait(receiverTraitSymbol)
+  const templates =
+    methodMetadata.moduleId === ctx.moduleId
+      ? ctx.traits.getImplTemplatesForTrait(methodMetadata.metadata.traitSymbol)
+      : (ctx.dependencies
+          .get(methodMetadata.moduleId)
+          ?.typing.traits.getImplTemplatesForTrait(
+            methodMetadata.metadata.traitSymbol,
+          ) ?? []);
+  const template = templates
     .find(
       (entry) =>
-        entry.methods.get(methodMetadata.traitMethodSymbol) === calleeSymbol,
+        entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
+        calleeSymbol,
     );
   if (!template) {
     return undefined;
@@ -1561,7 +1685,10 @@ const selectMethodCallCandidate = ({
   }
 
   if (traitDispatch) {
-    return { selected: traitDispatch, usedTraitDispatch: true };
+    return {
+      selected: traitDispatch,
+      usedTraitDispatch: true,
+    };
   }
 
   if (matches.length === 0) {
@@ -1685,6 +1812,7 @@ const resolveQualifiedTraitMethodCallCandidates = ({
 }): MethodCallResolution => {
   const traitRecord = ctx.symbolTable.getSymbol(traitSymbol);
   const traitName = traitRecord.name;
+  const qualifiedTraitRef = canonicalSymbolRefForTypingContext(traitSymbol, ctx);
 
   if (receiverType === ctx.primitives.unknown) {
     return { candidates: [], receiverName: traitName };
@@ -1692,8 +1820,7 @@ const resolveQualifiedTraitMethodCallCandidates = ({
 
   const receiverDesc = ctx.arena.get(receiverType);
   if (receiverDesc.kind === "trait") {
-    const receiverTraitSymbol = localSymbolForSymbolRef(receiverDesc.owner, ctx);
-    if (receiverTraitSymbol !== traitSymbol) {
+    if (!symbolRefEquals(receiverDesc.owner, qualifiedTraitRef)) {
       return { candidates: [], receiverName: traitName };
     }
     const resolution = resolveTraitMethodCandidates({
@@ -1710,8 +1837,7 @@ const resolveQualifiedTraitMethodCallCandidates = ({
       if (traitTypeDesc.kind !== "trait") {
         return [];
       }
-      const symbol = localSymbolForSymbolRef(traitTypeDesc.owner, ctx);
-      if (symbol !== traitSymbol) {
+      if (!symbolRefEquals(traitTypeDesc.owner, qualifiedTraitRef)) {
         return [];
       }
       const resolution = resolveTraitMethodCandidates({
@@ -1737,7 +1863,22 @@ const resolveQualifiedTraitMethodCallCandidates = ({
   }
 
   const candidates = nominalResolution.candidates.filter(
-    (candidate) => ctx.traitMethodImpls.get(candidate.symbol)?.traitSymbol === traitSymbol,
+    (candidate) => {
+      const methodMetadata = traitMethodImplMetadataFor({
+        symbol: candidate.symbol,
+        moduleId: candidate.symbolRef.moduleId,
+        ctx,
+      });
+      if (!methodMetadata) {
+        return false;
+      }
+      const methodTraitRef = traitSymbolRefFor({
+        traitSymbol: methodMetadata.metadata.traitSymbol,
+        moduleId: methodMetadata.moduleId,
+        ctx,
+      });
+      return symbolRefEquals(methodTraitRef, qualifiedTraitRef);
+    },
   );
 
   return { candidates, receiverName: traitName };
@@ -1880,7 +2021,7 @@ const typeOperatorOverloadCall = ({
       state,
       span: call.span,
     });
-  } else {
+  } else if (selected.symbolRef.moduleId === ctx.moduleId) {
     assertMemberAccess({
       symbol: selected.symbol,
       ctx,
@@ -1941,22 +2082,53 @@ const resolveNominalMethodCandidates = ({
           methodName,
           ctx,
         });
-  const receiverName =
-    ownerRef.moduleId === ctx.moduleId
-      ? (() => {
-          const owner = localSymbolForSymbolRef(ownerRef, ctx);
-          return typeof owner === "number"
-            ? ctx.symbolTable.getSymbol(owner).name
-            : undefined;
-        })()
-      : (() => {
-          const dependency = ctx.dependencies.get(ownerRef.moduleId);
-          return dependency
-            ? dependency.symbolTable.getSymbol(ownerRef.symbol).name
-            : undefined;
-        })();
+  const receiverName = symbolNameForRef({ ref: ownerRef, ctx });
 
   return { candidates, receiverName };
+};
+
+const canonicalSymbolRefForModuleSymbol = ({
+  moduleId,
+  symbol,
+  ctx,
+  seen = new Set<string>(),
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+  ctx: TypingContext;
+  seen?: Set<string>;
+}): SymbolRef => {
+  const key = `${moduleId}:${symbol}`;
+  if (seen.has(key)) {
+    return { moduleId, symbol };
+  }
+  seen.add(key);
+
+  if (moduleId === ctx.moduleId) {
+    return canonicalSymbolRefForTypingContext(symbol, ctx);
+  }
+
+  const dependency = ctx.dependencies.get(moduleId);
+  if (!dependency) {
+    return { moduleId, symbol };
+  }
+
+  const metadata = (dependency.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+    import?: { moduleId?: unknown; symbol?: unknown };
+  };
+  if (
+    typeof metadata.import?.moduleId === "string" &&
+    typeof metadata.import?.symbol === "number"
+  ) {
+    return canonicalSymbolRefForModuleSymbol({
+      moduleId: metadata.import.moduleId,
+      symbol: metadata.import.symbol,
+      ctx,
+      seen,
+    });
+  }
+
+  return { moduleId, symbol };
 };
 
 const resolveTraitMethodCandidates = ({
@@ -1971,50 +2143,102 @@ const resolveTraitMethodCandidates = ({
   if (receiverDesc.kind !== "trait") {
     return { candidates: [] };
   }
-  const traitSymbol = localSymbolForSymbolRef(receiverDesc.owner, ctx);
-  if (typeof traitSymbol !== "number") {
-    return { candidates: [] };
-  }
-  const traitDecl = ctx.traits.getDecl(traitSymbol);
-  const traitName = ctx.symbolTable.getSymbol(traitSymbol).name;
-  const traitMethod = traitDecl?.methods.find(
-    (method) => ctx.symbolTable.getSymbol(method.symbol).name === methodName,
-  );
-  if (!traitMethod) {
-    return { candidates: [], receiverName: traitName };
+  const receiverName = symbolNameForRef({ ref: receiverDesc.owner, ctx });
+  const receiverMethodRef = traitMethodRefFor({
+    traitRef: receiverDesc.owner,
+    methodName,
+    ctx,
+  });
+  if (!receiverMethodRef) {
+    return { candidates: [], receiverName };
   }
 
-  const implMethods = new Set<SymbolId>();
-  const impls = ctx.traitImplsByTrait.get(traitSymbol) ?? [];
-  impls.forEach((impl) => {
-    const methodSymbol = impl.methods.get(traitMethod.symbol);
-    if (typeof methodSymbol === "number") {
-      implMethods.add(methodSymbol);
+  const candidates: MethodCallCandidate[] = [];
+  const seen = new Set<string>();
+  const addCandidate = ({
+    moduleId,
+    symbol,
+    signature,
+    nameForSymbol,
+  }: {
+    moduleId: string;
+    symbol: SymbolId;
+    signature: FunctionSignature;
+    nameForSymbol?: SymbolNameResolver;
+  }) => {
+    const key = `${moduleId}:${symbol}`;
+    if (seen.has(key)) {
+      return;
     }
-  });
-  const templates = ctx.traits.getImplTemplatesForTrait(traitSymbol);
-  templates.forEach((template) => {
-    const methodSymbol = template.methods.get(traitMethod.symbol);
-    if (typeof methodSymbol === "number") {
-      implMethods.add(methodSymbol);
-    }
-  });
-
-  const candidates = Array.from(implMethods).map((symbol) => {
-    const signature = ctx.functions.getSignature(symbol);
-    if (!signature) {
-      throw new Error(
-        `missing type signature for trait method ${getSymbolName(symbol, ctx)}`,
-      );
-    }
-    return {
+    seen.add(key);
+    candidates.push({
       symbol,
       signature,
-      symbolRef: { moduleId: ctx.moduleId, symbol },
-    };
+      symbolRef: { moduleId, symbol },
+      nameForSymbol,
+    });
+  };
+
+  const collectFromModule = ({
+    moduleId,
+    symbolTable,
+    functions,
+    traitMethodImpls,
+    nameForSymbol,
+  }: {
+    moduleId: string;
+    symbolTable: TypingContext["symbolTable"];
+    functions: TypingContext["functions"];
+    traitMethodImpls: ReadonlyMap<
+      SymbolId,
+      { traitSymbol: SymbolId; traitMethodSymbol: SymbolId }
+    >;
+    nameForSymbol?: SymbolNameResolver;
+  }) => {
+    traitMethodImpls.forEach((metadata, implMethod) => {
+      const traitRef = canonicalSymbolRefForModuleSymbol({
+        moduleId,
+        symbol: metadata.traitSymbol,
+        ctx,
+      });
+      if (!symbolRefEquals(traitRef, receiverDesc.owner)) {
+        return;
+      }
+      const traitMethodRef = canonicalSymbolRefForModuleSymbol({
+        moduleId,
+        symbol: metadata.traitMethodSymbol,
+        ctx,
+      });
+      if (!symbolRefEquals(traitMethodRef, receiverMethodRef)) {
+        return;
+      }
+      const signature = functions.getSignature(implMethod);
+      if (!signature) {
+        throw new Error(
+          `missing type signature for trait method ${symbolTable.getSymbol(implMethod).name}`,
+        );
+      }
+      addCandidate({ moduleId, symbol: implMethod, signature, nameForSymbol });
+    });
+  };
+
+  collectFromModule({
+    moduleId: ctx.moduleId,
+    symbolTable: ctx.symbolTable,
+    functions: ctx.functions,
+    traitMethodImpls: ctx.traitMethodImpls,
+  });
+  ctx.dependencies.forEach((dependency) => {
+    collectFromModule({
+      moduleId: dependency.moduleId,
+      symbolTable: dependency.symbolTable,
+      functions: dependency.typing.functions,
+      traitMethodImpls: dependency.typing.traitMethodImpls,
+      nameForSymbol: (symbol) => dependency.symbolTable.getSymbol(symbol).name,
+    });
   });
 
-  return { candidates, receiverName: traitName };
+  return { candidates, receiverName };
 };
 
 const resolveFreeFunctionCandidates = ({
@@ -2227,6 +2451,7 @@ const typeFunctionCall = ({
     hasTypeParams && args.length > 0
       ? getTraitMethodTypeBindings({
           calleeSymbol,
+          calleeModuleId: resolvedModuleId,
           receiverType: args[0]!.type,
           signature,
           ctx,
@@ -2260,6 +2485,7 @@ const typeFunctionCall = ({
       args,
       params: instantiation.parameters,
       calleeSymbol,
+      calleeModuleId: resolvedModuleId,
       ctx,
     }) ?? instantiation.parameters;
 
@@ -2832,7 +3058,11 @@ const typeOverloadedCall = (
 };
 
 const resolveTraitDispatchOverload = <
-  T extends { symbol: SymbolId; signature: FunctionSignature },
+  T extends {
+    symbol: SymbolId;
+    signature: FunctionSignature;
+    symbolRef?: SymbolRef;
+  },
 >({
   candidates,
   args,
@@ -2853,38 +3083,65 @@ const resolveTraitDispatchOverload = <
     return undefined;
   }
 
-  const receiverTraitSymbol = localSymbolForSymbolRef(receiverDesc.owner, ctx);
-  if (typeof receiverTraitSymbol !== "number") {
-    return undefined;
-  }
-  const impls = ctx.traitImplsByTrait.get(receiverTraitSymbol);
-  const templates = ctx.traits.getImplTemplatesForTrait(receiverTraitSymbol);
-  if (
-    (!impls || impls.length === 0) &&
-    (!templates || templates.length === 0)
-  ) {
-    return undefined;
-  }
-
   const allowUnknown = state.mode === "relaxed";
-  const candidate = candidates.find(({ symbol, signature }) => {
+  const candidate = candidates.find((candidate) => {
+    const { symbol, signature } = candidate;
     if (signature.parameters.length === 0) {
       return false;
     }
-    const methodMetadata = ctx.traitMethodImpls.get(symbol);
-    if (!methodMetadata || methodMetadata.traitSymbol !== receiverTraitSymbol) {
+    const candidateModuleId = candidate.symbolRef?.moduleId ?? ctx.moduleId;
+    const methodMetadata = traitMethodImplMetadataFor({
+      symbol,
+      moduleId: candidateModuleId,
+      ctx,
+    });
+    if (!methodMetadata) {
       return false;
     }
+
+    const methodTraitRef = traitSymbolRefFor({
+      traitSymbol: methodMetadata.metadata.traitSymbol,
+      moduleId: methodMetadata.moduleId,
+      ctx,
+    });
+    if (!symbolRefEquals(methodTraitRef, receiverDesc.owner)) {
+      return false;
+    }
+
+    const impls =
+      methodMetadata.moduleId === ctx.moduleId
+        ? ctx.traitImplsByTrait.get(methodMetadata.metadata.traitSymbol)
+        : ctx.dependencies
+            .get(methodMetadata.moduleId)
+            ?.typing.traitImplsByTrait.get(
+              methodMetadata.metadata.traitSymbol,
+            );
+    const templates =
+      methodMetadata.moduleId === ctx.moduleId
+        ? ctx.traits.getImplTemplatesForTrait(
+            methodMetadata.metadata.traitSymbol,
+          )
+        : ctx.dependencies
+            .get(methodMetadata.moduleId)
+            ?.typing.traits.getImplTemplatesForTrait(
+              methodMetadata.metadata.traitSymbol,
+            );
+
+    if ((!impls || impls.length === 0) && (!templates || templates.length === 0)) {
+      return false;
+    }
+
     const hasMatchingImpl =
       impls?.some(
         (entry) =>
-          entry.methods.get(methodMetadata.traitMethodSymbol) === symbol &&
+          entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
+            symbol &&
           typeSatisfies(receiver.type, entry.trait, ctx, state),
       ) === true;
     const hasCompatibleTemplate =
       templates?.some((template) => {
         const implMethod = template.methods.get(
-          methodMetadata.traitMethodSymbol,
+          methodMetadata.metadata.traitMethodSymbol,
         );
         if (implMethod !== symbol) {
           return false;
@@ -2905,6 +3162,7 @@ const resolveTraitDispatchOverload = <
         args,
         params: signature.parameters,
         calleeSymbol: symbol,
+        calleeModuleId: candidateModuleId,
         ctx,
       }) ?? signature.parameters;
     return callArgumentsSatisfyParams({
@@ -2924,6 +3182,7 @@ const resolveTraitDispatchOverload = <
       args,
       params: candidate.signature.parameters,
       calleeSymbol: candidate.symbol,
+      calleeModuleId: candidate.symbolRef?.moduleId ?? ctx.moduleId,
       ctx,
     }) ?? candidate.signature.parameters;
 

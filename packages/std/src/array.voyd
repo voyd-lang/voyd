@@ -1,6 +1,7 @@
 use std::fixed_array::fns::{ new_fixed_array }
 use std::optional::types::all
 use std::test::assertions::all
+use std::iterator::all
 
 pub obj Array<T> {
   storage: FixedArray<T>,
@@ -364,6 +365,23 @@ fn resized_storage<T>(storage: FixedArray<T>, count: i32, required: i32) -> Fixe
     count: count
   })
   new_storage
+
+obj ArrayIterator<T> {
+  array: Array<T>,
+  index: i32
+}
+
+impl<T> Iterable<T> for Array<T>
+  api fn iterate(self) -> Iterator<T>
+    ArrayIterator<T> { array: self, index: 0 }
+
+impl<T> Iterator<T> for ArrayIterator<T>
+  api fn next(~self) -> Option<T>
+    if self.index >= self.array.length() then:
+      return None {}
+    let value = self.array.get(self.index)
+    self.index = self.index + 1
+    value
 
 test "array new from fixed array preserves length":
   var fixed = new_fixed_array<i32>(2)
