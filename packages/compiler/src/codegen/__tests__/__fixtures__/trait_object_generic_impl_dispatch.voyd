@@ -1,0 +1,22 @@
+trait Value<T>
+  fn value(self) -> T
+
+obj Box<T> {
+  value: T
+}
+
+impl<T> Value<T> for Box<T>
+  fn value(self) -> T
+    self.value
+
+fn take_i32(v: Value<i32>) -> i32
+  v.value()
+
+fn take_f64(v: Value<f64>) -> f64
+  v.value()
+
+pub fn main() -> i32
+  take_i32(Box<i32> { value: 7 })
+
+pub fn main_f64() -> f64
+  take_f64(Box<f64> { value: 2.5 })

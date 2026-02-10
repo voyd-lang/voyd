@@ -732,7 +732,12 @@ const buildTraitMethodMap = ({
     return undefined;
   }
   const traitDecl = ctx.decls.getTrait(traitSymbol);
-  if (!traitDecl) {
+  const traitMethods =
+    traitDecl?.methods ??
+    ctx.traits.getDecl(traitSymbol)?.methods.map((method) => ({
+      symbol: method.symbol,
+    }));
+  if (!traitMethods || traitMethods.length === 0) {
     return undefined;
   }
   const implMethodsByName = new Map(
@@ -742,7 +747,7 @@ const buildTraitMethodMap = ({
     ])
   );
   const methodMap = new Map<SymbolId, SymbolId>();
-  traitDecl.methods.forEach((traitMethod) => {
+  traitMethods.forEach((traitMethod) => {
     const implMethod = implMethodsByName.get(
       getSymbolName(traitMethod.symbol, ctx)
     );

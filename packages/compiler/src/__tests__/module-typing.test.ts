@@ -4,7 +4,7 @@ import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleGraph, ModuleHost, ModulePath } from "../modules/types.js";
 import { analyzeModules, loadModuleGraph } from "../pipeline.js";
-import type { Diagnostic } from "../diagnostics/index.js";
+import { DiagnosticError, type Diagnostic } from "../diagnostics/index.js";
 import { modulePathToString } from "../modules/path.js";
 import type { ModuleExportTable } from "../semantics/modules.js";
 import {
@@ -77,6 +77,46 @@ const analyzeModulesWithSharedInterners = ({
     semantics.set(id, result);
     exports.set(id, result.exports);
     diagnostics.push(...result.diagnostics);
+  });
+
+  return { semantics, diagnostics };
+};
+
+const analyzeModulesWithIsolatedInterners = ({
+  graph,
+}: {
+  graph: ModuleGraph;
+}): {
+  semantics: Map<string, SemanticsPipelineResult>;
+  diagnostics: Diagnostic[];
+} => {
+  const order = sortModules(graph);
+  const semantics = new Map<string, SemanticsPipelineResult>();
+  const exports = new Map<string, ModuleExportTable>();
+  const diagnostics: Diagnostic[] = [];
+
+  order.forEach((id) => {
+    const module = graph.modules.get(id);
+    if (!module) {
+      return;
+    }
+    try {
+      const result = semanticsPipeline({
+        module,
+        graph,
+        exports,
+        dependencies: semantics,
+      });
+      semantics.set(id, result);
+      exports.set(id, result.exports);
+      diagnostics.push(...result.diagnostics);
+    } catch (error) {
+      if (error instanceof DiagnosticError) {
+        diagnostics.push(...error.diagnostics);
+        return;
+      }
+      throw error;
+    }
   });
 
   return { semantics, diagnostics };
@@ -291,6 +331,146 @@ pub fn main() -> i32
     const graph = await loadModuleGraph({
       entryPath: `${root}${sep}main.voyd`,
       roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("resolves trait-object method calls for traits imported from another module", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::iterator
+pub use self::counter
+pub use std::counter::{ Counter, new_counter }
+pub use std::iterator::{ Iterable, Iterator }
+`,
+      [`${stdRoot}${sep}iterator.voyd`]: `
+pub trait Iterable
+  fn iterate(self) -> Iterator
+
+pub trait Iterator
+  fn next(~self) -> i32
+`,
+      [`${stdRoot}${sep}counter.voyd`]: `
+use std::iterator::all
+
+pub obj Counter { value: i32 }
+
+pub fn new_counter(value: i32) -> Counter
+  Counter { value }
+
+impl Iterable for Counter
+  api fn iterate(self) -> Iterator
+    self
+
+impl Iterator for Counter
+  api fn next(~self) -> i32
+    self.value
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+pub fn main() -> i32
+  let ~iter = new_counter(7).iterate()
+  iter.next()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("resolves imported trait-object method calls when modules use isolated interners", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::iterator
+pub use self::counter
+pub use std::counter::{ Counter, new_counter }
+pub use std::iterator::{ Iterable, Iterator }
+`,
+      [`${stdRoot}${sep}iterator.voyd`]: `
+pub trait Iterable
+  fn iterate(self) -> Iterator
+
+pub trait Iterator
+  fn next(~self) -> i32
+`,
+      [`${stdRoot}${sep}counter.voyd`]: `
+use std::iterator::all
+
+pub obj Counter { value: i32 }
+
+pub fn new_counter(value: i32) -> Counter
+  Counter { value }
+
+impl Iterable for Counter
+  api fn iterate(self) -> Iterator
+    self
+
+impl Iterator for Counter
+  api fn next(~self) -> i32
+    self.value
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+pub fn main() -> i32
+  let ~iter = new_counter(7).iterate()
+  iter.next()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModulesWithIsolatedInterners({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
+  it("allows named macro re-exports in std package imports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::iterator
+pub use std::iterator::{ Iterable, Iterator, for }
+`,
+      [`${stdRoot}${sep}iterator.voyd`]: `
+pub trait Iterable<T>
+  fn iterate(self) -> Iterator<T>
+
+pub trait Iterator<T>
+  fn next(~self) -> i32
+
+pub macro for(case)
+  0
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+pub fn main() -> i32
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
       host,
     });
 

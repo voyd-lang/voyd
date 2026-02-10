@@ -3,11 +3,281 @@ import { ensureObjectType, getObjectTemplate } from "./type-system.js";
 import { importableMetadataFrom } from "../imports/metadata.js";
 import type { DependencySemantics, TypingContext } from "./types.js";
 import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
+import type {
+  HirMethodParameter,
+  HirTraitMethod,
+  HirTypeExpr,
+  HirTypeParameter,
+} from "../hir/index.js";
 import {
   createTranslation,
   mapTypeParam,
+  translateFunctionSignature,
 } from "./import-type-translation.js";
 import { findExport, makeDependencyContext } from "./import-resolution.js";
+
+const targetTypeIncludesDependencySymbol = ({
+  type,
+  dependency,
+  symbol,
+}: {
+  type: TypeId;
+  dependency: DependencySemantics;
+  symbol: SymbolId;
+}): boolean => {
+  const desc = dependency.typing.arena.get(type);
+  if (desc.kind === "nominal-object") {
+    return (
+      desc.owner.moduleId === dependency.moduleId && desc.owner.symbol === symbol
+    );
+  }
+  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+    return targetTypeIncludesDependencySymbol({
+      type: desc.nominal,
+      dependency,
+      symbol,
+    });
+  }
+  if (desc.kind === "recursive") {
+    return targetTypeIncludesDependencySymbol({
+      type: desc.body,
+      dependency,
+      symbol,
+    });
+  }
+  return false;
+};
+
+const mapImportedTraitMethodSymbol = ({
+  dependency,
+  dependencyTraitSymbol,
+  dependencyTraitMethodSymbol,
+  localTraitSymbol,
+  ctx,
+}: {
+  dependency: DependencySemantics;
+  dependencyTraitSymbol: SymbolId;
+  dependencyTraitMethodSymbol: SymbolId;
+  localTraitSymbol: SymbolId;
+  ctx: TypingContext;
+}): SymbolId => {
+  const depTraitDecl = dependency.typing.traits.getDecl(dependencyTraitSymbol);
+  const localTraitDecl = ctx.traits.getDecl(localTraitSymbol);
+  if (!depTraitDecl || !localTraitDecl) {
+    return mapDependencySymbolToLocal({
+      owner: dependencyTraitMethodSymbol,
+      dependency,
+      ctx,
+      allowUnexported: true,
+    });
+  }
+
+  const depMethodIndex = depTraitDecl.methods.findIndex(
+    (method) => method.symbol === dependencyTraitMethodSymbol,
+  );
+  if (depMethodIndex < 0) {
+    return mapDependencySymbolToLocal({
+      owner: dependencyTraitMethodSymbol,
+      dependency,
+      ctx,
+      allowUnexported: true,
+    });
+  }
+
+  const localMethod = localTraitDecl.methods[depMethodIndex];
+  if (localMethod) {
+    return localMethod.symbol;
+  }
+
+  return mapDependencySymbolToLocal({
+    owner: dependencyTraitMethodSymbol,
+    dependency,
+    ctx,
+    allowUnexported: true,
+  });
+};
+
+const translateTraitTypeExpr = ({
+  expr,
+  translation,
+  mapSymbol,
+}: {
+  expr: HirTypeExpr | undefined;
+  translation: (id: TypeId) => TypeId;
+  mapSymbol: (symbol: SymbolId | undefined) => SymbolId | undefined;
+}): HirTypeExpr | undefined => {
+  if (!expr) {
+    return undefined;
+  }
+
+  const typeId =
+    typeof expr.typeId === "number" ? translation(expr.typeId) : undefined;
+
+  switch (expr.typeKind) {
+    case "named":
+      return {
+        ...expr,
+        symbol: mapSymbol(expr.symbol),
+        typeArguments: expr.typeArguments?.map(
+          (arg) =>
+            translateTraitTypeExpr({ expr: arg, translation, mapSymbol }) ??
+            arg
+        ),
+        typeId,
+      };
+    case "object":
+      return {
+        ...expr,
+        fields: expr.fields.map((field) => ({
+          ...field,
+          type:
+            translateTraitTypeExpr({
+              expr: field.type,
+              translation,
+              mapSymbol,
+            }) ?? field.type,
+        })),
+        typeId,
+      };
+    case "tuple":
+      return {
+        ...expr,
+        elements: expr.elements.map(
+          (entry) =>
+            translateTraitTypeExpr({ expr: entry, translation, mapSymbol }) ??
+            entry
+        ),
+        typeId,
+      };
+    case "union":
+      return {
+        ...expr,
+        members: expr.members.map(
+          (entry) =>
+            translateTraitTypeExpr({ expr: entry, translation, mapSymbol }) ??
+            entry
+        ),
+        typeId,
+      };
+    case "intersection":
+      return {
+        ...expr,
+        members: expr.members.map(
+          (entry) =>
+            translateTraitTypeExpr({ expr: entry, translation, mapSymbol }) ??
+            entry
+        ),
+        typeId,
+      };
+    case "function":
+      return {
+        ...expr,
+        typeParameters: expr.typeParameters?.map((param) =>
+          translateTraitTypeParameter({ param, translation, mapSymbol })
+        ),
+        parameters: expr.parameters.map((param) => ({
+          ...param,
+          type:
+            translateTraitTypeExpr({
+              expr: param.type,
+              translation,
+              mapSymbol,
+            }) ?? param.type,
+        })),
+        returnType:
+          translateTraitTypeExpr({
+            expr: expr.returnType,
+            translation,
+            mapSymbol,
+          }) ?? expr.returnType,
+        effectType: translateTraitTypeExpr({
+          expr: expr.effectType,
+          translation,
+          mapSymbol,
+        }),
+        typeId,
+      };
+    case "self":
+      return {
+        ...expr,
+        typeId,
+      };
+    default: {
+      const _exhaustive: never = expr;
+      return _exhaustive;
+    }
+  }
+};
+
+const translateTraitTypeParameter = ({
+  param,
+  translation,
+  mapSymbol,
+}: {
+  param: HirTypeParameter;
+  translation: (id: TypeId) => TypeId;
+  mapSymbol: (symbol: SymbolId | undefined) => SymbolId | undefined;
+}): HirTypeParameter => ({
+  ...param,
+  symbol: mapSymbol(param.symbol) ?? param.symbol,
+  constraint: translateTraitTypeExpr({
+    expr: param.constraint,
+    translation,
+    mapSymbol,
+  }),
+  defaultType: translateTraitTypeExpr({
+    expr: param.defaultType,
+    translation,
+    mapSymbol,
+  }),
+});
+
+const translateTraitMethodParameter = ({
+  parameter,
+  translation,
+  mapSymbol,
+}: {
+  parameter: HirMethodParameter;
+  translation: (id: TypeId) => TypeId;
+  mapSymbol: (symbol: SymbolId | undefined) => SymbolId | undefined;
+}): HirMethodParameter => ({
+  ...parameter,
+  symbol: mapSymbol(parameter.symbol) ?? parameter.symbol,
+  type: translateTraitTypeExpr({
+    expr: parameter.type,
+    translation,
+    mapSymbol,
+  }),
+});
+
+const translateTraitMethod = ({
+  method,
+  translation,
+  mapSymbol,
+}: {
+  method: HirTraitMethod;
+  translation: (id: TypeId) => TypeId;
+  mapSymbol: (symbol: SymbolId | undefined) => SymbolId | undefined;
+}): HirTraitMethod => ({
+  ...method,
+  symbol: mapSymbol(method.symbol) ?? method.symbol,
+  typeParameters: method.typeParameters?.map((param) =>
+    translateTraitTypeParameter({ param, translation, mapSymbol })
+  ),
+  parameters: method.parameters.map((parameter) =>
+    translateTraitMethodParameter({ parameter, translation, mapSymbol })
+  ),
+  returnType: translateTraitTypeExpr({
+    expr: method.returnType,
+    translation,
+    mapSymbol,
+  }),
+  effectType: translateTraitTypeExpr({
+    expr: method.effectType,
+    translation,
+    mapSymbol,
+  }),
+});
 
 export const registerImportedObjectTemplate = ({
   dependency,
@@ -125,6 +395,287 @@ export const registerImportedObjectTemplate = ({
     const state = createTypingState();
     ensureObjectType(localSymbol, ctx, state, []);
   }
+};
+
+export const registerImportedTraitDecl = ({
+  dependency,
+  dependencySymbol,
+  localSymbol,
+  ctx,
+}: {
+  dependency: DependencySemantics;
+  dependencySymbol: SymbolId;
+  localSymbol: SymbolId;
+  ctx: TypingContext;
+}): void => {
+  if (ctx.traits.getDecl(localSymbol)) {
+    return;
+  }
+  const traitDecl = dependency.typing.traits.getDecl(dependencySymbol);
+  if (!traitDecl) {
+    return;
+  }
+
+  const symbolMap = new Map<SymbolId, SymbolId>();
+  symbolMap.set(dependencySymbol, localSymbol);
+
+  const mapSymbol = (symbol: SymbolId): SymbolId => {
+    const existing = symbolMap.get(symbol);
+    if (typeof existing === "number") {
+      return existing;
+    }
+    const record = dependency.symbolTable.getSymbol(symbol);
+    const mapped = ctx.symbolTable.declare({
+      name: record.name,
+      kind: record.kind,
+      declaredAt: ctx.hir.module.ast,
+    });
+    symbolMap.set(symbol, mapped);
+    return mapped;
+  };
+  const typeParamMap = new Map<TypeParamId, TypeParamId>();
+  const cache = new Map<TypeId, TypeId>();
+  const translation = createTranslation({
+    sourceArena: dependency.typing.arena,
+    targetArena: ctx.arena,
+    sourceEffects: dependency.typing.effects,
+    targetEffects: ctx.effects,
+    paramMap: typeParamMap,
+    cache,
+    mapSymbol: (owner) =>
+      mapDependencySymbolToLocal({
+        owner,
+        dependency,
+        ctx,
+        allowUnexported: true,
+      }),
+  });
+  const mapTypeExprSymbol = (
+    symbol: SymbolId | undefined,
+  ): SymbolId | undefined => {
+    if (typeof symbol !== "number") {
+      return symbol;
+    }
+    const existing = symbolMap.get(symbol);
+    if (typeof existing === "number") {
+      return existing;
+    }
+    let record: Readonly<{ kind: string }>;
+    try {
+      record = dependency.symbolTable.getSymbol(symbol);
+    } catch {
+      return symbol;
+    }
+    return record.kind === "type-parameter"
+      ? mapSymbol(symbol)
+      : mapDependencySymbolToLocal({
+          owner: symbol,
+          dependency,
+          ctx,
+          allowUnexported: true,
+        });
+  };
+
+  ctx.traits.registerDecl({
+    ...traitDecl,
+    symbol: localSymbol,
+    typeParameters: traitDecl.typeParameters?.map((param) =>
+      translateTraitTypeParameter({
+        param,
+        translation,
+        mapSymbol: mapTypeExprSymbol,
+      })
+    ),
+    requirements: traitDecl.requirements?.map((requirement) =>
+      translateTraitTypeExpr({
+        expr: requirement,
+        translation,
+        mapSymbol: mapTypeExprSymbol,
+      }) ?? requirement
+    ),
+    methods: traitDecl.methods.map((method) =>
+      translateTraitMethod({
+        method: {
+          ...method,
+          symbol: mapDependencySymbolToLocal({
+            owner: method.symbol,
+            dependency,
+            ctx,
+            allowUnexported: true,
+          }),
+        },
+        translation,
+        mapSymbol: mapTypeExprSymbol,
+      })
+    ),
+  });
+  const name = ctx.symbolTable.getSymbol(localSymbol).name;
+  ctx.traits.setName(name, localSymbol);
+};
+
+export const registerImportedTraitImplTemplates = ({
+  dependency,
+  dependencySymbol,
+  ctx,
+}: {
+  dependency: DependencySemantics;
+  dependencySymbol: SymbolId;
+  ctx: TypingContext;
+}): void => {
+  const relevantTemplates = dependency.typing.traits
+    .getImplTemplates()
+    .filter(
+      (template) =>
+        targetTypeIncludesDependencySymbol({
+          type: template.target,
+          dependency,
+          symbol: dependencySymbol,
+        }),
+    );
+
+  if (relevantTemplates.length === 0) {
+    return;
+  }
+
+  relevantTemplates.forEach((template) => {
+    const localTraitSymbol = mapDependencySymbolToLocal({
+      owner: template.traitSymbol,
+      dependency,
+      ctx,
+      allowUnexported: true,
+    });
+    registerImportedTraitDecl({
+      dependency,
+      dependencySymbol: template.traitSymbol,
+      localSymbol: localTraitSymbol,
+      ctx,
+    });
+
+    const localImplSymbol = mapDependencySymbolToLocal({
+      owner: template.implSymbol,
+      dependency,
+      ctx,
+      allowUnexported: true,
+    });
+    const templateAlreadyRegistered = ctx.traits
+      .getImplTemplates()
+      .some((entry) => entry.implSymbol === localImplSymbol);
+    if (templateAlreadyRegistered) {
+      return;
+    }
+
+    const typeParamMap = new Map<TypeParamId, TypeParamId>();
+    const cache = new Map<TypeId, TypeId>();
+    const translation = createTranslation({
+      sourceArena: dependency.typing.arena,
+      targetArena: ctx.arena,
+      sourceEffects: dependency.typing.effects,
+      targetEffects: ctx.effects,
+      paramMap: typeParamMap,
+      cache,
+      mapSymbol: (owner) =>
+        mapDependencySymbolToLocal({
+          owner,
+          dependency,
+          ctx,
+          allowUnexported: true,
+        }),
+    });
+
+    const typeParamSymbolMap = new Map<SymbolId, SymbolId>();
+    const mapTypeParamSymbol = (symbol: SymbolId): SymbolId => {
+      const existing = typeParamSymbolMap.get(symbol);
+      if (typeof existing === "number") {
+        return existing;
+      }
+      const depRecord = dependency.symbolTable.getSymbol(symbol);
+      const local = ctx.symbolTable.declare({
+        name: depRecord.name,
+        kind: "type-parameter",
+        declaredAt: ctx.hir.module.ast,
+      });
+      typeParamSymbolMap.set(symbol, local);
+      return local;
+    };
+
+    const methods = new Map<SymbolId, SymbolId>();
+    template.methods.forEach(
+      (dependencyImplMethodSymbol, dependencyTraitMethodSymbol) => {
+        const traitMethodSymbol = mapImportedTraitMethodSymbol({
+          dependency,
+          dependencyTraitSymbol: template.traitSymbol,
+          dependencyTraitMethodSymbol,
+          localTraitSymbol,
+          ctx,
+        });
+        const implMethodSymbol = mapDependencySymbolToLocal({
+          owner: dependencyImplMethodSymbol,
+          dependency,
+          ctx,
+          allowUnexported: true,
+        });
+        methods.set(traitMethodSymbol, implMethodSymbol);
+
+        if (!ctx.functions.getSignature(implMethodSymbol)) {
+          const dependencySignature =
+            dependency.typing.functions.getSignature(dependencyImplMethodSymbol);
+          if (dependencySignature) {
+            const signatureTypeParamMap = new Map<TypeParamId, TypeParamId>();
+            const signatureCache = new Map<TypeId, TypeId>();
+            const signatureTranslation = createTranslation({
+              sourceArena: dependency.typing.arena,
+              targetArena: ctx.arena,
+              sourceEffects: dependency.typing.effects,
+              targetEffects: ctx.effects,
+              paramMap: signatureTypeParamMap,
+              cache: signatureCache,
+              mapSymbol: (owner) =>
+                mapDependencySymbolToLocal({
+                  owner,
+                  dependency,
+                  ctx,
+                  allowUnexported: true,
+                }),
+            });
+            const translated = translateFunctionSignature({
+              signature: dependencySignature,
+              translation: signatureTranslation,
+              dependency,
+              ctx,
+              paramMap: signatureTypeParamMap,
+            });
+            ctx.functions.setSignature(implMethodSymbol, translated.signature);
+            ctx.table.setSymbolScheme(implMethodSymbol, translated.signature.scheme);
+            ctx.valueTypes.set(implMethodSymbol, translated.signature.typeId);
+          }
+        }
+      },
+    );
+
+    ctx.traits.registerImplTemplate({
+      trait: translation(template.trait),
+      traitSymbol: localTraitSymbol,
+      target: translation(template.target),
+      typeParams: template.typeParams.map((param) => ({
+        symbol: mapTypeParamSymbol(param.symbol),
+        typeParam: mapTypeParam(param.typeParam, typeParamMap, ctx),
+        constraint: param.constraint ? translation(param.constraint) : undefined,
+        typeRef: translation(param.typeRef),
+      })),
+      methods,
+      implSymbol: localImplSymbol,
+    });
+
+    methods.forEach((implMethodSymbol, traitMethodSymbol) => {
+      if (ctx.traitMethodImpls.has(implMethodSymbol)) {
+        return;
+      }
+      ctx.traitMethodImpls.set(implMethodSymbol, {
+        traitSymbol: localTraitSymbol,
+        traitMethodSymbol,
+      });
+    });
+  });
 };
 
 export const mapDependencySymbolToLocal = ({

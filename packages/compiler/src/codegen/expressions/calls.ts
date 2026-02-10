@@ -246,16 +246,18 @@ export const compileCallExpr = (
       throw new Error("codegen missing overload resolution for indirect call");
     }
     const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
-    const traitDispatch = compileTraitDispatchCall({
-      expr,
-      calleeSymbol: targetRef.symbol,
-      calleeModuleId: targetRef.moduleId,
-      ctx,
-      fnCtx,
-      compileExpr,
-      tailPosition,
-      expectedResultTypeId,
-    });
+    const traitDispatch = expectTraitDispatch
+      ? compileTraitDispatchCall({
+          expr,
+          calleeSymbol: targetRef.symbol,
+          calleeModuleId: targetRef.moduleId,
+          ctx,
+          fnCtx,
+          compileExpr,
+          tailPosition,
+          expectedResultTypeId,
+        })
+      : undefined;
     if (traitDispatch) {
       return traitDispatch;
     }
@@ -323,16 +325,18 @@ export const compileCallExpr = (
       (targets && targets.size === 1 ? targets.values().next().value : undefined);
     if (typeof targetFunctionId === "number" && targetFunctionId !== calleeId) {
       const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
-      const traitDispatch = compileTraitDispatchCall({
-        expr,
-        calleeSymbol: targetRef.symbol,
-        calleeModuleId: targetRef.moduleId,
-        ctx,
-        fnCtx,
-        compileExpr,
-        tailPosition,
-        expectedResultTypeId,
-      });
+      const traitDispatch = expectTraitDispatch
+        ? compileTraitDispatchCall({
+            expr,
+            calleeSymbol: targetRef.symbol,
+            calleeModuleId: targetRef.moduleId,
+            ctx,
+            fnCtx,
+            compileExpr,
+            tailPosition,
+            expectedResultTypeId,
+          })
+        : undefined;
       if (traitDispatch) {
         return traitDispatch;
       }
@@ -360,15 +364,17 @@ export const compileCallExpr = (
       });
     }
 
-    const traitDispatch = compileTraitDispatchCall({
-      expr,
-      calleeSymbol: callee.symbol,
-      ctx,
-      fnCtx,
-      compileExpr,
-      tailPosition,
-      expectedResultTypeId,
-    });
+    const traitDispatch = expectTraitDispatch
+      ? compileTraitDispatchCall({
+          expr,
+          calleeSymbol: callee.symbol,
+          ctx,
+          fnCtx,
+          compileExpr,
+          tailPosition,
+          expectedResultTypeId,
+        })
+      : undefined;
     if (traitDispatch) {
       return traitDispatch;
     }
@@ -481,16 +487,18 @@ export const compileMethodCallExpr = (
 
   const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
   const callView = toMethodCallView(expr);
-  const traitDispatch = compileTraitDispatchCall({
-    expr: callView,
-    calleeSymbol: targetRef.symbol,
-    calleeModuleId: targetRef.moduleId,
-    ctx,
-    fnCtx,
-    compileExpr,
-    tailPosition,
-    expectedResultTypeId,
-  });
+  const traitDispatch = callInfo.traitDispatch
+    ? compileTraitDispatchCall({
+        expr: callView,
+        calleeSymbol: targetRef.symbol,
+        calleeModuleId: targetRef.moduleId,
+        ctx,
+        fnCtx,
+        compileExpr,
+        tailPosition,
+        expectedResultTypeId,
+      })
+    : undefined;
   if (traitDispatch) {
     return traitDispatch;
   }

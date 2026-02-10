@@ -29,6 +29,8 @@ import {
   mapLocalSymbolToDependency,
   mapTypeParam,
   registerImportedObjectTemplate,
+  registerImportedTraitDecl,
+  registerImportedTraitImplTemplates,
   translateFunctionSignature,
 } from "./imports-internal/index.js";
 
@@ -37,6 +39,8 @@ export {
   importTargetFor,
   mapDependencySymbolToLocal,
   registerImportedObjectTemplate,
+  registerImportedTraitDecl,
+  registerImportedTraitImplTemplates,
 };
 
 export const resolveImportedValue = ({
@@ -87,6 +91,17 @@ export const resolveImportedValue = ({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
+    ctx,
+  });
+  registerImportedTraitDecl({
+    dependency,
+    dependencySymbol: target.symbol,
+    localSymbol: symbol,
+    ctx,
+  });
+  registerImportedTraitImplTemplates({
+    dependency,
+    dependencySymbol: target.symbol,
     ctx,
   });
 
@@ -240,6 +255,17 @@ export const resolveImportedTypeExpr = ({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
+    ctx,
+  });
+  registerImportedTraitDecl({
+    dependency,
+    dependencySymbol: target.symbol,
+    localSymbol: symbol,
+    ctx,
+  });
+  registerImportedTraitImplTemplates({
+    dependency,
+    dependencySymbol: target.symbol,
     ctx,
   });
 

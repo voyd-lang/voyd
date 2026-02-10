@@ -130,6 +130,7 @@ export const createTestCodegenContext = (): {
       traits: {
         getImplsByNominal: () => [],
         getImplsByTrait: () => [],
+        getImplTemplates: () => [],
         getTraitMethodImpl: () => undefined,
       },
       calls: {
