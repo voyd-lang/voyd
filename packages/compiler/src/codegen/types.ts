@@ -16,17 +16,16 @@ import {
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
+import { pickTraitImplMethodMeta } from "./function-lookup.js";
 import type {
   CodegenContext,
   ClosureTypeInfo,
   StructuralFieldInfo,
   StructuralTypeInfo,
-  FunctionMetadata,
   HirTypeExpr,
   HirExprId,
   HirPattern,
   SymbolId,
-  TypeId,
   FixedArrayWasmType,
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
@@ -35,6 +34,7 @@ import type {
   ProgramFunctionInstanceId,
   ProgramSymbolId,
   TypeParamId,
+  TypeId,
 } from "../semantics/ids.js";
 import { buildInstanceSubstitution } from "./type-substitution.js";
 import { getSccContainingRoot } from "./graph/scc.js";
@@ -1144,16 +1144,6 @@ const buildRuntimeAncestors = ({
   return ancestors;
 };
 
-const pickMethodMetadata = (
-  metas: readonly FunctionMetadata[] | undefined,
-): FunctionMetadata | undefined => {
-  if (!metas || metas.length === 0) {
-    return undefined;
-  }
-  const concrete = metas.find((meta) => meta.typeArgs.length === 0);
-  return concrete ?? metas[0];
-};
-
 const createMethodLookupEntries = ({
   impls,
   ctx,
@@ -1175,10 +1165,31 @@ const createMethodLookupEntries = ({
     impl.methods.forEach(({ traitMethod, implMethod }) => {
       const implRef = ctx.program.symbols.refOf(implMethod as ProgramSymbolId);
       const metas = ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
-      const meta = pickMethodMetadata(metas);
+      const meta = pickTraitImplMethodMeta({
+        metas,
+        impl,
+        runtimeType,
+        ctx,
+      });
       if (!meta) {
+        const availableInstances = (metas ?? [])
+          .map((entry) => {
+            const receiverTypeIndex = entry.effectful ? 1 : 0;
+            const receiverType = entry.paramTypes[receiverTypeIndex] ?? runtimeType;
+            const receiverTypeId = entry.paramTypeIds[receiverTypeIndex];
+            return `${entry.wasmName}#${entry.instanceId}@${receiverType}(receiverTypeId=${receiverTypeId},typeArgs=[${entry.typeArgs.join(",")}])`;
+          })
+          .join(", ");
         throw new Error(
-          `codegen missing metadata for trait method impl ${implMethod}`,
+          [
+            "codegen missing metadata for trait method impl",
+            `impl: ${implMethod}`,
+            `trait method: ${impl.traitSymbol}:${traitMethod}`,
+            `runtime type: ${runtimeType}`,
+            `impl target: ${impl.target}`,
+            `impl trait: ${impl.trait}`,
+            `available instances: ${availableInstances || "<none>"}`,
+          ].join("\n"),
         );
       }
       const handlerParamType = ctx.effectsRuntime.handlerFrameType;

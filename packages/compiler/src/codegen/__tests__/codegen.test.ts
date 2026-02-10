@@ -676,6 +676,16 @@ describe("next codegen", () => {
     expect(main()).toBe(29);
   });
 
+  it("emits wasm for trait object dispatch on generic impl instantiations", () => {
+    const instance = loadWasmInstance("trait_object_generic_impl_dispatch.voyd");
+    const main = instance.exports.main;
+    const mainF64 = instance.exports.main_f64;
+    expect(typeof main).toBe("function");
+    expect(typeof mainF64).toBe("function");
+    expect((main as () => number)()).toBe(7);
+    expect((mainF64 as () => number)()).toBeCloseTo(2.5);
+  });
+
   it("preserves nominal identity for structurally identical types in match guards", () => {
     const main = loadMain("nominal_identity_match.voyd");
     expect(main()).toBe(303);
