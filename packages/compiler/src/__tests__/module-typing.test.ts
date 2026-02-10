@@ -273,4 +273,28 @@ pub fn main() -> i32
     const { diagnostics } = analyzeModules({ graph });
     expect(diagnostics).toHaveLength(0);
   });
+
+  it("resolves nested module paths when exported via bare pub module-expression", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}outer${sep}inner.voyd`]: "pub obj Foo { x: i32 }",
+      [`${root}${sep}outer.voyd`]: "pub self::inner",
+      [`${root}${sep}main.voyd`]: `
+use src::outer::self
+
+pub fn main() -> i32
+  let foo = outer::inner::Foo { x: 5 }
+  foo.x
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
 });

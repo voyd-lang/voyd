@@ -336,6 +336,68 @@ pub fn internal_fn(): () -> i32
     expect(exports.internal_fn).toBeUndefined();
   });
 
+  it("treats pub use as both a local import and public export", async () => {
+    const root = resolve("/proj/src");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const apiPath = `${root}${sep}api.voyd`;
+    const host = createMemoryHost({
+      [pkgPath]: `
+pub use src::api::public_fn
+
+pub fn main() -> i32
+  public_fn()
+`,
+      [apiPath]: `
+pub fn public_fn(): () -> i32
+  11
+`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    }));
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    const exports = instance.exports as Record<string, unknown>;
+    expect(typeof exports.public_fn).toBe("function");
+    expect((exports.public_fn as () => number)()).toBe(11);
+    expect((exports.main as () => number)()).toBe(11);
+  });
+
+  it("exports members via bare pub module-expression", async () => {
+    const root = resolve("/proj/src");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const apiPath = `${root}${sep}api.voyd`;
+    const host = createMemoryHost({
+      [pkgPath]: `
+pub src::api::public_fn
+
+pub fn main() -> i32
+  public_fn()
+`,
+      [apiPath]: `
+pub fn public_fn(): () -> i32
+  13
+`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    }));
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    const exports = instance.exports as Record<string, unknown>;
+    expect(typeof exports.public_fn).toBe("function");
+    expect((exports.public_fn as () => number)()).toBe(13);
+    expect((exports.main as () => number)()).toBe(13);
+  });
+
   it("rejects accessing pri fields outside their object", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;

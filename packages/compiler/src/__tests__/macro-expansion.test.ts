@@ -108,4 +108,36 @@ pub use src::base_macros::all
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(3);
   });
+
+  it("re-exports pub macros via bare pub module-expression", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const basePath = `${root}${sep}base_macros.voyd`;
+    const reexportPath = `${root}${sep}macro_exports.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use src::macro_exports::all
+
+pub fn main() -> f64
+  inc(2.0)
+`,
+      [basePath]: `
+pub macro inc(value)
+  syntax_template (+ $value 1.0)
+`,
+      [reexportPath]: `
+pub src::base_macros::all
+`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(3);
+  });
 });
