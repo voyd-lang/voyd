@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { parse } from "../../parser.js";
+import { parse, parseBase } from "../../parser.js";
 import { Form } from "../../ast/index.js";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { expandFunctionalMacros } from "../functional-macro-expander/index.js";
 
 type Plain = (string | Plain)[];
 
@@ -31,6 +32,34 @@ const containsDeep = (value: unknown, target: unknown): boolean => {
 };
 
 describe("functional macro expansion", () => {
+  test("retains successful exports when later expansion fails", () => {
+    const ast = parseBase(`\
+pub macro keep(x)
+  x
+keep()
+`);
+    const errors: string[] = [];
+
+    const { exports } = expandFunctionalMacros(ast, {
+      strictMacroSignatures: true,
+      onError: (error) => {
+        errors.push(error.message);
+      },
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(exports.map((entry) => entry.name.value)).toEqual(["keep"]);
+  });
+
+  test("does not throw for incomplete macro definitions while typing", () => {
+    const code = `\
+macro binaryen_gc_call
+  syntax_template binaryen
+`;
+    expect(() => parse(code)).not.toThrow();
+    expect(parse(code)).toBeInstanceOf(Form);
+  });
+
   test("expands macro_let definitions into macro variables", () => {
     const ast = parse(functionalMacrosVoydFile);
     const plain = toPlain(ast);
