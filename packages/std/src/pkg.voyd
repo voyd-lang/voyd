@@ -3,6 +3,7 @@ pub use self::string
 pub use self::box
 pub use self::memory
 pub use self::msgpack
+pub use self::iterator
 pub use std::optional::types::{ Optional, Option, Some, None }
 pub use std::optional::fns::{
   some,
@@ -18,6 +19,7 @@ pub use std::optional::fns::{
 }
 pub use std::array::{ Array, ArrayPop, new_array }
 pub use std::map::{ Map, MapEntry, new_map }
+pub use std::iterator::{ Iterable, Iterator, for }
 pub use std::string::types::{ String }
 pub use std::string::fns::{ new_string }
 pub use std::box::{ Box }

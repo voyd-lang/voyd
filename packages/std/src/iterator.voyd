@@ -1,0 +1,27 @@
+use std::optional::all
+
+pub trait Iterable<T>
+  fn iterate(self) -> Iterator<T>
+
+pub trait Iterator<T>
+  fn next(~self) -> Option<T>
+
+pub macro for(case)
+  let cond = case.get(1)
+  let do = case.get(2)
+  let binding = cond.get(1)
+  let iterable = cond.get(2)
+  let iterator_id = identifier(__iterable)
+  let iterator_val_id = identifier(__iterable_val)
+
+  `
+    let ~($iterator_id) = $iterable.iterate()
+    while true do:
+      let $iterator_val_id = ($iterator_id).next()
+      $iterator_val_id.match
+        Some:
+          let $binding = $iterator_val_id.value
+          $do
+          void
+        None:
+          break

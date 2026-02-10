@@ -532,6 +532,9 @@ const bindImportsFromModule = ({
 
   const exported = exports.get(targetName);
   if (!exported) {
+    if (isMacroExportedFromModule({ moduleId, targetName, ctx })) {
+      return [];
+    }
     recordImportDiagnostic({
       params: { kind: "missing-export", moduleId, target: targetName },
       span: entry.span,
@@ -577,6 +580,17 @@ const bindImportsFromModule = ({
     visibility,
   });
 };
+
+const isMacroExportedFromModule = ({
+  moduleId,
+  targetName,
+  ctx,
+}: {
+  moduleId: string;
+  targetName: string;
+  ctx: BindingContext;
+}): boolean =>
+  Boolean(ctx.graph.modules.get(moduleId)?.macroExports?.includes(targetName));
 
 const declareImportedSymbol = ({
   exported,
