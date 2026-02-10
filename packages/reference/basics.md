@@ -103,6 +103,10 @@ else:
 while x > 5 do:
   // Do something
 
+// Case-style while loops
+while x > 5:
+  // Do something
+
 // For-in loops
 for item in [1, 2, 3] do:
   // Do something with item

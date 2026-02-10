@@ -12,6 +12,7 @@ import {
 import {
   expectLabeledExpr,
   parseIfBranches,
+  parseWhileConditionAndBody,
   toSourceSpan,
 } from "../../utils.js";
 import { diagnosticFromCode } from "../../../diagnostics/index.js";
@@ -310,12 +311,7 @@ const bindWhile = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
-  const condition = form.at(1);
-  if (!condition) {
-    throw new Error("while expression missing condition");
-  }
-
-  const body = expectLabeledExpr(form.at(2), "do", "while expression");
+  const { condition, body } = parseWhileConditionAndBody(form);
 
   bindExpr(condition, ctx, tracker);
   bindExpr(body, ctx, tracker);

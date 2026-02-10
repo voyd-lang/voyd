@@ -45,6 +45,39 @@ export const expectLabeledExpr = (
   return value;
 };
 
+export const parseWhileConditionAndBody = (
+  form: Form,
+  context = "while expression"
+): { condition: Expr; body: Expr } => {
+  const conditionExpr = form.at(1);
+  if (!conditionExpr) {
+    throw new Error(`${context} missing condition`);
+  }
+
+  const isCaseForm = isForm(conditionExpr) && conditionExpr.calls(":");
+  if (!isCaseForm) {
+    return {
+      condition: conditionExpr,
+      body: expectLabeledExpr(form.at(2), "do", context),
+    };
+  }
+
+  const bodyExpr = conditionExpr.at(2);
+  if (!bodyExpr) {
+    throw new Error(`${context} missing body expression`);
+  }
+
+  const caseCondition = conditionExpr.at(1);
+  if (!caseCondition) {
+    throw new Error(`${context} clause is missing a condition`);
+  }
+
+  return {
+    condition: caseCondition,
+    body: bodyExpr,
+  };
+};
+
 export type ParsedIfBranch = {
   condition: Expr;
   value: Expr;
