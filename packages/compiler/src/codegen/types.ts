@@ -1175,8 +1175,14 @@ const instantiateTraitImplsForNominal = ({
     if (!match.ok) {
       return [];
     }
-    const trait = ctx.program.types.substitute(template.trait, match.substitution);
-    const target = ctx.program.types.substitute(template.target, match.substitution);
+    const trait = ctx.program.types.substitute(
+      template.trait,
+      match.substitution,
+    );
+    const target = ctx.program.types.substitute(
+      template.target,
+      match.substitution,
+    );
     return [
       {
         trait,
@@ -1240,7 +1246,8 @@ const createMethodLookupEntries = ({
         const availableInstances = (metas ?? [])
           .map((entry) => {
             const receiverTypeIndex = entry.effectful ? 1 : 0;
-            const receiverType = entry.paramTypes[receiverTypeIndex] ?? runtimeType;
+            const receiverType =
+              entry.paramTypes[receiverTypeIndex] ?? runtimeType;
             const receiverTypeId = entry.paramTypeIds[receiverTypeIndex];
             return `${entry.wasmName}#${entry.instanceId}@${receiverType}(receiverTypeId=${receiverTypeId},typeArgs=[${entry.typeArgs.join(",")}])`;
           })
@@ -1282,12 +1289,18 @@ const createMethodLookupEntries = ({
       const userParamTypes = meta.effectful
         ? meta.paramTypes.slice(2)
         : meta.paramTypes.slice(1);
-      if (meta.effectful && userParamTypes.length + 2 !== meta.paramTypes.length) {
+      if (
+        meta.effectful &&
+        userParamTypes.length + 2 !== meta.paramTypes.length
+      ) {
         throw new Error(
           `codegen malformed effectful parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
       }
-      if (!meta.effectful && userParamTypes.length + 1 !== meta.paramTypes.length) {
+      if (
+        !meta.effectful &&
+        userParamTypes.length + 1 !== meta.paramTypes.length
+      ) {
         throw new Error(
           `codegen malformed parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
