@@ -155,6 +155,33 @@ pub fn main() -> i32
     ).toBe(true);
   });
 
+  it("reports generic missing return annotations as typing diagnostics", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub fn identity<T>(value: T)
+  value
+
+pub fn main() -> i32
+  0
+`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    const diagnostics = result.diagnostics.filter((diagnostic) => diagnostic.code === "TY0034");
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(diagnostics[0]?.span.file).toBe(mainPath);
+    expect(result.diagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(false);
+  });
+
   it("orders modules topologically for lowering", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");

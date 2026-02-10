@@ -13,6 +13,8 @@ report on it and suggest direction in your final response.
 Voyd has not yet been released. Breaking changes to public APIs are ok. Just
 note the breaking changes if made.
 
+Keep this AGENTS.md file up to date. Add notes to agent notes that can assist future development. Remove notes that are no longer useful.
+
 # Debugging
 
 A cli is available after `npm link`
@@ -39,3 +41,5 @@ You should generally add unit tests (especially e2e ones)
 - Prefer functional control flow (`map`, `filter`, etc) to imperative loop constructs.
 - Files should be ordered by importance. The main export of a file at the top.
 - Use a single parameter object for functions containing more than three params to name the parameters on call.
+
+# Agent Notes

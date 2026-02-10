@@ -181,4 +181,25 @@ describe("language server project analysis", () => {
       await rm(project.rootDir, { recursive: true, force: true });
     }
   });
+
+  it("surfaces typing diagnostics when generics miss return annotations", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn identity<T>(value: T)\n  value\n\nfn main() -> i32\n  let counter = 1\n  counter\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      expect(diagnostics.some((diagnostic) => diagnostic.code === "TY0034")).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
 });

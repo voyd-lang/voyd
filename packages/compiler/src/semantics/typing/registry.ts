@@ -198,11 +198,15 @@ export const registerFunctionSignatures = (
           });
 
     if (typeParams && typeParams.length > 0 && !item.returnType) {
-      throw new Error(
-        `generic function ${getSymbolName(
-          item.symbol,
-          ctx
-        )} must declare a return type`
+      ctx.diagnostics.report(
+        diagnosticFromCode({
+          code: "TY0034",
+          params: {
+            kind: "return-type-inference-failed",
+            functionName: getSymbolName(item.symbol, ctx),
+          },
+          span: normalizeSpan(item.span, ctx.hir.module.span),
+        })
       );
     }
 

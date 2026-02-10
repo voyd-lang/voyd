@@ -1,21 +1,16 @@
 use std::all
 
-fn reduce<T>(arr: Array<T>, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T
-  let iterator = arr.iterate()
-  let reducer: (acc: T) -> T = (acc: T) -> T =>
-    iterator.next().match(opt)
-      Some:
-        reducer(cb(acc, opt.value))
-      None:
-        acc
-  reducer(start)
+fn reduce<T>(ay: Array<T>, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T
+  let a = ay
+  start
 
-fn add<T>(a: T, b: T)
+fn add<T>(a: T, b: T) -> T
   a + b
 
 pub fn main() -> i32
-  let x: i32 = 5.0
-  [1, 2, 3.0]
+  let x = 5
+  [1, 2, 3]
     .reduce start: 0 reducer: (acc, current) =>
       acc + current
-    .add(3.0)
+    .add(3)
+  x + 3
