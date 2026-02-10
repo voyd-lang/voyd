@@ -49,4 +49,4 @@ You should generally add unit tests (especially e2e ones)
 - `apps/vscode` server bundling resolves compiler imports during the build; keep `@voyd/compiler` declared in `apps/vscode` devDependencies so Turbo/CI task isolation can resolve it consistently.
 - `@voyd/language-server` publishes runtime entrypoints from `dist/`; its `build` script should emit JS with `tsconfig.build.json` (not `--noEmit`).
 - Keep language-server source range checks end-exclusive (`[start, end)`) to match LSP cursor semantics at token boundaries.
-- Top-level `pub <module-expression>` is parsed as a public re-export shorthand (same module-resolution behavior as `pub use <module-expression>`), and should be kept in sync across module graph dependency discovery, binding, and macro re-export collection.
+- Keep top-level declaration semantics centralized in `packages/compiler/src/modules/use-decl.ts` (`classifyTopLevelDecl`). Module graph loading, semantic binding, and macro re-export collection should consume this shared classifier to avoid drift.

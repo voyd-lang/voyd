@@ -1,10 +1,8 @@
 import {
-  type Expr,
   Form,
   InternalIdentifierAtom,
   formCallsInternal,
   isForm,
-  isIdentifierAtom,
   parseBase,
 } from "../parser/index.js";
 import { toSourceSpan } from "../semantics/utils.js";
@@ -14,7 +12,7 @@ import {
   resolveModuleFile,
 } from "./path.js";
 import { resolveModuleRequest } from "./resolve.js";
-import { parseTopLevelUseDecl } from "./use-decl.js";
+import { classifyTopLevelDecl } from "./use-decl.js";
 import { parseUsePaths } from "./use-path.js";
 import { moduleDiagnosticToDiagnostic } from "./diagnostics.js";
 import type {
@@ -281,10 +279,11 @@ const collectModuleInfo = ({
   entries.forEach((entry) => {
     if (!isForm(entry)) return;
     const span = toSourceSpan(entry);
+    const topLevelDecl = classifyTopLevelDecl(entry);
 
-    const usePath = parseUse(entry);
-    if (usePath) {
-      const resolvedEntries = usePath.entries
+    if (topLevelDecl.kind === "use-decl") {
+      const useEntries = parseUsePaths(topLevelDecl.pathExpr, span);
+      const resolvedEntries = useEntries
         .filter((entryPath) => entryPath.hasExplicitPrefix)
         .map((entryPath) =>
           resolveModuleRequest(
@@ -301,7 +300,7 @@ const collectModuleInfo = ({
         dependencies.push({
           kind: "use",
           path,
-          span: usePath.span ?? span,
+          span,
         });
         if (modulePath.namespace !== "std" && path.namespace === "std") {
           needsStdPkg = true;
@@ -310,10 +309,17 @@ const collectModuleInfo = ({
       return;
     }
 
-    const inline = parseInlineModule(entry, modulePath, source);
-    if (inline) {
-      inlineModules.push(inline.node, ...inline.descendants);
+    if (topLevelDecl.kind !== "inline-module-decl") {
+      return;
     }
+
+    const inline = parseInlineModuleDecl({
+      decl: topLevelDecl,
+      form: entry,
+      parentPath: modulePath,
+      source,
+    });
+    inlineModules.push(inline.node, ...inline.descendants);
   });
 
   if (needsStdPkg) {
@@ -334,38 +340,31 @@ const collectModuleInfo = ({
   return { dependencies, inlineModules };
 };
 
-const parseUse = (
-  form: Form,
-):
-  | { entries: ReturnType<typeof parseUsePaths>; span?: SourceSpan }
-  | undefined => {
-  const parsed = parseTopLevelUseDecl(form);
-  if (!parsed) {
-    return undefined;
-  }
-  const span = toSourceSpan(form);
-  return { entries: parseUsePaths(parsed.pathExpr, span), span };
-};
-
 type InlineModuleTree = {
   node: ModuleNode;
   descendants: ModuleNode[];
 };
 
-const parseInlineModule = (
-  form: Form,
-  parentPath: ModulePath,
-  source: string,
-): InlineModuleTree | undefined => {
-  const match = matchInlineModule(form);
-  if (!match) return undefined;
-
+const parseInlineModuleDecl = ({
+  decl,
+  form,
+  parentPath,
+  source,
+}: {
+  decl: Extract<
+    ReturnType<typeof classifyTopLevelDecl>,
+    { kind: "inline-module-decl" }
+  >;
+  form: Form;
+  parentPath: ModulePath;
+  source: string;
+}): InlineModuleTree => {
   const modulePath = {
     ...parentPath,
-    segments: [...parentPath.segments, match.name],
+    segments: [...parentPath.segments, decl.name],
   };
 
-  const ast = toModuleAst(match.body);
+  const ast = toModuleAst(decl.body);
   const info = collectModuleInfo({ modulePath, ast, source });
 
   const node: ModuleNode = {
@@ -374,38 +373,15 @@ const parseInlineModule = (
     origin: {
       kind: "inline",
       parentId: modulePathToString(parentPath),
-      name: match.name,
-      span: match.span,
+      name: decl.name,
+      span: toSourceSpan(form),
     },
     ast,
-    source: sliceSource(source, match.span),
+    source: sliceSource(source, toSourceSpan(form)),
     dependencies: info.dependencies,
   };
 
   return { node, descendants: info.inlineModules };
-};
-
-const matchInlineModule = (
-  form: Form,
-): { name: string; body: Form; span: SourceSpan } | undefined => {
-  const first = form.at(0);
-  const isPub = first && isIdentifierAtom(first) && first.value === "pub";
-  const offset = isPub ? 1 : 0;
-  const keyword = form.at(offset);
-  const nameExpr = form.at(offset + 1);
-  const body = form.at(offset + 2);
-
-  if (
-    !isIdentifierAtom(keyword) ||
-    keyword.value !== "mod" ||
-    !isIdentifierAtom(nameExpr) ||
-    !isForm(body) ||
-    !body.calls("block")
-  ) {
-    return undefined;
-  }
-
-  return { name: nameExpr.value, body, span: toSourceSpan(form) };
 };
 
 const toModuleAst = (block: Form): Form => {

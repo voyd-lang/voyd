@@ -1,6 +1,6 @@
 import { Form, IdentifierAtom, isForm } from "../parser/index.js";
 import { toSourceSpan } from "../semantics/utils.js";
-import { parseTopLevelUseDecl } from "./use-decl.js";
+import { classifyTopLevelDecl } from "./use-decl.js";
 import { parseUsePaths, type NormalizedUseEntry } from "./use-path.js";
 import { resolveModuleRequest } from "./resolve.js";
 import { modulePathToString } from "./path.js";
@@ -251,13 +251,13 @@ const collectUseEntries = (form: Form): UseEntryWithVisibility[] => {
 const parseUseDecl = (
   form: Form
 ): { entries: NormalizedUseEntry[]; visibility: "module" | "pub" } | null => {
-  const parsed = parseTopLevelUseDecl(form);
-  if (!parsed) {
+  const classified = classifyTopLevelDecl(form);
+  if (classified.kind !== "use-decl") {
     return null;
   }
   return {
-    entries: parseUsePaths(parsed.pathExpr, toSourceSpan(form)),
-    visibility: parsed.visibility,
+    entries: parseUsePaths(classified.pathExpr, toSourceSpan(form)),
+    visibility: classified.visibility,
   };
 };
 
