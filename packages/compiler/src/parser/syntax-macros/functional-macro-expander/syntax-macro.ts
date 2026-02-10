@@ -6,6 +6,7 @@ import {
   isIdentifierAtom,
 } from "../../ast/index.js";
 import type { SyntaxMacro } from "../types.js";
+import { SyntaxMacroError } from "../macro-error.js";
 import {
   ensureForm,
   cloneExpr,
@@ -26,48 +27,74 @@ type MacroDefinitionInput = {
   visibility: "pub" | "module";
 };
 
+type ExpandFunctionalMacroOptions = {
+  scope?: MacroScope;
+  strictMacroSignatures?: boolean;
+  onError?: (error: SyntaxMacroError) => void;
+};
+
 export const functionalMacroExpander: SyntaxMacro = (form: Form): Form =>
   expandFunctionalMacros(form).form;
 
 export const expandFunctionalMacros = (
   form: Form,
-  options: { scope?: MacroScope } = {}
+  options: ExpandFunctionalMacroOptions = {}
 ): { form: Form; exports: MacroDefinition[] } => {
   const scope = options.scope ?? new MacroScope();
   const exports: MacroDefinition[] = [];
-  return { form: ensureForm(expandExpr(form, scope, exports)), exports };
+  try {
+    return { form: ensureForm(expandExpr(form, scope, exports, options)), exports };
+  } catch (error) {
+    const macroError = toSyntaxMacroError(error, form);
+    if (!options.onError) {
+      throw macroError;
+    }
+    options.onError(macroError);
+    return { form, exports };
+  }
 };
 
 const expandExpr = (
   expr: Expr,
   scope: MacroScope,
-  exports: MacroDefinition[]
+  exports: MacroDefinition[],
+  options: ExpandFunctionalMacroOptions
 ): Expr => {
-  if (!isForm(expr)) return expr;
-
-  const macroDefinition = parseMacroDefinition(expr);
-  if (macroDefinition) {
-    return expandMacroDefinition(macroDefinition, scope, exports);
+  if (!isForm(expr)) {
+    return expr;
   }
 
-  if (expr.calls("macro_let")) {
-    return expandMacroLet(expr, scope);
-  }
+  try {
+    const macroDefinition = parseMacroDefinition({
+      form: expr,
+      strictMacroSignatures: options.strictMacroSignatures === true,
+    });
+    if (macroDefinition) {
+      return expandMacroDefinition(macroDefinition, scope, exports);
+    }
 
-  const head = expr.at(0);
-  const macro = isIdentifierAtom(head) ? scope.getMacro(head.value) : undefined;
-  if (macro) {
-    const expanded = expandMacroCall(expr, macro, scope);
-    return expandExpr(expanded, scope, exports);
-  }
+    if (expr.calls("macro_let")) {
+      return expandMacroLet(expr, scope);
+    }
 
-  return expandForm(expr, scope, exports);
+    const head = expr.at(0);
+    const macro = isIdentifierAtom(head) ? scope.getMacro(head.value) : undefined;
+    if (macro) {
+      const expanded = expandMacroCall(expr, macro, scope);
+      return expandExpr(expanded, scope, exports, options);
+    }
+
+    return expandForm(expr, scope, exports, options);
+  } catch (error) {
+    throw toSyntaxMacroError(error, expr);
+  }
 };
 
 const expandForm = (
   form: Form,
   scope: MacroScope,
-  exports: MacroDefinition[]
+  exports: MacroDefinition[],
+  options: ExpandFunctionalMacroOptions
 ): Form => {
   const head = form.at(0);
   const bodyScope = createsScopeFor(head) ? scope.child() : scope;
@@ -80,7 +107,7 @@ const expandForm = (
       return;
     }
 
-    result.push(expandExpr(child, bodyScope, exports));
+    result.push(expandExpr(child, bodyScope, exports, options));
   });
 
   return recreateForm(form, result);
@@ -151,7 +178,13 @@ const createsScopeFor = (expr: Expr | undefined): boolean =>
 const isModuleName = (head: Expr | undefined, index: number): boolean =>
   isIdentifierAtom(head) && head.value === "module" && index === 1;
 
-const parseMacroDefinition = (form: Form): MacroDefinitionInput | null => {
+const parseMacroDefinition = ({
+  form,
+  strictMacroSignatures,
+}: {
+  form: Form;
+  strictMacroSignatures: boolean;
+}): MacroDefinitionInput | null => {
   let index = 0;
   let visibility: MacroDefinitionInput["visibility"] = "module";
   const first = form.at(0);
@@ -168,14 +201,32 @@ const parseMacroDefinition = (form: Form): MacroDefinitionInput | null => {
 
   const signatureExpr = form.at(index + 1);
   if (!signatureExpr) {
-    throw new Error("macro missing signature");
+    if (strictMacroSignatures) {
+      throw new Error("macro missing signature");
+    }
+    return null;
+  }
+  if (!isForm(signatureExpr)) {
+    if (strictMacroSignatures) {
+      throw new Error("Expected form for macro signature");
+    }
+    return null;
   }
 
-  const signature = expectForm(signatureExpr, "macro signature");
+  const signature = signatureExpr;
   const bodyExpressions = form
     .toArray()
     .slice(index + 2)
     .map(cloneExpr);
 
   return { signature, bodyExpressions, visibility };
+};
+
+const toSyntaxMacroError = (error: unknown, syntax: Expr): SyntaxMacroError => {
+  if (error instanceof SyntaxMacroError) {
+    return error.syntax ? error : new SyntaxMacroError(error.message, syntax);
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return new SyntaxMacroError(message, syntax);
 };

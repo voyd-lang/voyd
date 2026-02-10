@@ -40,8 +40,19 @@ export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
     const scope = new MacroScope();
     importedMacros.forEach((macro) => scope.defineMacro(macro));
 
-    const { form, exports } = expandFunctionalMacros(module.ast, { scope });
-    module.ast = applyPostSyntaxMacros(form, diagnostics);
+    const functionalResult = expandFunctionalMacros(module.ast, {
+      scope,
+      strictMacroSignatures: true,
+      onError: (error) =>
+        reportMacroExpansionError({
+          diagnostics,
+          macroName: "functionalMacroExpander",
+          error,
+          fallbackSyntax: module.ast,
+        }),
+    });
+    module.ast = applyPostSyntaxMacros(functionalResult.form, diagnostics);
+    const { exports } = functionalResult;
     const localExports = indexExports(exports);
     const exportedMacros = collectMacroReexports({
       module,
@@ -68,21 +79,12 @@ const applyPostSyntaxMacros = (form: Form, diagnostics: Diagnostic[]): Form => {
     try {
       current = macro(current);
     } catch (error) {
-      const macroName = macro.name || "<syntax-macro>";
-      const message = error instanceof Error ? error.message : String(error);
-      const syntax = error instanceof SyntaxMacroError ? error.syntax : current;
-
-      diagnostics.push(
-        diagnosticFromCode({
-          code: "MD0003",
-          params: {
-            kind: "macro-expansion-failed",
-            macro: macroName,
-            errorMessage: message,
-          },
-          span: toSourceSpan(syntax),
-        })
-      );
+      reportMacroExpansionError({
+        diagnostics,
+        macroName: macro.name || "<syntax-macro>",
+        error,
+        fallbackSyntax: current,
+      });
 
       if (macro === serializerAttributeMacro) {
         current = stripSerializerAttributeForms(current);
@@ -91,6 +93,34 @@ const applyPostSyntaxMacros = (form: Form, diagnostics: Diagnostic[]): Form => {
   });
 
   return current;
+};
+
+const reportMacroExpansionError = ({
+  diagnostics,
+  macroName,
+  error,
+  fallbackSyntax,
+}: {
+  diagnostics: Diagnostic[];
+  macroName: string;
+  error: unknown;
+  fallbackSyntax: Form;
+}): void => {
+  const message = error instanceof Error ? error.message : String(error);
+  const syntax =
+    error instanceof SyntaxMacroError ? error.syntax ?? fallbackSyntax : fallbackSyntax;
+
+  diagnostics.push(
+    diagnosticFromCode({
+      code: "MD0003",
+      params: {
+        kind: "macro-expansion-failed",
+        macro: macroName,
+        errorMessage: message,
+      },
+      span: toSourceSpan(syntax),
+    })
+  );
 };
 
 const indexExports = (exports: MacroDefinition[]): MacroExportTable => {
