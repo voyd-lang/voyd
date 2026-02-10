@@ -1,7 +1,6 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import {
-  formCallsInternal,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -38,6 +37,10 @@ import {
   spanRange,
 } from "./text.js";
 import type { ExportCandidate, SymbolOccurrence, SymbolRef } from "./types.js";
+import {
+  findLabeledArgumentSyntaxes,
+  findMethodNameSyntax,
+} from "./call-syntax.js";
 
 type SymbolIndex = {
   occurrencesByUri: ReadonlyMap<string, readonly SymbolOccurrence[]>;
@@ -60,11 +63,6 @@ type BoundParameterLike = {
   label?: string;
   ast?: Syntax;
   labelAst?: Syntax;
-};
-
-type LabeledArgumentSyntax = {
-  label: string;
-  syntax: Syntax;
 };
 
 const collectSyntaxById = (root: Form): Map<number, Syntax> => {
@@ -192,108 +190,6 @@ const resolveEffectOperationNameSyntax = (form: Form | undefined): Syntax | unde
   }
 
   return undefined;
-};
-
-const findMethodNameSyntax = ({
-  callForm,
-  methodName,
-}: {
-  callForm: Form;
-  methodName: string;
-}): Syntax | undefined => {
-  const methodFromMember = (member: unknown): Syntax | undefined => {
-    if (isIdentifierAtom(member) || isInternalIdentifierAtom(member)) {
-      return member.value === methodName ? member : undefined;
-    }
-
-    if (!isForm(member)) {
-      return undefined;
-    }
-
-    const head = member.at(0);
-    if ((isIdentifierAtom(head) || isInternalIdentifierAtom(head)) && head.value === methodName) {
-      return head;
-    }
-
-    return undefined;
-  };
-
-  if (callForm.calls(".")) {
-    return methodFromMember(callForm.at(2));
-  }
-
-  if (!callForm.calls("::")) {
-    return undefined;
-  }
-
-  const member = callForm.at(2);
-  if (isForm(member) && member.calls("::")) {
-    return methodFromMember(member.at(2));
-  }
-
-  return methodFromMember(member);
-};
-
-const labeledArgumentsFromCallMember = (member: Form): LabeledArgumentSyntax[] => {
-  const hasTypeArguments =
-    isForm(member.at(1)) && formCallsInternal(member.at(1) as Form, "generics");
-  const startIndex = hasTypeArguments ? 2 : 1;
-  return member
-    .toArray()
-    .slice(startIndex)
-    .flatMap((arg): LabeledArgumentSyntax[] => {
-      if (!(isForm(arg) && arg.calls(":"))) {
-        return [];
-      }
-      const labelExpr = arg.at(1);
-      if (!(isIdentifierAtom(labelExpr) || isInternalIdentifierAtom(labelExpr))) {
-        return [];
-      }
-      return [{ label: labelExpr.value, syntax: labelExpr }];
-    });
-};
-
-const findLabeledArgumentSyntaxes = ({
-  callForm,
-}: {
-  callForm: Form;
-}): LabeledArgumentSyntax[] => {
-  if (callForm.calls(".")) {
-    const memberExpr = callForm.at(2);
-    const member =
-      isForm(memberExpr) && memberExpr.calls("::")
-        ? memberExpr.at(2)
-        : memberExpr;
-    if (!isForm(member)) {
-      return [];
-    }
-    return labeledArgumentsFromCallMember(member);
-  }
-
-  if (callForm.calls("::")) {
-    const member = callForm.at(2);
-    if (!isForm(member)) {
-      return [];
-    }
-    return labeledArgumentsFromCallMember(member);
-  }
-
-  const hasTypeArguments =
-    isForm(callForm.at(1)) && formCallsInternal(callForm.at(1) as Form, "generics");
-  const startIndex = hasTypeArguments ? 2 : 1;
-  return callForm
-    .toArray()
-    .slice(startIndex)
-    .flatMap((arg): LabeledArgumentSyntax[] => {
-      if (!(isForm(arg) && arg.calls(":"))) {
-        return [];
-      }
-      const labelExpr = arg.at(1);
-      if (!(isIdentifierAtom(labelExpr) || isInternalIdentifierAtom(labelExpr))) {
-        return [];
-      }
-      return [{ label: labelExpr.value, syntax: labelExpr }];
-    });
 };
 
 const escapeForRegex = (value: string): string =>
