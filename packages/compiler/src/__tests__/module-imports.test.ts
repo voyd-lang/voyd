@@ -55,4 +55,29 @@ describe("module imports", () => {
     expect(graph.modules.has(fooId)).toBe(true);
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
+
+  it("resolves std module imports without explicit self selectors", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]:
+        "use std::msgpack\npub fn main() -> i32\n  msgpack::marker()",
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::msgpack",
+      [`${stdRoot}${sep}msgpack.voyd`]: "pub fn marker() -> i32\n  1",
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const mainSemantics = semantics.get("src::main");
+
+    expect(mainSemantics?.binding.imports.map((imp) => imp.name)).toContain(
+      "msgpack",
+    );
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
 });

@@ -26,12 +26,14 @@ type RawUseEntry = {
   anchorToSelf?: boolean;
   parentHops?: number;
   hasExplicitPrefix?: boolean;
+  fromGroupSelection?: boolean;
 };
 
 type ParseUsePathState = {
   anchorToSelf?: boolean;
   parentHops?: number;
   hasExplicitPrefix?: boolean;
+  fromGroupSelection?: boolean;
 };
 
 const ROOT_PREFIXES = new Set(["self", "super", "src", "std", "pkg"]);
@@ -72,6 +74,7 @@ export const parseUsePaths = (
         anchorToSelf: nextState.anchorToSelf,
         parentHops: nextState.parentHops,
         hasExplicitPrefix: nextState.hasExplicitPrefix,
+        fromGroupSelection: nextState.fromGroupSelection,
       }),
     ];
   }
@@ -125,7 +128,12 @@ export const parseUsePaths = (
   }
 
   if (expr.callsInternal("object_literal")) {
-    return expr.rest.flatMap((entry) => parseUsePaths(entry, span, base, state));
+    return expr.rest.flatMap((entry) =>
+      parseUsePaths(entry, span, base, {
+        ...state,
+        fromGroupSelection: true,
+      }),
+    );
   }
 
   return [];
@@ -138,6 +146,7 @@ const normalizeUseEntry = ({
   anchorToSelf,
   parentHops,
   hasExplicitPrefix: explicitPrefix,
+  fromGroupSelection,
 }: RawUseEntry): NormalizedUseEntry => {
   const normalizedSegments =
     segments[0] === "pkg" && segments[1] === "std"
@@ -200,7 +209,9 @@ const normalizeUseEntry = ({
   if (
     normalizedSegments.length === 2 &&
     last &&
-    (first === "src" || first === "pkg")
+    (first === "src" ||
+      first === "pkg" ||
+      (first === "std" && fromGroupSelection !== true))
   ) {
     return {
       moduleSegments: normalizedSegments,
