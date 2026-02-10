@@ -15,18 +15,73 @@ export type ModulePathMatchEntry = {
   parentHops?: number;
 };
 
+const srcAliasNamespaceFor = ({
+  importerNamespace,
+}: {
+  importerNamespace: ModulePath["namespace"];
+}): ModulePath["namespace"] | undefined =>
+  importerNamespace === "pkg" || importerNamespace === "std"
+    ? importerNamespace
+    : undefined;
+
+const resolveRequestNamespace = ({
+  requestNamespace,
+  importerNamespace,
+}: {
+  requestNamespace?: ModulePath["namespace"];
+  importerNamespace: ModulePath["namespace"];
+}): ModulePath["namespace"] => {
+  if (requestNamespace !== "src") {
+    return requestNamespace ?? importerNamespace;
+  }
+
+  return srcAliasNamespaceFor({ importerNamespace }) ?? requestNamespace;
+};
+
+const aliasSrcEntryKey = ({
+  key,
+  importerNamespace,
+}: {
+  key: string;
+  importerNamespace: ModulePath["namespace"];
+}): string | undefined => {
+  const aliasNamespace = srcAliasNamespaceFor({ importerNamespace });
+  if (!aliasNamespace) {
+    return undefined;
+  }
+  if (key === "src") {
+    return aliasNamespace === "pkg" ? "pkg" : `${aliasNamespace}::pkg`;
+  }
+  if (!key.startsWith("src::")) {
+    return undefined;
+  }
+
+  const keySuffix = key.slice("src::".length);
+  return aliasNamespace === "pkg" ? keySuffix : `${aliasNamespace}::${keySuffix}`;
+};
+
+const srcAliasEntryKeysFor = ({
+  entryKeys,
+  importerNamespace,
+}: {
+  entryKeys: readonly string[];
+  importerNamespace: ModulePath["namespace"];
+}): string[] =>
+  entryKeys.flatMap((key) => {
+    const aliased = aliasSrcEntryKey({ key, importerNamespace });
+    return aliased ? [aliased] : [];
+  });
+
 export const resolveModuleRequest = (
   request: ModuleRequest,
   importer: ModulePath,
   options: { anchorToSelf?: boolean; parentHops?: number } = {}
 ): ModulePath => {
   const normalized = normalizeRequest(request);
-  const resolveSrcWithinPackage =
-    (importer.namespace === "pkg" || importer.namespace === "std") &&
-    normalized.namespace === "src";
-  const namespace = resolveSrcWithinPackage
-    ? importer.namespace
-    : normalized.namespace ?? importer.namespace;
+  const namespace = resolveRequestNamespace({
+    requestNamespace: normalized.namespace,
+    importerNamespace: importer.namespace,
+  });
   const packageName =
     namespace === "pkg"
       ? normalized.packageName ?? importer.packageName
@@ -84,17 +139,10 @@ export const matchesDependencyPath = ({
     entry.moduleSegments.length > 0 ? entry.moduleSegments.join("::") : undefined,
     entry.path.length > 0 ? entry.path.join("::") : undefined,
   ].filter((value): value is string => Boolean(value));
-  const srcAliasEntryKeys =
-    (currentModulePath.namespace === "pkg" ||
-      currentModulePath.namespace === "std")
-      ? entryKeys.flatMap((key) =>
-          key === "src"
-            ? ["pkg"]
-            : key.startsWith("src::")
-            ? [key.slice("src::".length)]
-            : [],
-        )
-      : [];
+  const srcAliasEntryKeys = srcAliasEntryKeysFor({
+    entryKeys,
+    importerNamespace: currentModulePath.namespace,
+  });
   const allEntryKeys = [...entryKeys, ...srcAliasEntryKeys];
   if (entry.moduleSegments.length === 1 && entry.moduleSegments[0] === "std") {
     allEntryKeys.push("std::pkg");

@@ -105,4 +105,41 @@ describe("module imports", () => {
     expect(graph.modules.has("std::msgpack::fns")).toBe(true);
     expect(graph.modules.has("src::msgpack::fns")).toBe(false);
   });
+
+  it("keeps std src aliases namespace-specific when pkg modules share segments", async () => {
+    const stdRoot = resolve("/proj/std");
+    const pkgDir = resolve("/proj/node_modules");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}msgpack.voyd`]: [
+        "use pkg::foo::msgpack::fns::all",
+        "use src::msgpack::fns::marker",
+        "pub fn top() -> i32",
+        "  marker()",
+      ].join("\n"),
+      [`${stdRoot}${sep}msgpack${sep}fns.voyd`]: "pub fn marker() -> i32\n  1",
+      [`${pkgDir}${sep}foo${sep}src${sep}msgpack${sep}fns.voyd`]:
+        "pub fn marker() -> i32\n  2",
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${stdRoot}${sep}msgpack.voyd`,
+      roots: { src: stdRoot, std: stdRoot, pkgDirs: [pkgDir] },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    const msgpackSemantics = semantics.get("std::msgpack");
+    const msgpackUses = msgpackSemantics?.binding.uses.flatMap((decl) => decl.entries) ?? [];
+    const localMarkerImport = msgpackUses.find(
+      (entry) => entry.path.join("::") === "src::msgpack::fns::marker",
+    );
+    const externalMarkerImport = msgpackUses.find(
+      (entry) => entry.path.join("::") === "pkg::foo::msgpack::fns",
+    );
+
+    expect(combinedDiagnostics).toHaveLength(0);
+    expect(localMarkerImport?.moduleId).toBe("std::msgpack::fns");
+    expect(externalMarkerImport?.moduleId).toBe("pkg:foo::msgpack::fns");
+  });
 });
