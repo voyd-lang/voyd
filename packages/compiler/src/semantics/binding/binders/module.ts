@@ -350,7 +350,7 @@ const resolveUseEntry = ({
     return {
       path: entry.path,
       span: entry.span,
-      importKind: entry.importKind,
+      selectionKind: entry.selectionKind,
       targetName: entry.targetName,
       alias: entry.alias,
       imports: [],
@@ -385,7 +385,7 @@ const resolveUseEntry = ({
   }
 
   const imports =
-    entry.importKind === "self"
+    entry.selectionKind === "module"
       ? declareModuleImport({
           moduleId,
           alias: entry.alias ?? entry.path.at(-1),
@@ -408,7 +408,7 @@ const resolveUseEntry = ({
     path: entry.path,
     moduleId,
     span: entry.span,
-    importKind: entry.importKind,
+    selectionKind: entry.selectionKind,
     targetName: entry.targetName,
     alias: entry.alias,
     imports: imports ?? [],
@@ -545,7 +545,7 @@ const bindImportsFromModule = ({
     return true;
   };
 
-  if (entry.importKind === "all") {
+  if (entry.selectionKind === "all") {
     const allowed = Array.from(exports.values()).filter((item) => {
       const accessible = canAccessExport({ exported: item, moduleId, ctx });
       if (!accessible) {

@@ -80,11 +80,20 @@ const toExportVisibility = (
   return visibility;
 };
 
+const toHirImportKind = (
+  selectionKind: BoundUse["entries"][number]["selectionKind"],
+): "name" | "self" | "all" =>
+  selectionKind === "module"
+    ? "self"
+    : selectionKind === "all"
+      ? "all"
+      : "name";
+
 export const lowerUseDecl = (use: BoundUse, ctx: LowerContext): void => {
   const entries = use.entries.map((entry) => ({
     path: entry.path,
     alias: entry.alias,
-    importKind: entry.importKind,
+    importKind: toHirImportKind(entry.selectionKind),
     span: entry.span,
   }));
 
@@ -105,7 +114,7 @@ export const lowerUseDecl = (use: BoundUse, ctx: LowerContext): void => {
           visibility: exportVisibility,
           span: entry.span,
           item: useId,
-          alias: entry.importKind === "all" ? undefined : entry.alias,
+          alias: entry.selectionKind === "all" ? undefined : entry.alias,
         });
       })
     );

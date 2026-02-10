@@ -113,7 +113,7 @@ const collectMacroImports = ({
     if (!entry.hasExplicitPrefix) {
       return;
     }
-    if (entry.importKind === "self") {
+    if (entry.selectionKind === "module") {
       return;
     }
 
@@ -131,7 +131,7 @@ const collectMacroImports = ({
       return;
     }
 
-    if (entry.importKind === "all") {
+    if (entry.selectionKind === "all") {
       exportedMacros.forEach((macro, name) => {
         imports.set(name, macro);
       });
@@ -176,7 +176,7 @@ const collectMacroReexports = ({
       if (!entry.hasExplicitPrefix) {
         return;
       }
-      if (entry.importKind === "self") {
+      if (entry.selectionKind === "module") {
         return;
       }
 
@@ -194,7 +194,7 @@ const collectMacroReexports = ({
         return;
       }
 
-      if (entry.importKind === "all") {
+      if (entry.selectionKind === "all") {
         exportedMacros.forEach((macro, name) => {
           if (!exports.has(name)) {
             exports.set(name, macro);
