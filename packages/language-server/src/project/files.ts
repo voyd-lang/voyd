@@ -33,19 +33,34 @@ const collectNodeModulesDirs = (startDir: string): string[] => {
 const hasStdSourceLayout = (rootPath: string): boolean =>
   existsSync(path.join(rootPath, "pkg.voyd"));
 
+const resolveStdRootFromPackage = (): string | undefined => {
+  try {
+    const packageJsonPath = require.resolve("@voyd/std/package.json");
+    const packageRoot = dirname(packageJsonPath);
+    const srcRoot = join(packageRoot, "src");
+    return hasStdSourceLayout(srcRoot) ? srcRoot : packageRoot;
+  } catch {
+    return undefined;
+  }
+};
+
 const resolveStdRoot = (): string => {
   const envRoot = process.env.VOYD_STD_ROOT;
-  if (envRoot) {
-    const resolvedEnvRoot = path.resolve(envRoot);
-    if (hasStdSourceLayout(resolvedEnvRoot)) {
-      return resolvedEnvRoot;
-    }
+  const resolvedEnvRoot = envRoot ? path.resolve(envRoot) : undefined;
+  if (resolvedEnvRoot && hasStdSourceLayout(resolvedEnvRoot)) {
+    return resolvedEnvRoot;
   }
 
-  const packageJsonPath = require.resolve("@voyd/std/package.json");
-  const packageRoot = dirname(packageJsonPath);
-  const srcRoot = join(packageRoot, "src");
-  return hasStdSourceLayout(srcRoot) ? srcRoot : packageRoot;
+  const packageRoot = resolveStdRootFromPackage();
+  if (packageRoot) {
+    return packageRoot;
+  }
+
+  if (resolvedEnvRoot) {
+    return resolvedEnvRoot;
+  }
+
+  return path.resolve(process.cwd(), "node_modules", "@voyd", "std", "src");
 };
 
 export const normalizeFilePath = (filePath: string): string => path.resolve(filePath);

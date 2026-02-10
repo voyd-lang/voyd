@@ -47,3 +47,5 @@ You should generally add unit tests (especially e2e ones)
 - Prefer consuming compiler functionality through public pipeline entrypoints (`@voyd/compiler` or `@voyd/compiler/pipeline.js`) instead of deep-importing internal module graph files from other packages.
 - In `@voyd/compiler` exports, keep `.js` subpath mappings (`"./*.js"`) unambiguous. A broad `./*` export can break bundlers that resolve `*.js` subpaths in development mode.
 - `apps/vscode` server bundling resolves compiler imports during the build; keep `@voyd/compiler` declared in `apps/vscode` devDependencies so Turbo/CI task isolation can resolve it consistently.
+- `@voyd/language-server` publishes runtime entrypoints from `dist/`; its `build` script should emit JS with `tsconfig.build.json` (not `--noEmit`).
+- Keep language-server source range checks end-exclusive (`[start, end)`) to match LSP cursor semantics at token boundaries.

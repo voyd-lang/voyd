@@ -91,7 +91,7 @@ export const isInRange = (position: Position, range: Range): boolean => {
     return false;
   }
 
-  if (position.line === range.end.line && position.character > range.end.character) {
+  if (position.line === range.end.line && position.character >= range.end.character) {
     return false;
   }
 

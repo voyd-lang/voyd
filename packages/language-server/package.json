@@ -22,7 +22,7 @@
     }
   },
   "scripts": {
-    "build": "tsc --noEmit -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config ../../vitest.config.ts src",
     "test:w": "vitest --config ../../vitest.config.ts src",
@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@voyd/compiler": "0.9.0",
+    "@voyd/std": "0.9.0",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",
     "vscode-uri": "^3.0.8"
