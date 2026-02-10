@@ -1,5 +1,5 @@
-use std::msgpack::self as __std_msgpack
-use std::string::self as __std_string
+use std::msgpack
+use std::string
 
 @effect(id: "com.example.async")
 eff Async

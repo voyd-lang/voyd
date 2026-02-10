@@ -670,7 +670,10 @@ describe("binding pipeline", () => {
     });
 
     const [use] = binding.uses;
-    expect(use.entries.map((entry) => entry.importKind)).toEqual(["self", "name"]);
+    expect(use.entries.map((entry) => entry.selectionKind)).toEqual([
+      "module",
+      "name",
+    ]);
     expect(use.entries[0]?.moduleId).toBe(utilId);
     expect(use.entries[1]?.moduleId).toBe(mathId);
     expect(use.entries[1]?.alias).toBe("math");
@@ -746,7 +749,10 @@ describe("binding pipeline", () => {
     });
 
     const [use] = binding.uses;
-    expect(use.entries.map((entry) => entry.importKind)).toEqual(["self", "name"]);
+    expect(use.entries.map((entry) => entry.selectionKind)).toEqual([
+      "module",
+      "name",
+    ]);
     expect(use.entries[0]?.moduleId).toBe("src::grouped::util");
     expect(use.entries[1]?.moduleId).toBe(mathId);
     expect(use.entries[1]?.alias).toBe("math");
