@@ -31,6 +31,15 @@ const containsDeep = (value: unknown, target: unknown): boolean => {
 };
 
 describe("functional macro expansion", () => {
+  test("does not throw for incomplete macro definitions while typing", () => {
+    const code = `\
+macro binaryen_gc_call
+  syntax_template binaryen
+`;
+    expect(() => parse(code)).not.toThrow();
+    expect(parse(code)).toBeInstanceOf(Form);
+  });
+
   test("expands macro_let definitions into macro variables", () => {
     const ast = parse(functionalMacrosVoydFile);
     const plain = toPlain(ast);

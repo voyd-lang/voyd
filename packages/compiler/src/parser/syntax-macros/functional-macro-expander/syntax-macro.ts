@@ -6,6 +6,7 @@ import {
   isIdentifierAtom,
 } from "../../ast/index.js";
 import type { SyntaxMacro } from "../types.js";
+import { SyntaxMacroError } from "../macro-error.js";
 import {
   ensureForm,
   cloneExpr,
@@ -43,25 +44,31 @@ const expandExpr = (
   scope: MacroScope,
   exports: MacroDefinition[]
 ): Expr => {
-  if (!isForm(expr)) return expr;
-
-  const macroDefinition = parseMacroDefinition(expr);
-  if (macroDefinition) {
-    return expandMacroDefinition(macroDefinition, scope, exports);
+  if (!isForm(expr)) {
+    return expr;
   }
 
-  if (expr.calls("macro_let")) {
-    return expandMacroLet(expr, scope);
-  }
+  try {
+    const macroDefinition = parseMacroDefinition(expr);
+    if (macroDefinition) {
+      return expandMacroDefinition(macroDefinition, scope, exports);
+    }
 
-  const head = expr.at(0);
-  const macro = isIdentifierAtom(head) ? scope.getMacro(head.value) : undefined;
-  if (macro) {
-    const expanded = expandMacroCall(expr, macro, scope);
-    return expandExpr(expanded, scope, exports);
-  }
+    if (expr.calls("macro_let")) {
+      return expandMacroLet(expr, scope);
+    }
 
-  return expandForm(expr, scope, exports);
+    const head = expr.at(0);
+    const macro = isIdentifierAtom(head) ? scope.getMacro(head.value) : undefined;
+    if (macro) {
+      const expanded = expandMacroCall(expr, macro, scope);
+      return expandExpr(expanded, scope, exports);
+    }
+
+    return expandForm(expr, scope, exports);
+  } catch (error) {
+    throw toSyntaxMacroError(error, expr);
+  }
 };
 
 const expandForm = (
@@ -167,15 +174,24 @@ const parseMacroDefinition = (form: Form): MacroDefinitionInput | null => {
   }
 
   const signatureExpr = form.at(index + 1);
-  if (!signatureExpr) {
-    throw new Error("macro missing signature");
+  if (!signatureExpr || !isForm(signatureExpr)) {
+    return null;
   }
 
-  const signature = expectForm(signatureExpr, "macro signature");
+  const signature = signatureExpr;
   const bodyExpressions = form
     .toArray()
     .slice(index + 2)
     .map(cloneExpr);
 
   return { signature, bodyExpressions, visibility };
+};
+
+const toSyntaxMacroError = (error: unknown, syntax: Expr): SyntaxMacroError => {
+  if (error instanceof SyntaxMacroError) {
+    return error.syntax ? error : new SyntaxMacroError(error.message, syntax);
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return new SyntaxMacroError(message, syntax);
 };
