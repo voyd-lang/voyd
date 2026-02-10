@@ -114,9 +114,13 @@ const bindFunctionParameters = (
       },
     });
     rememberSyntax(param.ast, ctx);
+    if (param.labelAst) {
+      rememberSyntax(param.labelAst, ctx);
+    }
     boundParams.push({
       name: param.name,
       label: param.label,
+      labelAst: param.labelAst,
       optional: param.optional,
       symbol: paramSymbol,
       ast: param.ast,

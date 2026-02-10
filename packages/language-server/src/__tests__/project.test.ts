@@ -198,6 +198,73 @@ describe("language server project analysis", () => {
 
       const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
       expect(diagnostics.some((diagnostic) => diagnostic.code === "TY0034")).toBe(true);
+
+      const rename = renameAtPosition({
+        analysis,
+        uri,
+        position: { line: 5, character: 3 },
+        newName: "total",
+      });
+      const changes = rename?.changes?.[uri] ?? [];
+      expect(changes.length).toBeGreaterThanOrEqual(2);
+      expect(changes.every((change) => change.newText === "total")).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("renames labeled parameters, including external labels", async () => {
+    const source = `use std::all\n\nfn reduce<T>(ay: Array<T>, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  start\n\nfn main() -> i32\n  [1, 2, 3].reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
+    const project = await createProject({
+      "src/main.voyd": source,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+      const lines = source.split("\n");
+      const callLine = lines.findIndex((line) => line.includes("reducer:"));
+      const callChar = lines[callLine]?.indexOf("reducer") ?? -1;
+      const reducerDeclLine = lines.findIndex((line) => line.includes("reducer cb"));
+      const startBodyLine = lines.findIndex((line) => line.trim() === "start");
+      expect(callLine).toBeGreaterThanOrEqual(0);
+      expect(callChar).toBeGreaterThanOrEqual(0);
+      expect(reducerDeclLine).toBeGreaterThanOrEqual(0);
+      expect(startBodyLine).toBeGreaterThanOrEqual(0);
+
+      const externalLabelRename = renameAtPosition({
+        analysis,
+        uri,
+        position: { line: callLine, character: callChar + 1 },
+        newName: "combine",
+      });
+      const externalLabelChanges = externalLabelRename?.changes?.[uri] ?? [];
+      expect(externalLabelChanges.some((change) => change.range.start.line === reducerDeclLine)).toBe(
+        true,
+      );
+      expect(externalLabelChanges.some((change) => change.range.start.line === callLine)).toBe(
+        true,
+      );
+      expect(externalLabelChanges.every((change) => change.newText === "combine")).toBe(true);
+
+      const startCallChar = lines[callLine]?.indexOf("start") ?? -1;
+      expect(startCallChar).toBeGreaterThanOrEqual(0);
+      const startRename = renameAtPosition({
+        analysis,
+        uri,
+        position: { line: callLine, character: startCallChar + 1 },
+        newName: "initial",
+      });
+      const startChanges = startRename?.changes?.[uri] ?? [];
+      expect(startChanges.some((change) => change.range.start.line === reducerDeclLine)).toBe(true);
+      expect(startChanges.some((change) => change.range.start.line === startBodyLine)).toBe(true);
+      expect(startChanges.some((change) => change.range.start.line === callLine)).toBe(true);
+      expect(startChanges.every((change) => change.newText === "initial")).toBe(true);
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }

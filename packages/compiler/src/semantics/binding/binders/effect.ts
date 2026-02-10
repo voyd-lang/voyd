@@ -28,9 +28,13 @@ const declareEffectOperationParams = ({
       scope
     );
     rememberSyntax(param.ast, ctx);
+    if (param.labelAst) {
+      rememberSyntax(param.labelAst, ctx);
+    }
     return {
       name: param.name,
       label: param.label,
+      labelAst: param.labelAst,
       optional: param.optional,
       symbol,
       ast: param.ast,

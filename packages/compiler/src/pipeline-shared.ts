@@ -37,6 +37,7 @@ export type AnalyzeModulesOptions = {
   graph: ModuleGraph;
   includeTests?: boolean;
   testScope?: TestScope;
+  recoverFromTypingErrors?: boolean;
 };
 
 export type AnalyzeModulesResult = {
@@ -104,6 +105,7 @@ export const analyzeModules = ({
   graph,
   includeTests,
   testScope,
+  recoverFromTypingErrors,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
   const order = sortModules(graph);
   const semantics = new Map<string, SemanticsPipelineResult>();
@@ -126,6 +128,7 @@ export const analyzeModules = ({
         dependencies: semantics,
         typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
         includeTests,
+        recoverFromTypingErrors,
       });
       semantics.set(id, result);
       exports.set(id, result.exports);

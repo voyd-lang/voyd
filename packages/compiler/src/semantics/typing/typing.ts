@@ -24,31 +24,56 @@ import {
 } from "./imports.js";
 import { cloneNestedMap } from "./call-resolution.js";
 import { resolveTypeAlias } from "./type-system.js";
+import { DiagnosticError, type Diagnostic } from "../../diagnostics/index.js";
 
 export * from "./types.js";
 
 export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
   const ctx = createTypingContext(inputs);
   const state = createTypingState();
+  const recoverDiagnosticErrors = inputs.recoverDiagnosticErrors === true;
 
-  seedPrimitiveTypes(ctx);
-  seedBaseObjectType(ctx);
-  primeImportedValues(ctx);
-  primeImportedTypes(ctx);
-  registerTypeAliases(ctx, state);
-  registerObjectDecls(ctx);
-  registerTraits(ctx);
-  primeTypeAliases(ctx, state);
-  registerFunctionSignatures(ctx, state);
-  registerEffectOperations(ctx, state);
-  registerImpls(ctx, state);
-  indexMemberMetadata(ctx);
+  try {
+    seedPrimitiveTypes(ctx);
+    seedBaseObjectType(ctx);
+    primeImportedValues(ctx);
+    primeImportedTypes(ctx);
+    registerTypeAliases(ctx, state);
+    registerObjectDecls(ctx);
+    registerTraits(ctx);
+    primeTypeAliases(ctx, state);
+    registerFunctionSignatures(ctx, state);
+    registerEffectOperations(ctx, state);
+    registerImpls(ctx, state);
+    indexMemberMetadata(ctx);
 
-  runInferencePass(ctx, state);
-  runStrictTypeCheck(ctx, state);
-  requireInferredReturnTypes(ctx);
-  validateTypedProgram(ctx);
+    runInferencePass(ctx, state);
+    runStrictTypeCheck(ctx, state);
+    requireInferredReturnTypes(ctx);
+    validateTypedProgram(ctx);
+  } catch (error) {
+    if (!(error instanceof DiagnosticError) || !recoverDiagnosticErrors) {
+      throw error;
+    }
+    return snapshotTypingResult({
+      ctx,
+      diagnostics: mergeDiagnostics(
+        ctx.diagnostics.diagnostics,
+        error.diagnostics,
+      ),
+    });
+  }
 
+  return snapshotTypingResult({ ctx });
+};
+
+const snapshotTypingResult = ({
+  ctx,
+  diagnostics,
+}: {
+  ctx: TypingContext;
+  diagnostics?: readonly Diagnostic[];
+}): TypingResult => {
   return {
     arena: ctx.arena,
     table: ctx.table,
@@ -85,8 +110,30 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     ),
     traitMethodImpls: new Map(ctx.traitMethodImpls),
     memberMetadata: new Map(ctx.memberMetadata),
-    diagnostics: ctx.diagnostics.diagnostics,
+    diagnostics: diagnostics ?? ctx.diagnostics.diagnostics,
   };
+};
+
+const mergeDiagnostics = (
+  primary: readonly Diagnostic[],
+  secondary: readonly Diagnostic[],
+): readonly Diagnostic[] => {
+  const seen = new Set(
+    primary.map(
+      (diagnostic) =>
+        `${diagnostic.code}:${diagnostic.span.file}:${diagnostic.span.start}:${diagnostic.span.end}:${diagnostic.message}`,
+    ),
+  );
+  const merged = [...primary];
+  secondary.forEach((diagnostic) => {
+    const key = `${diagnostic.code}:${diagnostic.span.file}:${diagnostic.span.start}:${diagnostic.span.end}:${diagnostic.message}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    merged.push(diagnostic);
+  });
+  return merged;
 };
 
 const primeTypeAliases = (ctx: TypingContext, state: TypingState): void => {

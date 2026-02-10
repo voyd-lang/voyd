@@ -45,6 +45,7 @@ export interface SemanticsPipelineOptions {
   dependencies?: Map<string, SemanticsPipelineResult>;
   typing?: Partial<Pick<TypingResult, "arena" | "effects">>;
   includeTests?: boolean;
+  recoverFromTypingErrors?: boolean;
 }
 
 type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
@@ -58,6 +59,7 @@ export const semanticsPipeline = (
     exports,
     dependencies,
     typing: typingState,
+    recoverFromTypingErrors,
   } = normalizeSemanticsInput(input);
   const form = module.ast;
   if (!form.callsInternal("ast")) {
@@ -133,6 +135,7 @@ export const semanticsPipeline = (
       packageId: binding.packageId,
       moduleExports: exports ?? new Map(),
       availableSemantics: projectDependencySemantics(dependencies),
+      recoverDiagnosticErrors: recoverFromTypingErrors,
     });
   } catch (error) {
     if (error instanceof DiagnosticError) {

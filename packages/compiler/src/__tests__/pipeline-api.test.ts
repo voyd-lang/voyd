@@ -182,6 +182,37 @@ pub fn main() -> i32
     expect(result.diagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(false);
   });
 
+  it("retains semantics for modules with typing diagnostics when recovery is enabled", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub fn identity<T>(value: T)
+  value
+
+pub fn main() -> i32
+  let counter = 1
+  counter
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({
+      graph,
+      recoverFromTypingErrors: true,
+    });
+
+    expect(semantics.has("src::main")).toBe(true);
+    expect(diagnostics.some((diagnostic) => diagnostic.code === "TY0034")).toBe(
+      true,
+    );
+  });
+
   it("orders modules topologically for lowering", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");

@@ -102,7 +102,10 @@ export const analyzeProjectCore = async ({
     host: overlayHost,
   });
 
-  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({ graph });
+  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
+    graph,
+    recoverFromTypingErrors: true,
+  });
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
 
   const sourceByFile = buildSourceByFile({

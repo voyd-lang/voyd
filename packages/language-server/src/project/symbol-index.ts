@@ -1,6 +1,7 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import {
+  formCallsInternal,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -46,6 +47,25 @@ type SymbolIndex = {
 };
 
 const keyForSymbol = ({ moduleId, symbol }: SymbolRef): string => `${moduleId}::${symbol}`;
+const keyForExternalParameterLabel = ({
+  moduleId,
+  symbol,
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+}): string => `${moduleId}::label::${symbol}`;
+
+type BoundParameterLike = {
+  symbol: SymbolId;
+  label?: string;
+  ast?: Syntax;
+  labelAst?: Syntax;
+};
+
+type LabeledArgumentSyntax = {
+  label: string;
+  syntax: Syntax;
+};
 
 const collectSyntaxById = (root: Form): Map<number, Syntax> => {
   const syntaxById = new Map<number, Syntax>();
@@ -212,6 +232,68 @@ const findMethodNameSyntax = ({
   }
 
   return methodFromMember(member);
+};
+
+const labeledArgumentsFromCallMember = (member: Form): LabeledArgumentSyntax[] => {
+  const hasTypeArguments =
+    isForm(member.at(1)) && formCallsInternal(member.at(1) as Form, "generics");
+  const startIndex = hasTypeArguments ? 2 : 1;
+  return member
+    .toArray()
+    .slice(startIndex)
+    .flatMap((arg): LabeledArgumentSyntax[] => {
+      if (!(isForm(arg) && arg.calls(":"))) {
+        return [];
+      }
+      const labelExpr = arg.at(1);
+      if (!(isIdentifierAtom(labelExpr) || isInternalIdentifierAtom(labelExpr))) {
+        return [];
+      }
+      return [{ label: labelExpr.value, syntax: labelExpr }];
+    });
+};
+
+const findLabeledArgumentSyntaxes = ({
+  callForm,
+}: {
+  callForm: Form;
+}): LabeledArgumentSyntax[] => {
+  if (callForm.calls(".")) {
+    const memberExpr = callForm.at(2);
+    const member =
+      isForm(memberExpr) && memberExpr.calls("::")
+        ? memberExpr.at(2)
+        : memberExpr;
+    if (!isForm(member)) {
+      return [];
+    }
+    return labeledArgumentsFromCallMember(member);
+  }
+
+  if (callForm.calls("::")) {
+    const member = callForm.at(2);
+    if (!isForm(member)) {
+      return [];
+    }
+    return labeledArgumentsFromCallMember(member);
+  }
+
+  const hasTypeArguments =
+    isForm(callForm.at(1)) && formCallsInternal(callForm.at(1) as Form, "generics");
+  const startIndex = hasTypeArguments ? 2 : 1;
+  return callForm
+    .toArray()
+    .slice(startIndex)
+    .flatMap((arg): LabeledArgumentSyntax[] => {
+      if (!(isForm(arg) && arg.calls(":"))) {
+        return [];
+      }
+      const labelExpr = arg.at(1);
+      if (!(isIdentifierAtom(labelExpr) || isInternalIdentifierAtom(labelExpr))) {
+        return [];
+      }
+      return [{ label: labelExpr.value, syntax: labelExpr }];
+    });
 };
 
 const escapeForRegex = (value: string): string =>
@@ -386,6 +468,48 @@ export const buildSymbolIndex = async ({
     });
   };
 
+  const addCustomOccurrenceFromLocation = ({
+    canonicalKey,
+    moduleId,
+    symbol,
+    location,
+    kind,
+    name,
+  }: {
+    canonicalKey: string;
+    moduleId: string;
+    symbol: SymbolId;
+    location: SourceLocation | undefined;
+    kind: SymbolOccurrence["kind"];
+    name: string;
+  }): void => {
+    if (!location) {
+      return;
+    }
+
+    const filePath = path.resolve(location.filePath);
+    const lineIndex = lineIndexByFile.get(filePath);
+    const range = locationRange({ location, lineIndex });
+    if (!range) {
+      return;
+    }
+
+    pushOccurrence({
+      occurrence: {
+        canonicalKey,
+        moduleId,
+        symbol,
+        uri: toFileUri(filePath),
+        range,
+        name,
+        kind,
+      },
+      byUri: occurrencesByUri,
+      byKey: occurrencesByKey,
+      dedupeKeys,
+    });
+  };
+
   const addOccurrenceFromSpan = ({
     symbolRef,
     span,
@@ -416,6 +540,110 @@ export const buildSymbolIndex = async ({
       byUri: occurrencesByUri,
       byKey: occurrencesByKey,
       dedupeKeys,
+    });
+  };
+
+  const getCallableParameters = ({
+    moduleId,
+    symbol,
+  }: SymbolRef): readonly BoundParameterLike[] => {
+    const module = semantics.get(moduleId);
+    if (!module) {
+      return [];
+    }
+
+    const fromFunction = module.binding.functions.find((fn) => fn.symbol === symbol);
+    if (fromFunction) {
+      return fromFunction.params;
+    }
+
+    for (const trait of module.binding.traits) {
+      const method = trait.methods.find((entry) => entry.symbol === symbol);
+      if (method) {
+        return method.params;
+      }
+    }
+
+    for (const effect of module.binding.effects) {
+      const operation = effect.operations.find((entry) => entry.symbol === symbol);
+      if (operation) {
+        return operation.parameters;
+      }
+    }
+
+    return [];
+  };
+
+  const resolveParameterLabelTarget = ({
+    target,
+    parameter,
+  }: {
+    target: SymbolRef;
+    parameter: BoundParameterLike;
+  }): {
+    canonicalKey: string;
+    moduleId: string;
+    symbol: SymbolId;
+    name: string;
+  } | undefined => {
+    if (!parameter.label) {
+      return undefined;
+    }
+
+    const isExternalLabel =
+      Boolean(parameter.labelAst) &&
+      Boolean(parameter.ast) &&
+      parameter.labelAst?.syntaxId !== parameter.ast?.syntaxId;
+
+    if (isExternalLabel) {
+      return {
+        canonicalKey: keyForExternalParameterLabel({
+          moduleId: target.moduleId,
+          symbol: parameter.symbol,
+        }),
+        moduleId: target.moduleId,
+        symbol: parameter.symbol,
+        name: parameter.label,
+      };
+    }
+
+    const canonical = canonicalize({
+      moduleId: target.moduleId,
+      symbol: parameter.symbol,
+    });
+    return {
+      canonicalKey: keyForSymbol(canonical),
+      moduleId: target.moduleId,
+      symbol: parameter.symbol,
+      name: parameter.label,
+    };
+  };
+
+  const addExternalLabelDeclaration = ({
+    target,
+    parameter,
+  }: {
+    target: SymbolRef;
+    parameter: BoundParameterLike;
+  }): void => {
+    if (!parameter.labelAst?.location) {
+      return;
+    }
+    const labelTarget = resolveParameterLabelTarget({ target, parameter });
+    if (!labelTarget) {
+      return;
+    }
+    const symbolCanonicalKey = keyForSymbol(canonicalize(target));
+    if (labelTarget.canonicalKey === symbolCanonicalKey) {
+      return;
+    }
+    addCustomOccurrenceFromLocation({
+      canonicalKey: labelTarget.canonicalKey,
+      moduleId: labelTarget.moduleId,
+      symbol: labelTarget.symbol,
+      location: parameter.labelAst.location,
+      kind: "declaration",
+      name: labelTarget.name,
     });
   };
 
@@ -520,6 +748,10 @@ export const buildSymbolIndex = async ({
           location: param.ast?.location,
           kind: "declaration",
         });
+        addExternalLabelDeclaration({
+          target: moduleRef(param.symbol),
+          parameter: param,
+        });
       });
     });
 
@@ -559,6 +791,10 @@ export const buildSymbolIndex = async ({
             location: param.ast?.location,
             kind: "declaration",
           });
+          addExternalLabelDeclaration({
+            target: moduleRef(param.symbol),
+            parameter: param,
+          });
         });
       });
     });
@@ -582,6 +818,10 @@ export const buildSymbolIndex = async ({
             symbolRef: moduleRef(param.symbol),
             location: param.ast?.location,
             kind: "declaration",
+          });
+          addExternalLabelDeclaration({
+            target: moduleRef(param.symbol),
+            parameter: param,
           });
         });
       });
@@ -614,6 +854,52 @@ export const buildSymbolIndex = async ({
     });
 
     entry.hir.expressions.forEach((expression) => {
+      const addLabeledArgumentOccurrences = ({
+        target,
+      }: {
+        target: SymbolRef;
+      }): void => {
+        const callSyntax = syntaxById.get(expression.ast);
+        if (!callSyntax || !isForm(callSyntax)) {
+          return;
+        }
+
+        const labeledArgs = findLabeledArgumentSyntaxes({ callForm: callSyntax });
+        if (labeledArgs.length === 0) {
+          return;
+        }
+
+        const paramsByLabel = new Map<string, BoundParameterLike>();
+        getCallableParameters(target).forEach((param) => {
+          if (!param.label || paramsByLabel.has(param.label)) {
+            return;
+          }
+          paramsByLabel.set(param.label, param);
+        });
+
+        labeledArgs.forEach(({ label, syntax }) => {
+          const parameter = paramsByLabel.get(label);
+          if (!parameter) {
+            return;
+          }
+          const labelTarget = resolveParameterLabelTarget({
+            target,
+            parameter,
+          });
+          if (!labelTarget) {
+            return;
+          }
+          addCustomOccurrenceFromLocation({
+            canonicalKey: labelTarget.canonicalKey,
+            moduleId: labelTarget.moduleId,
+            symbol: labelTarget.symbol,
+            location: syntax.location,
+            kind: "reference",
+            name: labelTarget.name,
+          });
+        });
+      };
+
       if (expression.exprKind === "identifier") {
         addOccurrenceFromSpan({
           symbolRef: moduleRef(expression.symbol),
@@ -656,6 +942,19 @@ export const buildSymbolIndex = async ({
         });
       }
 
+      if (expression.exprKind === "call") {
+        const callTarget = entry.typing.callTargets.get(expression.id);
+        const selected = callTarget ? Array.from(callTarget.values())[0] : undefined;
+        if (selected) {
+          addLabeledArgumentOccurrences({
+            target: {
+              moduleId: selected.moduleId,
+              symbol: selected.symbol,
+            },
+          });
+        }
+      }
+
       if (expression.exprKind === "method-call") {
         const methodTarget = entry.typing.callTargets.get(expression.id);
         const selected = methodTarget ? Array.from(methodTarget.values())[0] : undefined;
@@ -679,6 +978,13 @@ export const buildSymbolIndex = async ({
               kind: "reference",
             });
           }
+
+          addLabeledArgumentOccurrences({
+            target: {
+              moduleId: selected.moduleId,
+              symbol: selected.symbol,
+            },
+          });
         }
       }
 
