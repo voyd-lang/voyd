@@ -80,4 +80,29 @@ describe("module imports", () => {
     );
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
+
+  it("treats src imports as std-internal aliases when analyzing std modules", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}msgpack.voyd`]:
+        "use src::msgpack::fns::marker\npub fn top() -> i32\n  marker()",
+      [`${stdRoot}${sep}msgpack${sep}fns.voyd`]:
+        "use std::fixed_array::fns::hidden\npub fn marker() -> i32\n  hidden()",
+      [`${stdRoot}${sep}fixed_array${sep}fns.voyd`]: "pub fn hidden() -> i32\n  1",
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${stdRoot}${sep}msgpack.voyd`,
+      roots: { src: stdRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+
+    expect(combinedDiagnostics).toHaveLength(0);
+    expect(graph.modules.has("std::msgpack::fns")).toBe(true);
+    expect(graph.modules.has("src::msgpack::fns")).toBe(false);
+  });
 });

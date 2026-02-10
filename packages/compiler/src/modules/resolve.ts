@@ -22,8 +22,11 @@ export const resolveModuleRequest = (
 ): ModulePath => {
   const normalized = normalizeRequest(request);
   const resolveSrcWithinPackage =
-    importer.namespace === "pkg" && normalized.namespace === "src";
-  const namespace = resolveSrcWithinPackage ? "pkg" : normalized.namespace ?? importer.namespace;
+    (importer.namespace === "pkg" || importer.namespace === "std") &&
+    normalized.namespace === "src";
+  const namespace = resolveSrcWithinPackage
+    ? importer.namespace
+    : normalized.namespace ?? importer.namespace;
   const packageName =
     namespace === "pkg"
       ? normalized.packageName ?? importer.packageName
@@ -82,7 +85,8 @@ export const matchesDependencyPath = ({
     entry.path.length > 0 ? entry.path.join("::") : undefined,
   ].filter((value): value is string => Boolean(value));
   const srcAliasEntryKeys =
-    currentModulePath.namespace === "pkg"
+    (currentModulePath.namespace === "pkg" ||
+      currentModulePath.namespace === "std")
       ? entryKeys.flatMap((key) =>
           key === "src"
             ? ["pkg"]

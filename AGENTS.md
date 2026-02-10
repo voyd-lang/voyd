@@ -49,3 +49,4 @@ You should generally add unit tests (especially e2e ones)
 - `apps/vscode` server bundling resolves compiler imports during the build; keep `@voyd/compiler` declared in `apps/vscode` devDependencies so Turbo/CI task isolation can resolve it consistently.
 - `@voyd/language-server` publishes runtime entrypoints from `dist/`; its `build` script should emit JS with `tsconfig.build.json` (not `--noEmit`).
 - Keep language-server source range checks end-exclusive (`[start, end)`) to match LSP cursor semantics at token boundaries.
+- Inside modules in the `std` namespace, treat `src::...` imports as aliases of `std::...` to avoid false unavailable-import diagnostics when `roots.src` and `roots.std` overlap during std development.
