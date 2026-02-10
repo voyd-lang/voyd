@@ -24,6 +24,7 @@ import type {
   ModuleNode,
   ModulePath,
 } from "../../modules/types.js";
+import type { UsePathSelectionKind } from "../../modules/use-path.js";
 import type { ModuleExportTable } from "../modules.js";
 import type { SourceSpan } from "../ids.js";
 
@@ -133,6 +134,7 @@ export interface BoundUseEntry {
   path: readonly string[];
   moduleId?: string;
   span: SourceSpan;
+  selectionKind: UsePathSelectionKind;
   importKind: "all" | "self" | "name";
   targetName?: string;
   alias?: string;

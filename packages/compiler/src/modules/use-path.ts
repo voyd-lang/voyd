@@ -5,6 +5,7 @@ import {
 } from "../parser/index.js";
 import type { SourceSpan } from "../semantics/ids.js";
 
+export type UsePathSelectionKind = "all" | "module" | "name";
 export type UsePathImportKind = "all" | "self" | "name";
 
 export type NormalizedUseEntry = {
@@ -12,6 +13,7 @@ export type NormalizedUseEntry = {
   path: readonly string[];
   targetName?: string;
   alias?: string;
+  selectionKind: UsePathSelectionKind;
   importKind: UsePathImportKind;
   anchorToSelf?: boolean;
   parentHops?: number;
@@ -26,14 +28,14 @@ type RawUseEntry = {
   anchorToSelf?: boolean;
   parentHops?: number;
   hasExplicitPrefix?: boolean;
-  fromGroupSelection?: boolean;
+  selectionContext?: "direct" | "group";
 };
 
 type ParseUsePathState = {
   anchorToSelf?: boolean;
   parentHops?: number;
   hasExplicitPrefix?: boolean;
-  fromGroupSelection?: boolean;
+  selectionContext?: "direct" | "group";
 };
 
 const ROOT_PREFIXES = new Set(["self", "super", "src", "std", "pkg"]);
@@ -74,7 +76,7 @@ export const parseUsePaths = (
         anchorToSelf: nextState.anchorToSelf,
         parentHops: nextState.parentHops,
         hasExplicitPrefix: nextState.hasExplicitPrefix,
-        fromGroupSelection: nextState.fromGroupSelection,
+        selectionContext: nextState.selectionContext,
       }),
     ];
   }
@@ -114,6 +116,7 @@ export const parseUsePaths = (
         anchorToSelf: entry.anchorToSelf,
         parentHops: entry.parentHops,
         hasExplicitPrefix: entry.hasExplicitPrefix,
+        selectionContext: state.selectionContext,
       })
     );
   }
@@ -131,7 +134,7 @@ export const parseUsePaths = (
     return expr.rest.flatMap((entry) =>
       parseUsePaths(entry, span, base, {
         ...state,
-        fromGroupSelection: true,
+        selectionContext: "group",
       }),
     );
   }
@@ -146,7 +149,7 @@ const normalizeUseEntry = ({
   anchorToSelf,
   parentHops,
   hasExplicitPrefix: explicitPrefix,
-  fromGroupSelection,
+  selectionContext,
 }: RawUseEntry): NormalizedUseEntry => {
   const normalizedSegments =
     segments[0] === "pkg" && segments[1] === "std"
@@ -167,6 +170,7 @@ const normalizeUseEntry = ({
     return {
       moduleSegments,
       path: moduleSegments,
+      selectionKind: "all",
       importKind: "all",
       alias,
       anchorToSelf,
@@ -182,6 +186,7 @@ const normalizeUseEntry = ({
     return {
       moduleSegments,
       path: moduleSegments,
+      selectionKind: "module",
       importKind: "self",
       alias: alias ?? name,
       anchorToSelf,
@@ -197,6 +202,7 @@ const normalizeUseEntry = ({
       path: normalizedSegments,
       targetName: last,
       alias: alias ?? last,
+      selectionKind: "module",
       importKind: "self",
       anchorToSelf,
       parentHops,
@@ -211,11 +217,12 @@ const normalizeUseEntry = ({
     last &&
     (first === "src" ||
       first === "pkg" ||
-      (first === "std" && fromGroupSelection !== true))
+      (first === "std" && selectionContext !== "group"))
   ) {
     return {
       moduleSegments: normalizedSegments,
       path: normalizedSegments,
+      selectionKind: "module",
       importKind: "self",
       alias: alias ?? last,
       anchorToSelf,
@@ -233,6 +240,7 @@ const normalizeUseEntry = ({
     path: targetName ? [...moduleSegments, targetName] : moduleSegments,
     targetName,
     alias: alias ?? name,
+    selectionKind: "name",
     importKind: "name",
     anchorToSelf,
     parentHops,
