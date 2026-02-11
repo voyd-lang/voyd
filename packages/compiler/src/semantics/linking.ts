@@ -3,6 +3,7 @@ import { createTypingState } from "./typing/context.js";
 import type { DependencySemantics, SymbolRefKey, TypingContext } from "./typing/types.js";
 import {
   typeGenericFunctionBody,
+  formatFunctionInstanceKey,
 } from "./typing/expressions/call.js";
 import { cloneNestedMap } from "./typing/call-resolution.js";
 import type { ModuleExportTable } from "./modules.js";
@@ -10,7 +11,7 @@ import type { SemanticsPipelineResult } from "./pipeline.js";
 import type { MonomorphizedInstanceRequest } from "./codegen-view/index.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import type { HirExprId, SymbolId, TypeId } from "./ids.js";
-import { buildProgramSymbolArena, type SymbolRef as ProgramSymbolRef } from "./program-symbol-arena.js";
+import type { SymbolRef as ProgramSymbolRef } from "./program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "./canonical-symbol-ref.js";
 import type { SymbolRef as TypingSymbolRef } from "./typing/symbol-ref.js";
 import { parseSymbolRefKey } from "./typing/symbol-ref-utils.js";
@@ -105,7 +106,6 @@ export const monomorphizeProgram = ({
   const stableModules = [...modules].sort((a, b) =>
     a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true })
   );
-  const programSymbols = buildProgramSymbolArena(stableModules);
 
   const importTargetsByModule = new Map<string, Map<SymbolId, ProgramSymbolRef>>();
   stableModules.forEach((mod) => {
@@ -179,8 +179,8 @@ export const monomorphizeProgram = ({
     }
     seenRequestKeys.add(requestKey);
     requestedInstances.push({
-      callee: programSymbols.idOf(canonicalCallee),
-      typeArgs,
+      callee: canonicalCallee,
+      typeArgs: [...typeArgs],
     });
     const substitution = new Map(
       typeParams.map((param, index) => [param.typeParam, typeArgs[index]!] as const)
@@ -196,96 +196,128 @@ export const monomorphizeProgram = ({
     enqueueModule(canonicalCallee.moduleId);
   };
 
-	  while (moduleQueue.length > 0) {
-	    const callerModuleId = moduleQueue.shift();
-	    if (!callerModuleId) {
-	      continue;
-	    }
-    queuedModules.delete(callerModuleId);
-    const callerCtx = typingContextFor(callerModuleId);
-    if (!callerCtx) {
-      continue;
+  const processModuleQueue = (): void => {
+    while (moduleQueue.length > 0) {
+      const callerModuleId = moduleQueue.shift();
+      if (!callerModuleId) {
+        continue;
+      }
+      queuedModules.delete(callerModuleId);
+      const callerCtx = typingContextFor(callerModuleId);
+      if (!callerCtx) {
+        continue;
+      }
+
+      const callTargets = callerCtx.callResolution.targets;
+      const callTypeArguments = callerCtx.callResolution.typeArguments;
+      callTargets.forEach((targets, callId) => {
+        targets.forEach((targetRef, callerInstanceKey) => {
+          const rawTypeArgs = callTypeArguments.get(callId)?.get(callerInstanceKey);
+          if (!rawTypeArgs || rawTypeArgs.length === 0) {
+            return;
+          }
+          const typeArgs = applyCallerInstanceSubstitution({
+            callerCtx,
+            callerInstanceKey,
+            typeArgs: rawTypeArgs,
+          });
+          requestInstantiation({ callerModuleId, calleeRef: targetRef, typeArgs });
+        });
+      });
+
+      const instantiationSources: Array<
+        ReadonlyMap<SymbolRefKey, ReadonlyMap<string, readonly TypeId[]>>
+      > = [callerCtx.functions.snapshotInstantiationInfo()];
+      const priorInstantiationInfo =
+        semantics.get(callerModuleId)?.typing.functionInstantiationInfo;
+      if (priorInstantiationInfo) {
+        instantiationSources.push(priorInstantiationInfo);
+      }
+
+      instantiationSources.forEach((instantiationInfo) => {
+        const sortedRefKeys = Array.from(instantiationInfo.keys()).sort((a, b) =>
+          a.localeCompare(b, undefined, { numeric: true })
+        );
+        sortedRefKeys.forEach((refKey) => {
+          const instantiations = instantiationInfo.get(refKey);
+          if (!instantiations) {
+            return;
+          }
+          const parsed = parseSymbolRefKey(refKey);
+          if (!parsed || parsed.moduleId === callerModuleId) {
+            return;
+          }
+          const sortedInstantiations = Array.from(instantiations.entries()).sort(([a], [b]) =>
+            a.localeCompare(b, undefined, { numeric: true })
+          );
+          sortedInstantiations.forEach(([, typeArgs]) => {
+            requestInstantiation({ callerModuleId, calleeRef: parsed, typeArgs });
+          });
+        });
+      });
     }
-
-    const callTargets = callerCtx.callResolution.targets;
-    const callTypeArguments = callerCtx.callResolution.typeArguments;
-	    callTargets.forEach((targets, callId) => {
-	      targets.forEach((targetRef, callerInstanceKey) => {
-	        const rawTypeArgs = callTypeArguments.get(callId)?.get(callerInstanceKey);
-	        if (!rawTypeArgs || rawTypeArgs.length === 0) {
-	          return;
-	        }
-	        const typeArgs = applyCallerInstanceSubstitution({
-	          callerCtx,
-	          callerInstanceKey,
-	          typeArgs: rawTypeArgs,
-	        });
-	        requestInstantiation({ callerModuleId, calleeRef: targetRef, typeArgs });
-	      });
-	    });
-
-	    const instantiationSources: Array<
-	      ReadonlyMap<SymbolRefKey, ReadonlyMap<string, readonly TypeId[]>>
-	    > = [callerCtx.functions.snapshotInstantiationInfo()];
-	    const priorInstantiationInfo =
-	      semantics.get(callerModuleId)?.typing.functionInstantiationInfo;
-	    if (priorInstantiationInfo) {
-	      instantiationSources.push(priorInstantiationInfo);
-	    }
-
-	    instantiationSources.forEach((instantiationInfo) => {
-	      const sortedRefKeys = Array.from(instantiationInfo.keys()).sort((a, b) =>
-	        a.localeCompare(b, undefined, { numeric: true })
-	      );
-	      sortedRefKeys.forEach((refKey) => {
-	        const instantiations = instantiationInfo.get(refKey);
-	        if (!instantiations) {
-	          return;
-	        }
-	        const parsed = parseSymbolRefKey(refKey);
-	        if (!parsed || parsed.moduleId === callerModuleId) {
-	          return;
-	        }
-	        const sortedInstantiations = Array.from(instantiations.entries()).sort(([a], [b]) =>
-	          a.localeCompare(b, undefined, { numeric: true })
-	        );
-	        sortedInstantiations.forEach(([, typeArgs]) => {
-	          requestInstantiation({ callerModuleId, calleeRef: parsed, typeArgs });
-	        });
-	      });
-	    });
-	  }
-
-  const getOrCreateMap = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
-    const existing = map.get(key);
-    if (existing) {
-      return existing;
-    }
-    const next = create();
-    map.set(key, next);
-    return next;
   };
 
-  const instanceRequests = new Map<
-    MonomorphizedInstanceRequest["callee"],
-    Map<string, MonomorphizedInstanceRequest>
-  >();
+  processModuleQueue();
+
+  requestedInstances.forEach((request) => {
+    const calleeRef = request.callee;
+    const callee = semantics.get(calleeRef.moduleId);
+    const calleeCtx = callee ? typingContextFor(calleeRef.moduleId) : undefined;
+    if (!callee || !calleeCtx) {
+      return;
+    }
+    const calleeSignature = callee.typing.functions.getSignature(calleeRef.symbol);
+    const typeParams = calleeSignature?.typeParams ?? [];
+    if (!calleeSignature || typeParams.length === 0) {
+      return;
+    }
+    if (request.typeArgs.length !== typeParams.length) {
+      return;
+    }
+    const instanceKey = formatFunctionInstanceKey(calleeRef.symbol, request.typeArgs);
+    if (!calleeCtx.functions.getInstanceExprTypes(instanceKey)) {
+      const substitution = new Map(
+        typeParams.map(
+          (param, index) => [param.typeParam, request.typeArgs[index]!] as const
+        )
+      );
+      typeGenericFunctionBody({
+        symbol: calleeRef.symbol,
+        signature: calleeSignature,
+        substitution,
+        ctx: calleeCtx,
+        state: createTypingState("relaxed"),
+      });
+    }
+    touchedModules.add(calleeRef.moduleId);
+    enqueueModule(calleeRef.moduleId);
+  });
+
+  processModuleQueue();
+
+  const instanceRequests = new Map<string, MonomorphizedInstanceRequest>();
   requestedInstances.forEach((info) => {
-    const byArgs = getOrCreateMap(instanceRequests, info.callee, () => new Map());
-    const key = info.typeArgs.join(",");
-    if (!byArgs.has(key)) {
-      byArgs.set(key, info);
+    const key = `${info.callee.moduleId}::${info.callee.symbol}<${info.typeArgs.join(",")}>`;
+    if (!instanceRequests.has(key)) {
+      instanceRequests.set(key, info);
     }
   });
 
-  const instances = Array.from(instanceRequests.entries())
-    .flatMap(([, byArgs]) => Array.from(byArgs.values()))
-    .sort((a, b) => {
-      if (a.callee !== b.callee) return a.callee - b.callee;
-      return a.typeArgs.join(",").localeCompare(b.typeArgs.join(","), undefined, {
-        numeric: true,
-      });
+  const instances = Array.from(instanceRequests.values()).sort((a, b) => {
+    const calleeOrder = a.callee.moduleId.localeCompare(b.callee.moduleId, undefined, {
+      numeric: true,
     });
+    if (calleeOrder !== 0) {
+      return calleeOrder;
+    }
+    if (a.callee.symbol !== b.callee.symbol) {
+      return a.callee.symbol - b.callee.symbol;
+    }
+    return a.typeArgs.join(",").localeCompare(b.typeArgs.join(","), undefined, {
+      numeric: true,
+    });
+  });
 
   const moduleTyping = new Map<
     string,

@@ -65,6 +65,11 @@ export interface ModuleNode {
   ast: Form;
   source: string;
   dependencies: readonly ModuleDependency[];
+  /**
+   * Functional macro names exported from this module after macro-expansion.
+   * Includes local `pub macro` exports and `pub use` re-exports.
+   */
+  macroExports?: readonly string[];
 }
 
 export interface ModuleDiagnostic {

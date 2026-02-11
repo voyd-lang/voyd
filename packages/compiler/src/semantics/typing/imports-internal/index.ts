@@ -15,5 +15,7 @@ export {
 export {
   mapDependencySymbolToLocal,
   registerImportedObjectTemplate,
+  registerImportedTraitDecl,
+  registerImportedTraitImplTemplates,
 } from "../import-symbol-mapping.js";
 export { ensureImportedOwnerTemplatesAvailable } from "../import-owner-templates.js";
