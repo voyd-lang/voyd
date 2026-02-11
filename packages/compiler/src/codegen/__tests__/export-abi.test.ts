@@ -4,6 +4,7 @@ import { createVoydHost, parseExportAbi } from "@voyd/js-host";
 import { compileProgram, type CompileProgramResult } from "../../pipeline.js";
 import { createFsModuleHost } from "../../modules/fs-host.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";
+import type { CodegenOptions } from "../context.js";
 
 const fixtureRoot = resolve(import.meta.dirname, "__fixtures__");
 const stdRoot = resolve(import.meta.dirname, "../../../../std/src");
@@ -20,12 +21,17 @@ const expectCompileSuccess = (
 
 const buildModule = async ({
   entryFile = "msgpack-export.voyd",
-}: { entryFile?: string } = {}): Promise<Uint8Array> => {
+  codegenOptions,
+}: {
+  entryFile?: string;
+  codegenOptions?: CodegenOptions;
+} = {}): Promise<Uint8Array> => {
   const entryPath = resolve(fixtureRoot, entryFile);
   const result = expectCompileSuccess(await compileProgram({
     entryPath,
     roots: { src: fixtureRoot, std: stdRoot },
     host: createFsModuleHost(),
+    codegenOptions,
   }));
   if (!result.wasm) {
     throw new Error("missing wasm output");
@@ -60,6 +66,15 @@ describe("export abi metadata", () => {
     const host = await createVoydHost({ wasm });
     const result = await host.runPure("fetch", []);
     expect(result).toEqual(["a", "b", "c"]);
+  });
+
+  it("exports memory for serialized wrappers under linearMemoryExport: auto", async () => {
+    const wasm = await buildModule({
+      codegenOptions: { linearMemoryExport: "auto" },
+    });
+    const module = new WebAssembly.Module(wasmBufferSource(wasm));
+    const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);
+    expect(exports).toContain("memory");
   });
 
   it("round-trips complex msgpack values", async () => {
