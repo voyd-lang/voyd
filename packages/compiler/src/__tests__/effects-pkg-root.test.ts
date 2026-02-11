@@ -125,4 +125,33 @@ pub fn main(): Async -> i32
     const { diagnostics } = analyzeModules({ graph });
     expect(diagnostics.some((diag) => diag.code === "TY0017")).toBe(true);
   });
+
+  it("does not require effect annotations for exported generated tests", async () => {
+    const root = resolve("/proj/app/src");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const helpersPath = `${root}${sep}helpers.voyd`;
+    const host = createMemoryHost({
+      [pkgPath]: `
+pub use src::helpers::all
+pub fn main(): () -> i32
+  0
+`,
+      [helpersPath]: `
+eff Async
+  fn await(tail) -> i32
+
+test "effectful test":
+  Async::await()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph, includeTests: true });
+    expect(diagnostics.some((diag) => diag.code === "TY0016")).toBe(false);
+  });
 });

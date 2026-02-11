@@ -12,6 +12,18 @@ export type ContinuationFieldSource =
   | "handler"
   | "site";
 
+export type ContinuationCaptureSource =
+  | "param"
+  | "local"
+  | "temp";
+
+export interface ContinuationCaptureField {
+  sourceKind: ContinuationCaptureSource;
+  typeId: TypeId;
+  symbol?: SymbolId;
+  tempId?: number;
+}
+
 export interface ContinuationEnvField {
   name: string;
   symbol?: SymbolId;
@@ -34,6 +46,17 @@ export interface ContinuationSiteBase {
   resumeValueTypeId: TypeId;
 }
 
+export interface ContinuationSiteEirBase {
+  exprId: HirExprId;
+  siteId: number;
+  siteOrder: number;
+  owner: ContinuationSiteOwner;
+  contBaseName: string;
+  handlerAtSite: boolean;
+  resumeValueTypeId: TypeId;
+  captureFields: readonly ContinuationCaptureField[];
+}
+
 export interface ContinuationPerformSite extends ContinuationSiteBase {
   kind: "perform";
   effectSymbol: SymbolId;
@@ -45,9 +68,30 @@ export interface ContinuationCallSite extends ContinuationSiteBase {
 
 export type ContinuationSite = ContinuationPerformSite | ContinuationCallSite;
 
+export interface ContinuationPerformSiteEir extends ContinuationSiteEirBase {
+  kind: "perform";
+  effectSymbol: SymbolId;
+}
+
+export interface ContinuationCallSiteEir extends ContinuationSiteEirBase {
+  kind: "call";
+}
+
+export type ContinuationSiteEir = ContinuationPerformSiteEir | ContinuationCallSiteEir;
+
 export interface EffectLoweringResult {
   sitesByExpr: Map<HirExprId, ContinuationSite>;
   sites: readonly ContinuationSite[];
+  callArgTemps: Map<
+    HirExprId,
+    readonly { argIndex: number; tempId: number; typeId: TypeId }[]
+  >;
+  tempTypeIds: Map<number, TypeId>;
+}
+
+export interface EffectLoweringEirResult {
+  sitesByExpr: Map<HirExprId, ContinuationSiteEir>;
+  sites: readonly ContinuationSiteEir[];
   callArgTemps: Map<
     HirExprId,
     readonly { argIndex: number; tempId: number; typeId: TypeId }[]

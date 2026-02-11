@@ -140,4 +140,47 @@ pub src::base_macros::all
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(3);
   });
+
+  it("preserves literal numeric types when splicing macro arguments", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+obj Some {
+  value: i32
+}
+
+obj None {}
+
+type Optional = Some | None
+
+fn some(v: i32): () -> Optional
+  Some { value: v }
+
+pub macro '??'(l, r)
+  let item = identifier(__item)
+  \`
+    let $item = $l
+    if $item is Some:
+      $item.value
+    else:
+      $r
+
+pub fn main() -> i32
+  some(5) ?? 0
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(5);
+  });
 });

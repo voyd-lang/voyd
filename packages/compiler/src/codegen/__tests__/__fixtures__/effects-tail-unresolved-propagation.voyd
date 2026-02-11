@@ -1,0 +1,21 @@
+eff TailFx
+  await(tail) -> i32
+
+eff LogFx
+  ping(resume, x: i32) -> i32
+
+fn worker(): TailFx -> i32
+  TailFx::await()
+
+pub fn tail_single_resume(): () -> i32
+  try
+    worker()
+  TailFx::await(tail):
+    tail(11)
+
+pub fn tail_unresolved_then_propagate(): LogFx -> i32
+  try
+    worker()
+  TailFx::await(tail):
+    LogFx::ping(3)
+    tail(9)

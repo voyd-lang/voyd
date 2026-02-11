@@ -27,6 +27,18 @@ Keep this AGENTS.md file up to date.
   `init_effects(handle_table_ptr)`.
 - `effects_memory` is an optional compatibility alias of `memory`.
 
+## Effects Backend Status
+
+- The effects runtime currently uses the `gc-trampoline` backend.
+- `stack-switch` is not implemented yet; requests for it must fail closed to
+  `gc-trampoline` behavior.
+
+## Tail Resumption Contract
+
+- `tail` continuations are strict: they must be resumed exactly once.
+- Returning from a tail handler clause or propagating another effect before the
+  required tail resume is a runtime trap.
+
 # Debugging
 
 A cli is available after `npm link`

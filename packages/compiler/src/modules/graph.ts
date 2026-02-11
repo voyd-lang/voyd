@@ -31,6 +31,7 @@ type BuildGraphOptions = {
   entryPath: string;
   host: ModuleHost;
   roots: ModuleRoots;
+  includeTests?: boolean;
 };
 
 type PendingDependency = {
@@ -45,6 +46,7 @@ export const buildModuleGraph = async ({
   entryPath,
   host,
   roots,
+  includeTests,
 }: BuildGraphOptions): Promise<ModuleGraph> => {
   const modules = new Map<string, ModuleNode>();
   const modulesByPath = new Map<string, ModuleNode>();
@@ -69,6 +71,7 @@ export const buildModuleGraph = async ({
     filePath: entryFile,
     modulePath: entryModulePath,
     host,
+    includeTests: includeTests === true,
   });
 
   addModuleTree(entryModule, modules, modulesByPath);
@@ -152,6 +155,7 @@ export const buildModuleGraph = async ({
         filePath: resolvedPath,
         modulePath: resolvedModulePath,
         host,
+        includeTests: includeTests === true,
       });
     } catch (error) {
       moduleDiagnostics.push({
@@ -221,18 +225,31 @@ const loadFileModule = async ({
   filePath,
   modulePath,
   host,
+  includeTests,
 }: {
   filePath: string;
   modulePath: ModulePath;
   host: ModuleHost;
+  includeTests: boolean;
 }): Promise<LoadedModule> => {
   const source = await host.readFile(filePath);
-  const ast = parseBase(source, filePath);
+  let ast = parseBase(source, filePath);
+  const sourceByFile = new Map<string, string>([[filePath, source]]);
+
+  if (includeTests && !isCompanionTestFile(filePath)) {
+    const companionFilePath = companionFileFor(filePath);
+    if (await host.fileExists(companionFilePath)) {
+      const companionSource = await host.readFile(companionFilePath);
+      const companionAst = parseBase(companionSource, companionFilePath);
+      ast = mergeCompanionAst({ primary: ast, companion: companionAst });
+      sourceByFile.set(companionFilePath, companionSource);
+    }
+  }
 
   const info = collectModuleInfo({
     modulePath,
     ast,
-    source,
+    sourceByFile,
   });
   const submoduleDeps = await discoverSubmodules({
     filePath,
@@ -261,15 +278,16 @@ type ModuleInfo = {
 };
 
 const VOYD_EXTENSION = ".voyd";
+const TEST_COMPANION_EXTENSION = ".test.voyd";
 
 const collectModuleInfo = ({
   modulePath,
   ast,
-  source,
+  sourceByFile,
 }: {
   modulePath: ModulePath;
   ast: Form;
-  source: string;
+  sourceByFile: ReadonlyMap<string, string>;
 }): ModuleInfo => {
   const dependencies: ModuleDependency[] = [];
   const inlineModules: ModuleNode[] = [];
@@ -322,7 +340,7 @@ const collectModuleInfo = ({
       decl: topLevelDecl,
       form: entry,
       parentPath: modulePath,
-      source,
+      sourceByFile,
     });
     inlineModules.push(inline.node, ...inline.descendants);
   });
@@ -354,7 +372,7 @@ const parseInlineModuleDecl = ({
   decl,
   form,
   parentPath,
-  source,
+  sourceByFile,
 }: {
   decl: Extract<
     ReturnType<typeof classifyTopLevelDecl>,
@@ -362,7 +380,7 @@ const parseInlineModuleDecl = ({
   >;
   form: Form;
   parentPath: ModulePath;
-  source: string;
+  sourceByFile: ReadonlyMap<string, string>;
 }): InlineModuleTree => {
   const modulePath = {
     ...parentPath,
@@ -370,7 +388,12 @@ const parseInlineModuleDecl = ({
   };
 
   const ast = toModuleAst(decl.body);
-  const info = collectModuleInfo({ modulePath, ast, source });
+  const info = collectModuleInfo({ modulePath, ast, sourceByFile });
+  const span = toSourceSpan(form);
+  const sourceForModule =
+    sourceByFile.get(span.file) ??
+    sourceByFile.values().next().value ??
+    "";
 
   const node: ModuleNode = {
     id: modulePathToString(modulePath),
@@ -379,10 +402,10 @@ const parseInlineModuleDecl = ({
       kind: "inline",
       parentId: modulePathToString(parentPath),
       name: decl.name,
-      span: toSourceSpan(form),
+      span,
     },
     ast,
-    source: sliceSource(source, toSourceSpan(form)),
+    source: sliceSource(sourceForModule, span),
     dependencies: info.dependencies,
   };
 
@@ -399,6 +422,33 @@ const toModuleAst = (block: Form): Form => {
 
 const sliceSource = (source: string, span: SourceSpan): string =>
   source.slice(span.start, span.end);
+
+const isCompanionTestFile = (filePath: string): boolean =>
+  filePath.endsWith(TEST_COMPANION_EXTENSION);
+
+const companionFileFor = (filePath: string): string =>
+  `${filePath.slice(0, -VOYD_EXTENSION.length)}${TEST_COMPANION_EXTENSION}`;
+
+const mergeCompanionAst = ({
+  primary,
+  companion,
+}: {
+  primary: Form;
+  companion: Form;
+}): Form => {
+  const primaryEntries = formCallsInternal(primary, "ast")
+    ? primary.rest
+    : primary.toArray();
+  const companionEntries = formCallsInternal(companion, "ast")
+    ? companion.rest
+    : companion.toArray();
+  const astHead = primary.first ?? new InternalIdentifierAtom("ast");
+
+  return new Form({
+    location: primary.location?.clone(),
+    elements: [astHead, ...primaryEntries, ...companionEntries],
+  }).toCall();
+};
 
 const discoverSubmodules = async ({
   filePath,
@@ -428,6 +478,7 @@ const discoverSubmodules = async ({
       }
 
       if (!entry.endsWith(VOYD_EXTENSION)) continue;
+      if (entry.endsWith(TEST_COMPANION_EXTENSION)) continue;
       const stem = host.path.basename(entry, VOYD_EXTENSION);
       dependencies.push({
         kind: "export",

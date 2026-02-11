@@ -3,18 +3,18 @@ use std::fixed_array::fns::{ get, length }
 use std::optional::fns::{ unwrap_or }
 
 pub fn entry_tail() -> i32
-  let arr = Array<i32>::with_capacity(2)
-  let arr = arr.push(1)
-  let arr = arr.push(2)
-  let storage = arr.raw_storage()
+  let arr0 = Array<i32>::with_capacity(2)
+  let arr1 = arr0.push(1)
+  let arr2 = arr1.push(2)
+  let storage = arr2.raw_storage()
   unwrap_or<i32>(get<i32>(storage, 1), -1)
 
 pub fn fixed_roundtrip() -> i32
-  let arr = Array<i32>::with_capacity(3)
-  let arr = arr.push(1)
-  let arr = arr.push(2)
-  let arr = arr.push(3)
-  let fixed = arr.to_fixed_array()
+  let arr0 = Array<i32>::with_capacity(3)
+  let arr1 = arr0.push(1)
+  let arr2 = arr1.push(2)
+  let arr3 = arr2.push(3)
+  let fixed = arr3.to_fixed_array()
   length<i32>(fixed)
 
 pub fn enumerate_length() -> i32
