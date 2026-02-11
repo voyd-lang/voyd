@@ -1,47 +1,47 @@
-import binaryen from "binaryen";
-import {
-  defineStructType,
-  modBinaryenTypeToHeapType,
-} from "@voyd/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   HirExprId,
   SymbolId,
   TypeId,
 } from "../../context.js";
-import { wasmTypeFor } from "../../types.js";
 import { effectsFacade } from "../facade.js";
 import type {
   BuildEffectLoweringParams,
-  ContinuationEnvField,
-  ContinuationSite,
-  EffectLoweringResult,
+  ContinuationCaptureField,
+  ContinuationSiteEir,
+  EffectLoweringEirResult,
 } from "./types.js";
 import { analyzeExpr } from "./liveness.js";
 import {
   definitionOrderForFunction,
   definitionOrderForHandlerClause,
   definitionOrderForLambda,
-  envFieldsFor,
   functionParamSymbols,
   handlerClauseParamSymbols,
   lambdaParamSymbols,
   sanitizeIdentifier,
-  shouldLowerLambda,
 } from "./layout.js";
-import {
-  handlerClauseContinuationTempId,
-  handlerClauseTailGuardTempId,
-} from "./handler-clause-temp-ids.js";
 
 type TempCaptureKey = string;
 
 const uniqueTempCaptures = (
-  captures: readonly { key: TempCaptureKey; callExprId: HirExprId; argIndex: number; typeId: TypeId }[]
-): readonly { key: TempCaptureKey; callExprId: HirExprId; argIndex: number; typeId: TypeId }[] =>
+  captures: readonly {
+    key: TempCaptureKey;
+    callExprId: HirExprId;
+    argIndex: number;
+    typeId: TypeId;
+  }[]
+): readonly {
+  key: TempCaptureKey;
+  callExprId: HirExprId;
+  argIndex: number;
+  typeId: TypeId;
+}[] =>
   captures
     .slice()
-    .sort((a, b) => (a.callExprId !== b.callExprId ? a.callExprId - b.callExprId : a.argIndex - b.argIndex))
+    .sort((a, b) =>
+      a.callExprId !== b.callExprId ? a.callExprId - b.callExprId : a.argIndex - b.argIndex
+    )
     .filter((capture, index, all) => (index === 0 ? true : all[index - 1]!.key !== capture.key));
 
 const resumeValueTypeIdForSite = ({
@@ -75,59 +75,45 @@ const resumeValueTypeIdForSite = ({
   return exprType ?? ctx.program.primitives.unknown;
 };
 
-const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [
-  {
-    name: "site",
-    typeId: ctx.program.primitives.i32,
-    wasmType: binaryen.i32,
-    sourceKind: "site",
-  },
-  {
-    name: "handler",
-    wasmType: ctx.effectsRuntime.handlerFrameType,
-    typeId: ctx.program.primitives.unknown,
-    sourceKind: "handler",
-  } as const,
-];
-
-const handlerClauseBaseTemps = ({
-  owner,
+const captureFieldsForSite = ({
+  liveSymbols,
+  params,
+  ordering,
+  tempCaptures,
   ctx,
 }: {
-  owner: ContinuationSite["owner"];
+  liveSymbols: ReadonlySet<SymbolId>;
+  params: ReadonlySet<SymbolId>;
+  ordering: Map<SymbolId, number>;
+  tempCaptures: readonly { tempId: number; typeId: TypeId }[];
   ctx: CodegenContext;
-}): ContinuationEnvField[] => {
-  if (owner.kind !== "handler-clause") return [];
-  return [
-    {
-      name: "clause_cont",
-      wasmType: ctx.effectsRuntime.continuationType,
-      typeId: ctx.program.primitives.unknown,
-      sourceKind: "local",
-      tempId: handlerClauseContinuationTempId({
-        handlerExprId: owner.handlerExprId,
-        clauseIndex: owner.clauseIndex,
-      }),
-    },
-    {
-      name: "clause_tail_guard",
-      wasmType: ctx.effectsRuntime.tailGuardType,
-      typeId: ctx.program.primitives.unknown,
-      sourceKind: "local",
-      tempId: handlerClauseTailGuardTempId({
-        handlerExprId: owner.handlerExprId,
-        clauseIndex: owner.clauseIndex,
-      }),
-    },
-  ];
+}): ContinuationCaptureField[] => {
+  const symbolFields = Array.from(liveSymbols)
+    .filter((symbol) => params.has(symbol) || ordering.has(symbol))
+    .sort((a, b) => (ordering.get(a) ?? 0) - (ordering.get(b) ?? 0))
+    .map(
+      (symbol): ContinuationCaptureField => ({
+        sourceKind: params.has(symbol) ? "param" : "local",
+        symbol,
+        typeId: ctx.module.types.getValueType(symbol) ?? ctx.program.primitives.unknown,
+      })
+    );
+
+  const tempFields: ContinuationCaptureField[] = tempCaptures.map((capture) => ({
+    sourceKind: "temp",
+    tempId: capture.tempId,
+    typeId: capture.typeId,
+  }));
+
+  return [...tempFields, ...symbolFields];
 };
 
-export const buildEffectLowering = ({
+export const buildEffectLoweringEir = ({
   ctx,
   siteCounter,
-}: BuildEffectLoweringParams): EffectLoweringResult => {
-  const sites: ContinuationSite[] = [];
-  const sitesByExpr = new Map<HirExprId, ContinuationSite>();
+}: BuildEffectLoweringParams): EffectLoweringEirResult => {
+  const sites: ContinuationSiteEir[] = [];
+  const sitesByExpr = new Map<HirExprId, ContinuationSiteEir>();
   const callArgTemps = new Map<
     HirExprId,
     { argIndex: number; tempId: number; typeId: TypeId }[]
@@ -136,10 +122,12 @@ export const buildEffectLowering = ({
   const tempIdByKey = new Map<string, number>();
   let tempCounter = 0;
 
-  const baseEnvType = ctx.effectsRuntime.contEnvBaseType;
-  const baseHeapType = modBinaryenTypeToHeapType(ctx.mod, baseEnvType);
-
-  const ensureTempId = (capture: { key: string; callExprId: HirExprId; argIndex: number; typeId: TypeId }): number => {
+  const ensureTempId = (capture: {
+    key: string;
+    callExprId: HirExprId;
+    argIndex: number;
+    typeId: TypeId;
+  }): number => {
     const existing = tempIdByKey.get(capture.key);
     if (typeof existing === "number") {
       return existing;
@@ -162,57 +150,40 @@ export const buildEffectLowering = ({
     ordering,
     params,
     handlerAtSite,
-    fnNameForEnv,
   }: {
     analysisSites: readonly {
       kind: "perform" | "call";
       exprId: HirExprId;
       liveAfter: ReadonlySet<SymbolId>;
       effectSymbol?: SymbolId;
-      tempCaptures?: readonly { key: string; callExprId: HirExprId; argIndex: number; typeId: TypeId }[];
+      tempCaptures?: readonly {
+        key: string;
+        callExprId: HirExprId;
+        argIndex: number;
+        typeId: TypeId;
+      }[];
     }[];
-    owner: ContinuationSite["owner"];
+    owner: ContinuationSiteEir["owner"];
     contBaseName: string;
     ordering: Map<SymbolId, number>;
     params: ReadonlySet<SymbolId>;
     handlerAtSite: boolean;
-    fnNameForEnv: string;
   }): void => {
     analysisSites.forEach((site) => {
       const resumeValueTypeId = resumeValueTypeIdForSite({ site, ctx });
-      const tempCaptures = uniqueTempCaptures(site.tempCaptures ?? []);
-      const tempFields: ContinuationEnvField[] = tempCaptures.map((capture) => {
-        const tempId = ensureTempId(capture);
-        return {
-          name: `tmp_${tempId}`,
-          wasmType: wasmTypeFor(capture.typeId, ctx),
-          typeId: capture.typeId,
-          sourceKind: "local",
-          tempId,
-        };
-      });
-      const clauseTemps = handlerClauseBaseTemps({ owner, ctx });
-      const capturedFields = envFieldsFor({
+      const tempCaptures = uniqueTempCaptures(site.tempCaptures ?? []).map((capture) => ({
+        tempId: ensureTempId(capture),
+        typeId: capture.typeId,
+      }));
+      const captureFields = captureFieldsForSite({
         liveSymbols: site.liveAfter,
         params,
         ordering,
+        tempCaptures,
         ctx,
       });
 
-      const envFields: ContinuationEnvField[] = [
-        ...baseEnvFields(ctx),
-        ...clauseTemps,
-        ...tempFields,
-        ...capturedFields,
-      ];
-      const envType = defineStructType(ctx.mod, {
-        name: `voydContEnv_${sanitizeIdentifier(ctx.moduleLabel)}_${fnNameForEnv}_${siteCounter.current}`,
-        fields: envFields.map((field) => ({ name: field.name, type: field.wasmType, mutable: false })),
-        supertype: baseHeapType,
-        final: true,
-      });
-
-      const lowered: ContinuationSite =
+      const lowered: ContinuationSiteEir =
         site.kind === "perform"
           ? (() => {
               if (typeof site.effectSymbol !== "number") {
@@ -226,11 +197,9 @@ export const buildEffectLowering = ({
                 owner,
                 effectSymbol: site.effectSymbol,
                 contBaseName,
-                baseEnvType,
-                envType,
-                envFields,
                 handlerAtSite,
                 resumeValueTypeId,
+                captureFields,
               };
             })()
           : {
@@ -240,11 +209,9 @@ export const buildEffectLowering = ({
               siteOrder: siteCounter.current,
               owner,
               contBaseName,
-              baseEnvType,
-              envType,
-              envFields,
               handlerAtSite,
               resumeValueTypeId,
+              captureFields,
             };
 
       siteCounter.current += 1;
@@ -263,9 +230,7 @@ export const buildEffectLowering = ({
     const params = functionParamSymbols(item);
     const analysis = analyzeExpr({ exprId: item.body, liveAfter: new Set(), ctx });
     const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: item.symbol });
-    const fnName = sanitizeIdentifier(
-      ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`
-    );
+    const fnName = sanitizeIdentifier(ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`);
     const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
 
     emitSitesFor({
@@ -275,13 +240,13 @@ export const buildEffectLowering = ({
       ordering,
       params,
       handlerAtSite: true,
-      fnNameForEnv: fnName,
     });
   });
 
   ctx.module.hir.expressions.forEach((expr) => {
     if (expr.exprKind !== "lambda") return;
-    if (!shouldLowerLambda(expr, ctx)) return;
+    const lambdaAbi = effectsFacade(ctx).lambdaAbi(expr.id);
+    if (!lambdaAbi?.shouldLower) return;
 
     const ordering = definitionOrderForLambda(expr, ctx);
     const params = lambdaParamSymbols(expr);
@@ -296,7 +261,6 @@ export const buildEffectLowering = ({
       ordering,
       params,
       handlerAtSite: true,
-      fnNameForEnv: fnName,
     });
   });
 
@@ -313,11 +277,10 @@ export const buildEffectLowering = ({
       emitSitesFor({
         analysisSites: analysis.sites,
         owner: { kind: "handler-clause", handlerExprId: expr.id, clauseIndex },
-      contBaseName,
+        contBaseName,
         ordering,
         params,
         handlerAtSite: true,
-        fnNameForEnv: fnName,
       });
     });
   });

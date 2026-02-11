@@ -18,6 +18,7 @@ import {
 import { diagnosticFromCode } from "../../../diagnostics/index.js";
 import { rememberSyntax } from "../context.js";
 import { reportOverloadNameCollision } from "../overloads.js";
+import { declareValueOrParameter } from "../redefinitions.js";
 import type { BindingContext } from "../types.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import { parseLambdaSignature } from "../../lambda.js";
@@ -166,16 +167,17 @@ const declareHandlerParams = (
       return undefined;
     })();
     if (!nameExpr) return;
-    const symbol = ctx.symbolTable.declare(
-      {
-        name: nameExpr.value,
-        kind: "parameter",
-        declaredAt: nameExpr.syntaxId,
-      },
-      scope,
-    );
-    ctx.scopeByNode.set(nameExpr.syntaxId, scope);
     rememberSyntax(nameExpr, ctx);
+    declareValueOrParameter({
+      name: nameExpr.value,
+      kind: "parameter",
+      declaredAt: nameExpr.syntaxId,
+      metadata: { declarationSpan: toSourceSpan(nameExpr as Syntax) },
+      scope,
+      syntax: nameExpr,
+      ctx,
+    });
+    ctx.scopeByNode.set(nameExpr.syntaxId, scope);
   });
 };
 
@@ -276,10 +278,16 @@ const bindMatch = (
         potentialBinder,
         ctx,
       );
-      ctx.symbolTable.declare({
+      declareValueOrParameter({
         name: potentialBinder.value,
         kind: "value",
         declaredAt: potentialBinder.syntaxId,
+        metadata: {
+          declarationSpan: toSourceSpan(potentialBinder),
+        },
+        scope: matchScope,
+        syntax: potentialBinder,
+        ctx,
       });
     }
 
@@ -391,38 +399,40 @@ const declareLambdaParam = (
   if (isIdentifierAtom(param)) {
     rememberSyntax(param, ctx);
     reportOverloadNameCollision(param.value, scope, param, ctx);
-    ctx.symbolTable.declare(
-      {
-        name: param.value,
-        kind: "parameter",
-        declaredAt: param.syntaxId,
-        metadata: { declarationSpan },
-      },
+    declareValueOrParameter({
+      name: param.value,
+      kind: "parameter",
+      declaredAt: param.syntaxId,
+      metadata: { declarationSpan },
       scope,
-    );
+      syntax: param,
+      ctx,
+    });
     return;
   }
 
   if (isForm(param) && param.calls("~")) {
+    rememberSyntax(param, ctx);
     const target = param.at(1);
     if (!isIdentifierAtom(target)) {
       throw new Error("lambda parameter name must be an identifier");
     }
     rememberSyntax(target, ctx);
     reportOverloadNameCollision(target.value, scope, target, ctx);
-    ctx.symbolTable.declare(
-      {
-        name: target.value,
-        kind: "parameter",
-        declaredAt: param.syntaxId,
-        metadata: { bindingKind: "mutable-ref", declarationSpan },
-      },
+    declareValueOrParameter({
+      name: target.value,
+      kind: "parameter",
+      declaredAt: param.syntaxId,
+      metadata: { bindingKind: "mutable-ref", declarationSpan },
       scope,
-    );
+      syntax: param,
+      ctx,
+    });
     return;
   }
 
   if (isForm(param) && (param.calls(":") || param.calls("?:"))) {
+    rememberSyntax(param, ctx);
     const nameExpr = param.at(1);
     const { target, bindingKind } = unwrapMutablePattern(nameExpr);
     if (!isIdentifierAtom(target)) {
@@ -431,15 +441,15 @@ const declareLambdaParam = (
     rememberSyntax(target, ctx);
     rememberSyntax(param.at(2) as Syntax, ctx);
     reportOverloadNameCollision(target.value, scope, param, ctx);
-    ctx.symbolTable.declare(
-      {
-        name: target.value,
-        kind: "parameter",
-        declaredAt: param.syntaxId,
-        metadata: { bindingKind, declarationSpan },
-      },
+    declareValueOrParameter({
+      name: target.value,
+      kind: "parameter",
+      declaredAt: param.syntaxId,
+      metadata: { bindingKind, declarationSpan },
       scope,
-    );
+      syntax: param,
+      ctx,
+    });
     return;
   }
 
@@ -946,7 +956,7 @@ const declarePatternBindings = (
       options.declarationSpan ?? toSourceSpan(basePattern);
     rememberSyntax(basePattern, ctx);
     reportOverloadNameCollision(basePattern.value, scope, basePattern, ctx);
-    ctx.symbolTable.declare({
+    declareValueOrParameter({
       name: basePattern.value,
       kind: "value",
       declaredAt: basePattern.syntaxId,
@@ -955,6 +965,9 @@ const declarePatternBindings = (
         declarationSpan,
         bindingKind,
       },
+      scope,
+      syntax: basePattern,
+      ctx,
     });
     return;
   }
@@ -1027,7 +1040,7 @@ const declarePatternBindings = (
     if (isIdentifierAtom(target)) {
       rememberSyntax(target as Syntax, ctx);
       reportOverloadNameCollision(target.value, scope, basePattern, ctx);
-      ctx.symbolTable.declare({
+      declareValueOrParameter({
         name: target.value,
         kind: "value",
         declaredAt: basePattern.syntaxId,
@@ -1036,6 +1049,9 @@ const declarePatternBindings = (
           declarationSpan: options.declarationSpan ?? toSourceSpan(basePattern),
           bindingKind: nameBinding ?? bindingKind,
         },
+        scope,
+        syntax: basePattern,
+        ctx,
       });
       return;
     }

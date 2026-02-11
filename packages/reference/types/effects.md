@@ -3,12 +3,16 @@
 Effects are resumable exceptions. They capture side-effects in the type system
 so that functions must either expose them in their signature or handle them.
 
+Current backend status: Voyd currently materializes effects through the
+`gc-trampoline` backend. The `stack-switch` backend is planned but not yet
+implemented.
+
 ## At a Glance
 
 - Effects bundle named operations that may suspend and resume execution.
 - Operation behavior is signaled by the first parameter:
   - `resume` means resumable; the handler may resume zero or one time.
-  - `tail` means tail-resumptive; the handler must resume exactly once.
+  - `tail` means tail-resumptive; the handler must resume exactly once before returning or propagating another effect.
 - Function types carry an effect row: `fn load(): (Async, Log) -> Bytes`.
 - Effects are inferred locally, but exported APIs should **spell them out** or
   handle everything and remain pure (`()`).
@@ -48,7 +52,8 @@ eff get(tail) -> Int
 Operations that start with a `resume` parameter expose the current continuation
 to the handler and may be resumed zero or one time. Operations that start with a
 `tail` parameter are tail-resumptive (like `await` or `yield from`) and are
-guaranteed to resume exactly once by the handler.
+guaranteed to resume exactly once by the handler before any clause exit or effect
+propagation.
 
 ---
 
@@ -86,7 +91,10 @@ Notes:
 - A handler may re-raise an effect (keeping it in the row) or fully discharge
   it.
 - `resume` is one-shot: handlers may resume zero or one time; a second resume
-  traps at runtime. `tail` resumes are enforced to happen exactly once.
+  traps at runtime.
+- `tail` resumes are strict: each `tail` continuation must be resumed exactly
+  once before the clause returns or propagates another effect. Missing or double
+  resumes trap at runtime.
 - Handlers are written as clauses after `try`: each clause matches an operation
   by name and destructures its parameters (including `resume`/`tail`).
 

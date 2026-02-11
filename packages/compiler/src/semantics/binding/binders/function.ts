@@ -10,6 +10,7 @@ import { bindExpr } from "./expressions.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { toSourceSpan } from "../../utils.js";
+import { declareValueOrParameter } from "../redefinitions.js";
 
 export type BindFunctionOptions = {
   declarationScope?: ScopeId;
@@ -104,7 +105,11 @@ const bindFunctionParameters = (
 ) => {
   const boundParams: ParameterDeclInput[] = [];
   decl.signature.params.forEach((param, index) => {
-    const paramSymbol = ctx.symbolTable.declare({
+    rememberSyntax(param.ast, ctx);
+    if (param.labelAst) {
+      rememberSyntax(param.labelAst, ctx);
+    }
+    const paramSymbol = declareValueOrParameter({
       name: param.name,
       kind: "parameter",
       declaredAt: param.ast.syntaxId,
@@ -112,11 +117,10 @@ const bindFunctionParameters = (
         bindingKind: param.bindingKind,
         declarationSpan: toSourceSpan(param.ast),
       },
+      scope: tracker.current(),
+      syntax: param.ast,
+      ctx,
     });
-    rememberSyntax(param.ast, ctx);
-    if (param.labelAst) {
-      rememberSyntax(param.labelAst, ctx);
-    }
     boundParams.push({
       name: param.name,
       label: param.label,

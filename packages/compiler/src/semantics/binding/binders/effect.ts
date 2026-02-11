@@ -4,6 +4,7 @@ import type { BindingContext } from "../types.js";
 import type { ParsedEffectDecl, ParsedEffectOperation } from "../parsing.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import type { TypeParameterDecl } from "../../decls.js";
+import { declareValueOrParameter } from "../redefinitions.js";
 
 const declareEffectOperationParams = ({
   op,
@@ -15,22 +16,22 @@ const declareEffectOperationParams = ({
   scope: number;
 }) =>
   op.params.map((param) => {
-    const symbol = ctx.symbolTable.declare(
-      {
-        name: param.name,
-        kind: "parameter",
-        declaredAt: param.ast.syntaxId,
-        metadata: {
-          bindingKind: param.bindingKind,
-          declarationSpan: toSourceSpan(param.ast),
-        },
-      },
-      scope
-    );
     rememberSyntax(param.ast, ctx);
     if (param.labelAst) {
       rememberSyntax(param.labelAst, ctx);
     }
+    const symbol = declareValueOrParameter({
+      name: param.name,
+      kind: "parameter",
+      declaredAt: param.ast.syntaxId,
+      metadata: {
+        bindingKind: param.bindingKind,
+        declarationSpan: toSourceSpan(param.ast),
+      },
+      scope,
+      syntax: param.ast,
+      ctx,
+    });
     return {
       name: param.name,
       label: param.label,

@@ -188,6 +188,7 @@ export const codegenProgram = ({
     module: mod,
     effectTable,
     diagnostics: [...diagnostics.diagnostics],
+    continuationBackendKind: entryCtx.effectsBackend.kind,
   };
 };
 
@@ -200,14 +201,10 @@ export const codegenProgramWithContinuationFallback = ({
   preferred: CodegenResult;
   fallback?: CodegenResult;
 } => {
-  const preferredKind: ContinuationBackendKind =
-    options.continuationBackend?.stackSwitching === true
-      ? "stack-switch"
-      : "gc-trampoline";
-
-  if (preferredKind !== "stack-switch") {
+  const stackSwitchRequested = options.continuationBackend?.stackSwitching === true;
+  if (!stackSwitchRequested) {
     return {
-      preferredKind,
+      preferredKind: "gc-trampoline",
       preferred: codegenProgram({ program, entryModuleId, options }),
     };
   }
@@ -223,6 +220,10 @@ export const codegenProgramWithContinuationFallback = ({
       },
     },
   });
+  const preferredKind = preferred.continuationBackendKind;
+  if (preferredKind !== "stack-switch") {
+    return { preferredKind, preferred };
+  }
   const fallback = codegenProgram({
     program,
     entryModuleId,

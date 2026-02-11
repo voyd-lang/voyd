@@ -226,7 +226,7 @@ pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> FixedArray<T>
 
 pub fn main() -> voyd
   let a = [A { x: 1 }]
-  let a = [B { a: 1 }]
+  let b = [B { a: 1 }]
 `,
     });
 

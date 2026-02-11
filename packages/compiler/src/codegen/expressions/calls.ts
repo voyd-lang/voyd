@@ -44,7 +44,11 @@ import { compileOptionalNoneValue } from "../optionals.js";
 import { typeContainsUnresolvedParam } from "../../semantics/type-utils.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
-  ctx.effectsRuntime.handlerFrameType;
+  ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
+const hiddenParamOffsetFor = (meta: FunctionMetadata): number =>
+  meta.effectful
+    ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length)
+    : 0;
 const debugEffects = (): boolean =>
   typeof process !== "undefined" && process.env?.DEBUG_EFFECTS === "1";
 
@@ -58,7 +62,7 @@ const currentHandlerValue = (
       fnCtx.currentHandler.type
     );
   }
-  return ctx.mod.ref.null(handlerType(ctx));
+  return ctx.effectsBackend.abi.hiddenHandlerValue(ctx);
 };
 
 const activeSiteInSet = ({
@@ -581,9 +585,8 @@ const compileTraitDispatchCall = ({
     return undefined;
   }
 
-  const userParamTypes = meta.effectful
-    ? meta.paramTypes.slice(2)
-    : meta.paramTypes.slice(1);
+  const receiverIndex = hiddenParamOffsetFor(meta);
+  const userParamTypes = meta.paramTypes.slice(receiverIndex + 1);
   const wrapperParamTypes = meta.effectful
     ? [handlerType(ctx), ctx.rtt.baseType, ...userParamTypes]
     : [ctx.rtt.baseType, ...userParamTypes];

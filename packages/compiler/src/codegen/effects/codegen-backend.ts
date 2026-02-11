@@ -10,6 +10,7 @@ import type {
   HirEffectHandlerExpr,
   SymbolId,
   TypeId,
+  FunctionMetadata,
 } from "../context.js";
 import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
 import type { EffectLoweringResult } from "./effect-lowering.js";
@@ -17,8 +18,40 @@ import { createGcTrampolineBackend } from "./gc-trampoline-backend.js";
 
 export type EffectsBackendKind = "gc-trampoline" | "stack-switch";
 
+export type EffectfulExportTarget = {
+  meta: FunctionMetadata;
+  exportName: string;
+};
+
+export interface EffectAbiSignature {
+  paramTypes: readonly binaryen.Type[];
+  resultType: binaryen.Type;
+  userParamOffset: number;
+}
+
+export interface EffectsAbiStrategy {
+  hiddenHandlerParamType: (ctx: CodegenContext) => binaryen.Type;
+  hiddenHandlerValue: (ctx: CodegenContext) => binaryen.ExpressionRef;
+  effectfulResultType: (ctx: CodegenContext) => binaryen.Type;
+  widenSignature: (params: {
+    ctx: CodegenContext;
+    effectful: boolean;
+    userParamTypes: readonly binaryen.Type[];
+    userResultType: binaryen.Type;
+  }) => EffectAbiSignature;
+  emitHostBoundary: (params: {
+    entryCtx: CodegenContext;
+    contexts: readonly CodegenContext[];
+    effectfulExports: readonly EffectfulExportTarget[];
+  }) => void;
+}
+
 export interface EffectsBackend {
   kind: EffectsBackendKind;
+  requestedKind: EffectsBackendKind;
+  stackSwitchRequested: boolean;
+  stackSwitchUnavailableReason?: string;
+  abi: EffectsAbiStrategy;
   buildLowering: (params: {
     ctx: CodegenContext;
     siteCounter: { current: number };
@@ -59,23 +92,20 @@ export interface EffectsBackend {
   }) => CompiledExpression;
 }
 
-const createStackSwitchBackend = (fallback: EffectsBackend): EffectsBackend => ({
-  kind: "stack-switch",
-  buildLowering: fallback.buildLowering,
-  lowerEffectfulCallResult: fallback.lowerEffectfulCallResult,
-  compileContinuationCall: fallback.compileContinuationCall,
-  compileEffectOpCall: fallback.compileEffectOpCall,
-  compileEffectHandlerExpr: fallback.compileEffectHandlerExpr,
-});
+export const STACK_SWITCH_UNAVAILABLE_REASON =
+  "stack-switch backend is not implemented yet";
+
+const stackSwitchRequestedFor = (ctx: CodegenContext): boolean =>
+  ctx.options.continuationBackend.stackSwitching ??
+  (typeof process !== "undefined" && process.env.VOYD_STACK_SWITCH === "1");
 
 export const selectEffectsBackend = (ctx: CodegenContext): EffectsBackend => {
-  const fallback = createGcTrampolineBackend();
-  const stackSwitching =
-    ctx.options.continuationBackend.stackSwitching ??
-    (typeof process !== "undefined" && process.env.VOYD_STACK_SWITCH === "1");
-  if (stackSwitching) {
-    // Stack-switching backend is not implemented yet; use gc-trampoline fallback.
-    return createStackSwitchBackend(fallback);
-  }
-  return fallback;
+  const stackSwitchRequested = stackSwitchRequestedFor(ctx);
+  return createGcTrampolineBackend({
+    requestedKind: stackSwitchRequested ? "stack-switch" : "gc-trampoline",
+    stackSwitchRequested,
+    stackSwitchUnavailableReason: stackSwitchRequested
+      ? STACK_SWITCH_UNAVAILABLE_REASON
+      : undefined,
+  });
 };
