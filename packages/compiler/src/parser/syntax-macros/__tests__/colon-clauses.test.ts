@@ -72,5 +72,22 @@ describe("colon clause attachment", () => {
       ],
     ]);
   });
-});
 
+  test("attaches case-style while clauses to while calls", () => {
+    const ast = parse(
+      [
+        "while x < 4:",
+        "  do_work()",
+        "",
+      ].join("\n")
+    ).toJSON();
+
+    expect(ast).toEqual([
+      "ast",
+      [
+        "while",
+        [":", ["<", "x", "4"], ["block", ["do_work"]]],
+      ],
+    ]);
+  });
+});
