@@ -311,13 +311,13 @@ impl<T> Array<T>
     self.count = next_count
     removed
 
-  api fn update(~self, value: T, { at index: i32 }) -> bool
+  api fn replace(~self, index: i32, { with element: T }) -> bool
     let computed_index = compute_index(index, self.count)
     if computed_index < 0 or computed_index >= self.count:
       return false
 
     self.ensure_unique(self.count)
-    __array_set(self.storage, computed_index, value)
+    __array_set(self.storage, computed_index, element)
     true
 
   api fn cleared(self) -> Array<T>

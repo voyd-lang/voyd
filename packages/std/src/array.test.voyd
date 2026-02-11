@@ -157,12 +157,12 @@ test "array mutating insert and remove":
   assert(arr.length(), eq: 2)
   assert(optional_i32_or(arr.get(1), -1), eq: 20)
 
-test "array mutating update":
+test "array mutating replace":
   let ~arr = array_of_3(10, 20, 30)
-  assert(arr.update(99, at: 1), eq: true)
+  assert(arr.replace(1, with: 99), eq: true)
   assert(optional_i32_or(arr.get(1), -1), eq: 99)
-  assert(arr.update(1, at: 9), eq: false)
-  assert(arr.update(1, at: -9), eq: false)
+  assert(arr.replace(9, with: 1), eq: false)
+  assert(arr.replace(-9, with: 1), eq: false)
 
 test "array mutating sort":
   let ~arr = array_of_3(3, 1, 2)

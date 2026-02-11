@@ -330,7 +330,7 @@ fn set_in_bucket<T>(bucket: Array<MapEntry<T>>, key: String, value: T) -> Bucket
     return BucketSetResult<T> { bucket: next_bucket, inserted: true }
 
   let ~next_bucket = bucket.copied()
-  next_bucket.update(entry, at: index)
+  next_bucket.replace(index, with: entry)
   BucketSetResult<T> { bucket: next_bucket, inserted: false }
 
 fn delete_from_bucket<T>(bucket: Array<MapEntry<T>>, key: String) -> BucketDeleteResult<T>
