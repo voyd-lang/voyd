@@ -17,4 +17,9 @@ describe("branch result typing", () => {
     const ast = loadAst("while_body_discard_value_if_branch_types_ok.voyd");
     expect(() => semanticsPipeline(ast)).not.toThrow();
   });
+
+  it("accepts case-style while loops", () => {
+    const ast = loadAst("while_case_form.voyd");
+    expect(() => semanticsPipeline(ast)).not.toThrow();
+  });
 });
