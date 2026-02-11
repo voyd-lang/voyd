@@ -267,6 +267,16 @@ impl<T> Array<T>
 
     Array<T> { storage: new_storage, count: new_length }
 
+  api fn enumerate(self): () -> Array<(i32, T)>
+    let new_storage = new_fixed_array<(i32, T)>(self.count)
+    var index = 0
+    while index < self.count do:
+      let value = __array_get(self.storage, index)
+      __array_set(new_storage, index, (index, value))
+      index = index + 1
+
+    Array<(i32, T)> { storage: new_storage, count: self.count }
+
   api fn each(self, f: (v: T) -> void): () -> void
     var index = 0
     while index < self.count do:
