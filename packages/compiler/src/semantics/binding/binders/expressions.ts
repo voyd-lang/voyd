@@ -412,6 +412,7 @@ const declareLambdaParam = (
   }
 
   if (isForm(param) && param.calls("~")) {
+    rememberSyntax(param, ctx);
     const target = param.at(1);
     if (!isIdentifierAtom(target)) {
       throw new Error("lambda parameter name must be an identifier");
@@ -431,6 +432,7 @@ const declareLambdaParam = (
   }
 
   if (isForm(param) && (param.calls(":") || param.calls("?:"))) {
+    rememberSyntax(param, ctx);
     const nameExpr = param.at(1);
     const { target, bindingKind } = unwrapMutablePattern(nameExpr);
     if (!isIdentifierAtom(target)) {

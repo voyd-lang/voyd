@@ -5,21 +5,9 @@ import type { NodeId, ScopeId, SymbolId } from "../ids.js";
 import { toSourceSpan } from "../utils.js";
 import type { BindingContext } from "./types.js";
 
-const hasDeclarationSpan = (record: SymbolRecord): boolean => {
-  const metadata = record.metadata as { declarationSpan?: unknown } | undefined;
-  return metadata?.declarationSpan !== undefined;
-};
-
-const isVariableOrParameterBinding = (record: SymbolRecord): boolean => {
-  if (record.kind === "parameter") {
-    return true;
-  }
-
-  if (record.kind !== "value") {
-    return false;
-  }
-
-  return hasDeclarationSpan(record);
+const isLocalBinding = (record: SymbolRecord): boolean => {
+  const metadata = record.metadata as { localBinding?: unknown } | undefined;
+  return metadata?.localBinding === true;
 };
 
 const findBindingInScope = ({
@@ -36,7 +24,7 @@ const findBindingInScope = ({
     if (record.name !== name) {
       continue;
     }
-    if (!isVariableOrParameterBinding(record)) {
+    if (!isLocalBinding(record)) {
       continue;
     }
     return record;
@@ -84,5 +72,13 @@ export const declareValueOrParameter = ({
     );
   }
 
-  return ctx.symbolTable.declare({ name, kind, declaredAt, metadata }, scope);
+  return ctx.symbolTable.declare(
+    {
+      name,
+      kind,
+      declaredAt,
+      metadata: { ...metadata, localBinding: true },
+    },
+    scope
+  );
 };

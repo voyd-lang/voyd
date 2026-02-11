@@ -1041,6 +1041,29 @@ describe("binding pipeline", () => {
     expect(sum?.params).toHaveLength(2);
   });
 
+  it("keeps duplicate lambda parameter notes at the original form span", () => {
+    const source = `pub fn main() -> i32
+  let f = (~x, ~x) => x
+  0`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const duplicate = binding.diagnostics.find(
+      (entry) =>
+        entry.code === "BD0006" && entry.message.includes("cannot redefine x"),
+    );
+
+    expect(duplicate).toBeDefined();
+    expect(duplicate?.related?.[0]?.span.file).toBe("main.voyd");
+    expect(duplicate?.related?.[0]?.span.start).toBeGreaterThan(0);
+  });
+
   it("allows shadowing a binding in a nested scope", () => {
     const source = `pub fn main() -> i32
   let a = 1
