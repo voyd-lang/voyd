@@ -15,6 +15,18 @@ note the breaking changes if made.
 
 Keep this AGENTS.md file up to date.
 
+## Intrinsic Policy
+
+- Raw `__*` intrinsics are std-only.
+- Non-std code should use std wrappers/APIs instead of calling or wrapping raw
+  intrinsics directly.
+
+## Effects Memory ABI
+
+- Effect handle tables are stored in linear memory and initialized through
+  `init_effects(handle_table_ptr)`.
+- `effects_memory` is an optional compatibility alias of `memory`.
+
 # Debugging
 
 A cli is available after `npm link`

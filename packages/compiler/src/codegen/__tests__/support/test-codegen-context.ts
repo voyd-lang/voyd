@@ -152,6 +152,8 @@ export const createTestCodegenContext = (): {
       continuationBackend: {},
       testMode: false,
       effectsHostBoundary: "off",
+      linearMemoryExport: "always",
+      effectsMemoryExport: "auto",
       testScope: "all",
     },
     programHelpers,

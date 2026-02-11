@@ -56,11 +56,18 @@ const loadAst = (fixtureName: string) => {
 const loadSemanticsWithTyping = (
   fixtureName: string,
   typing: { arena: any; effects: any },
+  options: { asStd?: boolean } = {},
 ) => {
   const form = loadAst(fixtureName);
-  const path: ModulePath = { namespace: "src", segments: [] };
+  const asStd = options.asStd === true;
+  const fixtureSegment = fixtureName
+    .replace(/\.voyd$/, "")
+    .replace(/[^a-zA-Z0-9_]/g, "_");
+  const path: ModulePath = asStd
+    ? { namespace: "std", segments: [fixtureSegment] }
+    : { namespace: "src", segments: [] };
   const module: ModuleNode = {
-    id: fixtureName,
+    id: asStd ? `std::${fixtureSegment}` : fixtureName,
     path,
     origin: { kind: "file", filePath: fixtureName },
     ast: form,
@@ -81,15 +88,24 @@ const loadSemanticsWithTyping = (
   });
 };
 
-const loadWasmInstance = (fixtureName: string) => {
-  const ast = loadAst(fixtureName);
-  const semantics = semanticsPipeline(ast);
+const loadWasmInstance = (
+  fixtureName: string,
+  options: { asStd?: boolean } = {},
+) => {
+  const semantics = loadSemanticsWithTyping(
+    fixtureName,
+    {
+      arena: createTypeArena(),
+      effects: createEffectTable({ interner: createEffectInterner() }),
+    },
+    { asStd: options.asStd },
+  );
   const { module } = codegen(semantics, { effectsHostBoundary: "off" });
   return getWasmInstance(module);
 };
 
-const loadMain = (fixtureName: string) => {
-  const instance = loadWasmInstance(fixtureName);
+const loadMain = (fixtureName: string, options: { asStd?: boolean } = {}) => {
+  const instance = loadWasmInstance(fixtureName, options);
   const main = instance.exports.main;
   expect(typeof main).toBe("function");
   return main as (...params: unknown[]) => unknown;
@@ -119,6 +135,8 @@ const DEFAULT_OPTIONS = {
   continuationBackend: {},
   testMode: false,
   effectsHostBoundary: "off",
+  linearMemoryExport: "always",
+  effectsMemoryExport: "auto",
   testScope: "all",
 } as const;
 
@@ -340,8 +358,14 @@ describe("next codegen", () => {
   });
 
   it("emits recursive wasm heap types for recursive objects", () => {
-    const ast = loadAst("recursive_heap_types.voyd");
-    const semantics = semanticsPipeline(ast);
+    const semantics = loadSemanticsWithTyping(
+      "recursive_heap_types.voyd",
+      {
+        arena: createTypeArena(),
+        effects: createEffectTable({ interner: createEffectInterner() }),
+      },
+      { asStd: true },
+    );
     const {
       contexts: [ctx],
     } = buildCodegenProgram([semantics]);
@@ -399,8 +423,14 @@ describe("next codegen", () => {
   });
 
   it("emits recursive wasm heap types for recursive FixedArray elements", () => {
-    const ast = loadAst("recursive_fixed_array_heap_types.voyd");
-    const semantics = semanticsPipeline(ast);
+    const semantics = loadSemanticsWithTyping(
+      "recursive_fixed_array_heap_types.voyd",
+      {
+        arena: createTypeArena(),
+        effects: createEffectTable({ interner: createEffectInterner() }),
+      },
+      { asStd: true },
+    );
     const {
       contexts: [ctx],
     } = buildCodegenProgram([semantics]);
@@ -437,17 +467,21 @@ describe("next codegen", () => {
   });
 
   it("runs recursive heap types fixture", () => {
-    const main = loadMain("recursive_heap_types.voyd");
+    const main = loadMain("recursive_heap_types.voyd", { asStd: true });
     expect(main()).toBe(18);
   });
 
   it("runs recursive fixed-array heap types fixture", () => {
-    const main = loadMain("recursive_fixed_array_heap_types.voyd");
+    const main = loadMain("recursive_fixed_array_heap_types.voyd", {
+      asStd: true,
+    });
     expect(main()).toBe(7);
   });
 
   it("preserves declared types when allocating locals for fixed-array bindings", () => {
-    const main = loadMain("fixed_array_declared_local_type.voyd");
+    const main = loadMain("fixed_array_declared_local_type.voyd", {
+      asStd: true,
+    });
     expect(main()).toBe(0);
   });
 
@@ -923,7 +957,9 @@ describe("next codegen", () => {
   });
 
   it("handles attribute-tagged intrinsics through codegen", () => {
-    const instance = loadWasmInstance("intrinsic_attributes_codegen.voyd");
+    const instance = loadWasmInstance("intrinsic_attributes_codegen.voyd", {
+      asStd: true,
+    });
     const main = instance.exports.main;
     expect(typeof main).toBe("function");
     expect((main as () => number)()).toBe(3);
@@ -931,7 +967,7 @@ describe("next codegen", () => {
   });
 
   it("emits wasm for array literals via fixed_array_literal", () => {
-    const main = loadMain("array_literal_codegen.voyd");
+    const main = loadMain("array_literal_codegen.voyd", { asStd: true });
     expect(main()).toBe(2);
   });
 

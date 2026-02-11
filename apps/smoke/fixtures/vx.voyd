@@ -42,4 +42,3 @@ fn List({ value: Array<String> })
 
 pub fn main()
   App()
-

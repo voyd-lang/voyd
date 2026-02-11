@@ -9,6 +9,9 @@ codegen pipeline.
 
 - Intrinsic status lives on symbol metadata. Functions become intrinsic by being
   annotated with `@intrinsic`.
+- Raw low-level intrinsic names prefixed with `__` are **std-only**. Non-std
+  packages cannot call them directly and cannot declare `@intrinsic(name:
+  "__...")` wrappers.
 - `@intrinsic` supports optional arguments:
   - `name`: the low-level intrinsic identifier to call. Defaults to the function
     name.
@@ -33,10 +36,13 @@ fn get<T>(arr: FixedArray<T>, index: i32) -> T
 
 The following intrinsic names are recognized by typing and codegen:
 
-- Numeric arithmetic: `+`, `-`, `*`, `/` (i32, i64, f32, f64)
-- Numeric comparisons: `<`, `<=`, `>`, `>=` (i32, i64, f32, f64)
-- Equality: `==`, `!=` (i32, i64, f32, f64, bool)
-- Fixed-array primitives:
+- Public language-level intrinsics:
+  - Numeric arithmetic: `+`, `-`, `*`, `/` (i32, i64, f32, f64)
+  - Numeric comparisons: `<`, `<=`, `>`, `>=` (i32, i64, f32, f64)
+  - Equality: `==`, `!=` (i32, i64, f32, f64, bool)
+  - Boolean ops: `and`, `or`, `xor`, `not`
+
+- Std-only low-level intrinsics (reserved for std):
   - `__array_new<T>(size: i32) -> FixedArray<T>`
   - `__array_new_fixed<T>(elements...) -> FixedArray<T>`
   - `__array_get<T>(array: FixedArray<T>, index: i32, [elementType, signed?]) -> T`
@@ -49,11 +55,21 @@ The following intrinsic names are recognized by typing and codegen:
 
 ## Authoring and using intrinsic wrappers
 
-- Mark wrappers in any module with `@intrinsic`; the metadata flows through
-  binding, lowering, typing, and codegen.
+- In non-std packages, wrap behavior using std APIs instead of raw `__*`
+  intrinsic wrappers.
+- In std, mark wrappers with `@intrinsic`; metadata flows through binding,
+  lowering, typing, and codegen.
 - For `uses_signature: true`, provide a normal Voyd signature/body—the compiler
   will type-check calls against it and still emit intrinsic code.
 - For raw intrinsics (`uses_signature` omitted/false), calls must satisfy the
   intrinsic's arity and type rules regardless of the wrapper's signature/body.
 - Intrinsic functions are not exported when compiling modules; they are
   consumed internally or via wrappers marked intrinsic.
+
+### Migration guidance
+
+- If you hit `TY0038` in a non-std package:
+  - Remove `@intrinsic(name: "__...")` wrappers.
+  - Import and call std wrappers (`std::fixed_array`, `std::array`,
+    `std::memory`, etc.).
+- If you called raw `__*` names directly, replace them with std APIs.

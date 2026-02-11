@@ -101,6 +101,9 @@ const resolveIntrinsicSymbol = (
   if (!metadata) {
     return undefined;
   }
+  if (metadata.access === "std-only" && ctx.packageId !== "std") {
+    return undefined;
+  }
 
   intrinsic = ctx.symbolTable.declare({
     name,

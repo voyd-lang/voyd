@@ -1,4 +1,4 @@
-@intrinsic(name: "__dep_intrinsic_impl", uses_signature: true)
+@intrinsic(name: "dep_intrinsic_impl", uses_signature: true)
 pub fn dep_intrinsic(value: i32) -> i32 value
 
 pub obj External {

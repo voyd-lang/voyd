@@ -1,6 +1,3 @@
-fn new_array<T>({ from source: FixedArray<T> }) -> FixedArray<T>
-  source
-
 obj Foo {
   a: i32
 }
@@ -46,7 +43,7 @@ pub fn test_structural_intersections()
   sum_vec3({ x: 1, y: 2, z: 3 })
 
 trait Image
-  fn draw(self) -> FixedArray<i32>
+  fn draw(self) -> Rgb
 
 trait Movable
   fn move(~self, x: i32, y: i32) -> void
@@ -54,14 +51,20 @@ trait Movable
 
 type MoveableImage = Movable & Image
 
+obj Rgb {
+  r: i32,
+  g: i32,
+  b: i32
+}
+
 obj Shape {
-  image: FixedArray<i32>,
+  image: Rgb,
   x: i32,
   y: i32
 }
 
 impl Image for Shape
-  fn draw(self) -> FixedArray<i32>
+  fn draw(self) -> Rgb
     self.image
 
 impl Movable for Shape
@@ -75,13 +78,15 @@ impl Movable for Shape
 fn work(~shape: MoveableImage)
   shape.move(10, 15)
   let (x, y) = shape.coords()
-  let r = __array_get(shape.draw(), 0)
-  let g = __array_get(shape.draw(), 1)
-  let b = __array_get(shape.draw(), 2)
-  x + y + r + g + b
+  let color = shape.draw()
+  x + y + color.r + color.g + color.b
 
 pub fn test_trait_intersections()
-  let ~shape = Shape { image: [255, 128, 64], x: 1, y: 2 }
+  let ~shape = Shape {
+    image: Rgb { r: 255, g: 128, b: 64 },
+    x: 1,
+    y: 2
+  }
   work(~shape)
 
 type XYMovable = { x: i32, y: i32 } & Movable
@@ -92,7 +97,11 @@ fn sum_xy_movable(~v: XYMovable) -> i32
   x * 100 + y
 
 pub fn test_structural_trait_intersection() -> i32
-  let ~shape = Shape { image: [1, 2, 3], x: 5, y: 6 }
+  let ~shape = Shape {
+    image: Rgb { r: 1, g: 2, b: 3 },
+    x: 5,
+    y: 6
+  }
   sum_xy_movable(~shape)
 
 type FooMovableB = Foo & { b: i32 } & Movable

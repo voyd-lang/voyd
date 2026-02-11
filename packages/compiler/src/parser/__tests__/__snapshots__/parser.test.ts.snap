@@ -461,7 +461,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
       "=",
       "tuples",
       [
-        "new_array",
+        "new_array_unchecked",
         [
           ":",
           "from",
@@ -1145,14 +1145,14 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
               ":",
               "attributes",
               [
-                "new_array",
+                "new_array_unchecked",
                 [
                   ":",
                   "from",
                   [
                     "fixed_array_literal",
                     [
-                      "new_array",
+                      "new_array_unchecked",
                       [
                         ":",
                         "from",
@@ -1180,7 +1180,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                       ],
                     ],
                     [
-                      "new_array",
+                      "new_array_unchecked",
                       [
                         ":",
                         "from",
@@ -1212,7 +1212,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
               ":",
               "children",
               [
-                "new_array",
+                "new_array_unchecked",
                 [
                   ":",
                   "from",
@@ -1235,14 +1235,14 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                         ":",
                         "attributes",
                         [
-                          "new_array",
+                          "new_array_unchecked",
                           [
                             ":",
                             "from",
                             [
                               "fixed_array_literal",
                               [
-                                "new_array",
+                                "new_array_unchecked",
                                 [
                                   ":",
                                   "from",
@@ -1280,7 +1280,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                         ":",
                         "children",
                         [
-                          "new_array",
+                          "new_array_unchecked",
                           [
                             ":",
                             "from",
@@ -1328,7 +1328,7 @@ exports[`parser can parse a file into a syntax expanded ast 1`] = `
                         ":",
                         "children",
                         [
-                          "new_array",
+                          "new_array_unchecked",
                           [
                             ":",
                             "from",

@@ -30,7 +30,7 @@ import {
 import { getEffectOpInstanceInfo, resolvePerformSignature } from "../effect-registry.js";
 import { ensureEffectArgsType } from "../args-type.js";
 import { ensureEffectsMemory } from "../host-boundary/imports.js";
-import { EFFECTS_MEMORY_INTERNAL } from "../host-boundary/constants.js";
+import { LINEAR_MEMORY_INTERNAL } from "../host-boundary/constants.js";
 import { ensureEffectHandleTable } from "../handle-table.js";
 
 export const compileEffectOpCall = ({
@@ -129,9 +129,12 @@ export const compileEffectOpCall = ({
     ? initStruct(ctx.mod, argsType, args as number[])
     : ctx.mod.ref.null(binaryen.eqref);
   ensureEffectsMemory(ctx);
-  ensureEffectHandleTable(ctx);
-  const handlePtr = ctx.mod.i32.const(opInfo.opIndex * 4);
-  const handleValue = ctx.mod.i32.load(0, 4, handlePtr, EFFECTS_MEMORY_INTERNAL);
+  const handleTable = ensureEffectHandleTable(ctx);
+  const handlePtr = ctx.mod.i32.add(
+    ctx.mod.global.get(handleTable.tableBaseGlobal, binaryen.i32),
+    ctx.mod.i32.const(opInfo.opIndex * 4)
+  );
+  const handleValue = ctx.mod.i32.load(0, 4, handlePtr, LINEAR_MEMORY_INTERNAL);
   const request = ctx.effectsRuntime.makeEffectRequest({
     effectId: ctx.mod.i64.const(
       opInfo.effectId.hash.low,

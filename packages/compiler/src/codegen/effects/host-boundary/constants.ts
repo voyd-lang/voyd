@@ -1,8 +1,9 @@
 export const LINEAR_MEMORY_EXPORT = "memory";
-// Memory names are indices ("0", "1") after seeding via readBinary.
+// Memory names are indices after seeding via readBinary.
 export const LINEAR_MEMORY_INTERNAL = "0";
 export const EFFECTS_MEMORY_EXPORT = "effects_memory";
-export const EFFECTS_MEMORY_INTERNAL = "1";
+// effects_memory is an alias of linear memory for host ABI stability.
+export const EFFECTS_MEMORY_INTERNAL = LINEAR_MEMORY_INTERNAL;
 
 export const EFFECTS_HOST_BOUNDARY_STD_DEPS = [
   "std::msgpack",

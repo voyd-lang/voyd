@@ -17,7 +17,7 @@ pub use std::optional::fns::{
   or_value,
   or_else
 }
-pub use std::array::{ Array, ArrayPop, new_array }
+pub use std::array::{ Array, ArrayPop, new_array_unchecked }
 pub use std::map::{ Map, MapEntry, new_map }
 pub use std::iterator::{ Iterable, Iterator, for }
 pub use std::string::types::{ String }

@@ -26,7 +26,7 @@ const expectCompileSuccess = (
 };
 
 describe("tuple codegen e2e", () => {
-  it("supports tuple field access after array.get().unwrap_or() without std", async () => {
+  it("supports tuple field access after unwrap_or() without std", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;
     const host = createFixtureHost({

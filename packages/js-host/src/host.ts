@@ -11,7 +11,6 @@ import {
   toHostProtocolTable,
 } from "./protocol/table.js";
 import {
-  EFFECTS_MEMORY_EXPORT,
   LINEAR_MEMORY_EXPORT,
   MIN_EFFECT_BUFFER_SIZE,
 } from "./runtime/constants.js";
@@ -97,6 +96,8 @@ const requireExportedMemory = ({
 const effectfulExportNameFor = (entryName: string): string =>
   entryName.endsWith("_effectful") ? entryName : `${entryName}_effectful`;
 
+const handleTableBasePtr = (bufferSize: number): number => bufferSize * 2;
+
 const registerHandlerInternal = ({
   handler,
   signatureHash,
@@ -142,20 +143,21 @@ const initEffectsInternal = ({
     return;
   }
 
-  const effectsMemory = requireExportedMemory({
+  const tablePtr = handleTableBasePtr(bufferSize);
+  const linearMemory = requireExportedMemory({
     instance,
-    name: EFFECTS_MEMORY_EXPORT,
+    name: LINEAR_MEMORY_EXPORT,
   });
   ensureMemoryCapacity({
-    memory: effectsMemory,
-    requiredBytes: table.ops.length * 4,
-    label: EFFECTS_MEMORY_EXPORT,
+    memory: linearMemory,
+    requiredBytes: tablePtr + table.ops.length * 4,
+    label: LINEAR_MEMORY_EXPORT,
   });
 
-  const handleView = new DataView(effectsMemory.buffer);
+  const handleView = new DataView(linearMemory.buffer);
   table.ops.forEach((op) => {
     const handle = op.opIndex;
-    handleView.setUint32(op.opIndex * 4, handle, true);
+    handleView.setUint32(tablePtr + op.opIndex * 4, handle, true);
     const key = buildEffectOpKey({
       effectId: op.effectId,
       opId: op.opId,
@@ -165,13 +167,7 @@ const initEffectsInternal = ({
   });
 
   const initEffectsFn = requireExportedFunction({ instance, name: "init_effects" });
-  initEffectsFn();
-
-  ensureMemoryCapacity({
-    memory: requireExportedMemory({ instance, name: LINEAR_MEMORY_EXPORT }),
-    requiredBytes: bufferSize,
-    label: LINEAR_MEMORY_EXPORT,
-  });
+  initEffectsFn(tablePtr);
 };
 
 export const createVoydHost = async ({

@@ -50,6 +50,8 @@ export interface CodegenOptions {
   validate?: boolean;
   emitEffectHelpers?: boolean;
   effectsHostBoundary?: "msgpack" | "off";
+  linearMemoryExport?: "always" | "auto" | "off";
+  effectsMemoryExport?: "auto" | "always" | "off";
   continuationBackend?: ContinuationBackendOptions;
   testMode?: boolean;
   testScope?: "all" | "entry";

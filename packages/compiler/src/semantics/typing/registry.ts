@@ -28,6 +28,7 @@ import {
   emitDiagnostic,
   normalizeSpan,
 } from "../../diagnostics/index.js";
+import { isStdOnlyIntrinsicName } from "../intrinsics.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
@@ -149,6 +150,31 @@ export const registerFunctionSignatures = (
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
     ctx.functions.register(item);
+    const symbolRecord = ctx.symbolTable.getSymbol(item.symbol);
+    const symbolMetadata = (symbolRecord.metadata ?? {}) as {
+      intrinsic?: unknown;
+      intrinsicName?: unknown;
+    };
+    const intrinsicName =
+      typeof symbolMetadata.intrinsicName === "string"
+        ? symbolMetadata.intrinsicName
+        : undefined;
+    if (
+      ctx.packageId !== "std" &&
+      symbolMetadata.intrinsic === true &&
+      typeof intrinsicName === "string" &&
+      isStdOnlyIntrinsicName(intrinsicName)
+    ) {
+      emitDiagnostic({
+        code: "TY0038",
+        ctx,
+        span: normalizeSpan(item.span, ctx.hir.module.span),
+        params: {
+          kind: "std-only-intrinsic-wrapper",
+          intrinsicName,
+        },
+      });
+    }
     const fnDecl =
       (typeof item.decl === "number"
         ? ctx.decls.getFunctionById(item.decl)

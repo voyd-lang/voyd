@@ -35,14 +35,17 @@ import {
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../semantics/ids.js";
 import { DiagnosticEmitter } from "../diagnostics/index.js";
-import { createMultiMemoryModule } from "./wasm-module.js";
+import { createCodegenModule } from "./wasm-module.js";
 import { createProgramHelperRegistry } from "./program-helpers.js";
+import { applyConfiguredMemoryExports } from "./memory-exports.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
   validate: true,
   emitEffectHelpers: false,
   effectsHostBoundary: "msgpack",
+  linearMemoryExport: "always",
+  effectsMemoryExport: "auto",
   continuationBackend: {},
   testMode: false,
   testScope: "all",
@@ -72,7 +75,7 @@ export const codegenProgram = ({
   options = {},
 }: CodegenProgramParams): CodegenResult => {
   const modules = Array.from(program.modules.values());
-  const mod = createMultiMemoryModule();
+  const mod = createCodegenModule();
   const mergedOptions: Required<CodegenOptions> = {
     ...DEFAULT_OPTIONS,
     ...options,
@@ -141,6 +144,9 @@ export const codegenProgram = ({
   }));
 
   const siteCounter = { current: 0 };
+  const entryCtx =
+    contexts.find((ctx) => ctx.moduleId === entryModuleId) ?? contexts[0];
+  applyConfiguredMemoryExports(entryCtx);
   contexts.forEach((ctx) => {
     ctx.effectsBackend = selectEffectsBackend(ctx);
   });
@@ -156,8 +162,6 @@ export const codegenProgram = ({
   buildRuntimeTypeArtifacts(contexts);
   contexts.forEach(compileFunctions);
 
-  const entryCtx =
-    contexts.find((ctx) => ctx.moduleId === entryModuleId) ?? contexts[0];
   emitModuleExports(entryCtx, contexts);
   const effectTable = emitEffectTableSection({
     contexts,
