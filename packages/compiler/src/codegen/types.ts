@@ -1245,10 +1245,12 @@ const createMethodLookupEntries = ({
         }
         const availableInstances = (metas ?? [])
           .map((entry) => {
-            const receiverTypeIndex = entry.effectful ? 1 : 0;
+            const receiverTypeIndex = entry.effectful
+              ? Math.max(0, entry.paramTypes.length - entry.paramTypeIds.length)
+              : 0;
             const receiverType =
               entry.paramTypes[receiverTypeIndex] ?? runtimeType;
-            const receiverTypeId = entry.paramTypeIds[receiverTypeIndex];
+            const receiverTypeId = entry.paramTypeIds[0];
             return `${entry.wasmName}#${entry.instanceId}@${receiverType}(receiverTypeId=${receiverTypeId},typeArgs=[${entry.typeArgs.join(",")}])`;
           })
           .join(", ");
@@ -1274,24 +1276,25 @@ const createMethodLookupEntries = ({
           `codegen missing receiver parameter type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
       }
-      if (meta.effectful && meta.paramTypes.length < 2) {
+      const hiddenParamOffset = meta.effectful
+        ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length)
+        : 0;
+      if (meta.effectful && meta.paramTypes.length < hiddenParamOffset + 1) {
         throw new Error(
           `codegen missing effectful receiver parameter type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
       }
-      const receiverTypeIndex = meta.effectful ? 1 : 0;
+      const receiverTypeIndex = hiddenParamOffset;
       const receiverType = meta.paramTypes[receiverTypeIndex];
       if (typeof receiverType !== "number") {
         throw new Error(
           `codegen missing receiver wasm type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
       }
-      const userParamTypes = meta.effectful
-        ? meta.paramTypes.slice(2)
-        : meta.paramTypes.slice(1);
+      const userParamTypes = meta.paramTypes.slice(receiverTypeIndex + 1);
       if (
         meta.effectful &&
-        userParamTypes.length + 2 !== meta.paramTypes.length
+        userParamTypes.length + receiverTypeIndex + 1 !== meta.paramTypes.length
       ) {
         throw new Error(
           `codegen malformed effectful parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
@@ -1305,7 +1308,7 @@ const createMethodLookupEntries = ({
           `codegen malformed parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
       }
-      const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+      const handlerParamType = ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
       const params = meta.effectful
         ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
         : [ctx.rtt.baseType, ...userParamTypes];

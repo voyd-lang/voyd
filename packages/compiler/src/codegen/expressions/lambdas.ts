@@ -121,11 +121,18 @@ const emitLambdaFunction = ({
   const lambdaInfo = effectsFacade(ctx).lambdaAbi(expr.id);
   const abiEffectful = lambdaInfo?.abiEffectful ?? typeEffectful;
   const needsWrapper = abiEffectful && !typeEffectful;
+  const userParamOffset = Math.max(0, env.base.paramTypes.length - expr.parameters.length);
 
   if (needsWrapper) {
-    const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+    const implSignature = ctx.effectsBackend.abi.widenSignature({
+      ctx,
+      effectful: true,
+      userParamTypes: env.base.paramTypes,
+      userResultType: env.base.resultType,
+    });
+    const handlerParamType = ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
     const implName = `${fnName}__effectful_impl`;
-    const implParams = [env.base.interfaceType, handlerParamType, ...env.base.paramTypes];
+    const implParams = [env.base.interfaceType, ...implSignature.paramTypes];
 
     const implCtx: FunctionContext = {
       bindings: new Map(),
@@ -142,7 +149,7 @@ const emitLambdaFunction = ({
     expr.parameters.forEach((param, index) => {
       const binding = {
         kind: "local" as const,
-        index: index + 2,
+        index: index + 1 + implSignature.userParamOffset,
         type: env.base.paramTypes[index]!,
         typeId: desc.parameters[index]!.type,
       };
@@ -182,7 +189,7 @@ const emitLambdaFunction = ({
     ctx.mod.addFunction(
       implName,
       binaryen.createType(implParams as number[]),
-      ctx.effectsRuntime.outcomeType,
+      ctx.effectsBackend.abi.effectfulResultType(ctx),
       implCtx.locals,
       implFunctionBody
     );
@@ -195,7 +202,7 @@ const emitLambdaFunction = ({
       implName,
       buildImplCallArgs: () => [
         ctx.mod.local.get(0, env.base.interfaceType),
-        ctx.mod.ref.null(handlerParamType),
+        ctx.effectsBackend.abi.hiddenHandlerValue(ctx),
         ...expr.parameters.map((_, index) =>
           ctx.mod.local.get(index + 1, env.base.paramTypes[index] as number)
         ),
@@ -205,7 +212,6 @@ const emitLambdaFunction = ({
   }
 
   const effectful = abiEffectful;
-  const handlerOffset = effectful ? 1 : 0;
   const lambdaCtx: FunctionContext = {
     bindings: new Map(),
     tempLocals: new Map(),
@@ -219,15 +225,15 @@ const emitLambdaFunction = ({
   if (effectful) {
     lambdaCtx.currentHandler = {
       index: 1,
-      type: ctx.effectsRuntime.handlerFrameType,
+      type: ctx.effectsBackend.abi.hiddenHandlerParamType(ctx),
     };
   }
 
   expr.parameters.forEach((param, index) => {
     const binding = {
       kind: "local" as const,
-      index: index + 1 + handlerOffset,
-      type: env.base.paramTypes[index + handlerOffset]!,
+      index: index + 1 + userParamOffset,
+      type: env.base.paramTypes[index + userParamOffset]!,
       typeId: desc.parameters[index]!.type,
     };
     lambdaCtx.bindings.set(param.symbol, binding);
@@ -261,7 +267,7 @@ const emitLambdaFunction = ({
       (returnWasmType === ctx.rtt.baseType &&
         bodyExprType !== binaryen.none &&
         bodyExprType !== binaryen.unreachable &&
-        bodyExprType !== ctx.effectsRuntime.outcomeType));
+        bodyExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx)));
   const functionBody = shouldWrapOutcome
     ? wrapValueInOutcome({
         valueExpr: body.expr,
