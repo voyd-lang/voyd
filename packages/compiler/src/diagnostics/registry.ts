@@ -53,6 +53,9 @@ type DiagnosticParamsMap = {
     | { kind: "missing-annotation"; functionName: string; parameter: string }
     | { kind: "conflicting-overload" };
   BD0005: { kind: "unsupported-mod-decl" };
+  BD0006:
+    | { kind: "duplicate-binding"; name: string }
+    | { kind: "previous-binding" };
   CG0001: { kind: "codegen-error"; message: string };
   CG0002: {
     kind: "unsupported-effectful-export-return";
@@ -257,6 +260,19 @@ export const diagnosticsRegistry: {
       "mod declarations without a body are no longer supported; use `use`, `pub use self::...`, or `pub self::...` instead",
     severity: "error",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0005"]>,
+  BD0006: {
+    code: "BD0006",
+    message: (params) => {
+      switch (params.kind) {
+        case "duplicate-binding":
+          return `cannot redefine ${params.name} in the same scope`;
+        case "previous-binding":
+          return "previous binding declared here";
+      }
+      return exhaustive(params);
+    },
+    severity: "error",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0006"]>,
   CG0001: {
     code: "CG0001",
     message: (params) => params.message,
