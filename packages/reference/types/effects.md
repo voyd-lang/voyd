@@ -235,4 +235,5 @@ changes when internal implementations start using new effects.
 - Default behavior:
   - `memory` is always exported.
   - `effects_memory` is exported only when effects runtime paths require it.
+  - `effects_memory`, when exported, aliases `memory` (same linear memory).
 - If `effects_memory` is exported, `memory` is also exported.

@@ -66,7 +66,8 @@ memory exports are deterministic and configurable:
 - `effectsMemoryExport`: `"auto" | "always" | "off"` (default: `"auto"`)
 
 By default, Voyd exports `memory` and only exports `effects_memory` when effect
-runtime paths require it.
+runtime paths require it. When present, `effects_memory` is an alias of
+`memory` (same underlying linear memory).
 
 **Requirements**
 

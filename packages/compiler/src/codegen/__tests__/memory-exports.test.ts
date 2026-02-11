@@ -28,6 +28,25 @@ const compileExports = ({
   return exportNames(wasmModule);
 };
 
+const compileInstance = ({
+  source,
+  options,
+}: {
+  source: string;
+  options?: Parameters<typeof codegen>[1];
+}): WebAssembly.Instance => {
+  const ast = parse(source, "memory_exports_instance_test.voyd");
+  const semantics = semanticsPipeline(ast);
+  const { module } = codegen(semantics, {
+    effectsHostBoundary: "off",
+    ...(options ?? {}),
+  });
+  const wasmModule = new WebAssembly.Module(
+    wasmBufferSource(module.emitBinary()),
+  );
+  return new WebAssembly.Instance(wasmModule, {});
+};
+
 describe("codegen memory exports", () => {
   const baseSource = `pub fn main() -> i32
   1`;
@@ -56,5 +75,20 @@ describe("codegen memory exports", () => {
     });
     expect(names).toContain("memory");
     expect(names).toContain("effects_memory");
+  });
+
+  it("aliases effects_memory to linear memory", () => {
+    const instance = compileInstance({
+      source: baseSource,
+      options: {
+        linearMemoryExport: "always",
+        effectsMemoryExport: "always",
+      },
+    });
+    const linear = instance.exports["memory" as keyof WebAssembly.Exports];
+    const effects =
+      instance.exports["effects_memory" as keyof WebAssembly.Exports];
+    expect(linear).toBeInstanceOf(WebAssembly.Memory);
+    expect(effects).toBe(linear);
   });
 });

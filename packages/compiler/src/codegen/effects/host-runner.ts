@@ -4,7 +4,6 @@ import { EFFECT_TABLE_EXPORT } from "./effect-table.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
 import {
   EFFECT_RESULT_STATUS,
-  EFFECTS_MEMORY_EXPORT,
   LINEAR_MEMORY_EXPORT,
   MIN_EFFECT_BUFFER_SIZE,
 } from "./host-boundary.js";
@@ -31,6 +30,8 @@ const isNoResume = (value: unknown): value is NoResume => {
   if (!value || typeof value !== "object") return false;
   return (value as Record<symbol, unknown>)[NO_RESUME_BRAND] === true;
 };
+
+const handleTableBasePtr = (bufferSize: number): number => bufferSize * 2;
 
 const ensureMemoryCapacity = (
   memory: WebAssembly.Memory,
@@ -364,12 +365,6 @@ export const runEffectfulExport = async <T = unknown>({
     imports,
     tableExport,
   });
-  const exportedEffectsMemory = instance.exports[
-    EFFECTS_MEMORY_EXPORT as keyof WebAssembly.Exports
-  ];
-  if (!(exportedEffectsMemory instanceof WebAssembly.Memory)) {
-    throw new Error(`expected module to export ${EFFECTS_MEMORY_EXPORT}`);
-  }
   const msgpackMemory = instance.exports[
     LINEAR_MEMORY_EXPORT as keyof WebAssembly.Exports
   ];
@@ -404,20 +399,20 @@ export const runEffectfulExport = async <T = unknown>({
     handlers,
   });
   const bufferPtr = 0;
+  const tablePtr = handleTableBasePtr(bufferSize);
   ensureMemoryCapacity(
     msgpackMemory,
-    bufferPtr + bufferSize,
+    tablePtr + table.ops.length * 4,
     LINEAR_MEMORY_EXPORT
   );
-  ensureMemoryCapacity(exportedEffectsMemory, table.ops.length * 4, EFFECTS_MEMORY_EXPORT);
 
-  const memoryView = new DataView(exportedEffectsMemory.buffer);
+  const memoryView = new DataView(msgpackMemory.buffer);
   table.ops.forEach((op) => {
     const handle = handleByOpIndex.get(op.opIndex) ?? 0;
-    memoryView.setUint32(op.opIndex * 4, handle, true);
+    memoryView.setUint32(tablePtr + op.opIndex * 4, handle, true);
   });
   if (typeof initEffects === "function") {
-    initEffects();
+    initEffects(tablePtr);
   }
 
   let result = (entry as CallableFunction)(bufferPtr, bufferSize);

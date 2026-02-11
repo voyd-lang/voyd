@@ -63,7 +63,8 @@ The host owns effect handlers. The module only needs opaque handles.
    validating `signature_hash` and `abi_version`.
 3. Host allocates an opaque handle for each op (u32 or pointer-like index).
 4. Host writes handles to the reserved effect handle table in `op_index` order.
-5. Host calls `init_effects()` to signal that the handle table is ready.
+5. Host calls `init_effects(handle_table_ptr)` to signal that the table is
+   ready and provide its base pointer.
 
 **Module behavior**
 
@@ -83,18 +84,17 @@ This is the key mechanism that connects `Log::info` to a host handler: the
 host reads the effect table entry for `Log.info`, assigns a handle, and the
 module uses that handle whenever it performs the op.
 
-### 2.2) Dedicated Effect Memory
+### 2.2) Handle Table Location
 
-To avoid mixing effect state with other runtime buffers, the module uses a
-separate Wasm memory for effect handles (multi-memory).
+Effect handles are stored in linear memory at a host-selected base pointer.
 
-- The module exports a dedicated memory (`effects_memory`).
-- The host writes a `u32` handle table into that memory.
-- The handle table occupies address 0 in the effect memory and is reserved
-  exclusively for effect handles.
-- The effect memory is defined by the module and exported for host tooling.
-- MsgPack buffers live in the module's default linear memory export (`memory`).
-- Hosts may grow either memory if buffers or handle tables exceed capacity.
+- The host writes a `u32` handle table into `memory` and passes
+  `handle_table_ptr` to `init_effects(handle_table_ptr)`.
+- MsgPack buffers and the handle table share linear memory but use disjoint
+  regions chosen by the host runtime.
+- The module may additionally export `effects_memory` as a compatibility alias
+  to `memory`.
+- Hosts may grow `memory` if buffers or handle tables exceed capacity.
 
 ### 2.1) Generics
 
