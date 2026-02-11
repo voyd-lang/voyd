@@ -313,9 +313,7 @@ impl<T> Array<T>
 
   api fn update(~self, value: T, { at index: i32 }) -> bool
     let computed_index = compute_index(index, self.count)
-    if computed_index < 0:
-      return false
-    if computed_index >= self.count:
+    if computed_index < 0 or computed_index >= self.count:
       return false
 
     self.ensure_unique(self.count)
@@ -415,19 +413,17 @@ fn compute_index(index: i32, length: i32) -> i32
 
 fn clamp_slice_index(index: i32, length: i32) -> i32
   let computed = compute_index(index, length)
-  if computed < 0 then:
-    return 0
-  if computed > length then:
-    return length
-  computed
+  if
+    computed < 0: 0
+    computed > length: length
+    else: computed
 
 fn clamp_insert_index(index: i32, length: i32) -> i32
   let computed = compute_index(index, length)
-  if computed < 0 then:
-    return 0
-  if computed > length then:
-    return length
-  computed
+  if
+    computed < 0: 0
+    computed > length: length
+    else: computed
 
 fn growth_capacity(current_capacity: i32, required: i32) -> i32
   if required <= 0 then:
@@ -437,7 +433,7 @@ fn growth_capacity(current_capacity: i32, required: i32) -> i32
 
   let base = if current_capacity > 0 then: current_capacity else: 4
   var next_capacity = base
-  while next_capacity < required do:
+  while next_capacity < required:
     next_capacity = next_capacity * 2
   next_capacity
 

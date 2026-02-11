@@ -167,11 +167,9 @@ test "array mutating update":
 test "array mutating sort":
   let ~arr = array_of_3(3, 1, 2)
   arr.sort((left: i32, right: i32) -> i32 =>
-    if left < right then:
-      return -1
-    if left > right then:
-      return 1
-    0
+    if left < right: -1
+    left > right: 1
+    else: 0
   )
   assert(optional_i32_or(arr.get(0), -1), eq: 1)
   assert(optional_i32_or(arr.get(1), -1), eq: 2)
@@ -232,11 +230,9 @@ test "array non-mutating mirrors":
   assert(optional_i32_or(spliced.get(1), -1), eq: 8)
 
   let sorted = arr.sorted((left: i32, right: i32) -> i32 =>
-    if left < right then:
-      return -1
-    if left > right then:
-      return 1
-    0
+    if left < right: -1
+    left > right: 1
+    else: 0
   )
   assert(optional_i32_or(arr.get(0), -1), eq: 1)
   assert(optional_i32_or(sorted.get(0), -1), eq: 1)
@@ -244,11 +240,9 @@ test "array non-mutating mirrors":
 test "array sorted does not mutate source":
   let arr = array_of_3(3, 1, 2)
   let sorted = arr.sorted((left: i32, right: i32) -> i32 =>
-    if left < right then:
-      return -1
-    if left > right then:
-      return 1
-    0
+    if left < right: -1
+    left > right: 1
+    else: 0
   )
   assert(optional_i32_or(arr.get(0), -1), eq: 3)
   assert(optional_i32_or(sorted.get(0), -1), eq: 1)
