@@ -67,7 +67,7 @@ fn msgpack_array_with_capacity(size: i32): () -> Array<MsgPack>
   Array<MsgPack>::with_capacity(size)
 
 fn msgpack_array_push(array: Array<MsgPack>, value: MsgPack): () -> Array<MsgPack>
-  array.push(value)
+  array.pushed(value)
 
 fn msgpack_array_length(array: Array<MsgPack>): () -> i32
   array.length()

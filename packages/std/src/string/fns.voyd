@@ -224,12 +224,12 @@ fn append_codepoint(bytes: Array<i32>, codepoint: i32) -> Array<i32>
   if codepoint < 0 then:
     return append_replacement(bytes)
   if codepoint <= 127 then:
-    return bytes.push(codepoint)
+    return bytes.pushed(codepoint)
   if codepoint <= 2047 then:
     let first = 192 + (codepoint / 64)
     let second = 128 + (codepoint - (codepoint / 64) * 64)
-    var out = bytes.push(first)
-    out = out.push(second)
+    var out = bytes.pushed(first)
+    out = out.pushed(second)
     return out
   if codepoint <= 65535 then:
     if codepoint >= 55296 and codepoint <= 57343 then:
@@ -237,26 +237,26 @@ fn append_codepoint(bytes: Array<i32>, codepoint: i32) -> Array<i32>
     let first = 224 + (codepoint / 4096)
     let second = 128 + ((codepoint / 64) - (codepoint / 4096) * 64)
     let third = 128 + (codepoint - (codepoint / 64) * 64)
-    var out = bytes.push(first)
-    out = out.push(second)
-    out = out.push(third)
+    var out = bytes.pushed(first)
+    out = out.pushed(second)
+    out = out.pushed(third)
     return out
   if codepoint <= 1114111 then:
     let first = 240 + (codepoint / 262144)
     let second = 128 + ((codepoint / 4096) - (codepoint / 262144) * 64)
     let third = 128 + ((codepoint / 64) - (codepoint / 4096) * 64)
     let fourth = 128 + (codepoint - (codepoint / 64) * 64)
-    var out = bytes.push(first)
-    out = out.push(second)
-    out = out.push(third)
-    out = out.push(fourth)
+    var out = bytes.pushed(first)
+    out = out.pushed(second)
+    out = out.pushed(third)
+    out = out.pushed(fourth)
     return out
   append_replacement(bytes)
 
 fn append_replacement(bytes: Array<i32>) -> Array<i32>
-  var out = bytes.push(239)
-  out = out.push(191)
-  out = out.push(189)
+  var out = bytes.pushed(239)
+  out = out.pushed(191)
+  out = out.pushed(189)
   out
 
 fn utf8_replacement() -> Utf8Read

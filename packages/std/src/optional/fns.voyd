@@ -1,8 +1,5 @@
 use super::types::all
 
-fn hi()
-  3
-
 pub fn some<T>(value: T): () -> Optional<T>
   Some { value: value }
 

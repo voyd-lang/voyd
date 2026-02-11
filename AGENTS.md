@@ -13,32 +13,6 @@ report on it and suggest direction in your final response.
 Voyd has not yet been released. Breaking changes to public APIs are ok. Just
 note the breaking changes if made.
 
-Keep this AGENTS.md file up to date.
-
-## Intrinsic Policy
-
-- Raw `__*` intrinsics are std-only.
-- Non-std code should use std wrappers/APIs instead of calling or wrapping raw
-  intrinsics directly.
-
-## Effects Memory ABI
-
-- Effect handle tables are stored in linear memory and initialized through
-  `init_effects(handle_table_ptr)`.
-- `effects_memory` is an optional compatibility alias of `memory`.
-
-## Effects Backend Status
-
-- The effects runtime currently uses the `gc-trampoline` backend.
-- `stack-switch` is not implemented yet; requests for it must fail closed to
-  `gc-trampoline` behavior.
-
-## Tail Resumption Contract
-
-- `tail` continuations are strict: they must be resumed exactly once.
-- Returning from a tail handler clause or propagating another effect before the
-  required tail resume is a runtime trap.
-
 # Debugging
 
 A cli is available after `npm link`
@@ -48,6 +22,8 @@ Helpful commands:
 - `vt --run <path-to-voyd-file>` // runs the pub fn main of the file
 - `vt --emit-wasm-text --opt <path-to-voyd-file>` // Careful, this can be large
 
+If you find additional information that can save you time later add it here.
+
 # Testing
 
 - `npm test` (runs vitest suite). Always confirm this passes before finishing.
@@ -56,7 +32,7 @@ Helpful commands:
 
 You should generally add unit tests (especially e2e ones)
 
-# Style Guide
+# TS Style Guide
 
 - Keep functions small
 - Prefer early returns to else ifs
@@ -65,3 +41,12 @@ You should generally add unit tests (especially e2e ones)
 - Prefer functional control flow (`map`, `filter`, etc) to imperative loop constructs.
 - Files should be ordered by importance. The main export of a file at the top.
 - Use a single parameter object for functions containing more than three params to name the parameters on call.
+
+## Voyd Style Guide
+
+Guide for writing voyd code and APIs. Voyd APIs should share a similar
+spirit to [Swift API Design Guidelines](https://www.swift.org/documentation/api-design-guidelines/)
+
+- Snake case for functions, variables, and effect ops. UpperCamelCase for types and effects
+- Always use labeled parameters when there are more than three parameters `fn foo({ a: i32, b: i32, c: i32 })` `foo(a: 1, b: 2, c: 3)`
+- Make use of function / method overloading when it makes semantic sense.

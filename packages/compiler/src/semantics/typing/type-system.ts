@@ -1164,7 +1164,6 @@ const resolveTupleTypeExpr = (
   state: TypingState,
   typeParams?: ReadonlyMap<SymbolId, TypeId>,
 ): TypeId => {
-  const allowedParams = paramIdSetFrom(typeParams, ctx);
   const fields = expr.elements.map((element, index) => {
     const type = resolveTypeExpr(
       element,
@@ -1176,9 +1175,6 @@ const resolveTupleTypeExpr = (
     return {
       name: `${index}`,
       type,
-      declaringParams: allowedParams
-        ? declaringParamsForField(type, allowedParams, ctx)
-        : undefined,
     };
   });
   return ctx.arena.internStructuralObject({ fields });

@@ -1,5 +1,4 @@
-use std::array::self as array
-use std::array::{ Array }
+use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
 use std::optional::types::all
 use std::string::fns::all
@@ -79,7 +78,7 @@ impl<T> Map<T>
     if entry_index < 0 then:
       return None {}
 
-    let entry = __array_get(array::raw_storage(bucket), entry_index)
+    let entry = __array_get(bucket.raw_storage(), entry_index)
     Some<T> { value: entry.value }
 
   api fn get_or(self, key: String, default: T): () -> T
@@ -137,7 +136,7 @@ impl<T> Map<T>
     var bucket_index = 0
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
-      out = array::extend(out, bucket)
+      out = out.extended(bucket)
       bucket_index = bucket_index + 1
     out
 
@@ -145,17 +144,17 @@ impl<T> Map<T>
     if self.count == 0 then:
       return Array<String>::with_capacity(0)
 
-    var out = Array<String>::with_capacity(self.count)
+    let ~out = Array<String>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
-      let storage = array::raw_storage(bucket)
-      let len = array::length(bucket)
+      let storage = bucket.raw_storage()
+      let len = bucket.length()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
-        out = array::push(out, entry.key)
+        out.push(entry.key)
         index = index + 1
       bucket_index = bucket_index + 1
     out
@@ -164,17 +163,17 @@ impl<T> Map<T>
     if self.count == 0 then:
       return Array<T>::with_capacity(0)
 
-    var out = Array<T>::with_capacity(self.count)
+    let ~out = Array<T>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
-      let storage = array::raw_storage(bucket)
-      let len = array::length(bucket)
+      let storage = bucket.raw_storage()
+      let len = bucket.length()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
-        out = array::push(out, entry.value)
+        out.push(entry.value)
         index = index + 1
       bucket_index = bucket_index + 1
     out
@@ -187,8 +186,8 @@ impl<T> Map<T>
     var bucket_index = 0
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
-      let storage = array::raw_storage(bucket)
-      let len = array::length(bucket)
+      let storage = bucket.raw_storage()
+      let len = bucket.length()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
@@ -205,8 +204,8 @@ impl<T> Map<T>
     var bucket_index = 0
     while bucket_index < bucket_count do:
       let bucket = __array_get(other.buckets, bucket_index)
-      let storage = array::raw_storage(bucket)
-      let len = array::length(bucket)
+      let storage = bucket.raw_storage()
+      let len = bucket.length()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
@@ -224,8 +223,8 @@ impl<T> Map<T>
     var bucket_index = 0
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
-      let storage = array::raw_storage(bucket)
-      let len = array::length(bucket)
+      let storage = bucket.raw_storage()
+      let len = bucket.length()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
@@ -243,8 +242,8 @@ impl<T> Map<T>
     var bucket_index = 0
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
-      let storage = array::raw_storage(bucket)
-      let len = array::length(bucket)
+      let storage = bucket.raw_storage()
+      let len = bucket.length()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
@@ -293,8 +292,8 @@ fn insert_bucket_entries<T>(
   bucket_count: i32,
   bucket: Array<MapEntry<T>>
 ) -> void
-  let storage = array::raw_storage(bucket)
-  let len = array::length(bucket)
+  let storage = bucket.raw_storage()
+  let len = bucket.length()
   var index = 0
   while index < len do:
     let entry = __array_get(storage, index)
@@ -308,12 +307,12 @@ fn insert_entry<T>(
 ) -> FixedArray<Array<MapEntry<T>>>
   let bucket_index = bucket_index_for_key(bucket_count, entry.key)
   let bucket = __array_get(buckets, bucket_index)
-  let next_bucket = array::push(bucket, entry)
+  let next_bucket = bucket.pushed(entry)
   __array_set(buckets, bucket_index, next_bucket)
 
 fn find_entry_index_in_bucket<T>(bucket: Array<MapEntry<T>>, key: String) -> i32
-  let storage = array::raw_storage(bucket)
-  let len = array::length(bucket)
+  let storage = bucket.raw_storage()
+  let len = bucket.length()
   var index = 0
   while index < len do:
     let entry = __array_get(storage, index)
@@ -327,10 +326,11 @@ fn set_in_bucket<T>(bucket: Array<MapEntry<T>>, key: String, value: T) -> Bucket
   let entry = MapEntry<T> { key: key, value: value }
 
   if index < 0 then:
-    let next_bucket = array::push(bucket, entry)
+    let next_bucket = bucket.pushed(entry)
     return BucketSetResult<T> { bucket: next_bucket, inserted: true }
 
-  let next_bucket = array::set(bucket, index, entry)
+  let ~next_bucket = bucket.copied()
+  next_bucket.replace(index, with: entry)
   BucketSetResult<T> { bucket: next_bucket, inserted: false }
 
 fn delete_from_bucket<T>(bucket: Array<MapEntry<T>>, key: String) -> BucketDeleteResult<T>
@@ -338,7 +338,7 @@ fn delete_from_bucket<T>(bucket: Array<MapEntry<T>>, key: String) -> BucketDelet
   if index < 0 then:
     return BucketDeleteResult<T> { bucket: bucket, deleted: false }
 
-  let next_bucket = array::remove(bucket, index)
+  let next_bucket = bucket.removed(index)
   BucketDeleteResult<T> { bucket: next_bucket, deleted: true }
 
 fn bucket_index_for_key(bucket_count: i32, key: String) -> i32
@@ -430,12 +430,12 @@ test "map entries keys and values match size":
   let keys = map.keys()
   let values = map.values()
   let entries = map.entries()
-  assert(array::length(keys), eq: 3)
-  assert(array::length(values), eq: 3)
-  assert(array::length(entries), eq: 3)
+  assert(keys.length(), eq: 3)
+  assert(values.length(), eq: 3)
+  assert(entries.length(), eq: 3)
 
-  assert(array::some(keys, (k: String) -> bool => k.equals("a")), eq: true)
-  assert(array::contains(values, 2), eq: true)
+  assert(map.has("a"), eq: true)
+  assert(values.contains(2), eq: true)
 
 test "map get_or and get_or_else":
   var map = Map<i32>::new()
