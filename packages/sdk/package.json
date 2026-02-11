@@ -45,10 +45,10 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "@voyd/compiler": "0.9.0",
-    "@voyd/js-host": "0.9.0",
-    "@voyd/std": "0.9.0",
-    "@voyd/lib": "0.9.0",
+    "@voyd/compiler": "*",
+    "@voyd/js-host": "*",
+    "@voyd/std": "*",
+    "@voyd/lib": "*",
     "binaryen": "^123.0.0"
   }
 }
