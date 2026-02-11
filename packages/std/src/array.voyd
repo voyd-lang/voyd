@@ -14,12 +14,6 @@ pub obj ArrayPop<T> {
   value?: T
 }
 
-pub obj ArraySplice<T> {
-  start: i32,
-  delete_count: i32,
-  items: Array<T>
-}
-
 impl<T> Array<T>
   api fn init() -> Array<T>
     Array<T>::new()
@@ -75,7 +69,7 @@ impl<T> Array<T>
       return none<T>()
     some(__array_get(self.storage, computed_index))
 
-  api fn slice(self, start: i32, end: i32) -> Array<T>
+  api fn slice(self, { from start: i32, to end: i32 }) -> Array<T>
     let computed_start = clamp_slice_index(start, self.count)
     let computed_end = clamp_slice_index(end, self.count)
     if computed_start >= computed_end:
@@ -115,12 +109,12 @@ impl<T> Array<T>
       index = index + 1
     out
 
-  api fn reduce<O>(self, init: O, f: (acc: O, v: T) -> O): () -> O
-    var acc = init
+  api fn reduce<O>(self, initial: O, { step: (acc: O, v: T) -> O }): () -> O
+    var acc = initial
     var index = 0
     while index < self.count:
       let value = __array_get(self.storage, index)
-      acc = f(acc, value)
+      acc = step(acc, value)
       index = index + 1
     acc
 
@@ -160,6 +154,11 @@ impl<T> Array<T>
   api fn contains(self, value: T) -> bool
     self.index_of(value) >= 0
 
+  api fn sorted(self, compare: (left: T, right: T) -> i32): () -> Array<T>
+    let ~copy = self.copied()
+    copy.sort(compare)
+    copy
+
   api fn to_fixed_array(self) -> FixedArray<T>
     let next_raw = new_fixed_array<T>(self.count)
     __array_copy(next_raw, {
@@ -184,6 +183,24 @@ impl<T> Array<T>
 
   api fn concat(self, other: Array<T>) -> Array<T>
     self.extended(other)
+
+  api fn sort(~self, compare: (left: T, right: T) -> i32): () -> void
+    if self.count < 2:
+      return void
+
+    self.ensure_unique(self.count)
+    var index = 1
+    while index < self.count:
+      let value = __array_get(self.storage, index)
+      var cursor = index - 1
+      while cursor >= 0 do:
+        let shifted = __array_get(self.storage, cursor)
+        if compare(shifted, value) <= 0 then:
+          break
+        __array_set(self.storage, cursor + 1, shifted)
+        cursor = cursor - 1
+      __array_set(self.storage, cursor + 1, value)
+      index = index + 1
 
   api fn clear(~self) -> void
     if self.count == 0:
@@ -215,11 +232,11 @@ impl<T> Array<T>
     self.count = last_index
     Some<T> { value: value }
 
-  api fn insert(~self, index: i32, value: T) -> void
+  api fn insert(~self, value: T, { at index: i32 }) -> void
     let insert_index = clamp_insert_index(index, self.count)
     let ~items = Array<T>::with_capacity(1)
     items.push(value)
-    self.splice(ArraySplice<T> { start: insert_index, delete_count: 0, items: items })
+    self.splice(at: insert_index, removing: 0, inserting: items)
     void
 
   api fn remove(~self, index: i32) -> Optional<T>
@@ -227,11 +244,11 @@ impl<T> Array<T>
     if computed_index < 0 or computed_index >= self.count:
       return None {}
 
-    let removed = self.splice(ArraySplice<T> {
-      start: computed_index,
-      delete_count: 1,
-      items: Array<T>::with_capacity(0)
-    })
+    let removed = self.splice(
+      at: computed_index,
+      removing: 1,
+      inserting: Array<T>::with_capacity(0)
+    )
     removed.first()
 
   api fn extend(~self, other: Array<T>) -> void
@@ -248,19 +265,19 @@ impl<T> Array<T>
     })
     self.count = self.count + other.count
 
-  api fn splice(~self, opts: ArraySplice<T>) -> Array<T>
-    let start = clamp_insert_index(opts.start, self.count)
+  api fn splice(~self, { at start: i32, removing remove_count: i32, inserting items: Array<T> }) -> Array<T>
+    let clamped_start = clamp_insert_index(start, self.count)
     let safe_delete_count =
-      if opts.delete_count < 0 then: 0 else: opts.delete_count
-    let available = self.count - start
-    let delete_count =
+      if remove_count < 0 then: 0 else: remove_count
+    let available = self.count - clamped_start
+    let effective_delete_count =
       if safe_delete_count > available then: available else: safe_delete_count
 
-    let removed = self.slice(start, start + delete_count)
-    let insert_items = opts.items.to_fixed_array()
-    let insert_count = opts.items.count
+    let removed = self.slice(from: clamped_start, to: clamped_start + effective_delete_count)
+    let insert_items = items.to_fixed_array()
+    let insert_count = items.count
 
-    let next_count = self.count - delete_count + insert_count
+    let next_count = self.count - effective_delete_count + insert_count
     let current_capacity = self.capacity()
     let next_capacity =
       if next_count > current_capacity:
@@ -274,27 +291,27 @@ impl<T> Array<T>
       from: self.storage,
       to_index: 0,
       from_index: 0,
-      count: start
+      count: clamped_start
     })
 
     __array_copy(next_raw, {
       from: insert_items,
-      to_index: start,
+      to_index: clamped_start,
       from_index: 0,
       count: insert_count
     })
 
     __array_copy(next_raw, {
       from: self.storage,
-      to_index: start + insert_count,
-      from_index: start + delete_count,
-      count: self.count - start - delete_count
+      to_index: clamped_start + insert_count,
+      from_index: clamped_start + effective_delete_count,
+      count: self.count - clamped_start - effective_delete_count
     })
     self.replace_storage(next_raw)
     self.count = next_count
     removed
 
-  api fn update(~self, index: i32, value: T) -> bool
+  api fn update(~self, value: T, { at index: i32 }) -> bool
     let computed_index = compute_index(index, self.count)
     if computed_index < 0:
       return false
@@ -325,9 +342,9 @@ impl<T> Array<T>
     let value = copy.pop()
     ArrayPop<T> { array: copy, value }
 
-  api fn inserted(self, index: i32, value: T) -> Array<T>
+  api fn inserted(self, value: T, { at index: i32 }) -> Array<T>
     let ~copy = self.copied(1)
-    copy.insert(index, value)
+    copy.insert(value, at: index)
     copy
 
   api fn removed(self, index: i32) -> Array<T>
@@ -340,9 +357,9 @@ impl<T> Array<T>
     copy.extend(other)
     copy
 
-  api fn spliced(self, opts: ArraySplice<T>) -> Array<T>
-    let ~copy = self.copied(opts.items.count)
-    copy.splice(opts)
+  api fn spliced(self, { at start: i32, removing remove_count: i32, inserting items: Array<T> }) -> Array<T>
+    let ~copy = self.copied(items.count)
+    copy.splice(at: start, removing: remove_count, inserting: items)
     copy
 
   fn ensure_unique(~self, required: i32) -> void

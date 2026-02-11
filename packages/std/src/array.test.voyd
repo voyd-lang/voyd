@@ -92,7 +92,7 @@ test "array higher-order helpers":
   assert(optional_i32_or(filtered.get(0), -1), eq: 2)
   assert(optional_i32_or(filtered.get(1), -1), eq: 3)
 
-  let reduced = arr.reduce<i32>(0, (acc: i32, v: i32) -> i32 => acc + v)
+  let reduced = arr.reduce<i32>(0, step: (acc: i32, v: i32) -> i32 => acc + v)
   assert(reduced, eq: 6)
 
   let found = arr.find((v: i32) -> bool => v == 2)
@@ -104,7 +104,7 @@ test "array higher-order helpers":
 
 test "array slice enumerate concat and fixed array conversion":
   let arr = array_of_3(3, 4, 5)
-  let sliced = arr.slice(1, 3)
+  let sliced = arr.slice(from: 1, to: 3)
   assert(sliced.length(), eq: 2)
   assert(optional_i32_or(sliced.get(0), -1), eq: 4)
   assert(optional_i32_or(sliced.get(1), -1), eq: 5)
@@ -148,7 +148,7 @@ test "array mutating clear reserve push pop":
 
 test "array mutating insert and remove":
   let ~arr = array_of_2(10, 30)
-  arr.insert(1, 20)
+  arr.insert(20, at: 1)
   assert(arr.length(), eq: 3)
   assert(optional_i32_or(arr.get(1), -1), eq: 20)
 
@@ -159,10 +159,23 @@ test "array mutating insert and remove":
 
 test "array mutating update":
   let ~arr = array_of_3(10, 20, 30)
-  assert(arr.update(1, 99), eq: true)
+  assert(arr.update(99, at: 1), eq: true)
   assert(optional_i32_or(arr.get(1), -1), eq: 99)
-  assert(arr.update(9, 1), eq: false)
-  assert(arr.update(-9, 1), eq: false)
+  assert(arr.update(1, at: 9), eq: false)
+  assert(arr.update(1, at: -9), eq: false)
+
+test "array mutating sort":
+  let ~arr = array_of_3(3, 1, 2)
+  arr.sort((left: i32, right: i32) -> i32 =>
+    if left < right then:
+      return -1
+    if left > right then:
+      return 1
+    0
+  )
+  assert(optional_i32_or(arr.get(0), -1), eq: 1)
+  assert(optional_i32_or(arr.get(1), -1), eq: 2)
+  assert(optional_i32_or(arr.get(2), -1), eq: 3)
 
 test "array mutating extend and splice":
   let ~arr = array_of_3(1, 2, 5)
@@ -170,11 +183,7 @@ test "array mutating extend and splice":
   assert(arr.length(), eq: 5)
   assert(optional_i32_or(arr.get(4), -1), eq: 9)
 
-  let removed = arr.splice(ArraySplice<i32> {
-    start: 1,
-    delete_count: 3,
-    items: array_of_2(3, 4)
-  })
+  let removed = arr.splice(at: 1, removing: 3, inserting: array_of_2(3, 4))
 
   assert(removed.length(), eq: 3)
   assert(optional_i32_or(removed.get(0), -1), eq: 2)
@@ -206,7 +215,7 @@ test "array non-mutating mirrors":
   assert(popped.array.length(), eq: 2)
   assert(optional_i32_or(popped.value, -1), eq: 3)
 
-  let inserted = arr.inserted(1, 9)
+  let inserted = arr.inserted(9, at: 1)
   assert(inserted.length(), eq: 4)
   assert(optional_i32_or(inserted.get(1), -1), eq: 9)
 
@@ -217,14 +226,32 @@ test "array non-mutating mirrors":
   let extended = arr.extended(array_of_2(4, 5))
   assert(extended.length(), eq: 5)
 
-  let spliced = arr.spliced(ArraySplice<i32> {
-    start: 1,
-    delete_count: 1,
-    items: array_of_2(8, 9)
-  })
+  let spliced = arr.spliced(at: 1, removing: 1, inserting: array_of_2(8, 9))
   assert(spliced.length(), eq: 4)
   assert(optional_i32_or(spliced.get(0), -1), eq: 1)
   assert(optional_i32_or(spliced.get(1), -1), eq: 8)
+
+  let sorted = arr.sorted((left: i32, right: i32) -> i32 =>
+    if left < right then:
+      return -1
+    if left > right then:
+      return 1
+    0
+  )
+  assert(optional_i32_or(arr.get(0), -1), eq: 1)
+  assert(optional_i32_or(sorted.get(0), -1), eq: 1)
+
+test "array sorted does not mutate source":
+  let arr = array_of_3(3, 1, 2)
+  let sorted = arr.sorted((left: i32, right: i32) -> i32 =>
+    if left < right then:
+      return -1
+    if left > right then:
+      return 1
+    0
+  )
+  assert(optional_i32_or(arr.get(0), -1), eq: 3)
+  assert(optional_i32_or(sorted.get(0), -1), eq: 1)
 
 test "array copy-on-write keeps copies isolated":
   let ~base = array_of_2(1, 2)

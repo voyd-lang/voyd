@@ -1,4 +1,4 @@
-use std::array::{ Array }
+use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
 use std::optional::types::all
 use std::string::fns::all
@@ -330,7 +330,7 @@ fn set_in_bucket<T>(bucket: Array<MapEntry<T>>, key: String, value: T) -> Bucket
     return BucketSetResult<T> { bucket: next_bucket, inserted: true }
 
   let ~next_bucket = bucket.copied()
-  next_bucket.update(index, entry)
+  next_bucket.update(entry, at: index)
   BucketSetResult<T> { bucket: next_bucket, inserted: false }
 
 fn delete_from_bucket<T>(bucket: Array<MapEntry<T>>, key: String) -> BucketDeleteResult<T>
