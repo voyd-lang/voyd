@@ -37,10 +37,6 @@ fn i32_nine(): () -> i32
 fn i32_eleven(): () -> i32
   11
 
-test "hi returns 3":
-  let result = hi()
-  assert(result, eq: 3)
-
 test "unwrap_or returns inner value":
   let value = unwrap_or<i32>(some<i32>(3), 0)
   assert(value, eq: 3)

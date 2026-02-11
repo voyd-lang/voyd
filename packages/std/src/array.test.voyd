@@ -1,0 +1,243 @@
+use std::test::assertions::all
+
+fn array_of_2(a: i32, b: i32) -> Array<i32>
+  let ~out = Array<i32>::with_capacity(2)
+  out.push(a)
+  out.push(b)
+  out
+
+fn array_of_3(a: i32, b: i32, c: i32) -> Array<i32>
+  let ~out = Array<i32>::with_capacity(3)
+  out.push(a)
+  out.push(b)
+  out.push(c)
+  out
+
+fn optional_i32_or(value: Optional<i32>, fallback: i32) -> i32
+  match(value)
+    Some<i32> { value }:
+      value
+    None:
+      fallback
+
+test "array new from fixed array preserves length":
+  var fixed = new_fixed_array<i32>(2)
+  fixed = __array_set(fixed, 0, 4)
+  fixed = __array_set(fixed, 1, 9)
+
+  let arr = Array<i32>::from(fixed)
+  match(arr)
+    Some<Array<i32>> { value }:
+      assert(value.length(), eq: 2)
+      match(value.first())
+        Some<i32> { value }:
+          assert(value, eq: 4)
+        None:
+          assert(false)
+      match(value.last())
+        Some<i32> { value }:
+          assert(value, eq: 9)
+        None:
+          assert(false)
+    None:
+      assert(false)
+
+test "array from null ref source returns none":
+  let fixed = new_fixed_array<FixedArray<i32>>(1)
+  let arr = Array<FixedArray<i32>>::from(fixed)
+  match(arr)
+    Some:
+      assert(false)
+    None:
+      assert(true)
+
+test "array read-only helpers":
+  let arr = array_of_3(7, 9, 11)
+  assert(arr.length(), eq: 3)
+  assert(arr.capacity() >= 3, eq: true)
+  assert(arr.is_empty(), eq: false)
+  assert(arr.contains(9), eq: true)
+  assert(arr.contains(8), eq: false)
+  assert(arr.index_of(11), eq: 2)
+  assert(arr.index_of(99), eq: -1)
+
+  match(arr.get(0))
+    Some<i32> { value }:
+      assert(value, eq: 7)
+    None:
+      assert(false)
+
+  match(arr.get(-1))
+    Some<i32> { value }:
+      assert(value, eq: 11)
+    None:
+      assert(false)
+
+  match(arr.get(9))
+    Some<i32>:
+      assert(false)
+    None:
+      assert(true)
+
+test "array higher-order helpers":
+  let arr = array_of_3(1, 2, 3)
+
+  let mapped = arr.map<i32>(v => v * 2)
+  assert(mapped.length(), eq: 3)
+  assert(optional_i32_or(mapped.get(0), -1), eq: 2)
+  assert(optional_i32_or(mapped.get(2), -1), eq: 6)
+
+  let filtered = arr.filter((v: i32) -> bool => v > 1)
+  assert(filtered.length(), eq: 2)
+  assert(optional_i32_or(filtered.get(0), -1), eq: 2)
+  assert(optional_i32_or(filtered.get(1), -1), eq: 3)
+
+  let reduced = arr.reduce<i32>(0, (acc: i32, v: i32) -> i32 => acc + v)
+  assert(reduced, eq: 6)
+
+  let found = arr.find((v: i32) -> bool => v == 2)
+  assert(optional_i32_or(found, -1), eq: 2)
+
+  assert(arr.some((v: i32) -> bool => v == 3), eq: true)
+  assert(arr.every((v: i32) -> bool => v > 0), eq: true)
+  assert(arr.every((v: i32) -> bool => v > 1), eq: false)
+
+test "array slice enumerate concat and fixed array conversion":
+  let arr = array_of_3(3, 4, 5)
+  let sliced = arr.slice(1, 3)
+  assert(sliced.length(), eq: 2)
+  assert(optional_i32_or(sliced.get(0), -1), eq: 4)
+  assert(optional_i32_or(sliced.get(1), -1), eq: 5)
+
+  let entries = arr.enumerate()
+  assert(entries.length(), eq: 3)
+  match(entries.get(1))
+    Some<(i32, i32)> { value }:
+      assert(value.0, eq: 1)
+      assert(value.1, eq: 4)
+    None:
+      assert(false)
+
+  let concatenated = arr.concat(array_of_2(6, 7))
+  assert(concatenated.length(), eq: 5)
+  assert(optional_i32_or(concatenated.get(3), -1), eq: 6)
+
+  let fixed = arr.to_fixed_array()
+  assert(__array_len(fixed), eq: 3)
+  assert(__array_get(fixed, 2), eq: 5)
+
+  let raw = arr.raw_storage()
+  assert(__array_get(raw, 0), eq: 3)
+
+test "array mutating clear reserve push pop":
+  let ~arr = Array<i32>::with_capacity(1)
+  arr.reserve(4)
+  assert(arr.capacity() >= 4, eq: true)
+
+  arr.push(1)
+  arr.push(2)
+  assert(arr.length(), eq: 2)
+
+  let popped = arr.pop()
+  assert(optional_i32_or(popped, -1), eq: 2)
+  assert(arr.length(), eq: 1)
+
+  arr.clear()
+  assert(arr.length(), eq: 0)
+  assert(arr.is_empty(), eq: true)
+
+test "array mutating insert and remove":
+  let ~arr = array_of_2(10, 30)
+  arr.insert(1, 20)
+  assert(arr.length(), eq: 3)
+  assert(optional_i32_or(arr.get(1), -1), eq: 20)
+
+  let removed = arr.remove(-1)
+  assert(optional_i32_or(removed, -1), eq: 30)
+  assert(arr.length(), eq: 2)
+  assert(optional_i32_or(arr.get(1), -1), eq: 20)
+
+test "array mutating update":
+  let ~arr = array_of_3(10, 20, 30)
+  assert(arr.update(1, 99), eq: true)
+  assert(optional_i32_or(arr.get(1), -1), eq: 99)
+  assert(arr.update(9, 1), eq: false)
+  assert(arr.update(-9, 1), eq: false)
+
+test "array mutating extend and splice":
+  let ~arr = array_of_3(1, 2, 5)
+  arr.extend(array_of_2(8, 9))
+  assert(arr.length(), eq: 5)
+  assert(optional_i32_or(arr.get(4), -1), eq: 9)
+
+  let removed = arr.splice(ArraySplice<i32> {
+    start: 1,
+    delete_count: 3,
+    items: array_of_2(3, 4)
+  })
+
+  assert(removed.length(), eq: 3)
+  assert(optional_i32_or(removed.get(0), -1), eq: 2)
+  assert(optional_i32_or(removed.get(2), -1), eq: 8)
+
+  assert(arr.length(), eq: 4)
+  assert(optional_i32_or(arr.get(0), -1), eq: 1)
+  assert(optional_i32_or(arr.get(1), -1), eq: 3)
+  assert(optional_i32_or(arr.get(2), -1), eq: 4)
+  assert(optional_i32_or(arr.get(3), -1), eq: 9)
+
+test "array non-mutating mirrors":
+  let arr = array_of_3(1, 2, 3)
+
+  let cleared = arr.cleared()
+  assert(cleared.length(), eq: 0)
+  assert(arr.length(), eq: 3)
+
+  let reserved = arr.reserved(10)
+  let min_reserved = arr.length() + 10
+  assert(reserved.capacity() >= min_reserved, eq: true)
+
+  let pushed = arr.pushed(4)
+  assert(arr.length(), eq: 3)
+  assert(pushed.length(), eq: 4)
+  assert(optional_i32_or(pushed.last(), -1), eq: 4)
+
+  let popped = arr.popped()
+  assert(popped.array.length(), eq: 2)
+  assert(optional_i32_or(popped.value, -1), eq: 3)
+
+  let inserted = arr.inserted(1, 9)
+  assert(inserted.length(), eq: 4)
+  assert(optional_i32_or(inserted.get(1), -1), eq: 9)
+
+  let removed = arr.removed(0)
+  assert(removed.length(), eq: 2)
+  assert(optional_i32_or(removed.first(), -1), eq: 2)
+
+  let extended = arr.extended(array_of_2(4, 5))
+  assert(extended.length(), eq: 5)
+
+  let spliced = arr.spliced(ArraySplice<i32> {
+    start: 1,
+    delete_count: 1,
+    items: array_of_2(8, 9)
+  })
+  assert(spliced.length(), eq: 4)
+  assert(optional_i32_or(spliced.get(0), -1), eq: 1)
+  assert(optional_i32_or(spliced.get(1), -1), eq: 8)
+
+test "array copy-on-write keeps copies isolated":
+  let ~base = array_of_2(1, 2)
+  let ~copy = base.copied()
+
+  copy.push(3)
+  assert(base.length(), eq: 2)
+  assert(copy.length(), eq: 3)
+  assert(optional_i32_or(base.last(), -1), eq: 2)
+  assert(optional_i32_or(copy.last(), -1), eq: 3)
+
+  base.push(4)
+  assert(base.length(), eq: 3)
+  assert(copy.length(), eq: 3)
+  assert(optional_i32_or(base.last(), -1), eq: 4)
+  assert(optional_i32_or(copy.last(), -1), eq: 3)

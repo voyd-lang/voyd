@@ -13,32 +13,6 @@ report on it and suggest direction in your final response.
 Voyd has not yet been released. Breaking changes to public APIs are ok. Just
 note the breaking changes if made.
 
-Keep this AGENTS.md file up to date.
-
-## Intrinsic Policy
-
-- Raw `__*` intrinsics are std-only.
-- Non-std code should use std wrappers/APIs instead of calling or wrapping raw
-  intrinsics directly.
-
-## Effects Memory ABI
-
-- Effect handle tables are stored in linear memory and initialized through
-  `init_effects(handle_table_ptr)`.
-- `effects_memory` is an optional compatibility alias of `memory`.
-
-## Effects Backend Status
-
-- The effects runtime currently uses the `gc-trampoline` backend.
-- `stack-switch` is not implemented yet; requests for it must fail closed to
-  `gc-trampoline` behavior.
-
-## Tail Resumption Contract
-
-- `tail` continuations are strict: they must be resumed exactly once.
-- Returning from a tail handler clause or propagating another effect before the
-  required tail resume is a runtime trap.
-
 # Debugging
 
 A cli is available after `npm link`
@@ -47,6 +21,8 @@ Helpful commands:
 - `vt --emit-parser-ast <path-to-voyd-file>`
 - `vt --run <path-to-voyd-file>` // runs the pub fn main of the file
 - `vt --emit-wasm-text --opt <path-to-voyd-file>` // Careful, this can be large
+
+If you find additional information that can save you time later add it here.
 
 # Testing
 

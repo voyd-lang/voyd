@@ -1,0 +1,6 @@
+
+pub fn max<T>(a: T, b: T) -> T
+  if a > b then: a else: b
+
+pub fn min<T>(a: T, b: T) -> T
+  if a < b then: a else: b

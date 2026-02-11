@@ -152,9 +152,9 @@ test "msgpack encode/decode roundtrip for nested values":
   let base = memory::size() * 65536
   memory::grow(1)
 
-  var items = Array<MsgPack>::new()
-  items = items.push(pack_i32(1))
-  items = items.push(pack_string("hi"))
+  let ~items = Array<MsgPack>::new()
+  items.push(pack_i32(1))
+  items.push(pack_string("hi"))
 
   var map = Map<MsgPack>::new()
   map = map.set("items", pack_array(items))
@@ -454,19 +454,19 @@ impl Decoder
   fn decode_binary(~self, length: i32) -> Binary
     if length <= 0 then:
       return Binary { bytes: Array<i32>::with_capacity(0) }
-    var bytes = Array<i32>::with_capacity(length)
+    let ~bytes = Array<i32>::with_capacity(length)
     var index = 0
     while index < length do:
-      bytes = bytes.push(self.read_u8())
+      bytes.push(self.read_u8())
       index = index + 1
     Binary { bytes: bytes }
 
   fn decode_array(~self, length: i32) -> Array<MsgPack>
     let capacity = if length < 0 then: 0 else: length
-    var out = Array<MsgPack>::with_capacity(capacity)
+    let ~out = Array<MsgPack>::with_capacity(capacity)
     var index = 0
     while index < length do:
-      out = out.push(self.decode_any())
+      out.push(self.decode_any())
       index = index + 1
     out
 
