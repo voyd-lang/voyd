@@ -38,6 +38,13 @@ while cond do:
     CaseB: break  // exits the loop; type-checks as void
 ```
 
+The loop body can also use case form:
+
+```voyd
+while cond:
+  do_work()
+```
+
 ## Match
 
 `match` is an expression that branches on a value using a list of pattern arms.
