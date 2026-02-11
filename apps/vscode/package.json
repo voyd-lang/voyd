@@ -25,7 +25,7 @@
     "bundle": "vite build -c vite.extension.config.ts && vite build -c vite.server.config.ts",
     "bundle:std": "node ./scripts/copy-std.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo 'no tests configured'",
+    "test": "node ./scripts/test-grammar.mjs",
     "lint": "echo 'no lint configured'",
     "clean": "rm -rf dist",
     "publish:patch": "npm run compile && vsce publish patch --no-dependencies",

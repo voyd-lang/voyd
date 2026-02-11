@@ -106,10 +106,10 @@
         },
         {
           "name": "meta.function-call.operator-word.voyd",
-          "begin": "(?<!\\bfn\\s)(\\b(?!impl\\b)([A-Z][\\w]*|[a-z_][\\w]*)\\b)(?=\\s*(?:<|\\())(?=[^\\n]*\\)\\s*:)",
+          "begin": "(?<!\\bfn\\s)(\\b(?!impl\\b)([A-Z][\\w]*|[a-z_][\\w]*)\\b)(?=\\s*(?:\\(|<\\s*[A-Za-z_][\\w\\s,<>::]*>\\s*\\())(?=[^\\n]*\\)\\s*:)",
           "beginCaptures": {
             "1": {
-              "name": "keyword.operator.word.voyd"
+              "name": "entity.name.function.voyd"
             }
           },
           "end": "(?=\\s*:)",
@@ -182,7 +182,7 @@
         },
         {
           "name": "keyword.other.voyd",
-          "match": "\\b(use|pub|where|mod|impl)\\b"
+          "match": "\\b(use|pub|where|mod|impl|api|pri)\\b"
         },
         {
           "name": "storage.type.voyd",
