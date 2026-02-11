@@ -32,7 +32,7 @@ Helpful commands:
 
 You should generally add unit tests (especially e2e ones)
 
-# Style Guide
+# TS Style Guide
 
 - Keep functions small
 - Prefer early returns to else ifs
@@ -41,3 +41,12 @@ You should generally add unit tests (especially e2e ones)
 - Prefer functional control flow (`map`, `filter`, etc) to imperative loop constructs.
 - Files should be ordered by importance. The main export of a file at the top.
 - Use a single parameter object for functions containing more than three params to name the parameters on call.
+
+## Voyd Style Guide
+
+Guide for writing voyd code and APIs. Voyd APIs should share a similar
+spirit to [Swift API Design Guidelines](https://www.swift.org/documentation/api-design-guidelines/)
+
+- Snake case for functions, variables, and effect ops. UpperCamelCase for types and effects
+- Always use labeled parameters when there are more than three parameters `fn foo({ a: i32, b: i32, c: i32 })` `foo(a: 1, b: 2, c: 3)`
+- Make use of function / method overloading when it makes semantic sense.
