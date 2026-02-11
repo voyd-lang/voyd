@@ -19,6 +19,7 @@ import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import { effectsFacade } from "./effects/facade.js";
 import { emitPureSurfaceWrapper } from "./effects/abi-wrapper.js";
 import { formatTestExportName } from "../tests/exports.js";
+import { isGeneratedTestId } from "../tests/prefix.js";
 import { emitSerializedExportWrapper } from "./exports/serialized-abi.js";
 import {
   emitExportAbiSection,
@@ -415,7 +416,7 @@ export const emitModuleExports = (
     const isTestExport = (entry: HirExportEntry): boolean => {
       const name =
         entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
-      return name.startsWith("__test__");
+      return isGeneratedTestId(name);
     };
     const exportEntries = exportCtx.options.testMode
       ? baseEntries.filter(isTestExport)
