@@ -302,7 +302,12 @@ const collectModuleInfo = ({
           path,
           span,
         });
-        if (modulePath.namespace !== "std" && path.namespace === "std") {
+        if (
+          modulePath.namespace !== "std" &&
+          path.namespace === "std" &&
+          path.segments.length === 1 &&
+          path.segments[0] === "pkg"
+        ) {
           needsStdPkg = true;
         }
       });

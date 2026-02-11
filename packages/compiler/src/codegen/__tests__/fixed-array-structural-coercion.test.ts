@@ -3,6 +3,7 @@ import { getWasmInstance } from "@voyd/lib/wasm.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
+import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 
 describe("FixedArray structural coercions", () => {
   it("coerces FixedArray<A> into FixedArray<B> via element-by-element conversion", () => {
@@ -20,7 +21,20 @@ pub fn main() -> i32
   read_first_x(arr)
 `;
     const ast = parse(source, "fixed_array_structural_coercion.voyd");
-    const semantics = semanticsPipeline(ast);
+    const moduleNode: ModuleNode = {
+      id: "std::fixed_array_structural_coercion",
+      path: { namespace: "std", segments: ["fixed_array_structural_coercion"] },
+      origin: { kind: "file", filePath: "fixed_array_structural_coercion.voyd" },
+      ast,
+      source,
+      dependencies: [],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleNode.id,
+      modules: new Map([[moduleNode.id, moduleNode]]),
+      diagnostics: [],
+    };
+    const semantics = semanticsPipeline({ module: moduleNode, graph });
     const { module, diagnostics } = codegen(semantics);
     if (diagnostics.length > 0) {
       throw new Error(JSON.stringify(diagnostics, null, 2));
@@ -29,4 +43,3 @@ pub fn main() -> i32
     expect((instance.exports.main as () => number)()).toBe(7);
   });
 });
-

@@ -1,3 +1,5 @@
+use std::array::self as array
+
 pub use self::optional
 pub use self::string
 pub use self::box
@@ -17,7 +19,7 @@ pub use std::optional::fns::{
   or_value,
   or_else
 }
-pub use std::array::{ Array, ArrayPop, new_array }
+pub use std::array::{ Array, ArrayPop }
 pub use std::map::{ Map, MapEntry, new_map }
 pub use std::iterator::{ Iterable, Iterator, for }
 pub use std::string::types::{ String }
@@ -25,3 +27,6 @@ pub use std::string::fns::{ new_string }
 pub use std::box::{ Box }
 pub use std::test::assertions::{ Test, assert }
 pub use self::vx
+
+pub fn new_array<T>({ from source: FixedArray<T> }): () -> Array<T>
+  array::new_array_unchecked<T>({ from: source })

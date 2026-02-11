@@ -2,9 +2,29 @@ import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
+import type { ModuleGraph, ModuleNode } from "../../../modules/types.js";
 
 const getFirstCall = (hir: ReturnType<typeof semanticsPipeline>["hir"]) =>
   Array.from(hir.expressions.values()).find((expr) => expr.exprKind === "call");
+
+const loadStdFixture = (fixtureName: string): { module: ModuleNode; graph: ModuleGraph } => {
+  const ast = loadAst(fixtureName);
+  const name = fixtureName.replace(/\.voyd$/, "").replace(/[^a-zA-Z0-9_]/g, "_");
+  const module: ModuleNode = {
+    id: `std::${name}`,
+    path: { namespace: "std", segments: [name] },
+    origin: { kind: "file", filePath: fixtureName },
+    ast,
+    source: "",
+    dependencies: [],
+  };
+  const graph: ModuleGraph = {
+    entry: module.id,
+    modules: new Map([[module.id, module]]),
+    diagnostics: [],
+  };
+  return { module, graph };
+};
 
 describe("array literals", () => {
   it("infers a homogeneous primitive element type", () => {
@@ -134,7 +154,7 @@ describe("array literals", () => {
 
   it("honors explicit type arguments for empty literals", () => {
     const { typing, hir } = semanticsPipeline(
-      loadAst("array_literal_empty_with_type_arg.voyd")
+      loadStdFixture("array_literal_empty_with_type_arg.voyd")
     );
     const call = getFirstCall(hir);
     expect(call).toBeDefined();
@@ -152,7 +172,7 @@ describe("array literals", () => {
 
   it("enforces explicit type arguments for provided elements", () => {
     expect(() =>
-      semanticsPipeline(loadAst("array_literal_type_arg_mismatch.voyd"))
+      semanticsPipeline(loadStdFixture("array_literal_type_arg_mismatch.voyd"))
     ).toThrow(/TY0027: type mismatch: expected 'i32', received 'bool'/);
   });
 });

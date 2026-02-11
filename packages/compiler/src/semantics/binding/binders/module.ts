@@ -302,7 +302,7 @@ const resolveUseEntry = ({
   let dependencyPath = resolveDependencyPath({ entry, ctx });
   let blockedStdImport = false;
 
-  if (dependencyPath && isStdImportBlocked({ dependencyPath, ctx })) {
+  if (dependencyPath && isStdImportBlocked({ dependencyPath, entry, ctx })) {
     recordImportDiagnostic({
       params: {
         kind: "module-unavailable",
@@ -359,9 +359,11 @@ const resolveUseEntry = ({
 
 const isStdImportBlocked = ({
   dependencyPath,
+  entry,
   ctx,
 }: {
   dependencyPath: ModulePath;
+  entry: ParsedUseEntry;
   ctx: BindingContext;
 }): boolean => {
   if (dependencyPath.namespace !== "std") {
@@ -374,6 +376,11 @@ const isStdImportBlocked = ({
     dependencyPath.segments.length === 1 &&
     dependencyPath.segments[0] === "pkg"
   ) {
+    return false;
+  }
+  const explicitlyTargetsSubmodule =
+    entry.moduleSegments[0] === "std" && entry.moduleSegments.length > 1;
+  if (explicitlyTargetsSubmodule) {
     return false;
   }
   const moduleId = modulePathToString(dependencyPath);
@@ -440,14 +447,16 @@ const bindImportsFromModule = ({
   visibility: HirVisibility;
 }): BoundImport[] => {
   let exports = ctx.moduleExports.get(moduleId);
+  const explicitlyTargetsStdSubmodule =
+    entry.moduleSegments[0] === "std" && entry.moduleSegments.length > 1;
   const isStdImport =
     moduleId.startsWith("std::") &&
     moduleId !== "std::pkg" &&
     ctx.module.path.namespace !== "std";
-  const stdPkgExports = isStdImport
+  const stdPkgExports = isStdImport && !explicitlyTargetsStdSubmodule
     ? stdPkgExportsFor({ moduleId, ctx })
     : undefined;
-  if (isStdImport && !stdPkgExports) {
+  if (isStdImport && !explicitlyTargetsStdSubmodule && !stdPkgExports) {
     exports = undefined;
   }
   if (!exports) {
@@ -489,7 +498,12 @@ const bindImportsFromModule = ({
 
   if (entry.selectionKind === "all") {
     const allowed = Array.from(exports.values()).filter((item) => {
-      const accessible = canAccessExport({ exported: item, moduleId, ctx });
+      const accessible = canAccessExport({
+        exported: item,
+        moduleId,
+        ctx,
+        allowStdSubmodulePackageExports: explicitlyTargetsStdSubmodule,
+      });
       if (!accessible) {
         return false;
       }
@@ -557,7 +571,14 @@ const bindImportsFromModule = ({
     return [];
   }
 
-  if (!canAccessExport({ exported, moduleId, ctx })) {
+  if (
+    !canAccessExport({
+      exported,
+      moduleId,
+      ctx,
+      allowStdSubmodulePackageExports: explicitlyTargetsStdSubmodule,
+    })
+  ) {
     recordImportDiagnostic({
       params: {
         kind: "out-of-scope-export",
@@ -723,10 +744,12 @@ const canAccessExport = ({
   exported,
   moduleId,
   ctx,
+  allowStdSubmodulePackageExports = false,
 }: {
   exported: ModuleExportEntry;
   moduleId: string;
   ctx: BindingContext;
+  allowStdSubmodulePackageExports?: boolean;
 }): boolean => {
   if (moduleId === ctx.module.id) {
     return true;
@@ -747,6 +770,15 @@ const canAccessExport = ({
     isSamePackage(exported.modulePath, ctx.modulePath);
 
   if (samePackage) {
+    return isPackageVisible(exported.visibility);
+  }
+
+  if (
+    allowStdSubmodulePackageExports &&
+    exported.packageId === "std" &&
+    moduleId.startsWith("std::") &&
+    moduleId !== "std::pkg"
+  ) {
     return isPackageVisible(exported.visibility);
   }
 

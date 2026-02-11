@@ -15,6 +15,12 @@ note the breaking changes if made.
 
 Keep this AGENTS.md file up to date.
 
+## Intrinsic Policy
+
+- Raw `__*` intrinsics are std-only.
+- Non-std code should use std wrappers/APIs instead of calling or wrapping raw
+  intrinsics directly.
+
 # Debugging
 
 A cli is available after `npm link`

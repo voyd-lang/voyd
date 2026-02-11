@@ -1,6 +1,5 @@
 use std::msgpack::MsgPack
-use std::array::all
-use std::string::all
+use std::all
 
 pub fn echo(value: MsgPack) -> MsgPack
   value

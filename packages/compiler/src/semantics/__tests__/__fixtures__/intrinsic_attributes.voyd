@@ -1,4 +1,4 @@
-@intrinsic(name: "__renamed_intrinsic", uses_signature: true)
+@intrinsic(name: "renamed_intrinsic", uses_signature: true)
 fn renamed(value: i32) -> i32 value
 
 @intrinsic

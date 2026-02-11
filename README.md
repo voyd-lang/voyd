@@ -57,6 +57,17 @@ voyd --emit-wasm src > output.wasm
 voyd --emit-wasm --opt src > output.wasm
 ```
 
+### Memory Export ABI (Compiler API)
+
+When compiling through the compiler API (`compileProgram` / `codegenOptions`),
+memory exports are deterministic and configurable:
+
+- `linearMemoryExport`: `"always" | "auto" | "off"` (default: `"always"`)
+- `effectsMemoryExport`: `"auto" | "always" | "off"` (default: `"auto"`)
+
+By default, Voyd exports `memory` and only exports `effects_memory` when effect
+runtime paths require it.
+
 **Requirements**
 
 Currently requires node v22

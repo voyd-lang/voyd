@@ -224,13 +224,13 @@ describe("buildModuleGraph", () => {
     expect(moduleIds).not.toContain("std::msgpack");
   });
 
-  it("injects std::pkg for src modules that import std", async () => {
+  it("loads std::pkg for src modules that rely on std root re-exports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
     const host = createMemoryHost({
-      [`${srcRoot}${sep}main.voyd`]: "use std::map::Map",
-      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::msgpack",
-      [`${stdRoot}${sep}map.voyd`]: "",
+      [`${srcRoot}${sep}main.voyd`]: "use std::{ Map }",
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::map::all\npub use self::msgpack",
+      [`${stdRoot}${sep}map.voyd`]: "pub obj Map {}",
       [`${stdRoot}${sep}msgpack.voyd`]: "use std::map::Map",
     });
 
@@ -244,6 +244,29 @@ describe("buildModuleGraph", () => {
     expect(Array.from(graph.modules.keys())).toEqual(
       expect.arrayContaining(["src::main", "std::pkg", "std::msgpack", "std::map"]),
     );
+  });
+
+  it("does not load std::pkg for explicit std submodule imports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use std::memory::self as memory",
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::msgpack",
+      [`${stdRoot}${sep}memory.voyd`]: "pub fn size() -> i32\n  0",
+      [`${stdRoot}${sep}msgpack.voyd`]: "pub fn noop() -> i32\n  0",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const modules = Array.from(graph.modules.keys());
+    expect(modules).toEqual(expect.arrayContaining(["src::main", "std::memory"]));
+    expect(modules).not.toContain("std::pkg");
+    expect(modules).not.toContain("std::msgpack");
   });
 
   it("resolves self-relative imports from std pkg.voyd", async () => {
@@ -263,8 +286,9 @@ describe("buildModuleGraph", () => {
 
     expect(graph.diagnostics).toHaveLength(0);
     expect(Array.from(graph.modules.keys())).toEqual(
-      expect.arrayContaining(["src::main", "std::pkg", "std::math"]),
+      expect.arrayContaining(["src::main", "std::math"]),
     );
+    expect(Array.from(graph.modules.keys())).not.toContain("std::pkg");
   });
 
   it("treats pkg::std imports as std namespace imports", async () => {
@@ -284,8 +308,9 @@ describe("buildModuleGraph", () => {
 
     expect(graph.diagnostics).toHaveLength(0);
     expect(Array.from(graph.modules.keys())).toEqual(
-      expect.arrayContaining(["src::main", "std::pkg", "std::math"]),
+      expect.arrayContaining(["src::main", "std::math"]),
     );
+    expect(Array.from(graph.modules.keys())).not.toContain("std::pkg");
   });
 
   it("resolves installed packages from configured pkgDirs", async () => {
