@@ -5,18 +5,7 @@ pub use self::memory
 pub use self::msgpack
 pub use self::iterator
 pub use std::optional::types::{ Optional, Option, Some, None }
-pub use std::optional::fns::{
-  some,
-  none,
-  is_some,
-  is_none,
-  unwrap_or,
-  unwrap_or_else,
-  map,
-  and_then,
-  or_value,
-  or_else
-}
+pub use std::optional::fns::all
 pub use std::array::{ Array, ArrayPop, new_array_unchecked }
 pub use std::map::{ Map, MapEntry, new_map }
 pub use std::iterator::{ Iterable, Iterator, for }

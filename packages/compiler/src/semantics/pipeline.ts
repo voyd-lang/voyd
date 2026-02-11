@@ -25,7 +25,7 @@ import {
   type ModuleSymbolIndex,
 } from "./symbol-index.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
-import { assignModuleTestIds } from "../tests/ids.js";
+import { assignModuleTestIds, isGeneratedTestId } from "../tests/ids.js";
 import { formatEffectRow } from "./effects/format.js";
 
 export interface SemanticsPipelineResult {
@@ -415,6 +415,7 @@ const enforcePkgRootEffectRules = ({
     span: SourceSpan;
     displayName: string;
   }): void => {
+    if (isGeneratedTestId(displayName)) return;
     if (seen.has(symbol)) return;
     seen.add(symbol);
 

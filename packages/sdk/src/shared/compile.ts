@@ -46,9 +46,15 @@ export const compileWithLoader = async ({
   loadModuleGraph: LoadModuleGraphFn;
   testScope?: TestScope;
 }): Promise<CompileArtifacts> => {
+  const shouldIncludeTests = includeTests || testsOnly;
   let graph: Awaited<ReturnType<LoadModuleGraphFn>>;
   try {
-    graph = await loadModuleGraph({ entryPath, roots, host });
+    graph = await loadModuleGraph({
+      entryPath,
+      roots,
+      host,
+      includeTests: shouldIncludeTests,
+    });
   } catch (error) {
     return {
       success: false,
@@ -59,7 +65,6 @@ export const compileWithLoader = async ({
     };
   }
 
-  const shouldIncludeTests = includeTests || testsOnly;
   const scopedTestScope = testScope ?? "all";
   const { semantics, diagnostics: semanticDiagnostics, tests } = analyzeModules({
     graph,

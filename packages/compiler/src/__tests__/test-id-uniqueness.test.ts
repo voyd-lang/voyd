@@ -5,6 +5,7 @@ import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import { buildModuleGraph } from "../modules/graph.js";
 import { analyzeModules } from "../pipeline-shared.js";
 import { hashModulePath } from "../tests/ids.js";
+import { TEST_ID_PREFIX } from "../tests/prefix.js";
 
 describe("test ids", () => {
   it("prefixes test ids with module hashes to keep them unique", async () => {
@@ -40,7 +41,7 @@ pub use self::util::all
         throw new Error(`missing module ${test.moduleId}`);
       }
       const moduleHash = hashModulePath(moduleNode.path);
-      expect(test.id.startsWith(`__test__${moduleHash}_`)).toBe(true);
+      expect(test.id.startsWith(`${TEST_ID_PREFIX}${moduleHash}_`)).toBe(true);
     });
   });
 });

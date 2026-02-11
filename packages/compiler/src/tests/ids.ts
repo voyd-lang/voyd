@@ -8,8 +8,9 @@ import {
   isIdentifierAtom,
 } from "../parser/index.js";
 import type { TestAttribute } from "../parser/attributes.js";
+import { TEST_ID_PREFIX, isGeneratedTestId } from "./prefix.js";
 
-const TEST_PREFIX = "__test__";
+export { TEST_ID_PREFIX, isGeneratedTestId };
 
 export const hashModulePath = (path: ModulePath): string => {
   const moduleId = modulePathToString(path);
@@ -18,10 +19,10 @@ export const hashModulePath = (path: ModulePath): string => {
 };
 
 const parseTestSuffix = (id: string): string | undefined => {
-  if (!id.startsWith(TEST_PREFIX)) {
+  if (!id.startsWith(TEST_ID_PREFIX)) {
     return undefined;
   }
-  const remainder = id.slice(TEST_PREFIX.length);
+  const remainder = id.slice(TEST_ID_PREFIX.length);
   if (!remainder) {
     return undefined;
   }
@@ -90,7 +91,7 @@ export const assignModuleTestIds = ({
         typeof startIndex === "number"
           ? `${startIndex}`
           : parseTestSuffix(test.id) ?? `${counter}`;
-      const nextId = `${TEST_PREFIX}${moduleHash}_${suffix}`;
+      const nextId = `${TEST_ID_PREFIX}${moduleHash}_${suffix}`;
       if (test.id !== nextId) {
         test.id = nextId;
       }

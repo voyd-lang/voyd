@@ -65,6 +65,25 @@ const findVoydFiles = async (rootPath: string): Promise<string[]> => {
   return files;
 };
 
+const TEST_COMPANION_SUFFIX = ".test.voyd";
+const VOYD_SUFFIX = ".voyd";
+
+const isCompanionTestFile = ({
+  filePath,
+  knownFiles,
+}: {
+  filePath: string;
+  knownFiles: ReadonlySet<string>;
+}): boolean => {
+  if (!filePath.endsWith(TEST_COMPANION_SUFFIX)) {
+    return false;
+  }
+
+  const basePath =
+    filePath.slice(0, -TEST_COMPANION_SUFFIX.length) + VOYD_SUFFIX;
+  return knownFiles.has(resolve(basePath));
+};
+
 const resolveRoots = (
   rootPath: string,
   pkgDirs: readonly string[] = [],
@@ -250,9 +269,13 @@ export const runTests = async ({
   const stdRoot = roots.std ?? resolveStdRoot();
   const isTestingStd = isWithinRoot(stdRoot, scanRoot);
   const files = await findVoydFiles(scanRoot);
+  const knownFiles = new Set(files.map((filePath) => resolve(filePath)));
+  const moduleFiles = files.filter(
+    (filePath) => !isCompanionTestFile({ filePath, knownFiles }),
+  );
   const cliReporter = createCliReporter(reporter);
 
-  if (files.length === 0) {
+  if (moduleFiles.length === 0) {
     if (reporter !== "silent") {
       console.log("No tests found.");
     }
@@ -268,10 +291,10 @@ export const runTests = async ({
     };
   }
 
-  const modulePaths = files.map((filePath) =>
+  const modulePaths = moduleFiles.map((filePath) =>
     buildModulePath({ filePath, roots, pathAdapter: host.path })
   );
-  const entryPath = resolveTestEntryPath({ roots, existingFiles: files });
+  const entryPath = resolveTestEntryPath({ roots, existingFiles: moduleFiles });
   const entrySource = buildTestEntrySource({ modulePaths });
 
   const startRun = Date.now();
