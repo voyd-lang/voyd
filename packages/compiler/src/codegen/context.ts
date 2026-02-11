@@ -61,6 +61,7 @@ export interface CodegenResult {
   module: binaryen.Module;
   effectTable?: EffectTableSidecar;
   diagnostics: Diagnostic[];
+  continuationBackendKind: "gc-trampoline" | "stack-switch";
 }
 
 export interface FunctionMetadata {

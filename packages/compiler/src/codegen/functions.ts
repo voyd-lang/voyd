@@ -16,15 +16,6 @@ import {
 } from "../semantics/hir/index.js";
 import { diagnosticFromCode } from "../diagnostics/index.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
-import {
-  collectEffectOperationSignatures,
-  createEffectfulEntry,
-  createHandleOutcomeDynamic,
-  createResumeContinuation,
-  createResumeEffectful,
-  ensureEffectResultAccessors,
-  ensureEffectsMemory,
-} from "./effects/host-boundary.js";
 import { effectsFacade } from "./effects/facade.js";
 import { emitPureSurfaceWrapper } from "./effects/abi-wrapper.js";
 import { formatTestExportName } from "../tests/exports.js";
@@ -34,7 +25,7 @@ import {
   type ExportAbiEntry,
 } from "./exports/export-abi.js";
 import { resolveSerializerForTypes } from "./serializer.js";
-import { EFFECTS_HOST_BOUNDARY_STD_DEPS } from "./effects/host-boundary/constants.js";
+import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 
 const debugEffects = (): boolean =>
   typeof process !== "undefined" && process.env?.DEBUG_EFFECTS === "1";
@@ -84,13 +75,15 @@ const pushFunctionMeta = (
   }
 };
 
+const userParamOffsetFor = (meta: FunctionMetadata): number =>
+  meta.effectful ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length) : 0;
+
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
   const unknown = ctx.program.primitives.unknown;
   const exportedItems = new Set(
     ctx.module.hir.module.exports.map((entry) => entry.item),
   );
-  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
 
   for (const [itemId, item] of ctx.module.hir.items) {
     if (item.kind !== "function") continue;
@@ -183,19 +176,19 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
       const userParamTypes = descriptor.parameters.map((param) =>
         wasmTypeFor(param.type, ctx, new Set(), "signature"),
       );
-      const paramTypes = effectful
-        ? [handlerParamType, ...userParamTypes]
-        : userParamTypes;
-      const resultType = effectful
-        ? ctx.effectsRuntime.outcomeType
-        : wasmTypeFor(descriptor.returnType, ctx, new Set(), "signature");
+      const widened = ctx.effectsBackend.abi.widenSignature({
+        ctx,
+        effectful,
+        userParamTypes,
+        userResultType: wasmTypeFor(descriptor.returnType, ctx, new Set(), "signature"),
+      });
 
       const metadata: FunctionMetadata = {
         moduleId: ctx.moduleId,
         symbol: item.symbol,
         wasmName: makeFunctionName(item, ctx, typeArgs),
-        paramTypes,
-        resultType,
+        paramTypes: widened.paramTypes,
+        resultType: widened.resultType,
         paramTypeIds: descriptor.parameters.map((param) => param.type),
         parameters: descriptor.parameters.map((param, index) => ({
           typeId: param.type,
@@ -258,7 +251,6 @@ export const compileFunctions = (ctx: CodegenContext): void => {
 
 export const registerImportMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
-  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   ctx.module.meta.imports.forEach((imp) => {
     const targetId = ctx.program.imports.getTarget(ctx.moduleId, imp.local);
     if (!targetId) return;
@@ -331,23 +323,23 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
       const userParamTypes = instantiatedTypeDesc.parameters.map((param) =>
         wasmTypeFor(param.type, ctx, new Set(), "signature"),
       );
-      const paramTypes = effectful
-        ? [handlerParamType, ...userParamTypes]
-        : userParamTypes;
-      const resultType = effectful
-        ? ctx.effectsRuntime.outcomeType
-        : wasmTypeFor(
-            instantiatedTypeDesc.returnType,
-            ctx,
-            new Set(),
-            "signature",
-          );
+      const widened = ctx.effectsBackend.abi.widenSignature({
+        ctx,
+        effectful,
+        userParamTypes,
+        userResultType: wasmTypeFor(
+          instantiatedTypeDesc.returnType,
+          ctx,
+          new Set(),
+          "signature",
+        ),
+      });
       const metadata: FunctionMetadata = {
         moduleId: ctx.moduleId,
         symbol: imp.local,
         wasmName: (targetMeta ?? targetMetas[0]!).wasmName,
-        paramTypes,
-        resultType,
+        paramTypes: widened.paramTypes,
+        resultType: widened.resultType,
         paramTypeIds: instantiatedTypeDesc.parameters.map(
           (param) => param.type,
         ),
@@ -375,7 +367,7 @@ export const emitModuleExports = (
   ctx: CodegenContext,
   contexts: readonly CodegenContext[] = [ctx],
 ): void => {
-  const effectfulExports: { meta: FunctionMetadata; exportName: string }[] = [];
+  const effectfulExports: EffectfulExportTarget[] = [];
   const exportAbiEntries: ExportAbiEntry[] = [];
 
   const emitEffectfulWasmExportWrapper = ({
@@ -387,8 +379,8 @@ export const emitModuleExports = (
     meta: FunctionMetadata;
     exportName: string;
   }): void => {
-    const handlerParamType = exportCtx.effectsRuntime.handlerFrameType;
-    const userParamTypes = meta.paramTypes.slice(1) as number[];
+    const userParamOffset = userParamOffsetFor(meta);
+    const userParamTypes = meta.paramTypes.slice(userParamOffset) as number[];
     const wrapperName = `${meta.wasmName}__wasm_export_${sanitizeIdentifier(exportName)}`;
 
     emitPureSurfaceWrapper({
@@ -398,7 +390,7 @@ export const emitModuleExports = (
       wrapperResultType: wasmTypeFor(meta.resultTypeId, exportCtx),
       implName: meta.wasmName,
       buildImplCallArgs: () => [
-        exportCtx.mod.ref.null(handlerParamType),
+        exportCtx.effectsBackend.abi.hiddenHandlerValue(exportCtx),
         ...userParamTypes.map((type, index) =>
           exportCtx.mod.local.get(index, type),
         ),
@@ -466,7 +458,7 @@ export const emitModuleExports = (
       if (meta.effectful) {
         emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
 
-        if (meta.paramTypes.length > 1) {
+        if (meta.paramTypes.length > userParamOffsetFor(meta)) {
           return;
         }
         const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
@@ -553,59 +545,10 @@ export const emitModuleExports = (
   if (effectfulExports.length === 0) {
     return;
   }
-
-  const hostBoundary = ctx.options.effectsHostBoundary ?? "msgpack";
-  if (hostBoundary === "off") {
-    return;
-  }
-
-  const missingStdModules = EFFECTS_HOST_BOUNDARY_STD_DEPS.filter(
-    (moduleId) => !ctx.program.modules.has(moduleId),
-  );
-  if (missingStdModules.length > 0) {
-    ctx.diagnostics.report(
-      diagnosticFromCode({
-        code: "CG0001",
-        params: {
-          kind: "codegen-error",
-          message: `effectful exports require ${missingStdModules.join(
-            " and ",
-          )} (provide a std root or disable the host boundary via effectsHostBoundary: "off")`,
-        },
-        span: ctx.module.hir.module.span,
-      }),
-    );
-    return;
-  }
-
-  ensureEffectsMemory(ctx);
-  const signatures = collectEffectOperationSignatures(ctx, contexts);
-  const handleOutcome = createHandleOutcomeDynamic({
-    ctx,
-    runtime: ctx.effectsRuntime,
-    signatures,
-  });
-  const resumeContinuation = createResumeContinuation({
-    ctx,
-    runtime: ctx.effectsRuntime,
-    signatures,
-  });
-  createResumeEffectful({
-    ctx,
-    runtime: ctx.effectsRuntime,
-    handleOutcome,
-    resumeContinuation,
-  });
-  ensureEffectResultAccessors({ ctx, runtime: ctx.effectsRuntime });
-
-  effectfulExports.forEach(({ meta, exportName }) => {
-    createEffectfulEntry({
-      ctx,
-      runtime: ctx.effectsRuntime,
-      meta,
-      handleOutcome,
-      exportName: `${exportName}_effectful`,
-    });
+  ctx.effectsBackend.abi.emitHostBoundary({
+    entryCtx: ctx,
+    contexts,
+    effectfulExports,
   });
 };
 
@@ -663,14 +606,20 @@ const compileFunctionItem = (
   }
   const needsWrapper =
     effectInfo.abiEffectful && effectInfo.typeEffectful === false;
-  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
+  const handlerParamType = ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
   if (needsWrapper) {
+    const implSignature = ctx.effectsBackend.abi.widenSignature({
+      ctx,
+      effectful: true,
+      userParamTypes: meta.paramTypes,
+      userResultType: meta.resultType,
+    });
     const implName = `${meta.wasmName}__effectful_impl`;
     const implCtx: FunctionContext = {
       bindings: new Map(),
       tempLocals: new Map(),
       locals: [],
-      nextLocalIndex: meta.paramTypes.length + 1,
+      nextLocalIndex: implSignature.paramTypes.length,
       returnTypeId: meta.resultTypeId,
       instanceId: meta.instanceId,
       typeInstanceId: meta.instanceId,
@@ -687,7 +636,7 @@ const compileFunctionItem = (
       }
       implCtx.bindings.set(param.symbol, {
         kind: "local",
-        index: index + 1,
+        index: index + implSignature.userParamOffset,
         type,
         typeId: meta.paramTypeIds[index],
       });
@@ -708,10 +657,10 @@ const compileFunctionItem = (
       (returnValueType === ctx.rtt.baseType &&
         implExprType !== binaryen.none &&
         implExprType !== binaryen.unreachable &&
-        implExprType !== ctx.effectsRuntime.outcomeType);
+        implExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx));
     const functionBody = shouldWrapOutcome
       ? wrapValueInOutcome({
-          valueExpr: implBody.expr,
+        valueExpr: implBody.expr,
           valueType: returnValueType,
           ctx,
         })
@@ -719,8 +668,8 @@ const compileFunctionItem = (
 
     ctx.mod.addFunction(
       implName,
-      binaryen.createType([handlerParamType, ...(meta.paramTypes as number[])]),
-      ctx.effectsRuntime.outcomeType,
+      binaryen.createType(implSignature.paramTypes as number[]),
+      ctx.effectsBackend.abi.effectfulResultType(ctx),
       implCtx.locals,
       functionBody,
     );
@@ -732,7 +681,7 @@ const compileFunctionItem = (
       wrapperResultType: meta.resultType,
       implName,
       buildImplCallArgs: () => [
-        ctx.mod.ref.null(handlerParamType),
+        ctx.effectsBackend.abi.hiddenHandlerValue(ctx),
         ...fn.parameters.map((_, index) =>
           ctx.mod.local.get(index, meta.paramTypes[index] as number),
         ),
@@ -741,7 +690,7 @@ const compileFunctionItem = (
     return;
   }
 
-  const handlerOffset = meta.effectful ? 1 : 0;
+  const handlerOffset = userParamOffsetFor(meta);
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     tempLocals: new Map(),
@@ -790,7 +739,7 @@ const compileFunctionItem = (
       (returnValueType === ctx.rtt.baseType &&
         bodyExprType !== binaryen.none &&
         bodyExprType !== binaryen.unreachable &&
-        bodyExprType !== ctx.effectsRuntime.outcomeType));
+        bodyExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx)));
   const functionBody = shouldWrapOutcome
     ? wrapValueInOutcome({
         valueExpr: body.expr,

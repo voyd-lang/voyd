@@ -19,6 +19,7 @@ import {
 import { asStatement } from "./utils.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { handlerCleanupOps } from "../effects/handler-stack.js";
+import { tailResumptionExitChecks } from "../effects/tail-resumptions.js";
 
 export const compileBlockExpr = (
   expr: HirBlockExpr,
@@ -108,6 +109,7 @@ export const compileStatement = (
         if (valueExpr.usedReturnCall) {
           return valueExpr.expr;
         }
+        const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
         if (fnCtx.returnTypeId === ctx.program.primitives.void) {
           const cleanup = handlerCleanupOps({ ctx, fnCtx });
           const valueStmt = asStatement(ctx, valueExpr.expr);
@@ -119,14 +121,14 @@ export const compileStatement = (
             });
             const ops =
               cleanup.length === 0
-                ? [valueStmt, ctx.mod.return(wrapped)]
-                : [valueStmt, ...cleanup, ctx.mod.return(wrapped)];
+                ? [valueStmt, ...tailChecks, ctx.mod.return(wrapped)]
+                : [valueStmt, ...tailChecks, ...cleanup, ctx.mod.return(wrapped)];
             return ctx.mod.block(null, ops, binaryen.none);
           }
           const ops =
             cleanup.length === 0
-              ? [valueStmt, ctx.mod.return()]
-              : [valueStmt, ...cleanup, ctx.mod.return()];
+              ? [valueStmt, ...tailChecks, ctx.mod.return()]
+              : [valueStmt, ...tailChecks, ...cleanup, ctx.mod.return()];
           return ctx.mod.block(null, ops, binaryen.none);
         }
         const requiredActualType = getRequiredExprType(
@@ -149,33 +151,38 @@ export const compileStatement = (
             ctx,
           });
           if (cleanup.length === 0) {
-            return ctx.mod.return(wrapped);
+            return ctx.mod.block(null, [...tailChecks, ctx.mod.return(wrapped)], binaryen.none);
           }
           return ctx.mod.block(
             null,
-            [...cleanup, ctx.mod.return(wrapped)],
+            [...tailChecks, ...cleanup, ctx.mod.return(wrapped)],
             binaryen.none
           );
         }
         if (binaryen.getExpressionType(coerced) === binaryen.none) {
           if (cleanup.length === 0) {
-            return ctx.mod.block(null, [coerced, ctx.mod.return()], binaryen.none);
+            return ctx.mod.block(
+              null,
+              [coerced, ...tailChecks, ctx.mod.return()],
+              binaryen.none
+            );
           }
           return ctx.mod.block(
             null,
-            [...cleanup, coerced, ctx.mod.return()],
+            [...tailChecks, ...cleanup, coerced, ctx.mod.return()],
             binaryen.none
           );
         }
         if (cleanup.length === 0) {
-          return ctx.mod.return(coerced);
+          return ctx.mod.block(null, [...tailChecks, ctx.mod.return(coerced)], binaryen.none);
         }
         return ctx.mod.block(
           null,
-          [...cleanup, ctx.mod.return(coerced)],
+          [...tailChecks, ...cleanup, ctx.mod.return(coerced)],
           binaryen.none
         );
       }
+      const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
       const cleanup = handlerCleanupOps({ ctx, fnCtx });
       if (fnCtx.effectful) {
         const wrapped = wrapValueInOutcome({
@@ -184,18 +191,22 @@ export const compileStatement = (
           ctx,
         });
         if (cleanup.length === 0) {
-          return ctx.mod.return(wrapped);
+          return ctx.mod.block(null, [...tailChecks, ctx.mod.return(wrapped)], binaryen.none);
         }
         return ctx.mod.block(
           null,
-          [...cleanup, ctx.mod.return(wrapped)],
+          [...tailChecks, ...cleanup, ctx.mod.return(wrapped)],
           binaryen.none
         );
       }
       if (cleanup.length === 0) {
-        return ctx.mod.return();
+        return ctx.mod.block(null, [...tailChecks, ctx.mod.return()], binaryen.none);
       }
-      return ctx.mod.block(null, [...cleanup, ctx.mod.return()], binaryen.none);
+      return ctx.mod.block(
+        null,
+        [...tailChecks, ...cleanup, ctx.mod.return()],
+        binaryen.none
+      );
     case "let":
       return compileLetStatement(stmt, ctx, fnCtx, compileExpr);
     default:

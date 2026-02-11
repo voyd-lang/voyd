@@ -25,6 +25,7 @@ import {
   ensureContinuationFunction,
 } from "./continuations.js";
 import { initStruct, refCast, refFunc } from "@voyd/lib/binaryen-gc/index.js";
+import { tailResumptionExitChecks } from "../tail-resumptions.js";
 
 export const lowerEffectfulCallResult = ({
   callExpr,
@@ -77,12 +78,16 @@ export const lowerEffectfulCallResult = ({
   const effectReturn = fnCtx.effectful
     ? (() => {
         const cleanup = handlerCleanupOps({ ctx, fnCtx });
+        const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
         const site = !tailPosition ? ctx.effectLowering.sitesByExpr.get(callId) : undefined;
         const shouldWrap = !!site && site.kind === "call" && !tailPosition;
 
         if (!shouldWrap) {
           const ret = ctx.mod.return(loadOutcome());
-          return cleanup.length === 0 ? ret : ctx.mod.block(null, [...cleanup, ret], binaryen.none);
+          if (tailChecks.length === 0 && cleanup.length === 0) {
+            return ret;
+          }
+          return ctx.mod.block(null, [...tailChecks, ...cleanup, ret], binaryen.none);
         }
 
         const callSite = site as ContinuationCallSite;
@@ -137,6 +142,7 @@ export const lowerEffectfulCallResult = ({
         const wrappedLocal = allocateTempLocal(ctx.effectsRuntime.outcomeType, fnCtx);
         const wrappedOps = [
           ctx.mod.local.set(wrappedLocal.index, wrappedOutcome),
+          ...tailChecks,
           ...cleanup,
           ctx.mod.return(ctx.mod.local.get(wrappedLocal.index, wrappedLocal.type)),
         ];

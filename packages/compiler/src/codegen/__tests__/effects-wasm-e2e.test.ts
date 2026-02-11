@@ -40,6 +40,16 @@ const handlerHostMutationFixturePath = resolve(
   "__fixtures__",
   "effects-handler-host-mutation.voyd"
 );
+const tailPropagationFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-tail-unresolved-propagation.voyd"
+);
+const effectfulExportFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-export.voyd"
+);
 
 const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
 
@@ -143,7 +153,7 @@ describe("effects wasm e2e", () => {
     expect(await runHostEntry("host_no_resume")).toBe(2);
   });
 
-  it("rejects host end(...) for tail handlers", async () => {
+  it("traps/rejects missing tail resume from host handlers", async () => {
     const { wasm } = await compileEffectFixture({ entryPath: hostTailNoResumeFixturePath });
     const host = await createVoydHost({ wasm });
     await registerStdTestFallbackHandlers(host);
@@ -173,5 +183,43 @@ describe("effects wasm e2e", () => {
     expect(resumeTarget(1)).toBe(5);
     expect(resumeTarget(0)).toBe(15);
     expect(tailTarget()).toBe(7);
+  });
+
+  it("allows a single tail resume in wasm handler clauses", async () => {
+    const { wasm } = await compileEffectFixture({ entryPath: tailPropagationFixturePath });
+    const instance = instantiateEffectsModule(wasm);
+    const target = instance.exports.tail_single_resume as CallableFunction;
+    expect(target()).toBe(11);
+  });
+
+  it("traps when a tail clause propagates another effect before resuming", async () => {
+    const { wasm } = await compileEffectFixture({ entryPath: tailPropagationFixturePath });
+    const instance = instantiateEffectsModule(wasm);
+    const target = instance.exports.tail_unresolved_then_propagate as CallableFunction;
+    expect(() => target()).toThrow(/unreachable|runtime/i);
+  });
+
+  it("traps on double tail resume of the same host continuation", async () => {
+    const { wasm } = await compileEffectFixture({ entryPath: effectfulExportFixturePath });
+    const instance = instantiateEffectsModule(wasm);
+    const memory = instance.exports.memory as WebAssembly.Memory;
+    const mainEffectful = instance.exports.main_effectful as CallableFunction;
+    const effectStatus = instance.exports.effect_status as CallableFunction;
+    const effectCont = instance.exports.effect_cont as CallableFunction;
+    const resumeEffectful = instance.exports.resume_effectful as CallableFunction;
+
+    const bufferPtr = 64;
+    const bufferCap = 1024;
+    new Uint8Array(memory.buffer, bufferPtr, 1)[0] = 2;
+
+    const first = mainEffectful(bufferPtr, bufferCap);
+    expect(effectStatus(first)).toBe(1);
+    const continuation = effectCont(first);
+    const resumed = resumeEffectful(continuation, bufferPtr, 1, bufferCap);
+    expect(effectStatus(resumed)).toBe(1);
+
+    expect(() =>
+      resumeEffectful(continuation, bufferPtr, 1, bufferCap)
+    ).toThrow(/unreachable|runtime/i);
   });
 });
