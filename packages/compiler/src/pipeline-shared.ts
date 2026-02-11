@@ -31,6 +31,7 @@ export type LoadModulesOptions = {
   entryPath: string;
   roots: ModuleRoots;
   host?: ModuleHost;
+  includeTests?: boolean;
 };
 
 export type AnalyzeModulesOptions = {
@@ -575,6 +576,7 @@ export const compileProgramWithLoader = async (
 
   const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
     graph,
+    includeTests: options.includeTests,
   });
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
 
