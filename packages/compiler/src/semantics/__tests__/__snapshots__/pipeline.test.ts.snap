@@ -608,6 +608,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
           "file": "fib.voyd",
           "start": 8,
         },
+        "localBinding": true,
       },
       "name": "n",
       "scope": 1,

@@ -28,6 +28,7 @@ import { bindExpr } from "./expressions.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { toSourceSpan } from "../../utils.js";
 import { moduleVisibility } from "../../hir/index.js";
+import { declareValueOrParameter } from "../redefinitions.js";
 
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
@@ -134,7 +135,7 @@ const bindTraitMethod = ({
   let params: ParameterDeclInput[] = [];
   tracker.enterScope(methodScope, () => {
     typeParameters = bindTypeParameters(decl.signature.typeParameters, ctx);
-    params = bindTraitMethodParameters(decl, ctx);
+    params = bindTraitMethodParameters(decl, ctx, methodScope);
     bindExpr(decl.body, ctx, tracker);
   });
 
@@ -155,10 +156,16 @@ const bindTraitMethod = ({
 
 const bindTraitMethodParameters = (
   decl: ParsedTraitMethod,
-  ctx: BindingContext
+  ctx: BindingContext,
+  scope: ScopeId
 ): ParameterDeclInput[] =>
   decl.signature.params.map((param) => {
-    const paramSymbol = ctx.symbolTable.declare({
+    rememberSyntax(param.ast, ctx);
+    if (param.labelAst) {
+      rememberSyntax(param.labelAst, ctx);
+    }
+    rememberSyntax(param.typeExpr as Syntax, ctx);
+    const paramSymbol = declareValueOrParameter({
       name: param.name,
       kind: "parameter",
       declaredAt: param.ast.syntaxId,
@@ -166,12 +173,10 @@ const bindTraitMethodParameters = (
         bindingKind: param.bindingKind,
         declarationSpan: toSourceSpan(param.ast),
       },
+      scope,
+      syntax: param.ast,
+      ctx,
     });
-    rememberSyntax(param.ast, ctx);
-    if (param.labelAst) {
-      rememberSyntax(param.labelAst, ctx);
-    }
-    rememberSyntax(param.typeExpr as Syntax, ctx);
     return {
       name: param.name,
       label: param.label,
