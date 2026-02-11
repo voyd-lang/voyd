@@ -8,4 +8,5 @@
   `u32` handle table to linear memory and pass its base pointer to initialize
   runtime handle lookup.
 - Helpers in `runtime-abi.ts` construct and read these structs; pure values and multi-value returns remain boxed per existing tuple boxing helpers and flow through `$Outcome.payload` when `tag=0`.
-- Semantics reference: `docs/effects-backend.md` and `packages/reference/types/effects.md` (resume ≤1, tail =1, handler result vs continuation result).
+- Semantics reference: `docs/effects-architecture.md` and `packages/reference/types/effects.md` (resume <= 1, strict tail exactly-once before clause exit/effect propagation).
+- Backend status: only `gc-trampoline` is implemented. If stack-switch is requested, backend selection fails closed to `gc-trampoline`.

@@ -131,16 +131,17 @@ export const ensureClosureTypeInfo = ({
   const effectful =
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
-  const handlerParamType = ctx.effectsRuntime.handlerFrameType;
   const userParamTypes = desc.parameters.map((param) =>
     lowerType(param.type, ctx, seen, mode)
   );
-  const paramTypes = effectful
-    ? [handlerParamType, ...userParamTypes]
-    : userParamTypes;
-  const resultType = effectful
-    ? ctx.effectsRuntime.outcomeType
-    : lowerType(desc.returnType, ctx, seen, mode);
+  const widened = ctx.effectsBackend.abi.widenSignature({
+    ctx,
+    effectful,
+    userParamTypes,
+    userResultType: lowerType(desc.returnType, ctx, seen, mode),
+  });
+  const paramTypes = widened.paramTypes;
+  const resultType = widened.resultType;
   const interfaceType = defineStructType(ctx.mod, {
     name: closureStructName({ moduleLabel: ctx.moduleLabel, key }),
     fields: [{ name: "__fn", type: binaryen.funcref, mutable: false }],
@@ -162,4 +163,3 @@ export const ensureClosureTypeInfo = ({
   ctx.closureTypes.set(key, info);
   return info;
 };
-

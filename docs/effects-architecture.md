@@ -2,6 +2,11 @@
 
 This document explains how to implement the effects runtime semantics from `packages/reference/types/effects.md` using a small, isolated translation layer that sits **between semantics and codegen**. The goal is to keep core codegen changes minimal while enabling a future stack-switch backend. Think of this as a CPS/delimited-continuation lowering that emits the stable Outcome/EffectRequest ABI.
 
+## Current Backend Status
+- Implemented backend: `gc-trampoline`.
+- `stack-switch` is not implemented yet.
+- Backend selection is fail-closed: if stack-switch is requested today, compilation still selects `gc-trampoline` semantics (no stack-switch-labeled artifact is emitted).
+
 ## Goals
 - Preserve pure call paths: functions with empty effect rows keep the existing Wasm signatures and exports.
 - Route only effectful code through a continuation backend that uses Wasm GC structs and closures.
@@ -134,7 +139,11 @@ This document explains how to implement the effects runtime semantics from `pack
 - Exports: only pure exports are host-callable by default. Effectful exports must surface an explicit effectful entry (see Host Boundary) or be wrapped in a pure function; otherwise emit a diagnostic.
 
 ## Tail and Resume Enforcement
-- `tail`: runtime guard via `$TailGuard` + dispatcher finalize check; trap on observed != 1.
+- `tail`: strict runtime guard via `$TailGuard`.
+  - A tail continuation must be resumed exactly once.
+  - Clause exit (`return`/fallthrough) with unresolved tail traps.
+  - Effect propagation while a tail continuation is unresolved traps.
+  - Double tail resume traps.
 - `resume`: one-shot. Every `resume` op installs a guard with `expected=1`; double resume traps.
 
 ## Testing Strategy
@@ -219,6 +228,7 @@ while (true) {
 ## Stack-Switch Compatibility
 - Keep `Outcome`/`EffectRequest`/`Continuation` shapes intact.
 - Isolate continuation construction and dispatcher in a backend module; later, swap the continuation builder to use `suspend/resume` primitives while keeping handler code and call lowering unchanged.
+- Until stack-switch lands, requests for that backend must fail closed to the implemented `gc-trampoline` backend.
 
 ## Minimal Codegen Touchpoints (vs main)
 - Function metadata: set result type to `$Outcome` for effectful functions.

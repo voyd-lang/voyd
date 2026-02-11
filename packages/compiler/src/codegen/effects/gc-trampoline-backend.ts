@@ -1,13 +1,33 @@
 import { compileEffectHandlerExpr } from "../expressions/effect-handler.js";
-import { buildEffectLowering } from "./effect-lowering.js";
+import {
+  buildEffectLoweringEir,
+  materializeGcTrampolineEffectLowering,
+} from "./effect-lowering.js";
 import type { EffectsBackend } from "./codegen-backend.js";
+import { gcTrampolineAbiStrategy } from "./gc-trampoline-abi-strategy.js";
 import { compileContinuationCall } from "./gc-trampoline/continuation-call.js";
 import { lowerEffectfulCallResult } from "./gc-trampoline/lower-effectful-call.js";
 import { compileEffectOpCall } from "./gc-trampoline/perform.js";
 
-export const createGcTrampolineBackend = (): EffectsBackend => ({
+export const createGcTrampolineBackend = ({
+  requestedKind = "gc-trampoline",
+  stackSwitchRequested = false,
+  stackSwitchUnavailableReason,
+}: {
+  requestedKind?: "gc-trampoline" | "stack-switch";
+  stackSwitchRequested?: boolean;
+  stackSwitchUnavailableReason?: string;
+} = {}): EffectsBackend => ({
   kind: "gc-trampoline",
-  buildLowering: ({ ctx, siteCounter }) => buildEffectLowering({ ctx, siteCounter }),
+  requestedKind,
+  stackSwitchRequested,
+  stackSwitchUnavailableReason,
+  abi: gcTrampolineAbiStrategy,
+  buildLowering: ({ ctx, siteCounter }) =>
+    materializeGcTrampolineEffectLowering({
+      eir: buildEffectLoweringEir({ ctx, siteCounter }),
+      ctx,
+    }),
   lowerEffectfulCallResult: (params) => lowerEffectfulCallResult(params),
   compileContinuationCall: (params) => compileContinuationCall(params),
   compileEffectOpCall: (params) => compileEffectOpCall(params),
@@ -28,4 +48,3 @@ export const createGcTrampolineBackend = (): EffectsBackend => ({
       expectedResultTypeId
     ),
 });
-
