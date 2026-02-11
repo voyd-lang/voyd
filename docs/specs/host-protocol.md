@@ -35,11 +35,10 @@ Effectful modules must export:
 
 - `__voyd_effect_table` (custom section): effect descriptors and op entries.
 - `memory` (Wasm memory): linear memory used for MsgPack buffers.
-- `effects_memory` (Wasm memory): dedicated linear memory that reserves the
-  handle table at address 0. (Effects use multi-memory; the memory is defined
-  by the module and exported for the host.)
-- `init_effects()`:
-  - compiler-emitted function that marks the handle table as ready.
+- `effects_memory` (Wasm memory): optional compatibility alias of `memory`.
+- `init_effects(handle_table_ptr: i32)`:
+  - compiler-emitted function that marks the handle table as ready and stores
+    the base pointer used for handle lookup.
 - `resume_effectful(request: anyref, buf_ptr: i32, buf_len: i32)`:
   - resumes execution after an effect is handled.
 - `effect_status(result: anyref) -> i32`:
@@ -79,22 +78,22 @@ different `signature_hash`, and therefore a unique `op_index`.
 
 ## Capability Handle Table
 
-The host builds a `u32` handle table in `op_index` order and writes it to the
-effects memory at address 0:
+The host builds a `u32` handle table in `op_index` order and writes it into
+linear memory (`memory`) at a host-chosen address:
 
 ```
-effects_memory[0..op_count] = u32 handles
+memory[handle_table_ptr .. handle_table_ptr + op_count*4] = u32 handles
 ```
 
-Hosts may grow `effects_memory` before writing if needed.
+Hosts may grow `memory` before writing if needed.
 
 The host then calls:
 
 ```
-init_effects()
+init_effects(handle_table_ptr)
 ```
 
-The module reads from `effects_memory` during `perform`.
+The module reads handles from `memory` during `perform`.
 
 ## MsgPack Buffer Memory
 
@@ -131,8 +130,8 @@ diagnostics and wasm-side resume decoding.
 3. Validate table version and ABI compatibility.
 4. Build a mapping from `(effect_id, op_id, signature_hash)` to host handlers.
 5. Allocate handles and write a `u32` handle table by `op_index` into
-   `effects_memory`.
-6. Call `init_effects`.
+   `memory`.
+6. Call `init_effects(handle_table_ptr)`.
 7. Run entry point. When effects occur, dispatch by handle and resume via
    `resume_effectful`.
 

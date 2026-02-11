@@ -57,6 +57,18 @@ voyd --emit-wasm src > output.wasm
 voyd --emit-wasm --opt src > output.wasm
 ```
 
+### Memory Export ABI (Compiler API)
+
+When compiling through the compiler API (`compileProgram` / `codegenOptions`),
+memory exports are deterministic and configurable:
+
+- `linearMemoryExport`: `"always" | "auto" | "off"` (default: `"always"`)
+- `effectsMemoryExport`: `"auto" | "always" | "off"` (default: `"auto"`)
+
+By default, Voyd exports `memory` and only exports `effects_memory` when effect
+runtime paths require it. When present, `effects_memory` is an alias of
+`memory` (same underlying linear memory).
+
 **Requirements**
 
 Currently requires node v22
@@ -84,7 +96,7 @@ false // Boolean
 1 // i32 by default
 1.0 // f64 by default
 "Hello!" // String literal, can be multiline, supports interpolation via ${} (NOTE: Interpolation not yet implemented)
-[1, 2, 3] // Array literal. (NOTE: Not yet implemented. Arrays can be initialized with new_array<T>({ from: FixedArray(val1, val2, etc) })
+[1, 2, 3] // Array literal. (NOTE: Not yet implemented. Arrays can be initialized with new_array_unchecked<T>({ from: FixedArray(val1, val2, etc) })
 (1, 2, 3) // Tuple literal  (NOTE: Not yet implemented)
 {x: 2, y: 4} // Structural object literal
 ```

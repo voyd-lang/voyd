@@ -96,7 +96,7 @@ describe("import metadata propagation", () => {
       .metadata as Record<string, unknown> | undefined;
     expect(metadata).toMatchObject({
       intrinsic: true,
-      intrinsicName: "__dep_intrinsic_impl",
+      intrinsicName: "dep_intrinsic_impl",
       intrinsicUsesSignature: true,
       entity: "function",
     });

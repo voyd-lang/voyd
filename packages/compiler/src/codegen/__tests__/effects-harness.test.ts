@@ -108,6 +108,26 @@ describe("effect table + harness", () => {
     expect(result.value).toBe(0);
   });
 
+  it("runs effectful exports when effectsMemoryExport is off", async () => {
+    const { module } = await compileEffectFixture({
+      entryPath: smokeFixturePath,
+      codegenOptions: { effectsMemoryExport: "off" },
+    });
+    const parsed = parseEffectTable(module);
+    const op = parsed.ops[0];
+    if (!op) {
+      throw new Error("missing effect op entry");
+    }
+    const { value } = await runEffectfulExport<number>({
+      wasm: module,
+      entryName: "main_effectful",
+      handlers: {
+        [`${op.opIndex}`]: () => 0,
+      },
+    });
+    expect(value).toBe(8);
+  });
+
   it("throws when a performed op has no handler", async () => {
     const { module } = await buildFixtureEffectModule();
     await expect(

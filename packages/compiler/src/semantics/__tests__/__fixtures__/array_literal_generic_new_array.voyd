@@ -2,7 +2,7 @@ obj Array<T> {
   storage: FixedArray<T>
 }
 
-pub fn new_array<T>({ from source: FixedArray<T> }) -> Array<T>
+pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
   Array<T> { storage: source }
 
 fn make() -> Array<f64>

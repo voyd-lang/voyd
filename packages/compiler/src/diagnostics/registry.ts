@@ -180,6 +180,10 @@ type DiagnosticParamsMap = {
         targetName: string;
       };
   TY0037: { kind: "missing-object-field"; field: string; receiver?: string };
+  TY0038: {
+    kind: "std-only-intrinsic-wrapper";
+    intrinsicName: string;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -652,6 +656,19 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0037"]>,
+  TY0038: {
+    code: "TY0038",
+    message: (params) =>
+      `intrinsic wrapper '${params.intrinsicName}' is reserved for std; use the std library API instead`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Import and call std wrappers (for example std::fixed_array, std::array, std::memory) instead of declaring raw __* wrappers.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0038"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

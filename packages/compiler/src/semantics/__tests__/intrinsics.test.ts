@@ -68,7 +68,7 @@ describe("intrinsic metadata", () => {
     expect(renamedMetadata).toMatchObject({
       entity: "function",
       intrinsic: true,
-      intrinsicName: "__renamed_intrinsic",
+      intrinsicName: "renamed_intrinsic",
       intrinsicUsesSignature: true,
     });
     expect(defaultMetadata).toMatchObject({
@@ -88,7 +88,7 @@ describe("intrinsic metadata", () => {
     const helperDecl = binding.functions.find((fn) => fn.symbol === helper);
 
     expect(renamedDecl?.intrinsic).toEqual({
-      name: "__renamed_intrinsic",
+      name: "renamed_intrinsic",
       usesSignature: true,
     });
     expect(defaultDecl?.intrinsic).toEqual({
@@ -111,7 +111,7 @@ describe("intrinsic metadata", () => {
     );
 
     expect(renamedHir?.intrinsic).toEqual({
-      name: "__renamed_intrinsic",
+      name: "renamed_intrinsic",
       usesSignature: true,
     });
     expect(defaultHir?.intrinsic).toEqual({

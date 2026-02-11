@@ -2,7 +2,7 @@ obj A { value: i32 }
 obj B {}
 obj C { value: i32 }
 
-pub fn new_array({ from source: FixedArray<A | B | C> }) -> FixedArray<A | B | C>
+pub fn new_array_unchecked({ from source: FixedArray<A | B | C> }) -> FixedArray<A | B | C>
   source
 
 fn make() -> FixedArray<A | B | C>

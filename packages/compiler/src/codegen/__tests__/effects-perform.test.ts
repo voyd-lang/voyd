@@ -68,6 +68,8 @@ const buildLoweringSnapshot = () => {
       continuationBackend: {},
       testMode: false,
       effectsHostBoundary: "off",
+      linearMemoryExport: "always",
+      effectsMemoryExport: "auto",
       testScope: "all",
     },
     programHelpers,

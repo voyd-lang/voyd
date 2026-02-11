@@ -267,7 +267,7 @@ describe("language server project analysis", () => {
   it(
     "renames labeled parameters, including external labels",
     async () => {
-      const source = `use std::all\n\nfn reduce<T>(ay: Array<T>, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  start\n\nfn main() -> i32\n  [1, 2, 3].reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
+      const source = `use std::all\n\nfn reduce<T>(value: T, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  cb(start, value)\n\nfn main() -> i32\n  1.reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
       const project = await createProject({
         "src/main.voyd": source,
       });
@@ -284,7 +284,7 @@ describe("language server project analysis", () => {
         const callLine = lines.findIndex((line) => line.includes("reducer:"));
         const callChar = lines[callLine]?.indexOf("reducer") ?? -1;
         const reducerDeclLine = lines.findIndex((line) => line.includes("reducer cb"));
-        const startBodyLine = lines.findIndex((line) => line.trim() === "start");
+        const startBodyLine = lines.findIndex((line) => line.includes("cb(start, value)"));
         expect(callLine).toBeGreaterThanOrEqual(0);
         expect(callChar).toBeGreaterThanOrEqual(0);
         expect(reducerDeclLine).toBeGreaterThanOrEqual(0);

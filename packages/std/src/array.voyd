@@ -13,7 +13,15 @@ pub obj ArrayPop<T> {
   value: Optional<T>
 }
 
-pub fn new_array<T>({ from source: FixedArray<T> }): () -> Array<T>
+pub fn new_array<T>({ from source: FixedArray<T> }): () -> Optional<Array<T>>
+  if has_null_entries(source) then:
+    None {}
+  else:
+    Some<Array<T>> {
+      value: Array<T> { storage: source, count: __array_len(source) }
+    }
+
+pub fn new_array_unchecked<T>({ from source: FixedArray<T> }): () -> Array<T>
   Array<T> { storage: source, count: __array_len(source) }
 
 impl<T> Array<T>
@@ -24,8 +32,8 @@ impl<T> Array<T>
     let capacity = if size > 0 then: size else: 0
     Array<T> { storage: new_fixed_array<T>(capacity), count: 0 }
 
-  api fn from(source: FixedArray<T>): () -> Array<T>
-    Array<T> { storage: source, count: __array_len(source) }
+  api fn from(source: FixedArray<T>): () -> Optional<Array<T>>
+    new_array<T>({ from: source })
 
   api fn length(self): () -> i32
     self.count
@@ -357,6 +365,19 @@ impl<T> Array<T>
 fn compute_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
 
+fn has_null_entries<T>(source: FixedArray<T>): () -> bool
+  let length = __array_len(source)
+  var index = 0
+  while index < length do:
+    if ref_is_null(__array_get(source, index)) then:
+      return true
+    index = index + 1
+  false
+
+@intrinsic(name: "__ref_is_null")
+fn ref_is_null<T>(value: T): () -> bool
+  __ref_is_null(value)
+
 fn resized_storage<T>(storage: FixedArray<T>, count: i32, required: i32) -> FixedArray<T>
   let current_capacity = __array_len(storage)
   if required <= current_capacity then:
@@ -399,22 +420,35 @@ test "array new from fixed array preserves length":
   fixed = __array_set(fixed, 1, 9)
 
   let arr = Array<i32>::from(fixed)
-  let first = arr.get(0)
-  let last = arr.get(-1)
+  match(arr)
+    Some<Array<i32>> { value }:
+      let first = value.get(0)
+      let last = value.get(-1)
 
-  match(first)
-    Some<i32> { value }:
-      assert(value, eq: 4)
+      match(first)
+        Some<i32> { value }:
+          assert(value, eq: 4)
+        None:
+          assert(false)
+
+      match(last)
+        Some<i32> { value }:
+          assert(value, eq: 9)
+        None:
+          assert(false)
+
+      assert(value.length(), eq: 2)
     None:
       assert(false)
 
-  match(last)
-    Some<i32> { value }:
-      assert(value, eq: 9)
-    None:
+test "array from null ref source returns none":
+  let fixed = new_fixed_array<FixedArray<i32>>(1)
+  let arr = Array<FixedArray<i32>>::from(fixed)
+  match(arr)
+    Some:
       assert(false)
-
-  assert(arr.length(), eq: 2)
+    None:
+      assert(true)
 
 test "array push increments length":
   var arr = Array<i32>::new()

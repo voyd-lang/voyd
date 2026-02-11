@@ -1,11 +1,13 @@
 use std::array::Array
+use std::fixed_array::fns::{ get, length }
+use std::optional::fns::{ unwrap_or }
 
 pub fn entry_tail() -> i32
   let arr = Array<i32>::with_capacity(2)
   let arr = arr.push(1)
   let arr = arr.push(2)
   let storage = arr.raw_storage()
-  __array_get(storage, 1)
+  unwrap_or<i32>(get<i32>(storage, 1), -1)
 
 pub fn fixed_roundtrip() -> i32
   let arr = Array<i32>::with_capacity(3)
@@ -13,7 +15,7 @@ pub fn fixed_roundtrip() -> i32
   let arr = arr.push(2)
   let arr = arr.push(3)
   let fixed = arr.to_fixed_array()
-  __array_len(fixed)
+  length<i32>(fixed)
 
 pub fn enumerate_length() -> i32
   let arr = Array<i32>::with_capacity(2)

@@ -226,3 +226,14 @@ changes when internal implementations start using new effects.
 - Effect/op table export (data): header entries `{effectId, nameOffset, opsOffset, opCount}`, op entries `{opId, resumeKind, nameOffset}`, and a UTF-8 name blob; ids are stable in declaration order.
 - Runtime-owned helpers (not user-defined): `handle_outcome`, `read_value`, and `resume_continuation` are emitted/linked by the compiler to implement the entry/resume protocol.
 - Buffer overflow: writing past `buf_len` traps; hosts/harness should allocate sufficient space or retry with a larger buffer.
+
+### Deterministic memory exports
+
+- Memory exports are explicit and configurable:
+  - `linearMemoryExport`: `"always" | "auto" | "off"` (default: `"always"`).
+  - `effectsMemoryExport`: `"auto" | "always" | "off"` (default: `"auto"`).
+- Default behavior:
+  - `memory` is always exported.
+  - `effects_memory` is exported only when effects runtime paths require it.
+  - `effects_memory`, when exported, aliases `memory` (same linear memory).
+- If `effects_memory` is exported, `memory` is also exported.

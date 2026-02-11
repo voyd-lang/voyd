@@ -5,6 +5,7 @@ import { findSerializerForType, resolveSerializerForTypes } from "../serializer.
 import { coerceValueToType } from "../structural.js";
 import { wasmTypeFor } from "../types.js";
 import { requireFunctionMeta } from "../function-lookup.js";
+import { ensureLinearMemoryExport } from "../memory-exports.js";
 import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
 import {
   packMsgPackValueForType,
@@ -34,6 +35,7 @@ export const emitSerializedExportWrapper = ({
       `unsupported export serializer format for ${exportName}: ${serializer.formatId}`
     );
   }
+  ensureLinearMemoryExport(ctx);
   validateExportTypes({ ctx, meta, exportName });
 
   const msgpack = ensureMsgPackFunctions(ctx);

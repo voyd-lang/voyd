@@ -18,23 +18,6 @@ pub fn unwrap_or<T>(opt: Optional<T>, default: T): () -> T
     None:
       default
 
-pub obj Array<T> {
-  storage: FixedArray<T>,
-  count: i32
-}
-
-pub fn new_array<T>({ from source: FixedArray<T> }): () -> Array<T>
-  Array<T> { storage: source, count: __array_len(source) }
-
-impl<T> Array<T>
-  api fn get(self, index: i32): () -> Optional<T>
-    if index < 0 then:
-      return None {}
-    if index >= self.count then:
-      return None {}
-    Some<T> { value: __array_get(self.storage, index) }
-
 pub fn main() -> i32
-  let a = [(1, 2)]
-  let t = a.get(0).unwrap_or((0, 0))
+  let t = Some<(i32, i32)> { value: (1, 2) }.unwrap_or((0, 0))
   t.0
