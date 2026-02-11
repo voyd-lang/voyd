@@ -32,6 +32,7 @@ import { ensureEffectArgsType } from "../args-type.js";
 import { ensureEffectsMemory } from "../host-boundary/imports.js";
 import { LINEAR_MEMORY_INTERNAL } from "../host-boundary/constants.js";
 import { ensureEffectHandleTable } from "../handle-table.js";
+import { tailResumptionExitChecks } from "../tail-resumptions.js";
 
 export const compileEffectOpCall = ({
   expr,
@@ -160,9 +161,11 @@ export const compileEffectOpCall = ({
   }
 
   const cleanup = handlerCleanupOps({ ctx, fnCtx });
+  const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
   const temp = allocateTempLocal(ctx.effectsRuntime.outcomeType, fnCtx);
   const ops: binaryen.ExpressionRef[] = [
     ctx.mod.local.set(temp.index, exprRef),
+    ...tailChecks,
     ...cleanup,
     ctx.mod.return(ctx.mod.local.get(temp.index, temp.type)),
     ctx.mod.unreachable(),
