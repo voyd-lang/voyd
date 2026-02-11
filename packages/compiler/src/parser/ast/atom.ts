@@ -37,6 +37,8 @@ export class Atom extends Syntax {
     return this.constructor as new (opts: AtomOpts) => this;
   }
 
+  protected cloneInto(_cloned: this): void {}
+
   eq(val: Atom | string): boolean {
     return val instanceof Atom ? this.value === val.value : this.value === val;
   }
@@ -47,6 +49,7 @@ export class Atom extends Syntax {
       value: this.value,
     });
     cloned.attributes = this.attributes ? { ...this.attributes } : undefined;
+    this.cloneInto(cloned);
     return cloned;
   }
 
@@ -74,6 +77,10 @@ export class IdentifierAtom extends Atom {
   setIsQuoted(v: boolean) {
     this.isQuoted = v;
     return this;
+  }
+
+  protected override cloneInto(cloned: this): void {
+    cloned.isQuoted = this.isQuoted;
   }
 }
 
@@ -106,6 +113,10 @@ export class IntAtom extends Atom {
     this.intType = t;
     return this;
   }
+
+  protected override cloneInto(cloned: this): void {
+    cloned.intType = this.intType;
+  }
 }
 
 export class FloatAtom extends Atom {
@@ -115,6 +126,10 @@ export class FloatAtom extends Atom {
   setType(t: "f32" | "f64") {
     this.floatType = t;
     return this;
+  }
+
+  protected override cloneInto(cloned: this): void {
+    cloned.floatType = this.floatType;
   }
 }
 
