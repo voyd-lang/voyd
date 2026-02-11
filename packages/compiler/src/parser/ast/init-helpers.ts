@@ -25,7 +25,7 @@ export const tuple = (...args: FormInitElements) => call("tuple", ...args);
 
 export const arrayLiteral = (...args: FormInitElements) =>
   surfaceCall(
-    "new_array",
+    "new_array_unchecked",
     label("from", surfaceCall("fixed_array_literal", ...args)),
   );
 

@@ -6,7 +6,7 @@ export const arrayLiteralMacro: ReaderMacro = {
   macro: (file, { reader }) => {
     const items = reader(file, "]");
     return surfaceCall(
-      "new_array",
+      "new_array_unchecked",
       label("from", items.splitInto("fixed_array_literal"))
     );
   },

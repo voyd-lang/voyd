@@ -98,7 +98,7 @@ describe("array literals", () => {
     }
   });
 
-  it("infers generic new_array type arguments from literal elements", () => {
+  it("infers generic new_array_unchecked type arguments from literal elements", () => {
     const semantics = semanticsPipeline(loadAst("array_literal_generic_new_array.voyd"));
     const { typing, hir } = semantics;
     const symbolTable = getSymbolTable(semantics);
@@ -107,7 +107,7 @@ describe("array literals", () => {
       if (!expr || expr.exprKind !== "call") return false;
       const callee = hir.expressions.get(expr.callee);
       if (!callee || callee.exprKind !== "identifier") return false;
-      return symbolTable.getSymbol(callee.symbol).name === "new_array";
+      return symbolTable.getSymbol(callee.symbol).name === "new_array_unchecked";
     });
     expect(callId).toBeDefined();
     if (!callId) return;

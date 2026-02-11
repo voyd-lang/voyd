@@ -1,4 +1,4 @@
-pub fn new_array({ from source: FixedArray<i32> }) -> FixedArray<i32>
+pub fn new_array_unchecked({ from source: FixedArray<i32> }) -> FixedArray<i32>
   source
 
 fn make() -> FixedArray<i32>
