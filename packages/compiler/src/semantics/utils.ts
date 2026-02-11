@@ -18,6 +18,50 @@ export const isIdentifierWithValue = (
   value: string
 ): expr is IdentifierAtom => isIdentifierAtom(expr) && expr.value === value;
 
+type ColonClause = {
+  labelExpr: Expr | undefined;
+  valueExpr: Expr | undefined;
+};
+
+const toColonClause = (expr: Expr | undefined): ColonClause | undefined => {
+  if (!isForm(expr) || !expr.calls(":")) {
+    return undefined;
+  }
+
+  return {
+    labelExpr: expr.at(1),
+    valueExpr: expr.at(2),
+  };
+};
+
+const expectColonClause = (
+  expr: Expr | undefined,
+  errorMessage: string
+): ColonClause => {
+  const clause = toColonClause(expr);
+  if (!clause) {
+    throw new Error(errorMessage);
+  }
+
+  return clause;
+};
+
+const expectClauseLabel = (clause: ColonClause, errorMessage: string): Expr => {
+  if (!clause.labelExpr) {
+    throw new Error(errorMessage);
+  }
+
+  return clause.labelExpr;
+};
+
+const expectClauseValue = (clause: ColonClause, errorMessage: string): Expr => {
+  if (!clause.valueExpr) {
+    throw new Error(errorMessage);
+  }
+
+  return clause.valueExpr;
+};
+
 export const expectLabeledExpr = (
   expr: Expr | undefined,
   label: string,
@@ -27,22 +71,23 @@ export const expectLabeledExpr = (
     throw new Error(`${context} missing body expression`);
   }
 
-  if (!isForm(expr) || !expr.calls(":")) {
-    throw new Error(`${context} requires '${label}:' before the body`);
-  }
-
-  const labelExpr = expr.at(1);
-  const value = expr.at(2);
+  const clause = expectColonClause(
+    expr,
+    `${context} requires '${label}:' before the body`
+  );
+  const labelExpr = expectClauseLabel(
+    clause,
+    `${context} requires '${label}:' before the body`
+  );
 
   if (!isIdentifierWithValue(labelExpr, label)) {
     throw new Error(`${context} requires '${label}:' before the body`);
   }
 
-  if (!value) {
-    throw new Error(`${context} missing body expression after '${label}:'`);
-  }
-
-  return value;
+  return expectClauseValue(
+    clause,
+    `${context} missing body expression after '${label}:'`
+  );
 };
 
 export const parseWhileConditionAndBody = (
@@ -54,23 +99,24 @@ export const parseWhileConditionAndBody = (
     throw new Error(`${context} missing condition`);
   }
 
-  const isCaseForm = isForm(conditionExpr) && conditionExpr.calls(":");
-  if (!isCaseForm) {
+  const explicitBodyExpr = form.at(2);
+  if (explicitBodyExpr) {
     return {
       condition: conditionExpr,
-      body: expectLabeledExpr(form.at(2), "do", context),
+      body: expectLabeledExpr(explicitBodyExpr, "do", context),
     };
   }
 
-  const bodyExpr = conditionExpr.at(2);
-  if (!bodyExpr) {
-    throw new Error(`${context} missing body expression`);
+  const caseClause = toColonClause(conditionExpr);
+  if (!caseClause) {
+    throw new Error(`${context} requires 'do:' before the body`);
   }
 
-  const caseCondition = conditionExpr.at(1);
-  if (!caseCondition) {
-    throw new Error(`${context} clause is missing a condition`);
-  }
+  const caseCondition = expectClauseLabel(
+    caseClause,
+    `${context} clause is missing a condition`
+  );
+  const bodyExpr = expectClauseValue(caseClause, `${context} missing body expression`);
 
   return {
     condition: caseCondition,
@@ -87,12 +133,12 @@ export const parseIfBranches = (
   form: Form,
   context = "if expression"
 ): { branches: ParsedIfBranch[]; defaultBranch?: Expr } => {
-  const clauseEntries = form
-    .rest
-    .filter((entry): entry is Form => isForm(entry) && entry.calls(":"));
+  const clauseEntries = form.rest
+    .map(toColonClause)
+    .filter((entry): entry is ColonClause => !!entry);
 
   const hasLegacyLabels = clauseEntries.some((entry) => {
-    const labelExpr = entry.at(1);
+    const labelExpr = entry.labelExpr;
     return (
       isIdentifierWithValue(labelExpr, "then") ||
       isIdentifierWithValue(labelExpr, "elif")
@@ -104,14 +150,14 @@ export const parseIfBranches = (
     let defaultBranch: Expr | undefined;
 
     clauseEntries.forEach((entry) => {
-      const conditionExpr = entry.at(1);
-      const valueExpr = entry.at(2);
-      if (!conditionExpr) {
-        throw new Error(`${context} clause is missing a condition`);
-      }
-      if (!valueExpr) {
-        throw new Error(`${context} clause is missing a value`);
-      }
+      const conditionExpr = expectClauseLabel(
+        entry,
+        `${context} clause is missing a condition`
+      );
+      const valueExpr = expectClauseValue(
+        entry,
+        `${context} clause is missing a value`
+      );
 
       if (isIdentifierWithValue(conditionExpr, "else")) {
         defaultBranch = valueExpr;
@@ -163,14 +209,18 @@ export const parseIfBranches = (
 
   for (let i = 2; i < form.length; i += 1) {
     const branch = form.at(i);
-    if (!isForm(branch) || !branch.calls(":")) continue;
-    const labelExpr = branch.at(1);
+    const clause = toColonClause(branch);
+    if (!clause) continue;
+    const labelExpr = clause.labelExpr;
 
     if (isIdentifierWithValue(labelExpr, "then")) {
       if (!pendingCondition) {
         throw new Error(`${context} has 'then:' without a condition`);
       }
-      const valueExpr = expectLabeledExpr(branch, "then", context);
+      const valueExpr = expectClauseValue(
+        clause,
+        `${context} missing body expression after 'then:'`
+      );
       branches.push({ condition: pendingCondition, value: valueExpr });
       pendingCondition = undefined;
       continue;
@@ -182,7 +232,10 @@ export const parseIfBranches = (
           `${context} requires 'then:' after a condition before 'elif:'`
         );
       }
-      const elifCondition = expectLabeledExpr(branch, "elif", context);
+      const elifCondition = expectClauseValue(
+        clause,
+        `${context} missing body expression after 'elif:'`
+      );
       const inlineThen = extractInlineThenBranch(elifCondition);
       if (inlineThen) {
         branches.push(inlineThen);
@@ -199,7 +252,10 @@ export const parseIfBranches = (
           `${context} requires 'then:' after a condition before 'else:'`
         );
       }
-      defaultBranch = expectLabeledExpr(branch, "else", context);
+      defaultBranch = expectClauseValue(
+        clause,
+        `${context} missing body expression after 'else:'`
+      );
     }
   }
 
