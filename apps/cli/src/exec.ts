@@ -4,15 +4,12 @@ import { dirname, join, resolve } from "node:path";
 import { getConfig } from "@voyd/lib/config/index.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { testGc } from "@voyd/lib/binaryen-gc/test.js";
-import {
-  collectNodeModulesDirs,
-  createSdk,
-  type CompileResult,
-} from "@voyd/sdk";
+import { createSdk, type CompileResult } from "@voyd/sdk";
 import { analyzeModules, loadModuleGraph, parse } from "@voyd/sdk/compiler";
 import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd/sdk/compiler";
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
+import { resolvePackageDirs } from "./package-dirs.js";
 import { runTests } from "./test-runner.js";
 
 export const exec = () => main().catch(errorHandler);
@@ -113,18 +110,6 @@ const getModuleRoots = ({
     std: resolveStdRoot(),
     pkgDirs: resolvePackageDirs({ srcRoot, additionalPkgDirs }),
   };
-};
-
-const resolvePackageDirs = ({
-  srcRoot,
-  additionalPkgDirs,
-}: {
-  srcRoot: string;
-  additionalPkgDirs: readonly string[];
-}): string[] => {
-  const configured = additionalPkgDirs.map((dir) => resolve(dir));
-  const nodeModules = collectNodeModulesDirs(srcRoot);
-  return Array.from(new Set([...configured, ...nodeModules]));
 };
 
 const failWithDiagnostics = (diagnostics: readonly Diagnostic[]): never => {

@@ -35,10 +35,7 @@ import {
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../semantics/ids.js";
 import { DiagnosticEmitter } from "../diagnostics/index.js";
-import {
-  CODEGEN_BINARYEN_FEATURES,
-  createCodegenModule,
-} from "./wasm-module.js";
+import { createCodegenModule } from "./wasm-module.js";
 import { createProgramHelperRegistry } from "./program-helpers.js";
 import { applyConfiguredMemoryExports } from "./memory-exports.js";
 
@@ -87,7 +84,6 @@ export const codegenProgram = ({
       ...(options.continuationBackend ?? {}),
     },
   };
-  mod.setFeatures(CODEGEN_BINARYEN_FEATURES);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, Map<number, FunctionMetadata[]>>();

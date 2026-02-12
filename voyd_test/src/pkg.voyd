@@ -1,0 +1,14 @@
+use std::string::fns::new_string
+use pkg::voyd_semver::all
+
+pub fn main() -> i32
+  let parsed = parse("1.2.3")
+  match(parsed)
+    Some { value }:
+      let bumped = bump_patch(value)
+      if lt(value, bumped) and eq(bumped, new_version(1, 2, 4)) then:
+        42
+      else:
+        0
+    None:
+      0
