@@ -256,7 +256,7 @@ export const typeCallExpr = (
     if (metadata.unresolved === true) {
       return reportUnknownFunction({
         name: record.name,
-        span: calleeExpr.span,
+        span: calleeExpr.span ?? expr.span,
         ctx,
       });
     }
@@ -308,7 +308,7 @@ export const typeCallExpr = (
     if (missingFunction) {
       return reportUnknownFunction({
         name: intrinsicName,
-        span: calleeExpr.span,
+        span: calleeExpr.span ?? expr.span,
         ctx,
       });
     }
@@ -377,7 +377,9 @@ export const typeCallExpr = (
       : signature ||
           !metadata.intrinsic ||
           (intrinsicSignatures && intrinsicSignatures.length > 0)
-        ? getValueType(calleeExpr.symbol, ctx)
+        ? getValueType(calleeExpr.symbol, ctx, {
+            span: calleeExpr.span ?? expr.span,
+          })
         : expectedCalleeType(args, ctx);
     ctx.table.setExprType(calleeExpr.id, calleeType);
     ctx.resolvedExprTypes.set(
@@ -1514,7 +1516,10 @@ const reportUnknownFunction = ({
   emitDiagnostic({
     ctx,
     code: "TY0006",
-    params: { kind: "unknown-function", name },
+    params:
+      name === "new_string"
+        ? { kind: "missing-string-helper", name: "new_string" }
+        : { kind: "unknown-function", name },
     span: normalizeSpan(span),
   });
 

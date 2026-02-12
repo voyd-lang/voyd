@@ -105,7 +105,9 @@ type DiagnosticParamsMap = {
     | { kind: "immutable-object"; binding: string; reason: string }
     | { kind: "binding-declaration"; binding: string };
   TY0005: { kind: "not-callable" };
-  TY0006: { kind: "unknown-function"; name: string };
+  TY0006:
+    | { kind: "unknown-function"; name: string }
+    | { kind: "missing-string-helper"; name: "new_string" };
   TY0007: { kind: "ambiguous-overload"; name: string };
   TY0008: { kind: "no-overload"; name: string };
   TY0009: {
@@ -198,6 +200,11 @@ type DiagnosticParamsMap = {
     kind: "redundant-match-arm";
     armIndex: number;
     patternLabel: string;
+  };
+  TY0041: {
+    kind: "symbol-not-a-value";
+    name: string;
+    symbolKind: string;
   };
   TY9999: { kind: "unexpected-error"; message: string };
 };
@@ -392,7 +399,10 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0005"]>,
   TY0006: {
     code: "TY0006",
-    message: (params) => `function '${params.name}' is not defined`,
+    message: (params) =>
+      params.kind === "unknown-function"
+        ? `function '${params.name}' is not defined`
+        : "function 'new_string' is not defined; import std::string::fns::new_string",
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0006"]>,
@@ -708,6 +718,19 @@ export const diagnosticsRegistry: {
     severity: "warning",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0039"]>,
+  TY0041: {
+    code: "TY0041",
+    message: (params) =>
+      `symbol '${params.name}' is a ${params.symbolKind}, not a value`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Type aliases cannot be constructed as values; for structural aliases use '{ ... }', and for nominal construction use an object type value.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0041"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

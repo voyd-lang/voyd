@@ -1,5 +1,29 @@
 import { ReaderMacro } from "./types.js";
+import { type Expr, isForm } from "../ast/index.js";
 import { identifier, string } from "../ast/init-helpers.js";
+import type { SourceLocation } from "../ast/syntax.js";
+
+const assignMissingGeneratedLocations = (
+  expr: Expr,
+  fallback?: SourceLocation
+): void => {
+  const location = expr.location ?? fallback;
+  if (!location) {
+    return;
+  }
+
+  if (!expr.location) {
+    expr.setLocation(location.clone());
+  }
+
+  if (!isForm(expr)) {
+    return;
+  }
+
+  expr.toArray().forEach((child) =>
+    assignMissingGeneratedLocations(child, location)
+  );
+};
 
 export const stringMacro: ReaderMacro = {
   match: (t) => t.value === '"' || t.value === "'",
@@ -29,6 +53,8 @@ export const stringMacro: ReaderMacro = {
         .setIsQuoted(true);
     }
 
-    return string(token.value).setLocation(token.location);
+    const generated = string(token.value).setLocation(token.location);
+    assignMissingGeneratedLocations(generated, generated.location);
+    return generated;
   },
 };
