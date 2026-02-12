@@ -4,14 +4,15 @@ pub obj Version {
   api patch: i32
 }
 
-pub fn new_version(major: i32, minor: i32, patch: i32): () -> Version
-  Version { major: major, minor: minor, patch: patch }
+impl Version
+  fn init(major: i32, minor: i32, patch: i32)
+    Version { major, minor, patch }
 
-pub fn bump_major(version: Version): () -> Version
-  new_version(version.major + 1, 0, 0)
+  api fn bump_major(version: Version) -> Version
+    Version(version.major + 1, 0, 0)
 
-pub fn bump_minor(version: Version): () -> Version
-  new_version(version.major, version.minor + 1, 0)
+  api fn bump_minor(version: Version) -> Version
+    Version(version.major, version.minor + 1, 0)
 
-pub fn bump_patch(version: Version): () -> Version
-  new_version(version.major, version.minor, version.patch + 1)
+  api fn bump_patch(version: Version) -> Version
+    Version(version.major, version.minor, version.patch + 1)

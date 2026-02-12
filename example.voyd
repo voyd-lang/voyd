@@ -1,17 +1,14 @@
-use std::all
 
-obj A<T> { v: T }
-obj B {}
-type C<T> = A<T> | B
+pub obj Version {
+  api major: i32,
+  api minor: i32,
+  api patch: i32
+}
 
-fn b() -> B
-  B {}
-
-fn c() -> C<i32>
-  b()
+impl Version
+  fn init({ major: i32, minor: i32, patch: i32 })
+    Version { major, minor, patch }
 
 pub fn main()
-  c().match
-    A: 1
-    B: 2
-    C: 3
+  let v = Version(1, 2, 3)
+  v.major

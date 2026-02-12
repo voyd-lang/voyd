@@ -2,4 +2,4 @@ pub self::compare
 pub self::version
 pub self::compare::all
 pub self::parse::{ parse }
-pub self::version::{ Version, new_version, bump_major, bump_minor, bump_patch }
+pub self::version::{ Version }

@@ -1,6 +1,6 @@
 use super::version::Version
 
-pub fn compare(left: Version, right: Version): () -> i32
+pub fn compare(left: Version, right: Version) -> i32
   if left.major < right.major then:
     return -1
   if left.major > right.major then:
@@ -18,17 +18,17 @@ pub fn compare(left: Version, right: Version): () -> i32
 
   0
 
-pub fn eq(left: Version, right: Version): () -> bool
+pub fn eq(left: Version, right: Version) -> bool
   compare(left, right) == 0
 
-pub fn lt(left: Version, right: Version): () -> bool
+pub fn lt(left: Version, right: Version) -> bool
   compare(left, right) < 0
 
-pub fn lte(left: Version, right: Version): () -> bool
+pub fn lte(left: Version, right: Version) -> bool
   compare(left, right) <= 0
 
-pub fn gt(left: Version, right: Version): () -> bool
+pub fn gt(left: Version, right: Version) -> bool
   compare(left, right) > 0
 
-pub fn gte(left: Version, right: Version): () -> bool
+pub fn gte(left: Version, right: Version) -> bool
   compare(left, right) >= 0

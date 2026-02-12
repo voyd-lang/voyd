@@ -1,6 +1,6 @@
 use std::optional::all
 use std::string::types::String
-use super::version::{ Version, new_version }
+use super::version::{ Version }
 use self::scanner::parse_non_negative_segment
 
 pub fn parse(input: String): () -> Optional<Version>
@@ -38,6 +38,6 @@ fn parse_minor(major: i32, minor_text: String, patch_text: String): () -> Option
 fn parse_patch(major: i32, minor: i32, patch_text: String): () -> Optional<Version>
   match(parse_non_negative_segment(patch_text))
     Some { value: patch }:
-      some(new_version(major, minor, patch))
+      some(Version(major, minor, patch))
     None:
       none<Version>()

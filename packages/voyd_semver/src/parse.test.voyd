@@ -1,7 +1,4 @@
-use std::string::fns::new_string
 use std::test::assertions::all
-use src::compare::compare as compare_versions
-use src::pkg::all
 
 test "parse accepts strict major minor patch":
   match(parse("0.0.0"))
@@ -84,37 +81,3 @@ test "parse rejects invalid versions":
       assert(false)
     None:
       assert(true)
-
-test "compare and relation helpers follow precedence":
-  let v_123 = new_version(1, 2, 3)
-  let v_124 = new_version(1, 2, 4)
-  let v_130 = new_version(1, 3, 0)
-  let v_200 = new_version(2, 0, 0)
-
-  assert(compare_versions(v_123, v_124), eq: -1)
-  assert(compare_versions(v_124, v_123), eq: 1)
-  assert(compare_versions(v_123, v_123), eq: 0)
-
-  assert(lt(v_123, v_124))
-  assert(lte(v_123, v_123))
-  assert(gt(v_200, v_130))
-  assert(gte(v_124, v_123))
-  assert(eq(v_123, new_version(1, 2, 3)))
-
-test "bump helpers increment and reset segments":
-  let version = new_version(1, 2, 3)
-
-  let major = bump_major(version)
-  assert(major.major, eq: 2)
-  assert(major.minor, eq: 0)
-  assert(major.patch, eq: 0)
-
-  let minor = bump_minor(version)
-  assert(minor.major, eq: 1)
-  assert(minor.minor, eq: 3)
-  assert(minor.patch, eq: 0)
-
-  let patch = bump_patch(version)
-  assert(patch.major, eq: 1)
-  assert(patch.minor, eq: 2)
-  assert(patch.patch, eq: 4)

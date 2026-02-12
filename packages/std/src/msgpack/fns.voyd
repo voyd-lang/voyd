@@ -374,8 +374,6 @@ impl Encoder
         self.encode_array(decoded)
       Map<MsgPack>:
         self.encode_map(decoded)
-      else:
-        self.ok = false
 
 impl Decoder
   pub fn init(ptr: i32, len: i32)

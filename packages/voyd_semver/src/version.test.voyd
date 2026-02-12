@@ -1,0 +1,19 @@
+use std::test::assertions::all
+
+test "bump helpers increment and reset segments":
+  let version = Version(1, 2, 3)
+
+  let major = version.bump_major()
+  assert(major.major, eq: 2)
+  assert(major.minor, eq: 0)
+  assert(major.patch, eq: 0)
+
+  let minor = version.bump_minor()
+  assert(minor.major, eq: 1)
+  assert(minor.minor, eq: 3)
+  assert(minor.patch, eq: 0)
+
+  let patch = version.bump_patch()
+  assert(patch.major, eq: 1)
+  assert(patch.minor, eq: 2)
+  assert(patch.patch, eq: 4)
