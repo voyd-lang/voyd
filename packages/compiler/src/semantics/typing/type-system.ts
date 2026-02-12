@@ -2689,10 +2689,6 @@ const bindTypeParamsFromUnion = ({
     return undefined;
   }
 
-  if (expectedMembers.length > actualDesc.members.length) {
-    return undefined;
-  }
-
   const bareTypeParamMembers = expectedMembers.filter((member) => {
     const desc = ctx.arena.get(member);
     return desc.kind === "type-param-ref";

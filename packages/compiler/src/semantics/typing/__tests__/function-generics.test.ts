@@ -459,6 +459,62 @@ pub fn main() -> i32
     expect(typeArgs).toEqual([i32]);
   });
 
+  it("infers when expected union has more members than the context union", () => {
+    const ast = parse(
+      `
+obj Some<T> {}
+obj None {}
+type Out<T> = Some<T> | Some<i32> | None
+
+fn none<T>() -> Out<T>
+  None {}
+
+fn from_return() -> Some<i32> | None
+  none()
+
+pub fn main() -> i32
+  let _ = from_return()
+  0
+`,
+      "union_return_context_collapsed_member_count.voyd",
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const root = symbolTable.rootScope;
+
+    const noneSymbol = symbolTable.resolve("none", root);
+    expect(typeof noneSymbol).toBe("number");
+    if (typeof noneSymbol !== "number") {
+      return;
+    }
+
+    const noneCall = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") {
+          return false;
+        }
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          (callee as HirIdentifierExpr).symbol === noneSymbol
+        );
+      },
+    );
+    expect(noneCall).toBeDefined();
+    if (!noneCall) {
+      return;
+    }
+
+    const typeArgsByInstance = typing.callTypeArguments.get(noneCall.id);
+    const typeArgs = typeArgsByInstance
+      ? Array.from(typeArgsByInstance.values())[0]
+      : undefined;
+    const i32 = typing.arena.internPrimitive("i32");
+    expect(typeArgs).toEqual([i32]);
+  });
+
   it("does not infer union-based generics when member bindings conflict", () => {
     const ast = parse(
       `
