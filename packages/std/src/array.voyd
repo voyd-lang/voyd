@@ -2,6 +2,7 @@ use std::fixed_array::fns::{ new_fixed_array }
 use std::iterator::all
 use std::optional::all
 use std::math::all
+use std::subscript::{ SubscriptRead, SubscriptWrite }
 
 pub obj Array<T> {
   pri storage: FixedArray<T>,
@@ -12,6 +13,12 @@ pub obj Array<T> {
 pub obj ArrayPop<T> {
   array: Array<T>,
   value?: T
+}
+
+type SliceRange = {
+  start: Optional<i32>,
+  end: Optional<i32>,
+  include_end: bool
 }
 
 impl<T> Array<T>
@@ -474,6 +481,24 @@ impl<T> Iterator<T> for ArrayIterator<T>
     self.index = self.index + 1
     value
 
+impl<T> SubscriptRead<i32, Optional<T>> for Array<T>
+  api fn subscript_get(self, index: i32) -> Optional<T>
+    self.get(index)
+
+impl<T> SubscriptRead<SliceRange, Array<T>> for Array<T>
+  api fn subscript_get(self, range: SliceRange) -> Array<T>
+    let start = normalize_range_start(range, self.count)
+    let end = normalize_range_end_exclusive(range, self.count)
+    self.slice(from: start, to: end)
+
+impl<T> SubscriptWrite<i32, T> for Array<T>
+  api fn subscript_set(~self, index: i32, value: T) -> void
+    let replaced = self.replace(index, with: value)
+    if replaced then:
+      return void
+    __array_set(self.storage, self.capacity(), value)
+    void
+
 pub fn new_array<T>({ from source: FixedArray<T> }) -> Optional<Array<T>>
   if has_null_entries(source) then:
     None {}
@@ -484,3 +509,22 @@ pub fn new_array<T>({ from source: FixedArray<T> }) -> Optional<Array<T>>
 
 pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
   Array<T> { storage: source, count: __array_len(source), owners: new_array_owners() }
+
+fn normalize_range_start(range: SliceRange, length: i32) -> i32
+  match(range.start)
+    Some<i32> { value }:
+      clamp_slice_index(value, length)
+    None:
+      0
+
+fn normalize_range_end_exclusive(range: SliceRange, length: i32) -> i32
+  match(range.end)
+    Some<i32> { value }:
+      let clamped = clamp_slice_index(value, length)
+      if not range.include_end then:
+        return clamped
+      if clamped >= length then:
+        return length
+      clamped + 1
+    None:
+      length

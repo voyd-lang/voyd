@@ -1,4 +1,4 @@
-import { call, Expr, Form } from "./ast/index.js";
+import { call, Expr, Form, isForm } from "./ast/index.js";
 import { CharStream } from "./char-stream.js";
 import { Lexer } from "./lexer.js";
 import { getReaderMacroForToken } from "./reader-macros/index.js";
@@ -23,7 +23,12 @@ export const read = (file: CharStream, opts: ParseCharsOpts = {}): Form => {
     }
 
     const result = processWithReaderMacro(token, file, lexer, elements.at(-1));
-    if (result) elements.push(result);
+    if (result) {
+      if (isSubscriptForm(result) && elements.length > 0) {
+        elements.pop();
+      }
+      elements.push(result);
+    }
   }
 
   location.setEndToStartOf(file.currentSourceLocation());
@@ -43,6 +48,7 @@ const processWithReaderMacro = (
 
   return readerMacro(file, {
     token,
+    previous: last,
     reader: (file, terminator) =>
       read(file, {
         nested: true,
@@ -51,3 +57,6 @@ const processWithReaderMacro = (
       }),
   });
 };
+
+const isSubscriptForm = (expr: Expr): expr is Form =>
+  isForm(expr) && expr.callsInternal("subscript");

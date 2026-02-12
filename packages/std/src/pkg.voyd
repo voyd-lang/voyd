@@ -4,11 +4,13 @@ pub self::box
 pub self::memory
 pub self::msgpack
 pub self::iterator
+pub self::subscript
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::all
 pub std::array::{ Array, ArrayPop, new_array_unchecked }
 pub std::map::{ Map, MapEntry, new_map }
 pub std::iterator::{ Iterable, Iterator, for }
+pub std::subscript::{ Range, SubscriptRead, SubscriptWrite }
 pub std::string::types::{ String }
 pub std::string::fns::{ new_string }
 pub std::box::{ Box }

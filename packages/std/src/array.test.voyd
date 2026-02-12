@@ -79,6 +79,41 @@ test "array read-only helpers":
     None:
       assert(true)
 
+test "array subscript read and range forms":
+  let arr = [1, 2, 3, 4]
+  assert(optional_i32_or(arr[1], -1), eq: 2)
+  assert(optional_i32_or(arr[-1], -1), eq: 4)
+
+  let exclusive = arr[1..3]
+  assert(exclusive.length(), eq: 2)
+  assert(optional_i32_or(exclusive.get(0), -1), eq: 2)
+  assert(optional_i32_or(exclusive.get(1), -1), eq: 3)
+
+  let inclusive = arr[1..=2]
+  assert(inclusive.length(), eq: 2)
+  assert(optional_i32_or(inclusive.get(0), -1), eq: 2)
+  assert(optional_i32_or(inclusive.get(1), -1), eq: 3)
+
+  let left_unbounded = arr[..2]
+  assert(left_unbounded.length(), eq: 2)
+  assert(optional_i32_or(left_unbounded.get(0), -1), eq: 1)
+  assert(optional_i32_or(left_unbounded.get(1), -1), eq: 2)
+
+  let left_unbounded_inclusive = arr[..=1]
+  assert(left_unbounded_inclusive.length(), eq: 2)
+  assert(optional_i32_or(left_unbounded_inclusive.get(0), -1), eq: 1)
+  assert(optional_i32_or(left_unbounded_inclusive.get(1), -1), eq: 2)
+
+  let right_unbounded = arr[2..]
+  assert(right_unbounded.length(), eq: 2)
+  assert(optional_i32_or(right_unbounded.get(0), -1), eq: 3)
+  assert(optional_i32_or(right_unbounded.get(1), -1), eq: 4)
+
+  let full = arr[..]
+  assert(full.length(), eq: 4)
+  assert(optional_i32_or(full.get(0), -1), eq: 1)
+  assert(optional_i32_or(full.get(3), -1), eq: 4)
+
 test "array higher-order helpers":
   let arr = array_of_3(1, 2, 3)
 
@@ -163,6 +198,11 @@ test "array mutating replace":
   assert(optional_i32_or(arr.get(1), -1), eq: 99)
   assert(arr.replace(9, with: 1), eq: false)
   assert(arr.replace(-9, with: 1), eq: false)
+
+test "array subscript write":
+  let ~arr = array_of_3(10, 20, 30)
+  arr[1] = 99
+  assert(optional_i32_or(arr[1], -1), eq: 99)
 
 test "array mutating sort":
   let ~arr = array_of_3(3, 1, 2)

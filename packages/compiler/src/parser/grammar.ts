@@ -53,6 +53,9 @@ export const infixOps: OpMap = new Map([
   ["::", precedence.namespace],
   [";", precedence.pipe],
   ["??", precedence.compare],
+  ["..", precedence.compare],
+  ["..=", precedence.compare],
+  ["..<", precedence.compare],
   ["?.", precedence.access],
   ["and", precedence.assign],
   ["or", precedence.assign],
@@ -78,6 +81,9 @@ export const prefixOps: OpMap = new Map([
   ["~", precedence.prefix],
   ["not", precedence.prefix],
   ["...", precedence.arrow],
+  ["..", precedence.compare],
+  ["..=", precedence.compare],
+  ["..<", precedence.compare],
 ]);
 
 export const isPrefixOp = (op?: unknown): op is Atom =>

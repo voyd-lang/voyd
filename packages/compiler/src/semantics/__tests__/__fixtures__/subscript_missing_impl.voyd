@@ -1,0 +1,7 @@
+obj Box {
+  value: i32
+}
+
+fn main() -> i32
+  let box = Box { value: 1 }
+  box[0]

@@ -9,6 +9,7 @@ export interface ReaderMacro {
     file: CharStream,
     opts: {
       token: Token;
+      previous?: Expr;
       reader: (file: CharStream, terminator?: string) => Form;
     }
   ) => Expr | undefined;

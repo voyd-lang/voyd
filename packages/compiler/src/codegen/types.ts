@@ -1312,7 +1312,7 @@ const createMethodLookupEntries = ({
       const params = meta.effectful
         ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
         : [ctx.rtt.baseType, ...userParamTypes];
-      const wrapperName = `${typeLabel}__method_${impl.traitSymbol}_${traitMethod}`;
+      const wrapperName = `${typeLabel}__method_${impl.traitSymbol}_${traitMethod}_${implRef.symbol}`;
       const wrapper = ctx.mod.addFunction(
         wrapperName,
         binaryen.createType(params as number[]),
