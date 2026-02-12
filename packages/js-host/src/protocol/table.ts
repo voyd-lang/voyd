@@ -69,27 +69,115 @@ const toBase64 = (data: Uint8Array): string => {
 
 type BinaryenModuleLike = { emitBinary: () => Uint8Array };
 
-const toArrayBuffer = (
+const toUint8Array = (
   wasm: Uint8Array | ArrayBuffer | BinaryenModuleLike
-): ArrayBuffer => {
-  if (wasm instanceof ArrayBuffer) return wasm;
-  if (wasm instanceof Uint8Array) {
-    if (
-      wasm.buffer instanceof ArrayBuffer &&
-      wasm.byteOffset === 0 &&
-      wasm.byteLength === wasm.buffer.byteLength
-    ) {
-      return wasm.buffer;
-    }
-
-    const copy = new Uint8Array(wasm.byteLength);
-    copy.set(wasm);
-    return copy.buffer;
-  }
+): Uint8Array => {
+  if (wasm instanceof Uint8Array) return wasm;
+  if (wasm instanceof ArrayBuffer) return new Uint8Array(wasm);
   if (typeof (wasm as BinaryenModuleLike).emitBinary === "function") {
-    return toArrayBuffer((wasm as BinaryenModuleLike).emitBinary());
+    return toUint8Array((wasm as BinaryenModuleLike).emitBinary());
   }
   throw new Error("Unsupported wasm input");
+};
+
+const WASM_MAGIC = [0x00, 0x61, 0x73, 0x6d] as const;
+const WASM_VERSION_V1 = [0x01, 0x00, 0x00, 0x00] as const;
+const WASM_HEADER_SIZE = 8;
+const CUSTOM_SECTION_ID = 0;
+
+const readVarUint32 = ({
+  bytes,
+  offset,
+  context,
+}: {
+  bytes: Uint8Array;
+  offset: number;
+  context: string;
+}): { value: number; nextOffset: number } => {
+  let value = 0;
+  let shift = 0;
+  let cursor = offset;
+
+  for (let index = 0; index < 5; index += 1) {
+    if (cursor >= bytes.length) {
+      throw new Error(`Truncated varuint32 while reading ${context}`);
+    }
+
+    const byte = bytes[cursor]!;
+    cursor += 1;
+    value |= (byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) {
+      return { value, nextOffset: cursor };
+    }
+    shift += 7;
+  }
+
+  throw new Error(`Invalid varuint32 while reading ${context}`);
+};
+
+const ensureWasmHeader = (bytes: Uint8Array): void => {
+  if (bytes.length < WASM_HEADER_SIZE) {
+    throw new Error("Invalid wasm binary: missing header");
+  }
+
+  const hasMagic = WASM_MAGIC.every((byte, index) => bytes[index] === byte);
+  const hasVersion = WASM_VERSION_V1.every(
+    (byte, index) => bytes[index + WASM_MAGIC.length] === byte
+  );
+
+  if (!hasMagic || !hasVersion) {
+    throw new Error("Invalid wasm binary header");
+  }
+};
+
+const getCustomSectionPayloadFromBytes = ({
+  wasmBytes,
+  tableExport,
+}: {
+  wasmBytes: Uint8Array;
+  tableExport: string;
+}): Uint8Array | undefined => {
+  ensureWasmHeader(wasmBytes);
+  let offset = WASM_HEADER_SIZE;
+
+  while (offset < wasmBytes.length) {
+    const sectionId = wasmBytes[offset]!;
+    offset += 1;
+    const sectionSizeRead = readVarUint32({
+      bytes: wasmBytes,
+      offset,
+      context: "section size",
+    });
+    offset = sectionSizeRead.nextOffset;
+    const sectionEnd = offset + sectionSizeRead.value;
+    if (sectionEnd > wasmBytes.length) {
+      throw new Error("Wasm section is truncated");
+    }
+
+    if (sectionId === CUSTOM_SECTION_ID) {
+      const sectionNameLengthRead = readVarUint32({
+        bytes: wasmBytes,
+        offset,
+        context: "custom section name length",
+      });
+      const sectionNameStart = sectionNameLengthRead.nextOffset;
+      const sectionNameEnd = sectionNameStart + sectionNameLengthRead.value;
+      if (sectionNameEnd > sectionEnd) {
+        throw new Error("Custom section name extends beyond section bounds");
+      }
+
+      const sectionName = new TextDecoder().decode(
+        wasmBytes.subarray(sectionNameStart, sectionNameEnd)
+      );
+      if (sectionName === tableExport) {
+        return wasmBytes.slice(sectionNameEnd, sectionEnd);
+      }
+    }
+
+    offset = sectionEnd;
+  }
+
+  return undefined;
 };
 
 const parseResumeKind = (value: number): ResumeKindCode => {
@@ -162,15 +250,22 @@ export const parseEffectTable = (
   wasm: Uint8Array | ArrayBuffer | WebAssembly.Module | BinaryenModuleLike,
   tableExport = EFFECT_TABLE_EXPORT
 ): ParsedEffectTable => {
-  const module =
+  const payload =
     wasm instanceof WebAssembly.Module
-      ? wasm
-      : new WebAssembly.Module(toArrayBuffer(wasm));
-  const sections = WebAssembly.Module.customSections(module, tableExport);
-  if (sections.length === 0) {
+      ? (() => {
+          const sections = WebAssembly.Module.customSections(wasm, tableExport);
+          if (sections.length === 0) return undefined;
+          return new Uint8Array(sections[0]!);
+        })()
+      : getCustomSectionPayloadFromBytes({
+          wasmBytes: toUint8Array(wasm),
+          tableExport,
+        });
+
+  if (!payload) {
     throw new Error(`Missing effect table export ${tableExport}`);
   }
-  const payload = new Uint8Array(sections[0]!);
+
   const view = new DataView(
     payload.buffer,
     payload.byteOffset,

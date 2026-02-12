@@ -18,6 +18,15 @@ import type { CompileOptions, CompileResult, VoydSdk } from "./shared/types.js";
 
 const DEFAULT_ENTRY = "index.voyd";
 const DEFAULT_VIRTUAL_ROOT = ".voyd";
+const RUNTIME_BINARYEN_FEATURES =
+  binaryen.Features.GC |
+  binaryen.Features.ReferenceTypes |
+  binaryen.Features.TailCall |
+  binaryen.Features.Multivalue |
+  binaryen.Features.BulkMemory |
+  binaryen.Features.SignExt |
+  binaryen.Features.MutableGlobals |
+  binaryen.Features.ExtendedConst;
 
 export const createSdk = (): VoydSdk => ({
   compile: compileSdk,
@@ -235,6 +244,7 @@ const finalizeCompile = ({
   }
 
   const module = binaryen.readBinary(result.wasm);
+  module.setFeatures(RUNTIME_BINARYEN_FEATURES);
   if (options.optimize) {
     binaryen.setShrinkLevel(3);
     binaryen.setOptimizeLevel(3);
@@ -246,6 +256,7 @@ const finalizeCompile = ({
   let testsWasm = result.testsWasm;
   if (options.optimize && result.testsWasm) {
     const testsModule = binaryen.readBinary(result.testsWasm);
+    testsModule.setFeatures(RUNTIME_BINARYEN_FEATURES);
     testsModule.optimize();
     testsWasm = emitBinary(testsModule);
   }

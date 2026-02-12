@@ -17,6 +17,6 @@
     "@voyd/sdk": "*",
     "@voyd/lib": "*",
     "@voyd/std": "*",
-    "binaryen": "^123.0.0"
+    "binaryen": "^125.0.0"
   }
 }
