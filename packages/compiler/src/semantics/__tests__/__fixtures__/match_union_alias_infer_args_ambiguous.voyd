@@ -1,0 +1,19 @@
+obj A<T> { value: T }
+obj B {}
+
+type C<T> = A<T> | B
+type Many = A<i32> | A<bool> | B
+
+fn many() -> Many
+  B {}
+
+pub fn main() -> i32
+  many().match
+    C:
+      1
+    A<i32>:
+      2
+    A<bool>:
+      3
+    B:
+      4
