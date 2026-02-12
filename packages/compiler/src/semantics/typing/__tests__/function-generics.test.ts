@@ -106,4 +106,88 @@ pub fn main(): () -> i32
     const intType = typing.arena.internPrimitive("i32");
     expect(typeArgs).toEqual([intType]);
   });
+
+  it("infers zero-arg generic calls through union return context", () => {
+    const ast = parse(
+      `
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn none<T>() -> Optional<T>
+  None {}
+
+fn from_return() -> Optional<i32>
+  none()
+
+fn from_arg(value: Optional<i32>) -> i32
+  0
+
+pub fn main() -> i32
+  let _ = from_return()
+  from_arg(none())
+`,
+      "union_return_context_inference.voyd",
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const root = symbolTable.rootScope;
+
+    const noneSymbol = symbolTable.resolve("none", root);
+    expect(typeof noneSymbol).toBe("number");
+    if (typeof noneSymbol !== "number") {
+      return;
+    }
+
+    const noneCalls = Array.from(hir.expressions.values()).filter(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") {
+          return false;
+        }
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          (callee as HirIdentifierExpr).symbol === noneSymbol
+        );
+      },
+    );
+    expect(noneCalls).toHaveLength(2);
+
+    const i32 = typing.arena.internPrimitive("i32");
+    noneCalls.forEach((callExpr) => {
+      const typeArgsByInstance = typing.callTypeArguments.get(callExpr.id);
+      const typeArgs = typeArgsByInstance
+        ? Array.from(typeArgsByInstance.values())[0]
+        : undefined;
+      expect(typeArgs).toEqual([i32]);
+    });
+  });
+
+  it("does not infer union-based generics when member bindings conflict", () => {
+    const ast = parse(
+      `
+obj Left<T> {}
+obj Right<T> {}
+type Either<T> = Left<T> | Right<T>
+
+fn make<T>() -> Either<T>
+  Left<T> {}
+
+fn conflicting() -> Left<i32> | Right<i64>
+  make()
+
+pub fn main() -> i32
+  0
+`,
+      "union_return_context_conflict.voyd",
+    );
+
+    expect(() => semanticsPipeline(ast)).toThrow(/make is missing 1 type argument/);
+  });
 });

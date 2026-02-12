@@ -2396,6 +2396,23 @@ export const bindTypeParamsFromType = (
   }
 
   const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "union") {
+    const nextBindings = bindTypeParamsFromUnion({
+      expectedMembers: expectedDesc.members,
+      actual,
+      bindings,
+      ctx,
+      state,
+    });
+    if (nextBindings) {
+      bindings.clear();
+      nextBindings.forEach((value, key) => {
+        bindings.set(key, value);
+      });
+    }
+    return;
+  }
+
   if (expectedDesc.kind === "type-param-ref") {
     const existing = bindings.get(expectedDesc.param);
     if (!existing) {
@@ -2517,4 +2534,90 @@ export const bindTypeParamsFromType = (
       );
     }
   }
+};
+
+const bindTypeParamsFromUnion = ({
+  expectedMembers,
+  actual,
+  bindings,
+  ctx,
+  state,
+}: {
+  expectedMembers: readonly TypeId[];
+  actual: TypeId;
+  bindings: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): Map<TypeParamId, TypeId> | undefined => {
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind !== "union") {
+    return undefined;
+  }
+
+  if (actualDesc.members.length !== expectedMembers.length) {
+    return undefined;
+  }
+
+  const unresolvedExpected = [...expectedMembers];
+  let unresolvedActual = [...actualDesc.members];
+  let nextBindings = new Map(bindings);
+
+  while (unresolvedExpected.length > 0) {
+    const expectedMember = unresolvedExpected.shift();
+    if (typeof expectedMember !== "number") {
+      return undefined;
+    }
+
+    const matches = unresolvedActual.flatMap((actualMember, index) => {
+      const candidate = tryBindExpectedMember({
+        expectedMember,
+        actualMember,
+        bindings: nextBindings,
+        ctx,
+        state,
+      });
+      return candidate ? [{ index, bindings: candidate }] : [];
+    });
+
+    if (matches.length !== 1) {
+      return undefined;
+    }
+
+    const match = matches[0]!;
+    nextBindings = match.bindings;
+    unresolvedActual = unresolvedActual.filter((_, index) => index !== match.index);
+  }
+
+  return nextBindings;
+};
+
+const tryBindExpectedMember = ({
+  expectedMember,
+  actualMember,
+  bindings,
+  ctx,
+  state,
+}: {
+  expectedMember: TypeId;
+  actualMember: TypeId;
+  bindings: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): Map<TypeParamId, TypeId> | undefined => {
+  const candidateBindings = new Map(bindings);
+  bindTypeParamsFromType(
+    expectedMember,
+    actualMember,
+    candidateBindings,
+    ctx,
+    state,
+  );
+  const substitutedExpected = ctx.arena.substitute(expectedMember, candidateBindings);
+  if (
+    !typeSatisfies(actualMember, substitutedExpected, ctx, state) &&
+    !typeSatisfies(substitutedExpected, actualMember, ctx, state)
+  ) {
+    return undefined;
+  }
+  return candidateBindings;
 };
