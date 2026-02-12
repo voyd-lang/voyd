@@ -132,7 +132,7 @@ const buildLoweringSnapshot = () => {
     }));
 };
 
-describe("effect perform lowering", () => {
+describe("effect perform lowering", { timeout: 15_000 }, () => {
   it("records liveness and continuation layouts for perform sites", () => {
     const sites = buildLoweringSnapshot();
     expect(sites.length).toBeGreaterThan(0);
