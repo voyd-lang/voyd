@@ -1,3 +1,5 @@
+import type { Syntax } from "../../parser/index.js";
+import { diagnosticFromCode } from "../../diagnostics/index.js";
 import type { SymbolKind, SymbolRecord } from "../binder/index.js";
 import type { ScopeId, SourceSpan, SymbolId } from "../ids.js";
 import { toSourceSpan } from "../utils.js";
@@ -150,4 +152,41 @@ export const spanForDeclaredSymbol = ({
 }): SourceSpan => {
   const declaredAt = ctx.symbolTable.getSymbol(symbol).declaredAt;
   return toSourceSpan(ctx.syntaxByNode.get(declaredAt));
+};
+
+export const reportOverloadNameCollision = ({
+  name,
+  scope,
+  syntax,
+  ctx,
+}: {
+  name: string;
+  scope: ScopeId;
+  syntax: Syntax;
+  ctx: BindingContext;
+}): void => {
+  const bucket = ctx.overloadBuckets.get(`${scope}:${name}`);
+  if (
+    !bucket ||
+    bucket.functions.length === 0 ||
+    bucket.nonFunctionConflictReported
+  ) {
+    return;
+  }
+  ctx.diagnostics.push(
+    diagnosticFromCode({
+      code: "BD0003",
+      params: { kind: "overload-name-collision", name },
+      span: toSourceSpan(syntax),
+      related: [
+        diagnosticFromCode({
+          code: "BD0003",
+          params: { kind: "conflicting-declaration" },
+          severity: "note",
+          span: toSourceSpan(bucket.functions[0]!.form),
+        }),
+      ],
+    }),
+  );
+  bucket.nonFunctionConflictReported = true;
 };

@@ -1,4 +1,3 @@
-import type { Syntax } from "../../parser/index.js";
 import type { ScopeId } from "../ids.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
 import { formatTypeAnnotation, toSourceSpan } from "../utils.js";
@@ -296,36 +295,4 @@ export const finalizeEffectOperationOverloadSets = (ctx: BindingContext): void =
       ctx.importedOverloadOptions.set(id, symbols);
     });
   });
-};
-
-export const reportOverloadNameCollision = (
-  name: string,
-  scope: ScopeId,
-  syntax: Syntax,
-  ctx: BindingContext
-): void => {
-  const bucket = ctx.overloadBuckets.get(makeOverloadBucketKey(scope, name));
-  if (
-    !bucket ||
-    bucket.functions.length === 0 ||
-    bucket.nonFunctionConflictReported
-  ) {
-    return;
-  }
-  ctx.diagnostics.push(
-    diagnosticFromCode({
-      code: "BD0003",
-      params: { kind: "overload-name-collision", name },
-      span: toSourceSpan(syntax),
-      related: [
-        diagnosticFromCode({
-          code: "BD0003",
-          params: { kind: "conflicting-declaration" },
-          severity: "note",
-          span: toSourceSpan(bucket.functions[0]!.form),
-        }),
-      ],
-    })
-  );
-  bucket.nonFunctionConflictReported = true;
 };

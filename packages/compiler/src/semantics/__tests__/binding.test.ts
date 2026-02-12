@@ -445,6 +445,36 @@ describe("binding pipeline", () => {
     expect(conflict).toBeDefined();
   });
 
+  it("reports overload-name collisions for top-level non-function declarations", () => {
+    const source = [
+      "fn add(a: i32) -> i32",
+      "  a",
+      "fn add(a: i32, b: i32) -> i32",
+      "  a + b",
+      "type add = i32",
+    ].join("\n");
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+    });
+
+    expect(
+      binding.diagnostics.some(
+        (diag) =>
+          diag.code === "BD0003" &&
+          diag.message.includes("cannot declare add; overloads with this name"),
+      ),
+    ).toBe(true);
+  });
+
   it("rejects cross-package imports of package-visible exports", () => {
     const source = "use pkg::dep::Thing";
     const ast = parse(source, "main.voyd");

@@ -3,7 +3,10 @@ import { diagnosticFromCode } from "../../diagnostics/index.js";
 import type { NodeId, ScopeId, SymbolId } from "../ids.js";
 import { toSourceSpan } from "../utils.js";
 import type { BindingContext } from "./types.js";
-import { findLocalBindingNameCollision } from "./name-collisions.js";
+import {
+  findLocalBindingNameCollision,
+  reportOverloadNameCollision,
+} from "./name-collisions.js";
 
 export const declareValueOrParameter = ({
   name,
@@ -22,6 +25,15 @@ export const declareValueOrParameter = ({
   syntax?: Syntax;
   ctx: BindingContext;
 }): SymbolId => {
+  if (syntax) {
+    reportOverloadNameCollision({
+      name,
+      scope,
+      syntax,
+      ctx,
+    });
+  }
+
   const existing = findLocalBindingNameCollision({ name, scope, ctx });
   if (existing) {
     ctx.diagnostics.push(
