@@ -418,6 +418,7 @@ describe("binding pipeline", () => {
             {
               name: "compare",
               symbol: 99,
+              overloadSet: 0,
               moduleId: compareId,
               modulePath: comparePath,
               packageId: packageIdFromPath(comparePath),

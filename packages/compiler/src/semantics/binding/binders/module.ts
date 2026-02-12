@@ -707,6 +707,10 @@ const declareImportedSymbol = ({
     locals.push(bound);
   });
 
+  if (locals.length === 0) {
+    return locals;
+  }
+
   if (symbols.length > 1 && exported.overloadSet !== undefined) {
     const nextId = Math.max(-1, ...ctx.importedOverloadOptions.keys()) + 1;
     const localSymbols = locals.map((entry) => entry.local);

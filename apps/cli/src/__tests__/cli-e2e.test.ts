@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 const testDir = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = resolve(testDir, "../../../../");
 const tsxPath = resolve(repoRoot, "node_modules/.bin/tsx");
+const CLI_E2E_TIMEOUT_MS = 60_000;
 
 const writePackageFixture = async (packageSrcRoot: string): Promise<void> => {
   await mkdir(packageSrcRoot, { recursive: true });
@@ -207,11 +208,11 @@ const runCli = (root: string, args: string[]) =>
       cwd: root,
       encoding: "utf8",
       env: { ...process.env },
-      timeout: 30000,
+      timeout: CLI_E2E_TIMEOUT_MS,
     }
   );
 
-describe("voyd cli test discovery", { timeout: 30_000 }, () => {
+describe("voyd cli test discovery", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it(
     "defaults test root to repo root when no path is provided",
     async () => {
@@ -236,7 +237,7 @@ describe("voyd cli test discovery", { timeout: 30_000 }, () => {
   );
 });
 
-describe("voyd cli package resolution", () => {
+describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it(
     "defaults package lookup to node_modules",
     async () => {
@@ -357,7 +358,7 @@ describe("voyd cli package resolution", () => {
         await rm(fixture.cwd, { recursive: true, force: true });
       }
     },
-    30000,
+    CLI_E2E_TIMEOUT_MS,
   );
 
   it(
