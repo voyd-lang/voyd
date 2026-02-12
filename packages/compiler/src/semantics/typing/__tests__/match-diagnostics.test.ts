@@ -78,9 +78,11 @@ describe("match diagnostics", () => {
   it("reports redundant alias match arms as warnings", () => {
     const ast = loadAst("match_union_alias_infer_args.voyd");
     const result = semanticsPipeline(ast);
-    const diagnostic = result.diagnostics.find((entry) => entry.code === "TY0039");
+    const diagnostics = result.diagnostics.filter((entry) => entry.code === "TY0039");
+    const [diagnostic] = diagnostics;
 
     expect(diagnostic).toBeDefined();
+    expect(diagnostics).toHaveLength(1);
     expect(diagnostic?.severity).toBe("warning");
     expect(diagnostic?.phase).toBe("typing");
     expect(diagnostic?.message).toMatch(/pattern 'C'/i);

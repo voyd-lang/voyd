@@ -151,7 +151,7 @@ const createMatchCoverageTracker = ({
     patternNominalHints,
     trackArm: ({ arm, armIndex, patternSpan, discriminantSpan }) => {
       if (arm.pattern.kind === "wildcard") {
-        if (remainingMembers.size === 0) {
+        if (state.mode === "strict" && remainingMembers.size === 0) {
           reportRedundantMatchArm({
             ctx,
             armIndex,
@@ -177,7 +177,11 @@ const createMatchCoverageTracker = ({
       }
 
       const matched = matchedUnionMembers(patternType, remainingMembers, ctx, state);
-      if (patternType !== ctx.primitives.unknown && matched.length === 0) {
+      if (
+        state.mode === "strict" &&
+        patternType !== ctx.primitives.unknown &&
+        matched.length === 0
+      ) {
         reportRedundantMatchArm({
           ctx,
           armIndex,
