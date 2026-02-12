@@ -2654,6 +2654,13 @@ const bindTypeParamsFromUnion = ({
   }
 
   const remainderTarget = bareTypeParamMembers[0];
+  const remainderParam =
+    typeof remainderTarget === "number"
+      ? (() => {
+          const desc = ctx.arena.get(remainderTarget);
+          return desc.kind === "type-param-ref" ? desc.param : undefined;
+        })()
+      : undefined;
   const subsetMembers =
     typeof remainderTarget === "number"
       ? expectedMembers.filter((member) => member !== remainderTarget)
@@ -2673,25 +2680,43 @@ const bindTypeParamsFromUnion = ({
   const solutionsByKey = new Map<string, Map<TypeParamId, TypeId>>();
   candidates.forEach((candidate) => {
     const nextBindings = new Map(candidate.bindings);
-    if (typeof remainderTarget === "number") {
+    if (typeof remainderTarget === "number" && typeof remainderParam === "number") {
       const remainder = candidate.remainingActualMembers;
       if (remainder.length === 0) {
         return;
       }
-      const remainderType =
-        remainder.length === 1 ? remainder[0]! : ctx.arena.internUnion(remainder);
-      bindTypeParamsFromType(
-        remainderTarget,
-        remainderType,
-        nextBindings,
-        ctx,
-        state,
-      );
-      const substitutedTarget = ctx.arena.substitute(remainderTarget, nextBindings);
-      if (
-        !typeSatisfies(remainderType, substitutedTarget, ctx, state) &&
-        !typeSatisfies(substitutedTarget, remainderType, ctx, state)
-      ) {
+
+      const existingBinding = nextBindings.get(remainderParam);
+      if (typeof existingBinding === "number") {
+        const hasCompatibleRemainder = remainder.some(
+          (member) =>
+            typeSatisfies(member, existingBinding, ctx, state) ||
+            typeSatisfies(existingBinding, member, ctx, state),
+        );
+        if (!hasCompatibleRemainder) {
+          return;
+        }
+      } else {
+        const remainderType =
+          remainder.length === 1 ? remainder[0]! : ctx.arena.internUnion(remainder);
+        bindTypeParamsFromType(
+          remainderTarget,
+          remainderType,
+          nextBindings,
+          ctx,
+          state,
+        );
+        const substitutedTarget = ctx.arena.substitute(remainderTarget, nextBindings);
+        if (
+          !typeSatisfies(remainderType, substitutedTarget, ctx, state) &&
+          !typeSatisfies(substitutedTarget, remainderType, ctx, state)
+        ) {
+          return;
+        }
+      }
+    } else if (typeof remainderTarget === "number") {
+      // Should not happen: remainder target candidates are limited to bare type-param members.
+      if (candidate.remainingActualMembers.length === 0) {
         return;
       }
     }
