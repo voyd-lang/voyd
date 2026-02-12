@@ -169,6 +169,62 @@ pub fn main() -> i32
     });
   });
 
+  it("backtracks union member matching for generic return inference", () => {
+    const ast = parse(
+      `
+obj Box<T> {}
+
+type Out<T> = Box<T> | Box<i32>
+
+fn make<T>() -> Out<T>
+  Box<T> {}
+
+fn from_return() -> Box<i64> | Box<i32>
+  make()
+
+pub fn main() -> i32
+  let _ = from_return()
+  0
+`,
+      "union_return_context_backtracking.voyd",
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const root = symbolTable.rootScope;
+
+    const makeSymbol = symbolTable.resolve("make", root);
+    expect(typeof makeSymbol).toBe("number");
+    if (typeof makeSymbol !== "number") {
+      return;
+    }
+
+    const makeCall = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") {
+          return false;
+        }
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          (callee as HirIdentifierExpr).symbol === makeSymbol
+        );
+      },
+    );
+    expect(makeCall).toBeDefined();
+    if (!makeCall) {
+      return;
+    }
+
+    const typeArgsByInstance = typing.callTypeArguments.get(makeCall.id);
+    const typeArgs = typeArgsByInstance
+      ? Array.from(typeArgsByInstance.values())[0]
+      : undefined;
+    const i64 = typing.arena.internPrimitive("i64");
+    expect(typeArgs).toEqual([i64]);
+  });
+
   it("does not infer union-based generics when member bindings conflict", () => {
     const ast = parse(
       `

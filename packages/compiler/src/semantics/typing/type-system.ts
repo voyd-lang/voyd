@@ -2645,38 +2645,97 @@ const bindTypeParamsFromUnion = ({
     return undefined;
   }
 
-  const unresolvedExpected = [...expectedMembers];
-  let unresolvedActual = [...actualDesc.members];
-  let nextBindings = new Map(bindings);
+  const matchings = findUnionMemberMatchings({
+    expectedMembers,
+    actualMembers: actualDesc.members,
+    bindings,
+    ctx,
+    state,
+  });
+  if (matchings.length !== 1) {
+    return undefined;
+  }
 
-  while (unresolvedExpected.length > 0) {
-    const expectedMember = unresolvedExpected.shift();
-    if (typeof expectedMember !== "number") {
-      return undefined;
+  return matchings[0];
+};
+
+const findUnionMemberMatchings = ({
+  expectedMembers,
+  actualMembers,
+  bindings,
+  ctx,
+  state,
+}: {
+  expectedMembers: readonly TypeId[];
+  actualMembers: readonly TypeId[];
+  bindings: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): Map<TypeParamId, TypeId>[] => {
+  const solutionsByKey = new Map<string, Map<TypeParamId, TypeId>>();
+  const unresolvedExpected = [...expectedMembers];
+  const unresolvedActual = [...actualMembers];
+
+  const search = ({
+    expected,
+    actual,
+    currentBindings,
+  }: {
+    expected: readonly TypeId[];
+    actual: readonly TypeId[];
+    currentBindings: ReadonlyMap<TypeParamId, TypeId>;
+  }): void => {
+    if (solutionsByKey.size > 1) {
+      return;
+    }
+    if (expected.length === 0) {
+      const snapshot = new Map(currentBindings);
+      solutionsByKey.set(serializeTypeParamBindings(snapshot), snapshot);
+      return;
     }
 
-    const matches = unresolvedActual.flatMap((actualMember, index) => {
+    const expectedMember = expected[0];
+    if (typeof expectedMember !== "number") {
+      return;
+    }
+
+    actual.forEach((actualMember, index) => {
       const candidate = tryBindExpectedMember({
         expectedMember,
         actualMember,
-        bindings: nextBindings,
+        bindings: currentBindings,
         ctx,
         state,
       });
-      return candidate ? [{ index, bindings: candidate }] : [];
+      if (!candidate) {
+        return;
+      }
+      const nextExpected = expected.slice(1);
+      const nextActual = actual.filter((_, nextIndex) => nextIndex !== index);
+      search({
+        expected: nextExpected,
+        actual: nextActual,
+        currentBindings: candidate,
+      });
     });
+  };
 
-    if (matches.length !== 1) {
-      return undefined;
-    }
+  search({
+    expected: unresolvedExpected,
+    actual: unresolvedActual,
+    currentBindings: bindings,
+  });
 
-    const match = matches[0]!;
-    nextBindings = match.bindings;
-    unresolvedActual = unresolvedActual.filter((_, index) => index !== match.index);
-  }
-
-  return nextBindings;
+  return [...solutionsByKey.values()];
 };
+
+const serializeTypeParamBindings = (
+  bindings: ReadonlyMap<TypeParamId, TypeId>,
+): string =>
+  [...bindings.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([param, type]) => `${param}:${type}`)
+    .join(",");
 
 const tryBindExpectedMember = ({
   expectedMember,
