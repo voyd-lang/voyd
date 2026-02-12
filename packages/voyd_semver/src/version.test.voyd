@@ -1,4 +1,14 @@
 use std::test::assertions::all
+use std::string::fns::new_string
+
+test "string init parses strict versions":
+  match(Version("1.2.3"))
+    Some { value: version }:
+      assert(version.major, eq: 1)
+      assert(version.minor, eq: 2)
+      assert(version.patch, eq: 3)
+    None:
+      assert(false)
 
 test "bump helpers increment and reset segments":
   let version = Version(1, 2, 3)

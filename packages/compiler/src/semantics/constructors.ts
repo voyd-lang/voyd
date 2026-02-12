@@ -48,13 +48,15 @@ export const extractConstructorTargetIdentifier = (
   return undefined;
 };
 
-export const literalProvidesAllFields = (
+export const literalShouldLowerAsObjectLiteral = (
   literal: Form,
   fields: readonly { name: string }[]
 ): boolean => {
   const info = gatherLiteralFieldInfo(literal);
   if (info.hasSpread) {
-    return false;
+    // Spreads can still satisfy all required fields, but that can only be
+    // validated during typing when the spread value type is known.
+    return true;
   }
   const expected = fields.map((field) => field.name);
   return expected.every((name) => info.fields.has(name));

@@ -282,6 +282,35 @@ pub fn main()
       ),
     ).toBe(true);
   });
+
+  it("lowers nominal literals with spreads as object literals when constructors exist", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub obj Version { major: i32, minor: i32, patch: i32 }
+
+impl Version
+  pub fn init(major: i32, minor: i32, patch: i32) -> Version
+    Version { major, minor, patch }
+
+pub fn main() -> i32
+  let base = Version { major: 1, minor: 2, patch: 3 }
+  let copy = Version { ...base, patch: 4 }
+  copy.patch
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    expect(result.wasm?.length ?? 0).toBeGreaterThan(0);
+  });
   it("orders modules topologically for lowering", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");

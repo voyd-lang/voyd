@@ -15,7 +15,7 @@ impl Version
   api fn init(version_text: String): () -> Optional<Version>
     match(parse(version_text))
       Some { value: parsed }:
-        some(Version(parsed.major, parsed.minor, parsed.patch))
+        some(Version { ...parsed })
       None:
         none<Version>()
 
