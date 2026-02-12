@@ -742,8 +742,20 @@ const getExpectedCallParameters = ({
     if (matchingReturn.length !== 1) {
       return { expectedReturnCandidates };
     }
+    const selected = matchingReturn[0]!;
+    const substitution =
+      selected.signature.typeParams && selected.signature.typeParams.length > 0
+        ? applyExplicitTypeArguments({
+            signature: selected.signature,
+            typeArguments,
+            calleeSymbol: selected.symbol,
+            ctx,
+          })
+        : undefined;
     return {
-      params: matchingReturn[0]!.signature.parameters.map((param) => param.type),
+      params: selected.signature.parameters.map((param) =>
+        substitution ? ctx.arena.substitute(param.type, substitution) : param.type,
+      ),
       expectedReturnCandidates,
     };
   }

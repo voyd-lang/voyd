@@ -1,0 +1,9 @@
+fn pick<T>(mapper: fn(T) -> bool) -> bool
+  true
+
+fn pick<T>(mapper: fn(T) -> i32) -> i32
+  0
+
+pub fn main() -> bool
+  let value: bool = pick<bool>(x => not x)
+  value
