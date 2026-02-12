@@ -1,7 +1,7 @@
 import type { HirMatchExpr, HirPattern, HirTypeExpr } from "../../hir/index.js";
 import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
 import { typeExpression, type TypeExpressionOptions } from "../expressions.js";
-import { composeEffectRows, getExprEffectRow } from "../effects.js";
+import { getExprEffectRow } from "../effects.js";
 import {
   getNominalComponent,
   matchedUnionMembers,
@@ -37,17 +37,11 @@ export const typeMatchExpr = (
     discriminantExpr?.exprKind === "identifier"
       ? discriminantExpr.symbol
       : undefined;
-
-  const discriminantDesc = ctx.arena.get(discriminantType);
-  const unionMembers =
-    discriminantDesc.kind === "union"
-      ? [...discriminantDesc.members]
-      : undefined;
-  const patternNominalHints =
-    discriminantDesc.kind === "union"
-      ? collectNominalPatternHints(discriminantType, ctx)
-      : undefined;
-  const remainingMembers = unionMembers ? new Set(unionMembers) : undefined;
+  const coverage = createMatchCoverageTracker({
+    discriminantType,
+    ctx,
+    state,
+  });
 
   let branchType: TypeId | undefined;
   let effectRow = getExprEffectRow(expr.discriminant, ctx);
@@ -65,7 +59,7 @@ export const typeMatchExpr = (
         patternSpan,
         discriminantSpan,
       },
-      patternNominalHints
+      coverage.patternNominalHints
     );
 
     bindMatchPatternBindings(arm.pattern, narrowed, ctx, state, patternSpan);
@@ -107,70 +101,140 @@ export const typeMatchExpr = (
       });
     }
 
-    if (!remainingMembers) {
-      return;
-    }
+    coverage.trackArm({
+      arm,
+      armIndex: index + 1,
+      patternSpan,
+      discriminantSpan,
+    });
+  });
 
-    if (arm.pattern.kind === "wildcard") {
-      if (remainingMembers.size === 0) {
-        reportRedundantMatchArm({
-          ctx,
-          armIndex: index + 1,
-          pattern: arm.pattern,
-          span: patternSpan,
-        });
+  coverage.ensureExhaustive(expr.span);
+
+  ctx.effects.setExprEffect(expr.id, effectRow);
+  return discardValue ? ctx.primitives.void : (branchType ?? ctx.primitives.void);
+};
+
+type MatchCoverageTracker = {
+  patternNominalHints?: NominalPatternHints;
+  trackArm: (input: {
+    arm: HirMatchExpr["arms"][number];
+    armIndex: number;
+    patternSpan: SourceSpan;
+    discriminantSpan?: SourceSpan;
+  }) => void;
+  ensureExhaustive: (span: SourceSpan) => void;
+};
+
+const createMatchCoverageTracker = ({
+  discriminantType,
+  ctx,
+  state,
+}: {
+  discriminantType: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): MatchCoverageTracker => {
+  const discriminantDesc = ctx.arena.get(discriminantType);
+  if (discriminantDesc.kind !== "union") {
+    return {
+      patternNominalHints: undefined,
+      trackArm: () => undefined,
+      ensureExhaustive: () => undefined,
+    };
+  }
+
+  const remainingMembers = new Set(discriminantDesc.members);
+  const patternNominalHints = collectNominalPatternHints(discriminantType, ctx);
+
+  return {
+    patternNominalHints,
+    trackArm: ({ arm, armIndex, patternSpan, discriminantSpan }) => {
+      if (arm.pattern.kind === "wildcard") {
+        if (remainingMembers.size === 0) {
+          reportRedundantMatchArm({
+            ctx,
+            armIndex,
+            pattern: arm.pattern,
+            span: patternSpan,
+          });
+        }
+        remainingMembers.clear();
+        return;
       }
-      remainingMembers.clear();
-      return;
-    }
 
-    const patternType =
-      typeof arm.pattern.typeId === "number"
-        ? arm.pattern.typeId
-        : arm.pattern.kind === "type"
-          ? resolveMatchPatternType({
-              pattern: arm.pattern,
-              discriminantType,
-              ctx,
-              state,
-              hints: patternNominalHints,
-              discriminantSpan,
-              patternSpan,
-            })
-          : undefined;
-    if (typeof patternType === "number") {
-      const matched = matchedUnionMembers(
-        patternType,
-        remainingMembers,
+      const patternType = resolvePatternCoverageType({
+        pattern: arm.pattern,
+        discriminantType,
         ctx,
-        state
-      );
-      if (
-        patternType !== ctx.primitives.unknown &&
-        matched.length === 0
-      ) {
+        state,
+        hints: patternNominalHints,
+        discriminantSpan,
+        patternSpan,
+      });
+      if (typeof patternType !== "number") {
+        return;
+      }
+
+      const matched = matchedUnionMembers(patternType, remainingMembers, ctx, state);
+      if (patternType !== ctx.primitives.unknown && matched.length === 0) {
         reportRedundantMatchArm({
           ctx,
-          armIndex: index + 1,
+          armIndex,
           pattern: arm.pattern,
           span: patternSpan,
         });
       }
       matched.forEach((member) => remainingMembers.delete(member));
-    }
-  });
+    },
+    ensureExhaustive: (span) => {
+      if (remainingMembers.size === 0) {
+        return;
+      }
+      emitDiagnostic({
+        ctx,
+        code: "TY0003",
+        params: { kind: "non-exhaustive-match" },
+        span,
+      });
+    },
+  };
+};
 
-  if (remainingMembers && remainingMembers.size > 0) {
-    emitDiagnostic({
-      ctx,
-      code: "TY0003",
-      params: { kind: "non-exhaustive-match" },
-      span: expr.span,
-    });
+const resolvePatternCoverageType = ({
+  pattern,
+  discriminantType,
+  ctx,
+  state,
+  hints,
+  discriminantSpan,
+  patternSpan,
+}: {
+  pattern: HirPattern;
+  discriminantType: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+  hints?: NominalPatternHints;
+  discriminantSpan?: SourceSpan;
+  patternSpan: SourceSpan;
+}): TypeId | undefined => {
+  if (typeof pattern.typeId === "number") {
+    return pattern.typeId;
   }
 
-  ctx.effects.setExprEffect(expr.id, effectRow);
-  return discardValue ? ctx.primitives.void : (branchType ?? ctx.primitives.void);
+  if (pattern.kind !== "type") {
+    return undefined;
+  }
+
+  return resolveMatchPatternType({
+    pattern,
+    discriminantType,
+    ctx,
+    state,
+    hints,
+    discriminantSpan,
+    patternSpan,
+  });
 };
 
 const narrowMatchPattern = (
