@@ -19,6 +19,7 @@ import type {
 import { ExportIndexService } from "./export-index-service.js";
 
 type UriContext = {
+  filePath: string;
   entryPath: string;
   roots: ModuleRoots;
 };
@@ -96,7 +97,23 @@ export class AnalysisCoordinator {
   ): Promise<{ context: UriContext; analysis: ProjectCoreAnalysis }> {
     const context = await this.#resolveUriContext(uri);
     const analysis = await this.#getCoreForContext(context);
-    return { context, analysis };
+    if (
+      context.filePath === context.entryPath ||
+      analysis.moduleIdByFilePath.has(context.filePath)
+    ) {
+      return { context, analysis };
+    }
+
+    const fallbackContext: UriContext = {
+      filePath: context.filePath,
+      entryPath: context.filePath,
+      roots: context.roots,
+    };
+    const fallbackAnalysis = await this.#getCoreForContext(fallbackContext);
+    return {
+      context: fallbackContext,
+      analysis: fallbackAnalysis,
+    };
   }
 
   async getNavigationForUri(uri: string): Promise<ProjectNavigationIndex> {
@@ -170,9 +187,13 @@ export class AnalysisCoordinator {
 
   async #resolveUriContext(uri: string): Promise<UriContext> {
     const filePath = normalizeFilePathFromUri(uri);
-    const entryPath = await resolveEntryPath(filePath);
-    const roots = resolveModuleRoots(entryPath);
-    return { entryPath, roots };
+    const projectEntryPath = await resolveEntryPath(filePath);
+    const roots = resolveModuleRoots(projectEntryPath);
+    return {
+      filePath,
+      entryPath: projectEntryPath,
+      roots,
+    };
   }
 
   async #getCoreForContext(context: UriContext): Promise<ProjectCoreAnalysis> {
