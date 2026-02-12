@@ -37,6 +37,7 @@ import {
   moduleVisibility,
   packageVisibility,
 } from "../../hir/index.js";
+import type { SymbolKind } from "../../binder/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { SourceSpan, SymbolId } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
@@ -635,6 +636,23 @@ const declareImportedSymbol = ({
   const locals: BoundImport[] = [];
 
   symbols.forEach((symbol) => {
+    const importNameCollision = findImportNameCollision({
+      name: alias,
+      incomingKind: exported.kind,
+      ctx,
+    });
+    if (importNameCollision) {
+      recordImportNameConflict({
+        name: alias,
+        incomingKind: exported.kind,
+        existingKind: importNameCollision.kind,
+        span,
+        previousSpan: importNameCollision.span,
+        ctx,
+      });
+      return;
+    }
+
     const dependency = ctx.dependencies.get(exported.moduleId);
     const sourceMetadata = dependency
       ? dependency.symbolTable.getSymbol(symbol).metadata
@@ -723,6 +741,23 @@ const declareModuleImport = ({
     return [];
   }
   const name = alias ?? moduleId.split("::").at(-1) ?? "self";
+  const importNameCollision = findImportNameCollision({
+    name,
+    incomingKind: "module",
+    ctx,
+  });
+  if (importNameCollision) {
+    recordImportNameConflict({
+      name,
+      incomingKind: "module",
+      existingKind: importNameCollision.kind,
+      span,
+      previousSpan: importNameCollision.span,
+      ctx,
+    });
+    return [];
+  }
+
   const local = ctx.symbolTable.declare({
     name,
     kind: "module",
@@ -803,6 +838,86 @@ const recordImportDiagnostic = ({
       code: "BD0001",
       params,
       span,
+    }),
+  );
+};
+
+const findImportNameCollision = ({
+  name,
+  incomingKind,
+  ctx,
+}: {
+  name: string;
+  incomingKind: SymbolKind;
+  ctx: BindingContext;
+}): { kind: SymbolKind; span: SourceSpan } | undefined => {
+  for (const symbolId of ctx.symbolTable.symbolsInScope(ctx.symbolTable.rootScope)) {
+    const existing = ctx.symbolTable.getSymbol(symbolId);
+    if (existing.name !== name) {
+      continue;
+    }
+    if (!isModuleNamespaceCollision(existing.kind, incomingKind)) {
+      continue;
+    }
+    return {
+      kind: existing.kind,
+      span: spanForDeclaredSymbol({ symbol: symbolId, ctx }),
+    };
+  }
+  return undefined;
+};
+
+const isModuleNamespaceCollision = (
+  existingKind: SymbolKind,
+  incomingKind: SymbolKind,
+): boolean =>
+  (existingKind === "module" && incomingKind !== "module") ||
+  (existingKind !== "module" && incomingKind === "module");
+
+const spanForDeclaredSymbol = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: BindingContext;
+}): SourceSpan => {
+  const declaredAt = ctx.symbolTable.getSymbol(symbol).declaredAt;
+  return toSourceSpan(ctx.syntaxByNode.get(declaredAt));
+};
+
+const recordImportNameConflict = ({
+  name,
+  incomingKind,
+  existingKind,
+  span,
+  previousSpan,
+  ctx,
+}: {
+  name: string;
+  incomingKind: SymbolKind;
+  existingKind: SymbolKind;
+  span: SourceSpan;
+  previousSpan: SourceSpan;
+  ctx: BindingContext;
+}) => {
+  ctx.diagnostics.push(
+    diagnosticFromCode({
+      code: "BD0001",
+      params: {
+        kind: "import-name-conflict",
+        name,
+        incomingKind,
+        existingKind,
+      },
+      span,
+      related: [
+        diagnosticFromCode({
+          code: "BD0001",
+          params: { kind: "previous-import-name-conflict" },
+          severity: "note",
+          span: previousSpan,
+        }),
+      ],
     }),
   );
 };

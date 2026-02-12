@@ -37,7 +37,14 @@ type DiagnosticParamsMap = {
         moduleId: string;
         target: string;
         owner?: string;
-      };
+      }
+    | {
+        kind: "import-name-conflict";
+        name: string;
+        incomingKind: string;
+        existingKind: string;
+      }
+    | { kind: "previous-import-name-conflict" };
   BD0002:
     | {
         kind: "duplicate-overload";
@@ -224,6 +231,10 @@ export const diagnosticsRegistry: {
           const ownerPrefix = params.owner ? `${params.owner}::` : "";
           return `Cannot import ${params.target} from ${params.moduleId}; ${ownerPrefix}${params.target} is an instance member and must be accessed through its type`;
         }
+        case "import-name-conflict":
+          return `Cannot import ${params.name} as ${params.incomingKind}; ${params.name} is already bound as ${params.existingKind} in this scope`;
+        case "previous-import-name-conflict":
+          return "previous conflicting import binding is here";
       }
       return exhaustive(params);
     },

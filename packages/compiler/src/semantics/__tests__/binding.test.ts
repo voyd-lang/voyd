@@ -375,6 +375,76 @@ describe("binding pipeline", () => {
     expect(binding.diagnostics).toHaveLength(0);
   });
 
+  it("reports a clear diagnostic when module and value imports collide by name", () => {
+    const source = "use self::compare\nuse self::compare::all";
+    const ast = parse(source, "pkg.voyd");
+    const useForm = ast.rest.find((entry) => isForm(entry) && entry.calls("use")) as
+      | Form
+      | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const comparePath = {
+      namespace: "src" as const,
+      segments: ["main", "compare"] as const,
+    };
+    const compareId = modulePathToString(comparePath);
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "pkg.voyd" },
+      ast,
+      source,
+      dependencies: [{ kind: "export", path: comparePath, span }],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "pkg.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        compareId,
+        new Map([
+          [
+            "compare",
+            {
+              name: "compare",
+              symbol: 99,
+              moduleId: compareId,
+              modulePath: comparePath,
+              packageId: packageIdFromPath(comparePath),
+              kind: "value",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const conflict = binding.diagnostics.find(
+      (diag) =>
+        diag.code === "BD0001" &&
+        diag.message.includes("Cannot import compare as value"),
+    );
+    expect(conflict).toBeDefined();
+  });
+
   it("rejects cross-package imports of package-visible exports", () => {
     const source = "use pkg::dep::Thing";
     const ast = parse(source, "main.voyd");
