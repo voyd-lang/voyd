@@ -1,5 +1,7 @@
 use std::array::all
 use std::fixed_array::fns::{ new_fixed_array }
+use std::iterator::all
+use std::optional::types::all
 use std::test::assertions::all
 
 pub obj String {
@@ -21,6 +23,19 @@ pub fn new_string(from_bytes: FixedArray<i32>): () -> String
 impl String
   pub fn byte_length(self): () -> i32
     self.byte_count
+
+  api fn byte_values(self): () -> Array<i32>
+    new_array_unchecked(from: self.raw_bytes())
+
+  api fn byte_at(self, index: i32): () -> i32
+    if index < 0 then:
+      return -1
+    if index >= self.byte_count then:
+      return -1
+    __array_get(self.bytes.raw_storage(), index)
+
+  api fn raw_bytes(self): () -> FixedArray<i32>
+    self.bytes.raw_storage()
 
   api fn equals(self, other: String): () -> bool
     if self.byte_count != other.byte_count then:
@@ -135,10 +150,70 @@ impl String
     })
     new_string(storage)
 
+  api fn index_of(self, { codepoint: i32, start?: i32 }): () -> i32
+    if codepoint < 0 then:
+      return -1
+    if codepoint > 1114111 then:
+      return -1
+
+    let start_index = match(start)
+      Some { value }:
+        value
+      None:
+        0
+
+    if start_index < 0 then:
+      return -1
+    if start_index >= self.byte_count then:
+      return -1
+
+    let source = self.bytes.raw_storage()
+    var index = start_index
+    while index < self.byte_count do:
+      let read = decode_utf8_at(source, self.byte_count, index)
+      if read.codepoint == codepoint then:
+        return index
+      index = index + read.width
+    -1
+
+  api fn split(self, { once_codepoint: i32 }): () -> Optional<(String, String)>
+    let separator_index = self.index_of(codepoint: once_codepoint)
+    if separator_index < 0 then:
+      return None {}
+
+    let source = self.bytes.raw_storage()
+    let separator_read = decode_utf8_at(source, self.byte_count, separator_index)
+    let left = self.slice_bytes(0, separator_index)
+    let right_start = separator_index + separator_read.width
+    let right = self.slice_bytes(right_start, self.byte_count - right_start)
+    Some { value: (left, right) }
+
 obj Utf8Read {
   api codepoint: i32,
   api width: i32
 }
+
+obj StringIterator {
+  source: FixedArray<i32>,
+  byte_count: i32,
+  index: i32
+}
+
+impl Iterable<i32> for String
+  api fn iterate(self) -> Iterator<i32>
+    StringIterator {
+      source: self.raw_bytes(),
+      byte_count: self.byte_length(),
+      index: 0
+    }
+
+impl Iterator<i32> for StringIterator
+  api fn next(~self) -> Option<i32>
+    if self.index >= self.byte_count then:
+      return None {}
+    let read = decode_utf8_at(self.source, self.byte_count, self.index)
+    self.index = self.index + read.width
+    Some<i32> { value: read.codepoint }
 
 fn decode_utf8_at(source: FixedArray<i32>, limit: i32, index: i32) -> Utf8Read
   if index < 0 then:
@@ -298,3 +373,42 @@ test "string hash matches for identical strings":
   assert("hello".hash_i32(), eq: "hello".hash_i32())
   let empty = empty_string()
   assert(empty.hash_i32(), eq: empty.hash_i32())
+
+test "string byte access APIs":
+  let value = "a😀"
+  assert(value.byte_at(0), eq: 97)
+  assert(value.byte_at(1), eq: 240)
+  assert(value.byte_at(9), eq: -1)
+
+  let bytes = value.raw_bytes()
+  assert(__array_len(bytes), eq: value.byte_length())
+  assert(__array_get(bytes, 0), eq: 97)
+
+test "string index_of and split once codepoint":
+  let value = "1.2.3"
+  assert(value.index_of(codepoint: 46), eq: 1)
+  assert(value.index_of(codepoint: 46, start: 2), eq: 3)
+  assert(value.index_of(codepoint: 46, start: 4), eq: -1)
+
+  match(value.split(once_codepoint: 46))
+    Some<(String, String)> { value: split }:
+      assert(split.0.equals("1"), eq: true)
+      assert(split.1.equals("2.3"), eq: true)
+    None:
+      assert(false)
+
+  match("123".split(once_codepoint: 46))
+    Some:
+      assert(false)
+    None:
+      assert(true)
+
+test "string iterator yields codepoints for for-in":
+  var count = 0
+  var sum = 0
+  for (codepoint in "a😀b"):
+    count = count + 1
+    sum = sum + codepoint
+
+  assert(count, eq: 3)
+  assert(sum, eq: 128707)

@@ -1,47 +1,31 @@
 use std::optional::all
-use std::memory::self as memory
+use std::iterator::all
+use std::string::types::String
 
-pub obj ParseSegmentResult {
-  api value: i32,
-  api next_index: i32
-}
-
-pub fn parse_non_negative_segment(
-  source_ptr: i32,
-  start_index: i32,
-  length: i32
-): () -> Optional<ParseSegmentResult>
-  if start_index < 0 then:
-    return none<ParseSegmentResult>()
-  if start_index >= length then:
-    return none<ParseSegmentResult>()
-
-  var index = start_index
+pub fn parse_non_negative_segment(input: String): () -> Optional<i32>
   var value = 0
   var digit_count = 0
   var leading_zero = false
 
-  while index < length do:
-    let codepoint = memory::load_u8(source_ptr + index)
-    if codepoint < 48 or codepoint > 57 then:
-      break
+  let bytes = input.byte_values()
+  for (byte in bytes):
+    if byte < 48 or byte > 57 then:
+      return none<i32>()
 
-    let digit = codepoint - 48
+    let digit = byte - 48
     if digit_count == 0 then:
       leading_zero = digit == 0
     if digit_count > 0 and leading_zero then:
-      return none<ParseSegmentResult>()
+      return none<i32>()
 
     if value > 214748364 then:
-      return none<ParseSegmentResult>()
+      return none<i32>()
     if value == 214748364 and digit > 7 then:
-      return none<ParseSegmentResult>()
+      return none<i32>()
 
     value = value * 10 + digit
     digit_count = digit_count + 1
-    index = index + 1
 
   if digit_count == 0 then:
-    return none<ParseSegmentResult>()
-
-  some(ParseSegmentResult { value: value, next_index: index })
+    return none<i32>()
+  some(value)

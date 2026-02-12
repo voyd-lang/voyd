@@ -1,157 +1,43 @@
 use std::optional::all
-use std::memory::self as memory
-use std::msgpack::self as msgpack
 use std::string::types::String
 use super::version::{ Version, new_version }
-use self::scanner::ParseSegmentResult
 use self::scanner::parse_non_negative_segment
 
-obj EncodedStringView {
-  source_ptr: i32,
-  start_index: i32,
-  length: i32
-}
-
 pub fn parse(input: String): () -> Optional<Version>
-  let encoded = encode_string_view(input)
-  match(encoded)
-    Some { value }:
-      parse_encoded(value)
+  match(input.split(once_codepoint: 46))
+    Some<(String, String)> { value: major_and_rest }:
+      parse_minor_and_patch(major_and_rest.0, major_and_rest.1)
     None:
       none<Version>()
 
-fn parse_encoded(encoded: EncodedStringView): () -> Optional<Version>
-  if encoded.length <= 0 then:
-    return none<Version>()
-
-  let source_ptr = encoded.source_ptr + encoded.start_index
-  let major_segment = parse_non_negative_segment(source_ptr, 0, encoded.length)
-  match(major_segment)
-    Some { value }:
-      parse_minor_and_patch(source_ptr, encoded.length, value)
+fn parse_minor_and_patch(major_text: String, remainder: String): () -> Optional<Version>
+  match(remainder.split(once_codepoint: 46))
+    Some<(String, String)> { value: minor_and_patch }:
+      parse_segments(major_text, minor_and_patch.0, minor_and_patch.1)
     None:
       none<Version>()
 
-fn parse_minor_and_patch(
-  source_ptr: i32,
-  length: i32,
-  major_segment: ParseSegmentResult
+fn parse_segments(
+  major_text: String,
+  minor_text: String,
+  patch_text: String
 ): () -> Optional<Version>
-  if not has_separator(source_ptr, major_segment.next_index, length) then:
-    return none<Version>()
-
-  let minor_segment = parse_non_negative_segment(
-    source_ptr,
-    major_segment.next_index + 1,
-    length
-  )
-  match(minor_segment)
-    Some { value }:
-      parse_patch(source_ptr, length, major_segment.value, value)
+  match(parse_non_negative_segment(major_text))
+    Some { value: major }:
+      parse_minor(major, minor_text, patch_text)
     None:
       none<Version>()
 
-fn parse_patch(
-  source_ptr: i32,
-  length: i32,
-  major_value: i32,
-  minor_segment: ParseSegmentResult
-): () -> Optional<Version>
-  if not has_separator(source_ptr, minor_segment.next_index, length) then:
-    return none<Version>()
-
-  let patch_segment = parse_non_negative_segment(
-    source_ptr,
-    minor_segment.next_index + 1,
-    length
-  )
-  match(patch_segment)
-    Some { value }:
-      if value.next_index != length then:
-        return none<Version>()
-      some(new_version(major_value, minor_segment.value, value.value))
+fn parse_minor(major: i32, minor_text: String, patch_text: String): () -> Optional<Version>
+  match(parse_non_negative_segment(minor_text))
+    Some { value: minor }:
+      parse_patch(major, minor, patch_text)
     None:
       none<Version>()
 
-fn has_separator(source_ptr: i32, index: i32, length: i32): () -> bool
-  if index < 0 then:
-    return false
-  if index >= length then:
-    return false
-
-  memory::load_u8(source_ptr + index) == 46
-
-fn encode_string_view(input: String): () -> Optional<EncodedStringView>
-  let base = memory::size() * 65536
-  memory::grow(1)
-  let written = msgpack::encode_value(msgpack::pack_string(input), base, 65536)
-  if written <= 0 then:
-    return none<EncodedStringView>()
-
-  let header = memory::load_u8(base)
-  if header >= 160 and header <= 191 then:
-    return encode_fixstr(base, written, header)
-  if header == 217 then:
-    return encode_str8(base, written)
-  if header == 218 then:
-    return encode_str16(base, written)
-  if header == 219 then:
-    return encode_str32(base, written)
-
-  none<EncodedStringView>()
-
-fn encode_fixstr(base: i32, written: i32, header: i32): () -> Optional<EncodedStringView>
-  let text_length = header - 160
-  let expected_length = written - 1
-  if text_length != expected_length then:
-    return none<EncodedStringView>()
-
-  some(EncodedStringView {
-    source_ptr: base,
-    start_index: 1,
-    length: text_length
-  })
-
-fn encode_str8(base: i32, written: i32): () -> Optional<EncodedStringView>
-  if written < 2 then:
-    return none<EncodedStringView>()
-  let text_length = memory::load_u8(base + 1)
-  let expected_length = written - 2
-  if text_length != expected_length then:
-    return none<EncodedStringView>()
-
-  some(EncodedStringView {
-    source_ptr: base,
-    start_index: 2,
-    length: text_length
-  })
-
-fn encode_str16(base: i32, written: i32): () -> Optional<EncodedStringView>
-  if written < 3 then:
-    return none<EncodedStringView>()
-  let text_length = memory::load_u16(base + 1)
-  let expected_length = written - 3
-  if text_length != expected_length then:
-    return none<EncodedStringView>()
-
-  some(EncodedStringView {
-    source_ptr: base,
-    start_index: 3,
-    length: text_length
-  })
-
-fn encode_str32(base: i32, written: i32): () -> Optional<EncodedStringView>
-  if written < 5 then:
-    return none<EncodedStringView>()
-  let text_length = memory::load_u32(base + 1)
-  if text_length < 0 then:
-    return none<EncodedStringView>()
-  let expected_length = written - 5
-  if text_length != expected_length then:
-    return none<EncodedStringView>()
-
-  some(EncodedStringView {
-    source_ptr: base,
-    start_index: 5,
-    length: text_length
-  })
+fn parse_patch(major: i32, minor: i32, patch_text: String): () -> Optional<Version>
+  match(parse_non_negative_segment(patch_text))
+    Some { value: patch }:
+      some(new_version(major, minor, patch))
+    None:
+      none<Version>()
