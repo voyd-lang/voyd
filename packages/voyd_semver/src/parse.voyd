@@ -1,5 +1,6 @@
 use std::optional::all
 use std::string::types::String
+use std::string::fns::new_string
 use super::version::{ Version }
 use self::scanner::parse_non_negative_segment
 

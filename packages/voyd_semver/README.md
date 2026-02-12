@@ -20,7 +20,7 @@ use pkg::voyd_semver::all
 pub fn main() -> i32
   match(parse("1.2.3"))
     Some { value }:
-      let next = bump_patch(value)
+      let next = value.bump_patch()
       if lt(value, next) then:
         1
       else:
@@ -35,4 +35,4 @@ pub fn main() -> i32
 - `new_version`
 - `parse` (`MAJOR.MINOR.PATCH` only)
 - `compare`, `eq`, `lt`, `lte`, `gt`, `gte`
-- `bump_major`, `bump_minor`, `bump_patch`
+- `Version.bump_major()`, `Version.bump_minor()`, `Version.bump_patch()`

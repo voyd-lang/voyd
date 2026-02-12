@@ -5,7 +5,7 @@ pub fn main() -> i32
   let parsed = parse("1.2.3")
   match(parsed)
     Some { value }:
-      let bumped = bump_patch(value)
+      let bumped = value.bump_patch()
       if lt(value, bumped) and eq(bumped, new_version(1, 2, 4)) then:
         42
       else:

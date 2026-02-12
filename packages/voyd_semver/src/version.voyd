@@ -5,14 +5,17 @@ pub obj Version {
 }
 
 impl Version
-  fn init(major: i32, minor: i32, patch: i32)
+  api fn init(major: i32, minor: i32, patch: i32)
     Version { major, minor, patch }
 
-  api fn bump_major(version: Version) -> Version
-    Version(version.major + 1, 0, 0)
+  api fn bump_major(self) -> Version
+    Version(self.major + 1, 0, 0)
 
-  api fn bump_minor(version: Version) -> Version
-    Version(version.major, version.minor + 1, 0)
+  api fn bump_minor(self) -> Version
+    Version(self.major, self.minor + 1, 0)
 
-  api fn bump_patch(version: Version) -> Version
-    Version(version.major, version.minor, version.patch + 1)
+  api fn bump_patch(self) -> Version
+    Version(self.major, self.minor, self.patch + 1)
+
+pub fn new_version(major: i32, minor: i32, patch: i32) -> Version
+  Version(major, minor, patch)

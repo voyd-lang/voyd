@@ -18,6 +18,9 @@ pub fn compare(left: Version, right: Version) -> i32
 
   0
 
+pub fn compare_versions(left: Version, right: Version) -> i32
+  compare(left, right)
+
 pub fn eq(left: Version, right: Version) -> bool
   compare(left, right) == 0
 
