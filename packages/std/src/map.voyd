@@ -89,7 +89,7 @@ impl<T> Map<T>
       None:
         default
 
-  api fn get_or_else(self, key: String, default: () -> T): () -> T
+  api fn get_or_else(self, key: String, default: () -> T) -> T
     match(self.get(key))
       Some<T> { value }:
         value
@@ -179,7 +179,7 @@ impl<T> Map<T>
       bucket_index = bucket_index + 1
     out
 
-  api fn each(self, f: (key: String, value: T) -> void): () -> void
+  api fn each(self, f: (key: String, value: T) -> void) -> void
     if self.count == 0 then:
       return void
 
@@ -215,7 +215,7 @@ impl<T> Map<T>
       bucket_index = bucket_index + 1
     out
 
-  api fn map_values<U>(self, f: (value: T) -> U): () -> Map<U>
+  api fn map_values<U>(self, f: (value: T) -> U) -> Map<U>
     if self.count == 0 then:
       return Map<U>::new()
 
@@ -234,7 +234,7 @@ impl<T> Map<T>
       bucket_index = bucket_index + 1
     out
 
-  api fn filter(self, pred: (key: String, value: T) -> bool): () -> Map<T>
+  api fn filter(self, pred: (key: String, value: T) -> bool) -> Map<T>
     if self.count == 0 then:
       return self
 

@@ -12,6 +12,7 @@ import type {
   EffectLoweringEirResult,
 } from "./types.js";
 import { analyzeExpr } from "./liveness.js";
+import { walkHirExpression } from "../../hir-walk.js";
 import {
   definitionOrderForFunction,
   definitionOrderForHandlerClause,
@@ -80,12 +81,14 @@ const captureFieldsForSite = ({
   params,
   ordering,
   tempCaptures,
+  symbolTypes,
   ctx,
 }: {
   liveSymbols: ReadonlySet<SymbolId>;
   params: ReadonlySet<SymbolId>;
   ordering: Map<SymbolId, number>;
   tempCaptures: readonly { tempId: number; typeId: TypeId }[];
+  symbolTypes: ReadonlyMap<SymbolId, TypeId>;
   ctx: CodegenContext;
 }): ContinuationCaptureField[] => {
   const symbolFields = Array.from(liveSymbols)
@@ -95,7 +98,10 @@ const captureFieldsForSite = ({
       (symbol): ContinuationCaptureField => ({
         sourceKind: params.has(symbol) ? "param" : "local",
         symbol,
-        typeId: ctx.module.types.getValueType(symbol) ?? ctx.program.primitives.unknown,
+        typeId:
+          symbolTypes.get(symbol) ??
+          ctx.module.types.getValueType(symbol) ??
+          ctx.program.primitives.unknown,
       })
     );
 
@@ -106,6 +112,39 @@ const captureFieldsForSite = ({
   }));
 
   return [...tempFields, ...symbolFields];
+};
+
+const collectIdentifierSymbolTypes = ({
+  exprId,
+  ctx,
+}: {
+  exprId: HirExprId;
+  ctx: CodegenContext;
+}): Map<SymbolId, TypeId> => {
+  const symbolTypes = new Map<SymbolId, TypeId>();
+  walkHirExpression({
+    exprId,
+    ctx,
+    visitLambdaBodies: false,
+    visitor: {
+      onExpr: (id, expr) => {
+        if (expr.exprKind !== "identifier") return;
+        const typeId =
+          ctx.module.types.getResolvedExprType(id) ??
+          ctx.module.types.getExprType(id);
+        if (typeof typeId !== "number") return;
+        const existing = symbolTypes.get(expr.symbol);
+        if (
+          typeof existing === "number" &&
+          existing !== ctx.program.primitives.unknown
+        ) {
+          return;
+        }
+        symbolTypes.set(expr.symbol, typeId);
+      },
+    },
+  });
+  return symbolTypes;
 };
 
 export const buildEffectLoweringEir = ({
@@ -150,6 +189,7 @@ export const buildEffectLoweringEir = ({
     ordering,
     params,
     handlerAtSite,
+    symbolTypes,
   }: {
     analysisSites: readonly {
       kind: "perform" | "call";
@@ -168,6 +208,7 @@ export const buildEffectLoweringEir = ({
     ordering: Map<SymbolId, number>;
     params: ReadonlySet<SymbolId>;
     handlerAtSite: boolean;
+    symbolTypes: ReadonlyMap<SymbolId, TypeId>;
   }): void => {
     analysisSites.forEach((site) => {
       const resumeValueTypeId = resumeValueTypeIdForSite({ site, ctx });
@@ -180,6 +221,7 @@ export const buildEffectLoweringEir = ({
         params,
         ordering,
         tempCaptures,
+        symbolTypes,
         ctx,
       });
 
@@ -228,6 +270,10 @@ export const buildEffectLoweringEir = ({
 
     const ordering = definitionOrderForFunction(item, ctx);
     const params = functionParamSymbols(item);
+    const symbolTypes = collectIdentifierSymbolTypes({
+      exprId: item.body,
+      ctx,
+    });
     const analysis = analyzeExpr({ exprId: item.body, liveAfter: new Set(), ctx });
     const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: item.symbol });
     const fnName = sanitizeIdentifier(ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`);
@@ -240,6 +286,7 @@ export const buildEffectLoweringEir = ({
       ordering,
       params,
       handlerAtSite: true,
+      symbolTypes,
     });
   });
 
@@ -250,6 +297,10 @@ export const buildEffectLoweringEir = ({
 
     const ordering = definitionOrderForLambda(expr, ctx);
     const params = lambdaParamSymbols(expr);
+    const symbolTypes = collectIdentifierSymbolTypes({
+      exprId: expr.body,
+      ctx,
+    });
     const fnName = `lambda_${expr.id}`;
     const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${expr.id}`;
     const analysis = analyzeExpr({ exprId: expr.body, liveAfter: new Set(), ctx });
@@ -261,6 +312,7 @@ export const buildEffectLoweringEir = ({
       ordering,
       params,
       handlerAtSite: true,
+      symbolTypes,
     });
   });
 
@@ -270,6 +322,10 @@ export const buildEffectLoweringEir = ({
     expr.handlers.forEach((clause, clauseIndex) => {
       const ordering = definitionOrderForHandlerClause({ clause, ctx });
       const params = handlerClauseParamSymbols(clause);
+      const symbolTypes = collectIdentifierSymbolTypes({
+        exprId: clause.body,
+        ctx,
+      });
       const analysis = analyzeExpr({ exprId: clause.body, liveAfter: new Set(), ctx });
       const fnName = `handler_${expr.id}_${clauseIndex}`;
       const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}`;
@@ -281,6 +337,7 @@ export const buildEffectLoweringEir = ({
         ordering,
         params,
         handlerAtSite: true,
+        symbolTypes,
       });
     });
   });

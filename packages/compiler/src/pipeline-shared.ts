@@ -252,15 +252,22 @@ const enforcePublicApiMethodEffectAnnotations = ({
 
       const effectInfoFor = (
         effectRow: number,
-      ): { isPure: boolean; effectsText: string } => {
+      ): { isPure: boolean; isPolymorphic: boolean; effectsText: string } => {
         try {
+          const row = mod.typing.effects.getRow(effectRow);
           const isPure = mod.typing.effects.isEmpty(effectRow);
           return {
             isPure,
+            isPolymorphic:
+              !isPure && row.operations.length === 0 && Boolean(row.tailVar),
             effectsText: formatEffectRow(effectRow, mod.typing.effects),
           };
         } catch {
-          return { isPure: false, effectsText: "unknown effects" };
+          return {
+            isPure: false,
+            isPolymorphic: false,
+            effectsText: "unknown effects",
+          };
         }
       };
 
@@ -279,8 +286,8 @@ const enforcePublicApiMethodEffectAnnotations = ({
         const signature = mod.typing.functions.getSignature(symbol);
         if (!signature) return;
 
-        const { isPure, effectsText } = effectInfoFor(signature.effectRow);
-        if (signature.annotatedEffects || isPure) return;
+        const { isPure, isPolymorphic, effectsText } = effectInfoFor(signature.effectRow);
+        if (signature.annotatedEffects || isPure || isPolymorphic) return;
 
         const seenKey = `${moduleId}:${symbol}`;
         if (seen.has(seenKey)) return;

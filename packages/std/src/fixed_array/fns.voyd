@@ -83,14 +83,14 @@ pub fn fill<T>(arr: FixedArray<T>, value: T): () -> FixedArray<T>
     index = index + 1
   arr
 
-pub fn each<T>(arr: FixedArray<T>, f: (v: T) -> void): () -> void
+pub fn each<T>(arr: FixedArray<T>, f: (v: T) -> void) -> void
   let len = arr.length<T>()
   var index = 0
   while index < len do:
     f(__array_get(arr, index))
     index = index + 1
 
-pub fn map<T, U>(arr: FixedArray<T>, f: (v: T) -> U): () -> FixedArray<U>
+pub fn map<T, U>(arr: FixedArray<T>, f: (v: T) -> U) -> FixedArray<U>
   let len = arr.length<T>()
   let out = new_fixed_array<U>(len)
   var index = 0

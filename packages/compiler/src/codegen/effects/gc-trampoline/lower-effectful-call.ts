@@ -24,6 +24,7 @@ import {
   continuationFunctionName,
   ensureContinuationFunction,
 } from "./continuations.js";
+import { specializeContinuationSite } from "./specialize-site.js";
 import { initStruct, refCast, refFunc } from "@voyd/lib/binaryen-gc/index.js";
 import { tailResumptionExitChecks } from "../tail-resumptions.js";
 
@@ -76,10 +77,15 @@ export const lowerEffectfulCallResult = ({
   const valueResult = unboxOutcomeValue({ payload, valueType, ctx });
 
   const effectReturn = fnCtx.effectful
-    ? (() => {
+      ? (() => {
         const cleanup = handlerCleanupOps({ ctx, fnCtx });
         const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
-        const site = !tailPosition ? ctx.effectLowering.sitesByExpr.get(callId) : undefined;
+        const siteTemplate = !tailPosition
+          ? ctx.effectLowering.sitesByExpr.get(callId)
+          : undefined;
+        const site = siteTemplate
+          ? specializeContinuationSite({ site: siteTemplate, ctx, typeInstanceId: lookupKey })
+          : undefined;
         const shouldWrap = !!site && site.kind === "call" && !tailPosition;
 
         if (!shouldWrap) {

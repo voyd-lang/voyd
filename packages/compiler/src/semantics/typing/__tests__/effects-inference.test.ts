@@ -598,7 +598,38 @@ fn main()
     if (!runSig || !mainSig) return;
 
     expect(typing.effects.isOpen(runSig.effectRow)).toBe(true);
-    expect(typing.effects.isOpen(mainSig.effectRow)).toBe(true);
+    expect(typing.effects.isOpen(mainSig.effectRow)).toBe(false);
+    expect(effectOps(mainSig.effectRow, typing.effects)).toEqual(["Async.await"]);
+  });
+
+  it("specializes callback effects to pure for pure callbacks", () => {
+    const ast = parse(
+      `
+fn run(cb: fn() -> i32)
+  cb()
+
+fn main()
+  run(() -> i32 => 1)
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const runSymbol = symbolTable.resolve("run", symbolTable.rootScope);
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof runSymbol).toBe("number");
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof runSymbol !== "number" || typeof mainSymbol !== "number") return;
+
+    const runSig = typing.functions.getSignature(runSymbol);
+    const mainSig = typing.functions.getSignature(mainSymbol);
+    expect(runSig && mainSig).toBeTruthy();
+    if (!runSig || !mainSig) return;
+
+    expect(typing.effects.isOpen(runSig.effectRow)).toBe(true);
+    expect(typing.effects.isEmpty(mainSig.effectRow)).toBe(true);
   });
 
   it("reports missing handlers for closed rows", () => {

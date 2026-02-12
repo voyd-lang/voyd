@@ -1,0 +1,27 @@
+eff Async
+  await(resume, value: i32) -> i32
+
+eff Trace
+  tap(resume, value: i32) -> i32
+
+fn map_like<T, U>(count: i32, value: T, f: fn(T) -> U) -> U
+  var index = 0
+  var last = f(value)
+  while index < count do:
+    last = f(value)
+    index = index + 1
+  last
+
+fn find_like<T>(count: i32, value: T, pred: fn(T) -> bool) -> i32
+  var index = 0
+  while index < count do:
+    if pred(value):
+      return index
+    index = index + 1
+  -1
+
+pub fn main(): (Async, Trace) -> i32
+  let mapped = map_like<i32, i32>(2, 5, (v: i32) -> i32 => Async::await(v + 1))
+  let mapped_trace = map_like<i32, i32>(3, 2, (v: i32) -> i32 => Trace::tap(v * 2))
+  let found = find_like<i32>(2, 5, (v: i32) -> bool => Async::await(v) > 4)
+  mapped + mapped_trace + found
