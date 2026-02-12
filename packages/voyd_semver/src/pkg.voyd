@@ -1,4 +1,1 @@
-pub self::compare
-pub self::compare::all
-pub self::parse::{ parse }
-pub self::version::{ Version, new_version }
+pub self::version::{ Version }
