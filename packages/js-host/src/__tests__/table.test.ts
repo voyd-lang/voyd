@@ -132,4 +132,15 @@ describe("parseEffectTable", () => {
     const parsed = parseEffectTable(module);
     expectSingleParsedOp(parsed);
   });
+
+  it("rejects custom sections with varuint32 sizes at or above 0x80000000", () => {
+    const header = Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00);
+    const oversizedCustomSection = Uint8Array.of(
+      0x00, // custom section id
+      0x80, 0x80, 0x80, 0x80, 0x08 // varuint32 section size = 0x80000000
+    );
+    const wasm = concat([header, oversizedCustomSection]);
+
+    expect(() => parseEffectTable(wasm)).toThrow(/Wasm section is truncated/i);
+  });
 });

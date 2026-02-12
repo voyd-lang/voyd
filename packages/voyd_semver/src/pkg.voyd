@@ -1,1 +1,10 @@
-pub self::version::{ Version }
+pub self::version::{
+  Version,
+  new_version,
+  parse,
+  eq,
+  lt,
+  lte,
+  gt,
+  gte
+}

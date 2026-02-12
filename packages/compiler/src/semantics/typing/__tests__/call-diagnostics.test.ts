@@ -215,7 +215,7 @@ describe("call diagnostics", () => {
     expect(caught.diagnostic.message).toMatch(/expected major, got no label/i);
   });
 
-  it("diagnoses constructor calls when no init exists", () => {
+  it("diagnoses constructor calls on types without value constructors", () => {
     const ast = loadAst("constructor_call_without_init.voyd");
 
     let caught: unknown;
@@ -230,7 +230,7 @@ describe("call diagnostics", () => {
       return;
     }
 
-    expect(caught.diagnostic.code).toBe("TY0005");
-    expect(caught.diagnostic.message).toMatch(/cannot call a non-function value/i);
+    expect(caught.diagnostic.code).toBe("TY0041");
+    expect(caught.diagnostic.message).toMatch(/is a type, not a value/i);
   });
 });

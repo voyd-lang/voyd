@@ -261,10 +261,15 @@ export const typeCallExpr = (
       });
     }
     if (record.kind === "type") {
-      return reportNonFunctionCallee({
-        callSpan: expr.span,
-        calleeSpan: calleeExpr.span,
+      return emitDiagnostic({
         ctx,
+        code: "TY0041",
+        params: {
+          kind: "symbol-not-a-value",
+          name: record.name,
+          symbolKind: record.kind,
+        },
+        span: normalizeSpan(calleeExpr.span, expr.span),
       });
     }
     assertMemberAccess({

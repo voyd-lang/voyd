@@ -95,7 +95,7 @@ const readVarUint32 = ({
   context: string;
 }): { value: number; nextOffset: number } => {
   let value = 0;
-  let shift = 0;
+  let multiplier = 1;
   let cursor = offset;
 
   for (let index = 0; index < 5; index += 1) {
@@ -105,11 +105,14 @@ const readVarUint32 = ({
 
     const byte = bytes[cursor]!;
     cursor += 1;
-    value |= (byte & 0x7f) << shift;
+    value += (byte & 0x7f) * multiplier;
+    if (value > 0xffffffff) {
+      throw new Error(`Invalid varuint32 while reading ${context}`);
+    }
     if ((byte & 0x80) === 0) {
       return { value, nextOffset: cursor };
     }
-    shift += 7;
+    multiplier *= 0x80;
   }
 
   throw new Error(`Invalid varuint32 while reading ${context}`);

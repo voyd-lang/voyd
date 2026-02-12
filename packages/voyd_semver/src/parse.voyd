@@ -12,7 +12,10 @@ pub fn parse(input: String): () -> Optional<Ver>
     None:
       none<Ver>()
 
-fn parse_minor_and_patch(major_text: String, remainder: String): () -> Optional<Ver>
+fn parse_minor_and_patch(
+  major_text: String,
+  remainder: String
+): () -> Optional<Ver>
   match(remainder.split(once_codepoint: 46))
     Some<(String, String)> { value: minor_and_patch }:
       parse_segments(major_text, minor_and_patch.0, minor_and_patch.1)
@@ -30,14 +33,22 @@ fn parse_segments(
     None:
       none<Ver>()
 
-fn parse_minor(major: i32, minor_text: String, patch_text: String): () -> Optional<Ver>
+fn parse_minor(
+  major: i32,
+  minor_text: String,
+  patch_text: String
+): () -> Optional<Ver>
   match(parse_non_negative_segment(minor_text))
     Some { value: minor }:
       parse_patch(major, minor, patch_text)
     None:
       none<Ver>()
 
-fn parse_patch(major: i32, minor: i32, patch_text: String): () -> Optional<Ver>
+fn parse_patch(
+  major: i32,
+  minor: i32,
+  patch_text: String
+): () -> Optional<Ver>
   match(parse_non_negative_segment(patch_text))
     Some { value: patch }:
       some({ major, minor, patch })
