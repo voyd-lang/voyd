@@ -15,7 +15,10 @@ import {
   translateFunctionSignature,
 } from "./import-type-translation.js";
 import { findExport, makeDependencyContext } from "./import-resolution.js";
-import { methodSignatureKey } from "./method-signature-key.js";
+import {
+  methodSignatureKey,
+  methodSignatureParamTypeKey,
+} from "../method-signature-key.js";
 import { typeExprKey } from "./trait-method-matcher.js";
 
 const targetTypeIncludesDependencySymbol = ({
@@ -128,12 +131,15 @@ const traitMethodMappingKey = ({
 }): string => {
   const methodName = symbolNameFor(method.symbol);
   const typeParamCount = method.typeParameters?.length ?? 0;
-  const params = method.parameters.map((param) => {
-    const name = symbolNameFor(param.symbol);
+  const params = method.parameters.map((param, index) => {
+    const paramName = symbolNameFor(param.symbol);
     return {
-      name,
-      label: name,
-      typeKey: typeExprKey(param.type),
+      name: paramName,
+      typeKey: methodSignatureParamTypeKey({
+        index,
+        paramName,
+        typeKey: typeExprKey(param.type),
+      }),
     };
   });
   return methodSignatureKey({ methodName, typeParamCount, params });

@@ -15,6 +15,10 @@ import { resolveObjectDecl } from "./object.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { inheritMemberVisibility, moduleVisibility } from "../../hir/index.js";
 import { formatTypeAnnotation } from "../../utils.js";
+import {
+  methodSignatureKey,
+  methodSignatureParamTypeKey,
+} from "../../method-signature-key.js";
 
 const isStaticMethod = (fn: ParsedFunctionDecl): boolean =>
   fn.signature.params.length === 0 ||
@@ -360,21 +364,35 @@ export const flushPendingStaticMethods = (ctx: BindingContext): void => {
 const methodSignatureKeyForBoundFunction = (
   fn: ReturnType<typeof bindFunctionDecl>,
 ): string => {
-  const typeParamCount = fn.typeParameters?.length ?? 0;
-  const params = fn.params.map((param) => {
-    const label = param.label ?? param.name;
-    const type = formatTypeAnnotation(param.typeExpr);
-    return `${label}:${type}`;
+  const params = fn.params.map((param, index) => ({
+    label: param.label,
+    name: param.name,
+    typeKey: methodSignatureParamTypeKey({
+      index,
+      paramName: param.name,
+      typeKey: formatTypeAnnotation(param.typeExpr),
+    }),
+  }));
+  return methodSignatureKey({
+    methodName: fn.name,
+    typeParamCount: fn.typeParameters?.length ?? 0,
+    params,
   });
-  return `${fn.name}|${typeParamCount}|${fn.params.length}|${params.join(",")}`;
 };
 
 const methodSignatureKeyForParsedFunction = (fn: ParsedFunctionDecl): string => {
-  const typeParamCount = fn.signature.typeParameters.length;
-  const params = fn.signature.params.map((param) => {
-    const label = param.label ?? param.name;
-    const type = formatTypeAnnotation(param.typeExpr);
-    return `${label}:${type}`;
+  const params = fn.signature.params.map((param, index) => ({
+    label: param.label,
+    name: param.name,
+    typeKey: methodSignatureParamTypeKey({
+      index,
+      paramName: param.name,
+      typeKey: formatTypeAnnotation(param.typeExpr),
+    }),
+  }));
+  return methodSignatureKey({
+    methodName: fn.signature.name.value,
+    typeParamCount: fn.signature.typeParameters.length,
+    params,
   });
-  return `${fn.signature.name.value}|${typeParamCount}|${fn.signature.params.length}|${params.join(",")}`;
 };

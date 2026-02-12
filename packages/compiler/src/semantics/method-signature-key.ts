@@ -49,3 +49,13 @@ export const formatMethodSignature = ({
     .join(", ");
   return `${methodName}${typeParams}(${renderedParams})`;
 };
+
+export const methodSignatureParamTypeKey = ({
+  index,
+  paramName,
+  typeKey,
+}: {
+  index: number;
+  paramName?: string;
+  typeKey?: string;
+}): string | undefined => index === 0 && paramName === "self" ? undefined : typeKey;

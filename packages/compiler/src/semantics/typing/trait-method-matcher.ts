@@ -5,8 +5,9 @@ import type { TypingContext } from "./types.js";
 import {
   formatMethodSignature,
   methodSignatureKey,
+  methodSignatureParamTypeKey,
   methodSignatureShapeKey,
-} from "./method-signature-key.js";
+} from "../method-signature-key.js";
 
 type MethodWithSymbol = { symbol: SymbolId };
 
@@ -62,15 +63,16 @@ export const buildTraitMethodSignatureInfos = ({
     const params = method.params.map((param, index) => ({
       label: param.label,
       name: param.name,
-      typeKey:
-        index === 0 && param.name === "self"
-          ? undefined
-          : typeExprKey(
-              methodHir?.parameters[index]?.type,
-              traitTypeSubstitutions,
-              undefined,
-              selfType,
-            ),
+      typeKey: methodSignatureParamTypeKey({
+        index,
+        paramName: param.name,
+        typeKey: typeExprKey(
+          methodHir?.parameters[index]?.type,
+          traitTypeSubstitutions,
+          undefined,
+          selfType,
+        ),
+      }),
     }));
     return {
       method,
@@ -103,15 +105,16 @@ export const buildImplMethodSignatureInfos = ({
     const params = method.params.map((param, index) => ({
       label: param.label,
       name: param.name,
-      typeKey:
-        index === 0 && param.name === "self"
-          ? undefined
-          : typeExprKey(
-              implFunction?.parameters[index]?.type,
-              traitTypeSubstitutions,
-              undefined,
-              selfType,
-            ),
+      typeKey: methodSignatureParamTypeKey({
+        index,
+        paramName: param.name,
+        typeKey: typeExprKey(
+          implFunction?.parameters[index]?.type,
+          traitTypeSubstitutions,
+          undefined,
+          selfType,
+        ),
+      }),
     }));
     return {
       method,
@@ -144,15 +147,16 @@ export const buildTraitMethodSignatureInfosFromHir = ({
       const paramName = getSymbolName(param.symbol, ctx);
       return {
         name: paramName,
-        typeKey:
-          index === 0 && paramName === "self"
-            ? undefined
-            : typeExprKey(
-                param.type,
-                traitTypeSubstitutions,
-                undefined,
-                selfType,
-              ),
+        typeKey: methodSignatureParamTypeKey({
+          index,
+          paramName,
+          typeKey: typeExprKey(
+            param.type,
+            traitTypeSubstitutions,
+            undefined,
+            selfType,
+          ),
+        }),
       };
     });
     return {
