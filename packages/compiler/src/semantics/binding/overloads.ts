@@ -118,7 +118,7 @@ const createOverloadSignature = (
 };
 
 const parameterLabel = (param: BoundParameter): string | undefined =>
-  param.label ?? param.name;
+  param.label;
 
 const formatParameterDisplayName = (param: BoundParameter): string => {
   if (!param.label) {
