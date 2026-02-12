@@ -281,6 +281,51 @@ const containsTypeParam = (
   }
 };
 
+const containsAnyTypeParam = (
+  type: TypeId,
+  ctx: TypingContext,
+  seen: Set<TypeId> = new Set(),
+): boolean => {
+  if (seen.has(type)) {
+    return false;
+  }
+  seen.add(type);
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "type-param-ref":
+      return true;
+    case "recursive":
+      return containsAnyTypeParam(desc.body, ctx, seen);
+    case "trait":
+    case "nominal-object":
+      return desc.typeArgs.some((arg) => containsAnyTypeParam(arg, ctx, seen));
+    case "structural-object":
+      return desc.fields.some((field) =>
+        containsAnyTypeParam(field.type, ctx, seen),
+      );
+    case "function":
+      return (
+        desc.parameters.some((paramDesc) =>
+          containsAnyTypeParam(paramDesc.type, ctx, seen),
+        ) || containsAnyTypeParam(desc.returnType, ctx, seen)
+      );
+    case "union":
+      return desc.members.some((member) => containsAnyTypeParam(member, ctx, seen));
+    case "intersection":
+      return (
+        (typeof desc.nominal === "number" &&
+          containsAnyTypeParam(desc.nominal, ctx, seen)) ||
+        (typeof desc.structural === "number" &&
+          containsAnyTypeParam(desc.structural, ctx, seen))
+      );
+    case "fixed-array":
+      return containsAnyTypeParam(desc.element, ctx, seen);
+    default:
+      return false;
+  }
+};
+
 const containsAliasSelfUnguarded = (
   type: TypeId,
   aliasSymbol: SymbolId,
@@ -2555,6 +2600,9 @@ const bindUnion = ({
   if (expectedDesc.kind !== "union") {
     return;
   }
+  if (!expectedDesc.members.some((member) => containsAnyTypeParam(member, ctx))) {
+    return;
+  }
 
   const nextBindings = bindTypeParamsFromUnion({
     expectedMembers: expectedDesc.members,
@@ -2676,9 +2724,17 @@ const bindTypeParamsFromUnion = ({
   if (candidates.length === 0) {
     return undefined;
   }
+  const maxCoverage = candidates.reduce((max, candidate) => {
+    const coverage = actualDesc.members.length - candidate.remainingActualMembers.length;
+    return coverage > max ? coverage : max;
+  }, 0);
+  const filteredCandidates = candidates.filter(
+    (candidate) =>
+      actualDesc.members.length - candidate.remainingActualMembers.length === maxCoverage,
+  );
 
   const solutionsByKey = new Map<string, Map<TypeParamId, TypeId>>();
-  candidates.forEach((candidate) => {
+  filteredCandidates.forEach((candidate) => {
     const nextBindings = new Map(candidate.bindings);
     if (typeof remainderTarget === "number" && typeof remainderParam === "number") {
       const remainder = candidate.remainingActualMembers;
@@ -2754,26 +2810,22 @@ const findUnionBindingCandidates = ({
   const visitedStates = new Set<string>();
   let abortedForComplexity = false;
   const unresolvedExpected = [...expectedMembers];
-  const unresolvedActual = [...actualMembers];
 
   const search = ({
     expected,
-    actual,
     currentBindings,
+    usedActualIndices,
   }: {
     expected: readonly TypeId[];
-    actual: readonly TypeId[];
     currentBindings: ReadonlyMap<TypeParamId, TypeId>;
+    usedActualIndices: ReadonlySet<number>;
   }): void => {
     if (abortedForComplexity) {
       return;
     }
-    if (expected.length > actual.length) {
-      return;
-    }
     const stateKey = serializeUnionBindingSearchState({
       expected,
-      actual,
+      usedActualIndices,
       bindings: currentBindings,
     });
     if (visitedStates.has(stateKey)) {
@@ -2789,7 +2841,9 @@ const findUnionBindingCandidates = ({
       const snapshot = new Map(currentBindings);
       solutions.push({
         bindings: snapshot,
-        remainingActualMembers: [...actual],
+        remainingActualMembers: actualMembers.filter(
+          (_, index) => !usedActualIndices.has(index),
+        ),
       });
       return;
     }
@@ -2799,7 +2853,7 @@ const findUnionBindingCandidates = ({
         if (typeof expectedMember !== "number") {
           return undefined;
         }
-        const matches = actual.flatMap((actualMember, actualIndex) => {
+        const matches = actualMembers.flatMap((actualMember, actualIndex) => {
           const candidate = tryBindExpectedMember({
             expectedMember,
             actualMember,
@@ -2831,21 +2885,20 @@ const findUnionBindingCandidates = ({
     const nextExpected = expected.filter((_, index) => index !== next.expectedIndex);
 
     next.matches.forEach((match) => {
-      const nextActual = actual.filter(
-        (_, nextIndex) => nextIndex !== match.actualIndex,
-      );
+      const nextUsedActualIndices = new Set(usedActualIndices);
+      nextUsedActualIndices.add(match.actualIndex);
       search({
         expected: nextExpected,
-        actual: nextActual,
         currentBindings: match.bindings,
+        usedActualIndices: nextUsedActualIndices,
       });
     });
   };
 
   search({
     expected: unresolvedExpected,
-    actual: unresolvedActual,
     currentBindings: bindings,
+    usedActualIndices: new Set<number>(),
   });
 
   if (abortedForComplexity) {
@@ -2857,11 +2910,11 @@ const findUnionBindingCandidates = ({
 
 const serializeUnionBindingSearchState = ({
   expected,
-  actual,
+  usedActualIndices,
   bindings,
 }: {
   expected: readonly TypeId[];
-  actual: readonly TypeId[];
+  usedActualIndices: ReadonlySet<number>;
   bindings: ReadonlyMap<TypeParamId, TypeId>;
 }): string =>
   [
@@ -2869,8 +2922,7 @@ const serializeUnionBindingSearchState = ({
       .slice()
       .sort((left, right) => left - right)
       .join(","),
-    actual
-      .slice()
+    [...usedActualIndices]
       .sort((left, right) => left - right)
       .join(","),
     serializeTypeParamBindings(bindings),
