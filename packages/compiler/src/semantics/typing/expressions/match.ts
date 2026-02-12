@@ -122,6 +122,7 @@ export const typeMatchExpr = (
         : arm.pattern.kind === "type"
           ? resolveMatchPatternType({
               pattern: arm.pattern,
+              discriminantType,
               ctx,
               state,
               hints: patternNominalHints,
@@ -200,6 +201,7 @@ const narrowMatchPattern = (
       try {
         patternType = resolveMatchPatternType({
           pattern,
+          discriminantType,
           ctx,
           state,
           hints: patternHints,
@@ -444,6 +446,7 @@ const resolveNominalPatternSymbol = (
 
 const resolveMatchPatternType = ({
   pattern,
+  discriminantType,
   ctx,
   state,
   hints,
@@ -451,6 +454,7 @@ const resolveMatchPatternType = ({
   patternSpan,
 }: {
   pattern: HirPattern & { kind: "type" };
+  discriminantType: TypeId;
   ctx: TypingContext;
   state: TypingState;
   hints?: NominalPatternHints;
@@ -461,7 +465,53 @@ const resolveMatchPatternType = ({
     pattern.type.typeKind === "named" ? pattern.type : undefined;
   const nominalSymbol =
     hints && namedType ? resolveNominalPatternSymbol(namedType, ctx) : undefined;
+  const aliasSymbol =
+    namedType ? resolveAliasPatternSymbol(namedType, ctx) : undefined;
+  const aliasTemplate =
+    typeof aliasSymbol === "number"
+      ? ctx.typeAliases.getTemplate(aliasSymbol)
+      : undefined;
+  const isGenericAlias = (aliasTemplate?.params.length ?? 0) > 0;
   const hasTypeArguments = (namedType?.typeArguments?.length ?? 0) > 0;
+
+  if (aliasSymbol && isGenericAlias && !hasTypeArguments) {
+    const inferred = inferAliasPatternType({
+      aliasSymbol,
+      discriminantType,
+      ctx,
+      state,
+    });
+
+    if (inferred.kind === "resolved") {
+      return inferred.type;
+    }
+
+    if (inferred.kind === "ambiguous") {
+      const related = discriminantSpan
+        ? [
+            diagnosticFromCode({
+              code: "TY0002",
+              params: { kind: "discriminant-note" },
+              severity: "note",
+              span: discriminantSpan,
+            }),
+          ]
+        : undefined;
+
+      emitDiagnostic({
+        ctx,
+        code: "TY0020",
+        params: {
+          kind: "ambiguous-nominal-match-pattern",
+          typeName: getSymbolName(aliasSymbol, ctx),
+        },
+        span: patternSpan,
+        related,
+      });
+    }
+
+    return ctx.primitives.unknown;
+  }
 
   if (nominalSymbol && hints && !hasTypeArguments) {
     const inferred = hints.unique.get(nominalSymbol);
@@ -497,6 +547,111 @@ const resolveMatchPatternType = ({
   }
 
   return resolveTypeExpr(pattern.type, ctx, state, ctx.primitives.unknown);
+};
+
+const resolveAliasPatternSymbol = (
+  typeExpr: HirTypeExpr | undefined,
+  ctx: TypingContext
+): SymbolId | undefined => {
+  if (!typeExpr || typeExpr.typeKind !== "named") {
+    return undefined;
+  }
+
+  if (typeof typeExpr.symbol === "number") {
+    const symbol = typeExpr.symbol;
+    if (ctx.typeAliases.hasTemplate(symbol)) {
+      return symbol;
+    }
+  }
+
+  const name = typeExpr.path.at(-1);
+  if (!name) {
+    return undefined;
+  }
+  return ctx.typeAliases.resolveName(name);
+};
+
+type AliasPatternInference =
+  | { kind: "resolved"; type: TypeId }
+  | { kind: "unresolved" }
+  | { kind: "ambiguous" };
+
+const inferAliasPatternType = ({
+  aliasSymbol,
+  discriminantType,
+  ctx,
+  state,
+}: {
+  aliasSymbol: SymbolId;
+  discriminantType: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): AliasPatternInference => {
+  const template = ctx.typeAliases.getTemplate(aliasSymbol);
+  if (!template || template.params.length === 0) {
+    return { kind: "unresolved" };
+  }
+
+  const inferenceParams = template.params.map(() => ctx.arena.freshTypeParam());
+  const inferenceParamMap = new Map<SymbolId, TypeId>();
+  template.params.forEach((param, index) => {
+    inferenceParamMap.set(
+      param.symbol,
+      ctx.arena.internTypeParamRef(inferenceParams[index]!),
+    );
+  });
+  const inferenceTarget = resolveTypeExpr(
+    template.target,
+    ctx,
+    state,
+    ctx.primitives.unknown,
+    inferenceParamMap,
+  );
+
+  const candidates = inferenceParams.map(() => new Set<TypeId>());
+  let matched = false;
+  const members = (() => {
+    const desc = ctx.arena.get(discriminantType);
+    return desc.kind === "union" ? desc.members : [discriminantType];
+  })();
+
+  members.forEach((member) => {
+    const comparison = ctx.arena.unify(member, inferenceTarget, {
+      location: ctx.hir.module.ast,
+      reason: "match alias pattern inference",
+      variance: "covariant",
+      allowUnknown: state.mode === "relaxed",
+    });
+    if (!comparison.ok) {
+      return;
+    }
+    matched = true;
+    inferenceParams.forEach((param, index) => {
+      const bound = comparison.substitution.get(param);
+      if (typeof bound === "number") {
+        candidates[index]!.add(bound);
+      }
+    });
+  });
+
+  if (!matched) {
+    return { kind: "unresolved" };
+  }
+
+  if (candidates.some((entry) => entry.size > 1)) {
+    return { kind: "ambiguous" };
+  }
+
+  const inferredSubstitution = new Map(
+    inferenceParams.map((param, index) => {
+      const [inferred] = candidates[index]!;
+      return [param, inferred ?? ctx.primitives.unknown] as const;
+    }),
+  );
+  return {
+    kind: "resolved",
+    type: ctx.arena.substitute(inferenceTarget, inferredSubstitution),
+  };
 };
 
 const withNarrowedDiscriminant = (
