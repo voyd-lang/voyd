@@ -552,6 +552,153 @@ const createExplicitTypeArgReturnFilterCase = (overloadCount: number) => {
   };
 };
 
+const createExpectedReturnReuseBudgetCase = ({
+  overloadCount,
+  unionMemberCount,
+}: {
+  overloadCount: number;
+  unionMemberCount: number;
+}) => {
+  const ctx = createModuleContext();
+  const overloadSetId: OverloadSetId = 0;
+  const functionScope = ctx.symbolTable.rootScope as ScopeId;
+  const fakeExpr = (): Expr =>
+    ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+  const bool = () => createNamedType("bool", ctx.nextNode(), ctx.span);
+  const objectType = (fieldName: string) => ({
+    typeKind: "object" as const,
+    fields: [{ name: fieldName, type: bool(), span: ctx.span }],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const objectLiteral = (fieldName: string) =>
+    ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "object-literal",
+      literalKind: "structural",
+      entries: [
+        {
+          kind: "field",
+          name: fieldName,
+          value: ctx.createLiteral("boolean", "false"),
+          span: ctx.span,
+        },
+      ],
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+
+  const overloadSymbols: SymbolId[] = [];
+  for (let index = 0; index < overloadCount; index += 1) {
+    const symbol = ctx.symbolTable.declare({
+      name: "pick_cached_return",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    overloadSymbols.push(symbol);
+
+    const valueParam = ctx.symbolTable.declare({
+      name: `value_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const decl = ctx.decls.registerFunction({
+      name: "pick_cached_return",
+      visibility: moduleVisibility(),
+      symbol,
+      scope: functionScope,
+      params: [{ name: `value_${index}`, symbol: valueParam, ast: undefined }],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
+    const selected = index === overloadCount - 1;
+    const returnField = selected ? "k_0" : `missing_${index}`;
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      symbol,
+      decl: decl.id,
+      parameters: [
+        {
+          symbol: valueParam,
+          pattern: { kind: "identifier", symbol: valueParam },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        },
+      ],
+      returnType: objectType(returnField),
+      body: objectLiteral(returnField),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  }
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "overload-set",
+      name: "pick_cached_return",
+      set: overloadSetId,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const mainDecl = ctx.decls.registerFunction({
+    name: "main",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    scope: functionScope,
+    params: [],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    decl: mainDecl.id,
+    parameters: [],
+    returnType: {
+      typeKind: "union",
+      members: Array.from({ length: unionMemberCount }, (_, index) =>
+        objectType(`k_${index}`),
+      ),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    },
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>([
+        [overloadSetId, overloadSymbols],
+      ]),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: overloadSymbols[overloadSymbols.length - 1]!,
+  };
+};
+
 const createMethodTypeArgumentBudgetCase = (nongenericOverloadCount: number) => {
   const ctx = createModuleContext();
   const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
@@ -1132,6 +1279,25 @@ describe("type-check budgets", () => {
     const callDesc = typing.arena.get(callType!);
     expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
 
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("reuses expected-return filtering so overload calls do not double-spend unify budget", () => {
+    const fanout = createExpectedReturnReuseBudgetCase({
+      overloadCount: 24,
+      unionMemberCount: 40,
+    });
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxUnifySteps: 2_400 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
     const callTargets = typing.callTargets.get(fanout.callExpr);
     expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
       moduleId: "local",

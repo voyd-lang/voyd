@@ -90,6 +90,11 @@ type MethodCallSelection = {
   usedTraitDispatch: boolean;
 };
 
+type ExpectedCallContext = {
+  params?: readonly TypeId[];
+  expectedReturnCandidates?: ReadonlySet<SymbolId>;
+};
+
 const dependencyMethodSignatureCache = new WeakMap<
   TypingContext,
   Map<string, FunctionSignature>
@@ -175,7 +180,7 @@ export const typeCallExpr = (
       ? resolveTypeArguments(expr.typeArguments, ctx, state)
       : undefined;
 
-  const expectedParams = getExpectedCallParameters({
+  const expectedCallContext = getExpectedCallParameters({
     callee: calleeExpr,
     typeArguments,
     expectedReturnType,
@@ -183,6 +188,7 @@ export const typeCallExpr = (
     ctx,
     state,
   });
+  const expectedParams = expectedCallContext.params;
   const shouldDeferLambdaProbeTyping = calleeExpr.exprKind === "overload-set";
 
   const args = expr.args.map((arg, index) => {
@@ -240,6 +246,7 @@ export const typeCallExpr = (
       state,
       expectedReturnType,
       typeArguments,
+      expectedCallContext.expectedReturnCandidates,
     );
     return finalizeCall({
       returnType: overloaded.returnType,
@@ -693,7 +700,7 @@ const getExpectedCallParameters = ({
   callSpan?: SourceSpan;
   ctx: TypingContext;
   state: TypingState;
-}): readonly TypeId[] | undefined => {
+}): ExpectedCallContext => {
   if (
     callee.exprKind === "overload-set" &&
     typeof expectedReturnType === "number" &&
@@ -701,11 +708,17 @@ const getExpectedCallParameters = ({
   ) {
     const overloads = ctx.overloads.get(callee.set);
     if (!overloads) {
-      return undefined;
+      return {};
     }
     const candidates = overloads
-      .map((symbol) => ctx.functions.getSignature(symbol))
-      .filter((entry): entry is FunctionSignature => Boolean(entry));
+      .map((symbol) => {
+        const signature = ctx.functions.getSignature(symbol);
+        return signature ? { symbol, signature } : undefined;
+      })
+      .filter(
+        (entry): entry is { symbol: SymbolId; signature: FunctionSignature } =>
+          Boolean(entry),
+      );
     const explicitTypeMatches = filterCandidatesByExplicitTypeArguments({
       candidates,
       typeArguments,
@@ -723,18 +736,24 @@ const getExpectedCallParameters = ({
       ctx,
       span: callSpan ?? callee.span,
     });
+    const expectedReturnCandidates = new Set(
+      matchingReturn.map((candidate) => candidate.symbol),
+    );
     if (matchingReturn.length !== 1) {
-      return undefined;
+      return { expectedReturnCandidates };
     }
-    return matchingReturn[0].parameters.map((param) => param.type);
+    return {
+      params: matchingReturn[0]!.signature.parameters.map((param) => param.type),
+      expectedReturnCandidates,
+    };
   }
 
   if (callee.exprKind !== "identifier") {
-    return undefined;
+    return {};
   }
   const signature = ctx.functions.getSignature(callee.symbol);
   if (!signature) {
-    return undefined;
+    return {};
   }
   const substitution =
     signature.typeParams && signature.typeParams.length > 0
@@ -745,9 +764,11 @@ const getExpectedCallParameters = ({
           ctx,
         })
       : undefined;
-  return signature.parameters.map((param) =>
-    substitution ? ctx.arena.substitute(param.type, substitution) : param.type,
-  );
+  return {
+    params: signature.parameters.map((param) =>
+      substitution ? ctx.arena.substitute(param.type, substitution) : param.type,
+    ),
+  };
 };
 
 const applyExplicitTypeArguments = ({
@@ -3605,6 +3626,7 @@ const typeOverloadedCall = (
   state: TypingState,
   expectedReturnType?: TypeId,
   typeArguments?: readonly TypeId[],
+  expectedReturnCandidates?: ReadonlySet<SymbolId>,
 ): { returnType: TypeId; effectRow: number } => {
   const options = ctx.overloads.get(callee.set);
   if (!options) {
@@ -3629,13 +3651,17 @@ const typeOverloadedCall = (
     candidates,
     typeArguments,
   });
-  const candidatesForResolution = filterCandidatesByExpectedReturnType({
-    candidates: candidatesForBudget,
-    expectedReturnType,
-    typeArguments,
-    ctx,
-    state,
-  });
+  const candidatesForResolution = expectedReturnCandidates
+    ? candidatesForBudget.filter((candidate) =>
+        expectedReturnCandidates.has(candidate.symbol),
+      )
+    : filterCandidatesByExpectedReturnType({
+        candidates: candidatesForBudget,
+        expectedReturnType,
+        typeArguments,
+        ctx,
+        state,
+      });
   enforceOverloadCandidateBudget({
     name: callee.name,
     candidateCount: candidatesForResolution.length,
