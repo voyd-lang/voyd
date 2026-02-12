@@ -282,6 +282,73 @@ pub fn main() -> i32
     expect(typeArgs).toEqual([i64]);
   });
 
+  it("infers bare union type-parameter members from remainder context", () => {
+    const ast = parse(
+      `
+obj None {}
+type Optional<T> = T | None
+
+fn none<T>() -> Optional<T>
+  None {}
+
+fn from_return() -> i32 | i64 | None
+  none()
+
+pub fn main() -> i32
+  let _ = from_return()
+  0
+`,
+      "union_return_context_bare_type_param_remainder.voyd",
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const root = symbolTable.rootScope;
+
+    const noneSymbol = symbolTable.resolve("none", root);
+    expect(typeof noneSymbol).toBe("number");
+    if (typeof noneSymbol !== "number") {
+      return;
+    }
+
+    const noneCall = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") {
+          return false;
+        }
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          (callee as HirIdentifierExpr).symbol === noneSymbol
+        );
+      },
+    );
+    expect(noneCall).toBeDefined();
+    if (!noneCall) {
+      return;
+    }
+
+    const typeArgsByInstance = typing.callTypeArguments.get(noneCall.id);
+    const typeArgs = typeArgsByInstance
+      ? Array.from(typeArgsByInstance.values())[0]
+      : undefined;
+    expect(typeArgs).toBeDefined();
+    if (!typeArgs) {
+      return;
+    }
+    const inferred = typing.arena.get(typeArgs[0]!);
+    expect(inferred.kind).toBe("union");
+    if (inferred.kind !== "union") {
+      return;
+    }
+    const i32 = typing.arena.internPrimitive("i32");
+    const i64 = typing.arena.internPrimitive("i64");
+    expect(inferred.members).toHaveLength(2);
+    expect(inferred.members).toContain(i32);
+    expect(inferred.members).toContain(i64);
+  });
+
   it("does not infer union-based generics when member bindings conflict", () => {
     const ast = parse(
       `

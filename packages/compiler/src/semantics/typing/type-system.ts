@@ -2645,21 +2645,72 @@ const bindTypeParamsFromUnion = ({
     return undefined;
   }
 
-  const matchings = findUnionMemberMatchings({
-    expectedMembers,
+  const bareTypeParamMembers = expectedMembers.filter((member) => {
+    const desc = ctx.arena.get(member);
+    return desc.kind === "type-param-ref";
+  });
+  if (bareTypeParamMembers.length > 1) {
+    return undefined;
+  }
+
+  const remainderTarget = bareTypeParamMembers[0];
+  const subsetMembers =
+    typeof remainderTarget === "number"
+      ? expectedMembers.filter((member) => member !== remainderTarget)
+      : expectedMembers;
+
+  const candidates = findUnionBindingCandidates({
+    expectedMembers: subsetMembers,
     actualMembers: actualDesc.members,
     bindings,
     ctx,
     state,
   });
-  if (matchings.length !== 1) {
+  if (candidates.length === 0) {
     return undefined;
   }
 
-  return matchings[0];
+  const solutionsByKey = new Map<string, Map<TypeParamId, TypeId>>();
+  candidates.forEach((candidate) => {
+    const nextBindings = new Map(candidate.bindings);
+    if (typeof remainderTarget === "number") {
+      const remainder = candidate.remainingActualMembers;
+      if (remainder.length === 0) {
+        return;
+      }
+      const remainderType =
+        remainder.length === 1 ? remainder[0]! : ctx.arena.internUnion(remainder);
+      bindTypeParamsFromType(
+        remainderTarget,
+        remainderType,
+        nextBindings,
+        ctx,
+        state,
+      );
+      const substitutedTarget = ctx.arena.substitute(remainderTarget, nextBindings);
+      if (
+        !typeSatisfies(remainderType, substitutedTarget, ctx, state) &&
+        !typeSatisfies(substitutedTarget, remainderType, ctx, state)
+      ) {
+        return;
+      }
+    }
+    solutionsByKey.set(serializeTypeParamBindings(nextBindings), nextBindings);
+  });
+
+  if (solutionsByKey.size !== 1) {
+    return undefined;
+  }
+
+  return [...solutionsByKey.values()][0];
 };
 
-const findUnionMemberMatchings = ({
+type UnionBindingCandidate = {
+  bindings: Map<TypeParamId, TypeId>;
+  remainingActualMembers: readonly TypeId[];
+};
+
+const findUnionBindingCandidates = ({
   expectedMembers,
   actualMembers,
   bindings,
@@ -2671,8 +2722,8 @@ const findUnionMemberMatchings = ({
   bindings: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
   state: TypingState;
-}): Map<TypeParamId, TypeId>[] => {
-  const solutionsByKey = new Map<string, Map<TypeParamId, TypeId>>();
+}): UnionBindingCandidate[] => {
+  const solutions: UnionBindingCandidate[] = [];
   const unresolvedExpected = [...expectedMembers];
   const unresolvedActual = [...actualMembers];
 
@@ -2685,12 +2736,12 @@ const findUnionMemberMatchings = ({
     actual: readonly TypeId[];
     currentBindings: ReadonlyMap<TypeParamId, TypeId>;
   }): void => {
-    if (solutionsByKey.size > 1) {
-      return;
-    }
     if (expected.length === 0) {
       const snapshot = new Map(currentBindings);
-      solutionsByKey.set(serializeTypeParamBindings(snapshot), snapshot);
+      solutions.push({
+        bindings: snapshot,
+        remainingActualMembers: [...actual],
+      });
       return;
     }
 
@@ -2726,7 +2777,7 @@ const findUnionMemberMatchings = ({
     currentBindings: bindings,
   });
 
-  return [...solutionsByKey.values()];
+  return solutions;
 };
 
 const serializeTypeParamBindings = (
