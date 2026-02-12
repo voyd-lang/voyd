@@ -1,0 +1,13 @@
+use std::optional::types::Optional
+
+pub obj Range {
+  api start: Optional<i32>,
+  api end: Optional<i32>,
+  api include_end: bool
+}
+
+pub trait SubscriptRead<Index, Output>
+  fn subscript_get(self, index: Index) -> Output
+
+pub trait SubscriptWrite<Index, Value>
+  fn subscript_set(~self, index: Index, value: Value) -> void

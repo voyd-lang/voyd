@@ -1,0 +1,48 @@
+trait SubscriptRead<Index, Output>
+  fn subscript_get(self, index: Index) -> Output
+
+trait SubscriptWrite<Index, Value>
+  fn subscript_set(~self, index: Index, value: Value) -> void
+
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn some<T>(value: T) -> Optional<T>
+  Some<T> { value: value }
+
+fn none<T>() -> Optional<T>
+  None {}
+
+obj Range {
+  start: Optional<i32>,
+  end: Optional<i32>,
+  include_end: bool
+}
+
+obj Box {
+  value: i32
+}
+
+impl SubscriptRead<i32, i32> for Box
+  fn subscript_get(self, index: i32) -> i32
+    self.value + index
+
+impl SubscriptWrite<i32, i32> for Box
+  fn subscript_set(~self, index: i32, value: i32) -> void
+    self.value = value + index
+
+impl SubscriptRead<Range, i32> for Box
+  fn subscript_get(self, _range: Range) -> i32
+    self.value
+
+fn main() -> i32
+  let ~box = Box { value: 2 }
+  let read = box[3]
+  box[1] = 9
+  let range_read = box[1..]
+  read + range_read + box.value

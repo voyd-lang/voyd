@@ -10,4 +10,6 @@ export type Internal =
   | "new_string"
   | "generics"
   | "map"
-  | "scientific_e_notation";
+  | "scientific_e_notation"
+  | "subscript"
+  | "subscript_set";

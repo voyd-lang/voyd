@@ -3,6 +3,7 @@ use std::fixed_array::fns::{ new_fixed_array }
 use std::optional::types::all
 use std::string::fns::all
 use std::string::types::all
+use std::subscript::{ SubscriptRead, SubscriptWrite }
 use std::test::assertions::all
 
 pub obj MapEntry<T> {
@@ -253,6 +254,16 @@ impl<T> Map<T>
       bucket_index = bucket_index + 1
     out
 
+impl<T> SubscriptRead<String, Optional<T>> for Map<T>
+  api fn subscript_get(self, key: String) -> Optional<T>
+    self.get(key)
+
+impl<T> SubscriptWrite<String, T> for Map<T>
+  api fn subscript_set(~self, key: String, value: T) -> void
+    let next = self.set(key, value)
+    self.buckets = next.buckets
+    self.count = next.count
+
 fn new_buckets<T>(bucket_count: i32) -> FixedArray<Array<MapEntry<T>>>
   let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1
   let buckets = new_fixed_array<Array<MapEntry<T>>>(safe_bucket_count)
@@ -391,6 +402,23 @@ test "map set and get roundtrip":
   match(map.get("b"))
     Some<i32> { value }:
       assert(value, eq: 2)
+    None:
+      assert(false)
+
+test "map subscript read and write":
+  let ~map = Map<i32>::new()
+  map["a"] = 1
+  map["b"] = 3
+
+  match(map["a"])
+    Some<i32> { value }:
+      assert(value, eq: 1)
+    None:
+      assert(false)
+
+  match(map["b"])
+    Some<i32> { value }:
+      assert(value, eq: 3)
     None:
       assert(false)
 

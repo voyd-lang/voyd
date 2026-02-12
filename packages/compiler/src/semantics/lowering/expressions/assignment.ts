@@ -3,6 +3,10 @@ import { toSourceSpan } from "../../utils.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirPattern } from "../../hir/index.js";
 import { lowerPattern } from "./patterns.js";
+import {
+  isSubscriptForm,
+  lowerSubscriptSetExpr,
+} from "./subscript.js";
 import type { LoweringFormParams } from "./types.js";
 
 export const lowerAssignment = ({
@@ -15,6 +19,17 @@ export const lowerAssignment = ({
   const valueExpr = form.at(2);
   if (!targetExpr || !valueExpr) {
     throw new Error("assignment requires target and value");
+  }
+
+  if (isForm(targetExpr) && isSubscriptForm(targetExpr)) {
+    return lowerSubscriptSetExpr({
+      assignmentForm: form,
+      targetForm: targetExpr,
+      valueExpr,
+      ctx,
+      scopes,
+      lowerExpr,
+    });
   }
 
   let target: HirExprId | undefined;

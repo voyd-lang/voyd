@@ -310,6 +310,33 @@ add (1 2)
 (add (1 2))
 ```
 
+# Subscript Syntax
+
+Square brackets are adjacency-sensitive:
+
+```voyd
+foo[1]   // subscript
+foo [1]  // call with array literal argument
+```
+
+When `[` is adjacent to the previous expression, Voyd parses a subscript:
+
+```voyd
+items[0]
+items[1] = 42
+```
+
+Subscripts lower to trait-backed calls (`subscript_get` / `subscript_set`).
+
+## Range Operators
+
+Subscripts support explicit range operators:
+
+- `start..end` (end-exclusive)
+- `start..=end` (end-inclusive)
+- `..end`, `..=end`, `start..`, `..`
+- `..<` aliases the exclusive range forms (`start..<end`, `..<end`)
+
 # Pattern Matching (`match`)
 
 `match` is an expression that branches on a value using pattern arms:
@@ -456,6 +483,9 @@ export const infixOperators = new Map<string, [number, Associativity]>([
   ["::", [0, "left"]],
   [";", [4, "left"]],
   ["??", [3, "right"]],
+  ["..", [3, "right"]],
+  ["..=", [3, "right"]],
+  ["..<", [3, "right"]],
   ["?:", [3, "right"]],
 ]);
 ```

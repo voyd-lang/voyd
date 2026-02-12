@@ -35,6 +35,12 @@ import { lowerStaticAccessExpr } from "./static-access.js";
 import { lowerTupleExpr } from "./tuple.js";
 import { lowerWhile } from "./while.js";
 import { createVoidLiteralExpr } from "./literal-helpers.js";
+import {
+  isRangeExprForm,
+  isSubscriptForm,
+  lowerRangeExpr,
+  lowerSubscriptReadExpr,
+} from "./subscript.js";
 
 export { isObjectLiteralForm } from "./object-literal.js";
 
@@ -224,17 +230,25 @@ export const lowerExpr: LowerExprFn = (
       return lowerArrayLiteralExpr({ form: expr, ctx, scopes, lowerExpr });
     }
 
-  if (expr.calls("match")) {
-    return lowerMatch({ form: expr, ctx, scopes, lowerExpr });
-  }
+    if (isSubscriptForm(expr)) {
+      return lowerSubscriptReadExpr({ form: expr, ctx, scopes, lowerExpr });
+    }
 
-  if (expr.calls("try")) {
-    return lowerTry({ form: expr, ctx, scopes, lowerExpr });
-  }
+    if (isRangeExprForm(expr)) {
+      return lowerRangeExpr({ form: expr, ctx, scopes, lowerExpr });
+    }
 
-  if (isFieldAccessForm(expr)) {
-    return lowerFieldAccessExpr({ form: expr, ctx, scopes, lowerExpr });
-  }
+    if (expr.calls("match")) {
+      return lowerMatch({ form: expr, ctx, scopes, lowerExpr });
+    }
+
+    if (expr.calls("try")) {
+      return lowerTry({ form: expr, ctx, scopes, lowerExpr });
+    }
+
+    if (isFieldAccessForm(expr)) {
+      return lowerFieldAccessExpr({ form: expr, ctx, scopes, lowerExpr });
+    }
 
     if (expr.calls("::")) {
       return lowerStaticAccessExpr({ form: expr, ctx, scopes, lowerExpr });
