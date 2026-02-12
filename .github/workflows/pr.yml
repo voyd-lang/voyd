@@ -20,5 +20,5 @@ jobs:
       - run: npm ci --include=optional
       - run: npm run typecheck
       - run: npm run build
-      - run: VOYD_USE_DIST=1 npm test
+      - run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm test
       - run: npm run --workspace @voyd/compiler bench:typing

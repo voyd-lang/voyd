@@ -9,7 +9,11 @@ import { fileURLToPath } from "node:url";
 const testDir = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = resolve(testDir, "../../../../");
 const tsxPath = resolve(repoRoot, "node_modules/.bin/tsx");
+const distCliPath = resolve(repoRoot, "apps/cli/dist/cli-dev.js");
 const CLI_E2E_TIMEOUT_MS = 60_000;
+const cliE2eRuntime = process.env.VOYD_CLI_E2E_RUNTIME === "dist"
+  ? "dist"
+  : "source";
 
 const writePackageFixture = async (packageSrcRoot: string): Promise<void> => {
   await mkdir(packageSrcRoot, { recursive: true });
@@ -198,27 +202,37 @@ const createPkgDirRelativeTestFixture = async (): Promise<{
   return { cwd: root, testRoot };
 };
 
-const cliPath = resolve(repoRoot, "apps/cli/src/cli-dev.ts");
+const sourceCliPath = resolve(repoRoot, "apps/cli/src/cli-dev.ts");
+
+const assertCliRunnerAvailable = (): void => {
+  if (cliE2eRuntime === "source" && !existsSync(tsxPath)) {
+    throw new Error(`Missing tsx binary at ${tsxPath}`);
+  }
+  if (cliE2eRuntime === "dist" && !existsSync(distCliPath)) {
+    throw new Error(
+      `Missing built CLI entry at ${distCliPath}. Run npm run --workspace @voyd/cli build.`,
+    );
+  }
+};
 
 const runCli = (root: string, args: string[]) =>
-  spawnSync(
-    tsxPath,
-    ["--conditions=development", cliPath, ...args],
-    {
-      cwd: root,
-      encoding: "utf8",
-      env: { ...process.env },
-      timeout: CLI_E2E_TIMEOUT_MS,
-    }
-  );
+  spawnSync(cliE2eRuntime === "source" ? tsxPath : process.execPath, [
+    ...(cliE2eRuntime === "source"
+      ? ["--conditions=development", sourceCliPath]
+      : [distCliPath]),
+    ...args,
+  ], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env },
+    timeout: CLI_E2E_TIMEOUT_MS,
+  });
 
 describe("voyd cli test discovery", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it(
     "defaults test root to repo root when no path is provided",
     async () => {
-      if (!existsSync(tsxPath)) {
-        throw new Error(`Missing tsx binary at ${tsxPath}`);
-      }
+      assertCliRunnerAvailable();
 
       const root = await createFixture();
       try {
@@ -241,9 +255,7 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it(
     "defaults package lookup to node_modules",
     async () => {
-      if (!existsSync(tsxPath)) {
-        throw new Error(`Missing tsx binary at ${tsxPath}`);
-      }
+      assertCliRunnerAvailable();
 
       const root = await createNodeModulesFixture();
       try {
@@ -264,9 +276,7 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it(
     "walks ancestor directories for node_modules relative to the entry path",
     async () => {
-      if (!existsSync(tsxPath)) {
-        throw new Error(`Missing tsx binary at ${tsxPath}`);
-      }
+      assertCliRunnerAvailable();
 
       const fixture = await createAncestorNodeModulesFixture();
       try {
@@ -287,9 +297,7 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it(
     "resolves --pkg-dir relative to the target source root",
     async () => {
-      if (!existsSync(tsxPath)) {
-        throw new Error(`Missing tsx binary at ${tsxPath}`);
-      }
+      assertCliRunnerAvailable();
 
       const fixture = await createPkgDirRelativeFixture();
       try {
@@ -315,9 +323,7 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it(
     "defaults voyd test package lookup to node_modules",
     async () => {
-      if (!existsSync(tsxPath)) {
-        throw new Error(`Missing tsx binary at ${tsxPath}`);
-      }
+      assertCliRunnerAvailable();
 
       const root = await createNodeModulesTestFixture();
       try {
@@ -339,9 +345,7 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it(
     "walks ancestor directories for node_modules in voyd test mode",
     async () => {
-      if (!existsSync(tsxPath)) {
-        throw new Error(`Missing tsx binary at ${tsxPath}`);
-      }
+      assertCliRunnerAvailable();
 
       const fixture = await createAncestorNodeModulesTestFixture();
       try {
@@ -364,9 +368,7 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it(
     "resolves --pkg-dir relative to the test root",
     async () => {
-      if (!existsSync(tsxPath)) {
-        throw new Error(`Missing tsx binary at ${tsxPath}`);
-      }
+      assertCliRunnerAvailable();
 
       const fixture = await createPkgDirRelativeTestFixture();
       try {
