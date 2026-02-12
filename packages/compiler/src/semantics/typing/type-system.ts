@@ -2641,7 +2641,7 @@ const bindTypeParamsFromUnion = ({
     return undefined;
   }
 
-  if (actualDesc.members.length !== expectedMembers.length) {
+  if (expectedMembers.length > actualDesc.members.length) {
     return undefined;
   }
 
