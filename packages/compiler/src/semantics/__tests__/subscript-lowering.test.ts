@@ -86,7 +86,11 @@ describe("subscript lowering", () => {
       withRangeArg.args[0]!.expr
     ) as HirObjectLiteralExpr;
     expect(rangeArg.exprKind).toBe("object-literal");
-    expect(rangeArg.literalKind).toBe("structural");
+    expect(rangeArg.literalKind).toBe("nominal");
+    expect(rangeArg.target?.typeKind).toBe("named");
+    if (rangeArg.target?.typeKind === "named") {
+      expect(rangeArg.target.path).toEqual(["Range"]);
+    }
     const fieldNames = rangeArg.entries
       .filter((entry) => entry.kind === "field")
       .map((entry) => entry.name)

@@ -18,7 +18,7 @@ fn some<T>(value: T) -> Optional<T>
 fn none<T>() -> Optional<T>
   None {}
 
-type SliceRange = {
+obj Range {
   start: Optional<i32>,
   end: Optional<i32>,
   include_end: bool
@@ -36,8 +36,8 @@ impl SubscriptWrite<i32, i32> for Box
   fn subscript_set(~self, index: i32, value: i32) -> void
     self.value = value + index
 
-impl SubscriptRead<SliceRange, i32> for Box
-  fn subscript_get(self, _range: SliceRange) -> i32
+impl SubscriptRead<Range, i32> for Box
+  fn subscript_get(self, _range: Range) -> i32
     self.value
 
 fn main() -> i32

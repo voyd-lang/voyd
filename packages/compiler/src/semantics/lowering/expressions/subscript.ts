@@ -7,9 +7,10 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../../../parser/index.js";
-import type { HirExprId } from "../../ids.js";
-import type { HirObjectLiteralEntry } from "../../hir/index.js";
+import type { HirExprId, SymbolId } from "../../ids.js";
+import type { HirNamedTypeExpr, HirObjectLiteralEntry } from "../../hir/index.js";
 import { toSourceSpan } from "../../utils.js";
+import { resolveTypeSymbol } from "../resolution.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 
 const RANGE_OPERATOR_NAMES = new Set(["..", "..=", "..<"]);
@@ -86,6 +87,11 @@ export const lowerRangeExpr = ({
     throw new Error("invalid range expression");
   }
 
+  const rangeSymbol = resolveTypeSymbol("Range", scopes.current(), ctx);
+  const target = createRangeTarget({
+    form,
+    rangeSymbol,
+  });
   const entries = createRangeEntries({
     form,
     bounds,
@@ -99,10 +105,26 @@ export const lowerRangeExpr = ({
     exprKind: "object-literal",
     ast: form.syntaxId,
     span: toSourceSpan(form),
-    literalKind: "structural",
+    literalKind: "nominal",
+    target,
+    targetSymbol: rangeSymbol,
     entries,
   });
 };
+
+const createRangeTarget = ({
+  form,
+  rangeSymbol,
+}: {
+  form: Form;
+  rangeSymbol?: SymbolId;
+}): HirNamedTypeExpr => ({
+  typeKind: "named",
+  path: ["Range"],
+  ast: form.syntaxId,
+  span: toSourceSpan(form),
+  ...(typeof rangeSymbol === "number" ? { symbol: rangeSymbol } : {}),
+});
 
 const createRangeEntries = ({
   form,
