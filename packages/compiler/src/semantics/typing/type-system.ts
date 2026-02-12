@@ -13,6 +13,7 @@ import type { SourceSpan, SymbolId, TypeId, TypeParamId } from "../ids.js";
 import {
   typeDescriptorToUserString,
   type StructuralField,
+  type TypeDescriptor,
 } from "./type-arena.js";
 import { freshOpenEffectRow, resolveEffectAnnotation } from "./effects.js";
 import {
@@ -2381,6 +2382,224 @@ export const narrowTypeForPattern = (
     : undefined;
 };
 
+type BindTypeParamsArgs = {
+  actual: TypeId;
+  expectedDesc: TypeDescriptor;
+  bindings: Map<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+};
+
+type BindTypeParamsHandler = (args: BindTypeParamsArgs) => void;
+
+const applyBindingUpdates = ({
+  bindings,
+  nextBindings,
+}: {
+  bindings: Map<TypeParamId, TypeId>;
+  nextBindings: ReadonlyMap<TypeParamId, TypeId>;
+}): void => {
+  bindings.clear();
+  nextBindings.forEach((value, key) => {
+    bindings.set(key, value);
+  });
+};
+
+const bindTypeParamRef = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "type-param-ref") {
+    return;
+  }
+
+  const existing = bindings.get(expectedDesc.param);
+  if (!existing) {
+    bindings.set(expectedDesc.param, actual);
+    return;
+  }
+  if (typeSatisfies(actual, existing, ctx, state)) {
+    return;
+  }
+  if (typeSatisfies(existing, actual, ctx, state)) {
+    bindings.set(expectedDesc.param, actual);
+  }
+};
+
+const bindNominalObject = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "nominal-object") {
+    return;
+  }
+
+  const actualNominal = getNominalComponent(actual, ctx);
+  if (typeof actualNominal !== "number") {
+    return;
+  }
+  const actualDesc = ctx.arena.get(actualNominal);
+  if (
+    actualDesc.kind !== "nominal-object" ||
+    !symbolRefEquals(actualDesc.owner, expectedDesc.owner)
+  ) {
+    return;
+  }
+  expectedDesc.typeArgs.forEach((typeArg, index) => {
+    const actualArg = actualDesc.typeArgs[index];
+    if (typeof actualArg === "number") {
+      bindTypeParamsFromType(typeArg, actualArg, bindings, ctx, state);
+    }
+  });
+};
+
+const bindStructuralObject = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "structural-object") {
+    return;
+  }
+
+  const actualFields = getStructuralFields(actual, ctx, state);
+  if (!actualFields) {
+    return;
+  }
+  expectedDesc.fields.forEach((field) => {
+    const candidate = actualFields.find((entry) => entry.name === field.name);
+    if (candidate) {
+      bindTypeParamsFromType(field.type, candidate.type, bindings, ctx, state);
+    }
+  });
+};
+
+const bindFixedArray = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "fixed-array") {
+    return;
+  }
+
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind !== "fixed-array") {
+    return;
+  }
+  bindTypeParamsFromType(
+    expectedDesc.element,
+    actualDesc.element,
+    bindings,
+    ctx,
+    state,
+  );
+};
+
+const bindFunction = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "function") {
+    return;
+  }
+
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind !== "function") {
+    return;
+  }
+
+  const count = Math.min(
+    expectedDesc.parameters.length,
+    actualDesc.parameters.length,
+  );
+  for (let index = 0; index < count; index += 1) {
+    bindTypeParamsFromType(
+      expectedDesc.parameters[index]!.type,
+      actualDesc.parameters[index]!.type,
+      bindings,
+      ctx,
+      state,
+    );
+  }
+
+  bindTypeParamsFromType(
+    expectedDesc.returnType,
+    actualDesc.returnType,
+    bindings,
+    ctx,
+    state,
+  );
+};
+
+const bindUnion = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "union") {
+    return;
+  }
+
+  const nextBindings = bindTypeParamsFromUnion({
+    expectedMembers: expectedDesc.members,
+    actual,
+    bindings,
+    ctx,
+    state,
+  });
+  if (!nextBindings) {
+    return;
+  }
+  applyBindingUpdates({ bindings, nextBindings });
+};
+
+const bindIntersection = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "intersection") {
+    return;
+  }
+
+  if (typeof expectedDesc.nominal === "number") {
+    bindTypeParamsFromType(expectedDesc.nominal, actual, bindings, ctx, state);
+  }
+  if (typeof expectedDesc.structural === "number") {
+    bindTypeParamsFromType(expectedDesc.structural, actual, bindings, ctx, state);
+  }
+};
+
+const bindTypeParamsHandlers: Partial<
+  Record<TypeDescriptor["kind"], BindTypeParamsHandler>
+> = {
+  "type-param-ref": bindTypeParamRef,
+  "nominal-object": bindNominalObject,
+  "structural-object": bindStructuralObject,
+  "fixed-array": bindFixedArray,
+  function: bindFunction,
+  union: bindUnion,
+  intersection: bindIntersection,
+};
+
 export const bindTypeParamsFromType = (
   expected: TypeId,
   actual: TypeId,
@@ -2396,144 +2615,12 @@ export const bindTypeParamsFromType = (
   }
 
   const expectedDesc = ctx.arena.get(expected);
-  if (expectedDesc.kind === "union") {
-    const nextBindings = bindTypeParamsFromUnion({
-      expectedMembers: expectedDesc.members,
-      actual,
-      bindings,
-      ctx,
-      state,
-    });
-    if (nextBindings) {
-      bindings.clear();
-      nextBindings.forEach((value, key) => {
-        bindings.set(key, value);
-      });
-    }
+  const handler = bindTypeParamsHandlers[expectedDesc.kind];
+  if (!handler) {
     return;
   }
 
-  if (expectedDesc.kind === "type-param-ref") {
-    const existing = bindings.get(expectedDesc.param);
-    if (!existing) {
-      bindings.set(expectedDesc.param, actual);
-      return;
-    }
-    if (typeSatisfies(actual, existing, ctx, state)) {
-      return;
-    }
-    if (typeSatisfies(existing, actual, ctx, state)) {
-      bindings.set(expectedDesc.param, actual);
-    }
-    return;
-  }
-
-  if (expectedDesc.kind === "nominal-object") {
-    const actualNominal = getNominalComponent(actual, ctx);
-    if (typeof actualNominal !== "number") {
-      return;
-    }
-    const actualDesc = ctx.arena.get(actualNominal);
-    if (
-      actualDesc.kind !== "nominal-object" ||
-      !symbolRefEquals(actualDesc.owner, expectedDesc.owner)
-    ) {
-      return;
-    }
-    expectedDesc.typeArgs.forEach((typeArg, index) => {
-      const actualArg = actualDesc.typeArgs[index];
-      if (typeof actualArg === "number") {
-        bindTypeParamsFromType(typeArg, actualArg, bindings, ctx, state);
-      }
-    });
-    return;
-  }
-
-  if (expectedDesc.kind === "structural-object") {
-    const actualFields = getStructuralFields(actual, ctx, state);
-    if (!actualFields) {
-      return;
-    }
-    expectedDesc.fields.forEach((field) => {
-      const candidate = actualFields.find((entry) => entry.name === field.name);
-      if (candidate) {
-        bindTypeParamsFromType(
-          field.type,
-          candidate.type,
-          bindings,
-          ctx,
-          state,
-        );
-      }
-    });
-    return;
-  }
-
-  if (expectedDesc.kind === "fixed-array") {
-    const actualDesc = ctx.arena.get(actual);
-    if (actualDesc.kind !== "fixed-array") {
-      return;
-    }
-    bindTypeParamsFromType(
-      expectedDesc.element,
-      actualDesc.element,
-      bindings,
-      ctx,
-      state,
-    );
-    return;
-  }
-
-  if (expectedDesc.kind === "function") {
-    const actualDesc = ctx.arena.get(actual);
-    if (actualDesc.kind !== "function") {
-      return;
-    }
-
-    const count = Math.min(
-      expectedDesc.parameters.length,
-      actualDesc.parameters.length,
-    );
-    for (let index = 0; index < count; index += 1) {
-      bindTypeParamsFromType(
-        expectedDesc.parameters[index]!.type,
-        actualDesc.parameters[index]!.type,
-        bindings,
-        ctx,
-        state,
-      );
-    }
-
-    bindTypeParamsFromType(
-      expectedDesc.returnType,
-      actualDesc.returnType,
-      bindings,
-      ctx,
-      state,
-    );
-    return;
-  }
-
-  if (expectedDesc.kind === "intersection") {
-    if (typeof expectedDesc.nominal === "number") {
-      bindTypeParamsFromType(
-        expectedDesc.nominal,
-        actual,
-        bindings,
-        ctx,
-        state,
-      );
-    }
-    if (typeof expectedDesc.structural === "number") {
-      bindTypeParamsFromType(
-        expectedDesc.structural,
-        actual,
-        bindings,
-        ctx,
-        state,
-      );
-    }
-  }
+  handler({ actual, expectedDesc, bindings, ctx, state });
 };
 
 const bindTypeParamsFromUnion = ({
