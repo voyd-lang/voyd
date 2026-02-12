@@ -515,6 +515,114 @@ pub fn main() -> i32
     expect(typeArgs).toEqual([i32]);
   });
 
+  describe("union return inference regression matrix", () => {
+    const cases = [
+      {
+        name: "duplicate-equivalent expected members",
+        fileName: "union_return_matrix_duplicate_equivalent.voyd",
+        calleeName: "make",
+        expectedType: "i32" as const,
+        source: `
+obj Box<T> {}
+type Out<T> = Box<T> | Box<i32>
+
+fn make<T>() -> Out<T>
+  Box<T> {}
+
+fn from_return() -> i32 | Box<i32>
+  make()
+
+pub fn main() -> i32
+  let _ = from_return()
+  0
+`,
+      },
+      {
+        name: "expected member count exceeds context member count after collapse",
+        fileName: "union_return_matrix_expected_gt_actual.voyd",
+        calleeName: "none",
+        expectedType: "i32" as const,
+        source: `
+obj Some<T> {}
+obj None {}
+type Out<T> = Some<T> | Some<i32> | None
+
+fn none<T>() -> Out<T>
+  None {}
+
+fn from_return() -> Some<i32> | None
+  none()
+
+pub fn main() -> i32
+  let _ = from_return()
+  0
+`,
+      },
+      {
+        name: "extra context members still produce one concrete binding",
+        fileName: "union_return_matrix_extra_context.voyd",
+        calleeName: "make",
+        expectedType: "i64" as const,
+        source: `
+obj Box<T> {}
+obj None {}
+obj Extra {}
+type Out<T> = Box<T> | None
+
+fn make<T>() -> Out<T>
+  None {}
+
+fn from_return() -> Box<i64> | None | Extra
+  make()
+
+pub fn main() -> i32
+  let _ = from_return()
+  0
+`,
+      },
+    ];
+
+    cases.forEach(({ name, fileName, calleeName, expectedType, source }) => {
+      it(name, () => {
+        const ast = parse(source, fileName);
+        const semantics = semanticsPipeline(ast);
+        const { hir, typing } = semantics;
+        const symbolTable = getSymbolTable(semantics);
+        const root = symbolTable.rootScope;
+
+        const calleeSymbol = symbolTable.resolve(calleeName, root);
+        expect(typeof calleeSymbol).toBe("number");
+        if (typeof calleeSymbol !== "number") {
+          return;
+        }
+
+        const calleeCall = Array.from(hir.expressions.values()).find(
+          (expr): expr is HirCallExpr => {
+            if (expr.exprKind !== "call") {
+              return false;
+            }
+            const callee = hir.expressions.get(expr.callee);
+            return (
+              callee?.exprKind === "identifier" &&
+              (callee as HirIdentifierExpr).symbol === calleeSymbol
+            );
+          },
+        );
+        expect(calleeCall).toBeDefined();
+        if (!calleeCall) {
+          return;
+        }
+
+        const typeArgsByInstance = typing.callTypeArguments.get(calleeCall.id);
+        const typeArgs = typeArgsByInstance
+          ? Array.from(typeArgsByInstance.values())[0]
+          : undefined;
+        const expected = typing.arena.internPrimitive(expectedType);
+        expect(typeArgs).toEqual([expected]);
+      });
+    });
+  });
+
   it("does not infer union-based generics when member bindings conflict", () => {
     const ast = parse(
       `
