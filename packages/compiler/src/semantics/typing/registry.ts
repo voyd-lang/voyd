@@ -3,6 +3,7 @@ import {
   resolveTypeExpr,
   getSymbolName,
   getNominalComponent,
+  unifyWithBudget,
 } from "./type-system.js";
 import type { SymbolId, TypeId } from "../ids.js";
 import {
@@ -667,11 +668,16 @@ const traitImplTemplatesOverlap = ({
   right: TraitImplTemplate;
   ctx: TypingContext;
 }): boolean => {
-  const targetMatch = ctx.arena.unify(left.target, right.target, {
-    location: ctx.hir.module.ast,
-    reason: "trait impl overlap check (target)",
-    variance: "invariant",
-    allowUnknown: false,
+  const targetMatch = unifyWithBudget({
+    actual: left.target,
+    expected: right.target,
+    options: {
+      location: ctx.hir.module.ast,
+      reason: "trait impl overlap check (target)",
+      variance: "invariant",
+      allowUnknown: false,
+    },
+    ctx,
   });
   if (!targetMatch.ok) {
     return false;
@@ -679,11 +685,16 @@ const traitImplTemplatesOverlap = ({
 
   const leftTrait = ctx.arena.substitute(left.trait, targetMatch.substitution);
   const rightTrait = ctx.arena.substitute(right.trait, targetMatch.substitution);
-  const traitMatch = ctx.arena.unify(leftTrait, rightTrait, {
-    location: ctx.hir.module.ast,
-    reason: "trait impl overlap check (trait)",
-    variance: "invariant",
-    allowUnknown: false,
+  const traitMatch = unifyWithBudget({
+    actual: leftTrait,
+    expected: rightTrait,
+    options: {
+      location: ctx.hir.module.ast,
+      reason: "trait impl overlap check (trait)",
+      variance: "invariant",
+      allowUnknown: false,
+    },
+    ctx,
   });
   return traitMatch.ok;
 };

@@ -198,6 +198,17 @@ type DiagnosticParamsMap = {
     armIndex: number;
     patternLabel: string;
   };
+  TY0040: {
+    kind: "typecheck-unify-budget-exceeded";
+    maxSteps: number;
+    observedSteps: number;
+  };
+  TY0041: {
+    kind: "overload-candidate-budget-exceeded";
+    name: string;
+    candidates: number;
+    maxCandidates: number;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -396,6 +407,12 @@ export const diagnosticsRegistry: {
     message: (params) => `ambiguous overload for ${params.name}`,
     severity: "error",
     phase: "typing",
+    hints: [
+      {
+        message:
+          "Add explicit type arguments or annotate the expected type to disambiguate; the compiler will not perform global backtracking.",
+      },
+    ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0007"]>,
   TY0008: {
     code: "TY0008",
@@ -708,6 +725,32 @@ export const diagnosticsRegistry: {
     severity: "warning",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0039"]>,
+  TY0040: {
+    code: "TY0040",
+    message: (params) =>
+      `type-check unification budget exceeded (${params.observedSteps}/${params.maxSteps} steps)`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Simplify deeply nested unions/intersections or add type annotations to reduce inference work.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0040"]>,
+  TY0041: {
+    code: "TY0041",
+    message: (params) =>
+      `overload resolution for ${params.name} considered ${params.candidates} candidates (budget: ${params.maxCandidates})`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Split broad overload sets and add explicit type arguments or expected-type annotations instead of relying on global inference.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0041"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
