@@ -187,6 +187,11 @@ type DiagnosticParamsMap = {
     kind: "std-only-intrinsic-wrapper";
     intrinsicName: string;
   };
+  TY0039: {
+    kind: "redundant-match-arm";
+    armIndex: number;
+    patternLabel: string;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -685,6 +690,13 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0038"]>,
+  TY0039: {
+    code: "TY0039",
+    message: (params) =>
+      `match arm ${params.armIndex} for pattern '${params.patternLabel}' is redundant because previous arms already cover it`,
+    severity: "warning",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0039"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
