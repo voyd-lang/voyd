@@ -1,6 +1,5 @@
-import { cloneNestedMap } from "./call-resolution.js";
+import { createTypingContextFromTypingResult } from "./context-from-typing-result.js";
 import type { DependencySemantics, TypingContext } from "./types.js";
-import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import type { SymbolId } from "../ids.js";
 import type { ModuleExportEntry } from "../modules.js";
 
@@ -56,40 +55,18 @@ export const findExport = (
 export const makeDependencyContext = (
   dependency: DependencySemantics,
   ctx: TypingContext,
-): TypingContext => ({
-  activeValueTypeComputations: new Set(),
-  symbolTable: dependency.symbolTable,
-  hir: dependency.hir,
-  overloads: dependency.overloads,
-  typeCheckBudget: ctx.typeCheckBudget,
-  decls: dependency.decls,
-  moduleId: dependency.moduleId,
-  packageId: dependency.packageId,
-  moduleExports: ctx.moduleExports,
-  dependencies: ctx.dependencies,
-  importsByLocal: new Map(),
-  importAliasesByModule: new Map(),
-  arena: dependency.typing.arena,
-  table: dependency.typing.table,
-  effects: dependency.typing.effects,
-  resolvedExprTypes: new Map(dependency.typing.resolvedExprTypes),
-  valueTypes: new Map(dependency.typing.valueTypes),
-  tailResumptions: new Map(dependency.typing.tailResumptions),
-  callResolution: {
-    targets: cloneNestedMap(dependency.typing.callTargets),
-    typeArguments: cloneNestedMap(dependency.typing.callTypeArguments),
-    instanceKeys: cloneNestedMap(dependency.typing.callInstanceKeys),
-    traitDispatches: new Set(dependency.typing.callTraitDispatches),
-  },
-  functions: dependency.typing.functions,
-  objects: dependency.typing.objects,
-  traits: dependency.typing.traits,
-  typeAliases: dependency.typing.typeAliases,
-  primitives: dependency.typing.primitives,
-  intrinsicTypes: dependency.typing.intrinsicTypes,
-  traitImplsByNominal: new Map(dependency.typing.traitImplsByNominal),
-  traitImplsByTrait: new Map(dependency.typing.traitImplsByTrait),
-  traitMethodImpls: new Map(dependency.typing.traitMethodImpls),
-  memberMetadata: new Map(dependency.typing.memberMetadata),
-  diagnostics: new DiagnosticEmitter(),
-});
+): TypingContext =>
+  createTypingContextFromTypingResult({
+    symbolTable: dependency.symbolTable,
+    hir: dependency.hir,
+    overloads: dependency.overloads,
+    typeCheckBudget: ctx.typeCheckBudget,
+    decls: dependency.decls,
+    moduleId: dependency.moduleId,
+    packageId: dependency.packageId,
+    moduleExports: ctx.moduleExports,
+    dependencies: ctx.dependencies,
+    importsByLocal: new Map(),
+    importAliasesByModule: new Map(),
+    typing: dependency.typing,
+  });

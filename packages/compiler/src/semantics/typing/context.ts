@@ -8,14 +8,17 @@ import {
   ObjectStore,
   TypeAliasStore,
   TraitStore,
+  type TypeCheckBudgetConfig,
+  type TypeCheckBudgetState,
   type TypingState,
   type TypingContext,
   type TypingInputs,
 } from "./types.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
+import { createImportMaps } from "./import-maps.js";
 
-const DEFAULT_MAX_UNIFY_STEPS = 50_000;
-const DEFAULT_MAX_OVERLOAD_CANDIDATES = 64;
+export const DEFAULT_MAX_UNIFY_STEPS = 50_000;
+export const DEFAULT_MAX_OVERLOAD_CANDIDATES = 64;
 
 const normalizeBudgetLimit = ({
   value,
@@ -30,6 +33,20 @@ const normalizeBudgetLimit = ({
   return Math.max(1, Math.trunc(value));
 };
 
+export const createTypeCheckBudgetState = (
+  config?: TypeCheckBudgetConfig,
+): TypeCheckBudgetState => ({
+  maxUnifySteps: normalizeBudgetLimit({
+    value: config?.maxUnifySteps,
+    fallback: DEFAULT_MAX_UNIFY_STEPS,
+  }),
+  maxOverloadCandidates: normalizeBudgetLimit({
+    value: config?.maxOverloadCandidates,
+    fallback: DEFAULT_MAX_OVERLOAD_CANDIDATES,
+  }),
+  unifyStepsUsed: { value: 0 },
+});
+
 export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const decls = inputs.decls ?? new DeclTable();
   const arena = inputs.arena ?? createTypeArena();
@@ -41,31 +58,10 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const typeAliases = new TypeAliasStore();
   const moduleExports = inputs.moduleExports ?? new Map();
   const dependencies = inputs.availableSemantics ?? new Map();
-  const importsByLocal = new Map<
-    number,
-    { moduleId: string; symbol: number }
-  >();
-  const importAliasesByModule = new Map<string, Map<number, number>>();
-  (inputs.imports ?? []).forEach((entry) => {
-    if (!entry.target) {
-      return;
-    }
-    importsByLocal.set(entry.local, entry.target);
-    const bucket = importAliasesByModule.get(entry.target.moduleId) ?? new Map();
-    bucket.set(entry.target.symbol, entry.local);
-    importAliasesByModule.set(entry.target.moduleId, bucket);
-  });
-  const typeCheckBudget = {
-    maxUnifySteps: normalizeBudgetLimit({
-      value: inputs.typeCheckBudget?.maxUnifySteps,
-      fallback: DEFAULT_MAX_UNIFY_STEPS,
-    }),
-    maxOverloadCandidates: normalizeBudgetLimit({
-      value: inputs.typeCheckBudget?.maxOverloadCandidates,
-      fallback: DEFAULT_MAX_OVERLOAD_CANDIDATES,
-    }),
-    unifyStepsUsed: { value: 0 },
-  };
+  const { importsByLocal, importAliasesByModule } = createImportMaps(
+    inputs.imports,
+  );
+  const typeCheckBudget = createTypeCheckBudgetState(inputs.typeCheckBudget);
 
   return {
     symbolTable: inputs.symbolTable,
