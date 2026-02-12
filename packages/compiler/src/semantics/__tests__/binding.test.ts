@@ -529,6 +529,23 @@ describe("binding pipeline", () => {
     expect(methodNames).toContain("copy");
   });
 
+  it("injects only missing default overloads for same-name trait methods", () => {
+    const name = "trait_default_overload_injection.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name, kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const impl = binding.impls[0];
+    expect(impl).toBeDefined();
+    if (!impl) return;
+
+    const parseMethods = impl.methods.filter(
+      (method) => symbolTable.getSymbol(method.symbol).name === "parse",
+    );
+    expect(parseMethods).toHaveLength(2);
+  });
+
   it("resolves self-relative use declarations using module export dependencies", () => {
     const source = "use self::util::all";
     const ast = parse(source, "main.voyd");

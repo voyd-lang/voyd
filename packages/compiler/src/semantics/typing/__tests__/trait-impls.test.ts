@@ -32,6 +32,12 @@ describe("trait implementations", () => {
     ).not.toThrow();
   });
 
+  it("applies missing default trait overloads without clobbering existing impl overloads", () => {
+    expect(() =>
+      semanticsPipeline(loadAst("trait_default_overload_injection.voyd"))
+    ).not.toThrow();
+  });
+
   it("errors when an impl misses one required trait overload", () => {
     expect(() =>
       semanticsPipeline(loadAst("trait_overload_parse_missing_impl.voyd"))

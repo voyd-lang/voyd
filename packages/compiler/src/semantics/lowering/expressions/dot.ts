@@ -126,15 +126,19 @@ const lowerQualifiedTraitMethodCallExpr = ({
   }
 
   const traitDecl = ctx.decls.getTrait(traitSymbol);
-  const traitMethod = traitDecl?.methods.find(
-    (method) => ctx.symbolTable.getSymbol(method.symbol).name === calleeExpr.value,
-  );
-  if (!traitMethod) {
+  const traitMethods =
+    traitDecl?.methods.filter(
+      (method) => ctx.symbolTable.getSymbol(method.symbol).name === calleeExpr.value,
+    ) ?? [];
+  if (traitMethods.length === 0) {
     throw new Error(
       `trait ${traitRecord.name} does not declare method ${calleeExpr.value}`,
     );
   }
-  if (traitMethod.params[0]?.name !== "self") {
+  const selfTraitMethods = traitMethods.filter(
+    (method) => traitMethodHasSelfReceiver(method),
+  );
+  if (selfTraitMethods.length === 0) {
     throw new Error(
       `qualified trait call requires a self receiver (method ${traitRecord.name}::${calleeExpr.value})`,
     );
@@ -175,6 +179,25 @@ const lowerQualifiedTraitMethodCallExpr = ({
     args,
     typeArguments,
   });
+};
+
+const traitMethodHasSelfReceiver = ({
+  params,
+}: {
+  params: readonly { name: string; ast?: unknown }[];
+}): boolean => {
+  const receiver = params[0];
+  if (!receiver) {
+    return false;
+  }
+  if (receiver.name === "self") {
+    return true;
+  }
+  return Boolean(
+    receiver.ast &&
+      isIdentifierAtom(receiver.ast) &&
+      receiver.ast.value === "self",
+  );
 };
 
 const lowerMethodCallExpr = ({
