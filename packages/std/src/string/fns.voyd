@@ -30,9 +30,11 @@ impl String
   api fn byte_at(self, index: i32): () -> i32
     if index < 0 then:
       return -1
-    if index >= self.byte_count then:
-      return -1
-    __array_get(self.bytes.raw_storage(), index)
+    match(self.bytes.get(index))
+      Some { value }:
+        value
+      None:
+        -1
 
   api fn raw_bytes(self): () -> FixedArray<i32>
     self.bytes.raw_storage()
