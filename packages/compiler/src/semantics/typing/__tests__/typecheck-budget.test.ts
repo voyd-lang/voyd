@@ -266,6 +266,28 @@ describe("type-check budgets", () => {
     expect(error.diagnostic.code).toBe("TY0040");
   });
 
+  it("reports TY0040 when expected-side union sweeps exhaust unify budget", () => {
+    const { ctx, state } = createTypeSatisfactionContext({
+      maxUnifySteps: 12,
+    });
+    const bool = getPrimitiveType(ctx, "bool");
+    const actual = ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: bool }],
+    });
+    const expected = ctx.arena.internUnion(
+      Array.from({ length: 80 }, (_, index) =>
+        ctx.arena.internStructuralObject({
+          fields: [{ name: `missing_${index}`, type: bool }],
+        }),
+      ),
+    );
+
+    const error = expectDiagnosticError(() =>
+      typeSatisfies(actual, expected, ctx, state),
+    );
+    expect(error.diagnostic.code).toBe("TY0040");
+  });
+
   it("handles union-heavy comparisons when the unify budget is sufficient", () => {
     const { ctx, state } = createTypeSatisfactionContext({
       maxUnifySteps: 20_000,

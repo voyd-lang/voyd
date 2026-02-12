@@ -63,7 +63,9 @@ export const unifyWithBudget = ({
       stepsUsed: ctx.typeCheckBudget.unifyStepsUsed,
     },
   });
-  if (!compatibility.ok && compatibility.conflict.kind === "budget-exceeded") {
+  const exhaustedBudget =
+    ctx.typeCheckBudget.unifyStepsUsed.value > ctx.typeCheckBudget.maxUnifySteps;
+  if (!compatibility.ok && exhaustedBudget) {
     emitDiagnostic({
       ctx,
       code: "TY0040",
