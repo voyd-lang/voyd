@@ -59,7 +59,11 @@ async function main() {
   }
 
   if (config.run) {
-    return runWasm(entryPath, roots, config.runBinaryenOptimizationPass);
+    return runVoyd(entryPath, roots, config.runBinaryenOptimizationPass);
+  }
+
+  if (config.runWasm) {
+    return runWasm(entryPath);
   }
 
   if (config.internalTest) {
@@ -210,7 +214,7 @@ async function emitWasm(
   stdout.write(result.wasm);
 }
 
-async function runWasm(
+async function runVoyd(
   entryPath: string,
   roots: ModuleRoots,
   optimize = false,
@@ -220,6 +224,12 @@ async function runWasm(
   );
 
   const result = await sdk.run({ wasm: compiled.wasm, entryName: "main" });
+  printValue(result);
+}
+
+async function runWasm(entryPath: string) {
+  const wasm = readFileSync(entryPath);
+  const result = await sdk.run({ wasm, entryName: "main" });
   printValue(result);
 }
 

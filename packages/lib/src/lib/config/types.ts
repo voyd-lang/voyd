@@ -11,8 +11,10 @@ export type VoydConfig = {
   emitWasmText?: boolean;
   /** Have binaryen run an optimization pass */
   runBinaryenOptimizationPass?: boolean;
-  /** Run the compiled wasm code */
+  /** Run voyd from src/ or provided path */
   run?: boolean;
+  /** Run emitted wasm directly */
+  runWasm?: boolean;
   decodeMsgPackResponse?: boolean;
   /** Specifies the entry voyd file */
   index: string;

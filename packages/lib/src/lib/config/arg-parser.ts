@@ -24,11 +24,12 @@ export const getConfigFromCli = (): VoydConfig => {
     .option("--emit-wasm", "write wasm bytecode to stdout")
     .option(
       "--emit-wasm-text",
-      "write wasm text format (binaryen flavor) to stdout"
+      "write wasm text format (binaryen flavor) to stdout",
     )
     .option("--opt", "have binaryen run its standard optimization pass")
     .option("-m, --msg-pack", "decode message pack response")
-    .option("-r, --run", "run the compiled wasm code")
+    .option("-r, --run", "run voyd from src/ or provided path")
+    .option("--run-wasm", "run the compiled wasm code directly")
     .option("--internal-test", "run the internal test script")
     .option("--test", "run voyd tests")
     .option("--reporter <name>", "test reporter (default: minimal)")
@@ -60,6 +61,7 @@ export const getConfigFromCli = (): VoydConfig => {
     runBinaryenOptimizationPass: opts.opt,
     decodeMsgPackResponse: opts.msgPack,
     run: opts.run,
+    runWasm: opts.runWasm,
     internalTest: opts.internalTest,
     test: testMode,
     testReporter: opts.reporter,
