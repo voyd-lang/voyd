@@ -397,12 +397,18 @@ const enforcePkgRootEffectRules = ({
 
   const getEffectInfo = (
     effectRow: number,
-  ): { isPure: boolean; effectsText: string } => {
+  ): { isPure: boolean; isPolymorphic: boolean; effectsText: string } => {
     try {
+      const row = typing.effects.getRow(effectRow);
       const isPure = typing.effects.isEmpty(effectRow);
-      return { isPure, effectsText: formatEffectRow(effectRow, typing.effects) };
+      const isPolymorphic = !isPure && row.operations.length === 0 && Boolean(row.tailVar);
+      return {
+        isPure,
+        isPolymorphic,
+        effectsText: formatEffectRow(effectRow, typing.effects),
+      };
     } catch {
-      return { isPure: false, effectsText: "unknown effects" };
+      return { isPure: false, isPolymorphic: false, effectsText: "unknown effects" };
     }
   };
 
@@ -422,9 +428,14 @@ const enforcePkgRootEffectRules = ({
     const signature = typing.functions.getSignature(symbol);
     if (!signature) return;
 
-    const { isPure, effectsText } = getEffectInfo(signature.effectRow);
+    const { isPure, isPolymorphic, effectsText } = getEffectInfo(signature.effectRow);
 
-    if (!signature.annotatedEffects && !isPure && displayName !== "main") {
+    if (
+      !signature.annotatedEffects &&
+      !isPure &&
+      !isPolymorphic &&
+      displayName !== "main"
+    ) {
       diagnostics.push(
         diagnosticFromCode({
           code: "TY0016",

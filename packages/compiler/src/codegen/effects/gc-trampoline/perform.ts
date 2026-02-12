@@ -27,6 +27,7 @@ import {
   continuationFunctionName,
   ensureContinuationFunction,
 } from "./continuations.js";
+import { specializeContinuationSite } from "./specialize-site.js";
 import { getEffectOpInstanceInfo, resolvePerformSignature } from "../effect-registry.js";
 import { ensureEffectArgsType } from "../args-type.js";
 import { ensureEffectsMemory } from "../host-boundary/imports.js";
@@ -47,8 +48,8 @@ export const compileEffectOpCall = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): CompiledExpression => {
-  const site = ctx.effectLowering.sitesByExpr.get(expr.id);
-  if (!site || site.kind !== "perform") {
+  const siteTemplate = ctx.effectLowering.sitesByExpr.get(expr.id);
+  if (!siteTemplate || siteTemplate.kind !== "perform") {
     throw new Error("codegen missing effect lowering info for perform site");
   }
   const signature = ctx.program.functions.getSignature(ctx.moduleId, calleeSymbol);
@@ -56,6 +57,14 @@ export const compileEffectOpCall = ({
     throw new Error("codegen missing effect operation signature");
   }
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const site = specializeContinuationSite({
+    site: siteTemplate,
+    ctx,
+    typeInstanceId,
+  });
+  if (site.kind !== "perform") {
+    throw new Error("codegen missing effect lowering info for perform site");
+  }
   const registry = ctx.effectsState.effectRegistry;
   if (!registry) {
     throw new Error("codegen missing effect registry");

@@ -148,6 +148,51 @@ export const resolveEffectAnnotation = (
 ): EffectRowId | undefined =>
   effectType ? resolveEffectRowFromExpr(effectType, ctx, state) : undefined;
 
+export const applyEffectRowSubstitution = ({
+  row,
+  substitution,
+  effects,
+}: {
+  row: EffectRowId;
+  substitution: ReadonlyMap<number, EffectRowId>;
+  effects: EffectTable;
+}): EffectRowId => {
+  if (substitution.size === 0) {
+    return row;
+  }
+
+  const visit = (current: EffectRowId, seen: Set<EffectRowId>): EffectRowId => {
+    if (seen.has(current)) {
+      return current;
+    }
+    seen.add(current);
+
+    const desc = effects.getRow(current);
+    const tail = desc.tailVar;
+    if (!tail) {
+      seen.delete(current);
+      return current;
+    }
+
+    const replacement = substitution.get(tail.id);
+    if (typeof replacement !== "number") {
+      seen.delete(current);
+      return current;
+    }
+
+    const appliedReplacement = visit(replacement, seen);
+    const replacementDesc = effects.getRow(appliedReplacement);
+    const next = effects.internRow({
+      operations: [...desc.operations, ...replacementDesc.operations],
+      tailVar: replacementDesc.tailVar,
+    });
+    seen.delete(current);
+    return next;
+  };
+
+  return visit(row, new Set());
+};
+
 export const ensureEffectCompatibility = ({
   inferred,
   annotated,

@@ -1,6 +1,7 @@
 import type binaryen from "binaryen";
 import type { GroupContinuationCfg } from "./continuation-cfg.js";
 import type { EffectRegistry } from "./effect-registry.js";
+import type { ContinuationSite } from "./effect-lowering.js";
 
 export interface EffectsState {
   dispatcherName?: string;
@@ -9,6 +10,7 @@ export interface EffectsState {
   contCfgByName: Map<string, GroupContinuationCfg>;
   contRefTypeByKey: Map<string, binaryen.Type>;
   contSignatureByKey: Map<string, { returnType: number; envTypes: number[] }>;
+  contSiteByKey: Map<string, ContinuationSite>;
   effectRegistry?: EffectRegistry;
   effectArgsTypes: Map<number, number>;
   closureCoercions: Map<
@@ -24,6 +26,7 @@ export const createEffectsState = (): EffectsState => ({
   contCfgByName: new Map<string, GroupContinuationCfg>(),
   contRefTypeByKey: new Map<string, binaryen.Type>(),
   contSignatureByKey: new Map<string, { returnType: number; envTypes: number[] }>(),
+  contSiteByKey: new Map<string, ContinuationSite>(),
   effectArgsTypes: new Map(),
   closureCoercions: new Map(),
   memo: new Map<symbol, unknown>(),

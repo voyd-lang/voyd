@@ -2031,6 +2031,48 @@ const structuralExpectationOf = (
   }
 };
 
+const functionTypeSatisfies = ({
+  actual,
+  expected,
+  ctx,
+  state,
+}: {
+  actual: TypeId;
+  expected: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const actualDesc = ctx.arena.get(actual);
+  const expectedDesc = ctx.arena.get(expected);
+  if (actualDesc.kind !== "function" || expectedDesc.kind !== "function") {
+    return false;
+  }
+
+  if (actualDesc.parameters.length !== expectedDesc.parameters.length) {
+    return false;
+  }
+
+  for (let index = 0; index < actualDesc.parameters.length; index += 1) {
+    const actualParam = actualDesc.parameters[index]!;
+    const expectedParam = expectedDesc.parameters[index]!;
+    if (actualParam.optional !== expectedParam.optional) {
+      return false;
+    }
+    if (!typeSatisfies(expectedParam.type, actualParam.type, ctx, state)) {
+      return false;
+    }
+  }
+
+  if (!typeSatisfies(actualDesc.returnType, expectedDesc.returnType, ctx, state)) {
+    return false;
+  }
+
+  return ctx.effects.constrain(actualDesc.effectRow, expectedDesc.effectRow, {
+    location: ctx.hir.module.ast,
+    reason: "function type effect compatibility",
+  }).ok;
+};
+
 // Satisfaction layers nominal gates over structural comparison and unification:
 // unknown short-circuits according to mode, structural expectations normalize through the arena, and nominal expectations gate structural fallbacks.
 export const typeSatisfies = (
@@ -2058,6 +2100,10 @@ export const typeSatisfies = (
   }
 
   const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "function") {
+    return functionTypeSatisfies({ actual, expected, ctx, state });
+  }
+
   if (expectedDesc.kind === "trait") {
     const owner = localSymbolForSymbolRef(expectedDesc.owner, ctx);
     return typeof owner === "number"

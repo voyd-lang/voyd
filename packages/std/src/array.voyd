@@ -86,7 +86,7 @@ impl<T> Array<T>
     })
     Array<T> { storage: next_raw, count: next_count, owners: new_array_owners() }
 
-  api fn map<O>(self, f: (v: T) -> O): () -> Array<O>
+  api fn map<O>(self, f: (v: T) -> O) -> Array<O>
     if self.count == 0:
       return Array<O>::with_capacity(0)
 
@@ -99,7 +99,7 @@ impl<T> Array<T>
 
     Array<O> { storage: next_raw, count: self.count, owners: new_array_owners() }
 
-  api fn filter(self, pred: (v: T) -> bool): () -> Array<T>
+  api fn filter(self, pred: (v: T) -> bool) -> Array<T>
     let initial_capacity = if self.count > 0 then: self.count else: 0
     let ~out = Array<T>::with_capacity(initial_capacity)
     var index = 0
@@ -110,7 +110,7 @@ impl<T> Array<T>
       index = index + 1
     out
 
-  api fn reduce<O>(self, initial: O, { step: (acc: O, v: T) -> O }): () -> O
+  api fn reduce<O>(self, initial: O, { step: (acc: O, v: T) -> O }) -> O
     var acc = initial
     var index = 0
     while index < self.count:
@@ -119,7 +119,7 @@ impl<T> Array<T>
       index = index + 1
     acc
 
-  api fn find(self, pred: (v: T) -> bool): () -> Optional<T>
+  api fn find(self, pred: (v: T) -> bool) -> Optional<T>
     var index = 0
     while index < self.count:
       let value = __array_get(self.storage, index)
@@ -128,7 +128,7 @@ impl<T> Array<T>
       index = index + 1
     None {}
 
-  api fn some(self, pred: (v: T) -> bool): () -> bool
+  api fn some(self, pred: (v: T) -> bool) -> bool
     var index = 0
     while index < self.count:
       if pred(__array_get(self.storage, index)):
@@ -136,7 +136,7 @@ impl<T> Array<T>
       index = index + 1
     false
 
-  api fn every(self, pred: (v: T) -> bool): () -> bool
+  api fn every(self, pred: (v: T) -> bool) -> bool
     var index = 0
     while index < self.count:
       if not pred(__array_get(self.storage, index)):
@@ -155,7 +155,7 @@ impl<T> Array<T>
   api fn contains(self, value: T) -> bool
     self.index_of(value) >= 0
 
-  api fn sorted(self, compare: (left: T, right: T) -> i32): () -> Array<T>
+  api fn sorted(self, compare: (left: T, right: T) -> i32) -> Array<T>
     let ~copy = self.copied()
     copy.sort(compare)
     copy
@@ -185,7 +185,7 @@ impl<T> Array<T>
   api fn concat(self, other: Array<T>) -> Array<T>
     self.extended(other)
 
-  api fn sort(~self, compare: (left: T, right: T) -> i32): () -> void
+  api fn sort(~self, compare: (left: T, right: T) -> i32) -> void
     if self.count < 2:
       return void
 

@@ -216,10 +216,12 @@ export const createEffectInterner = (): EffectInterner => {
             : undefined,
       });
       substitution.set(supRow.tailVar!.id, tailRow);
-    } else if (supAllowsExtra && subRow.tailVar) {
+    } else if (supAllowsExtra) {
       substitution.set(
         supRow.tailVar!.id,
-        internRow({ operations: [], tailVar: subRow.tailVar })
+        subRow.tailVar
+          ? internRow({ operations: [], tailVar: subRow.tailVar })
+          : emptyRow
       );
     }
 

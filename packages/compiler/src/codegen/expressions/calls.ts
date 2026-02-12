@@ -42,6 +42,7 @@ import { effectsFacade } from "../effects/facade.js";
 import { buildInstanceSubstitution } from "../type-substitution.js";
 import { compileOptionalNoneValue } from "../optionals.js";
 import { typeContainsUnresolvedParam } from "../../semantics/type-utils.js";
+import { resolveTempCaptureTypeId } from "../effects/temp-capture-types.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
@@ -95,8 +96,15 @@ const getOrCreateTempLocal = ({
 }): { index: number; type: binaryen.Type } => {
   const existing = fnCtx.tempLocals.get(tempId);
   if (existing) return existing;
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typeId =
-    ctx.effectLowering.tempTypeIds.get(tempId) ?? ctx.program.primitives.unknown;
+    typeof typeInstanceId === "number"
+      ? resolveTempCaptureTypeId({
+          tempId,
+          ctx,
+          typeInstanceId,
+        })
+      : (ctx.effectLowering.tempTypeIds.get(tempId) ?? ctx.program.primitives.unknown);
   const wasmType = wasmTypeFor(typeId, ctx);
   const local = allocateTempLocal(wasmType, fnCtx, typeId);
   fnCtx.tempLocals.set(tempId, local);

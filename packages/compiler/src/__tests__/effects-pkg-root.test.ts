@@ -69,6 +69,34 @@ pub fn pure() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("accepts unannotated effect-polymorphic exports from pkg.voyd", async () => {
+    const root = resolve("/proj/app/src");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const helpersPath = `${root}${sep}utils${sep}helpers.voyd`;
+    const host = createMemoryHost({
+      [pkgPath]: `
+use src::utils::helpers::all
+
+pub use src::utils::helpers::run
+pub fn main(): () -> i32
+  run(() -> i32 => 1)
+`,
+      [helpersPath]: `
+pub fn run(cb: fn() -> i32) -> i32
+  cb()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics.some((diag) => diag.code === "TY0016")).toBe(false);
+  });
+
   it("rejects unannotated effectful exports from pkg.voyd", async () => {
     const root = resolve("/proj/app/src");
     const pkgPath = `${root}${sep}pkg.voyd`;
