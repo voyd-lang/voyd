@@ -1,0 +1,16 @@
+obj A<T> { value: T }
+obj B {}
+
+type C<T> = A<T> | B
+
+fn to_c() -> C<i32>
+  B {}
+
+pub fn main() -> i32
+  to_c().match
+    A:
+      1
+    B:
+      2
+    C:
+      3
