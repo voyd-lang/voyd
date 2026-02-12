@@ -554,6 +554,48 @@ pub fn main() -> i32
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 
+  it("matches local impls against imported labeled trait overloads", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::router::{ Router }
+`,
+      [`${stdRoot}${sep}router.voyd`]: `
+pub trait Router
+  fn route(self, { from dest: i32 }) -> i32
+  fn route(self, { to dest: i32 }) -> i32
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+obj Box { value: i32 }
+
+impl Router for Box
+  fn route(self, { from dest: i32 }) -> i32
+    self.value + dest
+
+  fn route(self, { to dest: i32 }) -> i32
+    self.value - dest
+
+fn apply(r: Router) -> i32
+  r.route(from: 2) + r.route(to: 3)
+
+pub fn main() -> i32
+  apply(Box { value: 7 })
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModulesWithIsolatedInterners({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
   it("allows named macro re-exports in std package imports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

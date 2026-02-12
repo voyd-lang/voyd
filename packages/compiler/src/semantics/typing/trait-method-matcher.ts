@@ -146,6 +146,7 @@ export const buildTraitMethodSignatureInfosFromHir = ({
     const params = method.parameters.map((param, index) => {
       const paramName = getSymbolName(param.symbol, ctx);
       return {
+        label: param.label,
         name: paramName,
         typeKey: methodSignatureParamTypeKey({
           index,

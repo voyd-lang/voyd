@@ -294,6 +294,7 @@ export const lowerTraitDecl = (
     const parameters = method.params.map((param) => ({
       symbol: param.symbol,
       span: toSourceSpan(param.ast ?? method.form ?? trait.form),
+      label: param.label,
       type: lowerTypeExpr(param.typeExpr, ctx, methodScope),
       mutable: false,
       bindingKind: param.bindingKind,

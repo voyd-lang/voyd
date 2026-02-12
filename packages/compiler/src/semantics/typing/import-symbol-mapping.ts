@@ -134,6 +134,7 @@ const traitMethodMappingKey = ({
   const params = method.parameters.map((param, index) => {
     const paramName = symbolNameFor(param.symbol);
     return {
+      label: param.label,
       name: paramName,
       typeKey: methodSignatureParamTypeKey({
         index,
