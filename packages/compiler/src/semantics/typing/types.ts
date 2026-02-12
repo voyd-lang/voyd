@@ -32,6 +32,17 @@ import type { SymbolRef } from "./symbol-ref.js";
 export type TypeCheckMode = "relaxed" | "strict";
 export type SymbolRefKey = string;
 
+export interface TypeCheckBudgetConfig {
+  maxUnifySteps?: number;
+  maxOverloadCandidates?: number;
+}
+
+export interface TypeCheckBudgetState {
+  maxUnifySteps: number;
+  maxOverloadCandidates: number;
+  unifyStepsUsed: { value: number };
+}
+
 export interface TypingInputs {
   symbolTable: SymbolTable;
   hir: HirGraph;
@@ -48,6 +59,7 @@ export interface TypingInputs {
   packageId?: string;
   moduleExports?: Map<string, ModuleExportTable>;
   availableSemantics?: Map<string, DependencySemantics>;
+  typeCheckBudget?: TypeCheckBudgetConfig;
 }
 
 export interface TypingResult {
@@ -564,6 +576,7 @@ export interface TypingContext {
   symbolTable: SymbolTable;
   hir: HirGraph;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
+  typeCheckBudget: TypeCheckBudgetState;
   decls: DeclTable;
   moduleId: string;
   packageId: string;

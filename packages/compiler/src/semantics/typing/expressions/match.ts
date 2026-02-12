@@ -11,6 +11,7 @@ import {
   unfoldRecursiveType,
   getStructuralFields,
   getSymbolName,
+  unifyWithBudget,
 } from "../type-system.js";
 import {
   diagnosticFromCode,
@@ -746,11 +747,16 @@ const inferAliasPatternType = ({
   })();
 
   members.forEach((member) => {
-    const comparison = ctx.arena.unify(member, inferenceTarget, {
-      location: ctx.hir.module.ast,
-      reason: "match alias pattern inference",
-      variance: "covariant",
-      allowUnknown: state.mode === "relaxed",
+    const comparison = unifyWithBudget({
+      actual: member,
+      expected: inferenceTarget,
+      options: {
+        location: ctx.hir.module.ast,
+        reason: "match alias pattern inference",
+        variance: "covariant",
+        allowUnknown: state.mode === "relaxed",
+      },
+      ctx,
     });
     if (!comparison.ok) {
       return;

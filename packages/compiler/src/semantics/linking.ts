@@ -1,11 +1,12 @@
-import { DiagnosticEmitter } from "../diagnostics/index.js";
-import { createTypingState } from "./typing/context.js";
+import { createTypeCheckBudgetState, createTypingState } from "./typing/context.js";
 import type { DependencySemantics, SymbolRefKey, TypingContext } from "./typing/types.js";
 import {
   typeGenericFunctionBody,
   formatFunctionInstanceKey,
 } from "./typing/expressions/call.js";
 import { cloneNestedMap } from "./typing/call-resolution.js";
+import { createImportMaps } from "./typing/import-maps.js";
+import { createTypingContextFromTypingResult } from "./typing/context-from-typing-result.js";
 import type { ModuleExportTable } from "./modules.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import type { MonomorphizedInstanceRequest } from "./codegen-view/index.js";
@@ -411,29 +412,18 @@ const createTypingContextFactory = ({
       return undefined;
     }
 
-    const importsByLocal = new Map<
-      number,
-      { moduleId: string; symbol: number }
-    >();
-    const importAliasesByModule = new Map<string, Map<number, number>>();
-    entry.binding.imports.forEach((imp) => {
-      if (!imp.target) {
-        return;
-      }
-      importsByLocal.set(imp.local, imp.target);
-      const bucket =
-        importAliasesByModule.get(imp.target.moduleId) ?? new Map();
-      bucket.set(imp.target.symbol, imp.local);
-      importAliasesByModule.set(imp.target.moduleId, bucket);
-    });
+    const { importsByLocal, importAliasesByModule } = createImportMaps(
+      entry.binding.imports,
+    );
 
-    const ctx: TypingContext = {
+    const ctx = createTypingContextFromTypingResult({
       symbolTable: getSymbolTable(entry),
       hir: entry.hir,
       overloads: collectOverloadOptions(
         entry.binding.overloads,
-        entry.binding.importedOverloadOptions
+        entry.binding.importedOverloadOptions,
       ),
+      typeCheckBudget: createTypeCheckBudgetState(),
       decls: entry.binding.decls,
       moduleId: entry.moduleId,
       packageId: entry.binding.packageId,
@@ -441,31 +431,8 @@ const createTypingContextFactory = ({
       dependencies,
       importsByLocal,
       importAliasesByModule,
-      arena: entry.typing.arena,
-      table: entry.typing.table,
-      effects: entry.typing.effects,
-      resolvedExprTypes: new Map(entry.typing.resolvedExprTypes),
-      valueTypes: new Map(entry.typing.valueTypes),
-      activeValueTypeComputations: new Set(),
-      tailResumptions: new Map(entry.typing.tailResumptions),
-      callResolution: {
-        targets: cloneNestedMap(entry.typing.callTargets),
-        typeArguments: cloneNestedMap(entry.typing.callTypeArguments),
-        instanceKeys: cloneNestedMap(entry.typing.callInstanceKeys),
-        traitDispatches: new Set(entry.typing.callTraitDispatches),
-      },
-      functions: entry.typing.functions,
-      objects: entry.typing.objects,
-      traits: entry.typing.traits,
-      typeAliases: entry.typing.typeAliases,
-      primitives: entry.typing.primitives,
-      intrinsicTypes: entry.typing.intrinsicTypes,
-      diagnostics: new DiagnosticEmitter(),
-      memberMetadata: new Map(entry.typing.memberMetadata),
-      traitImplsByNominal: new Map(entry.typing.traitImplsByNominal),
-      traitImplsByTrait: new Map(entry.typing.traitImplsByTrait),
-      traitMethodImpls: new Map(entry.typing.traitMethodImpls),
-    };
+      typing: entry.typing,
+    });
 
     typingContexts.set(moduleId, ctx);
     return ctx;

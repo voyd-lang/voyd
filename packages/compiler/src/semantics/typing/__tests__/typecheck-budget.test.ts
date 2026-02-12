@@ -1,0 +1,1398 @@
+import { describe, expect, it } from "vitest";
+import type { HirGraph } from "../../hir/index.js";
+import { moduleVisibility, packageVisibility } from "../../hir/index.js";
+import type {
+  OverloadSetId,
+  ScopeId,
+  SourceSpan,
+  SymbolId,
+  TypeId,
+} from "../../ids.js";
+import { Expr } from "../../../parser/index.js";
+import { runTypingPipeline } from "../typing.js";
+import { createModuleContext } from "./helpers.js";
+import { DiagnosticError } from "../../../diagnostics/index.js";
+import { SymbolTable } from "../../binder/index.js";
+import { DeclTable } from "../../decls.js";
+import { createTypingContext, createTypingState } from "../context.js";
+import { getPrimitiveType, typeSatisfies } from "../type-system.js";
+import { seedBaseObjectType, seedPrimitiveTypes } from "../registry.js";
+import type { TypeCheckBudgetConfig } from "../types.js";
+
+const createNamedType = (
+  name: string,
+  ast: number,
+  span: SourceSpan,
+): { typeKind: "named"; path: string[]; ast: number; span: SourceSpan } => ({
+  typeKind: "named",
+  path: [name],
+  ast,
+  span,
+});
+
+const createOverloadFanoutCase = (overloadCount: number) => {
+  const ctx = createModuleContext();
+  const overloadSetId: OverloadSetId = 0;
+  const functionScope = ctx.symbolTable.rootScope as ScopeId;
+  const fakeExpr = (): Expr =>
+    ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+
+  const overloadSymbols: SymbolId[] = [];
+  for (let index = 0; index < overloadCount; index += 1) {
+    const symbol = ctx.symbolTable.declare({
+      name: "pick",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    overloadSymbols.push(symbol);
+
+    const paramCount = index === overloadCount - 1 ? 1 : 2;
+    const params = Array.from({ length: paramCount }, (_, paramIndex) => {
+      const paramSymbol = ctx.symbolTable.declare({
+        name: `value_${index}_${paramIndex}`,
+        kind: "parameter",
+        declaredAt: ctx.nextNode(),
+      });
+      return {
+        name: `value_${index}_${paramIndex}`,
+        symbol: paramSymbol,
+      };
+    });
+
+    const decl = ctx.decls.registerFunction({
+      name: "pick",
+      visibility: moduleVisibility(),
+      symbol,
+      scope: functionScope,
+      params: params.map((entry) => ({
+        name: entry.name,
+        symbol: entry.symbol,
+        ast: undefined,
+      })),
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      symbol,
+      decl: decl.id,
+      parameters: params.map((entry) => ({
+        symbol: entry.symbol,
+        pattern: { kind: "identifier", symbol: entry.symbol },
+        mutable: false,
+        span: ctx.span,
+        type: i32(),
+      })),
+      returnType: i32(),
+      body: ctx.createLiteral("i32", `${index}`),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  }
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "overload-set",
+      name: "pick",
+      set: overloadSetId,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const mainDecl = ctx.decls.registerFunction({
+    name: "main",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    scope: functionScope,
+    params: [],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    decl: mainDecl.id,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>([
+        [overloadSetId, overloadSymbols],
+      ]),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: overloadSymbols[overloadSymbols.length - 1]!,
+  };
+};
+
+const createReturnTypeNarrowingCase = (overloadCount: number) => {
+  const ctx = createModuleContext();
+  const overloadSetId: OverloadSetId = 0;
+  const functionScope = ctx.symbolTable.rootScope as ScopeId;
+  const fakeExpr = (): Expr =>
+    ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+  const bool = () => createNamedType("bool", ctx.nextNode(), ctx.span);
+
+  const overloadSymbols: SymbolId[] = [];
+  for (let index = 0; index < overloadCount; index += 1) {
+    const symbol = ctx.symbolTable.declare({
+      name: "pick_by_return",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    overloadSymbols.push(symbol);
+
+    const valueParam = ctx.symbolTable.declare({
+      name: `value_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const decl = ctx.decls.registerFunction({
+      name: "pick_by_return",
+      visibility: moduleVisibility(),
+      symbol,
+      scope: functionScope,
+      params: [{ name: `value_${index}`, symbol: valueParam, ast: undefined }],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
+    const returnsI32 = index === overloadCount - 1;
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      symbol,
+      decl: decl.id,
+      parameters: [
+        {
+          symbol: valueParam,
+          pattern: { kind: "identifier", symbol: valueParam },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        },
+      ],
+      returnType: returnsI32 ? i32() : bool(),
+      body: returnsI32
+        ? ctx.createLiteral("i32", `${index}`)
+        : ctx.createLiteral("boolean", "false"),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  }
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "overload-set",
+      name: "pick_by_return",
+      set: overloadSetId,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const mainDecl = ctx.decls.registerFunction({
+    name: "main",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    scope: functionScope,
+    params: [],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    decl: mainDecl.id,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>([
+        [overloadSetId, overloadSymbols],
+      ]),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: overloadSymbols[overloadSymbols.length - 1]!,
+  };
+};
+
+const createExplicitTypeArgumentNarrowingCase = (nongenericOverloadCount: number) => {
+  const ctx = createModuleContext();
+  const overloadSetId: OverloadSetId = 0;
+  const functionScope = ctx.symbolTable.rootScope as ScopeId;
+  const fakeExpr = (): Expr =>
+    ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+
+  const overloadSymbols: SymbolId[] = [];
+  for (let index = 0; index < nongenericOverloadCount; index += 1) {
+    const symbol = ctx.symbolTable.declare({
+      name: "pick_by_type_args",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    overloadSymbols.push(symbol);
+
+    const valueParam = ctx.symbolTable.declare({
+      name: `value_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const decl = ctx.decls.registerFunction({
+      name: "pick_by_type_args",
+      visibility: moduleVisibility(),
+      symbol,
+      scope: functionScope,
+      params: [{ name: `value_${index}`, symbol: valueParam, ast: undefined }],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      symbol,
+      decl: decl.id,
+      parameters: [
+        {
+          symbol: valueParam,
+          pattern: { kind: "identifier", symbol: valueParam },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        },
+      ],
+      returnType: i32(),
+      body: ctx.createLiteral("i32", `${index}`),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  }
+
+  const genericSymbol = ctx.symbolTable.declare({
+    name: "pick_by_type_args",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericTypeParamSymbol = ctx.symbolTable.declare({
+    name: "T",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericValueParam = ctx.symbolTable.declare({
+    name: "value_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericDecl = ctx.decls.registerFunction({
+    name: "pick_by_type_args",
+    visibility: moduleVisibility(),
+    symbol: genericSymbol,
+    scope: functionScope,
+    typeParameters: [{ name: "T", symbol: genericTypeParamSymbol }],
+    params: [{ name: "value_generic", symbol: genericValueParam, ast: undefined }],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: moduleVisibility(),
+    symbol: genericSymbol,
+    decl: genericDecl.id,
+    typeParameters: [{ symbol: genericTypeParamSymbol, span: ctx.span }],
+    parameters: [
+      {
+        symbol: genericValueParam,
+        pattern: { kind: "identifier", symbol: genericValueParam },
+        mutable: false,
+        span: ctx.span,
+        type: i32(),
+      },
+    ],
+    returnType: i32(),
+    body: ctx.createLiteral("i32", "42"),
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  overloadSymbols.push(genericSymbol);
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "overload-set",
+      name: "pick_by_type_args",
+      set: overloadSetId,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    typeArguments: [i32()],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const mainDecl = ctx.decls.registerFunction({
+    name: "main",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    scope: functionScope,
+    params: [],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    decl: mainDecl.id,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>([
+        [overloadSetId, overloadSymbols],
+      ]),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: genericSymbol,
+  };
+};
+
+const createExplicitTypeArgReturnFilterCase = (overloadCount: number) => {
+  const ctx = createModuleContext();
+  const overloadSetId: OverloadSetId = 0;
+  const functionScope = ctx.symbolTable.rootScope as ScopeId;
+  const fakeExpr = (): Expr =>
+    ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+  const bool = () => createNamedType("bool", ctx.nextNode(), ctx.span);
+
+  const overloadSymbols: SymbolId[] = [];
+  for (let index = 0; index < overloadCount; index += 1) {
+    const symbol = ctx.symbolTable.declare({
+      name: "pick_by_explicit_return",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    overloadSymbols.push(symbol);
+
+    const typeParamSymbol = ctx.symbolTable.declare({
+      name: `T_${index}`,
+      kind: "type",
+      declaredAt: ctx.nextNode(),
+    });
+    const valueParam = ctx.symbolTable.declare({
+      name: `value_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const decl = ctx.decls.registerFunction({
+      name: "pick_by_explicit_return",
+      visibility: moduleVisibility(),
+      symbol,
+      scope: functionScope,
+      typeParameters: [{ name: `T_${index}`, symbol: typeParamSymbol }],
+      params: [{ name: `value_${index}`, symbol: valueParam, ast: undefined }],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
+    const isSelectedOverload = index === overloadCount - 1;
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      symbol,
+      decl: decl.id,
+      typeParameters: [{ symbol: typeParamSymbol, span: ctx.span }],
+      parameters: [
+        {
+          symbol: valueParam,
+          pattern: { kind: "identifier", symbol: valueParam },
+          mutable: false,
+          span: ctx.span,
+          type: isSelectedOverload
+            ? i32()
+            : {
+                ...bool(),
+                path: [`T_${index}`],
+                symbol: typeParamSymbol,
+              },
+        },
+      ],
+      returnType: isSelectedOverload
+        ? i32()
+        : {
+            ...bool(),
+            path: [`T_${index}`],
+            symbol: typeParamSymbol,
+          },
+      body: isSelectedOverload
+        ? ctx.createLiteral("i32", `${index}`)
+        : ctx.createLiteral("boolean", "false"),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  }
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "overload-set",
+      name: "pick_by_explicit_return",
+      set: overloadSetId,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    typeArguments: [bool()],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const mainDecl = ctx.decls.registerFunction({
+    name: "main",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    scope: functionScope,
+    params: [],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    decl: mainDecl.id,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>([
+        [overloadSetId, overloadSymbols],
+      ]),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: overloadSymbols[overloadSymbols.length - 1]!,
+  };
+};
+
+const createExpectedReturnReuseBudgetCase = ({
+  overloadCount,
+  unionMemberCount,
+}: {
+  overloadCount: number;
+  unionMemberCount: number;
+}) => {
+  const ctx = createModuleContext();
+  const overloadSetId: OverloadSetId = 0;
+  const functionScope = ctx.symbolTable.rootScope as ScopeId;
+  const fakeExpr = (): Expr =>
+    ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+  const bool = () => createNamedType("bool", ctx.nextNode(), ctx.span);
+  const objectType = (fieldName: string) => ({
+    typeKind: "object" as const,
+    fields: [{ name: fieldName, type: bool(), span: ctx.span }],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const objectLiteral = (fieldName: string) =>
+    ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "object-literal",
+      literalKind: "structural",
+      entries: [
+        {
+          kind: "field",
+          name: fieldName,
+          value: ctx.createLiteral("boolean", "false"),
+          span: ctx.span,
+        },
+      ],
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+
+  const overloadSymbols: SymbolId[] = [];
+  for (let index = 0; index < overloadCount; index += 1) {
+    const symbol = ctx.symbolTable.declare({
+      name: "pick_cached_return",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    overloadSymbols.push(symbol);
+
+    const valueParam = ctx.symbolTable.declare({
+      name: `value_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const decl = ctx.decls.registerFunction({
+      name: "pick_cached_return",
+      visibility: moduleVisibility(),
+      symbol,
+      scope: functionScope,
+      params: [{ name: `value_${index}`, symbol: valueParam, ast: undefined }],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
+    const selected = index === overloadCount - 1;
+    const returnField = selected ? "k_0" : `missing_${index}`;
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      symbol,
+      decl: decl.id,
+      parameters: [
+        {
+          symbol: valueParam,
+          pattern: { kind: "identifier", symbol: valueParam },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        },
+      ],
+      returnType: objectType(returnField),
+      body: objectLiteral(returnField),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  }
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "overload-set",
+      name: "pick_cached_return",
+      set: overloadSetId,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const mainDecl = ctx.decls.registerFunction({
+    name: "main",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    scope: functionScope,
+    params: [],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    decl: mainDecl.id,
+    parameters: [],
+    returnType: {
+      typeKind: "union",
+      members: Array.from({ length: unionMemberCount }, (_, index) =>
+        objectType(`k_${index}`),
+      ),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    },
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>([
+        [overloadSetId, overloadSymbols],
+      ]),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: overloadSymbols[overloadSymbols.length - 1]!,
+  };
+};
+
+const createMethodTypeArgumentBudgetCase = (nongenericOverloadCount: number) => {
+  const ctx = createModuleContext();
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+
+  const boxSymbol = ctx.symbolTable.declare({
+    name: "Box",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const valueFieldSymbol = ctx.symbolTable.declare({
+    name: "value",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+
+  ctx.builder.addItem({
+    kind: "object",
+    visibility: moduleVisibility(),
+    symbol: boxSymbol,
+    fields: [
+      {
+        name: "value",
+        symbol: valueFieldSymbol,
+        visibility: moduleVisibility(),
+        type: i32(),
+        span: ctx.span,
+      },
+    ],
+    isFinal: false,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const methodItems = Array.from({ length: nongenericOverloadCount }, (_, index) => {
+    const methodSymbol = ctx.symbolTable.declare({
+      name: "pick",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    const selfParamSymbol = ctx.symbolTable.declare({
+      name: `self_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const argSymbols = Array.from({ length: index + 2 }, (_, argIndex) =>
+      ctx.symbolTable.declare({
+        name: `value_${index}_${argIndex}`,
+        kind: "parameter",
+        declaredAt: ctx.nextNode(),
+      }),
+    );
+    return ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      memberVisibility: moduleVisibility(),
+      symbol: methodSymbol,
+      parameters: [
+        {
+          symbol: selfParamSymbol,
+          pattern: { kind: "identifier" as const, symbol: selfParamSymbol },
+          mutable: false,
+          span: ctx.span,
+          type: {
+            ...i32(),
+            path: ["Box"],
+            symbol: boxSymbol,
+          },
+        },
+        ...argSymbols.map((symbol) => ({
+          symbol,
+          pattern: { kind: "identifier" as const, symbol },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        })),
+      ],
+      returnType: i32(),
+      body: ctx.createLiteral("i32", `${index}`),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  });
+
+  const genericMethodSymbol = ctx.symbolTable.declare({
+    name: "pick",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericTypeParamSymbol = ctx.symbolTable.declare({
+    name: "T",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericSelfParam = ctx.symbolTable.declare({
+    name: "self_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericValueParam = ctx.symbolTable.declare({
+    name: "value_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericMethodItem = ctx.builder.addFunction({
+    kind: "function",
+    visibility: moduleVisibility(),
+    memberVisibility: moduleVisibility(),
+    symbol: genericMethodSymbol,
+    typeParameters: [{ symbol: genericTypeParamSymbol, span: ctx.span }],
+    parameters: [
+      {
+        symbol: genericSelfParam,
+        pattern: { kind: "identifier" as const, symbol: genericSelfParam },
+        mutable: false,
+        span: ctx.span,
+        type: {
+          ...i32(),
+          path: ["Box"],
+          symbol: boxSymbol,
+        },
+      },
+      {
+        symbol: genericValueParam,
+        pattern: { kind: "identifier" as const, symbol: genericValueParam },
+        mutable: false,
+        span: ctx.span,
+        type: i32(),
+      },
+    ],
+    returnType: i32(),
+    body: ctx.createLiteral("i32", "42"),
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const implSymbol = ctx.symbolTable.declare({
+    name: "Box_impl",
+    kind: "impl",
+    declaredAt: ctx.nextNode(),
+  });
+  ctx.builder.addItem({
+    kind: "impl",
+    visibility: moduleVisibility(),
+    symbol: implSymbol,
+    target: {
+      ...i32(),
+      path: ["Box"],
+      symbol: boxSymbol,
+    },
+    members: [...methodItems, genericMethodItem],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const receiverExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "object-literal",
+    literalKind: "nominal",
+    targetSymbol: boxSymbol,
+    entries: [
+      {
+        kind: "field",
+        name: "value",
+        value: ctx.createLiteral("i32", "1"),
+        span: ctx.span,
+      },
+    ],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "method-call",
+    target: receiverExpr,
+    method: "pick",
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    typeArguments: [i32()],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>(),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: genericMethodSymbol,
+  };
+};
+
+const createOperatorTypeArgumentBudgetCase = (nongenericOverloadCount: number) => {
+  const ctx = createModuleContext();
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+
+  const boxSymbol = ctx.symbolTable.declare({
+    name: "Box",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const valueFieldSymbol = ctx.symbolTable.declare({
+    name: "value",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+
+  ctx.builder.addItem({
+    kind: "object",
+    visibility: moduleVisibility(),
+    symbol: boxSymbol,
+    fields: [
+      {
+        name: "value",
+        symbol: valueFieldSymbol,
+        visibility: moduleVisibility(),
+        type: i32(),
+        span: ctx.span,
+      },
+    ],
+    isFinal: false,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const methodItems = Array.from({ length: nongenericOverloadCount }, (_, index) => {
+    const methodSymbol = ctx.symbolTable.declare({
+      name: "+",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    const selfParamSymbol = ctx.symbolTable.declare({
+      name: `self_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const argSymbols = Array.from({ length: index + 2 }, (_, argIndex) =>
+      ctx.symbolTable.declare({
+        name: `rhs_${index}_${argIndex}`,
+        kind: "parameter",
+        declaredAt: ctx.nextNode(),
+      }),
+    );
+    return ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      memberVisibility: moduleVisibility(),
+      symbol: methodSymbol,
+      parameters: [
+        {
+          symbol: selfParamSymbol,
+          pattern: { kind: "identifier" as const, symbol: selfParamSymbol },
+          mutable: false,
+          span: ctx.span,
+          type: {
+            ...i32(),
+            path: ["Box"],
+            symbol: boxSymbol,
+          },
+        },
+        ...argSymbols.map((symbol) => ({
+          symbol,
+          pattern: { kind: "identifier" as const, symbol },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        })),
+      ],
+      returnType: i32(),
+      body: ctx.createLiteral("i32", `${index}`),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  });
+
+  const genericMethodSymbol = ctx.symbolTable.declare({
+    name: "+",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericTypeParamSymbol = ctx.symbolTable.declare({
+    name: "T",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericSelfParam = ctx.symbolTable.declare({
+    name: "self_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericRhsParam = ctx.symbolTable.declare({
+    name: "rhs_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericMethodItem = ctx.builder.addFunction({
+    kind: "function",
+    visibility: moduleVisibility(),
+    memberVisibility: moduleVisibility(),
+    symbol: genericMethodSymbol,
+    typeParameters: [{ symbol: genericTypeParamSymbol, span: ctx.span }],
+    parameters: [
+      {
+        symbol: genericSelfParam,
+        pattern: { kind: "identifier" as const, symbol: genericSelfParam },
+        mutable: false,
+        span: ctx.span,
+        type: {
+          ...i32(),
+          path: ["Box"],
+          symbol: boxSymbol,
+        },
+      },
+      {
+        symbol: genericRhsParam,
+        pattern: { kind: "identifier" as const, symbol: genericRhsParam },
+        mutable: false,
+        span: ctx.span,
+        type: i32(),
+      },
+    ],
+    returnType: i32(),
+    body: ctx.createLiteral("i32", "42"),
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const implSymbol = ctx.symbolTable.declare({
+    name: "Box_impl",
+    kind: "impl",
+    declaredAt: ctx.nextNode(),
+  });
+  ctx.builder.addItem({
+    kind: "impl",
+    visibility: moduleVisibility(),
+    symbol: implSymbol,
+    target: {
+      ...i32(),
+      path: ["Box"],
+      symbol: boxSymbol,
+    },
+    members: [...methodItems, genericMethodItem],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const addSymbol = ctx.symbolTable.declare({
+    name: "+",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+    metadata: { intrinsic: true },
+  });
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const receiverExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "object-literal",
+    literalKind: "nominal",
+    targetSymbol: boxSymbol,
+    entries: [
+      {
+        kind: "field",
+        name: "value",
+        value: ctx.createLiteral("i32", "1"),
+        span: ctx.span,
+      },
+    ],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "identifier",
+      symbol: addSymbol,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: receiverExpr }, { expr: ctx.createLiteral("i32", "1") }],
+    typeArguments: [i32()],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>(),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: genericMethodSymbol,
+  };
+};
+
+const createTypeSatisfactionContext = (typeCheckBudget?: TypeCheckBudgetConfig) => {
+  const span: SourceSpan = { file: "<test>", start: 0, end: 0 };
+  const symbolTable = new SymbolTable({ rootOwner: 0 });
+  const hir: HirGraph = {
+    module: {
+      kind: "module",
+      id: 0,
+      path: "<test>",
+      scope: symbolTable.rootScope,
+      ast: 0,
+      span,
+      items: [],
+      exports: [],
+    },
+    items: new Map(),
+    statements: new Map(),
+    expressions: new Map(),
+  };
+  const ctx = createTypingContext({
+    symbolTable,
+    hir,
+    overloads: new Map(),
+    decls: new DeclTable(),
+    moduleId: "test",
+    typeCheckBudget,
+  });
+  seedPrimitiveTypes(ctx);
+  seedBaseObjectType(ctx);
+  const state = createTypingState("strict");
+  return { ctx, state };
+};
+
+const createUnionHeavyTypes = ({
+  memberCount,
+  baseType,
+  ctx,
+}: {
+  memberCount: number;
+  baseType: TypeId;
+  ctx: ReturnType<typeof createTypeSatisfactionContext>["ctx"];
+}) => {
+  const members = Array.from({ length: memberCount }, (_, index) =>
+    ctx.arena.internStructuralObject({
+      fields: [
+        { name: "value", type: baseType },
+        { name: `extra_${index}`, type: baseType },
+      ],
+    }),
+  );
+  const actual = ctx.arena.internUnion(members);
+  const expected = ctx.arena.internStructuralObject({
+    fields: [{ name: "value", type: baseType }],
+  });
+  return { actual, expected };
+};
+
+const expectDiagnosticError = (run: () => unknown): DiagnosticError => {
+  try {
+    run();
+  } catch (error) {
+    if (error instanceof DiagnosticError) {
+      return error;
+    }
+    throw error;
+  }
+  throw new Error("expected DiagnosticError");
+};
+
+describe("type-check budgets", () => {
+  it("reports TY0041 when overload fanout exceeds the candidate budget", () => {
+    const fanout = createOverloadFanoutCase(18);
+    const error = expectDiagnosticError(() =>
+      runTypingPipeline({
+        ...fanout.inputs,
+        typeCheckBudget: { maxOverloadCandidates: 12 },
+      }),
+    );
+    expect(error.diagnostic.code).toBe("TY0041");
+    expect(error.diagnostic.message).toContain("pick");
+  });
+
+  it("resolves overload fanout deterministically when within budget", () => {
+    const fanout = createOverloadFanoutCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 18 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("applies expected return narrowing before overload candidate budget checks", () => {
+    const fanout = createReturnTypeNarrowingCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 5 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("applies explicit type argument narrowing before overload candidate budget checks", () => {
+    const fanout = createExplicitTypeArgumentNarrowingCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 5 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("applies explicit type substitutions before expected return filtering", () => {
+    const fanout = createExplicitTypeArgReturnFilterCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 5 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("reuses expected-return filtering so overload calls do not double-spend unify budget", () => {
+    const fanout = createExpectedReturnReuseBudgetCase({
+      overloadCount: 24,
+      unionMemberCount: 40,
+    });
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxUnifySteps: 2_400 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("applies method overload budget checks after explicit type-arg narrowing", () => {
+    const fanout = createMethodTypeArgumentBudgetCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 5 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("applies operator overload budget checks after explicit type-arg narrowing", () => {
+    const fanout = createOperatorTypeArgumentBudgetCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 5 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("reports TY0040 when a union-heavy comparison exceeds the unify step budget", () => {
+    const { ctx, state } = createTypeSatisfactionContext({
+      maxUnifySteps: 20,
+    });
+    const bool = getPrimitiveType(ctx, "bool");
+    const { actual, expected } = createUnionHeavyTypes({
+      memberCount: 60,
+      baseType: bool,
+      ctx,
+    });
+
+    const error = expectDiagnosticError(() =>
+      typeSatisfies(actual, expected, ctx, state),
+    );
+    expect(error.diagnostic.code).toBe("TY0040");
+  });
+
+  it("reports TY0040 when expected-side union sweeps exhaust unify budget", () => {
+    const { ctx, state } = createTypeSatisfactionContext({
+      maxUnifySteps: 12,
+    });
+    const bool = getPrimitiveType(ctx, "bool");
+    const actual = ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: bool }],
+    });
+    const expected = ctx.arena.internUnion(
+      Array.from({ length: 80 }, (_, index) =>
+        ctx.arena.internStructuralObject({
+          fields: [{ name: `missing_${index}`, type: bool }],
+        }),
+      ),
+    );
+
+    const error = expectDiagnosticError(() =>
+      typeSatisfies(actual, expected, ctx, state),
+    );
+    expect(error.diagnostic.code).toBe("TY0040");
+  });
+
+  it("handles union-heavy comparisons when the unify budget is sufficient", () => {
+    const { ctx, state } = createTypeSatisfactionContext({
+      maxUnifySteps: 20_000,
+    });
+    const bool = getPrimitiveType(ctx, "bool");
+    const { actual, expected } = createUnionHeavyTypes({
+      memberCount: 60,
+      baseType: bool,
+      ctx,
+    });
+
+    expect(typeSatisfies(actual, expected, ctx, state)).toBe(true);
+  });
+});

@@ -8,11 +8,44 @@ import {
   ObjectStore,
   TypeAliasStore,
   TraitStore,
+  type TypeCheckBudgetConfig,
+  type TypeCheckBudgetState,
   type TypingState,
   type TypingContext,
   type TypingInputs,
 } from "./types.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
+import { createImportMaps } from "./import-maps.js";
+
+export const DEFAULT_MAX_UNIFY_STEPS = 50_000;
+export const DEFAULT_MAX_OVERLOAD_CANDIDATES = 64;
+
+const normalizeBudgetLimit = ({
+  value,
+  fallback,
+}: {
+  value: number | undefined;
+  fallback: number;
+}): number => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(1, Math.trunc(value));
+};
+
+export const createTypeCheckBudgetState = (
+  config?: TypeCheckBudgetConfig,
+): TypeCheckBudgetState => ({
+  maxUnifySteps: normalizeBudgetLimit({
+    value: config?.maxUnifySteps,
+    fallback: DEFAULT_MAX_UNIFY_STEPS,
+  }),
+  maxOverloadCandidates: normalizeBudgetLimit({
+    value: config?.maxOverloadCandidates,
+    fallback: DEFAULT_MAX_OVERLOAD_CANDIDATES,
+  }),
+  unifyStepsUsed: { value: 0 },
+});
 
 export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const decls = inputs.decls ?? new DeclTable();
@@ -25,25 +58,16 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const typeAliases = new TypeAliasStore();
   const moduleExports = inputs.moduleExports ?? new Map();
   const dependencies = inputs.availableSemantics ?? new Map();
-  const importsByLocal = new Map<
-    number,
-    { moduleId: string; symbol: number }
-  >();
-  const importAliasesByModule = new Map<string, Map<number, number>>();
-  (inputs.imports ?? []).forEach((entry) => {
-    if (!entry.target) {
-      return;
-    }
-    importsByLocal.set(entry.local, entry.target);
-    const bucket = importAliasesByModule.get(entry.target.moduleId) ?? new Map();
-    bucket.set(entry.target.symbol, entry.local);
-    importAliasesByModule.set(entry.target.moduleId, bucket);
-  });
+  const { importsByLocal, importAliasesByModule } = createImportMaps(
+    inputs.imports,
+  );
+  const typeCheckBudget = createTypeCheckBudgetState(inputs.typeCheckBudget);
 
   return {
     symbolTable: inputs.symbolTable,
     hir: inputs.hir,
     overloads: inputs.overloads,
+    typeCheckBudget,
     decls,
     moduleId: inputs.moduleId ?? "local",
     packageId: inputs.packageId ?? "local",
