@@ -2735,6 +2735,8 @@ type UnionBindingCandidate = {
   remainingActualMembers: readonly TypeId[];
 };
 
+const MAX_UNION_BINDING_SEARCH_STATES = 4_096;
+
 const findUnionBindingCandidates = ({
   expectedMembers,
   actualMembers,
@@ -2749,6 +2751,8 @@ const findUnionBindingCandidates = ({
   state: TypingState;
 }): UnionBindingCandidate[] => {
   const solutions: UnionBindingCandidate[] = [];
+  const visitedStates = new Set<string>();
+  let abortedForComplexity = false;
   const unresolvedExpected = [...expectedMembers];
   const unresolvedActual = [...actualMembers];
 
@@ -2761,6 +2765,26 @@ const findUnionBindingCandidates = ({
     actual: readonly TypeId[];
     currentBindings: ReadonlyMap<TypeParamId, TypeId>;
   }): void => {
+    if (abortedForComplexity) {
+      return;
+    }
+    if (expected.length > actual.length) {
+      return;
+    }
+    const stateKey = serializeUnionBindingSearchState({
+      expected,
+      actual,
+      bindings: currentBindings,
+    });
+    if (visitedStates.has(stateKey)) {
+      return;
+    }
+    visitedStates.add(stateKey);
+    if (visitedStates.size > MAX_UNION_BINDING_SEARCH_STATES) {
+      abortedForComplexity = true;
+      return;
+    }
+
     if (expected.length === 0) {
       const snapshot = new Map(currentBindings);
       solutions.push({
@@ -2770,28 +2794,50 @@ const findUnionBindingCandidates = ({
       return;
     }
 
-    const expectedMember = expected[0];
-    if (typeof expectedMember !== "number") {
+    const options = expected
+      .map((expectedMember, expectedIndex) => {
+        if (typeof expectedMember !== "number") {
+          return undefined;
+        }
+        const matches = actual.flatMap((actualMember, actualIndex) => {
+          const candidate = tryBindExpectedMember({
+            expectedMember,
+            actualMember,
+            bindings: currentBindings,
+            ctx,
+            state,
+          });
+          return candidate ? [{ actualIndex, bindings: candidate }] : [];
+        });
+        return { expectedIndex, matches };
+      })
+      .filter(
+        (
+          option,
+        ): option is {
+          expectedIndex: number;
+          matches: { actualIndex: number; bindings: Map<TypeParamId, TypeId> }[];
+        } => Boolean(option),
+      )
+      .sort((left, right) => left.matches.length - right.matches.length);
+
+    const next = options[0];
+    if (!next) {
       return;
     }
+    if (next.matches.length === 0) {
+      return;
+    }
+    const nextExpected = expected.filter((_, index) => index !== next.expectedIndex);
 
-    actual.forEach((actualMember, index) => {
-      const candidate = tryBindExpectedMember({
-        expectedMember,
-        actualMember,
-        bindings: currentBindings,
-        ctx,
-        state,
-      });
-      if (!candidate) {
-        return;
-      }
-      const nextExpected = expected.slice(1);
-      const nextActual = actual.filter((_, nextIndex) => nextIndex !== index);
+    next.matches.forEach((match) => {
+      const nextActual = actual.filter(
+        (_, nextIndex) => nextIndex !== match.actualIndex,
+      );
       search({
         expected: nextExpected,
         actual: nextActual,
-        currentBindings: candidate,
+        currentBindings: match.bindings,
       });
     });
   };
@@ -2802,8 +2848,33 @@ const findUnionBindingCandidates = ({
     currentBindings: bindings,
   });
 
+  if (abortedForComplexity) {
+    return [];
+  }
+
   return solutions;
 };
+
+const serializeUnionBindingSearchState = ({
+  expected,
+  actual,
+  bindings,
+}: {
+  expected: readonly TypeId[];
+  actual: readonly TypeId[];
+  bindings: ReadonlyMap<TypeParamId, TypeId>;
+}): string =>
+  [
+    expected
+      .slice()
+      .sort((left, right) => left - right)
+      .join(","),
+    actual
+      .slice()
+      .sort((left, right) => left - right)
+      .join(","),
+    serializeTypeParamBindings(bindings),
+  ].join("|");
 
 const serializeTypeParamBindings = (
   bindings: ReadonlyMap<TypeParamId, TypeId>,
