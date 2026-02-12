@@ -22,6 +22,7 @@ type UriContext = {
   filePath: string;
   entryPath: string;
   roots: ModuleRoots;
+  cacheKey: string;
 };
 
 type CoreCacheEntry = {
@@ -108,6 +109,10 @@ export class AnalysisCoordinator {
       filePath: context.filePath,
       entryPath: context.filePath,
       roots: context.roots,
+      cacheKey: AnalysisCoordinator.#contextCacheKey({
+        entryPath: context.filePath,
+        roots: context.roots,
+      }),
     };
     const fallbackAnalysis = await this.#getCoreForContext(fallbackContext);
     return {
@@ -118,14 +123,14 @@ export class AnalysisCoordinator {
 
   async getNavigationForUri(uri: string): Promise<ProjectNavigationIndex> {
     const { context, analysis } = await this.getCoreForUri(uri);
-    const cached = this.#navigationCache.get(context.entryPath);
+    const cached = this.#navigationCache.get(context.cacheKey);
     if (cached && cached.revision === this.#revision) {
       return cached.index;
     }
 
     const runRevision = this.#revision;
     const inFlightKey = AnalysisCoordinator.#inFlightKey({
-      entryPath: context.entryPath,
+      contextKey: context.cacheKey,
       revision: runRevision,
     });
     const pending = this.#navigationInFlight.get(inFlightKey);
@@ -137,7 +142,7 @@ export class AnalysisCoordinator {
     const task = (async () => {
       const index = await buildProjectNavigationIndex({ analysis });
       if (this.#revision === runRevision) {
-        this.#navigationCache.set(context.entryPath, {
+        this.#navigationCache.set(context.cacheKey, {
           revision: runRevision,
           index,
         });
@@ -176,35 +181,64 @@ export class AnalysisCoordinator {
   }
 
   static #inFlightKey({
-    entryPath,
+    contextKey,
     revision,
   }: {
-    entryPath: string;
+    contextKey: string;
     revision: number;
   }): string {
-    return `${entryPath}@${revision}`;
+    return `${contextKey}@${revision}`;
+  }
+
+  static #contextCacheKey({
+    entryPath,
+    roots,
+  }: {
+    entryPath: string;
+    roots: ModuleRoots;
+  }): string {
+    const src = path.resolve(roots.src);
+    const std = roots.std ? path.resolve(roots.std) : "";
+    const pkg = roots.pkg ? path.resolve(roots.pkg) : "";
+    const pkgDirs = [...(roots.pkgDirs ?? [])]
+      .map((pkgDir) => path.resolve(pkgDir))
+      .sort();
+    const hasResolvePackageRoot = roots.resolvePackageRoot ? "custom-pkg-resolver" : "";
+    return [
+      path.resolve(entryPath),
+      src,
+      std,
+      pkg,
+      hasResolvePackageRoot,
+      ...pkgDirs,
+    ].join("|");
   }
 
   async #resolveUriContext(uri: string): Promise<UriContext> {
     const filePath = normalizeFilePathFromUri(uri);
     const projectEntryPath = await resolveEntryPath(filePath);
     const roots = resolveModuleRoots(projectEntryPath);
+    const cacheKey = AnalysisCoordinator.#contextCacheKey({
+      entryPath: projectEntryPath,
+      roots,
+    });
     return {
       filePath,
       entryPath: projectEntryPath,
       roots,
+      cacheKey,
     };
   }
 
   async #getCoreForContext(context: UriContext): Promise<ProjectCoreAnalysis> {
-    const cached = this.#coreCache.get(context.entryPath);
+    const cached = this.#coreCache.get(context.cacheKey);
     if (cached && cached.revision === this.#revision) {
       return cached.analysis;
     }
 
     const runRevision = this.#revision;
     const inFlightKey = AnalysisCoordinator.#inFlightKey({
-      entryPath: context.entryPath,
+      contextKey: context.cacheKey,
       revision: runRevision,
     });
     const pending = this.#coreInFlight.get(inFlightKey);
@@ -225,7 +259,7 @@ export class AnalysisCoordinator {
         host: this.#moduleHost,
       });
       if (this.#revision === runRevision) {
-        this.#coreCache.set(context.entryPath, {
+        this.#coreCache.set(context.cacheKey, {
           revision: runRevision,
           analysis,
         });
