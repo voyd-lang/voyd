@@ -74,4 +74,28 @@ describe("match diagnostics", () => {
     const source = readFileSync(fixturePath, "utf8");
     expect(source.slice(diagnostic.span.start, diagnostic.span.end)).toBe("C");
   });
+
+  it("reports redundant alias match arms as warnings", () => {
+    const ast = loadAst("match_union_alias_infer_args.voyd");
+    const result = semanticsPipeline(ast);
+    const diagnostic = result.diagnostics.find((entry) => entry.code === "TY0039");
+
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic?.severity).toBe("warning");
+    expect(diagnostic?.phase).toBe("typing");
+    expect(diagnostic?.message).toMatch(/pattern 'C'/i);
+
+    const fixturePath = resolve(
+      import.meta.dirname,
+      "..",
+      "..",
+      "__tests__",
+      "__fixtures__",
+      "match_union_alias_infer_args.voyd"
+    );
+    const source = readFileSync(fixturePath, "utf8");
+    if (diagnostic) {
+      expect(source.slice(diagnostic.span.start, diagnostic.span.end)).toBe("C");
+    }
+  });
 });

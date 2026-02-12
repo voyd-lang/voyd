@@ -112,6 +112,14 @@ export const typeMatchExpr = (
     }
 
     if (arm.pattern.kind === "wildcard") {
+      if (remainingMembers.size === 0) {
+        reportRedundantMatchArm({
+          ctx,
+          armIndex: index + 1,
+          pattern: arm.pattern,
+          span: patternSpan,
+        });
+      }
       remainingMembers.clear();
       return;
     }
@@ -131,9 +139,24 @@ export const typeMatchExpr = (
             })
           : undefined;
     if (typeof patternType === "number") {
-      matchedUnionMembers(patternType, remainingMembers, ctx, state).forEach(
-        (member) => remainingMembers.delete(member)
+      const matched = matchedUnionMembers(
+        patternType,
+        remainingMembers,
+        ctx,
+        state
       );
+      if (
+        patternType !== ctx.primitives.unknown &&
+        matched.length === 0
+      ) {
+        reportRedundantMatchArm({
+          ctx,
+          armIndex: index + 1,
+          pattern: arm.pattern,
+          span: patternSpan,
+        });
+      }
+      matched.forEach((member) => remainingMembers.delete(member));
     }
   });
 
@@ -420,6 +443,45 @@ const collectNominalPatternHints = (
   });
 
   return unique.size > 0 || ambiguous.size > 0 ? { unique, ambiguous } : undefined;
+};
+
+const reportRedundantMatchArm = ({
+  ctx,
+  armIndex,
+  pattern,
+  span,
+}: {
+  ctx: TypingContext;
+  armIndex: number;
+  pattern: HirPattern;
+  span: SourceSpan;
+}): void => {
+  ctx.diagnostics.report(
+    diagnosticFromCode({
+      code: "TY0039",
+      params: {
+        kind: "redundant-match-arm",
+        armIndex,
+        patternLabel: patternLabelForDiagnostic(pattern),
+      },
+      span,
+    })
+  );
+};
+
+const patternLabelForDiagnostic = (pattern: HirPattern): string => {
+  switch (pattern.kind) {
+    case "wildcard":
+      return "_";
+    case "tuple":
+      return `(${pattern.elements.length}-tuple)`;
+    case "type":
+      return pattern.type.typeKind === "named"
+        ? pattern.type.path.join("::")
+        : "type pattern";
+    default:
+      return pattern.kind;
+  }
 };
 
 const resolveNominalPatternSymbol = (
