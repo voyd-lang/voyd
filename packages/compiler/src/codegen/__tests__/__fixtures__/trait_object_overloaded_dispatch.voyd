@@ -1,0 +1,18 @@
+trait Parse
+  fn parse(self, value: i32) -> i32
+  fn parse(self, value: bool) -> i32
+
+obj Box { value: i32 }
+
+impl Parse for Box
+  fn parse(self, value: i32) -> i32
+    self.value + value
+
+  fn parse(self, value: bool) -> i32
+    if value then: self.value else: 0
+
+fn use_dispatch(p: Parse) -> i32
+  p.parse(3) + p.parse(true) + p.Parse::parse(false) + Parse::parse(p, 4)
+
+pub fn main() -> i32
+  use_dispatch(Box { value: 5 })

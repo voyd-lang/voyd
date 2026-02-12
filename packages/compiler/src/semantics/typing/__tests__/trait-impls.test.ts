@@ -26,6 +26,30 @@ describe("trait implementations", () => {
     expect(() => semanticsPipeline(ast)).not.toThrow();
   });
 
+  it("supports same-name overloaded trait methods when impl signatures match", () => {
+    expect(() =>
+      semanticsPipeline(loadAst("trait_overload_parse_happy.voyd"))
+    ).not.toThrow();
+  });
+
+  it("errors when an impl misses one required trait overload", () => {
+    expect(() =>
+      semanticsPipeline(loadAst("trait_overload_parse_missing_impl.voyd"))
+    ).toThrowError(/missing trait method.*parse.*bool/i);
+  });
+
+  it("errors when an impl overload does not match a trait overload signature", () => {
+    expect(() =>
+      semanticsPipeline(loadAst("trait_overload_parse_mismatch_impl.voyd"))
+    ).toThrowError(/type mismatch: expected bool, got f64/i);
+  });
+
+  it("errors when a trait declares duplicate overload signatures", () => {
+    expect(() =>
+      semanticsPipeline(loadAst("trait_overload_parse_duplicate_signature.voyd"))
+    ).toThrowError(/trait Parse declares duplicate overload parse/i);
+  });
+
   it("errors when an impl does not provide required trait methods", () => {
     const ast = loadAst("trait_area_invalid.voyd");
     expect(() => semanticsPipeline(ast)).toThrowError(

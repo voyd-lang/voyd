@@ -29,6 +29,11 @@ import {
   normalizeSpan,
 } from "../../diagnostics/index.js";
 import { isStdOnlyIntrinsicName } from "../intrinsics.js";
+import {
+  formatMethodSignature,
+  methodSignatureKey,
+  methodSignatureShapeKey,
+} from "./method-signature-key.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
@@ -135,6 +140,21 @@ export const registerObjectDecls = (ctx: TypingContext): void => {
 export const registerTraits = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "trait") continue;
+    const traitDecl = ctx.decls.getTrait(item.symbol);
+    if (traitDecl) {
+      const traitMethodsBySymbol = new Map(
+        item.methods.map((method) => [method.symbol, method]),
+      );
+      const traitInfos = buildTraitMethodSignatureInfos({
+        traitMethods: traitDecl.methods,
+        traitMethodsBySymbol,
+        ctx,
+      });
+      assertUniqueTraitMethodSignatures({
+        traitName: getSymbolName(item.symbol, ctx),
+        methods: traitInfos,
+      });
+    }
     ctx.traits.registerDecl(item);
     const name = getSymbolName(item.symbol, ctx);
     if (!ctx.traits.hasName(name)) {
@@ -509,6 +529,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
     const methodMap =
       typeof traitSymbol === "number"
         ? buildTraitMethodMap({
+            impl: item,
             implDecl: decl,
             traitSymbol,
             ctx,
@@ -684,60 +705,116 @@ const validateImplTraitMethods = ({
     return;
   }
 
-  const implMethodsByName = new Map(
-    implDecl.methods.map((method) => [
-      getSymbolName(method.symbol, ctx),
-      method,
-    ])
-  );
   const traitMethodsBySymbol = new Map(
-    traitHirDecl?.methods.map((method) => [method.symbol, method]) ?? []
+    traitHirDecl?.methods.map((method) => [method.symbol, method]) ?? [],
   );
   const implFunctionsBySymbol = new Map(
     implDecl.methods.map((method) => [
       method.symbol,
       ctx.functions.getFunction(method.symbol),
-    ])
+    ]),
   );
   const traitTypeSubstitutions = buildTraitTypeSubstitutions({
     traitTypeParameters:
       traitHirDecl?.typeParameters ?? traitDecl.typeParameters,
     traitExpr: impl.trait,
   });
-  const missing = traitDecl.methods
-    .filter((method) => !method.defaultBody)
-    .map((method) => getSymbolName(method.symbol, ctx))
-    .filter((name) => !implMethodsByName.has(name));
+  const traitName = getSymbolName(traitSymbol, ctx);
+  const targetName =
+    impl.target.typeKind === "named" && typeof impl.target.symbol === "number"
+      ? getSymbolName(impl.target.symbol, ctx)
+      : "impl target";
+  const traitMethodSignatures = buildTraitMethodSignatureInfos({
+    traitMethods: traitDecl.methods,
+    traitMethodsBySymbol,
+    ctx,
+    traitTypeSubstitutions,
+    selfType: impl.target,
+  });
+  assertUniqueTraitMethodSignatures({
+    traitName,
+    methods: traitMethodSignatures,
+  });
+  const implMethodSignatures = buildImplMethodSignatureInfos({
+    implMethods: implDecl.methods,
+    implFunctionsBySymbol,
+    ctx,
+    traitTypeSubstitutions,
+    selfType: impl.target,
+  });
+  const implMethodsBySignature = groupMethodSignaturesByKey(implMethodSignatures);
+  const implMethodsByShape = groupMethodSignaturesByShape(implMethodSignatures);
+  const missing: string[] = [];
+  const consumedImplMethodSymbols = new Set<SymbolId>();
+  const unresolvedTraitMethods: TraitMethodSignatureInfo[] = [];
 
-  if (missing.length === 0) {
-    traitDecl.methods.forEach((traitMethod) => {
-      const implMethod = implMethodsByName.get(
-        getSymbolName(traitMethod.symbol, ctx)
+  traitMethodSignatures.forEach((traitMethodInfo) => {
+    const exactMatches = implMethodsBySignature.get(traitMethodInfo.key) ?? [];
+    if (exactMatches.length > 1) {
+      throw new Error(
+        `impl ${traitName} for ${targetName} has ambiguous overloads for ${traitMethodInfo.display}`,
       );
-      if (!implMethod) return;
+    }
 
+    const matchedImplInfo = exactMatches[0];
+    if (matchedImplInfo) {
       const signatureError = compareMethodSignatures({
-        traitMethod,
-        implMethod,
+        traitMethod: traitMethodInfo.method,
+        implMethod: matchedImplInfo.method,
         traitSymbol,
         impl,
         ctx,
-        traitMethodHir: traitMethodsBySymbol.get(traitMethod.symbol),
-        implFunction: implFunctionsBySymbol.get(implMethod.symbol),
+        traitMethodHir: traitMethodInfo.methodHir,
+        implFunction: implFunctionsBySymbol.get(matchedImplInfo.method.symbol),
         traitTypeSubstitutions,
       });
       if (signatureError) {
         throw signatureError;
       }
-    });
+      consumedImplMethodSymbols.add(matchedImplInfo.method.symbol);
+      return;
+    }
+
+    unresolvedTraitMethods.push(traitMethodInfo);
+  });
+
+  unresolvedTraitMethods.forEach((traitMethodInfo) => {
+    const shapeMatches = (implMethodsByShape.get(traitMethodInfo.shapeKey) ?? []).filter(
+      (methodInfo) => !consumedImplMethodSymbols.has(methodInfo.method.symbol),
+    );
+    if (shapeMatches.length > 1) {
+      throw new Error(
+        `impl ${traitName} for ${targetName} has ambiguous overloads for ${traitMethodInfo.display}`,
+      );
+    }
+    const shapeMatch = shapeMatches[0];
+    if (shapeMatch) {
+      const signatureError = compareMethodSignatures({
+        traitMethod: traitMethodInfo.method,
+        implMethod: shapeMatch.method,
+        traitSymbol,
+        impl,
+        ctx,
+        traitMethodHir: traitMethodInfo.methodHir,
+        implFunction: implFunctionsBySymbol.get(shapeMatch.method.symbol),
+        traitTypeSubstitutions,
+      });
+      if (signatureError) {
+        throw signatureError;
+      }
+      consumedImplMethodSymbols.add(shapeMatch.method.symbol);
+      return;
+    }
+
+    if (!traitMethodInfo.hasDefaultBody) {
+      missing.push(traitMethodInfo.display);
+    }
+  });
+
+  if (missing.length === 0) {
     return;
   }
 
-  const targetName =
-    impl.target.typeKind === "named" && typeof impl.target.symbol === "number"
-      ? getSymbolName(impl.target.symbol, ctx)
-      : "impl target";
-  const traitName = getSymbolName(traitSymbol, ctx);
   const plural = missing.length > 1 ? "s" : "";
   const missingList = missing.join(", ");
   throw new Error(
@@ -746,10 +823,12 @@ const validateImplTraitMethods = ({
 };
 
 const buildTraitMethodMap = ({
+  impl,
   implDecl,
   traitSymbol,
   ctx,
 }: {
+  impl: HirImplDecl;
   implDecl?: ReturnType<TypingContext["decls"]["getImpl"]>;
   traitSymbol: SymbolId;
   ctx: TypingContext;
@@ -758,30 +837,320 @@ const buildTraitMethodMap = ({
     return undefined;
   }
   const traitDecl = ctx.decls.getTrait(traitSymbol);
-  const traitMethods =
-    traitDecl?.methods ??
-    ctx.traits.getDecl(traitSymbol)?.methods.map((method) => ({
-      symbol: method.symbol,
-    }));
-  if (!traitMethods || traitMethods.length === 0) {
+  const traitHirDecl = ctx.traits.getDecl(traitSymbol);
+  if (
+    (!traitDecl || traitDecl.methods.length === 0) &&
+    (!traitHirDecl || traitHirDecl.methods.length === 0)
+  ) {
     return undefined;
   }
-  const implMethodsByName = new Map(
-    implDecl.methods.map((method) => [
-      getSymbolName(method.symbol, ctx),
-      method.symbol,
-    ])
+  const traitMethodsBySymbol = new Map(
+    traitHirDecl?.methods.map((method) => [method.symbol, method]) ?? [],
   );
+  const implFunctionsBySymbol = new Map(
+    implDecl.methods.map((method) => [
+      method.symbol,
+      ctx.functions.getFunction(method.symbol),
+    ]),
+  );
+  const traitTypeSubstitutions = buildTraitTypeSubstitutions({
+    traitTypeParameters:
+      traitHirDecl?.typeParameters ?? traitDecl?.typeParameters,
+    traitExpr: impl.trait,
+  });
+
+  if (!traitDecl) {
+    const traitMethodSignatures = buildTraitMethodSignatureInfosFromHir({
+      traitMethods: traitHirDecl?.methods ?? [],
+      ctx,
+      traitTypeSubstitutions,
+      selfType: impl.target,
+    });
+    assertUniqueImportedTraitMethodSignatures({
+      traitName: getSymbolName(traitSymbol, ctx),
+      methods: traitMethodSignatures,
+    });
+    const implMethodSignatures = buildImplMethodSignatureInfos({
+      implMethods: implDecl.methods,
+      implFunctionsBySymbol,
+      ctx,
+      traitTypeSubstitutions,
+      selfType: impl.target,
+    });
+    const implMethodsBySignature = groupMethodSignaturesByKey(implMethodSignatures);
+    const methodMap = new Map<SymbolId, SymbolId>();
+
+    traitMethodSignatures.forEach((traitMethodInfo) => {
+      const implMatches = implMethodsBySignature.get(traitMethodInfo.key) ?? [];
+      if (implMatches.length > 1) {
+        throw new Error(
+          `trait method mapping is ambiguous for ${traitMethodInfo.display}`,
+        );
+      }
+      const implMatch = implMatches[0];
+      if (implMatch) {
+        methodMap.set(traitMethodInfo.method.symbol, implMatch.method.symbol);
+      }
+    });
+    return methodMap.size > 0 ? methodMap : undefined;
+  }
+
+  const traitMethodSignatures = buildTraitMethodSignatureInfos({
+    traitMethods: traitDecl.methods,
+    traitMethodsBySymbol,
+    ctx,
+    traitTypeSubstitutions,
+    selfType: impl.target,
+  });
+  assertUniqueTraitMethodSignatures({
+    traitName: getSymbolName(traitSymbol, ctx),
+    methods: traitMethodSignatures,
+  });
+  const implMethodSignatures = buildImplMethodSignatureInfos({
+    implMethods: implDecl.methods,
+    implFunctionsBySymbol,
+    ctx,
+    traitTypeSubstitutions,
+    selfType: impl.target,
+  });
+  const implMethodsBySignature = groupMethodSignaturesByKey(implMethodSignatures);
+
   const methodMap = new Map<SymbolId, SymbolId>();
-  traitMethods.forEach((traitMethod) => {
-    const implMethod = implMethodsByName.get(
-      getSymbolName(traitMethod.symbol, ctx)
-    );
-    if (typeof implMethod === "number") {
-      methodMap.set(traitMethod.symbol, implMethod);
+  traitMethodSignatures.forEach((traitMethodInfo) => {
+    const implMatches = implMethodsBySignature.get(traitMethodInfo.key) ?? [];
+    if (implMatches.length > 1) {
+      throw new Error(
+        `trait method mapping is ambiguous for ${traitMethodInfo.display}`,
+      );
+    }
+    const implMatch = implMatches[0];
+    if (implMatch) {
+      methodMap.set(traitMethodInfo.method.symbol, implMatch.method.symbol);
     }
   });
   return methodMap.size > 0 ? methodMap : undefined;
+};
+
+type TraitDeclMethod = NonNullable<
+  ReturnType<TypingContext["decls"]["getTrait"]>
+>["methods"][number];
+
+type ImplDeclMethod = NonNullable<
+  ReturnType<TypingContext["decls"]["getImpl"]>
+>["methods"][number];
+
+type TraitMethodSignatureInfo = {
+  method: TraitDeclMethod;
+  methodHir?: HirTraitMethod;
+  key: string;
+  shapeKey: string;
+  display: string;
+  hasDefaultBody: boolean;
+};
+
+type ImplMethodSignatureInfo = {
+  method: ImplDeclMethod;
+  key: string;
+  shapeKey: string;
+  display: string;
+};
+
+type ImportedTraitMethodSignatureInfo = {
+  method: HirTraitMethod;
+  key: string;
+  display: string;
+};
+
+const buildTraitMethodSignatureInfos = ({
+  traitMethods,
+  traitMethodsBySymbol,
+  ctx,
+  traitTypeSubstitutions,
+  selfType,
+}: {
+  traitMethods: readonly TraitDeclMethod[];
+  traitMethodsBySymbol: ReadonlyMap<SymbolId, HirTraitMethod>;
+  ctx: TypingContext;
+  traitTypeSubstitutions?: Map<SymbolId, HirTypeExpr>;
+  selfType?: HirTypeExpr;
+}): TraitMethodSignatureInfo[] =>
+  traitMethods.map((method) => {
+    const methodHir = traitMethodsBySymbol.get(method.symbol);
+    const methodName = getSymbolName(method.symbol, ctx);
+    const typeParamCount = method.typeParameters?.length ?? 0;
+    const params = method.params.map((param, index) => ({
+      label: param.label,
+      name: param.name,
+      typeKey:
+        index === 0 && param.name === "self"
+          ? undefined
+          : typeExprKey(
+              methodHir?.parameters[index]?.type,
+              traitTypeSubstitutions,
+              undefined,
+              selfType,
+            ),
+    }));
+    return {
+      method,
+      methodHir,
+      key: methodSignatureKey({ methodName, typeParamCount, params }),
+      shapeKey: methodSignatureShapeKey({ methodName, typeParamCount, params }),
+      display: formatMethodSignature({ methodName, typeParamCount, params }),
+      hasDefaultBody: Boolean(method.defaultBody),
+    };
+  });
+
+const buildImplMethodSignatureInfos = ({
+  implMethods,
+  implFunctionsBySymbol,
+  ctx,
+  traitTypeSubstitutions,
+  selfType,
+}: {
+  implMethods: readonly ImplDeclMethod[];
+  implFunctionsBySymbol: ReadonlyMap<SymbolId, HirFunction | undefined>;
+  ctx: TypingContext;
+  traitTypeSubstitutions?: Map<SymbolId, HirTypeExpr>;
+  selfType?: HirTypeExpr;
+}): ImplMethodSignatureInfo[] =>
+  implMethods.map((method) => {
+    const methodName = getSymbolName(method.symbol, ctx);
+    const typeParamCount = method.typeParameters?.length ?? 0;
+    const implFunction = implFunctionsBySymbol.get(method.symbol);
+    const params = method.params.map((param, index) => ({
+      label: param.label,
+      name: param.name,
+      typeKey:
+        index === 0 && param.name === "self"
+          ? undefined
+          : typeExprKey(
+              implFunction?.parameters[index]?.type,
+              traitTypeSubstitutions,
+              undefined,
+              selfType,
+            ),
+    }));
+    return {
+      method,
+      key: methodSignatureKey({ methodName, typeParamCount, params }),
+      shapeKey: methodSignatureShapeKey({ methodName, typeParamCount, params }),
+      display: formatMethodSignature({ methodName, typeParamCount, params }),
+    };
+  });
+
+const buildTraitMethodSignatureInfosFromHir = ({
+  traitMethods,
+  ctx,
+  traitTypeSubstitutions,
+  selfType,
+}: {
+  traitMethods: readonly HirTraitMethod[];
+  ctx: TypingContext;
+  traitTypeSubstitutions?: Map<SymbolId, HirTypeExpr>;
+  selfType?: HirTypeExpr;
+}): ImportedTraitMethodSignatureInfo[] =>
+  traitMethods.map((method) => {
+    const methodName = getSymbolName(method.symbol, ctx);
+    const typeParamCount = method.typeParameters?.length ?? 0;
+    const params = method.parameters.map((param, index) => {
+      const paramName = getSymbolName(param.symbol, ctx);
+      return {
+        name: paramName,
+        typeKey:
+          index === 0 && paramName === "self"
+            ? undefined
+            : typeExprKey(
+                param.type,
+                traitTypeSubstitutions,
+                undefined,
+                selfType,
+              ),
+      };
+    });
+    return {
+      method,
+      key: methodSignatureKey({ methodName, typeParamCount, params }),
+      display: formatMethodSignature({ methodName, typeParamCount, params }),
+    };
+  });
+
+const groupMethodSignaturesByKey = <
+  T extends { key: string },
+>(
+  methods: readonly T[],
+): Map<string, T[]> => {
+  const grouped = new Map<string, T[]>();
+  methods.forEach((method) => {
+    const existing = grouped.get(method.key);
+    if (existing) {
+      existing.push(method);
+      return;
+    }
+    grouped.set(method.key, [method]);
+  });
+  return grouped;
+};
+
+const groupMethodSignaturesByShape = <
+  T extends { shapeKey: string },
+>(
+  methods: readonly T[],
+): Map<string, T[]> => {
+  const grouped = new Map<string, T[]>();
+  methods.forEach((method) => {
+    const existing = grouped.get(method.shapeKey);
+    if (existing) {
+      existing.push(method);
+      return;
+    }
+    grouped.set(method.shapeKey, [method]);
+  });
+  return grouped;
+};
+
+const assertUniqueTraitMethodSignatures = ({
+  traitName,
+  methods,
+}: {
+  traitName: string;
+  methods: readonly TraitMethodSignatureInfo[];
+}): void => {
+  const bySignature = groupMethodSignaturesByKey(methods);
+  bySignature.forEach((matches) => {
+    if (matches.length < 2) {
+      return;
+    }
+    const duplicate = matches[0];
+    if (!duplicate) {
+      return;
+    }
+    throw new Error(
+      `trait ${traitName} declares duplicate overload ${duplicate.display}`,
+    );
+  });
+};
+
+const assertUniqueImportedTraitMethodSignatures = ({
+  traitName,
+  methods,
+}: {
+  traitName: string;
+  methods: readonly ImportedTraitMethodSignatureInfo[];
+}): void => {
+  const bySignature = groupMethodSignaturesByKey(methods);
+  bySignature.forEach((matches) => {
+    if (matches.length < 2) {
+      return;
+    }
+    const duplicate = matches[0];
+    if (!duplicate) {
+      return;
+    }
+    throw new Error(
+      `trait ${traitName} declares duplicate overload ${duplicate.display}`,
+    );
+  });
 };
 
 const compareMethodSignatures = ({
