@@ -40,6 +40,6 @@ fn parse_minor(major: i32, minor_text: String, patch_text: String): () -> Option
 fn parse_patch(major: i32, minor: i32, patch_text: String): () -> Optional<Ver>
   match(parse_non_negative_segment(patch_text))
     Some { value: patch }:
-      some(Ver { major, minor, patch })
+      some({ major, minor, patch })
     None:
       none<Ver>()

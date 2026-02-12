@@ -1,3 +1,5 @@
+use std::optional::all
+use std::string::types::String
 use super::parse::{ parse }
 
 pub obj Version {
@@ -12,10 +14,10 @@ impl Version
 
   api fn init(version_text: String): () -> Optional<Version>
     match(parse(version_text))
-      Some { value }:
-        some(value)
+      Some { value: parsed }:
+        some(Version(parsed.major, parsed.minor, parsed.patch))
       None:
-        none()
+        none<Version>()
 
   api fn bump_major(self) -> Version
     Version(self.major + 1, 0, 0)
