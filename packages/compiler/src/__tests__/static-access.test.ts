@@ -119,4 +119,20 @@ describe("static access e2e", () => {
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(5);
   });
+
+  it("keeps codegen call argument planning aligned with typing labels", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("call_label_optional_alignment.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(7);
+  });
 });
