@@ -238,4 +238,43 @@ describe("match expressions", () => {
       )
     ).toThrow(/ambiguous match pattern 'A'/i);
   });
+
+  it("infers omitted generic type alias arguments in patterns", () => {
+    const ast = loadAst("match_union_alias_infer_args.voyd");
+    const { typing, hir } = semanticsPipeline(ast);
+
+    const matchExpr = Array.from(hir.expressions.values()).find(
+      (candidate) => candidate.exprKind === "match"
+    );
+    expect(matchExpr).toBeDefined();
+    if (!matchExpr || matchExpr.exprKind !== "match") {
+      return;
+    }
+
+    const aliasPattern = matchExpr.arms[2]?.pattern;
+    expect(aliasPattern?.kind).toBe("type");
+    if (aliasPattern?.kind !== "type") {
+      return;
+    }
+
+    expect(typeof aliasPattern.typeId).toBe("number");
+    if (typeof aliasPattern.typeId !== "number") {
+      return;
+    }
+
+    expect(aliasPattern.typeId).not.toBe(typing.primitives.unknown);
+    const patternDesc = typing.arena.get(aliasPattern.typeId);
+    expect(patternDesc.kind).toBe("union");
+    if (patternDesc.kind === "union") {
+      expect(patternDesc.members.length).toBe(2);
+    }
+  });
+
+  it("errors when omitting type parameters for repeated type alias union members", () => {
+    expect(() =>
+      semanticsPipeline(
+        loadAst("match_union_alias_infer_args_ambiguous.voyd")
+      )
+    ).toThrow(/ambiguous match pattern 'C'/i);
+  });
 });

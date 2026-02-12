@@ -1,0 +1,13 @@
+obj A<T> { value: T }
+obj B {}
+obj D {}
+
+type C<T> = A<T> | B
+
+pub fn main() -> i32
+  let d: D = D {}
+  d.match
+    C:
+      1
+    D:
+      2
