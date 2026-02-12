@@ -419,6 +419,436 @@ const createExplicitTypeArgumentNarrowingCase = (nongenericOverloadCount: number
   };
 };
 
+const createMethodTypeArgumentBudgetCase = (nongenericOverloadCount: number) => {
+  const ctx = createModuleContext();
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+
+  const boxSymbol = ctx.symbolTable.declare({
+    name: "Box",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const valueFieldSymbol = ctx.symbolTable.declare({
+    name: "value",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+
+  ctx.builder.addItem({
+    kind: "object",
+    visibility: moduleVisibility(),
+    symbol: boxSymbol,
+    fields: [
+      {
+        name: "value",
+        symbol: valueFieldSymbol,
+        visibility: moduleVisibility(),
+        type: i32(),
+        span: ctx.span,
+      },
+    ],
+    isFinal: false,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const methodItems = Array.from({ length: nongenericOverloadCount }, (_, index) => {
+    const methodSymbol = ctx.symbolTable.declare({
+      name: "pick",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    const selfParamSymbol = ctx.symbolTable.declare({
+      name: `self_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const argSymbols = Array.from({ length: index + 2 }, (_, argIndex) =>
+      ctx.symbolTable.declare({
+        name: `value_${index}_${argIndex}`,
+        kind: "parameter",
+        declaredAt: ctx.nextNode(),
+      }),
+    );
+    return ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      memberVisibility: moduleVisibility(),
+      symbol: methodSymbol,
+      parameters: [
+        {
+          symbol: selfParamSymbol,
+          pattern: { kind: "identifier" as const, symbol: selfParamSymbol },
+          mutable: false,
+          span: ctx.span,
+          type: {
+            ...i32(),
+            path: ["Box"],
+            symbol: boxSymbol,
+          },
+        },
+        ...argSymbols.map((symbol) => ({
+          symbol,
+          pattern: { kind: "identifier" as const, symbol },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        })),
+      ],
+      returnType: i32(),
+      body: ctx.createLiteral("i32", `${index}`),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  });
+
+  const genericMethodSymbol = ctx.symbolTable.declare({
+    name: "pick",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericTypeParamSymbol = ctx.symbolTable.declare({
+    name: "T",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericSelfParam = ctx.symbolTable.declare({
+    name: "self_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericValueParam = ctx.symbolTable.declare({
+    name: "value_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericMethodItem = ctx.builder.addFunction({
+    kind: "function",
+    visibility: moduleVisibility(),
+    memberVisibility: moduleVisibility(),
+    symbol: genericMethodSymbol,
+    typeParameters: [{ symbol: genericTypeParamSymbol, span: ctx.span }],
+    parameters: [
+      {
+        symbol: genericSelfParam,
+        pattern: { kind: "identifier" as const, symbol: genericSelfParam },
+        mutable: false,
+        span: ctx.span,
+        type: {
+          ...i32(),
+          path: ["Box"],
+          symbol: boxSymbol,
+        },
+      },
+      {
+        symbol: genericValueParam,
+        pattern: { kind: "identifier" as const, symbol: genericValueParam },
+        mutable: false,
+        span: ctx.span,
+        type: i32(),
+      },
+    ],
+    returnType: i32(),
+    body: ctx.createLiteral("i32", "42"),
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const implSymbol = ctx.symbolTable.declare({
+    name: "Box_impl",
+    kind: "impl",
+    declaredAt: ctx.nextNode(),
+  });
+  ctx.builder.addItem({
+    kind: "impl",
+    visibility: moduleVisibility(),
+    symbol: implSymbol,
+    target: {
+      ...i32(),
+      path: ["Box"],
+      symbol: boxSymbol,
+    },
+    members: [...methodItems, genericMethodItem],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const receiverExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "object-literal",
+    literalKind: "nominal",
+    targetSymbol: boxSymbol,
+    entries: [
+      {
+        kind: "field",
+        name: "value",
+        value: ctx.createLiteral("i32", "1"),
+        span: ctx.span,
+      },
+    ],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "method-call",
+    target: receiverExpr,
+    method: "pick",
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    typeArguments: [i32()],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>(),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: genericMethodSymbol,
+  };
+};
+
+const createOperatorTypeArgumentBudgetCase = (nongenericOverloadCount: number) => {
+  const ctx = createModuleContext();
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+
+  const boxSymbol = ctx.symbolTable.declare({
+    name: "Box",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const valueFieldSymbol = ctx.symbolTable.declare({
+    name: "value",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+
+  ctx.builder.addItem({
+    kind: "object",
+    visibility: moduleVisibility(),
+    symbol: boxSymbol,
+    fields: [
+      {
+        name: "value",
+        symbol: valueFieldSymbol,
+        visibility: moduleVisibility(),
+        type: i32(),
+        span: ctx.span,
+      },
+    ],
+    isFinal: false,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const methodItems = Array.from({ length: nongenericOverloadCount }, (_, index) => {
+    const methodSymbol = ctx.symbolTable.declare({
+      name: "+",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    const selfParamSymbol = ctx.symbolTable.declare({
+      name: `self_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const argSymbols = Array.from({ length: index + 2 }, (_, argIndex) =>
+      ctx.symbolTable.declare({
+        name: `rhs_${index}_${argIndex}`,
+        kind: "parameter",
+        declaredAt: ctx.nextNode(),
+      }),
+    );
+    return ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      memberVisibility: moduleVisibility(),
+      symbol: methodSymbol,
+      parameters: [
+        {
+          symbol: selfParamSymbol,
+          pattern: { kind: "identifier" as const, symbol: selfParamSymbol },
+          mutable: false,
+          span: ctx.span,
+          type: {
+            ...i32(),
+            path: ["Box"],
+            symbol: boxSymbol,
+          },
+        },
+        ...argSymbols.map((symbol) => ({
+          symbol,
+          pattern: { kind: "identifier" as const, symbol },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        })),
+      ],
+      returnType: i32(),
+      body: ctx.createLiteral("i32", `${index}`),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  });
+
+  const genericMethodSymbol = ctx.symbolTable.declare({
+    name: "+",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericTypeParamSymbol = ctx.symbolTable.declare({
+    name: "T",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericSelfParam = ctx.symbolTable.declare({
+    name: "self_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericRhsParam = ctx.symbolTable.declare({
+    name: "rhs_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericMethodItem = ctx.builder.addFunction({
+    kind: "function",
+    visibility: moduleVisibility(),
+    memberVisibility: moduleVisibility(),
+    symbol: genericMethodSymbol,
+    typeParameters: [{ symbol: genericTypeParamSymbol, span: ctx.span }],
+    parameters: [
+      {
+        symbol: genericSelfParam,
+        pattern: { kind: "identifier" as const, symbol: genericSelfParam },
+        mutable: false,
+        span: ctx.span,
+        type: {
+          ...i32(),
+          path: ["Box"],
+          symbol: boxSymbol,
+        },
+      },
+      {
+        symbol: genericRhsParam,
+        pattern: { kind: "identifier" as const, symbol: genericRhsParam },
+        mutable: false,
+        span: ctx.span,
+        type: i32(),
+      },
+    ],
+    returnType: i32(),
+    body: ctx.createLiteral("i32", "42"),
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const implSymbol = ctx.symbolTable.declare({
+    name: "Box_impl",
+    kind: "impl",
+    declaredAt: ctx.nextNode(),
+  });
+  ctx.builder.addItem({
+    kind: "impl",
+    visibility: moduleVisibility(),
+    symbol: implSymbol,
+    target: {
+      ...i32(),
+      path: ["Box"],
+      symbol: boxSymbol,
+    },
+    members: [...methodItems, genericMethodItem],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  const addSymbol = ctx.symbolTable.declare({
+    name: "+",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+    metadata: { intrinsic: true },
+  });
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const receiverExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "object-literal",
+    literalKind: "nominal",
+    targetSymbol: boxSymbol,
+    entries: [
+      {
+        kind: "field",
+        name: "value",
+        value: ctx.createLiteral("i32", "1"),
+        span: ctx.span,
+      },
+    ],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "identifier",
+      symbol: addSymbol,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: receiverExpr }, { expr: ctx.createLiteral("i32", "1") }],
+    typeArguments: [i32()],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>(),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: genericMethodSymbol,
+  };
+};
+
 const createTypeSatisfactionContext = (typeCheckBudget?: TypeCheckBudgetConfig) => {
   const span: SourceSpan = { file: "<test>", start: 0, end: 0 };
   const symbolTable = new SymbolTable({ rootOwner: 0 });
@@ -540,6 +970,44 @@ describe("type-check budgets", () => {
 
   it("applies explicit type argument narrowing before overload candidate budget checks", () => {
     const fanout = createExplicitTypeArgumentNarrowingCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 5 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("applies method overload budget checks after explicit type-arg narrowing", () => {
+    const fanout = createMethodTypeArgumentBudgetCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 5 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("applies operator overload budget checks after explicit type-arg narrowing", () => {
+    const fanout = createOperatorTypeArgumentBudgetCase(18);
     const typing = runTypingPipeline({
       ...fanout.inputs,
       typeCheckBudget: { maxOverloadCandidates: 5 },

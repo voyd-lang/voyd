@@ -1924,20 +1924,22 @@ const selectMethodCallCandidate = ({
     return { usedTraitDispatch: false };
   }
 
-  enforceOverloadCandidateBudget({
-    name: expr.method,
-    candidateCount: resolution.candidates.length,
-    ctx,
-    span: expr.span,
-  });
-
   const argsForCandidate = (candidate: MethodCallCandidate): readonly Arg[] =>
     argsForMethodCallCandidate({
       probeArgs,
       receiverTypeOverride: candidate.receiverTypeOverride,
     });
 
-  let candidates = resolution.candidates;
+  let candidates = filterCandidatesByExplicitTypeArguments({
+    candidates: resolution.candidates,
+    typeArguments,
+  });
+  enforceOverloadCandidateBudget({
+    name: expr.method,
+    candidateCount: candidates.length,
+    ctx,
+    span: expr.span,
+  });
   let matches = findMatchingOverloadCandidates({
     candidates,
     args: probeArgs,
@@ -1967,12 +1969,15 @@ const selectMethodCallCandidate = ({
     // same-named methods exist and none of them match the call shape.
     const fallbackCandidates = resolveFreeFunctionFallbackCandidates({
       methodName: expr.method,
-      existing: candidates,
+      existing: resolution.candidates,
       ctx,
     });
 
     if (fallbackCandidates.length > 0) {
-      candidates = fallbackCandidates;
+      candidates = filterCandidatesByExplicitTypeArguments({
+        candidates: fallbackCandidates,
+        typeArguments,
+      });
       enforceOverloadCandidateBudget({
         name: expr.method,
         candidateCount: candidates.length,
@@ -2259,15 +2264,19 @@ const typeOperatorOverloadCall = ({
     return undefined;
   }
 
+  const candidates = filterCandidatesByExplicitTypeArguments({
+    candidates: resolution.candidates,
+    typeArguments,
+  });
   enforceOverloadCandidateBudget({
     name: operatorName,
-    candidateCount: resolution.candidates.length,
+    candidateCount: candidates.length,
     ctx,
     span: call.span,
   });
 
   const matches = findMatchingOverloadCandidates({
-    candidates: resolution.candidates,
+    candidates,
     args,
     ctx,
     state,
@@ -2276,7 +2285,7 @@ const typeOperatorOverloadCall = ({
   const traitDispatch =
     matches.length === 0
       ? resolveTraitDispatchOverload({
-          candidates: resolution.candidates,
+          candidates,
           args,
           ctx,
           state,
