@@ -1,10 +1,17 @@
 use std::all
 
+obj A<T> { v: T }
+obj B {}
+type C<T> = A<T> | B
+
+fn b() -> B
+  B {}
+
+fn c() -> C<i32>
+  b()
+
 pub fn main()
-  let arr = [1, 2, 3]
-  var sum = 0
-  var it = 0
-  for (i, x) in arr.enumerate():
-    sum = sum + x
-    it = it + i
-  sum + it
+  c().match
+    A: 1
+    B: 2
+    C: 3
