@@ -109,5 +109,14 @@ export const getValueType = (
     return unknownType;
   }
 
-  throw new Error(`missing value type for symbol ${record.name}`);
+  return emitDiagnostic({
+    ctx,
+    code: "TY0041",
+    params: {
+      kind: "symbol-not-a-value",
+      name: record.name,
+      symbolKind: record.kind,
+    },
+    span: normalizeSpan(options.span),
+  });
 };

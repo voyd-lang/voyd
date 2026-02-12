@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  collectNodeModulesDirs,
   createSdk,
   type CompileResult,
   type EffectContinuation,
@@ -19,6 +21,8 @@ pub fn main(): Async -> i32
   Async::await(2) + 1
 `;
 const ASYNC_EFFECT_ID = "com.example.async";
+const sdkTestRoot = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(sdkTestRoot, "../../../../");
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -120,6 +124,19 @@ describe("node sdk", () => {
     }
   });
 
+  it("collects node_modules directories from source up to filesystem root", () => {
+    const startDir = path.join(path.sep, "tmp", "voyd", "nested");
+    const resolvedStart = path.resolve(startDir);
+    const rootDir = path.parse(resolvedStart).root;
+    const parentDir = path.dirname(resolvedStart);
+
+    const dirs = collectNodeModulesDirs(startDir);
+
+    expect(dirs[0]).toBe(path.join(resolvedStart, "node_modules"));
+    expect(dirs.at(-1)).toBe(path.join(rootDir, "node_modules"));
+    expect(dirs).toContain(path.join(parentDir, "node_modules"));
+  });
+
   it("resolves packages from the default node_modules search path", async () => {
     const sdk = createSdk();
     const repoRoot = process.cwd();
@@ -208,6 +225,42 @@ pub fn main() -> i32
       );
       const output = await result.run<number>({ entryName: "main" });
       expect(output).toBe(10);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("emits runnable optimized wasm for package-based projects", async () => {
+    const sdk = createSdk();
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-opt-node-modules-"),
+    );
+    const srcDir = path.join(projectRoot, "src");
+    const entryPath = path.join(srcDir, "main.voyd");
+    const packageRoot = path.join(projectRoot, "node_modules", "voyd_semver");
+
+    await fs.mkdir(srcDir, { recursive: true });
+    await fs.copyFile(
+      path.join(
+        repoRoot,
+        "apps",
+        "smoke",
+        "fixtures",
+        "node-modules-voyd-semver",
+        "main.voyd",
+      ),
+      entryPath,
+    );
+    await fs.cp(path.join(repoRoot, "packages", "voyd_semver"), packageRoot, {
+      recursive: true,
+    });
+
+    try {
+      const result = expectCompileSuccess(
+        await sdk.compile({ entryPath, optimize: true }),
+      );
+      const output = await result.run<number>({ entryName: "main" });
+      expect(output).toBe(42);
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }

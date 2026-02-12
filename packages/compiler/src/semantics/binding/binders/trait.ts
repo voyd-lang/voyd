@@ -29,6 +29,7 @@ import { bindTypeParameters } from "./type-parameters.js";
 import { toSourceSpan } from "../../utils.js";
 import { moduleVisibility } from "../../hir/index.js";
 import { declareValueOrParameter } from "../redefinitions.js";
+import { reportOverloadNameCollision } from "../name-collisions.js";
 
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
@@ -38,6 +39,12 @@ export const bindTraitDecl = (
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
   rememberSyntax(decl.body, ctx);
+  reportOverloadNameCollision({
+    name: decl.name.value,
+    scope: tracker.current(),
+    syntax: decl.name,
+    ctx,
+  });
 
   const symbol = ctx.symbolTable.declare({
     name: decl.name.value,

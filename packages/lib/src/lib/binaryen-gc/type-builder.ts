@@ -9,6 +9,23 @@ import {
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
+const writeU32Array = (ptr: number, u32s: number[]): void => {
+  if (bin.HEAPU32) {
+    bin.HEAPU32.set(u32s, ptr >>> 2);
+    return;
+  }
+  u32s.forEach((value, index) => {
+    bin.__i32_store(ptr + (index << 2), value >>> 0);
+  });
+};
+
+const readU32At = (ptr: number, index: number): number => {
+  if (bin.HEAPU32) {
+    return bin.HEAPU32[(ptr >>> 2) + index]!;
+  }
+  return bin.__i32_load(ptr + (index << 2)) >>> 0;
+};
+
 export class TypeBuilderBuildError extends Error {
   errorIndex: number;
   errorReason: number;
@@ -122,7 +139,7 @@ export class TypeBuilder {
         throw new TypeBuilderBuildError({ errorIndex, errorReason });
       }
       return Array.from({ length: size }, (_, i) => {
-        return bin.HEAPU32[(heapTypesPtr >>> 2) + i]!;
+        return readU32At(heapTypesPtr, i);
       });
     } finally {
       bin._free(out);
@@ -149,7 +166,7 @@ export class TypeBuilder {
 
   private allocU32Array(u32s: number[]): number {
     const ptr = bin._malloc(u32s.length << 2);
-    bin.HEAPU32.set(u32s, ptr >>> 2);
+    writeU32Array(ptr, u32s);
     this.allocations.push(ptr);
     return ptr;
   }

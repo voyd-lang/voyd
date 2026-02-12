@@ -11,6 +11,7 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "@voyd/sdk": "*"
+    "@voyd/sdk": "*",
+    "voyd_semver": "*"
   }
 }

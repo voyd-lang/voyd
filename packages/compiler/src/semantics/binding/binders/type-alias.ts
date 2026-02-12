@@ -4,6 +4,7 @@ import type { TypeParameterDecl } from "../../decls.js";
 import { rememberSyntax } from "../context.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
+import { reportOverloadNameCollision } from "../name-collisions.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -17,6 +18,12 @@ export const bindTypeAlias = (
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
+  reportOverloadNameCollision({
+    name: decl.name.value,
+    scope: tracker.current(),
+    syntax: decl.name,
+    ctx,
+  });
 
   const symbol = ctx.symbolTable.declare({
     name: decl.name.value,

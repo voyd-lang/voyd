@@ -49,6 +49,6 @@
     "@voyd/js-host": "*",
     "@voyd/std": "*",
     "@voyd/lib": "*",
-    "binaryen": "^123.0.0"
+    "binaryen": "^125.0.0"
   }
 }

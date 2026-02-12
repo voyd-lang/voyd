@@ -37,7 +37,14 @@ type DiagnosticParamsMap = {
         moduleId: string;
         target: string;
         owner?: string;
-      };
+      }
+    | {
+        kind: "import-name-conflict";
+        name: string;
+        incomingKind: string;
+        existingKind: string;
+      }
+    | { kind: "previous-import-name-conflict" };
   BD0002:
     | {
         kind: "duplicate-overload";
@@ -98,7 +105,9 @@ type DiagnosticParamsMap = {
     | { kind: "immutable-object"; binding: string; reason: string }
     | { kind: "binding-declaration"; binding: string };
   TY0005: { kind: "not-callable" };
-  TY0006: { kind: "unknown-function"; name: string };
+  TY0006:
+    | { kind: "unknown-function"; name: string }
+    | { kind: "missing-string-helper"; name: "new_string" };
   TY0007: { kind: "ambiguous-overload"; name: string };
   TY0008: { kind: "no-overload"; name: string };
   TY0009: {
@@ -204,6 +213,10 @@ type DiagnosticParamsMap = {
     observedSteps: number;
   };
   TY0041: {
+    kind: "symbol-not-a-value";
+    name: string;
+    symbolKind: string;
+  } | {
     kind: "overload-candidate-budget-exceeded";
     name: string;
     candidates: number;
@@ -241,6 +254,10 @@ export const diagnosticsRegistry: {
           const ownerPrefix = params.owner ? `${params.owner}::` : "";
           return `Cannot import ${params.target} from ${params.moduleId}; ${ownerPrefix}${params.target} is an instance member and must be accessed through its type`;
         }
+        case "import-name-conflict":
+          return `Cannot import ${params.name} as ${params.incomingKind}; ${params.name} is already bound as ${params.existingKind} in this scope`;
+        case "previous-import-name-conflict":
+          return "previous conflicting import binding is here";
       }
       return exhaustive(params);
     },
@@ -398,7 +415,10 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0005"]>,
   TY0006: {
     code: "TY0006",
-    message: (params) => `function '${params.name}' is not defined`,
+    message: (params) =>
+      params.kind === "unknown-function"
+        ? `function '${params.name}' is not defined`
+        : "function 'new_string' is not defined; import std::string::fns::new_string",
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0006"]>,
@@ -741,10 +761,16 @@ export const diagnosticsRegistry: {
   TY0041: {
     code: "TY0041",
     message: (params) =>
-      `overload resolution for ${params.name} considered ${params.candidates} candidates (budget: ${params.maxCandidates})`,
+      params.kind === "symbol-not-a-value"
+        ? `symbol '${params.name}' is a ${params.symbolKind}, not a value`
+        : `overload resolution for ${params.name} considered ${params.candidates} candidates (budget: ${params.maxCandidates})`,
     severity: "error",
     phase: "typing",
     hints: [
+      {
+        message:
+          "Type aliases cannot be constructed as values; for structural aliases use '{ ... }', and for nominal construction use an object type value.",
+      },
       {
         message:
           "Split broad overload sets and add explicit type arguments or expected-type annotations instead of relying on global inference.",

@@ -1,0 +1,4 @@
+type Ver = { major: i32, minor: i32, patch: i32 }
+
+pub fn main()
+  Ver { major: 1, minor: 2, patch: 3 }

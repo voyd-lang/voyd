@@ -1,40 +1,12 @@
 import type { Syntax } from "../../parser/index.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
-import type { SymbolRecord } from "../binder/index.js";
 import type { NodeId, ScopeId, SymbolId } from "../ids.js";
 import { toSourceSpan } from "../utils.js";
 import type { BindingContext } from "./types.js";
-
-const isLocalBinding = (record: SymbolRecord): boolean => {
-  const metadata = record.metadata as { localBinding?: unknown } | undefined;
-  return metadata?.localBinding === true;
-};
-
-const findBindingInScope = ({
-  name,
-  scope,
-  ctx,
-}: {
-  name: string;
-  scope: ScopeId;
-  ctx: BindingContext;
-}): SymbolRecord | undefined => {
-  for (const symbolId of ctx.symbolTable.symbolsInScope(scope)) {
-    const record = ctx.symbolTable.getSymbol(symbolId);
-    if (record.name !== name) {
-      continue;
-    }
-    if (!isLocalBinding(record)) {
-      continue;
-    }
-    return record;
-  }
-
-  return undefined;
-};
-
-const spanForNode = (nodeId: NodeId, ctx: BindingContext) =>
-  toSourceSpan(ctx.syntaxByNode.get(nodeId));
+import {
+  findLocalBindingNameCollision,
+  reportOverloadNameCollision,
+} from "./name-collisions.js";
 
 export const declareValueOrParameter = ({
   name,
@@ -53,7 +25,16 @@ export const declareValueOrParameter = ({
   syntax?: Syntax;
   ctx: BindingContext;
 }): SymbolId => {
-  const existing = findBindingInScope({ name, scope, ctx });
+  if (syntax) {
+    reportOverloadNameCollision({
+      name,
+      scope,
+      syntax,
+      ctx,
+    });
+  }
+
+  const existing = findLocalBindingNameCollision({ name, scope, ctx });
   if (existing) {
     ctx.diagnostics.push(
       diagnosticFromCode({
@@ -65,7 +46,7 @@ export const declareValueOrParameter = ({
             code: "BD0006",
             params: { kind: "previous-binding" },
             severity: "note",
-            span: spanForNode(existing.declaredAt, ctx),
+            span: existing.span,
           }),
         ],
       })

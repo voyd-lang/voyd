@@ -7,7 +7,7 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../../../parser/index.js";
-import { literalProvidesAllFields } from "../../constructors.js";
+import { literalShouldLowerAsObjectLiteral } from "../../constructors.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirTypeExpr } from "../../hir/index.js";
 import { lowerTypeExpr } from "../type-expressions.js";
@@ -129,9 +129,9 @@ export const lowerNominalObjectLiteral = ({
   }
   if (constructors && constructors.size > 0) {
     const decl = ctx.decls.getObject(calleeResolution.symbol);
-    const providesAllFields =
-      decl && literalProvidesAllFields(literalForm, decl.fields);
-    if (!providesAllFields) {
+    const lowerAsObjectLiteral =
+      decl && literalShouldLowerAsObjectLiteral(literalForm, decl.fields);
+    if (!lowerAsObjectLiteral) {
       return lowerConstructorLiteralCall({
         callee: calleeResolution.calleeSyntax,
         literal: literalForm,

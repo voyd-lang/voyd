@@ -1,6 +1,4 @@
-import type { Syntax } from "../../parser/index.js";
-import type { SymbolRecord } from "../binder/index.js";
-import type { NodeId, ScopeId, SymbolId } from "../ids.js";
+import type { ScopeId } from "../ids.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
 import { formatTypeAnnotation, toSourceSpan } from "../utils.js";
 import type {
@@ -10,6 +8,7 @@ import type {
   OverloadBucket,
   BoundParameter,
 } from "./types.js";
+import { findNonOverloadNameCollision } from "./name-collisions.js";
 
 const makeOverloadBucketKey = (scope: ScopeId, name: string): string =>
   `${scope}:${name}`;
@@ -60,12 +59,12 @@ export const recordFunctionOverload = (
 
   bucket.functions.push(fn);
 
-  const conflict = findNonFunctionDeclaration(
-    fn.name,
-    declarationScope,
-    fn.symbol,
-    ctx
-  );
+  const conflict = findNonOverloadNameCollision({
+    name: fn.name,
+    scope: declarationScope,
+    skipSymbol: fn.symbol,
+    ctx,
+  });
   if (conflict && !bucket.nonFunctionConflictReported) {
     ctx.diagnostics.push(
       diagnosticFromCode({
@@ -81,7 +80,7 @@ export const recordFunctionOverload = (
             code: "BD0003",
             params: { kind: "conflicting-declaration" },
             severity: "note",
-            span: spanForNode(conflict.declaredAt, ctx),
+            span: conflict.span,
           }),
         ],
       })
@@ -296,62 +295,4 @@ export const finalizeEffectOperationOverloadSets = (ctx: BindingContext): void =
       ctx.importedOverloadOptions.set(id, symbols);
     });
   });
-};
-
-export const reportOverloadNameCollision = (
-  name: string,
-  scope: ScopeId,
-  syntax: Syntax,
-  ctx: BindingContext
-): void => {
-  const bucket = ctx.overloadBuckets.get(makeOverloadBucketKey(scope, name));
-  if (
-    !bucket ||
-    bucket.functions.length === 0 ||
-    bucket.nonFunctionConflictReported
-  ) {
-    return;
-  }
-  ctx.diagnostics.push(
-    diagnosticFromCode({
-      code: "BD0003",
-      params: { kind: "overload-name-collision", name },
-      span: toSourceSpan(syntax),
-      related: [
-        diagnosticFromCode({
-          code: "BD0003",
-          params: { kind: "conflicting-declaration" },
-          severity: "note",
-          span: toSourceSpan(bucket.functions[0]!.form),
-        }),
-      ],
-    })
-  );
-  bucket.nonFunctionConflictReported = true;
-};
-
-const spanForNode = (nodeId: NodeId, ctx: BindingContext) =>
-  toSourceSpan(ctx.syntaxByNode.get(nodeId));
-
-const findNonFunctionDeclaration = (
-  name: string,
-  scope: ScopeId,
-  skipSymbol: SymbolId,
-  ctx: BindingContext
-): SymbolRecord | undefined => {
-  for (const symbolId of ctx.symbolTable.symbolsInScope(scope)) {
-    if (symbolId === skipSymbol) {
-      continue;
-    }
-    const record = ctx.symbolTable.getSymbol(symbolId);
-    if (record.name !== name) {
-      continue;
-    }
-    const metadata = (record.metadata ?? {}) as { entity?: string };
-    if (metadata.entity === "function" || metadata.entity === "object") {
-      continue;
-    }
-    return record;
-  }
-  return undefined;
 };

@@ -11,7 +11,7 @@
   "packageManager": "npm@11.4.2",
   "scripts": {
     "build": "turbo run build --affected",
-    "test": "turbo run test --affected --output-logs=errors-only",
+    "test": "turbo run test --affected --output-logs=errors-only --concurrency=4",
     "typecheck": "turbo run typecheck --affected",
     "lint": "turbo run lint --affected --parallel",
     "dev": "turbo run dev --affected --parallel",
