@@ -46,6 +46,7 @@ import {
   importableMetadataFrom,
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
+import { findModuleNamespaceNameCollision } from "../name-collisions.js";
 
 type ModuleMetadata =
   | { import?: { moduleId?: unknown; symbol?: unknown } | undefined }
@@ -636,8 +637,9 @@ const declareImportedSymbol = ({
   const locals: BoundImport[] = [];
 
   symbols.forEach((symbol) => {
-    const importNameCollision = findImportNameCollision({
+    const importNameCollision = findModuleNamespaceNameCollision({
       name: alias,
+      scope: ctx.symbolTable.rootScope,
       incomingKind: exported.kind,
       ctx,
     });
@@ -741,8 +743,9 @@ const declareModuleImport = ({
     return [];
   }
   const name = alias ?? moduleId.split("::").at(-1) ?? "self";
-  const importNameCollision = findImportNameCollision({
+  const importNameCollision = findModuleNamespaceNameCollision({
     name,
+    scope: ctx.symbolTable.rootScope,
     incomingKind: "module",
     ctx,
   });
@@ -840,49 +843,6 @@ const recordImportDiagnostic = ({
       span,
     }),
   );
-};
-
-const findImportNameCollision = ({
-  name,
-  incomingKind,
-  ctx,
-}: {
-  name: string;
-  incomingKind: SymbolKind;
-  ctx: BindingContext;
-}): { kind: SymbolKind; span: SourceSpan } | undefined => {
-  for (const symbolId of ctx.symbolTable.symbolsInScope(ctx.symbolTable.rootScope)) {
-    const existing = ctx.symbolTable.getSymbol(symbolId);
-    if (existing.name !== name) {
-      continue;
-    }
-    if (!isModuleNamespaceCollision(existing.kind, incomingKind)) {
-      continue;
-    }
-    return {
-      kind: existing.kind,
-      span: spanForDeclaredSymbol({ symbol: symbolId, ctx }),
-    };
-  }
-  return undefined;
-};
-
-const isModuleNamespaceCollision = (
-  existingKind: SymbolKind,
-  incomingKind: SymbolKind,
-): boolean =>
-  (existingKind === "module" && incomingKind !== "module") ||
-  (existingKind !== "module" && incomingKind === "module");
-
-const spanForDeclaredSymbol = ({
-  symbol,
-  ctx,
-}: {
-  symbol: SymbolId;
-  ctx: BindingContext;
-}): SourceSpan => {
-  const declaredAt = ctx.symbolTable.getSymbol(symbol).declaredAt;
-  return toSourceSpan(ctx.syntaxByNode.get(declaredAt));
 };
 
 const recordImportNameConflict = ({
