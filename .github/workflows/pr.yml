@@ -27,7 +27,16 @@ jobs:
           filters: |
             cli:
               - "apps/cli/**"
+              - "packages/sdk/**"
+              - "packages/lib/**"
+              - "packages/std/**"
+              - "packages/compiler/**"
+              - "packages/js-host/**"
               - "scripts/voyd"
+              - "package-lock.json"
+              - "vite.config.ts"
+              - "vitest.config.ts"
+              - "tsconfig*.json"
             compiler_semantics:
               - "packages/compiler/src/semantics/**"
       - name: Use Node.js
