@@ -713,6 +713,7 @@ const getExpectedCallParameters = ({
     const matchingReturn = filterCandidatesByExpectedReturnType({
       candidates: explicitTypeMatches,
       expectedReturnType,
+      typeArguments,
       ctx,
       state,
     });
@@ -876,11 +877,13 @@ const filterCandidatesByExpectedReturnType = <
 >({
   candidates,
   expectedReturnType,
+  typeArguments,
   ctx,
   state,
 }: {
   candidates: readonly T[];
   expectedReturnType: TypeId | undefined;
+  typeArguments?: readonly TypeId[];
   ctx: TypingContext;
   state: TypingState;
 }): T[] => {
@@ -890,14 +893,29 @@ const filterCandidatesByExpectedReturnType = <
   ) {
     return [...candidates];
   }
-  return candidates.filter((candidate) =>
-    typeSatisfies(
-      signatureForOverloadCandidate(candidate).returnType,
-      expectedReturnType,
-      ctx,
-      state,
-    ),
-  );
+  return candidates.filter((candidate) => {
+    const signature = signatureForOverloadCandidate(candidate);
+    const typeParams = signature.typeParams ?? [];
+    if (
+      typeArguments &&
+      typeArguments.length > 0 &&
+      typeArguments.length > typeParams.length
+    ) {
+      return false;
+    }
+    const substitution = new Map<TypeParamId, TypeId>();
+    typeParams.forEach((param, index) => {
+      const explicitArg = typeArguments?.[index];
+      if (typeof explicitArg === "number") {
+        substitution.set(param.typeParam, explicitArg);
+      }
+    });
+    const returnType =
+      substitution.size > 0
+        ? ctx.arena.substitute(signature.returnType, substitution)
+        : signature.returnType;
+    return typeSatisfies(returnType, expectedReturnType, ctx, state);
+  });
 };
 
 const enforceOverloadCandidateBudget = ({
@@ -3614,6 +3632,7 @@ const typeOverloadedCall = (
   const candidatesForResolution = filterCandidatesByExpectedReturnType({
     candidates: candidatesForBudget,
     expectedReturnType,
+    typeArguments,
     ctx,
     state,
   });
