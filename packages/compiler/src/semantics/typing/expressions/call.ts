@@ -260,6 +260,13 @@ export const typeCallExpr = (
         ctx,
       });
     }
+    if (record.kind === "type") {
+      return reportNonFunctionCallee({
+        callSpan: expr.span,
+        calleeSpan: calleeExpr.span,
+        ctx,
+      });
+    }
     assertMemberAccess({
       symbol: calleeExpr.symbol,
       ctx,
@@ -849,22 +856,18 @@ const resolveTypeArguments = (
       )
     : undefined;
 
-const expectedParamLabel = (param: ParamSignature): string | undefined =>
-  param.label ?? param.name;
-
 const labelsCompatible = (
   param: ParamSignature,
   argLabel: string | undefined,
 ): boolean => {
-  const expected = expectedParamLabel(param);
-  if (!expected) {
+  if (!param.label) {
     return argLabel === undefined;
   }
-  if (param.label) {
-    return argLabel === expected;
-  }
-  return argLabel === undefined || argLabel === expected;
+  return argLabel === param.label;
 };
+
+const labelForDiagnostic = (label: string | undefined): string | undefined =>
+  label && label.length > 0 ? label : undefined;
 
 const spanForArg = (arg: Arg, ctx: TypingContext): SourceSpan | undefined => {
   if (typeof arg.exprId !== "number") {
@@ -1076,13 +1079,17 @@ const validateCallArgs = (
       continue;
     }
 
-    const expectedLabel = expectedParamLabel(param) ?? "no label";
-    const actualLabel = arg.label ?? "no label";
-    throw new Error(
-      `call argument ${
-        paramIndex + 1
-      } label mismatch: expected ${expectedLabel}, got ${actualLabel}`,
-    );
+    emitDiagnostic({
+      ctx,
+      code: "TY0021",
+      params: {
+        kind: "call-argument-label-mismatch",
+        argumentIndex: paramIndex + 1,
+        expectedLabel: labelForDiagnostic(param.label),
+        actualLabel: labelForDiagnostic(arg.label),
+      },
+      span: normalizeSpan(spanForArg(arg, ctx), param.span, span),
+    });
   }
 
   if (argIndex < args.length) {

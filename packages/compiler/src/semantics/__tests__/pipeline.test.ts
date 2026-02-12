@@ -791,6 +791,12 @@ describe("semanticsPipeline", () => {
     ).toBe(true);
   });
 
+  it("allows overloads that differ only by explicit label style", () => {
+    const ast = loadAst("constructor_overloads_mixed_label_styles.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("rejects overloads that differ only by return type", () => {
     const binding = bindFixture("function_overloads_return_type.voyd");
     expect(
