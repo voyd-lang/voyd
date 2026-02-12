@@ -792,17 +792,11 @@ const compileCallArgumentsForParams = (
       `call argument count mismatch for ${calleeName} (call ${call.id} in ${ctx.moduleId}): ${detail}`
     );
   };
-  const expectedParamLabel = (param: CallParam): string | undefined =>
-    param.label ?? param.name;
   const labelsCompatible = (param: CallParam, argLabel: string | undefined): boolean => {
-    const expected = expectedParamLabel(param);
-    if (!expected) {
+    if (!param.label) {
       return argLabel === undefined;
     }
-    if (param.label) {
-      return argLabel === expected;
-    }
-    return argLabel === undefined || argLabel === expected;
+    return argLabel === param.label;
   };
 
   type PlanEntry =

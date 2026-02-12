@@ -154,6 +154,12 @@ type DiagnosticParamsMap = {
   TY0021:
     | { kind: "call-missing-argument"; paramName: string }
     | { kind: "call-missing-labeled-argument"; label: string }
+    | {
+        kind: "call-argument-label-mismatch";
+        argumentIndex: number;
+        expectedLabel?: string;
+        actualLabel?: string;
+      }
     | { kind: "call-extra-arguments"; extra: number };
   TY0022: { kind: "unknown-method"; name: string; receiver?: string };
   TY0023: { kind: "array-literal-empty" };
@@ -533,6 +539,11 @@ export const diagnosticsRegistry: {
           return `missing required call argument for ${params.paramName}`;
         case "call-missing-labeled-argument":
           return `missing required labeled call argument ${params.label}`;
+        case "call-argument-label-mismatch": {
+          const expected = params.expectedLabel ?? "no label";
+          const actual = params.actualLabel ?? "no label";
+          return `call argument ${params.argumentIndex} label mismatch: expected ${expected}, got ${actual}`;
+        }
         case "call-extra-arguments":
           return `call has ${params.extra} extra argument(s)`;
       }

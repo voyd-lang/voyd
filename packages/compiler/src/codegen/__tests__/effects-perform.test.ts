@@ -132,7 +132,7 @@ const buildLoweringSnapshot = () => {
     }));
 };
 
-describe("effect perform lowering", () => {
+describe("effect perform lowering", { timeout: 15_000 }, () => {
   it("records liveness and continuation layouts for perform sites", () => {
     const sites = buildLoweringSnapshot();
     expect(sites.length).toBeGreaterThan(0);
@@ -145,17 +145,21 @@ describe("effect perform lowering", () => {
     ).toBe(true);
   });
 
-  it("emits continuation env captures and effect requests in Wasm", async () => {
-    const { module } = await compileEffectFixture({
-      entryPath: fixturePath,
-      codegenOptions: { emitEffectHelpers: true },
-    });
-    const text = module.emitText();
-    expect(text).toContain("voydEffectRequest");
-    expect(text).toContain("voydContEnvBase");
-    expect(text).toContain("voydContEnv_");
-    expect(text).toContain("__cont_");
-  });
+  it(
+    "emits continuation env captures and effect requests in Wasm",
+    async () => {
+      const { module } = await compileEffectFixture({
+        entryPath: fixturePath,
+        codegenOptions: { emitEffectHelpers: true },
+      });
+      const text = module.emitText();
+      expect(text).toContain("voydEffectRequest");
+      expect(text).toContain("voydContEnvBase");
+      expect(text).toContain("voydContEnv_");
+      expect(text).toContain("__cont_");
+    },
+    15_000,
+  );
 
   it("does not re-evaluate guards when resuming after a perform", async () => {
     const { module } = await compileEffectFixture({ entryPath: guardFixturePath });

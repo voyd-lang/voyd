@@ -260,6 +260,13 @@ export const typeCallExpr = (
         ctx,
       });
     }
+    if (record.kind === "type") {
+      return reportNonFunctionCallee({
+        callSpan: expr.span,
+        calleeSpan: calleeExpr.span,
+        ctx,
+      });
+    }
     assertMemberAccess({
       symbol: calleeExpr.symbol,
       ctx,
@@ -851,22 +858,18 @@ const resolveTypeArguments = (
       )
     : undefined;
 
-const expectedParamLabel = (param: ParamSignature): string | undefined =>
-  param.label ?? param.name;
-
 const labelsCompatible = (
   param: ParamSignature,
   argLabel: string | undefined,
 ): boolean => {
-  const expected = expectedParamLabel(param);
-  if (!expected) {
+  if (!param.label) {
     return argLabel === undefined;
   }
-  if (param.label) {
-    return argLabel === expected;
-  }
-  return argLabel === undefined || argLabel === expected;
+  return argLabel === param.label;
 };
+
+const labelForDiagnostic = (label: string | undefined): string | undefined =>
+  label && label.length > 0 ? label : undefined;
 
 const spanForArg = (arg: Arg, ctx: TypingContext): SourceSpan | undefined => {
   if (typeof arg.exprId !== "number") {
@@ -899,15 +902,77 @@ const spanForObjectLiteralFieldValue = (
   return ctx.hir.expressions.get(field.value)?.span ?? field.span;
 };
 
-const validateCallArgs = (
-  args: readonly Arg[],
-  params: readonly ParamSignature[],
-  ctx: TypingContext,
-  state: TypingState,
-  callSpan?: SourceSpan,
-): void => {
-  const span = callSpan ?? ctx.hir.module.span;
+type MatchedCallArgument = {
+  arg: Arg;
+  argIndex: number;
+  param: ParamSignature;
+  paramIndex: number;
+  matchedType: TypeId;
+  matchedExprId?: HirExprId;
+  kind: "direct" | "structural-field";
+  fieldName?: string;
+};
 
+type SkippedOptionalCallParameter = {
+  param: ParamSignature;
+  paramIndex: number;
+  reason: "missing-argument" | "structural-missing-field" | "label-mismatch";
+};
+
+type CallArgumentWalkFailure =
+  | { kind: "missing-argument"; paramIndex: number }
+  | { kind: "missing-labeled-argument"; paramIndex: number; label: string }
+  | {
+      kind: "label-mismatch";
+      paramIndex: number;
+      argIndex: number;
+      expectedLabel?: string;
+      actualLabel?: string;
+    }
+  | { kind: "extra-arguments"; extra: number }
+  | { kind: "incompatible"; paramIndex: number; argIndex?: number };
+
+type CallArgumentWalkResult =
+  | { kind: "ok" }
+  | { kind: "error"; failure: CallArgumentWalkFailure };
+
+const resolveStructuralMatchedExprId = ({
+  arg,
+  fieldName,
+  ctx,
+}: {
+  arg: Arg;
+  fieldName: string;
+  ctx: TypingContext;
+}): HirExprId | undefined => {
+  if (typeof arg.exprId !== "number") {
+    return undefined;
+  }
+  const argExpr = ctx.hir.expressions.get(arg.exprId);
+  if (argExpr?.exprKind !== "object-literal") {
+    return arg.exprId;
+  }
+  const directField = argExpr.entries.find(
+    (entry) => entry.kind === "field" && entry.name === fieldName,
+  );
+  return directField?.kind === "field" ? directField.value : arg.exprId;
+};
+
+const walkCallArguments = ({
+  args,
+  params,
+  ctx,
+  state,
+  onMatch,
+  onSkipOptionalParam,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  ctx: TypingContext;
+  state: TypingState;
+  onMatch: (match: MatchedCallArgument) => boolean;
+  onSkipOptionalParam: (skipped: SkippedOptionalCallParameter) => boolean;
+}): CallArgumentWalkResult => {
   let argIndex = 0;
   let paramIndex = 0;
 
@@ -917,212 +982,22 @@ const validateCallArgs = (
 
     if (!arg) {
       if (param.optional) {
-        // TODO: Not sure this optional check is doing anything useful here
-        const optionalInfo = getOptionalInfo(
-          param.type,
-          optionalResolverContextForTypingContext(ctx),
-        );
-        if (!optionalInfo) {
-          throw new Error("optional parameter type must be Optional");
+        if (
+          !onSkipOptionalParam({
+            param,
+            paramIndex,
+            reason: "missing-argument",
+          })
+        ) {
+          return {
+            kind: "error",
+            failure: { kind: "incompatible", paramIndex },
+          };
         }
-        ensureTypeMatches(
-          optionalInfo.noneType,
-          param.type,
-          ctx,
-          state,
-          `call argument ${paramIndex + 1}`,
-          normalizeSpan(callSpan, param.span, span),
-        );
         paramIndex += 1;
         continue;
       }
-
-      emitDiagnostic({
-        ctx,
-        code: "TY0021",
-        params: {
-          kind: "call-missing-argument",
-          paramName: param.name ?? param.label ?? `parameter ${paramIndex + 1}`,
-        },
-        span,
-      });
-      throw new Error("call argument count mismatch");
-    }
-
-    if (param.label && arg.label === undefined) {
-      const structuralFields = getStructuralFields(arg.type, ctx, state);
-      if (structuralFields) {
-        let cursor = paramIndex;
-        while (cursor < params.length) {
-          const runParam = params[cursor]!;
-          if (!runParam.label) {
-            break;
-          }
-          const match = structuralFields.find(
-            (field) => field.name === runParam.label,
-          );
-          if (match) {
-            const fieldSpan =
-              runParam.label !== undefined
-                ? spanForObjectLiteralFieldValue(arg, runParam.label, ctx)
-                : spanForArg(arg, ctx);
-            ensureTypeMatches(
-              match.type,
-              runParam.type,
-              ctx,
-              state,
-              `call argument ${cursor + 1}`,
-              normalizeSpan(fieldSpan, runParam.span, span),
-            );
-            const mutabilityExprId = (() => {
-              if (typeof arg.exprId !== "number") {
-                return undefined;
-              }
-              const argExpr = ctx.hir.expressions.get(arg.exprId);
-              if (argExpr?.exprKind !== "object-literal") {
-                return arg.exprId;
-              }
-              const directField = argExpr.entries.find(
-                (entry) =>
-                  entry.kind === "field" && entry.name === runParam.label,
-              );
-              return directField?.kind === "field"
-                ? directField.value
-                : arg.exprId;
-            })();
-            ensureMutableArgument({
-              arg: {
-                ...arg,
-                type: match.type,
-                exprId: mutabilityExprId ?? arg.exprId,
-              },
-              param: runParam,
-              index: cursor,
-              ctx,
-            });
-            cursor += 1;
-            continue;
-          }
-
-          if (runParam.optional) {
-            const optionalInfo = getOptionalInfo(
-              runParam.type,
-              optionalResolverContextForTypingContext(ctx),
-            );
-            if (!optionalInfo) {
-              throw new Error("optional parameter type must be Optional");
-            }
-            ensureTypeMatches(
-              optionalInfo.noneType,
-              runParam.type,
-              ctx,
-              state,
-              `call argument ${cursor + 1}`,
-              normalizeSpan(callSpan, runParam.span, span),
-            );
-            cursor += 1;
-            continue;
-          }
-
-          emitDiagnostic({
-            ctx,
-            code: "TY0021",
-            params: {
-              kind: "call-missing-labeled-argument",
-              label: runParam.label,
-            },
-            span,
-          });
-        }
-
-        if (cursor > paramIndex) {
-          paramIndex = cursor;
-          argIndex += 1;
-          continue;
-        }
-      }
-    }
-
-    if (labelsCompatible(param, arg.label)) {
-      ensureTypeMatches(
-        arg.type,
-        param.type,
-        ctx,
-        state,
-        `call argument ${paramIndex + 1}`,
-        normalizeSpan(spanForArg(arg, ctx), param.span, span),
-      );
-      ensureMutableArgument({ arg, param, index: paramIndex, ctx });
-      argIndex += 1;
-      paramIndex += 1;
-      continue;
-    }
-
-    if (param.optional) {
-      const optionalInfo = getOptionalInfo(
-        param.type,
-        optionalResolverContextForTypingContext(ctx),
-      );
-      if (!optionalInfo) {
-        throw new Error("optional parameter type must be Optional");
-      }
-      ensureTypeMatches(
-        optionalInfo.noneType,
-        param.type,
-        ctx,
-        state,
-        `call argument ${paramIndex + 1}`,
-        normalizeSpan(callSpan, param.span, span),
-      );
-      paramIndex += 1;
-      continue;
-    }
-
-    const expectedLabel = expectedParamLabel(param) ?? "no label";
-    const actualLabel = arg.label ?? "no label";
-    throw new Error(
-      `call argument ${
-        paramIndex + 1
-      } label mismatch: expected ${expectedLabel}, got ${actualLabel}`,
-    );
-  }
-
-  if (argIndex < args.length) {
-    emitDiagnostic({
-      ctx,
-      code: "TY0021",
-      params: {
-        kind: "call-extra-arguments",
-        extra: args.length - argIndex,
-      },
-      span,
-    });
-    throw new Error("call argument count mismatch");
-  }
-};
-
-const callArgumentsSatisfyParams = ({
-  args,
-  params,
-  ctx,
-  state,
-}: {
-  args: readonly Arg[];
-  params: readonly ParamSignature[];
-  ctx: TypingContext;
-  state: TypingState;
-}): boolean => {
-  let argIndex = 0;
-  let paramIndex = 0;
-
-  while (paramIndex < params.length) {
-    const param = params[paramIndex]!;
-    const arg = args[argIndex];
-
-    if (!arg) {
-      return params
-        .slice(paramIndex)
-        .every((remaining) => Boolean(remaining.optional));
+      return { kind: "error", failure: { kind: "missing-argument", paramIndex } };
     }
 
     if (param.label && arg.label === undefined) {
@@ -1139,19 +1014,53 @@ const callArgumentsSatisfyParams = ({
           );
           if (match) {
             if (
-              match.type !== ctx.primitives.unknown &&
-              !typeSatisfies(match.type, runParam.type, ctx, state)
+              !onMatch({
+                arg,
+                argIndex,
+                param: runParam,
+                paramIndex: cursor,
+                matchedType: match.type,
+                matchedExprId: resolveStructuralMatchedExprId({
+                  arg,
+                  fieldName: runParam.label,
+                  ctx,
+                }),
+                kind: "structural-field",
+                fieldName: runParam.label,
+              })
             ) {
-              return false;
+              return {
+                kind: "error",
+                failure: { kind: "incompatible", paramIndex: cursor, argIndex },
+              };
             }
             cursor += 1;
             continue;
           }
           if (runParam.optional) {
+            if (
+              !onSkipOptionalParam({
+                param: runParam,
+                paramIndex: cursor,
+                reason: "structural-missing-field",
+              })
+            ) {
+              return {
+                kind: "error",
+                failure: { kind: "incompatible", paramIndex: cursor, argIndex },
+              };
+            }
             cursor += 1;
             continue;
           }
-          return false;
+          return {
+            kind: "error",
+            failure: {
+              kind: "missing-labeled-argument",
+              paramIndex: cursor,
+              label: runParam.label,
+            },
+          };
         }
 
         if (cursor > paramIndex) {
@@ -1164,26 +1073,232 @@ const callArgumentsSatisfyParams = ({
 
     if (labelsCompatible(param, arg.label)) {
       if (
-        arg.type !== ctx.primitives.unknown &&
-        !typeSatisfies(arg.type, param.type, ctx, state)
+        !onMatch({
+          arg,
+          argIndex,
+          param,
+          paramIndex,
+          matchedType: arg.type,
+          matchedExprId: arg.exprId,
+          kind: "direct",
+        })
       ) {
-        return false;
+        return {
+          kind: "error",
+          failure: { kind: "incompatible", paramIndex, argIndex },
+        };
       }
-      paramIndex += 1;
       argIndex += 1;
+      paramIndex += 1;
       continue;
     }
 
     if (param.optional) {
+      if (
+        !onSkipOptionalParam({
+          param,
+          paramIndex,
+          reason: "label-mismatch",
+        })
+      ) {
+        return {
+          kind: "error",
+          failure: { kind: "incompatible", paramIndex, argIndex },
+        };
+      }
       paramIndex += 1;
       continue;
     }
 
-    return false;
+    return {
+      kind: "error",
+      failure: {
+        kind: "label-mismatch",
+        paramIndex,
+        argIndex,
+        expectedLabel: labelForDiagnostic(param.label),
+        actualLabel: labelForDiagnostic(arg.label),
+      },
+    };
   }
 
-  return argIndex === args.length;
+  if (argIndex < args.length) {
+    return {
+      kind: "error",
+      failure: { kind: "extra-arguments", extra: args.length - argIndex },
+    };
+  }
+
+  return { kind: "ok" };
 };
+
+const ensureOptionalParameterIsSkippable = ({
+  param,
+  paramIndex,
+  ctx,
+  state,
+  callSpan,
+  fallbackSpan,
+}: {
+  param: ParamSignature;
+  paramIndex: number;
+  ctx: TypingContext;
+  state: TypingState;
+  callSpan?: SourceSpan;
+  fallbackSpan: SourceSpan;
+}): void => {
+  const optionalInfo = getOptionalInfo(
+    param.type,
+    optionalResolverContextForTypingContext(ctx),
+  );
+  if (!optionalInfo) {
+    throw new Error("optional parameter type must be Optional");
+  }
+  ensureTypeMatches(
+    optionalInfo.noneType,
+    param.type,
+    ctx,
+    state,
+    `call argument ${paramIndex + 1}`,
+    normalizeSpan(callSpan, param.span, fallbackSpan),
+  );
+};
+
+const validateCallArgs = (
+  args: readonly Arg[],
+  params: readonly ParamSignature[],
+  ctx: TypingContext,
+  state: TypingState,
+  callSpan?: SourceSpan,
+): void => {
+  const span = callSpan ?? ctx.hir.module.span;
+  const result = walkCallArguments({
+    args,
+    params,
+    ctx,
+    state,
+    onMatch: (match) => {
+      const matchSpan =
+        match.kind === "structural-field" && match.fieldName
+          ? spanForObjectLiteralFieldValue(match.arg, match.fieldName, ctx)
+          : spanForArg(match.arg, ctx);
+      ensureTypeMatches(
+        match.matchedType,
+        match.param.type,
+        ctx,
+        state,
+        `call argument ${match.paramIndex + 1}`,
+        normalizeSpan(matchSpan, match.param.span, span),
+      );
+      ensureMutableArgument({
+        arg: {
+          ...match.arg,
+          type: match.matchedType,
+          exprId: match.matchedExprId ?? match.arg.exprId,
+        },
+        param: match.param,
+        index: match.paramIndex,
+        ctx,
+      });
+      return true;
+    },
+    onSkipOptionalParam: ({ param, paramIndex }) => {
+      ensureOptionalParameterIsSkippable({
+        param,
+        paramIndex,
+        ctx,
+        state,
+        callSpan,
+        fallbackSpan: span,
+      });
+      return true;
+    },
+  });
+  if (result.kind === "ok") {
+    return;
+  }
+
+  const { failure } = result;
+  switch (failure.kind) {
+    case "missing-argument": {
+      const param = params[failure.paramIndex]!;
+      return emitDiagnostic({
+        ctx,
+        code: "TY0021",
+        params: {
+          kind: "call-missing-argument",
+          paramName:
+            param.name ?? param.label ?? `parameter ${failure.paramIndex + 1}`,
+        },
+        span,
+      });
+    }
+    case "missing-labeled-argument":
+      return emitDiagnostic({
+        ctx,
+        code: "TY0021",
+        params: {
+          kind: "call-missing-labeled-argument",
+          label: failure.label,
+        },
+        span,
+      });
+    case "label-mismatch": {
+      const param = params[failure.paramIndex]!;
+      const arg = args[failure.argIndex];
+      return emitDiagnostic({
+        ctx,
+        code: "TY0021",
+        params: {
+          kind: "call-argument-label-mismatch",
+          argumentIndex: failure.paramIndex + 1,
+          expectedLabel: failure.expectedLabel,
+          actualLabel: failure.actualLabel,
+        },
+        span: normalizeSpan(
+          arg ? spanForArg(arg, ctx) : undefined,
+          param?.span,
+          span,
+        ),
+      });
+    }
+    case "extra-arguments":
+      return emitDiagnostic({
+        ctx,
+        code: "TY0021",
+        params: {
+          kind: "call-extra-arguments",
+          extra: failure.extra,
+        },
+        span,
+      });
+    case "incompatible":
+      throw new Error("call argument type mismatch");
+  }
+};
+
+const callArgumentsSatisfyParams = ({
+  args,
+  params,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean =>
+  walkCallArguments({
+    args,
+    params,
+    ctx,
+    state,
+    onMatch: (match) =>
+      match.matchedType === ctx.primitives.unknown
+        ? true
+        : typeSatisfies(match.matchedType, match.param.type, ctx, state),
+    onSkipOptionalParam: () => true,
+  }).kind === "ok";
 
 const ensureMutableArgument = ({
   arg,
