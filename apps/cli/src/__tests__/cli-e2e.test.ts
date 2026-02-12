@@ -211,7 +211,7 @@ const runCli = (root: string, args: string[]) =>
     }
   );
 
-describe("voyd cli test discovery", () => {
+describe("voyd cli test discovery", { timeout: 30_000 }, () => {
   it(
     "defaults test root to repo root when no path is provided",
     async () => {
@@ -233,7 +233,6 @@ describe("voyd cli test discovery", () => {
         await rm(root, { recursive: true, force: true });
       }
     },
-    30000,
   );
 });
 
@@ -259,7 +258,6 @@ describe("voyd cli package resolution", () => {
         await rm(root, { recursive: true, force: true });
       }
     },
-    30000,
   );
 
   it(
@@ -283,7 +281,6 @@ describe("voyd cli package resolution", () => {
         await rm(fixture.cwd, { recursive: true, force: true });
       }
     },
-    30000,
   );
 
   it(
@@ -312,7 +309,6 @@ describe("voyd cli package resolution", () => {
         await rm(fixture.cwd, { recursive: true, force: true });
       }
     },
-    30000,
   );
 
   it(
@@ -337,7 +333,6 @@ describe("voyd cli package resolution", () => {
         await rm(root, { recursive: true, force: true });
       }
     },
-    30000,
   );
 
   it(
@@ -392,6 +387,5 @@ describe("voyd cli package resolution", () => {
         await rm(fixture.cwd, { recursive: true, force: true });
       }
     },
-    30000,
   );
 });
