@@ -1,0 +1,3 @@
+trait Parse
+  fn parse(self, value: i32) -> i32
+  fn parse(self, value: i32) -> bool

@@ -88,4 +88,11 @@ describe("trait objects", () => {
       semanticsPipeline(loadAst("trait_object_dispatch_infer_return.voyd"))
     ).not.toThrow();
   });
+
+  it("resolves overloaded trait object methods for direct and qualified calls", () => {
+    const semantics = semanticsPipeline(
+      loadAst("trait_overload_parse_qualified_dispatch.voyd")
+    );
+    expect(semantics.typing.callTraitDispatches.size).toBeGreaterThan(0);
+  });
 });

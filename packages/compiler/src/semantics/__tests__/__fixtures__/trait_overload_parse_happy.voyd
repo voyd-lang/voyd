@@ -1,0 +1,18 @@
+trait Parse
+  fn parse(self, value: i32) -> i32
+  fn parse(self, value: bool) -> i32
+
+obj Box { value: i32 }
+
+impl Parse for Box
+  fn parse(self, value: i32) -> i32
+    self.value + value
+
+  fn parse(self, value: bool) -> i32
+    if value then: self.value else: 0
+
+fn use_it(p: Parse) -> i32
+  p.parse(3) + p.parse(true)
+
+pub fn main() -> i32
+  use_it(Box { value: 5 })

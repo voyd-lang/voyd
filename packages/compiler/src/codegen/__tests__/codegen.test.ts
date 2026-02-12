@@ -710,6 +710,11 @@ describe("next codegen", () => {
     expect(main()).toBe(29);
   });
 
+  it("emits wasm for overloaded trait object dispatch and qualified trait calls", () => {
+    const main = loadMain("trait_object_overloaded_dispatch.voyd");
+    expect(main()).toBe(22);
+  });
+
   it("emits wasm for trait object dispatch on generic impl instantiations", () => {
     const instance = loadWasmInstance("trait_object_generic_impl_dispatch.voyd");
     const main = instance.exports.main;

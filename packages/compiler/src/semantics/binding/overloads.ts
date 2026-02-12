@@ -110,7 +110,7 @@ const createOverloadSignature = (
   });
   const returnAnnotation = formatTypeAnnotation(fn.returnTypeExpr);
   return {
-    key: `${fn.params.length}|${params.map((param) => param.key).join(",")}`,
+    key: overloadSignatureKeyFromParams(fn.params, { includeLabels: true }),
     label: `${fn.name}(${params
       .map((param) => param.label)
       .join(", ")}) -> ${returnAnnotation}`,
@@ -196,10 +196,22 @@ export const finalizeOverloadSets = (ctx: BindingContext): void => {
   }
 };
 
-const overloadSignatureKeyFromParams = (params: readonly BoundParameter[]): string =>
-  `${params.length}|${params
-    .map((param) => formatTypeAnnotation(param.typeExpr))
-    .join(",")}`;
+const overloadSignatureKeyFromParams = (
+  params: readonly BoundParameter[],
+  options?: { includeLabels?: boolean },
+): string => {
+  const includeLabels = options?.includeLabels === true;
+  const rendered = params.map((param) => {
+    const annotation = formatTypeAnnotation(param.typeExpr);
+    if (!includeLabels) {
+      return annotation;
+    }
+    const label = parameterLabel(param);
+    const labelKey = label ?? "";
+    return `${labelKey}:${annotation}`;
+  });
+  return `${params.length}|${rendered.join(",")}`;
+};
 
 export const finalizeEffectOperationOverloadSets = (ctx: BindingContext): void => {
   const existingIds = [

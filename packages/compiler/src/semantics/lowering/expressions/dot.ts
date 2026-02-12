@@ -14,6 +14,7 @@ import { lowerCallFromElements } from "./call.js";
 import { resolveTypeSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import { lowerMatch } from "./match.js";
+import { lowerQualifiedTraitMethodCall } from "./qualified-trait-call.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 
 export const lowerDotExpr = ({
@@ -104,76 +105,18 @@ const lowerQualifiedTraitMethodCallExpr = ({
   if (typeof traitSymbol !== "number") {
     throw new Error(`unknown trait ${traitIdentifier.value}`);
   }
-  const traitRecord = ctx.symbolTable.getSymbol(traitSymbol);
-  if (traitRecord.kind !== "trait") {
-    throw new Error(
-      `qualified trait method requires a trait (got ${traitRecord.kind})`,
-    );
-  }
 
   if (!isForm(memberExpr)) {
     throw new Error("qualified trait member must be a call expression");
   }
-
-  const elements = memberExpr.toArray();
-  if (!elements.length) {
-    throw new Error("qualified trait method call missing callee");
-  }
-
-  const calleeExpr = elements[0]!;
-  if (!isIdentifierAtom(calleeExpr) && !isInternalIdentifierAtom(calleeExpr)) {
-    throw new Error("qualified trait method name must be an identifier");
-  }
-
-  const traitDecl = ctx.decls.getTrait(traitSymbol);
-  const traitMethod = traitDecl?.methods.find(
-    (method) => ctx.symbolTable.getSymbol(method.symbol).name === calleeExpr.value,
-  );
-  if (!traitMethod) {
-    throw new Error(
-      `trait ${traitRecord.name} does not declare method ${calleeExpr.value}`,
-    );
-  }
-  if (traitMethod.params[0]?.name !== "self") {
-    throw new Error(
-      `qualified trait call requires a self receiver (method ${traitRecord.name}::${calleeExpr.value})`,
-    );
-  }
-
-  const potentialGenerics = elements[1];
-  const hasTypeArguments =
-    isForm(potentialGenerics) && formCallsInternal(potentialGenerics, "generics");
-  const typeArguments = hasTypeArguments
-    ? ((potentialGenerics as Form).rest
-        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
-        .filter(Boolean) as HirTypeExpr[])
-    : undefined;
-
-  const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
-    if (isForm(arg) && arg.calls(":")) {
-      const labelExpr = arg.at(1);
-      const valueExpr = arg.at(2);
-      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
-        throw new Error("Invalid labeled argument");
-      }
-      return {
-        label: labelExpr.value,
-        expr: lowerExpr(valueExpr, ctx, scopes),
-      };
-    }
-    return { expr: lowerExpr(arg, ctx, scopes) };
-  });
-
-  return ctx.builder.addExpression({
-    kind: "expr",
-    exprKind: "method-call",
-    ast: dotForm.syntaxId,
-    span: toSourceSpan(dotForm),
+  return lowerQualifiedTraitMethodCall({
+    accessForm: dotForm,
     traitSymbol,
-    target: lowerExpr(targetExpr, ctx, scopes),
-    method: calleeExpr.value,
-    args,
-    typeArguments,
+    memberForm: memberExpr,
+    receiverSource: { kind: "target", targetExpr },
+    ctx,
+    scopes,
+    lowerExpr,
   });
 };
 

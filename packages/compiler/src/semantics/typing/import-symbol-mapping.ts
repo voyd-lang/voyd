@@ -15,6 +15,11 @@ import {
   translateFunctionSignature,
 } from "./import-type-translation.js";
 import { findExport, makeDependencyContext } from "./import-resolution.js";
+import {
+  methodSignatureKey,
+  methodSignatureParamTypeKey,
+} from "../method-signature-key.js";
+import { typeExprKey } from "./trait-method-matcher.js";
 
 const targetTypeIncludesDependencySymbol = ({
   type,
@@ -72,6 +77,26 @@ const mapImportedTraitMethodSymbol = ({
     });
   }
 
+  const dependencyMethod = depTraitDecl.methods.find(
+    (method) => method.symbol === dependencyTraitMethodSymbol,
+  );
+  if (dependencyMethod) {
+    const dependencyKey = traitMethodMappingKey({
+      method: dependencyMethod,
+      symbolNameFor: (symbol) => dependency.symbolTable.getSymbol(symbol).name,
+    });
+    const localMatches = localTraitDecl.methods.filter(
+      (method) =>
+        traitMethodMappingKey({
+          method,
+          symbolNameFor: (symbol) => ctx.symbolTable.getSymbol(symbol).name,
+        }) === dependencyKey,
+    );
+    if (localMatches.length === 1) {
+      return localMatches[0]!.symbol;
+    }
+  }
+
   const depMethodIndex = depTraitDecl.methods.findIndex(
     (method) => method.symbol === dependencyTraitMethodSymbol,
   );
@@ -95,6 +120,30 @@ const mapImportedTraitMethodSymbol = ({
     ctx,
     allowUnexported: true,
   });
+};
+
+const traitMethodMappingKey = ({
+  method,
+  symbolNameFor,
+}: {
+  method: HirTraitMethod;
+  symbolNameFor: (symbol: SymbolId) => string;
+}): string => {
+  const methodName = symbolNameFor(method.symbol);
+  const typeParamCount = method.typeParameters?.length ?? 0;
+  const params = method.parameters.map((param, index) => {
+    const paramName = symbolNameFor(param.symbol);
+    return {
+      label: param.label,
+      name: paramName,
+      typeKey: methodSignatureParamTypeKey({
+        index,
+        paramName,
+        typeKey: typeExprKey(param.type),
+      }),
+    };
+  });
+  return methodSignatureKey({ methodName, typeParamCount, params });
 };
 
 const translateTraitTypeExpr = ({

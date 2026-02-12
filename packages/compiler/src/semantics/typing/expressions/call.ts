@@ -1294,7 +1294,7 @@ const traitSymbolRefFor = ({
     ctx,
   });
 
-const traitMethodRefFor = ({
+const traitMethodRefsFor = ({
   traitRef,
   methodName,
   ctx,
@@ -1302,7 +1302,7 @@ const traitMethodRefFor = ({
   traitRef: SymbolRef;
   methodName: string;
   ctx: TypingContext;
-}): SymbolRef | undefined => {
+}): SymbolRef[] => {
   const traitScope =
     traitRef.moduleId === ctx.moduleId
       ? { symbolTable: ctx.symbolTable, traits: ctx.traits }
@@ -1316,25 +1316,25 @@ const traitMethodRefFor = ({
             : undefined;
         })();
   if (!traitScope) {
-    return undefined;
+    return [];
   }
 
   const traitDecl = traitScope.traits.getDecl(traitRef.symbol);
   if (!traitDecl) {
-    return undefined;
+    return [];
   }
-  const traitMethod = traitDecl.methods.find(
-    (method) => traitScope.symbolTable.getSymbol(method.symbol).name === methodName,
-  );
-  if (!traitMethod) {
-    return undefined;
-  }
-
-  return canonicalSymbolRefForModuleSymbol({
-    moduleId: traitRef.moduleId,
-    symbol: traitMethod.symbol,
-    ctx,
-  });
+  return traitDecl.methods
+    .filter(
+      (method) =>
+        traitScope.symbolTable.getSymbol(method.symbol).name === methodName,
+    )
+    .map((method) =>
+      canonicalSymbolRefForModuleSymbol({
+        moduleId: traitRef.moduleId,
+        symbol: method.symbol,
+        ctx,
+      }),
+    );
 };
 
 const adjustTraitDispatchParameters = ({
@@ -2217,14 +2217,15 @@ const resolveTraitMethodCandidates = ({
     return { candidates: [] };
   }
   const receiverName = symbolNameForRef({ ref: receiverDesc.owner, ctx });
-  const receiverMethodRef = traitMethodRefFor({
+  const receiverMethodRefs = traitMethodRefsFor({
     traitRef: receiverDesc.owner,
     methodName,
     ctx,
   });
-  if (!receiverMethodRef) {
+  if (receiverMethodRefs.length === 0) {
     return { candidates: [], receiverName };
   }
+  const receiverMethodRefKeys = new Set(receiverMethodRefs.map(symbolRefKey));
 
   const candidates: MethodCallCandidate[] = [];
   const seen = new Set<string>();
@@ -2282,7 +2283,7 @@ const resolveTraitMethodCandidates = ({
         symbol: metadata.traitMethodSymbol,
         ctx,
       });
-      if (!symbolRefEquals(traitMethodRef, receiverMethodRef)) {
+      if (!receiverMethodRefKeys.has(symbolRefKey(traitMethodRef))) {
         return;
       }
       const signature = getSignature(implMethod);

@@ -1,0 +1,16 @@
+trait Parse
+  fn parse(value: i32) -> i32
+  fn parse(self, value: i32) -> i32
+
+obj Box { value: i32 }
+
+impl Parse for Box
+  fn parse(value: i32) -> i32
+    value + 1
+
+  fn parse(self, value: i32) -> i32
+    self.value + value
+
+pub fn main() -> i32
+  let b = Box { value: 40 }
+  Parse::parse(b, 2) + b.Parse::parse(3)

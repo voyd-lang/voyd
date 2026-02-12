@@ -14,6 +14,11 @@ import {
 import { resolveObjectDecl } from "./object.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { inheritMemberVisibility, moduleVisibility } from "../../hir/index.js";
+import { formatTypeAnnotation } from "../../utils.js";
+import {
+  methodSignatureKey,
+  methodSignatureParamTypeKey,
+} from "../../method-signature-key.js";
 
 const isStaticMethod = (fn: ParsedFunctionDecl): boolean =>
   fn.signature.params.length === 0 ||
@@ -231,21 +236,23 @@ export const bindImplDecl = (
       const traitDecl = resolveTraitDecl(decl.trait, ctx, tracker.current());
       if (traitDecl) {
         const traitTypeParamMap = buildTraitTypeParamMap(traitDecl, decl.trait);
-        const methodNames = new Set(
-          methods.map((method) => ctx.symbolTable.getSymbol(method.symbol).name)
+        const methodSignatures = new Set(
+          methods.map((method) => methodSignatureKeyForBoundFunction(method))
         );
         traitDecl.methods.forEach((traitMethod) => {
           if (!traitMethod.defaultBody) {
             return;
           }
-          const name = ctx.symbolTable.getSymbol(traitMethod.symbol).name;
-          if (methodNames.has(name)) {
-            return;
-          }
           const parsed = makeParsedFunctionFromTraitMethod(traitMethod, {
             typeParamSubstitutions: traitTypeParamMap,
           });
-          methods.push(bindMethod(parsed));
+          const signature = methodSignatureKeyForParsedFunction(parsed);
+          if (methodSignatures.has(signature)) {
+            return;
+          }
+          const method = bindMethod(parsed);
+          methods.push(method);
+          methodSignatures.add(signature);
         });
       }
     }
@@ -352,4 +359,40 @@ export const flushPendingStaticMethods = (ctx: BindingContext): void => {
   });
 
   ctx.pendingStaticMethods = [];
+};
+
+const methodSignatureKeyForBoundFunction = (
+  fn: ReturnType<typeof bindFunctionDecl>,
+): string => {
+  const params = fn.params.map((param, index) => ({
+    label: param.label,
+    name: param.name,
+    typeKey: methodSignatureParamTypeKey({
+      index,
+      paramName: param.name,
+      typeKey: formatTypeAnnotation(param.typeExpr),
+    }),
+  }));
+  return methodSignatureKey({
+    methodName: fn.name,
+    typeParamCount: fn.typeParameters?.length ?? 0,
+    params,
+  });
+};
+
+const methodSignatureKeyForParsedFunction = (fn: ParsedFunctionDecl): string => {
+  const params = fn.signature.params.map((param, index) => ({
+    label: param.label,
+    name: param.name,
+    typeKey: methodSignatureParamTypeKey({
+      index,
+      paramName: param.name,
+      typeKey: formatTypeAnnotation(param.typeExpr),
+    }),
+  }));
+  return methodSignatureKey({
+    methodName: fn.signature.name.value,
+    typeParamCount: fn.signature.typeParameters.length,
+    params,
+  });
 };

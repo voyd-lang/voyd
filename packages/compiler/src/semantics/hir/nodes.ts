@@ -320,6 +320,7 @@ export interface HirTraitMethod {
 export interface HirMethodParameter {
   symbol: SymbolId;
   span: SourceSpan;
+  label?: string;
   type?: HirTypeExpr;
   mutable: boolean;
   bindingKind?: HirBindingKind;

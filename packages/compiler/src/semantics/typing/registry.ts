@@ -29,6 +29,15 @@ import {
   normalizeSpan,
 } from "../../diagnostics/index.js";
 import { isStdOnlyIntrinsicName } from "../intrinsics.js";
+import {
+  assertUniqueMethodSignatures,
+  buildImplMethodSignatureInfos,
+  buildTraitMethodMapByExactSignature,
+  buildTraitMethodSignatureInfos,
+  buildTraitMethodSignatureInfosFromHir,
+  matchTraitMethodsWithShapeFallback,
+  typeExprKey,
+} from "./trait-method-matcher.js";
 
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
@@ -135,6 +144,21 @@ export const registerObjectDecls = (ctx: TypingContext): void => {
 export const registerTraits = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "trait") continue;
+    const traitDecl = ctx.decls.getTrait(item.symbol);
+    if (traitDecl) {
+      const traitMethodsBySymbol = new Map(
+        item.methods.map((method) => [method.symbol, method]),
+      );
+      const traitInfos = buildTraitMethodSignatureInfos({
+        traitMethods: traitDecl.methods,
+        traitMethodsBySymbol,
+        ctx,
+      });
+      assertUniqueMethodSignatures({
+        traitName: getSymbolName(item.symbol, ctx),
+        methods: traitInfos,
+      });
+    }
     ctx.traits.registerDecl(item);
     const name = getSymbolName(item.symbol, ctx);
     if (!ctx.traits.hasName(name)) {
@@ -509,6 +533,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
     const methodMap =
       typeof traitSymbol === "number"
         ? buildTraitMethodMap({
+            impl: item,
             implDecl: decl,
             traitSymbol,
             ctx,
@@ -684,72 +709,88 @@ const validateImplTraitMethods = ({
     return;
   }
 
-  const implMethodsByName = new Map(
-    implDecl.methods.map((method) => [
-      getSymbolName(method.symbol, ctx),
-      method,
-    ])
-  );
   const traitMethodsBySymbol = new Map(
-    traitHirDecl?.methods.map((method) => [method.symbol, method]) ?? []
+    traitHirDecl?.methods.map((method) => [method.symbol, method]) ?? [],
   );
   const implFunctionsBySymbol = new Map(
     implDecl.methods.map((method) => [
       method.symbol,
       ctx.functions.getFunction(method.symbol),
-    ])
+    ]),
   );
   const traitTypeSubstitutions = buildTraitTypeSubstitutions({
     traitTypeParameters:
       traitHirDecl?.typeParameters ?? traitDecl.typeParameters,
     traitExpr: impl.trait,
   });
-  const missing = traitDecl.methods
-    .filter((method) => !method.defaultBody)
-    .map((method) => getSymbolName(method.symbol, ctx))
-    .filter((name) => !implMethodsByName.has(name));
-
-  if (missing.length === 0) {
-    traitDecl.methods.forEach((traitMethod) => {
-      const implMethod = implMethodsByName.get(
-        getSymbolName(traitMethod.symbol, ctx)
-      );
-      if (!implMethod) return;
-
-      const signatureError = compareMethodSignatures({
-        traitMethod,
-        implMethod,
-        traitSymbol,
-        impl,
-        ctx,
-        traitMethodHir: traitMethodsBySymbol.get(traitMethod.symbol),
-        implFunction: implFunctionsBySymbol.get(implMethod.symbol),
-        traitTypeSubstitutions,
-      });
-      if (signatureError) {
-        throw signatureError;
-      }
-    });
-    return;
-  }
-
+  const traitName = getSymbolName(traitSymbol, ctx);
   const targetName =
     impl.target.typeKind === "named" && typeof impl.target.symbol === "number"
       ? getSymbolName(impl.target.symbol, ctx)
       : "impl target";
-  const traitName = getSymbolName(traitSymbol, ctx);
-  const plural = missing.length > 1 ? "s" : "";
-  const missingList = missing.join(", ");
+  const traitMethodSignatures = buildTraitMethodSignatureInfos({
+    traitMethods: traitDecl.methods,
+    traitMethodsBySymbol,
+    ctx,
+    traitTypeSubstitutions,
+    selfType: impl.target,
+  });
+  assertUniqueMethodSignatures({
+    traitName,
+    methods: traitMethodSignatures,
+  });
+  const implMethodSignatures = buildImplMethodSignatureInfos({
+    implMethods: implDecl.methods,
+    implFunctionsBySymbol,
+    ctx,
+    traitTypeSubstitutions,
+    selfType: impl.target,
+  });
+  const { matches, missing } = matchTraitMethodsWithShapeFallback({
+    traitMethods: traitMethodSignatures,
+    implMethods: implMethodSignatures,
+    ambiguousMessage: (method) =>
+      `impl ${traitName} for ${targetName} has ambiguous overloads for ${method.display}`,
+  });
+
+  matches.forEach(({ traitMethod, implMethod }) => {
+    const signatureError = compareMethodSignatures({
+      traitMethod: traitMethod.method,
+      implMethod: implMethod.method,
+      traitSymbol,
+      impl,
+      ctx,
+      traitMethodHir: traitMethod.methodHir,
+      implFunction: implFunctionsBySymbol.get(implMethod.method.symbol),
+      traitTypeSubstitutions,
+    });
+    if (signatureError) {
+      throw signatureError;
+    }
+  });
+
+  const missingRequired = missing
+    .filter((method) => !method.hasDefaultBody)
+    .map((method) => method.display);
+
+  if (missingRequired.length === 0) {
+    return;
+  }
+
+  const plural = missingRequired.length > 1 ? "s" : "";
+  const missingList = missingRequired.join(", ");
   throw new Error(
     `impl ${traitName} for ${targetName} is missing trait method${plural}: ${missingList}`
   );
 };
 
 const buildTraitMethodMap = ({
+  impl,
   implDecl,
   traitSymbol,
   ctx,
 }: {
+  impl: HirImplDecl;
   implDecl?: ReturnType<TypingContext["decls"]["getImpl"]>;
   traitSymbol: SymbolId;
   ctx: TypingContext;
@@ -758,28 +799,90 @@ const buildTraitMethodMap = ({
     return undefined;
   }
   const traitDecl = ctx.decls.getTrait(traitSymbol);
-  const traitMethods =
-    traitDecl?.methods ??
-    ctx.traits.getDecl(traitSymbol)?.methods.map((method) => ({
-      symbol: method.symbol,
-    }));
-  if (!traitMethods || traitMethods.length === 0) {
+  const traitHirDecl = ctx.traits.getDecl(traitSymbol);
+  if (
+    (!traitDecl || traitDecl.methods.length === 0) &&
+    (!traitHirDecl || traitHirDecl.methods.length === 0)
+  ) {
     return undefined;
   }
-  const implMethodsByName = new Map(
-    implDecl.methods.map((method) => [
-      getSymbolName(method.symbol, ctx),
-      method.symbol,
-    ])
+  const traitMethodsBySymbol = new Map(
+    traitHirDecl?.methods.map((method) => [method.symbol, method]) ?? [],
   );
-  const methodMap = new Map<SymbolId, SymbolId>();
-  traitMethods.forEach((traitMethod) => {
-    const implMethod = implMethodsByName.get(
-      getSymbolName(traitMethod.symbol, ctx)
+  const implFunctionsBySymbol = new Map(
+    implDecl.methods.map((method) => [
+      method.symbol,
+      ctx.functions.getFunction(method.symbol),
+    ]),
+  );
+  const traitTypeSubstitutions = buildTraitTypeSubstitutions({
+    traitTypeParameters:
+      traitHirDecl?.typeParameters ?? traitDecl?.typeParameters,
+    traitExpr: impl.trait,
+  });
+
+  if (!traitDecl) {
+    const traitMethodSignatures = buildTraitMethodSignatureInfosFromHir({
+      traitMethods: traitHirDecl?.methods ?? [],
+      ctx,
+      traitTypeSubstitutions,
+      selfType: impl.target,
+    });
+    assertUniqueMethodSignatures({
+      traitName: getSymbolName(traitSymbol, ctx),
+      methods: traitMethodSignatures,
+    });
+    const implMethodSignatures = buildImplMethodSignatureInfos({
+      implMethods: implDecl.methods,
+      implFunctionsBySymbol,
+      ctx,
+      traitTypeSubstitutions,
+      selfType: impl.target,
+    });
+    const dispatchTraitMethodSignatures = traitMethodSignatures.filter(
+      (method) => method.hasSelfReceiver,
     );
-    if (typeof implMethod === "number") {
-      methodMap.set(traitMethod.symbol, implMethod);
+    if (dispatchTraitMethodSignatures.length === 0) {
+      return undefined;
     }
+    const methodMap = buildTraitMethodMapByExactSignature({
+      traitMethods: dispatchTraitMethodSignatures,
+      implMethods: implMethodSignatures,
+      ambiguousMessage: (method) =>
+        `trait method mapping is ambiguous for ${method.display}`,
+    });
+    return methodMap.size > 0 ? methodMap : undefined;
+  }
+
+  const traitMethodSignatures = buildTraitMethodSignatureInfos({
+    traitMethods: traitDecl.methods,
+    traitMethodsBySymbol,
+    ctx,
+    traitTypeSubstitutions,
+    selfType: impl.target,
+  });
+  assertUniqueMethodSignatures({
+    traitName: getSymbolName(traitSymbol, ctx),
+    methods: traitMethodSignatures,
+  });
+  const implMethodSignatures = buildImplMethodSignatureInfos({
+    implMethods: implDecl.methods,
+    implFunctionsBySymbol,
+    ctx,
+    traitTypeSubstitutions,
+    selfType: impl.target,
+  });
+  const dispatchTraitMethodSignatures = traitMethodSignatures.filter(
+    (method) => method.hasSelfReceiver,
+  );
+  if (dispatchTraitMethodSignatures.length === 0) {
+    return undefined;
+  }
+  const methodMap = buildTraitMethodMapByExactSignature({
+    traitMethods: dispatchTraitMethodSignatures,
+    implMethods: implMethodSignatures,
+    ambiguousMessage: (method) =>
+      `trait method mapping is ambiguous for ${method.display}`,
   });
   return methodMap.size > 0 ? methodMap : undefined;
 };
@@ -921,84 +1024,4 @@ const buildTraitTypeSubstitutions = ({
   });
 
   return substitutions.size > 0 ? substitutions : undefined;
-};
-
-const typeExprKey = (
-  expr: HirTypeExpr | undefined,
-  substitutions?: Map<SymbolId, HirTypeExpr>,
-  visiting?: Set<SymbolId>,
-  selfType?: HirTypeExpr
-): string | undefined => {
-  if (!expr) return undefined;
-
-  switch (expr.typeKind) {
-    case "named": {
-      const symbol = expr.symbol;
-      const substitution =
-        typeof symbol === "number" ? substitutions?.get(symbol) : undefined;
-      if (substitution) {
-        const nextVisiting = new Set(visiting ?? []);
-        if (typeof symbol === "number" && nextVisiting.has(symbol)) {
-          return undefined;
-        }
-        if (typeof symbol === "number") {
-          nextVisiting.add(symbol);
-        }
-        return typeExprKey(substitution, substitutions, nextVisiting, selfType);
-      }
-      const args = expr.typeArguments?.map((arg) =>
-        typeExprKey(arg, substitutions, visiting, selfType)
-      );
-      const renderedArgs =
-        args && args.length > 0
-          ? `<${args.map((arg) => arg ?? "_").join(",")}>`
-          : "";
-      return `${expr.path.join("::")}${renderedArgs}`;
-    }
-    case "object":
-      return "object";
-    case "tuple":
-      return `(${expr.elements
-        .map(
-          (entry) =>
-            typeExprKey(entry, substitutions, visiting, selfType) ?? "_"
-        )
-        .join(",")})`;
-    case "union":
-      return expr.members
-        .map(
-          (entry) =>
-            typeExprKey(entry, substitutions, visiting, selfType) ?? "_"
-        )
-        .join("|");
-    case "intersection":
-      return expr.members
-        .map(
-          (entry) =>
-            typeExprKey(entry, substitutions, visiting, selfType) ?? "_"
-        )
-        .join("&");
-    case "function": {
-      const typeParamCount = expr.typeParameters?.length ?? 0;
-      const params = expr.parameters
-        .map(
-          (param) => {
-            const resolved =
-              typeExprKey(param.type, substitutions, visiting, selfType) ?? "_";
-            return param.optional ? `${resolved}?` : resolved;
-          }
-        )
-        .join(",");
-      const returnKey =
-        typeExprKey(expr.returnType, substitutions, visiting, selfType) ??
-        "void";
-      const typeParamPart = typeParamCount > 0 ? `<${typeParamCount}>` : "";
-      return `fn${typeParamPart}(${params})->${returnKey}`;
-    }
-    case "self":
-      if (!selfType || selfType.typeKind === "self") return "Self";
-      return typeExprKey(selfType, substitutions, visiting, selfType);
-    default:
-      return undefined;
-  }
 };
