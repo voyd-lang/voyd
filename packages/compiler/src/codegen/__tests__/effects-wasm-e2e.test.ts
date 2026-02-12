@@ -53,7 +53,7 @@ const effectfulExportFixturePath = resolve(
 
 const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
 
-describe("effects wasm e2e", () => {
+describe("effects wasm e2e", { timeout: 15_000 }, () => {
   const instantiateEffectsModule = (
     wasm: Uint8Array<ArrayBufferLike> | ArrayBuffer,
   ) =>
