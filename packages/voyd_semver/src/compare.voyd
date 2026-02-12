@@ -1,0 +1,34 @@
+use super::version::Version
+
+pub fn compare(left: Version, right: Version): () -> i32
+  if left.major < right.major then:
+    return -1
+  if left.major > right.major then:
+    return 1
+
+  if left.minor < right.minor then:
+    return -1
+  if left.minor > right.minor then:
+    return 1
+
+  if left.patch < right.patch then:
+    return -1
+  if left.patch > right.patch then:
+    return 1
+
+  0
+
+pub fn eq(left: Version, right: Version): () -> bool
+  compare(left, right) == 0
+
+pub fn lt(left: Version, right: Version): () -> bool
+  compare(left, right) < 0
+
+pub fn lte(left: Version, right: Version): () -> bool
+  compare(left, right) <= 0
+
+pub fn gt(left: Version, right: Version): () -> bool
+  compare(left, right) > 0
+
+pub fn gte(left: Version, right: Version): () -> bool
+  compare(left, right) >= 0

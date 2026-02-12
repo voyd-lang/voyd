@@ -1,0 +1,17 @@
+{
+  "name": "voyd_semver",
+  "version": "0.9.0",
+  "private": false,
+  "description": "Example semver library for Voyd package/module resolution validation",
+  "files": [
+    "src",
+    "README.md",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/.placeholder','voyd_semver source package');\"",
+    "typecheck": "echo 'no types for voyd source package'",
+    "test": "VOYD_USE_SRC=1 node ../../scripts/voyd test ./src --fail-empty-tests",
+    "lint": "echo 'no lint configured'"
+  }
+}

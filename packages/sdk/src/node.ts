@@ -160,7 +160,7 @@ const resolvePackageDirs = ({
   return dedupePaths([...configured, ...nodeModulesDirs]);
 };
 
-const collectNodeModulesDirs = (startDir: string): string[] => {
+export const collectNodeModulesDirs = (startDir: string): string[] => {
   const dirs: string[] = [];
   let current = path.resolve(startDir);
   while (true) {

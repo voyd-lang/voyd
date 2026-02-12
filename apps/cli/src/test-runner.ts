@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
+  collectNodeModulesDirs,
   createSdk,
   type TestEvent,
   type TestReporter,
@@ -114,20 +115,6 @@ const resolvePackageDirs = ({
   const configured = additionalPkgDirs.map((dir) => resolve(dir));
   const nodeModules = collectNodeModulesDirs(srcRoot);
   return Array.from(new Set([...configured, ...nodeModules]));
-};
-
-const collectNodeModulesDirs = (startDir: string): string[] => {
-  const dirs: string[] = [];
-  let current = resolve(startDir);
-  while (true) {
-    dirs.push(join(current, "node_modules"));
-    const parent = dirname(current);
-    if (parent === current) {
-      break;
-    }
-    current = parent;
-  }
-  return dirs;
 };
 
 const isWithinRoot = (root: string, target: string): boolean => {

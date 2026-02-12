@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  collectNodeModulesDirs,
   createSdk,
   type CompileResult,
   type EffectContinuation,
@@ -118,6 +119,19 @@ describe("node sdk", () => {
     } finally {
       await fs.rm(tempRoot, { recursive: true, force: true });
     }
+  });
+
+  it("collects node_modules directories from source up to filesystem root", () => {
+    const startDir = path.join(path.sep, "tmp", "voyd", "nested");
+    const resolvedStart = path.resolve(startDir);
+    const rootDir = path.parse(resolvedStart).root;
+    const parentDir = path.dirname(resolvedStart);
+
+    const dirs = collectNodeModulesDirs(startDir);
+
+    expect(dirs[0]).toBe(path.join(resolvedStart, "node_modules"));
+    expect(dirs.at(-1)).toBe(path.join(rootDir, "node_modules"));
+    expect(dirs).toContain(path.join(parentDir, "node_modules"));
   });
 
   it("resolves packages from the default node_modules search path", async () => {

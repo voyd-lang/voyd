@@ -4,7 +4,11 @@ import { dirname, join, resolve } from "node:path";
 import { getConfig } from "@voyd/lib/config/index.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { testGc } from "@voyd/lib/binaryen-gc/test.js";
-import { createSdk, type CompileResult } from "@voyd/sdk";
+import {
+  collectNodeModulesDirs,
+  createSdk,
+  type CompileResult,
+} from "@voyd/sdk";
 import { analyzeModules, loadModuleGraph, parse } from "@voyd/sdk/compiler";
 import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd/sdk/compiler";
 import { formatCliDiagnostic } from "./diagnostics.js";
@@ -117,20 +121,6 @@ const resolvePackageDirs = ({
   const configured = additionalPkgDirs.map((dir) => resolve(dir));
   const nodeModules = collectNodeModulesDirs(srcRoot);
   return Array.from(new Set([...configured, ...nodeModules]));
-};
-
-const collectNodeModulesDirs = (startDir: string): string[] => {
-  const dirs: string[] = [];
-  let current = resolve(startDir);
-  while (true) {
-    dirs.push(join(current, "node_modules"));
-    const parent = dirname(current);
-    if (parent === current) {
-      break;
-    }
-    current = parent;
-  }
-  return dirs;
 };
 
 const failWithDiagnostics = (diagnostics: readonly Diagnostic[]): never => {
