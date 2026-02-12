@@ -33,6 +33,7 @@ import {
   freshOpenEffectRow,
   getExprEffectRow,
   ensureEffectCompatibility,
+  applyEffectRowSubstitution,
 } from "../effects.js";
 import {
   intrinsicSignaturesFor,
@@ -2487,6 +2488,322 @@ const resolveCurriedCallReturnType = ({
   }
 };
 
+type EffectVariance = "covariant" | "contravariant" | "invariant";
+
+const flipEffectVariance = (variance: EffectVariance): EffectVariance => {
+  if (variance === "covariant") {
+    return "contravariant";
+  }
+  if (variance === "contravariant") {
+    return "covariant";
+  }
+  return "invariant";
+};
+
+const mergeEffectTailSubstitutions = ({
+  current,
+  next,
+  ctx,
+}: {
+  current: Map<number, number>;
+  next: ReadonlyMap<number, number>;
+  ctx: TypingContext;
+}): void => {
+  next.forEach((row, tailVar) => {
+    const existing = current.get(tailVar);
+    if (typeof existing !== "number") {
+      current.set(tailVar, row);
+      return;
+    }
+    if (existing === row) {
+      return;
+    }
+    current.set(tailVar, ctx.effects.compose(existing, row));
+  });
+};
+
+const collectEffectTailSubstitutionsFromTypes = ({
+  actualType,
+  expectedType,
+  variance,
+  location,
+  reason,
+  ctx,
+  substitution,
+  seen,
+}: {
+  actualType: TypeId;
+  expectedType: TypeId;
+  variance: EffectVariance;
+  location: HirExprId;
+  reason: string;
+  ctx: TypingContext;
+  substitution: Map<number, number>;
+  seen: Set<string>;
+}): void => {
+  if (
+    actualType === ctx.primitives.unknown ||
+    expectedType === ctx.primitives.unknown
+  ) {
+    return;
+  }
+
+  if (variance === "invariant") {
+    collectEffectTailSubstitutionsFromTypes({
+      actualType,
+      expectedType,
+      variance: "covariant",
+      location,
+      reason,
+      ctx,
+      substitution,
+      seen,
+    });
+    collectEffectTailSubstitutionsFromTypes({
+      actualType,
+      expectedType,
+      variance: "contravariant",
+      location,
+      reason,
+      ctx,
+      substitution,
+      seen,
+    });
+    return;
+  }
+
+  const key = `${variance}:${actualType}:${expectedType}`;
+  if (seen.has(key)) {
+    return;
+  }
+  seen.add(key);
+
+  const actualDesc = ctx.arena.get(actualType);
+  const expectedDesc = ctx.arena.get(expectedType);
+  if (actualDesc.kind === "function" && expectedDesc.kind === "function") {
+    const subEffectRow =
+      variance === "covariant"
+        ? actualDesc.effectRow
+        : expectedDesc.effectRow;
+    const supEffectRow =
+      variance === "covariant"
+        ? expectedDesc.effectRow
+        : actualDesc.effectRow;
+    const constrained = ctx.effects.constrain(subEffectRow, supEffectRow, {
+      location,
+      reason,
+    });
+    if (constrained.ok) {
+      mergeEffectTailSubstitutions({
+        current: substitution,
+        next: constrained.substitution.rows,
+        ctx,
+      });
+    }
+
+    const count = Math.min(
+      actualDesc.parameters.length,
+      expectedDesc.parameters.length,
+    );
+    for (let index = 0; index < count; index += 1) {
+      collectEffectTailSubstitutionsFromTypes({
+        actualType: actualDesc.parameters[index]!.type,
+        expectedType: expectedDesc.parameters[index]!.type,
+        variance: flipEffectVariance(variance),
+        location,
+        reason,
+        ctx,
+        substitution,
+        seen,
+      });
+    }
+    collectEffectTailSubstitutionsFromTypes({
+      actualType: actualDesc.returnType,
+      expectedType: expectedDesc.returnType,
+      variance,
+      location,
+      reason,
+      ctx,
+      substitution,
+      seen,
+    });
+    return;
+  }
+
+  if (
+    actualDesc.kind === "nominal-object" &&
+    expectedDesc.kind === "nominal-object" &&
+    symbolRefEquals(actualDesc.owner, expectedDesc.owner)
+  ) {
+    const count = Math.min(actualDesc.typeArgs.length, expectedDesc.typeArgs.length);
+    for (let index = 0; index < count; index += 1) {
+      collectEffectTailSubstitutionsFromTypes({
+        actualType: actualDesc.typeArgs[index]!,
+        expectedType: expectedDesc.typeArgs[index]!,
+        variance,
+        location,
+        reason,
+        ctx,
+        substitution,
+        seen,
+      });
+    }
+    return;
+  }
+
+  if (
+    actualDesc.kind === "trait" &&
+    expectedDesc.kind === "trait" &&
+    symbolRefEquals(actualDesc.owner, expectedDesc.owner)
+  ) {
+    const count = Math.min(actualDesc.typeArgs.length, expectedDesc.typeArgs.length);
+    for (let index = 0; index < count; index += 1) {
+      collectEffectTailSubstitutionsFromTypes({
+        actualType: actualDesc.typeArgs[index]!,
+        expectedType: expectedDesc.typeArgs[index]!,
+        variance,
+        location,
+        reason,
+        ctx,
+        substitution,
+        seen,
+      });
+    }
+    return;
+  }
+
+  if (actualDesc.kind === "fixed-array" && expectedDesc.kind === "fixed-array") {
+    collectEffectTailSubstitutionsFromTypes({
+      actualType: actualDesc.element,
+      expectedType: expectedDesc.element,
+      variance,
+      location,
+      reason,
+      ctx,
+      substitution,
+      seen,
+    });
+    return;
+  }
+
+  if (
+    actualDesc.kind === "structural-object" &&
+    expectedDesc.kind === "structural-object"
+  ) {
+    expectedDesc.fields.forEach((expectedField) => {
+      const actualField = actualDesc.fields.find(
+        (candidate) => candidate.name === expectedField.name,
+      );
+      if (!actualField) {
+        return;
+      }
+      collectEffectTailSubstitutionsFromTypes({
+        actualType: actualField.type,
+        expectedType: expectedField.type,
+        variance,
+        location,
+        reason,
+        ctx,
+        substitution,
+        seen,
+      });
+    });
+    return;
+  }
+
+  if (actualDesc.kind === "union" && expectedDesc.kind === "union") {
+    const count = Math.min(actualDesc.members.length, expectedDesc.members.length);
+    for (let index = 0; index < count; index += 1) {
+      collectEffectTailSubstitutionsFromTypes({
+        actualType: actualDesc.members[index]!,
+        expectedType: expectedDesc.members[index]!,
+        variance,
+        location,
+        reason,
+        ctx,
+        substitution,
+        seen,
+      });
+    }
+    return;
+  }
+
+  if (
+    actualDesc.kind === "intersection" &&
+    expectedDesc.kind === "intersection"
+  ) {
+    if (
+      typeof actualDesc.nominal === "number" &&
+      typeof expectedDesc.nominal === "number"
+    ) {
+      collectEffectTailSubstitutionsFromTypes({
+        actualType: actualDesc.nominal,
+        expectedType: expectedDesc.nominal,
+        variance,
+        location,
+        reason,
+        ctx,
+        substitution,
+        seen,
+      });
+    }
+    if (
+      typeof actualDesc.structural === "number" &&
+      typeof expectedDesc.structural === "number"
+    ) {
+      collectEffectTailSubstitutionsFromTypes({
+        actualType: actualDesc.structural,
+        expectedType: expectedDesc.structural,
+        variance,
+        location,
+        reason,
+        ctx,
+        substitution,
+        seen,
+      });
+    }
+  }
+};
+
+const specializeCallEffectRow = ({
+  effectRow,
+  args,
+  params,
+  callId,
+  ctx,
+}: {
+  effectRow: number;
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  callId: HirExprId;
+  ctx: TypingContext;
+}): number => {
+  if (!ctx.effects.isOpen(effectRow)) {
+    return effectRow;
+  }
+
+  const substitution = new Map<number, number>();
+  const count = Math.min(args.length, params.length);
+  for (let index = 0; index < count; index += 1) {
+    collectEffectTailSubstitutionsFromTypes({
+      actualType: args[index]!.type,
+      expectedType: params[index]!.type,
+      variance: "covariant",
+      location: callId,
+      reason: "call argument callback effects",
+      ctx,
+      substitution,
+      seen: new Set(),
+    });
+  }
+
+  return applyEffectRowSubstitution({
+    row: effectRow,
+    substitution,
+    effects: ctx.effects,
+  });
+};
+
 const typeFunctionCall = ({
   args,
   signature,
@@ -2574,6 +2891,13 @@ const typeFunctionCall = ({
 
   const callSpan = ctx.hir.expressions.get(callId)?.span;
   validateCallArgs(args, adjustedParameters, ctx, state, callSpan);
+  const specializedEffectRow = specializeCallEffectRow({
+    effectRow: signature.effectRow,
+    args,
+    params: adjustedParameters,
+    callId,
+    ctx,
+  });
 
   if (typeof calleeExprId === "number") {
     const calleeType = ctx.arena.internFunction({
@@ -2678,7 +3002,7 @@ const typeFunctionCall = ({
 
   return {
     returnType: instantiation.returnType,
-    effectRow: signature.effectRow,
+    effectRow: specializedEffectRow,
   };
 };
 

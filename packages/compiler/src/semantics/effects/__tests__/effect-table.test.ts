@@ -66,6 +66,28 @@ describe("EffectTable", () => {
     expect(tailRow.operations).toEqual([{ name: "Log.write" }]);
   });
 
+  it("binds open super-row tails to empty rows for closed sub-rows", () => {
+    const effects = createEffectTable();
+    const supTail = effects.freshTailVar();
+    const sup = effects.internRow({
+      operations: [],
+      tailVar: supTail,
+    });
+    const sub = effects.internRow({
+      operations: [],
+    });
+
+    const result = effects.constrain(sub, sup, {
+      location: 0 as NodeId,
+      reason: "closed specialization",
+    });
+    expect(result.ok).toBe(true);
+    const substitution = result.ok ? result.substitution.rows : undefined;
+    const tailRowId = substitution?.get(supTail.id);
+    expect(typeof tailRowId).toBe("number");
+    expect(tailRowId).toBe(effects.emptyRow);
+  });
+
   it("flags conflicts when constraining closed rows", () => {
     const effects = createEffectTable();
     const sup = effects.internRow({ operations: [{ name: "Async.await" }] });
@@ -111,4 +133,3 @@ describe("EffectTable", () => {
     expect(effects.isOpen(effects.unknownRow)).toBe(true);
   });
 });
-
