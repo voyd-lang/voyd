@@ -15,6 +15,7 @@ import {
   type UnificationResult,
   typeDescriptorToUserString,
   type StructuralField,
+  type TypeDescriptor,
 } from "./type-arena.js";
 import { freshOpenEffectRow, resolveEffectAnnotation } from "./effects.js";
 import {
@@ -316,6 +317,51 @@ const containsTypeParam = (
       );
     case "fixed-array":
       return containsTypeParam(desc.element, param, ctx, seen);
+    default:
+      return false;
+  }
+};
+
+const containsAnyTypeParam = (
+  type: TypeId,
+  ctx: TypingContext,
+  seen: Set<TypeId> = new Set(),
+): boolean => {
+  if (seen.has(type)) {
+    return false;
+  }
+  seen.add(type);
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "type-param-ref":
+      return true;
+    case "recursive":
+      return containsAnyTypeParam(desc.body, ctx, seen);
+    case "trait":
+    case "nominal-object":
+      return desc.typeArgs.some((arg) => containsAnyTypeParam(arg, ctx, seen));
+    case "structural-object":
+      return desc.fields.some((field) =>
+        containsAnyTypeParam(field.type, ctx, seen),
+      );
+    case "function":
+      return (
+        desc.parameters.some((paramDesc) =>
+          containsAnyTypeParam(paramDesc.type, ctx, seen),
+        ) || containsAnyTypeParam(desc.returnType, ctx, seen)
+      );
+    case "union":
+      return desc.members.some((member) => containsAnyTypeParam(member, ctx, seen));
+    case "intersection":
+      return (
+        (typeof desc.nominal === "number" &&
+          containsAnyTypeParam(desc.nominal, ctx, seen)) ||
+        (typeof desc.structural === "number" &&
+          containsAnyTypeParam(desc.structural, ctx, seen))
+      );
+    case "fixed-array":
+      return containsAnyTypeParam(desc.element, ctx, seen);
     default:
       return false;
   }
@@ -2469,6 +2515,227 @@ export const narrowTypeForPattern = (
     : undefined;
 };
 
+type BindTypeParamsArgs = {
+  actual: TypeId;
+  expectedDesc: TypeDescriptor;
+  bindings: Map<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+};
+
+type BindTypeParamsHandler = (args: BindTypeParamsArgs) => void;
+
+const applyBindingUpdates = ({
+  bindings,
+  nextBindings,
+}: {
+  bindings: Map<TypeParamId, TypeId>;
+  nextBindings: ReadonlyMap<TypeParamId, TypeId>;
+}): void => {
+  bindings.clear();
+  nextBindings.forEach((value, key) => {
+    bindings.set(key, value);
+  });
+};
+
+const bindTypeParamRef = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "type-param-ref") {
+    return;
+  }
+
+  const existing = bindings.get(expectedDesc.param);
+  if (!existing) {
+    bindings.set(expectedDesc.param, actual);
+    return;
+  }
+  if (typeSatisfies(actual, existing, ctx, state)) {
+    return;
+  }
+  if (typeSatisfies(existing, actual, ctx, state)) {
+    bindings.set(expectedDesc.param, actual);
+  }
+};
+
+const bindNominalObject = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "nominal-object") {
+    return;
+  }
+
+  const actualNominal = getNominalComponent(actual, ctx);
+  if (typeof actualNominal !== "number") {
+    return;
+  }
+  const actualDesc = ctx.arena.get(actualNominal);
+  if (
+    actualDesc.kind !== "nominal-object" ||
+    !symbolRefEquals(actualDesc.owner, expectedDesc.owner)
+  ) {
+    return;
+  }
+  expectedDesc.typeArgs.forEach((typeArg, index) => {
+    const actualArg = actualDesc.typeArgs[index];
+    if (typeof actualArg === "number") {
+      bindTypeParamsFromType(typeArg, actualArg, bindings, ctx, state);
+    }
+  });
+};
+
+const bindStructuralObject = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "structural-object") {
+    return;
+  }
+
+  const actualFields = getStructuralFields(actual, ctx, state);
+  if (!actualFields) {
+    return;
+  }
+  expectedDesc.fields.forEach((field) => {
+    const candidate = actualFields.find((entry) => entry.name === field.name);
+    if (candidate) {
+      bindTypeParamsFromType(field.type, candidate.type, bindings, ctx, state);
+    }
+  });
+};
+
+const bindFixedArray = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "fixed-array") {
+    return;
+  }
+
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind !== "fixed-array") {
+    return;
+  }
+  bindTypeParamsFromType(
+    expectedDesc.element,
+    actualDesc.element,
+    bindings,
+    ctx,
+    state,
+  );
+};
+
+const bindFunction = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "function") {
+    return;
+  }
+
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind !== "function") {
+    return;
+  }
+
+  const count = Math.min(
+    expectedDesc.parameters.length,
+    actualDesc.parameters.length,
+  );
+  for (let index = 0; index < count; index += 1) {
+    bindTypeParamsFromType(
+      expectedDesc.parameters[index]!.type,
+      actualDesc.parameters[index]!.type,
+      bindings,
+      ctx,
+      state,
+    );
+  }
+
+  bindTypeParamsFromType(
+    expectedDesc.returnType,
+    actualDesc.returnType,
+    bindings,
+    ctx,
+    state,
+  );
+};
+
+const bindUnion = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "union") {
+    return;
+  }
+  if (!expectedDesc.members.some((member) => containsAnyTypeParam(member, ctx))) {
+    return;
+  }
+
+  const nextBindings = bindTypeParamsFromUnion({
+    expectedMembers: expectedDesc.members,
+    actual,
+    bindings,
+    ctx,
+    state,
+  });
+  if (!nextBindings) {
+    return;
+  }
+  applyBindingUpdates({ bindings, nextBindings });
+};
+
+const bindIntersection = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "intersection") {
+    return;
+  }
+
+  if (typeof expectedDesc.nominal === "number") {
+    bindTypeParamsFromType(expectedDesc.nominal, actual, bindings, ctx, state);
+  }
+  if (typeof expectedDesc.structural === "number") {
+    bindTypeParamsFromType(expectedDesc.structural, actual, bindings, ctx, state);
+  }
+};
+
+const bindTypeParamsHandlers: Partial<
+  Record<TypeDescriptor["kind"], BindTypeParamsHandler>
+> = {
+  "type-param-ref": bindTypeParamRef,
+  "nominal-object": bindNominalObject,
+  "structural-object": bindStructuralObject,
+  "fixed-array": bindFixedArray,
+  function: bindFunction,
+  union: bindUnion,
+  intersection: bindIntersection,
+};
+
 export const bindTypeParamsFromType = (
   expected: TypeId,
   actual: TypeId,
@@ -2484,125 +2751,302 @@ export const bindTypeParamsFromType = (
   }
 
   const expectedDesc = ctx.arena.get(expected);
-  if (expectedDesc.kind === "type-param-ref") {
-    const existing = bindings.get(expectedDesc.param);
-    if (!existing) {
-      bindings.set(expectedDesc.param, actual);
-      return;
-    }
-    if (typeSatisfies(actual, existing, ctx, state)) {
-      return;
-    }
-    if (typeSatisfies(existing, actual, ctx, state)) {
-      bindings.set(expectedDesc.param, actual);
-    }
+  const handler = bindTypeParamsHandlers[expectedDesc.kind];
+  if (!handler) {
     return;
   }
 
-  if (expectedDesc.kind === "nominal-object") {
-    const actualNominal = getNominalComponent(actual, ctx);
-    if (typeof actualNominal !== "number") {
-      return;
-    }
-    const actualDesc = ctx.arena.get(actualNominal);
-    if (
-      actualDesc.kind !== "nominal-object" ||
-      !symbolRefEquals(actualDesc.owner, expectedDesc.owner)
-    ) {
-      return;
-    }
-    expectedDesc.typeArgs.forEach((typeArg, index) => {
-      const actualArg = actualDesc.typeArgs[index];
-      if (typeof actualArg === "number") {
-        bindTypeParamsFromType(typeArg, actualArg, bindings, ctx, state);
+  handler({ actual, expectedDesc, bindings, ctx, state });
+};
+
+const bindTypeParamsFromUnion = ({
+  expectedMembers,
+  actual,
+  bindings,
+  ctx,
+  state,
+}: {
+  expectedMembers: readonly TypeId[];
+  actual: TypeId;
+  bindings: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): Map<TypeParamId, TypeId> | undefined => {
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind !== "union") {
+    return undefined;
+  }
+
+  const bareTypeParamMembers = expectedMembers.filter((member) => {
+    const desc = ctx.arena.get(member);
+    return desc.kind === "type-param-ref";
+  });
+  if (bareTypeParamMembers.length > 1) {
+    return undefined;
+  }
+
+  const remainderTarget = bareTypeParamMembers[0];
+  const remainderParam =
+    typeof remainderTarget === "number"
+      ? (() => {
+          const desc = ctx.arena.get(remainderTarget);
+          return desc.kind === "type-param-ref" ? desc.param : undefined;
+        })()
+      : undefined;
+  const subsetMembers =
+    typeof remainderTarget === "number"
+      ? expectedMembers.filter((member) => member !== remainderTarget)
+      : expectedMembers;
+
+  const candidates = findUnionBindingCandidates({
+    expectedMembers: subsetMembers,
+    actualMembers: actualDesc.members,
+    bindings,
+    ctx,
+    state,
+  });
+  if (candidates.length === 0) {
+    return undefined;
+  }
+  const maxCoverage = candidates.reduce((max, candidate) => {
+    const coverage = actualDesc.members.length - candidate.remainingActualMembers.length;
+    return coverage > max ? coverage : max;
+  }, 0);
+  const filteredCandidates = candidates.filter(
+    (candidate) =>
+      actualDesc.members.length - candidate.remainingActualMembers.length === maxCoverage,
+  );
+
+  const solutionsByKey = new Map<string, Map<TypeParamId, TypeId>>();
+  filteredCandidates.forEach((candidate) => {
+    const nextBindings = new Map(candidate.bindings);
+    if (typeof remainderTarget === "number" && typeof remainderParam === "number") {
+      const remainder = candidate.remainingActualMembers;
+      if (remainder.length === 0) {
+        return;
       }
-    });
-    return;
-  }
 
-  if (expectedDesc.kind === "structural-object") {
-    const actualFields = getStructuralFields(actual, ctx, state);
-    if (!actualFields) {
-      return;
-    }
-    expectedDesc.fields.forEach((field) => {
-      const candidate = actualFields.find((entry) => entry.name === field.name);
-      if (candidate) {
+      const existingBinding = nextBindings.get(remainderParam);
+      if (typeof existingBinding === "number") {
+        const hasCompatibleRemainder = remainder.some(
+          (member) =>
+            typeSatisfies(member, existingBinding, ctx, state) ||
+            typeSatisfies(existingBinding, member, ctx, state),
+        );
+        if (!hasCompatibleRemainder) {
+          return;
+        }
+      } else {
+        const remainderType =
+          remainder.length === 1 ? remainder[0]! : ctx.arena.internUnion(remainder);
         bindTypeParamsFromType(
-          field.type,
-          candidate.type,
-          bindings,
+          remainderTarget,
+          remainderType,
+          nextBindings,
           ctx,
           state,
         );
+        const substitutedTarget = ctx.arena.substitute(remainderTarget, nextBindings);
+        if (
+          !typeSatisfies(remainderType, substitutedTarget, ctx, state) &&
+          !typeSatisfies(substitutedTarget, remainderType, ctx, state)
+        ) {
+          return;
+        }
       }
+    } else if (typeof remainderTarget === "number") {
+      // Should not happen: remainder target candidates are limited to bare type-param members.
+      if (candidate.remainingActualMembers.length === 0) {
+        return;
+      }
+    }
+    solutionsByKey.set(serializeTypeParamBindings(nextBindings), nextBindings);
+  });
+
+  if (solutionsByKey.size !== 1) {
+    return undefined;
+  }
+
+  return [...solutionsByKey.values()][0];
+};
+
+type UnionBindingCandidate = {
+  bindings: Map<TypeParamId, TypeId>;
+  remainingActualMembers: readonly TypeId[];
+};
+
+const MAX_UNION_BINDING_SEARCH_STATES = 4_096;
+
+const findUnionBindingCandidates = ({
+  expectedMembers,
+  actualMembers,
+  bindings,
+  ctx,
+  state,
+}: {
+  expectedMembers: readonly TypeId[];
+  actualMembers: readonly TypeId[];
+  bindings: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): UnionBindingCandidate[] => {
+  const solutions: UnionBindingCandidate[] = [];
+  const visitedStates = new Set<string>();
+  let abortedForComplexity = false;
+  const unresolvedExpected = [...expectedMembers];
+
+  const search = ({
+    expected,
+    currentBindings,
+    usedActualIndices,
+  }: {
+    expected: readonly TypeId[];
+    currentBindings: ReadonlyMap<TypeParamId, TypeId>;
+    usedActualIndices: ReadonlySet<number>;
+  }): void => {
+    if (abortedForComplexity) {
+      return;
+    }
+    const stateKey = serializeUnionBindingSearchState({
+      expected,
+      usedActualIndices,
+      bindings: currentBindings,
     });
-    return;
-  }
-
-  if (expectedDesc.kind === "fixed-array") {
-    const actualDesc = ctx.arena.get(actual);
-    if (actualDesc.kind !== "fixed-array") {
+    if (visitedStates.has(stateKey)) {
       return;
     }
-    bindTypeParamsFromType(
-      expectedDesc.element,
-      actualDesc.element,
-      bindings,
-      ctx,
-      state,
-    );
-    return;
-  }
-
-  if (expectedDesc.kind === "function") {
-    const actualDesc = ctx.arena.get(actual);
-    if (actualDesc.kind !== "function") {
+    visitedStates.add(stateKey);
+    if (visitedStates.size > MAX_UNION_BINDING_SEARCH_STATES) {
+      abortedForComplexity = true;
       return;
     }
 
-    const count = Math.min(
-      expectedDesc.parameters.length,
-      actualDesc.parameters.length,
-    );
-    for (let index = 0; index < count; index += 1) {
-      bindTypeParamsFromType(
-        expectedDesc.parameters[index]!.type,
-        actualDesc.parameters[index]!.type,
-        bindings,
-        ctx,
-        state,
-      );
+    if (expected.length === 0) {
+      const snapshot = new Map(currentBindings);
+      solutions.push({
+        bindings: snapshot,
+        remainingActualMembers: actualMembers.filter(
+          (_, index) => !usedActualIndices.has(index),
+        ),
+      });
+      return;
     }
 
-    bindTypeParamsFromType(
-      expectedDesc.returnType,
-      actualDesc.returnType,
-      bindings,
-      ctx,
-      state,
-    );
-    return;
+    const options = expected
+      .map((expectedMember, expectedIndex) => {
+        if (typeof expectedMember !== "number") {
+          return undefined;
+        }
+        const matches = actualMembers.flatMap((actualMember, actualIndex) => {
+          const candidate = tryBindExpectedMember({
+            expectedMember,
+            actualMember,
+            bindings: currentBindings,
+            ctx,
+            state,
+          });
+          return candidate ? [{ actualIndex, bindings: candidate }] : [];
+        });
+        return { expectedIndex, matches };
+      })
+      .filter(
+        (
+          option,
+        ): option is {
+          expectedIndex: number;
+          matches: { actualIndex: number; bindings: Map<TypeParamId, TypeId> }[];
+        } => Boolean(option),
+      )
+      .sort((left, right) => left.matches.length - right.matches.length);
+
+    const next = options[0];
+    if (!next) {
+      return;
+    }
+    if (next.matches.length === 0) {
+      return;
+    }
+    const nextExpected = expected.filter((_, index) => index !== next.expectedIndex);
+
+    next.matches.forEach((match) => {
+      const nextUsedActualIndices = new Set(usedActualIndices);
+      nextUsedActualIndices.add(match.actualIndex);
+      search({
+        expected: nextExpected,
+        currentBindings: match.bindings,
+        usedActualIndices: nextUsedActualIndices,
+      });
+    });
+  };
+
+  search({
+    expected: unresolvedExpected,
+    currentBindings: bindings,
+    usedActualIndices: new Set<number>(),
+  });
+
+  if (abortedForComplexity) {
+    return [];
   }
 
-  if (expectedDesc.kind === "intersection") {
-    if (typeof expectedDesc.nominal === "number") {
-      bindTypeParamsFromType(
-        expectedDesc.nominal,
-        actual,
-        bindings,
-        ctx,
-        state,
-      );
-    }
-    if (typeof expectedDesc.structural === "number") {
-      bindTypeParamsFromType(
-        expectedDesc.structural,
-        actual,
-        bindings,
-        ctx,
-        state,
-      );
-    }
+  return solutions;
+};
+
+const serializeUnionBindingSearchState = ({
+  expected,
+  usedActualIndices,
+  bindings,
+}: {
+  expected: readonly TypeId[];
+  usedActualIndices: ReadonlySet<number>;
+  bindings: ReadonlyMap<TypeParamId, TypeId>;
+}): string =>
+  [
+    expected
+      .slice()
+      .sort((left, right) => left - right)
+      .join(","),
+    [...usedActualIndices]
+      .sort((left, right) => left - right)
+      .join(","),
+    serializeTypeParamBindings(bindings),
+  ].join("|");
+
+const serializeTypeParamBindings = (
+  bindings: ReadonlyMap<TypeParamId, TypeId>,
+): string =>
+  [...bindings.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([param, type]) => `${param}:${type}`)
+    .join(",");
+
+const tryBindExpectedMember = ({
+  expectedMember,
+  actualMember,
+  bindings,
+  ctx,
+  state,
+}: {
+  expectedMember: TypeId;
+  actualMember: TypeId;
+  bindings: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): Map<TypeParamId, TypeId> | undefined => {
+  const candidateBindings = new Map(bindings);
+  bindTypeParamsFromType(
+    expectedMember,
+    actualMember,
+    candidateBindings,
+    ctx,
+    state,
+  );
+  const substitutedExpected = ctx.arena.substitute(expectedMember, candidateBindings);
+  if (
+    !typeSatisfies(actualMember, substitutedExpected, ctx, state) &&
+    !typeSatisfies(substitutedExpected, actualMember, ctx, state)
+  ) {
+    return undefined;
   }
+  return candidateBindings;
 };
