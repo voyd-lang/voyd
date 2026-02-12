@@ -117,6 +117,11 @@ export interface TypeScheme {
 
 export type Variance = "invariant" | "covariant" | "contravariant";
 
+export interface UnificationStepBudget {
+  maxSteps: number;
+  stepsUsed: { value: number };
+}
+
 export interface UnificationContext {
   location: NodeId;
   reason: string;
@@ -126,6 +131,8 @@ export interface UnificationContext {
   allowUnknown?: boolean;
   // Optional projector to normalize types (e.g. to structural components) before comparison.
   structuralResolver?: (type: TypeId) => TypeId | undefined;
+  // Optional global unification budget shared across calls in a typing pipeline.
+  stepBudget?: UnificationStepBudget;
 }
 
 export type UnificationResult =
@@ -136,6 +143,7 @@ export interface UnificationConflict {
   left: TypeId;
   right: TypeId;
   message: string;
+  kind?: "budget-exceeded";
 }
 
 export interface TypeArena {
@@ -649,6 +657,7 @@ export const createTypeArena = (): TypeArena => {
     const constraintMap = ctx.constraints;
     // Used to project types (often nominal expectations) into a structural shape before inspection.
     const structuralResolver = ctx.structuralResolver;
+    const stepBudget = ctx.stepBudget;
     const seen = new Set<string>();
 
     const success = (substitution: Substitution): UnificationResult => ({
@@ -660,12 +669,14 @@ export const createTypeArena = (): TypeArena => {
       left: TypeId,
       right: TypeId,
       message?: string,
+      kind?: "budget-exceeded",
     ): UnificationResult => ({
       ok: false,
       conflict: {
         left,
         right,
         message: message ?? `cannot unify types (${ctx.reason})`,
+        kind,
       },
     });
 
@@ -1068,6 +1079,18 @@ export const createTypeArena = (): TypeArena => {
       subst: Substitution,
       localSeen: Set<string>,
     ): UnificationResult => {
+      if (stepBudget) {
+        stepBudget.stepsUsed.value += 1;
+        if (stepBudget.stepsUsed.value > stepBudget.maxSteps) {
+          return conflict(
+            left,
+            right,
+            `type-check unification budget exceeded (${stepBudget.stepsUsed.value}/${stepBudget.maxSteps})`,
+            "budget-exceeded",
+          );
+        }
+      }
+
       const substitutedLeft = substitute(left, subst);
       const substitutedRight = substitute(right, subst);
       const resolvedLeft = normalizeStructural(substitutedLeft);

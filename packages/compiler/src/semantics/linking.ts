@@ -434,6 +434,11 @@ const createTypingContextFactory = ({
         entry.binding.overloads,
         entry.binding.importedOverloadOptions
       ),
+      typeCheckBudget: {
+        maxUnifySteps: 50_000,
+        maxOverloadCandidates: 64,
+        unifyStepsUsed: { value: 0 },
+      },
       decls: entry.binding.decls,
       moduleId: entry.moduleId,
       packageId: entry.binding.packageId,

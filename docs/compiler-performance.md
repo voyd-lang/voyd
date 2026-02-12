@@ -1,5 +1,19 @@
 # Performance Log
 
+**12 Feb 2026**
+
+Added typing performance guardrails and CI benchmarks:
+
+- `packages/compiler/src/semantics/typing/__tests__/typing.bench.ts` covers
+  overload fanout and union-heavy typing paths.
+- CI now runs `npm run --workspace @voyd/compiler bench:typing` in
+  `.github/workflows/pr.yml`.
+
+Typing disambiguation policy:
+
+- If overload disambiguation would require global backtracking, require explicit
+  type arguments or expected-type annotations instead of adding heuristic search.
+
 **16 Aug 2025**
 
 Time to parse ~0.19 MB Voyd File (M1 Pro 16GB). Average of 124.68 ms. Relatively

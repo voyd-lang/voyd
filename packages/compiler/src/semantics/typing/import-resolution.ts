@@ -61,6 +61,7 @@ export const makeDependencyContext = (
   symbolTable: dependency.symbolTable,
   hir: dependency.hir,
   overloads: dependency.overloads,
+  typeCheckBudget: ctx.typeCheckBudget,
   decls: dependency.decls,
   moduleId: dependency.moduleId,
   packageId: dependency.packageId,

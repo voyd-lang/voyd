@@ -11,6 +11,8 @@ import type {
 import { resolveImportedTypeExpr } from "./imports.js";
 import type { SourceSpan, SymbolId, TypeId, TypeParamId } from "../ids.js";
 import {
+  type UnificationContext,
+  type UnificationResult,
   typeDescriptorToUserString,
   type StructuralField,
 } from "./type-arena.js";
@@ -38,6 +40,43 @@ import {
 } from "./symbol-ref-utils.js";
 import { symbolRefEquals } from "./symbol-ref.js";
 import { emitDiagnostic } from "../../diagnostics/index.js";
+
+type UnifyWithBudgetOptions = Omit<UnificationContext, "stepBudget">;
+
+export const unifyWithBudget = ({
+  actual,
+  expected,
+  options,
+  ctx,
+  span,
+}: {
+  actual: TypeId;
+  expected: TypeId;
+  options: UnifyWithBudgetOptions;
+  ctx: TypingContext;
+  span?: SourceSpan;
+}): UnificationResult => {
+  const compatibility = ctx.arena.unify(actual, expected, {
+    ...options,
+    stepBudget: {
+      maxSteps: ctx.typeCheckBudget.maxUnifySteps,
+      stepsUsed: ctx.typeCheckBudget.unifyStepsUsed,
+    },
+  });
+  if (!compatibility.ok && compatibility.conflict.kind === "budget-exceeded") {
+    emitDiagnostic({
+      ctx,
+      code: "TY0040",
+      params: {
+        kind: "typecheck-unify-budget-exceeded",
+        maxSteps: ctx.typeCheckBudget.maxUnifySteps,
+        observedSteps: ctx.typeCheckBudget.unifyStepsUsed.value,
+      },
+      span: span ?? ctx.hir.module.span,
+    });
+  }
+  return compatibility;
+};
 
 const isFixedArrayReference = (
   name: string,
@@ -1215,11 +1254,17 @@ const resolveIntersectionTypeExpr = (
 
     const requiredOptional =
       existing.optional === true && field.optional === true ? true : undefined;
-    const compatible = ctx.arena.unify(existing.type, field.type, {
-      location: ctx.hir.module.ast,
-      reason: `intersection field ${field.name} compatibility`,
-      variance: "invariant",
-      allowUnknown: state.mode === "relaxed",
+    const compatible = unifyWithBudget({
+      actual: existing.type,
+      expected: field.type,
+      options: {
+        location: ctx.hir.module.ast,
+        reason: `intersection field ${field.name} compatibility`,
+        variance: "invariant",
+        allowUnknown: state.mode === "relaxed",
+      },
+      ctx,
+      span: expr.span,
     });
     if (!compatible.ok) {
       emitDiagnostic({
@@ -1497,9 +1542,15 @@ export const getObjectTemplate = (
             )} must redeclare inherited field ${baseField.name}`,
           );
         }
-        const compatibility = ctx.arena.unify(declared.type, baseField.type, {
-          location: ctx.hir.module.ast,
-          reason: `field ${baseField.name} compatibility with base object`,
+        const compatibility = unifyWithBudget({
+          actual: declared.type,
+          expected: baseField.type,
+          options: {
+            location: ctx.hir.module.ast,
+            reason: `field ${baseField.name} compatibility with base object`,
+          },
+          ctx,
+          span: decl.span,
         });
         if (!compatibility.ok) {
           throw new Error(
@@ -1719,11 +1770,16 @@ const instantiateTraitImplsFor = ({
   const implementations: TraitImplInstance[] = [];
   const allowUnknown = state.mode === "relaxed";
   ctx.traits.getImplTemplates().forEach((template) => {
-    const match = ctx.arena.unify(nominal, template.target, {
-      location: ctx.hir.module.ast,
-      reason: "trait impl instantiation",
-      variance: "invariant",
-      allowUnknown,
+    const match = unifyWithBudget({
+      actual: nominal,
+      expected: template.target,
+      options: {
+        location: ctx.hir.module.ast,
+        reason: "trait impl instantiation",
+        variance: "invariant",
+        allowUnknown,
+      },
+      ctx,
     });
     if (!match.ok) {
       return;
@@ -1842,10 +1898,15 @@ export const nominalSatisfies = (
       if (expectedArg === ctx.primitives.unknown) {
         return true;
       }
-      const result = ctx.arena.unify(actualDesc.typeArgs[index]!, expectedArg, {
-        location: ctx.hir.module.ast,
-        reason: "type argument compatibility",
-        variance: "covariant",
+      const result = unifyWithBudget({
+        actual: actualDesc.typeArgs[index]!,
+        expected: expectedArg,
+        options: {
+          location: ctx.hir.module.ast,
+          reason: "type argument compatibility",
+          variance: "covariant",
+        },
+        ctx,
       });
       if (result.ok) {
         return true;
@@ -2174,12 +2235,17 @@ export const typeSatisfies = (
         structuralExpectationOf(type, ctx, state)
     : undefined;
 
-  const compatibility = ctx.arena.unify(actual, expected, {
-    location: ctx.hir.module.ast,
-    reason: "type satisfaction",
-    variance: "covariant",
-    structuralResolver,
-    allowUnknown,
+  const compatibility = unifyWithBudget({
+    actual,
+    expected,
+    options: {
+      location: ctx.hir.module.ast,
+      reason: "type satisfaction",
+      variance: "covariant",
+      structuralResolver,
+      allowUnknown,
+    },
+    ctx,
   });
   return compatibility.ok;
 };
@@ -2198,11 +2264,16 @@ const traitSatisfies = (
     const allowUnknown = state.mode === "relaxed";
     const matches = actualDesc.traits.some(
       (trait) =>
-        ctx.arena.unify(trait, expected, {
-          location: ctx.hir.module.ast,
-          reason: "trait compatibility",
-          variance: "covariant",
-          allowUnknown,
+        unifyWithBudget({
+          actual: trait,
+          expected,
+          options: {
+            location: ctx.hir.module.ast,
+            reason: "trait compatibility",
+            variance: "covariant",
+            allowUnknown,
+          },
+          ctx,
         }).ok,
     );
     if (matches) {
@@ -2210,11 +2281,16 @@ const traitSatisfies = (
     }
   }
   if (actualDesc.kind === "trait" && expectedDesc.kind === "trait") {
-    const match = ctx.arena.unify(actual, expected, {
-      location: ctx.hir.module.ast,
-      reason: "trait compatibility",
-      variance: "covariant",
-      allowUnknown,
+    const match = unifyWithBudget({
+      actual,
+      expected,
+      options: {
+        location: ctx.hir.module.ast,
+        reason: "trait compatibility",
+        variance: "covariant",
+        allowUnknown,
+      },
+      ctx,
     });
     return match.ok;
   }
@@ -2238,11 +2314,16 @@ const traitSatisfies = (
     if (impl.traitSymbol !== traitSymbol) {
       return false;
     }
-    const comparison = ctx.arena.unify(impl.trait, expected, {
-      location: ctx.hir.module.ast,
-      reason: "trait compatibility",
-      variance: "covariant",
-      allowUnknown,
+    const comparison = unifyWithBudget({
+      actual: impl.trait,
+      expected,
+      options: {
+        location: ctx.hir.module.ast,
+        reason: "trait compatibility",
+        variance: "covariant",
+        allowUnknown,
+      },
+      ctx,
     });
     return comparison.ok;
   });
@@ -2305,10 +2386,15 @@ const nominalInstantiationMatches = (
       !expectedDesc.typeArgs.some((arg) => containsUnknownType(arg, ctx))
     ) {
       const compatibleArgs = currentDesc.typeArgs.every((arg, index) => {
-        const comparison = ctx.arena.unify(arg, expectedDesc.typeArgs[index]!, {
-          location: ctx.hir.module.ast,
-          reason: "nominal instantiation comparison",
-          variance: "invariant",
+        const comparison = unifyWithBudget({
+          actual: arg,
+          expected: expectedDesc.typeArgs[index]!,
+          options: {
+            location: ctx.hir.module.ast,
+            reason: "nominal instantiation comparison",
+            variance: "invariant",
+          },
+          ctx,
         });
         return comparison.ok;
       });

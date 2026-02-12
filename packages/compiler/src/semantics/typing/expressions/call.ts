@@ -22,6 +22,7 @@ import {
   resolveTypeExpr,
   typeSatisfies,
   getSymbolName,
+  unifyWithBudget,
 } from "../type-system.js";
 import {
   getOptionalInfo,
@@ -178,6 +179,7 @@ export const typeCallExpr = (
     callee: calleeExpr,
     typeArguments,
     expectedReturnType,
+    callSpan: expr.span,
     ctx,
     state,
   });
@@ -674,12 +676,14 @@ const getExpectedCallParameters = ({
   callee,
   typeArguments,
   expectedReturnType,
+  callSpan,
   ctx,
   state,
 }: {
   callee: HirExpression;
   typeArguments: readonly TypeId[] | undefined;
   expectedReturnType: TypeId | undefined;
+  callSpan?: SourceSpan;
   ctx: TypingContext;
   state: TypingState;
 }): readonly TypeId[] | undefined => {
@@ -692,6 +696,12 @@ const getExpectedCallParameters = ({
     if (!overloads) {
       return undefined;
     }
+    enforceOverloadCandidateBudget({
+      name: callee.name,
+      candidateCount: overloads.length,
+      ctx,
+      span: callSpan ?? callee.span,
+    });
     const candidates = overloads
       .map((symbol) => ctx.functions.getSignature(symbol))
       .filter((entry): entry is FunctionSignature => Boolean(entry));
@@ -820,6 +830,33 @@ const findMatchingOverloadCandidates = <
       typeArguments,
     ),
   );
+
+const enforceOverloadCandidateBudget = ({
+  name,
+  candidateCount,
+  ctx,
+  span,
+}: {
+  name: string;
+  candidateCount: number;
+  ctx: TypingContext;
+  span?: SourceSpan;
+}): void => {
+  if (candidateCount <= ctx.typeCheckBudget.maxOverloadCandidates) {
+    return;
+  }
+  emitDiagnostic({
+    ctx,
+    code: "TY0041",
+    params: {
+      kind: "overload-candidate-budget-exceeded",
+      name,
+      candidates: candidateCount,
+      maxCandidates: ctx.typeCheckBudget.maxOverloadCandidates,
+    },
+    span: normalizeSpan(span, ctx.hir.module.span),
+  });
+};
 
 const expectedCalleeType = (args: readonly Arg[], ctx: TypingContext): TypeId =>
   ctx.arena.internFunction({
@@ -1455,11 +1492,16 @@ const getTraitMethodTypeBindings = ({
   }
 
   const allowUnknown = state.mode === "relaxed";
-  const match = ctx.arena.unify(receiverType, template.trait, {
-    location: ctx.hir.module.ast,
-    reason: "trait method inference",
-    variance: "covariant",
-    allowUnknown,
+  const match = unifyWithBudget({
+    actual: receiverType,
+    expected: template.trait,
+    options: {
+      location: ctx.hir.module.ast,
+      reason: "trait method inference",
+      variance: "covariant",
+      allowUnknown,
+    },
+    ctx,
   });
   if (!match.ok) {
     return undefined;
@@ -1705,6 +1747,13 @@ const selectMethodCallCandidate = ({
     return { usedTraitDispatch: false };
   }
 
+  enforceOverloadCandidateBudget({
+    name: expr.method,
+    candidateCount: resolution.candidates.length,
+    ctx,
+    span: expr.span,
+  });
+
   const argsForCandidate = (candidate: MethodCallCandidate): readonly Arg[] =>
     argsForMethodCallCandidate({
       probeArgs,
@@ -1747,6 +1796,12 @@ const selectMethodCallCandidate = ({
 
     if (fallbackCandidates.length > 0) {
       candidates = fallbackCandidates;
+      enforceOverloadCandidateBudget({
+        name: expr.method,
+        candidateCount: candidates.length,
+        ctx,
+        span: expr.span,
+      });
       matches = findMatchingOverloadCandidates({
         candidates,
         args: probeArgs,
@@ -2026,6 +2081,13 @@ const typeOperatorOverloadCall = ({
   if (!resolution || resolution.candidates.length === 0) {
     return undefined;
   }
+
+  enforceOverloadCandidateBudget({
+    name: operatorName,
+    candidateCount: resolution.candidates.length,
+    ctx,
+    span: call.span,
+  });
 
   const matches = findMatchingOverloadCandidates({
     candidates: resolution.candidates,
@@ -3347,6 +3409,13 @@ const typeOverloadedCall = (
     );
   }
 
+  enforceOverloadCandidateBudget({
+    name: callee.name,
+    candidateCount: options.length,
+    ctx,
+    span: call.span,
+  });
+
   const candidates = options.map((symbol) => {
     const signature = ctx.functions.getSignature(symbol);
     if (!signature) {
@@ -3583,11 +3652,16 @@ const resolveTraitDispatchOverload = <
         if (implMethod !== symbol) {
           return false;
         }
-        const comparison = ctx.arena.unify(receiver.type, toLocalType(template.trait), {
-          location: ctx.hir.module.ast,
-          reason: "trait object dispatch",
-          variance: "covariant",
-          allowUnknown,
+        const comparison = unifyWithBudget({
+          actual: receiver.type,
+          expected: toLocalType(template.trait),
+          options: {
+            location: ctx.hir.module.ast,
+            reason: "trait object dispatch",
+            variance: "covariant",
+            allowUnknown,
+          },
+          ctx,
         });
         return comparison.ok;
       }) === true;

@@ -14,6 +14,22 @@ import {
 } from "./types.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 
+const DEFAULT_MAX_UNIFY_STEPS = 50_000;
+const DEFAULT_MAX_OVERLOAD_CANDIDATES = 64;
+
+const normalizeBudgetLimit = ({
+  value,
+  fallback,
+}: {
+  value: number | undefined;
+  fallback: number;
+}): number => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  return Math.max(1, Math.trunc(value));
+};
+
 export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const decls = inputs.decls ?? new DeclTable();
   const arena = inputs.arena ?? createTypeArena();
@@ -39,11 +55,23 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     bucket.set(entry.target.symbol, entry.local);
     importAliasesByModule.set(entry.target.moduleId, bucket);
   });
+  const typeCheckBudget = {
+    maxUnifySteps: normalizeBudgetLimit({
+      value: inputs.typeCheckBudget?.maxUnifySteps,
+      fallback: DEFAULT_MAX_UNIFY_STEPS,
+    }),
+    maxOverloadCandidates: normalizeBudgetLimit({
+      value: inputs.typeCheckBudget?.maxOverloadCandidates,
+      fallback: DEFAULT_MAX_OVERLOAD_CANDIDATES,
+    }),
+    unifyStepsUsed: { value: 0 },
+  };
 
   return {
     symbolTable: inputs.symbolTable,
     hir: inputs.hir,
     overloads: inputs.overloads,
+    typeCheckBudget,
     decls,
     moduleId: inputs.moduleId ?? "local",
     packageId: inputs.packageId ?? "local",
