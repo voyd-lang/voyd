@@ -703,18 +703,25 @@ const getExpectedCallParameters = ({
     if (!overloads) {
       return undefined;
     }
-    enforceOverloadCandidateBudget({
-      name: callee.name,
-      candidateCount: overloads.length,
-      ctx,
-      span: callSpan ?? callee.span,
-    });
     const candidates = overloads
       .map((symbol) => ctx.functions.getSignature(symbol))
       .filter((entry): entry is FunctionSignature => Boolean(entry));
-    const matchingReturn = candidates.filter((signature) =>
-      typeSatisfies(signature.returnType, expectedReturnType, ctx, state),
-    );
+    const explicitTypeMatches = filterCandidatesByExplicitTypeArguments({
+      candidates,
+      typeArguments,
+    });
+    const matchingReturn = filterCandidatesByExpectedReturnType({
+      candidates: explicitTypeMatches,
+      expectedReturnType,
+      ctx,
+      state,
+    });
+    enforceOverloadCandidateBudget({
+      name: callee.name,
+      candidateCount: matchingReturn.length,
+      ctx,
+      span: callSpan ?? callee.span,
+    });
     if (matchingReturn.length !== 1) {
       return undefined;
     }
@@ -837,6 +844,61 @@ const findMatchingOverloadCandidates = <
       typeArguments,
     ),
   );
+
+const signatureForOverloadCandidate = <
+  T extends FunctionSignature | { signature: FunctionSignature },
+>(
+  candidate: T,
+): FunctionSignature =>
+  "signature" in candidate ? candidate.signature : candidate;
+
+const filterCandidatesByExplicitTypeArguments = <
+  T extends FunctionSignature | { signature: FunctionSignature },
+>({
+  candidates,
+  typeArguments,
+}: {
+  candidates: readonly T[];
+  typeArguments?: readonly TypeId[];
+}): T[] => {
+  if (!typeArguments || typeArguments.length === 0) {
+    return [...candidates];
+  }
+  return candidates.filter((candidate) => {
+    const signature = signatureForOverloadCandidate(candidate);
+    const typeParamCount = signature.typeParams?.length ?? 0;
+    return typeArguments.length <= typeParamCount;
+  });
+};
+
+const filterCandidatesByExpectedReturnType = <
+  T extends FunctionSignature | { signature: FunctionSignature },
+>({
+  candidates,
+  expectedReturnType,
+  ctx,
+  state,
+}: {
+  candidates: readonly T[];
+  expectedReturnType: TypeId | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): T[] => {
+  if (
+    typeof expectedReturnType !== "number" ||
+    expectedReturnType === ctx.primitives.unknown
+  ) {
+    return [...candidates];
+  }
+  return candidates.filter((candidate) =>
+    typeSatisfies(
+      signatureForOverloadCandidate(candidate).returnType,
+      expectedReturnType,
+      ctx,
+      state,
+    ),
+  );
+};
 
 const enforceOverloadCandidateBudget = ({
   name,
@@ -3524,13 +3586,6 @@ const typeOverloadedCall = (
     );
   }
 
-  enforceOverloadCandidateBudget({
-    name: callee.name,
-    candidateCount: options.length,
-    ctx,
-    span: call.span,
-  });
-
   const candidates = options.map((symbol) => {
     const signature = ctx.functions.getSignature(symbol);
     if (!signature) {
@@ -3543,8 +3598,24 @@ const typeOverloadedCall = (
     }
     return { symbol, signature };
   });
-  const matches = findMatchingOverloadCandidates({
+  const candidatesForBudget = filterCandidatesByExplicitTypeArguments({
     candidates,
+    typeArguments,
+  });
+  const candidatesForResolution = filterCandidatesByExpectedReturnType({
+    candidates: candidatesForBudget,
+    expectedReturnType,
+    ctx,
+    state,
+  });
+  enforceOverloadCandidateBudget({
+    name: callee.name,
+    candidateCount: candidatesForResolution.length,
+    ctx,
+    span: call.span,
+  });
+  const matches = findMatchingOverloadCandidates({
+    candidates: candidatesForResolution,
     args: probeArgs,
     ctx,
     state,
@@ -3554,7 +3625,7 @@ const typeOverloadedCall = (
   const traitDispatch =
     matches.length === 0 && (!typeArguments || typeArguments.length === 0)
       ? resolveTraitDispatchOverload({
-          candidates,
+          candidates: candidatesForResolution,
           args: probeArgs,
           ctx,
           state,

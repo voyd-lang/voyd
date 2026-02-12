@@ -149,6 +149,276 @@ const createOverloadFanoutCase = (overloadCount: number) => {
   };
 };
 
+const createReturnTypeNarrowingCase = (overloadCount: number) => {
+  const ctx = createModuleContext();
+  const overloadSetId: OverloadSetId = 0;
+  const functionScope = ctx.symbolTable.rootScope as ScopeId;
+  const fakeExpr = (): Expr =>
+    ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+  const bool = () => createNamedType("bool", ctx.nextNode(), ctx.span);
+
+  const overloadSymbols: SymbolId[] = [];
+  for (let index = 0; index < overloadCount; index += 1) {
+    const symbol = ctx.symbolTable.declare({
+      name: "pick_by_return",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    overloadSymbols.push(symbol);
+
+    const valueParam = ctx.symbolTable.declare({
+      name: `value_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const decl = ctx.decls.registerFunction({
+      name: "pick_by_return",
+      visibility: moduleVisibility(),
+      symbol,
+      scope: functionScope,
+      params: [{ name: `value_${index}`, symbol: valueParam, ast: undefined }],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
+    const returnsI32 = index === overloadCount - 1;
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      symbol,
+      decl: decl.id,
+      parameters: [
+        {
+          symbol: valueParam,
+          pattern: { kind: "identifier", symbol: valueParam },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        },
+      ],
+      returnType: returnsI32 ? i32() : bool(),
+      body: returnsI32
+        ? ctx.createLiteral("i32", `${index}`)
+        : ctx.createLiteral("boolean", "false"),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  }
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "overload-set",
+      name: "pick_by_return",
+      set: overloadSetId,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const mainDecl = ctx.decls.registerFunction({
+    name: "main",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    scope: functionScope,
+    params: [],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    decl: mainDecl.id,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>([
+        [overloadSetId, overloadSymbols],
+      ]),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: overloadSymbols[overloadSymbols.length - 1]!,
+  };
+};
+
+const createExplicitTypeArgumentNarrowingCase = (nongenericOverloadCount: number) => {
+  const ctx = createModuleContext();
+  const overloadSetId: OverloadSetId = 0;
+  const functionScope = ctx.symbolTable.rootScope as ScopeId;
+  const fakeExpr = (): Expr =>
+    ({ syntaxId: ctx.nextNode(), location: ctx.span } as unknown as Expr);
+  const i32 = () => createNamedType("i32", ctx.nextNode(), ctx.span);
+
+  const overloadSymbols: SymbolId[] = [];
+  for (let index = 0; index < nongenericOverloadCount; index += 1) {
+    const symbol = ctx.symbolTable.declare({
+      name: "pick_by_type_args",
+      kind: "value",
+      declaredAt: ctx.nextNode(),
+    });
+    overloadSymbols.push(symbol);
+
+    const valueParam = ctx.symbolTable.declare({
+      name: `value_${index}`,
+      kind: "parameter",
+      declaredAt: ctx.nextNode(),
+    });
+    const decl = ctx.decls.registerFunction({
+      name: "pick_by_type_args",
+      visibility: moduleVisibility(),
+      symbol,
+      scope: functionScope,
+      params: [{ name: `value_${index}`, symbol: valueParam, ast: undefined }],
+      body: fakeExpr(),
+      moduleIndex: ctx.nextModuleIndex(),
+    });
+
+    ctx.builder.addFunction({
+      kind: "function",
+      visibility: moduleVisibility(),
+      symbol,
+      decl: decl.id,
+      parameters: [
+        {
+          symbol: valueParam,
+          pattern: { kind: "identifier", symbol: valueParam },
+          mutable: false,
+          span: ctx.span,
+          type: i32(),
+        },
+      ],
+      returnType: i32(),
+      body: ctx.createLiteral("i32", `${index}`),
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    });
+  }
+
+  const genericSymbol = ctx.symbolTable.declare({
+    name: "pick_by_type_args",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericTypeParamSymbol = ctx.symbolTable.declare({
+    name: "T",
+    kind: "type",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericValueParam = ctx.symbolTable.declare({
+    name: "value_generic",
+    kind: "parameter",
+    declaredAt: ctx.nextNode(),
+  });
+  const genericDecl = ctx.decls.registerFunction({
+    name: "pick_by_type_args",
+    visibility: moduleVisibility(),
+    symbol: genericSymbol,
+    scope: functionScope,
+    typeParameters: [{ name: "T", symbol: genericTypeParamSymbol }],
+    params: [{ name: "value_generic", symbol: genericValueParam, ast: undefined }],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: moduleVisibility(),
+    symbol: genericSymbol,
+    decl: genericDecl.id,
+    typeParameters: [{ symbol: genericTypeParamSymbol, span: ctx.span }],
+    parameters: [
+      {
+        symbol: genericValueParam,
+        pattern: { kind: "identifier", symbol: genericValueParam },
+        mutable: false,
+        span: ctx.span,
+        type: i32(),
+      },
+    ],
+    returnType: i32(),
+    body: ctx.createLiteral("i32", "42"),
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  overloadSymbols.push(genericSymbol);
+
+  const mainSymbol = ctx.symbolTable.declare({
+    name: "main",
+    kind: "value",
+    declaredAt: ctx.nextNode(),
+  });
+  const callExpr = ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    callee: ctx.builder.addExpression({
+      kind: "expr",
+      exprKind: "overload-set",
+      name: "pick_by_type_args",
+      set: overloadSetId,
+      ast: ctx.nextNode(),
+      span: ctx.span,
+    }),
+    args: [{ expr: ctx.createLiteral("i32", "1") }],
+    typeArguments: [i32()],
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+  const mainDecl = ctx.decls.registerFunction({
+    name: "main",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    scope: functionScope,
+    params: [],
+    body: fakeExpr(),
+    moduleIndex: ctx.nextModuleIndex(),
+  });
+  ctx.builder.addFunction({
+    kind: "function",
+    visibility: packageVisibility(),
+    symbol: mainSymbol,
+    decl: mainDecl.id,
+    parameters: [],
+    returnType: i32(),
+    body: callExpr,
+    ast: ctx.nextNode(),
+    span: ctx.span,
+  });
+
+  return {
+    inputs: {
+      symbolTable: ctx.symbolTable,
+      hir: ctx.builder.finalize(),
+      overloads: new Map<OverloadSetId, readonly SymbolId[]>([
+        [overloadSetId, overloadSymbols],
+      ]),
+      decls: ctx.decls,
+    },
+    callExpr,
+    mainSymbol,
+    selectedSymbol: genericSymbol,
+  };
+};
+
 const createTypeSatisfactionContext = (typeCheckBudget?: TypeCheckBudgetConfig) => {
   const span: SourceSpan = { file: "<test>", start: 0, end: 0 };
   const symbolTable = new SymbolTable({ rootOwner: 0 });
@@ -235,6 +505,44 @@ describe("type-check budgets", () => {
     const typing = runTypingPipeline({
       ...fanout.inputs,
       typeCheckBudget: { maxOverloadCandidates: 18 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("applies expected return narrowing before overload candidate budget checks", () => {
+    const fanout = createReturnTypeNarrowingCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 5 },
+    });
+
+    const callType = typing.table.getExprType(fanout.callExpr);
+    expect(callType).toBeDefined();
+    const callDesc = typing.arena.get(callType!);
+    expect(callDesc).toMatchObject({ kind: "primitive", name: "i32" });
+
+    const callTargets = typing.callTargets.get(fanout.callExpr);
+    expect(callTargets?.get(`${fanout.mainSymbol}<>`)).toEqual({
+      moduleId: "local",
+      symbol: fanout.selectedSymbol,
+    });
+  });
+
+  it("applies explicit type argument narrowing before overload candidate budget checks", () => {
+    const fanout = createExplicitTypeArgumentNarrowingCase(18);
+    const typing = runTypingPipeline({
+      ...fanout.inputs,
+      typeCheckBudget: { maxOverloadCandidates: 5 },
     });
 
     const callType = typing.table.getExprType(fanout.callExpr);
