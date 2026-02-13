@@ -13,12 +13,45 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-
+      - name: Detect changed areas
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cli:
+              - "apps/cli/**"
+              - "packages/sdk/**"
+              - "packages/lib/**"
+              - "packages/std/**"
+              - "packages/compiler/**"
+              - "packages/js-host/**"
+              - "scripts/voyd"
+              - "package-lock.json"
+              - "vite.config.ts"
+              - "vitest.config.ts"
+              - "tsconfig*.json"
+            compiler_semantics:
+              - "packages/compiler/src/semantics/**"
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
       - run: npm run typecheck
       - run: npm run build
-      - run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm test
-      - run: npm run --workspace @voyd/compiler bench:typing
+      - run: VOYD_USE_DIST=1 npm test
+      - name: Run CLI dist e2e
+        if: steps.changes.outputs.cli == 'true'
+        run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd/cli test -- src/__tests__/cli-e2e.test.ts
+      - name: Run typing benchmark
+        if: steps.changes.outputs.compiler_semantics == 'true'
+        run: npm run --workspace @voyd/compiler bench:typing
