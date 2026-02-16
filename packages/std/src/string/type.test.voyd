@@ -1,0 +1,35 @@
+use std::test::assertions::all
+
+test "string lengths for ascii":
+  let value = "hello"
+  assert(value.byte_length(), eq: 5)
+  assert(value.codepoint_length(), eq: 5)
+  assert(value.codepoint_at(1), eq: 101)
+
+test "string lengths for non-bmp":
+  let value = "😀"
+  assert(value.byte_length(), eq: 4)
+  assert(value.codepoint_length(), eq: 1)
+  assert(value.codepoint_at(0), eq: 128512)
+
+test "string lengths for mixed utf8":
+  let value = "a😀b"
+  assert(value.byte_length(), eq: 6)
+  assert(value.codepoint_length(), eq: 3)
+  assert(value.codepoint_at(1), eq: 128512)
+
+  let sliced = value.slice_codepoints(1, 1)
+  assert(sliced.byte_length(), eq: 4)
+  assert(sliced.codepoint_length(), eq: 1)
+  assert(sliced.codepoint_at(0), eq: 128512)
+
+test "string equals compares bytes":
+  assert("hello".equals("hello"), eq: true)
+  assert("hello".equals("hell"), eq: false)
+  assert("😀".equals("😀"), eq: true)
+  assert("😀".equals("😁"), eq: false)
+
+test "string hash matches for identical strings":
+  assert("hello".hash_i32(), eq: "hello".hash_i32())
+  let empty = empty_string()
+  assert(empty.hash_i32(), eq: empty.hash_i32())

@@ -1,5 +1,5 @@
-use self::fns::self as string_fns
-pub use self::types::all
+use self::type::self as string_type
+pub use self::type::{ String }
 
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
-  string_fns::new_string(from_bytes)
+  string_type::new_string(from_bytes)

@@ -1,0 +1,7 @@
+
+pub trait Comparable<T>
+  fn '=='(self, other: T) -> bool
+  fn '>'(self, other: T) -> bool
+  fn '>='(self, other: T) -> bool
+  fn '<'(self, other: T) -> bool
+  fn '<='(self, other: T) -> bool

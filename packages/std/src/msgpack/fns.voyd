@@ -4,8 +4,7 @@ use std::map::Map
 use std::memory::self as memory
 use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 use std::optional::types::all
-use std::string::fns::{ new_string }
-use std::string::types::String
+use std::string::type::{ new_string, String }
 use std::test::assertions::all
 
 @serializer("msgpack", encode_value, decode_value)
@@ -374,8 +373,6 @@ impl Encoder
         self.encode_array(decoded)
       Map<MsgPack>:
         self.encode_map(decoded)
-      else:
-        self.ok = false
 
 impl Decoder
   pub fn init(ptr: i32, len: i32)
