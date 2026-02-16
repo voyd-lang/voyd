@@ -117,10 +117,16 @@ export const registerTypeAliases = (
         `missing or mismatched decl for type alias symbol ${item.symbol}`
       );
     }
-    const typeParams = item.typeParameters ?? decl?.typeParameters ?? [];
+    const typeParams: readonly { symbol: SymbolId; constraint?: HirTypeExpr }[] =
+      item.typeParameters?.map((param) => ({
+        symbol: param.symbol,
+        constraint: param.constraint,
+      })) ??
+      decl?.typeParameters?.map((param) => ({ symbol: param.symbol })) ??
+      [];
     const params = typeParams.map((param) => ({
       symbol: param.symbol,
-      constraint: "constraint" in param ? param.constraint : undefined,
+      constraint: param.constraint,
     }));
     ctx.typeAliases.registerTemplate({
       symbol: item.symbol,
@@ -223,9 +229,32 @@ export const registerFunctionSignatures = (
       typeof fnDecl?.implId === "number"
         ? ctx.decls.getImplById(fnDecl.implId)
         : undefined;
-    const fnTypeParameters =
-      item.typeParameters ?? fnDecl?.typeParameters ?? [];
-    const implTypeParameters = implDecl?.typeParameters ?? [];
+    const implItem = implDecl
+      ? Array.from(ctx.hir.items.values()).find(
+          (entry): entry is HirImplDecl =>
+            entry.kind === "impl" && entry.symbol === implDecl.symbol
+        )
+      : undefined;
+    const fnTypeParameters: readonly {
+      symbol: SymbolId;
+      constraint?: HirTypeExpr;
+    }[] =
+      item.typeParameters?.map((param) => ({
+        symbol: param.symbol,
+        constraint: param.constraint,
+      })) ??
+      fnDecl?.typeParameters?.map((param) => ({ symbol: param.symbol })) ??
+      [];
+    const implTypeParameters: readonly {
+      symbol: SymbolId;
+      constraint?: HirTypeExpr;
+    }[] =
+      implItem?.typeParameters?.map((param) => ({
+        symbol: param.symbol,
+        constraint: param.constraint,
+      })) ??
+      implDecl?.typeParameters?.map((param) => ({ symbol: param.symbol })) ??
+      [];
     const typeParameterDecls = [...fnTypeParameters, ...implTypeParameters];
     const paramMap = new Map<SymbolId, TypeId>();
     const typeParams =
@@ -235,18 +264,26 @@ export const registerFunctionSignatures = (
             const typeParam = ctx.arena.freshTypeParam();
             const typeRef = ctx.arena.internTypeParamRef(typeParam);
             paramMap.set(param.symbol, typeRef);
-            const constraint =
-              "constraint" in param && param.constraint
-                ? resolveTypeExpr(
-                    param.constraint,
-                    ctx,
-                    state,
-                    ctx.primitives.unknown,
-                    paramMap
-                  )
-                : undefined;
-            return { symbol: param.symbol, typeParam, constraint, typeRef };
+            return {
+              symbol: param.symbol,
+              typeParam,
+              typeRef,
+              constraint: undefined as TypeId | undefined,
+            };
           });
+    typeParams?.forEach((param, index) => {
+      const constraintExpr = typeParameterDecls[index]?.constraint;
+      if (!constraintExpr) {
+        return;
+      }
+      param.constraint = resolveTypeExpr(
+        constraintExpr,
+        ctx,
+        state,
+        ctx.primitives.unknown,
+        paramMap
+      );
+    });
 
     if (typeParams && typeParams.length > 0 && !item.returnType) {
       ctx.diagnostics.report(
@@ -370,7 +407,16 @@ export const registerEffectOperations = (
     if (item.kind !== "effect") continue;
 
     const decl = ctx.decls.getEffect(item.symbol);
-    const typeParameterDecls = item.typeParameters ?? decl?.typeParameters ?? [];
+    const typeParameterDecls: readonly {
+      symbol: SymbolId;
+      constraint?: HirTypeExpr;
+    }[] =
+      item.typeParameters?.map((param) => ({
+        symbol: param.symbol,
+        constraint: param.constraint,
+      })) ??
+      decl?.typeParameters?.map((param) => ({ symbol: param.symbol })) ??
+      [];
     const typeParamMap = new Map<SymbolId, TypeId>();
     const typeParams =
       typeParameterDecls.length === 0
@@ -379,17 +425,26 @@ export const registerEffectOperations = (
             const typeParam = ctx.arena.freshTypeParam();
             const typeRef = ctx.arena.internTypeParamRef(typeParam);
             typeParamMap.set(param.symbol, typeRef);
-            const constraint = (param as any).constraint
-              ? resolveTypeExpr(
-                  (param as any).constraint,
-                  ctx,
-                  state,
-                  ctx.primitives.unknown,
-                  typeParamMap
-                )
-              : undefined;
-            return { symbol: param.symbol, typeParam, typeRef, constraint };
+            return {
+              symbol: param.symbol,
+              typeParam,
+              typeRef,
+              constraint: undefined as TypeId | undefined,
+            };
           });
+    typeParams?.forEach((param, index) => {
+      const constraintExpr = typeParameterDecls[index]?.constraint;
+      if (!constraintExpr) {
+        return;
+      }
+      param.constraint = resolveTypeExpr(
+        constraintExpr,
+        ctx,
+        state,
+        ctx.primitives.unknown,
+        typeParamMap
+      );
+    });
     const typeParamMapRef = typeParams ? typeParamMap : undefined;
 
     item.operations.forEach((op) => {
@@ -472,7 +527,16 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       (typeof (item as any).decl === "number"
         ? ctx.decls.getImplById((item as any).decl)
         : undefined);
-    const typeParameterDecls = item.typeParameters ?? decl?.typeParameters ?? [];
+    const typeParameterDecls: readonly {
+      symbol: SymbolId;
+      constraint?: HirTypeExpr;
+    }[] =
+      item.typeParameters?.map((param) => ({
+        symbol: param.symbol,
+        constraint: param.constraint,
+      })) ??
+      decl?.typeParameters?.map((param) => ({ symbol: param.symbol })) ??
+      [];
     const typeParamMap = new Map<SymbolId, TypeId>();
     const typeParams =
       typeParameterDecls.length === 0
@@ -481,18 +545,26 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
             const typeParam = ctx.arena.freshTypeParam();
             const typeRef = ctx.arena.internTypeParamRef(typeParam);
             typeParamMap.set(param.symbol, typeRef);
-            const constraint =
-              "constraint" in param && param.constraint
-                ? resolveTypeExpr(
-                    param.constraint,
-                    ctx,
-                    state,
-                    ctx.primitives.unknown,
-                    typeParamMap
-                  )
-                : undefined;
-            return { symbol: param.symbol, typeParam, typeRef, constraint };
+            return {
+              symbol: param.symbol,
+              typeParam,
+              typeRef,
+              constraint: undefined as TypeId | undefined,
+            };
           });
+    typeParams.forEach((param, index) => {
+      const constraintExpr = typeParameterDecls[index]?.constraint;
+      if (!constraintExpr) {
+        return;
+      }
+      param.constraint = resolveTypeExpr(
+        constraintExpr,
+        ctx,
+        state,
+        ctx.primitives.unknown,
+        typeParamMap
+      );
+    });
     const typeParamMapRef = typeParams.length > 0 ? typeParamMap : undefined;
 
     resolveTypeExpr(

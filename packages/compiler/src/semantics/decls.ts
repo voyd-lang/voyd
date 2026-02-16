@@ -35,6 +35,7 @@ export interface TypeParameterDecl {
   name: string;
   symbol: SymbolId;
   ast?: Syntax;
+  constraint?: Expr;
 }
 
 export type TypeParameterDeclInput = TypeParameterDecl;

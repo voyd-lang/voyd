@@ -8,6 +8,7 @@ import type { ParsedObjectDecl } from "../parsing.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { inheritMemberVisibility } from "../../hir/index.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
+import { bindTypeParameters } from "./type-parameters.js";
 
 export const bindObjectDecl = (
   decl: ParsedObjectDecl,
@@ -43,22 +44,10 @@ export const bindObjectDecl = (
   });
   ctx.scopeByNode.set(decl.form.syntaxId, objectScope);
 
-  const typeParameters: TypeParameterDecl[] = [];
+  let typeParameters: TypeParameterDecl[] = [];
   const fields: ObjectFieldDecl[] = [];
   tracker.enterScope(objectScope, () => {
-    decl.typeParameters.forEach((param) => {
-      rememberSyntax(param, ctx);
-      const paramSymbol = ctx.symbolTable.declare({
-        name: param.value,
-        kind: "type-parameter",
-        declaredAt: param.syntaxId,
-      });
-      typeParameters.push({
-        name: param.value,
-        symbol: paramSymbol,
-        ast: param,
-      });
-    });
+    typeParameters = bindTypeParameters(decl.typeParameters, ctx);
 
     decl.fields.forEach((field) => {
       rememberSyntax(field.ast, ctx);

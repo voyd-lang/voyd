@@ -1,0 +1,9 @@
+obj Animal {
+  id: i32
+}
+
+fn take_animal<T: Animal>(value: T) -> i32
+  1
+
+fn main() -> i32
+  take_animal({ id: 1 })

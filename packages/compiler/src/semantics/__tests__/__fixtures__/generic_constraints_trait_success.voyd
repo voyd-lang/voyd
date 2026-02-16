@@ -1,0 +1,16 @@
+trait Run
+  fn run(self) -> i32
+
+obj Dog {
+  speed: i32
+}
+
+impl Run for Dog
+  fn run(self) -> i32
+    self.speed
+
+fn use_runner<T: Run>(value: T) -> i32
+  value.run()
+
+fn main() -> i32
+  use_runner(Dog { speed: 7 })

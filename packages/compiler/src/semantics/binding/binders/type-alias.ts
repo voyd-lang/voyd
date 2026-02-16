@@ -39,21 +39,9 @@ export const bindTypeAlias = (
   });
   ctx.scopeByNode.set(decl.form.syntaxId, aliasScope);
 
-  const typeParameters: TypeParameterDecl[] = [];
+  let typeParameters: TypeParameterDecl[] = [];
   tracker.enterScope(aliasScope, () => {
-    decl.typeParameters.forEach((param) => {
-      rememberSyntax(param, ctx);
-      const paramSymbol = ctx.symbolTable.declare({
-        name: param.value,
-        kind: "type-parameter",
-        declaredAt: param.syntaxId,
-      });
-      typeParameters.push({
-        name: param.value,
-        symbol: paramSymbol,
-        ast: param,
-      });
-    });
+    typeParameters = bindTypeParameters(decl.typeParameters, ctx);
   });
 
   ctx.decls.registerTypeAlias({

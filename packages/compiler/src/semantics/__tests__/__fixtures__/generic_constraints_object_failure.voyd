@@ -1,0 +1,11 @@
+obj Animal {
+  id: i32
+}
+
+obj Box<T: Animal> {
+  value: T
+}
+
+fn main() -> i32
+  let box = Box<i32> { value: 1 }
+  box.value

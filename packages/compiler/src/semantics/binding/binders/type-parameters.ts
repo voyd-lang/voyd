@@ -1,22 +1,24 @@
-import type { IdentifierAtom } from "../../../parser/index.js";
 import { rememberSyntax } from "../context.js";
 import type { TypeParameterDecl } from "../../decls.js";
 import type { BindingContext } from "../types.js";
+import type { ParsedTypeParameter } from "../parsing.js";
 
 export const bindTypeParameters = (
-  params: readonly IdentifierAtom[],
+  params: readonly ParsedTypeParameter[],
   ctx: BindingContext
 ): TypeParameterDecl[] =>
   params.map((param) => {
-    rememberSyntax(param, ctx);
+    rememberSyntax(param.name, ctx);
+    rememberSyntax(param.constraint, ctx);
     const paramSymbol = ctx.symbolTable.declare({
-      name: param.value,
+      name: param.name.value,
       kind: "type-parameter",
-      declaredAt: param.syntaxId,
+      declaredAt: param.name.syntaxId,
     });
     return {
-      name: param.value,
+      name: param.name.value,
       symbol: paramSymbol,
-      ast: param,
+      ast: param.name,
+      constraint: param.constraint,
     };
   });

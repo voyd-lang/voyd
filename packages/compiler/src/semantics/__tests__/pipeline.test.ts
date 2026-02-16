@@ -591,6 +591,58 @@ describe("semanticsPipeline", () => {
     });
   });
 
+  it("accepts trait-constrained generic function calls", () => {
+    const ast = loadAst("generic_constraints_trait_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects generic function calls when trait constraints are not satisfied", () => {
+    const ast = loadAst("generic_constraints_trait_failure.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /does not satisfy.*constraint/i
+    );
+  });
+
+  it("accepts structural generic constraints", () => {
+    const ast = loadAst("generic_constraints_structural_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects generic function calls when structural constraints are not satisfied", () => {
+    const ast = loadAst("generic_constraints_structural_failure.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /does not satisfy.*constraint/i
+    );
+  });
+
+  it("accepts nominal subtype generic constraints", () => {
+    const ast = loadAst("generic_constraints_nominal_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects generic function calls when nominal subtype constraints are not satisfied", () => {
+    const ast = loadAst("generic_constraints_nominal_failure.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /does not satisfy.*constraint/i
+    );
+  });
+
+  it("applies constraints on non-function declaration generics", () => {
+    const ast = loadAst("generic_constraints_object_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects non-function generic instantiations when constraints fail", () => {
+    const ast = loadAst("generic_constraints_object_failure.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /does not satisfy.*constraint/i
+    );
+  });
+
   it("lowers nominal constructor overloads across modules", () => {
     const animalFixture = "nominal_constructors_cross_module/animal.voyd";
     const mainFixture = "nominal_constructors_cross_module/main.voyd";

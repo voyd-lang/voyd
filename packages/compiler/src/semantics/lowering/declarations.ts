@@ -164,7 +164,11 @@ export const lowerFunctionDecl = (
     visibility: fn.visibility,
     memberVisibility: fn.memberVisibility,
     symbol: fn.symbol,
-    typeParameters: lowerTypeParameters(fn.typeParameters),
+    typeParameters: lowerTypeParameters({
+      params: fn.typeParameters,
+      ctx,
+      scope: currentScope,
+    }),
     ast: (fn.form ?? fn.body).syntaxId,
     span: toSourceSpan(fallbackSyntax),
     parameters,
@@ -205,7 +209,11 @@ export const lowerTypeAliasDecl = (
     visibility: alias.visibility,
     ast: aliasSyntax.syntaxId,
     span: toSourceSpan(aliasSyntax),
-    typeParameters: lowerTypeParameters(alias.typeParameters),
+    typeParameters: lowerTypeParameters({
+      params: alias.typeParameters,
+      ctx,
+      scope: aliasScope,
+    }),
     target,
   });
 
@@ -258,7 +266,11 @@ export const lowerObjectDecl = (
     kind: "object",
     symbol: object.symbol,
     visibility: object.visibility,
-    typeParameters: lowerTypeParameters(object.typeParameters),
+    typeParameters: lowerTypeParameters({
+      params: object.typeParameters,
+      ctx,
+      scope: objectScope,
+    }),
     ast: objectSyntax.syntaxId,
     span: toSourceSpan(objectSyntax),
     base,
@@ -309,7 +321,11 @@ export const lowerTraitDecl = (
     return {
       symbol: method.symbol,
       span: toSourceSpan(method.form ?? trait.form),
-      typeParameters: lowerTypeParameters(method.typeParameters),
+      typeParameters: lowerTypeParameters({
+        params: method.typeParameters,
+        ctx,
+        scope: methodScope,
+      }),
       parameters,
       returnType: lowerTypeExpr(
         method.returnTypeExpr,
@@ -328,7 +344,11 @@ export const lowerTraitDecl = (
     visibility: trait.visibility,
     ast: (traitSyntax as Syntax | undefined)?.syntaxId ?? ctx.moduleNodeId,
     span: toSourceSpan(traitSyntax),
-    typeParameters: lowerTypeParameters(trait.typeParameters),
+    typeParameters: lowerTypeParameters({
+      params: trait.typeParameters,
+      ctx,
+      scope: traitScope,
+    }),
     requirements: undefined,
     methods,
   });
@@ -377,7 +397,11 @@ export const lowerImplDecl = (
     visibility: impl.visibility,
     ast: (syntax as Syntax | undefined)?.syntaxId ?? ctx.moduleNodeId,
     span: toSourceSpan(syntax),
-    typeParameters: lowerTypeParameters(impl.typeParameters),
+    typeParameters: lowerTypeParameters({
+      params: impl.typeParameters,
+      ctx,
+      scope: implScope ?? impl.scope ?? ctx.symbolTable.rootScope,
+    }),
     target,
     trait,
     with: undefined,
@@ -430,7 +454,11 @@ export const lowerEffectDecl = (
     visibility: effect.visibility,
     ast: (effect.form ?? effect.operations[0]?.ast)?.syntaxId ?? ctx.moduleNodeId,
     span: toSourceSpan(effect.form),
-    typeParameters: lowerTypeParameters(effect.typeParameters),
+    typeParameters: lowerTypeParameters({
+      params: effect.typeParameters,
+      ctx,
+      scope: effectScope,
+    }),
     operations,
   });
 
