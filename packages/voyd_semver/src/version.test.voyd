@@ -1,5 +1,5 @@
 use std::test::assertions::all
-use std::string::fns::new_string
+use std::string::type::new_string
 
 test "string init parses strict versions":
   match(Version("1.2.3"))

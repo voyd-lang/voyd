@@ -1,6 +1,6 @@
 use std::optional::all
 use std::iterator::all
-use std::string::types::String
+use std::string::type::String
 
 pub fn parse_non_negative_segment(input: String): () -> Optional<i32>
   var value = 0

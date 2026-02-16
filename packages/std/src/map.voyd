@@ -1,8 +1,7 @@
 use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
 use std::optional::types::all
-use std::string::fns::all
-use std::string::types::all
+use std::string::type::{ String, new_string }
 use std::subscript::{ SubscriptRead, SubscriptWrite }
 use std::test::assertions::all
 

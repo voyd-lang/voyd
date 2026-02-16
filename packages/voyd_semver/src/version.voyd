@@ -1,5 +1,5 @@
 use std::optional::all
-use std::string::types::String
+use std::string::type::String
 use super::parse::{ parse as parse_components }
 
 pub obj Version {

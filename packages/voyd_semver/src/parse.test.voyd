@@ -1,4 +1,5 @@
 use std::test::assertions::all
+use std::string::type::new_string
 
 test "parse accepts strict major minor patch":
   match(parse("0.0.0"))

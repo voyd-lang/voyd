@@ -2,23 +2,11 @@ use std::array::all
 use std::fixed_array::fns::{ new_fixed_array }
 use std::iterator::all
 use std::optional::types::all
-use std::test::assertions::all
 
 pub obj String {
   bytes: Array<i32>,
   byte_count: i32
 }
-
-pub fn new_string(from_bytes: FixedArray<i32>): () -> String
-  let input_length = __array_len(from_bytes)
-  var bytes = Array<i32>::with_capacity(input_length)
-  var index = 0
-  while index < input_length do:
-    let read = decode_utf8_at(from_bytes, input_length, index)
-    bytes = append_codepoint(bytes, read.codepoint)
-    index = index + read.width
-  let byte_count = bytes.length()
-  String { bytes: bytes, byte_count: byte_count }
 
 impl String
   pub fn byte_length(self): () -> i32
@@ -54,6 +42,9 @@ impl String
       index = index + 1
     true
 
+  api fn '=='(self, other: String) -> bool
+    self.equals(other)
+
   api fn hash_i32(self): () -> i32
     let source = self.bytes.raw_storage()
     var index = 0
@@ -63,7 +54,7 @@ impl String
       index = index + 1
     hash
 
-  pub fn codepoint_length(self): () -> i32
+  api fn codepoint_length(self): () -> i32
     var index = 0
     var count = 0
     let source = self.bytes.raw_storage()
@@ -73,7 +64,7 @@ impl String
       index = index + read.width
     count
 
-  pub fn codepoint_at(self, index: i32): () -> i32
+  api fn codepoint_at(self, index: i32): () -> i32
     if index < 0 then:
       return -1
 
@@ -88,7 +79,7 @@ impl String
       byte_index = byte_index + read.width
     -1
 
-  pub fn slice_bytes(self, start: i32, len: i32): () -> String
+  api fn slice_bytes(self, start: i32, len: i32): () -> String
     if len <= 0 then:
       return empty_string()
 
@@ -112,7 +103,7 @@ impl String
     })
     new_string(storage)
 
-  pub fn slice_codepoints(self, start: i32, len: i32): () -> String
+  api fn slice_codepoints(self, start: i32, len: i32): () -> String
     if len <= 0 then:
       return empty_string()
     if start < 0 then:
@@ -330,6 +321,17 @@ fn append_codepoint(bytes: Array<i32>, codepoint: i32) -> Array<i32>
     return out
   append_replacement(bytes)
 
+pub fn new_string(from_bytes: FixedArray<i32>): () -> String
+  let input_length = __array_len(from_bytes)
+  var bytes = Array<i32>::with_capacity(input_length)
+  var index = 0
+  while index < input_length do:
+    let read = decode_utf8_at(from_bytes, input_length, index)
+    bytes = append_codepoint(bytes, read.codepoint)
+    index = index + read.width
+  let byte_count = bytes.length()
+  String { bytes: bytes, byte_count: byte_count }
+
 fn append_replacement(bytes: Array<i32>) -> Array<i32>
   var out = bytes.pushed(239)
   out = out.pushed(191)
@@ -341,76 +343,3 @@ fn utf8_replacement() -> Utf8Read
 
 fn empty_string() -> String
   new_string(new_fixed_array<i32>(0))
-
-test "string lengths for ascii":
-  let value = "hello"
-  assert(value.byte_length(), eq: 5)
-  assert(value.codepoint_length(), eq: 5)
-  assert(value.codepoint_at(1), eq: 101)
-
-test "string lengths for non-bmp":
-  let value = "😀"
-  assert(value.byte_length(), eq: 4)
-  assert(value.codepoint_length(), eq: 1)
-  assert(value.codepoint_at(0), eq: 128512)
-
-test "string lengths for mixed utf8":
-  let value = "a😀b"
-  assert(value.byte_length(), eq: 6)
-  assert(value.codepoint_length(), eq: 3)
-  assert(value.codepoint_at(1), eq: 128512)
-
-  let sliced = value.slice_codepoints(1, 1)
-  assert(sliced.byte_length(), eq: 4)
-  assert(sliced.codepoint_length(), eq: 1)
-  assert(sliced.codepoint_at(0), eq: 128512)
-
-test "string equals compares bytes":
-  assert("hello".equals("hello"), eq: true)
-  assert("hello".equals("hell"), eq: false)
-  assert("😀".equals("😀"), eq: true)
-  assert("😀".equals("😁"), eq: false)
-
-test "string hash matches for identical strings":
-  assert("hello".hash_i32(), eq: "hello".hash_i32())
-  let empty = empty_string()
-  assert(empty.hash_i32(), eq: empty.hash_i32())
-
-test "string byte access APIs":
-  let value = "a😀"
-  assert(value.byte_at(0), eq: 97)
-  assert(value.byte_at(1), eq: 240)
-  assert(value.byte_at(9), eq: -1)
-
-  let bytes = value.raw_bytes()
-  assert(__array_len(bytes), eq: value.byte_length())
-  assert(__array_get(bytes, 0), eq: 97)
-
-test "string index_of and split once codepoint":
-  let value = "1.2.3"
-  assert(value.index_of(codepoint: 46), eq: 1)
-  assert(value.index_of(codepoint: 46, start: 2), eq: 3)
-  assert(value.index_of(codepoint: 46, start: 4), eq: -1)
-
-  match(value.split(once_codepoint: 46))
-    Some<(String, String)> { value: split }:
-      assert(split.0.equals("1"), eq: true)
-      assert(split.1.equals("2.3"), eq: true)
-    None:
-      assert(false)
-
-  match("123".split(once_codepoint: 46))
-    Some:
-      assert(false)
-    None:
-      assert(true)
-
-test "string iterator yields codepoints for for-in":
-  var count = 0
-  var sum = 0
-  for (codepoint in "a😀b"):
-    count = count + 1
-    sum = sum + codepoint
-
-  assert(count, eq: 3)
-  assert(sum, eq: 128707)

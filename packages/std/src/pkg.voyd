@@ -11,8 +11,7 @@ pub std::array::{ Array, ArrayPop, new_array_unchecked }
 pub std::map::{ Map, MapEntry, new_map }
 pub std::iterator::{ Iterable, Iterator, for }
 pub std::subscript::{ Range, SubscriptRead, SubscriptWrite }
-pub std::string::types::{ String }
-pub std::string::fns::{ new_string }
+pub std::string::type::{ String, new_string }
 pub std::box::{ Box }
 pub std::test::assertions::{ Test, assert }
 pub self::vx

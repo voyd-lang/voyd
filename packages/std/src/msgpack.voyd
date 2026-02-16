@@ -2,7 +2,7 @@ use self::fns::self as msgpack_fns
 use self::fns::MsgPack
 use std::array::Array
 use std::map::Map
-use std::string::types::String
+use std::string::type::String
 pub use self::fns::MsgPack
 pub use self::types::{ Binary, Bool, Null, Numeric }
 
