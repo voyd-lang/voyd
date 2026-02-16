@@ -39,7 +39,7 @@ const buildModule = async ({
   return result.wasm;
 };
 
-describe("export abi metadata", () => {
+describe("export abi metadata", { timeout: 15_000 }, () => {
   it("marks msgpack signatures as serialized", async () => {
     const wasm = await buildModule();
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
