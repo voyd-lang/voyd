@@ -35,4 +35,14 @@ describe("diagnostic utilities", () => {
     expect(diagnostic.hints).toBeDefined();
     expect(diagnostic.hints?.[0]?.message).toContain("~");
   });
+
+  it("guides ambiguous overloads toward explicit annotations", () => {
+    const diagnostic = diagnosticFromCode({
+      code: "TY0007",
+      params: { kind: "ambiguous-overload", name: "pick" },
+      span: { file: "file.voyd", start: 0, end: 1 },
+    });
+    expect(diagnostic.hints?.[0]?.message).toContain("type arguments");
+    expect(diagnostic.hints?.[0]?.message).toContain("backtracking");
+  });
 });

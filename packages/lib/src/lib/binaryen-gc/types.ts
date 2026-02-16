@@ -189,5 +189,5 @@ export type AugmentedBinaryen = typeof binaryen & {
     type: TypeRef
   ): ExpressionRef;
   stringToUTF8OnStack(str: string): number;
-  HEAPU32: Uint32Array;
+  HEAPU32?: Uint32Array;
 };

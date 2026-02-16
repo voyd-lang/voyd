@@ -9,6 +9,7 @@ import { analyzeModules, loadModuleGraph, parse } from "@voyd/sdk/compiler";
 import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd/sdk/compiler";
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
+import { resolvePackageDirs } from "./package-dirs.js";
 import { runTests } from "./test-runner.js";
 
 export const exec = () => main().catch(errorHandler);
@@ -55,7 +56,11 @@ async function main() {
   }
 
   if (config.run) {
-    return runWasm(entryPath, roots, config.runBinaryenOptimizationPass);
+    return runVoyd(entryPath, roots, config.runBinaryenOptimizationPass);
+  }
+
+  if (config.runWasm) {
+    return runWasm(entryPath);
   }
 
   if (config.internalTest) {
@@ -105,32 +110,6 @@ const getModuleRoots = ({
     std: resolveStdRoot(),
     pkgDirs: resolvePackageDirs({ srcRoot, additionalPkgDirs }),
   };
-};
-
-const resolvePackageDirs = ({
-  srcRoot,
-  additionalPkgDirs,
-}: {
-  srcRoot: string;
-  additionalPkgDirs: readonly string[];
-}): string[] => {
-  const configured = additionalPkgDirs.map((dir) => resolve(dir));
-  const nodeModules = collectNodeModulesDirs(srcRoot);
-  return Array.from(new Set([...configured, ...nodeModules]));
-};
-
-const collectNodeModulesDirs = (startDir: string): string[] => {
-  const dirs: string[] = [];
-  let current = resolve(startDir);
-  while (true) {
-    dirs.push(join(current, "node_modules"));
-    const parent = dirname(current);
-    if (parent === current) {
-      break;
-    }
-    current = parent;
-  }
-  return dirs;
 };
 
 const failWithDiagnostics = (diagnostics: readonly Diagnostic[]): never => {
@@ -220,7 +199,7 @@ async function emitWasm(
   stdout.write(result.wasm);
 }
 
-async function runWasm(
+async function runVoyd(
   entryPath: string,
   roots: ModuleRoots,
   optimize = false,
@@ -230,6 +209,12 @@ async function runWasm(
   );
 
   const result = await sdk.run({ wasm: compiled.wasm, entryName: "main" });
+  printValue(result);
+}
+
+async function runWasm(entryPath: string) {
+  const wasm = readFileSync(entryPath);
+  const result = await sdk.run({ wasm, entryName: "main" });
   printValue(result);
 }
 

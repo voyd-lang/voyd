@@ -173,6 +173,56 @@ describe("lowering pipeline", () => {
     );
   });
 
+  it("lowers nominal constructor literals with spreads as nominal object literals", () => {
+    const name = "nominal_constructor_spread.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const versionSymbol = symbolTable.resolve("Version", symbolTable.rootScope)!;
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    const mainBlock = hir.expressions.get(mainFn!.body)!;
+    expect(mainBlock.exprKind).toBe("block");
+    const blockExpr = mainBlock as HirBlockExpr;
+    const copyStmt = hir.statements.get(blockExpr.statements[1]!)!;
+    expect(copyStmt.kind).toBe("let");
+    const copyInitializer = hir.expressions.get(
+      (copyStmt as HirLetStatement).initializer
+    )!;
+    expect(copyInitializer.exprKind).toBe("object-literal");
+    const nominalLiteral = copyInitializer as HirObjectLiteralExpr;
+    expect(nominalLiteral.literalKind).toBe("nominal");
+    expect(nominalLiteral.targetSymbol).toBe(versionSymbol);
+    expect(
+      nominalLiteral.entries.some((entry) => entry.kind === "spread")
+    ).toBe(true);
+  });
+
   it("lowers dot calls into method-call expressions", () => {
     const name = "ufcs.voyd";
     const ast = loadAst(name);

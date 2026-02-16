@@ -7,6 +7,7 @@ import type { BindingContext } from "../types.js";
 import type { ParsedObjectDecl } from "../parsing.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { inheritMemberVisibility } from "../../hir/index.js";
+import { reportOverloadNameCollision } from "../name-collisions.js";
 
 export const bindObjectDecl = (
   decl: ParsedObjectDecl,
@@ -21,6 +22,12 @@ export const bindObjectDecl = (
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
+  reportOverloadNameCollision({
+    name: decl.name.value,
+    scope: tracker.current(),
+    syntax: decl.name,
+    ctx,
+  });
 
   const symbol = ctx.symbolTable.declare({
     name: decl.name.value,

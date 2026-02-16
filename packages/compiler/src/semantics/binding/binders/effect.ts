@@ -5,6 +5,7 @@ import type { ParsedEffectDecl, ParsedEffectOperation } from "../parsing.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import type { TypeParameterDecl } from "../../decls.js";
 import { declareValueOrParameter } from "../redefinitions.js";
+import { reportOverloadNameCollision } from "../name-collisions.js";
 
 const declareEffectOperationParams = ({
   op,
@@ -51,6 +52,12 @@ export const bindEffectDecl = (
 ): void => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
+  reportOverloadNameCollision({
+    name: decl.name.value,
+    scope: tracker.current(),
+    syntax: decl.name,
+    ctx,
+  });
   const effectSymbol = ctx.symbolTable.declare(
     {
       name: decl.name.value,

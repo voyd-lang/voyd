@@ -84,7 +84,6 @@ export const codegenProgram = ({
       ...(options.continuationBackend ?? {}),
     },
   };
-  mod.setFeatures(binaryen.Features.All);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, Map<number, FunctionMetadata[]>>();

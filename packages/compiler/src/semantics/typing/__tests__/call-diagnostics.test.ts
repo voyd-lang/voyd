@@ -70,6 +70,45 @@ describe("call diagnostics", () => {
     expect(source.slice(start, end)).toBe("hi");
   });
 
+  it("reports actionable diagnostics when string literal lowering helper is missing", () => {
+    const ast = loadAst("string_literal_missing_new_string_import.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0006");
+    expect(caught.diagnostic.message).toMatch(
+      /import std::string::fns::new_string/i
+    );
+    expect(caught.diagnostic.code).not.toBe("TY9999");
+    expect(caught.diagnostic.span.file).toBe(
+      "string_literal_missing_new_string_import.voyd"
+    );
+
+    const fixturePath = resolve(
+      import.meta.dirname,
+      "..",
+      "..",
+      "__tests__",
+      "__fixtures__",
+      "string_literal_missing_new_string_import.voyd"
+    );
+    const source = readFileSync(fixturePath, "utf8");
+    const { start, end } = caught.diagnostic.span;
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    expect(source.slice(start, end)).toContain("1.2.3");
+  });
+
   it("reports diagnostics for calling a missing method", () => {
     const ast = loadAst("missing_method_call.voyd");
 
@@ -134,5 +173,64 @@ describe("call diagnostics", () => {
     const source = readFileSync(fixturePath, "utf8");
     const { start, end } = caught.diagnostic.span;
     expect(source.slice(start, end)).toBe("true");
+  });
+
+  it("diagnoses labeled constructor calls when only an unlabeled init exists", () => {
+    const ast = loadAst("constructor_call_labeled_requires_labeled_init.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0021");
+    expect(caught.diagnostic.message).toMatch(/label mismatch/i);
+    expect(caught.diagnostic.message).toMatch(/expected no label, got major/i);
+  });
+
+  it("diagnoses unlabeled constructor calls when only a labeled init exists", () => {
+    const ast = loadAst("constructor_call_unlabeled_requires_unlabeled_init.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0021");
+    expect(caught.diagnostic.message).toMatch(/label mismatch/i);
+    expect(caught.diagnostic.message).toMatch(/expected major, got no label/i);
+  });
+
+  it("diagnoses constructor calls on types without value constructors", () => {
+    const ast = loadAst("constructor_call_without_init.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0041");
+    expect(caught.diagnostic.message).toMatch(/is a type, not a value/i);
   });
 });

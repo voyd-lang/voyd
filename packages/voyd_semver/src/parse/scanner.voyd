@@ -1,0 +1,31 @@
+use std::optional::all
+use std::iterator::all
+use std::string::type::String
+
+pub fn parse_non_negative_segment(input: String): () -> Optional<i32>
+  var value = 0
+  var digit_count = 0
+  var leading_zero = false
+
+  let bytes = input.byte_values()
+  for (byte in bytes):
+    if byte < 48 or byte > 57 then:
+      return none<i32>()
+
+    let digit = byte - 48
+    if digit_count == 0 then:
+      leading_zero = digit == 0
+    if digit_count > 0 and leading_zero then:
+      return none<i32>()
+
+    if value > 214748364 then:
+      return none<i32>()
+    if value == 214748364 and digit > 7 then:
+      return none<i32>()
+
+    value = value * 10 + digit
+    digit_count = digit_count + 1
+
+  if digit_count == 0 then:
+    return none<i32>()
+  some(value)

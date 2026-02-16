@@ -13,6 +13,7 @@ import {
   type ModuleRoots,
 } from "@voyd/sdk/compiler";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
+import { resolvePackageDirs } from "./package-dirs.js";
 
 const sdk = createSdk();
 
@@ -102,32 +103,6 @@ const resolveRoots = (
       }),
     },
   };
-};
-
-const resolvePackageDirs = ({
-  srcRoot,
-  additionalPkgDirs,
-}: {
-  srcRoot: string;
-  additionalPkgDirs: readonly string[];
-}): string[] => {
-  const configured = additionalPkgDirs.map((dir) => resolve(dir));
-  const nodeModules = collectNodeModulesDirs(srcRoot);
-  return Array.from(new Set([...configured, ...nodeModules]));
-};
-
-const collectNodeModulesDirs = (startDir: string): string[] => {
-  const dirs: string[] = [];
-  let current = resolve(startDir);
-  while (true) {
-    dirs.push(join(current, "node_modules"));
-    const parent = dirname(current);
-    if (parent === current) {
-      break;
-    }
-    current = parent;
-  }
-  return dirs;
 };
 
 const isWithinRoot = (root: string, target: string): boolean => {

@@ -37,7 +37,14 @@ type DiagnosticParamsMap = {
         moduleId: string;
         target: string;
         owner?: string;
-      };
+      }
+    | {
+        kind: "import-name-conflict";
+        name: string;
+        incomingKind: string;
+        existingKind: string;
+      }
+    | { kind: "previous-import-name-conflict" };
   BD0002:
     | {
         kind: "duplicate-overload";
@@ -98,7 +105,9 @@ type DiagnosticParamsMap = {
     | { kind: "immutable-object"; binding: string; reason: string }
     | { kind: "binding-declaration"; binding: string };
   TY0005: { kind: "not-callable" };
-  TY0006: { kind: "unknown-function"; name: string };
+  TY0006:
+    | { kind: "unknown-function"; name: string }
+    | { kind: "missing-string-helper"; name: "new_string" };
   TY0007: { kind: "ambiguous-overload"; name: string };
   TY0008: { kind: "no-overload"; name: string };
   TY0009: {
@@ -145,6 +154,12 @@ type DiagnosticParamsMap = {
   TY0021:
     | { kind: "call-missing-argument"; paramName: string }
     | { kind: "call-missing-labeled-argument"; label: string }
+    | {
+        kind: "call-argument-label-mismatch";
+        argumentIndex: number;
+        expectedLabel?: string;
+        actualLabel?: string;
+      }
     | { kind: "call-extra-arguments"; extra: number };
   TY0022: { kind: "unknown-method"; name: string; receiver?: string };
   TY0023: { kind: "array-literal-empty" };
@@ -192,6 +207,21 @@ type DiagnosticParamsMap = {
     armIndex: number;
     patternLabel: string;
   };
+  TY0040: {
+    kind: "typecheck-unify-budget-exceeded";
+    maxSteps: number;
+    observedSteps: number;
+  };
+  TY0041: {
+    kind: "symbol-not-a-value";
+    name: string;
+    symbolKind: string;
+  } | {
+    kind: "overload-candidate-budget-exceeded";
+    name: string;
+    candidates: number;
+    maxCandidates: number;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -224,6 +254,10 @@ export const diagnosticsRegistry: {
           const ownerPrefix = params.owner ? `${params.owner}::` : "";
           return `Cannot import ${params.target} from ${params.moduleId}; ${ownerPrefix}${params.target} is an instance member and must be accessed through its type`;
         }
+        case "import-name-conflict":
+          return `Cannot import ${params.name} as ${params.incomingKind}; ${params.name} is already bound as ${params.existingKind} in this scope`;
+        case "previous-import-name-conflict":
+          return "previous conflicting import binding is here";
       }
       return exhaustive(params);
     },
@@ -381,7 +415,10 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0005"]>,
   TY0006: {
     code: "TY0006",
-    message: (params) => `function '${params.name}' is not defined`,
+    message: (params) =>
+      params.kind === "unknown-function"
+        ? `function '${params.name}' is not defined`
+        : "function 'new_string' is not defined; import std::string::fns::new_string",
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0006"]>,
@@ -390,6 +427,12 @@ export const diagnosticsRegistry: {
     message: (params) => `ambiguous overload for ${params.name}`,
     severity: "error",
     phase: "typing",
+    hints: [
+      {
+        message:
+          "Add explicit type arguments or annotate the expected type to disambiguate; the compiler will not perform global backtracking.",
+      },
+    ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0007"]>,
   TY0008: {
     code: "TY0008",
@@ -512,6 +555,11 @@ export const diagnosticsRegistry: {
           return `missing required call argument for ${params.paramName}`;
         case "call-missing-labeled-argument":
           return `missing required labeled call argument ${params.label}`;
+        case "call-argument-label-mismatch": {
+          const expected = params.expectedLabel ?? "no label";
+          const actual = params.actualLabel ?? "no label";
+          return `call argument ${params.argumentIndex} label mismatch: expected ${expected}, got ${actual}`;
+        }
         case "call-extra-arguments":
           return `call has ${params.extra} extra argument(s)`;
       }
@@ -697,6 +745,38 @@ export const diagnosticsRegistry: {
     severity: "warning",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0039"]>,
+  TY0040: {
+    code: "TY0040",
+    message: (params) =>
+      `type-check unification budget exceeded (${params.observedSteps}/${params.maxSteps} steps)`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Simplify deeply nested unions/intersections or add type annotations to reduce inference work.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0040"]>,
+  TY0041: {
+    code: "TY0041",
+    message: (params) =>
+      params.kind === "symbol-not-a-value"
+        ? `symbol '${params.name}' is a ${params.symbolKind}, not a value`
+        : `overload resolution for ${params.name} considered ${params.candidates} candidates (budget: ${params.maxCandidates})`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Type aliases cannot be constructed as values; for structural aliases use '{ ... }', and for nominal construction use an object type value.",
+      },
+      {
+        message:
+          "Split broad overload sets and add explicit type arguments or expected-type annotations instead of relying on global inference.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0041"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

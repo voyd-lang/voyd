@@ -251,7 +251,13 @@ export const arrayCopy = (
 /** Returns a pointer to the allocated array */
 const allocU32Array = (u32s: number[]): number => {
   const ptr = bin._malloc(u32s.length << 2);
-  bin.HEAPU32.set(u32s, ptr >>> 2);
+  if (bin.HEAPU32) {
+    bin.HEAPU32.set(u32s, ptr >>> 2);
+  } else {
+    u32s.forEach((value, index) => {
+      bin.__i32_store(ptr + (index << 2), value >>> 0);
+    });
+  }
   return ptr;
 };
 

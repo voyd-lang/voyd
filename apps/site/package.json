@@ -21,7 +21,7 @@
     "@voyd/lib": "*",
     "@voyd/reference": "*",
     "@voyd/sdk": "*",
-    "binaryen": "^123.0.0",
+    "binaryen": "^125.0.0",
     "isbot": "^5.1.27",
     "modern-monaco": "^0.1.8",
     "monaco-editor-core": "^0.52.2",

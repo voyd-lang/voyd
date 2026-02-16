@@ -17,7 +17,6 @@ import {
 } from "../../utils.js";
 import { diagnosticFromCode } from "../../../diagnostics/index.js";
 import { rememberSyntax } from "../context.js";
-import { reportOverloadNameCollision } from "../overloads.js";
 import { declareValueOrParameter } from "../redefinitions.js";
 import type { BindingContext } from "../types.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
@@ -272,12 +271,6 @@ const bindMatch = (
 
     if (hasBinder) {
       rememberSyntax(potentialBinder as Syntax, ctx);
-      reportOverloadNameCollision(
-        potentialBinder.value,
-        matchScope,
-        potentialBinder,
-        ctx,
-      );
       declareValueOrParameter({
         name: potentialBinder.value,
         kind: "value",
@@ -398,7 +391,6 @@ const declareLambdaParam = (
 
   if (isIdentifierAtom(param)) {
     rememberSyntax(param, ctx);
-    reportOverloadNameCollision(param.value, scope, param, ctx);
     declareValueOrParameter({
       name: param.value,
       kind: "parameter",
@@ -418,7 +410,6 @@ const declareLambdaParam = (
       throw new Error("lambda parameter name must be an identifier");
     }
     rememberSyntax(target, ctx);
-    reportOverloadNameCollision(target.value, scope, target, ctx);
     declareValueOrParameter({
       name: target.value,
       kind: "parameter",
@@ -440,7 +431,6 @@ const declareLambdaParam = (
     }
     rememberSyntax(target, ctx);
     rememberSyntax(param.at(2) as Syntax, ctx);
-    reportOverloadNameCollision(target.value, scope, param, ctx);
     declareValueOrParameter({
       name: target.value,
       kind: "parameter",
@@ -955,7 +945,6 @@ const declarePatternBindings = (
     const declarationSpan =
       options.declarationSpan ?? toSourceSpan(basePattern);
     rememberSyntax(basePattern, ctx);
-    reportOverloadNameCollision(basePattern.value, scope, basePattern, ctx);
     declareValueOrParameter({
       name: basePattern.value,
       kind: "value",
@@ -1039,7 +1028,6 @@ const declarePatternBindings = (
     rememberSyntax(typeExpr as Syntax, ctx);
     if (isIdentifierAtom(target)) {
       rememberSyntax(target as Syntax, ctx);
-      reportOverloadNameCollision(target.value, scope, basePattern, ctx);
       declareValueOrParameter({
         name: target.value,
         kind: "value",

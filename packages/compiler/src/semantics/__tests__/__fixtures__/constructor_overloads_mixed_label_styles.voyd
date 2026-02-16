@@ -1,0 +1,17 @@
+obj Version {
+  major: i32,
+  minor: i32,
+  patch: i32
+}
+
+impl Version
+  fn init(major: i32, minor: i32, patch: i32) -> Version
+    Version { major, minor, patch }
+
+  fn init({ major: i32, minor: i32, patch: i32 }) -> Version
+    Version { major, minor, patch }
+
+pub fn main() -> i32
+  let a = Version(1, 2, 3)
+  let b = Version(major: 1, minor: 2, patch: 3)
+  a.major + b.major

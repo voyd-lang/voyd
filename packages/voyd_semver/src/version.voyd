@@ -1,0 +1,75 @@
+use std::optional::all
+use std::string::type::String
+use super::parse::{ parse as parse_components }
+
+pub obj Version {
+  api major: i32,
+  api minor: i32,
+  api patch: i32
+}
+
+impl Version
+  api fn init(major: i32, minor: i32, patch: i32)
+    Version { major, minor, patch }
+
+  api fn init(version_text: String): () -> Optional<Version>
+    parse(version_text)
+
+  api fn bump_major(self) -> Version
+    Version(self.major + 1, 0, 0)
+
+  api fn bump_minor(self) -> Version
+    Version(self.major, self.minor + 1, 0)
+
+  api fn bump_patch(self) -> Version
+    Version(self.major, self.minor, self.patch + 1)
+
+  api fn compare(self: Version, right: Version) -> i32
+    if
+      self.major < right.major: -1
+      self.major > right.major: 1
+      self.minor < right.minor: -1
+      self.minor > right.minor: 1
+      self.patch < right.patch: -1
+      self.patch > right.patch: 1
+      else: 0
+
+  api fn '=='(self, right: Version) -> bool
+    self.compare(right) == 0
+
+  api fn '<'(self, right: Version) -> bool
+    self.compare(right) < 0
+
+  api fn '<='(self, right: Version) -> bool
+    self.compare(right) <= 0
+
+  api fn '>'(self, right: Version) -> bool
+    self.compare(right) > 0
+
+  api fn '>='(self, right: Version) -> bool
+    self.compare(right) >= 0
+
+pub fn new_version(major: i32, minor: i32, patch: i32) -> Version
+  Version(major, minor, patch)
+
+pub fn parse(input: String): () -> Optional<Version>
+  match(parse_components(input))
+    Some { value: parsed }:
+      some(Version(parsed.major, parsed.minor, parsed.patch))
+    None:
+      none<Version>()
+
+pub fn eq(left: Version, right: Version) -> bool
+  left == right
+
+pub fn lt(left: Version, right: Version) -> bool
+  left < right
+
+pub fn lte(left: Version, right: Version) -> bool
+  left <= right
+
+pub fn gt(left: Version, right: Version) -> bool
+  left > right
+
+pub fn gte(left: Version, right: Version) -> bool
+  left >= right

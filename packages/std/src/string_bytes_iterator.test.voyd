@@ -1,0 +1,19 @@
+use std::all
+
+test "string byte_values iterates utf8 bytes":
+  let values = "a😀".byte_values()
+  let ~iterator = values.iterate()
+  var count = 0
+  var sum = 0
+
+  while true do:
+    let next = iterator.next()
+    match(next)
+      Some<i32> { value }:
+        count = count + 1
+        sum = sum + value
+      None:
+        break
+
+  assert(count, eq: 5)
+  assert(sum, eq: 776)
