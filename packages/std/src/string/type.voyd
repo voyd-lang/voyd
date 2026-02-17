@@ -1,8 +1,9 @@
-use std::array::all
+use std::array::{ Array, new_array_unchecked }
 use std::fixed_array::fns::{ new_fixed_array }
 use std::iterator::all
-use std::optional::types::all
+use std::optional::all
 use std::result::types::all
+use std::subscript::{ Range }
 
 pub obj String {
   bytes: Array<i32>,
@@ -11,6 +12,7 @@ pub obj String {
 
 pub type StringSlice = String
 pub type StringIndex = i32
+pub type CharSet = Array<i32>
 
 pub obj Utf8Error {
   api code: i32
@@ -25,6 +27,16 @@ pub obj ParseFloatError {
 }
 
 impl String
+  api fn init() -> String
+    empty_string()
+
+  api fn with_capacity({ bytes _capacity: i32 }) -> String
+    let capacity = if _capacity > 0 then: _capacity else: 0
+    String { bytes: Array<i32>::with_capacity(capacity), byte_count: 0 }
+
+  api fn from_utf8({ bytes source: Array<i32> }) -> Result<String, Utf8Error>
+    from_utf8(bytes: source)
+
   pub fn byte_length(self): () -> i32
     self.byte_count
 
@@ -33,6 +45,18 @@ impl String
 
   api fn rune_len(self): () -> i32
     self.codepoint_length()
+
+  api fn grapheme_len(self) -> i32
+    let source = self.raw_bytes()
+    var index = 0
+    var count = 0
+    while index < self.byte_count do:
+      index = next_grapheme_boundary(source, self.byte_count, index)
+      count = count + 1
+    count
+
+  api fn is_empty(self) -> bool
+    self.byte_count == 0
 
   api fn to_utf8(self): () -> Array<i32>
     self.byte_values()
@@ -46,8 +70,36 @@ impl String
   api fn end_index(self): () -> StringIndex
     self.byte_count
 
+  api fn slice(self, { range: Range }) -> StringSlice
+    let source = self.raw_bytes()
+    let start = clamp_index_to_rune_boundary(source, self.byte_count, normalize_range_start(range, self.byte_count))
+    let end =
+      clamp_index_to_rune_boundary(
+        source,
+        self.byte_count,
+        normalize_range_end_exclusive(range, self.byte_count)
+      )
+    if start >= end then:
+      return empty_string()
+    self.slice_bytes(start, end - start)
+
+  api fn index(self, { after cursor: StringIndex, by steps?: i32 }) -> Option<StringIndex>
+    let delta = steps ?? 1
+    advance_rune_index(self, cursor, delta)
+
+  api fn grapheme_index(self, { after cursor: StringIndex, by steps?: i32 }) -> Option<StringIndex>
+    let delta = steps ?? 1
+    advance_grapheme_index(self, cursor, delta)
+
+  api fn graphemes(self) -> StringGraphemeSequence
+    StringGraphemeSequence { source: self }
+
   api fn byte_values(self): () -> Array<i32>
-    new_array_unchecked(from: self.raw_bytes())
+    match(Array<i32>::from(self.raw_bytes()))
+      Some<Array<i32>> { value }:
+        value
+      None:
+        Array<i32>::init()
 
   api fn byte_at(self, index: i32): () -> i32
     if index < 0 then:
@@ -203,6 +255,70 @@ impl String
       index = index + read.width
     -1
 
+  api fn starts_with(self, { prefix: StringSlice }) -> bool
+    if prefix.byte_len() > self.byte_count then:
+      return false
+    bytes_match_at(self.raw_bytes(), prefix.raw_bytes(), 0, prefix.byte_len())
+
+  api fn ends_with(self, { suffix: StringSlice }) -> bool
+    let suffix_len = suffix.byte_len()
+    if suffix_len > self.byte_count then:
+      return false
+    let start = self.byte_count - suffix_len
+    bytes_match_at(self.raw_bytes(), suffix.raw_bytes(), start, suffix_len)
+
+  api fn contains(self, { substring: StringSlice }) -> bool
+    match(self.find(substring: substring))
+      Some<StringIndex>:
+        true
+      None:
+        false
+
+  api fn contains(self, { where pred: (rune: i32) -> bool }) -> bool
+    let source = self.raw_bytes()
+    var index = 0
+    while index < self.byte_count do:
+      let read = decode_utf8_at(source, self.byte_count, index)
+      if pred(read.codepoint) then:
+        return true
+      index = index + read.width
+    false
+
+  api fn find(self, { substring: StringSlice, from?: StringIndex }) -> Option<StringIndex>
+    let start = from ?? self.start_index()
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start) then:
+      return None {}
+    let match_index = find_substring_from(self, substring, start)
+    if match_index < 0 then:
+      return None {}
+    Some<StringIndex> { value: match_index }
+
+  api fn rfind(self, { substring: StringSlice, to?: StringIndex }) -> Option<StringIndex>
+    let end = to ?? self.end_index()
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), end) then:
+      return None {}
+    let match_index = find_substring_to(self, substring, end)
+    if match_index < 0 then:
+      return None {}
+    Some<StringIndex> { value: match_index }
+
+  api fn find_range(self, { substring: StringSlice, from?: StringIndex }) -> Option<Range>
+    let start = from ?? self.start_index()
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start) then:
+      return None {}
+    let match_index = find_substring_from(self, substring, start)
+    if match_index < 0 then:
+      return None {}
+
+    let end = match_index + substring.byte_len()
+    Some<Range> {
+      value: Range {
+        start: Some<i32> { value: match_index },
+        end: Some<i32> { value: end },
+        include_end: false
+      }
+    }
+
   api fn split(self, { once_codepoint: i32 }): () -> Optional<(String, String)>
     let separator_index = self.index_of(codepoint: once_codepoint)
     if separator_index < 0 then:
@@ -215,26 +331,120 @@ impl String
     let right = self.slice_bytes(right_start, self.byte_count - right_start)
     Some { value: (left, right) }
 
+  api fn split(
+    self,
+    { on separator: i32, max_splits?: i32, keep_empty?: bool }
+  ) -> Array<StringSlice>
+    self.split(where: (r: i32) -> bool => r == separator, max_splits: max_splits, keep_empty: keep_empty)
+
+  api fn split(
+    self,
+    { on separator: StringSlice, max_splits?: i32, keep_empty?: bool }
+  ) -> Array<StringSlice>
+    split_on_substring(self, separator, max_splits: max_splits, keep_empty: keep_empty)
+
+  api fn split(
+    self,
+    { where pred: (rune: i32) -> bool, max_splits?: i32, keep_empty?: bool }
+  ) -> Array<StringSlice>
+    let allow_empty = keep_empty ?? false
+    let limit = max_splits ?? -1
+    let source = self.raw_bytes()
+    let ~parts = Array<StringSlice>::with_capacity(4)
+    var start = 0
+    var index = 0
+    var splits = 0
+    while index < self.byte_count do:
+      let read = decode_utf8_at(source, self.byte_count, index)
+      let can_split = limit < 0 or splits < limit
+      if can_split and pred(read.codepoint) then:
+        let length = index - start
+        if allow_empty or length > 0 then:
+          parts.push(self.slice_bytes(start, length))
+        start = index + read.width
+        splits = splits + 1
+      index = index + read.width
+
+    let tail_len = self.byte_count - start
+    if allow_empty or tail_len > 0 then:
+      parts.push(self.slice_bytes(start, tail_len))
+    parts
+
+  api fn lines(self, { keep_ends?: bool }) -> Array<StringSlice>
+    let include_ends = keep_ends ?? false
+    let source = self.raw_bytes()
+    let ~parts = Array<StringSlice>::with_capacity(4)
+    var start = 0
+    var index = 0
+    while index < self.byte_count do:
+      let read = decode_utf8_at(source, self.byte_count, index)
+      if read.codepoint == 10 then:
+        let boundary = if include_ends then: index + read.width else: index
+        parts.push(self.slice_bytes(start, boundary - start))
+        start = index + read.width
+      index = index + read.width
+
+    if start < self.byte_count then:
+      parts.push(self.slice_bytes(start, self.byte_count - start))
+    elif: self.byte_count == 0 then:
+      parts.push(empty_string())
+    parts
+
+  api fn words(self) -> Array<StringSlice>
+    let source = self.raw_bytes()
+    let ~parts = Array<StringSlice>::with_capacity(4)
+    var start = -1
+    var index = 0
+    while index < self.byte_count do:
+      let read = decode_utf8_at(source, self.byte_count, index)
+      if is_whitespace_rune(read.codepoint) then:
+        if start >= 0 then:
+          parts.push(self.slice_bytes(start, index - start))
+          start = -1
+      else:
+        if start < 0 then:
+          start = index
+      index = index + read.width
+
+    if start >= 0 then:
+      parts.push(self.slice_bytes(start, self.byte_count - start))
+    parts
+
   api fn trimmed(self): () -> String
+    self.trimmed(chars: whitespace_charset())
+
+  api fn trimmed(self, { chars: CharSet }) -> String
     if self.byte_count == 0 then:
       return self
 
-    let source = self.bytes.raw_storage()
+    let source = self.raw_bytes()
     var start = 0
-    while start < self.byte_count and is_trim_byte(__array_get(source, start)) do:
-      start = start + 1
+    while start < self.byte_count do:
+      let read = decode_utf8_at(source, self.byte_count, start)
+      if not rune_in_charset(chars, read.codepoint) then:
+        break
+      start = start + read.width
 
     if start >= self.byte_count then:
       return empty_string()
 
-    var end = self.byte_count - 1
-    while end >= start and is_trim_byte(__array_get(source, end)) do:
-      end = end - 1
+    var end = self.byte_count
+    while end > start do:
+      let prev = previous_rune_boundary(source, end)
+      let read = decode_utf8_at(source, self.byte_count, prev)
+      if not rune_in_charset(chars, read.codepoint) then:
+        break
+      end = prev
 
-    self.slice_bytes(start, end - start + 1)
+    self.slice_bytes(start, end - start)
 
   api fn trim(~self) -> void
     let next = self.trimmed()
+    self.bytes = next.bytes
+    self.byte_count = next.byte_count
+
+  api fn trim(~self, { chars: CharSet }) -> void
+    let next = self.trimmed(chars: chars)
     self.bytes = next.bytes
     self.byte_count = next.byte_count
 
@@ -305,6 +515,12 @@ impl String
         index = index + 1
     new_string(out.to_fixed_array())
 
+  api fn replaced(
+    self,
+    { old: StringSlice, with replacement: StringSlice, max_replacements?: i32 }
+  ) -> String
+    self.replaced(old, with: replacement, max_replacements: max_replacements)
+
   api fn replace(
     ~self,
     old: String,
@@ -313,6 +529,55 @@ impl String
     let next = self.replaced(old, with: replacement, max_replacements: max_replacements)
     self.bytes = next.bytes
     self.byte_count = next.byte_count
+
+  api fn replace(
+    ~self,
+    { old: StringSlice, with replacement: StringSlice, max_replacements?: i32 }
+  ) -> void
+    self.replace(old, with: replacement, max_replacements: max_replacements)
+
+  api fn repeat(self, { count: i32 }) -> String
+    if count <= 0 then:
+      return empty_string()
+    if self.byte_count == 0 then:
+      return self
+
+    let capacity = self.byte_count * count
+    let ~out = Array<i32>::with_capacity(capacity)
+    let source = self.raw_bytes()
+    var times = 0
+    while times < count do:
+      append_bytes(out, source, self.byte_count)
+      times = times + 1
+    new_string(out.to_fixed_array())
+
+  api fn pad_left(self, { width: i32, with?: i32 }) -> String
+    let pad_rune = with ?? 32
+    let needed = width - self.rune_len()
+    if needed <= 0 then:
+      return self
+
+    let ~bytes = Array<i32>::with_capacity(self.byte_count + needed * 4)
+    var index = 0
+    while index < needed do:
+      append_codepoint_mut(bytes, pad_rune)
+      index = index + 1
+    append_bytes(bytes, self.raw_bytes(), self.byte_count)
+    new_string(bytes.to_fixed_array())
+
+  api fn pad_right(self, { width: i32, with?: i32 }) -> String
+    let pad_rune = with ?? 32
+    let needed = width - self.rune_len()
+    if needed <= 0 then:
+      return self
+
+    let ~bytes = Array<i32>::with_capacity(self.byte_count + needed * 4)
+    append_bytes(bytes, self.raw_bytes(), self.byte_count)
+    var index = 0
+    while index < needed do:
+      append_codepoint_mut(bytes, pad_rune)
+      index = index + 1
+    new_string(bytes.to_fixed_array())
 
   api fn parse_int(self, { radix?: i32 }): () -> Result<i32, ParseIntError>
     let base = match(radix)
@@ -350,11 +615,91 @@ impl String
     Ok<i32> { value: value * sign }
 
   api fn parse_float(self): () -> Result<f64, ParseFloatError>
-    if self.equals("0.0") then:
-      return Ok<f64> { value: 0.0 }
-    if self.equals("1.0") then:
-      return Ok<f64> { value: 1.0 }
-    Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+    if self.byte_count == 0 then:
+      return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+
+    let source = self.raw_bytes()
+    var index = 0
+    var sign = 1.0
+    let first = __array_get(source, 0)
+    if first == 45 then:
+      sign = -1.0
+      index = 1
+    elif: first == 43 then:
+      index = 1
+
+    if index >= self.byte_count then:
+      return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+
+    var int_part = 0.0
+    var saw_digit = false
+    while index < self.byte_count do:
+      let digit = parse_digit(__array_get(source, index))
+      if digit < 0 or digit > 9 then:
+        break
+      int_part = int_part * 10.0 + digit_to_f64(digit)
+      saw_digit = true
+      index = index + 1
+
+    var frac_part = 0.0
+    var frac_scale = 1.0
+    if index < self.byte_count and __array_get(source, index) == 46 then:
+      index = index + 1
+      while index < self.byte_count do:
+        let digit = parse_digit(__array_get(source, index))
+        if digit < 0 or digit > 9 then:
+          break
+        frac_part = frac_part * 10.0 + digit_to_f64(digit)
+        frac_scale = frac_scale * 10.0
+        saw_digit = true
+        index = index + 1
+
+    if not saw_digit then:
+      return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+
+    var exponent = 0
+    var exponent_sign = 1
+    if index < self.byte_count then:
+      let exp_marker = __array_get(source, index)
+      if exp_marker == 101 or exp_marker == 69 then:
+        index = index + 1
+        if index >= self.byte_count then:
+          return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+
+        let exp_sign_byte = __array_get(source, index)
+        if exp_sign_byte == 45 then:
+          exponent_sign = -1
+          index = index + 1
+        elif: exp_sign_byte == 43 then:
+          index = index + 1
+
+        if index >= self.byte_count then:
+          return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+
+        var saw_exp_digit = false
+        while index < self.byte_count do:
+          let digit = parse_digit(__array_get(source, index))
+          if digit < 0 or digit > 9 then:
+            break
+          exponent = exponent * 10 + digit
+          saw_exp_digit = true
+          index = index + 1
+
+        if not saw_exp_digit then:
+          return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+
+    if index != self.byte_count then:
+      return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+
+    let base = int_part + frac_part / frac_scale
+    let pow = pow10_i32(exponent_sign * exponent)
+    Ok<f64> { value: sign * base * pow }
+
+  api fn to_debug(self) -> String
+    build_escaped(self, false)
+
+  api fn to_repr(self) -> String
+    build_escaped(self, true)
 
 obj Utf8Read {
   api codepoint: i32,
@@ -364,6 +709,15 @@ obj Utf8Read {
 obj StringIterator {
   source: FixedArray<i32>,
   byte_count: i32,
+  index: i32
+}
+
+obj StringGraphemeSequence {
+  source: String
+}
+
+obj StringGraphemeIterator {
+  source: String,
   index: i32
 }
 
@@ -382,6 +736,18 @@ impl Iterator<i32> for StringIterator
     let read = decode_utf8_at(self.source, self.byte_count, self.index)
     self.index = self.index + read.width
     Some<i32> { value: read.codepoint }
+
+impl Sequence<StringSlice> for StringGraphemeSequence
+  api fn iter(self) -> Iterator<StringSlice>
+    StringGraphemeIterator { source: self.source, index: 0 }
+
+impl Iterator<StringSlice> for StringGraphemeIterator
+  api fn next(~self) -> Option<StringSlice>
+    if self.index >= self.source.byte_len() then:
+      return None {}
+    let start = self.index
+    self.index = next_grapheme_boundary(self.source.raw_bytes(), self.source.byte_len(), self.index)
+    Some<StringSlice> { value: self.source.slice_bytes(start, self.index - start) }
 
 fn decode_utf8_at(source: FixedArray<i32>, limit: i32, index: i32) -> Utf8Read
   if index < 0 then:
@@ -463,8 +829,234 @@ fn valid_four_byte_lead(b0: i32, b1: i32, b2: i32, b3: i32) -> bool
     return false
   true
 
+fn whitespace_charset() -> CharSet
+  [32, 9, 10, 13]
+
 fn is_trim_byte(value: i32) -> bool
   value == 32 or value == 9 or value == 10 or value == 13
+
+fn rune_in_charset(chars: CharSet, rune: i32) -> bool
+  chars.contains(rune)
+
+fn is_whitespace_rune(rune: i32) -> bool
+  rune == 32 or rune == 9 or rune == 10 or rune == 13
+
+fn normalize_range_start(range: Range, length: i32) -> i32
+  match(range.start)
+    Some<i32> { value }:
+      clamp_slice_index(value, length)
+    None:
+      0
+
+fn normalize_range_end_exclusive(range: Range, length: i32) -> i32
+  match(range.end)
+    Some<i32> { value }:
+      let clamped = clamp_slice_index(value, length)
+      if not range.include_end then:
+        return clamped
+      if clamped >= length then:
+        return length
+      clamped + 1
+    None:
+      length
+
+fn clamp_slice_index(index: i32, length: i32) -> i32
+  if index < 0 then:
+    return 0
+  if index > length then:
+    return length
+  index
+
+fn advance_rune_index(value: String, cursor: i32, steps: i32) -> Option<StringIndex>
+  if cursor < 0 or cursor > value.byte_len() then:
+    return None {}
+  let source = value.raw_bytes()
+  if not is_rune_boundary(source, value.byte_len(), cursor) then:
+    return None {}
+  if steps == 0 then:
+    return Some<StringIndex> { value: cursor }
+
+  var index = cursor
+  if steps > 0 then:
+    var moved = 0
+    while moved < steps do:
+      if index >= value.byte_len() then:
+        return None {}
+      let read = decode_utf8_at(source, value.byte_len(), index)
+      index = index + read.width
+      moved = moved + 1
+    return Some<StringIndex> { value: index }
+
+  var moved = 0
+  while moved > steps do:
+    if index <= 0 then:
+      return None {}
+    index = previous_rune_boundary(source, index)
+    moved = moved - 1
+  Some<StringIndex> { value: index }
+
+fn advance_grapheme_index(value: String, cursor: i32, steps: i32) -> Option<StringIndex>
+  if cursor < 0 or cursor > value.byte_len() then:
+    return None {}
+  let source = value.raw_bytes()
+  if not is_rune_boundary(source, value.byte_len(), cursor) then:
+    return None {}
+  if steps == 0 then:
+    return Some<StringIndex> { value: cursor }
+
+  var index = cursor
+  if steps > 0 then:
+    var moved = 0
+    while moved < steps do:
+      if index >= value.byte_len() then:
+        return None {}
+      index = next_grapheme_boundary(source, value.byte_len(), index)
+      moved = moved + 1
+    return Some<StringIndex> { value: index }
+
+  var moved = 0
+  while moved > steps do:
+    if index <= 0 then:
+      return None {}
+    index = previous_grapheme_boundary(source, value.byte_len(), index)
+    moved = moved - 1
+  Some<StringIndex> { value: index }
+
+fn previous_rune_boundary(source: FixedArray<i32>, index: i32) -> i32
+  var cursor = index - 1
+  while cursor > 0 and is_continuation_byte(__array_get(source, cursor)) do:
+    cursor = cursor - 1
+  if cursor < 0 then: 0 else: cursor
+
+fn is_rune_boundary(source: FixedArray<i32>, length: i32, index: i32) -> bool
+  if index < 0 or index > length then:
+    return false
+  if index == 0 or index == length then:
+    return true
+  not is_continuation_byte(__array_get(source, index))
+
+fn clamp_index_to_rune_boundary(source: FixedArray<i32>, length: i32, index: i32) -> i32
+  let clamped = clamp_slice_index(index, length)
+  if clamped <= 0 or clamped >= length then:
+    return clamped
+
+  var cursor = clamped
+  while cursor > 0 and is_continuation_byte(__array_get(source, cursor)) do:
+    cursor = cursor - 1
+  cursor
+
+fn next_grapheme_boundary(source: FixedArray<i32>, length: i32, index: i32) -> i32
+  if index >= length then:
+    return length
+
+  let head = decode_utf8_at(source, length, index)
+  var cursor = index + head.width
+  var prev = head.codepoint
+  while cursor < length do:
+    let read = decode_utf8_at(source, length, cursor)
+    if should_join_grapheme(prev, read.codepoint) then:
+      cursor = cursor + read.width
+      prev = read.codepoint
+    else:
+      break
+  cursor
+
+fn previous_grapheme_boundary(source: FixedArray<i32>, length: i32, index: i32) -> i32
+  if index <= 0 then:
+    return 0
+
+  var cursor = 0
+  var prev = 0
+  while cursor < index do:
+    prev = cursor
+    cursor = next_grapheme_boundary(source, length, cursor)
+  prev
+
+fn should_join_grapheme(previous: i32, next: i32) -> bool
+  if next == 8205 then:
+    return true
+  if previous == 8205 then:
+    return true
+  if next >= 65024 and next <= 65039 then:
+    return true
+  if next >= 127995 and next <= 127999 then:
+    return true
+  if next >= 768 and next <= 879 then:
+    return true
+  if next >= 6832 and next <= 6911 then:
+    return true
+  false
+
+fn find_substring_from(value: String, substring: String, start: i32) -> i32
+  if substring.byte_len() == 0 then:
+    return clamp_slice_index(start, value.byte_len())
+  if substring.byte_len() > value.byte_len() then:
+    return -1
+  if start < 0 or start > value.byte_len() then:
+    return -1
+
+  let source = value.raw_bytes()
+  let needle = substring.raw_bytes()
+  let limit = value.byte_len() - substring.byte_len()
+  var index = start
+  while index <= limit do:
+    if bytes_match_at(source, needle, index, substring.byte_len()) then:
+      return index
+    index = index + 1
+  -1
+
+fn find_substring_to(value: String, substring: String, end: i32) -> i32
+  if substring.byte_len() == 0 then:
+    return clamp_slice_index(end, value.byte_len())
+  if substring.byte_len() > value.byte_len() then:
+    return -1
+
+  let clamped_end = clamp_slice_index(end, value.byte_len())
+  let source = value.raw_bytes()
+  let needle = substring.raw_bytes()
+  var index = clamped_end - substring.byte_len()
+  while index >= 0 do:
+    if bytes_match_at(source, needle, index, substring.byte_len()) then:
+      return index
+    index = index - 1
+  -1
+
+fn split_on_substring(
+  value: String,
+  separator: String,
+  { max_splits?: i32, keep_empty?: bool }
+) -> Array<StringSlice>
+  let allow_empty = keep_empty ?? false
+  let limit = max_splits ?? -1
+  let sep_len = separator.byte_len()
+  if sep_len <= 0 then:
+    let ~one = Array<StringSlice>::with_capacity(1)
+    one.push(value)
+    return one
+
+  let source = value.raw_bytes()
+  let needle = separator.raw_bytes()
+  let ~parts = Array<StringSlice>::with_capacity(4)
+  var start = 0
+  var index = 0
+  var splits = 0
+  let max_index = value.byte_len() - sep_len
+  while index <= max_index do:
+    let can_split = limit < 0 or splits < limit
+    if can_split and bytes_match_at(source, needle, index, sep_len) then:
+      let length = index - start
+      if allow_empty or length > 0 then:
+        parts.push(value.slice_bytes(start, length))
+      start = index + sep_len
+      index = start
+      splits = splits + 1
+    else:
+      index = index + 1
+
+  let tail_len = value.byte_len() - start
+  if allow_empty or tail_len > 0 then:
+    parts.push(value.slice_bytes(start, tail_len))
+  parts
 
 fn to_ascii_lower(value: i32) -> i32
   if value >= 65 and value <= 90 then:
@@ -485,6 +1077,119 @@ fn parse_digit(value: i32) -> i32
     return value - 87
   -1
 
+fn digit_to_f64(value: i32) -> f64
+  if value == 0 then:
+    return 0.0
+  if value == 1 then:
+    return 1.0
+  if value == 2 then:
+    return 2.0
+  if value == 3 then:
+    return 3.0
+  if value == 4 then:
+    return 4.0
+  if value == 5 then:
+    return 5.0
+  if value == 6 then:
+    return 6.0
+  if value == 7 then:
+    return 7.0
+  if value == 8 then:
+    return 8.0
+  if value == 9 then:
+    return 9.0
+  0.0
+
+fn pow10_i32(value: i32) -> f64
+  if value == 0 then:
+    return 1.0
+
+  var out = 1.0
+  var index = 0
+  let abs = if value < 0 then: 0 - value else: value
+  while index < abs do:
+    out = out * 10.0
+    index = index + 1
+
+  if value < 0 then:
+    return 1.0 / out
+  out
+
+fn build_escaped(value: String, include_quotes: bool) -> String
+  let ~bytes = Array<i32>::with_capacity(value.byte_len() + 2)
+  if include_quotes then:
+    bytes.push(34)
+
+  let source = value.raw_bytes()
+  var index = 0
+  while index < value.byte_len() do:
+    let read = decode_utf8_at(source, value.byte_len(), index)
+    append_escaped_rune(bytes, read.codepoint)
+    index = index + read.width
+
+  if include_quotes then:
+    bytes.push(34)
+  new_string(bytes.to_fixed_array())
+
+fn append_escaped_rune(~out: Array<i32>, rune: i32) -> void
+  if rune == 34 then:
+    out.push(92)
+    out.push(34)
+    return void
+  if rune == 92 then:
+    out.push(92)
+    out.push(92)
+    return void
+  if rune == 10 then:
+    out.push(92)
+    out.push(110)
+    return void
+  if rune == 13 then:
+    out.push(92)
+    out.push(114)
+    return void
+  if rune == 9 then:
+    out.push(92)
+    out.push(116)
+    return void
+  if rune < 32 then:
+    append_hex_escape(out, rune)
+    return void
+
+  let next = append_codepoint(Array<i32>::with_capacity(0), rune)
+  append_bytes(out, next.raw_storage(), next.len())
+
+fn append_hex_escape(~out: Array<i32>, rune: i32) -> void
+  out.push(92)
+  out.push(117)
+  out.push(123)
+
+  let raw = rune
+  if raw == 0 then:
+    out.push(48)
+  else:
+    let ~digits = Array<i32>::with_capacity(8)
+    var value = raw
+    while value > 0 do:
+      let digit = value - (value / 16) * 16
+      digits.push(hex_digit(digit))
+      value = value / 16
+    var index = digits.len() - 1
+    while index >= 0 do:
+      match(digits.get(index))
+        Some<i32> { value }:
+          out.push(value)
+        None:
+          void
+      index = index - 1
+
+  out.push(125)
+
+fn hex_digit(value: i32) -> i32
+  if value < 10 then:
+    return 48 + value
+  97 + (value - 10)
+
 fn bytes_match_at(
   source: FixedArray<i32>,
   target: FixedArray<i32>,
@@ -504,7 +1209,19 @@ fn append_bytes(~out: Array<i32>, source: FixedArray<i32>, count: i32) -> void
     out.push(__array_get(source, index))
     index = index + 1
 
-pub fn from_utf8(bytes: Array<i32>): () -> Result<String, Utf8Error>
+pub fn from_utf8({ bytes: Array<i32> }) -> Result<String, Utf8Error>
+  let source_bytes = bytes
+  let source = source_bytes.raw_storage()
+  let len = source_bytes.len()
+  var index = 0
+  while index < len do:
+    let width = valid_utf8_width_at(source, len, index)
+    if width <= 0 then:
+      return Err<Utf8Error> { error: Utf8Error { code: 1 } }
+    index = index + width
+  Ok<String> { value: new_string(source_bytes.to_fixed_array()) }
+
+fn from_utf8_legacy(bytes: Array<i32>): () -> Result<String, Utf8Error>
   let source = bytes.raw_storage()
   let len = bytes.len()
   var index = 0
@@ -547,6 +1264,10 @@ fn append_codepoint(bytes: Array<i32>, codepoint: i32) -> Array<i32>
     return out
   append_replacement(bytes)
 
+fn append_codepoint_mut(~bytes: Array<i32>, codepoint: i32) -> void
+  let encoded = append_codepoint(Array<i32>::with_capacity(0), codepoint)
+  append_bytes(bytes, encoded.raw_storage(), encoded.len())
+
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   let input_length = __array_len(from_bytes)
   var bytes = Array<i32>::with_capacity(input_length)
@@ -566,6 +1287,45 @@ fn append_replacement(bytes: Array<i32>) -> Array<i32>
 
 fn utf8_replacement() -> Utf8Read
   Utf8Read { codepoint: 65533, width: 1 }
+
+fn valid_utf8_width_at(source: FixedArray<i32>, limit: i32, index: i32) -> i32
+  if index < 0 or index >= limit then:
+    return 0
+
+  let b0 = __array_get(source, index)
+  if not is_byte(b0) then:
+    return 0
+  if b0 <= 127 then:
+    return 1
+
+  if b0 >= 194 and b0 <= 223 then:
+    let next_index = index + 1
+    if next_index >= limit then:
+      return 0
+    let b1 = __array_get(source, next_index)
+    if is_continuation_byte(b1) then: 2 else: 0
+
+  if b0 >= 224 and b0 <= 239 then:
+    let next_index = index + 1
+    let next_index2 = index + 2
+    if next_index2 >= limit then:
+      return 0
+    let b1 = __array_get(source, next_index)
+    let b2 = __array_get(source, next_index2)
+    if valid_three_byte_lead(b0, b1, b2) then: 3 else: 0
+
+  if b0 >= 240 and b0 <= 244 then:
+    let next_index = index + 1
+    let next_index2 = index + 2
+    let next_index3 = index + 3
+    if next_index3 >= limit then:
+      return 0
+    let b1 = __array_get(source, next_index)
+    let b2 = __array_get(source, next_index2)
+    let b3 = __array_get(source, next_index3)
+    if valid_four_byte_lead(b0, b1, b2, b3) then: 4 else: 0
+
+  0
 
 fn empty_string() -> String
   new_string(new_fixed_array<i32>(0))

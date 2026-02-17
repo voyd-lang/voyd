@@ -1,0 +1,264 @@
+use std::array::{ Array, new_array_unchecked }
+use std::optional::types::all
+use std::string::type::{ String, from_utf8, Utf8Error, new_string }
+use std::test::assertions::all
+
+obj EachStats {
+  count: i32,
+  sum: i32,
+  has_a: bool
+}
+
+obj IntKey {
+  value: i32
+}
+
+impl IntKey
+  fn '=='(self, other: IntKey) -> bool
+    self.value == other.value
+
+impl DictKey<IntKey> for IntKey
+  api fn dict_hash(self) -> i32
+    self.value
+
+  api fn dict_eq(self, { other: IntKey }) -> bool
+    self.value == other.value
+
+obj CollidingKey {
+  value: i32
+}
+
+impl DictKey<CollidingKey> for CollidingKey
+  api fn dict_hash(self) -> i32
+    7
+
+  api fn dict_eq(self, { other: CollidingKey }) -> bool
+    self.value == other.value
+
+fn must_utf8(bytes: Array<i32>) -> String
+  match(from_utf8(bytes: bytes))
+    Ok<String> { value }:
+      value
+    Err<Utf8Error>:
+      assert(false)
+      String::init()
+
+fn make_test_key(index: i32) -> String
+  let a = index / 26
+  let b = index - a * 26
+  must_utf8([97 + a, 97 + b])
+
+fn array_of_5(a: i32, b: i32, c: i32, d: i32, e: i32) -> Array<i32>
+  let ~out = Array<i32>::with_capacity(5)
+  out.push(a)
+  out.push(b)
+  out.push(c)
+  out.push(d)
+  out.push(e)
+  out
+
+test "dict init is empty":
+  let map = Dict<String, i32>::init()
+  assert(map.len(), eq: 0)
+  assert(map.is_empty(), eq: true)
+
+test "dict with_capacity supports inserts":
+  let ~map = Dict<String, i32>::with_capacity(size: 40)
+  var index = 0
+  while index < 40 do:
+    map.set(key: make_test_key(index), value: index)
+    index = index + 1
+  assert(map.len(), eq: 40)
+
+  match(map.get(key: make_test_key(10)))
+    Some<i32> { value }:
+      assert(value, eq: 10)
+    None:
+      assert(false)
+
+test "dict set insert get contains remove clear":
+  let ~map = Dict<String, i32>::init()
+  map.set(key: "a", value: 1)
+  let previous = map.insert(key: "a", value: 2)
+  match(previous)
+    Some<i32> { value }:
+      assert(value, eq: 1)
+    None:
+      assert(false)
+
+  assert(map.contains_key(key: "a"), eq: true)
+  match(map.get(key: "a"))
+    Some<i32> { value }:
+      assert(value, eq: 2)
+    None:
+      assert(false)
+
+  let removed = map.remove(key: "a")
+  match(removed)
+    Some<i32> { value }:
+      assert(value, eq: 2)
+    None:
+      assert(false)
+
+  assert(map.contains_key(key: "a"), eq: false)
+  map.set(key: "x", value: 9)
+  map.clear()
+  assert(map.len(), eq: 0)
+
+test "dict keys values entries each":
+  let ~map = Dict<String, i32>::init()
+  map.set(key: "a", value: 1)
+  map.set(key: "b", value: 2)
+  map.set(key: "c", value: 3)
+
+  let keys = map.keys()
+  let values = map.values()
+  let entries = map.entries()
+  assert(keys.len(), eq: 3)
+  assert(values.len(), eq: 3)
+  assert(entries.len(), eq: 3)
+
+  let ~stats = EachStats { count: 0, sum: 0, has_a: false }
+  map.each(do: (key: String, value: i32) -> void =>
+    stats.count = stats.count + 1
+    stats.sum = stats.sum + value
+    if key.equals("a") then:
+      stats.has_a = true
+    void
+  )
+  assert(stats.count, eq: 3)
+  assert(stats.sum, eq: 6)
+  assert(stats.has_a, eq: true)
+
+test "dict extend merged merge":
+  let ~left = Dict<String, i32>::init()
+  left.set(key: "a", value: 1)
+  let ~right = Dict<String, i32>::init()
+  right.set(key: "b", value: 2)
+  right.set(key: "a", value: 9)
+  let merged = left.merged(
+    other: right,
+    on_conflict: (_key: String, l: i32, r: i32) -> i32 => l + r
+  )
+  let ~out = Dict<String, i32>::init()
+  out.extend(entries: merged.entries())
+  out.merge(other: merged, on_conflict: (_k: String, l: i32, r: i32) -> i32 => l + r)
+  match(out.get(key: "a"))
+    Some<i32> { value }:
+      assert(value, eq: 20)
+    None:
+      assert(false)
+  match(out.get(key: "b"))
+    Some<i32> { value }:
+      assert(value, eq: 2)
+    None:
+      assert(false)
+
+test "dict map and filter":
+  let ~map = Dict<String, i32>::init()
+  map.set(key: "a", value: 1)
+  map.set(key: "b", value: 2)
+  map.set(key: "c", value: 3)
+
+  let mapped = map.map<i32>(map: (_k: String, v: i32) -> i32 => v * 10)
+  match(mapped.get(key: "b"))
+    Some<i32> { value }:
+      assert(value, eq: 20)
+    None:
+      assert(false)
+
+  let filtered = map.filter(where: (_k: String, v: i32) -> bool => v >= 2)
+  assert(filtered.len(), eq: 2)
+  assert(filtered.contains_key(key: "a"), eq: false)
+
+test "dict entry helpers":
+  let base = Dict<String, i32>::init()
+
+  let next = base.entry(key: "kiwi").or_insert(default: 0)
+  match(next.get(key: "kiwi"))
+    Some<i32> { value }:
+      assert(value, eq: 0)
+    None:
+      assert(false)
+
+  let next2 = next.entry(key: "kiwi").and_modify(f: (v: i32) -> i32 => v + 1).dict
+  match(next2.get(key: "kiwi"))
+    Some<i32> { value }:
+      assert(value, eq: 1)
+    None:
+      assert(false)
+
+  let next3 = next2.entry(key: "pear").or_insert_with(make: () -> i32 => 42)
+  match(next3.get(key: "pear"))
+    Some<i32> { value }:
+      assert(value, eq: 42)
+    None:
+      assert(false)
+
+  let removed = next3.entry(key: "pear").remove()
+  match(removed)
+    Some<i32> { value }:
+      assert(value, eq: 42)
+    None:
+      assert(false)
+
+test "dict grows and preserves entries":
+  let ~map = Dict<String, i32>::init()
+  var index = 0
+  while index < 80 do:
+    map.set(key: make_test_key(index), value: index)
+    index = index + 1
+  assert(map.len(), eq: 80)
+
+  match(map.get(key: make_test_key(0)))
+    Some<i32> { value }:
+      assert(value, eq: 0)
+    None:
+      assert(false)
+
+  match(map.get(key: make_test_key(79)))
+    Some<i32> { value }:
+      assert(value, eq: 79)
+    None:
+      assert(false)
+
+test "dict supports non-string key type":
+  let ~map = Dict<IntKey, i32>::init()
+  map.set(key: IntKey { value: 1 }, value: 10)
+  map.set(key: IntKey { value: 2 }, value: 20)
+
+  match(map.get(key: IntKey { value: 1 }))
+    Some<i32> { value }:
+      assert(value, eq: 10)
+    None:
+      assert(false)
+
+test "dict handles colliding custom key hashes":
+  let ~map = Dict<CollidingKey, i32>::init()
+  map.set(key: CollidingKey { value: 1 }, value: 10)
+  map.set(key: CollidingKey { value: 2 }, value: 20)
+  map.set(key: CollidingKey { value: 3 }, value: 30)
+  assert(map.len(), eq: 3)
+  match(map.get(key: CollidingKey { value: 2 }))
+    Some<i32> { value }:
+      assert(value, eq: 20)
+    None:
+      assert(false)
+
+test "array group_by groups values by key":
+  let grouped = array_of_5(1, 2, 3, 4, 5).group_by<String>(key: (value: i32) -> String =>
+    let half = value / 2
+    if half * 2 == value then: "even" else: "odd"
+  )
+
+  match(grouped.get(key: "even"))
+    Some<Array<i32>> { value }:
+      assert(value.len(), eq: 2)
+    None:
+      assert(false)
+
+  match(grouped.get(key: "odd"))
+    Some<Array<i32>> { value }:
+      assert(value.len(), eq: 3)
+    None:
+      assert(false)

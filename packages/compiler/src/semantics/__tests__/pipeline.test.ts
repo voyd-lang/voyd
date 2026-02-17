@@ -662,6 +662,18 @@ describe("semanticsPipeline", () => {
     expect(result.diagnostics).toHaveLength(0);
   });
 
+  it("accepts constrained generic re-instantiation inside constrained impl methods", () => {
+    const ast = loadAst("generic_constraints_reinstantiation_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("accepts constrained helper generic calls inside constrained impl methods", () => {
+    const ast = loadAst("generic_constraints_constrained_helper_call_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("rejects impl template matches when impl type parameter constraints are violated", () => {
     const ast = loadAst("generic_constraints_impl_type_param_failure.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(

@@ -1,0 +1,59 @@
+use std::test::assertions::all
+
+test "fixed_array get handles negative indexing":
+  var arr = new_fixed_array<i32>(2)
+  arr = arr.set<i32>(0, 3)
+  arr = arr.set<i32>(1, 5)
+
+  let last = arr.get<i32>(-1)
+  match(last)
+    Some<i32> { value }:
+      assert(value, eq: 5)
+    None:
+      assert(false)
+
+test "fixed_array get returns none for out-of-bounds":
+  let arr = new_fixed_array<i32>(1)
+  let missing = arr.get<i32>(2)
+  match(missing)
+    Some<i32>:
+      assert(false)
+    None:
+      assert(true)
+
+test "fixed_array get returns none for null refs":
+  let arr = new_fixed_array<FixedArray<i32>>(1)
+  let missing = arr.get<FixedArray<i32>>(0)
+  match(missing)
+    Some<FixedArray<i32>>:
+      assert(false)
+    None:
+      assert(true)
+
+test "fixed_array copy clamps to bounds":
+  var dest = new_fixed_array<i32>(2)
+  var src = new_fixed_array<i32>(2)
+  dest = dest.set<i32>(0, 1)
+  dest = dest.set<i32>(1, 2)
+  src = src.set<i32>(0, 5)
+  src = src.set<i32>(1, 6)
+
+  dest = dest.copy<i32>({
+    from: src,
+    to_index: 0,
+    from_index: 0,
+    count: 5
+  })
+
+  let first = dest.get<i32>(0)
+  let second = dest.get<i32>(1)
+
+  match(first)
+    Some<i32> { value }:
+      match(second)
+        Some<i32> { value: other }:
+          assert(value + other, eq: 11)
+        None:
+          assert(false)
+    None:
+      assert(false)

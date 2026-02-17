@@ -1,4 +1,6 @@
-use std::all
+use std::test::assertions::all
+use std::optional::types::all
+use std::string::{ new_string }
 
 test "string byte_values iterates utf8 bytes":
   let values = "a😀".byte_values()

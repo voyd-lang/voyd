@@ -1,6 +1,6 @@
 use std::optional::types::{ Optional, Some, None }
 use std::optional::fns::{ some, none }
-use std::dict::new_dict
+use std::dict::Dict
 use std::array::new_array_unchecked
 use std::subscript::Range
 use std::string::type::new_string
@@ -52,7 +52,7 @@ pub fn slice_full_unbounded() -> i32
   slice.len()
 
 pub fn map_roundtrip() -> i32
-  let ~map = new_dict<i32>()
+  let ~map = Dict<String, i32>::init()
   map["x"] = 7
   optional_i32_or(map["x"], -1)
 

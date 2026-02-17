@@ -1,7 +1,7 @@
-use std::string::type::String
+use std::string::type::StringSlice
 
 pub trait Formatter
-  fn write_str(self, { s: String }) -> void
+  fn write_str(self, { s: StringSlice }) -> void
   fn write_char(self, { c: i32 }) -> void
 
 pub trait Debug<T>

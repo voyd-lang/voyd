@@ -1,65 +1,189 @@
+use std::array::{ Array, new_array_unchecked }
 use std::test::assertions::all
 
-test "string lengths for ascii":
-  let value = "hello"
-  assert(value.byte_length(), eq: 5)
-  assert(value.codepoint_length(), eq: 5)
-  assert(value.codepoint_at(1), eq: 101)
+fn must_utf8(bytes: Array<i32>) -> String
+  match(from_utf8(bytes: bytes))
+    Ok<String> { value }:
+      value
+    Err<Utf8Error>:
+      assert(false)
+      String::init()
 
-test "string lengths for non-bmp":
-  let value = "😀"
-  assert(value.byte_length(), eq: 4)
-  assert(value.codepoint_length(), eq: 1)
-  assert(value.codepoint_at(0), eq: 128512)
+fn option_i32_or(value: Option<i32>, fallback: i32) -> i32
+  match(value)
+    Some<i32> { value }:
+      value
+    None:
+      fallback
 
-test "string lengths for mixed utf8":
+fn is_none_string_index(value: Option<StringIndex>) -> bool
+  match(value)
+    Some<StringIndex>:
+      false
+    None:
+      true
+
+test "string init and capacity constructors":
+  let empty = String::init()
+  assert(empty.is_empty(), eq: true)
+  assert(empty.byte_len(), eq: 0)
+  assert(empty.rune_len(), eq: 0)
+
+  let reserved = String::with_capacity(bytes: 64)
+  assert(reserved.is_empty(), eq: true)
+  assert(reserved.byte_len(), eq: 0)
+
+test "string utf8 decode and encode":
+  let value = must_utf8([104, 105])
+  assert(value.equals("hi"), eq: true)
+  assert(value.to_utf8().len(), eq: 2)
+
+  match(from_utf8(bytes: [255]))
+    Ok<String>:
+      assert(false)
+    Err<Utf8Error> { error }:
+      assert(error.code, eq: 1)
+
+test "string slice and as_slice":
   let value = "a😀b"
+  let sliced = value.slice(range: Range {
+    start: Some<i32> { value: 1 },
+    end: Some<i32> { value: 5 },
+    include_end: false
+  })
+  assert(sliced.equals("😀"), eq: true)
+  assert(value.as_slice().equals(value), eq: true)
+
+test "string lengths and graphemes":
+  let value = "a😀b"
+  assert(value.byte_len(), eq: 6)
   assert(value.byte_length(), eq: 6)
+  assert(value.rune_len(), eq: 3)
   assert(value.codepoint_length(), eq: 3)
-  assert(value.codepoint_at(1), eq: 128512)
+  assert(value.grapheme_len(), eq: 3)
 
-  let sliced = value.slice_codepoints(1, 1)
-  assert(sliced.byte_length(), eq: 4)
-  assert(sliced.codepoint_length(), eq: 1)
-  assert(sliced.codepoint_at(0), eq: 128512)
+  let joined = "é"
+  assert(joined.rune_len(), eq: 2)
+  assert(joined.grapheme_len(), eq: 1)
 
-test "string equals compares bytes":
-  assert("hello".equals("hello"), eq: true)
-  assert("hello".equals("hell"), eq: false)
-  assert("😀".equals("😀"), eq: true)
-  assert("😀".equals("😁"), eq: false)
+test "string index and grapheme_index stepping":
+  let value = "a😀b"
+  assert(value.start_index(), eq: 0)
+  assert(value.end_index(), eq: value.byte_len())
+  assert(option_i32_or(value.index(after: 0), -1), eq: 1)
+  assert(option_i32_or(value.index(after: 0, by: 2), -1), eq: 5)
+  assert(option_i32_or(value.index(after: 5, by: -1), -1), eq: 1)
+  assert(is_none_string_index(value.index(after: 2)), eq: true)
 
-test "string hash matches for identical strings":
-  assert("hello".hash_i32(), eq: "hello".hash_i32())
-  let empty = empty_string()
-  assert(empty.hash_i32(), eq: empty.hash_i32())
+  let joined = "é"
+  assert(option_i32_or(joined.grapheme_index(after: 0), -1), eq: joined.end_index())
 
-test "string trim and trim_mutating":
+test "string grapheme sequence iteration":
+  let joined = "éx"
+  let ~iter = joined.graphemes().iter()
+  match(iter.next())
+    Some<StringSlice> { value }:
+      assert(value.equals("é"), eq: true)
+    None:
+      assert(false)
+  match(iter.next())
+    Some<StringSlice> { value }:
+      assert(value.equals("x"), eq: true)
+    None:
+      assert(false)
+  match(iter.next())
+    Some<StringSlice>:
+      assert(false)
+    None:
+      assert(true)
+
+test "string search helpers":
+  let value = "alpha,beta,gamma"
+  assert(value.starts_with(prefix: "alpha"), eq: true)
+  assert(value.ends_with(suffix: "gamma"), eq: true)
+  assert(value.contains(substring: "beta"), eq: true)
+  assert(value.contains(where: (rune: i32) -> bool => rune == 44), eq: true)
+  assert(option_i32_or(value.find(substring: "beta"), -1) > 0, eq: true)
+  assert(option_i32_or(value.rfind(substring: "a"), -1) >= 0, eq: true)
+
+  match(value.find_range(substring: "beta"))
+    Some<Range> { value }:
+      assert(option_i32_or(value.start, -1) >= 0, eq: true)
+    None:
+      assert(false)
+
+test "string split overloads":
+  let value = "a,b,,c"
+  assert(value.split(on: 44).len(), eq: 4)
+  assert(value.split(on: ",").len(), eq: 4)
+  assert(value.split(on: ",", keep_empty: false).len(), eq: 3)
+  assert(value.split(on: ",", max_splits: 1).len(), eq: 2)
+  assert(
+    value.split(where: (rune: i32) -> bool => rune == 44, keep_empty: true).len(),
+    eq: 4
+  )
+
+test "string lines and words":
+  let multiline = must_utf8([97, 10, 98, 10])
+  let lines = multiline.lines()
+  assert(lines.len(), eq: 2)
+  match(lines.get(at: 0))
+    Some<StringSlice>:
+      assert(true, eq: true)
+    None:
+      assert(false)
+
+  let lines_with_ends = multiline.lines(keep_ends: true)
+  match(lines_with_ends.get(at: 0))
+    Some<StringSlice> { value }:
+      assert(value.ends_with(suffix: must_utf8([10])), eq: true)
+    None:
+      assert(false)
+
+  let words = "  hi   there ".words()
+  assert(words.len(), eq: 2)
+
+test "string trim pairs":
   assert("  hi  ".trimmed().equals("hi"), eq: true)
+  assert("--hi--".trimmed(chars: [45]).equals("hi"), eq: true)
+
   let ~value = "  bye  "
   value.trim()
   assert(value.equals("bye"), eq: true)
+  let ~value2 = "--z--"
+  value2.trim(chars: [45])
+  assert(value2.equals("z"), eq: true)
 
-test "string lower and upper pairs":
+test "string case and replace pairs":
   assert("AbC".lowered().equals("abc"), eq: true)
   assert("AbC".uppered().equals("ABC"), eq: true)
-  let ~value = "aBc"
-  value.upper()
-  assert(value.equals("ABC"), eq: true)
-  value.lower()
-  assert(value.equals("abc"), eq: true)
+  assert("banana".replaced("na", with: "X").equals("baXX"), eq: true)
+  assert(
+    "banana".replaced(old: "na", with: "Y", max_replacements: 1).equals("baYna"),
+    eq: true
+  )
 
-test "string replace pairs":
-  let replaced = "banana".replaced("na", with: "X")
-  assert(replaced.equals("baXX"), eq: true)
   let ~value = "banana"
   value.replace("na", with: "Y", max_replacements: 1)
   assert(value.equals("baYna"), eq: true)
+  value.replace(old: "Y", with: "Z")
+  assert(value.equals("baZna"), eq: true)
 
-test "string parse_int uses result":
+test "string repeat and padding":
+  assert("x".repeat(count: 3).equals("xxx"), eq: true)
+  assert("x".pad_left(width: 3, with: 46).equals("..x"), eq: true)
+  assert("x".pad_right(width: 3, with: 46).equals("x.."), eq: true)
+
+test "string parse_int result":
   match("42".parse_int())
     Ok<i32> { value }:
       assert(value, eq: 42)
+    Err<ParseIntError>:
+      assert(false)
+
+  match("ff".parse_int(radix: 16))
+    Ok<i32> { value }:
+      assert(value, eq: 255)
     Err<ParseIntError>:
       assert(false)
 
@@ -69,11 +193,31 @@ test "string parse_int uses result":
     Err<ParseIntError> { error }:
       assert(error.code > 0, eq: true)
 
-test "string from_utf8 and utf8 bytes roundtrip":
-  let bytes = "hi".to_utf8()
-  match(from_utf8(bytes))
-    Ok<String> { value }:
-      assert(value.equals("hi"), eq: true)
-      assert(value.to_utf8().len(), eq: 2)
-    Err<Utf8Error>:
+  match("1".parse_int(radix: 1))
+    Ok<i32>:
       assert(false)
+    Err<ParseIntError> { error }:
+      assert(error.code, eq: 1)
+
+test "string parse_float result":
+  match("1.25e2".parse_float())
+    Ok<f64> { value }:
+      assert(value > 100.0, eq: true)
+    Err<ParseFloatError>:
+      assert(false)
+
+  match("x".parse_float())
+    Ok<f64>:
+      assert(false)
+    Err<ParseFloatError> { error }:
+      assert(error.code, eq: 1)
+
+test "string debug and repr helpers":
+  let escaped_newline = must_utf8([92, 110])
+  let quote = must_utf8([34])
+  let source = must_utf8([97, 10, 98])
+  let debug = source.to_debug()
+  let repr = source.to_repr()
+  assert(debug.contains(substring: escaped_newline), eq: true)
+  assert(repr.starts_with(prefix: quote), eq: true)
+  assert(repr.ends_with(suffix: quote), eq: true)

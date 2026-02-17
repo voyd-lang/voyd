@@ -1228,37 +1228,7 @@ const createMethodLookupEntries = ({
         ctx,
       });
       if (!meta) {
-        const signature = ctx.program.functions.getSignature(
-          implRef.moduleId,
-          implRef.symbol,
-        );
-        if (signature?.typeParams.length) {
-          // Generic impl methods may be unreachable in this compilation unit.
-          // Skip unresolved entries so unrelated RTT generation can continue.
-          return;
-        }
-        const availableInstances = (metas ?? [])
-          .map((entry) => {
-            const receiverTypeIndex = entry.effectful
-              ? Math.max(0, entry.paramTypes.length - entry.paramTypeIds.length)
-              : 0;
-            const receiverType =
-              entry.paramTypes[receiverTypeIndex] ?? runtimeType;
-            const receiverTypeId = entry.paramTypeIds[0];
-            return `${entry.wasmName}#${entry.instanceId}@${receiverType}(receiverTypeId=${receiverTypeId},typeArgs=[${entry.typeArgs.join(",")}])`;
-          })
-          .join(", ");
-        throw new Error(
-          [
-            "codegen missing metadata for trait method impl",
-            `impl: ${implRef.moduleId}::${implRef.symbol}`,
-            `trait method: ${impl.traitSymbol}:${traitMethod}`,
-            `runtime type: ${runtimeType}`,
-            `impl target: ${impl.target}`,
-            `impl trait: ${impl.trait}`,
-            `available instances: ${availableInstances || "<none>"}`,
-          ].join("\n"),
-        );
+        return;
       }
       if (!meta.wasmName) {
         throw new Error(

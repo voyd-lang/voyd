@@ -1900,7 +1900,19 @@ const instantiateTraitImplsFor = ({
       },
       ctx,
     });
-    if (!match.ok) {
+    const fallbackMatch =
+      !match.ok && template.typeParams.length === 0
+        ? (() => {
+            const templateNominal = getNominalComponent(template.target, ctx);
+            if (typeof templateNominal !== "number") {
+              return undefined;
+            }
+            return nominal === templateNominal
+              ? new Map<TypeParamId, TypeId>()
+              : undefined;
+          })()
+        : undefined;
+    if (!match.ok && !fallbackMatch) {
       return;
     }
 
@@ -1908,7 +1920,9 @@ const instantiateTraitImplsFor = ({
     template.typeParams.forEach((param) =>
       implTypeArgSubstitution.set(
         param.typeParam,
-        match.substitution.get(param.typeParam) ?? ctx.primitives.unknown,
+        (match.ok
+          ? match.substitution.get(param.typeParam)
+          : fallbackMatch?.get(param.typeParam)) ?? ctx.primitives.unknown,
       ),
     );
 
@@ -1931,18 +1945,13 @@ const instantiateTraitImplsFor = ({
       return;
     }
 
-    const appliedTrait = ctx.arena.substitute(
-      template.trait,
-      match.substitution,
-    );
+    const substitution = match.ok ? match.substitution : fallbackMatch!;
+    const appliedTrait = ctx.arena.substitute(template.trait, substitution);
     const traitDesc = ctx.arena.get(appliedTrait);
     if (traitDesc.kind !== "trait") {
       return;
     }
-    const appliedTarget = ctx.arena.substitute(
-      template.target,
-      match.substitution,
-    );
+    const appliedTarget = ctx.arena.substitute(template.target, substitution);
     implementations.push({
       trait: appliedTrait,
       traitSymbol: template.traitSymbol,
@@ -2289,6 +2298,7 @@ export const typeSatisfies = (
   ctx: TypingContext,
   state: TypingState,
 ): boolean => {
+  const activeConstraints = currentFunctionConstraintMap(ctx, state);
   if (actual === expected) {
     return true;
   }
@@ -2315,7 +2325,7 @@ export const typeSatisfies = (
   if (expectedDesc.kind === "trait") {
     const owner = localSymbolForSymbolRef(expectedDesc.owner, ctx);
     return typeof owner === "number"
-      ? traitSatisfies(actual, expected, owner, ctx, state)
+      ? traitSatisfies(actual, expected, owner, ctx, state, activeConstraints)
       : false;
   }
   if (
@@ -2330,7 +2340,7 @@ export const typeSatisfies = (
       }
       const owner = localSymbolForSymbolRef(traitDesc.owner, ctx);
       return typeof owner === "number"
-        ? traitSatisfies(actual, trait, owner, ctx, state)
+        ? traitSatisfies(actual, trait, owner, ctx, state, activeConstraints)
         : false;
     });
     if (!ok) {
@@ -2397,16 +2407,57 @@ export const typeSatisfies = (
   return compatibility.ok;
 };
 
+const currentFunctionConstraintMap = (
+  ctx: TypingContext,
+  state: TypingState,
+): ReadonlyMap<TypeParamId, TypeId> | undefined => {
+  const current = state.currentFunction;
+  const functionSymbol = current?.functionSymbol;
+  if (typeof functionSymbol !== "number") {
+    return undefined;
+  }
+
+  const signature = ctx.functions.getSignature(functionSymbol);
+  const typeParams = signature?.typeParams;
+  if (!typeParams || typeParams.length === 0) {
+    return undefined;
+  }
+
+  const substitution = current?.substitution;
+  const out = new Map<TypeParamId, TypeId>();
+  typeParams.forEach((param) => {
+    if (!param.constraint) {
+      return;
+    }
+    const resolved = substitution
+      ? ctx.arena.substitute(param.constraint, substitution)
+      : param.constraint;
+    out.set(param.typeParam, resolved);
+  });
+
+  return out.size > 0 ? out : undefined;
+};
+
 const traitSatisfies = (
   actual: TypeId,
   expected: TypeId,
   traitSymbol: SymbolId,
   ctx: TypingContext,
   state: TypingState,
+  activeConstraints?: ReadonlyMap<TypeParamId, TypeId>,
 ): boolean => {
   const allowUnknown = state.mode === "relaxed";
   const expectedDesc = ctx.arena.get(expected);
   const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind === "type-param-ref") {
+    const constraint = activeConstraints?.get(actualDesc.param);
+    if (
+      typeof constraint === "number" &&
+      typeSatisfies(constraint, expected, ctx, state)
+    ) {
+      return true;
+    }
+  }
   if (actualDesc.kind === "intersection" && actualDesc.traits) {
     const allowUnknown = state.mode === "relaxed";
     const matches = actualDesc.traits.some(

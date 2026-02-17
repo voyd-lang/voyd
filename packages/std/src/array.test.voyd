@@ -1,4 +1,5 @@
 use std::test::assertions::all
+use std::traits::ord::{ Ordering, less, equal, greater }
 
 fn array_of_2(a: i32, b: i32) -> Array<i32>
   let ~out = Array<i32>::with_capacity(2)
@@ -11,6 +12,23 @@ fn array_of_3(a: i32, b: i32, c: i32) -> Array<i32>
   out.push(a)
   out.push(b)
   out.push(c)
+  out
+
+fn array_of_4(a: i32, b: i32, c: i32, d: i32) -> Array<i32>
+  let ~out = Array<i32>::with_capacity(4)
+  out.push(a)
+  out.push(b)
+  out.push(c)
+  out.push(d)
+  out
+
+fn array_of_5(a: i32, b: i32, c: i32, d: i32, e: i32) -> Array<i32>
+  let ~out = Array<i32>::with_capacity(5)
+  out.push(a)
+  out.push(b)
+  out.push(c)
+  out.push(d)
+  out.push(e)
   out
 
 fn optional_i32_or(value: Optional<i32>, fallback: i32) -> i32
@@ -80,7 +98,7 @@ test "array read-only helpers":
       assert(true)
 
 test "array subscript read and range forms":
-  let arr = [1, 2, 3, 4]
+  let arr = array_of_4(1, 2, 3, 4)
   assert(optional_i32_or(arr[1], -1), eq: 2)
   assert(optional_i32_or(arr[-1], -1), eq: 4)
 
@@ -304,7 +322,7 @@ test "array copy-on-write keeps copies isolated":
   assert(optional_i32_or(copy.last(), -1), eq: 3)
 
 test "array reverse pairs and utility helpers":
-  let source = [1, 2, 3, 4]
+  let source = array_of_4(1, 2, 3, 4)
   let reversed = source.reversed()
   assert(optional_i32_or(reversed.get(0), -1), eq: 4)
   assert(optional_i32_or(source.get(0), -1), eq: 1)
@@ -321,7 +339,7 @@ test "array reverse pairs and utility helpers":
   assert(dropped.len(), eq: 2)
   assert(optional_i32_or(dropped.get(0), -1), eq: 3)
 
-  let chunks = [1, 2, 3, 4, 5].chunk(of: 2)
+  let chunks = array_of_5(1, 2, 3, 4, 5).chunk(of: 2)
   assert(chunks.len(), eq: 3)
   match(chunks.get(0))
     Some<Array<i32>> { value }:
@@ -348,7 +366,9 @@ test "array reverse pairs and utility helpers":
     None:
       assert(false)
 
-  let expanded = array_of_2(1, 2).flat_map<i32>((v: i32) -> Array<i32> => [v, v + 10])
+  let expanded = array_of_2(1, 2).flat_map<i32>((v: i32) -> Array<i32> =>
+    array_of_2(v, v + 10)
+  )
   assert(expanded.len(), eq: 4)
   assert(optional_i32_or(expanded.get(3), -1), eq: 12)
 
@@ -361,3 +381,55 @@ test "array reverse pairs and utility helpers":
   let partitioned = source.partition((v: i32) -> bool => v > 2)
   assert(partitioned.0.len(), eq: 2)
   assert(partitioned.1.len(), eq: 2)
+
+test "array default sort and sorted overloads":
+  let ~mut = array_of_4(4, 1, 3, 2)
+  mut.sort()
+  assert(optional_i32_or(mut.get(0), -1), eq: 1)
+  assert(optional_i32_or(mut.get(3), -1), eq: 4)
+
+  let sorted = array_of_3(5, 2, 4).sorted()
+  assert(optional_i32_or(sorted.get(0), -1), eq: 2)
+  assert(optional_i32_or(sorted.get(2), -1), eq: 5)
+
+test "array labeled overloads and ordering comparator forms":
+  let source = array_of_4(3, 1, 4, 2)
+  assert(optional_i32_or(source.get(at: 0), -1), eq: 3)
+  assert(source.at(at: 1), eq: 1)
+  assert(source.contains(value: 4), eq: true)
+  assert(source.contains(where: (value: i32) -> bool => value > 3), eq: true)
+  assert(source.any(where: (value: i32) -> bool => value == 2), eq: true)
+  assert(source.all(where: (value: i32) -> bool => value > 0), eq: true)
+
+  let found = source.find(where: (value: i32) -> bool => value == 4)
+  assert(optional_i32_or(found, -1), eq: 4)
+  match(source.find_index(value: 2))
+    Some<i32> { value }:
+      assert(value, eq: 3)
+    None:
+      assert(false)
+  match(source.find_index(where: (value: i32) -> bool => value == 9))
+    Some<i32>:
+      assert(false)
+    None:
+      assert(true)
+
+  let sorted = source.sorted(by: (left: i32, right: i32) -> Ordering =>
+    if left < right: less {}
+    left > right: greater {}
+    else: equal {}
+  )
+  assert(optional_i32_or(sorted.get(0), -1), eq: 1)
+  assert(optional_i32_or(source.get(0), -1), eq: 3)
+
+  let ~mut = source.copied()
+  mut.sort(by: (left: i32, right: i32) -> Ordering =>
+    if left < right: less {}
+    left > right: greater {}
+    else: equal {}
+  )
+  assert(optional_i32_or(mut.get(0), -1), eq: 1)
+
+  let ~extend_target = Array<i32>::init()
+  extend_target.extend(items: source)
+  assert(extend_target.len(), eq: source.len())

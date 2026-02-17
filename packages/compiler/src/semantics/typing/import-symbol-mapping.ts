@@ -416,6 +416,82 @@ export const registerImportedObjectTemplate = ({
     constraint: param.constraint ? translation(param.constraint) : undefined,
   }));
 
+  const dependencyTraitSymbols = new Set<SymbolId>();
+  const seenConstraintTypes = new Set<TypeId>();
+  const collectConstraintTraits = (type: TypeId): void => {
+    if (seenConstraintTypes.has(type)) {
+      return;
+    }
+    seenConstraintTypes.add(type);
+
+    const desc = dependency.typing.arena.get(type);
+    if (desc.kind === "trait") {
+      if (desc.owner.moduleId === dependency.moduleId) {
+        dependencyTraitSymbols.add(desc.owner.symbol);
+      }
+      desc.typeArgs.forEach(collectConstraintTraits);
+      return;
+    }
+    if (desc.kind === "intersection") {
+      desc.traits?.forEach(collectConstraintTraits);
+      if (typeof desc.nominal === "number") {
+        collectConstraintTraits(desc.nominal);
+      }
+      if (typeof desc.structural === "number") {
+        collectConstraintTraits(desc.structural);
+      }
+      return;
+    }
+    if (desc.kind === "nominal-object") {
+      desc.typeArgs.forEach(collectConstraintTraits);
+      return;
+    }
+    if (desc.kind === "structural-object") {
+      desc.fields.forEach((field) => collectConstraintTraits(field.type));
+      return;
+    }
+    if (desc.kind === "function") {
+      desc.parameters.forEach((param) => collectConstraintTraits(param.type));
+      collectConstraintTraits(desc.returnType);
+      return;
+    }
+    if (desc.kind === "union") {
+      desc.members.forEach(collectConstraintTraits);
+      return;
+    }
+    if (desc.kind === "recursive") {
+      collectConstraintTraits(desc.body);
+      return;
+    }
+    if (desc.kind === "fixed-array") {
+      collectConstraintTraits(desc.element);
+    }
+  };
+  template.params.forEach((param) => {
+    if (typeof param.constraint === "number") {
+      collectConstraintTraits(param.constraint);
+    }
+  });
+  dependencyTraitSymbols.forEach((traitSymbol) => {
+    const localTraitSymbol = mapDependencySymbolToLocal({
+      owner: traitSymbol,
+      dependency,
+      ctx,
+      allowUnexported: true,
+    });
+    registerImportedTraitDecl({
+      dependency,
+      dependencySymbol: traitSymbol,
+      localSymbol: localTraitSymbol,
+      ctx,
+    });
+    registerImportedTraitImplTemplates({
+      dependency,
+      dependencySymbol: traitSymbol,
+      ctx,
+    });
+  });
+
   const fields = template.fields.map((field) => ({
     name: field.name,
     type: translation(field.type),
@@ -571,10 +647,13 @@ export const registerImportedTraitImplTemplates = ({
   dependencySymbol: SymbolId;
   ctx: TypingContext;
 }): void => {
+  const dependencyRecord = dependency.symbolTable.getSymbol(dependencySymbol);
+  const dependencyIsTrait = dependencyRecord.kind === "trait";
   const relevantTemplates = dependency.typing.traits
     .getImplTemplates()
     .filter(
       (template) =>
+        (dependencyIsTrait && template.traitSymbol === dependencySymbol) ||
         targetTypeIncludesDependencySymbol({
           type: template.target,
           dependency,
