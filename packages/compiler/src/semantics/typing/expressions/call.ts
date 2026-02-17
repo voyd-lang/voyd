@@ -77,6 +77,7 @@ import {
   registerImportedTraitDecl,
   registerImportedTraitImplTemplates,
 } from "../import-symbol-mapping.js";
+import { collectTraitOwnersFromTypeParams } from "../constraint-trait-owners.js";
 
 type SymbolNameResolver = (symbol: SymbolId) => string;
 
@@ -105,99 +106,6 @@ const dependencyMethodSignatureCache = new WeakMap<
   Map<string, FunctionSignature>
 >();
 
-const collectConstraintTraitOwners = ({
-  type,
-  arena,
-  out,
-  seen,
-}: {
-  type: TypeId;
-  arena: TypingContext["arena"];
-  out: Map<string, SymbolRef>;
-  seen: Set<TypeId>;
-}): void => {
-  if (seen.has(type)) {
-    return;
-  }
-  seen.add(type);
-
-  const desc = arena.get(type);
-  switch (desc.kind) {
-    case "trait": {
-      out.set(`${desc.owner.moduleId}::${desc.owner.symbol}`, desc.owner);
-      desc.typeArgs.forEach((arg) =>
-        collectConstraintTraitOwners({ type: arg, arena, out, seen }),
-      );
-      return;
-    }
-    case "nominal-object":
-      desc.typeArgs.forEach((arg) =>
-        collectConstraintTraitOwners({ type: arg, arena, out, seen }),
-      );
-      return;
-    case "structural-object":
-      desc.fields.forEach((field) =>
-        collectConstraintTraitOwners({ type: field.type, arena, out, seen }),
-      );
-      return;
-    case "function":
-      desc.parameters.forEach((param) =>
-        collectConstraintTraitOwners({ type: param.type, arena, out, seen }),
-      );
-      collectConstraintTraitOwners({
-        type: desc.returnType,
-        arena,
-        out,
-        seen,
-      });
-      return;
-    case "union":
-      desc.members.forEach((member) =>
-        collectConstraintTraitOwners({ type: member, arena, out, seen }),
-      );
-      return;
-    case "intersection":
-      desc.traits?.forEach((trait) =>
-        collectConstraintTraitOwners({ type: trait, arena, out, seen }),
-      );
-      if (typeof desc.nominal === "number") {
-        collectConstraintTraitOwners({
-          type: desc.nominal,
-          arena,
-          out,
-          seen,
-        });
-      }
-      if (typeof desc.structural === "number") {
-        collectConstraintTraitOwners({
-          type: desc.structural,
-          arena,
-          out,
-          seen,
-        });
-      }
-      return;
-    case "recursive":
-      collectConstraintTraitOwners({
-        type: desc.body,
-        arena,
-        out,
-        seen,
-      });
-      return;
-    case "fixed-array":
-      collectConstraintTraitOwners({
-        type: desc.element,
-        arena,
-        out,
-        seen,
-      });
-      return;
-    default:
-      return;
-  }
-};
-
 const ensureImportedConstraintTraitsForSignature = ({
   signature,
   dependency,
@@ -207,18 +115,9 @@ const ensureImportedConstraintTraitsForSignature = ({
   dependency: DependencySemantics;
   ctx: TypingContext;
 }): void => {
-  const owners = new Map<string, SymbolRef>();
-  const seen = new Set<TypeId>();
-  signature.typeParams?.forEach((param) => {
-    if (typeof param.constraint !== "number") {
-      return;
-    }
-    collectConstraintTraitOwners({
-      type: param.constraint,
-      arena: dependency.typing.arena,
-      out: owners,
-      seen,
-    });
+  const owners = collectTraitOwnersFromTypeParams({
+    typeParams: signature.typeParams,
+    arena: dependency.typing.arena,
   });
 
   owners.forEach((owner) => {

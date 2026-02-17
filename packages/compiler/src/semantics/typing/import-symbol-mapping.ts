@@ -14,6 +14,7 @@ import {
   mapTypeParam,
   translateFunctionSignature,
 } from "./import-type-translation.js";
+import { collectTraitOwnersFromTypeParams } from "./constraint-trait-owners.js";
 import { findExport, makeDependencyContext } from "./import-resolution.js";
 import {
   methodSignatureKey,
@@ -417,72 +418,36 @@ export const registerImportedObjectTemplate = ({
   }));
 
   const dependencyTraitSymbols = new Set<SymbolId>();
-  const seenConstraintTypes = new Set<TypeId>();
-  const collectConstraintTraits = (type: TypeId): void => {
-    if (seenConstraintTypes.has(type)) {
-      return;
-    }
-    seenConstraintTypes.add(type);
-
-    const desc = dependency.typing.arena.get(type);
-    if (desc.kind === "trait") {
-      if (desc.owner.moduleId === dependency.moduleId) {
-        dependencyTraitSymbols.add(desc.owner.symbol);
+  const addDependencyTraitSymbols = (
+    owners: ReadonlyMap<string, { moduleId: string; symbol: SymbolId }>,
+  ): void => {
+    owners.forEach((owner) => {
+      if (owner.moduleId === dependency.moduleId) {
+        dependencyTraitSymbols.add(owner.symbol);
       }
-      desc.typeArgs.forEach(collectConstraintTraits);
-      return;
-    }
-    if (desc.kind === "intersection") {
-      desc.traits?.forEach(collectConstraintTraits);
-      if (typeof desc.nominal === "number") {
-        collectConstraintTraits(desc.nominal);
-      }
-      if (typeof desc.structural === "number") {
-        collectConstraintTraits(desc.structural);
-      }
-      return;
-    }
-    if (desc.kind === "nominal-object") {
-      desc.typeArgs.forEach(collectConstraintTraits);
-      return;
-    }
-    if (desc.kind === "structural-object") {
-      desc.fields.forEach((field) => collectConstraintTraits(field.type));
-      return;
-    }
-    if (desc.kind === "function") {
-      desc.parameters.forEach((param) => collectConstraintTraits(param.type));
-      collectConstraintTraits(desc.returnType);
-      return;
-    }
-    if (desc.kind === "union") {
-      desc.members.forEach(collectConstraintTraits);
-      return;
-    }
-    if (desc.kind === "recursive") {
-      collectConstraintTraits(desc.body);
-      return;
-    }
-    if (desc.kind === "fixed-array") {
-      collectConstraintTraits(desc.element);
-    }
+    });
   };
-  template.params.forEach((param) => {
-    if (typeof param.constraint === "number") {
-      collectConstraintTraits(param.constraint);
-    }
-  });
+
+  addDependencyTraitSymbols(
+    collectTraitOwnersFromTypeParams({
+      typeParams: template.params,
+      arena: dependency.typing.arena,
+    }),
+  );
+
   dependency.typing.memberMetadata.forEach((metadata, memberSymbol) => {
     if (metadata.owner !== dependencySymbol) {
       return;
     }
     const signature = dependency.typing.functions.getSignature(memberSymbol);
-    signature?.typeParams?.forEach((param) => {
-      if (typeof param.constraint === "number") {
-        collectConstraintTraits(param.constraint);
-      }
-    });
+    addDependencyTraitSymbols(
+      collectTraitOwnersFromTypeParams({
+        typeParams: signature?.typeParams,
+        arena: dependency.typing.arena,
+      }),
+    );
   });
+
   dependencyTraitSymbols.forEach((traitSymbol) => {
     const localTraitSymbol = mapDependencySymbolToLocal({
       owner: traitSymbol,

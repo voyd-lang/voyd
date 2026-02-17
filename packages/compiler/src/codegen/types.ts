@@ -20,6 +20,8 @@ import { pickTraitImplMethodMeta } from "./function-lookup.js";
 import type {
   CodegenContext,
   ClosureTypeInfo,
+  FunctionMetadata,
+  HirFunction,
   StructuralFieldInfo,
   StructuralTypeInfo,
   HirTypeExpr,
@@ -39,6 +41,7 @@ import type {
 import { buildInstanceSubstitution } from "./type-substitution.js";
 import { getSccContainingRoot } from "./graph/scc.js";
 import { emitRecursiveStructuralHeapTypeGroup } from "./structural-heap-type-emitter.js";
+import { typeContainsUnresolvedParam } from "../semantics/type-utils.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -1200,6 +1203,248 @@ const instantiateTraitImplsForNominal = ({
     return true;
   });
 };
+
+const describeTraitImplMetadataInstances = ({
+  metas,
+  runtimeType,
+}: {
+  metas: readonly FunctionMetadata[];
+  runtimeType: binaryen.Type;
+}): string =>
+  metas
+    .map((entry) => {
+      const receiverTypeIndex = entry.effectful
+        ? Math.max(0, entry.paramTypes.length - entry.paramTypeIds.length)
+        : 0;
+      const receiverType = entry.paramTypes[receiverTypeIndex] ?? runtimeType;
+      const receiverTypeId = entry.paramTypeIds[0];
+      return `${entry.wasmName}#${entry.instanceId}@${receiverType}(receiverTypeId=${receiverTypeId},typeArgs=[${entry.typeArgs.join(",")}])`;
+    })
+    .join(", ");
+
+const sanitizeIdentifierForWasm = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const symbolNameForModuleSymbol = ({
+  moduleId,
+  symbol,
+  ctx,
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+  ctx: CodegenContext;
+}): string =>
+  ctx.program.symbols.getName(ctx.program.symbols.idOf({ moduleId, symbol })) ??
+  `${symbol}`;
+
+const synthesizeConcreteFunctionMeta = ({
+  moduleId,
+  symbol,
+  ctx,
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+  ctx: CodegenContext;
+}): FunctionMetadata | undefined => {
+  const moduleView = ctx.program.modules.get(moduleId);
+  if (!moduleView) {
+    return undefined;
+  }
+  const functionItem = Array.from(moduleView.hir.items.values()).find(
+    (item): item is HirFunction =>
+      item.kind === "function" && item.symbol === symbol,
+  );
+  if (!functionItem) {
+    return undefined;
+  }
+
+  const signature = ctx.program.functions.getSignature(moduleId, symbol);
+  if (!signature) {
+    return undefined;
+  }
+  const scheme = ctx.program.types.getScheme(signature.scheme);
+  if (scheme.params.length > 0) {
+    return undefined;
+  }
+
+  const instanceId = ctx.program.functions.getInstanceId(moduleId, symbol, []);
+  if (typeof instanceId !== "number") {
+    return undefined;
+  }
+
+  const effectInfo = moduleView.effectsInfo.functions.get(symbol);
+  if (!effectInfo) {
+    return undefined;
+  }
+  const effectful = effectInfo.pure === false;
+  const instantiatedTypeId = ctx.program.types.instantiate(signature.scheme, []);
+  const instantiatedTypeDesc = ctx.program.types.getTypeDesc(instantiatedTypeId);
+  if (instantiatedTypeDesc.kind !== "function") {
+    return undefined;
+  }
+
+  const userParamTypes = instantiatedTypeDesc.parameters.map((param) =>
+    wasmTypeFor(param.type, ctx, new Set(), "signature"),
+  );
+  const widened = ctx.effectsBackend.abi.widenSignature({
+    ctx,
+    effectful,
+    userParamTypes,
+    userResultType: wasmTypeFor(
+      instantiatedTypeDesc.returnType,
+      ctx,
+      new Set(),
+      "signature",
+    ),
+  });
+
+  const metadata: FunctionMetadata = {
+    moduleId,
+    symbol,
+    wasmName: `${sanitizeIdentifierForWasm(
+      moduleView.hir.module.path,
+    )}__${sanitizeIdentifierForWasm(
+      symbolNameForModuleSymbol({ moduleId, symbol, ctx }),
+    )}_${symbol}`,
+    paramTypes: widened.paramTypes,
+    resultType: widened.resultType,
+    paramTypeIds: instantiatedTypeDesc.parameters.map((param) => param.type),
+    parameters: instantiatedTypeDesc.parameters.map((param, index) => ({
+      typeId: param.type,
+      label: param.label,
+      optional: param.optional,
+      name:
+        typeof functionItem.parameters[index]?.symbol === "number"
+          ? symbolNameForModuleSymbol({
+              moduleId,
+              symbol: functionItem.parameters[index]!.symbol,
+              ctx,
+            })
+          : undefined,
+    })),
+    resultTypeId: instantiatedTypeDesc.returnType,
+    typeArgs: [],
+    instanceId,
+    effectful,
+    effectRow: effectInfo.effectRow,
+  };
+
+  const bySymbol = ctx.functions.get(moduleId) ?? new Map<number, FunctionMetadata[]>();
+  const existing = bySymbol.get(symbol) ?? [];
+  if (!existing.some((entry) => entry.instanceId === metadata.instanceId)) {
+    bySymbol.set(symbol, [...existing, metadata]);
+    ctx.functions.set(moduleId, bySymbol);
+    ctx.functionInstances.set(metadata.instanceId, metadata);
+  }
+  return metadata;
+};
+
+const resolveTraitImplMethodMeta = ({
+  metas,
+  impl,
+  implRef,
+  traitMethod,
+  runtimeType,
+  ctx,
+}: {
+  metas: readonly FunctionMetadata[] | undefined;
+  impl: CodegenTraitImplInstance;
+  implRef: { moduleId: string; symbol: SymbolId };
+  traitMethod: SymbolId;
+  runtimeType: binaryen.Type;
+  ctx: CodegenContext;
+}): FunctionMetadata | undefined => {
+  const canonicalImplMethodId = ctx.program.symbols.canonicalIdOf(
+    implRef.moduleId,
+    implRef.symbol,
+  );
+  const intrinsicFlags =
+    ctx.program.symbols.getIntrinsicFunctionFlags(canonicalImplMethodId);
+  if (
+    intrinsicFlags.intrinsic &&
+    intrinsicFlags.intrinsicUsesSignature !== true
+  ) {
+    return undefined;
+  }
+
+  const knownMetas =
+    metas && metas.length > 0
+      ? metas
+      : (() => {
+          const synthesized = synthesizeConcreteFunctionMeta({
+            moduleId: implRef.moduleId,
+            symbol: implRef.symbol,
+            ctx,
+          });
+          if (!synthesized) {
+            return metas;
+          }
+          return ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
+        })();
+
+  const meta = pickTraitImplMethodMeta({
+    metas: knownMetas,
+    impl,
+    runtimeType,
+    ctx,
+  });
+  if (meta) {
+    return meta;
+  }
+
+  const signature = ctx.program.functions.getSignature(
+    implRef.moduleId,
+    implRef.symbol,
+  );
+  const scheme = signature
+    ? ctx.program.types.getScheme(signature.scheme)
+    : undefined;
+  const signatureTypeParamCount = signature?.typeParams?.length ?? 0;
+  const schemeTypeParamCount = scheme?.params.length ?? 0;
+  const unresolvedImplTarget = typeContainsUnresolvedParam({
+    typeId: impl.target,
+    getTypeDesc: (typeId) => ctx.program.types.getTypeDesc(typeId),
+  });
+  const unresolvedImplTrait = typeContainsUnresolvedParam({
+    typeId: impl.trait,
+    getTypeDesc: (typeId) => ctx.program.types.getTypeDesc(typeId),
+  });
+
+  if (
+    signatureTypeParamCount > 0 ||
+    schemeTypeParamCount > 0 ||
+    unresolvedImplTarget ||
+    unresolvedImplTrait
+  ) {
+    // Keep generic/unresolved entries out of concrete runtime dispatch tables.
+    return undefined;
+  }
+
+  const availableInstances = describeTraitImplMetadataInstances({
+    metas: knownMetas ?? [],
+    runtimeType,
+  });
+  const moduleView = ctx.program.modules.get(implRef.moduleId);
+  const hasFunctionItem = Boolean(
+    moduleView &&
+      Array.from(moduleView.hir.items.values()).some(
+        (item) => item.kind === "function" && item.symbol === implRef.symbol,
+      ),
+  );
+  throw new Error(
+    [
+      "codegen missing metadata for trait method impl",
+      `impl: ${implRef.moduleId}::${implRef.symbol}`,
+      `trait method: ${impl.traitSymbol}:${traitMethod}`,
+      `runtime type: ${runtimeType}`,
+      `impl target: ${impl.target}`,
+      `impl trait: ${impl.trait}`,
+      `impl has function item: ${hasFunctionItem}`,
+      `available instances: ${availableInstances || "<none>"}`,
+    ].join("\n"),
+  );
+};
+
 const createMethodLookupEntries = ({
   impls,
   ctx,
@@ -1221,9 +1466,11 @@ const createMethodLookupEntries = ({
     impl.methods.forEach(({ traitMethod, implMethod }) => {
       const implRef = ctx.program.symbols.refOf(implMethod as ProgramSymbolId);
       const metas = ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
-      const meta = pickTraitImplMethodMeta({
+      const meta = resolveTraitImplMethodMeta({
         metas,
         impl,
+        implRef,
+        traitMethod,
         runtimeType,
         ctx,
       });
