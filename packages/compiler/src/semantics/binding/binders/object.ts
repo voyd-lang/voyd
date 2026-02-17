@@ -1,6 +1,6 @@
 import type { Expr } from "../../../parser/index.js";
 import { isForm, isIdentifierAtom } from "../../../parser/index.js";
-import { rememberSyntax } from "../context.js";
+import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import type { ObjectFieldDecl, TypeParameterDecl } from "../../decls.js";
 import type { ScopeId } from "../../ids.js";
 import type { BindingContext } from "../types.js";
@@ -67,6 +67,7 @@ export const bindObjectDecl = (
         ast: field.ast,
         typeExpr: field.typeExpr,
         optional: field.optional,
+        documentation: declarationDocForSyntax(field.name, ctx),
         visibility: inheritMemberVisibility({
           ownerVisibility: decl.visibility,
           modifier: field.memberModifier,
@@ -84,6 +85,7 @@ export const bindObjectDecl = (
     fields,
     typeParameters,
     moduleIndex: ctx.nextModuleIndex++,
+    documentation: declarationDocForSyntax(decl.name, ctx),
   });
 };
 

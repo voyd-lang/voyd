@@ -7,6 +7,7 @@ import {
   analyzeProject,
   autoImportActions,
   definitionsAtPosition,
+  hoverAtPosition,
   renameAtPosition,
   resolveModuleRoots,
   toFileUri,
@@ -259,6 +260,73 @@ describe("language server project analysis", () => {
 
       const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
       expect(diagnostics).toHaveLength(0);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns markdown hover docs for documented symbols", async () => {
+    const project = await createProject({
+      "src/main.voyd": `/// Adds two numbers.\nfn add(\n  /// Left operand.\n  left: i32,\n  /// Right operand.\n  right: i32\n) -> i32\n  left + right\n\nfn main() -> i32\n  add(1, 2)\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const fnHover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 10, character: 3 },
+      });
+      expect(fnHover?.contents).toEqual({
+        kind: "markdown",
+        value: " Adds two numbers.",
+      });
+
+      const paramHover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 7, character: 3 },
+      });
+      expect(paramHover?.contents).toEqual({
+        kind: "markdown",
+        value: " Left operand.",
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns docs for symbols declared in modules named label", async () => {
+    const project = await createProject({
+      "src/label.voyd": `/// Label module docs.\npub fn tagged() -> i32\n  1\n`,
+      "src/main.voyd": `use src::label::all\n\nfn main() -> i32\n  tagged()\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 3, character: 3 },
+      });
+      expect(hover?.contents).toEqual({
+        kind: "markdown",
+        value: " Label module docs.",
+      });
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }

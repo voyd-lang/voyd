@@ -17,6 +17,7 @@ import {
   prepareRenameAtPosition,
   renameAtPosition,
 } from "./project/rename.js";
+import { hoverAtPosition } from "./project/hover.js";
 import type {
   AnalysisInputs,
   ProjectAnalysis,
@@ -28,6 +29,7 @@ import type {
 export {
   autoImportActions,
   definitionsAtPosition,
+  hoverAtPosition,
   prepareRenameAtPosition,
   renameAtPosition,
   resolveEntryPath,
@@ -152,6 +154,7 @@ export const buildProjectNavigationIndex = async ({
   return {
     occurrencesByUri: symbolIndex.occurrencesByUri,
     declarationsByKey: symbolIndex.declarationsByKey,
+    documentationByCanonicalKey: symbolIndex.documentationByCanonicalKey,
   };
 };
 
@@ -171,6 +174,7 @@ export const analyzeProject = async (inputs: AnalysisInputs): Promise<ProjectAna
     diagnosticsByUri: analysis.diagnosticsByUri,
     occurrencesByUri: symbolIndex.occurrencesByUri,
     declarationsByKey: symbolIndex.declarationsByKey,
+    documentationByCanonicalKey: symbolIndex.documentationByCanonicalKey,
     exportsByName: symbolIndex.exportsByName,
     moduleIdByFilePath: analysis.moduleIdByFilePath,
     graph: analysis.graph,

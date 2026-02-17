@@ -45,6 +45,7 @@ import {
 type SymbolIndex = {
   occurrencesByUri: ReadonlyMap<string, readonly SymbolOccurrence[]>;
   declarationsByKey: ReadonlyMap<string, readonly SymbolOccurrence[]>;
+  documentationByCanonicalKey: ReadonlyMap<string, string>;
   exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
   moduleIdByFilePath: ReadonlyMap<string, string>;
 };
@@ -322,6 +323,54 @@ export const buildSymbolIndex = async ({
     }
     return module.binding.symbolTable.getSymbol(ref.symbol).name;
   };
+
+  const symbolDocumentationByModule = new Map<string, Map<SymbolId, string>>();
+  semantics.forEach((entry, moduleId) => {
+    const docsBySymbol = new Map<SymbolId, string>();
+    const remember = (symbol: SymbolId, documentation: string | undefined) => {
+      if (documentation === undefined || docsBySymbol.has(symbol)) {
+        return;
+      }
+      docsBySymbol.set(symbol, documentation);
+    };
+
+    entry.binding.functions.forEach((fn) => {
+      remember(fn.symbol, fn.documentation);
+      fn.params.forEach((param) => {
+        remember(param.symbol, param.documentation);
+      });
+    });
+
+    entry.binding.typeAliases.forEach((alias) => {
+      remember(alias.symbol, alias.documentation);
+    });
+
+    entry.binding.objects.forEach((objectDecl) => {
+      remember(objectDecl.symbol, objectDecl.documentation);
+      objectDecl.fields.forEach((field) => {
+        remember(field.symbol, field.documentation);
+      });
+    });
+
+    entry.binding.traits.forEach((traitDecl) => {
+      remember(traitDecl.symbol, traitDecl.documentation);
+      traitDecl.methods.forEach((method) => {
+        remember(method.symbol, method.documentation);
+        method.params.forEach((param) => {
+          remember(param.symbol, param.documentation);
+        });
+      });
+    });
+
+    entry.binding.impls.forEach((implDecl) => {
+      remember(implDecl.symbol, implDecl.documentation);
+      implDecl.methods.forEach((method) => {
+        remember(method.symbol, method.documentation);
+      });
+    });
+
+    symbolDocumentationByModule.set(moduleId, docsBySymbol);
+  });
 
   const occurrencesByUri = new Map<string, SymbolOccurrence[]>();
   const occurrencesByKey = new Map<string, SymbolOccurrence[]>();
@@ -972,9 +1021,21 @@ export const buildSymbolIndex = async ({
     ]),
   );
 
+  const documentationByCanonicalKey = new Map<string, string>();
+  sortedDeclarations.forEach((entries, canonicalKey) => {
+    const documentation = entries
+      .map((entry) => symbolDocumentationByModule.get(entry.moduleId)?.get(entry.symbol))
+      .find((doc): doc is string => doc !== undefined);
+
+    if (documentation !== undefined) {
+      documentationByCanonicalKey.set(canonicalKey, documentation);
+    }
+  });
+
   return {
     occurrencesByUri: sortedOccurrences,
     declarationsByKey: sortedDeclarations,
+    documentationByCanonicalKey,
     exportsByName,
     moduleIdByFilePath,
   };

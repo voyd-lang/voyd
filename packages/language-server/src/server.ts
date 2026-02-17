@@ -6,13 +6,20 @@ import {
   type CodeActionParams,
   type DefinitionParams,
   type DidChangeWatchedFilesParams,
+  type HoverParams,
   type InitializeParams,
   type InitializeResult,
   type PrepareRenameParams,
   type RenameParams,
 } from "vscode-languageserver/lib/node/main.js";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import { autoImportActions, definitionsAtPosition, prepareRenameAtPosition, renameAtPosition } from "./project.js";
+import {
+  autoImportActions,
+  definitionsAtPosition,
+  hoverAtPosition,
+  prepareRenameAtPosition,
+  renameAtPosition,
+} from "./project.js";
 import { AnalysisCoordinator } from "./server/analysis-coordinator.js";
 import { DiagnosticsScheduler, type DiagnosticsRun } from "./server/diagnostics-scheduler.js";
 
@@ -108,6 +115,21 @@ const handleCodeActions = async ({
   });
 };
 
+const handleHover = async ({
+  params,
+  coordinator,
+}: {
+  params: HoverParams;
+  coordinator: AnalysisCoordinator;
+}) => {
+  const analysis = await coordinator.getNavigationForUri(params.textDocument.uri);
+  return hoverAtPosition({
+    analysis,
+    uri: params.textDocument.uri,
+    position: params.position,
+  });
+};
+
 export const startServer = ({
   connection = createConnection(ProposedFeatures.all),
 }: StartServerOptions = {}): void => {
@@ -132,6 +154,7 @@ export const startServer = ({
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       definitionProvider: true,
+      hoverProvider: true,
       renameProvider: {
         prepareProvider: true,
       },
@@ -176,6 +199,10 @@ export const startServer = ({
 
   connection.onCodeAction(async (params: CodeActionParams) =>
     handleCodeActions({ params, coordinator }),
+  );
+
+  connection.onHover(async (params: HoverParams) =>
+    handleHover({ params, coordinator }),
   );
 
   documents.listen(connection);

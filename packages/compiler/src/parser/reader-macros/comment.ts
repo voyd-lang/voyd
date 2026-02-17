@@ -1,7 +1,7 @@
 import { ReaderMacro } from "./types.js";
 
 export const comment: ReaderMacro = {
-  match: (t) => t.value === "//",
+  match: (t) => t.value.startsWith("//"),
   macro: (file, { token }) => {
     while (file.hasCharacters) {
       if (file.next === "\n") break;

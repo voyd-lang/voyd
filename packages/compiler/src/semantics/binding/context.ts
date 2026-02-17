@@ -106,3 +106,23 @@ export const rememberSyntax = (
   }
   ctx.syntaxByNode.set(syntax.syntaxId, syntax);
 };
+
+export const declarationDocForSyntax = (
+  syntax: Syntax | undefined,
+  ctx: Pick<BindingContext, "module">,
+): string | undefined => {
+  if (!syntax) {
+    return undefined;
+  }
+  return ctx.module.docs?.declarationsBySyntaxId.get(syntax.syntaxId);
+};
+
+export const parameterDocForSyntax = (
+  syntax: Syntax | undefined,
+  ctx: Pick<BindingContext, "module">,
+): string | undefined => {
+  if (!syntax) {
+    return undefined;
+  }
+  return ctx.module.docs?.parametersBySyntaxId.get(syntax.syntaxId);
+};
