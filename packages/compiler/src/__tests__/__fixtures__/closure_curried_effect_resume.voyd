@@ -1,0 +1,9 @@
+eff One
+  next(tail) -> i32
+
+pub fn main() -> i32
+  try
+    let f = (a: i32) => (b: i32) => a + b
+    f(One::next(), One::next())
+  One::next(tail):
+    tail(10)

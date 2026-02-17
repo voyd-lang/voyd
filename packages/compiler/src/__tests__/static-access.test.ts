@@ -135,4 +135,52 @@ describe("static access e2e", () => {
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(7);
   });
+
+  it("runs curried closure calls with optional arguments", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("closure_curried_optional_call.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(15);
+  });
+
+  it("handles callback closures that capture mutable state and use labeled calls", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("closure_callback_capture_labeled_calls.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(6);
+  });
+
+  it("resumes curried closure calls after effectful argument sites", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("closure_curried_effect_resume.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(20);
+  });
 });

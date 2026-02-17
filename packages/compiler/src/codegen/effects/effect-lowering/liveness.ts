@@ -257,7 +257,13 @@ const shouldSkipCalleeIdentifierUse = ({
 }: {
   symbol: SymbolId;
   ctx: CodegenContext;
-}): boolean => !!ctx.program.functions.getSignature(ctx.moduleId, symbol);
+}): boolean => {
+  if (!ctx.program.functions.getSignature(ctx.moduleId, symbol)) {
+    return false;
+  }
+  const canonicalId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, symbol);
+  return ctx.program.symbols.isModuleScoped(canonicalId);
+};
 
 const buildCfg = ({
   exprId,
@@ -330,10 +336,12 @@ const buildCfg = ({
     callExprId,
     argExprIds,
     argGraphs,
+    argIndexOffset = 0,
   }: {
     callExprId: HirExprId;
     argExprIds: readonly HirExprId[];
     argGraphs: readonly Subgraph[];
+    argIndexOffset?: number;
   }): void => {
     if (argExprIds.length === 0) return;
 
@@ -356,9 +364,9 @@ const buildCfg = ({
         ctx.module.types.getExprType(argExprId) ??
         ctx.program.primitives.unknown;
       tempCapturesByIndex[argIndex] = {
-        key: callArgTempKey({ callExprId, argIndex }),
+        key: callArgTempKey({ callExprId, argIndex: argIndex + argIndexOffset }),
         callExprId,
-        argIndex,
+        argIndex: argIndex + argIndexOffset,
         typeId,
       };
     });
@@ -589,9 +597,19 @@ const buildCfg = ({
       }
       case "call": {
         const calleeExpr = ctx.module.hir.expressions.get(expr.callee);
+        const calleeIdentifierIsModuleScoped =
+          calleeExpr?.exprKind === "identifier"
+            ? ctx.program.symbols.isModuleScoped(
+                ctx.program.symbols.canonicalIdOf(ctx.moduleId, calleeExpr.symbol)
+              )
+            : false;
+        const skipCalleeIdentifierUse =
+          calleeExpr?.exprKind === "identifier"
+            ? shouldSkipCalleeIdentifierUse({ symbol: calleeExpr.symbol, ctx })
+            : false;
         const calleeGraph =
           calleeExpr && calleeExpr.exprKind === "identifier"
-            ? shouldSkipCalleeIdentifierUse({ symbol: calleeExpr.symbol, ctx })
+            ? skipCalleeIdentifierUse
               ? nop()
               : buildExpr(expr.callee, flow)
             : calleeExpr && calleeExpr.exprKind === "overload-set"
@@ -625,11 +643,26 @@ const buildCfg = ({
                 : undefined,
         });
 
-        attachCallArgTempCaptures({
-          callExprId: expr.id,
-          argExprIds: expr.args.map((arg) => arg.expr),
-          argGraphs,
-        });
+        const includeCalleeTempCapture =
+          calleeExpr?.exprKind === "overload-set"
+            ? false
+            : calleeExpr?.exprKind === "identifier"
+              ? !calleeIdentifierIsModuleScoped
+              : true;
+        attachCallArgTempCaptures(
+          includeCalleeTempCapture
+            ? {
+                callExprId: expr.id,
+                argExprIds: [expr.callee, ...expr.args.map((arg) => arg.expr)],
+                argGraphs: [calleeGraph, ...argGraphs],
+                argIndexOffset: -1,
+              }
+            : {
+                callExprId: expr.id,
+                argExprIds: expr.args.map((arg) => arg.expr),
+                argGraphs,
+              }
+        );
 
         const graph = sequence([calleeGraph, ...argGraphs]);
         graph.exits.forEach((exit) => addEdge(exit, applyNode));

@@ -99,7 +99,9 @@ export const compileEffectOpCall = ({
         if (typeof field.tempId === "number") {
           const binding = fnCtx.tempLocals.get(field.tempId);
           if (!binding) {
-            throw new Error("missing temp local binding for perform env capture");
+            throw new Error(
+              `missing temp local binding for perform env capture (call ${expr.id}, temp ${field.tempId})`
+            );
           }
           return ctx.mod.local.get(binding.index, binding.type);
         }
