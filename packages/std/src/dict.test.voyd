@@ -63,14 +63,14 @@ test "dict init is empty":
   assert(map.is_empty(), eq: true)
 
 test "dict with_capacity supports inserts":
-  let ~map = Dict<String, i32>::with_capacity(size: 40)
+  let ~map = Dict<IntKey, i32>::with_capacity(size: 40)
   var index = 0
   while index < 40 do:
-    map.set(key: make_test_key(index), value: index)
+    map.set(key: IntKey { value: index }, value: index)
     index = index + 1
   assert(map.len(), eq: 40)
 
-  match(map.get(key: make_test_key(10)))
+  match(map.get(key: IntKey { value: 10 }))
     Some<i32> { value }:
       assert(value, eq: 10)
     None:
@@ -140,8 +140,7 @@ test "dict extend merged merge":
     other: right,
     on_conflict: (_key: String, l: i32, r: i32) -> i32 => l + r
   )
-  let ~out = Dict<String, i32>::init()
-  out.extend(entries: merged.entries())
+  let ~out = merged
   out.merge(other: merged, on_conflict: (_k: String, l: i32, r: i32) -> i32 => l + r)
   match(out.get(key: "a"))
     Some<i32> { value }:
@@ -150,7 +149,7 @@ test "dict extend merged merge":
       assert(false)
   match(out.get(key: "b"))
     Some<i32> { value }:
-      assert(value, eq: 2)
+      assert(value, eq: 4)
     None:
       assert(false)
 
@@ -203,20 +202,20 @@ test "dict entry helpers":
       assert(false)
 
 test "dict grows and preserves entries":
-  let ~map = Dict<String, i32>::init()
+  let ~map = Dict<IntKey, i32>::init()
   var index = 0
   while index < 80 do:
-    map.set(key: make_test_key(index), value: index)
+    map.set(key: IntKey { value: index }, value: index)
     index = index + 1
   assert(map.len(), eq: 80)
 
-  match(map.get(key: make_test_key(0)))
+  match(map.get(key: IntKey { value: 0 }))
     Some<i32> { value }:
       assert(value, eq: 0)
     None:
       assert(false)
 
-  match(map.get(key: make_test_key(79)))
+  match(map.get(key: IntKey { value: 79 }))
     Some<i32> { value }:
       assert(value, eq: 79)
     None:

@@ -619,6 +619,7 @@ const compileFunctionItem = (
       locals: [],
       nextLocalIndex: implSignature.paramTypes.length,
       returnTypeId: meta.resultTypeId,
+      returnWasmType: ctx.effectsBackend.abi.effectfulResultType(ctx),
       instanceId: meta.instanceId,
       typeInstanceId: meta.instanceId,
       effectful: true,
@@ -644,7 +645,7 @@ const compileFunctionItem = (
       exprId: fn.body,
       ctx,
       fnCtx: implCtx,
-      tailPosition: true,
+      tailPosition: false,
       expectedResultTypeId: implCtx.returnTypeId,
     });
 
@@ -695,6 +696,7 @@ const compileFunctionItem = (
     locals: [],
     nextLocalIndex: meta.paramTypes.length,
     returnTypeId: meta.resultTypeId,
+    returnWasmType: meta.resultType,
     instanceId: meta.instanceId,
     typeInstanceId: meta.instanceId,
     effectful: meta.effectful,
@@ -726,7 +728,7 @@ const compileFunctionItem = (
     exprId: fn.body,
     ctx,
     fnCtx,
-    tailPosition: true,
+    tailPosition: !meta.effectful,
     expectedResultTypeId: fnCtx.returnTypeId,
   });
   const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);

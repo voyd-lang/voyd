@@ -394,6 +394,7 @@ export const ensureContinuationFunction = ({
     locals,
     nextLocalIndex: params.length,
     returnTypeId: resolvedReturnTypeId,
+    returnWasmType: ctx.effectsRuntime.outcomeType,
     instanceId: typeInstanceId,
     typeInstanceId,
     effectful: true,

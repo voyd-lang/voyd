@@ -694,6 +694,9 @@ const emitResolvedCall = (
   const lookupKey = typeInstanceId ?? meta.instanceId;
   const returnTypeId = getRequiredExprType(callId, ctx, lookupKey);
   const expectedTypeId = expectedResultTypeId ?? returnTypeId;
+  const callResultWasmType = getExprBinaryenType(callId, ctx, lookupKey);
+  const callerReturnWasmType =
+    fnCtx.returnWasmType ?? wasmTypeFor(fnCtx.returnTypeId, ctx);
   const callArgs = meta.effectful
     ? [currentHandlerValue(ctx, fnCtx), ...args]
     : args;
@@ -721,6 +724,8 @@ const emitResolvedCall = (
     !fnCtx.effectful &&
     meta.resultTypeId === expectedTypeId &&
     returnTypeId === expectedTypeId &&
+    meta.resultType === callerReturnWasmType &&
+    callResultWasmType === callerReturnWasmType &&
     !requiresStructuralConversion(returnTypeId, expectedTypeId, ctx);
 
   if (allowReturnCall) {
@@ -728,7 +733,7 @@ const emitResolvedCall = (
       expr: ctx.mod.return_call(
         meta.wasmName,
         callArgs as number[],
-        getExprBinaryenType(callId, ctx, lookupKey)
+        callResultWasmType
       ),
       usedReturnCall: true,
     };
@@ -737,7 +742,7 @@ const emitResolvedCall = (
   const callExpr = ctx.mod.call(
     meta.wasmName,
     callArgs as number[],
-    getExprBinaryenType(callId, ctx, lookupKey)
+    callResultWasmType
   );
   return {
     expr: callExpr,
@@ -787,8 +792,20 @@ const compileCallArgumentsForParams = (
     return callee.exprKind;
   })();
   const fail = (detail: string): never => {
+    const paramSummary = params
+      .map(
+        (param, index) =>
+          `${index}:${param.label ?? "_"}${param.optional ? "?" : ""}@${param.typeId}`,
+      )
+      .join(", ");
+    const argSummary = call.args
+      .map((arg, index) => {
+        const argType = getRequiredExprType(arg.expr, ctx, typeInstanceId);
+        return `${index}:${arg.label ?? "_"}@expr${arg.expr}:type${argType}`;
+      })
+      .join(", ");
     throw new Error(
-      `call argument count mismatch for ${calleeName} (call ${call.id} in ${ctx.moduleId}): ${detail}`
+      `call argument count mismatch for ${calleeName} (call ${call.id} in ${ctx.moduleId}): ${detail}; params=[${paramSummary}]; args=[${argSummary}]`
     );
   };
   const labelsCompatible = (param: CallParam, argLabel: string | undefined): boolean => {
@@ -797,6 +814,9 @@ const compileCallArgumentsForParams = (
     }
     return argLabel === param.label;
   };
+  const allowsOmittedArgument = (param: CallParam): boolean =>
+    param.optional === true ||
+    ctx.program.optionals.getOptionalInfo(ctx.moduleId, param.typeId) !== undefined;
 
   type PlanEntry =
     | { kind: "direct"; argIndex: number }
@@ -818,7 +838,7 @@ const compileCallArgumentsForParams = (
     const arg = call.args[argIndex];
 
     if (!arg) {
-      if (param.optional) {
+      if (allowsOmittedArgument(param)) {
         plan.push({ kind: "missing", targetTypeId: param.typeId });
         paramIndex += 1;
         continue;
@@ -847,7 +867,7 @@ const compileCallArgumentsForParams = (
             cursor += 1;
             continue;
           }
-          if (runParam.optional) {
+          if (allowsOmittedArgument(runParam)) {
             plan.push({ kind: "missing", targetTypeId: runParam.typeId });
             cursor += 1;
             continue;
@@ -870,7 +890,7 @@ const compileCallArgumentsForParams = (
       continue;
     }
 
-    if (param.optional) {
+    if (allowsOmittedArgument(param)) {
       plan.push({ kind: "missing", targetTypeId: param.typeId });
       paramIndex += 1;
       continue;

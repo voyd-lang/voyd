@@ -82,6 +82,7 @@ export const emitSerializedExportWrapper = ({
     locals,
     nextLocalIndex: paramCount + locals.length,
     returnTypeId: meta.resultTypeId,
+    returnWasmType: binaryen.i32,
     effectful: false,
   };
 

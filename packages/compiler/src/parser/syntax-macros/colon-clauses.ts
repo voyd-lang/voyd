@@ -22,12 +22,71 @@ const isCallLikeForm = (form: Form): boolean => {
 const isNonBindingOp = (expr: Expr | undefined): boolean =>
   isIdentifierAtom(expr) && isOp(expr) && !blockBindingOps.has(expr.value);
 
+const isObjectLiteral = (expr: Expr | undefined): expr is Form =>
+  isForm(expr) && expr.callsInternal("object_literal");
+
+const clauseValueObjectLiteralHosts = new Set(["if", "while"]);
+
+const canCallWithObjectLiteral = (expr: Expr | undefined): boolean => {
+  if (!expr) {
+    return false;
+  }
+  if (isIdentifierAtom(expr)) {
+    return !expr.isQuoted && !isOp(expr);
+  }
+  if (!isForm(expr) || expr.callsInternal("paren") || expr.callsInternal("tuple")) {
+    return false;
+  }
+  const head = expr.first;
+  return isIdentifierAtom(head) && !head.isQuoted && !isOp(head);
+};
+
 const rebuildSameKind = (original: Form, elements: Expr[]): Form => {
   const rebuilt = new Form({
     location: original.location?.clone(),
     elements,
   });
   return original instanceof CallForm ? rebuilt.toCall() : rebuilt;
+};
+
+const withTrailingObjectLiteralValue = (
+  clause: Form,
+  objectLiteral: Form,
+): Form => {
+  const value = clause.at(2);
+  if (!canCallWithObjectLiteral(value)) {
+    return clause;
+  }
+
+  const mergedValue = new CallForm([value!, objectLiteral]);
+  return rebuildSameKind(clause, [clause.at(0)!, clause.at(1)!, mergedValue]);
+};
+
+const mergeClauseObjectLiterals = (form: Form): Form => {
+  const elements = form.toArray();
+  const result: Expr[] = [];
+
+  for (let index = 0; index < elements.length; index += 1) {
+    let current = elements[index]!;
+    if (isClause(current)) {
+      const maybeObjectLiteral = elements[index + 1];
+      if (isObjectLiteral(maybeObjectLiteral)) {
+        const merged = withTrailingObjectLiteralValue(current, maybeObjectLiteral);
+        if (merged !== current) {
+          current = merged;
+          index += 1;
+        }
+      }
+    }
+    result.push(current);
+  }
+
+  return rebuildSameKind(form, result);
+};
+
+const canMergeClauseObjectLiteralValues = (form: Form): boolean => {
+  const head = form.first;
+  return isIdentifierAtom(head) && clauseValueObjectLiteralHosts.has(head.value);
 };
 
 const attachClausesToRightmostCall = (expr: Form, clauses: Form[]): Form => {
@@ -66,12 +125,21 @@ const attachFollowingClauses = (form: Form): Form => {
   const result: Expr[] = [];
 
   for (let index = 0; index < elements.length; index += 1) {
-    const current = elements[index]!;
+    let current = elements[index]!;
+    if (isClause(current)) {
+      const maybeObjectLiteral = elements[index + 1];
+      if (isObjectLiteral(maybeObjectLiteral)) {
+        const merged = withTrailingObjectLiteralValue(current, maybeObjectLiteral);
+        if (merged !== current) {
+          current = merged;
+          index += 1;
+        }
+      }
+    }
 
     const previous = result.at(-1);
     if (isClause(current) && isForm(previous)) {
       result.pop();
-
       const collected: Form[] = [current];
       while (isClause(elements[index + 1] as Expr | undefined)) {
         index += 1;
@@ -99,13 +167,18 @@ const rewriteExpr = (expr: Expr): Expr => {
 
   const rewrittenChildren = expr.toArray().map(rewriteExpr);
   const rebuilt = rebuildSameKind(expr, rewrittenChildren);
+  const mergedClauseValues = canMergeClauseObjectLiteralValues(rebuilt)
+    ? mergeClauseObjectLiterals(rebuilt)
+    : rebuilt;
 
-  if (!isCallLikeForm(rebuilt)) {
-    return rebuilt;
+  if (!isCallLikeForm(mergedClauseValues)) {
+    return mergedClauseValues;
   }
 
   // 1) `foo (block (: ...) (: ...))` => `foo (: ...) (: ...)`
-  const withSplicedTrailingSuite = spliceTrailingClauseSuiteBlock(rebuilt);
+  const withSplicedTrailingSuite = spliceTrailingClauseSuiteBlock(
+    mergedClauseValues,
+  );
 
   // 2) In suite containers, `foo\n  (: ...)\n  (: ...)` => `foo (: ...) (: ...)`
   const isSuiteContainer =

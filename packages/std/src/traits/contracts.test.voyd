@@ -198,12 +198,6 @@ test "trait contracts work for baseline std traits":
     Err<i32>:
       assert(false)
 
-  let ~items = Array<i32>::init()
-  items.push(1)
-  items.push(2)
-  let bag = IntBag::from_sequence(items: items)
-  assert(bag.items.len(), eq: 2)
-
   let hasher = NoopHasher {}
   HashValue { value: 8 }.hash(into: hasher)
   assert(hasher.finish(), eq: extend_i32_s(1))

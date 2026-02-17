@@ -392,7 +392,7 @@ test "array default sort and sorted overloads":
   assert(optional_i32_or(sorted.get(0), -1), eq: 2)
   assert(optional_i32_or(sorted.get(2), -1), eq: 5)
 
-test "array labeled overloads and ordering comparator forms":
+test "array labeled overloads and predicates":
   let source = array_of_4(3, 1, 4, 2)
   assert(optional_i32_or(source.get(at: 0), -1), eq: 3)
   assert(source.at(at: 1), eq: 1)
@@ -414,6 +414,8 @@ test "array labeled overloads and ordering comparator forms":
     None:
       assert(true)
 
+test "array sorted by ordering comparator":
+  let source = array_of_4(3, 1, 4, 2)
   let sorted = source.sorted(by: (left: i32, right: i32) -> Ordering =>
     if left < right: less {}
     left > right: greater {}
@@ -422,6 +424,8 @@ test "array labeled overloads and ordering comparator forms":
   assert(optional_i32_or(sorted.get(0), -1), eq: 1)
   assert(optional_i32_or(source.get(0), -1), eq: 3)
 
+test "array sort by ordering comparator":
+  let source = array_of_4(3, 1, 4, 2)
   let ~mut = source.copied()
   mut.sort(by: (left: i32, right: i32) -> Ordering =>
     if left < right: less {}
@@ -430,6 +434,8 @@ test "array labeled overloads and ordering comparator forms":
   )
   assert(optional_i32_or(mut.get(0), -1), eq: 1)
 
+test "array extend array overload":
+  let source = array_of_4(3, 1, 4, 2)
   let ~extend_target = Array<i32>::init()
-  extend_target.extend(items: source)
+  extend_target.extend(source)
   assert(extend_target.len(), eq: source.len())

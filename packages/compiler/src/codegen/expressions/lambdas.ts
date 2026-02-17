@@ -140,6 +140,7 @@ const emitLambdaFunction = ({
       locals: [],
       nextLocalIndex: implParams.length,
       returnTypeId: desc.returnType,
+      returnWasmType: ctx.effectsBackend.abi.effectfulResultType(ctx),
       instanceId: typeInstanceId,
       typeInstanceId,
       effectful: true,
@@ -173,7 +174,7 @@ const emitLambdaFunction = ({
       exprId: expr.body,
       ctx,
       fnCtx: implCtx,
-      tailPosition: true,
+      tailPosition: false,
       expectedResultTypeId: desc.returnType,
     });
     const returnWasmType = wasmTypeFor(desc.returnType, ctx);
@@ -211,13 +212,14 @@ const emitLambdaFunction = ({
     return;
   }
 
-  const effectful = abiEffectful;
+  const effectful = typeEffectful || abiEffectful;
   const lambdaCtx: FunctionContext = {
     bindings: new Map(),
     tempLocals: new Map(),
     locals: [],
     nextLocalIndex: params.length,
     returnTypeId: desc.returnType,
+    returnWasmType: env.base.resultType,
     instanceId: typeInstanceId,
     typeInstanceId,
     effectful,
@@ -256,7 +258,7 @@ const emitLambdaFunction = ({
     exprId: expr.body,
     ctx,
     fnCtx: lambdaCtx,
-    tailPosition: true,
+    tailPosition: !effectful,
     expectedResultTypeId: desc.returnType,
   });
   const returnWasmType = wasmTypeFor(desc.returnType, ctx);

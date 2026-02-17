@@ -257,10 +257,9 @@ impl<T> Array<T>
     )
 
   api fn sorted(self, { by compare: (left: T, right: T) -> Ordering }) -> Array<T>
-    self.sorted(
-      (left: T, right: T) -> i32 =>
-        ordering_to_i32(compare(left, right))
-    )
+    let ~copy = self.copied()
+    copy.sort(by: compare)
+    copy
 
   api fn reversed(self) -> Array<T>
     let ~copy = self.copied()
@@ -421,10 +420,22 @@ impl<T> Array<T>
     )
 
   api fn sort(~self, { by compare: (left: T, right: T) -> Ordering }) -> void
-    self.sort(
-      (left: T, right: T) -> i32 =>
-        ordering_to_i32(compare(left, right))
-    )
+    if self.count < 2:
+      return void
+
+    self.ensure_unique(self.count)
+    var index = 1
+    while index < self.count:
+      let value = __array_get(self.storage, index)
+      var cursor = index - 1
+      while cursor >= 0 do:
+        let shifted = __array_get(self.storage, cursor)
+        if ordering_to_i32(compare(shifted, value)) <= 0 then:
+          break
+        __array_set(self.storage, cursor + 1, shifted)
+        cursor = cursor - 1
+      __array_set(self.storage, cursor + 1, value)
+      index = index + 1
 
   api fn reverse(~self) -> void
     if self.count < 2:

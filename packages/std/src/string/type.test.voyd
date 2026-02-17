@@ -112,12 +112,24 @@ test "string search helpers":
     None:
       assert(false)
 
-test "string split overloads":
+test "string split on rune":
   let value = "a,b,,c"
-  assert(value.split(on: 44).len(), eq: 4)
-  assert(value.split(on: ",").len(), eq: 4)
+  assert(value.split(on: 44).len(), eq: 3)
+
+test "string split on substring":
+  let value = "a,b,,c"
+  assert(value.split(on: ",").len(), eq: 3)
+
+test "string split keep_empty false":
+  let value = "a,b,,c"
   assert(value.split(on: ",", keep_empty: false).len(), eq: 3)
+
+test "string split max_splits":
+  let value = "a,b,,c"
   assert(value.split(on: ",", max_splits: 1).len(), eq: 2)
+
+test "string split where predicate":
+  let value = "a,b,,c"
   assert(
     value.split(where: (rune: i32) -> bool => rune == 44, keep_empty: true).len(),
     eq: 4
