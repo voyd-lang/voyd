@@ -1903,6 +1903,34 @@ const instantiateTraitImplsFor = ({
     if (!match.ok) {
       return;
     }
+
+    const implTypeArgSubstitution = new Map<TypeParamId, TypeId>();
+    template.typeParams.forEach((param) =>
+      implTypeArgSubstitution.set(
+        param.typeParam,
+        match.substitution.get(param.typeParam) ?? ctx.primitives.unknown,
+      ),
+    );
+
+    const constraintsSatisfied = template.typeParams.every((param) => {
+      if (!param.constraint) {
+        return true;
+      }
+      const applied =
+        implTypeArgSubstitution.get(param.typeParam) ?? ctx.primitives.unknown;
+      if (applied === ctx.primitives.unknown) {
+        return true;
+      }
+      const constraint = ctx.arena.substitute(
+        param.constraint,
+        implTypeArgSubstitution,
+      );
+      return typeSatisfies(applied, constraint, ctx, state);
+    });
+    if (!constraintsSatisfied) {
+      return;
+    }
+
     const appliedTrait = ctx.arena.substitute(
       template.trait,
       match.substitution,

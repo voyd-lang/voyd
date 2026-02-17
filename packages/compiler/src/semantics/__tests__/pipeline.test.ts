@@ -656,6 +656,19 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("accepts impl templates when impl type parameter constraints are satisfied", () => {
+    const ast = loadAst("generic_constraints_impl_type_param_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects impl template matches when impl type parameter constraints are violated", () => {
+    const ast = loadAst("generic_constraints_impl_type_param_failure.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /does not satisfy.*constraint/i
+    );
+  });
+
   it("lowers nominal constructor overloads across modules", () => {
     const animalFixture = "nominal_constructors_cross_module/animal.voyd";
     const mainFixture = "nominal_constructors_cross_module/main.voyd";
