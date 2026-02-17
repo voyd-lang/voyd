@@ -107,18 +107,13 @@ const resolveFixedArrayType = ({
   ctx: TypingContext;
   state: TypingState;
 }): TypeId => {
-  const normalized = normalizeTypeArgs({
+  const normalized = normalizeDeclarationTypeArgs({
     typeArgs,
     paramCount: 1,
-    unknownType: ctx.primitives.unknown,
+    ctx,
+    state,
     context: "FixedArray",
   });
-
-  if (normalized.missingCount > 0 && state.mode === "strict") {
-    throw new Error(
-      `FixedArray is missing ${normalized.missingCount} type argument(s)`,
-    );
-  }
 
   return ctx.arena.internFixedArray(normalized.applied[0]!);
 };
@@ -635,6 +630,133 @@ const ensureFieldsSubstituted = (
   });
 };
 
+const normalizeDeclarationTypeArgs = ({
+  typeArgs,
+  paramCount,
+  ctx,
+  state,
+  context,
+  requireAllTypeArgs,
+}: {
+  typeArgs: readonly TypeId[];
+  paramCount: number;
+  ctx: TypingContext;
+  state: TypingState;
+  context: string;
+  requireAllTypeArgs?: boolean;
+}) => {
+  const normalized = normalizeTypeArgs({
+    typeArgs,
+    paramCount,
+    unknownType: ctx.primitives.unknown,
+    context,
+  });
+
+  if (
+    normalized.missingCount > 0 &&
+    (requireAllTypeArgs === true || state.mode === "strict")
+  ) {
+    throw new Error(
+      `${context} is missing ${normalized.missingCount} type argument(s)`,
+    );
+  }
+
+  return normalized;
+};
+
+const enforceExprTypeParameterConstraints = ({
+  params,
+  appliedArgs,
+  ctx,
+  state,
+  context,
+}: {
+  params: readonly { symbol: SymbolId; constraint?: HirTypeExpr }[];
+  appliedArgs: readonly TypeId[];
+  ctx: TypingContext;
+  state: TypingState;
+  context: string;
+}): ReadonlyMap<SymbolId, TypeId> => {
+  const typeParamMap = new Map<SymbolId, TypeId>();
+  params.forEach((param, index) =>
+    typeParamMap.set(param.symbol, appliedArgs[index] ?? ctx.primitives.unknown),
+  );
+
+  params.forEach((param, index) => {
+    if (!param.constraint) {
+      return;
+    }
+    const applied = appliedArgs[index] ?? ctx.primitives.unknown;
+    if (applied === ctx.primitives.unknown) {
+      return;
+    }
+    const resolvedConstraint = resolveTypeExpr(
+      param.constraint,
+      ctx,
+      state,
+      ctx.primitives.unknown,
+      typeParamMap,
+    );
+    if (!typeSatisfies(applied, resolvedConstraint, ctx, state)) {
+      throw new Error(
+        `type argument for ${getSymbolName(
+          param.symbol,
+          ctx,
+        )} does not satisfy constraint for ${context}`,
+      );
+    }
+  });
+
+  return typeParamMap;
+};
+
+const enforceResolvedTypeParameterConstraints = ({
+  params,
+  appliedArgs,
+  ctx,
+  state,
+  context,
+}: {
+  params: readonly {
+    symbol: SymbolId;
+    typeParam: TypeParamId;
+    constraint?: TypeId;
+  }[];
+  appliedArgs: readonly TypeId[];
+  ctx: TypingContext;
+  state: TypingState;
+  context: string;
+}): ReadonlyMap<TypeParamId, TypeId> => {
+  const substitution = new Map<TypeParamId, TypeId>();
+  params.forEach((param, index) =>
+    substitution.set(
+      param.typeParam,
+      appliedArgs[index] ?? ctx.primitives.unknown,
+    ),
+  );
+
+  params.forEach((param, index) => {
+    if (!param.constraint) {
+      return;
+    }
+    const applied = appliedArgs[index] ?? ctx.primitives.unknown;
+    if (applied === ctx.primitives.unknown) {
+      return;
+    }
+    const constraintType = ctx.arena.substitute(param.constraint, substitution);
+    if (!typeSatisfies(applied, constraintType, ctx, state)) {
+      throw new Error(
+        `type argument for ${getSymbolName(
+          param.symbol,
+          ctx,
+        )} does not satisfy constraint for ${context}`,
+      );
+    }
+  });
+
+  return substitution;
+};
+
 export const registerPrimitive = (
   ctx: TypingContext,
   canonical: string,
@@ -741,18 +863,14 @@ export const resolveTypeAlias = (
     throw new Error(`missing type alias target for ${aliasName}`);
   }
 
-  const normalized = normalizeTypeArgs({
+  const normalized = normalizeDeclarationTypeArgs({
     typeArgs,
     paramCount: template.params.length,
-    unknownType: ctx.primitives.unknown,
+    ctx,
+    state,
     context: `type alias ${aliasName}`,
+    requireAllTypeArgs: true,
   });
-
-  if (normalized.missingCount > 0) {
-    throw new Error(
-      `type alias ${aliasName} is missing ${normalized.missingCount} type argument(s)`,
-    );
-  }
 
   const key = makeTypeAliasInstanceKey(symbol, normalized.applied);
   const cacheable = shouldCacheInstantiation(normalized);
@@ -788,40 +906,12 @@ export const resolveTypeAlias = (
       void placeholder;
       ctx.typeAliases.beginResolution(key, self);
 
-      const paramMap = new Map<SymbolId, TypeId>();
-      template.params.forEach((param, index) =>
-        paramMap.set(
-          param.symbol,
-          normalized.applied[index] ?? ctx.primitives.unknown,
-        ),
-      );
-
-      template.params.forEach((param, index) => {
-        if (!param.constraint) {
-          return;
-        }
-        const applied = normalized.applied[index] ?? ctx.primitives.unknown;
-        if (applied === ctx.primitives.unknown) {
-          return;
-        }
-        const resolvedConstraint = resolveTypeExpr(
-          param.constraint,
-          ctx,
-          state,
-          ctx.primitives.unknown,
-          paramMap,
-        );
-        if (!typeSatisfies(applied, resolvedConstraint, ctx, state)) {
-          throw new Error(
-            `type argument for ${getSymbolName(
-              param.symbol,
-              ctx,
-            )} does not satisfy constraint for type alias ${getSymbolName(
-              symbol,
-              ctx,
-            )}`,
-          );
-        }
+      const paramMap = enforceExprTypeParameterConstraints({
+        params: template.params,
+        appliedArgs: normalized.applied,
+        ctx,
+        state,
+        context: `type alias ${aliasName}`,
       });
 
       const targetType = resolveTypeExpr(
@@ -1657,21 +1747,15 @@ export const ensureObjectType = (
   const templateParamSet = new Set(
     template.params.map((param) => param.typeParam),
   );
+  const objectName = getSymbolName(symbol, ctx);
 
-  const normalized = normalizeTypeArgs({
+  const normalized = normalizeDeclarationTypeArgs({
     typeArgs,
     paramCount: template.params.length,
-    unknownType: ctx.primitives.unknown,
-    context: `object ${getSymbolName(symbol, ctx)}`,
+    ctx,
+    state,
+    context: `object ${objectName}`,
   });
-
-  if (normalized.missingCount > 0 && state.mode === "strict") {
-    throw new Error(
-      `object ${getSymbolName(symbol, ctx)} is missing ${
-        normalized.missingCount
-      } type argument(s)`,
-    );
-  }
 
   const key = makeObjectInstanceKey(symbol, normalized.applied);
   const cacheable = shouldCacheInstantiation(normalized);
@@ -1682,28 +1766,12 @@ export const ensureObjectType = (
     }
   }
 
-  const subst = new Map<TypeParamId, TypeId>();
-  template.params.forEach((param, index) =>
-    subst.set(param.typeParam, normalized.applied[index]!),
-  );
-
-  template.params.forEach((param, index) => {
-    if (!param.constraint) {
-      return;
-    }
-    const applied = normalized.applied[index] ?? ctx.primitives.unknown;
-    if (applied === ctx.primitives.unknown) {
-      return;
-    }
-    const constraintType = ctx.arena.substitute(param.constraint, subst);
-    if (!typeSatisfies(applied, constraintType, ctx, state)) {
-      throw new Error(
-        `type argument for ${getSymbolName(
-          param.symbol,
-          ctx,
-        )} does not satisfy constraint for object ${getSymbolName(symbol, ctx)}`,
-      );
-    }
+  const subst = enforceResolvedTypeParameterConstraints({
+    params: template.params,
+    appliedArgs: normalized.applied,
+    ctx,
+    state,
+    context: `object ${objectName}`,
   });
 
   const nominal = ctx.arena.substitute(template.nominal, subst);
@@ -1715,10 +1783,7 @@ export const ensureObjectType = (
   );
   if (unresolvedStructuralParams.size > 0) {
     throw new Error(
-      `object ${getSymbolName(
-        symbol,
-        ctx,
-      )} is missing substitutions for its structural fields`,
+      `object ${objectName} is missing substitutions for its structural fields`,
     );
   }
   const type = ctx.arena.substitute(template.type, subst);
@@ -1734,7 +1799,7 @@ export const ensureObjectType = (
   ensureFieldsSubstituted(
     fields,
     ctx,
-    `object ${getSymbolName(symbol, ctx)} instantiation`,
+    `object ${objectName} instantiation`,
   );
   const baseNominal = template.baseNominal
     ? ctx.arena.substitute(template.baseNominal, subst)
@@ -1780,51 +1845,21 @@ export const ensureTraitType = (
   const traitName = getSymbolName(symbol, ctx);
   const paramCount =
     hirDecl?.typeParameters?.length ?? decl.typeParameters?.length ?? 0;
-  const normalized = normalizeTypeArgs({
+  const normalized = normalizeDeclarationTypeArgs({
     typeArgs,
     paramCount,
-    unknownType: ctx.primitives.unknown,
+    ctx,
+    state,
     context: `trait ${traitName}`,
   });
 
-  if (normalized.missingCount > 0 && state.mode === "strict") {
-    throw new Error(
-      `trait ${traitName} is missing ${normalized.missingCount} type argument(s)`,
-    );
-  }
-
   if (hirDecl?.typeParameters && hirDecl.typeParameters.length > 0) {
-    const typeParamMap = new Map<SymbolId, TypeId>();
-    hirDecl.typeParameters.forEach((param, index) =>
-      typeParamMap.set(
-        param.symbol,
-        normalized.applied[index] ?? ctx.primitives.unknown,
-      ),
-    );
-
-    hirDecl.typeParameters.forEach((param, index) => {
-      if (!param.constraint) {
-        return;
-      }
-      const applied = normalized.applied[index] ?? ctx.primitives.unknown;
-      if (applied === ctx.primitives.unknown) {
-        return;
-      }
-      const resolvedConstraint = resolveTypeExpr(
-        param.constraint,
-        ctx,
-        state,
-        ctx.primitives.unknown,
-        typeParamMap,
-      );
-      if (!typeSatisfies(applied, resolvedConstraint, ctx, state)) {
-        throw new Error(
-          `type argument for ${getSymbolName(
-            param.symbol,
-            ctx,
-          )} does not satisfy constraint for trait ${traitName}`,
-        );
-      }
+    enforceExprTypeParameterConstraints({
+      params: hirDecl.typeParameters,
+      appliedArgs: normalized.applied,
+      ctx,
+      state,
+      context: `trait ${traitName}`,
     });
   }
 
