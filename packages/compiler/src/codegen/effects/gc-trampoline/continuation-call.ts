@@ -6,7 +6,6 @@ import type {
   ExpressionCompiler,
   FunctionContext,
   HirCallExpr,
-  TypeId,
 } from "../../context.js";
 import { callRef, refCast } from "@voyd/lib/binaryen-gc/index.js";
 import { boxOutcomeValue } from "../outcome-values.js";
@@ -20,16 +19,12 @@ export const compileContinuationCall = ({
   ctx,
   fnCtx,
   compileExpr,
-  expectedResultTypeId,
-  tailPosition,
 }: {
   expr: HirCallExpr;
   continuation: ContinuationBinding;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
-  expectedResultTypeId?: TypeId;
-  tailPosition: boolean;
 }): CompiledExpression => {
   const resumeTypeId = continuation.resumeTypeId;
   const resumeWasmType = wasmTypeFor(resumeTypeId, ctx);

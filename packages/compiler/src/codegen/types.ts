@@ -42,9 +42,6 @@ import { emitRecursiveStructuralHeapTypeGroup } from "./structural-heap-type-emi
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
-const sanitizeIdentifier = (value: string): string =>
-  value.replace(/[^a-zA-Z0-9_]/g, "_");
-
 export type WasmTypeMode = "runtime" | "signature";
 
 type RuntimeTypeKeyState = {
@@ -229,9 +226,6 @@ const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
   ctx.program.symbols.getName(
     ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol }),
   ) ?? `${symbol}`;
-
-const functionKey = (moduleId: string, symbol: number): string =>
-  `${moduleId}::${symbol}`;
 
 const traitMethodHash = ({
   traitSymbol,
@@ -788,7 +782,7 @@ export const getExprBinaryenType = (
 
 export const getTypeIdFromTypeExpr = (
   expr: HirTypeExpr,
-  ctx: CodegenContext,
+  _ctx: CodegenContext,
 ): TypeId => {
   if (typeof expr.typeId === "number") {
     return expr.typeId;

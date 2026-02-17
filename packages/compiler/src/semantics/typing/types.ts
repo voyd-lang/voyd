@@ -1,6 +1,5 @@
 import type { SymbolTable } from "../binder/index.js";
 import type {
-  HirExpression,
   HirFunction,
   HirGraph,
   HirObjectDecl,

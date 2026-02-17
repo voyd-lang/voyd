@@ -4,71 +4,23 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../ast/index.js";
-import { call } from "../ast/init-helpers.js";
 import { cloneAttributes } from "../ast/syntax.js";
 import type { SerializerAttribute } from "../attributes.js";
 import { SyntaxMacroError } from "./macro-error.js";
 import type { SyntaxMacro } from "./types.js";
 import { parseStringValue } from "./string-value.js";
+import { transformFormSequence } from "./sequence-transform.js";
 
 type PendingSerializerAttribute = SerializerAttribute & { source: Form };
 
 export const serializerAttributeMacro: SyntaxMacro = (form) =>
   attachSerializerAttributes(form);
 
-export const stripSerializerAttributeForms = (form: Form): Form => {
-  if (form.callsInternal("ast")) {
-    const { elements, changed } = stripSequence(form.rest, true);
-    if (!changed) {
-      return form;
-    }
-    const wrapped = call("ast", ...elements);
-    wrapped.setLocation(form.location?.clone());
-    wrapped.attributes = cloneAttributes(form.attributes);
-    return wrapped;
-  }
+export const stripSerializerAttributeForms = (form: Form): Form =>
+  transformFormSequence({ form, transform: stripSequence });
 
-  const { elements, changed } = stripSequence(
-    form.toArray(),
-    form.calls("block") || form.callsInternal("ast")
-  );
-  if (!changed) {
-    return form;
-  }
-  const rebuilt = new (form.constructor as typeof Form)({
-    location: form.location?.clone(),
-    elements,
-  });
-  rebuilt.attributes = cloneAttributes(form.attributes);
-  return rebuilt;
-};
-
-const attachSerializerAttributes = (form: Form): Form => {
-  if (form.callsInternal("ast")) {
-    const { elements, changed } = processSequence(form.rest, true);
-    if (!changed) {
-      return form;
-    }
-    const wrapped = call("ast", ...elements);
-    wrapped.setLocation(form.location?.clone());
-    wrapped.attributes = cloneAttributes(form.attributes);
-    return wrapped;
-  }
-
-  const { elements, changed } = processSequence(
-    form.toArray(),
-    form.calls("block") || form.callsInternal("ast")
-  );
-  if (!changed) {
-    return form;
-  }
-  const rebuilt = new (form.constructor as typeof Form)({
-    location: form.location?.clone(),
-    elements,
-  });
-  rebuilt.attributes = cloneAttributes(form.attributes);
-  return rebuilt;
-};
+const attachSerializerAttributes = (form: Form): Form =>
+  transformFormSequence({ form, transform: processSequence });
 
 const processSequence = (
   elements: readonly Expr[],
@@ -86,51 +38,51 @@ const processSequence = (
       changed = true;
     }
 
-	    let serializerAttributeForm: Form | null = null;
-	    if (allowAttributes && isSerializerAttributeForm(processed)) {
-	      serializerAttributeForm = processed;
-	    }
-	    if (serializerAttributeForm) {
-	      if (pending) {
-	        throw new SyntaxMacroError(
-	          "duplicate @serializer attribute",
-	          serializerAttributeForm
-	        );
-	      }
-	      pending = parseSerializerAttribute(serializerAttributeForm as Form);
-	      changed = true;
-	      continue;
-	    }
+    let serializerAttributeForm: Form | null = null;
+    if (allowAttributes && isSerializerAttributeForm(processed)) {
+      serializerAttributeForm = processed;
+    }
+    if (serializerAttributeForm) {
+      if (pending) {
+        throw new SyntaxMacroError(
+          "duplicate @serializer attribute",
+          serializerAttributeForm
+        );
+      }
+      pending = parseSerializerAttribute(serializerAttributeForm as Form);
+      changed = true;
+      continue;
+    }
 
-	    if (pending && allowAttributes) {
-	      const kind = isForm(processed) ? getTypeDeclKind(processed) : null;
-	      if (kind === "trait") {
-	        throw new SyntaxMacroError(
-	          "@serializer is not supported on trait declarations",
-	          pending.source
-	        );
-	      }
-	      if (kind) {
-	        attachSerializerAttribute(processed as Form, pending);
-	        changed = true;
-	        pending = null;
-	      } else {
-	        throw new SyntaxMacroError(
-	          "@serializer attribute must precede a type",
-	          pending.source
-	        );
-	      }
-	    }
+    if (pending && allowAttributes) {
+      const kind = isForm(processed) ? getTypeDeclKind(processed) : null;
+      if (kind === "trait") {
+        throw new SyntaxMacroError(
+          "@serializer is not supported on trait declarations",
+          pending.source
+        );
+      }
+      if (kind) {
+        attachSerializerAttribute(processed as Form, pending);
+        changed = true;
+        pending = null;
+      } else {
+        throw new SyntaxMacroError(
+          "@serializer attribute must precede a type",
+          pending.source
+        );
+      }
+    }
 
     result.push(processed);
   }
 
-	  if (pending && allowAttributes) {
-	    throw new SyntaxMacroError(
-	      "@serializer attribute missing a type",
-	      pending.source
-	    );
-	  }
+  if (pending && allowAttributes) {
+    throw new SyntaxMacroError(
+      "@serializer attribute missing a type",
+      pending.source
+    );
+  }
 
   return { elements: result, changed };
 };

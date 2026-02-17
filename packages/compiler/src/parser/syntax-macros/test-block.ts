@@ -1,5 +1,4 @@
 import {
-  type Expr,
   Form,
   IdentifierAtom,
   isForm,

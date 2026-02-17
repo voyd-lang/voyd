@@ -82,9 +82,6 @@ const userParamOffsetFor = (meta: FunctionMetadata): number =>
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
   const unknown = ctx.program.primitives.unknown;
-  const exportedItems = new Set(
-    ctx.module.hir.module.exports.map((entry) => entry.item),
-  );
 
   for (const [itemId, item] of ctx.module.hir.items) {
     if (item.kind !== "function") continue;
