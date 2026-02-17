@@ -220,6 +220,10 @@ const createDocFixture = async (): Promise<string> => {
       ") -> i32",
       "  left + right",
       "",
+      "/// Adds without arguments.",
+      "pub fn add() -> i32",
+      "  0",
+      "",
       "pub fn main() -> i32",
       "  add(1, 2)",
       "",
@@ -453,6 +457,7 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(html).toContain("<!doctype html>");
       expect(html).toContain("Table of Contents");
       expect(html).toContain("id=\"fn-src-main-add\"");
+      expect(html).toContain("id=\"fn-src-main-add-1\"");
       expect(html).toContain("<strong>markdown</strong>");
       expect(html).toContain("Left side.");
     } finally {

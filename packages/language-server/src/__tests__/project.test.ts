@@ -303,6 +303,35 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("returns docs for symbols declared in modules named label", async () => {
+    const project = await createProject({
+      "src/label.voyd": `/// Label module docs.\npub fn tagged() -> i32\n  1\n`,
+      "src/main.voyd": `use src::label::all\n\nfn main() -> i32\n  tagged()\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 3, character: 3 },
+      });
+      expect(hover?.contents).toEqual({
+        kind: "markdown",
+        value: " Label module docs.",
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it(
     "renames labeled parameters, including external labels",
     async () => {

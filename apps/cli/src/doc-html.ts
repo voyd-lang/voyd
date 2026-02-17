@@ -434,28 +434,27 @@ export const generateDocumentationHtml = ({
 }): string => {
   const items = buildDocItems({ graph, semantics });
   const title = graph.entry;
-  const anchors = new Map<string, string>();
   const anchorCounts = new Map<string, number>();
-
-  items.forEach((item) => {
+  const anchoredItems = items.map((item) => {
     const base = sanitizeAnchorSegment(`${item.kind}-${item.fqn}`) || "item";
     const seen = anchorCounts.get(base) ?? 0;
     anchorCounts.set(base, seen + 1);
-    anchors.set(item.fqn, seen === 0 ? base : `${base}-${seen}`);
+    return {
+      ...item,
+      anchor: seen === 0 ? base : `${base}-${seen}`,
+    };
   });
 
-  const tocHtml = items
+  const tocHtml = anchoredItems
     .map((item) => {
-      const anchor = anchors.get(item.fqn) ?? "item";
-      return `<li><a href="#${anchor}"><code>${escapeHtml(
+      return `<li><a href="#${item.anchor}"><code>${escapeHtml(
         item.kind,
       )}</code> ${escapeHtml(item.fqn)}</a></li>`;
     })
     .join("\n");
 
-  const sections = items
+  const sections = anchoredItems
     .map((item) => {
-      const anchor = anchors.get(item.fqn) ?? "item";
       const docsHtml =
         item.documentation !== undefined
           ? `<div class="doc-body">${renderMarkdownToHtml(item.documentation)}</div>`
@@ -487,7 +486,7 @@ export const generateDocumentationHtml = ({
               .join("")}</ul>`
           : "";
 
-      return `<section id="${anchor}">
+      return `<section id="${item.anchor}">
   <h3><code>${escapeHtml(item.kind)}</code> ${escapeHtml(item.fqn)}</h3>
   <p><strong>Signature:</strong> <code>${escapeHtml(item.signature)}</code></p>
   ${docsHtml}

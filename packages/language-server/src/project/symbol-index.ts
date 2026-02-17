@@ -59,28 +59,6 @@ const keyForExternalParameterLabel = ({
   symbol: SymbolId;
 }): string => `${moduleId}::label::${symbol}`;
 
-const parseCanonicalSymbolKey = (
-  value: string,
-): { moduleId: string; symbol: SymbolId } | undefined => {
-  const labelMatch = /^(.*)::label::(-?\d+)$/.exec(value);
-  if (labelMatch) {
-    return {
-      moduleId: labelMatch[1]!,
-      symbol: Number(labelMatch[2]!),
-    };
-  }
-
-  const plainMatch = /^(.*)::(-?\d+)$/.exec(value);
-  if (!plainMatch) {
-    return undefined;
-  }
-
-  return {
-    moduleId: plainMatch[1]!,
-    symbol: Number(plainMatch[2]!),
-  };
-};
-
 type BoundParameterLike = {
   symbol: SymbolId;
   label?: string;
@@ -1044,24 +1022,14 @@ export const buildSymbolIndex = async ({
   );
 
   const documentationByCanonicalKey = new Map<string, string>();
-  sortedOccurrences.forEach((entries) => {
-    entries.forEach((entry) => {
-      if (documentationByCanonicalKey.has(entry.canonicalKey)) {
-        return;
-      }
-      const parsed = parseCanonicalSymbolKey(entry.canonicalKey);
-      if (!parsed) {
-        return;
-      }
-      const documentation =
-        symbolDocumentationByModule
-          .get(parsed.moduleId)
-          ?.get(parsed.symbol);
-      if (documentation === undefined) {
-        return;
-      }
-      documentationByCanonicalKey.set(entry.canonicalKey, documentation);
-    });
+  sortedDeclarations.forEach((entries, canonicalKey) => {
+    const documentation = entries
+      .map((entry) => symbolDocumentationByModule.get(entry.moduleId)?.get(entry.symbol))
+      .find((doc): doc is string => doc !== undefined);
+
+    if (documentation !== undefined) {
+      documentationByCanonicalKey.set(canonicalKey, documentation);
+    }
   });
 
   return {
