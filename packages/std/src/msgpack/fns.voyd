@@ -242,7 +242,7 @@ impl Encoder
     self.write_u64(reinterpret_f64_to_i64(value))
 
   fn encode_string(~self, value: String) -> void
-    let len = value.byte_length()
+    let len = value.byte_count
     if len < 32 then:
       self.write_u8(160 + len)
     elif: len < 256 then:

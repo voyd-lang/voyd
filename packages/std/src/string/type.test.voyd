@@ -64,9 +64,7 @@ test "string slice and as_slice":
 test "string lengths and graphemes":
   let value = "a😀b"
   assert(value.byte_len(), eq: 6)
-  assert(value.byte_length(), eq: 6)
   assert(value.rune_len(), eq: 3)
-  assert(value.codepoint_length(), eq: 3)
   assert(value.grapheme_len(), eq: 3)
 
   let joined = "é"
@@ -143,9 +141,48 @@ test "string search helpers":
     None:
       assert(false)
 
+  match(value.find_rune(rune: 44))
+    Some<StringIndex> { value }:
+      assert(value.to_i32() >= 0, eq: true)
+    None:
+      assert(false)
+
+  match(value.find_rune(rune: -1))
+    Some<StringIndex>:
+      assert(false)
+    None:
+      assert(true)
+
+  match(value.find_rune(rune: 1114112))
+    Some<StringIndex>:
+      assert(false)
+    None:
+      assert(true)
+
 test "string split on rune":
   let value = "a,b,,c"
   assert(value.split(on: 44).len(), eq: 3)
+
+test "string split_once on rune":
+  let value = "a,b,,c"
+  match(value.split_once(on: 44))
+    Some<(String, String)> { value }:
+      assert(value.0.equals("a"), eq: true)
+      assert(value.1.equals("b,,c"), eq: true)
+    None:
+      assert(false)
+
+  match(value.split_once(on: -1))
+    Some<(String, String)>:
+      assert(false)
+    None:
+      assert(true)
+
+  match(value.split_once(on: 1114112))
+    Some<(String, String)>:
+      assert(false)
+    None:
+      assert(true)
 
 test "string split on substring":
   let value = "a,b,,c"
@@ -200,17 +237,37 @@ test "string trim pairs":
 test "string case and replace pairs":
   assert("AbC".lowered().equals("abc"), eq: true)
   assert("AbC".uppered().equals("ABC"), eq: true)
-  assert("banana".replaced("na", with: "X").equals("baXX"), eq: true)
+  assert("banana".replaced(old: "na", with: "X").equals("baXX"), eq: true)
   assert(
     "banana".replaced(old: "na", with: "Y", max_replacements: 1).equals("baYna"),
     eq: true
   )
 
   let ~value = "banana"
-  value.replace("na", with: "Y", max_replacements: 1)
+  value.replace(old: "na", with: "Y", max_replacements: 1)
   assert(value.equals("baYna"), eq: true)
   value.replace(old: "Y", with: "Z")
   assert(value.equals("baZna"), eq: true)
+
+test "string byte_at and rune_at return option":
+  let value = "a😀"
+  match(value.byte_at(at: 0))
+    Some<i32> { value }:
+      assert(value, eq: 97)
+    None:
+      assert(false)
+
+  match(value.rune_at(index: 1))
+    Some<i32> { value }:
+      assert(value, eq: 128512)
+    None:
+      assert(false)
+
+  match(value.rune_at(index: 9))
+    Some<i32>:
+      assert(false)
+    None:
+      assert(true)
 
 test "string repeat and padding":
   assert("x".repeat(count: 3).equals("xxx"), eq: true)
