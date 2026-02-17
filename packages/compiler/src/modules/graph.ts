@@ -2,9 +2,16 @@ import {
   Form,
   InternalIdentifierAtom,
   formCallsInternal,
+  isIdentifierAtom,
   isForm,
   parseBase,
 } from "../parser/index.js";
+import { type Diagnostic } from "../diagnostics/index.js";
+import {
+  collectModuleDocumentation,
+  combineDocumentation,
+  type ModuleDocumentation,
+} from "../docs/doc-comments.js";
 import { toSourceSpan } from "../semantics/utils.js";
 import {
   modulePathFromFile,
@@ -51,6 +58,7 @@ export const buildModuleGraph = async ({
   const modules = new Map<string, ModuleNode>();
   const modulesByPath = new Map<string, ModuleNode>();
   const moduleDiagnostics: ModuleDiagnostic[] = [];
+  const docDiagnostics: Diagnostic[] = [];
   const missingModules = new Map<string, Set<string>>();
 
   const hasMissingModule = (importer: string, pathKey: string): boolean =>
@@ -75,6 +83,7 @@ export const buildModuleGraph = async ({
   });
 
   addModuleTree(entryModule, modules, modulesByPath);
+  docDiagnostics.push(...entryModule.diagnostics);
 
   const pending: PendingDependency[] = [];
   enqueueDependencies(entryModule, pending);
@@ -169,6 +178,7 @@ export const buildModuleGraph = async ({
       continue;
     }
     addModuleTree(nextModule, modules, modulesByPath);
+    docDiagnostics.push(...nextModule.diagnostics);
     enqueueDependencies(nextModule, pending);
     if (!modulesByPath.has(pathKey) && !hasNestedModule(pathKey)) {
       moduleDiagnostics.push({
@@ -186,10 +196,13 @@ export const buildModuleGraph = async ({
   const graph = {
     entry: entryModule.node.id,
     modules,
-    diagnostics: baseDiagnostics,
+    diagnostics: [...baseDiagnostics, ...docDiagnostics],
   };
   const macroDiagnostics = expandModuleMacros(graph);
-  return { ...graph, diagnostics: [...baseDiagnostics, ...macroDiagnostics] };
+  return {
+    ...graph,
+    diagnostics: [...baseDiagnostics, ...docDiagnostics, ...macroDiagnostics],
+  };
 };
 
 const addModuleTree = (
@@ -219,6 +232,7 @@ const enqueueDependencies = (
 type LoadedModule = {
   node: ModuleNode;
   inlineModules: ModuleNode[];
+  diagnostics: readonly Diagnostic[];
 };
 
 const loadFileModule = async ({
@@ -250,6 +264,7 @@ const loadFileModule = async ({
     modulePath,
     ast,
     sourceByFile,
+    moduleRange: { start: 0, end: source.length },
   });
   const submoduleDeps = await discoverSubmodules({
     filePath,
@@ -263,18 +278,22 @@ const loadFileModule = async ({
     origin: { kind: "file", filePath },
     ast,
     source,
+    docs: info.docs,
     dependencies: [...info.dependencies, ...submoduleDeps],
   };
 
   return {
     node,
     inlineModules: info.inlineModules,
+    diagnostics: info.diagnostics,
   };
 };
 
 type ModuleInfo = {
   dependencies: ModuleDependency[];
   inlineModules: ModuleNode[];
+  docs: ModuleDocumentation;
+  diagnostics: readonly Diagnostic[];
 };
 
 const VOYD_EXTENSION = ".voyd";
@@ -284,15 +303,25 @@ const collectModuleInfo = ({
   modulePath,
   ast,
   sourceByFile,
+  moduleRange,
 }: {
   modulePath: ModulePath;
   ast: Form;
   sourceByFile: ReadonlyMap<string, string>;
+  moduleRange: { start: number; end: number };
 }): ModuleInfo => {
   const dependencies: ModuleDependency[] = [];
   const inlineModules: ModuleNode[] = [];
+  const diagnostics: Diagnostic[] = [];
   let needsStdPkg = false;
   const entries = formCallsInternal(ast, "ast") ? ast.rest : [];
+  const sourceForDocs = sourceForModuleAst({ ast, sourceByFile });
+  const collectedDocs = collectModuleDocumentation({
+    ast,
+    source: sourceForDocs,
+    moduleRange,
+  });
+  diagnostics.push(...collectedDocs.diagnostics);
 
   entries.forEach((entry) => {
     if (!isForm(entry)) return;
@@ -341,8 +370,20 @@ const collectModuleInfo = ({
       form: entry,
       parentPath: modulePath,
       sourceByFile,
+      outerModuleDoc: (() => {
+        const first = entry.at(0);
+        const visibilityOffset =
+          isIdentifierAtom(first) && first.value === "pub" ? 1 : 0;
+        const nameSyntax = entry.at(visibilityOffset + 1);
+        return nameSyntax
+          ? collectedDocs.documentation.declarationsBySyntaxId.get(
+              nameSyntax.syntaxId,
+            )
+          : undefined;
+      })(),
     });
     inlineModules.push(inline.node, ...inline.descendants);
+    diagnostics.push(...inline.diagnostics);
   });
 
   if (needsStdPkg) {
@@ -360,12 +401,18 @@ const collectModuleInfo = ({
     }
   }
 
-  return { dependencies, inlineModules };
+  return {
+    dependencies,
+    inlineModules,
+    docs: collectedDocs.documentation,
+    diagnostics,
+  };
 };
 
 type InlineModuleTree = {
   node: ModuleNode;
   descendants: ModuleNode[];
+  diagnostics: readonly Diagnostic[];
 };
 
 const parseInlineModuleDecl = ({
@@ -373,6 +420,7 @@ const parseInlineModuleDecl = ({
   form,
   parentPath,
   sourceByFile,
+  outerModuleDoc,
 }: {
   decl: Extract<
     ReturnType<typeof classifyTopLevelDecl>,
@@ -381,19 +429,32 @@ const parseInlineModuleDecl = ({
   form: Form;
   parentPath: ModulePath;
   sourceByFile: ReadonlyMap<string, string>;
+  outerModuleDoc?: string;
 }): InlineModuleTree => {
   const modulePath = {
     ...parentPath,
     segments: [...parentPath.segments, decl.name],
   };
 
-  const ast = toModuleAst(decl.body);
-  const info = collectModuleInfo({ modulePath, ast, sourceByFile });
   const span = toSourceSpan(form);
   const sourceForModule =
     sourceByFile.get(span.file) ??
     sourceByFile.values().next().value ??
     "";
+  const ast = toModuleAst(decl.body);
+  const moduleRangeStart = lineStartIndex(
+    sourceForModule,
+    (form.location?.startLine ?? decl.body.location?.startLine ?? 1) + 1,
+  );
+  const info = collectModuleInfo({
+    modulePath,
+    ast,
+    sourceByFile,
+    moduleRange: {
+      start: moduleRangeStart,
+      end: decl.body.location?.endIndex ?? sourceForModule.length,
+    },
+  });
 
   const node: ModuleNode = {
     id: modulePathToString(modulePath),
@@ -406,10 +467,18 @@ const parseInlineModuleDecl = ({
     },
     ast,
     source: sliceSource(sourceForModule, span),
+    docs: {
+      ...info.docs,
+      module: combineDocumentation(outerModuleDoc, info.docs.module),
+    },
     dependencies: info.dependencies,
   };
 
-  return { node, descendants: info.inlineModules };
+  return {
+    node,
+    descendants: info.inlineModules,
+    diagnostics: info.diagnostics,
+  };
 };
 
 const toModuleAst = (block: Form): Form => {
@@ -422,6 +491,43 @@ const toModuleAst = (block: Form): Form => {
 
 const sliceSource = (source: string, span: SourceSpan): string =>
   source.slice(span.start, span.end);
+
+const sourceForModuleAst = ({
+  ast,
+  sourceByFile,
+}: {
+  ast: Form;
+  sourceByFile: ReadonlyMap<string, string>;
+}): string => {
+  const filePath = ast.location?.filePath;
+  if (filePath) {
+    const source = sourceByFile.get(filePath);
+    if (source !== undefined) {
+      return source;
+    }
+  }
+
+  return sourceByFile.values().next().value ?? "";
+};
+
+const lineStartIndex = (source: string, lineNumber: number): number => {
+  if (lineNumber <= 1) {
+    return 0;
+  }
+
+  let currentLine = 1;
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] !== "\n") {
+      continue;
+    }
+    currentLine += 1;
+    if (currentLine === lineNumber) {
+      return index + 1;
+    }
+  }
+
+  return source.length;
+};
 
 const isCompanionTestFile = (filePath: string): boolean =>
   filePath.endsWith(TEST_COMPANION_EXTENSION);

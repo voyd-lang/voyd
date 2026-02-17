@@ -28,4 +28,8 @@ export type VoydConfig = {
   failOnEmptyTests?: boolean;
   /** Additional package search directories */
   pkgDirs?: string[];
+  /** Generate HTML documentation */
+  doc?: boolean;
+  /** Documentation output path */
+  docOut?: string;
 };

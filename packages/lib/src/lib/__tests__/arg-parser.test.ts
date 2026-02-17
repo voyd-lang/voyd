@@ -41,4 +41,17 @@ describe("getConfigFromCli", () => {
     ]);
     expect(config.pkgDirs).toEqual(["./node_modules", "../vendor/packages"]);
   });
+
+  it("supports `voyd doc` with default source root", () => {
+    const config = runWithArgv(["node", "voyd", "doc"]);
+    expect(config.doc).toBe(true);
+    expect(config.index).toBe("./src");
+  });
+
+  it("supports `voyd docs` alias with explicit output path", () => {
+    const config = runWithArgv(["node", "voyd", "docs", "./demo", "--out", "docs.html"]);
+    expect(config.doc).toBe(true);
+    expect(config.index).toBe("./demo");
+    expect(config.docOut).toBe("docs.html");
+  });
 });
