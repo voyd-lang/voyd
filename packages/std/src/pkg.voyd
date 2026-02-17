@@ -5,7 +5,6 @@ pub self::box
 pub self::memory
 pub self::msgpack
 pub self::dict
-pub self::iterator
 pub self::subscript
 pub self::traits
 pub std::optional::types::{ Optional, Option, Some, None }
@@ -14,7 +13,7 @@ pub std::result::types::{ Result, Ok, Err }
 pub std::result::fns::all
 pub std::array::{ Array, ArrayPop, new_array_unchecked }
 pub std::dict::{ Dict, DictEntry, DictKey }
-pub std::iterator::{ Sequence, Iterator, for }
+pub std::traits::{ Sequence, Iterator, for }
 pub std::subscript::{ Range, SubscriptRead, SubscriptWrite }
 pub std::string::{
   String,

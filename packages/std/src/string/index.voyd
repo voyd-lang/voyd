@@ -1,0 +1,10 @@
+pub obj StringIndex {
+  value: i32
+}
+
+impl StringIndex
+  api fn to_i32(self) -> i32
+    self.value
+
+pub fn make_string_index(value: i32) -> StringIndex
+  StringIndex { value: value }

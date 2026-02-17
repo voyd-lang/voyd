@@ -1,5 +1,5 @@
 use std::array::Array
-use std::iterator::Sequence
+use std::traits::sequence::Sequence
 use std::result::types::{ Result, Ok, Err }
 use std::string::type::StringSlice
 use std::test::assertions::all

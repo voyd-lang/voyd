@@ -1,6 +1,6 @@
 use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
-use std::iterator::all
+use std::traits::sequence::all
 use std::optional::types::all
 use std::string::type::String
 use std::subscript::{ SubscriptRead, SubscriptWrite }

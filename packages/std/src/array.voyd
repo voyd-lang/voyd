@@ -1,5 +1,5 @@
 use std::fixed_array::fns::{ new_fixed_array }
-use std::iterator::all
+use std::traits::sequence::all
 use std::optional::all
 use std::math::all
 use std::subscript::{ Range, SubscriptRead, SubscriptWrite }

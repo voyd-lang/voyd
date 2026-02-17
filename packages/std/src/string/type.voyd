@@ -1,9 +1,13 @@
 use std::array::{ Array, new_array_unchecked }
 use std::fixed_array::fns::{ new_fixed_array }
-use std::iterator::all
+use std::string::index::{ make_string_index }
+use std::traits::sequence::all
 use std::optional::all
 use std::result::types::all
 use std::subscript::{ Range }
+
+pub use std::string::errors::{ ParseFloatError, ParseIntError, Utf8Error }
+pub use std::string::index::StringIndex
 
 pub obj String {
   bytes: Array<i32>,
@@ -16,26 +20,7 @@ pub obj StringSlice {
   byte_count: i32
 }
 
-pub obj StringIndex {
-  value: i32
-}
 pub type CharSet = Array<i32>
-
-pub obj Utf8Error {
-  api code: i32
-}
-
-pub obj ParseIntError {
-  api code: i32
-}
-
-pub obj ParseFloatError {
-  api code: i32
-}
-
-impl StringIndex
-  api fn to_i32(self) -> i32
-    self.value
 
 impl StringSlice
   api fn byte_len(self) -> i32
@@ -46,12 +31,6 @@ impl StringSlice
 
   api fn to_string(self) -> String
     self.source.slice_bytes(self.start, self.byte_count)
-
-  fn raw_bytes(self) -> FixedArray<i32>
-    self.source.raw_bytes()
-
-  fn start_offset(self) -> i32
-    self.start
 
 impl String
   api fn init() -> String
@@ -925,9 +904,6 @@ fn clamp_slice_index(index: i32, length: i32) -> i32
     return length
   index
 
-fn make_string_index(value: i32) -> StringIndex
-  StringIndex { value: value }
-
 fn new_string_slice(source: String, start: i32, len: i32) -> StringSlice
   let source_len = source.byte_len()
   let start_index = clamp_slice_index(start, source_len)
@@ -1323,8 +1299,8 @@ fn bytes_match_slice_at(
   index: i32
 ) -> bool
   let target_len = target.byte_len()
-  let target_source = target.raw_bytes()
-  let target_start = target.start_offset()
+  let target_source = target.source.raw_bytes()
+  let target_start = target.start
   var cursor = 0
   while cursor < target_len do:
     if __array_get(source, index + cursor) != __array_get(target_source, target_start + cursor) then:
@@ -1348,7 +1324,7 @@ pub fn from_utf8({ bytes: Array<i32> }) -> Result<String, Utf8Error>
     if width <= 0 then:
       return Err<Utf8Error> { error: Utf8Error { code: 1 } }
     index = index + width
-  Ok<String> { value: new_string(source_bytes.to_fixed_array()) }
+  Ok<String> { value: String { bytes: source_bytes, byte_count: len } }
 
 fn from_utf8_legacy(bytes: Array<i32>): () -> Result<String, Utf8Error>
   let source = bytes.raw_storage()

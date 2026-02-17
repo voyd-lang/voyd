@@ -1,5 +1,5 @@
 use std::optional::all
-use std::iterator::all
+use std::traits::sequence::all
 use std::string::type::String
 
 pub fn parse_non_negative_segment(input: String): () -> Optional<i32>
