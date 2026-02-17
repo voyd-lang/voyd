@@ -1,5 +1,12 @@
+use std::array::Array
+use std::result::types::{ Result }
 use self::type::self as string_type
-pub use self::type::{ String }
+pub use self::errors::{ ParseFloatError, ParseIntError, Utf8Error }
+pub use self::index::StringIndex
+pub use self::type::{ CharSet, String, StringSlice }
 
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   string_type::new_string(from_bytes)
+
+pub fn from_utf8({ bytes source: Array<i32> }) -> Result<String, Utf8Error>
+  String::from_utf8(bytes: source)

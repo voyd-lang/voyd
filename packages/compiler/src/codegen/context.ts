@@ -235,6 +235,7 @@ export interface FunctionContext {
   locals: binaryen.Type[];
   nextLocalIndex: number;
   returnTypeId: TypeId;
+  returnWasmType?: binaryen.Type;
   currentHandler?: { index: number; type: binaryen.Type };
   instanceId?: ProgramFunctionInstanceId;
   typeInstanceId?: ProgramFunctionInstanceId;

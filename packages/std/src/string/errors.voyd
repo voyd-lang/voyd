@@ -1,0 +1,11 @@
+pub obj Utf8Error {
+  api code: i32
+}
+
+pub obj ParseIntError {
+  api code: i32
+}
+
+pub obj ParseFloatError {
+  api code: i32
+}

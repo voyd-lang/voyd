@@ -1,0 +1,8 @@
+use std::array::Array
+
+pub trait Hasher
+  fn write(self, { bytes: Array<i32> }) -> void
+  fn finish(self) -> i64
+
+pub trait Hash<T>
+  fn hash(self, { into: Hasher }) -> void

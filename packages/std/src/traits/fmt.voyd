@@ -1,0 +1,11 @@
+use std::string::type::StringSlice
+
+pub trait Formatter
+  fn write_str(self, { s: StringSlice }) -> void
+  fn write_char(self, { c: i32 }) -> void
+
+pub trait Debug<T>
+  fn fmt_debug(self, { into: Formatter }) -> void
+
+pub trait Display<T>
+  fn fmt_display(self, { into: Formatter }) -> void

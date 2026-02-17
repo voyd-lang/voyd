@@ -1,0 +1,46 @@
+use std::memory::self as memory
+use std::optional::types::all
+use std::test::assertions::all
+
+test "msgpack encode/decode roundtrip for nested values":
+  let base = memory::size() * 65536
+  memory::grow(1)
+
+  let ~items = Array<MsgPack>::init()
+  items.push(make_i32(1))
+  items.push(make_string("hi"))
+
+  let ~map = Dict<String, MsgPack>::init()
+  map.set(key: "items", value: make_array(items))
+  map.set(key: "flag", value: make_bool(true))
+
+  let value = make_map(map)
+  let written = encode_value(value, base, 1024)
+  assert(written > 0, eq: true)
+
+  let decoded = decode_value(base, written)
+  let decoded_map = unpack_map(decoded)
+
+  match(decoded_map.get(key: "flag"))
+    Some<MsgPack> { value: flag_value }:
+      assert(unpack_bool(flag_value), eq: true)
+    None:
+      assert(false, eq: true)
+
+  match(decoded_map.get(key: "items"))
+    Some<MsgPack> { value: items_value }:
+      let arr = unpack_array(items_value)
+      assert(arr.len(), eq: 2)
+      match(arr.get(0))
+        Some<MsgPack> { value: first }:
+          assert(unpack_i32(first), eq: 1)
+        None:
+          assert(false, eq: true)
+      match(arr.get(1))
+        Some<MsgPack> { value: second }:
+          let text = unpack_string(second)
+          assert(text.equals("hi"), eq: true)
+        None:
+          assert(false, eq: true)
+    None:
+      assert(false, eq: true)

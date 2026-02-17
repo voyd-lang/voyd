@@ -1,0 +1,26 @@
+trait Key<T>
+  fn same(self, other: T) -> bool
+
+obj IntKey {
+  value: i32
+}
+
+impl Key<IntKey> for IntKey
+  fn same(self, other: IntKey) -> bool
+    self.value == other.value
+
+obj Box<K, V> {
+  value: V
+}
+
+impl<K: Key<K>, V> Box<K, V>
+  fn init(value: V) -> Box<K, V>
+    Box<K, V> { value: value }
+
+  fn map<U>(self, value: U) -> Box<K, U>
+    Box<K, U>::init(value)
+
+fn main() -> i32
+  let box = Box<IntKey, i32>::init(1)
+  let next = box.map<bool>(true)
+  if next.value then: 1 else: 0

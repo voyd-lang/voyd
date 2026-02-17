@@ -1,14 +1,17 @@
 use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
-use std::map::Map
+use std::dict::{ Dict, DictKey }
 use std::memory::self as memory
 use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 use std::optional::types::all
 use std::string::type::{ new_string, String }
-use std::test::assertions::all
 
 @serializer("msgpack", encode_value, decode_value)
-pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | Map<MsgPack>
+pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | MsgPackMap
+
+obj MsgPackMap {
+  entries: Array<(String, MsgPack)>
+}
 
 obj Encoder {
   ptr: i32,
@@ -32,49 +35,46 @@ pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
 pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
   let ~decoder = Decoder(ptr, len)
   let value = decoder.decode_any()
-  if decoder.ok then: value else: pack_null()
+  if decoder.ok then: value else: make_null()
 
 fn empty_binary(): () -> Binary
-  Binary { bytes: Array<i32>::new() }
+  Binary { bytes: Array<i32>::init() }
 
 fn empty_array(): () -> Array<MsgPack>
-  Array<MsgPack>::new()
+  Array<MsgPack>::init()
 
-fn empty_map(): () -> Map<MsgPack>
-  Map<MsgPack>::new()
+fn empty_map(): () -> Dict<String, MsgPack>
+  Dict<String, MsgPack>::init()
 
 fn empty_text(): () -> String
   new_string(new_fixed_array<i32>(0))
 
-pub fn pack_null(): () -> MsgPack
+pub fn make_null(): () -> MsgPack
   Null {}
 
-pub fn pack_i32(value: i32): () -> MsgPack
+pub fn make_i32(value: i32): () -> MsgPack
   I32 { value }
 
-pub fn pack_i64(value: i64): () -> MsgPack
+pub fn make_i64(value: i64): () -> MsgPack
   I64 { value }
 
-pub fn pack_f32(value: f32): () -> MsgPack
+pub fn make_f32(value: f32): () -> MsgPack
   F32 { value }
 
-pub fn pack_f64(value: f64): () -> MsgPack
-  F64 { value }
-
-pub fn pack_bool(value: bool): () -> MsgPack
+pub fn make_bool(value: bool): () -> MsgPack
   Bool { value }
 
-pub fn pack_string(value: String): () -> MsgPack
+pub fn make_string(value: String): () -> MsgPack
   value
 
-pub fn pack_binary(value: Binary): () -> MsgPack
+pub fn make_binary(value: Binary): () -> MsgPack
   value
 
-pub fn pack_array(value: Array<MsgPack>): () -> MsgPack
+pub fn make_array(value: Array<MsgPack>): () -> MsgPack
   value
 
-pub fn pack_map(value: Map<MsgPack>): () -> MsgPack
-  value
+pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
+  MsgPackMap { entries: value.entries() }
 
 pub fn unpack_i32(value: MsgPack): () -> i32
   value.match(decoded)
@@ -140,55 +140,22 @@ pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
     else:
       empty_array()
 
-pub fn unpack_map(value: MsgPack): () -> Map<MsgPack>
+pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
   value.match(boxed)
-    Map<MsgPack>:
-      boxed
+    MsgPackMap:
+      let ~out = Dict<String, MsgPack>::init()
+      let entries = boxed.entries
+      var index = 0
+      while index < entries.len() do:
+        match(entries.get(index))
+          Some<(String, MsgPack)> { value: entry }:
+            out.set(key: entry.0, value: entry.1)
+          None:
+            void
+        index = index + 1
+      out
     else:
       empty_map()
-
-test "msgpack encode/decode roundtrip for nested values":
-  let base = memory::size() * 65536
-  memory::grow(1)
-
-  let ~items = Array<MsgPack>::new()
-  items.push(pack_i32(1))
-  items.push(pack_string("hi"))
-
-  var map = Map<MsgPack>::new()
-  map = map.set("items", pack_array(items))
-  map = map.set("flag", pack_bool(true))
-
-  let value = pack_map(map)
-  let written = encode_value(value, base, 1024)
-  assert(written > 0, eq: true)
-
-  let decoded = decode_value(base, written)
-  let decoded_map = unpack_map(decoded)
-
-  match(decoded_map.get("flag"))
-    Some<MsgPack> { value: flag_value }:
-      assert(unpack_bool(flag_value), eq: true)
-    None:
-      assert(false, eq: true)
-
-  match(decoded_map.get("items"))
-    Some<MsgPack> { value: items_value }:
-      let arr = unpack_array(items_value)
-      assert(arr.length(), eq: 2)
-      match(arr.get(0))
-        Some<MsgPack> { value: first }:
-          assert(unpack_i32(first), eq: 1)
-        None:
-          assert(false, eq: true)
-      match(arr.get(1))
-        Some<MsgPack> { value: second }:
-          let text = unpack_string(second)
-          assert(text.equals("hi"), eq: true)
-        None:
-          assert(false, eq: true)
-    None:
-      assert(false, eq: true)
 
 impl Encoder
   pub fn init(ptr: i32, len: i32)
@@ -275,7 +242,7 @@ impl Encoder
     self.write_u64(reinterpret_f64_to_i64(value))
 
   fn encode_string(~self, value: String) -> void
-    let len = value.byte_length()
+    let len = value.byte_count
     if len < 32 then:
       self.write_u8(160 + len)
     elif: len < 256 then:
@@ -295,7 +262,7 @@ impl Encoder
       index = index + 1
 
   fn encode_binary(~self, bytes: Array<i32>) -> void
-    let len = bytes.length()
+    let len = bytes.len()
     if len < 256 then:
       self.write_u8(196)
       self.write_u8(len)
@@ -313,7 +280,7 @@ impl Encoder
       index = index + 1
 
   fn encode_array(~self, value: Array<MsgPack>) -> void
-    let len = value.length()
+    let len = value.len()
     if len < 16 then:
       self.write_u8(144 + len)
     elif: len < 65536 then:
@@ -329,8 +296,11 @@ impl Encoder
       self.encode_any(__array_get(source, index))
       index = index + 1
 
-  fn encode_map(~self, value: Map<MsgPack>) -> void
-    let len = value.size()
+  fn encode_map(~self, value: Dict<String, MsgPack>) -> void
+    self.encode_map_entries(value.entries())
+
+  fn encode_map_entries(~self, entries: Array<(String, MsgPack)>) -> void
+    let len = entries.len()
     if len < 16 then:
       self.write_u8(128 + len)
     elif: len < 65536 then:
@@ -340,14 +310,13 @@ impl Encoder
       self.write_u8(223)
       self.write_u32(len)
 
-    let entries = value.entries()
     let storage = entries.raw_storage()
-    let entry_count = entries.length()
+    let entry_count = entries.len()
     var index = 0
     while index < entry_count do:
       let entry = __array_get(storage, index)
-      self.encode_string(entry.key)
-      self.encode_any(entry.value)
+      self.encode_string(entry.0)
+      self.encode_any(entry.1)
       index = index + 1
 
   fn encode_any(~self, value: MsgPack) -> void
@@ -371,8 +340,8 @@ impl Encoder
         self.encode_binary(decoded.bytes)
       Array<MsgPack>:
         self.encode_array(decoded)
-      Map<MsgPack>:
-        self.encode_map(decoded)
+      MsgPackMap:
+        self.encode_map_entries(decoded.entries)
 
 impl Decoder
   pub fn init(ptr: i32, len: i32)
@@ -467,93 +436,93 @@ impl Decoder
       index = index + 1
     out
 
-  fn decode_map(~self, length: i32) -> Map<MsgPack>
-    var out = Map<MsgPack>::new()
+  fn decode_map(~self, length: i32) -> Dict<String, MsgPack>
+    let ~out = Dict<String, MsgPack>::init()
     var index = 0
     while index < length do:
       let key = self.decode_any()
       let value = self.decode_any()
       key.match(decoded_key)
         String:
-          out = out.set(decoded_key, value)
+          out.set(key: decoded_key, value: value)
         else:
-          out = out
+          void
       index = index + 1
     out
 
   fn decode_integer(~self, prefix: i32) -> MsgPack
     if prefix < 128 then:
-      return pack_i32(prefix)
+      return make_i32(prefix)
     if prefix >= 224 then:
-      return pack_i32(prefix - 256)
+      return make_i32(prefix - 256)
     if prefix == 204 then:
-      return pack_i32(self.read_u8())
+      return make_i32(self.read_u8())
     if prefix == 205 then:
-      return pack_i32(self.read_u16())
+      return make_i32(self.read_u16())
     if prefix == 206 then:
       let value = self.read_u32()
       if value < 0 then:
         let extended = extend_i32_u(value)
-        return pack_i64(extended)
-      return pack_i32(value)
+        return make_i64(extended)
+      return make_i32(value)
     if prefix == 207 then:
-      return pack_i64(self.read_u64())
+      return make_i64(self.read_u64())
     if prefix == 208 then:
-      return pack_i32(self.read_u8() - 256)
+      return make_i32(self.read_u8() - 256)
     if prefix == 209 then:
       let value = self.read_u16()
       if value >= 32768 then:
-        return pack_i32(value - 65536)
-      return pack_i32(value)
+        return make_i32(value - 65536)
+      return make_i32(value)
     if prefix == 210 then:
-      return pack_i32(self.read_u32())
+      return make_i32(self.read_u32())
     if prefix == 211 then:
-      return pack_i64(self.read_u64())
-    pack_i32(0)
+      return make_i64(self.read_u64())
+    make_i32(0)
 
   fn decode_any(~self) -> MsgPack
     let prefix = self.read_u8()
     if self.ok == false then:
-      return pack_null()
+      return make_null()
     if prefix == 192 then:
-      return pack_null()
+      return make_null()
     if prefix == 194 then:
-      return pack_bool(false)
+      return make_bool(false)
     if prefix == 195 then:
-      return pack_bool(true)
+      return make_bool(true)
     if prefix >= 160 and prefix < 192 then:
       let len = prefix - 160
-      return pack_string(self.decode_string(len))
+      return make_string(self.decode_string(len))
     if prefix >= 144 and prefix < 160 then:
-      return pack_array(self.decode_array(prefix - 144))
+      return make_array(self.decode_array(prefix - 144))
     if prefix >= 128 and prefix < 144 then:
-      return pack_map(self.decode_map(prefix - 128))
+      return make_map(self.decode_map(prefix - 128))
     if prefix == 217 then:
-      return pack_string(self.decode_string(self.read_u8()))
+      return make_string(self.decode_string(self.read_u8()))
     if prefix == 218 then:
-      return pack_string(self.decode_string(self.read_u16()))
+      return make_string(self.decode_string(self.read_u16()))
     if prefix == 219 then:
-      return pack_string(self.decode_string(self.read_u32()))
+      return make_string(self.decode_string(self.read_u32()))
     if prefix == 220 then:
-      return pack_array(self.decode_array(self.read_u16()))
+      return make_array(self.decode_array(self.read_u16()))
     if prefix == 221 then:
-      return pack_array(self.decode_array(self.read_u32()))
+      return make_array(self.decode_array(self.read_u32()))
     if prefix == 222 then:
-      return pack_map(self.decode_map(self.read_u16()))
+      return make_map(self.decode_map(self.read_u16()))
     if prefix == 223 then:
-      return pack_map(self.decode_map(self.read_u32()))
+      return make_map(self.decode_map(self.read_u32()))
     if prefix == 196 then:
-      return pack_binary(self.decode_binary(self.read_u8()))
+      return make_binary(self.decode_binary(self.read_u8()))
     if prefix == 197 then:
-      return pack_binary(self.decode_binary(self.read_u16()))
+      return make_binary(self.decode_binary(self.read_u16()))
     if prefix == 198 then:
-      return pack_binary(self.decode_binary(self.read_u32()))
+      return make_binary(self.decode_binary(self.read_u32()))
     if prefix == 202 then:
       let raw = self.read_u32()
-      return pack_f32(reinterpret_i32_to_f32(raw))
+      return make_f32(reinterpret_i32_to_f32(raw))
     if prefix == 203 then:
       let raw = self.read_u64()
-      return pack_f64(reinterpret_i64_to_f64(raw))
+      return F64 { value: reinterpret_i64_to_f64(raw) }
     self.decode_integer(prefix)
 
 @intrinsic(name: "__shift_l")

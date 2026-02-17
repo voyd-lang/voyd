@@ -1,0 +1,208 @@
+use std::array::Array
+use std::traits::sequence::Sequence
+use std::result::types::{ Result, Ok, Err }
+use std::string::type::StringSlice
+use std::test::assertions::all
+use std::traits::clone::{ Clone, Copy }
+use std::traits::collect::Collect
+use std::traits::convert::{ From, Into, TryFrom, TryInto }
+use std::traits::default::Default
+use std::traits::eq::Eq
+use std::traits::fmt::{ Debug, Display, Formatter }
+use std::traits::hash::{ Hash, Hasher }
+use std::traits::ord::{ Ord, Ordering, Less, Equal, Greater }
+
+@intrinsic(name: "__i64_extend_s")
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
+
+obj EqOrdValue {
+  value: i32
+}
+
+fn cmp_eq_ord_value(left: i32, right: i32) -> Ordering
+  if left < right then:
+    Less {}
+  elif: left > right then:
+    Greater {}
+  else:
+    Equal {}
+
+fn is_less(value: Ordering) -> bool
+  match(value)
+    Less:
+      true
+    Equal:
+      false
+    Greater:
+      false
+
+fn is_equal(value: Ordering) -> bool
+  match(value)
+    Equal:
+      true
+    Less:
+      false
+    Greater:
+      false
+
+fn is_greater(value: Ordering) -> bool
+  match(value)
+    Greater:
+      true
+    Less:
+      false
+    Equal:
+      false
+
+impl Eq<EqOrdValue> for EqOrdValue
+  fn eq(self, { other: EqOrdValue }) -> bool
+    self.value == other.value
+
+impl Ord<EqOrdValue> for EqOrdValue
+  fn cmp(self, { other: EqOrdValue }) -> Ordering
+    cmp_eq_ord_value(self.value, other.value)
+
+obj DefaultValue {
+  value: i32
+}
+
+impl Default<DefaultValue> for DefaultValue
+  fn default() -> DefaultValue
+    DefaultValue { value: 7 }
+
+obj CloneCopyValue {
+  value: i32
+}
+
+impl Clone<CloneCopyValue> for CloneCopyValue
+  fn clone(self) -> CloneCopyValue
+    CloneCopyValue { value: self.value }
+
+impl Copy<CloneCopyValue> for CloneCopyValue
+  fn copy(self) -> CloneCopyValue
+    self.clone()
+
+obj NumText {
+  value: i32
+}
+
+fn num_text_try_from(value: i32) -> Result<NumText, i32>
+  if value >= 0 then:
+    Ok<NumText> { value: NumText { value: value } }
+  else:
+    Err<i32> { error: -1 }
+
+fn num_text_try_into(value: i32) -> Result<i32, i32>
+  if value >= 0 then:
+    Ok<i32> { value: value }
+  else:
+    Err<i32> { error: -1 }
+
+impl From<NumText, i32> for NumText
+  fn from({ value: i32 }) -> NumText
+    NumText { value: value }
+
+impl Into<NumText, i32> for NumText
+  fn into(self) -> i32
+    self.value
+
+impl TryFrom<NumText, i32, i32> for NumText
+  fn try_from({ value: i32 }) -> Result<NumText, i32>
+    num_text_try_from(value)
+
+impl TryInto<NumText, i32, i32> for NumText
+  fn try_into(self) -> Result<i32, i32>
+    num_text_try_into(self.value)
+
+obj IntBag {
+  items: Array<i32>
+}
+
+impl Collect<i32> for IntBag
+  fn from_sequence({ items: Sequence<i32> }) -> IntBag
+    let ~out = Array<i32>::init()
+    out.extend(items: items)
+    IntBag { items: out }
+
+obj NoopHasher {}
+
+impl Hasher for NoopHasher
+  fn write(self, { bytes: Array<i32> }) -> void
+    bytes.len()
+    void
+
+  fn finish(self) -> i64
+    extend_i32_s(1)
+
+obj HashValue {
+  value: i32
+}
+
+impl Hash<HashValue> for HashValue
+  fn hash(self, { into: Hasher }) -> void
+    let ~bytes = Array<i32>::with_capacity(1)
+    bytes.push(self.value)
+    into.write(bytes: bytes)
+
+obj NoopFormatter {}
+
+impl Formatter for NoopFormatter
+  fn write_str(self, { s: StringSlice }) -> void
+    s.byte_len()
+    void
+
+  fn write_char(self, { c: i32 }) -> void
+    c
+    void
+
+obj ShowValue {
+  value: i32
+}
+
+impl Debug<ShowValue> for ShowValue
+  fn fmt_debug(self, { into: Formatter }) -> void
+    self.value
+    into.write_char(c: 68)
+
+impl Display<ShowValue> for ShowValue
+  fn fmt_display(self, { into: Formatter }) -> void
+    self.value
+    into.write_char(c: 80)
+
+test "trait contracts work for baseline std traits":
+  let low = EqOrdValue { value: 1 }
+  let high = EqOrdValue { value: 2 }
+  assert(low.eq(other: low), eq: true)
+  assert(not low.eq(other: high), eq: true)
+  assert(is_less(low.cmp(other: high)), eq: true)
+  assert(is_greater(high.cmp(other: low)), eq: true)
+  assert(is_equal(low.cmp(other: low)), eq: true)
+
+  let defaulted = DefaultValue::default()
+  assert(defaulted.value, eq: 7)
+
+  let copied = CloneCopyValue { value: 9 }
+  assert(copied.clone().value, eq: 9)
+  assert(copied.copy().value, eq: 9)
+
+  let from_num = NumText::from(value: 5)
+  assert(from_num.into(), eq: 5)
+  match(NumText::try_from(value: 3))
+    Ok<NumText> { value }:
+      assert(value.value, eq: 3)
+    Err<i32>:
+      assert(false)
+  match(NumText { value: 4 }.try_into())
+    Ok<i32> { value }:
+      assert(value, eq: 4)
+    Err<i32>:
+      assert(false)
+
+  let hasher = NoopHasher {}
+  HashValue { value: 8 }.hash(into: hasher)
+  assert(hasher.finish(), eq: extend_i32_s(1))
+
+  let formatter = NoopFormatter {}
+  ShowValue { value: 1 }.fmt_debug(into: formatter)
+  ShowValue { value: 1 }.fmt_display(into: formatter)
+  assert(true, eq: true)

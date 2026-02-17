@@ -1,0 +1,9 @@
+pub obj Ok<T> {
+  api value: T
+}
+
+pub obj Err<E> {
+  api error: E
+}
+
+pub type Result<T, E> = Ok<T> | Err<E>

@@ -1,0 +1,22 @@
+obj Box {
+  value: i32
+}
+
+impl Box
+  api fn set(~self, { value: i32 }) -> void
+    self.value = value
+
+fn sum_pair({ left: i32, right: i32 }) -> i32
+  left + right
+
+fn each({ do f: (value: i32) -> void }) -> void
+  f(1)
+  f(2)
+  f(3)
+
+pub fn main() -> i32
+  let ~out = Box { value: 0 }
+  each(do: (value: i32) -> void =>
+    out.set(value: sum_pair(left: out.value, right: value))
+  )
+  out.value

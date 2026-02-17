@@ -1,0 +1,5 @@
+use src::dep::{ DictLike, IntKey }
+
+pub fn main() -> i32
+  let dict = DictLike<IntKey, i32>::init(IntKey { value: 7 }, 1)
+  if dict.key_matches(IntKey { value: 7 }) then: 1 else: 0

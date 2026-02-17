@@ -1,40 +1,40 @@
 use self::fns::self as msgpack_fns
 use self::fns::MsgPack
 use std::array::Array
-use std::map::Map
+use std::dict::{ Dict, DictKey }
 use std::string::type::String
 pub use self::fns::MsgPack
-pub use self::types::{ Binary, Bool, Null, Numeric }
+pub use self::types::{ Binary, Bool, F64, Null, Numeric }
 
-pub fn pack_null(): () -> MsgPack
-  msgpack_fns::pack_null()
+pub fn make_null(): () -> MsgPack
+  msgpack_fns::make_null()
 
-pub fn pack_bool(value: bool): () -> MsgPack
-  msgpack_fns::pack_bool(value)
+pub fn make_bool(value: bool): () -> MsgPack
+  msgpack_fns::make_bool(value)
 
-pub fn pack_string(value: String): () -> MsgPack
-  msgpack_fns::pack_string(value)
+pub fn make_string(value: String): () -> MsgPack
+  msgpack_fns::make_string(value)
 
-pub fn pack_binary(value: Binary): () -> MsgPack
-  msgpack_fns::pack_binary(value)
+pub fn make_binary(value: Binary): () -> MsgPack
+  msgpack_fns::make_binary(value)
 
-pub fn pack_array(value: Array<MsgPack>): () -> MsgPack
-  msgpack_fns::pack_array(value)
+pub fn make_array(value: Array<MsgPack>): () -> MsgPack
+  msgpack_fns::make_array(value)
 
-pub fn pack_f32(value: f32): () -> MsgPack
-  msgpack_fns::pack_f32(value)
+pub fn make_f32(value: f32): () -> MsgPack
+  msgpack_fns::make_f32(value)
 
-pub fn pack_f64(value: f64): () -> MsgPack
-  msgpack_fns::pack_f64(value)
+pub fn make_f64(value: f64): () -> MsgPack
+  F64 { value }
 
-pub fn pack_i32(value: i32): () -> MsgPack
-  msgpack_fns::pack_i32(value)
+pub fn make_i32(value: i32): () -> MsgPack
+  msgpack_fns::make_i32(value)
 
-pub fn pack_i64(value: i64): () -> MsgPack
-  msgpack_fns::pack_i64(value)
+pub fn make_i64(value: i64): () -> MsgPack
+  msgpack_fns::make_i64(value)
 
-pub fn pack_map(value: Map<MsgPack>): () -> MsgPack
-  msgpack_fns::pack_map(value)
+pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
+  msgpack_fns::make_map(value)
 
 pub fn unpack_bool(value: MsgPack): () -> bool
   msgpack_fns::unpack_bool(value)
@@ -60,8 +60,38 @@ pub fn unpack_i32(value: MsgPack): () -> i32
 pub fn unpack_i64(value: MsgPack): () -> i64
   msgpack_fns::unpack_i64(value)
 
-pub fn unpack_map(value: MsgPack): () -> Map<MsgPack>
+pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
   msgpack_fns::unpack_map(value)
+
+pub fn pack_null(): () -> MsgPack
+  make_null()
+
+pub fn pack_bool(value: bool): () -> MsgPack
+  make_bool(value)
+
+pub fn pack_string(value: String): () -> MsgPack
+  make_string(value)
+
+pub fn pack_binary(value: Binary): () -> MsgPack
+  make_binary(value)
+
+pub fn pack_array(value: Array<MsgPack>): () -> MsgPack
+  make_array(value)
+
+pub fn pack_f32(value: f32): () -> MsgPack
+  make_f32(value)
+
+pub fn pack_f64(value: f64): () -> MsgPack
+  F64 { value }
+
+pub fn pack_i32(value: i32): () -> MsgPack
+  make_i32(value)
+
+pub fn pack_i64(value: i64): () -> MsgPack
+  make_i64(value)
+
+pub fn pack_map(value: Dict<String, MsgPack>): () -> MsgPack
+  make_map(value)
 
 fn msgpack_array_with_capacity(size: i32): () -> Array<MsgPack>
   Array<MsgPack>::with_capacity(size)
@@ -70,16 +100,18 @@ fn msgpack_array_push(array: Array<MsgPack>, value: MsgPack): () -> Array<MsgPac
   array.pushed(value)
 
 fn msgpack_array_length(array: Array<MsgPack>): () -> i32
-  array.length()
+  array.len()
 
 fn msgpack_array_raw_storage(array: Array<MsgPack>): () -> FixedArray<MsgPack>
   array.raw_storage()
 
-fn msgpack_map_new(): () -> Map<MsgPack>
-  Map<MsgPack>::new()
+fn msgpack_map_new(): () -> Dict<String, MsgPack>
+  Dict<String, MsgPack>::init()
 
-fn msgpack_map_set(map: Map<MsgPack>, key: String, value: MsgPack): () -> Map<MsgPack>
-  map.set(key, value)
+fn msgpack_map_set(map: Dict<String, MsgPack>, key: String, value: MsgPack): () -> Dict<String, MsgPack>
+  let ~next = map
+  next.set(key: key, value: value)
+  next
 
 pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
   msgpack_fns::encode_value(value, ptr, len)

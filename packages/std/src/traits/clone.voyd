@@ -1,0 +1,5 @@
+pub trait Clone<T>
+  fn clone(self) -> T
+
+pub trait Copy<T>
+  fn copy(self) -> T

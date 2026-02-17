@@ -1,7 +1,7 @@
 use std::optional::all
 
-pub trait Iterable<T>
-  fn iterate(self) -> Iterator<T>
+pub trait Sequence<T>
+  fn iter(self) -> Iterator<T>
 
 pub trait Iterator<T>
   fn next(~self) -> Option<T>
@@ -15,7 +15,7 @@ pub macro for(case)
   let iterator_val_id = identifier(__iterable_val)
 
   `
-    let ~($iterator_id) = $iterable.iterate()
+    let ~($iterator_id) = $iterable.iter()
     while true do:
       let $iterator_val_id = ($iterator_id).next()
       $iterator_val_id.match

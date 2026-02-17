@@ -90,4 +90,24 @@ describe("colon clause attachment", () => {
       ],
     ]);
   });
+
+  test("keeps inline object literal branch values inside if clauses", () => {
+    const ast = parse(
+      [
+        "if",
+        "  x < y: Less {}",
+        "  else: Equal {}",
+        "",
+      ].join("\n")
+    ).toJSON();
+
+    expect(ast).toEqual([
+      "ast",
+      [
+        "if",
+        [":", ["<", "x", "y"], ["Less", ["object_literal"]]],
+        [":", "else", ["Equal", ["object_literal"]]],
+      ],
+    ]);
+  });
 });

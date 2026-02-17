@@ -106,7 +106,9 @@ export const lowerEffectfulCallResult = ({
               if (typeof field.tempId === "number") {
                 const binding = fnCtx.tempLocals.get(field.tempId);
                 if (!binding) {
-                  throw new Error("missing temp local binding for call env capture");
+                  throw new Error(
+                    `missing temp local binding for call env capture (call ${callId}, temp ${field.tempId})`
+                  );
                 }
                 return ctx.mod.local.get(binding.index, binding.type);
               }

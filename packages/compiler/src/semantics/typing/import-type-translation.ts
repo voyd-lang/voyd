@@ -100,12 +100,34 @@ export const translateFunctionSignature = ({
   paramMap: Map<TypeParamId, TypeParamId>;
 }): { signature: FunctionSignature } => {
   const typeParamMap = paramMap;
+  const typeParamSymbolMap = new Map<SymbolId, SymbolId>();
+  const mapTypeParamSymbol = (symbol: SymbolId): SymbolId => {
+    const existing = typeParamSymbolMap.get(symbol);
+    if (typeof existing === "number") {
+      return existing;
+    }
+    const mapped = cloneTypeParamSymbol(symbol, dependency, ctx);
+    typeParamSymbolMap.set(symbol, mapped);
+    return mapped;
+  };
   const params = signature.typeParams?.map((param) => ({
-    symbol: cloneTypeParamSymbol(param.symbol, dependency, ctx),
+    symbol: mapTypeParamSymbol(param.symbol),
     typeParam: mapTypeParam(param.typeParam, typeParamMap, ctx),
     constraint: param.constraint ? translation(param.constraint) : undefined,
     typeRef: translation(param.typeRef),
   }));
+  const translatedTypeParamMap = signature.typeParamMap
+    ? new Map<SymbolId, TypeId>(
+        Array.from(signature.typeParamMap.entries()).map(([symbol, typeRef]) => [
+          mapTypeParamSymbol(symbol),
+          translation(typeRef),
+        ]),
+      )
+    : params && params.length > 0
+      ? new Map<SymbolId, TypeId>(
+          params.map((param) => [param.symbol, param.typeRef]),
+        )
+      : undefined;
 
   const parameters = signature.parameters.map((param) => ({
     type: translation(param.type),
@@ -137,7 +159,7 @@ export const translateFunctionSignature = ({
       annotatedEffects: signature.annotatedEffects ?? false,
       typeParams: params,
       scheme,
-      typeParamMap: signature.typeParamMap,
+      typeParamMap: translatedTypeParamMap,
     },
   };
 };

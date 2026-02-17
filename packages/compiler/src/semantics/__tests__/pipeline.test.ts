@@ -662,11 +662,142 @@ describe("semanticsPipeline", () => {
     expect(result.diagnostics).toHaveLength(0);
   });
 
+  it("accepts constrained generic re-instantiation inside constrained impl methods", () => {
+    const ast = loadAst("generic_constraints_reinstantiation_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("accepts constrained helper generic calls inside constrained impl methods", () => {
+    const ast = loadAst("generic_constraints_constrained_helper_call_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("rejects impl template matches when impl type parameter constraints are violated", () => {
     const ast = loadAst("generic_constraints_impl_type_param_failure.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(
       /does not satisfy.*constraint/i
     );
+  });
+
+  it("supports key-style generic constraints used by std container APIs", () => {
+    const ast = loadAst("generic_constraints_std_preflight.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("accepts constrained generic object methods across module boundaries", () => {
+    const depFixture = "generic_constraints_cross_module/dep.voyd";
+    const mainFixture = "generic_constraints_cross_module/main.voyd";
+    const dep = buildModule({
+      fixture: depFixture,
+      segments: ["dep"],
+    });
+    const depSemantics = semanticsPipeline({
+      module: dep.module,
+      graph: dep.graph,
+    });
+
+    const mainAst = loadAst(mainFixture);
+    const useForm = mainAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const dependency = {
+      kind: "use" as const,
+      path: dep.module.path,
+      span: toSourceSpan(useForm ?? mainAst),
+    };
+    const main = buildModule({
+      fixture: mainFixture,
+      ast: mainAst,
+      segments: ["main"],
+      dependencies: [dependency],
+    });
+
+    const mainSemantics = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[dep.module.id, depSemantics.exports]]),
+      dependencies: new Map([[dep.module.id, depSemantics]]),
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
+  it("accepts constrained generic object methods with transitive key-type dependencies", () => {
+    const keyTypeFixture = "generic_constraints_cross_module_transitive/key_type.voyd";
+    const depFixture = "generic_constraints_cross_module_transitive/dep.voyd";
+    const mainFixture = "generic_constraints_cross_module_transitive/main.voyd";
+
+    const keyType = buildModule({
+      fixture: keyTypeFixture,
+      segments: ["key_type"],
+    });
+    const keyTypeSemantics = semanticsPipeline({
+      module: keyType.module,
+      graph: keyType.graph,
+    });
+
+    const depAst = loadAst(depFixture);
+    const depUseForm = depAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const depDependency = {
+      kind: "use" as const,
+      path: keyType.module.path,
+      span: toSourceSpan(depUseForm ?? depAst),
+    };
+    const dep = buildModule({
+      fixture: depFixture,
+      ast: depAst,
+      segments: ["dep"],
+      dependencies: [depDependency],
+    });
+    const depSemantics = semanticsPipeline({
+      module: dep.module,
+      graph: dep.graph,
+      exports: new Map([[keyType.module.id, keyTypeSemantics.exports]]),
+      dependencies: new Map([[keyType.module.id, keyTypeSemantics]]),
+    });
+
+    const mainAst = loadAst(mainFixture);
+    const useForms = mainAst.rest.filter(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const mainDependencies = [
+      {
+        kind: "use" as const,
+        path: dep.module.path,
+        span: toSourceSpan(useForms[0] ?? mainAst),
+      },
+      {
+        kind: "use" as const,
+        path: keyType.module.path,
+        span: toSourceSpan(useForms[1] ?? mainAst),
+      },
+    ];
+    const main = buildModule({
+      fixture: mainFixture,
+      ast: mainAst,
+      segments: ["main"],
+      dependencies: mainDependencies,
+    });
+
+    const mainSemantics = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([
+        [dep.module.id, depSemantics.exports],
+        [keyType.module.id, keyTypeSemantics.exports],
+      ]),
+      dependencies: new Map([
+        [dep.module.id, depSemantics],
+        [keyType.module.id, keyTypeSemantics],
+      ]),
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
   });
 
   it("lowers nominal constructor overloads across modules", () => {

@@ -1,0 +1,20 @@
+use src::key_type::KeyName
+
+pub trait Key<T>
+  fn matches(self, other: T) -> bool
+
+impl Key<KeyName> for KeyName
+  fn matches(self, other: KeyName) -> bool
+    self.value == other.value
+
+pub obj DictLike<K, V> {
+  key: K,
+  value: V
+}
+
+impl<K: Key<K>, V> DictLike<K, V>
+  pub fn init(key: K, value: V) -> DictLike<K, V>
+    DictLike<K, V> { key: key, value: value }
+
+  pub fn key_matches(self, key: K) -> bool
+    self.key.matches(key)

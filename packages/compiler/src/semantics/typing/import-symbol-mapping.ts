@@ -14,6 +14,7 @@ import {
   mapTypeParam,
   translateFunctionSignature,
 } from "./import-type-translation.js";
+import { collectTraitOwnersFromTypeParams } from "./constraint-trait-owners.js";
 import { findExport, makeDependencyContext } from "./import-resolution.js";
 import {
   methodSignatureKey,
@@ -416,6 +417,57 @@ export const registerImportedObjectTemplate = ({
     constraint: param.constraint ? translation(param.constraint) : undefined,
   }));
 
+  const dependencyTraitSymbols = new Set<SymbolId>();
+  const addDependencyTraitSymbols = (
+    owners: ReadonlyMap<string, { moduleId: string; symbol: SymbolId }>,
+  ): void => {
+    owners.forEach((owner) => {
+      if (owner.moduleId === dependency.moduleId) {
+        dependencyTraitSymbols.add(owner.symbol);
+      }
+    });
+  };
+
+  addDependencyTraitSymbols(
+    collectTraitOwnersFromTypeParams({
+      typeParams: template.params,
+      arena: dependency.typing.arena,
+    }),
+  );
+
+  dependency.typing.memberMetadata.forEach((metadata, memberSymbol) => {
+    if (metadata.owner !== dependencySymbol) {
+      return;
+    }
+    const signature = dependency.typing.functions.getSignature(memberSymbol);
+    addDependencyTraitSymbols(
+      collectTraitOwnersFromTypeParams({
+        typeParams: signature?.typeParams,
+        arena: dependency.typing.arena,
+      }),
+    );
+  });
+
+  dependencyTraitSymbols.forEach((traitSymbol) => {
+    const localTraitSymbol = mapDependencySymbolToLocal({
+      owner: traitSymbol,
+      dependency,
+      ctx,
+      allowUnexported: true,
+    });
+    registerImportedTraitDecl({
+      dependency,
+      dependencySymbol: traitSymbol,
+      localSymbol: localTraitSymbol,
+      ctx,
+    });
+    registerImportedTraitImplTemplates({
+      dependency,
+      dependencySymbol: traitSymbol,
+      ctx,
+    });
+  });
+
   const fields = template.fields.map((field) => ({
     name: field.name,
     type: translation(field.type),
@@ -571,10 +623,13 @@ export const registerImportedTraitImplTemplates = ({
   dependencySymbol: SymbolId;
   ctx: TypingContext;
 }): void => {
+  const dependencyRecord = dependency.symbolTable.getSymbol(dependencySymbol);
+  const dependencyIsTrait = dependencyRecord.kind === "trait";
   const relevantTemplates = dependency.typing.traits
     .getImplTemplates()
     .filter(
       (template) =>
+        (dependencyIsTrait && template.traitSymbol === dependencySymbol) ||
         targetTypeIncludesDependencySymbol({
           type: template.target,
           dependency,
@@ -792,10 +847,6 @@ export const mapDependencySymbolToLocal = ({
             },
             ...(importableMetadata ?? {}),
           },
-        });
-        ctx.importsByLocal.set(declared, {
-          moduleId: candidateDependency.moduleId,
-          symbol: candidateOwner,
         });
         const bucket =
           ctx.importAliasesByModule.get(candidateDependency.moduleId) ??

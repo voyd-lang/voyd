@@ -7,6 +7,7 @@ import type { TypeParameterDecl } from "../../decls.js";
 import { declareValueOrParameter } from "../redefinitions.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { bindTypeParameters } from "./type-parameters.js";
+import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 
 const declareEffectOperationParams = ({
   op,
@@ -53,6 +54,11 @@ export const bindEffectDecl = (
 ): void => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
+  reportInvalidTypeDeclarationName({
+    declarationKind: "effect",
+    name: decl.name,
+    ctx,
+  });
   reportOverloadNameCollision({
     name: decl.name.value,
     scope: tracker.current(),

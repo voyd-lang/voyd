@@ -105,7 +105,9 @@ use std::all
 use std::optional::Optional
 
 fn main() -> i32
-  let m = Map<i32>([("hey", 5), ("bye", 1)])
+  let ~m = Dict<i32>::new()
+  m.set("hey", 5)
+  m.set("bye", 1)
   match(m.get("hey"))
     Some: 1   // OK: `Some` appears once in Optional<T>
     None: -1

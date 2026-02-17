@@ -1,0 +1,504 @@
+use std::array::Array
+use std::fixed_array::fns::{ new_fixed_array }
+use std::traits::sequence::all
+use std::optional::types::all
+use std::string::type::String
+use std::subscript::{ SubscriptRead, SubscriptWrite }
+
+pub trait DictKey<K>
+  fn dict_hash(self) -> i32
+  fn dict_eq(self, { other: K }) -> bool
+
+pub obj DictEntry<K, V> {
+  api dict: Dict<K, V>,
+  api key: K
+}
+
+pub obj Dict<K, V> {
+  buckets: FixedArray<Array<DictPair<K, V>>>,
+  count: i32
+}
+
+obj DictPair<K, V> {
+  key: K,
+  value: V
+}
+
+obj BucketSetResult<K, V> {
+  bucket: Array<DictPair<K, V>>,
+  inserted: bool
+}
+
+obj BucketDeleteResult<K, V> {
+  bucket: Array<DictPair<K, V>>,
+  deleted: bool
+}
+
+impl<K: DictKey<K>, V> Dict<K, V>
+  api fn init() -> Dict<K, V>
+    Dict<K, V> { buckets: new_buckets<K, V>(16), count: 0 }
+
+  api fn with_capacity({ size capacity: i32 }) -> Dict<K, V>
+    let target = if capacity > 0 then: capacity else: 0
+    let min_bucket_count = 16
+    let desired_bucket_count = next_power_of_two(target * 2)
+    let bucket_count =
+      if desired_bucket_count > min_bucket_count then:
+        desired_bucket_count
+      else:
+        min_bucket_count
+
+    Dict<K, V> { buckets: new_buckets<K, V>(bucket_count), count: 0 }
+
+  api fn len(self) -> i32
+    self.count
+
+  api fn is_empty(self) -> bool
+    self.count == 0
+
+  api fn contains_key(self, { key: K }) -> bool
+    if self.count == 0 then:
+      return false
+
+    let bucket_count = __array_len(self.buckets)
+    let bucket_index = bucket_index_for_key(bucket_count, key)
+    let bucket = __array_get(self.buckets, bucket_index)
+    find_entry_index_in_bucket(bucket, key) >= 0
+
+  api fn get(self, { key: K }) -> Optional<V>
+    if self.count == 0 then:
+      return None {}
+
+    let bucket_count = __array_len(self.buckets)
+    let bucket_index = bucket_index_for_key(bucket_count, key)
+    let bucket = __array_get(self.buckets, bucket_index)
+    let entry_index = find_entry_index_in_bucket(bucket, key)
+    if entry_index < 0 then:
+      return None {}
+
+    let storage = bucket.raw_storage()
+    let entry = __array_get(storage, entry_index)
+    Some<V> { value: entry.value }
+
+  api fn insert(~self, { key: K, value: V }) -> Optional<V>
+    let previous = self.get(key: key)
+    self.set(key: key, value: value)
+    previous
+
+  api fn set(~self, { key: K, value: V }) -> void
+    let next = self.with_set(key, value)
+    self.buckets = next.buckets
+    self.count = next.count
+
+  api fn remove(~self, { key: K }) -> Optional<V>
+    let previous = self.get(key: key)
+    let next = self.with_deleted(key)
+    self.buckets = next.buckets
+    self.count = next.count
+    previous
+
+  api fn clear(~self) -> void
+    if self.count == 0 then:
+      return void
+
+    let bucket_count = __array_len(self.buckets)
+    self.buckets = new_buckets<K, V>(bucket_count)
+    self.count = 0
+
+  api fn keys(self) -> Array<K>
+    if self.count == 0 then:
+      return Array<K>::with_capacity(0)
+
+    let ~out = Array<K>::with_capacity(self.count)
+    let bucket_count = __array_len(self.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count do:
+      let bucket = __array_get(self.buckets, bucket_index)
+      let storage = bucket.raw_storage()
+      let len = bucket.len()
+      var index = 0
+      while index < len do:
+        let entry = __array_get(storage, index)
+        out.push(entry.key)
+        index = index + 1
+      bucket_index = bucket_index + 1
+    out
+
+  api fn values(self) -> Array<V>
+    if self.count == 0 then:
+      return Array<V>::with_capacity(0)
+
+    let ~out = Array<V>::with_capacity(self.count)
+    let bucket_count = __array_len(self.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count do:
+      let bucket = __array_get(self.buckets, bucket_index)
+      let storage = bucket.raw_storage()
+      let len = bucket.len()
+      var index = 0
+      while index < len do:
+        let entry = __array_get(storage, index)
+        out.push(entry.value)
+        index = index + 1
+      bucket_index = bucket_index + 1
+    out
+
+  api fn entries(self) -> Array<(K, V)>
+    if self.count == 0 then:
+      return Array<(K, V)>::with_capacity(0)
+
+    let ~out = Array<(K, V)>::with_capacity(self.count)
+    let bucket_count = __array_len(self.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count do:
+      let bucket = __array_get(self.buckets, bucket_index)
+      let storage = bucket.raw_storage()
+      let len = bucket.len()
+      var index = 0
+      while index < len do:
+        let entry = __array_get(storage, index)
+        out.push((entry.key, entry.value))
+        index = index + 1
+      bucket_index = bucket_index + 1
+    out
+
+  api fn each(self, { do f: (key: K, value: V) -> void }) -> void
+    if self.count == 0 then:
+      return void
+
+    let bucket_count = __array_len(self.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count do:
+      let bucket = __array_get(self.buckets, bucket_index)
+      let storage = bucket.raw_storage()
+      let len = bucket.len()
+      var index = 0
+      while index < len do:
+        let entry = __array_get(storage, index)
+        f(entry.key, entry.value)
+        index = index + 1
+      bucket_index = bucket_index + 1
+
+  api fn extend(~self, other: Dict<K, V>) -> void
+    self.extend(entries: other.entries())
+
+  api fn extend(~self, { entries: Sequence<(K, V)> }) -> void
+    let ~iter = entries.iter()
+    while true do:
+      match(iter.next())
+        Some<(K, V)> { value }:
+          self.set(key: value.0, value: value.1)
+        None:
+          break
+
+  api fn merged(self, { other: Dict<K, V> }) -> Dict<K, V>
+    self.merged(
+      other: other,
+      on_conflict: (_key: K, _left: V, right: V) -> V => right
+    )
+
+  api fn merged(
+    self,
+    { other: Dict<K, V>, on_conflict: (key: K, left: V, right: V) -> V }
+  ) -> Dict<K, V>
+    if other.count == 0 then:
+      return self
+
+    var out = self
+    let bucket_count = __array_len(other.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count do:
+      let bucket = __array_get(other.buckets, bucket_index)
+      let storage = bucket.raw_storage()
+      let len = bucket.len()
+      var index = 0
+      while index < len do:
+        let entry = __array_get(storage, index)
+        match(out.get(key: entry.key))
+          Some<V> { value: left }:
+            out = out.with_set(entry.key, on_conflict(entry.key, left, entry.value))
+          None:
+            out = out.with_set(entry.key, entry.value)
+        index = index + 1
+      bucket_index = bucket_index + 1
+    out
+
+  api fn merge(~self, { other: Dict<K, V> }) -> void
+    self.merge(
+      other: other,
+      on_conflict: (_key: K, _left: V, right: V) -> V => right
+    )
+
+  api fn merge(
+    ~self,
+    { other: Dict<K, V>, on_conflict: (key: K, left: V, right: V) -> V }
+  ) -> void
+    if other.count == 0 then:
+      return void
+
+    let bucket_count = __array_len(other.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count do:
+      let bucket = __array_get(other.buckets, bucket_index)
+      let storage = bucket.raw_storage()
+      let len = bucket.len()
+      var index = 0
+      while index < len do:
+        let entry = __array_get(storage, index)
+        match(self.get(key: entry.key))
+          Some<V> { value: left }:
+            self.set(key: entry.key, value: on_conflict(entry.key, left, entry.value))
+          None:
+            self.set(key: entry.key, value: entry.value)
+        index = index + 1
+      bucket_index = bucket_index + 1
+
+  api fn map<U>(self, { map f: (key: K, value: V) -> U }) -> Dict<K, U>
+    if self.count == 0 then:
+      return Dict<K, U>::init()
+
+    var out = Dict<K, U>::with_capacity(size: self.count)
+    let bucket_count = __array_len(self.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count do:
+      let bucket = __array_get(self.buckets, bucket_index)
+      let storage = bucket.raw_storage()
+      let len = bucket.len()
+      var index = 0
+      while index < len do:
+        let entry = __array_get(storage, index)
+        out = out.with_set(entry.key, f(entry.key, entry.value))
+        index = index + 1
+      bucket_index = bucket_index + 1
+    out
+
+  api fn filter(self, { where pred: (key: K, value: V) -> bool }) -> Dict<K, V>
+    if self.count == 0 then:
+      return self
+
+    var out = Dict<K, V>::with_capacity(size: self.count)
+    let bucket_count = __array_len(self.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count do:
+      let bucket = __array_get(self.buckets, bucket_index)
+      let storage = bucket.raw_storage()
+      let len = bucket.len()
+      var index = 0
+      while index < len do:
+        let entry = __array_get(storage, index)
+        if pred(entry.key, entry.value) then:
+          out = out.with_set(entry.key, entry.value)
+        index = index + 1
+      bucket_index = bucket_index + 1
+    out
+
+  api fn entry(self, { key: K }) -> DictEntry<K, V>
+    DictEntry<K, V> { dict: self, key: key }
+
+  fn with_set(self, key: K, value: V) -> Dict<K, V>
+    let bucket_count = __array_len(self.buckets)
+    let bucket_index = bucket_index_for_key(bucket_count, key)
+    let bucket = __array_get(self.buckets, bucket_index)
+    let result = set_in_bucket(bucket, key, value)
+
+    __array_set(self.buckets, bucket_index, result.bucket)
+    let count = if result.inserted then: self.count + 1 else: self.count
+    let next = Dict<K, V> { buckets: self.buckets, count: count }
+    maybe_grow(next)
+
+  fn with_deleted(self, key: K) -> Dict<K, V>
+    if self.count == 0 then:
+      return self
+
+    let bucket_count = __array_len(self.buckets)
+    let bucket_index = bucket_index_for_key(bucket_count, key)
+    let bucket = __array_get(self.buckets, bucket_index)
+    let result = delete_from_bucket(bucket, key)
+    if result.deleted then:
+      __array_set(self.buckets, bucket_index, result.bucket)
+      return Dict<K, V> { buckets: self.buckets, count: self.count - 1 }
+    self
+
+impl<K: DictKey<K>, V> DictEntry<K, V>
+  api fn or_insert(self, { default: V }) -> Dict<K, V>
+    if self.dict.contains_key(key: self.key) then:
+      return self.dict
+
+    let ~next = self.dict
+    next.set(key: self.key, value: default)
+    next
+
+  api fn or_insert_with(self, { make: () -> V }) -> Dict<K, V>
+    if self.dict.contains_key(key: self.key) then:
+      return self.dict
+
+    let ~next = self.dict
+    next.set(key: self.key, value: make())
+    next
+
+  api fn and_modify(self, { f: (value: V) -> V }) -> DictEntry<K, V>
+    let ~next = self.dict
+    match(next.get(key: self.key))
+      Some<V> { value }:
+        next.set(key: self.key, value: f(value))
+      None:
+        void
+    DictEntry<K, V> { dict: next, key: self.key }
+
+  api fn remove(self) -> Optional<V>
+    let ~next = self.dict
+    next.remove(key: self.key)
+
+impl<K: DictKey<K>, V> SubscriptRead<K, Optional<V>> for Dict<K, V>
+  api fn subscript_get(self, key: K) -> Optional<V>
+    self.get(key: key)
+
+impl<K: DictKey<K>, V> SubscriptWrite<K, V> for Dict<K, V>
+  api fn subscript_set(~self, key: K, value: V) -> void
+    self.set(key: key, value: value)
+
+impl<T> Array<T>
+  api fn group_by<K: DictKey<K>>(self, { key f: (value: T) -> K }) -> Dict<K, Array<T>>
+    let ~out = Dict<K, Array<T>>::with_capacity(size: self.len())
+    var index = 0
+    while index < self.len() do:
+      match(self.get(index))
+        Some<T> { value }:
+          let group_key = f(value)
+          match(out.get(key: group_key))
+            Some<Array<T>> { value: existing }:
+              let ~next = existing
+              next.push(value)
+              out.set(key: group_key, value: next)
+            None:
+              let ~next = Array<T>::with_capacity(1)
+              next.push(value)
+              out.set(key: group_key, value: next)
+        None:
+          void
+      index = index + 1
+    out
+
+impl DictKey<String> for String
+  api fn dict_hash(self) -> i32
+    self.hash_i32()
+
+  api fn dict_eq(self, { other: String }) -> bool
+    self == other
+
+fn new_buckets<K, V>(bucket_count: i32) -> FixedArray<Array<DictPair<K, V>>>
+  let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1
+  let buckets = new_fixed_array<Array<DictPair<K, V>>>(safe_bucket_count)
+  var index = 0
+  while index < safe_bucket_count do:
+    __array_set(buckets, index, Array<DictPair<K, V>>::init())
+    index = index + 1
+  buckets
+
+fn maybe_grow<K: DictKey<K>, V>(dict: Dict<K, V>) -> Dict<K, V>
+  let bucket_count = __array_len(dict.buckets)
+  if should_grow(dict.count, bucket_count) then:
+    let next_bucket_count = bucket_count * 2
+    return rehash_to_bucket_count(dict, next_bucket_count)
+  dict
+
+fn should_grow(count: i32, bucket_count: i32) -> bool
+  if bucket_count <= 0 then:
+    return true
+  (count * 4) > (bucket_count * 3)
+
+fn rehash_to_bucket_count<K: DictKey<K>, V>(dict: Dict<K, V>, bucket_count: i32) -> Dict<K, V>
+  let next_bucket_count = if bucket_count > 0 then: bucket_count else: 1
+  let next_buckets = new_buckets<K, V>(next_bucket_count)
+
+  let previous_bucket_count = __array_len(dict.buckets)
+  var bucket_index = 0
+  while bucket_index < previous_bucket_count do:
+    let bucket = __array_get(dict.buckets, bucket_index)
+    insert_bucket_entries(next_buckets, next_bucket_count, bucket)
+    bucket_index = bucket_index + 1
+
+  Dict<K, V> { buckets: next_buckets, count: dict.count }
+
+fn insert_bucket_entries<K: DictKey<K>, V>(
+  buckets: FixedArray<Array<DictPair<K, V>>>,
+  bucket_count: i32,
+  bucket: Array<DictPair<K, V>>
+) -> void
+  let storage = bucket.raw_storage()
+  let len = bucket.len()
+  var index = 0
+  while index < len do:
+    let entry = __array_get(storage, index)
+    insert_entry(buckets, bucket_count, entry)
+    index = index + 1
+
+fn insert_entry<K: DictKey<K>, V>(
+  buckets: FixedArray<Array<DictPair<K, V>>>,
+  bucket_count: i32,
+  entry: DictPair<K, V>
+) -> FixedArray<Array<DictPair<K, V>>>
+  let bucket_index = bucket_index_for_key(bucket_count, entry.key)
+  let bucket = __array_get(buckets, bucket_index)
+  let next_bucket = bucket.pushed(entry)
+  __array_set(buckets, bucket_index, next_bucket)
+
+fn find_entry_index_in_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, key: K) -> i32
+  let storage = bucket.raw_storage()
+  let len = bucket.len()
+  var index = 0
+  while index < len do:
+    let entry = __array_get(storage, index)
+    if key_equals(entry.key, key) then:
+      return index
+    index = index + 1
+  -1
+
+fn set_in_bucket<K: DictKey<K>, V>(
+  bucket: Array<DictPair<K, V>>,
+  key: K,
+  value: V
+) -> BucketSetResult<K, V>
+  let index = find_entry_index_in_bucket(bucket, key)
+  let entry = DictPair<K, V> { key: key, value: value }
+
+  if index < 0 then:
+    let next_bucket = bucket.pushed(entry)
+    return BucketSetResult<K, V> { bucket: next_bucket, inserted: true }
+
+  let ~next_bucket = bucket.copied()
+  next_bucket.replace(index, with: entry)
+  BucketSetResult<K, V> { bucket: next_bucket, inserted: false }
+
+fn delete_from_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, key: K) -> BucketDeleteResult<K, V>
+  let index = find_entry_index_in_bucket(bucket, key)
+  if index < 0 then:
+    return BucketDeleteResult<K, V> { bucket: bucket, deleted: false }
+
+  let next_bucket = bucket.removed(index)
+  BucketDeleteResult<K, V> { bucket: next_bucket, deleted: true }
+
+fn bucket_index_for_key<K: DictKey<K>>(bucket_count: i32, key: K) -> i32
+  let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1
+  mod_i32(hash_key(key), safe_bucket_count)
+
+fn key_equals<K: DictKey<K>>(left: K, right: K) -> bool
+  left.dict_eq(other: right)
+
+fn hash_key<K: DictKey<K>>(key: K) -> i32
+  key.dict_hash()
+
+fn mod_i32(value: i32, modulus: i32) -> i32
+  if modulus <= 0 then:
+    return 0
+
+  let div = value / modulus
+  let rem = value - div * modulus
+  if rem < 0 then: rem + modulus else: rem
+
+fn next_power_of_two(value: i32) -> i32
+  let start = if value > 1 then: value else: 1
+  var out = 1
+  while out < start do:
+    out = out * 2
+  out

@@ -1292,6 +1292,37 @@ fn id<T: Animal>(value: T) -> T
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("requires UpperCamelCase for type declaration names", () => {
+    const source = `
+type value_alias = i32
+
+obj thing {}
+
+trait watcher
+  fn watch(self) -> i32
+
+eff async_effect
+  fn next() -> i32
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const diagnostics = binding.diagnostics.filter((entry) => entry.code === "BD0007");
+    const messages = diagnostics.map((entry) => entry.message);
+
+    expect(diagnostics).toHaveLength(4);
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        "type alias value_alias must be UpperCamelCase",
+        "obj thing must be UpperCamelCase",
+        "trait watcher must be UpperCamelCase",
+        "effect async_effect must be UpperCamelCase",
+      ])
+    );
+  });
+
   it("reports unsupported mod declarations", () => {
     const source = "pub mod util";
     const ast = parse(source, "main.voyd");

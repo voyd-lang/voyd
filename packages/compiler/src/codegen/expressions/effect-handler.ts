@@ -292,6 +292,7 @@ const emitClauseFunction = ({
     locals: [],
     nextLocalIndex: params.length,
     returnTypeId: resolvedReturnTypeId,
+    returnWasmType: ctx.effectsBackend.abi.effectfulResultType(ctx),
     instanceId: typeInstanceId,
     typeInstanceId,
     effectful: true,

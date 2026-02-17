@@ -1,8 +1,10 @@
-use std::all
+use std::test::assertions::all
+use std::optional::types::all
+use std::string::{ new_string }
 
-test "string byte_values iterates utf8 bytes":
-  let values = "a😀".byte_values()
-  let ~iterator = values.iterate()
+test "string to_utf8 iterates utf8 bytes":
+  let values = "a😀".to_utf8()
+  let ~iterator = values.iter()
   var count = 0
   var sum = 0
 

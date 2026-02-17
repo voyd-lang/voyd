@@ -1,0 +1,5 @@
+pub trait Eq<T>
+  fn eq(self, { other: T }) -> bool
+
+  fn ne(self, { other: T }) -> bool
+    not self.eq(other: other)

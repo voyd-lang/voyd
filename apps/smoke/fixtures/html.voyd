@@ -1,17 +1,18 @@
 use std::all
 use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
 
 fn create_element({
   name: String,
   attributes?: Array<Array<String>>,
   children: Array<MsgPack>
 }) -> MsgPack
-  var element = Map<MsgPack>::new()
-  element = element.set("name", name)
-  element = element.set("children", children)
+  let ~element = Dict<String, MsgPack>::init()
+  element.set(key: "name", value: name)
+  element.set(key: "children", value: children)
   if attributes is Some:
-    element = element.set("attributes", attributes.value)
-  element
+    element.set(key: "attributes", value: attributes.value)
+  msgpack::make_map(element)
 
 pub fn main()
   <div class="greeting" visible>

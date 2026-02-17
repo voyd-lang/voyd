@@ -1,0 +1,16 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+pub fn main() -> i32
+  let lift = (base: i32) => (delta?: i32) =>
+    match(delta)
+      Some<i32>:
+        base + delta.value
+      None:
+        base
+  lift(10, 5)

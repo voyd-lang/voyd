@@ -62,6 +62,7 @@ import type {
   TypingContext,
   TypingState,
 } from "../types.js";
+import { typeDescriptorToUserString } from "../type-arena.js";
 import { assertMemberAccess } from "../visibility.js";
 import { symbolRefEquals, type SymbolRef } from "../symbol-ref.js";
 import {
@@ -71,7 +72,12 @@ import {
 } from "../symbol-ref-utils.js";
 import { createTranslation, translateFunctionSignature } from "../import-type-translation.js";
 import { typingContextsShareInterners } from "../shared-interners.js";
-import { mapDependencySymbolToLocal } from "../import-symbol-mapping.js";
+import {
+  mapDependencySymbolToLocal,
+  registerImportedTraitDecl,
+  registerImportedTraitImplTemplates,
+} from "../import-symbol-mapping.js";
+import { collectTraitOwnersFromTypeParams } from "../constraint-trait-owners.js";
 
 type SymbolNameResolver = (symbol: SymbolId) => string;
 
@@ -100,6 +106,48 @@ const dependencyMethodSignatureCache = new WeakMap<
   Map<string, FunctionSignature>
 >();
 
+const ensureImportedConstraintTraitsForSignature = ({
+  signature,
+  dependency,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  dependency: DependencySemantics;
+  ctx: TypingContext;
+}): void => {
+  const owners = collectTraitOwnersFromTypeParams({
+    typeParams: signature.typeParams,
+    arena: dependency.typing.arena,
+  });
+
+  owners.forEach((owner) => {
+    const traitDependency =
+      owner.moduleId === dependency.moduleId
+        ? dependency
+        : ctx.dependencies.get(owner.moduleId);
+    if (!traitDependency) {
+      return;
+    }
+    const localTraitSymbol = mapDependencySymbolToLocal({
+      owner: owner.symbol,
+      dependency: traitDependency,
+      ctx,
+      allowUnexported: true,
+    });
+    registerImportedTraitDecl({
+      dependency: traitDependency,
+      dependencySymbol: owner.symbol,
+      localSymbol: localTraitSymbol,
+      ctx,
+    });
+    registerImportedTraitImplTemplates({
+      dependency: traitDependency,
+      dependencySymbol: owner.symbol,
+      ctx,
+    });
+  });
+};
+
 const getDependencyMethodSignature = ({
   dependency,
   symbol,
@@ -113,6 +161,7 @@ const getDependencyMethodSignature = ({
   if (!signature) {
     return undefined;
   }
+  ensureImportedConstraintTraitsForSignature({ signature, dependency, ctx });
   if (
     typingContextsShareInterners({
       sourceArena: dependency.typing.arena,
@@ -3351,12 +3400,17 @@ export const enforceTypeParamConstraint = (
   }
   const constraint = ctx.arena.substitute(param.constraint, substitution);
   if (!typeSatisfies(applied, constraint, ctx, state)) {
+    const appliedType = typeDescriptorToUserString(ctx.arena.get(applied), ctx.arena);
+    const constraintType = typeDescriptorToUserString(
+      ctx.arena.get(constraint),
+      ctx.arena,
+    );
     throw new Error(
       `type argument for ${resolveSymbolName(
         param.symbol,
         ctx,
         nameForSymbol,
-      )} does not satisfy its constraint`,
+      )} does not satisfy its constraint (applied=${appliedType}, constraint=${constraintType}, symbol=${param.symbol}, type_param=${param.typeParam})`,
     );
   }
 };

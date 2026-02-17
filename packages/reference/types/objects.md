@@ -386,12 +386,15 @@ Type: `Array`
 let my_array = Array(1, 2, 3)
 ```
 
-## Maps
+## Dictionaries
 
 Dictionaries are a growable collection of key-value pairs.
 
-Type: `Map`
+Type: `Dict`
 
 ```voyd
-let my_dict = Dict { a: 1, b: 2, c: 3 }
+let ~my_dict = Dict<i32>::new()
+my_dict.set("a", 1)
+my_dict.set("b", 2)
+my_dict.set("c", 3)
 ```
