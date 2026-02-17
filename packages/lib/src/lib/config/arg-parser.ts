@@ -32,6 +32,7 @@ export const getConfigFromCli = (): VoydConfig => {
     .option("--run-wasm", "run the compiled wasm code directly")
     .option("--internal-test", "run the internal test script")
     .option("--test", "run voyd tests")
+    .option("--out <path>", "output path for generated documentation")
     .option("--reporter <name>", "test reporter (default: minimal)")
     .option("--fail-empty-tests", "exit 1 if no tests are found")
     .option(
@@ -47,8 +48,10 @@ export const getConfigFromCli = (): VoydConfig => {
   const opts = program.opts();
   const [firstArg, secondArg] = program.args as [string?, string?];
   const isTestCommand = firstArg === "test";
+  const isDocCommand = firstArg === "doc" || firstArg === "docs";
   const testMode = isTestCommand || opts.test;
-  const indexArg = isTestCommand ? secondArg : firstArg;
+  const docMode = isDocCommand;
+  const indexArg = isTestCommand || isDocCommand ? secondArg : firstArg;
   const defaultIndex = testMode ? "." : "./src";
 
   return {
@@ -67,5 +70,7 @@ export const getConfigFromCli = (): VoydConfig => {
     testReporter: opts.reporter,
     failOnEmptyTests: opts.failEmptyTests,
     pkgDirs: opts.pkgDir,
+    doc: docMode,
+    docOut: opts.out,
   };
 };

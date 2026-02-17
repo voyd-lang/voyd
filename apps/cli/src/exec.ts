@@ -1,5 +1,6 @@
 import { stdout } from "process";
 import { readFileSync, statSync, existsSync } from "fs";
+import { writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { getConfig } from "@voyd/lib/config/index.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
@@ -11,6 +12,7 @@ import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
 import { resolvePackageDirs } from "./package-dirs.js";
 import { runTests } from "./test-runner.js";
+import { generateDocumentationHtml } from "./doc-html.js";
 
 export const exec = () => main().catch(errorHandler);
 
@@ -35,6 +37,14 @@ async function main() {
 
   if (config.emitParserAst) {
     return printJson(await getParserAst(entryPath));
+  }
+
+  if (config.doc) {
+    return emitDocumentation({
+      entryPath,
+      roots,
+      outPath: config.docOut,
+    });
   }
 
   if (config.emitCoreAst) {
@@ -216,6 +226,31 @@ async function runWasm(entryPath: string) {
   const wasm = readFileSync(entryPath);
   const result = await sdk.run({ wasm, entryName: "main" });
   printValue(result);
+}
+
+async function emitDocumentation({
+  entryPath,
+  roots,
+  outPath,
+}: {
+  entryPath: string;
+  roots: ModuleRoots;
+  outPath?: string;
+}) {
+  const graph = await loadModuleGraph({ entryPath, roots });
+  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
+    graph,
+  });
+  const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
+  assertNoDiagnostics(diagnostics);
+
+  const html = generateDocumentationHtml({
+    graph,
+    semantics,
+  });
+  const targetPath = resolve(outPath ?? "docs.html");
+  await writeFile(targetPath, html, "utf8");
+  console.log(targetPath);
 }
 
 function errorHandler(error: unknown) {

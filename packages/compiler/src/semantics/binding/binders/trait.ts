@@ -7,7 +7,11 @@ import {
   formCallsInternal,
 } from "../../../parser/index.js";
 import type { IntrinsicAttribute } from "../../../parser/attributes.js";
-import { rememberSyntax } from "../context.js";
+import {
+  declarationDocForSyntax,
+  parameterDocForSyntax,
+  rememberSyntax,
+} from "../context.js";
 import type {
   TraitMethodDeclInput,
   TypeParameterDecl,
@@ -89,6 +93,7 @@ export const bindTraitDecl = (
     methods,
     scope: traitScope,
     moduleIndex: ctx.nextModuleIndex++,
+    documentation: declarationDocForSyntax(decl.name, ctx),
   });
 };
 
@@ -158,6 +163,7 @@ const bindTraitMethod = ({
     effectTypeExpr: decl.signature.effectType,
     defaultBody: decl.body,
     intrinsic: decl.intrinsic,
+    documentation: declarationDocForSyntax(decl.signature.name, ctx),
   };
 };
 
@@ -193,6 +199,7 @@ const bindTraitMethodParameters = (
       ast: param.ast,
       typeExpr: param.typeExpr,
       bindingKind: param.bindingKind,
+      documentation: parameterDocForSyntax(param.ast, ctx),
     };
   });
 

@@ -1,5 +1,9 @@
 import type { Expr } from "../../../parser/index.js";
-import { rememberSyntax } from "../context.js";
+import {
+  declarationDocForSyntax,
+  parameterDocForSyntax,
+  rememberSyntax,
+} from "../context.js";
 import { recordFunctionOverload } from "../overloads.js";
 import type { TypeParameterDecl, ParameterDeclInput } from "../../decls.js";
 import type { BindingContext } from "../types.js";
@@ -85,6 +89,7 @@ export const bindFunctionDecl = (
     moduleIndex: options.moduleIndex ?? ctx.nextModuleIndex++,
     implId: undefined,
     intrinsic: intrinsicMetadata,
+    documentation: declarationDocForSyntax(decl.signature.name, ctx),
   });
 
   recordFunctionOverload(fnDecl, declarationScope, ctx);
@@ -134,6 +139,7 @@ const bindFunctionParameters = (
           ? options.selfTypeExpr
           : undefined),
       bindingKind: param.bindingKind,
+      documentation: parameterDocForSyntax(param.ast, ctx),
     });
   });
 

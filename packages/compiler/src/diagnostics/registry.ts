@@ -93,6 +93,7 @@ type DiagnosticParamsMap = {
     macro: string;
     errorMessage?: string;
   };
+  MD0004: { kind: "dangling-doc-comment" };
   TY0001:
     | { kind: "immutable-assignment"; name: string }
     | { kind: "binding-declaration"; name: string };
@@ -366,6 +367,12 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "module-graph",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0003"]>,
+  MD0004: {
+    code: "MD0004",
+    message: () => "Dangling doc comment",
+    severity: "error",
+    phase: "module-graph",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0004"]>,
   TY0001: {
     code: "TY0001",
     message: (params) =>

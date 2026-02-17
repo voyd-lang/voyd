@@ -1,5 +1,6 @@
 import type { Form } from "../parser/index.js";
 import type { Diagnostic, SourceSpan } from "../diagnostics/index.js";
+import type { ModuleDocumentation } from "../docs/doc-comments.js";
 
 export type ModuleNamespace = "src" | "std" | "pkg";
 
@@ -64,6 +65,7 @@ export interface ModuleNode {
   origin: ModuleOrigin;
   ast: Form;
   source: string;
+  docs?: ModuleDocumentation;
   dependencies: readonly ModuleDependency[];
   /**
    * Functional macro names exported from this module after macro-expansion.

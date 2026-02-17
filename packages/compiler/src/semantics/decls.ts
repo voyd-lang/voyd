@@ -25,6 +25,7 @@ export interface ParameterDecl {
   ast?: Syntax;
   typeExpr?: Expr;
   bindingKind?: HirBindingKind;
+  documentation?: string;
 }
 
 export type ParameterDeclInput = Omit<ParameterDecl, "id"> & {
@@ -57,6 +58,7 @@ export interface FunctionDecl {
   moduleIndex: number;
   implId?: ImplDeclId;
   intrinsic?: IntrinsicAttribute;
+  documentation?: string;
 }
 
 export type FunctionDeclInput = Omit<FunctionDecl, "id" | "params"> & {
@@ -73,6 +75,7 @@ export interface TypeAliasDecl {
   target: Expr;
   typeParameters?: TypeParameterDecl[];
   moduleIndex: number;
+  documentation?: string;
 }
 
 export type TypeAliasDeclInput = Omit<TypeAliasDecl, "id"> & {
@@ -86,6 +89,7 @@ export interface ObjectFieldDecl {
   visibility: HirVisibility;
   typeExpr: Expr;
   optional?: boolean;
+  documentation?: string;
 }
 
 export interface ObjectDecl {
@@ -98,6 +102,7 @@ export interface ObjectDecl {
   fields: ObjectFieldDecl[];
   typeParameters?: TypeParameterDecl[];
   moduleIndex: number;
+  documentation?: string;
 }
 
 export type ObjectDeclInput = Omit<ObjectDecl, "id"> & { id?: ObjectDeclId };
@@ -114,6 +119,7 @@ export interface TraitMethodDecl {
   effectTypeExpr?: Expr;
   defaultBody?: Expr;
   intrinsic?: IntrinsicAttribute;
+  documentation?: string;
 }
 
 export type TraitMethodDeclInput = Omit<TraitMethodDecl, "params"> & {
@@ -130,6 +136,7 @@ export interface TraitDecl {
   methods: TraitMethodDecl[];
   scope: ScopeId;
   moduleIndex: number;
+  documentation?: string;
 }
 
 export type TraitDeclInput = Omit<TraitDecl, "id" | "methods"> & {
@@ -148,6 +155,7 @@ export interface ImplDecl {
   methods: FunctionDecl[];
   scope: ScopeId;
   moduleIndex: number;
+  documentation?: string;
 }
 
 export type ImplDeclInput = Omit<ImplDecl, "id" | "methods"> & {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -202,6 +202,53 @@ const createPkgDirRelativeTestFixture = async (): Promise<{
   return { cwd: root, testRoot };
 };
 
+const createDocFixture = async (): Promise<string> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-docs-"));
+  const srcRoot = resolve(root, "src");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    resolve(srcRoot, "main.voyd"),
+    [
+      "//! Package docs.",
+      "",
+      "/// Adds values with **markdown**.",
+      "pub fn add(",
+      "  /// Left side.",
+      "  left: i32,",
+      "  /// Right side.",
+      "  right: i32",
+      ") -> i32",
+      "  left + right",
+      "",
+      "/// Adds without arguments.",
+      "pub fn add() -> i32",
+      "  0",
+      "",
+      "pub fn main() -> i32",
+      "  add(1, 2)",
+      "",
+    ].join("\n"),
+  );
+  return root;
+};
+
+const createDanglingDocFixture = async (): Promise<string> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-docs-dangling-"));
+  const srcRoot = resolve(root, "src");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    resolve(srcRoot, "main.voyd"),
+    [
+      "/// I am lost.",
+      "",
+      "fn main() -> i32",
+      "  1",
+      "",
+    ].join("\n"),
+  );
+  return root;
+};
+
 const sourceCliPath = resolve(repoRoot, "apps/cli/src/cli-dev.ts");
 
 const assertCliRunnerAvailable = (): void => {
@@ -391,4 +438,45 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       }
     },
   );
+});
+
+describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
+  it("emits self-contained HTML with TOC, anchors, and rendered docs", async () => {
+    assertCliRunnerAvailable();
+
+    const root = await createDocFixture();
+    try {
+      const result = runCli(root, ["doc"]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      if (result.status !== 0) {
+        throw new Error(`voyd doc failed: ${output}`);
+      }
+
+      const docsPath = resolve(root, "docs.html");
+      const html = await readFile(docsPath, "utf8");
+      expect(html).toContain("<!doctype html>");
+      expect(html).toContain("Table of Contents");
+      expect(html).toContain("id=\"fn-src-main-add\"");
+      expect(html).toContain("id=\"fn-src-main-add-1\"");
+      expect(html).toContain("<strong>markdown</strong>");
+      expect(html).toContain("Left side.");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails with diagnostics when doc comments are dangling", async () => {
+    assertCliRunnerAvailable();
+
+    const root = await createDanglingDocFixture();
+    try {
+      const result = runCli(root, ["doc"]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      expect(result.status).not.toBe(0);
+      expect(output).toContain("MD0004");
+      expect(output).toContain("Dangling doc comment");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

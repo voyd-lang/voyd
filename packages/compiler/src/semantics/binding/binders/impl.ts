@@ -1,5 +1,5 @@
 import { type Expr, isIdentifierAtom, isForm } from "../../../parser/index.js";
-import { rememberSyntax } from "../context.js";
+import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import type { TypeParameterDecl, TraitDecl } from "../../decls.js";
 import type { BindingContext } from "../types.js";
 import type { ParsedFunctionDecl, ParsedImplDecl } from "../parsing.js";
@@ -257,6 +257,7 @@ export const bindImplDecl = (
     methods,
     scope: implScope,
     moduleIndex: ctx.nextModuleIndex++,
+    documentation: declarationDocForSyntax(decl.target, ctx),
   });
 
   methods.forEach((method) => {
