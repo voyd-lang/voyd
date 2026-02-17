@@ -68,7 +68,6 @@ export const pickTraitImplMethodMeta = ({
     return undefined;
   }
   const matchingTypeIds = metas.filter((meta) => {
-    const receiverTypeIndex = hiddenParamOffsetFor(meta);
     const receiverTypeId = meta.paramTypeIds[0];
     return (
       receiverTypeMatches({

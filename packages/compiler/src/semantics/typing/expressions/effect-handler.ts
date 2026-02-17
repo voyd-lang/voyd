@@ -3,7 +3,6 @@ import { typeExpression } from "../expressions.js";
 import {
   composeEffectRows,
   effectOpName,
-  freshOpenEffectRow,
   getExprEffectRow,
 } from "../effects.js";
 import {

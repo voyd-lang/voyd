@@ -68,7 +68,6 @@ export const semanticsPipeline = (
 
   assignModuleTestIds({ ast: form, modulePath: module.path });
 
-  const modulePath = form.location?.filePath ?? "<module>";
   const symbolTable: SymbolTable = new SymbolTable({
     rootOwner: form.syntaxId,
   });

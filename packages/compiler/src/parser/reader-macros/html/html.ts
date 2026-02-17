@@ -16,7 +16,7 @@ export const htmlMacro: ReaderMacro = {
       TAG_START.test(nextChar)
     );
   },
-  macro: (file, { token, reader }) => {
+  macro: (file, { reader }) => {
     const parser = new HTMLParser(file, {
       onUnescapedCurlyBrace: () => {
         file.consumeChar();
