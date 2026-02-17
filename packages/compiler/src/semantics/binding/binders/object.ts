@@ -9,6 +9,7 @@ import type { BinderScopeTracker } from "./scope-tracker.js";
 import { inheritMemberVisibility } from "../../hir/index.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { bindTypeParameters } from "./type-parameters.js";
+import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 
 export const bindObjectDecl = (
   decl: ParsedObjectDecl,
@@ -19,6 +20,11 @@ export const bindObjectDecl = (
   rememberSyntax(decl.name, ctx);
   rememberSyntax(decl.base, ctx);
   rememberSyntax(decl.body, ctx);
+  reportInvalidTypeDeclarationName({
+    declarationKind: "obj",
+    name: decl.name,
+    ctx,
+  });
 
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =

@@ -95,8 +95,8 @@ describe("colon clause attachment", () => {
     const ast = parse(
       [
         "if",
-        "  x < y: less {}",
-        "  else: equal {}",
+        "  x < y: Less {}",
+        "  else: Equal {}",
         "",
       ].join("\n")
     ).toJSON();
@@ -105,8 +105,8 @@ describe("colon clause attachment", () => {
       "ast",
       [
         "if",
-        [":", ["<", "x", "y"], ["less", ["object_literal"]]],
-        [":", "else", ["equal", ["object_literal"]]],
+        [":", ["<", "x", "y"], ["Less", ["object_literal"]]],
+        [":", "else", ["Equal", ["object_literal"]]],
       ],
     ]);
   });

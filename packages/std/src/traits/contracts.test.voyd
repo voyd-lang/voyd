@@ -10,7 +10,7 @@ use std::traits::default::Default
 use std::traits::eq::Eq
 use std::traits::fmt::{ Debug, Display, Formatter }
 use std::traits::hash::{ Hash, Hasher }
-use std::traits::ord::{ Ord, Ordering, less, equal, greater }
+use std::traits::ord::{ Ord, Ordering, Less, Equal, Greater }
 
 @intrinsic(name: "__i64_extend_s")
 fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
@@ -21,37 +21,37 @@ obj EqOrdValue {
 
 fn cmp_eq_ord_value(left: i32, right: i32) -> Ordering
   if left < right then:
-    less {}
+    Less {}
   elif: left > right then:
-    greater {}
+    Greater {}
   else:
-    equal {}
+    Equal {}
 
 fn is_less(value: Ordering) -> bool
   match(value)
-    less:
+    Less:
       true
-    equal:
+    Equal:
       false
-    greater:
+    Greater:
       false
 
 fn is_equal(value: Ordering) -> bool
   match(value)
-    equal:
+    Equal:
       true
-    less:
+    Less:
       false
-    greater:
+    Greater:
       false
 
 fn is_greater(value: Ordering) -> bool
   match(value)
-    greater:
+    Greater:
       true
-    less:
+    Less:
       false
-    equal:
+    Equal:
       false
 
 impl Eq<EqOrdValue> for EqOrdValue

@@ -34,6 +34,7 @@ import { toSourceSpan } from "../../utils.js";
 import { moduleVisibility } from "../../hir/index.js";
 import { declareValueOrParameter } from "../redefinitions.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
+import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
@@ -43,6 +44,11 @@ export const bindTraitDecl = (
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
   rememberSyntax(decl.body, ctx);
+  reportInvalidTypeDeclarationName({
+    declarationKind: "trait",
+    name: decl.name,
+    ctx,
+  });
   reportOverloadNameCollision({
     name: decl.name.value,
     scope: tracker.current(),

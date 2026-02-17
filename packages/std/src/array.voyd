@@ -3,7 +3,7 @@ use std::iterator::all
 use std::optional::all
 use std::math::all
 use std::subscript::{ Range, SubscriptRead, SubscriptWrite }
-use std::traits::ord::{ Ordering, less, equal, greater }
+use std::traits::ord::{ Ordering, Less, Equal, Greater }
 
 pub obj Array<T> {
   pri storage: FixedArray<T>,
@@ -757,11 +757,11 @@ fn default_compare_i32<T>(left: T, right: T) -> i32
 
 fn ordering_to_i32(value: Ordering) -> i32
   match(value)
-    less:
+    Less:
       -1
-    equal:
+    Equal:
       0
-    greater:
+    Greater:
       1
 
 fn new_array_owners() -> ArrayOwners

@@ -4,7 +4,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
 {
   "expressions": Map {
     1 => {
-      "ast": 1746,
+      "ast": 1744,
       "exprKind": "identifier",
       "id": 1,
       "kind": "expr",
@@ -16,7 +16,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 4,
     },
     2 => {
-      "ast": 1744,
+      "ast": 1742,
       "exprKind": "identifier",
       "id": 2,
       "kind": "expr",
@@ -28,7 +28,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 2,
     },
     3 => {
-      "ast": 1748,
+      "ast": 1746,
       "exprKind": "literal",
       "id": 3,
       "kind": "expr",
@@ -49,7 +49,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "expr": 3,
         },
       ],
-      "ast": 2047,
+      "ast": 2044,
       "callee": 1,
       "exprKind": "call",
       "id": 4,
@@ -62,7 +62,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "typeArguments": undefined,
     },
     5 => {
-      "ast": 1755,
+      "ast": 1753,
       "exprKind": "identifier",
       "id": 5,
       "kind": "expr",
@@ -74,7 +74,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 2,
     },
     6 => {
-      "ast": 2048,
+      "ast": 2045,
       "exprKind": "block",
       "id": 6,
       "kind": "expr",
@@ -87,7 +87,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "value": 5,
     },
     7 => {
-      "ast": 1776,
+      "ast": 1774,
       "exprKind": "identifier",
       "id": 7,
       "kind": "expr",
@@ -99,7 +99,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 5,
     },
     8 => {
-      "ast": 1763,
+      "ast": 1761,
       "exprKind": "identifier",
       "id": 8,
       "kind": "expr",
@@ -111,7 +111,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 1,
     },
     9 => {
-      "ast": 1766,
+      "ast": 1764,
       "exprKind": "identifier",
       "id": 9,
       "kind": "expr",
@@ -123,7 +123,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 6,
     },
     10 => {
-      "ast": 1764,
+      "ast": 1762,
       "exprKind": "identifier",
       "id": 10,
       "kind": "expr",
@@ -135,7 +135,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 2,
     },
     11 => {
-      "ast": 1768,
+      "ast": 1766,
       "exprKind": "literal",
       "id": 11,
       "kind": "expr",
@@ -156,7 +156,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "expr": 11,
         },
       ],
-      "ast": 2050,
+      "ast": 2047,
       "callee": 9,
       "exprKind": "call",
       "id": 12,
@@ -174,7 +174,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "expr": 12,
         },
       ],
-      "ast": 2051,
+      "ast": 2048,
       "callee": 8,
       "exprKind": "call",
       "id": 13,
@@ -187,7 +187,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "typeArguments": undefined,
     },
     14 => {
-      "ast": 1778,
+      "ast": 1776,
       "exprKind": "identifier",
       "id": 14,
       "kind": "expr",
@@ -199,7 +199,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 1,
     },
     15 => {
-      "ast": 1781,
+      "ast": 1779,
       "exprKind": "identifier",
       "id": 15,
       "kind": "expr",
@@ -211,7 +211,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 6,
     },
     16 => {
-      "ast": 1779,
+      "ast": 1777,
       "exprKind": "identifier",
       "id": 16,
       "kind": "expr",
@@ -223,7 +223,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 2,
     },
     17 => {
-      "ast": 1783,
+      "ast": 1781,
       "exprKind": "literal",
       "id": 17,
       "kind": "expr",
@@ -244,7 +244,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "expr": 17,
         },
       ],
-      "ast": 2052,
+      "ast": 2049,
       "callee": 15,
       "exprKind": "call",
       "id": 18,
@@ -262,7 +262,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "expr": 18,
         },
       ],
-      "ast": 2053,
+      "ast": 2050,
       "callee": 14,
       "exprKind": "call",
       "id": 19,
@@ -283,7 +283,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "expr": 19,
         },
       ],
-      "ast": 2054,
+      "ast": 2051,
       "callee": 7,
       "exprKind": "call",
       "id": 20,
@@ -296,7 +296,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "typeArguments": undefined,
     },
     21 => {
-      "ast": 2055,
+      "ast": 2052,
       "exprKind": "block",
       "id": 21,
       "kind": "expr",
@@ -309,7 +309,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "value": 20,
     },
     22 => {
-      "ast": 2057,
+      "ast": 2054,
       "branches": [
         {
           "condition": 4,
@@ -327,7 +327,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       },
     },
     23 => {
-      "ast": 2058,
+      "ast": 2055,
       "exprKind": "block",
       "id": 23,
       "kind": "expr",
@@ -340,7 +340,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "value": 22,
     },
     25 => {
-      "ast": 1808,
+      "ast": 1806,
       "exprKind": "identifier",
       "id": 25,
       "kind": "expr",
@@ -352,7 +352,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "symbol": 1,
     },
     26 => {
-      "ast": 1809,
+      "ast": 1807,
       "exprKind": "literal",
       "id": 26,
       "kind": "expr",
@@ -370,7 +370,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           "expr": 26,
         },
       ],
-      "ast": 2062,
+      "ast": 2059,
       "callee": 25,
       "exprKind": "call",
       "id": 27,
@@ -383,7 +383,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "typeArguments": undefined,
     },
     28 => {
-      "ast": 2063,
+      "ast": 2060,
       "exprKind": "block",
       "id": 28,
       "kind": "expr",
@@ -398,7 +398,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
   },
   "items": Map {
     24 => {
-      "ast": 2059,
+      "ast": 2056,
       "body": 23,
       "decl": 0,
       "id": 24,
@@ -421,7 +421,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
           },
           "symbol": 2,
           "type": {
-            "ast": 1729,
+            "ast": 1727,
             "path": [
               "i32",
             ],
@@ -437,7 +437,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
         },
       ],
       "returnType": {
-        "ast": 1739,
+        "ast": 1737,
         "path": [
           "i32",
         ],
@@ -462,7 +462,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       },
     },
     29 => {
-      "ast": 2064,
+      "ast": 2061,
       "body": 28,
       "decl": 1,
       "id": 29,
@@ -470,7 +470,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
       "memberVisibility": undefined,
       "parameters": [],
       "returnType": {
-        "ast": 1805,
+        "ast": 1803,
         "path": [
           "i32",
         ],
@@ -496,7 +496,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 1`] = `
     },
   },
   "module": {
-    "ast": 2065,
+    "ast": 2062,
     "exports": [
       {
         "item": 29,
@@ -538,49 +538,49 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
     {
       "id": 0,
       "kind": "module",
-      "owner": 2065,
+      "owner": 2062,
       "parent": null,
     },
     {
       "id": 1,
       "kind": "function",
-      "owner": 2059,
+      "owner": 2056,
       "parent": 0,
     },
     {
       "id": 2,
       "kind": "block",
-      "owner": 2058,
+      "owner": 2055,
       "parent": 1,
     },
     {
       "id": 3,
       "kind": "block",
-      "owner": 2048,
+      "owner": 2045,
       "parent": 2,
     },
     {
       "id": 4,
       "kind": "block",
-      "owner": 2055,
+      "owner": 2052,
       "parent": 2,
     },
     {
       "id": 5,
       "kind": "function",
-      "owner": 2064,
+      "owner": 2061,
       "parent": 0,
     },
     {
       "id": 6,
       "kind": "block",
-      "owner": 2063,
+      "owner": 2060,
       "parent": 5,
     },
   ],
   "symbols": [
     {
-      "declaredAt": 2065,
+      "declaredAt": 2062,
       "id": 0,
       "kind": "module",
       "metadata": undefined,
@@ -588,7 +588,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "scope": 0,
     },
     {
-      "declaredAt": 2059,
+      "declaredAt": 2056,
       "id": 1,
       "kind": "value",
       "metadata": {
@@ -598,7 +598,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "scope": 0,
     },
     {
-      "declaredAt": 1726,
+      "declaredAt": 1724,
       "id": 2,
       "kind": "parameter",
       "metadata": {
@@ -614,7 +614,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "scope": 1,
     },
     {
-      "declaredAt": 2064,
+      "declaredAt": 2061,
       "id": 3,
       "kind": "value",
       "metadata": {
@@ -624,7 +624,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "scope": 0,
     },
     {
-      "declaredAt": 2065,
+      "declaredAt": 2062,
       "id": 4,
       "kind": "value",
       "metadata": {
@@ -634,7 +634,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "scope": 0,
     },
     {
-      "declaredAt": 2065,
+      "declaredAt": 2062,
       "id": 5,
       "kind": "value",
       "metadata": {
@@ -644,7 +644,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "scope": 0,
     },
     {
-      "declaredAt": 2065,
+      "declaredAt": 2062,
       "id": 6,
       "kind": "value",
       "metadata": {
@@ -654,7 +654,7 @@ exports[`semanticsPipeline > binds and lowers the fib sample module 2`] = `
       "scope": 0,
     },
     {
-      "declaredAt": 2065,
+      "declaredAt": 2062,
       "id": 7,
       "kind": "type",
       "metadata": {

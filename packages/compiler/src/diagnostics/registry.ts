@@ -63,6 +63,11 @@ type DiagnosticParamsMap = {
   BD0006:
     | { kind: "duplicate-binding"; name: string }
     | { kind: "previous-binding" };
+  BD0007: {
+    kind: "invalid-type-name";
+    declarationKind: "type alias" | "obj" | "trait" | "effect";
+    name: string;
+  };
   CG0001: { kind: "codegen-error"; message: string };
   CG0002: {
     kind: "unsupported-effectful-export-return";
@@ -313,6 +318,12 @@ export const diagnosticsRegistry: {
     },
     severity: "error",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0006"]>,
+  BD0007: {
+    code: "BD0007",
+    message: (params) =>
+      `${params.declarationKind} ${params.name} must be UpperCamelCase`,
+    severity: "error",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0007"]>,
   CG0001: {
     code: "CG0001",
     message: (params) => params.message,

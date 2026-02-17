@@ -5,6 +5,7 @@ import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
+import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -14,6 +15,11 @@ export const bindTypeAlias = (
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
   rememberSyntax(decl.target, ctx);
+  reportInvalidTypeDeclarationName({
+    declarationKind: "type alias",
+    name: decl.name,
+    ctx,
+  });
 
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =

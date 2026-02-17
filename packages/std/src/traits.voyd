@@ -1,6 +1,6 @@
 pub self::comparable::Comparable
 pub self::eq::{ Eq }
-pub self::ord::{ Ord, Ordering, less, equal, greater }
+pub self::ord::{ Ord, Ordering, Less, Equal, Greater }
 pub self::hash::{ Hash, Hasher }
 pub self::default::{ Default }
 pub self::clone::{ Clone, Copy }
