@@ -683,15 +683,37 @@ impl String
     if index >= self.byte_count then:
       return Err<ParseIntError> { error: ParseIntError { code: 2 } }
 
+    let max_i32 = 2147483647
+    let min_i32 = -2147483647 - 1
     var value = 0
     while index < self.byte_count do:
       let digit = parse_digit(__array_get(source, index))
       if digit < 0 or digit >= base then:
         return Err<ParseIntError> { error: ParseIntError { code: 3 } }
-      value = value * base + digit
+
+      if sign > 0 then:
+        let max_before_mul = max_i32 / base
+        if value > max_before_mul then:
+          return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+
+        let next = value * base
+        let max_allowed = max_i32 - digit
+        if next > max_allowed then:
+          return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        value = next + digit
+      else:
+        let min_before_mul = min_i32 / base
+        if value < min_before_mul then:
+          return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+
+        let next = value * base
+        let min_allowed = min_i32 + digit
+        if next < min_allowed then:
+          return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        value = next - digit
       index = index + 1
 
-    Ok<i32> { value: value * sign }
+    Ok<i32> { value }
 
   api fn parse_float(self): () -> Result<f64, ParseFloatError>
     if self.byte_count == 0 then:
@@ -1050,12 +1072,17 @@ fn next_grapheme_boundary(source: FixedArray<i32>, length: i32, index: i32) -> i
 
   let head = decode_utf8_at(source, length, index)
   var cursor = index + head.width
-  var prev = head.codepoint
+  var previous = head.codepoint
+  var regional_indicator_count = grapheme_regional_indicator_count_initial(previous)
   while cursor < length do:
     let read = decode_utf8_at(source, length, cursor)
-    if should_join_grapheme(prev, read.codepoint) then:
+    if should_join_grapheme(previous, read.codepoint, regional_indicator_count) then:
       cursor = cursor + read.width
-      prev = read.codepoint
+      previous = read.codepoint
+      regional_indicator_count = grapheme_regional_indicator_count_next(
+        regional_indicator_count,
+        previous
+      )
     else:
       break
   cursor
@@ -1071,7 +1098,15 @@ fn previous_grapheme_boundary(source: FixedArray<i32>, length: i32, index: i32) 
     cursor = next_grapheme_boundary(source, length, cursor)
   prev
 
-fn should_join_grapheme(previous: i32, next: i32) -> bool
+// Grapheme clustering rules used by grapheme_len/graphemes/grapheme_index.
+fn should_join_grapheme(previous: i32, next: i32, regional_indicator_count: i32) -> bool
+  if should_join_grapheme_non_regional(previous, next) then:
+    return true
+  if should_join_grapheme_regional_indicators(previous, next, regional_indicator_count) then:
+    return true
+  false
+
+fn should_join_grapheme_non_regional(previous: i32, next: i32) -> bool
   if next == 8205 then:
     return true
   if previous == 8205 then:
@@ -1085,6 +1120,33 @@ fn should_join_grapheme(previous: i32, next: i32) -> bool
   if next >= 6832 and next <= 6911 then:
     return true
   false
+
+fn should_join_grapheme_regional_indicators(
+  previous: i32,
+  next: i32,
+  regional_indicator_count: i32
+) -> bool
+  if not is_regional_indicator(previous) then:
+    return false
+  if not is_regional_indicator(next) then:
+    return false
+  let pair_count = regional_indicator_count / 2
+  let consumed = pair_count * 2
+  let remainder = regional_indicator_count - consumed
+  remainder == 1
+
+fn grapheme_regional_indicator_count_initial(codepoint: i32) -> i32
+  if is_regional_indicator(codepoint) then:
+    return 1
+  0
+
+fn grapheme_regional_indicator_count_next(current: i32, codepoint: i32) -> i32
+  if is_regional_indicator(codepoint) then:
+    return current + 1
+  0
+
+fn is_regional_indicator(codepoint: i32) -> bool
+  codepoint >= 127462 and codepoint <= 127487
 
 fn find_substring_from(value: String, substring: StringSlice, start: i32) -> i32
   if substring.byte_len() == 0 then:

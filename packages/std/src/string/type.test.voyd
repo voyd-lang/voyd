@@ -73,6 +73,14 @@ test "string lengths and graphemes":
   assert(joined.rune_len(), eq: 2)
   assert(joined.grapheme_len(), eq: 1)
 
+  let flag = "🇺🇸"
+  assert(flag.rune_len(), eq: 2)
+  assert(flag.grapheme_len(), eq: 1)
+
+  let zwj = "👩‍💻"
+  assert(zwj.rune_len() > 1, eq: true)
+  assert(zwj.grapheme_len(), eq: 1)
+
 test "string index and grapheme_index stepping":
   let value = "a😀b"
   assert(is_none_string_index(value.index(after: value.start_index())), eq: false)
@@ -97,6 +105,24 @@ test "string grapheme sequence iteration":
     None:
       assert(false)
   match(iter.next())
+    Some<StringSlice>:
+      assert(false)
+    None:
+      assert(true)
+
+  let flags = "🇺🇸🇨🇦"
+  let ~flag_iter = flags.graphemes().iter()
+  match(flag_iter.next())
+    Some<StringSlice> { value }:
+      assert(value.to_string().equals("🇺🇸"), eq: true)
+    None:
+      assert(false)
+  match(flag_iter.next())
+    Some<StringSlice> { value }:
+      assert(value.to_string().equals("🇨🇦"), eq: true)
+    None:
+      assert(false)
+  match(flag_iter.next())
     Some<StringSlice>:
       assert(false)
     None:
@@ -215,6 +241,24 @@ test "string parse_int result":
       assert(false)
     Err<ParseIntError> { error }:
       assert(error.code, eq: 1)
+
+  match("-2147483648".parse_int())
+    Ok<i32> { value }:
+      assert(value, eq: -2147483648)
+    Err<ParseIntError>:
+      assert(false)
+
+  match("2147483648".parse_int())
+    Ok<i32>:
+      assert(false)
+    Err<ParseIntError> { error }:
+      assert(error.code, eq: 4)
+
+  match("-2147483649".parse_int())
+    Ok<i32>:
+      assert(false)
+    Err<ParseIntError> { error }:
+      assert(error.code, eq: 4)
 
 test "string parse_float result":
   match("1.25e2".parse_float())
