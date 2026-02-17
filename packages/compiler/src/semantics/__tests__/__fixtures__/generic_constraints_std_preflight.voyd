@@ -1,0 +1,27 @@
+trait DictKey<T>
+  fn dict_hash(self, probe: T) -> i32
+  fn dict_eq(self, other: T) -> bool
+
+obj IntKey {
+  value: i32
+}
+
+impl DictKey<IntKey> for IntKey
+  fn dict_hash(self, _probe: IntKey) -> i32
+    self.value
+
+  fn dict_eq(self, other: IntKey) -> bool
+    self.value == other.value
+
+obj Dict<K, V> {
+  key: K,
+  value: V
+}
+
+impl<K: DictKey<K>, V> Dict<K, V>
+  fn key_matches(self, key: K) -> bool
+    self.key.dict_eq(key)
+
+pub fn main() -> i32
+  let dict = Dict<IntKey, i32> { key: IntKey { value: 5 }, value: 1 }
+  if dict.key_matches(IntKey { value: 5 }) then: 1 else: 0

@@ -669,6 +669,12 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("supports key-style generic constraints used by std container APIs", () => {
+    const ast = loadAst("generic_constraints_std_preflight.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("lowers nominal constructor overloads across modules", () => {
     const animalFixture = "nominal_constructors_cross_module/animal.voyd";
     const mainFixture = "nominal_constructors_cross_module/main.voyd";
