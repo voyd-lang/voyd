@@ -5,43 +5,19 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../ast/index.js";
-import { call } from "../ast/init-helpers.js";
 import { cloneAttributes } from "../ast/syntax.js";
 import type { IntrinsicAttribute } from "../attributes.js";
 import { SyntaxMacro } from "./types.js";
 import { parseStringValue } from "./string-value.js";
+import { transformFormSequence } from "./sequence-transform.js";
 
 type PendingIntrinsicAttribute = IntrinsicAttribute & { source: Form };
 
 export const intrinsicAttributeMacro: SyntaxMacro = (form) =>
   attachIntrinsicAttributes(form);
 
-const attachIntrinsicAttributes = (form: Form): Form => {
-  if (form.callsInternal("ast")) {
-    const { elements, changed } = processSequence(form.rest, true);
-    if (!changed) {
-      return form;
-    }
-    const wrapped = call("ast", ...elements);
-    wrapped.setLocation(form.location?.clone());
-    wrapped.attributes = cloneAttributes(form.attributes);
-    return wrapped;
-  }
-
-  const { elements, changed } = processSequence(
-    form.toArray(),
-    form.calls("block") || form.callsInternal("ast")
-  );
-  if (!changed) {
-    return form;
-  }
-  const rebuilt = new (form.constructor as typeof Form)({
-    location: form.location?.clone(),
-    elements,
-  });
-  rebuilt.attributes = cloneAttributes(form.attributes);
-  return rebuilt;
-};
+const attachIntrinsicAttributes = (form: Form): Form =>
+  transformFormSequence({ form, transform: processSequence });
 
 const processSequence = (
   elements: readonly Expr[],

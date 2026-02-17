@@ -6,7 +6,6 @@ import {
 } from "./type-system.js";
 import { applyImportableMetadata } from "../imports/metadata.js";
 import type {
-  DependencySemantics,
   TypeCheckMode,
   TypingContext,
 } from "./types.js";

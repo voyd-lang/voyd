@@ -31,7 +31,6 @@ import type {
   ObjectTypeInfo,
   SymbolRefKey,
   TraitImplInstance,
-  TraitMethodImpl,
 } from "../typing/types.js";
 import { cloneNestedMap } from "../typing/call-resolution.js";
 import {
@@ -42,7 +41,6 @@ import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
 import { parseSymbolRefKey } from "../typing/symbol-ref-utils.js";
-import { typeContainsUnresolvedParam } from "../type-utils.js";
 
 export type { SymbolRef } from "../program-symbol-arena.js";
 
