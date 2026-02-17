@@ -1,0 +1,8 @@
+trait Run
+  fn run(self) -> i32
+
+fn use_runner<T: Run>(value: T) -> i32
+  1
+
+fn main() -> i32
+  use_runner({ speed: 7 })

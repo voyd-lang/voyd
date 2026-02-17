@@ -6,6 +6,7 @@ import type { BinderScopeTracker } from "./scope-tracker.js";
 import type { TypeParameterDecl } from "../../decls.js";
 import { declareValueOrParameter } from "../redefinitions.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
+import { bindTypeParameters } from "./type-parameters.js";
 
 const declareEffectOperationParams = ({
   op,
@@ -77,15 +78,7 @@ export const bindEffectDecl = (
 
   const typeParameters: TypeParameterDecl[] = [];
   tracker.enterScope(effectScope, () => {
-    decl.typeParameters.forEach((param) => {
-      rememberSyntax(param, ctx);
-      const symbol = ctx.symbolTable.declare({
-        name: param.value,
-        kind: "type-parameter",
-        declaredAt: param.syntaxId,
-      });
-      typeParameters.push({ name: param.value, symbol, ast: param });
-    });
+    typeParameters.push(...bindTypeParameters(decl.typeParameters, ctx));
   });
 
   const operations = decl.operations.map((op) => {

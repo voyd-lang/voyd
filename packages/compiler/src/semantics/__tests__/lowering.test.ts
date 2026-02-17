@@ -173,6 +173,80 @@ describe("lowering pipeline", () => {
     );
   });
 
+  it("lowers constrained declaration type parameters into HIR constraints", () => {
+    const source = `
+obj Animal {
+  id: i32
+}
+
+trait Named
+  fn name(self) -> i32
+
+fn constrained<T: Named, U: { value: i32 }, V: Animal>(a: T, b: U, c: V) -> i32
+  0
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: "main.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const constrainedSymbol = symbolTable.resolve("constrained", symbolTable.rootScope);
+    const namedSymbol = symbolTable.resolve("Named", symbolTable.rootScope);
+    const animalSymbol = symbolTable.resolve("Animal", symbolTable.rootScope);
+    expect(typeof constrainedSymbol).toBe("number");
+    expect(typeof namedSymbol).toBe("number");
+    expect(typeof animalSymbol).toBe("number");
+    if (
+      typeof constrainedSymbol !== "number" ||
+      typeof namedSymbol !== "number" ||
+      typeof animalSymbol !== "number"
+    ) {
+      return;
+    }
+
+    const constrained = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === constrainedSymbol
+    );
+    expect(constrained).toBeDefined();
+    const typeParameters = constrained?.typeParameters ?? [];
+    expect(typeParameters).toHaveLength(3);
+
+    const traitConstraint = typeParameters[0]?.constraint;
+    expect(traitConstraint?.typeKind).toBe("named");
+    if (traitConstraint?.typeKind === "named") {
+      expect(traitConstraint.symbol).toBe(namedSymbol);
+    }
+
+    const structuralConstraint = typeParameters[1]?.constraint;
+    expect(structuralConstraint?.typeKind).toBe("object");
+
+    const nominalConstraint = typeParameters[2]?.constraint;
+    expect(nominalConstraint?.typeKind).toBe("named");
+    if (nominalConstraint?.typeKind === "named") {
+      expect(nominalConstraint.symbol).toBe(animalSymbol);
+    }
+  });
+
   it("lowers nominal constructor literals with spreads as nominal object literals", () => {
     const name = "nominal_constructor_spread.voyd";
     const ast = loadAst(name);

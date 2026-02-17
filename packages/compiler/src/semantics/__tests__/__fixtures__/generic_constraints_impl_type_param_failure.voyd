@@ -1,0 +1,28 @@
+trait Animal
+  fn id(self) -> i32
+
+obj Dog {
+  value: i32
+}
+
+impl Animal for Dog
+  fn id(self) -> i32
+    self.value
+
+trait Carrier<T>
+  fn marker(self) -> i32
+
+obj Box<T> {
+  value: T
+}
+
+impl<T: Animal> Carrier<T> for Box<T>
+  fn marker(self) -> i32
+    1
+
+fn needs_i32_carrier<T: Carrier<i32>>(value: T) -> i32
+  value.marker()
+
+fn main() -> i32
+  let box = Box<i32> { value: 1 }
+  needs_i32_carrier(box)

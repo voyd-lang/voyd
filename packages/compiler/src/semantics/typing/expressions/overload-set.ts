@@ -1,4 +1,4 @@
-import type { HirExpression, HirOverloadSetExpr } from "../../hir/index.js";
+import type { HirExpression } from "../../hir/index.js";
 import type { TypeId } from "../../ids.js";
 import type { TypingContext } from "../types.js";
 
@@ -8,7 +8,7 @@ export const typeOverloadSetExpr = (
     name: string;
     set: number;
   },
-  ctx: TypingContext
+  _ctx: TypingContext
 ): TypeId => {
   throw new Error(
     `overload set ${expr.name} cannot be used outside of a call expression`

@@ -1,0 +1,5 @@
+fn get_value<T: { value: i32 }>(item: T) -> i32
+  1
+
+fn main() -> i32
+  get_value({ value: true })

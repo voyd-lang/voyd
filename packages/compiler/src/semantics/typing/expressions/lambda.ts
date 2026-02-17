@@ -22,7 +22,6 @@ import {
 import {
   bindTuplePatternFromType,
   recordPatternType,
-  resolvePatternAnnotation,
 } from "./patterns.js";
 import { applyCurrentSubstitution } from "./shared.js";
 import {

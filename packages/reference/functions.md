@@ -173,14 +173,15 @@ fn add<T>(a: T, b: T) -> T
   a + b
 ```
 
-With trait constraints
+With constraints
 
 ```rust
 fn add<T: Numeric>(a: T, b: T) -> T
   a + b
 ```
 
-See the chapter on [Generics](./generics.md) for more information.
+Constraints may be trait, structural, or nominal requirements. See
+[Generics](./generics.md) for details and additional examples.
 
 
 ## Parenthetical Elision

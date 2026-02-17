@@ -244,13 +244,17 @@ const lowerFunctionTypeExpr = (
   }
 
   const typeParameters = lowerTypeParameters(
-    signature.typeParameters?.map((param) => {
-      const symbol = resolveTypeSymbol(param.value, scope, ctx);
-      if (!symbol) {
-        throw new Error(`unknown type parameter ${param.value} in function type`);
-      }
-      return { symbol, ast: param };
-    })
+    {
+      params: signature.typeParameters?.map((param) => {
+        const symbol = resolveTypeSymbol(param.value, scope, ctx);
+        if (!symbol) {
+          throw new Error(`unknown type parameter ${param.value} in function type`);
+        }
+        return { symbol, ast: param };
+      }),
+      ctx,
+      scope,
+    }
   );
 
   const parameters = signature.parameters.map((param) => {
@@ -286,7 +290,17 @@ const lowerFunctionTypeExpr = (
 };
 
 export const lowerTypeParameters = (
-  params: readonly { symbol: SymbolId; ast?: Syntax }[] | undefined
+  {
+    params,
+    ctx,
+    scope,
+  }: {
+    params:
+      | readonly { symbol: SymbolId; ast?: Syntax; constraint?: Expr }[]
+      | undefined;
+    ctx: LowerContext;
+    scope: ScopeId;
+  }
 ): HirTypeParameter[] | undefined => {
   if (!params || params.length === 0) {
     return undefined;
@@ -295,5 +309,6 @@ export const lowerTypeParameters = (
   return params.map((param) => ({
     symbol: param.symbol,
     span: toSourceSpan(param.ast),
+    constraint: lowerTypeExpr(param.constraint, ctx, scope),
   }));
 };

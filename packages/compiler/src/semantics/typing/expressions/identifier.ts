@@ -2,7 +2,6 @@ import type { HirExpression } from "../../hir/index.js";
 import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
 import { resolveImportedValue } from "../imports.js";
 import type { TypingContext } from "../types.js";
-import { getSymbolName } from "../type-system.js";
 import { getIntrinsicType } from "./intrinsics.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 

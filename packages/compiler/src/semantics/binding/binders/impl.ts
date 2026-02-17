@@ -11,6 +11,7 @@ import {
   resolveTraitDecl,
   extractTraitTypeArguments,
 } from "./trait.js";
+import { bindTypeParameters } from "./type-parameters.js";
 import { resolveObjectDecl } from "./object.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { inheritMemberVisibility, moduleVisibility } from "../../hir/index.js";
@@ -147,19 +148,7 @@ export const bindImplDecl = (
     : memberDeclarationScope;
 
   tracker.enterScope(implScope, () => {
-    decl.typeParameters.forEach((param) => {
-      rememberSyntax(param, ctx);
-      const paramSymbol = ctx.symbolTable.declare({
-        name: param.value,
-        kind: "type-parameter",
-        declaredAt: param.syntaxId,
-      });
-      typeParameters.push({
-        name: param.value,
-        symbol: paramSymbol,
-        ast: param,
-      });
-    });
+    typeParameters.push(...bindTypeParameters(decl.typeParameters, ctx));
 
     inferredTypeParams.forEach((name) => {
       if (typeParameters.some((param) => param.name === name)) {

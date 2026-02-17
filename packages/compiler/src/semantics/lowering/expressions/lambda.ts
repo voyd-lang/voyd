@@ -40,15 +40,17 @@ export const lowerLambda = ({
     lowerLambdaParameter(param, ctx, scopes)
   );
 
-  const typeParameters = lowerTypeParameters(
-    signature.typeParameters?.map((param) => {
+  const typeParameters = lowerTypeParameters({
+    params: signature.typeParameters?.map((param) => {
       const symbol = resolveTypeSymbol(param.value, scopes.current(), ctx);
       if (!symbol) {
         throw new Error(`unknown type parameter ${param.value} in lambda`);
       }
       return { symbol, ast: param };
-    })
-  );
+    }),
+    ctx,
+    scope: scopes.current(),
+  });
 
   const returnType = lowerTypeExpr(signature.returnType, ctx, scopes.current());
   const effectType = lowerTypeExpr(signature.effectType, ctx, scopes.current());

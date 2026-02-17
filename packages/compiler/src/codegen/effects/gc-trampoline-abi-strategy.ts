@@ -11,10 +11,7 @@ import {
   ensureEffectsMemory,
 } from "./host-boundary.js";
 import { EFFECTS_HOST_BOUNDARY_STD_DEPS } from "./host-boundary/constants.js";
-import type {
-  EffectfulExportTarget,
-  EffectsAbiStrategy,
-} from "./codegen-backend.js";
+import type { EffectsAbiStrategy } from "./codegen-backend.js";
 
 const hiddenHandlerParamType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
