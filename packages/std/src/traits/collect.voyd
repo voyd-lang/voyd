@@ -1,0 +1,4 @@
+use std::iterator::Sequence
+
+pub trait Collect<T>
+  fn from_sequence({ items: Sequence<T> }) -> Self

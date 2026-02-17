@@ -1,1 +1,9 @@
 pub self::comparable::Comparable
+pub self::eq::{ Eq }
+pub self::ord::{ Ord, Ordering, less, equal, greater }
+pub self::hash::{ Hash, Hasher }
+pub self::default::{ Default }
+pub self::clone::{ Clone, Copy }
+pub self::fmt::{ Debug, Display, Formatter }
+pub self::convert::{ From, Into, TryFrom, TryInto }
+pub self::collect::{ Collect }

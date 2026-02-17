@@ -21,4 +21,4 @@ pub fn enumerate_length() -> i32
   let ~arr = Array<i32>::with_capacity(2)
   arr.push(1)
   arr.push(2)
-  arr.enumerate().length()
+  arr.enumerate().len()

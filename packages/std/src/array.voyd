@@ -49,7 +49,7 @@ impl<T> Array<T>
     owners.retain()
     Array<T> { storage: self.storage, count: self.count, owners: self.owners }
 
-  api fn length(self) -> i32
+  api fn len(self) -> i32
     self.count
 
   api fn capacity(self) -> i32
@@ -110,6 +110,14 @@ impl<T> Array<T>
       index = index + 1
     out
 
+  api fn flat_map<O>(self, f: (v: T) -> Array<O>) -> Array<O>
+    let ~out = Array<O>::with_capacity(0)
+    var index = 0
+    while index < self.count:
+      out.extend(f(__array_get(self.storage, index)))
+      index = index + 1
+    out
+
   api fn reduce<O>(self, initial: O, { step: (acc: O, v: T) -> O }) -> O
     var acc = initial
     var index = 0
@@ -128,7 +136,7 @@ impl<T> Array<T>
       index = index + 1
     None {}
 
-  api fn some(self, pred: (v: T) -> bool) -> bool
+  api fn any(self, pred: (v: T) -> bool) -> bool
     var index = 0
     while index < self.count:
       if pred(__array_get(self.storage, index)):
@@ -136,7 +144,7 @@ impl<T> Array<T>
       index = index + 1
     false
 
-  api fn every(self, pred: (v: T) -> bool) -> bool
+  api fn all(self, pred: (v: T) -> bool) -> bool
     var index = 0
     while index < self.count:
       if not pred(__array_get(self.storage, index)):
@@ -144,7 +152,7 @@ impl<T> Array<T>
       index = index + 1
     true
 
-  api fn index_of(self, value: T) -> i32
+  api fn find_index(self, value: T) -> i32
     var index = 0
     while index < self.count:
       if __array_get(self.storage, index) == value:
@@ -152,12 +160,25 @@ impl<T> Array<T>
       index = index + 1
     -1
 
+  api fn find_index_where(self, pred: (v: T) -> bool) -> i32
+    var index = 0
+    while index < self.count:
+      if pred(__array_get(self.storage, index)):
+        return index
+      index = index + 1
+    -1
+
   api fn contains(self, value: T) -> bool
-    self.index_of(value) >= 0
+    self.find_index(value) >= 0
 
   api fn sorted(self, compare: (left: T, right: T) -> i32) -> Array<T>
     let ~copy = self.copied()
     copy.sort(compare)
+    copy
+
+  api fn reversed(self) -> Array<T>
+    let ~copy = self.copied()
+    copy.reverse()
     copy
 
   api fn to_fixed_array(self) -> FixedArray<T>
@@ -185,6 +206,82 @@ impl<T> Array<T>
   api fn concat(self, other: Array<T>) -> Array<T>
     self.extended(other)
 
+  api fn take(self, n: i32) -> Array<T>
+    if n <= 0 then:
+      return Array<T>::with_capacity(0)
+    let end = if n < self.count then: n else: self.count
+    self.slice(from: 0, to: end)
+
+  api fn drop(self, n: i32) -> Array<T>
+    if n <= 0 then:
+      return self.slice(from: 0, to: self.count)
+    if n >= self.count then:
+      return Array<T>::with_capacity(0)
+    self.slice(from: n, to: self.count)
+
+  api fn partition(self, pred: (v: T) -> bool) -> (Array<T>, Array<T>)
+    let ~left = Array<T>::with_capacity(self.count)
+    let ~right = Array<T>::with_capacity(self.count)
+    var index = 0
+    while index < self.count:
+      let value = __array_get(self.storage, index)
+      if pred(value):
+        left.push(value)
+      else:
+        right.push(value)
+      index = index + 1
+    (left, right)
+
+  api fn chunk(self, { of size: i32 }) -> Array<Array<T>>
+    if size <= 0 then:
+      return Array<Array<T>>::with_capacity(0)
+    if self.count == 0 then:
+      return Array<Array<T>>::with_capacity(0)
+    let ~out = Array<Array<T>>::with_capacity((self.count + size - 1) / size)
+    var index = 0
+    while index < self.count:
+      let end = min(index + size, self.count)
+      out.push(self.slice(from: index, to: end))
+      index = index + size
+    out
+
+  api fn window(self, size: i32) -> Array<Array<T>>
+    if size <= 0 then:
+      return Array<Array<T>>::with_capacity(0)
+    if size > self.count then:
+      return Array<Array<T>>::with_capacity(0)
+    let count = self.count - size + 1
+    let ~out = Array<Array<T>>::with_capacity(count)
+    var index = 0
+    while index < count:
+      out.push(self.slice(from: index, to: index + size))
+      index = index + 1
+    out
+
+  api fn zip<U>(self, other: Array<U>) -> Array<(T, U)>
+    let count = min(self.count, other.count)
+    let next_raw = new_fixed_array<(T, U)>(count)
+    var index = 0
+    while index < count:
+      __array_set(
+        next_raw,
+        index,
+        (__array_get(self.storage, index), __array_get(other.storage, index))
+      )
+      index = index + 1
+    Array<(T, U)> { storage: next_raw, count: count, owners: new_array_owners() }
+
+  api fn fold(self, combine: (left: T, right: T) -> T) -> Optional<T>
+    if self.count == 0:
+      return None {}
+
+    var index = 1
+    var acc = __array_get(self.storage, 0)
+    while index < self.count:
+      acc = combine(acc, __array_get(self.storage, index))
+      index = index + 1
+    Some<T> { value: acc }
+
   api fn sort(~self, compare: (left: T, right: T) -> i32) -> void
     if self.count < 2:
       return void
@@ -202,6 +299,21 @@ impl<T> Array<T>
         cursor = cursor - 1
       __array_set(self.storage, cursor + 1, value)
       index = index + 1
+
+  api fn reverse(~self) -> void
+    if self.count < 2:
+      return void
+
+    self.ensure_unique(self.count)
+    var left = 0
+    var right = self.count - 1
+    while left < right do:
+      let left_value = __array_get(self.storage, left)
+      let right_value = __array_get(self.storage, right)
+      __array_set(self.storage, left, right_value)
+      __array_set(self.storage, right, left_value)
+      left = left + 1
+      right = right - 1
 
   api fn clear(~self) -> void
     if self.count == 0:
@@ -463,13 +575,13 @@ obj ArrayIterator<T> {
   index: i32
 }
 
-impl<T> Iterable<T> for Array<T>
-  api fn iterate(self) -> Iterator<T>
+impl<T> Sequence<T> for Array<T>
+  api fn iter(self) -> Iterator<T>
     ArrayIterator<T> { array: self, index: 0 }
 
 impl<T> Iterator<T> for ArrayIterator<T>
   api fn next(~self) -> Option<T>
-    if self.index >= self.array.length() then:
+    if self.index >= self.array.len() then:
       return None {}
     let value = self.array.get(self.index)
     self.index = self.index + 1

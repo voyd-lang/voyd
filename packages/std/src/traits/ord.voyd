@@ -1,0 +1,8 @@
+pub obj less {}
+pub obj equal {}
+pub obj greater {}
+
+pub type Ordering = less | equal | greater
+
+pub trait Ord<T>
+  fn cmp(self, { other: T }) -> Ordering

@@ -2,7 +2,7 @@ use std::all
 
 test "string byte_values iterates utf8 bytes":
   let values = "a😀".byte_values()
-  let ~iterator = values.iterate()
+  let ~iterator = values.iter()
   var count = 0
   var sum = 0
 

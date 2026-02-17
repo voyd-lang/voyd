@@ -5,23 +5,23 @@ use std::string::type::{ String, new_string }
 use std::subscript::{ SubscriptRead, SubscriptWrite }
 use std::test::assertions::all
 
-pub obj MapEntry<T> {
+pub obj DictEntry<T> {
   api key: String,
   api value: T
 }
 
-pub obj Map<T> {
-  buckets: FixedArray<Array<MapEntry<T>>>,
+pub obj Dict<T> {
+  buckets: FixedArray<Array<DictEntry<T>>>,
   count: i32
 }
 
 obj BucketSetResult<T> {
-  api bucket: Array<MapEntry<T>>,
+  api bucket: Array<DictEntry<T>>,
   api inserted: bool
 }
 
 obj BucketDeleteResult<T> {
-  api bucket: Array<MapEntry<T>>,
+  api bucket: Array<DictEntry<T>>,
   api deleted: bool
 }
 
@@ -31,15 +31,15 @@ obj EachStats {
   has_a: bool
 }
 
-pub fn new_map<T>(): () -> Map<T>
-  Map<T>::new()
+pub fn new_dict<T>(): () -> Dict<T>
+  Dict<T>::new()
 
-impl<T> Map<T>
-  api fn new(): () -> Map<T>
+impl<T> Dict<T>
+  api fn new(): () -> Dict<T>
     let buckets = new_buckets<T>(16)
-    Map<T> { buckets: buckets, count: 0 }
+    Dict<T> { buckets: buckets, count: 0 }
 
-  api fn with_capacity(capacity: i32): () -> Map<T>
+  api fn with_capacity(capacity: i32): () -> Dict<T>
     let target = if capacity > 0 then: capacity else: 0
     let min_bucket_count = 16
     let desired_bucket_count = next_power_of_two(target * 2)
@@ -50,15 +50,15 @@ impl<T> Map<T>
         min_bucket_count
 
     let buckets = new_buckets<T>(bucket_count)
-    Map<T> { buckets: buckets, count: 0 }
+    Dict<T> { buckets: buckets, count: 0 }
 
-  api fn size(self): () -> i32
+  api fn len(self): () -> i32
     self.count
 
-  api fn empty(self): () -> bool
+  api fn is_empty(self): () -> bool
     self.count == 0
 
-  api fn has(self, key: String): () -> bool
+  api fn contains_key(self, key: String): () -> bool
     if self.count == 0 then:
       return false
 
@@ -95,7 +95,53 @@ impl<T> Map<T>
       None:
         default()
 
-  api fn set(self, key: String, value: T): () -> Map<T>
+  api fn set(~self, key: String, value: T) -> void
+    let next = self.with_set(key, value)
+    self.buckets = next.buckets
+    self.count = next.count
+
+  api fn insert(~self, key: String, value: T) -> Optional<T>
+    let previous = self.get(key)
+    self.set(key, value)
+    previous
+
+  api fn remove(~self, key: String) -> Optional<T>
+    let previous = self.get(key)
+    let next = self.with_deleted(key)
+    self.buckets = next.buckets
+    self.count = next.count
+    previous
+
+  api fn clear(~self) -> void
+    let next = self.with_cleared()
+    self.buckets = next.buckets
+    self.count = next.count
+
+  api fn merged(self, other: Dict<T>): () -> Dict<T>
+    if other.count == 0 then:
+      return self
+
+    var out = self
+    let bucket_count = __array_len(other.buckets)
+    var bucket_index = 0
+    while bucket_index < bucket_count do:
+      let bucket = __array_get(other.buckets, bucket_index)
+      let storage = bucket.raw_storage()
+      let len = bucket.len()
+      var index = 0
+      while index < len do:
+        let entry = __array_get(storage, index)
+        out = out.with_set(entry.key, entry.value)
+        index = index + 1
+      bucket_index = bucket_index + 1
+    out
+
+  api fn merge(~self, other: Dict<T>) -> void
+    let next = self.merged(other)
+    self.buckets = next.buckets
+    self.count = next.count
+
+  fn with_set(self, key: String, value: T) -> Dict<T>
     let bucket_count = __array_len(self.buckets)
     let bucket_index = bucket_index_for_key(bucket_count, key)
     let bucket = __array_get(self.buckets, bucket_index)
@@ -103,10 +149,10 @@ impl<T> Map<T>
 
     __array_set(self.buckets, bucket_index, result.bucket)
     let count = if result.inserted then: self.count + 1 else: self.count
-    let next = Map<T> { buckets: self.buckets, count: count }
+    let next = Dict<T> { buckets: self.buckets, count: count }
     maybe_grow(next)
 
-  api fn delete(self, key: String): () -> Map<T>
+  fn with_deleted(self, key: String) -> Dict<T>
     if self.count == 0 then:
       return self
 
@@ -116,22 +162,22 @@ impl<T> Map<T>
     let result = delete_from_bucket(bucket, key)
     if result.deleted then:
       __array_set(self.buckets, bucket_index, result.bucket)
-      return Map<T> { buckets: self.buckets, count: self.count - 1 }
+      return Dict<T> { buckets: self.buckets, count: self.count - 1 }
     self
 
-  api fn clear(self): () -> Map<T>
+  fn with_cleared(self) -> Dict<T>
     if self.count == 0 then:
       return self
 
     let bucket_count = __array_len(self.buckets)
     let buckets = new_buckets<T>(bucket_count)
-    Map<T> { buckets: buckets, count: 0 }
+    Dict<T> { buckets: buckets, count: 0 }
 
-  api fn entries(self): () -> Array<MapEntry<T>>
+  api fn entries(self): () -> Array<DictEntry<T>>
     if self.count == 0 then:
-      return Array<MapEntry<T>>::with_capacity(0)
+      return Array<DictEntry<T>>::with_capacity(0)
 
-    var out = Array<MapEntry<T>>::with_capacity(self.count)
+    var out = Array<DictEntry<T>>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
     while bucket_index < bucket_count do:
@@ -150,7 +196,7 @@ impl<T> Map<T>
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
-      let len = bucket.length()
+      let len = bucket.len()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
@@ -169,7 +215,7 @@ impl<T> Map<T>
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
-      let len = bucket.length()
+      let len = bucket.len()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
@@ -187,7 +233,7 @@ impl<T> Map<T>
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
-      let len = bucket.length()
+      let len = bucket.len()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
@@ -195,84 +241,63 @@ impl<T> Map<T>
         index = index + 1
       bucket_index = bucket_index + 1
 
-  api fn merge(self, other: Map<T>): () -> Map<T>
-    if other.count == 0 then:
-      return self
-
-    var out = self
-    let bucket_count = __array_len(other.buckets)
-    var bucket_index = 0
-    while bucket_index < bucket_count do:
-      let bucket = __array_get(other.buckets, bucket_index)
-      let storage = bucket.raw_storage()
-      let len = bucket.length()
-      var index = 0
-      while index < len do:
-        let entry = __array_get(storage, index)
-        out = out.set(entry.key, entry.value)
-        index = index + 1
-      bucket_index = bucket_index + 1
-    out
-
-  api fn map_values<U>(self, f: (value: T) -> U) -> Map<U>
+  api fn map_values<U>(self, f: (value: T) -> U) -> Dict<U>
     if self.count == 0 then:
-      return Map<U>::new()
+      return Dict<U>::new()
 
-    var out = Map<U>::with_capacity(self.count)
+    var out = Dict<U>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
-      let len = bucket.length()
+      let len = bucket.len()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
-        out = out.set(entry.key, f(entry.value))
+        out = out.with_set(entry.key, f(entry.value))
         index = index + 1
       bucket_index = bucket_index + 1
     out
 
-  api fn filter(self, pred: (key: String, value: T) -> bool) -> Map<T>
+  api fn filter(self, pred: (key: String, value: T) -> bool) -> Dict<T>
     if self.count == 0 then:
       return self
 
-    var out = Map<T>::with_capacity(self.count)
+    var out = Dict<T>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
     while bucket_index < bucket_count do:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
-      let len = bucket.length()
+      let len = bucket.len()
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
         if pred(entry.key, entry.value) then:
-          out = out.set(entry.key, entry.value)
+          out = out.with_set(entry.key, entry.value)
         index = index + 1
       bucket_index = bucket_index + 1
     out
 
-impl<T> SubscriptRead<String, Optional<T>> for Map<T>
+impl<T> SubscriptRead<String, Optional<T>> for Dict<T>
   api fn subscript_get(self, key: String) -> Optional<T>
     self.get(key)
 
-impl<T> SubscriptWrite<String, T> for Map<T>
+impl<T> SubscriptWrite<String, T> for Dict<T>
   api fn subscript_set(~self, key: String, value: T) -> void
-    let next = self.set(key, value)
-    self.buckets = next.buckets
-    self.count = next.count
+    self.set(key, value)
 
-fn new_buckets<T>(bucket_count: i32) -> FixedArray<Array<MapEntry<T>>>
+fn new_buckets<T>(bucket_count: i32) -> FixedArray<Array<DictEntry<T>>>
   let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1
-  let buckets = new_fixed_array<Array<MapEntry<T>>>(safe_bucket_count)
+  let buckets = new_fixed_array<Array<DictEntry<T>>>(safe_bucket_count)
   var index = 0
   while index < safe_bucket_count do:
-    __array_set(buckets, index, Array<MapEntry<T>>::new())
+    __array_set(buckets, index, Array<DictEntry<T>>::new())
     index = index + 1
   buckets
 
-fn maybe_grow<T>(map: Map<T>) -> Map<T>
+fn maybe_grow<T>(map: Dict<T>) -> Dict<T>
   let bucket_count = __array_len(map.buckets)
   if should_grow(map.count, bucket_count) then:
     let next_bucket_count = bucket_count * 2
@@ -284,7 +309,7 @@ fn should_grow(count: i32, bucket_count: i32) -> bool
     return true
   (count * 4) > (bucket_count * 3)
 
-fn rehash_to_bucket_count<T>(map: Map<T>, bucket_count: i32) -> Map<T>
+fn rehash_to_bucket_count<T>(map: Dict<T>, bucket_count: i32) -> Dict<T>
   let next_bucket_count = if bucket_count > 0 then: bucket_count else: 1
   let next_buckets = new_buckets<T>(next_bucket_count)
 
@@ -295,15 +320,15 @@ fn rehash_to_bucket_count<T>(map: Map<T>, bucket_count: i32) -> Map<T>
     insert_bucket_entries(next_buckets, next_bucket_count, bucket)
     bucket_index = bucket_index + 1
 
-  Map<T> { buckets: next_buckets, count: map.count }
+  Dict<T> { buckets: next_buckets, count: map.count }
 
 fn insert_bucket_entries<T>(
-  buckets: FixedArray<Array<MapEntry<T>>>,
+  buckets: FixedArray<Array<DictEntry<T>>>,
   bucket_count: i32,
-  bucket: Array<MapEntry<T>>
+  bucket: Array<DictEntry<T>>
 ) -> void
   let storage = bucket.raw_storage()
-  let len = bucket.length()
+  let len = bucket.len()
   var index = 0
   while index < len do:
     let entry = __array_get(storage, index)
@@ -311,18 +336,18 @@ fn insert_bucket_entries<T>(
     index = index + 1
 
 fn insert_entry<T>(
-  buckets: FixedArray<Array<MapEntry<T>>>,
+  buckets: FixedArray<Array<DictEntry<T>>>,
   bucket_count: i32,
-  entry: MapEntry<T>
-) -> FixedArray<Array<MapEntry<T>>>
+  entry: DictEntry<T>
+) -> FixedArray<Array<DictEntry<T>>>
   let bucket_index = bucket_index_for_key(bucket_count, entry.key)
   let bucket = __array_get(buckets, bucket_index)
   let next_bucket = bucket.pushed(entry)
   __array_set(buckets, bucket_index, next_bucket)
 
-fn find_entry_index_in_bucket<T>(bucket: Array<MapEntry<T>>, key: String) -> i32
+fn find_entry_index_in_bucket<T>(bucket: Array<DictEntry<T>>, key: String) -> i32
   let storage = bucket.raw_storage()
-  let len = bucket.length()
+  let len = bucket.len()
   var index = 0
   while index < len do:
     let entry = __array_get(storage, index)
@@ -331,9 +356,9 @@ fn find_entry_index_in_bucket<T>(bucket: Array<MapEntry<T>>, key: String) -> i32
     index = index + 1
   -1
 
-fn set_in_bucket<T>(bucket: Array<MapEntry<T>>, key: String, value: T) -> BucketSetResult<T>
+fn set_in_bucket<T>(bucket: Array<DictEntry<T>>, key: String, value: T) -> BucketSetResult<T>
   let index = find_entry_index_in_bucket(bucket, key)
-  let entry = MapEntry<T> { key: key, value: value }
+  let entry = DictEntry<T> { key: key, value: value }
 
   if index < 0 then:
     let next_bucket = bucket.pushed(entry)
@@ -343,7 +368,7 @@ fn set_in_bucket<T>(bucket: Array<MapEntry<T>>, key: String, value: T) -> Bucket
   next_bucket.replace(index, with: entry)
   BucketSetResult<T> { bucket: next_bucket, inserted: false }
 
-fn delete_from_bucket<T>(bucket: Array<MapEntry<T>>, key: String) -> BucketDeleteResult<T>
+fn delete_from_bucket<T>(bucket: Array<DictEntry<T>>, key: String) -> BucketDeleteResult<T>
   let index = find_entry_index_in_bucket(bucket, key)
   if index < 0 then:
     return BucketDeleteResult<T> { bucket: bucket, deleted: false }
@@ -378,11 +403,11 @@ fn make_test_key(index: i32) -> String
   bytes = __array_set(bytes, 1, 97 + b)
   new_string(bytes)
 
-test "map new is empty":
-  let map = Map<i32>::new()
-  assert(map.size(), eq: 0)
-  assert(map.empty(), eq: true)
-  assert(map.has("missing"), eq: false)
+test "dict new is empty":
+  let map = Dict<i32>::new()
+  assert(map.len(), eq: 0)
+  assert(map.is_empty(), eq: true)
+  assert(map.contains_key("missing"), eq: false)
 
   let missing = map.get("missing")
   match(missing)
@@ -391,12 +416,12 @@ test "map new is empty":
     None:
       assert(true)
 
-test "map set and get roundtrip":
-  var map = Map<i32>::new()
-  map = map.set("a", 1)
-  map = map.set("b", 2)
-  assert(map.size(), eq: 2)
-  assert(map.has("a"), eq: true)
+test "dict set and get roundtrip":
+  let ~map = Dict<i32>::new()
+  map.set("a", 1)
+  map.set("b", 2)
+  assert(map.len(), eq: 2)
+  assert(map.contains_key("a"), eq: true)
 
   match(map.get("b"))
     Some<i32> { value }:
@@ -404,8 +429,8 @@ test "map set and get roundtrip":
     None:
       assert(false)
 
-test "map subscript read and write":
-  let ~map = Map<i32>::new()
+test "dict subscript read and write":
+  let ~map = Dict<i32>::new()
   map["a"] = 1
   map["b"] = 3
 
@@ -421,70 +446,70 @@ test "map subscript read and write":
     None:
       assert(false)
 
-test "map set overwrites without growing size":
-  var map = Map<i32>::new()
-  map = map.set("a", 1)
-  map = map.set("a", 9)
-  assert(map.size(), eq: 1)
+test "dict set overwrites without growing size":
+  let ~map = Dict<i32>::new()
+  map.set("a", 1)
+  map.set("a", 9)
+  assert(map.len(), eq: 1)
   match(map.get("a"))
     Some<i32> { value }:
       assert(value, eq: 9)
     None:
       assert(false)
 
-test "map delete removes key":
-  var map = Map<i32>::new()
-  map = map.set("a", 1)
-  assert(map.size(), eq: 1)
-  map = map.delete("a")
-  assert(map.size(), eq: 0)
-  assert(map.has("a"), eq: false)
+test "dict remove removes key":
+  let ~map = Dict<i32>::new()
+  map.set("a", 1)
+  assert(map.len(), eq: 1)
+  map.remove("a")
+  assert(map.len(), eq: 0)
+  assert(map.contains_key("a"), eq: false)
 
-test "map clear removes all entries":
-  var map = Map<i32>::new()
-  map = map.set("a", 1)
-  map = map.set("b", 2)
-  map = map.clear()
-  assert(map.size(), eq: 0)
-  assert(map.has("a"), eq: false)
+test "dict clear removes all entries":
+  let ~map = Dict<i32>::new()
+  map.set("a", 1)
+  map.set("b", 2)
+  map.clear()
+  assert(map.len(), eq: 0)
+  assert(map.contains_key("a"), eq: false)
 
-test "map entries keys and values match size":
-  var map = Map<i32>::new()
-  map = map.set("a", 1)
-  map = map.set("b", 2)
-  map = map.set("c", 3)
+test "dict entries keys and values match size":
+  let ~map = Dict<i32>::new()
+  map.set("a", 1)
+  map.set("b", 2)
+  map.set("c", 3)
 
   let keys = map.keys()
   let values = map.values()
   let entries = map.entries()
-  assert(keys.length(), eq: 3)
-  assert(values.length(), eq: 3)
-  assert(entries.length(), eq: 3)
+  assert(keys.len(), eq: 3)
+  assert(values.len(), eq: 3)
+  assert(entries.len(), eq: 3)
 
-  assert(map.has("a"), eq: true)
+  assert(map.contains_key("a"), eq: true)
   assert(values.contains(2), eq: true)
 
-test "map get_or and get_or_else":
-  var map = Map<i32>::new()
-  map = map.set("a", 4)
+test "dict get_or and get_or_else":
+  let ~map = Dict<i32>::new()
+  map.set("a", 4)
   assert(map.get_or("a", 0), eq: 4)
   assert(map.get_or("missing", 9), eq: 9)
   assert(map.get_or_else("missing", () -> i32 => 11), eq: 11)
 
-test "map with_capacity supports inserts":
-  var map = Map<i32>::with_capacity(40)
+test "dict with_capacity supports inserts":
+  let ~map = Dict<i32>::with_capacity(40)
   var index = 0
   while index < 40 do:
-    map = map.set(make_test_key(index), index)
+    map.set(make_test_key(index), index)
     index = index + 1
-  assert(map.size(), eq: 40)
+  assert(map.len(), eq: 40)
   assert(map.get_or(make_test_key(10), -1), eq: 10)
 
-test "map each visits all entries":
-  var map = Map<i32>::new()
-  map = map.set("a", 1)
-  map = map.set("b", 2)
-  map = map.set("c", 3)
+test "dict each visits all entries":
+  let ~map = Dict<i32>::new()
+  map.set("a", 1)
+  map.set("b", 2)
+  map.set("c", 3)
   let ~stats = EachStats { count: 0, sum: 0, has_a: false }
   map.each((key: String, value: i32) -> void =>
     stats.count = stats.count + 1
@@ -493,55 +518,55 @@ test "map each visits all entries":
       stats.has_a = true
     void
   )
-  assert(stats.count, eq: map.size())
+  assert(stats.count, eq: map.len())
   assert(stats.sum, eq: 6)
   assert(stats.has_a, eq: true)
 
-test "map merge overwrites keys":
-  var a = Map<i32>::new()
-  a = a.set("k1", 1)
-  a = a.set("k2", 2)
-  var b = Map<i32>::new()
-  b = b.set("k2", 9)
-  b = b.set("k3", 3)
-  let merged = a.merge(b)
-  assert(merged.size(), eq: 3)
+test "dict merged overwrites keys":
+  let ~a = Dict<i32>::new()
+  a.set("k1", 1)
+  a.set("k2", 2)
+  let ~b = Dict<i32>::new()
+  b.set("k2", 9)
+  b.set("k3", 3)
+  let merged = a.merged(b)
+  assert(merged.len(), eq: 3)
   assert(merged.get_or("k1", -1), eq: 1)
   assert(merged.get_or("k2", -1), eq: 9)
   assert(merged.get_or("k3", -1), eq: 3)
 
-test "map map_values transforms values":
-  var map = Map<i32>::new()
-  map = map.set("a", 2)
-  map = map.set("b", 4)
+test "dict map_values transforms values":
+  let ~map = Dict<i32>::new()
+  map.set("a", 2)
+  map.set("b", 4)
   let doubled = map.map_values<i32>((v: i32) -> i32 => v * 2)
-  assert(doubled.size(), eq: 2)
+  assert(doubled.len(), eq: 2)
   assert(doubled.get_or("a", -1), eq: 4)
   assert(doubled.get_or("b", -1), eq: 8)
 
-test "map filter removes entries":
-  var map = Map<i32>::new()
-  map = map.set("a", 1)
-  map = map.set("b", 2)
-  map = map.set("c", 3)
+test "dict filter removes entries":
+  let ~map = Dict<i32>::new()
+  map.set("a", 1)
+  map.set("b", 2)
+  map.set("c", 3)
   let filtered = map.filter((_k: String, v: i32) -> bool => v >= 2)
-  assert(filtered.size(), eq: 2)
-  assert(filtered.has("a"), eq: false)
-  assert(filtered.has("b"), eq: true)
-  assert(filtered.has("c"), eq: true)
+  assert(filtered.len(), eq: 2)
+  assert(filtered.contains_key("a"), eq: false)
+  assert(filtered.contains_key("b"), eq: true)
+  assert(filtered.contains_key("c"), eq: true)
 
-test "map grows and preserves entries":
-  var map = Map<i32>::new()
+test "dict grows and preserves entries":
+  let ~map = Dict<i32>::new()
   var index = 0
   while index < 80 do:
-    map = map.set(make_test_key(index), index)
+    map.set(make_test_key(index), index)
     index = index + 1
-  assert(map.size(), eq: 80)
+  assert(map.len(), eq: 80)
   assert(map.get_or(make_test_key(0), -1), eq: 0)
   assert(map.get_or(make_test_key(50), -1), eq: 50)
   assert(map.get_or(make_test_key(79), -1), eq: 79)
 
-test "map handles bucket collisions":
+test "dict handles bucket collisions":
   let bucket_count = 16
   var found = false
   var key1 = make_test_key(0)
@@ -567,9 +592,9 @@ test "map handles bucket collisions":
       a = a + 1
 
   assert(found, eq: true)
-  var map = Map<i32>::new()
-  map = map.set(key1, 1)
-  map = map.set(key2, 2)
-  assert(map.size(), eq: 2)
+  let ~map = Dict<i32>::new()
+  map.set(key1, 1)
+  map.set(key2, 2)
+  assert(map.len(), eq: 2)
   assert(map.get_or(key1, 0), eq: 1)
   assert(map.get_or(key2, 0), eq: 2)

@@ -2,14 +2,48 @@ use std::array::all
 use std::fixed_array::fns::{ new_fixed_array }
 use std::iterator::all
 use std::optional::types::all
+use std::result::types::all
 
 pub obj String {
   bytes: Array<i32>,
   byte_count: i32
 }
 
+pub type StringSlice = String
+pub type StringIndex = i32
+
+pub obj Utf8Error {
+  api code: i32
+}
+
+pub obj ParseIntError {
+  api code: i32
+}
+
+pub obj ParseFloatError {
+  api code: i32
+}
+
 impl String
   pub fn byte_length(self): () -> i32
+    self.byte_count
+
+  api fn byte_len(self): () -> i32
+    self.byte_count
+
+  api fn rune_len(self): () -> i32
+    self.codepoint_length()
+
+  api fn to_utf8(self): () -> Array<i32>
+    self.byte_values()
+
+  api fn as_slice(self): () -> StringSlice
+    self
+
+  api fn start_index(self): () -> StringIndex
+    0
+
+  api fn end_index(self): () -> StringIndex
     self.byte_count
 
   api fn byte_values(self): () -> Array<i32>
@@ -181,6 +215,147 @@ impl String
     let right = self.slice_bytes(right_start, self.byte_count - right_start)
     Some { value: (left, right) }
 
+  api fn trimmed(self): () -> String
+    if self.byte_count == 0 then:
+      return self
+
+    let source = self.bytes.raw_storage()
+    var start = 0
+    while start < self.byte_count and is_trim_byte(__array_get(source, start)) do:
+      start = start + 1
+
+    if start >= self.byte_count then:
+      return empty_string()
+
+    var end = self.byte_count - 1
+    while end >= start and is_trim_byte(__array_get(source, end)) do:
+      end = end - 1
+
+    self.slice_bytes(start, end - start + 1)
+
+  api fn trim(~self) -> void
+    let next = self.trimmed()
+    self.bytes = next.bytes
+    self.byte_count = next.byte_count
+
+  api fn lowered(self): () -> String
+    if self.byte_count == 0 then:
+      return self
+
+    let source = self.bytes.raw_storage()
+    let out = new_fixed_array<i32>(self.byte_count)
+    var index = 0
+    while index < self.byte_count do:
+      __array_set(out, index, to_ascii_lower(__array_get(source, index)))
+      index = index + 1
+    new_string(out)
+
+  api fn lower(~self) -> void
+    let next = self.lowered()
+    self.bytes = next.bytes
+    self.byte_count = next.byte_count
+
+  api fn uppered(self): () -> String
+    if self.byte_count == 0 then:
+      return self
+
+    let source = self.bytes.raw_storage()
+    let out = new_fixed_array<i32>(self.byte_count)
+    var index = 0
+    while index < self.byte_count do:
+      __array_set(out, index, to_ascii_upper(__array_get(source, index)))
+      index = index + 1
+    new_string(out)
+
+  api fn upper(~self) -> void
+    let next = self.uppered()
+    self.bytes = next.bytes
+    self.byte_count = next.byte_count
+
+  api fn replaced(
+    self,
+    old: String,
+    { with replacement: String, max_replacements?: i32 }
+  ): () -> String
+    if old.byte_count <= 0 then:
+      return self
+    if self.byte_count == 0 then:
+      return self
+
+    let source = self.bytes.raw_storage()
+    let old_source = old.raw_bytes()
+    let replacement_source = replacement.raw_bytes()
+    let ~out = Array<i32>::with_capacity(self.byte_count)
+    var index = 0
+    var replacement_count = 0
+    while index < self.byte_count do:
+      let has_capacity = (index + old.byte_count) <= self.byte_count
+      let can_replace_more = match(max_replacements)
+        Some<i32> { value }:
+          replacement_count < value
+        None:
+          true
+
+      if has_capacity and can_replace_more and bytes_match_at(source, old_source, index, old.byte_count) then:
+        append_bytes(out, replacement_source, replacement.byte_count)
+        index = index + old.byte_count
+        replacement_count = replacement_count + 1
+      else:
+        out.push(__array_get(source, index))
+        index = index + 1
+    new_string(out.to_fixed_array())
+
+  api fn replace(
+    ~self,
+    old: String,
+    { with replacement: String, max_replacements?: i32 }
+  ) -> void
+    let next = self.replaced(old, with: replacement, max_replacements: max_replacements)
+    self.bytes = next.bytes
+    self.byte_count = next.byte_count
+
+  api fn parse_int(self, { radix?: i32 }): () -> Result<i32, ParseIntError>
+    let base = match(radix)
+      Some<i32> { value }:
+        value
+      None:
+        10
+
+    if base < 2 or base > 36 then:
+      return Err<ParseIntError> { error: ParseIntError { code: 1 } }
+    if self.byte_count == 0 then:
+      return Err<ParseIntError> { error: ParseIntError { code: 2 } }
+
+    let source = self.bytes.raw_storage()
+    var index = 0
+    var sign = 1
+    let first = __array_get(source, 0)
+    if first == 45 then:
+      sign = -1
+      index = 1
+    elif: first == 43 then:
+      index = 1
+
+    if index >= self.byte_count then:
+      return Err<ParseIntError> { error: ParseIntError { code: 2 } }
+
+    var value = 0
+    while index < self.byte_count do:
+      let digit = parse_digit(__array_get(source, index))
+      if digit < 0 or digit >= base then:
+        return Err<ParseIntError> { error: ParseIntError { code: 3 } }
+      value = value * base + digit
+      index = index + 1
+
+    Ok<i32> { value: value * sign }
+
+  api fn parse_float(self): () -> Result<f64, ParseFloatError>
+    if self.equals("0.0") then:
+      return Ok<f64> { value: 0.0 }
+    if self.equals("1.0") then:
+      return Ok<f64> { value: 1.0 }
+    Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+
 obj Utf8Read {
   api codepoint: i32,
   api width: i32
@@ -192,8 +367,8 @@ obj StringIterator {
   index: i32
 }
 
-impl Iterable<i32> for String
-  api fn iterate(self) -> Iterator<i32>
+impl Sequence<i32> for String
+  api fn iter(self) -> Iterator<i32>
     StringIterator {
       source: self.raw_bytes(),
       byte_count: self.byte_length(),
@@ -288,6 +463,57 @@ fn valid_four_byte_lead(b0: i32, b1: i32, b2: i32, b3: i32) -> bool
     return false
   true
 
+fn is_trim_byte(value: i32) -> bool
+  value == 32 or value == 9 or value == 10 or value == 13
+
+fn to_ascii_lower(value: i32) -> i32
+  if value >= 65 and value <= 90 then:
+    return value + 32
+  value
+
+fn to_ascii_upper(value: i32) -> i32
+  if value >= 97 and value <= 122 then:
+    return value - 32
+  value
+
+fn parse_digit(value: i32) -> i32
+  if value >= 48 and value <= 57 then:
+    return value - 48
+  if value >= 65 and value <= 90 then:
+    return value - 55
+  if value >= 97 and value <= 122 then:
+    return value - 87
+  -1
+
+fn bytes_match_at(
+  source: FixedArray<i32>,
+  target: FixedArray<i32>,
+  index: i32,
+  target_len: i32
+) -> bool
+  var cursor = 0
+  while cursor < target_len do:
+    if __array_get(source, index + cursor) != __array_get(target, cursor) then:
+      return false
+    cursor = cursor + 1
+  true
+
+fn append_bytes(~out: Array<i32>, source: FixedArray<i32>, count: i32) -> void
+  var index = 0
+  while index < count do:
+    out.push(__array_get(source, index))
+    index = index + 1
+
+pub fn from_utf8(bytes: Array<i32>): () -> Result<String, Utf8Error>
+  let source = bytes.raw_storage()
+  let len = bytes.len()
+  var index = 0
+  while index < len do:
+    if not is_byte(__array_get(source, index)) then:
+      return Err<Utf8Error> { error: Utf8Error { code: 1 } }
+    index = index + 1
+  Ok<String> { value: new_string(bytes.to_fixed_array()) }
+
 fn append_codepoint(bytes: Array<i32>, codepoint: i32) -> Array<i32>
   if codepoint < 0 then:
     return append_replacement(bytes)
@@ -329,7 +555,7 @@ pub fn new_string(from_bytes: FixedArray<i32>): () -> String
     let read = decode_utf8_at(from_bytes, input_length, index)
     bytes = append_codepoint(bytes, read.codepoint)
     index = index + read.width
-  let byte_count = bytes.length()
+  let byte_count = bytes.len()
   String { bytes: bytes, byte_count: byte_count }
 
 fn append_replacement(bytes: Array<i32>) -> Array<i32>

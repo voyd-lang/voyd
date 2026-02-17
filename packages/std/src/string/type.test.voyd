@@ -33,3 +33,47 @@ test "string hash matches for identical strings":
   assert("hello".hash_i32(), eq: "hello".hash_i32())
   let empty = empty_string()
   assert(empty.hash_i32(), eq: empty.hash_i32())
+
+test "string trim and trim_mutating":
+  assert("  hi  ".trimmed().equals("hi"), eq: true)
+  let ~value = "  bye  "
+  value.trim()
+  assert(value.equals("bye"), eq: true)
+
+test "string lower and upper pairs":
+  assert("AbC".lowered().equals("abc"), eq: true)
+  assert("AbC".uppered().equals("ABC"), eq: true)
+  let ~value = "aBc"
+  value.upper()
+  assert(value.equals("ABC"), eq: true)
+  value.lower()
+  assert(value.equals("abc"), eq: true)
+
+test "string replace pairs":
+  let replaced = "banana".replaced("na", with: "X")
+  assert(replaced.equals("baXX"), eq: true)
+  let ~value = "banana"
+  value.replace("na", with: "Y", max_replacements: 1)
+  assert(value.equals("baYna"), eq: true)
+
+test "string parse_int uses result":
+  match("42".parse_int())
+    Ok<i32> { value }:
+      assert(value, eq: 42)
+    Err<ParseIntError>:
+      assert(false)
+
+  match("nope".parse_int())
+    Ok<i32>:
+      assert(false)
+    Err<ParseIntError> { error }:
+      assert(error.code > 0, eq: true)
+
+test "string from_utf8 and utf8 bytes roundtrip":
+  let bytes = "hi".to_utf8()
+  match(from_utf8(bytes))
+    Ok<String> { value }:
+      assert(value.equals("hi"), eq: true)
+      assert(value.to_utf8().len(), eq: 2)
+    Err<Utf8Error>:
+      assert(false)

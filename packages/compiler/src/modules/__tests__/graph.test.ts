@@ -207,19 +207,19 @@ describe("buildModuleGraph", () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
     const host = createMemoryHost({
-      [`${stdRoot}${sep}map.voyd`]: "",
-      [`${stdRoot}${sep}msgpack.voyd`]: "use std::map::Map",
+      [`${stdRoot}${sep}dict.voyd`]: "",
+      [`${stdRoot}${sep}msgpack.voyd`]: "use std::dict::Dict",
     });
 
     const graph = await buildModuleGraph({
-      entryPath: `${stdRoot}${sep}map.voyd`,
+      entryPath: `${stdRoot}${sep}dict.voyd`,
       host,
       roots: { src: srcRoot, std: stdRoot },
     });
 
     expect(graph.diagnostics).toHaveLength(0);
     const moduleIds = Array.from(graph.modules.keys());
-    expect(moduleIds).toEqual(expect.arrayContaining(["std::map"]));
+    expect(moduleIds).toEqual(expect.arrayContaining(["std::dict"]));
     expect(moduleIds).not.toContain("std::pkg");
     expect(moduleIds).not.toContain("std::msgpack");
   });
@@ -228,10 +228,10 @@ describe("buildModuleGraph", () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
     const host = createMemoryHost({
-      [`${srcRoot}${sep}main.voyd`]: "use std::{ Map }",
-      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::map::all\npub use self::msgpack",
-      [`${stdRoot}${sep}map.voyd`]: "pub obj Map {}",
-      [`${stdRoot}${sep}msgpack.voyd`]: "use std::map::Map",
+      [`${srcRoot}${sep}main.voyd`]: "use std::{ Dict }",
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::dict::all\npub use self::msgpack",
+      [`${stdRoot}${sep}dict.voyd`]: "pub obj Dict {}",
+      [`${stdRoot}${sep}msgpack.voyd`]: "use std::dict::Dict",
     });
 
     const graph = await buildModuleGraph({
@@ -242,7 +242,7 @@ describe("buildModuleGraph", () => {
 
     expect(graph.diagnostics).toHaveLength(0);
     expect(Array.from(graph.modules.keys())).toEqual(
-      expect.arrayContaining(["src::main", "std::pkg", "std::msgpack", "std::map"]),
+      expect.arrayContaining(["src::main", "std::pkg", "std::msgpack", "std::dict"]),
     );
   });
 

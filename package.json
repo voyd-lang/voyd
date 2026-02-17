@@ -15,7 +15,8 @@
     "typecheck": "turbo run typecheck --affected",
     "lint": "turbo run lint --affected --parallel",
     "dev": "turbo run dev --affected --parallel",
-    "clean": "turbo run clean --affected --parallel"
+    "clean": "turbo run clean --affected --parallel",
+    "preflight:constraints": "node ./scripts/preflight-generic-constraints.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.5.1",

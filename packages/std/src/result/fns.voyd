@@ -1,0 +1,38 @@
+use super::types::all
+
+pub fn ok<T, E>(value: T): () -> Result<T, E>
+  Ok<T> { value: value }
+
+pub fn err<T, E>(error: E): () -> Result<T, E>
+  Err<E> { error: error }
+
+pub fn is_ok<T, E>(result: Result<T, E>): () -> bool
+  match(result)
+    Ok<T>:
+      true
+    Err<E>:
+      false
+
+pub fn is_err<T, E>(result: Result<T, E>): () -> bool
+  not is_ok<T, E>(result)
+
+pub fn unwrap_or<T, E>(result: Result<T, E>, fallback: T): () -> T
+  match(result)
+    Ok<T> { value }:
+      value
+    Err<E>:
+      fallback
+
+pub fn map<T, E, U>(result: Result<T, E>, f: (v: T) -> U) -> Result<U, E>
+  match(result)
+    Ok<T> { value }:
+      Ok<U> { value: f(value) }
+    Err<E> { error }:
+      Err<E> { error: error }
+
+pub fn and_then<T, E, U>(result: Result<T, E>, f: (v: T) -> Result<U, E>) -> Result<U, E>
+  match(result)
+    Ok<T> { value }:
+      f(value)
+    Err<E> { error }:
+      Err<E> { error: error }

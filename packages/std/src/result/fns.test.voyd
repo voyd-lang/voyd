@@ -1,0 +1,21 @@
+use std::test::assertions::all
+
+obj ResultErr {
+  api value: i32
+}
+
+test "result ok and err helpers":
+  let success = ok<i32, ResultErr>(7)
+  let failure = err<i32, ResultErr>(ResultErr { value: 9 })
+  assert(is_ok<i32, ResultErr>(success), eq: true)
+  assert(is_err<i32, ResultErr>(failure), eq: true)
+
+test "result map and and_then":
+  let success = ok<i32, ResultErr>(3)
+  let mapped = map<i32, ResultErr, i32>(success, (v: i32) -> i32 => v * 2)
+  let chained = and_then<i32, ResultErr, i32>(
+    mapped,
+    (v: i32) -> Result<i32, ResultErr> => ok<i32, ResultErr>(v + 1)
+  )
+  let value = unwrap_or<i32, ResultErr>(chained, 0)
+  assert(value, eq: 7)

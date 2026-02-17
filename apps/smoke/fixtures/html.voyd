@@ -6,11 +6,11 @@ fn create_element({
   attributes?: Array<Array<String>>,
   children: Array<MsgPack>
 }) -> MsgPack
-  var element = Map<MsgPack>::new()
-  element = element.set("name", name)
-  element = element.set("children", children)
+  let ~element = Dict<MsgPack>::new()
+  element.set("name", name)
+  element.set("children", children)
   if attributes is Some:
-    element = element.set("attributes", attributes.value)
+    element.set("attributes", attributes.value)
   element
 
 pub fn main()

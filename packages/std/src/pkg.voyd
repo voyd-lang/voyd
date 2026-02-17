@@ -1,18 +1,33 @@
 pub self::optional
+pub self::result
 pub self::string
 pub self::box
 pub self::memory
 pub self::msgpack
+pub self::dict
 pub self::iterator
 pub self::subscript
+pub self::traits
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::all
+pub std::result::types::{ Result, Ok, Err }
+pub std::result::fns::all
 pub std::array::{ Array, ArrayPop, new_array_unchecked }
-pub std::map::{ Map, MapEntry, new_map }
-pub std::iterator::{ Iterable, Iterator, for }
+pub std::dict::{ Dict, DictEntry, new_dict }
+pub std::iterator::{ Sequence, Iterator, for }
 pub std::subscript::{ Range, SubscriptRead, SubscriptWrite }
-pub std::string::type::{ String, new_string }
+pub std::string::{
+  String,
+  StringSlice,
+  StringIndex,
+  Utf8Error,
+  ParseIntError,
+  ParseFloatError,
+  new_string,
+  from_utf8
+}
 pub std::box::{ Box }
+pub std::traits::all
 pub std::test::assertions::{ Test, assert }
 pub self::vx
 pub self::math

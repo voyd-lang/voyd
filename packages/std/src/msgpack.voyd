@@ -1,7 +1,7 @@
 use self::fns::self as msgpack_fns
 use self::fns::MsgPack
 use std::array::Array
-use std::map::Map
+use std::dict::Dict
 use std::string::type::String
 pub use self::fns::MsgPack
 pub use self::types::{ Binary, Bool, Null, Numeric }
@@ -33,7 +33,7 @@ pub fn pack_i32(value: i32): () -> MsgPack
 pub fn pack_i64(value: i64): () -> MsgPack
   msgpack_fns::pack_i64(value)
 
-pub fn pack_map(value: Map<MsgPack>): () -> MsgPack
+pub fn pack_map(value: Dict<MsgPack>): () -> MsgPack
   msgpack_fns::pack_map(value)
 
 pub fn unpack_bool(value: MsgPack): () -> bool
@@ -60,7 +60,7 @@ pub fn unpack_i32(value: MsgPack): () -> i32
 pub fn unpack_i64(value: MsgPack): () -> i64
   msgpack_fns::unpack_i64(value)
 
-pub fn unpack_map(value: MsgPack): () -> Map<MsgPack>
+pub fn unpack_map(value: MsgPack): () -> Dict<MsgPack>
   msgpack_fns::unpack_map(value)
 
 fn msgpack_array_with_capacity(size: i32): () -> Array<MsgPack>
@@ -70,16 +70,18 @@ fn msgpack_array_push(array: Array<MsgPack>, value: MsgPack): () -> Array<MsgPac
   array.pushed(value)
 
 fn msgpack_array_length(array: Array<MsgPack>): () -> i32
-  array.length()
+  array.len()
 
 fn msgpack_array_raw_storage(array: Array<MsgPack>): () -> FixedArray<MsgPack>
   array.raw_storage()
 
-fn msgpack_map_new(): () -> Map<MsgPack>
-  Map<MsgPack>::new()
+fn msgpack_map_new(): () -> Dict<MsgPack>
+  Dict<MsgPack>::new()
 
-fn msgpack_map_set(map: Map<MsgPack>, key: String, value: MsgPack): () -> Map<MsgPack>
-  map.set(key, value)
+fn msgpack_map_set(map: Dict<MsgPack>, key: String, value: MsgPack): () -> Dict<MsgPack>
+  let ~next = map
+  next.set(key, value)
+  next
 
 pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
   msgpack_fns::encode_value(value, ptr, len)

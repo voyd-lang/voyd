@@ -1,6 +1,6 @@
 use std::optional::types::{ Optional, Some, None }
 use std::optional::fns::{ some, none }
-use std::map::new_map
+use std::dict::new_dict
 use std::array::new_array_unchecked
 use std::subscript::Range
 use std::string::type::new_string
@@ -49,10 +49,10 @@ pub fn slice_right_unbounded() -> i32
 pub fn slice_full_unbounded() -> i32
   let arr = [1, 2, 3, 4]
   let slice = arr[..]
-  slice.length()
+  slice.len()
 
 pub fn map_roundtrip() -> i32
-  let ~map = new_map<i32>()
+  let ~map = new_dict<i32>()
   map["x"] = 7
   optional_i32_or(map["x"], -1)
 

@@ -1,0 +1,13 @@
+use std::result::types::Result
+
+pub trait From<To, From>
+  fn from({ value: From }) -> To
+
+pub trait Into<From, To>
+  fn into(self) -> To
+
+pub trait TryFrom<To, From, E>
+  fn try_from({ value: From }) -> Result<To, E>
+
+pub trait TryInto<From, To, E>
+  fn try_into(self) -> Result<To, E>

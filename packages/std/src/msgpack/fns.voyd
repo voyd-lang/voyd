@@ -1,6 +1,6 @@
 use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
-use std::map::Map
+use std::dict::Dict
 use std::memory::self as memory
 use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 use std::optional::types::all
@@ -8,7 +8,7 @@ use std::string::type::{ new_string, String }
 use std::test::assertions::all
 
 @serializer("msgpack", encode_value, decode_value)
-pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | Map<MsgPack>
+pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | Dict<MsgPack>
 
 obj Encoder {
   ptr: i32,
@@ -40,8 +40,8 @@ fn empty_binary(): () -> Binary
 fn empty_array(): () -> Array<MsgPack>
   Array<MsgPack>::new()
 
-fn empty_map(): () -> Map<MsgPack>
-  Map<MsgPack>::new()
+fn empty_map(): () -> Dict<MsgPack>
+  Dict<MsgPack>::new()
 
 fn empty_text(): () -> String
   new_string(new_fixed_array<i32>(0))
@@ -73,7 +73,7 @@ pub fn pack_binary(value: Binary): () -> MsgPack
 pub fn pack_array(value: Array<MsgPack>): () -> MsgPack
   value
 
-pub fn pack_map(value: Map<MsgPack>): () -> MsgPack
+pub fn pack_map(value: Dict<MsgPack>): () -> MsgPack
   value
 
 pub fn unpack_i32(value: MsgPack): () -> i32
@@ -140,9 +140,9 @@ pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
     else:
       empty_array()
 
-pub fn unpack_map(value: MsgPack): () -> Map<MsgPack>
+pub fn unpack_map(value: MsgPack): () -> Dict<MsgPack>
   value.match(boxed)
-    Map<MsgPack>:
+    Dict<MsgPack>:
       boxed
     else:
       empty_map()
@@ -155,9 +155,9 @@ test "msgpack encode/decode roundtrip for nested values":
   items.push(pack_i32(1))
   items.push(pack_string("hi"))
 
-  var map = Map<MsgPack>::new()
-  map = map.set("items", pack_array(items))
-  map = map.set("flag", pack_bool(true))
+  let ~map = Dict<MsgPack>::new()
+  map.set("items", pack_array(items))
+  map.set("flag", pack_bool(true))
 
   let value = pack_map(map)
   let written = encode_value(value, base, 1024)
@@ -175,7 +175,7 @@ test "msgpack encode/decode roundtrip for nested values":
   match(decoded_map.get("items"))
     Some<MsgPack> { value: items_value }:
       let arr = unpack_array(items_value)
-      assert(arr.length(), eq: 2)
+      assert(arr.len(), eq: 2)
       match(arr.get(0))
         Some<MsgPack> { value: first }:
           assert(unpack_i32(first), eq: 1)
@@ -295,7 +295,7 @@ impl Encoder
       index = index + 1
 
   fn encode_binary(~self, bytes: Array<i32>) -> void
-    let len = bytes.length()
+    let len = bytes.len()
     if len < 256 then:
       self.write_u8(196)
       self.write_u8(len)
@@ -313,7 +313,7 @@ impl Encoder
       index = index + 1
 
   fn encode_array(~self, value: Array<MsgPack>) -> void
-    let len = value.length()
+    let len = value.len()
     if len < 16 then:
       self.write_u8(144 + len)
     elif: len < 65536 then:
@@ -329,8 +329,8 @@ impl Encoder
       self.encode_any(__array_get(source, index))
       index = index + 1
 
-  fn encode_map(~self, value: Map<MsgPack>) -> void
-    let len = value.size()
+  fn encode_map(~self, value: Dict<MsgPack>) -> void
+    let len = value.len()
     if len < 16 then:
       self.write_u8(128 + len)
     elif: len < 65536 then:
@@ -342,7 +342,7 @@ impl Encoder
 
     let entries = value.entries()
     let storage = entries.raw_storage()
-    let entry_count = entries.length()
+    let entry_count = entries.len()
     var index = 0
     while index < entry_count do:
       let entry = __array_get(storage, index)
@@ -371,7 +371,7 @@ impl Encoder
         self.encode_binary(decoded.bytes)
       Array<MsgPack>:
         self.encode_array(decoded)
-      Map<MsgPack>:
+      Dict<MsgPack>:
         self.encode_map(decoded)
 
 impl Decoder
@@ -467,17 +467,17 @@ impl Decoder
       index = index + 1
     out
 
-  fn decode_map(~self, length: i32) -> Map<MsgPack>
-    var out = Map<MsgPack>::new()
+  fn decode_map(~self, length: i32) -> Dict<MsgPack>
+    let ~out = Dict<MsgPack>::new()
     var index = 0
     while index < length do:
       let key = self.decode_any()
       let value = self.decode_any()
       key.match(decoded_key)
         String:
-          out = out.set(decoded_key, value)
+          out.set(decoded_key, value)
         else:
-          out = out
+          void
       index = index + 1
     out
 
