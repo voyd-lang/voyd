@@ -1,0 +1,3 @@
+pub obj KeyName {
+  value: i32
+}

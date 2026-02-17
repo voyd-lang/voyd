@@ -472,6 +472,17 @@ export const registerImportedObjectTemplate = ({
       collectConstraintTraits(param.constraint);
     }
   });
+  dependency.typing.memberMetadata.forEach((metadata, memberSymbol) => {
+    if (metadata.owner !== dependencySymbol) {
+      return;
+    }
+    const signature = dependency.typing.functions.getSignature(memberSymbol);
+    signature?.typeParams?.forEach((param) => {
+      if (typeof param.constraint === "number") {
+        collectConstraintTraits(param.constraint);
+      }
+    });
+  });
   dependencyTraitSymbols.forEach((traitSymbol) => {
     const localTraitSymbol = mapDependencySymbolToLocal({
       owner: traitSymbol,
@@ -871,10 +882,6 @@ export const mapDependencySymbolToLocal = ({
             },
             ...(importableMetadata ?? {}),
           },
-        });
-        ctx.importsByLocal.set(declared, {
-          moduleId: candidateDependency.moduleId,
-          symbol: candidateOwner,
         });
         const bucket =
           ctx.importAliasesByModule.get(candidateDependency.moduleId) ??

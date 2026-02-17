@@ -1,0 +1,22 @@
+pub trait Key<T>
+  fn matches(self, other: T) -> bool
+
+pub obj IntKey {
+  value: i32
+}
+
+impl Key<IntKey> for IntKey
+  fn matches(self, other: IntKey) -> bool
+    self.value == other.value
+
+pub obj DictLike<K, V> {
+  key: K,
+  value: V
+}
+
+impl<K: Key<K>, V> DictLike<K, V>
+  pub fn init(key: K, value: V) -> DictLike<K, V>
+    DictLike<K, V> { key: key, value: value }
+
+  pub fn key_matches(self, key: K) -> bool
+    self.key.matches(key)

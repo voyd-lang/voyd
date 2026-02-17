@@ -2324,9 +2324,14 @@ export const typeSatisfies = (
 
   if (expectedDesc.kind === "trait") {
     const owner = localSymbolForSymbolRef(expectedDesc.owner, ctx);
-    return typeof owner === "number"
-      ? traitSatisfies(actual, expected, owner, ctx, state, activeConstraints)
-      : false;
+    return traitSatisfies(
+      actual,
+      expected,
+      owner,
+      ctx,
+      state,
+      activeConstraints,
+    );
   }
   if (
     expectedDesc.kind === "intersection" &&
@@ -2339,9 +2344,14 @@ export const typeSatisfies = (
         return false;
       }
       const owner = localSymbolForSymbolRef(traitDesc.owner, ctx);
-      return typeof owner === "number"
-        ? traitSatisfies(actual, trait, owner, ctx, state, activeConstraints)
-        : false;
+      return traitSatisfies(
+        actual,
+        trait,
+        owner,
+        ctx,
+        state,
+        activeConstraints,
+      );
     });
     if (!ok) {
       return false;
@@ -2441,7 +2451,7 @@ const currentFunctionConstraintMap = (
 const traitSatisfies = (
   actual: TypeId,
   expected: TypeId,
-  traitSymbol: SymbolId,
+  traitSymbol: SymbolId | undefined,
   ctx: TypingContext,
   state: TypingState,
   activeConstraints?: ReadonlyMap<TypeParamId, TypeId>,
@@ -2509,7 +2519,18 @@ const traitSatisfies = (
   }
   impls ??= [];
   return impls.some((impl) => {
-    if (impl.traitSymbol !== traitSymbol) {
+    const traitMatches =
+      typeof traitSymbol === "number"
+        ? impl.traitSymbol === traitSymbol
+        : (() => {
+            const implTraitDesc = ctx.arena.get(impl.trait);
+            return (
+              implTraitDesc.kind === "trait" &&
+              expectedDesc.kind === "trait" &&
+              symbolRefEquals(implTraitDesc.owner, expectedDesc.owner)
+            );
+          })();
+    if (!traitMatches) {
       return false;
     }
     const comparison = unifyWithBudget({

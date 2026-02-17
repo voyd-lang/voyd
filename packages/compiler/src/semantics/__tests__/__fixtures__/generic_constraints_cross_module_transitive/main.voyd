@@ -1,0 +1,6 @@
+use src::dep::DictLike
+use src::key_type::KeyName
+
+pub fn main() -> i32
+  let dict = DictLike<KeyName, i32>::init(KeyName { value: 7 }, 1)
+  if dict.key_matches(KeyName { value: 7 }) then: 1 else: 0
