@@ -39,6 +39,78 @@ import {
   typeExprKey,
 } from "./trait-method-matcher.js";
 
+type ConstraintTypeParameterDecl = {
+  symbol: SymbolId;
+  constraint?: HirTypeExpr;
+};
+
+type ResolvedTypeParameter = {
+  symbol: SymbolId;
+  typeParam: number;
+  typeRef: TypeId;
+  constraint?: TypeId;
+};
+
+const normalizeConstraintTypeParameters = ({
+  hirParams,
+  declParams,
+}: {
+  hirParams: readonly ConstraintTypeParameterDecl[] | undefined;
+  declParams: readonly { symbol: SymbolId }[] | undefined;
+}): readonly ConstraintTypeParameterDecl[] =>
+  hirParams?.map((param) => ({
+    symbol: param.symbol,
+    constraint: param.constraint,
+  })) ??
+  declParams?.map((param) => ({ symbol: param.symbol })) ??
+  [];
+
+const resolveConstraintTypeParameters = ({
+  params,
+  ctx,
+  state,
+}: {
+  params: readonly ConstraintTypeParameterDecl[];
+  ctx: TypingContext;
+  state: TypingState;
+}): { typeParams: ResolvedTypeParameter[]; typeParamMap: Map<SymbolId, TypeId> } => {
+  const typeParamMap = new Map<SymbolId, TypeId>();
+  const typeParams = params.map((param) => {
+    const typeParam = ctx.arena.freshTypeParam();
+    const typeRef = ctx.arena.internTypeParamRef(typeParam);
+    typeParamMap.set(param.symbol, typeRef);
+    return {
+      symbol: param.symbol,
+      typeParam,
+      typeRef,
+      constraint: undefined as TypeId | undefined,
+    };
+  });
+
+  typeParams.forEach((param, index) => {
+    const constraintExpr = params[index]?.constraint;
+    if (!constraintExpr) {
+      return;
+    }
+    param.constraint = resolveTypeExpr(
+      constraintExpr,
+      ctx,
+      state,
+      ctx.primitives.unknown,
+      typeParamMap
+    );
+  });
+
+  return { typeParams, typeParamMap };
+};
+
+const toTypeParamSymbolMap = (
+  typeParams: readonly ResolvedTypeParameter[]
+): ReadonlyMap<SymbolId, TypeId> | undefined =>
+  typeParams.length > 0
+    ? new Map(typeParams.map((param) => [param.symbol, param.typeRef] as const))
+    : undefined;
+
 export const seedPrimitiveTypes = (ctx: TypingContext): void => {
   ctx.primitives.void = registerPrimitive(ctx, "voyd", "void", "Voyd");
   ctx.primitives.bool = registerPrimitive(ctx, "bool", "boolean", "Bool");
@@ -116,10 +188,12 @@ export const registerTypeAliases = (
         `missing or mismatched decl for type alias symbol ${item.symbol}`
       );
     }
-    const typeParams = item.typeParameters ?? decl?.typeParameters ?? [];
-    const params = typeParams.map((param) => ({
+    const params = normalizeConstraintTypeParameters({
+      hirParams: item.typeParameters,
+      declParams: decl?.typeParameters,
+    }).map((param) => ({
       symbol: param.symbol,
-      constraint: "constraint" in param ? param.constraint : undefined,
+      constraint: param.constraint,
     }));
     ctx.typeAliases.registerTemplate({
       symbol: item.symbol,
@@ -222,32 +296,31 @@ export const registerFunctionSignatures = (
       typeof fnDecl?.implId === "number"
         ? ctx.decls.getImplById(fnDecl.implId)
         : undefined;
-    const fnTypeParameters =
-      item.typeParameters ?? fnDecl?.typeParameters ?? [];
-    const implTypeParameters = implDecl?.typeParameters ?? [];
-    const typeParameterDecls = [...fnTypeParameters, ...implTypeParameters];
-    const paramMap = new Map<SymbolId, TypeId>();
-    const typeParams =
-      typeParameterDecls.length === 0
-        ? undefined
-        : typeParameterDecls.map((param) => {
-            const typeParam = ctx.arena.freshTypeParam();
-            const typeRef = ctx.arena.internTypeParamRef(typeParam);
-            paramMap.set(param.symbol, typeRef);
-            const constraint =
-              "constraint" in param && param.constraint
-                ? resolveTypeExpr(
-                    param.constraint,
-                    ctx,
-                    state,
-                    ctx.primitives.unknown,
-                    paramMap
-                  )
-                : undefined;
-            return { symbol: param.symbol, typeParam, constraint, typeRef };
-          });
+    const implItem = implDecl
+      ? Array.from(ctx.hir.items.values()).find(
+          (entry): entry is HirImplDecl =>
+            entry.kind === "impl" && entry.symbol === implDecl.symbol
+        )
+      : undefined;
+    const typeParameterDecls = [
+      ...normalizeConstraintTypeParameters({
+        hirParams: item.typeParameters,
+        declParams: fnDecl?.typeParameters,
+      }),
+      ...normalizeConstraintTypeParameters({
+        hirParams: implItem?.typeParameters,
+        declParams: implDecl?.typeParameters,
+      }),
+    ];
+    const { typeParams, typeParamMap: paramMap } =
+      resolveConstraintTypeParameters({
+        params: typeParameterDecls,
+        ctx,
+        state,
+      });
+    const signatureTypeParams = typeParams.length > 0 ? typeParams : undefined;
 
-    if (typeParams && typeParams.length > 0 && !item.returnType) {
+    if (signatureTypeParams && !item.returnType) {
       ctx.diagnostics.report(
         diagnosticFromCode({
           code: "TY0034",
@@ -334,7 +407,7 @@ export const registerFunctionSignatures = (
     });
 
     const scheme = ctx.arena.newScheme(
-      typeParams?.map((param) => param.typeParam) ?? [],
+      signatureTypeParams?.map((param) => param.typeParam) ?? [],
       functionType
     );
 
@@ -346,14 +419,9 @@ export const registerFunctionSignatures = (
       annotatedReturn: hasExplicitReturn,
       effectRow: initialEffectRow,
       annotatedEffects,
-      typeParams,
+      typeParams: signatureTypeParams,
       scheme,
-      typeParamMap:
-        typeParams && typeParams.length > 0
-          ? new Map(
-              typeParams.map((param) => [param.symbol, param.typeRef] as const)
-            )
-          : undefined,
+      typeParamMap: toTypeParamSymbolMap(typeParams),
     });
     ctx.valueTypes.set(item.symbol, functionType);
 
@@ -369,27 +437,17 @@ export const registerEffectOperations = (
     if (item.kind !== "effect") continue;
 
     const decl = ctx.decls.getEffect(item.symbol);
-    const typeParameterDecls = item.typeParameters ?? decl?.typeParameters ?? [];
-    const typeParamMap = new Map<SymbolId, TypeId>();
-    const typeParams =
-      typeParameterDecls.length === 0
-        ? undefined
-        : typeParameterDecls.map((param) => {
-            const typeParam = ctx.arena.freshTypeParam();
-            const typeRef = ctx.arena.internTypeParamRef(typeParam);
-            typeParamMap.set(param.symbol, typeRef);
-            const constraint = (param as any).constraint
-              ? resolveTypeExpr(
-                  (param as any).constraint,
-                  ctx,
-                  state,
-                  ctx.primitives.unknown,
-                  typeParamMap
-                )
-              : undefined;
-            return { symbol: param.symbol, typeParam, typeRef, constraint };
-          });
-    const typeParamMapRef = typeParams ? typeParamMap : undefined;
+    const typeParameterDecls = normalizeConstraintTypeParameters({
+      hirParams: item.typeParameters,
+      declParams: decl?.typeParameters,
+    });
+    const { typeParams, typeParamMap } = resolveConstraintTypeParameters({
+      params: typeParameterDecls,
+      ctx,
+      state,
+    });
+    const signatureTypeParams = typeParams.length > 0 ? typeParams : undefined;
+    const typeParamMapRef = signatureTypeParams ? typeParamMap : undefined;
 
     item.operations.forEach((op) => {
       const parameters = op.parameters.map((param) => ({
@@ -437,7 +495,7 @@ export const registerEffectOperations = (
       });
 
       const scheme = ctx.arena.newScheme(
-        typeParams?.map((param) => param.typeParam) ?? [],
+        signatureTypeParams?.map((param) => param.typeParam) ?? [],
         functionType
       );
       ctx.functions.setSignature(op.symbol, {
@@ -448,14 +506,9 @@ export const registerEffectOperations = (
         annotatedReturn: hasExplicitReturn,
         effectRow,
         annotatedEffects: true,
-        typeParams,
+        typeParams: signatureTypeParams,
         scheme,
-        typeParamMap:
-          typeParams && typeParams.length > 0
-            ? new Map(
-                typeParams.map((param) => [param.symbol, param.typeRef] as const)
-              )
-            : undefined,
+        typeParamMap: toTypeParamSymbolMap(typeParams),
       });
       ctx.valueTypes.set(op.symbol, functionType);
       ctx.table.setSymbolScheme(op.symbol, scheme);
@@ -471,27 +524,15 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       (typeof (item as any).decl === "number"
         ? ctx.decls.getImplById((item as any).decl)
         : undefined);
-    const typeParameterDecls = item.typeParameters ?? decl?.typeParameters ?? [];
-    const typeParamMap = new Map<SymbolId, TypeId>();
-    const typeParams =
-      typeParameterDecls.length === 0
-        ? []
-        : typeParameterDecls.map((param) => {
-            const typeParam = ctx.arena.freshTypeParam();
-            const typeRef = ctx.arena.internTypeParamRef(typeParam);
-            typeParamMap.set(param.symbol, typeRef);
-            const constraint =
-              "constraint" in param && param.constraint
-                ? resolveTypeExpr(
-                    param.constraint,
-                    ctx,
-                    state,
-                    ctx.primitives.unknown,
-                    typeParamMap
-                  )
-                : undefined;
-            return { symbol: param.symbol, typeParam, typeRef, constraint };
-          });
+    const typeParameterDecls = normalizeConstraintTypeParameters({
+      hirParams: item.typeParameters,
+      declParams: decl?.typeParameters,
+    });
+    const { typeParams, typeParamMap } = resolveConstraintTypeParameters({
+      params: typeParameterDecls,
+      ctx,
+      state,
+    });
     const typeParamMapRef = typeParams.length > 0 ? typeParamMap : undefined;
 
     resolveTypeExpr(

@@ -175,6 +175,97 @@ describe("binding pipeline", () => {
     }
   });
 
+  it("captures generic constraints on functions and type aliases", () => {
+    const source = `
+fn identity<T: Numeric>(value: T) -> T
+  value
+
+type Wrap<T: { value: i32 }> = T
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    const identity = binding.functions.find(
+      (fn) => symbolTable.getSymbol(fn.symbol).name === "identity"
+    );
+    expect(identity).toBeDefined();
+    const functionConstraint = identity?.typeParameters?.[0]?.constraint;
+    expect(
+      isIdentifierAtom(functionConstraint) && functionConstraint.value === "Numeric"
+    ).toBe(true);
+
+    const wrap = binding.typeAliases.find(
+      (alias) => symbolTable.getSymbol(alias.symbol).name === "Wrap"
+    );
+    expect(wrap).toBeDefined();
+    const aliasConstraint = wrap?.typeParameters?.[0]?.constraint;
+    expect(
+      isForm(aliasConstraint) && aliasConstraint.callsInternal("object_literal")
+    ).toBe(true);
+  });
+
+  it("supports constrained generics across all declaration heads", () => {
+    const source = `
+obj Animal {
+  id: i32
+}
+
+type Wrap<T: Animal> = T
+
+obj Box<T: Animal> {
+  value: T
+}
+
+trait Carrier<T: Animal>
+  fn carry(self, value: T) -> i32
+
+impl<T: Animal> Box<T>
+  fn carry(self, value: T) -> i32
+    value.id
+
+eff Stream<T: Animal>
+  fn next() -> T
+
+fn id<T: Animal>(value: T) -> T
+  value
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    const firstConstraintName = (constraint: unknown): string | undefined =>
+      isIdentifierAtom(constraint) ? constraint.value : undefined;
+
+    const typeAlias = binding.typeAliases.find(
+      (entry) => symbolTable.getSymbol(entry.symbol).name === "Wrap"
+    );
+    const objectDecl = binding.objects.find(
+      (entry) => symbolTable.getSymbol(entry.symbol).name === "Box"
+    );
+    const traitDecl = binding.traits.find(
+      (entry) => symbolTable.getSymbol(entry.symbol).name === "Carrier"
+    );
+    const implDecl = binding.impls[0];
+    const effectDecl = binding.effects.find(
+      (entry) => symbolTable.getSymbol(entry.symbol).name === "Stream"
+    );
+    const functionDecl = binding.functions.find(
+      (entry) => symbolTable.getSymbol(entry.symbol).name === "id"
+    );
+
+    expect(firstConstraintName(typeAlias?.typeParameters?.[0]?.constraint)).toBe("Animal");
+    expect(firstConstraintName(objectDecl?.typeParameters?.[0]?.constraint)).toBe("Animal");
+    expect(firstConstraintName(traitDecl?.typeParameters?.[0]?.constraint)).toBe("Animal");
+    expect(firstConstraintName(implDecl?.typeParameters?.[0]?.constraint)).toBe("Animal");
+    expect(firstConstraintName(effectDecl?.typeParameters?.[0]?.constraint)).toBe("Animal");
+    expect(firstConstraintName(functionDecl?.typeParameters?.[0]?.constraint)).toBe("Animal");
+  });
+
   it("binds impl blocks and keeps methods out of the root scope", () => {
     const name = "impl_methods.voyd";
     const ast = loadAst(name);

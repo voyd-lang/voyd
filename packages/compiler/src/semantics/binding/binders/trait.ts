@@ -287,9 +287,21 @@ export const makeParsedFunctionFromTraitMethod = (
     signature: {
       name: nameAst,
       typeParameters:
-        method.typeParameters
-          ?.map((param) => param.ast)
-          .filter((entry): entry is IdentifierAtom => Boolean(entry)) ?? [],
+        method.typeParameters?.flatMap((param) => {
+          const ast = param.ast?.clone();
+          if (!isIdentifierAtom(ast)) {
+            return [];
+          }
+          return [
+            {
+              name: ast,
+              constraint: substituteTypeParamExpr(
+                param.constraint?.clone(),
+                options?.typeParamSubstitutions
+              ),
+            },
+          ];
+        }) ?? [],
       params: signatureParams,
       returnType,
     },

@@ -178,6 +178,37 @@ describe("module typing across imports", () => {
     expect(diagnostics.some((diag) => diag.code.startsWith("TY"))).toBe(true);
   });
 
+  it("enforces imported generic constraints from dependency signatures", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}util${sep}constraints.voyd`]: `
+pub obj Animal { id: i32 }
+
+pub fn accept<T: Animal>(value: T) -> i32
+  value.id
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::util::constraints::all
+
+pub fn main() -> i32
+  accept({ id: 1 })
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(
+      diagnostics.some((diag) =>
+        /does not satisfy.*constraint/i.test(diag.message)
+      )
+    ).toBe(true);
+  });
+
   it("resolves pub use chains for imported types", async () => {
     const root = resolve("/proj/src");
     const hostFiles = {

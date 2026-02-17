@@ -32,7 +32,7 @@ export interface ParsedTypeAliasDecl {
   visibility: HirVisibility;
   name: IdentifierAtom;
   target: Expr;
-  typeParameters: readonly IdentifierAtom[];
+  typeParameters: readonly ParsedTypeParameter[];
 }
 
 export interface ParsedObjectDecl {
@@ -42,7 +42,7 @@ export interface ParsedObjectDecl {
   base?: Expr;
   body: Form;
   fields: readonly ParsedObjectField[];
-  typeParameters: readonly IdentifierAtom[];
+  typeParameters: readonly ParsedTypeParameter[];
 }
 
 export interface ParsedObjectField {
@@ -65,7 +65,7 @@ export interface ParsedTraitDecl {
   visibility: HirVisibility;
   name: IdentifierAtom;
   body: Form;
-  typeParameters: readonly IdentifierAtom[];
+  typeParameters: readonly ParsedTypeParameter[];
   methods: readonly ParsedTraitMethod[];
 }
 
@@ -74,7 +74,7 @@ export interface ParsedImplDecl {
   visibility: HirVisibility;
   target: Expr;
   trait?: Expr;
-  typeParameters: readonly IdentifierAtom[];
+  typeParameters: readonly ParsedTypeParameter[];
   body: Form;
 }
 
@@ -90,16 +90,21 @@ export interface ParsedEffectDecl {
   form: Form;
   visibility: HirVisibility;
   name: IdentifierAtom;
-  typeParameters: readonly IdentifierAtom[];
+  typeParameters: readonly ParsedTypeParameter[];
   operations: readonly ParsedEffectOperation[];
   effectId?: string;
+}
+
+export interface ParsedTypeParameter {
+  name: IdentifierAtom;
+  constraint?: Expr;
 }
 
 interface ParsedFunctionSignature {
   name: IdentifierAtom;
   params: SignatureParam[];
   returnType?: Expr;
-  typeParameters: readonly IdentifierAtom[];
+  typeParameters: readonly ParsedTypeParameter[];
   effectType?: Expr;
 }
 
@@ -443,7 +448,7 @@ const parseFunctionHead = (
   expr: Expr | undefined
 ): {
   name: IdentifierAtom;
-  typeParameters: readonly IdentifierAtom[];
+  typeParameters: readonly ParsedTypeParameter[];
   params: readonly Expr[];
 } => {
   if (!expr) {
@@ -721,7 +726,7 @@ const parseObjectHead = (
 ): {
   name: IdentifierAtom;
   base?: Expr;
-  typeParameters: readonly IdentifierAtom[];
+  typeParameters: readonly ParsedTypeParameter[];
 } => {
   if (!expr) {
     throw new Error("obj declaration missing name");
@@ -747,7 +752,7 @@ const parseObjectHead = (
 
 const parseNamedTypeHead = (
   expr: Expr | undefined
-): { name: IdentifierAtom; typeParameters: readonly IdentifierAtom[] } => {
+): { name: IdentifierAtom; typeParameters: readonly ParsedTypeParameter[] } => {
   if (isIdentifierAtom(expr)) {
     return { name: expr, typeParameters: [] };
   }
@@ -764,17 +769,34 @@ const parseNamedTypeHead = (
   throw new Error("invalid named type head");
 };
 
-const parseTypeParameters = (form: Form): IdentifierAtom[] =>
+const parseTypeParameters = (form: Form): ParsedTypeParameter[] =>
   form.rest.map((entry) => {
-    if (!isIdentifierAtom(entry)) {
-      throw new Error("type parameters must be identifiers");
+    if (isIdentifierAtom(entry)) {
+      return { name: entry };
     }
-    return entry;
+
+    if (isForm(entry) && entry.calls(":")) {
+      const name = entry.at(1);
+      if (!isIdentifierAtom(name)) {
+        throw new Error(
+          "constrained type parameter name must be an identifier"
+        );
+      }
+      const constraint = entry.at(2);
+      if (!constraint) {
+        throw new Error("constrained type parameter missing constraint type");
+      }
+      return { name, constraint };
+    }
+
+    throw new Error(
+      "type parameters must be identifiers or constrained identifiers"
+    );
   });
 
 const parseImplHead = (
   entries: readonly Expr[]
-): { target: Expr; trait?: Expr; typeParameters: IdentifierAtom[] } => {
+): { target: Expr; trait?: Expr; typeParameters: ParsedTypeParameter[] } => {
   if (entries.length === 0) {
     throw new Error("impl declaration missing target type");
   }
@@ -794,7 +816,7 @@ const parseImplHead = (
 
     const leading = entries.slice(0, Math.max(0, forIndex - 1));
     const trailing = entries.slice(forIndex + 2);
-    let typeParameters: IdentifierAtom[] = [];
+    let typeParameters: ParsedTypeParameter[] = [];
     leading.forEach((entry) => {
       if (isForm(entry) && formCallsInternal(entry, "generics")) {
         typeParameters = [...typeParameters, ...parseTypeParameters(entry)];
@@ -835,7 +857,7 @@ const parseImplHead = (
 
 const parseImplHeadTarget = (
   expr: Expr
-): { target: Expr; typeParameters: IdentifierAtom[] } => {
+): { target: Expr; typeParameters: ParsedTypeParameter[] } => {
   if (isForm(expr) && formCallsInternal(expr, "generics")) {
     const targetExpr = expr.at(1);
     if (!targetExpr) {

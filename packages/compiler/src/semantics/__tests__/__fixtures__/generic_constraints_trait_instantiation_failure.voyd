@@ -1,0 +1,15 @@
+trait Animal
+  fn score(self) -> i32
+
+trait Carrier<T: Animal>
+  fn carry(self, value: T) -> i32
+
+obj NumberCarrier {}
+
+impl Carrier<i32> for NumberCarrier
+  fn carry(self, value: i32) -> i32
+    value
+
+fn main() -> i32
+  let carrier = NumberCarrier {}
+  carrier.carry(3)
