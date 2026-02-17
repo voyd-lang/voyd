@@ -733,18 +733,6 @@ const assertArgCount = (
   }
 };
 
-const assertMinArgCount = (
-  name: string,
-  args: readonly unknown[],
-  min: number
-): void => {
-  if (args.length < min) {
-    throw new Error(
-      `intrinsic ${name} expected at least ${min} args, received ${args.length}`
-    );
-  }
-};
-
 const getBinaryenTypeArg = ({
   call,
   ctx,

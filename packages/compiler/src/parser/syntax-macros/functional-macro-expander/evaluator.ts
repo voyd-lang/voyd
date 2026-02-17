@@ -110,7 +110,7 @@ function evalCall(
 export function expandMacroCall(
   call: Form,
   macro: MacroDefinition,
-  scope: MacroScope
+  _scope: MacroScope
 ): Expr {
   const invocationScope = new MacroScope(macro.scope);
   const args = call.toArray().slice(1).map(cloneExpr);

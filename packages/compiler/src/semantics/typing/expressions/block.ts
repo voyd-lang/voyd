@@ -180,7 +180,6 @@ const typeStatement = (
       case "let":
         return { effect: typeLetStatement(stmt, ctx, state) };
       default: {
-        const unreachable: never = stmt;
         throw new Error("unsupported statement kind");
       }
     }

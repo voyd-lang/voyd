@@ -4,42 +4,18 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../ast/index.js";
-import { call } from "../ast/init-helpers.js";
 import { cloneAttributes } from "../ast/syntax.js";
 import { SyntaxMacro } from "./types.js";
 import { parseStringValue } from "./string-value.js";
+import { transformFormSequence } from "./sequence-transform.js";
 
 type PendingIntrinsicTypeAttribute = { intrinsicType: string; source: Form };
 
 export const intrinsicTypeAttributeMacro: SyntaxMacro = (form) =>
   attachIntrinsicTypeAttributes(form);
 
-const attachIntrinsicTypeAttributes = (form: Form): Form => {
-  if (form.callsInternal("ast")) {
-    const { elements, changed } = processSequence(form.rest, true);
-    if (!changed) {
-      return form;
-    }
-    const wrapped = call("ast", ...elements);
-    wrapped.setLocation(form.location?.clone());
-    wrapped.attributes = cloneAttributes(form.attributes);
-    return wrapped;
-  }
-
-  const { elements, changed } = processSequence(
-    form.toArray(),
-    form.calls("block") || form.callsInternal("ast")
-  );
-  if (!changed) {
-    return form;
-  }
-  const rebuilt = new (form.constructor as typeof Form)({
-    location: form.location?.clone(),
-    elements,
-  });
-  rebuilt.attributes = cloneAttributes(form.attributes);
-  return rebuilt;
-};
+const attachIntrinsicTypeAttributes = (form: Form): Form =>
+  transformFormSequence({ form, transform: processSequence });
 
 const processSequence = (
   elements: readonly Expr[],

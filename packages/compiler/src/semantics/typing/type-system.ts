@@ -2454,20 +2454,12 @@ export const ensureTypeMatches = (
   expected: TypeId,
   ctx: TypingContext,
   state: TypingState,
-  reason: string,
+  _reason: string,
   span?: SourceSpan,
 ): void => {
   if (typeSatisfies(actual, expected, ctx, state)) {
     return;
   }
-
-  const format = (type: TypeId): string => {
-    try {
-      return JSON.stringify({ id: type, desc: ctx.arena.get(type) });
-    } catch {
-      return String(type);
-    }
-  };
 
   emitDiagnostic({
     ctx,

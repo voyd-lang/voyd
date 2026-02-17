@@ -20,7 +20,6 @@ import type {
   HirTypeExpr,
 } from "../hir/index.js";
 import {
-  freshOpenEffectRow,
   effectOpName,
   resolveEffectAnnotation,
 } from "./effects.js";
@@ -173,7 +172,7 @@ export const seedBaseObjectType = (ctx: TypingContext): void => {
 
 export const registerTypeAliases = (
   ctx: TypingContext,
-  state: TypingState
+  _state: TypingState
 ): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "type-alias") continue;

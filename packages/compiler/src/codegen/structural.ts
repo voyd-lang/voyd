@@ -673,7 +673,7 @@ export const emitStructuralConversion = ({
 };
 
 export const loadStructuralField = ({
-  structInfo,
+  structInfo: _structInfo,
   field,
   pointer,
   ctx,
@@ -699,7 +699,7 @@ export const loadStructuralField = ({
 };
 
 export const storeStructuralField = ({
-  structInfo,
+  structInfo: _structInfo,
   field,
   pointer,
   value,

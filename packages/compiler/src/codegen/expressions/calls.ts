@@ -31,7 +31,6 @@ import {
 import { allocateTempLocal } from "../locals.js";
 import {
   callRef,
-  initStruct,
   refCast,
   structGetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";

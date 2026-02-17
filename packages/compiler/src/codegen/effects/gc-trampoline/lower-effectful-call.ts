@@ -32,7 +32,6 @@ export const lowerEffectfulCallResult = ({
   callExpr,
   callId,
   returnTypeId,
-  expectedResultTypeId,
   tailPosition,
   typeInstanceId,
   ctx,
@@ -41,7 +40,6 @@ export const lowerEffectfulCallResult = ({
   callExpr: binaryen.ExpressionRef;
   callId: HirExprId;
   returnTypeId: TypeId;
-  expectedResultTypeId?: TypeId;
   tailPosition: boolean;
   typeInstanceId?: ProgramFunctionInstanceId;
   ctx: CodegenContext;

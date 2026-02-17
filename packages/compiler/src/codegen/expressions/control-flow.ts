@@ -17,7 +17,6 @@ import { allocateTempLocal, declareLocal } from "../locals.js";
 import { RTT_METADATA_SLOTS } from "../rtt/index.js";
 import {
   getExprBinaryenType,
-  getRequiredExprType,
   getStructuralTypeInfo,
   getMatchPatternTypeId,
 } from "../types.js";
@@ -148,11 +147,6 @@ export const compileMatchExpr = (
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
-  const discriminantTypeId = getRequiredExprType(
-    expr.discriminant,
-    ctx,
-    typeInstanceId,
-  );
   const discriminantType = getExprBinaryenType(
     expr.discriminant,
     ctx,
