@@ -2,31 +2,39 @@
 
 ## Status
 
-`DictKey` cross-module constraint enforcement is now fixed.
+Resolved and verified end-to-end.
 
-`TY9999` for valid `Dict<String, ...>` usage is no longer reproduced in std.
+`DictKey` cross-module constraint enforcement works with merged generic constraints, and valid `Dict<String, ...>` usage no longer triggers `TY9999`.
 
 ## What Was Fixed
 
-1. Imported constraint traits are now discovered from constrained member signatures, not only object type parameters.
-2. Trait-satisfaction logic now supports symbol-ref based matching when local trait alias mapping is unavailable.
+1. Imported constraint traits are discovered from constrained member signatures, not only object type parameters.
+2. Trait-satisfaction logic supports symbol-ref matching when local trait alias mapping is unavailable.
 3. Imported function signature `typeParamMap` is remapped to local symbols/types.
 4. Unexported symbol aliasing no longer pollutes import-value priming.
-5. Regression coverage added for:
+5. Regression tests cover:
    - constrained object methods across modules,
-   - constrained object methods with transitive key-type dependencies.
+   - transitive key-type dependency constraints.
 
-Detailed implementation notes are in:
+Detailed implementation notes remain in:
 - `compiler_blocker_dict_constraints.md`
 
-## Current Remaining Blocker (Not DictKey)
+## DictKey Implementation Scope (Std)
 
-Full std validation is now blocked by codegen:
-- `CG0001: codegen missing binding for symbol less`
-- tracked in `compiler_blocker_codegen_less_binding.md`.
+1. `Dict` is now keyed as `Dict<K, V>` with `K: DictKey<K>`.
+2. `DictKey<String>` is implemented and used by std consumers.
+3. `Dict` entry/merge/map/filter surfaces compile under constraint enforcement.
 
-## Last Verified
+## Verification
 
-1. Date: `2026-02-17`
-2. DictKey constraint status: resolved.
-3. Full std gate status: blocked by unrelated codegen issue above.
+Last verified on `2026-02-17`:
+
+1. `npm run test --workspace @voyd/std`
+2. `npm run test --workspace @voyd/compiler`
+3. `npm run typecheck --workspace @voyd/compiler`
+4. `npm run test --workspace @voyd/cli`
+5. `npm run typecheck --workspace @voyd/cli`
+6. `npm test`
+7. `npm run typecheck`
+
+All gates above are currently passing.

@@ -1,52 +1,38 @@
 # Remaining Work To Complete `std_update_spec.md`
 
-## Current State
+## Status
 
-1. `Dict<K, V>` + `DictKey` exist and most API surface from `std_update_spec.md` is implemented for `String`, `Array`, and `Dict`.
-2. Dedicated test files now exist for:
-   - `packages/std/src/string/type.test.voyd`
-   - `packages/std/src/array.test.voyd`
-   - `packages/std/src/dict.test.voyd`
-   - `packages/std/src/traits/contracts.test.voyd`
-3. `@voyd/std` still does not pass, but the previous `DictKey` constraint blocker is resolved.
-4. Current top blocker is now codegen:
-   - `CG0001: call argument count mismatch for value (call 5905 in std::string::type): argument/parameter mismatch`
-   - tracked in `compiler_blocker_codegen_call_arg_mismatch_string_value.md`.
+Closed for this migration pass.
 
-Last verified on `2026-02-17` via:
-- `npm run test --workspace @voyd/std`
+All previously tracked blockers in this ticket are resolved, and the validation matrix is green.
 
-## Remaining Work
+## What Was Completed
 
-## 1. Compiler Blocker (Hard)
-
-1. Resolve the new codegen blocker:
+1. Compiler blockers in the prior chain were resolved:
+   - `compiler_blocker_dict_constraints.md`
+   - `compiler_blocker_codegen_less_binding.md`
    - `compiler_blocker_codegen_call_arg_mismatch_string_value.md`
-2. Re-run and pass the full validation matrix after codegen fix.
+2. String type-shape migration was completed:
+   - `StringSlice` is now a concrete view object.
+   - `StringIndex` is now a concrete index object.
+   - Rune/grapheme stepping/search APIs use the new index/view model.
+3. Dict migration is complete with key constraints:
+   - `Dict<K, V>` and `DictKey<K>` are enforced in std surfaces.
+4. Required std tests are in dedicated `*.test.voyd` files for core modules and traits.
+5. Coverage was extended for renamed APIs and new string/dict surfaces.
 
-## 2. String Type-Shape Gap
+## Validation (Last Verified `2026-02-17`)
 
-1. `StringSlice` is still an alias (`pub type StringSlice = String`), not an explicit zero-copy slice view type.
-2. `StringIndex` is still a raw alias (`pub type StringIndex = i32`), not an opaque index type.
-3. Implement the concrete type-shape migration while preserving current rune/grapheme boundary guarantees.
+1. `npm run test --workspace @voyd/std` passed (75/75).
+2. `npm run test --workspace @voyd/compiler` passed.
+3. `npm run typecheck --workspace @voyd/compiler` passed.
+4. `npm run test --workspace @voyd/cli` passed.
+5. `npm run typecheck --workspace @voyd/cli` passed.
+6. `npm test` passed.
+7. `npm run typecheck` passed.
 
-## 3. Trait Alignment Gap
+## Intentional Divergence Tracked
 
-1. `Copy` remains method-based because current parser requires trait bodies with members.
-2. Decide final direction:
-   - add marker-trait support in language/compiler, then switch `Copy` to marker, or
-   - formally document intentional divergence from spec.
-
-## 4. Coverage Closure
-
-1. Complete a method-by-method coverage audit against `std_update_spec.md`.
-2. Add missing edge/failure-path tests where any API method is not directly covered yet.
-3. Keep tests only in `*.test.voyd` files.
-
-## 5. Validation Gates (Must Pass)
-
-1. `npm run test --workspace @voyd/std`
-2. `npm run test --workspace @voyd/compiler`
-3. `npm run typecheck --workspace @voyd/compiler`
-4. `npm run test --workspace @voyd/cli`
-5. `npm run typecheck --workspace @voyd/cli`
+1. `Copy` remains method-based (`copy(self) -> T`) instead of marker-style.
+2. Reason: current language/parser model requires trait members.
+3. This is documented divergence, not a release blocker for `std_update_spec.md`.

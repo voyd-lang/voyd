@@ -10,8 +10,15 @@ pub obj String {
   byte_count: i32
 }
 
-pub type StringSlice = String
-pub type StringIndex = i32
+pub obj StringSlice {
+  source: String,
+  start: i32,
+  byte_count: i32
+}
+
+pub obj StringIndex {
+  value: i32
+}
 pub type CharSet = Array<i32>
 
 pub obj Utf8Error {
@@ -25,6 +32,26 @@ pub obj ParseIntError {
 pub obj ParseFloatError {
   api code: i32
 }
+
+impl StringIndex
+  api fn to_i32(self) -> i32
+    self.value
+
+impl StringSlice
+  api fn byte_len(self) -> i32
+    self.byte_count
+
+  api fn is_empty(self) -> bool
+    self.byte_count == 0
+
+  api fn to_string(self) -> String
+    self.source.slice_bytes(self.start, self.byte_count)
+
+  fn raw_bytes(self) -> FixedArray<i32>
+    self.source.raw_bytes()
+
+  fn start_offset(self) -> i32
+    self.start
 
 impl String
   api fn init() -> String
@@ -62,13 +89,13 @@ impl String
     self.byte_values()
 
   api fn as_slice(self): () -> StringSlice
-    self
+    new_string_slice(self, 0, self.byte_count)
 
   api fn start_index(self): () -> StringIndex
-    0
+    make_string_index(0)
 
   api fn end_index(self): () -> StringIndex
-    self.byte_count
+    make_string_index(self.byte_count)
 
   api fn slice(self, { range: Range }) -> StringSlice
     let source = self.raw_bytes()
@@ -80,16 +107,16 @@ impl String
         normalize_range_end_exclusive(range, self.byte_count)
       )
     if start >= end then:
-      return empty_string()
-    self.slice_bytes(start, end - start)
+      return new_string_slice(self, 0, 0)
+    new_string_slice(self, start, end - start)
 
   api fn index(self, { after cursor: StringIndex, by steps?: i32 }) -> Option<StringIndex>
     let delta = steps ?? 1
-    advance_rune_index(self, cursor, delta)
+    advance_rune_index(self, cursor.to_i32(), delta)
 
   api fn grapheme_index(self, { after cursor: StringIndex, by steps?: i32 }) -> Option<StringIndex>
     let delta = steps ?? 1
-    advance_grapheme_index(self, cursor, delta)
+    advance_grapheme_index(self, cursor.to_i32(), delta)
 
   api fn graphemes(self) -> StringGraphemeSequence
     StringGraphemeSequence { source: self }
@@ -258,14 +285,20 @@ impl String
   api fn starts_with(self, { prefix: StringSlice }) -> bool
     if prefix.byte_len() > self.byte_count then:
       return false
-    bytes_match_at(self.raw_bytes(), prefix.raw_bytes(), 0, prefix.byte_len())
+    bytes_match_slice_at(self.raw_bytes(), prefix, 0)
+
+  api fn starts_with(self, { prefix: String }) -> bool
+    self.starts_with(prefix: prefix.as_slice())
 
   api fn ends_with(self, { suffix: StringSlice }) -> bool
     let suffix_len = suffix.byte_len()
     if suffix_len > self.byte_count then:
       return false
     let start = self.byte_count - suffix_len
-    bytes_match_at(self.raw_bytes(), suffix.raw_bytes(), start, suffix_len)
+    bytes_match_slice_at(self.raw_bytes(), suffix, start)
+
+  api fn ends_with(self, { suffix: String }) -> bool
+    self.ends_with(suffix: suffix.as_slice())
 
   api fn contains(self, { substring: StringSlice }) -> bool
     match(self.find(substring: substring))
@@ -273,6 +306,9 @@ impl String
         true
       None:
         false
+
+  api fn contains(self, { substring: String }) -> bool
+    self.contains(substring: substring.as_slice())
 
   api fn contains(self, { where pred: (rune: i32) -> bool }) -> bool
     let source = self.raw_bytes()
@@ -286,27 +322,36 @@ impl String
 
   api fn find(self, { substring: StringSlice, from?: StringIndex }) -> Option<StringIndex>
     let start = from ?? self.start_index()
-    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start) then:
+    let start_value = start.to_i32()
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start_value) then:
       return None {}
-    let match_index = find_substring_from(self, substring, start)
+    let match_index = find_substring_from(self, substring, start_value)
     if match_index < 0 then:
       return None {}
-    Some<StringIndex> { value: match_index }
+    Some<StringIndex> { value: make_string_index(match_index) }
+
+  api fn find(self, { substring: String, from?: StringIndex }) -> Option<StringIndex>
+    self.find(substring: substring.as_slice(), from: from)
 
   api fn rfind(self, { substring: StringSlice, to?: StringIndex }) -> Option<StringIndex>
     let end = to ?? self.end_index()
-    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), end) then:
+    let end_value = end.to_i32()
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), end_value) then:
       return None {}
-    let match_index = find_substring_to(self, substring, end)
+    let match_index = find_substring_to(self, substring, end_value)
     if match_index < 0 then:
       return None {}
-    Some<StringIndex> { value: match_index }
+    Some<StringIndex> { value: make_string_index(match_index) }
+
+  api fn rfind(self, { substring: String, to?: StringIndex }) -> Option<StringIndex>
+    self.rfind(substring: substring.as_slice(), to: to)
 
   api fn find_range(self, { substring: StringSlice, from?: StringIndex }) -> Option<Range>
     let start = from ?? self.start_index()
-    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start) then:
+    let start_value = start.to_i32()
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start_value) then:
       return None {}
-    let match_index = find_substring_from(self, substring, start)
+    let match_index = find_substring_from(self, substring, start_value)
     if match_index < 0 then:
       return None {}
 
@@ -318,6 +363,9 @@ impl String
         include_end: false
       }
     }
+
+  api fn find_range(self, { substring: String, from?: StringIndex }) -> Option<Range>
+    self.find_range(substring: substring.as_slice(), from: from)
 
   api fn split(self, { once_codepoint: i32 }): () -> Optional<(String, String)>
     let separator_index = self.index_of(codepoint: once_codepoint)
@@ -345,6 +393,17 @@ impl String
 
   api fn split(
     self,
+    { on separator: String, max_splits?: i32, keep_empty?: bool }
+  ) -> Array<StringSlice>
+    split_on_substring(
+      self,
+      separator.as_slice(),
+      max_splits: max_splits,
+      keep_empty: keep_empty
+    )
+
+  api fn split(
+    self,
     { where pred: (rune: i32) -> bool, max_splits?: i32, keep_empty?: bool }
   ) -> Array<StringSlice>
     let allow_empty = keep_empty ?? false
@@ -360,14 +419,14 @@ impl String
       if can_split and pred(read.codepoint) then:
         let length = index - start
         if allow_empty or length > 0 then:
-          parts.push(self.slice_bytes(start, length))
+          parts.push(new_string_slice(self, start, length))
         start = index + read.width
         splits = splits + 1
       index = index + read.width
 
     let tail_len = self.byte_count - start
     if allow_empty or tail_len > 0 then:
-      parts.push(self.slice_bytes(start, tail_len))
+      parts.push(new_string_slice(self, start, tail_len))
     parts
 
   api fn lines(self, { keep_ends?: bool }) -> Array<StringSlice>
@@ -380,14 +439,14 @@ impl String
       let read = decode_utf8_at(source, self.byte_count, index)
       if read.codepoint == 10 then:
         let boundary = if include_ends then: index + read.width else: index
-        parts.push(self.slice_bytes(start, boundary - start))
+        parts.push(new_string_slice(self, start, boundary - start))
         start = index + read.width
       index = index + read.width
 
     if start < self.byte_count then:
-      parts.push(self.slice_bytes(start, self.byte_count - start))
+      parts.push(new_string_slice(self, start, self.byte_count - start))
     elif: self.byte_count == 0 then:
-      parts.push(empty_string())
+      parts.push(new_string_slice(self, 0, 0))
     parts
 
   api fn words(self) -> Array<StringSlice>
@@ -399,7 +458,7 @@ impl String
       let read = decode_utf8_at(source, self.byte_count, index)
       if is_whitespace_rune(read.codepoint) then:
         if start >= 0 then:
-          parts.push(self.slice_bytes(start, index - start))
+          parts.push(new_string_slice(self, start, index - start))
           start = -1
       else:
         if start < 0 then:
@@ -407,7 +466,7 @@ impl String
       index = index + read.width
 
     if start >= 0 then:
-      parts.push(self.slice_bytes(start, self.byte_count - start))
+      parts.push(new_string_slice(self, start, self.byte_count - start))
     parts
 
   api fn trimmed(self): () -> String
@@ -517,9 +576,19 @@ impl String
 
   api fn replaced(
     self,
-    { old: StringSlice, with replacement: StringSlice, max_replacements?: i32 }
+    { old: String, with replacement: String, max_replacements?: i32 }
   ) -> String
     self.replaced(old, with: replacement, max_replacements: max_replacements)
+
+  api fn replaced(
+    self,
+    { old: StringSlice, with replacement: StringSlice, max_replacements?: i32 }
+  ) -> String
+    self.replaced(
+      old.to_string(),
+      with: replacement.to_string(),
+      max_replacements: max_replacements
+    )
 
   api fn replace(
     ~self,
@@ -532,9 +601,19 @@ impl String
 
   api fn replace(
     ~self,
-    { old: StringSlice, with replacement: StringSlice, max_replacements?: i32 }
+    { old: String, with replacement: String, max_replacements?: i32 }
   ) -> void
     self.replace(old, with: replacement, max_replacements: max_replacements)
+
+  api fn replace(
+    ~self,
+    { old: StringSlice, with replacement: StringSlice, max_replacements?: i32 }
+  ) -> void
+    self.replace(
+      old.to_string(),
+      with: replacement.to_string(),
+      max_replacements: max_replacements
+    )
 
   api fn repeat(self, { count: i32 }) -> String
     if count <= 0 then:
@@ -747,7 +826,7 @@ impl Iterator<StringSlice> for StringGraphemeIterator
       return None {}
     let start = self.index
     self.index = next_grapheme_boundary(self.source.raw_bytes(), self.source.byte_len(), self.index)
-    Some<StringSlice> { value: self.source.slice_bytes(start, self.index - start) }
+    Some<StringSlice> { value: new_string_slice(self.source, start, self.index - start) }
 
 fn decode_utf8_at(source: FixedArray<i32>, limit: i32, index: i32) -> Utf8Read
   if index < 0 then:
@@ -867,6 +946,26 @@ fn clamp_slice_index(index: i32, length: i32) -> i32
     return length
   index
 
+fn make_string_index(value: i32) -> StringIndex
+  StringIndex { value: value }
+
+fn new_string_slice(source: String, start: i32, len: i32) -> StringSlice
+  let source_len = source.byte_len()
+  let start_index = clamp_slice_index(start, source_len)
+  let max_len = source_len - start_index
+  let clamped_len =
+    if len < 0 then:
+      0
+    elif: len > max_len then:
+      max_len
+    else:
+      len
+  StringSlice {
+    source: source,
+    start: start_index,
+    byte_count: clamped_len
+  }
+
 fn advance_rune_index(value: String, cursor: i32, steps: i32) -> Option<StringIndex>
   if cursor < 0 or cursor > value.byte_len() then:
     return None {}
@@ -874,7 +973,7 @@ fn advance_rune_index(value: String, cursor: i32, steps: i32) -> Option<StringIn
   if not is_rune_boundary(source, value.byte_len(), cursor) then:
     return None {}
   if steps == 0 then:
-    return Some<StringIndex> { value: cursor }
+    return Some<StringIndex> { value: make_string_index(cursor) }
 
   var index = cursor
   if steps > 0 then:
@@ -885,7 +984,7 @@ fn advance_rune_index(value: String, cursor: i32, steps: i32) -> Option<StringIn
       let read = decode_utf8_at(source, value.byte_len(), index)
       index = index + read.width
       moved = moved + 1
-    return Some<StringIndex> { value: index }
+    return Some<StringIndex> { value: make_string_index(index) }
 
   var moved = 0
   while moved > steps do:
@@ -893,7 +992,7 @@ fn advance_rune_index(value: String, cursor: i32, steps: i32) -> Option<StringIn
       return None {}
     index = previous_rune_boundary(source, index)
     moved = moved - 1
-  Some<StringIndex> { value: index }
+  Some<StringIndex> { value: make_string_index(index) }
 
 fn advance_grapheme_index(value: String, cursor: i32, steps: i32) -> Option<StringIndex>
   if cursor < 0 or cursor > value.byte_len() then:
@@ -902,7 +1001,7 @@ fn advance_grapheme_index(value: String, cursor: i32, steps: i32) -> Option<Stri
   if not is_rune_boundary(source, value.byte_len(), cursor) then:
     return None {}
   if steps == 0 then:
-    return Some<StringIndex> { value: cursor }
+    return Some<StringIndex> { value: make_string_index(cursor) }
 
   var index = cursor
   if steps > 0 then:
@@ -912,7 +1011,7 @@ fn advance_grapheme_index(value: String, cursor: i32, steps: i32) -> Option<Stri
         return None {}
       index = next_grapheme_boundary(source, value.byte_len(), index)
       moved = moved + 1
-    return Some<StringIndex> { value: index }
+    return Some<StringIndex> { value: make_string_index(index) }
 
   var moved = 0
   while moved > steps do:
@@ -920,7 +1019,7 @@ fn advance_grapheme_index(value: String, cursor: i32, steps: i32) -> Option<Stri
       return None {}
     index = previous_grapheme_boundary(source, value.byte_len(), index)
     moved = moved - 1
-  Some<StringIndex> { value: index }
+  Some<StringIndex> { value: make_string_index(index) }
 
 fn previous_rune_boundary(source: FixedArray<i32>, index: i32) -> i32
   var cursor = index - 1
@@ -987,7 +1086,7 @@ fn should_join_grapheme(previous: i32, next: i32) -> bool
     return true
   false
 
-fn find_substring_from(value: String, substring: String, start: i32) -> i32
+fn find_substring_from(value: String, substring: StringSlice, start: i32) -> i32
   if substring.byte_len() == 0 then:
     return clamp_slice_index(start, value.byte_len())
   if substring.byte_len() > value.byte_len() then:
@@ -996,16 +1095,15 @@ fn find_substring_from(value: String, substring: String, start: i32) -> i32
     return -1
 
   let source = value.raw_bytes()
-  let needle = substring.raw_bytes()
   let limit = value.byte_len() - substring.byte_len()
   var index = start
   while index <= limit do:
-    if bytes_match_at(source, needle, index, substring.byte_len()) then:
+    if bytes_match_slice_at(source, substring, index) then:
       return index
     index = index + 1
   -1
 
-fn find_substring_to(value: String, substring: String, end: i32) -> i32
+fn find_substring_to(value: String, substring: StringSlice, end: i32) -> i32
   if substring.byte_len() == 0 then:
     return clamp_slice_index(end, value.byte_len())
   if substring.byte_len() > value.byte_len() then:
@@ -1013,17 +1111,16 @@ fn find_substring_to(value: String, substring: String, end: i32) -> i32
 
   let clamped_end = clamp_slice_index(end, value.byte_len())
   let source = value.raw_bytes()
-  let needle = substring.raw_bytes()
   var index = clamped_end - substring.byte_len()
   while index >= 0 do:
-    if bytes_match_at(source, needle, index, substring.byte_len()) then:
+    if bytes_match_slice_at(source, substring, index) then:
       return index
     index = index - 1
   -1
 
 fn split_on_substring(
   value: String,
-  separator: String,
+  separator: StringSlice,
   { max_splits?: i32, keep_empty?: bool }
 ) -> Array<StringSlice>
   let allow_empty = keep_empty ?? false
@@ -1031,11 +1128,10 @@ fn split_on_substring(
   let sep_len = separator.byte_len()
   if sep_len <= 0 then:
     let ~one = Array<StringSlice>::with_capacity(1)
-    one.push(value)
+    one.push(value.as_slice())
     return one
 
   let source = value.raw_bytes()
-  let needle = separator.raw_bytes()
   let ~parts = Array<StringSlice>::with_capacity(4)
   var start = 0
   var index = 0
@@ -1043,10 +1139,10 @@ fn split_on_substring(
   let max_index = value.byte_len() - sep_len
   while index <= max_index do:
     let can_split = limit < 0 or splits < limit
-    if can_split and bytes_match_at(source, needle, index, sep_len) then:
+    if can_split and bytes_match_slice_at(source, separator, index) then:
       let length = index - start
       if allow_empty or length > 0 then:
-        parts.push(value.slice_bytes(start, length))
+        parts.push(new_string_slice(value, start, length))
       start = index + sep_len
       index = start
       splits = splits + 1
@@ -1055,7 +1151,7 @@ fn split_on_substring(
 
   let tail_len = value.byte_len() - start
   if allow_empty or tail_len > 0 then:
-    parts.push(value.slice_bytes(start, tail_len))
+    parts.push(new_string_slice(value, start, tail_len))
   parts
 
 fn to_ascii_lower(value: i32) -> i32
@@ -1199,6 +1295,21 @@ fn bytes_match_at(
   var cursor = 0
   while cursor < target_len do:
     if __array_get(source, index + cursor) != __array_get(target, cursor) then:
+      return false
+    cursor = cursor + 1
+  true
+
+fn bytes_match_slice_at(
+  source: FixedArray<i32>,
+  target: StringSlice,
+  index: i32
+) -> bool
+  let target_len = target.byte_len()
+  let target_source = target.raw_bytes()
+  let target_start = target.start_offset()
+  var cursor = 0
+  while cursor < target_len do:
+    if __array_get(source, index + cursor) != __array_get(target_source, target_start + cursor) then:
       return false
     cursor = cursor + 1
   true

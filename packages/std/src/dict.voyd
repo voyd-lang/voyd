@@ -384,7 +384,7 @@ impl DictKey<String> for String
     self.hash_i32()
 
   api fn dict_eq(self, { other: String }) -> bool
-    self.equals(other)
+    self == other
 
 fn new_buckets<K, V>(bucket_count: i32) -> FixedArray<Array<DictPair<K, V>>>
   let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1

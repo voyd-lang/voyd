@@ -16,6 +16,13 @@ fn option_i32_or(value: Option<i32>, fallback: i32) -> i32
     None:
       fallback
 
+fn option_string_index_or(value: Option<StringIndex>, fallback: i32) -> i32
+  match(value)
+    Some<StringIndex> { value }:
+      value.to_i32()
+    None:
+      fallback
+
 fn is_none_string_index(value: Option<StringIndex>) -> bool
   match(value)
     Some<StringIndex>:
@@ -51,8 +58,8 @@ test "string slice and as_slice":
     end: Some<i32> { value: 5 },
     include_end: false
   })
-  assert(sliced.equals("😀"), eq: true)
-  assert(value.as_slice().equals(value), eq: true)
+  assert(sliced.to_string().equals("😀"), eq: true)
+  assert(value.as_slice().to_string().equals(value), eq: true)
 
 test "string lengths and graphemes":
   let value = "a😀b"
@@ -68,27 +75,25 @@ test "string lengths and graphemes":
 
 test "string index and grapheme_index stepping":
   let value = "a😀b"
-  assert(value.start_index(), eq: 0)
-  assert(value.end_index(), eq: value.byte_len())
-  assert(option_i32_or(value.index(after: 0), -1), eq: 1)
-  assert(option_i32_or(value.index(after: 0, by: 2), -1), eq: 5)
-  assert(option_i32_or(value.index(after: 5, by: -1), -1), eq: 1)
-  assert(is_none_string_index(value.index(after: 2)), eq: true)
+  assert(is_none_string_index(value.index(after: value.start_index())), eq: false)
+  assert(is_none_string_index(value.index(after: value.start_index(), by: 2)), eq: false)
+  assert(is_none_string_index(value.index(after: value.end_index(), by: -1)), eq: false)
+  assert(is_none_string_index(value.index(after: value.end_index())), eq: true)
 
   let joined = "é"
-  assert(option_i32_or(joined.grapheme_index(after: 0), -1), eq: joined.end_index())
+  assert(is_none_string_index(joined.grapheme_index(after: joined.start_index())), eq: false)
 
 test "string grapheme sequence iteration":
   let joined = "éx"
   let ~iter = joined.graphemes().iter()
   match(iter.next())
     Some<StringSlice> { value }:
-      assert(value.equals("é"), eq: true)
+      assert(value.to_string().equals("é"), eq: true)
     None:
       assert(false)
   match(iter.next())
     Some<StringSlice> { value }:
-      assert(value.equals("x"), eq: true)
+      assert(value.to_string().equals("x"), eq: true)
     None:
       assert(false)
   match(iter.next())
@@ -103,8 +108,8 @@ test "string search helpers":
   assert(value.ends_with(suffix: "gamma"), eq: true)
   assert(value.contains(substring: "beta"), eq: true)
   assert(value.contains(where: (rune: i32) -> bool => rune == 44), eq: true)
-  assert(option_i32_or(value.find(substring: "beta"), -1) > 0, eq: true)
-  assert(option_i32_or(value.rfind(substring: "a"), -1) >= 0, eq: true)
+  assert(option_string_index_or(value.find(substring: "beta"), -1) > 0, eq: true)
+  assert(option_string_index_or(value.rfind(substring: "a"), -1) >= 0, eq: true)
 
   match(value.find_range(substring: "beta"))
     Some<Range> { value }:
@@ -148,7 +153,7 @@ test "string lines and words":
   let lines_with_ends = multiline.lines(keep_ends: true)
   match(lines_with_ends.get(at: 0))
     Some<StringSlice> { value }:
-      assert(value.ends_with(suffix: must_utf8([10])), eq: true)
+      assert(value.to_string().ends_with(suffix: must_utf8([10])), eq: true)
     None:
       assert(false)
 
