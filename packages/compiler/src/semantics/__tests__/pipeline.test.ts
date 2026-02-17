@@ -643,6 +643,19 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("accepts trait instantiations when trait type arguments satisfy constraints", () => {
+    const ast = loadAst("generic_constraints_trait_instantiation_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects trait instantiations when trait type arguments violate constraints", () => {
+    const ast = loadAst("generic_constraints_trait_instantiation_failure.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /does not satisfy constraint for trait/i
+    );
+  });
+
   it("lowers nominal constructor overloads across modules", () => {
     const animalFixture = "nominal_constructors_cross_module/animal.voyd";
     const mainFixture = "nominal_constructors_cross_module/main.voyd";

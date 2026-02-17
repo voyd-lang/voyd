@@ -1771,30 +1771,66 @@ export const ensureTraitType = (
   state: TypingState,
   typeArgs: readonly TypeId[] = [],
 ): TypeId | undefined => {
-  const decl = ctx.traits.getDecl(symbol) ?? ctx.decls.getTrait(symbol);
+  const hirDecl = ctx.traits.getDecl(symbol);
+  const decl = hirDecl ?? ctx.decls.getTrait(symbol);
   if (!decl) {
     return undefined;
   }
 
-  const paramCount = decl.typeParameters?.length ?? 0;
+  const traitName = getSymbolName(symbol, ctx);
+  const paramCount =
+    hirDecl?.typeParameters?.length ?? decl.typeParameters?.length ?? 0;
   const normalized = normalizeTypeArgs({
     typeArgs,
     paramCount,
     unknownType: ctx.primitives.unknown,
-    context: `trait ${getSymbolName(symbol, ctx)}`,
+    context: `trait ${traitName}`,
   });
 
   if (normalized.missingCount > 0 && state.mode === "strict") {
     throw new Error(
-      `trait ${getSymbolName(symbol, ctx)} is missing ${
-        normalized.missingCount
-      } type argument(s)`,
+      `trait ${traitName} is missing ${normalized.missingCount} type argument(s)`,
     );
+  }
+
+  if (hirDecl?.typeParameters && hirDecl.typeParameters.length > 0) {
+    const typeParamMap = new Map<SymbolId, TypeId>();
+    hirDecl.typeParameters.forEach((param, index) =>
+      typeParamMap.set(
+        param.symbol,
+        normalized.applied[index] ?? ctx.primitives.unknown,
+      ),
+    );
+
+    hirDecl.typeParameters.forEach((param, index) => {
+      if (!param.constraint) {
+        return;
+      }
+      const applied = normalized.applied[index] ?? ctx.primitives.unknown;
+      if (applied === ctx.primitives.unknown) {
+        return;
+      }
+      const resolvedConstraint = resolveTypeExpr(
+        param.constraint,
+        ctx,
+        state,
+        ctx.primitives.unknown,
+        typeParamMap,
+      );
+      if (!typeSatisfies(applied, resolvedConstraint, ctx, state)) {
+        throw new Error(
+          `type argument for ${getSymbolName(
+            param.symbol,
+            ctx,
+          )} does not satisfy constraint for trait ${traitName}`,
+        );
+      }
+    });
   }
 
   const type = ctx.arena.internTrait({
     owner: canonicalSymbolRefForTypingContext(symbol, ctx),
-    name: getSymbolName(symbol, ctx),
+    name: traitName,
     typeArgs: normalized.applied,
   });
   ctx.valueTypes.set(symbol, type);
