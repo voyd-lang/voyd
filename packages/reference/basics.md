@@ -2,11 +2,7 @@
 
 ```voyd
 // This is a single line comment
-/// This is a doc comment (for declarations)
-//! This is an inner doc comment (for file/module docs)
 ```
-
-For full documentation behavior and attachment rules, see [Doc Comments](./doc-comments.md).
 
 # Identifiers
 
