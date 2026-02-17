@@ -15,8 +15,8 @@ pub fn create_element({
   element.set(key: "children", value: children)
   if attributes is Some:
     let attrs = attributes_to_map(attributes.value)
-    element.set(key: "attributes", value: attrs)
-  element
+    element.set(key: "attributes", value: msgpack::make_map(attrs))
+  msgpack::make_map(element)
 
 fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Dict<String, MsgPack>
   let ~acc = Dict<String, MsgPack>::init()

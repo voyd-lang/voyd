@@ -135,6 +135,16 @@ export const emitSerializedExportWrapper = ({
       msgPackType,
       false
     );
+    const serializer = findSerializerForType(typeId, ctx);
+    if (serializer) {
+      return coerceValueToType({
+        value: element,
+        actualType: msgpack.msgPackTypeId,
+        targetType: typeId,
+        ctx,
+        fnCtx,
+      });
+    }
     return unpackMsgPackValueForType({
       ctx,
       msgpack,
@@ -152,26 +162,34 @@ export const emitSerializedExportWrapper = ({
     callArgs as number[],
     wasmTypeFor(meta.resultTypeId, ctx)
   );
-  const msgpackResult = packMsgPackValueForType({
-    ctx,
-    msgpack,
-    msgPackType,
-    value: resultValue,
-    typeId: meta.resultTypeId,
-    label: `${exportName} result`,
-    onUnsupported: "throw",
-  });
   const encodeParamType = encodeMeta.paramTypeIds[0];
   if (typeof encodeParamType !== "number") {
     throw new Error(`missing serializer input type for ${exportName}`);
   }
-  const encodeValue = coerceValueToType({
-    value: msgpackResult,
-    actualType: msgpack.msgPackTypeId,
-    targetType: encodeParamType,
-    ctx,
-    fnCtx,
-  });
+  const resultSerializer = findSerializerForType(meta.resultTypeId, ctx);
+  const encodeValue = resultSerializer
+    ? coerceValueToType({
+        value: resultValue,
+        actualType: meta.resultTypeId,
+        targetType: encodeParamType,
+        ctx,
+        fnCtx,
+      })
+    : coerceValueToType({
+        value: packMsgPackValueForType({
+          ctx,
+          msgpack,
+          msgPackType,
+          value: resultValue,
+          typeId: meta.resultTypeId,
+          label: `${exportName} result`,
+          onUnsupported: "throw",
+        }),
+        actualType: msgpack.msgPackTypeId,
+        targetType: encodeParamType,
+        ctx,
+        fnCtx,
+      });
   const encodedLength = ctx.mod.call(
     encodeMeta.wasmName,
     [

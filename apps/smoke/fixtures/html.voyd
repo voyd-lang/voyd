@@ -1,5 +1,6 @@
 use std::all
 use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
 
 fn create_element({
   name: String,
@@ -11,7 +12,7 @@ fn create_element({
   element.set(key: "children", value: children)
   if attributes is Some:
     element.set(key: "attributes", value: attributes.value)
-  element
+  msgpack::make_map(element)
 
 pub fn main()
   <div class="greeting" visible>

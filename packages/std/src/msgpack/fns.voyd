@@ -6,6 +6,7 @@ use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 use std::optional::types::all
 use std::string::type::{ new_string, String }
 
+@serializer("msgpack", encode_value, decode_value)
 pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | MsgPackMap
 
 obj MsgPackMap {
