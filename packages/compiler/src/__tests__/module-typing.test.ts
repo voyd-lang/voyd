@@ -627,6 +627,78 @@ pub fn main() -> i32
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 
+  it("resolves imported instance methods inside module import cycles", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::a::b::all
+
+pub fn main() -> i32
+  bounce()
+`,
+      [`${root}${sep}a.voyd`]: `
+pub obj Buffer {
+  api bytes: i32
+}
+
+impl Buffer
+  api fn byte_len(self) -> i32
+    self.bytes
+`,
+      [`${root}${sep}a${sep}b.voyd`]: `
+use src::a::all
+
+pub fn bounce() -> i32
+  Buffer { bytes: 3 }.byte_len()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("adds cycle-aware TY0022 hints for unresolved methods in cyclic modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::a::b::all
+
+pub fn main() -> i32
+  bounce()
+`,
+      [`${root}${sep}a.voyd`]: `
+pub obj Buffer {
+  api bytes: i32
+}
+`,
+      [`${root}${sep}a${sep}b.voyd`]: `
+use src::a::all
+
+pub fn bounce() -> i32
+  Buffer { bytes: 3 }.byte_len()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const unknownMethod = diagnostics.find((diagnostic) => diagnostic.code === "TY0022");
+    expect(unknownMethod).toBeDefined();
+    expect(
+      unknownMethod?.hints?.some((hint) => /import cycle/i.test(hint.message)),
+    ).toBe(true);
+  });
+
   it("allows named macro re-exports in std package imports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
