@@ -473,6 +473,29 @@ pub fn main() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("preserves fixed member args for generic enum namespace aliases", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+type Wrap<T> = Marker<T, i32>
+obj Marker<T, U> { value: T, marker: U }
+
+pub fn main() -> i32
+  let wrapped: Wrap<bool>::Marker = Wrap<bool>::Marker { value: true, marker: 7 }
+  wrapped.marker
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
   it("preserves outer generic args for namespaced type members", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

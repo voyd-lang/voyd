@@ -5,6 +5,7 @@ import {
   formCallsInternal,
   isForm,
   isIdentifierAtom,
+  isInternalIdentifierAtom,
 } from "../../parser/index.js";
 import type { HirTypeExpr } from "../hir/index.js";
 import type { ScopeId, SymbolId } from "../ids.js";
@@ -104,13 +105,16 @@ export const resolveNamedTypeTarget = ({
     const enumNamespaceTypeArguments = resolveEnumNamespaceMemberTypeArguments({
       namespaceSymbol: typeNamespace.symbol,
       memberName: member.name.value,
+      namespaceTypeArguments: typeNamespace.typeArguments,
       ctx,
       parseTypeArguments,
     });
     const combinedTypeArguments = [
       ...(member.typeArguments ?? []),
-      ...(enumNamespaceTypeArguments ?? []),
-      ...(typeNamespace.typeArguments ?? []),
+      ...(enumNamespaceTypeArguments.typeArguments ?? []),
+      ...(enumNamespaceTypeArguments.consumeNamespaceTypeArguments
+        ? []
+        : (typeNamespace.typeArguments ?? [])),
     ];
 
     return {
@@ -188,25 +192,48 @@ const resolveTypeNamespaceTarget = ({
 const resolveEnumNamespaceMemberTypeArguments = ({
   namespaceSymbol,
   memberName,
+  namespaceTypeArguments,
   ctx,
   parseTypeArguments,
 }: {
   namespaceSymbol: SymbolId;
   memberName: string;
+  namespaceTypeArguments?: readonly HirTypeExpr[];
   ctx: LowerContext;
   parseTypeArguments: (entries: readonly Expr[]) => HirTypeExpr[];
-}): HirTypeExpr[] | undefined => {
+}): {
+  typeArguments?: HirTypeExpr[];
+  consumeNamespaceTypeArguments: boolean;
+} => {
   const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
-  const memberTypeArguments = enumNamespaceMemberTypeArgumentsFromMetadata({
+  const metadata = enumNamespaceMemberTypeArgumentsFromMetadata({
     source: namespaceRecord.metadata as Record<string, unknown> | undefined,
     memberName,
   });
-  if (!memberTypeArguments || memberTypeArguments.length === 0) {
-    return undefined;
+  if (!metadata) {
+    return { consumeNamespaceTypeArguments: false };
   }
 
-  const lowered = parseTypeArguments(memberTypeArguments);
-  return lowered.length > 0 ? lowered : undefined;
+  const typeParameterByName = new Map(
+    metadata.typeParameterNames.map((name, index) => [
+      name,
+      namespaceTypeArguments?.[index],
+    ]),
+  );
+  const lowered = metadata.typeArguments.flatMap((entry) => {
+    if (
+      (isIdentifierAtom(entry) || isInternalIdentifierAtom(entry)) &&
+      typeParameterByName.get(entry.value)
+    ) {
+      return [typeParameterByName.get(entry.value)!];
+    }
+    const parsed = parseTypeArguments([entry]);
+    return parsed.length > 0 ? [parsed[0]!] : [];
+  });
+  return {
+    typeArguments: lowered.length > 0 ? lowered : undefined,
+    consumeNamespaceTypeArguments: true,
+  };
 };
 
 const isGenericsForm = (expr: Expr | undefined): expr is Form =>

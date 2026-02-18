@@ -264,13 +264,16 @@ const lowerStaticMethodCall = ({
   const enumNamespaceTypeArguments = lowerEnumNamespaceMemberTypeArguments({
     namespaceSymbol: targetSymbol,
     memberName: calleeExpr.value,
+    namespaceTypeArguments: targetTypeArguments,
     scope: scopes.current(),
     ctx,
   });
   const combinedTypeArguments = [
     ...(typeArguments ?? []),
-    ...(enumNamespaceTypeArguments ?? []),
-    ...(targetTypeArguments ?? []),
+    ...(enumNamespaceTypeArguments.typeArguments ?? []),
+    ...(enumNamespaceTypeArguments.consumeNamespaceTypeArguments
+      ? []
+      : (targetTypeArguments ?? [])),
   ];
 
   const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
@@ -343,27 +346,48 @@ const lowerStaticMethodCall = ({
 const lowerEnumNamespaceMemberTypeArguments = ({
   namespaceSymbol,
   memberName,
+  namespaceTypeArguments,
   scope,
   ctx,
 }: {
   namespaceSymbol: SymbolId;
   memberName: string;
+  namespaceTypeArguments?: readonly HirTypeExpr[];
   scope: ScopeId;
   ctx: LoweringParams["ctx"];
-}): HirTypeExpr[] | undefined => {
+}): {
+  typeArguments?: HirTypeExpr[];
+  consumeNamespaceTypeArguments: boolean;
+} => {
   const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
-  const typeArgumentExprs = enumNamespaceMemberTypeArgumentsFromMetadata({
+  const metadata = enumNamespaceMemberTypeArgumentsFromMetadata({
     source: namespaceRecord.metadata as Record<string, unknown> | undefined,
     memberName,
   });
-  if (!typeArgumentExprs || typeArgumentExprs.length === 0) {
-    return undefined;
+  if (!metadata) {
+    return { consumeNamespaceTypeArguments: false };
   }
 
-  const lowered = typeArgumentExprs
-    .map((entry) => lowerTypeExpr(entry, ctx, scope))
-    .filter((entry): entry is HirTypeExpr => Boolean(entry));
-  return lowered.length > 0 ? lowered : undefined;
+  const typeParameterByName = new Map(
+    metadata.typeParameterNames.map((name, index) => [
+      name,
+      namespaceTypeArguments?.[index],
+    ]),
+  );
+  const lowered = metadata.typeArguments.flatMap((entry) => {
+    if (
+      (isIdentifierAtom(entry) || isInternalIdentifierAtom(entry)) &&
+      typeParameterByName.get(entry.value)
+    ) {
+      return [typeParameterByName.get(entry.value)!];
+    }
+    const parsed = lowerTypeExpr(entry, ctx, scope);
+    return parsed ? [parsed] : [];
+  });
+  return {
+    typeArguments: lowered.length > 0 ? lowered : undefined,
+    consumeNamespaceTypeArguments: true,
+  };
 };
 
 const lowerModuleQualifiedCall = ({

@@ -298,7 +298,7 @@ export const createBuiltins = (
       const flattened =
         values.length === 1 &&
         isForm(single) &&
-        isForm(single.at(0))
+        (single.length === 0 || single.toArray().every((entry) => isForm(entry)))
           ? single.toArray()
           : values;
       return new Form([

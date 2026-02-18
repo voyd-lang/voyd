@@ -26,13 +26,13 @@ export const importedSymbolTargetFromMetadata = (
 
 export const enumNamespaceMetadataFromAliasTarget = ({
   target,
-  typeParameterCount,
+  typeParameterNames,
 }: {
   target: Expr | undefined;
-  typeParameterCount: number;
+  typeParameterNames: readonly string[];
 }): {
   enumNamespaceMembers: readonly EnumNamespaceMember[];
-  enumNamespaceTypeParameterCount: number;
+  enumNamespaceTypeParameterNames: readonly string[];
 } | undefined => {
   const members = collectUnionNominalMembers(target);
   if (!members || members.length === 0) {
@@ -40,7 +40,7 @@ export const enumNamespaceMetadataFromAliasTarget = ({
   }
   return {
     enumNamespaceMembers: dedupeEnumNamespaceMembers(members),
-    enumNamespaceTypeParameterCount: typeParameterCount,
+    enumNamespaceTypeParameterNames: [...typeParameterNames],
   };
 };
 
@@ -50,20 +50,30 @@ export const enumNamespaceMemberTypeArgumentsFromMetadata = ({
 }: {
   source?: Record<string, unknown>;
   memberName: string;
-}): readonly Expr[] | undefined => {
+}):
+  | {
+      typeArguments: readonly Expr[];
+      typeParameterNames: readonly string[];
+    }
+  | undefined => {
   const meta = source as
     | {
         enumNamespaceMembers?: unknown;
-        enumNamespaceTypeParameterCount?: unknown;
+        enumNamespaceTypeParameterNames?: unknown;
       }
     | undefined;
-  if (typeof meta?.enumNamespaceTypeParameterCount === "number" && meta.enumNamespaceTypeParameterCount > 0) {
-    return undefined;
-  }
   const members = enumNamespaceMembersFromUnknown(meta?.enumNamespaceMembers);
   const member = members?.find((entry) => entry.name === memberName);
-  const typeArguments = member?.typeArguments;
-  return typeArguments && typeArguments.length > 0 ? typeArguments : undefined;
+  if (!member) {
+    return undefined;
+  }
+  return {
+    typeArguments: member.typeArguments ?? [],
+    typeParameterNames:
+      enumNamespaceTypeParameterNamesFromUnknown(
+        meta?.enumNamespaceTypeParameterNames,
+      ) ?? [],
+  };
 };
 
 export const enumVariantTypeNamesFromAliasTarget = (
@@ -171,4 +181,14 @@ const enumNamespaceMembersFromUnknown = (
     return [{ name: candidate.name, typeArguments }];
   });
   return members.length > 0 ? dedupeEnumNamespaceMembers(members) : undefined;
+};
+
+const enumNamespaceTypeParameterNamesFromUnknown = (
+  input: unknown,
+): string[] | undefined => {
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+  const names = input.filter((entry): entry is string => typeof entry === "string");
+  return names.length > 0 ? names : undefined;
 };

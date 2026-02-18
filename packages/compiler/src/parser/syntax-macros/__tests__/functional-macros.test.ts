@@ -156,6 +156,20 @@ declare_pair()
     expect(plain).toContainEqual(["type", ["=", "Right", "i32"]]);
   });
 
+  test("treats empty emit_many lists as a no-op at top level", () => {
+    const code = `\
+macro emit_nothing()
+  let declarations = \`().slice(1)
+  emit_many(declarations)
+emit_nothing()
+type Keep = i32
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain).toContainEqual(["type", ["=", "Keep", "i32"]]);
+    expect(plain).not.toContainEqual([]);
+  });
+
   test("does not implicitly splice top-level block expansions", () => {
     const code = `\
 macro wrap_decl()

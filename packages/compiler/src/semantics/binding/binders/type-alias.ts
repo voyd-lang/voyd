@@ -31,7 +31,7 @@ export const bindTypeAlias = (
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
   const enumNamespaceMetadata = enumNamespaceMetadataFromAliasTarget({
     target: decl.target,
-    typeParameterCount: decl.typeParameters.length,
+    typeParameterNames: decl.typeParameters.map((entry) => entry.name.value),
   });
   reportOverloadNameCollision({
     name: decl.name.value,
