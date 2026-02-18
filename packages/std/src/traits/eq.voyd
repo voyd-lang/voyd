@@ -3,3 +3,9 @@ pub trait Eq<T>
 
   fn ne(self, { other: T }) -> bool
     not self.eq(other: other)
+
+  fn '=='(self, other: T) -> bool
+    self.eq(other: other)
+
+  fn '!='(self, other: T) -> bool
+    self.ne(other: other)

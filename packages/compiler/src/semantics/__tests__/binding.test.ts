@@ -19,6 +19,7 @@ import type { ModuleExportTable } from "../modules.js";
 import { resolve, sep } from "node:path";
 import {
   packageVisibility,
+  publicVisibility,
 } from "../hir/index.js";
 import { packageIdFromPath } from "../packages.js";
 
@@ -700,6 +701,157 @@ fn id<T: Animal>(value: T) -> T
     expect(implInjected).toBeDefined();
     if (!implInjected) return;
     expect(implInjected.scope).not.toBe(doubleMethod.scope);
+  });
+
+  it("preserves helper overload sets for imported trait default methods", () => {
+    const depPath = {
+      namespace: "pkg" as const,
+      packageName: "dep" as const,
+      segments: ["pkg"] as const,
+    };
+    const depId = modulePathToString(depPath);
+    const depSource = `
+pub fn choose({ value: i32 }) -> bool
+  true
+
+pub fn choose({ value: bool }) -> bool
+  value
+
+pub trait Eq<T>
+  fn eq(self, { other: T }) -> bool
+
+  fn '=='(self, other: T) -> bool
+    choose(value: self.eq(other: other))
+`;
+    const depAst = parse(depSource, depId);
+    const depSymbolTable = new SymbolTable({ rootOwner: depAst.syntaxId });
+    depSymbolTable.declare({ name: depId, kind: "module", declaredAt: depAst.syntaxId });
+    const depModule: ModuleNode = {
+      id: depId,
+      path: depPath,
+      origin: { kind: "file", filePath: depId },
+      ast: depAst,
+      source: depSource,
+      dependencies: [],
+    };
+    const depGraph: ModuleGraph = {
+      entry: depId,
+      modules: new Map([[depId, depModule]]),
+      diagnostics: [],
+    };
+    const depBinding = runBindingPipeline({
+      moduleForm: depAst,
+      symbolTable: depSymbolTable,
+      module: depModule,
+      graph: depGraph,
+    });
+    expect(depBinding.diagnostics).toHaveLength(0);
+
+    const traitSymbol = depSymbolTable.resolve("Eq", depSymbolTable.rootScope);
+    expect(typeof traitSymbol).toBe("number");
+    if (typeof traitSymbol !== "number") return;
+
+    const depExports: ModuleExportTable = new Map([
+      [
+        "Eq",
+        {
+          name: "Eq",
+          symbol: traitSymbol,
+          moduleId: depId,
+          modulePath: depPath,
+          packageId: packageIdFromPath(depPath),
+          kind: "trait",
+          visibility: publicVisibility(),
+        },
+      ],
+    ]);
+
+    const mainPath = {
+      namespace: "src" as const,
+      segments: ["main"] as const,
+    };
+    const mainId = modulePathToString(mainPath);
+    const mainSource = `
+use pkg::dep::Eq
+
+obj Box {
+  value: i32
+}
+
+impl Eq<Box> for Box
+  fn eq(self, { other: Box }) -> bool
+    self.value == other.value
+`;
+    const mainAst = parse(mainSource, mainId);
+    const useForm = mainAst.rest.find((entry) => isForm(entry) && entry.calls("use"));
+    const mainSymbolTable = new SymbolTable({ rootOwner: mainAst.syntaxId });
+    mainSymbolTable.declare({
+      name: mainId,
+      kind: "module",
+      declaredAt: mainAst.syntaxId,
+    });
+    const mainModule: ModuleNode = {
+      id: mainId,
+      path: mainPath,
+      origin: { kind: "file", filePath: mainId },
+      ast: mainAst,
+      source: mainSource,
+      dependencies: [
+        {
+          kind: "use",
+          path: depPath,
+          span: toSourceSpan(useForm ?? mainAst),
+        },
+      ],
+    };
+    const mainGraph: ModuleGraph = {
+      entry: mainId,
+      modules: new Map([[mainId, mainModule]]),
+      diagnostics: [],
+    };
+
+    const mainBinding = runBindingPipeline({
+      moduleForm: mainAst,
+      symbolTable: mainSymbolTable,
+      module: mainModule,
+      graph: mainGraph,
+      moduleExports: new Map([[depId, depExports]]),
+      dependencies: new Map([[depId, depBinding]]),
+    });
+
+    expect(mainBinding.diagnostics).toHaveLength(0);
+
+    const eqOperator = mainBinding.functions.find(
+      (fn) =>
+        mainSymbolTable.getSymbol(fn.symbol).name === "==" &&
+        typeof fn.implId === "number",
+    );
+    expect(eqOperator).toBeDefined();
+    if (!eqOperator) return;
+
+    const importedScope = mainSymbolTable.getScope(eqOperator.scope).parent;
+    expect(typeof importedScope).toBe("number");
+    if (typeof importedScope !== "number") return;
+
+    const chooseLocals = Array.from(mainSymbolTable.symbolsInScope(importedScope)).filter(
+      (symbol) => mainSymbolTable.getSymbol(symbol).name === "choose",
+    );
+    expect(chooseLocals).toHaveLength(2);
+
+    const overloadSetIds = new Set(
+      chooseLocals
+        .map((symbol) => mainBinding.overloadBySymbol.get(symbol))
+        .filter((id): id is number => typeof id === "number"),
+    );
+    expect(overloadSetIds.size).toBe(1);
+    const overloadSetId = Array.from(overloadSetIds)[0];
+    expect(typeof overloadSetId).toBe("number");
+    if (typeof overloadSetId !== "number") return;
+
+    const importedOptions = mainBinding.importedOverloadOptions.get(overloadSetId);
+    expect(importedOptions).toBeDefined();
+    if (!importedOptions) return;
+    expect(new Set(importedOptions)).toEqual(new Set(chooseLocals));
   });
 
   it("applies default trait methods for impls with trait type arguments", () => {

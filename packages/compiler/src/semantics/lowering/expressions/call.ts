@@ -21,6 +21,7 @@ import type { LoweringFormParams, LoweringParams } from "./types.js";
 import {
   lowerConstructorLiteralCall,
 } from "./constructor-call.js";
+import { createBoolLiteralExpr } from "./literal-helpers.js";
 
 type LowerCallFromElementsParams = LoweringParams & {
   calleeExpr: Expr;
@@ -46,14 +47,26 @@ export const lowerCallFromElements = ({
   const hasTypeArguments =
     isForm(potentialGenerics) &&
     formCallsInternal(potentialGenerics, "generics");
+  const callArgsExprs = argsExprs.slice(hasTypeArguments ? 1 : 0);
   const typeArguments = hasTypeArguments
     ? ((potentialGenerics as Form).rest
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
         .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
     : undefined;
+  const isTypeCheck = tryLowerIsTypeCheckCall({
+    calleeExpr,
+    argsExprs: callArgsExprs,
+    ast,
+    ctx,
+    scopes,
+    lowerExpr,
+  });
+  if (typeof isTypeCheck === "number") {
+    return isTypeCheck;
+  }
 
   const calleeId = lowerExpr(calleeExpr, ctx, scopes);
-  const args = argsExprs.slice(hasTypeArguments ? 1 : 0).map((arg) => {
+  const args = callArgsExprs.map((arg) => {
     if (isForm(arg) && arg.calls(":")) {
       const labelExpr = arg.at(1);
       const valueExpr = arg.at(2);
@@ -77,6 +90,68 @@ export const lowerCallFromElements = ({
     callee: calleeId,
     args,
     typeArguments,
+  });
+};
+
+const tryLowerIsTypeCheckCall = ({
+  calleeExpr,
+  argsExprs,
+  ast,
+  ctx,
+  scopes,
+  lowerExpr,
+}: LowerCallFromElementsParams): HirExprId | undefined => {
+  if (!isIdentifierAtom(calleeExpr) || calleeExpr.value !== "is") {
+    return undefined;
+  }
+  const [discriminantExpr, typeExpr, ...rest] = argsExprs;
+  if (!discriminantExpr || !typeExpr || rest.length > 0) {
+    return undefined;
+  }
+
+  const type = (() => {
+    try {
+      return lowerTypeExpr(typeExpr, ctx, scopes.current());
+    } catch {
+      return undefined;
+    }
+  })();
+  if (!type) {
+    return undefined;
+  }
+
+  const discriminant = lowerExpr(discriminantExpr, ctx, scopes);
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "match",
+    ast: ast.syntaxId,
+    span: toSourceSpan(ast),
+    discriminant,
+    arms: [
+      {
+        pattern: {
+          kind: "type",
+          type,
+          span: toSourceSpan(typeExpr),
+        },
+        value: createBoolLiteralExpr({
+          value: true,
+          spanSource: typeExpr,
+          ctx,
+        }),
+      },
+      {
+        pattern: {
+          kind: "wildcard",
+          span: toSourceSpan(ast),
+        },
+        value: createBoolLiteralExpr({
+          value: false,
+          spanSource: ast,
+          ctx,
+        }),
+      },
+    ],
   });
 };
 

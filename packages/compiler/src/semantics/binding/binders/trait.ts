@@ -15,10 +15,12 @@ import type {
   TraitMethodDeclInput,
   TypeParameterDecl,
   TraitMethodDecl,
+  TraitDecl,
+  DeclTable,
   ParameterDeclInput,
 } from "../../decls.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
-import type { BindingContext } from "../types.js";
+import type { BindingContext, BindingResult } from "../types.js";
 import {
   normalizeIntrinsicAttribute,
   type ParsedTraitDecl,
@@ -211,7 +213,7 @@ export const resolveTraitDecl = (
   traitExpr: Expr,
   ctx: BindingContext,
   scope: ScopeId
-) => {
+): ResolvedTraitDecl | undefined => {
   const traitIdentifier = (() => {
     if (isIdentifierAtom(traitExpr)) {
       return traitExpr;
@@ -244,7 +246,94 @@ export const resolveTraitDecl = (
   if (record.kind !== "trait") {
     return undefined;
   }
-  return ctx.decls.getTrait(record.id);
+  const resolved = resolveTraitDeclBySymbol({
+    symbol: traitSymbol,
+    symbolTable: ctx.symbolTable,
+    decls: ctx.decls,
+    dependencies: ctx.dependencies,
+    moduleId: ctx.module.id,
+  });
+  if (!resolved) {
+    return undefined;
+  }
+  return {
+    ...resolved,
+    localSymbol: traitSymbol,
+  };
+};
+
+type ImportMetadata = {
+  import?: { moduleId?: unknown; symbol?: unknown };
+};
+
+export type ResolvedTraitDecl = {
+  decl: TraitDecl;
+  localSymbol: SymbolId;
+  sourceModuleId: string;
+  sourceSymbol: SymbolId;
+  sourceSymbolTable:
+    | BindingContext["symbolTable"]
+    | BindingResult["symbolTable"];
+};
+
+type TraitDeclSourceResolution = Omit<ResolvedTraitDecl, "localSymbol">;
+
+const resolveTraitDeclBySymbol = ({
+  symbol,
+  symbolTable,
+  decls,
+  dependencies,
+  moduleId,
+  seen = new Set<string>(),
+}: {
+  symbol: SymbolId;
+  symbolTable: BindingContext["symbolTable"] | BindingResult["symbolTable"];
+  decls: DeclTable;
+  dependencies: Map<string, BindingResult>;
+  moduleId: string;
+  seen?: Set<string>;
+}): TraitDeclSourceResolution | undefined => {
+  const key = `${moduleId}:${symbol}`;
+  if (seen.has(key)) {
+    return undefined;
+  }
+  seen.add(key);
+
+  const direct = decls.getTrait(symbol);
+  if (direct) {
+    return {
+      decl: direct,
+      sourceModuleId: moduleId,
+      sourceSymbol: symbol,
+      sourceSymbolTable: symbolTable,
+    };
+  }
+
+  const record = symbolTable.getSymbol(symbol);
+  if (record.kind !== "trait") {
+    return undefined;
+  }
+
+  const metadata = (record.metadata ?? {}) as ImportMetadata;
+  const importModuleId = metadata.import?.moduleId;
+  const importSymbol = metadata.import?.symbol;
+  if (typeof importModuleId !== "string" || typeof importSymbol !== "number") {
+    return undefined;
+  }
+
+  const dependency = dependencies.get(importModuleId);
+  if (!dependency) {
+    return undefined;
+  }
+
+  return resolveTraitDeclBySymbol({
+    symbol: importSymbol,
+    symbolTable: dependency.symbolTable,
+    decls: dependency.decls,
+    dependencies: dependency.dependencies,
+    moduleId: importModuleId,
+    seen,
+  });
 };
 
 export const makeParsedFunctionFromTraitMethod = (
