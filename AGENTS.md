@@ -24,6 +24,10 @@ Helpful commands:
 
 If you find additional information that can save you time later add it here.
 
+Additional notes:
+- Companion tests (`*.test.voyd`) are merged into their companion module when `includeTests` is enabled. In companion tests, avoid importing the same module via `std::...`; reference companion symbols directly or module resolution can fail with `BD0001`.
+- For ASCII encoder outputs in stdlib modules, prefer `new_string(bytes.to_fixed_array())` over `from_utf8(bytes: ...)` to avoid hangs in downstream string operations in current runtime paths.
+
 # Testing
 
 - `npm test` (runs vitest suite). Always confirm this passes before finishing.

@@ -1,0 +1,32 @@
+use std::bytes::ByteBuffer
+use std::bytes::Bytes
+use std::encoding::errors::DecodeError
+use std::string::type::{ new_string }
+use std::test::assertions::all
+
+fn bytes_of_3(a: i32, b: i32, c: i32) -> Bytes
+  let ~buffer = ByteBuffer::with_capacity(bytes: 3)
+  buffer.push(value: a)
+  buffer.push(value: b)
+  buffer.push(value: c)
+  buffer.as_bytes()
+
+test "hex encode and decode":
+  let encoded = encode(bytes: bytes_of_3(0, 255, 16))
+  assert(encoded.equals("00ff10"), eq: true)
+
+  match(decode(s: "4869".as_slice()))
+    Ok<Bytes> { value }:
+      let out = value.to_array()
+      assert(out.len(), eq: 2)
+      assert(out.at(at: 0), eq: 72)
+      assert(out.at(at: 1), eq: 105)
+    Err<DecodeError>:
+      assert(false)
+
+test "hex decode rejects invalid text":
+  match(decode(s: "4x".as_slice()))
+    Ok<Bytes>:
+      assert(false)
+    Err<DecodeError> { error }:
+      assert(error.message.equals("hex input contains invalid characters"), eq: true)

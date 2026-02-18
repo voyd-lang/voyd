@@ -1,0 +1,5 @@
+pub self::errors
+pub self::hex
+pub self::base64
+
+pub use self::errors::{ DecodeError }

@@ -1,0 +1,76 @@
+use std::array::Array
+use std::bytes::ByteBuffer
+use std::bytes::Bytes
+use std::encoding::errors::DecodeError
+use std::optional::types::all
+use std::result::types::{ Result, Ok, Err }
+use std::string::{ String, StringSlice, new_string }
+
+/// Encodes bytes as lower-case hexadecimal.
+pub fn encode({ bytes: Bytes }) -> String
+  let source = bytes.to_array()
+  if source.is_empty() then:
+    return String::init()
+
+  let ~out = Array<i32>::with_capacity(source.len() * 2)
+  var index = 0
+  while index < source.len() do:
+    let value = source.at(at: index)
+    out.push(hex_digit_to_ascii(div_rem(value, 16).0))
+    out.push(hex_digit_to_ascii(div_rem(value, 16).1))
+    index = index + 1
+
+  string_from_ascii_bytes(out)
+
+/// Decodes a hexadecimal string into bytes.
+pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
+  let source = s.to_string().to_utf8()
+  let source_len = source.len()
+  if source_len == 0 then:
+    return Ok<Bytes> { value: ByteBuffer::init().as_bytes() }
+  if div_rem(source_len, 2).1 != 0 then:
+    return decode_error("hex input length must be even")
+
+  let ~buffer = ByteBuffer::with_capacity(bytes: source_len / 2)
+  var index = 0
+  while index < source_len do:
+    let high = hex_ascii_to_digit(source.at(at: index))
+    let low = hex_ascii_to_digit(source.at(at: index + 1))
+
+    match(high)
+      Some<i32> { value: high_value }:
+        match(low)
+          Some<i32> { value: low_value }:
+            buffer.push(value: high_value * 16 + low_value)
+          None:
+            return decode_error("hex input contains invalid characters")
+      None:
+        return decode_error("hex input contains invalid characters")
+    index = index + 2
+
+  Ok<Bytes> { value: buffer.as_bytes() }
+
+fn string_from_ascii_bytes(bytes: Array<i32>) -> String
+  new_string(bytes.to_fixed_array())
+
+fn decode_error<T>(message: String) -> Result<T, DecodeError>
+  Err<DecodeError> { error: DecodeError { message: message } }
+
+fn hex_ascii_to_digit(value: i32) -> Option<i32>
+  if value >= 48 and value <= 57 then:
+    return Some<i32> { value: value - 48 }
+  if value >= 65 and value <= 70 then:
+    return Some<i32> { value: value - 55 }
+  if value >= 97 and value <= 102 then:
+    return Some<i32> { value: value - 87 }
+  None {}
+
+fn hex_digit_to_ascii(value: i32) -> i32
+  if value <= 9 then:
+    return 48 + value
+  97 + (value - 10)
+
+fn div_rem(value: i32, divisor: i32) -> (i32, i32)
+  let quotient = value / divisor
+  let remainder = value - quotient * divisor
+  (quotient, remainder)

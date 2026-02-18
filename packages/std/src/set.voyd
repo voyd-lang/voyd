@@ -1,0 +1,47 @@
+use std::array::Array
+use std::dict::{ Dict, DictKey }
+
+/// A hash-based set of unique values.
+pub obj Set<T> {
+  storage: Dict<T, bool>
+}
+
+impl<T: DictKey<T>> Set<T>
+  /// Creates an empty set.
+  api fn init() -> Set<T>
+    Set<T> { storage: Dict<T, bool>::init() }
+
+  /// Returns the number of values in the set.
+  api fn len(self) -> i32
+    self.storage.len()
+
+  /// Returns true when the set is empty.
+  api fn is_empty(self) -> bool
+    self.storage.is_empty()
+
+  /// Returns true when `value` is in the set.
+  api fn contains(self, { value: T }) -> bool
+    self.storage.contains_key(key: value)
+
+  /// Inserts `value`, returning true only when it was newly inserted.
+  api fn insert(~self, { value: T }) -> bool
+    if self.storage.contains_key(key: value) then:
+      return false
+    self.storage.set(key: value, value: true)
+    true
+
+  /// Removes `value`, returning true only when it existed.
+  api fn remove(~self, { value: T }) -> bool
+    match(self.storage.remove(key: value))
+      Some<bool>:
+        true
+      None:
+        false
+
+  /// Removes all values.
+  api fn clear(~self) -> void
+    self.storage.clear()
+
+  /// Returns all values in unspecified order.
+  api fn values(self) -> Array<T>
+    self.storage.keys()

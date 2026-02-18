@@ -1,0 +1,139 @@
+use std::array::Array
+use std::bytes::ByteBuffer
+use std::bytes::Bytes
+use std::encoding::errors::DecodeError
+use std::optional::types::all
+use std::result::types::{ Result, Ok, Err }
+use std::string::{ String, StringSlice, new_string }
+
+/// Encodes bytes as RFC 4648 base64 (with `=` padding).
+pub fn encode({ bytes: Bytes }) -> String
+  let source = bytes.to_array()
+  if source.is_empty() then:
+    return String::init()
+
+  let source_len = source.len()
+  let out_len = ((source_len + 2) / 3) * 4
+  let ~out = Array<i32>::with_capacity(out_len)
+  var index = 0
+  while index < source_len do:
+    let b0 = source.at(at: index)
+    let has_b1 = (index + 1) < source_len
+    let has_b2 = (index + 2) < source_len
+    let b1 = if has_b1 then: source.at(at: index + 1) else: 0
+    let b2 = if has_b2 then: source.at(at: index + 2) else: 0
+
+    let s0 = b0 / 4
+    let s1 = div_rem(b0, 4).1 * 16 + (b1 / 16)
+    let s2 = div_rem(b1, 16).1 * 4 + (b2 / 64)
+    let s3 = div_rem(b2, 64).1
+
+    out.push(base64_digit_to_ascii(s0))
+    out.push(base64_digit_to_ascii(s1))
+    if has_b1 then:
+      out.push(base64_digit_to_ascii(s2))
+    else:
+      out.push(61)
+    if has_b2 then:
+      out.push(base64_digit_to_ascii(s3))
+    else:
+      out.push(61)
+
+    index = index + 3
+
+  string_from_ascii_bytes(out)
+
+/// Decodes a base64 string into bytes.
+pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
+  let source = s.to_string().to_utf8()
+  let source_len = source.len()
+  if source_len == 0 then:
+    return Ok<Bytes> { value: ByteBuffer::init().as_bytes() }
+  if div_rem(source_len, 4).1 != 0 then:
+    return decode_error("base64 input length must be a multiple of 4")
+
+  let ~buffer = ByteBuffer::with_capacity(bytes: source_len / 4 * 3)
+  var index = 0
+  while index < source_len do:
+    let c0 = source.at(at: index)
+    let c1 = source.at(at: index + 1)
+    let c2 = source.at(at: index + 2)
+    let c3 = source.at(at: index + 3)
+    let d0 = base64_ascii_to_digit(c0)
+    let d1 = base64_ascii_to_digit(c1)
+    let is_pad_2 = c2 == 61
+    let is_pad_3 = c3 == 61
+    let is_last_quartet = (index + 4) == source_len
+
+    match(d0)
+      Some<i32> { value: d0_value }:
+        match(d1)
+          Some<i32> { value: d1_value }:
+            if is_pad_2 and not is_pad_3 then:
+              return decode_error("invalid base64 padding")
+            if (is_pad_2 or is_pad_3) and not is_last_quartet then:
+              return decode_error("base64 padding is only valid at the end")
+
+            let byte0 = d0_value * 4 + (d1_value / 16)
+            buffer.push(value: byte0)
+
+            if not is_pad_2 then:
+              let d2 = base64_ascii_to_digit(c2)
+              match(d2)
+                Some<i32> { value: d2_value }:
+                  let byte1 = div_rem(d1_value, 16).1 * 16 + (d2_value / 4)
+                  buffer.push(value: byte1)
+
+                  if not is_pad_3 then:
+                    let d3 = base64_ascii_to_digit(c3)
+                    match(d3)
+                      Some<i32> { value: d3_value }:
+                        let byte2 = div_rem(d2_value, 4).1 * 64 + d3_value
+                        buffer.push(value: byte2)
+                      None:
+                        return decode_error("base64 input contains invalid characters")
+                None:
+                  return decode_error("base64 input contains invalid characters")
+          None:
+            return decode_error("base64 input contains invalid characters")
+      None:
+        return decode_error("base64 input contains invalid characters")
+
+    index = index + 4
+
+  Ok<Bytes> { value: buffer.as_bytes() }
+
+fn string_from_ascii_bytes(bytes: Array<i32>) -> String
+  new_string(bytes.to_fixed_array())
+
+fn decode_error<T>(message: String) -> Result<T, DecodeError>
+  Err<DecodeError> { error: DecodeError { message: message } }
+
+fn base64_ascii_to_digit(value: i32) -> Option<i32>
+  if value >= 65 and value <= 90 then:
+    return Some<i32> { value: value - 65 }
+  if value >= 97 and value <= 122 then:
+    return Some<i32> { value: value - 71 }
+  if value >= 48 and value <= 57 then:
+    return Some<i32> { value: value + 4 }
+  if value == 43 then:
+    return Some<i32> { value: 62 }
+  if value == 47 then:
+    return Some<i32> { value: 63 }
+  None {}
+
+fn base64_digit_to_ascii(value: i32) -> i32
+  if value < 26 then:
+    return 65 + value
+  if value < 52 then:
+    return 97 + (value - 26)
+  if value < 62 then:
+    return 48 + (value - 52)
+  if value == 62 then:
+    return 43
+  47
+
+fn div_rem(value: i32, divisor: i32) -> (i32, i32)
+  let quotient = value / divisor
+  let remainder = value - quotient * divisor
+  (quotient, remainder)
