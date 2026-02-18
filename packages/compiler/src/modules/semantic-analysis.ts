@@ -110,6 +110,8 @@ const analyzeCyclicScc = ({
 }) => {
   const firstPassSemantics = new Map<string, SemanticsPipelineResult>();
   const firstPassExports = new Map<string, ModuleExportTable>();
+  const secondPassSemantics = new Map<string, SemanticsPipelineResult>();
+  const secondPassExports = new Map<string, ModuleExportTable>();
 
   moduleIds.forEach((moduleId) => {
     const result = analyzeModule({
@@ -137,8 +139,14 @@ const analyzeCyclicScc = ({
       recoverFromTypingErrors,
       cycleModuleIdsByModuleId,
       graph,
-      semantics: mergeWithOverrides({ base: semantics, overrides: firstPassSemantics }),
-      exports: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
+      semantics: mergeWithOverrides({
+        base: mergeWithOverrides({ base: semantics, overrides: firstPassSemantics }),
+        overrides: secondPassSemantics,
+      }),
+      exports: mergeWithOverrides({
+        base: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
+        overrides: secondPassExports,
+      }),
       arena,
       effectInterner,
       diagnostics,
@@ -146,6 +154,8 @@ const analyzeCyclicScc = ({
     if (!result) {
       return;
     }
+    secondPassSemantics.set(moduleId, result);
+    secondPassExports.set(moduleId, result.exports);
     semantics.set(moduleId, result);
     exports.set(moduleId, result.exports);
   });
