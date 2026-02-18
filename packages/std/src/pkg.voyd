@@ -8,6 +8,10 @@ pub self::msgpack
 pub self::dict
 pub self::subscript
 pub self::traits
+pub self::error
+pub self::log
+pub self::time
+pub self::random
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::all
 pub std::result::types::{ Result, Ok, Err }

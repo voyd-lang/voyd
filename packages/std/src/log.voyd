@@ -1,0 +1,70 @@
+use std::array::Array
+use std::optional::types::all
+use std::string::{ String, StringSlice }
+
+pub obj LogTrace {}
+pub obj LogDebug {}
+pub obj LogInfo {}
+pub obj LogWarn {}
+pub obj LogError {}
+
+pub type LogLevel = LogTrace | LogDebug | LogInfo | LogWarn | LogError
+
+pub obj LogString {
+  api value: String
+}
+
+pub obj LogInt {
+  api value: i64
+}
+
+pub obj LogFloat {
+  api value: f64
+}
+
+pub obj LogBool {
+  api value: bool
+}
+
+pub type LogFieldValue = LogString | LogInt | LogFloat | LogBool
+
+pub obj LogField {
+  api key: String,
+  api value: LogFieldValue
+}
+
+pub type LogFields = Array<LogField>
+
+@effect(id: "std::log::Log")
+pub eff Log
+  emit(tail, level: LogLevel, message: String, fields: Option<LogFields>) -> void
+
+pub fn trace({ message: StringSlice }): Log -> void
+  Log::emit(LogTrace {}, message.to_string(), None {})
+
+pub fn trace({ message: StringSlice, fields: LogFields }): Log -> void
+  Log::emit(LogTrace {}, message.to_string(), Some<LogFields> { value: fields })
+
+pub fn debug({ message: StringSlice }): Log -> void
+  Log::emit(LogDebug {}, message.to_string(), None {})
+
+pub fn debug({ message: StringSlice, fields: LogFields }): Log -> void
+  Log::emit(LogDebug {}, message.to_string(), Some<LogFields> { value: fields })
+
+pub fn info({ message: StringSlice }): Log -> void
+  Log::emit(LogInfo {}, message.to_string(), None {})
+
+pub fn info({ message: StringSlice, fields: LogFields }): Log -> void
+  Log::emit(LogInfo {}, message.to_string(), Some<LogFields> { value: fields })
+
+pub fn warn({ message: StringSlice }): Log -> void
+  Log::emit(LogWarn {}, message.to_string(), None {})
+
+pub fn warn({ message: StringSlice, fields: LogFields }): Log -> void
+  Log::emit(LogWarn {}, message.to_string(), Some<LogFields> { value: fields })
+
+pub fn error({ message: StringSlice }): Log -> void
+  Log::emit(LogError {}, message.to_string(), None {})
+
+pub fn error({ message: StringSlice, fields: LogFields }): Log -> void
+  Log::emit(LogError {}, message.to_string(), Some<LogFields> { value: fields })

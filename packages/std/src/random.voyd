@@ -1,0 +1,57 @@
+use std::array::Array
+use std::optional::types::all
+use std::subscript::Range
+
+@effect(id: "std::random::Random")
+pub eff Random
+  next_i64(tail) -> i64
+
+pub fn fill_buffer(~buf: Array<i32>, len: i32): Random -> void
+  if len <= 0 then:
+    return void
+
+  var index = 0
+  while index < len do:
+    let next = wrap_i64(Random::next_i64())
+    buf.push(value: mod_i32(next, 256))
+    index = index + 1
+
+pub fn random_bool(): Random -> bool
+  let value = wrap_i64(Random::next_i64())
+  mod_i32(value, 2) == 0
+
+pub fn random_int({ range: Range }): Random -> i32
+  let start = range_start_or_zero(range.start)
+  let end_exclusive = range_end_exclusive(range, start)
+  if end_exclusive <= start then:
+    return start
+
+  let span = end_exclusive - start
+  let seed = wrap_i64(Random::next_i64())
+  start + mod_i32(seed, span)
+
+fn range_start_or_zero(start: Option<i32>) -> i32
+  match(start)
+    Some<i32> { value }:
+      value
+    None:
+      0
+
+fn range_end_exclusive(range: Range, start: i32) -> i32
+  match(range.end)
+    Some<i32> { value }:
+      if range.include_end then:
+        if value >= 2147483647 then: 2147483647 else: value + 1
+      else:
+        value
+    None:
+      start + 1
+
+fn mod_i32(value: i32, modulus: i32) -> i32
+  if modulus <= 0 then:
+    return 0
+  let div = value / modulus
+  let rem = value - div * modulus
+  if rem < 0 then: rem + modulus else: rem
+
+fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)
