@@ -342,6 +342,9 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
+    if (diagnostics.length) {
+      throw new Error(JSON.stringify(diagnostics, null, 2));
+    }
     expect(diagnostics).toHaveLength(0);
   });
 
@@ -366,6 +369,7 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
+    console.error("enum type-only diagnostics", diagnostics);
     expect(diagnostics).toHaveLength(0);
   });
 
@@ -402,6 +406,60 @@ obj Tea {}
 
 pub fn main() -> Drink
   Drink::Coffee {}
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("resolves imported enum namespaces used only in type positions", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}drinks.voyd`]: `
+pub obj Coffee {}
+pub obj Tea {}
+pub type Drink = Coffee | Tea
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::drinks::{ Drink }
+
+pub fn takes(_: Drink::Coffee) -> i32
+  1
+
+pub fn main() -> i32
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("preserves outer generic args for namespaced type members", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+type Wrap<T> = Marker<T>
+obj Marker<T> { value: T }
+
+pub fn takes(_: Wrap<i32>::Marker) -> i32
+  1
+
+pub fn main() -> i32
+  1
 `,
     });
 

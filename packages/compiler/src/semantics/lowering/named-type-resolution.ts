@@ -100,12 +100,17 @@ export const resolveNamedTypeTarget = ({
     if (allowed.length !== 1) {
       return undefined;
     }
+    const combinedTypeArguments = [
+      ...(member.typeArguments ?? []),
+      ...(typeNamespace.typeArguments ?? []),
+    ];
 
     return {
       symbol: allowed[0],
       path: [...typeNamespace.path, member.name.value],
       name: member.name,
-      typeArguments: member.typeArguments,
+      typeArguments:
+        combinedTypeArguments.length > 0 ? combinedTypeArguments : undefined,
     };
   }
 
@@ -151,7 +156,7 @@ const resolveTypeNamespaceTarget = ({
   scope: ScopeId;
   ctx: LowerContext;
   parseTypeArguments: (entries: readonly Expr[]) => HirTypeExpr[];
-}): { symbol: SymbolId; path: string[] } | undefined => {
+}): { symbol: SymbolId; path: string[]; typeArguments?: HirTypeExpr[] } | undefined => {
   const target = parseNamedTypeTarget({ expr, parseTypeArguments });
   if (!target) {
     return undefined;
@@ -168,6 +173,7 @@ const resolveTypeNamespaceTarget = ({
   return {
     symbol,
     path: [target.name.value],
+    typeArguments: target.typeArguments,
   };
 };
 

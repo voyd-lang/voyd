@@ -137,6 +137,8 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   }
 };
 
+let implicitEnumNamespaceImportId = 0;
+
 type ParsedUseEntry = NormalizedUseEntry;
 
 type ParsedUseDecl = {
@@ -781,6 +783,14 @@ const declareImportedSymbol = ({
       span,
     };
     ctx.imports.push(bound);
+    hydrateImportedEnumAliasNamespace({
+      namespaceSymbol: local,
+      importedModuleId,
+      importedSymbolId:
+        typeof importedSymbolId === "number" ? importedSymbolId : undefined,
+      declaredAt,
+      ctx,
+    });
     locals.push(bound);
   });
 
@@ -798,6 +808,93 @@ const declareImportedSymbol = ({
   }
 
   return locals;
+};
+
+const hydrateImportedEnumAliasNamespace = ({
+  namespaceSymbol,
+  importedModuleId,
+  importedSymbolId,
+  declaredAt,
+  ctx,
+}: {
+  namespaceSymbol: SymbolId;
+  importedModuleId: string;
+  importedSymbolId?: SymbolId;
+  declaredAt: Form;
+  ctx: BindingContext;
+}): void => {
+  if (typeof importedSymbolId !== "number") {
+    return;
+  }
+
+  const dependency = ctx.dependencies.get(importedModuleId);
+  if (!dependency) {
+    return;
+  }
+
+  const aliasDecl = dependency.decls.getTypeAlias(importedSymbolId);
+  const variantNames = aliasDecl
+    ? enumVariantTypeNamesFromAliasTarget(aliasDecl.target)
+    : undefined;
+  if (!variantNames || variantNames.length === 0) {
+    return;
+  }
+
+  const exports = ctx.moduleExports.get(importedModuleId);
+  if (!exports) {
+    return;
+  }
+
+  const bucket = ctx.staticMethods.get(namespaceSymbol) ?? new Map();
+  let changed = false;
+
+  variantNames.forEach((variantName) => {
+    if (bucket.get(variantName)?.size) {
+      return;
+    }
+
+    const exported = exports.get(variantName);
+    if (!exported) {
+      return;
+    }
+    if (!canAccessExport({ exported, moduleId: importedModuleId, ctx })) {
+      return;
+    }
+
+    const exportedRecord = dependency.symbolTable.getSymbol(exported.symbol);
+    const metadata = exportedRecord.metadata as { entity?: string } | undefined;
+    if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
+      return;
+    }
+
+    const existing = ctx.imports.find(
+      (entry) =>
+        entry.target?.moduleId === importedModuleId &&
+        entry.target.symbol === exported.symbol,
+    )?.local;
+    const local =
+      typeof existing === "number"
+        ? existing
+        : ctx.symbolTable.declare({
+            name: `__enum_ns_${implicitEnumNamespaceImportId++}_${variantName}`,
+            kind: exported.kind,
+            declaredAt: declaredAt.syntaxId,
+            metadata: {
+              import: { moduleId: importedModuleId, symbol: exported.symbol },
+              ...(importableMetadataFrom(
+                exportedRecord.metadata as Record<string, unknown> | undefined,
+              ) ?? {}),
+            },
+          });
+
+    bucket.set(variantName, new Set([local]));
+    changed = true;
+  });
+
+  if (!changed) {
+    return;
+  }
+  ctx.staticMethods.set(namespaceSymbol, bucket);
 };
 
 const declareModuleImport = ({

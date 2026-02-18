@@ -674,6 +674,14 @@ const ensureStaticMethodImport = ({
 
   const existing = ctx.staticMethods.get(targetSymbol)?.get(memberName);
   if (existing?.size) {
+    existing.forEach((symbol) =>
+      ensureConstructorImport({
+        targetSymbol: symbol,
+        syntax,
+        scope,
+        ctx,
+      }),
+    );
     return;
   }
 
