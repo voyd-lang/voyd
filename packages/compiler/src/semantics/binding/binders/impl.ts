@@ -1,7 +1,7 @@
 import { type Expr, isIdentifierAtom, isForm } from "../../../parser/index.js";
 import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import type { TypeParameterDecl, TraitDecl } from "../../decls.js";
-import type { BindingContext } from "../types.js";
+import type { BindingContext, BindingResult } from "../types.js";
 import type { ParsedFunctionDecl, ParsedImplDecl } from "../parsing.js";
 import { parseFunctionDecl } from "../parsing.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
@@ -371,10 +371,15 @@ const createImportedTraitDefaultScope = ({
   const referencedNames = collectReferencedIdentifierNames({
     parsedDefaultMethod,
   });
+  const sourceBinding = ctx.dependencies.get(sourceModuleId);
   const importCandidates = collectImportCandidatesForReferencedNames({
     names: referencedNames,
     fromScope: sourceMethodScope,
     symbolTable: sourceSymbolTable,
+    sourceOverloadBySymbol: sourceBinding?.overloadBySymbol,
+    sourceOverloadOptions: sourceBinding
+      ? collectOverloadOptionsBySetId(sourceBinding)
+      : undefined,
   });
   if (importCandidates.length === 0) {
     return undefined;
@@ -386,36 +391,49 @@ const createImportedTraitDefaultScope = ({
     owner: ownerSyntaxId,
   });
 
-  importCandidates.forEach(({ symbol, record }) => {
-    const sourceMetadata = (record.metadata ?? {}) as {
-      import?: { moduleId?: unknown; symbol?: unknown };
-    };
-    const importedModuleId =
-      importedModuleIdFrom(record.metadata as Record<string, unknown> | undefined) ??
-      sourceModuleId;
-    const importedSymbol =
-      typeof sourceMetadata.import?.symbol === "number"
-        ? sourceMetadata.import.symbol
-        : symbol;
-    const importableMetadata = importableMetadataFrom(
-      record.metadata as Record<string, unknown> | undefined,
-    );
+  importCandidates.forEach(({ candidates }) => {
+    const importedLocals = candidates.map(({ symbol, record }) => {
+      const sourceMetadata = (record.metadata ?? {}) as {
+        import?: { moduleId?: unknown; symbol?: unknown };
+      };
+      const importedModuleId =
+        importedModuleIdFrom(record.metadata as Record<string, unknown> | undefined) ??
+        sourceModuleId;
+      const importedSymbol =
+        typeof sourceMetadata.import?.symbol === "number"
+          ? sourceMetadata.import.symbol
+          : symbol;
+      const importableMetadata = importableMetadataFrom(
+        record.metadata as Record<string, unknown> | undefined,
+      );
 
-    ctx.symbolTable.declare(
-      {
-        name: record.name,
-        kind: record.kind,
-        declaredAt: ownerSyntaxId,
-        metadata: {
-          import:
-            record.kind === "module"
-              ? { moduleId: importedModuleId }
-              : { moduleId: importedModuleId, symbol: importedSymbol },
-          ...(importableMetadata ?? {}),
+      return ctx.symbolTable.declare(
+        {
+          name: record.name,
+          kind: record.kind,
+          declaredAt: ownerSyntaxId,
+          metadata: {
+            import:
+              record.kind === "module"
+                ? { moduleId: importedModuleId }
+                : { moduleId: importedModuleId, symbol: importedSymbol },
+            ...(importableMetadata ?? {}),
+          },
         },
-      },
-      importedScope,
-    );
+        importedScope,
+      );
+    });
+
+    if (importedLocals.length <= 1) {
+      return;
+    }
+    const nextOverloadSetId =
+      Math.max(-1, ...ctx.importedOverloadOptions.keys(), ...ctx.overloads.keys()) +
+      1;
+    ctx.importedOverloadOptions.set(nextOverloadSetId, importedLocals);
+    importedLocals.forEach((local) => {
+      ctx.overloadBySymbol.set(local, nextOverloadSetId);
+    });
   });
 
   return importedScope;
@@ -425,36 +443,125 @@ const collectImportCandidatesForReferencedNames = ({
   names,
   fromScope,
   symbolTable,
+  sourceOverloadBySymbol,
+  sourceOverloadOptions,
 }: {
   names: ReadonlySet<string>;
   fromScope: ScopeId;
   symbolTable: BindingContext["symbolTable"];
-}): { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }[] => {
+  sourceOverloadBySymbol?: ReadonlyMap<SymbolId, number>;
+  sourceOverloadOptions?: ReadonlyMap<number, readonly SymbolId[]>;
+}): {
+  name: string;
+  candidates: { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }[];
+}[] => {
   const candidatesByName = new Map<
     string,
-    { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }
+    { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }[]
   >();
   names.forEach((name) => {
-    const symbol = symbolTable.resolve(name, fromScope);
-    if (typeof symbol !== "number") {
+    const nearest = nearestScopedSymbolsForName({
+      name,
+      fromScope,
+      symbolTable,
+    });
+    if (!nearest || nearest.scope === fromScope) {
       return;
     }
-    const record = symbolTable.getSymbol(symbol);
-    if (
-      record.name === "void" ||
-      record.scope === fromScope ||
-      record.kind === "parameter" ||
-      record.kind === "type-parameter"
-    ) {
+    const symbols = expandOverloadCandidates({
+      symbols: nearest.symbols,
+      sourceOverloadBySymbol,
+      sourceOverloadOptions,
+    });
+    const candidates = symbols
+      .map((symbol) => ({ symbol, record: symbolTable.getSymbol(symbol) }))
+      .filter(({ record }) => {
+        if (record.name !== name) {
+          return false;
+        }
+        if (
+          record.name === "void" ||
+          record.kind === "parameter" ||
+          record.kind === "type-parameter"
+        ) {
+          return false;
+        }
+        const metadata = (record.metadata ?? {}) as { entity?: unknown };
+        return metadata.entity !== "trait-method";
+      });
+    if (candidates.length === 0) {
       return;
     }
-    const metadata = (record.metadata ?? {}) as { entity?: unknown };
-    if (metadata.entity === "trait-method") {
-      return;
-    }
-    candidatesByName.set(record.name, { symbol, record });
+    candidatesByName.set(name, candidates);
   });
-  return Array.from(candidatesByName.values());
+  return Array.from(candidatesByName.entries()).map(([name, candidates]) => ({
+    name,
+    candidates,
+  }));
+};
+
+const expandOverloadCandidates = ({
+  symbols,
+  sourceOverloadBySymbol,
+  sourceOverloadOptions,
+}: {
+  symbols: readonly SymbolId[];
+  sourceOverloadBySymbol?: ReadonlyMap<SymbolId, number>;
+  sourceOverloadOptions?: ReadonlyMap<number, readonly SymbolId[]>;
+}): SymbolId[] => {
+  const expanded = new Set<SymbolId>();
+  symbols.forEach((symbol) => {
+    const overloadSetId = sourceOverloadBySymbol?.get(symbol);
+    if (typeof overloadSetId !== "number") {
+      expanded.add(symbol);
+      return;
+    }
+    const overloadSymbols = sourceOverloadOptions?.get(overloadSetId);
+    if (!overloadSymbols || overloadSymbols.length === 0) {
+      expanded.add(symbol);
+      return;
+    }
+    overloadSymbols.forEach((option) => expanded.add(option));
+  });
+  return Array.from(expanded);
+};
+
+const collectOverloadOptionsBySetId = (
+  binding: BindingResult,
+): Map<number, readonly SymbolId[]> => {
+  const options = new Map<number, readonly SymbolId[]>();
+  binding.overloads.forEach((set, id) => {
+    options.set(
+      id,
+      set.functions.map((fn) => fn.symbol),
+    );
+  });
+  binding.importedOverloadOptions.forEach((symbols, id) => {
+    options.set(id, symbols);
+  });
+  return options;
+};
+
+const nearestScopedSymbolsForName = ({
+  name,
+  fromScope,
+  symbolTable,
+}: {
+  name: string;
+  fromScope: ScopeId;
+  symbolTable: BindingContext["symbolTable"];
+}): { scope: ScopeId; symbols: SymbolId[] } | undefined => {
+  let scope: ScopeId | null = fromScope;
+  while (typeof scope === "number") {
+    const symbols = Array.from(symbolTable.symbolsInScope(scope)).filter(
+      (symbol) => symbolTable.getSymbol(symbol).name === name,
+    );
+    if (symbols.length > 0) {
+      return { scope, symbols };
+    }
+    scope = symbolTable.getScope(scope).parent;
+  }
+  return undefined;
 };
 
 const collectReferencedIdentifierNames = ({

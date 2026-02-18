@@ -110,7 +110,13 @@ const tryLowerIsTypeCheckCall = ({
     return undefined;
   }
 
-  const type = lowerTypeExpr(typeExpr, ctx, scopes.current());
+  const type = (() => {
+    try {
+      return lowerTypeExpr(typeExpr, ctx, scopes.current());
+    } catch {
+      return undefined;
+    }
+  })();
   if (!type) {
     return undefined;
   }
