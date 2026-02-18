@@ -13,6 +13,7 @@
     "build": "turbo run build --affected",
     "test": "turbo run test --affected --output-logs=errors-only --concurrency=4",
     "typecheck": "turbo run typecheck --affected",
+    "typecheck:unused": "turbo run typecheck --affected -- --noUnusedLocals --noUnusedParameters",
     "lint": "turbo run lint --affected --parallel",
     "dev": "turbo run dev --affected --parallel",
     "clean": "turbo run clean --affected --parallel"

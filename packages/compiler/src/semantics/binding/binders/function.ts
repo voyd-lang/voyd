@@ -9,7 +9,7 @@ import type { TypeParameterDecl, ParameterDeclInput } from "../../decls.js";
 import type { BindingContext } from "../types.js";
 import type { ParsedFunctionDecl } from "../parsing.js";
 import type { HirVisibility } from "../../hir/index.js";
-import type { ScopeId, SymbolId } from "../../ids.js";
+import type { ScopeId } from "../../ids.js";
 import { bindExpr } from "./expressions.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindTypeParameters } from "./type-parameters.js";
