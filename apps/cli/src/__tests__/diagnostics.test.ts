@@ -14,8 +14,6 @@ const findFixtureDiagnostic = (): Diagnostic => {
   if (start < 0) {
     throw new Error("fixture missing span target");
   }
-  const lastNewline = fixtureSource.lastIndexOf("\n", start - 1);
-  const column = start - lastNewline;
 
   return {
     code: "TY0002",

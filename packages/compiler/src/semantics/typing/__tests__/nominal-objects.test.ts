@@ -7,7 +7,7 @@ describe("nominal objects", () => {
   it("preserves nominal identity while allowing structural use", () => {
     const ast = loadAst("nominal_objects.voyd");
     const semantics = semanticsPipeline(ast);
-    const { typing, binding } = semantics;
+    const { typing } = semantics;
     const symbolTable = getSymbolTable(semantics);
     const root = symbolTable.rootScope;
 

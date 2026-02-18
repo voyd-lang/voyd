@@ -1,9 +1,7 @@
 import {
   type Expr,
-  type Form,
   isForm,
   isIdentifierAtom,
-  isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import type { HirBindingKind, HirPattern } from "../../hir/index.js";

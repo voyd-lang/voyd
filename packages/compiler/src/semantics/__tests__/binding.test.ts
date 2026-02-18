@@ -18,9 +18,7 @@ import type {
 import type { ModuleExportTable } from "../modules.js";
 import { resolve, sep } from "node:path";
 import {
-  moduleVisibility,
   packageVisibility,
-  publicVisibility,
 } from "../hir/index.js";
 import { packageIdFromPath } from "../packages.js";
 

@@ -1,6 +1,5 @@
 import {
   type Expr,
-  type IdentifierAtom,
   type Syntax,
   isForm,
   isIdentifierAtom,
@@ -16,7 +15,6 @@ import type {
   TraitMethodDeclInput,
   TypeParameterDecl,
   TraitMethodDecl,
-  TraitDecl,
   ParameterDeclInput,
 } from "../../decls.js";
 import type { ScopeId, SymbolId } from "../../ids.js";

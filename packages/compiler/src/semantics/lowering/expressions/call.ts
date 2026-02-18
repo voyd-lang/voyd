@@ -19,7 +19,6 @@ import {
 } from "./object-literal.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 import {
-  lowerConstructorArgFromEntry,
   lowerConstructorLiteralCall,
 } from "./constructor-call.js";
 

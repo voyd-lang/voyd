@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { HirMethodCallExpr } from "../../hir/nodes.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
-import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("impl method generics", () => {
   it("binds explicit type arguments to method generics before impl generics", () => {

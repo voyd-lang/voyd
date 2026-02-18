@@ -3,9 +3,7 @@ import { AugmentedBinaryen } from "./types.js";
 import {
   arrayGet,
   arrayLen,
-  arrayNew,
   arrayNewFixed,
-  arraySet,
   binaryenTypeToHeapType,
   defineArrayType,
 } from "./index.js";
