@@ -35,6 +35,7 @@ type LowerNominalObjectLiteralParams = LoweringParams & {
   args: readonly Expr[];
   ast: Expr;
   fallbackTypeArguments?: HirTypeExpr[];
+  allowedTargetSymbols?: ReadonlySet<number>;
 };
 
 export const lowerCallFromElements = ({
@@ -162,6 +163,7 @@ export const lowerNominalObjectLiteral = ({
   args,
   ast,
   fallbackTypeArguments,
+  allowedTargetSymbols,
   ctx,
   scopes,
   lowerExpr,
@@ -174,6 +176,12 @@ export const lowerNominalObjectLiteral = ({
     scope: scopes.current(),
   });
   if (!calleeResolution) {
+    return undefined;
+  }
+  if (
+    allowedTargetSymbols &&
+    !allowedTargetSymbols.has(calleeResolution.symbol)
+  ) {
     return undefined;
   }
 

@@ -283,12 +283,15 @@ const lowerStaticMethodCall = ({
     const expr = lowerExpr(arg, ctx, scopes);
     return { expr };
   });
+  const namespaceMemberSymbols =
+    methodTable.get(calleeExpr.value) ?? new Set<SymbolId>();
 
   const nominal = lowerNominalObjectLiteral({
     callee: calleeExpr,
     args: memberForm.rest,
     ast: accessForm,
     fallbackTypeArguments: combinedTypeArguments,
+    allowedTargetSymbols: namespaceMemberSymbols,
     ctx,
     scopes,
     lowerExpr,

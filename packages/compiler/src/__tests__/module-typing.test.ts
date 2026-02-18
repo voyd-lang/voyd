@@ -473,6 +473,30 @@ pub fn main() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("rejects namespaced nominal literals for non-members", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+obj A1 { value: i32 }
+obj B1 { value: i32 }
+type B = B1
+
+pub fn main() -> i32
+  let value = B::A1 { value: 1 }
+  value.value
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics.length).toBeGreaterThan(0);
+  });
+
   it("resolves trait-object method calls for traits imported from another module", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
