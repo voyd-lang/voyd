@@ -342,9 +342,6 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
-    if (diagnostics.length) {
-      throw new Error(JSON.stringify(diagnostics, null, 2));
-    }
     expect(diagnostics).toHaveLength(0);
   });
 
@@ -369,7 +366,6 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
-    console.error("enum type-only diagnostics", diagnostics);
     expect(diagnostics).toHaveLength(0);
   });
 
@@ -435,6 +431,35 @@ pub fn takes(_: Drink::Coffee) -> i32
 
 pub fn main() -> i32
   1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("preserves concrete enum alias member type arguments across module boundaries", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}drinks.voyd`]: `
+pub obj Coffee<T> {}
+pub type Drink = Coffee<i32>
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::drinks::{ Drink }
+
+pub fn takes(_: Drink::Coffee) -> i32
+  1
+
+pub fn main() -> i32
+  let from_literal: Drink::Coffee = Drink::Coffee {}
+  takes(from_literal)
 `,
     });
 

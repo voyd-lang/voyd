@@ -15,6 +15,7 @@ import {
 } from "./expressions/namespace-resolution.js";
 import { resolveTypeSymbol } from "./resolution.js";
 import type { LowerContext } from "./types.js";
+import { enumNamespaceMemberTypeArgumentsFromMetadata } from "../enum-namespace.js";
 
 export interface ResolvedNamedTypeTarget {
   symbol?: SymbolId;
@@ -100,8 +101,15 @@ export const resolveNamedTypeTarget = ({
     if (allowed.length !== 1) {
       return undefined;
     }
+    const enumNamespaceTypeArguments = resolveEnumNamespaceMemberTypeArguments({
+      namespaceSymbol: typeNamespace.symbol,
+      memberName: member.name.value,
+      ctx,
+      parseTypeArguments,
+    });
     const combinedTypeArguments = [
       ...(member.typeArguments ?? []),
+      ...(enumNamespaceTypeArguments ?? []),
       ...(typeNamespace.typeArguments ?? []),
     ];
 
@@ -175,6 +183,30 @@ const resolveTypeNamespaceTarget = ({
     path: [target.name.value],
     typeArguments: target.typeArguments,
   };
+};
+
+const resolveEnumNamespaceMemberTypeArguments = ({
+  namespaceSymbol,
+  memberName,
+  ctx,
+  parseTypeArguments,
+}: {
+  namespaceSymbol: SymbolId;
+  memberName: string;
+  ctx: LowerContext;
+  parseTypeArguments: (entries: readonly Expr[]) => HirTypeExpr[];
+}): HirTypeExpr[] | undefined => {
+  const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
+  const memberTypeArguments = enumNamespaceMemberTypeArgumentsFromMetadata({
+    source: namespaceRecord.metadata as Record<string, unknown> | undefined,
+    memberName,
+  });
+  if (!memberTypeArguments || memberTypeArguments.length === 0) {
+    return undefined;
+  }
+
+  const lowered = parseTypeArguments(memberTypeArguments);
+  return lowered.length > 0 ? lowered : undefined;
 };
 
 const isGenericsForm = (expr: Expr | undefined): expr is Form =>

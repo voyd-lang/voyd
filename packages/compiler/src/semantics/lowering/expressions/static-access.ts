@@ -23,6 +23,7 @@ import { resolveConstructorResolution, resolveTypeSymbol } from "../resolution.j
 import { lowerTypeExpr } from "../type-expressions.js";
 import { resolveModulePathSymbol } from "./namespace-resolution.js";
 import { lowerQualifiedTraitMethodCall } from "./qualified-trait-call.js";
+import { enumNamespaceMemberTypeArgumentsFromMetadata } from "../../enum-namespace.js";
 
 export const lowerStaticAccessExpr = ({
   form,
@@ -260,13 +261,17 @@ const lowerStaticMethodCall = ({
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
         .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
     : undefined;
-  const combinedTypeArguments =
-    targetTypeArguments && targetTypeArguments.length > 0
-      ? [
-          ...(typeArguments ?? []),
-          ...(targetTypeArguments.filter(Boolean) as HirTypeExpr[]),
-        ]
-      : typeArguments;
+  const enumNamespaceTypeArguments = lowerEnumNamespaceMemberTypeArguments({
+    namespaceSymbol: targetSymbol,
+    memberName: calleeExpr.value,
+    scope: scopes.current(),
+    ctx,
+  });
+  const combinedTypeArguments = [
+    ...(typeArguments ?? []),
+    ...(enumNamespaceTypeArguments ?? []),
+    ...(targetTypeArguments ?? []),
+  ];
 
   const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
     if (isForm(arg) && arg.calls(":")) {
@@ -329,10 +334,36 @@ const lowerStaticMethodCall = ({
     callee,
     args,
     typeArguments:
-      combinedTypeArguments && combinedTypeArguments.length > 0
+      combinedTypeArguments.length > 0
         ? combinedTypeArguments
         : undefined,
   });
+};
+
+const lowerEnumNamespaceMemberTypeArguments = ({
+  namespaceSymbol,
+  memberName,
+  scope,
+  ctx,
+}: {
+  namespaceSymbol: SymbolId;
+  memberName: string;
+  scope: ScopeId;
+  ctx: LoweringParams["ctx"];
+}): HirTypeExpr[] | undefined => {
+  const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
+  const typeArgumentExprs = enumNamespaceMemberTypeArgumentsFromMetadata({
+    source: namespaceRecord.metadata as Record<string, unknown> | undefined,
+    memberName,
+  });
+  if (!typeArgumentExprs || typeArgumentExprs.length === 0) {
+    return undefined;
+  }
+
+  const lowered = typeArgumentExprs
+    .map((entry) => lowerTypeExpr(entry, ctx, scope))
+    .filter((entry): entry is HirTypeExpr => Boolean(entry));
+  return lowered.length > 0 ? lowered : undefined;
 };
 
 const lowerModuleQualifiedCall = ({

@@ -798,6 +798,17 @@ const ensureEnumNamespaceImport = ({
   const exportTable = ctx.moduleExports.get(importedTarget.moduleId);
   const exported = exportTable?.get(memberName);
   if (!exported) {
+    ctx.diagnostics.push(
+      diagnosticFromCode({
+        code: "BD0001",
+        params: {
+          kind: "missing-export",
+          moduleId: importedTarget.moduleId,
+          target: memberName,
+        },
+        span: toSourceSpan(syntax),
+      }),
+    );
     return;
   }
   if (!canAccessExport({ exported, moduleId: importedTarget.moduleId, ctx })) {

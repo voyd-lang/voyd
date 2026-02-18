@@ -6,7 +6,10 @@ import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
-import { enumVariantTypeNamesFromAliasTarget } from "../../enum-namespace.js";
+import {
+  enumNamespaceMetadataFromAliasTarget,
+  enumVariantTypeNamesFromAliasTarget,
+} from "../../enum-namespace.js";
 import type { SymbolId } from "../../ids.js";
 
 export const bindTypeAlias = (
@@ -26,6 +29,10 @@ export const bindTypeAlias = (
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
+  const enumNamespaceMetadata = enumNamespaceMetadataFromAliasTarget({
+    target: decl.target,
+    typeParameterCount: decl.typeParameters.length,
+  });
   reportOverloadNameCollision({
     name: decl.name.value,
     scope: tracker.current(),
@@ -37,7 +44,11 @@ export const bindTypeAlias = (
     name: decl.name.value,
     kind: "type",
     declaredAt: decl.form.syntaxId,
-    metadata: { entity: "type-alias", ...intrinsicTypeMetadata },
+    metadata: {
+      entity: "type-alias",
+      ...intrinsicTypeMetadata,
+      ...(enumNamespaceMetadata ?? {}),
+    },
   });
 
   const aliasScope = ctx.symbolTable.createScope({

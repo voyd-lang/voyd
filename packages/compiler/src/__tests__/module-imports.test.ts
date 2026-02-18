@@ -246,4 +246,43 @@ pub fn main() -> Drink
       ),
     ).toBe(true);
   });
+
+  it("reports missing exports for unresolved enum namespace members", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}variants.voyd`]: `
+pub obj Coffee {}
+pub obj Tea {}
+`,
+      [`${srcRoot}${sep}drinks.voyd`]: `
+use src::variants::all
+
+pub type Drink = Coffee | Tea
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::drinks::{ Drink }
+
+pub fn main() -> Drink
+  Drink::Tea {}
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+
+    expect(
+      combinedDiagnostics.some(
+        (diag) =>
+          diag.code === "BD0001" &&
+          diag.message.includes("src::drinks") &&
+          diag.message.includes("Tea"),
+      ),
+    ).toBe(true);
+  });
 });
