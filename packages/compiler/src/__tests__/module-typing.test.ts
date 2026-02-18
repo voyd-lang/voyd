@@ -369,6 +369,206 @@ pub fn main() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("propagates outer generic args into namespaced nominal literals", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+type Wrap<T> = Marker<T>
+obj Marker<T> { value: T }
+
+pub fn main() -> i32
+  let marker = Wrap<i32>::Marker { value: 5 }
+  marker.value
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("supports enum alias namespace access when alias is declared before variants", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+type Drink = Coffee | Tea
+obj Coffee {}
+obj Tea {}
+
+pub fn main() -> Drink
+  Drink::Coffee {}
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("resolves imported enum namespaces used only in type positions", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}drinks.voyd`]: `
+pub obj Coffee {}
+pub obj Tea {}
+pub type Drink = Coffee | Tea
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::drinks::{ Drink }
+
+pub fn takes(_: Drink::Coffee) -> i32
+  1
+
+pub fn main() -> i32
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("preserves concrete enum alias member type arguments across module boundaries", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}drinks.voyd`]: `
+pub obj Coffee<T> {}
+pub type Drink = Coffee<i32>
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::drinks::{ Drink }
+
+pub fn takes(_: Drink::Coffee) -> i32
+  1
+
+pub fn main() -> i32
+  let from_literal: Drink::Coffee = Drink::Coffee {}
+  takes(from_literal)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("preserves fixed member args for generic enum namespace aliases", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+type Wrap<T> = Marker<T, i32>
+obj Marker<T, U> { value: T, marker: U }
+
+pub fn main() -> i32
+  let wrapped: Wrap<bool>::Marker = Wrap<bool>::Marker { value: true, marker: 7 }
+  wrapped.marker
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("substitutes namespace params inside composite enum member args", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+obj Box<T> {}
+obj Marker<U> {}
+type Wrap<T> = Marker<Box<T>>
+
+pub fn main() -> i32
+  let marker: Wrap<i32>::Marker = Wrap<i32>::Marker {}
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("preserves outer generic args for namespaced type members", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+type Wrap<T> = Marker<T>
+obj Marker<T> { value: T }
+
+pub fn takes(_: Wrap<i32>::Marker) -> i32
+  1
+
+pub fn main() -> i32
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("rejects namespaced nominal literals for non-members", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+obj A1 { value: i32 }
+obj B1 { value: i32 }
+type B = B1
+
+pub fn main() -> i32
+  let value = B::A1 { value: 1 }
+  value.value
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics.length).toBeGreaterThan(0);
+  });
+
   it("resolves trait-object method calls for traits imported from another module", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
@@ -625,6 +825,78 @@ pub fn main() -> i32
 
     const { diagnostics } = analyzeModulesWithIsolatedInterners({ graph });
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
+  it("resolves imported instance methods inside module import cycles", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::a::b::all
+
+pub fn main() -> i32
+  bounce()
+`,
+      [`${root}${sep}a.voyd`]: `
+pub obj Buffer {
+  api bytes: i32
+}
+
+impl Buffer
+  api fn byte_len(self) -> i32
+    self.bytes
+`,
+      [`${root}${sep}a${sep}b.voyd`]: `
+use src::a::all
+
+pub fn bounce() -> i32
+  Buffer { bytes: 3 }.byte_len()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("adds cycle-aware TY0022 hints for unresolved methods in cyclic modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::a::b::all
+
+pub fn main() -> i32
+  bounce()
+`,
+      [`${root}${sep}a.voyd`]: `
+pub obj Buffer {
+  api bytes: i32
+}
+`,
+      [`${root}${sep}a${sep}b.voyd`]: `
+use src::a::all
+
+pub fn bounce() -> i32
+  Buffer { bytes: 3 }.byte_len()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const unknownMethod = diagnostics.find((diagnostic) => diagnostic.code === "TY0022");
+    expect(unknownMethod).toBeDefined();
+    expect(
+      unknownMethod?.hints?.some((hint) => /import cycle/i.test(hint.message)),
+    ).toBe(true);
   });
 
   it("allows named macro re-exports in std package imports", async () => {

@@ -10,7 +10,7 @@ import {
 } from "../parsing.js";
 import { bindFunctionDecl } from "./function.js";
 import { bindObjectDecl } from "./object.js";
-import { bindTypeAlias } from "./type-alias.js";
+import { bindTypeAlias, seedEnumAliasNamespaces } from "./type-alias.js";
 import { bindTraitDecl } from "./trait.js";
 import { bindImplDecl, flushPendingStaticMethods } from "./impl.js";
 import { bindEffectDecl } from "./effect.js";
@@ -33,7 +33,6 @@ import { matchesDependencyPath } from "../../../modules/resolve.js";
 import {
   type HirVisibility,
   isPackageVisible,
-  isPublicVisibility,
   moduleVisibility,
   packageVisibility,
 } from "../../hir/index.js";
@@ -41,117 +40,20 @@ import type { SymbolKind } from "../../binder/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { SourceSpan, SymbolId } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
-import { isSamePackage } from "../../packages.js";
 import {
   importableMetadataFrom,
+  importedModuleExplicitStdSubmoduleFrom,
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
 import { findModuleNamespaceNameCollision } from "../name-collisions.js";
-
-type ModuleMetadata =
-  | { import?: { moduleId?: unknown; symbol?: unknown } | undefined }
-  | undefined;
-
-const importedSymbolTargetFrom = (
-  source?: Record<string, unknown>,
-): { moduleId: string; symbol: SymbolId } | undefined => {
-  const meta = source as ModuleMetadata;
-  const moduleId = meta?.import?.moduleId;
-  const symbol = meta?.import?.symbol;
-  return typeof moduleId === "string" && typeof symbol === "number"
-    ? { moduleId, symbol }
-    : undefined;
-};
-
-const exportTargetFor = (
-  entry: ModuleExportEntry,
-  ctx: BindingContext,
-): { moduleId: string; symbol: SymbolId } | undefined => {
-  const dependency = ctx.dependencies.get(entry.moduleId);
-  if (!dependency) {
-    return { moduleId: entry.moduleId, symbol: entry.symbol };
-  }
-  const sourceMetadata = dependency.symbolTable.getSymbol(entry.symbol)
-    .metadata as Record<string, unknown> | undefined;
-  if (entry.kind === "module") {
-    const moduleId = importedModuleIdFrom(sourceMetadata);
-    if (moduleId) {
-      return { moduleId, symbol: entry.symbol };
-    }
-  }
-  const imported = importedSymbolTargetFrom(sourceMetadata);
-  if (imported) {
-    return imported;
-  }
-  return { moduleId: entry.moduleId, symbol: entry.symbol };
-};
-
-const isSameOrDescendantModuleId = (moduleId: string, parent: string): boolean =>
-  moduleId === parent || moduleId.startsWith(`${parent}::`);
-
-const stdPkgExportsFor = ({
-  moduleId,
-  ctx,
-}: {
-  moduleId: string;
-  ctx: BindingContext;
-}): Map<string, ModuleExportEntry> | undefined => {
-  const stdPkgExports = ctx.moduleExports.get("std::pkg");
-  if (!stdPkgExports) {
-    return undefined;
-  }
-  const filtered = new Map<string, ModuleExportEntry>();
-  for (const entry of stdPkgExports.values()) {
-    if (!isPublicVisibility(entry.visibility)) {
-      continue;
-    }
-    const target = exportTargetFor(entry, ctx);
-    if (!target) {
-      continue;
-    }
-    if (
-      isSameOrDescendantModuleId(target.moduleId, moduleId) ||
-      isSameOrDescendantModuleId(moduleId, target.moduleId)
-    ) {
-      filtered.set(entry.name, entry);
-    }
-  }
-  return filtered.size > 0 ? filtered : undefined;
-};
-
-const isStdPkgExportedTarget = ({
-  target,
-  importedFromModuleId,
-  ctx,
-}: {
-  target: { moduleId: string; symbol: SymbolId };
-  importedFromModuleId: string;
-  ctx: BindingContext;
-}): boolean => {
-  const exports = stdPkgExportsFor({ moduleId: importedFromModuleId, ctx });
-  if (!exports) {
-    return false;
-  }
-  for (const entry of exports.values()) {
-    const entryTarget = exportTargetFor(entry, ctx);
-    if (!entryTarget) {
-      continue;
-    }
-    if (
-      entry.kind === "module" &&
-      isSameOrDescendantModuleId(importedFromModuleId, entryTarget.moduleId)
-    ) {
-      return true;
-    }
-    if (
-      entryTarget.moduleId === target.moduleId &&
-      entryTarget.symbol === target.symbol
-    ) {
-      return true;
-    }
-  }
-  return false;
-};
+import {
+  canAccessExport,
+  stdPkgExportsFor,
+} from "../export-visibility.js";
+import {
+  enumVariantTypeNamesFromAliasTarget,
+  importedSymbolTargetFromMetadata,
+} from "../../enum-namespace.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -229,11 +131,14 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   }
 
   flushPendingStaticMethods(ctx);
+  seedEnumAliasNamespaces(ctx);
 
   if (tracker.depth() !== 1) {
     throw new Error("binder scope stack imbalance after traversal");
   }
 };
+
+let implicitEnumNamespaceImportId = 0;
 
 type ParsedUseEntry = NormalizedUseEntry;
 
@@ -283,6 +188,11 @@ const resolveUseEntry = ({
   ctx: BindingContext;
 }): BoundUseEntry => {
   if (!entry.hasExplicitPrefix) {
+    const implicitUse = resolveImplicitNamespaceUseEntry({ entry, decl, ctx });
+    if (implicitUse) {
+      return implicitUse;
+    }
+
     recordImportDiagnostic({
       params: {
         kind: "missing-path-prefix",
@@ -333,6 +243,7 @@ const resolveUseEntry = ({
       ? declareModuleImport({
           moduleId,
           alias: entry.alias ?? entry.path.at(-1),
+          explicitlyTargetsStdSubmodule: isExplicitStdSubmoduleEntry(entry),
           ctx,
           span: entry.span,
           declaredAt: decl.form,
@@ -359,6 +270,193 @@ const resolveUseEntry = ({
   };
 };
 
+const resolveImplicitNamespaceUseEntry = ({
+  entry,
+  decl,
+  ctx,
+}: {
+  entry: ParsedUseEntry;
+  decl: ParsedUseDecl;
+  ctx: BindingContext;
+}): BoundUseEntry | undefined => {
+  if (entry.moduleSegments.length !== 1) {
+    return undefined;
+  }
+  const namespaceName = entry.moduleSegments[0];
+  if (!namespaceName) {
+    return undefined;
+  }
+
+  const namespaceSymbol = ctx.symbolTable.resolve(
+    namespaceName,
+    ctx.symbolTable.rootScope,
+  );
+  if (typeof namespaceSymbol !== "number") {
+    return undefined;
+  }
+  const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
+
+  if (namespaceRecord.kind === "module") {
+    const namespaceMetadata = namespaceRecord.metadata as
+      | Record<string, unknown>
+      | undefined;
+    const moduleId = importedModuleIdFrom(namespaceMetadata);
+    if (!moduleId) {
+      return undefined;
+    }
+    const explicitlyTargetsStdSubmodule =
+      importedModuleExplicitStdSubmoduleFrom(namespaceMetadata) ?? false;
+    const imports =
+      entry.selectionKind === "module"
+        ? declareModuleImport({
+            moduleId,
+            alias: entry.alias ?? entry.path.at(-1),
+            explicitlyTargetsStdSubmodule,
+            ctx,
+            span: entry.span,
+            declaredAt: decl.form,
+            visibility: decl.visibility,
+          })
+        : bindImportsFromModule({
+            moduleId,
+            entry: { ...entry, hasExplicitPrefix: true },
+            explicitlyTargetsStdSubmodule,
+            ctx,
+            declaredAt: decl.form,
+            visibility: decl.visibility,
+          });
+    return {
+      path: entry.path,
+      moduleId,
+      span: entry.span,
+      selectionKind: entry.selectionKind,
+      targetName: entry.targetName,
+      alias: entry.alias,
+      imports: imports ?? [],
+    };
+  }
+
+  if (namespaceRecord.kind !== "type") {
+    return undefined;
+  }
+  const explicitlyTargetsStdSubmodule =
+    importedModuleExplicitStdSubmoduleFrom(
+      namespaceRecord.metadata as Record<string, unknown> | undefined,
+    ) ?? false;
+
+  const importedTarget = importedSymbolTargetFromMetadata(
+    namespaceRecord.metadata as Record<string, unknown> | undefined,
+  );
+  if (!importedTarget) {
+    return undefined;
+  }
+
+  const dependency = ctx.dependencies.get(importedTarget.moduleId);
+  const aliasDecl = dependency?.decls.getTypeAlias(importedTarget.symbol);
+  const variantNames = aliasDecl
+    ? enumVariantTypeNamesFromAliasTarget(aliasDecl.target)
+    : undefined;
+  if (!dependency || !variantNames || variantNames.length === 0) {
+    return undefined;
+  }
+
+  const exports = ctx.moduleExports.get(importedTarget.moduleId);
+  if (!exports) {
+    return undefined;
+  }
+
+  const visibleObjectExportFor = (
+    variantName: string,
+  ): ModuleExportEntry | undefined => {
+    if (!variantNames.includes(variantName)) {
+      return undefined;
+    }
+    const exported = exports.get(variantName);
+    if (!exported) {
+      return undefined;
+    }
+    const exportedRecord = dependency.symbolTable.getSymbol(exported.symbol);
+    const metadata = exportedRecord.metadata as { entity?: string } | undefined;
+    if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
+      return undefined;
+    }
+    if (
+      !canAccessExport({
+        exported,
+        moduleId: importedTarget.moduleId,
+        ctx,
+        explicitlyTargetsStdSubmodule,
+      })
+    ) {
+      return undefined;
+    }
+    return exported;
+  };
+
+  const imports = (() => {
+    if (entry.selectionKind === "all") {
+      return variantNames.flatMap((variantName) => {
+        const exported = visibleObjectExportFor(variantName);
+        if (!exported) {
+          return [];
+        }
+        return declareImportedSymbol({
+          exported,
+          alias: variantName,
+          ctx,
+          declaredAt: decl.form,
+          span: entry.span,
+          visibility: decl.visibility,
+        });
+      });
+    }
+
+    const targetName = entry.targetName ?? entry.alias;
+    if (!targetName) {
+      recordImportDiagnostic({
+        params: { kind: "missing-target" },
+        span: entry.span,
+        ctx,
+      });
+      return [];
+    }
+
+    const exported = visibleObjectExportFor(targetName);
+    if (!exported) {
+      recordImportDiagnostic({
+        params: {
+          kind: "missing-export",
+          moduleId: importedTarget.moduleId,
+          target: targetName,
+        },
+        span: entry.span,
+        ctx,
+      });
+      return [];
+    }
+
+    return declareImportedSymbol({
+      exported,
+      alias: entry.alias ?? targetName,
+      explicitlyTargetsStdSubmodule,
+      ctx,
+      declaredAt: decl.form,
+      span: entry.span,
+      visibility: decl.visibility,
+    });
+  })();
+
+  return {
+    path: entry.path,
+    moduleId: importedTarget.moduleId,
+    span: entry.span,
+    selectionKind: entry.selectionKind,
+    targetName: entry.targetName,
+    alias: entry.alias,
+    imports,
+  };
+};
+
 const isStdImportBlocked = ({
   dependencyPath,
   entry,
@@ -380,14 +478,19 @@ const isStdImportBlocked = ({
   ) {
     return false;
   }
-  const explicitlyTargetsSubmodule =
-    entry.moduleSegments[0] === "std" && entry.moduleSegments.length > 1;
+  const explicitlyTargetsSubmodule = isExplicitStdSubmoduleEntry(entry);
   if (explicitlyTargetsSubmodule) {
     return false;
   }
   const moduleId = modulePathToString(dependencyPath);
   return !stdPkgExportsFor({ moduleId, ctx });
 };
+
+const isExplicitStdSubmoduleEntry = (entry: ParsedUseEntry): boolean =>
+  entry.moduleSegments[0] === "std" && entry.moduleSegments.length > 1;
+
+const isStdSubmoduleModuleId = (moduleId: string): boolean =>
+  moduleId.startsWith("std::") && moduleId !== "std::pkg";
 
 const resolveDependencyPath = ({
   entry,
@@ -438,28 +541,28 @@ const resolveDependencyPath = ({
 const bindImportsFromModule = ({
   moduleId,
   entry,
+  explicitlyTargetsStdSubmodule: explicitStdSubmoduleOverride,
   ctx,
   declaredAt,
   visibility,
 }: {
   moduleId: string;
   entry: ParsedUseEntry;
+  explicitlyTargetsStdSubmodule?: boolean;
   ctx: BindingContext;
   declaredAt: Form;
   visibility: HirVisibility;
 }): BoundImport[] => {
   let exports = ctx.moduleExports.get(moduleId);
   const explicitlyTargetsStdSubmodule =
-    entry.moduleSegments[0] === "std" && entry.moduleSegments.length > 1;
+    explicitStdSubmoduleOverride ?? isExplicitStdSubmoduleEntry(entry);
   const isStdImport =
-    moduleId.startsWith("std::") &&
-    moduleId !== "std::pkg" &&
-    ctx.module.path.namespace !== "std";
+    isStdSubmoduleModuleId(moduleId) && ctx.module.path.namespace !== "std";
   const stdPkgExports = isStdImport && !explicitlyTargetsStdSubmodule
     ? stdPkgExportsFor({ moduleId, ctx })
     : undefined;
-  if (isStdImport && !explicitlyTargetsStdSubmodule && !stdPkgExports) {
-    exports = undefined;
+  if (isStdImport && !explicitlyTargetsStdSubmodule) {
+    exports = stdPkgExports;
   }
   if (!exports) {
     recordImportDiagnostic({
@@ -504,7 +607,7 @@ const bindImportsFromModule = ({
         exported: item,
         moduleId,
         ctx,
-        allowStdSubmodulePackageExports: explicitlyTargetsStdSubmodule,
+        explicitlyTargetsStdSubmodule,
       });
       if (!accessible) {
         return false;
@@ -528,6 +631,7 @@ const bindImportsFromModule = ({
       declareImportedSymbol({
         exported: item,
         alias: item.name,
+        explicitlyTargetsStdSubmodule,
         ctx,
         declaredAt,
         span: entry.span,
@@ -578,7 +682,7 @@ const bindImportsFromModule = ({
       exported,
       moduleId,
       ctx,
-      allowStdSubmodulePackageExports: explicitlyTargetsStdSubmodule,
+      explicitlyTargetsStdSubmodule,
     })
   ) {
     recordImportDiagnostic({
@@ -597,6 +701,7 @@ const bindImportsFromModule = ({
   return declareImportedSymbol({
     exported,
     alias: entry.alias ?? targetName,
+    explicitlyTargetsStdSubmodule,
     ctx,
     declaredAt,
     span: entry.span,
@@ -618,6 +723,7 @@ const isMacroExportedFromModule = ({
 const declareImportedSymbol = ({
   exported,
   alias,
+  explicitlyTargetsStdSubmodule = false,
   ctx,
   declaredAt,
   span,
@@ -625,6 +731,7 @@ const declareImportedSymbol = ({
 }: {
   exported: ModuleExportEntry;
   alias: string;
+  explicitlyTargetsStdSubmodule?: boolean;
   ctx: BindingContext;
   declaredAt: Form;
   span: SourceSpan;
@@ -664,7 +771,7 @@ const declareImportedSymbol = ({
     );
     const importedSymbolTarget =
       exported.kind !== "module"
-        ? importedSymbolTargetFrom(
+        ? importedSymbolTargetFromMetadata(
             sourceMetadata as Record<string, unknown> | undefined,
           )
         : undefined;
@@ -674,6 +781,10 @@ const declareImportedSymbol = ({
             sourceMetadata as Record<string, unknown> | undefined,
           ) ?? exported.moduleId)
         : (importedSymbolTarget?.moduleId ?? exported.moduleId);
+    const importedModuleExplicitStdSubmodule =
+      importedModuleExplicitStdSubmoduleFrom(
+        sourceMetadata as Record<string, unknown> | undefined,
+      ) ?? explicitlyTargetsStdSubmodule;
     const importedSymbolId =
       exported.kind !== "module"
         ? (importedSymbolTarget?.symbol ?? symbol)
@@ -685,8 +796,15 @@ const declareImportedSymbol = ({
       metadata: {
         import:
           exported.kind === "module"
-            ? { moduleId: importedModuleId }
-            : { moduleId: importedModuleId, symbol: importedSymbolId },
+            ? {
+                moduleId: importedModuleId,
+                explicitlyTargetsStdSubmodule: importedModuleExplicitStdSubmodule,
+              }
+            : {
+                moduleId: importedModuleId,
+                symbol: importedSymbolId,
+                explicitlyTargetsStdSubmodule: importedModuleExplicitStdSubmodule,
+              },
         ...(importableMetadata ?? {}),
       },
     });
@@ -704,6 +822,15 @@ const declareImportedSymbol = ({
       span,
     };
     ctx.imports.push(bound);
+    hydrateImportedEnumAliasNamespace({
+      namespaceSymbol: local,
+      importedModuleId,
+      explicitlyTargetsStdSubmodule: importedModuleExplicitStdSubmodule,
+      importedSymbolId:
+        typeof importedSymbolId === "number" ? importedSymbolId : undefined,
+      declaredAt,
+      ctx,
+    });
     locals.push(bound);
   });
 
@@ -723,9 +850,110 @@ const declareImportedSymbol = ({
   return locals;
 };
 
+const hydrateImportedEnumAliasNamespace = ({
+  namespaceSymbol,
+  importedModuleId,
+  explicitlyTargetsStdSubmodule = false,
+  importedSymbolId,
+  declaredAt,
+  ctx,
+}: {
+  namespaceSymbol: SymbolId;
+  importedModuleId: string;
+  explicitlyTargetsStdSubmodule?: boolean;
+  importedSymbolId?: SymbolId;
+  declaredAt: Form;
+  ctx: BindingContext;
+}): void => {
+  if (typeof importedSymbolId !== "number") {
+    return;
+  }
+
+  const dependency = ctx.dependencies.get(importedModuleId);
+  if (!dependency) {
+    return;
+  }
+
+  const aliasDecl = dependency.decls.getTypeAlias(importedSymbolId);
+  const variantNames = aliasDecl
+    ? enumVariantTypeNamesFromAliasTarget(aliasDecl.target)
+    : undefined;
+  if (!variantNames || variantNames.length === 0) {
+    return;
+  }
+
+  const exports = ctx.moduleExports.get(importedModuleId);
+  if (!exports) {
+    return;
+  }
+
+  const bucket = ctx.staticMethods.get(namespaceSymbol) ?? new Map();
+  let changed = false;
+
+  variantNames.forEach((variantName) => {
+    if (bucket.get(variantName)?.size) {
+      return;
+    }
+
+    const exported = exports.get(variantName);
+    if (!exported) {
+      return;
+    }
+    if (
+      !canAccessExport({
+        exported,
+        moduleId: importedModuleId,
+        ctx,
+        explicitlyTargetsStdSubmodule,
+      })
+    ) {
+      return;
+    }
+
+    const exportedRecord = dependency.symbolTable.getSymbol(exported.symbol);
+    const metadata = exportedRecord.metadata as { entity?: string } | undefined;
+    if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
+      return;
+    }
+
+    const existing = ctx.imports.find(
+      (entry) =>
+        entry.target?.moduleId === importedModuleId &&
+        entry.target.symbol === exported.symbol,
+    )?.local;
+    const local =
+      typeof existing === "number"
+        ? existing
+        : ctx.symbolTable.declare({
+            name: `__enum_ns_${implicitEnumNamespaceImportId++}_${variantName}`,
+            kind: exported.kind,
+            declaredAt: declaredAt.syntaxId,
+            metadata: {
+              import: {
+                moduleId: importedModuleId,
+                symbol: exported.symbol,
+                explicitlyTargetsStdSubmodule,
+              },
+              ...(importableMetadataFrom(
+                exportedRecord.metadata as Record<string, unknown> | undefined,
+              ) ?? {}),
+            },
+          });
+
+    bucket.set(variantName, new Set([local]));
+    changed = true;
+  });
+
+  if (!changed) {
+    return;
+  }
+  ctx.staticMethods.set(namespaceSymbol, bucket);
+};
+
 const declareModuleImport = ({
   moduleId,
   alias,
+  explicitlyTargetsStdSubmodule = false,
   ctx,
   declaredAt,
   span,
@@ -733,6 +961,7 @@ const declareModuleImport = ({
 }: {
   moduleId?: string;
   alias?: string;
+  explicitlyTargetsStdSubmodule?: boolean;
   ctx: BindingContext;
   declaredAt: Form;
   span: SourceSpan;
@@ -769,7 +998,7 @@ const declareModuleImport = ({
     name,
     kind: "module",
     declaredAt: declaredAt.syntaxId,
-    metadata: { import: { moduleId } },
+    metadata: { import: { moduleId, explicitlyTargetsStdSubmodule } },
   });
   const bound: BoundImport = {
     name,
@@ -780,55 +1009,6 @@ const declareModuleImport = ({
   };
   ctx.imports.push(bound);
   return [bound];
-};
-
-const canAccessExport = ({
-  exported,
-  moduleId,
-  ctx,
-  allowStdSubmodulePackageExports = false,
-}: {
-  exported: ModuleExportEntry;
-  moduleId: string;
-  ctx: BindingContext;
-  allowStdSubmodulePackageExports?: boolean;
-}): boolean => {
-  if (moduleId === ctx.module.id) {
-    return true;
-  }
-
-  const isStdPkgExported = (): boolean => {
-    if (exported.packageId !== "std") {
-      return false;
-    }
-    const target = exportTargetFor(exported, ctx);
-    return target
-      ? isStdPkgExportedTarget({ target, importedFromModuleId: moduleId, ctx })
-      : false;
-  };
-
-  const samePackage =
-    exported.packageId === ctx.packageId ||
-    isSamePackage(exported.modulePath, ctx.modulePath);
-
-  if (samePackage) {
-    return isPackageVisible(exported.visibility);
-  }
-
-  if (
-    allowStdSubmodulePackageExports &&
-    exported.packageId === "std" &&
-    moduleId.startsWith("std::") &&
-    moduleId !== "std::pkg"
-  ) {
-    return isPackageVisible(exported.visibility);
-  }
-
-  if (isPublicVisibility(exported.visibility)) {
-    return true;
-  }
-
-  return isStdPkgExported();
 };
 
 const recordImportDiagnostic = ({

@@ -18,7 +18,6 @@ import type {
 import type { ModuleExportTable } from "../modules.js";
 import { resolve, sep } from "node:path";
 import {
-  moduleVisibility,
   packageVisibility,
   publicVisibility,
 } from "../hir/index.js";
@@ -1045,6 +1044,74 @@ impl Eq<Box> for Box
       .metadata as { import?: { moduleId: string } } | undefined;
 
     expect(mathImport?.import?.moduleId).toBe(mathId);
+  });
+
+  it("treats std submodule alias member imports as explicit std-submodule imports", () => {
+    const source = "use std::memory::self as memory\nuse memory::Buffer";
+    const ast = parse(source, "main.voyd");
+    const useForm = ast.rest.find((entry) => isForm(entry) && entry.calls("use"));
+    expect(useForm).toBeDefined();
+    if (!isForm(useForm)) return;
+    const span = toSourceSpan(useForm);
+
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const memoryPath = { namespace: "std" as const, segments: ["memory"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const memoryId = modulePathToString(memoryPath);
+    const dependencies: ModuleDependency[] = [{ kind: "use", path: memoryPath, span }];
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "main.voyd" },
+      ast,
+      source,
+      dependencies,
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+    const exportedSymbol = 44;
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        memoryId,
+        new Map([
+          [
+            "Buffer",
+            {
+              name: "Buffer",
+              symbol: exportedSymbol,
+              moduleId: memoryId,
+              modulePath: memoryPath,
+              packageId: packageIdFromPath(memoryPath),
+              kind: "value",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    expect(binding.diagnostics).toHaveLength(0);
+
+    const importedBufferSymbol = symbolTable.resolve("Buffer", symbolTable.rootScope);
+    expect(importedBufferSymbol).toBeDefined();
+    if (!importedBufferSymbol) return;
+    const importedBuffer = symbolTable.getSymbol(importedBufferSymbol)
+      .metadata as { import?: { moduleId: string } } | undefined;
+
+    expect(importedBuffer?.import?.moduleId).toBe(memoryId);
   });
 
   it("populates module graph dependencies for grouped self-relative selections", async () => {

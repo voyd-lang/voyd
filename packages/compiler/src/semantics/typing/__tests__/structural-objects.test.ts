@@ -7,7 +7,6 @@ import { Expr } from "../../../parser/index.js";
 import {
   moduleVisibility,
   packageVisibility,
-  publicVisibility,
 } from "../../hir/index.js";
 
 const createNamedType = (

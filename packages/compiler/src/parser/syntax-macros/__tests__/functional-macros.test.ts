@@ -143,4 +143,54 @@ wrap()
       ],
     ]);
   });
+
+  test("splices top-level emit_many expansions into the ast root", () => {
+    const code = `\
+macro declare_pair()
+  emit_many(\`(type (Left = i32)), \`(type (Right = i32)))
+declare_pair()
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain).toContainEqual(["type", ["=", "Left", "i32"]]);
+    expect(plain).toContainEqual(["type", ["=", "Right", "i32"]]);
+  });
+
+  test("treats empty emit_many lists as a no-op at top level", () => {
+    const code = `\
+macro emit_nothing()
+  let declarations = \`().slice(1)
+  emit_many(declarations)
+emit_nothing()
+type Keep = i32
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain).toContainEqual(["type", ["=", "Keep", "i32"]]);
+    expect(plain).not.toContainEqual([]);
+  });
+
+  test("does not implicitly splice top-level block expansions", () => {
+    const code = `\
+macro wrap_decl()
+  \`(block (type (Only = i32)))
+wrap_decl()
+`;
+    const ast = parse(code);
+    expect(toPlain(ast)).toContainEqual([
+      "block",
+      ["type", ["=", "Only", "i32"]],
+    ]);
+  });
+
+  test("supports pub-wrapped macro invocations", () => {
+    const code = `\
+macro declare_alias(name)
+  \`(type ($name = i32))
+pub declare_alias NumberLike
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain).toContainEqual(["pub", "type", ["=", "NumberLike", "i32"]]);
+  });
 });

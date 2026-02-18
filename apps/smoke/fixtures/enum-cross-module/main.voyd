@@ -1,0 +1,19 @@
+use src::drinks::{ Drink, make_coffee }
+use Drink::Coffee
+
+pub fn main() -> i32
+  let brewed = make_coffee(12)
+  let poured: Drink = Coffee { size: 8 }
+  match(brewed)
+    Coffee { size }:
+      match(poured)
+        Coffee { size: poured_size }:
+          size + poured_size
+        Tea:
+          0
+        Water:
+          0
+    Tea:
+      0
+    Water:
+      0

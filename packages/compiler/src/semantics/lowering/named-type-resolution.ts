@@ -15,6 +15,8 @@ import {
 } from "./expressions/namespace-resolution.js";
 import { resolveTypeSymbol } from "./resolution.js";
 import type { LowerContext } from "./types.js";
+import { enumNamespaceMemberTypeArgumentsFromMetadata } from "../enum-namespace.js";
+import { substituteTypeParametersInTypeExpr } from "../hir/type-expr-substitution.js";
 
 export interface ResolvedNamedTypeTarget {
   symbol?: SymbolId;
@@ -71,13 +73,57 @@ export const resolveNamedTypeTarget = ({
   }
 
   const moduleSymbol = resolveModulePathSymbol(moduleExpr, scope, ctx);
-  if (typeof moduleSymbol !== "number") {
-    return undefined;
-  }
 
   const member = parseNamedTypeTarget({ expr: memberExpr, parseTypeArguments });
   if (!member) {
     return undefined;
+  }
+
+  if (typeof moduleSymbol !== "number") {
+    const typeNamespace = resolveTypeNamespaceTarget({
+      expr: moduleExpr,
+      scope,
+      ctx,
+      parseTypeArguments,
+    });
+    if (!typeNamespace) {
+      return undefined;
+    }
+
+    const staticMembers = ctx.staticMethods.get(typeNamespace.symbol);
+    const candidates = staticMembers?.get(member.name.value);
+    if (!candidates || candidates.size === 0) {
+      return undefined;
+    }
+
+    const allowed = Array.from(candidates).filter((candidate) =>
+      allowNamespacedSymbolKind(ctx.symbolTable.getSymbol(candidate).kind),
+    );
+    if (allowed.length !== 1) {
+      return undefined;
+    }
+    const enumNamespaceTypeArguments = resolveEnumNamespaceMemberTypeArguments({
+      namespaceSymbol: typeNamespace.symbol,
+      memberName: member.name.value,
+      namespaceTypeArguments: typeNamespace.typeArguments,
+      ctx,
+      parseTypeArguments,
+    });
+    const combinedTypeArguments = [
+      ...(member.typeArguments ?? []),
+      ...(enumNamespaceTypeArguments.typeArguments ?? []),
+      ...(enumNamespaceTypeArguments.consumeNamespaceTypeArguments
+        ? []
+        : (typeNamespace.typeArguments ?? [])),
+    ];
+
+    return {
+      symbol: allowed[0],
+      path: [...typeNamespace.path, member.name.value],
+      name: member.name,
+      typeArguments:
+        combinedTypeArguments.length > 0 ? combinedTypeArguments : undefined,
+    };
   }
 
   const memberTable = ctx.moduleMembers.get(moduleSymbol);
@@ -109,6 +155,86 @@ export const resolveNamedTypeTarget = ({
     path: [...moduleSegments, member.name.value],
     name: member.name,
     typeArguments: member.typeArguments,
+  };
+};
+
+const resolveTypeNamespaceTarget = ({
+  expr,
+  scope,
+  ctx,
+  parseTypeArguments,
+}: {
+  expr: Expr;
+  scope: ScopeId;
+  ctx: LowerContext;
+  parseTypeArguments: (entries: readonly Expr[]) => HirTypeExpr[];
+}): { symbol: SymbolId; path: string[]; typeArguments?: HirTypeExpr[] } | undefined => {
+  const target = parseNamedTypeTarget({ expr, parseTypeArguments });
+  if (!target) {
+    return undefined;
+  }
+
+  const symbol = resolveTypeSymbol(target.name.value, scope, ctx);
+  if (typeof symbol !== "number") {
+    return undefined;
+  }
+  if (ctx.symbolTable.getSymbol(symbol).kind !== "type") {
+    return undefined;
+  }
+
+  return {
+    symbol,
+    path: [target.name.value],
+    typeArguments: target.typeArguments,
+  };
+};
+
+const resolveEnumNamespaceMemberTypeArguments = ({
+  namespaceSymbol,
+  memberName,
+  namespaceTypeArguments,
+  ctx,
+  parseTypeArguments,
+}: {
+  namespaceSymbol: SymbolId;
+  memberName: string;
+  namespaceTypeArguments?: readonly HirTypeExpr[];
+  ctx: LowerContext;
+  parseTypeArguments: (entries: readonly Expr[]) => HirTypeExpr[];
+}): {
+  typeArguments?: HirTypeExpr[];
+  consumeNamespaceTypeArguments: boolean;
+} => {
+  const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
+  const metadata = enumNamespaceMemberTypeArgumentsFromMetadata({
+    source: namespaceRecord.metadata as Record<string, unknown> | undefined,
+    memberName,
+  });
+  if (!metadata) {
+    return { consumeNamespaceTypeArguments: false };
+  }
+
+  const substitutionsByName = new Map(
+    metadata.typeParameterNames.map((name, index) => [
+      name,
+      namespaceTypeArguments?.[index],
+    ]),
+  );
+  const lowered = metadata.typeArguments.flatMap((entry) => {
+    const parsed = parseTypeArguments([entry]);
+    if (parsed.length === 0) {
+      return [];
+    }
+    return [
+      substituteTypeParametersInTypeExpr({
+        typeExpr: parsed[0]!,
+        substitutionsByName,
+      }),
+    ];
+  });
+  return {
+    typeArguments: lowered.length > 0 ? lowered : undefined,
+    consumeNamespaceTypeArguments: true,
   };
 };
 
