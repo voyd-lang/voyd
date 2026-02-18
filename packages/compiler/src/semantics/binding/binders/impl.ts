@@ -16,6 +16,7 @@ import { resolveObjectDecl } from "./object.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { inheritMemberVisibility, moduleVisibility } from "../../hir/index.js";
 import { formatTypeAnnotation } from "../../utils.js";
+import { importableMetadataFrom, importedModuleIdFrom } from "../../imports/metadata.js";
 import {
   methodSignatureKey,
   methodSignatureParamTypeKey,
@@ -85,13 +86,15 @@ export const bindImplDecl = (
   const implTargetDecl = resolveObjectDecl(decl.target, ctx, implScope);
   const implTargetSymbol = implTargetDecl?.symbol;
   const ownerVisibility = implTargetDecl?.visibility ?? moduleVisibility();
+  const traitResolution = decl.trait
+    ? resolveTraitDecl(decl.trait, ctx, tracker.current())
+    : undefined;
   const traitSymbolForMemberScope = (() => {
+    if (traitResolution) {
+      return traitResolution.localSymbol;
+    }
     if (!decl.trait) {
       return undefined;
-    }
-    const resolved = resolveTraitDecl(decl.trait, ctx, tracker.current());
-    if (resolved) {
-      return resolved.symbol;
     }
     if (isIdentifierAtom(decl.trait)) {
       return ctx.symbolTable.resolve(decl.trait.value, tracker.current());
@@ -162,7 +165,10 @@ export const bindImplDecl = (
       typeParameters.push({ name, symbol: paramSymbol });
     });
 
-    const bindMethod = (parsedFn: ParsedFunctionDecl) => {
+    const bindMethod = (
+      parsedFn: ParsedFunctionDecl,
+      options?: { scopeParent?: ScopeId },
+    ) => {
       const staticMethod = isStaticMethod(parsedFn);
       const metadata: Record<string, unknown> = {
         entity: "function",
@@ -184,7 +190,7 @@ export const bindImplDecl = (
         declarationScope: staticMethod
           ? implScope
           : methodDeclarationScope ?? ctx.symbolTable.rootScope,
-        scopeParent: implScope,
+        scopeParent: options?.scopeParent ?? implScope,
         metadata,
         selfTypeExpr: staticMethod ? undefined : decl.target,
         visibilityOverride: memberVisibility,
@@ -222,9 +228,19 @@ export const bindImplDecl = (
     });
 
     if (decl.trait) {
-      const traitDecl = resolveTraitDecl(decl.trait, ctx, tracker.current());
+      const traitDecl = traitResolution?.decl;
       if (traitDecl) {
         const traitTypeParamMap = buildTraitTypeParamMap(traitDecl, decl.trait);
+        const defaultScopeParent =
+          traitResolution &&
+          createImportedTraitDefaultScope({
+            implScope,
+            sourceModuleId: traitResolution.sourceModuleId,
+            sourceSymbolTable: traitResolution.sourceSymbolTable,
+            sourceTraitScope: traitDecl.scope,
+            ownerSyntaxId: decl.form.syntaxId,
+            ctx,
+          });
         const methodSignatures = new Set(
           methods.map((method) => methodSignatureKeyForBoundFunction(method))
         );
@@ -239,7 +255,9 @@ export const bindImplDecl = (
           if (methodSignatures.has(signature)) {
             return;
           }
-          const method = bindMethod(parsed);
+          const method = bindMethod(parsed, {
+            scopeParent: defaultScopeParent ?? implScope,
+          });
           methods.push(method);
           methodSignatures.add(signature);
         });
@@ -291,7 +309,7 @@ const inferImplTypeParameters = ({
     }
   }
 
-  const traitDecl = trait ? resolveTraitDecl(trait, ctx, scope) : undefined;
+  const traitDecl = trait ? resolveTraitDecl(trait, ctx, scope)?.decl : undefined;
   if (traitDecl?.typeParameters?.length) {
     const args = trait ? extractTraitTypeArguments(trait) : [];
     if (args.length === traitDecl.typeParameters.length) {
@@ -328,6 +346,101 @@ const buildTraitTypeParamMap = (
     }
   });
   return substitutions.size > 0 ? substitutions : undefined;
+};
+
+const createImportedTraitDefaultScope = ({
+  implScope,
+  sourceModuleId,
+  sourceSymbolTable,
+  sourceTraitScope,
+  ownerSyntaxId,
+  ctx,
+}: {
+  implScope: ScopeId;
+  sourceModuleId: string;
+  sourceSymbolTable: BindingContext["symbolTable"];
+  sourceTraitScope: ScopeId;
+  ownerSyntaxId: number;
+  ctx: BindingContext;
+}): ScopeId | undefined => {
+  if (sourceModuleId === ctx.module.id) {
+    return undefined;
+  }
+
+  const importedScope = ctx.symbolTable.createScope({
+    parent: implScope,
+    kind: "block",
+    owner: ownerSyntaxId,
+  });
+  const sourceParentScope = sourceSymbolTable.getScope(sourceTraitScope).parent;
+  if (sourceParentScope === null) {
+    return importedScope;
+  }
+  const visibleByName = collectVisibleSymbols({
+    fromScope: sourceParentScope,
+    symbolTable: sourceSymbolTable,
+  });
+
+  visibleByName.forEach(({ symbol, record }) => {
+    if (record.name === "void") {
+      return;
+    }
+    const sourceMetadata = (record.metadata ?? {}) as {
+      import?: { moduleId?: unknown; symbol?: unknown };
+    };
+    const importedModuleId =
+      importedModuleIdFrom(record.metadata as Record<string, unknown> | undefined) ??
+      sourceModuleId;
+    const importedSymbol =
+      typeof sourceMetadata.import?.symbol === "number"
+        ? sourceMetadata.import.symbol
+        : symbol;
+    const importableMetadata = importableMetadataFrom(
+      record.metadata as Record<string, unknown> | undefined,
+    );
+
+    ctx.symbolTable.declare(
+      {
+        name: record.name,
+        kind: record.kind,
+        declaredAt: ownerSyntaxId,
+        metadata: {
+          import:
+            record.kind === "module"
+              ? { moduleId: importedModuleId }
+              : { moduleId: importedModuleId, symbol: importedSymbol },
+          ...(importableMetadata ?? {}),
+        },
+      },
+      importedScope,
+    );
+  });
+
+  return importedScope;
+};
+
+const collectVisibleSymbols = ({
+  fromScope,
+  symbolTable,
+}: {
+  fromScope: ScopeId;
+  symbolTable: BindingContext["symbolTable"];
+}): Map<string, { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }> => {
+  const visible = new Map<
+    string,
+    { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }
+  >();
+  let scope: ScopeId | null = fromScope;
+  while (typeof scope === "number") {
+    for (const symbol of symbolTable.symbolsInScope(scope)) {
+      const record = symbolTable.getSymbol(symbol);
+      if (!visible.has(record.name)) {
+        visible.set(record.name, { symbol, record });
+      }
+    }
+    scope = symbolTable.getScope(scope).parent;
+  }
+  return visible;
 };
 
 export const flushPendingStaticMethods = (ctx: BindingContext): void => {

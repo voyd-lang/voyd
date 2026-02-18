@@ -214,7 +214,7 @@ export const resolveTraitDecl = (
   traitExpr: Expr,
   ctx: BindingContext,
   scope: ScopeId
-) => {
+): ResolvedTraitDecl | undefined => {
   const traitIdentifier = (() => {
     if (isIdentifierAtom(traitExpr)) {
       return traitExpr;
@@ -247,18 +247,37 @@ export const resolveTraitDecl = (
   if (record.kind !== "trait") {
     return undefined;
   }
-  return resolveTraitDeclBySymbol({
+  const resolved = resolveTraitDeclBySymbol({
     symbol: traitSymbol,
     symbolTable: ctx.symbolTable,
     decls: ctx.decls,
     dependencies: ctx.dependencies,
     moduleId: ctx.module.id,
   });
+  if (!resolved) {
+    return undefined;
+  }
+  return {
+    ...resolved,
+    localSymbol: traitSymbol,
+  };
 };
 
 type ImportMetadata = {
   import?: { moduleId?: unknown; symbol?: unknown };
 };
+
+export type ResolvedTraitDecl = {
+  decl: TraitDecl;
+  localSymbol: SymbolId;
+  sourceModuleId: string;
+  sourceSymbol: SymbolId;
+  sourceSymbolTable:
+    | BindingContext["symbolTable"]
+    | BindingResult["symbolTable"];
+};
+
+type TraitDeclSourceResolution = Omit<ResolvedTraitDecl, "localSymbol">;
 
 const resolveTraitDeclBySymbol = ({
   symbol,
@@ -274,7 +293,7 @@ const resolveTraitDeclBySymbol = ({
   dependencies: Map<string, BindingResult>;
   moduleId: string;
   seen?: Set<string>;
-}): TraitDecl | undefined => {
+}): TraitDeclSourceResolution | undefined => {
   const key = `${moduleId}:${symbol}`;
   if (seen.has(key)) {
     return undefined;
@@ -283,7 +302,12 @@ const resolveTraitDeclBySymbol = ({
 
   const direct = decls.getTrait(symbol);
   if (direct) {
-    return direct;
+    return {
+      decl: direct,
+      sourceModuleId: moduleId,
+      sourceSymbol: symbol,
+      sourceSymbolTable: symbolTable,
+    };
   }
 
   const record = symbolTable.getSymbol(symbol);
