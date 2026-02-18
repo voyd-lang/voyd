@@ -10,7 +10,7 @@ import {
 } from "../parsing.js";
 import { bindFunctionDecl } from "./function.js";
 import { bindObjectDecl } from "./object.js";
-import { bindTypeAlias } from "./type-alias.js";
+import { bindTypeAlias, seedEnumAliasNamespaces } from "./type-alias.js";
 import { bindTraitDecl } from "./trait.js";
 import { bindImplDecl, flushPendingStaticMethods } from "./impl.js";
 import { bindEffectDecl } from "./effect.js";
@@ -130,6 +130,7 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   }
 
   flushPendingStaticMethods(ctx);
+  seedEnumAliasNamespaces(ctx);
 
   if (tracker.depth() !== 1) {
     throw new Error("binder scope stack imbalance after traversal");

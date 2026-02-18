@@ -369,6 +369,52 @@ pub fn main() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("propagates outer generic args into namespaced nominal literals", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+type Wrap<T> = Marker<T>
+obj Marker<T> { value: T }
+
+pub fn main() -> i32
+  let marker = Wrap<i32>::Marker { value: 5 }
+  marker.value
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("supports enum alias namespace access when alias is declared before variants", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+type Drink = Coffee | Tea
+obj Coffee {}
+obj Tea {}
+
+pub fn main() -> Drink
+  Drink::Coffee {}
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
   it("resolves trait-object method calls for traits imported from another module", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

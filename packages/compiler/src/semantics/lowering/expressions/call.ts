@@ -34,6 +34,7 @@ type LowerNominalObjectLiteralParams = LoweringParams & {
   callee: Expr;
   args: readonly Expr[];
   ast: Expr;
+  fallbackTypeArguments?: HirTypeExpr[];
 };
 
 export const lowerCallFromElements = ({
@@ -160,6 +161,7 @@ export const lowerNominalObjectLiteral = ({
   callee,
   args,
   ast,
+  fallbackTypeArguments,
   ctx,
   scopes,
   lowerExpr,
@@ -187,13 +189,16 @@ export const lowerNominalObjectLiteral = ({
   }
   const literalForm: Form = literalArg;
 
-  const typeArguments =
-    calleeResolution.typeArguments ??
-    (hasGenerics
-      ? ((genericsForm as Form).rest
-          .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
-          .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
-      : undefined);
+  const parsedTypeArguments = hasGenerics
+    ? ((genericsForm as Form).rest
+        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+        .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
+    : undefined;
+  const mergedTypeArguments =
+    parsedTypeArguments && fallbackTypeArguments && fallbackTypeArguments.length > 0
+      ? [...parsedTypeArguments, ...fallbackTypeArguments]
+      : parsedTypeArguments ?? fallbackTypeArguments;
+  const typeArguments = calleeResolution.typeArguments ?? mergedTypeArguments;
 
   const metadata = (ctx.symbolTable.getSymbol(calleeResolution.symbol).metadata ?? {}) as {
     entity?: string;

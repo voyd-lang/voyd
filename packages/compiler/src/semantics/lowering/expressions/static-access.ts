@@ -288,6 +288,7 @@ const lowerStaticMethodCall = ({
     callee: calleeExpr,
     args: memberForm.rest,
     ast: accessForm,
+    fallbackTypeArguments: combinedTypeArguments,
     ctx,
     scopes,
     lowerExpr,

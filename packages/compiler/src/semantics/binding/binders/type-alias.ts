@@ -39,12 +39,6 @@ export const bindTypeAlias = (
     declaredAt: decl.form.syntaxId,
     metadata: { entity: "type-alias", ...intrinsicTypeMetadata },
   });
-  seedEnumVariantNamespace({
-    aliasSymbol: symbol,
-    target: decl.target,
-    scope: tracker.current(),
-    ctx,
-  });
 
   const aliasScope = ctx.symbolTable.createScope({
     parent: tracker.current(),
@@ -67,6 +61,17 @@ export const bindTypeAlias = (
     typeParameters,
     moduleIndex: ctx.nextModuleIndex++,
     documentation: declarationDocForSyntax(decl.name, ctx),
+  });
+};
+
+export const seedEnumAliasNamespaces = (ctx: BindingContext): void => {
+  ctx.decls.typeAliases.forEach((alias) => {
+    seedEnumVariantNamespace({
+      aliasSymbol: alias.symbol,
+      target: alias.target,
+      scope: ctx.symbolTable.rootScope,
+      ctx,
+    });
   });
 };
 
