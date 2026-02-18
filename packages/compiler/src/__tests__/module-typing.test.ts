@@ -496,6 +496,30 @@ pub fn main() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("substitutes namespace params inside composite enum member args", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+obj Box<T> {}
+obj Marker<U> {}
+type Wrap<T> = Marker<Box<T>>
+
+pub fn main() -> i32
+  let marker: Wrap<i32>::Marker = Wrap<i32>::Marker {}
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
   it("preserves outer generic args for namespaced type members", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

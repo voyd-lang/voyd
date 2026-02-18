@@ -24,6 +24,7 @@ import { lowerTypeExpr } from "../type-expressions.js";
 import { resolveModulePathSymbol } from "./namespace-resolution.js";
 import { lowerQualifiedTraitMethodCall } from "./qualified-trait-call.js";
 import { enumNamespaceMemberTypeArgumentsFromMetadata } from "../../enum-namespace.js";
+import { substituteTypeParametersInTypeExpr } from "../../hir/type-expr-substitution.js";
 
 export const lowerStaticAccessExpr = ({
   form,
@@ -368,21 +369,23 @@ const lowerEnumNamespaceMemberTypeArguments = ({
     return { consumeNamespaceTypeArguments: false };
   }
 
-  const typeParameterByName = new Map(
+  const substitutionsByName = new Map(
     metadata.typeParameterNames.map((name, index) => [
       name,
       namespaceTypeArguments?.[index],
     ]),
   );
   const lowered = metadata.typeArguments.flatMap((entry) => {
-    if (
-      (isIdentifierAtom(entry) || isInternalIdentifierAtom(entry)) &&
-      typeParameterByName.get(entry.value)
-    ) {
-      return [typeParameterByName.get(entry.value)!];
-    }
     const parsed = lowerTypeExpr(entry, ctx, scope);
-    return parsed ? [parsed] : [];
+    if (!parsed) {
+      return [];
+    }
+    return [
+      substituteTypeParametersInTypeExpr({
+        typeExpr: parsed,
+        substitutionsByName,
+      }),
+    ];
   });
   return {
     typeArguments: lowered.length > 0 ? lowered : undefined,

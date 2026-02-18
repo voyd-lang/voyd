@@ -1,7 +1,12 @@
 import { importedSymbolTargetFromMetadata } from "../enum-namespace.js";
-import { isPackageVisible, isPublicVisibility } from "../hir/index.js";
+import {
+  type HirVisibility,
+  isPackageVisible,
+  isPublicVisibility,
+} from "../hir/index.js";
 import type { SymbolId } from "../ids.js";
 import { importedModuleIdFrom } from "../imports/metadata.js";
+import type { ModulePath } from "../../modules/types.js";
 import type { ModuleExportEntry } from "../modules.js";
 import { isSamePackage } from "../packages.js";
 import type { BindingContext } from "./types.js";
@@ -42,17 +47,13 @@ export const canAccessExport = ({
   exported,
   moduleId,
   ctx,
-  allowStdSubmodulePackageExports = false,
+  explicitlyTargetsStdSubmodule = false,
 }: {
   exported: ModuleExportEntry;
   moduleId: string;
   ctx: BindingContext;
-  allowStdSubmodulePackageExports?: boolean;
+  explicitlyTargetsStdSubmodule?: boolean;
 }): boolean => {
-  if (moduleId === ctx.module.id) {
-    return true;
-  }
-
   const isStdPkgExported = (): boolean => {
     if (exported.packageId !== "std") {
       return false;
@@ -63,28 +64,66 @@ export const canAccessExport = ({
       : false;
   };
 
-  const samePackage =
-    exported.packageId === ctx.packageId ||
-    isSamePackage(exported.modulePath, ctx.modulePath);
-
-  if (samePackage) {
-    return isPackageVisible(exported.visibility);
-  }
-
   if (
-    allowStdSubmodulePackageExports &&
-    exported.packageId === "std" &&
-    moduleId.startsWith("std::") &&
-    moduleId !== "std::pkg"
+    canAccessSymbolVisibility({
+      visibility: exported.visibility,
+      ownerPackageId: exported.packageId,
+      ownerModulePath: exported.modulePath,
+      importedFromModuleId: moduleId,
+      explicitlyTargetsStdSubmodule,
+      ctx,
+    })
   ) {
-    return isPackageVisible(exported.visibility);
-  }
-
-  if (isPublicVisibility(exported.visibility)) {
     return true;
   }
 
   return isStdPkgExported();
+};
+
+export const canAccessSymbolVisibility = ({
+  visibility,
+  ownerPackageId,
+  ownerModulePath,
+  importedFromModuleId,
+  explicitlyTargetsStdSubmodule = false,
+  allowApiVisibility = false,
+  ctx,
+}: {
+  visibility: HirVisibility;
+  ownerPackageId: string;
+  ownerModulePath?: ModulePath;
+  importedFromModuleId: string;
+  explicitlyTargetsStdSubmodule?: boolean;
+  allowApiVisibility?: boolean;
+  ctx: BindingContext;
+}): boolean => {
+  if (importedFromModuleId === ctx.module.id) {
+    return true;
+  }
+
+  const samePackage =
+    ownerPackageId === ctx.packageId ||
+    isSamePackage(ownerModulePath, ctx.modulePath);
+  if (samePackage) {
+    return isPackageVisible(visibility);
+  }
+
+  if (
+    canUseStdSubmodulePackageVisibility({
+      ownerPackageId,
+      importedFromModuleId,
+      explicitlyTargetsStdSubmodule,
+      ctx,
+    })
+  ) {
+    return isPackageVisible(visibility);
+  }
+
+  if (isPublicVisibility(visibility)) {
+    return true;
+  }
+
+  return allowApiVisibility && visibility.api === true;
 };
 
 const exportTargetFor = (
@@ -113,6 +152,23 @@ const exportTargetFor = (
 
 const isSameOrDescendantModuleId = (moduleId: string, parent: string): boolean =>
   moduleId === parent || moduleId.startsWith(`${parent}::`);
+
+const canUseStdSubmodulePackageVisibility = ({
+  ownerPackageId,
+  importedFromModuleId,
+  explicitlyTargetsStdSubmodule,
+  ctx,
+}: {
+  ownerPackageId: string;
+  importedFromModuleId: string;
+  explicitlyTargetsStdSubmodule: boolean;
+  ctx: BindingContext;
+}): boolean =>
+  explicitlyTargetsStdSubmodule &&
+  ownerPackageId === "std" &&
+  importedFromModuleId.startsWith("std::") &&
+  importedFromModuleId !== "std::pkg" &&
+  ctx.module.path.namespace !== "std";
 
 const isStdPkgExportedTarget = ({
   target,

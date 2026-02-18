@@ -139,7 +139,18 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
-    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    if (combinedDiagnostics.length > 0) {
+      throw new Error(
+        JSON.stringify(
+          combinedDiagnostics.map((diag) => ({
+            code: diag.code,
+            message: diag.message,
+          })),
+        ),
+      );
+    }
+    expect(combinedDiagnostics).toHaveLength(0);
   });
 
   it("keeps std::all alias chains restricted to std::pkg-visible exports", async () => {
@@ -202,7 +213,18 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
-    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    if (combinedDiagnostics.length > 0) {
+      throw new Error(
+        JSON.stringify(
+          combinedDiagnostics.map((diag) => ({
+            code: diag.code,
+            message: diag.message,
+          })),
+        ),
+      );
+    }
+    expect(combinedDiagnostics).toHaveLength(0);
   });
 
   it("treats src imports as std-internal aliases when analyzing std modules", async () => {
@@ -334,6 +356,69 @@ pub fn main() -> i32
 
     expect(combinedDiagnostics).toHaveLength(0);
     expect(mainSemantics?.binding.imports.map((entry) => entry.name)).toContain("Coffee");
+  });
+
+  it("allows explicit std submodule enum namespace member imports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}drinks.voyd`]: `
+pub obj Coffee { size: i32 }
+pub type Drink = Coffee
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::drinks::{ Drink }
+
+pub fn main() -> i32
+  let drink: Drink = Drink::Coffee { size: 1 }
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics.some(
+        (diag) =>
+          diag.code === "BD0001" &&
+          diag.message.includes("not visible here"),
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects std::all enum namespace member access to package-visible variants", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use std::drinks::{ Drink }",
+      [`${stdRoot}${sep}drinks.voyd`]: `
+pub obj Coffee { size: i32 }
+pub type Drink = Coffee
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+pub fn main() -> i32
+  let drink: Drink = Drink::Coffee { size: 1 }
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(combinedDiagnostics.length).toBeGreaterThan(0);
   });
 
   it("does not auto-import package-visible enum variants across package boundaries", async () => {

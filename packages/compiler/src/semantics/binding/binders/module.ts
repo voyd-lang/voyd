@@ -339,6 +339,10 @@ const resolveImplicitNamespaceUseEntry = ({
   if (namespaceRecord.kind !== "type") {
     return undefined;
   }
+  const explicitlyTargetsStdSubmodule =
+    importedModuleExplicitStdSubmoduleFrom(
+      namespaceRecord.metadata as Record<string, unknown> | undefined,
+    ) ?? false;
 
   const importedTarget = importedSymbolTargetFromMetadata(
     namespaceRecord.metadata as Record<string, unknown> | undefined,
@@ -376,7 +380,14 @@ const resolveImplicitNamespaceUseEntry = ({
     if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
       return undefined;
     }
-    if (!canAccessExport({ exported, moduleId: importedTarget.moduleId, ctx })) {
+    if (
+      !canAccessExport({
+        exported,
+        moduleId: importedTarget.moduleId,
+        ctx,
+        explicitlyTargetsStdSubmodule,
+      })
+    ) {
       return undefined;
     }
     return exported;
@@ -595,7 +606,7 @@ const bindImportsFromModule = ({
         exported: item,
         moduleId,
         ctx,
-        allowStdSubmodulePackageExports: explicitlyTargetsStdSubmodule,
+        explicitlyTargetsStdSubmodule,
       });
       if (!accessible) {
         return false;
@@ -670,7 +681,7 @@ const bindImportsFromModule = ({
       exported,
       moduleId,
       ctx,
-      allowStdSubmodulePackageExports: explicitlyTargetsStdSubmodule,
+      explicitlyTargetsStdSubmodule,
     })
   ) {
     recordImportDiagnostic({
@@ -770,11 +781,9 @@ const declareImportedSymbol = ({
           ) ?? exported.moduleId)
         : (importedSymbolTarget?.moduleId ?? exported.moduleId);
     const importedModuleExplicitStdSubmodule =
-      exported.kind === "module"
-        ? (importedModuleExplicitStdSubmoduleFrom(
-            sourceMetadata as Record<string, unknown> | undefined,
-          ) ?? explicitlyTargetsStdSubmodule)
-        : undefined;
+      importedModuleExplicitStdSubmoduleFrom(
+        sourceMetadata as Record<string, unknown> | undefined,
+      ) ?? explicitlyTargetsStdSubmodule;
     const importedSymbolId =
       exported.kind !== "module"
         ? (importedSymbolTarget?.symbol ?? symbol)
@@ -790,7 +799,11 @@ const declareImportedSymbol = ({
                 moduleId: importedModuleId,
                 explicitlyTargetsStdSubmodule: importedModuleExplicitStdSubmodule,
               }
-            : { moduleId: importedModuleId, symbol: importedSymbolId },
+            : {
+                moduleId: importedModuleId,
+                symbol: importedSymbolId,
+                explicitlyTargetsStdSubmodule: importedModuleExplicitStdSubmodule,
+              },
         ...(importableMetadata ?? {}),
       },
     });
@@ -811,6 +824,7 @@ const declareImportedSymbol = ({
     hydrateImportedEnumAliasNamespace({
       namespaceSymbol: local,
       importedModuleId,
+      explicitlyTargetsStdSubmodule: importedModuleExplicitStdSubmodule,
       importedSymbolId:
         typeof importedSymbolId === "number" ? importedSymbolId : undefined,
       declaredAt,
@@ -838,12 +852,14 @@ const declareImportedSymbol = ({
 const hydrateImportedEnumAliasNamespace = ({
   namespaceSymbol,
   importedModuleId,
+  explicitlyTargetsStdSubmodule = false,
   importedSymbolId,
   declaredAt,
   ctx,
 }: {
   namespaceSymbol: SymbolId;
   importedModuleId: string;
+  explicitlyTargetsStdSubmodule?: boolean;
   importedSymbolId?: SymbolId;
   declaredAt: Form;
   ctx: BindingContext;
@@ -882,7 +898,14 @@ const hydrateImportedEnumAliasNamespace = ({
     if (!exported) {
       return;
     }
-    if (!canAccessExport({ exported, moduleId: importedModuleId, ctx })) {
+    if (
+      !canAccessExport({
+        exported,
+        moduleId: importedModuleId,
+        ctx,
+        explicitlyTargetsStdSubmodule,
+      })
+    ) {
       return;
     }
 
