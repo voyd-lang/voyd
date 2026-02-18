@@ -231,16 +231,6 @@ export const bindImplDecl = (
       const traitDecl = traitResolution?.decl;
       if (traitDecl) {
         const traitTypeParamMap = buildTraitTypeParamMap(traitDecl, decl.trait);
-        const defaultScopeParent =
-          traitResolution &&
-          createImportedTraitDefaultScope({
-            implScope,
-            sourceModuleId: traitResolution.sourceModuleId,
-            sourceSymbolTable: traitResolution.sourceSymbolTable,
-            sourceTraitScope: traitDecl.scope,
-            ownerSyntaxId: decl.form.syntaxId,
-            ctx,
-          });
         const methodSignatures = new Set(
           methods.map((method) => methodSignatureKeyForBoundFunction(method))
         );
@@ -256,7 +246,16 @@ export const bindImplDecl = (
             return;
           }
           const method = bindMethod(parsed, {
-            scopeParent: defaultScopeParent ?? implScope,
+            scopeParent:
+              createImportedTraitDefaultScope({
+                implScope,
+                sourceModuleId: traitResolution.sourceModuleId,
+                sourceSymbolTable: traitResolution.sourceSymbolTable,
+                sourceMethodScope: traitMethod.scope,
+                ownerSyntaxId: decl.form.syntaxId,
+                parsedDefaultMethod: parsed,
+                ctx,
+              }) ?? implScope,
           });
           methods.push(method);
           methodSignatures.add(signature);
@@ -352,18 +351,32 @@ const createImportedTraitDefaultScope = ({
   implScope,
   sourceModuleId,
   sourceSymbolTable,
-  sourceTraitScope,
+  sourceMethodScope,
   ownerSyntaxId,
+  parsedDefaultMethod,
   ctx,
 }: {
   implScope: ScopeId;
   sourceModuleId: string;
   sourceSymbolTable: BindingContext["symbolTable"];
-  sourceTraitScope: ScopeId;
+  sourceMethodScope: ScopeId;
   ownerSyntaxId: number;
+  parsedDefaultMethod: ParsedFunctionDecl;
   ctx: BindingContext;
 }): ScopeId | undefined => {
   if (sourceModuleId === ctx.module.id) {
+    return undefined;
+  }
+
+  const referencedNames = collectReferencedIdentifierNames({
+    parsedDefaultMethod,
+  });
+  const importCandidates = collectImportCandidatesForReferencedNames({
+    names: referencedNames,
+    fromScope: sourceMethodScope,
+    symbolTable: sourceSymbolTable,
+  });
+  if (importCandidates.length === 0) {
     return undefined;
   }
 
@@ -372,19 +385,8 @@ const createImportedTraitDefaultScope = ({
     kind: "block",
     owner: ownerSyntaxId,
   });
-  const sourceParentScope = sourceSymbolTable.getScope(sourceTraitScope).parent;
-  if (sourceParentScope === null) {
-    return importedScope;
-  }
-  const visibleByName = collectVisibleSymbols({
-    fromScope: sourceParentScope,
-    symbolTable: sourceSymbolTable,
-  });
 
-  visibleByName.forEach(({ symbol, record }) => {
-    if (record.name === "void") {
-      return;
-    }
+  importCandidates.forEach(({ symbol, record }) => {
     const sourceMetadata = (record.metadata ?? {}) as {
       import?: { moduleId?: unknown; symbol?: unknown };
     };
@@ -419,28 +421,77 @@ const createImportedTraitDefaultScope = ({
   return importedScope;
 };
 
-const collectVisibleSymbols = ({
+const collectImportCandidatesForReferencedNames = ({
+  names,
   fromScope,
   symbolTable,
 }: {
+  names: ReadonlySet<string>;
   fromScope: ScopeId;
   symbolTable: BindingContext["symbolTable"];
-}): Map<string, { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }> => {
-  const visible = new Map<
+}): { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }[] => {
+  const candidatesByName = new Map<
     string,
     { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }
   >();
-  let scope: ScopeId | null = fromScope;
-  while (typeof scope === "number") {
-    for (const symbol of symbolTable.symbolsInScope(scope)) {
-      const record = symbolTable.getSymbol(symbol);
-      if (!visible.has(record.name)) {
-        visible.set(record.name, { symbol, record });
-      }
+  names.forEach((name) => {
+    const symbol = symbolTable.resolve(name, fromScope);
+    if (typeof symbol !== "number") {
+      return;
     }
-    scope = symbolTable.getScope(scope).parent;
+    const record = symbolTable.getSymbol(symbol);
+    if (
+      record.name === "void" ||
+      record.scope === fromScope ||
+      record.kind === "parameter" ||
+      record.kind === "type-parameter"
+    ) {
+      return;
+    }
+    const metadata = (record.metadata ?? {}) as { entity?: unknown };
+    if (metadata.entity === "trait-method") {
+      return;
+    }
+    candidatesByName.set(record.name, { symbol, record });
+  });
+  return Array.from(candidatesByName.values());
+};
+
+const collectReferencedIdentifierNames = ({
+  parsedDefaultMethod,
+}: {
+  parsedDefaultMethod: ParsedFunctionDecl;
+}): ReadonlySet<string> => {
+  const names = new Set<string>();
+  collectIdentifierNamesFromExpr(parsedDefaultMethod.body, names);
+  parsedDefaultMethod.signature.params.forEach((param) => {
+    collectIdentifierNamesFromExpr(param.typeExpr, names);
+  });
+  collectIdentifierNamesFromExpr(parsedDefaultMethod.signature.returnType, names);
+  collectIdentifierNamesFromExpr(parsedDefaultMethod.signature.effectType, names);
+  parsedDefaultMethod.signature.typeParameters.forEach((typeParam) => {
+    collectIdentifierNamesFromExpr(typeParam.constraint, names);
+  });
+  return names;
+};
+
+const collectIdentifierNamesFromExpr = (
+  expr: Expr | undefined,
+  names: Set<string>,
+): void => {
+  if (!expr) {
+    return;
   }
-  return visible;
+  if (isIdentifierAtom(expr)) {
+    names.add(expr.value);
+    return;
+  }
+  if (!isForm(expr)) {
+    return;
+  }
+  expr.toArray().forEach((entry) => {
+    collectIdentifierNamesFromExpr(entry, names);
+  });
 };
 
 export const flushPendingStaticMethods = (ctx: BindingContext): void => {
