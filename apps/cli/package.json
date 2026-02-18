@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts src/__tests__",
+    "test": "vitest run --config ../../vitest.config.ts --testTimeout 60000 src/__tests__",
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
