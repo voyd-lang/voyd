@@ -77,6 +77,10 @@ export interface TypingResult {
   tailResumptions: ReadonlyMap<HirExprId, HirEffectHandlerClause["tailResumption"]>;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
   callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolRef>>;
+  callArgumentPlans: ReadonlyMap<
+    HirExprId,
+    ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
+  >;
   functionInstances: ReadonlyMap<string, TypeId>;
   callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
   callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
@@ -141,8 +145,19 @@ export interface Arg {
   exprId?: HirExprId;
 }
 
+export type CallArgumentPlanEntry =
+  | { kind: "direct"; argIndex: number }
+  | { kind: "missing"; targetTypeId: TypeId }
+  | {
+      kind: "container-field";
+      containerArgIndex: number;
+      fieldName: string;
+      targetTypeId: TypeId;
+    };
+
 export interface CallResolution {
   targets: Map<HirExprId, Map<string, SymbolRef>>;
+  argumentPlans: Map<HirExprId, Map<string, readonly CallArgumentPlanEntry[]>>;
   typeArguments: Map<HirExprId, Map<string, readonly TypeId[]>>;
   instanceKeys: Map<HirExprId, Map<string, string>>;
   traitDispatches: Set<HirExprId>;

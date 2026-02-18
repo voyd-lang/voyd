@@ -27,6 +27,7 @@ import type { EffectsLoweringInfo } from "../effects/analysis.js";
 import { getSymbolTable } from "../_internal/symbol-table.js";
 import type { SymbolRef as TypingSymbolRef } from "../typing/symbol-ref.js";
 import type {
+  CallArgumentPlanEntry,
   ObjectTemplate,
   ObjectTypeInfo,
   SymbolRefKey,
@@ -127,6 +128,7 @@ export type StructuralLayout =
 
 export type CallLoweringInfo = {
   targets?: ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>;
+  argPlans?: ReadonlyMap<ProgramFunctionInstanceId, readonly CallArgumentPlanEntry[]>;
   typeArgs?: ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>;
   traitDispatch: boolean;
 };
@@ -355,20 +357,39 @@ export const buildProgramCodegenView = (
   modules: readonly SemanticsPipelineResult[],
   options?: {
     instances?: readonly MonomorphizedInstanceRequest[];
-	    moduleTyping?: ReadonlyMap<
-	      string,
-	      {
-	        functionInstantiationInfo: ReadonlyMap<SymbolRefKey, ReadonlyMap<string, readonly TypeId[]>>;
-	        functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
-	        functionInstanceValueTypes: ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>;
-	        callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
-	        callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
-	        callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
-	        callTraitDispatches: ReadonlySet<HirExprId>;
-	        valueTypes: ReadonlyMap<SymbolId, TypeId>;
-	      }
-	    >;
-	  }
+    moduleTyping?: ReadonlyMap<
+      string,
+      {
+        functionInstantiationInfo: ReadonlyMap<
+          SymbolRefKey,
+          ReadonlyMap<string, readonly TypeId[]>
+        >;
+        functionInstanceExprTypes: ReadonlyMap<
+          string,
+          ReadonlyMap<HirExprId, TypeId>
+        >;
+        functionInstanceValueTypes: ReadonlyMap<
+          string,
+          ReadonlyMap<SymbolId, TypeId>
+        >;
+        callTargets: ReadonlyMap<
+          HirExprId,
+          ReadonlyMap<string, TypingSymbolRef>
+        >;
+        callArgumentPlans: ReadonlyMap<
+          HirExprId,
+          ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
+        >;
+        callTypeArguments: ReadonlyMap<
+          HirExprId,
+          ReadonlyMap<string, readonly TypeId[]>
+        >;
+        callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
+        callTraitDispatches: ReadonlySet<HirExprId>;
+        valueTypes: ReadonlyMap<SymbolId, TypeId>;
+      }
+    >;
+  }
 ): ProgramCodegenView => {
   type ModuleTypingOverride = NonNullable<NonNullable<typeof options>["moduleTyping"]> extends ReadonlyMap<
     string,
@@ -407,22 +428,27 @@ export const buildProgramCodegenView = (
   const traitMethodImpls = new Map<ProgramSymbolId, CodegenTraitMethodImpl>();
   const traitImplTemplates: CodegenTraitImplTemplate[] = [];
 
-	  const callsByModuleRaw = new Map<
-	    string,
-	    {
-	      targets: Map<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
-	      typeArgs: Map<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
-	      traitDispatches: Set<HirExprId>;
-	    }
-	  >();
-	  const callsByModule = new Map<
-	    string,
-	    {
-	      targets: Map<HirExprId, ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>>;
-	      typeArgs: Map<HirExprId, ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>>;
-	      traitDispatches: Set<HirExprId>;
-	    }
-	  >();
+  const callsByModuleRaw = new Map<
+    string,
+    {
+      targets: Map<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
+      argPlans: Map<HirExprId, ReadonlyMap<string, readonly CallArgumentPlanEntry[]>>;
+      typeArgs: Map<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
+      traitDispatches: Set<HirExprId>;
+    }
+  >();
+  const callsByModule = new Map<
+    string,
+    {
+      targets: Map<HirExprId, ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>>;
+      argPlans: Map<
+        HirExprId,
+        ReadonlyMap<ProgramFunctionInstanceId, readonly CallArgumentPlanEntry[]>
+      >;
+      typeArgs: Map<HirExprId, ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>>;
+      traitDispatches: Set<HirExprId>;
+    }
+  >();
 
   const allInstances: MonomorphizedInstanceInfo[] = [];
   const instanceById = new Map<ProgramFunctionInstanceId, MonomorphizedInstanceInfo>();
@@ -816,11 +842,14 @@ export const buildProgramCodegenView = (
       })),
     });
 
-	    const callSource = moduleTyping.get(mod.moduleId);
+    const callSource = moduleTyping.get(mod.moduleId);
     const callTargets = callSource?.callTargets ?? mod.typing.callTargets;
+    const callArgumentPlans =
+      callSource?.callArgumentPlans ?? mod.typing.callArgumentPlans;
     const callTypeArgs = callSource?.callTypeArguments ?? mod.typing.callTypeArguments;
     callsByModuleRaw.set(mod.moduleId, {
       targets: cloneNestedMap(callTargets),
+      argPlans: cloneNestedMap(callArgumentPlans),
       typeArgs: cloneNestedMap(callTypeArgs),
       traitDispatches: new Set(
         callSource?.callTraitDispatches ?? mod.typing.callTraitDispatches
@@ -1041,14 +1070,26 @@ export const buildProgramCodegenView = (
       moduleTyping.get(mod.moduleId)?.callTargets,
       mod.typing.callTargets,
     ];
-	    callTargetsSources.forEach((callTargets) => {
-	      callTargets?.forEach((targets) => {
-	        targets.forEach((_targetSymbol, instanceKey) => {
-	          recordInstanceKey(mod.moduleId, instanceKey);
-	        });
-	      });
-	    });
-	  });
+    callTargetsSources.forEach((callTargets) => {
+      callTargets?.forEach((targets) => {
+        targets.forEach((_targetSymbol, instanceKey) => {
+          recordInstanceKey(mod.moduleId, instanceKey);
+        });
+      });
+    });
+
+    const callArgumentPlanSources = [
+      moduleTyping.get(mod.moduleId)?.callArgumentPlans,
+      mod.typing.callArgumentPlans,
+    ];
+    callArgumentPlanSources.forEach((plansByCall) => {
+      plansByCall?.forEach((plansByInstanceKey) => {
+        plansByInstanceKey.forEach((_plan, instanceKey) => {
+          recordInstanceKey(mod.moduleId, instanceKey);
+        });
+      });
+    });
+  });
 
   (options?.instances ?? []).forEach((instance) => {
     const functionId = getProgramFunctionId(instance.callee);
@@ -1064,11 +1105,11 @@ export const buildProgramCodegenView = (
     recordInstantiation(functionId, instance.typeArgs);
   });
 
-	  const getInstanceIdForFunctionAndArgs = (
-	    functionId: ProgramFunctionId,
-	    typeArgs: readonly TypeId[]
-	  ): ProgramFunctionInstanceId | undefined =>
-	    instanceIdsByFunctionId.get(functionId)?.get(typeArgs.join(","));
+  const getInstanceIdForFunctionAndArgs = (
+    functionId: ProgramFunctionId,
+    typeArgs: readonly TypeId[]
+  ): ProgramFunctionInstanceId | undefined =>
+    instanceIdsByFunctionId.get(functionId)?.get(typeArgs.join(","));
 
   const getProgramFunctionInstanceId = (
     ref: SymbolRef,
@@ -1195,46 +1236,66 @@ export const buildProgramCodegenView = (
     );
   };
 
-	  callsByModuleRaw.forEach((data, moduleId) => {
-	    const mappedTargets = new Map<
-	      HirExprId,
-	      ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>
-	    >();
-	    data.targets.forEach((targets, exprId) => {
-	      const mapped = new Map<ProgramFunctionInstanceId, ProgramFunctionId>();
-	      targets.forEach((targetRef, instanceKey) => {
-	        const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
-	        const targetFunctionId = getProgramFunctionId(toSymbolRef(targetRef));
-	        if (callerInstanceId === undefined || targetFunctionId === undefined) {
-	          return;
-	        }
-	        mapped.set(callerInstanceId, targetFunctionId);
-	      });
-	      mappedTargets.set(exprId, mapped);
-	    });
+  callsByModuleRaw.forEach((data, moduleId) => {
+    const mappedTargets = new Map<
+      HirExprId,
+      ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>
+    >();
+    data.targets.forEach((targets, exprId) => {
+      const mapped = new Map<ProgramFunctionInstanceId, ProgramFunctionId>();
+      targets.forEach((targetRef, instanceKey) => {
+        const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
+        const targetFunctionId = getProgramFunctionId(toSymbolRef(targetRef));
+        if (callerInstanceId === undefined || targetFunctionId === undefined) {
+          return;
+        }
+        mapped.set(callerInstanceId, targetFunctionId);
+      });
+      mappedTargets.set(exprId, mapped);
+    });
 
-	    const mappedTypeArgs = new Map<
-	      HirExprId,
-	      ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>
-	    >();
-	    data.typeArgs.forEach((argsByInstanceKey, exprId) => {
-	      const mapped = new Map<ProgramFunctionInstanceId, readonly TypeId[]>();
-	      argsByInstanceKey.forEach((typeArgs, instanceKey) => {
-	        const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
-	        if (callerInstanceId === undefined) {
-	          return;
-	        }
-	        mapped.set(callerInstanceId, typeArgs);
-	      });
-	      mappedTypeArgs.set(exprId, mapped);
-	    });
+    const mappedArgPlans = new Map<
+      HirExprId,
+      ReadonlyMap<ProgramFunctionInstanceId, readonly CallArgumentPlanEntry[]>
+    >();
+    data.argPlans.forEach((plansByInstanceKey, exprId) => {
+      const mapped = new Map<
+        ProgramFunctionInstanceId,
+        readonly CallArgumentPlanEntry[]
+      >();
+      plansByInstanceKey.forEach((plan, instanceKey) => {
+        const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
+        if (callerInstanceId === undefined) {
+          return;
+        }
+        mapped.set(callerInstanceId, plan);
+      });
+      mappedArgPlans.set(exprId, mapped);
+    });
 
-	    callsByModule.set(moduleId, {
-	      targets: mappedTargets,
-	      typeArgs: mappedTypeArgs,
-	      traitDispatches: new Set(data.traitDispatches),
-	    });
-	  });
+    const mappedTypeArgs = new Map<
+      HirExprId,
+      ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>
+    >();
+    data.typeArgs.forEach((argsByInstanceKey, exprId) => {
+      const mapped = new Map<ProgramFunctionInstanceId, readonly TypeId[]>();
+      argsByInstanceKey.forEach((typeArgs, instanceKey) => {
+        const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
+        if (callerInstanceId === undefined) {
+          return;
+        }
+        mapped.set(callerInstanceId, typeArgs);
+      });
+      mappedTypeArgs.set(exprId, mapped);
+    });
+
+    callsByModule.set(moduleId, {
+      targets: mappedTargets,
+      argPlans: mappedArgPlans,
+      typeArgs: mappedTypeArgs,
+      traitDispatches: new Set(data.traitDispatches),
+    });
+  });
 
   (options?.instances ?? []).forEach((info) => {
     const functionId = getProgramFunctionId(info.callee);
@@ -1396,6 +1457,7 @@ export const buildProgramCodegenView = (
       }
       return {
         targets: data.targets.get(expr),
+        argPlans: data.argPlans.get(expr),
         typeArgs: data.typeArgs.get(expr),
         traitDispatch: data.traitDispatches.has(expr),
       };

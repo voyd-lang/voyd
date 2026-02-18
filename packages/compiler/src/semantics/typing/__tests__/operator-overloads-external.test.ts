@@ -135,6 +135,13 @@ pub fn main(): () -> bool
       moduleId: external.module.id,
       symbol: expectedSymbol,
     });
+
+    const argPlan = result.typing.callArgumentPlans
+      .get(callExpr.id)
+      ?.get(instanceKey);
+    expect(argPlan).toEqual([
+      { kind: "direct", argIndex: 0 },
+      { kind: "direct", argIndex: 1 },
+    ]);
   });
 });
-
