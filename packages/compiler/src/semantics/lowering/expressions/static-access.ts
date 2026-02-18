@@ -19,10 +19,12 @@ import {
 } from "./resolution-helpers.js";
 import { lowerNominalObjectLiteral } from "./call.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
-import { resolveTypeSymbol } from "../resolution.js";
+import { resolveConstructorResolution, resolveTypeSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import { resolveModulePathSymbol } from "./namespace-resolution.js";
 import { lowerQualifiedTraitMethodCall } from "./qualified-trait-call.js";
+import { enumNamespaceMemberTypeArgumentsFromMetadata } from "../../enum-namespace.js";
+import { substituteTypeParametersInTypeExpr } from "../../hir/type-expr-substitution.js";
 
 export const lowerStaticAccessExpr = ({
   form,
@@ -89,8 +91,17 @@ export const lowerStaticAccessExpr = ({
         methodTable,
         ctx,
       });
+      const constructorResolution =
+        resolution.kind === "symbol" &&
+        ctx.symbolTable.getSymbol(resolution.symbol).kind === "type"
+          ? resolveConstructorResolution({
+              targetSymbol: resolution.symbol,
+              name: memberExpr.value,
+              ctx,
+            })
+          : undefined;
       return lowerResolvedCallee({
-        resolution,
+        resolution: constructorResolution ?? resolution,
         syntax: memberExpr,
         ctx,
       });
@@ -251,13 +262,20 @@ const lowerStaticMethodCall = ({
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
         .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
     : undefined;
-  const combinedTypeArguments =
-    targetTypeArguments && targetTypeArguments.length > 0
-      ? [
-          ...(typeArguments ?? []),
-          ...(targetTypeArguments.filter(Boolean) as HirTypeExpr[]),
-        ]
-      : typeArguments;
+  const enumNamespaceTypeArguments = lowerEnumNamespaceMemberTypeArguments({
+    namespaceSymbol: targetSymbol,
+    memberName: calleeExpr.value,
+    namespaceTypeArguments: targetTypeArguments,
+    scope: scopes.current(),
+    ctx,
+  });
+  const combinedTypeArguments = [
+    ...(typeArguments ?? []),
+    ...(enumNamespaceTypeArguments.typeArguments ?? []),
+    ...(enumNamespaceTypeArguments.consumeNamespaceTypeArguments
+      ? []
+      : (targetTypeArguments ?? [])),
+  ];
 
   const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
     if (isForm(arg) && arg.calls(":")) {
@@ -274,6 +292,22 @@ const lowerStaticMethodCall = ({
     const expr = lowerExpr(arg, ctx, scopes);
     return { expr };
   });
+  const namespaceMemberSymbols =
+    methodTable.get(calleeExpr.value) ?? new Set<SymbolId>();
+
+  const nominal = lowerNominalObjectLiteral({
+    callee: calleeExpr,
+    args: memberForm.rest,
+    ast: accessForm,
+    fallbackTypeArguments: combinedTypeArguments,
+    allowedTargetSymbols: namespaceMemberSymbols,
+    ctx,
+    scopes,
+    lowerExpr,
+  });
+  if (typeof nominal === "number") {
+    return nominal;
+  }
 
   const resolution = resolveStaticMethodResolution({
     name: calleeExpr.value,
@@ -281,8 +315,17 @@ const lowerStaticMethodCall = ({
     methodTable,
     ctx,
   });
+  const constructorResolution =
+    resolution.kind === "symbol" &&
+    ctx.symbolTable.getSymbol(resolution.symbol).kind === "type"
+      ? resolveConstructorResolution({
+          targetSymbol: resolution.symbol,
+          name: calleeExpr.value,
+          ctx,
+        })
+      : undefined;
   const callee = lowerResolvedCallee({
-    resolution,
+    resolution: constructorResolution ?? resolution,
     syntax: calleeExpr,
     ctx,
   });
@@ -295,10 +338,59 @@ const lowerStaticMethodCall = ({
     callee,
     args,
     typeArguments:
-      combinedTypeArguments && combinedTypeArguments.length > 0
+      combinedTypeArguments.length > 0
         ? combinedTypeArguments
         : undefined,
   });
+};
+
+const lowerEnumNamespaceMemberTypeArguments = ({
+  namespaceSymbol,
+  memberName,
+  namespaceTypeArguments,
+  scope,
+  ctx,
+}: {
+  namespaceSymbol: SymbolId;
+  memberName: string;
+  namespaceTypeArguments?: readonly HirTypeExpr[];
+  scope: ScopeId;
+  ctx: LoweringParams["ctx"];
+}): {
+  typeArguments?: HirTypeExpr[];
+  consumeNamespaceTypeArguments: boolean;
+} => {
+  const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
+  const metadata = enumNamespaceMemberTypeArgumentsFromMetadata({
+    source: namespaceRecord.metadata as Record<string, unknown> | undefined,
+    memberName,
+  });
+  if (!metadata) {
+    return { consumeNamespaceTypeArguments: false };
+  }
+
+  const substitutionsByName = new Map(
+    metadata.typeParameterNames.map((name, index) => [
+      name,
+      namespaceTypeArguments?.[index],
+    ]),
+  );
+  const lowered = metadata.typeArguments.flatMap((entry) => {
+    const parsed = lowerTypeExpr(entry, ctx, scope);
+    if (!parsed) {
+      return [];
+    }
+    return [
+      substituteTypeParametersInTypeExpr({
+        typeExpr: parsed,
+        substitutionsByName,
+      }),
+    ];
+  });
+  return {
+    typeArguments: lowered.length > 0 ? lowered : undefined,
+    consumeNamespaceTypeArguments: true,
+  };
 };
 
 const lowerModuleQualifiedCall = ({

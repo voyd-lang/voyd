@@ -2,6 +2,7 @@ import { Form } from "../../ast/form.js";
 import {
   Expr,
   IdentifierAtom,
+  InternalIdentifierAtom,
   isBoolAtom,
   isFloatAtom,
   isForm,
@@ -290,6 +291,20 @@ export const createBuiltins = (
       return value
         ? expectExpr(value, "block result")
         : new IdentifierAtom("nop");
+    },
+    emit_many: ({ args }) => {
+      const values = args.map((arg) => expectExpr(arg, "emit_many value"));
+      const single = values.at(0);
+      const flattened =
+        values.length === 1 &&
+        isForm(single) &&
+        (single.length === 0 || single.toArray().every((entry) => isForm(entry)))
+          ? single.toArray()
+          : values;
+      return new Form([
+        new InternalIdentifierAtom("emit_many"),
+        ...flattened.map((value) => cloneExpr(value)),
+      ]);
     },
     length: ({ args }) => {
       const list = expectForm(args.at(0), "length target");

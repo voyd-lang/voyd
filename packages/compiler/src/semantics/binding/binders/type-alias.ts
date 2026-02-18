@@ -6,6 +6,11 @@ import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
+import {
+  enumNamespaceMetadataFromAliasTarget,
+  enumVariantTypeNamesFromAliasTarget,
+} from "../../enum-namespace.js";
+import type { SymbolId } from "../../ids.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -24,6 +29,10 @@ export const bindTypeAlias = (
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
+  const enumNamespaceMetadata = enumNamespaceMetadataFromAliasTarget({
+    target: decl.target,
+    typeParameterNames: decl.typeParameters.map((entry) => entry.name.value),
+  });
   reportOverloadNameCollision({
     name: decl.name.value,
     scope: tracker.current(),
@@ -35,7 +44,11 @@ export const bindTypeAlias = (
     name: decl.name.value,
     kind: "type",
     declaredAt: decl.form.syntaxId,
-    metadata: { entity: "type-alias", ...intrinsicTypeMetadata },
+    metadata: {
+      entity: "type-alias",
+      ...intrinsicTypeMetadata,
+      ...(enumNamespaceMetadata ?? {}),
+    },
   });
 
   const aliasScope = ctx.symbolTable.createScope({
@@ -60,4 +73,79 @@ export const bindTypeAlias = (
     moduleIndex: ctx.nextModuleIndex++,
     documentation: declarationDocForSyntax(decl.name, ctx),
   });
+};
+
+export const seedEnumAliasNamespaces = (ctx: BindingContext): void => {
+  ctx.decls.typeAliases.forEach((alias) => {
+    seedEnumVariantNamespace({
+      aliasSymbol: alias.symbol,
+      target: alias.target,
+      scope: ctx.symbolTable.rootScope,
+      ctx,
+    });
+  });
+};
+
+const seedEnumVariantNamespace = ({
+  aliasSymbol,
+  target,
+  scope,
+  ctx,
+}: {
+  aliasSymbol: SymbolId;
+  target: ParsedTypeAliasDecl["target"];
+  scope: number;
+  ctx: BindingContext;
+}): void => {
+  const variantNames = enumVariantTypeNamesFromAliasTarget(target);
+  if (!variantNames) {
+    return;
+  }
+
+  const bucket = ctx.staticMethods.get(aliasSymbol) ?? new Map();
+  let seeded = false;
+
+  variantNames.forEach((variantName) => {
+    const variantSymbol = resolveObjectTypeSymbol({
+      name: variantName,
+      scope,
+      ctx,
+    });
+    if (typeof variantSymbol !== "number") {
+      return;
+    }
+
+    const symbols = bucket.get(variantName) ?? new Set<SymbolId>();
+    symbols.add(variantSymbol);
+    bucket.set(variantName, symbols);
+    seeded = true;
+  });
+
+  if (!seeded) {
+    return;
+  }
+  ctx.staticMethods.set(aliasSymbol, bucket);
+};
+
+const resolveObjectTypeSymbol = ({
+  name,
+  scope,
+  ctx,
+}: {
+  name: string;
+  scope: number;
+  ctx: BindingContext;
+}): SymbolId | undefined => {
+  const symbol = ctx.symbolTable.resolve(name, scope);
+  if (typeof symbol !== "number") {
+    return undefined;
+  }
+
+  const record = ctx.symbolTable.getSymbol(symbol);
+  const metadata = record.metadata as { entity?: string } | undefined;
+  if (record.kind !== "type" || metadata?.entity !== "object") {
+    return undefined;
+  }
+
+  return symbol;
 };

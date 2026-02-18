@@ -1,0 +1,9 @@
+use std::all
+
+pub enum Drink
+  Coffee { size: i32 }
+  Tea { size: i32 }
+  Water
+
+pub fn make_coffee(size: i32) -> Drink
+  Drink::Coffee { size }
