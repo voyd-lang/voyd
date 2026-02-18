@@ -16,5 +16,6 @@ pub macro enum(enum_name, variants_block)
     first_variant,
     (acc, next) => `($acc | $next)
   )
+  let declarations = object_decls.push(`(type ($enum_name = $union_target)))
 
-  `(block $$(object_decls) (type ($enum_name = $union_target)))
+  emit_many(declarations)

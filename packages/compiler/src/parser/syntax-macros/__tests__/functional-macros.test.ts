@@ -144,16 +144,29 @@ wrap()
     ]);
   });
 
-  test("splices top-level block expansions into the ast root", () => {
+  test("splices top-level emit_many expansions into the ast root", () => {
     const code = `\
 macro declare_pair()
-  \`(block (type (Left = i32)) (type (Right = i32)))
+  emit_many(\`(type (Left = i32)), \`(type (Right = i32)))
 declare_pair()
 `;
     const ast = parse(code);
     const plain = toPlain(ast);
     expect(plain).toContainEqual(["type", ["=", "Left", "i32"]]);
     expect(plain).toContainEqual(["type", ["=", "Right", "i32"]]);
+  });
+
+  test("does not implicitly splice top-level block expansions", () => {
+    const code = `\
+macro wrap_decl()
+  \`(block (type (Only = i32)))
+wrap_decl()
+`;
+    const ast = parse(code);
+    expect(toPlain(ast)).toContainEqual([
+      "block",
+      ["type", ["=", "Only", "i32"]],
+    ]);
   });
 
   test("supports pub-wrapped macro invocations", () => {

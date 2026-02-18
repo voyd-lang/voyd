@@ -1,6 +1,7 @@
 /** Defines all internal fn calls */
 export type Internal =
   | "ast"
+  | "emit_many"
   | "tuple"
   | "paren"
   | "array_literal"

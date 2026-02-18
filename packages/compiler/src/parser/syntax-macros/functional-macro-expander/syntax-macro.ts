@@ -119,11 +119,7 @@ const expandForm = (
     }
 
     const expanded = expandExpr(child, bodyScope, exports, options);
-    if (
-      isTopLevelAst(form) &&
-      isForm(expanded) &&
-      isBlockLikeForm(expanded)
-    ) {
+    if (isTopLevelAst(form) && isForm(expanded) && isEmitManyForm(expanded)) {
       result.push(...expanded.rest);
       return;
     }
@@ -169,7 +165,7 @@ const applyPubVisibility = (expr: Expr): Expr => {
     return expr;
   }
 
-  if (expr.calls("block")) {
+  if (expr.calls("block") || isEmitManyForm(expr)) {
     return recreateForm(expr, [
       expr.first!,
       ...expr.rest.map((entry) => withPubModifier(entry)),
@@ -198,13 +194,12 @@ const withPubModifier = (expr: Expr): Expr => {
 const isTopLevelAst = (form: Form): boolean =>
   form.callsInternal("ast") || form.calls("ast");
 
-const isBlockLikeForm = (form: Form): boolean => {
-  if (form.calls("block")) {
+const isEmitManyForm = (form: Form): boolean => {
+  if (form.callsInternal("emit_many")) {
     return true;
   }
-
   const head = form.at(0);
-  return isInternalIdentifierAtom(head) && head.value === "block";
+  return isInternalIdentifierAtom(head) && head.value === "emit_many";
 };
 
 const PUB_ELIGIBLE_TOP_LEVEL_HEADS = new Set([

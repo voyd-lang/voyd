@@ -166,17 +166,22 @@ pub macro enum(enum_name, variants_block)
     first_variant,
     (acc, next) => \`($acc | $next)
   )
-  \`(block $$(object_decls) (type ($enum_name = $union_target)))
+  let declarations = object_decls.push(\`(type ($enum_name = $union_target)))
+  emit_many(declarations)
 `,
       [`${srcRoot}${sep}drinks.voyd`]: `
 use std::all
 
 pub enum Drink
-  Coffee
-  Tea
+  Coffee { size: i32 }
+  Tea { size: i32 }
+
+impl Coffee
+  pub fn init(size: i32) -> Coffee
+    Coffee { size }
 
 pub fn make() -> Drink
-  Drink::Coffee {}
+  Drink::Coffee(12)
 `,
       [`${srcRoot}${sep}main.voyd`]: `
 use src::drinks::{ Drink, make }
@@ -184,8 +189,12 @@ use Drink::Coffee
 
 pub fn main() -> i32
   let drink: Drink = make()
-  let coffee: Drink = Coffee {}
-  1
+  let coffee: Drink = Drink::Coffee(8)
+  match(coffee)
+    Coffee { size }:
+      size
+    Tea:
+      0
 `,
     });
 
@@ -201,5 +210,40 @@ pub fn main() -> i32
 
     expect(combinedDiagnostics).toHaveLength(0);
     expect(mainSemantics?.binding.imports.map((entry) => entry.name)).toContain("Coffee");
+  });
+
+  it("does not auto-import package-visible enum variants across package boundaries", async () => {
+    const srcRoot = resolve("/proj/src");
+    const pkgDir = resolve("/proj/node_modules");
+    const host = createMemoryHost({
+      [`${pkgDir}${sep}bev${sep}src${sep}drinks.voyd`]: `
+obj Coffee {}
+
+pub type Drink = Coffee
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use pkg::bev::drinks::{ Drink }
+
+pub fn main() -> Drink
+  Drink::Coffee {}
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, pkgDirs: [pkgDir] },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+
+    expect(
+      combinedDiagnostics.some(
+        (diag) =>
+          diag.code === "BD0001" &&
+          diag.message.includes("not visible here"),
+      ),
+    ).toBe(true);
   });
 });
