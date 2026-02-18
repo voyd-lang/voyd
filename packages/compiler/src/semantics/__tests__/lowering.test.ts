@@ -892,4 +892,41 @@ fn main()
       /missing function item/
     );
   });
+
+  it("falls back to regular call lowering when `is` rhs is not a type", () => {
+    const source = `
+obj Box {
+  value: i32
+}
+
+pub fn main(): () -> bool
+  let b = Box { value: 1 }
+  b is (1 + 2)
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: "main.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    expect(() =>
+      runLoweringPipeline({
+        builder,
+        binding,
+        moduleNodeId: ast.syntaxId,
+        modulePath: binding.modulePath,
+        packageId: binding.packageId,
+        isPackageRoot: binding.isPackageRoot,
+      }),
+    ).not.toThrow();
+  });
 });
