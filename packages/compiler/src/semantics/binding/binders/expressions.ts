@@ -24,8 +24,6 @@ import { ensureForm } from "./utils.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import {
   type HirBindingKind,
-  isPublicVisibility,
-  isPackageVisible,
   moduleVisibility,
 } from "../../hir/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
@@ -33,8 +31,14 @@ import type { ModuleMemberTable } from "../types.js";
 import { extractConstructorTargetIdentifier } from "../../constructors.js";
 import {
   importableMetadataFrom,
+  importedModuleExplicitStdSubmoduleFrom,
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
+import { canAccessExport, canAccessSymbolVisibility } from "../export-visibility.js";
+import {
+  enumVariantTypeNamesFromAliasTarget,
+  importedSymbolTargetFromMetadata,
+} from "../../enum-namespace.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -534,6 +538,13 @@ const bindNamespaceAccess = (
     scope,
     ctx,
   });
+  ensureEnumNamespaceImport({
+    targetSymbol,
+    memberName,
+    syntax: member as Syntax,
+    scope,
+    ctx,
+  });
 };
 
 const resolveNamespaceModuleSymbol = (
@@ -629,7 +640,13 @@ const stripTypeArguments = (expr: Expr): Expr => {
   return expr;
 };
 
-type ImportMeta = { import?: { moduleId?: string; symbol?: number } };
+type ImportMeta = {
+  import?: {
+    moduleId?: string;
+    symbol?: number;
+    explicitlyTargetsStdSubmodule?: boolean;
+  };
+};
 
 const ensureStaticMethodImport = ({
   targetSymbol,
@@ -648,6 +665,8 @@ const ensureStaticMethodImport = ({
   const importMeta = targetRecord.metadata as ImportMeta | undefined;
   const moduleId = importMeta?.import?.moduleId;
   const exportedSymbol = importMeta?.import?.symbol;
+  const explicitlyTargetsStdSubmodule =
+    importMeta?.import?.explicitlyTargetsStdSubmodule === true;
   if (!moduleId || typeof exportedSymbol !== "number") {
     return;
   }
@@ -661,6 +680,14 @@ const ensureStaticMethodImport = ({
 
   const existing = ctx.staticMethods.get(targetSymbol)?.get(memberName);
   if (existing?.size) {
+    existing.forEach((symbol) =>
+      ensureConstructorImport({
+        targetSymbol: symbol,
+        syntax,
+        scope,
+        ctx,
+      }),
+    );
     return;
   }
 
@@ -672,11 +699,14 @@ const ensureStaticMethodImport = ({
     if (!fn) {
       return;
     }
-    const samePackage = dependency.packageId === ctx.packageId;
-    const visibilityAllowed =
-      isPublicVisibility(fn.visibility) ||
-      fn.visibility.api === true ||
-      (samePackage && isPackageVisible(fn.visibility));
+    const visibilityAllowed = canAccessSymbolVisibility({
+      visibility: fn.visibility,
+      ownerPackageId: dependency.packageId,
+      importedFromModuleId: moduleId,
+      explicitlyTargetsStdSubmodule,
+      allowApiVisibility: true,
+      ctx,
+    });
     if (!visibilityAllowed) {
       return;
     }
@@ -731,6 +761,122 @@ const ensureStaticMethodImport = ({
     ctx.importedOverloadOptions.set(setId, merged);
     merged.forEach((local) => ctx.overloadBySymbol.set(local, setId));
   }
+};
+
+const ensureEnumNamespaceImport = ({
+  targetSymbol,
+  memberName,
+  syntax,
+  scope,
+  ctx,
+}: {
+  targetSymbol: number;
+  memberName: string;
+  syntax: Syntax;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): void => {
+  const existing = ctx.staticMethods.get(targetSymbol)?.get(memberName);
+  if (existing?.size) {
+    return;
+  }
+
+  const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
+  const explicitlyTargetsStdSubmodule =
+    importedModuleExplicitStdSubmoduleFrom(
+      targetRecord.metadata as Record<string, unknown> | undefined,
+    ) ?? false;
+  const importedTarget = importedSymbolTargetFromMetadata(
+    targetRecord.metadata as Record<string, unknown> | undefined,
+  );
+  if (!importedTarget) {
+    return;
+  }
+
+  const dependency = ctx.dependencies.get(importedTarget.moduleId);
+  if (!dependency) {
+    return;
+  }
+
+  const aliasDecl = dependency.decls.getTypeAlias(importedTarget.symbol);
+  if (!aliasDecl) {
+    return;
+  }
+
+  const variantNames = enumVariantTypeNamesFromAliasTarget(aliasDecl.target);
+  if (!variantNames || !variantNames.includes(memberName)) {
+    return;
+  }
+
+  const exportTable = ctx.moduleExports.get(importedTarget.moduleId);
+  const exported = exportTable?.get(memberName);
+  if (!exported) {
+    ctx.diagnostics.push(
+      diagnosticFromCode({
+        code: "BD0001",
+        params: {
+          kind: "missing-export",
+          moduleId: importedTarget.moduleId,
+          target: memberName,
+        },
+        span: toSourceSpan(syntax),
+      }),
+    );
+    return;
+  }
+  if (
+    !canAccessExport({
+      exported,
+      moduleId: importedTarget.moduleId,
+      ctx,
+      explicitlyTargetsStdSubmodule,
+    })
+  ) {
+    ctx.diagnostics.push(
+      diagnosticFromCode({
+        code: "BD0001",
+        params: {
+          kind: "out-of-scope-export",
+          moduleId: importedTarget.moduleId,
+          target: memberName,
+          visibility: exported.visibility.level,
+        },
+        span: toSourceSpan(syntax),
+      }),
+    );
+    return;
+  }
+
+  const exportedRecord = dependency.symbolTable.getSymbol(exported.symbol);
+  const metadata = exportedRecord.metadata as { entity?: string } | undefined;
+  if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
+    return;
+  }
+
+  const locals = declareModuleMemberImport({
+    exported,
+    explicitlyTargetsStdSubmodule,
+    syntax,
+    scope,
+    ctx,
+  });
+  if (locals.length === 0) {
+    return;
+  }
+
+  const bucket = ctx.staticMethods.get(targetSymbol) ?? new Map();
+  const members = bucket.get(memberName) ?? new Set<SymbolId>();
+  locals.forEach((local) => members.add(local));
+  bucket.set(memberName, members);
+  ctx.staticMethods.set(targetSymbol, bucket);
+  locals.forEach((local) =>
+    ensureConstructorImport({
+      targetSymbol: local,
+      syntax,
+      scope,
+      ctx,
+    }),
+  );
 };
 
 const ensureConstructorImport = ({
@@ -819,6 +965,11 @@ const ensureModuleMemberImport = ({
   if (cached) {
     return;
   }
+  const moduleRecord = ctx.symbolTable.getSymbol(moduleSymbol);
+  const explicitlyTargetsStdSubmodule =
+    importedModuleExplicitStdSubmoduleFrom(
+      moduleRecord.metadata as Record<string, unknown> | undefined,
+    ) ?? false;
   const exportTable = ctx.moduleExports.get(moduleId);
   const exported = exportTable?.get(memberName);
   if (!exported) {
@@ -833,6 +984,7 @@ const ensureModuleMemberImport = ({
   }
   const locals = declareModuleMemberImport({
     exported,
+    explicitlyTargetsStdSubmodule,
     syntax,
     scope,
     ctx,
@@ -857,11 +1009,13 @@ const createMemberBucket = (
 
 const declareModuleMemberImport = ({
   exported,
+  explicitlyTargetsStdSubmodule = false,
   syntax,
   scope,
   ctx,
 }: {
   exported: ModuleExportEntry;
+  explicitlyTargetsStdSubmodule?: boolean;
   syntax: Syntax;
   scope: ScopeId;
   ctx: BindingContext;
@@ -891,8 +1045,15 @@ const declareModuleMemberImport = ({
         metadata: {
           import:
             exported.kind === "module"
-              ? { moduleId: importedModuleId }
-              : { moduleId: exported.moduleId, symbol },
+              ? {
+                  moduleId: importedModuleId,
+                  explicitlyTargetsStdSubmodule,
+                }
+              : {
+                  moduleId: exported.moduleId,
+                  symbol,
+                  explicitlyTargetsStdSubmodule,
+                },
           ...(importableMetadata ?? {}),
         },
       },

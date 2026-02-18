@@ -191,6 +191,7 @@ const typeFunction = (
 
 const clearFunctionInstances = (ctx: TypingContext): void => {
   ctx.functions.resetInstances();
+  ctx.callResolution.argumentPlans.clear();
   ctx.callResolution.typeArguments.clear();
   ctx.callResolution.instanceKeys.clear();
 };

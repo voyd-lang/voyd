@@ -1,4 +1,4 @@
-# Enum (Not yet implemented)
+# Enum
 
 ```voyd
 enum Drink
