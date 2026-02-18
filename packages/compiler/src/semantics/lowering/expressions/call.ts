@@ -102,7 +102,11 @@ const tryLowerIsTypeCheckCall = ({
   scopes,
   lowerExpr,
 }: LowerCallFromElementsParams): HirExprId | undefined => {
-  if (!isIdentifierAtom(calleeExpr) || calleeExpr.value !== "is") {
+  if (
+    !isIdentifierAtom(calleeExpr) ||
+    calleeExpr.isQuoted ||
+    calleeExpr.value !== "is"
+  ) {
     return undefined;
   }
   const [discriminantExpr, typeExpr, ...rest] = argsExprs;
