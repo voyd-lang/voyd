@@ -438,6 +438,7 @@ const resolveImplicitNamespaceUseEntry = ({
     return declareImportedSymbol({
       exported,
       alias: entry.alias ?? targetName,
+      explicitlyTargetsStdSubmodule,
       ctx,
       declaredAt: decl.form,
       span: entry.span,
@@ -928,7 +929,11 @@ const hydrateImportedEnumAliasNamespace = ({
             kind: exported.kind,
             declaredAt: declaredAt.syntaxId,
             metadata: {
-              import: { moduleId: importedModuleId, symbol: exported.symbol },
+              import: {
+                moduleId: importedModuleId,
+                symbol: exported.symbol,
+                explicitlyTargetsStdSubmodule,
+              },
               ...(importableMetadataFrom(
                 exportedRecord.metadata as Record<string, unknown> | undefined,
               ) ?? {}),
