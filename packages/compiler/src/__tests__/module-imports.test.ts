@@ -81,6 +81,130 @@ describe("module imports", () => {
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 
+  it("rejects std::all alias hops to package-visible std internals", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::memory",
+      [`${stdRoot}${sep}memory.voyd`]: `
+pub fn hidden() -> i32
+  1
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+use memory::hidden
+
+pub fn main() -> i32
+  hidden()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+
+    expect(
+      combinedDiagnostics.some(
+        (diag) => diag.code === "BD0001" && diag.message.includes("hidden"),
+      ),
+    ).toBe(true);
+  });
+
+  it("allows explicit std submodule alias hops to package-visible members", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}memory.voyd`]: `
+pub fn hidden() -> i32
+  1
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::memory::self as memory
+use memory::hidden
+
+pub fn main() -> i32
+  hidden()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
+  it("keeps std::all alias chains restricted to std::pkg-visible exports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::memory",
+      [`${stdRoot}${sep}memory.voyd`]: `
+pub fn hidden() -> i32
+  1
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+use memory::self as mem
+use mem::hidden
+
+pub fn main() -> i32
+  hidden()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+
+    expect(
+      combinedDiagnostics.some(
+        (diag) => diag.code === "BD0001" && diag.message.includes("hidden"),
+      ),
+    ).toBe(true);
+  });
+
+  it("preserves explicit std-submodule permissions across module alias chains", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}memory.voyd`]: `
+pub fn hidden() -> i32
+  1
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::memory::self as memory
+use memory::self as mem
+use mem::hidden
+
+pub fn main() -> i32
+  hidden()
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
   it("treats src imports as std-internal aliases when analyzing std modules", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

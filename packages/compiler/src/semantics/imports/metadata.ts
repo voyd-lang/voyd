@@ -55,3 +55,13 @@ export const importedModuleIdFrom = (
   const moduleId = meta?.import?.moduleId;
   return typeof moduleId === "string" ? moduleId : undefined;
 };
+
+export const importedModuleExplicitStdSubmoduleFrom = (
+  source?: Record<string, unknown>,
+): boolean | undefined => {
+  const meta = source as
+    | { import?: { explicitlyTargetsStdSubmodule?: unknown } | undefined }
+    | undefined;
+  const explicit = meta?.import?.explicitlyTargetsStdSubmodule;
+  return typeof explicit === "boolean" ? explicit : undefined;
+};

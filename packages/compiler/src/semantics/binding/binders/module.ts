@@ -42,6 +42,7 @@ import type { SourceSpan, SymbolId } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
 import {
   importableMetadataFrom,
+  importedModuleExplicitStdSubmoduleFrom,
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
 import { findModuleNamespaceNameCollision } from "../name-collisions.js";
@@ -242,6 +243,7 @@ const resolveUseEntry = ({
       ? declareModuleImport({
           moduleId,
           alias: entry.alias ?? entry.path.at(-1),
+          explicitlyTargetsStdSubmodule: isExplicitStdSubmoduleEntry(entry),
           ctx,
           span: entry.span,
           declaredAt: decl.form,
@@ -295,17 +297,21 @@ const resolveImplicitNamespaceUseEntry = ({
   const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
 
   if (namespaceRecord.kind === "module") {
-    const moduleId = importedModuleIdFrom(
-      namespaceRecord.metadata as Record<string, unknown> | undefined,
-    );
+    const namespaceMetadata = namespaceRecord.metadata as
+      | Record<string, unknown>
+      | undefined;
+    const moduleId = importedModuleIdFrom(namespaceMetadata);
     if (!moduleId) {
       return undefined;
     }
+    const explicitlyTargetsStdSubmodule =
+      importedModuleExplicitStdSubmoduleFrom(namespaceMetadata) ?? false;
     const imports =
       entry.selectionKind === "module"
         ? declareModuleImport({
             moduleId,
             alias: entry.alias ?? entry.path.at(-1),
+            explicitlyTargetsStdSubmodule,
             ctx,
             span: entry.span,
             declaredAt: decl.form,
@@ -314,7 +320,7 @@ const resolveImplicitNamespaceUseEntry = ({
         : bindImportsFromModule({
             moduleId,
             entry: { ...entry, hasExplicitPrefix: true },
-            explicitlyTargetsStdSubmodule: isStdSubmoduleModuleId(moduleId),
+            explicitlyTargetsStdSubmodule,
             ctx,
             declaredAt: decl.form,
             visibility: decl.visibility,
@@ -543,8 +549,8 @@ const bindImportsFromModule = ({
   const stdPkgExports = isStdImport && !explicitlyTargetsStdSubmodule
     ? stdPkgExportsFor({ moduleId, ctx })
     : undefined;
-  if (isStdImport && !explicitlyTargetsStdSubmodule && !stdPkgExports) {
-    exports = undefined;
+  if (isStdImport && !explicitlyTargetsStdSubmodule) {
+    exports = stdPkgExports;
   }
   if (!exports) {
     recordImportDiagnostic({
@@ -613,6 +619,7 @@ const bindImportsFromModule = ({
       declareImportedSymbol({
         exported: item,
         alias: item.name,
+        explicitlyTargetsStdSubmodule,
         ctx,
         declaredAt,
         span: entry.span,
@@ -682,6 +689,7 @@ const bindImportsFromModule = ({
   return declareImportedSymbol({
     exported,
     alias: entry.alias ?? targetName,
+    explicitlyTargetsStdSubmodule,
     ctx,
     declaredAt,
     span: entry.span,
@@ -703,6 +711,7 @@ const isMacroExportedFromModule = ({
 const declareImportedSymbol = ({
   exported,
   alias,
+  explicitlyTargetsStdSubmodule = false,
   ctx,
   declaredAt,
   span,
@@ -710,6 +719,7 @@ const declareImportedSymbol = ({
 }: {
   exported: ModuleExportEntry;
   alias: string;
+  explicitlyTargetsStdSubmodule?: boolean;
   ctx: BindingContext;
   declaredAt: Form;
   span: SourceSpan;
@@ -759,6 +769,12 @@ const declareImportedSymbol = ({
             sourceMetadata as Record<string, unknown> | undefined,
           ) ?? exported.moduleId)
         : (importedSymbolTarget?.moduleId ?? exported.moduleId);
+    const importedModuleExplicitStdSubmodule =
+      exported.kind === "module"
+        ? (importedModuleExplicitStdSubmoduleFrom(
+            sourceMetadata as Record<string, unknown> | undefined,
+          ) ?? explicitlyTargetsStdSubmodule)
+        : undefined;
     const importedSymbolId =
       exported.kind !== "module"
         ? (importedSymbolTarget?.symbol ?? symbol)
@@ -770,7 +786,10 @@ const declareImportedSymbol = ({
       metadata: {
         import:
           exported.kind === "module"
-            ? { moduleId: importedModuleId }
+            ? {
+                moduleId: importedModuleId,
+                explicitlyTargetsStdSubmodule: importedModuleExplicitStdSubmodule,
+              }
             : { moduleId: importedModuleId, symbol: importedSymbolId },
         ...(importableMetadata ?? {}),
       },
@@ -906,6 +925,7 @@ const hydrateImportedEnumAliasNamespace = ({
 const declareModuleImport = ({
   moduleId,
   alias,
+  explicitlyTargetsStdSubmodule = false,
   ctx,
   declaredAt,
   span,
@@ -913,6 +933,7 @@ const declareModuleImport = ({
 }: {
   moduleId?: string;
   alias?: string;
+  explicitlyTargetsStdSubmodule?: boolean;
   ctx: BindingContext;
   declaredAt: Form;
   span: SourceSpan;
@@ -949,7 +970,7 @@ const declareModuleImport = ({
     name,
     kind: "module",
     declaredAt: declaredAt.syntaxId,
-    metadata: { import: { moduleId } },
+    metadata: { import: { moduleId, explicitlyTargetsStdSubmodule } },
   });
   const bound: BoundImport = {
     name,
