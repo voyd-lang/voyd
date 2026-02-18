@@ -1,0 +1,8 @@
+use std::string::type::{ String, StringSlice }
+
+pub use std::traits::fmt::{ Formatter, Debug, Display }
+
+pub obj FmtArgs {}
+
+pub fn format({ fmt: StringSlice, args _args: FmtArgs }) -> String
+  fmt.to_string()

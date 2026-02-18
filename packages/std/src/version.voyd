@@ -1,0 +1,7 @@
+use std::string::new_string
+
+pub fn std_version() -> String
+  "0.9.0"
+
+pub fn language_version() -> String
+  "0.9.0"

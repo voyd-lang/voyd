@@ -46,6 +46,20 @@ type PendingDependency = {
   importer: string;
 };
 
+const NO_PRELUDE_DIRECTIVE = /(^|[\r\n])([^\S\r\n]*#!no_prelude[^\r\n]*)(?=$|[\r\n])/g;
+const PRELUDE_MODULE_SEGMENTS = ["std", "prelude"] as const;
+const IMPLICIT_PRELUDE_USE_DECL = (() => {
+  const ast = parseBase("use std::prelude::all", "<implicit-prelude>");
+  if (!formCallsInternal(ast, "ast")) {
+    throw new Error("failed to parse implicit prelude import");
+  }
+  const entry = ast.rest[0];
+  if (!isForm(entry)) {
+    throw new Error("failed to parse implicit prelude use declaration");
+  }
+  return entry;
+})();
+
 const formatErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -73,6 +87,11 @@ export const buildModuleGraph = async ({
     missingModules.set(importer, new Set([pathKey]));
   };
 
+  const hasStdPreludeModule = await supportsStdPreludeAutoImport({
+    roots,
+    host,
+  });
+
   const entryFile = host.path.resolve(entryPath);
   const entryModulePath = modulePathFromFile(entryFile, roots, host.path);
   const entryModule = await loadFileModule({
@@ -80,6 +99,7 @@ export const buildModuleGraph = async ({
     modulePath: entryModulePath,
     host,
     includeTests: includeTests === true,
+    hasStdPreludeModule,
   });
 
   addModuleTree(entryModule, modules, modulesByPath);
@@ -165,6 +185,7 @@ export const buildModuleGraph = async ({
         modulePath: resolvedModulePath,
         host,
         includeTests: includeTests === true,
+        hasStdPreludeModule,
       });
     } catch (error) {
       moduleDiagnostics.push({
@@ -240,25 +261,43 @@ const loadFileModule = async ({
   modulePath,
   host,
   includeTests,
+  hasStdPreludeModule,
 }: {
   filePath: string;
   modulePath: ModulePath;
   host: ModuleHost;
   includeTests: boolean;
+  hasStdPreludeModule: boolean;
 }): Promise<LoadedModule> => {
   const source = await host.readFile(filePath);
-  let ast = parseBase(source, filePath);
-  const sourceByFile = new Map<string, string>([[filePath, source]]);
+  const primaryParsed = parseModuleDirectives(source);
+  let ast = parseBase(primaryParsed.sanitizedSource, filePath);
+  let noPrelude = primaryParsed.noPrelude;
+  const sourceByFile = new Map<string, string>([
+    [filePath, primaryParsed.sanitizedSource],
+  ]);
 
   if (includeTests && !isCompanionTestFile(filePath)) {
     const companionFilePath = companionFileFor(filePath);
     if (await host.fileExists(companionFilePath)) {
       const companionSource = await host.readFile(companionFilePath);
-      const companionAst = parseBase(companionSource, companionFilePath);
+      const companionParsed = parseModuleDirectives(companionSource);
+      noPrelude = noPrelude || companionParsed.noPrelude;
+      const companionAst = parseBase(
+        companionParsed.sanitizedSource,
+        companionFilePath,
+      );
       ast = mergeCompanionAst({ primary: ast, companion: companionAst });
-      sourceByFile.set(companionFilePath, companionSource);
+      sourceByFile.set(companionFilePath, companionParsed.sanitizedSource);
     }
   }
+
+  ast = injectImplicitPreludeUse({
+    ast,
+    modulePath,
+    hasStdPreludeModule,
+    noPrelude,
+  });
 
   const info = collectModuleInfo({
     modulePath,
@@ -554,6 +593,91 @@ const mergeCompanionAst = ({
     location: primary.location?.clone(),
     elements: [astHead, ...primaryEntries, ...companionEntries],
   }).toCall();
+};
+
+const parseModuleDirectives = (
+  source: string,
+): { sanitizedSource: string; noPrelude: boolean } => {
+  let noPrelude = false;
+  const sanitizedSource = source.replace(
+    NO_PRELUDE_DIRECTIVE,
+    (full, prefix: string, directive: string) => {
+      noPrelude = true;
+      return `${prefix}${" ".repeat(directive.length)}`;
+    },
+  );
+
+  return { sanitizedSource, noPrelude };
+};
+
+const hasExplicitPreludeUse = ({ ast }: { ast: Form }): boolean => {
+  const entries = formCallsInternal(ast, "ast") ? ast.rest : [];
+  return entries.some((entry) => {
+    if (!isForm(entry)) {
+      return false;
+    }
+
+    const topLevelDecl = classifyTopLevelDecl(entry);
+    if (topLevelDecl.kind !== "use-decl") {
+      return false;
+    }
+
+    return parseUsePaths(topLevelDecl.pathExpr, toSourceSpan(entry)).some(
+      (useEntry) =>
+        useEntry.selectionKind === "all" &&
+        useEntry.moduleSegments.length === PRELUDE_MODULE_SEGMENTS.length &&
+        useEntry.moduleSegments.every(
+          (segment, index) => segment === PRELUDE_MODULE_SEGMENTS[index],
+        ),
+    );
+  });
+};
+
+const injectImplicitPreludeUse = ({
+  ast,
+  modulePath,
+  hasStdPreludeModule,
+  noPrelude,
+}: {
+  ast: Form;
+  modulePath: ModulePath;
+  hasStdPreludeModule: boolean;
+  noPrelude: boolean;
+}): Form => {
+  if (modulePath.namespace === "std" || noPrelude || !hasStdPreludeModule) {
+    return ast;
+  }
+  if (!formCallsInternal(ast, "ast")) {
+    return ast;
+  }
+  if (hasExplicitPreludeUse({ ast })) {
+    return ast;
+  }
+
+  const astHead = ast.first ?? new InternalIdentifierAtom("ast");
+  return new Form({
+    location: ast.location?.clone(),
+    elements: [astHead, IMPLICIT_PRELUDE_USE_DECL.clone(), ...ast.rest],
+  }).toCall();
+};
+
+const supportsStdPreludeAutoImport = async ({
+  roots,
+  host,
+}: {
+  roots: ModuleRoots;
+  host: ModuleHost;
+}): Promise<boolean> => {
+  if (!roots.std) {
+    return false;
+  }
+
+  const resolved = await resolveModuleFile(
+    { namespace: "std", segments: ["prelude"] },
+    roots,
+    host,
+  );
+  return Boolean(resolved);
 };
 
 const discoverSubmodules = async ({

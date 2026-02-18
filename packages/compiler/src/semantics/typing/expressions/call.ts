@@ -4135,6 +4135,8 @@ const typeIntrinsicCall = (
       });
     case "__memory_copy":
       return typeMemoryCopyIntrinsic({ args, ctx, state, typeArguments });
+    case "__panic_trap":
+      return typePanicTrapIntrinsic({ args, ctx, typeArguments });
     case "__shift_l":
     case "__shift_ru":
       return typeShiftIntrinsic({ name, args, ctx, state, typeArguments });
@@ -4799,6 +4801,20 @@ const typeMemoryCopyIntrinsic = ({
   ensureTypeMatches(args[0]!.type, int32, ctx, state, "__memory_copy dest");
   ensureTypeMatches(args[1]!.type, int32, ctx, state, "__memory_copy src");
   ensureTypeMatches(args[2]!.type, int32, ctx, state, "__memory_copy len");
+  return ctx.primitives.void;
+};
+
+const typePanicTrapIntrinsic = ({
+  args,
+  ctx,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name: "__panic_trap", args, expected: 0 });
+  assertNoIntrinsicTypeArgs("__panic_trap", typeArguments);
   return ctx.primitives.void;
 };
 

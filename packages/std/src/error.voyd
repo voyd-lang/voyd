@@ -1,0 +1,40 @@
+use std::string::type::{ String, StringSlice }
+
+pub obj Utf8Error {
+  api message: String
+}
+
+pub obj ParseIntError {
+  api message: String
+}
+
+pub obj ParseFloatError {
+  api message: String
+}
+
+pub obj DecodeError {
+  api message: String
+}
+
+pub obj JsonError {
+  api message: String
+}
+
+pub obj HostError {
+  api code: i32
+  api message: String
+}
+
+pub obj IoError {
+  api code: i32
+  api message: String
+}
+
+pub trait Error<T>
+  fn message(self) -> String
+
+@intrinsic(name: "__panic_trap")
+fn panic_trap(): () -> void __panic_trap()
+
+pub fn panic({ message _message: StringSlice }) -> void
+  panic_trap()
