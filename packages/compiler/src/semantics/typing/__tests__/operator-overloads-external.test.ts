@@ -136,5 +136,83 @@ pub fn main(): () -> bool
       symbol: expectedSymbol,
     });
   });
-});
 
+  it("applies imported trait default operator methods to local impls", () => {
+    const externalPath: ModulePath = {
+      namespace: "pkg",
+      packageName: "dep",
+      segments: ["pkg"],
+    };
+    const externalSource = `
+pub trait Eq<T>
+  fn eq(self, { other: T }) -> bool
+
+  fn ne(self, { other: T }) -> bool
+    not self.eq(other: other)
+
+  fn '=='(self, other: T) -> bool
+    self.eq(other: other)
+
+  fn '!='(self, other: T) -> bool
+    self.ne(other: other)
+
+pub trait Ord<T>
+  fn cmp(self, { other: T }) -> i32
+
+  fn '<'(self, other: T) -> bool
+    self.cmp(other: other) < 0
+
+  fn '<='(self, other: T) -> bool
+    self.cmp(other: other) <= 0
+
+  fn '>'(self, other: T) -> bool
+    self.cmp(other: other) > 0
+
+  fn '>='(self, other: T) -> bool
+    self.cmp(other: other) >= 0
+`;
+    const external = buildModule({ source: externalSource, path: externalPath });
+    const externalSemantics = semanticsPipeline({
+      module: external.module,
+      graph: external.graph,
+    });
+
+    const mainPath: ModulePath = { namespace: "src", segments: ["main"] };
+    const mainSource = `
+use pkg::dep::{ Eq, Ord }
+
+obj Box {
+  value: i32
+}
+
+impl Eq<Box> for Box
+  fn eq(self, { other: Box }) -> bool
+    self.value == other.value
+
+impl Ord<Box> for Box
+  fn cmp(self, { other: Box }) -> i32
+    self.value - other.value
+
+pub fn main(): () -> bool
+  let a = Box { value: 1 }
+  let b = Box { value: 2 }
+  (a == a) and (a != b) and a.ne(other: b) and (a < b) and (a <= b) and (b > a) and (b >= a)
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, externalPath)],
+    });
+
+    const result = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[external.module.id, externalSemantics.exports]]),
+      dependencies: new Map([[external.module.id, externalSemantics]]),
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+  });
+});
