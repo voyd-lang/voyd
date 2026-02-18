@@ -314,6 +314,7 @@ const resolveImplicitNamespaceUseEntry = ({
         : bindImportsFromModule({
             moduleId,
             entry: { ...entry, hasExplicitPrefix: true },
+            explicitlyTargetsStdSubmodule: isStdSubmoduleModuleId(moduleId),
             ctx,
             declaredAt: decl.form,
             visibility: decl.visibility,
@@ -459,14 +460,19 @@ const isStdImportBlocked = ({
   ) {
     return false;
   }
-  const explicitlyTargetsSubmodule =
-    entry.moduleSegments[0] === "std" && entry.moduleSegments.length > 1;
+  const explicitlyTargetsSubmodule = isExplicitStdSubmoduleEntry(entry);
   if (explicitlyTargetsSubmodule) {
     return false;
   }
   const moduleId = modulePathToString(dependencyPath);
   return !stdPkgExportsFor({ moduleId, ctx });
 };
+
+const isExplicitStdSubmoduleEntry = (entry: ParsedUseEntry): boolean =>
+  entry.moduleSegments[0] === "std" && entry.moduleSegments.length > 1;
+
+const isStdSubmoduleModuleId = (moduleId: string): boolean =>
+  moduleId.startsWith("std::") && moduleId !== "std::pkg";
 
 const resolveDependencyPath = ({
   entry,
@@ -517,23 +523,23 @@ const resolveDependencyPath = ({
 const bindImportsFromModule = ({
   moduleId,
   entry,
+  explicitlyTargetsStdSubmodule: explicitStdSubmoduleOverride,
   ctx,
   declaredAt,
   visibility,
 }: {
   moduleId: string;
   entry: ParsedUseEntry;
+  explicitlyTargetsStdSubmodule?: boolean;
   ctx: BindingContext;
   declaredAt: Form;
   visibility: HirVisibility;
 }): BoundImport[] => {
   let exports = ctx.moduleExports.get(moduleId);
   const explicitlyTargetsStdSubmodule =
-    entry.moduleSegments[0] === "std" && entry.moduleSegments.length > 1;
+    explicitStdSubmoduleOverride ?? isExplicitStdSubmoduleEntry(entry);
   const isStdImport =
-    moduleId.startsWith("std::") &&
-    moduleId !== "std::pkg" &&
-    ctx.module.path.namespace !== "std";
+    isStdSubmoduleModuleId(moduleId) && ctx.module.path.namespace !== "std";
   const stdPkgExports = isStdImport && !explicitlyTargetsStdSubmodule
     ? stdPkgExportsFor({ moduleId, ctx })
     : undefined;
