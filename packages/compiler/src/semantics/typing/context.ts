@@ -84,6 +84,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     tailResumptions: new Map(),
     callResolution: {
       targets: new Map(),
+      argumentPlans: new Map(),
       typeArguments: new Map(),
       instanceKeys: new Map(),
       traitDispatches: new Set(),

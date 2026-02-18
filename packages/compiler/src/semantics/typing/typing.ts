@@ -89,6 +89,7 @@ const snapshotTypingResult = ({
     tailResumptions: new Map(ctx.tailResumptions),
     objectsByNominal: ctx.objects.snapshotByNominal(),
     callTargets: cloneNestedMap(ctx.callResolution.targets),
+    callArgumentPlans: cloneNestedMap(ctx.callResolution.argumentPlans),
     functionInstances: ctx.functions.snapshotInstances(),
     callTypeArguments: cloneNestedMap(ctx.callResolution.typeArguments),
     callInstanceKeys: cloneNestedMap(ctx.callResolution.instanceKeys),

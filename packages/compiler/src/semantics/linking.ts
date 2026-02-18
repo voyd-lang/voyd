@@ -1,5 +1,10 @@
 import { createTypeCheckBudgetState, createTypingState } from "./typing/context.js";
-import type { DependencySemantics, SymbolRefKey, TypingContext } from "./typing/types.js";
+import type {
+  CallArgumentPlanEntry,
+  DependencySemantics,
+  SymbolRefKey,
+  TypingContext,
+} from "./typing/types.js";
 import {
   typeGenericFunctionBody,
   formatFunctionInstanceKey,
@@ -41,6 +46,10 @@ export const monomorphizeProgram = ({
         ReadonlyMap<SymbolId, TypeId>
       >;
       callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
+      callArgumentPlans: ReadonlyMap<
+        HirExprId,
+        ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
+      >;
       callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
       callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
       callTraitDispatches: ReadonlySet<HirExprId>;
@@ -336,6 +345,10 @@ export const monomorphizeProgram = ({
         ReadonlyMap<SymbolId, TypeId>
       >;
       callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
+      callArgumentPlans: ReadonlyMap<
+        HirExprId,
+        ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
+      >;
       callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
       callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
       callTraitDispatches: ReadonlySet<HirExprId>;
@@ -351,6 +364,7 @@ export const monomorphizeProgram = ({
       functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
       functionInstanceValueTypes: ctx.functions.snapshotInstanceValueTypes(),
       callTargets: cloneNestedMap(ctx.callResolution.targets),
+      callArgumentPlans: cloneNestedMap(ctx.callResolution.argumentPlans),
       callTypeArguments: cloneNestedMap(ctx.callResolution.typeArguments),
       callInstanceKeys: cloneNestedMap(ctx.callResolution.instanceKeys),
       callTraitDispatches: new Set(ctx.callResolution.traitDispatches),

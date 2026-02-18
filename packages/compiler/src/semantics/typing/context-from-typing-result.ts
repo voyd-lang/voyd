@@ -59,6 +59,7 @@ export const createTypingContextFromTypingResult = ({
   tailResumptions: new Map(typing.tailResumptions),
   callResolution: {
     targets: cloneNestedMap(typing.callTargets),
+    argumentPlans: cloneNestedMap(typing.callArgumentPlans),
     typeArguments: cloneNestedMap(typing.callTypeArguments),
     instanceKeys: cloneNestedMap(typing.callInstanceKeys),
     traitDispatches: new Set(typing.callTraitDispatches),
