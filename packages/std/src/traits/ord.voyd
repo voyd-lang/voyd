@@ -6,3 +6,15 @@ pub type Ordering = Less | Equal | Greater
 
 pub trait Ord<T>
   fn cmp(self, { other: T }) -> Ordering
+
+  fn '<'(self, other: T) -> bool
+    self.cmp(other: other) is Less
+
+  fn '<='(self, other: T) -> bool
+    not (self.cmp(other: other) is Greater)
+
+  fn '>'(self, other: T) -> bool
+    self.cmp(other: other) is Greater
+
+  fn '>='(self, other: T) -> bool
+    not (self.cmp(other: other) is Less)
