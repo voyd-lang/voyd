@@ -41,4 +41,4 @@ describe("voyd test runner", () => {
     expect(result.failed).toBe(0);
     expect(result.skipped).toBe(2);
   });
-}, { timeout: 20_000 });
+});

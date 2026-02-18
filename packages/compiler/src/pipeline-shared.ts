@@ -3,25 +3,19 @@ import { modulePathToString } from "./modules/path.js";
 import type {
   ModuleGraph,
   ModuleHost,
-  ModuleNode,
   ModulePath,
   ModuleRoots,
 } from "./modules/types.js";
 import type { TestAttribute } from "./parser/attributes.js";
-import {
-  semanticsPipeline,
-  type SemanticsPipelineResult,
-} from "./semantics/pipeline.js";
+import { type SemanticsPipelineResult } from "./semantics/pipeline.js";
 import { monomorphizeProgram } from "./semantics/linking.js";
 import type { Diagnostic } from "./diagnostics/index.js";
 import { diagnosticFromCode, DiagnosticError } from "./diagnostics/index.js";
 import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
 import type { CodegenOptions } from "./codegen/context.js";
 import type { ContinuationBackendKind } from "./codegen/codegen.js";
-import { ModuleExportTable } from "./semantics/modules.js";
-import { createTypeArena } from "./semantics/typing/type-arena.js";
-import { createEffectInterner, createEffectTable } from "./semantics/effects/effect-table.js";
 import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
+import { analyzeModuleSemantics } from "./modules/semantic-analysis.js";
 import { formatTestExportName } from "./tests/exports.js";
 import type { SourceSpan, SymbolId } from "./semantics/ids.js";
 import { getSymbolTable } from "./semantics/_internal/symbol-table.js";
@@ -108,48 +102,10 @@ export const analyzeModules = ({
   testScope,
   recoverFromTypingErrors,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
-  const order = sortModules(graph);
-  const semantics = new Map<string, SemanticsPipelineResult>();
-  const exports = new Map<string, ModuleExportTable>();
-  const diagnostics: Diagnostic[] = [];
-
-  const arena = createTypeArena();
-  const effectInterner = createEffectInterner();
-
-  order.forEach((id) => {
-    const module = graph.modules.get(id);
-    if (!module) {
-      return;
-    }
-    try {
-      const result = semanticsPipeline({
-        module,
-        graph,
-        exports,
-        dependencies: semantics,
-        typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
-        includeTests,
-        recoverFromTypingErrors,
-      });
-      semantics.set(id, result);
-      exports.set(id, result.exports);
-      diagnostics.push(...result.diagnostics);
-    } catch (error) {
-      if (error instanceof DiagnosticError) {
-        diagnostics.push(...error.diagnostics);
-        return;
-      }
-      const fallback = diagnosticFromCode({
-        code: "TY9999",
-        params: {
-          kind: "unexpected-error",
-          message: error instanceof Error ? error.message : String(error),
-        },
-        span: { file: moduleDiagnosticFilePath(module), start: 0, end: 0 },
-      });
-      diagnostics.push(fallback);
-      return;
-    }
+  const { semantics, diagnostics } = analyzeModuleSemantics({
+    graph,
+    includeTests,
+    recoverFromTypingErrors,
   });
 
   diagnostics.push(...enforcePublicApiMethodEffectAnnotations({ semantics }));
@@ -624,35 +580,6 @@ export const compileProgramWithLoader = async (
 };
 
 const moduleIdForPath = (path: ModulePath): string => modulePathToString(path);
-
-const moduleDiagnosticFilePath = (module: ModuleNode): string =>
-  module.ast.location?.filePath ??
-  (module.origin.kind === "file" ? module.origin.filePath : module.id);
-
-const sortModules = (graph: ModuleGraph): string[] => {
-  const visited = new Set<string>();
-  const visiting = new Set<string>();
-  const order: string[] = [];
-
-  const visit = (id: string) => {
-    if (visited.has(id)) return;
-    if (visiting.has(id)) return;
-    visiting.add(id);
-    const node = graph.modules.get(id);
-    node?.dependencies.forEach((dep) => {
-      const depId = moduleIdForPath(dep.path);
-      if (graph.modules.has(depId)) {
-        visit(depId);
-      }
-    });
-    visiting.delete(id);
-    visited.add(id);
-    order.push(id);
-  };
-
-  graph.modules.forEach((_, id) => visit(id));
-  return order;
-};
 
 const lazyCodegen = async () =>
   (await import(
