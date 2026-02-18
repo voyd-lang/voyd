@@ -6,6 +6,8 @@ import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
+import { enumVariantTypeNamesFromAliasTarget } from "../../enum-namespace.js";
+import type { SymbolId } from "../../ids.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -37,6 +39,12 @@ export const bindTypeAlias = (
     declaredAt: decl.form.syntaxId,
     metadata: { entity: "type-alias", ...intrinsicTypeMetadata },
   });
+  seedEnumVariantNamespace({
+    aliasSymbol: symbol,
+    target: decl.target,
+    scope: tracker.current(),
+    ctx,
+  });
 
   const aliasScope = ctx.symbolTable.createScope({
     parent: tracker.current(),
@@ -60,4 +68,68 @@ export const bindTypeAlias = (
     moduleIndex: ctx.nextModuleIndex++,
     documentation: declarationDocForSyntax(decl.name, ctx),
   });
+};
+
+const seedEnumVariantNamespace = ({
+  aliasSymbol,
+  target,
+  scope,
+  ctx,
+}: {
+  aliasSymbol: SymbolId;
+  target: ParsedTypeAliasDecl["target"];
+  scope: number;
+  ctx: BindingContext;
+}): void => {
+  const variantNames = enumVariantTypeNamesFromAliasTarget(target);
+  if (!variantNames) {
+    return;
+  }
+
+  const bucket = ctx.staticMethods.get(aliasSymbol) ?? new Map();
+  let seeded = false;
+
+  variantNames.forEach((variantName) => {
+    const variantSymbol = resolveObjectTypeSymbol({
+      name: variantName,
+      scope,
+      ctx,
+    });
+    if (typeof variantSymbol !== "number") {
+      return;
+    }
+
+    const symbols = bucket.get(variantName) ?? new Set<SymbolId>();
+    symbols.add(variantSymbol);
+    bucket.set(variantName, symbols);
+    seeded = true;
+  });
+
+  if (!seeded) {
+    return;
+  }
+  ctx.staticMethods.set(aliasSymbol, bucket);
+};
+
+const resolveObjectTypeSymbol = ({
+  name,
+  scope,
+  ctx,
+}: {
+  name: string;
+  scope: number;
+  ctx: BindingContext;
+}): SymbolId | undefined => {
+  const symbol = ctx.symbolTable.resolve(name, scope);
+  if (typeof symbol !== "number") {
+    return undefined;
+  }
+
+  const record = ctx.symbolTable.getSymbol(symbol);
+  const metadata = record.metadata as { entity?: string } | undefined;
+  if (record.kind !== "type" || metadata?.entity !== "object") {
+    return undefined;
+  }
+
+  return symbol;
 };

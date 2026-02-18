@@ -71,13 +71,42 @@ export const resolveNamedTypeTarget = ({
   }
 
   const moduleSymbol = resolveModulePathSymbol(moduleExpr, scope, ctx);
-  if (typeof moduleSymbol !== "number") {
-    return undefined;
-  }
 
   const member = parseNamedTypeTarget({ expr: memberExpr, parseTypeArguments });
   if (!member) {
     return undefined;
+  }
+
+  if (typeof moduleSymbol !== "number") {
+    const typeNamespace = resolveTypeNamespaceTarget({
+      expr: moduleExpr,
+      scope,
+      ctx,
+      parseTypeArguments,
+    });
+    if (!typeNamespace) {
+      return undefined;
+    }
+
+    const staticMembers = ctx.staticMethods.get(typeNamespace.symbol);
+    const candidates = staticMembers?.get(member.name.value);
+    if (!candidates || candidates.size === 0) {
+      return undefined;
+    }
+
+    const allowed = Array.from(candidates).filter((candidate) =>
+      allowNamespacedSymbolKind(ctx.symbolTable.getSymbol(candidate).kind),
+    );
+    if (allowed.length !== 1) {
+      return undefined;
+    }
+
+    return {
+      symbol: allowed[0],
+      path: [...typeNamespace.path, member.name.value],
+      name: member.name,
+      typeArguments: member.typeArguments,
+    };
   }
 
   const memberTable = ctx.moduleMembers.get(moduleSymbol);
@@ -109,6 +138,36 @@ export const resolveNamedTypeTarget = ({
     path: [...moduleSegments, member.name.value],
     name: member.name,
     typeArguments: member.typeArguments,
+  };
+};
+
+const resolveTypeNamespaceTarget = ({
+  expr,
+  scope,
+  ctx,
+  parseTypeArguments,
+}: {
+  expr: Expr;
+  scope: ScopeId;
+  ctx: LowerContext;
+  parseTypeArguments: (entries: readonly Expr[]) => HirTypeExpr[];
+}): { symbol: SymbolId; path: string[] } | undefined => {
+  const target = parseNamedTypeTarget({ expr, parseTypeArguments });
+  if (!target) {
+    return undefined;
+  }
+
+  const symbol = resolveTypeSymbol(target.name.value, scope, ctx);
+  if (typeof symbol !== "number") {
+    return undefined;
+  }
+  if (ctx.symbolTable.getSymbol(symbol).kind !== "type") {
+    return undefined;
+  }
+
+  return {
+    symbol,
+    path: [target.name.value],
   };
 };
 

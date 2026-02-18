@@ -36,6 +36,10 @@ import {
   importableMetadataFrom,
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
+import {
+  enumVariantTypeNamesFromAliasTarget,
+  importedSymbolTargetFromMetadata,
+} from "../../enum-namespace.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -535,6 +539,13 @@ const bindNamespaceAccess = (
     scope,
     ctx,
   });
+  ensureEnumNamespaceImport({
+    targetSymbol,
+    memberName,
+    syntax: member as Syntax,
+    scope,
+    ctx,
+  });
 };
 
 const resolveNamespaceModuleSymbol = (
@@ -732,6 +743,76 @@ const ensureStaticMethodImport = ({
     ctx.importedOverloadOptions.set(setId, merged);
     merged.forEach((local) => ctx.overloadBySymbol.set(local, setId));
   }
+};
+
+const ensureEnumNamespaceImport = ({
+  targetSymbol,
+  memberName,
+  syntax,
+  scope,
+  ctx,
+}: {
+  targetSymbol: number;
+  memberName: string;
+  syntax: Syntax;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): void => {
+  const existing = ctx.staticMethods.get(targetSymbol)?.get(memberName);
+  if (existing?.size) {
+    return;
+  }
+
+  const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
+  const importedTarget = importedSymbolTargetFromMetadata(
+    targetRecord.metadata as Record<string, unknown> | undefined,
+  );
+  if (!importedTarget) {
+    return;
+  }
+
+  const dependency = ctx.dependencies.get(importedTarget.moduleId);
+  if (!dependency) {
+    return;
+  }
+
+  const aliasDecl = dependency.decls.getTypeAlias(importedTarget.symbol);
+  if (!aliasDecl) {
+    return;
+  }
+
+  const variantNames = enumVariantTypeNamesFromAliasTarget(aliasDecl.target);
+  if (!variantNames || !variantNames.includes(memberName)) {
+    return;
+  }
+
+  const exportTable = ctx.moduleExports.get(importedTarget.moduleId);
+  const exported = exportTable?.get(memberName);
+  if (!exported) {
+    return;
+  }
+
+  const exportedRecord = dependency.symbolTable.getSymbol(exported.symbol);
+  const metadata = exportedRecord.metadata as { entity?: string } | undefined;
+  if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
+    return;
+  }
+
+  const locals = declareModuleMemberImport({
+    exported,
+    syntax,
+    scope,
+    ctx,
+  });
+  if (locals.length === 0) {
+    return;
+  }
+
+  const bucket = ctx.staticMethods.get(targetSymbol) ?? new Map();
+  const members = bucket.get(memberName) ?? new Set<SymbolId>();
+  locals.forEach((local) => members.add(local));
+  bucket.set(memberName, members);
+  ctx.staticMethods.set(targetSymbol, bucket);
 };
 
 const ensureConstructorImport = ({

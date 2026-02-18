@@ -4,6 +4,7 @@ import {
   IdentifierAtom,
   isForm,
   isIdentifierAtom,
+  isInternalIdentifierAtom,
 } from "../../ast/index.js";
 import type { SyntaxMacro } from "../types.js";
 import { SyntaxMacroError } from "../macro-error.js";
@@ -84,6 +85,16 @@ const expandExpr = (
       return expandExpr(expanded, scope, exports, options);
     }
 
+    const visibilityWrapped = expandVisibilityWrappedMacroCall({
+      expr,
+      scope,
+      exports,
+      options,
+    });
+    if (visibilityWrapped) {
+      return visibilityWrapped;
+    }
+
     return expandForm(expr, scope, exports, options);
   } catch (error) {
     throw toSyntaxMacroError(error, expr);
@@ -107,11 +118,109 @@ const expandForm = (
       return;
     }
 
-    result.push(expandExpr(child, bodyScope, exports, options));
+    const expanded = expandExpr(child, bodyScope, exports, options);
+    if (
+      isTopLevelAst(form) &&
+      isForm(expanded) &&
+      isBlockLikeForm(expanded)
+    ) {
+      result.push(...expanded.rest);
+      return;
+    }
+    result.push(expanded);
   });
 
   return recreateForm(form, result);
 };
+
+const expandVisibilityWrappedMacroCall = ({
+  expr,
+  scope,
+  exports,
+  options,
+}: {
+  expr: Form;
+  scope: MacroScope;
+  exports: MacroDefinition[];
+  options: ExpandFunctionalMacroOptions;
+}): Expr | undefined => {
+  const visibility = expr.at(0);
+  const macroName = expr.at(1);
+  if (!isIdentifierAtom(visibility) || visibility.value !== "pub") {
+    return undefined;
+  }
+  if (!isIdentifierAtom(macroName)) {
+    return undefined;
+  }
+
+  const macro = scope.getMacro(macroName.value);
+  if (!macro) {
+    return undefined;
+  }
+
+  const invocation = recreateForm(expr, [macroName, ...expr.toArray().slice(2)]);
+  const expanded = expandMacroCall(invocation, macro, scope);
+  const withVisibility = applyPubVisibility(expanded);
+  return expandExpr(withVisibility, scope, exports, options);
+};
+
+const applyPubVisibility = (expr: Expr): Expr => {
+  if (!isForm(expr)) {
+    return expr;
+  }
+
+  if (expr.calls("block")) {
+    return recreateForm(expr, [
+      expr.first!,
+      ...expr.rest.map((entry) => withPubModifier(entry)),
+    ]);
+  }
+
+  return withPubModifier(expr);
+};
+
+const withPubModifier = (expr: Expr): Expr => {
+  if (!isForm(expr)) {
+    return expr;
+  }
+
+  const first = expr.at(0);
+  if (isIdentifierAtom(first) && first.value === "pub") {
+    return expr;
+  }
+  if (!isIdentifierAtom(first) || !PUB_ELIGIBLE_TOP_LEVEL_HEADS.has(first.value)) {
+    return expr;
+  }
+
+  return recreateForm(expr, [new IdentifierAtom("pub"), ...expr.toArray()]);
+};
+
+const isTopLevelAst = (form: Form): boolean =>
+  form.callsInternal("ast") || form.calls("ast");
+
+const isBlockLikeForm = (form: Form): boolean => {
+  if (form.calls("block")) {
+    return true;
+  }
+
+  const head = form.at(0);
+  return isInternalIdentifierAtom(head) && head.value === "block";
+};
+
+const PUB_ELIGIBLE_TOP_LEVEL_HEADS = new Set([
+  "fn",
+  "type",
+  "obj",
+  "trait",
+  "impl",
+  "eff",
+  "mod",
+  "use",
+  "macro",
+  "macro_let",
+  "functional-macro",
+  "define-macro-variable",
+]);
 
 const expandMacroDefinition = (
   definition: MacroDefinitionInput,

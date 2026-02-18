@@ -143,4 +143,27 @@ wrap()
       ],
     ]);
   });
+
+  test("splices top-level block expansions into the ast root", () => {
+    const code = `\
+macro declare_pair()
+  \`(block (type (Left = i32)) (type (Right = i32)))
+declare_pair()
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain).toContainEqual(["type", ["=", "Left", "i32"]]);
+    expect(plain).toContainEqual(["type", ["=", "Right", "i32"]]);
+  });
+
+  test("supports pub-wrapped macro invocations", () => {
+    const code = `\
+macro declare_alias(name)
+  \`(type ($name = i32))
+pub declare_alias NumberLike
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain).toContainEqual(["pub", "type", ["=", "NumberLike", "i32"]]);
+  });
 });

@@ -19,7 +19,7 @@ import {
 } from "./resolution-helpers.js";
 import { lowerNominalObjectLiteral } from "./call.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
-import { resolveTypeSymbol } from "../resolution.js";
+import { resolveConstructorResolution, resolveTypeSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import { resolveModulePathSymbol } from "./namespace-resolution.js";
 import { lowerQualifiedTraitMethodCall } from "./qualified-trait-call.js";
@@ -89,8 +89,17 @@ export const lowerStaticAccessExpr = ({
         methodTable,
         ctx,
       });
+      const constructorResolution =
+        resolution.kind === "symbol" &&
+        ctx.symbolTable.getSymbol(resolution.symbol).kind === "type"
+          ? resolveConstructorResolution({
+              targetSymbol: resolution.symbol,
+              name: memberExpr.value,
+              ctx,
+            })
+          : undefined;
       return lowerResolvedCallee({
-        resolution,
+        resolution: constructorResolution ?? resolution,
         syntax: memberExpr,
         ctx,
       });
@@ -275,14 +284,35 @@ const lowerStaticMethodCall = ({
     return { expr };
   });
 
+  const nominal = lowerNominalObjectLiteral({
+    callee: calleeExpr,
+    args: memberForm.rest,
+    ast: accessForm,
+    ctx,
+    scopes,
+    lowerExpr,
+  });
+  if (typeof nominal === "number") {
+    return nominal;
+  }
+
   const resolution = resolveStaticMethodResolution({
     name: calleeExpr.value,
     targetSymbol,
     methodTable,
     ctx,
   });
+  const constructorResolution =
+    resolution.kind === "symbol" &&
+    ctx.symbolTable.getSymbol(resolution.symbol).kind === "type"
+      ? resolveConstructorResolution({
+          targetSymbol: resolution.symbol,
+          name: calleeExpr.value,
+          ctx,
+        })
+      : undefined;
   const callee = lowerResolvedCallee({
-    resolution,
+    resolution: constructorResolution ?? resolution,
     syntax: calleeExpr,
     ctx,
   });

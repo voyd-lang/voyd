@@ -142,4 +142,64 @@ describe("module imports", () => {
     expect(localMarkerImport?.moduleId).toBe("std::msgpack::fns");
     expect(externalMarkerImport?.moduleId).toBe("pkg:foo::msgpack::fns");
   });
+
+  it("supports enum variant namespace imports through an imported type alias", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: "pub use self::enums::{ enum }",
+      [`${stdRoot}${sep}enums.voyd`]: `
+pub macro enum(enum_name, variants_block)
+  let variants = variants_block.slice(1).map((variant) =>
+    if is_list(variant) then:
+      variant
+    else:
+      \`($variant {})
+  )
+  let variant_names = variants.map((variant) => variant.get(0))
+  let object_decls = variants.map((variant) =>
+    \`(obj $(variant.get(0)) $(variant.get(1)))
+  )
+  let first_variant = variant_names.get(0)
+  let remaining_variants = variant_names.slice(1)
+  let union_target = remaining_variants.reduce(
+    first_variant,
+    (acc, next) => \`($acc | $next)
+  )
+  \`(block $$(object_decls) (type ($enum_name = $union_target)))
+`,
+      [`${srcRoot}${sep}drinks.voyd`]: `
+use std::all
+
+pub enum Drink
+  Coffee
+  Tea
+
+pub fn make() -> Drink
+  Drink::Coffee {}
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::drinks::{ Drink, make }
+use Drink::Coffee
+
+pub fn main() -> i32
+  let drink: Drink = make()
+  let coffee: Drink = Coffee {}
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const mainSemantics = semantics.get("src::main");
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+
+    expect(combinedDiagnostics).toHaveLength(0);
+    expect(mainSemantics?.binding.imports.map((entry) => entry.name)).toContain("Coffee");
+  });
 });

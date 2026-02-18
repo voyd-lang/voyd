@@ -47,6 +47,10 @@ import {
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
 import { findModuleNamespaceNameCollision } from "../name-collisions.js";
+import {
+  enumVariantTypeNamesFromAliasTarget,
+  importedSymbolTargetFromMetadata,
+} from "../../enum-namespace.js";
 
 type ModuleMetadata =
   | { import?: { moduleId?: unknown; symbol?: unknown } | undefined }
@@ -283,6 +287,11 @@ const resolveUseEntry = ({
   ctx: BindingContext;
 }): BoundUseEntry => {
   if (!entry.hasExplicitPrefix) {
+    const implicitUse = resolveImplicitNamespaceUseEntry({ entry, decl, ctx });
+    if (implicitUse) {
+      return implicitUse;
+    }
+
     recordImportDiagnostic({
       params: {
         kind: "missing-path-prefix",
@@ -356,6 +365,176 @@ const resolveUseEntry = ({
     targetName: entry.targetName,
     alias: entry.alias,
     imports: imports ?? [],
+  };
+};
+
+const resolveImplicitNamespaceUseEntry = ({
+  entry,
+  decl,
+  ctx,
+}: {
+  entry: ParsedUseEntry;
+  decl: ParsedUseDecl;
+  ctx: BindingContext;
+}): BoundUseEntry | undefined => {
+  if (entry.moduleSegments.length !== 1) {
+    return undefined;
+  }
+  const namespaceName = entry.moduleSegments[0];
+  if (!namespaceName) {
+    return undefined;
+  }
+
+  const namespaceSymbol = ctx.symbolTable.resolve(
+    namespaceName,
+    ctx.symbolTable.rootScope,
+  );
+  if (typeof namespaceSymbol !== "number") {
+    return undefined;
+  }
+  const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
+
+  if (namespaceRecord.kind === "module") {
+    const moduleId = importedModuleIdFrom(
+      namespaceRecord.metadata as Record<string, unknown> | undefined,
+    );
+    if (!moduleId) {
+      return undefined;
+    }
+    const imports =
+      entry.selectionKind === "module"
+        ? declareModuleImport({
+            moduleId,
+            alias: entry.alias ?? entry.path.at(-1),
+            ctx,
+            span: entry.span,
+            declaredAt: decl.form,
+            visibility: decl.visibility,
+          })
+        : bindImportsFromModule({
+            moduleId,
+            entry: { ...entry, hasExplicitPrefix: true },
+            ctx,
+            declaredAt: decl.form,
+            visibility: decl.visibility,
+          });
+    return {
+      path: entry.path,
+      moduleId,
+      span: entry.span,
+      selectionKind: entry.selectionKind,
+      targetName: entry.targetName,
+      alias: entry.alias,
+      imports: imports ?? [],
+    };
+  }
+
+  if (namespaceRecord.kind !== "type") {
+    return undefined;
+  }
+
+  const importedTarget = importedSymbolTargetFromMetadata(
+    namespaceRecord.metadata as Record<string, unknown> | undefined,
+  );
+  if (!importedTarget) {
+    return undefined;
+  }
+
+  const dependency = ctx.dependencies.get(importedTarget.moduleId);
+  const aliasDecl = dependency?.decls.getTypeAlias(importedTarget.symbol);
+  const variantNames = aliasDecl
+    ? enumVariantTypeNamesFromAliasTarget(aliasDecl.target)
+    : undefined;
+  if (!dependency || !variantNames || variantNames.length === 0) {
+    return undefined;
+  }
+
+  const exports = ctx.moduleExports.get(importedTarget.moduleId);
+  if (!exports) {
+    return undefined;
+  }
+
+  const visibleObjectExportFor = (
+    variantName: string,
+  ): ModuleExportEntry | undefined => {
+    if (!variantNames.includes(variantName)) {
+      return undefined;
+    }
+    const exported = exports.get(variantName);
+    if (!exported) {
+      return undefined;
+    }
+    const exportedRecord = dependency.symbolTable.getSymbol(exported.symbol);
+    const metadata = exportedRecord.metadata as { entity?: string } | undefined;
+    if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
+      return undefined;
+    }
+    if (!canAccessExport({ exported, moduleId: importedTarget.moduleId, ctx })) {
+      return undefined;
+    }
+    return exported;
+  };
+
+  const imports = (() => {
+    if (entry.selectionKind === "all") {
+      return variantNames.flatMap((variantName) => {
+        const exported = visibleObjectExportFor(variantName);
+        if (!exported) {
+          return [];
+        }
+        return declareImportedSymbol({
+          exported,
+          alias: variantName,
+          ctx,
+          declaredAt: decl.form,
+          span: entry.span,
+          visibility: decl.visibility,
+        });
+      });
+    }
+
+    const targetName = entry.targetName ?? entry.alias;
+    if (!targetName) {
+      recordImportDiagnostic({
+        params: { kind: "missing-target" },
+        span: entry.span,
+        ctx,
+      });
+      return [];
+    }
+
+    const exported = visibleObjectExportFor(targetName);
+    if (!exported) {
+      recordImportDiagnostic({
+        params: {
+          kind: "missing-export",
+          moduleId: importedTarget.moduleId,
+          target: targetName,
+        },
+        span: entry.span,
+        ctx,
+      });
+      return [];
+    }
+
+    return declareImportedSymbol({
+      exported,
+      alias: entry.alias ?? targetName,
+      ctx,
+      declaredAt: decl.form,
+      span: entry.span,
+      visibility: decl.visibility,
+    });
+  })();
+
+  return {
+    path: entry.path,
+    moduleId: importedTarget.moduleId,
+    span: entry.span,
+    selectionKind: entry.selectionKind,
+    targetName: entry.targetName,
+    alias: entry.alias,
+    imports,
   };
 };
 
