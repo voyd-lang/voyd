@@ -14,6 +14,7 @@ import type {
 } from "../context.js";
 import type { EffectRowId, ProgramFunctionInstanceId } from "../../semantics/ids.js";
 import type { ProgramSymbolId } from "../../semantics/ids.js";
+import type { CallArgumentPlanEntry } from "../../semantics/typing/types.js";
 import { compileIntrinsicCall } from "../intrinsics.js";
 import {
   requiresStructuralConversion,
@@ -821,9 +822,39 @@ const compileCallArguments = (
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef[] => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const typedPlan = resolveTypedCallArgumentPlan({
+    callId: call.id,
+    typeInstanceId,
+    ctx,
+  });
   return compileCallArgumentsForParams(call, meta.parameters, ctx, fnCtx, compileExpr, {
     typeInstanceId,
+    typedPlan,
   });
+};
+
+const resolveTypedCallArgumentPlan = ({
+  callId,
+  typeInstanceId,
+  ctx,
+}: {
+  callId: HirExprId;
+  typeInstanceId: ProgramFunctionInstanceId | undefined;
+  ctx: CodegenContext;
+}): readonly CallArgumentPlanEntry[] | undefined => {
+  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, callId);
+  if (!callInfo.argPlans || callInfo.argPlans.size === 0) {
+    return undefined;
+  }
+  if (typeof typeInstanceId === "number") {
+    const byInstance = callInfo.argPlans.get(typeInstanceId);
+    if (byInstance) {
+      return byInstance;
+    }
+  }
+  return callInfo.argPlans.size === 1
+    ? callInfo.argPlans.values().next().value
+    : undefined;
 };
 
 type CallParam = {
@@ -838,6 +869,7 @@ type CompileCallArgumentOptions = {
   argIndexOffset?: number;
   allowTrailingArguments?: boolean;
   allCallArgExprIds?: readonly HirExprId[];
+  typedPlan?: readonly CallArgumentPlanEntry[];
 };
 
 type CompiledCallArgumentsForParams = {
@@ -845,23 +877,13 @@ type CompiledCallArgumentsForParams = {
   consumedArgCount: number;
 };
 
-type CallArgumentPlanEntry =
-  | { kind: "direct"; argIndex: number }
-  | { kind: "missing"; targetTypeId: TypeId }
-  | {
-      kind: "container-field";
-      containerArgIndex: number;
-      fieldName: string;
-      targetTypeId: TypeId;
-    };
-
 type PlannedCallArguments = {
   plan: CallArgumentPlanEntry[];
   expectedTypeByArgIndex: Map<number, TypeId>;
   consumedArgCount: number;
 };
 
-const planCallArgumentsForParams = ({
+const planCallArgumentsForParamsFallback = ({
   call,
   params,
   ctx,
@@ -993,6 +1015,78 @@ const planCallArgumentsForParams = ({
   return { plan, expectedTypeByArgIndex, consumedArgCount: argIndex };
 };
 
+const planCallArgumentsFromTypedPlan = ({
+  typedPlan,
+  call,
+  params,
+  allowTrailingArguments,
+  fail,
+}: {
+  typedPlan: readonly CallArgumentPlanEntry[];
+  call: HirCallExpr;
+  params: readonly CallParam[];
+  allowTrailingArguments: boolean;
+  fail: (detail: string) => never;
+}): PlannedCallArguments => {
+  if (typedPlan.length !== params.length) {
+    fail(
+      `typed plan length mismatch (expected ${params.length}, got ${typedPlan.length})`,
+    );
+  }
+
+  const expectedTypeByArgIndex = new Map<number, TypeId>();
+  const plan: CallArgumentPlanEntry[] = [];
+  let consumedArgCount = 0;
+
+  typedPlan.forEach((entry, index) => {
+    const param = params[index];
+    if (!param) {
+      fail(`typed plan references missing parameter at index ${index}`);
+    }
+    const currentParam = param!;
+    if (entry.kind === "direct") {
+      if (entry.argIndex < 0 || entry.argIndex >= call.args.length) {
+        fail(`typed plan direct arg index ${entry.argIndex} is out of range`);
+      }
+      plan.push(entry);
+      expectedTypeByArgIndex.set(entry.argIndex, currentParam.typeId);
+      consumedArgCount = Math.max(consumedArgCount, entry.argIndex + 1);
+      return;
+    }
+
+    if (entry.kind === "missing") {
+      plan.push({
+        kind: "missing",
+        targetTypeId: currentParam.typeId,
+      });
+      return;
+    }
+
+    if (entry.containerArgIndex < 0 || entry.containerArgIndex >= call.args.length) {
+      fail(
+        `typed plan container arg index ${entry.containerArgIndex} is out of range`,
+      );
+    }
+    plan.push({
+      kind: "container-field",
+      containerArgIndex: entry.containerArgIndex,
+      fieldName: entry.fieldName,
+      targetTypeId: currentParam.typeId,
+    });
+    consumedArgCount = Math.max(consumedArgCount, entry.containerArgIndex + 1);
+  });
+
+  if (!allowTrailingArguments && consumedArgCount < call.args.length) {
+    fail(`received ${call.args.length - consumedArgCount} extra argument(s)`);
+  }
+
+  return {
+    plan,
+    expectedTypeByArgIndex,
+    consumedArgCount,
+  };
+};
+
 const materializeCallArgumentPlan = ({
   plan,
   compiledArgs,
@@ -1092,15 +1186,52 @@ const compileCallArgumentsForParamsWithDetails = (
     argIndexOffset = 0,
     allowTrailingArguments = false,
     allCallArgExprIds,
+    typedPlan,
   } = options;
-  const planned = planCallArgumentsForParams({
-    call,
-    params,
-    ctx,
-    typeInstanceId,
-    allowTrailingArguments,
-    argIndexOffset,
-  });
+  const fail = (detail: string): never => {
+    const callee = ctx.module.hir.expressions.get(call.callee);
+    const calleeName =
+      !callee
+        ? "<unknown>"
+        : callee.exprKind === "identifier"
+          ? (ctx.program.symbols.getName(
+              ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol)
+            ) ?? `${callee.symbol}`)
+          : callee.exprKind === "overload-set"
+            ? callee.name
+            : callee.exprKind;
+    const paramSummary = params
+      .map(
+        (param, index) =>
+          `${index}:${param.label ?? "_"}${param.optional ? "?" : ""}@${param.typeId}`,
+      )
+      .join(", ");
+    const argSummary = call.args
+      .map((arg, index) => {
+        const argType = getRequiredExprType(arg.expr, ctx, typeInstanceId);
+        return `${index + argIndexOffset}:${arg.label ?? "_"}@expr${arg.expr}:type${argType}`;
+      })
+      .join(", ");
+    throw new Error(
+      `call argument count mismatch for ${calleeName} (call ${call.id} in ${ctx.moduleId}): ${detail}; params=[${paramSummary}]; args=[${argSummary}]`,
+    );
+  };
+  const planned = typedPlan
+    ? planCallArgumentsFromTypedPlan({
+        typedPlan,
+        call,
+        params,
+        allowTrailingArguments,
+        fail,
+      })
+    : planCallArgumentsForParamsFallback({
+        call,
+        params,
+        ctx,
+        typeInstanceId,
+        allowTrailingArguments,
+        argIndexOffset,
+      });
   const consumedArgs = call.args.slice(0, planned.consumedArgCount);
   const compiledArgs = compileCallArgExpressionsWithTemps({
     callId: call.id,

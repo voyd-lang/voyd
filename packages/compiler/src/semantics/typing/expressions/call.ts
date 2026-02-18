@@ -55,6 +55,7 @@ import { getValueType } from "./identifier.js";
 import { assertMutableObjectBinding, findBindingSymbol } from "./mutability.js";
 import type {
   Arg,
+  CallArgumentPlanEntry,
   DependencySemantics,
   FunctionSignature,
   FunctionTypeParam,
@@ -1302,8 +1303,9 @@ const validateCallArgs = (
   ctx: TypingContext,
   state: TypingState,
   callSpan?: SourceSpan,
-): void => {
+): { ok: true; plan: readonly CallArgumentPlanEntry[] } | { ok: false } => {
   const span = callSpan ?? ctx.hir.module.span;
+  const plan: CallArgumentPlanEntry[] = [];
   const result = walkCallArguments({
     args,
     params,
@@ -1332,6 +1334,16 @@ const validateCallArgs = (
         index: match.paramIndex,
         ctx,
       });
+      if (match.kind === "direct") {
+        plan.push({ kind: "direct", argIndex: match.argIndex });
+        return true;
+      }
+      plan.push({
+        kind: "container-field",
+        containerArgIndex: match.argIndex,
+        fieldName: match.fieldName!,
+        targetTypeId: match.param.type,
+      });
       return true;
     },
     onSkipOptionalParam: ({ param, paramIndex }) => {
@@ -1343,18 +1355,19 @@ const validateCallArgs = (
         callSpan,
         fallbackSpan: span,
       });
+      plan.push({ kind: "missing", targetTypeId: param.type });
       return true;
     },
   });
   if (result.kind === "ok") {
-    return;
+    return { ok: true, plan };
   }
 
   const { failure } = result;
   switch (failure.kind) {
     case "missing-argument": {
       const param = params[failure.paramIndex]!;
-      return emitDiagnostic({
+      emitDiagnostic({
         ctx,
         code: "TY0021",
         params: {
@@ -1364,9 +1377,10 @@ const validateCallArgs = (
         },
         span,
       });
+      return { ok: false };
     }
     case "missing-labeled-argument":
-      return emitDiagnostic({
+      emitDiagnostic({
         ctx,
         code: "TY0021",
         params: {
@@ -1375,10 +1389,11 @@ const validateCallArgs = (
         },
         span,
       });
+      return { ok: false };
     case "label-mismatch": {
       const param = params[failure.paramIndex]!;
       const arg = args[failure.argIndex];
-      return emitDiagnostic({
+      emitDiagnostic({
         ctx,
         code: "TY0021",
         params: {
@@ -1393,9 +1408,10 @@ const validateCallArgs = (
           span,
         ),
       });
+      return { ok: false };
     }
     case "extra-arguments":
-      return emitDiagnostic({
+      emitDiagnostic({
         ctx,
         code: "TY0021",
         params: {
@@ -1404,9 +1420,11 @@ const validateCallArgs = (
         },
         span,
       });
+      return { ok: false };
     case "incompatible":
       throw new Error("call argument type mismatch");
   }
+  return { ok: false };
 };
 
 const callArgumentsSatisfyParams = ({
@@ -2763,7 +2781,10 @@ const resolveCurriedCallReturnType = ({
     }
 
     const segment = remainingArgs.slice(0, parameters.length);
-    validateCallArgs(segment, parameters, ctx, state, callSpan);
+    const validation = validateCallArgs(segment, parameters, ctx, state, callSpan);
+    if (!validation.ok) {
+      return ctx.primitives.unknown;
+    }
 
     remainingArgs = remainingArgs.slice(parameters.length);
     if (remainingArgs.length === 0) {
@@ -3176,7 +3197,27 @@ const typeFunctionCall = ({
     }) ?? instantiation.parameters;
 
   const callSpan = ctx.hir.expressions.get(callId)?.span;
-  validateCallArgs(args, adjustedParameters, ctx, state, callSpan);
+  const validation = validateCallArgs(
+    args,
+    adjustedParameters,
+    ctx,
+    state,
+    callSpan,
+  );
+  if (validation.ok) {
+    const existingPlans =
+      ctx.callResolution.argumentPlans.get(callId) ?? new Map();
+    existingPlans.set(callerInstanceKey, validation.plan);
+    ctx.callResolution.argumentPlans.set(callId, existingPlans);
+  } else {
+    const existingPlans = ctx.callResolution.argumentPlans.get(callId);
+    if (existingPlans) {
+      existingPlans.delete(callerInstanceKey);
+      if (existingPlans.size === 0) {
+        ctx.callResolution.argumentPlans.delete(callId);
+      }
+    }
+  }
   const specializedEffectRow = specializeCallEffectRow({
     effectRow: signature.effectRow,
     args,
