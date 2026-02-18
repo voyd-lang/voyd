@@ -15,3 +15,21 @@ export const createVoidLiteralExpr = (
     literalKind: "void",
     value: "void",
   });
+
+export const createBoolLiteralExpr = ({
+  value,
+  spanSource,
+  ctx,
+}: {
+  value: boolean;
+  spanSource: Syntax;
+  ctx: LowerContext;
+}): HirExprId =>
+  ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "literal",
+    ast: spanSource.syntaxId,
+    span: toSourceSpan(spanSource),
+    literalKind: "boolean",
+    value: value ? "true" : "false",
+  });

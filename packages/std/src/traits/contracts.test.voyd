@@ -28,31 +28,13 @@ fn cmp_eq_ord_value(left: i32, right: i32) -> Ordering
     Equal {}
 
 fn is_less(value: Ordering) -> bool
-  match(value)
-    Less:
-      true
-    Equal:
-      false
-    Greater:
-      false
+  value is Less
 
 fn is_equal(value: Ordering) -> bool
-  match(value)
-    Equal:
-      true
-    Less:
-      false
-    Greater:
-      false
+  value is Equal
 
 fn is_greater(value: Ordering) -> bool
-  match(value)
-    Greater:
-      true
-    Less:
-      false
-    Equal:
-      false
+  value is Greater
 
 impl Eq<EqOrdValue> for EqOrdValue
   fn eq(self, { other: EqOrdValue }) -> bool
@@ -173,10 +155,21 @@ test "trait contracts work for baseline std traits":
   let low = EqOrdValue { value: 1 }
   let high = EqOrdValue { value: 2 }
   assert(low.eq(other: low), eq: true)
+  assert(low == low, eq: true)
   assert(not low.eq(other: high), eq: true)
+  assert(low.ne(other: high), eq: true)
+  assert(low != high, eq: true)
   assert(is_less(low.cmp(other: high)), eq: true)
   assert(is_greater(high.cmp(other: low)), eq: true)
   assert(is_equal(low.cmp(other: low)), eq: true)
+  assert(low < high, eq: true)
+  assert(low <= high, eq: true)
+  assert(low <= low, eq: true)
+  assert(high > low, eq: true)
+  assert(high >= low, eq: true)
+  assert(high >= high, eq: true)
+  assert(not (high < low), eq: true)
+  assert(not (low > high), eq: true)
 
   let defaulted = DefaultValue::default()
   assert(defaulted.value, eq: 7)
