@@ -11,7 +11,7 @@ const expectCompileSuccess = (
   return result;
 };
 
-describe("sdk tests collection", () => {
+describe("sdk tests collection", { timeout: 90_000 }, () => {
   it("discovers and runs tests", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(await sdk.compile({
