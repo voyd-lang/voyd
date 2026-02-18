@@ -3,26 +3,19 @@ import { modulePathToString } from "./modules/path.js";
 import type {
   ModuleGraph,
   ModuleHost,
-  ModuleNode,
   ModulePath,
   ModuleRoots,
 } from "./modules/types.js";
 import type { TestAttribute } from "./parser/attributes.js";
-import {
-  semanticsPipeline,
-  type SemanticsPipelineResult,
-} from "./semantics/pipeline.js";
+import { type SemanticsPipelineResult } from "./semantics/pipeline.js";
 import { monomorphizeProgram } from "./semantics/linking.js";
 import type { Diagnostic } from "./diagnostics/index.js";
 import { diagnosticFromCode, DiagnosticError } from "./diagnostics/index.js";
 import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
 import type { CodegenOptions } from "./codegen/context.js";
 import type { ContinuationBackendKind } from "./codegen/codegen.js";
-import { ModuleExportTable } from "./semantics/modules.js";
-import { createTypeArena } from "./semantics/typing/type-arena.js";
-import { createEffectInterner, createEffectTable } from "./semantics/effects/effect-table.js";
 import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
-import { getModuleSccGroups } from "./modules/scc.js";
+import { analyzeModuleSemantics } from "./modules/semantic-analysis.js";
 import { formatTestExportName } from "./tests/exports.js";
 import type { SourceSpan, SymbolId } from "./semantics/ids.js";
 import { getSymbolTable } from "./semantics/_internal/symbol-table.js";
@@ -109,62 +102,10 @@ export const analyzeModules = ({
   testScope,
   recoverFromTypingErrors,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
-  const sccGroups = getModuleSccGroups({ graph });
-  const semantics = new Map<string, SemanticsPipelineResult>();
-  const exports = new Map<string, ModuleExportTable>();
-  const diagnostics: Diagnostic[] = [];
-
-  const arena = createTypeArena();
-  const effectInterner = createEffectInterner();
-
-  const cycleModuleIdsByModuleId = new Map<string, readonly string[]>();
-  sccGroups.forEach((group) => {
-    if (!group.cyclic) {
-      return;
-    }
-    group.moduleIds.forEach((moduleId) => {
-      cycleModuleIdsByModuleId.set(moduleId, group.moduleIds);
-    });
-  });
-
-  sccGroups.forEach((group) => {
-    if (group.cyclic) {
-      analyzeCyclicScc({
-        moduleIds: group.moduleIds,
-        graph,
-        exports,
-        semantics,
-        diagnostics,
-        includeTests,
-        recoverFromTypingErrors,
-        arena,
-        effectInterner,
-        cycleModuleIdsByModuleId,
-      });
-      return;
-    }
-
-    const moduleId = group.moduleIds[0];
-    if (!moduleId) {
-      return;
-    }
-    const result = analyzeModule({
-      moduleId,
-      graph,
-      exports,
-      semantics,
-      diagnostics,
-      includeTests,
-      recoverFromTypingErrors,
-      arena,
-      effectInterner,
-      cycleModuleIdsByModuleId,
-    });
-    if (!result) {
-      return;
-    }
-    semantics.set(moduleId, result);
-    exports.set(moduleId, result.exports);
+  const { semantics, diagnostics } = analyzeModuleSemantics({
+    graph,
+    includeTests,
+    recoverFromTypingErrors,
   });
 
   diagnostics.push(...enforcePublicApiMethodEffectAnnotations({ semantics }));
@@ -173,187 +114,6 @@ export const analyzeModules = ({
     ? collectTests({ graph, semantics, scope: testScope ?? "all" })
     : [];
   return { semantics, diagnostics, tests };
-};
-
-const analyzeCyclicScc = ({
-  moduleIds,
-  graph,
-  exports,
-  semantics,
-  diagnostics,
-  includeTests,
-  recoverFromTypingErrors,
-  arena,
-  effectInterner,
-  cycleModuleIdsByModuleId,
-}: {
-  moduleIds: readonly string[];
-  graph: ModuleGraph;
-  exports: Map<string, ModuleExportTable>;
-  semantics: Map<string, SemanticsPipelineResult>;
-  diagnostics: Diagnostic[];
-  includeTests: boolean | undefined;
-  recoverFromTypingErrors: boolean | undefined;
-  arena: ReturnType<typeof createTypeArena>;
-  effectInterner: ReturnType<typeof createEffectInterner>;
-  cycleModuleIdsByModuleId: ReadonlyMap<string, readonly string[]>;
-}) => {
-  const firstPassSemantics = new Map<string, SemanticsPipelineResult>();
-  const firstPassExports = new Map<string, ModuleExportTable>();
-
-  moduleIds.forEach((moduleId) => {
-    const result = analyzeModule({
-      moduleId,
-      graph,
-      exports: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
-      semantics: mergeWithOverrides({
-        base: semantics,
-        overrides: firstPassSemantics,
-      }),
-      includeTests,
-      recoverFromTypingErrors: true,
-      arena,
-      effectInterner,
-      cycleModuleIdsByModuleId,
-    });
-    if (!result) {
-      return;
-    }
-    firstPassSemantics.set(moduleId, result);
-    firstPassExports.set(moduleId, result.exports);
-  });
-
-  moduleIds.forEach((moduleId) => {
-    const result = analyzeModule({
-      moduleId,
-      graph,
-      exports: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
-      semantics: mergeWithOverrides({
-        base: semantics,
-        overrides: firstPassSemantics,
-      }),
-      diagnostics,
-      includeTests,
-      recoverFromTypingErrors,
-      arena,
-      effectInterner,
-      cycleModuleIdsByModuleId,
-    });
-    if (!result) {
-      return;
-    }
-    semantics.set(moduleId, result);
-    exports.set(moduleId, result.exports);
-  });
-};
-
-const analyzeModule = ({
-  moduleId,
-  graph,
-  exports,
-  semantics,
-  diagnostics,
-  includeTests,
-  recoverFromTypingErrors,
-  arena,
-  effectInterner,
-  cycleModuleIdsByModuleId,
-}: {
-  moduleId: string;
-  graph: ModuleGraph;
-  exports: Map<string, ModuleExportTable>;
-  semantics: Map<string, SemanticsPipelineResult>;
-  diagnostics?: Diagnostic[];
-  includeTests: boolean | undefined;
-  recoverFromTypingErrors: boolean | undefined;
-  arena: ReturnType<typeof createTypeArena>;
-  effectInterner: ReturnType<typeof createEffectInterner>;
-  cycleModuleIdsByModuleId: ReadonlyMap<string, readonly string[]>;
-}): SemanticsPipelineResult | undefined => {
-  const module = graph.modules.get(moduleId);
-  if (!module) {
-    return undefined;
-  }
-
-  try {
-    const result = semanticsPipeline({
-      module,
-      graph,
-      exports,
-      dependencies: semantics,
-      typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
-      includeTests,
-      recoverFromTypingErrors,
-    });
-    diagnostics?.push(
-      ...augmentCycleTy0022Diagnostics({
-        diagnostics: result.diagnostics,
-        moduleId,
-        cycleModuleIdsByModuleId,
-      }),
-    );
-    return result;
-  } catch (error) {
-    if (error instanceof DiagnosticError) {
-      diagnostics?.push(
-        ...augmentCycleTy0022Diagnostics({
-          diagnostics: error.diagnostics,
-          moduleId,
-          cycleModuleIdsByModuleId,
-        }),
-      );
-      return undefined;
-    }
-    const fallback = diagnosticFromCode({
-      code: "TY9999",
-      params: {
-        kind: "unexpected-error",
-        message: error instanceof Error ? error.message : String(error),
-      },
-      span: { file: moduleDiagnosticFilePath(module), start: 0, end: 0 },
-    });
-    diagnostics?.push(fallback);
-    return undefined;
-  }
-};
-
-const mergeWithOverrides = <K, V>({
-  base,
-  overrides,
-}: {
-  base: ReadonlyMap<K, V>;
-  overrides: ReadonlyMap<K, V>;
-}): Map<K, V> => new Map([...base.entries(), ...overrides.entries()]);
-
-const augmentCycleTy0022Diagnostics = ({
-  diagnostics,
-  moduleId,
-  cycleModuleIdsByModuleId,
-}: {
-  diagnostics: readonly Diagnostic[];
-  moduleId: string;
-  cycleModuleIdsByModuleId: ReadonlyMap<string, readonly string[]>;
-}): Diagnostic[] => {
-  const cycleModuleIds = cycleModuleIdsByModuleId.get(moduleId);
-  if (!cycleModuleIds) {
-    return [...diagnostics];
-  }
-
-  const cycleHintMessage = `Lookup happened inside import cycle: ${cycleModuleIds.join(", ")}. Method surfaces from cyclic dependencies may require a second typing pass.`;
-
-  return diagnostics.map((diagnostic) => {
-    if (diagnostic.code !== "TY0022") {
-      return diagnostic;
-    }
-    const hints = diagnostic.hints ?? [];
-    if (hints.some((hint) => hint.message === cycleHintMessage)) {
-      return diagnostic;
-    }
-    return {
-      ...diagnostic,
-      hints: [...hints, { message: cycleHintMessage }],
-    };
-  });
 };
 
 const enforcePublicApiMethodEffectAnnotations = ({
@@ -820,10 +580,6 @@ export const compileProgramWithLoader = async (
 };
 
 const moduleIdForPath = (path: ModulePath): string => modulePathToString(path);
-
-const moduleDiagnosticFilePath = (module: ModuleNode): string =>
-  module.ast.location?.filePath ??
-  (module.origin.kind === "file" ? module.origin.filePath : module.id);
 
 const lazyCodegen = async () =>
   (await import(
