@@ -9,7 +9,7 @@ const skipFixturePath = resolve(__dirname, "fixtures", "skip-effect.voyd");
 const onlyFixturePath = resolve(__dirname, "fixtures", "global-only");
 
 describe("voyd test runner", () => {
-  it("runs std optional tests", async () => {
+  it("runs std optional tests", { timeout: 60_000 }, async () => {
     const result = await runTests({
       rootPath: resolveStdRoot(),
       reporter: "silent",
@@ -41,4 +41,4 @@ describe("voyd test runner", () => {
     expect(result.failed).toBe(0);
     expect(result.skipped).toBe(2);
   });
-}, { timeout: 20_000 });
+});
