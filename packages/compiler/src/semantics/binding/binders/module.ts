@@ -33,7 +33,6 @@ import { matchesDependencyPath } from "../../../modules/resolve.js";
 import {
   type HirVisibility,
   isPackageVisible,
-  isPublicVisibility,
   moduleVisibility,
   packageVisibility,
 } from "../../hir/index.js";
@@ -41,121 +40,19 @@ import type { SymbolKind } from "../../binder/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { SourceSpan, SymbolId } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
-import { isSamePackage } from "../../packages.js";
 import {
   importableMetadataFrom,
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
 import { findModuleNamespaceNameCollision } from "../name-collisions.js";
 import {
+  canAccessExport,
+  stdPkgExportsFor,
+} from "../export-visibility.js";
+import {
   enumVariantTypeNamesFromAliasTarget,
   importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
-
-type ModuleMetadata =
-  | { import?: { moduleId?: unknown; symbol?: unknown } | undefined }
-  | undefined;
-
-const importedSymbolTargetFrom = (
-  source?: Record<string, unknown>,
-): { moduleId: string; symbol: SymbolId } | undefined => {
-  const meta = source as ModuleMetadata;
-  const moduleId = meta?.import?.moduleId;
-  const symbol = meta?.import?.symbol;
-  return typeof moduleId === "string" && typeof symbol === "number"
-    ? { moduleId, symbol }
-    : undefined;
-};
-
-const exportTargetFor = (
-  entry: ModuleExportEntry,
-  ctx: BindingContext,
-): { moduleId: string; symbol: SymbolId } | undefined => {
-  const dependency = ctx.dependencies.get(entry.moduleId);
-  if (!dependency) {
-    return { moduleId: entry.moduleId, symbol: entry.symbol };
-  }
-  const sourceMetadata = dependency.symbolTable.getSymbol(entry.symbol)
-    .metadata as Record<string, unknown> | undefined;
-  if (entry.kind === "module") {
-    const moduleId = importedModuleIdFrom(sourceMetadata);
-    if (moduleId) {
-      return { moduleId, symbol: entry.symbol };
-    }
-  }
-  const imported = importedSymbolTargetFrom(sourceMetadata);
-  if (imported) {
-    return imported;
-  }
-  return { moduleId: entry.moduleId, symbol: entry.symbol };
-};
-
-const isSameOrDescendantModuleId = (moduleId: string, parent: string): boolean =>
-  moduleId === parent || moduleId.startsWith(`${parent}::`);
-
-const stdPkgExportsFor = ({
-  moduleId,
-  ctx,
-}: {
-  moduleId: string;
-  ctx: BindingContext;
-}): Map<string, ModuleExportEntry> | undefined => {
-  const stdPkgExports = ctx.moduleExports.get("std::pkg");
-  if (!stdPkgExports) {
-    return undefined;
-  }
-  const filtered = new Map<string, ModuleExportEntry>();
-  for (const entry of stdPkgExports.values()) {
-    if (!isPublicVisibility(entry.visibility)) {
-      continue;
-    }
-    const target = exportTargetFor(entry, ctx);
-    if (!target) {
-      continue;
-    }
-    if (
-      isSameOrDescendantModuleId(target.moduleId, moduleId) ||
-      isSameOrDescendantModuleId(moduleId, target.moduleId)
-    ) {
-      filtered.set(entry.name, entry);
-    }
-  }
-  return filtered.size > 0 ? filtered : undefined;
-};
-
-const isStdPkgExportedTarget = ({
-  target,
-  importedFromModuleId,
-  ctx,
-}: {
-  target: { moduleId: string; symbol: SymbolId };
-  importedFromModuleId: string;
-  ctx: BindingContext;
-}): boolean => {
-  const exports = stdPkgExportsFor({ moduleId: importedFromModuleId, ctx });
-  if (!exports) {
-    return false;
-  }
-  for (const entry of exports.values()) {
-    const entryTarget = exportTargetFor(entry, ctx);
-    if (!entryTarget) {
-      continue;
-    }
-    if (
-      entry.kind === "module" &&
-      isSameOrDescendantModuleId(importedFromModuleId, entryTarget.moduleId)
-    ) {
-      return true;
-    }
-    if (
-      entryTarget.moduleId === target.moduleId &&
-      entryTarget.symbol === target.symbol
-    ) {
-      return true;
-    }
-  }
-  return false;
-};
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -843,7 +740,7 @@ const declareImportedSymbol = ({
     );
     const importedSymbolTarget =
       exported.kind !== "module"
-        ? importedSymbolTargetFrom(
+        ? importedSymbolTargetFromMetadata(
             sourceMetadata as Record<string, unknown> | undefined,
           )
         : undefined;
@@ -959,55 +856,6 @@ const declareModuleImport = ({
   };
   ctx.imports.push(bound);
   return [bound];
-};
-
-const canAccessExport = ({
-  exported,
-  moduleId,
-  ctx,
-  allowStdSubmodulePackageExports = false,
-}: {
-  exported: ModuleExportEntry;
-  moduleId: string;
-  ctx: BindingContext;
-  allowStdSubmodulePackageExports?: boolean;
-}): boolean => {
-  if (moduleId === ctx.module.id) {
-    return true;
-  }
-
-  const isStdPkgExported = (): boolean => {
-    if (exported.packageId !== "std") {
-      return false;
-    }
-    const target = exportTargetFor(exported, ctx);
-    return target
-      ? isStdPkgExportedTarget({ target, importedFromModuleId: moduleId, ctx })
-      : false;
-  };
-
-  const samePackage =
-    exported.packageId === ctx.packageId ||
-    isSamePackage(exported.modulePath, ctx.modulePath);
-
-  if (samePackage) {
-    return isPackageVisible(exported.visibility);
-  }
-
-  if (
-    allowStdSubmodulePackageExports &&
-    exported.packageId === "std" &&
-    moduleId.startsWith("std::") &&
-    moduleId !== "std::pkg"
-  ) {
-    return isPackageVisible(exported.visibility);
-  }
-
-  if (isPublicVisibility(exported.visibility)) {
-    return true;
-  }
-
-  return isStdPkgExported();
 };
 
 const recordImportDiagnostic = ({
