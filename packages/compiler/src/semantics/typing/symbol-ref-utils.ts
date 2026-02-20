@@ -7,7 +7,7 @@ type ImportMetadata = {
   import?: { moduleId?: unknown; symbol?: unknown };
 };
 
-const importTargetFromSymbolTable = (
+export const importTargetFromSymbolTable = (
   symbol: SymbolId,
   symbolTable: SymbolTable,
 ): SymbolRef | undefined => {
@@ -27,6 +27,26 @@ const importTargetFromSymbolTable = (
     return undefined;
   }
   return undefined;
+};
+
+export const createImportTargetResolver = ({
+  moduleId,
+  symbolTable,
+  dependencies,
+}: {
+  moduleId: string;
+  symbolTable: SymbolTable;
+  dependencies: ReadonlyMap<string, { symbolTable: SymbolTable }>;
+}): ((ref: SymbolRef) => SymbolRef | undefined) => {
+  return (ref) => {
+    const sourceTable = ref.moduleId === moduleId
+      ? symbolTable
+      : dependencies.get(ref.moduleId)?.symbolTable;
+    if (!sourceTable) {
+      return undefined;
+    }
+    return importTargetFromSymbolTable(ref.symbol, sourceTable);
+  };
 };
 
 export const canonicalizeSymbolRef = ({
@@ -89,16 +109,11 @@ export const canonicalSymbolRefInTypingContext = (
 ): SymbolRef =>
   canonicalizeSymbolRef({
     ref,
-    resolveImportTarget: (candidate) => {
-      if (candidate.moduleId === ctx.moduleId) {
-        return importTargetFromSymbolTable(candidate.symbol, ctx.symbolTable);
-      }
-      const dependency = ctx.dependencies.get(candidate.moduleId);
-      if (!dependency) {
-        return undefined;
-      }
-      return importTargetFromSymbolTable(candidate.symbol, dependency.symbolTable);
-    },
+    resolveImportTarget: createImportTargetResolver({
+      moduleId: ctx.moduleId,
+      symbolTable: ctx.symbolTable,
+      dependencies: ctx.dependencies,
+    }),
   });
 
 export const symbolRefKey = (ref: SymbolRef): SymbolRefKey =>
