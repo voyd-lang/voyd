@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type {
-  HirBlockExpr,
   HirCallExpr,
   HirFunction,
 } from "../../hir/nodes.js";

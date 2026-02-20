@@ -19,7 +19,6 @@ import {
 } from "./object-literal.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 import {
-  lowerConstructorArgFromEntry,
   lowerConstructorLiteralCall,
 } from "./constructor-call.js";
 import { createBoolLiteralExpr } from "./literal-helpers.js";
@@ -104,7 +103,11 @@ const tryLowerIsTypeCheckCall = ({
   scopes,
   lowerExpr,
 }: LowerCallFromElementsParams): HirExprId | undefined => {
-  if (!isIdentifierAtom(calleeExpr) || calleeExpr.value !== "is") {
+  if (
+    !isIdentifierAtom(calleeExpr) ||
+    calleeExpr.isQuoted ||
+    calleeExpr.value !== "is"
+  ) {
     return undefined;
   }
   const [discriminantExpr, typeExpr, ...rest] = argsExprs;

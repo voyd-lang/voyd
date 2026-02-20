@@ -1,5 +1,5 @@
 import type { Expr, Form, Syntax } from "../../parser/index.js";
-import type { SymbolRecord, SymbolTable } from "../binder/index.js";
+import type { SymbolTable } from "../binder/index.js";
 import type {
   Diagnostic,
   NodeId,
@@ -19,7 +19,6 @@ import {
   type EffectDecl,
 } from "../decls.js";
 import type {
-  ModuleDependency,
   ModuleGraph,
   ModuleNode,
   ModulePath,

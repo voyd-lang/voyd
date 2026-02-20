@@ -1,6 +1,5 @@
 import {
   type Expr,
-  type IdentifierAtom,
   type Syntax,
   isForm,
   isIdentifierAtom,

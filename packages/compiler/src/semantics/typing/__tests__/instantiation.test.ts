@@ -1241,7 +1241,7 @@ describe("instantiation argument handling", () => {
   });
 
   it("unifies composite types with variance-aware substitutions", () => {
-    const { ctx, state } = createContext();
+    const { ctx } = createContext();
     const param = ctx.arena.freshTypeParam();
     const paramRef = ctx.arena.internTypeParamRef(param);
     const genericFn = ctx.arena.internFunction({

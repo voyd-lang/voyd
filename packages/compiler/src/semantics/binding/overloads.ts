@@ -4,7 +4,6 @@ import { formatTypeAnnotation, toSourceSpan } from "../utils.js";
 import type {
   BindingContext,
   BoundFunction,
-  BoundOverloadSet,
   OverloadBucket,
   BoundParameter,
 } from "./types.js";
