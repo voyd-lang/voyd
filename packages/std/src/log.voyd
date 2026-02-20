@@ -1,6 +1,10 @@
 use std::array::Array
+use std::dict::Dict
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::string::{ String, StringSlice }
+use std::string::type::new_string
 
 pub obj LogTrace {}
 pub obj LogDebug {}
@@ -37,34 +41,107 @@ pub type LogFields = Array<LogField>
 
 @effect(id: "std::log::Log")
 pub eff Log
-  emit(tail, level: LogLevel, message: String, fields: Option<LogFields>) -> void
+  emit(tail, payload: MsgPack) -> void
 
 pub fn trace({ message: StringSlice }): Log -> void
-  Log::emit(LogTrace {}, message.to_string(), None {})
+  Log::emit(log_emit_payload(level: LogTrace {}, message: message.to_string(), fields: None {}))
 
 pub fn trace({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(LogTrace {}, message.to_string(), Some<LogFields> { value: fields })
+  Log::emit(log_emit_payload(
+    level: LogTrace {},
+    message: message.to_string(),
+    fields: Some<LogFields> { value: fields }
+  ))
 
 pub fn debug({ message: StringSlice }): Log -> void
-  Log::emit(LogDebug {}, message.to_string(), None {})
+  Log::emit(log_emit_payload(level: LogDebug {}, message: message.to_string(), fields: None {}))
 
 pub fn debug({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(LogDebug {}, message.to_string(), Some<LogFields> { value: fields })
+  Log::emit(log_emit_payload(
+    level: LogDebug {},
+    message: message.to_string(),
+    fields: Some<LogFields> { value: fields }
+  ))
 
 pub fn info({ message: StringSlice }): Log -> void
-  Log::emit(LogInfo {}, message.to_string(), None {})
+  Log::emit(log_emit_payload(level: LogInfo {}, message: message.to_string(), fields: None {}))
 
 pub fn info({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(LogInfo {}, message.to_string(), Some<LogFields> { value: fields })
+  Log::emit(log_emit_payload(
+    level: LogInfo {},
+    message: message.to_string(),
+    fields: Some<LogFields> { value: fields }
+  ))
 
 pub fn warn({ message: StringSlice }): Log -> void
-  Log::emit(LogWarn {}, message.to_string(), None {})
+  Log::emit(log_emit_payload(level: LogWarn {}, message: message.to_string(), fields: None {}))
 
 pub fn warn({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(LogWarn {}, message.to_string(), Some<LogFields> { value: fields })
+  Log::emit(log_emit_payload(
+    level: LogWarn {},
+    message: message.to_string(),
+    fields: Some<LogFields> { value: fields }
+  ))
 
 pub fn error({ message: StringSlice }): Log -> void
-  Log::emit(LogError {}, message.to_string(), None {})
+  Log::emit(log_emit_payload(level: LogError {}, message: message.to_string(), fields: None {}))
 
 pub fn error({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(LogError {}, message.to_string(), Some<LogFields> { value: fields })
+  Log::emit(log_emit_payload(
+    level: LogError {},
+    message: message.to_string(),
+    fields: Some<LogFields> { value: fields }
+  ))
+
+fn log_emit_payload({ level: LogLevel, message: String, fields: Option<LogFields> }): () -> MsgPack
+  let ~payload = Dict<String, MsgPack>::init()
+  payload.set(key: "level", value: log_level_to_msgpack(level))
+  payload.set(key: "message", value: msgpack::make_string(message))
+  payload.set(key: "fields", value: log_fields_to_msgpack(fields))
+  msgpack::make_map(payload)
+
+fn log_level_to_msgpack(level: LogLevel): () -> MsgPack
+  level.match(active)
+    LogTrace:
+      msgpack::make_string("trace")
+    LogDebug:
+      msgpack::make_string("debug")
+    LogInfo:
+      msgpack::make_string("info")
+    LogWarn:
+      msgpack::make_string("warn")
+    LogError:
+      msgpack::make_string("error")
+
+fn log_fields_to_msgpack(fields: Option<LogFields>): () -> MsgPack
+  match(fields)
+    Some<LogFields> { value: field_values }:
+      let ~encoded = Array<MsgPack>::with_capacity(field_values.len())
+      var index = 0
+      while index < field_values.len() do:
+        match(field_values.get(index))
+          Some<LogField> { value: field }:
+            encoded.push(log_field_to_msgpack(field))
+          None:
+            void
+        index = index + 1
+      msgpack::make_array(encoded)
+    None:
+      msgpack::make_null()
+
+fn log_field_to_msgpack(field: LogField): () -> MsgPack
+  let ~entry = Dict<String, MsgPack>::init()
+  entry.set(key: "key", value: msgpack::make_string(field.key))
+  entry.set(key: "value", value: log_field_value_to_msgpack(field.value))
+  msgpack::make_map(entry)
+
+fn log_field_value_to_msgpack(value: LogFieldValue): () -> MsgPack
+  value.match(active)
+    LogString:
+      msgpack::make_string(active.value)
+    LogInt:
+      msgpack::make_i64(active.value)
+    LogFloat:
+      msgpack::make_f64(active.value)
+    LogBool:
+      msgpack::make_bool(active.value)
