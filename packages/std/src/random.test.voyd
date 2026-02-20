@@ -1,0 +1,33 @@
+use std::test::assertions::all
+
+test "random_int handles spans larger than i32":
+  let value = random_int_from_seed({
+    seed: i64_from_i32(2147483647),
+    range: Range {
+      start: Some<i32> { value: -1 },
+      end: Some<i32> { value: 2147483647 },
+      include_end: false
+    }
+  })
+
+  assert(value, eq: 2147483646)
+
+test "random_int includes i32 max for inclusive upper bounds":
+  let value = random_int_from_seed({
+    seed: i64_from_i32(1),
+    range: Range {
+      start: Some<i32> { value: 2147483646 },
+      end: Some<i32> { value: 2147483647 },
+      include_end: true
+    }
+  })
+
+  assert(value, eq: 2147483647)
+
+fn random_int_from_seed({ seed: i64, range: Range }) -> i32
+  try
+    random_int(range: range)
+  Random::next_i64(tail):
+    tail(seed)
+
+fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)

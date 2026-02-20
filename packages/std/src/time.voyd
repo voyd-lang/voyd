@@ -35,7 +35,7 @@ impl SystemTime
   api fn now(): Time -> SystemTime
     SystemTime { unix_millis_value: Time::system_now_millis() }
 
-  api fn unix_millis(self): Time -> i64
+  api fn unix_millis(self) -> i64
     self.unix_millis_value
 
 @effect(id: "std::time::Time")
