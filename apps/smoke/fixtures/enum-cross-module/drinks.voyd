@@ -1,9 +1,9 @@
 use std::all
 
 pub enum Drink
-  Coffee { size: i32 }
-  Tea { size: i32 }
+  Coffee<T> { size: T }
+  Tea<T> { size: T }
   Water
 
-pub fn make_coffee(size: i32) -> Drink
-  Drink::Coffee { size }
+pub fn make_coffee<T>(size: T) -> Drink<T>
+  Drink::Coffee<T> { size }

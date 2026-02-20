@@ -1,0 +1,28 @@
+use std::all
+
+pub enum MaybeDrink
+  None
+  Some<T> { value: T }
+
+pub enum Signal
+  Idle
+  Ready<T>
+
+fn option_score() -> i32
+  let option: MaybeDrink<i32> = MaybeDrink::Some<i32> { value: 10 }
+  match(option)
+    MaybeDrink::None:
+      0
+    MaybeDrink::Some { value }:
+      value
+
+fn signal_score() -> i32
+  let signal: Signal<i32> = Signal::Ready<i32> {}
+  match(signal)
+    Signal::Idle:
+      0
+    Signal::Ready:
+      1
+
+pub fn main() -> i32
+  option_score() + signal_score()

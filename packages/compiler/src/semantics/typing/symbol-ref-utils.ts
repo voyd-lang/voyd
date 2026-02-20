@@ -48,7 +48,6 @@ export const createImportTargetResolver = ({
     return importTargetFromSymbolTable(ref.symbol, sourceTable);
   };
 };
-
 export const canonicalizeSymbolRef = ({
   ref,
   resolveImportTarget,
