@@ -1,3 +1,9 @@
+use std::dict::Dict
+use std::error::HostError
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 
 fn read_unix_millis(value: SystemTime) -> i64
@@ -16,6 +22,37 @@ fn system_time_now_with_millis(ms: i64): () -> SystemTime
   Time::system_now_millis(tail):
     tail(ms)
   Time::sleep_millis(tail, _ms):
-    tail()
+    tail(host_ok_payload())
+
+test "sleep decodes host errors":
+  let result = sleep_with_error(code: 7, message: "blocked".as_slice())
+  match(result)
+    Err<HostError> { error }:
+      assert(error.code, eq: 7)
+      assert(error.message.equals("blocked"), eq: true)
+    Ok<Unit>:
+      assert(false, eq: true)
+
+fn sleep_with_error({ code: i32, message: StringSlice }): () -> Result<Unit, HostError>
+  try
+    sleep(duration: Duration::from_millis(ms: i64_from_i32(5)))
+  Time::monotonic_now_millis(tail):
+    tail(i64_from_i32(0))
+  Time::system_now_millis(tail):
+    tail(i64_from_i32(0))
+  Time::sleep_millis(tail, _ms):
+    tail(host_error_payload(code: code, message: message.to_string()))
+
+fn host_ok_payload(): () -> MsgPack
+  let ~payload = Dict<String, MsgPack>::init()
+  payload.set(key: "ok", value: msgpack::make_bool(true))
+  msgpack::make_map(payload)
+
+fn host_error_payload({ code: i32, message: String }): () -> MsgPack
+  let ~payload = Dict<String, MsgPack>::init()
+  payload.set(key: "ok", value: msgpack::make_bool(false))
+  payload.set(key: "code", value: msgpack::make_i32(code))
+  payload.set(key: "message", value: msgpack::make_string(message))
+  msgpack::make_map(payload)
 
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)

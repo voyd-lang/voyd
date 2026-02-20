@@ -1,3 +1,11 @@
+use std::dict::Dict
+use std::error::HostError
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, new_string }
+
 pub obj Duration {
   millis: i64
 }
@@ -42,9 +50,39 @@ impl SystemTime
 pub eff Time
   monotonic_now_millis(tail) -> i64
   system_now_millis(tail) -> i64
-  sleep_millis(tail, ms: i64) -> void
+  sleep_millis(tail, ms: i64) -> MsgPack
 
-pub fn sleep({ duration: Duration }): Time -> void
-  Time::sleep_millis(duration.as_millis())
+pub fn sleep_millis({ ms: i64 }): Time -> Result<Unit, HostError>
+  decode_host_void_result(Time::sleep_millis(ms))
+
+pub fn sleep({ duration: Duration }): Time -> Result<Unit, HostError>
+  sleep_millis(ms: duration.as_millis())
+
+fn decode_host_void_result(payload: MsgPack): () -> Result<Unit, HostError>
+  let decoded = msgpack::unpack_map(payload)
+  if read_bool(decoded, "ok") then:
+    return Ok<Unit> { value: Unit {} }
+  Err<HostError> {
+    error: HostError {
+      code: read_i32(decoded, "code"),
+      message: read_string(decoded, "message")
+    }
+  }
+
+fn read_bool(map: Dict<String, MsgPack>, key: String): () -> bool
+  msgpack::unpack_bool(read_msgpack(map, key))
+
+fn read_i32(map: Dict<String, MsgPack>, key: String): () -> i32
+  msgpack::unpack_i32(read_msgpack(map, key))
+
+fn read_string(map: Dict<String, MsgPack>, key: String): () -> String
+  msgpack::unpack_string(read_msgpack(map, key))
+
+fn read_msgpack(map: Dict<String, MsgPack>, key: String): () -> MsgPack
+  match(map.get(key: key))
+    Some<MsgPack> { value }:
+      value
+    None:
+      msgpack::make_null()
 
 fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)

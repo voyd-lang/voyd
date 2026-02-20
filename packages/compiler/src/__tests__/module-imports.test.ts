@@ -81,6 +81,47 @@ describe("module imports", () => {
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 
+  it("resolves explicit std env/fs/path imports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: [
+        "pub use self::env",
+        "pub use self::fs",
+        "pub use self::path",
+      ].join("\n"),
+      [`${stdRoot}${sep}env.voyd`]: "pub fn get() -> i32\n  1",
+      [`${stdRoot}${sep}fs.voyd`]: "pub fn exists() -> bool\n  true",
+      [`${stdRoot}${sep}path.voyd`]: "pub obj Path {}",
+      [`${srcRoot}${sep}main.voyd`]: [
+        "use std::env::get",
+        "use std::fs::exists",
+        "use std::path::Path",
+        "",
+        "fn consume_path(_value: Path) -> i32",
+        "  0",
+        "",
+        "pub fn main() -> i32",
+        "  consume_path(Path {})",
+        "  if exists() then: get() else: 0",
+      ].join("\n"),
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const mainSemantics = semantics.get("src::main");
+
+    expect(mainSemantics?.binding.imports.map((imp) => imp.name)).toEqual(
+      expect.arrayContaining(["get", "exists", "Path"]),
+    );
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
   it("rejects std::all alias hops to package-visible std internals", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

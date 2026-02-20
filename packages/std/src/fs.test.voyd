@@ -1,0 +1,139 @@
+use std::array::Array
+use std::dict::Dict
+use std::error::IoError
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::path::Path
+use std::result::types::all
+use std::string::type::{ String, StringSlice, new_string }
+use std::test::assertions::all
+
+test "fs read_string decodes host payload":
+  let result = read_string_with_payload(host_ok_with_value(msgpack::make_string("hello")))
+  match(result)
+    Ok<String> { value }:
+      assert(value.equals("hello"), eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "fs write_string encodes path and value":
+  let ~paths = Array<String>::init()
+  let ~values = Array<String>::init()
+
+  let result = write_string_with_capture(paths, values)
+
+  match(result)
+    Ok<Unit>:
+      assert(optional_string_or(paths.get(0), "missing".as_slice()).equals("/tmp/app.log"), eq: true)
+      assert(optional_string_or(values.get(0), "missing".as_slice()).equals("line"), eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "fs list_dir decodes path arrays":
+  let result = list_dir_with_payload(host_ok_with_value(path_array_payload("/tmp/a", "/tmp/b")))
+  match(result)
+    Ok<Array<Path>> { value }:
+      assert(value.len(), eq: 2)
+      let first = optional_path_or(value.get(0), Path::new(s: "/missing".as_slice()))
+      let second = optional_path_or(value.get(1), Path::new(s: "/missing".as_slice()))
+      assert(first.as_string().equals("/tmp/a"), eq: true)
+      assert(second.as_string().equals("/tmp/b"), eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+fn read_string_with_payload(payload: MsgPack): () -> Result<String, IoError>
+  try
+    read_string(path: Path::new(s: "/tmp/app.log".as_slice()))
+  Fs::read_bytes(tail, _path):
+    tail(host_error_payload())
+  Fs::read_string(tail, _path):
+    tail(payload)
+  Fs::write_bytes(tail, _payload):
+    tail(host_error_payload())
+  Fs::write_string(tail, _payload):
+    tail(host_error_payload())
+  Fs::exists(tail, _path):
+    tail(false)
+  Fs::list_dir(tail, _path):
+    tail(host_error_payload())
+
+fn list_dir_with_payload(payload: MsgPack): () -> Result<Array<Path>, IoError>
+  try
+    list_dir(path: Path::new(s: "/tmp".as_slice()))
+  Fs::read_bytes(tail, _path):
+    tail(host_error_payload())
+  Fs::read_string(tail, _path):
+    tail(host_error_payload())
+  Fs::write_bytes(tail, _payload):
+    tail(host_error_payload())
+  Fs::write_string(tail, _payload):
+    tail(host_error_payload())
+  Fs::exists(tail, _path):
+    tail(false)
+  Fs::list_dir(tail, _path):
+    tail(payload)
+
+fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () -> Result<Unit, IoError>
+  try
+    write_string(path: Path::new(s: "/tmp/app.log".as_slice()), s: "line".as_slice())
+  Fs::read_bytes(tail, _path):
+    tail(host_error_payload())
+  Fs::read_string(tail, _path):
+    tail(host_error_payload())
+  Fs::write_bytes(tail, _payload):
+    tail(host_error_payload())
+  Fs::write_string(tail, payload):
+    let decoded = msgpack::unpack_map(payload)
+    paths.push(msgpack::unpack_string(read_test_msgpack(decoded, "path")))
+    values.push(msgpack::unpack_string(read_test_msgpack(decoded, "value")))
+    tail(host_ok_payload())
+  Fs::exists(tail, _path):
+    tail(false)
+  Fs::list_dir(tail, _path):
+    tail(host_error_payload())
+
+fn host_ok_payload(): () -> MsgPack
+  let ~payload = Dict<String, MsgPack>::init()
+  payload.set(key: "ok", value: msgpack::make_bool(true))
+  msgpack::make_map(payload)
+
+fn host_error_payload(): () -> MsgPack
+  let ~payload = Dict<String, MsgPack>::init()
+  payload.set(key: "ok", value: msgpack::make_bool(false))
+  payload.set(key: "code", value: msgpack::make_i32(1))
+  payload.set(key: "message", value: msgpack::make_string("error"))
+  msgpack::make_map(payload)
+
+fn host_ok_with_value(value: MsgPack): () -> MsgPack
+  let ~payload = Dict<String, MsgPack>::init()
+  payload.set(key: "ok", value: msgpack::make_bool(true))
+  payload.set(key: "value", value: value)
+  msgpack::make_map(payload)
+
+fn path_array_payload(first: String, second: String): () -> MsgPack
+  let ~values = Array<MsgPack>::with_capacity(2)
+  values.push(msgpack::make_string(first))
+  values.push(msgpack::make_string(second))
+  msgpack::make_array(values)
+
+fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
+  match(value)
+    Some<String> { value: present }:
+      present
+    None:
+      fallback.to_string()
+
+fn optional_path_or(value: Option<Path>, fallback: Path): () -> Path
+  match(value)
+    Some<Path> { value: present }:
+      present
+    None:
+      fallback
+
+fn read_test_msgpack(map: Dict<String, MsgPack>, key: String): () -> MsgPack
+  match(map.get(key: key))
+    Some<MsgPack> { value }:
+      value
+    None:
+      msgpack::make_null()
