@@ -106,6 +106,13 @@ export const hydrateImportedTraitMetadataForNominal = ({
   if (nominalDesc.kind !== "nominal-object") {
     return false;
   }
+  if (nominalDesc.owner.moduleId !== ctx.moduleId) {
+    return hydrateImportedTraitMetadataForOwnerRef({
+      ownerModuleId: nominalDesc.owner.moduleId,
+      ownerSymbol: nominalDesc.owner.symbol,
+      ctx,
+    });
+  }
   const localOwner = localSymbolForSymbolRef(nominalDesc.owner, ctx);
   if (typeof localOwner !== "number") {
     return false;

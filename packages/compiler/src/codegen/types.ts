@@ -1465,6 +1465,11 @@ const createMethodLookupEntries = ({
   impls.forEach((impl) => {
     impl.methods.forEach(({ traitMethod, implMethod }) => {
       const implRef = ctx.program.symbols.refOf(implMethod as ProgramSymbolId);
+      const traitMethodImpl = ctx.program.traits.getTraitMethodImpl(
+        implMethod as ProgramSymbolId,
+      );
+      const hashTraitSymbol = traitMethodImpl?.traitSymbol ?? impl.traitSymbol;
+      const hashTraitMethod = traitMethodImpl?.traitMethodSymbol ?? traitMethod;
       const metas = ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
       const meta = resolveTraitImplMethodMeta({
         metas,
@@ -1523,7 +1528,7 @@ const createMethodLookupEntries = ({
       const params = meta.effectful
         ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
         : [ctx.rtt.baseType, ...userParamTypes];
-      const wrapperName = `${typeLabel}__method_${impl.traitSymbol}_${traitMethod}_${implRef.symbol}`;
+      const wrapperName = `${typeLabel}__method_${hashTraitSymbol}_${hashTraitMethod}_${implRef.symbol}`;
       const wrapper = ctx.mod.addFunction(
         wrapperName,
         binaryen.createType(params as number[]),
@@ -1561,10 +1566,10 @@ const createMethodLookupEntries = ({
       const heapType = bin._BinaryenFunctionGetType(wrapper);
       const fnType = bin._BinaryenTypeFromHeapType(heapType, false);
       const hash = traitMethodHash({
-        traitSymbol: impl.traitSymbol,
-        methodSymbol: traitMethod,
+        traitSymbol: hashTraitSymbol,
+        methodSymbol: hashTraitMethod,
       });
-      const signatureKey = `${impl.traitSymbol}:${traitMethod}`;
+      const signatureKey = `${hashTraitSymbol}:${hashTraitMethod}`;
       const existing = hashes.get(hash);
       if (existing && existing !== signatureKey) {
         throw new Error(

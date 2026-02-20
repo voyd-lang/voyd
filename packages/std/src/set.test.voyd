@@ -29,4 +29,24 @@ test "set values returns iterable keys":
   let ~values = Set<String>::init()
   values.insert(value: "left")
   values.insert(value: "right")
+
   assert(accepts_sequence(values: values.values()), eq: true)
+
+  let ~iter = values.values().iter()
+  var count = 0
+  var has_left = false
+  var has_right = false
+  while true do:
+    match(iter.next())
+      Some<String> { value }:
+        count = count + 1
+        if value.equals("left") then:
+          has_left = true
+        if value.equals("right") then:
+          has_right = true
+      None:
+        break
+
+  assert(count, eq: 2)
+  assert(has_left, eq: true)
+  assert(has_right, eq: true)
