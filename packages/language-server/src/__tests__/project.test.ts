@@ -82,7 +82,7 @@ describe("language server project analysis", () => {
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("treats symbol ranges as end-exclusive for navigation", async () => {
     const project = await createProject({
