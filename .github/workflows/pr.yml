@@ -3,6 +3,32 @@ name: Node.js CI
 on: [pull_request]
 
 jobs:
+  unused_symbols:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+      TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --include=optional
+      - run: npm run typecheck:unused
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 8

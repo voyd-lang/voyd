@@ -1,13 +1,6 @@
 import type {
-  HirGraph,
   HirBuilder,
   HirTypeExpr,
-  HirObjectLiteralEntry,
-  HirMatchArm,
-  HirCondBranch,
-  HirParameter,
-  HirPattern,
-  HirTypeParameter,
 } from "../hir/index.js";
 import type {
   BindingResult,
