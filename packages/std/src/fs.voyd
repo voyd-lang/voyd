@@ -1,6 +1,6 @@
 use std::array::Array
-use std::dict::Dict
 use std::error::IoError
+use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
@@ -41,16 +41,16 @@ fn encode_path(path: Path): () -> MsgPack
   msgpack::make_string(path.as_string())
 
 fn encode_write_bytes_payload({ path: Path, bytes: Array<i32> }): () -> MsgPack
-  let ~payload = Dict<String, MsgPack>::init()
-  payload.set(key: "path", value: encode_path(path))
-  payload.set(key: "bytes", value: encode_byte_array(bytes))
-  msgpack::make_map(payload)
+  HostDto::init()
+    .set("path", encode_path(path))
+    .set("bytes", encode_byte_array(bytes))
+    .pack()
 
 fn encode_write_string_payload({ path: Path, value: String }): () -> MsgPack
-  let ~payload = Dict<String, MsgPack>::init()
-  payload.set(key: "path", value: encode_path(path))
-  payload.set(key: "value", value: msgpack::make_string(value))
-  msgpack::make_map(payload)
+  HostDto::init()
+    .set("path", encode_path(path))
+    .set("value", msgpack::make_string(value))
+    .pack()
 
 fn encode_byte_array(bytes: Array<i32>): () -> MsgPack
   let ~encoded = Array<MsgPack>::with_capacity(bytes.len())
@@ -65,36 +65,36 @@ fn encode_byte_array(bytes: Array<i32>): () -> MsgPack
   msgpack::make_array(encoded)
 
 fn decode_read_bytes_result(payload: MsgPack): () -> Result<Array<i32>, IoError>
-  let decoded = msgpack::unpack_map(payload)
-  if read_bool(decoded, "ok") == false then:
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") == false then:
     return Err<IoError> { error: decode_io_error(decoded) }
 
-  Ok<Array<i32>> { value: decode_byte_array(read_msgpack(decoded, "value")) }
+  Ok<Array<i32>> { value: decode_byte_array(decoded.read_msgpack("value")) }
 
 fn decode_read_string_result(payload: MsgPack): () -> Result<String, IoError>
-  let decoded = msgpack::unpack_map(payload)
-  if read_bool(decoded, "ok") == false then:
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") == false then:
     return Err<IoError> { error: decode_io_error(decoded) }
 
-  Ok<String> { value: msgpack::unpack_string(read_msgpack(decoded, "value")) }
+  Ok<String> { value: decoded.read_string("value") }
 
 fn decode_write_result(payload: MsgPack): () -> Result<Unit, IoError>
-  let decoded = msgpack::unpack_map(payload)
-  if read_bool(decoded, "ok") then:
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") then:
     return Ok<Unit> { value: Unit {} }
   Err<IoError> { error: decode_io_error(decoded) }
 
 fn decode_list_dir_result(payload: MsgPack): () -> Result<Array<Path>, IoError>
-  let decoded = msgpack::unpack_map(payload)
-  if read_bool(decoded, "ok") == false then:
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") == false then:
     return Err<IoError> { error: decode_io_error(decoded) }
 
-  Ok<Array<Path>> { value: decode_path_array(read_msgpack(decoded, "value")) }
+  Ok<Array<Path>> { value: decode_path_array(decoded.read_msgpack("value")) }
 
-fn decode_io_error(payload: Dict<String, MsgPack>): () -> IoError
+fn decode_io_error(payload: HostDto): () -> IoError
   IoError {
-    code: read_i32(payload, "code"),
-    message: read_string(payload, "message")
+    code: payload.read_i32("code"),
+    message: payload.read_string("message")
   }
 
 fn decode_byte_array(payload: MsgPack): () -> Array<i32>
@@ -136,19 +136,3 @@ fn mod_i32(value: i32, modulus: i32) -> i32
   let div = value / modulus
   let rem = value - div * modulus
   if rem < 0 then: rem + modulus else: rem
-
-fn read_bool(map: Dict<String, MsgPack>, key: String): () -> bool
-  msgpack::unpack_bool(read_msgpack(map, key))
-
-fn read_i32(map: Dict<String, MsgPack>, key: String): () -> i32
-  msgpack::unpack_i32(read_msgpack(map, key))
-
-fn read_string(map: Dict<String, MsgPack>, key: String): () -> String
-  msgpack::unpack_string(read_msgpack(map, key))
-
-fn read_msgpack(map: Dict<String, MsgPack>, key: String): () -> MsgPack
-  match(map.get(key: key))
-    Some<MsgPack> { value }:
-      value
-    None:
-      msgpack::make_null()
