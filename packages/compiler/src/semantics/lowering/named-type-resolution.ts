@@ -5,7 +5,6 @@ import {
   formCallsInternal,
   isForm,
   isIdentifierAtom,
-  isInternalIdentifierAtom,
 } from "../../parser/index.js";
 import type { HirTypeExpr } from "../hir/index.js";
 import type { ScopeId, SymbolId } from "../ids.js";

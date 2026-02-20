@@ -1,4 +1,3 @@
-import type { Form } from "../../../parser/index.js";
 import { parseWhileConditionAndBody, toSourceSpan } from "../../utils.js";
 import type { HirExprId } from "../../ids.js";
 import type { LoweringFormParams } from "./types.js";

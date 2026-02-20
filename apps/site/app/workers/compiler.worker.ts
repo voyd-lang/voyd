@@ -5,13 +5,6 @@ type Outbound =
   | { id: number; ok: true; tree: any }
   | { id: number; ok: false; error: string };
 
-const toBytes = (
-  result: Uint8Array | { binary?: Uint8Array; output?: Uint8Array },
-): Uint8Array =>
-  result instanceof Uint8Array
-    ? result
-    : (result.output ?? result.binary ?? new Uint8Array());
-
 // Signal readiness so the main thread can queue messages safely
 self.postMessage({ type: "ready" });
 

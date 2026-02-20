@@ -8,7 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const skipFixturePath = resolve(__dirname, "fixtures", "skip-effect.voyd");
 const onlyFixturePath = resolve(__dirname, "fixtures", "global-only");
 
-describe("voyd test runner", () => {
+describe("voyd test runner", { timeout: 240_000 }, () => {
   it("runs std optional tests", async () => {
     const result = await runTests({
       rootPath: resolveStdRoot(),

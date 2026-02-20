@@ -7,18 +7,8 @@ import {
   modBinaryenTypeToHeapType,
 } from "@voyd/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes } from "../types.js";
-import type {
-  CodegenContext,
-  HirCallExpr,
-  HirExpression,
-  HirExprId,
-  TypeId,
-} from "../context.js";
+import type { CodegenContext, HirCallExpr, HirExpression, HirExprId, TypeId } from "../context.js";
 import { createTestCodegenContext } from "./support/test-codegen-context.js";
-
-type TypeDescriptor =
-  | { kind: "primitive"; name: string }
-  | { kind: "fixed-array"; element: TypeId };
 
 const span = { start: 0, end: 0 } as const;
 
