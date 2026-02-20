@@ -11,6 +11,7 @@ import {
   isStringAtom,
 } from "../../ast/index.js";
 import { getSyntaxId } from "../../ast/syntax.js";
+import { parseStringValue } from "../string-value.js";
 import type { MacroScope } from "./scope.js";
 import {
   bool,
@@ -305,6 +306,21 @@ export const createBuiltins = (
         new InternalIdentifierAtom("emit_many"),
         ...flattened.map((value) => cloneExpr(value)),
       ]);
+    },
+    empty_list: () => new Form([]),
+    panic: ({ args, originalArgs, scope }) => {
+      const messageExpr = args.at(0);
+      if (!messageExpr) {
+        throw new Error("panic requires a message");
+      }
+      const parsedMessage = parseStringValue(originalArgs.at(0));
+      if (parsedMessage !== null) {
+        throw new Error(parsedMessage);
+      }
+      const value = getMacroTimeValue(messageExpr, scope);
+      const message =
+        typeof value === "string" ? value : JSON.stringify(value ?? "panic");
+      throw new Error(message);
     },
     length: ({ args }) => {
       const list = expectForm(args.at(0), "length target");

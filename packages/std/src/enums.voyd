@@ -1,52 +1,56 @@
 pub macro enum(enum_name, variants_block)
-  let variants = variants_block.slice(1).map((variant) =>
+  let normalize_variant = (variant) =>
     if is_list(variant) then:
-      variant
+      if variant.length == 1 then:
+        `($(variant.get(0)) {})
+      else:
+        if variant.length <= 3 then:
+          variant
+        else:
+          panic("enum macro: expected `Name`, `Name { ... }`, or `Name<T> { ... }`")
     else:
       `($variant {})
-  )
-  let first_variant = variants.get(0)
-  let inferred_generics =
-    if is_list(first_variant) then:
-      if first_variant.length == 3 then:
-        first_variant.get(1)
-      else:
-        variants.slice(from: 0, to: 0)
-    else:
-      variants.slice(from: 0, to: 0)
-  let enum_head =
-    if is_list(enum_name) then:
-      enum_name
-    else:
-      if inferred_generics.length > 0 then:
-        `($enum_name $inferred_generics)
-      else:
-        enum_name
-  let variant_names = variants.map((variant) =>
+
+  let variant_type_ref = (variant) =>
     if variant.length == 3 then:
       variant.slice(0, 2)
     else:
-      variant.get(0)
-  )
-  let object_decls = variants.map((variant) =>
-    let object_head =
-      if variant.length == 3 then:
-        variant.slice(0, 2)
-      else:
+      if variant.length == 2 then:
         variant.get(0)
-    let object_body =
-      if variant.length == 3 then:
-        variant.get(2)
       else:
-        variant.get(1)
-    `(obj $object_head $object_body)
-  )
-  let first_variant_name = variant_names.get(0)
-  let remaining_variants = variant_names.slice(1)
-  let union_target = remaining_variants.reduce(
-    first_variant_name,
-    (acc, next) => `($acc | $next)
-  )
-  let declarations = object_decls.push(`(type ($enum_head = $union_target)))
+        panic("enum macro: normalized variant missing type head")
 
-  emit_many(declarations)
+  let variant_body = (variant) =>
+    if variant.length == 3 then:
+      variant.get(2)
+    else:
+      if variant.length == 2 then:
+        variant.get(1)
+      else:
+        panic("enum macro: normalized variant missing object body")
+
+  let infer_enum_head = (enum_name, first_variant) =>
+    if is_list(enum_name) then:
+      enum_name
+    else:
+      let first_type_ref = variant_type_ref(first_variant)
+      if is_list(first_type_ref) then:
+        `($enum_name $(first_type_ref.get(1)))
+      else:
+        enum_name
+
+  let raw_variants = variants_block.slice(1)
+  if raw_variants.length == 0 then:
+    panic("enum macro requires at least one variant")
+
+  let variants = raw_variants.map(normalize_variant)
+  let enum_head = infer_enum_head(enum_name, variants.get(0))
+  let variant_type_refs = variants.map(variant_type_ref)
+  let object_decls = variants.map((variant) =>
+    `(obj $(variant_type_ref(variant)) $(variant_body(variant)))
+  )
+  let union_target = variant_type_refs
+    .slice(1)
+    .reduce(variant_type_refs.get(0), (acc, next) => `($acc | $next))
+
+  emit_many(object_decls.push(`(type ($enum_head = $union_target))))

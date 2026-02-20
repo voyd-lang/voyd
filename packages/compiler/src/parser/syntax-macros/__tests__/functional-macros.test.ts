@@ -170,6 +170,39 @@ type Keep = i32
     expect(plain).not.toContainEqual([]);
   });
 
+  test("supports empty_list for explicit empty macro collections", () => {
+    const code = `\
+macro emit_nothing()
+  let declarations = empty_list()
+  emit_many(declarations)
+emit_nothing()
+type Keep = i32
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain).toContainEqual(["type", ["=", "Keep", "i32"]]);
+    expect(plain).not.toContainEqual([]);
+  });
+
+  test("surfaces panic messages from functional macros", () => {
+    const ast = parseBase(`\
+macro fail()
+  panic("boom")
+fail()
+`);
+    const errors: string[] = [];
+
+    expandFunctionalMacros(ast, {
+      strictMacroSignatures: true,
+      onError: (error) => {
+        errors.push(error.message);
+      },
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("boom");
+  });
+
   test("does not implicitly splice top-level block expansions", () => {
     const code = `\
 macro wrap_decl()
