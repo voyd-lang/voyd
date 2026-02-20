@@ -131,7 +131,7 @@ describe(
       expect(normalized.children).toBeInstanceOf(Array);
     });
 
-    it("supports enum macro expansion and variant imports across modules", async () => {
+    it("supports generic enum macro expansion across modules", async () => {
       const module = await compileToBinaryenModule(
         fixturePath("enum-cross-module/main.voyd"),
       );

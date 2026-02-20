@@ -582,6 +582,53 @@ pub fn main() -> i32
     );
   });
 
+  it("constructs imported generic enum namespace variants without direct member imports", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}drinks.voyd`]: `
+pub obj Coffee<T> { size: T }
+pub obj Tea<T> { size: T }
+pub obj Water {}
+pub type Drink<T> = Coffee<T> | Tea<T> | Water
+
+pub fn make<T>(size: T) -> Drink<T>
+  Drink::Coffee<T> { size }
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::drinks::{ Drink, make }
+
+pub fn main() -> i32
+  let brewed: Drink<i32> = make(12)
+  let poured: Drink<i32> = Drink::Coffee<i32> { size: 8 }
+  match(brewed)
+    Drink::Coffee { size }:
+      match(poured)
+        Drink::Coffee { size: poured_size }:
+          size + poured_size
+        Drink::Tea:
+          0
+        Drink::Water:
+          0
+    Drink::Tea:
+      0
+    Drink::Water:
+      0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+    expect(diagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(
+      false,
+    );
+  });
+
   it("preserves outer generic args for namespaced type members", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
