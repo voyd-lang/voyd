@@ -8,11 +8,7 @@ import type {
   HirFunctionTypeExpr,
   HirVisibility,
 } from "../hir/index.js";
-import {
-  importTargetFor,
-  registerImportedTraitImplTemplates,
-  resolveImportedTypeExpr,
-} from "./imports.js";
+import { resolveImportedTypeExpr } from "./imports.js";
 import type { SourceSpan, SymbolId, TypeId, TypeParamId } from "../ids.js";
 import {
   type UnificationContext,
@@ -45,6 +41,7 @@ import {
 } from "./symbol-ref-utils.js";
 import { symbolRefEquals } from "./symbol-ref.js";
 import { emitDiagnostic } from "../../diagnostics/index.js";
+import { hydrateImportedTraitMetadataForNominal } from "./import-trait-impl-hydration.js";
 
 type UnifyWithBudgetOptions = Omit<UnificationContext, "stepBudget">;
 
@@ -2515,23 +2512,7 @@ const traitSatisfies = (
   const info = getObjectInfoForNominal(actualNominal, ctx, state);
   let impls = ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls;
   if (!impls || impls.length === 0) {
-    const actualNominalDesc = ctx.arena.get(actualNominal);
-    if (actualNominalDesc.kind === "nominal-object") {
-      const localOwner = localSymbolForSymbolRef(actualNominalDesc.owner, ctx);
-      if (typeof localOwner === "number") {
-        const target = importTargetFor(localOwner, ctx);
-        if (target) {
-          const dependency = ctx.dependencies.get(target.moduleId);
-          if (dependency) {
-            registerImportedTraitImplTemplates({
-              dependency,
-              dependencySymbol: target.symbol,
-              ctx,
-            });
-          }
-        }
-      }
-    }
+    hydrateImportedTraitMetadataForNominal({ nominal: actualNominal, ctx });
     impls = instantiateTraitImplsFor({
       nominal: actualNominal,
       ctx,
