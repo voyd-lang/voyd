@@ -22,6 +22,7 @@ import { createCanonicalSymbolRefResolver } from "./canonical-symbol-ref.js";
 import type { SymbolRef as TypingSymbolRef } from "./typing/symbol-ref.js";
 import {
   canonicalizeSymbolRef,
+  createImportTargetResolver,
   parseSymbolRefKey,
 } from "./typing/symbol-ref-utils.js";
 
@@ -430,38 +431,11 @@ const createTypingContextFactory = ({
     }
 
     const entrySymbolTable = getSymbolTable(entry);
-    const resolveImportTarget = (
-      ref: TypingSymbolRef,
-    ): TypingSymbolRef | undefined => {
-      const symbolTable = ref.moduleId === moduleId
-        ? entrySymbolTable
-        : dependencies.get(ref.moduleId)?.symbolTable;
-      if (!symbolTable) {
-        return undefined;
-      }
-      try {
-        const metadata = (symbolTable.getSymbol(ref.symbol).metadata ?? {}) as
-          | {
-              import?: {
-                moduleId?: unknown;
-                symbol?: unknown;
-              };
-            }
-          | undefined;
-        if (
-          typeof metadata?.import?.moduleId === "string" &&
-          typeof metadata.import.symbol === "number"
-        ) {
-          return {
-            moduleId: metadata.import.moduleId,
-            symbol: metadata.import.symbol,
-          };
-        }
-      } catch {
-        return undefined;
-      }
-      return undefined;
-    };
+    const resolveImportTarget = createImportTargetResolver({
+      moduleId,
+      symbolTable: entrySymbolTable,
+      dependencies,
+    });
 
     const { importsByLocal, importAliasesByModule } = createImportMaps(
       entry.binding.imports,
