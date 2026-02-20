@@ -1,14 +1,12 @@
 use std::array::Array
 use std::traits::sequence::Sequence
 use std::result::types::{ Result, Ok, Err }
-use std::string::type::StringSlice
 use std::test::assertions::all
 use std::traits::clone::{ Clone, Copy }
 use std::traits::collect::Collect
 use std::traits::convert::{ From, Into, TryFrom, TryInto }
 use std::traits::default::Default
 use std::traits::eq::Eq
-use std::traits::fmt::{ Debug, Display, Formatter }
 use std::traits::hash::{ Hash, Hasher }
 use std::traits::ord::{ Ord, Ordering, Less, Equal, Greater }
 
@@ -126,31 +124,6 @@ impl Hash<HashValue> for HashValue
     bytes.push(self.value)
     into.write(bytes: bytes)
 
-obj NoopFormatter {}
-
-impl Formatter for NoopFormatter
-  fn write_str(self, { s: StringSlice }) -> void
-    s.byte_len()
-    void
-
-  fn write_char(self, { c: i32 }) -> void
-    c
-    void
-
-obj ShowValue {
-  value: i32
-}
-
-impl Debug<ShowValue> for ShowValue
-  fn fmt_debug(self, { into: Formatter }) -> void
-    self.value
-    into.write_char(c: 68)
-
-impl Display<ShowValue> for ShowValue
-  fn fmt_display(self, { into: Formatter }) -> void
-    self.value
-    into.write_char(c: 80)
-
 test "trait contracts work for baseline std traits":
   let low = EqOrdValue { value: 1 }
   let high = EqOrdValue { value: 2 }
@@ -194,8 +167,4 @@ test "trait contracts work for baseline std traits":
   let hasher = NoopHasher {}
   HashValue { value: 8 }.hash(into: hasher)
   assert(hasher.finish(), eq: extend_i32_s(1))
-
-  let formatter = NoopFormatter {}
-  ShowValue { value: 1 }.fmt_debug(into: formatter)
-  ShowValue { value: 1 }.fmt_display(into: formatter)
   assert(true, eq: true)

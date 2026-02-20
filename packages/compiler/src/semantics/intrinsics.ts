@@ -47,6 +47,7 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ["__memory_load_u32", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__memory_store_u32", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__memory_copy", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__panic_trap", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__shift_l", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__shift_ru", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__bit_and", { intrinsicUsesSignature: false, access: "std-only" }],

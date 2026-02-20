@@ -4,6 +4,5 @@ pub self::ord::{ Ord, Ordering, Less, Equal, Greater }
 pub self::hash::{ Hash, Hasher }
 pub self::default::{ Default }
 pub self::clone::{ Clone, Copy }
-pub self::fmt::{ Debug, Display, Formatter }
 pub self::convert::{ From, Into, TryFrom, TryInto }
 pub self::collect::{ Collect }

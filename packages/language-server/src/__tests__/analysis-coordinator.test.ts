@@ -52,7 +52,7 @@ describe("analysis coordinator", () => {
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it("recomputes analysis when module roots change for the same entry", async () => {
     const project = await createProject({

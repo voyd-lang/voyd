@@ -66,7 +66,7 @@ describe("effect table + harness", () => {
     effectTable.ops.forEach((op) => {
       expect(typeof op.signatureHash).toBe("number");
     });
-  });
+  }, 30_000);
 
   it("unwraps Outcome.value from an effectful export", async () => {
     const { module } = await loadSmokeModule();

@@ -224,6 +224,93 @@ describe("buildModuleGraph", () => {
     expect(moduleIds).not.toContain("std::msgpack");
   });
 
+  it("auto-imports std::prelude::all for src modules when std::prelude exists", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "pub fn main() -> i32\n  1",
+      [`${stdRoot}${sep}prelude.voyd`]: "pub fn answer() -> i32\n  42",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining(["src::main", "std::prelude"]),
+    );
+  });
+
+  it("auto-imports std::prelude::all for inline src modules when std::prelude exists", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "mod nested\n  pub fn call() -> i32\n    answer()",
+      [`${stdRoot}${sep}prelude.voyd`]: "pub fn answer() -> i32\n  42",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const nested = graph.modules.get("src::main::nested");
+    expect(nested).toBeDefined();
+    const hasPreludeDependency = nested?.dependencies.some(
+      (dependency) =>
+        dependency.path.namespace === "std" &&
+        dependency.path.segments.length === 1 &&
+        dependency.path.segments[0] === "prelude"
+    );
+    expect(hasPreludeDependency).toBe(true);
+  });
+
+  it("supports #!no_prelude to suppress implicit std::prelude import", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "#!no_prelude\npub fn main() -> i32\n  1",
+      [`${stdRoot}${sep}prelude.voyd`]: "pub fn answer() -> i32\n  42",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const moduleIds = Array.from(graph.modules.keys());
+    expect(moduleIds).toEqual(expect.arrayContaining(["src::main"]));
+    expect(moduleIds).not.toContain("std::prelude");
+  });
+
+  it("does not auto-import std::prelude::all when std::prelude is imported explicitly", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]:
+        "use std::prelude::{ answer }\npub fn main() -> i32\n  answer()",
+      [`${stdRoot}${sep}prelude.voyd`]: "pub fn answer() -> i32\n  42",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const moduleIds = Array.from(graph.modules.keys());
+    expect(moduleIds).toEqual(expect.arrayContaining(["src::main", "std::prelude"]));
+    expect(moduleIds).not.toContain("std::prelude::all");
+  });
+
   it("loads std::pkg for src modules that rely on std root re-exports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
