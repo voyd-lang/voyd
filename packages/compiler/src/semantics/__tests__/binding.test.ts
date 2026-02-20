@@ -567,6 +567,37 @@ fn id<T: Animal>(value: T) -> T
     ).toBe(true);
   });
 
+  it("documents effect op and wrapper name collisions with BD0003 guidance", () => {
+    const source = [
+      "eff Env",
+      "  get(resume, key: i32) -> i32",
+      "fn get(key: i32) -> i32",
+      "  Env::get(key)",
+    ].join("\n");
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+    });
+
+    expect(
+      binding.diagnostics.some(
+        (diag) =>
+          diag.code === "BD0003" &&
+          diag.message.includes(
+            "effect operations and top-level functions share the same module scope",
+          ),
+      ),
+    ).toBe(true);
+  });
+
   it("rejects cross-package imports of package-visible exports", () => {
     const source = "use pkg::dep::Thing";
     const ast = parse(source, "main.voyd");

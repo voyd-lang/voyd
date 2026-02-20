@@ -281,6 +281,9 @@ export const diagnosticsRegistry: {
     message: (params) => {
       switch (params.kind) {
         case "non-function-conflict":
+          if (params.conflictKind === "effect-op") {
+            return `cannot overload ${params.name}; effect operations and top-level functions share the same module scope (BD0003). Move wrappers to a sibling module (for example std::env::ops + std::env) or rename one side`;
+          }
           return `cannot overload ${params.name}; ${params.conflictKind} with the same name already exists`;
         case "overload-name-collision":
           return `cannot declare ${params.name}; overloads with this name already exist in the current scope`;
