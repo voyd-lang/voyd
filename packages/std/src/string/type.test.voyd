@@ -45,6 +45,17 @@ test "string utf8 decode and encode":
   assert(value.equals("hi"), eq: true)
   assert(value.to_utf8().len(), eq: 2)
 
+  let ~ascii = Array<i32>::with_capacity(8)
+  ascii.push(48)
+  ascii.push(48)
+  ascii.push(102)
+  ascii.push(102)
+  ascii.push(49)
+  ascii.push(48)
+  let roundtrip = must_utf8(ascii)
+  assert(roundtrip.equals("00ff10"), eq: true)
+  assert(roundtrip.to_utf8().len(), eq: 6)
+
   match(from_utf8(bytes: [255]))
     Ok<String>:
       assert(false)

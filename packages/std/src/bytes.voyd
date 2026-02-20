@@ -1,0 +1,82 @@
+use std::array::Array
+use std::optional::types::all
+use std::subscript::Range
+
+/// A single byte value in the range `0..255`.
+pub type Byte = i32
+
+/// An immutable byte sequence view.
+pub obj Bytes {
+  storage: Array<Byte>
+}
+
+impl Bytes
+  /// Returns the number of bytes.
+  api fn len(self) -> i32
+    self.storage.len()
+
+  /// Returns true when this sequence is empty.
+  api fn is_empty(self) -> bool
+    self.storage.is_empty()
+
+  /// Returns the byte at `at`, or `None` when out of bounds.
+  api fn get(self, { at: i32 }) -> Option<Byte>
+    self.storage.get(at)
+
+  /// Returns the byte at `at`, trapping when out of bounds.
+  api fn at(self, { at: i32 }) -> Byte
+    self.storage.at(at: at)
+
+  /// Returns a byte slice for the provided range.
+  api fn slice(self, { range: Range }) -> Bytes
+    bytes_from_array(self.storage.slice(range: range))
+
+  /// Returns a copied array of bytes.
+  api fn to_array(self) -> Array<Byte>
+    self.storage.copied()
+
+/// A mutable, growable byte buffer.
+pub obj ByteBuffer {
+  storage: Array<Byte>
+}
+
+impl ByteBuffer
+  /// Creates an empty byte buffer.
+  api fn init() -> ByteBuffer
+    ByteBuffer { storage: Array<Byte>::init() }
+
+  /// Creates an empty byte buffer with at least `bytes` capacity.
+  api fn with_capacity({ bytes: i32 }) -> ByteBuffer
+    let capacity = if bytes > 0 then: bytes else: 0
+    ByteBuffer { storage: Array<Byte>::with_capacity(capacity) }
+
+  /// Returns the number of bytes in the buffer.
+  api fn len(self) -> i32
+    self.storage.len()
+
+  /// Returns true when this buffer is empty.
+  api fn is_empty(self) -> bool
+    self.storage.is_empty()
+
+  /// Returns total byte capacity.
+  api fn capacity(self) -> i32
+    self.storage.capacity()
+
+  /// Returns an immutable bytes snapshot.
+  api fn as_bytes(self) -> Bytes
+    bytes_from_array(self.storage.copied())
+
+  /// Appends one byte.
+  api fn push(~self, { value: Byte }) -> void
+    self.storage.push(value)
+
+  /// Appends all bytes from `bytes`.
+  api fn extend(~self, { bytes: Bytes }) -> void
+    self.storage.extend(bytes.to_array())
+
+  /// Removes all bytes.
+  api fn clear(~self) -> void
+    self.storage.clear()
+
+fn bytes_from_array(storage: Array<Byte>) -> Bytes
+  Bytes { storage: storage }

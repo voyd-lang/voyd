@@ -1,0 +1,15 @@
+use std::string::type::{ new_string }
+use std::test::assertions::all
+use std::result::types::Ok
+
+test "json parse currently reports not implemented":
+  match(parse(s: "{}".as_slice()))
+    Ok<JsonValue>:
+      assert(false)
+    Err<JsonError> { error }:
+      assert(error.message.equals("std::json::parse is specified but not implemented yet"), eq: true)
+
+test "json stringify APIs are available":
+  let null_value = JsonNull {}
+  assert(stringify(value: null_value).equals("std::json::stringify is specified but not implemented yet"), eq: true)
+  assert(stringify_pretty(value: null_value).equals("std::json::stringify is specified but not implemented yet"), eq: true)

@@ -1,23 +1,43 @@
 use std::array::Array
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::subscript::Range
 
 @effect(id: "std::random::Random")
 pub eff Random
   next_i64(tail) -> i64
+  fill_bytes(tail, len: i32) -> MsgPack
 
-pub fn fill_buffer(~buf: Array<i32>, len: i32): Random -> void
+pub fn next_i64(): Random -> i64
+  Random::next_i64()
+
+pub fn fill_bytes(~buf: Array<i32>, len: i32): Random -> void
   if len <= 0 then:
     return void
 
+  let payload = Random::fill_bytes(len)
+  let decoded = msgpack::unpack_array(payload)
+
   var index = 0
   while index < len do:
-    let next = wrap_i64(Random::next_i64())
-    buf.push(value: mod_i32(next, 256))
+    if index < decoded.len() then:
+      match(decoded.get(index))
+        Some<MsgPack> { value }:
+          buf.push(value: mod_i32(msgpack::unpack_i32(value), 256))
+        None:
+          let next = wrap_i64(next_i64())
+          buf.push(value: mod_i32(next, 256))
+    else:
+      let next = wrap_i64(next_i64())
+      buf.push(value: mod_i32(next, 256))
     index = index + 1
 
+pub fn fill_buffer(~buf: Array<i32>, len: i32): Random -> void
+  fill_bytes(buf, len)
+
 pub fn random_bool(): Random -> bool
-  let value = wrap_i64(Random::next_i64())
+  let value = wrap_i64(next_i64())
   mod_i32(value, 2) == 0
 
 pub fn random_int({ range: Range }): Random -> i32
@@ -28,7 +48,7 @@ pub fn random_int({ range: Range }): Random -> i32
     return start
 
   let span = end_exclusive - start_i64
-  let seed = Random::next_i64()
+  let seed = next_i64()
   let sample = start_i64 + mod_i64(seed, span)
   wrap_i64(sample)
 

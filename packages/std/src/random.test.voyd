@@ -1,4 +1,22 @@
+use std::msgpack::self as msgpack
 use std::test::assertions::all
+
+test "fill_bytes calls host op and fills via fallback":
+  let ~buf = Array<i32>::init()
+  let ~requested_lengths = Array<i32>::init()
+
+  try
+    fill_bytes(buf, 3)
+  Random::fill_bytes(tail, requested):
+    requested_lengths.push(requested)
+    tail(msgpack::make_null())
+  Random::next_i64(tail):
+    tail(i64_from_i32(1))
+
+  assert(optional_i32_or(requested_lengths.get(0), -1), eq: 3)
+  assert(optional_i32_or(buf.get(0), -1), eq: 1)
+  assert(optional_i32_or(buf.get(1), -1), eq: 1)
+  assert(optional_i32_or(buf.get(2), -1), eq: 1)
 
 test "random_int handles spans larger than i32":
   let value = random_int_from_seed({
@@ -27,7 +45,16 @@ test "random_int includes i32 max for inclusive upper bounds":
 fn random_int_from_seed({ seed: i64, range: Range }) -> i32
   try
     random_int(range: range)
+  Random::fill_bytes(tail, _len):
+    tail(msgpack::make_null())
   Random::next_i64(tail):
     tail(seed)
+
+fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
+  match(value)
+    Some<i32> { value: present }:
+      present
+    None:
+      fallback
 
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
