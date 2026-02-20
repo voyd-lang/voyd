@@ -18,6 +18,12 @@ const unsupportedReturnFixturePath = resolve(
   "effects-export-object-return-unsupported.voyd",
 );
 
+const sameNameFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-op-wrapper-same-name.voyd",
+);
+
 describe("host boundary payload compatibility", () => {
   it("supports API-to-DTO shim wrappers for effect payloads", async () => {
     const { module } = await compileEffectFixture({ entryPath: dtoShimFixturePath });
@@ -50,5 +56,24 @@ describe("host boundary payload compatibility", () => {
         diag.message.includes("unsupported type Box"),
     );
     expect(diagnostic).toBeDefined();
+  });
+
+  it("resolves same-name wrapper calls to functions instead of effect ops", async () => {
+    const { module } = await compileEffectFixture({ entryPath: sameNameFixturePath });
+    const parsed = parseEffectTable(module);
+    const op = parsed.ops.find((entry) => entry.label.endsWith("Env.get"));
+    if (!op) {
+      throw new Error("missing Env.get op entry");
+    }
+
+    const result = await runEffectfulExport<number>({
+      wasm: module,
+      entryName: "main_effectful",
+      handlers: {
+        [`${op.opIndex}`]: (_request, key: unknown) => (key as number) + 1,
+      },
+    });
+
+    expect(result.value).toBe(42);
   });
 });

@@ -1,0 +1,8 @@
+eff Env
+  get(resume, key: i32) -> i32
+
+pub fn get(key: i32): Env -> i32
+  Env::get(key)
+
+pub fn main(): Env -> i32
+  get(41)

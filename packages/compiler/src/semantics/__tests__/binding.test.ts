@@ -567,7 +567,7 @@ fn id<T: Animal>(value: T) -> T
     ).toBe(true);
   });
 
-  it("documents effect op and wrapper name collisions with BD0003 guidance", () => {
+  it("allows effect ops and wrapper functions to share names", () => {
     const source = [
       "eff Env",
       "  get(resume, key: i32) -> i32",
@@ -587,15 +587,9 @@ fn id<T: Animal>(value: T) -> T
       symbolTable,
     });
 
-    expect(
-      binding.diagnostics.some(
-        (diag) =>
-          diag.code === "BD0003" &&
-          diag.message.includes(
-            "effect operations and top-level functions share the same module scope",
-          ),
-      ),
-    ).toBe(true);
+    expect(binding.diagnostics.some((diag) => diag.code === "BD0003")).toBe(
+      false,
+    );
   });
 
   it("rejects cross-package imports of package-visible exports", () => {

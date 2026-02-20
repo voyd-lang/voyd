@@ -37,14 +37,12 @@ or collections), keep that API shape and convert at the effect boundary:
 
 This keeps host protocol compatibility isolated to a narrow boundary.
 
-## Naming Rule (`BD0003`)
+## Naming Rule
 
-Effect ops and top-level functions share the same module scope in the binder.
-Declaring both with the same name triggers `BD0003`.
+Effect ops and top-level wrapper functions may share the same name. Binder and
+value resolution treat these as distinct call paths:
 
-Use one of these patterns:
+- `Effect::op(...)` resolves to the effect operation.
+- `op(...)` resolves to the wrapper function in value position.
 
-1. Module split (preferred): declare effect ops in a sibling module (for
-   example `std::env::ops`) and keep ergonomic wrappers in `std::env`.
-2. Wrapper naming convention: when module split is not practical, give wrappers
-   a distinct suffix/prefix that cannot collide with op names.
+No wrapper renaming/module-split workaround is required.
