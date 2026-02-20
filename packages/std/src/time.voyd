@@ -2,6 +2,7 @@ use std::error::HostError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::result::types::all
+use std::string::type::new_string
 
 pub obj Duration {
   millis: i64
