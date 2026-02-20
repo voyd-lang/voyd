@@ -1324,17 +1324,7 @@ pub fn from_utf8({ bytes: Array<i32> }) -> Result<String, Utf8Error>
     if width <= 0 then:
       return Err<Utf8Error> { error: Utf8Error { code: 1 } }
     index = index + width
-  Ok<String> { value: String { bytes: source_bytes, byte_count: len } }
-
-fn from_utf8_legacy(bytes: Array<i32>): () -> Result<String, Utf8Error>
-  let source = bytes.raw_storage()
-  let len = bytes.len()
-  var index = 0
-  while index < len do:
-    if not is_byte(__array_get(source, index)) then:
-      return Err<Utf8Error> { error: Utf8Error { code: 1 } }
-    index = index + 1
-  Ok<String> { value: new_string(bytes.to_fixed_array()) }
+  Ok<String> { value: new_string(source_bytes.to_fixed_array()) }
 
 fn append_codepoint_mut(~bytes: Array<i32>, codepoint: i32) -> void
   if codepoint < 0 then:

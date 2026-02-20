@@ -1,0 +1,33 @@
+use std::optional::types::all
+use std::test::assertions::all
+
+fn option_i32_or(value: Option<i32>, fallback: i32) -> i32
+  match(value)
+    Some<i32> { value }:
+      value
+    None:
+      fallback
+
+test "deque push and pop from both ends":
+  let ~queue = Deque<i32>::init()
+  assert(queue.is_empty(), eq: true)
+
+  queue.push_back(value: 2)
+  queue.push_front(value: 1)
+  queue.push_back(value: 3)
+  assert(queue.len(), eq: 3)
+  assert(option_i32_or(queue.front(), -1), eq: 1)
+  assert(option_i32_or(queue.back(), -1), eq: 3)
+
+  assert(option_i32_or(queue.pop_front(), -1), eq: 1)
+  assert(option_i32_or(queue.pop_back(), -1), eq: 3)
+  assert(option_i32_or(queue.pop_back(), -1), eq: 2)
+  assert(queue.is_empty(), eq: true)
+
+test "deque clear empties storage":
+  let ~queue = Deque<i32>::init()
+  queue.push_back(value: 9)
+  queue.push_back(value: 10)
+  queue.clear()
+  assert(queue.len(), eq: 0)
+  assert(option_i32_or(queue.front(), -1), eq: -1)

@@ -1,0 +1,48 @@
+use std::array::Array
+use std::optional::types::Option
+
+/// A double-ended queue.
+pub obj Deque<T> {
+  storage: Array<T>
+}
+
+impl<T> Deque<T>
+  /// Creates an empty deque.
+  api fn init() -> Deque<T>
+    Deque<T> { storage: Array<T>::init() }
+
+  /// Returns the number of values.
+  api fn len(self) -> i32
+    self.storage.len()
+
+  /// Returns true when the deque is empty.
+  api fn is_empty(self) -> bool
+    self.storage.is_empty()
+
+  /// Pushes `value` to the front.
+  api fn push_front(~self, { value: T }) -> void
+    self.storage.insert(value, at: 0)
+
+  /// Pushes `value` to the back.
+  api fn push_back(~self, { value: T }) -> void
+    self.storage.push(value)
+
+  /// Pops and returns the front value.
+  api fn pop_front(~self) -> Option<T>
+    self.storage.remove(0)
+
+  /// Pops and returns the back value.
+  api fn pop_back(~self) -> Option<T>
+    self.storage.pop()
+
+  /// Returns the front value without removing it.
+  api fn front(self) -> Option<T>
+    self.storage.get(at: 0)
+
+  /// Returns the back value without removing it.
+  api fn back(self) -> Option<T>
+    self.storage.get(at: -1)
+
+  /// Removes all values.
+  api fn clear(~self) -> void
+    self.storage.clear()
