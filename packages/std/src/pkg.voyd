@@ -1,5 +1,8 @@
 pub self::optional
 pub self::result
+pub self::prelude
+pub self::error
+pub self::version
 pub self::enums
 pub self::string
 pub self::box

@@ -229,6 +229,10 @@ export const compileIntrinsicCall = ({
         LINEAR_MEMORY_INTERNAL
       );
     }
+    case "__panic_trap": {
+      assertArgCount(name, args, 0);
+      return ctx.mod.unreachable();
+    }
     case "__shift_l":
     case "__shift_ru": {
       assertArgCount(name, args, 2);

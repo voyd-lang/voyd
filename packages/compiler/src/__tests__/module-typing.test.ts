@@ -123,6 +123,50 @@ const analyzeModulesWithIsolatedInterners = ({
 };
 
 describe("module typing across imports", () => {
+  it("brings std::prelude::all symbols into scope implicitly", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: `
+pub fn main() -> i32
+  answer()
+`,
+      [`${stdRoot}${sep}prelude.voyd`]: "pub fn answer() -> i32\n  42",
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
+  it("suppresses implicit prelude imports with #!no_prelude", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: `
+#!no_prelude
+pub fn main() -> i32
+  answer()
+`,
+      [`${stdRoot}${sep}prelude.voyd`]: "pub fn answer() -> i32\n  42",
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const allDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(allDiagnostics.some((diag) => /answer/i.test(diag.message))).toBe(true);
+  });
+
   it("type-checks imported functions with their dependency signatures", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
