@@ -23,29 +23,37 @@ pub obj StringSlice {
 pub type CharSet = Array<i32>
 
 impl StringSlice
+  /// Returns the number of UTF-8 bytes.
   api fn byte_len(self) -> i32
     self.byte_count
 
+  /// Returns true when no values are stored.
   api fn is_empty(self) -> bool
     self.byte_count == 0
 
+  /// Returns an owned string copy.
   api fn to_string(self) -> String
     self.source.slice_bytes(self.start, self.byte_count)
 
 impl String
+  /// Creates an empty string.
   api fn init() -> String
     empty_string()
 
+  /// Creates an empty string with capacity for at least `_capacity` bytes.
   api fn with_capacity({ bytes _capacity: i32 }) -> String
     let capacity = if _capacity > 0 then: _capacity else: 0
     String { bytes: Array<i32>::with_capacity(capacity), byte_count: 0 }
 
+  /// Validates UTF-8 bytes and builds a string on success.
   api fn from_utf8({ bytes source: Array<i32> }) -> Result<String, Utf8Error>
     from_utf8(bytes: source)
 
+  /// Returns the number of UTF-8 bytes.
   api fn byte_len(self): () -> i32
     self.byte_count
 
+  /// Returns the number of Unicode scalar values.
   api fn rune_len(self): () -> i32
     var index = 0
     var count = 0
@@ -56,6 +64,7 @@ impl String
       index = index + read.width
     count
 
+  /// Returns the number of grapheme clusters.
   api fn grapheme_len(self) -> i32
     let source = self.raw_bytes()
     var index = 0
@@ -65,9 +74,11 @@ impl String
       count = count + 1
     count
 
+  /// Returns true when no values are stored.
   api fn is_empty(self) -> bool
     self.byte_count == 0
 
+  /// Returns a UTF-8 byte array copy.
   api fn to_utf8(self): () -> Array<i32>
     match(Array<i32>::from(self.raw_bytes()))
       Some<Array<i32>> { value }:
@@ -75,15 +86,19 @@ impl String
       None:
         Array<i32>::init()
 
+  /// Returns a non-owning slice view of the string.
   api fn as_slice(self): () -> StringSlice
     new_string_slice(self, 0, self.byte_count)
 
+  /// Returns the first valid string index.
   api fn start_index(self): () -> StringIndex
     make_string_index(0)
 
+  /// Returns the index immediately after the last byte.
   api fn end_index(self): () -> StringIndex
     make_string_index(self.byte_count)
 
+  /// Returns a subrange view or copy for the requested range.
   api fn slice(self, { range: Range }) -> StringSlice
     let source = self.raw_bytes()
     let start = clamp_index_to_rune_boundary(source, self.byte_count, normalize_range_start(range, self.byte_count))
@@ -97,17 +112,21 @@ impl String
       return new_string_slice(self, 0, 0)
     new_string_slice(self, start, end - start)
 
+  /// Moves a string index by rune steps.
   api fn index(self, { after cursor: StringIndex, by steps?: i32 }) -> Option<StringIndex>
     let delta = steps ?? 1
     advance_rune_index(self, cursor.to_i32(), delta)
 
+  /// Moves a string index by grapheme clusters.
   api fn grapheme_index(self, { after cursor: StringIndex, by steps?: i32 }) -> Option<StringIndex>
     let delta = steps ?? 1
     advance_grapheme_index(self, cursor.to_i32(), delta)
 
+  /// Returns an iterator over grapheme slices.
   api fn graphemes(self) -> StringGraphemeSequence
     StringGraphemeSequence { source: self }
 
+  /// Returns the byte at the requested index, or `None` when the index is out of bounds.
   api fn byte_at(self, { at index: i32 }) -> Option<i32>
     if index < 0 then:
       return None {}
@@ -117,9 +136,11 @@ impl String
       None:
         None {}
 
+  /// Returns the underlying UTF-8 byte storage.
   api fn raw_bytes(self): () -> FixedArray<i32>
     self.bytes.raw_storage()
 
+  /// Returns true when both strings have identical bytes.
   api fn equals(self, other: String): () -> bool
     if self.byte_count != other.byte_count then:
       return false
@@ -135,9 +156,11 @@ impl String
       index = index + 1
     true
 
+  /// Compares two values for equality.
   api fn '=='(self, other: String) -> bool
     self.equals(other)
 
+  /// Returns a 32-bit hash of the string contents.
   api fn hash_i32(self): () -> i32
     let source = self.bytes.raw_storage()
     var index = 0
@@ -147,6 +170,7 @@ impl String
       index = index + 1
     hash
 
+  /// Returns the rune at the requested rune index.
   api fn rune_at(self, { index: i32 }) -> Option<i32>
     if index < 0 then:
       return None {}
@@ -162,6 +186,7 @@ impl String
       byte_index = byte_index + read.width
     None {}
 
+  /// Returns a substring using byte offsets.
   api fn slice_bytes(self, start: i32, len: i32): () -> String
     if len <= 0 then:
       return empty_string()
@@ -186,6 +211,7 @@ impl String
     })
     new_string(storage)
 
+  /// Returns a substring using rune offsets.
   api fn slice_runes(self, start: i32, len: i32): () -> String
     if len <= 0 then:
       return empty_string()
@@ -226,6 +252,7 @@ impl String
     })
     new_string(storage)
 
+  /// Returns the index of the first matching rune.
   api fn find_rune(self, { rune: i32, from?: StringIndex }) -> Option<StringIndex>
     if rune < 0 then:
       return None {}
@@ -248,14 +275,17 @@ impl String
       cursor = cursor + read.width
     None {}
 
+  /// Returns true when the value begins with the provided prefix.
   api fn starts_with(self, { prefix: StringSlice }) -> bool
     if prefix.byte_len() > self.byte_count then:
       return false
     bytes_match_slice_at(self.raw_bytes(), prefix, 0)
 
+  /// Returns true when the value begins with the provided prefix.
   api fn starts_with(self, { prefix: String }) -> bool
     self.starts_with(prefix: prefix.as_slice())
 
+  /// Returns true when the value ends with the provided suffix.
   api fn ends_with(self, { suffix: StringSlice }) -> bool
     let suffix_len = suffix.byte_len()
     if suffix_len > self.byte_count then:
@@ -263,9 +293,11 @@ impl String
     let start = self.byte_count - suffix_len
     bytes_match_slice_at(self.raw_bytes(), suffix, start)
 
+  /// Returns true when the value ends with the provided suffix.
   api fn ends_with(self, { suffix: String }) -> bool
     self.ends_with(suffix: suffix.as_slice())
 
+  /// Returns true when a matching value exists.
   api fn contains(self, { substring: StringSlice }) -> bool
     match(self.find(substring: substring))
       Some<StringIndex>:
@@ -273,9 +305,11 @@ impl String
       None:
         false
 
+  /// Returns true when a matching value exists.
   api fn contains(self, { substring: String }) -> bool
     self.contains(substring: substring.as_slice())
 
+  /// Returns true when a matching value exists.
   api fn contains(self, { where pred: (rune: i32) -> bool }) -> bool
     let source = self.raw_bytes()
     var index = 0
@@ -286,6 +320,7 @@ impl String
       index = index + read.width
     false
 
+  /// Returns the first value that satisfies the predicate.
   api fn find(self, { substring: StringSlice, from?: StringIndex }) -> Option<StringIndex>
     let start = from ?? self.start_index()
     let start_value = start.to_i32()
@@ -296,9 +331,11 @@ impl String
       return None {}
     Some<StringIndex> { value: make_string_index(match_index) }
 
+  /// Returns the first value that satisfies the predicate.
   api fn find(self, { substring: String, from?: StringIndex }) -> Option<StringIndex>
     self.find(substring: substring.as_slice(), from: from)
 
+  /// Returns the last match of a substring before the optional limit.
   api fn rfind(self, { substring: StringSlice, to?: StringIndex }) -> Option<StringIndex>
     let end = to ?? self.end_index()
     let end_value = end.to_i32()
@@ -309,9 +346,11 @@ impl String
       return None {}
     Some<StringIndex> { value: make_string_index(match_index) }
 
+  /// Returns the last match of a substring before the optional limit.
   api fn rfind(self, { substring: String, to?: StringIndex }) -> Option<StringIndex>
     self.rfind(substring: substring.as_slice(), to: to)
 
+  /// Returns the start and end byte range of the first substring match.
   api fn find_range(self, { substring: StringSlice, from?: StringIndex }) -> Option<Range>
     let start = from ?? self.start_index()
     let start_value = start.to_i32()
@@ -330,9 +369,11 @@ impl String
       }
     }
 
+  /// Returns the start and end byte range of the first substring match.
   api fn find_range(self, { substring: String, from?: StringIndex }) -> Option<Range>
     self.find_range(substring: substring.as_slice(), from: from)
 
+  /// Splits at the first matching separator.
   api fn split_once(self, { on separator: i32 }): () -> Option<(String, String)>
     let match_index = self.find_rune(rune: separator)
     var separator_index = 0
@@ -349,18 +390,21 @@ impl String
     let right = self.slice_bytes(right_start, self.byte_count - right_start)
     Some { value: (left, right) }
 
+  /// Splits a string by a delimiter or predicate.
   api fn split(
     self,
     { on separator: i32, max_splits?: i32, keep_empty?: bool }
   ) -> Array<StringSlice>
     self.split(where: (r: i32) -> bool => r == separator, max_splits: max_splits, keep_empty: keep_empty)
 
+  /// Splits a string by a delimiter or predicate.
   api fn split(
     self,
     { on separator: StringSlice, max_splits?: i32, keep_empty?: bool }
   ) -> Array<StringSlice>
     split_on_substring(self, separator, max_splits: max_splits, keep_empty: keep_empty)
 
+  /// Splits a string by a delimiter or predicate.
   api fn split(
     self,
     { on separator: String, max_splits?: i32, keep_empty?: bool }
@@ -372,6 +416,7 @@ impl String
       keep_empty: keep_empty
     )
 
+  /// Splits a string by a delimiter or predicate.
   api fn split(
     self,
     { where pred: (rune: i32) -> bool, max_splits?: i32, keep_empty?: bool }
@@ -399,6 +444,7 @@ impl String
       parts.push(new_string_slice(self, start, tail_len))
     parts
 
+  /// Splits a string slice into lines.
   api fn lines(self, { keep_ends?: bool }) -> Array<StringSlice>
     let include_ends = keep_ends ?? false
     let source = self.raw_bytes()
@@ -419,6 +465,7 @@ impl String
       parts.push(new_string_slice(self, 0, 0))
     parts
 
+  /// Splits the text into whitespace-delimited words.
   api fn words(self) -> Array<StringSlice>
     let source = self.raw_bytes()
     let ~parts = Array<StringSlice>::with_capacity(4)
@@ -439,9 +486,11 @@ impl String
       parts.push(new_string_slice(self, start, self.byte_count - start))
     parts
 
+  /// Returns a trimmed copy.
   api fn trimmed(self): () -> String
     self.trimmed(chars: whitespace_charset())
 
+  /// Returns a trimmed copy.
   api fn trimmed(self, { chars: CharSet }) -> String
     if self.byte_count == 0 then:
       return self
@@ -467,16 +516,19 @@ impl String
 
     self.slice_bytes(start, end - start)
 
+  /// Trims leading and trailing characters in place.
   api fn trim(~self) -> void
     let next = self.trimmed()
     self.bytes = next.bytes
     self.byte_count = next.byte_count
 
+  /// Trims leading and trailing characters in place.
   api fn trim(~self, { chars: CharSet }) -> void
     let next = self.trimmed(chars: chars)
     self.bytes = next.bytes
     self.byte_count = next.byte_count
 
+  /// Returns a lowercase ASCII copy of this string.
   api fn lowered(self): () -> String
     if self.byte_count == 0 then:
       return self
@@ -489,11 +541,13 @@ impl String
       index = index + 1
     new_string(out)
 
+  /// Converts this string in place to lowercase ASCII characters.
   api fn lower(~self) -> void
     let next = self.lowered()
     self.bytes = next.bytes
     self.byte_count = next.byte_count
 
+  /// Returns an uppercase ASCII copy of this string.
   api fn uppered(self): () -> String
     if self.byte_count == 0 then:
       return self
@@ -506,11 +560,13 @@ impl String
       index = index + 1
     new_string(out)
 
+  /// Converts this string in place to uppercase ASCII characters.
   api fn upper(~self) -> void
     let next = self.uppered()
     self.bytes = next.bytes
     self.byte_count = next.byte_count
 
+  /// Returns a new string with replacements applied.
   api fn replaced(
     self,
     { old: String, with replacement: String, max_replacements?: i32 }
@@ -543,6 +599,7 @@ impl String
         index = index + 1
     new_string(out.to_fixed_array())
 
+  /// Replaces matching content with new content.
   api fn replace(
     ~self,
     { old: String, with replacement: String, max_replacements?: i32 }
@@ -551,6 +608,7 @@ impl String
     self.bytes = next.bytes
     self.byte_count = next.byte_count
 
+  /// Returns a new string repeated `count` times.
   api fn repeat(self, { count: i32 }) -> String
     if count <= 0 then:
       return empty_string()
@@ -566,6 +624,7 @@ impl String
       times = times + 1
     new_string(out.to_fixed_array())
 
+  /// Returns a copy padded on the left to the requested width.
   api fn pad_left(self, { width: i32, with?: i32 }) -> String
     let pad_rune = with ?? 32
     let needed = width - self.rune_len()
@@ -580,6 +639,7 @@ impl String
     append_bytes(bytes, self.raw_bytes(), self.byte_count)
     new_string(bytes.to_fixed_array())
 
+  /// Returns a copy padded on the right to the requested width.
   api fn pad_right(self, { width: i32, with?: i32 }) -> String
     let pad_rune = with ?? 32
     let needed = width - self.rune_len()
@@ -594,6 +654,7 @@ impl String
       index = index + 1
     new_string(bytes.to_fixed_array())
 
+  /// Parses this string as an integer with optional radix.
   api fn parse_int(self, { radix?: i32 }): () -> Result<i32, ParseIntError>
     let base = match(radix)
       Some<i32> { value }:
@@ -651,6 +712,7 @@ impl String
 
     Ok<i32> { value }
 
+  /// Parses this string as a floating-point number.
   api fn parse_float(self): () -> Result<f64, ParseFloatError>
     if self.byte_count == 0 then:
       return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
@@ -732,14 +794,18 @@ impl String
     let pow = pow10_i32(exponent_sign * exponent)
     Ok<f64> { value: sign * base * pow }
 
+  /// Returns a debug-friendly escaped string representation.
   api fn to_debug(self) -> String
     build_escaped(self, false)
 
+  /// Returns a source-like escaped string representation.
   api fn to_repr(self) -> String
     build_escaped(self, true)
 
 obj Utf8Read {
+  /// Unicode scalar value for this grapheme.
   api codepoint: i32,
+  /// Display width for this grapheme.
   api width: i32
 }
 
@@ -759,6 +825,7 @@ obj StringGraphemeIterator {
 }
 
 impl Sequence<i32> for String
+  /// Returns an iterator over values.
   api fn iter(self) -> Iterator<i32>
     StringIterator {
       source: self.raw_bytes(),
@@ -767,6 +834,7 @@ impl Sequence<i32> for String
     }
 
 impl Iterator<i32> for StringIterator
+  /// Returns the next item from the iterator.
   api fn next(~self) -> Option<i32>
     if self.index >= self.byte_count then:
       return None {}
@@ -775,10 +843,12 @@ impl Iterator<i32> for StringIterator
     Some<i32> { value: read.codepoint }
 
 impl Sequence<StringSlice> for StringGraphemeSequence
+  /// Returns an iterator over values.
   api fn iter(self) -> Iterator<StringSlice>
     StringGraphemeIterator { source: self.source, index: 0 }
 
 impl Iterator<StringSlice> for StringGraphemeIterator
+  /// Returns the next item from the iterator.
   api fn next(~self) -> Option<StringSlice>
     if self.index >= self.source.byte_len() then:
       return None {}
@@ -1314,6 +1384,7 @@ fn append_bytes(~out: Array<i32>, source: FixedArray<i32>, count: i32) -> void
     out.push(__array_get(source, index))
     index = index + 1
 
+/// Validates UTF-8 bytes and builds a string on success.
 pub fn from_utf8({ bytes: Array<i32> }) -> Result<String, Utf8Error>
   let source_bytes = bytes
   let source = source_bytes.raw_storage()
@@ -1353,6 +1424,7 @@ fn append_codepoint_mut(~bytes: Array<i32>, codepoint: i32) -> void
     return void
   append_replacement_mut(bytes)
 
+/// Builds a string from owned UTF-8 byte storage without validation.
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   let input_length = __array_len(from_bytes)
   let ~bytes = Array<i32>::with_capacity(input_length)

@@ -3,8 +3,10 @@ pub obj StringIndex {
 }
 
 impl StringIndex
+  /// Returns the raw integer value of this index.
   api fn to_i32(self) -> i32
     self.value
 
+/// Creates a string index from a byte offset.
 pub fn make_string_index(value: i32) -> StringIndex
   StringIndex { value: value }

@@ -9,15 +9,19 @@ pub obj Duration {
 }
 
 impl Duration
+  /// Constructs a duration from milliseconds.
   api fn from_millis({ ms: i64 }) -> Duration
     Duration { millis: ms }
 
+  /// Constructs a duration from seconds.
   api fn from_secs({ s: i64 }) -> Duration
     Duration { millis: s * extend_i32_s(1000) }
 
+  /// Returns the duration in milliseconds.
   api fn as_millis(self) -> i64
     self.millis
 
+  /// Returns the duration in seconds.
   api fn as_secs(self) -> i64
     self.millis / extend_i32_s(1000)
 
@@ -26,9 +30,11 @@ pub obj Instant {
 }
 
 impl Instant
+  /// Captures the current time value.
   api fn now(): Time -> Instant
     Instant { monotonic_millis: Time::monotonic_now_millis() }
 
+  /// Returns the duration since this instant was captured.
   api fn elapsed(self): Time -> Duration
     let now = Time::monotonic_now_millis()
     Duration::from_millis(ms: now - self.monotonic_millis)
@@ -38,9 +44,11 @@ pub obj SystemTime {
 }
 
 impl SystemTime
+  /// Captures the current time value.
   api fn now(): Time -> SystemTime
     SystemTime { unix_millis_value: Time::system_now_millis() }
 
+  /// Returns milliseconds since the Unix epoch.
   api fn unix_millis(self) -> i64
     self.unix_millis_value
 
@@ -50,9 +58,11 @@ pub eff Time
   system_now_millis(tail) -> i64
   sleep_millis(tail, ms: i64) -> MsgPack
 
+/// Suspends execution for the provided millisecond count.
 pub fn sleep_millis({ ms: i64 }): Time -> Result<Unit, HostError>
   decode_host_void_result(Time::sleep_millis(ms))
 
+/// Suspends execution for the provided duration.
 pub fn sleep({ duration: Duration }): Time -> Result<Unit, HostError>
   sleep_millis(ms: duration.as_millis())
 

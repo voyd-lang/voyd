@@ -1,26 +1,35 @@
 @intrinsic(name: "__memory_size")
+/// Returns the current WebAssembly memory size in pages.
 pub fn size(): () -> i32 __memory_size()
 
 @intrinsic(name: "__memory_grow")
+/// Grows WebAssembly linear memory by page count and returns the previous size.
 pub fn grow(pages: i32): () -> i32 __memory_grow(pages)
 
 @intrinsic(name: "__memory_load_u8")
+/// Reads an unsigned 8-bit value from linear memory.
 pub fn load_u8(ptr: i32): () -> i32 __memory_load_u8(ptr)
 
 @intrinsic(name: "__memory_store_u8")
+/// Writes an unsigned 8-bit value to linear memory.
 pub fn store_u8(ptr: i32, value: i32): () -> void __memory_store_u8(ptr, value)
 
 @intrinsic(name: "__memory_load_u16")
+/// Reads an unsigned 16-bit value from linear memory.
 pub fn load_u16(ptr: i32): () -> i32 __memory_load_u16(ptr)
 
 @intrinsic(name: "__memory_store_u16")
+/// Writes an unsigned 16-bit value to linear memory.
 pub fn store_u16(ptr: i32, value: i32): () -> void __memory_store_u16(ptr, value)
 
 @intrinsic(name: "__memory_load_u32")
+/// Reads an unsigned 32-bit value from linear memory.
 pub fn load_u32(ptr: i32): () -> i32 __memory_load_u32(ptr)
 
 @intrinsic(name: "__memory_store_u32")
+/// Writes an unsigned 32-bit value to linear memory.
 pub fn store_u32(ptr: i32, value: i32): () -> void __memory_store_u32(ptr, value)
 
 @intrinsic(name: "__memory_copy")
+/// Copies `len` bytes from `src` to `dest` in linear memory.
 pub fn copy(dest: i32, src: i32, len: i32): () -> void __memory_copy(dest, src, len)

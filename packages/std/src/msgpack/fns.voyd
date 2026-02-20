@@ -27,11 +27,13 @@ obj Decoder {
   ok: bool
 }
 
+/// Encodes a MessagePack value into a memory region and returns bytes written or `-1` on failure.
 pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
   let ~encoder = Encoder(ptr, len)
   encoder.encode_any(value)
   if encoder.ok then: encoder.pos else: -1
 
+/// Decodes a MessagePack value from a memory region.
 pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
   let ~decoder = Decoder(ptr, len)
   let value = decoder.decode_any()
@@ -49,33 +51,43 @@ fn empty_map(): () -> Dict<String, MsgPack>
 fn empty_text(): () -> String
   new_string(new_fixed_array<i32>(0))
 
+/// Returns a MessagePack null value.
 pub fn make_null(): () -> MsgPack
   Null {}
 
+/// Wraps a 32-bit integer as a MessagePack value.
 pub fn make_i32(value: i32): () -> MsgPack
   I32 { value }
 
+/// Wraps a 64-bit integer as a MessagePack value.
 pub fn make_i64(value: i64): () -> MsgPack
   I64 { value }
 
+/// Wraps a 32-bit float as a MessagePack value.
 pub fn make_f32(value: f32): () -> MsgPack
   F32 { value }
 
+/// Wraps a boolean as a MessagePack value.
 pub fn make_bool(value: bool): () -> MsgPack
   Bool { value }
 
+/// Wraps a string as a MessagePack value.
 pub fn make_string(value: String): () -> MsgPack
   value
 
+/// Wraps binary data as a MessagePack value.
 pub fn make_binary(value: Binary): () -> MsgPack
   value
 
+/// Wraps an array as a MessagePack value.
 pub fn make_array(value: Array<MsgPack>): () -> MsgPack
   value
 
+/// Wraps a string-keyed dictionary as a MessagePack map value.
 pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
   MsgPackMap { entries: value.entries() }
 
+/// Extracts a 32-bit integer from a MessagePack value.
 pub fn unpack_i32(value: MsgPack): () -> i32
   value.match(decoded)
     I32:
@@ -85,6 +97,7 @@ pub fn unpack_i32(value: MsgPack): () -> i32
     else:
       0
 
+/// Extracts a 64-bit integer from a MessagePack value.
 pub fn unpack_i64(value: MsgPack): () -> i64
   value.match(decoded)
     I64:
@@ -94,6 +107,7 @@ pub fn unpack_i64(value: MsgPack): () -> i64
     else:
       extend_i32_s(0)
 
+/// Extracts a 32-bit float from a MessagePack value.
 pub fn unpack_f32(value: MsgPack): () -> f32
   value.match(decoded)
     F32:
@@ -103,6 +117,7 @@ pub fn unpack_f32(value: MsgPack): () -> f32
     else:
       reinterpret_i32_to_f32(0)
 
+/// Extracts a 64-bit float from a MessagePack value.
 pub fn unpack_f64(value: MsgPack): () -> f64
   value.match(decoded)
     F64:
@@ -112,6 +127,7 @@ pub fn unpack_f64(value: MsgPack): () -> f64
     else:
       0.0
 
+/// Extracts a boolean from a MessagePack value.
 pub fn unpack_bool(value: MsgPack): () -> bool
   value.match(decoded)
     Bool:
@@ -119,6 +135,7 @@ pub fn unpack_bool(value: MsgPack): () -> bool
     else:
       false
 
+/// Extracts a string from a MessagePack value.
 pub fn unpack_string(value: MsgPack): () -> String
   value.match(decoded)
     String:
@@ -126,6 +143,7 @@ pub fn unpack_string(value: MsgPack): () -> String
     else:
       empty_text()
 
+/// Extracts binary data from a MessagePack value.
 pub fn unpack_binary(value: MsgPack): () -> Binary
   value.match(boxed)
     Binary:
@@ -133,6 +151,7 @@ pub fn unpack_binary(value: MsgPack): () -> Binary
     else:
       empty_binary()
 
+/// Extracts an array from a MessagePack value.
 pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
   value.match(boxed)
     Array<MsgPack>:
@@ -140,6 +159,7 @@ pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
     else:
       empty_array()
 
+/// Extracts a string-keyed map from a MessagePack value.
 pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
   value.match(boxed)
     MsgPackMap:
@@ -158,6 +178,7 @@ pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
       empty_map()
 
 impl Encoder
+  /// Initializes a codec cursor over the provided memory region.
   pub fn init(ptr: i32, len: i32)
     Encoder { ptr: ptr, pos: 0, len: len, ok: true }
 
@@ -344,6 +365,7 @@ impl Encoder
         self.encode_map_entries(decoded.entries)
 
 impl Decoder
+  /// Initializes a codec cursor over the provided memory region.
   pub fn init(ptr: i32, len: i32)
     Decoder { ptr: ptr, pos: 0, end: ptr + len, ok: true }
 

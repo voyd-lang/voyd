@@ -17,17 +17,21 @@ pub obj ArrayPop<T> {
 }
 
 impl<T> Array<T>
+  /// Creates an empty array.
   api fn init() -> Array<T>
     Array<T> { storage: make_storage<T>(4), count: 0, owners: new_array_owners() }
 
+  /// Creates an empty array with capacity for at least `size` elements.
   api fn with_capacity(size: i32) -> Array<T>
     let capacity = if size > 0 then: size else: 0
     Array<T> { storage: make_storage<T>(capacity), count: 0, owners: new_array_owners() }
 
+  /// Builds a value from the provided source.
   api fn from(source: FixedArray<T>) -> Optional<Array<T>>
     new_array<T>({ from: source })
 
   // Produces a shallow copy; writes clone storage before mutation.
+  /// Returns a shallow copy of the array.
   api fn copied(self, add_capacity?: i32) -> Array<T>
     let additional = add_capacity?.max(0) ?? 0
     let required = self.count + additional
@@ -47,41 +51,51 @@ impl<T> Array<T>
     owners.retain()
     Array<T> { storage: self.storage, count: self.count, owners: self.owners }
 
+  /// Returns the number of stored elements.
   api fn len(self) -> i32
     self.count
 
+  /// Returns how many elements can be stored before reallocation is required.
   api fn capacity(self) -> i32
     __array_len(self.storage)
 
+  /// Returns true when no values are stored.
   api fn is_empty(self) -> bool
     self.count == 0
 
+  /// Returns the first element, or `None` when empty.
   api fn first(self) -> Optional<T>
     self.get(0)
 
+  /// Returns the last element, or `None` when empty.
   api fn last(self) -> Optional<T>
     self.get(-1)
 
+  /// Returns the element at `index`, or `None` when out of bounds.
   api fn get(self, { at index: i32 }) -> Option<T>
     self.get(index)
 
+  /// Returns the element at `index`, or `None` when out of bounds.
   api fn get(self, index: i32) -> Optional<T>
     let computed_index = compute_index(index, self.count)
     if computed_index < 0 or computed_index >= self.count:
       return none<T>()
     some(__array_get(self.storage, computed_index))
 
+  /// Returns the value at the requested index and traps when the index is out of bounds.
   api fn at(self, { at index: i32 }) -> T
     let computed_index = compute_index(index, self.count)
     if computed_index < 0 or computed_index >= self.count then:
       return trap_out_of_bounds(self.storage)
     __array_get(self.storage, computed_index)
 
+  /// Returns a subrange view or copy for the requested range.
   api fn slice(self, { range: Range }) -> Array<T>
     let start = normalize_range_start(range, self.count)
     let end = normalize_range_end_exclusive(range, self.count)
     self.slice(from: start, to: end)
 
+  /// Returns a subrange view or copy for the requested range.
   api fn slice(self, { from start: i32, to end: i32 }) -> Array<T>
     let computed_start = clamp_slice_index(start, self.count)
     let computed_end = clamp_slice_index(end, self.count)
@@ -98,6 +112,7 @@ impl<T> Array<T>
     })
     Array<T> { storage: next_raw, count: next_count, owners: new_array_owners() }
 
+  /// Applies a transform to each element and returns a new array.
   api fn map<O>(self, f: (v: T) -> O) -> Array<O>
     if self.count == 0:
       return Array<O>::with_capacity(0)
@@ -111,9 +126,11 @@ impl<T> Array<T>
 
     Array<O> { storage: next_raw, count: self.count, owners: new_array_owners() }
 
+  /// Applies a transform to each element and returns a new array.
   api fn map<O>(self, { map f: (value: T) -> O }) -> Array<O>
     self.map(f)
 
+  /// Returns a collection containing only values that satisfy the predicate.
   api fn filter(self, pred: (v: T) -> bool) -> Array<T>
     let initial_capacity = if self.count > 0 then: self.count else: 0
     let ~out = Array<T>::with_capacity(initial_capacity)
@@ -125,15 +142,18 @@ impl<T> Array<T>
       index = index + 1
     out
 
+  /// Returns a collection containing only values that satisfy the predicate.
   api fn filter(self, { where pred: (value: T) -> bool }) -> Array<T>
     self.filter(pred)
 
+  /// Invokes a callback for each element.
   api fn each(self, { do f: (value: T) -> void }) -> void
     var index = 0
     while index < self.count do:
       f(__array_get(self.storage, index))
       index = index + 1
 
+  /// Maps each element and flattens the mapped sequences into one array.
   api fn flat_map<O>(self, f: (v: T) -> Array<O>) -> Array<O>
     let ~out = Array<O>::with_capacity(0)
     var index = 0
@@ -142,6 +162,7 @@ impl<T> Array<T>
       index = index + 1
     out
 
+  /// Maps each element and flattens the mapped sequences into one array.
   api fn flat_map<O>(self, { map f: (value: T) -> Sequence<O> }) -> Array<O>
     let ~out = Array<O>::with_capacity(0)
     var index = 0
@@ -156,6 +177,7 @@ impl<T> Array<T>
       index = index + 1
     out
 
+  /// Reduces values to a single accumulator value.
   api fn reduce<O>(self, initial: O, { step: (acc: O, v: T) -> O }) -> O
     var acc = initial
     var index = 0
@@ -165,9 +187,11 @@ impl<T> Array<T>
       index = index + 1
     acc
 
+  /// Reduces values to a single accumulator value.
   api fn reduce<O>(self, { initial: O, combine: (acc: O, value: T) -> O }) -> O
     self.reduce(initial, step: combine)
 
+  /// Returns the first value that satisfies the predicate.
   api fn find(self, pred: (v: T) -> bool) -> Optional<T>
     var index = 0
     while index < self.count:
@@ -177,9 +201,11 @@ impl<T> Array<T>
       index = index + 1
     None {}
 
+  /// Returns the first value that satisfies the predicate.
   api fn find(self, { where pred: (value: T) -> bool }) -> Option<T>
     self.find(pred)
 
+  /// Returns true when at least one element matches the predicate.
   api fn any(self, pred: (v: T) -> bool) -> bool
     var index = 0
     while index < self.count:
@@ -188,9 +214,11 @@ impl<T> Array<T>
       index = index + 1
     false
 
+  /// Returns true when at least one element matches the predicate.
   api fn any(self, { where pred: (value: T) -> bool }) -> bool
     self.any(pred)
 
+  /// Returns true only when every element matches the predicate.
   api fn all(self, pred: (v: T) -> bool) -> bool
     var index = 0
     while index < self.count:
@@ -199,6 +227,7 @@ impl<T> Array<T>
       index = index + 1
     true
 
+  /// Returns true only when every element matches the predicate.
   api fn all(self, { where pred: (value: T) -> bool }) -> bool
     self.all(pred)
 
@@ -218,54 +247,66 @@ impl<T> Array<T>
       index = index + 1
     -1
 
+  /// Returns true when a matching value exists.
   api fn contains(self, value: T) -> bool
     self.find_index_raw(value) >= 0
 
+  /// Returns true when a matching value exists.
   api fn contains(self, { value: T }) -> bool
     self.contains(value)
 
+  /// Returns true when a matching value exists.
   api fn contains(self, { where pred: (value: T) -> bool }) -> bool
     self.any(pred)
 
+  /// Returns the index of the first matching value.
   api fn find_index(self, { value: T }) -> Option<i32>
     let index = self.find_index_raw(value)
     if index < 0 then:
       return None {}
     Some<i32> { value: index }
 
+  /// Returns the index of the first matching value.
   api fn find_index(self, value: T) -> i32
     self.find_index_raw(value)
 
+  /// Returns the index of the first matching value.
   api fn find_index(self, { where pred: (value: T) -> bool }) -> Option<i32>
     let index = self.find_index_where_raw(pred)
     if index < 0 then:
       return None {}
     Some<i32> { value: index }
 
+  /// Returns the index of the first value that satisfies the predicate, or `-1` when absent.
   api fn find_index_where(self, pred: (v: T) -> bool) -> i32
     self.find_index_where_raw(pred)
 
+  /// Returns a sorted copy.
   api fn sorted(self, compare: (left: T, right: T) -> i32) -> Array<T>
     let ~copy = self.copied()
     copy.sort(compare)
     copy
 
+  /// Returns a sorted copy.
   api fn sorted(self) -> Array<T>
     self.sorted(
       (left: T, right: T) -> i32 =>
         default_compare_i32(left, right)
     )
 
+  /// Returns a sorted copy.
   api fn sorted(self, { by compare: (left: T, right: T) -> Ordering }) -> Array<T>
     let ~copy = self.copied()
     copy.sort(by: compare)
     copy
 
+  /// Returns a reversed copy.
   api fn reversed(self) -> Array<T>
     let ~copy = self.copied()
     copy.reverse()
     copy
 
+  /// Copies values into a fixed-size array.
   api fn to_fixed_array(self) -> FixedArray<T>
     let next_raw = new_fixed_array<T>(self.count)
     __array_copy(next_raw, {
@@ -276,9 +317,11 @@ impl<T> Array<T>
     })
     next_raw
 
+  /// Returns the underlying backing storage array.
   api fn raw_storage(self) -> FixedArray<T>
     self.to_fixed_array()
 
+  /// Returns pairs of `(index, value)` for each element.
   api fn enumerate(self) -> Array<(i32, T)>
     let next_raw = new_fixed_array<(i32, T)>(self.count)
     var index = 0
@@ -288,18 +331,22 @@ impl<T> Array<T>
 
     Array<(i32, T)> { storage: next_raw, count: self.count, owners: new_array_owners() }
 
+  /// Returns a new collection with `other` appended.
   api fn concat(self, other: Array<T>) -> Array<T>
     self.extended(other)
 
+  /// Returns a new array containing the first `n` elements.
   api fn take(self, n: i32) -> Array<T>
     if n <= 0 then:
       return Array<T>::with_capacity(0)
     let end = if n < self.count then: n else: self.count
     self.slice(from: 0, to: end)
 
+  /// Returns a new array containing the first `n` elements.
   api fn take(self, { n: i32 }) -> Array<T>
     self.take(n)
 
+  /// Returns a new array without the first `n` elements.
   api fn drop(self, n: i32) -> Array<T>
     if n <= 0 then:
       return self.slice(from: 0, to: self.count)
@@ -307,9 +354,11 @@ impl<T> Array<T>
       return Array<T>::with_capacity(0)
     self.slice(from: n, to: self.count)
 
+  /// Returns a new array without the first `n` elements.
   api fn drop(self, { n: i32 }) -> Array<T>
     self.drop(n)
 
+  /// Splits values into two arrays based on the predicate result.
   api fn partition(self, pred: (v: T) -> bool) -> (Array<T>, Array<T>)
     let ~left = Array<T>::with_capacity(self.count)
     let ~right = Array<T>::with_capacity(self.count)
@@ -323,9 +372,11 @@ impl<T> Array<T>
       index = index + 1
     (left, right)
 
+  /// Splits values into two arrays based on the predicate result.
   api fn partition(self, { where pred: (value: T) -> bool }) -> (Array<T>, Array<T>)
     self.partition(pred)
 
+  /// Splits values into consecutive chunks of the requested size.
   api fn chunk(self, { of size: i32 }) -> Array<Array<T>>
     if size <= 0 then:
       return Array<Array<T>>::with_capacity(0)
@@ -339,6 +390,7 @@ impl<T> Array<T>
       index = index + size
     out
 
+  /// Returns all sliding windows of the requested size.
   api fn window(self, size: i32) -> Array<Array<T>>
     if size <= 0 then:
       return Array<Array<T>>::with_capacity(0)
@@ -352,9 +404,11 @@ impl<T> Array<T>
       index = index + 1
     out
 
+  /// Returns all sliding windows of the requested size.
   api fn window(self, { size: i32 }) -> Array<Array<T>>
     self.window(size)
 
+  /// Pairs values from two sequences until either sequence ends.
   api fn zip<U>(self, other: Array<U>) -> Array<(T, U)>
     let count = min(self.count, other.count)
     let next_raw = new_fixed_array<(T, U)>(count)
@@ -368,6 +422,7 @@ impl<T> Array<T>
       index = index + 1
     Array<(T, U)> { storage: next_raw, count: count, owners: new_array_owners() }
 
+  /// Pairs values from two sequences until either sequence ends.
   api fn zip<U>(self, { other: Sequence<U> }) -> Array<(T, U)>
     let ~out = Array<(T, U)>::with_capacity(self.count)
     let ~iter = other.iter()
@@ -381,6 +436,7 @@ impl<T> Array<T>
           break
     out
 
+  /// Combines all values into one using a binary reducer.
   api fn fold(self, combine: (left: T, right: T) -> T) -> Optional<T>
     if self.count == 0:
       return None {}
@@ -392,9 +448,11 @@ impl<T> Array<T>
       index = index + 1
     Some<T> { value: acc }
 
+  /// Combines all values into one using a binary reducer.
   api fn fold(self, { combine: (left: T, right: T) -> T }) -> Option<T>
     self.fold(combine)
 
+  /// Sorts values in place.
   api fn sort(~self, compare: (left: T, right: T) -> i32) -> void
     if self.count < 2:
       return void
@@ -413,12 +471,14 @@ impl<T> Array<T>
       __array_set(self.storage, cursor + 1, value)
       index = index + 1
 
+  /// Sorts values in place.
   api fn sort(~self) -> void
     self.sort(
       (left: T, right: T) -> i32 =>
         default_compare_i32(left, right)
     )
 
+  /// Sorts values in place.
   api fn sort(~self, { by compare: (left: T, right: T) -> Ordering }) -> void
     if self.count < 2:
       return void
@@ -437,6 +497,7 @@ impl<T> Array<T>
       __array_set(self.storage, cursor + 1, value)
       index = index + 1
 
+  /// Reverses values in place.
   api fn reverse(~self) -> void
     if self.count < 2:
       return void
@@ -452,6 +513,7 @@ impl<T> Array<T>
       left = left + 1
       right = right - 1
 
+  /// Removes all stored values.
   api fn clear(~self) -> void
     if self.count == 0:
       return void
@@ -459,6 +521,7 @@ impl<T> Array<T>
     self.ensure_unique(self.count)
     self.count = 0
 
+  /// Shrinks the array to the requested length.
   api fn truncate(~self, { len: i32 }) -> void
     if len >= self.count then:
       return void
@@ -468,6 +531,7 @@ impl<T> Array<T>
     self.ensure_unique(self.count)
     self.count = len
 
+  /// Ensures capacity for at least `additional` more elements.
   api fn reserve(~self, additional: i32) -> void
     if additional <= 0:
       return void
@@ -475,6 +539,7 @@ impl<T> Array<T>
     let required = self.count + additional
     self.ensure_unique(required)
 
+  /// Ensures capacity for at least `additional` more elements.
   api fn reserve(~self, { additional: i32 }) -> void
     if additional <= 0:
       return void
@@ -482,18 +547,21 @@ impl<T> Array<T>
     let required = self.count + additional
     self.ensure_unique(required)
 
+  /// Appends a value to the end.
   api fn push(~self, value: T) -> void
     let required = self.count + 1
     self.ensure_unique(required)
     __array_set(self.storage, self.count, value)
     self.count = required
 
+  /// Appends a value to the end.
   api fn push(~self, { value: T }) -> void
     let required = self.count + 1
     self.ensure_unique(required)
     __array_set(self.storage, self.count, value)
     self.count = required
 
+  /// Removes and returns the last value.
   api fn pop(~self) -> Optional<T>
     if self.count == 0:
       return None {}
@@ -504,6 +572,7 @@ impl<T> Array<T>
     self.count = last_index
     Some<T> { value: value }
 
+  /// Inserts a value at the target location.
   api fn insert(~self, value: T, { at index: i32 }) -> void
     let insert_index = clamp_insert_index(index, self.count)
     let ~items = Array<T>::with_capacity(1)
@@ -511,6 +580,7 @@ impl<T> Array<T>
     self.splice(at: insert_index, removing: 0, inserting: items)
     void
 
+  /// Inserts a value at the target location.
   api fn insert(~self, { value: T, at index: i32 }) -> void
     let insert_index = clamp_insert_index(index, self.count)
     let ~items = Array<T>::with_capacity(1)
@@ -518,6 +588,7 @@ impl<T> Array<T>
     self.splice(at: insert_index, removing: 0, inserting: items)
     void
 
+  /// Removes and returns a value when present.
   api fn remove(~self, index: i32) -> Optional<T>
     let computed_index = compute_index(index, self.count)
     if computed_index < 0 or computed_index >= self.count:
@@ -530,6 +601,7 @@ impl<T> Array<T>
     )
     removed.first()
 
+  /// Removes and returns a value when present.
   api fn remove(~self, { at index: i32 }) -> T
     let computed_index = compute_index(index, self.count)
     if computed_index < 0 or computed_index >= self.count then:
@@ -546,6 +618,7 @@ impl<T> Array<T>
       None:
         trap_out_of_bounds(self.storage)
 
+  /// Appends values from another collection or sequence.
   api fn extend(~self, other: Array<T>) -> void
     if other.count == 0:
       return void
@@ -560,6 +633,7 @@ impl<T> Array<T>
     })
     self.count = self.count + other.count
 
+  /// Appends values from another collection or sequence.
   api fn extend(~self, { items: Sequence<T> }) -> void
     let ~iter = items.iter()
     while true do:
@@ -569,6 +643,7 @@ impl<T> Array<T>
         None:
           break
 
+  /// Replaces a range with inserted values and returns removed values.
   api fn splice(~self, { at start: i32, removing remove_count: i32, inserting items: Array<T> }) -> Array<T>
     let clamped_start = clamp_insert_index(start, self.count)
     let safe_delete_count =
@@ -615,6 +690,7 @@ impl<T> Array<T>
     self.count = next_count
     removed
 
+  /// Replaces matching content with new content.
   api fn replace(~self, index: i32, { with element: T }) -> bool
     let computed_index = compute_index(index, self.count)
     if computed_index < 0 or computed_index >= self.count:
@@ -624,41 +700,49 @@ impl<T> Array<T>
     __array_set(self.storage, computed_index, element)
     true
 
+  /// Returns a copy with all values removed.
   api fn cleared(self) -> Array<T>
     let ~copy = self.copied()
     copy.clear()
     copy
 
+  /// Returns a copy with reserved additional capacity.
   api fn reserved(self, additional: i32) -> Array<T>
     let ~copy = self.copied(additional)
     copy.reserve(additional)
     copy
 
+  /// Returns a copy with one value appended.
   api fn pushed(self, value: T) -> Array<T>
     let ~copy = self.copied(1)
     copy.push(value: value)
     copy
 
+  /// Returns a copy with the last value removed.
   api fn popped(self) -> ArrayPop<T>
     let ~copy = self.copied()
     let value = copy.pop()
     ArrayPop<T> { array: copy, value }
 
+  /// Returns a copy with a value inserted at the requested index.
   api fn inserted(self, value: T, { at index: i32 }) -> Array<T>
     let ~copy = self.copied(1)
     copy.insert(value, at: index)
     copy
 
+  /// Returns a copy with one value removed.
   api fn removed(self, index: i32) -> Array<T>
     let ~copy = self.copied()
     copy.remove(index)
     copy
 
+  /// Returns a copy with values from `other` appended.
   api fn extended(self, other: Array<T>) -> Array<T>
     let ~copy = self.copied(other.count)
     copy.extend(other)
     copy
 
+  /// Returns a copy with a splice operation applied.
   api fn spliced(self, { at start: i32, removing remove_count: i32, inserting items: Array<T> }) -> Array<T>
     let ~copy = self.copied(items.count)
     copy.splice(at: start, removing: remove_count, inserting: items)
@@ -786,10 +870,12 @@ obj ArrayIterator<T> {
 }
 
 impl<T> Sequence<T> for Array<T>
+  /// Returns an iterator over values.
   api fn iter(self) -> Iterator<T>
     ArrayIterator<T> { array: self, index: 0 }
 
 impl<T> Iterator<T> for ArrayIterator<T>
+  /// Returns the next item from the iterator.
   api fn next(~self) -> Option<T>
     if self.index >= self.array.len() then:
       return None {}
@@ -798,16 +884,19 @@ impl<T> Iterator<T> for ArrayIterator<T>
     value
 
 impl<T> SubscriptRead<i32, Optional<T>> for Array<T>
+  /// Returns the value addressed by subscript syntax.
   api fn subscript_get(self, index: i32) -> Optional<T>
     self.get(index)
 
 impl<T> SubscriptRead<Range, Array<T>> for Array<T>
+  /// Returns the value addressed by subscript syntax.
   api fn subscript_get(self, range: Range) -> Array<T>
     let start = normalize_range_start(range, self.count)
     let end = normalize_range_end_exclusive(range, self.count)
     self.slice(from: start, to: end)
 
 impl<T> SubscriptWrite<i32, T> for Array<T>
+  /// Updates the value addressed by subscript syntax.
   api fn subscript_set(~self, index: i32, value: T) -> void
     let replaced = self.replace(index, with: value)
     if replaced then:
@@ -815,6 +904,7 @@ impl<T> SubscriptWrite<i32, T> for Array<T>
     __array_set(self.storage, self.capacity(), value)
     void
 
+/// Creates an array from fixed storage, returning `None` if allocation fails.
 pub fn new_array<T>({ from source: FixedArray<T> }) -> Optional<Array<T>>
   if has_null_entries(source) then:
     None {}
@@ -823,6 +913,7 @@ pub fn new_array<T>({ from source: FixedArray<T> }) -> Optional<Array<T>>
       value: Array<T> { storage: source, count: __array_len(source), owners: new_array_owners() }
     }
 
+/// Creates an array from fixed storage without allocation failure checks.
 pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
   Array<T> { storage: source, count: __array_len(source), owners: new_array_owners() }
 

@@ -1,11 +1,14 @@
 use super::types::all
 
+/// Constructs an optional value containing `value`.
 pub fn some<T>(value: T): () -> Optional<T>
   Some { value: value }
 
+/// Constructs an empty optional value.
 pub fn none<T>(): () -> Optional<T>
   None {}
 
+/// Returns true when the optional value is present.
 pub fn is_some<T>(opt: Optional<T>): () -> boolean
   match(opt)
     Some:
@@ -13,6 +16,7 @@ pub fn is_some<T>(opt: Optional<T>): () -> boolean
     None:
       false
 
+/// Returns true when the optional value is absent.
 pub fn is_none<T>(opt: Optional<T>): () -> boolean
   match(opt)
     Some:
@@ -20,6 +24,7 @@ pub fn is_none<T>(opt: Optional<T>): () -> boolean
     None:
       true
 
+/// Returns the contained value or the provided fallback.
 pub fn unwrap_or<T>(opt: Optional<T>, default: T): () -> T
   match(opt)
     Some { value }:
@@ -27,6 +32,7 @@ pub fn unwrap_or<T>(opt: Optional<T>, default: T): () -> T
     None:
       default
 
+/// Returns the contained value or computes a fallback.
 pub fn unwrap_or_else<T>(opt: Optional<T>, default: () -> T) -> T
   match(opt)
     Some { value }:
@@ -34,6 +40,7 @@ pub fn unwrap_or_else<T>(opt: Optional<T>, default: () -> T) -> T
     None:
       default()
 
+/// Transforms the contained value when present and leaves `None` unchanged.
 pub fn map<T, U>(opt: Optional<T>, f: (v: T) -> U) -> Optional<U>
   match(opt)
     Some { value }:
@@ -41,6 +48,7 @@ pub fn map<T, U>(opt: Optional<T>, f: (v: T) -> U) -> Optional<U>
     None:
       None {}
 
+/// Runs `f` only when a value is present, propagating `None` otherwise.
 pub fn and_then<T, U>(opt: Optional<T>, f: (v: T) -> Optional<U>) -> Optional<U>
   match(opt)
     Some { value }:
@@ -48,6 +56,7 @@ pub fn and_then<T, U>(opt: Optional<T>, f: (v: T) -> Optional<U>) -> Optional<U>
     None:
       None {}
 
+/// Returns the current optional value or the provided fallback optional value.
 pub fn or_value<T>(opt: Optional<T>, fallback: Optional<T>): () -> Optional<T>
   match(opt)
     Some:
@@ -55,6 +64,7 @@ pub fn or_value<T>(opt: Optional<T>, fallback: Optional<T>): () -> Optional<T>
     None:
       fallback
 
+/// Returns the current optional value or computes a fallback optional value.
 pub fn or_else<T>(opt: Optional<T>, fallback: () -> Optional<T>) -> Optional<T>
   match(opt)
     Some:

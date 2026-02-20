@@ -1,14 +1,18 @@
 use std::optional::types::all
 
+/// Allocates a fixed-size array.
 pub fn new_fixed_array<T>(size: i32): () -> FixedArray<T>
   __array_new<T>(size)
 
+/// Returns the number of stored elements.
 pub fn length<T>(arr: FixedArray<T>): () -> i32
   __array_len(arr)
 
+/// Returns true when no values are stored.
 pub fn is_empty<T>(arr: FixedArray<T>): () -> bool
   arr.length<T>() == 0
 
+/// Returns the element at `index`, or `None` when out of bounds.
 pub fn get<T>(arr: FixedArray<T>, index: i32): () -> Optional<T>
   let len = arr.length<T>()
   let idx = normalize_index(index, len)
@@ -24,6 +28,7 @@ pub fn get<T>(arr: FixedArray<T>, index: i32): () -> Optional<T>
 
   Some<T> { value: value }
 
+/// Writes `value` at `index` and traps when the index is out of bounds.
 pub fn set<T>(arr: FixedArray<T>, index: i32, value: T): () -> FixedArray<T>
   let len = arr.length<T>()
   let idx = normalize_index(index, len)
@@ -36,6 +41,7 @@ pub fn set<T>(arr: FixedArray<T>, index: i32, value: T): () -> FixedArray<T>
   __array_set(arr, idx, value)
   arr
 
+/// Copies elements between fixed arrays according to the provided copy options.
 pub fn copy<T>(dest_array: FixedArray<T>, opts: {
   from: FixedArray<T>,
   to_index: i32,
@@ -74,6 +80,7 @@ pub fn copy<T>(dest_array: FixedArray<T>, opts: {
   })
   dest_array
 
+/// Sets every position in the fixed array to the provided value.
 pub fn fill<T>(arr: FixedArray<T>, value: T): () -> FixedArray<T>
   let len = arr.length<T>()
   var index = 0
@@ -82,6 +89,7 @@ pub fn fill<T>(arr: FixedArray<T>, value: T): () -> FixedArray<T>
     index = index + 1
   arr
 
+/// Invokes a callback for each element.
 pub fn each<T>(arr: FixedArray<T>, f: (v: T) -> void) -> void
   let len = arr.length<T>()
   var index = 0
@@ -89,6 +97,7 @@ pub fn each<T>(arr: FixedArray<T>, f: (v: T) -> void) -> void
     f(__array_get(arr, index))
     index = index + 1
 
+/// Applies a transform to each element and returns a fixed array of equal length.
 pub fn map<T, U>(arr: FixedArray<T>, f: (v: T) -> U) -> FixedArray<U>
   let len = arr.length<T>()
   let out = new_fixed_array<U>(len)

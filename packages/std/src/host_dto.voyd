@@ -9,20 +9,25 @@ pub obj HostDto {
 }
 
 impl HostDto
+  /// Creates an empty host payload object.
   api fn init() -> HostDto
     HostDto { payload: Dict<String, MsgPack>::init() }
 
+  /// Builds a DTO from a MessagePack payload.
   api fn unpack(payload: MsgPack) -> HostDto
     HostDto { payload: msgpack::unpack_map(payload) }
 
+  /// Serializes this DTO into a MessagePack map payload.
   api fn pack(self) -> MsgPack
     msgpack::make_map(self.payload)
 
+  /// Returns a copy of the DTO with one field set.
   api fn set(self, key: String, value: MsgPack) -> HostDto
     let ~next = self.payload
     next.set(key: key, value: value)
     HostDto { payload: next }
 
+  /// Reads a required MessagePack field from the payload.
   api fn read_msgpack(self, key: String) -> MsgPack
     match(self.payload.get(key: key))
       Some<MsgPack> { value }:
@@ -30,11 +35,14 @@ impl HostDto
       None:
         msgpack::make_null()
 
+  /// Reads a required boolean field from the payload.
   api fn read_bool(self, key: String) -> bool
     msgpack::unpack_bool(self.read_msgpack(key))
 
+  /// Reads a required 32-bit integer field from the payload.
   api fn read_i32(self, key: String) -> i32
     msgpack::unpack_i32(self.read_msgpack(key))
 
+  /// Reads a required string field from the payload.
   api fn read_string(self, key: String) -> String
     msgpack::unpack_string(self.read_msgpack(key))

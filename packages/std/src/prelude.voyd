@@ -1,8 +1,30 @@
-pub use std::optional::types::{ Option }
-pub use std::result::types::{ Result }
+pub use std::optional::types::{ Optional, Option, Some, None }
+pub use std::optional::fns::{ some, none }
+pub use std::result::types::{ Result, Ok, Err }
+pub use std::result::fns::{ ok, err }
 
 pub use std::traits::{ Eq, Ord, Hash, Default, Clone, Copy }
 pub use std::traits::{ Sequence, Iterator }
+pub use std::subscript::{ Range }
+
+pub use std::array::{ Array, ArrayPop, new_array, new_array_unchecked }
+pub use std::dict::{ Dict, DictEntry, DictKey }
+pub use std::deque::{ Deque }
+pub use std::set::{ Set }
+pub use std::bytes::{ Byte, Bytes, ByteBuffer }
+pub use std::box::{ Box }
+
+pub use std::string::{
+  String,
+  StringSlice,
+  StringIndex,
+  CharSet,
+  Utf8Error,
+  ParseIntError,
+  ParseFloatError,
+  new_string,
+  from_utf8
+}
 
 pub use std::error::panic
 pub use std::test::assertions::{ assert }
