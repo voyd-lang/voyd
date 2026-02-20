@@ -21,6 +21,7 @@ import {
   methodSignatureParamTypeKey,
 } from "../method-signature-key.js";
 import { typeExprKey } from "./trait-method-matcher.js";
+import { registerTraitMethodImplMapping } from "./trait-method-impl-mapping.js";
 
 const targetTypeIncludesDependencySymbol = ({
   type,
@@ -770,15 +771,21 @@ export const registerImportedTraitImplTemplates = ({
       implSymbol: localImplSymbol,
     });
 
-    methods.forEach((implMethodSymbol, traitMethodSymbol) => {
-      if (ctx.traitMethodImpls.has(implMethodSymbol)) {
-        return;
-      }
-      ctx.traitMethodImpls.set(implMethodSymbol, {
+    methods.forEach((implMethodSymbol, traitMethodSymbol) =>
+      registerTraitMethodImplMapping({
+        traitMethodImpls: ctx.traitMethodImpls,
+        implMethodSymbol,
         traitSymbol: localTraitSymbol,
         traitMethodSymbol,
-      });
-    });
+        buildConflictMessage: ({ implMethodSymbol, existing, incoming }) =>
+          [
+            "imported impl method mapped to multiple trait methods",
+            `impl method symbol: ${implMethodSymbol}`,
+            `existing trait/method: ${existing.traitSymbol}/${existing.traitMethodSymbol}`,
+            `incoming trait/method: ${incoming.traitSymbol}/${incoming.traitMethodSymbol}`,
+          ].join("\n"),
+      }),
+    );
   });
 };
 

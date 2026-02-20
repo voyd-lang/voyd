@@ -38,6 +38,7 @@ import {
   matchTraitMethodsWithShapeFallback,
   typeExprKey,
 } from "./trait-method-matcher.js";
+import { registerTraitMethodImplMapping } from "./trait-method-impl-mapping.js";
 
 type ConstraintTypeParameterDecl = {
   symbol: SymbolId;
@@ -604,9 +605,18 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
         ctx,
       });
       methodMap.forEach((implMethodSymbol, traitMethodSymbol) => {
-        ctx.traitMethodImpls.set(implMethodSymbol, {
+        registerTraitMethodImplMapping({
+          traitMethodImpls: ctx.traitMethodImpls,
+          implMethodSymbol,
           traitSymbol,
           traitMethodSymbol,
+          buildConflictMessage: ({ implMethodSymbol, existing, incoming }) =>
+            [
+              "impl method mapped to multiple trait methods",
+              `impl method: ${getSymbolName(implMethodSymbol, ctx)}`,
+              `existing: trait=${getSymbolName(existing.traitSymbol, ctx)}, method=${getSymbolName(existing.traitMethodSymbol, ctx)}`,
+              `incoming: trait=${getSymbolName(incoming.traitSymbol, ctx)}, method=${getSymbolName(incoming.traitMethodSymbol, ctx)}`,
+            ].join("\n"),
         });
       });
     }

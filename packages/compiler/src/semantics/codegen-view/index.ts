@@ -990,16 +990,6 @@ export const buildProgramCodegenView = (
       );
     });
 
-    mod.typing.traitMethodImpls.forEach((info, symbol) => {
-      const key = canonicalProgramSymbolIdOf(mod.moduleId, symbol);
-      traitMethodImpls.set(
-        key,
-        toCodegenTraitMethodImpl({
-          traitSymbol: canonicalProgramSymbolIdOf(mod.moduleId, info.traitSymbol),
-          traitMethodSymbol: canonicalProgramSymbolIdOf(mod.moduleId, info.traitMethodSymbol),
-        })
-      );
-    });
   });
 
   const recordInstanceKey = (moduleId: string, key: string): void => {
@@ -1346,11 +1336,87 @@ export const buildProgramCodegenView = (
     seenTraitImplTemplates.add(template.implSymbol);
     return true;
   });
+  const templateByImplSymbol = new Map(
+    uniqueTraitImplTemplates.map((template) => [template.implSymbol, template]),
+  );
+  const normalizeImplMethods = (impl: CodegenTraitImplInstance): CodegenTraitImplInstance => {
+    const template = templateByImplSymbol.get(impl.implSymbol);
+    if (!template) {
+      return impl;
+    }
+    if (template.traitSymbol !== impl.traitSymbol) {
+      throw new Error(
+        `trait impl ${impl.implSymbol} resolved to conflicting trait symbols`,
+      );
+    }
+    return {
+      ...impl,
+      methods: template.methods,
+    };
+  };
+  traitImplsByNominal.forEach((bucket, nominal) => {
+    traitImplsByNominal.set(
+      nominal,
+      bucket.map((impl) => normalizeImplMethods(impl)),
+    );
+  });
+  traitImplsByTrait.forEach((bucket, symbol) => {
+    traitImplsByTrait.set(
+      symbol,
+      bucket.map((impl) => normalizeImplMethods(impl)),
+    );
+  });
   const describeProgramSymbol = (id: ProgramSymbolId): string => {
     const ref = symbols.refOf(id);
     const name = symbols.getName(id) ?? `${ref.symbol}`;
     return `${ref.moduleId}::${name}`;
   };
+  const registerTraitMethodImplMapping = ({
+    implMethod,
+    traitSymbol,
+    traitMethodSymbol,
+    source,
+  }: {
+    implMethod: ProgramSymbolId;
+    traitSymbol: ProgramSymbolId;
+    traitMethodSymbol: ProgramSymbolId;
+    source: string;
+  }): void => {
+    const existing = traitMethodImpls.get(implMethod);
+    if (existing) {
+      if (
+        existing.traitSymbol !== traitSymbol ||
+        existing.traitMethodSymbol !== traitMethodSymbol
+      ) {
+        throw new Error(
+          [
+            "trait impl method mapped to multiple trait methods",
+            `impl method: ${describeProgramSymbol(implMethod)}`,
+            `existing: trait=${describeProgramSymbol(existing.traitSymbol)}, method=${describeProgramSymbol(existing.traitMethodSymbol)}`,
+            `incoming: trait=${describeProgramSymbol(traitSymbol)}, method=${describeProgramSymbol(traitMethodSymbol)} (${source})`,
+          ].join("\n"),
+        );
+      }
+      return;
+    }
+    traitMethodImpls.set(
+      implMethod,
+      toCodegenTraitMethodImpl({
+        traitSymbol,
+        traitMethodSymbol,
+      }),
+    );
+  };
+  uniqueTraitImplTemplates.forEach((template) => {
+    template.methods.forEach(({ traitMethod, implMethod }) =>
+      registerTraitMethodImplMapping({
+        implMethod,
+        traitSymbol: template.traitSymbol,
+        traitMethodSymbol: traitMethod,
+        source: `template ${describeProgramSymbol(template.implSymbol)}`,
+      }),
+    );
+  });
   const assertTraitDispatchConsistency = (): void => {
     const registrationsByImplMethod = new Map<
       ProgramSymbolId,
@@ -1410,7 +1476,9 @@ export const buildProgramCodegenView = (
         );
       }
       const metadataTraitMatches = registrations.some(
-        ({ traitSymbol }) => traitSymbol === metadata.traitSymbol,
+        ({ traitSymbol, traitMethodSymbol }) =>
+          traitSymbol === metadata.traitSymbol &&
+          traitMethodSymbol === metadata.traitMethodSymbol,
       );
       if (metadataTraitMatches) {
         return;
@@ -1423,7 +1491,7 @@ export const buildProgramCodegenView = (
         .join("; ");
       throw new Error(
         [
-          "trait dispatch metadata points to a different trait than impl registrations",
+          "trait dispatch metadata diverged from impl registrations",
           `impl method: ${describeProgramSymbol(implMethod)}`,
           `metadata: trait=${describeProgramSymbol(metadata.traitSymbol)}, method=${describeProgramSymbol(metadata.traitMethodSymbol)}`,
           `registrations: ${registrationsText}`,
