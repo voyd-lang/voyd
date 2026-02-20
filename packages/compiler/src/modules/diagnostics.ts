@@ -10,9 +10,9 @@ export const moduleDiagnosticToDiagnostic = (
   diagnostic: ModuleDiagnostic
 ): Diagnostic => {
   const requested = modulePathToString(diagnostic.requested);
-  const importer = diagnostic.importer;
-  const importerSpan = importer
-    ? { file: importer, start: 0, end: 0 }
+  const importer = diagnostic.importerFilePath ?? diagnostic.importer;
+  const importerSpan = diagnostic.importerFilePath
+    ? { file: diagnostic.importerFilePath, start: 0, end: 0 }
     : undefined;
   const span = normalizeSpan(diagnostic.span, importerSpan);
 

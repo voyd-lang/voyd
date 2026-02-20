@@ -43,7 +43,8 @@ type BuildGraphOptions = {
 
 type PendingDependency = {
   dependency: ModuleDependency;
-  importer: string;
+  importerId: string;
+  importerFilePath?: string;
 };
 
 const NO_PRELUDE_DIRECTIVE = /(^|[\r\n])([^\S\r\n]*#!no_prelude[^\r\n]*)(?=$|[\r\n])/g;
@@ -140,9 +141,10 @@ export const buildModuleGraph = async ({
   };
 
   while (pending.length) {
-    const { dependency, importer } = pending.shift()!;
+    const { dependency, importerId, importerFilePath } = pending.shift()!;
+    const importerLabel = importerFilePath ?? importerId;
     const pathKey = modulePathToString(dependency.path);
-    if (hasMissingModule(importer, pathKey)) {
+    if (hasMissingModule(importerId, pathKey)) {
       continue;
     }
     if (modulesByPath.has(pathKey)) {
@@ -157,10 +159,11 @@ export const buildModuleGraph = async ({
         kind: "io-error",
         message: formatErrorMessage(error),
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
       continue;
     }
 
@@ -168,10 +171,11 @@ export const buildModuleGraph = async ({
       moduleDiagnostics.push({
         kind: "missing-module",
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
       continue;
     }
 
@@ -184,10 +188,11 @@ export const buildModuleGraph = async ({
         kind: "reserved-module-segment",
         segment: reservedSegment,
         requested: resolvedModulePath,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span ?? { file: resolvedPath, start: 0, end: 0 },
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
       continue;
     }
     if (modulesByPath.has(resolvedKey)) {
@@ -197,10 +202,11 @@ export const buildModuleGraph = async ({
       moduleDiagnostics.push({
         kind: "missing-module",
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
       continue;
     }
     let nextModule: LoadedModule;
@@ -217,10 +223,11 @@ export const buildModuleGraph = async ({
         kind: "io-error",
         message: formatErrorMessage(error),
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
       continue;
     }
     addModuleTree(nextModule, modules, modulesByPath);
@@ -230,10 +237,11 @@ export const buildModuleGraph = async ({
       moduleDiagnostics.push({
         kind: "missing-module",
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
     }
   }
 
@@ -267,9 +275,17 @@ const enqueueDependencies = (
   queue: PendingDependency[],
 ) => {
   const modules = [loaded.node, ...loaded.inlineModules];
+  const importerFilePathFor = (module: ModuleNode): string | undefined =>
+    module.origin.kind === "file"
+      ? module.origin.filePath
+      : module.origin.span?.file;
   modules.forEach((module) =>
     module.dependencies.forEach((dependency) =>
-      queue.push({ dependency, importer: module.id }),
+      queue.push({
+        dependency,
+        importerId: module.id,
+        importerFilePath: importerFilePathFor(module),
+      }),
     ),
   );
 };

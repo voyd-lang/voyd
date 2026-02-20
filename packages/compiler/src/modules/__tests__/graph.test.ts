@@ -177,6 +177,8 @@ describe("buildModuleGraph", () => {
     expect(diagnostic.severity).toBe("error");
     expect(diagnostic.span.file).toContain("main.voyd");
     expect(diagnostic.message).toMatch(/src::util/);
+    expect(diagnostic.related?.[0]?.span.file).toContain("main.voyd");
+    expect(diagnostic.related?.[0]?.message).toContain("main.voyd");
   });
 
   it("rejects entry modules named all", async () => {
