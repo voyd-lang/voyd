@@ -78,6 +78,10 @@ jobs:
       - name: Run CLI dist e2e
         if: steps.changes.outputs.cli == 'true'
         run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd/cli test -- src/__tests__/cli-e2e.test.ts
-      - name: Run typing benchmark
+      - name: Run typing benchmark regression gate
         if: steps.changes.outputs.compiler_semantics == 'true'
-        run: npm run --workspace @voyd/compiler bench:typing
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TYPING_BENCH_MAX_REGRESSION_PCT: "15"
+        run: node scripts/ci/check-typing-bench-regression.mjs
