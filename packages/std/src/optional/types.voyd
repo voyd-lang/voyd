@@ -1,5 +1,6 @@
 @intrinsic_type(type: "optional-some")
 pub obj Some<T> {
+  /// Present optional payload.
   api value: T
 }
 

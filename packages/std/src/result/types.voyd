@@ -1,10 +1,12 @@
 pub obj Unit {}
 
 pub obj Ok<T> {
+  /// Successful result payload.
   api value: T
 }
 
 pub obj Err<E> {
+  /// Error payload carried by this result variant.
   api error: E
 }
 

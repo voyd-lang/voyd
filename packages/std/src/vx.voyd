@@ -5,6 +5,7 @@ use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::string::type::{ String, new_string }
 
+/// Creates a virtual DOM element value for rendering.
 pub fn create_element({
   name: String,
   attributes?: Array<Array<MsgPack>>,

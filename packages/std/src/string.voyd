@@ -5,8 +5,10 @@ pub use self::errors::{ ParseFloatError, ParseIntError, Utf8Error }
 pub use self::index::StringIndex
 pub use self::type::{ CharSet, String, StringSlice }
 
+/// Builds a string from owned UTF-8 byte storage without validation.
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   string_type::new_string(from_bytes)
 
+/// Validates UTF-8 bytes and builds a string on success.
 pub fn from_utf8({ bytes source: Array<i32> }) -> Result<String, Utf8Error>
   String::from_utf8(bytes: source)

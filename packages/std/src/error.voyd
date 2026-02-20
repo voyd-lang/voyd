@@ -1,32 +1,41 @@
 use std::string::type::{ String, StringSlice }
 
 pub obj Utf8Error {
+  /// Human-readable error message.
   api message: String
 }
 
 pub obj ParseIntError {
+  /// Human-readable error message.
   api message: String
 }
 
 pub obj ParseFloatError {
+  /// Human-readable error message.
   api message: String
 }
 
 pub obj DecodeError {
+  /// Human-readable error message.
   api message: String
 }
 
 pub obj JsonError {
+  /// Human-readable error message.
   api message: String
 }
 
 pub obj HostError {
+  /// Machine-readable error code.
   api code: i32,
+  /// Human-readable error message.
   api message: String
 }
 
 pub obj IoError {
+  /// Machine-readable error code.
   api code: i32,
+  /// Human-readable error message.
   api message: String
 }
 
@@ -36,5 +45,6 @@ pub trait Error<T>
 @intrinsic(name: "__panic_trap")
 fn panic_trap(): () -> void __panic_trap()
 
+/// Stops execution immediately with a panic.
 pub fn panic({ message _message: StringSlice }) -> void
   panic_trap()

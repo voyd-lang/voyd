@@ -1,11 +1,14 @@
 pub obj Utf8Error {
+  /// Machine-readable error code.
   api code: i32
 }
 
 pub obj ParseIntError {
+  /// Machine-readable error code.
   api code: i32
 }
 
 pub obj ParseFloatError {
+  /// Machine-readable error code.
   api code: i32
 }

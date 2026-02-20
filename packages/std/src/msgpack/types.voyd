@@ -1,22 +1,27 @@
 use std::array::Array
 
 pub obj I32 {
+  /// Wrapped payload value.
   api value: i32
 }
 
 pub obj I64 {
+  /// Wrapped payload value.
   api value: i64
 }
 
 pub obj F32 {
+  /// Wrapped payload value.
   api value: f32
 }
 
 pub obj F64 {
+  /// Wrapped payload value.
   api value: f64
 }
 
 pub obj Bool {
+  /// Wrapped payload value.
   api value: bool
 }
 
@@ -25,5 +30,6 @@ pub type Numeric = I32 | I64 | F32 | F64
 pub obj Null {}
 
 pub obj Binary {
+  /// Raw bytes stored by this value.
   api bytes: Array<i32>
 }

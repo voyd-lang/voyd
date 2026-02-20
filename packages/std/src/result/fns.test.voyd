@@ -1,6 +1,7 @@
 use std::test::assertions::all
 
 obj ResultErr {
+  /// Error code used by tests.
   api value: i32
 }
 

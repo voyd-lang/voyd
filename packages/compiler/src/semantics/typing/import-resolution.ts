@@ -2,6 +2,7 @@ import { createTypingContextFromTypingResult } from "./context-from-typing-resul
 import type { DependencySemantics, TypingContext } from "./types.js";
 import type { SymbolId } from "../ids.js";
 import type { ModuleExportEntry } from "../modules.js";
+import { canonicalSymbolRefForTypingContext } from "./symbol-ref-utils.js";
 
 export type ImportTarget = { moduleId: string; symbol: SymbolId };
 
@@ -14,11 +15,8 @@ export const importTargetFor = (
     return mapped;
   }
 
-  const record = ctx.symbolTable.getSymbol(symbol);
-  const metadata = (record.metadata ?? {}) as {
-    import?: { moduleId: string; symbol: SymbolId };
-  };
-  return metadata.import;
+  const canonical = canonicalSymbolRefForTypingContext(symbol, ctx);
+  return canonical.moduleId === ctx.moduleId ? undefined : canonical;
 };
 
 export const mapLocalSymbolToDependency = ({
@@ -30,14 +28,12 @@ export const mapLocalSymbolToDependency = ({
   dependency: DependencySemantics;
   ctx: TypingContext;
 }): SymbolId => {
-  const record = ctx.symbolTable.getSymbol(owner);
-  const metadata = (record.metadata ?? {}) as {
-    import?: { moduleId: string; symbol: SymbolId };
-  };
-  if (metadata.import && metadata.import.moduleId === dependency.moduleId) {
-    return metadata.import.symbol;
+  const canonical = canonicalSymbolRefForTypingContext(owner, ctx);
+  if (canonical.moduleId === dependency.moduleId) {
+    return canonical.symbol;
   }
 
+  const record = ctx.symbolTable.getSymbol(owner);
   throw new Error(
     `type parameter or symbol ${record.name} is not available in ${dependency.moduleId}`,
   );

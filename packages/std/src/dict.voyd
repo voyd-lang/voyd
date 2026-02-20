@@ -10,7 +10,9 @@ pub trait DictKey<K>
   fn dict_eq(self, { other: K }) -> bool
 
 pub obj DictEntry<K, V> {
+  /// Dictionary being accessed by this entry handle.
   api dict: Dict<K, V>,
+  /// Associated key for this entry.
   api key: K
 }
 
@@ -35,9 +37,11 @@ obj BucketDeleteResult<K, V> {
 }
 
 impl<K: DictKey<K>, V> Dict<K, V>
+  /// Creates an empty dictionary.
   api fn init() -> Dict<K, V>
     Dict<K, V> { buckets: new_buckets<K, V>(16), count: 0 }
 
+  /// Creates an empty dictionary sized for at least `capacity` entries.
   api fn with_capacity({ size capacity: i32 }) -> Dict<K, V>
     let target = if capacity > 0 then: capacity else: 0
     let min_bucket_count = 16
@@ -50,12 +54,15 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
     Dict<K, V> { buckets: new_buckets<K, V>(bucket_count), count: 0 }
 
+  /// Returns the number of stored elements.
   api fn len(self) -> i32
     self.count
 
+  /// Returns true when no values are stored.
   api fn is_empty(self) -> bool
     self.count == 0
 
+  /// Returns true when the dictionary contains the key.
   api fn contains_key(self, { key: K }) -> bool
     if self.count == 0 then:
       return false
@@ -65,6 +72,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     let bucket = __array_get(self.buckets, bucket_index)
     find_entry_index_in_bucket(bucket, key) >= 0
 
+  /// Returns the value for `key`, or `None` when the key is absent.
   api fn get(self, { key: K }) -> Optional<V>
     if self.count == 0 then:
       return None {}
@@ -80,16 +88,19 @@ impl<K: DictKey<K>, V> Dict<K, V>
     let entry = __array_get(storage, entry_index)
     Some<V> { value: entry.value }
 
+  /// Inserts a value at the target location.
   api fn insert(~self, { key: K, value: V }) -> Optional<V>
     let previous = self.get(key: key)
     self.set(key: key, value: value)
     previous
 
+  /// Inserts or replaces the value for a key.
   api fn set(~self, { key: K, value: V }) -> void
     let next = self.with_set(key, value)
     self.buckets = next.buckets
     self.count = next.count
 
+  /// Removes and returns a value when present.
   api fn remove(~self, { key: K }) -> Optional<V>
     let previous = self.get(key: key)
     let next = self.with_deleted(key)
@@ -97,6 +108,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     self.count = next.count
     previous
 
+  /// Removes all stored values.
   api fn clear(~self) -> void
     if self.count == 0 then:
       return void
@@ -105,6 +117,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     self.buckets = new_buckets<K, V>(bucket_count)
     self.count = 0
 
+  /// Returns all dictionary keys.
   api fn keys(self) -> Array<K>
     if self.count == 0 then:
       return Array<K>::with_capacity(0)
@@ -124,6 +137,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       bucket_index = bucket_index + 1
     out
 
+  /// Returns dictionary values.
   api fn values(self) -> Array<V>
     if self.count == 0 then:
       return Array<V>::with_capacity(0)
@@ -143,6 +157,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       bucket_index = bucket_index + 1
     out
 
+  /// Returns dictionary entries as key-value tuples.
   api fn entries(self) -> Array<(K, V)>
     if self.count == 0 then:
       return Array<(K, V)>::with_capacity(0)
@@ -162,6 +177,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       bucket_index = bucket_index + 1
     out
 
+  /// Invokes a callback for each element.
   api fn each(self, { do f: (key: K, value: V) -> void }) -> void
     if self.count == 0 then:
       return void
@@ -179,9 +195,11 @@ impl<K: DictKey<K>, V> Dict<K, V>
         index = index + 1
       bucket_index = bucket_index + 1
 
+  /// Appends values from another collection or sequence.
   api fn extend(~self, other: Dict<K, V>) -> void
     self.extend(entries: other.entries())
 
+  /// Appends values from another collection or sequence.
   api fn extend(~self, { entries: Sequence<(K, V)> }) -> void
     let ~iter = entries.iter()
     while true do:
@@ -191,12 +209,14 @@ impl<K: DictKey<K>, V> Dict<K, V>
         None:
           break
 
+  /// Returns a new dictionary containing entries from both inputs.
   api fn merged(self, { other: Dict<K, V> }) -> Dict<K, V>
     self.merged(
       other: other,
       on_conflict: (_key: K, _left: V, right: V) -> V => right
     )
 
+  /// Returns a new dictionary containing entries from both inputs.
   api fn merged(
     self,
     { other: Dict<K, V>, on_conflict: (key: K, left: V, right: V) -> V }
@@ -223,12 +243,14 @@ impl<K: DictKey<K>, V> Dict<K, V>
       bucket_index = bucket_index + 1
     out
 
+  /// Merges entries from another dictionary into this dictionary.
   api fn merge(~self, { other: Dict<K, V> }) -> void
     self.merge(
       other: other,
       on_conflict: (_key: K, _left: V, right: V) -> V => right
     )
 
+  /// Merges entries from another dictionary into this dictionary.
   api fn merge(
     ~self,
     { other: Dict<K, V>, on_conflict: (key: K, left: V, right: V) -> V }
@@ -253,6 +275,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
         index = index + 1
       bucket_index = bucket_index + 1
 
+  /// Transforms each value and keeps the original keys.
   api fn map<U>(self, { map f: (key: K, value: V) -> U }) -> Dict<K, U>
     if self.count == 0 then:
       return Dict<K, U>::init()
@@ -272,6 +295,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       bucket_index = bucket_index + 1
     out
 
+  /// Returns a collection containing only values that satisfy the predicate.
   api fn filter(self, { where pred: (key: K, value: V) -> bool }) -> Dict<K, V>
     if self.count == 0 then:
       return self
@@ -292,6 +316,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       bucket_index = bucket_index + 1
     out
 
+  /// Returns an entry handle for in-place updates on a specific key.
   api fn entry(self, { key: K }) -> DictEntry<K, V>
     DictEntry<K, V> { dict: self, key: key }
 
@@ -320,6 +345,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     self
 
 impl<K: DictKey<K>, V> DictEntry<K, V>
+  /// Inserts the default value when the entry is vacant and returns the dictionary.
   api fn or_insert(self, { default: V }) -> Dict<K, V>
     if self.dict.contains_key(key: self.key) then:
       return self.dict
@@ -328,6 +354,7 @@ impl<K: DictKey<K>, V> DictEntry<K, V>
     next.set(key: self.key, value: default)
     next
 
+  /// Lazily inserts a computed value when the entry is vacant and returns the dictionary.
   api fn or_insert_with(self, { make: () -> V }) -> Dict<K, V>
     if self.dict.contains_key(key: self.key) then:
       return self.dict
@@ -336,6 +363,7 @@ impl<K: DictKey<K>, V> DictEntry<K, V>
     next.set(key: self.key, value: make())
     next
 
+  /// Applies a modifier function to the value when the entry already exists.
   api fn and_modify(self, { f: (value: V) -> V }) -> DictEntry<K, V>
     let ~next = self.dict
     match(next.get(key: self.key))
@@ -345,19 +373,23 @@ impl<K: DictKey<K>, V> DictEntry<K, V>
         void
     DictEntry<K, V> { dict: next, key: self.key }
 
+  /// Removes and returns a value when present.
   api fn remove(self) -> Optional<V>
     let ~next = self.dict
     next.remove(key: self.key)
 
 impl<K: DictKey<K>, V> SubscriptRead<K, Optional<V>> for Dict<K, V>
+  /// Returns the value addressed by subscript syntax.
   api fn subscript_get(self, key: K) -> Optional<V>
     self.get(key: key)
 
 impl<K: DictKey<K>, V> SubscriptWrite<K, V> for Dict<K, V>
+  /// Updates the value addressed by subscript syntax.
   api fn subscript_set(~self, key: K, value: V) -> void
     self.set(key: key, value: value)
 
 impl<T> Array<T>
+  /// Groups sequence values by key and returns grouped arrays.
   api fn group_by<K: DictKey<K>>(self, { key f: (value: T) -> K }) -> Dict<K, Array<T>>
     let ~out = Dict<K, Array<T>>::with_capacity(size: self.len())
     var index = 0
@@ -380,9 +412,11 @@ impl<T> Array<T>
     out
 
 impl DictKey<String> for String
+  /// Returns the hash code used for dictionary key bucketing.
   api fn dict_hash(self) -> i32
     self.hash_i32()
 
+  /// Compares this key with another key for dictionary equality.
   api fn dict_eq(self, { other: String }) -> bool
     self == other
 
