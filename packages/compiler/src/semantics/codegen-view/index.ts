@@ -887,9 +887,6 @@ export const buildProgramCodegenView = (
   const getProgramFunctionId = (ref: SymbolRef): ProgramFunctionId | undefined =>
     symbols.tryIdOf(canonicalSymbolRef(ref));
 
-  const programSymbolIdOf = (moduleId: string, symbol: SymbolId): ProgramSymbolId =>
-    symbols.idOf({ moduleId, symbol });
-
   const canonicalProgramSymbolIdOf = (
     moduleId: string,
     symbol: SymbolId
@@ -994,7 +991,7 @@ export const buildProgramCodegenView = (
     });
 
     mod.typing.traitMethodImpls.forEach((info, symbol) => {
-      const key = programSymbolIdOf(mod.moduleId, symbol);
+      const key = canonicalProgramSymbolIdOf(mod.moduleId, symbol);
       traitMethodImpls.set(
         key,
         toCodegenTraitMethodImpl({
@@ -1349,6 +1346,92 @@ export const buildProgramCodegenView = (
     seenTraitImplTemplates.add(template.implSymbol);
     return true;
   });
+  const describeProgramSymbol = (id: ProgramSymbolId): string => {
+    const ref = symbols.refOf(id);
+    const name = symbols.getName(id) ?? `${ref.symbol}`;
+    return `${ref.moduleId}::${name}`;
+  };
+  const assertTraitDispatchConsistency = (): void => {
+    const registrationsByImplMethod = new Map<
+      ProgramSymbolId,
+      { traitSymbol: ProgramSymbolId; traitMethodSymbol: ProgramSymbolId; source: string }[]
+    >();
+    const registerRegistration = ({
+      implMethod,
+      traitSymbol,
+      traitMethodSymbol,
+      source,
+    }: {
+      implMethod: ProgramSymbolId;
+      traitSymbol: ProgramSymbolId;
+      traitMethodSymbol: ProgramSymbolId;
+      source: string;
+    }): void => {
+      const bucket = registrationsByImplMethod.get(implMethod) ?? [];
+      bucket.push({ traitSymbol, traitMethodSymbol, source });
+      registrationsByImplMethod.set(implMethod, bucket);
+    };
+
+    uniqueTraitImplTemplates.forEach((template) => {
+      template.methods.forEach(({ traitMethod, implMethod }) =>
+        registerRegistration({
+          implMethod,
+          traitSymbol: template.traitSymbol,
+          traitMethodSymbol: traitMethod,
+          source: `template ${describeProgramSymbol(template.implSymbol)}`,
+        }),
+      );
+    });
+
+    traitImplsByNominal.forEach((impls, nominal) => {
+      impls.forEach((impl) => {
+        impl.methods.forEach(({ traitMethod, implMethod }) =>
+          registerRegistration({
+            implMethod,
+            traitSymbol: impl.traitSymbol,
+            traitMethodSymbol: traitMethod,
+            source: `nominal ${nominal} impl ${describeProgramSymbol(impl.implSymbol)}`,
+          }),
+        );
+      });
+    });
+
+    registrationsByImplMethod.forEach((registrations, implMethod) => {
+      const metadata = traitMethodImpls.get(implMethod);
+      if (!metadata) {
+        throw new Error(
+          [
+            "missing trait method mapping for impl method",
+            `impl method: ${describeProgramSymbol(implMethod)}`,
+            `registered by: ${registrations
+              .map((entry) => entry.source)
+              .join(", ")}`,
+          ].join("\n"),
+        );
+      }
+      const metadataTraitMatches = registrations.some(
+        ({ traitSymbol }) => traitSymbol === metadata.traitSymbol,
+      );
+      if (metadataTraitMatches) {
+        return;
+      }
+      const registrationsText = registrations
+        .map(
+          ({ traitSymbol, traitMethodSymbol, source }) =>
+            `trait=${describeProgramSymbol(traitSymbol)}, method=${describeProgramSymbol(traitMethodSymbol)} (${source})`,
+        )
+        .join("; ");
+      throw new Error(
+        [
+          "trait dispatch metadata points to a different trait than impl registrations",
+          `impl method: ${describeProgramSymbol(implMethod)}`,
+          `metadata: trait=${describeProgramSymbol(metadata.traitSymbol)}, method=${describeProgramSymbol(metadata.traitMethodSymbol)}`,
+          `registrations: ${registrationsText}`,
+        ].join("\n"),
+      );
+    });
+  };
+  assertTraitDispatchConsistency();
 
   allInstances.sort((a, b) => a.instanceId - b.instanceId);
 

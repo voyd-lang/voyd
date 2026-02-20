@@ -15,7 +15,6 @@ import {
 } from "./fixed-array-types.js";
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
-import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import { pickTraitImplMethodMeta } from "./function-lookup.js";
 import type {
   CodegenContext,
@@ -42,6 +41,10 @@ import { buildInstanceSubstitution } from "./type-substitution.js";
 import { getSccContainingRoot } from "./graph/scc.js";
 import { emitRecursiveStructuralHeapTypeGroup } from "./structural-heap-type-emitter.js";
 import { typeContainsUnresolvedParam } from "../semantics/type-utils.js";
+import {
+  traitDispatchHash,
+  traitDispatchSignatureKey,
+} from "./trait-dispatch-key.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -229,14 +232,6 @@ const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
   ctx.program.symbols.getName(
     ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol }),
   ) ?? `${symbol}`;
-
-const traitMethodHash = ({
-  traitSymbol,
-  methodSymbol,
-}: {
-  traitSymbol: number;
-  methodSymbol: number;
-}): number => murmurHash3(`${traitSymbol}:${methodSymbol}`);
 
 export const getClosureTypeInfo = (
   typeId: TypeId,
@@ -1565,11 +1560,14 @@ const createMethodLookupEntries = ({
       );
       const heapType = bin._BinaryenFunctionGetType(wrapper);
       const fnType = bin._BinaryenTypeFromHeapType(heapType, false);
-      const hash = traitMethodHash({
+      const hash = traitDispatchHash({
         traitSymbol: hashTraitSymbol,
-        methodSymbol: hashTraitMethod,
+        traitMethodSymbol: hashTraitMethod,
       });
-      const signatureKey = `${hashTraitSymbol}:${hashTraitMethod}`;
+      const signatureKey = traitDispatchSignatureKey({
+        traitSymbol: hashTraitSymbol,
+        traitMethodSymbol: hashTraitMethod,
+      });
       const existing = hashes.get(hash);
       if (existing && existing !== signatureKey) {
         throw new Error(
