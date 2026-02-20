@@ -379,7 +379,7 @@ pub fn main() -> i32
   match(coffee)
     Coffee { size }:
       size
-    Tea:
+    Drink::Tea:
       0
 `,
     });
@@ -396,6 +396,133 @@ pub fn main() -> i32
 
     expect(combinedDiagnostics).toHaveLength(0);
     expect(mainSemantics?.binding.imports.map((entry) => entry.name)).toContain("Coffee");
+  });
+
+  it("supports generic enum namespace single-member imports via use Drink::Coffee", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}drinks.voyd`]: `
+pub obj Coffee<T> { size: T }
+pub obj Tea<T> { size: T }
+pub obj Water {}
+pub type Drink<T> = Coffee<T> | Tea<T> | Water
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::drinks::{ Drink }
+use Drink::Coffee
+
+pub fn main() -> i32
+  let drink: Drink<i32> = Coffee<i32> { size: 8 }
+  match(drink)
+    Coffee { size }:
+      size
+    Drink::Tea:
+      0
+    Drink::Water:
+      0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const mainSemantics = semantics.get("src::main");
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+
+    expect(combinedDiagnostics).toHaveLength(0);
+    expect(mainSemantics?.binding.imports.map((entry) => entry.name)).toContain("Coffee");
+  });
+
+  it("supports generic enum namespace grouped member imports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}drinks.voyd`]: `
+pub obj Coffee<T> { size: T }
+pub obj Tea<T> { size: T }
+pub obj Water {}
+pub type Drink<T> = Coffee<T> | Tea<T> | Water
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::drinks::{ Drink }
+use Drink::{ Coffee, Tea, Water }
+
+pub fn main() -> i32
+  let drink: Drink<i32> = Tea<i32> { size: 8 }
+  match(drink)
+    Coffee:
+      0
+    Tea { size }:
+      size
+    Water:
+      0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const mainSemantics = semantics.get("src::main");
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    const importNames = new Set(
+      mainSemantics?.binding.imports.map((entry) => entry.name) ?? [],
+    );
+
+    expect(combinedDiagnostics).toHaveLength(0);
+    expect(importNames.has("Coffee")).toBe(true);
+    expect(importNames.has("Tea")).toBe(true);
+    expect(importNames.has("Water")).toBe(true);
+  });
+
+  it("supports generic enum namespace all imports via use Drink::all", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}drinks.voyd`]: `
+pub obj Coffee<T> { size: T }
+pub obj Tea<T> { size: T }
+pub obj Water {}
+pub type Drink<T> = Coffee<T> | Tea<T> | Water
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::drinks::{ Drink }
+use Drink::all
+
+pub fn main() -> i32
+  let drink: Drink<i32> = Coffee<i32> { size: 8 }
+  match(drink)
+    Coffee { size }:
+      size
+    Tea:
+      0
+    Water:
+      0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const mainSemantics = semantics.get("src::main");
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    const importNames = new Set(
+      mainSemantics?.binding.imports.map((entry) => entry.name) ?? [],
+    );
+
+    expect(combinedDiagnostics).toHaveLength(0);
+    expect(importNames.has("Coffee")).toBe(true);
+    expect(importNames.has("Tea")).toBe(true);
+    expect(importNames.has("Water")).toBe(true);
   });
 
   it("allows explicit std submodule enum namespace member imports", async () => {

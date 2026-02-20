@@ -921,11 +921,12 @@ const hydrateImportedEnumAliasNamespace = ({
         entry.target?.moduleId === importedModuleId &&
         entry.target.symbol === exported.symbol,
     )?.local;
+    const hiddenImportName = `__enum_ns_${implicitEnumNamespaceImportId++}_${variantName}`;
     const local =
       typeof existing === "number"
         ? existing
         : ctx.symbolTable.declare({
-            name: `__enum_ns_${implicitEnumNamespaceImportId++}_${variantName}`,
+            name: hiddenImportName,
             kind: exported.kind,
             declaredAt: declaredAt.syntaxId,
             metadata: {
@@ -939,6 +940,15 @@ const hydrateImportedEnumAliasNamespace = ({
               ) ?? {}),
             },
           });
+    if (typeof existing !== "number") {
+      ctx.imports.push({
+        name: hiddenImportName,
+        local,
+        target: { moduleId: importedModuleId, symbol: exported.symbol },
+        visibility: moduleVisibility(),
+        span: toSourceSpan(declaredAt),
+      });
+    }
 
     bucket.set(variantName, new Set([local]));
     changed = true;
