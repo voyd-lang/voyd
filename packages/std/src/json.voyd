@@ -1,0 +1,64 @@
+use std::array::Array
+use std::dict::Dict
+use std::result::types::{ Result, Err }
+use std::string::{ String, StringSlice, new_string }
+
+/// Error returned from JSON parsing.
+pub obj JsonError {
+  /// Human-readable error detail.
+  api message: String
+}
+
+/// JSON null value.
+pub obj JsonNull {}
+
+/// JSON boolean value.
+pub obj JsonBool {
+  /// Stored boolean value.
+  api value: bool
+}
+
+/// JSON numeric value.
+pub obj JsonNumber {
+  /// Stored number value.
+  api value: f64
+}
+
+/// JSON string value.
+pub obj JsonString {
+  /// Stored string value.
+  api value: String
+}
+
+/// JSON array value.
+pub obj JsonArray {
+  /// Stored array value.
+  api value: Array<JsonValue>
+}
+
+/// JSON object value.
+pub obj JsonObject {
+  /// Stored object fields.
+  api value: Dict<String, JsonValue>
+}
+
+/// JSON tagged union value.
+pub type JsonValue = JsonNull | JsonBool | JsonNumber | JsonString | JsonArray | JsonObject
+
+/// Parses a JSON string into a `JsonValue`.
+pub fn parse({ s: StringSlice }) -> Result<JsonValue, JsonError>
+  let _input = s
+  Err<JsonError> {
+    error: JsonError {
+      message: "std::json::parse is specified but not implemented yet"
+    }
+  }
+
+/// Serializes a `JsonValue` to compact JSON text.
+pub fn stringify({ value: JsonValue }) -> String
+  let _value = value
+  "std::json::stringify is specified but not implemented yet"
+
+/// Serializes a `JsonValue` to pretty JSON text.
+pub fn stringify_pretty({ value: JsonValue }) -> String
+  stringify(value: value)

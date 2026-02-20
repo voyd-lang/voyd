@@ -1,0 +1,7 @@
+use std::string::String
+
+/// Error returned by byte-string decoders.
+pub obj DecodeError {
+  /// Human-readable error detail.
+  api message: String
+}

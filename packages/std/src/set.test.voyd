@@ -1,0 +1,46 @@
+use std::optional::types::all
+use std::string::type::{ new_string }
+use std::test::assertions::all
+
+test "set insert contains remove clear":
+  let ~values = Set<String>::init()
+  assert(values.is_empty(), eq: true)
+
+  assert(values.insert(value: "a"), eq: true)
+  assert(values.insert(value: "a"), eq: false)
+  assert(values.insert(value: "b"), eq: true)
+  assert(values.len(), eq: 2)
+  assert(values.contains(value: "a"), eq: true)
+  assert(values.contains(value: "z"), eq: false)
+
+  assert(values.remove(value: "a"), eq: true)
+  assert(values.remove(value: "a"), eq: false)
+  assert(values.contains(value: "a"), eq: false)
+
+  values.clear()
+  assert(values.len(), eq: 0)
+  assert(values.is_empty(), eq: true)
+
+test "set values returns iterable keys":
+  let ~values = Set<String>::init()
+  values.insert(value: "left")
+  values.insert(value: "right")
+
+  let ~iter = values.values().iter()
+  var count = 0
+  var has_left = false
+  var has_right = false
+  while true do:
+    match(iter.next())
+      Some<String> { value }:
+        count = count + 1
+        if value.equals("left") then:
+          has_left = true
+        if value.equals("right") then:
+          has_right = true
+      None:
+        break
+
+  assert(count, eq: 2)
+  assert(has_left, eq: true)
+  assert(has_right, eq: true)

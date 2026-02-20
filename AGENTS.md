@@ -24,7 +24,9 @@ Helpful commands:
 
 If you find additional information that can save you time later add it here.
 
-Additional note:
+Additional notes:
+- Companion tests (`*.test.voyd`) are merged into their companion module when `includeTests` is enabled. In companion tests, avoid importing the same module via `std::...`; reference companion symbols directly or module resolution can fail with `BD0001`.
+- For ASCII encoder outputs in stdlib modules, prefer `new_string(bytes.to_fixed_array())` over `from_utf8(bytes: ...)` to avoid hangs in downstream string operations in current runtime paths.
 - Symbol resolution now has explicit kind-aware APIs in `packages/compiler/src/semantics/binder/symbol-table.ts` (`resolveByKinds`, `resolveAllByKinds`, `resolveWhere`, `resolveAllWhere`).
 - Same-name effect ops and wrapper functions are supported. Value-position lookup excludes `effect-op` symbols, while handler-head lookup resolves `effect-op` symbols explicitly.
 - Do not reintroduce wrapper renaming/module-split workarounds for effect-op name collisions.
