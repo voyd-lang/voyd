@@ -986,4 +986,63 @@ pub fn main(): () -> bool
       }),
     ).not.toThrow();
   });
+
+  it("does not rewrite quoted `is` calls into type-check matches", () => {
+    const source = `
+pub fn 'is'({ left: i32, right: i32 }) -> bool
+  left == right
+
+pub fn main(): () -> bool
+  'is'(left: 1, right: 2)
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: "main.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") {
+      throw new Error("missing main symbol");
+    }
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol,
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) {
+      throw new Error("missing lowered main function");
+    }
+
+    const mainBody = hir.expressions.get(mainFn.body);
+    expect(mainBody?.exprKind).toBe("block");
+    if (!mainBody || mainBody.exprKind !== "block") {
+      throw new Error("main body is not a block");
+    }
+    const callExpr = hir.expressions.get(mainBody.value ?? -1);
+    expect(callExpr?.exprKind).toBe("call");
+
+    const hasMatchExpr = Array.from(hir.expressions.values()).some(
+      (expr) => expr.exprKind === "match",
+    );
+    expect(hasMatchExpr).toBe(false);
+  });
 });
