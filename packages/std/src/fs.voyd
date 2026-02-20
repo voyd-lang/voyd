@@ -1,0 +1,138 @@
+use std::array::Array
+use std::error::IoError
+use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::path::Path
+use std::result::types::all
+use std::string::type::{ String, StringSlice, new_string }
+
+@effect(id: "std::fs::Fs")
+pub eff Fs
+  read_bytes(tail, path: MsgPack) -> MsgPack
+  read_string(tail, path: MsgPack) -> MsgPack
+  write_bytes(tail, payload: MsgPack) -> MsgPack
+  write_string(tail, payload: MsgPack) -> MsgPack
+  exists(tail, path: MsgPack) -> bool
+  list_dir(tail, path: MsgPack) -> MsgPack
+
+pub fn read_bytes({ path: Path }): Fs -> Result<Array<i32>, IoError>
+  decode_read_bytes_result(Fs::read_bytes(encode_path(path)))
+
+pub fn read_string({ path: Path }): Fs -> Result<String, IoError>
+  decode_read_string_result(Fs::read_string(encode_path(path)))
+
+pub fn write_bytes({ path: Path, bytes: Array<i32> }): Fs -> Result<Unit, IoError>
+  let payload = encode_write_bytes_payload(path: path, bytes: bytes)
+  decode_write_result(Fs::write_bytes(payload))
+
+pub fn write_string({ path: Path, s: StringSlice }): Fs -> Result<Unit, IoError>
+  let payload = encode_write_string_payload(path: path, value: s.to_string())
+  decode_write_result(Fs::write_string(payload))
+
+pub fn exists({ path: Path }): Fs -> bool
+  Fs::exists(encode_path(path))
+
+pub fn list_dir({ path: Path }): Fs -> Result<Array<Path>, IoError>
+  decode_list_dir_result(Fs::list_dir(encode_path(path)))
+
+fn encode_path(path: Path): () -> MsgPack
+  msgpack::make_string(path.as_string())
+
+fn encode_write_bytes_payload({ path: Path, bytes: Array<i32> }): () -> MsgPack
+  HostDto::init()
+    .set("path", encode_path(path))
+    .set("bytes", encode_byte_array(bytes))
+    .pack()
+
+fn encode_write_string_payload({ path: Path, value: String }): () -> MsgPack
+  HostDto::init()
+    .set("path", encode_path(path))
+    .set("value", msgpack::make_string(value))
+    .pack()
+
+fn encode_byte_array(bytes: Array<i32>): () -> MsgPack
+  let ~encoded = Array<MsgPack>::with_capacity(bytes.len())
+  var index = 0
+  while index < bytes.len() do:
+    match(bytes.get(index))
+      Some<i32> { value }:
+        encoded.push(msgpack::make_i32(value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_array(encoded)
+
+fn decode_read_bytes_result(payload: MsgPack): () -> Result<Array<i32>, IoError>
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") == false then:
+    return Err<IoError> { error: decode_io_error(decoded) }
+
+  Ok<Array<i32>> { value: decode_byte_array(decoded.read_msgpack("value")) }
+
+fn decode_read_string_result(payload: MsgPack): () -> Result<String, IoError>
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") == false then:
+    return Err<IoError> { error: decode_io_error(decoded) }
+
+  Ok<String> { value: decoded.read_string("value") }
+
+fn decode_write_result(payload: MsgPack): () -> Result<Unit, IoError>
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") then:
+    return Ok<Unit> { value: Unit {} }
+  Err<IoError> { error: decode_io_error(decoded) }
+
+fn decode_list_dir_result(payload: MsgPack): () -> Result<Array<Path>, IoError>
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") == false then:
+    return Err<IoError> { error: decode_io_error(decoded) }
+
+  Ok<Array<Path>> { value: decode_path_array(decoded.read_msgpack("value")) }
+
+fn decode_io_error(payload: HostDto): () -> IoError
+  IoError {
+    code: payload.read_i32("code"),
+    message: payload.read_string("message")
+  }
+
+fn decode_byte_array(payload: MsgPack): () -> Array<i32>
+  let source = msgpack::unpack_array(payload)
+  let ~out = Array<i32>::with_capacity(source.len())
+  var index = 0
+  while index < source.len() do:
+    match(source.get(index))
+      Some<MsgPack> { value }:
+        out.push(normalize_byte(msgpack::unpack_i32(value)))
+      None:
+        void
+    index = index + 1
+  out
+
+fn decode_path_array(payload: MsgPack): () -> Array<Path>
+  let source = msgpack::unpack_array(payload)
+  let ~out = Array<Path>::with_capacity(source.len())
+  var index = 0
+  while index < source.len() do:
+    match(source.get(index))
+      Some<MsgPack> { value }:
+        value.match(path_value)
+          String:
+            out.push(Path::new(s: path_value.as_slice()))
+          else:
+            void
+      None:
+        void
+    index = index + 1
+  out
+
+fn normalize_byte(value: i32): () -> i32
+  mod_i32(value, 256)
+
+fn mod_i32(value: i32, modulus: i32) -> i32
+  if modulus <= 0 then:
+    return 0
+  let div = value / modulus
+  let rem = value - div * modulus
+  if rem < 0 then: rem + modulus else: rem
