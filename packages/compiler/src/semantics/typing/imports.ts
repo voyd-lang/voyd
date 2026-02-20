@@ -32,6 +32,7 @@ import {
   registerImportedTraitImplTemplates,
   translateFunctionSignature,
 } from "./imports-internal/index.js";
+import { hydrateImportedTraitMetadataForDependencySymbol } from "./import-trait-impl-hydration.js";
 
 export {
   createTypeTranslation,
@@ -92,15 +93,10 @@ export const resolveImportedValue = ({
     localSymbol: symbol,
     ctx,
   });
-  registerImportedTraitDecl({
+  hydrateImportedTraitMetadataForDependencySymbol({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
-    ctx,
-  });
-  registerImportedTraitImplTemplates({
-    dependency,
-    dependencySymbol: target.symbol,
     ctx,
   });
 
@@ -256,15 +252,10 @@ export const resolveImportedTypeExpr = ({
     localSymbol: symbol,
     ctx,
   });
-  registerImportedTraitDecl({
+  hydrateImportedTraitMetadataForDependencySymbol({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
-    ctx,
-  });
-  registerImportedTraitImplTemplates({
-    dependency,
-    dependencySymbol: target.symbol,
     ctx,
   });
 

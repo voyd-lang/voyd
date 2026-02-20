@@ -15,7 +15,6 @@ import {
 } from "./fixed-array-types.js";
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
-import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import { pickTraitImplMethodMeta } from "./function-lookup.js";
 import type {
   CodegenContext,
@@ -42,6 +41,10 @@ import { buildInstanceSubstitution } from "./type-substitution.js";
 import { getSccContainingRoot } from "./graph/scc.js";
 import { emitRecursiveStructuralHeapTypeGroup } from "./structural-heap-type-emitter.js";
 import { typeContainsUnresolvedParam } from "../semantics/type-utils.js";
+import {
+  traitDispatchHash,
+  traitDispatchSignatureKey,
+} from "./trait-dispatch-key.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -229,14 +232,6 @@ const getLocalSymbolName = (symbol: SymbolId, ctx: CodegenContext): string =>
   ctx.program.symbols.getName(
     ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol }),
   ) ?? `${symbol}`;
-
-const traitMethodHash = ({
-  traitSymbol,
-  methodSymbol,
-}: {
-  traitSymbol: number;
-  methodSymbol: number;
-}): number => murmurHash3(`${traitSymbol}:${methodSymbol}`);
 
 export const getClosureTypeInfo = (
   typeId: TypeId,
@@ -1465,6 +1460,11 @@ const createMethodLookupEntries = ({
   impls.forEach((impl) => {
     impl.methods.forEach(({ traitMethod, implMethod }) => {
       const implRef = ctx.program.symbols.refOf(implMethod as ProgramSymbolId);
+      const traitMethodImpl = ctx.program.traits.getTraitMethodImpl(
+        implMethod as ProgramSymbolId,
+      );
+      const hashTraitSymbol = traitMethodImpl?.traitSymbol ?? impl.traitSymbol;
+      const hashTraitMethod = traitMethodImpl?.traitMethodSymbol ?? traitMethod;
       const metas = ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
       const meta = resolveTraitImplMethodMeta({
         metas,
@@ -1523,7 +1523,7 @@ const createMethodLookupEntries = ({
       const params = meta.effectful
         ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
         : [ctx.rtt.baseType, ...userParamTypes];
-      const wrapperName = `${typeLabel}__method_${impl.traitSymbol}_${traitMethod}_${implRef.symbol}`;
+      const wrapperName = `${typeLabel}__method_${hashTraitSymbol}_${hashTraitMethod}_${implRef.symbol}`;
       const wrapper = ctx.mod.addFunction(
         wrapperName,
         binaryen.createType(params as number[]),
@@ -1560,11 +1560,14 @@ const createMethodLookupEntries = ({
       );
       const heapType = bin._BinaryenFunctionGetType(wrapper);
       const fnType = bin._BinaryenTypeFromHeapType(heapType, false);
-      const hash = traitMethodHash({
-        traitSymbol: impl.traitSymbol,
-        methodSymbol: traitMethod,
+      const hash = traitDispatchHash({
+        traitSymbol: hashTraitSymbol,
+        traitMethodSymbol: hashTraitMethod,
       });
-      const signatureKey = `${impl.traitSymbol}:${traitMethod}`;
+      const signatureKey = traitDispatchSignatureKey({
+        traitSymbol: hashTraitSymbol,
+        traitMethodSymbol: hashTraitMethod,
+      });
       const existing = hashes.get(hash);
       if (existing && existing !== signatureKey) {
         throw new Error(

@@ -1,6 +1,10 @@
 use std::optional::types::all
 use std::string::type::{ new_string }
 use std::test::assertions::all
+use std::traits::sequence::Sequence
+
+fn accepts_sequence({ values: Sequence<String> }) -> bool
+  true
 
 test "set insert contains remove clear":
   let ~values = Set<String>::init()
@@ -25,6 +29,8 @@ test "set values returns iterable keys":
   let ~values = Set<String>::init()
   values.insert(value: "left")
   values.insert(value: "right")
+
+  assert(accepts_sequence(values: values.values()), eq: true)
 
   let ~iter = values.values().iter()
   var count = 0
