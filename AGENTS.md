@@ -24,6 +24,13 @@ Helpful commands:
 
 If you find additional information that can save you time later add it here.
 
+Additional note:
+- Symbol resolution now has explicit kind-aware APIs in `packages/compiler/src/semantics/binder/symbol-table.ts` (`resolveByKinds`, `resolveAllByKinds`, `resolveWhere`, `resolveAllWhere`).
+- Same-name effect ops and wrapper functions are supported. Value-position lookup excludes `effect-op` symbols, while handler-head lookup resolves `effect-op` symbols explicitly.
+- Do not reintroduce wrapper renaming/module-split workarounds for effect-op name collisions.
+- Host boundary DTO compatibility is enforced at compile time for effect payloads. Allowed payload categories are: `bool`, `i32`, `i64`, `f32`, `f64`, `void`, or types annotated with `@serializer("msgpack", ...)`.
+- Unsupported host-boundary payload shapes should fail with clear `CG0001` diagnostics (not runtime traps). Keep API-to-DTO shim conversions at effect boundaries.
+
 # Testing
 
 - `npm test` (runs vitest suite). Always confirm this passes before finishing.

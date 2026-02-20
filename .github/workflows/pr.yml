@@ -3,6 +3,32 @@ name: Node.js CI
 on: [pull_request]
 
 jobs:
+  unused_symbols:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+      TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --include=optional
+      - run: npm run typecheck:unused
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -52,6 +78,10 @@ jobs:
       - name: Run CLI dist e2e
         if: steps.changes.outputs.cli == 'true'
         run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd/cli test -- src/__tests__/cli-e2e.test.ts
-      - name: Run typing benchmark
+      - name: Run typing benchmark regression gate
         if: steps.changes.outputs.compiler_semantics == 'true'
-        run: npm run --workspace @voyd/compiler bench:typing
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          TYPING_BENCH_MAX_REGRESSION_PCT: "15"
+        run: node scripts/ci/check-typing-bench-regression.mjs

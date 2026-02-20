@@ -228,7 +228,6 @@ pub fn main() -> i32
   });
 
   it("treats src imports as std-internal aliases when analyzing std modules", async () => {
-    const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
     const host = createMemoryHost({
       [`${stdRoot}${sep}msgpack.voyd`]:

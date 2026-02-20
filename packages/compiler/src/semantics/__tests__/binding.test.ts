@@ -18,7 +18,6 @@ import type {
 import type { ModuleExportTable } from "../modules.js";
 import { resolve, sep } from "node:path";
 import {
-  moduleVisibility,
   packageVisibility,
   publicVisibility,
 } from "../hir/index.js";
@@ -565,6 +564,31 @@ fn id<T: Animal>(value: T) -> T
           diag.message.includes("cannot declare add; overloads with this name"),
       ),
     ).toBe(true);
+  });
+
+  it("allows effect ops and wrapper functions to share names", () => {
+    const source = [
+      "eff Env",
+      "  get(resume, key: i32) -> i32",
+      "fn get(key: i32) -> i32",
+      "  Env::get(key)",
+    ].join("\n");
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+    });
+
+    expect(binding.diagnostics.some((diag) => diag.code === "BD0003")).toBe(
+      false,
+    );
   });
 
   it("rejects cross-package imports of package-visible exports", () => {

@@ -1,0 +1,17 @@
+obj Box { v: i32 }
+
+eff HostBridge
+  take_box(resume, raw: i32) -> i32
+
+fn box_to_host(value: Box): () -> i32
+  value.v
+
+fn box_from_host(raw: i32): () -> Box
+  Box { v: raw }
+
+pub fn take(value: Box): HostBridge -> Box
+  box_from_host(HostBridge::take_box(box_to_host(value)))
+
+pub fn main(): HostBridge -> i32
+  let out = take(Box { v: 41 })
+  out.v

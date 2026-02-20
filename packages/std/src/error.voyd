@@ -21,12 +21,12 @@ pub obj JsonError {
 }
 
 pub obj HostError {
-  api code: i32
+  api code: i32,
   api message: String
 }
 
 pub obj IoError {
-  api code: i32
+  api code: i32,
   api message: String
 }
 

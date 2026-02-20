@@ -10,7 +10,6 @@ import {
   isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import {
-  expectLabeledExpr,
   parseIfBranches,
   parseWhileConditionAndBody,
   toSourceSpan,
