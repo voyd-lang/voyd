@@ -74,13 +74,27 @@ export interface ModuleNode {
   macroExports?: readonly string[];
 }
 
-export interface ModuleDiagnostic {
-  kind: "missing-module" | "io-error";
-  message: string;
-  requested: ModulePath;
-  importer?: string;
-  span?: SourceSpan;
-}
+export type ModuleDiagnostic =
+  | {
+      kind: "missing-module";
+      requested: ModulePath;
+      importer?: string;
+      span?: SourceSpan;
+    }
+  | {
+      kind: "io-error";
+      message: string;
+      requested: ModulePath;
+      importer?: string;
+      span?: SourceSpan;
+    }
+  | {
+      kind: "reserved-module-segment";
+      segment: string;
+      requested: ModulePath;
+      importer?: string;
+      span?: SourceSpan;
+    };
 
 export interface ModuleGraph {
   entry: string;

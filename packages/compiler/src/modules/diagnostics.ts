@@ -37,6 +37,18 @@ export const moduleDiagnosticToDiagnostic = (
     });
   }
 
+  if (diagnostic.kind === "reserved-module-segment") {
+    return diagnosticFromCode({
+      code: "MD0005",
+      params: {
+        kind: "reserved-module-segment",
+        requested,
+        segment: diagnostic.segment,
+      },
+      span,
+    });
+  }
+
   const related =
     importer && importerSpan
       ? [
