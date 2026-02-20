@@ -76,6 +76,61 @@ export const enumNamespaceMemberTypeArgumentsFromMetadata = ({
   };
 };
 
+export const lowerEnumNamespaceMemberTypeArgumentsFromMetadata = <TypeExpr>({
+  source,
+  memberName,
+  namespaceTypeArguments,
+  lowerTypeArgument,
+  substituteTypeArgument,
+}: {
+  source?: Record<string, unknown>;
+  memberName: string;
+  namespaceTypeArguments?: readonly TypeExpr[];
+  lowerTypeArgument: (entry: Expr) => TypeExpr | undefined;
+  substituteTypeArgument: ({
+    typeArgument,
+    substitutionsByName,
+  }: {
+    typeArgument: TypeExpr;
+    substitutionsByName: ReadonlyMap<string, TypeExpr | undefined>;
+  }) => TypeExpr;
+}): {
+  typeArguments?: TypeExpr[];
+  consumeNamespaceTypeArguments: boolean;
+} => {
+  const metadata = enumNamespaceMemberTypeArgumentsFromMetadata({
+    source,
+    memberName,
+  });
+  if (!metadata) {
+    return { consumeNamespaceTypeArguments: false };
+  }
+
+  const substitutionsByName = new Map(
+    metadata.typeParameterNames.map((name, index) => [
+      name,
+      namespaceTypeArguments?.[index],
+    ]),
+  );
+  const lowered = metadata.typeArguments.flatMap((entry) => {
+    const typeArgument = lowerTypeArgument(entry);
+    if (!typeArgument) {
+      return [];
+    }
+    return [
+      substituteTypeArgument({
+        typeArgument,
+        substitutionsByName,
+      }),
+    ];
+  });
+
+  return {
+    typeArguments: lowered.length > 0 ? lowered : undefined,
+    consumeNamespaceTypeArguments: true,
+  };
+};
+
 export const enumVariantTypeNamesFromAliasTarget = (
   target: Expr | undefined,
 ): string[] | undefined => {

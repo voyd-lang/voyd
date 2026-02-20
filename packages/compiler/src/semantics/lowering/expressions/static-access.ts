@@ -23,7 +23,7 @@ import { resolveConstructorResolution, resolveTypeSymbol } from "../resolution.j
 import { lowerTypeExpr } from "../type-expressions.js";
 import { resolveModulePathSymbol } from "./namespace-resolution.js";
 import { lowerQualifiedTraitMethodCall } from "./qualified-trait-call.js";
-import { enumNamespaceMemberTypeArgumentsFromMetadata } from "../../enum-namespace.js";
+import { lowerEnumNamespaceMemberTypeArgumentsFromMetadata } from "../../enum-namespace.js";
 import { substituteTypeParametersInTypeExpr } from "../../hir/type-expr-substitution.js";
 
 export const lowerStaticAccessExpr = ({
@@ -361,36 +361,17 @@ const lowerEnumNamespaceMemberTypeArguments = ({
   consumeNamespaceTypeArguments: boolean;
 } => {
   const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
-  const metadata = enumNamespaceMemberTypeArgumentsFromMetadata({
+  return lowerEnumNamespaceMemberTypeArgumentsFromMetadata({
     source: namespaceRecord.metadata as Record<string, unknown> | undefined,
     memberName,
-  });
-  if (!metadata) {
-    return { consumeNamespaceTypeArguments: false };
-  }
-
-  const substitutionsByName = new Map(
-    metadata.typeParameterNames.map((name, index) => [
-      name,
-      namespaceTypeArguments?.[index],
-    ]),
-  );
-  const lowered = metadata.typeArguments.flatMap((entry) => {
-    const parsed = lowerTypeExpr(entry, ctx, scope);
-    if (!parsed) {
-      return [];
-    }
-    return [
+    namespaceTypeArguments,
+    lowerTypeArgument: (entry) => lowerTypeExpr(entry, ctx, scope),
+    substituteTypeArgument: ({ typeArgument, substitutionsByName }) =>
       substituteTypeParametersInTypeExpr({
-        typeExpr: parsed,
+        typeExpr: typeArgument,
         substitutionsByName,
       }),
-    ];
   });
-  return {
-    typeArguments: lowered.length > 0 ? lowered : undefined,
-    consumeNamespaceTypeArguments: true,
-  };
 };
 
 const lowerModuleQualifiedCall = ({
