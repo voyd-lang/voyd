@@ -1,10 +1,6 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  compileEffectFixture,
-  runEffectfulExport,
-  parseEffectTable,
-} from "./support/effects-harness.js";
+import { compileEffectFixture } from "./support/effects-harness.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -12,22 +8,18 @@ const fixturePath = resolve(
   "effects-export-object-arg-trap.voyd"
 );
 
-const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
+const compileFixture = () =>
+  compileEffectFixture({ entryPath: fixturePath, throwOnError: false });
 
 describe("effectful exports with non-i32 args", () => {
-  it("traps when an effect with unsupported args escapes to JS", async () => {
-    const { module } = await buildModule();
-    const parsed = parseEffectTable(module);
-    const op = parsed.ops[0];
-    if (!op) {
-      throw new Error("missing effect op entry");
-    }
-    await expect(
-      runEffectfulExport<number>({
-        wasm: module,
-        entryName: "main_effectful",
-        handlers: { [`${op.opIndex}`]: () => 1 },
-      })
-    ).rejects.toThrow();
+  it("fails codegen with a host-boundary payload compatibility diagnostic", async () => {
+    const result = await compileFixture();
+    const diagnostic = result.diagnostics.find(
+      (diag) =>
+        diag.code === "CG0001" &&
+        diag.message.includes("HostOnly.poke arg1") &&
+        diag.message.includes("Supported payload categories")
+    );
+    expect(diagnostic).toBeDefined();
   });
 });

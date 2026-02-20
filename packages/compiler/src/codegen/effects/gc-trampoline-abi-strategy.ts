@@ -11,6 +11,10 @@ import {
   ensureEffectsMemory,
 } from "./host-boundary.js";
 import { EFFECTS_HOST_BOUNDARY_STD_DEPS } from "./host-boundary/constants.js";
+import {
+  collectHostBoundaryPayloadViolations,
+  formatHostBoundaryPayloadViolation,
+} from "./host-boundary/payload-compatibility.js";
 import type { EffectsAbiStrategy } from "./codegen-backend.js";
 
 const hiddenHandlerParamType = (ctx: CodegenContext): binaryen.Type =>
@@ -71,6 +75,25 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
 
   ensureEffectsMemory(entryCtx);
   const signatures = collectEffectOperationSignatures(entryCtx, contexts);
+  const payloadViolations = collectHostBoundaryPayloadViolations({
+    signatures,
+    ctx: entryCtx,
+  });
+  if (payloadViolations.length > 0) {
+    payloadViolations.forEach((violation) => {
+      entryCtx.diagnostics.report(
+        diagnosticFromCode({
+          code: "CG0001",
+          params: {
+            kind: "codegen-error",
+            message: formatHostBoundaryPayloadViolation(violation),
+          },
+          span: violation.span,
+        })
+      );
+    });
+    return;
+  }
   const handleOutcome = createHandleOutcomeDynamic({
     ctx: entryCtx,
     runtime: entryCtx.effectsRuntime,

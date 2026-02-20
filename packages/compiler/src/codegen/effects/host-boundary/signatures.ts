@@ -1,5 +1,6 @@
 import binaryen from "binaryen";
 import type { CodegenContext } from "../../context.js";
+import type { SourceSpan } from "../../../diagnostics/types.js";
 import { wasmTypeFor } from "../../types.js";
 import type { EffectOpSignature } from "./types.js";
 import { stateFor } from "./state.js";
@@ -27,6 +28,19 @@ const sameTypeList = (
   right: readonly binaryen.Type[]
 ): boolean =>
   left.length === right.length && left.every((type, index) => type === right[index]);
+
+const buildEffectOpSpanMap = (
+  ctx: CodegenContext
+): Map<SymbolId, SourceSpan> => {
+  const spans = new Map<SymbolId, SourceSpan>();
+  ctx.module.hir.items.forEach((item) => {
+    if (item.kind !== "effect") return;
+    item.operations.forEach((op) => {
+      spans.set(op.symbol, op.span);
+    });
+  });
+  return spans;
+};
 
 const buildOwnerMap = (ctx: CodegenContext): Map<HirExprId, SymbolId> => {
   const ownerByExpr = new Map<HirExprId, SymbolId>();
@@ -75,6 +89,7 @@ export const collectEffectOperationSignatures = (
     contexts.forEach((siteCtx) => {
       const ownerByExpr = buildOwnerMap(siteCtx);
       const instances = instancesBySymbol(siteCtx);
+      const opSpans = buildEffectOpSpanMap(siteCtx);
 
       siteCtx.effectLowering.sites.filter(isPerformSite).forEach((site) => {
         const ownerSymbol = ownerByExpr.get(site.exprId);
@@ -118,6 +133,7 @@ export const collectEffectOperationSignatures = (
               returnTypeId: signature.returnType,
               argsType,
               label: opInfo.label,
+              span: opSpans.get(site.effectSymbol) ?? siteCtx.module.hir.module.span,
             });
             return;
           }

@@ -1,0 +1,35 @@
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::test::assertions::all
+
+test "trace with fields emits a msgpack payload":
+  let fields = make_fields()
+
+  let ~seen = Array<i32>::init()
+  let ~payload_sizes = Array<i32>::init()
+
+  try
+    trace(message: "hello".as_slice(), fields: fields)
+  Log::emit(tail, payload):
+    seen.push(value: 1)
+    let payload_map = msgpack::unpack_map(payload)
+    payload_sizes.push(value: payload_map.len())
+    tail()
+
+  assert(seen.len(), eq: 1)
+  match(payload_sizes.get(0))
+    Some<i32> { value: payload_size }:
+      assert(payload_size >= 3, eq: true)
+    None:
+      assert(false, eq: true)
+
+fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
+
+fn make_fields(): () -> LogFields
+  let ~fields = Array<LogField>::init()
+  fields.push(value: LogField {
+    key: "count",
+    value: LogInt { value: i64_from_i32(7) }
+  })
+  fields
