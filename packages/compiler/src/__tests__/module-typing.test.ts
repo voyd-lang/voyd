@@ -827,6 +827,104 @@ pub fn main() -> i32
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 
+  it("accepts imported trait assignments for concrete implementors in call and return positions", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::array::{ Array, with_capacity }
+pub use self::traits::sequence::{ Sequence }
+`,
+      [`${stdRoot}${sep}array.voyd`]: `
+use std::traits::sequence::all
+
+pub obj Array<T> { value: i32 }
+
+pub fn with_capacity<T>(n: i32) -> Array<T>
+  Array<T> { value: n }
+
+impl<T> Sequence<T> for Array<T>
+  fn marker(self) -> i32
+    self.value
+`,
+      [`${stdRoot}${sep}traits${sep}sequence.voyd`]: `
+pub trait Sequence<T>
+  fn marker(self) -> i32
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+fn consume({ seq: Sequence<i32> }) -> i32
+  1
+
+fn build() -> Sequence<i32>
+  with_capacity<i32>(4)
+
+pub fn main() -> i32
+  let value = with_capacity<i32>(3)
+  consume(seq: value) + consume(seq: build())
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("accepts imported trait assignments for concrete implementors with isolated interners", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::array::{ Array, with_capacity }
+pub use self::traits::sequence::{ Sequence }
+`,
+      [`${stdRoot}${sep}array.voyd`]: `
+use std::traits::sequence::all
+
+pub obj Array<T> { value: i32 }
+
+pub fn with_capacity<T>(n: i32) -> Array<T>
+  Array<T> { value: n }
+
+impl<T> Sequence<T> for Array<T>
+  fn marker(self) -> i32
+    self.value
+`,
+      [`${stdRoot}${sep}traits${sep}sequence.voyd`]: `
+pub trait Sequence<T>
+  fn marker(self) -> i32
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+fn consume({ seq: Sequence<i32> }) -> i32
+  1
+
+fn build() -> Sequence<i32>
+  with_capacity<i32>(4)
+
+pub fn main() -> i32
+  let value = with_capacity<i32>(3)
+  consume(seq: value) + consume(seq: build())
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModulesWithIsolatedInterners({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
   it("resolves imported instance methods inside module import cycles", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

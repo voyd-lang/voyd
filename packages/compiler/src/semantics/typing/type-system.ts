@@ -8,7 +8,11 @@ import type {
   HirFunctionTypeExpr,
   HirVisibility,
 } from "../hir/index.js";
-import { resolveImportedTypeExpr } from "./imports.js";
+import {
+  importTargetFor,
+  registerImportedTraitImplTemplates,
+  resolveImportedTypeExpr,
+} from "./imports.js";
 import type { SourceSpan, SymbolId, TypeId, TypeParamId } from "../ids.js";
 import {
   type UnificationContext,
@@ -2511,6 +2515,23 @@ const traitSatisfies = (
   const info = getObjectInfoForNominal(actualNominal, ctx, state);
   let impls = ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls;
   if (!impls || impls.length === 0) {
+    const actualNominalDesc = ctx.arena.get(actualNominal);
+    if (actualNominalDesc.kind === "nominal-object") {
+      const localOwner = localSymbolForSymbolRef(actualNominalDesc.owner, ctx);
+      if (typeof localOwner === "number") {
+        const target = importTargetFor(localOwner, ctx);
+        if (target) {
+          const dependency = ctx.dependencies.get(target.moduleId);
+          if (dependency) {
+            registerImportedTraitImplTemplates({
+              dependency,
+              dependencySymbol: target.symbol,
+              ctx,
+            });
+          }
+        }
+      }
+    }
     impls = instantiateTraitImplsFor({
       nominal: actualNominal,
       ctx,

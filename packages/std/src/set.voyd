@@ -1,5 +1,5 @@
-use std::array::Array
 use std::dict::{ Dict, DictKey }
+use std::traits::sequence::Sequence
 
 /// A hash-based set of unique values.
 pub obj Set<T> {
@@ -43,5 +43,5 @@ impl<T: DictKey<T>> Set<T>
     self.storage.clear()
 
   /// Returns all values in unspecified order.
-  api fn values(self) -> Array<T>
+  api fn values(self) -> Sequence<T>
     self.storage.keys()
