@@ -74,7 +74,7 @@ jobs:
       - run: npm ci --include=optional
       - run: npm run typecheck
       - run: npm run build
-      - run: VOYD_USE_DIST=1 npm test
+      - run: VOYD_USE_DIST=1 npx turbo run test --affected --output-logs=errors-only --concurrency=2
       - name: Run CLI dist e2e
         if: steps.changes.outputs.cli == 'true'
         run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd/cli test -- src/__tests__/cli-e2e.test.ts
