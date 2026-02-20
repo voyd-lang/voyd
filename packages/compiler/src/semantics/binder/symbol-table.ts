@@ -35,6 +35,11 @@ const ensureScopeExists = (
 
 type SymbolPredicate = (record: Readonly<SymbolRecord>) => boolean;
 
+const isImportedSymbolRecord = (record: SymbolRecord): boolean => {
+  const metadata = record.metadata as { import?: unknown } | undefined;
+  return metadata?.import !== undefined;
+};
+
 export class SymbolTable {
   private nextScope: ScopeId = 0;
   private nextSymbol: SymbolId = 0;
@@ -196,6 +201,16 @@ export class SymbolTable {
       if (hits && hits.length > 0) {
         for (let index = hits.length - 1; index >= 0; index -= 1) {
           const candidate = hits[index]!;
+          const record = this.symbolRecords[candidate];
+          if (!record || isImportedSymbolRecord(record)) {
+            continue;
+          }
+          if (!predicate || predicate(record)) {
+            return candidate;
+          }
+        }
+
+        for (const candidate of hits) {
           const record = this.symbolRecords[candidate];
           if (!record) {
             continue;

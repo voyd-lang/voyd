@@ -22,6 +22,7 @@ import {
 import { mergeBranchType } from "./branching.js";
 import type { TypingContext, TypingState } from "../types.js";
 import {
+  canonicalSymbolRefInTypingContext,
   canonicalSymbolRefForTypingContext,
   symbolRefKey as symbolRefKeyForTyping,
 } from "../symbol-ref-utils.js";
@@ -502,7 +503,9 @@ const collectNominalPatternHints = (
     if (nominalDesc.kind !== "nominal-object") {
       return;
     }
-    const ownerKey = symbolRefKeyForTyping(nominalDesc.owner);
+    const ownerKey = symbolRefKeyForTyping(
+      canonicalSymbolRefInTypingContext(nominalDesc.owner, ctx),
+    );
     const count = (counts.get(ownerKey) ?? 0) + 1;
     counts.set(ownerKey, count);
     if (count === 1) {
