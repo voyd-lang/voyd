@@ -1,0 +1,124 @@
+use std::array::Array
+use std::optional::types::all
+use std::string::type::{ String, StringSlice, new_string }
+
+pub obj Path {
+  raw: String
+}
+
+impl Path
+  api fn new({ s: StringSlice }) -> Path
+    Path { raw: s.to_string() }
+
+  api fn as_string(self) -> String
+    self.raw
+
+  api fn join(self, { child: StringSlice }) -> Path
+    let child_path = child.to_string()
+    if string_len(child_path) == 0 then:
+      return self
+    if starts_with_separator(child_path) then:
+      return Path { raw: child_path }
+
+    let base = self.raw
+    if string_len(base) == 0 then:
+      return Path { raw: child_path }
+
+    let combined =
+      if ends_with_separator(base) then:
+        concat_strings(base, child_path)
+      else:
+        concat_strings_with_separator(base, child_path)
+    Path { raw: combined }
+
+  api fn parent(self) -> Option<Path>
+    let end = trim_trailing_separators(self.raw)
+    if end <= 0 then:
+      return None {}
+
+    let separator = last_separator_before(self.raw, end)
+    if separator < 0 then:
+      return None {}
+    if separator == 0 then:
+      if end == 1 then:
+        return None {}
+      return Some<Path> { value: Path::new(s: "/".as_slice()) }
+
+    Some<Path> { value: Path { raw: self.raw.slice_bytes(0, separator) } }
+
+  api fn file_name(self) -> Option<String>
+    let end = trim_trailing_separators(self.raw)
+    if end <= 0 then:
+      return None {}
+
+    let separator = last_separator_before(self.raw, end)
+    let start = separator + 1
+    if start >= end then:
+      return None {}
+
+    Some<String> { value: self.raw.slice_bytes(start, end - start) }
+
+fn trim_trailing_separators(value: String) -> i32
+  let len = string_len(value)
+  if len == 0 then:
+    return 0
+
+  var end = len
+  while end > 1 do:
+    if byte_at_or(value, end - 1, -1) != 47 then:
+      break
+    end = end - 1
+  end
+
+fn last_separator_before(value: String, end_exclusive: i32) -> i32
+  if end_exclusive <= 0 then:
+    return -1
+
+  var index = end_exclusive - 1
+  while index >= 0 do:
+    if byte_at_or(value, index, -1) == 47 then:
+      return index
+    index = index - 1
+  -1
+
+fn starts_with_separator(value: String) -> bool
+  byte_at_or(value, 0, -1) == 47
+
+fn ends_with_separator(value: String) -> bool
+  let len = string_len(value)
+  if len == 0 then:
+    return false
+  byte_at_or(value, len - 1, -1) == 47
+
+fn byte_at_or(value: String, index: i32, fallback: i32) -> i32
+  match(value.byte_at(at: index))
+    Some<i32> { value: read }:
+      read
+    None:
+      fallback
+
+fn concat_strings(left: String, right: String): () -> String
+  let left_len = string_len(left)
+  let right_len = string_len(right)
+  let ~bytes = Array<i32>::with_capacity(left_len + right_len)
+  append_bytes(bytes, left.raw_bytes(), left_len)
+  append_bytes(bytes, right.raw_bytes(), right_len)
+  new_string(bytes.to_fixed_array())
+
+fn concat_strings_with_separator(left: String, right: String): () -> String
+  let left_len = string_len(left)
+  let right_len = string_len(right)
+  let ~bytes = Array<i32>::with_capacity(left_len + right_len + 1)
+  append_bytes(bytes, left.raw_bytes(), left_len)
+  bytes.push(47)
+  append_bytes(bytes, right.raw_bytes(), right_len)
+  new_string(bytes.to_fixed_array())
+
+fn string_len(value: String): () -> i32
+  value.as_slice().byte_len()
+
+fn append_bytes(~into: Array<i32>, source: FixedArray<i32>, count: i32) -> void
+  var index = 0
+  while index < count do:
+    into.push(__array_get(source, index))
+    index = index + 1

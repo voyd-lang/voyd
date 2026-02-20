@@ -1,0 +1,25 @@
+use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::string::type::{ String, new_string }
+
+pub fn host_ok_payload(): () -> MsgPack
+  HostDto::init()
+    .set("ok", msgpack::make_bool(true))
+    .pack()
+
+pub fn host_ok_with_value(value: MsgPack): () -> MsgPack
+  HostDto::init()
+    .set("ok", msgpack::make_bool(true))
+    .set("value", value)
+    .pack()
+
+pub fn host_error_payload({ code: i32, message: String }): () -> MsgPack
+  HostDto::init()
+    .set("ok", msgpack::make_bool(false))
+    .set("code", msgpack::make_i32(code))
+    .set("message", msgpack::make_string(message))
+    .pack()
+
+pub fn host_default_error_payload(): () -> MsgPack
+  host_error_payload(code: 1, message: "error")

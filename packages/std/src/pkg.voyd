@@ -17,6 +17,9 @@ pub self::error
 pub self::log
 pub self::time
 pub self::random
+pub self::env
+pub self::path
+pub self::fs
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::all
 pub std::result::types::{ Result, Ok, Err }

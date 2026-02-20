@@ -1,3 +1,9 @@
+use std::error::HostError
+use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::result::types::all
+use std::string::type::new_string
+
 pub obj Duration {
   millis: i64
 }
@@ -42,9 +48,23 @@ impl SystemTime
 pub eff Time
   monotonic_now_millis(tail) -> i64
   system_now_millis(tail) -> i64
-  sleep_millis(tail, ms: i64) -> void
+  sleep_millis(tail, ms: i64) -> MsgPack
 
-pub fn sleep({ duration: Duration }): Time -> void
-  Time::sleep_millis(duration.as_millis())
+pub fn sleep_millis({ ms: i64 }): Time -> Result<Unit, HostError>
+  decode_host_void_result(Time::sleep_millis(ms))
+
+pub fn sleep({ duration: Duration }): Time -> Result<Unit, HostError>
+  sleep_millis(ms: duration.as_millis())
+
+fn decode_host_void_result(payload: MsgPack): () -> Result<Unit, HostError>
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") then:
+    return Ok<Unit> { value: Unit {} }
+  Err<HostError> {
+    error: HostError {
+      code: decoded.read_i32("code"),
+      message: decoded.read_string("message")
+    }
+  }
 
 fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
