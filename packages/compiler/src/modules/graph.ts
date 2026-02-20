@@ -611,6 +611,12 @@ const parseModuleDirectives = (
 };
 
 const hasExplicitPreludeUse = ({ ast }: { ast: Form }): boolean => {
+  const hasPreludePrefix = (segments: readonly string[]): boolean =>
+    segments.length >= PRELUDE_MODULE_SEGMENTS.length &&
+    PRELUDE_MODULE_SEGMENTS.every(
+      (segment, index) => segments[index] === segment,
+    );
+
   const entries = formCallsInternal(ast, "ast") ? ast.rest : [];
   return entries.some((entry) => {
     if (!isForm(entry)) {
@@ -624,11 +630,8 @@ const hasExplicitPreludeUse = ({ ast }: { ast: Form }): boolean => {
 
     return parseUsePaths(topLevelDecl.pathExpr, toSourceSpan(entry)).some(
       (useEntry) =>
-        useEntry.selectionKind === "all" &&
-        useEntry.moduleSegments.length === PRELUDE_MODULE_SEGMENTS.length &&
-        useEntry.moduleSegments.every(
-          (segment, index) => segment === PRELUDE_MODULE_SEGMENTS[index],
-        ),
+        hasPreludePrefix(useEntry.moduleSegments) ||
+        hasPreludePrefix(useEntry.path),
     );
   });
 };

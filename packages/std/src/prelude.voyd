@@ -4,6 +4,5 @@ pub use std::result::types::{ Result }
 pub use std::traits::{ Eq, Ord, Hash, Default, Clone, Copy }
 pub use std::traits::{ Sequence, Iterator }
 
-pub use std::fmt::{ Debug, Display, format }
 pub use std::error::panic
 pub use std::test::assertions::{ assert }

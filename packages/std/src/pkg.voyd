@@ -2,7 +2,6 @@ pub self::optional
 pub self::result
 pub self::prelude
 pub self::error
-pub self::fmt
 pub self::version
 pub self::enums
 pub self::string
