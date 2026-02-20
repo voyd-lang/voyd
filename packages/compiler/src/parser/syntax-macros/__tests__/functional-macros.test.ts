@@ -113,6 +113,21 @@ wrap()
     ).toBe(true);
   });
 
+  test("calls recognizes internal identifier heads", () => {
+    const code = `\
+macro has_generics(type_expr)
+  let maybe_generics = type_expr.get(1)
+  if maybe_generics.calls(generics) then:
+    1
+  else:
+    0
+has_generics(Box<T>)
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain.at(-1)).toEqual("1");
+  });
+
   test("expands fn macro invocations", () => {
     const ast = parse(functionalMacrosVoydFile);
     const fibForm = toPlain(ast).at(-1);

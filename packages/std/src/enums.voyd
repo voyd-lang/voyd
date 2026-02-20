@@ -4,47 +4,89 @@ pub macro enum(enum_name, variants_block)
       if variant.length == 1 then:
         `($(variant.get(0)) {})
       else:
-        if variant.length <= 3 then:
-          variant
+        if variant.length == 2 then:
+          let second = variant.get(1)
+          if is_list(second) then:
+            if second.calls(generics) then:
+              variant.push(`({}))
+            else:
+              variant
+          else:
+            variant
         else:
-          panic("enum macro: expected `Name`, `Name { ... }`, or `Name<T> { ... }`")
+          if variant.length == 3 then:
+            variant
+          else:
+            panic("enum macro: expected `Name`, `Name { ... }`, or `Name<T> { ... }`")
     else:
       `($variant {})
 
-  let variant_type_ref = (variant) =>
-    if variant.length == 3 then:
-      variant.slice(0, 2)
-    else:
-      if variant.length == 2 then:
-        variant.get(0)
+  let variant_generics = (variant) =>
+    if is_list(variant) then:
+      if variant.length == 3 then:
+        let maybe_generics = variant.get(1)
+        if is_list(maybe_generics) then:
+          maybe_generics
+        else:
+          false
       else:
-        panic("enum macro: normalized variant missing type head")
+        false
+    else:
+      false
+
+  let infer_enum_generics = (variants) =>
+    if is_list(variants) then:
+      variants.reduce(false, (acc, variant) =>
+        if is_list(acc) then:
+          acc
+        else:
+          variant_generics(variant)
+      )
+    else:
+      false
+
+  let variant_type_ref = (variant) =>
+    if is_list(variant) then:
+      if variant.length == 3 then:
+        variant.slice(0, 2)
+      else:
+        if variant.length == 2 then:
+          variant.get(0)
+        else:
+          panic("enum macro: normalized variant missing type head")
+    else:
+      panic("enum macro: normalized variant is not a list")
 
   let variant_body = (variant) =>
-    if variant.length == 3 then:
-      variant.get(2)
-    else:
-      if variant.length == 2 then:
-        variant.get(1)
+    if is_list(variant) then:
+      if variant.length == 3 then:
+        variant.get(2)
       else:
-        panic("enum macro: normalized variant missing object body")
+        if variant.length == 2 then:
+          variant.get(1)
+        else:
+          panic("enum macro: normalized variant missing object body")
+    else:
+      panic("enum macro: normalized variant is not a list")
 
-  let infer_enum_head = (enum_name, first_variant) =>
+  let infer_enum_head = (enum_name, variants) =>
     if is_list(enum_name) then:
       enum_name
     else:
-      let first_type_ref = variant_type_ref(first_variant)
-      if is_list(first_type_ref) then:
-        `($enum_name $(first_type_ref.get(1)))
+      let inferred_generics = infer_enum_generics(variants)
+      if is_list(inferred_generics) then:
+        `($enum_name $inferred_generics)
       else:
         enum_name
 
   let raw_variants = variants_block.slice(1)
+  if not is_list(raw_variants) then:
+    panic("enum macro: variants block did not produce a list")
   if raw_variants.length == 0 then:
     panic("enum macro requires at least one variant")
 
   let variants = raw_variants.map(normalize_variant)
-  let enum_head = infer_enum_head(enum_name, variants.get(0))
+  let enum_head = infer_enum_head(enum_name, variants)
   let variant_type_refs = variants.map(variant_type_ref)
   let object_decls = variants.map((variant) =>
     `(obj $(variant_type_ref(variant)) $(variant_body(variant)))

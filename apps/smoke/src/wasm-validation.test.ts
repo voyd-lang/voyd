@@ -140,5 +140,15 @@ describe(
       const exports = instance.exports as Record<string, unknown>;
       expect((exports.main as () => number)()).toBe(20);
     });
+
+    it("supports generic enum inference regardless of variant order and generic unit variants", async () => {
+      const module = await compileToBinaryenModule(
+        fixturePath("enum-generic-variant-shapes.voyd"),
+      );
+      const wasm = assertRunnableWasm(module);
+      const instance = getWasmInstance(wasm);
+      const exports = instance.exports as Record<string, unknown>;
+      expect((exports.main as () => number)()).toBe(11);
+    });
   }
 );

@@ -405,7 +405,9 @@ export const createBuiltins = (
       const call = expectForm(args.at(0), "calls target");
       const label = expectIdentifier(args.at(1), "calls identifier");
       const target = call.at(0);
-      if (!isIdentifierAtom(target)) return bool(false);
+      if (!isIdentifierAtom(target) && !(target instanceof InternalIdentifierAtom)) {
+        return bool(false);
+      }
       return bool(target.value === label.value);
     },
     argWithLabel: ({ args }) => {
