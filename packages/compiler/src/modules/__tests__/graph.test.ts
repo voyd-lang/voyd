@@ -244,6 +244,32 @@ describe("buildModuleGraph", () => {
     );
   });
 
+  it("auto-imports std::prelude::all for inline src modules when std::prelude exists", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "mod nested\n  pub fn call() -> i32\n    answer()",
+      [`${stdRoot}${sep}prelude.voyd`]: "pub fn answer() -> i32\n  42",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const nested = graph.modules.get("src::main::nested");
+    expect(nested).toBeDefined();
+    const hasPreludeDependency = nested?.dependencies.some(
+      (dependency) =>
+        dependency.path.namespace === "std" &&
+        dependency.path.segments.length === 1 &&
+        dependency.path.segments[0] === "prelude"
+    );
+    expect(hasPreludeDependency).toBe(true);
+  });
+
   it("supports #!no_prelude to suppress implicit std::prelude import", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

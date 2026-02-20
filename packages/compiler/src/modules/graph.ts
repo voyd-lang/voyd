@@ -304,6 +304,8 @@ const loadFileModule = async ({
     ast,
     sourceByFile,
     moduleRange: { start: 0, end: source.length },
+    hasStdPreludeModule,
+    noPrelude,
   });
   const submoduleDeps = await discoverSubmodules({
     filePath,
@@ -343,11 +345,15 @@ const collectModuleInfo = ({
   ast,
   sourceByFile,
   moduleRange,
+  hasStdPreludeModule,
+  noPrelude,
 }: {
   modulePath: ModulePath;
   ast: Form;
   sourceByFile: ReadonlyMap<string, string>;
   moduleRange: { start: number; end: number };
+  hasStdPreludeModule: boolean;
+  noPrelude: boolean;
 }): ModuleInfo => {
   const dependencies: ModuleDependency[] = [];
   const inlineModules: ModuleNode[] = [];
@@ -409,6 +415,8 @@ const collectModuleInfo = ({
       form: entry,
       parentPath: modulePath,
       sourceByFile,
+      hasStdPreludeModule,
+      noPrelude,
       outerModuleDoc: (() => {
         const first = entry.at(0);
         const visibilityOffset =
@@ -459,6 +467,8 @@ const parseInlineModuleDecl = ({
   form,
   parentPath,
   sourceByFile,
+  hasStdPreludeModule,
+  noPrelude,
   outerModuleDoc,
 }: {
   decl: Extract<
@@ -468,6 +478,8 @@ const parseInlineModuleDecl = ({
   form: Form;
   parentPath: ModulePath;
   sourceByFile: ReadonlyMap<string, string>;
+  hasStdPreludeModule: boolean;
+  noPrelude: boolean;
   outerModuleDoc?: string;
 }): InlineModuleTree => {
   const modulePath = {
@@ -480,7 +492,12 @@ const parseInlineModuleDecl = ({
     sourceByFile.get(span.file) ??
     sourceByFile.values().next().value ??
     "";
-  const ast = toModuleAst(decl.body);
+  const ast = injectImplicitPreludeUse({
+    ast: toModuleAst(decl.body),
+    modulePath,
+    hasStdPreludeModule,
+    noPrelude,
+  });
   const moduleRangeStart = lineStartIndex(
     sourceForModule,
     (form.location?.startLine ?? decl.body.location?.startLine ?? 1) + 1,
@@ -493,6 +510,8 @@ const parseInlineModuleDecl = ({
       start: moduleRangeStart,
       end: decl.body.location?.endIndex ?? sourceForModule.length,
     },
+    hasStdPreludeModule,
+    noPrelude,
   });
 
   const node: ModuleNode = {
