@@ -22,6 +22,7 @@ import {
 } from "../method-signature-key.js";
 import { typeExprKey } from "./trait-method-matcher.js";
 import { registerTraitMethodImplMapping } from "./trait-method-impl-mapping.js";
+import { canonicalSymbolRefInTypingContext } from "./symbol-ref-utils.js";
 
 const targetTypeIncludesDependencySymbol = ({
   type,
@@ -800,6 +801,18 @@ export const mapDependencySymbolToLocal = ({
   ctx: TypingContext;
   allowUnexported?: boolean;
 }): SymbolId => {
+  const canonicalTargetFor = ({
+    moduleId,
+    symbol,
+  }: {
+    moduleId: string;
+    symbol: SymbolId;
+  }): { moduleId: string; symbol: SymbolId } =>
+    canonicalSymbolRefInTypingContext(
+      { moduleId, symbol },
+      ctx,
+    );
+
   const visit = (
     candidateOwner: SymbolId,
     candidateDependency: DependencySemantics,
@@ -813,8 +826,12 @@ export const mapDependencySymbolToLocal = ({
     }
     seen.add(key);
 
-    const aliases = ctx.importAliasesByModule.get(candidateDependency.moduleId);
-    const aliased = aliases?.get(candidateOwner);
+    const canonicalCandidate = canonicalTargetFor({
+      moduleId: candidateDependency.moduleId,
+      symbol: candidateOwner,
+    });
+    const aliases = ctx.importAliasesByModule.get(canonicalCandidate.moduleId);
+    const aliased = aliases?.get(canonicalCandidate.symbol);
     if (typeof aliased === "number") {
       return aliased;
     }
@@ -839,12 +856,11 @@ export const mapDependencySymbolToLocal = ({
       }
 
       if (allowUnexported === true) {
-        const recordName = record.name;
         const importableMetadata = importableMetadataFrom(
           record.metadata as Record<string, unknown> | undefined,
         );
         const declared = ctx.symbolTable.declare({
-          name: recordName,
+          name: record.name,
           kind: record.kind,
           declaredAt: ctx.hir.module.ast,
           metadata: {
@@ -855,11 +871,15 @@ export const mapDependencySymbolToLocal = ({
             ...(importableMetadata ?? {}),
           },
         });
+        const canonicalTarget = canonicalTargetFor({
+          moduleId: candidateDependency.moduleId,
+          symbol: candidateOwner,
+        });
         const bucket =
-          ctx.importAliasesByModule.get(candidateDependency.moduleId) ??
+          ctx.importAliasesByModule.get(canonicalTarget.moduleId) ??
           new Map();
-        bucket.set(candidateOwner, declared);
-        ctx.importAliasesByModule.set(candidateDependency.moduleId, bucket);
+        bucket.set(canonicalTarget.symbol, declared);
+        ctx.importAliasesByModule.set(canonicalTarget.moduleId, bucket);
         if (
           record.kind === "type" ||
           candidateDependency.typing.objects.getTemplate(candidateOwner)
@@ -894,14 +914,15 @@ export const mapDependencySymbolToLocal = ({
         ...(importableMetadata ?? {}),
       },
     });
-    ctx.importsByLocal.set(declared, {
+    const canonicalTarget = canonicalTargetFor({
       moduleId: candidateDependency.moduleId,
       symbol: candidateOwner,
     });
+    ctx.importsByLocal.set(declared, canonicalTarget);
     const bucket =
-      ctx.importAliasesByModule.get(candidateDependency.moduleId) ?? new Map();
-    bucket.set(candidateOwner, declared);
-    ctx.importAliasesByModule.set(candidateDependency.moduleId, bucket);
+      ctx.importAliasesByModule.get(canonicalTarget.moduleId) ?? new Map();
+    bucket.set(canonicalTarget.symbol, declared);
+    ctx.importAliasesByModule.set(canonicalTarget.moduleId, bucket);
     if (
       exportEntry.kind === "type" ||
       candidateDependency.typing.objects.getTemplate(candidateOwner)

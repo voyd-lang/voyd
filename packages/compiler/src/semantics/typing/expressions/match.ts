@@ -21,7 +21,10 @@ import {
 } from "../../../diagnostics/index.js";
 import { mergeBranchType } from "./branching.js";
 import type { TypingContext, TypingState } from "../types.js";
-import { localSymbolForSymbolRef } from "../symbol-ref-utils.js";
+import {
+  canonicalSymbolRefForTypingContext,
+  symbolRefKey as symbolRefKeyForTyping,
+} from "../symbol-ref-utils.js";
 import { bindPatternFromType, recordPatternType } from "./patterns.js";
 
 export const typeMatchExpr = (
@@ -470,9 +473,11 @@ type NominalPatternHint = {
   memberType: TypeId;
 };
 
+type NominalPatternOwnerKey = string;
+
 type NominalPatternHints = {
-  unique: Map<SymbolId, NominalPatternHint>;
-  ambiguous: Set<SymbolId>;
+  unique: Map<NominalPatternOwnerKey, NominalPatternHint>;
+  ambiguous: Set<NominalPatternOwnerKey>;
 };
 
 const collectNominalPatternHints = (
@@ -484,9 +489,9 @@ const collectNominalPatternHints = (
     return undefined;
   }
 
-  const counts = new Map<SymbolId, number>();
-  const unique = new Map<SymbolId, NominalPatternHint>();
-  const ambiguous = new Set<SymbolId>();
+  const counts = new Map<NominalPatternOwnerKey, number>();
+  const unique = new Map<NominalPatternOwnerKey, NominalPatternHint>();
+  const ambiguous = new Set<NominalPatternOwnerKey>();
 
   desc.members.forEach((member) => {
     const nominal = getNominalComponent(member, ctx);
@@ -497,17 +502,14 @@ const collectNominalPatternHints = (
     if (nominalDesc.kind !== "nominal-object") {
       return;
     }
-    const owner = localSymbolForSymbolRef(nominalDesc.owner, ctx);
-    if (typeof owner !== "number") {
-      return;
-    }
-    const count = (counts.get(owner) ?? 0) + 1;
-    counts.set(owner, count);
+    const ownerKey = symbolRefKeyForTyping(nominalDesc.owner);
+    const count = (counts.get(ownerKey) ?? 0) + 1;
+    counts.set(ownerKey, count);
     if (count === 1) {
-      unique.set(owner, { nominal, memberType: member });
+      unique.set(ownerKey, { nominal, memberType: member });
     } else {
-      unique.delete(owner);
-      ambiguous.add(owner);
+      unique.delete(ownerKey);
+      ambiguous.add(ownerKey);
     }
   });
 
@@ -645,14 +647,17 @@ const resolveMatchPatternType = ({
   }
 
   if (nominalSymbol && hints && !hasTypeArguments) {
-    const inferred = hints.unique.get(nominalSymbol);
+    const nominalOwnerKey = symbolRefKeyForTyping(
+      canonicalSymbolRefForTypingContext(nominalSymbol, ctx),
+    );
+    const inferred = hints.unique.get(nominalOwnerKey);
     if (inferred) {
       return inferred.memberType;
     }
 
     const template = ctx.objects.getTemplate(nominalSymbol);
     const isGeneric = (template?.params.length ?? 0) > 0;
-    if (isGeneric && hints.ambiguous.has(nominalSymbol)) {
+    if (isGeneric && hints.ambiguous.has(nominalOwnerKey)) {
       const related = discriminantSpan
         ? [
             diagnosticFromCode({
