@@ -1,7 +1,9 @@
 use std::string::new_string
 
+/// Returns the version of the standard library package.
 pub fn std_version() -> String
   "0.9.0"
 
+/// Returns the language version this standard library targets.
 pub fn language_version() -> String
   "0.9.0"

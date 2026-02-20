@@ -1,8 +1,11 @@
 use std::optional::types::Optional
 
 pub obj Range {
+  /// Optional starting index for the range.
   api start: Optional<i32>,
+  /// Optional ending index for the range.
   api end: Optional<i32>,
+  /// Whether the end index is included in the range.
   api include_end: bool
 }
 

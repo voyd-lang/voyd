@@ -15,25 +15,31 @@ pub obj LogError {}
 pub type LogLevel = LogTrace | LogDebug | LogInfo | LogWarn | LogError
 
 pub obj LogString {
+  /// String field payload.
   api value: String
 }
 
 pub obj LogInt {
+  /// Integer field payload.
   api value: i64
 }
 
 pub obj LogFloat {
+  /// Floating-point field payload.
   api value: f64
 }
 
 pub obj LogBool {
+  /// Boolean field payload.
   api value: bool
 }
 
 pub type LogFieldValue = LogString | LogInt | LogFloat | LogBool
 
 pub obj LogField {
+  /// Associated key for this entry.
   api key: String,
+  /// Log field payload.
   api value: LogFieldValue
 }
 
@@ -43,9 +49,11 @@ pub type LogFields = Array<LogField>
 pub eff Log
   emit(tail, payload: MsgPack) -> void
 
+/// Emits a trace-level log message.
 pub fn trace({ message: StringSlice }): Log -> void
   Log::emit(log_emit_payload(level: LogTrace {}, message: message.to_string(), fields: None {}))
 
+/// Emits a trace-level log message.
 pub fn trace({ message: StringSlice, fields: LogFields }): Log -> void
   Log::emit(log_emit_payload(
     level: LogTrace {},
@@ -53,9 +61,11 @@ pub fn trace({ message: StringSlice, fields: LogFields }): Log -> void
     fields: Some<LogFields> { value: fields }
   ))
 
+/// Emits a debug-level log message.
 pub fn debug({ message: StringSlice }): Log -> void
   Log::emit(log_emit_payload(level: LogDebug {}, message: message.to_string(), fields: None {}))
 
+/// Emits a debug-level log message.
 pub fn debug({ message: StringSlice, fields: LogFields }): Log -> void
   Log::emit(log_emit_payload(
     level: LogDebug {},
@@ -63,9 +73,11 @@ pub fn debug({ message: StringSlice, fields: LogFields }): Log -> void
     fields: Some<LogFields> { value: fields }
   ))
 
+/// Emits an info-level log message.
 pub fn info({ message: StringSlice }): Log -> void
   Log::emit(log_emit_payload(level: LogInfo {}, message: message.to_string(), fields: None {}))
 
+/// Emits an info-level log message.
 pub fn info({ message: StringSlice, fields: LogFields }): Log -> void
   Log::emit(log_emit_payload(
     level: LogInfo {},
@@ -73,9 +85,11 @@ pub fn info({ message: StringSlice, fields: LogFields }): Log -> void
     fields: Some<LogFields> { value: fields }
   ))
 
+/// Emits a warning-level log message.
 pub fn warn({ message: StringSlice }): Log -> void
   Log::emit(log_emit_payload(level: LogWarn {}, message: message.to_string(), fields: None {}))
 
+/// Emits a warning-level log message.
 pub fn warn({ message: StringSlice, fields: LogFields }): Log -> void
   Log::emit(log_emit_payload(
     level: LogWarn {},
@@ -83,9 +97,11 @@ pub fn warn({ message: StringSlice, fields: LogFields }): Log -> void
     fields: Some<LogFields> { value: fields }
   ))
 
+/// Emits an error-level log message.
 pub fn error({ message: StringSlice }): Log -> void
   Log::emit(log_emit_payload(level: LogError {}, message: message.to_string(), fields: None {}))
 
+/// Emits an error-level log message.
 pub fn error({ message: StringSlice, fields: LogFields }): Log -> void
   Log::emit(log_emit_payload(
     level: LogError {},

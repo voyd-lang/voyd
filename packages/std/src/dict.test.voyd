@@ -18,9 +18,11 @@ impl IntKey
     self.value == other.value
 
 impl DictKey<IntKey> for IntKey
+  /// Returns the hash code used for dictionary key bucketing.
   api fn dict_hash(self) -> i32
     self.value
 
+  /// Compares this key with another key for dictionary equality.
   api fn dict_eq(self, { other: IntKey }) -> bool
     self.value == other.value
 
@@ -29,9 +31,11 @@ obj CollidingKey {
 }
 
 impl DictKey<CollidingKey> for CollidingKey
+  /// Returns the hash code used for dictionary key bucketing.
   api fn dict_hash(self) -> i32
     7
 
+  /// Compares this key with another key for dictionary equality.
   api fn dict_eq(self, { other: CollidingKey }) -> bool
     self.value == other.value
 

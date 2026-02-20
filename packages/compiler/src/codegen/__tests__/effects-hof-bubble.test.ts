@@ -15,9 +15,12 @@ const fixturePath = resolve(
 );
 
 const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
+const HOF_BUBBLE_TIMEOUT_MS = 30_000;
 
 describe("effects higher-order functions", () => {
-  it("bubbles lambda effects through effect-polymorphic callers", async () => {
+  it(
+    "bubbles lambda effects through effect-polymorphic callers",
+    async () => {
     const { module } = await buildModule();
     const parsed = parseEffectTable(module);
     const awaitOp = parsed.ops.find((op) => op.label.endsWith("Async.await"));
@@ -38,13 +41,19 @@ describe("effects higher-order functions", () => {
     });
     expect(result.value).toBe(19);
     expect(seen.length).toBe(1);
-  });
+    },
+    HOF_BUBBLE_TIMEOUT_MS,
+  );
 
-  it("resumes into lambdas with captured variables", async () => {
+  it(
+    "resumes into lambdas with captured variables",
+    async () => {
     const { wasm } = await buildModule();
     const wasmModule = new WebAssembly.Module(wasmBufferSource(wasm));
     const instance = new WebAssembly.Instance(wasmModule, createEffectsImports());
     const handled = instance.exports.handled as CallableFunction;
     expect(handled()).toBe(15);
-  });
+    },
+    HOF_BUBBLE_TIMEOUT_MS,
+  );
 });

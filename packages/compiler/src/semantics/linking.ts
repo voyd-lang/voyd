@@ -20,7 +20,10 @@ import type { HirExprId, SymbolId, TypeId } from "./ids.js";
 import type { SymbolRef as ProgramSymbolRef } from "./program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "./canonical-symbol-ref.js";
 import type { SymbolRef as TypingSymbolRef } from "./typing/symbol-ref.js";
-import { parseSymbolRefKey } from "./typing/symbol-ref-utils.js";
+import {
+  canonicalizeSymbolRef,
+  parseSymbolRefKey,
+} from "./typing/symbol-ref-utils.js";
 
 export const monomorphizeProgram = ({
   modules,
@@ -426,12 +429,53 @@ const createTypingContextFactory = ({
       return undefined;
     }
 
+    const entrySymbolTable = getSymbolTable(entry);
+    const resolveImportTarget = (
+      ref: TypingSymbolRef,
+    ): TypingSymbolRef | undefined => {
+      const symbolTable = ref.moduleId === moduleId
+        ? entrySymbolTable
+        : dependencies.get(ref.moduleId)?.symbolTable;
+      if (!symbolTable) {
+        return undefined;
+      }
+      try {
+        const metadata = (symbolTable.getSymbol(ref.symbol).metadata ?? {}) as
+          | {
+              import?: {
+                moduleId?: unknown;
+                symbol?: unknown;
+              };
+            }
+          | undefined;
+        if (
+          typeof metadata?.import?.moduleId === "string" &&
+          typeof metadata.import.symbol === "number"
+        ) {
+          return {
+            moduleId: metadata.import.moduleId,
+            symbol: metadata.import.symbol,
+          };
+        }
+      } catch {
+        return undefined;
+      }
+      return undefined;
+    };
+
     const { importsByLocal, importAliasesByModule } = createImportMaps(
       entry.binding.imports,
+      {
+        canonicalizeTarget: (target) =>
+          canonicalizeSymbolRef({
+            ref: target,
+            resolveImportTarget,
+          }),
+      },
     );
 
     const ctx = createTypingContextFromTypingResult({
-      symbolTable: getSymbolTable(entry),
+      symbolTable: entrySymbolTable,
       hir: entry.hir,
       overloads: collectOverloadOptions(
         entry.binding.overloads,

@@ -6,90 +6,119 @@ use std::string::type::String
 pub use self::fns::MsgPack
 pub use self::types::{ Binary, Bool, F64, Null, Numeric }
 
+/// Returns a MessagePack null value.
 pub fn make_null(): () -> MsgPack
   msgpack_fns::make_null()
 
+/// Wraps a boolean as a MessagePack value.
 pub fn make_bool(value: bool): () -> MsgPack
   msgpack_fns::make_bool(value)
 
+/// Wraps a string as a MessagePack value.
 pub fn make_string(value: String): () -> MsgPack
   msgpack_fns::make_string(value)
 
+/// Wraps binary data as a MessagePack value.
 pub fn make_binary(value: Binary): () -> MsgPack
   msgpack_fns::make_binary(value)
 
+/// Wraps an array as a MessagePack value.
 pub fn make_array(value: Array<MsgPack>): () -> MsgPack
   msgpack_fns::make_array(value)
 
+/// Wraps a 32-bit float as a MessagePack value.
 pub fn make_f32(value: f32): () -> MsgPack
   msgpack_fns::make_f32(value)
 
+/// Wraps a 64-bit float as a MessagePack value.
 pub fn make_f64(value: f64): () -> MsgPack
   F64 { value }
 
+/// Wraps a 32-bit integer as a MessagePack value.
 pub fn make_i32(value: i32): () -> MsgPack
   msgpack_fns::make_i32(value)
 
+/// Wraps a 64-bit integer as a MessagePack value.
 pub fn make_i64(value: i64): () -> MsgPack
   msgpack_fns::make_i64(value)
 
+/// Wraps a string-keyed dictionary as a MessagePack map value.
 pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
   msgpack_fns::make_map(value)
 
+/// Extracts a boolean from a MessagePack value.
 pub fn unpack_bool(value: MsgPack): () -> bool
   msgpack_fns::unpack_bool(value)
 
+/// Extracts a string from a MessagePack value.
 pub fn unpack_string(value: MsgPack): () -> String
   msgpack_fns::unpack_string(value)
 
+/// Extracts binary data from a MessagePack value.
 pub fn unpack_binary(value: MsgPack): () -> Binary
   msgpack_fns::unpack_binary(value)
 
+/// Extracts an array from a MessagePack value.
 pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
   msgpack_fns::unpack_array(value)
 
+/// Extracts a 32-bit float from a MessagePack value.
 pub fn unpack_f32(value: MsgPack): () -> f32
   msgpack_fns::unpack_f32(value)
 
+/// Extracts a 64-bit float from a MessagePack value.
 pub fn unpack_f64(value: MsgPack): () -> f64
   msgpack_fns::unpack_f64(value)
 
+/// Extracts a 32-bit integer from a MessagePack value.
 pub fn unpack_i32(value: MsgPack): () -> i32
   msgpack_fns::unpack_i32(value)
 
+/// Extracts a 64-bit integer from a MessagePack value.
 pub fn unpack_i64(value: MsgPack): () -> i64
   msgpack_fns::unpack_i64(value)
 
+/// Extracts a string-keyed map from a MessagePack value.
 pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
   msgpack_fns::unpack_map(value)
 
+/// Alias for creating a MessagePack null value.
 pub fn pack_null(): () -> MsgPack
   make_null()
 
+/// Alias for creating a MessagePack boolean value.
 pub fn pack_bool(value: bool): () -> MsgPack
   make_bool(value)
 
+/// Alias for creating a MessagePack string value.
 pub fn pack_string(value: String): () -> MsgPack
   make_string(value)
 
+/// Alias for creating a MessagePack binary value.
 pub fn pack_binary(value: Binary): () -> MsgPack
   make_binary(value)
 
+/// Alias for creating a MessagePack array value.
 pub fn pack_array(value: Array<MsgPack>): () -> MsgPack
   make_array(value)
 
+/// Alias for creating a MessagePack 32-bit float value.
 pub fn pack_f32(value: f32): () -> MsgPack
   make_f32(value)
 
+/// Alias for creating a MessagePack 64-bit float value.
 pub fn pack_f64(value: f64): () -> MsgPack
   F64 { value }
 
+/// Alias for creating a MessagePack 32-bit integer value.
 pub fn pack_i32(value: i32): () -> MsgPack
   make_i32(value)
 
+/// Alias for creating a MessagePack 64-bit integer value.
 pub fn pack_i64(value: i64): () -> MsgPack
   make_i64(value)
 
+/// Alias for creating a MessagePack map value.
 pub fn pack_map(value: Dict<String, MsgPack>): () -> MsgPack
   make_map(value)
 
@@ -113,8 +142,10 @@ fn msgpack_map_set(map: Dict<String, MsgPack>, key: String, value: MsgPack): () 
   next.set(key: key, value: value)
   next
 
+/// Encodes a MessagePack value into a memory region and returns bytes written or `-1` on failure.
 pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
   msgpack_fns::encode_value(value, ptr, len)
 
+/// Decodes a MessagePack value from a memory region.
 pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
   msgpack_fns::decode_value(ptr, len)
