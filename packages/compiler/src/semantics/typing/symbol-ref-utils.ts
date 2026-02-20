@@ -122,6 +122,10 @@ export const localSymbolForSymbolRef = (
   ref: SymbolRef,
   ctx: TypingContext
 ): SymbolId | undefined => {
+  if (ref.moduleId === ctx.moduleId) {
+    return ref.symbol;
+  }
+
   const canonicalRef = canonicalSymbolRefInTypingContext(ref, ctx);
   if (canonicalRef.moduleId === ctx.moduleId) {
     return canonicalRef.symbol;

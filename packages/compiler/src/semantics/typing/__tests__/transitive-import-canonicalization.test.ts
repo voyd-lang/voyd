@@ -56,6 +56,14 @@ describe("transitive import canonicalization", () => {
         import: { moduleId: "dep::a", symbol: depASymbol },
       },
     });
+    const localAliasSymbol = localSymbolTable.declare({
+      name: "SomeAlias",
+      kind: "type",
+      declaredAt: 0,
+      metadata: {
+        import: { moduleId: "dep::a", symbol: depASymbol },
+      },
+    });
 
     const dependencyA = {
       moduleId: "dep::a",
@@ -76,6 +84,10 @@ describe("transitive import canonicalization", () => {
           local: localSymbol,
           target: { moduleId: "dep::a", symbol: depASymbol },
         },
+        {
+          local: localAliasSymbol,
+          target: { moduleId: "dep::a", symbol: depASymbol },
+        },
       ],
       availableSemantics: new Map([
         ["dep::a", dependencyA],
@@ -92,8 +104,17 @@ describe("transitive import canonicalization", () => {
       symbol: depBSymbol,
     });
     expect(
-      localSymbolForSymbolRef({ moduleId: "dep::b", symbol: depBSymbol }, ctx),
+      localSymbolForSymbolRef({ moduleId: "src::main", symbol: localSymbol }, ctx),
     ).toBe(localSymbol);
+    expect(
+      localSymbolForSymbolRef(
+        { moduleId: "src::main", symbol: localAliasSymbol },
+        ctx,
+      ),
+    ).toBe(localAliasSymbol);
+    expect(
+      localSymbolForSymbolRef({ moduleId: "dep::b", symbol: depBSymbol }, ctx),
+    ).toBe(localAliasSymbol);
     expect(
       mapLocalSymbolToDependency({
         owner: localSymbol,
