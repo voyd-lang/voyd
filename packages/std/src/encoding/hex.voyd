@@ -1,6 +1,7 @@
 use std::array::Array
 use std::bytes::ByteBuffer
 use std::bytes::Bytes
+use std::encoding::ascii::ascii_string_from_bytes
 use std::encoding::errors::DecodeError
 use std::optional::types::all
 use std::result::types::{ Result, Ok, Err }
@@ -20,7 +21,7 @@ pub fn encode({ bytes: Bytes }) -> String
     out.push(hex_digit_to_ascii(div_rem(value, 16).1))
     index = index + 1
 
-  string_from_ascii_bytes(out)
+  ascii_string_from_bytes(bytes: out)
 
 /// Decodes a hexadecimal string into bytes.
 pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
@@ -49,9 +50,6 @@ pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
     index = index + 2
 
   Ok<Bytes> { value: buffer.as_bytes() }
-
-fn string_from_ascii_bytes(bytes: Array<i32>) -> String
-  new_string(bytes.to_fixed_array())
 
 fn decode_error<T>(message: String) -> Result<T, DecodeError>
   Err<DecodeError> { error: DecodeError { message: message } }

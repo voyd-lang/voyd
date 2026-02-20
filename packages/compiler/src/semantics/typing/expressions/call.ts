@@ -2632,9 +2632,10 @@ const resolveFreeFunctionCandidates = ({
   methodName: string;
   ctx: TypingContext;
 }): MethodCallCandidate[] => {
-  const symbols = ctx.symbolTable.resolveAll(
+  const symbols = ctx.symbolTable.resolveAllByKinds(
     methodName,
     ctx.symbolTable.rootScope,
+    ["value"],
   );
   if (!symbols || symbols.length === 0) {
     return [];
@@ -2642,10 +2643,6 @@ const resolveFreeFunctionCandidates = ({
 
   return symbols
     .map((symbol) => {
-      const record = ctx.symbolTable.getSymbol(symbol);
-      if (record.kind !== "value") {
-        return undefined;
-      }
       const signature = ctx.functions.getSignature(symbol);
       if (!signature) {
         return undefined;

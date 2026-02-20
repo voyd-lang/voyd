@@ -13,6 +13,10 @@ pub self::encoding
 pub self::json
 pub self::set
 pub self::deque
+pub self::error
+pub self::log
+pub self::time
+pub self::random
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::all
 pub std::result::types::{ Result, Ok, Err }

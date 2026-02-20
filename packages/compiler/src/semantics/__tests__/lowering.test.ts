@@ -5,6 +5,7 @@ import { createHirBuilder } from "../hir/builder.js";
 import {
   type HirBlockExpr,
   type HirCallExpr,
+  type HirEffectHandlerExpr,
   type HirFieldAccessExpr,
   type HirFunction,
   type HirIdentifierExpr,
@@ -714,6 +715,62 @@ fn main()
     }
   });
 
+  it("resolves unqualified handler heads to effect-op symbols when wrappers share the name", () => {
+    const source = `eff Env
+  get(tail) -> i32
+
+fn get() -> i32
+  0
+
+fn main() -> i32
+  try
+    Env::get()
+  get(tail):
+    tail()`;
+    const ast = parse(source, "effect_op_resolution.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "effect_op_resolution.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+    });
+    const builder = createHirBuilder({
+      path: "effect_op_resolution.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) return;
+
+    const block = hir.expressions.get(mainFn.body) as HirBlockExpr;
+    const handlerExpr = hir.expressions.get(block.value!) as HirEffectHandlerExpr;
+    expect(handlerExpr.exprKind).toBe("effect-handler");
+    const handler = handlerExpr.handlers[0];
+    expect(handler).toBeDefined();
+    if (!handler) return;
+    expect(symbolTable.getSymbol(handler.operation).kind).toBe("effect-op");
+  });
+
   it("lowers traits and their default methods", () => {
     const name = "trait_area.voyd";
     const ast = loadAst(name);
@@ -928,5 +985,64 @@ pub fn main(): () -> bool
         isPackageRoot: binding.isPackageRoot,
       }),
     ).not.toThrow();
+  });
+
+  it("does not rewrite quoted `is` calls into type-check matches", () => {
+    const source = `
+pub fn 'is'({ left: i32, right: i32 }) -> bool
+  left == right
+
+pub fn main(): () -> bool
+  'is'(left: 1, right: 2)
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: "main.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") {
+      throw new Error("missing main symbol");
+    }
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol,
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) {
+      throw new Error("missing lowered main function");
+    }
+
+    const mainBody = hir.expressions.get(mainFn.body);
+    expect(mainBody?.exprKind).toBe("block");
+    if (!mainBody || mainBody.exprKind !== "block") {
+      throw new Error("main body is not a block");
+    }
+    const callExpr = hir.expressions.get(mainBody.value ?? -1);
+    expect(callExpr?.exprKind).toBe("call");
+
+    const hasMatchExpr = Array.from(hir.expressions.values()).some(
+      (expr) => expr.exprKind === "match",
+    );
+    expect(hasMatchExpr).toBe(false);
   });
 });

@@ -113,10 +113,12 @@ export const compileEffectFixture = async ({
   entryPath,
   extraEntries,
   codegenOptions,
+  throwOnError = true,
 }: {
   entryPath: string;
   extraEntries?: readonly string[];
   codegenOptions?: CodegenOptions;
+  throwOnError?: boolean;
 }) => {
   const host = createFsModuleHost();
   const srcRoot = dirname(entryPath);
@@ -157,7 +159,9 @@ export const compileEffectFixture = async ({
   const entryModuleId = graph.entry ?? entryPath;
   const result = codegenProgram({ program, entryModuleId, options: codegenOptions });
   const allDiagnostics = [...diagnostics, ...result.diagnostics];
-  throwIfErrors(allDiagnostics);
+  if (throwOnError) {
+    throwIfErrors(allDiagnostics);
+  }
 
   return {
     ...result,

@@ -1,0 +1,8 @@
+obj Box { v: i32 }
+
+eff HostOnly
+  roundtrip(resume, value: i32) -> Box
+
+pub fn main(): HostOnly -> i32
+  let box = HostOnly::roundtrip(1)
+  box.v

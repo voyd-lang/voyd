@@ -52,6 +52,9 @@ const overloadEntity = (record: SymbolRecord): string | undefined => {
 };
 
 const overloadAllowsSymbol = (record: SymbolRecord): boolean => {
+  if (record.kind === "effect-op") {
+    return true;
+  }
   const entity = overloadEntity(record);
   return entity === "function" || entity === "object";
 };

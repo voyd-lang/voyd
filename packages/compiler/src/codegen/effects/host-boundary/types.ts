@@ -1,5 +1,6 @@
 import type binaryen from "binaryen";
 import type { TypeId } from "../../../semantics/ids.js";
+import type { SourceSpan } from "../../../diagnostics/types.js";
 
 export type EffectOpSignature = {
   opIndex: number;
@@ -13,4 +14,5 @@ export type EffectOpSignature = {
   returnTypeId: TypeId;
   argsType?: binaryen.Type;
   label: string;
+  span: SourceSpan;
 };

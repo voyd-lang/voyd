@@ -1,3 +1,4 @@
+pub self::ascii
 pub self::errors
 pub self::hex
 pub self::base64
