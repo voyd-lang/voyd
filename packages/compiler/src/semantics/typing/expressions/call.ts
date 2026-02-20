@@ -75,9 +75,8 @@ import { createTranslation, translateFunctionSignature } from "../import-type-tr
 import { typingContextsShareInterners } from "../shared-interners.js";
 import {
   mapDependencySymbolToLocal,
-  registerImportedTraitDecl,
-  registerImportedTraitImplTemplates,
 } from "../import-symbol-mapping.js";
+import { hydrateImportedTraitMetadataForOwnerRef } from "../import-trait-impl-hydration.js";
 import { collectTraitOwnersFromTypeParams } from "../constraint-trait-owners.js";
 
 type SymbolNameResolver = (symbol: SymbolId) => string;
@@ -122,28 +121,10 @@ const ensureImportedConstraintTraitsForSignature = ({
   });
 
   owners.forEach((owner) => {
-    const traitDependency =
-      owner.moduleId === dependency.moduleId
-        ? dependency
-        : ctx.dependencies.get(owner.moduleId);
-    if (!traitDependency) {
-      return;
-    }
-    const localTraitSymbol = mapDependencySymbolToLocal({
-      owner: owner.symbol,
-      dependency: traitDependency,
-      ctx,
-      allowUnexported: true,
-    });
-    registerImportedTraitDecl({
-      dependency: traitDependency,
-      dependencySymbol: owner.symbol,
-      localSymbol: localTraitSymbol,
-      ctx,
-    });
-    registerImportedTraitImplTemplates({
-      dependency: traitDependency,
-      dependencySymbol: owner.symbol,
+    hydrateImportedTraitMetadataForOwnerRef({
+      ownerModuleId: owner.moduleId,
+      ownerSymbol: owner.symbol,
+      preferredDependency: dependency,
       ctx,
     });
   });

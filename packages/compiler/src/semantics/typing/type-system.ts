@@ -41,6 +41,7 @@ import {
 } from "./symbol-ref-utils.js";
 import { symbolRefEquals } from "./symbol-ref.js";
 import { emitDiagnostic } from "../../diagnostics/index.js";
+import { hydrateImportedTraitMetadataForNominal } from "./import-trait-impl-hydration.js";
 
 type UnifyWithBudgetOptions = Omit<UnificationContext, "stepBudget">;
 
@@ -2511,6 +2512,7 @@ const traitSatisfies = (
   const info = getObjectInfoForNominal(actualNominal, ctx, state);
   let impls = ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls;
   if (!impls || impls.length === 0) {
+    hydrateImportedTraitMetadataForNominal({ nominal: actualNominal, ctx });
     impls = instantiateTraitImplsFor({
       nominal: actualNominal,
       ctx,

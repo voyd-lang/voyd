@@ -93,6 +93,50 @@ impl Box
     expect((instance.exports.main as () => number)()).toBe(7);
   });
 
+  it("runs trait dispatch for imported upcasts through package re-exports", async () => {
+    const root = resolve("/proj/src");
+    const std = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use std::all
+
+fn consume(~seq: Sequence) -> i32
+  seq.measure()
+
+pub fn main() -> i32
+  consume(~make_array(41)) + 1
+`,
+      [`${std}${sep}pkg.voyd`]: `pub use self::array::{ Array, make_array }
+pub use self::traits::sequence::{ Sequence }
+`,
+      [`${std}${sep}array.voyd`]: `use std::traits::sequence::all
+
+pub obj Array {
+  value: i32
+}
+
+pub fn make_array(value: i32) -> Array
+  Array { value }
+
+impl Sequence for Array
+  fn measure(~self) -> i32
+    self.value
+`,
+      [`${std}${sep}traits${sep}sequence.voyd`]: `pub trait Sequence
+  fn measure(~self) -> i32
+`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root, std },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("links imported generic instantiations across modules", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");

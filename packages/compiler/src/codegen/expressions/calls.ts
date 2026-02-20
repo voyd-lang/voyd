@@ -36,12 +36,12 @@ import {
   structGetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
 import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
-import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 import { effectsFacade } from "../effects/facade.js";
 import { buildInstanceSubstitution } from "../type-substitution.js";
 import { compileOptionalNoneValue } from "../optionals.js";
 import { typeContainsUnresolvedParam } from "../../semantics/type-utils.js";
 import { resolveTempCaptureTypeId } from "../effects/temp-capture-types.js";
+import { traitDispatchHash } from "../trait-dispatch-key.js";
 
 const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
@@ -688,7 +688,10 @@ const compileTraitDispatchCall = ({
     LOOKUP_METHOD_ACCESSOR,
     [
       ctx.mod.i32.const(
-        traitMethodHash(mapping.traitSymbol, mapping.traitMethodSymbol)
+        traitDispatchHash({
+          traitSymbol: mapping.traitSymbol,
+          traitMethodSymbol: mapping.traitMethodSymbol,
+        })
       ),
       methodTable,
     ],
@@ -1554,9 +1557,6 @@ const compileCurriedClosureCall = ({
 
   return currentValue;
 };
-
-const traitMethodHash = (traitSymbol: number, methodSymbol: number): number =>
-  murmurHash3(`${traitSymbol}:${methodSymbol}`);
 
 const functionRefType = ({
   params,
