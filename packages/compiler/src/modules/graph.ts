@@ -601,7 +601,7 @@ const parseModuleDirectives = (
   let noPrelude = false;
   const sanitizedSource = source.replace(
     NO_PRELUDE_DIRECTIVE,
-    (full, prefix: string, directive: string) => {
+    (_full, prefix: string, directive: string) => {
       noPrelude = true;
       return `${prefix}${" ".repeat(directive.length)}`;
     },
