@@ -5,6 +5,7 @@ import { createHirBuilder } from "../hir/builder.js";
 import {
   type HirBlockExpr,
   type HirCallExpr,
+  type HirEffectHandlerExpr,
   type HirFieldAccessExpr,
   type HirFunction,
   type HirIdentifierExpr,
@@ -712,6 +713,62 @@ fn main()
     if (call.typeArguments?.[0]?.typeKind === "named") {
       expect(call.typeArguments[0].path).toEqual(["i32"]);
     }
+  });
+
+  it("resolves unqualified handler heads to effect-op symbols when wrappers share the name", () => {
+    const source = `eff Env
+  get(tail) -> i32
+
+fn get() -> i32
+  0
+
+fn main() -> i32
+  try
+    Env::get()
+  get(tail):
+    tail()`;
+    const ast = parse(source, "effect_op_resolution.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "effect_op_resolution.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+    });
+    const builder = createHirBuilder({
+      path: "effect_op_resolution.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope)!;
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) return;
+
+    const block = hir.expressions.get(mainFn.body) as HirBlockExpr;
+    const handlerExpr = hir.expressions.get(block.value!) as HirEffectHandlerExpr;
+    expect(handlerExpr.exprKind).toBe("effect-handler");
+    const handler = handlerExpr.handlers[0];
+    expect(handler).toBeDefined();
+    if (!handler) return;
+    expect(symbolTable.getSymbol(handler.operation).kind).toBe("effect-op");
   });
 
   it("lowers traits and their default methods", () => {

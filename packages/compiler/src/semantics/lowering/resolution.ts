@@ -11,14 +11,12 @@ export const resolveIdentifierValue = (
   ctx: LowerContext
 ): IdentifierResolution => {
   const name = identifier.name;
-  const symbols = ctx.symbolTable.resolveAll(name, scope);
-  const matchingSymbols = symbols.filter((symbol) => {
-    const record = ctx.symbolTable.getSymbol(symbol);
+  const resolved = ctx.symbolTable.resolveWhere(name, scope, (record) => {
     const meta = (record.metadata ?? {}) as { quotedName?: boolean };
     const declQuoted = meta.quotedName === true;
-    return identifier.isQuoted ? declQuoted : !declQuoted;
+    const quoteMatches = identifier.isQuoted ? declQuoted : !declQuoted;
+    return quoteMatches && record.kind !== "effect-op";
   });
-  const resolved = chooseValueSymbol(matchingSymbols, ctx);
   if (typeof resolved === "number") {
     const record = ctx.symbolTable.getSymbol(resolved);
     if (record.kind === "type") {
@@ -50,20 +48,6 @@ export const resolveIdentifierValue = (
   }
 
   return { kind: "symbol", name, symbol: resolved };
-};
-
-const chooseValueSymbol = (
-  symbols: readonly SymbolId[],
-  ctx: LowerContext,
-): SymbolId | undefined => {
-  if (symbols.length === 0) {
-    return undefined;
-  }
-  const preferred = symbols.find((symbol) => {
-    const record = ctx.symbolTable.getSymbol(symbol);
-    return record.kind !== "effect-op";
-  });
-  return preferred ?? symbols[0];
 };
 
 export const resolveSymbol = (

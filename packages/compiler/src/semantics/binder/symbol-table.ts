@@ -1,6 +1,7 @@
 import type { ScopeId, SymbolId } from "../ids.js";
 import type {
   ScopeInfo,
+  SymbolKind,
   SymbolRecord,
   SymbolTableInit,
   SymbolTableSnapshot,
@@ -31,6 +32,8 @@ const ensureScopeExists = (
 
   return bucket;
 };
+
+type SymbolPredicate = (record: Readonly<SymbolRecord>) => boolean;
 
 export class SymbolTable {
   private nextScope: ScopeId = 0;
@@ -132,12 +135,74 @@ export class SymbolTable {
   }
 
   resolve(name: string, fromScope: ScopeId): SymbolId | undefined {
+    return this.resolveInternal(name, fromScope);
+  }
+
+  resolveAll(name: string, fromScope: ScopeId): readonly SymbolId[] {
+    return this.resolveAllInternal(name, fromScope);
+  }
+
+  resolveWhere(
+    name: string,
+    fromScope: ScopeId,
+    predicate: SymbolPredicate
+  ): SymbolId | undefined {
+    return this.resolveInternal(name, fromScope, predicate);
+  }
+
+  resolveAllWhere(
+    name: string,
+    fromScope: ScopeId,
+    predicate: SymbolPredicate
+  ): readonly SymbolId[] {
+    return this.resolveAllInternal(name, fromScope, predicate);
+  }
+
+  resolveByKinds(
+    name: string,
+    fromScope: ScopeId,
+    kinds: readonly SymbolKind[]
+  ): SymbolId | undefined {
+    const allowedKinds = new Set(kinds);
+    return this.resolveInternal(
+      name,
+      fromScope,
+      (record) => allowedKinds.has(record.kind)
+    );
+  }
+
+  resolveAllByKinds(
+    name: string,
+    fromScope: ScopeId,
+    kinds: readonly SymbolKind[]
+  ): readonly SymbolId[] {
+    const allowedKinds = new Set(kinds);
+    return this.resolveAllInternal(
+      name,
+      fromScope,
+      (record) => allowedKinds.has(record.kind)
+    );
+  }
+
+  private resolveInternal(
+    name: string,
+    fromScope: ScopeId,
+    predicate?: SymbolPredicate
+  ): SymbolId | undefined {
     let scope: ScopeId | null = fromScope;
     while (scope !== null) {
       const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
       const hits = bucket.nameIndex.get(name);
       if (hits && hits.length > 0) {
-        return hits[0];
+        for (const candidate of hits) {
+          const record = this.symbolRecords[candidate];
+          if (!record) {
+            continue;
+          }
+          if (!predicate || predicate(record)) {
+            return candidate;
+          }
+        }
       }
 
       scope = bucket.info.parent;
@@ -146,7 +211,11 @@ export class SymbolTable {
     return undefined;
   }
 
-  resolveAll(name: string, fromScope: ScopeId): readonly SymbolId[] {
+  private resolveAllInternal(
+    name: string,
+    fromScope: ScopeId,
+    predicate?: SymbolPredicate
+  ): readonly SymbolId[] {
     const resolved: SymbolId[] = [];
     let scope: ScopeId | null = fromScope;
 
@@ -154,7 +223,16 @@ export class SymbolTable {
       const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
       const hits = bucket.nameIndex.get(name);
       if (hits && hits.length > 0) {
-        resolved.push(...hits);
+        if (!predicate) {
+          resolved.push(...hits);
+        } else {
+          for (const candidate of hits) {
+            const record = this.symbolRecords[candidate];
+            if (record && predicate(record)) {
+              resolved.push(candidate);
+            }
+          }
+        }
       }
 
       scope = bucket.info.parent;

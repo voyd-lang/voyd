@@ -24,6 +24,11 @@ Helpful commands:
 
 If you find additional information that can save you time later add it here.
 
+Additional note:
+- Symbol resolution now has explicit kind-aware APIs in `packages/compiler/src/semantics/binder/symbol-table.ts` (`resolveByKinds`, `resolveAllByKinds`, `resolveWhere`, `resolveAllWhere`).
+- Same-name effect ops and wrapper functions are supported. Value-position lookup excludes `effect-op` symbols, while handler-head lookup resolves `effect-op` symbols explicitly.
+- Do not reintroduce wrapper renaming/module-split workarounds for effect-op name collisions.
+
 # Testing
 
 - `npm test` (runs vitest suite). Always confirm this passes before finishing.

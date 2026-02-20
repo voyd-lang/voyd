@@ -276,7 +276,11 @@ const lowerHandlerCall = (
         : undefined;
     const operation =
       resolvedOperation ??
-      resolveSymbol(opName, scope, ctx);
+      resolveEffectOperationSymbol({
+        opName,
+        scope,
+        ctx,
+      });
     const callArgs = isForm(head) ? head.rest : [];
     const parsedParams = callArgs.map((entry) =>
       entry ? parseParam(entry) : undefined
@@ -297,8 +301,17 @@ const lowerHandlerCall = (
     const operation =
       effectSymbol !== undefined
         ? ctx.moduleMembers.get(effectSymbol)?.get(head.value)?.values().next()
-            .value ?? resolveSymbol(head.value, scope, ctx)
-        : resolveSymbol(head.value, scope, ctx);
+            .value ??
+          resolveEffectOperationSymbol({
+            opName: head.value,
+            scope,
+            ctx,
+          })
+        : resolveEffectOperationSymbol({
+            opName: head.value,
+            scope,
+            ctx,
+          });
     const opDecl = ctx.decls.getEffectOperation(operation);
     const resumable = opDecl?.operation.resumable === "tail" ? "fn" : "ctl";
     return { operation, parameters: [], resumable };
@@ -331,8 +344,26 @@ const lowerHandlerCall = (
       ? (candidates.values().next().value as number)
       : undefined;
 
-  const operation = resolvedOperation ?? resolveSymbol(opName.value, scope, ctx);
+  const operation =
+    resolvedOperation ??
+    resolveEffectOperationSymbol({
+      opName: opName.value,
+      scope,
+      ctx,
+    });
   const opDecl = ctx.decls.getEffectOperation(operation);
   const resumable = opDecl?.operation.resumable === "tail" ? "fn" : "ctl";
   return { operation, parameters: params, resumable };
 };
+
+const resolveEffectOperationSymbol = ({
+  opName,
+  scope,
+  ctx,
+}: {
+  opName: string;
+  scope: number;
+  ctx: LoweringFormParams["ctx"];
+}): number =>
+  ctx.symbolTable.resolveByKinds(opName, scope, ["effect-op"]) ??
+  resolveSymbol(opName, scope, ctx);
