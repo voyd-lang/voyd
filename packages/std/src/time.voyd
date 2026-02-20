@@ -1,0 +1,50 @@
+pub obj Duration {
+  millis: i64
+}
+
+impl Duration
+  api fn from_millis({ ms: i64 }) -> Duration
+    Duration { millis: ms }
+
+  api fn from_secs({ s: i64 }) -> Duration
+    Duration { millis: s * extend_i32_s(1000) }
+
+  api fn as_millis(self) -> i64
+    self.millis
+
+  api fn as_secs(self) -> i64
+    self.millis / extend_i32_s(1000)
+
+pub obj Instant {
+  monotonic_millis: i64
+}
+
+impl Instant
+  api fn now(): Time -> Instant
+    Instant { monotonic_millis: Time::monotonic_now_millis() }
+
+  api fn elapsed(self): Time -> Duration
+    let now = Time::monotonic_now_millis()
+    Duration::from_millis(ms: now - self.monotonic_millis)
+
+pub obj SystemTime {
+  unix_millis_value: i64
+}
+
+impl SystemTime
+  api fn now(): Time -> SystemTime
+    SystemTime { unix_millis_value: Time::system_now_millis() }
+
+  api fn unix_millis(self) -> i64
+    self.unix_millis_value
+
+@effect(id: "std::time::Time")
+pub eff Time
+  monotonic_now_millis(tail) -> i64
+  system_now_millis(tail) -> i64
+  sleep_millis(tail, ms: i64) -> void
+
+pub fn sleep({ duration: Duration }): Time -> void
+  Time::sleep_millis(duration.as_millis())
+
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)

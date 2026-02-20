@@ -1,0 +1,21 @@
+use std::test::assertions::all
+
+fn read_unix_millis(value: SystemTime) -> i64
+  value.unix_millis()
+
+test "system_time unix_millis is pure":
+  let now = system_time_now_with_millis(i64_from_i32(123))
+
+  assert(read_unix_millis(now), eq: i64_from_i32(123))
+
+fn system_time_now_with_millis(ms: i64): () -> SystemTime
+  try
+    SystemTime::now()
+  Time::monotonic_now_millis(tail):
+    tail(i64_from_i32(0))
+  Time::system_now_millis(tail):
+    tail(ms)
+  Time::sleep_millis(tail, _ms):
+    tail()
+
+fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
