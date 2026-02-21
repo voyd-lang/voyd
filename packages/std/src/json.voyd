@@ -389,7 +389,7 @@ fn append_json_escape(~out: Array<i32>, byte: i32) -> bool
   false
 
 fn stringify_number(value: f64): () -> String
-  if value != value then:
+  if is_non_finite_float(value) then:
     return "0"
   if value == 0.0 then:
     return "0"
@@ -398,6 +398,10 @@ fn stringify_number(value: f64): () -> String
   var abs_value = value
   if negative then:
     abs_value = 0.0 - value
+
+  let exponent = decimal_exponent(abs_value)
+  if exponent >= 15 or exponent <= -7 then:
+    return stringify_number_scientific(abs_value, negative, exponent)
 
   let ~bytes = Array<i32>::with_capacity(48)
   if negative then:
@@ -423,16 +427,61 @@ fn stringify_number(value: f64): () -> String
   trim_fractional_zeroes(bytes)
   new_string(bytes.to_fixed_array())
 
+fn stringify_number_scientific(value: f64, negative: bool, exponent: i32): () -> String
+  var exponent_value = exponent
+  var normalized = value / pow10_i32(exponent_value)
+
+  if normalized >= 10.0 then:
+    normalized = normalized / 10.0
+    exponent_value = exponent_value + 1
+  if normalized < 1.0 then:
+    normalized = normalized * 10.0
+    exponent_value = exponent_value - 1
+
+  let ~bytes = Array<i32>::with_capacity(32)
+  if negative then:
+    bytes.push(45)
+
+  let leading = floor_digit(normalized)
+  bytes.push(ascii_digit(leading))
+
+  var fractional = normalized - digit_to_f64(leading)
+  if fractional > 0.0000000000005 then:
+    bytes.push(46)
+    var digits = 0
+    while digits < 15 do:
+      fractional = fractional * 10.0
+      let digit = floor_digit(fractional)
+      bytes.push(ascii_digit(digit))
+      fractional = fractional - digit_to_f64(digit)
+      digits = digits + 1
+      if fractional <= 0.0000000000005 then:
+        break
+    trim_fractional_zeroes(bytes)
+
+  bytes.push(101)
+  append_signed_i32(bytes, exponent_value)
+  new_string(bytes.to_fixed_array())
+
+fn decimal_exponent(value: f64): () -> i32
+  var exponent = 0
+  var normalized = value
+  while normalized >= 10.0 do:
+    normalized = normalized / 10.0
+    exponent = exponent + 1
+  while normalized < 1.0 do:
+    normalized = normalized * 10.0
+    exponent = exponent - 1
+  exponent
+
 fn append_float_integer_part(~out: Array<i32>, value: f64) -> void
   if value < 1.0 then:
     out.push(48)
     return void
 
   var scale = value / value
-  var guard = 0
-  while ((value / scale) >= 10.0) and (guard < 18) do:
+  while (value / scale) >= 10.0 do:
     scale = scale * 10.0
-    guard = guard + 1
 
   var remaining = value
   while scale >= 1.0 do:
@@ -457,10 +506,8 @@ fn floor_float(value: f64) -> f64
     return 0.0
 
   var scale = value / value
-  var guard = 0
-  while ((value / scale) >= 10.0) and (guard < 18) do:
+  while (value / scale) >= 10.0 do:
     scale = scale * 10.0
-    guard = guard + 1
 
   var remaining = value
   var out = value - value
@@ -495,6 +542,29 @@ fn floor_digit(value: f64) -> i32
 
 fn ascii_digit(value: i32) -> i32
   48 + value
+
+fn append_signed_i32(~out: Array<i32>, value: i32) -> void
+  if value < 0 then:
+    out.push(45)
+    append_u32_like(out, 0 - value)
+    return void
+  append_u32_like(out, value)
+
+fn append_u32_like(~out: Array<i32>, value: i32) -> void
+  if value == 0 then:
+    out.push(48)
+    return void
+
+  var scale = 1
+  while (value / scale) >= 10 do:
+    scale = scale * 10
+
+  var remaining = value
+  while scale >= 1 do:
+    let digit = remaining / scale
+    out.push(ascii_digit(digit))
+    remaining = remaining - digit * scale
+    scale = scale / 10
 
 fn append_indent(~out: Array<i32>, depth: i32) -> void
   var index = 0
@@ -607,10 +677,25 @@ fn append_escaped(~out: Array<i32>, escaped: i32, ~parser: JsonParser) -> i32
   if escaped != 117 then:
     return -1
 
-  let codepoint = read_unicode_escape(parser)
-  if codepoint < 0 then:
+  let lead = read_unicode_escape(parser)
+  if lead < 0 then:
     return -1
-  append_codepoint(out, codepoint)
+  if is_high_surrogate(lead) then:
+    let checkpoint = parser.index
+    if consume_byte(parser, 92) then:
+      if consume_byte(parser, 117) then:
+        let trail = read_unicode_escape(parser)
+        if is_low_surrogate(trail) then:
+          append_codepoint(out, decode_surrogate_pair(lead, trail))
+          return 0
+      parser.index = checkpoint
+    append_replacement(out)
+    return 0
+  if is_low_surrogate(lead) then:
+    append_replacement(out)
+    return 0
+
+  append_codepoint(out, lead)
   0
 
 fn read_unicode_escape(~parser: JsonParser) -> i32
@@ -689,6 +774,21 @@ fn hex_digit(value: i32) -> i32
   if value < 10 then:
     return 48 + value
   97 + (value - 10)
+
+fn is_high_surrogate(value: i32) -> bool
+  value >= 55296 and value <= 56319
+
+fn is_low_surrogate(value: i32) -> bool
+  value >= 56320 and value <= 57343
+
+fn decode_surrogate_pair(lead: i32, trail: i32) -> i32
+  65536 + (lead - 55296) * 1024 + (trail - 56320)
+
+fn is_non_finite_float(value: f64) -> bool
+  if value != value then:
+    return true
+  let delta = value - value
+  delta != delta
 
 fn digit_to_f64(value: i32) -> f64
   if value == 0 then:
@@ -786,6 +886,8 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
         let digit = parse_decimal_digit(byte_at_or(source, index, -1))
         if digit < 0 then:
           break
+        if exponent > 400 then:
+          return Err<JsonError> { error: json_error("json parse error: invalid exponent") }
         exponent = exponent * 10 + digit
         saw_exp_digit = true
         index = index + 1
@@ -796,7 +898,10 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
   let base = int_part + frac_part / frac_scale
-  Ok<f64> { value: sign * base * pow10_i32(exponent_sign * exponent) }
+  let signed_exponent = exponent_sign * exponent
+  if signed_exponent > 308 or signed_exponent < -324 then:
+    return Err<JsonError> { error: json_error("json parse error: invalid exponent") }
+  Ok<f64> { value: sign * base * pow10_i32(signed_exponent) }
 
 fn parse_decimal_digit(byte: i32) -> i32
   if byte >= 48 and byte <= 57 then:

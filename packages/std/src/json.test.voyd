@@ -35,12 +35,47 @@ test "json parse decodes escaped strings":
     Err<JsonError>:
       assert(false, eq: true)
 
+test "json parse decodes escaped surrogate pairs":
+  let input = from_ascii([34,92,117,68,56,51,68,92,117,68,69,48,48,34])
+  let expected = from_ascii([240,159,152,128])
+
+  match(parse(s: input.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonString:
+          assert(root.value.equals(expected), eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+test "json parse keeps escapes after unmatched high surrogate":
+  let input = from_ascii([34,92,117,68,56,51,68,92,117,48,48,52,49,34])
+  let expected = from_ascii([239,191,189,65])
+
+  match(parse(s: input.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonString:
+          assert(root.value.equals(expected), eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
 test "json parse rejects invalid input":
   match(parse(s: "{".as_slice()))
     Ok<JsonValue>:
       assert(false, eq: true)
     Err<JsonError> { error }:
       assert(error.message.contains(substring: "json parse error"), eq: true)
+
+test "json parse rejects oversized exponents":
+  match(parse(s: "1e100000000".as_slice()))
+    Ok<JsonValue>:
+      assert(false, eq: true)
+    Err<JsonError>:
+      assert(true, eq: true)
 
 test "json stringify emits compact object envelope":
   let ~fields = Dict<String, JsonValue>::init()
@@ -97,6 +132,58 @@ test "json stringify_pretty emits newlines":
   let pretty = stringify_pretty(value: value)
 
   assert(pretty.contains(substring: from_ascii([10])), eq: true)
+
+test "json stringify falls back for non-finite numbers":
+  let nan_text = stringify(value: JsonNumber { value: 0.0 / 0.0 })
+  let inf_text = stringify(value: JsonNumber { value: 1.0 / 0.0 })
+  let neg_inf_text = stringify(value: JsonNumber { value: (0.0 - 1.0) / 0.0 })
+
+  assert(nan_text.equals("0"), eq: true)
+  assert(inf_text.equals("0"), eq: true)
+  assert(neg_inf_text.equals("0"), eq: true)
+
+test "json stringify preserves magnitude for large finite numbers":
+  var huge = 1.0
+  var index = 0
+  while index < 20 do:
+    huge = huge * 10.0
+    index = index + 1
+
+  let encoded = stringify(value: JsonNumber { value: huge })
+  match(parse(s: encoded.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          let ratio = root.value / huge
+          assert(ratio > 0.999999999, eq: true)
+          assert(ratio < 1.000000001, eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+test "json stringify preserves tiny non-zero magnitude":
+  var tiny = 1.0
+  var index = 0
+  while index < 14 do:
+    tiny = tiny / 10.0
+    index = index + 1
+
+  let encoded = stringify(value: JsonNumber { value: tiny })
+  assert(encoded.equals("0"), eq: false)
+  assert(encoded.equals("-0"), eq: false)
+
+  match(parse(s: encoded.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          let ratio = root.value / tiny
+          assert(ratio > 0.999999999, eq: true)
+          assert(ratio < 1.000000001, eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
 
 fn from_ascii(bytes: Array<i32>): () -> String
   new_string(bytes.to_fixed_array())
