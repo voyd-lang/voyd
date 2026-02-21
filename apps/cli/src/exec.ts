@@ -13,6 +13,10 @@ import { printJson, printValue } from "./output.js";
 import { resolvePackageDirs } from "./package-dirs.js";
 import { runTests } from "./test-runner.js";
 import { generateDocumentationHtml } from "./doc-html.js";
+import {
+  compactDiagnosticsForCli,
+  formatCompactionSummary,
+} from "./diagnostic-compaction.js";
 
 export const exec = () => main().catch(errorHandler);
 
@@ -256,12 +260,23 @@ async function emitDocumentation({
 function errorHandler(error: unknown) {
   const diagnostics = extractDiagnostics(error);
   if (diagnostics) {
-    diagnostics.forEach((diagnostic, index) => {
+    const compacted = compactDiagnosticsForCli(diagnostics);
+
+    compacted.diagnostics.forEach((diagnostic, index) => {
       if (index > 0) {
         console.error("");
       }
       console.error(formatCliDiagnostic(diagnostic));
     });
+
+    const summary = formatCompactionSummary(compacted);
+    if (summary) {
+      if (compacted.diagnostics.length > 0) {
+        console.error("");
+      }
+      console.error(summary);
+    }
+
     process.exit(1);
   }
 

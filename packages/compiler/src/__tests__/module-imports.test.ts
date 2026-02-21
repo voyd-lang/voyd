@@ -661,4 +661,41 @@ pub fn main() -> Drink
       ),
     ).toBe(true);
   });
+
+  it("deduplicates repeated grouped-import diagnostics with the same source span", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::{ array, array, array }
+
+pub fn main() -> i32
+  1
+`,
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub fn marker() -> i32
+  1
+`,
+      [`${stdRoot}${sep}prelude.voyd`]: `
+pub fn keep_parser_happy() -> i32
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    const repeated = combinedDiagnostics.filter(
+      (diag) =>
+        diag.code === "BD0001" &&
+        diag.message.includes("std::pkg does not export array"),
+    );
+
+    expect(repeated).toHaveLength(1);
+  });
 });
