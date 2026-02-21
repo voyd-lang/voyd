@@ -529,7 +529,7 @@ describe("voyd cli diagnostics output", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(result.status).not.toBe(0);
       expect(output).toContain("TY9999");
       expect(output).toContain("Suppressed ");
-      expect(output).toContain("cascading import diagnostics");
+      expect(output).toContain("import diagnostics above display limit");
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }

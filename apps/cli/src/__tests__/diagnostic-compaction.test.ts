@@ -36,7 +36,7 @@ describe("diagnostic compaction", () => {
 
     expect(result.diagnostics).toHaveLength(1);
     expect(result.duplicateCount).toBe(2);
-    expect(result.cascadeCount).toBe(0);
+    expect(result.cappedImportCount).toBe(0);
     expect(result.suppressedCount).toBe(2);
   });
 
@@ -54,8 +54,29 @@ describe("diagnostic compaction", () => {
 
     expect(result.diagnostics).toHaveLength(20);
     expect(result.duplicateCount).toBe(0);
-    expect(result.cascadeCount).toBe(5);
+    expect(result.cappedImportCount).toBe(5);
     expect(result.suppressedCount).toBe(5);
+  });
+
+  it("keeps multiple distinct import diagnostics from the same file when capped", () => {
+    const diagnostics = Array.from({ length: 25 }, (_, index) =>
+      makeDiagnostic({
+        code: "BD0001",
+        file: "/tmp/same-file.voyd",
+        start: index,
+        message: `Module std::pkg does not export value_${index}`,
+      }),
+    );
+
+    const result = compactDiagnosticsForCli(diagnostics);
+
+    expect(result.diagnostics).toHaveLength(20);
+    expect(
+      result.diagnostics.every(
+        (diagnostic) => diagnostic.span.file === "/tmp/same-file.voyd",
+      ),
+    ).toBe(true);
+    expect(result.cappedImportCount).toBe(5);
   });
 
   it("preserves non-import diagnostics while compacting cascading import diagnostics", () => {
@@ -80,19 +101,21 @@ describe("diagnostic compaction", () => {
     );
 
     expect(hasRootCause).toBe(true);
-    expect(result.diagnostics.filter((diagnostic) => diagnostic.code === "BD0001")).toHaveLength(20);
+    expect(
+      result.diagnostics.filter((diagnostic) => diagnostic.code === "BD0001"),
+    ).toHaveLength(20);
   });
 
   it("formats suppression summary with duplicate and cascading counts", () => {
     const summary = formatCompactionSummary({
       diagnostics: [],
       duplicateCount: 3,
-      cascadeCount: 4,
+      cappedImportCount: 4,
       suppressedCount: 7,
     });
 
     expect(summary).toBe(
-      "Suppressed 7 additional diagnostics (3 duplicates, 4 cascading import diagnostics).",
+      "Suppressed 7 additional diagnostics (3 duplicates, 4 import diagnostics above display limit).",
     );
   });
 });

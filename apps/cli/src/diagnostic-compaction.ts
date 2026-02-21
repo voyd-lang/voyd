@@ -3,7 +3,7 @@ import type { Diagnostic } from "@voyd/sdk/compiler";
 export type DiagnosticsCompactionResult = {
   diagnostics: Diagnostic[];
   duplicateCount: number;
-  cascadeCount: number;
+  cappedImportCount: number;
   suppressedCount: number;
 };
 
@@ -40,32 +40,19 @@ const dedupeDiagnostics = (diagnostics: readonly Diagnostic[]): Diagnostic[] => 
 const compactImportDiagnostics = (
   diagnostics: readonly Diagnostic[],
 ): Diagnostic[] => {
-  const importDiagnostics = diagnostics.filter(
-    (diagnostic) => diagnostic.code === IMPORT_DIAGNOSTIC_CODE,
-  );
-
-  if (importDiagnostics.length <= MAX_BD0001_DIAGNOSTICS) {
-    return [...diagnostics];
-  }
-
-  const firstImportByFile = new Map<string, Diagnostic>();
-  importDiagnostics.forEach((diagnostic) => {
-    if (!firstImportByFile.has(diagnostic.span.file)) {
-      firstImportByFile.set(diagnostic.span.file, diagnostic);
+  let keptImportDiagnostics = 0;
+  return diagnostics.filter((diagnostic) => {
+    if (diagnostic.code !== IMPORT_DIAGNOSTIC_CODE) {
+      return true;
     }
+
+    if (keptImportDiagnostics >= MAX_BD0001_DIAGNOSTICS) {
+      return false;
+    }
+
+    keptImportDiagnostics += 1;
+    return true;
   });
-
-  const keptImportKeys = new Set(
-    Array.from(firstImportByFile.values())
-      .slice(0, MAX_BD0001_DIAGNOSTICS)
-      .map((diagnostic) => diagnosticKey(diagnostic)),
-  );
-
-  return diagnostics.filter((diagnostic) =>
-    diagnostic.code !== IMPORT_DIAGNOSTIC_CODE
-      ? true
-      : keptImportKeys.has(diagnosticKey(diagnostic)),
-  );
 };
 
 export const compactDiagnosticsForCli = (
@@ -75,13 +62,13 @@ export const compactDiagnosticsForCli = (
   const compacted = compactImportDiagnostics(deduped);
 
   const duplicateCount = diagnostics.length - deduped.length;
-  const cascadeCount = deduped.length - compacted.length;
-  const suppressedCount = duplicateCount + cascadeCount;
+  const cappedImportCount = deduped.length - compacted.length;
+  const suppressedCount = duplicateCount + cappedImportCount;
 
   return {
     diagnostics: compacted,
     duplicateCount,
-    cascadeCount,
+    cappedImportCount,
     suppressedCount,
   };
 };
@@ -101,14 +88,14 @@ export const formatCompactionSummary = (
     "duplicate",
     "duplicates",
   );
-  const cascadeLabel = pluralize(
-    result.cascadeCount,
-    "cascading import diagnostic",
-    "cascading import diagnostics",
+  const cappedImportLabel = pluralize(
+    result.cappedImportCount,
+    "import diagnostic above display limit",
+    "import diagnostics above display limit",
   );
 
   return [
     `Suppressed ${result.suppressedCount} additional diagnostics`,
-    `(${result.duplicateCount} ${duplicateLabel}, ${result.cascadeCount} ${cascadeLabel}).`,
+    `(${result.duplicateCount} ${duplicateLabel}, ${result.cappedImportCount} ${cappedImportLabel}).`,
   ].join(" ");
 };
