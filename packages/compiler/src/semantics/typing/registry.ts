@@ -1,5 +1,6 @@
 import {
   registerPrimitive,
+  refreshTraitImplInstances,
   resolveTypeExpr,
   getSymbolName,
   getNominalComponent,
@@ -604,6 +605,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
         template,
         ctx,
       });
+      refreshTraitImplInstances(ctx, state);
       methodMap.forEach((implMethodSymbol, traitMethodSymbol) => {
         registerTraitMethodImplMapping({
           traitMethodImpls: ctx.traitMethodImpls,

@@ -7,6 +7,8 @@ import {
 import { applyImportableMetadata } from "../imports/metadata.js";
 import type {
   TypeCheckMode,
+  DependencySemantics,
+  FunctionSignature,
   TypingContext,
 } from "./types.js";
 import type { HirNamedTypeExpr } from "../hir/index.js";
@@ -33,6 +35,8 @@ import {
   translateFunctionSignature,
 } from "./imports-internal/index.js";
 import { hydrateImportedTraitMetadataForDependencySymbol } from "./import-trait-impl-hydration.js";
+import { hydrateImportedTraitMetadataForOwnerRef } from "./import-trait-impl-hydration.js";
+import { collectTraitOwnersFromTypeParams } from "./constraint-trait-owners.js";
 
 export {
   createTypeTranslation,
@@ -87,13 +91,13 @@ export const resolveImportedValue = ({
     });
   }
 
-  registerImportedObjectTemplate({
+  hydrateImportedTraitMetadataForDependencySymbol({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
     ctx,
   });
-  hydrateImportedTraitMetadataForDependencySymbol({
+  registerImportedObjectTemplate({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
@@ -128,6 +132,7 @@ export const resolveImportedValue = ({
 
     const signature = dependency.typing.functions.getSignature(target.symbol);
     if (signature) {
+      ensureImportedConstraintTraitsForSignature({ signature, dependency, ctx });
       ctx.functions.setSignature(symbol, signature);
       ctx.table.setSymbolScheme(symbol, signature.scheme);
       ctx.valueTypes.set(symbol, signature.typeId);
@@ -189,6 +194,7 @@ export const resolveImportedValue = ({
 
   const signature = dependency.typing.functions.getSignature(target.symbol);
   if (signature) {
+    ensureImportedConstraintTraitsForSignature({ signature, dependency, ctx });
     const translated = translateFunctionSignature({
       signature,
       translation,
@@ -220,6 +226,29 @@ export const resolveImportedValue = ({
   return undefined;
 };
 
+const ensureImportedConstraintTraitsForSignature = ({
+  signature,
+  dependency,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  dependency: DependencySemantics;
+  ctx: TypingContext;
+}): void => {
+  const owners = collectTraitOwnersFromTypeParams({
+    typeParams: signature.typeParams,
+    arena: dependency.typing.arena,
+  });
+  owners.forEach((owner) => {
+    hydrateImportedTraitMetadataForOwnerRef({
+      ownerModuleId: owner.moduleId,
+      ownerSymbol: owner.symbol,
+      preferredDependency: dependency,
+      ctx,
+    });
+  });
+};
+
 export const resolveImportedTypeExpr = ({
   expr,
   typeArgs,
@@ -246,13 +275,13 @@ export const resolveImportedTypeExpr = ({
       `missing semantics for imported module ${target.moduleId}`,
     );
   }
-  registerImportedObjectTemplate({
+  hydrateImportedTraitMetadataForDependencySymbol({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
     ctx,
   });
-  hydrateImportedTraitMetadataForDependencySymbol({
+  registerImportedObjectTemplate({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
@@ -282,6 +311,12 @@ export const resolveImportedTypeExpr = ({
       aliasResolved ??
       resolveImportedObject(target.symbol, typeArgs, depCtx, depState) ??
       resolveImportedTrait(target.symbol, typeArgs, depCtx, depState);
+    if (typeof resolved === "number") {
+      ensureImportedOwnerTemplatesAvailable({
+        types: [resolved],
+        ctx,
+      });
+    }
     if (typeof aliasResolved === "number") {
       ctx.typeAliases.recordInstanceSymbol(aliasResolved, symbol);
     }
@@ -322,6 +357,12 @@ export const resolveImportedTypeExpr = ({
     resolveImportedTrait(target.symbol, depArgs, depCtx, depState);
 
   const localType = typeof resolved === "number" ? back(resolved) : undefined;
+  if (typeof localType === "number") {
+    ensureImportedOwnerTemplatesAvailable({
+      types: [localType],
+      ctx,
+    });
+  }
   if (typeof aliasResolved === "number" && typeof localType === "number") {
     ctx.typeAliases.recordInstanceSymbol(localType, symbol);
   }

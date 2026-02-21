@@ -23,8 +23,9 @@ import {
   resolveImportedValue,
 } from "./imports.js";
 import { cloneNestedMap } from "./call-resolution.js";
-import { resolveTypeAlias } from "./type-system.js";
+import { refreshTraitImplInstances, resolveTypeAlias } from "./type-system.js";
 import { DiagnosticError, type Diagnostic } from "../../diagnostics/index.js";
+import { hydrateImportedTraitMetadataForDependencySymbol } from "./import-trait-impl-hydration.js";
 
 export * from "./types.js";
 
@@ -45,6 +46,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     registerFunctionSignatures(ctx, state);
     registerEffectOperations(ctx, state);
     registerImpls(ctx, state);
+    refreshTraitImplInstances(ctx, state);
     indexMemberMetadata(ctx);
 
     runInferencePass(ctx, state);
@@ -172,6 +174,12 @@ const primeImportedTypes = (ctx: TypingContext): void => {
     if (!dependency) {
       return;
     }
+    hydrateImportedTraitMetadataForDependencySymbol({
+      dependency,
+      dependencySymbol: target.symbol,
+      localSymbol: symbol,
+      ctx,
+    });
     registerImportedObjectTemplate({
       dependency,
       dependencySymbol: target.symbol,
