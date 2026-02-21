@@ -113,6 +113,21 @@ wrap()
     ).toBe(true);
   });
 
+  test("calls recognizes internal identifier heads", () => {
+    const code = `\
+macro has_generics(type_expr)
+  let maybe_generics = type_expr.get(1)
+  if maybe_generics.calls(generics) then:
+    1
+  else:
+    0
+has_generics(Box<T>)
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain.at(-1)).toEqual("1");
+  });
+
   test("expands fn macro invocations", () => {
     const ast = parse(functionalMacrosVoydFile);
     const fibForm = toPlain(ast).at(-1);
@@ -168,6 +183,39 @@ type Keep = i32
     const plain = toPlain(ast);
     expect(plain).toContainEqual(["type", ["=", "Keep", "i32"]]);
     expect(plain).not.toContainEqual([]);
+  });
+
+  test("supports empty_list for explicit empty macro collections", () => {
+    const code = `\
+macro emit_nothing()
+  let declarations = empty_list()
+  emit_many(declarations)
+emit_nothing()
+type Keep = i32
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain).toContainEqual(["type", ["=", "Keep", "i32"]]);
+    expect(plain).not.toContainEqual([]);
+  });
+
+  test("surfaces panic messages from functional macros", () => {
+    const ast = parseBase(`\
+macro fail()
+  panic("boom")
+fail()
+`);
+    const errors: string[] = [];
+
+    expandFunctionalMacros(ast, {
+      strictMacroSignatures: true,
+      onError: (error) => {
+        errors.push(error.message);
+      },
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("boom");
   });
 
   test("does not implicitly splice top-level block expansions", () => {

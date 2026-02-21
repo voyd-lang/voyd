@@ -15,7 +15,7 @@ import {
 } from "./expressions/namespace-resolution.js";
 import { resolveTypeSymbol } from "./resolution.js";
 import type { LowerContext } from "./types.js";
-import { enumNamespaceMemberTypeArgumentsFromMetadata } from "../enum-namespace.js";
+import { lowerEnumNamespaceMemberTypeArgumentsFromMetadata } from "../enum-namespace.js";
 import { substituteTypeParametersInTypeExpr } from "../hir/type-expr-substitution.js";
 
 export interface ResolvedNamedTypeTarget {
@@ -206,36 +206,17 @@ const resolveEnumNamespaceMemberTypeArguments = ({
   consumeNamespaceTypeArguments: boolean;
 } => {
   const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
-  const metadata = enumNamespaceMemberTypeArgumentsFromMetadata({
+  return lowerEnumNamespaceMemberTypeArgumentsFromMetadata({
     source: namespaceRecord.metadata as Record<string, unknown> | undefined,
     memberName,
-  });
-  if (!metadata) {
-    return { consumeNamespaceTypeArguments: false };
-  }
-
-  const substitutionsByName = new Map(
-    metadata.typeParameterNames.map((name, index) => [
-      name,
-      namespaceTypeArguments?.[index],
-    ]),
-  );
-  const lowered = metadata.typeArguments.flatMap((entry) => {
-    const parsed = parseTypeArguments([entry]);
-    if (parsed.length === 0) {
-      return [];
-    }
-    return [
+    namespaceTypeArguments,
+    lowerTypeArgument: (entry) => parseTypeArguments([entry])[0],
+    substituteTypeArgument: ({ typeArgument, substitutionsByName }) =>
       substituteTypeParametersInTypeExpr({
-        typeExpr: parsed[0]!,
+        typeExpr: typeArgument,
         substitutionsByName,
       }),
-    ];
   });
-  return {
-    typeArguments: lowered.length > 0 ? lowered : undefined,
-    consumeNamespaceTypeArguments: true,
-  };
 };
 
 const isGenericsForm = (expr: Expr | undefined): expr is Form =>

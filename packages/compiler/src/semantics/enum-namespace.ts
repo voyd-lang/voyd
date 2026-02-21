@@ -76,6 +76,105 @@ export const enumNamespaceMemberTypeArgumentsFromMetadata = ({
   };
 };
 
+export const lowerEnumNamespaceMemberTypeArgumentsFromMetadata = <TypeExpr>({
+  source,
+  memberName,
+  namespaceTypeArguments,
+  lowerTypeArgument,
+  substituteTypeArgument,
+}: {
+  source?: Record<string, unknown>;
+  memberName: string;
+  namespaceTypeArguments?: readonly TypeExpr[];
+  lowerTypeArgument: (entry: Expr) => TypeExpr | undefined;
+  substituteTypeArgument: ({
+    typeArgument,
+    substitutionsByName,
+  }: {
+    typeArgument: TypeExpr;
+    substitutionsByName: ReadonlyMap<string, TypeExpr | undefined>;
+  }) => TypeExpr;
+}): {
+  typeArguments?: TypeExpr[];
+  consumeNamespaceTypeArguments: boolean;
+} => {
+  const metadata = enumNamespaceMemberTypeArgumentsFromMetadata({
+    source,
+    memberName,
+  });
+  if (!metadata) {
+    return { consumeNamespaceTypeArguments: false };
+  }
+  const hasNamespaceTypeArguments = (namespaceTypeArguments?.length ?? 0) > 0;
+  if (
+    !hasNamespaceTypeArguments &&
+    metadata.typeArguments.some((entry) =>
+      exprReferencesTypeParameters({
+        expr: entry,
+        typeParameterNames: metadata.typeParameterNames,
+      }),
+    )
+  ) {
+    return { consumeNamespaceTypeArguments: false };
+  }
+
+  const substitutionsByName = new Map(
+    metadata.typeParameterNames.map((name, index) => [
+      name,
+      namespaceTypeArguments?.[index],
+    ]),
+  );
+  const lowered = metadata.typeArguments.flatMap((entry) => {
+    const typeArgument = lowerTypeArgument(entry);
+    if (!typeArgument) {
+      return [];
+    }
+    return [
+      substituteTypeArgument({
+        typeArgument,
+        substitutionsByName,
+      }),
+    ];
+  });
+
+  return {
+    typeArguments: lowered.length > 0 ? lowered : undefined,
+    consumeNamespaceTypeArguments: true,
+  };
+};
+
+const exprReferencesTypeParameters = ({
+  expr,
+  typeParameterNames,
+}: {
+  expr: Expr;
+  typeParameterNames: readonly string[];
+}): boolean => {
+  if (typeParameterNames.length === 0) {
+    return false;
+  }
+  const names = new Set(typeParameterNames);
+  return exprReferencesTypeParametersRecursive(expr, names);
+};
+
+const exprReferencesTypeParametersRecursive = (
+  expr: Expr | undefined,
+  typeParameterNames: ReadonlySet<string>,
+): boolean => {
+  if (!expr) {
+    return false;
+  }
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    return typeParameterNames.has(expr.value);
+  }
+  if (!isForm(expr)) {
+    return false;
+  }
+  return expr.toArray().some((entry) =>
+    exprReferencesTypeParametersRecursive(entry, typeParameterNames),
+  );
+};
+
 export const enumVariantTypeNamesFromAliasTarget = (
   target: Expr | undefined,
 ): string[] | undefined => {
