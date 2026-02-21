@@ -1,5 +1,28 @@
 # Performance Log
 
+**20 Feb 2026**
+
+Added debug-only compiler perf instrumentation behind `VOYD_COMPILER_PERF=1`.
+
+- Compile-phase timings are emitted from `compileProgramWithLoader` as:
+  - `loadModuleGraph`
+  - `analyzeModules`
+  - `emitProgram`
+  - `total`
+- Hot counters include:
+  - graph traversal queue behavior (`graph.pending.*`, `graph.nested.*`)
+  - typing current-function constraint-cache behavior (`typing.constraint_cache.*`)
+  - union-binding search behavior (`typing.union_search.*`)
+
+Example:
+
+```sh
+VOYD_COMPILER_PERF=1 vt --run ./path/to/main.voyd
+```
+
+The compiler prints a single structured summary line prefixed with
+`[voyd:compiler:perf]` for each compile invocation.
+
 **12 Feb 2026**
 
 Added typing performance guardrails and CI benchmarks:

@@ -32,6 +32,7 @@ Additional notes:
 - Do not reintroduce wrapper renaming/module-split workarounds for effect-op name collisions.
 - Host boundary DTO compatibility is enforced at compile time for effect payloads. Allowed payload categories are: `bool`, `i32`, `i64`, `f32`, `f64`, `void`, or types annotated with `@serializer("msgpack", ...)`.
 - Unsupported host-boundary payload shapes should fail with clear `CG0001` diagnostics (not runtime traps). Keep API-to-DTO shim conversions at effect boundaries.
+- Enable compile instrumentation with `VOYD_COMPILER_PERF=1` to print phase timings (`loadModuleGraph`, `analyzeModules`, `emitProgram`, `total`) and hotspot counters as one `[voyd:compiler:perf]` JSON line per compile.
 
 # Testing
 
