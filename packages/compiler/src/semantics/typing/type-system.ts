@@ -3064,7 +3064,139 @@ type UnionBindingCandidate = {
   remainingActualMembers: readonly TypeId[];
 };
 
+type UnionBindingMatch = {
+  actualIndex: number;
+  bindings: Map<TypeParamId, TypeId>;
+};
+
+type UnionSearchNextOption = {
+  expectedIndex: number;
+  matches: readonly UnionBindingMatch[];
+};
+
+type UnionSearchDecision =
+  | { kind: "next"; option: UnionSearchNextOption }
+  | { kind: "dead-end" }
+  | { kind: "none" };
+
 const MAX_UNION_BINDING_SEARCH_STATES = 4_096;
+
+const maybeIncrementUnionSearchCounter = (name: string): void => {
+  if (COMPILER_PERF_ENABLED) {
+    incrementCompilerPerfCounter(name);
+  }
+};
+
+const collectUnionBindingMatchesForExpectedMember = ({
+  expectedMember,
+  actualMembers,
+  currentBindings,
+  usedActualIndices,
+  ctx,
+  state,
+}: {
+  expectedMember: TypeId;
+  actualMembers: readonly TypeId[];
+  currentBindings: ReadonlyMap<TypeParamId, TypeId>;
+  usedActualIndices: ReadonlySet<number>;
+  ctx: TypingContext;
+  state: TypingState;
+}): UnionBindingMatch[] => {
+  const matches: UnionBindingMatch[] = [];
+
+  for (let actualIndex = 0; actualIndex < actualMembers.length; actualIndex += 1) {
+    if (usedActualIndices.has(actualIndex)) {
+      maybeIncrementUnionSearchCounter("typing.union_search.actual_index_revisited");
+    }
+
+    const actualMember = actualMembers[actualIndex];
+    if (typeof actualMember !== "number") {
+      continue;
+    }
+
+    const candidate = tryBindExpectedMember({
+      expectedMember,
+      actualMember,
+      bindings: currentBindings,
+      ctx,
+      state,
+    });
+    if (!candidate) {
+      continue;
+    }
+
+    maybeIncrementUnionSearchCounter("typing.union_search.match_candidates");
+    matches.push({ actualIndex, bindings: candidate });
+  }
+
+  return matches;
+};
+
+const pickNextUnionSearchOption = ({
+  expected,
+  actualMembers,
+  currentBindings,
+  usedActualIndices,
+  ctx,
+  state,
+}: {
+  expected: readonly TypeId[];
+  actualMembers: readonly TypeId[];
+  currentBindings: ReadonlyMap<TypeParamId, TypeId>;
+  usedActualIndices: ReadonlySet<number>;
+  ctx: TypingContext;
+  state: TypingState;
+}): UnionSearchDecision => {
+  let next: UnionSearchNextOption | undefined;
+
+  for (let expectedIndex = 0; expectedIndex < expected.length; expectedIndex += 1) {
+    const expectedMember = expected[expectedIndex];
+    if (typeof expectedMember !== "number") {
+      continue;
+    }
+
+    const matches = collectUnionBindingMatchesForExpectedMember({
+      expectedMember,
+      actualMembers,
+      currentBindings,
+      usedActualIndices,
+      ctx,
+      state,
+    });
+    if (matches.length === 0) {
+      return { kind: "dead-end" };
+    }
+
+    if (!next || matches.length < next.matches.length) {
+      next = { expectedIndex, matches };
+    }
+  }
+
+  if (!next) {
+    return { kind: "none" };
+  }
+
+  return { kind: "next", option: next };
+};
+
+const pushUnionBindingSolution = ({
+  solutions,
+  currentBindings,
+  actualMembers,
+  usedActualIndices,
+}: {
+  solutions: UnionBindingCandidate[];
+  currentBindings: ReadonlyMap<TypeParamId, TypeId>;
+  actualMembers: readonly TypeId[];
+  usedActualIndices: ReadonlySet<number>;
+}): void => {
+  solutions.push({
+    bindings: new Map(currentBindings),
+    remainingActualMembers: actualMembers.filter(
+      (_, index) => !usedActualIndices.has(index),
+    ),
+  });
+};
 
 const findUnionBindingCandidates = ({
   expectedMembers,
@@ -3079,9 +3211,7 @@ const findUnionBindingCandidates = ({
   ctx: TypingContext;
   state: TypingState;
 }): UnionBindingCandidate[] => {
-  if (COMPILER_PERF_ENABLED) {
-    incrementCompilerPerfCounter("typing.union_search.invocations");
-  }
+  maybeIncrementUnionSearchCounter("typing.union_search.invocations");
   const solutions: UnionBindingCandidate[] = [];
   const visitedStates = new Set<string>();
   let abortedForComplexity = false;
@@ -3109,81 +3239,36 @@ const findUnionBindingCandidates = ({
       return;
     }
     visitedStates.add(stateKey);
-    if (COMPILER_PERF_ENABLED) {
-      incrementCompilerPerfCounter("typing.union_search.state_visited");
-    }
+    maybeIncrementUnionSearchCounter("typing.union_search.state_visited");
     if (visitedStates.size > MAX_UNION_BINDING_SEARCH_STATES) {
       abortedForComplexity = true;
-      if (COMPILER_PERF_ENABLED) {
-        incrementCompilerPerfCounter("typing.union_search.state_budget_abort");
-      }
+      maybeIncrementUnionSearchCounter("typing.union_search.state_budget_abort");
       return;
     }
 
     if (expected.length === 0) {
-      const snapshot = new Map(currentBindings);
-      solutions.push({
-        bindings: snapshot,
-        remainingActualMembers: actualMembers.filter(
-          (_, index) => !usedActualIndices.has(index),
-        ),
+      pushUnionBindingSolution({
+        solutions,
+        currentBindings,
+        actualMembers,
+        usedActualIndices,
       });
       return;
     }
 
-    let next:
-      | {
-          expectedIndex: number;
-          matches: { actualIndex: number; bindings: Map<TypeParamId, TypeId> }[];
-        }
-      | undefined;
-
-    for (let expectedIndex = 0; expectedIndex < expected.length; expectedIndex += 1) {
-      const expectedMember = expected[expectedIndex];
-      if (typeof expectedMember !== "number") {
-        continue;
-      }
-
-      const matches: { actualIndex: number; bindings: Map<TypeParamId, TypeId> }[] = [];
-      for (let actualIndex = 0; actualIndex < actualMembers.length; actualIndex += 1) {
-        if (usedActualIndices.has(actualIndex)) {
-          if (COMPILER_PERF_ENABLED) {
-            incrementCompilerPerfCounter("typing.union_search.actual_index_revisited");
-          }
-        }
-        const actualMember = actualMembers[actualIndex];
-        if (typeof actualMember !== "number") {
-          continue;
-        }
-        const candidate = tryBindExpectedMember({
-          expectedMember,
-          actualMember,
-          bindings: currentBindings,
-          ctx,
-          state,
-        });
-        if (!candidate) {
-          continue;
-        }
-        if (COMPILER_PERF_ENABLED) {
-          incrementCompilerPerfCounter("typing.union_search.match_candidates");
-        }
-        matches.push({ actualIndex, bindings: candidate });
-      }
-
-      if (matches.length === 0) {
-        return;
-      }
-
-      if (!next || matches.length < next.matches.length) {
-        next = { expectedIndex, matches };
-      }
-    }
-
-    if (!next) {
+    const decision = pickNextUnionSearchOption({
+      expected,
+      actualMembers,
+      currentBindings,
+      usedActualIndices,
+      ctx,
+      state,
+    });
+    if (decision.kind !== "next") {
       return;
     }
 
+    const next = decision.option;
     const nextExpected = expected.filter((_, index) => index !== next.expectedIndex);
 
     next.matches.forEach((match) => {
