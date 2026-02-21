@@ -177,6 +177,90 @@ describe("buildModuleGraph", () => {
     expect(diagnostic.severity).toBe("error");
     expect(diagnostic.span.file).toContain("main.voyd");
     expect(diagnostic.message).toMatch(/src::util/);
+    expect(diagnostic.related?.[0]?.span.file).toContain("main.voyd");
+    expect(diagnostic.related?.[0]?.message).toContain("main.voyd");
+  });
+
+  it("rejects entry modules named all", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}all.voyd`]: "pub fn main() -> i32\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}all.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(1);
+    const diagnostic = graph.diagnostics[0]!;
+    expect(diagnostic.code).toBe("MD0005");
+    expect(diagnostic.message).toContain("src::all");
+    expect(diagnostic.message).toContain("reserved segment 'all'");
+  });
+
+  it("rejects nested modules named all", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: "use src::util::all",
+      [`${root}${sep}util.voyd`]: "pub fn plus_one(v: i32) -> i32\n  v + 1",
+      [`${root}${sep}util${sep}all.voyd`]: "pub fn hidden() -> i32\n  0",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(1);
+    const diagnostic = graph.diagnostics[0]!;
+    expect(diagnostic.code).toBe("MD0005");
+    expect(diagnostic.message).toContain("src::util::all");
+  });
+
+  it("rejects inline modules named all", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: "mod all\n  pub fn hidden() -> i32\n    0",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(1);
+    const diagnostic = graph.diagnostics[0]!;
+    expect(diagnostic.code).toBe("MD0005");
+    expect(diagnostic.message).toContain("src::main::all");
+  });
+
+  it("rejects nested package modules named all", async () => {
+    const appRoot = resolve("/proj/app");
+    const pkgDir = resolve("/proj/node_modules");
+    const host = createMemoryHost({
+      [`${appRoot}${sep}main.voyd`]: "use pkg::my_pkg::all",
+      [`${pkgDir}${sep}my_pkg${sep}src${sep}pkg.voyd`]:
+        "pub use self::util::all",
+      [`${pkgDir}${sep}my_pkg${sep}src${sep}util.voyd`]:
+        "pub fn plus_one(v: i32) -> i32\n  v + 1",
+      [`${pkgDir}${sep}my_pkg${sep}src${sep}util${sep}all.voyd`]:
+        "pub fn hidden() -> i32\n  0",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${appRoot}${sep}main.voyd`,
+      host,
+      roots: { src: appRoot, pkgDirs: [pkgDir] },
+    });
+
+    expect(graph.diagnostics).toHaveLength(1);
+    const diagnostic = graph.diagnostics[0]!;
+    expect(diagnostic.code).toBe("MD0005");
+    expect(diagnostic.message).toContain("pkg:my_pkg::util::all");
   });
 
   it("tracks missing modules without importer path collisions", async () => {

@@ -6,7 +6,7 @@ import {
   isForm,
   parseBase,
 } from "../parser/index.js";
-import { type Diagnostic } from "../diagnostics/index.js";
+import { diagnosticFromCode, type Diagnostic } from "../diagnostics/index.js";
 import {
   collectModuleDocumentation,
   combineDocumentation,
@@ -43,7 +43,8 @@ type BuildGraphOptions = {
 
 type PendingDependency = {
   dependency: ModuleDependency;
-  importer: string;
+  importerId: string;
+  importerFilePath?: string;
 };
 
 const NO_PRELUDE_DIRECTIVE = /(^|[\r\n])([^\S\r\n]*#!no_prelude[^\r\n]*)(?=$|[\r\n])/g;
@@ -62,6 +63,12 @@ const IMPLICIT_PRELUDE_USE_DECL = (() => {
 
 const formatErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+const RESERVED_MODULE_SEGMENT = "all";
+
+const findReservedModuleSegment = (
+  path: ModulePath,
+): string | undefined => path.segments.find((segment) => segment === RESERVED_MODULE_SEGMENT);
 
 export const buildModuleGraph = async ({
   entryPath,
@@ -94,6 +101,15 @@ export const buildModuleGraph = async ({
 
   const entryFile = host.path.resolve(entryPath);
   const entryModulePath = modulePathFromFile(entryFile, roots, host.path);
+  const entryReservedSegment = findReservedModuleSegment(entryModulePath);
+  if (entryReservedSegment) {
+    moduleDiagnostics.push({
+      kind: "reserved-module-segment",
+      segment: entryReservedSegment,
+      requested: entryModulePath,
+      span: { file: entryFile, start: 0, end: 0 },
+    });
+  }
   const entryModule = await loadFileModule({
     filePath: entryFile,
     modulePath: entryModulePath,
@@ -125,9 +141,10 @@ export const buildModuleGraph = async ({
   };
 
   while (pending.length) {
-    const { dependency, importer } = pending.shift()!;
+    const { dependency, importerId, importerFilePath } = pending.shift()!;
+    const importerLabel = importerFilePath ?? importerId;
     const pathKey = modulePathToString(dependency.path);
-    if (hasMissingModule(importer, pathKey)) {
+    if (hasMissingModule(importerId, pathKey)) {
       continue;
     }
     if (modulesByPath.has(pathKey)) {
@@ -142,40 +159,54 @@ export const buildModuleGraph = async ({
         kind: "io-error",
         message: formatErrorMessage(error),
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
       continue;
     }
 
     if (!resolved) {
       moduleDiagnostics.push({
         kind: "missing-module",
-        message: `Unable to resolve module ${pathKey}`,
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
       continue;
     }
 
     const resolvedPath = resolved.filePath;
     const resolvedModulePath = resolved.modulePath;
     const resolvedKey = modulePathToString(resolvedModulePath);
+    const reservedSegment = findReservedModuleSegment(resolvedModulePath);
+    if (reservedSegment) {
+      moduleDiagnostics.push({
+        kind: "reserved-module-segment",
+        segment: reservedSegment,
+        requested: resolvedModulePath,
+        importer: importerLabel,
+        importerFilePath,
+        span: dependency.span ?? { file: resolvedPath, start: 0, end: 0 },
+      });
+      addMissingModule(importerId, pathKey);
+      continue;
+    }
     if (modulesByPath.has(resolvedKey)) {
       if (hasNestedModule(pathKey)) {
         continue;
       }
       moduleDiagnostics.push({
         kind: "missing-module",
-        message: `Unable to resolve module ${pathKey}`,
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
       continue;
     }
     let nextModule: LoadedModule;
@@ -192,10 +223,11 @@ export const buildModuleGraph = async ({
         kind: "io-error",
         message: formatErrorMessage(error),
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
       continue;
     }
     addModuleTree(nextModule, modules, modulesByPath);
@@ -204,12 +236,12 @@ export const buildModuleGraph = async ({
     if (!modulesByPath.has(pathKey) && !hasNestedModule(pathKey)) {
       moduleDiagnostics.push({
         kind: "missing-module",
-        message: `Unable to resolve module ${pathKey}`,
         requested: dependency.path,
-        importer,
+        importer: importerLabel,
+        importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importer, pathKey);
+      addMissingModule(importerId, pathKey);
     }
   }
 
@@ -243,9 +275,17 @@ const enqueueDependencies = (
   queue: PendingDependency[],
 ) => {
   const modules = [loaded.node, ...loaded.inlineModules];
+  const importerFilePathFor = (module: ModuleNode): string | undefined =>
+    module.origin.kind === "file"
+      ? module.origin.filePath
+      : module.origin.span?.file;
   modules.forEach((module) =>
     module.dependencies.forEach((dependency) =>
-      queue.push({ dependency, importer: module.id }),
+      queue.push({
+        dependency,
+        importerId: module.id,
+        importerFilePath: importerFilePathFor(module),
+      }),
     ),
   );
 };
@@ -407,6 +447,25 @@ const collectModuleInfo = ({
     }
 
     if (topLevelDecl.kind !== "inline-module-decl") {
+      return;
+    }
+
+    if (topLevelDecl.name === RESERVED_MODULE_SEGMENT) {
+      const inlineModulePath = modulePathToString({
+        ...modulePath,
+        segments: [...modulePath.segments, topLevelDecl.name],
+      });
+      diagnostics.push(
+        diagnosticFromCode({
+          code: "MD0005",
+          params: {
+            kind: "reserved-module-segment",
+            requested: inlineModulePath,
+            segment: RESERVED_MODULE_SEGMENT,
+          },
+          span,
+        }),
+      );
       return;
     }
 

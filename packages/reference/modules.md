@@ -145,6 +145,9 @@ use src::my_module::hello as hi
 use src::my_module::all
 ```
 
+`all` is reserved as the all-import selector. Module path segments cannot be named
+`all` (for example, `src/all.voyd` and `src/util/all.voyd` are invalid).
+
 ## Parent-relative imports
 
 Use `super::` to refer to modules relative to the parent module:
