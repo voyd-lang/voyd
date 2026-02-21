@@ -17,6 +17,7 @@ import { bindEffectDecl } from "./effect.js";
 import type { BindingContext, BoundUseEntry, BoundImport } from "../types.js";
 import {
   diagnosticFromCode,
+  type Diagnostic,
   type DiagnosticParams,
 } from "../../../diagnostics/index.js";
 import { modulePathToString } from "../../../modules/path.js";
@@ -1030,13 +1031,14 @@ const recordImportDiagnostic = ({
   span: SourceSpan;
   ctx: BindingContext;
 }): void => {
-  ctx.diagnostics.push(
-    diagnosticFromCode({
+  pushUniqueImportDiagnostic({
+    diagnostic: diagnosticFromCode({
       code: "BD0001",
       params,
       span,
     }),
-  );
+    ctx,
+  });
 };
 
 const recordImportNameConflict = ({
@@ -1054,8 +1056,8 @@ const recordImportNameConflict = ({
   previousSpan: SourceSpan;
   ctx: BindingContext;
 }) => {
-  ctx.diagnostics.push(
-    diagnosticFromCode({
+  pushUniqueImportDiagnostic({
+    diagnostic: diagnosticFromCode({
       code: "BD0001",
       params: {
         kind: "import-name-conflict",
@@ -1073,5 +1075,46 @@ const recordImportNameConflict = ({
         }),
       ],
     }),
-  );
+    ctx,
+  });
+};
+
+const importDiagnosticKeys = new WeakMap<BindingContext, Set<string>>();
+
+const relatedDiagnosticKey = (diagnostic: Diagnostic): string =>
+  (diagnostic.related ?? [])
+    .map(
+      (related) =>
+        `${related.code}|${related.severity}|${related.span.file}|${related.span.start}|${related.span.end}|${related.message}`,
+    )
+    .join(";");
+
+const importDiagnosticKey = (diagnostic: Diagnostic): string =>
+  [
+    diagnostic.code,
+    diagnostic.severity,
+    diagnostic.phase ?? "",
+    diagnostic.span.file,
+    diagnostic.span.start,
+    diagnostic.span.end,
+    diagnostic.message,
+    relatedDiagnosticKey(diagnostic),
+  ].join("|");
+
+const pushUniqueImportDiagnostic = ({
+  diagnostic,
+  ctx,
+}: {
+  diagnostic: Diagnostic;
+  ctx: BindingContext;
+}): void => {
+  const key = importDiagnosticKey(diagnostic);
+  const keys = importDiagnosticKeys.get(ctx) ?? new Set<string>();
+  if (keys.has(key)) {
+    return;
+  }
+
+  keys.add(key);
+  importDiagnosticKeys.set(ctx, keys);
+  ctx.diagnostics.push(diagnostic);
 };
