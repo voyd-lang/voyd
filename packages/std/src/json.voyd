@@ -844,7 +844,7 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
       return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
   var frac_part = 0.0
-  var frac_scale = 1.0
+  var frac_place = 0.1
   if index < len and byte_at_or(source, index, -1) == 46 then:
     index = index + 1
     if index >= len then:
@@ -855,8 +855,9 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
       let digit = parse_decimal_digit(byte_at_or(source, index, -1))
       if digit < 0 then:
         break
-      frac_part = frac_part * 10.0 + digit_to_f64(digit)
-      frac_scale = frac_scale * 10.0
+      if frac_place > 0.0 then:
+        frac_part = frac_part + digit_to_f64(digit) * frac_place
+        frac_place = frac_place / 10.0
       saw_fraction_digit = true
       index = index + 1
     if not saw_fraction_digit then:
@@ -897,7 +898,7 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
   if index != len then:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
-  let base = int_part + frac_part / frac_scale
+  let base = int_part + frac_part
   if is_non_finite_float(base) then:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
   if base == 0.0 then:

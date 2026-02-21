@@ -96,6 +96,19 @@ test "json parse rejects overflowing mantissas":
     Err<JsonError>:
       assert(true, eq: true)
 
+test "json parse accepts long fractional mantissas":
+  let input = long_fraction_input(49, 400)
+  match(parse(s: input.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          assert(root.value > 0.0, eq: true)
+          assert(root.value < 1.0, eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
 test "json parse allows zero mantissa with large exponent":
   match(parse(s: "0e309".as_slice()))
     Ok<JsonValue> { value }:
@@ -272,4 +285,16 @@ fn repeat_byte(byte: i32, count: i32): () -> String
   while index < count do:
     bytes.push(byte)
     index = index + 1
+  new_string(bytes.to_fixed_array())
+
+fn long_fraction_input(digit: i32, digits: i32): () -> String
+  let ~bytes = Array<i32>::with_capacity(digits + 2)
+  bytes.push(48)
+  bytes.push(46)
+
+  var index = 0
+  while index < digits do:
+    bytes.push(digit)
+    index = index + 1
+
   new_string(bytes.to_fixed_array())
