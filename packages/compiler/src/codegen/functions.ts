@@ -6,7 +6,10 @@ import type {
   HirFunction,
   TypeId,
 } from "./context.js";
-import type { ProgramFunctionInstanceId } from "../semantics/ids.js";
+import type {
+  ProgramFunctionInstanceId,
+  ProgramSymbolId,
+} from "../semantics/ids.js";
 import { compileExpression } from "./expressions/index.js";
 import { wasmTypeFor } from "./types.js";
 import {
@@ -27,6 +30,9 @@ import {
 } from "./exports/export-abi.js";
 import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
+import { walkHirExpression } from "./hir-walk.js";
+
+const USED_MATH_FUNCTIONS = Symbol("codegen.usedMathFunctions");
 
 const debugEffects = (): boolean =>
   typeof process !== "undefined" && process.env?.DEBUG_EFFECTS === "1";
@@ -78,6 +84,159 @@ const pushFunctionMeta = (
 
 const userParamOffsetFor = (meta: FunctionMetadata): number =>
   meta.effectful ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length) : 0;
+
+const getModuleExportEntries = (ctx: CodegenContext): readonly HirExportEntry[] => {
+  const publicExports = ctx.module.hir.module.exports.filter((entry) =>
+    isPublicVisibility(entry.visibility),
+  );
+  const baseEntries =
+    ctx.module.meta.isPackageRoot || publicExports.length > 0
+      ? publicExports
+      : ctx.module.hir.module.exports.filter((entry) =>
+          isPackageVisible(entry.visibility),
+        );
+  if (!ctx.options.testMode) {
+    return baseEntries;
+  }
+  return baseEntries.filter((entry) => {
+    const name = entry.alias ?? symbolName(ctx, ctx.moduleId, entry.symbol);
+    return isGeneratedTestId(name);
+  });
+};
+
+const collectUsedMathFunctionSymbols = ({
+  ctx,
+  contexts,
+  entryModuleId,
+}: {
+  ctx: CodegenContext;
+  contexts: readonly CodegenContext[];
+  entryModuleId: string;
+}): ReadonlySet<ProgramSymbolId> => {
+  const isMathModule = (moduleId: string): boolean =>
+    moduleId === "std::math" || moduleId.startsWith("std::math::");
+
+  const isMathSymbol = (symbolId: ProgramSymbolId): boolean =>
+    isMathModule(ctx.program.symbols.refOf(symbolId).moduleId);
+
+  const byModuleId = new Map(contexts.map((candidate) => [candidate.moduleId, candidate]));
+  const entryCtx = byModuleId.get(entryModuleId) ?? ctx;
+
+  const used = new Set<ProgramSymbolId>();
+  const queue: ProgramSymbolId[] = [];
+  const enqueue = (symbolId: ProgramSymbolId | undefined): void => {
+    if (typeof symbolId !== "number" || used.has(symbolId) || !isMathSymbol(symbolId)) {
+      return;
+    }
+    queue.push(symbolId);
+  };
+
+  // Seed from call sites outside std::math modules.
+  contexts
+    .filter((candidate) => !isMathModule(candidate.moduleId))
+    .forEach((candidate) => {
+      candidate.module.hir.items.forEach((item) => {
+        if (item.kind !== "function") {
+          return;
+        }
+        walkHirExpression({
+          exprId: item.body,
+          ctx: candidate,
+          visitLambdaBodies: true,
+          visitHandlerBodies: true,
+          visitor: {
+            onExpr: (exprId, expr) => {
+              if (expr.exprKind === "call") {
+                const callee = candidate.module.hir.expressions.get(expr.callee);
+                if (callee?.exprKind === "identifier") {
+                  enqueue(
+                    candidate.program.symbols.canonicalIdOf(
+                      candidate.moduleId,
+                      callee.symbol,
+                    ) as ProgramSymbolId,
+                  );
+                }
+              } else if (expr.exprKind !== "method-call") {
+                return;
+              }
+              const callInfo = candidate.program.calls.getCallInfo(candidate.moduleId, exprId);
+              callInfo.targets?.forEach((targetId) =>
+                enqueue(targetId as ProgramSymbolId),
+              );
+            },
+          },
+        });
+      });
+    });
+
+  // If entry is a std::math module, seed from exported roots.
+  if (isMathModule(entryCtx.moduleId)) {
+    getModuleExportEntries(entryCtx).forEach((entry) => {
+      const intrinsicMetadata = entryCtx.program.symbols.getIntrinsicFunctionFlags(
+        programSymbolIdOf(entryCtx, entryCtx.moduleId, entry.symbol),
+      );
+      if (
+        intrinsicMetadata.intrinsic &&
+        intrinsicMetadata.intrinsicUsesSignature !== true
+      ) {
+        return;
+      }
+      enqueue(
+        entryCtx.program.symbols.canonicalIdOf(entryCtx.moduleId, entry.symbol) as ProgramSymbolId,
+      );
+    });
+  }
+
+  while (queue.length > 0) {
+    const symbolId = queue.pop()!;
+    if (used.has(symbolId)) {
+      continue;
+    }
+    used.add(symbolId);
+    const symbolRef = ctx.program.symbols.refOf(symbolId);
+    const ownerCtx = byModuleId.get(symbolRef.moduleId);
+    if (!ownerCtx) {
+      continue;
+    }
+    const item = Array.from(ownerCtx.module.hir.items.values()).find(
+      (candidate): candidate is HirFunction =>
+        candidate.kind === "function" &&
+        candidate.symbol === symbolRef.symbol,
+    );
+    if (!item) {
+      continue;
+    }
+    walkHirExpression({
+      exprId: item.body,
+      ctx: ownerCtx,
+      visitLambdaBodies: true,
+      visitHandlerBodies: true,
+      visitor: {
+        onExpr: (exprId, expr) => {
+          if (expr.exprKind === "call") {
+            const callee = ownerCtx.module.hir.expressions.get(expr.callee);
+            if (callee?.exprKind === "identifier") {
+              enqueue(
+                ownerCtx.program.symbols.canonicalIdOf(
+                  ownerCtx.moduleId,
+                  callee.symbol,
+                ) as ProgramSymbolId,
+              );
+            }
+          } else if (expr.exprKind !== "method-call") {
+            return;
+          }
+          const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
+          callInfo.targets?.forEach((targetId) =>
+            enqueue(targetId as ProgramSymbolId),
+          );
+        },
+      },
+    });
+  }
+
+  return used;
+};
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
@@ -210,7 +369,21 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   }
 };
 
-export const compileFunctions = (ctx: CodegenContext): void => {
+export const compileFunctions = ({
+  ctx,
+  contexts,
+  entryModuleId,
+}: {
+  ctx: CodegenContext;
+  contexts: readonly CodegenContext[];
+  entryModuleId: string;
+}): void => {
+  const isMathModule =
+    ctx.moduleId === "std::math" || ctx.moduleId.startsWith("std::math::");
+  const usedMathFunctions = ctx.programHelpers.getHelperState(
+    USED_MATH_FUNCTIONS,
+    () => collectUsedMathFunctionSymbols({ ctx, contexts, entryModuleId }),
+  );
   for (const item of ctx.module.hir.items.values()) {
     if (item.kind !== "function") continue;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
@@ -224,24 +397,18 @@ export const compileFunctions = (ctx: CodegenContext): void => {
     }
     const metas = getFunctionMetas(ctx, ctx.moduleId, item.symbol);
     if (!metas || metas.length === 0) {
-      const signature = ctx.program.functions.getSignature(
-        ctx.moduleId,
-        item.symbol,
-      );
-      const scheme = signature
-        ? ctx.program.types.getScheme(signature.scheme)
-        : undefined;
-      const instantiationInfo = ctx.program.functions.getInstantiationInfo(
-        ctx.moduleId,
-        item.symbol,
-      );
-      const hasInstantiations = Boolean(
-        instantiationInfo && instantiationInfo.size > 0,
-      );
-      if (scheme && scheme.params.length > 0 && !hasInstantiations) {
-        continue;
-      }
-      throw new Error(`codegen missing metadata for function ${item.symbol}`);
+      continue;
+    }
+    if (!isMathModule) {
+      metas.forEach((meta) => compileFunctionItem(item, meta, ctx));
+      continue;
+    }
+    const canonicalId = ctx.program.symbols.canonicalIdOf(
+      ctx.moduleId,
+      item.symbol,
+    ) as ProgramSymbolId;
+    if (!usedMathFunctions.has(canonicalId)) {
+      continue;
     }
     metas.forEach((meta) => compileFunctionItem(item, meta, ctx));
   }
@@ -401,23 +568,7 @@ export const emitModuleExports = (
   const exportContexts =
     ctx.options.testMode && testScope === "all" ? contexts : [ctx];
   exportContexts.forEach((exportCtx) => {
-    const publicExports = exportCtx.module.hir.module.exports.filter((entry) =>
-      isPublicVisibility(entry.visibility),
-    );
-    const baseEntries =
-      exportCtx.module.meta.isPackageRoot || publicExports.length > 0
-        ? publicExports
-        : exportCtx.module.hir.module.exports.filter((entry) =>
-            isPackageVisible(entry.visibility),
-          );
-    const isTestExport = (entry: HirExportEntry): boolean => {
-      const name =
-        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
-      return isGeneratedTestId(name);
-    };
-    const exportEntries = exportCtx.options.testMode
-      ? baseEntries.filter(isTestExport)
-      : baseEntries;
+    const exportEntries = getModuleExportEntries(exportCtx);
 
     exportEntries.forEach((entry) => {
       const intrinsicMetadata =

@@ -159,7 +159,9 @@ export const codegenProgram = ({
   });
   contexts.forEach(registerImportMetadata);
   buildRuntimeTypeArtifacts(contexts);
-  contexts.forEach(compileFunctions);
+  contexts.forEach((ctx) =>
+    compileFunctions({ ctx, contexts, entryModuleId }),
+  );
 
   emitModuleExports(entryCtx, contexts);
   const effectTable = emitEffectTableSection({
