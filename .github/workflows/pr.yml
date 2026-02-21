@@ -3,7 +3,7 @@ name: Node.js CI
 on: [pull_request]
 
 jobs:
-  unused_symbols:
+  typecheck:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
@@ -73,7 +73,7 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
       # Main PR tests run in source mode for speed and broad coverage.
-      - run: VOYD_USE_SRC=1 npx turbo run test --affected --output-logs=errors-only --concurrency=2
+      - run: VOYD_USE_SRC=1 npx turbo run test --affected --output-logs=errors-only --concurrency=75%
       # Dist mode is validated separately via targeted CLI e2e when CLI/runtime areas change.
       - name: Build CLI dist for dist e2e
         if: steps.changes.outputs.cli == 'true'
