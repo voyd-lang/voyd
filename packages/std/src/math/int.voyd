@@ -1,0 +1,172 @@
+use std::result::types::all
+use std::math::errors::{
+  MathError,
+  math_error,
+  math_error_code_invalid_input,
+  math_error_code_overflow,
+  math_error_code_divide_by_zero
+}
+
+/// Returns the larger of two values.
+pub fn max<T>(a: T, b: T) -> T
+  if a > b then: a else: b
+
+/// Returns the smaller of two values.
+pub fn min<T>(a: T, b: T) -> T
+  if a < b then: a else: b
+
+/// Returns the Euclidean remainder for 32-bit integers.
+pub fn mod_euclid(value: i32, modulus: i32) -> Result<i32, MathError>
+  if modulus <= 0 then:
+    return math_error(code: math_error_code_invalid_input())
+
+  let remainder = value % modulus
+  Ok<i32> {
+    value: if remainder < 0 then: remainder + modulus else: remainder
+  }
+
+/// Returns the Euclidean remainder for 64-bit integers.
+pub fn mod_euclid(value: i64, modulus: i64) -> Result<i64, MathError>
+  if modulus <= extend_i32_s(0) then:
+    return math_error(code: math_error_code_invalid_input())
+
+  let remainder = value % modulus
+  Ok<i64> {
+    value: if remainder < extend_i32_s(0) then: remainder + modulus else: remainder
+  }
+
+/// Returns the Euclidean remainder for 32-bit integers.
+pub fn rem_euclid(value: i32, modulus: i32) -> Result<i32, MathError>
+  mod_euclid(value, modulus)
+
+/// Returns the Euclidean remainder for 64-bit integers.
+pub fn rem_euclid(value: i64, modulus: i64) -> Result<i64, MathError>
+  mod_euclid(value, modulus)
+
+/// Returns quotient and remainder for 32-bit integers.
+pub fn div_rem(value: i32, divisor: i32) -> (i32, i32)
+  (value / divisor, value % divisor)
+
+/// Returns quotient and remainder for 64-bit integers.
+pub fn div_rem(value: i64, divisor: i64) -> (i64, i64)
+  (value / divisor, value % divisor)
+
+/// Returns quotient and remainder, rejecting divide-by-zero and signed overflow.
+pub fn checked_div_rem(value: i32, divisor: i32) -> Result<(i32, i32), MathError>
+  if divisor == 0 then:
+    return math_error(code: math_error_code_divide_by_zero())
+  if divisor == -1 then:
+    if value < 0 then:
+      let flipped = 0 - value
+      if flipped < 0 then:
+        return math_error(code: math_error_code_overflow())
+  Ok<(i32, i32)> { value: (value / divisor, value % divisor) }
+
+/// Returns quotient and remainder, rejecting divide-by-zero and signed overflow.
+pub fn checked_div_rem(value: i32, { by divisor: i32 }) -> Result<(i32, i32), MathError>
+  checked_div_rem(value, divisor)
+
+/// Returns quotient and remainder, rejecting divide-by-zero and signed overflow.
+pub fn checked_div_rem(value: i64, divisor: i64) -> Result<(i64, i64), MathError>
+  if divisor == extend_i32_s(0) then:
+    return math_error(code: math_error_code_divide_by_zero())
+  if divisor == extend_i32_s(-1) then:
+    if value < extend_i32_s(0) then:
+      let flipped = extend_i32_s(0) - value
+      if flipped < extend_i32_s(0) then:
+        return math_error(code: math_error_code_overflow())
+  Ok<(i64, i64)> { value: (value / divisor, value % divisor) }
+
+/// Returns quotient and remainder, rejecting divide-by-zero and signed overflow.
+pub fn checked_div_rem(value: i64, { by divisor: i64 }) -> Result<(i64, i64), MathError>
+  checked_div_rem(value, divisor)
+
+/// Returns the next power of two for a 32-bit integer.
+pub fn next_power_of_two(value: i32) -> Result<i32, MathError>
+  let start = if value > 1 then: value else: 1
+  var out = 1
+  while out < start do:
+    if out > 1073741823 then:
+      return math_error(code: math_error_code_overflow())
+    out = out * 2
+  Ok<i32> { value: out }
+
+/// Returns true when `value` is a power of two.
+pub fn is_power_of_two(value: i32) -> bool
+  if value <= 0 then:
+    return false
+  bit_and_i32(value, value - 1) == 0
+
+/// Returns true when `value` is a power of two.
+pub fn is_power_of_two(value: i64) -> bool
+  if value <= extend_i32_s(0) then:
+    return false
+  bit_and_i64(value, value - extend_i32_s(1)) == extend_i32_s(0)
+
+/// Returns the greatest power of two less than or equal to `value`.
+pub fn prev_power_of_two(value: i32) -> Result<i32, MathError>
+  if value <= 0 then:
+    return math_error(code: math_error_code_invalid_input())
+  var out = 1
+  while out <= (value / 2) do:
+    out = out * 2
+  Ok<i32> { value: out }
+
+/// Returns the greatest power of two less than or equal to `value`.
+pub fn prev_power_of_two(value: i64) -> Result<i64, MathError>
+  if value <= extend_i32_s(0) then:
+    return math_error(code: math_error_code_invalid_input())
+  var out = extend_i32_s(1)
+  while out <= (value / extend_i32_s(2)) do:
+    out = out * extend_i32_s(2)
+  Ok<i64> { value: out }
+
+/// Returns the smallest multiple of `factor` that is greater than or equal to `value`.
+pub fn next_multiple_of(value: i32, factor: i32) -> Result<i32, MathError>
+  if factor <= 0 then:
+    return math_error(code: math_error_code_invalid_input())
+
+  match(mod_euclid(value, factor))
+    Ok<i32> { value: rem }:
+      if rem == 0 then:
+        return Ok<i32> { value }
+      let delta = factor - rem
+      let next = value + delta
+      if next < value then:
+        return math_error(code: math_error_code_overflow())
+      Ok<i32> { value: next }
+    Err<MathError> { error }:
+      Err<MathError> { error }
+
+/// Returns the smallest multiple of `factor` that is greater than or equal to `value`.
+pub fn next_multiple_of(value: i32, { factor: i32 }) -> Result<i32, MathError>
+  next_multiple_of(value, factor)
+
+/// Returns the smallest multiple of `factor` that is greater than or equal to `value`.
+pub fn next_multiple_of(value: i64, factor: i64) -> Result<i64, MathError>
+  if factor <= extend_i32_s(0) then:
+    return math_error(code: math_error_code_invalid_input())
+
+  match(mod_euclid(value, factor))
+    Ok<i64> { value: rem }:
+      if rem == extend_i32_s(0) then:
+        return Ok<i64> { value }
+      let delta = factor - rem
+      let next = value + delta
+      if next < value then:
+        return math_error(code: math_error_code_overflow())
+      Ok<i64> { value: next }
+    Err<MathError> { error }:
+      Err<MathError> { error }
+
+/// Returns the smallest multiple of `factor` that is greater than or equal to `value`.
+pub fn next_multiple_of(value: i64, { factor: i64 }) -> Result<i64, MathError>
+  next_multiple_of(value, factor)
+
+@intrinsic(name: "__bit_and")
+fn bit_and_i32(left: i32, right: i32): () -> i32 __bit_and(left, right)
+
+@intrinsic(name: "__bit_and")
+fn bit_and_i64(left: i64, right: i64): () -> i64 __bit_and(left, right)
+
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)

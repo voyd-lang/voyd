@@ -32,7 +32,15 @@ pub use std::math::{
   signum,
   is_nan,
   is_finite,
-  is_infinite
+  is_infinite,
+  pi_f64,
+  pi_f32,
+  tau_f64,
+  tau_f32,
+  e_f64,
+  e_f32,
+  deg_to_rad,
+  rad_to_deg
 }
 
 pub use std::string::{

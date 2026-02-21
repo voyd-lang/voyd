@@ -1,0 +1,20 @@
+use std::test::assertions::all
+
+test "clamp and between support positional and labeled overloads":
+  assert(clamp(7, 1, 5), eq: 5)
+  assert(clamp(2, min: 5, max: 1), eq: 2)
+  assert(clamp(0, min: 1, max: 5), eq: 1)
+
+  assert(between(3, 1, 5), eq: true)
+  assert(between(6, min: 1, max: 5), eq: false)
+  assert(between(3, min: 5, max: 1), eq: true)
+
+test "float overloads clamp and between":
+  assert(clamp(3.75, 1.0, 3.0), eq: 3.0)
+  assert(clamp(f32_from_f64(0.25), min: f32_from_f64(0.5), max: f32_from_f64(2.0)), eq: f32_from_f64(0.5))
+
+  assert(between(2.5, 2.0, 3.0), eq: true)
+  assert(between(f32_from_f64(4.0), min: f32_from_f64(1.0), max: f32_from_f64(3.0)), eq: false)
+
+@intrinsic(name: "__f32_demote_f64")
+fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)

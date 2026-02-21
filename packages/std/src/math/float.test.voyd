@@ -1,0 +1,78 @@
+use std::test::assertions::all
+
+test "abs supports ints and floats":
+  match(abs(9))
+    Ok<i32> { value }:
+      assert(value, eq: 9)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(abs(-9))
+    Ok<i32> { value }:
+      assert(value, eq: 9)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(abs(-2147483647 - 1))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 2)
+
+  match(abs(i64_from_i32(-9)))
+    Ok<i64> { value }:
+      assert(value, eq: i64_from_i32(9))
+    Err<MathError>:
+      assert(false, eq: true)
+
+  assert(abs(-2.5), eq: 2.5)
+  assert(f64_from_f32(abs(f32_from_f64(-3.5))), eq: 3.5)
+
+test "signum supports ints and floats including nan":
+  assert(signum(-9), eq: -1)
+  assert(signum(0), eq: 0)
+  assert(signum(9), eq: 1)
+
+  assert(signum(i64_from_i32(-9)), eq: i64_from_i32(-1))
+  assert(signum(i64_from_i32(0)), eq: i64_from_i32(0))
+  assert(signum(i64_from_i32(9)), eq: i64_from_i32(1))
+
+  assert(signum(-2.5), eq: -1.0)
+  assert(signum(0.0), eq: 0.0)
+  assert(signum(2.5), eq: 1.0)
+  assert(f64_from_f32(signum(f32_from_f64(-2.5))), eq: -1.0)
+
+  let nan = 0.0 / 0.0
+  assert(is_nan(signum(nan)), eq: true)
+
+test "nan finite and infinite helpers work for f64 and f32":
+  let finite = 12.5
+  let inf = 1.0 / 0.0
+  let nan = 0.0 / 0.0
+
+  assert(is_finite(finite), eq: true)
+  assert(is_infinite(finite), eq: false)
+  assert(is_nan(finite), eq: false)
+
+  assert(is_finite(inf), eq: false)
+  assert(is_infinite(inf), eq: true)
+  assert(is_nan(inf), eq: false)
+
+  assert(is_finite(nan), eq: false)
+  assert(is_infinite(nan), eq: false)
+  assert(is_nan(nan), eq: true)
+
+  let finite32 = f32_from_f64(3.5)
+  let inf32 = f32_from_f64(1.0 / 0.0)
+  let nan32 = f32_from_f64(0.0 / 0.0)
+  assert(is_finite(finite32), eq: true)
+  assert(is_infinite(inf32), eq: true)
+  assert(is_nan(nan32), eq: true)
+
+@intrinsic(name: "__f32_demote_f64")
+fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+@intrinsic(name: "__f64_promote_f32")
+fn f64_from_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
