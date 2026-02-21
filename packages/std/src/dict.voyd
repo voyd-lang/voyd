@@ -42,12 +42,13 @@ impl<K: DictKey<K>, V> Dict<K, V>
   api fn init() -> Dict<K, V>
     Dict<K, V> { buckets: new_buckets<K, V>(16), count: 0 }
 
-  /// Creates an empty dictionary sized for at least `capacity` entries.
+  /// Creates an empty dictionary sized for `capacity` entries up to a safe upper bound.
   api fn with_capacity({ size capacity: i32 }) -> Dict<K, V>
     let target = if capacity > 0 then: capacity else: 0
     let min_bucket_count = 16
+    let max_initial_bucket_count = 65536
     let grown_target = if target > 1073741823 then: 2147483647 else: target * 2
-    let desired_bucket_count = next_power_of_two_or_max(grown_target)
+    let desired_bucket_count = next_power_of_two_or_limit(grown_target, max_initial_bucket_count)
     let bucket_count =
       if desired_bucket_count > min_bucket_count then:
         desired_bucket_count
@@ -531,9 +532,10 @@ fn mod_euclid_or_zero(value: i32, modulus: i32) -> i32
     Err<MathError>:
       0
 
-fn next_power_of_two_or_max(value: i32) -> i32
+fn next_power_of_two_or_limit(value: i32, limit: i32) -> i32
+  let safe_limit = if limit > 0 then: limit else: 1
   match(next_power_of_two(value))
-    Ok<i32> { value }:
-      value
+    Ok<i32> { value: next }:
+      if next > safe_limit then: safe_limit else: next
     Err<MathError>:
-      1073741824
+      safe_limit
