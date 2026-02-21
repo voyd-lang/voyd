@@ -31,6 +31,7 @@ import {
 import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
+import { requireFunctionMetaByName } from "./function-lookup.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 
@@ -269,6 +270,72 @@ const collectReachableFunctionSymbols = ({
 const reachabilityStateOf = (ctx: CodegenContext): ReachabilityState =>
   ctx.programHelpers.getHelperState(REACHABILITY_STATE, () => ({}));
 
+const reachabilitySetOf = (ctx: CodegenContext): Set<ProgramSymbolId> => {
+  const state = reachabilityStateOf(ctx);
+  if (state.symbols) {
+    return state.symbols;
+  }
+  const symbols = new Set<ProgramSymbolId>();
+  state.symbols = symbols;
+  return symbols;
+};
+
+const markFunctionReachable = ({
+  ctx,
+  moduleId,
+  symbol,
+  reachable,
+}: {
+  ctx: CodegenContext;
+  moduleId: string;
+  symbol: number;
+  reachable?: Set<ProgramSymbolId>;
+}): void => {
+  (reachable ?? reachabilitySetOf(ctx)).add(
+    ctx.program.symbols.canonicalIdOf(moduleId, symbol) as ProgramSymbolId,
+  );
+};
+
+const markSerializerReachable = ({
+  ctx,
+  serializer,
+}: {
+  ctx: CodegenContext;
+  serializer: NonNullable<ReturnType<typeof resolveSerializerForTypes>>;
+}): void => {
+  markFunctionReachable({
+    ctx,
+    moduleId: serializer.encode.moduleId,
+    symbol: serializer.encode.symbol,
+  });
+  markFunctionReachable({
+    ctx,
+    moduleId: serializer.decode.moduleId,
+    symbol: serializer.decode.symbol,
+  });
+};
+
+const markStringLiteralCtorReachable = ({
+  ctx,
+  reachable,
+}: {
+  ctx: CodegenContext;
+  reachable: Set<ProgramSymbolId>;
+}): void => {
+  const meta = requireFunctionMetaByName({
+    ctx,
+    moduleId: "std::string",
+    name: "new_string",
+    paramCount: 1,
+  });
+  markFunctionReachable({
+    ctx,
+    moduleId: meta.moduleId,
+    symbol: meta.symbol,
+    reachable,
+  });
+};
+
 const getReachableFunctionSymbols = ({
   ctx,
   contexts,
@@ -501,6 +568,10 @@ export const compileFunctions = ({
             }
             return;
           }
+          if (expr.exprKind === "literal" && expr.literalKind === "string") {
+            markStringLiteralCtorReachable({ ctx, reachable: reachableFunctions });
+            return;
+          }
           if (expr.exprKind !== "method-call") {
             return;
           }
@@ -723,6 +794,9 @@ export const emitModuleExports = (
           [meta.resultTypeId],
           exportCtx,
         );
+        if (serializer) {
+          markSerializerReachable({ ctx: exportCtx, serializer });
+        }
         const supportedReturn =
           valueType === binaryen.none ||
           valueType === binaryen.i32 ||
@@ -768,6 +842,7 @@ export const emitModuleExports = (
       }
 
       if (serializer) {
+        markSerializerReachable({ ctx: exportCtx, serializer });
         try {
           emitSerializedExportWrapper({ ctx: exportCtx, meta, exportName });
           exportAbiEntries.push({
