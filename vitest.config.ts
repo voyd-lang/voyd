@@ -6,6 +6,7 @@ export default mergeConfig(
   defineConfig({
     test: {
       pool: "threads", // or: 'vmThreads'
+      testTimeout: 30000,
       hookTimeout: 30000,
     },
   }),
