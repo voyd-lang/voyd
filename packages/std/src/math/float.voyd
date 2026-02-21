@@ -21,7 +21,7 @@ pub fn abs(value: i64) -> Result<i64, MathError>
 
 /// Returns the absolute value.
 pub fn abs(value: f64) -> f64
-  if value < 0.0 then: 0.0 - value else: value
+  if value <= 0.0 then: 0.0 - value else: value
 
 /// Returns the absolute value.
 pub fn abs(value: f32) -> f32

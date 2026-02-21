@@ -28,6 +28,10 @@ test "abs supports ints and floats":
   assert(abs(-2.5), eq: 2.5)
   assert(f64_from_f32(abs(f32_from_f64(-3.5))), eq: 3.5)
 
+  let pos_inf = 1.0 / 0.0
+  assert(1.0 / abs(-0.0), eq: pos_inf)
+  assert(1.0 / f64_from_f32(abs(f32_from_f64(-0.0))), eq: pos_inf)
+
 test "signum supports ints and floats including nan":
   assert(signum(-9), eq: -1)
   assert(signum(0), eq: 0)
