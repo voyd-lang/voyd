@@ -130,6 +130,43 @@ test "json parse allows zero mantissa with large exponent":
     Err<JsonError>:
       assert(false, eq: true)
 
+test "json parse accepts normalized finite exponents above 308":
+  match(parse(s: "0.1e309".as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          var expected = 1.0
+          var index = 0
+          while index < 308 do:
+            expected = expected * 10.0
+            index = index + 1
+          let ratio = root.value / expected
+          assert(ratio > 0.999999999, eq: true)
+          assert(ratio < 1.000000001, eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+test "json parse keeps late fractional digits with exponent compensation":
+  let input = compensated_fraction_input(350)
+  match(parse(s: input.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          var expected = 1.0
+          var index = 0
+          while index < 26 do:
+            expected = expected / 10.0
+            index = index + 1
+          let ratio = root.value / expected
+          assert(ratio > 0.999999999, eq: true)
+          assert(ratio < 1.000000001, eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
 test "json stringify emits compact object envelope":
   let ~fields = Dict<String, JsonValue>::init()
   fields.set(key: "ok", value: JsonBool { value: true })
@@ -256,21 +293,22 @@ test "json stringify preserves extended fractional precision":
       assert(false, eq: true)
 
 test "json stringify preserves subnormal numbers":
-  var tiny = 1.0
-  var index = 0
-  while index < 309 do:
-    tiny = tiny / 10.0
-    index = index + 1
-
-  let encoded = stringify(value: JsonNumber { value: tiny })
-  assert(encoded.equals("0"), eq: false)
-  assert(encoded.equals("-0"), eq: false)
-
-  match(parse(s: encoded.as_slice()))
+  match(parse(s: "1e-309".as_slice()))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
-          assert(root.value > 0.0, eq: true)
+          let encoded = stringify(value: JsonNumber { value: root.value })
+          assert(encoded.equals("0"), eq: false)
+          assert(encoded.equals("-0"), eq: false)
+          match(parse(s: encoded.as_slice()))
+            Ok<JsonValue> { value: roundtrip }:
+              roundtrip.match(roundtrip_root)
+                JsonNumber:
+                  assert(roundtrip_root.value > 0.0, eq: true)
+                else:
+                  assert(false, eq: true)
+            Err<JsonError>:
+              assert(false, eq: true)
         else:
           assert(false, eq: true)
     Err<JsonError>:
@@ -297,4 +335,21 @@ fn long_fraction_input(digit: i32, digits: i32): () -> String
     bytes.push(digit)
     index = index + 1
 
+  new_string(bytes.to_fixed_array())
+
+fn compensated_fraction_input(zero_digits: i32): () -> String
+  let ~bytes = Array<i32>::with_capacity(zero_digits + 7)
+  bytes.push(48)
+  bytes.push(46)
+
+  var index = 0
+  while index < zero_digits do:
+    bytes.push(48)
+    index = index + 1
+
+  bytes.push(49)
+  bytes.push(101)
+  bytes.push(51)
+  bytes.push(50)
+  bytes.push(53)
   new_string(bytes.to_fixed_array())

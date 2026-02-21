@@ -828,23 +828,32 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
   if index >= len then:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
-  var int_part = 0.0
+  var significand = 0.0
+  var collected_digits = 0
+  var significant_digits = 0
+  var saw_nonzero_digit = false
+
+  var saw_int_digit = false
   if byte_at_or(source, index, -1) == 48 then:
+    saw_int_digit = true
     index = index + 1
   else:
-    var saw_int_digit = false
     while index < len do:
       let digit = parse_decimal_digit(byte_at_or(source, index, -1))
       if digit < 0 then:
         break
-      int_part = int_part * 10.0 + digit_to_f64(digit)
       saw_int_digit = true
+      if digit != 0 or saw_nonzero_digit then:
+        saw_nonzero_digit = true
+        significant_digits = significant_digits + 1
+        if collected_digits < 17 then:
+          significand = significand * 10.0 + digit_to_f64(digit)
+          collected_digits = collected_digits + 1
       index = index + 1
-    if not saw_int_digit then:
-      return Err<JsonError> { error: json_error("json parse error: invalid number") }
+  if not saw_int_digit then:
+    return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
-  var frac_part = 0.0
-  var frac_place = 0.1
+  var frac_digits = 0
   if index < len and byte_at_or(source, index, -1) == 46 then:
     index = index + 1
     if index >= len then:
@@ -855,9 +864,13 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
       let digit = parse_decimal_digit(byte_at_or(source, index, -1))
       if digit < 0 then:
         break
-      if frac_place > 0.0 then:
-        frac_part = frac_part + digit_to_f64(digit) * frac_place
-        frac_place = frac_place / 10.0
+      frac_digits = frac_digits + 1
+      if digit != 0 or saw_nonzero_digit then:
+        saw_nonzero_digit = true
+        significant_digits = significant_digits + 1
+        if collected_digits < 17 then:
+          significand = significand * 10.0 + digit_to_f64(digit)
+          collected_digits = collected_digits + 1
       saw_fraction_digit = true
       index = index + 1
     if not saw_fraction_digit then:
@@ -887,9 +900,8 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
         let digit = parse_decimal_digit(byte_at_or(source, index, -1))
         if digit < 0 then:
           break
-        if exponent > 400 then:
-          return Err<JsonError> { error: json_error("json parse error: invalid exponent") }
-        exponent = exponent * 10 + digit
+        if exponent < 1000000 then:
+          exponent = exponent * 10 + digit
         saw_exp_digit = true
         index = index + 1
       if not saw_exp_digit then:
@@ -898,17 +910,13 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
   if index != len then:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
-  let base = int_part + frac_part
-  if is_non_finite_float(base) then:
-    return Err<JsonError> { error: json_error("json parse error: invalid number") }
-  if base == 0.0 then:
+  if not saw_nonzero_digit then:
     return Ok<f64> { value: sign * 0.0 }
 
-  let signed_exponent = exponent_sign * exponent
-  if signed_exponent > 308 or signed_exponent < -324 then:
-    return Err<JsonError> { error: json_error("json parse error: invalid exponent") }
+  let omitted_digits = significant_digits - collected_digits
+  let signed_exponent = exponent_sign * exponent - frac_digits + omitted_digits
 
-  let value = sign * base * pow10_i32(signed_exponent)
+  let value = sign * significand * pow10_i32(signed_exponent)
   if is_non_finite_float(value) then:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
@@ -922,19 +930,34 @@ fn parse_decimal_digit(byte: i32) -> i32
 fn pow10_i32(value: i32) -> f64
   if value == 0 then:
     return 1.0
-
-  var out = 1.0
-  var index = 0
   if value < 0 then:
-    let abs = 0 - value
-    while index < abs do:
-      out = out / 10.0
-      index = index + 1
-    return out
+    return pow10_negative_i32(0 - value)
+  pow10_positive_i32(value)
 
-  while index < value do:
-    out = out * 10.0
-    index = index + 1
+fn pow10_positive_i32(value: i32) -> f64
+  var out = 1.0
+  var base = 10.0
+  var remaining = value
+  while remaining > 0 do:
+    let half = remaining / 2
+    let odd = remaining - half * 2
+    if odd == 1 then:
+      out = out * base
+    base = base * base
+    remaining = half
+  out
+
+fn pow10_negative_i32(value: i32) -> f64
+  var out = 1.0
+  var base = 0.1
+  var remaining = value
+  while remaining > 0 do:
+    let half = remaining / 2
+    let odd = remaining - half * 2
+    if odd == 1 then:
+      out = out * base
+    base = base * base
+    remaining = half
   out
 
 fn json_error(message: String) -> JsonError
