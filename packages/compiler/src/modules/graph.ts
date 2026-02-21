@@ -33,6 +33,10 @@ import type {
 } from "./types.js";
 import { expandModuleMacros } from "./macro-expansion.js";
 import type { SourceSpan } from "../semantics/ids.js";
+import {
+  incrementCompilerPerfCounter,
+  isCompilerPerfEnabled,
+} from "../perf.js";
 
 type BuildGraphOptions = {
   entryPath: string;
@@ -70,6 +74,29 @@ const findReservedModuleSegment = (
   path: ModulePath,
 ): string | undefined => path.segments.find((segment) => segment === RESERVED_MODULE_SEGMENT);
 
+const COMPILER_PERF_ENABLED = isCompilerPerfEnabled();
+
+const updateNestedPrefixCounts = ({
+  counts,
+  pathKey,
+  delta,
+}: {
+  counts: Map<string, number>;
+  pathKey: string;
+  delta: 1 | -1;
+}): void => {
+  const segments = pathKey.split("::");
+  for (let length = 1; length < segments.length; length += 1) {
+    const prefix = segments.slice(0, length).join("::");
+    const next = (counts.get(prefix) ?? 0) + delta;
+    if (next <= 0) {
+      counts.delete(prefix);
+    } else {
+      counts.set(prefix, next);
+    }
+  }
+};
+
 export const buildModuleGraph = async ({
   entryPath,
   host,
@@ -81,6 +108,8 @@ export const buildModuleGraph = async ({
   const moduleDiagnostics: ModuleDiagnostic[] = [];
   const docDiagnostics: Diagnostic[] = [];
   const missingModules = new Map<string, Set<string>>();
+  const moduleNestedPrefixCounts = new Map<string, number>();
+  const pendingNestedPrefixCounts = new Map<string, number>();
 
   const hasMissingModule = (importer: string, pathKey: string): boolean =>
     missingModules.get(importer)?.has(pathKey) ?? false;
@@ -118,30 +147,58 @@ export const buildModuleGraph = async ({
     hasStdPreludeModule,
   });
 
-  addModuleTree(entryModule, modules, modulesByPath);
+  addModuleTree(entryModule, modules, modulesByPath, (module) =>
+    updateNestedPrefixCounts({
+      counts: moduleNestedPrefixCounts,
+      pathKey: modulePathToString(module.path),
+      delta: 1,
+    }),
+  );
   docDiagnostics.push(...entryModule.diagnostics);
 
   const pending: PendingDependency[] = [];
-  enqueueDependencies(entryModule, pending);
+  enqueueDependencies(entryModule, pending, (queued) => {
+    if (COMPILER_PERF_ENABLED) {
+      incrementCompilerPerfCounter("graph.pending.enqueued");
+    }
+    updateNestedPrefixCounts({
+      counts: pendingNestedPrefixCounts,
+      pathKey: modulePathToString(queued.dependency.path),
+      delta: 1,
+    });
+  });
 
   const hasNestedModule = (pathKey: string): boolean => {
-    const prefix = `${pathKey}::`;
-    for (const key of modulesByPath.keys()) {
-      if (key.startsWith(prefix)) {
-        return true;
-      }
+    if (COMPILER_PERF_ENABLED) {
+      incrementCompilerPerfCounter("graph.nested.checks");
     }
-    for (const entry of pending) {
-      const depKey = modulePathToString(entry.dependency.path);
-      if (depKey.startsWith(prefix)) {
-        return true;
-      }
+    const hasNested =
+      (moduleNestedPrefixCounts.get(pathKey) ?? 0) > 0 ||
+      (pendingNestedPrefixCounts.get(pathKey) ?? 0) > 0;
+    if (hasNested && COMPILER_PERF_ENABLED) {
+      incrementCompilerPerfCounter("graph.nested.hits");
     }
-    return false;
+    return hasNested;
   };
 
-  while (pending.length) {
-    const { dependency, importerId, importerFilePath } = pending.shift()!;
+  let pendingIndex = 0;
+  while (pendingIndex < pending.length) {
+    const nextPending = pending[pendingIndex];
+    pendingIndex += 1;
+    if (!nextPending) {
+      continue;
+    }
+
+    if (COMPILER_PERF_ENABLED) {
+      incrementCompilerPerfCounter("graph.pending.dequeued");
+    }
+    const { dependency, importerId, importerFilePath } = nextPending;
+    updateNestedPrefixCounts({
+      counts: pendingNestedPrefixCounts,
+      pathKey: modulePathToString(dependency.path),
+      delta: -1,
+    });
+
     const importerLabel = importerFilePath ?? importerId;
     const pathKey = modulePathToString(dependency.path);
     if (hasMissingModule(importerId, pathKey)) {
@@ -230,9 +287,24 @@ export const buildModuleGraph = async ({
       addMissingModule(importerId, pathKey);
       continue;
     }
-    addModuleTree(nextModule, modules, modulesByPath);
+    addModuleTree(nextModule, modules, modulesByPath, (module) =>
+      updateNestedPrefixCounts({
+        counts: moduleNestedPrefixCounts,
+        pathKey: modulePathToString(module.path),
+        delta: 1,
+      }),
+    );
     docDiagnostics.push(...nextModule.diagnostics);
-    enqueueDependencies(nextModule, pending);
+    enqueueDependencies(nextModule, pending, (queued) => {
+      if (COMPILER_PERF_ENABLED) {
+        incrementCompilerPerfCounter("graph.pending.enqueued");
+      }
+      updateNestedPrefixCounts({
+        counts: pendingNestedPrefixCounts,
+        pathKey: modulePathToString(queued.dependency.path),
+        delta: 1,
+      });
+    });
     if (!modulesByPath.has(pathKey) && !hasNestedModule(pathKey)) {
       moduleDiagnostics.push({
         kind: "missing-module",
@@ -262,17 +334,20 @@ const addModuleTree = (
   root: LoadedModule,
   modules: Map<string, ModuleNode>,
   modulesByPath: Map<string, ModuleNode>,
+  onModuleAdded?: (module: ModuleNode) => void,
 ) => {
   const allModules = [root.node, ...root.inlineModules];
   allModules.forEach((module) => {
     modules.set(module.id, module);
     modulesByPath.set(modulePathToString(module.path), module);
+    onModuleAdded?.(module);
   });
 };
 
 const enqueueDependencies = (
   loaded: LoadedModule,
   queue: PendingDependency[],
+  onQueued?: (queued: PendingDependency) => void,
 ) => {
   const modules = [loaded.node, ...loaded.inlineModules];
   const importerFilePathFor = (module: ModuleNode): string | undefined =>
@@ -280,13 +355,15 @@ const enqueueDependencies = (
       ? module.origin.filePath
       : module.origin.span?.file;
   modules.forEach((module) =>
-    module.dependencies.forEach((dependency) =>
-      queue.push({
+    module.dependencies.forEach((dependency) => {
+      const queued: PendingDependency = {
         dependency,
         importerId: module.id,
         importerFilePath: importerFilePathFor(module),
-      }),
-    ),
+      };
+      queue.push(queued);
+      onQueued?.(queued);
+    }),
   );
 };
 

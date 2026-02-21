@@ -42,6 +42,12 @@ import {
 import { symbolRefEquals } from "./symbol-ref.js";
 import { emitDiagnostic } from "../../diagnostics/index.js";
 import { hydrateImportedTraitMetadataForNominal } from "./import-trait-impl-hydration.js";
+import {
+  incrementCompilerPerfCounter,
+  isCompilerPerfEnabled,
+} from "../../perf.js";
+
+const COMPILER_PERF_ENABLED = isCompilerPerfEnabled();
 
 type UnifyWithBudgetOptions = Omit<UnificationContext, "stepBudget">;
 
@@ -2423,14 +2429,29 @@ const currentFunctionConstraintMap = (
   state: TypingState,
 ): ReadonlyMap<TypeParamId, TypeId> | undefined => {
   const current = state.currentFunction;
+  const cache = state.currentFunctionConstraintCache;
+  if (cache.forFunction === current) {
+    if (COMPILER_PERF_ENABLED) {
+      incrementCompilerPerfCounter("typing.constraint_cache.hit");
+    }
+    return cache.constraints;
+  }
+
+  if (COMPILER_PERF_ENABLED) {
+    incrementCompilerPerfCounter("typing.constraint_cache.miss");
+  }
   const functionSymbol = current?.functionSymbol;
   if (typeof functionSymbol !== "number") {
+    cache.forFunction = current;
+    cache.constraints = undefined;
     return undefined;
   }
 
   const signature = ctx.functions.getSignature(functionSymbol);
   const typeParams = signature?.typeParams;
   if (!typeParams || typeParams.length === 0) {
+    cache.forFunction = current;
+    cache.constraints = undefined;
     return undefined;
   }
 
@@ -2446,7 +2467,10 @@ const currentFunctionConstraintMap = (
     out.set(param.typeParam, resolved);
   });
 
-  return out.size > 0 ? out : undefined;
+  const constraints = out.size > 0 ? out : undefined;
+  cache.forFunction = current;
+  cache.constraints = constraints;
+  return constraints;
 };
 
 const traitSatisfies = (
@@ -3055,6 +3079,9 @@ const findUnionBindingCandidates = ({
   ctx: TypingContext;
   state: TypingState;
 }): UnionBindingCandidate[] => {
+  if (COMPILER_PERF_ENABLED) {
+    incrementCompilerPerfCounter("typing.union_search.invocations");
+  }
   const solutions: UnionBindingCandidate[] = [];
   const visitedStates = new Set<string>();
   let abortedForComplexity = false;
@@ -3076,13 +3103,20 @@ const findUnionBindingCandidates = ({
       expected,
       usedActualIndices,
       bindings: currentBindings,
+      actualMemberCount: actualMembers.length,
     });
     if (visitedStates.has(stateKey)) {
       return;
     }
     visitedStates.add(stateKey);
+    if (COMPILER_PERF_ENABLED) {
+      incrementCompilerPerfCounter("typing.union_search.state_visited");
+    }
     if (visitedStates.size > MAX_UNION_BINDING_SEARCH_STATES) {
       abortedForComplexity = true;
+      if (COMPILER_PERF_ENABLED) {
+        incrementCompilerPerfCounter("typing.union_search.state_budget_abort");
+      }
       return;
     }
 
@@ -3097,40 +3131,59 @@ const findUnionBindingCandidates = ({
       return;
     }
 
-    const options = expected
-      .map((expectedMember, expectedIndex) => {
-        if (typeof expectedMember !== "number") {
-          return undefined;
-        }
-        const matches = actualMembers.flatMap((actualMember, actualIndex) => {
-          const candidate = tryBindExpectedMember({
-            expectedMember,
-            actualMember,
-            bindings: currentBindings,
-            ctx,
-            state,
-          });
-          return candidate ? [{ actualIndex, bindings: candidate }] : [];
-        });
-        return { expectedIndex, matches };
-      })
-      .filter(
-        (
-          option,
-        ): option is {
+    let next:
+      | {
           expectedIndex: number;
           matches: { actualIndex: number; bindings: Map<TypeParamId, TypeId> }[];
-        } => Boolean(option),
-      )
-      .sort((left, right) => left.matches.length - right.matches.length);
+        }
+      | undefined;
 
-    const next = options[0];
+    for (let expectedIndex = 0; expectedIndex < expected.length; expectedIndex += 1) {
+      const expectedMember = expected[expectedIndex];
+      if (typeof expectedMember !== "number") {
+        continue;
+      }
+
+      const matches: { actualIndex: number; bindings: Map<TypeParamId, TypeId> }[] = [];
+      for (let actualIndex = 0; actualIndex < actualMembers.length; actualIndex += 1) {
+        if (usedActualIndices.has(actualIndex)) {
+          if (COMPILER_PERF_ENABLED) {
+            incrementCompilerPerfCounter("typing.union_search.actual_index_revisited");
+          }
+        }
+        const actualMember = actualMembers[actualIndex];
+        if (typeof actualMember !== "number") {
+          continue;
+        }
+        const candidate = tryBindExpectedMember({
+          expectedMember,
+          actualMember,
+          bindings: currentBindings,
+          ctx,
+          state,
+        });
+        if (!candidate) {
+          continue;
+        }
+        if (COMPILER_PERF_ENABLED) {
+          incrementCompilerPerfCounter("typing.union_search.match_candidates");
+        }
+        matches.push({ actualIndex, bindings: candidate });
+      }
+
+      if (matches.length === 0) {
+        return;
+      }
+
+      if (!next || matches.length < next.matches.length) {
+        next = { expectedIndex, matches };
+      }
+    }
+
     if (!next) {
       return;
     }
-    if (next.matches.length === 0) {
-      return;
-    }
+
     const nextExpected = expected.filter((_, index) => index !== next.expectedIndex);
 
     next.matches.forEach((match) => {
@@ -3161,21 +3214,40 @@ const serializeUnionBindingSearchState = ({
   expected,
   usedActualIndices,
   bindings,
+  actualMemberCount,
 }: {
   expected: readonly TypeId[];
   usedActualIndices: ReadonlySet<number>;
   bindings: ReadonlyMap<TypeParamId, TypeId>;
+  actualMemberCount: number;
 }): string =>
   [
-    expected
-      .slice()
-      .sort((left, right) => left - right)
-      .join(","),
-    [...usedActualIndices]
-      .sort((left, right) => left - right)
-      .join(","),
+    expected.join(","),
+    serializeUsedActualIndices({
+      usedActualIndices,
+      actualMemberCount,
+    }),
     serializeTypeParamBindings(bindings),
   ].join("|");
+
+const serializeUsedActualIndices = ({
+  usedActualIndices,
+  actualMemberCount,
+}: {
+  usedActualIndices: ReadonlySet<number>;
+  actualMemberCount: number;
+}): string => {
+  if (usedActualIndices.size === 0) {
+    return "";
+  }
+  const used: number[] = [];
+  for (let index = 0; index < actualMemberCount; index += 1) {
+    if (usedActualIndices.has(index)) {
+      used.push(index);
+    }
+  }
+  return used.join(",");
+};
 
 const serializeTypeParamBindings = (
   bindings: ReadonlyMap<TypeParamId, TypeId>,

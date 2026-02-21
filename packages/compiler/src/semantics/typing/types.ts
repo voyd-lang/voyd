@@ -578,6 +578,11 @@ export interface FunctionScope {
 export interface TypingState {
   mode: TypeCheckMode;
   currentFunction?: FunctionScope;
+  /** Internal cache for typeSatisfies current-function generic constraints. */
+  currentFunctionConstraintCache: {
+    forFunction?: FunctionScope;
+    constraints?: ReadonlyMap<TypeParamId, TypeId>;
+  };
 }
 
 export interface MemberMetadata {
