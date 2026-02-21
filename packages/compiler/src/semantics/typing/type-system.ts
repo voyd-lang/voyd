@@ -41,7 +41,6 @@ import {
 } from "./symbol-ref-utils.js";
 import { symbolRefEquals } from "./symbol-ref.js";
 import { emitDiagnostic } from "../../diagnostics/index.js";
-import { hydrateImportedTraitMetadataForNominal } from "./import-trait-impl-hydration.js";
 import {
   incrementCompilerPerfCounter,
   isCompilerPerfEnabled,
@@ -1978,6 +1977,51 @@ const instantiateTraitImplsFor = ({
   return implementations;
 };
 
+export const refreshTraitImplInstances = (
+  ctx: TypingContext,
+  state: TypingState,
+): void => {
+  const dropImplFromTraitBuckets = (impl: TraitImplInstance): void => {
+    const existing = ctx.traitImplsByTrait.get(impl.traitSymbol);
+    if (!existing || existing.length === 0) {
+      return;
+    }
+    const next = existing.filter(
+      (entry) =>
+        !(
+          entry.implSymbol === impl.implSymbol &&
+          entry.traitSymbol === impl.traitSymbol &&
+          entry.trait === impl.trait &&
+          entry.target === impl.target
+        ),
+    );
+    if (next.length === 0) {
+      ctx.traitImplsByTrait.delete(impl.traitSymbol);
+      return;
+    }
+    ctx.traitImplsByTrait.set(impl.traitSymbol, next);
+  };
+
+  Array.from(ctx.objects.instanceEntries()).forEach(([key, info]) => {
+    const known =
+      ctx.traitImplsByNominal.get(info.nominal) ??
+      info.traitImpls ??
+      [];
+    known.forEach((impl) => dropImplFromTraitBuckets(impl));
+    ctx.traitImplsByNominal.delete(info.nominal);
+
+    const instantiated = instantiateTraitImplsFor({
+      nominal: info.nominal,
+      ctx,
+      state,
+    });
+    const { traitImpls: _ignored, ...baseInfo } = info;
+    const nextInfo =
+      instantiated.length > 0 ? { ...baseInfo, traitImpls: instantiated } : baseInfo;
+    ctx.objects.addInstance(key, nextInfo);
+  });
+};
+
 const mergeDeclaredFields = (
   inherited: readonly StructuralField[],
   own: readonly StructuralField[],
@@ -2534,16 +2578,7 @@ const traitSatisfies = (
   }
 
   const info = getObjectInfoForNominal(actualNominal, ctx, state);
-  let impls = ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls;
-  if (!impls || impls.length === 0) {
-    hydrateImportedTraitMetadataForNominal({ nominal: actualNominal, ctx });
-    impls = instantiateTraitImplsFor({
-      nominal: actualNominal,
-      ctx,
-      state,
-    });
-  }
-  impls ??= [];
+  const impls = ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls ?? [];
   return impls.some((impl) => {
     const traitMatches =
       typeof traitSymbol === "number"

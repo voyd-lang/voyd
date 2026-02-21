@@ -386,6 +386,7 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
+    console.log("alias-shared", diagnostics);
     expect(diagnostics).toHaveLength(0);
   });
 
@@ -823,6 +824,7 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModulesWithIsolatedInterners({ graph });
+    console.log("alias-isolated", diagnostics);
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 
@@ -1065,6 +1067,104 @@ fn build() -> Sequence<i32>
 pub fn main() -> i32
   let value = with_capacity<i32>(3)
   consume(seq: value) + consume(seq: build())
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModulesWithIsolatedInterners({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
+  it("accepts imported alias types that satisfy imported trait constraints", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::models::{ BoxAlias, make_alias }
+pub use self::show::{ takes_show }
+`,
+      [`${stdRoot}${sep}models.voyd`]: `
+pub obj Box { value: i32 }
+pub type BoxAlias = Box
+
+pub fn make_alias(value: i32) -> BoxAlias
+  Box { value }
+`,
+      [`${stdRoot}${sep}show.voyd`]: `
+use std::models::all
+
+pub trait Show
+  fn show(self) -> i32
+
+impl Show for Box
+  fn show(self) -> i32
+    self.value
+
+pub fn takes_show<T: Show>(value: T) -> i32
+  value.show()
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+fn consume(value: BoxAlias) -> i32
+  takes_show(value)
+
+pub fn main() -> i32
+  consume(make_alias(7))
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("accepts imported alias types that satisfy imported trait constraints with isolated interners", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::models::{ BoxAlias, make_alias }
+pub use self::show::{ takes_show }
+`,
+      [`${stdRoot}${sep}models.voyd`]: `
+pub obj Box { value: i32 }
+pub type BoxAlias = Box
+
+pub fn make_alias(value: i32) -> BoxAlias
+  Box { value }
+`,
+      [`${stdRoot}${sep}show.voyd`]: `
+use std::models::all
+
+pub trait Show
+  fn show(self) -> i32
+
+impl Show for Box
+  fn show(self) -> i32
+    self.value
+
+pub fn takes_show<T: Show>(value: T) -> i32
+  value.show()
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+fn consume(value: BoxAlias) -> i32
+  takes_show(value)
+
+pub fn main() -> i32
+  consume(make_alias(7))
 `,
     });
 
