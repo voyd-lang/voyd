@@ -138,4 +138,8 @@ export const seedBaseObjectName = (ctx: TypingContext): void => {
 
 export const createTypingState = (mode: TypingState["mode"] = "relaxed"): TypingState => ({
   mode,
+  currentFunctionConstraintCache: {
+    forFunction: undefined,
+    constraints: undefined,
+  },
 });
