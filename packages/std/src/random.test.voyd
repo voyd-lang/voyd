@@ -1,8 +1,9 @@
+use std::bytes::ByteBuffer
 use std::msgpack::self as msgpack
 use std::test::assertions::all
 
 test "fill_bytes calls host op and fills via fallback":
-  let ~buf = Array<i32>::init()
+  let ~buf = ByteBuffer::init()
   let ~requested_lengths = Array<i32>::init()
 
   try
@@ -13,10 +14,11 @@ test "fill_bytes calls host op and fills via fallback":
   Random::next_i64(tail):
     tail(i64_from_i32(1))
 
+  let bytes = buf.as_bytes().to_array()
   assert(optional_i32_or(requested_lengths.get(0), -1), eq: 3)
-  assert(optional_i32_or(buf.get(0), -1), eq: 1)
-  assert(optional_i32_or(buf.get(1), -1), eq: 1)
-  assert(optional_i32_or(buf.get(2), -1), eq: 1)
+  assert(optional_i32_or(bytes.get(0), -1), eq: 1)
+  assert(optional_i32_or(bytes.get(1), -1), eq: 1)
+  assert(optional_i32_or(bytes.get(2), -1), eq: 1)
 
 test "random_int handles spans larger than i32":
   let value = random_int_from_seed({

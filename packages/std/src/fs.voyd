@@ -1,4 +1,5 @@
 use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
 use std::error::IoError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
@@ -18,7 +19,7 @@ pub eff Fs
   list_dir(tail, path: MsgPack) -> MsgPack
 
 /// Reads a file as raw bytes.
-pub fn read_bytes({ path: Path }): Fs -> Result<Array<i32>, IoError>
+pub fn read_bytes({ path: Path }): Fs -> Result<Bytes, IoError>
   decode_read_bytes_result(Fs::read_bytes(encode_path(path)))
 
 /// Reads text from a file.
@@ -26,7 +27,7 @@ pub fn read_string({ path: Path }): Fs -> Result<String, IoError>
   decode_read_string_result(Fs::read_string(encode_path(path)))
 
 /// Writes bytes to a file.
-pub fn write_bytes({ path: Path, bytes: Array<i32> }): Fs -> Result<Unit, IoError>
+pub fn write_bytes({ path: Path, bytes: Bytes }): Fs -> Result<Unit, IoError>
   let payload = encode_write_bytes_payload(path: path, bytes: bytes)
   decode_write_result(Fs::write_bytes(payload))
 
@@ -46,7 +47,7 @@ pub fn list_dir({ path: Path }): Fs -> Result<Array<Path>, IoError>
 fn encode_path(path: Path): () -> MsgPack
   msgpack::make_string(path.as_string())
 
-fn encode_write_bytes_payload({ path: Path, bytes: Array<i32> }): () -> MsgPack
+fn encode_write_bytes_payload({ path: Path, bytes: Bytes }): () -> MsgPack
   HostDto::init()
     .set("path", encode_path(path))
     .set("bytes", encode_byte_array(bytes))
@@ -58,11 +59,12 @@ fn encode_write_string_payload({ path: Path, value: String }): () -> MsgPack
     .set("value", msgpack::make_string(value))
     .pack()
 
-fn encode_byte_array(bytes: Array<i32>): () -> MsgPack
+fn encode_byte_array(bytes: Bytes): () -> MsgPack
+  let source = bytes.to_array()
   let ~encoded = Array<MsgPack>::with_capacity(bytes.len())
   var index = 0
-  while index < bytes.len() do:
-    match(bytes.get(index))
+  while index < source.len() do:
+    match(source.get(index))
       Some<i32> { value }:
         encoded.push(msgpack::make_i32(value))
       None:
@@ -70,12 +72,12 @@ fn encode_byte_array(bytes: Array<i32>): () -> MsgPack
     index = index + 1
   msgpack::make_array(encoded)
 
-fn decode_read_bytes_result(payload: MsgPack): () -> Result<Array<i32>, IoError>
+fn decode_read_bytes_result(payload: MsgPack): () -> Result<Bytes, IoError>
   let decoded = HostDto::unpack(payload)
   if decoded.read_bool("ok") == false then:
     return Err<IoError> { error: decode_io_error(decoded) }
 
-  Ok<Array<i32>> { value: decode_byte_array(decoded.read_msgpack("value")) }
+  Ok<Bytes> { value: decode_bytes(decoded.read_msgpack("value")) }
 
 fn decode_read_string_result(payload: MsgPack): () -> Result<String, IoError>
   let decoded = HostDto::unpack(payload)
@@ -103,18 +105,18 @@ fn decode_io_error(payload: HostDto): () -> IoError
     message: payload.read_string("message")
   }
 
-fn decode_byte_array(payload: MsgPack): () -> Array<i32>
+fn decode_bytes(payload: MsgPack): () -> Bytes
   let source = msgpack::unpack_array(payload)
-  let ~out = Array<i32>::with_capacity(source.len())
+  let ~buffer = ByteBuffer::with_capacity(bytes: source.len())
   var index = 0
   while index < source.len() do:
     match(source.get(index))
       Some<MsgPack> { value }:
-        out.push(normalize_byte(msgpack::unpack_i32(value)))
+        buffer.push(value: normalize_byte(msgpack::unpack_i32(value)))
       None:
         void
     index = index + 1
-  out
+  buffer.as_bytes()
 
 fn decode_path_array(payload: MsgPack): () -> Array<Path>
   let source = msgpack::unpack_array(payload)

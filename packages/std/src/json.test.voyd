@@ -1,15 +1,102 @@
-use std::string::type::{ new_string }
+use std::array::{ Array, new_array_unchecked }
+use std::dict::Dict
+use std::string::{ String, new_string }
 use std::test::assertions::all
-use std::result::types::Ok
 
-test "json parse currently reports not implemented":
-  match(parse(s: "{}".as_slice()))
+test "json parse handles objects, arrays, booleans, and numbers":
+  let input = from_ascii([
+    123,34,111,107,34,58,116,114,117,101,44,34,110,34,58,49,50,44,
+    34,97,114,114,34,58,91,102,97,108,115,101,44,110,117,108,108,93,125
+  ])
+
+  match(parse(s: input.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonObject:
+          assert(root.value.contains_key(key: "ok"), eq: true)
+          assert(root.value.contains_key(key: "n"), eq: true)
+          assert(root.value.contains_key(key: "arr"), eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+test "json parse decodes escaped strings":
+  let input = from_ascii([34,108,105,110,101,92,110,34])
+  let expected = from_ascii([108,105,110,101,10])
+
+  match(parse(s: input.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonString:
+          assert(root.value.equals(expected), eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+test "json parse rejects invalid input":
+  match(parse(s: "{".as_slice()))
     Ok<JsonValue>:
-      assert(false)
+      assert(false, eq: true)
     Err<JsonError> { error }:
-      assert(error.message.equals("std::json::parse is specified but not implemented yet"), eq: true)
+      assert(error.message.contains(substring: "json parse error"), eq: true)
 
-test "json stringify APIs are available":
-  let null_value = JsonNull {}
-  assert(stringify(value: null_value).equals("std::json::stringify is specified but not implemented yet"), eq: true)
-  assert(stringify_pretty(value: null_value).equals("std::json::stringify is specified but not implemented yet"), eq: true)
+test "json stringify emits compact object envelope":
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set(key: "ok", value: JsonBool { value: true })
+  fields.set(key: "count", value: JsonNumber { value: 12.5 })
+
+  let ~items = Array<JsonValue>::with_capacity(2)
+  items.push(value: JsonString { value: "x" })
+  items.push(value: JsonNull {})
+  fields.set(key: "items", value: JsonArray { value: items })
+
+  let value = JsonObject { value: fields }
+  let compact = stringify(value: value)
+
+  assert(compact.starts_with(prefix: "{"), eq: true)
+  assert(compact.ends_with(suffix: "}"), eq: true)
+
+test "json stringify includes object keys":
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set(key: "ok", value: JsonBool { value: true })
+  fields.set(key: "count", value: JsonNumber { value: 12.5 })
+
+  let ~items = Array<JsonValue>::with_capacity(2)
+  items.push(value: JsonString { value: "x" })
+  items.push(value: JsonNull {})
+  fields.set(key: "items", value: JsonArray { value: items })
+
+  let value = JsonObject { value: fields }
+  let compact = stringify(value: value)
+
+  match(parse(s: compact.as_slice()))
+    Ok<JsonValue> { value: roundtrip }:
+      roundtrip.match(root)
+        JsonObject:
+          assert(root.value.contains_key(key: "ok"), eq: true)
+          assert(root.value.contains_key(key: "count"), eq: true)
+          assert(root.value.contains_key(key: "items"), eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+test "json stringify_pretty emits newlines":
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set(key: "ok", value: JsonBool { value: true })
+  fields.set(key: "count", value: JsonNumber { value: 12.5 })
+
+  let ~items = Array<JsonValue>::with_capacity(2)
+  items.push(value: JsonString { value: "x" })
+  items.push(value: JsonNull {})
+  fields.set(key: "items", value: JsonArray { value: items })
+
+  let value = JsonObject { value: fields }
+  let pretty = stringify_pretty(value: value)
+
+  assert(pretty.contains(substring: from_ascii([10])), eq: true)
+
+fn from_ascii(bytes: Array<i32>): () -> String
+  new_string(bytes.to_fixed_array())
