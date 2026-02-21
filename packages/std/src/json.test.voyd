@@ -96,6 +96,27 @@ test "json parse rejects overflowing mantissas":
     Err<JsonError>:
       assert(true, eq: true)
 
+test "json parse allows zero mantissa with large exponent":
+  match(parse(s: "0e309".as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          assert(root.value, eq: 0.0)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+  match(parse(s: "-0e400".as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          assert(root.value, eq: 0.0)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
 test "json stringify emits compact object envelope":
   let ~fields = Dict<String, JsonValue>::init()
   fields.set(key: "ok", value: JsonBool { value: true })
@@ -199,6 +220,23 @@ test "json stringify preserves tiny non-zero magnitude":
           let ratio = root.value / tiny
           assert(ratio > 0.999999999, eq: true)
           assert(ratio < 1.000000001, eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+test "json stringify preserves extended fractional precision":
+  let source = JsonNumber { value: 0.1234567890123456 }
+  let encoded = stringify(value: source)
+  assert(encoded.equals("0.123456789012"), eq: false)
+
+  match(parse(s: encoded.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          let ratio = root.value / 0.1234567890123456
+          assert(ratio > 0.999999999999, eq: true)
+          assert(ratio < 1.000000000001, eq: true)
         else:
           assert(false, eq: true)
     Err<JsonError>:

@@ -415,7 +415,7 @@ fn stringify_number(value: f64): () -> String
 
   bytes.push(46)
   var digits = 0
-  while digits < 12 do:
+  while digits < 17 do:
     fractional = fractional * 10.0
     let digit = floor_digit(fractional)
     bytes.push(ascii_digit(digit))
@@ -900,6 +900,8 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
   let base = int_part + frac_part / frac_scale
   if is_non_finite_float(base) then:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
+  if base == 0.0 then:
+    return Ok<f64> { value: sign * 0.0 }
 
   let signed_exponent = exponent_sign * exponent
   if signed_exponent > 308 or signed_exponent < -324 then:
