@@ -635,22 +635,24 @@ export const typeMethodCallExpr = (
     ctx.callResolution.traitDispatches.delete(expr.id);
   }
 
-  if (selected.exported) {
-    assertExportedMemberAccess({
-      exported: selected.exported,
-      methodName: expr.method,
-      ctx,
-      state,
-      span: expr.span,
-    });
-  } else if (selected.symbolRef.moduleId === ctx.moduleId) {
-    assertMemberAccess({
-      symbol: selected.symbol,
-      ctx,
-      state,
-      span: expr.span,
-      context: "calling member",
-    });
+  if (!selection.usedTraitDispatch) {
+    if (selected.exported) {
+      assertExportedMemberAccess({
+        exported: selected.exported,
+        methodName: expr.method,
+        ctx,
+        state,
+        span: expr.span,
+      });
+    } else if (selected.symbolRef.moduleId === ctx.moduleId) {
+      assertMemberAccess({
+        symbol: selected.symbol,
+        ctx,
+        state,
+        span: expr.span,
+        context: "calling member",
+      });
+    }
   }
 
   const selectedRef =
@@ -2372,22 +2374,24 @@ const typeOperatorOverloadCall = ({
     ctx.callResolution.traitDispatches.delete(call.id);
   }
 
-  if (selected.exported) {
-    assertExportedMemberAccess({
-      exported: selected.exported,
-      methodName: operatorName,
-      ctx,
-      state,
-      span: call.span,
-    });
-  } else if (selected.symbolRef.moduleId === ctx.moduleId) {
-    assertMemberAccess({
-      symbol: selected.symbol,
-      ctx,
-      state,
-      span: call.span,
-      context: "calling member",
-    });
+  if (!traitDispatch) {
+    if (selected.exported) {
+      assertExportedMemberAccess({
+        exported: selected.exported,
+        methodName: operatorName,
+        ctx,
+        state,
+        span: call.span,
+      });
+    } else if (selected.symbolRef.moduleId === ctx.moduleId) {
+      assertMemberAccess({
+        symbol: selected.symbol,
+        ctx,
+        state,
+        span: call.span,
+        context: "calling member",
+      });
+    }
   }
 
   const targets =

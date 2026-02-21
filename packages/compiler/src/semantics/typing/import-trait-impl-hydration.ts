@@ -13,6 +13,51 @@ type DependencySymbolResolution = {
   dependencySymbol: SymbolId;
 };
 
+type ImportMetadata = {
+  import?: { moduleId?: unknown; symbol?: unknown };
+};
+
+const resolveDependencySymbolChain = ({
+  dependency,
+  dependencySymbol,
+  ctx,
+}: {
+  dependency: DependencySemantics;
+  dependencySymbol: SymbolId;
+  ctx: TypingContext;
+}): DependencySymbolResolution => {
+  const seen = new Set<string>();
+  let currentDependency = dependency;
+  let currentSymbol = dependencySymbol;
+
+  while (true) {
+    const key = `${currentDependency.moduleId}::${currentSymbol}`;
+    if (seen.has(key)) {
+      return { dependency: currentDependency, dependencySymbol: currentSymbol };
+    }
+    seen.add(key);
+
+    let metadata: ImportMetadata | undefined;
+    try {
+      metadata = currentDependency.symbolTable.getSymbol(currentSymbol)
+        .metadata as ImportMetadata | undefined;
+    } catch {
+      return { dependency: currentDependency, dependencySymbol: currentSymbol };
+    }
+    const importModuleId = metadata?.import?.moduleId;
+    const importSymbol = metadata?.import?.symbol;
+    if (typeof importModuleId !== "string" || typeof importSymbol !== "number") {
+      return { dependency: currentDependency, dependencySymbol: currentSymbol };
+    }
+    const importedDependency = ctx.dependencies.get(importModuleId);
+    if (!importedDependency) {
+      return { dependency: currentDependency, dependencySymbol: currentSymbol };
+    }
+    currentDependency = importedDependency;
+    currentSymbol = importSymbol;
+  }
+};
+
 const resolveDependencySymbol = ({
   ownerModuleId,
   ownerSymbol,
@@ -31,7 +76,11 @@ const resolveDependencySymbol = ({
   if (!dependency) {
     return undefined;
   }
-  return { dependency, dependencySymbol: ownerSymbol };
+  return resolveDependencySymbolChain({
+    dependency,
+    dependencySymbol: ownerSymbol,
+    ctx,
+  });
 };
 
 export const hydrateImportedTraitMetadataForDependencySymbol = ({
@@ -45,24 +94,29 @@ export const hydrateImportedTraitMetadataForDependencySymbol = ({
   localSymbol?: SymbolId;
   ctx: TypingContext;
 }): void => {
+  const resolved = resolveDependencySymbolChain({
+    dependency,
+    dependencySymbol,
+    ctx,
+  });
   const localTraitSymbol =
     typeof localSymbol === "number"
       ? localSymbol
       : mapDependencySymbolToLocal({
-          owner: dependencySymbol,
-          dependency,
+          owner: resolved.dependencySymbol,
+          dependency: resolved.dependency,
           ctx,
           allowUnexported: true,
         });
   registerImportedTraitDecl({
-    dependency,
-    dependencySymbol,
+    dependency: resolved.dependency,
+    dependencySymbol: resolved.dependencySymbol,
     localSymbol: localTraitSymbol,
     ctx,
   });
   registerImportedTraitImplTemplates({
-    dependency,
-    dependencySymbol,
+    dependency: resolved.dependency,
+    dependencySymbol: resolved.dependencySymbol,
     ctx,
   });
 };
