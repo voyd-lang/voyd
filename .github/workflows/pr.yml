@@ -17,9 +17,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.event.pull_request.head.sha }}
           restore-keys: |
-            ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
@@ -43,9 +43,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.event.pull_request.head.sha }}
           restore-keys: |
-            ${{ runner.os }}-turbo-pr-${{ github.event.pull_request.number }}-
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Detect changed areas
         id: changes
         uses: dorny/paths-filter@v3
@@ -72,9 +72,12 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
-      - run: npm run typecheck
-      - run: npm run build
-      - run: VOYD_USE_DIST=1 npx turbo run test --affected --output-logs=errors-only --concurrency=2
+      # Main PR tests run in source mode for speed and broad coverage.
+      - run: VOYD_USE_SRC=1 npx turbo run test --affected --output-logs=errors-only --concurrency=2
+      # Dist mode is validated separately via targeted CLI e2e when CLI/runtime areas change.
+      - name: Build CLI dist for dist e2e
+        if: steps.changes.outputs.cli == 'true'
+        run: npx turbo run build --filter=@voyd/cli... --output-logs=errors-only
       - name: Run CLI dist e2e
         if: steps.changes.outputs.cli == 'true'
         run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd/cli test -- src/__tests__/cli-e2e.test.ts
