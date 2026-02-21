@@ -20,6 +20,12 @@ import { formatTestExportName } from "./tests/exports.js";
 import type { SourceSpan, SymbolId } from "./semantics/ids.js";
 import { getSymbolTable } from "./semantics/_internal/symbol-table.js";
 import { formatEffectRow } from "./semantics/effects/format.js";
+import {
+  diffCompilerPerfCounters,
+  isCompilerPerfEnabled,
+  logCompilerPerfSummary,
+  snapshotCompilerPerfCounters,
+} from "./perf.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -518,37 +524,80 @@ export const compileProgramWithLoader = async (
   options: CompileProgramOptions,
   loadModuleGraph: LoadModuleGraphFn
 ): Promise<CompileProgramResult> => {
+  const perfEnabled = isCompilerPerfEnabled();
+  const compileStartedAt = perfEnabled ? performance.now() : 0;
+  const perfCountersBefore = perfEnabled
+    ? snapshotCompilerPerfCounters()
+    : undefined;
+  const phaseDurationsMs: Record<string, number> = {};
+  const markPhaseDuration = (phase: string, startedAt: number) => {
+    if (!perfEnabled) {
+      return;
+    }
+    phaseDurationsMs[phase] = performance.now() - startedAt;
+  };
+  const complete = (
+    result: CompileProgramResult,
+  ): CompileProgramResult => {
+    if (!perfEnabled || !perfCountersBefore) {
+      return result;
+    }
+
+    phaseDurationsMs.total = performance.now() - compileStartedAt;
+    const perfCountersAfter = snapshotCompilerPerfCounters();
+    const diagnostics = result.success ? 0 : result.diagnostics.length;
+
+    logCompilerPerfSummary({
+      entryPath: options.entryPath,
+      success: result.success,
+      diagnostics,
+      phasesMs: phaseDurationsMs,
+      counters: diffCompilerPerfCounters({
+        before: perfCountersBefore,
+        after: perfCountersAfter,
+      }),
+    });
+
+    return result;
+  };
+
   let graph: ModuleGraph;
+  const loadStartedAt = perfEnabled ? performance.now() : 0;
   try {
     graph = await loadModuleGraph(options);
+    markPhaseDuration("loadModuleGraph", loadStartedAt);
   } catch (error) {
-    return compileProgramFailure(
+    markPhaseDuration("loadModuleGraph", loadStartedAt);
+    return complete(compileProgramFailure(
       diagnosticsFromUnexpectedError({
         error,
         moduleId: options.entryPath,
       }),
-    );
+    ));
   }
 
   if (options.skipSemantics) {
     const diagnostics = [...graph.diagnostics];
-    return hasErrorDiagnostics(diagnostics)
+    return complete(hasErrorDiagnostics(diagnostics)
       ? compileProgramFailure(diagnostics)
-      : compileProgramSuccess({ graph });
+      : compileProgramSuccess({ graph }));
   }
 
+  const analyzeStartedAt = perfEnabled ? performance.now() : 0;
   const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
     graph,
     includeTests: options.includeTests,
   });
+  markPhaseDuration("analyzeModules", analyzeStartedAt);
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
 
   if (hasErrorDiagnostics(diagnostics)) {
-    return compileProgramFailure(diagnostics);
+    return complete(compileProgramFailure(diagnostics));
   }
 
   const shouldLinkSemantics = options.linkSemantics !== false;
 
+  const emitStartedAt = perfEnabled ? performance.now() : 0;
   try {
     const wasmResult = await emitProgram({
       graph,
@@ -557,25 +606,27 @@ export const compileProgramWithLoader = async (
       entryModuleId: options.entryModuleId,
       linkSemantics: shouldLinkSemantics,
     });
+    markPhaseDuration("emitProgram", emitStartedAt);
 
     diagnostics.push(...wasmResult.diagnostics);
 
     if (hasErrorDiagnostics(diagnostics)) {
-      return compileProgramFailure(diagnostics);
+      return complete(compileProgramFailure(diagnostics));
     }
 
-    return compileProgramSuccess({
+    return complete(compileProgramSuccess({
       graph,
       semantics,
       wasm: wasmResult.wasm,
-    });
+    }));
   } catch (error) {
-    return compileProgramFailure([
+    markPhaseDuration("emitProgram", emitStartedAt);
+    return complete(compileProgramFailure([
       ...diagnostics,
       codegenErrorToDiagnostic(error, {
         moduleId: options.entryModuleId ?? graph.entry,
       }),
-    ]);
+    ]));
   }
 };
 
