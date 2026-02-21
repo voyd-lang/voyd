@@ -1,4 +1,5 @@
-use std::array::Array
+use std::array::{ Array, new_array_unchecked }
+use std::bytes::{ ByteBuffer, Bytes }
 use std::error::IoError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
@@ -18,6 +19,18 @@ test "fs read_string decodes host payload":
     Err<IoError>:
       assert(false, eq: true)
 
+test "fs read_bytes decodes host payload":
+  let payload = host_dto_test::host_ok_with_value(msgpack::make_array([msgpack::make_i32(1), msgpack::make_i32(255)]))
+  let result = read_bytes_with_payload(payload)
+  match(result)
+    Ok<Bytes> { value }:
+      let decoded = value.to_array()
+      assert(decoded.len(), eq: 2)
+      assert(optional_i32_or(decoded.get(0), -1), eq: 1)
+      assert(optional_i32_or(decoded.get(1), -1), eq: 255)
+    Err<IoError>:
+      assert(false, eq: true)
+
 test "fs write_string encodes path and value":
   let ~paths = Array<String>::init()
   let ~values = Array<String>::init()
@@ -28,6 +41,19 @@ test "fs write_string encodes path and value":
     Ok<Unit>:
       assert(optional_string_or(paths.get(0), "missing".as_slice()).equals("/tmp/app.log"), eq: true)
       assert(optional_string_or(values.get(0), "missing".as_slice()).equals("line"), eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "fs write_bytes encodes path and values":
+  let ~paths = Array<String>::init()
+  let ~bytes = Array<i32>::init()
+  let result = write_bytes_with_capture(paths, bytes)
+
+  match(result)
+    Ok<Unit>:
+      assert(optional_string_or(paths.get(0), "missing".as_slice()).equals("/tmp/data.bin"), eq: true)
+      assert(optional_i32_or(bytes.get(0), -1), eq: 7)
+      assert(optional_i32_or(bytes.get(1), -1), eq: 8)
     Err<IoError>:
       assert(false, eq: true)
 
@@ -50,6 +76,22 @@ fn read_string_with_payload(payload: MsgPack): () -> Result<String, IoError>
     tail(host_dto_test::host_default_error_payload())
   Fs::read_string(tail, _path):
     tail(payload)
+  Fs::write_bytes(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_string(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::exists(tail, _path):
+    tail(false)
+  Fs::list_dir(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+
+fn read_bytes_with_payload(payload: MsgPack): () -> Result<Bytes, IoError>
+  try
+    read_bytes(path: Path::new(s: "/tmp/data.bin".as_slice()))
+  Fs::read_bytes(tail, _path):
+    tail(payload)
+  Fs::read_string(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
   Fs::write_bytes(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
   Fs::write_string(tail, _payload):
@@ -94,6 +136,37 @@ fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () 
   Fs::list_dir(tail, _path):
     tail(host_dto_test::host_default_error_payload())
 
+fn write_bytes_with_capture(~paths: Array<String>, ~values: Array<i32>): () -> Result<Unit, IoError>
+  let ~buffer = ByteBuffer::init()
+  buffer.push(value: 7)
+  buffer.push(value: 8)
+
+  try
+    write_bytes(path: Path::new(s: "/tmp/data.bin".as_slice()), bytes: buffer.as_bytes())
+  Fs::read_bytes(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::read_string(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_bytes(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    paths.push(decoded.read_string("path"))
+    let encoded_values = msgpack::unpack_array(decoded.read_msgpack("bytes"))
+    var index = 0
+    while index < encoded_values.len() do:
+      match(encoded_values.get(index))
+        Some<MsgPack> { value }:
+          values.push(msgpack::unpack_i32(value))
+        None:
+          void
+      index = index + 1
+    tail(host_dto_test::host_ok_payload())
+  Fs::write_string(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::exists(tail, _path):
+    tail(false)
+  Fs::list_dir(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+
 fn path_array_payload(first: String, second: String): () -> MsgPack
   let ~values = Array<MsgPack>::with_capacity(2)
   values.push(msgpack::make_string(first))
@@ -110,6 +183,13 @@ fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> Strin
 fn optional_path_or(value: Option<Path>, fallback: Path): () -> Path
   match(value)
     Some<Path> { value: present }:
+      present
+    None:
+      fallback
+
+fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
+  match(value)
+    Some<i32> { value: present }:
       present
     None:
       fallback
