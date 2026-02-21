@@ -1,9 +1,9 @@
 use src::drinks::{ Drink, make_coffee }
-use Drink::Coffee
+use Drink::all
 
 pub fn main() -> i32
-  let brewed = make_coffee(12)
-  let poured: Drink = Coffee { size: 8 }
+  let brewed: Drink<i32> = make_coffee(12)
+  let poured: Drink<i32> = Drink::Coffee<i32> { size: 8 }
   match(brewed)
     Coffee { size }:
       match(poured)

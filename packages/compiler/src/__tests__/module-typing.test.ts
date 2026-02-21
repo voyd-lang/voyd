@@ -564,6 +564,115 @@ pub fn main() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("resolves generic enum alias members in type and value positions without TY9999", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+obj Marker<T, U> { value: T, marker: U }
+type Wrap<T> = Marker<T, i32>
+
+pub fn takes(_: Wrap<bool>::Marker) -> i32
+  1
+
+pub fn main() -> i32
+  let wrapped: Wrap<bool>::Marker = Wrap<bool>::Marker { value: true, marker: 7 }
+  takes(wrapped)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+    expect(diagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(
+      false,
+    );
+  });
+
+  it("resolves imported generic enum alias members across module boundaries", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}drinks.voyd`]: `
+pub obj Box<T> {}
+pub obj Marker<U> { value: U }
+pub type Wrap<T> = Marker<Box<T>>
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::drinks::{ Box, Wrap }
+
+pub fn takes(_: Wrap<i32>::Marker) -> i32
+  1
+
+pub fn main() -> i32
+  let wrapped: Wrap<i32>::Marker = Wrap<i32>::Marker { value: Box<i32> {} }
+  takes(wrapped)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+    expect(diagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(
+      false,
+    );
+  });
+
+  it("constructs imported generic enum namespace variants without direct member imports", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}drinks.voyd`]: `
+pub obj Coffee<T> { size: T }
+pub obj Tea<T> { size: T }
+pub obj Water {}
+pub type Drink<T> = Coffee<T> | Tea<T> | Water
+
+pub fn make<T>(size: T) -> Drink<T>
+  Drink::Coffee<T> { size }
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::drinks::{ Drink, make }
+
+pub fn main() -> i32
+  let brewed: Drink<i32> = make(12)
+  let poured: Drink<i32> = Drink::Coffee<i32> { size: 8 }
+  match(brewed)
+    Drink::Coffee { size }:
+      match(poured)
+        Drink::Coffee { size: poured_size }:
+          size + poured_size
+        Drink::Tea:
+          0
+        Drink::Water:
+          0
+    Drink::Tea:
+      0
+    Drink::Water:
+      0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+    expect(diagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(
+      false,
+    );
+  });
+
   it("preserves outer generic args for namespaced type members", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

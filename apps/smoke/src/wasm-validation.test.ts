@@ -131,7 +131,7 @@ describe(
       expect(normalized.children).toBeInstanceOf(Array);
     });
 
-    it("supports enum macro expansion and variant imports across modules", async () => {
+    it("supports generic enum macro expansion across modules", async () => {
       const module = await compileToBinaryenModule(
         fixturePath("enum-cross-module/main.voyd"),
       );
@@ -139,6 +139,16 @@ describe(
       const instance = getWasmInstance(wasm);
       const exports = instance.exports as Record<string, unknown>;
       expect((exports.main as () => number)()).toBe(20);
+    });
+
+    it("supports generic enum inference regardless of variant order and generic unit variants", async () => {
+      const module = await compileToBinaryenModule(
+        fixturePath("enum-generic-variant-shapes.voyd"),
+      );
+      const wasm = assertRunnableWasm(module);
+      const instance = getWasmInstance(wasm);
+      const exports = instance.exports as Record<string, unknown>;
+      expect((exports.main as () => number)()).toBe(11);
     });
   }
 );

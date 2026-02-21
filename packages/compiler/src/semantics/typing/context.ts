@@ -16,8 +16,10 @@ import {
 } from "./types.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createImportMaps } from "./import-maps.js";
-import { canonicalizeSymbolRef } from "./symbol-ref-utils.js";
-import type { SymbolRef } from "./symbol-ref.js";
+import {
+  canonicalizeSymbolRef,
+  createImportTargetResolver,
+} from "./symbol-ref-utils.js";
 
 export const DEFAULT_MAX_UNIFY_STEPS = 50_000;
 export const DEFAULT_MAX_OVERLOAD_CANDIDATES = 64;
@@ -61,36 +63,11 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
   const moduleId = inputs.moduleId ?? "local";
   const moduleExports = inputs.moduleExports ?? new Map();
   const dependencies = inputs.availableSemantics ?? new Map();
-  const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined => {
-    const symbolTable = ref.moduleId === moduleId
-      ? inputs.symbolTable
-      : dependencies.get(ref.moduleId)?.symbolTable;
-    if (!symbolTable) {
-      return undefined;
-    }
-    try {
-      const metadata = (symbolTable.getSymbol(ref.symbol).metadata ?? {}) as
-        | {
-            import?: {
-              moduleId?: unknown;
-              symbol?: unknown;
-            };
-          }
-        | undefined;
-      if (
-        typeof metadata?.import?.moduleId === "string" &&
-        typeof metadata.import.symbol === "number"
-      ) {
-        return {
-          moduleId: metadata.import.moduleId,
-          symbol: metadata.import.symbol,
-        };
-      }
-    } catch {
-      return undefined;
-    }
-    return undefined;
-  };
+  const resolveImportTarget = createImportTargetResolver({
+    moduleId,
+    symbolTable: inputs.symbolTable,
+    dependencies,
+  });
   const { importsByLocal, importAliasesByModule } = createImportMaps(
     inputs.imports,
     {
