@@ -14,7 +14,26 @@ pub use std::set::{ Set }
 pub use std::bytes::{ Byte, Bytes, ByteBuffer }
 pub use std::box::{ Box }
 pub use std::math::self as math
-pub use std::math::{ MathError, min, max, mod_euclid, div_rem, next_power_of_two }
+pub use std::math::{
+  MathError,
+  min,
+  max,
+  clamp,
+  between,
+  mod_euclid,
+  rem_euclid,
+  div_rem,
+  checked_div_rem,
+  next_power_of_two,
+  prev_power_of_two,
+  is_power_of_two,
+  next_multiple_of,
+  abs,
+  signum,
+  is_nan,
+  is_finite,
+  is_infinite
+}
 
 pub use std::string::{
   String,
