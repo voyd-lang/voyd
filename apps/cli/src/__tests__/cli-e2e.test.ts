@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -249,6 +249,38 @@ const createDanglingDocFixture = async (): Promise<string> => {
   return root;
 };
 
+const createDiagnosticCompactionFixture = async (): Promise<{
+  root: string;
+  stdRoot: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-diagnostics-"));
+  const srcRoot = resolve(root, "src");
+  const stdRoot = resolve(root, "std");
+  await mkdir(srcRoot, { recursive: true });
+  await cp(resolve(repoRoot, "packages/std/src"), stdRoot, { recursive: true });
+
+  await writeFile(
+    resolve(srcRoot, "main.voyd"),
+    [
+      "use std::all",
+      "",
+      "pub fn main() -> i32",
+      "  1",
+      "",
+    ].join("\n"),
+  );
+
+  const arrayPath = resolve(stdRoot, "array.voyd");
+  const arraySource = await readFile(arrayPath, "utf8");
+  await writeFile(
+    arrayPath,
+    arraySource.replace("pub obj Array<T> {", "pub obj Arrray<T> {"),
+    "utf8",
+  );
+
+  return { root, stdRoot };
+};
+
 const sourceCliPath = resolve(repoRoot, "apps/cli/src/cli-dev.ts");
 
 const assertCliRunnerAvailable = (): void => {
@@ -262,7 +294,7 @@ const assertCliRunnerAvailable = (): void => {
   }
 };
 
-const runCli = (root: string, args: string[]) =>
+const runCli = (root: string, args: string[], env?: Record<string, string>) =>
   spawnSync(cliE2eRuntime === "source" ? tsxPath : process.execPath, [
     ...(cliE2eRuntime === "source"
       ? ["--conditions=development", sourceCliPath]
@@ -271,7 +303,7 @@ const runCli = (root: string, args: string[]) =>
   ], {
     cwd: root,
     encoding: "utf8",
-    env: { ...process.env },
+    env: { ...process.env, ...env },
     timeout: CLI_E2E_TIMEOUT_MS,
   });
 
@@ -477,6 +509,29 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(output).toContain("Dangling doc comment");
     } finally {
       await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("voyd cli diagnostics output", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
+  it("suppresses duplicate diagnostics and prints a summary", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createDiagnosticCompactionFixture();
+    try {
+      const result = runCli(
+        fixture.root,
+        ["--emit-ir-ast"],
+        { VOYD_STD_ROOT: fixture.stdRoot },
+      );
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      expect(result.status).not.toBe(0);
+      expect(output).toContain("TY9999");
+      expect(output).toContain("Suppressed ");
+      expect(output).toContain("import diagnostics above display limit");
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
     }
   });
 });
