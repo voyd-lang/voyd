@@ -13,6 +13,8 @@ pub use std::deque::{ Deque }
 pub use std::set::{ Set }
 pub use std::bytes::{ Byte, Bytes, ByteBuffer }
 pub use std::box::{ Box }
+pub use std::math::self as math
+pub use std::math::{ MathError, min, max, mod_euclid, div_rem, next_power_of_two }
 
 pub use std::string::{
   String,

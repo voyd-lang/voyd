@@ -1,5 +1,6 @@
 use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
+use std::math::{ MathError, mod_euclid, next_power_of_two }
 use std::traits::sequence::all
 use std::optional::types::all
 use std::string::type::String
@@ -45,7 +46,8 @@ impl<K: DictKey<K>, V> Dict<K, V>
   api fn with_capacity({ size capacity: i32 }) -> Dict<K, V>
     let target = if capacity > 0 then: capacity else: 0
     let min_bucket_count = 16
-    let desired_bucket_count = next_power_of_two(target * 2)
+    let grown_target = if target > 1073741823 then: 2147483647 else: target * 2
+    let desired_bucket_count = next_power_of_two_or_max(grown_target)
     let bucket_count =
       if desired_bucket_count > min_bucket_count then:
         desired_bucket_count
@@ -514,8 +516,7 @@ fn delete_from_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, key: K) -
 
 fn bucket_index_for_key<K: DictKey<K>>(bucket_count: i32, key: K) -> i32
   let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1
-  let remainder = hash_key(key) % safe_bucket_count
-  if remainder < 0 then: remainder + safe_bucket_count else: remainder
+  mod_euclid_or_zero(hash_key(key), safe_bucket_count)
 
 fn key_equals<K: DictKey<K>>(left: K, right: K) -> bool
   left.dict_eq(other: right)
@@ -523,9 +524,16 @@ fn key_equals<K: DictKey<K>>(left: K, right: K) -> bool
 fn hash_key<K: DictKey<K>>(key: K) -> i32
   key.dict_hash()
 
-fn next_power_of_two(value: i32) -> i32
-  let start = if value > 1 then: value else: 1
-  var out = 1
-  while out < start do:
-    out = out * 2
-  out
+fn mod_euclid_or_zero(value: i32, modulus: i32) -> i32
+  match(mod_euclid(value, modulus))
+    Ok<i32> { value }:
+      value
+    Err<MathError>:
+      0
+
+fn next_power_of_two_or_max(value: i32) -> i32
+  match(next_power_of_two(value))
+    Ok<i32> { value }:
+      value
+    Err<MathError>:
+      1073741824

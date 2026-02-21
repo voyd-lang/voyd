@@ -3,6 +3,7 @@ use std::bytes::ByteBuffer
 use std::bytes::Bytes
 use std::encoding::ascii::ascii_string_from_bytes
 use std::encoding::errors::DecodeError
+use std::math::div_rem
 use std::optional::types::all
 use std::result::types::{ Result, Ok, Err }
 use std::string::{ String, StringSlice, new_string }
@@ -67,8 +68,3 @@ fn hex_digit_to_ascii(value: i32) -> i32
   if value <= 9 then:
     return 48 + value
   97 + (value - 10)
-
-fn div_rem(value: i32, divisor: i32) -> (i32, i32)
-  let quotient = value / divisor
-  let remainder = value % divisor
-  (quotient, remainder)

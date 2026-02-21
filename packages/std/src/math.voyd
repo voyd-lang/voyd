@@ -1,4 +1,11 @@
 
+use std::result::types::all
+
+pub obj MathError {
+  /// Machine-readable error code.
+  api code: i32
+}
+
 /// Returns the larger of two values.
 pub fn max<T>(a: T, b: T) -> T
   if a > b then: a else: b
@@ -6,3 +13,43 @@ pub fn max<T>(a: T, b: T) -> T
 /// Returns the smaller of two values.
 pub fn min<T>(a: T, b: T) -> T
   if a < b then: a else: b
+
+/// Returns the Euclidean remainder for 32-bit integers.
+pub fn mod_euclid(value: i32, modulus: i32) -> Result<i32, MathError>
+  if modulus <= 0 then:
+    return Err<MathError> { error: MathError { code: 1 } }
+
+  let remainder = value % modulus
+  Ok<i32> {
+    value: if remainder < 0 then: remainder + modulus else: remainder
+  }
+
+/// Returns the Euclidean remainder for 64-bit integers.
+pub fn mod_euclid(value: i64, modulus: i64) -> Result<i64, MathError>
+  if modulus <= extend_i32_s(0) then:
+    return Err<MathError> { error: MathError { code: 1 } }
+
+  let remainder = value % modulus
+  Ok<i64> {
+    value: if remainder < extend_i32_s(0) then: remainder + modulus else: remainder
+  }
+
+/// Returns quotient and remainder for 32-bit integers.
+pub fn div_rem(value: i32, divisor: i32) -> (i32, i32)
+  (value / divisor, value % divisor)
+
+/// Returns quotient and remainder for 64-bit integers.
+pub fn div_rem(value: i64, divisor: i64) -> (i64, i64)
+  (value / divisor, value % divisor)
+
+/// Returns the next power of two for a 32-bit integer.
+pub fn next_power_of_two(value: i32) -> Result<i32, MathError>
+  let start = if value > 1 then: value else: 1
+  var out = 1
+  while out < start do:
+    if out > 1073741823 then:
+      return Err<MathError> { error: MathError { code: 2 } }
+    out = out * 2
+  Ok<i32> { value: out }
+
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)

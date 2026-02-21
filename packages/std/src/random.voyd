@@ -1,5 +1,6 @@
 use std::array::Array
 use std::bytes::ByteBuffer
+use std::math::{ MathError, mod_euclid }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
@@ -27,16 +28,13 @@ pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
     if index < decoded.len() then:
       match(decoded.get(index))
         Some<MsgPack> { value }:
-          let remainder = msgpack::unpack_i32(value) % 256
-          buf.push(value: if remainder < 0 then: remainder + 256 else: remainder)
+          buf.push(value: mod_euclid_i32_or_zero(msgpack::unpack_i32(value), 256))
         None:
           let next = wrap_i64(next_i64())
-          let remainder = next % 256
-          buf.push(value: if remainder < 0 then: remainder + 256 else: remainder)
+          buf.push(value: mod_euclid_i32_or_zero(next, 256))
     else:
       let next = wrap_i64(next_i64())
-      let remainder = next % 256
-      buf.push(value: if remainder < 0 then: remainder + 256 else: remainder)
+      buf.push(value: mod_euclid_i32_or_zero(next, 256))
     index = index + 1
 
 /// Fills a byte buffer with cryptographically secure random bytes.
@@ -58,9 +56,7 @@ pub fn random_int({ range: Range }): Random -> i32
 
   let span = end_exclusive - start_i64
   let seed = next_i64()
-  let remainder = seed % span
-  let sample = start_i64 +
-    (if remainder < extend_i32_s(0) then: remainder + span else: remainder)
+  let sample = start_i64 + mod_euclid_i64_or_zero(seed, span)
   wrap_i64(sample)
 
 fn range_start_or_zero(start: Option<i32>) -> i32
@@ -80,6 +76,20 @@ fn range_end_exclusive(range: Range, start: i64) -> i64
         end
     None:
       start + extend_i32_s(1)
+
+fn mod_euclid_i32_or_zero(value: i32, modulus: i32) -> i32
+  match(mod_euclid(value, modulus))
+    Ok<i32> { value }:
+      value
+    Err<MathError>:
+      0
+
+fn mod_euclid_i64_or_zero(value: i64, modulus: i64) -> i64
+  match(mod_euclid(value, modulus))
+    Ok<i64> { value }:
+      value
+    Err<MathError>:
+      extend_i32_s(0)
 
 fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)
 fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
