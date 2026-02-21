@@ -69,6 +69,34 @@ test "nan finite and infinite helpers work for f64 and f32":
   assert(is_infinite(inf32), eq: true)
   assert(is_nan(nan32), eq: true)
 
+test "floor ceil round trunc fract and sqrt support f64 and f32":
+  assert(floor(2.7), eq: 2.0)
+  assert(floor(-2.7), eq: -3.0)
+
+  assert(ceil(2.1), eq: 3.0)
+  assert(ceil(-2.1), eq: -2.0)
+
+  assert(round(2.4), eq: 2.0)
+  assert(round(2.5), eq: 2.0)
+  assert(round(3.5), eq: 4.0)
+  assert(round(-2.5), eq: -2.0)
+
+  assert(trunc(2.9), eq: 2.0)
+  assert(trunc(-2.9), eq: -2.0)
+
+  assert(fract(2.75), eq: 0.75)
+  assert(fract(-2.75), eq: -0.75)
+
+  assert(sqrt(9.0), eq: 3.0)
+
+  let value32 = f32_from_f64(2.75)
+  assert(f64_from_f32(floor(value32)), eq: 2.0)
+  assert(f64_from_f32(ceil(value32)), eq: 3.0)
+  assert(f64_from_f32(round(value32)), eq: 3.0)
+  assert(f64_from_f32(trunc(value32)), eq: 2.0)
+  assert(f64_from_f32(fract(value32)), eq: 0.75)
+  assert(f64_from_f32(sqrt(f32_from_f64(9.0))), eq: 3.0)
+
 @intrinsic(name: "__f32_demote_f64")
 fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)
 

@@ -66,6 +66,15 @@ const expectExpressionId = (
   expect(binaryen.getExpressionId(expr)).toBe(expected);
 };
 
+const expectUnaryOp = (
+  expr: binaryen.ExpressionRef,
+  op: binaryen.Operations
+): void => {
+  const info = binaryen.getExpressionInfo(expr) as binaryen.UnaryInfo;
+  expect(info.id).toBe(binaryen.ExpressionIds.Unary);
+  expect(info.op).toBe(op);
+};
+
 describe("compileIntrinsicCall array intrinsics", () => {
   const i32Type = 1 as TypeId;
   const arrayType = 2 as TypeId;
@@ -581,5 +590,144 @@ describe("compileIntrinsicCall array intrinsics", () => {
     const notInfo = binaryen.getExpressionInfo(notExpr) as binaryen.UnaryInfo;
     expect(notInfo.id).toBe(binaryen.ExpressionIds.Unary);
     expect(notInfo.op).toBe(binaryen.Operations.EqZInt32);
+  });
+
+  it("emits unary float math intrinsics", () => {
+    const f32Type = 6 as TypeId;
+    const f64Type = 7 as TypeId;
+    const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();
+    descriptors.set(f32Type, { kind: "primitive", name: "f32" });
+    descriptors.set(f64Type, { kind: "primitive", name: "f64" });
+
+    registerExpr(
+      { expressions, exprTypes, typeId: f32Type },
+      1 as HirExprId,
+      {
+        id: 1 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "float",
+        value: "1.5",
+      } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: f64Type },
+      2 as HirExprId,
+      {
+        id: 2 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "float",
+        value: "2.5",
+      } as any
+    );
+
+    fnCtx.returnTypeId = f32Type;
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__floor",
+        call: makeCall([1 as HirExprId]),
+        args: [ctx.mod.f32.const(1.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.FloorFloat32
+    );
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__ceil",
+        call: makeCall([1 as HirExprId]),
+        args: [ctx.mod.f32.const(1.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.CeilFloat32
+    );
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__round",
+        call: makeCall([1 as HirExprId]),
+        args: [ctx.mod.f32.const(1.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.NearestFloat32
+    );
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__trunc",
+        call: makeCall([1 as HirExprId]),
+        args: [ctx.mod.f32.const(1.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.TruncFloat32
+    );
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__sqrt",
+        call: makeCall([1 as HirExprId]),
+        args: [ctx.mod.f32.const(1.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.SqrtFloat32
+    );
+
+    fnCtx.returnTypeId = f64Type;
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__floor",
+        call: makeCall([2 as HirExprId]),
+        args: [ctx.mod.f64.const(2.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.FloorFloat64
+    );
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__ceil",
+        call: makeCall([2 as HirExprId]),
+        args: [ctx.mod.f64.const(2.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.CeilFloat64
+    );
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__round",
+        call: makeCall([2 as HirExprId]),
+        args: [ctx.mod.f64.const(2.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.NearestFloat64
+    );
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__trunc",
+        call: makeCall([2 as HirExprId]),
+        args: [ctx.mod.f64.const(2.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.TruncFloat64
+    );
+    expectUnaryOp(
+      compileIntrinsicCall({
+        name: "__sqrt",
+        call: makeCall([2 as HirExprId]),
+        args: [ctx.mod.f64.const(2.5)],
+        ctx,
+        fnCtx,
+      }),
+      binaryen.Operations.SqrtFloat64
+    );
   });
 });

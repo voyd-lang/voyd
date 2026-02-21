@@ -66,6 +66,11 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ],
   ["__f32_demote_f64", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__f64_promote_f32", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__floor", { access: "std-only" }],
+  ["__ceil", { access: "std-only" }],
+  ["__round", { access: "std-only" }],
+  ["__trunc", { access: "std-only" }],
+  ["__sqrt", { access: "std-only" }],
   [
     "__reinterpret_f64_to_i64",
     { intrinsicUsesSignature: false, access: "std-only" },

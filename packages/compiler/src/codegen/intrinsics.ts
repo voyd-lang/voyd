@@ -34,6 +34,7 @@ type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
 type BooleanKind = "bool";
 type IntegerKind = "i32" | "i64";
+type FloatKind = "f32" | "f64";
 
 interface CompileIntrinsicCallParams {
   name: string;
@@ -54,6 +55,13 @@ interface EmitEqualityIntrinsicParams {
   op: "==" | "!=";
   kind: EqualityKind;
   args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+}
+
+interface EmitFloatUnaryIntrinsicParams {
+  op: "__floor" | "__ceil" | "__round" | "__trunc" | "__sqrt";
+  kind: FloatKind;
+  arg: binaryen.ExpressionRef;
   ctx: CodegenContext;
 }
 
@@ -318,6 +326,23 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 1);
       return ctx.mod.f64.promote(args[0]!);
     }
+    case "__floor":
+    case "__ceil":
+    case "__round":
+    case "__trunc":
+    case "__sqrt": {
+      assertArgCount(name, args, 1);
+      const kind = requireFloatKind(
+        getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
+        ctx
+      );
+      return emitFloatUnaryIntrinsic({
+        op: name,
+        kind,
+        arg: args[0]!,
+        ctx,
+      });
+    }
     case "+":
     case "-":
     case "*":
@@ -461,6 +486,41 @@ const emitArithmeticIntrinsic = ({
       break;
   }
   throw new Error(`unsupported ${op} intrinsic for numeric kind ${kind}`);
+};
+
+const emitFloatUnaryIntrinsic = ({
+  op,
+  kind,
+  arg,
+  ctx,
+}: EmitFloatUnaryIntrinsicParams): binaryen.ExpressionRef => {
+  if (kind === "f32") {
+    switch (op) {
+      case "__floor":
+        return ctx.mod.f32.floor(arg);
+      case "__ceil":
+        return ctx.mod.f32.ceil(arg);
+      case "__round":
+        return ctx.mod.f32.nearest(arg);
+      case "__trunc":
+        return ctx.mod.f32.trunc(arg);
+      case "__sqrt":
+        return ctx.mod.f32.sqrt(arg);
+    }
+  }
+
+  switch (op) {
+    case "__floor":
+      return ctx.mod.f64.floor(arg);
+    case "__ceil":
+      return ctx.mod.f64.ceil(arg);
+    case "__round":
+      return ctx.mod.f64.nearest(arg);
+    case "__trunc":
+      return ctx.mod.f64.trunc(arg);
+    case "__sqrt":
+      return ctx.mod.f64.sqrt(arg);
+  }
 };
 
 const emitComparisonIntrinsic = ({
@@ -726,6 +786,19 @@ const requireIntegerKind = (typeId: TypeId, ctx: CodegenContext): IntegerKind =>
     }
   }
   throw new Error("intrinsic arguments must be i32 or i64");
+};
+
+const requireFloatKind = (typeId: TypeId, ctx: CodegenContext): FloatKind => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "primitive") {
+    switch (desc.name) {
+      case "f32":
+        return "f32";
+      case "f64":
+        return "f64";
+    }
+  }
+  throw new Error("intrinsic arguments must be f32 or f64");
 };
 
 const getNumericKind = (typeId: TypeId, ctx: CodegenContext): NumericKind => {

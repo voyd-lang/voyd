@@ -54,6 +54,54 @@ pub fn signum(value: f64) -> f64
 pub fn signum(value: f32) -> f32
   demote_f64(signum(promote_f32(value)))
 
+/// Rounds `value` down to the nearest integer.
+pub fn floor(value: f64) -> f64
+  floor_f64(value)
+
+/// Rounds `value` down to the nearest integer.
+pub fn floor(value: f32) -> f32
+  floor_f32(value)
+
+/// Rounds `value` up to the nearest integer.
+pub fn ceil(value: f64) -> f64
+  ceil_f64(value)
+
+/// Rounds `value` up to the nearest integer.
+pub fn ceil(value: f32) -> f32
+  ceil_f32(value)
+
+/// Rounds `value` to the nearest integer using ties-to-even semantics.
+pub fn round(value: f64) -> f64
+  round_f64(value)
+
+/// Rounds `value` to the nearest integer using ties-to-even semantics.
+pub fn round(value: f32) -> f32
+  round_f32(value)
+
+/// Rounds `value` toward zero.
+pub fn trunc(value: f64) -> f64
+  trunc_f64(value)
+
+/// Rounds `value` toward zero.
+pub fn trunc(value: f32) -> f32
+  trunc_f32(value)
+
+/// Returns the fractional component of `value`.
+pub fn fract(value: f64) -> f64
+  value - trunc(value)
+
+/// Returns the fractional component of `value`.
+pub fn fract(value: f32) -> f32
+  value - trunc(value)
+
+/// Returns the square root of `value`.
+pub fn sqrt(value: f64) -> f64
+  sqrt_f64(value)
+
+/// Returns the square root of `value`.
+pub fn sqrt(value: f32) -> f32
+  sqrt_f32(value)
+
 /// Returns true when `value` is `NaN`.
 pub fn is_nan(value: f64) -> bool
   value != value
@@ -84,5 +132,35 @@ fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
 
 @intrinsic(name: "__f64_promote_f32")
 fn promote_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+@intrinsic(name: "__floor")
+fn floor_f64(value: f64): () -> f64 __floor(value)
+
+@intrinsic(name: "__floor")
+fn floor_f32(value: f32): () -> f32 __floor(value)
+
+@intrinsic(name: "__ceil")
+fn ceil_f64(value: f64): () -> f64 __ceil(value)
+
+@intrinsic(name: "__ceil")
+fn ceil_f32(value: f32): () -> f32 __ceil(value)
+
+@intrinsic(name: "__round")
+fn round_f64(value: f64): () -> f64 __round(value)
+
+@intrinsic(name: "__round")
+fn round_f32(value: f32): () -> f32 __round(value)
+
+@intrinsic(name: "__trunc")
+fn trunc_f64(value: f64): () -> f64 __trunc(value)
+
+@intrinsic(name: "__trunc")
+fn trunc_f32(value: f32): () -> f32 __trunc(value)
+
+@intrinsic(name: "__sqrt")
+fn sqrt_f64(value: f64): () -> f64 __sqrt(value)
+
+@intrinsic(name: "__sqrt")
+fn sqrt_f32(value: f32): () -> f32 __sqrt(value)
 
 fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)

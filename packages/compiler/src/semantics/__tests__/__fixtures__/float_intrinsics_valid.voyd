@@ -1,0 +1,22 @@
+fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+fn use_f64(value: f64) -> f64
+  let a = __floor(value)
+  let b = __ceil(value)
+  let c = __round(value)
+  let d = __trunc(value)
+  let e = __sqrt(value)
+  a + b + c + d + e
+
+fn use_f32(value: f32) -> f32
+  let a = __floor(value)
+  let b = __ceil(value)
+  let c = __round(value)
+  let d = __trunc(value)
+  let e = __sqrt(value)
+  let sum = a + b + c + d + e
+  sum
+
+fn both() -> f32
+  let v32 = demote_f64(2.5)
+  use_f32(v32)
