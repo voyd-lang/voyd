@@ -99,6 +99,11 @@ type DiagnosticParamsMap = {
     errorMessage?: string;
   };
   MD0004: { kind: "dangling-doc-comment" };
+  MD0005: {
+    kind: "reserved-module-segment";
+    requested: string;
+    segment: string;
+  };
   TY0001:
     | { kind: "immutable-assignment"; name: string }
     | { kind: "binding-declaration"; name: string };
@@ -384,6 +389,13 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "module-graph",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0004"]>,
+  MD0005: {
+    code: "MD0005",
+    message: (params) =>
+      `Module ${params.requested} uses reserved segment '${params.segment}'. Rename the module.`,
+    severity: "error",
+    phase: "module-graph",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0005"]>,
   TY0001: {
     code: "TY0001",
     message: (params) =>
