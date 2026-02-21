@@ -898,10 +898,18 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
   let base = int_part + frac_part / frac_scale
+  if is_non_finite_float(base) then:
+    return Err<JsonError> { error: json_error("json parse error: invalid number") }
+
   let signed_exponent = exponent_sign * exponent
   if signed_exponent > 308 or signed_exponent < -324 then:
     return Err<JsonError> { error: json_error("json parse error: invalid exponent") }
-  Ok<f64> { value: sign * base * pow10_i32(signed_exponent) }
+
+  let value = sign * base * pow10_i32(signed_exponent)
+  if is_non_finite_float(value) then:
+    return Err<JsonError> { error: json_error("json parse error: invalid number") }
+
+  Ok<f64> { value: value }
 
 fn parse_decimal_digit(byte: i32) -> i32
   if byte >= 48 and byte <= 57 then:
@@ -914,13 +922,16 @@ fn pow10_i32(value: i32) -> f64
 
   var out = 1.0
   var index = 0
-  let abs = if value < 0 then: 0 - value else: value
-  while index < abs do:
+  if value < 0 then:
+    let abs = 0 - value
+    while index < abs do:
+      out = out / 10.0
+      index = index + 1
+    return out
+
+  while index < value do:
     out = out * 10.0
     index = index + 1
-
-  if value < 0 then:
-    return 1.0 / out
   out
 
 fn json_error(message: String) -> JsonError

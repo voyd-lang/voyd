@@ -77,6 +77,25 @@ test "json parse rejects oversized exponents":
     Err<JsonError>:
       assert(true, eq: true)
 
+test "json parse preserves subnormal magnitudes":
+  match(parse(s: "1e-309".as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          assert(root.value > 0.0, eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+test "json parse rejects overflowing mantissas":
+  let too_large = repeat_byte(57, 500)
+  match(parse(s: too_large.as_slice()))
+    Ok<JsonValue>:
+      assert(false, eq: true)
+    Err<JsonError>:
+      assert(true, eq: true)
+
 test "json stringify emits compact object envelope":
   let ~fields = Dict<String, JsonValue>::init()
   fields.set(key: "ok", value: JsonBool { value: true })
@@ -185,5 +204,34 @@ test "json stringify preserves tiny non-zero magnitude":
     Err<JsonError>:
       assert(false, eq: true)
 
+test "json stringify preserves subnormal numbers":
+  var tiny = 1.0
+  var index = 0
+  while index < 309 do:
+    tiny = tiny / 10.0
+    index = index + 1
+
+  let encoded = stringify(value: JsonNumber { value: tiny })
+  assert(encoded.equals("0"), eq: false)
+  assert(encoded.equals("-0"), eq: false)
+
+  match(parse(s: encoded.as_slice()))
+    Ok<JsonValue> { value }:
+      value.match(root)
+        JsonNumber:
+          assert(root.value > 0.0, eq: true)
+        else:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
 fn from_ascii(bytes: Array<i32>): () -> String
+  new_string(bytes.to_fixed_array())
+
+fn repeat_byte(byte: i32, count: i32): () -> String
+  let ~bytes = Array<i32>::with_capacity(count)
+  var index = 0
+  while index < count do:
+    bytes.push(byte)
+    index = index + 1
   new_string(bytes.to_fixed_array())
