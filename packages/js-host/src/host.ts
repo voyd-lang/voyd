@@ -46,6 +46,55 @@ export type VoydHost = {
 
 const MSGPACK_OPTS = { useBigInt64: true } as const;
 
+const createVoydMathImports = (): Record<string, CallableFunction> => ({
+  sin: Math.sin,
+  cos: Math.cos,
+  tan: Math.tan,
+  ln: Math.log,
+  log2: Math.log2,
+  log10: Math.log10,
+  exp: Math.exp,
+  pow: Math.pow,
+  atan2: Math.atan2,
+});
+
+const defaultImports = (): WebAssembly.Imports => ({
+  env: {},
+  voyd_math: createVoydMathImports(),
+});
+
+const isImportModuleRecord = (
+  value: unknown
+): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const mergeDefaultImports = (
+  imports?: WebAssembly.Imports
+): WebAssembly.Imports => {
+  const defaults = defaultImports() as Record<string, unknown>;
+  if (!imports) {
+    return defaults as WebAssembly.Imports;
+  }
+  const merged = {
+    ...defaults,
+    ...(imports as Record<string, unknown>),
+  } as Record<string, unknown>;
+
+  const importRecord = imports as Record<string, unknown>;
+  ["env", "voyd_math"].forEach((moduleName) => {
+    const defaultModule = defaults[moduleName];
+    const providedModule = importRecord[moduleName];
+    if (
+      isImportModuleRecord(defaultModule) &&
+      isImportModuleRecord(providedModule)
+    ) {
+      merged[moduleName] = { ...defaultModule, ...providedModule };
+    }
+  });
+
+  return merged as WebAssembly.Imports;
+};
+
 const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   if (
     bytes.buffer instanceof ArrayBuffer &&
@@ -182,7 +231,7 @@ export const createVoydHost = async ({
   const exportAbiByName = new Map(
     exportAbi.exports.map((entry) => [entry.name, entry] as const)
   );
-  const instance = new WebAssembly.Instance(module, imports ?? {});
+  const instance = new WebAssembly.Instance(module, mergeDefaultImports(imports));
 
   const handlersByKey = new Map<string, EffectHandler>();
   const opByKey = buildParsedEffectOpMap({ ops: parsedTable.ops });

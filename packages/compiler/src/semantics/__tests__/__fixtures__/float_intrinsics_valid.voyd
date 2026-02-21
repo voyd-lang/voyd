@@ -1,0 +1,40 @@
+fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+fn use_f64(value: f64) -> f64
+  let a = __floor(value)
+  let b = __ceil(value)
+  let c = __round(value)
+  let d = __trunc(value)
+  let e = __sqrt(value)
+  let s = __sin(value)
+  let q = __cos(value)
+  let t = __tan(value)
+  let n = __ln(value)
+  let l2 = __log2(value)
+  let l10 = __log10(value)
+  let ex = __exp(value)
+  let p = __pow(value, value)
+  let a2 = __atan2(value, value)
+  a + b + c + d + e + s + q + t + n + l2 + l10 + ex + p + a2
+
+fn use_f32(value: f32) -> f32
+  let a = __floor(value)
+  let b = __ceil(value)
+  let c = __round(value)
+  let d = __trunc(value)
+  let e = __sqrt(value)
+  let s = __sin(value)
+  let q = __cos(value)
+  let t = __tan(value)
+  let n = __ln(value)
+  let l2 = __log2(value)
+  let l10 = __log10(value)
+  let ex = __exp(value)
+  let p = __pow(value, value)
+  let a2 = __atan2(value, value)
+  let sum = a + b + c + d + e + s + q + t + n + l2 + l10 + ex + p + a2
+  sum
+
+fn both() -> f32
+  let v32 = demote_f64(2.5)
+  use_f32(v32)

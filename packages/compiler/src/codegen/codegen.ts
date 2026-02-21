@@ -13,6 +13,7 @@ import { createEffectRuntime } from "./effects/runtime-abi.js";
 import {
   compileFunctions,
   emitModuleExports,
+  prepareReachableFunctionSymbols,
   registerImportMetadata,
   registerFunctionMetadata,
 } from "./functions.js";
@@ -145,6 +146,7 @@ export const codegenProgram = ({
   const siteCounter = { current: 0 };
   const entryCtx =
     contexts.find((ctx) => ctx.moduleId === entryModuleId) ?? contexts[0];
+  prepareReachableFunctionSymbols({ contexts, entryModuleId });
   applyConfiguredMemoryExports(entryCtx);
   contexts.forEach((ctx) => {
     ctx.effectsBackend = selectEffectsBackend(ctx);
@@ -159,9 +161,20 @@ export const codegenProgram = ({
   });
   contexts.forEach(registerImportMetadata);
   buildRuntimeTypeArtifacts(contexts);
-  contexts.forEach(compileFunctions);
+  const compileReachableFunctions = (): void => {
+    let compiled = 0;
+    do {
+      compiled = contexts.reduce(
+        (count, ctx) =>
+          count + compileFunctions({ ctx, contexts, entryModuleId }),
+        0,
+      );
+    } while (compiled > 0);
+  };
+  compileReachableFunctions();
 
   emitModuleExports(entryCtx, contexts);
+  compileReachableFunctions();
   const effectTable = emitEffectTableSection({
     contexts,
     entryModuleId,

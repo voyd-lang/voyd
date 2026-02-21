@@ -1,0 +1,22 @@
+use std::result::types::all
+
+pub obj MathError {
+  /// Machine-readable error code.
+  api code: i32
+}
+
+/// Error code for invalid input values.
+pub fn math_error_code_invalid_input() -> i32
+  1
+
+/// Error code for overflow conditions.
+pub fn math_error_code_overflow() -> i32
+  2
+
+/// Error code for divide-by-zero conditions.
+pub fn math_error_code_divide_by_zero() -> i32
+  3
+
+/// Constructs a `MathError` result with the provided code.
+pub fn math_error<T>({ code: i32 }) -> Result<T, MathError>
+  Err<MathError> { error: MathError { code } }

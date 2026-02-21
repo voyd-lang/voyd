@@ -1,0 +1,36 @@
+use std::test::assertions::all
+
+test "pi tau and e constants are exposed":
+  assert(pi_f64() > 3.14, eq: true)
+  assert(pi_f64() < 3.15, eq: true)
+  assert(tau_f64() > 6.28, eq: true)
+  assert(tau_f64() < 6.29, eq: true)
+  assert(e_f64() > 2.71, eq: true)
+  assert(e_f64() < 2.72, eq: true)
+
+  assert(f64_from_f32(pi_f32()) > 3.14, eq: true)
+  assert(f64_from_f32(pi_f32()) < 3.15, eq: true)
+  assert(f64_from_f32(tau_f32()) > 6.28, eq: true)
+  assert(f64_from_f32(tau_f32()) < 6.29, eq: true)
+  assert(f64_from_f32(e_f32()) > 2.71, eq: true)
+  assert(f64_from_f32(e_f32()) < 2.72, eq: true)
+
+test "degree and radian conversion helpers roundtrip":
+  assert(approx_eq(deg_to_rad(180.0), pi_f64(), 0.000000000001), eq: true)
+  assert(approx_eq(rad_to_deg(pi_f64()), 180.0, 0.000000000001), eq: true)
+
+  let deg = f32_from_f64(90.0)
+  let rad = deg_to_rad(deg)
+  assert(approx_eq(f64_from_f32(rad), pi_f64() / 2.0, 0.0001), eq: true)
+  assert(approx_eq(f64_from_f32(rad_to_deg(rad)), 90.0, 0.0001), eq: true)
+
+fn approx_eq(left: f64, right: f64, epsilon: f64) -> bool
+  let delta = left - right
+  let abs_delta = if delta < 0.0 then: 0.0 - delta else: delta
+  abs_delta <= epsilon
+
+@intrinsic(name: "__f32_demote_f64")
+fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+@intrinsic(name: "__f64_promote_f32")
+fn f64_from_f32(value: f32): () -> f64 __f64_promote_f32(value)

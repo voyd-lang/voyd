@@ -1,0 +1,204 @@
+use std::test::assertions::all
+
+test "abs supports ints and floats":
+  match(abs(9))
+    Ok<i32> { value }:
+      assert(value, eq: 9)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(abs(-9))
+    Ok<i32> { value }:
+      assert(value, eq: 9)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(abs(-2147483647 - 1))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 2)
+
+  match(abs(i64_from_i32(-9)))
+    Ok<i64> { value }:
+      assert(value, eq: i64_from_i32(9))
+    Err<MathError>:
+      assert(false, eq: true)
+
+  assert(abs(-2.5), eq: 2.5)
+  assert(f64_from_f32(abs(f32_from_f64(-3.5))), eq: 3.5)
+
+  let pos_inf = 1.0 / 0.0
+  assert(1.0 / abs(-0.0), eq: pos_inf)
+  assert(1.0 / f64_from_f32(abs(f32_from_f64(-0.0))), eq: pos_inf)
+
+test "signum supports ints and floats including nan":
+  assert(signum(-9), eq: -1)
+  assert(signum(0), eq: 0)
+  assert(signum(9), eq: 1)
+
+  assert(signum(i64_from_i32(-9)), eq: i64_from_i32(-1))
+  assert(signum(i64_from_i32(0)), eq: i64_from_i32(0))
+  assert(signum(i64_from_i32(9)), eq: i64_from_i32(1))
+
+  assert(signum(-2.5), eq: -1.0)
+  assert(signum(0.0), eq: 0.0)
+  assert(signum(2.5), eq: 1.0)
+  assert(f64_from_f32(signum(f32_from_f64(-2.5))), eq: -1.0)
+
+  let nan = 0.0 / 0.0
+  assert(is_nan(signum(nan)), eq: true)
+
+test "nan finite and infinite helpers work for f64 and f32":
+  let finite = 12.5
+  let inf = 1.0 / 0.0
+  let nan = 0.0 / 0.0
+
+  assert(is_finite(finite), eq: true)
+  assert(is_infinite(finite), eq: false)
+  assert(is_nan(finite), eq: false)
+
+  assert(is_finite(inf), eq: false)
+  assert(is_infinite(inf), eq: true)
+  assert(is_nan(inf), eq: false)
+
+  assert(is_finite(nan), eq: false)
+  assert(is_infinite(nan), eq: false)
+  assert(is_nan(nan), eq: true)
+
+  let finite32 = f32_from_f64(3.5)
+  let inf32 = f32_from_f64(1.0 / 0.0)
+  let nan32 = f32_from_f64(0.0 / 0.0)
+  assert(is_finite(finite32), eq: true)
+  assert(is_infinite(inf32), eq: true)
+  assert(is_nan(nan32), eq: true)
+
+test "floor ceil round trunc fract and sqrt support f64 and f32":
+  assert(floor(2.7), eq: 2.0)
+  assert(floor(-2.7), eq: -3.0)
+
+  assert(ceil(2.1), eq: 3.0)
+  assert(ceil(-2.1), eq: -2.0)
+
+  assert(round(2.4), eq: 2.0)
+  assert(round(2.5), eq: 2.0)
+  assert(round(3.5), eq: 4.0)
+  assert(round(-2.5), eq: -2.0)
+
+  assert(trunc(2.9), eq: 2.0)
+  assert(trunc(-2.9), eq: -2.0)
+
+  assert(fract(2.75), eq: 0.75)
+  assert(fract(-2.75), eq: -0.75)
+
+  assert(sqrt(9.0), eq: 3.0)
+
+  let value32 = f32_from_f64(2.75)
+  assert(f64_from_f32(floor(value32)), eq: 2.0)
+  assert(f64_from_f32(ceil(value32)), eq: 3.0)
+  assert(f64_from_f32(round(value32)), eq: 3.0)
+  assert(f64_from_f32(trunc(value32)), eq: 2.0)
+  assert(f64_from_f32(fract(value32)), eq: 0.75)
+  assert(f64_from_f32(sqrt(f32_from_f64(9.0))), eq: 3.0)
+
+test "hypot supports f64 and f32":
+  assert(close_enough(hypot(3.0, 4.0), target: 5.0, epsilon: 0.0000000001), eq: true)
+  assert(
+    close_enough(
+      f64_from_f32(hypot(f32_from_f64(3.0), f32_from_f64(4.0))),
+      target: 5.0,
+      epsilon: 0.00001
+    ),
+    eq: true
+  )
+
+test "pow trig log and exp support f64 and f32":
+  assert(pow(2.0, 3.0), eq: 8.0)
+  assert(close_enough(pow(9.0, 0.5), target: 3.0, epsilon: 0.0000000001), eq: true)
+
+  assert(close_enough(exp(1.0), target: 2.718281828459045, epsilon: 0.000000001), eq: true)
+  assert(close_enough(ln(2.718281828459045), target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(log2(8.0), target: 3.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(log10(1000.0), target: 3.0, epsilon: 0.000000001), eq: true)
+
+  assert(close_enough(sin(0.0), target: 0.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(cos(0.0), target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(tan(0.0), target: 0.0, epsilon: 0.000000001), eq: true)
+  assert(
+    close_enough(
+      atan2(1.0, 0.0),
+      target: 1.5707963267948966,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+
+  let two32 = f32_from_f64(2.0)
+  let three32 = f32_from_f64(3.0)
+  assert(close_enough(f64_from_f32(pow(two32, three32)), target: 8.0, epsilon: 0.00001), eq: true)
+  assert(close_enough(f64_from_f32(sin(f32_from_f64(0.0))), target: 0.0, epsilon: 0.00001), eq: true)
+  assert(close_enough(f64_from_f32(cos(f32_from_f64(0.0))), target: 1.0, epsilon: 0.00001), eq: true)
+  assert(close_enough(f64_from_f32(tan(f32_from_f64(0.0))), target: 0.0, epsilon: 0.00001), eq: true)
+  assert(
+    close_enough(
+      f64_from_f32(atan2(f32_from_f64(1.0), f32_from_f64(0.0))),
+      target: 1.5707963267948966,
+      epsilon: 0.00001
+    ),
+    eq: true
+  )
+  assert(close_enough(f64_from_f32(log2(f32_from_f64(8.0))), target: 3.0, epsilon: 0.00001), eq: true)
+  assert(
+    close_enough(
+      f64_from_f32(log10(f32_from_f64(1000.0))),
+      target: 3.0,
+      epsilon: 0.00001
+    ),
+    eq: true
+  )
+  assert(close_enough(f64_from_f32(exp(f32_from_f64(1.0))), target: 2.718281828459045, epsilon: 0.0001), eq: true)
+  assert(close_enough(f64_from_f32(ln(f32_from_f64(2.7182817))), target: 1.0, epsilon: 0.0001), eq: true)
+
+test "advanced float APIs support UFCS style":
+  assert(2.0.pow(3.0), eq: 8.0)
+  assert(close_enough(1.0.exp(), target: 2.718281828459045, epsilon: 0.000000001), eq: true)
+  assert(close_enough(2.718281828459045.ln(), target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(0.0.sin(), target: 0.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(0.0.cos(), target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(3.0.hypot(4.0), target: 5.0, epsilon: 0.000000001), eq: true)
+
+test "boundary behavior around nan and infinities":
+  let inf = 1.0 / 0.0
+  let neg_inf = -1.0 / 0.0
+  let nan = 0.0 / 0.0
+
+  assert(is_infinite(exp(inf)), eq: true)
+  assert(is_infinite(log2(0.0)), eq: true)
+  assert(is_nan(ln(-1.0)), eq: true)
+  assert(is_nan(sqrt(-1.0)), eq: true)
+  assert(is_nan(fract(nan)), eq: true)
+  assert(is_infinite(floor(inf)), eq: true)
+  assert(is_infinite(ceil(neg_inf)), eq: true)
+
+test "deterministic sweep validates transcendental identities":
+  var x = 0.25
+  while x <= 16.0 do:
+    assert(close_enough(exp(ln(x)), target: x, epsilon: 0.000000001), eq: true)
+    x = x + 0.25
+
+  var angle = -3.0
+  while angle <= 3.0 do:
+    let identity = (sin(angle) * sin(angle)) + (cos(angle) * cos(angle))
+    assert(close_enough(identity, target: 1.0, epsilon: 0.000000001), eq: true)
+    angle = angle + 0.25
+
+@intrinsic(name: "__f32_demote_f64")
+fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+@intrinsic(name: "__f64_promote_f32")
+fn f64_from_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
+
+fn close_enough(value: f64, { target: f64, epsilon: f64 }) -> bool
+  abs(value - target) <= epsilon

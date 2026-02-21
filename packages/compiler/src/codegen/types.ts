@@ -47,6 +47,60 @@ import {
 } from "./trait-dispatch-key.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
+const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
+
+type ReachabilityState = {
+  symbols?: Set<ProgramSymbolId>;
+};
+
+const markReachableFunctionSymbol = ({
+  ctx,
+  moduleId,
+  symbol,
+}: {
+  ctx: CodegenContext;
+  moduleId: string;
+  symbol: SymbolId;
+}): void => {
+  const state = ctx.programHelpers.getHelperState<ReachabilityState>(
+    REACHABILITY_STATE,
+    () => ({ symbols: new Set<ProgramSymbolId>() }),
+  );
+  const symbols = state.symbols ?? new Set<ProgramSymbolId>();
+  state.symbols = symbols;
+  symbols.add(
+    ctx.program.symbols.canonicalIdOf(moduleId, symbol) as ProgramSymbolId,
+  );
+};
+
+const resolveImportedFunctionSymbol = ({
+  ctx,
+  moduleId,
+  symbol,
+}: {
+  ctx: CodegenContext;
+  moduleId: string;
+  symbol: SymbolId;
+}): { moduleId: string; symbol: SymbolId } => {
+  const seen = new Set<string>();
+  let currentModuleId = moduleId;
+  let currentSymbol = symbol;
+
+  while (true) {
+    const key = `${currentModuleId}:${currentSymbol}`;
+    if (seen.has(key)) {
+      return { moduleId: currentModuleId, symbol: currentSymbol };
+    }
+    seen.add(key);
+    const targetId = ctx.program.imports.getTarget(currentModuleId, currentSymbol);
+    if (typeof targetId !== "number") {
+      return { moduleId: currentModuleId, symbol: currentSymbol };
+    }
+    const targetRef = ctx.program.symbols.refOf(targetId);
+    currentModuleId = targetRef.moduleId;
+    currentSymbol = targetRef.symbol;
+  }
+};
 
 export type WasmTypeMode = "runtime" | "signature";
 
@@ -1465,11 +1519,18 @@ const createMethodLookupEntries = ({
       );
       const hashTraitSymbol = traitMethodImpl?.traitSymbol ?? impl.traitSymbol;
       const hashTraitMethod = traitMethodImpl?.traitMethodSymbol ?? traitMethod;
-      const metas = ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
+      const resolvedImplRef = resolveImportedFunctionSymbol({
+        ctx,
+        moduleId: implRef.moduleId,
+        symbol: implRef.symbol,
+      });
+      const metas = ctx.functions
+        .get(resolvedImplRef.moduleId)
+        ?.get(resolvedImplRef.symbol);
       const meta = resolveTraitImplMethodMeta({
         metas,
         impl,
-        implRef,
+        implRef: resolvedImplRef,
         traitMethod,
         runtimeType,
         ctx,
@@ -1477,6 +1538,11 @@ const createMethodLookupEntries = ({
       if (!meta) {
         return;
       }
+      markReachableFunctionSymbol({
+        ctx,
+        moduleId: meta.moduleId,
+        symbol: meta.symbol,
+      });
       if (!meta.wasmName) {
         throw new Error(
           `codegen missing wasm symbol for trait method impl ${implRef.moduleId}::${implRef.symbol}`,

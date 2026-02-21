@@ -1,0 +1,301 @@
+use std::test::assertions::all
+
+test "max and min choose expected values":
+  assert(max(4, 9), eq: 9)
+  assert(max(-2, -7), eq: -2)
+  assert(min(4, 9), eq: 4)
+  assert(min(-2, -7), eq: -7)
+
+test "mod_euclid i32 returns euclidean remainder":
+  match(mod_euclid(-1, 4))
+    Ok<i32> { value }:
+      assert(value, eq: 3)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(mod_euclid(14, 4))
+    Ok<i32> { value }:
+      assert(value, eq: 2)
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "mod_euclid i32 rejects non-positive modulus":
+  match(mod_euclid(5, 0))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+  match(mod_euclid(5, -3))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+test "mod_euclid i64 returns euclidean remainder":
+  match(mod_euclid(i64_from_i32(-1), i64_from_i32(4)))
+    Ok<i64> { value }:
+      assert(value, eq: i64_from_i32(3))
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(mod_euclid(i64_from_i32(14), i64_from_i32(4)))
+    Ok<i64> { value }:
+      assert(value, eq: i64_from_i32(2))
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "mod_euclid i64 rejects non-positive modulus":
+  match(mod_euclid(i64_from_i32(5), i64_from_i32(0)))
+    Ok<i64>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+  match(mod_euclid(i64_from_i32(5), i64_from_i32(-3)))
+    Ok<i64>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+test "rem_euclid aliases mod_euclid":
+  match(rem_euclid(-1, 4))
+    Ok<i32> { value }:
+      assert(value, eq: 3)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(rem_euclid(i64_from_i32(-1), i64_from_i32(4)))
+    Ok<i64> { value }:
+      assert(value, eq: i64_from_i32(3))
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "div_rem i32 returns quotient and remainder":
+  let pair = div_rem(13, 5)
+  assert(pair.0, eq: 2)
+  assert(pair.1, eq: 3)
+
+test "div_rem i64 returns quotient and remainder":
+  let pair = div_rem(i64_from_i32(13), i64_from_i32(5))
+  assert(pair.0, eq: i64_from_i32(2))
+  assert(pair.1, eq: i64_from_i32(3))
+
+test "checked_div_rem returns values and rejects invalid cases":
+  match(checked_div_rem(13, 5))
+    Ok<(i32, i32)> { value }:
+      assert(value.0, eq: 2)
+      assert(value.1, eq: 3)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(checked_div_rem(13, by: 5))
+    Ok<(i32, i32)> { value }:
+      assert(value.0, eq: 2)
+      assert(value.1, eq: 3)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(checked_div_rem(4, 0))
+    Ok<(i32, i32)>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 3)
+
+  match(checked_div_rem(-2147483647 - 1, -1))
+    Ok<(i32, i32)>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 2)
+
+  match(checked_div_rem(i64_from_i32(4), i64_from_i32(0)))
+    Ok<(i64, i64)>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 3)
+
+test "next_power_of_two handles base and rounding cases":
+  match(next_power_of_two(-10))
+    Ok<i32> { value }:
+      assert(value, eq: 1)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_power_of_two(1))
+    Ok<i32> { value }:
+      assert(value, eq: 1)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_power_of_two(3))
+    Ok<i32> { value }:
+      assert(value, eq: 4)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_power_of_two(1073741824))
+    Ok<i32> { value }:
+      assert(value, eq: 1073741824)
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "next_power_of_two rejects overflow":
+  match(next_power_of_two(1073741825))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 2)
+
+  match(next_power_of_two(2147483647))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 2)
+
+test "power of two helpers work for i32 and i64":
+  assert(is_power_of_two(1), eq: true)
+  assert(is_power_of_two(8), eq: true)
+  assert(is_power_of_two(6), eq: false)
+  assert(is_power_of_two(-2), eq: false)
+
+  match(prev_power_of_two(1))
+    Ok<i32> { value }:
+      assert(value, eq: 1)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(prev_power_of_two(19))
+    Ok<i32> { value }:
+      assert(value, eq: 16)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(prev_power_of_two(0))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+  assert(is_power_of_two(i64_from_i32(16)), eq: true)
+  assert(is_power_of_two(i64_from_i32(18)), eq: false)
+
+  match(prev_power_of_two(i64_from_i32(33)))
+    Ok<i64> { value }:
+      assert(value, eq: i64_from_i32(32))
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "next_multiple_of rounds up and rejects invalid input":
+  match(next_multiple_of(10, 3))
+    Ok<i32> { value }:
+      assert(value, eq: 12)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_multiple_of(12, factor: 3))
+    Ok<i32> { value }:
+      assert(value, eq: 12)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_multiple_of(-10, 3))
+    Ok<i32> { value }:
+      assert(value, eq: -9)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_multiple_of(7, 0))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+  match(next_multiple_of(2147483647, 2))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 2)
+
+  match(next_multiple_of(i64_from_i32(10), i64_from_i32(4)))
+    Ok<i64> { value }:
+      assert(value, eq: i64_from_i32(12))
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "rem_euclid invariants hold across signed range":
+  var value = -128
+  while value <= 128 do:
+    var modulus = 1
+    while modulus <= 16 do:
+      match(rem_euclid(value, modulus))
+        Ok<i32> { value: rem }:
+          assert(rem >= 0, eq: true)
+          assert(rem < modulus, eq: true)
+          assert((value - rem) % modulus, eq: 0)
+        Err<MathError>:
+          assert(false, eq: true)
+      modulus = modulus + 1
+    value = value + 1
+
+test "next_multiple_of invariants hold across signed range":
+  var value = -128
+  while value <= 128 do:
+    var factor = 1
+    while factor <= 16 do:
+      match(next_multiple_of(value, factor))
+        Ok<i32> { value: next }:
+          assert(next >= value, eq: true)
+          match(rem_euclid(next, factor))
+            Ok<i32> { value: rem }:
+              assert(rem, eq: 0)
+            Err<MathError>:
+              assert(false, eq: true)
+        Err<MathError>:
+          assert(false, eq: true)
+      factor = factor + 1
+    value = value + 1
+
+test "integer boundaries around signed extremes stay stable":
+  match(rem_euclid(-2147483647 - 1, 2))
+    Ok<i32> { value }:
+      assert(value, eq: 0)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_multiple_of(-2147483647 - 1, 2))
+    Ok<i32> { value }:
+      assert(value, eq: -2147483647 - 1)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_multiple_of(2147483640, 8))
+    Ok<i32> { value }:
+      assert(value, eq: 2147483640)
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "perf smoke for hot integer helpers":
+  var index = 1
+  var checksum = 0
+  while index < 20000 do:
+    let value = (index * 37) - 10000
+
+    match(rem_euclid(value, 97))
+      Ok<i32> { value: rem }:
+        checksum = checksum + rem
+      Err<MathError>:
+        checksum = checksum + 1
+
+    match(next_multiple_of(value, 16))
+      Ok<i32> { value: next }:
+        checksum = checksum + (next - value)
+      Err<MathError>:
+        checksum = checksum + 1
+
+    if is_power_of_two(index) then:
+      checksum = checksum + 3
+    index = index + 1
+
+  assert(checksum > 0, eq: true)
+
+fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)

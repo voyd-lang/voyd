@@ -6,7 +6,10 @@ import type {
   HirFunction,
   TypeId,
 } from "./context.js";
-import type { ProgramFunctionInstanceId } from "../semantics/ids.js";
+import type {
+  ProgramFunctionInstanceId,
+  ProgramSymbolId,
+} from "../semantics/ids.js";
 import { compileExpression } from "./expressions/index.js";
 import { wasmTypeFor } from "./types.js";
 import {
@@ -27,6 +30,14 @@ import {
 } from "./exports/export-abi.js";
 import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
+import { walkHirExpression } from "./hir-walk.js";
+import { requireFunctionMetaByName } from "./function-lookup.js";
+
+const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
+
+type ReachabilityState = {
+  symbols?: Set<ProgramSymbolId>;
+};
 
 const debugEffects = (): boolean =>
   typeof process !== "undefined" && process.env?.DEBUG_EFFECTS === "1";
@@ -78,6 +89,289 @@ const pushFunctionMeta = (
 
 const userParamOffsetFor = (meta: FunctionMetadata): number =>
   meta.effectful ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length) : 0;
+
+const getModuleExportEntries = (ctx: CodegenContext): readonly HirExportEntry[] => {
+  const publicExports = ctx.module.hir.module.exports.filter((entry) =>
+    isPublicVisibility(entry.visibility),
+  );
+  const baseEntries =
+    ctx.module.meta.isPackageRoot || publicExports.length > 0
+      ? publicExports
+      : ctx.module.hir.module.exports.filter((entry) =>
+          isPackageVisible(entry.visibility),
+        );
+  if (!ctx.options.testMode) {
+    return baseEntries;
+  }
+  return baseEntries.filter((entry) => {
+    const name = entry.alias ?? symbolName(ctx, ctx.moduleId, entry.symbol);
+    return isGeneratedTestId(name);
+  });
+};
+
+const collectReachableFunctionSymbols = ({
+  ctx,
+  contexts,
+  entryModuleId,
+}: {
+  ctx: CodegenContext;
+  contexts: readonly CodegenContext[];
+  entryModuleId: string;
+}): Set<ProgramSymbolId> => {
+  const byModuleId = new Map(contexts.map((candidate) => [candidate.moduleId, candidate]));
+  const entryCtx = byModuleId.get(entryModuleId) ?? ctx;
+  const functionItemsByModule = new Map<string, Map<number, HirFunction>>();
+  contexts.forEach((candidate) => {
+    const bySymbol = new Map<number, HirFunction>();
+    candidate.module.hir.items.forEach((item) => {
+      if (item.kind === "function") {
+        bySymbol.set(item.symbol, item);
+      }
+    });
+    functionItemsByModule.set(candidate.moduleId, bySymbol);
+  });
+
+  const reachable = new Set<ProgramSymbolId>();
+  const queue: ProgramSymbolId[] = [];
+  const enqueue = (symbolId: ProgramSymbolId | undefined): void => {
+    if (typeof symbolId !== "number" || reachable.has(symbolId)) {
+      return;
+    }
+    queue.push(symbolId);
+  };
+
+  const testScope = entryCtx.options.testScope ?? "all";
+  const exportContexts =
+    entryCtx.options.testMode && testScope === "all" ? contexts : [entryCtx];
+  exportContexts.forEach((exportCtx) => {
+    getModuleExportEntries(exportCtx).forEach((entry) => {
+      const intrinsicMetadata = entryCtx.program.symbols.getIntrinsicFunctionFlags(
+        programSymbolIdOf(exportCtx, exportCtx.moduleId, entry.symbol),
+      );
+      if (
+        intrinsicMetadata.intrinsic &&
+        intrinsicMetadata.intrinsicUsesSignature !== true
+      ) {
+        return;
+      }
+      const targetId = exportCtx.program.imports.getTarget(
+        exportCtx.moduleId,
+        entry.symbol,
+      );
+      if (typeof targetId === "number") {
+        const targetRef = exportCtx.program.symbols.refOf(targetId);
+        enqueue(
+          exportCtx.program.symbols.canonicalIdOf(
+            targetRef.moduleId,
+            targetRef.symbol,
+          ) as ProgramSymbolId,
+        );
+        return;
+      }
+      enqueue(
+        exportCtx.program.symbols.canonicalIdOf(
+          exportCtx.moduleId,
+          entry.symbol,
+        ) as ProgramSymbolId,
+      );
+    });
+  });
+  if (queue.length === 0) {
+    entryCtx.module.hir.items.forEach((item) => {
+      if (item.kind !== "function") {
+        return;
+      }
+      const intrinsicMetadata = entryCtx.program.symbols.getIntrinsicFunctionFlags(
+        programSymbolIdOf(entryCtx, entryCtx.moduleId, item.symbol),
+      );
+      if (
+        intrinsicMetadata.intrinsic &&
+        intrinsicMetadata.intrinsicUsesSignature !== true
+      ) {
+        return;
+      }
+      enqueue(
+        entryCtx.program.symbols.canonicalIdOf(
+          entryCtx.moduleId,
+          item.symbol,
+        ) as ProgramSymbolId,
+      );
+    });
+  }
+
+  while (queue.length > 0) {
+    const symbolId = queue.pop()!;
+    if (reachable.has(symbolId)) {
+      continue;
+    }
+    reachable.add(symbolId);
+    const symbolRef = ctx.program.symbols.refOf(symbolId);
+    const ownerCtx = byModuleId.get(symbolRef.moduleId);
+    if (!ownerCtx) {
+      continue;
+    }
+    const item = functionItemsByModule
+      .get(ownerCtx.moduleId)
+      ?.get(symbolRef.symbol);
+    if (!item) {
+      const targetId = ownerCtx.program.imports.getTarget(
+        ownerCtx.moduleId,
+        symbolRef.symbol,
+      );
+      if (typeof targetId === "number") {
+        const targetRef = ownerCtx.program.symbols.refOf(targetId);
+        enqueue(
+          ownerCtx.program.symbols.canonicalIdOf(
+            targetRef.moduleId,
+            targetRef.symbol,
+          ) as ProgramSymbolId,
+        );
+      }
+      continue;
+    }
+    walkHirExpression({
+      exprId: item.body,
+      ctx: ownerCtx,
+      visitLambdaBodies: true,
+      visitHandlerBodies: true,
+      visitor: {
+        onExpr: (exprId, expr) => {
+          if (expr.exprKind === "call") {
+            const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
+            callInfo.targets?.forEach((targetId) =>
+              enqueue(targetId as ProgramSymbolId),
+            );
+            const callee = ownerCtx.module.hir.expressions.get(expr.callee);
+            if (callee?.exprKind === "identifier") {
+              enqueue(
+                ownerCtx.program.symbols.canonicalIdOf(
+                  ownerCtx.moduleId,
+                  callee.symbol,
+                ) as ProgramSymbolId,
+              );
+            }
+            return;
+          }
+          if (expr.exprKind !== "method-call") {
+            return;
+          }
+          const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
+          callInfo.targets?.forEach((targetId) =>
+            enqueue(targetId as ProgramSymbolId),
+          );
+        },
+      },
+    });
+  }
+
+  return reachable;
+};
+
+const reachabilityStateOf = (ctx: CodegenContext): ReachabilityState =>
+  ctx.programHelpers.getHelperState(REACHABILITY_STATE, () => ({}));
+
+const reachabilitySetOf = (ctx: CodegenContext): Set<ProgramSymbolId> => {
+  const state = reachabilityStateOf(ctx);
+  if (state.symbols) {
+    return state.symbols;
+  }
+  const symbols = new Set<ProgramSymbolId>();
+  state.symbols = symbols;
+  return symbols;
+};
+
+const markFunctionReachable = ({
+  ctx,
+  moduleId,
+  symbol,
+  reachable,
+}: {
+  ctx: CodegenContext;
+  moduleId: string;
+  symbol: number;
+  reachable?: Set<ProgramSymbolId>;
+}): void => {
+  (reachable ?? reachabilitySetOf(ctx)).add(
+    ctx.program.symbols.canonicalIdOf(moduleId, symbol) as ProgramSymbolId,
+  );
+};
+
+const markSerializerReachable = ({
+  ctx,
+  serializer,
+}: {
+  ctx: CodegenContext;
+  serializer: NonNullable<ReturnType<typeof resolveSerializerForTypes>>;
+}): void => {
+  markFunctionReachable({
+    ctx,
+    moduleId: serializer.encode.moduleId,
+    symbol: serializer.encode.symbol,
+  });
+  markFunctionReachable({
+    ctx,
+    moduleId: serializer.decode.moduleId,
+    symbol: serializer.decode.symbol,
+  });
+};
+
+const markStringLiteralCtorReachable = ({
+  ctx,
+  reachable,
+}: {
+  ctx: CodegenContext;
+  reachable: Set<ProgramSymbolId>;
+}): void => {
+  const meta = requireFunctionMetaByName({
+    ctx,
+    moduleId: "std::string",
+    name: "new_string",
+    paramCount: 1,
+  });
+  markFunctionReachable({
+    ctx,
+    moduleId: meta.moduleId,
+    symbol: meta.symbol,
+    reachable,
+  });
+};
+
+const getReachableFunctionSymbols = ({
+  ctx,
+  contexts,
+  entryModuleId,
+}: {
+  ctx: CodegenContext;
+  contexts: readonly CodegenContext[];
+  entryModuleId: string;
+}): Set<ProgramSymbolId> => {
+  const state = reachabilityStateOf(ctx);
+  if (state.symbols) {
+    return state.symbols;
+  }
+  const symbols = collectReachableFunctionSymbols({ ctx, contexts, entryModuleId });
+  state.symbols = symbols;
+  return symbols;
+};
+
+export const prepareReachableFunctionSymbols = ({
+  contexts,
+  entryModuleId,
+}: {
+  contexts: readonly CodegenContext[];
+  entryModuleId: string;
+}): Set<ProgramSymbolId> => {
+  const seedCtx = contexts[0];
+  if (!seedCtx) {
+    return new Set<ProgramSymbolId>();
+  }
+  const symbols = getReachableFunctionSymbols({
+    ctx: seedCtx,
+    contexts,
+    entryModuleId,
+  });
+  return symbols;
+};
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   const effects = effectsFacade(ctx);
@@ -210,7 +504,21 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
   }
 };
 
-export const compileFunctions = (ctx: CodegenContext): void => {
+export const compileFunctions = ({
+  ctx,
+  contexts,
+  entryModuleId,
+}: {
+  ctx: CodegenContext;
+  contexts: readonly CodegenContext[];
+  entryModuleId: string;
+}): number => {
+  const reachableFunctions = getReachableFunctionSymbols({
+    ctx,
+    contexts,
+    entryModuleId,
+  }) as Set<ProgramSymbolId>;
+  let compiledCount = 0;
   for (const item of ctx.module.hir.items.values()) {
     if (item.kind !== "function") continue;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
@@ -224,27 +532,65 @@ export const compileFunctions = (ctx: CodegenContext): void => {
     }
     const metas = getFunctionMetas(ctx, ctx.moduleId, item.symbol);
     if (!metas || metas.length === 0) {
-      const signature = ctx.program.functions.getSignature(
-        ctx.moduleId,
-        item.symbol,
-      );
-      const scheme = signature
-        ? ctx.program.types.getScheme(signature.scheme)
-        : undefined;
-      const instantiationInfo = ctx.program.functions.getInstantiationInfo(
-        ctx.moduleId,
-        item.symbol,
-      );
-      const hasInstantiations = Boolean(
-        instantiationInfo && instantiationInfo.size > 0,
-      );
-      if (scheme && scheme.params.length > 0 && !hasInstantiations) {
-        continue;
-      }
-      throw new Error(`codegen missing metadata for function ${item.symbol}`);
+      continue;
     }
-    metas.forEach((meta) => compileFunctionItem(item, meta, ctx));
+    const canonicalId = ctx.program.symbols.canonicalIdOf(
+      ctx.moduleId,
+      item.symbol,
+    ) as ProgramSymbolId;
+    if (!reachableFunctions.has(canonicalId)) {
+      continue;
+    }
+    const hasPendingMeta = metas.some((meta) => ctx.mod.getFunction(meta.wasmName) === 0);
+    if (!hasPendingMeta) {
+      continue;
+    }
+    walkHirExpression({
+      exprId: item.body,
+      ctx,
+      visitLambdaBodies: true,
+      visitHandlerBodies: true,
+      visitor: {
+        onExpr: (exprId, expr) => {
+          if (expr.exprKind === "call") {
+            const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
+            callInfo.targets?.forEach((targetId) =>
+              reachableFunctions.add(targetId as ProgramSymbolId),
+            );
+            const callee = ctx.module.hir.expressions.get(expr.callee);
+            if (callee?.exprKind === "identifier") {
+              reachableFunctions.add(
+                ctx.program.symbols.canonicalIdOf(
+                  ctx.moduleId,
+                  callee.symbol,
+                ) as ProgramSymbolId,
+              );
+            }
+            return;
+          }
+          if (expr.exprKind === "literal" && expr.literalKind === "string") {
+            markStringLiteralCtorReachable({ ctx, reachable: reachableFunctions });
+            return;
+          }
+          if (expr.exprKind !== "method-call") {
+            return;
+          }
+          const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
+          callInfo.targets?.forEach((targetId) =>
+            reachableFunctions.add(targetId as ProgramSymbolId),
+          );
+        },
+      },
+    });
+    metas.forEach((meta) => {
+      if (ctx.mod.getFunction(meta.wasmName) !== 0) {
+        return;
+      }
+      compileFunctionItem(item, meta, ctx);
+      compiledCount += 1;
+    });
   }
+  return compiledCount;
 };
 
 export const registerImportMetadata = (ctx: CodegenContext): void => {
@@ -401,23 +747,7 @@ export const emitModuleExports = (
   const exportContexts =
     ctx.options.testMode && testScope === "all" ? contexts : [ctx];
   exportContexts.forEach((exportCtx) => {
-    const publicExports = exportCtx.module.hir.module.exports.filter((entry) =>
-      isPublicVisibility(entry.visibility),
-    );
-    const baseEntries =
-      exportCtx.module.meta.isPackageRoot || publicExports.length > 0
-        ? publicExports
-        : exportCtx.module.hir.module.exports.filter((entry) =>
-            isPackageVisible(entry.visibility),
-          );
-    const isTestExport = (entry: HirExportEntry): boolean => {
-      const name =
-        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
-      return isGeneratedTestId(name);
-    };
-    const exportEntries = exportCtx.options.testMode
-      ? baseEntries.filter(isTestExport)
-      : baseEntries;
+    const exportEntries = getModuleExportEntries(exportCtx);
 
     exportEntries.forEach((entry) => {
       const intrinsicMetadata =
@@ -464,6 +794,9 @@ export const emitModuleExports = (
           [meta.resultTypeId],
           exportCtx,
         );
+        if (serializer) {
+          markSerializerReachable({ ctx: exportCtx, serializer });
+        }
         const supportedReturn =
           valueType === binaryen.none ||
           valueType === binaryen.i32 ||
@@ -509,6 +842,7 @@ export const emitModuleExports = (
       }
 
       if (serializer) {
+        markSerializerReachable({ ctx: exportCtx, serializer });
         try {
           emitSerializedExportWrapper({ ctx: exportCtx, meta, exportName });
           exportAbiEntries.push({

@@ -48,6 +48,14 @@ export const intrinsicSignaturesFor = (
   const booleanUnarySignatures: IntrinsicSignature[] = [
     { parameters: [ctx.primitives.bool], returnType: ctx.primitives.bool },
   ];
+  const floatUnarySignatures: IntrinsicSignature[] = [
+    { parameters: [float32], returnType: float32 },
+    { parameters: [float64], returnType: float64 },
+  ];
+  const floatBinarySignatures: IntrinsicSignature[] = [
+    { parameters: [float32, float32], returnType: float32 },
+    { parameters: [float64, float64], returnType: float64 },
+  ];
 
   switch (name) {
     case "+":
@@ -71,6 +79,22 @@ export const intrinsicSignaturesFor = (
       return booleanBinarySignatures;
     case "not":
       return booleanUnarySignatures;
+    case "__floor":
+    case "__ceil":
+    case "__round":
+    case "__trunc":
+    case "__sqrt":
+    case "__sin":
+    case "__cos":
+    case "__tan":
+    case "__ln":
+    case "__log2":
+    case "__log10":
+    case "__exp":
+      return floatUnarySignatures;
+    case "__pow":
+    case "__atan2":
+      return floatBinarySignatures;
     default:
       return [];
   }
