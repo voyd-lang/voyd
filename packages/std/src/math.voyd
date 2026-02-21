@@ -1,3 +1,6 @@
+// Math APIs for integer, float, interpolation, and constants helpers.
+// Use via the prelude module export (for example, `math::pow(2.0, 3.0)`), or
+// bring functions into scope (`use math::all`) for UFCS style (`2.0.pow(3.0)`).
 pub self::constants
 pub self::errors
 pub self::float

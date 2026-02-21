@@ -97,6 +97,17 @@ test "floor ceil round trunc fract and sqrt support f64 and f32":
   assert(f64_from_f32(fract(value32)), eq: 0.75)
   assert(f64_from_f32(sqrt(f32_from_f64(9.0))), eq: 3.0)
 
+test "hypot supports f64 and f32":
+  assert(close_enough(hypot(3.0, 4.0), target: 5.0, epsilon: 0.0000000001), eq: true)
+  assert(
+    close_enough(
+      f64_from_f32(hypot(f32_from_f64(3.0), f32_from_f64(4.0))),
+      target: 5.0,
+      epsilon: 0.00001
+    ),
+    eq: true
+  )
+
 test "pow trig log and exp support f64 and f32":
   assert(pow(2.0, 3.0), eq: 8.0)
   assert(close_enough(pow(9.0, 0.5), target: 3.0, epsilon: 0.0000000001), eq: true)
@@ -143,6 +154,14 @@ test "pow trig log and exp support f64 and f32":
   )
   assert(close_enough(f64_from_f32(exp(f32_from_f64(1.0))), target: 2.718281828459045, epsilon: 0.0001), eq: true)
   assert(close_enough(f64_from_f32(ln(f32_from_f64(2.7182817))), target: 1.0, epsilon: 0.0001), eq: true)
+
+test "advanced float APIs support UFCS style":
+  assert(2.0.pow(3.0), eq: 8.0)
+  assert(close_enough(1.0.exp(), target: 2.718281828459045, epsilon: 0.000000001), eq: true)
+  assert(close_enough(2.718281828459045.ln(), target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(0.0.sin(), target: 0.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(0.0.cos(), target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(3.0.hypot(4.0), target: 5.0, epsilon: 0.000000001), eq: true)
 
 @intrinsic(name: "__f32_demote_f64")
 fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)
