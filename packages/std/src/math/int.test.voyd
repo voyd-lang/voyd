@@ -222,4 +222,80 @@ test "next_multiple_of rounds up and rejects invalid input":
     Err<MathError>:
       assert(false, eq: true)
 
+test "rem_euclid invariants hold across signed range":
+  var value = -128
+  while value <= 128 do:
+    var modulus = 1
+    while modulus <= 16 do:
+      match(rem_euclid(value, modulus))
+        Ok<i32> { value: rem }:
+          assert(rem >= 0, eq: true)
+          assert(rem < modulus, eq: true)
+          assert((value - rem) % modulus, eq: 0)
+        Err<MathError>:
+          assert(false, eq: true)
+      modulus = modulus + 1
+    value = value + 1
+
+test "next_multiple_of invariants hold across signed range":
+  var value = -128
+  while value <= 128 do:
+    var factor = 1
+    while factor <= 16 do:
+      match(next_multiple_of(value, factor))
+        Ok<i32> { value: next }:
+          assert(next >= value, eq: true)
+          match(rem_euclid(next, factor))
+            Ok<i32> { value: rem }:
+              assert(rem, eq: 0)
+            Err<MathError>:
+              assert(false, eq: true)
+        Err<MathError>:
+          assert(false, eq: true)
+      factor = factor + 1
+    value = value + 1
+
+test "integer boundaries around signed extremes stay stable":
+  match(rem_euclid(-2147483647 - 1, 2))
+    Ok<i32> { value }:
+      assert(value, eq: 0)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_multiple_of(-2147483647 - 1, 2))
+    Ok<i32> { value }:
+      assert(value, eq: -2147483647 - 1)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_multiple_of(2147483640, 8))
+    Ok<i32> { value }:
+      assert(value, eq: 2147483640)
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "perf smoke for hot integer helpers":
+  var index = 1
+  var checksum = 0
+  while index < 20000 do:
+    let value = (index * 37) - 10000
+
+    match(rem_euclid(value, 97))
+      Ok<i32> { value: rem }:
+        checksum = checksum + rem
+      Err<MathError>:
+        checksum = checksum + 1
+
+    match(next_multiple_of(value, 16))
+      Ok<i32> { value: next }:
+        checksum = checksum + (next - value)
+      Err<MathError>:
+        checksum = checksum + 1
+
+    if is_power_of_two(index) then:
+      checksum = checksum + 3
+    index = index + 1
+
+  assert(checksum > 0, eq: true)
+
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)

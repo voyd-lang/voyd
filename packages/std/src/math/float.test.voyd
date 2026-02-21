@@ -163,6 +163,31 @@ test "advanced float APIs support UFCS style":
   assert(close_enough(0.0.cos(), target: 1.0, epsilon: 0.000000001), eq: true)
   assert(close_enough(3.0.hypot(4.0), target: 5.0, epsilon: 0.000000001), eq: true)
 
+test "boundary behavior around nan and infinities":
+  let inf = 1.0 / 0.0
+  let neg_inf = -1.0 / 0.0
+  let nan = 0.0 / 0.0
+
+  assert(is_infinite(exp(inf)), eq: true)
+  assert(is_infinite(log2(0.0)), eq: true)
+  assert(is_nan(ln(-1.0)), eq: true)
+  assert(is_nan(sqrt(-1.0)), eq: true)
+  assert(is_nan(fract(nan)), eq: true)
+  assert(is_infinite(floor(inf)), eq: true)
+  assert(is_infinite(ceil(neg_inf)), eq: true)
+
+test "deterministic sweep validates transcendental identities":
+  var x = 0.25
+  while x <= 16.0 do:
+    assert(close_enough(exp(ln(x)), target: x, epsilon: 0.000000001), eq: true)
+    x = x + 0.25
+
+  var angle = -3.0
+  while angle <= 3.0 do:
+    let identity = (sin(angle) * sin(angle)) + (cos(angle) * cos(angle))
+    assert(close_enough(identity, target: 1.0, epsilon: 0.000000001), eq: true)
+    angle = angle + 0.25
+
 @intrinsic(name: "__f32_demote_f64")
 fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)
 
