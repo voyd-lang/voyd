@@ -13,8 +13,15 @@ const distLibEntry = resolve(repoRoot, "packages/lib/dist/index.js");
 const args = process.argv.slice(2);
 const forceDist = process.env.VOYD_USE_DIST === "1";
 const useSource = process.env.VOYD_DEV === "1" || process.env.VOYD_USE_SRC === "1";
+const mustUseDist = forceDist && !useSource;
 
-if (forceDist && !existsSync(distCli)) {
+if (forceDist && useSource) {
+  console.error(
+    "Both VOYD_USE_DIST=1 and VOYD_USE_SRC=1 are set; VOYD_USE_SRC takes precedence and source CLI will run."
+  );
+}
+
+if (mustUseDist && !existsSync(distCli)) {
   console.error("Voyd CLI dist build not found. Run `npm run build -w @voyd/cli`.");
   process.exit(1);
 }
