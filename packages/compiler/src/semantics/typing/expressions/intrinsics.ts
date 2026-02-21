@@ -22,6 +22,10 @@ export const intrinsicSignaturesFor = (
     { parameters: [float32, float32], returnType: float32 },
     { parameters: [float64, float64], returnType: float64 },
   ];
+  const integerSignatures: IntrinsicSignature[] = [
+    { parameters: [int32, int32], returnType: int32 },
+    { parameters: [int64, int64], returnType: int64 },
+  ];
   const comparisonSignatures: IntrinsicSignature[] = [
     { parameters: [int32, int32], returnType: ctx.primitives.bool },
     { parameters: [int64, int64], returnType: ctx.primitives.bool },
@@ -51,6 +55,8 @@ export const intrinsicSignaturesFor = (
     case "*":
     case "/":
       return numericSignatures;
+    case "%":
+      return integerSignatures;
     case "<":
     case "<=":
     case ">":

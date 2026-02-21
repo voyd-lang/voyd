@@ -1,5 +1,6 @@
 use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
+use std::math::{ MathError, mod_euclid, next_power_of_two }
 use std::traits::sequence::all
 use std::optional::types::all
 use std::string::type::String
@@ -41,11 +42,13 @@ impl<K: DictKey<K>, V> Dict<K, V>
   api fn init() -> Dict<K, V>
     Dict<K, V> { buckets: new_buckets<K, V>(16), count: 0 }
 
-  /// Creates an empty dictionary sized for at least `capacity` entries.
+  /// Creates an empty dictionary sized for `capacity` entries up to a safe upper bound.
   api fn with_capacity({ size capacity: i32 }) -> Dict<K, V>
     let target = if capacity > 0 then: capacity else: 0
     let min_bucket_count = 16
-    let desired_bucket_count = next_power_of_two(target * 2)
+    let max_initial_bucket_count = 65536
+    let grown_target = if target > 1073741823 then: 2147483647 else: target * 2
+    let desired_bucket_count = next_power_of_two_or_limit(grown_target, max_initial_bucket_count)
     let bucket_count =
       if desired_bucket_count > min_bucket_count then:
         desired_bucket_count
@@ -514,7 +517,7 @@ fn delete_from_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, key: K) -
 
 fn bucket_index_for_key<K: DictKey<K>>(bucket_count: i32, key: K) -> i32
   let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1
-  mod_i32(hash_key(key), safe_bucket_count)
+  mod_euclid_or_zero(hash_key(key), safe_bucket_count)
 
 fn key_equals<K: DictKey<K>>(left: K, right: K) -> bool
   left.dict_eq(other: right)
@@ -522,17 +525,17 @@ fn key_equals<K: DictKey<K>>(left: K, right: K) -> bool
 fn hash_key<K: DictKey<K>>(key: K) -> i32
   key.dict_hash()
 
-fn mod_i32(value: i32, modulus: i32) -> i32
-  if modulus <= 0 then:
-    return 0
+fn mod_euclid_or_zero(value: i32, modulus: i32) -> i32
+  match(mod_euclid(value, modulus))
+    Ok<i32> { value }:
+      value
+    Err<MathError>:
+      0
 
-  let div = value / modulus
-  let rem = value - div * modulus
-  if rem < 0 then: rem + modulus else: rem
-
-fn next_power_of_two(value: i32) -> i32
-  let start = if value > 1 then: value else: 1
-  var out = 1
-  while out < start do:
-    out = out * 2
-  out
+fn next_power_of_two_or_limit(value: i32, limit: i32) -> i32
+  let safe_limit = if limit > 0 then: limit else: 1
+  match(next_power_of_two(value))
+    Ok<i32> { value: next }:
+      if next > safe_limit then: safe_limit else: next
+    Err<MathError>:
+      safe_limit

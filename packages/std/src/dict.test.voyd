@@ -80,6 +80,13 @@ test "dict with_capacity supports inserts":
     None:
       assert(false)
 
+test "dict with_capacity clamps unsafe sizes":
+  let huge = Dict<IntKey, i32>::with_capacity(size: 2147483647)
+  assert(bucket_count_of(huge), eq: 65536)
+
+  let negative = Dict<IntKey, i32>::with_capacity(size: -7)
+  assert(bucket_count_of(negative), eq: 16)
+
 test "dict set insert get contains remove clear":
   let ~map = Dict<String, i32>::init()
   map.set(key: "a", value: 1)
@@ -265,3 +272,6 @@ test "array group_by groups values by key":
       assert(value.len(), eq: 3)
     None:
       assert(false)
+
+fn bucket_count_of<K: DictKey<K>, V>(dict: Dict<K, V>) -> i32
+  __array_len(dict.buckets)

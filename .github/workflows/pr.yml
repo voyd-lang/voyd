@@ -85,7 +85,9 @@ jobs:
       # Build-only checks for non-CLI artifacts that are not exercised by package tests.
       - name: Build non-CLI artifacts
         if: steps.changes.outputs.non_cli_build == 'true'
-        run: npx turbo run build --affected --filter=voyd.dev... --filter=voyd-vscode... --output-logs=errors-only
+        # Turbo (2.6.x) rejects combining --affected with --filter, so scope by this step guard
+        # and keep affected package selection inside turbo.
+        run: npx turbo run build --affected --output-logs=errors-only
       # Dist mode is validated separately via targeted CLI e2e when CLI/runtime areas change.
       - name: Build CLI dist for dist e2e
         if: steps.changes.outputs.cli == 'true'

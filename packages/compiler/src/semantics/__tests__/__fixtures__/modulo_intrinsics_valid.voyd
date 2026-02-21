@@ -1,0 +1,5 @@
+fn i32_mod(a: i32, b: i32) -> i32
+  a % b
+
+fn i64_mod(a: i64, b: i64) -> i64
+  a % b

@@ -2,6 +2,7 @@ use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
 use std::error::IoError
 use std::host_dto::HostDto
+use std::math::{ MathError, mod_euclid }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
@@ -136,11 +137,8 @@ fn decode_path_array(payload: MsgPack): () -> Array<Path>
   out
 
 fn normalize_byte(value: i32): () -> i32
-  mod_i32(value, 256)
-
-fn mod_i32(value: i32, modulus: i32) -> i32
-  if modulus <= 0 then:
-    return 0
-  let div = value / modulus
-  let rem = value - div * modulus
-  if rem < 0 then: rem + modulus else: rem
+  match(mod_euclid(value, 256))
+    Ok<i32> { value }:
+      value
+    Err<MathError>:
+      0

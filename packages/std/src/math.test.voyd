@@ -1,0 +1,109 @@
+use std::test::assertions::all
+
+test "max and min choose expected values":
+  assert(max(4, 9), eq: 9)
+  assert(max(-2, -7), eq: -2)
+  assert(min(4, 9), eq: 4)
+  assert(min(-2, -7), eq: -7)
+
+test "mod_euclid i32 returns euclidean remainder":
+  match(mod_euclid(-1, 4))
+    Ok<i32> { value }:
+      assert(value, eq: 3)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(mod_euclid(14, 4))
+    Ok<i32> { value }:
+      assert(value, eq: 2)
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "mod_euclid i32 rejects non-positive modulus":
+  match(mod_euclid(5, 0))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+  match(mod_euclid(5, -3))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+test "mod_euclid i64 returns euclidean remainder":
+  match(mod_euclid(i64_from_i32(-1), i64_from_i32(4)))
+    Ok<i64> { value }:
+      assert(value, eq: i64_from_i32(3))
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(mod_euclid(i64_from_i32(14), i64_from_i32(4)))
+    Ok<i64> { value }:
+      assert(value, eq: i64_from_i32(2))
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "mod_euclid i64 rejects non-positive modulus":
+  match(mod_euclid(i64_from_i32(5), i64_from_i32(0)))
+    Ok<i64>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+  match(mod_euclid(i64_from_i32(5), i64_from_i32(-3)))
+    Ok<i64>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 1)
+
+test "div_rem i32 returns quotient and remainder":
+  let pair = div_rem(13, 5)
+  assert(pair.0, eq: 2)
+  assert(pair.1, eq: 3)
+
+test "div_rem i64 returns quotient and remainder":
+  let pair = div_rem(i64_from_i32(13), i64_from_i32(5))
+  assert(pair.0, eq: i64_from_i32(2))
+  assert(pair.1, eq: i64_from_i32(3))
+
+test "next_power_of_two handles base and rounding cases":
+  match(next_power_of_two(-10))
+    Ok<i32> { value }:
+      assert(value, eq: 1)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_power_of_two(1))
+    Ok<i32> { value }:
+      assert(value, eq: 1)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_power_of_two(3))
+    Ok<i32> { value }:
+      assert(value, eq: 4)
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(next_power_of_two(1073741824))
+    Ok<i32> { value }:
+      assert(value, eq: 1073741824)
+    Err<MathError>:
+      assert(false, eq: true)
+
+test "next_power_of_two rejects overflow":
+  match(next_power_of_two(1073741825))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 2)
+
+  match(next_power_of_two(2147483647))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MathError> { error }:
+      assert(error.code, eq: 2)
+
+fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)

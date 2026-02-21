@@ -1,0 +1,2 @@
+fn bad(a: i32, b: bool) -> i32
+  a % b
