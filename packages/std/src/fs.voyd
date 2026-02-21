@@ -136,11 +136,5 @@ fn decode_path_array(payload: MsgPack): () -> Array<Path>
   out
 
 fn normalize_byte(value: i32): () -> i32
-  mod_i32(value, 256)
-
-fn mod_i32(value: i32, modulus: i32) -> i32
-  if modulus <= 0 then:
-    return 0
-  let div = value / modulus
-  let rem = value - div * modulus
-  if rem < 0 then: rem + modulus else: rem
+  let remainder = value % 256
+  if remainder < 0 then: remainder + 256 else: remainder

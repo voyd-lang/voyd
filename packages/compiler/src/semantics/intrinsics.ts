@@ -78,6 +78,7 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ["-", {}],
   ["*", {}],
   ["/", {}],
+  ["%", {}],
   ["<", {}],
   ["<=", {}],
   [">", {}],

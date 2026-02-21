@@ -27,13 +27,16 @@ pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
     if index < decoded.len() then:
       match(decoded.get(index))
         Some<MsgPack> { value }:
-          buf.push(value: mod_i32(msgpack::unpack_i32(value), 256))
+          let remainder = msgpack::unpack_i32(value) % 256
+          buf.push(value: if remainder < 0 then: remainder + 256 else: remainder)
         None:
           let next = wrap_i64(next_i64())
-          buf.push(value: mod_i32(next, 256))
+          let remainder = next % 256
+          buf.push(value: if remainder < 0 then: remainder + 256 else: remainder)
     else:
       let next = wrap_i64(next_i64())
-      buf.push(value: mod_i32(next, 256))
+      let remainder = next % 256
+      buf.push(value: if remainder < 0 then: remainder + 256 else: remainder)
     index = index + 1
 
 /// Fills a byte buffer with cryptographically secure random bytes.
@@ -43,7 +46,7 @@ pub fn fill_buffer(~buf: ByteBuffer, len: i32): Random -> void
 /// Returns a random boolean value.
 pub fn random_bool(): Random -> bool
   let value = wrap_i64(next_i64())
-  mod_i32(value, 2) == 0
+  value % 2 == 0
 
 /// Returns a random integer within the provided range.
 pub fn random_int({ range: Range }): Random -> i32
@@ -55,7 +58,9 @@ pub fn random_int({ range: Range }): Random -> i32
 
   let span = end_exclusive - start_i64
   let seed = next_i64()
-  let sample = start_i64 + mod_i64(seed, span)
+  let remainder = seed % span
+  let sample = start_i64 +
+    (if remainder < extend_i32_s(0) then: remainder + span else: remainder)
   wrap_i64(sample)
 
 fn range_start_or_zero(start: Option<i32>) -> i32
@@ -75,20 +80,6 @@ fn range_end_exclusive(range: Range, start: i64) -> i64
         end
     None:
       start + extend_i32_s(1)
-
-fn mod_i32(value: i32, modulus: i32) -> i32
-  if modulus <= 0 then:
-    return 0
-  let div = value / modulus
-  let rem = value - div * modulus
-  if rem < 0 then: rem + modulus else: rem
-
-fn mod_i64(value: i64, modulus: i64) -> i64
-  if modulus <= extend_i32_s(0) then:
-    return extend_i32_s(0)
-  let div = value / modulus
-  let rem = value - div * modulus
-  if rem < extend_i32_s(0) then: rem + modulus else: rem
 
 fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)
 fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)

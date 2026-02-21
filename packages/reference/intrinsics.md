@@ -38,6 +38,7 @@ The following intrinsic names are recognized by typing and codegen:
 
 - Public language-level intrinsics:
   - Numeric arithmetic: `+`, `-`, `*`, `/` (i32, i64, f32, f64)
+  - Modulo: `%` (i32, i64)
   - Numeric comparisons: `<`, `<=`, `>`, `>=` (i32, i64, f32, f64)
   - Equality: `==`, `!=` (i32, i64, f32, f64, bool)
   - Boolean ops: `and`, `or`, `xor`, `not`

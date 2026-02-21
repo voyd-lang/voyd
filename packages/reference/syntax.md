@@ -457,6 +457,7 @@ export const infixOperators = new Map<string, [number, Associativity]>([
   ["-", [1, "left"]],
   ["*", [2, "left"]],
   ["/", [2, "left"]],
+  ["%", [2, "left"]],
   ["and", [0, "left"]],
   ["or", [0, "left"]],
   ["xor", [0, "left"]],

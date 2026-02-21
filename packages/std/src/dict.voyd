@@ -514,21 +514,14 @@ fn delete_from_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, key: K) -
 
 fn bucket_index_for_key<K: DictKey<K>>(bucket_count: i32, key: K) -> i32
   let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1
-  mod_i32(hash_key(key), safe_bucket_count)
+  let remainder = hash_key(key) % safe_bucket_count
+  if remainder < 0 then: remainder + safe_bucket_count else: remainder
 
 fn key_equals<K: DictKey<K>>(left: K, right: K) -> bool
   left.dict_eq(other: right)
 
 fn hash_key<K: DictKey<K>>(key: K) -> i32
   key.dict_hash()
-
-fn mod_i32(value: i32, modulus: i32) -> i32
-  if modulus <= 0 then:
-    return 0
-
-  let div = value / modulus
-  let rem = value - div * modulus
-  if rem < 0 then: rem + modulus else: rem
 
 fn next_power_of_two(value: i32) -> i32
   let start = if value > 1 then: value else: 1

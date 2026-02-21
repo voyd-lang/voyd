@@ -335,6 +335,15 @@ export const compileIntrinsicCall = ({
         ctx,
       });
     }
+    case "%": {
+      assertArgCount(name, args, 2);
+      const operandKind = requireHomogeneousIntegerKind({
+        argExprIds: call.args.map((a) => a.expr),
+        ctx,
+        instanceId,
+      });
+      return emitModuloIntrinsic({ kind: operandKind, args, ctx });
+    }
     case "<":
     case "<=":
     case ">":
@@ -517,6 +526,25 @@ const emitComparisonIntrinsic = ({
   throw new Error(`unsupported ${op} comparison for numeric kind ${kind}`);
 };
 
+const emitModuloIntrinsic = ({
+  kind,
+  args,
+  ctx,
+}: {
+  kind: IntegerKind;
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  const left = args[0]!;
+  const right = args[1]!;
+  switch (kind) {
+    case "i32":
+      return ctx.mod.i32.rem_s(left, right);
+    case "i64":
+      return ctx.mod.i64.rem_s(left, right);
+  }
+};
+
 const emitEqualityIntrinsic = ({
   op,
   kind,
@@ -626,6 +654,34 @@ const requireHomogeneousEqualityKind = ({
     );
     if (nextKind !== firstKind) {
       throw new Error("intrinsic operands must share the same primitive type");
+    }
+  }
+  return firstKind;
+};
+
+const requireHomogeneousIntegerKind = ({
+  argExprIds,
+  ctx,
+  instanceId,
+}: {
+  argExprIds: readonly HirExprId[];
+  ctx: CodegenContext;
+  instanceId?: ProgramFunctionInstanceId;
+}): IntegerKind => {
+  if (argExprIds.length === 0) {
+    throw new Error("intrinsic requires at least one operand");
+  }
+  const firstKind = requireIntegerKind(
+    getRequiredExprType(argExprIds[0]!, ctx, instanceId),
+    ctx
+  );
+  for (let i = 1; i < argExprIds.length; i += 1) {
+    const nextKind = requireIntegerKind(
+      getRequiredExprType(argExprIds[i]!, ctx, instanceId),
+      ctx
+    );
+    if (nextKind !== firstKind) {
+      throw new Error("intrinsic operands must share the same integer type");
     }
   }
   return firstKind;

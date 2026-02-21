@@ -70,5 +70,5 @@ fn hex_digit_to_ascii(value: i32) -> i32
 
 fn div_rem(value: i32, divisor: i32) -> (i32, i32)
   let quotient = value / divisor
-  let remainder = value - quotient * divisor
+  let remainder = value % divisor
   (quotient, remainder)
