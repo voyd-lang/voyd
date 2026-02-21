@@ -87,13 +87,13 @@ export const resolveImportedValue = ({
     });
   }
 
-  registerImportedObjectTemplate({
+  hydrateImportedTraitMetadataForDependencySymbol({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
     ctx,
   });
-  hydrateImportedTraitMetadataForDependencySymbol({
+  registerImportedObjectTemplate({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
@@ -246,13 +246,13 @@ export const resolveImportedTypeExpr = ({
       `missing semantics for imported module ${target.moduleId}`,
     );
   }
-  registerImportedObjectTemplate({
+  hydrateImportedTraitMetadataForDependencySymbol({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,
     ctx,
   });
-  hydrateImportedTraitMetadataForDependencySymbol({
+  registerImportedObjectTemplate({
     dependency,
     dependencySymbol: target.symbol,
     localSymbol: symbol,

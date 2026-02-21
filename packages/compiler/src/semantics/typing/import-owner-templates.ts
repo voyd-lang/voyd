@@ -4,6 +4,8 @@ import type { TypingContext } from "./types.js";
 import {
   mapDependencySymbolToLocal,
   registerImportedObjectTemplate,
+  registerImportedTraitDecl,
+  registerImportedTraitImplTemplates,
 } from "./import-symbol-mapping.js";
 
 export const ensureImportedOwnerTemplatesAvailable = ({
@@ -34,6 +36,17 @@ export const ensureImportedOwnerTemplatesAvailable = ({
       dependency,
       ctx,
       allowUnexported: true,
+    });
+    registerImportedTraitDecl({
+      dependency,
+      dependencySymbol: owner.symbol,
+      localSymbol,
+      ctx,
+    });
+    registerImportedTraitImplTemplates({
+      dependency,
+      dependencySymbol: owner.symbol,
+      ctx,
     });
     registerImportedObjectTemplate({
       dependency,
