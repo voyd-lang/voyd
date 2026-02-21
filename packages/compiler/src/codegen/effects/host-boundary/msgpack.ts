@@ -1,5 +1,5 @@
 import type { CodegenContext, FunctionMetadata } from "../../context.js";
-import type { TypeId } from "../../../semantics/ids.js";
+import type { ProgramSymbolId, TypeId } from "../../../semantics/ids.js";
 import { requireFunctionMetaByName } from "../../function-lookup.js";
 import { stateFor } from "./state.js";
 
@@ -31,6 +31,31 @@ export type MsgPackFunctions = {
 };
 
 const MSGPACK_FUNCS_KEY = Symbol("voyd.effects.hostBoundary.msgpackFunctions");
+const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
+
+type ReachabilityState = {
+  symbols?: Set<ProgramSymbolId>;
+};
+
+const markReachable = ({
+  ctx,
+  moduleId,
+  symbol,
+}: {
+  ctx: CodegenContext;
+  moduleId: string;
+  symbol: number;
+}): void => {
+  const state = ctx.programHelpers.getHelperState<ReachabilityState>(
+    REACHABILITY_STATE,
+    () => ({ symbols: new Set<ProgramSymbolId>() }),
+  );
+  const symbols = state.symbols ?? new Set<ProgramSymbolId>();
+  state.symbols = symbols;
+  symbols.add(
+    ctx.program.symbols.canonicalIdOf(moduleId, symbol) as ProgramSymbolId,
+  );
+};
 
 export const ensureMsgPackFunctions = (
   ctx: CodegenContext
@@ -51,7 +76,7 @@ export const ensureMsgPackFunctions = (
       throw new Error("std::msgpack::encode_value missing MsgPack parameter");
     }
 
-    return {
+    const msgpack = {
       msgPackTypeId,
       encodeValue,
       decodeValue: requireFunctionMetaByName({
@@ -187,4 +212,49 @@ export const ensureMsgPackFunctions = (
         paramCount: 3,
       }),
     };
+
+    [
+      msgpack.encodeValue,
+      msgpack.decodeValue,
+      msgpack.packNull,
+      msgpack.packBool,
+      msgpack.packArray,
+      msgpack.packI32,
+      msgpack.packI64,
+      msgpack.packF32,
+      msgpack.packF64,
+      msgpack.packMap,
+      msgpack.unpackBool,
+      msgpack.unpackArray,
+      msgpack.unpackI32,
+      msgpack.unpackI64,
+      msgpack.unpackF32,
+      msgpack.unpackF64,
+      msgpack.unpackMap,
+      msgpack.arrayWithCapacity,
+      msgpack.arrayPush,
+      msgpack.arrayLength,
+      msgpack.arrayRawStorage,
+      msgpack.mapNew,
+      msgpack.mapSet,
+    ].forEach((meta) =>
+      markReachable({
+        ctx,
+        moduleId: meta.moduleId,
+        symbol: meta.symbol,
+      }),
+    );
+    const stringNew = requireFunctionMetaByName({
+      ctx,
+      moduleId: "std::string",
+      name: "new_string",
+      paramCount: 1,
+    });
+    markReachable({
+      ctx,
+      moduleId: stringNew.moduleId,
+      symbol: stringNew.symbol,
+    });
+
+    return msgpack;
   });

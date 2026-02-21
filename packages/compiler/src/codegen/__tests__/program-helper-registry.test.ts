@@ -50,7 +50,7 @@ fn caller(): Async -> i32
   value + 1
 
 test "alpha":
-  1
+  caller()
 
 pub use self::util::all
 `,
@@ -65,7 +65,7 @@ fn caller(): Async -> i32
   value + 2
 
 test "beta":
-  1
+  caller()
 `,
       },
       pathAdapter: createNodePathAdapter(),
@@ -109,7 +109,7 @@ fn caller(): Async -> i32
   value + 1
 
 test "alpha":
-  1
+  caller()
 
 pub use self::util::all
 `,
@@ -124,7 +124,7 @@ fn caller(): Async -> i32
   value + 2
 
 test "beta":
-  1
+  caller()
 `,
       },
       pathAdapter: createNodePathAdapter(),

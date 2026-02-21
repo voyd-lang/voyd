@@ -32,7 +32,11 @@ import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
 
-const USED_MATH_FUNCTIONS = Symbol("codegen.usedMathFunctions");
+const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
+
+type ReachabilityState = {
+  symbols?: Set<ProgramSymbolId>;
+};
 
 const debugEffects = (): boolean =>
   typeof process !== "undefined" && process.env?.DEBUG_EFFECTS === "1";
@@ -104,7 +108,7 @@ const getModuleExportEntries = (ctx: CodegenContext): readonly HirExportEntry[] 
   });
 };
 
-const collectUsedMathFunctionSymbols = ({
+const collectReachableFunctionSymbols = ({
   ctx,
   contexts,
   entryModuleId,
@@ -112,68 +116,72 @@ const collectUsedMathFunctionSymbols = ({
   ctx: CodegenContext;
   contexts: readonly CodegenContext[];
   entryModuleId: string;
-}): ReadonlySet<ProgramSymbolId> => {
-  const isMathModule = (moduleId: string): boolean =>
-    moduleId === "std::math" || moduleId.startsWith("std::math::");
-
-  const isMathSymbol = (symbolId: ProgramSymbolId): boolean =>
-    isMathModule(ctx.program.symbols.refOf(symbolId).moduleId);
-
+}): Set<ProgramSymbolId> => {
   const byModuleId = new Map(contexts.map((candidate) => [candidate.moduleId, candidate]));
   const entryCtx = byModuleId.get(entryModuleId) ?? ctx;
+  const functionItemsByModule = new Map<string, Map<number, HirFunction>>();
+  contexts.forEach((candidate) => {
+    const bySymbol = new Map<number, HirFunction>();
+    candidate.module.hir.items.forEach((item) => {
+      if (item.kind === "function") {
+        bySymbol.set(item.symbol, item);
+      }
+    });
+    functionItemsByModule.set(candidate.moduleId, bySymbol);
+  });
 
-  const used = new Set<ProgramSymbolId>();
+  const reachable = new Set<ProgramSymbolId>();
   const queue: ProgramSymbolId[] = [];
   const enqueue = (symbolId: ProgramSymbolId | undefined): void => {
-    if (typeof symbolId !== "number" || used.has(symbolId) || !isMathSymbol(symbolId)) {
+    if (typeof symbolId !== "number" || reachable.has(symbolId)) {
       return;
     }
     queue.push(symbolId);
   };
 
-  // Seed from call sites outside std::math modules.
-  contexts
-    .filter((candidate) => !isMathModule(candidate.moduleId))
-    .forEach((candidate) => {
-      candidate.module.hir.items.forEach((item) => {
-        if (item.kind !== "function") {
-          return;
-        }
-        walkHirExpression({
-          exprId: item.body,
-          ctx: candidate,
-          visitLambdaBodies: true,
-          visitHandlerBodies: true,
-          visitor: {
-            onExpr: (exprId, expr) => {
-              if (expr.exprKind === "call") {
-                const callee = candidate.module.hir.expressions.get(expr.callee);
-                if (callee?.exprKind === "identifier") {
-                  enqueue(
-                    candidate.program.symbols.canonicalIdOf(
-                      candidate.moduleId,
-                      callee.symbol,
-                    ) as ProgramSymbolId,
-                  );
-                }
-              } else if (expr.exprKind !== "method-call") {
-                return;
-              }
-              const callInfo = candidate.program.calls.getCallInfo(candidate.moduleId, exprId);
-              callInfo.targets?.forEach((targetId) =>
-                enqueue(targetId as ProgramSymbolId),
-              );
-            },
-          },
-        });
-      });
-    });
-
-  // If entry is a std::math module, seed from exported roots.
-  if (isMathModule(entryCtx.moduleId)) {
-    getModuleExportEntries(entryCtx).forEach((entry) => {
+  const testScope = entryCtx.options.testScope ?? "all";
+  const exportContexts =
+    entryCtx.options.testMode && testScope === "all" ? contexts : [entryCtx];
+  exportContexts.forEach((exportCtx) => {
+    getModuleExportEntries(exportCtx).forEach((entry) => {
       const intrinsicMetadata = entryCtx.program.symbols.getIntrinsicFunctionFlags(
-        programSymbolIdOf(entryCtx, entryCtx.moduleId, entry.symbol),
+        programSymbolIdOf(exportCtx, exportCtx.moduleId, entry.symbol),
+      );
+      if (
+        intrinsicMetadata.intrinsic &&
+        intrinsicMetadata.intrinsicUsesSignature !== true
+      ) {
+        return;
+      }
+      const targetId = exportCtx.program.imports.getTarget(
+        exportCtx.moduleId,
+        entry.symbol,
+      );
+      if (typeof targetId === "number") {
+        const targetRef = exportCtx.program.symbols.refOf(targetId);
+        enqueue(
+          exportCtx.program.symbols.canonicalIdOf(
+            targetRef.moduleId,
+            targetRef.symbol,
+          ) as ProgramSymbolId,
+        );
+        return;
+      }
+      enqueue(
+        exportCtx.program.symbols.canonicalIdOf(
+          exportCtx.moduleId,
+          entry.symbol,
+        ) as ProgramSymbolId,
+      );
+    });
+  });
+  if (queue.length === 0) {
+    entryCtx.module.hir.items.forEach((item) => {
+      if (item.kind !== "function") {
+        return;
+      }
+      const intrinsicMetadata = entryCtx.program.symbols.getIntrinsicFunctionFlags(
+        programSymbolIdOf(entryCtx, entryCtx.moduleId, item.symbol),
       );
       if (
         intrinsicMetadata.intrinsic &&
@@ -182,28 +190,42 @@ const collectUsedMathFunctionSymbols = ({
         return;
       }
       enqueue(
-        entryCtx.program.symbols.canonicalIdOf(entryCtx.moduleId, entry.symbol) as ProgramSymbolId,
+        entryCtx.program.symbols.canonicalIdOf(
+          entryCtx.moduleId,
+          item.symbol,
+        ) as ProgramSymbolId,
       );
     });
   }
 
   while (queue.length > 0) {
     const symbolId = queue.pop()!;
-    if (used.has(symbolId)) {
+    if (reachable.has(symbolId)) {
       continue;
     }
-    used.add(symbolId);
+    reachable.add(symbolId);
     const symbolRef = ctx.program.symbols.refOf(symbolId);
     const ownerCtx = byModuleId.get(symbolRef.moduleId);
     if (!ownerCtx) {
       continue;
     }
-    const item = Array.from(ownerCtx.module.hir.items.values()).find(
-      (candidate): candidate is HirFunction =>
-        candidate.kind === "function" &&
-        candidate.symbol === symbolRef.symbol,
-    );
+    const item = functionItemsByModule
+      .get(ownerCtx.moduleId)
+      ?.get(symbolRef.symbol);
     if (!item) {
+      const targetId = ownerCtx.program.imports.getTarget(
+        ownerCtx.moduleId,
+        symbolRef.symbol,
+      );
+      if (typeof targetId === "number") {
+        const targetRef = ownerCtx.program.symbols.refOf(targetId);
+        enqueue(
+          ownerCtx.program.symbols.canonicalIdOf(
+            targetRef.moduleId,
+            targetRef.symbol,
+          ) as ProgramSymbolId,
+        );
+      }
       continue;
     }
     walkHirExpression({
@@ -214,6 +236,10 @@ const collectUsedMathFunctionSymbols = ({
       visitor: {
         onExpr: (exprId, expr) => {
           if (expr.exprKind === "call") {
+            const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
+            callInfo.targets?.forEach((targetId) =>
+              enqueue(targetId as ProgramSymbolId),
+            );
             const callee = ownerCtx.module.hir.expressions.get(expr.callee);
             if (callee?.exprKind === "identifier") {
               enqueue(
@@ -223,7 +249,9 @@ const collectUsedMathFunctionSymbols = ({
                 ) as ProgramSymbolId,
               );
             }
-          } else if (expr.exprKind !== "method-call") {
+            return;
+          }
+          if (expr.exprKind !== "method-call") {
             return;
           }
           const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
@@ -235,7 +263,47 @@ const collectUsedMathFunctionSymbols = ({
     });
   }
 
-  return used;
+  return reachable;
+};
+
+const reachabilityStateOf = (ctx: CodegenContext): ReachabilityState =>
+  ctx.programHelpers.getHelperState(REACHABILITY_STATE, () => ({}));
+
+const getReachableFunctionSymbols = ({
+  ctx,
+  contexts,
+  entryModuleId,
+}: {
+  ctx: CodegenContext;
+  contexts: readonly CodegenContext[];
+  entryModuleId: string;
+}): Set<ProgramSymbolId> => {
+  const state = reachabilityStateOf(ctx);
+  if (state.symbols) {
+    return state.symbols;
+  }
+  const symbols = collectReachableFunctionSymbols({ ctx, contexts, entryModuleId });
+  state.symbols = symbols;
+  return symbols;
+};
+
+export const prepareReachableFunctionSymbols = ({
+  contexts,
+  entryModuleId,
+}: {
+  contexts: readonly CodegenContext[];
+  entryModuleId: string;
+}): Set<ProgramSymbolId> => {
+  const seedCtx = contexts[0];
+  if (!seedCtx) {
+    return new Set<ProgramSymbolId>();
+  }
+  const symbols = getReachableFunctionSymbols({
+    ctx: seedCtx,
+    contexts,
+    entryModuleId,
+  });
+  return symbols;
 };
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
@@ -377,13 +445,13 @@ export const compileFunctions = ({
   ctx: CodegenContext;
   contexts: readonly CodegenContext[];
   entryModuleId: string;
-}): void => {
-  const isMathModule =
-    ctx.moduleId === "std::math" || ctx.moduleId.startsWith("std::math::");
-  const usedMathFunctions = ctx.programHelpers.getHelperState(
-    USED_MATH_FUNCTIONS,
-    () => collectUsedMathFunctionSymbols({ ctx, contexts, entryModuleId }),
-  );
+}): number => {
+  const reachableFunctions = getReachableFunctionSymbols({
+    ctx,
+    contexts,
+    entryModuleId,
+  }) as Set<ProgramSymbolId>;
+  let compiledCount = 0;
   for (const item of ctx.module.hir.items.values()) {
     if (item.kind !== "function") continue;
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
@@ -399,19 +467,59 @@ export const compileFunctions = ({
     if (!metas || metas.length === 0) {
       continue;
     }
-    if (!isMathModule) {
-      metas.forEach((meta) => compileFunctionItem(item, meta, ctx));
-      continue;
-    }
     const canonicalId = ctx.program.symbols.canonicalIdOf(
       ctx.moduleId,
       item.symbol,
     ) as ProgramSymbolId;
-    if (!usedMathFunctions.has(canonicalId)) {
+    if (!reachableFunctions.has(canonicalId)) {
       continue;
     }
-    metas.forEach((meta) => compileFunctionItem(item, meta, ctx));
+    const hasPendingMeta = metas.some((meta) => ctx.mod.getFunction(meta.wasmName) === 0);
+    if (!hasPendingMeta) {
+      continue;
+    }
+    walkHirExpression({
+      exprId: item.body,
+      ctx,
+      visitLambdaBodies: true,
+      visitHandlerBodies: true,
+      visitor: {
+        onExpr: (exprId, expr) => {
+          if (expr.exprKind === "call") {
+            const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
+            callInfo.targets?.forEach((targetId) =>
+              reachableFunctions.add(targetId as ProgramSymbolId),
+            );
+            const callee = ctx.module.hir.expressions.get(expr.callee);
+            if (callee?.exprKind === "identifier") {
+              reachableFunctions.add(
+                ctx.program.symbols.canonicalIdOf(
+                  ctx.moduleId,
+                  callee.symbol,
+                ) as ProgramSymbolId,
+              );
+            }
+            return;
+          }
+          if (expr.exprKind !== "method-call") {
+            return;
+          }
+          const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
+          callInfo.targets?.forEach((targetId) =>
+            reachableFunctions.add(targetId as ProgramSymbolId),
+          );
+        },
+      },
+    });
+    metas.forEach((meta) => {
+      if (ctx.mod.getFunction(meta.wasmName) !== 0) {
+        return;
+      }
+      compileFunctionItem(item, meta, ctx);
+      compiledCount += 1;
+    });
   }
+  return compiledCount;
 };
 
 export const registerImportMetadata = (ctx: CodegenContext): void => {
