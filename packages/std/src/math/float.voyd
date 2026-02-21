@@ -102,6 +102,78 @@ pub fn sqrt(value: f64) -> f64
 pub fn sqrt(value: f32) -> f32
   sqrt_f32(value)
 
+/// Raises `value` to the power of `exponent`.
+pub fn pow(value: f64, exponent: f64) -> f64
+  pow_f64(value, exponent)
+
+/// Raises `value` to the power of `exponent`.
+pub fn pow(value: f32, exponent: f32) -> f32
+  demote_f64(pow(promote_f32(value), promote_f32(exponent)))
+
+/// Returns the sine of `value` (radians).
+pub fn sin(value: f64) -> f64
+  sin_f64(value)
+
+/// Returns the sine of `value` (radians).
+pub fn sin(value: f32) -> f32
+  demote_f64(sin(promote_f32(value)))
+
+/// Returns the cosine of `value` (radians).
+pub fn cos(value: f64) -> f64
+  cos_f64(value)
+
+/// Returns the cosine of `value` (radians).
+pub fn cos(value: f32) -> f32
+  demote_f64(cos(promote_f32(value)))
+
+/// Returns the tangent of `value` (radians).
+pub fn tan(value: f64) -> f64
+  tan_f64(value)
+
+/// Returns the tangent of `value` (radians).
+pub fn tan(value: f32) -> f32
+  demote_f64(tan(promote_f32(value)))
+
+/// Returns the angle (in radians) between the positive x-axis and the point `(x, y)`.
+pub fn atan2(y: f64, x: f64) -> f64
+  atan2_f64(y, x)
+
+/// Returns the angle (in radians) between the positive x-axis and the point `(x, y)`.
+pub fn atan2(y: f32, x: f32) -> f32
+  demote_f64(atan2(promote_f32(y), promote_f32(x)))
+
+/// Returns the natural logarithm (base e).
+pub fn ln(value: f64) -> f64
+  ln_f64(value)
+
+/// Returns the natural logarithm (base e).
+pub fn ln(value: f32) -> f32
+  demote_f64(ln(promote_f32(value)))
+
+/// Returns the base-2 logarithm.
+pub fn log2(value: f64) -> f64
+  log2_f64(value)
+
+/// Returns the base-2 logarithm.
+pub fn log2(value: f32) -> f32
+  demote_f64(log2(promote_f32(value)))
+
+/// Returns the base-10 logarithm.
+pub fn log10(value: f64) -> f64
+  log10_f64(value)
+
+/// Returns the base-10 logarithm.
+pub fn log10(value: f32) -> f32
+  demote_f64(log10(promote_f32(value)))
+
+/// Returns e raised to `value`.
+pub fn exp(value: f64) -> f64
+  exp_f64(value)
+
+/// Returns e raised to `value`.
+pub fn exp(value: f32) -> f32
+  demote_f64(exp(promote_f32(value)))
+
 /// Returns true when `value` is `NaN`.
 pub fn is_nan(value: f64) -> bool
   value != value
@@ -162,5 +234,32 @@ fn sqrt_f64(value: f64): () -> f64 __sqrt(value)
 
 @intrinsic(name: "__sqrt")
 fn sqrt_f32(value: f32): () -> f32 __sqrt(value)
+
+@intrinsic(name: "__pow")
+fn pow_f64(value: f64, exponent: f64): () -> f64 __pow(value, exponent)
+
+@intrinsic(name: "__sin")
+fn sin_f64(value: f64): () -> f64 __sin(value)
+
+@intrinsic(name: "__cos")
+fn cos_f64(value: f64): () -> f64 __cos(value)
+
+@intrinsic(name: "__tan")
+fn tan_f64(value: f64): () -> f64 __tan(value)
+
+@intrinsic(name: "__atan2")
+fn atan2_f64(y: f64, x: f64): () -> f64 __atan2(y, x)
+
+@intrinsic(name: "__ln")
+fn ln_f64(value: f64): () -> f64 __ln(value)
+
+@intrinsic(name: "__log2")
+fn log2_f64(value: f64): () -> f64 __log2(value)
+
+@intrinsic(name: "__log10")
+fn log10_f64(value: f64): () -> f64 __log10(value)
+
+@intrinsic(name: "__exp")
+fn exp_f64(value: f64): () -> f64 __exp(value)
 
 fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)

@@ -35,6 +35,36 @@ type EqualityKind = NumericKind | "bool";
 type BooleanKind = "bool";
 type IntegerKind = "i32" | "i64";
 type FloatKind = "f32" | "f64";
+type WasmFloatUnaryIntrinsicOp =
+  | "__floor"
+  | "__ceil"
+  | "__round"
+  | "__trunc"
+  | "__sqrt";
+type HostMathUnaryIntrinsicOp =
+  | "__sin"
+  | "__cos"
+  | "__tan"
+  | "__ln"
+  | "__log2"
+  | "__log10"
+  | "__exp";
+type HostMathBinaryIntrinsicOp = "__pow" | "__atan2";
+
+const HOST_MATH_MODULE = "voyd_math";
+const HOST_MATH_IMPORT_STATE = Symbol("host-math-imports");
+
+const HOST_MATH_IMPORTS = {
+  __sin: { local: "__voyd_math_sin", base: "sin" },
+  __cos: { local: "__voyd_math_cos", base: "cos" },
+  __tan: { local: "__voyd_math_tan", base: "tan" },
+  __ln: { local: "__voyd_math_ln", base: "ln" },
+  __log2: { local: "__voyd_math_log2", base: "log2" },
+  __log10: { local: "__voyd_math_log10", base: "log10" },
+  __exp: { local: "__voyd_math_exp", base: "exp" },
+  __pow: { local: "__voyd_math_pow", base: "pow" },
+  __atan2: { local: "__voyd_math_atan2", base: "atan2" },
+} as const;
 
 interface CompileIntrinsicCallParams {
   name: string;
@@ -59,9 +89,23 @@ interface EmitEqualityIntrinsicParams {
 }
 
 interface EmitFloatUnaryIntrinsicParams {
-  op: "__floor" | "__ceil" | "__round" | "__trunc" | "__sqrt";
+  op: WasmFloatUnaryIntrinsicOp;
   kind: FloatKind;
   arg: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}
+
+interface EmitHostMathUnaryIntrinsicParams {
+  op: HostMathUnaryIntrinsicOp;
+  kind: FloatKind;
+  arg: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}
+
+interface EmitHostMathBinaryIntrinsicParams {
+  op: HostMathBinaryIntrinsicOp;
+  kind: FloatKind;
+  args: readonly binaryen.ExpressionRef[];
   ctx: CodegenContext;
 }
 
@@ -343,6 +387,40 @@ export const compileIntrinsicCall = ({
         ctx,
       });
     }
+    case "__sin":
+    case "__cos":
+    case "__tan":
+    case "__ln":
+    case "__log2":
+    case "__log10":
+    case "__exp": {
+      assertArgCount(name, args, 1);
+      const kind = requireFloatKind(
+        getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
+        ctx
+      );
+      return emitHostMathUnaryIntrinsic({
+        op: name,
+        kind,
+        arg: args[0]!,
+        ctx,
+      });
+    }
+    case "__pow":
+    case "__atan2": {
+      assertArgCount(name, args, 2);
+      const kind = requireHomogeneousFloatKind({
+        argExprIds: call.args.map((a) => a.expr),
+        ctx,
+        instanceId,
+      });
+      return emitHostMathBinaryIntrinsic({
+        op: name,
+        kind,
+        args,
+        ctx,
+      });
+    }
     case "+":
     case "-":
     case "*":
@@ -521,6 +599,55 @@ const emitFloatUnaryIntrinsic = ({
     case "__sqrt":
       return ctx.mod.f64.sqrt(arg);
   }
+};
+
+const emitHostMathUnaryIntrinsic = ({
+  op,
+  kind,
+  arg,
+  ctx,
+}: EmitHostMathUnaryIntrinsicParams): binaryen.ExpressionRef => {
+  const importDef = HOST_MATH_IMPORTS[op];
+  const callF64 = (value: binaryen.ExpressionRef): binaryen.ExpressionRef =>
+    callHostMathImport({
+      ctx,
+      localName: importDef.local,
+      baseName: importDef.base,
+      args: [value],
+      resultType: binaryen.f64,
+      paramTypes: [binaryen.f64],
+    });
+  if (kind === "f32") {
+    return ctx.mod.f32.demote(callF64(ctx.mod.f64.promote(arg)));
+  }
+  return callF64(arg);
+};
+
+const emitHostMathBinaryIntrinsic = ({
+  op,
+  kind,
+  args,
+  ctx,
+}: EmitHostMathBinaryIntrinsicParams): binaryen.ExpressionRef => {
+  const importDef = HOST_MATH_IMPORTS[op];
+  const callF64 = (
+    left: binaryen.ExpressionRef,
+    right: binaryen.ExpressionRef
+  ): binaryen.ExpressionRef =>
+    callHostMathImport({
+      ctx,
+      localName: importDef.local,
+      baseName: importDef.base,
+      args: [left, right],
+      resultType: binaryen.f64,
+      paramTypes: [binaryen.f64, binaryen.f64],
+    });
+  if (kind === "f32") {
+    return ctx.mod.f32.demote(
+      callF64(ctx.mod.f64.promote(args[0]!), ctx.mod.f64.promote(args[1]!))
+    );
+  }
+  return callF64(args[0]!, args[1]!);
 };
 
 const emitComparisonIntrinsic = ({
@@ -747,6 +874,34 @@ const requireHomogeneousIntegerKind = ({
   return firstKind;
 };
 
+const requireHomogeneousFloatKind = ({
+  argExprIds,
+  ctx,
+  instanceId,
+}: {
+  argExprIds: readonly HirExprId[];
+  ctx: CodegenContext;
+  instanceId?: ProgramFunctionInstanceId;
+}): FloatKind => {
+  if (argExprIds.length === 0) {
+    throw new Error("intrinsic requires at least one operand");
+  }
+  const firstKind = requireFloatKind(
+    getRequiredExprType(argExprIds[0]!, ctx, instanceId),
+    ctx
+  );
+  for (let i = 1; i < argExprIds.length; i += 1) {
+    const nextKind = requireFloatKind(
+      getRequiredExprType(argExprIds[i]!, ctx, instanceId),
+      ctx
+    );
+    if (nextKind !== firstKind) {
+      throw new Error("intrinsic operands must share the same float type");
+    }
+  }
+  return firstKind;
+};
+
 const requireBooleanKind = ({
   argExprIds,
   ctx,
@@ -852,6 +1007,61 @@ const getBooleanKind = (
     return "bool";
   }
   throw new Error("intrinsic arguments must be boolean types");
+};
+
+const callHostMathImport = ({
+  ctx,
+  localName,
+  baseName,
+  args,
+  resultType,
+  paramTypes,
+}: {
+  ctx: CodegenContext;
+  localName: string;
+  baseName: string;
+  args: readonly binaryen.ExpressionRef[];
+  resultType: binaryen.Type;
+  paramTypes: readonly binaryen.Type[];
+}): binaryen.ExpressionRef => {
+  ensureHostMathImport({
+    ctx,
+    localName,
+    baseName,
+    resultType,
+    paramTypes,
+  });
+  return ctx.mod.call(localName, args as number[], resultType);
+};
+
+const ensureHostMathImport = ({
+  ctx,
+  localName,
+  baseName,
+  resultType,
+  paramTypes,
+}: {
+  ctx: CodegenContext;
+  localName: string;
+  baseName: string;
+  resultType: binaryen.Type;
+  paramTypes: readonly binaryen.Type[];
+}): void => {
+  const registered = ctx.programHelpers.getHelperState(
+    HOST_MATH_IMPORT_STATE,
+    () => new Set<string>()
+  );
+  if (registered.has(localName)) {
+    return;
+  }
+  ctx.mod.addFunctionImport(
+    localName,
+    HOST_MATH_MODULE,
+    baseName,
+    binaryen.createType(paramTypes as number[]),
+    resultType
+  );
+  registered.add(localName);
 };
 
 const assertArgCount = (

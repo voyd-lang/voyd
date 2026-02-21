@@ -32,6 +32,6 @@ describe("float intrinsic typing", () => {
   it("rejects non-float operands", () => {
     expect(() =>
       semanticsPipeline(loadStdFixture("float_intrinsics_type_mismatch.voyd"))
-    ).toThrow(/no overload of __sqrt matches argument types/);
+    ).toThrow(/no overload of __pow matches argument types/);
   });
 });

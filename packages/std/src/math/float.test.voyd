@@ -97,6 +97,53 @@ test "floor ceil round trunc fract and sqrt support f64 and f32":
   assert(f64_from_f32(fract(value32)), eq: 0.75)
   assert(f64_from_f32(sqrt(f32_from_f64(9.0))), eq: 3.0)
 
+test "pow trig log and exp support f64 and f32":
+  assert(pow(2.0, 3.0), eq: 8.0)
+  assert(close_enough(pow(9.0, 0.5), target: 3.0, epsilon: 0.0000000001), eq: true)
+
+  assert(close_enough(exp(1.0), target: 2.718281828459045, epsilon: 0.000000001), eq: true)
+  assert(close_enough(ln(2.718281828459045), target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(log2(8.0), target: 3.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(log10(1000.0), target: 3.0, epsilon: 0.000000001), eq: true)
+
+  assert(close_enough(sin(0.0), target: 0.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(cos(0.0), target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(tan(0.0), target: 0.0, epsilon: 0.000000001), eq: true)
+  assert(
+    close_enough(
+      atan2(1.0, 0.0),
+      target: 1.5707963267948966,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+
+  let two32 = f32_from_f64(2.0)
+  let three32 = f32_from_f64(3.0)
+  assert(close_enough(f64_from_f32(pow(two32, three32)), target: 8.0, epsilon: 0.00001), eq: true)
+  assert(close_enough(f64_from_f32(sin(f32_from_f64(0.0))), target: 0.0, epsilon: 0.00001), eq: true)
+  assert(close_enough(f64_from_f32(cos(f32_from_f64(0.0))), target: 1.0, epsilon: 0.00001), eq: true)
+  assert(close_enough(f64_from_f32(tan(f32_from_f64(0.0))), target: 0.0, epsilon: 0.00001), eq: true)
+  assert(
+    close_enough(
+      f64_from_f32(atan2(f32_from_f64(1.0), f32_from_f64(0.0))),
+      target: 1.5707963267948966,
+      epsilon: 0.00001
+    ),
+    eq: true
+  )
+  assert(close_enough(f64_from_f32(log2(f32_from_f64(8.0))), target: 3.0, epsilon: 0.00001), eq: true)
+  assert(
+    close_enough(
+      f64_from_f32(log10(f32_from_f64(1000.0))),
+      target: 3.0,
+      epsilon: 0.00001
+    ),
+    eq: true
+  )
+  assert(close_enough(f64_from_f32(exp(f32_from_f64(1.0))), target: 2.718281828459045, epsilon: 0.0001), eq: true)
+  assert(close_enough(f64_from_f32(ln(f32_from_f64(2.7182817))), target: 1.0, epsilon: 0.0001), eq: true)
+
 @intrinsic(name: "__f32_demote_f64")
 fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)
 
@@ -104,3 +151,6 @@ fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)
 fn f64_from_f32(value: f32): () -> f64 __f64_promote_f32(value)
 
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
+
+fn close_enough(value: f64, { target: f64, epsilon: f64 }) -> bool
+  abs(value - target) <= epsilon

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
+import { createEffectsImports } from "./support/wasm-imports.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";
 
 const exportNames = (mod: WebAssembly.Module): string[] =>
@@ -44,7 +45,7 @@ const compileInstance = ({
   const wasmModule = new WebAssembly.Module(
     wasmBufferSource(module.emitBinary()),
   );
-  return new WebAssembly.Instance(wasmModule, {});
+  return new WebAssembly.Instance(wasmModule, createEffectsImports());
 };
 
 describe("codegen memory exports", () => {

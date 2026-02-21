@@ -75,6 +75,15 @@ const expectUnaryOp = (
   expect(info.op).toBe(op);
 };
 
+const expectCallTarget = (
+  expr: binaryen.ExpressionRef,
+  target: string
+): void => {
+  const info = binaryen.getExpressionInfo(expr) as binaryen.CallInfo;
+  expect(info.id).toBe(binaryen.ExpressionIds.Call);
+  expect(info.target).toBe(target);
+};
+
 describe("compileIntrinsicCall array intrinsics", () => {
   const i32Type = 1 as TypeId;
   const arrayType = 2 as TypeId;
@@ -729,5 +738,84 @@ describe("compileIntrinsicCall array intrinsics", () => {
       }),
       binaryen.Operations.SqrtFloat64
     );
+  });
+
+  it("emits host-backed float math imports", () => {
+    const f32Type = 8 as TypeId;
+    const f64Type = 9 as TypeId;
+    const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();
+    descriptors.set(f32Type, { kind: "primitive", name: "f32" });
+    descriptors.set(f64Type, { kind: "primitive", name: "f64" });
+
+    registerExpr(
+      { expressions, exprTypes, typeId: f32Type },
+      1 as HirExprId,
+      {
+        id: 1 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "float",
+        value: "1.5",
+      } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: f64Type },
+      2 as HirExprId,
+      {
+        id: 2 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "float",
+        value: "2.5",
+      } as any
+    );
+
+    fnCtx.returnTypeId = f64Type;
+    const sinF64 = compileIntrinsicCall({
+      name: "__sin",
+      call: makeCall([2 as HirExprId]),
+      args: [ctx.mod.f64.const(2.5)],
+      ctx,
+      fnCtx,
+    });
+    expectCallTarget(sinF64, "__voyd_math_sin");
+
+    const powF64 = compileIntrinsicCall({
+      name: "__pow",
+      call: makeCall([2 as HirExprId, 2 as HirExprId]),
+      args: [ctx.mod.f64.const(2.5), ctx.mod.f64.const(2.5)],
+      ctx,
+      fnCtx,
+    });
+    expectCallTarget(powF64, "__voyd_math_pow");
+
+    fnCtx.returnTypeId = f32Type;
+    const sinF32 = compileIntrinsicCall({
+      name: "__sin",
+      call: makeCall([1 as HirExprId]),
+      args: [ctx.mod.f32.const(1.5)],
+      ctx,
+      fnCtx,
+    });
+    const sinF32Info = binaryen.getExpressionInfo(sinF32) as binaryen.UnaryInfo;
+    expect(sinF32Info.id).toBe(binaryen.ExpressionIds.Unary);
+    expect(sinF32Info.op).toBe(binaryen.Operations.DemoteFloat64);
+    expectCallTarget(sinF32Info.value, "__voyd_math_sin");
+
+    const importedSin = binaryen.getFunctionInfo(
+      ctx.mod.getFunction("__voyd_math_sin")
+    ) as binaryen.FunctionInfo;
+    expect(importedSin.module).toBe("voyd_math");
+    expect(importedSin.base).toBe("sin");
+
+    const importedPow = binaryen.getFunctionInfo(
+      ctx.mod.getFunction("__voyd_math_pow")
+    ) as binaryen.FunctionInfo;
+    expect(importedPow.module).toBe("voyd_math");
+    expect(importedPow.base).toBe("pow");
   });
 });

@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { compileProgram, type CompileProgramResult } from "../../pipeline.js";
 import { createFsModuleHost } from "../../modules/fs-host.js";
+import { createEffectsImports } from "./support/wasm-imports.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";
 
 const fixtureRoot = resolve(import.meta.dirname, "__fixtures__");
@@ -32,7 +33,10 @@ const compileSubscriptFixture = async (): Promise<Uint8Array> => {
 };
 
 const instantiate = (wasm: Uint8Array): WebAssembly.Instance =>
-  new WebAssembly.Instance(new WebAssembly.Module(wasmBufferSource(wasm)), {});
+  new WebAssembly.Instance(
+    new WebAssembly.Module(wasmBufferSource(wasm)),
+    createEffectsImports()
+  );
 
 describe("subscript smoke e2e", () => {
   it("executes index, range, and map subscripts", async () => {
