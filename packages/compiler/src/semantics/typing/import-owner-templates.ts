@@ -1,6 +1,7 @@
 import type { TypeId } from "../ids.js";
 import { symbolRefKey, type SymbolRef } from "./symbol-ref.js";
 import type { TypingContext } from "./types.js";
+import { importTargetFor } from "./import-resolution.js";
 import {
   mapDependencySymbolToLocal,
   registerImportedObjectTemplate,
@@ -24,34 +25,58 @@ export const ensureImportedOwnerTemplatesAvailable = ({
   );
 
   owners.forEach((owner) => {
-    if (owner.moduleId === ctx.moduleId) {
+    const resolved =
+      owner.moduleId === ctx.moduleId
+        ? (() => {
+            const target = importTargetFor(owner.symbol, ctx);
+            if (!target) {
+              return undefined;
+            }
+            const dependency = ctx.dependencies.get(target.moduleId);
+            if (!dependency) {
+              return undefined;
+            }
+            return {
+              dependency,
+              dependencySymbol: target.symbol,
+              localSymbol: owner.symbol,
+            };
+          })()
+        : (() => {
+            const dependency = ctx.dependencies.get(owner.moduleId);
+            if (!dependency) {
+              return undefined;
+            }
+            const localSymbol = mapDependencySymbolToLocal({
+              owner: owner.symbol,
+              dependency,
+              ctx,
+              allowUnexported: true,
+            });
+            return {
+              dependency,
+              dependencySymbol: owner.symbol,
+              localSymbol,
+            };
+          })();
+    if (!resolved) {
       return;
     }
-    const dependency = ctx.dependencies.get(owner.moduleId);
-    if (!dependency) {
-      return;
-    }
-    const localSymbol = mapDependencySymbolToLocal({
-      owner: owner.symbol,
-      dependency,
-      ctx,
-      allowUnexported: true,
-    });
     registerImportedTraitDecl({
-      dependency,
-      dependencySymbol: owner.symbol,
-      localSymbol,
+      dependency: resolved.dependency,
+      dependencySymbol: resolved.dependencySymbol,
+      localSymbol: resolved.localSymbol,
       ctx,
     });
     registerImportedTraitImplTemplates({
-      dependency,
-      dependencySymbol: owner.symbol,
+      dependency: resolved.dependency,
+      dependencySymbol: resolved.dependencySymbol,
       ctx,
     });
     registerImportedObjectTemplate({
-      dependency,
-      dependencySymbol: owner.symbol,
-      localSymbol,
+      dependency: resolved.dependency,
+      dependencySymbol: resolved.dependencySymbol,
+      localSymbol: resolved.localSymbol,
       ctx,
     });
   });
