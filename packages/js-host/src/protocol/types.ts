@@ -4,6 +4,17 @@ export type SignatureHash = string;
 export type Handle = number;
 export type ResumeKind = "resume" | "tail";
 
+export type RunOutcome<T = unknown> =
+  | { kind: "value"; value: T }
+  | { kind: "failed"; error: Error }
+  | { kind: "cancelled"; reason?: unknown };
+
+export type VoydRunHandle<T = unknown> = {
+  id: string;
+  outcome: Promise<RunOutcome<T>>;
+  cancel: (reason?: unknown) => boolean;
+};
+
 export type EffectContinuationKind = "resume" | "tail" | "end";
 
 export type EffectHandler<

@@ -1,15 +1,23 @@
 export { createVoydHost } from "@voyd/js-host";
+export { CancelledRunError } from "@voyd/js-host";
 export type {
   EffectContinuation,
   EffectContinuationCall,
   EffectHandler,
   HostInitOptions,
   HostProtocolTable,
+  RunOutcome,
   LabelHandlerHost,
   VoydHost,
+  VoydRunHandle,
 } from "@voyd/js-host";
 export {
   buildHandlersByLabelSuffix,
+  createRuntimeScheduler,
   registerHandlersByLabelSuffix,
 } from "@voyd/js-host";
-export type { LabelHandlerMatch } from "@voyd/js-host";
+export type {
+  LabelHandlerMatch,
+  RuntimeSchedulerOptions,
+  RuntimeStepResult,
+} from "@voyd/js-host";

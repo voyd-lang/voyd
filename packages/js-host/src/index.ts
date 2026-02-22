@@ -1,4 +1,5 @@
 export { createVoydHost } from "./host.js";
+export { CancelledRunError } from "./host.js";
 export type { HostInitOptions, VoydHost } from "./host.js";
 export {
   buildHandlersByLabelSuffix,
@@ -40,5 +41,12 @@ export type {
   HostProtocolTable,
   OpId,
   ResumeKind,
+  RunOutcome,
   SignatureHash,
+  VoydRunHandle,
 } from "./protocol/types.js";
+export { createRuntimeScheduler } from "./runtime/scheduler.js";
+export type {
+  RuntimeSchedulerOptions,
+  RuntimeStepResult,
+} from "./runtime/scheduler.js";

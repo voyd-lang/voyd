@@ -11,3 +11,16 @@ host.initEffects();
 
 const result = await host.run("main");
 ```
+
+Advanced control (fairness + cancellation):
+
+```ts
+const host = await createVoydHost({
+  wasm,
+  scheduler: { maxInternalStepsPerTick: 1024 },
+});
+
+const run = host.runManaged("main");
+// run.cancel("user-request");
+const outcome = await run.outcome;
+```
