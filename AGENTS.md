@@ -33,7 +33,8 @@ Additional notes:
 - Host boundary DTO compatibility is enforced at compile time for effect payloads. Allowed payload categories are: `bool`, `i32`, `i64`, `f32`, `f64`, `void`, or types annotated with `@serializer("msgpack", ...)`.
 - Unsupported host-boundary payload shapes should fail with clear `CG0001` diagnostics (not runtime traps). Keep API-to-DTO shim conversions at effect boundaries.
 - Enable compile instrumentation with `VOYD_COMPILER_PERF=1` to print phase timings (`loadModuleGraph`, `analyzeModules`, `emitProgram`, `total`) and hotspot counters as one `[voyd:compiler:perf]` JSON line per compile.
-- Current `@voyd/js-host` event loop is cooperative and serial per run (`runEffectLoop`): handlers are awaited one-at-a-time, only the returned continuation call is applied, and there is no public cancellation API yet.
+- Current `@voyd/js-host` runtime is scheduler-driven with cooperative fairness budgeting and explicit cancellable managed runs (`runManaged`/`runEffectfulManaged`).
+- `createVoydHost` now installs default std capability adapters unless `defaultAdapters: false` is passed. Current default coverage: `std::fs::Fs`, `std::time::Time`, `std::env::Env`, `std::random::Random`, `std::log::Log`.
 
 # Testing
 

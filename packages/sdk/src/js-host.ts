@@ -1,9 +1,15 @@
 export { createVoydHost } from "@voyd/js-host";
 export { CancelledRunError } from "@voyd/js-host";
+export { detectHostRuntime, registerDefaultHostAdapters, scheduleTaskForRuntime } from "@voyd/js-host";
 export type {
+  DefaultAdapterCapability,
+  DefaultAdapterHost,
+  DefaultAdapterOptions,
+  DefaultAdapterRegistration,
   EffectContinuation,
   EffectContinuationCall,
   EffectHandler,
+  HostRuntimeKind,
   HostInitOptions,
   HostProtocolTable,
   RunOutcome,

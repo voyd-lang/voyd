@@ -25,12 +25,19 @@ import {
   createRuntimeScheduler,
   type RuntimeSchedulerOptions,
 } from "./runtime/scheduler.js";
+import {
+  registerDefaultHostAdapters,
+  type DefaultAdapterOptions,
+  type DefaultAdapterRegistration,
+} from "./adapters/default.js";
+import { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
   imports?: WebAssembly.Imports;
   bufferSize?: number;
   scheduler?: RuntimeSchedulerOptions;
+  defaultAdapters?: boolean | DefaultAdapterOptions;
 };
 
 export type VoydHost = {
@@ -45,6 +52,9 @@ export type VoydHost = {
   registerHandlersByLabelSuffix: (
     handlersByLabelSuffix: Record<string, EffectHandler>
   ) => number;
+  registerDefaultAdapters: (
+    options?: DefaultAdapterOptions
+  ) => Promise<DefaultAdapterRegistration>;
   initEffects: () => void;
   runPure: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
   runEffectfulManaged: <T = unknown>(
@@ -257,6 +267,7 @@ export const createVoydHost = async ({
   imports,
   bufferSize = MIN_EFFECT_BUFFER_SIZE,
   scheduler,
+  defaultAdapters = true,
 }: HostInitOptions): Promise<VoydHost> => {
   const module = toModule(wasm);
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
@@ -269,7 +280,11 @@ export const createVoydHost = async ({
 
   const handlersByKey = new Map<string, EffectHandler>();
   const opByKey = buildParsedEffectOpMap({ ops: parsedTable.ops });
-  const runtimeScheduler = createRuntimeScheduler(scheduler);
+  const runtime = detectHostRuntime();
+  const runtimeScheduler = createRuntimeScheduler({
+    ...scheduler,
+    scheduleTask: scheduler?.scheduleTask ?? scheduleTaskForRuntime(runtime),
+  });
 
   let initialized = false;
   const handlersByOpIndex: Array<EffectHandler | undefined> = Array.from({
@@ -459,7 +474,7 @@ export const createVoydHost = async ({
     return unwrapRunOutcome(runManaged<T>(entryName, args).outcome);
   };
 
-  return {
+  const host: VoydHost = {
     table,
     instance,
     registerHandler,
@@ -468,6 +483,11 @@ export const createVoydHost = async ({
         host: { table, registerHandler },
         handlersByLabelSuffix,
       }),
+    registerDefaultAdapters: (options = {}) =>
+      registerDefaultHostAdapters({
+        host: { table, registerHandler },
+        options,
+      }),
     initEffects,
     runPure,
     runEffectfulManaged,
@@ -475,4 +495,12 @@ export const createVoydHost = async ({
     runEffectful,
     run,
   };
+
+  if (defaultAdapters !== false) {
+    await host.registerDefaultAdapters(
+      typeof defaultAdapters === "object" ? defaultAdapters : {}
+    );
+  }
+
+  return host;
 };

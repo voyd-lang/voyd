@@ -338,4 +338,48 @@ pub fn main() -> i32
     });
     expect(output).toBe(43);
   });
+
+  it("runs std env effects with default host adapters", async () => {
+    const envKey = "VOYD_SDK_DEFAULT_ADAPTER_TEST";
+    const original = process.env[envKey];
+    const sdk = createSdk();
+    const source = `use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::string::type::String
+
+@effect(id: "std::env::Env")
+eff Env
+  get(tail, key: MsgPack) -> MsgPack
+  set(tail, payload: MsgPack) -> MsgPack
+
+pub fn main(): Env -> i32
+  let set_payload = HostDto::init()
+    .set("key", msgpack::make_string("${envKey}"))
+    .set("value", msgpack::make_string("41"))
+    .pack()
+  let _ = Env::set(set_payload)
+  let payload = Env::get(msgpack::make_string("${envKey}"))
+  payload.match(active)
+    String:
+      if active.equals("41") then:
+        41
+      else:
+        -2
+    else:
+      -3
+`;
+
+    try {
+      const result = expectCompileSuccess(await sdk.compile({ source }));
+      const output = await result.run<number>({ entryName: "main" });
+      expect(output).toBe(41);
+    } finally {
+      if (original === undefined) {
+        delete process.env[envKey];
+      } else {
+        process.env[envKey] = original;
+      }
+    }
+  });
 });

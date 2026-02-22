@@ -1,6 +1,13 @@
 export { createVoydHost } from "./host.js";
 export { CancelledRunError } from "./host.js";
 export type { HostInitOptions, VoydHost } from "./host.js";
+export { registerDefaultHostAdapters } from "./adapters/default.js";
+export type {
+  DefaultAdapterCapability,
+  DefaultAdapterHost,
+  DefaultAdapterOptions,
+  DefaultAdapterRegistration,
+} from "./adapters/default.js";
 export {
   buildHandlersByLabelSuffix,
   registerHandlersByLabelSuffix,
@@ -50,3 +57,5 @@ export type {
   RuntimeSchedulerOptions,
   RuntimeStepResult,
 } from "./runtime/scheduler.js";
+export { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
+export type { HostRuntimeKind } from "./runtime/environment.js";

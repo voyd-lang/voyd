@@ -243,6 +243,7 @@ continuation call is applied.
 
 ## Known Implementation Gap
 
-`@voyd/js-host` currently matches ordering and error semantics but does not yet
-implement required cancellation or fairness-budget scheduling. Closing this gap
-is the purpose of `V-257` and `V-259`.
+`@voyd/js-host` now implements scheduler-driven ordering, cancellation outcomes,
+and fairness-budget controls. Remaining adapter-level gaps are capability
+contracts that are not yet finalized in stdlib (notably fetch/input payload
+schemas), tracked under `V-258`/`V-259`.
