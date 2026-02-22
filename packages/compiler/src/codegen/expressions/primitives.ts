@@ -8,7 +8,7 @@ import type {
 import { getRequiredBinding, loadBindingValue } from "../locals.js";
 import { arrayNew, arrayNewFixed } from "@voyd/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes, wasmTypeFor } from "../types.js";
-import { requireFunctionMetaByName } from "../function-lookup.js";
+import { requireDependencyFunctionMeta } from "../function-dependencies.js";
 
 const encoder = new TextEncoder();
 
@@ -71,22 +71,20 @@ export const compileIdentifierExpr = (
 };
 
 export const emitStringLiteral = (value: string, ctx: CodegenContext): number => {
-  const newStringMeta = requireFunctionMetaByName({
+  const newStringMeta = requireDependencyFunctionMeta({
     ctx,
-    moduleId: "std::string",
-    name: "new_string",
-    paramCount: 1,
+    dependency: "string-literal-constructor",
   });
   const signature = ctx.program.functions.getSignature(
-    "std::string",
+    newStringMeta.moduleId,
     newStringMeta.symbol
   );
   if (!signature) {
-    throw new Error("missing signature for std::string::new_string");
+    throw new Error("missing signature for string literal constructor");
   }
   const fixedArrayType = signature.parameters[0]?.typeId;
   if (typeof fixedArrayType !== "number") {
-    throw new Error("std::string::new_string missing FixedArray parameter");
+    throw new Error("string literal constructor missing FixedArray parameter");
   }
 
   const arrayInfo = getFixedArrayWasmTypes(fixedArrayType, ctx);

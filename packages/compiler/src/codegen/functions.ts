@@ -31,7 +31,7 @@ import {
 import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
-import { requireFunctionMetaByName } from "./function-lookup.js";
+import { markDependencyFunctionReachable } from "./function-dependencies.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 
@@ -322,16 +322,9 @@ const markStringLiteralCtorReachable = ({
   ctx: CodegenContext;
   reachable: Set<ProgramSymbolId>;
 }): void => {
-  const meta = requireFunctionMetaByName({
+  markDependencyFunctionReachable({
     ctx,
-    moduleId: "std::string",
-    name: "new_string",
-    paramCount: 1,
-  });
-  markFunctionReachable({
-    ctx,
-    moduleId: meta.moduleId,
-    symbol: meta.symbol,
+    dependency: "string-literal-constructor",
     reachable,
   });
 };
