@@ -1,11 +1,15 @@
 export { createVoydHost } from "@voyd/js-host";
 export { CancelledRunError } from "@voyd/js-host";
 export { detectHostRuntime, registerDefaultHostAdapters, scheduleTaskForRuntime } from "@voyd/js-host";
+export { createDeterministicRuntime } from "@voyd/js-host";
 export type {
   DefaultAdapterCapability,
   DefaultAdapterHost,
   DefaultAdapterOptions,
   DefaultAdapterRegistration,
+  DefaultAdapterRuntimeHooks,
+  DeterministicRuntime,
+  DeterministicRuntimeOptions,
   EffectContinuation,
   EffectContinuationCall,
   EffectHandler,

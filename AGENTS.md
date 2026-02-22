@@ -35,6 +35,7 @@ Additional notes:
 - Enable compile instrumentation with `VOYD_COMPILER_PERF=1` to print phase timings (`loadModuleGraph`, `analyzeModules`, `emitProgram`, `total`) and hotspot counters as one `[voyd:compiler:perf]` JSON line per compile.
 - Current `@voyd/js-host` runtime is scheduler-driven with cooperative fairness budgeting and explicit cancellable managed runs (`runManaged`/`runEffectfulManaged`).
 - `createVoydHost` now installs default std capability adapters unless `defaultAdapters: false` is passed. Current default coverage: `std::fs::Fs`, `std::time::Time`, `std::env::Env`, `std::random::Random`, `std::log::Log`.
+- `@voyd/js-host` exposes `createDeterministicRuntime` for virtual-clock conformance tests; pair it with adapter `runtimeHooks` (`monotonicNowMillis`, `systemNowMillis`, `sleepMillis`, `randomBytes`) to avoid real host timing/randomness in tests.
 
 # Testing
 

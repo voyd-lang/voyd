@@ -7,6 +7,7 @@ export type {
   DefaultAdapterHost,
   DefaultAdapterOptions,
   DefaultAdapterRegistration,
+  DefaultAdapterRuntimeHooks,
 } from "./adapters/default.js";
 export {
   buildHandlersByLabelSuffix,
@@ -57,5 +58,10 @@ export type {
   RuntimeSchedulerOptions,
   RuntimeStepResult,
 } from "./runtime/scheduler.js";
+export { createDeterministicRuntime } from "./runtime/deterministic-runtime.js";
+export type {
+  DeterministicRuntime,
+  DeterministicRuntimeOptions,
+} from "./runtime/deterministic-runtime.js";
 export { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
 export type { HostRuntimeKind } from "./runtime/environment.js";

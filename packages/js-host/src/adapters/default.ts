@@ -22,10 +22,18 @@ export type DefaultAdapterHost = {
   ) => void;
 };
 
+export type DefaultAdapterRuntimeHooks = {
+  monotonicNowMillis?: () => bigint;
+  systemNowMillis?: () => bigint;
+  sleepMillis?: (ms: number) => Promise<void>;
+  randomBytes?: (length: number) => Uint8Array;
+};
+
 export type DefaultAdapterOptions = {
   runtime?: HostRuntimeKind | "auto";
   onDiagnostic?: (message: string) => void;
   logWriter?: Pick<Console, "trace" | "debug" | "info" | "warn" | "error">;
+  runtimeHooks?: DefaultAdapterRuntimeHooks;
 };
 
 export type DefaultAdapterCapability = {
@@ -47,6 +55,7 @@ type CapabilityContext = {
   runtime: HostRuntimeKind;
   diagnostics: string[];
   logWriter: Pick<Console, "trace" | "debug" | "info" | "warn" | "error">;
+  runtimeHooks: DefaultAdapterRuntimeHooks;
 };
 
 type CapabilityDefinition = {
@@ -410,7 +419,11 @@ const fsCapabilityDefinition: CapabilityDefinition = {
   },
 };
 
-const monotonicNow = (): bigint => {
+const monotonicNow = (runtimeHooks: DefaultAdapterRuntimeHooks): bigint => {
+  const hook = runtimeHooks.monotonicNowMillis;
+  if (hook) {
+    return hook();
+  }
   const perf = globalRecord.performance as { now?: () => number } | undefined;
   if (typeof perf?.now === "function") {
     return BigInt(Math.trunc(perf.now()));
@@ -418,13 +431,22 @@ const monotonicNow = (): bigint => {
   return BigInt(Date.now());
 };
 
+const systemNow = (runtimeHooks: DefaultAdapterRuntimeHooks): bigint => {
+  const hook = runtimeHooks.systemNowMillis;
+  if (hook) {
+    return hook();
+  }
+  return BigInt(Date.now());
+};
+
 const timeCapabilityDefinition: CapabilityDefinition = {
   capability: "timer",
   effectId: TIME_EFFECT_ID,
-  register: async ({ host, runtime, diagnostics }) => {
+  register: async ({ host, runtime, diagnostics, runtimeHooks }) => {
     const entries = opEntries({ host, effectId: TIME_EFFECT_ID });
     if (entries.length === 0) return 0;
-    if (typeof setTimeout !== "function") {
+    const hasSleepHook = typeof runtimeHooks.sleepMillis === "function";
+    if (!hasSleepHook && typeof setTimeout !== "function") {
       return registerUnsupportedHandlers({
         host,
         effectId: TIME_EFFECT_ID,
@@ -441,7 +463,7 @@ const timeCapabilityDefinition: CapabilityDefinition = {
       host,
       effectId: TIME_EFFECT_ID,
       opName: "monotonic_now_millis",
-      handler: ({ tail }) => tail(monotonicNow()),
+      handler: ({ tail }) => tail(monotonicNow(runtimeHooks)),
     });
     implementedOps.add("monotonic_now_millis");
 
@@ -449,7 +471,7 @@ const timeCapabilityDefinition: CapabilityDefinition = {
       host,
       effectId: TIME_EFFECT_ID,
       opName: "system_now_millis",
-      handler: ({ tail }) => tail(BigInt(Date.now())),
+      handler: ({ tail }) => tail(systemNow(runtimeHooks)),
     });
     implementedOps.add("system_now_millis");
 
@@ -459,6 +481,10 @@ const timeCapabilityDefinition: CapabilityDefinition = {
       opName: "sleep_millis",
       handler: async ({ tail }, ms) => {
         const sleepMs = Math.max(0, Number(toI64(ms)));
+        if (runtimeHooks.sleepMillis) {
+          await runtimeHooks.sleepMillis(sleepMs);
+          return tail(hostOk());
+        }
         await new Promise<void>((resolve) => {
           setTimeout(resolve, Math.min(sleepMs, 2_147_483_647));
         });
@@ -553,7 +579,25 @@ const envCapabilityDefinition: CapabilityDefinition = {
   },
 };
 
-const readRandomBytes = (length: number): Uint8Array => {
+const readRandomBytes = ({
+  length,
+  runtimeHooks,
+}: {
+  length: number;
+  runtimeHooks: DefaultAdapterRuntimeHooks;
+}): Uint8Array => {
+  if (runtimeHooks.randomBytes) {
+    const fromHook = runtimeHooks.randomBytes(length);
+    if (fromHook.byteLength < length) {
+      throw new Error(
+        `runtime randomBytes hook returned ${fromHook.byteLength} bytes, expected at least ${length}`
+      );
+    }
+    if (fromHook.byteLength === length) {
+      return fromHook;
+    }
+    return fromHook.subarray(0, length);
+  }
   const crypto = globalRecord.crypto as
     | { getRandomValues: <T extends ArrayBufferView>(array: T) => T }
     | undefined;
@@ -568,12 +612,12 @@ const readRandomBytes = (length: number): Uint8Array => {
 const randomCapabilityDefinition: CapabilityDefinition = {
   capability: "random",
   effectId: RANDOM_EFFECT_ID,
-  register: async ({ host, runtime, diagnostics }) => {
+  register: async ({ host, runtime, diagnostics, runtimeHooks }) => {
     const entries = opEntries({ host, effectId: RANDOM_EFFECT_ID });
     if (entries.length === 0) return 0;
 
     try {
-      readRandomBytes(1);
+      readRandomBytes({ length: 1, runtimeHooks });
     } catch {
       return registerUnsupportedHandlers({
         host,
@@ -592,7 +636,7 @@ const randomCapabilityDefinition: CapabilityDefinition = {
       effectId: RANDOM_EFFECT_ID,
       opName: "next_i64",
       handler: ({ tail }) => {
-        const bytes = readRandomBytes(8);
+        const bytes = readRandomBytes({ length: 8, runtimeHooks });
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
         return tail(view.getBigInt64(0, true));
       },
@@ -606,7 +650,7 @@ const randomCapabilityDefinition: CapabilityDefinition = {
       handler: ({ tail }, lenPayload) => {
         const requested = Math.max(0, toNumberOrUndefined(lenPayload) ?? 0);
         const length = Math.min(Math.trunc(requested), 1_000_000);
-        const bytes = readRandomBytes(length);
+        const bytes = readRandomBytes({ length, runtimeHooks });
         return tail(Array.from(bytes.values()));
       },
     });
@@ -733,6 +777,7 @@ export const registerDefaultHostAdapters = async ({
   const capabilities: DefaultAdapterCapability[] = [];
   let registeredOps = 0;
   const logWriter = options.logWriter ?? console;
+  const runtimeHooks = options.runtimeHooks ?? {};
 
   for (const capability of CAPABILITIES) {
     const count = await capability.register({
@@ -740,6 +785,7 @@ export const registerDefaultHostAdapters = async ({
       runtime,
       diagnostics,
       logWriter,
+      runtimeHooks,
     });
     const hasEffect = opEntries({ host, effectId: capability.effectId }).length > 0;
     if (!hasEffect) {

@@ -244,6 +244,7 @@ continuation call is applied.
 ## Known Implementation Gap
 
 `@voyd/js-host` now implements scheduler-driven ordering, cancellation outcomes,
-and fairness-budget controls. Remaining adapter-level gaps are capability
+fairness-budget controls, and deterministic conformance coverage with a virtual
+clock + controlled queues. Remaining adapter-level gaps are capability
 contracts that are not yet finalized in stdlib (notably fetch/input payload
-schemas), tracked under `V-258`/`V-259`.
+schemas), tracked under `V-260`.
