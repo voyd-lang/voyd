@@ -9,7 +9,16 @@ export type {
   VoydHost,
 } from "@voyd/js-host";
 export {
+  buildHandlerKey,
   buildHandlersByLabelSuffix,
+  parseHandlerKey,
+  registerHandlersByKey,
   registerHandlersByLabelSuffix,
+  resolveEffectOp,
+  resolveSignatureHashForOp,
 } from "@voyd/js-host";
-export type { LabelHandlerMatch } from "@voyd/js-host";
+export type {
+  KeyedHandlerHost,
+  LabelHandlerMatch,
+  ParsedHandlerKey,
+} from "@voyd/js-host";
