@@ -1,19 +1,15 @@
-import type { CompileArtifactsSuccess } from "./compile.js";
-import type { CompileSuccessResult, RunOptions } from "./types.js";
 import {
   buildHandlerKey,
-  createHost,
-  resolveEffectOp,
-  registerHandlers,
-  registerHandlersByLabelSuffix,
-  resolveSignatureHashForOp,
-} from "./host.js";
-import { createTestCollection } from "./tests.js";
-import {
   parseEffectTable,
+  resolveEffectOp,
+  resolveSignatureHashForOp,
   toHostProtocolTable,
   type HostProtocolTable,
 } from "@voyd/js-host";
+import type { CompileArtifactsSuccess } from "./compile.js";
+import { createHost, registerHandlers, registerHandlersByLabelSuffix } from "./host.js";
+import { createTestCollection } from "./tests.js";
+import type { CompileSuccessResult, RunOptions } from "./types.js";
 
 const DEFAULT_EFFECT_TABLE_VERSION = 2;
 

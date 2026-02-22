@@ -6,6 +6,14 @@ export {
 } from "./handlers.js";
 export type { LabelHandlerHost, LabelHandlerMatch } from "./handlers.js";
 export {
+  buildHandlerKey,
+  parseHandlerKey,
+  registerHandlersByKey,
+  resolveEffectOp,
+  resolveSignatureHashForOp,
+} from "./keyed-handlers.js";
+export type { KeyedHandlerHost, ParsedHandlerKey } from "./keyed-handlers.js";
+export {
   parseEffectTable,
   formatSignatureHash,
   normalizeSignatureHash,
