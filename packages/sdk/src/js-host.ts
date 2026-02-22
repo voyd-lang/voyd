@@ -22,12 +22,19 @@ export type {
   VoydRunHandle,
 } from "@voyd/js-host";
 export {
+  buildHandlerKey,
   buildHandlersByLabelSuffix,
   createRuntimeScheduler,
+  parseHandlerKey,
+  registerHandlersByKey,
   registerHandlersByLabelSuffix,
+  resolveEffectOp,
+  resolveSignatureHashForOp,
 } from "@voyd/js-host";
 export type {
+  KeyedHandlerHost,
   LabelHandlerMatch,
+  ParsedHandlerKey,
   RuntimeSchedulerOptions,
   RuntimeStepResult,
 } from "@voyd/js-host";

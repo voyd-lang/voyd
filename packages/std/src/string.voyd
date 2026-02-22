@@ -5,6 +5,7 @@ pub use self::errors::{ ParseFloatError, ParseIntError, Utf8Error }
 pub use self::index::StringIndex
 pub use self::type::{ CharSet, String, StringSlice }
 
+@intrinsic(name: "__string_new", uses_signature: true)
 /// Builds a string from owned UTF-8 byte storage without validation.
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   string_type::new_string(from_bytes)
