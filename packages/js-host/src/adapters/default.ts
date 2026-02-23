@@ -9,6 +9,7 @@ const RANDOM_EFFECT_ID = "std::random::Random";
 const LOG_EFFECT_ID = "std::log::Log";
 const FETCH_EFFECT_ID = "std::fetch::Fetch";
 const INPUT_EFFECT_ID = "std::input::Input";
+const WEB_CRYPTO_MAX_BYTES_PER_CALL = 65_536;
 
 type EffectOp = HostProtocolTable["ops"][number];
 
@@ -538,12 +539,17 @@ const envCapabilityDefinition: CapabilityDefinition = {
       opName: "get",
       handler: ({ tail }, keyPayload) => {
         const key = toStringOrUndefined(keyPayload) ?? "";
-        const value = processEnv
-          ? processEnv[key]
-          : denoEnv?.get
-            ? denoEnv.get(key)
-            : undefined;
-        return tail(value ?? null);
+        try {
+          const value = processEnv
+            ? processEnv[key]
+            : denoEnv?.get
+              ? denoEnv.get(key)
+              : undefined;
+          return tail(value ?? null);
+        } catch {
+          // Deno can throw when env access is denied; treat as unavailable key.
+          return tail(null);
+        }
       },
     });
     implementedOps.add("get");
@@ -605,7 +611,14 @@ const readRandomBytes = ({
     throw new Error("crypto.getRandomValues is unavailable");
   }
   const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
+  for (
+    let offset = 0;
+    offset < length;
+    offset += WEB_CRYPTO_MAX_BYTES_PER_CALL
+  ) {
+    const end = Math.min(offset + WEB_CRYPTO_MAX_BYTES_PER_CALL, length);
+    crypto.getRandomValues(bytes.subarray(offset, end));
+  }
   return bytes;
 };
 

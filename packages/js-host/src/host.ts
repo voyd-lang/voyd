@@ -189,6 +189,8 @@ const effectfulExportNameFor = (entryName: string): string =>
   entryName.endsWith("_effectful") ? entryName : `${entryName}_effectful`;
 
 const handleTableBasePtr = (bufferSize: number): number => bufferSize * 2;
+const alignTo = (value: number, alignment: number): number =>
+  Math.ceil(value / alignment) * alignment;
 
 const registerHandlerInternal = ({
   handler,
@@ -285,6 +287,26 @@ export const createVoydHost = async ({
     ...scheduler,
     scheduleTask: scheduler?.scheduleTask ?? scheduleTaskForRuntime(runtime),
   });
+  const effectRunBufferBasePtr = alignTo(
+    handleTableBasePtr(bufferSize) + parsedTable.ops.length * 4,
+    8
+  );
+  const freeEffectRunBufferPtrs: number[] = [];
+  let nextEffectRunBufferPtr = effectRunBufferBasePtr;
+
+  const acquireEffectRunBufferPtr = (): number => {
+    const recycled = freeEffectRunBufferPtrs.pop();
+    if (recycled !== undefined) {
+      return recycled;
+    }
+    const ptr = nextEffectRunBufferPtr;
+    nextEffectRunBufferPtr += bufferSize;
+    return ptr;
+  };
+
+  const releaseEffectRunBufferPtr = (bufferPtr: number): void => {
+    freeEffectRunBufferPtrs.push(bufferPtr);
+  };
 
   let initialized = false;
   const handlersByOpIndex: Array<EffectHandler | undefined> = Array.from({
@@ -415,14 +437,15 @@ export const createVoydHost = async ({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
+    const bufferPtr = acquireEffectRunBufferPtr();
     ensureMemoryCapacity({
       memory: msgpackMemory,
-      requiredBytes: bufferSize,
+      requiredBytes: bufferPtr + bufferSize,
       label: LINEAR_MEMORY_EXPORT,
     });
 
-    return runtimeScheduler.startRun<T>({
-      start: () => entry(0, bufferSize),
+    const run = runtimeScheduler.startRun<T>({
+      start: () => entry(bufferPtr, bufferSize),
       step: (result) =>
         continueEffectLoopStep<T>({
           result,
@@ -433,10 +456,14 @@ export const createVoydHost = async ({
           table: parsedTable,
           handlersByOpIndex,
           msgpackMemory,
-          bufferPtr: 0,
+          bufferPtr,
           bufferSize,
         }),
     });
+    void run.outcome.finally(() => {
+      releaseEffectRunBufferPtr(bufferPtr);
+    });
+    return run;
   };
 
   const runManaged = <T = unknown>(

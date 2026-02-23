@@ -9,6 +9,7 @@ import {
   type EffectContinuation,
   type EffectHandler,
 } from "@voyd/sdk";
+import { createVoydHost } from "@voyd/sdk/js-host";
 
 const EFFECT_SOURCE = `use std::msgpack::self as __std_msgpack
 use std::string::self as __std_string
@@ -27,12 +28,12 @@ const repoRoot = path.resolve(sdkTestRoot, "../../../../");
 const expectCompileSuccess = (
   result: CompileResult,
 ): Extract<CompileResult, { success: true }> => {
-  expect(result.success).toBe(true);
   if (!result.success) {
     throw new Error(
       result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
     );
   }
+  expect(result.success).toBe(true);
   return result;
 };
 
@@ -381,5 +382,41 @@ pub fn main(): Env -> i32
         process.env[envKey] = original;
       }
     }
+  });
+
+  it("isolates concurrent managed runs so effect payloads do not race", async () => {
+    const sdk = createSdk();
+    const source = `use std::msgpack::self as __std_msgpack
+
+@effect(id: "com.example.async")
+eff Async
+  await(resume, value: i32) -> i32
+
+pub fn main() -> i32
+  0
+
+pub fn first(): Async -> i32
+  Async::await(11)
+
+pub fn second(): Async -> i32
+  Async::await(22)
+`;
+    const result = expectCompileSuccess(await sdk.compile({ source }));
+    const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      defaultAdapters: false,
+    });
+    host.registerHandler(op.effectId, op.opId, op.signatureHash, async ({ resume }, value) => {
+      await Promise.resolve();
+      return resume(value);
+    });
+    host.initEffects();
+
+    const left = host.runManaged<number>("first");
+    const right = host.runManaged<number>("second");
+
+    await expect(left.outcome).resolves.toEqual({ kind: "value", value: 11 });
+    await expect(right.outcome).resolves.toEqual({ kind: "value", value: 22 });
   });
 });

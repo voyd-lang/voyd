@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EffectContinuation,
   EffectContinuationCall,
@@ -85,6 +85,10 @@ describe("registerDefaultHostAdapters", () => {
     } else {
       process.env[envKey] = originalEnvValue;
     }
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("registers node env handlers that set and read values", async () => {
@@ -199,5 +203,68 @@ describe("registerDefaultHostAdapters", () => {
       /Default fs adapter is unavailable on browser/i
     );
     expect(diagnostics.some((message) => message.includes("unsupported fs"))).toBe(true);
+  });
+
+  it("chunks browser random fills to avoid WebCrypto quota errors", async () => {
+    const table = buildTable([
+      { effectId: "std::random::Random", opName: "fill_bytes", opId: 0 },
+    ]);
+    const chunkSizes: number[] = [];
+    vi.stubGlobal("crypto", {
+      getRandomValues: <T extends ArrayBufferView>(array: T): T => {
+        chunkSizes.push(array.byteLength);
+        const bytes = new Uint8Array(
+          array.buffer,
+          array.byteOffset,
+          array.byteLength
+        );
+        bytes.fill(7);
+        return array;
+      },
+    });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "browser" },
+    });
+    chunkSizes.length = 0;
+
+    const result = await getHandler("std::random::Random", "fill_bytes")(
+      tailContinuation,
+      70_000
+    );
+    expect(result.kind).toBe("tail");
+    expect(Array.isArray(result.value)).toBe(true);
+    expect((result.value as unknown[]).length).toBe(70_000);
+    expect(chunkSizes).toEqual([65_536, 4_464]);
+  });
+
+  it("returns null for denied deno env reads", async () => {
+    const table = buildTable([
+      { effectId: "std::env::Env", opName: "get", opId: 0 },
+      { effectId: "std::env::Env", opName: "set", opId: 1 },
+    ]);
+    vi.stubGlobal("Deno", {
+      env: {
+        get: () => {
+          throw new Error("PermissionDenied");
+        },
+        set: () => {},
+      },
+    });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "deno" },
+    });
+
+    const result = await getHandler("std::env::Env", "get")(
+      tailContinuation,
+      "HOME"
+    );
+    expect(result.kind).toBe("tail");
+    expect(result.value).toBeNull();
   });
 });
