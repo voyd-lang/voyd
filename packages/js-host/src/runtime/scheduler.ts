@@ -10,10 +10,16 @@ export type RuntimeSchedulerOptions = {
 
 export type RuntimeStepResult<T = unknown> =
   | { kind: "next"; result: unknown }
+  | { kind: "aborted" }
   | { kind: "value"; value: T };
 
+export type RuntimeStepContext = {
+  isCancelled: () => boolean;
+};
+
 type RuntimeStep<T> = (
-  result: unknown
+  result: unknown,
+  context: RuntimeStepContext
 ) => RuntimeStepResult<T> | Promise<RuntimeStepResult<T>>;
 
 type ActiveRun = {
@@ -100,6 +106,9 @@ export const createRuntimeScheduler = ({
         finalizeRun(run, { kind: "failed", error: toError(event.error) });
         continue;
       }
+      if (event.result.kind === "aborted") {
+        continue;
+      }
       if (event.result.kind === "value") {
         finalizeRun(run, { kind: "value", value: event.result.value });
         continue;
@@ -115,7 +124,11 @@ export const createRuntimeScheduler = ({
     run.status = "waiting";
     let pending: Promise<RuntimeStepResult<unknown>>;
     try {
-      pending = Promise.resolve(run.step(run.result));
+      pending = Promise.resolve(
+        run.step(run.result, {
+          isCancelled: () => run.status === "terminal",
+        })
+      );
     } catch (error) {
       finalizeRun(run, { kind: "failed", error: toError(error) });
       return;

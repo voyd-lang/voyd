@@ -446,7 +446,7 @@ export const createVoydHost = async ({
 
     const run = runtimeScheduler.startRun<T>({
       start: () => entry(bufferPtr, bufferSize),
-      step: (result) =>
+      step: (result, context) =>
         continueEffectLoopStep<T>({
           result,
           effectStatus,
@@ -458,6 +458,7 @@ export const createVoydHost = async ({
           msgpackMemory,
           bufferPtr,
           bufferSize,
+          shouldContinue: () => !context.isCancelled(),
         }),
     });
     void run.outcome.finally(() => {

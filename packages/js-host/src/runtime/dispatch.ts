@@ -44,6 +44,7 @@ const invalidResumeHandlerMessage = (label: string): string =>
 
 export type EffectLoopStepResult<T = unknown> =
   | { kind: "next"; result: unknown }
+  | { kind: "aborted" }
   | { kind: "value"; value: T };
 
 export const continueEffectLoopStep = async <T = unknown>({
@@ -57,6 +58,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   msgpackMemory,
   bufferPtr,
   bufferSize,
+  shouldContinue = () => true,
 }: {
   result: unknown;
   effectStatus: CallableFunction;
@@ -68,6 +70,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   msgpackMemory: WebAssembly.Memory;
   bufferPtr: number;
   bufferSize: number;
+  shouldContinue?: () => boolean;
 }): Promise<EffectLoopStepResult<T>> => {
   const status = effectStatus(result) as number;
   const payloadLength = effectLen(result) as number;
@@ -98,6 +101,9 @@ export const continueEffectLoopStep = async <T = unknown>({
       continuation,
       ...(decodedEffect.args ?? [])
     );
+    if (!shouldContinue()) {
+      return { kind: "aborted" };
+    }
     if (!isEffectContinuationCall(handlerResult)) {
       throw new Error(nonReturningHandlerMessage(opEntry.label));
     }
@@ -175,6 +181,9 @@ export const runEffectLoop = async <T = unknown>({
     });
     if (stepResult.kind === "value") {
       return stepResult.value;
+    }
+    if (stepResult.kind === "aborted") {
+      throw new Error("effect loop step aborted outside scheduler context");
     }
     result = stepResult.result;
   }

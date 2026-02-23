@@ -73,6 +73,40 @@ describe("createRuntimeScheduler", () => {
     });
   });
 
+  it("exposes cancellation state to in-flight steps", async () => {
+    const runtime = createDeterministicRuntime();
+    const scheduler = createRuntimeScheduler({
+      scheduleTask: runtime.scheduleTask,
+    });
+    let resolvePending:
+      | ((result: { kind: "aborted" } | { kind: "value"; value: number }) => void)
+      | undefined;
+    let sawCancelled = false;
+
+    const run = scheduler.startRun<number>({
+      start: () => 0,
+      step: (_state, context) =>
+        new Promise((resolve) => {
+          resolvePending = (result) => {
+            sawCancelled = context.isCancelled();
+            resolve(result);
+          };
+        }),
+    });
+
+    await runtime.runUntilIdle();
+
+    expect(run.cancel("stop")).toBe(true);
+    resolvePending?.({ kind: "aborted" });
+    await runtime.runUntilIdle();
+
+    expect(sawCancelled).toBe(true);
+    await expect(run.outcome).resolves.toEqual({
+      kind: "cancelled",
+      reason: "stop",
+    });
+  });
+
   it("reports failures through outcome and onRunFailed callback", async () => {
     const runtime = createDeterministicRuntime();
     const onRunFailed = vi.fn();

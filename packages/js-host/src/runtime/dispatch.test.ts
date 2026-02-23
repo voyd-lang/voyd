@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { EffectOpRequest } from "../effect-op.js";
 import type { ParsedEffectOp, ParsedEffectTable } from "../protocol/table.js";
 import type { EffectHandler } from "../protocol/types.js";
-import { runEffectLoop } from "./dispatch.js";
+import { continueEffectLoopStep, runEffectLoop } from "./dispatch.js";
 import { EFFECT_RESULT_STATUS, RESUME_KIND } from "./constants.js";
 
 const MSGPACK_OPTS = { useBigInt64: true } as const;
@@ -346,5 +346,43 @@ describe("runEffectLoop", () => {
       })
     ).rejects.toThrow(/must return tail/i);
     expect(tailRuntime.resumeCalls()).toBe(0);
+  });
+
+  it("aborts late handler completions without resuming wasm when run is cancelled", async () => {
+    const op = createParsedOp({ resumeKind: RESUME_KIND.resume });
+    const table = createParsedTable({ op });
+    const runtime = createRuntimeDriver({
+      entryResult: effectResult({
+        request: createEffectRequest({ args: [1], resumeKind: RESUME_KIND.resume }),
+        cont: Symbol("cancelled-cont"),
+      }),
+      continuations: new Map(),
+    });
+    let resolveHandler: ((value: number) => void) | undefined;
+
+    const stepPromise = continueEffectLoopStep<number>({
+      result: runtime.entry(),
+      effectStatus: runtime.effectStatus,
+      effectCont: runtime.effectCont,
+      effectLen: runtime.effectLen,
+      resumeEffectful: runtime.resumeEffectful,
+      table,
+      handlersByOpIndex: [
+        ({ resume }, arg) =>
+          new Promise((resolve) => {
+            resolveHandler = (value: number) => resolve(resume(value));
+            expect(arg).toBe(1);
+          }),
+      ],
+      msgpackMemory: runtime.msgpackMemory,
+      bufferPtr: BUFFER_PTR,
+      bufferSize: BUFFER_SIZE,
+      shouldContinue: () => false,
+    });
+
+    resolveHandler?.(2);
+    const result = await stepPromise;
+    expect(result.kind).toBe("aborted");
+    expect(runtime.resumeCalls()).toBe(0);
   });
 });
