@@ -107,6 +107,12 @@ export const createRuntimeScheduler = ({
         continue;
       }
       if (event.result.kind === "aborted") {
+        finalizeRun(run, {
+          kind: "failed",
+          error: new Error(
+            `runtime step for ${run.id} reported aborted while run was still active`
+          ),
+        });
         continue;
       }
       if (event.result.kind === "value") {

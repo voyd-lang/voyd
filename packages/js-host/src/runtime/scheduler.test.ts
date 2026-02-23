@@ -134,6 +134,31 @@ describe("createRuntimeScheduler", () => {
     expect(onRunFailed.mock.calls[0]?.[1]).toBe(run.id);
   });
 
+  it("fails fast when an active step reports aborted", async () => {
+    const runtime = createDeterministicRuntime();
+    const onRunFailed = vi.fn();
+    const scheduler = createRuntimeScheduler({
+      scheduleTask: runtime.scheduleTask,
+      onRunFailed,
+    });
+
+    const run = scheduler.startRun<number>({
+      start: () => 0,
+      step: () => ({ kind: "aborted" }),
+    });
+
+    await runtime.runUntilIdle();
+
+    const outcome = await run.outcome;
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind !== "failed") {
+      throw new Error("expected failed outcome");
+    }
+    expect(outcome.error.message).toContain("reported aborted");
+    expect(onRunFailed).toHaveBeenCalledTimes(1);
+    expect(onRunFailed.mock.calls[0]?.[1]).toBe(run.id);
+  });
+
   it("does not run timers unless virtual time advances", async () => {
     const runtime = createDeterministicRuntime();
     const scheduler = createRuntimeScheduler({
