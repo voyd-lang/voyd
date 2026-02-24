@@ -205,6 +205,29 @@ describe("registerDefaultHostAdapters", () => {
     expect(diagnostics.some((message) => message.includes("unsupported fs"))).toBe(true);
   });
 
+  it("probes node fs when runtime is forced to node", async () => {
+    const table = buildTable([
+      { effectId: "std::fs::Fs", opName: "read_string", opId: 0 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "std::fs::Fs")
+        ?.supported
+    ).toBe(true);
+
+    const result = await getHandler("std::fs::Fs", "read_string")(
+      tailContinuation,
+      "/this/path/does/not/exist"
+    );
+    expect(result.kind).toBe("tail");
+    expect(result.value).toMatchObject({ ok: false });
+  });
+
   it("chunks browser random fills to avoid WebCrypto quota errors", async () => {
     const table = buildTable([
       { effectId: "std::random::Random", opName: "fill_bytes", opId: 0 },

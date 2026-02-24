@@ -227,7 +227,6 @@ const registerMissingOpHandlers = ({
 };
 
 const maybeNodeFs = async (): Promise<NodeFsPromises | undefined> => {
-  if (detectHostRuntime() !== "node") return undefined;
   try {
     const importModule = new Function(
       "specifier",
@@ -237,7 +236,12 @@ const maybeNodeFs = async (): Promise<NodeFsPromises | undefined> => {
     const mod = await importModule(nodeFsSpecifier);
     return mod as unknown as NodeFsPromises;
   } catch {
-    return undefined;
+    try {
+      const mod = await import("node:fs/promises");
+      return mod as unknown as NodeFsPromises;
+    } catch {
+      return undefined;
+    }
   }
 };
 
