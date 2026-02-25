@@ -13,6 +13,8 @@ instantiations.
 
 See `docs/proposals/effect-capabilities-and-continuations.md` for the overall
 design and compiler changes.
+See `docs/specs/runtime-event-loop.md` for host-independent event loop and
+effect execution semantics.
 See `docs/specs/host-boundary-dto-compatibility.md` for the payload type
 compatibility contract and wrapper naming guidance.
 

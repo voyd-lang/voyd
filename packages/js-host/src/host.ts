@@ -1,7 +1,9 @@
 import type {
   EffectHandler,
   HostProtocolTable,
+  RunOutcome,
   SignatureHash,
+  VoydRunHandle,
 } from "./protocol/types.js";
 import { decode, encode } from "@msgpack/msgpack";
 import { buildEffectOpKey, buildParsedEffectOpMap } from "./effect-op.js";
@@ -14,16 +16,28 @@ import {
   LINEAR_MEMORY_EXPORT,
   MIN_EFFECT_BUFFER_SIZE,
 } from "./runtime/constants.js";
-import { runEffectLoop } from "./runtime/dispatch.js";
+import { continueEffectLoopStep } from "./runtime/dispatch.js";
 import { ensureMemoryCapacity } from "./runtime/memory.js";
 import type { ParsedEffectOp, ParsedEffectTable } from "./protocol/table.js";
 import { registerHandlersByLabelSuffix } from "./handlers.js";
 import { parseExportAbi } from "./protocol/export-abi.js";
+import {
+  createRuntimeScheduler,
+  type RuntimeSchedulerOptions,
+} from "./runtime/scheduler.js";
+import {
+  registerDefaultHostAdapters,
+  type DefaultAdapterOptions,
+  type DefaultAdapterRegistration,
+} from "./adapters/default.js";
+import { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
   imports?: WebAssembly.Imports;
   bufferSize?: number;
+  scheduler?: RuntimeSchedulerOptions;
+  defaultAdapters?: boolean | DefaultAdapterOptions;
 };
 
 export type VoydHost = {
@@ -38,13 +52,42 @@ export type VoydHost = {
   registerHandlersByLabelSuffix: (
     handlersByLabelSuffix: Record<string, EffectHandler>
   ) => number;
+  registerDefaultAdapters: (
+    options?: DefaultAdapterOptions
+  ) => Promise<DefaultAdapterRegistration>;
   initEffects: () => void;
   runPure: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
+  runEffectfulManaged: <T = unknown>(
+    entryName: string,
+    args?: unknown[]
+  ) => VoydRunHandle<T>;
+  runManaged: <T = unknown>(entryName: string, args?: unknown[]) => VoydRunHandle<T>;
   runEffectful: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
   run: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
 };
 
 const MSGPACK_OPTS = { useBigInt64: true } as const;
+let detachedRunCounter = 1;
+
+const toError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
+
+export class CancelledRunError extends Error {
+  readonly reason?: unknown;
+
+  constructor(reason?: unknown) {
+    super("Run cancelled");
+    this.name = "CancelledRunError";
+    this.reason = reason;
+  }
+}
+
+const unwrapRunOutcome = async <T>(outcome: Promise<RunOutcome<T>>): Promise<T> => {
+  const settled = await outcome;
+  if (settled.kind === "value") return settled.value;
+  if (settled.kind === "failed") throw settled.error;
+  throw new CancelledRunError(settled.reason);
+};
 
 const createVoydMathImports = (): Record<string, CallableFunction> => ({
   sin: Math.sin,
@@ -146,6 +189,8 @@ const effectfulExportNameFor = (entryName: string): string =>
   entryName.endsWith("_effectful") ? entryName : `${entryName}_effectful`;
 
 const handleTableBasePtr = (bufferSize: number): number => bufferSize * 2;
+const alignTo = (value: number, alignment: number): number =>
+  Math.ceil(value / alignment) * alignment;
 
 const registerHandlerInternal = ({
   handler,
@@ -223,6 +268,8 @@ export const createVoydHost = async ({
   wasm,
   imports,
   bufferSize = MIN_EFFECT_BUFFER_SIZE,
+  scheduler,
+  defaultAdapters = true,
 }: HostInitOptions): Promise<VoydHost> => {
   const module = toModule(wasm);
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
@@ -235,6 +282,31 @@ export const createVoydHost = async ({
 
   const handlersByKey = new Map<string, EffectHandler>();
   const opByKey = buildParsedEffectOpMap({ ops: parsedTable.ops });
+  const runtime = detectHostRuntime();
+  const runtimeScheduler = createRuntimeScheduler({
+    ...scheduler,
+    scheduleTask: scheduler?.scheduleTask ?? scheduleTaskForRuntime(runtime),
+  });
+  const effectRunBufferBasePtr = alignTo(
+    handleTableBasePtr(bufferSize) + parsedTable.ops.length * 4,
+    8
+  );
+  const freeEffectRunBufferPtrs: number[] = [];
+  let nextEffectRunBufferPtr = effectRunBufferBasePtr;
+
+  const acquireEffectRunBufferPtr = (): number => {
+    const recycled = freeEffectRunBufferPtrs.pop();
+    if (recycled !== undefined) {
+      return recycled;
+    }
+    const ptr = nextEffectRunBufferPtr;
+    nextEffectRunBufferPtr += bufferSize;
+    return ptr;
+  };
+
+  const releaseEffectRunBufferPtr = (bufferPtr: number): void => {
+    freeEffectRunBufferPtrs.push(bufferPtr);
+  };
 
   let initialized = false;
   const handlersByOpIndex: Array<EffectHandler | undefined> = Array.from({
@@ -329,10 +401,10 @@ export const createVoydHost = async ({
     return (entry as (...params: unknown[]) => T)(...args);
   };
 
-  const runEffectful = async <T = unknown>(
+  const runEffectfulManaged = <T = unknown>(
     entryName: string,
     args: unknown[] = []
-  ): Promise<T> => {
+  ): VoydRunHandle<T> => {
     if (args.length > 0) {
       throw new Error("effectful exports do not accept arguments yet");
     }
@@ -365,36 +437,72 @@ export const createVoydHost = async ({
       instance,
       name: LINEAR_MEMORY_EXPORT,
     });
+    const bufferPtr = acquireEffectRunBufferPtr();
     ensureMemoryCapacity({
       memory: msgpackMemory,
-      requiredBytes: bufferSize,
+      requiredBytes: bufferPtr + bufferSize,
       label: LINEAR_MEMORY_EXPORT,
     });
 
-    return runEffectLoop<T>({
-      entry,
-      effectStatus,
-      effectCont,
-      effectLen,
-      resumeEffectful,
-      table: parsedTable,
-      handlersByOpIndex,
-      msgpackMemory,
-      bufferPtr: 0,
-      bufferSize,
+    const run = runtimeScheduler.startRun<T>({
+      start: () => entry(bufferPtr, bufferSize),
+      step: (result, context) =>
+        continueEffectLoopStep<T>({
+          result,
+          effectStatus,
+          effectCont,
+          effectLen,
+          resumeEffectful,
+          table: parsedTable,
+          handlersByOpIndex,
+          msgpackMemory,
+          bufferPtr,
+          bufferSize,
+          shouldContinue: () => !context.isCancelled(),
+        }),
     });
+    void run.outcome.finally(() => {
+      releaseEffectRunBufferPtr(bufferPtr);
+    });
+    return run;
+  };
+
+  const runManaged = <T = unknown>(
+    entryName: string,
+    args: unknown[] = []
+  ): VoydRunHandle<T> => {
+    const effectfulName = effectfulExportNameFor(entryName);
+    const hasEffectful = typeof instance.exports[effectfulName] === "function";
+    if (hasEffectful) {
+      return runEffectfulManaged<T>(entryName, args);
+    }
+
+    const id = `detached_${detachedRunCounter++}`;
+    const outcome = runPure<T>(entryName, args)
+      .then<RunOutcome<T>>((value) => ({ kind: "value", value }))
+      .catch<RunOutcome<T>>((error) => ({ kind: "failed", error: toError(error) }));
+    return {
+      id,
+      outcome,
+      cancel: () => false,
+    };
+  };
+
+  const runEffectful = async <T = unknown>(
+    entryName: string,
+    args: unknown[] = []
+  ): Promise<T> => {
+    return unwrapRunOutcome(runEffectfulManaged<T>(entryName, args).outcome);
   };
 
   const run = async <T = unknown>(
     entryName: string,
     args: unknown[] = []
   ): Promise<T> => {
-    const effectfulName = effectfulExportNameFor(entryName);
-    const hasEffectful = typeof instance.exports[effectfulName] === "function";
-    return hasEffectful ? runEffectful<T>(entryName, args) : runPure<T>(entryName, args);
+    return unwrapRunOutcome(runManaged<T>(entryName, args).outcome);
   };
 
-  return {
+  const host: VoydHost = {
     table,
     instance,
     registerHandler,
@@ -403,9 +511,27 @@ export const createVoydHost = async ({
         host: { table, registerHandler },
         handlersByLabelSuffix,
       }),
+    registerDefaultAdapters: (options = {}) =>
+      registerDefaultHostAdapters({
+        host: { table, registerHandler },
+        options: {
+          ...options,
+          effectBufferSize: bufferSize,
+        },
+      }),
     initEffects,
     runPure,
+    runEffectfulManaged,
+    runManaged,
     runEffectful,
     run,
   };
+
+  if (defaultAdapters !== false) {
+    await host.registerDefaultAdapters(
+      typeof defaultAdapters === "object" ? defaultAdapters : {}
+    );
+  }
+
+  return host;
 };

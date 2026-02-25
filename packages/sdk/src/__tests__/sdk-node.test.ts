@@ -9,6 +9,7 @@ import {
   type EffectContinuation,
   type EffectHandler,
 } from "@voyd/sdk";
+import { createVoydHost } from "@voyd/sdk/js-host";
 
 const EFFECT_SOURCE = `use std::msgpack::self as __std_msgpack
 use std::string::self as __std_string
@@ -27,12 +28,12 @@ const repoRoot = path.resolve(sdkTestRoot, "../../../../");
 const expectCompileSuccess = (
   result: CompileResult,
 ): Extract<CompileResult, { success: true }> => {
-  expect(result.success).toBe(true);
   if (!result.success) {
     throw new Error(
       result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
     );
   }
+  expect(result.success).toBe(true);
   return result;
 };
 
@@ -337,5 +338,85 @@ pub fn main() -> i32
       handlers,
     });
     expect(output).toBe(43);
+  });
+
+  it("runs std env effects with default host adapters", async () => {
+    const envKey = "VOYD_SDK_DEFAULT_ADAPTER_TEST";
+    const original = process.env[envKey];
+    const sdk = createSdk();
+    const source = `use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::string::type::String
+
+@effect(id: "std::env::Env")
+eff Env
+  get(tail, key: MsgPack) -> MsgPack
+  set(tail, payload: MsgPack) -> MsgPack
+
+pub fn main(): Env -> i32
+  let set_payload = HostDto::init()
+    .set("key", msgpack::make_string("${envKey}"))
+    .set("value", msgpack::make_string("41"))
+    .pack()
+  let _ = Env::set(set_payload)
+  let payload = Env::get(msgpack::make_string("${envKey}"))
+  payload.match(active)
+    String:
+      if active.equals("41") then:
+        41
+      else:
+        -2
+    else:
+      -3
+`;
+
+    try {
+      const result = expectCompileSuccess(await sdk.compile({ source }));
+      const output = await result.run<number>({ entryName: "main" });
+      expect(output).toBe(41);
+    } finally {
+      if (original === undefined) {
+        delete process.env[envKey];
+      } else {
+        process.env[envKey] = original;
+      }
+    }
+  });
+
+  it("isolates concurrent managed runs so effect payloads do not race", async () => {
+    const sdk = createSdk();
+    const source = `use std::msgpack::self as __std_msgpack
+
+@effect(id: "com.example.async")
+eff Async
+  await(resume, value: i32) -> i32
+
+pub fn main() -> i32
+  0
+
+pub fn first(): Async -> i32
+  Async::await(11)
+
+pub fn second(): Async -> i32
+  Async::await(22)
+`;
+    const result = expectCompileSuccess(await sdk.compile({ source }));
+    const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      defaultAdapters: false,
+    });
+    host.registerHandler(op.effectId, op.opId, op.signatureHash, async ({ resume }, value) => {
+      await Promise.resolve();
+      return resume(value);
+    });
+    host.initEffects();
+
+    const left = host.runManaged<number>("first");
+    const right = host.runManaged<number>("second");
+
+    await expect(left.outcome).resolves.toEqual({ kind: "value", value: 11 });
+    await expect(right.outcome).resolves.toEqual({ kind: "value", value: 22 });
   });
 });
