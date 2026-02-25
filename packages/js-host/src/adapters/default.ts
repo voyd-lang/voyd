@@ -10,6 +10,8 @@ const LOG_EFFECT_ID = "std::log::Log";
 const FETCH_EFFECT_ID = "std::fetch::Fetch";
 const INPUT_EFFECT_ID = "std::input::Input";
 const WEB_CRYPTO_MAX_BYTES_PER_CALL = 65_536;
+const MAX_TIMER_DELAY_MILLIS = 2_147_483_647;
+const MAX_TIMER_DELAY_MILLIS_BIGINT = 2_147_483_647n;
 
 type EffectOp = HostProtocolTable["ops"][number];
 
@@ -118,6 +120,34 @@ const normalizeByte = (value: unknown): number => {
     return Number(((value % 256n) + 256n) % 256n);
   }
   return 0;
+};
+
+const toNonNegativeI64 = (value: unknown): bigint => {
+  const normalized = toI64(value);
+  return normalized > 0n ? normalized : 0n;
+};
+
+const sleepInChunks = async ({
+  totalMillis,
+  sleep,
+}: {
+  totalMillis: bigint;
+  sleep: (milliseconds: number) => Promise<void>;
+}): Promise<void> => {
+  if (totalMillis === 0n) {
+    await sleep(0);
+    return;
+  }
+
+  let remaining = totalMillis;
+  while (remaining > 0n) {
+    const chunkMillis =
+      remaining > MAX_TIMER_DELAY_MILLIS_BIGINT
+        ? MAX_TIMER_DELAY_MILLIS
+        : Number(remaining);
+    await sleep(chunkMillis);
+    remaining -= BigInt(chunkMillis);
+  }
 };
 
 const toPath = (value: unknown): string => {
@@ -485,13 +515,17 @@ const timeCapabilityDefinition: CapabilityDefinition = {
       effectId: TIME_EFFECT_ID,
       opName: "sleep_millis",
       handler: async ({ tail }, ms) => {
-        const sleepMs = Math.max(0, Number(toI64(ms)));
-        if (runtimeHooks.sleepMillis) {
-          await runtimeHooks.sleepMillis(sleepMs);
-          return tail(hostOk());
-        }
-        await new Promise<void>((resolve) => {
-          setTimeout(resolve, Math.min(sleepMs, 2_147_483_647));
+        const sleepMillis = toNonNegativeI64(ms);
+        const sleepHook = runtimeHooks.sleepMillis;
+        const sleepChunk = sleepHook
+          ? (milliseconds: number) => sleepHook(milliseconds)
+          : (milliseconds: number) =>
+              new Promise<void>((resolve) => {
+                setTimeout(resolve, milliseconds);
+              });
+        await sleepInChunks({
+          totalMillis: sleepMillis,
+          sleep: sleepChunk,
         });
         return tail(hostOk());
       },

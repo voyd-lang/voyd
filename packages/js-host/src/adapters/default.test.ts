@@ -180,6 +180,36 @@ describe("registerDefaultHostAdapters", () => {
     expect(info).toHaveBeenCalled();
   });
 
+  it("chains timers for long sleep durations", async () => {
+    const table = buildTable([
+      { effectId: "std::time::Time", opName: "sleep_millis", opId: 0 },
+    ]);
+    const delays: number[] = [];
+    const setTimeoutSpy = vi.fn((task: () => void, delay?: number) => {
+      delays.push(delay ?? 0);
+      task();
+      return 0;
+    });
+    vi.stubGlobal("setTimeout", setTimeoutSpy);
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    const longSleep =
+      2_147_483_647n + 2_147_483_647n + 123n;
+    const result = await getHandler("std::time::Time", "sleep_millis")(
+      tailContinuation,
+      longSleep
+    );
+
+    expect(result.kind).toBe("tail");
+    expect(result.value).toMatchObject({ ok: true });
+    expect(delays).toEqual([2_147_483_647, 2_147_483_647, 123]);
+  });
+
   it("registers actionable unsupported handlers on browser for fs", async () => {
     const table = buildTable([
       { effectId: "std::fs::Fs", opName: "read_string", opId: 0 },
