@@ -660,6 +660,20 @@ const readRandomBytes = ({
   return bytes;
 };
 
+const hasRandomByteSource = ({
+  runtimeHooks,
+}: {
+  runtimeHooks: DefaultAdapterRuntimeHooks;
+}): boolean => {
+  if (typeof runtimeHooks.randomBytes === "function") {
+    return true;
+  }
+  const crypto = globalRecord.crypto as
+    | { getRandomValues?: <T extends ArrayBufferView>(array: T) => T }
+    | undefined;
+  return typeof crypto?.getRandomValues === "function";
+};
+
 const randomCapabilityDefinition: CapabilityDefinition = {
   capability: "random",
   effectId: RANDOM_EFFECT_ID,
@@ -667,9 +681,7 @@ const randomCapabilityDefinition: CapabilityDefinition = {
     const entries = opEntries({ host, effectId: RANDOM_EFFECT_ID });
     if (entries.length === 0) return 0;
 
-    try {
-      readRandomBytes({ length: 1, runtimeHooks });
-    } catch {
+    if (!hasRandomByteSource({ runtimeHooks })) {
       return registerUnsupportedHandlers({
         host,
         effectId: RANDOM_EFFECT_ID,

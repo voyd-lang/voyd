@@ -293,6 +293,55 @@ describe("registerDefaultHostAdapters", () => {
     expect(chunkSizes).toEqual([65_536, 4_464]);
   });
 
+  it("does not consume random hook bytes during adapter registration", async () => {
+    const table = buildTable([
+      { effectId: "std::random::Random", opName: "next_i64", opId: 0 },
+      { effectId: "std::random::Random", opName: "fill_bytes", opId: 1 },
+    ]);
+    const stream = Uint8Array.from(
+      Array.from({ length: 16 }, (_, index) => index + 1)
+    );
+    let offset = 0;
+    const randomBytes = vi.fn((length: number) => {
+      const end = offset + length;
+      const bytes = stream.subarray(offset, end);
+      if (bytes.byteLength < length) {
+        throw new Error("random hook stream exhausted");
+      }
+      offset = end;
+      return Uint8Array.from(bytes);
+    });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        runtimeHooks: { randomBytes },
+      },
+    });
+
+    expect(randomBytes).not.toHaveBeenCalled();
+
+    const nextI64Result = await getHandler("std::random::Random", "next_i64")(
+      tailContinuation
+    );
+    expect(nextI64Result).toEqual({
+      kind: "tail",
+      value: 0x0807060504030201n,
+    });
+
+    const fillBytesResult = await getHandler("std::random::Random", "fill_bytes")(
+      tailContinuation,
+      4
+    );
+    expect(fillBytesResult).toEqual({
+      kind: "tail",
+      value: [9, 10, 11, 12],
+    });
+    expect(randomBytes).toHaveBeenCalledTimes(2);
+  });
+
   it("returns null for denied deno env reads", async () => {
     const table = buildTable([
       { effectId: "std::env::Env", opName: "get", opId: 0 },
