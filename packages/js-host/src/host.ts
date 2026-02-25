@@ -514,7 +514,10 @@ export const createVoydHost = async ({
     registerDefaultAdapters: (options = {}) =>
       registerDefaultHostAdapters({
         host: { table, registerHandler },
-        options,
+        options: {
+          ...options,
+          effectBufferSize: bufferSize,
+        },
       }),
     initEffects,
     runPure,

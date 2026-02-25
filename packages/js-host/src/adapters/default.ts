@@ -1,4 +1,5 @@
 import type { EffectHandler, HostProtocolTable, SignatureHash } from "../protocol/types.js";
+import { MIN_EFFECT_BUFFER_SIZE } from "../runtime/constants.js";
 import type { HostRuntimeKind } from "../runtime/environment.js";
 import { detectHostRuntime } from "../runtime/environment.js";
 
@@ -12,6 +13,9 @@ const INPUT_EFFECT_ID = "std::input::Input";
 const WEB_CRYPTO_MAX_BYTES_PER_CALL = 65_536;
 const MAX_TIMER_DELAY_MILLIS = 2_147_483_647;
 const MAX_TIMER_DELAY_MILLIS_BIGINT = 2_147_483_647n;
+const RANDOM_FILL_MAX_REQUEST_BYTES = 1_000_000;
+const MSGPACK_ARRAY16_HEADER_BYTES = 3;
+const MSGPACK_MAX_BYTES_PER_BYTE_VALUE = 2;
 
 type EffectOp = HostProtocolTable["ops"][number];
 
@@ -37,6 +41,7 @@ export type DefaultAdapterOptions = {
   onDiagnostic?: (message: string) => void;
   logWriter?: Pick<Console, "trace" | "debug" | "info" | "warn" | "error">;
   runtimeHooks?: DefaultAdapterRuntimeHooks;
+  effectBufferSize?: number;
 };
 
 export type DefaultAdapterCapability = {
@@ -59,6 +64,7 @@ type CapabilityContext = {
   diagnostics: string[];
   logWriter: Pick<Console, "trace" | "debug" | "info" | "warn" | "error">;
   runtimeHooks: DefaultAdapterRuntimeHooks;
+  effectBufferSize: number;
 };
 
 type CapabilityDefinition = {
@@ -125,6 +131,14 @@ const normalizeByte = (value: unknown): number => {
 const toNonNegativeI64 = (value: unknown): bigint => {
   const normalized = toI64(value);
   return normalized > 0n ? normalized : 0n;
+};
+
+const normalizeEffectBufferSize = (value: number | undefined): number => {
+  if (value === undefined || !Number.isFinite(value)) {
+    return MIN_EFFECT_BUFFER_SIZE;
+  }
+  const normalized = Math.trunc(value);
+  return normalized > 0 ? normalized : MIN_EFFECT_BUFFER_SIZE;
 };
 
 const sleepInChunks = async ({
@@ -273,6 +287,23 @@ const maybeNodeFs = async (): Promise<NodeFsPromises | undefined> => {
       return undefined;
     }
   }
+};
+
+const joinListDirChildPath = ({
+  directoryPath,
+  childName,
+}: {
+  directoryPath: string;
+  childName: string;
+}): string => {
+  if (directoryPath === "/") {
+    return `/${childName}`;
+  }
+  const trimmed = directoryPath.replace(/\/+$/u, "");
+  if (trimmed.length === 0) {
+    return `/${childName}`;
+  }
+  return `${trimmed}/${childName}`;
 };
 
 const fsCapabilityDefinition: CapabilityDefinition = {
@@ -437,7 +468,16 @@ const fsCapabilityDefinition: CapabilityDefinition = {
               names.push(entry.name);
             }
           }
-          return tail(hostOk(names.map((name) => `${resolvedPath}/${name}`)));
+          return tail(
+            hostOk(
+              names.map((name) =>
+                joinListDirChildPath({
+                  directoryPath: resolvedPath,
+                  childName: name,
+                })
+              )
+            )
+          );
         } catch (error) {
           return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
         }
@@ -674,10 +714,30 @@ const hasRandomByteSource = ({
   return typeof crypto?.getRandomValues === "function";
 };
 
+const maxTransportSafeRandomFillBytes = ({
+  effectBufferSize,
+}: {
+  effectBufferSize: number;
+}): number => {
+  if (effectBufferSize <= MSGPACK_ARRAY16_HEADER_BYTES) {
+    return 0;
+  }
+  return Math.floor(
+    (effectBufferSize - MSGPACK_ARRAY16_HEADER_BYTES) /
+      MSGPACK_MAX_BYTES_PER_BYTE_VALUE
+  );
+};
+
 const randomCapabilityDefinition: CapabilityDefinition = {
   capability: "random",
   effectId: RANDOM_EFFECT_ID,
-  register: async ({ host, runtime, diagnostics, runtimeHooks }) => {
+  register: async ({
+    host,
+    runtime,
+    diagnostics,
+    runtimeHooks,
+    effectBufferSize,
+  }) => {
     const entries = opEntries({ host, effectId: RANDOM_EFFECT_ID });
     if (entries.length === 0) return 0;
 
@@ -712,7 +772,11 @@ const randomCapabilityDefinition: CapabilityDefinition = {
       opName: "fill_bytes",
       handler: ({ tail }, lenPayload) => {
         const requested = Math.max(0, toNumberOrUndefined(lenPayload) ?? 0);
-        const length = Math.min(Math.trunc(requested), 1_000_000);
+        const length = Math.min(
+          Math.trunc(requested),
+          RANDOM_FILL_MAX_REQUEST_BYTES,
+          maxTransportSafeRandomFillBytes({ effectBufferSize })
+        );
         const bytes = readRandomBytes({ length, runtimeHooks });
         return tail(Array.from(bytes.values()));
       },
@@ -841,6 +905,7 @@ export const registerDefaultHostAdapters = async ({
   let registeredOps = 0;
   const logWriter = options.logWriter ?? console;
   const runtimeHooks = options.runtimeHooks ?? {};
+  const effectBufferSize = normalizeEffectBufferSize(options.effectBufferSize);
 
   for (const capability of CAPABILITIES) {
     const count = await capability.register({
@@ -849,6 +914,7 @@ export const registerDefaultHostAdapters = async ({
       diagnostics,
       logWriter,
       runtimeHooks,
+      effectBufferSize,
     });
     const hasEffect = opEntries({ host, effectId: capability.effectId }).length > 0;
     if (!hasEffect) {

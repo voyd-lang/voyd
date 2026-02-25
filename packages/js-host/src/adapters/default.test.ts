@@ -258,6 +258,48 @@ describe("registerDefaultHostAdapters", () => {
     expect(result.value).toMatchObject({ ok: false });
   });
 
+  it("normalizes list_dir child paths for root and trailing separators", async () => {
+    const table = buildTable([
+      { effectId: "std::fs::Fs", opName: "list_dir", opId: 0 },
+    ]);
+    vi.stubGlobal("Deno", {
+      readFile: async () => new Uint8Array(),
+      readTextFile: async () => "",
+      writeFile: async () => {},
+      writeTextFile: async () => {},
+      stat: async () => ({}),
+      readDir: (path: string) => ({
+        async *[Symbol.asyncIterator]() {
+          if (path === "/") {
+            yield { name: "tmp" };
+            yield { name: "var" };
+            return;
+          }
+          yield { name: "child" };
+        },
+      }),
+    });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "deno" },
+    });
+
+    const listDir = getHandler("std::fs::Fs", "list_dir");
+    const rootResult = await listDir(tailContinuation, "/");
+    expect(rootResult).toEqual({
+      kind: "tail",
+      value: { ok: true, value: ["/tmp", "/var"] },
+    });
+
+    const nestedResult = await listDir(tailContinuation, "/tmp/");
+    expect(nestedResult).toEqual({
+      kind: "tail",
+      value: { ok: true, value: ["/tmp/child"] },
+    });
+  });
+
   it("chunks browser random fills to avoid WebCrypto quota errors", async () => {
     const table = buildTable([
       { effectId: "std::random::Random", opName: "fill_bytes", opId: 0 },
@@ -279,7 +321,10 @@ describe("registerDefaultHostAdapters", () => {
 
     await registerDefaultHostAdapters({
       host,
-      options: { runtime: "browser" },
+      options: {
+        runtime: "browser",
+        effectBufferSize: 200_000,
+      },
     });
     chunkSizes.length = 0;
 
@@ -291,6 +336,34 @@ describe("registerDefaultHostAdapters", () => {
     expect(Array.isArray(result.value)).toBe(true);
     expect((result.value as unknown[]).length).toBe(70_000);
     expect(chunkSizes).toEqual([65_536, 4_464]);
+  });
+
+  it("bounds fill_bytes payloads to transport-safe size", async () => {
+    const table = buildTable([
+      { effectId: "std::random::Random", opName: "fill_bytes", opId: 0 },
+    ]);
+    const randomBytes = vi.fn((length: number) =>
+      Uint8Array.from(Array.from({ length }, () => 255))
+    );
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        effectBufferSize: 64,
+        runtimeHooks: { randomBytes },
+      },
+    });
+
+    const result = await getHandler("std::random::Random", "fill_bytes")(
+      tailContinuation,
+      100
+    );
+    expect(result.kind).toBe("tail");
+    expect(result.value).toEqual(Array.from({ length: 30 }, () => 255));
+    expect(randomBytes).toHaveBeenCalledWith(30);
+    expect(randomBytes).toHaveBeenCalledTimes(1);
   });
 
   it("does not consume random hook bytes during adapter registration", async () => {
