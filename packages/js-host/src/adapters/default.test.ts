@@ -366,6 +366,35 @@ describe("registerDefaultHostAdapters", () => {
     expect(randomBytes).toHaveBeenCalledTimes(1);
   });
 
+  it("accounts for array32 header overhead when bounding fill_bytes payloads", async () => {
+    const table = buildTable([
+      { effectId: "std::random::Random", opName: "fill_bytes", opId: 0 },
+    ]);
+    const randomBytes = vi.fn((length: number) =>
+      Uint8Array.from(Array.from({ length }, () => 255))
+    );
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        effectBufferSize: 131_078,
+        runtimeHooks: { randomBytes },
+      },
+    });
+
+    const result = await getHandler("std::random::Random", "fill_bytes")(
+      tailContinuation,
+      1_000_000
+    );
+    expect(result.kind).toBe("tail");
+    expect(Array.isArray(result.value)).toBe(true);
+    expect((result.value as unknown[]).length).toBe(65_536);
+    expect(randomBytes).toHaveBeenCalledWith(65_536);
+    expect(randomBytes).toHaveBeenCalledTimes(1);
+  });
+
   it("does not consume random hook bytes during adapter registration", async () => {
     const table = buildTable([
       { effectId: "std::random::Random", opName: "next_i64", opId: 0 },

@@ -14,7 +14,11 @@ const WEB_CRYPTO_MAX_BYTES_PER_CALL = 65_536;
 const MAX_TIMER_DELAY_MILLIS = 2_147_483_647;
 const MAX_TIMER_DELAY_MILLIS_BIGINT = 2_147_483_647n;
 const RANDOM_FILL_MAX_REQUEST_BYTES = 1_000_000;
+const MSGPACK_FIXARRAY_HEADER_BYTES = 1;
 const MSGPACK_ARRAY16_HEADER_BYTES = 3;
+const MSGPACK_ARRAY32_HEADER_BYTES = 5;
+const MSGPACK_FIXARRAY_MAX_LENGTH = 15;
+const MSGPACK_ARRAY16_MAX_LENGTH = 65_535;
 const MSGPACK_MAX_BYTES_PER_BYTE_VALUE = 2;
 
 type EffectOp = HostProtocolTable["ops"][number];
@@ -719,13 +723,33 @@ const maxTransportSafeRandomFillBytes = ({
 }: {
   effectBufferSize: number;
 }): number => {
-  if (effectBufferSize <= MSGPACK_ARRAY16_HEADER_BYTES) {
+  if (effectBufferSize <= MSGPACK_FIXARRAY_HEADER_BYTES) {
     return 0;
   }
-  return Math.floor(
-    (effectBufferSize - MSGPACK_ARRAY16_HEADER_BYTES) /
-      MSGPACK_MAX_BYTES_PER_BYTE_VALUE
-  );
+
+  const arrayHeaderSize = (length: number): number => {
+    if (length <= MSGPACK_FIXARRAY_MAX_LENGTH) {
+      return MSGPACK_FIXARRAY_HEADER_BYTES;
+    }
+    if (length <= MSGPACK_ARRAY16_MAX_LENGTH) {
+      return MSGPACK_ARRAY16_HEADER_BYTES;
+    }
+    return MSGPACK_ARRAY32_HEADER_BYTES;
+  };
+
+  let low = 0;
+  let high = effectBufferSize;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const encodedWorstCaseBytes =
+      arrayHeaderSize(mid) + mid * MSGPACK_MAX_BYTES_PER_BYTE_VALUE;
+    if (encodedWorstCaseBytes <= effectBufferSize) {
+      low = mid;
+      continue;
+    }
+    high = mid - 1;
+  }
+  return low;
 };
 
 const randomCapabilityDefinition: CapabilityDefinition = {
