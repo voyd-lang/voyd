@@ -1,3 +1,4 @@
+import { encode } from "@msgpack/msgpack";
 import type { EffectHandler, HostProtocolTable, SignatureHash } from "../protocol/types.js";
 import { MIN_EFFECT_BUFFER_SIZE } from "../runtime/constants.js";
 import type { HostRuntimeKind } from "../runtime/environment.js";
@@ -20,6 +21,7 @@ const MSGPACK_ARRAY32_HEADER_BYTES = 5;
 const MSGPACK_FIXARRAY_MAX_LENGTH = 15;
 const MSGPACK_ARRAY16_MAX_LENGTH = 65_535;
 const MSGPACK_MAX_BYTES_PER_BYTE_VALUE = 2;
+const MSGPACK_OPTS = { useBigInt64: true } as const;
 
 type EffectOp = HostProtocolTable["ops"][number];
 
@@ -185,6 +187,38 @@ const hostError = (message: string, code = 1): Record<string, unknown> => ({
   message,
 });
 
+const fsTransportOverflowError = ({
+  opName,
+  effectBufferSize,
+}: {
+  opName: string;
+  effectBufferSize: number;
+}): Record<string, unknown> =>
+  hostError(
+    `Default fs adapter ${opName} response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or read a smaller payload.`
+  );
+
+const fsSuccessPayload = ({
+  opName,
+  value,
+  effectBufferSize,
+}: {
+  opName: string;
+  value: unknown;
+  effectBufferSize: number;
+}): Record<string, unknown> => {
+  const payload = hostOk(value);
+  try {
+    const encoded = encode(payload, MSGPACK_OPTS) as Uint8Array;
+    if (encoded.byteLength <= effectBufferSize) {
+      return payload;
+    }
+  } catch {
+    // Encode is expected to succeed for fs payload shapes; treat failures as transport errors.
+  }
+  return fsTransportOverflowError({ opName, effectBufferSize });
+};
+
 const opEntries = ({
   host,
   effectId,
@@ -313,7 +347,7 @@ const joinListDirChildPath = ({
 const fsCapabilityDefinition: CapabilityDefinition = {
   capability: "fs",
   effectId: FS_EFFECT_ID,
-  register: async ({ host, runtime, diagnostics }) => {
+  register: async ({ host, runtime, diagnostics, effectBufferSize }) => {
     const entries = opEntries({ host, effectId: FS_EFFECT_ID });
     if (entries.length === 0) return 0;
 
@@ -366,7 +400,21 @@ const fsCapabilityDefinition: CapabilityDefinition = {
           const bytes = hasNodeFs
             ? await nodeFs!.readFile(resolvedPath)
             : await denoReadFile!(resolvedPath);
-          return tail(hostOk(Array.from(bytes.values())));
+          if (bytes.byteLength > effectBufferSize) {
+            return tail(
+              fsTransportOverflowError({
+                opName: "read_bytes",
+                effectBufferSize,
+              })
+            );
+          }
+          return tail(
+            fsSuccessPayload({
+              opName: "read_bytes",
+              value: Array.from(bytes.values()),
+              effectBufferSize,
+            })
+          );
         } catch (error) {
           return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
         }
@@ -384,7 +432,13 @@ const fsCapabilityDefinition: CapabilityDefinition = {
           const value = hasNodeFs
             ? new TextDecoder().decode(await nodeFs!.readFile(resolvedPath))
             : await denoReadTextFile!(resolvedPath);
-          return tail(hostOk(value));
+          return tail(
+            fsSuccessPayload({
+              opName: "read_string",
+              value,
+              effectBufferSize,
+            })
+          );
         } catch (error) {
           return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
         }
@@ -473,14 +527,16 @@ const fsCapabilityDefinition: CapabilityDefinition = {
             }
           }
           return tail(
-            hostOk(
-              names.map((name) =>
+            fsSuccessPayload({
+              opName: "list_dir",
+              value: names.map((name) =>
                 joinListDirChildPath({
                   directoryPath: resolvedPath,
                   childName: name,
                 })
-              )
-            )
+              ),
+              effectBufferSize,
+            })
           );
         } catch (error) {
           return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));

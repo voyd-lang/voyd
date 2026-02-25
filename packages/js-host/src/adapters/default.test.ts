@@ -69,6 +69,17 @@ const continuationCall = (
   value?: unknown
 ): EffectContinuationCall => ({ kind, value });
 
+const toStringOrUndefinedFromRecord = (
+  value: unknown,
+  key: string
+): string | undefined => {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === "string" ? field : undefined;
+};
+
 const tailContinuation: EffectContinuation = {
   resume: (value?: unknown) => continuationCall("resume", value),
   tail: (value?: unknown) => continuationCall("tail", value),
@@ -298,6 +309,76 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: { ok: true, value: ["/tmp/child"] },
     });
+  });
+
+  it("returns io errors when fs read/list payloads exceed transport buffer", async () => {
+    const table = buildTable([
+      { effectId: "std::fs::Fs", opName: "read_bytes", opId: 0 },
+      { effectId: "std::fs::Fs", opName: "read_string", opId: 1 },
+      { effectId: "std::fs::Fs", opName: "list_dir", opId: 2 },
+    ]);
+    vi.stubGlobal("Deno", {
+      readFile: async () => Uint8Array.from(Array.from({ length: 128 }, () => 7)),
+      readTextFile: async () => "x".repeat(256),
+      writeFile: async () => {},
+      writeTextFile: async () => {},
+      stat: async () => ({}),
+      readDir: () => ({
+        async *[Symbol.asyncIterator]() {
+          for (let index = 0; index < 16; index += 1) {
+            yield { name: `entry-${index}-with-long-name` };
+          }
+        },
+      }),
+    });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "deno",
+        effectBufferSize: 64,
+      },
+    });
+
+    const readBytesResult = await getHandler("std::fs::Fs", "read_bytes")(
+      tailContinuation,
+      "/tmp/blob"
+    );
+    expect(readBytesResult.kind).toBe("tail");
+    expect(readBytesResult.value).toMatchObject({
+      ok: false,
+      code: 1,
+    });
+    expect(
+      toStringOrUndefinedFromRecord(readBytesResult.value, "message")
+    ).toMatch(/read_bytes response exceeds effect transport buffer/i);
+
+    const readStringResult = await getHandler("std::fs::Fs", "read_string")(
+      tailContinuation,
+      "/tmp/text"
+    );
+    expect(readStringResult.kind).toBe("tail");
+    expect(readStringResult.value).toMatchObject({
+      ok: false,
+      code: 1,
+    });
+    expect(
+      toStringOrUndefinedFromRecord(readStringResult.value, "message")
+    ).toMatch(/read_string response exceeds effect transport buffer/i);
+
+    const listDirResult = await getHandler("std::fs::Fs", "list_dir")(
+      tailContinuation,
+      "/tmp"
+    );
+    expect(listDirResult.kind).toBe("tail");
+    expect(listDirResult.value).toMatchObject({
+      ok: false,
+      code: 1,
+    });
+    expect(
+      toStringOrUndefinedFromRecord(listDirResult.value, "message")
+    ).toMatch(/list_dir response exceeds effect transport buffer/i);
   });
 
   it("chunks browser random fills to avoid WebCrypto quota errors", async () => {
