@@ -1,8 +1,50 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeterministicRuntime } from "./deterministic-runtime.js";
 import { createRuntimeScheduler } from "./scheduler.js";
 
 describe("createRuntimeScheduler", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses macrotask scheduling by default when timers are available", async () => {
+    const setTimeoutSpy = vi.fn((task: () => void, _delay?: number) => {
+      task();
+      return 0;
+    });
+    const queueMicrotaskSpy = vi.fn();
+    vi.stubGlobal("setTimeout", setTimeoutSpy);
+    vi.stubGlobal("queueMicrotask", queueMicrotaskSpy);
+
+    const scheduler = createRuntimeScheduler();
+    const run = scheduler.startRun<number>({
+      start: () => 0,
+      step: () => ({ kind: "value", value: 42 }),
+    });
+
+    await expect(run.outcome).resolves.toEqual({ kind: "value", value: 42 });
+    expect(setTimeoutSpy).toHaveBeenCalled();
+    expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(0);
+    expect(queueMicrotaskSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to microtasks when timers are unavailable", async () => {
+    const queueMicrotaskSpy = vi.fn((task: () => void) => {
+      task();
+    });
+    vi.stubGlobal("setTimeout", undefined);
+    vi.stubGlobal("queueMicrotask", queueMicrotaskSpy);
+
+    const scheduler = createRuntimeScheduler();
+    const run = scheduler.startRun<number>({
+      start: () => 0,
+      step: () => ({ kind: "value", value: 7 }),
+    });
+
+    await expect(run.outcome).resolves.toEqual({ kind: "value", value: 7 });
+    expect(queueMicrotaskSpy).toHaveBeenCalled();
+  });
+
   it("round-robins ready runs under a fairness budget", async () => {
     const runtime = createDeterministicRuntime();
     const scheduler = createRuntimeScheduler({

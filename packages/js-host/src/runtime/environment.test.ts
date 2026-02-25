@@ -31,7 +31,7 @@ describe("scheduleTaskForRuntime", () => {
 
   it("uses macrotask scheduling on browser/deno/unknown", () => {
     const trace: string[] = [];
-    const setTimeoutSpy = vi.fn((task: () => void, ms?: number) => {
+    const setTimeoutSpy = vi.fn((task: () => void, _delay?: number) => {
       task();
       return 0;
     });

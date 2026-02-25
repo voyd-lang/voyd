@@ -38,6 +38,10 @@ const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
 const defaultScheduleTask = (task: () => void): void => {
+  if (typeof setTimeout === "function") {
+    setTimeout(task, 0);
+    return;
+  }
   if (typeof queueMicrotask === "function") {
     queueMicrotask(task);
     return;
