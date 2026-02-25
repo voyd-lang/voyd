@@ -32,6 +32,14 @@ const queueMicrotaskOrPromise = (task: () => void): void => {
   Promise.resolve().then(task);
 };
 
+const scheduleMacrotaskOrMicrotask = (task: () => void): void => {
+  if (typeof setTimeout === "function") {
+    setTimeout(task, 0);
+    return;
+  }
+  queueMicrotaskOrPromise(task);
+};
+
 export const scheduleTaskForRuntime = (
   runtime: HostRuntimeKind
 ): ((task: () => void) => void) => {
@@ -40,5 +48,5 @@ export const scheduleTaskForRuntime = (
       setImmediate(task);
     };
   }
-  return queueMicrotaskOrPromise;
+  return scheduleMacrotaskOrMicrotask;
 };
