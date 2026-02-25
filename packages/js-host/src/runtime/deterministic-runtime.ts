@@ -122,7 +122,8 @@ export const createDeterministicRuntime = (
 
   const drainTasks = async (): Promise<void> => {
     for (let turn = 0; turn < maxDrainTurns; turn += 1) {
-      while (tasks.length > 0) {
+      const tasksThisTurn = tasks.length;
+      for (let index = 0; index < tasksThisTurn; index += 1) {
         const task = tasks.shift();
         task?.();
       }

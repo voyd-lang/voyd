@@ -43,4 +43,17 @@ describe("createDeterministicRuntime", () => {
     expect(trace).toEqual(["fast", "slow"]);
     await Promise.all([fast, slow]);
   });
+
+  it("enforces maxDrainTurns when tasks synchronously re-enqueue", async () => {
+    const runtime = createDeterministicRuntime({ maxDrainTurns: 3 });
+
+    const requeue = (): void => {
+      runtime.scheduleTask(requeue);
+    };
+    runtime.scheduleTask(requeue);
+
+    await expect(runtime.runUntilIdle()).rejects.toThrow(
+      "deterministic runtime exceeded max task-drain turns"
+    );
+  });
 });
