@@ -49,7 +49,7 @@ describe("export abi metadata", { timeout: 15_000 }, () => {
     expect(abi.exports).toEqual([
       { name: "add", abi: "direct" },
       { name: "echo", abi: "serialized", formatId: "msgpack" },
-      { name: "fetch", abi: "serialized", formatId: "msgpack" },
+      { name: "fetch_items", abi: "serialized", formatId: "msgpack" },
     ]);
   });
 
@@ -64,7 +64,7 @@ describe("export abi metadata", { timeout: 15_000 }, () => {
   it("fetches msgpack values for serialized exports", async () => {
     const wasm = await buildModule();
     const host = await createVoydHost({ wasm });
-    const result = await host.runPure("fetch", []);
+    const result = await host.runPure("fetch_items", []);
     expect(result).toEqual(["a", "b", "c"]);
   });
 

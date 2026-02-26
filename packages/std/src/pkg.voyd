@@ -21,6 +21,8 @@ pub self::log
 pub self::time
 pub self::random
 pub self::env
+pub self::fetch
+pub self::input
 pub self::path
 pub self::fs
 pub std::optional::types::{ Optional, Option, Some, None }

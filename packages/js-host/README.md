@@ -13,7 +13,8 @@ const result = await host.run("main");
 ```
 
 `createVoydHost` installs default std capability adapters by default
-(`std::fs::Fs`, `std::time::Time`, `std::env::Env`, `std::random::Random`, `std::log::Log`).
+(`std::fs::Fs`, `std::time::Time`, `std::env::Env`, `std::random::Random`,
+`std::log::Log`, `std::fetch::Fetch`, `std::input::Input`).
 Disable with `defaultAdapters: false` if you want full manual handler control.
 
 Advanced control (fairness + cancellation):

@@ -384,6 +384,97 @@ pub fn main(): Env -> i32
     }
   });
 
+  it("runs std fetch effects with default host adapters", async () => {
+    const sdk = createSdk();
+    const source = `use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+
+@effect(id: "std::fetch::Fetch")
+eff Fetch
+  request(tail, payload: MsgPack) -> MsgPack
+
+pub fn main(): Fetch -> i32
+  let header = HostDto::init()
+    .set("name", msgpack::make_string("accept".as_slice().to_string()))
+    .set("value", msgpack::make_string("text/plain".as_slice().to_string()))
+    .pack()
+  let request_payload = HostDto::init()
+    .set("method", msgpack::make_string("POST".as_slice().to_string()))
+    .set("url", msgpack::make_string("https://example.test/echo".as_slice().to_string()))
+    .set("headers", msgpack::make_array([header]))
+    .set("body", msgpack::make_string("ping".as_slice().to_string()))
+    .set("timeout_millis", msgpack::make_i32(10))
+    .pack()
+
+  let response_payload = Fetch::request(request_payload)
+  let response = HostDto::unpack(response_payload)
+  if response.read_bool("ok") == false then:
+    return -1
+
+  let value = HostDto::unpack(response.read_msgpack("value"))
+  if value.read_i32("status") == 201 and value.read_string("body").equals("pong") then:
+    201
+  else:
+    -2
+`;
+    const result = expectCompileSuccess(await sdk.compile({ source }));
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: {
+          fetchRequest: async () => ({
+            status: 201,
+            statusText: "Created",
+            headers: [{ name: "content-type", value: "text/plain" }],
+            body: "pong",
+          }),
+        },
+      },
+    });
+
+    const output = await host.run<number>("main");
+    expect(output).toBe(201);
+  });
+
+  it("runs std input effects with default host adapters", async () => {
+    const sdk = createSdk();
+    const source = `use std::error::HostError
+use std::input::read_line
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+
+pub fn main() -> i32
+  match(read_line(prompt: "Name: ".as_slice()))
+    Ok<Option<String>> { value }:
+      match(value)
+        Some<String> { value: line }:
+          if line.equals("voyd") then:
+            1
+          else:
+            -2
+        None:
+          0
+    Err<HostError>:
+      -1
+`;
+    const result = expectCompileSuccess(await sdk.compile({ source }));
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: {
+          readLine: async () => "voyd",
+        },
+      },
+    });
+
+    const output = await host.run<number>("main");
+    expect(output).toBe(1);
+  });
+
   it("isolates concurrent managed runs so effect payloads do not race", async () => {
     const sdk = createSdk();
     const source = `use std::msgpack::self as __std_msgpack
