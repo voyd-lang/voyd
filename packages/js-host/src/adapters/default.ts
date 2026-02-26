@@ -1234,11 +1234,7 @@ const isAbortLikeError = (error: unknown): boolean => {
     return true;
   }
   const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  return (
-    message.includes("aborted") ||
-    message.includes("timed out") ||
-    message.includes("timeout")
-  );
+  return message.includes("aborted") || message.includes("timed out");
 };
 
 const fetchErrorCode = (error: unknown): number =>

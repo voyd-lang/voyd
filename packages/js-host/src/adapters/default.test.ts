@@ -496,6 +496,46 @@ describe("registerDefaultHostAdapters", () => {
     });
   });
 
+  it("preserves fetch timeout capability errors when abort support is unavailable", async () => {
+    const table = buildTable([
+      { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        status: 200,
+        statusText: "OK",
+        headers: [],
+        text: async () => "",
+      }))
+    );
+    vi.stubGlobal("AbortController", undefined);
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    const result = await getHandler("std::fetch::Fetch", "request")(
+      tailContinuation,
+      {
+        method: "GET",
+        url: "https://example.test/timeout",
+        headers: [],
+        timeout_millis: 5,
+      }
+    );
+    expect(result).toEqual({
+      kind: "tail",
+      value: {
+        ok: false,
+        code: 1,
+        message: "fetch timeout_millis requires AbortController support",
+      },
+    });
+  });
+
   it("registers input read_line handlers from runtime hooks", async () => {
     const table = buildTable([
       { effectId: "std::input::Input", opName: "read_line", opId: 0 },
