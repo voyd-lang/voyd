@@ -4,6 +4,30 @@ This repository contains the implementation of the voyd programming language.
 voyd is a level between rust and typescript in terms of abstraction. It
 compiles to webassembly.
 
+# Directory Index
+
+- `apps/cli`: `voyd` / `vt` command line entrypoints.
+- `apps/smoke`: End-to-end smoke tests (prefer adding public API tests here).
+- `apps/site`: `voyd.dev` docs/playground site.
+- `apps/vscode`: VSCode extension and language client wiring.
+- `packages/compiler`: Parser, semantics, and Wasm codegen pipeline.
+- `packages/language-server`: LSP server built on compiler + std.
+- `packages/sdk`: Public Node/browser/deno APIs for compile/run/test flows.
+- `packages/lib`: Shared runtime/tooling utilities (CLI helpers, binaryen helpers, VSX DOM client).
+- `packages/js-host`: JS host runtime used for executing compiled modules.
+- `packages/std`: Standard library source bundle (Voyd source).
+- `packages/reference`: Language reference source/build scripts.
+- `docs/architecture`: Design constraints and cross-module contracts.
+
+# Architecture Overview
+
+- Monorepo layout: product surfaces live in `apps/*`, reusable language/runtime components live in `packages/*`.
+- Compilation flow (authoritative path): parser -> semantics (typing/binding/lowering) -> `ProgramCodegenView` -> Wasm codegen.
+- Boundary rule: `packages/compiler/src/semantics/codegen-view` is the contract; codegen should consume this view, not typing internals.
+- Runtime split: compiler emits Wasm, while `@voyd/js-host` + `@voyd/lib` provide JS-side execution and interop helpers.
+- Public integration point: `@voyd/sdk` composes compiler + host + std and is the preferred API for tests and external tooling.
+- Developer tooling stack: CLI (`apps/cli`), language server (`packages/language-server`), and VSCode extension (`apps/vscode`) all build on shared packages.
+
 # Guide
 
 Always build with long term maintainability in mind. Avoid short term hacks.
