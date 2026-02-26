@@ -381,6 +381,196 @@ describe("registerDefaultHostAdapters", () => {
     ).toMatch(/list_dir response exceeds effect transport buffer/i);
   });
 
+  it("registers fetch handlers and maps DTO payloads", async () => {
+    const table = buildTable([
+      { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
+    ]);
+    const seenRequests: unknown[] = [];
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "node",
+        runtimeHooks: {
+          fetchRequest: async (request) => {
+            seenRequests.push(request);
+            return {
+              status: 201,
+              statusText: "Created",
+              headers: [{ name: "content-type", value: "text/plain" }],
+              body: request.body ?? "",
+            };
+          },
+        },
+      },
+    });
+
+    const result = await getHandler("std::fetch::Fetch", "request")(
+      tailContinuation,
+      {
+        method: "post",
+        url: "https://example.test/echo",
+        headers: [{ name: "accept", value: "text/plain" }],
+        body: "hello",
+        timeout_millis: 15,
+      }
+    );
+
+    expect(seenRequests).toEqual([
+      {
+        method: "POST",
+        url: "https://example.test/echo",
+        headers: [{ name: "accept", value: "text/plain" }],
+        body: "hello",
+        timeoutMillis: 15,
+      },
+    ]);
+    expect(result).toEqual({
+      kind: "tail",
+      value: {
+        ok: true,
+        value: {
+          status: 201,
+          status_text: "Created",
+          headers: [{ name: "content-type", value: "text/plain" }],
+          body: "hello",
+        },
+      },
+    });
+  });
+
+  it("returns host timeout errors when fetch aborts", async () => {
+    const table = buildTable([
+      { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
+    ]);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init?: { signal?: AbortSignal }) => {
+        return new Promise((resolve, reject) => {
+          void resolve;
+          if (init?.signal?.aborted) {
+            const error = new Error("deadline exceeded");
+            error.name = "AbortError";
+            reject(error);
+            return;
+          }
+          init?.signal?.addEventListener("abort", () => {
+            const error = new Error("deadline exceeded");
+            error.name = "AbortError";
+            reject(error);
+          });
+        });
+      })
+    );
+    vi.stubGlobal(
+      "setTimeout",
+      vi.fn((task: () => void, _delay?: number) => {
+        task();
+        return 0;
+      })
+    );
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    const result = await getHandler("std::fetch::Fetch", "request")(
+      tailContinuation,
+      {
+        method: "GET",
+        url: "https://example.test/timeout",
+        headers: [],
+        timeout_millis: 5,
+      }
+    );
+    expect(result).toEqual({
+      kind: "tail",
+      value: {
+        ok: false,
+        code: 2,
+        message: "fetch request timed out or was aborted",
+      },
+    });
+  });
+
+  it("registers input read_line handlers from runtime hooks", async () => {
+    const table = buildTable([
+      { effectId: "std::input::Input", opName: "read_line", opId: 0 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "node",
+        runtimeHooks: {
+          readLine: async (prompt) => {
+            if (prompt === "fail") {
+              throw new Error("input unavailable");
+            }
+            return prompt === "eof" ? null : "voyd";
+          },
+        },
+      },
+    });
+
+    await expect(
+      getHandler("std::input::Input", "read_line")(tailContinuation, {
+        prompt: "Name: ",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true, value: "voyd" },
+    });
+
+    await expect(
+      getHandler("std::input::Input", "read_line")(tailContinuation, {
+        prompt: "eof",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true, value: null },
+    });
+
+    await expect(
+      getHandler("std::input::Input", "read_line")(tailContinuation, {
+        prompt: "fail",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: {
+        ok: false,
+        code: 1,
+        message: "input unavailable",
+      },
+    });
+  });
+
+  it("registers unsupported input handlers when prompt APIs are unavailable", async () => {
+    const table = buildTable([
+      { effectId: "std::input::Input", opName: "read_line", opId: 0 },
+    ]);
+    vi.stubGlobal("prompt", undefined);
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "browser" },
+    });
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "std::input::Input")
+        ?.supported
+    ).toBe(false);
+
+    await expect(
+      (async () =>
+        getHandler("std::input::Input", "read_line")(tailContinuation, {}))()
+    ).rejects.toThrow(/default input adapter is unavailable on browser/i);
+  });
+
   it("chunks browser random fills to avoid WebCrypto quota errors", async () => {
     const table = buildTable([
       { effectId: "std::random::Random", opName: "fill_bytes", opId: 0 },

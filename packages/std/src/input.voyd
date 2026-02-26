@@ -1,0 +1,66 @@
+use std::error::HostError
+use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice, new_string }
+
+pub obj InputRequest {
+  /// Optional prompt shown before reading input.
+  api prompt?: String
+}
+
+impl InputRequest
+  /// Builds a read request.
+  api fn init({ prompt?: StringSlice }) -> InputRequest
+    InputRequest { prompt: prompt?.to_string() }
+
+@effect(id: "std::input::Input")
+pub eff Input
+  read_line(tail, payload: MsgPack) -> MsgPack
+
+/// Reads a line from stdin (or host prompt source).
+pub fn read_line(): Input -> Result<Option<String>, HostError>
+  read_line(request: InputRequest::init())
+
+/// Reads a line using a prompt.
+pub fn read_line({ prompt: StringSlice }): Input -> Result<Option<String>, HostError>
+  read_line(request: InputRequest::init(prompt: prompt))
+
+/// Reads a line using an explicit request value.
+pub fn read_line({ request: InputRequest }): Input -> Result<Option<String>, HostError>
+  decode_read_line_result(Input::read_line(encode_read_line_payload(request)))
+
+fn encode_read_line_payload(request: InputRequest): () -> MsgPack
+  match(request.prompt)
+    Some<String> { value }:
+      HostDto::init()
+        .set("prompt", msgpack::make_string(value))
+        .pack()
+    None:
+      HostDto::init()
+        .set("prompt", msgpack::make_null())
+        .pack()
+
+fn decode_read_line_result(payload: MsgPack): () -> Result<Option<String>, HostError>
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") == false then:
+    return Err<HostError> { error: decode_host_error(decoded) }
+
+  Ok<Option<String>> {
+    value: decode_optional_string(decoded.read_msgpack("value"))
+  }
+
+fn decode_optional_string(payload: MsgPack): () -> Option<String>
+  payload.match(active)
+    String:
+      Some<String> { value: active }
+    else:
+      None {}
+
+fn decode_host_error(payload: HostDto): () -> HostError
+  HostError {
+    code: payload.read_i32("code"),
+    message: payload.read_string("message")
+  }

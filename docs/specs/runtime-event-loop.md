@@ -175,8 +175,8 @@ This spec defines time semantics independent of language/runtime APIs:
 - If multiple timers are due at the same monotonic instant, adapters SHOULD
   process them FIFO by registration order.
 
-Current JS-host note: there is no built-in timer capability in `@voyd/js-host`;
-timer behavior is provided by user handlers.
+Current JS-host note: `@voyd/js-host` default adapters provide `std::time::Time`
+handlers where host timer APIs exist (`setTimeout` or explicit runtime hooks).
 
 ## Capability Availability and Failure Semantics
 
@@ -189,6 +189,58 @@ Capabilities are represented by registered handlers over effect ops.
 
 Adapters MUST NOT silently remap an unavailable capability to a different
 handler.
+
+## Standard Capability Contracts (Fetch/Input)
+
+Default adapter conformance for `std::fetch::Fetch` and `std::input::Input`
+uses MessagePack DTO payloads with these stable fields:
+
+### `std::fetch::Fetch.request`
+
+Request payload (`tail` op argument):
+
+- `method: string` (defaults to `GET` when empty/missing)
+- `url: string` (required, non-empty)
+- `headers: Array<{ name: string, value: string }>`
+- `body: string | null`
+- `timeout_millis: i32 | null`
+
+Success response payload (`tail` op return):
+
+- `{ ok: true, value: { status: i32, status_text: string, headers: Array<{ name: string, value: string }>, body: string } }`
+
+Error response payload:
+
+- `{ ok: false, code: i32, message: string }`
+- Code guidance:
+  - `1`: request/host failure
+  - `2`: timeout/abort
+
+Cancellation semantics:
+
+- `timeout_millis` SHOULD trigger host-side fetch abort when supported.
+- If abort APIs are unavailable, adapters MUST return a deterministic host
+  error DTO (not hang or silently ignore timeout intent).
+- Run-level cancellation semantics from this spec still apply: if a run is
+  cancelled while fetch is in flight, late completions are dropped.
+
+### `std::input::Input.read_line`
+
+Request payload:
+
+- `prompt: string | null`
+
+Success response payload:
+
+- `{ ok: true, value: string | null }`
+- `null` means EOF / no line available.
+
+Error response payload:
+
+- `{ ok: false, code: i32, message: string }`
+- Code guidance:
+  - `1`: input failure
+  - `2`: input stream closed/aborted
 
 ## Conformance Scenarios
 
@@ -241,10 +293,9 @@ step3 value 40
 This ordering is normative: step 2 cannot start before step 1's returned
 continuation call is applied.
 
-## Known Implementation Gap
+## Implementation Status
 
-`@voyd/js-host` now implements scheduler-driven ordering, cancellation outcomes,
-fairness-budget controls, and deterministic conformance coverage with a virtual
-clock + controlled queues. Remaining adapter-level gaps are capability
-contracts that are not yet finalized in stdlib (notably fetch/input payload
-schemas), tracked under `V-260`.
+`@voyd/js-host` implements scheduler-driven ordering, cancellation outcomes,
+fairness-budget controls, deterministic conformance coverage (virtual clock +
+controlled queues), and default adapter contracts for std capabilities
+including `std::fetch::Fetch` and `std::input::Input`.

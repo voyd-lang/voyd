@@ -35,11 +35,35 @@ export type DefaultAdapterHost = {
   ) => void;
 };
 
+export type DefaultAdapterFetchHeader = {
+  name: string;
+  value: string;
+};
+
+export type DefaultAdapterFetchRequest = {
+  method: string;
+  url: string;
+  headers: DefaultAdapterFetchHeader[];
+  body?: string;
+  timeoutMillis?: number;
+};
+
+export type DefaultAdapterFetchResponse = {
+  status: number;
+  statusText: string;
+  headers: DefaultAdapterFetchHeader[];
+  body: string;
+};
+
 export type DefaultAdapterRuntimeHooks = {
   monotonicNowMillis?: () => bigint;
   systemNowMillis?: () => bigint;
   sleepMillis?: (ms: number) => Promise<void>;
   randomBytes?: (length: number) => Uint8Array;
+  fetchRequest?: (
+    request: DefaultAdapterFetchRequest
+  ) => Promise<DefaultAdapterFetchResponse>;
+  readLine?: (prompt: string | null) => Promise<string | null>;
 };
 
 export type DefaultAdapterOptions = {
@@ -86,6 +110,17 @@ type NodeFsPromises = {
   writeFile: (path: string, data: string | Uint8Array) => Promise<void>;
   access: (path: string) => Promise<void>;
   readdir: (path: string) => Promise<string[]>;
+};
+
+type NodeReadlinePromises = {
+  createInterface: (options: {
+    input: NodeJS.ReadableStream;
+    output: NodeJS.WritableStream;
+    terminal?: boolean;
+  }) => {
+    question: (query: string) => Promise<string>;
+    close: () => void;
+  };
 };
 
 const globalRecord = globalThis as Record<string, unknown>;
@@ -187,6 +222,21 @@ const hostError = (message: string, code = 1): Record<string, unknown> => ({
   message,
 });
 
+const payloadFitsEffectTransport = ({
+  payload,
+  effectBufferSize,
+}: {
+  payload: Record<string, unknown>;
+  effectBufferSize: number;
+}): boolean => {
+  try {
+    const encoded = encode(payload, MSGPACK_OPTS) as Uint8Array;
+    return encoded.byteLength <= effectBufferSize;
+  } catch {
+    return false;
+  }
+};
+
 const fsTransportOverflowError = ({
   opName,
   effectBufferSize,
@@ -208,15 +258,64 @@ const fsSuccessPayload = ({
   effectBufferSize: number;
 }): Record<string, unknown> => {
   const payload = hostOk(value);
-  try {
-    const encoded = encode(payload, MSGPACK_OPTS) as Uint8Array;
-    if (encoded.byteLength <= effectBufferSize) {
-      return payload;
-    }
-  } catch {
-    // Encode is expected to succeed for fs payload shapes; treat failures as transport errors.
+  if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
+    return payload;
   }
   return fsTransportOverflowError({ opName, effectBufferSize });
+};
+
+const fetchTransportOverflowError = ({
+  effectBufferSize,
+}: {
+  effectBufferSize: number;
+}): Record<string, unknown> =>
+  hostError(
+    `Default fetch adapter request response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or request a smaller payload.`
+  );
+
+const fetchSuccessPayload = ({
+  response,
+  effectBufferSize,
+}: {
+  response: DefaultAdapterFetchResponse;
+  effectBufferSize: number;
+}): Record<string, unknown> => {
+  const payload = hostOk({
+    status: response.status,
+    status_text: response.statusText,
+    headers: response.headers.map((header) => ({
+      name: header.name,
+      value: header.value,
+    })),
+    body: response.body,
+  });
+  if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
+    return payload;
+  }
+  return fetchTransportOverflowError({ effectBufferSize });
+};
+
+const inputTransportOverflowError = ({
+  effectBufferSize,
+}: {
+  effectBufferSize: number;
+}): Record<string, unknown> =>
+  hostError(
+    `Default input adapter read_line response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or provide shorter input.`
+  );
+
+const inputSuccessPayload = ({
+  line,
+  effectBufferSize,
+}: {
+  line: string | null;
+  effectBufferSize: number;
+}): Record<string, unknown> => {
+  const payload = hostOk(line);
+  if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
+    return payload;
+  }
+  return inputTransportOverflowError({ effectBufferSize });
 };
 
 const opEntries = ({
@@ -321,6 +420,27 @@ const maybeNodeFs = async (): Promise<NodeFsPromises | undefined> => {
     try {
       const mod = await import(/* @vite-ignore */ nodeFsSpecifier);
       return mod as unknown as NodeFsPromises;
+    } catch {
+      return undefined;
+    }
+  }
+};
+
+const maybeNodeReadlinePromises = async (): Promise<
+  NodeReadlinePromises | undefined
+> => {
+  const nodeReadlineSpecifier = ["node", "readline/promises"].join(":");
+  try {
+    const importModule = new Function(
+      "specifier",
+      "return import(specifier);"
+    ) as (specifier: string) => Promise<unknown>;
+    const mod = await importModule(nodeReadlineSpecifier);
+    return mod as unknown as NodeReadlinePromises;
+  } catch {
+    try {
+      const mod = await import(/* @vite-ignore */ nodeReadlineSpecifier);
+      return mod as unknown as NodeReadlinePromises;
     } catch {
       return undefined;
     }
@@ -936,39 +1056,504 @@ const logCapabilityDefinition: CapabilityDefinition = {
   },
 };
 
+const toFetchHeader = (
+  value: unknown
+): DefaultAdapterFetchHeader | undefined => {
+  if (Array.isArray(value)) {
+    const [nameValue, headerValue] = value;
+    const name = toStringOrUndefined(nameValue)?.trim();
+    if (!name) {
+      return undefined;
+    }
+    return {
+      name,
+      value: toStringOrUndefined(headerValue) ?? String(headerValue ?? ""),
+    };
+  }
+  const name = toStringOrUndefined(readField(value, "name"))?.trim();
+  if (!name) {
+    return undefined;
+  }
+  return {
+    name,
+    value:
+      toStringOrUndefined(readField(value, "value")) ??
+      String(readField(value, "value") ?? ""),
+  };
+};
+
+const normalizeFetchHeaders = (
+  value: unknown
+): DefaultAdapterFetchHeader[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.reduce<DefaultAdapterFetchHeader[]>((headers, entry) => {
+    const next = toFetchHeader(entry);
+    if (next) {
+      headers.push(next);
+    }
+    return headers;
+  }, []);
+};
+
+const decodeFetchRequest = (
+  payload: unknown
+): DefaultAdapterFetchRequest => {
+  const url = toStringOrUndefined(readField(payload, "url"))?.trim();
+  if (!url) {
+    throw new Error("fetch request payload must include a non-empty url");
+  }
+  const method = toStringOrUndefined(readField(payload, "method"))?.trim();
+  const timeoutRaw =
+    readField(payload, "timeout_millis") ?? readField(payload, "timeoutMillis");
+  const timeoutParsed = toNumberOrUndefined(timeoutRaw);
+  return {
+    method: method && method.length > 0 ? method.toUpperCase() : "GET",
+    url,
+    headers: normalizeFetchHeaders(readField(payload, "headers")),
+    body: toStringOrUndefined(readField(payload, "body")),
+    timeoutMillis:
+      timeoutParsed === undefined ? undefined : Math.max(0, Math.trunc(timeoutParsed)),
+  };
+};
+
+const normalizeFetchResponseHeaders = (
+  value: unknown
+): DefaultAdapterFetchHeader[] => {
+  if (Array.isArray(value)) {
+    return value.reduce<DefaultAdapterFetchHeader[]>((headers, entry) => {
+      const next = toFetchHeader(entry);
+      if (next) {
+        headers.push(next);
+      }
+      return headers;
+    }, []);
+  }
+
+  if (value instanceof Map) {
+    return Array.from(value.entries()).reduce<DefaultAdapterFetchHeader[]>(
+      (headers, entry) => {
+        const next = toFetchHeader(entry);
+        if (next) {
+          headers.push(next);
+        }
+        return headers;
+      },
+      []
+    );
+  }
+
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const entries = readField(value, "entries");
+  if (typeof entries === "function") {
+    const iter = (entries as () => Iterable<unknown>).call(value);
+    return Array.from(iter).reduce<DefaultAdapterFetchHeader[]>(
+      (headers, entry) => {
+        const next = toFetchHeader(entry);
+        if (next) {
+          headers.push(next);
+        }
+        return headers;
+      },
+      []
+    );
+  }
+
+  const forEach = readField(value, "forEach");
+  if (typeof forEach === "function") {
+    const headers: DefaultAdapterFetchHeader[] = [];
+    (
+      forEach as (
+        callback: (headerValue: unknown, nameValue: unknown) => void
+      ) => void
+    ).call(
+      value,
+      (headerValue: unknown, nameValue: unknown) => {
+        const next = toFetchHeader([nameValue, headerValue]);
+        if (next) {
+          headers.push(next);
+        }
+      }
+    );
+    return headers;
+  }
+
+  return Object.entries(value).reduce<DefaultAdapterFetchHeader[]>(
+    (headers, [nameValue, headerValue]) => {
+      const next = toFetchHeader([nameValue, headerValue]);
+      if (next) {
+        headers.push(next);
+      }
+      return headers;
+    },
+    []
+  );
+};
+
+const decodeFetchResponse = async (
+  response: unknown
+): Promise<DefaultAdapterFetchResponse> => {
+  const status = toNumberOrUndefined(readField(response, "status"));
+  if (status === undefined) {
+    throw new Error("fetch response is missing status");
+  }
+  const statusText = toStringOrUndefined(readField(response, "statusText")) ?? "";
+  const headers = normalizeFetchResponseHeaders(readField(response, "headers"));
+  const text = readField(response, "text");
+  if (typeof text === "function") {
+    const bodyValue = await (text as () => Promise<unknown>).call(response);
+    return {
+      status: Math.trunc(status),
+      statusText,
+      headers,
+      body: toStringOrUndefined(bodyValue) ?? String(bodyValue ?? ""),
+    };
+  }
+  return {
+    status: Math.trunc(status),
+    statusText,
+    headers,
+    body: toStringOrUndefined(readField(response, "body")) ?? "",
+  };
+};
+
+const isAbortLikeError = (error: unknown): boolean => {
+  if (error instanceof Error && error.name === "AbortError") {
+    return true;
+  }
+  const code = isRecord(error) ? toStringOrUndefined(readField(error, "code")) : undefined;
+  if (code === "ABORT_ERR" || code === "ERR_CANCELED") {
+    return true;
+  }
+  const name = isRecord(error) ? toStringOrUndefined(readField(error, "name")) : undefined;
+  if (name === "AbortError") {
+    return true;
+  }
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes("aborted") ||
+    message.includes("timed out") ||
+    message.includes("timeout")
+  );
+};
+
+const fetchErrorCode = (error: unknown): number =>
+  isAbortLikeError(error) ? 2 : 1;
+
+const fetchErrorMessage = (error: unknown): string => {
+  if (isAbortLikeError(error)) {
+    return "fetch request timed out or was aborted";
+  }
+  return error instanceof Error ? error.message : String(error);
+};
+
+const isInputClosedError = (error: unknown): boolean => {
+  if (isAbortLikeError(error)) {
+    return true;
+  }
+  const code = isRecord(error) ? toStringOrUndefined(readField(error, "code")) : undefined;
+  if (code === "ERR_USE_AFTER_CLOSE") {
+    return true;
+  }
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    message.includes("readline was closed") ||
+    message.includes("input closed") ||
+    message.includes("end of input")
+  );
+};
+
+const inputErrorCode = (error: unknown): number =>
+  isInputClosedError(error) ? 2 : 1;
+
+const inputErrorMessage = (error: unknown): string => {
+  if (isInputClosedError(error)) {
+    return "input stream was closed or aborted";
+  }
+  return error instanceof Error ? error.message : String(error);
+};
+
+type FetchSource = {
+  isAvailable: boolean;
+  unavailableReason: string;
+  request: (
+    input: DefaultAdapterFetchRequest
+  ) => Promise<DefaultAdapterFetchResponse>;
+};
+
+const createFetchSource = ({
+  runtimeHooks,
+}: {
+  runtimeHooks: DefaultAdapterRuntimeHooks;
+}): FetchSource => {
+  if (typeof runtimeHooks.fetchRequest === "function") {
+    return {
+      isAvailable: true,
+      unavailableReason: "",
+      request: runtimeHooks.fetchRequest,
+    };
+  }
+
+  const fetchValue = globalRecord.fetch;
+  if (typeof fetchValue !== "function") {
+    const unavailableReason = "fetch API is unavailable";
+    return {
+      isAvailable: false,
+      unavailableReason,
+      request: async () => {
+        throw new Error(unavailableReason);
+      },
+    };
+  }
+
+  const fetchFn = (
+    fetchValue as (input: string, init?: Record<string, unknown>) => Promise<unknown>
+  ).bind(globalThis);
+
+  return {
+    isAvailable: true,
+    unavailableReason: "",
+    request: async (input) => {
+      const init: Record<string, unknown> = {
+        method: input.method,
+        headers: input.headers.map((header) => [header.name, header.value]),
+      };
+      if (input.body !== undefined) {
+        init.body = input.body;
+      }
+
+      const timeoutMillis = input.timeoutMillis ?? 0;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      if (timeoutMillis > 0) {
+        const AbortControllerCtor = globalRecord.AbortController as
+          | (new () => { signal: unknown; abort: (reason?: unknown) => void })
+          | undefined;
+        if (typeof AbortControllerCtor !== "function") {
+          throw new Error("fetch timeout_millis requires AbortController support");
+        }
+        if (typeof setTimeout !== "function") {
+          throw new Error("fetch timeout_millis requires setTimeout support");
+        }
+        const controller = new AbortControllerCtor();
+        timeoutHandle = setTimeout(() => {
+          controller.abort("timeout");
+        }, timeoutMillis);
+        init.signal = controller.signal;
+      }
+
+      try {
+        const response = await fetchFn(input.url, init);
+        return await decodeFetchResponse(response);
+      } finally {
+        if (timeoutHandle !== undefined && typeof clearTimeout === "function") {
+          clearTimeout(timeoutHandle);
+        }
+      }
+    },
+  };
+};
+
+type InputSource = {
+  isAvailable: boolean;
+  unavailableReason: string;
+  readLine: (prompt: string | null) => Promise<string | null>;
+};
+
+const createInputSource = async ({
+  runtime,
+  runtimeHooks,
+}: {
+  runtime: HostRuntimeKind;
+  runtimeHooks: DefaultAdapterRuntimeHooks;
+}): Promise<InputSource> => {
+  if (typeof runtimeHooks.readLine === "function") {
+    return {
+      isAvailable: true,
+      unavailableReason: "",
+      readLine: runtimeHooks.readLine,
+    };
+  }
+
+  const promptValue = globalRecord.prompt;
+  if (typeof promptValue === "function") {
+    const promptFn = promptValue as (prompt?: string) => string | null;
+    return {
+      isAvailable: true,
+      unavailableReason: "",
+      readLine: async (prompt) => {
+        const value = promptFn(prompt ?? "");
+        return typeof value === "string" ? value : null;
+      },
+    };
+  }
+
+  if (runtime === "node") {
+    const processValue = globalRecord.process as
+      | {
+          stdin?: NodeJS.ReadableStream;
+          stdout?: NodeJS.WritableStream;
+        }
+      | undefined;
+    const readline = await maybeNodeReadlinePromises();
+    if (
+      processValue?.stdin &&
+      processValue?.stdout &&
+      typeof readline?.createInterface === "function"
+    ) {
+      return {
+        isAvailable: true,
+        unavailableReason: "",
+        readLine: async (prompt) => {
+          const lineReader = readline.createInterface({
+            input: processValue.stdin!,
+            output: processValue.stdout!,
+            terminal: true,
+          });
+          try {
+            return await lineReader.question(prompt ?? "");
+          } catch (error) {
+            if (isInputClosedError(error)) {
+              return null;
+            }
+            throw error;
+          } finally {
+            lineReader.close();
+          }
+        },
+      };
+    }
+  }
+
+  const unavailableReason = "interactive input APIs are unavailable";
+  return {
+    isAvailable: false,
+    unavailableReason,
+    readLine: async () => {
+      throw new Error(unavailableReason);
+    },
+  };
+};
+
+const decodeInputPrompt = (payload: unknown): string | null =>
+  toStringOrUndefined(readField(payload, "prompt")) ?? null;
+
 const fetchCapabilityDefinition: CapabilityDefinition = {
   capability: "fetch",
   effectId: FETCH_EFFECT_ID,
-  register: async ({ host, runtime, diagnostics }) => {
+  register: async ({
+    host,
+    runtime,
+    diagnostics,
+    runtimeHooks,
+    effectBufferSize,
+  }) => {
     const entries = opEntries({ host, effectId: FETCH_EFFECT_ID });
     if (entries.length === 0) return 0;
-    return registerUnsupportedHandlers({
+    const fetchSource = createFetchSource({ runtimeHooks });
+    if (!fetchSource.isAvailable) {
+      return registerUnsupportedHandlers({
+        host,
+        effectId: FETCH_EFFECT_ID,
+        capability: "fetch",
+        runtime,
+        reason: fetchSource.unavailableReason,
+        diagnostics,
+      });
+    }
+
+    const implementedOps = new Set<string>();
+    const registered = registerOpHandler({
       host,
       effectId: FETCH_EFFECT_ID,
-      capability: "fetch",
-      runtime,
-      reason:
-        "std::fetch::Fetch effect contract is not finalized in stdlib yet; default adapter cannot safely infer payload schema",
-      diagnostics,
+      opName: "request",
+      handler: async ({ tail }, payload) => {
+        try {
+          const request = decodeFetchRequest(payload);
+          const response = await fetchSource.request(request);
+          return tail(
+            fetchSuccessPayload({
+              response,
+              effectBufferSize,
+            })
+          );
+        } catch (error) {
+          return tail(hostError(fetchErrorMessage(error), fetchErrorCode(error)));
+        }
+      },
     });
+    implementedOps.add("request");
+
+    return (
+      registered +
+      registerMissingOpHandlers({
+        host,
+        effectId: FETCH_EFFECT_ID,
+        implementedOps,
+        diagnostics,
+      })
+    );
   },
 };
 
 const inputCapabilityDefinition: CapabilityDefinition = {
   capability: "input",
   effectId: INPUT_EFFECT_ID,
-  register: async ({ host, runtime, diagnostics }) => {
+  register: async ({
+    host,
+    runtime,
+    diagnostics,
+    runtimeHooks,
+    effectBufferSize,
+  }) => {
     const entries = opEntries({ host, effectId: INPUT_EFFECT_ID });
     if (entries.length === 0) return 0;
-    return registerUnsupportedHandlers({
+    const inputSource = await createInputSource({ runtime, runtimeHooks });
+    if (!inputSource.isAvailable) {
+      return registerUnsupportedHandlers({
+        host,
+        effectId: INPUT_EFFECT_ID,
+        capability: "input",
+        runtime,
+        reason: inputSource.unavailableReason,
+        diagnostics,
+      });
+    }
+
+    const implementedOps = new Set<string>();
+    const registered = registerOpHandler({
       host,
       effectId: INPUT_EFFECT_ID,
-      capability: "input",
-      runtime,
-      reason:
-        "std::input::Input effect contract is not finalized in stdlib yet; default adapter cannot safely infer payload schema",
-      diagnostics,
+      opName: "read_line",
+      handler: async ({ tail }, payload) => {
+        try {
+          const prompt = decodeInputPrompt(payload);
+          const line = await inputSource.readLine(prompt);
+          return tail(
+            inputSuccessPayload({
+              line,
+              effectBufferSize,
+            })
+          );
+        } catch (error) {
+          return tail(hostError(inputErrorMessage(error), inputErrorCode(error)));
+        }
+      },
     });
+    implementedOps.add("read_line");
+
+    return (
+      registered +
+      registerMissingOpHandlers({
+        host,
+        effectId: INPUT_EFFECT_ID,
+        implementedOps,
+        diagnostics,
+      })
+    );
   },
 };
 

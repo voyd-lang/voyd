@@ -1,0 +1,70 @@
+use std::array::Array
+use std::error::HostError
+use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use std::test::host_dto::self as host_dto_test
+
+test "input read_line encodes prompt and decodes line":
+  let ~prompts = Array<String>::init()
+  let result = read_line_with_capture(prompts)
+
+  assert(optional_string_or(prompts.get(0), "missing".as_slice()).equals("Name: "), eq: true)
+
+  match(result)
+    Ok<Option<String>> { value }:
+      match(value)
+        Some<String> { value: line }:
+          assert(line.equals("voyd"), eq: true)
+        None:
+          assert(false, eq: true)
+    Err<HostError>:
+      assert(false, eq: true)
+
+test "input read_line decodes null as none":
+  let result = read_line_with_payload(host_dto_test::host_ok_with_value(msgpack::make_null()))
+
+  match(result)
+    Ok<Option<String>> { value }:
+      match(value)
+        Some<String>:
+          assert(false, eq: true)
+        None:
+          assert(true, eq: true)
+    Err<HostError>:
+      assert(false, eq: true)
+
+test "input read_line decodes host errors":
+  let result = read_line_with_payload(host_dto_test::host_error_payload(code: 7, message: "denied"))
+
+  match(result)
+    Err<HostError> { error }:
+      assert(error.code, eq: 7)
+      assert(error.message.equals("denied"), eq: true)
+    Ok<Option<String>>:
+      assert(false, eq: true)
+
+fn read_line_with_payload(payload: MsgPack): () -> Result<Option<String>, HostError>
+  try
+    read_line()
+  Input::read_line(tail, _payload):
+    tail(payload)
+
+fn read_line_with_capture(~prompts: Array<String>): () -> Result<Option<String>, HostError>
+  try
+    read_line(prompt: "Name: ".as_slice())
+  Input::read_line(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    prompts.push(decoded.read_string("prompt"))
+    tail(host_dto_test::host_ok_with_value(msgpack::make_string("voyd".as_slice().to_string())))
+
+fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
+  match(value)
+    Some<String> { value: present }:
+      present
+    None:
+      fallback.to_string()

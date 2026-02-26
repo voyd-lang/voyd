@@ -1,0 +1,143 @@
+use std::array::{ Array, new_array_unchecked }
+use std::error::HostError
+use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use std::test::host_dto::self as host_dto_test
+
+test "fetch request encodes payload and decodes response":
+  let ~methods = Array<String>::init()
+  let ~urls = Array<String>::init()
+  let ~bodies = Array<String>::init()
+  let ~timeouts = Array<i32>::init()
+  let ~header_names = Array<String>::init()
+  let ~header_values = Array<String>::init()
+
+  let result = request_with_capture(
+    methods: methods,
+    urls: urls,
+    bodies: bodies,
+    timeouts: timeouts,
+    header_names: header_names,
+    header_values: header_values
+  )
+
+  assert(optional_string_or(methods.get(0), "missing".as_slice()).equals("POST"), eq: true)
+  assert(optional_string_or(urls.get(0), "missing".as_slice()).equals("https://voyd.dev/api"), eq: true)
+  assert(optional_string_or(bodies.get(0), "missing".as_slice()).equals("ping"), eq: true)
+  assert(optional_i32_or(timeouts.get(0), -1), eq: 500)
+  assert(optional_string_or(header_names.get(0), "missing".as_slice()).equals("Accept"), eq: true)
+  assert(optional_string_or(header_values.get(0), "missing".as_slice()).equals("text/plain"), eq: true)
+
+  match(result)
+    Ok<FetchResponse> { value }:
+      assert(value.status, eq: 200)
+      assert(value.is_success(), eq: true)
+      assert(value.body.equals("pong"), eq: true)
+      match(value.header(name: "content-type".as_slice()))
+        Some<String> { value: content_type }:
+          assert(content_type.equals("text/plain"), eq: true)
+        None:
+          assert(false, eq: true)
+    Err<HostError>:
+      assert(false, eq: true)
+
+test "fetch request decodes host errors":
+  let result = request_with_payload(host_dto_test::host_error_payload(
+    code: 503,
+    message: "unavailable"
+  ))
+  match(result)
+    Err<HostError> { error }:
+      assert(error.code, eq: 503)
+      assert(error.message.equals("unavailable"), eq: true)
+    Ok<FetchResponse>:
+      assert(false, eq: true)
+
+fn request_with_payload(payload: MsgPack): () -> Result<FetchResponse, HostError>
+  try
+    request(FetchRequest::get(url: "https://voyd.dev".as_slice()))
+  Fetch::request(tail, _payload):
+    tail(payload)
+
+fn request_with_capture({
+  ~methods: Array<String>,
+  ~urls: Array<String>,
+  ~bodies: Array<String>,
+  ~timeouts: Array<i32>,
+  ~header_names: Array<String>,
+  ~header_values: Array<String>
+}): () -> Result<FetchResponse, HostError>
+  let fetch_request = FetchRequest::post(url: "https://voyd.dev/api".as_slice(), body: "ping".as_slice())
+    .with_header(name: "Accept".as_slice(), value: "text/plain".as_slice())
+    .with_timeout(millis: 500)
+
+  try
+    request(fetch_request)
+  Fetch::request(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    methods.push(decoded.read_string("method"))
+    urls.push(decoded.read_string("url"))
+    bodies.push(decoded.read_string("body"))
+    timeouts.push(decoded.read_i32("timeout_millis"))
+
+    let encoded_headers = msgpack::unpack_array(decoded.read_msgpack("headers"))
+    match(encoded_headers.get(0))
+      Some<MsgPack> { value }:
+        let header_payload = HostDto::unpack(value)
+        header_names.push(header_payload.read_string("name"))
+        header_values.push(header_payload.read_string("value"))
+      None:
+        void
+
+    tail(fetch_success_payload())
+
+fn fetch_success_payload(): () -> MsgPack
+  HostDto::init()
+    .set("ok", msgpack::make_bool(true))
+    .set("value", encode_fetch_response(
+      status: 200,
+      status_text: "OK".as_slice(),
+      body: "pong".as_slice(),
+      header_name: "content-type".as_slice(),
+      header_value: "text/plain".as_slice()
+    ))
+    .pack()
+
+fn encode_fetch_response({
+  status: i32,
+  status_text: StringSlice,
+  body: StringSlice,
+  header_name: StringSlice,
+  header_value: StringSlice
+}): () -> MsgPack
+  let header_payload = HostDto::init()
+    .set("name", msgpack::make_string(header_name.to_string()))
+    .set("value", msgpack::make_string(header_value.to_string()))
+    .pack()
+  let headers = msgpack::make_array([header_payload])
+
+  HostDto::init()
+    .set("status", msgpack::make_i32(status))
+    .set("status_text", msgpack::make_string(status_text.to_string()))
+    .set("headers", headers)
+    .set("body", msgpack::make_string(body.to_string()))
+    .pack()
+
+fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
+  match(value)
+    Some<String> { value: present }:
+      present
+    None:
+      fallback.to_string()
+
+fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
+  match(value)
+    Some<i32> { value: present }:
+      present
+    None:
+      fallback

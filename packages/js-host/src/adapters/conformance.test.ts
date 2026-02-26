@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   EffectContinuation,
   EffectContinuationCall,
@@ -83,10 +83,14 @@ const invokeHandler = (
 ): Promise<EffectContinuationCall> =>
   Promise.resolve().then(() => handler(tailContinuation, ...args));
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe.each(["node", "deno", "browser", "unknown"] as const)(
   "default adapter conformance (%s)",
   (runtimeKind) => {
-    it("keeps timer/random behavior deterministic and marks unsupported capabilities", async () => {
+    it("keeps timer/random behavior deterministic and validates fetch/input contracts", async () => {
       const table = buildTable([
         { effectId: "std::time::Time", opName: "monotonic_now_millis", opId: 0 },
         { effectId: "std::time::Time", opName: "system_now_millis", opId: 1 },
@@ -101,6 +105,12 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         startSystemMs: 1_000,
       });
       const { host, getHandler } = createFakeHost(table);
+      const seenFetchRequests: Array<{
+        method: string;
+        url: string;
+        body?: string;
+        timeoutMillis?: number;
+      }> = [];
 
       const report = await registerDefaultHostAdapters({
         host,
@@ -114,6 +124,28 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
               Uint8Array.from(
                 Array.from({ length }, (_, index) => (index + 1) % 256)
               ),
+            fetchRequest: async (request) => {
+              seenFetchRequests.push(request);
+              if (request.url.endsWith("/timeout")) {
+                const error = new Error("deadline exceeded");
+                error.name = "AbortError";
+                throw error;
+              }
+              return {
+                status: 200,
+                statusText: "OK",
+                headers: [{ name: "content-type", value: "text/plain" }],
+                body: request.url.endsWith("/echo")
+                  ? request.body ?? ""
+                  : "voyd",
+              };
+            },
+            readLine: async (prompt) => {
+              if (prompt === "fail") {
+                throw new Error("input device failure");
+              }
+              return prompt === "eof" ? null : "voyd";
+            },
           },
         },
       });
@@ -126,10 +158,10 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         true
       );
       expect(capabilitiesByEffect.get("std::fetch::Fetch")?.supported).toBe(
-        false
+        true
       );
       expect(capabilitiesByEffect.get("std::input::Input")?.supported).toBe(
-        false
+        true
       );
 
       const monotonicHandler = getHandler(
@@ -189,11 +221,107 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       const inputHandler = getHandler("std::input::Input", "read_line");
 
       await expect(
-        invokeHandler(fetchHandler, {})
-      ).rejects.toThrow(/effect contract is not finalized/i);
+        invokeHandler(fetchHandler, {
+          method: "post",
+          url: "https://example.test/echo",
+          headers: [{ name: "accept", value: "text/plain" }],
+          body: "hello",
+          timeout_millis: 25,
+        })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: {
+          ok: true,
+          value: {
+            status: 200,
+            status_text: "OK",
+            headers: [{ name: "content-type", value: "text/plain" }],
+            body: "hello",
+          },
+        },
+      });
+      expect(seenFetchRequests).toEqual([
+        {
+          method: "POST",
+          url: "https://example.test/echo",
+          headers: [{ name: "accept", value: "text/plain" }],
+          body: "hello",
+          timeoutMillis: 25,
+        },
+      ]);
+
       await expect(
-        invokeHandler(inputHandler, {})
-      ).rejects.toThrow(/effect contract is not finalized/i);
+        invokeHandler(fetchHandler, {
+          method: "GET",
+          url: "https://example.test/timeout",
+          headers: [],
+        })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: {
+          ok: false,
+          code: 2,
+          message: "fetch request timed out or was aborted",
+        },
+      });
+
+      await expect(
+        invokeHandler(inputHandler, { prompt: "Name: " })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true, value: "voyd" },
+      });
+
+      await expect(
+        invokeHandler(inputHandler, { prompt: "eof" })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true, value: null },
+      });
+
+      await expect(
+        invokeHandler(inputHandler, { prompt: "fail" })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: {
+          ok: false,
+          code: 1,
+          message: "input device failure",
+        },
+      });
     });
   }
 );
+
+describe("default adapter conformance (unsupported capabilities)", () => {
+  it("marks fetch/input unsupported when no runtime implementation exists", async () => {
+    vi.stubGlobal("fetch", undefined);
+    vi.stubGlobal("prompt", undefined);
+    const table = buildTable([
+      { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
+      { effectId: "std::input::Input", opName: "read_line", opId: 0 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "unknown" },
+    });
+    const capabilitiesByEffect = new Map(
+      report.capabilities.map((capability) => [capability.effectId, capability])
+    );
+    expect(capabilitiesByEffect.get("std::fetch::Fetch")?.supported).toBe(
+      false
+    );
+    expect(capabilitiesByEffect.get("std::input::Input")?.supported).toBe(
+      false
+    );
+
+    await expect(
+      invokeHandler(getHandler("std::fetch::Fetch", "request"), {})
+    ).rejects.toThrow(/default fetch adapter is unavailable/i);
+    await expect(
+      invokeHandler(getHandler("std::input::Input", "read_line"), {})
+    ).rejects.toThrow(/default input adapter is unavailable/i);
+  });
+});
