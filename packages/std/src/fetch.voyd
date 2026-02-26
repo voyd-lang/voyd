@@ -104,12 +104,12 @@ impl FetchResponse
 
   /// Returns the first header value matching `name`.
   api fn header(self, { name: StringSlice }) -> Option<String>
-    let target = name.to_string()
+    let target = name.to_string().lowered()
     var index = 0
     while index < self.headers.len() do:
       match(self.headers.get(index))
         Some<FetchHeader> { value }:
-          if value.name.equals(target) then:
+          if value.name.lowered().equals(target) then:
             return Some<String> { value: value.value }
         None:
           void

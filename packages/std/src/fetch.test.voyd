@@ -38,7 +38,7 @@ test "fetch request encodes payload and decodes response":
       assert(value.status, eq: 200)
       assert(value.is_success(), eq: true)
       assert(value.body.equals("pong"), eq: true)
-      match(value.header(name: "content-type".as_slice()))
+      match(value.header(name: "Content-Type".as_slice()))
         Some<String> { value: content_type }:
           assert(content_type.equals("text/plain"), eq: true)
         None:
