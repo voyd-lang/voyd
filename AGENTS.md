@@ -4,6 +4,30 @@ This repository contains the implementation of the voyd programming language.
 voyd is a level between rust and typescript in terms of abstraction. It
 compiles to webassembly.
 
+# Directory Index
+
+- `apps/cli`: `voyd` / `vt` command line entrypoints.
+- `apps/smoke`: End-to-end smoke tests (prefer adding public API tests here).
+- `apps/site`: `voyd.dev` docs/playground site.
+- `apps/vscode`: VSCode extension and language client wiring.
+- `packages/compiler`: Parser, semantics, and Wasm codegen pipeline.
+- `packages/language-server`: LSP server built on compiler + std.
+- `packages/sdk`: Public Node/browser/deno APIs for compile/run/test flows.
+- `packages/lib`: Shared runtime/tooling utilities (CLI helpers, binaryen helpers, VSX DOM client).
+- `packages/js-host`: JS host runtime used for executing compiled modules.
+- `packages/std`: Standard library source bundle (Voyd source).
+- `packages/reference`: Language reference source/build scripts.
+- `docs/architecture`: Design constraints and cross-module contracts.
+
+# Architecture Overview
+
+- Monorepo layout: product surfaces live in `apps/*`, reusable language/runtime components live in `packages/*`.
+- Compilation flow (authoritative path): parser -> semantics (typing/binding/lowering) -> `ProgramCodegenView` -> Wasm codegen.
+- Boundary rule: `packages/compiler/src/semantics/codegen-view` is the contract; codegen should consume this view, not typing internals.
+- Runtime split: compiler emits Wasm, while `@voyd/js-host` + `@voyd/lib` provide JS-side execution and interop helpers.
+- Public integration point: `@voyd/sdk` composes compiler + host + std and is the preferred API for tests and external tooling.
+- Developer tooling stack: CLI (`apps/cli`), language server (`packages/language-server`), and VSCode extension (`apps/vscode`) all build on shared packages.
+
 # Guide
 
 Always build with long term maintainability in mind. Avoid short term hacks.
@@ -22,20 +46,6 @@ Helpful commands:
 - `vt --run <path-to-voyd-file>` // runs the pub fn main of the file
 - `vt --emit-wasm-text --opt <path-to-voyd-file>` // Careful, this can be large
 
-If you find additional information that can save you time later add it here.
-
-Additional notes:
-- Companion tests (`*.test.voyd`) are merged into their companion module when `includeTests` is enabled. In companion tests, avoid importing the same module via `std::...`; reference companion symbols directly or module resolution can fail with `BD0001`.
-- For ASCII encoder outputs in stdlib modules, prefer `new_string(bytes.to_fixed_array())` over `from_utf8(bytes: ...)` to avoid hangs in downstream string operations in current runtime paths.
-- Symbol resolution now has explicit kind-aware APIs in `packages/compiler/src/semantics/binder/symbol-table.ts` (`resolveByKinds`, `resolveAllByKinds`, `resolveWhere`, `resolveAllWhere`).
-- Same-name effect ops and wrapper functions are supported. Value-position lookup excludes `effect-op` symbols, while handler-head lookup resolves `effect-op` symbols explicitly.
-- Do not reintroduce wrapper renaming/module-split workarounds for effect-op name collisions.
-- Host boundary DTO compatibility is enforced at compile time for effect payloads. Allowed payload categories are: `bool`, `i32`, `i64`, `f32`, `f64`, `void`, or types annotated with `@serializer("msgpack", ...)`.
-- Unsupported host-boundary payload shapes should fail with clear `CG0001` diagnostics (not runtime traps). Keep API-to-DTO shim conversions at effect boundaries.
-- Enable compile instrumentation with `VOYD_COMPILER_PERF=1` to print phase timings (`loadModuleGraph`, `analyzeModules`, `emitProgram`, `total`) and hotspot counters as one `[voyd:compiler:perf]` JSON line per compile.
-- Current `@voyd/js-host` runtime is scheduler-driven with cooperative fairness budgeting and explicit cancellable managed runs (`runManaged`/`runEffectfulManaged`).
-- `createVoydHost` now installs default std capability adapters unless `defaultAdapters: false` is passed. Current default coverage: `std::fs::Fs`, `std::time::Time`, `std::env::Env`, `std::random::Random`, `std::log::Log`.
-- `@voyd/js-host` exposes `createDeterministicRuntime` for virtual-clock conformance tests; pair it with adapter `runtimeHooks` (`monotonicNowMillis`, `systemNowMillis`, `sleepMillis`, `randomBytes`) to avoid real host timing/randomness in tests.
 
 # Testing
 
@@ -44,6 +54,8 @@ Additional notes:
 - `npx vitest <path-to-test>`
 
 You should generally add unit tests (especially e2e ones)
+
+E2E Unit tests should go in apps/smoke (unless strictly scoped to the compiler). Always prefer the public API
 
 # TS Style Guide
 
@@ -54,6 +66,7 @@ You should generally add unit tests (especially e2e ones)
 - Prefer functional control flow (`map`, `filter`, etc) to imperative loop constructs.
 - Files should be ordered by importance. The main export of a file at the top.
 - Use a single parameter object for functions containing more than three params to name the parameters on call.
+- Avoid reaching across module boundaries.
 
 ## Voyd Style Guide
 
