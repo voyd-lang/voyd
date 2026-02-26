@@ -723,55 +723,67 @@ const envCapabilityDefinition: CapabilityDefinition = {
   },
 };
 
-const readRandomBytes = ({
-  length,
-  runtimeHooks,
-}: {
-  length: number;
-  runtimeHooks: DefaultAdapterRuntimeHooks;
-}): Uint8Array => {
-  if (runtimeHooks.randomBytes) {
-    const fromHook = runtimeHooks.randomBytes(length);
-    if (fromHook.byteLength < length) {
-      throw new Error(
-        `runtime randomBytes hook returned ${fromHook.byteLength} bytes, expected at least ${length}`
-      );
-    }
-    if (fromHook.byteLength === length) {
-      return fromHook;
-    }
-    return fromHook.subarray(0, length);
-  }
-  const crypto = globalRecord.crypto as
-    | { getRandomValues: <T extends ArrayBufferView>(array: T) => T }
-    | undefined;
-  if (!crypto?.getRandomValues) {
-    throw new Error("crypto.getRandomValues is unavailable");
-  }
-  const bytes = new Uint8Array(length);
-  for (
-    let offset = 0;
-    offset < length;
-    offset += WEB_CRYPTO_MAX_BYTES_PER_CALL
-  ) {
-    const end = Math.min(offset + WEB_CRYPTO_MAX_BYTES_PER_CALL, length);
-    crypto.getRandomValues(bytes.subarray(offset, end));
-  }
-  return bytes;
+type RandomSource = {
+  isAvailable: boolean;
+  unavailableReason: string;
+  readBytes: (length: number) => Uint8Array;
 };
 
-const hasRandomByteSource = ({
+const createRandomSource = ({
   runtimeHooks,
 }: {
   runtimeHooks: DefaultAdapterRuntimeHooks;
-}): boolean => {
+}): RandomSource => {
   if (typeof runtimeHooks.randomBytes === "function") {
-    return true;
+    const randomBytes = runtimeHooks.randomBytes;
+    return {
+      isAvailable: true,
+      unavailableReason: "",
+      readBytes: (length) => {
+        const fromHook = randomBytes(length);
+        if (fromHook.byteLength < length) {
+          throw new Error(
+            `runtime randomBytes hook returned ${fromHook.byteLength} bytes, expected at least ${length}`
+          );
+        }
+        return fromHook.byteLength === length
+          ? fromHook
+          : fromHook.subarray(0, length);
+      },
+    };
   }
+
   const crypto = globalRecord.crypto as
     | { getRandomValues?: <T extends ArrayBufferView>(array: T) => T }
     | undefined;
-  return typeof crypto?.getRandomValues === "function";
+  if (typeof crypto?.getRandomValues === "function") {
+    const getRandomValues = crypto.getRandomValues.bind(crypto);
+    return {
+      isAvailable: true,
+      unavailableReason: "",
+      readBytes: (length) => {
+        const bytes = new Uint8Array(length);
+        for (
+          let offset = 0;
+          offset < length;
+          offset += WEB_CRYPTO_MAX_BYTES_PER_CALL
+        ) {
+          const end = Math.min(offset + WEB_CRYPTO_MAX_BYTES_PER_CALL, length);
+          getRandomValues(bytes.subarray(offset, end));
+        }
+        return bytes;
+      },
+    };
+  }
+
+  const unavailableReason = "crypto.getRandomValues is unavailable";
+  return {
+    isAvailable: false,
+    unavailableReason,
+    readBytes: () => {
+      throw new Error(unavailableReason);
+    },
+  };
 };
 
 const maxTransportSafeRandomFillBytes = ({
@@ -820,14 +832,15 @@ const randomCapabilityDefinition: CapabilityDefinition = {
   }) => {
     const entries = opEntries({ host, effectId: RANDOM_EFFECT_ID });
     if (entries.length === 0) return 0;
+    const randomSource = createRandomSource({ runtimeHooks });
 
-    if (!hasRandomByteSource({ runtimeHooks })) {
+    if (!randomSource.isAvailable) {
       return registerUnsupportedHandlers({
         host,
         effectId: RANDOM_EFFECT_ID,
         capability: "random",
         runtime,
-        reason: "crypto.getRandomValues is unavailable",
+        reason: randomSource.unavailableReason,
         diagnostics,
       });
     }
@@ -839,7 +852,7 @@ const randomCapabilityDefinition: CapabilityDefinition = {
       effectId: RANDOM_EFFECT_ID,
       opName: "next_i64",
       handler: ({ tail }) => {
-        const bytes = readRandomBytes({ length: 8, runtimeHooks });
+        const bytes = randomSource.readBytes(8);
         const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
         return tail(view.getBigInt64(0, true));
       },
@@ -857,7 +870,7 @@ const randomCapabilityDefinition: CapabilityDefinition = {
           RANDOM_FILL_MAX_REQUEST_BYTES,
           maxTransportSafeRandomFillBytes({ effectBufferSize })
         );
-        const bytes = readRandomBytes({ length, runtimeHooks });
+        const bytes = randomSource.readBytes(length);
         return tail(Array.from(bytes.values()));
       },
     });
