@@ -60,7 +60,7 @@ test "fetch request decodes host errors":
 
 fn request_with_payload(payload: MsgPack): () -> Result<FetchResponse, HostError>
   try
-    request(FetchRequest::get(url: "https://voyd.dev".as_slice()))
+    FetchRequest::get(url: "https://voyd.dev".as_slice()).send()
   Fetch::request(tail, _payload):
     tail(payload)
 
@@ -77,7 +77,7 @@ fn request_with_capture({
     .with_timeout(millis: 500)
 
   try
-    request(fetch_request)
+    fetch_request.send()
   Fetch::request(tail, payload):
     let decoded = HostDto::unpack(payload)
     methods.push(decoded.read_string("method"))

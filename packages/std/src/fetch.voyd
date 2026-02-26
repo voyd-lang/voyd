@@ -86,6 +86,10 @@ impl FetchRequest
       timeout_millis: Some<i32> { value: millis }
     }
 
+  /// Sends this request.
+  api fn send(self): Fetch -> Result<FetchResponse, HostError>
+    request(self)
+
 pub obj FetchResponse {
   /// HTTP response status code.
   api status: i32,
