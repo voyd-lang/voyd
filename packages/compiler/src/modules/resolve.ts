@@ -17,11 +17,14 @@ export type ModulePathMatchEntry = {
 
 const PACKAGE_ROOT_SEGMENT = "pkg";
 
-const isPackageRootPath = (path: ModulePath): boolean =>
-  path.segments.at(-1) === PACKAGE_ROOT_SEGMENT;
-
-const packageAnchorSegments = (path: ModulePath): readonly string[] =>
-  isPackageRootPath(path) ? path.segments.slice(0, -1) : path.segments;
+const packageAnchorSegments = ({
+  path,
+  isPackageRoot,
+}: {
+  path: ModulePath;
+  isPackageRoot: boolean;
+}): readonly string[] =>
+  isPackageRoot ? path.segments.slice(0, -1) : path.segments;
 
 const implicitPackageRootSegments = (
   path: ModulePath,
@@ -33,12 +36,14 @@ const implicitPackageRootSegments = (
 const parentAnchorSegmentsFor = ({
   path,
   parentHops,
+  isPackageRoot,
 }: {
   path: ModulePath;
   parentHops: number;
+  isPackageRoot: boolean;
 }): readonly string[] => {
-  const base = packageAnchorSegments(path);
-  const effectiveHops = isPackageRootPath(path)
+  const base = packageAnchorSegments({ path, isPackageRoot });
+  const effectiveHops = isPackageRoot
     ? Math.max(parentHops - 1, 0)
     : parentHops;
   return base.slice(0, Math.max(base.length - effectiveHops, 0));
@@ -104,7 +109,11 @@ const srcAliasEntryKeysFor = ({
 export const resolveModuleRequest = (
   request: ModuleRequest,
   importer: ModulePath,
-  options: { anchorToSelf?: boolean; parentHops?: number } = {}
+  options: {
+    anchorToSelf?: boolean;
+    parentHops?: number;
+    importerIsPackageRoot?: boolean;
+  } = {}
 ): ModulePath => {
   const normalized = normalizeRequest(request);
   const namespace = resolveRequestNamespace({
@@ -122,10 +131,21 @@ export const resolveModuleRequest = (
 
   const anchorToSelf = options.anchorToSelf ?? false;
   const parentHops = options.parentHops ?? 0;
-  const importerAnchorSegments = packageAnchorSegments(importer);
+  const importerIsPackageRoot =
+    options.importerIsPackageRoot ??
+    (importer.namespace !== "src" &&
+      importer.segments.at(-1) === PACKAGE_ROOT_SEGMENT);
+  const importerAnchorSegments = packageAnchorSegments({
+    path: importer,
+    isPackageRoot: importerIsPackageRoot,
+  });
   const superBaseSegments =
     parentHops > 0
-      ? parentAnchorSegmentsFor({ path: importer, parentHops })
+      ? parentAnchorSegmentsFor({
+          path: importer,
+          parentHops,
+          isPackageRoot: importerIsPackageRoot,
+        })
       : [];
   const baseSegments = anchorToSelf
     ? importerAnchorSegments
@@ -152,10 +172,12 @@ export const matchesDependencyPath = ({
   dependencyPath,
   entry,
   currentModulePath,
+  currentModuleIsPackageRoot = false,
 }: {
   dependencyPath: ModulePath;
   entry: ModulePathMatchEntry;
   currentModulePath: ModulePath;
+  currentModuleIsPackageRoot?: boolean;
 }): boolean => {
   const entryKeys = [
     entry.moduleSegments.length > 0 ? entry.moduleSegments.join("::") : undefined,
@@ -176,7 +198,10 @@ export const matchesDependencyPath = ({
     if (!sameNamespace || !samePackage) {
       return false;
     }
-    const currentAnchorSegments = packageAnchorSegments(currentModulePath);
+    const currentAnchorSegments = packageAnchorSegments({
+      path: currentModulePath,
+      isPackageRoot: currentModuleIsPackageRoot,
+    });
     const hasModulePrefix =
       dependencyPath.segments.length >= currentAnchorSegments.length &&
       dependencyPath.segments
@@ -202,6 +227,7 @@ export const matchesDependencyPath = ({
     const parentAnchorSegments = parentAnchorSegmentsFor({
       path: currentModulePath,
       parentHops: hops,
+      isPackageRoot: currentModuleIsPackageRoot,
     });
     const hasParentPrefix =
       dependencyPath.segments.length >= parentAnchorSegments.length &&

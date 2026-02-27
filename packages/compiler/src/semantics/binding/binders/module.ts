@@ -505,6 +505,7 @@ const resolveDependencyPath = ({
       dependencyPath: dep.path,
       entry,
       currentModulePath: ctx.module.path,
+      currentModuleIsPackageRoot: ctx.isPackageRoot,
     }),
   );
   if (matches.length === 0) {

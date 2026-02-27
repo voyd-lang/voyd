@@ -141,6 +141,8 @@ const collectMacroImports = ({
   exportsByModule: Map<string, MacroExportTable>;
 }): Map<string, MacroDefinition> => {
   const imports = new Map<string, MacroDefinition>();
+  const moduleIsPackageRoot =
+    module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
   entries.forEach((entry) => {
     if (!entry.hasExplicitPrefix) {
       return;
@@ -155,6 +157,7 @@ const collectMacroImports = ({
       {
         anchorToSelf: entry.anchorToSelf,
         parentHops: entry.parentHops ?? 0,
+        importerIsPackageRoot: moduleIsPackageRoot,
       }
     );
     const moduleId = modulePathToString(resolvedPath);
@@ -201,6 +204,8 @@ const collectMacroReexports = ({
   localExports: MacroExportTable;
 }): MacroExportTable => {
   const exports = new Map(localExports);
+  const moduleIsPackageRoot =
+    module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
 
   entries
     .filter((entry) => entry.visibility === "pub")
@@ -218,6 +223,7 @@ const collectMacroReexports = ({
         {
           anchorToSelf: entry.anchorToSelf,
           parentHops: entry.parentHops ?? 0,
+          importerIsPackageRoot: moduleIsPackageRoot,
         }
       );
       const moduleId = modulePathToString(resolvedPath);

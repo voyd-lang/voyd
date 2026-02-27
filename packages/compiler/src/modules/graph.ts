@@ -435,6 +435,7 @@ const loadFileModule = async ({
     ast,
     sourceByFile,
     sourcePackageRoot,
+    moduleIsPackageRoot: host.path.basename(filePath, VOYD_EXTENSION) === "pkg",
     moduleRange: { start: 0, end: source.length },
     hasStdPreludeModule,
     noPrelude,
@@ -478,6 +479,7 @@ const collectModuleInfo = ({
   ast,
   sourceByFile,
   sourcePackageRoot,
+  moduleIsPackageRoot,
   moduleRange,
   hasStdPreludeModule,
   noPrelude,
@@ -486,6 +488,7 @@ const collectModuleInfo = ({
   ast: Form;
   sourceByFile: ReadonlyMap<string, string>;
   sourcePackageRoot?: readonly string[];
+  moduleIsPackageRoot: boolean;
   moduleRange: { start: number; end: number };
   hasStdPreludeModule: boolean;
   noPrelude: boolean;
@@ -495,6 +498,15 @@ const collectModuleInfo = ({
   const diagnostics: Diagnostic[] = [];
   let needsStdPkg = false;
   const entries = formCallsInternal(ast, "ast") ? ast.rest : [];
+  const inlineModuleNames = new Set(
+    entries.flatMap((entry) => {
+      if (!isForm(entry)) {
+        return [];
+      }
+      const topLevelDecl = classifyTopLevelDecl(entry);
+      return topLevelDecl.kind === "inline-module-decl" ? [topLevelDecl.name] : [];
+    }),
+  );
   const sourceForDocs = sourceForModuleAst({ ast, sourceByFile });
   const collectedDocs = collectModuleDocumentation({
     ast,
@@ -512,16 +524,26 @@ const collectModuleInfo = ({
       const useEntries = parseUsePaths(topLevelDecl.pathExpr, span);
       const resolvedEntries = useEntries
         .filter((entryPath) => entryPath.hasExplicitPrefix)
-        .map((entryPath) =>
-          resolveModuleRequest(
+        .map((entryPath) => {
+          const firstSegment = entryPath.moduleSegments[0];
+          const preservesInlinePkgScope =
+            moduleIsPackageRoot &&
+            entryPath.anchorToSelf === true &&
+            (entryPath.parentHops ?? 0) === 0 &&
+            typeof firstSegment === "string" &&
+            inlineModuleNames.has(firstSegment);
+
+          return resolveModuleRequest(
             { segments: entryPath.moduleSegments, span: entryPath.span },
             modulePath,
             {
               anchorToSelf: entryPath.anchorToSelf === true,
               parentHops: entryPath.parentHops ?? 0,
+              importerIsPackageRoot:
+                moduleIsPackageRoot && !preservesInlinePkgScope,
             },
-          ),
-        );
+          );
+        });
       resolvedEntries.forEach((path) => {
         if (!path.segments.length && !path.packageName) return;
         dependencies.push({
@@ -570,6 +592,7 @@ const collectModuleInfo = ({
       parentPath: modulePath,
       sourceByFile,
       sourcePackageRoot,
+      moduleIsPackageRoot: false,
       hasStdPreludeModule,
       noPrelude,
       outerModuleDoc: (() => {
@@ -623,6 +646,7 @@ const parseInlineModuleDecl = ({
   parentPath,
   sourceByFile,
   sourcePackageRoot,
+  moduleIsPackageRoot,
   hasStdPreludeModule,
   noPrelude,
   outerModuleDoc,
@@ -635,6 +659,7 @@ const parseInlineModuleDecl = ({
   parentPath: ModulePath;
   sourceByFile: ReadonlyMap<string, string>;
   sourcePackageRoot?: readonly string[];
+  moduleIsPackageRoot: boolean;
   hasStdPreludeModule: boolean;
   noPrelude: boolean;
   outerModuleDoc?: string;
@@ -663,10 +688,12 @@ const parseInlineModuleDecl = ({
     modulePath,
     ast,
     sourceByFile,
+    sourcePackageRoot,
     moduleRange: {
       start: moduleRangeStart,
       end: decl.body.location?.endIndex ?? sourceForModule.length,
     },
+    moduleIsPackageRoot,
     hasStdPreludeModule,
     noPrelude,
   });

@@ -134,6 +134,39 @@ describe("buildModuleGraph", () => {
     }
   });
 
+  it("treats inline modules named pkg as normal modules for self imports", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+mod pkg
+  use self::ops::all
+  pub fn run() -> i32
+    add_one(1)
+
+  mod ops
+    pub fn add_one(v: i32) -> i32
+      v + 1
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const moduleKeys = Array.from(graph.modules.keys());
+    expect(moduleKeys).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "src::main::pkg",
+        "src::main::pkg::ops",
+      ]),
+    );
+    expect(moduleKeys).not.toContain("src::main::ops");
+  });
+
   it("discovers dependencies for grouped self-relative selections", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
@@ -523,6 +556,60 @@ describe("buildModuleGraph", () => {
         "src::pkgs::math::ops",
       ]),
     );
+  });
+
+  it("resolves self imports to inline modules declared inside nested pkg.voyd", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use src::pkgs::math::all",
+      [`${srcRoot}${sep}pkgs${sep}math${sep}pkg.voyd`]: `
+mod outer
+  pub fn one() -> i32
+    1
+
+pub use self::outer::all
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "src::pkgs::math::pkg",
+        "src::pkgs::math::pkg::outer",
+      ]),
+    );
+  });
+
+  it("propagates sourcePackageRoot to deep inline descendants in nested pkg.voyd", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use src::pkgs::math::all",
+      [`${srcRoot}${sep}pkgs${sep}math${sep}pkg.voyd`]: `
+mod outer
+  mod inner
+    pub fn one() -> i32
+      1
+
+pub use self::outer::all
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const inner = graph.modules.get("src::pkgs::math::pkg::outer::inner");
+    expect(inner?.sourcePackageRoot).toEqual(["pkgs", "math"]);
   });
 
   it("treats pkg::std imports as std namespace imports", async () => {
