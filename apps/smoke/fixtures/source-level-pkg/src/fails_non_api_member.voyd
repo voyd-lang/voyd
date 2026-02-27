@@ -1,0 +1,4 @@
+use src::pkgs::arith::all
+
+pub fn main() -> i32
+  make_counter(40).hidden

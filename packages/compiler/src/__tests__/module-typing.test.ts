@@ -202,6 +202,25 @@ pub fn main() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("resolves imports that target inline modules in dependency files", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]:
+        "use src::internal::nested::all\n\npub fn main() -> i32\n  hi()",
+      [`${root}${sep}internal.voyd`]:
+        "mod nested\n  pub fn hi() -> i32\n    42",
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
   it("raises a typing error when imported functions are called with incompatible types", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
