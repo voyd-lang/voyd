@@ -1004,11 +1004,13 @@ describe("registerDefaultHostAdapters", () => {
     ).toBe(true);
 
     await expect(
-      (async () =>
-        getHandler("std::output::Output", "write")(tailContinuation, {
-          value: "hello",
-        }))()
-    ).rejects.toThrow(/does not implement op write/i);
+      getHandler("std::output::Output", "write")(tailContinuation, {
+        value: "hello",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
     await expect(
       getHandler("std::output::Output", "write_bytes")(tailContinuation, {
         target: "stderr",
@@ -1034,7 +1036,67 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: false,
     });
-    expect(byteWrites).toEqual([{ target: "stderr", bytes: [255, 0, 1] }]);
+    expect(byteWrites).toEqual([
+      { target: "stdout", bytes: [104, 101, 108, 108, 111] },
+      { target: "stderr", bytes: [255, 0, 1] },
+    ]);
+  });
+
+  it("routes write through writeBytes hooks before node streams", async () => {
+    const table = buildTable([
+      { effectId: "std::output::Output", opName: "write", opId: 0 },
+    ]);
+    const streamWrites: Array<{ target: string; value: string }> = [];
+    const stdout: any = {
+      isTTY: true,
+      writableNeedDrain: false,
+      write: (chunk: string | Uint8Array, callback?: (error?: Error | null) => void) => {
+        streamWrites.push({ target: "stdout", value: String(chunk) });
+        callback?.(null);
+        return true;
+      },
+      once: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const stderr: any = {
+      isTTY: true,
+      writableNeedDrain: false,
+      write: (chunk: string | Uint8Array, callback?: (error?: Error | null) => void) => {
+        streamWrites.push({ target: "stderr", value: String(chunk) });
+        callback?.(null);
+        return true;
+      },
+      once: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    vi.stubGlobal("process", { stdout, stderr });
+    const byteWrites: Array<{ target: string; bytes: number[] }> = [];
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "node",
+        runtimeHooks: {
+          writeBytes: async ({ target, bytes }) => {
+            byteWrites.push({ target, bytes: Array.from(bytes.values()) });
+          },
+        },
+      },
+    });
+
+    await expect(
+      getHandler("std::output::Output", "write")(tailContinuation, {
+        value: "hello",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(byteWrites).toEqual([
+      { target: "stdout", bytes: [104, 101, 108, 108, 111] },
+    ]);
+    expect(streamWrites).toEqual([]);
   });
 
   it("supports write and write_bytes while keeping flush and is_tty safe by default", async () => {

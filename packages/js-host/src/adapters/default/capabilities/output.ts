@@ -105,6 +105,12 @@ const createOutputSource = ({
   const write =
     typeof writeFromHook === "function"
       ? async (output: DefaultAdapterOutputWrite) => writeFromHook(output)
+      : typeof writeBytesFromHook === "function"
+        ? async ({ target, value }: DefaultAdapterOutputWrite) =>
+            writeBytesFromHook({
+              target,
+              bytes: new TextEncoder().encode(value),
+            })
       : hasStreams
         ? async ({ target, value }: DefaultAdapterOutputWrite) =>
             writeToNodeStream({
