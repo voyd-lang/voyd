@@ -103,6 +103,15 @@ const findVoydFiles = async (rootPath: string): Promise<string[]> => {
 const TEST_COMPANION_SUFFIX = ".test.voyd";
 const VOYD_SUFFIX = ".voyd";
 
+const isMissingPathError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+
 const companionFileFor = (filePath: string): string =>
   `${filePath.slice(0, -VOYD_SUFFIX.length)}${TEST_COMPANION_SUFFIX}`;
 
@@ -113,8 +122,11 @@ const fileExists = async (filePath: string): Promise<boolean> => {
   try {
     const info = await stat(filePath);
     return info.isFile();
-  } catch {
-    return false;
+  } catch (error) {
+    if (isMissingPathError(error)) {
+      return false;
+    }
+    throw error;
   }
 };
 
