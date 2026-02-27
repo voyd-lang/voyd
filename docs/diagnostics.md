@@ -65,3 +65,19 @@ Practical rule: if you’d be happy filtering them together by `code`, prefer a 
 - Prefer consistent casing and phrasing across diagnostics (most messages are sentence fragments without a trailing period).
 - Use `hints` when there is a reliable next step (a concrete “do X” suggestion).
 
+## Overload Detail Payloads (TY0007/TY0008)
+
+`TY0007` (ambiguous overload) and `TY0008` (no overload) support richer payload fields so call-site diagnostics can include high-context details without introducing new codes:
+
+- `inferredArguments?: readonly string[]`
+- `candidates?: readonly { signature: string; reason?: string }[]`
+
+Formatting contract:
+
+- Keep the lead sentence stable (`ambiguous overload for ...`, `no overload of ... matches argument types`).
+- Append details on new lines:
+  - `inferred argument types: (...)`
+  - `candidates:`
+  - one bullet per candidate (`signature` + optional `(reason)`).
+
+Reason strings should be actionable and specific (for example `arity mismatch`, `labels mismatch`, `type incompatibility`, `type argument arity mismatch`).

@@ -12,6 +12,7 @@ import {
 import { semanticsPipeline } from "../pipeline.js";
 import type { SymbolId, TypeId } from "../ids.js";
 import type { TypingResult } from "../typing/typing.js";
+import { DiagnosticError } from "../../diagnostics/index.js";
 import { loadAst } from "./load-ast.js";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline, type BindingResult } from "../binding/binding.js";
@@ -948,6 +949,58 @@ describe("semanticsPipeline", () => {
   it("rejects ambiguous overloaded calls", () => {
     const ast = loadAst("function_overloads_ambiguous.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(/ambiguous overload for add/);
+  });
+
+  it("reports typed overload mismatch details for function calls", () => {
+    const ast = loadAst("function_overloads_no_match_details.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(DiagnosticError);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0008");
+    expect(caught.diagnostic.message).toContain(
+      "no overload of add matches argument types",
+    );
+    expect(caught.diagnostic.message).toContain(
+      "inferred argument types: (i32, bool)",
+    );
+    expect(caught.diagnostic.message).toContain("candidates:");
+    expect(caught.diagnostic.message).toContain("type incompatibility");
+  });
+
+  it("reports typed overload mismatch details for operator calls", () => {
+    const ast = loadAst("operator_overload_eq_mismatch.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(DiagnosticError);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0008");
+    expect(caught.diagnostic.message).toContain(
+      "no overload of == matches argument types",
+    );
+    expect(caught.diagnostic.message).toContain("inferred argument types:");
+    expect(caught.diagnostic.message).toContain("String");
+    expect(caught.diagnostic.message).toContain("i32");
+    expect(caught.diagnostic.message).toContain("candidates:");
+    expect(caught.diagnostic.message).toContain("type incompatibility");
   });
 
   it("rejects overload sets that escape call sites", () => {

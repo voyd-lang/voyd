@@ -45,4 +45,27 @@ describe("diagnostic utilities", () => {
     expect(diagnostic.hints?.[0]?.message).toContain("type arguments");
     expect(diagnostic.hints?.[0]?.message).toContain("backtracking");
   });
+
+  it("formats overload mismatch details with inferred types and candidates", () => {
+    const diagnostic = diagnosticFromCode({
+      code: "TY0008",
+      params: {
+        kind: "no-overload",
+        name: "add",
+        inferredArguments: ["i32", "bool"],
+        candidates: [
+          {
+            signature: "add(a: i32, b: i32) -> i32",
+            reason: "type incompatibility at argument 2: expected i32, got bool",
+          },
+        ],
+      },
+      span: { file: "file.voyd", start: 0, end: 1 },
+    });
+
+    expect(diagnostic.message).toContain("no overload of add matches argument types");
+    expect(diagnostic.message).toContain("inferred argument types: (i32, bool)");
+    expect(diagnostic.message).toContain("candidates:");
+    expect(diagnostic.message).toContain("type incompatibility");
+  });
 });
