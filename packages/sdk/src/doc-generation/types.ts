@@ -17,6 +17,7 @@ export type DocumentationItemKind =
   | "type_alias"
   | "object"
   | "trait"
+  | "effect"
   | "impl";
 
 export type DocumentationItem = {
@@ -39,6 +40,7 @@ export type ModuleDocumentationSection = {
   typeAliases: readonly DocumentationItem[];
   objects: readonly DocumentationItem[];
   traits: readonly DocumentationItem[];
+  effects: readonly DocumentationItem[];
   impls: readonly DocumentationItem[];
 };
 

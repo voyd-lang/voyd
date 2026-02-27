@@ -68,6 +68,20 @@ export type DocumentationTraitView = {
   documentation?: string;
 };
 
+export type DocumentationEffectOperationView = {
+  name: string;
+  params: readonly DocumentationParameterView[];
+  returnTypeExpr?: unknown;
+  resumable: "resume" | "tail";
+};
+
+export type DocumentationEffectView = {
+  name: string;
+  visibility: DocumentationVisibilityView;
+  typeParameters?: readonly DocumentationTypeParameterView[];
+  operations: readonly DocumentationEffectOperationView[];
+};
+
 export type DocumentationImplView = {
   id: number;
   visibility: DocumentationVisibilityView;
@@ -87,6 +101,7 @@ export type DocumentationModuleView = {
   typeAliases: readonly DocumentationTypeAliasView[];
   objects: readonly DocumentationObjectView[];
   traits: readonly DocumentationTraitView[];
+  effects: readonly DocumentationEffectView[];
   impls: readonly DocumentationImplView[];
 };
 
@@ -224,6 +239,17 @@ const normalizeModules = ({
             typeParameters: normalizeTypeParameters(traitDecl.typeParameters),
             methods: traitDecl.methods.map(normalizeMethod),
             documentation: traitDecl.documentation,
+          })),
+          effects: semantic.binding.effects.map((effectDecl) => ({
+            name: effectDecl.name,
+            visibility: normalizeVisibility(effectDecl.visibility),
+            typeParameters: normalizeTypeParameters(effectDecl.typeParameters),
+            operations: effectDecl.operations.map((operation) => ({
+              name: operation.name,
+              params: operation.parameters.map(normalizeParameter),
+              returnTypeExpr: operation.returnTypeExpr,
+              resumable: operation.resumable,
+            })),
           })),
           impls: semantic.binding.impls.map((implDecl) => ({
             id: implDecl.id,

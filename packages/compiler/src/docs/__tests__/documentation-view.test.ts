@@ -24,6 +24,10 @@ pub fn add(
 ) -> i32
   left
 
+pub eff Decode
+  decode_next(resume, input: i32) -> i32
+  finish(tail) -> void
+
 /// Nested docs.
 pub mod math
   /// Returns one.
@@ -53,5 +57,11 @@ pub mod math
     expect(addFn?.documentation).toBe(" Adds values.");
     const leftParam = addFn?.params.find((param) => param.name === "left");
     expect(leftParam?.documentation).toBe(" Left docs.\n Keep newline.");
+    const decodeEffect = mainModule?.effects.find((effect) => effect.name === "Decode");
+    expect(decodeEffect).toBeDefined();
+    expect(decodeEffect?.operations.map((op) => op.name)).toEqual([
+      "decode_next",
+      "finish",
+    ]);
   });
 });

@@ -1,4 +1,5 @@
 import type {
+  DocumentationEffectOperationView,
   DocumentationFunctionView,
   DocumentationMethodView,
   DocumentationParameterView,
@@ -31,12 +32,228 @@ const createAnchorGenerator = () => {
   };
 };
 
+type SExpression = string | readonly SExpression[];
+
+const parseSExpression = (value: string): SExpression | undefined => {
+  let index = 0;
+  const source = value.trim();
+
+  const skipWhitespace = () => {
+    while (index < source.length && /\s/.test(source[index] ?? "")) {
+      index += 1;
+    }
+  };
+
+  const parseNode = (): SExpression | undefined => {
+    skipWhitespace();
+    const current = source[index];
+    if (!current) {
+      return undefined;
+    }
+
+    if (current === "(") {
+      index += 1;
+      const entries: SExpression[] = [];
+      while (index < source.length) {
+        skipWhitespace();
+        if ((source[index] ?? "") === ")") {
+          index += 1;
+          return entries;
+        }
+        const entry = parseNode();
+        if (entry === undefined) {
+          return undefined;
+        }
+        entries.push(entry);
+      }
+      return undefined;
+    }
+
+    let token = "";
+    while (index < source.length) {
+      const char = source[index]!;
+      if (/\s/.test(char) || char === "(" || char === ")") {
+        break;
+      }
+      token += char;
+      index += 1;
+    }
+    return token.length > 0 ? token : undefined;
+  };
+
+  const parsed = parseNode();
+  skipWhitespace();
+  if (index !== source.length) {
+    return undefined;
+  }
+  return parsed;
+};
+
+const isSExpressionList = (
+  expr: SExpression,
+): expr is readonly SExpression[] => Array.isArray(expr);
+
+const sExpressionHead = (expr: SExpression): string | undefined =>
+  isSExpressionList(expr) ? (typeof expr[0] === "string" ? expr[0] : undefined) : undefined;
+
+const renderSExpression = (expr: SExpression): string => {
+  if (!isSExpressionList(expr)) {
+    return expr;
+  }
+  if (expr.length === 0) {
+    return "()";
+  }
+
+  const [headValue, ...rest] = expr;
+  const head = typeof headValue === "string" ? headValue : undefined;
+  if (!head) {
+    return `(${expr.map(renderSExpression).join(" ")})`;
+  }
+
+  if (head === "generics") {
+    return `<${rest.map(renderSExpression).join(", ")}>`;
+  }
+  if (head === "tuple") {
+    return `(${rest.map(renderSExpression).join(", ")})`;
+  }
+  if (head === "->") {
+    if (rest.length === 0) {
+      return "()";
+    }
+    const returnType = rest[rest.length - 1];
+    const inputs = rest.slice(0, -1).flatMap((entry) => {
+      if (isSExpressionList(entry) && sExpressionHead(entry) === "tuple") {
+        return entry.slice(1);
+      }
+      return [entry];
+    });
+    return `(${inputs.map(renderSExpression).join(", ")}) -> ${renderSExpression(
+      returnType!,
+    )}`;
+  }
+  if (head === ":" && rest.length >= 2) {
+    return `${renderSExpression(rest[0]!)}: ${renderSExpression(rest[1]!)}`;
+  }
+
+  if (rest.length === 0) {
+    return head;
+  }
+
+  if (rest.length === 1 && isSExpressionList(rest[0]!) && sExpressionHead(rest[0]!) === "generics") {
+    return `${head}${renderSExpression(rest[0]!)}`;
+  }
+
+  return `${head}(${rest.map(renderSExpression).join(", ")})`;
+};
+
+const identifierValue = (expr: unknown): string | undefined => {
+  if (!expr || typeof expr !== "object") {
+    return undefined;
+  }
+  const candidate = expr as {
+    syntaxType?: string;
+    value?: unknown;
+  };
+  if (candidate.syntaxType !== "identifier") {
+    return undefined;
+  }
+  return typeof candidate.value === "string" ? candidate.value : undefined;
+};
+
+const formEntries = (expr: unknown): unknown[] | undefined => {
+  if (!expr || typeof expr !== "object") {
+    return undefined;
+  }
+  const candidate = expr as {
+    syntaxType?: string;
+    toArray?: () => unknown[];
+  };
+  if (
+    (candidate.syntaxType !== "form" && candidate.syntaxType !== "call-form") ||
+    typeof candidate.toArray !== "function"
+  ) {
+    return undefined;
+  }
+  return candidate.toArray();
+};
+
+const formatFunctionType = (parts: readonly unknown[]): string => {
+  if (parts.length === 0) {
+    return "()";
+  }
+  const returnType = parts[parts.length - 1];
+  const inputParts = parts.slice(0, -1);
+  const flattenedInputs = inputParts.flatMap((entry) => {
+    const entries = formEntries(entry);
+    if (!entries || entries.length === 0) {
+      return [entry];
+    }
+    const head = identifierValue(entries[0]);
+    if (head === "tuple") {
+      return entries.slice(1);
+    }
+    return [entry];
+  });
+
+  return `(${flattenedInputs.map((entry) => formatTypeExpr(entry)).join(", ")}) -> ${formatTypeExpr(
+    returnType,
+  )}`;
+};
+
+const formatCallForm = (entries: readonly unknown[]): string => {
+  if (entries.length === 0) {
+    return "()";
+  }
+
+  const [head, ...rest] = entries;
+  const headName = identifierValue(head);
+  if (!headName) {
+    return `(${entries.map((entry) => formatTypeExpr(entry)).join(" ")})`;
+  }
+
+  if (headName === "generics") {
+    return `<${rest.map((entry) => formatTypeExpr(entry)).join(", ")}>`;
+  }
+  if (headName === "tuple") {
+    return `(${rest.map((entry) => formatTypeExpr(entry)).join(", ")})`;
+  }
+  if (headName === "->") {
+    return formatFunctionType(rest);
+  }
+  if (headName === ":" && rest.length >= 2) {
+    return `${formatTypeExpr(rest[0])}: ${formatTypeExpr(rest[1])}`;
+  }
+
+  if (rest.length === 0) {
+    return headName;
+  }
+
+  const maybeGenerics = formEntries(rest[0]);
+  if (
+    rest.length === 1 &&
+    maybeGenerics &&
+    maybeGenerics.length > 0 &&
+    identifierValue(maybeGenerics[0]) === "generics"
+  ) {
+    return `${headName}${formatTypeExpr(rest[0])}`;
+  }
+
+  return `${headName}(${rest.map((entry) => formatTypeExpr(entry)).join(", ")})`;
+};
+
 const formatTypeExpr = (expr: unknown): string => {
   if (!expr) {
     return "<inferred>";
   }
 
   if (typeof expr === "string") {
+    if (!expr.includes("(")) {
+      return expr;
+    }
+    const parsed = parseSExpression(expr);
+    if (parsed) {
+      return renderSExpression(parsed);
+    }
     return expr;
   }
 
@@ -44,33 +261,14 @@ const formatTypeExpr = (expr: unknown): string => {
     return String(expr);
   }
 
-  if (typeof expr !== "object") {
-    return "<expr>";
+  const identifier = identifierValue(expr);
+  if (identifier) {
+    return identifier;
   }
 
-  const candidate = expr as {
-    syntaxType?: string;
-    value?: unknown;
-    toArray?: () => unknown[];
-  };
-
-  if (
-    (candidate.syntaxType === "identifier" ||
-      candidate.syntaxType === "int" ||
-      candidate.syntaxType === "float" ||
-      candidate.syntaxType === "string" ||
-      candidate.syntaxType === "bool") &&
-    typeof candidate.value === "string"
-  ) {
-    return candidate.value;
-  }
-
-  if (
-    (candidate.syntaxType === "form" || candidate.syntaxType === "call-form") &&
-    typeof candidate.toArray === "function"
-  ) {
-    const entries = candidate.toArray();
-    return `(${entries.map((entry) => formatTypeExpr(entry)).join(" ")})`;
+  const entries = formEntries(expr);
+  if (entries) {
+    return formatCallForm(entries);
   }
 
   return "<expr>";
@@ -142,6 +340,17 @@ const memberFromFunction = ({
   signature: formatFunctionSignature(fn),
   documentation: fn.documentation,
 });
+
+const formatEffectOperationSignature = (
+  operation: DocumentationEffectOperationView,
+): string => {
+  const params = operation.params.map(formatParameterSignature);
+  const allParams = [operation.resumable, ...params].join(", ");
+  const returnPart = operation.returnTypeExpr
+    ? ` -> ${formatTypeExpr(operation.returnTypeExpr)}`
+    : "";
+  return `${operation.name}(${allParams})${returnPart}`;
+};
 
 const createItem = ({
   moduleId,
@@ -267,6 +476,24 @@ export const createDocumentationModel = ({
         }),
       );
 
+    const effects = moduleDoc.effects
+      .filter((effectDecl) => isPublic(effectDecl.visibility))
+      .map((effectDecl) =>
+        createItem({
+          moduleId: moduleDoc.id,
+          kind: "effect",
+          name: effectDecl.name,
+          signature: `eff ${effectDecl.name}${formatTypeParameters(
+            effectDecl.typeParameters,
+          )}`,
+          members: effectDecl.operations.map((operation) => ({
+            name: operation.name,
+            signature: formatEffectOperationSignature(operation),
+          })),
+          nextAnchor,
+        }),
+      );
+
     const impls = moduleDoc.impls
       .filter((implDecl) => isPublic(implDecl.visibility))
       .map((implDecl) => {
@@ -297,6 +524,7 @@ export const createDocumentationModel = ({
       typeAliases,
       objects,
       traits,
+      effects,
       impls,
     };
   });

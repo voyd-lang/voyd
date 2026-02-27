@@ -136,6 +136,7 @@ const collectKindSections = (
     { title: "Type Aliases", items: moduleDoc.typeAliases },
     { title: "Objects", items: moduleDoc.objects },
     { title: "Traits", items: moduleDoc.traits },
+    { title: "Effects", items: moduleDoc.effects },
     { title: "Implementations", items: moduleDoc.impls },
   ].filter((section) => section.items.length > 0);
 
@@ -187,7 +188,7 @@ const renderItemCard = (item: DocumentationItem): string => {
   const docsHtml =
     item.documentation !== undefined
       ? `<div class="doc-body">${renderMarkdownToHtml(item.documentation)}</div>`
-      : `<p class="doc-missing">No documentation.</p>`;
+      : "";
 
   const parameterDocsHtml =
     item.parameterDocs.length > 0
@@ -214,7 +215,7 @@ const renderItemCard = (item: DocumentationItem): string => {
     .map((member) => {
       const docs = member.documentation
         ? `<div class="member-doc">${renderMarkdownToHtml(member.documentation)}</div>`
-        : `<p class="doc-missing">No documentation.</p>`;
+        : "";
       return `<section id="${member.anchor}" class="member">
   <h6><code>${escapeHtml(member.signature)}</code></h6>
   ${docs}
@@ -242,19 +243,9 @@ const renderSidebarNode = (node: TocNode): string => {
     ? `<a href="#${node.module.anchor}">${escapeHtml(node.label)}</a>`
     : `<span>${escapeHtml(node.label)}</span>`;
   const childNodes = node.children.map(renderSidebarNode).join("\n");
-  const itemLinks = node.module
-    ? collectAllModuleItems(node.module)
-        .map(
-          (item) =>
-            `<li><a href="#${item.anchor}"><code>${escapeHtml(item.kind)}</code> ${escapeHtml(item.name)}</a></li>`,
-        )
-        .join("\n")
-    : "";
   const shouldCollapse = node.depth > 1;
   const open = shouldCollapse ? "" : " open";
-  const body = childNodes || itemLinks
-    ? `<ul>${itemLinks}${childNodes}</ul>`
-    : "";
+  const body = childNodes ? `<ul>${childNodes}</ul>` : "";
 
   return `<li>
   <details${open}>
@@ -270,9 +261,12 @@ const renderTopToc = (modules: readonly ModuleDocumentationSection[]): string =>
   <ul>
     ${modules
       .map((moduleDoc) => {
-        const counts = collectKindSections(moduleDoc)
+        const counts = collectAllModuleItems(moduleDoc)
+          .length > 0
+          ? collectKindSections(moduleDoc)
           .map((section) => `${section.title}: ${section.items.length}`)
-          .join(" | ");
+          .join(" | ")
+          : "No public API items";
         return `<li><a href="#${moduleDoc.anchor}"><code>mod</code> ${escapeHtml(
           moduleDoc.id,
         )}</a><span class="toc-counts">${escapeHtml(counts)}</span></li>`;
@@ -285,7 +279,7 @@ const renderModuleSection = (moduleDoc: ModuleDocumentationSection): string => {
   const moduleDocs =
     moduleDoc.documentation !== undefined
       ? `<div class="doc-body">${renderMarkdownToHtml(moduleDoc.documentation)}</div>`
-      : `<p class="doc-missing">No module documentation.</p>`;
+      : "";
   const kindSections = collectKindSections(moduleDoc);
 
   return `<section id="${moduleDoc.anchor}" class="module-section">
@@ -315,23 +309,24 @@ export const renderDocumentationHtml = ({
   <title>${escapeHtml(model.entryModule)} Documentation</title>
   <style>
     :root {
-      --bg: #f7f6f2;
+      --bg: #f2f5f3;
       --surface: #ffffff;
-      --surface-soft: #f8faf8;
-      --ink: #1f2528;
-      --muted: #586068;
-      --line: #d5dcd7;
-      --accent: #0b7285;
-      --accent-soft: #dbf0f5;
-      --code-bg: #edf1ed;
+      --surface-soft: #f6f8f7;
+      --ink: #1a2124;
+      --muted: #5f676e;
+      --line: #dce3df;
+      --line-soft: #e8eeea;
+      --accent: #136f63;
+      --accent-soft: #ebf4f0;
+      --code-bg: #f1f4f2;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
     body {
       font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
       background:
-        radial-gradient(circle at 10% -10%, #ddece6 0%, transparent 30%),
-        linear-gradient(180deg, #f3f6ef 0%, var(--bg) 40%);
+        radial-gradient(circle at 10% -10%, #e5efe9 0%, transparent 36%),
+        linear-gradient(180deg, #f4f7f3 0%, var(--bg) 52%);
       color: var(--ink);
       line-height: 1.55;
       padding: 1.1rem;
@@ -340,15 +335,14 @@ export const renderDocumentationHtml = ({
       max-width: 1400px;
       margin: 0 auto;
       background: var(--surface);
-      border: 1px solid var(--line);
+      border: 1px solid var(--line-soft);
       border-radius: 16px;
-      box-shadow: 0 20px 35px rgba(15, 23, 42, 0.08);
-      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
     }
     .hero {
       padding: 1.5rem;
-      border-bottom: 1px solid var(--line);
-      background: radial-gradient(circle at top right, var(--accent-soft), #ffffff 58%);
+      border-bottom: 1px solid var(--line-soft);
+      background: radial-gradient(circle at top right, var(--accent-soft), #ffffff 62%);
     }
     h1, h2, h3, h4, h5, h6 { margin: 0.65rem 0; line-height: 1.2; }
     h1 { font-size: 1.9rem; }
@@ -362,32 +356,25 @@ export const renderDocumentationHtml = ({
     }
     .sidebar {
       display: none;
-      border-right: 1px solid var(--line);
+      border-right: 1px solid var(--line-soft);
       background: var(--surface-soft);
-      padding: 1rem;
+      padding: 0.9rem 0.85rem;
     }
     .sidebar h3 { margin-top: 0; color: var(--ink); }
-    .sidebar-scroll {
-      max-height: calc(100vh - 5rem);
-      overflow: auto;
-      position: sticky;
-      top: 1rem;
-      padding-right: 0.5rem;
-    }
     .sidebar ul {
       margin: 0;
-      padding-left: 1rem;
+      padding-left: 0.9rem;
       list-style: none;
     }
     .sidebar li { margin: 0.25rem 0; }
-    .sidebar summary { cursor: pointer; font-weight: 600; }
+    .sidebar summary { cursor: pointer; font-weight: 560; color: #4b545c; }
     .sidebar summary a { font-weight: 600; }
     .content {
       padding: 1rem 1.4rem 1.5rem;
     }
     .toc-top {
       background: var(--surface-soft);
-      border: 1px solid var(--line);
+      border: 1px solid var(--line-soft);
       border-radius: 10px;
       padding: 0.9rem 1rem;
       margin-bottom: 1rem;
@@ -402,31 +389,32 @@ export const renderDocumentationHtml = ({
     .toc-top li { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; }
     .toc-counts { color: var(--muted); font-size: 0.85rem; }
     .module-section {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 1rem;
+      border: 1px solid var(--line-soft);
+      border-radius: 9px;
+      padding: 1rem 1rem 0.9rem;
       margin-bottom: 1rem;
-      background: linear-gradient(180deg, #ffffff 0%, #fdfefd 100%);
+      background: #ffffff;
     }
     .module-section > header {
-      border-bottom: 1px dashed var(--line);
+      border-bottom: 1px solid var(--line-soft);
       margin-bottom: 0.8rem;
       padding-bottom: 0.4rem;
     }
     .kind-section + .kind-section {
-      border-top: 1px solid var(--line);
+      border-top: 1px solid var(--line-soft);
       margin-top: 1rem;
       padding-top: 0.8rem;
     }
     .doc-item {
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      background: #fff;
-      padding: 0.85rem 0.9rem;
-      margin: 0.7rem 0;
+      border: 1px solid var(--line-soft);
+      border-left: 3px solid #c5ddd3;
+      background: #ffffff;
+      border-radius: 7px;
+      padding: 0.72rem 0.8rem;
+      margin: 0.62rem 0;
     }
     .item-meta {
-      border-top: 1px dashed var(--line);
+      border-top: 1px solid var(--line-soft);
       margin-top: 0.75rem;
       padding-top: 0.65rem;
     }
@@ -436,14 +424,14 @@ export const renderDocumentationHtml = ({
     }
     .item-meta li { margin: 0.45rem 0; }
     .member {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fcfefd;
-      padding: 0.5rem 0.65rem;
+      border: 1px solid #ecf1ee;
+      border-radius: 6px;
+      background: #fbfdfc;
+      padding: 0.48rem 0.62rem;
       margin: 0.5rem 0;
     }
     .doc-body p:first-child { margin-top: 0.2rem; }
-    .doc-missing { color: var(--muted); }
+    .doc-body p { color: #273136; }
     .member-doc p { margin: 0.35rem 0; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
@@ -463,7 +451,15 @@ export const renderDocumentationHtml = ({
       .layout {
         grid-template-columns: 310px minmax(0, 1fr);
       }
-      .sidebar { display: block; }
+      .sidebar {
+        display: block;
+        position: sticky;
+        top: 0.9rem;
+        align-self: start;
+        max-height: calc(100vh - 1.8rem);
+        overflow: auto;
+      }
+      .toc-top { display: none; }
       .content { padding: 1.2rem 1.6rem 1.8rem; }
     }
     @media (max-width: 820px) {
@@ -482,12 +478,10 @@ export const renderDocumentationHtml = ({
     </header>
     <div class="layout">
       <aside class="sidebar">
-        <div class="sidebar-scroll">
-          <h3>Docs Index</h3>
-          <ul>
-            ${sidebar}
-          </ul>
-        </div>
+        <h3>Docs Index</h3>
+        <ul>
+          ${sidebar}
+        </ul>
       </aside>
       <article class="content">
         ${topToc}
