@@ -58,7 +58,7 @@ impl String
     var index = 0
     var count = 0
     let source = self.bytes.raw_storage()
-    while index < self.byte_count do:
+    while index < self.byte_count:
       let read = decode_utf8_at(source, self.byte_count, index)
       count = count + 1
       index = index + read.width
@@ -69,7 +69,7 @@ impl String
     let source = self.raw_bytes()
     var index = 0
     var count = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       index = next_grapheme_boundary(source, self.byte_count, index)
       count = count + 1
     count
@@ -108,7 +108,7 @@ impl String
         self.byte_count,
         normalize_range_end_exclusive(range, self.byte_count)
       )
-    if start >= end then:
+    if start >= end:
       return new_string_slice(self, 0, 0)
     new_string_slice(self, start, end - start)
 
@@ -127,8 +127,8 @@ impl String
     StringGraphemeSequence { source: self }
 
   /// Returns the byte at the requested index, or `None` when the index is out of bounds.
-  api fn byte_at(self, { at index: i32 }) -> Option<i32>
-    if index < 0 then:
+  api fn get_byte(self, index: i32) -> Option<i32>
+    if index < 0:
       return None {}
     match(self.bytes.get(index))
       Some { value }:
@@ -142,16 +142,16 @@ impl String
 
   /// Returns true when both strings have identical bytes.
   api fn equals(self, other: String): () -> bool
-    if self.byte_count != other.byte_count then:
+    if self.byte_count != other.byte_count:
       return false
-    if self.byte_count == 0 then:
+    if self.byte_count == 0:
       return true
 
     let self_source = self.bytes.raw_storage()
     let other_source = other.bytes.raw_storage()
     var index = 0
-    while index < self.byte_count do:
-      if __array_get(self_source, index) != __array_get(other_source, index) then:
+    while index < self.byte_count:
+      if __array_get(self_source, index) != __array_get(other_source, index):
         return false
       index = index + 1
     true
@@ -165,22 +165,22 @@ impl String
     let source = self.bytes.raw_storage()
     var index = 0
     var hash = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       hash = hash * 31 + __array_get(source, index)
       index = index + 1
     hash
 
   /// Returns the rune at the requested rune index.
   api fn rune_at(self, { index: i32 }) -> Option<i32>
-    if index < 0 then:
+    if index < 0:
       return None {}
 
     var byte_index = 0
     var rune_index = 0
     let source = self.bytes.raw_storage()
-    while byte_index < self.byte_count do:
+    while byte_index < self.byte_count:
       let read = decode_utf8_at(source, self.byte_count, byte_index)
-      if rune_index == index then:
+      if rune_index == index:
         return Some<i32> { value: read.codepoint }
       rune_index = rune_index + 1
       byte_index = byte_index + read.width
@@ -188,17 +188,17 @@ impl String
 
   /// Returns a substring using byte offsets.
   api fn slice_bytes(self, start: i32, len: i32): () -> String
-    if len <= 0 then:
+    if len <= 0:
       return empty_string()
 
     let clamped_start = if start < 0 then: 0 else: start
-    if clamped_start >= self.byte_count then:
+    if clamped_start >= self.byte_count:
       return empty_string()
 
     let raw_end = clamped_start + len
     let end = if raw_end > self.byte_count then: self.byte_count else: raw_end
     let slice_len = end - clamped_start
-    if slice_len <= 0 then:
+    if slice_len <= 0:
       return empty_string()
 
     let source = self.bytes.raw_storage()
@@ -213,9 +213,9 @@ impl String
 
   /// Returns a substring using rune offsets.
   api fn slice_runes(self, start: i32, len: i32): () -> String
-    if len <= 0 then:
+    if len <= 0:
       return empty_string()
-    if start < 0 then:
+    if start < 0:
       return empty_string()
 
     let target_end = start + len
@@ -224,10 +224,10 @@ impl String
     var slice_start = -1
     var slice_end = -1
     let source = self.bytes.raw_storage()
-    while byte_index < self.byte_count do:
-      if rune_index == start then:
+    while byte_index < self.byte_count:
+      if rune_index == start:
         slice_start = byte_index
-      if rune_index == target_end then:
+      if rune_index == target_end:
         slice_end = byte_index
         break
 
@@ -235,12 +235,12 @@ impl String
       byte_index = byte_index + read.width
       rune_index = rune_index + 1
 
-    if slice_start < 0 then:
+    if slice_start < 0:
       return empty_string()
 
     let final_end = if slice_end < 0 then: byte_index else: slice_end
     let slice_len = final_end - slice_start
-    if slice_len <= 0 then:
+    if slice_len <= 0:
       return empty_string()
 
     let storage = new_fixed_array<i32>(slice_len)
@@ -254,30 +254,28 @@ impl String
 
   /// Returns the index of the first matching rune.
   api fn find_rune(self, { rune: i32, from?: StringIndex }) -> Option<StringIndex>
-    if rune < 0 then:
-      return None {}
-    if rune > 1114111 then:
+    if rune < 0 or rune > 1114111:
       return None {}
 
     let start = from ?? self.start_index()
     let index = start.to_i32()
-    if index < 0 or index > self.byte_count then:
+    if index < 0 or index > self.byte_count:
       return None {}
-    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), index) then:
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), index):
       return None {}
 
     let source = self.bytes.raw_storage()
     var cursor = index
-    while cursor < self.byte_count do:
+    while cursor < self.byte_count:
       let read = decode_utf8_at(source, self.byte_count, cursor)
-      if read.codepoint == rune then:
+      if read.codepoint == rune:
         return Some<StringIndex> { value: make_string_index(cursor) }
       cursor = cursor + read.width
     None {}
 
   /// Returns true when the value begins with the provided prefix.
   api fn starts_with(self, { prefix: StringSlice }) -> bool
-    if prefix.byte_len() > self.byte_count then:
+    if prefix.byte_len() > self.byte_count:
       return false
     bytes_match_slice_at(self.raw_bytes(), prefix, 0)
 
@@ -288,7 +286,7 @@ impl String
   /// Returns true when the value ends with the provided suffix.
   api fn ends_with(self, { suffix: StringSlice }) -> bool
     let suffix_len = suffix.byte_len()
-    if suffix_len > self.byte_count then:
+    if suffix_len > self.byte_count:
       return false
     let start = self.byte_count - suffix_len
     bytes_match_slice_at(self.raw_bytes(), suffix, start)
@@ -313,9 +311,9 @@ impl String
   api fn contains(self, { where pred: (rune: i32) -> bool }) -> bool
     let source = self.raw_bytes()
     var index = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       let read = decode_utf8_at(source, self.byte_count, index)
-      if pred(read.codepoint) then:
+      if pred(read.codepoint):
         return true
       index = index + read.width
     false
@@ -324,10 +322,10 @@ impl String
   api fn find(self, { substring: StringSlice, from?: StringIndex }) -> Option<StringIndex>
     let start = from ?? self.start_index()
     let start_value = start.to_i32()
-    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start_value) then:
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start_value):
       return None {}
     let match_index = find_substring_from(self, substring, start_value)
-    if match_index < 0 then:
+    if match_index < 0:
       return None {}
     Some<StringIndex> { value: make_string_index(match_index) }
 
@@ -339,10 +337,10 @@ impl String
   api fn rfind(self, { substring: StringSlice, to?: StringIndex }) -> Option<StringIndex>
     let end = to ?? self.end_index()
     let end_value = end.to_i32()
-    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), end_value) then:
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), end_value):
       return None {}
     let match_index = find_substring_to(self, substring, end_value)
-    if match_index < 0 then:
+    if match_index < 0:
       return None {}
     Some<StringIndex> { value: make_string_index(match_index) }
 
@@ -354,10 +352,10 @@ impl String
   api fn find_range(self, { substring: StringSlice, from?: StringIndex }) -> Option<Range>
     let start = from ?? self.start_index()
     let start_value = start.to_i32()
-    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start_value) then:
+    if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start_value):
       return None {}
     let match_index = find_substring_from(self, substring, start_value)
-    if match_index < 0 then:
+    if match_index < 0:
       return None {}
 
     let end = match_index + substring.byte_len()
@@ -428,19 +426,19 @@ impl String
     var start = 0
     var index = 0
     var splits = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       let read = decode_utf8_at(source, self.byte_count, index)
       let can_split = limit < 0 or splits < limit
-      if can_split and pred(read.codepoint) then:
+      if can_split and pred(read.codepoint):
         let length = index - start
-        if allow_empty or length > 0 then:
+        if allow_empty or length > 0:
           parts.push(new_string_slice(self, start, length))
         start = index + read.width
         splits = splits + 1
       index = index + read.width
 
     let tail_len = self.byte_count - start
-    if allow_empty or tail_len > 0 then:
+    if allow_empty or tail_len > 0:
       parts.push(new_string_slice(self, start, tail_len))
     parts
 
@@ -451,18 +449,20 @@ impl String
     let ~parts = Array<StringSlice>::with_capacity(4)
     var start = 0
     var index = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       let read = decode_utf8_at(source, self.byte_count, index)
-      if read.codepoint == 10 then:
+      if read.codepoint == 10:
         let boundary = if include_ends then: index + read.width else: index
         parts.push(new_string_slice(self, start, boundary - start))
         start = index + read.width
       index = index + read.width
 
-    if start < self.byte_count then:
-      parts.push(new_string_slice(self, start, self.byte_count - start))
-    elif: self.byte_count == 0 then:
-      parts.push(new_string_slice(self, 0, 0))
+    if
+      start < self.byte_count:
+        parts.push(new_string_slice(self, start, self.byte_count - start))
+      self.byte_count == 0:
+        parts.push(new_string_slice(self, 0, 0))
+
     parts
 
   /// Splits the text into whitespace-delimited words.
@@ -471,18 +471,18 @@ impl String
     let ~parts = Array<StringSlice>::with_capacity(4)
     var start = -1
     var index = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       let read = decode_utf8_at(source, self.byte_count, index)
-      if is_whitespace_rune(read.codepoint) then:
-        if start >= 0 then:
+      if is_whitespace_rune(read.codepoint):
+        if start >= 0:
           parts.push(new_string_slice(self, start, index - start))
           start = -1
       else:
-        if start < 0 then:
+        if start < 0:
           start = index
       index = index + read.width
 
-    if start >= 0 then:
+    if start >= 0:
       parts.push(new_string_slice(self, start, self.byte_count - start))
     parts
 
@@ -492,25 +492,25 @@ impl String
 
   /// Returns a trimmed copy.
   api fn trimmed(self, { chars: CharSet }) -> String
-    if self.byte_count == 0 then:
+    if self.byte_count == 0:
       return self
 
     let source = self.raw_bytes()
     var start = 0
-    while start < self.byte_count do:
+    while start < self.byte_count:
       let read = decode_utf8_at(source, self.byte_count, start)
-      if not rune_in_charset(chars, read.codepoint) then:
+      if not rune_in_charset(chars, read.codepoint):
         break
       start = start + read.width
 
-    if start >= self.byte_count then:
+    if start >= self.byte_count:
       return empty_string()
 
     var end = self.byte_count
-    while end > start do:
+    while end > start:
       let prev = previous_rune_boundary(source, end)
       let read = decode_utf8_at(source, self.byte_count, prev)
-      if not rune_in_charset(chars, read.codepoint) then:
+      if not rune_in_charset(chars, read.codepoint):
         break
       end = prev
 
@@ -530,13 +530,13 @@ impl String
 
   /// Returns a lowercase ASCII copy of this string.
   api fn lowered(self): () -> String
-    if self.byte_count == 0 then:
+    if self.byte_count == 0:
       return self
 
     let source = self.bytes.raw_storage()
     let out = new_fixed_array<i32>(self.byte_count)
     var index = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       __array_set(out, index, to_ascii_lower(__array_get(source, index)))
       index = index + 1
     new_string(out)
@@ -549,13 +549,13 @@ impl String
 
   /// Returns an uppercase ASCII copy of this string.
   api fn uppered(self): () -> String
-    if self.byte_count == 0 then:
+    if self.byte_count == 0:
       return self
 
     let source = self.bytes.raw_storage()
     let out = new_fixed_array<i32>(self.byte_count)
     var index = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       __array_set(out, index, to_ascii_upper(__array_get(source, index)))
       index = index + 1
     new_string(out)
@@ -571,9 +571,9 @@ impl String
     self,
     { old: String, with replacement: String, max_replacements?: i32 }
   ): () -> String
-    if old.byte_count <= 0 then:
+    if old.byte_count <= 0:
       return self
-    if self.byte_count == 0 then:
+    if self.byte_count == 0:
       return self
 
     let source = self.bytes.raw_storage()
@@ -582,7 +582,7 @@ impl String
     let ~out = Array<i32>::with_capacity(self.byte_count)
     var index = 0
     var replacement_count = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       let has_capacity = (index + old.byte_count) <= self.byte_count
       let can_replace_more = match(max_replacements)
         Some<i32> { value }:
@@ -590,7 +590,7 @@ impl String
         None:
           true
 
-      if has_capacity and can_replace_more and bytes_match_at(source, old_source, index, old.byte_count) then:
+      if has_capacity and can_replace_more and bytes_match_at(source, old_source, index, old.byte_count):
         append_bytes(out, replacement_source, replacement.byte_count)
         index = index + old.byte_count
         replacement_count = replacement_count + 1
@@ -610,16 +610,16 @@ impl String
 
   /// Returns a new string repeated `count` times.
   api fn repeat(self, { count: i32 }) -> String
-    if count <= 0 then:
+    if count <= 0:
       return empty_string()
-    if self.byte_count == 0 then:
+    if self.byte_count == 0:
       return self
 
     let capacity = self.byte_count * count
     let ~out = Array<i32>::with_capacity(capacity)
     let source = self.raw_bytes()
     var times = 0
-    while times < count do:
+    while times < count:
       append_bytes(out, source, self.byte_count)
       times = times + 1
     new_string(out.to_fixed_array())
@@ -628,12 +628,12 @@ impl String
   api fn pad_left(self, { width: i32, with?: i32 }) -> String
     let pad_rune = with ?? 32
     let needed = width - self.rune_len()
-    if needed <= 0 then:
+    if needed <= 0:
       return self
 
     let ~bytes = Array<i32>::with_capacity(self.byte_count + needed * 4)
     var index = 0
-    while index < needed do:
+    while index < needed:
       append_codepoint_mut(bytes, pad_rune)
       index = index + 1
     append_bytes(bytes, self.raw_bytes(), self.byte_count)
@@ -643,13 +643,13 @@ impl String
   api fn pad_right(self, { width: i32, with?: i32 }) -> String
     let pad_rune = with ?? 32
     let needed = width - self.rune_len()
-    if needed <= 0 then:
+    if needed <= 0:
       return self
 
     let ~bytes = Array<i32>::with_capacity(self.byte_count + needed * 4)
     append_bytes(bytes, self.raw_bytes(), self.byte_count)
     var index = 0
-    while index < needed do:
+    while index < needed:
       append_codepoint_mut(bytes, pad_rune)
       index = index + 1
     new_string(bytes.to_fixed_array())
@@ -662,50 +662,50 @@ impl String
       None:
         10
 
-    if base < 2 or base > 36 then:
+    if base < 2 or base > 36:
       return Err<ParseIntError> { error: ParseIntError { code: 1 } }
-    if self.byte_count == 0 then:
+    if self.byte_count == 0:
       return Err<ParseIntError> { error: ParseIntError { code: 2 } }
 
     let source = self.bytes.raw_storage()
     var index = 0
     var sign = 1
     let first = __array_get(source, 0)
-    if first == 45 then:
+    if first == 45:
       sign = -1
       index = 1
-    elif: first == 43 then:
+    if first == 43:
       index = 1
 
-    if index >= self.byte_count then:
+    if index >= self.byte_count:
       return Err<ParseIntError> { error: ParseIntError { code: 2 } }
 
     let max_i32 = 2147483647
     let min_i32 = -2147483647 - 1
     var value = 0
-    while index < self.byte_count do:
+    while index < self.byte_count:
       let digit = parse_digit(__array_get(source, index))
-      if digit < 0 or digit >= base then:
+      if digit < 0 or digit >= base:
         return Err<ParseIntError> { error: ParseIntError { code: 3 } }
 
-      if sign > 0 then:
+      if sign > 0:
         let max_before_mul = max_i32 / base
-        if value > max_before_mul then:
+        if value > max_before_mul:
           return Err<ParseIntError> { error: ParseIntError { code: 4 } }
 
         let next = value * base
         let max_allowed = max_i32 - digit
-        if next > max_allowed then:
+        if next > max_allowed:
           return Err<ParseIntError> { error: ParseIntError { code: 4 } }
         value = next + digit
       else:
         let min_before_mul = min_i32 / base
-        if value < min_before_mul then:
+        if value < min_before_mul:
           return Err<ParseIntError> { error: ParseIntError { code: 4 } }
 
         let next = value * base
         let min_allowed = min_i32 + digit
-        if next < min_allowed then:
+        if next < min_allowed:
           return Err<ParseIntError> { error: ParseIntError { code: 4 } }
         value = next - digit
       index = index + 1
@@ -714,27 +714,27 @@ impl String
 
   /// Parses this string as a floating-point number.
   api fn parse_float(self): () -> Result<f64, ParseFloatError>
-    if self.byte_count == 0 then:
+    if self.byte_count == 0:
       return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
 
     let source = self.raw_bytes()
     var index = 0
     var sign = 1.0
     let first = __array_get(source, 0)
-    if first == 45 then:
+    if first == 45:
       sign = -1.0
       index = 1
-    elif: first == 43 then:
+    if first == 43:
       index = 1
 
-    if index >= self.byte_count then:
+    if index >= self.byte_count:
       return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
 
     var int_part = 0.0
     var saw_digit = false
-    while index < self.byte_count do:
+    while index < self.byte_count:
       let digit = parse_digit(__array_get(source, index))
-      if digit < 0 or digit > 9 then:
+      if digit < 0 or digit > 9:
         break
       int_part = int_part * 10.0 + digit_to_f64(digit)
       saw_digit = true
@@ -742,52 +742,52 @@ impl String
 
     var frac_part = 0.0
     var frac_scale = 1.0
-    if index < self.byte_count and __array_get(source, index) == 46 then:
+    if index < self.byte_count and __array_get(source, index) == 46:
       index = index + 1
-      while index < self.byte_count do:
+      while index < self.byte_count:
         let digit = parse_digit(__array_get(source, index))
-        if digit < 0 or digit > 9 then:
+        if digit < 0 or digit > 9:
           break
         frac_part = frac_part * 10.0 + digit_to_f64(digit)
         frac_scale = frac_scale * 10.0
         saw_digit = true
         index = index + 1
 
-    if not saw_digit then:
+    if not saw_digit:
       return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
 
     var exponent = 0
     var exponent_sign = 1
-    if index < self.byte_count then:
+    if index < self.byte_count:
       let exp_marker = __array_get(source, index)
-      if exp_marker == 101 or exp_marker == 69 then:
+      if exp_marker == 101 or exp_marker == 69:
         index = index + 1
-        if index >= self.byte_count then:
+        if index >= self.byte_count:
           return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
 
         let exp_sign_byte = __array_get(source, index)
-        if exp_sign_byte == 45 then:
+        if exp_sign_byte == 45:
           exponent_sign = -1
           index = index + 1
-        elif: exp_sign_byte == 43 then:
+        if exp_sign_byte == 43:
           index = index + 1
 
-        if index >= self.byte_count then:
+        if index >= self.byte_count:
           return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
 
         var saw_exp_digit = false
-        while index < self.byte_count do:
+        while index < self.byte_count:
           let digit = parse_digit(__array_get(source, index))
-          if digit < 0 or digit > 9 then:
+          if digit < 0 or digit > 9:
             break
           exponent = exponent * 10 + digit
           saw_exp_digit = true
           index = index + 1
 
-        if not saw_exp_digit then:
+        if not saw_exp_digit:
           return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
 
-    if index != self.byte_count then:
+    if index != self.byte_count:
       return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
 
     let base = int_part + frac_part / frac_scale
@@ -836,7 +836,7 @@ impl Sequence<i32> for String
 impl Iterator<i32> for StringIterator
   /// Returns the next item from the iterator.
   api fn next(~self) -> Option<i32>
-    if self.index >= self.byte_count then:
+    if self.index >= self.byte_count:
       return None {}
     let read = decode_utf8_at(self.source, self.byte_count, self.index)
     self.index = self.index + read.width
@@ -850,56 +850,52 @@ impl Sequence<StringSlice> for StringGraphemeSequence
 impl Iterator<StringSlice> for StringGraphemeIterator
   /// Returns the next item from the iterator.
   api fn next(~self) -> Option<StringSlice>
-    if self.index >= self.source.byte_len() then:
+    if self.index >= self.source.byte_len():
       return None {}
     let start = self.index
     self.index = next_grapheme_boundary(self.source.raw_bytes(), self.source.byte_len(), self.index)
     Some<StringSlice> { value: new_string_slice(self.source, start, self.index - start) }
 
 fn decode_utf8_at(source: FixedArray<i32>, limit: i32, index: i32) -> Utf8Read
-  if index < 0 then:
-    return utf8_replacement()
-  if index >= limit then:
+  if index < 0 or index >= limit:
     return utf8_replacement()
 
   let b0 = __array_get(source, index)
-  if not is_byte(b0) then:
+  if not is_byte(b0):
     return utf8_replacement()
-  if b0 <= 127 then:
+  if b0 <= 127:
     return Utf8Read { codepoint: b0, width: 1 }
 
-  if b0 >= 194 and b0 <= 223 then:
-    let next_index = index + 1
-    if next_index >= limit then:
+  if b0 >= 194 and b0 <= 223:
+    if not is_valid_continuation_bytes({
+      source, limit, index: index + 1, count: 1
+    }):
       return utf8_replacement()
-    let b1 = __array_get(source, next_index)
-    if not is_continuation_byte(b1) then:
-      return utf8_replacement()
+    let b1 = __array_get(source, index + 1)
     let codepoint = (b0 - 192) * 64 + (b1 - 128)
     return Utf8Read { codepoint: codepoint, width: 2 }
 
-  if b0 >= 224 and b0 <= 239 then:
-    let next_index = index + 1
-    let next_index2 = index + 2
-    if next_index2 >= limit then:
+  if b0 >= 224 and b0 <= 239:
+    if not is_valid_continuation_bytes({
+      source, limit, index: index + 1, count: 2
+    }):
       return utf8_replacement()
-    let b1 = __array_get(source, next_index)
-    let b2 = __array_get(source, next_index2)
-    if not valid_three_byte_lead(b0, b1, b2) then:
+    let b1 = __array_get(source, index + 1)
+    let b2 = __array_get(source, index + 2)
+    if not valid_three_byte_lead_constraints(b0, b1):
       return utf8_replacement()
     let codepoint = (b0 - 224) * 4096 + (b1 - 128) * 64 + (b2 - 128)
     return Utf8Read { codepoint: codepoint, width: 3 }
 
-  if b0 >= 240 and b0 <= 244 then:
-    let next_index = index + 1
-    let next_index2 = index + 2
-    let next_index3 = index + 3
-    if next_index3 >= limit then:
+  if b0 >= 240 and b0 <= 244:
+    if not is_valid_continuation_bytes({
+      source, limit, index: index + 1, count: 3
+    }):
       return utf8_replacement()
-    let b1 = __array_get(source, next_index)
-    let b2 = __array_get(source, next_index2)
-    let b3 = __array_get(source, next_index3)
-    if not valid_four_byte_lead(b0, b1, b2, b3) then:
+    let b1 = __array_get(source, index + 1)
+    let b2 = __array_get(source, index + 2)
+    let b3 = __array_get(source, index + 3)
+    if not valid_four_byte_lead_constraints(b0, b1):
       return utf8_replacement()
     let codepoint = (b0 - 240) * 262144 + (b1 - 128) * 4096 + (b2 - 128) * 64 + (b3 - 128)
     return Utf8Read { codepoint: codepoint, width: 4 }
@@ -912,29 +908,30 @@ fn is_byte(value: i32) -> bool
 fn is_continuation_byte(value: i32) -> bool
   value >= 128 and value <= 191
 
-fn valid_three_byte_lead(b0: i32, b1: i32, b2: i32) -> bool
-  if not is_continuation_byte(b1) then:
+fn is_valid_continuation_bytes({
+  source: FixedArray<i32>,
+  index: i32,
+  count: i32,
+  limit: i32,
+}) -> bool
+  if (index + count) > limit:
     return false
-  if not is_continuation_byte(b2) then:
-    return false
-  if b0 == 224 and b1 < 160 then:
-    return false
-  if b0 == 237 and b1 > 159 then:
-    return false
+
+  var i = 0
+  while i < count:
+    if not is_continuation_byte(__array_get(source, index + i)):
+      return false
+    i = i + 1
   true
 
-fn valid_four_byte_lead(b0: i32, b1: i32, b2: i32, b3: i32) -> bool
-  if not is_continuation_byte(b1) then:
-    return false
-  if not is_continuation_byte(b2) then:
-    return false
-  if not is_continuation_byte(b3) then:
-    return false
-  if b0 == 240 and b1 < 144 then:
-    return false
-  if b0 == 244 and b1 > 143 then:
-    return false
-  true
+
+fn valid_three_byte_lead_constraints(b0: i32, b1: i32) -> bool
+  not (b0 == 224 and b1 < 160) and
+  not (b0 == 237 and b1 > 159)
+
+fn valid_four_byte_lead_constraints(b0: i32, b1: i32) -> bool
+  not (b0 == 240 and b1 < 144) and
+  not (b0 == 244 and b1 > 143)
 
 fn whitespace_charset() -> CharSet
   [32, 9, 10, 13]
@@ -959,18 +956,18 @@ fn normalize_range_end_exclusive(range: Range, length: i32) -> i32
   match(range.end)
     Some<i32> { value }:
       let clamped = clamp_slice_index(value, length)
-      if not range.include_end then:
+      if not range.include_end:
         return clamped
-      if clamped >= length then:
+      if clamped >= length:
         return length
       clamped + 1
     None:
       length
 
 fn clamp_slice_index(index: i32, length: i32) -> i32
-  if index < 0 then:
+  if index < 0:
     return 0
-  if index > length then:
+  if index > length:
     return length
   index
 
@@ -979,12 +976,10 @@ fn new_string_slice(source: String, start: i32, len: i32) -> StringSlice
   let start_index = clamp_slice_index(start, source_len)
   let max_len = source_len - start_index
   let clamped_len =
-    if len < 0 then:
-      0
-    elif: len > max_len then:
-      max_len
-    else:
-      len
+    if
+      len < 0: 0
+      len > max_len: max_len
+      else: len
   StringSlice {
     source: source,
     start: start_index,
@@ -992,19 +987,19 @@ fn new_string_slice(source: String, start: i32, len: i32) -> StringSlice
   }
 
 fn advance_rune_index(value: String, cursor: i32, steps: i32) -> Option<StringIndex>
-  if cursor < 0 or cursor > value.byte_len() then:
+  if cursor < 0 or cursor > value.byte_len():
     return None {}
   let source = value.raw_bytes()
-  if not is_rune_boundary(source, value.byte_len(), cursor) then:
+  if not is_rune_boundary(source, value.byte_len(), cursor):
     return None {}
-  if steps == 0 then:
+  if steps == 0:
     return Some<StringIndex> { value: make_string_index(cursor) }
 
   var index = cursor
-  if steps > 0 then:
+  if steps > 0:
     var moved = 0
-    while moved < steps do:
-      if index >= value.byte_len() then:
+    while moved < steps:
+      if index >= value.byte_len():
         return None {}
       let read = decode_utf8_at(source, value.byte_len(), index)
       index = index + read.width
@@ -1012,35 +1007,35 @@ fn advance_rune_index(value: String, cursor: i32, steps: i32) -> Option<StringIn
     return Some<StringIndex> { value: make_string_index(index) }
 
   var moved = 0
-  while moved > steps do:
-    if index <= 0 then:
+  while moved > steps:
+    if index <= 0:
       return None {}
     index = previous_rune_boundary(source, index)
     moved = moved - 1
   Some<StringIndex> { value: make_string_index(index) }
 
 fn advance_grapheme_index(value: String, cursor: i32, steps: i32) -> Option<StringIndex>
-  if cursor < 0 or cursor > value.byte_len() then:
+  if cursor < 0 or cursor > value.byte_len():
     return None {}
   let source = value.raw_bytes()
-  if not is_rune_boundary(source, value.byte_len(), cursor) then:
+  if not is_rune_boundary(source, value.byte_len(), cursor):
     return None {}
-  if steps == 0 then:
+  if steps == 0:
     return Some<StringIndex> { value: make_string_index(cursor) }
 
   var index = cursor
-  if steps > 0 then:
+  if steps > 0:
     var moved = 0
-    while moved < steps do:
-      if index >= value.byte_len() then:
+    while moved < steps:
+      if index >= value.byte_len():
         return None {}
       index = next_grapheme_boundary(source, value.byte_len(), index)
       moved = moved + 1
     return Some<StringIndex> { value: make_string_index(index) }
 
   var moved = 0
-  while moved > steps do:
-    if index <= 0 then:
+  while moved > steps:
+    if index <= 0:
       return None {}
     index = previous_grapheme_boundary(source, value.byte_len(), index)
     moved = moved - 1
@@ -1048,38 +1043,38 @@ fn advance_grapheme_index(value: String, cursor: i32, steps: i32) -> Option<Stri
 
 fn previous_rune_boundary(source: FixedArray<i32>, index: i32) -> i32
   var cursor = index - 1
-  while cursor > 0 and is_continuation_byte(__array_get(source, cursor)) do:
+  while cursor > 0 and is_continuation_byte(__array_get(source, cursor)):
     cursor = cursor - 1
   if cursor < 0 then: 0 else: cursor
 
 fn is_rune_boundary(source: FixedArray<i32>, length: i32, index: i32) -> bool
-  if index < 0 or index > length then:
+  if index < 0 or index > length:
     return false
-  if index == 0 or index == length then:
+  if index == 0 or index == length:
     return true
   not is_continuation_byte(__array_get(source, index))
 
 fn clamp_index_to_rune_boundary(source: FixedArray<i32>, length: i32, index: i32) -> i32
   let clamped = clamp_slice_index(index, length)
-  if clamped <= 0 or clamped >= length then:
+  if clamped <= 0 or clamped >= length:
     return clamped
 
   var cursor = clamped
-  while cursor > 0 and is_continuation_byte(__array_get(source, cursor)) do:
+  while cursor > 0 and is_continuation_byte(__array_get(source, cursor)):
     cursor = cursor - 1
   cursor
 
 fn next_grapheme_boundary(source: FixedArray<i32>, length: i32, index: i32) -> i32
-  if index >= length then:
+  if index >= length:
     return length
 
   let head = decode_utf8_at(source, length, index)
   var cursor = index + head.width
   var previous = head.codepoint
   var regional_indicator_count = grapheme_regional_indicator_count_initial(previous)
-  while cursor < length do:
+  while cursor < length:
     let read = decode_utf8_at(source, length, cursor)
-    if should_join_grapheme(previous, read.codepoint, regional_indicator_count) then:
+    if should_join_grapheme(previous, read.codepoint, regional_indicator_count):
       cursor = cursor + read.width
       previous = read.codepoint
       regional_indicator_count = grapheme_regional_indicator_count_next(
@@ -1091,36 +1086,36 @@ fn next_grapheme_boundary(source: FixedArray<i32>, length: i32, index: i32) -> i
   cursor
 
 fn previous_grapheme_boundary(source: FixedArray<i32>, length: i32, index: i32) -> i32
-  if index <= 0 then:
+  if index <= 0:
     return 0
 
   var cursor = 0
   var prev = 0
-  while cursor < index do:
+  while cursor < index:
     prev = cursor
     cursor = next_grapheme_boundary(source, length, cursor)
   prev
 
 // Grapheme clustering rules used by grapheme_len/graphemes/grapheme_index.
 fn should_join_grapheme(previous: i32, next: i32, regional_indicator_count: i32) -> bool
-  if should_join_grapheme_non_regional(previous, next) then:
+  if should_join_grapheme_non_regional(previous, next):
     return true
-  if should_join_grapheme_regional_indicators(previous, next, regional_indicator_count) then:
+  if should_join_grapheme_regional_indicators(previous, next, regional_indicator_count):
     return true
   false
 
 fn should_join_grapheme_non_regional(previous: i32, next: i32) -> bool
-  if next == 8205 then:
+  if next == 8205:
     return true
-  if previous == 8205 then:
+  if previous == 8205:
     return true
-  if next >= 65024 and next <= 65039 then:
+  if next >= 65024 and next <= 65039:
     return true
-  if next >= 127995 and next <= 127999 then:
+  if next >= 127995 and next <= 127999:
     return true
-  if next >= 768 and next <= 879 then:
+  if next >= 768 and next <= 879:
     return true
-  if next >= 6832 and next <= 6911 then:
+  if next >= 6832 and next <= 6911:
     return true
   false
 
@@ -1129,9 +1124,9 @@ fn should_join_grapheme_regional_indicators(
   next: i32,
   regional_indicator_count: i32
 ) -> bool
-  if not is_regional_indicator(previous) then:
+  if not is_regional_indicator(previous):
     return false
-  if not is_regional_indicator(next) then:
+  if not is_regional_indicator(next):
     return false
   let pair_count = regional_indicator_count / 2
   let consumed = pair_count * 2
@@ -1139,12 +1134,12 @@ fn should_join_grapheme_regional_indicators(
   remainder == 1
 
 fn grapheme_regional_indicator_count_initial(codepoint: i32) -> i32
-  if is_regional_indicator(codepoint) then:
+  if is_regional_indicator(codepoint):
     return 1
   0
 
 fn grapheme_regional_indicator_count_next(current: i32, codepoint: i32) -> i32
-  if is_regional_indicator(codepoint) then:
+  if is_regional_indicator(codepoint):
     return current + 1
   0
 
@@ -1152,33 +1147,33 @@ fn is_regional_indicator(codepoint: i32) -> bool
   codepoint >= 127462 and codepoint <= 127487
 
 fn find_substring_from(value: String, substring: StringSlice, start: i32) -> i32
-  if substring.byte_len() == 0 then:
+  if substring.byte_len() == 0:
     return clamp_slice_index(start, value.byte_len())
-  if substring.byte_len() > value.byte_len() then:
+  if substring.byte_len() > value.byte_len():
     return -1
-  if start < 0 or start > value.byte_len() then:
+  if start < 0 or start > value.byte_len():
     return -1
 
   let source = value.raw_bytes()
   let limit = value.byte_len() - substring.byte_len()
   var index = start
-  while index <= limit do:
-    if bytes_match_slice_at(source, substring, index) then:
+  while index <= limit:
+    if bytes_match_slice_at(source, substring, index):
       return index
     index = index + 1
   -1
 
 fn find_substring_to(value: String, substring: StringSlice, end: i32) -> i32
-  if substring.byte_len() == 0 then:
+  if substring.byte_len() == 0:
     return clamp_slice_index(end, value.byte_len())
-  if substring.byte_len() > value.byte_len() then:
+  if substring.byte_len() > value.byte_len():
     return -1
 
   let clamped_end = clamp_slice_index(end, value.byte_len())
   let source = value.raw_bytes()
   var index = clamped_end - substring.byte_len()
-  while index >= 0 do:
-    if bytes_match_slice_at(source, substring, index) then:
+  while index >= 0:
+    if bytes_match_slice_at(source, substring, index):
       return index
     index = index - 1
   -1
@@ -1191,7 +1186,7 @@ fn split_on_substring(
   let allow_empty = keep_empty ?? false
   let limit = max_splits ?? -1
   let sep_len = separator.byte_len()
-  if sep_len <= 0 then:
+  if sep_len <= 0:
     let ~one = Array<StringSlice>::with_capacity(1)
     one.push(value.as_slice())
     return one
@@ -1202,11 +1197,11 @@ fn split_on_substring(
   var index = 0
   var splits = 0
   let max_index = value.byte_len() - sep_len
-  while index <= max_index do:
+  while index <= max_index:
     let can_split = limit < 0 or splits < limit
-    if can_split and bytes_match_slice_at(source, separator, index) then:
+    if can_split and bytes_match_slice_at(source, separator, index):
       let length = index - start
-      if allow_empty or length > 0 then:
+      if allow_empty or length > 0:
         parts.push(new_string_slice(value, start, length))
       start = index + sep_len
       index = start
@@ -1215,109 +1210,104 @@ fn split_on_substring(
       index = index + 1
 
   let tail_len = value.byte_len() - start
-  if allow_empty or tail_len > 0 then:
+  if allow_empty or tail_len > 0:
     parts.push(new_string_slice(value, start, tail_len))
   parts
 
 fn to_ascii_lower(value: i32) -> i32
-  if value >= 65 and value <= 90 then:
+  if value >= 65 and value <= 90:
     return value + 32
   value
 
 fn to_ascii_upper(value: i32) -> i32
-  if value >= 97 and value <= 122 then:
+  if value >= 97 and value <= 122:
     return value - 32
   value
 
 fn parse_digit(value: i32) -> i32
-  if value >= 48 and value <= 57 then:
+  if value >= 48 and value <= 57:
     return value - 48
-  if value >= 65 and value <= 90 then:
+  if value >= 65 and value <= 90:
     return value - 55
-  if value >= 97 and value <= 122 then:
+  if value >= 97 and value <= 122:
     return value - 87
   -1
 
 fn digit_to_f64(value: i32) -> f64
-  if value == 0 then:
+  if value == 0:
     return 0.0
-  if value == 1 then:
+  if value == 1:
     return 1.0
-  if value == 2 then:
+  if value == 2:
     return 2.0
-  if value == 3 then:
+  if value == 3:
     return 3.0
-  if value == 4 then:
+  if value == 4:
     return 4.0
-  if value == 5 then:
+  if value == 5:
     return 5.0
-  if value == 6 then:
+  if value == 6:
     return 6.0
-  if value == 7 then:
+  if value == 7:
     return 7.0
-  if value == 8 then:
+  if value == 8:
     return 8.0
-  if value == 9 then:
+  if value == 9:
     return 9.0
   0.0
 
 fn pow10_i32(value: i32) -> f64
-  if value == 0 then:
+  if value == 0:
     return 1.0
 
   var out = 1.0
   var index = 0
   let abs = if value < 0 then: 0 - value else: value
-  while index < abs do:
+  while index < abs:
     out = out * 10.0
     index = index + 1
 
-  if value < 0 then:
+  if value < 0:
     return 1.0 / out
   out
 
 fn build_escaped(value: String, include_quotes: bool) -> String
   let ~bytes = Array<i32>::with_capacity(value.byte_len() + 2)
-  if include_quotes then:
+  if include_quotes:
     bytes.push(34)
 
   let source = value.raw_bytes()
   var index = 0
-  while index < value.byte_len() do:
+  while index < value.byte_len():
     let read = decode_utf8_at(source, value.byte_len(), index)
     append_escaped_rune(bytes, read.codepoint)
     index = index + read.width
 
-  if include_quotes then:
+  if include_quotes:
     bytes.push(34)
   new_string(bytes.to_fixed_array())
 
 fn append_escaped_rune(~out: Array<i32>, rune: i32) -> void
-  if rune == 34 then:
-    out.push(92)
-    out.push(34)
-    return void
-  if rune == 92 then:
-    out.push(92)
-    out.push(92)
-    return void
-  if rune == 10 then:
-    out.push(92)
-    out.push(110)
-    return void
-  if rune == 13 then:
-    out.push(92)
-    out.push(114)
-    return void
-  if rune == 9 then:
-    out.push(92)
-    out.push(116)
-    return void
-  if rune < 32 then:
-    append_hex_escape(out, rune)
-    return void
-
-  append_codepoint_mut(out, rune)
+  if
+    rune == 34:
+      out.push(92)
+      out.push(34)
+    rune == 92:
+      out.push(92)
+      out.push(92)
+    rune == 10:
+      out.push(92)
+      out.push(110)
+    rune == 13:
+      out.push(92)
+      out.push(114)
+    rune == 9:
+      out.push(92)
+      out.push(116)
+    rune < 32:
+      append_hex_escape(out, rune)
+    else:
+      append_codepoint_mut(out, rune)
 
 fn append_hex_escape(~out: Array<i32>, rune: i32) -> void
   out.push(92)
@@ -1325,17 +1315,17 @@ fn append_hex_escape(~out: Array<i32>, rune: i32) -> void
   out.push(123)
 
   let raw = rune
-  if raw == 0 then:
+  if raw == 0:
     out.push(48)
   else:
     let ~digits = Array<i32>::with_capacity(8)
     var value = raw
-    while value > 0 do:
+    while value > 0:
       let digit = value - (value / 16) * 16
       digits.push(hex_digit(digit))
       value = value / 16
     var index = digits.len() - 1
-    while index >= 0 do:
+    while index >= 0:
       match(digits.get(index))
         Some<i32> { value }:
           out.push(value)
@@ -1346,7 +1336,7 @@ fn append_hex_escape(~out: Array<i32>, rune: i32) -> void
   out.push(125)
 
 fn hex_digit(value: i32) -> i32
-  if value < 10 then:
+  if value < 10:
     return 48 + value
   97 + (value - 10)
 
@@ -1357,8 +1347,8 @@ fn bytes_match_at(
   target_len: i32
 ) -> bool
   var cursor = 0
-  while cursor < target_len do:
-    if __array_get(source, index + cursor) != __array_get(target, cursor) then:
+  while cursor < target_len:
+    if __array_get(source, index + cursor) != __array_get(target, cursor):
       return false
     cursor = cursor + 1
   true
@@ -1372,15 +1362,15 @@ fn bytes_match_slice_at(
   let target_source = target.source.raw_bytes()
   let target_start = target.start
   var cursor = 0
-  while cursor < target_len do:
-    if __array_get(source, index + cursor) != __array_get(target_source, target_start + cursor) then:
+  while cursor < target_len:
+    if __array_get(source, index + cursor) != __array_get(target_source, target_start + cursor):
       return false
     cursor = cursor + 1
   true
 
 fn append_bytes(~out: Array<i32>, source: FixedArray<i32>, count: i32) -> void
   var index = 0
-  while index < count do:
+  while index < count:
     out.push(__array_get(source, index))
     index = index + 1
 
@@ -1390,33 +1380,33 @@ pub fn from_utf8({ bytes: Array<i32> }) -> Result<String, Utf8Error>
   let source = source_bytes.raw_storage()
   let len = source_bytes.len()
   var index = 0
-  while index < len do:
+  while index < len:
     let width = valid_utf8_width_at(source, len, index)
-    if width <= 0 then:
+    if width <= 0:
       return Err<Utf8Error> { error: Utf8Error { code: 1 } }
     index = index + width
   Ok<String> { value: new_string(source_bytes.to_fixed_array()) }
 
 fn append_codepoint_mut(~bytes: Array<i32>, codepoint: i32) -> void
-  if codepoint < 0 then:
+  if codepoint < 0:
     append_replacement_mut(bytes)
     return void
-  if codepoint <= 127 then:
+  if codepoint <= 127:
     bytes.push(codepoint)
     return void
-  if codepoint <= 2047 then:
+  if codepoint <= 2047:
     bytes.push(192 + (codepoint / 64))
     bytes.push(128 + (codepoint - (codepoint / 64) * 64))
     return void
-  if codepoint <= 65535 then:
-    if codepoint >= 55296 and codepoint <= 57343 then:
+  if codepoint <= 65535:
+    if codepoint >= 55296 and codepoint <= 57343:
       append_replacement_mut(bytes)
       return void
     bytes.push(224 + (codepoint / 4096))
     bytes.push(128 + ((codepoint / 64) - (codepoint / 4096) * 64))
     bytes.push(128 + (codepoint - (codepoint / 64) * 64))
     return void
-  if codepoint <= 1114111 then:
+  if codepoint <= 1114111:
     bytes.push(240 + (codepoint / 262144))
     bytes.push(128 + ((codepoint / 4096) - (codepoint / 262144) * 64))
     bytes.push(128 + ((codepoint / 64) - (codepoint / 4096) * 64))
@@ -1429,7 +1419,7 @@ pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   let input_length = __array_len(from_bytes)
   let ~bytes = Array<i32>::with_capacity(input_length)
   var index = 0
-  while index < input_length do:
+  while index < input_length:
     let read = decode_utf8_at(from_bytes, input_length, index)
     append_codepoint_mut(bytes, read.codepoint)
     index = index + read.width
@@ -1445,41 +1435,37 @@ fn utf8_replacement() -> Utf8Read
   Utf8Read { codepoint: 65533, width: 1 }
 
 fn valid_utf8_width_at(source: FixedArray<i32>, limit: i32, index: i32) -> i32
-  if index < 0 or index >= limit then:
+  if index < 0 or index >= limit:
     return 0
 
   let b0 = __array_get(source, index)
-  if not is_byte(b0) then:
+  if not is_byte(b0):
     return 0
-  if b0 <= 127 then:
+  if b0 <= 127:
     return 1
 
-  if b0 >= 194 and b0 <= 223 then:
+  if b0 >= 194 and b0 <= 223:
     let next_index = index + 1
-    if next_index >= limit then:
+    if next_index >= limit:
       return 0
     let b1 = __array_get(source, next_index)
     if is_continuation_byte(b1) then: 2 else: 0
 
-  if b0 >= 224 and b0 <= 239 then:
-    let next_index = index + 1
-    let next_index2 = index + 2
-    if next_index2 >= limit then:
+  if b0 >= 224 and b0 <= 239:
+    if not is_valid_continuation_bytes({
+      source, limit, index: index + 1, count: 2
+    }):
       return 0
-    let b1 = __array_get(source, next_index)
-    let b2 = __array_get(source, next_index2)
-    if valid_three_byte_lead(b0, b1, b2) then: 3 else: 0
+    let b1 = __array_get(source, index + 1)
+    if valid_three_byte_lead_constraints(b0, b1) then: 3 else: 0
 
-  if b0 >= 240 and b0 <= 244 then:
-    let next_index = index + 1
-    let next_index2 = index + 2
-    let next_index3 = index + 3
-    if next_index3 >= limit then:
+  if b0 >= 240 and b0 <= 244:
+    if not is_valid_continuation_bytes({
+      source, limit, index: index + 1, count: 3
+    }):
       return 0
-    let b1 = __array_get(source, next_index)
-    let b2 = __array_get(source, next_index2)
-    let b3 = __array_get(source, next_index3)
-    if valid_four_byte_lead(b0, b1, b2, b3) then: 4 else: 0
+    let b1 = __array_get(source, index + 1)
+    if valid_four_byte_lead_constraints(b0, b1) then: 4 else: 0
 
   0
 
