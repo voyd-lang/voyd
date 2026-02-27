@@ -148,4 +148,35 @@ pub mod visible
       "src::pkg::visible::nested",
     ]);
   });
+
+  it("includes modules referenced by named pkg.voyd re-exports", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}pkg.voyd`]: `pub use self::visible::shown
+
+mod hidden
+  pub fn internal() -> i32
+    0
+
+mod visible
+  pub fn shown() -> i32
+    1
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}pkg.voyd`,
+      host,
+      roots: { src: root },
+    });
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    expect(diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toHaveLength(0);
+
+    const view = buildDocumentationView({ graph, semantics });
+    expect(view.entryModule).toBe("src::pkg");
+    expect(view.modules.map((module) => module.id)).toEqual([
+      "src::pkg",
+      "src::pkg::visible",
+    ]);
+  });
 });

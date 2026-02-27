@@ -158,9 +158,6 @@ const collectDirectExportedModuleIds = (
       if (!entry.moduleId) {
         return;
       }
-      if (entry.selectionKind !== "all" && entry.selectionKind !== "module") {
-        return;
-      }
       exportedModuleIds.push(entry.moduleId);
     });
   });

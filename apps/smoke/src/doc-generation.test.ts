@@ -117,6 +117,33 @@ const createPackageRootFixture = async (): Promise<{
   return { root, entryPath };
 };
 
+const createNamedReExportPackageRootFixture = async (): Promise<{
+  root: string;
+  entryPath: string;
+}> => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "voyd-doc-generation-pkg-reexport-"));
+  const srcRoot = path.join(root, "src");
+  const entryPath = path.join(srcRoot, "pkg.voyd");
+  await fs.mkdir(srcRoot, { recursive: true });
+  await fs.writeFile(
+    entryPath,
+    [
+      "pub use self::visible::shown",
+      "",
+      "mod hidden",
+      "  pub fn internal() -> i32",
+      "    0",
+      "",
+      "mod visible",
+      "  pub fn shown() -> i32",
+      "    1",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return { root, entryPath };
+};
+
 describe("smoke: sdk doc-generation", () => {
   it("generates HTML and JSON documentation outputs", async () => {
     const fixture = await createFixture();
@@ -253,6 +280,22 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("id=\"module-src-pkg-visible-nested\"");
       expect(html.content).not.toContain("id=\"module-src-pkg-hidden\"");
       expect(html.content).not.toContain("id=\"module-src-pkg-visible-hidden-nested\"");
+    } finally {
+      await fs.rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("renders modules referenced by named pkg.voyd re-exports", async () => {
+    const fixture = await createNamedReExportPackageRootFixture();
+
+    try {
+      const html = await generateDocumentation({
+        entryPath: fixture.entryPath,
+        format: "html",
+      });
+      expect(html.content).toContain("id=\"module-src-pkg\"");
+      expect(html.content).toContain("id=\"module-src-pkg-visible\"");
+      expect(html.content).not.toContain("id=\"module-src-pkg-hidden\"");
     } finally {
       await fs.rm(fixture.root, { recursive: true, force: true });
     }
