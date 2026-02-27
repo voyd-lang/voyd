@@ -7,6 +7,24 @@ const smokeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 const fixtureSrcRoot = path.join(smokeRoot, "fixtures", "source-level-pkg", "src");
 
 describe("smoke: source-level pkg definitions", () => {
+  it("keeps inline module scope for modules named pkg", async () => {
+    const sdk = createSdk();
+    const entryPath = path.join(fixtureSrcRoot, "inline_pkg_module.voyd");
+
+    const result = await sdk.compile({ entryPath });
+    if (!result.success) {
+      throw new Error(
+        result.diagnostics
+          .map((diagnostic) => `${diagnostic.code} ${diagnostic.message}`)
+          .join("\n"),
+      );
+    }
+    expect(result.success).toBe(true);
+
+    const output = await result.run<number>({ entryName: "main" });
+    expect(output).toBe(42);
+  });
+
   it("allows consuming subpackage exports through nested pkg.voyd", async () => {
     const sdk = createSdk();
     const entryPath = path.join(fixtureSrcRoot, "main.voyd");

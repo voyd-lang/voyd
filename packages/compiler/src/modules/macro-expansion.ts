@@ -1,4 +1,4 @@
-import { Form, IdentifierAtom, isForm } from "../parser/index.js";
+import { Form, IdentifierAtom, formCallsInternal, isForm } from "../parser/index.js";
 import { toSourceSpan } from "../semantics/utils.js";
 import { classifyTopLevelDecl } from "./use-decl.js";
 import { parseUsePaths, type NormalizedUseEntry } from "./use-path.js";
@@ -131,6 +131,19 @@ const indexExports = (exports: MacroDefinition[]): MacroExportTable => {
   return table;
 };
 
+const inlineModuleNamesFor = (module: ModuleNode): Set<string> => {
+  const entries = formCallsInternal(module.ast, "ast") ? module.ast.rest : [];
+  return new Set(
+    entries.flatMap((entry) => {
+      if (!isForm(entry)) {
+        return [];
+      }
+      const decl = classifyTopLevelDecl(entry);
+      return decl.kind === "inline-module-decl" ? [decl.name] : [];
+    }),
+  );
+};
+
 const collectMacroImports = ({
   module,
   entries,
@@ -143,6 +156,7 @@ const collectMacroImports = ({
   const imports = new Map<string, MacroDefinition>();
   const moduleIsPackageRoot =
     module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
+  const inlineModuleNames = inlineModuleNamesFor(module);
   entries.forEach((entry) => {
     if (!entry.hasExplicitPrefix) {
       return;
@@ -150,6 +164,13 @@ const collectMacroImports = ({
     if (entry.selectionKind === "module") {
       return;
     }
+    const firstSegment = entry.moduleSegments[0];
+    const preservesInlinePkgScope =
+      moduleIsPackageRoot &&
+      entry.anchorToSelf === true &&
+      (entry.parentHops ?? 0) === 0 &&
+      typeof firstSegment === "string" &&
+      inlineModuleNames.has(firstSegment);
 
     const resolvedPath = resolveModuleRequest(
       { segments: entry.moduleSegments, span: entry.span },
@@ -157,7 +178,7 @@ const collectMacroImports = ({
       {
         anchorToSelf: entry.anchorToSelf,
         parentHops: entry.parentHops ?? 0,
-        importerIsPackageRoot: moduleIsPackageRoot,
+        importerIsPackageRoot: moduleIsPackageRoot && !preservesInlinePkgScope,
       }
     );
     const moduleId = modulePathToString(resolvedPath);
@@ -206,6 +227,7 @@ const collectMacroReexports = ({
   const exports = new Map(localExports);
   const moduleIsPackageRoot =
     module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
+  const inlineModuleNames = inlineModuleNamesFor(module);
 
   entries
     .filter((entry) => entry.visibility === "pub")
@@ -216,6 +238,13 @@ const collectMacroReexports = ({
       if (entry.selectionKind === "module") {
         return;
       }
+      const firstSegment = entry.moduleSegments[0];
+      const preservesInlinePkgScope =
+        moduleIsPackageRoot &&
+        entry.anchorToSelf === true &&
+        (entry.parentHops ?? 0) === 0 &&
+        typeof firstSegment === "string" &&
+        inlineModuleNames.has(firstSegment);
 
       const resolvedPath = resolveModuleRequest(
         { segments: entry.moduleSegments, span: entry.span },
@@ -223,7 +252,7 @@ const collectMacroReexports = ({
         {
           anchorToSelf: entry.anchorToSelf,
           parentHops: entry.parentHops ?? 0,
-          importerIsPackageRoot: moduleIsPackageRoot,
+          importerIsPackageRoot: moduleIsPackageRoot && !preservesInlinePkgScope,
         }
       );
       const moduleId = modulePathToString(resolvedPath);

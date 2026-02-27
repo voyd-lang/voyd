@@ -35,7 +35,7 @@ export const isPackageRootModule = (
   }
   const sourcePackageRoot = options.sourcePackageRoot;
   if (!sourcePackageRoot) {
-    return true;
+    return path.segments.length === 1;
   }
   if (path.segments.length !== sourcePackageRoot.length + 1) {
     return false;

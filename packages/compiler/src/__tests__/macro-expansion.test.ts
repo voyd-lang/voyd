@@ -12,10 +12,10 @@ const createMemoryHost = (files: Record<string, string>): ModuleHost =>
 const expectCompileSuccess = (
   result: CompileProgramResult,
 ): Extract<CompileProgramResult, { success: true }> => {
-  expect(result.success).toBe(true);
   if (!result.success) {
     throw new Error(JSON.stringify(result.diagnostics, null, 2));
   }
+  expect(result.success).toBe(true);
   return result;
 };
 
@@ -139,6 +139,37 @@ pub src::base_macros::all
 
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(3);
+  });
+
+  it("preserves inline pkg scope when re-exporting macros from nested pkg.voyd", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const nestedPkgPath = `${root}${sep}pkgs${sep}arith${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use src::pkgs::arith::pkg::all
+
+pub fn main() -> f64
+  add_one(41.0)
+`,
+      [nestedPkgPath]: `
+mod macros
+  pub macro add_one(value)
+    syntax_template (+ $value 1.0)
+
+pub use self::macros::all
+`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
   });
 
   it("preserves literal numeric types when splicing macro arguments", async () => {

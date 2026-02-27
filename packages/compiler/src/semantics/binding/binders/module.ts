@@ -493,6 +493,37 @@ const isExplicitStdSubmoduleEntry = (entry: ParsedUseEntry): boolean =>
 const isStdSubmoduleModuleId = (moduleId: string): boolean =>
   moduleId.startsWith("std::") && moduleId !== "std::pkg";
 
+const inlineModuleNamesFor = (moduleForm: Form): Set<string> =>
+  new Set(
+    moduleForm.rest.flatMap((entry) => {
+      if (!isForm(entry)) {
+        return [];
+      }
+      const decl = classifyTopLevelDecl(entry);
+      return decl.kind === "inline-module-decl" ? [decl.name] : [];
+    }),
+  );
+
+const shouldPreserveInlinePkgScope = ({
+  entry,
+  ctx,
+}: {
+  entry: ParsedUseEntry;
+  ctx: BindingContext;
+}): boolean => {
+  if (!ctx.isPackageRoot) {
+    return false;
+  }
+  if (entry.anchorToSelf !== true || (entry.parentHops ?? 0) !== 0) {
+    return false;
+  }
+  const firstSegment = entry.moduleSegments[0];
+  return (
+    typeof firstSegment === "string" &&
+    inlineModuleNamesFor(ctx.module.ast).has(firstSegment)
+  );
+};
+
 const resolveDependencyPath = ({
   entry,
   ctx,
@@ -500,12 +531,13 @@ const resolveDependencyPath = ({
   entry: ParsedUseEntry;
   ctx: BindingContext;
 }): ModulePath | undefined => {
+  const preservesInlinePkgScope = shouldPreserveInlinePkgScope({ entry, ctx });
   const matches = ctx.module.dependencies.filter((dep) =>
     matchesDependencyPath({
       dependencyPath: dep.path,
       entry,
       currentModulePath: ctx.module.path,
-      currentModuleIsPackageRoot: ctx.isPackageRoot,
+      currentModuleIsPackageRoot: ctx.isPackageRoot && !preservesInlinePkgScope,
     }),
   );
   if (matches.length === 0) {
