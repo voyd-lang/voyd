@@ -55,9 +55,12 @@ describe("smoke: std input/output", () => {
 
     const output = await host.run<number>("io_success");
     expect(output).toBe(24);
-    expect(writes).toEqual([{ target: "stdout", value: "hello" }]);
+    expect(writes).toEqual([
+      { target: "stdout", value: "hello" },
+      { target: "stdout", value: "ok" },
+      { target: "stdout", value: "\\n" },
+    ]);
     expect(byteWrites).toEqual([
-      { target: "stdout", bytes: [111, 107, 10] },
       { target: "stderr", bytes: [7, 8] },
     ]);
     expect(flushes).toEqual(["stdout", "stderr"]);

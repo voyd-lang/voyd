@@ -419,7 +419,7 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
 );
 
 describe("default adapter conformance (unsupported capabilities)", () => {
-  it("marks fetch/input/output unsupported when no runtime implementation exists", async () => {
+  it("keeps input/output partially supported with per-op fallbacks when runtime APIs are missing", async () => {
     vi.stubGlobal("fetch", undefined);
     vi.stubGlobal("prompt", undefined);
     const table = buildTable([
@@ -439,21 +439,17 @@ describe("default adapter conformance (unsupported capabilities)", () => {
     expect(capabilitiesByEffect.get("std::fetch::Fetch")?.supported).toBe(
       false
     );
-    expect(capabilitiesByEffect.get("std::input::Input")?.supported).toBe(
-      false
-    );
-    expect(capabilitiesByEffect.get("std::output::Output")?.supported).toBe(
-      false
-    );
+    expect(capabilitiesByEffect.get("std::input::Input")?.supported).toBe(true);
+    expect(capabilitiesByEffect.get("std::output::Output")?.supported).toBe(true);
 
     await expect(
       invokeHandler(getHandler("std::fetch::Fetch", "request"), {})
     ).rejects.toThrow(/default fetch adapter is unavailable/i);
     await expect(
       invokeHandler(getHandler("std::input::Input", "read_line"), {})
-    ).rejects.toThrow(/default input adapter is unavailable/i);
+    ).rejects.toThrow(/does not implement op read_line/i);
     await expect(
       invokeHandler(getHandler("std::output::Output", "write"), {})
-    ).rejects.toThrow(/default output adapter is unavailable/i);
+    ).rejects.toThrow(/does not implement op write/i);
   });
 });

@@ -1844,32 +1844,6 @@ const inputCapabilityDefinition: CapabilityDefinition = {
     if (entries.length === 0) return 0;
     const inputSource = await createInputSource({ runtime, runtimeHooks });
 
-    const needsReadLine = entries.some((entry) => entry.opName === "read_line");
-    if (needsReadLine && !inputSource.readLine) {
-      return registerUnsupportedHandlers({
-        host,
-        effectId: INPUT_EFFECT_ID,
-        capability: "input",
-        runtime,
-        reason: inputSource.readLineUnavailableReason,
-        diagnostics,
-      });
-    }
-    const needsReadBytes = hasOpName({
-      entries,
-      opNames: INPUT_READ_BYTES_OP_NAMES,
-    });
-    if (needsReadBytes && !inputSource.readBytes) {
-      return registerUnsupportedHandlers({
-        host,
-        effectId: INPUT_EFFECT_ID,
-        capability: "input",
-        runtime,
-        reason: inputSource.readBytesUnavailableReason,
-        diagnostics,
-      });
-    }
-
     const implementedOps = new Set<string>();
     let registered = 0;
     if (inputSource.readLine) {
@@ -1954,19 +1928,6 @@ const outputCapabilityDefinition: CapabilityDefinition = {
     const entries = opEntries({ host, effectId: OUTPUT_EFFECT_ID });
     if (entries.length === 0) return 0;
     const outputSource = createOutputSource({ runtime, runtimeHooks });
-    if (!outputSource.write && !outputSource.writeBytes) {
-      const reason =
-        outputSource.writeUnavailableReason ||
-        outputSource.writeBytesUnavailableReason;
-      return registerUnsupportedHandlers({
-        host,
-        effectId: OUTPUT_EFFECT_ID,
-        capability: "output",
-        runtime,
-        reason,
-        diagnostics,
-      });
-    }
 
     const implementedOps = new Set<string>();
     let registered = 0;

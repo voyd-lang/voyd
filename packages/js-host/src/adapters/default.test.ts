@@ -744,7 +744,7 @@ describe("registerDefaultHostAdapters", () => {
     expect(flushes).toEqual(["stderr"]);
   });
 
-  it("registers unsupported input handlers when runtime lacks requested ops", async () => {
+  it("registers fallback input handlers when runtime lacks requested ops", async () => {
     const table = buildTable([
       { effectId: "std::input::Input", opName: "read_bytes", opId: 0 },
     ]);
@@ -758,15 +758,59 @@ describe("registerDefaultHostAdapters", () => {
     expect(
       report.capabilities.find((capability) => capability.effectId === "std::input::Input")
         ?.supported
-    ).toBe(false);
+    ).toBe(true);
 
     await expect(
       (async () =>
         getHandler("std::input::Input", "read_bytes")(tailContinuation, {}))()
-    ).rejects.toThrow(/default input adapter is unavailable on browser/i);
+    ).rejects.toThrow(/does not implement op read_bytes/i);
   });
 
-  it("registers unsupported output handlers when stream APIs are unavailable", async () => {
+  it("keeps input read_bytes active when read_line is unavailable", async () => {
+    const table = buildTable([
+      { effectId: "std::input::Input", opName: "read_line", opId: 0 },
+      { effectId: "std::input::Input", opName: "read_bytes", opId: 1 },
+      { effectId: "std::input::Input", opName: "is_tty", opId: 2 },
+    ]);
+    vi.stubGlobal("prompt", undefined);
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        runtimeHooks: {
+          readBytes: async () => Uint8Array.from([7, 8, 9]),
+          isInputTty: () => true,
+        },
+      },
+    });
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "std::input::Input")
+        ?.supported
+    ).toBe(true);
+
+    await expect(
+      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+        max_bytes: 2,
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true, value: [7, 8] },
+    });
+    expect(getHandler("std::input::Input", "is_tty")(tailContinuation)).toEqual({
+      kind: "tail",
+      value: true,
+    });
+    await expect(
+      (async () =>
+        getHandler("std::input::Input", "read_line")(tailContinuation, {
+          prompt: "name: ",
+        }))()
+    ).rejects.toThrow(/does not implement op read_line/i);
+  });
+
+  it("registers fallback output handlers when stream APIs are unavailable", async () => {
     const table = buildTable([
       { effectId: "std::output::Output", opName: "write", opId: 0 },
     ]);
@@ -779,12 +823,44 @@ describe("registerDefaultHostAdapters", () => {
     expect(
       report.capabilities.find((capability) => capability.effectId === "std::output::Output")
         ?.supported
-    ).toBe(false);
+    ).toBe(true);
 
     await expect(
       (async () =>
         getHandler("std::output::Output", "write")(tailContinuation, {}))()
-    ).rejects.toThrow(/default output adapter is unavailable on browser/i);
+    ).rejects.toThrow(/does not implement op write/i);
+  });
+
+  it("keeps output is_tty active when write hooks are unavailable", async () => {
+    const table = buildTable([
+      { effectId: "std::output::Output", opName: "write", opId: 0 },
+      { effectId: "std::output::Output", opName: "is_tty", opId: 1 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "browser" },
+    });
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
+        ?.supported
+    ).toBe(true);
+
+    expect(
+      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+        target: "stdout",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: false,
+    });
+    await expect(
+      (async () =>
+        getHandler("std::output::Output", "write")(tailContinuation, {
+          value: "hello",
+        }))()
+    ).rejects.toThrow(/does not implement op write/i);
   });
 
   it("does not bridge write_bytes through lossy text write hooks", async () => {
