@@ -1,6 +1,7 @@
 use std::error::HostError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
 use std::result::types::all
 use std::string::type::new_string
 
@@ -57,19 +58,79 @@ pub eff Time
   monotonic_now_millis(tail) -> i64
   system_now_millis(tail) -> i64
   sleep_millis(tail, ms: i64) -> MsgPack
+  set_timeout_millis(tail, ms: i64) -> MsgPack
+  set_interval_millis(tail, ms: i64) -> MsgPack
+  clear_timer(tail, timer_id: i64) -> MsgPack
 
 /// Suspends execution for the provided millisecond count.
-pub fn sleep_millis({ ms: i64 }): Time -> Result<Unit, HostError>
+pub fn sleep({ ms: i64 }): Time -> Result<Unit, HostError>
   decode_host_void_result(Time::sleep_millis(ms))
 
 /// Suspends execution for the provided duration.
 pub fn sleep({ duration: Duration }): Time -> Result<Unit, HostError>
-  sleep_millis(ms: duration.as_millis())
+  sleep(ms: duration.as_millis())
+
+/// Schedules and runs a callback once after the provided duration.
+pub fn on_timeout({ duration: Duration, callback: () -> void }): Time -> Result<Unit, HostError>
+  let scheduled = decode_host_void_result(
+    Time::set_timeout_millis(duration.as_millis())
+  )
+  match(scheduled)
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<Unit>:
+      callback()
+      Ok<Unit> { value: Unit {} }
+
+/// Runs a callback repeatedly at the provided interval.
+pub fn on_interval({ interval: Duration, callback: () -> void }): Time -> Result<Unit, HostError>
+  while true do:
+    let timer_result = decode_timer_id_result(
+      Time::set_interval_millis(interval.as_millis())
+    )
+    match(timer_result)
+      Err<HostError> { error }:
+        return Err<HostError> { error: error }
+      Ok<i64> { value: timer_id }:
+        let sleep_result = decode_host_void_result(
+          Time::sleep_millis(interval.as_millis())
+        )
+        match(sleep_result)
+          Err<HostError> { error }:
+            let sleep_error = error
+            let clear_result = decode_host_void_result(Time::clear_timer(timer_id))
+            match(clear_result)
+              Err<HostError> { error }:
+                return Err<HostError> { error: error }
+              Ok<Unit>:
+                return Err<HostError> { error: sleep_error }
+          Ok<Unit>:
+            void
+        let clear_result = decode_host_void_result(Time::clear_timer(timer_id))
+        match(clear_result)
+          Err<HostError> { error }:
+            return Err<HostError> { error: error }
+          Ok<Unit>:
+            callback()
+  Ok<Unit> { value: Unit {} }
 
 fn decode_host_void_result(payload: MsgPack): () -> Result<Unit, HostError>
   let decoded = HostDto::unpack(payload)
   if decoded.read_bool("ok"):
     return Ok<Unit> { value: Unit {} }
+  Err<HostError> {
+    error: HostError {
+      code: decoded.read_i32("code"),
+      message: decoded.read_string("message")
+    }
+  }
+
+fn decode_timer_id_result(payload: MsgPack): () -> Result<i64, HostError>
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok"):
+    return Ok<i64> {
+      value: msgpack::unpack_i64(decoded.read_msgpack("value"))
+    }
   Err<HostError> {
     error: HostError {
       code: decoded.read_i32("code"),

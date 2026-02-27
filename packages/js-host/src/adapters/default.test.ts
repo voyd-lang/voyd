@@ -138,7 +138,10 @@ describe("registerDefaultHostAdapters", () => {
       { effectId: "std::time::Time", opName: "monotonic_now_millis", opId: 2 },
       { effectId: "std::time::Time", opName: "system_now_millis", opId: 3 },
       { effectId: "std::time::Time", opName: "sleep_millis", opId: 4 },
-      { effectId: "std::log::Log", opName: "emit", opId: 5 },
+      { effectId: "std::time::Time", opName: "set_timeout_millis", opId: 5 },
+      { effectId: "std::time::Time", opName: "set_interval_millis", opId: 6 },
+      { effectId: "std::time::Time", opName: "clear_timer", opId: 7 },
+      { effectId: "std::log::Log", opName: "emit", opId: 8 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -182,6 +185,24 @@ describe("registerDefaultHostAdapters", () => {
       0n
     );
     expect(slept.value).toMatchObject({ ok: true });
+
+    const timeout = await getHandler("std::time::Time", "set_timeout_millis")(
+      tailContinuation,
+      0n
+    );
+    expect(timeout.value).toMatchObject({ ok: true });
+
+    const interval = await getHandler("std::time::Time", "set_interval_millis")(
+      tailContinuation,
+      0n
+    );
+    expect(interval.value).toMatchObject({ ok: true, value: 1n });
+
+    const clear = await getHandler("std::time::Time", "clear_timer")(
+      tailContinuation,
+      1n
+    );
+    expect(clear.value).toMatchObject({ ok: true });
 
     await getHandler("std::log::Log", "emit")(tailContinuation, {
       level: "info",
@@ -241,6 +262,48 @@ describe("registerDefaultHostAdapters", () => {
     expect(result.kind).toBe("tail");
     expect(result.value).toMatchObject({ ok: true });
     expect(delays).toEqual([2_147_483_647, 2_147_483_647, 123]);
+  });
+
+  it("cancels fallback interval timers when clear_timer is invoked", async () => {
+    const table = buildTable([
+      { effectId: "std::time::Time", opName: "set_interval_millis", opId: 0 },
+      { effectId: "std::time::Time", opName: "clear_timer", opId: 1 },
+    ]);
+    let nextTimeoutToken = 1;
+    const scheduled = new Map<number, { delay: number }>();
+    const setTimeoutSpy = vi.fn((_task: () => void, delay?: number) => {
+      const token = nextTimeoutToken;
+      nextTimeoutToken += 1;
+      scheduled.set(token, { delay: delay ?? 0 });
+      return token;
+    });
+    const clearTimeoutSpy = vi.fn((token: number) => {
+      scheduled.delete(token);
+    });
+    vi.stubGlobal("setTimeout", setTimeoutSpy);
+    vi.stubGlobal("clearTimeout", clearTimeoutSpy);
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    const intervalResult = await getHandler("std::time::Time", "set_interval_millis")(
+      tailContinuation,
+      5_000n
+    );
+    expect(intervalResult.value).toMatchObject({ ok: true, value: 1n });
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+    expect(scheduled.size).toBe(1);
+
+    const clearResult = await getHandler("std::time::Time", "clear_timer")(
+      tailContinuation,
+      1n
+    );
+    expect(clearResult.value).toMatchObject({ ok: true });
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+    expect(scheduled.size).toBe(0);
   });
 
   it("registers actionable unsupported handlers on browser for fs", async () => {
