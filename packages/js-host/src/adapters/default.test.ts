@@ -138,7 +138,10 @@ describe("registerDefaultHostAdapters", () => {
       { effectId: "std::time::Time", opName: "monotonic_now_millis", opId: 2 },
       { effectId: "std::time::Time", opName: "system_now_millis", opId: 3 },
       { effectId: "std::time::Time", opName: "sleep_millis", opId: 4 },
-      { effectId: "std::log::Log", opName: "emit", opId: 5 },
+      { effectId: "std::time::Time", opName: "set_timeout_millis", opId: 5 },
+      { effectId: "std::time::Time", opName: "set_interval_millis", opId: 6 },
+      { effectId: "std::time::Time", opName: "clear_timer", opId: 7 },
+      { effectId: "std::log::Log", opName: "emit", opId: 8 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -182,6 +185,24 @@ describe("registerDefaultHostAdapters", () => {
       0n
     );
     expect(slept.value).toMatchObject({ ok: true });
+
+    const timeout = await getHandler("std::time::Time", "set_timeout_millis")(
+      tailContinuation,
+      0n
+    );
+    expect(timeout.value).toMatchObject({ ok: true });
+
+    const interval = await getHandler("std::time::Time", "set_interval_millis")(
+      tailContinuation,
+      0n
+    );
+    expect(interval.value).toMatchObject({ ok: true, value: 1n });
+
+    const clear = await getHandler("std::time::Time", "clear_timer")(
+      tailContinuation,
+      1n
+    );
+    expect(clear.value).toMatchObject({ ok: true });
 
     await getHandler("std::log::Log", "emit")(tailContinuation, {
       level: "info",

@@ -66,6 +66,7 @@ export type DefaultAdapterRuntimeHooks = {
   monotonicNowMillis?: () => bigint;
   systemNowMillis?: () => bigint;
   sleepMillis?: (ms: number) => Promise<void>;
+  clearTimer?: (timerId: bigint) => Promise<void> | void;
   randomBytes?: (length: number) => Uint8Array;
   fetchRequest?: (
     request: DefaultAdapterFetchRequest
