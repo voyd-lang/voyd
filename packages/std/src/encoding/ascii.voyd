@@ -3,17 +3,17 @@ use std::string::{ String, new_string }
 
 /// Builds a safe string from ASCII byte values.
 pub fn ascii_string_from_bytes({ bytes: Array<i32> }) -> String
-  if bytes.is_empty() then:
+  if bytes.is_empty():
     return String::init()
 
   let ~normalized = Array<i32>::with_capacity(bytes.len())
   var index = 0
   while index < bytes.len() do:
-    normalized.push(normalize_ascii_byte(bytes.at(at: index)))
+    normalized.push(normalize_ascii_byte(bytes.at(index)))
     index = index + 1
   new_string(normalized.to_fixed_array())
 
 fn normalize_ascii_byte(value: i32) -> i32
-  if value < 0 or value > 127 then:
+  if value < 0 or value > 127:
     return 63
   value

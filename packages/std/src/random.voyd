@@ -17,7 +17,7 @@ pub fn next_i64(): Random -> i64
 
 /// Fills a byte buffer with cryptographically secure random bytes.
 pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
-  if len <= 0 then:
+  if len <= 0:
     return void
 
   let payload = Random::fill_bytes(len)
@@ -25,7 +25,7 @@ pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
 
   var index = 0
   while index < len do:
-    if index < decoded.len() then:
+    if index < decoded.len():
       match(decoded.get(index))
         Some<MsgPack> { value }:
           buf.push(value: mod_euclid_i32_or_zero(msgpack::unpack_i32(value), 256))
@@ -51,7 +51,7 @@ pub fn random_int({ range: Range }): Random -> i32
   let start = range_start_or_zero(range.start)
   let start_i64 = extend_i32_s(start)
   let end_exclusive = range_end_exclusive(range, start_i64)
-  if end_exclusive <= start_i64 then:
+  if end_exclusive <= start_i64:
     return start
 
   let span = end_exclusive - start_i64
@@ -70,7 +70,7 @@ fn range_end_exclusive(range: Range, start: i64) -> i64
   match(range.end)
     Some<i32> { value }:
       let end = extend_i32_s(value)
-      if range.include_end then:
+      if range.include_end:
         end + extend_i32_s(1)
       else:
         end

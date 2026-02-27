@@ -68,7 +68,7 @@ pub fn sleep({ duration: Duration }): Time -> Result<Unit, HostError>
 
 fn decode_host_void_result(payload: MsgPack): () -> Result<Unit, HostError>
   let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") then:
+  if decoded.read_bool("ok"):
     return Ok<Unit> { value: Unit {} }
   Err<HostError> {
     error: HostError {

@@ -18,12 +18,13 @@ obj EqOrdValue {
 }
 
 fn cmp_eq_ord_value(left: i32, right: i32) -> Ordering
-  if left < right then:
-    Less {}
-  elif: left > right then:
-    Greater {}
-  else:
-    Equal {}
+  if
+    left < right:
+      Less {}
+    left > right:
+      Greater {}
+    else:
+      Equal {}
 
 fn is_less(value: Ordering) -> bool
   value is Less
@@ -67,13 +68,13 @@ obj NumText {
 }
 
 fn num_text_try_from(value: i32) -> Result<NumText, i32>
-  if value >= 0 then:
+  if value >= 0:
     Ok<NumText> { value: NumText { value: value } }
   else:
     Err<i32> { error: -1 }
 
 fn num_text_try_into(value: i32) -> Result<i32, i32>
-  if value >= 0 then:
+  if value >= 0:
     Ok<i32> { value: value }
   else:
     Err<i32> { error: -1 }

@@ -19,8 +19,8 @@ test "hex encode and decode":
     Ok<Bytes> { value }:
       let out = value.to_array()
       assert(out.len(), eq: 2)
-      assert(out.at(at: 0), eq: 72)
-      assert(out.at(at: 1), eq: 105)
+      assert(out.at(0), eq: 72)
+      assert(out.at(1), eq: 105)
     Err<DecodeError>:
       assert(false)
 

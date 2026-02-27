@@ -395,7 +395,7 @@ test "array default sort and sorted overloads":
 test "array labeled overloads and predicates":
   let source = array_of_4(3, 1, 4, 2)
   assert(optional_i32_or(source.get(at: 0), -1), eq: 3)
-  assert(source.at(at: 1), eq: 1)
+  assert(source.at(1), eq: 1)
   assert(source.contains(value: 4), eq: true)
   assert(source.contains(where: (value: i32) -> bool => value > 3), eq: true)
   assert(source.any(where: (value: i32) -> bool => value == 2), eq: true)

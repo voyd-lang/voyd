@@ -133,7 +133,7 @@ test "dict keys values entries each":
   map.each(do: (key: String, value: i32) -> void =>
     stats.count = stats.count + 1
     stats.sum = stats.sum + value
-    if key.equals("a") then:
+    if key.equals("a"):
       stats.has_a = true
     void
   )

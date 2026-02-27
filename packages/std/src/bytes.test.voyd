@@ -22,7 +22,7 @@ test "bytes and bytebuffer core operations":
   assert(bytes.len(), eq: 2)
   assert(bytes.is_empty(), eq: false)
   assert(option_i32_or(bytes.get(at: 0), -1), eq: 72)
-  assert(bytes.at(at: 1), eq: 105)
+  assert(bytes.at(1), eq: 105)
   assert(bytes.to_array().len(), eq: 2)
 
 test "bytes slice and buffer extend clear":
@@ -42,8 +42,8 @@ test "bytes slice and buffer extend clear":
     include_end: false
   })
   assert(sliced.len(), eq: 2)
-  assert(sliced.at(at: 0), eq: 2)
-  assert(sliced.at(at: 1), eq: 3)
+  assert(sliced.at(0), eq: 2)
+  assert(sliced.at(1), eq: 3)
 
   second.clear()
   assert(second.is_empty(), eq: true)
