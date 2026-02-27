@@ -806,14 +806,14 @@ describe("registerDefaultHostAdapters", () => {
     expect(
       report.capabilities.find((capability) => capability.effectId === "std::output::Output")
         ?.supported
-    ).toBe(false);
+    ).toBe(true);
 
     await expect(
       (async () =>
         getHandler("std::output::Output", "write_bytes")(tailContinuation, {
           bytes: [255, 0, 1],
         }))()
-    ).rejects.toThrow(/default output adapter is unavailable on browser/i);
+    ).rejects.toThrow(/does not implement op write_bytes/i);
   });
 
   it("chunks browser random fills to avoid WebCrypto quota errors", async () => {

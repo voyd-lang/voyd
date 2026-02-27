@@ -1954,45 +1954,16 @@ const outputCapabilityDefinition: CapabilityDefinition = {
     const entries = opEntries({ host, effectId: OUTPUT_EFFECT_ID });
     if (entries.length === 0) return 0;
     const outputSource = createOutputSource({ runtime, runtimeHooks });
-    const needsWrite = hasOpName({
-      entries,
-      opNames: OUTPUT_WRITE_OP_NAMES,
-    });
-    if (needsWrite && !outputSource.write) {
+    if (!outputSource.write && !outputSource.writeBytes) {
+      const reason =
+        outputSource.writeUnavailableReason ||
+        outputSource.writeBytesUnavailableReason;
       return registerUnsupportedHandlers({
         host,
         effectId: OUTPUT_EFFECT_ID,
         capability: "output",
         runtime,
-        reason: outputSource.writeUnavailableReason,
-        diagnostics,
-      });
-    }
-    const needsWriteBytes = hasOpName({
-      entries,
-      opNames: OUTPUT_WRITE_BYTES_OP_NAMES,
-    });
-    if (needsWriteBytes && !outputSource.writeBytes) {
-      return registerUnsupportedHandlers({
-        host,
-        effectId: OUTPUT_EFFECT_ID,
-        capability: "output",
-        runtime,
-        reason: outputSource.writeBytesUnavailableReason,
-        diagnostics,
-      });
-    }
-    const needsFlush = hasOpName({
-      entries,
-      opNames: OUTPUT_FLUSH_OP_NAMES,
-    });
-    if (needsFlush && !outputSource.flush) {
-      return registerUnsupportedHandlers({
-        host,
-        effectId: OUTPUT_EFFECT_ID,
-        capability: "output",
-        runtime,
-        reason: outputSource.flushUnavailableReason,
+        reason,
         diagnostics,
       });
     }

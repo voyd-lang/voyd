@@ -1,5 +1,5 @@
 use std::array::Array
-use std::bytes::{ ByteBuffer, Bytes }
+use std::bytes::{ Bytes }
 use std::error::IoError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
@@ -36,7 +36,11 @@ pub fn write_line({ value: StringSlice }): Output -> Result<Unit, IoError>
 
 /// Writes text followed by exactly "\n" to the selected target.
 pub fn write_line({ value: StringSlice, target: OutputTarget }): Output -> Result<Unit, IoError>
-  write_bytes(bytes: line_bytes(value: value), target: target)
+  match(write(value: value, target: target))
+    Ok<Unit>:
+      write(value: "\n".as_slice(), target: target)
+    Err<IoError> { error }:
+      Err<IoError> { error: error }
 
 /// Writes bytes to the selected output target (stdout by default).
 pub fn write_bytes({ bytes: Bytes }): Output -> Result<Unit, IoError>
@@ -64,20 +68,6 @@ pub fn is_tty(): Output -> bool
 /// Returns true when the selected output target is a terminal.
 pub fn is_tty({ target: OutputTarget }): Output -> bool
   Output::is_tty_op(encode_target_payload(target: target))
-
-fn line_bytes({ value: StringSlice }): () -> Bytes
-  let source = value.to_string().to_utf8()
-  let ~buffer = ByteBuffer::with_capacity(bytes: source.len() + 1)
-  var index = 0
-  while index < source.len() do:
-    match(source.get(index))
-      Some<i32> { value }:
-        buffer.push(value: value)
-      None:
-        void
-    index = index + 1
-  buffer.push(value: 10)
-  buffer.as_bytes()
 
 fn encode_write_payload({ value: String, target: OutputTarget }): () -> MsgPack
   HostDto::init()
