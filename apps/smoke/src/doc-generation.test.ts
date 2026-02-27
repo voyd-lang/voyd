@@ -15,6 +15,7 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       "//! Package docs.",
       "",
       "pub use src::util::all",
+      "use src::util::External",
       "",
       "/// Adds one.",
       "pub fn add_one(",
@@ -64,6 +65,10 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       "  api fn reveal(self) -> i32",
       "    self.value",
       "",
+      "impl External",
+      "  api fn external_value(~self) -> i32",
+      "    self.value",
+      "",
       "pub fn main() -> i32",
       "  add_one(41)",
       "",
@@ -73,6 +78,8 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
   await fs.writeFile(
     path.join(srcRoot, "util.voyd"),
     [
+      "pub obj External { api value: i32 }",
+      "",
       "pub fn util_value() -> i32",
       "  7",
       "",
@@ -135,6 +142,10 @@ const createNamedReExportPackageRootFixture = async (): Promise<{
       "    0",
       "",
       "mod visible",
+      "  pub mod nested",
+      "    pub fn deep() -> i32",
+      "      2",
+      "",
       "  pub fn shown() -> i32",
       "    1",
       "",
@@ -257,6 +268,12 @@ describe("smoke: sdk doc-generation", () => {
       expect(hiddenMethod).toBeUndefined();
       const hiddenImpl = mainModule?.impls.find((impl) => impl.signature.includes("Hidden"));
       expect(hiddenImpl).toBeUndefined();
+      const externalImpl = mainModule?.impls.find((impl) => impl.signature.includes("External"));
+      expect(externalImpl).toBeDefined();
+      const externalMethod = externalImpl?.members.find(
+        (member) => member.name === "external_value",
+      );
+      expect(externalMethod?.signature).toContain("~self");
       const counterObject = mainModule?.objects.find((objectDecl) => objectDecl.name === "Counter");
       expect(counterObject?.members.map((member) => member.name)).toEqual(["value"]);
       const decodeEffect = mainModule?.effects.find((effectDecl) => effectDecl.name === "Decode");
@@ -295,6 +312,7 @@ describe("smoke: sdk doc-generation", () => {
       });
       expect(html.content).toContain("id=\"module-src-pkg\"");
       expect(html.content).toContain("id=\"module-src-pkg-visible\"");
+      expect(html.content).not.toContain("id=\"module-src-pkg-visible-nested\"");
       expect(html.content).not.toContain("id=\"module-src-pkg-hidden\"");
     } finally {
       await fs.rm(fixture.root, { recursive: true, force: true });

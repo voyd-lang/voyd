@@ -138,16 +138,24 @@ const isDocumentedVisibility = (
 ): boolean =>
   visibility?.level === "public" || visibility?.level === "package";
 
+type ExportedModuleRef = {
+  moduleId: string;
+  traversable: boolean;
+};
+
 const collectDirectExportedModuleIds = (
   semantics: SemanticsPipelineResult,
-): readonly string[] => {
-  const exportedModuleIds: string[] = [];
+): readonly ExportedModuleRef[] => {
+  const exportedModuleIds: ExportedModuleRef[] = [];
 
   semantics.exports.forEach((entry) => {
     if (entry.kind !== "module" || !isDocumentedVisibility(entry.visibility)) {
       return;
     }
-    exportedModuleIds.push(entry.moduleId);
+    exportedModuleIds.push({
+      moduleId: entry.moduleId,
+      traversable: true,
+    });
   });
 
   semantics.binding.uses.forEach((useDecl) => {
@@ -158,7 +166,11 @@ const collectDirectExportedModuleIds = (
       if (!entry.moduleId) {
         return;
       }
-      exportedModuleIds.push(entry.moduleId);
+      exportedModuleIds.push({
+        moduleId: entry.moduleId,
+        traversable:
+          entry.selectionKind === "all" || entry.selectionKind === "module",
+      });
     });
   });
 
@@ -221,7 +233,33 @@ const collectExportedModuleIds = ({
   }
 
   const exportedModuleIds = new Set<string>([entryModule]);
+  const traversableByModuleId = new Map<string, boolean>([[entryModule, true]]);
   const queue: string[] = [entryModule];
+
+  const includeModule = ({
+    moduleId,
+    traversable,
+  }: {
+    moduleId: string;
+    traversable: boolean;
+  }) => {
+    if (!semantics.has(moduleId)) {
+      return;
+    }
+
+    exportedModuleIds.add(moduleId);
+
+    const wasTraversable = traversableByModuleId.get(moduleId) === true;
+    if (!wasTraversable && traversable) {
+      traversableByModuleId.set(moduleId, true);
+      queue.push(moduleId);
+      return;
+    }
+
+    if (!traversableByModuleId.has(moduleId)) {
+      traversableByModuleId.set(moduleId, traversable);
+    }
+  };
 
   while (queue.length > 0) {
     const moduleId = queue.shift();
@@ -234,18 +272,15 @@ const collectExportedModuleIds = ({
       continue;
     }
 
-    const directExportedModuleIds = [
+    const directExportedModules = [
       ...collectDirectExportedModuleIds(moduleSemantics),
-      ...collectPublicChildModuleIds({ moduleId, graph }),
+      ...collectPublicChildModuleIds({ moduleId, graph }).map((childModuleId) => ({
+        moduleId: childModuleId,
+        traversable: true,
+      })),
     ];
 
-    directExportedModuleIds.forEach((exportedModuleId) => {
-      if (!semantics.has(exportedModuleId) || exportedModuleIds.has(exportedModuleId)) {
-        return;
-      }
-      exportedModuleIds.add(exportedModuleId);
-      queue.push(exportedModuleId);
-    });
+    directExportedModules.forEach(includeModule);
   }
 
   return exportedModuleIds;

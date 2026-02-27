@@ -159,6 +159,10 @@ mod hidden
     0
 
 mod visible
+  pub mod nested
+    pub fn deep() -> i32
+      2
+
   pub fn shown() -> i32
     1
 `,
