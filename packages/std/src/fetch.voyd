@@ -122,6 +122,7 @@ impl FetchResponse
 
 @effect(id: "std::fetch::Fetch")
 pub eff Fetch
+  /// Sends an HTTP request and returns the response.
   request(tail, payload: MsgPack) -> MsgPack
 
 /// Creates one header value.

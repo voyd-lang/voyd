@@ -7,6 +7,7 @@ import {
   isIdentifierAtom,
 } from "../parser/index.js";
 import {
+  parseEffectDecl,
   parseFunctionDecl,
   parseImplDecl,
   parseObjectDecl,
@@ -25,6 +26,7 @@ type SourceLine = {
   lineNumber: number;
   startIndex: number;
   endIndex: number;
+  startColumn: number;
   kind: LineKind;
   docText?: string;
 };
@@ -56,6 +58,7 @@ export interface ModuleDocumentation {
   module?: string;
   declarationsBySyntaxId: ReadonlyMap<number, string>;
   parametersBySyntaxId: ReadonlyMap<number, string>;
+  macroDeclarationsByName: ReadonlyMap<string, string>;
 }
 
 export interface ModuleDocumentationResult {
@@ -89,11 +92,14 @@ const splitSourceLines = (source: string): SourceLine[] => {
     const raw = source.slice(lineStart, index);
     const normalized = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
     const trimmedStart = normalized.trimStart();
+    const firstNonWhitespaceIndex = normalized.search(/\S/u);
+    const startColumn = firstNonWhitespaceIndex >= 0 ? firstNonWhitespaceIndex : 0;
 
     const line = {
       lineNumber,
       startIndex: lineStart,
       endIndex: index,
+      startColumn,
       kind: "code" as LineKind,
       docText: undefined as string | undefined,
     };
@@ -248,6 +254,36 @@ const firstTargetForLine = (
   lineNumber: number,
 ): DocTarget | undefined => map.get(lineNumber)?.[0];
 
+const parseMacroDeclarationName = (
+  form: Form,
+): { name: string; syntax: Syntax } | undefined => {
+  let index = 0;
+  const first = form.at(0);
+  if (isIdentifierAtom(first) && first.value === "pub") {
+    index = 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierAtom(keyword) || keyword.value !== "macro") {
+    return undefined;
+  }
+
+  const signature = form.at(index + 1);
+  if (!isForm(signature)) {
+    return undefined;
+  }
+
+  const name = signature.at(0);
+  if (!isIdentifierAtom(name)) {
+    return undefined;
+  }
+
+  return {
+    name: name.value,
+    syntax: name,
+  };
+};
+
 const collectDocTargets = ({
   ast,
   declarationTargets,
@@ -283,6 +319,11 @@ const collectDocTargets = ({
     }
 
     const classified = classifyTopLevelDecl(entry);
+    if (classified.kind === "macro-decl") {
+      addDeclaration(parseMacroDeclarationName(entry)?.syntax);
+      return;
+    }
+
     if (
       classified.kind === "inline-module-decl" ||
       classified.kind === "unsupported-mod-decl"
@@ -340,6 +381,20 @@ const collectDocTargets = ({
     }
 
     try {
+      const parsed = parseEffectDecl(entry);
+      if (parsed) {
+        addDeclaration(parsed.name);
+        parsed.operations.forEach((operation) => {
+          addDeclaration(operation.name);
+          operation.params.forEach((param) => addParameter(param.ast));
+        });
+        return;
+      }
+    } catch {
+      // Parser diagnostics for malformed declarations are handled elsewhere.
+    }
+
+    try {
       const parsed = parseImplDecl(entry);
       if (parsed) {
         addDeclaration(parsed.target as Syntax);
@@ -365,6 +420,68 @@ const collectDocTargets = ({
   });
 };
 
+const collectMacroDeclarationDocsByName = ({
+  ast,
+  declarationsBySyntaxId,
+}: {
+  ast: Form;
+  declarationsBySyntaxId: ReadonlyMap<number, string>;
+}): ReadonlyMap<string, string> => {
+  const entries = ast.callsInternal("ast") ? ast.rest : ast.toArray();
+  return entries.reduce<Map<string, string>>((docsByName, entry) => {
+    if (!isForm(entry)) {
+      return docsByName;
+    }
+
+    const macroDecl = parseMacroDeclarationName(entry);
+    if (!macroDecl) {
+      return docsByName;
+    }
+
+    const documentation = declarationsBySyntaxId.get(macroDecl.syntax.syntaxId);
+    if (!documentation) {
+      return docsByName;
+    }
+
+    docsByName.set(macroDecl.name, documentation);
+    return docsByName;
+  }, new Map<string, string>());
+};
+
+const collectTopLevelStartColumn = ({
+  ast,
+  moduleFilePath,
+  moduleRange,
+  isExcluded,
+}: {
+  ast: Form;
+  moduleFilePath: string;
+  moduleRange: IndexRange;
+  isExcluded: (lineNumber: number) => boolean;
+}): number | undefined => {
+  const entries = ast.callsInternal("ast") ? ast.rest : ast.toArray();
+  const topLevelColumns = entries.flatMap((entry) => {
+    if (!isForm(entry)) {
+      return [];
+    }
+    const location = entry.location;
+    if (!location || location.filePath !== moduleFilePath) {
+      return [];
+    }
+    if (!inRange(location.startIndex, moduleRange)) {
+      return [];
+    }
+    if (isExcluded(location.startLine)) {
+      return [];
+    }
+    return [location.startColumn];
+  });
+  if (topLevelColumns.length === 0) {
+    return undefined;
+  }
+  return Math.min(...topLevelColumns);
+};
+
 export const collectModuleDocumentation = ({
   ast,
   source,
@@ -381,6 +498,7 @@ export const collectModuleDocumentation = ({
         module: undefined,
         declarationsBySyntaxId: new Map(),
         parametersBySyntaxId: new Map(),
+        macroDeclarationsByName: new Map(),
       },
       diagnostics: [],
     };
@@ -416,6 +534,12 @@ export const collectModuleDocumentation = ({
   const declarationDocsBySyntaxId = new Map<number, string>();
   const parameterDocsBySyntaxId = new Map<number, string>();
   const diagnostics: Diagnostic[] = [];
+  const topLevelStartColumn = collectTopLevelStartColumn({
+    ast,
+    moduleFilePath,
+    moduleRange: effectiveModuleRange,
+    isExcluded,
+  });
 
   const outerBlocks = buildOuterBlocks({
     lines,
@@ -503,18 +627,25 @@ export const collectModuleDocumentation = ({
     (line) =>
       line.kind === "inner-doc" &&
       inRange(line.startIndex, effectiveModuleRange) &&
-      !isExcluded(line.lineNumber),
+      !isExcluded(line.lineNumber) &&
+      (topLevelStartColumn === undefined ||
+        line.startColumn === topLevelStartColumn),
   );
   const moduleDoc =
     innerLines.length > 0
       ? innerLines.map((line) => line.docText ?? "").join("\n")
       : undefined;
+  const macroDeclarationsByName = collectMacroDeclarationDocsByName({
+    ast,
+    declarationsBySyntaxId: declarationDocsBySyntaxId,
+  });
 
   return {
     documentation: {
       module: moduleDoc,
       declarationsBySyntaxId: declarationDocsBySyntaxId,
       parametersBySyntaxId: parameterDocsBySyntaxId,
+      macroDeclarationsByName,
     },
     diagnostics,
   };
