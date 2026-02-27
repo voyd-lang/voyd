@@ -1443,6 +1443,28 @@ const formatTypeForDiagnostic = ({
   ctx: TypingContext;
 }): string => typeDescriptorToUserString(ctx.arena.get(type), ctx.arena);
 
+const typeSatisfiesForDiagnostic = ({
+  actual,
+  expected,
+  ctx,
+  state,
+}: {
+  actual: TypeId;
+  expected: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const originalMax = ctx.typeCheckBudget.maxUnifySteps;
+  const originalSteps = ctx.typeCheckBudget.unifyStepsUsed.value;
+  ctx.typeCheckBudget.maxUnifySteps = Number.MAX_SAFE_INTEGER;
+  try {
+    return typeSatisfies(actual, expected, ctx, state);
+  } finally {
+    ctx.typeCheckBudget.maxUnifySteps = originalMax;
+    ctx.typeCheckBudget.unifyStepsUsed.value = originalSteps;
+  }
+};
+
 const formatInferredArgumentsForDiagnostic = ({
   args,
   ctx,
@@ -1594,7 +1616,12 @@ const overloadCandidateFailureReason = ({
       if (match.matchedType === ctx.primitives.unknown) {
         return true;
       }
-      const ok = typeSatisfies(match.matchedType, match.param.type, ctx, state);
+      const ok = typeSatisfiesForDiagnostic({
+        actual: match.matchedType,
+        expected: match.param.type,
+        ctx,
+        state,
+      });
       if (!ok) {
         mismatch = {
           paramIndex: match.paramIndex,
