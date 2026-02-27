@@ -40,6 +40,7 @@ impl Num
   fn hide(self) -> i32
     self.value
 
+/// Decode effect docs.
 pub eff Decode
   /// Decode next value.
   decode_next(resume, input: i32) -> i32
@@ -83,6 +84,7 @@ pub mod math
     expect(numObject?.fields.map((field) => field.name)).toEqual(["value"]);
     const decodeEffect = mainModule?.effects.find((effect) => effect.name === "Decode");
     expect(decodeEffect).toBeDefined();
+    expect(decodeEffect?.documentation).toBe(" Decode effect docs.");
     expect(decodeEffect?.operations.map((op) => op.name)).toEqual([
       "decode_next",
       "finish",

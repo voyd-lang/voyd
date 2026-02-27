@@ -86,6 +86,7 @@ export type DocumentationEffectView = {
   visibility: DocumentationVisibilityView;
   typeParameters?: readonly DocumentationTypeParameterView[];
   operations: readonly DocumentationEffectOperationView[];
+  documentation?: string;
 };
 
 export type DocumentationImplView = {
@@ -523,6 +524,7 @@ const normalizeModules = ({
                 resumable: operation.resumable,
                 documentation: operation.documentation,
               })),
+              documentation: effectDecl.documentation,
             })),
           impls: semantic.binding.impls
             .filter((implDecl) => {

@@ -758,6 +758,7 @@ export const createDocumentationModel = ({
           signature: `eff ${effectDecl.name}${formatTypeParameters(
             effectDecl.typeParameters,
           )}`,
+          documentation: effectDecl.documentation,
           members: effectDecl.operations.map((operation) => ({
             name: operation.name,
             signature: formatEffectOperationSignature(operation),

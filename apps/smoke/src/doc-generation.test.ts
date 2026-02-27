@@ -45,6 +45,7 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       "pub fn linked_docs() -> i32",
       "  0",
       "",
+      "/// Decode effect docs.",
       "pub eff Decode",
       "  /// Reads next input value.",
       "  decode_next(resume, input: i32) -> i32",
@@ -189,6 +190,7 @@ describe("smoke: sdk doc-generation", () => {
       );
       expect(html.content).not.toContain("href=\"https://example.com/docs?q=voyd&amp;amp;lang=en\"");
       expect(html.content).toContain("Reads next input value.");
+      expect(html.content).toContain("Decode effect docs.");
       expect(html.content).not.toContain("id=\"function-src-main-double\"");
       const objectIndex = html.content.indexOf("id=\"object-src-main-counter\"");
       const implIndex = html.content.indexOf("id=\"impl-src-main-impl-0\"");
@@ -222,6 +224,7 @@ describe("smoke: sdk doc-generation", () => {
           }>;
           effects: Array<{
             name: string;
+            documentation?: string;
             members: Array<{
               name: string;
               signature: string;
@@ -280,6 +283,7 @@ describe("smoke: sdk doc-generation", () => {
       const counterObject = mainModule?.objects.find((objectDecl) => objectDecl.name === "Counter");
       expect(counterObject?.members.map((member) => member.name)).toEqual(["value"]);
       const decodeEffect = mainModule?.effects.find((effectDecl) => effectDecl.name === "Decode");
+      expect(decodeEffect?.documentation).toBe(" Decode effect docs.");
       const decodeNextOp = decodeEffect?.members.find((member) => member.name === "decode_next");
       expect(decodeNextOp?.documentation).toBe(" Reads next input value.");
     } finally {

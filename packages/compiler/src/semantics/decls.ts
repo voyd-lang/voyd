@@ -193,6 +193,7 @@ export interface EffectDecl {
   typeParameters?: TypeParameterDecl[];
   operations: readonly EffectOperationDecl[];
   moduleIndex: number;
+  documentation?: string;
 }
 
 export type EffectDeclInput = Omit<EffectDecl, "id" | "operations"> & {

@@ -140,5 +140,6 @@ export const bindEffectDecl = (
     operations,
     moduleIndex: ctx.nextModuleIndex++,
     scope: effectScope,
+    documentation: declarationDocForSyntax(decl.name, ctx),
   });
 };
