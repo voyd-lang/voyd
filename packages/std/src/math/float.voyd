@@ -3,19 +3,19 @@ use std::math::errors::{ MathError, math_error, math_error_code_overflow }
 
 /// Returns the absolute value, rejecting signed overflow.
 pub fn abs(value: i32) -> Result<i32, MathError>
-  if value >= 0 then:
+  if value >= 0:
     return Ok<i32> { value }
   let out = 0 - value
-  if out < 0 then:
+  if out < 0:
     return math_error(code: math_error_code_overflow())
   Ok<i32> { value: out }
 
 /// Returns the absolute value, rejecting signed overflow.
 pub fn abs(value: i64) -> Result<i64, MathError>
-  if value >= extend_i32_s(0) then:
+  if value >= extend_i32_s(0):
     return Ok<i64> { value }
   let out = extend_i32_s(0) - value
-  if out < extend_i32_s(0) then:
+  if out < extend_i32_s(0):
     return math_error(code: math_error_code_overflow())
   Ok<i64> { value: out }
 
@@ -43,7 +43,7 @@ pub fn signum(value: i64) -> i64
 
 /// Returns the sign of `value` as `-1`, `0`, or `1`, preserving `NaN`.
 pub fn signum(value: f64) -> f64
-  if value != value then:
+  if value != value:
     return value
   if
     value < 0.0: -1.0

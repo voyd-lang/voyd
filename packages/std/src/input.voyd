@@ -58,7 +58,7 @@ fn encode_read_line_payload(request: InputRequest): () -> MsgPack
 
 fn decode_read_line_result(payload: MsgPack): () -> Result<Option<String>, HostError>
   let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false then:
+  if decoded.read_bool("ok") == false:
     return Err<HostError> { error: decode_host_error(decoded) }
 
   Ok<Option<String>> {

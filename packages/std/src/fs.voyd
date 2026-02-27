@@ -75,27 +75,27 @@ fn encode_byte_array(bytes: Bytes): () -> MsgPack
 
 fn decode_read_bytes_result(payload: MsgPack): () -> Result<Bytes, IoError>
   let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false then:
+  if decoded.read_bool("ok") == false:
     return Err<IoError> { error: decode_io_error(decoded) }
 
   Ok<Bytes> { value: decode_bytes(decoded.read_msgpack("value")) }
 
 fn decode_read_string_result(payload: MsgPack): () -> Result<String, IoError>
   let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false then:
+  if decoded.read_bool("ok") == false:
     return Err<IoError> { error: decode_io_error(decoded) }
 
   Ok<String> { value: decoded.read_string("value") }
 
 fn decode_write_result(payload: MsgPack): () -> Result<Unit, IoError>
   let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") then:
+  if decoded.read_bool("ok"):
     return Ok<Unit> { value: Unit {} }
   Err<IoError> { error: decode_io_error(decoded) }
 
 fn decode_list_dir_result(payload: MsgPack): () -> Result<Array<Path>, IoError>
   let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false then:
+  if decoded.read_bool("ok") == false:
     return Err<IoError> { error: decode_io_error(decoded) }
 
   Ok<Array<Path>> { value: decode_path_array(decoded.read_msgpack("value")) }
