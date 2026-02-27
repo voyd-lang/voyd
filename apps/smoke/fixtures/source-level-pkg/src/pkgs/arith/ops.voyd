@@ -1,0 +1,4 @@
+use super::model::all
+
+pub fn add_one(v: i32) -> i32
+  v + 1

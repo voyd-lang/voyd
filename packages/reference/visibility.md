@@ -25,7 +25,8 @@ Voyd has three structural scopes:
 
 * **Type / object** – the body of an `obj` and its `impl`s.
 * **Module** – a `.voyd` file.
-* **Package** – a directory tree (`src/` + `pkg.voyd`), imported by other packages.
+* **Package** – a directory tree with a `pkg.voyd` root.
+  In app source, `src/pkg.voyd` is the root package and any nested `src/**/pkg.voyd` defines a source subpackage.
 
 On top of this, there are four effective *visibility levels* (conceptual, not all named explicitly):
 
@@ -126,6 +127,29 @@ Rules:
     let v = make_vec()  // OK
     work()              // OK
   ```
+
+### 2.4 Source subpackages (`src/**/pkg.voyd`)
+
+Any nested folder under `src/` that contains `pkg.voyd` is treated as its own package boundary.
+
+Example:
+
+```text
+src/
+  main.voyd
+  pkgs/
+    math/
+      pkg.voyd
+      ops.voyd
+      internal.voyd
+```
+
+If `src/pkgs/math/pkg.voyd` exports `ops` but not `internal`, then modules outside `src/pkgs/math/*`:
+
+* can import exported API via `src::pkgs::math::pkg::...`;
+* `use src::pkgs::math::all` is equivalent to `use src::pkgs::math::pkg::all`;
+* cannot import non-exported items from `src::pkgs::math::internal::...`;
+* can only access members marked `api` on exported types.
 
 ---
 

@@ -62,6 +62,11 @@ export interface ModuleNode {
   /** Stable identifier; currently the canonical module path string (e.g. `src::main`). */
   id: string;
   path: ModulePath;
+  /**
+   * For `src` modules, the nearest package-root directory segments that own
+   * this module (derived from the closest ancestor `pkg.voyd`).
+   */
+  sourcePackageRoot?: readonly string[];
   origin: ModuleOrigin;
   ast: Form;
   source: string;

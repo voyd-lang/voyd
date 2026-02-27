@@ -6,9 +6,7 @@ import {
 } from "../hir/index.js";
 import type { SymbolId } from "../ids.js";
 import { importedModuleIdFrom } from "../imports/metadata.js";
-import type { ModulePath } from "../../modules/types.js";
 import type { ModuleExportEntry } from "../modules.js";
-import { isSamePackage } from "../packages.js";
 import type { BindingContext } from "./types.js";
 
 export const stdPkgExportsFor = ({
@@ -68,7 +66,6 @@ export const canAccessExport = ({
     canAccessSymbolVisibility({
       visibility: exported.visibility,
       ownerPackageId: exported.packageId,
-      ownerModulePath: exported.modulePath,
       importedFromModuleId: moduleId,
       explicitlyTargetsStdSubmodule,
       ctx,
@@ -83,7 +80,6 @@ export const canAccessExport = ({
 export const canAccessSymbolVisibility = ({
   visibility,
   ownerPackageId,
-  ownerModulePath,
   importedFromModuleId,
   explicitlyTargetsStdSubmodule = false,
   allowApiVisibility = false,
@@ -91,7 +87,6 @@ export const canAccessSymbolVisibility = ({
 }: {
   visibility: HirVisibility;
   ownerPackageId: string;
-  ownerModulePath?: ModulePath;
   importedFromModuleId: string;
   explicitlyTargetsStdSubmodule?: boolean;
   allowApiVisibility?: boolean;
@@ -101,9 +96,7 @@ export const canAccessSymbolVisibility = ({
     return true;
   }
 
-  const samePackage =
-    ownerPackageId === ctx.packageId ||
-    isSamePackage(ownerModulePath, ctx.modulePath);
+  const samePackage = ownerPackageId === ctx.packageId;
   if (samePackage) {
     return isPackageVisible(visibility);
   }
