@@ -24,7 +24,7 @@ type CliTestResult = {
   error?: unknown;
 };
 
-const TEST_DECLARATION_PATTERN = /(^|[\r\n])\s*test(?:\s|$)/;
+const TEST_DECLARATION_PATTERN = /(^|[\r\n])\s*test(?=[^A-Za-z0-9_]|$)/;
 
 const emptySummary = ({
   durationMs,

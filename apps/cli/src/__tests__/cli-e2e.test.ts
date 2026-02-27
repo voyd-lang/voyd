@@ -278,6 +278,25 @@ const createMixedDirectoryFixture = async (): Promise<{
   return { root, testRoot };
 };
 
+const createMalformedTestDeclarationFixture = async (): Promise<{
+  root: string;
+  targetFile: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-malformed-test-"));
+  const srcRoot = resolve(root, "src");
+  const targetFile = resolve(srcRoot, "bad_test.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    targetFile,
+    [
+      "test:",
+      "  1",
+      "",
+    ].join("\n"),
+  );
+  return { root, targetFile };
+};
+
 const createDocFixture = async (): Promise<string> => {
   const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-docs-"));
   const srcRoot = resolve(root, "src");
@@ -459,6 +478,24 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 
       expect(output).toContain("passed 1, failed 0, skipped 0");
       expect(output).not.toContain("TY0027");
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces parser diagnostics for malformed test declarations", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createMalformedTestDeclarationFixture();
+    try {
+      const result = runCli(fixture.root, ["test", fixture.targetFile]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      expect(result.status).toBe(1);
+      expect(output).not.toContain("[discovery] No tests found for target:");
+      expect(output).toContain("[typing] voyd test failed for target:");
+      expect(output).toContain("TY9999");
+      expect(output).toContain(`${fixture.targetFile}:1:1`);
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }
