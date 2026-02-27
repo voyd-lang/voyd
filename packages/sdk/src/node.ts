@@ -321,5 +321,7 @@ export type {
   TestResult,
   TestRunOptions,
   TestRunSummary,
+  VoydRuntimeDiagnostics,
+  VoydRuntimeError,
   VoydSdk,
 } from "./shared/types.js";

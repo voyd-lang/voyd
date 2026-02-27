@@ -31,6 +31,11 @@ import {
   type DefaultAdapterRegistration,
 } from "./adapters/default.js";
 import { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
+import {
+  createVoydTrapDiagnostics,
+  isVoydRuntimeError,
+  type VoydTrapAnnotation,
+} from "./runtime/trap-diagnostics.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
@@ -272,6 +277,11 @@ export const createVoydHost = async ({
   defaultAdapters = true,
 }: HostInitOptions): Promise<VoydHost> => {
   const module = toModule(wasm);
+  const trapDiagnostics = createVoydTrapDiagnostics({ module });
+  const annotateTrap = (
+    error: unknown,
+    opts?: VoydTrapAnnotation
+  ): Error => trapDiagnostics.annotateTrap(error, opts);
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
   const table = toHostProtocolTable(parsedTable);
   const exportAbi = parseExportAbi(module);
@@ -370,12 +380,23 @@ export const createVoydHost = async ({
     new Uint8Array(msgpackMemory.buffer, inPtr, encodedArgs.length).set(
       encodedArgs
     );
-    const written = (entry as CallableFunction)(
-      inPtr,
-      encodedArgs.length,
-      outPtr,
-      bufferSize
-    ) as number;
+    let written: number;
+    try {
+      written = (entry as CallableFunction)(
+        inPtr,
+        encodedArgs.length,
+        outPtr,
+        bufferSize
+      ) as number;
+    } catch (error) {
+      throw annotateTrap(error, {
+        transition: {
+          point: "run_serialized_entry",
+          direction: "host->vm",
+        },
+        fallbackFunctionName: entryName,
+      });
+    }
     if (written < 0) {
       throw new Error("serialized export encoding failed");
     }
@@ -398,7 +419,17 @@ export const createVoydHost = async ({
       return runSerialized<T>(entryName, args);
     }
     const entry = requireExportedFunction({ instance, name: entryName });
-    return (entry as (...params: unknown[]) => T)(...args);
+    try {
+      return (entry as (...params: unknown[]) => T)(...args);
+    } catch (error) {
+      throw annotateTrap(error, {
+        transition: {
+          point: "run_pure_entry",
+          direction: "host->vm",
+        },
+        fallbackFunctionName: entryName,
+      });
+    }
   };
 
   const runEffectfulManaged = <T = unknown>(
@@ -445,21 +476,49 @@ export const createVoydHost = async ({
     });
 
     const run = runtimeScheduler.startRun<T>({
-      start: () => entry(bufferPtr, bufferSize),
-      step: (result, context) =>
-        continueEffectLoopStep<T>({
-          result,
-          effectStatus,
-          effectCont,
-          effectLen,
-          resumeEffectful,
-          table: parsedTable,
-          handlersByOpIndex,
-          msgpackMemory,
-          bufferPtr,
-          bufferSize,
-          shouldContinue: () => !context.isCancelled(),
-        }),
+      start: () => {
+        try {
+          return entry(bufferPtr, bufferSize);
+        } catch (error) {
+          throw annotateTrap(error, {
+            transition: {
+              point: "effectful_entry",
+              direction: "host->vm",
+            },
+            fallbackFunctionName: entryName,
+          });
+        }
+      },
+      step: async (result, context) => {
+        try {
+          return await continueEffectLoopStep<T>({
+            result,
+            effectStatus,
+            effectCont,
+            effectLen,
+            resumeEffectful,
+            table: parsedTable,
+            handlersByOpIndex,
+            msgpackMemory,
+            bufferPtr,
+            bufferSize,
+            shouldContinue: () => !context.isCancelled(),
+            annotateTrap,
+            fallbackFunctionName: entryName,
+          });
+        } catch (error) {
+          if (isVoydRuntimeError(error)) {
+            throw error;
+          }
+          throw annotateTrap(error, {
+            transition: {
+              point: "effect_loop_step",
+              direction: "vm",
+            },
+            fallbackFunctionName: entryName,
+          });
+        }
+      },
     });
     void run.outcome.finally(() => {
       releaseEffectRunBufferPtr(bufferPtr);

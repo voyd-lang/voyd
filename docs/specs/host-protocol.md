@@ -157,3 +157,46 @@ Hosts must fail fast on:
 
 Failure to initialize handles or mismatch signatures must result in a hard
 error. Silent fallback to name-based resolution is not allowed in release mode.
+
+### Runtime Trap Diagnostics
+
+When a wasm runtime trap bubbles through the JS host, the thrown `Error` keeps
+its normal JS stack and adds structured Voyd context at `error.voyd`:
+
+```ts
+{
+  version: 1,
+  kind: "wasm-trap",
+  trap: {
+    wasmFunctionIndex: 42,
+    wasmByteOffset: 336,
+    wasmName: "src_main_pure_trap_0",
+    moduleId: "src::main",
+    functionName: "pure_trap",
+    span: {
+      file: "/path/src/main.voyd",
+      start: 120,
+      end: 168,
+      startLine: 8,
+      startColumn: 1
+    }
+  },
+  effect: {
+    effectId: "com.example.async",
+    opId: 0,
+    opName: "await",
+    label: "Async::await",
+    resumeKind: "resume",
+    continuationBoundary: "resume"
+  },
+  transition: {
+    point: "resume_effectful",
+    direction: "host->vm"
+  }
+}
+```
+
+Notes:
+- `effect` is present when the trap occurs in effect dispatch/resume flow.
+- `transition` identifies the boundary point where the trap was observed.
+- `span` is best-effort; file/offsets are always emitted when available.

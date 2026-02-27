@@ -1,0 +1,16 @@
+use std::msgpack
+use std::string
+
+@effect(id: "com.example.trap")
+eff TrapFx
+  denom(resume, value: i32) -> i32
+
+fn zero() -> i32
+  0
+
+pub fn pure_trap() -> i32
+  10 / zero()
+
+pub fn effectful_trap(): TrapFx -> i32
+  let denominator = TrapFx::denom(1)
+  10 / denominator

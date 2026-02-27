@@ -260,6 +260,14 @@ export type ModuleCodegenMetadata = {
   }[];
 };
 
+export type CodegenSourceLocation = {
+  filePath: string;
+  startLine: number;
+  startColumn: number;
+  endLine?: number;
+  endColumn?: number;
+};
+
 export type ModuleCodegenView = {
   moduleId: string;
   meta: ModuleCodegenMetadata;
@@ -267,6 +275,7 @@ export type ModuleCodegenView = {
   effects: EffectTable;
   types: ModuleTypeIndex;
   effectsInfo: EffectsLoweringInfo;
+  functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
 
 export type ImportWiringIndex = {
@@ -1722,6 +1731,20 @@ export const buildProgramCodegenView = (
   stableModules.forEach((mod) => {
     const meta = moduleMetaById.get(mod.moduleId);
     if (!meta) return;
+    const functionLocations = new Map<SymbolId, CodegenSourceLocation>();
+    mod.binding.functions.forEach((fn) => {
+      const location = fn.form?.location;
+      if (!location?.filePath) {
+        return;
+      }
+      functionLocations.set(fn.symbol, {
+        filePath: location.filePath,
+        startLine: location.startLine,
+        startColumn: location.startColumn,
+        endLine: location.endLine,
+        endColumn: location.endColumn,
+      });
+    });
     moduleViews.set(mod.moduleId, {
       moduleId: mod.moduleId,
       meta,
@@ -1742,6 +1765,7 @@ export const buildProgramCodegenView = (
         hir: mod.hir,
         typing: mod.typing,
       }),
+      functionLocations,
     });
   });
 

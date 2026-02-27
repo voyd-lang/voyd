@@ -36,6 +36,8 @@ const findLogInfoOp = (
 ): { label: string; effectId: string } | undefined =>
   ops.find((op) => op.label.endsWith("Log.info"));
 
+const RUNTIME_DIAGNOSTICS_SECTION = "voyd.runtime_diagnostics";
+
 describe("effect table + harness", () => {
   it("emits a custom section and sidecar for effects", async () => {
     const { module, effectTable } = await loadSmokeModule();
@@ -67,6 +69,46 @@ describe("effect table + harness", () => {
       expect(typeof op.signatureHash).toBe("number");
     });
   }, 30_000);
+
+  it("emits runtime trap diagnostics function metadata", async () => {
+    const { wasm } = await loadSmokeModule();
+    const wasmBuffer =
+      wasm.buffer instanceof ArrayBuffer &&
+      wasm.byteOffset === 0 &&
+      wasm.byteLength === wasm.buffer.byteLength
+        ? wasm.buffer
+        : wasm.slice().buffer;
+    const wasmModule = new WebAssembly.Module(wasmBuffer);
+    const sections = WebAssembly.Module.customSections(
+      wasmModule,
+      RUNTIME_DIAGNOSTICS_SECTION
+    );
+    expect(sections.length).toBeGreaterThan(0);
+    const payload = new TextDecoder().decode(new Uint8Array(sections[0]!));
+    const parsed = JSON.parse(payload) as {
+      version: number;
+      functions: Array<{
+        wasmName: string;
+        moduleId: string;
+        functionName: string;
+        span: {
+          file: string;
+          start: number;
+          end: number;
+          startLine?: number;
+          startColumn?: number;
+        };
+      }>;
+    };
+    expect(parsed.version).toBe(1);
+    expect(parsed.functions.length).toBeGreaterThan(0);
+    const main = parsed.functions.find((entry) => entry.functionName === "main");
+    expect(main).toBeDefined();
+    expect(main?.moduleId).toContain("src::effects-smoke");
+    expect(main?.span.file).toContain("effects-smoke.voyd");
+    expect(main?.span.startLine).toBeGreaterThan(0);
+    expect(main?.span.startColumn).toBeGreaterThan(0);
+  });
 
   it("unwraps Outcome.value from an effectful export", async () => {
     const { module } = await loadSmokeModule();
