@@ -33,7 +33,6 @@ import {
 import { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
 import {
   createVoydTrapDiagnostics,
-  isVoydRuntimeError,
   type VoydTrapAnnotation,
 } from "./runtime/trap-diagnostics.js";
 
@@ -489,36 +488,22 @@ export const createVoydHost = async ({
           });
         }
       },
-      step: async (result, context) => {
-        try {
-          return await continueEffectLoopStep<T>({
-            result,
-            effectStatus,
-            effectCont,
-            effectLen,
-            resumeEffectful,
-            table: parsedTable,
-            handlersByOpIndex,
-            msgpackMemory,
-            bufferPtr,
-            bufferSize,
-            shouldContinue: () => !context.isCancelled(),
-            annotateTrap,
-            fallbackFunctionName: entryName,
-          });
-        } catch (error) {
-          if (isVoydRuntimeError(error)) {
-            throw error;
-          }
-          throw annotateTrap(error, {
-            transition: {
-              point: "effect_loop_step",
-              direction: "vm",
-            },
-            fallbackFunctionName: entryName,
-          });
-        }
-      },
+      step: async (result, context) =>
+        continueEffectLoopStep<T>({
+          result,
+          effectStatus,
+          effectCont,
+          effectLen,
+          resumeEffectful,
+          table: parsedTable,
+          handlersByOpIndex,
+          msgpackMemory,
+          bufferPtr,
+          bufferSize,
+          shouldContinue: () => !context.isCancelled(),
+          annotateTrap,
+          fallbackFunctionName: entryName,
+        }),
     });
     void run.outcome.finally(() => {
       releaseEffectRunBufferPtr(bufferPtr);
