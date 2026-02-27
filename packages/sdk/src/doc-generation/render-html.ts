@@ -358,9 +358,17 @@ export const renderDocumentationHtml = ({
       display: none;
       border-right: 1px solid var(--line-soft);
       background: var(--surface-soft);
-      padding: 0.9rem 0.85rem;
+      padding: 0.85rem 0.7rem 0.7rem;
+      position: sticky;
+      top: 0.9rem;
+      max-height: calc(100vh - 1.8rem);
+      overflow: auto;
     }
-    .sidebar h3 { margin-top: 0; color: var(--ink); }
+    .sidebar h3 {
+      margin: 0 0 0.5rem;
+      color: var(--ink);
+      padding: 0 0.35rem;
+    }
     .sidebar ul {
       margin: 0;
       padding-left: 0.9rem;
@@ -389,16 +397,15 @@ export const renderDocumentationHtml = ({
     .toc-top li { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: baseline; }
     .toc-counts { color: var(--muted); font-size: 0.85rem; }
     .module-section {
-      border: 1px solid var(--line-soft);
-      border-radius: 9px;
-      padding: 1rem 1rem 0.9rem;
-      margin-bottom: 1rem;
-      background: #ffffff;
+      padding: 1.05rem 0 0.95rem;
+      margin: 0;
+      background: transparent;
     }
+    .module-section + .module-section { border-top: 1px solid var(--line-soft); }
     .module-section > header {
       border-bottom: 1px solid var(--line-soft);
-      margin-bottom: 0.8rem;
-      padding-bottom: 0.4rem;
+      margin: 0 0.25rem 0.8rem;
+      padding-bottom: 0.46rem;
     }
     .kind-section + .kind-section {
       border-top: 1px solid var(--line-soft);
@@ -406,17 +413,15 @@ export const renderDocumentationHtml = ({
       padding-top: 0.8rem;
     }
     .doc-item {
-      border: 1px solid var(--line-soft);
-      border-left: 3px solid #c5ddd3;
-      background: #ffffff;
-      border-radius: 7px;
-      padding: 0.72rem 0.8rem;
-      margin: 0.62rem 0;
+      border-bottom: 1px solid var(--line-soft);
+      padding: 0.5rem 0.35rem 0.72rem;
+      margin: 0.45rem 0;
     }
+    .doc-item:last-child { border-bottom: none; }
+    .doc-item > h4 { margin-bottom: 0.35rem; }
     .item-meta {
-      border-top: 1px solid var(--line-soft);
-      margin-top: 0.75rem;
-      padding-top: 0.65rem;
+      margin-top: 0.7rem;
+      padding-top: 0.2rem;
     }
     .item-meta ul {
       margin: 0;
@@ -424,12 +429,11 @@ export const renderDocumentationHtml = ({
     }
     .item-meta li { margin: 0.45rem 0; }
     .member {
-      border: 1px solid #ecf1ee;
-      border-radius: 6px;
-      background: #fbfdfc;
-      padding: 0.48rem 0.62rem;
-      margin: 0.5rem 0;
+      border-left: 3px solid #d2e2db;
+      padding: 0.3rem 0.2rem 0.5rem 0.72rem;
+      margin: 0.55rem 0;
     }
+    .member h6 { margin: 0.3rem 0 0.35rem; font-size: 1.01rem; }
     .doc-body p:first-child { margin-top: 0.2rem; }
     .doc-body p { color: #273136; }
     .member-doc p { margin: 0.35rem 0; }
@@ -442,6 +446,13 @@ export const renderDocumentationHtml = ({
       padding: 0.14rem 0.35rem;
       font-size: 0.91em;
     }
+    .doc-item > h4 code,
+    .member h6 code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      font-size: 1em;
+    }
     pre code {
       display: block;
       padding: 0.8rem;
@@ -453,11 +464,7 @@ export const renderDocumentationHtml = ({
       }
       .sidebar {
         display: block;
-        position: sticky;
-        top: 0.9rem;
         align-self: start;
-        max-height: calc(100vh - 1.8rem);
-        overflow: auto;
       }
       .toc-top { display: none; }
       .content { padding: 1.2rem 1.6rem 1.8rem; }
@@ -466,7 +473,8 @@ export const renderDocumentationHtml = ({
       body { padding: 0.65rem; }
       .hero { padding: 1.15rem 1rem; }
       .content { padding: 0.85rem 0.9rem 1.2rem; }
-      .module-section { padding: 0.85rem; }
+      .module-section { padding: 0.85rem 0 0.75rem; }
+      .module-section > header { margin-left: 0; margin-right: 0; }
     }
   </style>
 </head>
@@ -479,9 +487,11 @@ export const renderDocumentationHtml = ({
     <div class="layout">
       <aside class="sidebar">
         <h3>Docs Index</h3>
-        <ul>
-          ${sidebar}
-        </ul>
+        <nav class="sidebar-nav">
+          <ul>
+            ${sidebar}
+          </ul>
+        </nav>
       </aside>
       <article class="content">
         ${topToc}

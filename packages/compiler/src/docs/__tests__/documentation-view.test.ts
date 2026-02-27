@@ -24,6 +24,12 @@ pub fn add(
 ) -> i32
   left
 
+pub obj Num { value: i32 }
+
+impl Num
+  fn double(self) -> i32
+    self.value * 2
+
 pub eff Decode
   decode_next(resume, input: i32) -> i32
   finish(tail) -> void
@@ -63,5 +69,11 @@ pub mod math
       "decode_next",
       "finish",
     ]);
+    const implMethod = mainModule?.functions.find((fn) => fn.name === "double");
+    const implDecl = mainModule?.impls[0];
+    expect(implMethod?.implId).toBe(implDecl?.id);
+    expect(implDecl?.methods.some((method) => method.name === "double")).toBe(
+      true,
+    );
   });
 });

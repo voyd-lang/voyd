@@ -22,6 +22,12 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       ") -> i32",
       "  value + 1",
       "",
+      "pub obj Counter { value: i32 }",
+      "",
+      "impl Counter",
+      "  fn double(self) -> i32",
+      "    self.value * 2",
+      "",
       "pub fn main() -> i32",
       "  add_one(41)",
       "",
@@ -44,6 +50,9 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("Docs Index");
       expect(html.content).toContain("Input value.<br />");
       expect(html.content).toContain("Keep newline.</p>");
+      expect(html.content).toContain("impl Counter");
+      expect(html.content).toContain("double(self: Counter) -&gt; i32");
+      expect(html.content).not.toContain("id=\"function-src-main-double\"");
 
       const json = await generateDocumentation({
         entryPath: fixture.entryPath,
@@ -56,6 +65,10 @@ describe("smoke: sdk doc-generation", () => {
             name: string;
             parameterDocs: Array<{ name: string; documentation: string }>;
           }>;
+          impls: Array<{
+            signature: string;
+            members: Array<{ name: string; signature: string }>;
+          }>;
         }>;
       };
       const mainModule = parsed.modules.find((module) => module.id === "src::main");
@@ -64,6 +77,15 @@ describe("smoke: sdk doc-generation", () => {
       expect(addOne).toBeDefined();
       const valueDoc = addOne?.parameterDocs.find((param) => param.name === "value");
       expect(valueDoc?.documentation).toBe(" Input value.\n Keep newline.");
+      const duplicateMethodFn = mainModule?.functions.find((fn) => fn.name === "double");
+      expect(duplicateMethodFn).toBeUndefined();
+      const counterImpl = mainModule?.impls.find((impl) =>
+        impl.signature.includes("Counter"),
+      );
+      expect(counterImpl).toBeDefined();
+      const doubleMethod = counterImpl?.members.find((member) => member.name === "double");
+      expect(doubleMethod).toBeDefined();
+      expect(doubleMethod?.signature.startsWith("fn ")).toBe(false);
     } finally {
       await fs.rm(fixture.root, { recursive: true, force: true });
     }

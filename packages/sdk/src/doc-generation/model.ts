@@ -16,6 +16,11 @@ import type {
 const isPublic = (visibility: { level?: string } | undefined): boolean =>
   visibility?.level === "public" || visibility?.level === "package";
 
+const isVisibleImpl = (visibility: { level?: string } | undefined): boolean =>
+  visibility?.level === "public" ||
+  visibility?.level === "package" ||
+  visibility?.level === "module";
+
 const sanitizeAnchorSegment = (value: string): string =>
   value
     .toLowerCase()
@@ -312,6 +317,24 @@ const formatFunctionSignature = (fn: {
   return `fn ${fn.name}${typeParams}(${params})${effectPart}${returnPart}`;
 };
 
+const formatMethodSignature = (member: {
+  name: string;
+  typeParameters?: ReadonlyArray<{ name: string }>;
+  params: ReadonlyArray<DocumentationParameterView>;
+  effectTypeExpr?: unknown;
+  returnTypeExpr?: unknown;
+}): string => {
+  const typeParams = formatTypeParameters(member.typeParameters);
+  const params = member.params.map(formatParameterSignature).join(", ");
+  const effectPart = member.effectTypeExpr
+    ? `: ${formatTypeExpr(member.effectTypeExpr)}`
+    : "";
+  const returnPart = member.returnTypeExpr
+    ? ` -> ${formatTypeExpr(member.returnTypeExpr)}`
+    : "";
+  return `${member.name}${typeParams}(${params})${effectPart}${returnPart}`;
+};
+
 const collectParameterDocs = (
   params: readonly DocumentationParameterView[],
 ): Array<{ name: string; documentation: string }> =>
@@ -327,17 +350,17 @@ const memberFromMethod = ({
   method: DocumentationMethodView;
 }): Omit<DocumentationMember, "anchor"> => ({
   name: method.name,
-  signature: formatFunctionSignature(method),
+  signature: formatMethodSignature(method),
   documentation: method.documentation,
 });
 
-const memberFromFunction = ({
+const memberFromImplMethod = ({
   fn,
 }: {
   fn: DocumentationFunctionView;
 }): Omit<DocumentationMember, "anchor"> => ({
   name: fn.name,
-  signature: formatFunctionSignature(fn),
+  signature: formatMethodSignature(fn),
   documentation: fn.documentation,
 });
 
@@ -406,7 +429,9 @@ export const createDocumentationModel = ({
     const moduleAnchor = nextAnchor(`module-${moduleDoc.id}`);
 
     const functions = moduleDoc.functions
-      .filter((fn) => isPublic(fn.visibility))
+      .filter(
+        (fn) => isPublic(fn.visibility) && fn.implId === undefined,
+      )
       .map((fn) =>
         createItem({
           moduleId: moduleDoc.id,
@@ -495,7 +520,7 @@ export const createDocumentationModel = ({
       );
 
     const impls = moduleDoc.impls
-      .filter((implDecl) => isPublic(implDecl.visibility))
+      .filter((implDecl) => isVisibleImpl(implDecl.visibility))
       .map((implDecl) => {
         const implName = `impl#${implDecl.id}`;
         return createItem({
@@ -509,7 +534,7 @@ export const createDocumentationModel = ({
           }`,
           documentation: implDecl.documentation,
           members: implDecl.methods.map((method) =>
-            memberFromFunction({ fn: method }),
+            memberFromImplMethod({ fn: method }),
           ),
           nextAnchor,
         });

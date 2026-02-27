@@ -21,6 +21,7 @@ export type DocumentationFunctionView = {
   id: number;
   name: string;
   visibility: DocumentationVisibilityView;
+  implId?: number;
   typeParameters?: readonly DocumentationTypeParameterView[];
   params: readonly DocumentationParameterView[];
   returnTypeExpr?: unknown;
@@ -145,6 +146,7 @@ const normalizeFunction = (
     id: number;
     name: string;
     visibility: { level?: string };
+    implId?: number;
     typeParameters?: ReadonlyArray<{ name: string }>;
     params: ReadonlyArray<{
       name: string;
@@ -161,6 +163,7 @@ const normalizeFunction = (
   id: fn.id,
   name: fn.name,
   visibility: normalizeVisibility(fn.visibility),
+  implId: fn.implId,
   typeParameters: normalizeTypeParameters(fn.typeParameters),
   params: fn.params.map(normalizeParameter),
   returnTypeExpr: fn.returnTypeExpr,
