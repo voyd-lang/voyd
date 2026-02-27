@@ -494,6 +494,21 @@ describe("next codegen", () => {
     expect(main()).toBe(55);
   });
 
+  it("short-circuits boolean and/or expressions", () => {
+    const instance = loadWasmInstance("boolean_short_circuit.voyd");
+    const guardedAnd = instance.exports.guarded_and;
+    expect(typeof guardedAnd).toBe("function");
+    expect((guardedAnd as () => number)()).toBe(2);
+
+    const guardedOr = instance.exports.guarded_or;
+    expect(typeof guardedOr).toBe("function");
+    expect((guardedOr as () => number)()).toBe(3);
+
+    const main = instance.exports.main;
+    expect(typeof main).toBe("function");
+    expect((main as () => number)()).toBe(5);
+  });
+
   it("coerces declared bindings to annotated optional types", () => {
     const main = loadMain("optional_binding_coercion.voyd");
     expect(main()).toBe(5);
