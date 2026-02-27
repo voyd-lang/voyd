@@ -1,3 +1,12 @@
+
+/// Quick way to define a union type with multiple inline object variants.
+/// For example:
+/// ```
+/// enum Result
+///   Foo<T> { value: T }
+///   Bar { value: i32 }
+///   Baz
+/// ```
 pub macro enum(enum_name, variants_block)
   let normalize_variant = (variant) =>
     if is_list(variant):

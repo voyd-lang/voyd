@@ -1,3 +1,4 @@
+pub self::array
 pub self::optional
 pub self::result
 pub self::prelude
@@ -26,6 +27,7 @@ pub self::input
 pub self::output
 pub self::path
 pub self::fs
+pub self::test
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::all
 pub std::result::types::{ Result, Ok, Err }

@@ -46,12 +46,72 @@ describe("getConfigFromCli", () => {
     const config = runWithArgv(["node", "voyd", "doc"]);
     expect(config.doc).toBe(true);
     expect(config.index).toBe("./src");
+    expect(config.docFormat).toBe("html");
   });
 
   it("supports `voyd docs` alias with explicit output path", () => {
-    const config = runWithArgv(["node", "voyd", "docs", "./demo", "--out", "docs.html"]);
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "docs",
+      "./demo",
+      "--out",
+      "docs.html",
+    ]);
     expect(config.doc).toBe(true);
     expect(config.index).toBe("./demo");
     expect(config.docOut).toBe("docs.html");
+  });
+
+  it("supports JSON doc output format", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "doc",
+      "--format",
+      "json",
+    ]);
+    expect(config.doc).toBe(true);
+    expect(config.docFormat).toBe("json");
+  });
+
+  it("parses `voyd test` when global options come first", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "--pkg-dir",
+      "./vendor",
+      "test",
+      "./suite",
+    ]);
+    expect(config.test).toBe(true);
+    expect(config.index).toBe("./suite");
+    expect(config.pkgDirs).toEqual(["./vendor"]);
+  });
+
+  it("parses `voyd doc` when global options come first", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "--pkg-dir=./vendor",
+      "doc",
+      "./src/pkg.voyd",
+    ]);
+    expect(config.doc).toBe(true);
+    expect(config.index).toBe("./src/pkg.voyd");
+    expect(config.pkgDirs).toEqual(["./vendor"]);
+  });
+
+  it("does not treat --reporter values as subcommands", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "--test",
+      "--reporter",
+      "doc",
+    ]);
+    expect(config.test).toBe(true);
+    expect(config.doc).toBe(false);
+    expect(config.testReporter).toBe("doc");
   });
 });
