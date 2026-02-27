@@ -307,8 +307,17 @@ const isWasmTrapError = (error: Error): boolean => {
   if (!error.stack) {
     return false;
   }
-  // Accept any stack format as long as we can identify at least one wasm frame.
-  return parseWasmFrames(error.stack).length > 0;
+
+  const topFrame = error.stack
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && !line.startsWith("RuntimeError:"));
+  if (!topFrame) {
+    return false;
+  }
+
+  // Only classify as a VM trap when the throwing frame itself is wasm.
+  return parseWasmFrameFromLine(topFrame) !== undefined;
 };
 
 const resolveFrame = ({

@@ -50,4 +50,19 @@ describe("createVoydTrapDiagnostics", () => {
     const annotated = diagnostics.annotateTrap(error);
     expect(isVoydRuntimeError(annotated)).toBe(false);
   });
+
+  it("does not annotate when a wasm frame exists but is not the throwing frame", () => {
+    const diagnostics = createVoydTrapDiagnostics({ module: EMPTY_WASM_MODULE });
+    const error = withStack(
+      new Error("runtime error"),
+      [
+        "RuntimeError: runtime error",
+        "at boom (https://example.test/host.js:10:3)",
+        "at main (wasm://wasm/00112233:1:57)",
+      ].join("\n")
+    );
+
+    const annotated = diagnostics.annotateTrap(error);
+    expect(isVoydRuntimeError(annotated)).toBe(false);
+  });
 });
