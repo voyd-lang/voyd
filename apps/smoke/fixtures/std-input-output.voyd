@@ -1,0 +1,153 @@
+use std::bytes::Bytes
+use std::bytes::ByteBuffer
+use std::error::IoError
+use std::input::{ read_bytes, is_tty as input_is_tty }
+use std::optional::types::all
+use std::output::{ write, write_line, write_bytes, flush, is_tty as output_is_tty, StdErr }
+use std::result::types::all
+
+fn sum_bytes(bytes: Bytes): () -> i32
+  let values = bytes.to_array()
+  var index = 0
+  var total = 0
+  while index < values.len() do:
+    match(values.get(index))
+      Some<i32> { value }:
+        total = total + value
+      None:
+        void
+    index = index + 1
+  total
+
+pub fn io_tty_probe() -> i32
+  if input_is_tty() == false then:
+    return -10
+  if output_is_tty() == false then:
+    return -11
+  if output_is_tty(target: StdErr {}) then:
+    return -12
+  1
+
+pub fn io_write_probe() -> i32
+  let _ = write(value: "hello".as_slice())
+  let _ = flush()
+  1
+
+pub fn io_write_line_probe() -> i32
+  let _ = write_line(value: "ok".as_slice())
+  1
+
+pub fn io_write_bytes_probe() -> i32
+  let ~buffer = ByteBuffer::with_capacity(bytes: 2)
+  buffer.push(value: 7)
+  buffer.push(value: 8)
+  let _ = write_bytes(bytes: buffer.as_bytes(), target: StdErr {})
+  1
+
+pub fn io_write_combo_probe() -> i32
+  let ~buffer = ByteBuffer::with_capacity(bytes: 2)
+  buffer.push(value: 7)
+  buffer.push(value: 8)
+  let _ = write(value: "hello".as_slice())
+  let _ = write_line(value: "ok".as_slice())
+  let _ = write_bytes(bytes: buffer.as_bytes(), target: StdErr {})
+  let _ = flush()
+  let _ = flush(target: StdErr {})
+  1
+
+pub fn io_read_bytes_probe() -> i32
+  match(read_bytes(max_bytes: 4))
+    Ok<Option<Bytes>> { value }:
+      match(value)
+        Some<Bytes> { value: bytes }:
+          sum_bytes(bytes)
+        None:
+          -1
+    Err<IoError>:
+      -2
+
+pub fn io_read_bytes_to_write_probe() -> i32
+  match(read_bytes(max_bytes: 4))
+    Ok<Option<Bytes>> { value }:
+      match(value)
+        Some<Bytes> { value: bytes }:
+          let _ = write_bytes(bytes: bytes, target: StdErr {})
+          1
+        None:
+          -1
+    Err<IoError>:
+      -2
+
+pub fn io_input_combo_probe() -> i32
+  if input_is_tty() == false then:
+    return -10
+  match(read_bytes(max_bytes: 4))
+    Ok<Option<Bytes>> { value }:
+      match(value)
+        Some<Bytes> { value: bytes }:
+          sum_bytes(bytes)
+        None:
+          -1
+    Err<IoError>:
+      -2
+
+pub fn io_output_combo_probe() -> i32
+  if output_is_tty() == false then:
+    return -10
+  if output_is_tty(target: StdErr {}) then:
+    return -11
+  let ~buffer = ByteBuffer::with_capacity(bytes: 2)
+  buffer.push(value: 7)
+  buffer.push(value: 8)
+  let _ = write(value: "hello".as_slice())
+  let _ = write_line(value: "ok".as_slice())
+  let _ = write_bytes(bytes: buffer.as_bytes(), target: StdErr {})
+  let _ = flush()
+  let _ = flush(target: StdErr {})
+  1
+
+pub fn io_success() -> i32
+  let tty_result = io_tty_probe()
+  if tty_result < 0 then:
+    return tty_result
+
+  let read_result = io_read_bytes_probe()
+  if read_result < 0 then:
+    return read_result
+
+  let output_result = io_output_combo_probe()
+  if output_result < 0 then:
+    return output_result
+
+  read_result
+
+pub fn io_read_eof() -> i32
+  match(read_bytes(max_bytes: 4))
+    Ok<Option<Bytes>> { value }:
+      match(value)
+        Some<Bytes>:
+          -1
+        None:
+          1
+    Err<IoError>:
+      -2
+
+pub fn io_read_error() -> i32
+  match(read_bytes(max_bytes: 4))
+    Ok<Option<Bytes>>:
+      -1
+    Err<IoError> { error }:
+      if error.code == 1 then:
+        1
+      else:
+        -2
+
+pub fn io_output_error() -> i32
+  match(write(value: "fail".as_slice()))
+    Ok<Unit>:
+      -1
+    Err<IoError> { error }:
+      if error.code == 1 then:
+        1
+      else:
+        -2

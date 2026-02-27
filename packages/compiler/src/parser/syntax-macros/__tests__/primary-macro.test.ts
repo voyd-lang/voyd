@@ -21,6 +21,26 @@ describe("primary syntax macro", () => {
     ]);
   });
 
+  it("binds additive operators tighter than comparisons", () => {
+    const greaterThan = expand("pub fn main() a + b > c");
+    expect(greaterThan).toEqual([
+      "ast",
+      ["pub", "fn", ["main"], [">", ["+", "a", "b"], "c"]],
+    ]);
+
+    const lessThan = expand("pub fn main() a - b < c");
+    expect(lessThan).toEqual([
+      "ast",
+      ["pub", "fn", ["main"], ["<", ["-", "a", "b"], "c"]],
+    ]);
+
+    const equality = expand("pub fn main() a + b == c");
+    expect(equality).toEqual([
+      "ast",
+      ["pub", "fn", ["main"], ["==", ["+", "a", "b"], "c"]],
+    ]);
+  });
+
   it("parses method calls with arguments", () => {
     const ast = expand("pub fn main() foo.bar(x)");
     expect(ast).toEqual([
