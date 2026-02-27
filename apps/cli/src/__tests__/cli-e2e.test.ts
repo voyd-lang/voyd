@@ -250,6 +250,36 @@ const createCompanionTypingErrorFixture = async (): Promise<{
   return { root, sourceFile, testFile };
 };
 
+const createCompanionScopedTargetFixture = async (): Promise<{
+  root: string;
+  testFile: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-companion-scoped-"));
+  const srcRoot = resolve(root, "src");
+  const sourceFile = resolve(srcRoot, "scoped.voyd");
+  const testFile = resolve(srcRoot, "scoped.test.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    sourceFile,
+    [
+      "pub fn broken() -> i32",
+      "  \"nope\"",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    testFile,
+    [
+      "use std::test::assertions::all",
+      "",
+      "test \"companion target stays scoped\":",
+      "  assert(true)",
+      "",
+    ].join("\n"),
+  );
+  return { root, testFile };
+};
+
 const createMixedDirectoryFixture = async (): Promise<{
   root: string;
   testRoot: string;
@@ -459,6 +489,25 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(output).toContain("[typing] voyd test failed for target:");
       expect(output).toContain(`${fixture.testFile}:2:11`);
       expect(output).not.toContain(`${fixture.sourceFile}:1:1`);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps companion-file targets scoped to the companion file", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createCompanionScopedTargetFixture();
+    try {
+      const result = runCli(fixture.root, ["test", fixture.testFile]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      if (result.status !== 0) {
+        throw new Error(`voyd test failed: ${output}`);
+      }
+
+      expect(output).toContain("passed 1, failed 0, skipped 0");
+      expect(output).not.toContain("TY0027");
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }

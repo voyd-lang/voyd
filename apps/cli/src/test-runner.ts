@@ -145,13 +145,14 @@ const enrichFileTargetWithCompanion = async ({
   if (!resolvedScanRoot.endsWith(VOYD_SUFFIX)) {
     return [...files];
   }
+  if (resolvedScanRoot.endsWith(TEST_COMPANION_SUFFIX)) {
+    return [...files];
+  }
   if (!files.some((filePath) => resolve(filePath) === resolvedScanRoot)) {
     return [...files];
   }
 
-  const counterpart = resolvedScanRoot.endsWith(TEST_COMPANION_SUFFIX)
-    ? primaryFileForCompanion(resolvedScanRoot)
-    : companionFileFor(resolvedScanRoot);
+  const counterpart = companionFileFor(resolvedScanRoot);
   if (!(await fileExists(counterpart))) {
     return [...files];
   }
@@ -162,12 +163,8 @@ const enrichFileTargetWithCompanion = async ({
 const sourceContainsTestDeclaration = async (
   filePath: string,
 ): Promise<boolean> => {
-  try {
-    const source = await readFile(filePath, "utf8");
-    return TEST_DECLARATION_PATTERN.test(source);
-  } catch {
-    return false;
-  }
+  const source = await readFile(filePath, "utf8");
+  return TEST_DECLARATION_PATTERN.test(source);
 };
 
 const selectTestModules = async ({
