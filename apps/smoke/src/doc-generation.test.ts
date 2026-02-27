@@ -14,6 +14,8 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
     [
       "//! Package docs.",
       "",
+      "pub use src::util::all",
+      "",
       "/// Adds one.",
       "pub fn add_one(",
       "  /// Input value.",
@@ -40,6 +42,15 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
     ].join("\n"),
     "utf8",
   );
+  await fs.writeFile(
+    path.join(srcRoot, "util.voyd"),
+    [
+      "pub fn util_value() -> i32",
+      "  7",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   return { root, entryPath };
 };
 
@@ -59,6 +70,9 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("class=\"tok-kw\">fn</span>");
       expect(html.content).toContain("class=\"tok-name\">take_labeled</span>");
       expect(html.content).toContain("class=\"tok-type\">Counter</span>");
+      expect(html.content).toContain("Re-Exports");
+      expect(html.content).toContain("class=\"tok-kw\">use</span>");
+      expect(html.content).toContain("class=\"tok-id\">util</span>");
       expect(html.content).toContain("class=\"tok-kw\">impl</span>");
       expect(html.content).toContain("class=\"tok-name\">double</span>");
       expect(html.content).not.toContain("id=\"function-src-main-double\"");
@@ -83,6 +97,9 @@ describe("smoke: sdk doc-generation", () => {
             signature: string;
             members: Array<{ name: string; signature: string }>;
           }>;
+          reexports: Array<{
+            signature: string;
+          }>;
         }>;
       };
       const mainModule = parsed.modules.find((module) => module.id === "src::main");
@@ -102,6 +119,9 @@ describe("smoke: sdk doc-generation", () => {
       expect(foldLike?.signature).not.toContain("}, {");
       const duplicateMethodFn = mainModule?.functions.find((fn) => fn.name === "double");
       expect(duplicateMethodFn).toBeUndefined();
+      expect(mainModule?.reexports.map((item) => item.signature)).toContain(
+        "pub use src::util::all",
+      );
       const counterImpl = mainModule?.impls.find((impl) =>
         impl.signature.includes("Counter"),
       );

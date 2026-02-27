@@ -34,6 +34,8 @@ pub eff Decode
   decode_next(resume, input: i32) -> i32
   finish(tail) -> void
 
+pub use src::main::math::all
+
 /// Nested docs.
 pub mod math
   /// Returns one.
@@ -69,6 +71,10 @@ pub mod math
       "decode_next",
       "finish",
     ]);
+    const mathReExport = mainModule?.reexports.find(
+      (reexport) => reexport.path.join("::") === "src::main::math",
+    );
+    expect(mathReExport?.selectionKind).toBe("all");
     const implMethod = mainModule?.functions.find((fn) => fn.name === "double");
     const implDecl = mainModule?.impls[0];
     expect(implMethod?.implId).toBe(implDecl?.id);

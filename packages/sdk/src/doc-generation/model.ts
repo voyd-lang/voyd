@@ -4,6 +4,7 @@ import type {
   DocumentationMethodView,
   DocumentationParameterView,
   DocumentationProgramView,
+  DocumentationReExportView,
 } from "@voyd/compiler/docs/documentation-view.js";
 import type {
   DocumentationItem,
@@ -502,6 +503,34 @@ const formatEffectOperationSignature = (
   return `${operation.name}(${allParams})${returnPart}`;
 };
 
+const defaultAliasForReExport = (
+  reexport: DocumentationReExportView,
+): string | undefined => {
+  if (reexport.selectionKind === "all") {
+    return undefined;
+  }
+  if (reexport.selectionKind === "name") {
+    return reexport.targetName;
+  }
+  return reexport.path.at(-1);
+};
+
+const formatReExportPath = (reexport: DocumentationReExportView): string =>
+  reexport.selectionKind === "all"
+    ? `${reexport.path.join("::")}::all`
+    : reexport.path.join("::");
+
+const formatReExportSignature = (
+  reexport: DocumentationReExportView,
+): string => {
+  const defaultAlias = defaultAliasForReExport(reexport);
+  const aliasPart =
+    reexport.alias && reexport.alias !== defaultAlias
+      ? ` as ${reexport.alias}`
+      : "";
+  return `pub use ${formatReExportPath(reexport)}${aliasPart}`;
+};
+
 const extractTargetName = (targetTypeExpr: unknown): string | undefined => {
   const typeText = formatTypeExpr(targetTypeExpr).trim();
   if (typeText.length === 0 || typeText.startsWith("(")) {
@@ -588,6 +617,18 @@ export const createDocumentationModel = ({
           signature: formatFunctionSignature(fn),
           documentation: fn.documentation,
           parameterDocs: collectParameterDocs(fn.params),
+          nextAnchor,
+        }),
+      );
+
+    const reexports = moduleDoc.reexports
+      .filter((reexport) => isPublic(reexport.visibility))
+      .map((reexport, index) =>
+        createItem({
+          moduleId: moduleDoc.id,
+          kind: "re_export",
+          name: `reexport#${index}`,
+          signature: formatReExportSignature(reexport),
           nextAnchor,
         }),
       );
@@ -694,6 +735,7 @@ export const createDocumentationModel = ({
       depth: moduleDoc.depth,
       anchor: moduleAnchor,
       documentation: moduleDoc.documentation,
+      reexports,
       functions,
       typeAliases,
       objects,

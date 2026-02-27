@@ -1,4 +1,5 @@
 import type { ModuleGraph } from "../modules/types.js";
+import type { UsePathSelectionKind } from "../modules/use-path.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 
 export type DocumentationVisibilityView = {
@@ -93,6 +94,14 @@ export type DocumentationImplView = {
   documentation?: string;
 };
 
+export type DocumentationReExportView = {
+  visibility: DocumentationVisibilityView;
+  path: readonly string[];
+  selectionKind: UsePathSelectionKind;
+  targetName?: string;
+  alias?: string;
+};
+
 export type DocumentationModuleView = {
   id: string;
   depth: number;
@@ -104,6 +113,7 @@ export type DocumentationModuleView = {
   traits: readonly DocumentationTraitView[];
   effects: readonly DocumentationEffectView[];
   impls: readonly DocumentationImplView[];
+  reexports: readonly DocumentationReExportView[];
 };
 
 export type DocumentationProgramView = {
@@ -263,6 +273,15 @@ const normalizeModules = ({
             methods: implDecl.methods.map(normalizeFunction),
             documentation: implDecl.documentation,
           })),
+          reexports: semantic.binding.uses.flatMap((useDecl) =>
+            useDecl.entries.map((entry) => ({
+              visibility: normalizeVisibility(useDecl.visibility),
+              path: entry.path,
+              selectionKind: entry.selectionKind,
+              targetName: entry.targetName,
+              alias: entry.alias,
+            })),
+          ),
         },
       ];
     })

@@ -23,6 +23,9 @@ type SignatureToken = {
 };
 
 const SIGNATURE_KEYWORDS = new Set([
+  "pub",
+  "use",
+  "as",
   "fn",
   "obj",
   "trait",
@@ -294,6 +297,7 @@ const collectKindSections = (
   moduleDoc: ModuleDocumentationSection,
 ): readonly KindSection[] =>
   [
+    { title: "Re-Exports", items: moduleDoc.reexports },
     { title: "Functions", items: moduleDoc.functions },
     { title: "Type Aliases", items: moduleDoc.typeAliases },
     { title: "Objects", items: moduleDoc.objects },
@@ -580,7 +584,7 @@ export const renderDocumentationHtml = ({
     .sidebar {
       display: none;
       border-right: 1px solid var(--line-soft);
-      background: var(--surface-soft);
+      background: transparent;
       padding: 0.85rem 0.7rem 0.7rem;
       position: sticky;
       top: 0.9rem;
