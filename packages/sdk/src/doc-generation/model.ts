@@ -293,8 +293,11 @@ const formatParameterSignature = (
 ): string => {
   const optionalMarker = parameter.optional ? "?" : "";
   const typeText = formatTypeExpr(parameter.typeExpr);
-  if (parameter.label && parameter.label !== parameter.name) {
-    return `${parameter.label} ${parameter.name}${optionalMarker}: ${typeText}`;
+  if (parameter.label) {
+    if (parameter.label === parameter.name) {
+      return `{ ${parameter.label}${optionalMarker}: ${typeText} }`;
+    }
+    return `{ ${parameter.label} ${parameter.name}${optionalMarker}: ${typeText} }`;
   }
   return `${parameter.name}${optionalMarker}: ${typeText}`;
 };
@@ -375,11 +378,30 @@ const formatEffectOperationSignature = (
   return `${operation.name}(${allParams})${returnPart}`;
 };
 
+const extractTargetName = (targetTypeExpr: unknown): string | undefined => {
+  const typeText = formatTypeExpr(targetTypeExpr).trim();
+  if (typeText.length === 0 || typeText.startsWith("(")) {
+    return undefined;
+  }
+
+  const candidate = typeText.split("<")[0]?.trim();
+  if (!candidate) {
+    return undefined;
+  }
+
+  const lastSegment = candidate.split("::").at(-1)?.trim();
+  if (!lastSegment || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(lastSegment)) {
+    return undefined;
+  }
+  return lastSegment;
+};
+
 const createItem = ({
   moduleId,
   kind,
   name,
   signature,
+  targetName,
   documentation,
   parameterDocs,
   members,
@@ -389,6 +411,7 @@ const createItem = ({
   kind: DocumentationItemKind;
   name: string;
   signature: string;
+  targetName?: string;
   documentation?: string;
   parameterDocs?: Array<{ name: string; documentation: string }>;
   members?: readonly Omit<DocumentationMember, "anchor">[];
@@ -405,6 +428,7 @@ const createItem = ({
     kind,
     name,
     fqn,
+    targetName,
     signature,
     documentation,
     anchor: itemAnchor,
@@ -527,6 +551,7 @@ export const createDocumentationModel = ({
           moduleId: moduleDoc.id,
           kind: "impl",
           name: implName,
+          targetName: extractTargetName(implDecl.target),
           signature: `impl${formatTypeParameters(
             implDecl.typeParameters,
           )} ${formatTypeExpr(implDecl.target)}${

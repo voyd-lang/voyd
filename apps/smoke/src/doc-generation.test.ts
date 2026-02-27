@@ -22,6 +22,9 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       ") -> i32",
       "  value + 1",
       "",
+      "pub fn take_labeled({ n: i32 }) -> i32",
+      "  n",
+      "",
       "pub obj Counter { value: i32 }",
       "",
       "impl Counter",
@@ -50,9 +53,14 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("Docs Index");
       expect(html.content).toContain("Input value.<br />");
       expect(html.content).toContain("Keep newline.</p>");
+      expect(html.content).toContain("fn take_labeled({ n: i32 }) -&gt; i32");
       expect(html.content).toContain("impl Counter");
       expect(html.content).toContain("double(self: Counter) -&gt; i32");
       expect(html.content).not.toContain("id=\"function-src-main-double\"");
+      const objectIndex = html.content.indexOf("obj Counter");
+      const implIndex = html.content.indexOf("impl Counter");
+      expect(objectIndex).toBeGreaterThan(-1);
+      expect(implIndex).toBeGreaterThan(objectIndex);
 
       const json = await generateDocumentation({
         entryPath: fixture.entryPath,
@@ -63,6 +71,7 @@ describe("smoke: sdk doc-generation", () => {
           id: string;
           functions: Array<{
             name: string;
+            signature: string;
             parameterDocs: Array<{ name: string; documentation: string }>;
           }>;
           impls: Array<{
@@ -77,6 +86,8 @@ describe("smoke: sdk doc-generation", () => {
       expect(addOne).toBeDefined();
       const valueDoc = addOne?.parameterDocs.find((param) => param.name === "value");
       expect(valueDoc?.documentation).toBe(" Input value.\n Keep newline.");
+      const labeledFn = mainModule?.functions.find((fn) => fn.name === "take_labeled");
+      expect(labeledFn?.signature).toContain("{ n: i32 }");
       const duplicateMethodFn = mainModule?.functions.find((fn) => fn.name === "double");
       expect(duplicateMethodFn).toBeUndefined();
       const counterImpl = mainModule?.impls.find((impl) =>

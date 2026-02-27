@@ -184,7 +184,13 @@ const buildTocTree = (modules: readonly ModuleDocumentationSection[]): TocNode[]
   return sortNodes(root.children);
 };
 
-const renderItemCard = (item: DocumentationItem): string => {
+const renderItemCard = ({
+  item,
+  linkedImpl = false,
+}: {
+  item: DocumentationItem;
+  linkedImpl?: boolean;
+}): string => {
   const docsHtml =
     item.documentation !== undefined
       ? `<div class="doc-body">${renderMarkdownToHtml(item.documentation)}</div>`
@@ -225,7 +231,9 @@ const renderItemCard = (item: DocumentationItem): string => {
 </section>`
       : "";
 
-  return `<article id="${item.anchor}" class="doc-item">
+  const classes = linkedImpl ? "doc-item doc-item-linked-impl" : "doc-item";
+
+  return `<article id="${item.anchor}" class="${classes}">
   <h4><code>${escapeHtml(item.signature)}</code></h4>
   ${docsHtml}
   ${parameterDocsHtml}
@@ -235,7 +243,9 @@ const renderItemCard = (item: DocumentationItem): string => {
 
 const renderKindSection = (section: KindSection): string => `<section class="kind-section">
   <h3>${escapeHtml(section.title)}</h3>
-  ${section.items.map(renderItemCard).join("\n")}
+  ${section.items
+    .map((item) => renderItemCard({ item }))
+    .join("\n")}
 </section>`;
 
 const renderSidebarNode = (node: TocNode): string => {
@@ -281,13 +291,75 @@ const renderModuleSection = (moduleDoc: ModuleDocumentationSection): string => {
       ? `<div class="doc-body">${renderMarkdownToHtml(moduleDoc.documentation)}</div>`
       : "";
   const kindSections = collectKindSections(moduleDoc);
+  const implsByTargetName = moduleDoc.impls.reduce<
+    Map<string, DocumentationItem[]>
+  >((acc, implItem) => {
+    if (!implItem.targetName) {
+      return acc;
+    }
+    const bucket = acc.get(implItem.targetName) ?? [];
+    bucket.push(implItem);
+    acc.set(implItem.targetName, bucket);
+    return acc;
+  }, new Map());
+  const attachedImplAnchors = new Set<string>();
+
+  const renderKindSectionWithAttachedImpls = (section: KindSection): string => {
+    if (section.title === "Implementations") {
+      const remainingImpls = section.items.filter(
+        (item) => !attachedImplAnchors.has(item.anchor),
+      );
+      if (remainingImpls.length === 0) {
+        return "";
+      }
+      return renderKindSection({
+        title: section.title,
+        items: remainingImpls,
+      });
+    }
+
+    const canAttachImpls =
+      section.title === "Objects" || section.title === "Type Aliases";
+    const body = section.items
+      .map((item) => {
+        if (!canAttachImpls) {
+          return renderItemCard({ item });
+        }
+        const linkedImpls = implsByTargetName.get(item.name) ?? [];
+        linkedImpls.forEach((implItem) =>
+          attachedImplAnchors.add(implItem.anchor),
+        );
+        if (linkedImpls.length === 0) {
+          return renderItemCard({ item });
+        }
+        return `${renderItemCard({ item })}
+<section class="linked-impls">
+  <h5>Implementations</h5>
+  ${linkedImpls
+    .map((implItem) =>
+      renderItemCard({ item: implItem, linkedImpl: true }),
+    )
+    .join("\n")}
+</section>`;
+      })
+      .join("\n");
+
+    return `<section class="kind-section">
+  <h3>${escapeHtml(section.title)}</h3>
+  ${body}
+</section>`;
+  };
+  const renderedSections = kindSections
+    .map(renderKindSectionWithAttachedImpls)
+    .filter((section) => section.length > 0)
+    .join("\n");
 
   return `<section id="${moduleDoc.anchor}" class="module-section">
   <header>
     <h2><code>mod</code> ${escapeHtml(moduleDoc.id)}</h2>
   </header>
   ${moduleDocs}
-  ${kindSections.map(renderKindSection).join("\n")}
+  ${renderedSections}
 </section>`;
 };
 
@@ -419,6 +491,22 @@ export const renderDocumentationHtml = ({
     }
     .doc-item:last-child { border-bottom: none; }
     .doc-item > h4 { margin-bottom: 0.35rem; }
+    .doc-item-linked-impl {
+      margin-left: 0.95rem;
+      padding-left: 0.95rem;
+      border-left: 2px solid #d1dfd8;
+      border-bottom: none;
+      margin-top: 0.2rem;
+    }
+    .linked-impls {
+      margin: 0.15rem 0 0.55rem;
+      padding: 0 0 0 0.1rem;
+    }
+    .linked-impls > h5 {
+      margin: 0.35rem 0 0.35rem;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
     .item-meta {
       margin-top: 0.7rem;
       padding-top: 0.2rem;

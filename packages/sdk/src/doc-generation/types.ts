@@ -24,6 +24,7 @@ export type DocumentationItem = {
   kind: DocumentationItemKind;
   name: string;
   fqn: string;
+  targetName?: string;
   signature: string;
   documentation?: string;
   anchor: string;
