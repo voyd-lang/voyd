@@ -1,0 +1,23 @@
+fn greater_than(index: i32, count: i32, limit: i32) -> bool
+  index + count > limit
+
+fn less_than(index: i32, count: i32, limit: i32) -> bool
+  index - count < limit
+
+fn equals(index: i32, count: i32, limit: i32) -> bool
+  index + count == limit
+
+fn greater_than_parenthesized(index: i32, count: i32, limit: i32) -> bool
+  (index + count) > limit
+
+pub fn main() -> bool
+  if greater_than(4, 3, 6) then:
+    if less_than(4, 3, 6) then:
+      if equals(4, 2, 6) then:
+        greater_than_parenthesized(4, 3, 6)
+      else:
+        false
+    else:
+      false
+  else:
+    false
