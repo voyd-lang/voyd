@@ -5,5 +5,4 @@ export * from "./read-string.js";
 export * from "./resolve-src.js";
 export * from "./resolve-std.js";
 export * from "./wasm.js";
-export * from "./config/index.js";
 export * from "./binaryen-gc/index.js";

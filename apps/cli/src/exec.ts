@@ -2,17 +2,20 @@ import { stdout } from "process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { getConfig } from "@voyd/lib/config/index.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { testGc } from "@voyd/lib/binaryen-gc/test.js";
 import { createSdk, type CompileResult } from "@voyd/sdk";
 import { analyzeModules, loadModuleGraph, parse } from "@voyd/sdk/compiler";
 import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd/sdk/compiler";
+import {
+  generateDocumentation,
+  type DocumentationOutputFormat,
+} from "@voyd/sdk/doc-generation";
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
 import { resolvePackageDirs } from "./package-dirs.js";
 import { runTests } from "./test-runner.js";
-import { generateDocumentationHtml } from "./doc-html.js";
+import { getConfig } from "./config/index.js";
 import {
   compactDiagnosticsForCli,
   formatCompactionSummary,
@@ -48,6 +51,7 @@ async function main() {
       entryPath,
       roots,
       outPath: config.docOut,
+      format: config.docFormat,
     });
   }
 
@@ -236,24 +240,22 @@ async function emitDocumentation({
   entryPath,
   roots,
   outPath,
+  format,
 }: {
   entryPath: string;
   roots: ModuleRoots;
   outPath?: string;
+  format?: DocumentationOutputFormat;
 }) {
-  const graph = await loadModuleGraph({ entryPath, roots });
-  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
-    graph,
+  const resolvedFormat = format ?? "html";
+  const { content } = await generateDocumentation({
+    entryPath,
+    roots,
+    format: resolvedFormat,
   });
-  const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
-  assertNoDiagnostics(diagnostics);
-
-  const html = generateDocumentationHtml({
-    graph,
-    semantics,
-  });
-  const targetPath = resolve(outPath ?? "docs.html");
-  await writeFile(targetPath, html, "utf8");
+  const defaultOut = resolvedFormat === "json" ? "docs.json" : "docs.html";
+  const targetPath = resolve(outPath ?? defaultOut);
+  await writeFile(targetPath, content, "utf8");
   console.log(targetPath);
 }
 

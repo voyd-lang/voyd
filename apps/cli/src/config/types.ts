@@ -1,3 +1,5 @@
+export type DocumentationFormat = "html" | "json";
+
 export type VoydConfig = {
   /** Write raw parser AST to stdout */
   emitParserAst?: boolean;
@@ -28,8 +30,10 @@ export type VoydConfig = {
   failOnEmptyTests?: boolean;
   /** Additional package search directories */
   pkgDirs?: string[];
-  /** Generate HTML documentation */
+  /** Generate documentation output */
   doc?: boolean;
   /** Documentation output path */
   docOut?: string;
+  /** Documentation output format */
+  docFormat?: DocumentationFormat;
 };

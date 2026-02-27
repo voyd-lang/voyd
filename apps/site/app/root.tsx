@@ -6,6 +6,7 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useHref,
 } from "react-router";
 import logo from "../assets/logo-inverted.svg";
 
@@ -26,6 +27,8 @@ export const links: Route.LinksFunction = () => [
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
+  const stdDocsPath = useHref("/std/");
+
   return (
     <html lang="en" data-theme="dark">
       <head>
@@ -45,6 +48,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <Link to="/docs" className="hover:underline text-[#58a6ff]">
                 Docs
               </Link>
+              <a href={stdDocsPath} className="hover:underline text-[#58a6ff]">
+                Std Docs
+              </a>
               <a
                 href="https://github.com/voyd-lang/voyd"
                 className="hover:underline text-[#58a6ff]"
