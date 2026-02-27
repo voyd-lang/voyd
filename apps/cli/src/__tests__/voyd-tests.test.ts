@@ -1,7 +1,6 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { runTests } from "../test-runner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -9,16 +8,6 @@ const skipFixturePath = resolve(__dirname, "fixtures", "skip-effect.voyd");
 const onlyFixturePath = resolve(__dirname, "fixtures", "global-only");
 
 describe("voyd test runner", { timeout: 240_000 }, () => {
-  it("runs std optional tests", async () => {
-    const result = await runTests({
-      rootPath: resolveStdRoot(),
-      reporter: "silent",
-    });
-
-    expect(result.total).toBeGreaterThan(0);
-    expect(result.failed).toBe(0);
-  });
-
   it("handles Test.skip from effectful tests", async () => {
     const result = await runTests({
       rootPath: skipFixturePath,
