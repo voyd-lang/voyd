@@ -307,17 +307,8 @@ const isWasmTrapError = (error: Error): boolean => {
   if (!error.stack) {
     return false;
   }
-
-  const firstStackFrame = error.stack
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.startsWith("at "));
-  if (!firstStackFrame) {
-    return false;
-  }
-
-  // Only classify VM traps when the top frame is wasm-originated.
-  return parseWasmFrameFromLine(firstStackFrame) !== undefined;
+  // Accept any stack format as long as we can identify at least one wasm frame.
+  return parseWasmFrames(error.stack).length > 0;
 };
 
 const resolveFrame = ({
