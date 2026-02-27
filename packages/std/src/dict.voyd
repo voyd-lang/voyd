@@ -50,7 +50,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     let grown_target = if target > 1073741823 then: 2147483647 else: target * 2
     let desired_bucket_count = next_power_of_two_or_limit(grown_target, max_initial_bucket_count)
     let bucket_count =
-      if desired_bucket_count > min_bucket_count then:
+      if desired_bucket_count > min_bucket_count:
         desired_bucket_count
       else:
         min_bucket_count
@@ -67,7 +67,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Returns true when the dictionary contains the key.
   api fn contains_key(self, { key: K }) -> bool
-    if self.count == 0 then:
+    if self.count == 0:
       return false
 
     let bucket_count = __array_len(self.buckets)
@@ -77,14 +77,14 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Returns the value for `key`, or `None` when the key is absent.
   api fn get(self, { key: K }) -> Optional<V>
-    if self.count == 0 then:
+    if self.count == 0:
       return None {}
 
     let bucket_count = __array_len(self.buckets)
     let bucket_index = bucket_index_for_key(bucket_count, key)
     let bucket = __array_get(self.buckets, bucket_index)
     let entry_index = find_entry_index_in_bucket(bucket, key)
-    if entry_index < 0 then:
+    if entry_index < 0:
       return None {}
 
     let storage = bucket.raw_storage()
@@ -113,7 +113,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Removes all stored values.
   api fn clear(~self) -> void
-    if self.count == 0 then:
+    if self.count == 0:
       return void
 
     let bucket_count = __array_len(self.buckets)
@@ -122,7 +122,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Returns all dictionary keys.
   api fn keys(self) -> Array<K>
-    if self.count == 0 then:
+    if self.count == 0:
       return Array<K>::with_capacity(0)
 
     let ~out = Array<K>::with_capacity(self.count)
@@ -142,7 +142,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Returns dictionary values.
   api fn values(self) -> Array<V>
-    if self.count == 0 then:
+    if self.count == 0:
       return Array<V>::with_capacity(0)
 
     let ~out = Array<V>::with_capacity(self.count)
@@ -162,7 +162,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Returns dictionary entries as key-value tuples.
   api fn entries(self) -> Array<(K, V)>
-    if self.count == 0 then:
+    if self.count == 0:
       return Array<(K, V)>::with_capacity(0)
 
     let ~out = Array<(K, V)>::with_capacity(self.count)
@@ -182,7 +182,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Invokes a callback for each element.
   api fn each(self, { do f: (key: K, value: V) -> void }) -> void
-    if self.count == 0 then:
+    if self.count == 0:
       return void
 
     let bucket_count = __array_len(self.buckets)
@@ -224,7 +224,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     self,
     { other: Dict<K, V>, on_conflict: (key: K, left: V, right: V) -> V }
   ) -> Dict<K, V>
-    if other.count == 0 then:
+    if other.count == 0:
       return self
 
     var out = self
@@ -258,7 +258,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     ~self,
     { other: Dict<K, V>, on_conflict: (key: K, left: V, right: V) -> V }
   ) -> void
-    if other.count == 0 then:
+    if other.count == 0:
       return void
 
     let bucket_count = __array_len(other.buckets)
@@ -280,7 +280,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Transforms each value and keeps the original keys.
   api fn map<U>(self, { map f: (key: K, value: V) -> U }) -> Dict<K, U>
-    if self.count == 0 then:
+    if self.count == 0:
       return Dict<K, U>::init()
 
     var out = Dict<K, U>::with_capacity(size: self.count)
@@ -300,7 +300,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
   /// Returns a collection containing only values that satisfy the predicate.
   api fn filter(self, { where pred: (key: K, value: V) -> bool }) -> Dict<K, V>
-    if self.count == 0 then:
+    if self.count == 0:
       return self
 
     var out = Dict<K, V>::with_capacity(size: self.count)
@@ -313,7 +313,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
       var index = 0
       while index < len do:
         let entry = __array_get(storage, index)
-        if pred(entry.key, entry.value) then:
+        if pred(entry.key, entry.value):
           out = out.with_set(entry.key, entry.value)
         index = index + 1
       bucket_index = bucket_index + 1
@@ -335,14 +335,14 @@ impl<K: DictKey<K>, V> Dict<K, V>
     maybe_grow(next)
 
   fn with_deleted(self, key: K) -> Dict<K, V>
-    if self.count == 0 then:
+    if self.count == 0:
       return self
 
     let bucket_count = __array_len(self.buckets)
     let bucket_index = bucket_index_for_key(bucket_count, key)
     let bucket = __array_get(self.buckets, bucket_index)
     let result = delete_from_bucket(bucket, key)
-    if result.deleted then:
+    if result.deleted:
       __array_set(self.buckets, bucket_index, result.bucket)
       return Dict<K, V> { buckets: self.buckets, count: self.count - 1 }
     self
@@ -350,7 +350,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
 impl<K: DictKey<K>, V> DictEntry<K, V>
   /// Inserts the default value when the entry is vacant and returns the dictionary.
   api fn or_insert(self, { default: V }) -> Dict<K, V>
-    if self.dict.contains_key(key: self.key) then:
+    if self.dict.contains_key(key: self.key):
       return self.dict
 
     let ~next = self.dict
@@ -359,7 +359,7 @@ impl<K: DictKey<K>, V> DictEntry<K, V>
 
   /// Lazily inserts a computed value when the entry is vacant and returns the dictionary.
   api fn or_insert_with(self, { make: () -> V }) -> Dict<K, V>
-    if self.dict.contains_key(key: self.key) then:
+    if self.dict.contains_key(key: self.key):
       return self.dict
 
     let ~next = self.dict
@@ -434,13 +434,13 @@ fn new_buckets<K, V>(bucket_count: i32) -> FixedArray<Array<DictPair<K, V>>>
 
 fn maybe_grow<K: DictKey<K>, V>(dict: Dict<K, V>) -> Dict<K, V>
   let bucket_count = __array_len(dict.buckets)
-  if should_grow(dict.count, bucket_count) then:
+  if should_grow(dict.count, bucket_count):
     let next_bucket_count = bucket_count * 2
     return rehash_to_bucket_count(dict, next_bucket_count)
   dict
 
 fn should_grow(count: i32, bucket_count: i32) -> bool
-  if bucket_count <= 0 then:
+  if bucket_count <= 0:
     return true
   (count * 4) > (bucket_count * 3)
 
@@ -486,7 +486,7 @@ fn find_entry_index_in_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, k
   var index = 0
   while index < len do:
     let entry = __array_get(storage, index)
-    if key_equals(entry.key, key) then:
+    if key_equals(entry.key, key):
       return index
     index = index + 1
   -1
@@ -499,7 +499,7 @@ fn set_in_bucket<K: DictKey<K>, V>(
   let index = find_entry_index_in_bucket(bucket, key)
   let entry = DictPair<K, V> { key: key, value: value }
 
-  if index < 0 then:
+  if index < 0:
     let next_bucket = bucket.pushed(entry)
     return BucketSetResult<K, V> { bucket: next_bucket, inserted: true }
 
@@ -509,7 +509,7 @@ fn set_in_bucket<K: DictKey<K>, V>(
 
 fn delete_from_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, key: K) -> BucketDeleteResult<K, V>
   let index = find_entry_index_in_bucket(bucket, key)
-  if index < 0 then:
+  if index < 0:
     return BucketDeleteResult<K, V> { bucket: bucket, deleted: false }
 
   let next_bucket = bucket.removed(index)

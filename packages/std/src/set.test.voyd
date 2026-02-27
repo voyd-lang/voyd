@@ -40,9 +40,9 @@ test "set values returns iterable keys":
     match(iter.next())
       Some<String> { value }:
         count = count + 1
-        if value.equals("left") then:
+        if value.equals("left"):
           has_left = true
-        if value.equals("right") then:
+        if value.equals("right"):
           has_right = true
       None:
         break

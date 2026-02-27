@@ -25,7 +25,7 @@ impl<T: DictKey<T>> Set<T>
 
   /// Inserts `value`, returning true only when it was newly inserted.
   api fn insert(~self, { value: T }) -> bool
-    if self.storage.contains_key(key: value) then:
+    if self.storage.contains_key(key: value):
       return false
     self.storage.set(key: value, value: true)
     true
