@@ -348,10 +348,8 @@ const buildTocTree = (modules: readonly ModuleDocumentationSection[]): TocNode[]
 
 const renderItemCard = ({
   item,
-  linkedImpl = false,
 }: {
   item: DocumentationItem;
-  linkedImpl?: boolean;
 }): string => {
   const docsHtml =
     item.documentation !== undefined
@@ -393,9 +391,7 @@ const renderItemCard = ({
 </section>`
       : "";
 
-  const classes = linkedImpl ? "doc-item doc-item-linked-impl" : "doc-item";
-
-  return `<article id="${item.anchor}" class="${classes}">
+  return `<article id="${item.anchor}" class="doc-item">
   <h4><code class="sig">${renderSignatureHtml(item.signature)}</code></h4>
   ${docsHtml}
   ${parameterDocsHtml}
@@ -495,14 +491,7 @@ const renderModuleSection = (moduleDoc: ModuleDocumentationSection): string => {
           return renderItemCard({ item });
         }
         return `${renderItemCard({ item })}
-<section class="linked-impls">
-  <h5>Implementations</h5>
-  ${linkedImpls
-    .map((implItem) =>
-      renderItemCard({ item: implItem, linkedImpl: true }),
-    )
-    .join("\n")}
-</section>`;
+${linkedImpls.map((implItem) => renderItemCard({ item: implItem })).join("\n")}`;
       })
       .join("\n");
 
@@ -653,22 +642,6 @@ export const renderDocumentationHtml = ({
     }
     .doc-item:last-child { border-bottom: none; }
     .doc-item > h4 { margin-bottom: 0.35rem; }
-    .doc-item-linked-impl {
-      margin-left: 0.95rem;
-      padding-left: 0.95rem;
-      border-left: 2px solid #d1dfd8;
-      border-bottom: none;
-      margin-top: 0.2rem;
-    }
-    .linked-impls {
-      margin: 0.15rem 0 0.55rem;
-      padding: 0 0 0 0.1rem;
-    }
-    .linked-impls > h5 {
-      margin: 0.35rem 0 0.35rem;
-      color: var(--muted);
-      font-size: 0.94rem;
-    }
     .item-meta {
       margin-top: 0.7rem;
       padding-top: 0.2rem;

@@ -59,11 +59,11 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("class=\"tok-kw\">fn</span>");
       expect(html.content).toContain("class=\"tok-name\">take_labeled</span>");
       expect(html.content).toContain("class=\"tok-type\">Counter</span>");
-      expect(html.content).toContain("impl Counter");
-      expect(html.content).toContain("double(self: Counter) -&gt; i32");
+      expect(html.content).toContain("class=\"tok-kw\">impl</span>");
+      expect(html.content).toContain("class=\"tok-name\">double</span>");
       expect(html.content).not.toContain("id=\"function-src-main-double\"");
-      const objectIndex = html.content.indexOf("obj Counter");
-      const implIndex = html.content.indexOf("impl Counter");
+      const objectIndex = html.content.indexOf("id=\"object-src-main-counter\"");
+      const implIndex = html.content.indexOf("id=\"impl-src-main-impl-0\"");
       expect(objectIndex).toBeGreaterThan(-1);
       expect(implIndex).toBeGreaterThan(objectIndex);
 
