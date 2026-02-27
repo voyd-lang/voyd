@@ -1,0 +1,11 @@
+obj String {
+  value: i32
+}
+
+impl String
+  api fn '=='(self, other: String): () -> bool
+    self.value == other.value
+
+pub fn main(): () -> bool
+  let a = String { value: 1 }
+  a == 1
