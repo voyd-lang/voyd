@@ -30,6 +30,20 @@ const implicitPackageRootSegments = (
     ? path.segments.slice(0, -1)
     : undefined;
 
+const parentAnchorSegmentsFor = ({
+  path,
+  parentHops,
+}: {
+  path: ModulePath;
+  parentHops: number;
+}): readonly string[] => {
+  const base = packageAnchorSegments(path);
+  const effectiveHops = isPackageRootPath(path)
+    ? Math.max(parentHops - 1, 0)
+    : parentHops;
+  return base.slice(0, Math.max(base.length - effectiveHops, 0));
+};
+
 const srcAliasNamespaceFor = ({
   importerNamespace,
 }: {
@@ -111,10 +125,7 @@ export const resolveModuleRequest = (
   const importerAnchorSegments = packageAnchorSegments(importer);
   const superBaseSegments =
     parentHops > 0
-      ? importerAnchorSegments.slice(
-          0,
-          Math.max(importerAnchorSegments.length - parentHops, 0),
-        )
+      ? parentAnchorSegmentsFor({ path: importer, parentHops })
       : [];
   const baseSegments = anchorToSelf
     ? importerAnchorSegments
@@ -188,11 +199,10 @@ export const matchesDependencyPath = ({
       return false;
     }
     const hops = entry.parentHops ?? 0;
-    const currentAnchorSegments = packageAnchorSegments(currentModulePath);
-    const parentAnchorSegments = currentAnchorSegments.slice(
-      0,
-      Math.max(currentAnchorSegments.length - hops, 0),
-    );
+    const parentAnchorSegments = parentAnchorSegmentsFor({
+      path: currentModulePath,
+      parentHops: hops,
+    });
     const hasParentPrefix =
       dependencyPath.segments.length >= parentAnchorSegments.length &&
       dependencyPath.segments

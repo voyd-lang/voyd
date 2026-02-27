@@ -499,6 +499,32 @@ describe("buildModuleGraph", () => {
     );
   });
 
+  it("resolves super-relative imports from nested src pkg.voyd files", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use src::pkgs::math::all",
+      [`${srcRoot}${sep}pkgs${sep}math${sep}pkg.voyd`]:
+        "pub use super::ops::all",
+      [`${srcRoot}${sep}pkgs${sep}math${sep}ops.voyd`]:
+        "pub fn add_one(v: i32) -> i32\n  v + 1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "src::pkgs::math::pkg",
+        "src::pkgs::math::ops",
+      ]),
+    );
+  });
+
   it("treats pkg::std imports as std namespace imports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
