@@ -30,6 +30,16 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       "pub fn fold_like<O>(count: i32, { hi: O }, { there: (acc: O, value: i32) -> O }) -> O",
       "  there(hi, count)",
       "",
+      "/// Builds enum declarations.",
+      "/// For example:",
+      "/// ```voyd",
+      "/// enum Result<T, E>",
+      "///   Ok<T> { value: T }",
+      "///   Err<E> { error: E }",
+      "/// ```",
+      "pub macro enum(enum_name, variants_block)",
+      "  syntax_template (void)",
+      "",
       "/// See [query docs](https://example.com/docs?q=voyd&lang=en).",
       "pub fn linked_docs() -> i32",
       "  0",
@@ -66,6 +76,33 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
   return { root, entryPath };
 };
 
+const createPackageRootFixture = async (): Promise<{
+  root: string;
+  entryPath: string;
+}> => {
+  const root = await fs.mkdtemp(path.join(tmpdir(), "voyd-doc-generation-pkg-root-"));
+  const srcRoot = path.join(root, "src");
+  const entryPath = path.join(srcRoot, "pkg.voyd");
+  await fs.mkdir(srcRoot, { recursive: true });
+  await fs.writeFile(
+    entryPath,
+    [
+      "pub use self::visible::all",
+      "",
+      "mod hidden",
+      "  pub fn internal() -> i32",
+      "    0",
+      "",
+      "pub mod visible",
+      "  pub fn shown() -> i32",
+      "    1",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return { root, entryPath };
+};
+
 describe("smoke: sdk doc-generation", () => {
   it("generates HTML and JSON documentation outputs", async () => {
     const fixture = await createFixture();
@@ -85,6 +122,11 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("Re-Exports");
       expect(html.content).toContain("class=\"tok-kw\">use</span>");
       expect(html.content).toContain("class=\"tok-id\">util</span>");
+      expect(html.content).toContain("class=\"tok-kw\">macro</span>");
+      expect(html.content).toContain("class=\"tok-name\">enum</span>");
+      expect(html.content).toContain("Builds enum declarations.");
+      expect(html.content).toContain("<pre><code>enum Result&lt;T, E&gt;");
+      expect(html.content).not.toContain("<p>```voyd");
       expect(html.content).toContain("class=\"tok-kw\">impl</span>");
       expect(html.content).toContain("class=\"tok-name\">double</span>");
       expect(html.content).toContain(
@@ -109,6 +151,11 @@ describe("smoke: sdk doc-generation", () => {
             name: string;
             signature: string;
             parameterDocs: Array<{ name: string; documentation: string }>;
+          }>;
+          macros: Array<{
+            name: string;
+            signature: string;
+            documentation?: string;
           }>;
           impls: Array<{
             signature: string;
@@ -135,6 +182,10 @@ describe("smoke: sdk doc-generation", () => {
       expect(mainModule).toBeDefined();
       const addOne = mainModule?.functions.find((fn) => fn.name === "add_one");
       expect(addOne).toBeDefined();
+      const enumMacro = mainModule?.macros.find((macro) => macro.name === "enum");
+      expect(enumMacro).toBeDefined();
+      expect(enumMacro?.documentation).toContain(" Builds enum declarations.");
+      expect(enumMacro?.documentation).toContain(" ```voyd");
       const valueDoc = addOne?.parameterDocs.find((param) => param.name === "value");
       expect(valueDoc?.documentation).toBe(" Input value.\n Keep newline.");
       const labeledFn = mainModule?.functions.find((fn) => fn.name === "take_labeled");
@@ -167,6 +218,22 @@ describe("smoke: sdk doc-generation", () => {
       const decodeEffect = mainModule?.effects.find((effectDecl) => effectDecl.name === "Decode");
       const decodeNextOp = decodeEffect?.members.find((member) => member.name === "decode_next");
       expect(decodeNextOp?.documentation).toBe(" Reads next input value.");
+    } finally {
+      await fs.rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("only renders modules exported by pkg.voyd", async () => {
+    const fixture = await createPackageRootFixture();
+
+    try {
+      const html = await generateDocumentation({
+        entryPath: fixture.entryPath,
+        format: "html",
+      });
+      expect(html.content).toContain("id=\"module-src-pkg\"");
+      expect(html.content).toContain("id=\"module-src-pkg-visible\"");
+      expect(html.content).not.toContain("id=\"module-src-pkg-hidden\"");
     } finally {
       await fs.rm(fixture.root, { recursive: true, force: true });
     }

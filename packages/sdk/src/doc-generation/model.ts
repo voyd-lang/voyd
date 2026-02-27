@@ -621,6 +621,18 @@ export const createDocumentationModel = ({
         }),
       );
 
+    const macros = moduleDoc.macros
+      .map((macro) =>
+        createItem({
+          moduleId: moduleDoc.id,
+          kind: "macro",
+          name: macro.name,
+          signature: `macro ${macro.name}`,
+          documentation: macro.documentation,
+          nextAnchor,
+        }),
+      );
+
     const reexports = moduleDoc.reexports
       .filter((reexport) => isPublic(reexport.visibility))
       .map((reexport, index) =>
@@ -736,6 +748,7 @@ export const createDocumentationModel = ({
       depth: moduleDoc.depth,
       anchor: moduleAnchor,
       documentation: moduleDoc.documentation,
+      macros,
       reexports,
       functions,
       typeAliases,

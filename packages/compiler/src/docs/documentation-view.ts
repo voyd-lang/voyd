@@ -98,9 +98,15 @@ export type DocumentationImplView = {
 export type DocumentationReExportView = {
   visibility: DocumentationVisibilityView;
   path: readonly string[];
+  moduleId?: string;
   selectionKind: UsePathSelectionKind;
   targetName?: string;
   alias?: string;
+};
+
+export type DocumentationMacroView = {
+  name: string;
+  documentation?: string;
 };
 
 export type DocumentationModuleView = {
@@ -108,6 +114,7 @@ export type DocumentationModuleView = {
   depth: number;
   packageId: string;
   documentation?: string;
+  macros: readonly DocumentationMacroView[];
   functions: readonly DocumentationFunctionView[];
   typeAliases: readonly DocumentationTypeAliasView[];
   objects: readonly DocumentationObjectView[];
@@ -121,6 +128,50 @@ export type DocumentationProgramView = {
   entryModule: string;
   packageId?: string;
   modules: readonly DocumentationModuleView[];
+};
+
+const isDocumentedVisibility = (
+  visibility: DocumentationVisibilityView | undefined,
+): boolean =>
+  visibility?.level === "public" || visibility?.level === "package";
+
+const collectExportedModuleIds = ({
+  entryModule,
+  semantics,
+}: {
+  entryModule: string;
+  semantics: ReadonlyMap<string, SemanticsPipelineResult>;
+}): Set<string> | undefined => {
+  const entrySemantics = semantics.get(entryModule);
+  if (!entrySemantics?.binding.isPackageRoot) {
+    return undefined;
+  }
+
+  const exportedModuleIds = new Set<string>([entryModule]);
+
+  entrySemantics.exports.forEach((entry) => {
+    if (entry.kind !== "module" || !isDocumentedVisibility(entry.visibility)) {
+      return;
+    }
+    exportedModuleIds.add(entry.moduleId);
+  });
+
+  entrySemantics.binding.uses.forEach((useDecl) => {
+    if (!isDocumentedVisibility(useDecl.visibility)) {
+      return;
+    }
+    useDecl.entries.forEach((entry) => {
+      if (!entry.moduleId) {
+        return;
+      }
+      if (entry.selectionKind !== "all" && entry.selectionKind !== "module") {
+        return;
+      }
+      exportedModuleIds.add(entry.moduleId);
+    });
+  });
+
+  return exportedModuleIds;
 };
 
 const moduleDepth = (moduleId: string): number => moduleId.split("::").length - 1;
@@ -210,23 +261,34 @@ const normalizeModules = ({
   graph,
   semantics,
   packageId,
+  includedModuleIds,
 }: {
   graph: ModuleGraph;
   semantics: ReadonlyMap<string, SemanticsPipelineResult>;
   packageId?: string;
+  includedModuleIds?: ReadonlySet<string>;
 }): DocumentationModuleView[] =>
   Array.from(semantics.entries())
     .flatMap(([moduleId, semantic]) => {
       if (packageId && semantic.binding.packageId !== packageId) {
         return [];
       }
+      if (includedModuleIds && !includedModuleIds.has(moduleId)) {
+        return [];
+      }
+      const moduleNode = graph.modules.get(moduleId);
+      const macroDocsByName = moduleNode?.docs?.macroDeclarationsByName;
 
       return [
         {
           id: moduleId,
           depth: moduleDepth(moduleId),
           packageId: semantic.binding.packageId,
-          documentation: graph.modules.get(moduleId)?.docs?.module,
+          documentation: moduleNode?.docs?.module,
+          macros: (moduleNode?.macroExports ?? []).map((name) => ({
+            name,
+            documentation: macroDocsByName?.get(name),
+          })),
           functions: semantic.binding.functions.map(normalizeFunction),
           typeAliases: semantic.binding.typeAliases.map((typeAlias) => ({
             name: typeAlias.name,
@@ -283,6 +345,7 @@ const normalizeModules = ({
             useDecl.entries.map((entry) => ({
               visibility: normalizeVisibility(useDecl.visibility),
               path: entry.path,
+              moduleId: entry.moduleId,
               selectionKind: entry.selectionKind,
               targetName: entry.targetName,
               alias: entry.alias,
@@ -307,6 +370,11 @@ export const buildDocumentationView = ({
     semantics.get(graph.entry)?.binding.packageId ??
     semantics.values().next().value?.binding?.packageId;
 
+  const includedModuleIds = collectExportedModuleIds({
+    entryModule: graph.entry,
+    semantics,
+  });
+
   return {
     entryModule: graph.entry,
     packageId: resolvedPackageId,
@@ -314,6 +382,7 @@ export const buildDocumentationView = ({
       graph,
       semantics,
       packageId: resolvedPackageId,
+      includedModuleIds,
     }),
   };
 };

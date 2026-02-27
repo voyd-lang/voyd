@@ -24,6 +24,7 @@ type SignatureToken = {
 
 const SIDEBAR_KIND_LABEL: Record<DocumentationItem["kind"], string> = {
   re_export: "use",
+  macro: "macro",
   function: "fn",
   type_alias: "type",
   object: "obj",
@@ -36,6 +37,7 @@ const SIGNATURE_KEYWORDS = new Set([
   "pub",
   "use",
   "as",
+  "macro",
   "fn",
   "obj",
   "trait",
@@ -179,6 +181,9 @@ const tokenizeSignature = (signature: string): SignatureToken[] => {
     ) {
       return { ...token, className: "tok-name" };
     }
+    if (previousText === "macro") {
+      return { ...token, className: "tok-name" };
+    }
 
     if (
       previousText &&
@@ -218,6 +223,7 @@ const renderMarkdownToHtml = (markdown: string): string => {
   const html: string[] = [];
   let inCodeFence = false;
   let codeLines: string[] = [];
+  let codeFenceIndent = 0;
   let paragraph: string[] = [];
   let listItems: string[] = [];
 
@@ -255,7 +261,9 @@ const renderMarkdownToHtml = (markdown: string): string => {
   };
 
   lines.forEach((line) => {
-    if (line.startsWith("```")) {
+    const trimmed = line.trimStart();
+
+    if (trimmed.startsWith("```")) {
       flushParagraph();
       flushList();
       if (inCodeFence) {
@@ -263,16 +271,21 @@ const renderMarkdownToHtml = (markdown: string): string => {
       } else {
         inCodeFence = true;
         codeLines = [];
+        codeFenceIndent = line.length - trimmed.length;
       }
       return;
     }
 
     if (inCodeFence) {
-      codeLines.push(line);
+      const indentPrefix = " ".repeat(codeFenceIndent);
+      const normalizedCodeLine = line.startsWith(indentPrefix)
+        ? line.slice(codeFenceIndent)
+        : line;
+      codeLines.push(normalizedCodeLine);
       return;
     }
 
-    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(line);
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(trimmed);
     if (headingMatch) {
       flushParagraph();
       flushList();
@@ -281,7 +294,7 @@ const renderMarkdownToHtml = (markdown: string): string => {
       return;
     }
 
-    const listMatch = /^[-*]\s+(.+)$/.exec(line);
+    const listMatch = /^[-*]\s+(.+)$/.exec(trimmed);
     if (listMatch) {
       flushParagraph();
       listItems.push(listMatch[1]!);
@@ -294,7 +307,7 @@ const renderMarkdownToHtml = (markdown: string): string => {
       return;
     }
 
-    paragraph.push(line);
+    paragraph.push(trimmed);
   });
 
   flushParagraph();
@@ -308,6 +321,7 @@ const collectKindSections = (
 ): readonly KindSection[] =>
   [
     { title: "Re-Exports", items: moduleDoc.reexports },
+    { title: "Macros", items: moduleDoc.macros },
     { title: "Functions", items: moduleDoc.functions },
     { title: "Type Aliases", items: moduleDoc.typeAliases },
     { title: "Objects", items: moduleDoc.objects },

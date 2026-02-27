@@ -57,6 +57,7 @@ export interface ModuleDocumentation {
   module?: string;
   declarationsBySyntaxId: ReadonlyMap<number, string>;
   parametersBySyntaxId: ReadonlyMap<number, string>;
+  macroDeclarationsByName: ReadonlyMap<string, string>;
 }
 
 export interface ModuleDocumentationResult {
@@ -249,6 +250,36 @@ const firstTargetForLine = (
   lineNumber: number,
 ): DocTarget | undefined => map.get(lineNumber)?.[0];
 
+const parseMacroDeclarationName = (
+  form: Form,
+): { name: string; syntax: Syntax } | undefined => {
+  let index = 0;
+  const first = form.at(0);
+  if (isIdentifierAtom(first) && first.value === "pub") {
+    index = 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierAtom(keyword) || keyword.value !== "macro") {
+    return undefined;
+  }
+
+  const signature = form.at(index + 1);
+  if (!isForm(signature)) {
+    return undefined;
+  }
+
+  const name = signature.at(0);
+  if (!isIdentifierAtom(name)) {
+    return undefined;
+  }
+
+  return {
+    name: name.value,
+    syntax: name,
+  };
+};
+
 const collectDocTargets = ({
   ast,
   declarationTargets,
@@ -284,6 +315,11 @@ const collectDocTargets = ({
     }
 
     const classified = classifyTopLevelDecl(entry);
+    if (classified.kind === "macro-decl") {
+      addDeclaration(parseMacroDeclarationName(entry)?.syntax);
+      return;
+    }
+
     if (
       classified.kind === "inline-module-decl" ||
       classified.kind === "unsupported-mod-decl"
@@ -380,6 +416,34 @@ const collectDocTargets = ({
   });
 };
 
+const collectMacroDeclarationDocsByName = ({
+  ast,
+  declarationsBySyntaxId,
+}: {
+  ast: Form;
+  declarationsBySyntaxId: ReadonlyMap<number, string>;
+}): ReadonlyMap<string, string> => {
+  const entries = ast.callsInternal("ast") ? ast.rest : ast.toArray();
+  return entries.reduce<Map<string, string>>((docsByName, entry) => {
+    if (!isForm(entry)) {
+      return docsByName;
+    }
+
+    const macroDecl = parseMacroDeclarationName(entry);
+    if (!macroDecl) {
+      return docsByName;
+    }
+
+    const documentation = declarationsBySyntaxId.get(macroDecl.syntax.syntaxId);
+    if (!documentation) {
+      return docsByName;
+    }
+
+    docsByName.set(macroDecl.name, documentation);
+    return docsByName;
+  }, new Map<string, string>());
+};
+
 export const collectModuleDocumentation = ({
   ast,
   source,
@@ -396,6 +460,7 @@ export const collectModuleDocumentation = ({
         module: undefined,
         declarationsBySyntaxId: new Map(),
         parametersBySyntaxId: new Map(),
+        macroDeclarationsByName: new Map(),
       },
       diagnostics: [],
     };
@@ -524,12 +589,17 @@ export const collectModuleDocumentation = ({
     innerLines.length > 0
       ? innerLines.map((line) => line.docText ?? "").join("\n")
       : undefined;
+  const macroDeclarationsByName = collectMacroDeclarationDocsByName({
+    ast,
+    declarationsBySyntaxId: declarationDocsBySyntaxId,
+  });
 
   return {
     documentation: {
       module: moduleDoc,
       declarationsBySyntaxId: declarationDocsBySyntaxId,
       parametersBySyntaxId: parameterDocsBySyntaxId,
+      macroDeclarationsByName,
     },
     diagnostics,
   };
