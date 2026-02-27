@@ -19,6 +19,11 @@ type WasmStackFrame = {
   functionNameFromStack?: string;
 };
 
+type ParsedStackFrame = {
+  functionName?: string;
+  location: string;
+};
+
 export type VoydRuntimeSourceSpan = {
   file: string;
   start: number;
@@ -254,23 +259,66 @@ const parseNameSectionFunctionNames = (
   }
 };
 
-const parseWasmFrameFromLine = (line: string): WasmStackFrame | undefined => {
-  const wasmMatch = line.match(/wasm-function\[(\d+)\](?::0x([0-9a-f]+))?/i);
-  const wasmUrlMatch = line.match(/wasm:\/\/[^\s)]+:(\d+):(\d+)/i);
-  if (!wasmMatch && !wasmUrlMatch) {
+const parseStackFrameLine = (line: string): ParsedStackFrame | undefined => {
+  const trimmed = line.trim();
+  if (trimmed.length === 0) {
     return undefined;
   }
 
-  const atMatch = line.trim().match(/^at\s+(.+?)\s+\(/);
-  const fromStack = atMatch?.[1]?.trim();
-  const functionNameFromStack =
-    fromStack &&
-    !fromStack.includes("<anonymous>") &&
-    !fromStack.startsWith("null.") &&
-    !fromStack.startsWith("wasm://") &&
-    !fromStack.includes("wasm-function[")
-      ? normalizeWasmName(fromStack)
-      : undefined;
+  const v8WithFunction = trimmed.match(/^at\s+(.+?)\s+\((.+)\)$/);
+  if (v8WithFunction) {
+    return {
+      functionName: v8WithFunction[1]?.trim(),
+      location: v8WithFunction[2]!.trim(),
+    };
+  }
+
+  const v8LocationOnly = trimmed.match(/^at\s+(.+)$/);
+  if (v8LocationOnly) {
+    return { location: v8LocationOnly[1]!.trim() };
+  }
+
+  const atSeparator = trimmed.lastIndexOf("@");
+  if (atSeparator > 0 && atSeparator < trimmed.length - 1) {
+    const functionName = trimmed.slice(0, atSeparator).trim();
+    const location = trimmed.slice(atSeparator + 1).trim();
+    return {
+      functionName: functionName.length > 0 ? functionName : undefined,
+      location,
+    };
+  }
+
+  if (trimmed.includes("wasm://") || trimmed.includes("wasm-function[")) {
+    return { location: trimmed };
+  }
+
+  return undefined;
+};
+
+const normalizeFrameFunctionName = (value?: string): string | undefined => {
+  if (
+    !value ||
+    value.includes("<anonymous>") ||
+    value.startsWith("null.") ||
+    value.startsWith("wasm://") ||
+    value.includes("wasm-function[")
+  ) {
+    return undefined;
+  }
+  return normalizeWasmName(value);
+};
+
+const parseWasmFrameFromLine = (line: string): WasmStackFrame | undefined => {
+  const parsedFrame = parseStackFrameLine(line);
+  const location = parsedFrame?.location ?? line;
+  const wasmMatch = location.match(/wasm-function\[(\d+)\](?::0x([0-9a-f]+))?/i);
+  const wasmUrlMatch = location.match(/wasm:\/\/[^\s)]+:(\d+):(\d+)/i);
+  if (!wasmMatch && !wasmUrlMatch) {
+    return undefined;
+  }
+  const functionNameFromStack = normalizeFrameFunctionName(
+    parsedFrame?.functionName
+  );
   const parsedIndex =
     wasmMatch?.[1] !== undefined
       ? Number.parseInt(wasmMatch[1], 10)
@@ -311,7 +359,7 @@ const isWasmTrapError = (error: Error): boolean => {
   const topFrame = error.stack
     .split("\n")
     .map((line) => line.trim())
-    .find((line) => line.length > 0 && !line.startsWith("RuntimeError:"));
+    .find((line) => parseStackFrameLine(line) !== undefined);
   if (!topFrame) {
     return false;
   }
