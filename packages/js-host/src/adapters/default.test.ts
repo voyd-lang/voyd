@@ -810,6 +810,71 @@ describe("registerDefaultHostAdapters", () => {
     ).rejects.toThrow(/does not implement op read_line/i);
   });
 
+  it("returns eof for read_bytes when node stdin is already ended", async () => {
+    const table = buildTable([
+      { effectId: "std::input::Input", opName: "read_bytes", opId: 0 },
+    ]);
+    const stdin: any = {
+      readableEnded: true,
+      isTTY: false,
+    };
+    stdin.read = vi.fn(() => null);
+    stdin.on = vi.fn(() => stdin);
+    stdin.once = vi.fn(() => stdin);
+    stdin.removeListener = vi.fn(() => stdin);
+    vi.stubGlobal("process", { stdin });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    await expect(
+      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+        max_bytes: 4,
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true, value: null },
+    });
+  });
+
+  it("returns an error when node stdin is configured for text chunks", async () => {
+    const table = buildTable([
+      { effectId: "std::input::Input", opName: "read_bytes", opId: 0 },
+    ]);
+    const stdin: any = {
+      readableEnded: false,
+      isTTY: false,
+    };
+    stdin.read = vi.fn(() => "abc");
+    stdin.on = vi.fn(() => stdin);
+    stdin.once = vi.fn(() => stdin);
+    stdin.removeListener = vi.fn(() => stdin);
+    vi.stubGlobal("process", { stdin });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    await expect(
+      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+        max_bytes: 4,
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: {
+        ok: false,
+        code: 1,
+        message:
+          "stdin is configured for text decoding; read_bytes requires raw byte chunks",
+      },
+    });
+  });
+
   it("registers fallback output handlers when stream APIs are unavailable", async () => {
     const table = buildTable([
       { effectId: "std::output::Output", opName: "write", opId: 0 },

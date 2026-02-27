@@ -219,6 +219,26 @@ const toUint8Array = (value: unknown): Uint8Array => {
   return new Uint8Array();
 };
 
+const toNodeReadBytesChunk = (value: unknown): Uint8Array => {
+  if (typeof value === "string") {
+    throw new Error(
+      "stdin is configured for text decoding; read_bytes requires raw byte chunks"
+    );
+  }
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  throw new Error(
+    `stdin.read returned unsupported chunk type (${typeof value}) for read_bytes`
+  );
+};
+
 const toNonNegativeI64 = (value: unknown): bigint => {
   const normalized = toI64(value);
   return normalized > 0n ? normalized : 0n;
@@ -1465,14 +1485,34 @@ const waitForNodeReadableChunk = async ({
   maxBytes: number;
 }): Promise<Uint8Array | null> =>
   new Promise((resolve, reject) => {
+    const ended = (): boolean => {
+      const streamState = input as NodeReadableWithRead & {
+        readableEnded?: boolean;
+        ended?: boolean;
+        readable?: boolean;
+        destroyed?: boolean;
+      };
+      if (streamState.readableEnded === true || streamState.ended === true) {
+        return true;
+      }
+      return streamState.destroyed === true && streamState.readable !== true;
+    };
+    if (ended()) {
+      resolve(null);
+      return;
+    }
     const onReadable = (): void => {
       try {
         const chunk = input.read(maxBytes);
         if (chunk === null || chunk === undefined) {
+          if (ended()) {
+            cleanup();
+            resolve(null);
+          }
           return;
         }
         cleanup();
-        resolve(toUint8Array(chunk).subarray(0, maxBytes));
+        resolve(toNodeReadBytesChunk(chunk).subarray(0, maxBytes));
       } catch (error) {
         cleanup();
         reject(error);
@@ -1510,7 +1550,7 @@ const readBytesFromNodeStream = async ({
   }
   const immediate = input.read(limit);
   if (immediate !== null && immediate !== undefined) {
-    return toUint8Array(immediate).subarray(0, limit);
+    return toNodeReadBytesChunk(immediate).subarray(0, limit);
   }
   return waitForNodeReadableChunk({ input, maxBytes: limit });
 };

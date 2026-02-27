@@ -40,9 +40,13 @@ test "output write_line appends exactly newline":
   match(result)
     Ok<Unit>:
       assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
-      assert(optional_string_or(targets.get(1), "missing".as_slice()).equals("stdout"), eq: true)
-      assert(optional_string_or(values.get(0), "missing".as_slice()).equals("hi"), eq: true)
-      assert(optional_string_or(values.get(1), "missing".as_slice()).equals("\n"), eq: true)
+      assert(targets.len(), eq: 1)
+      assert(values.len(), eq: 1)
+      let line = optional_string_or(values.get(0), "missing".as_slice())
+      let bytes = line.to_utf8()
+      assert(optional_i32_or(bytes.get(0), -1), eq: 104)
+      assert(optional_i32_or(bytes.get(1), -1), eq: 105)
+      assert(optional_i32_or(bytes.get(2), -1), eq: 10)
     Err<IoError>:
       assert(false, eq: true)
 

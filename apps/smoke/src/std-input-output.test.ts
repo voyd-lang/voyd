@@ -57,12 +57,9 @@ describe("smoke: std input/output", () => {
     expect(output).toBe(24);
     expect(writes).toEqual([
       { target: "stdout", value: "hello" },
-      { target: "stdout", value: "ok" },
-      { target: "stdout", value: "\\n" },
+      { target: "stdout", value: "ok\n" },
     ]);
-    expect(byteWrites).toEqual([
-      { target: "stderr", bytes: [7, 8] },
-    ]);
+    expect(byteWrites).toEqual([{ target: "stderr", bytes: [7, 8] }]);
     expect(flushes).toEqual(["stdout", "stderr"]);
   });
 

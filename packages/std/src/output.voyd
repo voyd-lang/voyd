@@ -36,11 +36,8 @@ pub fn write_line({ value: StringSlice }): Output -> Result<Unit, IoError>
 
 /// Writes text followed by exactly "\n" to the selected target.
 pub fn write_line({ value: StringSlice, target: OutputTarget }): Output -> Result<Unit, IoError>
-  match(write(value: value, target: target))
-    Ok<Unit>:
-      write(value: "\n".as_slice(), target: target)
-    Err<IoError> { error }:
-      Err<IoError> { error: error }
+  let line = line_string(value: value)
+  write(value: line.as_slice(), target: target)
 
 /// Writes bytes to the selected output target (stdout by default).
 pub fn write_bytes({ bytes: Bytes }): Output -> Result<Unit, IoError>
@@ -74,6 +71,11 @@ fn encode_write_payload({ value: String, target: OutputTarget }): () -> MsgPack
     .set("value", msgpack::make_string(value))
     .set("target", encode_output_target(target))
     .pack()
+
+fn line_string({ value: StringSlice }): () -> String
+  let ~line_bytes = value.to_string().to_utf8()
+  line_bytes.push(10)
+  new_string(line_bytes.to_fixed_array())
 
 fn encode_write_bytes_payload({ bytes: Bytes, target: OutputTarget }): () -> MsgPack
   HostDto::init()
