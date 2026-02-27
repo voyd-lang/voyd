@@ -241,7 +241,14 @@ export const buildModuleGraph = async ({
     const resolvedPath = resolved.filePath;
     const resolvedModulePath = resolved.modulePath;
     const resolvedKey = modulePathToString(resolvedModulePath);
-    if (resolvedKey !== requestedKey) {
+    const resolvedExtendsRequested =
+      resolvedModulePath.namespace === requestedPath.namespace &&
+      resolvedModulePath.packageName === requestedPath.packageName &&
+      resolvedModulePath.segments.length > requestedPath.segments.length &&
+      requestedPath.segments.every(
+        (segment, index) => resolvedModulePath.segments[index] === segment,
+      );
+    if (resolvedExtendsRequested) {
       dependency.path = resolvedModulePath;
     }
     const reservedSegment = findReservedModuleSegment(resolvedModulePath);
