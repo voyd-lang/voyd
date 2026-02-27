@@ -932,6 +932,20 @@ describe("semanticsPipeline", () => {
     expectPrimitiveType(typing, callType, "bool");
   });
 
+  it("types additive expressions before comparison operators", () => {
+    const ast = loadAst("operator_precedence_additive_comparison.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+
+    const symbolTable = getSymbolTable(result);
+    const rootScope = symbolTable.rootScope;
+    const mainSymbol = symbolTable.resolve("main", rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") return;
+
+    expectFunctionReturnPrimitive(result.typing, mainSymbol, "bool");
+  });
+
   it("rejects ambiguous overloaded calls", () => {
     const ast = loadAst("function_overloads_ambiguous.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(/ambiguous overload for add/);

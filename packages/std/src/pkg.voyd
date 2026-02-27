@@ -23,6 +23,7 @@ pub self::random
 pub self::env
 pub self::fetch
 pub self::input
+pub self::output
 pub self::path
 pub self::fs
 pub std::optional::types::{ Optional, Option, Some, None }
