@@ -139,6 +139,21 @@ describe("createVoydTrapDiagnostics", () => {
     expect(isVoydRuntimeError(annotated)).toBe(false);
   });
 
+  it("does not treat message lines containing wasm urls as stack frames", () => {
+    const diagnostics = createVoydTrapDiagnostics({ module: EMPTY_WASM_MODULE });
+    const error = withStack(
+      new Error("failed to load wasm://wasm/00112233:1:57"),
+      [
+        "Error: failed to load wasm://wasm/00112233:1:57",
+        "at boom (https://example.test/host.js:10:3)",
+        "at main (wasm://wasm/00112233:1:57)",
+      ].join("\n")
+    );
+
+    const annotated = diagnostics.annotateTrap(error);
+    expect(isVoydRuntimeError(annotated)).toBe(false);
+  });
+
   it("maps Firefox/WebKit wasm frame names without relying on V8 frame syntax", () => {
     const diagnostics = createVoydTrapDiagnostics({
       module: moduleWithRuntimeDiagnostics(),

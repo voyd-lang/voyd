@@ -288,7 +288,10 @@ const parseStackFrameLine = (line: string): ParsedStackFrame | undefined => {
     };
   }
 
-  if (trimmed.includes("wasm://") || trimmed.includes("wasm-function[")) {
+  const isBareWasmFrame =
+    /^wasm-function\[\d+\](?::0x[0-9a-f]+)?$/i.test(trimmed) ||
+    /^wasm:\/\/[^\s)]+(?::\d+:\d+)?$/i.test(trimmed);
+  if (isBareWasmFrame) {
     return { location: trimmed };
   }
 
