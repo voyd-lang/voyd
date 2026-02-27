@@ -1,3 +1,10 @@
+//! Public string module surface.
+//!
+//! This module re-exports the core string types and parse/error helpers from
+//! `std::string::type`, and provides top-level constructors for UTF-8 data.
+//! Use this module when you want the default string APIs without importing
+//! implementation details.
+
 use std::array::Array
 use std::result::types::{ Result }
 use self::type::self as string_type
@@ -7,9 +14,19 @@ pub use self::type::{ CharSet, String, StringSlice }
 
 @intrinsic(name: "__string_new", uses_signature: true)
 /// Builds a string from owned UTF-8 byte storage without validation.
+///
+/// This constructor assumes `from_bytes` already contains UTF-8 data.
+/// Invalid sequences are normalized into replacement runes by the lower-level
+/// decoder used internally.
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   string_type::new_string(from_bytes)
 
 /// Validates UTF-8 bytes and builds a string on success.
+///
+/// - `source`: UTF-8 bytes to validate and convert.
+///
+/// Example:
+/// `String::from_utf8(bytes: [72, 101, 108, 108, 111])`
+/// returns `Ok("Hello")`.
 pub fn from_utf8({ bytes source: Array<i32> }) -> Result<String, Utf8Error>
   String::from_utf8(bytes: source)

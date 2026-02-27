@@ -1,3 +1,9 @@
+//! HTTP request/response helpers backed by the host networking runtime.
+//!
+//! `std::fetch` provides typed request and response DTOs plus convenience helpers
+//! for common HTTP workflows. Requests are encoded as MessagePack maps for the host
+//! `Fetch` effect and decoded back into `Result<FetchResponse, HostError>`.
+
 use std::array::Array
 use std::error::HostError
 use std::host_dto::HostDto
@@ -121,8 +127,22 @@ impl FetchResponse
     None {}
 
 @effect(id: "std::fetch::Fetch")
+/// Host networking effect used by `std::fetch`.
+///
+/// The payload is a MessagePack map with request metadata and optional body/timeout.
 pub eff Fetch
-  /// Sends an HTTP request and returns the response.
+  /// Sends an HTTP request.
+  ///
+  /// `payload` must encode:
+  /// - `method`: HTTP method string (`GET`, `POST`, and so on)
+  /// - `url`: absolute URL
+  /// - `headers`: array of `{ name, value }`
+  /// - `body`: optional UTF-8 string or `null`
+  /// - `timeout_millis`: optional i32 or `null`
+  ///
+  /// Returns a MessagePack object shaped as:
+  /// - success: `{ ok: true, value: <response dto> }`
+  /// - failure: `{ ok: false, code: i32, message: string }`
   request(tail, payload: MsgPack) -> MsgPack
 
 /// Creates one header value.
@@ -130,10 +150,16 @@ pub fn header({ name: StringSlice, value: StringSlice }): () -> FetchHeader
   FetchHeader { name: name.to_string(), value: value.to_string() }
 
 /// Sends an HTTP request.
+///
+/// This is the lowest-level public API in this module and accepts a fully-built
+/// `FetchRequest` value.
 pub fn request(request: FetchRequest): Fetch -> Result<FetchResponse, HostError>
   decode_request_result(Fetch::request(encode_request_payload(request)))
 
 /// Sends an HTTP request from explicit values.
+///
+/// Example:
+/// `let response = fetch::request_with(method: "PUT".as_slice(), url: url)`
 pub fn request_with({
   method: StringSlice,
   url: StringSlice,
@@ -150,10 +176,16 @@ pub fn request_with({
   ))
 
 /// Sends a `GET` request.
+///
+/// Example:
+/// `let response = fetch::request_get(url: "https://voyd.dev".as_slice())`
 pub fn request_get({ url: StringSlice }): Fetch -> Result<FetchResponse, HostError>
   request(FetchRequest::get(url: url))
 
 /// Sends a `POST` request with a text body.
+///
+/// Example:
+/// `let response = fetch::request_post(url: api.as_slice(), body: payload.as_slice())`
 pub fn request_post({ url: StringSlice, body: StringSlice }): Fetch -> Result<FetchResponse, HostError>
   request(FetchRequest::post(url: url, body: body))
 

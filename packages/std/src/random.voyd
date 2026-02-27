@@ -1,3 +1,7 @@
+//! Random-number and random-byte helpers backed by the host `Random` effect.
+//! The host implementation is expected to provide cryptographically secure
+//! randomness when available.
+
 use std::array::Array
 use std::bytes::ByteBuffer
 use std::math::{ MathError, mod_euclid }
@@ -7,6 +11,7 @@ use std::optional::types::all
 use std::subscript::Range
 
 @effect(id: "std::random::Random")
+/// Host-provided random source effect.
 pub eff Random
   next_i64(tail) -> i64
   fill_bytes(tail, len: i32) -> MsgPack
@@ -16,6 +21,11 @@ pub fn next_i64(): Random -> i64
   Random::next_i64()
 
 /// Fills a byte buffer with cryptographically secure random bytes.
+/// `len` controls the number of bytes appended to `buf`.
+/// Example:
+/// `let buf = ByteBuffer::new()`
+/// `random::fill_bytes(buf, len: 16)`
+/// `buf.len() == 16`
 pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
   if len <= 0:
     return void
@@ -47,6 +57,10 @@ pub fn random_bool(): Random -> bool
   value % 2 == 0
 
 /// Returns a random integer within the provided range.
+/// The range lower bound is inclusive. The upper bound follows `Range`:
+/// exclusive by default, inclusive when `include_end` is true.
+/// Example:
+/// `random::random_int(range: 1..6)` samples values in `[1, 5]`.
 pub fn random_int({ range: Range }): Random -> i32
   let start = range_start_or_zero(range.start)
   let start_i64 = extend_i32_s(start)

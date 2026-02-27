@@ -1,5 +1,13 @@
+//! Value duplication traits.
+//!
+//! `Clone` supports explicit duplication, while `Copy` marks cheap copy semantics.
+
+/// Trait for creating an explicit duplicate of a value.
 pub trait Clone<T>
+  /// Returns a cloned value.
   fn clone(self) -> T
 
+/// Trait for values that can be copied without ownership transfer concerns.
 pub trait Copy<T>
+  /// Returns a copied value.
   fn copy(self) -> T

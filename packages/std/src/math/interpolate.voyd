@@ -1,3 +1,7 @@
+//! Interpolation and range-mapping helpers for scalar numeric values.
+//! Includes clamping, range checks, forward interpolation, inverse
+//! interpolation, and range remapping.
+
 /// Returns `value` clamped between `min` and `max` (inclusive).
 pub fn clamp(value: i32, min: i32, max: i32) -> i32
   let lower = if min < max then: min else: max
@@ -91,6 +95,8 @@ pub fn between(value: f64, { min lower: f64, max upper: f64 }) -> bool
   between(value, lower, upper)
 
 /// Returns the linear interpolation between `start` and `end` at `t`.
+/// `t` is interpolation progress where `0` returns `start` and `1` returns `end`.
+/// Example: `lerp(10.0, 20.0, 0.25) == 12.5`.
 /// Supports UFCS call style: `0.0.lerp(to: 10.0, t: 0.25)`.
 pub fn lerp(start: f64, end: f64, t: f64) -> f64
   start + ((end - start) * t)
@@ -100,6 +106,7 @@ pub fn lerp(start: f64, { to end: f64, t: f64 }) -> f64
   lerp(start, end, t)
 
 /// Returns the linear interpolation between `start` and `end` at `t`.
+/// `t` is interpolation progress where `0` returns `start` and `1` returns `end`.
 pub fn lerp(start: f32, end: f32, t: f32) -> f32
   start + ((end - start) * t)
 
@@ -108,6 +115,8 @@ pub fn lerp(start: f32, { to end: f32, t: f32 }) -> f32
   lerp(start, end, t)
 
 /// Returns interpolation progress of `value` within the range `start..end`.
+/// A return value of `0` means `value == start`, and `1` means `value == end`.
+/// Example: `inverse_lerp(5.0, 0.0, 10.0) == 0.5`.
 /// Supports UFCS call style: `5.0.inverse_lerp(start: 0.0, end: 10.0)`.
 pub fn inverse_lerp(value: f64, start: f64, end: f64) -> f64
   (value - start) / (end - start)
@@ -117,6 +126,7 @@ pub fn inverse_lerp(value: f64, { start: f64, end: f64 }) -> f64
   inverse_lerp(value, start, end)
 
 /// Returns interpolation progress of `value` within the range `start..end`.
+/// A return value of `0` means `value == start`, and `1` means `value == end`.
 pub fn inverse_lerp(value: f32, start: f32, end: f32) -> f32
   (value - start) / (end - start)
 
@@ -125,6 +135,9 @@ pub fn inverse_lerp(value: f32, { start: f32, end: f32 }) -> f32
   inverse_lerp(value, start, end)
 
 /// Maps `value` from one range into another range.
+/// `in_min`/`in_max` define the input range and `out_min`/`out_max` define
+/// the destination range.
+/// Example: `map_range(5.0, in_min: 0.0, in_max: 10.0, out_min: 100.0, out_max: 200.0) == 150.0`.
 /// Supports UFCS call style with labels for readability:
 /// `5.0.map_range(in_min: 0.0, in_max: 10.0, out_min: 100.0, out_max: 200.0)`.
 pub fn map_range(value: f64, { in_min: f64, in_max: f64, out_min: f64, out_max: f64 }) -> f64

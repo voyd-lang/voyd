@@ -1,29 +1,41 @@
+//! Test host DTO helpers.
+//!
+//! Builders for common host payload fixtures used in test scenarios.
+
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::string::type::{ String, new_string }
 
-/// Builds an empty successful host payload for tests.
+/// Builds an empty successful host payload.
 pub fn host_ok_payload(): () -> MsgPack
   HostDto::init()
     .set("ok", msgpack::make_bool(true))
     .pack()
 
-/// Builds a successful host payload with a `value` field for tests.
-pub fn host_ok_with_value(value: MsgPack): () -> MsgPack
+/// Builds a successful host payload with a `value` field.
+pub fn host_ok_with_value(
+  /// Payload value to place in the `value` key.
+  value: MsgPack
+): () -> MsgPack
   HostDto::init()
     .set("ok", msgpack::make_bool(true))
     .set("value", value)
     .pack()
 
-/// Builds a host error payload for tests.
-pub fn host_error_payload({ code: i32, message: String }): () -> MsgPack
+/// Builds a host error payload.
+pub fn host_error_payload({
+  /// Numeric error code for the payload.
+  code: i32,
+  /// Human-readable error message.
+  message: String
+}): () -> MsgPack
   HostDto::init()
     .set("ok", msgpack::make_bool(false))
     .set("code", msgpack::make_i32(code))
     .set("message", msgpack::make_string(message))
     .pack()
 
-/// Builds a default host error payload for tests.
+/// Builds a default host error payload.
 pub fn host_default_error_payload(): () -> MsgPack
   host_error_payload(code: 1, message: "error")

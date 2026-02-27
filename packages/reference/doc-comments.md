@@ -1,80 +1,101 @@
 # Doc Comments
 
-Voyd supports line-based doc comments for declarations, modules, files, and function parameters.
-Doc comments are Markdown consumed by tooling (language server and docs generation).
+Voyd supports Markdown doc comments on declarations, modules/files, and function parameters.
+Tooling (language server and docs generation) reads these comments directly.
 
 ## Comment Forms
 
 ```voyd
-/// Outer doc comment (attaches to next documentable target)
-//! Inner doc comment (attaches to enclosing file or module)
-// Regular comment (not documentation)
+/// Outer docs: attach to the next documentable declaration
+//! Inner docs: attach to the enclosing file or module
+// Regular comment: not documentation
 ```
 
 ## Documentable Targets
 
-Doc comments may attach to:
+Doc comments can attach to:
 
 - `obj`, `type`, `trait`, `impl`, `fn`, and `mod` declarations
-- members of `obj`, `trait`, and `impl` blocks
-- function parameters (including labeled parameters and externally-labeled parameters)
+- members inside `obj`, `trait`, and `impl` blocks
+- function parameters (including labeled and externally-labeled parameters)
 - file/module docs via `//!`
 
 Doc comments do not attach to `let`, `var`, statements, expressions, or local-only constructs.
 
 ## Outer Docs (`///`)
 
-`///` attaches to the next documentable declaration when:
+`///` attaches to the next documentable target when:
 
-1. It appears immediately before the declaration.
+1. It is immediately before that target.
 2. Only whitespace and regular `//` comments appear in between.
-3. There is no blank line between the doc block and the declaration.
+3. There is no blank line between the final `///` line and the target.
 
-Multiple consecutive `///` lines are concatenated in source order. An empty `///` line becomes a blank line in the resulting docs.
+### Multiline `///` blocks
+
+Consecutive `///` lines are combined in order.
+Use `///` by itself to produce a blank paragraph line.
 
 ```voyd
-/// A 2D vector.
-obj Vec2 { x: Float, y: Float }
-
-/// Adds two values.
-fn add(a: i32, b: i32) -> i32
-  a + b
+/// Builds a user profile.
+///
+/// Includes computed display metadata.
+fn build_profile(user: User) -> Profile
+  todo()
 ```
 
 ## Inner Docs (`//!`)
 
-`//!` always attaches to the enclosing container:
+`//!` always documents the enclosing container:
 
-- at top level, it documents the file/module
-- inside a `mod` body, it documents that module
+- at top level: the file/module itself
+- inside a `mod` body: that nested module
+
+### Multiline `//!` blocks
+
+Consecutive `//!` lines are combined in order.
+Use `//!` by itself to create paragraph spacing.
 
 ```voyd
-//! Math utilities.
-//! Prefer importing `math`.
+//! HTTP helpers.
+//!
+//! Shared parsing and formatting utilities.
+
+mod http
+```
+
+```voyd
+mod http
+  //! Request/response value types.
+  //!
+  //! Re-exported by `std::http`.
 ```
 
 ## Parameter Docs
 
 Inside a function parameter list, `///` attaches to the next parameter entry.
-This includes positional parameters and entries inside labeled-parameter objects.
+Parameter docs document that parameter only, not the function.
+
+### Placement rules
+
+- Place the `///` line directly above the parameter it describes.
+- For labeled parameter objects, place docs above each field entry.
+- For externally-labeled parameters, attach docs above the full entry (`label param: Type`).
 
 ```voyd
-/// Does foo.
-fn foo(
-  /// Positional parameter docs.
-  bar: Type,
+/// Sends a request.
+fn send(
+  /// Endpoint URL.
+  url: String,
   {
-    /// Labeled parameter docs.
-    baz: Type,
+    /// Request timeout in milliseconds.
+    timeout_ms: i32,
 
-    /// Docs attach to `param`, not to external label token.
-    ext_label param: Type
+    /// Docs apply to the parameter entry, including its external label.
+    with_headers headers: Dict<String, String>
   }
-) -> ReturnType
+) -> Response
   todo()
 ```
-
-Parameter docs only apply to parameters, not to the containing function.
 
 ## Attachment Breaks and Errors
 
@@ -97,7 +118,7 @@ let x = 1
 
 - Doc text is Markdown and preserved as written (line endings normalized to `\n`).
 - Hover shows symbol docs as Markdown.
-- Signature help may show function and active-parameter docs.
+- Signature help may show function docs and active-parameter docs.
 - Completion entries may include short doc summaries.
 
 ## HTML Docs CLI

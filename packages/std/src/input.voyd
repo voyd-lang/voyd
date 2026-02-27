@@ -1,3 +1,8 @@
+//! Standard input helpers backed by host-provided input streams.
+//!
+//! `std::input` supports line-based reads, raw byte reads, and terminal detection.
+//! Host interactions are encoded as MessagePack DTOs and decoded into typed results.
+
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
 use std::error::{ HostError, IoError }
@@ -20,16 +25,31 @@ impl InputRequest
     InputRequest { prompt: prompt?.to_string() }
 
 @effect(id: "std::input::Input")
+/// Host input effect used by `std::input`.
 pub eff Input
+  /// Reads one line using the provided payload.
+  ///
+  /// `payload` may include a `prompt` field (`string` or `null`).
+  /// Returns `{ ok, value }` where `value` is a string or null, or an error DTO.
   read_line(tail, payload: MsgPack) -> MsgPack
+  /// Reads up to `max_bytes` bytes from standard input.
+  ///
+  /// `payload` contains `{ max_bytes }`.
+  /// Returns `{ ok, value }` where `value` is a byte array or null, or an error DTO.
   read_bytes_op(tail, payload: MsgPack) -> MsgPack
+  /// Reports whether stdin is attached to an interactive terminal.
   is_tty_op(tail) -> bool
 
 /// Reads a line from stdin (or host prompt source).
+///
+/// Returns `Ok(None)` at end-of-input.
 pub fn read_line(): Input -> Result<Option<String>, HostError>
   read_line(request: InputRequest::init())
 
 /// Reads a line using a prompt.
+///
+/// Example:
+/// `let next = input::read_line(prompt: "> ".as_slice())`
 pub fn read_line({ prompt: StringSlice }): Input -> Result<Option<String>, HostError>
   read_line(request: InputRequest::init(prompt: prompt))
 
@@ -38,6 +58,8 @@ pub fn read_line({ request: InputRequest }): Input -> Result<Option<String>, Hos
   decode_read_line_result(Input::read_line(encode_read_line_payload(request)))
 
 /// Reads up to `max_bytes` raw bytes from stdin.
+///
+/// Returns `Ok(None)` when no more bytes are available.
 pub fn read_bytes({ max_bytes: i32 }): Input -> Result<Option<Bytes>, IoError>
   decode_read_bytes_result(Input::read_bytes_op(encode_read_bytes_payload(max_bytes)))
 

@@ -1,2 +1,6 @@
+//! Result standard module.
+//!
+//! Re-exports the core `Result` type family and functional helpers.
+
 pub use self::types::all
 pub use self::fns::all

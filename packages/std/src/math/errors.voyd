@@ -1,5 +1,8 @@
+//! Math-specific error types and stable error code helpers.
+
 use std::result::types::all
 
+/// Error type returned by fallible std math APIs.
 pub obj MathError {
   /// Machine-readable error code.
   api code: i32

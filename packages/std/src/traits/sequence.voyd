@@ -1,9 +1,17 @@
+//! Sequence and iterator traits.
+//!
+//! Defines iteration contracts and the `for` macro expansion used by the language.
+
 use std::optional::all
 
+/// Trait for values that can produce iterators.
 pub trait Sequence<T>
+  /// Returns an iterator over sequence items.
   fn iter(self) -> Iterator<T>
 
+/// Trait for stateful iterators over `T` values.
 pub trait Iterator<T>
+  /// Produces the next item, or `None` when exhausted.
   fn next(~self) -> Option<T>
 
 pub macro for(case)

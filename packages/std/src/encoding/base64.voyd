@@ -1,3 +1,5 @@
+//! RFC 4648 base64 encode/decode helpers.
+
 use std::array::Array
 use std::bytes::ByteBuffer
 use std::bytes::Bytes
@@ -9,6 +11,20 @@ use std::result::types::{ Result, Ok, Err }
 use std::string::{ String, StringSlice, new_string }
 
 /// Encodes bytes as RFC 4648 base64 (with `=` padding).
+///
+/// Params:
+/// - `bytes`: Raw bytes to encode.
+///
+/// Returns an ASCII base64 string.
+///
+/// Example:
+/// ```voyd
+/// use std::encoding::base64
+/// use std::bytes::ByteBuffer
+///
+/// let source = ByteBuffer::from_utf8("voyd")
+/// let encoded = base64::encode({ bytes: source.as_bytes() })
+/// ```
 pub fn encode({ bytes: Bytes }) -> String
   let source = bytes.to_array()
   if source.is_empty():
@@ -46,6 +62,20 @@ pub fn encode({ bytes: Bytes }) -> String
   ascii_string_from_bytes(bytes: out)
 
 /// Decodes a base64 string into bytes.
+///
+/// Params:
+/// - `s`: Base64 text with optional `=` padding.
+///
+/// Returns:
+/// - `Ok<Bytes>` for valid base64 input.
+/// - `Err<DecodeError>` for invalid length, invalid characters, or invalid padding.
+///
+/// Example:
+/// ```voyd
+/// use std::encoding::base64
+///
+/// let decoded = base64::decode({ s: "dm95ZA==".as_slice() })
+/// ```
 pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
   let source = s.to_string().to_utf8()
   let source_len = source.len()

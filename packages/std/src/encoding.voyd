@@ -1,3 +1,5 @@
+//! Text/binary encoding helpers and shared decode error types.
+
 pub self::ascii
 pub self::errors
 pub self::hex

@@ -1,3 +1,7 @@
+//! Virtual DOM helpers.
+//!
+//! Utilities for constructing VX element payloads encoded as MsgPack maps.
+
 use std::array::Array
 use std::dict::{ Dict, DictKey }
 use std::msgpack::MsgPack
@@ -5,10 +9,15 @@ use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::string::type::{ String, new_string }
 
-/// Creates a virtual DOM element value for rendering.
+/// Creates a virtual DOM element payload for renderer consumption.
+///
+/// The returned value is a MsgPack map with `name`, `children`, and optional `attributes`.
 pub fn create_element({
+  /// Element tag or component identifier.
   name: String,
+  /// Optional list of two-item key/value MsgPack pairs.
   attributes?: Array<Array<MsgPack>>,
+  /// Ordered child node payloads.
   children: Array<MsgPack>
 }) -> MsgPack
   let ~element = Dict<String, MsgPack>::init()

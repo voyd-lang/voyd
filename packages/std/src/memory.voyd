@@ -1,3 +1,8 @@
+//! Low-level WebAssembly linear memory intrinsics.
+//!
+//! These APIs are thin wrappers over compiler intrinsics and are intended for
+//! runtime and systems-level utilities that need explicit memory access.
+
 @intrinsic(name: "__memory_size")
 /// Returns the current WebAssembly memory size in pages.
 pub fn size(): () -> i32 __memory_size()

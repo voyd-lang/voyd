@@ -1,3 +1,8 @@
+//! Structured logging primitives backed by a host logging sink.
+//!
+//! `std::log` exposes level-specific helpers and typed field values for structured
+//! payloads. Messages and fields are encoded as MessagePack maps/arrays.
+
 use std::array::Array
 use std::dict::Dict
 use std::msgpack::MsgPack
@@ -46,7 +51,14 @@ pub obj LogField {
 pub type LogFields = Array<LogField>
 
 @effect(id: "std::log::Log")
+/// Host logging effect used by `std::log`.
 pub eff Log
+  /// Emits one structured log event.
+  ///
+  /// `payload` is a map with:
+  /// - `level`: one of `trace|debug|info|warn|error`
+  /// - `message`: log message string
+  /// - `fields`: array of `{ key, value }` entries or null
   emit(tail, payload: MsgPack) -> void
 
 /// Emits a trace-level log message.

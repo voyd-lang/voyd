@@ -1,3 +1,13 @@
+//! Byte-oriented collection types.
+//!
+//! `Bytes` is an immutable view over byte data and `ByteBuffer` is a mutable,
+//! growable builder. These types are useful for protocol work, file formats,
+//! and interop with UTF-8 string APIs.
+//!
+//! Example:
+//! `String::from_utf8(bytes: buffer.as_bytes().to_array())`
+//! converts buffered bytes into a validated `String`.
+
 use std::array::Array
 use std::optional::types::all
 use std::subscript::Range
@@ -23,11 +33,13 @@ impl Bytes
   api fn get(self, { at: i32 }) -> Option<Byte>
     self.storage.get(at)
 
-  /// Returns the byte at `at`, trapping when out of bounds.
+  /// Returns the byte at `index`, trapping when out of bounds.
   api fn at(self, index: i32) -> Byte
     self.storage.at(index)
 
   /// Returns a byte slice for the provided range.
+  ///
+  /// - `range`: half-open or closed range, following `Range` semantics.
   api fn slice(self, { range: Range }) -> Bytes
     bytes_from_array(self.storage.slice(range: range))
 
@@ -46,6 +58,8 @@ impl ByteBuffer
     ByteBuffer { storage: Array<Byte>::init() }
 
   /// Creates an empty byte buffer with at least `bytes` capacity.
+  ///
+  /// Negative values are clamped to `0`.
   api fn with_capacity({ bytes: i32 }) -> ByteBuffer
     let capacity = if bytes > 0 then: bytes else: 0
     ByteBuffer { storage: Array<Byte>::with_capacity(capacity) }
@@ -63,6 +77,8 @@ impl ByteBuffer
     self.storage.capacity()
 
   /// Returns an immutable bytes snapshot.
+  ///
+  /// The returned `Bytes` is a copy of the current buffer contents.
   api fn as_bytes(self) -> Bytes
     bytes_from_array(self.storage.copied())
 
@@ -71,6 +87,8 @@ impl ByteBuffer
     self.storage.push(value)
 
   /// Appends all bytes from `bytes`.
+  ///
+  /// This is useful for concatenating previously captured `Bytes` values.
   api fn extend(~self, { bytes: Bytes }) -> void
     self.storage.extend(bytes.to_array())
 

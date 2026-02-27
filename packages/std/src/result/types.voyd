@@ -1,13 +1,27 @@
+//! Result type definitions.
+//!
+//! Contains the sum type used to represent success (`Ok`) or failure (`Err`).
+
+/// Unit sentinel type used by APIs that need a concrete object shape.
 pub obj Unit {}
 
+/// Successful `Result` variant.
+///
+/// Stores the produced value for success paths.
 pub obj Ok<T> {
-  /// Successful result payload.
+  /// Successful payload value.
   api value: T
 }
 
+/// Failing `Result` variant.
+///
+/// Stores error information for failure paths.
 pub obj Err<E> {
-  /// Error payload carried by this result variant.
+  /// Error payload value.
   api error: E
 }
 
+/// Result sum type.
+///
+/// A value is either `Ok<T>` for success or `Err<E>` for failure.
 pub type Result<T, E> = Ok<T> | Err<E>

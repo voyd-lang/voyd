@@ -1,3 +1,7 @@
+//! Floating-point and numeric helper APIs used by `std::math`.
+//! Functions in this module favor direct Wasm intrinsics for predictable
+//! runtime behavior across hosts.
+
 use std::result::types::all
 use std::math::errors::{ MathError, math_error, math_error_code_overflow }
 
@@ -41,7 +45,8 @@ pub fn signum(value: i64) -> i64
     value > extend_i32_s(0): extend_i32_s(1)
     else: extend_i32_s(0)
 
-/// Returns the sign of `value` as `-1`, `0`, or `1`, preserving `NaN`.
+/// Returns the sign of `value` as `-1`, `0`, or `1`.
+/// Returns `NaN` unchanged.
 pub fn signum(value: f64) -> f64
   if value != value:
     return value
@@ -50,7 +55,8 @@ pub fn signum(value: f64) -> f64
     value > 0.0: 1.0
     else: 0.0
 
-/// Returns the sign of `value` as `-1`, `0`, or `1`, preserving `NaN`.
+/// Returns the sign of `value` as `-1`, `0`, or `1`.
+/// Returns `NaN` unchanged.
 pub fn signum(value: f32) -> f32
   demote_f64(signum(promote_f32(value)))
 
@@ -142,11 +148,13 @@ pub fn tan(value: f64) -> f64
 pub fn tan(value: f32) -> f32
   demote_f64(tan(promote_f32(value)))
 
-/// Returns the angle (in radians) between the positive x-axis and the point `(x, y)`.
+/// Returns the angle in radians between the positive x-axis and `(x, y)`.
+/// Parameter order follows `atan2(y, x)`.
 pub fn atan2(y: f64, x: f64) -> f64
   atan2_f64(y, x)
 
-/// Returns the angle (in radians) between the positive x-axis and the point `(x, y)`.
+/// Returns the angle in radians between the positive x-axis and `(x, y)`.
+/// Parameter order follows `atan2(y, x)`.
 pub fn atan2(y: f32, x: f32) -> f32
   demote_f64(atan2(promote_f32(y), promote_f32(x)))
 
@@ -191,6 +199,7 @@ pub fn is_nan(value: f32) -> bool
   is_nan(promote_f32(value))
 
 /// Returns true when `value` is finite.
+/// Finite means not `NaN` and not positive/negative infinity.
 pub fn is_finite(value: f64) -> bool
   let gap = value - value
   gap == 0.0

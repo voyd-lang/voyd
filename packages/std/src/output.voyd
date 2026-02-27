@@ -1,3 +1,8 @@
+//! Standard output/error stream helpers backed by host runtime operations.
+//!
+//! `std::output` provides text and byte writes, flushing, and TTY checks for
+//! stdout and stderr using MessagePack DTO payloads.
+
 use std::array::Array
 use std::bytes::{ Bytes }
 use std::error::IoError
@@ -13,13 +18,29 @@ pub obj StdErr {}
 pub type OutputTarget = StdOut | StdErr
 
 @effect(id: "std::output::Output")
+/// Host output effect used by `std::output`.
 pub eff Output
+  /// Writes UTF-8 text to the selected output stream.
+  ///
+  /// `payload` contains `{ value, target }`, where `target` is `"stdout"` or `"stderr"`.
   write_op(tail, payload: MsgPack) -> MsgPack
+  /// Writes raw bytes to the selected output stream.
+  ///
+  /// `payload` contains `{ bytes, target }`.
   write_bytes_op(tail, payload: MsgPack) -> MsgPack
+  /// Flushes buffered data for the selected output stream.
+  ///
+  /// `payload` contains `{ target }`.
   flush_op(tail, payload: MsgPack) -> MsgPack
+  /// Returns whether the selected stream is a terminal.
+  ///
+  /// `payload` contains `{ target }`.
   is_tty_op(tail, payload: MsgPack) -> bool
 
 /// Writes text to the selected output target (stdout by default).
+///
+/// Example:
+/// `let result = output::write(value: "hello".as_slice())`
 pub fn write({ value: StringSlice }): Output -> Result<Unit, IoError>
   write(value: value, target: StdOut {})
 
@@ -30,16 +51,20 @@ pub fn write({ value: StringSlice, target: OutputTarget }): Output -> Result<Uni
     target: target
   )))
 
-/// Writes text followed by exactly "\n" to the selected target (stdout by default).
+/// Writes text followed by exactly `\n` to the selected target (stdout by default).
 pub fn write_line({ value: StringSlice }): Output -> Result<Unit, IoError>
   write_line(value: value, target: StdOut {})
 
-/// Writes text followed by exactly "\n" to the selected target.
+/// Writes text followed by exactly `\n` to the selected target.
+///
+/// This always appends a single line-feed byte (`0x0A`).
 pub fn write_line({ value: StringSlice, target: OutputTarget }): Output -> Result<Unit, IoError>
   let line = line_string(value: value)
   write(value: line.as_slice(), target: target)
 
 /// Writes bytes to the selected output target (stdout by default).
+///
+/// Use this when you need binary output instead of UTF-8 text.
 pub fn write_bytes({ bytes: Bytes }): Output -> Result<Unit, IoError>
   write_bytes(bytes: bytes, target: StdOut {})
 

@@ -1,3 +1,9 @@
+//! File system APIs backed by host runtime operations.
+//!
+//! `std::fs` provides read/write/existence/listing helpers that operate on
+//! `std::path::Path` and return typed `Result` values where host I/O can fail.
+//! All effect payloads are MessagePack-encoded DTOs.
+
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
 use std::error::IoError
@@ -11,28 +17,50 @@ use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
 
 @effect(id: "std::fs::Fs")
+/// Host file-system effect used by `std::fs`.
 pub eff Fs
+  /// Reads file contents from `path` and returns raw byte data or an I/O error DTO.
   read_bytes(tail, path: MsgPack) -> MsgPack
+  /// Reads UTF-8 text contents from `path` and returns string data or an I/O error DTO.
   read_string(tail, path: MsgPack) -> MsgPack
+  /// Writes raw byte data to a file.
+  ///
+  /// `payload` contains `{ path, bytes }`.
   write_bytes(tail, payload: MsgPack) -> MsgPack
+  /// Writes UTF-8 text to a file.
+  ///
+  /// `payload` contains `{ path, value }`.
   write_string(tail, payload: MsgPack) -> MsgPack
+  /// Returns the host-reported existence check for `path`.
   exists(tail, path: MsgPack) -> bool
+  /// Lists child paths in the directory at `path`, or returns an I/O error DTO.
   list_dir(tail, path: MsgPack) -> MsgPack
 
 /// Reads a file as raw bytes.
+///
+/// Example:
+/// `let bytes = fs::read_bytes(path: Path::new(s: "./image.bin".as_slice()))`
 pub fn read_bytes({ path: Path }): Fs -> Result<Bytes, IoError>
   decode_read_bytes_result(Fs::read_bytes(encode_path(path)))
 
 /// Reads text from a file.
+///
+/// This expects host-side UTF-8 text decoding.
 pub fn read_string({ path: Path }): Fs -> Result<String, IoError>
   decode_read_string_result(Fs::read_string(encode_path(path)))
 
 /// Writes bytes to a file.
+///
+/// Example:
+/// `let write_result = fs::write_bytes(path: file_path, bytes: payload)`
 pub fn write_bytes({ path: Path, bytes: Bytes }): Fs -> Result<Unit, IoError>
   let payload = encode_write_bytes_payload(path: path, bytes: bytes)
   decode_write_result(Fs::write_bytes(payload))
 
 /// Writes text to a file.
+///
+/// Example:
+/// `let write_result = fs::write_string(path: file_path, s: "hello".as_slice())`
 pub fn write_string({ path: Path, s: StringSlice }): Fs -> Result<Unit, IoError>
   let payload = encode_write_string_payload(path: path, value: s.to_string())
   decode_write_result(Fs::write_string(payload))
@@ -42,6 +70,8 @@ pub fn exists({ path: Path }): Fs -> bool
   Fs::exists(encode_path(path))
 
 /// Lists child paths in a directory.
+///
+/// Each returned `Path` is decoded from host-provided string entries.
 pub fn list_dir({ path: Path }): Fs -> Result<Array<Path>, IoError>
   decode_list_dir_result(Fs::list_dir(encode_path(path)))
 

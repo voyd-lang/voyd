@@ -1,3 +1,9 @@
+//! Core UTF-8 string types and operations.
+//!
+//! `String` is an owned UTF-8 value and `StringSlice` is a non-owning byte
+//! window into a `String`. Index-based traversal uses `StringIndex` byte
+//! offsets, with helpers that keep movement on rune or grapheme boundaries.
+
 use std::array::{ Array, new_array_unchecked }
 use std::fixed_array::fns::{ new_fixed_array }
 use std::string::index::{ make_string_index }
@@ -9,17 +15,20 @@ use std::subscript::{ Range }
 pub use std::string::errors::{ ParseFloatError, ParseIntError, Utf8Error }
 pub use std::string::index::StringIndex
 
+/// Owned UTF-8 string value.
 pub obj String {
   bytes: Array<i32>,
   byte_count: i32
 }
 
+/// Non-owning view into a `String` byte range.
 pub obj StringSlice {
   source: String,
   start: i32,
   byte_count: i32
 }
 
+/// Rune set used by trimming and character membership APIs.
 pub type CharSet = Array<i32>
 
 impl StringSlice
@@ -46,6 +55,8 @@ impl String
     String { bytes: Array<i32>::with_capacity(capacity), byte_count: 0 }
 
   /// Validates UTF-8 bytes and builds a string on success.
+  ///
+  /// - `source`: byte array to validate as UTF-8.
   api fn from_utf8({ bytes source: Array<i32> }) -> Result<String, Utf8Error>
     from_utf8(bytes: source)
 
@@ -79,6 +90,12 @@ impl String
     self.byte_count == 0
 
   /// Returns a UTF-8 byte array copy.
+  ///
+  /// This allocates a new `Array<i32>` containing the exact encoded bytes.
+  ///
+  /// Example:
+  /// `String::from_utf8(bytes: text.to_utf8())`
+  /// round-trips `text` through bytes validation.
   api fn to_utf8(self): () -> Array<i32>
     match(Array<i32>::from(self.raw_bytes()))
       Some<Array<i32>> { value }:
@@ -98,7 +115,16 @@ impl String
   api fn end_index(self): () -> StringIndex
     make_string_index(self.byte_count)
 
-  /// Returns a subrange view or copy for the requested range.
+  /// Returns a subrange view for the requested range.
+  ///
+  /// - `range`: byte-based range expression.
+  ///
+  /// Start and end are clamped to valid bounds and moved to rune boundaries.
+  /// Empty or inverted ranges return an empty slice.
+  ///
+  /// Example:
+  /// `name.slice(range: 0..4).to_string()`
+  /// returns the first four bytes, snapped to rune boundaries.
   api fn slice(self, { range: Range }) -> StringSlice
     let source = self.raw_bytes()
     let start = clamp_index_to_rune_boundary(source, self.byte_count, normalize_range_start(range, self.byte_count))
@@ -113,11 +139,24 @@ impl String
     new_string_slice(self, start, end - start)
 
   /// Moves a string index by rune steps.
+  ///
+  /// - `cursor`: starting byte index.
+  /// - `steps`: number of runes to move; defaults to `1`.
+  ///
+  /// Negative steps move backward. Returns `None` when `cursor` is invalid or
+  /// movement would go out of bounds.
+  ///
+  /// Example:
+  /// `text.index(after: text.start_index(), by: 2)`
+  /// moves to the third rune boundary.
   api fn index(self, { after cursor: StringIndex, by steps?: i32 }) -> Option<StringIndex>
     let delta = steps ?? 1
     advance_rune_index(self, cursor.to_i32(), delta)
 
   /// Moves a string index by grapheme clusters.
+  ///
+  /// - `cursor`: starting byte index.
+  /// - `steps`: number of grapheme clusters to move; defaults to `1`.
   api fn grapheme_index(self, { after cursor: StringIndex, by steps?: i32 }) -> Option<StringIndex>
     let delta = steps ?? 1
     advance_grapheme_index(self, cursor.to_i32(), delta)
@@ -654,7 +693,20 @@ impl String
       index = index + 1
     new_string(bytes.to_fixed_array())
 
-  /// Parses this string as an integer with optional radix.
+  /// Parses this string as an `i32`.
+  ///
+  /// - `radix`: base in the inclusive range `2..36` (defaults to `10`).
+  ///
+  /// Supports optional leading `+` or `-`.
+  ///
+  /// Error codes:
+  /// - `1`: invalid radix.
+  /// - `2`: empty input (or sign without digits).
+  /// - `3`: digit not valid for `radix`.
+  /// - `4`: value overflowed `i32`.
+  ///
+  /// Example:
+  /// `hex.parse_int(radix: 16)` parses `"ff"` into `255`.
   api fn parse_int(self, { radix?: i32 }): () -> Result<i32, ParseIntError>
     let base = match(radix)
       Some<i32> { value }:
@@ -712,7 +764,16 @@ impl String
 
     Ok<i32> { value }
 
-  /// Parses this string as a floating-point number.
+  /// Parses this string as an `f64`.
+  ///
+  /// Accepted format:
+  /// `[+|-]?digits[.digits][e[+|-]digits]`
+  ///
+  /// Error codes:
+  /// - `1`: invalid or incomplete numeric format.
+  ///
+  /// Example:
+  /// `number.parse_float()` parses `"3.5e2"` into `350.0`.
   api fn parse_float(self): () -> Result<f64, ParseFloatError>
     if self.byte_count == 0:
       return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
@@ -1375,6 +1436,11 @@ fn append_bytes(~out: Array<i32>, source: FixedArray<i32>, count: i32) -> void
     index = index + 1
 
 /// Validates UTF-8 bytes and builds a string on success.
+///
+/// Returns `Err(Utf8Error { code: 1 })` when any byte sequence is invalid UTF-8.
+///
+/// Example:
+/// `from_utf8(bytes: [240, 159, 154, 128])` yields the rune `U+1F680`.
 pub fn from_utf8({ bytes: Array<i32> }) -> Result<String, Utf8Error>
   let source_bytes = bytes
   let source = source_bytes.raw_storage()
@@ -1414,7 +1480,10 @@ fn append_codepoint_mut(~bytes: Array<i32>, codepoint: i32) -> void
     return void
   append_replacement_mut(bytes)
 
-/// Builds a string from owned UTF-8 byte storage without validation.
+/// Builds a string from owned UTF-8 byte storage without strict validation.
+///
+/// This constructor decodes bytes and replaces invalid UTF-8 with the Unicode
+/// replacement rune.
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   let input_length = __array_len(from_bytes)
   let ~bytes = Array<i32>::with_capacity(input_length)

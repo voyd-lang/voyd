@@ -1,7 +1,15 @@
+//! Double-ended queue built on top of `std::array::Array`.
+//! Front operations are convenient but shift storage, so they are not constant-time.
+
 use std::array::Array
 use std::optional::types::Option
 
 /// A double-ended queue.
+///
+/// Example:
+/// `let ~queue = Deque<i32>::init()`
+/// `queue.push_back(value: 1)`
+/// `queue.push_front(value: 0)`
 pub obj Deque<T> {
   storage: Array<T>
 }

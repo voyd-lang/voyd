@@ -1,1 +1,5 @@
+//! Fixed-size array helpers and utilities.
+//! Re-exported APIs come from `std::fixed_array::fns`.
+
+/// Re-exports all fixed-array helper functions.
 pub use self::fns::all

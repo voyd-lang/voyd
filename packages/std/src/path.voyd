@@ -1,3 +1,8 @@
+//! Pure path string utilities.
+//!
+//! `std::path` performs lexical path composition and inspection without touching
+//! the file system. Use `std::fs` when you need host-backed path existence or I/O.
+
 use std::array::Array
 use std::optional::types::all
 use std::string::type::{ String, StringSlice, new_string }
