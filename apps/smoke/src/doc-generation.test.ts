@@ -30,11 +30,23 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       "pub fn fold_like<O>(count: i32, { hi: O }, { there: (acc: O, value: i32) -> O }) -> O",
       "  there(hi, count)",
       "",
-      "pub obj Counter { value: i32 }",
+      "/// See [query docs](https://example.com/docs?q=voyd&lang=en).",
+      "pub fn linked_docs() -> i32",
+      "  0",
+      "",
+      "pub eff Decode",
+      "  /// Reads next input value.",
+      "  decode_next(resume, input: i32) -> i32",
+      "  finish(tail) -> void",
+      "",
+      "pub obj Counter { api value: i32, pri hidden: i32 }",
       "",
       "impl Counter",
-      "  fn double(self) -> i32",
+      "  api fn double(self) -> i32",
       "    self.value * 2",
+      "",
+      "  fn hide(self) -> i32",
+      "    self.hidden",
       "",
       "pub fn main() -> i32",
       "  add_one(41)",
@@ -75,6 +87,11 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("class=\"tok-id\">util</span>");
       expect(html.content).toContain("class=\"tok-kw\">impl</span>");
       expect(html.content).toContain("class=\"tok-name\">double</span>");
+      expect(html.content).toContain(
+        "href=\"https://example.com/docs?q=voyd&amp;lang=en\"",
+      );
+      expect(html.content).not.toContain("href=\"https://example.com/docs?q=voyd&amp;amp;lang=en\"");
+      expect(html.content).toContain("Reads next input value.");
       expect(html.content).not.toContain("id=\"function-src-main-double\"");
       const objectIndex = html.content.indexOf("id=\"object-src-main-counter\"");
       const implIndex = html.content.indexOf("id=\"impl-src-main-impl-0\"");
@@ -96,6 +113,18 @@ describe("smoke: sdk doc-generation", () => {
           impls: Array<{
             signature: string;
             members: Array<{ name: string; signature: string }>;
+          }>;
+          objects: Array<{
+            name: string;
+            members: Array<{ name: string; signature: string }>;
+          }>;
+          effects: Array<{
+            name: string;
+            members: Array<{
+              name: string;
+              signature: string;
+              documentation?: string;
+            }>;
           }>;
           reexports: Array<{
             signature: string;
@@ -119,6 +148,8 @@ describe("smoke: sdk doc-generation", () => {
       expect(foldLike?.signature).not.toContain("}, {");
       const duplicateMethodFn = mainModule?.functions.find((fn) => fn.name === "double");
       expect(duplicateMethodFn).toBeUndefined();
+      const hiddenMethodFn = mainModule?.functions.find((fn) => fn.name === "hide");
+      expect(hiddenMethodFn).toBeUndefined();
       expect(mainModule?.reexports.map((item) => item.signature)).toContain(
         "pub use src::util::all",
       );
@@ -129,6 +160,13 @@ describe("smoke: sdk doc-generation", () => {
       const doubleMethod = counterImpl?.members.find((member) => member.name === "double");
       expect(doubleMethod).toBeDefined();
       expect(doubleMethod?.signature.startsWith("fn ")).toBe(false);
+      const hiddenMethod = counterImpl?.members.find((member) => member.name === "hide");
+      expect(hiddenMethod).toBeUndefined();
+      const counterObject = mainModule?.objects.find((objectDecl) => objectDecl.name === "Counter");
+      expect(counterObject?.members.map((member) => member.name)).toEqual(["value"]);
+      const decodeEffect = mainModule?.effects.find((effectDecl) => effectDecl.name === "Decode");
+      const decodeNextOp = decodeEffect?.members.find((member) => member.name === "decode_next");
+      expect(decodeNextOp?.documentation).toBe(" Reads next input value.");
     } finally {
       await fs.rm(fixture.root, { recursive: true, force: true });
     }

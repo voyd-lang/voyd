@@ -500,6 +500,12 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(html).toContain("id=\"module-src-main\"");
       expect(html).toContain("id=\"module-src-main-math\"");
       expect(html).toContain("<details>");
+      expect(html).toContain("<summary><a href=\"#module-src-main\">main</a></summary>");
+      expect(html).not.toContain("<summary><span>src</span></summary>");
+      expect(html).not.toContain("<details open>");
+      expect(html).toContain("<a href=\"#function-src-main-add\">");
+      expect(html).toContain("<code>fn</code> add");
+      expect(html).toContain("<a href=\"#module-src-main-math\">math</a>");
       expect(html).toContain("id=\"function-src-main-add\"");
       expect(html).toContain("id=\"function-src-main-add-1\"");
       expect(html).toContain("<strong>markdown</strong>");

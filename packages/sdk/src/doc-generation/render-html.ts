@@ -22,6 +22,16 @@ type SignatureToken = {
   className?: string;
 };
 
+const SIDEBAR_KIND_LABEL: Record<DocumentationItem["kind"], string> = {
+  re_export: "use",
+  function: "fn",
+  type_alias: "type",
+  object: "obj",
+  trait: "trait",
+  effect: "eff",
+  impl: "impl",
+};
+
 const SIGNATURE_KEYWORDS = new Set([
   "pub",
   "use",
@@ -195,7 +205,7 @@ const renderInlineMarkdown = (value: string): string => {
   return escaped
     .replace(
       /\[([^\]]+)\]\(([^)]+)\)/g,
-      (_, text, href) => `<a href="${escapeHtml(href)}">${text}</a>`,
+      (_, text, href) => `<a href="${href}">${text}</a>`,
     )
     .replace(/`([^`]+)`/g, "<code>$1</code>")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
@@ -347,7 +357,20 @@ const buildTocTree = (modules: readonly ModuleDocumentationSection[]): TocNode[]
       .sort((left, right) => left.key.localeCompare(right.key))
       .map((node) => ({ ...node, children: sortNodes(node.children) }));
 
-  return sortNodes(root.children);
+  const sortedNodes = sortNodes(root.children);
+  const shiftedNodes =
+    sortedNodes.length === 1 && sortedNodes[0]?.module === undefined
+      ? sortedNodes[0]!.children
+      : sortedNodes;
+
+  const rebaseDepths = (nodes: readonly TocNode[], depth: number): TocNode[] =>
+    nodes.map((node) => ({
+      ...node,
+      depth,
+      children: rebaseDepths(node.children, depth + 1),
+    }));
+
+  return rebaseDepths(shiftedNodes, 1);
 };
 
 const renderItemCard = ({
@@ -410,19 +433,46 @@ const renderKindSection = (section: KindSection): string => `<section class="kin
     .join("\n")}
 </section>`;
 
+const sidebarItemName = (item: DocumentationItem): string => {
+  if (item.kind === "impl") {
+    return item.targetName ?? item.name;
+  }
+  if (item.kind === "re_export") {
+    return item.signature.replace(/^pub\s+/, "");
+  }
+  return item.name;
+};
+
+const renderSidebarDeclarationNode = (item: DocumentationItem): string => `<li class="sidebar-decl">
+  <a href="#${item.anchor}">
+    <code>${SIDEBAR_KIND_LABEL[item.kind]}</code> ${escapeHtml(sidebarItemName(item))}
+  </a>
+</li>`;
+
 const renderSidebarNode = (node: TocNode): string => {
   const link = node.module
     ? `<a href="#${node.module.anchor}">${escapeHtml(node.label)}</a>`
     : `<span>${escapeHtml(node.label)}</span>`;
-  const childNodes = node.children.map(renderSidebarNode).join("\n");
-  const shouldCollapse = node.depth > 1;
-  const open = shouldCollapse ? "" : " open";
-  const body = childNodes ? `<ul>${childNodes}</ul>` : "";
+  const declarationNodes = node.module
+    ? collectAllModuleItems(node.module)
+      .map(renderSidebarDeclarationNode)
+      .join("\n")
+    : "";
+  const childModuleNodes = node.children.map(renderSidebarNode).join("\n");
+  const hasChildren = declarationNodes.length > 0 || childModuleNodes.length > 0;
+
+  if (!hasChildren) {
+    return `<li>${link}</li>`;
+  }
+
+  const body = [declarationNodes, childModuleNodes]
+    .filter((entries) => entries.length > 0)
+    .join("\n");
 
   return `<li>
-  <details${open}>
+  <details>
     <summary>${link}</summary>
-    ${body}
+    <ul>${body}</ul>
   </details>
 </li>`;
 };
@@ -604,6 +654,12 @@ export const renderDocumentationHtml = ({
     .sidebar li { margin: 0.25rem 0; }
     .sidebar summary { cursor: pointer; font-weight: 560; color: #4b545c; }
     .sidebar summary a { font-weight: 600; }
+    .sidebar-decl a { font-weight: 500; color: #4c5963; }
+    .sidebar-decl code {
+      font-size: 0.78em;
+      padding: 0.08rem 0.25rem;
+      margin-right: 0.14rem;
+    }
     .content {
       padding: 1rem 1.4rem 1.5rem;
     }

@@ -703,6 +703,7 @@ export const createDocumentationModel = ({
           members: effectDecl.operations.map((operation) => ({
             name: operation.name,
             signature: formatEffectOperationSignature(operation),
+            documentation: operation.documentation,
           })),
           nextAnchor,
         }),

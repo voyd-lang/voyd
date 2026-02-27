@@ -170,6 +170,7 @@ export interface EffectOperationDecl {
   parameters: readonly ParameterDecl[];
   resumable: "resume" | "tail";
   returnTypeExpr?: Expr;
+  documentation?: string;
 }
 
 export interface EffectOperationDeclInput {

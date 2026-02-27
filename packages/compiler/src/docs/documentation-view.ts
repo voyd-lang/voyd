@@ -75,6 +75,7 @@ export type DocumentationEffectOperationView = {
   params: readonly DocumentationParameterView[];
   returnTypeExpr?: unknown;
   resumable: "resume" | "tail";
+  documentation?: string;
 };
 
 export type DocumentationEffectView = {
@@ -239,11 +240,13 @@ const normalizeModules = ({
             visibility: normalizeVisibility(objectDecl.visibility),
             typeParameters: normalizeTypeParameters(objectDecl.typeParameters),
             baseTypeExpr: objectDecl.baseTypeExpr,
-            fields: objectDecl.fields.map((field) => ({
-              name: field.name,
-              typeExpr: field.typeExpr,
-              documentation: field.documentation,
-            })),
+            fields: objectDecl.fields
+              .filter((field) => field.visibility.api === true)
+              .map((field) => ({
+                name: field.name,
+                typeExpr: field.typeExpr,
+                documentation: field.documentation,
+              })),
             documentation: objectDecl.documentation,
           })),
           traits: semantic.binding.traits.map((traitDecl) => ({
@@ -262,6 +265,7 @@ const normalizeModules = ({
               params: operation.parameters.map(normalizeParameter),
               returnTypeExpr: operation.returnTypeExpr,
               resumable: operation.resumable,
+              documentation: operation.documentation,
             })),
           })),
           impls: semantic.binding.impls.map((implDecl) => ({
@@ -270,7 +274,9 @@ const normalizeModules = ({
             target: implDecl.target,
             trait: implDecl.trait,
             typeParameters: normalizeTypeParameters(implDecl.typeParameters),
-            methods: implDecl.methods.map(normalizeFunction),
+            methods: implDecl.methods
+              .filter((method) => method.memberVisibility?.api === true)
+              .map(normalizeFunction),
             documentation: implDecl.documentation,
           })),
           reexports: semantic.binding.uses.flatMap((useDecl) =>

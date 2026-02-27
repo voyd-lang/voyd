@@ -171,9 +171,38 @@ const parseDocConfig = (argv: readonly string[]): VoydConfig => {
   };
 };
 
+const findSubcommandIndex = (args: readonly string[]): number => {
+  let index = 0;
+  while (index < args.length) {
+    const arg = args[index]!;
+    if (arg === "test" || arg === "doc" || arg === "docs") {
+      return index;
+    }
+
+    if (arg === "--pkg-dir") {
+      index += 2;
+      continue;
+    }
+    if (arg.startsWith("--pkg-dir=")) {
+      index += 1;
+      continue;
+    }
+
+    index += 1;
+  }
+
+  return -1;
+};
+
 export const getConfigFromCli = (): VoydConfig => {
   const args = process.argv.slice(2);
-  const [command, ...rest] = args;
+  const commandIndex = findSubcommandIndex(args);
+  if (commandIndex < 0) {
+    return parseMainConfig(args);
+  }
+
+  const command = args[commandIndex]!;
+  const rest = args.filter((_, index) => index !== commandIndex);
 
   if (command === "test") {
     return parseTestConfig(rest);

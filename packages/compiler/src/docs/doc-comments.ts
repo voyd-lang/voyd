@@ -7,6 +7,7 @@ import {
   isIdentifierAtom,
 } from "../parser/index.js";
 import {
+  parseEffectDecl,
   parseFunctionDecl,
   parseImplDecl,
   parseObjectDecl,
@@ -332,6 +333,20 @@ const collectDocTargets = ({
         parsed.methods.forEach((method) => {
           addDeclaration(method.signature.name);
           method.signature.params.forEach((param) => addParameter(param.ast));
+        });
+        return;
+      }
+    } catch {
+      // Parser diagnostics for malformed declarations are handled elsewhere.
+    }
+
+    try {
+      const parsed = parseEffectDecl(entry);
+      if (parsed) {
+        addDeclaration(parsed.name);
+        parsed.operations.forEach((operation) => {
+          addDeclaration(operation.name);
+          operation.params.forEach((param) => addParameter(param.ast));
         });
         return;
       }

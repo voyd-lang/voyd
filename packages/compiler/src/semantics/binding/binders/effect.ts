@@ -1,4 +1,4 @@
-import { rememberSyntax } from "../context.js";
+import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import { toSourceSpan } from "../../utils.js";
 import type { BindingContext } from "../types.js";
 import type { ParsedEffectDecl, ParsedEffectOperation } from "../parsing.js";
@@ -89,6 +89,7 @@ export const bindEffectDecl = (
 
   const operations = decl.operations.map((op) => {
     rememberSyntax(op.form, ctx);
+    rememberSyntax(op.name, ctx);
     const scope = ctx.symbolTable.createScope({
       parent: effectScope,
       kind: "function",
@@ -125,6 +126,7 @@ export const bindEffectDecl = (
       parameters: params,
       resumable: op.resumable,
       returnTypeExpr: op.returnType,
+      documentation: declarationDocForSyntax(op.name, ctx),
     };
   });
 

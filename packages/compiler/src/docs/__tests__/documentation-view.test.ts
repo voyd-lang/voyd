@@ -24,13 +24,20 @@ pub fn add(
 ) -> i32
   left
 
-pub obj Num { value: i32 }
+pub obj Num {
+  api value: i32
+  hidden: i32
+}
 
 impl Num
-  fn double(self) -> i32
+  api fn double(self) -> i32
     self.value * 2
 
+  fn hide(self) -> i32
+    self.value
+
 pub eff Decode
+  /// Decode next value.
   decode_next(resume, input: i32) -> i32
   finish(tail) -> void
 
@@ -65,12 +72,18 @@ pub mod math
     expect(addFn?.documentation).toBe(" Adds values.");
     const leftParam = addFn?.params.find((param) => param.name === "left");
     expect(leftParam?.documentation).toBe(" Left docs.\n Keep newline.");
+    const numObject = mainModule?.objects.find((objectDecl) => objectDecl.name === "Num");
+    expect(numObject?.fields.map((field) => field.name)).toEqual(["value"]);
     const decodeEffect = mainModule?.effects.find((effect) => effect.name === "Decode");
     expect(decodeEffect).toBeDefined();
     expect(decodeEffect?.operations.map((op) => op.name)).toEqual([
       "decode_next",
       "finish",
     ]);
+    const decodeNextOp = decodeEffect?.operations.find(
+      (op) => op.name === "decode_next",
+    );
+    expect(decodeNextOp?.documentation).toBe(" Decode next value.");
     const mathReExport = mainModule?.reexports.find(
       (reexport) => reexport.path.join("::") === "src::main::math",
     );
@@ -80,6 +93,9 @@ pub mod math
     expect(implMethod?.implId).toBe(implDecl?.id);
     expect(implDecl?.methods.some((method) => method.name === "double")).toBe(
       true,
+    );
+    expect(implDecl?.methods.some((method) => method.name === "hide")).toBe(
+      false,
     );
   });
 });
