@@ -377,7 +377,9 @@ const buildDiagnostics = ({
         metadataByWasmName,
       })
     : undefined;
-  const fallbackMetadata =
+  const safeFallbackMetadata =
+    !resolved?.metadata &&
+    frames.length === 1 &&
     annotation?.fallbackFunctionName
       ? metadataByFunctionName.get(annotation.fallbackFunctionName)
       : undefined;
@@ -398,16 +400,13 @@ const buildDiagnostics = ({
           span: resolved.metadata.span,
         }
       : {}),
-    ...(resolved?.metadata || !fallbackMetadata
+    ...(resolved?.metadata || !safeFallbackMetadata
       ? {}
       : {
-          moduleId: fallbackMetadata.moduleId,
-          functionName: fallbackMetadata.functionName,
-          span: fallbackMetadata.span,
+          moduleId: safeFallbackMetadata.moduleId,
+          functionName: safeFallbackMetadata.functionName,
+          span: safeFallbackMetadata.span,
         }),
-    ...(resolved?.metadata || !annotation?.fallbackFunctionName
-      ? {}
-      : { functionName: annotation.fallbackFunctionName }),
   };
 
   return {

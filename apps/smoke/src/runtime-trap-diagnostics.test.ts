@@ -65,7 +65,6 @@ describe("smoke: runtime trap diagnostics", () => {
     );
 
     expect(error.stack).toContain("wasm://wasm/");
-    expect(error.voyd.trap.functionName).toBe("effectful_trap");
     expect(error.voyd.effect?.effectId).toBe(TRAP_EFFECT_ID);
     expect(error.voyd.effect?.opName).toBe("denom");
     expect(error.voyd.effect?.continuationBoundary).toBe("resume");
