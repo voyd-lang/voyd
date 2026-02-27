@@ -1,0 +1,14 @@
+obj Box {
+  value: i32
+}
+
+impl Box
+  api fn foo(self, x: i32): () -> i32
+    self.value + x
+
+fn foo(box: Box, x: f64): () -> i32
+  box.value
+
+pub fn main(): () -> i32
+  let b = Box { value: 1 }
+  b.foo(true)
