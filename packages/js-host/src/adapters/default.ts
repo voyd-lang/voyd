@@ -203,22 +203,6 @@ const normalizeByte = (value: unknown): number => {
   return 0;
 };
 
-const toUint8Array = (value: unknown): Uint8Array => {
-  if (value instanceof Uint8Array) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new TextEncoder().encode(value);
-  }
-  if (ArrayBuffer.isView(value)) {
-    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-  }
-  if (value instanceof ArrayBuffer) {
-    return new Uint8Array(value);
-  }
-  return new Uint8Array();
-};
-
 const toNodeReadBytesChunk = (value: unknown): Uint8Array => {
   if (typeof value === "string") {
     throw new Error(
