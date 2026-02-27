@@ -263,6 +263,7 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         value: { ok: true },
       });
       expect(seenClearedTimerIds).toEqual([1n]);
+      expect(runtime.pendingTimerCount()).toBe(0);
 
       await expect(invokeHandler(monotonicHandler)).resolves.toEqual({
         kind: "tail",

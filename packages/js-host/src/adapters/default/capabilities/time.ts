@@ -129,15 +129,7 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
         const timerRef = { cancel: () => undefined };
         pendingIntervalTimers.set(timerId, timerRef);
 
-        if (typeof runtimeHooks.sleepMillis === "function") {
-          void waitForMillis(intervalMillis)
-            .catch(() => undefined)
-            .then(() => {
-              if (pendingIntervalTimers.get(timerId) === timerRef) {
-                pendingIntervalTimers.delete(timerId);
-              }
-            });
-        } else {
+        if (typeof runtimeHooks.sleepMillis !== "function") {
           let cancelled = false;
           let currentTimeout: ReturnType<typeof setTimeout> | null = null;
           const runNextChunk = (remaining: bigint): void => {
