@@ -1,0 +1,8 @@
+fn add(a: i32, b: i32)
+  a + b
+
+fn add(a: bool, b: bool)
+  a and b
+
+pub fn main()
+  add(1, true)

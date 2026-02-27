@@ -14,7 +14,13 @@ import type {
   StaticMethodTable,
   ModuleMemberTable,
 } from "../binding/binding.js";
-import type { NodeId, OverloadSetId, ScopeId, SymbolId } from "../ids.js";
+import type {
+  NodeId,
+  OverloadSetId,
+  ScopeId,
+  SourceSpan,
+  SymbolId,
+} from "../ids.js";
 import type { SymbolTable } from "../binder/index.js";
 import { DeclTable } from "../decls.js";
 import type { ModulePath } from "../../modules/types.js";
@@ -42,10 +48,13 @@ export interface LowerContext {
   intrinsicSymbols: Map<string, SymbolId>;
   intrinsicTypeSymbols: Map<string, SymbolId>;
   moduleNodeId: NodeId;
+  moduleId: string;
   overloadBySymbol: ReadonlyMap<SymbolId, OverloadSetId>;
   staticMethods: StaticMethodTable;
   moduleMembers: ModuleMemberTable;
   decls: DeclTable;
+  dependencies: ReadonlyMap<string, BindingResult>;
+  importSpansByLocal: ReadonlyMap<SymbolId, SourceSpan>;
   modulePath: ModulePath;
   packageId: string;
   isPackageRoot: boolean;

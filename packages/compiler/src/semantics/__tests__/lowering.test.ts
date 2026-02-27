@@ -598,6 +598,138 @@ fn constrained<T: Named, U: { value: i32 }, V: Animal>(a: T, b: U, c: V) -> i32
     expect(callee.symbol).toBe(helper);
   });
 
+  it("lists ambiguity candidates for module-qualified members", () => {
+    const source = `use self::util
+
+fn main()
+  util::helper()`;
+    const ast = parse(source, "module_qualified_ambiguous_member.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "module_qualified_ambiguous_member.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const utilPath = {
+      namespace: "src" as const,
+      segments: ["main", "util"] as const,
+    };
+    const moduleId = modulePathToString(modulePath);
+    const utilId = modulePathToString(utilPath);
+    const useForm = ast.rest.find((entry) => isForm(entry) && entry.calls("use"));
+    const dependency = {
+      kind: "use" as const,
+      path: utilPath,
+      span: toSourceSpan((useForm as any) ?? ast),
+    };
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "module_qualified_ambiguous_member.voyd" },
+      ast,
+      source,
+      dependencies: [dependency],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+
+    const depSource = `fn helper_i32(value: i32)
+  value
+
+fn helper_bool(value: bool)
+  value`;
+    const depAst = parse(
+      depSource,
+      "module_qualified_ambiguous_member_dep.voyd",
+    );
+    const depSymbolTable = new SymbolTable({ rootOwner: depAst.syntaxId });
+    depSymbolTable.declare({
+      name: "module_qualified_ambiguous_member_dep.voyd",
+      kind: "module",
+      declaredAt: depAst.syntaxId,
+    });
+    const depBinding = runBindingPipeline({
+      moduleForm: depAst,
+      symbolTable: depSymbolTable,
+    });
+    const helperI32 = depSymbolTable.resolve("helper_i32", depSymbolTable.rootScope);
+    const helperBool = depSymbolTable.resolve(
+      "helper_bool",
+      depSymbolTable.rootScope,
+    );
+    expect(typeof helperI32).toBe("number");
+    expect(typeof helperBool).toBe("number");
+    if (typeof helperI32 !== "number" || typeof helperBool !== "number") {
+      throw new Error("missing dependency helper symbols");
+    }
+
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        utilId,
+        new Map([
+          [
+            "helper",
+            {
+              name: "helper",
+              symbol: helperI32,
+              symbols: [helperI32, helperBool],
+              moduleId: utilId,
+              modulePath: utilPath,
+              packageId: packageIdFromPath(utilPath),
+              kind: "value",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+      dependencies: new Map([[utilId, depBinding]]),
+    });
+
+    const builder = createHirBuilder({
+      path: "module_qualified_ambiguous_member.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    let caught: unknown;
+    try {
+      runLoweringPipeline({
+        builder,
+        binding,
+        moduleNodeId: ast.syntaxId,
+        modulePath: binding.modulePath,
+        packageId: binding.packageId,
+        isPackageRoot: binding.isPackageRoot,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    if (!(caught instanceof Error)) {
+      return;
+    }
+
+    expect(caught.message).toContain("ambiguous module member helper on util");
+    expect(caught.message).toContain("Candidates:");
+    expect(caught.message).toContain("src::main::util::helper_i32");
+    expect(caught.message).toContain("src::main::util::helper_bool");
+  });
+
   it("preserves target type args for namespace-qualified effect ops", () => {
     const source = `use self::util
 

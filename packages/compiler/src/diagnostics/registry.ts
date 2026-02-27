@@ -18,6 +18,33 @@ const mutableBindingHint: DiagnosticHint = {
   message: "Use the '~' prefix to create a mutable binding (~my_var).",
 };
 
+type OverloadDiagnosticCandidate = {
+  signature: string;
+  reason?: string;
+};
+
+const formatOverloadDiagnosticDetails = ({
+  inferredArguments,
+  candidates,
+}: {
+  inferredArguments?: readonly string[];
+  candidates?: readonly OverloadDiagnosticCandidate[];
+}): string => {
+  const sections: string[] = [];
+  if (inferredArguments && inferredArguments.length > 0) {
+    sections.push(`inferred argument types: (${inferredArguments.join(", ")})`);
+  }
+  if (candidates && candidates.length > 0) {
+    const lines = candidates.map((candidate) =>
+      candidate.reason
+        ? `  - ${candidate.signature} (${candidate.reason})`
+        : `  - ${candidate.signature}`,
+    );
+    sections.push(`candidates:\n${lines.join("\n")}`);
+  }
+  return sections.length > 0 ? `\n${sections.join("\n")}` : "";
+};
+
 type DiagnosticParamsMap = {
   BD0001:
     | { kind: "unresolved-use-path"; path: readonly string[] }
@@ -119,8 +146,18 @@ type DiagnosticParamsMap = {
   TY0006:
     | { kind: "unknown-function"; name: string }
     | { kind: "missing-string-helper"; name: "new_string" };
-  TY0007: { kind: "ambiguous-overload"; name: string };
-  TY0008: { kind: "no-overload"; name: string };
+  TY0007: {
+    kind: "ambiguous-overload";
+    name: string;
+    inferredArguments?: readonly string[];
+    candidates?: readonly OverloadDiagnosticCandidate[];
+  };
+  TY0008: {
+    kind: "no-overload";
+    name: string;
+    inferredArguments?: readonly string[];
+    candidates?: readonly OverloadDiagnosticCandidate[];
+  };
   TY0009: {
     kind: "member-access";
     memberKind: "field" | "method";
@@ -454,7 +491,11 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0006"]>,
   TY0007: {
     code: "TY0007",
-    message: (params) => `ambiguous overload for ${params.name}`,
+    message: (params) =>
+      `ambiguous overload for ${params.name}${formatOverloadDiagnosticDetails({
+        inferredArguments: params.inferredArguments,
+        candidates: params.candidates,
+      })}`,
     severity: "error",
     phase: "typing",
     hints: [
@@ -466,7 +507,13 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0007"]>,
   TY0008: {
     code: "TY0008",
-    message: (params) => `no overload of ${params.name} matches argument types`,
+    message: (params) =>
+      `no overload of ${params.name} matches argument types${formatOverloadDiagnosticDetails(
+        {
+          inferredArguments: params.inferredArguments,
+          candidates: params.candidates,
+        },
+      )}`,
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0008"]>,
