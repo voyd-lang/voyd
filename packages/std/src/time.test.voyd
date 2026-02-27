@@ -145,4 +145,43 @@ fn on_interval_until_error(~capture: IntervalCapture): () -> Result<Unit, HostEr
     capture.clear_calls = capture.clear_calls + 1
     tail(host_dto_test::host_ok_payload())
 
+test "on_interval clears timer when sleep fails":
+  let ~capture = IntervalCapture {
+    set_calls: 0,
+    clear_calls: 0,
+    callback_calls: 0
+  }
+  let result = on_interval_sleep_error(capture)
+  match(result)
+    Err<HostError> { error }:
+      assert(error.code, eq: 5)
+      assert(error.message.equals("sleep-failed"), eq: true)
+      assert(capture.set_calls, eq: 1)
+      assert(capture.clear_calls, eq: 1)
+      assert(capture.callback_calls, eq: 0)
+    Ok<Unit>:
+      assert(false, eq: true)
+
+fn on_interval_sleep_error(~capture: IntervalCapture): () -> Result<Unit, HostError>
+  try
+    on_interval(
+      interval: Duration::from_millis(ms: i64_from_i32(5)),
+      callback: () -> void =>
+        capture.callback_calls = capture.callback_calls + 1
+    )
+  Time::monotonic_now_millis(tail):
+    tail(i64_from_i32(0))
+  Time::system_now_millis(tail):
+    tail(i64_from_i32(0))
+  Time::sleep_millis(tail, _ms):
+    tail(host_dto_test::host_error_payload(code: 5, message: "sleep-failed"))
+  Time::set_timeout_millis(tail, _ms):
+    tail(host_dto_test::host_ok_payload())
+  Time::set_interval_millis(tail, _ms):
+    capture.set_calls = capture.set_calls + 1
+    tail(host_dto_test::host_ok_with_value(msgpack::make_i32(77)))
+  Time::clear_timer(tail, _timer_id):
+    capture.clear_calls = capture.clear_calls + 1
+    tail(host_dto_test::host_ok_payload())
+
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)

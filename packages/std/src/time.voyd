@@ -97,7 +97,13 @@ pub fn on_interval({ interval: Duration, callback: () -> void }): Time -> Result
         )
         match(sleep_result)
           Err<HostError> { error }:
-            return Err<HostError> { error: error }
+            let sleep_error = error
+            let clear_result = decode_host_void_result(Time::clear_timer(timer_id))
+            match(clear_result)
+              Err<HostError> { error }:
+                return Err<HostError> { error: error }
+              Ok<Unit>:
+                return Err<HostError> { error: sleep_error }
           Ok<Unit>:
             void
         let clear_result = decode_host_void_result(Time::clear_timer(timer_id))

@@ -1,4 +1,5 @@
 import {
+  MAX_TIMER_DELAY_MILLIS,
   globalRecord,
   hostOk,
   sleepInChunks,
@@ -62,7 +63,7 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
 
     const implementedOps = new Set<string>();
     let nextTimerId = 1n;
-    const pendingIntervalTimers = new Map<bigint, { active: boolean }>();
+    const pendingIntervalTimers = new Map<bigint, { cancel: () => void }>();
     const waitForMillis = async (totalMillis: bigint): Promise<void> => {
       const sleepHook = runtimeHooks.sleepMillis;
       const sleepChunk = sleepHook
@@ -125,15 +126,45 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
         const intervalMillis = toNonNegativeI64(ms);
         const timerId = nextTimerId;
         nextTimerId += 1n;
-        const timerRef = { active: true };
+        const timerRef = { cancel: () => undefined };
         pendingIntervalTimers.set(timerId, timerRef);
-        void waitForMillis(intervalMillis)
-          .catch(() => undefined)
-          .then(() => {
-            if (pendingIntervalTimers.get(timerId) === timerRef) {
-              pendingIntervalTimers.delete(timerId);
+
+        if (typeof runtimeHooks.sleepMillis === "function") {
+          void waitForMillis(intervalMillis)
+            .catch(() => undefined)
+            .then(() => {
+              if (pendingIntervalTimers.get(timerId) === timerRef) {
+                pendingIntervalTimers.delete(timerId);
+              }
+            });
+        } else {
+          let cancelled = false;
+          let currentTimeout: ReturnType<typeof setTimeout> | null = null;
+          const runNextChunk = (remaining: bigint): void => {
+            if (cancelled || remaining <= 0n) {
+              if (pendingIntervalTimers.get(timerId) === timerRef) {
+                pendingIntervalTimers.delete(timerId);
+              }
+              return;
             }
-          });
+            const chunkMillis =
+              remaining > BigInt(MAX_TIMER_DELAY_MILLIS)
+                ? MAX_TIMER_DELAY_MILLIS
+                : Number(remaining);
+            currentTimeout = setTimeout(() => {
+              currentTimeout = null;
+              runNextChunk(remaining - BigInt(chunkMillis));
+            }, chunkMillis);
+          };
+          timerRef.cancel = () => {
+            cancelled = true;
+            if (currentTimeout !== null && typeof clearTimeout === "function") {
+              clearTimeout(currentTimeout);
+              currentTimeout = null;
+            }
+          };
+          runNextChunk(intervalMillis);
+        }
         return tail(hostOk(timerId));
       },
     });
@@ -147,7 +178,7 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
         const timerId = toI64(timerIdValue);
         const pending = pendingIntervalTimers.get(timerId);
         if (pending) {
-          pending.active = false;
+          pending.cancel();
           pendingIntervalTimers.delete(timerId);
         }
         if (typeof runtimeHooks.clearTimer === "function") {
