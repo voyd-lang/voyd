@@ -16,7 +16,7 @@ import type {
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
 import { getExprBinaryenType, getRequiredExprType, wasmTypeFor } from "../../types.js";
-import { compileCallExpr, compileMethodCallExpr } from "../../expressions/calls.js";
+import { compileCallExpr, compileMethodCallExpr } from "../../expressions/call/index.js";
 import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
 import {
   compileBreakExpr,
