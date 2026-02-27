@@ -380,14 +380,6 @@ const opEntries = ({
   effectId: string;
 }): EffectOp[] => host.table.ops.filter((entry) => entry.effectId === effectId);
 
-const hasOpName = ({
-  entries,
-  opNames,
-}: {
-  entries: EffectOp[];
-  opNames: readonly string[];
-}): boolean => entries.some((entry) => opNames.includes(entry.opName));
-
 const registerOpHandler = ({
   host,
   effectId,
