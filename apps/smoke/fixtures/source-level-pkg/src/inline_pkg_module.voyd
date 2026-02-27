@@ -1,0 +1,12 @@
+mod pkg
+  use self::ops::all
+
+  pub fn run() -> i32
+    add_one(41)
+
+  mod ops
+    pub fn add_one(v: i32) -> i32
+      v + 1
+
+pub fn main() -> i32
+  42

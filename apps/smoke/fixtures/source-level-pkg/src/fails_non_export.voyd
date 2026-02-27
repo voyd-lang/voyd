@@ -1,0 +1,4 @@
+use src::pkgs::arith::internal::internal_only
+
+pub fn main() -> i32
+  internal_only()

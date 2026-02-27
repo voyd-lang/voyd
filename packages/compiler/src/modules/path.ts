@@ -293,12 +293,23 @@ const resolveFromRoot = async ({
     const candidateFile =
       host.path.join(root, ...candidateSegments) + VOYD_EXTENSION;
     const exists = await host.fileExists(candidateFile);
-    if (!exists) {
+    if (exists) {
+      return {
+        filePath: host.path.resolve(candidateFile),
+        segments: [...candidateSegments],
+      };
+    }
+
+    const candidatePkgFile =
+      host.path.join(root, ...candidateSegments, "pkg") + VOYD_EXTENSION;
+    const pkgExists = await host.fileExists(candidatePkgFile);
+    if (!pkgExists) {
       continue;
     }
+
     return {
-      filePath: host.path.resolve(candidateFile),
-      segments: [...candidateSegments],
+      filePath: host.path.resolve(candidatePkgFile),
+      segments: [...candidateSegments, "pkg"],
     };
   }
   return undefined;
