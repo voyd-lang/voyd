@@ -2400,6 +2400,24 @@ const resolveFreeFunctionFallbackCandidates = ({
       ),
   );
 
+const mergeCandidatesForMethodNoOverloadDiagnostic = ({
+  methodCandidates,
+  fallbackCandidates,
+}: {
+  methodCandidates: readonly MethodCallCandidate[];
+  fallbackCandidates: readonly MethodCallCandidate[];
+}): MethodCallCandidate[] => {
+  const seen = new Set<string>();
+  return [...methodCandidates, ...fallbackCandidates].filter((candidate) => {
+    const key = `${candidate.symbolRef.moduleId}:${candidate.symbol}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
 const selectMethodCallCandidate = ({
   expr,
   resolution,
@@ -2431,10 +2449,12 @@ const selectMethodCallCandidate = ({
       receiverTypeOverride: candidate.receiverTypeOverride,
     });
 
-  let candidates = filterCandidatesByExplicitTypeArguments({
+  const methodCandidates = filterCandidatesByExplicitTypeArguments({
     candidates: resolution.candidates,
     typeArguments,
   });
+  let candidates = methodCandidates;
+  let noOverloadDiagnosticCandidates = methodCandidates;
   enforceOverloadCandidateBudget({
     name: expr.method,
     candidateCount: candidates.length,
@@ -2475,9 +2495,14 @@ const selectMethodCallCandidate = ({
     });
 
     if (fallbackCandidates.length > 0) {
-      candidates = filterCandidatesByExplicitTypeArguments({
+      const filteredFallbackCandidates = filterCandidatesByExplicitTypeArguments({
         candidates: fallbackCandidates,
         typeArguments,
+      });
+      candidates = filteredFallbackCandidates;
+      noOverloadDiagnosticCandidates = mergeCandidatesForMethodNoOverloadDiagnostic({
+        methodCandidates,
+        fallbackCandidates: filteredFallbackCandidates,
       });
       enforceOverloadCandidateBudget({
         name: expr.method,
@@ -2509,7 +2534,7 @@ const selectMethodCallCandidate = ({
       code: "TY0008",
       params: noOverloadDiagnosticParams({
         name: expr.method,
-        candidates,
+        candidates: noOverloadDiagnosticCandidates,
         args: probeArgs,
         ctx,
         state,
