@@ -1,5 +1,8 @@
-use std::error::HostError
+use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
+use std::error::{ HostError, IoError }
 use std::host_dto::HostDto
+use std::math::{ MathError, mod_euclid }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::all
@@ -19,6 +22,8 @@ impl InputRequest
 @effect(id: "std::input::Input")
 pub eff Input
   read_line(tail, payload: MsgPack) -> MsgPack
+  read_bytes_op(tail, payload: MsgPack) -> MsgPack
+  is_tty_op(tail) -> bool
 
 /// Reads a line from stdin (or host prompt source).
 pub fn read_line(): Input -> Result<Option<String>, HostError>
@@ -31,6 +36,14 @@ pub fn read_line({ prompt: StringSlice }): Input -> Result<Option<String>, HostE
 /// Reads a line using an explicit request value.
 pub fn read_line({ request: InputRequest }): Input -> Result<Option<String>, HostError>
   decode_read_line_result(Input::read_line(encode_read_line_payload(request)))
+
+/// Reads up to `max_bytes` raw bytes from stdin.
+pub fn read_bytes({ max_bytes: i32 }): Input -> Result<Option<Bytes>, IoError>
+  decode_read_bytes_result(Input::read_bytes_op(encode_read_bytes_payload(max_bytes)))
+
+/// Returns true when stdin is attached to an interactive terminal.
+pub fn is_tty(): Input -> bool
+  Input::is_tty_op()
 
 fn encode_read_line_payload(request: InputRequest): () -> MsgPack
   match(request.prompt)
@@ -58,6 +71,50 @@ fn decode_optional_string(payload: MsgPack): () -> Option<String>
       Some<String> { value: active }
     else:
       None {}
+
+fn encode_read_bytes_payload(max_bytes: i32): () -> MsgPack
+  HostDto::init()
+    .set("max_bytes", msgpack::make_i32(max_bytes))
+    .pack()
+
+fn decode_read_bytes_result(payload: MsgPack): () -> Result<Option<Bytes>, IoError>
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") == false then:
+    return Err<IoError> { error: decode_io_error(decoded) }
+
+  Ok<Option<Bytes>> { value: decode_optional_bytes(decoded.read_msgpack("value")) }
+
+fn decode_optional_bytes(payload: MsgPack): () -> Option<Bytes>
+  payload.match(active)
+    Array:
+      Some<Bytes> { value: decode_bytes_array(active) }
+    else:
+      None {}
+
+fn decode_bytes_array(source: Array<MsgPack>): () -> Bytes
+  let ~buffer = ByteBuffer::with_capacity(bytes: source.len())
+  var index = 0
+  while index < source.len() do:
+    match(source.get(index))
+      Some<MsgPack> { value }:
+        buffer.push(value: normalize_byte(msgpack::unpack_i32(value)))
+      None:
+        void
+    index = index + 1
+  buffer.as_bytes()
+
+fn normalize_byte(value: i32): () -> i32
+  match(mod_euclid(value, 256))
+    Ok<i32> { value }:
+      value
+    Err<MathError>:
+      0
+
+fn decode_io_error(payload: HostDto): () -> IoError
+  IoError {
+    code: payload.read_i32("code"),
+    message: payload.read_string("message")
+  }
 
 fn decode_host_error(payload: HostDto): () -> HostError
   HostError {

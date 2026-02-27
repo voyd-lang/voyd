@@ -11,6 +11,7 @@ const RANDOM_EFFECT_ID = "std::random::Random";
 const LOG_EFFECT_ID = "std::log::Log";
 const FETCH_EFFECT_ID = "std::fetch::Fetch";
 const INPUT_EFFECT_ID = "std::input::Input";
+const OUTPUT_EFFECT_ID = "std::output::Output";
 const WEB_CRYPTO_MAX_BYTES_PER_CALL = 65_536;
 const MAX_TIMER_DELAY_MILLIS = 2_147_483_647;
 const MAX_TIMER_DELAY_MILLIS_BIGINT = 2_147_483_647n;
@@ -55,6 +56,22 @@ export type DefaultAdapterFetchResponse = {
   body: string;
 };
 
+export type DefaultAdapterOutputTarget = "stdout" | "stderr";
+
+export type DefaultAdapterOutputWrite = {
+  target: DefaultAdapterOutputTarget;
+  value: string;
+};
+
+export type DefaultAdapterOutputWriteBytes = {
+  target: DefaultAdapterOutputTarget;
+  bytes: Uint8Array;
+};
+
+export type DefaultAdapterOutputFlush = {
+  target: DefaultAdapterOutputTarget;
+};
+
 export type DefaultAdapterRuntimeHooks = {
   monotonicNowMillis?: () => bigint;
   systemNowMillis?: () => bigint;
@@ -64,6 +81,12 @@ export type DefaultAdapterRuntimeHooks = {
     request: DefaultAdapterFetchRequest
   ) => Promise<DefaultAdapterFetchResponse>;
   readLine?: (prompt: string | null) => Promise<string | null>;
+  readBytes?: (maxBytes: number) => Promise<Uint8Array | null>;
+  isInputTty?: () => boolean;
+  write?: (output: DefaultAdapterOutputWrite) => Promise<void>;
+  writeBytes?: (output: DefaultAdapterOutputWriteBytes) => Promise<void>;
+  flush?: (output: DefaultAdapterOutputFlush) => Promise<void>;
+  isOutputTty?: (target: DefaultAdapterOutputTarget) => boolean;
 };
 
 export type DefaultAdapterOptions = {
@@ -75,7 +98,7 @@ export type DefaultAdapterOptions = {
 };
 
 export type DefaultAdapterCapability = {
-  capability: "fs" | "timer" | "env" | "random" | "log" | "fetch" | "input";
+  capability: "fs" | "timer" | "env" | "random" | "log" | "fetch" | "input" | "output";
   effectId: string;
   registeredOps: number;
   supported: boolean;
@@ -123,6 +146,17 @@ type NodeReadlinePromises = {
   };
 };
 
+type NodeReadableWithRead = NodeJS.ReadableStream & {
+  read: (size?: number) => unknown;
+  isTTY?: boolean;
+};
+
+type NodeWritableWithWrite = NodeJS.WritableStream & {
+  write: (chunk: string | Uint8Array, callback?: (error?: Error | null) => void) => boolean;
+  isTTY?: boolean;
+  writableNeedDrain?: boolean;
+};
+
 const globalRecord = globalThis as Record<string, unknown>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -167,6 +201,26 @@ const normalizeByte = (value: unknown): number => {
     return Number(((value % 256n) + 256n) % 256n);
   }
   return 0;
+};
+
+const toNodeReadBytesChunk = (value: unknown): Uint8Array => {
+  if (typeof value === "string") {
+    throw new Error(
+      "stdin is configured for text decoding; read_bytes requires raw byte chunks"
+    );
+  }
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  throw new Error(
+    `stdin.read returned unsupported chunk type (${typeof value}) for read_bytes`
+  );
 };
 
 const toNonNegativeI64 = (value: unknown): bigint => {
@@ -296,26 +350,30 @@ const fetchSuccessPayload = ({
 };
 
 const inputTransportOverflowError = ({
+  opName,
   effectBufferSize,
 }: {
+  opName: string;
   effectBufferSize: number;
 }): Record<string, unknown> =>
   hostError(
-    `Default input adapter read_line response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or provide shorter input.`
+    `Default input adapter ${opName} response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or provide shorter input.`
   );
 
 const inputSuccessPayload = ({
-  line,
+  opName,
+  value,
   effectBufferSize,
 }: {
-  line: string | null;
+  opName: string;
+  value: unknown;
   effectBufferSize: number;
 }): Record<string, unknown> => {
-  const payload = hostOk(line);
+  const payload = hostOk(value);
   if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
     return payload;
   }
-  return inputTransportOverflowError({ effectBufferSize });
+  return inputTransportOverflowError({ opName, effectBufferSize });
 };
 
 const opEntries = ({
@@ -345,6 +403,29 @@ const registerOpHandler = ({
   });
   return matches.length;
 };
+
+const registerOpAliasHandlers = ({
+  host,
+  effectId,
+  opNames,
+  handler,
+}: {
+  host: DefaultAdapterHost;
+  effectId: string;
+  opNames: readonly string[];
+  handler: EffectHandler;
+}): number =>
+  opNames.reduce(
+    (count, opName) =>
+      count +
+      registerOpHandler({
+        host,
+        effectId,
+        opName,
+        handler,
+      }),
+    0
+  );
 
 const registerUnsupportedHandlers = ({
   host,
@@ -1273,6 +1354,15 @@ const inputErrorMessage = (error: unknown): string => {
   return error instanceof Error ? error.message : String(error);
 };
 
+const outputErrorCode = (error: unknown): number => {
+  const errno = isRecord(error) ? readField(error, "errno") : undefined;
+  const parsed = toNumberOrUndefined(errno);
+  return parsed === undefined ? 1 : parsed;
+};
+
+const outputErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 type FetchSource = {
   isAvailable: boolean;
   unavailableReason: string;
@@ -1354,9 +1444,142 @@ const createFetchSource = ({
 };
 
 type InputSource = {
-  isAvailable: boolean;
-  unavailableReason: string;
-  readLine: (prompt: string | null) => Promise<string | null>;
+  readLine?: (prompt: string | null) => Promise<string | null>;
+  readLineUnavailableReason: string;
+  readBytes?: (maxBytes: number) => Promise<Uint8Array | null>;
+  readBytesUnavailableReason: string;
+  isTty: () => boolean;
+};
+
+type OutputSource = {
+  write?: (output: DefaultAdapterOutputWrite) => Promise<void>;
+  writeUnavailableReason: string;
+  writeBytes?: (output: DefaultAdapterOutputWriteBytes) => Promise<void>;
+  writeBytesUnavailableReason: string;
+  flush?: (output: DefaultAdapterOutputFlush) => Promise<void>;
+  flushUnavailableReason: string;
+  isTty: (target: DefaultAdapterOutputTarget) => boolean;
+};
+
+const waitForNodeReadableChunk = async ({
+  input,
+  maxBytes,
+}: {
+  input: NodeReadableWithRead;
+  maxBytes: number;
+}): Promise<Uint8Array | null> =>
+  new Promise((resolve, reject) => {
+    const ended = (): boolean => {
+      const streamState = input as NodeReadableWithRead & {
+        readableEnded?: boolean;
+        ended?: boolean;
+        readable?: boolean;
+        destroyed?: boolean;
+      };
+      if (streamState.readableEnded === true || streamState.ended === true) {
+        return true;
+      }
+      return streamState.destroyed === true && streamState.readable !== true;
+    };
+    if (ended()) {
+      resolve(null);
+      return;
+    }
+    const onReadable = (): void => {
+      try {
+        const chunk = input.read(maxBytes);
+        if (chunk === null || chunk === undefined) {
+          if (ended()) {
+            cleanup();
+            resolve(null);
+          }
+          return;
+        }
+        cleanup();
+        resolve(toNodeReadBytesChunk(chunk).subarray(0, maxBytes));
+      } catch (error) {
+        cleanup();
+        reject(error);
+      }
+    };
+    const onEnd = (): void => {
+      cleanup();
+      resolve(null);
+    };
+    const onError = (error: unknown): void => {
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    const cleanup = (): void => {
+      input.removeListener("readable", onReadable);
+      input.removeListener("end", onEnd);
+      input.removeListener("error", onError);
+    };
+    input.on("readable", onReadable);
+    input.once("end", onEnd);
+    input.once("error", onError);
+    onReadable();
+  });
+
+const readBytesFromNodeStream = async ({
+  input,
+  maxBytes,
+}: {
+  input: NodeReadableWithRead;
+  maxBytes: number;
+}): Promise<Uint8Array | null> => {
+  const limit = Math.max(0, Math.trunc(maxBytes));
+  if (limit === 0) {
+    return new Uint8Array();
+  }
+  const immediate = input.read(limit);
+  if (immediate !== null && immediate !== undefined) {
+    return toNodeReadBytesChunk(immediate).subarray(0, limit);
+  }
+  return waitForNodeReadableChunk({ input, maxBytes: limit });
+};
+
+const writeToNodeStream = async ({
+  stream,
+  value,
+}: {
+  stream: NodeWritableWithWrite;
+  value: string | Uint8Array;
+}): Promise<void> =>
+  new Promise((resolve, reject) => {
+    try {
+      stream.write(value, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+
+const flushNodeStream = async (stream: NodeWritableWithWrite): Promise<void> => {
+  if (!stream.writableNeedDrain) {
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    const onDrain = (): void => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: unknown): void => {
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    const cleanup = (): void => {
+      stream.removeListener("drain", onDrain);
+      stream.removeListener("error", onError);
+    };
+    stream.once("drain", onDrain);
+    stream.once("error", onError);
+  });
 };
 
 const createInputSource = async ({
@@ -1366,25 +1589,29 @@ const createInputSource = async ({
   runtime: HostRuntimeKind;
   runtimeHooks: DefaultAdapterRuntimeHooks;
 }): Promise<InputSource> => {
-  if (typeof runtimeHooks.readLine === "function") {
-    return {
-      isAvailable: true,
-      unavailableReason: "",
-      readLine: runtimeHooks.readLine,
-    };
-  }
-
   const promptValue = globalRecord.prompt;
-  if (typeof promptValue === "function") {
-    const promptFn = promptValue as (prompt?: string) => string | null;
-    return {
-      isAvailable: true,
-      unavailableReason: "",
-      readLine: async (prompt) => {
-        const value = promptFn(prompt ?? "");
-        return typeof value === "string" ? value : null;
-      },
+  const promptFn =
+    typeof promptValue === "function"
+      ? (promptValue as (prompt?: string) => string | null)
+      : undefined;
+
+  let readLine = runtimeHooks.readLine;
+  let readLineUnavailableReason = readLine
+    ? ""
+    : "interactive input APIs are unavailable";
+  let readBytes = runtimeHooks.readBytes;
+  let readBytesUnavailableReason = readBytes
+    ? ""
+    : "raw stdin byte APIs are unavailable";
+  let stdin: NodeReadableWithRead | undefined;
+  let stdout: NodeWritableWithWrite | undefined;
+
+  if (!readLine && promptFn) {
+    readLine = async (prompt) => {
+      const value = promptFn(prompt ?? "");
+      return typeof value === "string" ? value : null;
     };
+    readLineUnavailableReason = "";
   }
 
   if (runtime === "node") {
@@ -1394,19 +1621,16 @@ const createInputSource = async ({
           stdout?: NodeJS.WritableStream;
         }
       | undefined;
-    const readline = await maybeNodeReadlinePromises();
-    if (
-      processValue?.stdin &&
-      processValue?.stdout &&
-      typeof readline?.createInterface === "function"
-    ) {
-      return {
-        isAvailable: true,
-        unavailableReason: "",
-        readLine: async (prompt) => {
+    stdin = processValue?.stdin as NodeReadableWithRead | undefined;
+    stdout = processValue?.stdout as NodeWritableWithWrite | undefined;
+
+    if (!readLine && stdin && stdout) {
+      const readline = await maybeNodeReadlinePromises();
+      if (typeof readline?.createInterface === "function") {
+        readLine = async (prompt) => {
           const lineReader = readline.createInterface({
-            input: processValue.stdin!,
-            output: processValue.stdout!,
+            input: stdin!,
+            output: stdout!,
             terminal: true,
           });
           try {
@@ -1419,23 +1643,150 @@ const createInputSource = async ({
           } finally {
             lineReader.close();
           }
-        },
-      };
+        };
+        readLineUnavailableReason = "";
+      }
+    }
+
+    if (!readBytes && stdin) {
+      readBytes = (maxBytes) =>
+        readBytesFromNodeStream({
+          input: stdin!,
+          maxBytes,
+        });
+      readBytesUnavailableReason = "";
     }
   }
 
-  const unavailableReason = "interactive input APIs are unavailable";
   return {
-    isAvailable: false,
-    unavailableReason,
-    readLine: async () => {
-      throw new Error(unavailableReason);
-    },
+    readLine,
+    readLineUnavailableReason,
+    readBytes,
+    readBytesUnavailableReason,
+    isTty:
+      typeof runtimeHooks.isInputTty === "function"
+        ? runtimeHooks.isInputTty
+        : () => Boolean(stdin?.isTTY),
+  };
+};
+
+const createOutputSource = ({
+  runtime,
+  runtimeHooks,
+}: {
+  runtime: HostRuntimeKind;
+  runtimeHooks: DefaultAdapterRuntimeHooks;
+}): OutputSource => {
+  let stdout: NodeWritableWithWrite | undefined;
+  let stderr: NodeWritableWithWrite | undefined;
+  if (runtime === "node") {
+    const processValue = globalRecord.process as
+      | {
+          stdout?: NodeJS.WritableStream;
+          stderr?: NodeJS.WritableStream;
+        }
+      | undefined;
+    stdout = processValue?.stdout as NodeWritableWithWrite | undefined;
+    stderr = processValue?.stderr as NodeWritableWithWrite | undefined;
+  }
+
+  const writeFromHook = runtimeHooks.write;
+  const writeBytesFromHook = runtimeHooks.writeBytes;
+  const flushFromHook = runtimeHooks.flush;
+  const streamFor = (target: DefaultAdapterOutputTarget): NodeWritableWithWrite => {
+    const stream = target === "stderr" ? stderr : stdout;
+    if (!stream) {
+      throw new Error("stdout/stderr stream is unavailable");
+    }
+    return stream;
+  };
+
+  const write =
+    typeof writeFromHook === "function"
+      ? async (output: DefaultAdapterOutputWrite) => writeFromHook(output)
+      : typeof writeBytesFromHook === "function"
+        ? async ({ target, value }: DefaultAdapterOutputWrite) =>
+            writeBytesFromHook({
+              target,
+              bytes: new TextEncoder().encode(value),
+            })
+        : stdout && stderr
+          ? async ({ target, value }: DefaultAdapterOutputWrite) =>
+              writeToNodeStream({
+                stream: streamFor(target),
+                value,
+              })
+          : undefined;
+  const writeBytes =
+    typeof writeBytesFromHook === "function"
+      ? async (output: DefaultAdapterOutputWriteBytes) => writeBytesFromHook(output)
+      : stdout && stderr
+        ? async ({ target, bytes }: DefaultAdapterOutputWriteBytes) =>
+            writeToNodeStream({
+              stream: streamFor(target),
+              value: bytes,
+            })
+        : undefined;
+  const flush =
+    typeof flushFromHook === "function"
+      ? async (output: DefaultAdapterOutputFlush) => flushFromHook(output)
+      : stdout && stderr
+        ? async ({ target }: DefaultAdapterOutputFlush) => flushNodeStream(streamFor(target))
+        : write || writeBytes
+          ? async () => {}
+          : undefined;
+
+  const unavailableReason = "stdout/stderr output APIs are unavailable";
+  return {
+    write,
+    writeUnavailableReason: write ? "" : unavailableReason,
+    writeBytes,
+    writeBytesUnavailableReason: writeBytes ? "" : unavailableReason,
+    flush,
+    flushUnavailableReason: flush ? "" : unavailableReason,
+    isTty:
+      typeof runtimeHooks.isOutputTty === "function"
+        ? runtimeHooks.isOutputTty
+        : (target) => Boolean((target === "stderr" ? stderr : stdout)?.isTTY),
   };
 };
 
 const decodeInputPrompt = (payload: unknown): string | null =>
   toStringOrUndefined(readField(payload, "prompt")) ?? null;
+
+const decodeInputReadBytesMaxBytes = (payload: unknown): number => {
+  const raw =
+    readField(payload, "max_bytes") ?? readField(payload, "maxBytes");
+  const parsed = toNumberOrUndefined(raw);
+  if (parsed === undefined) {
+    return 0;
+  }
+  return Math.max(0, Math.trunc(parsed));
+};
+
+const decodeOutputTarget = (payload: unknown): DefaultAdapterOutputTarget => {
+  const target =
+    toStringOrUndefined(readField(payload, "target"))?.trim().toLowerCase() ??
+    "stdout";
+  return target === "stderr" ? "stderr" : "stdout";
+};
+
+const decodeOutputWriteValue = (payload: unknown): string =>
+  toStringOrUndefined(readField(payload, "value")) ??
+  String(readField(payload, "value") ?? "");
+
+const decodeOutputWriteBytes = (payload: unknown): Uint8Array => {
+  const rawBytes = readField(payload, "bytes");
+  const source = Array.isArray(rawBytes) ? rawBytes : [];
+  return Uint8Array.from(source.map(normalizeByte));
+};
+
+const INPUT_READ_BYTES_OP_NAMES = ["read_bytes", "read_bytes_op"] as const;
+const INPUT_IS_TTY_OP_NAMES = ["is_tty", "is_tty_op"] as const;
+const OUTPUT_WRITE_OP_NAMES = ["write", "write_op"] as const;
+const OUTPUT_WRITE_BYTES_OP_NAMES = ["write_bytes", "write_bytes_op"] as const;
+const OUTPUT_FLUSH_OP_NAMES = ["flush", "flush_op"] as const;
+const OUTPUT_IS_TTY_OP_NAMES = ["is_tty", "is_tty_op"] as const;
 
 const fetchCapabilityDefinition: CapabilityDefinition = {
   capability: "fetch",
@@ -1508,38 +1859,71 @@ const inputCapabilityDefinition: CapabilityDefinition = {
     const entries = opEntries({ host, effectId: INPUT_EFFECT_ID });
     if (entries.length === 0) return 0;
     const inputSource = await createInputSource({ runtime, runtimeHooks });
-    if (!inputSource.isAvailable) {
-      return registerUnsupportedHandlers({
-        host,
-        effectId: INPUT_EFFECT_ID,
-        capability: "input",
-        runtime,
-        reason: inputSource.unavailableReason,
-        diagnostics,
-      });
-    }
 
     const implementedOps = new Set<string>();
-    const registered = registerOpHandler({
+    let registered = 0;
+    if (inputSource.readLine) {
+      registered += registerOpHandler({
+        host,
+        effectId: INPUT_EFFECT_ID,
+        opName: "read_line",
+        handler: async ({ tail }, payload) => {
+          try {
+            const prompt = decodeInputPrompt(payload);
+            const line = await inputSource.readLine!(prompt);
+            return tail(
+              inputSuccessPayload({
+                opName: "read_line",
+                value: line,
+                effectBufferSize,
+              })
+            );
+          } catch (error) {
+            return tail(hostError(inputErrorMessage(error), inputErrorCode(error)));
+          }
+        },
+      });
+      implementedOps.add("read_line");
+    }
+    if (inputSource.readBytes) {
+      registered += registerOpAliasHandlers({
+        host,
+        effectId: INPUT_EFFECT_ID,
+        opNames: INPUT_READ_BYTES_OP_NAMES,
+        handler: async ({ tail }, payload) => {
+          try {
+            const maxBytes = decodeInputReadBytesMaxBytes(payload);
+            const bytes = await inputSource.readBytes!(maxBytes);
+            const boundedBytes =
+              bytes === null ? null : bytes.subarray(0, maxBytes);
+            return tail(
+              inputSuccessPayload({
+                opName: "read_bytes",
+                value:
+                  boundedBytes === null
+                    ? null
+                    : Array.from(boundedBytes.values()),
+                effectBufferSize,
+              })
+            );
+          } catch (error) {
+            return tail(hostError(inputErrorMessage(error), inputErrorCode(error)));
+          }
+        },
+      });
+      INPUT_READ_BYTES_OP_NAMES.forEach((opName) => {
+        implementedOps.add(opName);
+      });
+    }
+    registered += registerOpAliasHandlers({
       host,
       effectId: INPUT_EFFECT_ID,
-      opName: "read_line",
-      handler: async ({ tail }, payload) => {
-        try {
-          const prompt = decodeInputPrompt(payload);
-          const line = await inputSource.readLine(prompt);
-          return tail(
-            inputSuccessPayload({
-              line,
-              effectBufferSize,
-            })
-          );
-        } catch (error) {
-          return tail(hostError(inputErrorMessage(error), inputErrorCode(error)));
-        }
-      },
+      opNames: INPUT_IS_TTY_OP_NAMES,
+      handler: ({ tail }) => tail(inputSource.isTty()),
     });
-    implementedOps.add("read_line");
+    INPUT_IS_TTY_OP_NAMES.forEach((opName) => {
+      implementedOps.add(opName);
+    });
 
     return (
       registered +
@@ -1553,10 +1937,105 @@ const inputCapabilityDefinition: CapabilityDefinition = {
   },
 };
 
+const outputCapabilityDefinition: CapabilityDefinition = {
+  capability: "output",
+  effectId: OUTPUT_EFFECT_ID,
+  register: async ({ host, runtime, diagnostics, runtimeHooks }) => {
+    const entries = opEntries({ host, effectId: OUTPUT_EFFECT_ID });
+    if (entries.length === 0) return 0;
+    const outputSource = createOutputSource({ runtime, runtimeHooks });
+
+    const implementedOps = new Set<string>();
+    let registered = 0;
+    if (outputSource.write) {
+      registered += registerOpAliasHandlers({
+        host,
+        effectId: OUTPUT_EFFECT_ID,
+        opNames: OUTPUT_WRITE_OP_NAMES,
+        handler: async ({ tail }, payload) => {
+          try {
+            await outputSource.write!({
+              target: decodeOutputTarget(payload),
+              value: decodeOutputWriteValue(payload),
+            });
+            return tail(hostOk());
+          } catch (error) {
+            return tail(hostError(outputErrorMessage(error), outputErrorCode(error)));
+          }
+        },
+      });
+      OUTPUT_WRITE_OP_NAMES.forEach((opName) => {
+        implementedOps.add(opName);
+      });
+    }
+    if (outputSource.writeBytes) {
+      registered += registerOpAliasHandlers({
+        host,
+        effectId: OUTPUT_EFFECT_ID,
+        opNames: OUTPUT_WRITE_BYTES_OP_NAMES,
+        handler: async ({ tail }, payload) => {
+          try {
+            await outputSource.writeBytes!({
+              target: decodeOutputTarget(payload),
+              bytes: decodeOutputWriteBytes(payload),
+            });
+            return tail(hostOk());
+          } catch (error) {
+            return tail(hostError(outputErrorMessage(error), outputErrorCode(error)));
+          }
+        },
+      });
+      OUTPUT_WRITE_BYTES_OP_NAMES.forEach((opName) => {
+        implementedOps.add(opName);
+      });
+    }
+    if (outputSource.flush) {
+      registered += registerOpAliasHandlers({
+        host,
+        effectId: OUTPUT_EFFECT_ID,
+        opNames: OUTPUT_FLUSH_OP_NAMES,
+        handler: async ({ tail }, payload) => {
+          try {
+            await outputSource.flush!({
+              target: decodeOutputTarget(payload),
+            });
+            return tail(hostOk());
+          } catch (error) {
+            return tail(hostError(outputErrorMessage(error), outputErrorCode(error)));
+          }
+        },
+      });
+      OUTPUT_FLUSH_OP_NAMES.forEach((opName) => {
+        implementedOps.add(opName);
+      });
+    }
+    registered += registerOpAliasHandlers({
+      host,
+      effectId: OUTPUT_EFFECT_ID,
+      opNames: OUTPUT_IS_TTY_OP_NAMES,
+      handler: ({ tail }, payload) => tail(outputSource.isTty(decodeOutputTarget(payload))),
+    });
+    OUTPUT_IS_TTY_OP_NAMES.forEach((opName) => {
+      implementedOps.add(opName);
+    });
+
+    return (
+      registered +
+      registerMissingOpHandlers({
+        host,
+        effectId: OUTPUT_EFFECT_ID,
+        implementedOps,
+        diagnostics,
+      })
+    );
+  },
+};
+
 const CAPABILITIES: CapabilityDefinition[] = [
   fsCapabilityDefinition,
   fetchCapabilityDefinition,
   inputCapabilityDefinition,
+  outputCapabilityDefinition,
   timeCapabilityDefinition,
   envCapabilityDefinition,
   randomCapabilityDefinition,

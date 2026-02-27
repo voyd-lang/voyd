@@ -1,0 +1,242 @@
+use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
+use std::error::IoError
+use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice, new_string }
+use std::test::assertions::all
+use std::test::host_dto::self as host_dto_test
+
+test "output write defaults to stdout":
+  let ~values = Array<String>::init()
+  let ~targets = Array<String>::init()
+  let result = write_with_capture(values, targets)
+
+  match(result)
+    Ok<Unit>:
+      assert(optional_string_or(values.get(0), "missing".as_slice()).equals("hello"), eq: true)
+      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "output write encodes stderr target":
+  let ~targets = Array<String>::init()
+  let result = write_stderr_with_capture(targets)
+
+  match(result)
+    Ok<Unit>:
+      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stderr"), eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "output write_line appends exactly newline":
+  let ~targets = Array<String>::init()
+  let ~values = Array<String>::init()
+  let result = write_line_with_capture(targets, values)
+
+  match(result)
+    Ok<Unit>:
+      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
+      assert(targets.len(), eq: 1)
+      assert(values.len(), eq: 1)
+      let line = optional_string_or(values.get(0), "missing".as_slice())
+      let bytes = line.to_utf8()
+      assert(optional_i32_or(bytes.get(0), -1), eq: 104)
+      assert(optional_i32_or(bytes.get(1), -1), eq: 105)
+      assert(optional_i32_or(bytes.get(2), -1), eq: 10)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "output write_bytes encodes stderr target":
+  let ~targets = Array<String>::init()
+  let ~values = Array<i32>::init()
+  let result = write_bytes_with_capture(targets, values)
+
+  match(result)
+    Ok<Unit>:
+      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stderr"), eq: true)
+      assert(optional_i32_or(values.get(0), -1), eq: 7)
+      assert(optional_i32_or(values.get(1), -1), eq: 8)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "output flush defaults to stdout":
+  let ~targets = Array<String>::init()
+  let result = flush_with_capture(targets)
+
+  match(result)
+    Ok<Unit>:
+      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "output is_tty forwards host bool with selected target":
+  let ~targets = Array<String>::init()
+  let stdout_tty = is_tty_with_stdout_payload(value: true, targets: targets)
+  let stderr_tty = is_tty_with_stderr_payload(value: false, targets: targets)
+
+  assert(stdout_tty, eq: true)
+  assert(stderr_tty, eq: false)
+  assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
+  assert(optional_string_or(targets.get(1), "missing".as_slice()).equals("stderr"), eq: true)
+
+test "output write decodes host errors":
+  let result = write_with_payload(host_dto_test::host_error_payload(code: 32, message: "broken pipe"))
+
+  match(result)
+    Err<IoError> { error }:
+      assert(error.code, eq: 32)
+      assert(error.message.equals("broken pipe"), eq: true)
+    Ok<Unit>:
+      assert(false, eq: true)
+
+fn write_with_capture(~values: Array<String>, ~targets: Array<String>): () -> Result<Unit, IoError>
+  try
+    write(value: "hello".as_slice())
+  Output::write_op(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    values.push(decoded.read_string("value"))
+    targets.push(decoded.read_string("target"))
+    tail(host_dto_test::host_ok_payload())
+  Output::write_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::flush_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::is_tty_op(tail, _payload):
+    tail(false)
+
+fn write_stderr_with_capture(~targets: Array<String>): () -> Result<Unit, IoError>
+  try
+    write(value: "warn".as_slice(), target: StdErr {})
+  Output::write_op(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    targets.push(decoded.read_string("target"))
+    tail(host_dto_test::host_ok_payload())
+  Output::write_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::flush_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::is_tty_op(tail, _payload):
+    tail(false)
+
+fn write_line_with_capture(
+  ~targets: Array<String>,
+  ~values: Array<String>
+): () -> Result<Unit, IoError>
+  try
+    write_line(value: "hi".as_slice())
+  Output::write_op(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    targets.push(decoded.read_string("target"))
+    values.push(decoded.read_string("value"))
+    tail(host_dto_test::host_ok_payload())
+  Output::write_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::flush_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::is_tty_op(tail, _payload):
+    tail(false)
+
+fn write_bytes_with_capture(
+  ~targets: Array<String>,
+  ~values: Array<i32>
+): () -> Result<Unit, IoError>
+  let ~buffer = ByteBuffer::with_capacity(bytes: 2)
+  buffer.push(value: 7)
+  buffer.push(value: 8)
+
+  try
+    write_bytes(bytes: buffer.as_bytes(), target: StdErr {})
+  Output::write_bytes_op(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    targets.push(decoded.read_string("target"))
+    decode_bytes_into(decoded.read_msgpack("bytes"), values)
+    tail(host_dto_test::host_ok_payload())
+  Output::write_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::flush_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::is_tty_op(tail, _payload):
+    tail(false)
+
+fn flush_with_capture(~targets: Array<String>): () -> Result<Unit, IoError>
+  try
+    flush()
+  Output::flush_op(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    targets.push(decoded.read_string("target"))
+    tail(host_dto_test::host_ok_payload())
+  Output::write_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::write_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::is_tty_op(tail, _payload):
+    tail(false)
+
+fn is_tty_with_stdout_payload({ value: bool, ~targets: Array<String> }): () -> bool
+  try
+    is_tty()
+  Output::is_tty_op(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    targets.push(decoded.read_string("target"))
+    tail(value)
+  Output::write_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::write_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::flush_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+
+fn is_tty_with_stderr_payload({ value: bool, ~targets: Array<String> }): () -> bool
+  try
+    is_tty(target: StdErr {})
+  Output::is_tty_op(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    targets.push(decoded.read_string("target"))
+    tail(value)
+  Output::write_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::write_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::flush_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+
+fn write_with_payload(payload: MsgPack): () -> Result<Unit, IoError>
+  try
+    write(value: "hello".as_slice())
+  Output::write_op(tail, _payload):
+    tail(payload)
+  Output::write_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::flush_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Output::is_tty_op(tail, _payload):
+    tail(false)
+
+fn decode_bytes_into(payload: MsgPack, ~values: Array<i32>) -> void
+  let source = msgpack::unpack_array(payload)
+  var index = 0
+  while index < source.len() do:
+    match(source.get(index))
+      Some<MsgPack> { value }:
+        values.push(msgpack::unpack_i32(value))
+      None:
+        void
+    index = index + 1
+
+fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
+  match(value)
+    Some<String> { value: present }:
+      present
+    None:
+      fallback.to_string()
+
+fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
+  match(value)
+    Some<i32> { value: present }:
+      present
+    None:
+      fallback
