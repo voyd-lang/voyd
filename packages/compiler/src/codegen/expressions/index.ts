@@ -3,7 +3,7 @@ import type {
   ExpressionCompiler,
   ExpressionCompilerParams,
 } from "../context.js";
-import { compileCallExpr, compileMethodCallExpr } from "./calls.js";
+import { compileCallExpr, compileMethodCallExpr } from "./call/index.js";
 import { compileBlockExpr } from "./blocks.js";
 import {
   compileBreakExpr,

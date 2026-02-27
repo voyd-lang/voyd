@@ -1003,6 +1003,27 @@ describe("semanticsPipeline", () => {
     expect(caught.diagnostic.message).toContain("type incompatibility");
   });
 
+  it("includes method and UFCS fallback candidates in no-overload details", () => {
+    const ast = loadAst("method_ufcs_fallback_no_match_details.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(DiagnosticError);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0008");
+    expect(caught.diagnostic.message).toContain("no overload of foo matches argument types");
+    expect(caught.diagnostic.message).toContain("candidates:");
+    expect(caught.diagnostic.message).toContain("self:");
+    expect(caught.diagnostic.message).toContain("x: f64");
+  });
   it("rejects overload sets that escape call sites", () => {
     const ast = loadAst("function_overloads_capture.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(
