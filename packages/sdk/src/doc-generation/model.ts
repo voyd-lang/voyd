@@ -603,39 +603,9 @@ export const createDocumentationModel = ({
   program: DocumentationProgramView;
 }): DocumentationModel => {
   const nextAnchor = createAnchorGenerator();
-  const globalPublicTypeNames = new Set(
-    program.modules.flatMap((moduleDoc) => [
-      ...moduleDoc.typeAliases
-        .filter((typeAlias) => isPublic(typeAlias.visibility))
-        .map((typeAlias) => typeAlias.name),
-      ...moduleDoc.objects
-        .filter((objectDecl) => isPublic(objectDecl.visibility))
-        .map((objectDecl) => objectDecl.name),
-      ...moduleDoc.traits
-        .filter((traitDecl) => isPublic(traitDecl.visibility))
-        .map((traitDecl) => traitDecl.name),
-      ...moduleDoc.effects
-        .filter((effectDecl) => isPublic(effectDecl.visibility))
-        .map((effectDecl) => effectDecl.name),
-    ]),
-  );
 
   const modules = program.modules.map((moduleDoc) => {
     const moduleAnchor = nextAnchor(`module-${moduleDoc.id}`);
-    const localPublicTypeNames = new Set([
-      ...moduleDoc.typeAliases
-        .filter((typeAlias) => isPublic(typeAlias.visibility))
-        .map((typeAlias) => typeAlias.name),
-      ...moduleDoc.objects
-        .filter((objectDecl) => isPublic(objectDecl.visibility))
-        .map((objectDecl) => objectDecl.name),
-      ...moduleDoc.traits
-        .filter((traitDecl) => isPublic(traitDecl.visibility))
-        .map((traitDecl) => traitDecl.name),
-      ...moduleDoc.effects
-        .filter((effectDecl) => isPublic(effectDecl.visibility))
-        .map((effectDecl) => effectDecl.name),
-    ]);
     const localPrivateTypeNames = new Set([
       ...moduleDoc.typeAliases
         .filter((typeAlias) => !isPublic(typeAlias.visibility))
@@ -780,10 +750,9 @@ export const createDocumentationModel = ({
         if (localPrivateTypeNames.has(targetName)) {
           return false;
         }
-        if (localPublicTypeNames.has(targetName)) {
-          return true;
-        }
-        return globalPublicTypeNames.has(targetName);
+        // If the target type is not known to be private in this module,
+        // keep the impl. This preserves extension impls for dependency types.
+        return true;
       })
       .map((implDecl) => {
         const implName = `impl#${implDecl.id}`;
