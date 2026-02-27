@@ -11,9 +11,9 @@ export type OpMap = Map<string, number>;
 
 const precedence = {
   assign: 0,
-  add: 1,
-  multiply: 2,
-  compare: 3,
+  compare: 1,
+  add: 2,
+  multiply: 3,
   pipe: 4,
   arrow: 5,
   bitOr: 6,
@@ -29,8 +29,8 @@ export const infixOps: OpMap = new Map([
   ["/", precedence.multiply],
   ["^", precedence.compare],
   ["%", precedence.multiply],
-  ["==", precedence.multiply],
-  ["!=", precedence.multiply],
+  ["==", precedence.compare],
+  ["!=", precedence.compare],
   ["<", precedence.compare],
   [">", precedence.compare],
   ["<=", precedence.compare],
