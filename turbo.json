@@ -12,6 +12,10 @@
       "dependsOn": [],
       "outputs": []
     },
+    "@voyd/smoke#test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "lint": {
       "outputs": []
     },
