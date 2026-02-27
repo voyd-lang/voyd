@@ -7,12 +7,17 @@ describe("createRuntimeScheduler", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses macrotask scheduling by default when timers are available", async () => {
+  it("uses setImmediate by default on node when available", async () => {
+    const setImmediateSpy = vi.fn((task: () => void) => {
+      task();
+      return 0;
+    });
     const setTimeoutSpy = vi.fn((task: () => void, _delay?: number) => {
       task();
       return 0;
     });
     const queueMicrotaskSpy = vi.fn();
+    vi.stubGlobal("setImmediate", setImmediateSpy);
     vi.stubGlobal("setTimeout", setTimeoutSpy);
     vi.stubGlobal("queueMicrotask", queueMicrotaskSpy);
 
@@ -23,15 +28,41 @@ describe("createRuntimeScheduler", () => {
     });
 
     await expect(run.outcome).resolves.toEqual({ kind: "value", value: 42 });
-    expect(setTimeoutSpy).toHaveBeenCalled();
-    expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(0);
+    expect(setImmediateSpy).toHaveBeenCalled();
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
     expect(queueMicrotaskSpy).not.toHaveBeenCalled();
   });
 
-  it("falls back to microtasks when timers are unavailable", async () => {
+  it("uses setTimeout by default on non-node runtimes", async () => {
+    vi.stubGlobal("process", undefined);
+    const setImmediateSpy = vi.fn((task: () => void) => {
+      task();
+      return 0;
+    });
+    const setTimeoutSpy = vi.fn((task: () => void, _delay?: number) => {
+      task();
+      return 0;
+    });
+    vi.stubGlobal("setImmediate", setImmediateSpy);
+    vi.stubGlobal("setTimeout", setTimeoutSpy);
+
+    const scheduler = createRuntimeScheduler();
+    const run = scheduler.startRun<number>({
+      start: () => 0,
+      step: () => ({ kind: "value", value: 11 }),
+    });
+
+    await expect(run.outcome).resolves.toEqual({ kind: "value", value: 11 });
+    expect(setTimeoutSpy).toHaveBeenCalled();
+    expect(setTimeoutSpy.mock.calls[0]?.[1]).toBe(0);
+    expect(setImmediateSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to microtasks when macrotask APIs are unavailable", async () => {
     const queueMicrotaskSpy = vi.fn((task: () => void) => {
       task();
     });
+    vi.stubGlobal("setImmediate", undefined);
     vi.stubGlobal("setTimeout", undefined);
     vi.stubGlobal("queueMicrotask", queueMicrotaskSpy);
 
