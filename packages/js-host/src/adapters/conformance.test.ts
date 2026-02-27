@@ -90,7 +90,7 @@ afterEach(() => {
 describe.each(["node", "deno", "browser", "unknown"] as const)(
   "default adapter conformance (%s)",
   (runtimeKind) => {
-    it("keeps timer/random behavior deterministic and validates fetch/input contracts", async () => {
+    it("keeps timer/random behavior deterministic and validates fetch/input/output contracts", async () => {
       const table = buildTable([
         { effectId: "std::time::Time", opName: "monotonic_now_millis", opId: 0 },
         { effectId: "std::time::Time", opName: "system_now_millis", opId: 1 },
@@ -99,6 +99,12 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         { effectId: "std::random::Random", opName: "fill_bytes", opId: 1 },
         { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
         { effectId: "std::input::Input", opName: "read_line", opId: 0 },
+        { effectId: "std::input::Input", opName: "read_bytes", opId: 1 },
+        { effectId: "std::input::Input", opName: "is_tty", opId: 2 },
+        { effectId: "std::output::Output", opName: "write", opId: 0 },
+        { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
+        { effectId: "std::output::Output", opName: "flush", opId: 2 },
+        { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
       ]);
       const runtime = createDeterministicRuntime({
         startMonotonicMs: 10,
@@ -111,6 +117,9 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         body?: string;
         timeoutMillis?: number;
       }> = [];
+      const seenWrites: Array<{ target: string; value: string }> = [];
+      const seenByteWrites: Array<{ target: string; bytes: number[] }> = [];
+      const seenFlushTargets: string[] = [];
 
       const report = await registerDefaultHostAdapters({
         host,
@@ -146,6 +155,26 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
               }
               return prompt === "eof" ? null : "voyd";
             },
+            readBytes: async (maxBytes) => {
+              if (maxBytes === 99) {
+                throw new Error("input bytes failure");
+              }
+              return maxBytes === 0 ? null : Uint8Array.from([7, 8, 9]);
+            },
+            isInputTty: () => true,
+            write: async ({ target, value }) => {
+              if (value === "fail") {
+                throw new Error("output write failure");
+              }
+              seenWrites.push({ target, value });
+            },
+            writeBytes: async ({ target, bytes }) => {
+              seenByteWrites.push({ target, bytes: Array.from(bytes.values()) });
+            },
+            flush: async ({ target }) => {
+              seenFlushTargets.push(target);
+            },
+            isOutputTty: (target) => target === "stdout",
           },
         },
       });
@@ -161,6 +190,9 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         true
       );
       expect(capabilitiesByEffect.get("std::input::Input")?.supported).toBe(
+        true
+      );
+      expect(capabilitiesByEffect.get("std::output::Output")?.supported).toBe(
         true
       );
 
@@ -218,7 +250,13 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       });
 
       const fetchHandler = getHandler("std::fetch::Fetch", "request");
-      const inputHandler = getHandler("std::input::Input", "read_line");
+      const inputLineHandler = getHandler("std::input::Input", "read_line");
+      const inputReadBytesHandler = getHandler("std::input::Input", "read_bytes");
+      const inputTtyHandler = getHandler("std::input::Input", "is_tty");
+      const outputWriteHandler = getHandler("std::output::Output", "write");
+      const outputWriteBytesHandler = getHandler("std::output::Output", "write_bytes");
+      const outputFlushHandler = getHandler("std::output::Output", "flush");
+      const outputTtyHandler = getHandler("std::output::Output", "is_tty");
 
       await expect(
         invokeHandler(fetchHandler, {
@@ -266,21 +304,21 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       });
 
       await expect(
-        invokeHandler(inputHandler, { prompt: "Name: " })
+        invokeHandler(inputLineHandler, { prompt: "Name: " })
       ).resolves.toEqual({
         kind: "tail",
         value: { ok: true, value: "voyd" },
       });
 
       await expect(
-        invokeHandler(inputHandler, { prompt: "eof" })
+        invokeHandler(inputLineHandler, { prompt: "eof" })
       ).resolves.toEqual({
         kind: "tail",
         value: { ok: true, value: null },
       });
 
       await expect(
-        invokeHandler(inputHandler, { prompt: "fail" })
+        invokeHandler(inputLineHandler, { prompt: "fail" })
       ).resolves.toEqual({
         kind: "tail",
         value: {
@@ -289,17 +327,105 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
           message: "input device failure",
         },
       });
+
+      await expect(
+        invokeHandler(inputReadBytesHandler, { max_bytes: 8 })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true, value: [7, 8, 9] },
+      });
+
+      await expect(
+        invokeHandler(inputReadBytesHandler, { max_bytes: 0 })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true, value: null },
+      });
+
+      await expect(
+        invokeHandler(inputReadBytesHandler, { max_bytes: 99 })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: {
+          ok: false,
+          code: 1,
+          message: "input bytes failure",
+        },
+      });
+
+      await expect(invokeHandler(inputTtyHandler)).resolves.toEqual({
+        kind: "tail",
+        value: true,
+      });
+
+      await expect(
+        invokeHandler(outputWriteHandler, {
+          value: "hello",
+        })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true },
+      });
+
+      await expect(
+        invokeHandler(outputWriteHandler, {
+          value: "fail",
+        })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: {
+          ok: false,
+          code: 1,
+          message: "output write failure",
+        },
+      });
+
+      await expect(
+        invokeHandler(outputWriteBytesHandler, {
+          target: "stderr",
+          bytes: [9, 10],
+        })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true },
+      });
+
+      await expect(
+        invokeHandler(outputFlushHandler, { target: "stderr" })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true },
+      });
+
+      await expect(
+        invokeHandler(outputTtyHandler, { target: "stdout" })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: true,
+      });
+
+      await expect(
+        invokeHandler(outputTtyHandler, { target: "stderr" })
+      ).resolves.toEqual({
+        kind: "tail",
+        value: false,
+      });
+
+      expect(seenWrites).toEqual([{ target: "stdout", value: "hello" }]);
+      expect(seenByteWrites).toEqual([{ target: "stderr", bytes: [9, 10] }]);
+      expect(seenFlushTargets).toEqual(["stderr"]);
     });
   }
 );
 
 describe("default adapter conformance (unsupported capabilities)", () => {
-  it("marks fetch/input unsupported when no runtime implementation exists", async () => {
+  it("marks fetch/input/output unsupported when no runtime implementation exists", async () => {
     vi.stubGlobal("fetch", undefined);
     vi.stubGlobal("prompt", undefined);
     const table = buildTable([
       { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
       { effectId: "std::input::Input", opName: "read_line", opId: 0 },
+      { effectId: "std::output::Output", opName: "write", opId: 0 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -316,6 +442,9 @@ describe("default adapter conformance (unsupported capabilities)", () => {
     expect(capabilitiesByEffect.get("std::input::Input")?.supported).toBe(
       false
     );
+    expect(capabilitiesByEffect.get("std::output::Output")?.supported).toBe(
+      false
+    );
 
     await expect(
       invokeHandler(getHandler("std::fetch::Fetch", "request"), {})
@@ -323,5 +452,8 @@ describe("default adapter conformance (unsupported capabilities)", () => {
     await expect(
       invokeHandler(getHandler("std::input::Input", "read_line"), {})
     ).rejects.toThrow(/default input adapter is unavailable/i);
+    await expect(
+      invokeHandler(getHandler("std::output::Output", "write"), {})
+    ).rejects.toThrow(/default output adapter is unavailable/i);
   });
 });

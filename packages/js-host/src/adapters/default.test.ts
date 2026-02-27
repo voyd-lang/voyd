@@ -536,9 +536,11 @@ describe("registerDefaultHostAdapters", () => {
     });
   });
 
-  it("registers input read_line handlers from runtime hooks", async () => {
+  it("registers input handlers from runtime hooks", async () => {
     const table = buildTable([
       { effectId: "std::input::Input", opName: "read_line", opId: 0 },
+      { effectId: "std::input::Input", opName: "read_bytes", opId: 1 },
+      { effectId: "std::input::Input", opName: "is_tty", opId: 2 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -553,6 +555,16 @@ describe("registerDefaultHostAdapters", () => {
             }
             return prompt === "eof" ? null : "voyd";
           },
+          readBytes: async (maxBytes) => {
+            if (maxBytes === 13) {
+              throw new Error("bytes unavailable");
+            }
+            if (maxBytes === 0) {
+              return null;
+            }
+            return Uint8Array.from([7, 8, 9]);
+          },
+          isInputTty: () => true,
         },
       },
     });
@@ -587,11 +599,145 @@ describe("registerDefaultHostAdapters", () => {
         message: "input unavailable",
       },
     });
+
+    await expect(
+      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+        max_bytes: 8,
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true, value: [7, 8, 9] },
+    });
+
+    await expect(
+      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+        max_bytes: 0,
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true, value: null },
+    });
+
+    await expect(
+      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+        max_bytes: 13,
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: {
+        ok: false,
+        code: 1,
+        message: "bytes unavailable",
+      },
+    });
+
+    expect(getHandler("std::input::Input", "is_tty")(tailContinuation)).toEqual({
+      kind: "tail",
+      value: true,
+    });
   });
 
-  it("registers unsupported input handlers when prompt APIs are unavailable", async () => {
+  it("registers output handlers from runtime hooks", async () => {
     const table = buildTable([
-      { effectId: "std::input::Input", opName: "read_line", opId: 0 },
+      { effectId: "std::output::Output", opName: "write", opId: 0 },
+      { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
+      { effectId: "std::output::Output", opName: "flush", opId: 2 },
+      { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
+    ]);
+    const writes: Array<{ target: string; value: string }> = [];
+    const byteWrites: Array<{ target: string; bytes: number[] }> = [];
+    const flushes: string[] = [];
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "node",
+        runtimeHooks: {
+          write: async ({ target, value }) => {
+            if (value === "fail") {
+              throw new Error("write failed");
+            }
+            writes.push({ target, value });
+          },
+          writeBytes: async ({ target, bytes }) => {
+            byteWrites.push({ target, bytes: Array.from(bytes.values()) });
+          },
+          flush: async ({ target }) => {
+            flushes.push(target);
+          },
+          isOutputTty: (target) => target === "stdout",
+        },
+      },
+    });
+
+    await expect(
+      getHandler("std::output::Output", "write")(tailContinuation, {
+        value: "hello",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+
+    await expect(
+      getHandler("std::output::Output", "write")(tailContinuation, {
+        value: "fail",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: {
+        ok: false,
+        code: 1,
+        message: "write failed",
+      },
+    });
+
+    await expect(
+      getHandler("std::output::Output", "write_bytes")(tailContinuation, {
+        target: "stderr",
+        bytes: [7, 8, 9],
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+
+    await expect(
+      getHandler("std::output::Output", "flush")(tailContinuation, {
+        target: "stderr",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+
+    expect(
+      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+        target: "stdout",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: true,
+    });
+
+    expect(
+      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+        target: "stderr",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: false,
+    });
+
+    expect(writes).toEqual([{ target: "stdout", value: "hello" }]);
+    expect(byteWrites).toEqual([{ target: "stderr", bytes: [7, 8, 9] }]);
+    expect(flushes).toEqual(["stderr"]);
+  });
+
+  it("registers unsupported input handlers when runtime lacks requested ops", async () => {
+    const table = buildTable([
+      { effectId: "std::input::Input", opName: "read_bytes", opId: 0 },
     ]);
     vi.stubGlobal("prompt", undefined);
     const { host, getHandler } = createFakeHost(table);
@@ -607,8 +753,29 @@ describe("registerDefaultHostAdapters", () => {
 
     await expect(
       (async () =>
-        getHandler("std::input::Input", "read_line")(tailContinuation, {}))()
+        getHandler("std::input::Input", "read_bytes")(tailContinuation, {}))()
     ).rejects.toThrow(/default input adapter is unavailable on browser/i);
+  });
+
+  it("registers unsupported output handlers when stream APIs are unavailable", async () => {
+    const table = buildTable([
+      { effectId: "std::output::Output", opName: "write", opId: 0 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "browser" },
+    });
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
+        ?.supported
+    ).toBe(false);
+
+    await expect(
+      (async () =>
+        getHandler("std::output::Output", "write")(tailContinuation, {}))()
+    ).rejects.toThrow(/default output adapter is unavailable on browser/i);
   });
 
   it("chunks browser random fills to avoid WebCrypto quota errors", async () => {

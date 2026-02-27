@@ -1,11 +1,12 @@
 use std::array::Array
-use std::error::HostError
+use std::bytes::{ ByteBuffer, Bytes }
+use std::error::{ HostError, IoError }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
-use std::string::type::{ String, StringSlice }
+use std::string::type::{ String, StringSlice, new_string }
 use std::test::assertions::all
 use std::test::host_dto::self as host_dto_test
 
@@ -48,11 +49,65 @@ test "input read_line decodes host errors":
     Ok<Option<String>>:
       assert(false, eq: true)
 
+test "input read_bytes encodes max_bytes and decodes payload":
+  let ~max_values = Array<i32>::init()
+  let result = read_bytes_with_capture(max_values)
+
+  assert(optional_i32_or(max_values.get(0), -1), eq: 3)
+
+  match(result)
+    Ok<Option<Bytes>> { value }:
+      match(value)
+        Some<Bytes> { value: bytes }:
+          let decoded = bytes.to_array()
+          assert(decoded.len(), eq: 3)
+          assert(optional_i32_or(decoded.get(0), -1), eq: 7)
+          assert(optional_i32_or(decoded.get(1), -1), eq: 8)
+          assert(optional_i32_or(decoded.get(2), -1), eq: 9)
+        None:
+          assert(false, eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "input read_bytes decodes null as none":
+  let result = read_bytes_with_payload(host_dto_test::host_ok_with_value(msgpack::make_null()))
+
+  match(result)
+    Ok<Option<Bytes>> { value }:
+      match(value)
+        Some<Bytes>:
+          assert(false, eq: true)
+        None:
+          assert(true, eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "input read_bytes decodes host errors":
+  let result = read_bytes_with_payload(host_dto_test::host_error_payload(code: 13, message: "stdin unavailable"))
+
+  match(result)
+    Err<IoError> { error }:
+      assert(error.code, eq: 13)
+      assert(error.message.equals("stdin unavailable"), eq: true)
+    Ok<Option<Bytes>>:
+      assert(false, eq: true)
+
+test "input is_tty forwards bool from host":
+  let tty_result = is_tty_with_payload(true)
+  let piped_result = is_tty_with_payload(false)
+
+  assert(tty_result, eq: true)
+  assert(piped_result, eq: false)
+
 fn read_line_with_payload(payload: MsgPack): () -> Result<Option<String>, HostError>
   try
     read_line()
   Input::read_line(tail, _payload):
     tail(payload)
+  Input::read_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Input::is_tty_op(tail):
+    tail(false)
 
 fn read_line_with_capture(~prompts: Array<String>): () -> Result<Option<String>, HostError>
   try
@@ -61,6 +116,59 @@ fn read_line_with_capture(~prompts: Array<String>): () -> Result<Option<String>,
     let decoded = HostDto::unpack(payload)
     prompts.push(decoded.read_string("prompt"))
     tail(host_dto_test::host_ok_with_value(msgpack::make_string("voyd".as_slice().to_string())))
+  Input::read_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Input::is_tty_op(tail):
+    tail(false)
+
+fn read_bytes_with_payload(payload: MsgPack): () -> Result<Option<Bytes>, IoError>
+  try
+    read_bytes(max_bytes: 8)
+  Input::read_bytes_op(tail, _payload):
+    tail(payload)
+  Input::read_line(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Input::is_tty_op(tail):
+    tail(false)
+
+fn read_bytes_with_capture(~max_values: Array<i32>): () -> Result<Option<Bytes>, IoError>
+  try
+    read_bytes(max_bytes: 3)
+  Input::read_bytes_op(tail, payload):
+    let decoded = HostDto::unpack(payload)
+    max_values.push(decoded.read_i32("max_bytes"))
+    let ~bytes = ByteBuffer::with_capacity(bytes: 3)
+    bytes.push(value: 7)
+    bytes.push(value: 8)
+    bytes.push(value: 9)
+    tail(host_dto_test::host_ok_with_value(encode_bytes(bytes.as_bytes())))
+  Input::read_line(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Input::is_tty_op(tail):
+    tail(false)
+
+fn is_tty_with_payload(value: bool): () -> bool
+  try
+    is_tty()
+  Input::is_tty_op(tail):
+    tail(value)
+  Input::read_line(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Input::read_bytes_op(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+
+fn encode_bytes(bytes: Bytes): () -> MsgPack
+  let source = bytes.to_array()
+  let ~encoded = Array<MsgPack>::with_capacity(source.len())
+  var index = 0
+  while index < source.len() do:
+    match(source.get(index))
+      Some<i32> { value }:
+        encoded.push(msgpack::make_i32(value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_array(encoded)
 
 fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
   match(value)
@@ -68,3 +176,10 @@ fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> Strin
       present
     None:
       fallback.to_string()
+
+fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
+  match(value)
+    Some<i32> { value: present }:
+      present
+    None:
+      fallback

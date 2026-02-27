@@ -1,0 +1,130 @@
+use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
+use std::error::IoError
+use std::host_dto::HostDto
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::result::types::all
+use std::string::type::{ String, StringSlice, new_string }
+
+pub obj StdOut {}
+pub obj StdErr {}
+
+pub type OutputTarget = StdOut | StdErr
+
+@effect(id: "std::output::Output")
+pub eff Output
+  write_op(tail, payload: MsgPack) -> MsgPack
+  write_bytes_op(tail, payload: MsgPack) -> MsgPack
+  flush_op(tail, payload: MsgPack) -> MsgPack
+  is_tty_op(tail, payload: MsgPack) -> bool
+
+/// Writes text to the selected output target (stdout by default).
+pub fn write({ value: StringSlice }): Output -> Result<Unit, IoError>
+  write(value: value, target: StdOut {})
+
+/// Writes text to the selected output target.
+pub fn write({ value: StringSlice, target: OutputTarget }): Output -> Result<Unit, IoError>
+  decode_write_result(Output::write_op(encode_write_payload(
+    value: value.to_string(),
+    target: target
+  )))
+
+/// Writes text followed by exactly "\n" to the selected target (stdout by default).
+pub fn write_line({ value: StringSlice }): Output -> Result<Unit, IoError>
+  write_line(value: value, target: StdOut {})
+
+/// Writes text followed by exactly "\n" to the selected target.
+pub fn write_line({ value: StringSlice, target: OutputTarget }): Output -> Result<Unit, IoError>
+  write_bytes(bytes: line_bytes(value: value), target: target)
+
+/// Writes bytes to the selected output target (stdout by default).
+pub fn write_bytes({ bytes: Bytes }): Output -> Result<Unit, IoError>
+  write_bytes(bytes: bytes, target: StdOut {})
+
+/// Writes bytes to the selected output target.
+pub fn write_bytes({ bytes: Bytes, target: OutputTarget }): Output -> Result<Unit, IoError>
+  decode_write_result(Output::write_bytes_op(encode_write_bytes_payload(
+    bytes: bytes,
+    target: target
+  )))
+
+/// Flushes the selected output target (stdout by default).
+pub fn flush(): Output -> Result<Unit, IoError>
+  flush(target: StdOut {})
+
+/// Flushes the selected output target.
+pub fn flush({ target: OutputTarget }): Output -> Result<Unit, IoError>
+  decode_write_result(Output::flush_op(encode_target_payload(target: target)))
+
+/// Returns true when the selected output target is a terminal (stdout by default).
+pub fn is_tty(): Output -> bool
+  is_tty(target: StdOut {})
+
+/// Returns true when the selected output target is a terminal.
+pub fn is_tty({ target: OutputTarget }): Output -> bool
+  Output::is_tty_op(encode_target_payload(target: target))
+
+fn line_bytes({ value: StringSlice }): () -> Bytes
+  let source = value.to_string().to_utf8()
+  let ~buffer = ByteBuffer::with_capacity(bytes: source.len() + 1)
+  var index = 0
+  while index < source.len() do:
+    match(source.get(index))
+      Some<i32> { value }:
+        buffer.push(value: value)
+      None:
+        void
+    index = index + 1
+  buffer.push(value: 10)
+  buffer.as_bytes()
+
+fn encode_write_payload({ value: String, target: OutputTarget }): () -> MsgPack
+  HostDto::init()
+    .set("value", msgpack::make_string(value))
+    .set("target", encode_output_target(target))
+    .pack()
+
+fn encode_write_bytes_payload({ bytes: Bytes, target: OutputTarget }): () -> MsgPack
+  HostDto::init()
+    .set("bytes", encode_bytes(bytes))
+    .set("target", encode_output_target(target))
+    .pack()
+
+fn encode_target_payload({ target: OutputTarget }): () -> MsgPack
+  HostDto::init()
+    .set("target", encode_output_target(target))
+    .pack()
+
+fn encode_output_target(target: OutputTarget): () -> MsgPack
+  target.match(active)
+    StdOut:
+      msgpack::make_string("stdout")
+    StdErr:
+      msgpack::make_string("stderr")
+
+fn encode_bytes(bytes: Bytes): () -> MsgPack
+  let source = bytes.to_array()
+  let ~encoded = Array<MsgPack>::with_capacity(source.len())
+  var index = 0
+  while index < source.len() do:
+    match(source.get(index))
+      Some<i32> { value }:
+        encoded.push(msgpack::make_i32(value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_array(encoded)
+
+fn decode_write_result(payload: MsgPack): () -> Result<Unit, IoError>
+  let decoded = HostDto::unpack(payload)
+  if decoded.read_bool("ok") then:
+    return Ok<Unit> { value: Unit {} }
+
+  Err<IoError> { error: decode_io_error(decoded) }
+
+fn decode_io_error(payload: HostDto): () -> IoError
+  IoError {
+    code: payload.read_i32("code"),
+    message: payload.read_string("message")
+  }
