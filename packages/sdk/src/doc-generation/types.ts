@@ -1,0 +1,49 @@
+export type DocumentationOutputFormat = "html" | "json";
+
+export type DocumentationParameter = {
+  name: string;
+  documentation: string;
+};
+
+export type DocumentationMember = {
+  name: string;
+  signature: string;
+  documentation?: string;
+  anchor: string;
+};
+
+export type DocumentationItemKind =
+  | "function"
+  | "type_alias"
+  | "object"
+  | "trait"
+  | "impl";
+
+export type DocumentationItem = {
+  kind: DocumentationItemKind;
+  name: string;
+  fqn: string;
+  signature: string;
+  documentation?: string;
+  anchor: string;
+  parameterDocs: readonly DocumentationParameter[];
+  members: readonly DocumentationMember[];
+};
+
+export type ModuleDocumentationSection = {
+  id: string;
+  depth: number;
+  anchor: string;
+  documentation?: string;
+  functions: readonly DocumentationItem[];
+  typeAliases: readonly DocumentationItem[];
+  objects: readonly DocumentationItem[];
+  traits: readonly DocumentationItem[];
+  impls: readonly DocumentationItem[];
+};
+
+export type DocumentationModel = {
+  entryModule: string;
+  generatedAt: string;
+  modules: readonly ModuleDocumentationSection[];
+};

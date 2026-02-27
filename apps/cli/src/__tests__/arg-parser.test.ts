@@ -46,12 +46,32 @@ describe("getConfigFromCli", () => {
     const config = runWithArgv(["node", "voyd", "doc"]);
     expect(config.doc).toBe(true);
     expect(config.index).toBe("./src");
+    expect(config.docFormat).toBe("html");
   });
 
   it("supports `voyd docs` alias with explicit output path", () => {
-    const config = runWithArgv(["node", "voyd", "docs", "./demo", "--out", "docs.html"]);
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "docs",
+      "./demo",
+      "--out",
+      "docs.html",
+    ]);
     expect(config.doc).toBe(true);
     expect(config.index).toBe("./demo");
     expect(config.docOut).toBe("docs.html");
+  });
+
+  it("supports JSON doc output format", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "doc",
+      "--format",
+      "json",
+    ]);
+    expect(config.doc).toBe(true);
+    expect(config.docFormat).toBe("json");
   });
 });
