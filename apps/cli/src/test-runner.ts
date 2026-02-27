@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   createSdk,
@@ -22,6 +22,40 @@ type CliTestResult = {
   status: "passed" | "failed" | "skipped";
   durationMs: number;
   error?: unknown;
+};
+
+const TEST_DECLARATION_PATTERN = /(^|[\r\n])\s*test(?:\s|$)/;
+
+const emptySummary = ({
+  durationMs,
+}: {
+  durationMs: number;
+}): TestRunSummary => ({
+  total: 0,
+  passed: 0,
+  failed: 0,
+  skipped: 0,
+  durationMs,
+});
+
+const reportNoTestsFound = ({
+  reporter,
+  targetPath,
+  failOnEmptyTests,
+  durationMs,
+}: {
+  reporter: string;
+  targetPath: string;
+  failOnEmptyTests: boolean;
+  durationMs: number;
+}): TestRunSummary => {
+  if (reporter !== "silent") {
+    console.log(`[discovery] No tests found for target: ${targetPath}`);
+  }
+  if (failOnEmptyTests) {
+    process.exitCode = 1;
+  }
+  return emptySummary({ durationMs });
 };
 
 const shouldSkipDir = (name: string): boolean => {
@@ -69,6 +103,21 @@ const findVoydFiles = async (rootPath: string): Promise<string[]> => {
 const TEST_COMPANION_SUFFIX = ".test.voyd";
 const VOYD_SUFFIX = ".voyd";
 
+const companionFileFor = (filePath: string): string =>
+  `${filePath.slice(0, -VOYD_SUFFIX.length)}${TEST_COMPANION_SUFFIX}`;
+
+const primaryFileForCompanion = (filePath: string): string =>
+  `${filePath.slice(0, -TEST_COMPANION_SUFFIX.length)}${VOYD_SUFFIX}`;
+
+const fileExists = async (filePath: string): Promise<boolean> => {
+  try {
+    const info = await stat(filePath);
+    return info.isFile();
+  } catch {
+    return false;
+  }
+};
+
 const isCompanionTestFile = ({
   filePath,
   knownFiles,
@@ -81,8 +130,98 @@ const isCompanionTestFile = ({
   }
 
   const basePath =
-    filePath.slice(0, -TEST_COMPANION_SUFFIX.length) + VOYD_SUFFIX;
+    primaryFileForCompanion(filePath);
   return knownFiles.has(resolve(basePath));
+};
+
+const enrichFileTargetWithCompanion = async ({
+  scanRoot,
+  files,
+}: {
+  scanRoot: string;
+  files: readonly string[];
+}): Promise<string[]> => {
+  const resolvedScanRoot = resolve(scanRoot);
+  if (!resolvedScanRoot.endsWith(VOYD_SUFFIX)) {
+    return [...files];
+  }
+  if (!files.some((filePath) => resolve(filePath) === resolvedScanRoot)) {
+    return [...files];
+  }
+
+  const counterpart = resolvedScanRoot.endsWith(TEST_COMPANION_SUFFIX)
+    ? primaryFileForCompanion(resolvedScanRoot)
+    : companionFileFor(resolvedScanRoot);
+  if (!(await fileExists(counterpart))) {
+    return [...files];
+  }
+
+  return [...new Set([...files, counterpart])];
+};
+
+const sourceContainsTestDeclaration = async (
+  filePath: string,
+): Promise<boolean> => {
+  try {
+    const source = await readFile(filePath, "utf8");
+    return TEST_DECLARATION_PATTERN.test(source);
+  } catch {
+    return false;
+  }
+};
+
+const selectTestModules = async ({
+  moduleFiles,
+  knownFiles,
+}: {
+  moduleFiles: readonly string[];
+  knownFiles: ReadonlySet<string>;
+}): Promise<string[]> => {
+  const selected = await Promise.all(moduleFiles.map(async (filePath) => {
+    if (!filePath.endsWith(TEST_COMPANION_SUFFIX)) {
+      const companionPath = resolve(companionFileFor(filePath));
+      if (
+        knownFiles.has(companionPath) &&
+        (await sourceContainsTestDeclaration(companionPath))
+      ) {
+        return filePath;
+      }
+    }
+
+    return (await sourceContainsTestDeclaration(filePath)) ? filePath : undefined;
+  }));
+
+  return selected.filter((filePath): filePath is string => Boolean(filePath));
+};
+
+const buildAllowedTestFiles = ({
+  testModules,
+  knownFiles,
+}: {
+  testModules: readonly string[];
+  knownFiles: ReadonlySet<string>;
+}): Set<string> => {
+  const allowedFiles = new Set<string>();
+
+  testModules.forEach((filePath) => {
+    const resolvedFilePath = resolve(filePath);
+    allowedFiles.add(resolvedFilePath);
+
+    if (resolvedFilePath.endsWith(TEST_COMPANION_SUFFIX)) {
+      const primaryFilePath = resolve(primaryFileForCompanion(resolvedFilePath));
+      if (knownFiles.has(primaryFilePath)) {
+        allowedFiles.add(primaryFilePath);
+      }
+      return;
+    }
+
+    const companionFilePath = resolve(companionFileFor(resolvedFilePath));
+    if (knownFiles.has(companionFilePath)) {
+      allowedFiles.add(companionFilePath);
+    }
+  });
+
+  return allowedFiles;
 };
 
 const resolveRoots = (
@@ -243,33 +382,31 @@ export const runTests = async ({
   const { scanRoot, roots } = resolveRoots(rootPath, pkgDirs);
   const stdRoot = roots.std ?? resolveStdRoot();
   const isTestingStd = isWithinRoot(stdRoot, scanRoot);
-  const files = await findVoydFiles(scanRoot);
+  const discoveredFiles = await enrichFileTargetWithCompanion({
+    scanRoot,
+    files: await findVoydFiles(scanRoot),
+  });
+  const files = discoveredFiles;
   const knownFiles = new Set(files.map((filePath) => resolve(filePath)));
   const moduleFiles = files.filter(
     (filePath) => !isCompanionTestFile({ filePath, knownFiles }),
   );
+  const testModules = await selectTestModules({ moduleFiles, knownFiles });
   const cliReporter = createCliReporter(reporter);
 
-  if (moduleFiles.length === 0) {
-    if (reporter !== "silent") {
-      console.log("No tests found.");
-    }
-    if (failOnEmptyTests) {
-      process.exitCode = 1;
-    }
-    return {
-      total: 0,
-      passed: 0,
-      failed: 0,
-      skipped: 0,
+  if (testModules.length === 0) {
+    return reportNoTestsFound({
+      reporter,
+      targetPath: scanRoot,
+      failOnEmptyTests,
       durationMs: 0,
-    };
+    });
   }
 
-  const modulePaths = moduleFiles.map((filePath) =>
+  const modulePaths = testModules.map((filePath) =>
     buildModulePath({ filePath, roots, pathAdapter: host.path })
   );
-  const entryPath = resolveTestEntryPath({ roots, existingFiles: moduleFiles });
+  const entryPath = resolveTestEntryPath({ roots, existingFiles: files });
   const entrySource = buildTestEntrySource({ modulePaths });
 
   const startRun = Date.now();
@@ -282,27 +419,27 @@ export const runTests = async ({
     roots,
   });
   if (!result.success) {
-    throw { diagnostics: result.diagnostics };
+    throw {
+      diagnostics: result.diagnostics,
+      testPhase: "typing",
+      testTargetPath: scanRoot,
+    };
   }
 
   const tests = result.tests;
   if (!tests || tests.cases.length === 0) {
-    if (reporter !== "silent") {
-      console.log("No tests found.");
-    }
-    if (failOnEmptyTests) {
-      process.exitCode = 1;
-    }
-    return {
-      total: 0,
-      passed: 0,
-      failed: 0,
-      skipped: 0,
+    return reportNoTestsFound({
+      reporter,
+      targetPath: scanRoot,
+      failOnEmptyTests,
       durationMs: Date.now() - startRun,
-    };
+    });
   }
 
-  const allowedFiles = new Set(files.map((filePath) => resolve(filePath)));
+  const allowedFiles = buildAllowedTestFiles({
+    testModules,
+    knownFiles,
+  });
   const allowedModules = new Set(modulePaths);
   const summary = await tests.run({
     reporter: cliReporter,
@@ -325,10 +462,23 @@ export const runTests = async ({
     },
   });
   const finalSummary = { ...summary, durationMs: Date.now() - startRun };
+  if (finalSummary.total === 0) {
+    return reportNoTestsFound({
+      reporter,
+      targetPath: scanRoot,
+      failOnEmptyTests,
+      durationMs: finalSummary.durationMs,
+    });
+  }
 
   reportSummary(finalSummary, reporter);
 
   if (finalSummary.failed > 0) {
+    if (reporter !== "silent") {
+      console.error(
+        `[execution] ${finalSummary.failed} test(s) failed for target: ${scanRoot}`,
+      );
+    }
     process.exitCode = 1;
   }
 
