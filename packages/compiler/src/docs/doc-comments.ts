@@ -26,6 +26,7 @@ type SourceLine = {
   lineNumber: number;
   startIndex: number;
   endIndex: number;
+  startColumn: number;
   kind: LineKind;
   docText?: string;
 };
@@ -91,11 +92,14 @@ const splitSourceLines = (source: string): SourceLine[] => {
     const raw = source.slice(lineStart, index);
     const normalized = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
     const trimmedStart = normalized.trimStart();
+    const firstNonWhitespaceIndex = normalized.search(/\S/u);
+    const startColumn = firstNonWhitespaceIndex >= 0 ? firstNonWhitespaceIndex : 0;
 
     const line = {
       lineNumber,
       startIndex: lineStart,
       endIndex: index,
+      startColumn,
       kind: "code" as LineKind,
       docText: undefined as string | undefined,
     };
@@ -444,6 +448,40 @@ const collectMacroDeclarationDocsByName = ({
   }, new Map<string, string>());
 };
 
+const collectTopLevelStartColumn = ({
+  ast,
+  moduleFilePath,
+  moduleRange,
+  isExcluded,
+}: {
+  ast: Form;
+  moduleFilePath: string;
+  moduleRange: IndexRange;
+  isExcluded: (lineNumber: number) => boolean;
+}): number | undefined => {
+  const entries = ast.callsInternal("ast") ? ast.rest : ast.toArray();
+  const topLevelColumns = entries.flatMap((entry) => {
+    if (!isForm(entry)) {
+      return [];
+    }
+    const location = entry.location;
+    if (!location || location.filePath !== moduleFilePath) {
+      return [];
+    }
+    if (!inRange(location.startIndex, moduleRange)) {
+      return [];
+    }
+    if (isExcluded(location.startLine)) {
+      return [];
+    }
+    return [location.startColumn];
+  });
+  if (topLevelColumns.length === 0) {
+    return undefined;
+  }
+  return Math.min(...topLevelColumns);
+};
+
 export const collectModuleDocumentation = ({
   ast,
   source,
@@ -496,6 +534,12 @@ export const collectModuleDocumentation = ({
   const declarationDocsBySyntaxId = new Map<number, string>();
   const parameterDocsBySyntaxId = new Map<number, string>();
   const diagnostics: Diagnostic[] = [];
+  const topLevelStartColumn = collectTopLevelStartColumn({
+    ast,
+    moduleFilePath,
+    moduleRange: effectiveModuleRange,
+    isExcluded,
+  });
 
   const outerBlocks = buildOuterBlocks({
     lines,
@@ -583,7 +627,9 @@ export const collectModuleDocumentation = ({
     (line) =>
       line.kind === "inner-doc" &&
       inRange(line.startIndex, effectiveModuleRange) &&
-      !isExcluded(line.lineNumber),
+      !isExcluded(line.lineNumber) &&
+      (topLevelStartColumn === undefined ||
+        line.startColumn === topLevelStartColumn),
   );
   const moduleDoc =
     innerLines.length > 0

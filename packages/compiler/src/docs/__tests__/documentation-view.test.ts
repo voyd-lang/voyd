@@ -190,4 +190,35 @@ mod visible
     const visibleModule = view.modules.find((module) => module.id === "src::pkg::visible");
     expect(visibleModule?.functions.map((fn) => fn.name)).toEqual(["shown"]);
   });
+
+  it("only collects module inner docs from module-level lines", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `pub fn main() -> i32
+  //! Not module docs.
+  1
+
+pub mod nested
+  //! Nested module docs.
+  pub fn value() -> i32
+    //! Not nested module docs.
+    2
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    expect(diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toHaveLength(0);
+
+    const view = buildDocumentationView({ graph, semantics });
+    const mainModule = view.modules.find((module) => module.id === "src::main");
+    expect(mainModule?.documentation).toBeUndefined();
+
+    const nestedModule = view.modules.find((module) => module.id === "src::main::nested");
+    expect(nestedModule?.documentation).toBe(" Nested module docs.");
+  });
 });
