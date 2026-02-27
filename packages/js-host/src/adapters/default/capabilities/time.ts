@@ -62,6 +62,7 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
 
     const implementedOps = new Set<string>();
     let nextTimerId = 1n;
+    const pendingIntervalTimers = new Map<bigint, { active: boolean }>();
     const waitForMillis = async (totalMillis: bigint): Promise<void> => {
       const sleepHook = runtimeHooks.sleepMillis;
       const sleepChunk = sleepHook
@@ -120,10 +121,19 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
       host,
       effectId: TIME_EFFECT_ID,
       opName: "set_interval_millis",
-      handler: async ({ tail }, ms) => {
-        await waitForMillis(toNonNegativeI64(ms));
+      handler: ({ tail }, ms) => {
+        const intervalMillis = toNonNegativeI64(ms);
         const timerId = nextTimerId;
         nextTimerId += 1n;
+        const timerRef = { active: true };
+        pendingIntervalTimers.set(timerId, timerRef);
+        void waitForMillis(intervalMillis)
+          .catch(() => undefined)
+          .then(() => {
+            if (pendingIntervalTimers.get(timerId) === timerRef) {
+              pendingIntervalTimers.delete(timerId);
+            }
+          });
         return tail(hostOk(timerId));
       },
     });
@@ -134,8 +144,14 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
       effectId: TIME_EFFECT_ID,
       opName: "clear_timer",
       handler: async ({ tail }, timerIdValue) => {
+        const timerId = toI64(timerIdValue);
+        const pending = pendingIntervalTimers.get(timerId);
+        if (pending) {
+          pending.active = false;
+          pendingIntervalTimers.delete(timerId);
+        }
         if (typeof runtimeHooks.clearTimer === "function") {
-          await runtimeHooks.clearTimer(toI64(timerIdValue));
+          await runtimeHooks.clearTimer(timerId);
         }
         return tail(hostOk());
       },

@@ -254,15 +254,7 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         value: { ok: true },
       });
 
-      let intervalSettled = false;
-      const intervalResult = invokeHandler(intervalHandler, 3n).then((result) => {
-        intervalSettled = true;
-        return result;
-      });
-      await runtime.runUntilIdle();
-      expect(intervalSettled).toBe(false);
-      await runtime.advanceBy(3);
-      await expect(intervalResult).resolves.toEqual({
+      await expect(invokeHandler(intervalHandler, 3n)).resolves.toEqual({
         kind: "tail",
         value: { ok: true, value: 1n },
       });
@@ -274,11 +266,11 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
 
       await expect(invokeHandler(monotonicHandler)).resolves.toEqual({
         kind: "tail",
-        value: 20n,
+        value: 17n,
       });
       await expect(invokeHandler(systemHandler)).resolves.toEqual({
         kind: "tail",
-        value: 1_010n,
+        value: 1_007n,
       });
 
       await expect(invokeHandler(nextI64Handler)).resolves.toEqual({
