@@ -1,5 +1,7 @@
 import type { ModuleGraph } from "../modules/types.js";
+import { classifyTopLevelDecl } from "../modules/use-decl.js";
 import type { UsePathSelectionKind } from "../modules/use-path.js";
+import { isForm, isIdentifierAtom } from "../parser/index.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 
 export type DocumentationVisibilityView = {
@@ -13,6 +15,7 @@ export type DocumentationTypeParameterView = {
 export type DocumentationParameterView = {
   name: string;
   label?: string;
+  mutable?: boolean;
   optional?: boolean;
   typeExpr?: unknown;
   documentation?: string;
@@ -135,28 +138,19 @@ const isDocumentedVisibility = (
 ): boolean =>
   visibility?.level === "public" || visibility?.level === "package";
 
-const collectExportedModuleIds = ({
-  entryModule,
-  semantics,
-}: {
-  entryModule: string;
-  semantics: ReadonlyMap<string, SemanticsPipelineResult>;
-}): Set<string> | undefined => {
-  const entrySemantics = semantics.get(entryModule);
-  if (!entrySemantics?.binding.isPackageRoot) {
-    return undefined;
-  }
+const collectDirectExportedModuleIds = (
+  semantics: SemanticsPipelineResult,
+): readonly string[] => {
+  const exportedModuleIds: string[] = [];
 
-  const exportedModuleIds = new Set<string>([entryModule]);
-
-  entrySemantics.exports.forEach((entry) => {
+  semantics.exports.forEach((entry) => {
     if (entry.kind !== "module" || !isDocumentedVisibility(entry.visibility)) {
       return;
     }
-    exportedModuleIds.add(entry.moduleId);
+    exportedModuleIds.push(entry.moduleId);
   });
 
-  entrySemantics.binding.uses.forEach((useDecl) => {
+  semantics.binding.uses.forEach((useDecl) => {
     if (!isDocumentedVisibility(useDecl.visibility)) {
       return;
     }
@@ -167,9 +161,95 @@ const collectExportedModuleIds = ({
       if (entry.selectionKind !== "all" && entry.selectionKind !== "module") {
         return;
       }
-      exportedModuleIds.add(entry.moduleId);
+      exportedModuleIds.push(entry.moduleId);
     });
   });
+
+  return exportedModuleIds;
+};
+
+const collectPublicChildModuleIds = ({
+  moduleId,
+  graph,
+}: {
+  moduleId: string;
+  graph: ModuleGraph;
+}): readonly string[] => {
+  const module = graph.modules.get(moduleId);
+  if (!module) {
+    return [];
+  }
+
+  const entries = module.ast.callsInternal("ast")
+    ? module.ast.rest
+    : module.ast.toArray();
+
+  return entries.flatMap((entry) => {
+    if (!isForm(entry)) {
+      return [];
+    }
+
+    const classified = classifyTopLevelDecl(entry);
+    if (classified.kind === "inline-module-decl" && classified.visibility === "pub") {
+      return [`${moduleId}::${classified.name}`];
+    }
+
+    if (classified.kind !== "unsupported-mod-decl" || classified.visibility !== "pub") {
+      return [];
+    }
+
+    const first = entry.at(0);
+    const visibilityOffset =
+      isIdentifierAtom(first) && first.value === "pub" ? 1 : 0;
+    const nameExpr = entry.at(visibilityOffset + 1);
+    if (!isIdentifierAtom(nameExpr)) {
+      return [];
+    }
+    return [`${moduleId}::${nameExpr.value}`];
+  });
+};
+
+const collectExportedModuleIds = ({
+  entryModule,
+  graph,
+  semantics,
+}: {
+  entryModule: string;
+  graph: ModuleGraph;
+  semantics: ReadonlyMap<string, SemanticsPipelineResult>;
+}): Set<string> | undefined => {
+  const entrySemantics = semantics.get(entryModule);
+  if (!entrySemantics?.binding.isPackageRoot) {
+    return undefined;
+  }
+
+  const exportedModuleIds = new Set<string>([entryModule]);
+  const queue: string[] = [entryModule];
+
+  while (queue.length > 0) {
+    const moduleId = queue.shift();
+    if (!moduleId) {
+      continue;
+    }
+
+    const moduleSemantics = semantics.get(moduleId);
+    if (!moduleSemantics) {
+      continue;
+    }
+
+    const directExportedModuleIds = [
+      ...collectDirectExportedModuleIds(moduleSemantics),
+      ...collectPublicChildModuleIds({ moduleId, graph }),
+    ];
+
+    directExportedModuleIds.forEach((exportedModuleId) => {
+      if (!semantics.has(exportedModuleId) || exportedModuleIds.has(exportedModuleId)) {
+        return;
+      }
+      exportedModuleIds.add(exportedModuleId);
+      queue.push(exportedModuleId);
+    });
+  }
 
   return exportedModuleIds;
 };
@@ -191,6 +271,7 @@ const normalizeParameter = (
   parameter: {
     name: string;
     label?: string;
+    bindingKind?: string;
     optional?: boolean;
     typeExpr?: unknown;
     documentation?: string;
@@ -198,6 +279,7 @@ const normalizeParameter = (
 ): DocumentationParameterView => ({
   name: parameter.name,
   label: parameter.label,
+  mutable: parameter.bindingKind === "mutable-ref",
   optional: parameter.optional,
   typeExpr: parameter.typeExpr,
   documentation: parameter.documentation,
@@ -213,6 +295,7 @@ const normalizeFunction = (
     params: ReadonlyArray<{
       name: string;
       label?: string;
+      bindingKind?: string;
       optional?: boolean;
       typeExpr?: unknown;
       documentation?: string;
@@ -240,6 +323,7 @@ const normalizeMethod = (
     params: ReadonlyArray<{
       name: string;
       label?: string;
+      bindingKind?: string;
       optional?: boolean;
       typeExpr?: unknown;
       documentation?: string;
@@ -372,6 +456,7 @@ export const buildDocumentationView = ({
 
   const includedModuleIds = collectExportedModuleIds({
     entryModule: graph.entry,
+    graph,
     semantics,
   });
 

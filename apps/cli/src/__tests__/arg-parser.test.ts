@@ -101,4 +101,17 @@ describe("getConfigFromCli", () => {
     expect(config.index).toBe("./src/pkg.voyd");
     expect(config.pkgDirs).toEqual(["./vendor"]);
   });
+
+  it("does not treat --reporter values as subcommands", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "--test",
+      "--reporter",
+      "doc",
+    ]);
+    expect(config.test).toBe(true);
+    expect(config.doc).toBe(false);
+    expect(config.testReporter).toBe("doc");
+  });
 });

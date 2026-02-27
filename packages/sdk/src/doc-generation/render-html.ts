@@ -23,7 +23,7 @@ type SignatureToken = {
 };
 
 const SIDEBAR_KIND_LABEL: Record<DocumentationItem["kind"], string> = {
-  re_export: "use",
+  re_export: "pub",
   macro: "macro",
   function: "fn",
   type_alias: "type",
@@ -122,7 +122,7 @@ const tokenizeSignature = (signature: string): SignatureToken[] => {
       continue;
     }
 
-    if ("(){}[]<>,:?".includes(char)) {
+    if ("(){}[]<>,:?~".includes(char)) {
       tokens.push({ text: char, className: "tok-punct" });
       index += 1;
       continue;

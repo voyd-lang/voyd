@@ -292,12 +292,13 @@ const formatTypeParameters = (
 const formatLabeledParameterEntry = (
   parameter: DocumentationParameterView,
 ): string => {
+  const renderedName = parameter.mutable ? `~${parameter.name}` : parameter.name;
   const optionalMarker = parameter.optional ? "?" : "";
   const typeText = formatTypeExpr(parameter.typeExpr);
   if (parameter.label === parameter.name) {
-    return `${parameter.label}${optionalMarker}: ${typeText}`;
+    return `${parameter.mutable ? `~${parameter.label}` : parameter.label}${optionalMarker}: ${typeText}`;
   }
-  return `${parameter.label} ${parameter.name}${optionalMarker}: ${typeText}`;
+  return `${parameter.label} ${renderedName}${optionalMarker}: ${typeText}`;
 };
 
 const formatParameterSignature = (
@@ -306,9 +307,10 @@ const formatParameterSignature = (
   if (parameter.label) {
     return `{ ${formatLabeledParameterEntry(parameter)} }`;
   }
+  const renderedName = parameter.mutable ? `~${parameter.name}` : parameter.name;
   const optionalMarker = parameter.optional ? "?" : "";
   const typeText = formatTypeExpr(parameter.typeExpr);
-  return `${parameter.name}${optionalMarker}: ${typeText}`;
+  return `${renderedName}${optionalMarker}: ${typeText}`;
 };
 
 type ParameterChunk =
@@ -528,7 +530,7 @@ const formatReExportSignature = (
     reexport.alias && reexport.alias !== defaultAlias
       ? ` as ${reexport.alias}`
       : "";
-  return `pub use ${formatReExportPath(reexport)}${aliasPart}`;
+  return `pub ${formatReExportPath(reexport)}${aliasPart}`;
 };
 
 const extractTargetName = (targetTypeExpr: unknown): string | undefined => {
@@ -604,6 +606,20 @@ export const createDocumentationModel = ({
 
   const modules = program.modules.map((moduleDoc) => {
     const moduleAnchor = nextAnchor(`module-${moduleDoc.id}`);
+    const documentedTypeNames = new Set([
+      ...moduleDoc.typeAliases
+        .filter((typeAlias) => isPublic(typeAlias.visibility))
+        .map((typeAlias) => typeAlias.name),
+      ...moduleDoc.objects
+        .filter((objectDecl) => isPublic(objectDecl.visibility))
+        .map((objectDecl) => objectDecl.name),
+      ...moduleDoc.traits
+        .filter((traitDecl) => isPublic(traitDecl.visibility))
+        .map((traitDecl) => traitDecl.name),
+      ...moduleDoc.effects
+        .filter((effectDecl) => isPublic(effectDecl.visibility))
+        .map((effectDecl) => effectDecl.name),
+    ]);
 
     const functions = moduleDoc.functions
       .filter(
@@ -722,7 +738,16 @@ export const createDocumentationModel = ({
       );
 
     const impls = moduleDoc.impls
-      .filter((implDecl) => isVisibleImpl(implDecl.visibility))
+      .filter((implDecl) => {
+        if (!isVisibleImpl(implDecl.visibility)) {
+          return false;
+        }
+        const targetName = extractTargetName(implDecl.target);
+        if (!targetName) {
+          return true;
+        }
+        return documentedTypeNames.has(targetName);
+      })
       .map((implDecl) => {
         const implName = `impl#${implDecl.id}`;
         return createItem({

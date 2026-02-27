@@ -51,12 +51,18 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       "",
       "pub obj Counter { api value: i32, pri hidden: i32 }",
       "",
+      "obj Hidden { api value: i32 }",
+      "",
       "impl Counter",
-      "  api fn double(self) -> i32",
+      "  api fn double(~self) -> i32",
       "    self.value * 2",
       "",
       "  fn hide(self) -> i32",
       "    self.hidden",
+      "",
+      "impl Hidden",
+      "  api fn reveal(self) -> i32",
+      "    self.value",
       "",
       "pub fn main() -> i32",
       "  add_one(41)",
@@ -94,6 +100,14 @@ const createPackageRootFixture = async (): Promise<{
       "    0",
       "",
       "pub mod visible",
+      "  mod hidden_nested",
+      "    pub fn hidden() -> i32",
+      "      0",
+      "",
+      "  pub mod nested",
+      "    pub fn deep() -> i32",
+      "      2",
+      "",
       "  pub fn shown() -> i32",
       "    1",
       "",
@@ -120,8 +134,8 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("class=\"tok-name\">take_labeled</span>");
       expect(html.content).toContain("class=\"tok-type\">Counter</span>");
       expect(html.content).toContain("Re-Exports");
-      expect(html.content).toContain("class=\"tok-kw\">use</span>");
-      expect(html.content).toContain("class=\"tok-id\">util</span>");
+      expect(html.content).not.toContain("class=\"tok-kw\">use</span>");
+      expect(html.content).toContain(">pub</code> src::util::all");
       expect(html.content).toContain("class=\"tok-kw\">macro</span>");
       expect(html.content).toContain("class=\"tok-name\">enum</span>");
       expect(html.content).toContain("Builds enum declarations.");
@@ -202,7 +216,7 @@ describe("smoke: sdk doc-generation", () => {
       const hiddenMethodFn = mainModule?.functions.find((fn) => fn.name === "hide");
       expect(hiddenMethodFn).toBeUndefined();
       expect(mainModule?.reexports.map((item) => item.signature)).toContain(
-        "pub use src::util::all",
+        "pub src::util::all",
       );
       const counterImpl = mainModule?.impls.find((impl) =>
         impl.signature.includes("Counter"),
@@ -211,8 +225,11 @@ describe("smoke: sdk doc-generation", () => {
       const doubleMethod = counterImpl?.members.find((member) => member.name === "double");
       expect(doubleMethod).toBeDefined();
       expect(doubleMethod?.signature.startsWith("fn ")).toBe(false);
+      expect(doubleMethod?.signature).toContain("~self");
       const hiddenMethod = counterImpl?.members.find((member) => member.name === "hide");
       expect(hiddenMethod).toBeUndefined();
+      const hiddenImpl = mainModule?.impls.find((impl) => impl.signature.includes("Hidden"));
+      expect(hiddenImpl).toBeUndefined();
       const counterObject = mainModule?.objects.find((objectDecl) => objectDecl.name === "Counter");
       expect(counterObject?.members.map((member) => member.name)).toEqual(["value"]);
       const decodeEffect = mainModule?.effects.find((effectDecl) => effectDecl.name === "Decode");
@@ -233,7 +250,9 @@ describe("smoke: sdk doc-generation", () => {
       });
       expect(html.content).toContain("id=\"module-src-pkg\"");
       expect(html.content).toContain("id=\"module-src-pkg-visible\"");
+      expect(html.content).toContain("id=\"module-src-pkg-visible-nested\"");
       expect(html.content).not.toContain("id=\"module-src-pkg-hidden\"");
+      expect(html.content).not.toContain("id=\"module-src-pkg-visible-hidden-nested\"");
     } finally {
       await fs.rm(fixture.root, { recursive: true, force: true });
     }

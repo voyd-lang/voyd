@@ -34,7 +34,7 @@ pub obj Num {
 }
 
 impl Num
-  api fn double(self) -> i32
+  api fn double(~self) -> i32
     self.value * 2
 
   fn hide(self) -> i32
@@ -101,6 +101,9 @@ pub mod math
     expect(implDecl?.methods.some((method) => method.name === "double")).toBe(
       true,
     );
+    const doubleMethod = implDecl?.methods.find((method) => method.name === "double");
+    const selfParam = doubleMethod?.params.find((param) => param.name === "self");
+    expect(selfParam?.mutable).toBe(true);
     expect(implDecl?.methods.some((method) => method.name === "hide")).toBe(
       false,
     );
@@ -116,6 +119,14 @@ mod hidden
     0
 
 pub mod visible
+  mod hidden_nested
+    pub fn never_seen() -> i32
+      0
+
+  pub mod nested
+    pub fn deep() -> i32
+      2
+
   pub fn shown() -> i32
     1
 `,
@@ -134,6 +145,7 @@ pub mod visible
     expect(view.modules.map((module) => module.id)).toEqual([
       "src::pkg",
       "src::pkg::visible",
+      "src::pkg::visible::nested",
     ]);
   });
 });

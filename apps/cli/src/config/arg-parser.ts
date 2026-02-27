@@ -172,6 +172,11 @@ const parseDocConfig = (argv: readonly string[]): VoydConfig => {
 };
 
 const findSubcommandIndex = (args: readonly string[]): number => {
+  const optionsWithValues = new Set([
+    "--pkg-dir",
+    "--reporter",
+  ]);
+
   let index = 0;
   while (index < args.length) {
     const arg = args[index]!;
@@ -179,11 +184,19 @@ const findSubcommandIndex = (args: readonly string[]): number => {
       return index;
     }
 
-    if (arg === "--pkg-dir") {
+    if (arg === "--") {
+      return -1;
+    }
+
+    if (optionsWithValues.has(arg)) {
       index += 2;
       continue;
     }
-    if (arg.startsWith("--pkg-dir=")) {
+
+    const optionWithInlineValue = Array.from(optionsWithValues).some((option) =>
+      arg.startsWith(`${option}=`),
+    );
+    if (optionWithInlineValue) {
       index += 1;
       continue;
     }
