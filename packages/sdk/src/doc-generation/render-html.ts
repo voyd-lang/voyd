@@ -160,7 +160,10 @@ const tokenizeSignature = (signature: string): SignatureToken[] => {
     const previousText = previousToken?.text;
     const nextText = nextToken?.text;
 
-    if (nextText === "(") {
+    if (
+      nextText === "(" ||
+      (nextText === "<" && (previousText === undefined || previousText === "fn"))
+    ) {
       return { ...token, className: "tok-name" };
     }
 
@@ -699,6 +702,10 @@ export const renderDocumentationHtml = ({
       padding: 0;
       border-radius: 0;
       font-size: 1em;
+    }
+    code.sig {
+      white-space: pre-wrap;
+      line-height: 1.4;
     }
     code.sig .tok-kw { color: #9c4f11; font-weight: 700; }
     code.sig .tok-type { color: #1f5ba8; }

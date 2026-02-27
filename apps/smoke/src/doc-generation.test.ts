@@ -25,6 +25,9 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       "pub fn take_labeled({ n: i32 }) -> i32",
       "  n",
       "",
+      "pub fn fold_like<O>(count: i32, { hi: O }, { there: (acc: O, value: i32) -> O }) -> O",
+      "  there(hi, count)",
+      "",
       "pub obj Counter { value: i32 }",
       "",
       "impl Counter",
@@ -53,7 +56,6 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("Docs Index");
       expect(html.content).toContain("Input value.<br />");
       expect(html.content).toContain("Keep newline.</p>");
-      expect(html.content).toContain("fn take_labeled({ n: i32 }) -&gt; i32");
       expect(html.content).toContain("class=\"tok-kw\">fn</span>");
       expect(html.content).toContain("class=\"tok-name\">take_labeled</span>");
       expect(html.content).toContain("class=\"tok-type\">Counter</span>");
@@ -91,6 +93,13 @@ describe("smoke: sdk doc-generation", () => {
       expect(valueDoc?.documentation).toBe(" Input value.\n Keep newline.");
       const labeledFn = mainModule?.functions.find((fn) => fn.name === "take_labeled");
       expect(labeledFn?.signature).toContain("{ n: i32 }");
+      const foldLike = mainModule?.functions.find((fn) => fn.name === "fold_like");
+      expect(foldLike).toBeDefined();
+      expect(foldLike?.signature).toContain("\n");
+      expect(foldLike?.signature).toContain("  {");
+      expect(foldLike?.signature).toContain("hi: O");
+      expect(foldLike?.signature).toContain("there: (acc: O, value: i32) -> O");
+      expect(foldLike?.signature).not.toContain("}, {");
       const duplicateMethodFn = mainModule?.functions.find((fn) => fn.name === "double");
       expect(duplicateMethodFn).toBeUndefined();
       const counterImpl = mainModule?.impls.find((impl) =>

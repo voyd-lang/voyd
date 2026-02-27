@@ -288,18 +288,147 @@ const formatTypeParameters = (
   return `<${typeParameters.map((parameter) => parameter.name).join(", ")}>`;
 };
 
-const formatParameterSignature = (
+const formatLabeledParameterEntry = (
   parameter: DocumentationParameterView,
 ): string => {
   const optionalMarker = parameter.optional ? "?" : "";
   const typeText = formatTypeExpr(parameter.typeExpr);
-  if (parameter.label) {
-    if (parameter.label === parameter.name) {
-      return `{ ${parameter.label}${optionalMarker}: ${typeText} }`;
-    }
-    return `{ ${parameter.label} ${parameter.name}${optionalMarker}: ${typeText} }`;
+  if (parameter.label === parameter.name) {
+    return `${parameter.label}${optionalMarker}: ${typeText}`;
   }
+  return `${parameter.label} ${parameter.name}${optionalMarker}: ${typeText}`;
+};
+
+const formatParameterSignature = (
+  parameter: DocumentationParameterView,
+): string => {
+  if (parameter.label) {
+    return `{ ${formatLabeledParameterEntry(parameter)} }`;
+  }
+  const optionalMarker = parameter.optional ? "?" : "";
+  const typeText = formatTypeExpr(parameter.typeExpr);
   return `${parameter.name}${optionalMarker}: ${typeText}`;
+};
+
+type ParameterChunk =
+  | { kind: "plain"; text: string }
+  | { kind: "labeled-group"; entries: readonly string[] };
+
+const buildParameterChunks = (
+  params: readonly DocumentationParameterView[],
+): ParameterChunk[] => {
+  const chunks: ParameterChunk[] = [];
+
+  let index = 0;
+  while (index < params.length) {
+    const parameter = params[index]!;
+    if (!parameter.label) {
+      chunks.push({ kind: "plain", text: formatParameterSignature(parameter) });
+      index += 1;
+      continue;
+    }
+
+    const entries: string[] = [];
+    while (index < params.length) {
+      const labeledParam = params[index]!;
+      if (!labeledParam.label) {
+        break;
+      }
+      entries.push(formatLabeledParameterEntry(labeledParam));
+      index += 1;
+    }
+    chunks.push({ kind: "labeled-group", entries });
+  }
+
+  return chunks;
+};
+
+const renderParameterChunkInline = (chunk: ParameterChunk): string =>
+  chunk.kind === "plain"
+    ? chunk.text
+    : `{ ${chunk.entries.join(", ")} }`;
+
+const isComplexParameterChunk = (chunk: ParameterChunk): boolean =>
+  chunk.kind === "labeled-group"
+    ? chunk.entries.length > 1 || chunk.entries.some((entry) => entry.includes("->"))
+    : chunk.text.includes("->");
+
+const shouldMultilineSignature = ({
+  header,
+  chunks,
+  effectPart,
+  returnPart,
+}: {
+  header: string;
+  chunks: readonly ParameterChunk[];
+  effectPart: string;
+  returnPart: string;
+}): boolean => {
+  const inlineParams = chunks.map(renderParameterChunkInline).join(", ");
+  const inlineSignature = `${header}(${inlineParams})${effectPart}${returnPart}`;
+  if (inlineSignature.length > 92) {
+    return true;
+  }
+
+  const hasComplexChunk = chunks.some(isComplexParameterChunk);
+  if (hasComplexChunk && chunks.length >= 2) {
+    return true;
+  }
+
+  return chunks.some(
+    (chunk) => chunk.kind === "labeled-group" && chunk.entries.length > 1,
+  );
+};
+
+const renderParameterChunkMultiline = (chunk: ParameterChunk): string => {
+  if (chunk.kind === "plain") {
+    return `  ${chunk.text}`;
+  }
+  const entries = chunk.entries.map((entry) => `    ${entry}`).join("\n");
+  return `  {\n${entries}\n  }`;
+};
+
+const formatCallableSignature = ({
+  callableKeyword,
+  name,
+  typeParameters,
+  params,
+  effectTypeExpr,
+  returnTypeExpr,
+}: {
+  callableKeyword?: string;
+  name: string;
+  typeParameters?: ReadonlyArray<{ name: string }>;
+  params: ReadonlyArray<DocumentationParameterView>;
+  effectTypeExpr?: unknown;
+  returnTypeExpr?: unknown;
+}): string => {
+  const typeParams = formatTypeParameters(typeParameters);
+  const chunks = buildParameterChunks(params);
+  const effectPart = effectTypeExpr
+    ? `: ${formatTypeExpr(effectTypeExpr)}`
+    : "";
+  const returnPart = returnTypeExpr
+    ? ` -> ${formatTypeExpr(returnTypeExpr)}`
+    : "";
+  const header = callableKeyword
+    ? `${callableKeyword} ${name}${typeParams}`
+    : `${name}${typeParams}`;
+
+  if (
+    !shouldMultilineSignature({
+      header,
+      chunks,
+      effectPart,
+      returnPart,
+    })
+  ) {
+    const inlineParams = chunks.map(renderParameterChunkInline).join(", ");
+    return `${header}(${inlineParams})${effectPart}${returnPart}`;
+  }
+
+  const multilineParams = chunks.map(renderParameterChunkMultiline).join(",\n");
+  return `${header}(\n${multilineParams}\n)${effectPart}${returnPart}`;
 };
 
 const formatFunctionSignature = (fn: {
@@ -308,17 +437,15 @@ const formatFunctionSignature = (fn: {
   params: ReadonlyArray<DocumentationParameterView>;
   effectTypeExpr?: unknown;
   returnTypeExpr?: unknown;
-}): string => {
-  const typeParams = formatTypeParameters(fn.typeParameters);
-  const params = fn.params.map(formatParameterSignature).join(", ");
-  const effectPart = fn.effectTypeExpr
-    ? `: ${formatTypeExpr(fn.effectTypeExpr)}`
-    : "";
-  const returnPart = fn.returnTypeExpr
-    ? ` -> ${formatTypeExpr(fn.returnTypeExpr)}`
-    : "";
-  return `fn ${fn.name}${typeParams}(${params})${effectPart}${returnPart}`;
-};
+}): string =>
+  formatCallableSignature({
+    callableKeyword: "fn",
+    name: fn.name,
+    typeParameters: fn.typeParameters,
+    params: fn.params,
+    effectTypeExpr: fn.effectTypeExpr,
+    returnTypeExpr: fn.returnTypeExpr,
+  });
 
 const formatMethodSignature = (member: {
   name: string;
@@ -326,17 +453,14 @@ const formatMethodSignature = (member: {
   params: ReadonlyArray<DocumentationParameterView>;
   effectTypeExpr?: unknown;
   returnTypeExpr?: unknown;
-}): string => {
-  const typeParams = formatTypeParameters(member.typeParameters);
-  const params = member.params.map(formatParameterSignature).join(", ");
-  const effectPart = member.effectTypeExpr
-    ? `: ${formatTypeExpr(member.effectTypeExpr)}`
-    : "";
-  const returnPart = member.returnTypeExpr
-    ? ` -> ${formatTypeExpr(member.returnTypeExpr)}`
-    : "";
-  return `${member.name}${typeParams}(${params})${effectPart}${returnPart}`;
-};
+}): string =>
+  formatCallableSignature({
+    name: member.name,
+    typeParameters: member.typeParameters,
+    params: member.params,
+    effectTypeExpr: member.effectTypeExpr,
+    returnTypeExpr: member.returnTypeExpr,
+  });
 
 const collectParameterDocs = (
   params: readonly DocumentationParameterView[],
