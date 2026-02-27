@@ -5,7 +5,11 @@ on:
     branches: [main]
     paths:
       - "apps/site/**"
+      - "apps/cli/**"
+      - "packages/compiler/**"
       - "packages/reference/**"
+      - "packages/sdk/**"
+      - "packages/std/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -47,6 +51,11 @@ jobs:
           echo "TURBO_SCM_HEAD=${{ github.sha }}" >> "$GITHUB_ENV"
 
       - run: npm ci --include=optional
+
+      - name: Generate std docs
+        run: |
+          mkdir -p apps/site/public/std
+          VOYD_USE_SRC=1 npx tsx --conditions=development apps/cli/src/cli-dev.ts doc packages/std/src --format html --out apps/site/public/std/index.html
 
       - name: Build
         env:

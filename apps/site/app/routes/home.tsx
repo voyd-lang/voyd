@@ -2,7 +2,7 @@ import type { Route } from "./+types/home";
 import logo from "../../assets/dark-star2.svg";
 
 import { type ReactNode } from "react";
-import { Link } from "react-router";
+import { Link, useHref } from "react-router";
 import { VsxPlayground } from "~/components/VsxPlayground";
 import CodeBlock from "~/components/CodeBlock";
 
@@ -186,24 +186,34 @@ const Section = ({
   );
 };
 
-const Links = () => (
-  <div className="w-full items-center justify-center flex gap-4">
-    <Link
-      to="/docs"
-      className="px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-500"
-    >
-      Read the Docs
-    </Link>
-    <a
-      href="https://github.com/voyd-lang/voyd"
-      className="px-4 py-2 rounded-md border border-indigo-600 text-indigo-400 hover:bg-indigo-600 hover:text-white"
-      target="_blank"
-      rel="noopener noreferrer"
-    >
-      GitHub
-    </a>
-  </div>
-);
+const Links = () => {
+  const stdDocsPath = useHref("/std/");
+
+  return (
+    <div className="w-full items-center justify-center flex gap-4 flex-wrap">
+      <Link
+        to="/docs"
+        className="px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-500"
+      >
+        Read the Docs
+      </Link>
+      <a
+        href={stdDocsPath}
+        className="px-4 py-2 rounded-md bg-teal-600 text-white hover:bg-teal-500"
+      >
+        Read Std Docs
+      </a>
+      <a
+        href="https://github.com/voyd-lang/voyd"
+        className="px-4 py-2 rounded-md border border-indigo-600 text-indigo-400 hover:bg-indigo-600 hover:text-white"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        GitHub
+      </a>
+    </div>
+  );
+};
 
 const Explainer = ({
   title,

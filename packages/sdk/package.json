@@ -29,6 +29,12 @@
       "import": "./dist/compiler.js",
       "default": "./dist/compiler.js"
     },
+    "./doc-generation": {
+      "types": "./dist/doc-generation/index.d.ts",
+      "development": "./src/doc-generation/index.ts",
+      "import": "./dist/doc-generation/index.js",
+      "default": "./dist/doc-generation/index.js"
+    },
     "./js-host": {
       "types": "./dist/js-host.d.ts",
       "development": "./src/js-host.ts",

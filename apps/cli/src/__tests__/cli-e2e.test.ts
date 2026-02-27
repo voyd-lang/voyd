@@ -212,8 +212,10 @@ const createDocFixture = async (): Promise<string> => {
       "//! Package docs.",
       "",
       "/// Adds values with **markdown**.",
+      "/// This line should remain separate.",
       "pub fn add(",
       "  /// Left side.",
+      "  /// Still left side.",
       "  left: i32,",
       "  /// Right side.",
       "  right: i32",
@@ -223,6 +225,12 @@ const createDocFixture = async (): Promise<string> => {
       "/// Adds without arguments.",
       "pub fn add() -> i32",
       "  0",
+      "",
+      "/// Math helpers.",
+      "pub mod math",
+      "  /// Adds one.",
+      "  pub fn plus_one(value: i32) -> i32",
+      "    value + 1",
       "",
       "pub fn main() -> i32",
       "  add(1, 2)",
@@ -473,7 +481,7 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 });
 
 describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
-  it("emits self-contained HTML with TOC, anchors, and rendered docs", async () => {
+  it("emits legible HTML docs with hierarchical navigation", async () => {
     assertCliRunnerAvailable();
 
     const root = await createDocFixture();
@@ -487,11 +495,54 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       const docsPath = resolve(root, "docs.html");
       const html = await readFile(docsPath, "utf8");
       expect(html).toContain("<!doctype html>");
+      expect(html).toContain("Docs Index");
       expect(html).toContain("Table of Contents");
-      expect(html).toContain("id=\"fn-src-main-add\"");
-      expect(html).toContain("id=\"fn-src-main-add-1\"");
+      expect(html).toContain("id=\"module-src-main\"");
+      expect(html).toContain("id=\"module-src-main-math\"");
+      expect(html).toContain("<details>");
+      expect(html).toContain("<summary><a href=\"#module-src-main\">main</a></summary>");
+      expect(html).not.toContain("<summary><span>src</span></summary>");
+      expect(html).not.toContain("<details open>");
+      expect(html).toContain("<a href=\"#function-src-main-add\">");
+      expect(html).toContain("<code>fn</code> add");
+      expect(html).toContain("<a href=\"#module-src-main-math\">math</a>");
+      expect(html).toContain("id=\"function-src-main-add\"");
+      expect(html).toContain("id=\"function-src-main-add-1\"");
       expect(html).toContain("<strong>markdown</strong>");
-      expect(html).toContain("Left side.");
+      expect(html).toContain("Left side.<br />");
+      expect(html).toContain("Still left side.</p>");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("supports JSON documentation output", async () => {
+    assertCliRunnerAvailable();
+
+    const root = await createDocFixture();
+    try {
+      const result = runCli(root, ["doc", "--format", "json"]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      if (result.status !== 0) {
+        throw new Error(`voyd doc --format json failed: ${output}`);
+      }
+
+      const docsPath = resolve(root, "docs.json");
+      const json = JSON.parse(await readFile(docsPath, "utf8")) as {
+        modules: Array<{
+          id: string;
+          functions: Array<{
+            name: string;
+            parameterDocs: Array<{ name: string; documentation: string }>;
+          }>;
+        }>;
+      };
+      const mainModule = json.modules.find((module) => module.id === "src::main");
+      expect(mainModule).toBeDefined();
+      const addFn = mainModule?.functions.find((fn) => fn.name === "add");
+      expect(addFn).toBeDefined();
+      const leftDoc = addFn?.parameterDocs.find((param) => param.name === "left");
+      expect(leftDoc?.documentation).toBe(" Left side.\n Still left side.");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -507,6 +558,28 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(result.status).not.toBe(0);
       expect(output).toContain("MD0004");
       expect(output).toContain("Dangling doc comment");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps --out off top-level help and scoped to doc help", async () => {
+    assertCliRunnerAvailable();
+
+    const root = await createFixture();
+    try {
+      const mainHelp = runCli(root, ["--help"]);
+      const mainOutput = `${mainHelp.stdout ?? ""}${mainHelp.stderr ?? ""}`;
+      expect(mainHelp.status).toBe(0);
+      expect(mainOutput).toContain("Commands:");
+      expect(mainOutput).toContain("doc [index]");
+      expect(mainOutput).not.toContain("--out <path>");
+
+      const docHelp = runCli(root, ["doc", "--help"]);
+      const docOutput = `${docHelp.stdout ?? ""}${docHelp.stderr ?? ""}`;
+      expect(docHelp.status).toBe(0);
+      expect(docOutput).toContain("--out <path>");
+      expect(docOutput).toContain("--format <format>");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

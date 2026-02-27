@@ -49,6 +49,10 @@ pub fn add(
 ) -> i32
   left + right + value
 
+/// Creates enums.
+pub macro enum(enum_name, variants_block)
+  syntax_template (void)
+
 /// Value alias.
 pub type Value = i32
 
@@ -86,6 +90,9 @@ pub mod math
 
     const mainModule = graph.modules.get("src::main");
     expect(mainModule?.docs?.module).toBe(" Module docs.\n More module docs.");
+    expect(mainModule?.docs?.macroDeclarationsByName.get("enum")).toBe(
+      " Creates enums.",
+    );
 
     const mainSemantics = semantics.get("src::main");
     expect(mainSemantics).toBeDefined();
