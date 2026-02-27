@@ -475,6 +475,92 @@ pub fn main() -> i32
     expect(output).toBe(1);
   });
 
+  it("runs std input/output byte and tty effects with default host adapters", async () => {
+    const sdk = createSdk();
+    const source = `use std::bytes::Bytes
+use std::error::IoError
+use std::input::{ read_bytes, is_tty as input_is_tty }
+use std::optional::types::all
+use std::output::{ write, write_line, write_bytes, flush, is_tty as output_is_tty, StdErr }
+use std::result::types::all
+
+fn sum_bytes(bytes: Bytes): () -> i32
+  let values = bytes.to_array()
+  var index = 0
+  var total = 0
+  while index < values.len() do:
+    match(values.get(index))
+      Some<i32> { value }:
+        total = total + value
+      None:
+        void
+    index = index + 1
+  total
+
+pub fn main() -> i32
+  if input_is_tty() == false then:
+    return -10
+  if output_is_tty() == false then:
+    return -11
+  if output_is_tty(target: StdErr {}) then:
+    return -12
+
+  let read_result = match(read_bytes(max_bytes: 4))
+    Ok<Option<Bytes>> { value }:
+      match(value)
+        Some<Bytes> { value: bytes }:
+          sum_bytes(bytes)
+        None:
+          return -2
+    Err<IoError>:
+      return -1
+
+  let ~buffer = std::bytes::ByteBuffer::with_capacity(bytes: 2)
+  buffer.push(value: 7)
+  buffer.push(value: 8)
+  let _ = write(value: "hello".as_slice())
+  let _ = write_line(value: "ok".as_slice())
+  let _ = write_bytes(bytes: buffer.as_bytes(), target: StdErr {})
+  let _ = flush()
+  let _ = flush(target: StdErr {})
+
+  read_result
+`;
+    const result = expectCompileSuccess(await sdk.compile({ source }));
+    const writes: Array<{ target: string; value: string }> = [];
+    const byteWrites: Array<{ target: string; bytes: number[] }> = [];
+    const flushes: string[] = [];
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: {
+          readBytes: async () => Uint8Array.from([7, 8, 9]),
+          isInputTty: () => true,
+          write: async ({ target, value }) => {
+            writes.push({ target, value });
+          },
+          writeBytes: async ({ target, bytes }) => {
+            byteWrites.push({ target, bytes: Array.from(bytes.values()) });
+          },
+          flush: async ({ target }) => {
+            flushes.push(target);
+          },
+          isOutputTty: (target) => target === "stdout",
+        },
+      },
+    });
+
+    const output = await host.run<number>("main");
+    expect(output).toBe(24);
+    expect(writes).toEqual([
+      { target: "stdout", value: "hello" },
+      { target: "stdout", value: "ok\n" },
+    ]);
+    expect(byteWrites).toEqual([{ target: "stderr", bytes: [7, 8] }]);
+    expect(flushes).toEqual(["stdout", "stderr"]);
+  });
+
   it("isolates concurrent managed runs so effect payloads do not race", async () => {
     const sdk = createSdk();
     const source = `use std::msgpack::self as __std_msgpack
