@@ -1,13 +1,10 @@
 import path from "node:path";
+import { buildDocumentationView } from "@voyd/compiler/docs/documentation-view.js";
 import { analyzeModules, loadModuleGraph } from "@voyd/compiler/pipeline.js";
 import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
 import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { createDocumentationModel } from "./model.js";
-import type {
-  DocumentationGraphLike,
-  DocumentationSemanticsLike,
-} from "./model.js";
 import { renderDocumentationHtml } from "./render-html.js";
 import { renderDocumentationJson } from "./render-json.js";
 import type { DocumentationModel, DocumentationOutputFormat } from "./types.js";
@@ -98,12 +95,9 @@ export const generateDocumentation = async ({
     throw { diagnostics: [...diagnostics] };
   }
 
+  const program = buildDocumentationView({ graph, semantics });
   const model = createDocumentationModel({
-    graph: graph as unknown as DocumentationGraphLike,
-    semantics: semantics as unknown as ReadonlyMap<
-      string,
-      DocumentationSemanticsLike
-    >,
+    program,
   });
 
   return {

@@ -1,4 +1,10 @@
 import type {
+  DocumentationFunctionView,
+  DocumentationMethodView,
+  DocumentationParameterView,
+  DocumentationProgramView,
+} from "@voyd/compiler/docs/documentation-view.js";
+import type {
   DocumentationItem,
   DocumentationItemKind,
   DocumentationMember,
@@ -6,100 +12,7 @@ import type {
   ModuleDocumentationSection,
 } from "./types.js";
 
-type VisibilityLike = {
-  level?: string;
-};
-
-type ParameterLike = {
-  name: string;
-  label?: string;
-  optional?: boolean;
-  typeExpr?: unknown;
-  documentation?: string;
-};
-
-type FunctionLike = {
-  id: number;
-  name: string;
-  visibility: VisibilityLike;
-  typeParameters?: ReadonlyArray<{ name: string }>;
-  params: ReadonlyArray<ParameterLike>;
-  returnTypeExpr?: unknown;
-  effectTypeExpr?: unknown;
-  documentation?: string;
-};
-
-type TypeAliasLike = {
-  name: string;
-  visibility: VisibilityLike;
-  typeParameters?: ReadonlyArray<{ name: string }>;
-  target: unknown;
-  documentation?: string;
-};
-
-type ObjectLike = {
-  name: string;
-  visibility: VisibilityLike;
-  typeParameters?: ReadonlyArray<{ name: string }>;
-  baseTypeExpr?: unknown;
-  fields: ReadonlyArray<{
-    name: string;
-    typeExpr: unknown;
-    documentation?: string;
-  }>;
-  documentation?: string;
-};
-
-type TraitLike = {
-  name: string;
-  visibility: VisibilityLike;
-  typeParameters?: ReadonlyArray<{ name: string }>;
-  methods: ReadonlyArray<{
-    name: string;
-    params: ReadonlyArray<ParameterLike>;
-    returnTypeExpr?: unknown;
-    effectTypeExpr?: unknown;
-    documentation?: string;
-  }>;
-  documentation?: string;
-};
-
-type ImplLike = {
-  id: number;
-  visibility: VisibilityLike;
-  target: unknown;
-  trait?: unknown;
-  typeParameters?: ReadonlyArray<{ name: string }>;
-  methods: ReadonlyArray<FunctionLike>;
-  documentation?: string;
-};
-
-type ModuleDocumentationLike = {
-  module?: string;
-};
-
-type ModuleNodeLike = {
-  id: string;
-  docs?: ModuleDocumentationLike;
-};
-
-export type DocumentationSemanticsLike = {
-  binding: {
-    packageId: string;
-    functions: ReadonlyArray<FunctionLike>;
-    typeAliases: ReadonlyArray<TypeAliasLike>;
-    objects: ReadonlyArray<ObjectLike>;
-    traits: ReadonlyArray<TraitLike>;
-    impls: ReadonlyArray<ImplLike>;
-  };
-};
-
-export type DocumentationGraphLike = {
-  entry: string;
-  modules: ReadonlyMap<string, ModuleNodeLike>;
-};
-
-const isPublic = (visibility: VisibilityLike | undefined): boolean =>
+const isPublic = (visibility: { level?: string } | undefined): boolean =>
   visibility?.level === "public" || visibility?.level === "package";
 
 const sanitizeAnchorSegment = (value: string): string =>
@@ -172,7 +85,9 @@ const formatTypeParameters = (
   return `<${typeParameters.map((parameter) => parameter.name).join(", ")}>`;
 };
 
-const formatParameterSignature = (parameter: ParameterLike): string => {
+const formatParameterSignature = (
+  parameter: DocumentationParameterView,
+): string => {
   const optionalMarker = parameter.optional ? "?" : "";
   const typeText = formatTypeExpr(parameter.typeExpr);
   if (parameter.label && parameter.label !== parameter.name) {
@@ -184,7 +99,7 @@ const formatParameterSignature = (parameter: ParameterLike): string => {
 const formatFunctionSignature = (fn: {
   name: string;
   typeParameters?: ReadonlyArray<{ name: string }>;
-  params: ReadonlyArray<ParameterLike>;
+  params: ReadonlyArray<DocumentationParameterView>;
   effectTypeExpr?: unknown;
   returnTypeExpr?: unknown;
 }): string => {
@@ -200,7 +115,7 @@ const formatFunctionSignature = (fn: {
 };
 
 const collectParameterDocs = (
-  params: readonly ParameterLike[],
+  params: readonly DocumentationParameterView[],
 ): Array<{ name: string; documentation: string }> =>
   params.flatMap((param) =>
     param.documentation === undefined
@@ -208,10 +123,20 @@ const collectParameterDocs = (
       : [{ name: param.name, documentation: param.documentation }],
   );
 
+const memberFromMethod = ({
+  method,
+}: {
+  method: DocumentationMethodView;
+}): Omit<DocumentationMember, "anchor"> => ({
+  name: method.name,
+  signature: formatFunctionSignature(method),
+  documentation: method.documentation,
+});
+
 const memberFromFunction = ({
   fn,
 }: {
-  fn: { name: string; params: ReadonlyArray<ParameterLike>; documentation?: string };
+  fn: DocumentationFunctionView;
 }): Omit<DocumentationMember, "anchor"> => ({
   name: fn.name,
   signature: formatFunctionSignature(fn),
@@ -261,38 +186,21 @@ const sortModules = (
 ): ModuleDocumentationSection[] =>
   [...modules].sort((left, right) => left.id.localeCompare(right.id));
 
-const moduleDepth = (moduleId: string): number => moduleId.split("::").length - 1;
-
 export const createDocumentationModel = ({
-  graph,
-  semantics,
+  program,
 }: {
-  graph: DocumentationGraphLike;
-  semantics: ReadonlyMap<string, DocumentationSemanticsLike>;
+  program: DocumentationProgramView;
 }): DocumentationModel => {
   const nextAnchor = createAnchorGenerator();
-  const entrySemantics = semantics.get(graph.entry);
-  const packageId =
-    entrySemantics?.binding.packageId ??
-    semantics.values().next().value?.binding?.packageId;
 
-  const modules = Array.from(semantics.keys()).flatMap((moduleId) => {
-    const semantic = semantics.get(moduleId);
-    if (!semantic) {
-      return [];
-    }
-    if (packageId && semantic.binding.packageId !== packageId) {
-      return [];
-    }
+  const modules = program.modules.map((moduleDoc) => {
+    const moduleAnchor = nextAnchor(`module-${moduleDoc.id}`);
 
-    const moduleNode = graph.modules.get(moduleId);
-    const moduleAnchor = nextAnchor(`module-${moduleId}`);
-
-    const functions = semantic.binding.functions
+    const functions = moduleDoc.functions
       .filter((fn) => isPublic(fn.visibility))
       .map((fn) =>
         createItem({
-          moduleId,
+          moduleId: moduleDoc.id,
           kind: "function",
           name: fn.name,
           signature: formatFunctionSignature(fn),
@@ -302,11 +210,11 @@ export const createDocumentationModel = ({
         }),
       );
 
-    const typeAliases = semantic.binding.typeAliases
+    const typeAliases = moduleDoc.typeAliases
       .filter((typeAlias) => isPublic(typeAlias.visibility))
       .map((typeAlias) =>
         createItem({
-          moduleId,
+          moduleId: moduleDoc.id,
           kind: "type_alias",
           name: typeAlias.name,
           signature: `type ${typeAlias.name}${formatTypeParameters(
@@ -317,11 +225,11 @@ export const createDocumentationModel = ({
         }),
       );
 
-    const objects = semantic.binding.objects
+    const objects = moduleDoc.objects
       .filter((objectDecl) => isPublic(objectDecl.visibility))
       .map((objectDecl) =>
         createItem({
-          moduleId,
+          moduleId: moduleDoc.id,
           kind: "object",
           name: objectDecl.name,
           signature: `obj ${objectDecl.name}${formatTypeParameters(
@@ -341,32 +249,30 @@ export const createDocumentationModel = ({
         }),
       );
 
-    const traits = semantic.binding.traits
+    const traits = moduleDoc.traits
       .filter((traitDecl) => isPublic(traitDecl.visibility))
       .map((traitDecl) =>
         createItem({
-          moduleId,
+          moduleId: moduleDoc.id,
           kind: "trait",
           name: traitDecl.name,
           signature: `trait ${traitDecl.name}${formatTypeParameters(
             traitDecl.typeParameters,
           )}`,
           documentation: traitDecl.documentation,
-          members: traitDecl.methods.map((method) => ({
-            name: method.name,
-            signature: formatFunctionSignature(method),
-            documentation: method.documentation,
-          })),
+          members: traitDecl.methods.map((method) =>
+            memberFromMethod({ method }),
+          ),
           nextAnchor,
         }),
       );
 
-    const impls = semantic.binding.impls
+    const impls = moduleDoc.impls
       .filter((implDecl) => isPublic(implDecl.visibility))
       .map((implDecl) => {
         const implName = `impl#${implDecl.id}`;
         return createItem({
-          moduleId,
+          moduleId: moduleDoc.id,
           kind: "impl",
           name: implName,
           signature: `impl${formatTypeParameters(
@@ -375,28 +281,28 @@ export const createDocumentationModel = ({
             implDecl.trait ? ` for ${formatTypeExpr(implDecl.trait)}` : ""
           }`,
           documentation: implDecl.documentation,
-          members: implDecl.methods.map((method) => memberFromFunction({ fn: method })),
+          members: implDecl.methods.map((method) =>
+            memberFromFunction({ fn: method }),
+          ),
           nextAnchor,
         });
       });
 
-    return [
-      {
-        id: moduleId,
-        depth: moduleDepth(moduleId),
-        anchor: moduleAnchor,
-        documentation: moduleNode?.docs?.module,
-        functions,
-        typeAliases,
-        objects,
-        traits,
-        impls,
-      },
-    ];
+    return {
+      id: moduleDoc.id,
+      depth: moduleDoc.depth,
+      anchor: moduleAnchor,
+      documentation: moduleDoc.documentation,
+      functions,
+      typeAliases,
+      objects,
+      traits,
+      impls,
+    };
   });
 
   return {
-    entryModule: graph.entry,
+    entryModule: program.entryModule,
     generatedAt: new Date().toISOString(),
     modules: sortModules(modules),
   };
