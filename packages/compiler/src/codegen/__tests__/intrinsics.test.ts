@@ -556,27 +556,34 @@ describe("compileIntrinsicCall array intrinsics", () => {
 
     fnCtx.returnTypeId = boolType;
 
+    const leftArg = ctx.mod.i32.eq(ctx.mod.i32.const(1), ctx.mod.i32.const(1));
+    const rightArg = ctx.mod.i32.eq(ctx.mod.i32.const(2), ctx.mod.i32.const(3));
+
     const andExpr = compileIntrinsicCall({
       name: "and",
       call: makeCall([1 as HirExprId, 2 as HirExprId]),
-      args: [ctx.mod.i32.const(1), ctx.mod.i32.const(0)],
+      args: [leftArg, rightArg],
       ctx,
       fnCtx,
     });
-    const andInfo = binaryen.getExpressionInfo(andExpr) as binaryen.BinaryInfo;
-    expect(andInfo.id).toBe(binaryen.ExpressionIds.Binary);
-    expect(andInfo.op).toBe(binaryen.Operations.AndInt32);
+    const andInfo = binaryen.getExpressionInfo(andExpr) as binaryen.IfInfo;
+    expect(andInfo.id).toBe(binaryen.ExpressionIds.If);
+    expect(andInfo.condition).toBe(leftArg);
+    expect(andInfo.ifTrue).toBe(rightArg);
+    expectExpressionId(andInfo.ifFalse, binaryen.ExpressionIds.Const);
 
     const orExpr = compileIntrinsicCall({
       name: "or",
       call: makeCall([1 as HirExprId, 2 as HirExprId]),
-      args: [ctx.mod.i32.const(1), ctx.mod.i32.const(0)],
+      args: [leftArg, rightArg],
       ctx,
       fnCtx,
     });
-    const orInfo = binaryen.getExpressionInfo(orExpr) as binaryen.BinaryInfo;
-    expect(orInfo.id).toBe(binaryen.ExpressionIds.Binary);
-    expect(orInfo.op).toBe(binaryen.Operations.OrInt32);
+    const orInfo = binaryen.getExpressionInfo(orExpr) as binaryen.IfInfo;
+    expect(orInfo.id).toBe(binaryen.ExpressionIds.If);
+    expect(orInfo.condition).toBe(leftArg);
+    expectExpressionId(orInfo.ifTrue, binaryen.ExpressionIds.Const);
+    expect(orInfo.ifFalse).toBe(rightArg);
 
     const xorExpr = compileIntrinsicCall({
       name: "xor",
