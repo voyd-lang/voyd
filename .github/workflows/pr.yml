@@ -17,8 +17,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.event.pull_request.head.sha }}
+          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
           restore-keys: |
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Use Node.js
         uses: actions/setup-node@v4
@@ -43,8 +44,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.event.pull_request.head.sha }}
+          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
           restore-keys: |
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Detect changed areas
         id: changes
