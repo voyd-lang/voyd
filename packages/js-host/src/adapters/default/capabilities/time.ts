@@ -1,7 +1,9 @@
 import {
+  MAX_TIMER_DELAY_MILLIS,
   globalRecord,
   hostOk,
   sleepInChunks,
+  toI64,
   toNonNegativeI64,
 } from "../helpers.js";
 import {
@@ -60,6 +62,22 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
     }
 
     const implementedOps = new Set<string>();
+    let nextTimerId = 1n;
+    const pendingIntervalTimers = new Map<bigint, { cancel: () => void }>();
+    const waitForMillis = async (totalMillis: bigint): Promise<void> => {
+      const sleepHook = runtimeHooks.sleepMillis;
+      const sleepChunk = sleepHook
+        ? (milliseconds: number) => sleepHook(milliseconds)
+        : (milliseconds: number) =>
+            new Promise<void>((resolve) => {
+              setTimeout(resolve, milliseconds);
+            });
+      await sleepInChunks({
+        totalMillis,
+        sleep: sleepChunk,
+      });
+    };
+
     let registered = 0;
     registered += registerOpHandler({
       host,
@@ -83,21 +101,85 @@ export const timeCapabilityDefinition: CapabilityDefinition = {
       opName: "sleep_millis",
       handler: async ({ tail }, ms) => {
         const sleepMillis = toNonNegativeI64(ms);
-        const sleepHook = runtimeHooks.sleepMillis;
-        const sleepChunk = sleepHook
-          ? (milliseconds: number) => sleepHook(milliseconds)
-          : (milliseconds: number) =>
-              new Promise<void>((resolve) => {
-                setTimeout(resolve, milliseconds);
-              });
-        await sleepInChunks({
-          totalMillis: sleepMillis,
-          sleep: sleepChunk,
-        });
+        await waitForMillis(sleepMillis);
         return tail(hostOk());
       },
     });
     implementedOps.add("sleep_millis");
+
+    registered += registerOpHandler({
+      host,
+      effectId: TIME_EFFECT_ID,
+      opName: "set_timeout_millis",
+      handler: async ({ tail }, ms) => {
+        await waitForMillis(toNonNegativeI64(ms));
+        return tail(hostOk());
+      },
+    });
+    implementedOps.add("set_timeout_millis");
+
+    registered += registerOpHandler({
+      host,
+      effectId: TIME_EFFECT_ID,
+      opName: "set_interval_millis",
+      handler: ({ tail }, ms) => {
+        const intervalMillis = toNonNegativeI64(ms);
+        const timerId = nextTimerId;
+        nextTimerId += 1n;
+        const timerRef = { cancel: () => undefined };
+        pendingIntervalTimers.set(timerId, timerRef);
+
+        if (typeof runtimeHooks.sleepMillis !== "function") {
+          let cancelled = false;
+          let currentTimeout: ReturnType<typeof setTimeout> | null = null;
+          const runNextChunk = (remaining: bigint): void => {
+            if (cancelled || remaining <= 0n) {
+              if (pendingIntervalTimers.get(timerId) === timerRef) {
+                pendingIntervalTimers.delete(timerId);
+              }
+              return;
+            }
+            const chunkMillis =
+              remaining > BigInt(MAX_TIMER_DELAY_MILLIS)
+                ? MAX_TIMER_DELAY_MILLIS
+                : Number(remaining);
+            currentTimeout = setTimeout(() => {
+              currentTimeout = null;
+              runNextChunk(remaining - BigInt(chunkMillis));
+            }, chunkMillis);
+          };
+          timerRef.cancel = () => {
+            cancelled = true;
+            if (currentTimeout !== null && typeof clearTimeout === "function") {
+              clearTimeout(currentTimeout);
+              currentTimeout = null;
+            }
+          };
+          runNextChunk(intervalMillis);
+        }
+        return tail(hostOk(timerId));
+      },
+    });
+    implementedOps.add("set_interval_millis");
+
+    registered += registerOpHandler({
+      host,
+      effectId: TIME_EFFECT_ID,
+      opName: "clear_timer",
+      handler: async ({ tail }, timerIdValue) => {
+        const timerId = toI64(timerIdValue);
+        const pending = pendingIntervalTimers.get(timerId);
+        if (pending) {
+          pending.cancel();
+          pendingIntervalTimers.delete(timerId);
+        }
+        if (typeof runtimeHooks.clearTimer === "function") {
+          await runtimeHooks.clearTimer(timerId);
+        }
+        return tail(hostOk());
+      },
+    });
+    implementedOps.add("clear_timer");
 
     return (
       registered +

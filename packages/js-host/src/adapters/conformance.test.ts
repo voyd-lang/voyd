@@ -95,6 +95,9 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         { effectId: "std::time::Time", opName: "monotonic_now_millis", opId: 0 },
         { effectId: "std::time::Time", opName: "system_now_millis", opId: 1 },
         { effectId: "std::time::Time", opName: "sleep_millis", opId: 2 },
+        { effectId: "std::time::Time", opName: "set_timeout_millis", opId: 3 },
+        { effectId: "std::time::Time", opName: "set_interval_millis", opId: 4 },
+        { effectId: "std::time::Time", opName: "clear_timer", opId: 5 },
         { effectId: "std::random::Random", opName: "next_i64", opId: 0 },
         { effectId: "std::random::Random", opName: "fill_bytes", opId: 1 },
         { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
@@ -120,6 +123,7 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       const seenWrites: Array<{ target: string; value: string }> = [];
       const seenByteWrites: Array<{ target: string; bytes: number[] }> = [];
       const seenFlushTargets: string[] = [];
+      const seenClearedTimerIds: bigint[] = [];
 
       const report = await registerDefaultHostAdapters({
         host,
@@ -129,6 +133,9 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
             monotonicNowMillis: runtime.monotonicNowMillis,
             systemNowMillis: runtime.systemNowMillis,
             sleepMillis: runtime.sleepMillis,
+            clearTimer: (timerId) => {
+              seenClearedTimerIds.push(timerId);
+            },
             randomBytes: (length) =>
               Uint8Array.from(
                 Array.from({ length }, (_, index) => (index + 1) % 256)
@@ -202,6 +209,9 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       );
       const systemHandler = getHandler("std::time::Time", "system_now_millis");
       const sleepHandler = getHandler("std::time::Time", "sleep_millis");
+      const timeoutHandler = getHandler("std::time::Time", "set_timeout_millis");
+      const intervalHandler = getHandler("std::time::Time", "set_interval_millis");
+      const clearTimerHandler = getHandler("std::time::Time", "clear_timer");
       const nextI64Handler = getHandler("std::random::Random", "next_i64");
       const fillBytesHandler = getHandler("std::random::Random", "fill_bytes");
 
@@ -231,13 +241,37 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         value: { ok: true },
       });
 
+      let timeoutSettled = false;
+      const timeoutResult = invokeHandler(timeoutHandler, 2n).then((result) => {
+        timeoutSettled = true;
+        return result;
+      });
+      await runtime.runUntilIdle();
+      expect(timeoutSettled).toBe(false);
+      await runtime.advanceBy(2);
+      await expect(timeoutResult).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true },
+      });
+
+      await expect(invokeHandler(intervalHandler, 3n)).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true, value: 1n },
+      });
+      await expect(invokeHandler(clearTimerHandler, 1n)).resolves.toEqual({
+        kind: "tail",
+        value: { ok: true },
+      });
+      expect(seenClearedTimerIds).toEqual([1n]);
+      expect(runtime.pendingTimerCount()).toBe(0);
+
       await expect(invokeHandler(monotonicHandler)).resolves.toEqual({
         kind: "tail",
-        value: 15n,
+        value: 17n,
       });
       await expect(invokeHandler(systemHandler)).resolves.toEqual({
         kind: "tail",
-        value: 1_005n,
+        value: 1_007n,
       });
 
       await expect(invokeHandler(nextI64Handler)).resolves.toEqual({
