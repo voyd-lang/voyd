@@ -897,7 +897,7 @@ describe("registerDefaultHostAdapters", () => {
     });
   });
 
-  it("reports output as unsupported when no output ops are available", async () => {
+  it("registers fallback output handlers when stream APIs are unavailable", async () => {
     const table = buildTable([
       { effectId: "std::output::Output", opName: "write", opId: 0 },
     ]);
@@ -910,12 +910,12 @@ describe("registerDefaultHostAdapters", () => {
     expect(
       report.capabilities.find((capability) => capability.effectId === "std::output::Output")
         ?.supported
-    ).toBe(false);
+    ).toBe(true);
 
     await expect(
       (async () =>
         getHandler("std::output::Output", "write")(tailContinuation, {}))()
-    ).rejects.toThrow(/default output adapter is unavailable/i);
+    ).rejects.toThrow(/does not implement op write/i);
   });
 
   it("keeps output partially supported for write-only hooks", async () => {
@@ -959,17 +959,21 @@ describe("registerDefaultHostAdapters", () => {
         }))()
     ).rejects.toThrow(/does not implement op write_bytes/i);
     await expect(
-      (async () =>
-        getHandler("std::output::Output", "flush")(tailContinuation, {
-          target: "stdout",
-        }))()
-    ).rejects.toThrow(/does not implement op flush/i);
-    await expect(
-      (async () =>
-        getHandler("std::output::Output", "is_tty")(tailContinuation, {
-          target: "stdout",
-        }))()
-    ).rejects.toThrow(/does not implement op is_tty/i);
+      getHandler("std::output::Output", "flush")(tailContinuation, {
+        target: "stdout",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(
+      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+        target: "stdout",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: false,
+    });
     expect(writes).toEqual([{ target: "stdout", value: "hello" }]);
   });
 
@@ -1015,21 +1019,25 @@ describe("registerDefaultHostAdapters", () => {
       value: { ok: true },
     });
     await expect(
-      (async () =>
-        getHandler("std::output::Output", "flush")(tailContinuation, {
-          target: "stdout",
-        }))()
-    ).rejects.toThrow(/does not implement op flush/i);
-    await expect(
-      (async () =>
-        getHandler("std::output::Output", "is_tty")(tailContinuation, {
-          target: "stdout",
-        }))()
-    ).rejects.toThrow(/does not implement op is_tty/i);
+      getHandler("std::output::Output", "flush")(tailContinuation, {
+        target: "stdout",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(
+      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+        target: "stdout",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: false,
+    });
     expect(byteWrites).toEqual([{ target: "stderr", bytes: [255, 0, 1] }]);
   });
 
-  it("supports write and write_bytes while keeping flush and is_tty optional", async () => {
+  it("supports write and write_bytes while keeping flush and is_tty safe by default", async () => {
     const table = buildTable([
       { effectId: "std::output::Output", opName: "write", opId: 0 },
       { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
@@ -1077,17 +1085,21 @@ describe("registerDefaultHostAdapters", () => {
       value: { ok: true },
     });
     await expect(
-      (async () =>
-        getHandler("std::output::Output", "flush")(tailContinuation, {
-          target: "stdout",
-        }))()
-    ).rejects.toThrow(/does not implement op flush/i);
-    await expect(
-      (async () =>
-        getHandler("std::output::Output", "is_tty")(tailContinuation, {
-          target: "stdout",
-        }))()
-    ).rejects.toThrow(/does not implement op is_tty/i);
+      getHandler("std::output::Output", "flush")(tailContinuation, {
+        target: "stdout",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(
+      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+        target: "stdout",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: false,
+    });
     expect(writes).toEqual([{ target: "stdout", value: "hello" }]);
     expect(byteWrites).toEqual([{ target: "stderr", bytes: [4, 5, 6] }]);
   });

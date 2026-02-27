@@ -36,8 +36,7 @@ type OutputSource = {
   writeBytesUnavailableReason: string;
   flush?: (output: DefaultAdapterOutputFlush) => Promise<void>;
   flushUnavailableReason: string;
-  isTty?: (target: DefaultAdapterOutputTarget) => boolean;
-  isTtyUnavailableReason: string;
+  isTty: (target: DefaultAdapterOutputTarget) => boolean;
 };
 
 type OutputOpMatrixEntry = {
@@ -131,6 +130,8 @@ const createOutputSource = ({
       : hasStreams
         ? async ({ target }: DefaultAdapterOutputFlush) =>
             flushNodeStream(streamFor(target))
+        : write || writeBytes
+          ? async () => {}
         : undefined;
 
   const isTty =
@@ -139,13 +140,11 @@ const createOutputSource = ({
       : hasStreams
         ? (target: DefaultAdapterOutputTarget) =>
             Boolean((target === "stderr" ? stderr : stdout)?.isTTY)
-        : undefined;
+        : () => false;
 
   const writeUnavailableReason = "text output APIs are unavailable";
   const writeBytesUnavailableReason = "byte output APIs are unavailable";
   const flushUnavailableReason = "flush APIs are unavailable";
-  const isTtyUnavailableReason = "TTY detection APIs are unavailable";
-
   return {
     write,
     writeUnavailableReason: write ? "" : writeUnavailableReason,
@@ -154,7 +153,6 @@ const createOutputSource = ({
     flush,
     flushUnavailableReason: flush ? "" : flushUnavailableReason,
     isTty,
-    isTtyUnavailableReason: isTty ? "" : isTtyUnavailableReason,
   };
 };
 
@@ -247,15 +245,15 @@ export const outputCapabilityDefinition: CapabilityDefinition = {
       },
       {
         opNames: OUTPUT_IS_TTY_OP_NAMES,
-        isSupported: !!outputSource.isTty,
-        unavailableReason: outputSource.isTtyUnavailableReason,
+        isSupported: true,
+        unavailableReason: "",
         registerHandler: () =>
           registerOpAliasHandlers({
             host,
             effectId: OUTPUT_EFFECT_ID,
             opNames: OUTPUT_IS_TTY_OP_NAMES,
             handler: ({ tail }, payload) =>
-              tail(outputSource.isTty!(decodeOutputTarget(payload))),
+              tail(outputSource.isTty(decodeOutputTarget(payload))),
           }),
       },
     ];

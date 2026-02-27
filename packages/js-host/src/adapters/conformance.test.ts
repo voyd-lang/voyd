@@ -440,9 +440,7 @@ describe("default adapter conformance (unsupported capabilities)", () => {
       false
     );
     expect(capabilitiesByEffect.get("std::input::Input")?.supported).toBe(true);
-    expect(capabilitiesByEffect.get("std::output::Output")?.supported).toBe(
-      false
-    );
+    expect(capabilitiesByEffect.get("std::output::Output")?.supported).toBe(true);
 
     await expect(
       invokeHandler(getHandler("std::fetch::Fetch", "request"), {})
@@ -452,6 +450,6 @@ describe("default adapter conformance (unsupported capabilities)", () => {
     ).rejects.toThrow(/does not implement op read_line/i);
     await expect(
       invokeHandler(getHandler("std::output::Output", "write"), {})
-    ).rejects.toThrow(/default output adapter is unavailable/i);
+    ).rejects.toThrow(/does not implement op write/i);
   });
 });
