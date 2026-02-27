@@ -437,6 +437,36 @@ export const createBuiltins = (
     syntax_template: syntaxTemplateBuiltin,
     "`": syntaxTemplateBuiltin,
     if: ({ originalArgs, scope }) => {
+      const allClauses = originalArgs.every(
+        (arg) => isForm(arg) && arg.calls(":"),
+      );
+      if (allClauses) {
+        for (const clause of originalArgs) {
+          const conditionExpr = clause.at(1);
+          const branchExpr = clause.at(2);
+          if (!conditionExpr || !branchExpr) {
+            throw new Error(`Invalid if expression`);
+          }
+
+          if (
+            isIdentifierAtom(conditionExpr) &&
+            conditionExpr.value === "else"
+          ) {
+            return evalMacroExpr(cloneExpr(branchExpr), scope);
+          }
+
+          const condResult = evalMacroExpr(
+            handleOptionalConditionParenthesis(cloneExpr(conditionExpr)),
+            scope,
+          );
+
+          if (getMacroTimeValue(condResult, scope)) {
+            return evalMacroExpr(cloneExpr(branchExpr), scope);
+          }
+        }
+        return new IdentifierAtom("nop");
+      }
+
       const [condition, truthy, falsy] = originalArgs;
       if (!condition || !truthy) {
         throw new Error(`Invalid if expression`);
