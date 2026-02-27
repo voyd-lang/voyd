@@ -304,14 +304,20 @@ const parseWasmFrames = (stack?: string): WasmStackFrame[] => {
 };
 
 const isWasmTrapError = (error: Error): boolean => {
-  if (
-    typeof WebAssembly !== "undefined" &&
-    "RuntimeError" in WebAssembly &&
-    error instanceof WebAssembly.RuntimeError
-  ) {
-    return true;
+  if (!error.stack) {
+    return false;
   }
-  return /wasm-function\[\d+\]/i.test(error.stack ?? "");
+
+  const firstStackFrame = error.stack
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.startsWith("at "));
+  if (!firstStackFrame) {
+    return false;
+  }
+
+  // Only classify VM traps when the top frame is wasm-originated.
+  return parseWasmFrameFromLine(firstStackFrame) !== undefined;
 };
 
 const resolveFrame = ({
