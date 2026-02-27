@@ -83,7 +83,7 @@ impl<T> Array<T>
     some(__array_get(self.storage, computed_index))
 
   /// Returns the value at the requested index and traps when the index is out of bounds.
-  api fn at(self, { at index: i32 }) -> T
+  api fn at(self, index: i32) -> T
     let computed_index = compute_index(index, self.count)
     if computed_index < 0 or computed_index >= self.count then:
       return trap_out_of_bounds(self.storage)

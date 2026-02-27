@@ -8,7 +8,7 @@ pub fn parse_non_negative_segment(input: String): () -> Optional<i32>
   var leading_zero = false
 
   let bytes = input.to_utf8()
-  for (byte in bytes):
+  for byte in bytes:
     if byte < 48 or byte > 57 then:
       return none<i32>()
 

@@ -96,7 +96,7 @@ fn ends_with_separator(value: String) -> bool
   byte_at_or(value, len - 1, -1) == 47
 
 fn byte_at_or(value: String, index: i32, fallback: i32) -> i32
-  match(value.byte_at(at: index))
+  match(value.get_byte(index))
     Some<i32> { value: read }:
       read
     None:

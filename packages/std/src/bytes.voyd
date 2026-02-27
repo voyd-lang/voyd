@@ -24,8 +24,8 @@ impl Bytes
     self.storage.get(at)
 
   /// Returns the byte at `at`, trapping when out of bounds.
-  api fn at(self, { at: i32 }) -> Byte
-    self.storage.at(at: at)
+  api fn at(self, index: i32) -> Byte
+    self.storage.at(index)
 
   /// Returns a byte slice for the provided range.
   api fn slice(self, { range: Range }) -> Bytes

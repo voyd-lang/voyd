@@ -262,7 +262,7 @@ test "string case and replace pairs":
 
 test "string byte_at and rune_at return option":
   let value = "a😀"
-  match(value.byte_at(at: 0))
+  match(value.get_byte(0))
     Some<i32> { value }:
       assert(value, eq: 97)
     None:

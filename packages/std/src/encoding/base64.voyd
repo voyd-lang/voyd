@@ -19,11 +19,11 @@ pub fn encode({ bytes: Bytes }) -> String
   let ~out = Array<i32>::with_capacity(out_len)
   var index = 0
   while index < source_len do:
-    let b0 = source.at(at: index)
+    let b0 = source.at(index)
     let has_b1 = (index + 1) < source_len
     let has_b2 = (index + 2) < source_len
-    let b1 = if has_b1 then: source.at(at: index + 1) else: 0
-    let b2 = if has_b2 then: source.at(at: index + 2) else: 0
+    let b1 = if has_b1 then: source.at(index + 1) else: 0
+    let b2 = if has_b2 then: source.at(index + 2) else: 0
 
     let s0 = b0 / 4
     let s1 = div_rem(b0, 4).1 * 16 + (b1 / 16)
@@ -57,10 +57,10 @@ pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
   let ~buffer = ByteBuffer::with_capacity(bytes: source_len / 4 * 3)
   var index = 0
   while index < source_len do:
-    let c0 = source.at(at: index)
-    let c1 = source.at(at: index + 1)
-    let c2 = source.at(at: index + 2)
-    let c3 = source.at(at: index + 3)
+    let c0 = source.at(index)
+    let c1 = source.at(index + 1)
+    let c2 = source.at(index + 2)
+    let c3 = source.at(index + 3)
     let d0 = base64_ascii_to_digit(c0)
     let d1 = base64_ascii_to_digit(c1)
     let is_pad_2 = c2 == 61

@@ -493,12 +493,12 @@ fn append_float_integer_part(~out: Array<i32>, value: f64) -> void
 
 fn trim_fractional_zeroes(~bytes: Array<i32>) -> void
   while bytes.len() > 0 do:
-    let last = bytes.at(at: bytes.len() - 1)
+    let last = bytes.at(bytes.len() - 1)
     if last != 48 then:
       break
     bytes.pop()
 
-  if bytes.len() > 0 and bytes.at(at: bytes.len() - 1) == 46 then:
+  if bytes.len() > 0 and bytes.at(bytes.len() - 1) == 46 then:
     bytes.pop()
 
 fn floor_float(value: f64) -> f64
@@ -601,7 +601,7 @@ fn consume_literal(~parser: JsonParser, literal: String) -> bool
   while index < source.len() do:
     match(next_byte(parser))
       Some<i32> { value }:
-        if value != source.at(at: index) then:
+        if value != source.at(index) then:
           parser.index = start
           return false
       None:
@@ -622,10 +622,10 @@ fn skip_whitespace(~parser: JsonParser) -> void
         break
 
 fn peek(parser: JsonParser): () -> Option<i32>
-  parser.source.byte_at(at: parser.index)
+  parser.source.get_byte(parser.index)
 
 fn next_byte(~parser: JsonParser): () -> Option<i32>
-  match(parser.source.byte_at(at: parser.index))
+  match(parser.source.get_byte(parser.index))
     Some<i32> { value }:
       parser.index = parser.index + 1
       Some<i32> { value: value }
@@ -749,7 +749,7 @@ fn string_from_utf8(bytes: Array<i32>): () -> Result<String, JsonError>
   Ok<String> { value: new_string(bytes.to_fixed_array()) }
 
 fn byte_at_or(value: String, index: i32, fallback: i32) -> i32
-  match(value.byte_at(at: index))
+  match(value.get_byte(index))
     Some<i32> { value: read }:
       read
     None:

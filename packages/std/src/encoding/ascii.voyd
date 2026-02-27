@@ -9,7 +9,7 @@ pub fn ascii_string_from_bytes({ bytes: Array<i32> }) -> String
   let ~normalized = Array<i32>::with_capacity(bytes.len())
   var index = 0
   while index < bytes.len() do:
-    normalized.push(normalize_ascii_byte(bytes.at(at: index)))
+    normalized.push(normalize_ascii_byte(bytes.at(index)))
     index = index + 1
   new_string(normalized.to_fixed_array())
 
