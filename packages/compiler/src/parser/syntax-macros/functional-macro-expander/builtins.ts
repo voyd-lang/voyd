@@ -437,11 +437,11 @@ export const createBuiltins = (
     syntax_template: syntaxTemplateBuiltin,
     "`": syntaxTemplateBuiltin,
     if: ({ originalArgs, scope }) => {
-      const allClauses = originalArgs.every(
-        (arg) => isForm(arg) && arg.calls(":"),
+      const clauses = originalArgs.filter(
+        (arg): arg is Form => isForm(arg) && arg.calls(":"),
       );
-      if (allClauses) {
-        for (const clause of originalArgs) {
+      if (clauses.length === originalArgs.length) {
+        for (const clause of clauses) {
           const conditionExpr = clause.at(1);
           const branchExpr = clause.at(2);
           if (!conditionExpr || !branchExpr) {
