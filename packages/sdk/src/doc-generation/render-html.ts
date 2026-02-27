@@ -17,6 +17,39 @@ type KindSection = {
   items: readonly DocumentationItem[];
 };
 
+type SignatureToken = {
+  text: string;
+  className?: string;
+};
+
+const SIGNATURE_KEYWORDS = new Set([
+  "fn",
+  "obj",
+  "trait",
+  "impl",
+  "eff",
+  "type",
+  "mod",
+  "for",
+  "resume",
+  "tail",
+]);
+
+const BUILTIN_TYPES = new Set([
+  "void",
+  "bool",
+  "i8",
+  "i16",
+  "i32",
+  "i64",
+  "u8",
+  "u16",
+  "u32",
+  "u64",
+  "f32",
+  "f64",
+]);
+
 const escapeHtml = (value: string): string =>
   value
     .replace(/&/g, "&amp;")
@@ -24,6 +57,132 @@ const escapeHtml = (value: string): string =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+
+const nextNonWhitespaceToken = (
+  tokens: readonly SignatureToken[],
+  start: number,
+): SignatureToken | undefined => {
+  for (let index = start; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token.className !== "tok-space") {
+      return token;
+    }
+  }
+  return undefined;
+};
+
+const previousNonWhitespaceToken = (
+  tokens: readonly SignatureToken[],
+  start: number,
+): SignatureToken | undefined => {
+  for (let index = start; index >= 0; index -= 1) {
+    const token = tokens[index]!;
+    if (token.className !== "tok-space") {
+      return token;
+    }
+  }
+  return undefined;
+};
+
+const tokenizeSignature = (signature: string): SignatureToken[] => {
+  const tokens: SignatureToken[] = [];
+  let index = 0;
+
+  while (index < signature.length) {
+    const char = signature[index]!;
+
+    if (/\s/.test(char)) {
+      let end = index + 1;
+      while (end < signature.length && /\s/.test(signature[end] ?? "")) {
+        end += 1;
+      }
+      tokens.push({ text: signature.slice(index, end), className: "tok-space" });
+      index = end;
+      continue;
+    }
+
+    if (char === "-" && signature[index + 1] === ">") {
+      tokens.push({ text: "->", className: "tok-punct" });
+      index += 2;
+      continue;
+    }
+
+    if ("(){}[]<>,:?".includes(char)) {
+      tokens.push({ text: char, className: "tok-punct" });
+      index += 1;
+      continue;
+    }
+
+    if (/[0-9]/.test(char)) {
+      let end = index + 1;
+      while (end < signature.length && /[0-9]/.test(signature[end] ?? "")) {
+        end += 1;
+      }
+      tokens.push({ text: signature.slice(index, end), className: "tok-num" });
+      index = end;
+      continue;
+    }
+
+    if (/[A-Za-z_]/.test(char)) {
+      let end = index + 1;
+      while (
+        end < signature.length &&
+        /[A-Za-z0-9_]/.test(signature[end] ?? "")
+      ) {
+        end += 1;
+      }
+      const word = signature.slice(index, end);
+      if (SIGNATURE_KEYWORDS.has(word)) {
+        tokens.push({ text: word, className: "tok-kw" });
+      } else if (
+        BUILTIN_TYPES.has(word) ||
+        /^[A-Z][A-Za-z0-9_]*$/.test(word)
+      ) {
+        tokens.push({ text: word, className: "tok-type" });
+      } else {
+        tokens.push({ text: word, className: "tok-id" });
+      }
+      index = end;
+      continue;
+    }
+
+    tokens.push({ text: char });
+    index += 1;
+  }
+
+  return tokens.map((token, tokenIndex) => {
+    if (token.className !== "tok-id") {
+      return token;
+    }
+
+    const previousToken = previousNonWhitespaceToken(tokens, tokenIndex - 1);
+    const nextToken = nextNonWhitespaceToken(tokens, tokenIndex + 1);
+    const previousText = previousToken?.text;
+    const nextText = nextToken?.text;
+
+    if (nextText === "(") {
+      return { ...token, className: "tok-name" };
+    }
+
+    if (
+      previousText &&
+      SIGNATURE_KEYWORDS.has(previousText) &&
+      previousText !== "fn"
+    ) {
+      return { ...token, className: "tok-type" };
+    }
+
+    return token;
+  });
+};
+
+const renderSignatureHtml = (signature: string): string =>
+  tokenizeSignature(signature)
+    .map((token) => {
+      const text = escapeHtml(token.text);
+      return token.className ? `<span class="${token.className}">${text}</span>` : text;
+    })
+    .join("");
 
 const renderInlineMarkdown = (value: string): string => {
   const escaped = escapeHtml(value);
@@ -223,7 +382,7 @@ const renderItemCard = ({
         ? `<div class="member-doc">${renderMarkdownToHtml(member.documentation)}</div>`
         : "";
       return `<section id="${member.anchor}" class="member">
-  <h6><code>${escapeHtml(member.signature)}</code></h6>
+  <h6><code class="sig">${renderSignatureHtml(member.signature)}</code></h6>
   ${docs}
 </section>`;
     })
@@ -234,7 +393,7 @@ const renderItemCard = ({
   const classes = linkedImpl ? "doc-item doc-item-linked-impl" : "doc-item";
 
   return `<article id="${item.anchor}" class="${classes}">
-  <h4><code>${escapeHtml(item.signature)}</code></h4>
+  <h4><code class="sig">${renderSignatureHtml(item.signature)}</code></h4>
   ${docsHtml}
   ${parameterDocsHtml}
   ${membersHtml}
@@ -541,6 +700,12 @@ export const renderDocumentationHtml = ({
       border-radius: 0;
       font-size: 1em;
     }
+    code.sig .tok-kw { color: #9c4f11; font-weight: 700; }
+    code.sig .tok-type { color: #1f5ba8; }
+    code.sig .tok-name { color: #0c7a66; font-weight: 650; }
+    code.sig .tok-id { color: #1f2933; }
+    code.sig .tok-punct { color: #66717c; }
+    code.sig .tok-num { color: #7f4a00; }
     pre code {
       display: block;
       padding: 0.8rem;

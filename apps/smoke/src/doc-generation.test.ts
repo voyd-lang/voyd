@@ -54,6 +54,9 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("Input value.<br />");
       expect(html.content).toContain("Keep newline.</p>");
       expect(html.content).toContain("fn take_labeled({ n: i32 }) -&gt; i32");
+      expect(html.content).toContain("class=\"tok-kw\">fn</span>");
+      expect(html.content).toContain("class=\"tok-name\">take_labeled</span>");
+      expect(html.content).toContain("class=\"tok-type\">Counter</span>");
       expect(html.content).toContain("impl Counter");
       expect(html.content).toContain("double(self: Counter) -&gt; i32");
       expect(html.content).not.toContain("id=\"function-src-main-double\"");
