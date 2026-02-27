@@ -1,0 +1,7 @@
+pub obj Counter {
+  api value: i32,
+  hidden: i32,
+}
+
+pub fn make_counter(seed: i32) -> Counter
+  Counter { value: seed, hidden: seed + 1 }

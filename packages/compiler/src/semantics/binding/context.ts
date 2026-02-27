@@ -42,7 +42,9 @@ export const createBindingContext = ({
   const dependencyBindings = dependencies ?? new Map<string, BindingResult>();
 
   const decls = new DeclTable();
-  const packageId = packageIdFromPath(moduleNode.path);
+  const packageId = packageIdFromPath(moduleNode.path, {
+    sourcePackageRoot: moduleNode.sourcePackageRoot,
+  });
 
   return {
     symbolTable,
@@ -58,7 +60,9 @@ export const createBindingContext = ({
     graph: moduleGraph,
     modulePath: moduleNode.path,
     packageId,
-    isPackageRoot: isPackageRootModule(moduleNode.path),
+    isPackageRoot: isPackageRootModule(moduleNode.path, {
+      sourcePackageRoot: moduleNode.sourcePackageRoot,
+    }),
     moduleExports: exportTables,
     dependencies: dependencyBindings,
     uses: [],

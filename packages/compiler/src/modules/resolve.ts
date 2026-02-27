@@ -15,6 +15,21 @@ export type ModulePathMatchEntry = {
   parentHops?: number;
 };
 
+const PACKAGE_ROOT_SEGMENT = "pkg";
+
+const isPackageRootPath = (path: ModulePath): boolean =>
+  path.segments.at(-1) === PACKAGE_ROOT_SEGMENT;
+
+const packageAnchorSegments = (path: ModulePath): readonly string[] =>
+  isPackageRootPath(path) ? path.segments.slice(0, -1) : path.segments;
+
+const implicitPackageRootSegments = (
+  path: ModulePath,
+): readonly string[] | undefined =>
+  path.segments.at(-1) === PACKAGE_ROOT_SEGMENT
+    ? path.segments.slice(0, -1)
+    : undefined;
+
 const srcAliasNamespaceFor = ({
   importerNamespace,
 }: {
@@ -93,20 +108,16 @@ export const resolveModuleRequest = (
 
   const anchorToSelf = options.anchorToSelf ?? false;
   const parentHops = options.parentHops ?? 0;
-  const importerIsPackageRoot =
-    importer.segments.length === 1 && importer.segments[0] === "pkg";
-  const importerAnchorSegments = importerIsPackageRoot ? [] : importer.segments;
+  const importerAnchorSegments = packageAnchorSegments(importer);
   const superBaseSegments =
     parentHops > 0
-      ? importer.segments.slice(
+      ? importerAnchorSegments.slice(
           0,
-          Math.max(importer.segments.length - parentHops, 0),
+          Math.max(importerAnchorSegments.length - parentHops, 0),
         )
       : [];
   const baseSegments = anchorToSelf
-    ? importerIsPackageRoot
-      ? []
-      : importer.segments
+    ? importerAnchorSegments
     : parentHops > 0
     ? superBaseSegments
     : [];
@@ -154,11 +165,7 @@ export const matchesDependencyPath = ({
     if (!sameNamespace || !samePackage) {
       return false;
     }
-    const currentAnchorSegments =
-      currentModulePath.segments.length === 1 &&
-      currentModulePath.segments[0] === "pkg"
-        ? []
-        : currentModulePath.segments;
+    const currentAnchorSegments = packageAnchorSegments(currentModulePath);
     const hasModulePrefix =
       dependencyPath.segments.length >= currentAnchorSegments.length &&
       dependencyPath.segments
@@ -181,9 +188,10 @@ export const matchesDependencyPath = ({
       return false;
     }
     const hops = entry.parentHops ?? 0;
-    const parentAnchorSegments = currentModulePath.segments.slice(
+    const currentAnchorSegments = packageAnchorSegments(currentModulePath);
+    const parentAnchorSegments = currentAnchorSegments.slice(
       0,
-      Math.max(currentModulePath.segments.length - hops, 0),
+      Math.max(currentAnchorSegments.length - hops, 0),
     );
     const hasParentPrefix =
       dependencyPath.segments.length >= parentAnchorSegments.length &&
@@ -204,7 +212,20 @@ export const matchesDependencyPath = ({
   const namespacedDepKey = [dependencyPath.namespace, ...dependencyPath.segments].join(
     "::"
   );
-  if (allEntryKeys.some((key) => key === depSegments || key === namespacedDepKey)) {
+  const depImplicitSegments = implicitPackageRootSegments(dependencyPath);
+  const implicitDepKey = depImplicitSegments?.join("::");
+  const implicitNamespacedDepKey = depImplicitSegments
+    ? [dependencyPath.namespace, ...depImplicitSegments].join("::")
+    : undefined;
+  if (
+    allEntryKeys.some(
+      (key) =>
+        key === depSegments ||
+        key === namespacedDepKey ||
+        key === implicitDepKey ||
+        key === implicitNamespacedDepKey
+    )
+  ) {
     return true;
   }
 
@@ -216,13 +237,25 @@ export const matchesDependencyPath = ({
       dependencyPath.packageName,
       ...dependencyPath.segments,
     ].join("::");
+    const implicitPkgKey = depImplicitSegments
+      ? [dependencyPath.packageName, ...depImplicitSegments].join("::")
+      : undefined;
+    const implicitNamespacedPkgKey = depImplicitSegments
+      ? [
+          dependencyPath.namespace,
+          dependencyPath.packageName,
+          ...depImplicitSegments,
+        ].join("::")
+      : undefined;
     if (
       allEntryKeys.some(
         (key) =>
           key === packageKey ||
           key === dependencyPath.packageName ||
           key === pkgKey ||
-          key === namespacedPkgKey
+          key === namespacedPkgKey ||
+          key === implicitPkgKey ||
+          key === implicitNamespacedPkgKey
       )
     ) {
       return true;

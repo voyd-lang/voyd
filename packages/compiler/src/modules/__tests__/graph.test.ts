@@ -462,6 +462,43 @@ describe("buildModuleGraph", () => {
     expect(Array.from(graph.modules.keys())).not.toContain("std::pkg");
   });
 
+  it("resolves self-relative imports from nested src pkg.voyd files", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use src::pkgs::math::all",
+      [`${srcRoot}${sep}pkgs${sep}math${sep}pkg.voyd`]:
+        "pub use self::ops::all",
+      [`${srcRoot}${sep}pkgs${sep}math${sep}ops.voyd`]:
+        "pub fn add_one(v: i32) -> i32\n  v + 1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "src::pkgs::math::pkg",
+        "src::pkgs::math::ops",
+      ]),
+    );
+
+    const ops = graph.modules.get("src::pkgs::math::ops");
+    expect(ops?.sourcePackageRoot).toEqual(["pkgs", "math"]);
+    const main = graph.modules.get("src::main");
+    expect(main?.dependencies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: { namespace: "src", segments: ["pkgs", "math", "pkg"] },
+        }),
+      ]),
+    );
+  });
+
   it("treats pkg::std imports as std namespace imports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
@@ -507,6 +544,45 @@ describe("buildModuleGraph", () => {
         "src::main",
         "pkg:my_pkg::pkg",
         "pkg:my_pkg::math",
+      ]),
+    );
+  });
+
+  it("infers pkg for nested installed package subpackages", async () => {
+    const appRoot = resolve("/proj/app");
+    const pkgDir = resolve("/proj/node_modules");
+    const host = createMemoryHost({
+      [`${appRoot}${sep}main.voyd`]: "use pkg::my_pkg::pkgs::math::all",
+      [`${pkgDir}${sep}my_pkg${sep}src${sep}pkgs${sep}math${sep}pkg.voyd`]:
+        "pub use self::ops::all",
+      [`${pkgDir}${sep}my_pkg${sep}src${sep}pkgs${sep}math${sep}ops.voyd`]:
+        "pub fn plus_one(v: i32) -> i32\n  v + 1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${appRoot}${sep}main.voyd`,
+      host,
+      roots: { src: appRoot, pkgDirs: [pkgDir] },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "pkg:my_pkg::pkgs::math::pkg",
+        "pkg:my_pkg::pkgs::math::ops",
+      ]),
+    );
+    const main = graph.modules.get("src::main");
+    expect(main?.dependencies).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: {
+            namespace: "pkg",
+            packageName: "my_pkg",
+            segments: ["pkgs", "math", "pkg"],
+          },
+        }),
       ]),
     );
   });

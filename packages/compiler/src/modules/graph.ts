@@ -143,6 +143,7 @@ export const buildModuleGraph = async ({
     filePath: entryFile,
     modulePath: entryModulePath,
     host,
+    roots,
     includeTests: includeTests === true,
     hasStdPreludeModule,
   });
@@ -200,45 +201,49 @@ export const buildModuleGraph = async ({
     });
 
     const importerLabel = importerFilePath ?? importerId;
-    const pathKey = modulePathToString(dependency.path);
-    if (hasMissingModule(importerId, pathKey)) {
+    const requestedPath = dependency.path;
+    const requestedKey = modulePathToString(requestedPath);
+    if (hasMissingModule(importerId, requestedKey)) {
       continue;
     }
-    if (modulesByPath.has(pathKey)) {
+    if (modulesByPath.has(requestedKey)) {
       continue;
     }
 
     let resolved: Awaited<ReturnType<typeof resolveModuleFile>>;
     try {
-      resolved = await resolveModuleFile(dependency.path, roots, host);
+      resolved = await resolveModuleFile(requestedPath, roots, host);
     } catch (error) {
       moduleDiagnostics.push({
         kind: "io-error",
         message: formatErrorMessage(error),
-        requested: dependency.path,
+        requested: requestedPath,
         importer: importerLabel,
         importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importerId, pathKey);
+      addMissingModule(importerId, requestedKey);
       continue;
     }
 
     if (!resolved) {
       moduleDiagnostics.push({
         kind: "missing-module",
-        requested: dependency.path,
+        requested: requestedPath,
         importer: importerLabel,
         importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importerId, pathKey);
+      addMissingModule(importerId, requestedKey);
       continue;
     }
 
     const resolvedPath = resolved.filePath;
     const resolvedModulePath = resolved.modulePath;
     const resolvedKey = modulePathToString(resolvedModulePath);
+    if (resolvedKey !== requestedKey) {
+      dependency.path = resolvedModulePath;
+    }
     const reservedSegment = findReservedModuleSegment(resolvedModulePath);
     if (reservedSegment) {
       moduleDiagnostics.push({
@@ -249,21 +254,21 @@ export const buildModuleGraph = async ({
         importerFilePath,
         span: dependency.span ?? { file: resolvedPath, start: 0, end: 0 },
       });
-      addMissingModule(importerId, pathKey);
+      addMissingModule(importerId, requestedKey);
       continue;
     }
     if (modulesByPath.has(resolvedKey)) {
-      if (hasNestedModule(pathKey)) {
+      if (hasNestedModule(requestedKey)) {
         continue;
       }
       moduleDiagnostics.push({
         kind: "missing-module",
-        requested: dependency.path,
+        requested: requestedPath,
         importer: importerLabel,
         importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importerId, pathKey);
+      addMissingModule(importerId, requestedKey);
       continue;
     }
     let nextModule: LoadedModule;
@@ -272,6 +277,7 @@ export const buildModuleGraph = async ({
         filePath: resolvedPath,
         modulePath: resolvedModulePath,
         host,
+        roots,
         includeTests: includeTests === true,
         hasStdPreludeModule,
       });
@@ -279,12 +285,12 @@ export const buildModuleGraph = async ({
       moduleDiagnostics.push({
         kind: "io-error",
         message: formatErrorMessage(error),
-        requested: dependency.path,
+        requested: requestedPath,
         importer: importerLabel,
         importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importerId, pathKey);
+      addMissingModule(importerId, requestedKey);
       continue;
     }
     addModuleTree(nextModule, modules, modulesByPath, (module) =>
@@ -305,15 +311,16 @@ export const buildModuleGraph = async ({
         delta: 1,
       });
     });
-    if (!modulesByPath.has(pathKey) && !hasNestedModule(pathKey)) {
+    const dependencyKey = modulePathToString(dependency.path);
+    if (!modulesByPath.has(dependencyKey) && !hasNestedModule(dependencyKey)) {
       moduleDiagnostics.push({
         kind: "missing-module",
-        requested: dependency.path,
+        requested: requestedPath,
         importer: importerLabel,
         importerFilePath,
         span: dependency.span,
       });
-      addMissingModule(importerId, pathKey);
+      addMissingModule(importerId, requestedKey);
     }
   }
 
@@ -377,12 +384,14 @@ const loadFileModule = async ({
   filePath,
   modulePath,
   host,
+  roots,
   includeTests,
   hasStdPreludeModule,
 }: {
   filePath: string;
   modulePath: ModulePath;
   host: ModuleHost;
+  roots: ModuleRoots;
   includeTests: boolean;
   hasStdPreludeModule: boolean;
 }): Promise<LoadedModule> => {
@@ -415,11 +424,17 @@ const loadFileModule = async ({
     hasStdPreludeModule,
     noPrelude,
   });
+  const sourcePackageRoot = await discoverSourcePackageRoot({
+    modulePath,
+    host,
+    roots,
+  });
 
   const info = collectModuleInfo({
     modulePath,
     ast,
     sourceByFile,
+    sourcePackageRoot,
     moduleRange: { start: 0, end: source.length },
     hasStdPreludeModule,
     noPrelude,
@@ -433,6 +448,7 @@ const loadFileModule = async ({
   const node: ModuleNode = {
     id: modulePathToString(modulePath),
     path: modulePath,
+    sourcePackageRoot,
     origin: { kind: "file", filePath },
     ast,
     source,
@@ -461,6 +477,7 @@ const collectModuleInfo = ({
   modulePath,
   ast,
   sourceByFile,
+  sourcePackageRoot,
   moduleRange,
   hasStdPreludeModule,
   noPrelude,
@@ -468,6 +485,7 @@ const collectModuleInfo = ({
   modulePath: ModulePath;
   ast: Form;
   sourceByFile: ReadonlyMap<string, string>;
+  sourcePackageRoot?: readonly string[];
   moduleRange: { start: number; end: number };
   hasStdPreludeModule: boolean;
   noPrelude: boolean;
@@ -551,6 +569,7 @@ const collectModuleInfo = ({
       form: entry,
       parentPath: modulePath,
       sourceByFile,
+      sourcePackageRoot,
       hasStdPreludeModule,
       noPrelude,
       outerModuleDoc: (() => {
@@ -603,6 +622,7 @@ const parseInlineModuleDecl = ({
   form,
   parentPath,
   sourceByFile,
+  sourcePackageRoot,
   hasStdPreludeModule,
   noPrelude,
   outerModuleDoc,
@@ -614,6 +634,7 @@ const parseInlineModuleDecl = ({
   form: Form;
   parentPath: ModulePath;
   sourceByFile: ReadonlyMap<string, string>;
+  sourcePackageRoot?: readonly string[];
   hasStdPreludeModule: boolean;
   noPrelude: boolean;
   outerModuleDoc?: string;
@@ -653,6 +674,7 @@ const parseInlineModuleDecl = ({
   const node: ModuleNode = {
     id: modulePathToString(modulePath),
     path: modulePath,
+    sourcePackageRoot,
     origin: {
       kind: "inline",
       parentId: modulePathToString(parentPath),
@@ -881,4 +903,39 @@ const discoverSubmodules = async ({
 
   await walk(moduleDir, []);
   return dependencies;
+};
+
+const discoverSourcePackageRoot = async ({
+  modulePath,
+  host,
+  roots,
+}: {
+  modulePath: ModulePath;
+  host: ModuleHost;
+  roots: ModuleRoots;
+}): Promise<readonly string[] | undefined> => {
+  if (modulePath.namespace !== "src") {
+    return undefined;
+  }
+
+  const sourceRoot = host.path.resolve(roots.src);
+  for (
+    let prefixLength = modulePath.segments.length - 1;
+    prefixLength >= 0;
+    prefixLength -= 1
+  ) {
+    const candidateSegments = [
+      ...modulePath.segments.slice(0, prefixLength),
+      "pkg",
+    ];
+    const candidateFile =
+      host.path.join(sourceRoot, ...candidateSegments) + VOYD_EXTENSION;
+    const exists = await host.fileExists(candidateFile);
+    if (!exists) {
+      continue;
+    }
+    return modulePath.segments.slice(0, prefixLength);
+  }
+
+  return undefined;
 };
