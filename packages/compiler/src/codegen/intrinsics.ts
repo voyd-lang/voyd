@@ -778,9 +778,9 @@ const emitBooleanBinaryIntrinsic = ({
   const right = args[1]!;
   switch (op) {
     case "and":
-      return ctx.mod.i32.and(left, right);
+      return ctx.mod.if(left, right, ctx.mod.i32.const(0));
     case "or":
-      return ctx.mod.i32.or(left, right);
+      return ctx.mod.if(left, ctx.mod.i32.const(1), right);
     case "xor":
       return ctx.mod.i32.xor(left, right);
   }
