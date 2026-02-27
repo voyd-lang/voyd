@@ -14,8 +14,14 @@ import {
   createEffectContinuation,
   isEffectContinuationCall,
 } from "./continuation.js";
+import type {
+  VoydRuntimeEffectContext,
+  VoydRuntimeTransitionContext,
+} from "./trap-diagnostics.js";
 
 const MSGPACK_OPTS = { useBigInt64: true } as const;
+const toError = (error: unknown): Error =>
+  error instanceof Error ? error : new Error(String(error));
 
 const decodePayload = ({
   memory,
@@ -42,6 +48,36 @@ const invalidTailHandlerMessage = (label: string): string =>
 const invalidResumeHandlerMessage = (label: string): string =>
   `Resume effect ${label} cannot return tail(...) (return resume(...) or end(...))`;
 
+const normalizedEffectLabel = (label: string): string => {
+  const dot = label.lastIndexOf(".");
+  if (dot < 0) return label;
+  return `${label.slice(0, dot)}::${label.slice(dot + 1)}`;
+};
+
+const opNameFromLabel = (label: string): string => {
+  const normalized = normalizedEffectLabel(label);
+  const separator = normalized.lastIndexOf("::");
+  if (separator < 0) {
+    return normalized;
+  }
+  return normalized.slice(separator + 2);
+};
+
+const effectContextFor = ({
+  opEntry,
+  continuationBoundary,
+}: {
+  opEntry: ParsedEffectTable["ops"][number];
+  continuationBoundary?: "resume" | "tail" | "end";
+}): VoydRuntimeEffectContext => ({
+  effectId: opEntry.effectId,
+  opId: opEntry.opId,
+  opName: opNameFromLabel(opEntry.label),
+  label: normalizedEffectLabel(opEntry.label),
+  resumeKind: resumeKindName(opEntry.resumeKind),
+  ...(continuationBoundary ? { continuationBoundary } : {}),
+});
+
 export type EffectLoopStepResult<T = unknown> =
   | { kind: "next"; result: unknown }
   | { kind: "aborted" }
@@ -59,6 +95,8 @@ export const continueEffectLoopStep = async <T = unknown>({
   bufferPtr,
   bufferSize,
   shouldContinue = () => true,
+  annotateTrap,
+  fallbackFunctionName,
 }: {
   result: unknown;
   effectStatus: CallableFunction;
@@ -71,9 +109,44 @@ export const continueEffectLoopStep = async <T = unknown>({
   bufferPtr: number;
   bufferSize: number;
   shouldContinue?: () => boolean;
+  annotateTrap?: (error: unknown, opts: {
+    effect?: VoydRuntimeEffectContext;
+    transition?: VoydRuntimeTransitionContext;
+    fallbackFunctionName?: string;
+  }) => Error;
+  fallbackFunctionName?: string;
 }): Promise<EffectLoopStepResult<T>> => {
-  const status = effectStatus(result) as number;
-  const payloadLength = effectLen(result) as number;
+  const withTrapContext = ({
+    error,
+    transition,
+    effect,
+  }: {
+    error: unknown;
+    transition: VoydRuntimeTransitionContext;
+    effect?: VoydRuntimeEffectContext;
+  }): Error =>
+    annotateTrap
+      ? annotateTrap(error, {
+          transition,
+          effect,
+          fallbackFunctionName,
+        })
+      : toError(error);
+
+  let status: number;
+  let payloadLength: number;
+  try {
+    status = effectStatus(result) as number;
+    payloadLength = effectLen(result) as number;
+  } catch (error) {
+    throw withTrapContext({
+      error,
+      transition: {
+        point: "effect_status",
+        direction: "vm",
+      },
+    });
+  }
   const decoded = decodePayload({
     memory: msgpackMemory,
     ptr: bufferPtr,
@@ -131,9 +204,30 @@ export const continueEffectLoopStep = async <T = unknown>({
       throw new Error("resume payload exceeds buffer size");
     }
     new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(encoded);
+    let resumed: unknown;
+    try {
+      resumed = resumeEffectful(
+        effectCont(result),
+        bufferPtr,
+        encoded.length,
+        bufferSize
+      );
+    } catch (error) {
+      throw withTrapContext({
+        error,
+        transition: {
+          point: "resume_effectful",
+          direction: "host->vm",
+        },
+        effect: effectContextFor({
+          opEntry,
+          continuationBoundary: handlerResult.kind,
+        }),
+      });
+    }
     return {
       kind: "next",
-      result: resumeEffectful(effectCont(result), bufferPtr, encoded.length, bufferSize),
+      result: resumed,
     };
   }
 

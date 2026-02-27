@@ -74,5 +74,18 @@ export type {
   DeterministicRuntime,
   DeterministicRuntimeOptions,
 } from "./runtime/deterministic-runtime.js";
+export {
+  createVoydTrapDiagnostics,
+  isVoydRuntimeError,
+} from "./runtime/trap-diagnostics.js";
+export type {
+  VoydRuntimeDiagnostics,
+  VoydRuntimeEffectContext,
+  VoydRuntimeError,
+  VoydRuntimeSourceSpan,
+  VoydRuntimeTransitionContext,
+  VoydTrapAnnotation,
+  VoydTrapDiagnostics,
+} from "./runtime/trap-diagnostics.js";
 export { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
 export type { HostRuntimeKind } from "./runtime/environment.js";

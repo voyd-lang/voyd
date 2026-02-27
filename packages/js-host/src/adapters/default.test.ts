@@ -191,6 +191,28 @@ describe("registerDefaultHostAdapters", () => {
     expect(info).toHaveBeenCalled();
   });
 
+  it("reports capabilities in the adapter registration order", async () => {
+    const table = buildTable([
+      { effectId: "std::log::Log", opName: "emit", opId: 0 },
+      { effectId: "std::random::Random", opName: "fill_bytes", opId: 1 },
+      { effectId: "std::env::Env", opName: "get", opId: 2 },
+      { effectId: "std::time::Time", opName: "system_now_millis", opId: 3 },
+    ]);
+    const { host } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    expect(report.capabilities.map((capability) => capability.effectId)).toEqual([
+      "std::time::Time",
+      "std::env::Env",
+      "std::random::Random",
+      "std::log::Log",
+    ]);
+  });
+
   it("chains timers for long sleep durations", async () => {
     const table = buildTable([
       { effectId: "std::time::Time", opName: "sleep_millis", opId: 0 },
@@ -896,43 +918,14 @@ describe("registerDefaultHostAdapters", () => {
     ).rejects.toThrow(/does not implement op write/i);
   });
 
-  it("keeps output is_tty active when write hooks are unavailable", async () => {
-    const table = buildTable([
-      { effectId: "std::output::Output", opName: "write", opId: 0 },
-      { effectId: "std::output::Output", opName: "is_tty", opId: 1 },
-    ]);
-    const { host, getHandler } = createFakeHost(table);
-
-    const report = await registerDefaultHostAdapters({
-      host,
-      options: { runtime: "browser" },
-    });
-    expect(
-      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
-        ?.supported
-    ).toBe(true);
-
-    expect(
-      getHandler("std::output::Output", "is_tty")(tailContinuation, {
-        target: "stdout",
-      })
-    ).toEqual({
-      kind: "tail",
-      value: false,
-    });
-    await expect(
-      (async () =>
-        getHandler("std::output::Output", "write")(tailContinuation, {
-          value: "hello",
-        }))()
-    ).rejects.toThrow(/does not implement op write/i);
-  });
-
-  it("does not bridge write_bytes through lossy text write hooks", async () => {
+  it("keeps output partially supported for write-only hooks", async () => {
     const table = buildTable([
       { effectId: "std::output::Output", opName: "write", opId: 0 },
       { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
+      { effectId: "std::output::Output", opName: "flush", opId: 2 },
+      { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
     ]);
+    const writes: Array<{ target: string; value: string }> = [];
     const { host, getHandler } = createFakeHost(table);
 
     const report = await registerDefaultHostAdapters({
@@ -940,7 +933,9 @@ describe("registerDefaultHostAdapters", () => {
       options: {
         runtime: "browser",
         runtimeHooks: {
-          write: async () => {},
+          write: async ({ target, value }) => {
+            writes.push({ target, value });
+          },
         },
       },
     });
@@ -950,11 +945,225 @@ describe("registerDefaultHostAdapters", () => {
     ).toBe(true);
 
     await expect(
+      getHandler("std::output::Output", "write")(tailContinuation, {
+        value: "hello",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    await expect(
       (async () =>
         getHandler("std::output::Output", "write_bytes")(tailContinuation, {
-          bytes: [255, 0, 1],
+          bytes: [1, 2, 3],
         }))()
     ).rejects.toThrow(/does not implement op write_bytes/i);
+    await expect(
+      getHandler("std::output::Output", "flush")(tailContinuation, {
+        target: "stdout",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(
+      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+        target: "stdout",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: false,
+    });
+    expect(writes).toEqual([{ target: "stdout", value: "hello" }]);
+  });
+
+  it("keeps output partially supported for bytes-only hooks", async () => {
+    const table = buildTable([
+      { effectId: "std::output::Output", opName: "write", opId: 0 },
+      { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
+      { effectId: "std::output::Output", opName: "flush", opId: 2 },
+      { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
+    ]);
+    const byteWrites: Array<{ target: string; bytes: number[] }> = [];
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        runtimeHooks: {
+          writeBytes: async ({ target, bytes }) => {
+            byteWrites.push({ target, bytes: Array.from(bytes.values()) });
+          },
+        },
+      },
+    });
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
+        ?.supported
+    ).toBe(true);
+
+    await expect(
+      getHandler("std::output::Output", "write")(tailContinuation, {
+        value: "hello",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    await expect(
+      getHandler("std::output::Output", "write_bytes")(tailContinuation, {
+        target: "stderr",
+        bytes: [255, 0, 1],
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    await expect(
+      getHandler("std::output::Output", "flush")(tailContinuation, {
+        target: "stdout",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(
+      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+        target: "stdout",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: false,
+    });
+    expect(byteWrites).toEqual([
+      { target: "stdout", bytes: [104, 101, 108, 108, 111] },
+      { target: "stderr", bytes: [255, 0, 1] },
+    ]);
+  });
+
+  it("routes write through writeBytes hooks before node streams", async () => {
+    const table = buildTable([
+      { effectId: "std::output::Output", opName: "write", opId: 0 },
+    ]);
+    const streamWrites: Array<{ target: string; value: string }> = [];
+    const stdout: any = {
+      isTTY: true,
+      writableNeedDrain: false,
+      write: (chunk: string | Uint8Array, callback?: (error?: Error | null) => void) => {
+        streamWrites.push({ target: "stdout", value: String(chunk) });
+        callback?.(null);
+        return true;
+      },
+      once: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    const stderr: any = {
+      isTTY: true,
+      writableNeedDrain: false,
+      write: (chunk: string | Uint8Array, callback?: (error?: Error | null) => void) => {
+        streamWrites.push({ target: "stderr", value: String(chunk) });
+        callback?.(null);
+        return true;
+      },
+      once: vi.fn(),
+      removeListener: vi.fn(),
+    };
+    vi.stubGlobal("process", { stdout, stderr });
+    const byteWrites: Array<{ target: string; bytes: number[] }> = [];
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "node",
+        runtimeHooks: {
+          writeBytes: async ({ target, bytes }) => {
+            byteWrites.push({ target, bytes: Array.from(bytes.values()) });
+          },
+        },
+      },
+    });
+
+    await expect(
+      getHandler("std::output::Output", "write")(tailContinuation, {
+        value: "hello",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(byteWrites).toEqual([
+      { target: "stdout", bytes: [104, 101, 108, 108, 111] },
+    ]);
+    expect(streamWrites).toEqual([]);
+  });
+
+  it("supports write and write_bytes while keeping flush and is_tty safe by default", async () => {
+    const table = buildTable([
+      { effectId: "std::output::Output", opName: "write", opId: 0 },
+      { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
+      { effectId: "std::output::Output", opName: "flush", opId: 2 },
+      { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
+    ]);
+    const writes: Array<{ target: string; value: string }> = [];
+    const byteWrites: Array<{ target: string; bytes: number[] }> = [];
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        runtimeHooks: {
+          write: async ({ target, value }) => {
+            writes.push({ target, value });
+          },
+          writeBytes: async ({ target, bytes }) => {
+            byteWrites.push({ target, bytes: Array.from(bytes.values()) });
+          },
+        },
+      },
+    });
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
+        ?.supported
+    ).toBe(true);
+
+    await expect(
+      getHandler("std::output::Output", "write")(tailContinuation, {
+        value: "hello",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    await expect(
+      getHandler("std::output::Output", "write_bytes")(tailContinuation, {
+        target: "stderr",
+        bytes: [4, 5, 6],
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    await expect(
+      getHandler("std::output::Output", "flush")(tailContinuation, {
+        target: "stdout",
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(
+      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+        target: "stdout",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: false,
+    });
+    expect(writes).toEqual([{ target: "stdout", value: "hello" }]);
+    expect(byteWrites).toEqual([{ target: "stderr", bytes: [4, 5, 6] }]);
   });
 
   it("chunks browser random fills to avoid WebCrypto quota errors", async () => {

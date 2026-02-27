@@ -31,6 +31,23 @@ const run = host.runManaged("main");
 const outcome = await run.outcome;
 ```
 
+Runtime wasm traps now include structured Voyd context on `error.voyd`:
+
+```ts
+try {
+  await host.run("main");
+} catch (error) {
+  if (error instanceof Error && "voyd" in error) {
+    const trap = (error as Error & { voyd: unknown }).voyd;
+    console.error(trap);
+  }
+}
+```
+
+`error.voyd` includes the nearest mapped Voyd function/span (when available),
+and for effect resume traps it also includes effect op metadata and transition
+context (`point`/`direction`).
+
 Deterministic runtime harness for scheduler/adapter conformance tests:
 
 ```ts

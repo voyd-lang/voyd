@@ -7,6 +7,8 @@ import type {
   EffectHandler,
   HostProtocolTable,
   SignatureHash,
+  VoydRuntimeDiagnostics,
+  VoydRuntimeError,
 } from "@voyd/js-host";
 
 export type {
@@ -17,6 +19,8 @@ export type {
   HostProtocolTable,
   ModuleRoots,
   SignatureHash,
+  VoydRuntimeDiagnostics,
+  VoydRuntimeError,
 };
 
 export type TestCase = CompilerTestCase;

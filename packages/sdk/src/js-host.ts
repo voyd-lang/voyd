@@ -2,6 +2,7 @@ export { createVoydHost } from "@voyd/js-host";
 export { CancelledRunError } from "@voyd/js-host";
 export { detectHostRuntime, registerDefaultHostAdapters, scheduleTaskForRuntime } from "@voyd/js-host";
 export { createDeterministicRuntime } from "@voyd/js-host";
+export { createVoydTrapDiagnostics, isVoydRuntimeError } from "@voyd/js-host";
 export type {
   DefaultAdapterCapability,
   DefaultAdapterHost,
@@ -17,6 +18,8 @@ export type {
   HostInitOptions,
   HostProtocolTable,
   RunOutcome,
+  VoydRuntimeDiagnostics,
+  VoydRuntimeError,
   LabelHandlerHost,
   VoydHost,
   VoydRunHandle,

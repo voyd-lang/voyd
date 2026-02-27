@@ -22,6 +22,7 @@ import {
   EFFECT_TABLE_EXPORT,
   emitEffectTableSection,
 } from "./effects/effect-table.js";
+import { emitRuntimeDiagnosticsSection } from "./exports/runtime-diagnostics.js";
 import { buildEffectRegistry } from "./effects/effect-registry.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
 import {
@@ -180,6 +181,10 @@ export const codegenProgram = ({
     entryModuleId,
     mod,
     exportName: EFFECT_TABLE_EXPORT,
+  });
+  emitRuntimeDiagnosticsSection({
+    contexts,
+    mod,
   });
   if (mergedOptions.emitEffectHelpers) {
     entryCtx.programHelpers.ensureEffectHelpers(entryCtx);
