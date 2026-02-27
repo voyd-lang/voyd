@@ -292,7 +292,7 @@ test "perf smoke for hot integer helpers":
       Err<MathError>:
         checksum = checksum + 1
 
-    if is_power_of_two(index) then:
+    if is_power_of_two(index):
       checksum = checksum + 3
     index = index + 1
 

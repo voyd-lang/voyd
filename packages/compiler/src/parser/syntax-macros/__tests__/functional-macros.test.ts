@@ -128,6 +128,20 @@ has_generics(Box<T>)
     expect(plain.at(-1)).toEqual("1");
   });
 
+  test("supports clause-style if expressions in functional macros", () => {
+    const code = `\
+macro choose(n)
+  if
+    n == 1: 10
+    n == 2: 20
+    else: 30
+choose(2)
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain.at(-1)).toEqual("20");
+  });
+
   test("expands fn macro invocations", () => {
     const ast = parse(functionalMacrosVoydFile);
     const fibForm = toPlain(ast).at(-1);

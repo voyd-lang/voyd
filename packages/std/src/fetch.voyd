@@ -113,7 +113,7 @@ impl FetchResponse
     while index < self.headers.len() do:
       match(self.headers.get(index))
         Some<FetchHeader> { value }:
-          if value.name.lowered().equals(target) then:
+          if value.name.lowered().equals(target):
             return Some<String> { value: value.value }
         None:
           void
@@ -199,7 +199,7 @@ fn encode_optional_i32(value: Option<i32>): () -> MsgPack
 
 fn decode_request_result(payload: MsgPack): () -> Result<FetchResponse, HostError>
   let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false then:
+  if decoded.read_bool("ok") == false:
     return Err<HostError> { error: decode_host_error(decoded) }
 
   Ok<FetchResponse> { value: decode_fetch_response(decoded.read_msgpack("value")) }
