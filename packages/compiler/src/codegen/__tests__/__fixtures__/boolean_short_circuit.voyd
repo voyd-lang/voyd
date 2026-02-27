@@ -1,0 +1,12 @@
+fn explode(): () -> bool
+  let x = 1 / 0
+  x == 0
+
+pub fn guarded_and(): () -> i32
+  if false and explode() then: 1 else: 2
+
+pub fn guarded_or(): () -> i32
+  if true or explode() then: 3 else: 4
+
+pub fn main(): () -> i32
+  guarded_and() + guarded_or()
