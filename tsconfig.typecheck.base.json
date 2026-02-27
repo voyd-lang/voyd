@@ -10,7 +10,11 @@
       "@voyd/compiler": ["packages/compiler/src/pipeline.ts"],
       "@voyd/compiler/*": ["packages/compiler/src/*"],
       "@voyd/sdk": ["packages/sdk/src/node.ts"],
-      "@voyd/sdk/*": ["packages/sdk/src/*.ts"],
+      "@voyd/sdk/*": [
+        "packages/sdk/src/*/index.ts",
+        "packages/sdk/src/*.ts",
+        "packages/sdk/src/*"
+      ],
       "@voyd/js-host": ["packages/js-host/src/index.ts"],
       "@voyd/js-host/*": ["packages/js-host/src/*"],
       "@voyd/reference": ["packages/reference/index.d.ts"]
