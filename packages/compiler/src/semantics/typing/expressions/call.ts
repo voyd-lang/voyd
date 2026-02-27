@@ -1433,6 +1433,468 @@ const callArgumentsSatisfyParams = ({
     onSkipOptionalParam: () => true,
   }).kind === "ok";
 
+const MAX_OVERLOAD_DIAGNOSTIC_CANDIDATES = 12;
+
+const formatTypeForDiagnostic = ({
+  type,
+  ctx,
+}: {
+  type: TypeId;
+  ctx: TypingContext;
+}): string => typeDescriptorToUserString(ctx.arena.get(type), ctx.arena);
+
+const typeSatisfiesForDiagnostic = ({
+  actual,
+  expected,
+  ctx,
+  state,
+}: {
+  actual: TypeId;
+  expected: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const originalMax = ctx.typeCheckBudget.maxUnifySteps;
+  const originalSteps = ctx.typeCheckBudget.unifyStepsUsed.value;
+  ctx.typeCheckBudget.maxUnifySteps = Number.MAX_SAFE_INTEGER;
+  try {
+    return typeSatisfies(actual, expected, ctx, state);
+  } finally {
+    ctx.typeCheckBudget.maxUnifySteps = originalMax;
+    ctx.typeCheckBudget.unifyStepsUsed.value = originalSteps;
+  }
+};
+
+const formatInferredArgumentsForDiagnostic = ({
+  args,
+  ctx,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+}): readonly string[] =>
+  args.map((arg) => {
+    const typeLabel = formatTypeForDiagnostic({ type: arg.type, ctx });
+    return arg.label ? `${arg.label}: ${typeLabel}` : typeLabel;
+  });
+
+const signatureWithExplicitTypeArgumentsForDiagnostic = ({
+  symbol,
+  signature,
+  typeArguments,
+  ctx,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  typeArguments?: readonly TypeId[];
+  ctx: TypingContext;
+}): FunctionSignature => {
+  if (!typeArguments || typeArguments.length === 0) {
+    return signature;
+  }
+
+  const typeParamCount = signature.typeParams?.length ?? 0;
+  if (typeArguments.length > typeParamCount) {
+    return signature;
+  }
+
+  const explicitSubstitution =
+    signature.typeParams && signature.typeParams.length > 0
+      ? applyExplicitTypeArguments({
+          signature,
+          typeArguments,
+          calleeSymbol: symbol,
+          ctx,
+        })
+      : undefined;
+  if (!explicitSubstitution || explicitSubstitution.size === 0) {
+    return signature;
+  }
+
+  return {
+    ...signature,
+    parameters: signature.parameters.map((param) => ({
+      ...param,
+      type: ctx.arena.substitute(param.type, explicitSubstitution),
+    })),
+    returnType: ctx.arena.substitute(signature.returnType, explicitSubstitution),
+  };
+};
+
+const formatFunctionSignatureForDiagnostic = ({
+  name,
+  signature,
+  ctx,
+}: {
+  name: string;
+  signature: FunctionSignature;
+  ctx: TypingContext;
+}): string => {
+  const typeParams = signature.typeParams?.map((param) =>
+    getSymbolName(param.symbol, ctx),
+  );
+  const typeParamSuffix =
+    typeParams && typeParams.length > 0 ? `<${typeParams.join(", ")}>` : "";
+
+  const params = signature.parameters.map((param) => {
+    const typeLabel = formatTypeForDiagnostic({ type: param.type, ctx });
+    const label = param.label ?? param.name;
+    const labelPrefix = label ? `${label}: ` : "";
+    const optionalSuffix = param.optional ? "?" : "";
+    return `${labelPrefix}${typeLabel}${optionalSuffix}`;
+  });
+  const returnType = formatTypeForDiagnostic({ type: signature.returnType, ctx });
+  return `${name}${typeParamSuffix}(${params.join(", ")}) -> ${returnType}`;
+};
+
+const formatIntrinsicSignatureForDiagnostic = ({
+  name,
+  signature,
+  ctx,
+}: {
+  name: string;
+  signature: IntrinsicSignature;
+  ctx: TypingContext;
+}): string => {
+  const params = signature.parameters.map((param) =>
+    formatTypeForDiagnostic({ type: param, ctx }),
+  );
+  const returnType = formatTypeForDiagnostic({ type: signature.returnType, ctx });
+  return `${name}(${params.join(", ")}) -> ${returnType}`;
+};
+
+const overloadCandidateFailureReason = ({
+  symbol,
+  signature,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): string | undefined => {
+  const typeParamCount = signature.typeParams?.length ?? 0;
+  if (typeArguments && typeArguments.length > typeParamCount) {
+    return `type argument arity mismatch: expected at most ${typeParamCount}, got ${typeArguments.length}`;
+  }
+
+  const explicitSubstitution =
+    signature.typeParams && signature.typeParams.length > 0
+      ? applyExplicitTypeArguments({
+          signature,
+          typeArguments,
+          calleeSymbol: symbol,
+          ctx,
+        })
+      : undefined;
+  const params = explicitSubstitution
+    ? signature.parameters.map((param) => ({
+        ...param,
+        type: ctx.arena.substitute(param.type, explicitSubstitution),
+      }))
+    : signature.parameters;
+
+  let mismatch:
+    | {
+        paramIndex: number;
+        argIndex: number;
+        expectedType: TypeId;
+        actualType: TypeId;
+      }
+    | undefined;
+
+  const walkResult = walkCallArguments({
+    args,
+    params,
+    ctx,
+    state,
+    onMatch: (match) => {
+      if (match.matchedType === ctx.primitives.unknown) {
+        return true;
+      }
+      const ok = typeSatisfiesForDiagnostic({
+        actual: match.matchedType,
+        expected: match.param.type,
+        ctx,
+        state,
+      });
+      if (!ok) {
+        mismatch = {
+          paramIndex: match.paramIndex,
+          argIndex: match.argIndex,
+          expectedType: match.param.type,
+          actualType: match.matchedType,
+        };
+      }
+      return ok;
+    },
+    onSkipOptionalParam: () => true,
+  });
+  if (walkResult.kind === "ok") {
+    return undefined;
+  }
+
+  const { failure } = walkResult;
+  switch (failure.kind) {
+    case "missing-argument": {
+      const param = params[failure.paramIndex];
+      const paramName =
+        param?.label ?? param?.name ?? `parameter ${failure.paramIndex + 1}`;
+      return `arity mismatch: missing argument for ${paramName}`;
+    }
+    case "missing-labeled-argument":
+      return `labels mismatch: missing labeled argument ${failure.label}`;
+    case "label-mismatch":
+      return `labels mismatch at argument ${failure.paramIndex + 1}: expected ${failure.expectedLabel ?? "no label"}, got ${failure.actualLabel ?? "no label"}`;
+    case "extra-arguments":
+      return `arity mismatch: ${failure.extra} extra argument(s)`;
+    case "incompatible": {
+      if (mismatch) {
+        const expected = formatTypeForDiagnostic({
+          type: mismatch.expectedType,
+          ctx,
+        });
+        const actual = formatTypeForDiagnostic({ type: mismatch.actualType, ctx });
+        return `type incompatibility at argument ${mismatch.argIndex + 1}: expected ${expected}, got ${actual}`;
+      }
+
+      const argIndex =
+        typeof failure.argIndex === "number" ? failure.argIndex : undefined;
+      const arg = typeof argIndex === "number" ? args[argIndex] : undefined;
+      const param = params[failure.paramIndex];
+      if (arg && param && typeof argIndex === "number") {
+        const expected = formatTypeForDiagnostic({ type: param.type, ctx });
+        const actual = formatTypeForDiagnostic({ type: arg.type, ctx });
+        return `type incompatibility at argument ${argIndex + 1}: expected ${expected}, got ${actual}`;
+      }
+
+      return "type incompatibility";
+    }
+  }
+};
+
+const overloadDiagnosticCandidates = <
+  T extends {
+    symbol: SymbolId;
+    signature: FunctionSignature;
+    nameForSymbol?: SymbolNameResolver;
+  },
+>({
+  candidates,
+  args,
+  ctx,
+  state,
+  typeArguments,
+  includeFailureReasons,
+  argsForCandidate,
+}: {
+  candidates: readonly T[];
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+  includeFailureReasons: boolean;
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+}): { signature: string; reason?: string }[] => {
+  const limitedCandidates = candidates.slice(0, MAX_OVERLOAD_DIAGNOSTIC_CANDIDATES);
+  const details = limitedCandidates.map((candidate) => {
+    const signature = signatureWithExplicitTypeArgumentsForDiagnostic({
+      symbol: candidate.symbol,
+      signature: candidate.signature,
+      typeArguments,
+      ctx,
+    });
+    const signatureLabel = formatFunctionSignatureForDiagnostic({
+      name: resolveSymbolName(candidate.symbol, ctx, candidate.nameForSymbol),
+      signature,
+      ctx,
+    });
+
+    if (!includeFailureReasons) {
+      return { signature: signatureLabel };
+    }
+
+    const reason = overloadCandidateFailureReason({
+      symbol: candidate.symbol,
+      signature: candidate.signature,
+      args: argsForCandidate ? argsForCandidate(candidate) : args,
+      ctx,
+      state,
+      typeArguments,
+    });
+
+    return reason
+      ? { signature: signatureLabel, reason }
+      : { signature: signatureLabel };
+  });
+
+  const omitted = candidates.length - limitedCandidates.length;
+  if (omitted > 0) {
+    details.push({
+      signature: `... ${omitted} more candidate(s) omitted`,
+    });
+  }
+  return details;
+};
+
+const noOverloadDiagnosticParams = <
+  T extends {
+    symbol: SymbolId;
+    signature: FunctionSignature;
+    nameForSymbol?: SymbolNameResolver;
+  },
+>({
+  name,
+  candidates,
+  args,
+  ctx,
+  state,
+  typeArguments,
+  argsForCandidate,
+}: {
+  name: string;
+  candidates: readonly T[];
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+}) => ({
+  kind: "no-overload" as const,
+  name,
+  inferredArguments: formatInferredArgumentsForDiagnostic({ args, ctx }),
+  candidates: overloadDiagnosticCandidates({
+    candidates,
+    args,
+    ctx,
+    state,
+    typeArguments,
+    includeFailureReasons: true,
+    argsForCandidate,
+  }),
+});
+
+const ambiguousOverloadDiagnosticParams = <
+  T extends {
+    symbol: SymbolId;
+    signature: FunctionSignature;
+    nameForSymbol?: SymbolNameResolver;
+  },
+>({
+  name,
+  matches,
+  args,
+  ctx,
+  state,
+  typeArguments,
+  argsForCandidate,
+}: {
+  name: string;
+  matches: readonly T[];
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+}) => ({
+  kind: "ambiguous-overload" as const,
+  name,
+  inferredArguments: formatInferredArgumentsForDiagnostic({ args, ctx }),
+  candidates: overloadDiagnosticCandidates({
+    candidates: matches,
+    args,
+    ctx,
+    state,
+    typeArguments,
+    includeFailureReasons: false,
+    argsForCandidate,
+  }),
+});
+
+const intrinsicNoOverloadDiagnosticParams = ({
+  name,
+  signatures,
+  args,
+  ctx,
+}: {
+  name: string;
+  signatures: readonly IntrinsicSignature[];
+  args: readonly Arg[];
+  ctx: TypingContext;
+}) => {
+  const details = signatures
+    .slice(0, MAX_OVERLOAD_DIAGNOSTIC_CANDIDATES)
+    .map((signature) => {
+      const signatureLabel = formatIntrinsicSignatureForDiagnostic({
+        name,
+        signature,
+        ctx,
+      });
+      if (signature.parameters.length !== args.length) {
+        return {
+          signature: signatureLabel,
+          reason: `arity mismatch: expected ${signature.parameters.length}, got ${args.length}`,
+        };
+      }
+      const mismatchIndex = signature.parameters.findIndex((param, index) => {
+        const arg = args[index];
+        return Boolean(arg && arg.type !== ctx.primitives.unknown && arg.type !== param);
+      });
+      if (mismatchIndex >= 0) {
+        const expected = formatTypeForDiagnostic({
+          type: signature.parameters[mismatchIndex]!,
+          ctx,
+        });
+        const actual = formatTypeForDiagnostic({
+          type: args[mismatchIndex]!.type,
+          ctx,
+        });
+        return {
+          signature: signatureLabel,
+          reason: `type incompatibility at argument ${mismatchIndex + 1}: expected ${expected}, got ${actual}`,
+        };
+      }
+      return { signature: signatureLabel };
+    });
+
+  const omitted = signatures.length - details.length;
+  if (omitted > 0) {
+    details.push({ signature: `... ${omitted} more candidate(s) omitted` });
+  }
+
+  return {
+    kind: "no-overload" as const,
+    name,
+    inferredArguments: formatInferredArgumentsForDiagnostic({ args, ctx }),
+    candidates: details,
+  };
+};
+
+const intrinsicAmbiguousOverloadDiagnosticParams = ({
+  name,
+  matches,
+  args,
+  ctx,
+}: {
+  name: string;
+  matches: readonly IntrinsicSignature[];
+  args: readonly Arg[];
+  ctx: TypingContext;
+}) => ({
+  kind: "ambiguous-overload" as const,
+  name,
+  inferredArguments: formatInferredArgumentsForDiagnostic({ args, ctx }),
+  candidates: matches
+    .slice(0, MAX_OVERLOAD_DIAGNOSTIC_CANDIDATES)
+    .map((signature) => ({
+      signature: formatIntrinsicSignatureForDiagnostic({ name, signature, ctx }),
+    })),
+});
+
 const ensureMutableArgument = ({
   arg,
   param,
@@ -2045,7 +2507,15 @@ const selectMethodCallCandidate = ({
     emitDiagnostic({
       ctx,
       code: "TY0008",
-      params: { kind: "no-overload", name: expr.method },
+      params: noOverloadDiagnosticParams({
+        name: expr.method,
+        candidates,
+        args: probeArgs,
+        ctx,
+        state,
+        typeArguments,
+        argsForCandidate,
+      }),
       span: expr.span,
     });
     return { usedTraitDispatch: false };
@@ -2055,7 +2525,15 @@ const selectMethodCallCandidate = ({
     emitDiagnostic({
       ctx,
       code: "TY0007",
-      params: { kind: "ambiguous-overload", name: expr.method },
+      params: ambiguousOverloadDiagnosticParams({
+        name: expr.method,
+        matches,
+        args: probeArgs,
+        ctx,
+        state,
+        typeArguments,
+        argsForCandidate,
+      }),
       span: expr.span,
     });
     return { usedTraitDispatch: false };
@@ -2337,7 +2815,14 @@ const typeOperatorOverloadCall = ({
       emitDiagnostic({
         ctx,
         code: "TY0008",
-        params: { kind: "no-overload", name: operatorName },
+        params: noOverloadDiagnosticParams({
+          name: operatorName,
+          candidates,
+          args,
+          ctx,
+          state,
+          typeArguments,
+        }),
         span: call.span,
       });
     }
@@ -2346,7 +2831,14 @@ const typeOperatorOverloadCall = ({
       emitDiagnostic({
         ctx,
         code: "TY0007",
-        params: { kind: "ambiguous-overload", name: operatorName },
+        params: ambiguousOverloadDiagnosticParams({
+          name: operatorName,
+          matches,
+          args,
+          ctx,
+          state,
+          typeArguments,
+        }),
         span: call.span,
       });
     }
@@ -3719,7 +4211,14 @@ const typeOverloadedCall = (
       emitDiagnostic({
         ctx,
         code: "TY0008",
-        params: { kind: "no-overload", name: callee.name },
+        params: noOverloadDiagnosticParams({
+          name: callee.name,
+          candidates: candidatesForResolution,
+          args: probeArgs,
+          ctx,
+          state,
+          typeArguments,
+        }),
         span: call.span,
       });
     }
@@ -3728,7 +4227,14 @@ const typeOverloadedCall = (
       emitDiagnostic({
         ctx,
         code: "TY0007",
-        params: { kind: "ambiguous-overload", name: callee.name },
+        params: ambiguousOverloadDiagnosticParams({
+          name: callee.name,
+          matches,
+          args: probeArgs,
+          ctx,
+          state,
+          typeArguments,
+        }),
         span: call.span,
       });
     }
@@ -4165,7 +4671,12 @@ const typeIntrinsicCall = (
         emitDiagnostic({
           ctx,
           code: "TY0008",
-          params: { kind: "no-overload", name },
+          params: intrinsicNoOverloadDiagnosticParams({
+            name,
+            signatures,
+            args,
+            ctx,
+          }),
           span: callSpan,
         });
         return ctx.primitives.unknown;
@@ -4175,7 +4686,12 @@ const typeIntrinsicCall = (
         emitDiagnostic({
           ctx,
           code: "TY0007",
-          params: { kind: "ambiguous-overload", name },
+          params: intrinsicAmbiguousOverloadDiagnosticParams({
+            name,
+            matches,
+            args,
+            ctx,
+          }),
           span: callSpan,
         });
         return ctx.primitives.unknown;

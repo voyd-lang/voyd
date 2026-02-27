@@ -2,7 +2,254 @@ import type { Syntax } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import { resolveConstructorResolution } from "../resolution.js";
 import type { IdentifierResolution, LowerContext } from "../types.js";
-import type { HirExprId, SymbolId } from "../../ids.js";
+import type { HirExprId, SourceSpan, SymbolId } from "../../ids.js";
+
+type SymbolMetadata = {
+  declarationSpan?: unknown;
+  import?: { moduleId?: unknown; symbol?: unknown };
+};
+
+const isSourceSpan = (value: unknown): value is SourceSpan => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<SourceSpan>;
+  return (
+    typeof candidate.file === "string" &&
+    typeof candidate.start === "number" &&
+    typeof candidate.end === "number"
+  );
+};
+
+const isKnownSpan = (span: SourceSpan | undefined): span is SourceSpan =>
+  Boolean(span && span.file !== "<unknown>");
+
+const declarationSpanFromDecls = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: LowerContext;
+}): SourceSpan | undefined => {
+  const fn = ctx.decls.getFunction(symbol);
+  if (fn?.form) {
+    return toSourceSpan(fn.form);
+  }
+
+  const alias = ctx.decls.getTypeAlias(symbol);
+  if (alias?.form) {
+    return toSourceSpan(alias.form);
+  }
+
+  const object = ctx.decls.getObject(symbol);
+  if (object?.form) {
+    return toSourceSpan(object.form);
+  }
+
+  const trait = ctx.decls.getTrait(symbol);
+  if (trait?.form) {
+    return toSourceSpan(trait.form);
+  }
+
+  const effect = ctx.decls.getEffect(symbol);
+  if (effect?.form) {
+    return toSourceSpan(effect.form);
+  }
+
+  const parameter = ctx.decls.getParameter(symbol);
+  if (parameter?.ast) {
+    return toSourceSpan(parameter.ast);
+  }
+
+  const effectOp = ctx.decls.getEffectOperation(symbol);
+  if (effectOp?.operation.ast) {
+    return toSourceSpan(effectOp.operation.ast);
+  }
+
+  return undefined;
+};
+
+const importedDeclarationSpan = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: LowerContext;
+}): SourceSpan | undefined => {
+  const localRecord = ctx.symbolTable.getSymbol(symbol);
+  const metadata = localRecord.metadata as SymbolMetadata | undefined;
+  if (
+    typeof metadata?.import?.moduleId !== "string" ||
+    typeof metadata.import.symbol !== "number"
+  ) {
+    return undefined;
+  }
+
+  const dependency = ctx.dependencies.get(metadata.import.moduleId);
+  if (!dependency) {
+    return undefined;
+  }
+
+  const importedSymbol = metadata.import.symbol;
+  const fn = dependency.decls.getFunction(importedSymbol);
+  if (fn?.form) {
+    return toSourceSpan(fn.form);
+  }
+
+  const alias = dependency.decls.getTypeAlias(importedSymbol);
+  if (alias?.form) {
+    return toSourceSpan(alias.form);
+  }
+
+  const object = dependency.decls.getObject(importedSymbol);
+  if (object?.form) {
+    return toSourceSpan(object.form);
+  }
+
+  const trait = dependency.decls.getTrait(importedSymbol);
+  if (trait?.form) {
+    return toSourceSpan(trait.form);
+  }
+
+  const effect = dependency.decls.getEffect(importedSymbol);
+  if (effect?.form) {
+    return toSourceSpan(effect.form);
+  }
+
+  const effectOp = dependency.decls.getEffectOperation(importedSymbol);
+  if (effectOp?.operation.ast) {
+    return toSourceSpan(effectOp.operation.ast);
+  }
+
+  return undefined;
+};
+
+const declarationSpanForSymbol = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: LowerContext;
+}): SourceSpan | undefined => {
+  const metadata = ctx.symbolTable.getSymbol(symbol).metadata as
+    | SymbolMetadata
+    | undefined;
+
+  if (isSourceSpan(metadata?.declarationSpan) && isKnownSpan(metadata.declarationSpan)) {
+    return metadata.declarationSpan;
+  }
+
+  const imported = importedDeclarationSpan({ symbol, ctx });
+  if (isKnownSpan(imported)) {
+    return imported;
+  }
+
+  const importSite = ctx.importSpansByLocal.get(symbol);
+  if (isKnownSpan(importSite)) {
+    return importSite;
+  }
+
+  const local = declarationSpanFromDecls({ symbol, ctx });
+  if (isKnownSpan(local)) {
+    return local;
+  }
+
+  return undefined;
+};
+
+const dependencySymbolName = ({
+  moduleId,
+  symbol,
+  fallback,
+  ctx,
+}: {
+  moduleId: string;
+  symbol: number | undefined;
+  fallback: string;
+  ctx: LowerContext;
+}): string => {
+  if (typeof symbol !== "number") {
+    return fallback;
+  }
+
+  const dependency = ctx.dependencies.get(moduleId);
+  if (!dependency) {
+    return fallback;
+  }
+
+  try {
+    return dependency.symbolTable.getSymbol(symbol).name;
+  } catch {
+    return fallback;
+  }
+};
+
+const fullyQualifiedPathForSymbol = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: LowerContext;
+}): string => {
+  const record = ctx.symbolTable.getSymbol(symbol);
+  const metadata = record.metadata as SymbolMetadata | undefined;
+  const importModuleId =
+    typeof metadata?.import?.moduleId === "string"
+      ? metadata.import.moduleId
+      : undefined;
+
+  if (importModuleId) {
+    const importedName = dependencySymbolName({
+      moduleId: importModuleId,
+      symbol:
+        typeof metadata?.import?.symbol === "number"
+          ? metadata.import.symbol
+          : undefined,
+      fallback: record.name,
+      ctx,
+    });
+    return `${importModuleId}::${importedName}`;
+  }
+
+  return `${ctx.moduleId}::${record.name}`;
+};
+
+const formatSourceSpan = (span: SourceSpan): string =>
+  `${span.file}:${span.start}-${span.end}`;
+
+const formatAmbiguousCandidates = ({
+  symbols,
+  ctx,
+}: {
+  symbols: readonly SymbolId[];
+  ctx: LowerContext;
+}): string =>
+  symbols
+    .map((symbol) => {
+      const candidatePath = fullyQualifiedPathForSymbol({ symbol, ctx });
+      const candidateSpan = declarationSpanForSymbol({ symbol, ctx });
+      const location = candidateSpan
+        ? ` (${formatSourceSpan(candidateSpan)})`
+        : "";
+      return `- ${candidatePath} [symbol ${symbol}]${location}`;
+    })
+    .join("\n");
+
+const formatAmbiguousResolutionMessage = ({
+  headline,
+  symbols,
+  guidance,
+  ctx,
+}: {
+  headline: string;
+  symbols: readonly SymbolId[];
+  guidance: string;
+  ctx: LowerContext;
+}): string =>
+  `${headline}\nCandidates:\n${formatAmbiguousCandidates({
+    symbols,
+    ctx,
+  })}\n${guidance}`;
 
 export const lowerResolvedCallee = ({
   resolution,
@@ -80,7 +327,14 @@ export const resolveStaticMethodResolution = ({
   }
 
   const targetName = ctx.symbolTable.getSymbol(targetSymbol).name;
-  throw new Error(`ambiguous static method ${name} for type ${targetName}`);
+  throw new Error(
+    formatAmbiguousResolutionMessage({
+      headline: `ambiguous static method ${name} for type ${targetName}`,
+      symbols: symbolsArray,
+      guidance: "Use explicit qualification to select a single static method.",
+      ctx,
+    }),
+  );
 };
 
 export const resolveModuleMemberResolution = ({
@@ -127,7 +381,15 @@ export const resolveModuleMemberResolution = ({
   }
 
   const moduleName = ctx.symbolTable.getSymbol(moduleSymbol).name;
-  throw new Error(`ambiguous module member ${name} on ${moduleName}`);
+  throw new Error(
+    formatAmbiguousResolutionMessage({
+      headline: `ambiguous module member ${name} on ${moduleName}`,
+      symbols: Array.from(symbols),
+      guidance:
+        "Disambiguate by importing with an alias or qualifying the target symbol explicitly.",
+      ctx,
+    }),
+  );
 };
 
 export const resolveModuleMemberCallResolution = ({
