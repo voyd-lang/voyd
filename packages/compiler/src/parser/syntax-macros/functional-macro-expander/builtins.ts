@@ -440,7 +440,7 @@ export const createBuiltins = (
       const clauses = originalArgs.filter(
         (arg): arg is Form => isForm(arg) && arg.calls(":"),
       );
-      if (clauses.length === originalArgs.length) {
+      if (originalArgs.length > 0 && clauses.length === originalArgs.length) {
         for (const clause of clauses) {
           const conditionExpr = clause.at(1);
           const branchExpr = clause.at(2);
