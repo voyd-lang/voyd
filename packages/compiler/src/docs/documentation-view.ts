@@ -141,6 +141,7 @@ const isDocumentedVisibility = (
 type ExportedModuleRef = {
   moduleId: string;
   traversable: boolean;
+  namedTargets?: readonly string[];
 };
 
 const collectDirectExportedModuleIds = (
@@ -166,10 +167,17 @@ const collectDirectExportedModuleIds = (
       if (!entry.moduleId) {
         return;
       }
+      const namedTargets =
+        entry.selectionKind === "name"
+          ? [entry.targetName ?? entry.path.at(-1)].filter(
+              (name): name is string => Boolean(name),
+            )
+          : undefined;
       exportedModuleIds.push({
         moduleId: entry.moduleId,
         traversable:
           entry.selectionKind === "all" || entry.selectionKind === "module",
+        namedTargets,
       });
     });
   });
@@ -226,7 +234,12 @@ const collectExportedModuleIds = ({
   entryModule: string;
   graph: ModuleGraph;
   semantics: ReadonlyMap<string, SemanticsPipelineResult>;
-}): Set<string> | undefined => {
+}):
+  | {
+      includedModuleIds: Set<string>;
+      namedExportsByModuleId: ReadonlyMap<string, ReadonlySet<string>>;
+    }
+  | undefined => {
   const entrySemantics = semantics.get(entryModule);
   if (!entrySemantics?.binding.isPackageRoot) {
     return undefined;
@@ -234,20 +247,28 @@ const collectExportedModuleIds = ({
 
   const exportedModuleIds = new Set<string>([entryModule]);
   const traversableByModuleId = new Map<string, boolean>([[entryModule, true]]);
+  const namedExportsByModuleId = new Map<string, Set<string>>();
   const queue: string[] = [entryModule];
 
   const includeModule = ({
     moduleId,
     traversable,
+    namedTargets,
   }: {
     moduleId: string;
     traversable: boolean;
+    namedTargets?: readonly string[];
   }) => {
     if (!semantics.has(moduleId)) {
       return;
     }
 
     exportedModuleIds.add(moduleId);
+    if (namedTargets && namedTargets.length > 0) {
+      const current = namedExportsByModuleId.get(moduleId) ?? new Set<string>();
+      namedTargets.forEach((target) => current.add(target));
+      namedExportsByModuleId.set(moduleId, current);
+    }
 
     const wasTraversable = traversableByModuleId.get(moduleId) === true;
     if (!wasTraversable && traversable) {
@@ -283,7 +304,47 @@ const collectExportedModuleIds = ({
     directExportedModules.forEach(includeModule);
   }
 
-  return exportedModuleIds;
+  const namedOnlyModuleFilters = new Map<string, ReadonlySet<string>>();
+  namedExportsByModuleId.forEach((targets, moduleId) => {
+    if (targets.size === 0) {
+      return;
+    }
+    if (traversableByModuleId.get(moduleId) === true) {
+      return;
+    }
+    namedOnlyModuleFilters.set(moduleId, targets);
+  });
+
+  return {
+    includedModuleIds: exportedModuleIds,
+    namedExportsByModuleId: namedOnlyModuleFilters,
+  };
+};
+
+const extractTypeName = (expr: unknown): string | undefined => {
+  if (isIdentifierAtom(expr)) {
+    return expr.value;
+  }
+  if (typeof expr === "string") {
+    const trimmed = expr.trim();
+    if (trimmed.length === 0) {
+      return undefined;
+    }
+    const withoutGenerics = trimmed.split("<")[0]?.trim();
+    const tail = withoutGenerics?.split("::").at(-1)?.trim();
+    return tail && /^[A-Za-z_][A-Za-z0-9_]*$/.test(tail) ? tail : undefined;
+  }
+  if (!isForm(expr)) {
+    return undefined;
+  }
+  if (expr.calls("::")) {
+    return extractTypeName(expr.at(2));
+  }
+  const first = expr.at(0);
+  if (isIdentifierAtom(first)) {
+    return first.value;
+  }
+  return extractTypeName(first);
 };
 
 const moduleDepth = (moduleId: string): number => moduleId.split("::").length - 1;
@@ -378,11 +439,13 @@ const normalizeModules = ({
   semantics,
   packageId,
   includedModuleIds,
+  namedExportsByModuleId,
 }: {
   graph: ModuleGraph;
   semantics: ReadonlyMap<string, SemanticsPipelineResult>;
   packageId?: string;
   includedModuleIds?: ReadonlySet<string>;
+  namedExportsByModuleId?: ReadonlyMap<string, ReadonlySet<string>>;
 }): DocumentationModuleView[] =>
   Array.from(semantics.entries())
     .flatMap(([moduleId, semantic]) => {
@@ -392,6 +455,9 @@ const normalizeModules = ({
       if (includedModuleIds && !includedModuleIds.has(moduleId)) {
         return [];
       }
+      const allowedNames = namedExportsByModuleId?.get(moduleId);
+      const allowsName = (name: string): boolean =>
+        !allowedNames || allowedNames.has(name);
       const moduleNode = graph.modules.get(moduleId);
       const macroDocsByName = moduleNode?.docs?.macroDeclarationsByName;
 
@@ -401,62 +467,79 @@ const normalizeModules = ({
           depth: moduleDepth(moduleId),
           packageId: semantic.binding.packageId,
           documentation: moduleNode?.docs?.module,
-          macros: (moduleNode?.macroExports ?? []).map((name) => ({
-            name,
-            documentation: macroDocsByName?.get(name),
-          })),
-          functions: semantic.binding.functions.map(normalizeFunction),
-          typeAliases: semantic.binding.typeAliases.map((typeAlias) => ({
-            name: typeAlias.name,
-            visibility: normalizeVisibility(typeAlias.visibility),
-            typeParameters: normalizeTypeParameters(typeAlias.typeParameters),
-            target: typeAlias.target,
-            documentation: typeAlias.documentation,
-          })),
-          objects: semantic.binding.objects.map((objectDecl) => ({
-            name: objectDecl.name,
-            visibility: normalizeVisibility(objectDecl.visibility),
-            typeParameters: normalizeTypeParameters(objectDecl.typeParameters),
-            baseTypeExpr: objectDecl.baseTypeExpr,
-            fields: objectDecl.fields
-              .filter((field) => field.visibility.api === true)
-              .map((field) => ({
-                name: field.name,
-                typeExpr: field.typeExpr,
-                documentation: field.documentation,
-              })),
-            documentation: objectDecl.documentation,
-          })),
-          traits: semantic.binding.traits.map((traitDecl) => ({
-            name: traitDecl.name,
-            visibility: normalizeVisibility(traitDecl.visibility),
-            typeParameters: normalizeTypeParameters(traitDecl.typeParameters),
-            methods: traitDecl.methods.map(normalizeMethod),
-            documentation: traitDecl.documentation,
-          })),
-          effects: semantic.binding.effects.map((effectDecl) => ({
-            name: effectDecl.name,
-            visibility: normalizeVisibility(effectDecl.visibility),
-            typeParameters: normalizeTypeParameters(effectDecl.typeParameters),
-            operations: effectDecl.operations.map((operation) => ({
-              name: operation.name,
-              params: operation.parameters.map(normalizeParameter),
-              returnTypeExpr: operation.returnTypeExpr,
-              resumable: operation.resumable,
-              documentation: operation.documentation,
+          macros: (moduleNode?.macroExports ?? [])
+            .filter((name) => allowsName(name))
+            .map((name) => ({
+              name,
+              documentation: macroDocsByName?.get(name),
             })),
-          })),
-          impls: semantic.binding.impls.map((implDecl) => ({
-            id: implDecl.id,
-            visibility: normalizeVisibility(implDecl.visibility),
-            target: implDecl.target,
-            trait: implDecl.trait,
-            typeParameters: normalizeTypeParameters(implDecl.typeParameters),
-            methods: implDecl.methods
-              .filter((method) => method.memberVisibility?.api === true)
-              .map(normalizeFunction),
-            documentation: implDecl.documentation,
-          })),
+          functions: semantic.binding.functions
+            .filter((fn) => allowsName(fn.name))
+            .map(normalizeFunction),
+          typeAliases: semantic.binding.typeAliases
+            .filter((typeAlias) => allowsName(typeAlias.name))
+            .map((typeAlias) => ({
+              name: typeAlias.name,
+              visibility: normalizeVisibility(typeAlias.visibility),
+              typeParameters: normalizeTypeParameters(typeAlias.typeParameters),
+              target: typeAlias.target,
+              documentation: typeAlias.documentation,
+            })),
+          objects: semantic.binding.objects
+            .filter((objectDecl) => allowsName(objectDecl.name))
+            .map((objectDecl) => ({
+              name: objectDecl.name,
+              visibility: normalizeVisibility(objectDecl.visibility),
+              typeParameters: normalizeTypeParameters(objectDecl.typeParameters),
+              baseTypeExpr: objectDecl.baseTypeExpr,
+              fields: objectDecl.fields
+                .filter((field) => field.visibility.api === true)
+                .map((field) => ({
+                  name: field.name,
+                  typeExpr: field.typeExpr,
+                  documentation: field.documentation,
+                })),
+              documentation: objectDecl.documentation,
+            })),
+          traits: semantic.binding.traits
+            .filter((traitDecl) => allowsName(traitDecl.name))
+            .map((traitDecl) => ({
+              name: traitDecl.name,
+              visibility: normalizeVisibility(traitDecl.visibility),
+              typeParameters: normalizeTypeParameters(traitDecl.typeParameters),
+              methods: traitDecl.methods.map(normalizeMethod),
+              documentation: traitDecl.documentation,
+            })),
+          effects: semantic.binding.effects
+            .filter((effectDecl) => allowsName(effectDecl.name))
+            .map((effectDecl) => ({
+              name: effectDecl.name,
+              visibility: normalizeVisibility(effectDecl.visibility),
+              typeParameters: normalizeTypeParameters(effectDecl.typeParameters),
+              operations: effectDecl.operations.map((operation) => ({
+                name: operation.name,
+                params: operation.parameters.map(normalizeParameter),
+                returnTypeExpr: operation.returnTypeExpr,
+                resumable: operation.resumable,
+                documentation: operation.documentation,
+              })),
+            })),
+          impls: semantic.binding.impls
+            .filter((implDecl) => {
+              const targetName = extractTypeName(implDecl.target);
+              return !targetName || allowsName(targetName);
+            })
+            .map((implDecl) => ({
+              id: implDecl.id,
+              visibility: normalizeVisibility(implDecl.visibility),
+              target: implDecl.target,
+              trait: implDecl.trait,
+              typeParameters: normalizeTypeParameters(implDecl.typeParameters),
+              methods: implDecl.methods
+                .filter((method) => method.memberVisibility?.api === true)
+                .map(normalizeFunction),
+              documentation: implDecl.documentation,
+            })),
           reexports: semantic.binding.uses.flatMap((useDecl) =>
             useDecl.entries.map((entry) => ({
               visibility: normalizeVisibility(useDecl.visibility),
@@ -466,7 +549,19 @@ const normalizeModules = ({
               targetName: entry.targetName,
               alias: entry.alias,
             })),
-          ),
+          ).filter((reexport) => {
+            if (!allowedNames) {
+              return true;
+            }
+            if (reexport.selectionKind !== "name") {
+              return false;
+            }
+            const exportedName =
+              reexport.alias ??
+              reexport.targetName ??
+              reexport.path.at(-1);
+            return Boolean(exportedName && allowedNames.has(exportedName));
+          }),
         },
       ];
     })
@@ -486,7 +581,7 @@ export const buildDocumentationView = ({
     semantics.get(graph.entry)?.binding.packageId ??
     semantics.values().next().value?.binding?.packageId;
 
-  const includedModuleIds = collectExportedModuleIds({
+  const exportScope = collectExportedModuleIds({
     entryModule: graph.entry,
     graph,
     semantics,
@@ -499,7 +594,8 @@ export const buildDocumentationView = ({
       graph,
       semantics,
       packageId: resolvedPackageId,
-      includedModuleIds,
+      includedModuleIds: exportScope?.includedModuleIds,
+      namedExportsByModuleId: exportScope?.namedExportsByModuleId,
     }),
   };
 };

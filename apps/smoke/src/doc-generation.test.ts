@@ -149,6 +149,9 @@ const createNamedReExportPackageRootFixture = async (): Promise<{
       "  pub fn shown() -> i32",
       "    1",
       "",
+      "  pub fn extra() -> i32",
+      "    3",
+      "",
     ].join("\n"),
     "utf8",
   );
@@ -313,6 +316,7 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("id=\"module-src-pkg\"");
       expect(html.content).toContain("id=\"module-src-pkg-visible\"");
       expect(html.content).not.toContain("id=\"module-src-pkg-visible-nested\"");
+      expect(html.content).not.toContain("id=\"function-src-pkg-visible-extra\"");
       expect(html.content).not.toContain("id=\"module-src-pkg-hidden\"");
     } finally {
       await fs.rm(fixture.root, { recursive: true, force: true });

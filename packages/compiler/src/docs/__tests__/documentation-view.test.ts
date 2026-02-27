@@ -165,6 +165,9 @@ mod visible
 
   pub fn shown() -> i32
     1
+
+  pub fn extra() -> i32
+    3
 `,
     });
 
@@ -182,5 +185,7 @@ mod visible
       "src::pkg",
       "src::pkg::visible",
     ]);
+    const visibleModule = view.modules.find((module) => module.id === "src::pkg::visible");
+    expect(visibleModule?.functions.map((fn) => fn.name)).toEqual(["shown"]);
   });
 });
