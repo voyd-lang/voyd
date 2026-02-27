@@ -1,4 +1,9 @@
-export type HostRuntimeKind = "node" | "deno" | "browser" | "unknown";
+import {
+  scheduleTaskForRuntimePolicy,
+  type RuntimeSchedulingKind,
+} from "./scheduling-policy.js";
+
+export type HostRuntimeKind = RuntimeSchedulingKind;
 
 export const detectHostRuntime = (): HostRuntimeKind => {
   const globalRecord = globalThis as Record<string, unknown>;
@@ -24,29 +29,6 @@ export const detectHostRuntime = (): HostRuntimeKind => {
   return "unknown";
 };
 
-const queueMicrotaskOrPromise = (task: () => void): void => {
-  if (typeof queueMicrotask === "function") {
-    queueMicrotask(task);
-    return;
-  }
-  Promise.resolve().then(task);
-};
-
-const scheduleMacrotaskOrMicrotask = (task: () => void): void => {
-  if (typeof setTimeout === "function") {
-    setTimeout(task, 0);
-    return;
-  }
-  queueMicrotaskOrPromise(task);
-};
-
 export const scheduleTaskForRuntime = (
   runtime: HostRuntimeKind
-): ((task: () => void) => void) => {
-  if (runtime === "node" && typeof setImmediate === "function") {
-    return (task) => {
-      setImmediate(task);
-    };
-  }
-  return scheduleMacrotaskOrMicrotask;
-};
+): ((task: () => void) => void) => scheduleTaskForRuntimePolicy(runtime);

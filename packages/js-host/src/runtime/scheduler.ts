@@ -1,4 +1,6 @@
 import type { RunOutcome, VoydRunHandle } from "../protocol/types.js";
+import { detectHostRuntime } from "./environment.js";
+import { scheduleTaskForRuntimePolicy } from "./scheduling-policy.js";
 
 const DEFAULT_MAX_INTERNAL_STEPS_PER_TICK = 1024;
 
@@ -37,17 +39,8 @@ type ExternalEvent =
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
-const defaultScheduleTask = (task: () => void): void => {
-  if (typeof setTimeout === "function") {
-    setTimeout(task, 0);
-    return;
-  }
-  if (typeof queueMicrotask === "function") {
-    queueMicrotask(task);
-    return;
-  }
-  Promise.resolve().then(task);
-};
+const resolveDefaultScheduleTask = (): ((task: () => void) => void) =>
+  scheduleTaskForRuntimePolicy(detectHostRuntime());
 
 const normalizeBudget = (value?: number): number => {
   if (!Number.isFinite(value) || value === undefined) {
@@ -59,7 +52,7 @@ const normalizeBudget = (value?: number): number => {
 
 export const createRuntimeScheduler = ({
   maxInternalStepsPerTick,
-  scheduleTask = defaultScheduleTask,
+  scheduleTask = resolveDefaultScheduleTask(),
   onRunFailed,
 }: RuntimeSchedulerOptions = {}) => {
   const budgetPerTick = normalizeBudget(maxInternalStepsPerTick);
