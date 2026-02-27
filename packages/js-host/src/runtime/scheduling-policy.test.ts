@@ -1,25 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  scheduleTaskForRuntime,
-  type HostRuntimeKind,
-} from "./environment.js";
-import { scheduleTaskForRuntimePolicy } from "./scheduling-policy.js";
+  scheduleTaskForRuntimePolicy,
+  type RuntimeSchedulingKind,
+} from "./scheduling-policy.js";
 
-describe("scheduleTaskForRuntime", () => {
+describe("scheduleTaskForRuntimePolicy", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("delegates to the shared scheduling policy helper", () => {
-    expect(scheduleTaskForRuntime("node")).toBe(
-      scheduleTaskForRuntimePolicy("node")
-    );
-    expect(scheduleTaskForRuntime("unknown")).toBe(
-      scheduleTaskForRuntimePolicy("unknown")
-    );
-  });
-
-  it("uses setImmediate on node", () => {
+  it("prefers setImmediate on node", () => {
     const trace: string[] = [];
     const setImmediateSpy = vi.fn((task: () => void) => {
       task();
@@ -29,7 +19,7 @@ describe("scheduleTaskForRuntime", () => {
     vi.stubGlobal("setImmediate", setImmediateSpy);
     vi.stubGlobal("setTimeout", setTimeoutSpy);
 
-    const schedule = scheduleTaskForRuntime("node");
+    const schedule = scheduleTaskForRuntimePolicy("node");
     schedule(() => {
       trace.push("ran");
     });
@@ -39,7 +29,7 @@ describe("scheduleTaskForRuntime", () => {
     expect(setTimeoutSpy).not.toHaveBeenCalled();
   });
 
-  it("uses macrotask scheduling on browser/deno/unknown", () => {
+  it("uses setTimeout on non-node runtimes", () => {
     const trace: string[] = [];
     const setTimeoutSpy = vi.fn((task: () => void, _delay?: number) => {
       task();
@@ -49,12 +39,14 @@ describe("scheduleTaskForRuntime", () => {
     vi.stubGlobal("setTimeout", setTimeoutSpy);
     vi.stubGlobal("setImmediate", setImmediateSpy);
 
-    (["browser", "deno", "unknown"] as HostRuntimeKind[]).forEach((runtime) => {
-      const schedule = scheduleTaskForRuntime(runtime);
-      schedule(() => {
-        trace.push(runtime);
-      });
-    });
+    (["browser", "deno", "unknown"] as RuntimeSchedulingKind[]).forEach(
+      (runtime) => {
+        const schedule = scheduleTaskForRuntimePolicy(runtime);
+        schedule(() => {
+          trace.push(runtime);
+        });
+      }
+    );
 
     expect(trace).toEqual(["browser", "deno", "unknown"]);
     expect(setTimeoutSpy).toHaveBeenCalledTimes(3);
@@ -62,17 +54,23 @@ describe("scheduleTaskForRuntime", () => {
     expect(setTimeoutSpy.mock.calls.every((call) => call[1] === 0)).toBe(true);
   });
 
-  it("falls back to microtask when setTimeout is unavailable", async () => {
+  it("falls back to microtasks when macrotask APIs are unavailable", async () => {
+    vi.stubGlobal("setImmediate", undefined);
     vi.stubGlobal("setTimeout", undefined);
-    const schedule = scheduleTaskForRuntime("browser");
-    const trace: string[] = [];
+    const queueMicrotaskSpy = vi.fn((task: () => void) => {
+      task();
+    });
+    vi.stubGlobal("queueMicrotask", queueMicrotaskSpy);
 
+    const trace: string[] = [];
+    const schedule = scheduleTaskForRuntimePolicy("node");
     schedule(() => {
       trace.push("scheduled");
     });
     trace.push("sync");
     await Promise.resolve();
 
-    expect(trace).toEqual(["sync", "scheduled"]);
+    expect(trace).toEqual(["scheduled", "sync"]);
+    expect(queueMicrotaskSpy).toHaveBeenCalledTimes(1);
   });
 });
