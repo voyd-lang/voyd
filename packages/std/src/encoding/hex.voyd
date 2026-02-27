@@ -11,7 +11,7 @@ use std::string::{ String, StringSlice, new_string }
 /// Encodes bytes as lower-case hexadecimal.
 pub fn encode({ bytes: Bytes }) -> String
   let source = bytes.to_array()
-  if source.is_empty() then:
+  if source.is_empty():
     return String::init()
 
   let ~out = Array<i32>::with_capacity(source.len() * 2)
@@ -28,9 +28,9 @@ pub fn encode({ bytes: Bytes }) -> String
 pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
   let source = s.to_string().to_utf8()
   let source_len = source.len()
-  if source_len == 0 then:
+  if source_len == 0:
     return Ok<Bytes> { value: ByteBuffer::init().as_bytes() }
-  if div_rem(source_len, 2).1 != 0 then:
+  if div_rem(source_len, 2).1 != 0:
     return decode_error("hex input length must be even")
 
   let ~buffer = ByteBuffer::with_capacity(bytes: source_len / 2)
@@ -56,15 +56,15 @@ fn decode_error<T>(message: String) -> Result<T, DecodeError>
   Err<DecodeError> { error: DecodeError { message: message } }
 
 fn hex_ascii_to_digit(value: i32) -> Option<i32>
-  if value >= 48 and value <= 57 then:
+  if value >= 48 and value <= 57:
     return Some<i32> { value: value - 48 }
-  if value >= 65 and value <= 70 then:
+  if value >= 65 and value <= 70:
     return Some<i32> { value: value - 55 }
-  if value >= 97 and value <= 102 then:
+  if value >= 97 and value <= 102:
     return Some<i32> { value: value - 87 }
   None {}
 
 fn hex_digit_to_ascii(value: i32) -> i32
-  if value <= 9 then:
+  if value <= 9:
     return 48 + value
   97 + (value - 10)

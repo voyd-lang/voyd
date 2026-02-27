@@ -6,15 +6,15 @@ pub eff Test
 
 /// Fails the current test when the assertion condition is not met.
 pub fn assert(cond: boolean): fail -> void
-  if not cond then:
+  if not cond:
     Test::fail()
 
 /// Fails the current test when the assertion condition is not met.
 pub fn assert<T>(value: T, { eq expected: T }): fail -> void
-  if value != expected then:
+  if value != expected:
     Test::fail()
 
 /// Fails the current test when the assertion condition is not met.
 pub fn assert<T>(value: T, { neq expected: T }): fail -> void
-  if value == expected then:
+  if value == expected:
     Test::fail()

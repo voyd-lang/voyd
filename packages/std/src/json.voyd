@@ -55,7 +55,7 @@ pub fn parse({ s: StringSlice }) -> Result<JsonValue, JsonError>
   match(value_result)
     Ok<JsonValue> { value }:
       skip_whitespace(parser)
-      if parser.index != parser.source.as_slice().byte_len() then:
+      if parser.index != parser.source.as_slice().byte_len():
         return Err<JsonError> { error: json_error("json parse error: trailing characters") }
       Ok<JsonValue> { value: value }
     Err<JsonError> { error }:
@@ -77,34 +77,34 @@ fn parse_value(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   skip_whitespace(parser)
   match(peek(parser))
     Some<i32> { value: byte }:
-      if byte == 110 then:
+      if byte == 110:
         return parse_literal_null(parser)
-      if byte == 116 then:
+      if byte == 116:
         return parse_literal_true(parser)
-      if byte == 102 then:
+      if byte == 102:
         return parse_literal_false(parser)
-      if byte == 34 then:
+      if byte == 34:
         return parse_string_value(parser)
-      if byte == 91 then:
+      if byte == 91:
         return parse_array(parser)
-      if byte == 123 then:
+      if byte == 123:
         return parse_object(parser)
       parse_number(parser)
     None:
       Err<JsonError> { error: json_error("json parse error: unexpected end of input") }
 
 fn parse_literal_null(~parser: JsonParser): () -> Result<JsonValue, JsonError>
-  if consume_literal(parser, "null") then:
+  if consume_literal(parser, "null"):
     return Ok<JsonValue> { value: JsonNull {} }
   Err<JsonError> { error: json_error("json parse error: invalid literal") }
 
 fn parse_literal_true(~parser: JsonParser): () -> Result<JsonValue, JsonError>
-  if consume_literal(parser, "true") then:
+  if consume_literal(parser, "true"):
     return Ok<JsonValue> { value: JsonBool { value: true } }
   Err<JsonError> { error: json_error("json parse error: invalid literal") }
 
 fn parse_literal_false(~parser: JsonParser): () -> Result<JsonValue, JsonError>
-  if consume_literal(parser, "false") then:
+  if consume_literal(parser, "false"):
     return Ok<JsonValue> { value: JsonBool { value: false } }
   Err<JsonError> { error: json_error("json parse error: invalid literal") }
 
@@ -116,25 +116,25 @@ fn parse_string_value(~parser: JsonParser): () -> Result<JsonValue, JsonError>
       Err<JsonError> { error: error }
 
 fn parse_string(~parser: JsonParser): () -> Result<String, JsonError>
-  if not consume_byte(parser, 34) then:
+  if not consume_byte(parser, 34):
     return Err<JsonError> { error: json_error("json parse error: expected string") }
 
   let ~bytes = Array<i32>::with_capacity(16)
   while true do:
     let byte = next_byte_or(parser, -1)
-    if byte < 0 then:
+    if byte < 0:
       return Err<JsonError> { error: json_error("json parse error: unterminated string") }
-    if byte == 34 then:
+    if byte == 34:
       return string_from_utf8(bytes)
-    if byte == 92 then:
+    if byte == 92:
       let escaped = next_byte_or(parser, -1)
-      if escaped < 0 then:
+      if escaped < 0:
         return Err<JsonError> { error: json_error("json parse error: unterminated escape") }
       let append_result = append_escaped(bytes, escaped, parser)
-      if append_result != 0 then:
+      if append_result != 0:
         return Err<JsonError> { error: json_error("json parse error: invalid string escape") }
       continue
-    if byte < 32 then:
+    if byte < 32:
       return Err<JsonError> {
         error: json_error("json parse error: unescaped control character in string")
       }
@@ -147,7 +147,7 @@ fn parse_array(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   skip_whitespace(parser)
 
   let ~items = Array<JsonValue>::with_capacity(4)
-  if consume_byte(parser, 93) then:
+  if consume_byte(parser, 93):
     return Ok<JsonValue> { value: JsonArray { value: items } }
 
   while true do:
@@ -158,10 +158,10 @@ fn parse_array(~parser: JsonParser): () -> Result<JsonValue, JsonError>
         return Err<JsonError> { error: error }
 
     skip_whitespace(parser)
-    if consume_byte(parser, 44) then:
+    if consume_byte(parser, 44):
       skip_whitespace(parser)
       continue
-    if consume_byte(parser, 93) then:
+    if consume_byte(parser, 93):
       return Ok<JsonValue> { value: JsonArray { value: items } }
     return Err<JsonError> { error: json_error("json parse error: expected ',' or ']' in array") }
 
@@ -172,14 +172,14 @@ fn parse_object(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   skip_whitespace(parser)
 
   let ~fields = Dict<String, JsonValue>::init()
-  if consume_byte(parser, 125) then:
+  if consume_byte(parser, 125):
     return Ok<JsonValue> { value: JsonObject { value: fields } }
 
   while true do:
     match(parse_string(parser))
       Ok<String> { value: key }:
         skip_whitespace(parser)
-        if not consume_byte(parser, 58) then:
+        if not consume_byte(parser, 58):
           return Err<JsonError> { error: json_error("json parse error: expected ':' after object key") }
         skip_whitespace(parser)
         match(parse_value(parser))
@@ -191,10 +191,10 @@ fn parse_object(~parser: JsonParser): () -> Result<JsonValue, JsonError>
         return Err<JsonError> { error: error }
 
     skip_whitespace(parser)
-    if consume_byte(parser, 44) then:
+    if consume_byte(parser, 44):
       skip_whitespace(parser)
       continue
-    if consume_byte(parser, 125) then:
+    if consume_byte(parser, 125):
       return Ok<JsonValue> { value: JsonObject { value: fields } }
     return Err<JsonError> { error: json_error("json parse error: expected ',' or '}' in object") }
 
@@ -202,25 +202,25 @@ fn parse_object(~parser: JsonParser): () -> Result<JsonValue, JsonError>
 
 fn parse_number(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   let start = parser.index
-  if consume_byte(parser, 45) then:
+  if consume_byte(parser, 45):
     void
 
   match(peek(parser))
     Some<i32> { value: first_digit }:
-      if first_digit == 48 then:
+      if first_digit == 48:
         parser.index = parser.index + 1
       else:
-        if is_digit(first_digit) then:
+        if is_digit(first_digit):
           consume_digits(parser)
         else:
           return Err<JsonError> { error: json_error("json parse error: invalid number") }
     None:
       return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
-  if consume_byte(parser, 46) then:
+  if consume_byte(parser, 46):
     match(peek(parser))
       Some<i32> { value: digit }:
-        if not is_digit(digit) then:
+        if not is_digit(digit):
           return Err<JsonError> { error: json_error("json parse error: invalid fraction") }
         consume_digits(parser)
       None:
@@ -232,12 +232,12 @@ fn parse_number(~parser: JsonParser): () -> Result<JsonValue, JsonError>
       value == 101 or value == 69
     None:
       false
-  if has_exponent then:
+  if has_exponent:
     parser.index = parser.index + 1
     let _ = consume_byte(parser, 43) or consume_byte(parser, 45)
     match(peek(parser))
       Some<i32> { value: digit }:
-        if not is_digit(digit) then:
+        if not is_digit(digit):
           return Err<JsonError> { error: json_error("json parse error: invalid exponent") }
         consume_digits(parser)
       None:
@@ -255,7 +255,7 @@ fn write_json_value(~out: Array<i32>, value: JsonValue, pretty: bool, depth: i32
     JsonNull:
       append_ascii(out, "null")
     JsonBool:
-      if active.value then:
+      if active.value:
         append_ascii(out, "true")
       else:
         append_ascii(out, "false")
@@ -275,13 +275,13 @@ fn append_json_array(
   depth: i32
 ) -> void
   out.push(91)
-  if items.is_empty() then:
+  if items.is_empty():
     out.push(93)
     return void
 
   var index = 0
   while index < items.len() do:
-    if pretty then:
+    if pretty:
       out.push(10)
       append_indent(out, depth + 1)
 
@@ -292,12 +292,12 @@ fn append_json_array(
         append_ascii(out, "null")
 
     index = index + 1
-    if index < items.len() then:
+    if index < items.len():
       out.push(44)
-      if not pretty then:
+      if not pretty:
         void
 
-  if pretty then:
+  if pretty:
     out.push(10)
     append_indent(out, depth)
   out.push(93)
@@ -310,13 +310,13 @@ fn append_json_object(
 ) -> void
   out.push(123)
   let entries = value.entries()
-  if entries.is_empty() then:
+  if entries.is_empty():
     out.push(125)
     return void
 
   var index = 0
   while index < entries.len() do:
-    if pretty then:
+    if pretty:
       out.push(10)
       append_indent(out, depth + 1)
 
@@ -324,17 +324,17 @@ fn append_json_object(
       Some<(String, JsonValue)> { value: entry }:
         append_json_string(out, entry.0)
         out.push(58)
-        if pretty then:
+        if pretty:
           out.push(32)
         write_json_value(out, entry.1, pretty, depth + 1)
       None:
         append_ascii(out, "\"\"")
 
     index = index + 1
-    if index < entries.len() then:
+    if index < entries.len():
       out.push(44)
 
-  if pretty then:
+  if pretty:
     out.push(10)
     append_indent(out, depth)
   out.push(125)
@@ -344,41 +344,41 @@ fn append_json_string(~out: Array<i32>, value: String) -> void
   var index = 0
   while index < value.as_slice().byte_len() do:
     let byte = byte_at_or(value, index, -1)
-    if not append_json_escape(out, byte) then:
+    if not append_json_escape(out, byte):
       out.push(byte)
     index = index + 1
   out.push(34)
 
 fn append_json_escape(~out: Array<i32>, byte: i32) -> bool
-  if byte == 34 then:
+  if byte == 34:
     out.push(92)
     out.push(34)
     return true
-  if byte == 92 then:
+  if byte == 92:
     out.push(92)
     out.push(92)
     return true
-  if byte == 8 then:
+  if byte == 8:
     out.push(92)
     out.push(98)
     return true
-  if byte == 12 then:
+  if byte == 12:
     out.push(92)
     out.push(102)
     return true
-  if byte == 10 then:
+  if byte == 10:
     out.push(92)
     out.push(110)
     return true
-  if byte == 13 then:
+  if byte == 13:
     out.push(92)
     out.push(114)
     return true
-  if byte == 9 then:
+  if byte == 9:
     out.push(92)
     out.push(116)
     return true
-  if byte >= 0 and byte < 32 then:
+  if byte >= 0 and byte < 32:
     out.push(92)
     out.push(117)
     out.push(48)
@@ -389,28 +389,28 @@ fn append_json_escape(~out: Array<i32>, byte: i32) -> bool
   false
 
 fn stringify_number(value: f64): () -> String
-  if is_non_finite_float(value) then:
+  if is_non_finite_float(value):
     return "0"
-  if value == 0.0 then:
+  if value == 0.0:
     return "0"
 
   let negative = value < 0.0
   var abs_value = value
-  if negative then:
+  if negative:
     abs_value = 0.0 - value
 
   let exponent = decimal_exponent(abs_value)
-  if exponent >= 15 or exponent <= -7 then:
+  if exponent >= 15 or exponent <= -7:
     return stringify_number_scientific(abs_value, negative, exponent)
 
   let ~bytes = Array<i32>::with_capacity(48)
-  if negative then:
+  if negative:
     bytes.push(45)
 
   append_float_integer_part(bytes, abs_value)
 
   var fractional = abs_value - floor_float(abs_value)
-  if fractional <= 0.0000000000005 then:
+  if fractional <= 0.0000000000005:
     return new_string(bytes.to_fixed_array())
 
   bytes.push(46)
@@ -421,7 +421,7 @@ fn stringify_number(value: f64): () -> String
     bytes.push(ascii_digit(digit))
     fractional = fractional - digit_to_f64(digit)
     digits = digits + 1
-    if fractional <= 0.0000000000005 then:
+    if fractional <= 0.0000000000005:
       break
 
   trim_fractional_zeroes(bytes)
@@ -431,22 +431,22 @@ fn stringify_number_scientific(value: f64, negative: bool, exponent: i32): () ->
   var exponent_value = exponent
   var normalized = value / pow10_i32(exponent_value)
 
-  if normalized >= 10.0 then:
+  if normalized >= 10.0:
     normalized = normalized / 10.0
     exponent_value = exponent_value + 1
-  if normalized < 1.0 then:
+  if normalized < 1.0:
     normalized = normalized * 10.0
     exponent_value = exponent_value - 1
 
   let ~bytes = Array<i32>::with_capacity(32)
-  if negative then:
+  if negative:
     bytes.push(45)
 
   let leading = floor_digit(normalized)
   bytes.push(ascii_digit(leading))
 
   var fractional = normalized - digit_to_f64(leading)
-  if fractional > 0.0000000000005 then:
+  if fractional > 0.0000000000005:
     bytes.push(46)
     var digits = 0
     while digits < 15 do:
@@ -455,7 +455,7 @@ fn stringify_number_scientific(value: f64, negative: bool, exponent: i32): () ->
       bytes.push(ascii_digit(digit))
       fractional = fractional - digit_to_f64(digit)
       digits = digits + 1
-      if fractional <= 0.0000000000005 then:
+      if fractional <= 0.0000000000005:
         break
     trim_fractional_zeroes(bytes)
 
@@ -475,7 +475,7 @@ fn decimal_exponent(value: f64): () -> i32
   exponent
 
 fn append_float_integer_part(~out: Array<i32>, value: f64) -> void
-  if value < 1.0 then:
+  if value < 1.0:
     out.push(48)
     return void
 
@@ -494,15 +494,15 @@ fn append_float_integer_part(~out: Array<i32>, value: f64) -> void
 fn trim_fractional_zeroes(~bytes: Array<i32>) -> void
   while bytes.len() > 0 do:
     let last = bytes.at(bytes.len() - 1)
-    if last != 48 then:
+    if last != 48:
       break
     bytes.pop()
 
-  if bytes.len() > 0 and bytes.at(bytes.len() - 1) == 46 then:
+  if bytes.len() > 0 and bytes.at(bytes.len() - 1) == 46:
     bytes.pop()
 
 fn floor_float(value: f64) -> f64
-  if value < 1.0 then:
+  if value < 1.0:
     return 0.0
 
   var scale = value / value
@@ -520,23 +520,23 @@ fn floor_float(value: f64) -> f64
   out
 
 fn floor_digit(value: f64) -> i32
-  if value >= 9.0 then:
+  if value >= 9.0:
     return 9
-  if value >= 8.0 then:
+  if value >= 8.0:
     return 8
-  if value >= 7.0 then:
+  if value >= 7.0:
     return 7
-  if value >= 6.0 then:
+  if value >= 6.0:
     return 6
-  if value >= 5.0 then:
+  if value >= 5.0:
     return 5
-  if value >= 4.0 then:
+  if value >= 4.0:
     return 4
-  if value >= 3.0 then:
+  if value >= 3.0:
     return 3
-  if value >= 2.0 then:
+  if value >= 2.0:
     return 2
-  if value >= 1.0 then:
+  if value >= 1.0:
     return 1
   0
 
@@ -544,14 +544,14 @@ fn ascii_digit(value: i32) -> i32
   48 + value
 
 fn append_signed_i32(~out: Array<i32>, value: i32) -> void
-  if value < 0 then:
+  if value < 0:
     out.push(45)
     append_u32_like(out, 0 - value)
     return void
   append_u32_like(out, value)
 
 fn append_u32_like(~out: Array<i32>, value: i32) -> void
-  if value == 0 then:
+  if value == 0:
     out.push(48)
     return void
 
@@ -587,7 +587,7 @@ fn consume_digits(~parser: JsonParser) -> void
   while true do:
     match(peek(parser))
       Some<i32> { value }:
-        if is_digit(value) then:
+        if is_digit(value):
           parser.index = parser.index + 1
         else:
           break
@@ -601,7 +601,7 @@ fn consume_literal(~parser: JsonParser, literal: String) -> bool
   while index < source.len() do:
     match(next_byte(parser))
       Some<i32> { value }:
-        if value != source.at(index) then:
+        if value != source.at(index):
           parser.index = start
           return false
       None:
@@ -614,7 +614,7 @@ fn skip_whitespace(~parser: JsonParser) -> void
   while true do:
     match(peek(parser))
       Some<i32> { value }:
-        if is_whitespace(value) then:
+        if is_whitespace(value):
           parser.index = parser.index + 1
         else:
           break
@@ -642,7 +642,7 @@ fn next_byte_or(~parser: JsonParser, fallback: i32) -> i32
 fn consume_byte(~parser: JsonParser, expected: i32) -> bool
   match(peek(parser))
     Some<i32> { value }:
-      if value != expected then:
+      if value != expected:
         return false
       parser.index = parser.index + 1
       true
@@ -650,48 +650,48 @@ fn consume_byte(~parser: JsonParser, expected: i32) -> bool
       false
 
 fn append_escaped(~out: Array<i32>, escaped: i32, ~parser: JsonParser) -> i32
-  if escaped == 34 then:
+  if escaped == 34:
     out.push(34)
     return 0
-  if escaped == 92 then:
+  if escaped == 92:
     out.push(92)
     return 0
-  if escaped == 47 then:
+  if escaped == 47:
     out.push(47)
     return 0
-  if escaped == 98 then:
+  if escaped == 98:
     out.push(8)
     return 0
-  if escaped == 102 then:
+  if escaped == 102:
     out.push(12)
     return 0
-  if escaped == 110 then:
+  if escaped == 110:
     out.push(10)
     return 0
-  if escaped == 114 then:
+  if escaped == 114:
     out.push(13)
     return 0
-  if escaped == 116 then:
+  if escaped == 116:
     out.push(9)
     return 0
-  if escaped != 117 then:
+  if escaped != 117:
     return -1
 
   let lead = read_unicode_escape(parser)
-  if lead < 0 then:
+  if lead < 0:
     return -1
-  if is_high_surrogate(lead) then:
+  if is_high_surrogate(lead):
     let checkpoint = parser.index
-    if consume_byte(parser, 92) then:
-      if consume_byte(parser, 117) then:
+    if consume_byte(parser, 92):
+      if consume_byte(parser, 117):
         let trail = read_unicode_escape(parser)
-        if is_low_surrogate(trail) then:
+        if is_low_surrogate(trail):
           append_codepoint(out, decode_surrogate_pair(lead, trail))
           return 0
       parser.index = checkpoint
     append_replacement(out)
     return 0
-  if is_low_surrogate(lead) then:
+  if is_low_surrogate(lead):
     append_replacement(out)
     return 0
 
@@ -705,7 +705,7 @@ fn read_unicode_escape(~parser: JsonParser) -> i32
     match(next_byte(parser))
       Some<i32> { value }:
         let digit = hex_to_i32(value)
-        if digit < 0 then:
+        if digit < 0:
           return -1
         codepoint = codepoint * 16 + digit
       None:
@@ -714,25 +714,25 @@ fn read_unicode_escape(~parser: JsonParser) -> i32
   codepoint
 
 fn append_codepoint(~out: Array<i32>, codepoint: i32) -> void
-  if codepoint < 0 then:
+  if codepoint < 0:
     append_replacement(out)
     return void
-  if codepoint <= 127 then:
+  if codepoint <= 127:
     out.push(codepoint)
     return void
-  if codepoint <= 2047 then:
+  if codepoint <= 2047:
     out.push(192 + (codepoint / 64))
     out.push(128 + (codepoint - (codepoint / 64) * 64))
     return void
-  if codepoint <= 65535 then:
-    if codepoint >= 55296 and codepoint <= 57343 then:
+  if codepoint <= 65535:
+    if codepoint >= 55296 and codepoint <= 57343:
       append_replacement(out)
       return void
     out.push(224 + (codepoint / 4096))
     out.push(128 + ((codepoint / 64) - (codepoint / 4096) * 64))
     out.push(128 + (codepoint - (codepoint / 64) * 64))
     return void
-  if codepoint <= 1114111 then:
+  if codepoint <= 1114111:
     out.push(240 + (codepoint / 262144))
     out.push(128 + ((codepoint / 4096) - (codepoint / 262144) * 64))
     out.push(128 + ((codepoint / 64) - (codepoint / 4096) * 64))
@@ -762,16 +762,16 @@ fn is_digit(value: i32) -> bool
   value >= 48 and value <= 57
 
 fn hex_to_i32(value: i32) -> i32
-  if value >= 48 and value <= 57 then:
+  if value >= 48 and value <= 57:
     return value - 48
-  if value >= 65 and value <= 70 then:
+  if value >= 65 and value <= 70:
     return value - 55
-  if value >= 97 and value <= 102 then:
+  if value >= 97 and value <= 102:
     return value - 87
   -1
 
 fn hex_digit(value: i32) -> i32
-  if value < 10 then:
+  if value < 10:
     return 48 + value
   97 + (value - 10)
 
@@ -785,47 +785,47 @@ fn decode_surrogate_pair(lead: i32, trail: i32) -> i32
   65536 + (lead - 55296) * 1024 + (trail - 56320)
 
 fn is_non_finite_float(value: f64) -> bool
-  if value != value then:
+  if value != value:
     return true
   let delta = value - value
   delta != delta
 
 fn digit_to_f64(value: i32) -> f64
-  if value == 0 then:
+  if value == 0:
     return 0.0
-  if value == 1 then:
+  if value == 1:
     return 1.0
-  if value == 2 then:
+  if value == 2:
     return 2.0
-  if value == 3 then:
+  if value == 3:
     return 3.0
-  if value == 4 then:
+  if value == 4:
     return 4.0
-  if value == 5 then:
+  if value == 5:
     return 5.0
-  if value == 6 then:
+  if value == 6:
     return 6.0
-  if value == 7 then:
+  if value == 7:
     return 7.0
-  if value == 8 then:
+  if value == 8:
     return 8.0
-  if value == 9 then:
+  if value == 9:
     return 9.0
   0.0
 
 fn parse_json_number(source: String): () -> Result<f64, JsonError>
   let len = source.as_slice().byte_len()
-  if len <= 0 then:
+  if len <= 0:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
   var index = 0
   var sign = 1.0
   let first = byte_at_or(source, 0, -1)
-  if first == 45 then:
+  if first == 45:
     sign = -1.0
     index = 1
 
-  if index >= len then:
+  if index >= len:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
   var significand = 0.0
@@ -834,103 +834,104 @@ fn parse_json_number(source: String): () -> Result<f64, JsonError>
   var saw_nonzero_digit = false
 
   var saw_int_digit = false
-  if byte_at_or(source, index, -1) == 48 then:
+  if byte_at_or(source, index, -1) == 48:
     saw_int_digit = true
     index = index + 1
   else:
     while index < len do:
       let digit = parse_decimal_digit(byte_at_or(source, index, -1))
-      if digit < 0 then:
+      if digit < 0:
         break
       saw_int_digit = true
-      if digit != 0 or saw_nonzero_digit then:
+      if digit != 0 or saw_nonzero_digit:
         saw_nonzero_digit = true
         significant_digits = significant_digits + 1
-        if collected_digits < 17 then:
+        if collected_digits < 17:
           significand = significand * 10.0 + digit_to_f64(digit)
           collected_digits = collected_digits + 1
       index = index + 1
-  if not saw_int_digit then:
+  if not saw_int_digit:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
   var frac_digits = 0
-  if index < len and byte_at_or(source, index, -1) == 46 then:
+  if index < len and byte_at_or(source, index, -1) == 46:
     index = index + 1
-    if index >= len then:
+    if index >= len:
       return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
     var saw_fraction_digit = false
     while index < len do:
       let digit = parse_decimal_digit(byte_at_or(source, index, -1))
-      if digit < 0 then:
+      if digit < 0:
         break
       frac_digits = frac_digits + 1
-      if digit != 0 or saw_nonzero_digit then:
+      if digit != 0 or saw_nonzero_digit:
         saw_nonzero_digit = true
         significant_digits = significant_digits + 1
-        if collected_digits < 17 then:
+        if collected_digits < 17:
           significand = significand * 10.0 + digit_to_f64(digit)
           collected_digits = collected_digits + 1
       saw_fraction_digit = true
       index = index + 1
-    if not saw_fraction_digit then:
+    if not saw_fraction_digit:
       return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
   var exponent = 0
   var exponent_sign = 1
-  if index < len then:
+  if index < len:
     let marker = byte_at_or(source, index, -1)
-    if marker == 101 or marker == 69 then:
+    if marker == 101 or marker == 69:
       index = index + 1
-      if index >= len then:
+      if index >= len:
         return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
       let sign_byte = byte_at_or(source, index, -1)
-      if sign_byte == 45 then:
-        exponent_sign = -1
-        index = index + 1
-      elif: sign_byte == 43 then:
-        index = index + 1
+      if
+        sign_byte == 45:
+          exponent_sign = -1
+          index = index + 1
+        sign_byte == 43:
+          index = index + 1
 
-      if index >= len then:
+      if index >= len:
         return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
       var saw_exp_digit = false
       while index < len do:
         let digit = parse_decimal_digit(byte_at_or(source, index, -1))
-        if digit < 0 then:
+        if digit < 0:
           break
-        if exponent < 1000000 then:
+        if exponent < 1000000:
           exponent = exponent * 10 + digit
         saw_exp_digit = true
         index = index + 1
-      if not saw_exp_digit then:
+      if not saw_exp_digit:
         return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
-  if index != len then:
+  if index != len:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
-  if not saw_nonzero_digit then:
+  if not saw_nonzero_digit:
     return Ok<f64> { value: sign * 0.0 }
 
   let omitted_digits = significant_digits - collected_digits
   let signed_exponent = exponent_sign * exponent - frac_digits + omitted_digits
 
   let value = sign * significand * pow10_i32(signed_exponent)
-  if is_non_finite_float(value) then:
+  if is_non_finite_float(value):
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 
   Ok<f64> { value: value }
 
 fn parse_decimal_digit(byte: i32) -> i32
-  if byte >= 48 and byte <= 57 then:
+  if byte >= 48 and byte <= 57:
     return byte - 48
   -1
 
 fn pow10_i32(value: i32) -> f64
-  if value == 0 then:
+  if value == 0:
     return 1.0
-  if value < 0 then:
+  if value < 0:
     return pow10_negative_i32(0 - value)
   pow10_positive_i32(value)
 
@@ -941,7 +942,7 @@ fn pow10_positive_i32(value: i32) -> f64
   while remaining > 0 do:
     let half = remaining / 2
     let odd = remaining - half * 2
-    if odd == 1 then:
+    if odd == 1:
       out = out * base
     base = base * base
     remaining = half
@@ -954,7 +955,7 @@ fn pow10_negative_i32(value: i32) -> f64
   while remaining > 0 do:
     let half = remaining / 2
     let odd = remaining - half * 2
-    if odd == 1 then:
+    if odd == 1:
       out = out * base
     base = base * base
     remaining = half

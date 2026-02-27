@@ -183,34 +183,34 @@ impl Encoder
     Encoder { ptr: ptr, pos: 0, len: len, ok: true }
 
   fn can_write(~self, count: i32) -> bool
-    if self.ok == false then:
+    if self.ok == false:
       return false
-    if count <= 0 then:
+    if count <= 0:
       return true
     let next = self.pos + count
-    if next > self.len then:
+    if next > self.len:
       self.ok = false
       return false
     let memory_end = memory::size() * 65536
-    if (self.ptr + next) > memory_end then:
+    if (self.ptr + next) > memory_end:
       self.ok = false
       return false
     true
 
   fn write_u8(~self, value: i32) -> void
-    if self.can_write(1) == false then:
+    if self.can_write(1) == false:
       return void
     memory::store_u8(self.ptr + self.pos, value)
     self.pos = self.pos + 1
 
   fn write_u16(~self, value: i32) -> void
-    if self.can_write(2) == false then:
+    if self.can_write(2) == false:
       return void
     self.write_u8(shift_ru(value, 8))
     self.write_u8(bit_and(value, 255))
 
   fn write_u32(~self, value: i32) -> void
-    if self.can_write(4) == false then:
+    if self.can_write(4) == false:
       return void
     self.write_u8(shift_ru(value, 24))
     self.write_u8(bit_and(shift_ru(value, 16), 255))
@@ -218,7 +218,7 @@ impl Encoder
     self.write_u8(bit_and(value, 255))
 
   fn write_u64(~self, value: i64) -> void
-    if self.can_write(8) == false then:
+    if self.can_write(8) == false:
       return void
     self.write_u8(bit_and(wrap_i64(shift_ru(value, 56)), 255))
     self.write_u8(bit_and(wrap_i64(shift_ru(value, 48)), 255))
@@ -241,10 +241,10 @@ impl Encoder
         self.encode_f64(number.value)
 
   fn encode_i32(~self, value: i32) -> void
-    if value >= 0 and value < 128 then:
+    if value >= 0 and value < 128:
       self.write_u8(value)
       return void
-    if value >= -32 and value < 0 then:
+    if value >= -32 and value < 0:
       self.write_u8(value + 256)
       return void
     self.write_u8(210)
@@ -264,17 +264,18 @@ impl Encoder
 
   fn encode_string(~self, value: String) -> void
     let len = value.byte_count
-    if len < 32 then:
-      self.write_u8(160 + len)
-    elif: len < 256 then:
-      self.write_u8(217)
-      self.write_u8(len)
-    elif: len < 65536 then:
-      self.write_u8(218)
-      self.write_u16(len)
-    else:
-      self.write_u8(219)
-      self.write_u32(len)
+    if
+      len < 32:
+        self.write_u8(160 + len)
+      len < 256:
+        self.write_u8(217)
+        self.write_u8(len)
+      len < 65536:
+        self.write_u8(218)
+        self.write_u16(len)
+      else:
+        self.write_u8(219)
+        self.write_u32(len)
 
     let source = value.bytes.raw_storage()
     var index = 0
@@ -284,15 +285,16 @@ impl Encoder
 
   fn encode_binary(~self, bytes: Array<i32>) -> void
     let len = bytes.len()
-    if len < 256 then:
-      self.write_u8(196)
-      self.write_u8(len)
-    elif: len < 65536 then:
-      self.write_u8(197)
-      self.write_u16(len)
-    else:
-      self.write_u8(198)
-      self.write_u32(len)
+    if
+      len < 256:
+        self.write_u8(196)
+        self.write_u8(len)
+      len < 65536:
+        self.write_u8(197)
+        self.write_u16(len)
+      else:
+        self.write_u8(198)
+        self.write_u32(len)
 
     let source = bytes.raw_storage()
     var index = 0
@@ -302,14 +304,15 @@ impl Encoder
 
   fn encode_array(~self, value: Array<MsgPack>) -> void
     let len = value.len()
-    if len < 16 then:
-      self.write_u8(144 + len)
-    elif: len < 65536 then:
-      self.write_u8(220)
-      self.write_u16(len)
-    else:
-      self.write_u8(221)
-      self.write_u32(len)
+    if
+      len < 16:
+        self.write_u8(144 + len)
+      len < 65536:
+        self.write_u8(220)
+        self.write_u16(len)
+      else:
+        self.write_u8(221)
+        self.write_u32(len)
 
     let source = value.raw_storage()
     var index = 0
@@ -322,14 +325,15 @@ impl Encoder
 
   fn encode_map_entries(~self, entries: Array<(String, MsgPack)>) -> void
     let len = entries.len()
-    if len < 16 then:
-      self.write_u8(128 + len)
-    elif: len < 65536 then:
-      self.write_u8(222)
-      self.write_u16(len)
-    else:
-      self.write_u8(223)
-      self.write_u32(len)
+    if
+      len < 16:
+        self.write_u8(128 + len)
+      len < 65536:
+        self.write_u8(222)
+        self.write_u16(len)
+      else:
+        self.write_u8(223)
+        self.write_u32(len)
 
     let storage = entries.raw_storage()
     let entry_count = entries.len()
@@ -370,36 +374,36 @@ impl Decoder
     Decoder { ptr: ptr, pos: 0, end: ptr + len, ok: true }
 
   fn can_read(~self, count: i32) -> bool
-    if self.ok == false then:
+    if self.ok == false:
       return false
-    if count <= 0 then:
+    if count <= 0:
       return true
     let next = self.ptr + self.pos + count
     let memory_end = memory::size() * 65536
-    if next > self.end then:
+    if next > self.end:
       self.ok = false
       return false
-    if next > memory_end then:
+    if next > memory_end:
       self.ok = false
       return false
     true
 
   fn read_u8(~self) -> i32
-    if self.can_read(1) == false then:
+    if self.can_read(1) == false:
       return 0
     let value = memory::load_u8(self.ptr + self.pos)
     self.pos = self.pos + 1
     value
 
   fn read_u16(~self) -> i32
-    if self.can_read(2) == false then:
+    if self.can_read(2) == false:
       return 0
     let high = self.read_u8()
     let low = self.read_u8()
     bit_or(shift_l(high, 8), low)
 
   fn read_u32(~self) -> i32
-    if self.can_read(4) == false then:
+    if self.can_read(4) == false:
       return 0
     let b1 = self.read_u8()
     let b2 = self.read_u8()
@@ -410,7 +414,7 @@ impl Decoder
     bit_or(value, b4)
 
   fn read_u64(~self) -> i64
-    if self.can_read(8) == false then:
+    if self.can_read(8) == false:
       return extend_i32_u(0)
     let b1 = extend_i32_u(self.read_u8())
     let b2 = extend_i32_u(self.read_u8())
@@ -430,7 +434,7 @@ impl Decoder
     bit_or(value, b8)
 
   fn decode_string(~self, length: i32) -> String
-    if length <= 0 then:
+    if length <= 0:
       return empty_text()
     let storage = new_fixed_array<i32>(length)
     var index = 0
@@ -440,7 +444,7 @@ impl Decoder
     new_string(storage)
 
   fn decode_binary(~self, length: i32) -> Binary
-    if length <= 0 then:
+    if length <= 0:
       return Binary { bytes: Array<i32>::with_capacity(0) }
     let ~bytes = Array<i32>::with_capacity(length)
     var index = 0
@@ -473,76 +477,76 @@ impl Decoder
     out
 
   fn decode_integer(~self, prefix: i32) -> MsgPack
-    if prefix < 128 then:
+    if prefix < 128:
       return make_i32(prefix)
-    if prefix >= 224 then:
+    if prefix >= 224:
       return make_i32(prefix - 256)
-    if prefix == 204 then:
+    if prefix == 204:
       return make_i32(self.read_u8())
-    if prefix == 205 then:
+    if prefix == 205:
       return make_i32(self.read_u16())
-    if prefix == 206 then:
+    if prefix == 206:
       let value = self.read_u32()
-      if value < 0 then:
+      if value < 0:
         let extended = extend_i32_u(value)
         return make_i64(extended)
       return make_i32(value)
-    if prefix == 207 then:
+    if prefix == 207:
       return make_i64(self.read_u64())
-    if prefix == 208 then:
+    if prefix == 208:
       return make_i32(self.read_u8() - 256)
-    if prefix == 209 then:
+    if prefix == 209:
       let value = self.read_u16()
-      if value >= 32768 then:
+      if value >= 32768:
         return make_i32(value - 65536)
       return make_i32(value)
-    if prefix == 210 then:
+    if prefix == 210:
       return make_i32(self.read_u32())
-    if prefix == 211 then:
+    if prefix == 211:
       return make_i64(self.read_u64())
     make_i32(0)
 
   fn decode_any(~self) -> MsgPack
     let prefix = self.read_u8()
-    if self.ok == false then:
+    if self.ok == false:
       return make_null()
-    if prefix == 192 then:
+    if prefix == 192:
       return make_null()
-    if prefix == 194 then:
+    if prefix == 194:
       return make_bool(false)
-    if prefix == 195 then:
+    if prefix == 195:
       return make_bool(true)
-    if prefix >= 160 and prefix < 192 then:
+    if prefix >= 160 and prefix < 192:
       let len = prefix - 160
       return make_string(self.decode_string(len))
-    if prefix >= 144 and prefix < 160 then:
+    if prefix >= 144 and prefix < 160:
       return make_array(self.decode_array(prefix - 144))
-    if prefix >= 128 and prefix < 144 then:
+    if prefix >= 128 and prefix < 144:
       return make_map(self.decode_map(prefix - 128))
-    if prefix == 217 then:
+    if prefix == 217:
       return make_string(self.decode_string(self.read_u8()))
-    if prefix == 218 then:
+    if prefix == 218:
       return make_string(self.decode_string(self.read_u16()))
-    if prefix == 219 then:
+    if prefix == 219:
       return make_string(self.decode_string(self.read_u32()))
-    if prefix == 220 then:
+    if prefix == 220:
       return make_array(self.decode_array(self.read_u16()))
-    if prefix == 221 then:
+    if prefix == 221:
       return make_array(self.decode_array(self.read_u32()))
-    if prefix == 222 then:
+    if prefix == 222:
       return make_map(self.decode_map(self.read_u16()))
-    if prefix == 223 then:
+    if prefix == 223:
       return make_map(self.decode_map(self.read_u32()))
-    if prefix == 196 then:
+    if prefix == 196:
       return make_binary(self.decode_binary(self.read_u8()))
-    if prefix == 197 then:
+    if prefix == 197:
       return make_binary(self.decode_binary(self.read_u16()))
-    if prefix == 198 then:
+    if prefix == 198:
       return make_binary(self.decode_binary(self.read_u32()))
-    if prefix == 202 then:
+    if prefix == 202:
       let raw = self.read_u32()
       return make_f32(reinterpret_i32_to_f32(raw))
-    if prefix == 203 then:
+    if prefix == 203:
       let raw = self.read_u64()
       return F64 { value: reinterpret_i64_to_f64(raw) }
     self.decode_integer(prefix)
