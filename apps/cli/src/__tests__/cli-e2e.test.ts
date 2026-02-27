@@ -202,6 +202,131 @@ const createPkgDirRelativeTestFixture = async (): Promise<{
   return { cwd: root, testRoot };
 };
 
+const createNonTestTargetFixture = async (): Promise<{
+  root: string;
+  targetFile: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-non-test-target-"));
+  const srcRoot = resolve(root, "src");
+  const targetFile = resolve(srcRoot, "no_tests.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    targetFile,
+    [
+      "pub fn broken() -> i32",
+      "  \"oops\"",
+      "",
+    ].join("\n"),
+  );
+  return { root, targetFile };
+};
+
+const createCompanionTypingErrorFixture = async (): Promise<{
+  root: string;
+  sourceFile: string;
+  testFile: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-companion-typing-"));
+  const srcRoot = resolve(root, "src");
+  const sourceFile = resolve(srcRoot, "subject.voyd");
+  const testFile = resolve(srcRoot, "subject.test.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    sourceFile,
+    [
+      "pub fn add_one(value: i32) -> i32",
+      "  value + 1",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    testFile,
+    [
+      "test \"preserves error location\":",
+      "  add_one(\"x\")",
+      "",
+    ].join("\n"),
+  );
+  return { root, sourceFile, testFile };
+};
+
+const createCompanionScopedTargetFixture = async (): Promise<{
+  root: string;
+  testFile: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-companion-scoped-"));
+  const srcRoot = resolve(root, "src");
+  const sourceFile = resolve(srcRoot, "scoped.voyd");
+  const testFile = resolve(srcRoot, "scoped.test.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    sourceFile,
+    [
+      "pub fn broken() -> i32",
+      "  \"nope\"",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    testFile,
+    [
+      "use std::test::assertions::all",
+      "",
+      "test \"companion target stays scoped\":",
+      "  assert(true)",
+      "",
+    ].join("\n"),
+  );
+  return { root, testFile };
+};
+
+const createMixedDirectoryFixture = async (): Promise<{
+  root: string;
+  testRoot: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-mixed-tests-"));
+  const testRoot = resolve(root, "test");
+  await mkdir(testRoot, { recursive: true });
+  await writeFile(
+    resolve(testRoot, "passes.voyd"),
+    [
+      "use std::test::assertions::all",
+      "",
+      "test \"runs despite unrelated invalid file\":",
+      "  assert(true)",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    resolve(testRoot, "broken.voyd"),
+    [
+      "pub fn not_a_test() -> i32",
+      "  \"broken\"",
+      "",
+    ].join("\n"),
+  );
+  return { root, testRoot };
+};
+
+const createMalformedTestDeclarationFixture = async (): Promise<{
+  root: string;
+  targetFile: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-malformed-test-"));
+  const srcRoot = resolve(root, "src");
+  const targetFile = resolve(srcRoot, "bad_test.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    targetFile,
+    [
+      "test:",
+      "  1",
+      "",
+    ].join("\n"),
+  );
+  return { root, targetFile };
+};
+
 const createDocFixture = async (): Promise<string> => {
   const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-docs-"));
   const srcRoot = resolve(root, "src");
@@ -336,6 +461,102 @@ describe("voyd cli test discovery", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       }
     },
   );
+});
+
+describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
+  it("reports discovery failures for non-test file targets", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createNonTestTargetFixture();
+    try {
+      const result = runCli(fixture.root, [
+        "test",
+        fixture.targetFile,
+        "--fail-empty-tests",
+      ]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      expect(result.status).toBe(1);
+      expect(output).toContain("[discovery] No tests found for target:");
+      expect(output).toContain(fixture.targetFile);
+      expect(output).not.toContain("TY0027");
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves true file locations for test typing errors", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createCompanionTypingErrorFixture();
+    try {
+      const result = runCli(fixture.root, ["test", fixture.sourceFile]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      expect(result.status).toBe(1);
+      expect(output).toContain("[typing] voyd test failed for target:");
+      expect(output).toContain(`${fixture.testFile}:2:11`);
+      expect(output).not.toContain(`${fixture.sourceFile}:1:1`);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps companion-file targets scoped to the companion file", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createCompanionScopedTargetFixture();
+    try {
+      const result = runCli(fixture.root, ["test", fixture.testFile]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      if (result.status !== 0) {
+        throw new Error(`voyd test failed: ${output}`);
+      }
+
+      expect(output).toContain("passed 1, failed 0, skipped 0");
+      expect(output).not.toContain("TY0027");
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("runs valid tests in mixed directories with invalid non-test files", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createMixedDirectoryFixture();
+    try {
+      const result = runCli(fixture.root, ["test", fixture.testRoot]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      if (result.status !== 0) {
+        throw new Error(`voyd test failed: ${output}`);
+      }
+
+      expect(output).toContain("passed 1, failed 0, skipped 0");
+      expect(output).not.toContain("TY0027");
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("surfaces parser diagnostics for malformed test declarations", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createMalformedTestDeclarationFixture();
+    try {
+      const result = runCli(fixture.root, ["test", fixture.targetFile]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      expect(result.status).toBe(1);
+      expect(output).not.toContain("[discovery] No tests found for target:");
+      expect(output).toContain("[typing] voyd test failed for target:");
+      expect(output).toContain("TY9999");
+      expect(output).toContain(`${fixture.targetFile}:1:1`);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {

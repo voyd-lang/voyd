@@ -25,6 +25,8 @@ export const exec = () => main().catch(errorHandler);
 
 const sdk = createSdk();
 
+type TestFailurePhase = "discovery" | "typing" | "execution";
+
 async function main() {
   const config = getConfig();
   if (config.test) {
@@ -262,6 +264,14 @@ async function emitDocumentation({
 function errorHandler(error: unknown) {
   const diagnostics = extractDiagnostics(error);
   if (diagnostics) {
+    const testFailure = extractTestFailure(error);
+    if (testFailure) {
+      console.error(
+        `[${testFailure.phase}] voyd test failed for target: ${testFailure.targetPath}`,
+      );
+      console.error("");
+    }
+
     const compacted = compactDiagnosticsForCli(diagnostics);
 
     compacted.diagnostics.forEach((diagnostic, index) => {
@@ -306,6 +316,26 @@ const extractDiagnostics = (error: unknown): Diagnostic[] | undefined => {
   if ("diagnostic" in error) {
     const candidate = (error as { diagnostic?: unknown }).diagnostic;
     return isDiagnostic(candidate) ? [candidate] : undefined;
+  }
+
+  return undefined;
+};
+
+const extractTestFailure = (
+  error: unknown,
+): { phase: TestFailurePhase; targetPath: string } | undefined => {
+  if (!error || typeof error !== "object") {
+    return undefined;
+  }
+
+  const candidate = error as { testPhase?: unknown; testTargetPath?: unknown };
+  const phase = candidate.testPhase;
+  const targetPath = candidate.testTargetPath;
+  if (
+    (phase === "discovery" || phase === "typing" || phase === "execution") &&
+    typeof targetPath === "string"
+  ) {
+    return { phase, targetPath };
   }
 
   return undefined;
