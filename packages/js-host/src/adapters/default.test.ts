@@ -602,6 +602,15 @@ describe("registerDefaultHostAdapters", () => {
 
     await expect(
       getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+        max_bytes: 2,
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true, value: [7, 8] },
+    });
+
+    await expect(
+      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
         max_bytes: 8,
       })
     ).resolves.toEqual({
@@ -775,6 +784,35 @@ describe("registerDefaultHostAdapters", () => {
     await expect(
       (async () =>
         getHandler("std::output::Output", "write")(tailContinuation, {}))()
+    ).rejects.toThrow(/default output adapter is unavailable on browser/i);
+  });
+
+  it("does not bridge write_bytes through lossy text write hooks", async () => {
+    const table = buildTable([
+      { effectId: "std::output::Output", opName: "write", opId: 0 },
+      { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        runtimeHooks: {
+          write: async () => {},
+        },
+      },
+    });
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
+        ?.supported
+    ).toBe(false);
+
+    await expect(
+      (async () =>
+        getHandler("std::output::Output", "write_bytes")(tailContinuation, {
+          bytes: [255, 0, 1],
+        }))()
     ).rejects.toThrow(/default output adapter is unavailable on browser/i);
   });
 

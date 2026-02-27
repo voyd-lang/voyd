@@ -1704,19 +1704,13 @@ const createOutputSource = ({
   const writeBytes =
     typeof writeBytesFromHook === "function"
       ? async (output: DefaultAdapterOutputWriteBytes) => writeBytesFromHook(output)
-      : typeof writeFromHook === "function"
+      : stdout && stderr
         ? async ({ target, bytes }: DefaultAdapterOutputWriteBytes) =>
-            writeFromHook({
-              target,
-              value: new TextDecoder().decode(bytes),
+            writeToNodeStream({
+              stream: streamFor(target),
+              value: bytes,
             })
-        : stdout && stderr
-          ? async ({ target, bytes }: DefaultAdapterOutputWriteBytes) =>
-              writeToNodeStream({
-                stream: streamFor(target),
-                value: bytes,
-              })
-          : undefined;
+        : undefined;
   const flush =
     typeof flushFromHook === "function"
       ? async (output: DefaultAdapterOutputFlush) => flushFromHook(output)
@@ -1910,10 +1904,15 @@ const inputCapabilityDefinition: CapabilityDefinition = {
           try {
             const maxBytes = decodeInputReadBytesMaxBytes(payload);
             const bytes = await inputSource.readBytes!(maxBytes);
+            const boundedBytes =
+              bytes === null ? null : bytes.subarray(0, maxBytes);
             return tail(
               inputSuccessPayload({
                 opName: "read_bytes",
-                value: bytes === null ? null : Array.from(bytes.values()),
+                value:
+                  boundedBytes === null
+                    ? null
+                    : Array.from(boundedBytes.values()),
                 effectBufferSize,
               })
             );
