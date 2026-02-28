@@ -5,14 +5,14 @@ import type {
 } from "../../protocol/types.js";
 import type { HostRuntimeKind } from "../../runtime/environment.js";
 
-export const FS_EFFECT_ID = "std::fs::Fs";
-export const TIME_EFFECT_ID = "std::time::Time";
-export const ENV_EFFECT_ID = "std::env::Env";
-export const RANDOM_EFFECT_ID = "std::random::Random";
-export const LOG_EFFECT_ID = "std::log::Log";
-export const FETCH_EFFECT_ID = "std::fetch::Fetch";
-export const INPUT_EFFECT_ID = "std::input::Input";
-export const OUTPUT_EFFECT_ID = "std::output::Output";
+export const FS_EFFECT_ID = "voyd.std.fs";
+export const TIME_EFFECT_ID = "voyd.std.time";
+export const ENV_EFFECT_ID = "voyd.std.env";
+export const RANDOM_EFFECT_ID = "voyd.std.random";
+export const LOG_EFFECT_ID = "voyd.std.log";
+export const FETCH_EFFECT_ID = "voyd.std.fetch";
+export const INPUT_EFFECT_ID = "voyd.std.input";
+export const OUTPUT_EFFECT_ID = "voyd.std.output";
 
 export type EffectOp = HostProtocolTable["ops"][number];
 

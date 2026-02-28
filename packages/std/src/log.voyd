@@ -54,7 +54,7 @@ pub type LogFields = Array<LogField>
 ///
 /// `std::log` converts typed log-level and field values into a MessagePack map
 /// consumed by the host log sink.
-@effect(id: "std::log::Log")
+@effect(id: "voyd.std.log")
 pub eff Log
   /// Emits one structured log event.
   ///

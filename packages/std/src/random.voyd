@@ -14,7 +14,7 @@ use std::subscript::Range
 ///
 /// The host random provider should use a secure entropy source when available.
 /// `std::random` normalizes returned values into `i32` byte ranges where needed.
-@effect(id: "std::random::Random")
+@effect(id: "voyd.std.random")
 pub eff Random
   /// Returns a random signed 64-bit integer.
   next_i64(tail) -> i64

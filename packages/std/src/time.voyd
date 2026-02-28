@@ -64,7 +64,7 @@ impl SystemTime
 ///
 /// `std::time` encodes timer commands as MessagePack payloads and decodes host
 /// responses into typed success/error values.
-@effect(id: "std::time::Time")
+@effect(id: "voyd.std.time")
 pub eff Time
   /// Returns a monotonic millisecond timestamp suitable for elapsed-time math.
   monotonic_now_millis(tail) -> i64

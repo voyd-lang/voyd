@@ -196,7 +196,7 @@ fn ok() -> i32
 
   it("allows docs before attribute lines on declarations", async () => {
     const { diagnostics, semantics } = await compileSingleModule(`/// Time effect docs.
-@effect(id: "std::time::Time")
+@effect(id: "voyd.std.time")
 pub eff Time
   /// Sleep docs.
   sleep(tail, ms: i64) -> i64

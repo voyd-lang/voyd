@@ -165,7 +165,7 @@ impl FetchResponse
 /// Host networking effect used by `std::fetch`.
 ///
 /// The payload is a MessagePack map with request metadata and optional body/timeout.
-@effect(id: "std::fetch::Fetch")
+@effect(id: "voyd.std.fetch")
 pub eff Fetch
   /// Sends an HTTP request.
   ///

@@ -19,7 +19,7 @@ use std::string::type::{ String, StringSlice, new_string }
 ///
 /// Operations in this effect proxy host file APIs using MessagePack payloads
 /// and return DTOs decoded by helper functions in this module.
-@effect(id: "std::fs::Fs")
+@effect(id: "voyd.std.fs")
 pub eff Fs
   /// Reads file contents from `path` and returns raw byte data or an I/O error DTO.
   read_bytes(tail, path: MsgPack) -> MsgPack

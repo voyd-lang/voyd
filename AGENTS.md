@@ -82,4 +82,4 @@ spirit to [Swift API Design Guidelines](https://www.swift.org/documentation/api-
 - Use labels to distinguish overload families when argument types overlap (`contains(key: ...)`, `contains(value: ...)`, `contains(where: ...)`).
 - Prefer semantic base function names over type-encoded names. Use labels to describe input role/source instead of suffixes like `_bytes` when practical (for example `ascii_string_from(bytes: source)`).
 - Any public/api function that accepts `StringSlice` should also provide a `String` overload with equivalent behavior. Implement one overload as a thin forwarder to avoid duplicated logic.
-- Use stable effect ids with module-path naming: `@effect(id: "<package>::<module_path>::<EffectName>")` (for example `std::fs::Fs`), and keep IDs aligned with real module paths.
+- Use stable effect ids with dotted capability naming: `@effect(id: "<owner>.<package>.<capability>")` (for example `voyd.std.fs`). IDs are API contracts: do not change them for refactors.

@@ -21,7 +21,7 @@ pub type OutputTarget = StdOut | StdErr
 ///
 /// Operations in this effect forward writes/flushes to host-managed stdout and
 /// stderr streams using MessagePack DTO payloads.
-@effect(id: "std::output::Output")
+@effect(id: "voyd.std.output")
 pub eff Output
   /// Writes UTF-8 text to the selected output stream.
   ///

@@ -57,17 +57,18 @@ propagation.
 
 ### Effect ID Convention
 
-For public/stable effects, use Voyd namespace IDs with stable semantic naming:
+For public/stable effects, use dotted stable capability IDs:
 
 ```voyd
-@effect(id: "std::fs::Fs")
+@effect(id: "voyd.std.fs")
 eff Fs
 ```
 
 Use this shape consistently:
-- `"<package>::<capability>::<EffectName>"`
+- `"<owner>.<package>.<capability>"`
+- `owner` is the organization/ecosystem namespace (`voyd` for std).
 - `capability` is a stable semantic namespace, not a required mirror of file/module paths.
-- `EffectName` should match the declared effect type name (UpperCamelCase).
+- Use lowercase ASCII tokens (`a-z0-9` + `.`).
 
 Why this is preferred over reverse-DNS-like examples such as
 `"com.example.generic"`:

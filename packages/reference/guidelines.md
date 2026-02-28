@@ -78,21 +78,22 @@ pub fn parse(source: String) -> Result<JsonValue, JsonError>
 
 Effect IDs are part of your public integration contract. Optimize for long-term stability.
 
-- Use Voyd namespace style: `@effect(id: "<package>::<capability>::<EffectName>")`.
+- Use dotted capability IDs: `@effect(id: "<owner>.<package>.<capability>")`.
+- Use lowercase ASCII tokens (`a-z0-9` + `.`).
 - Treat `capability` as a stable semantic namespace, not a required file/module path mirror.
 - Do not change IDs because of internal refactors (file moves, module renames, or code reorganization).
-- Keep `EffectName` aligned with the declared effect type name.
+- For this repository, prefer the `voyd.std.*` namespace for std effects.
 
 ```voyd
 // Stable semantic identity
-@effect(id: "std::fs::Fs")
+@effect(id: "voyd.std.fs")
 eff Fs
 ```
 
 ```voyd
 // If implementation moves modules, keep the same ID.
-@effect(id: "std::fs::Fs")
+@effect(id: "voyd.std.fs")
 eff Fs
 ```
 
-Reverse-DNS IDs (for example `com.example.generic`) are valid, but this repository standard uses Voyd namespace style for consistency with imports and package naming.
+Reverse-DNS-style IDs are valid, but this repository standard uses `voyd.std.*` for std consistency.

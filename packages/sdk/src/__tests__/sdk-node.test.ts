@@ -349,7 +349,7 @@ use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::string::type::String
 
-@effect(id: "std::env::Env")
+@effect(id: "voyd.std.env")
 eff Env
   get(tail, key: MsgPack) -> MsgPack
   set(tail, payload: MsgPack) -> MsgPack
@@ -390,7 +390,7 @@ pub fn main(): Env -> i32
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 
-@effect(id: "std::fetch::Fetch")
+@effect(id: "voyd.std.fetch")
 eff Fetch
   request(tail, payload: MsgPack) -> MsgPack
 

@@ -32,7 +32,7 @@ impl InputRequest
 ///
 /// Operations in this effect map host stdin facilities into typed MessagePack
 /// DTOs consumed by this module.
-@effect(id: "std::input::Input")
+@effect(id: "voyd.std.input")
 pub eff Input
   /// Reads one line using the provided payload.
   ///

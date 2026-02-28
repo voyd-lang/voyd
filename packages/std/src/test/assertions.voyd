@@ -5,7 +5,7 @@
 /// Host test-runner effect used by assertion helpers.
 ///
 /// The runtime consumes these operations to mark test outcomes and emit test logs.
-@effect(id: "std::std::test::assertions::Test")
+@effect(id: "voyd.std.test.assertions")
 pub eff Test
   /// Marks the current test as failed and stops normal assertion flow.
   fail(resume) -> void
