@@ -114,4 +114,18 @@ describe("getConfigFromCli", () => {
     expect(config.doc).toBe(false);
     expect(config.testReporter).toBe("doc");
   });
+
+  it("does not treat --run-entry values as subcommands", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "--run",
+      "--run-entry",
+      "test",
+    ]);
+    expect(config.run).toBe(true);
+    expect(config.test).toBe(false);
+    expect(config.doc).toBe(false);
+    expect(config.runEntry).toBe("test");
+  });
 });

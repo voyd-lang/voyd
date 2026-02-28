@@ -57,7 +57,6 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
     .option("-r, --run", "run voyd from src/ or provided path")
     .option("--run-wasm", "run the compiled wasm code directly")
     .option("--run-entry <name>", "entry function to run (default: main)")
-    .option("--internal-test", "run the internal test script")
     .option("--test", "run voyd tests")
     .option("--reporter <name>", "test reporter (default: minimal)")
     .option("--fail-empty-tests", "exit 1 if no tests are found")
@@ -172,7 +171,7 @@ const parseDocConfig = (argv: readonly string[]): VoydConfig => {
 };
 
 const findSubcommandIndex = (args: readonly string[]): number => {
-  const optionsWithValues = new Set(["--pkg-dir", "--reporter"]);
+  const optionsWithValues = new Set(["--pkg-dir", "--reporter", "--run-entry"]);
 
   let index = 0;
   while (index < args.length) {
