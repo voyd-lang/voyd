@@ -343,16 +343,120 @@ export const typeSummaryForSymbol = ({
 
   const symbolName = displayName ?? semantics.binding.symbolTable.getSymbol(ref.symbol).name;
 
+  const findParameterSummary = (): string | undefined => {
+    const toLocalParameter = ({
+      ownerSymbol,
+      params,
+    }: {
+      ownerSymbol: number;
+      params: readonly { symbol: number }[];
+    }): string | undefined => {
+      const parameterIndex = params.findIndex((parameter) => parameter.symbol === ref.symbol);
+      if (parameterIndex < 0) {
+        return undefined;
+      }
+
+      const signature = semantics.typing.functions.getSignature(ownerSymbol);
+      const parameter = signature?.parameters[parameterIndex];
+      if (!parameter || typeof parameter.type !== "number") {
+        return undefined;
+      }
+
+      const nominalNameForTypeId = (typeId: TypeId): string | undefined => {
+        const descriptor = semantics.typing.arena.get(typeId);
+        if (descriptor.kind === "nominal-object") {
+          return descriptor.name;
+        }
+        if (descriptor.kind === "intersection" && typeof descriptor.nominal === "number") {
+          return nominalNameForTypeId(descriptor.nominal);
+        }
+        return undefined;
+      };
+
+      const optionalInnerType = (typeId: TypeId): TypeId | undefined => {
+        const descriptor = semantics.typing.arena.get(typeId);
+        if (descriptor.kind !== "union") {
+          return undefined;
+        }
+
+        let someInner: TypeId | undefined;
+        let hasNone = false;
+
+        descriptor.members.forEach((member) => {
+          const nominalName = nominalNameForTypeId(member);
+          if (nominalName === "None") {
+            hasNone = true;
+            return;
+          }
+          if (nominalName !== "Some") {
+            return;
+          }
+          const memberDescriptor = semantics.typing.arena.get(member);
+          const someDescriptor =
+            memberDescriptor.kind === "intersection" &&
+            typeof memberDescriptor.nominal === "number"
+              ? semantics.typing.arena.get(memberDescriptor.nominal)
+              : memberDescriptor;
+          if (someDescriptor.kind === "nominal-object" && someDescriptor.typeArgs.length > 0) {
+            someInner = someDescriptor.typeArgs[0];
+          }
+        });
+
+        return hasNone && typeof someInner === "number" ? someInner : undefined;
+      };
+
+      const normalized = parameter.optional
+        ? (optionalInnerType(parameter.type) ?? parameter.type)
+        : parameter.type;
+      const optionalSuffix = parameter.optional ? "?" : "";
+      return `${symbolName}${optionalSuffix}: ${formatType(normalized)}`;
+    };
+
+    for (const fn of semantics.binding.functions) {
+      const summary = toLocalParameter({
+        ownerSymbol: fn.symbol,
+        params: fn.params,
+      });
+      if (summary) {
+        return summary;
+      }
+    }
+
+    for (const trait of semantics.binding.traits) {
+      for (const method of trait.methods) {
+        const summary = toLocalParameter({
+          ownerSymbol: method.symbol,
+          params: method.params,
+        });
+        if (summary) {
+          return summary;
+        }
+      }
+    }
+
+    for (const effect of semantics.binding.effects) {
+      for (const operation of effect.operations) {
+        const summary = toLocalParameter({
+          ownerSymbol: operation.symbol,
+          params: operation.parameters,
+        });
+        if (summary) {
+          return summary;
+        }
+      }
+    }
+
+    return undefined;
+  };
+
+  const parameterSummary = findParameterSummary();
+  if (parameterSummary) {
+    return parameterSummary;
+  }
+
   const directType = semantics.typing.valueTypes.get(ref.symbol);
   if (typeof directType === "number") {
     return `${symbolName}: ${formatType(directType)}`;
-  }
-
-  for (const [, signature] of semantics.typing.functions.signatures) {
-    const parameter = signature.parameters.find((entry) => entry.symbol === ref.symbol);
-    if (parameter && typeof parameter.type === "number") {
-      return `${symbolName}: ${formatType(parameter.type)}`;
-    }
   }
 
   const instantiatedTypes = new Set<TypeId>();
