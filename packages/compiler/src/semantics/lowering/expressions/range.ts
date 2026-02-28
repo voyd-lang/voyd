@@ -28,7 +28,7 @@ type RangeBounds = {
 export const isRangeOperatorAtom = (
   expr: Expr | undefined
 ): expr is IdentifierAtom =>
-  isIdentifierAtom(expr) && RANGE_OPERATOR_NAMES.has(expr.value);
+  isIdentifierAtom(expr) && !expr.isQuoted && RANGE_OPERATOR_NAMES.has(expr.value);
 
 export const isRangeExprForm = (expr: Expr): boolean =>
   isForm(expr) && isRangeOperatorAtom(expr.at(0));
