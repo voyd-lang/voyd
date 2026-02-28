@@ -184,7 +184,7 @@ const decodeStringEscape = (escaped: string): string => {
     case "'":
       return "'";
     default:
-      return escaped;
+      return `\\${escaped}`;
   }
 };
 

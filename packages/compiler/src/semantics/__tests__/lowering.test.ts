@@ -1177,4 +1177,69 @@ pub fn main(): () -> bool
     );
     expect(hasMatchExpr).toBe(false);
   });
+
+  it("does not rewrite quoted range operator identifiers into Range literals", () => {
+    const source = `
+pub fn '..'() -> i32
+  1
+
+pub fn main(): () -> i32
+  '..'()
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: "main.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") {
+      throw new Error("missing main symbol");
+    }
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === mainSymbol,
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) {
+      throw new Error("missing lowered main function");
+    }
+
+    const mainBody = hir.expressions.get(mainFn.body);
+    expect(mainBody?.exprKind).toBe("block");
+    if (!mainBody || mainBody.exprKind !== "block") {
+      throw new Error("main body is not a block");
+    }
+
+    const callExpr = hir.expressions.get(mainBody.value ?? -1);
+    expect(callExpr?.exprKind).toBe("call");
+
+    const hasRangeLiteral = Array.from(hir.expressions.values()).some(
+      (expr) =>
+        expr.exprKind === "object-literal" &&
+        expr.literalKind === "nominal" &&
+        expr.target?.typeKind === "named" &&
+        expr.target.path.length === 1 &&
+        expr.target.path[0] === "Range",
+    );
+    expect(hasRangeLiteral).toBe(false);
+  });
 });
