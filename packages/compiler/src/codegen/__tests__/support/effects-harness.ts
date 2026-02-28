@@ -203,12 +203,16 @@ const lookupHandler = (
   return undefined;
 };
 
+const isTestAssertionEffectId = (effectId: string): boolean =>
+  effectId === "voyd.std.test.assertions" ||
+  effectId.endsWith("std::std::test::assertions::Test") ||
+  effectId.endsWith("std::test::assertions::Test");
+
 const isTestAssertionOp = (op: ParsedEffectOp): boolean =>
-  op.effectId.endsWith("std::test::assertions::Test") ||
-  op.label.startsWith("std::test::assertions::Test.");
+  isTestAssertionEffectId(op.effectId) || op.label.startsWith("Test.");
 
 const defaultTestAssertionHandler: EffectHandler = (request) => {
-  throw new Error(`Unhandled std::test::assertions effect: ${request.label}`);
+  throw new Error(`Unhandled test assertion effect: ${request.label}`);
 };
 
 const toContinuationResult = ({
