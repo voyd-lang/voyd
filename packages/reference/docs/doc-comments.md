@@ -1,3 +1,7 @@
+---
+order: 90
+---
+
 # Doc Comments
 
 Voyd supports line-based doc comments for declarations, modules, files, and function parameters.

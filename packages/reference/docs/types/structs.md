@@ -1,3 +1,7 @@
+---
+order: 220
+---
+
 # Structs
 
 Structs are a value data type that represent a fixed collection of key value

@@ -1,3 +1,7 @@
+---
+order: 280
+---
+
 # Effects
 
 Effects are resumable exceptions. They capture side-effects in the type system
@@ -67,7 +71,7 @@ eff Async
 
 fn async_task(): Async -> i32
   let num = Async::await()
-  if num > 0 then:
+  if num > 0:
     Async::resolve(num)
   else:
     Async::reject("Number must be positive")

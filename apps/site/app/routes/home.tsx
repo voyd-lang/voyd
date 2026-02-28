@@ -26,6 +26,14 @@ type Feature = {
   lang?: string;
 };
 
+type Capability = {
+  title: string;
+  detail: string;
+  points?: string[];
+  linkHref?: string;
+  linkLabel?: string;
+};
+
 const CORE_FEATURES: Feature[] = [
   {
     id: "full-stack",
@@ -46,8 +54,12 @@ pub fn main() -> void
   app.route("GET", "/api/projects", handler: list_projects)
   app.listen(port: 8080)
 
-fn render_home() -> Html
-  render(HomePage {})`,
+fn Home() -> Html
+  // Built in html support
+  <div>
+    <h1>Hello, World></h1>
+    <p>Welcome to voyd.</p>
+  </div>`,
   },
   {
     id: "types",
@@ -108,7 +120,7 @@ move(from: point, to: moved)`,
 
 fn load_count(): Async -> i32
   let value = Async::await()
-  if value > 0 then:
+  if value > 0:
     Async::resolve(value)
   else:
     Async::reject("Expected positive count")
@@ -134,7 +146,9 @@ fn main(): () -> i32
       "Execute safely through host-boundary handlers.",
     ],
     lang: "typescript",
-    code: `import { compile } from "@voyd/sdk/browser";
+    code: `
+// This is a JS file.
+import { compile } from "@voyd/sdk/browser";
 
 const source = \
 \`use src::plugin::all
@@ -211,16 +225,19 @@ await writeFile("./build/std-docs.html", content);`,
   },
 ];
 
-const MORE_CAPABILITIES = [
+const MORE_CAPABILITIES: Capability[] = [
   {
     title: "Wasm-first pipeline",
     detail:
       "Parser, semantics, and codegen are designed around a stable codegen-view boundary.",
   },
   {
-    title: "Language server support",
+    title: "VSCode extension",
     detail:
-      "LSP server and VSCode extension share compiler semantics for consistent tooling.",
+      "Edit Voyd with focused IDE tooling for day-to-day language workflows. Supports refactoring, auto imports, error highlighting and more.",
+    linkHref:
+      "https://marketplace.visualstudio.com/items?itemName=voyd-lang.voyd-vscode",
+    linkLabel: "Open extension",
   },
   {
     title: "Public SDK targets",
@@ -246,7 +263,7 @@ const MORE_CAPABILITIES = [
 
 export default function Home() {
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-6 px-4 pb-16 pt-6">
+    <main className="mx-auto w-full max-w-6xl space-y-6 overflow-x-clip px-4 pb-16 pt-6">
       <Hero />
       <section className="space-y-5" aria-label="Core features">
         {CORE_FEATURES.map((feature, index) => (
@@ -258,7 +275,7 @@ export default function Home() {
         ))}
       </section>
       <section className="space-y-5 pt-6">
-        <header className="flex max-w-3xl flex-col gap-2">
+        <header className="flex max-w-3xl ml-3 flex-col gap-2">
           <Eyebrow>Built-in tooling</Eyebrow>
           <h2 className="m-0 text-3xl leading-tight font-bold sm:text-4xl">
             Production-ready workflow support
@@ -283,6 +300,23 @@ export default function Home() {
               <MutedParagraph className="mt-2 text-sm leading-6">
                 {capability.detail}
               </MutedParagraph>
+              {capability.points && capability.points.length > 0 ? (
+                <ul className="mt-2 grid gap-1.5 pl-5 text-sm leading-6 text-[var(--site-text-muted)]">
+                  {capability.points.map((point) => (
+                    <li key={point}>{point}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {capability.linkHref ? (
+                <a
+                  href={capability.linkHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-3 inline-flex w-fit rounded-md border border-[var(--site-button-ghost-border)] bg-[var(--site-surface)] px-3 py-1.5 text-sm font-bold transition hover:bg-[var(--site-surface-soft)]"
+                >
+                  {capability.linkLabel ?? "Learn more"}
+                </a>
+              ) : null}
             </SurfaceArticle>
           ))}
         </div>
@@ -300,7 +334,7 @@ const Hero = () => {
       }}
     >
       <div
-        className="pointer-events-none absolute left-1/2 top-[46%] z-0 aspect-[2.35/1] w-[44rem] max-w-[98vw] -translate-x-1/2 -translate-y-1/2 opacity-[0.52] sm:max-w-[98vw]"
+        className="pointer-events-none absolute left-1/2 top-[46%] z-0 aspect-[2.35/1] w-[min(44rem,92vw)] -translate-x-1/2 -translate-y-1/2 opacity-[0.52]"
         aria-hidden="true"
       >
         <div
@@ -363,11 +397,11 @@ const FeatureSection = ({
   const codeOrderClass = reverse ? "lg:order-1" : "lg:order-2";
 
   return (
-    <SurfaceArticle className="p-3 flex flex-col md:flex-row gap-4">
+    <SurfaceArticle className="flex min-w-0 flex-col gap-4 p-3 md:flex-row">
       <div
-        className={`m-1 flex flex-col gap-3 ${contentOrderClass} md:w-1/2 p-1`}
+        className={`m-1 flex min-w-0 flex-col gap-3 p-1 ${contentOrderClass} md:w-1/2`}
       >
-        <h2 className="m-0 text-3xl leading-tight font-bold sm:text-[2rem]">
+        <h2 className="m-0 mt text-3xl leading-tight font-bold sm:text-[2rem]">
           {feature.title}
         </h2>
         <MutedParagraph className="text-base leading-7">
@@ -378,7 +412,7 @@ const FeatureSection = ({
       <CodePanel
         code={feature.code}
         lang={feature.lang ?? "voyd"}
-        className={`${codeOrderClass} md:w-1/2`}
+        className={`min-w-0 ${codeOrderClass} md:w-1/2`}
       />
     </SurfaceArticle>
   );
@@ -386,12 +420,14 @@ const FeatureSection = ({
 
 const ToolingCard = ({ feature }: { feature: Feature }) => {
   return (
-    <SurfaceArticle className="flex flex-col gap-3 p-4">
-      <h3 className="m-0 text-2xl font-bold">{feature.title}</h3>
-      <MutedParagraph className="text-base leading-7">
-        {feature.description}
-      </MutedParagraph>
-      <FeaturePoints points={feature.points} />
+    <SurfaceArticle className="flex flex-col gap-10 p-4">
+      <div className="gap-3">
+        <h3 className="m-0 text-2xl font-bold">{feature.title}</h3>
+        <MutedParagraph className="text-base leading-7">
+          {feature.description}
+        </MutedParagraph>
+        <FeaturePoints points={feature.points} />
+      </div>
       <CodePanel code={feature.code} lang={feature.lang ?? "voyd"} />
     </SurfaceArticle>
   );
@@ -408,7 +444,7 @@ const SurfaceSection = ({
 }) => {
   return (
     <section
-      className={`rounded-2xl border border-[var(--site-border)] bg-[var(--site-surface)] ${className}`}
+      className={`min-w-0 rounded-2xl border border-[var(--site-border)] bg-[var(--site-surface)] ${className}`}
       style={style}
     >
       {children}
@@ -475,7 +511,7 @@ const CodePanel = ({
 }) => {
   return (
     <div
-      className={`overflow-hidden rounded-xl border border-[var(--site-border)] bg-[#0d1117] ${className}`}
+      className={`max-w-full min-w-0 overflow-hidden rounded-xl border border-[var(--site-border)] bg-[#0d1117] ${className}`}
     >
       <CodeBlock code={code} lang={lang} />
     </div>

@@ -1,10 +1,16 @@
-# Comments
+---
+order: 10
+---
+
+# Basics
+
+## Comments
 
 ```voyd
 // This is a single line comment
 ```
 
-# Identifiers
+## Identifiers
 
 Identifiers bind names to values, types, and other language constructs. They can
 contain letters, numbers, and underscores, and must start with a letter or underscore.
@@ -16,7 +22,7 @@ MyType
 MyType2
 ```
 
-# Variables
+## Variables
 
 ```voyd
 // Declare an immutable variable
@@ -26,7 +32,7 @@ let x = 5
 var y = 3
 ```
 
-# String Literals
+## String Literals
 
 ```voyd
 // Strings are defined with double quotes
@@ -37,11 +43,11 @@ let address = "
 123 Main St
 Anytown, USA
 "
-// String interpolation will also be supported by double quotes and the ${} syntax (not yet implemented)
+// String interpolation
 let greeting = "Hello, ${name}"
 ```
 
-# Numeric Literals
+## Numeric Literals
 
 ```voyd
 // Integers
@@ -51,14 +57,14 @@ let x = 5
 let y = 3.14
 ```
 
-# Boolean Literals
+## Boolean Literals
 
 ```voyd
 let x = true
 let y = false
 ```
 
-# Object literals
+## Object literals
 
 ```voyd
 let value = {
@@ -79,7 +85,7 @@ let value = { a, b: 4 }
 let value = { a: a, b: 4 }
 ```
 
-# Tuple literals
+## Tuple literals
 
 ```voyd
 let value = (5, 4)
@@ -89,35 +95,40 @@ let x = value.0 // x will be bound to 5
 let (a, b) = value
 ```
 
-# Control Flow
+## Control Flow
 
 ```voyd
 // If statements
-if x > 5 then:
-  // Do something
-elif: x > 2 then:
-  // Do something else
+if x > 5:
+  foo()
 else:
-  // Fallback
+  bar()
+
+// Multi-clause if statements (elifs)
+if
+  x > 5:
+    foo()
+  x < 2:
+    bar()
+  else:
+    bax()
 
 // While loops
-while x > 5 do:
-  // Do something
-
-// Case-style while loops
 while x > 5:
-  // Do something
+  foo()
+
+
 
 // For-in loops
-for item in [1, 2, 3] do:
-  // Do something with item
+for item in [1, 2, 3]:
+  foo(item)
 
 // Blocks are defined by 2 space indentation
 let y =
   let x = 2 + 3
   x + 3 // y will be bound to 8
 ```
-# Expressions
+## Expressions
 
 Expressions are statements that return a value. They can be used in a variety of contexts, such as variable assignment, function arguments, and more.
 

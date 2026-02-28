@@ -1,3 +1,7 @@
+---
+order: 70
+---
+
 # Visibility and Access Control
 
 This document defines Voyd’s visibility model for types, members, and modules, and how package APIs are formed.

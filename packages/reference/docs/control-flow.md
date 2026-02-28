@@ -1,48 +1,53 @@
+---
+order: 30
+---
+
 # Control Flow
 
 ## If
 
-If expressions support any number of `elif` branches and an optional `else`.
+Examples
 
 ```voyd
-if x < 0 then: -1
-elif x < 10:
-  0
+// Standard if statement
+if x < 0:
+  -1
 else:
   1
+
+// With multiple conditions (else if clauses)
+if
+  x < 0:
+    -1
+  x > 5:
+    0
+  else:
+    1
+
+// As an expression
+let x =
+  if
+    x < 0:
+      -1
+    x > 5
+      0
+    else:
+      1
+
+// One line expressions need `then:` and do not support multiple conditions
+let x = if x < 0 then: -1 else: 2
 ```
 
-When the `else` branch is omitted, the result of the expression is `voyd`.
-
-### Value-level `void`
-
-Voyd provides a value-level placeholder `void` usable in expression position
-whenever you need to produce no value (historically this was done with `0`).
-This compiles to a no-op and type-checks as `voyd`, which is compatible with
-`void` return types.
+## Loops
 
 ```voyd
-fn noop() -> void
-  void
-```
-
-### `break` type
-
-`break` is treated as a `void`-typed expression. This allows using `break`
-inside expression contexts such as match arms without adding filler values.
-
-```voyd
-while cond do:
-  match(x)
-    CaseA: void   // any void-like work
-    CaseB: break  // exits the loop; type-checks as void
-```
-
-The loop body can also use case form:
-
-```voyd
+// Standard while loop
 while cond:
-  do_work()
+  foo()
+
+// For loop. Works on anything that implements the Sequence trait, such as Array
+for item in [1, 2, 3]:
+  foo(item)
 ```
 
 ## Match
@@ -122,12 +127,37 @@ An `if/elif/else` chain is lowered as a `match` when all conditions are type
 tests (`is`) of the same identifier and an `else` branch exists:
 
 ```voyd
-if pet is Dog then:
-  pet.noses
-elif pet is Cat:
-  pet.lives
-else:
-  0
+if
+  pet is Dog:
+    pet.noses
+  pet is Cat:
+    pet.lives
+  else:
+    0
 ```
 
 This is equivalent to a `match(pet)` with type patterns plus a wildcard arm.
+
+## Value-level `void`
+
+Voyd provides a value-level placeholder `void` usable in expression position
+whenever you need to produce no value (historically this was done with `0`).
+This compiles to a no-op and type-checks as `voyd`, which is compatible with
+`void` return types.
+
+```voyd
+fn noop() -> void
+  void
+```
+
+## `break` type
+
+`break` is treated as a `void`-typed expression. This allows using `break`
+inside expression contexts such as match arms without adding filler values.
+
+```voyd
+while cond:
+  match(x)
+    CaseA: void   // any void-like work
+    CaseB: break  // exits the loop; type-checks as void
+```

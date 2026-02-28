@@ -1,3 +1,7 @@
+---
+order: 20
+---
+
 # The Surface Language Syntax
 
 The surface language is a superset of the core language (a minimalistic lisp

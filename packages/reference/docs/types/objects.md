@@ -1,3 +1,7 @@
+---
+order: 210
+---
+
 # Objects
 
 Objects are a reference data type that represent a fixed collection of key value
@@ -331,7 +335,7 @@ obj Some: Optional {
 }
 
 fn divide(a: i32, b: i32) -> Optional
-  if b == 0 then:
+  if b == 0:
     None { }
   else:
     Some { value: a / b }

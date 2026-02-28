@@ -1,4 +1,8 @@
-# 📦 Modules
+---
+order: 60
+---
+
+# Modules
 
 Voyd uses a file-and-folder based module system similar to modern Rust.
 A module is defined by a file, and submodules are defined inside a directory of the same name.

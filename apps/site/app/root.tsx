@@ -8,6 +8,7 @@ import {
   Scripts,
   ScrollRestoration,
   useHref,
+  useLocation,
 } from "react-router";
 import logo from "../assets/logo-inverted.svg";
 
@@ -34,6 +35,8 @@ const THEME_INIT_SCRIPT = `(() => {
 
 const NAV_LINK_CLASS =
   "text-sm font-semibold opacity-[0.85] underline-offset-4 transition hover:opacity-100 hover:underline";
+const MOBILE_NAV_LINK_CLASS =
+  "block rounded-md px-3 py-2 text-sm font-semibold transition hover:bg-[var(--site-surface-soft)]";
 
 const isThemePreference = (value: string | null): value is ThemePreference =>
   value === "light" || value === "dark" || value === "system";
@@ -108,9 +111,11 @@ export const links: Route.LinksFunction = () => [
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const stdDocsPath = useHref("/std/");
+  const location = useLocation();
   const [themePreference, setThemePreference] = useState<ThemePreference>(
     "system",
   );
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -118,6 +123,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
     setThemePreference(resolvedPreference);
     applyThemePreference(resolvedPreference);
   }, []);
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [location.pathname, location.search]);
 
   const onThemeChange = (next: ThemePreference) => {
     setThemePreference(next);
@@ -134,39 +143,84 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <Links />
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="min-h-screen bg-[var(--site-page-bg)] font-sans text-foreground antialiased">
+      <body className="min-h-screen overflow-x-hidden bg-[var(--site-page-bg)] font-sans text-[var(--foreground)] antialiased">
         <header
           className="sticky top-0 z-[60] border-b border-[var(--site-border)] backdrop-blur"
           style={{
             background: "color-mix(in srgb, var(--site-surface) 86%, transparent)",
           }}
         >
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-4">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-2 text-[1.05rem] font-extrabold tracking-[0.02em] lowercase"
+          <div className="mx-auto w-full max-w-6xl px-4 py-3 sm:py-4">
+            <div className="flex items-center justify-between gap-3">
+              <Link
+                to="/"
+                className="inline-flex items-center gap-2 text-[1.05rem] font-extrabold tracking-[0.02em] lowercase"
+              >
+                <img src={logo} alt="Voyd logo" className="h-7 w-7" />
+                <span>voyd</span>
+              </Link>
+
+              <button
+                type="button"
+                className="inline-flex items-center rounded-md border border-[var(--site-border)] bg-[var(--site-surface)] px-3 py-1.5 text-sm font-semibold sm:hidden"
+                onClick={() => setIsMobileMenuOpen((isOpen) => !isOpen)}
+                aria-expanded={isMobileMenuOpen}
+                aria-controls="mobile-nav-menu"
+              >
+                Menu
+              </button>
+
+              <div className="hidden items-center gap-4 sm:flex">
+                <nav className="flex items-center gap-4">
+                  <Link to="/docs" className={NAV_LINK_CLASS}>
+                    Docs
+                  </Link>
+                  <Link to="/playground" className={NAV_LINK_CLASS}>
+                    Playground
+                  </Link>
+                  <a href={stdDocsPath} className={NAV_LINK_CLASS}>
+                    Std Docs
+                  </a>
+                  <a
+                    href="https://github.com/voyd-lang/voyd"
+                    className={NAV_LINK_CLASS}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    GitHub
+                  </a>
+                </nav>
+                <ThemeToggle value={themePreference} onChange={onThemeChange} />
+              </div>
+            </div>
+
+            <div
+              id="mobile-nav-menu"
+              className={`${isMobileMenuOpen ? "mt-3 grid gap-2" : "hidden"} sm:hidden`}
             >
-              <img src={logo} alt="Voyd logo" className="h-7 w-7" />
-              <span>voyd</span>
-            </Link>
-            <div className="flex items-center justify-between gap-3 sm:justify-end sm:gap-4">
-              <nav className="flex flex-wrap items-center gap-3 sm:gap-4">
-                <Link to="/docs" className={NAV_LINK_CLASS}>
+              <nav className="grid gap-1 rounded-xl border border-[var(--site-border)] bg-[var(--site-surface)] p-2">
+                <Link to="/docs" className={MOBILE_NAV_LINK_CLASS}>
                   Docs
                 </Link>
-                <a href={stdDocsPath} className={NAV_LINK_CLASS}>
+                <Link to="/playground" className={MOBILE_NAV_LINK_CLASS}>
+                  Playground
+                </Link>
+                <a href={stdDocsPath} className={MOBILE_NAV_LINK_CLASS}>
                   Std Docs
                 </a>
                 <a
                   href="https://github.com/voyd-lang/voyd"
-                  className={NAV_LINK_CLASS}
+                  className={MOBILE_NAV_LINK_CLASS}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   GitHub
                 </a>
               </nav>
-              <ThemeToggle value={themePreference} onChange={onThemeChange} />
+
+              <div className="rounded-xl border border-[var(--site-border)] bg-[var(--site-surface)] p-2">
+                <ThemeToggle value={themePreference} onChange={onThemeChange} />
+              </div>
             </div>
           </div>
         </header>

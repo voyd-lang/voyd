@@ -1,3 +1,7 @@
+---
+order: 110
+---
+
 # Intrinsics
 
 Intrinsics are built-in operations implemented by the compiler or runtime rather
