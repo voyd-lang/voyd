@@ -33,7 +33,7 @@ import { scanExportsFromSource } from "./export-scan.js";
 import {
   buildTypeParamNameIndex,
   typeSummaryForSymbol,
-} from "./type-display.js";
+} from "@voyd/compiler/semantics/type-display.js";
 import {
   LineIndex,
   locationRange,
