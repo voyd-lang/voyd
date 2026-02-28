@@ -54,6 +54,31 @@ const applyThemePreference = (preference: ThemePreference) => {
   document.documentElement.setAttribute("data-theme", preference);
 };
 
+const getStoredThemePreference = (): ThemePreference => {
+  if (typeof window === "undefined") {
+    return "system";
+  }
+
+  try {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return isThemePreference(stored) ? stored : "system";
+  } catch {
+    return "system";
+  }
+};
+
+const setStoredThemePreference = (preference: ThemePreference) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, preference);
+  } catch {
+    // Ignore storage failures (for example, blocked privacy contexts).
+  }
+};
+
 const ThemeToggle = ({
   value,
   onChange,
@@ -118,8 +143,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    const resolvedPreference = isThemePreference(stored) ? stored : "system";
+    const resolvedPreference = getStoredThemePreference();
     setThemePreference(resolvedPreference);
     applyThemePreference(resolvedPreference);
   }, []);
@@ -130,7 +154,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   const onThemeChange = (next: ThemePreference) => {
     setThemePreference(next);
-    window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    setStoredThemePreference(next);
     applyThemePreference(next);
   };
 

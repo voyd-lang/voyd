@@ -21,11 +21,12 @@
   ],
   "scripts": {
     "build": "npm run compile",
-    "compile": "npm run clean && npm run bundle && npm run bundle:std",
+    "compile": "npm run clean && npm run bundle:syntaxes && npm run bundle && npm run bundle:std",
     "bundle": "vite build -c vite.extension.config.ts && vite build -c vite.server.config.ts",
+    "bundle:syntaxes": "node ./scripts/copy-syntaxes.mjs",
     "bundle:std": "node ./scripts/copy-std.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node ./scripts/test-grammar.mjs",
+    "test": "npm run bundle:syntaxes && node ./scripts/test-grammar.mjs",
     "lint": "echo 'no lint configured'",
     "clean": "rm -rf dist",
     "publish:patch": "npm run compile && vsce publish patch --no-dependencies",
@@ -83,6 +84,7 @@
   },
   "devDependencies": {
     "@voyd/compiler": "*",
+    "@voyd/lib": "*",
     "@types/vscode": "^1.74.0",
     "@vscode/vsce": "^3.6.2",
     "typescript": "^5.6.2",
