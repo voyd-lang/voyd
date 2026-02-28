@@ -349,6 +349,15 @@ export default function Docs() {
       const firstChild = childNodes[0];
 
       if (isValidElement<{ className?: string; children?: unknown }>(firstChild)) {
+        if (
+          typeof firstChild.props === "object" &&
+          firstChild.props !== null &&
+          "code" in firstChild.props &&
+          "lang" in firstChild.props
+        ) {
+          return firstChild;
+        }
+
         const className =
           typeof firstChild.props.className === "string"
             ? firstChild.props.className
