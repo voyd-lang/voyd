@@ -553,18 +553,38 @@ const resolveDependencyPath = ({
   ctx: BindingContext;
 }): ModulePath | undefined => {
   const preservesInlinePkgScope = shouldPreserveInlinePkgScope({ entry, ctx });
-  const matches = ctx.module.dependencies.filter((dep) =>
-    matchesDependencyPath({
+  const matchingDependencies = ctx.module.dependencies.flatMap((dep) => {
+    const allowImplicitPackageRootAlias = shouldAllowImplicitPackageRootAlias({
+      dependencyPath: dep.path,
+      ctx,
+    });
+    const sharedOptions = {
       dependencyPath: dep.path,
       entry,
       currentModulePath: ctx.module.path,
       currentModuleIsPackageRoot: ctx.isPackageRoot && !preservesInlinePkgScope,
-      allowImplicitPackageRootAlias: shouldAllowImplicitPackageRootAlias({
-        dependencyPath: dep.path,
-        ctx,
-      }),
-    }),
-  );
+    };
+    const matchesWithAlias = matchesDependencyPath({
+      ...sharedOptions,
+      allowImplicitPackageRootAlias,
+    });
+    if (!matchesWithAlias) {
+      return [];
+    }
+    const matchesWithoutAlias = matchesDependencyPath({
+      ...sharedOptions,
+      allowImplicitPackageRootAlias: false,
+    });
+    return [{ dependency: dep, matchesWithoutAlias }];
+  });
+
+  const strictMatches = matchingDependencies
+    .filter((candidate) => candidate.matchesWithoutAlias)
+    .map((candidate) => candidate.dependency);
+  const matches =
+    strictMatches.length > 0
+      ? strictMatches
+      : matchingDependencies.map((candidate) => candidate.dependency);
   if (matches.length === 0) {
     return undefined;
   }
