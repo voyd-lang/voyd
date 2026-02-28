@@ -130,7 +130,7 @@ export const classifyTopLevelDecl = (
   if (keyword === "use") {
     const pathExpr = form.at(offset + 1);
     if (!pathExpr) {
-      throw new Error("use statement missing a path");
+      return { kind: "other" };
     }
     return { kind: "use-decl", pathExpr, visibility };
   }
