@@ -1,0 +1,58 @@
+//! Integer range type and iteration behavior.
+//!
+//! `Range` is used by slicing and range-based APIs across std.
+
+use std::optional::all
+use std::optional::types::Optional
+use std::traits::sequence::all
+
+/// Integer range value used by slicing and bounded APIs.
+pub obj Range {
+  /// Optional inclusive starting index.
+  api start: Optional<i32>,
+
+  /// Optional ending index.
+  api end: Optional<i32>,
+
+  /// Whether `end` is included in the range.
+  api include_end: bool
+}
+
+/// Iterator state for `Range` sequences.
+obj RangeIterator {
+  current: i32,
+  end: i32,
+  include_end: bool
+}
+
+impl Sequence<i32> for Range
+  /// Returns an iterator over integer range values.
+  api fn iter(self) -> Iterator<i32>
+    let start = range_bound_or(self.start, 0)
+    let end = range_bound_or(self.end, start)
+    RangeIterator { current: start, end: end, include_end: self.include_end }
+
+impl Iterator<i32> for RangeIterator
+  /// Returns the next value in the range or `None` when exhausted.
+  api fn next(~self) -> Option<i32>
+    if self.include_end:
+      if self.current > self.end:
+        return None {}
+    else:
+      if self.current >= self.end:
+        return None {}
+
+    let value = self.current
+    if self.include_end and self.current == self.end then:
+      // Avoid i32 overflow for inclusive ranges that end at i32::MAX.
+      self.include_end = false
+    else:
+      self.current = self.current + 1
+    Some<i32> { value: value }
+
+fn range_bound_or(value: Optional<i32>, fallback: i32) -> i32
+  match(value)
+    Some<i32> { value: result }:
+      result
+    None:
+      fallback

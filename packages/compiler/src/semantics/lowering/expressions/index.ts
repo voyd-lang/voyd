@@ -35,11 +35,15 @@ import { lowerTupleExpr } from "./tuple.js";
 import { lowerWhile } from "./while.js";
 import { createVoidLiteralExpr } from "./literal-helpers.js";
 import {
-  isRangeExprForm,
   isSubscriptForm,
-  lowerRangeExpr,
   lowerSubscriptReadExpr,
 } from "./subscript.js";
+import {
+  isRangeExprForm,
+  isRangeOperatorAtom,
+  lowerRangeExpr,
+  lowerRangeOperatorExpr,
+} from "./range.js";
 
 export { isObjectLiteralForm } from "./object-literal.js";
 
@@ -165,6 +169,14 @@ export const lowerExpr: LowerExprFn = (
     }
     if (identifierAtom.value === "void") {
       return createVoidLiteralExpr(expr, ctx);
+    }
+    if (isRangeOperatorAtom(identifierAtom)) {
+      return lowerRangeOperatorExpr({
+        operator: identifierAtom,
+        ctx,
+        scopes,
+        lowerExpr,
+      });
     }
     const resolution = resolveIdentifierValue(
       {

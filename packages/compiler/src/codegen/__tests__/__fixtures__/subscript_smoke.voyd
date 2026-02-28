@@ -2,7 +2,7 @@ use std::optional::types::{ Optional, Some, None }
 use std::optional::fns::{ some, none }
 use std::dict::Dict
 use std::array::new_array_unchecked
-use std::subscript::Range
+use std::range::Range
 use std::string::type::new_string
 
 fn optional_i32_or(value: Optional<i32>, fallback: i32) -> i32

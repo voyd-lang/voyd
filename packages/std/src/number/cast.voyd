@@ -1,0 +1,385 @@
+//! Primitive numeric conversion APIs.
+//!
+//! This module centralizes numeric conversion intrinsics behind explicit,
+//! typed std functions.
+
+use std::array::Array
+use std::result::types::all
+use std::string::{ String, new_string }
+
+/// Error returned by checked numeric casts.
+pub obj CastError {
+  /// Machine-readable error code.
+  api code: i32
+}
+
+/// Error code for non-finite or non-integer checked float inputs.
+pub fn cast_error_code_invalid_input() -> i32
+  1
+
+/// Error code for values that overflow the destination type.
+pub fn cast_error_code_overflow() -> i32
+  2
+
+/// Constructs a `CastError` result with the provided code.
+pub fn cast_error<T>(code: i32) -> Result<T, CastError>
+  Err<CastError> { error: CastError { code } }
+
+/// Converts an `i32` to `f64`.
+pub fn to_f64(value: i32) -> f64
+  convert_f64_i32_s(value)
+
+/// Converts an `i64` to `f64`.
+pub fn to_f64(value: i64) -> f64
+  convert_f64_i64_s(value)
+
+/// Converts an `f32` to `f64`.
+pub fn to_f64(value: f32) -> f64
+  promote_f32(value)
+
+/// Converts an `i32` to `f32`.
+pub fn to_f32(value: i32) -> f32
+  convert_f32_i32_s(value)
+
+/// Converts an `i64` to `f32`.
+pub fn to_f32(value: i64) -> f32
+  convert_f32_i64_s(value)
+
+/// Converts an `f64` to `f32`.
+pub fn to_f32(value: f64) -> f32
+  demote_f64(value)
+
+/// Sign-extends an `i32` into `i64`.
+pub fn to_i64(value: i32) -> i64
+  extend_i32_s(value)
+
+/// Wraps an `i64` into `i32` by truncating to the low 32 bits.
+pub fn to_i32_wrapping(value: i64) -> i32
+  wrap_i64(value)
+
+/// Converts an `i64` to `i32`, returning overflow on narrowing failure.
+pub fn to_i32_checked(value: i64): () -> Result<i32, CastError>
+  let narrowed = wrap_i64(value)
+  if extend_i32_s(narrowed) != value:
+    return cast_error(cast_error_code_overflow())
+  Ok<i32> { value: narrowed }
+
+/// Converts an `f32` to `i32`, requiring a finite in-range value.
+///
+/// Fractional values are truncated toward zero.
+pub fn to_i32_checked(value: f32): () -> Result<i32, CastError>
+  to_i32_checked(to_f64(value))
+
+/// Converts an `f64` to `i32`, requiring a finite in-range value.
+///
+/// Fractional values are truncated toward zero.
+pub fn to_i32_checked(value: f64): () -> Result<i32, CastError>
+  if not is_finite_f64(value):
+    return cast_error(cast_error_code_invalid_input())
+  if value < -2147483648.0 or value > 2147483647.0:
+    return cast_error(cast_error_code_overflow())
+  Ok<i32> { value: trunc_i32_f64_s(value) }
+
+/// Converts an `f32` to `i64`, requiring a finite in-range value.
+///
+/// Fractional values are truncated toward zero.
+pub fn to_i64_checked(value: f32): () -> Result<i64, CastError>
+  to_i64_checked(to_f64(value))
+
+/// Converts an `f64` to `i64`, requiring a finite in-range value.
+///
+/// Fractional values are truncated toward zero.
+pub fn to_i64_checked(value: f64): () -> Result<i64, CastError>
+  if not is_finite_f64(value):
+    return cast_error(cast_error_code_invalid_input())
+  // `2^63 - 1` is not exactly representable as `f64`, so use an exclusive upper bound.
+  let min_i64 = 0.0 - 9223372036854775808.0
+  if value < min_i64 or value >= 9223372036854775808.0:
+    return cast_error(cast_error_code_overflow())
+  Ok<i64> { value: trunc_i64_f64_s(value) }
+
+/// Reinterprets `f32` bits as `i32`.
+pub fn reinterpret_i32(value: f32) -> i32
+  reinterpret_f32_to_i32(value)
+
+/// Reinterprets `i32` bits as `f32`.
+pub fn reinterpret_f32(value: i32) -> f32
+  reinterpret_i32_to_f32(value)
+
+/// Reinterprets `f64` bits as `i64`.
+pub fn reinterpret_i64(value: f64) -> i64
+  reinterpret_f64_to_i64(value)
+
+/// Reinterprets `i64` bits as `f64`.
+pub fn reinterpret_f64(value: i64) -> f64
+  reinterpret_i64_to_f64(value)
+
+/// Formats an `i32` as decimal text.
+pub fn to_string(value: i32) -> String
+  let ~bytes = Array<i32>::with_capacity(16)
+  append_signed_i32(bytes, value)
+  new_string(bytes.to_fixed_array())
+
+/// Formats an `i64` as decimal text.
+pub fn to_string(value: i64) -> String
+  let ~bytes = Array<i32>::with_capacity(24)
+  append_signed_i64(bytes, value)
+  new_string(bytes.to_fixed_array())
+
+/// Formats an `f32` as decimal text.
+pub fn to_string(value: f32) -> String
+  to_string(to_f64(value))
+
+/// Formats an `f64` as decimal text.
+///
+/// Non-finite values format as `"0"` to preserve JSON-safe encoding behavior.
+pub fn to_string(value: f64) -> String
+  if is_non_finite_f64(value):
+    return "0"
+  if value == 0.0:
+    return "0"
+
+  let negative = value < 0.0
+  var abs_value = value
+  if negative:
+    abs_value = 0.0 - value
+
+  let exponent = decimal_exponent_f64(abs_value)
+  if exponent >= 15 or exponent <= -7:
+    return to_string_f64_scientific(abs_value, negative, exponent)
+
+  let ~bytes = Array<i32>::with_capacity(48)
+  if negative:
+    bytes.push(45)
+
+  append_float_integer_part_f64(bytes, abs_value)
+
+  var fractional = abs_value - floor_f64(abs_value)
+  if fractional <= 0.0000000000005:
+    return new_string(bytes.to_fixed_array())
+
+  bytes.push(46)
+  var digits = 0
+  while digits < 17 do:
+    fractional = fractional * 10.0
+    let digit = floor_digit_f64(fractional)
+    bytes.push(ascii_digit(digit))
+    fractional = fractional - to_f64(digit)
+    digits = digits + 1
+    if fractional <= 0.0000000000005:
+      break
+
+  trim_fractional_zeroes(bytes)
+  new_string(bytes.to_fixed_array())
+
+fn is_finite_f64(value: f64) -> bool
+  (value - value) == 0.0
+
+fn is_non_finite_f64(value: f64) -> bool
+  not is_finite_f64(value)
+
+fn to_string_f64_scientific(value: f64, negative: bool, exponent: i32): () -> String
+  var exponent_value = exponent
+  var normalized = value / pow10_i32(exponent_value)
+
+  if normalized >= 10.0:
+    normalized = normalized / 10.0
+    exponent_value = exponent_value + 1
+  if normalized < 1.0:
+    normalized = normalized * 10.0
+    exponent_value = exponent_value - 1
+
+  let ~bytes = Array<i32>::with_capacity(32)
+  if negative:
+    bytes.push(45)
+
+  let leading = floor_digit_f64(normalized)
+  bytes.push(ascii_digit(leading))
+
+  var fractional = normalized - to_f64(leading)
+  if fractional > 0.0000000000005:
+    bytes.push(46)
+    var digits = 0
+    while digits < 15 do:
+      fractional = fractional * 10.0
+      let digit = floor_digit_f64(fractional)
+      bytes.push(ascii_digit(digit))
+      fractional = fractional - to_f64(digit)
+      digits = digits + 1
+      if fractional <= 0.0000000000005:
+        break
+    trim_fractional_zeroes(bytes)
+
+  bytes.push(101)
+  append_signed_i32(bytes, exponent_value)
+  new_string(bytes.to_fixed_array())
+
+fn decimal_exponent_f64(value: f64): () -> i32
+  var exponent = 0
+  var normalized = value
+  while normalized >= 10.0 do:
+    normalized = normalized / 10.0
+    exponent = exponent + 1
+  while normalized < 1.0 do:
+    normalized = normalized * 10.0
+    exponent = exponent - 1
+  exponent
+
+fn append_float_integer_part_f64(~out: Array<i32>, value: f64) -> void
+  if value < 1.0:
+    out.push(48)
+    return void
+
+  var scale = value / value
+  while (value / scale) >= 10.0 do:
+    scale = scale * 10.0
+
+  var remaining = value
+  while scale >= 1.0 do:
+    let normalized = remaining / scale
+    let digit = floor_digit_f64(normalized)
+    out.push(ascii_digit(digit))
+    remaining = remaining - to_f64(digit) * scale
+    scale = scale / 10.0
+
+fn trim_fractional_zeroes(~bytes: Array<i32>) -> void
+  while bytes.len() > 0 do:
+    let last = bytes.at(bytes.len() - 1)
+    if last != 48:
+      break
+    bytes.pop()
+
+  if bytes.len() > 0 and bytes.at(bytes.len() - 1) == 46:
+    bytes.pop()
+
+fn floor_f64(value: f64) -> f64
+  if value < 1.0:
+    return 0.0
+
+  var scale = value / value
+  while (value / scale) >= 10.0 do:
+    scale = scale * 10.0
+
+  var remaining = value
+  var out = value - value
+  while scale >= 1.0 do:
+    let normalized = remaining / scale
+    let digit = floor_digit_f64(normalized)
+    out = out + to_f64(digit) * scale
+    remaining = remaining - to_f64(digit) * scale
+    scale = scale / 10.0
+  out
+
+fn floor_digit_f64(value: f64) -> i32
+  if value >= 9.0:
+    return 9
+  if value >= 8.0:
+    return 8
+  if value >= 7.0:
+    return 7
+  if value >= 6.0:
+    return 6
+  if value >= 5.0:
+    return 5
+  if value >= 4.0:
+    return 4
+  if value >= 3.0:
+    return 3
+  if value >= 2.0:
+    return 2
+  if value >= 1.0:
+    return 1
+  0
+
+fn append_signed_i32(~out: Array<i32>, value: i32) -> void
+  append_signed_i64(out, to_i64(value))
+
+fn append_signed_i64(~out: Array<i32>, value: i64) -> void
+  if value == to_i64(0):
+    out.push(48)
+    return void
+
+  let ~reversed = Array<i32>::with_capacity(20)
+  var remaining = value
+  if remaining < to_i64(0):
+    out.push(45)
+    while remaining != to_i64(0) do:
+      let digit = to_i32_wrapping(to_i64(0) - (remaining % to_i64(10)))
+      reversed.push(ascii_digit(digit))
+      remaining = remaining / to_i64(10)
+    append_reverse(out, reversed)
+    return void
+
+  while remaining != to_i64(0) do:
+    let digit = to_i32_wrapping(remaining % to_i64(10))
+    reversed.push(ascii_digit(digit))
+    remaining = remaining / to_i64(10)
+  append_reverse(out, reversed)
+
+fn append_reverse(~out: Array<i32>, values: Array<i32>) -> void
+  var index = values.len() - 1
+  while index >= 0 do:
+    out.push(values.at(index))
+    index = index - 1
+
+fn ascii_digit(value: i32) -> i32
+  48 + value
+
+fn pow10_i32(value: i32) -> f64
+  var exponent = value
+  var out = 1.0
+  if exponent >= 0:
+    while exponent > 0 do:
+      out = out * 10.0
+      exponent = exponent - 1
+    return out
+
+  while exponent < 0 do:
+    out = out / 10.0
+    exponent = exponent + 1
+  out
+
+@intrinsic(name: "__f32_demote_f64")
+fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+@intrinsic(name: "__f64_promote_f32")
+fn promote_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+@intrinsic(name: "__f32_convert_i32_s")
+fn convert_f32_i32_s(value: i32): () -> f32 __f32_convert_i32_s(value)
+
+@intrinsic(name: "__f32_convert_i64_s")
+fn convert_f32_i64_s(value: i64): () -> f32 __f32_convert_i64_s(value)
+
+@intrinsic(name: "__f64_convert_i32_s")
+fn convert_f64_i32_s(value: i32): () -> f64 __f64_convert_i32_s(value)
+
+@intrinsic(name: "__f64_convert_i64_s")
+fn convert_f64_i64_s(value: i64): () -> f64 __f64_convert_i64_s(value)
+
+@intrinsic(name: "__i32_trunc_f64_s")
+fn trunc_i32_f64_s(value: f64): () -> i32 __i32_trunc_f64_s(value)
+
+@intrinsic(name: "__i64_trunc_f64_s")
+fn trunc_i64_f64_s(value: f64): () -> i64 __i64_trunc_f64_s(value)
+
+@intrinsic(name: "__trunc")
+fn trunc_f64(value: f64): () -> f64 __trunc(value)
+
+@intrinsic(name: "__i32_wrap_i64")
+fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)
+
+@intrinsic(name: "__i64_extend_s")
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
+
+@intrinsic(name: "__reinterpret_f32_to_i32")
+fn reinterpret_f32_to_i32(value: f32): () -> i32 __reinterpret_f32_to_i32(value)
+
+@intrinsic(name: "__reinterpret_i32_to_f32")
+fn reinterpret_i32_to_f32(value: i32): () -> f32 __reinterpret_i32_to_f32(value)
+
+@intrinsic(name: "__reinterpret_f64_to_i64")
+fn reinterpret_f64_to_i64(value: f64): () -> i64 __reinterpret_f64_to_i64(value)
+
+@intrinsic(name: "__reinterpret_i64_to_f64")
+fn reinterpret_i64_to_f64(value: i64): () -> f64 __reinterpret_i64_to_f64(value)

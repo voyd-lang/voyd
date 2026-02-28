@@ -10,7 +10,7 @@ use std::string::index::{ make_string_index }
 use std::traits::sequence::all
 use std::optional::all
 use std::result::types::all
-use std::subscript::{ Range }
+use std::range::{ Range }
 
 pub use std::string::errors::{ ParseFloatError, ParseIntError, Utf8Error }
 pub use std::string::index::StringIndex

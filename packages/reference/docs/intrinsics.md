@@ -55,6 +55,24 @@ The following intrinsic names are recognized by typing and codegen:
   - `__array_len<T>(array: FixedArray<T>) -> i32`
   - `__array_copy<T>(dest: FixedArray<T>, srcIndex: i32, src: FixedArray<T>, srcOffset: i32, count: i32) -> FixedArray<T>`
     or options form with `from`, `to_index`, `from_index`, `count`
+  - Numeric cast/conversion helpers:
+    - `__i32_wrap_i64(i64) -> i32`
+    - `__i64_extend_u(i32) -> i64`
+    - `__i64_extend_s(i32) -> i64`
+    - `__i32_trunc_f32_s(f32) -> i32`
+    - `__i32_trunc_f64_s(f64) -> i32`
+    - `__i64_trunc_f32_s(f32) -> i64`
+    - `__i64_trunc_f64_s(f64) -> i64`
+    - `__f32_convert_i32_s(i32) -> f32`
+    - `__f32_convert_i64_s(i64) -> f32`
+    - `__f64_convert_i32_s(i32) -> f64`
+    - `__f64_convert_i64_s(i64) -> f64`
+    - `__f32_demote_f64(f64) -> f32`
+    - `__f64_promote_f32(f32) -> f64`
+    - `__reinterpret_f32_to_i32(f32) -> i32`
+    - `__reinterpret_i32_to_f32(i32) -> f32`
+    - `__reinterpret_f64_to_i64(f64) -> i64`
+    - `__reinterpret_i64_to_f64(i64) -> f64`
 - GC/type helpers:
   - `__type_to_heap_type(type) -> heapref`
 

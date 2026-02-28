@@ -1,6 +1,5 @@
 import {
   Expr,
-  Form,
   isCommentAtom,
   isIdentifierAtom,
   isWhitespaceAtom,
@@ -17,26 +16,13 @@ export const arrayLiteralMacro: ReaderMacro = {
   macro: (file, { reader, previous, token }) => {
     const items = reader(file, "]");
     if (shouldParseAsSubscript({ token, previous })) {
-      return call("subscript", previous!, normalizeSubscriptIndex(items));
+      return call("subscript", previous!, items.unwrap());
     }
     return surfaceCall(
       "new_array_unchecked",
       label("from", items.splitInto("fixed_array_literal"))
     );
   },
-};
-
-const RANGE_ONLY_OPERATORS = new Set(["..", "..=", "..<"]);
-
-const normalizeSubscriptIndex = (items: Form): Expr => {
-  const unwrapped = items.unwrap();
-  if (
-    isIdentifierAtom(unwrapped) &&
-    RANGE_ONLY_OPERATORS.has(unwrapped.value)
-  ) {
-    return new Form([unwrapped, new Form()]);
-  }
-  return unwrapped;
 };
 
 const shouldParseAsSubscript = ({

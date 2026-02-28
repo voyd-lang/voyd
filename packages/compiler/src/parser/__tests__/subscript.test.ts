@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isForm, parse } from "../index.js";
+import { isForm, isIdentifierAtom, parse } from "../index.js";
 
 const parseFirstExpression = (source: string) => {
   const ast = parse(source);
@@ -83,9 +83,8 @@ describe("range operators", () => {
     expect(isForm(left) && left.calls("..")).toBe(true);
     expect(isForm(leftInclusive) && leftInclusive.calls("..=")).toBe(true);
     expect(isForm(right) && right.calls("..")).toBe(true);
-    expect(isForm(full) && full.calls("..")).toBe(true);
+    expect(isIdentifierAtom(full) && full.value === "..").toBe(true);
 
     expect(isForm(right) && isEmptyForm(right.at(2))).toBe(true);
-    expect(isForm(full) && isEmptyForm(full.at(1))).toBe(true);
   });
 });

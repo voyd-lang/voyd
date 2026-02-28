@@ -15,6 +15,10 @@ const parseExpression = (expr: Expr): Expr =>
   isForm(expr) ? parseForm(expr) : expr;
 
 const parseForm = (form: Form): Form => {
+  if (form.callsInternal("subscript")) {
+    return parseSubscriptForm(form);
+  }
+
   const hadSingleFormChild = form.length === 1 && isForm(form.at(0));
 
   if (!form.length) {
@@ -38,6 +42,15 @@ const parseForm = (form: Form): Form => {
   }
 
   return restructureOperatorTail(result);
+};
+
+const parseSubscriptForm = (form: Form): Form => {
+  const head = form.first;
+  if (!head) {
+    return formWithLocation(form, []);
+  }
+  const parsedArgs = form.rest.map(parseExpression);
+  return formWithLocation(form, [head, ...parsedArgs]);
 };
 
 const parsePrecedence = (cursor: FormCursor, minPrecedence = 0): Expr => {

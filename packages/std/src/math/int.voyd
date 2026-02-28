@@ -32,12 +32,12 @@ pub fn mod_euclid(value: i32, modulus: i32) -> Result<i32, MathError>
 /// Returns the non-negative Euclidean remainder for 64-bit integers.
 /// `modulus` must be greater than zero.
 pub fn mod_euclid(value: i64, modulus: i64) -> Result<i64, MathError>
-  if modulus <= extend_i32_s(0):
+  if modulus <= to_i64(0):
     return math_error(math_error_code_invalid_input())
 
   let remainder = value % modulus
   Ok<i64> {
-    value: if remainder < extend_i32_s(0) then: remainder + modulus else: remainder
+    value: if remainder < to_i64(0) then: remainder + modulus else: remainder
   }
 
 /// Returns the Euclidean remainder for 32-bit integers.
@@ -77,12 +77,12 @@ pub fn checked_div_rem(value: i32, { by divisor: i32 }) -> Result<(i32, i32), Ma
 /// Returns quotient and remainder, rejecting divide-by-zero and signed overflow.
 /// Signed overflow covers the `MIN / -1` case.
 pub fn checked_div_rem(value: i64, divisor: i64) -> Result<(i64, i64), MathError>
-  if divisor == extend_i32_s(0):
+  if divisor == to_i64(0):
     return math_error(math_error_code_divide_by_zero())
-  if divisor == extend_i32_s(-1):
-    if value < extend_i32_s(0):
-      let flipped = extend_i32_s(0) - value
-      if flipped < extend_i32_s(0):
+  if divisor == to_i64(-1):
+    if value < to_i64(0):
+      let flipped = to_i64(0) - value
+      if flipped < to_i64(0):
         return math_error(math_error_code_overflow())
   Ok<(i64, i64)> { value: (value / divisor, value % divisor) }
 
@@ -109,9 +109,9 @@ pub fn is_power_of_two(value: i32) -> bool
 
 /// Returns true when `value` is a power of two.
 pub fn is_power_of_two(value: i64) -> bool
-  if value <= extend_i32_s(0):
+  if value <= to_i64(0):
     return false
-  bit_and_i64(value, value - extend_i32_s(1)) == extend_i32_s(0)
+  bit_and_i64(value, value - to_i64(1)) == to_i64(0)
 
 /// Returns the greatest power of two less than or equal to `value`.
 /// `value` must be positive.
@@ -126,11 +126,11 @@ pub fn prev_power_of_two(value: i32) -> Result<i32, MathError>
 /// Returns the greatest power of two less than or equal to `value`.
 /// `value` must be positive.
 pub fn prev_power_of_two(value: i64) -> Result<i64, MathError>
-  if value <= extend_i32_s(0):
+  if value <= to_i64(0):
     return math_error(math_error_code_invalid_input())
-  var out = extend_i32_s(1)
-  while out <= (value / extend_i32_s(2)) do:
-    out = out * extend_i32_s(2)
+  var out = to_i64(1)
+  while out <= (value / to_i64(2)) do:
+    out = out * to_i64(2)
   Ok<i64> { value: out }
 
 /// Returns the smallest multiple of `factor` that is greater than or equal to `value`.
@@ -154,12 +154,12 @@ pub fn next_multiple_of(value: i32, factor: i32) -> Result<i32, MathError>
 /// Returns the smallest multiple of `factor` that is greater than or equal to `value`.
 /// `factor` must be positive.
 pub fn next_multiple_of(value: i64, factor: i64) -> Result<i64, MathError>
-  if factor <= extend_i32_s(0):
+  if factor <= to_i64(0):
     return math_error(math_error_code_invalid_input())
 
   match(mod_euclid(value, factor))
     Ok<i64> { value: rem }:
-      if rem == extend_i32_s(0):
+      if rem == to_i64(0):
         return Ok<i64> { value }
       let delta = factor - rem
       let next = value + delta
@@ -175,4 +175,8 @@ fn bit_and_i32(left: i32, right: i32): () -> i32 __bit_and(left, right)
 @intrinsic(name: "__bit_and")
 fn bit_and_i64(left: i64, right: i64): () -> i64 __bit_and(left, right)
 
+@intrinsic(name: "__i64_extend_s")
 fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
+
+fn to_i64(value: i32) -> i64
+  extend_i32_s(value)

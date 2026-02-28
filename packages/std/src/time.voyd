@@ -6,6 +6,7 @@ use std::error::HostError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
+use std::number::cast::{ to_i64 }
 use std::result::types::all
 use std::string::type::new_string
 
@@ -21,7 +22,7 @@ impl Duration
 
   /// Constructs a duration from seconds.
   api fn from_secs(s: i64) -> Duration
-    Duration { millis: s * extend_i32_s(1000) }
+    Duration { millis: s * to_i64(1000) }
 
   /// Returns the duration in milliseconds.
   api fn as_millis(self) -> i64
@@ -29,7 +30,7 @@ impl Duration
 
   /// Returns the duration in seconds.
   api fn as_secs(self) -> i64
-    self.millis / extend_i32_s(1000)
+    self.millis / to_i64(1000)
 
 /// Monotonic timestamp that is suitable for elapsed-time measurement.
 pub obj Instant {
@@ -167,5 +168,3 @@ fn decode_timer_id_result(payload: MsgPack): () -> Result<i64, HostError>
       message: decoded.read_string("message")
     }
   }
-
-fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)

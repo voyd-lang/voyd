@@ -1,0 +1,34 @@
+pub fn range_for_half_open() -> i32
+  var total = 0
+  for value in 0..5:
+    total = total + value
+  total
+
+pub fn range_for_inclusive() -> i32
+  var total = 0
+  for value in 0..=5:
+    total = total + value
+  total
+
+pub fn range_for_nested() -> i32
+  var total = 0
+  for y in 0..3:
+    for x in 0..3:
+      total = total + (x + y)
+  total
+
+pub fn range_iterator_inclusive_i32_max_stops() -> i32
+  let ~iter = (2147483647..=2147483647).iter()
+
+  match(iter.next())
+    Some<i32> { value }:
+      if value != 2147483647 then:
+        return -1
+    None:
+      return -2
+
+  match(iter.next())
+    None:
+      1
+    Some<i32> { value: _ }:
+      0

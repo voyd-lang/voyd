@@ -7,8 +7,9 @@ use std::bytes::ByteBuffer
 use std::math::{ MathError, mod_euclid }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
+use std::number::cast::{ to_i32_wrapping, to_i64 }
 use std::optional::types::all
-use std::subscript::Range
+use std::range::Range
 
 /// Host-provided random source effect.
 ///
@@ -48,10 +49,10 @@ pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
         Some<MsgPack> { value }:
           buf.push(mod_euclid_i32_or_zero(msgpack::unpack_i32(value), 256))
         None:
-          let next = wrap_i64(next_i64())
+          let next = to_i32_wrapping(next_i64())
           buf.push(mod_euclid_i32_or_zero(next, 256))
     else:
-      let next = wrap_i64(next_i64())
+      let next = to_i32_wrapping(next_i64())
       buf.push(mod_euclid_i32_or_zero(next, 256))
     index = index + 1
 
@@ -61,7 +62,7 @@ pub fn fill_buffer(~buf: ByteBuffer, len: i32): Random -> void
 
 /// Returns a random boolean value.
 pub fn random_bool(): Random -> bool
-  let value = wrap_i64(next_i64())
+  let value = to_i32_wrapping(next_i64())
   value % 2 == 0
 
 /// Returns a random integer within the provided range.
@@ -71,7 +72,7 @@ pub fn random_bool(): Random -> bool
 /// `random::random_int(1..6)` samples values in `[1, 5]`.
 pub fn random_int(range: Range): Random -> i32
   let start = range_start_or_zero(range.start)
-  let start_i64 = extend_i32_s(start)
+  let start_i64 = to_i64(start)
   let end_exclusive = range_end_exclusive(range, start_i64)
   if end_exclusive <= start_i64:
     return start
@@ -79,7 +80,7 @@ pub fn random_int(range: Range): Random -> i32
   let span = end_exclusive - start_i64
   let seed = next_i64()
   let sample = start_i64 + mod_euclid_i64_or_zero(seed, span)
-  wrap_i64(sample)
+  to_i32_wrapping(sample)
 
 fn range_start_or_zero(start: Option<i32>) -> i32
   match(start)
@@ -91,13 +92,13 @@ fn range_start_or_zero(start: Option<i32>) -> i32
 fn range_end_exclusive(range: Range, start: i64) -> i64
   match(range.end)
     Some<i32> { value }:
-      let end = extend_i32_s(value)
+      let end = to_i64(value)
       if range.include_end:
-        end + extend_i32_s(1)
+        end + to_i64(1)
       else:
         end
     None:
-      start + extend_i32_s(1)
+      start + to_i64(1)
 
 fn mod_euclid_i32_or_zero(value: i32, modulus: i32) -> i32
   match(mod_euclid(value, modulus))
@@ -111,7 +112,4 @@ fn mod_euclid_i64_or_zero(value: i64, modulus: i64) -> i64
     Ok<i64> { value }:
       value
     Err<MathError>:
-      extend_i32_s(0)
-
-fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)
-fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
+      to_i64(0)

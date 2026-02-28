@@ -42,9 +42,8 @@ export const specializeOverloadCallees = ({
 
     const targets = typing.callTargets.get(expr.id);
     if (!targets || targets.size === 0) {
-      throw new Error(
-        `missing overload resolution for call expression ${expr.id}`
-      );
+      unspecialized.add(callee.id);
+      continue;
     }
 
     const uniqueTargets = new Map<string, { moduleId: string; symbol: SymbolId }>();
