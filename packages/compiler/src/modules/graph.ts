@@ -4,6 +4,7 @@ import {
   formCallsInternal,
   isIdentifierAtom,
   isForm,
+  parserErrorLocation,
   parseBase,
 } from "../parser/index.js";
 import { diagnosticFromCode, type Diagnostic } from "../diagnostics/index.js";
@@ -402,6 +403,19 @@ const parseModuleAst = ({
   try {
     return { ast: parseBase(source, filePath), diagnostics: [] };
   } catch (error) {
+    const parserLocation = parserErrorLocation(error);
+    const span = parserLocation
+      ? {
+          file: parserLocation.filePath,
+          start: parserLocation.startIndex,
+          end: Math.max(parserLocation.startIndex + 1, parserLocation.endIndex),
+        }
+      : {
+          file: filePath,
+          start: 0,
+          end: Math.max(1, source.length),
+        };
+
     return {
       ast: parseBase("", filePath),
       diagnostics: [
@@ -412,11 +426,7 @@ const parseModuleAst = ({
             requested: modulePathToString(modulePath),
             errorMessage: `Failed to parse ${filePath}: ${formatErrorMessage(error)}`,
           },
-          span: {
-            file: filePath,
-            start: 0,
-            end: Math.max(1, source.length),
-          },
+          span,
         }),
       ],
     };

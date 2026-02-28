@@ -255,10 +255,19 @@ describe("language server project analysis", () => {
       });
 
       const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
-      expect(diagnostics.some((diagnostic) => diagnostic.code === "MD0002")).toBe(true);
+      const diagnostic = diagnostics.find((entry) => entry.code === "MD0002");
+      expect(diagnostic).toBeDefined();
+      if (!diagnostic) {
+        return;
+      }
+
       expect(
-        diagnostics.some((diagnostic) => diagnostic.message.includes("Failed to parse")),
+        diagnostic.message.includes("Failed to parse"),
       ).toBe(true);
+      expect(diagnostic.range.start.line).toBeGreaterThan(0);
+      expect(diagnostic.range.end.line).toBeGreaterThanOrEqual(
+        diagnostic.range.start.line,
+      );
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }

@@ -228,12 +228,17 @@ mod pkg
     });
 
     expect(graph.modules.has("src::main")).toBe(true);
-    expect(graph.diagnostics.some((diagnostic) => diagnostic.code === "MD0002")).toBe(
-      true,
-    );
+    const diagnostic = graph.diagnostics.find((entry) => entry.code === "MD0002");
+    expect(diagnostic).toBeDefined();
+    if (!diagnostic) {
+      return;
+    }
+
     expect(
-      graph.diagnostics.some((diagnostic) => diagnostic.message.includes("Failed to parse")),
+      diagnostic.message.includes("Failed to parse"),
     ).toBe(true);
+    expect(diagnostic.span.start).toBeGreaterThan(0);
+    expect(diagnostic.span.end).toBe(diagnostic.span.start + 1);
   });
 
   it("rejects entry modules named all", async () => {
