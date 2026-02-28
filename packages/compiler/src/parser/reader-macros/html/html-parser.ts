@@ -12,6 +12,7 @@ import {
   string,
 } from "../../ast/index.js";
 import { CharStream } from "../../char-stream.js";
+import { ParserSyntaxError } from "../../errors.js";
 
 type ParseOptions = {
   onUnescapedCurlyBrace: (stream: CharStream) => Expr | undefined;
@@ -32,7 +33,7 @@ export class HTMLParser {
 
   parse(startElement?: string): Expr {
     const node = this.parseNode(startElement);
-    if (!node) throw new Error("Expected HTML node");
+    if (!node) this.throwSyntaxError("Expected HTML node");
     return node;
   }
 
@@ -60,7 +61,10 @@ export class HTMLParser {
 
     const selfClosing = this.stream.next === "/";
     if (selfClosing) this.stream.consumeChar();
-    if (this.stream.consumeChar() !== ">") throw new Error("Malformed tag");
+    this.consumeExpectedChar({
+      expected: ">",
+      message: "Malformed tag",
+    });
 
     // Component: translate to function call with props object and children
     if (isComponent) {
@@ -118,7 +122,11 @@ export class HTMLParser {
 
   private parseTagName(): string {
     let tagName = "";
-    while (/[a-zA-Z0-9:]/.test(this.stream.next)) {
+    while (this.stream.hasCharacters) {
+      const char = this.stream.next;
+      if (!char || !/[a-zA-Z0-9:]/.test(char)) {
+        break;
+      }
       tagName += this.stream.consumeChar();
     }
     return tagName;
@@ -145,7 +153,11 @@ export class HTMLParser {
 
   private parseAttributeName(): string {
     let name = "";
-    while (/[a-zA-Z0-9-]/.test(this.stream.next)) {
+    while (this.stream.hasCharacters) {
+      const char = this.stream.next;
+      if (!char || !/[a-zA-Z0-9-]/.test(char)) {
+        break;
+      }
       name += this.stream.consumeChar();
     }
     return name;
@@ -157,7 +169,7 @@ export class HTMLParser {
       const expr = this.options.onUnescapedCurlyBrace(this.stream);
 
       if (!expr) {
-        throw new Error(
+        this.throwSyntaxError(
           "Unescaped curly brace must be followed by an expression",
         );
       }
@@ -166,14 +178,18 @@ export class HTMLParser {
     }
 
     if (quote !== '"' && quote !== "'") {
-      throw new Error("Attribute value must be quoted");
+      this.throwSyntaxError("Attribute value must be quoted");
     }
 
+    const valueStart = this.stream.currentSourceLocation();
     this.stream.consumeChar(); // Consume the opening quote
 
     let text = "";
-    while (this.stream.next !== quote) {
+    while (this.stream.hasCharacters && this.stream.next !== quote) {
       text += this.stream.consumeChar();
+    }
+    if (this.stream.next !== quote) {
+      this.throwSyntaxError("Unterminated attribute value", valueStart);
     }
     this.stream.consumeChar(); // Consume the closing quote
     return string(text);
@@ -215,18 +231,22 @@ export class HTMLParser {
 
     if (this.stream.hasCharacters && this.stream.next === `<`) {
       this.stream.consumeChar(); // Consume '<'
-      if (this.stream.consumeChar() !== "/") {
-        throw new Error(`Expected closing tag </${tagName}>`);
-      }
+      this.consumeExpectedChar({
+        expected: "/",
+        message: `Expected closing tag </${tagName}>`,
+      });
+      const closingTagStart = this.stream.currentSourceLocation();
       const closingTagName = this.parseTagName();
       if (closingTagName !== tagName) {
-        throw new Error(
+        this.throwSyntaxError(
           `Mismatched closing tag, expected </${tagName}> but got </${closingTagName}>`,
+          closingTagStart,
         );
       }
-      if (this.stream.consumeChar() !== ">") {
-        throw new Error("Malformed closing tag");
-      }
+      this.consumeExpectedChar({
+        expected: ">",
+        message: "Malformed closing tag",
+      });
     }
 
     const result = arrayLiteral(...children);
@@ -287,6 +307,24 @@ export class HTMLParser {
   ) {
     const children = this.parseChildren(tagName);
     return [...props, { name: "children", value: children }];
+  }
+
+  private consumeExpectedChar({
+    expected,
+    message,
+  }: {
+    expected: string;
+    message: string;
+  }): void {
+    const location = this.stream.currentSourceLocation();
+    if (this.stream.next !== expected) {
+      this.throwSyntaxError(message, location);
+    }
+    this.stream.consumeChar();
+  }
+
+  private throwSyntaxError(message: string, location = this.stream.currentSourceLocation()): never {
+    throw new ParserSyntaxError(message, location);
   }
 }
 
