@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   isRouteErrorResponse,
   Link,
@@ -12,6 +13,81 @@ import logo from "../assets/logo-inverted.svg";
 
 import type { Route } from "./+types/root";
 import "./app.css";
+
+const THEME_STORAGE_KEY = "voyd-theme-preference";
+
+type ThemePreference = "light" | "dark" | "system";
+
+const THEME_INIT_SCRIPT = `(() => {
+  try {
+    const key = "${THEME_STORAGE_KEY}";
+    const stored = window.localStorage.getItem(key);
+    if (stored === "light" || stored === "dark") {
+      document.documentElement.setAttribute("data-theme", stored);
+      return;
+    }
+    document.documentElement.removeAttribute("data-theme");
+  } catch {
+    document.documentElement.removeAttribute("data-theme");
+  }
+})();`;
+
+const NAV_LINK_CLASS =
+  "text-sm font-semibold opacity-[0.85] underline-offset-4 transition hover:opacity-100 hover:underline";
+
+const isThemePreference = (value: string | null): value is ThemePreference =>
+  value === "light" || value === "dark" || value === "system";
+
+const applyThemePreference = (preference: ThemePreference) => {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  if (preference === "system") {
+    document.documentElement.removeAttribute("data-theme");
+    return;
+  }
+
+  document.documentElement.setAttribute("data-theme", preference);
+};
+
+const ThemeToggle = ({
+  value,
+  onChange,
+}: {
+  value: ThemePreference;
+  onChange: (next: ThemePreference) => void;
+}) => {
+  const options: ThemePreference[] = ["light", "dark", "system"];
+
+  return (
+    <div
+      className="inline-flex gap-1 rounded-full border border-[var(--site-border)] bg-[var(--site-surface-soft)] p-[3px]"
+      role="group"
+      aria-label="Theme mode"
+    >
+      {options.map((option) => {
+        const isActive = value === option;
+        return (
+          <button
+            key={option}
+            type="button"
+            className={`rounded-full px-3 py-1 text-xs font-bold transition ${
+              isActive
+                ? "bg-[var(--site-surface)] opacity-100 shadow-sm"
+                : "opacity-70 hover:opacity-100"
+            }`}
+            onClick={() => onChange(option)}
+            aria-pressed={isActive}
+          >
+            {option[0]?.toUpperCase()}
+            {option.slice(1)}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -32,6 +108,22 @@ export const links: Route.LinksFunction = () => [
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const stdDocsPath = useHref("/std/");
+  const [themePreference, setThemePreference] = useState<ThemePreference>(
+    "system",
+  );
+
+  useEffect(() => {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    const resolvedPreference = isThemePreference(stored) ? stored : "system";
+    setThemePreference(resolvedPreference);
+    applyThemePreference(resolvedPreference);
+  }, []);
+
+  const onThemeChange = (next: ThemePreference) => {
+    setThemePreference(next);
+    window.localStorage.setItem(THEME_STORAGE_KEY, next);
+    applyThemePreference(next);
+  };
 
   return (
     <html lang="en">
@@ -40,30 +132,42 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
-      <body className="bg-background text-foreground max-w-screen">
-        <header className="backdrop-blur-sm">
-          <div className="max-w-5xl mx-auto flex items-center justify-between p-4">
-            <Link to="/" className="flex items-center gap-2 font-bold text-xl">
-              <img src={logo} alt="Voyd logo" className="h-8 w-8" />
+      <body className="min-h-screen bg-[var(--site-page-bg)] font-sans text-foreground antialiased">
+        <header
+          className="sticky top-0 z-[60] border-b border-[var(--site-border)] backdrop-blur"
+          style={{
+            background: "color-mix(in srgb, var(--site-surface) 86%, transparent)",
+          }}
+        >
+          <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:py-4">
+            <Link
+              to="/"
+              className="inline-flex items-center gap-2 text-[1.05rem] font-extrabold tracking-[0.02em] lowercase"
+            >
+              <img src={logo} alt="Voyd logo" className="h-7 w-7" />
               <span>voyd</span>
             </Link>
-            <nav className="flex gap-4">
-              <Link to="/docs" className="hover:underline text-[#58a6ff]">
-                Docs
-              </Link>
-              <a href={stdDocsPath} className="hover:underline text-[#58a6ff]">
-                Std Docs
-              </a>
-              <a
-                href="https://github.com/voyd-lang/voyd"
-                className="hover:underline text-[#58a6ff]"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                GitHub
-              </a>
-            </nav>
+            <div className="flex items-center justify-between gap-3 sm:justify-end sm:gap-4">
+              <nav className="flex flex-wrap items-center gap-3 sm:gap-4">
+                <Link to="/docs" className={NAV_LINK_CLASS}>
+                  Docs
+                </Link>
+                <a href={stdDocsPath} className={NAV_LINK_CLASS}>
+                  Std Docs
+                </a>
+                <a
+                  href="https://github.com/voyd-lang/voyd"
+                  className={NAV_LINK_CLASS}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  GitHub
+                </a>
+              </nav>
+              <ThemeToggle value={themePreference} onChange={onThemeChange} />
+            </div>
           </div>
         </header>
         {children}
@@ -95,11 +199,11 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
 
   return (
-    <main className="pt-16 p-4 container mx-auto">
+    <main className="container mx-auto p-4 pt-16">
       <h1>{message}</h1>
       <p>{details}</p>
       {stack && (
-        <pre className="w-full p-4 overflow-x-auto">
+        <pre className="w-full overflow-x-auto p-4">
           <code>{stack}</code>
         </pre>
       )}

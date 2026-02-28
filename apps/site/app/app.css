@@ -338,3 +338,85 @@
   --color-accent-foreground: #ffffff;
   --color-card-foreground: #0b0b0b;
 }
+
+html,
+body {
+  min-height: 100%;
+}
+
+:root {
+  --site-page-bg: #f6f7fb;
+  --site-surface: #ffffff;
+  --site-surface-soft: #f1f4f9;
+  --site-border: rgba(15, 23, 42, 0.14);
+  --site-text-muted: #51607b;
+  --site-hero-halo: rgba(129, 147, 184, 0.22);
+  --site-hero-warp: rgba(39, 51, 75, 0.16);
+  --site-hero-ring: rgba(122, 141, 180, 0.2);
+  --site-hero-core: rgba(14, 20, 33, 0.2);
+  --site-button-solid-bg: #131f38;
+  --site-button-solid-fg: #f4f7ff;
+  --site-button-ghost-border: rgba(15, 23, 42, 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --site-page-bg: #0a101c;
+    --site-surface: #101a2c;
+    --site-surface-soft: #0d1525;
+    --site-border: rgba(183, 198, 230, 0.2);
+    --site-text-muted: #a8b5d0;
+    --site-hero-halo: rgba(110, 135, 192, 0.22);
+    --site-hero-warp: rgba(190, 212, 255, 0.18);
+    --site-hero-ring: rgba(170, 191, 236, 0.27);
+    --site-hero-core: rgba(2, 6, 14, 0.72);
+    --site-button-solid-bg: #dae5ff;
+    --site-button-solid-fg: #0f182c;
+    --site-button-ghost-border: rgba(214, 225, 247, 0.34);
+  }
+}
+
+[data-theme="light"] {
+  --site-page-bg: #f6f7fb;
+  --site-surface: #ffffff;
+  --site-surface-soft: #f1f4f9;
+  --site-border: rgba(15, 23, 42, 0.14);
+  --site-text-muted: #51607b;
+  --site-hero-halo: rgba(129, 147, 184, 0.22);
+  --site-hero-warp: rgba(39, 51, 75, 0.16);
+  --site-hero-ring: rgba(122, 141, 180, 0.2);
+  --site-hero-core: rgba(14, 20, 33, 0.2);
+  --site-button-solid-bg: #131f38;
+  --site-button-solid-fg: #f4f7ff;
+  --site-button-ghost-border: rgba(15, 23, 42, 0.2);
+}
+
+[data-theme="dark"] {
+  --site-page-bg: #0a101c;
+  --site-surface: #101a2c;
+  --site-surface-soft: #0d1525;
+  --site-border: rgba(183, 198, 230, 0.2);
+  --site-text-muted: #a8b5d0;
+  --site-hero-halo: rgba(110, 135, 192, 0.22);
+  --site-hero-warp: rgba(190, 212, 255, 0.18);
+  --site-hero-ring: rgba(170, 191, 236, 0.27);
+  --site-hero-core: rgba(2, 6, 14, 0.72);
+  --site-button-solid-bg: #dae5ff;
+  --site-button-solid-fg: #0f182c;
+  --site-button-ghost-border: rgba(214, 225, 247, 0.34);
+}
+
+@keyframes lens-shift {
+  from {
+    transform: rotate(-12deg) scale(1);
+  }
+  to {
+    transform: rotate(-8deg) scale(1.02);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[lens-shift_16s_ease-in-out_infinite_alternate\] {
+    animation: none !important;
+  }
+}

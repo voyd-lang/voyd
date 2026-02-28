@@ -1,6 +1,7 @@
 node_modules
 dist
 ast.json
+output/
 *output*.json
 *output*.wat
 .env
