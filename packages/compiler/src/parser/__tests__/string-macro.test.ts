@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { string as stringExpr } from "../ast/init-helpers.js";
 import {
+  call,
   type Expr,
+  Form,
   IntAtom,
+  identifier,
   isForm,
   isIdentifierAtom,
 } from "../ast/index.js";
+import { CharStream } from "../char-stream.js";
+import { read } from "../reader.js";
 
 const bytesFromStringLiteral = (value: string): number[] => {
   const expr: Expr = stringExpr(value);
@@ -32,6 +37,28 @@ const bytesFromStringLiteral = (value: string): number[] => {
   return bytes;
 };
 
+const parseSingleExpression = (source: string): Expr => {
+  const parsed = read(new CharStream(source, "test"));
+  const first = parsed.at(1);
+  if (!first) {
+    throw new Error("expected one expression");
+  }
+  return first;
+};
+
+const toPlain = (expr: Expr): unknown =>
+  JSON.parse(JSON.stringify(expr.toJSON())) as unknown;
+
+const methodCall = ({
+  target,
+  method,
+  args = [],
+}: {
+  target: Expr;
+  method: string;
+  args?: Expr[];
+}): Expr => call(identifier("."), target, new Form([identifier(method), ...args]).toCall());
+
 describe("string macro utf8 encoding", () => {
   it("encodes surrogate pairs as utf8 bytes", () => {
     expect(bytesFromStringLiteral("😀")).toEqual([240, 159, 152, 128]);
@@ -40,5 +67,43 @@ describe("string macro utf8 encoding", () => {
   it("replaces unpaired surrogates", () => {
     const value = String.fromCharCode(0xd800);
     expect(bytesFromStringLiteral(value)).toEqual([239, 191, 189]);
+  });
+
+  it("parses interpolation into concat calls", () => {
+    const expected = methodCall({
+      target: stringExpr("Hello, "),
+      method: "concat",
+      args: [identifier("name")],
+    });
+
+    expect(toPlain(parseSingleExpression('"Hello, ${name}"'))).toEqual(
+      toPlain(expected)
+    );
+  });
+
+  it("keeps escaped interpolation markers as text", () => {
+    expect(toPlain(parseSingleExpression('"Hello, \\${name}"'))).toEqual(
+      toPlain(stringExpr("Hello, ${name}"))
+    );
+  });
+
+  it("supports interpolation-only and mixed interpolation strings", () => {
+    const interpolationOnly = identifier("first");
+    expect(toPlain(parseSingleExpression('"${first}"'))).toEqual(
+      toPlain(interpolationOnly)
+    );
+
+    const mixed = methodCall({
+      target: methodCall({
+        target: identifier("first"),
+        method: "concat",
+        args: [stringExpr("-")],
+      }),
+      method: "concat",
+      args: [identifier("second")],
+    });
+    expect(toPlain(parseSingleExpression('"${first}-${second}"'))).toEqual(
+      toPlain(mixed)
+    );
   });
 });
