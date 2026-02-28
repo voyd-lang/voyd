@@ -1,34 +1,44 @@
+//! Primitive wrapper types used by `std::msgpack` value unions.
+
 use std::array::Array
 
+/// MessagePack 32-bit integer wrapper.
 pub obj I32 {
   /// Wrapped payload value.
   api value: i32
 }
 
+/// MessagePack 64-bit integer wrapper.
 pub obj I64 {
   /// Wrapped payload value.
   api value: i64
 }
 
+/// MessagePack 32-bit float wrapper.
 pub obj F32 {
   /// Wrapped payload value.
   api value: f32
 }
 
+/// MessagePack 64-bit float wrapper.
 pub obj F64 {
   /// Wrapped payload value.
   api value: f64
 }
 
+/// MessagePack boolean wrapper.
 pub obj Bool {
   /// Wrapped payload value.
   api value: bool
 }
 
+/// Numeric subset of MessagePack wrapper types.
 pub type Numeric = I32 | I64 | F32 | F64
 
+/// MessagePack null wrapper.
 pub obj Null {}
 
+/// MessagePack binary payload wrapper.
 pub obj Binary {
   /// Raw bytes stored by this value.
   api bytes: Array<i32>

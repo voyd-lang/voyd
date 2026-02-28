@@ -92,22 +92,22 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
   (runtimeKind) => {
     it("keeps timer/random behavior deterministic and validates fetch/input/output contracts", async () => {
       const table = buildTable([
-        { effectId: "std::time::Time", opName: "monotonic_now_millis", opId: 0 },
-        { effectId: "std::time::Time", opName: "system_now_millis", opId: 1 },
-        { effectId: "std::time::Time", opName: "sleep_millis", opId: 2 },
-        { effectId: "std::time::Time", opName: "set_timeout_millis", opId: 3 },
-        { effectId: "std::time::Time", opName: "set_interval_millis", opId: 4 },
-        { effectId: "std::time::Time", opName: "clear_timer", opId: 5 },
-        { effectId: "std::random::Random", opName: "next_i64", opId: 0 },
-        { effectId: "std::random::Random", opName: "fill_bytes", opId: 1 },
-        { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
-        { effectId: "std::input::Input", opName: "read_line", opId: 0 },
-        { effectId: "std::input::Input", opName: "read_bytes", opId: 1 },
-        { effectId: "std::input::Input", opName: "is_tty", opId: 2 },
-        { effectId: "std::output::Output", opName: "write", opId: 0 },
-        { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
-        { effectId: "std::output::Output", opName: "flush", opId: 2 },
-        { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
+        { effectId: "voyd.std.time", opName: "monotonic_now_millis", opId: 0 },
+        { effectId: "voyd.std.time", opName: "system_now_millis", opId: 1 },
+        { effectId: "voyd.std.time", opName: "sleep_millis", opId: 2 },
+        { effectId: "voyd.std.time", opName: "set_timeout_millis", opId: 3 },
+        { effectId: "voyd.std.time", opName: "set_interval_millis", opId: 4 },
+        { effectId: "voyd.std.time", opName: "clear_timer", opId: 5 },
+        { effectId: "voyd.std.random", opName: "next_i64", opId: 0 },
+        { effectId: "voyd.std.random", opName: "fill_bytes", opId: 1 },
+        { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
+        { effectId: "voyd.std.input", opName: "read_line", opId: 0 },
+        { effectId: "voyd.std.input", opName: "read_bytes", opId: 1 },
+        { effectId: "voyd.std.input", opName: "is_tty", opId: 2 },
+        { effectId: "voyd.std.output", opName: "write", opId: 0 },
+        { effectId: "voyd.std.output", opName: "write_bytes", opId: 1 },
+        { effectId: "voyd.std.output", opName: "flush", opId: 2 },
+        { effectId: "voyd.std.output", opName: "is_tty", opId: 3 },
       ]);
       const runtime = createDeterministicRuntime({
         startMonotonicMs: 10,
@@ -189,31 +189,31 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       const capabilitiesByEffect = new Map(
         report.capabilities.map((capability) => [capability.effectId, capability])
       );
-      expect(capabilitiesByEffect.get("std::time::Time")?.supported).toBe(true);
-      expect(capabilitiesByEffect.get("std::random::Random")?.supported).toBe(
+      expect(capabilitiesByEffect.get("voyd.std.time")?.supported).toBe(true);
+      expect(capabilitiesByEffect.get("voyd.std.random")?.supported).toBe(
         true
       );
-      expect(capabilitiesByEffect.get("std::fetch::Fetch")?.supported).toBe(
+      expect(capabilitiesByEffect.get("voyd.std.fetch")?.supported).toBe(
         true
       );
-      expect(capabilitiesByEffect.get("std::input::Input")?.supported).toBe(
+      expect(capabilitiesByEffect.get("voyd.std.input")?.supported).toBe(
         true
       );
-      expect(capabilitiesByEffect.get("std::output::Output")?.supported).toBe(
+      expect(capabilitiesByEffect.get("voyd.std.output")?.supported).toBe(
         true
       );
 
       const monotonicHandler = getHandler(
-        "std::time::Time",
+        "voyd.std.time",
         "monotonic_now_millis"
       );
-      const systemHandler = getHandler("std::time::Time", "system_now_millis");
-      const sleepHandler = getHandler("std::time::Time", "sleep_millis");
-      const timeoutHandler = getHandler("std::time::Time", "set_timeout_millis");
-      const intervalHandler = getHandler("std::time::Time", "set_interval_millis");
-      const clearTimerHandler = getHandler("std::time::Time", "clear_timer");
-      const nextI64Handler = getHandler("std::random::Random", "next_i64");
-      const fillBytesHandler = getHandler("std::random::Random", "fill_bytes");
+      const systemHandler = getHandler("voyd.std.time", "system_now_millis");
+      const sleepHandler = getHandler("voyd.std.time", "sleep_millis");
+      const timeoutHandler = getHandler("voyd.std.time", "set_timeout_millis");
+      const intervalHandler = getHandler("voyd.std.time", "set_interval_millis");
+      const clearTimerHandler = getHandler("voyd.std.time", "clear_timer");
+      const nextI64Handler = getHandler("voyd.std.random", "next_i64");
+      const fillBytesHandler = getHandler("voyd.std.random", "fill_bytes");
 
       await expect(invokeHandler(monotonicHandler)).resolves.toEqual({
         kind: "tail",
@@ -283,14 +283,14 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         value: [1, 2, 3, 4],
       });
 
-      const fetchHandler = getHandler("std::fetch::Fetch", "request");
-      const inputLineHandler = getHandler("std::input::Input", "read_line");
-      const inputReadBytesHandler = getHandler("std::input::Input", "read_bytes");
-      const inputTtyHandler = getHandler("std::input::Input", "is_tty");
-      const outputWriteHandler = getHandler("std::output::Output", "write");
-      const outputWriteBytesHandler = getHandler("std::output::Output", "write_bytes");
-      const outputFlushHandler = getHandler("std::output::Output", "flush");
-      const outputTtyHandler = getHandler("std::output::Output", "is_tty");
+      const fetchHandler = getHandler("voyd.std.fetch", "request");
+      const inputLineHandler = getHandler("voyd.std.input", "read_line");
+      const inputReadBytesHandler = getHandler("voyd.std.input", "read_bytes");
+      const inputTtyHandler = getHandler("voyd.std.input", "is_tty");
+      const outputWriteHandler = getHandler("voyd.std.output", "write");
+      const outputWriteBytesHandler = getHandler("voyd.std.output", "write_bytes");
+      const outputFlushHandler = getHandler("voyd.std.output", "flush");
+      const outputTtyHandler = getHandler("voyd.std.output", "is_tty");
 
       await expect(
         invokeHandler(fetchHandler, {
@@ -457,9 +457,9 @@ describe("default adapter conformance (unsupported capabilities)", () => {
     vi.stubGlobal("fetch", undefined);
     vi.stubGlobal("prompt", undefined);
     const table = buildTable([
-      { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
-      { effectId: "std::input::Input", opName: "read_line", opId: 0 },
-      { effectId: "std::output::Output", opName: "write", opId: 0 },
+      { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
+      { effectId: "voyd.std.input", opName: "read_line", opId: 0 },
+      { effectId: "voyd.std.output", opName: "write", opId: 0 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -470,20 +470,20 @@ describe("default adapter conformance (unsupported capabilities)", () => {
     const capabilitiesByEffect = new Map(
       report.capabilities.map((capability) => [capability.effectId, capability])
     );
-    expect(capabilitiesByEffect.get("std::fetch::Fetch")?.supported).toBe(
+    expect(capabilitiesByEffect.get("voyd.std.fetch")?.supported).toBe(
       false
     );
-    expect(capabilitiesByEffect.get("std::input::Input")?.supported).toBe(true);
-    expect(capabilitiesByEffect.get("std::output::Output")?.supported).toBe(true);
+    expect(capabilitiesByEffect.get("voyd.std.input")?.supported).toBe(true);
+    expect(capabilitiesByEffect.get("voyd.std.output")?.supported).toBe(true);
 
     await expect(
-      invokeHandler(getHandler("std::fetch::Fetch", "request"), {})
+      invokeHandler(getHandler("voyd.std.fetch", "request"), {})
     ).rejects.toThrow(/default fetch adapter is unavailable/i);
     await expect(
-      invokeHandler(getHandler("std::input::Input", "read_line"), {})
+      invokeHandler(getHandler("voyd.std.input", "read_line"), {})
     ).rejects.toThrow(/does not implement op read_line/i);
     await expect(
-      invokeHandler(getHandler("std::output::Output", "write"), {})
+      invokeHandler(getHandler("voyd.std.output", "write"), {})
     ).rejects.toThrow(/does not implement op write/i);
   });
 });

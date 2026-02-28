@@ -10,33 +10,33 @@ fn option_i32_or(value: Option<i32>, fallback: i32) -> i32
       fallback
 
 test "bytes and bytebuffer core operations":
-  let ~buffer = ByteBuffer::with_capacity(bytes: 4)
+  let ~buffer = ByteBuffer::with_capacity(4)
   assert(buffer.capacity() >= 4, eq: true)
   assert(buffer.is_empty(), eq: true)
 
-  buffer.push(value: 72)
-  buffer.push(value: 105)
+  buffer.push(72)
+  buffer.push(105)
   assert(buffer.len(), eq: 2)
 
   let bytes = buffer.as_bytes()
   assert(bytes.len(), eq: 2)
   assert(bytes.is_empty(), eq: false)
-  assert(option_i32_or(bytes.get(at: 0), -1), eq: 72)
+  assert(option_i32_or(bytes.get(0), -1), eq: 72)
   assert(bytes.at(1), eq: 105)
   assert(bytes.to_array().len(), eq: 2)
 
 test "bytes slice and buffer extend clear":
   let ~first = ByteBuffer::init()
-  first.push(value: 1)
-  first.push(value: 2)
-  first.push(value: 3)
-  first.push(value: 4)
+  first.push(1)
+  first.push(2)
+  first.push(3)
+  first.push(4)
 
   let ~second = ByteBuffer::init()
-  second.extend(bytes: first.as_bytes())
+  second.extend(first.as_bytes())
   assert(second.len(), eq: 4)
 
-  let sliced = second.as_bytes().slice(range: Range {
+  let sliced = second.as_bytes().slice(Range {
     start: Some<i32> { value: 1 },
     end: Some<i32> { value: 3 },
     include_end: false

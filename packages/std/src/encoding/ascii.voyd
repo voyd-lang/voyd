@@ -1,8 +1,15 @@
+//! ASCII normalization helpers for byte-to-string conversions.
+
 use std::array::Array
 use std::string::{ String, new_string }
 
 /// Builds a safe string from ASCII byte values.
-pub fn ascii_string_from_bytes({ bytes: Array<i32> }) -> String
+///
+/// Params:
+/// - `bytes`: Byte values expected to be ASCII.
+///
+/// Any byte outside the 0-127 range is replaced with `?` (`63`).
+pub fn ascii_string_from(bytes: Array<i32>) -> String
   if bytes.is_empty():
     return String::init()
 
@@ -12,6 +19,10 @@ pub fn ascii_string_from_bytes({ bytes: Array<i32> }) -> String
     normalized.push(normalize_ascii_byte(bytes.at(index)))
     index = index + 1
   new_string(normalized.to_fixed_array())
+
+/// Compatibility alias for `ascii_string_from(bytes: ...)`.
+pub fn ascii_string_from_bytes(bytes: Array<i32>) -> String
+  ascii_string_from(bytes)
 
 fn normalize_ascii_byte(value: i32) -> i32
   if value < 0 or value > 127:

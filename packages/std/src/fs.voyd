@@ -1,8 +1,13 @@
+//! File system APIs backed by host runtime operations.
+//!
+//! `std::fs` provides read/write/existence/listing helpers that operate on
+//! `std::path::Path` and return typed `Result` values where host I/O can fail.
+//! All effect payloads are MessagePack-encoded DTOs.
+
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
 use std::error::IoError
 use std::host_dto::HostDto
-use std::math::{ MathError, mod_euclid }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
@@ -10,51 +15,102 @@ use std::path::Path
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
 
-@effect(id: "std::fs::Fs")
+/// Host file-system effect used by `std::fs`.
+///
+/// Operations in this effect proxy host file APIs using MessagePack payloads
+/// and return DTOs decoded by helper functions in this module.
+@effect(id: "voyd.std.fs")
 pub eff Fs
+  /// Reads file contents from `path` and returns raw byte data or an I/O error DTO.
   read_bytes(tail, path: MsgPack) -> MsgPack
+  /// Reads UTF-8 text contents from `path` and returns string data or an I/O error DTO.
   read_string(tail, path: MsgPack) -> MsgPack
+  /// Writes raw byte data to a file.
+  ///
+  /// `payload` contains `{ path, bytes }`.
   write_bytes(tail, payload: MsgPack) -> MsgPack
+  /// Writes UTF-8 text to a file.
+  ///
+  /// `payload` contains `{ path, value }`.
   write_string(tail, payload: MsgPack) -> MsgPack
+  /// Returns the host-reported existence check for `path`.
   exists(tail, path: MsgPack) -> bool
+  /// Lists child paths in the directory at `path`, or returns an I/O error DTO.
   list_dir(tail, path: MsgPack) -> MsgPack
 
 /// Reads a file as raw bytes.
-pub fn read_bytes({ path: Path }): Fs -> Result<Bytes, IoError>
+///
+/// Example:
+/// `let bytes = fs::read_bytes(Path::new("./image.bin".as_slice()))`
+pub fn read_bytes(path: Path): Fs -> Result<Bytes, IoError>
   decode_read_bytes_result(Fs::read_bytes(encode_path(path)))
 
 /// Reads text from a file.
-pub fn read_string({ path: Path }): Fs -> Result<String, IoError>
+///
+/// This expects host-side UTF-8 text decoding.
+pub fn read(path: Path): Fs -> Result<String, IoError>
   decode_read_string_result(Fs::read_string(encode_path(path)))
 
+/// Reads text from a file.
+///
+/// This expects host-side UTF-8 text decoding.
+pub fn read_string(path: Path): Fs -> Result<String, IoError>
+  read(path)
+
 /// Writes bytes to a file.
-pub fn write_bytes({ path: Path, bytes: Bytes }): Fs -> Result<Unit, IoError>
-  let payload = encode_write_bytes_payload(path: path, bytes: bytes)
+///
+/// Example:
+/// `let write_result = fs::write_bytes(file_path, payload)`
+pub fn write_bytes(path: Path, bytes: Bytes): Fs -> Result<Unit, IoError>
+  let payload = encode_write_bytes_payload(path, bytes)
   decode_write_result(Fs::write_bytes(payload))
 
 /// Writes text to a file.
-pub fn write_string({ path: Path, s: StringSlice }): Fs -> Result<Unit, IoError>
-  let payload = encode_write_string_payload(path: path, value: s.to_string())
+///
+/// Example:
+/// `let write_result = fs::write_string(file_path, "hello".as_slice())`
+pub fn write(path: Path, value: String): Fs -> Result<Unit, IoError>
+  let payload = encode_write_string_payload(path, value)
+  decode_write_result(Fs::write_string(payload))
+
+/// Writes text to a file.
+pub fn write(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
+  let payload = encode_write_string_payload(path, value.to_string())
+  decode_write_result(Fs::write_string(payload))
+
+/// Writes text to a file.
+///
+/// Example:
+/// `let write_result = fs::write_string(file_path, "hello".as_slice())`
+pub fn write_string(path: Path, value: String): Fs -> Result<Unit, IoError>
+  let payload = encode_write_string_payload(path, value)
+  decode_write_result(Fs::write_string(payload))
+
+/// Writes text to a file.
+pub fn write_string(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
+  let payload = encode_write_string_payload(path, value.to_string())
   decode_write_result(Fs::write_string(payload))
 
 /// Returns true when the path exists in the file system.
-pub fn exists({ path: Path }): Fs -> bool
+pub fn exists(path: Path): Fs -> bool
   Fs::exists(encode_path(path))
 
 /// Lists child paths in a directory.
-pub fn list_dir({ path: Path }): Fs -> Result<Array<Path>, IoError>
+///
+/// Each returned `Path` is decoded from host-provided string entries.
+pub fn list_dir(path: Path): Fs -> Result<Array<Path>, IoError>
   decode_list_dir_result(Fs::list_dir(encode_path(path)))
 
 fn encode_path(path: Path): () -> MsgPack
   msgpack::make_string(path.as_string())
 
-fn encode_write_bytes_payload({ path: Path, bytes: Bytes }): () -> MsgPack
+fn encode_write_bytes_payload(path: Path, bytes: Bytes): () -> MsgPack
   HostDto::init()
     .set("path", encode_path(path))
     .set("bytes", encode_byte_array(bytes))
     .pack()
 
-fn encode_write_string_payload({ path: Path, value: String }): () -> MsgPack
+fn encode_write_string_payload(path: Path, value: String): () -> MsgPack
   HostDto::init()
     .set("path", encode_path(path))
     .set("value", msgpack::make_string(value))
@@ -108,12 +164,12 @@ fn decode_io_error(payload: HostDto): () -> IoError
 
 fn decode_bytes(payload: MsgPack): () -> Bytes
   let source = msgpack::unpack_array(payload)
-  let ~buffer = ByteBuffer::with_capacity(bytes: source.len())
+  let ~buffer = ByteBuffer::with_capacity(source.len())
   var index = 0
   while index < source.len() do:
     match(source.get(index))
       Some<MsgPack> { value }:
-        buffer.push(value: normalize_byte(msgpack::unpack_i32(value)))
+        buffer.push(normalize_byte(msgpack::unpack_i32(value)))
       None:
         void
     index = index + 1
@@ -128,7 +184,7 @@ fn decode_path_array(payload: MsgPack): () -> Array<Path>
       Some<MsgPack> { value }:
         value.match(path_value)
           String:
-            out.push(Path::new(s: path_value.as_slice()))
+            out.push(Path { raw: path_value })
           else:
             void
       None:
@@ -137,8 +193,8 @@ fn decode_path_array(payload: MsgPack): () -> Array<Path>
   out
 
 fn normalize_byte(value: i32): () -> i32
-  match(mod_euclid(value, 256))
-    Ok<i32> { value }:
-      value
-    Err<MathError>:
-      0
+  let remainder = value % 256
+  if remainder < 0:
+    remainder + 256
+  else:
+    remainder

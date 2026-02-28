@@ -1,7 +1,14 @@
+//! Optional helper functions.
+//!
+//! Constructors, predicates, and combinators for `Optional<T>` values.
+
 use super::types::all
 
 /// Constructs an optional value containing `value`.
-pub fn some<T>(value: T): () -> Optional<T>
+pub fn some<T>(
+  /// Value to wrap in `Some`.
+  value: T
+): () -> Optional<T>
   Some { value: value }
 
 /// Constructs an empty optional value.
@@ -9,7 +16,10 @@ pub fn none<T>(): () -> Optional<T>
   None {}
 
 /// Returns true when the optional value is present.
-pub fn is_some<T>(opt: Optional<T>): () -> boolean
+pub fn is_some<T>(
+  /// Optional value to inspect.
+  opt: Optional<T>
+): () -> boolean
   match(opt)
     Some:
       true
@@ -17,55 +27,88 @@ pub fn is_some<T>(opt: Optional<T>): () -> boolean
       false
 
 /// Returns true when the optional value is absent.
-pub fn is_none<T>(opt: Optional<T>): () -> boolean
+pub fn is_none<T>(
+  /// Optional value to inspect.
+  opt: Optional<T>
+): () -> boolean
   match(opt)
     Some:
       false
     None:
       true
 
-/// Returns the contained value or the provided fallback.
-pub fn unwrap_or<T>(opt: Optional<T>, default: T): () -> T
+/// Returns the contained value or a fallback.
+pub fn unwrap_or<T>(
+  /// Optional value to unwrap.
+  opt: Optional<T>,
+  /// Fallback value returned for `None`.
+  default: T
+): () -> T
   match(opt)
     Some { value }:
       value
     None:
       default
 
-/// Returns the contained value or computes a fallback.
-pub fn unwrap_or_else<T>(opt: Optional<T>, default: () -> T) -> T
+/// Returns the contained value or computes a fallback lazily.
+pub fn unwrap_or_else<T>(
+  /// Optional value to unwrap.
+  opt: Optional<T>,
+  /// Function invoked only when `opt` is `None`.
+  default: () -> T
+) -> T
   match(opt)
     Some { value }:
       value
     None:
       default()
 
-/// Transforms the contained value when present and leaves `None` unchanged.
-pub fn map<T, U>(opt: Optional<T>, f: (v: T) -> U) -> Optional<U>
+/// Transforms a present value and leaves `None` unchanged.
+pub fn map<T, U>(
+  /// Optional value to transform.
+  opt: Optional<T>,
+  /// Mapping function applied to `Some` payloads.
+  f: (v: T) -> U
+) -> Optional<U>
   match(opt)
     Some { value }:
       Some { value: f(value) }
     None:
       None {}
 
-/// Runs `f` only when a value is present, propagating `None` otherwise.
-pub fn and_then<T, U>(opt: Optional<T>, f: (v: T) -> Optional<U>) -> Optional<U>
+/// Runs `f` when a value is present and flattens the result.
+pub fn and_then<T, U>(
+  /// Optional value to transform.
+  opt: Optional<T>,
+  /// Function applied to `Some` payloads.
+  f: (v: T) -> Optional<U>
+) -> Optional<U>
   match(opt)
     Some { value }:
       f(value)
     None:
       None {}
 
-/// Returns the current optional value or the provided fallback optional value.
-pub fn or_value<T>(opt: Optional<T>, fallback: Optional<T>): () -> Optional<T>
+/// Returns `opt` when present, otherwise `fallback`.
+pub fn or_value<T>(
+  /// Primary optional value.
+  opt: Optional<T>,
+  /// Fallback optional value used for `None`.
+  fallback: Optional<T>
+): () -> Optional<T>
   match(opt)
     Some:
       opt
     None:
       fallback
 
-/// Returns the current optional value or computes a fallback optional value.
-pub fn or_else<T>(opt: Optional<T>, fallback: () -> Optional<T>) -> Optional<T>
+/// Returns `opt` when present, otherwise computes a fallback optional value.
+pub fn or_else<T>(
+  /// Primary optional value.
+  opt: Optional<T>,
+  /// Function invoked to compute a fallback for `None`.
+  fallback: () -> Optional<T>
+) -> Optional<T>
   match(opt)
     Some:
       opt

@@ -1,13 +1,21 @@
+//! Error payloads used by `std::string` parsing and UTF-8 conversion APIs.
+//!
+//! Each error currently exposes a numeric `code` so callers can branch on
+//! failure kinds without string matching.
+
+/// Error returned when UTF-8 validation fails.
 pub obj Utf8Error {
   /// Machine-readable error code.
   api code: i32
 }
 
+/// Error returned when integer parsing fails.
 pub obj ParseIntError {
   /// Machine-readable error code.
   api code: i32
 }
 
+/// Error returned when floating-point parsing fails.
 pub obj ParseFloatError {
   /// Machine-readable error code.
   api code: i32

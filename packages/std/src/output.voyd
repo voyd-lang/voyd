@@ -1,3 +1,8 @@
+//! Standard output/error stream helpers backed by host runtime operations.
+//!
+//! `std::output` provides text and byte writes, flushing, and TTY checks for
+//! stdout and stderr using MessagePack DTO payloads.
+
 use std::array::Array
 use std::bytes::{ Bytes }
 use std::error::IoError
@@ -12,78 +17,121 @@ pub obj StdErr {}
 
 pub type OutputTarget = StdOut | StdErr
 
-@effect(id: "std::output::Output")
+/// Host output effect used by `std::output`.
+///
+/// Operations in this effect forward writes/flushes to host-managed stdout and
+/// stderr streams using MessagePack DTO payloads.
+@effect(id: "voyd.std.output")
 pub eff Output
+  /// Writes UTF-8 text to the selected output stream.
+  ///
+  /// `payload` contains `{ value, target }`, where `target` is `"stdout"` or `"stderr"`.
   write_op(tail, payload: MsgPack) -> MsgPack
+  /// Writes raw bytes to the selected output stream.
+  ///
+  /// `payload` contains `{ bytes, target }`.
   write_bytes_op(tail, payload: MsgPack) -> MsgPack
+  /// Flushes buffered data for the selected output stream.
+  ///
+  /// `payload` contains `{ target }`.
   flush_op(tail, payload: MsgPack) -> MsgPack
+  /// Returns whether the selected stream is a terminal.
+  ///
+  /// `payload` contains `{ target }`.
   is_tty_op(tail, payload: MsgPack) -> bool
 
 /// Writes text to the selected output target (stdout by default).
-pub fn write({ value: StringSlice }): Output -> Result<Unit, IoError>
-  write(value: value, target: StdOut {})
+///
+/// Example:
+/// `let result = output::write("hello".as_slice())`
+pub fn write(value: StringSlice): Output -> Result<Unit, IoError>
+  write(value, StdOut {})
+
+/// Writes text to the selected output target (stdout by default).
+pub fn write(value: String): Output -> Result<Unit, IoError>
+  write(value.as_slice())
 
 /// Writes text to the selected output target.
-pub fn write({ value: StringSlice, target: OutputTarget }): Output -> Result<Unit, IoError>
-  decode_write_result(Output::write_op(encode_write_payload(
-    value: value.to_string(),
-    target: target
-  )))
+pub fn write(value: StringSlice, target: OutputTarget): Output -> Result<Unit, IoError>
+  decode_write_result(Output::write_op(encode_write_payload(value.to_string(), target)))
 
-/// Writes text followed by exactly "\n" to the selected target (stdout by default).
-pub fn write_line({ value: StringSlice }): Output -> Result<Unit, IoError>
-  write_line(value: value, target: StdOut {})
+/// Writes text to the selected output target.
+pub fn write(value: String, target: OutputTarget): Output -> Result<Unit, IoError>
+  write(value.as_slice(), target)
 
-/// Writes text followed by exactly "\n" to the selected target.
-pub fn write_line({ value: StringSlice, target: OutputTarget }): Output -> Result<Unit, IoError>
-  let line = line_string(value: value)
-  write(value: line.as_slice(), target: target)
+/// Writes text followed by exactly `\n` to the selected target (stdout by default).
+pub fn write_line(value: StringSlice): Output -> Result<Unit, IoError>
+  write_line(value, StdOut {})
+
+/// Writes text followed by exactly `\n` to the selected target (stdout by default).
+pub fn write_line(value: String): Output -> Result<Unit, IoError>
+  write_line(value.as_slice())
+
+/// Writes text followed by exactly `\n` to the selected target.
+///
+/// This always appends a single line-feed byte (`0x0A`).
+pub fn write_line(value: StringSlice, target: OutputTarget): Output -> Result<Unit, IoError>
+  let line = line_string(value)
+  write(line.as_slice(), target)
+
+/// Writes text followed by exactly `\n` to the selected target.
+pub fn write_line(value: String, target: OutputTarget): Output -> Result<Unit, IoError>
+  write_line(value.as_slice(), target)
 
 /// Writes bytes to the selected output target (stdout by default).
-pub fn write_bytes({ bytes: Bytes }): Output -> Result<Unit, IoError>
-  write_bytes(bytes: bytes, target: StdOut {})
+///
+/// Use this when you need binary output instead of UTF-8 text.
+pub fn write(bytes: Bytes): Output -> Result<Unit, IoError>
+  write(bytes, StdOut {})
 
 /// Writes bytes to the selected output target.
-pub fn write_bytes({ bytes: Bytes, target: OutputTarget }): Output -> Result<Unit, IoError>
-  decode_write_result(Output::write_bytes_op(encode_write_bytes_payload(
-    bytes: bytes,
-    target: target
-  )))
+pub fn write(bytes: Bytes, target: OutputTarget): Output -> Result<Unit, IoError>
+  decode_write_result(Output::write_bytes_op(encode_write_bytes_payload(bytes, target)))
+
+/// Writes bytes to the selected output target (stdout by default).
+///
+/// Use this when you need binary output instead of UTF-8 text.
+pub fn write_bytes(bytes: Bytes): Output -> Result<Unit, IoError>
+  write(bytes)
+
+/// Writes bytes to the selected output target.
+pub fn write_bytes(bytes: Bytes, target: OutputTarget): Output -> Result<Unit, IoError>
+  write(bytes, target)
 
 /// Flushes the selected output target (stdout by default).
 pub fn flush(): Output -> Result<Unit, IoError>
-  flush(target: StdOut {})
+  flush(StdOut {})
 
 /// Flushes the selected output target.
-pub fn flush({ target: OutputTarget }): Output -> Result<Unit, IoError>
-  decode_write_result(Output::flush_op(encode_target_payload(target: target)))
+pub fn flush(target: OutputTarget): Output -> Result<Unit, IoError>
+  decode_write_result(Output::flush_op(encode_target_payload(target)))
 
 /// Returns true when the selected output target is a terminal (stdout by default).
 pub fn is_tty(): Output -> bool
-  is_tty(target: StdOut {})
+  is_tty(StdOut {})
 
 /// Returns true when the selected output target is a terminal.
-pub fn is_tty({ target: OutputTarget }): Output -> bool
-  Output::is_tty_op(encode_target_payload(target: target))
+pub fn is_tty(target: OutputTarget): Output -> bool
+  Output::is_tty_op(encode_target_payload(target))
 
-fn encode_write_payload({ value: String, target: OutputTarget }): () -> MsgPack
+fn encode_write_payload(value: String, target: OutputTarget): () -> MsgPack
   HostDto::init()
     .set("value", msgpack::make_string(value))
     .set("target", encode_output_target(target))
     .pack()
 
-fn line_string({ value: StringSlice }): () -> String
+fn line_string(value: StringSlice): () -> String
   let ~line_bytes = value.to_string().to_utf8()
   line_bytes.push(10)
   new_string(line_bytes.to_fixed_array())
 
-fn encode_write_bytes_payload({ bytes: Bytes, target: OutputTarget }): () -> MsgPack
+fn encode_write_bytes_payload(bytes: Bytes, target: OutputTarget): () -> MsgPack
   HostDto::init()
     .set("bytes", encode_bytes(bytes))
     .set("target", encode_output_target(target))
     .pack()
 
-fn encode_target_payload({ target: OutputTarget }): () -> MsgPack
+fn encode_target_payload(target: OutputTarget): () -> MsgPack
   HostDto::init()
     .set("target", encode_output_target(target))
     .pack()

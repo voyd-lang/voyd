@@ -1,3 +1,7 @@
+//! Core standard traits.
+//!
+//! Re-exports shared behavior contracts used throughout the language and std.
+
 pub self::sequence::{ Sequence, Iterator, for }
 pub self::eq::{ Eq }
 pub self::ord::{ Ord, Ordering, Less, Equal, Greater }

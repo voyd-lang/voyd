@@ -10,6 +10,15 @@ use std::string::type::{ String, StringSlice, new_string }
 use std::test::assertions::all
 use std::test::host_dto::self as host_dto_test
 
+test "input request init accepts string":
+  let request = InputRequest::init("Name: ".as_slice().to_string())
+
+  match(request.prompt)
+    Some<String> { value }:
+      assert(value.equals("Name: "), eq: true)
+    None:
+      assert(false, eq: true)
+
 test "input read_line encodes prompt and decodes line":
   let ~prompts = Array<String>::init()
   let result = read_line_with_capture(prompts)
@@ -111,7 +120,7 @@ fn read_line_with_payload(payload: MsgPack): () -> Result<Option<String>, HostEr
 
 fn read_line_with_capture(~prompts: Array<String>): () -> Result<Option<String>, HostError>
   try
-    read_line(prompt: "Name: ".as_slice())
+    read_line("Name: ".as_slice().to_string())
   Input::read_line(tail, payload):
     let decoded = HostDto::unpack(payload)
     prompts.push(decoded.read_string("prompt"))
@@ -123,7 +132,7 @@ fn read_line_with_capture(~prompts: Array<String>): () -> Result<Option<String>,
 
 fn read_bytes_with_payload(payload: MsgPack): () -> Result<Option<Bytes>, IoError>
   try
-    read_bytes(max_bytes: 8)
+    read_bytes(8)
   Input::read_bytes_op(tail, _payload):
     tail(payload)
   Input::read_line(tail, _payload):
@@ -133,14 +142,14 @@ fn read_bytes_with_payload(payload: MsgPack): () -> Result<Option<Bytes>, IoErro
 
 fn read_bytes_with_capture(~max_values: Array<i32>): () -> Result<Option<Bytes>, IoError>
   try
-    read_bytes(max_bytes: 3)
+    read_bytes(3)
   Input::read_bytes_op(tail, payload):
     let decoded = HostDto::unpack(payload)
     max_values.push(decoded.read_i32("max_bytes"))
-    let ~bytes = ByteBuffer::with_capacity(bytes: 3)
-    bytes.push(value: 7)
-    bytes.push(value: 8)
-    bytes.push(value: 9)
+    let ~bytes = ByteBuffer::with_capacity(3)
+    bytes.push(7)
+    bytes.push(8)
+    bytes.push(9)
     tail(host_dto_test::host_ok_with_value(encode_bytes(bytes.as_bytes())))
   Input::read_line(tail, _payload):
     tail(host_dto_test::host_default_error_payload())

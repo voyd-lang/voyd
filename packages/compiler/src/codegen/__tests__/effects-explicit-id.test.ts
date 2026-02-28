@@ -15,8 +15,8 @@ describe("explicit effect ids", () => {
 
     const tableA = parseEffectTable(moduleA.module);
     const tableB = parseEffectTable(moduleB.module);
-    const opA = tableA.ops[0];
-    const opB = tableB.ops[0];
+    const opA = tableA.ops.find((op) => op.effectId === "com.example.log");
+    const opB = tableB.ops.find((op) => op.effectId === "com.example.log");
     if (!opA || !opB) {
       throw new Error("missing ops in explicit id fixtures");
     }

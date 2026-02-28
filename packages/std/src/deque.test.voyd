@@ -12,9 +12,9 @@ test "deque push and pop from both ends":
   let ~queue = Deque<i32>::init()
   assert(queue.is_empty(), eq: true)
 
-  queue.push_back(value: 2)
-  queue.push_front(value: 1)
-  queue.push_back(value: 3)
+  queue.push_back(2)
+  queue.push_front(1)
+  queue.push_back(3)
   assert(queue.len(), eq: 3)
   assert(option_i32_or(queue.front(), -1), eq: 1)
   assert(option_i32_or(queue.back(), -1), eq: 3)
@@ -26,8 +26,8 @@ test "deque push and pop from both ends":
 
 test "deque clear empties storage":
   let ~queue = Deque<i32>::init()
-  queue.push_back(value: 9)
-  queue.push_back(value: 10)
+  queue.push_back(9)
+  queue.push_back(10)
   queue.clear()
   assert(queue.len(), eq: 0)
   assert(option_i32_or(queue.front(), -1), eq: -1)

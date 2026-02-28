@@ -1,3 +1,6 @@
+//! MessagePack serializer implementation used by `std::msgpack`.
+//! This module owns the in-memory codec and value constructors/unpackers.
+
 use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
 use std::dict::{ Dict, DictKey }
@@ -7,8 +10,10 @@ use std::optional::types::all
 use std::string::type::{ new_string, String }
 
 @serializer("msgpack", encode_value, decode_value)
+/// Recursive MessagePack value union used by the serializer boundary.
 pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | MsgPackMap
 
+/// Internal representation for MessagePack maps before conversion to `Dict`.
 obj MsgPackMap {
   entries: Array<(String, MsgPack)>
 }
@@ -27,13 +32,26 @@ obj Decoder {
   ok: bool
 }
 
-/// Encodes a MessagePack value into a memory region and returns bytes written or `-1` on failure.
+/// Encodes one MessagePack value into a caller-provided memory region.
+///
+/// Params:
+/// - `value`: MessagePack value to encode.
+/// - `ptr`: Start offset in linear memory where bytes are written.
+/// - `len`: Maximum writable bytes at `ptr`.
+///
+/// Returns the number of bytes written, or `-1` when encoding fails due to bounds checks.
 pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
   let ~encoder = Encoder(ptr, len)
   encoder.encode_any(value)
   if encoder.ok then: encoder.pos else: -1
 
-/// Decodes a MessagePack value from a memory region.
+/// Decodes one MessagePack value from a memory region.
+///
+/// Params:
+/// - `ptr`: Start offset in linear memory where encoded bytes are read.
+/// - `len`: Number of readable bytes from `ptr`.
+///
+/// Returns the decoded value, or `Null` when decoding fails.
 pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
   let ~decoder = Decoder(ptr, len)
   let value = decoder.decode_any()
@@ -169,7 +187,7 @@ pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
       while index < entries.len() do:
         match(entries.get(index))
           Some<(String, MsgPack)> { value: entry }:
-            out.set(key: entry.0, value: entry.1)
+            out.set(entry.0, entry.1)
           None:
             void
         index = index + 1
@@ -470,7 +488,7 @@ impl Decoder
       let value = self.decode_any()
       key.match(decoded_key)
         String:
-          out.set(key: decoded_key, value: value)
+          out.set(decoded_key, value)
         else:
           void
       index = index + 1

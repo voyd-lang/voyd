@@ -103,6 +103,9 @@ catch(e):
 [1] The compiler will typically optimize this away, so there is no performance
 penalty for using labeled arguments.
 
+For API design guidance (labels, naming, overload design, and effect ID
+conventions), see [Guidelines](./guidelines.md#api-guidelines).
+
 ## Optional parameters
 
 Parameters may be marked optional by adding `?` before the colon. The parameter's

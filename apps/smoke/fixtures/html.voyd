@@ -8,10 +8,10 @@ fn create_element({
   children: Array<MsgPack>
 }) -> MsgPack
   let ~element = Dict<String, MsgPack>::init()
-  element.set(key: "name", value: name)
-  element.set(key: "children", value: children)
+  element.set("name", name)
+  element.set("children", children)
   if attributes is Some:
-    element.set(key: "attributes", value: attributes.value)
+    element.set("attributes", attributes.value)
   msgpack::make_map(element)
 
 pub fn main()

@@ -1,20 +1,32 @@
-@effect(id: "std::std::test::assertions::Test")
+//! Test assertion utilities.
+//!
+//! Hosts effectful assertion helpers used by std and smoke tests.
+
+/// Host test-runner effect used by assertion helpers.
+///
+/// The runtime consumes these operations to mark test outcomes and emit test logs.
+@effect(id: "voyd.std.test.assertions")
 pub eff Test
+  /// Marks the current test as failed and stops normal assertion flow.
   fail(resume) -> void
+
+  /// Marks the current test as skipped.
   skip(resume) -> void
+
+  /// Emits a structured test log event for the active test case.
   log(resume) -> void
 
-/// Fails the current test when the assertion condition is not met.
+/// Fails the current test when `cond` is false.
 pub fn assert(cond: boolean): fail -> void
   if not cond:
     Test::fail()
 
-/// Fails the current test when the assertion condition is not met.
+/// Fails the current test when `value` is not equal to `expected`.
 pub fn assert<T>(value: T, { eq expected: T }): fail -> void
   if value != expected:
     Test::fail()
 
-/// Fails the current test when the assertion condition is not met.
+/// Fails the current test when `value` is equal to `expected`.
 pub fn assert<T>(value: T, { neq expected: T }): fail -> void
   if value == expected:
     Test::fail()

@@ -394,20 +394,16 @@ test "array default sort and sorted overloads":
 
 test "array labeled overloads and predicates":
   let source = array_of_4(3, 1, 4, 2)
-  assert(optional_i32_or(source.get(at: 0), -1), eq: 3)
+  assert(optional_i32_or(source.get(0), -1), eq: 3)
   assert(source.at(1), eq: 1)
-  assert(source.contains(value: 4), eq: true)
+  assert(source.contains(4), eq: true)
   assert(source.contains(where: (value: i32) -> bool => value > 3), eq: true)
   assert(source.any(where: (value: i32) -> bool => value == 2), eq: true)
   assert(source.all(where: (value: i32) -> bool => value > 0), eq: true)
 
   let found = source.find(where: (value: i32) -> bool => value == 4)
   assert(optional_i32_or(found, -1), eq: 4)
-  match(source.find_index(value: 2))
-    Some<i32> { value }:
-      assert(value, eq: 3)
-    None:
-      assert(false)
+  assert(source.find_index(2), eq: 3)
   match(source.find_index(where: (value: i32) -> bool => value == 9))
     Some<i32>:
       assert(false)

@@ -95,7 +95,7 @@ test "output write decodes host errors":
 
 fn write_with_capture(~values: Array<String>, ~targets: Array<String>): () -> Result<Unit, IoError>
   try
-    write(value: "hello".as_slice())
+    write("hello".as_slice().to_string())
   Output::write_op(tail, payload):
     let decoded = HostDto::unpack(payload)
     values.push(decoded.read_string("value"))
@@ -110,7 +110,7 @@ fn write_with_capture(~values: Array<String>, ~targets: Array<String>): () -> Re
 
 fn write_stderr_with_capture(~targets: Array<String>): () -> Result<Unit, IoError>
   try
-    write(value: "warn".as_slice(), target: StdErr {})
+    write("warn".as_slice().to_string(), StdErr {})
   Output::write_op(tail, payload):
     let decoded = HostDto::unpack(payload)
     targets.push(decoded.read_string("target"))
@@ -127,7 +127,7 @@ fn write_line_with_capture(
   ~values: Array<String>
 ): () -> Result<Unit, IoError>
   try
-    write_line(value: "hi".as_slice())
+    write_line("hi".as_slice().to_string())
   Output::write_op(tail, payload):
     let decoded = HostDto::unpack(payload)
     targets.push(decoded.read_string("target"))
@@ -144,12 +144,12 @@ fn write_bytes_with_capture(
   ~targets: Array<String>,
   ~values: Array<i32>
 ): () -> Result<Unit, IoError>
-  let ~buffer = ByteBuffer::with_capacity(bytes: 2)
-  buffer.push(value: 7)
-  buffer.push(value: 8)
+  let ~buffer = ByteBuffer::with_capacity(2)
+  buffer.push(7)
+  buffer.push(8)
 
   try
-    write_bytes(bytes: buffer.as_bytes(), target: StdErr {})
+    write(buffer.as_bytes(), StdErr {})
   Output::write_bytes_op(tail, payload):
     let decoded = HostDto::unpack(payload)
     targets.push(decoded.read_string("target"))
@@ -192,7 +192,7 @@ fn is_tty_with_stdout_payload({ value: bool, ~targets: Array<String> }): () -> b
 
 fn is_tty_with_stderr_payload({ value: bool, ~targets: Array<String> }): () -> bool
   try
-    is_tty(target: StdErr {})
+    is_tty(StdErr {})
   Output::is_tty_op(tail, payload):
     let decoded = HostDto::unpack(payload)
     targets.push(decoded.read_string("target"))
@@ -206,7 +206,7 @@ fn is_tty_with_stderr_payload({ value: bool, ~targets: Array<String> }): () -> b
 
 fn write_with_payload(payload: MsgPack): () -> Result<Unit, IoError>
   try
-    write(value: "hello".as_slice())
+    write("hello".as_slice().to_string())
   Output::write_op(tail, _payload):
     tail(payload)
   Output::write_bytes_op(tail, _payload):

@@ -1,3 +1,5 @@
+//! Version metadata for the standard library package.
+
 use std::string::new_string
 
 /// Returns the version of the standard library package.

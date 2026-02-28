@@ -82,14 +82,14 @@ test "div_rem i64 returns quotient and remainder":
   assert(pair.1, eq: i64_from_i32(3))
 
 test "checked_div_rem returns values and rejects invalid cases":
-  match(checked_div_rem(13, 5))
+  match(checked_div_rem(13, by: 5))
     Ok<(i32, i32)> { value }:
       assert(value.0, eq: 2)
       assert(value.1, eq: 3)
     Err<MathError>:
       assert(false, eq: true)
 
-  match(checked_div_rem(13, by: 5))
+  match(checked_div_rem(13, 5))
     Ok<(i32, i32)> { value }:
       assert(value.0, eq: 2)
       assert(value.1, eq: 3)
@@ -108,7 +108,14 @@ test "checked_div_rem returns values and rejects invalid cases":
     Err<MathError> { error }:
       assert(error.code, eq: 2)
 
-  match(checked_div_rem(i64_from_i32(4), i64_from_i32(0)))
+  match(checked_div_rem(i64_from_i32(13), by: i64_from_i32(5)))
+    Ok<(i64, i64)> { value }:
+      assert(value.0, eq: i64_from_i32(2))
+      assert(value.1, eq: i64_from_i32(3))
+    Err<MathError>:
+      assert(false, eq: true)
+
+  match(checked_div_rem(i64_from_i32(4), by: i64_from_i32(0)))
     Ok<(i64, i64)>:
       assert(false, eq: true)
     Err<MathError> { error }:
@@ -192,7 +199,7 @@ test "next_multiple_of rounds up and rejects invalid input":
     Err<MathError>:
       assert(false, eq: true)
 
-  match(next_multiple_of(12, factor: 3))
+  match(next_multiple_of(12, 3))
     Ok<i32> { value }:
       assert(value, eq: 12)
     Err<MathError>:

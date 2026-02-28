@@ -1,7 +1,9 @@
+//! Lower-case hexadecimal encode/decode helpers.
+
 use std::array::Array
 use std::bytes::ByteBuffer
 use std::bytes::Bytes
-use std::encoding::ascii::ascii_string_from_bytes
+use std::encoding::ascii::ascii_string_from
 use std::encoding::errors::DecodeError
 use std::math::div_rem
 use std::optional::types::all
@@ -9,7 +11,21 @@ use std::result::types::{ Result, Ok, Err }
 use std::string::{ String, StringSlice, new_string }
 
 /// Encodes bytes as lower-case hexadecimal.
-pub fn encode({ bytes: Bytes }) -> String
+///
+/// Params:
+/// - `bytes`: Raw bytes to encode.
+///
+/// Returns an ASCII hex string that is always lower-case.
+///
+/// Example:
+/// ```voyd
+/// use std::encoding::hex
+/// use std::bytes::ByteBuffer
+///
+/// let source = ByteBuffer::from_utf8("ok")
+/// let encoded = hex::encode(source.as_bytes())
+/// ```
+pub fn encode(bytes: Bytes) -> String
   let source = bytes.to_array()
   if source.is_empty():
     return String::init()
@@ -22,10 +38,28 @@ pub fn encode({ bytes: Bytes }) -> String
     out.push(hex_digit_to_ascii(div_rem(value, 16).1))
     index = index + 1
 
-  ascii_string_from_bytes(bytes: out)
+  ascii_string_from(out)
 
 /// Decodes a hexadecimal string into bytes.
-pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
+pub fn decode(s: String) -> Result<Bytes, DecodeError>
+  decode(s.as_slice())
+
+/// Decodes a hexadecimal string into bytes.
+///
+/// Params:
+/// - `s`: Hex text using two digits per byte.
+///
+/// Returns:
+/// - `Ok<Bytes>` for valid hex input.
+/// - `Err<DecodeError>` when the length is odd or any character is not hex.
+///
+/// Example:
+/// ```voyd
+/// use std::encoding::hex
+///
+/// let decoded = hex::decode("766f7964".as_slice())
+/// ```
+pub fn decode(s: StringSlice) -> Result<Bytes, DecodeError>
   let source = s.to_string().to_utf8()
   let source_len = source.len()
   if source_len == 0:
@@ -33,7 +67,7 @@ pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
   if div_rem(source_len, 2).1 != 0:
     return decode_error("hex input length must be even")
 
-  let ~buffer = ByteBuffer::with_capacity(bytes: source_len / 2)
+  let ~buffer = ByteBuffer::with_capacity(source_len / 2)
   var index = 0
   while index < source_len do:
     let high = hex_ascii_to_digit(source.at(index))
@@ -43,7 +77,7 @@ pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
       Some<i32> { value: high_value }:
         match(low)
           Some<i32> { value: low_value }:
-            buffer.push(value: high_value * 16 + low_value)
+            buffer.push(high_value * 16 + low_value)
           None:
             return decode_error("hex input contains invalid characters")
       None:

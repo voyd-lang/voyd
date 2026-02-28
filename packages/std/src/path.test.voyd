@@ -3,19 +3,19 @@ use std::string::type::String
 use std::test::assertions::all
 
 test "path join appends relative segments":
-  let base = Path::new(s: "/tmp".as_slice())
-  let joined = base.join(child: "logs".as_slice())
+  let base = Path::new("/tmp".as_slice().to_string())
+  let joined = base.join("logs".as_slice().to_string())
   assert(joined.as_string().equals("/tmp/logs"), eq: true)
 
 test "path parent handles root and nested paths":
-  let nested = Path::new(s: "/tmp/logs/app.log".as_slice())
+  let nested = Path::new("/tmp/logs/app.log".as_slice())
   match(nested.parent())
     Some<Path> { value }:
       assert(value.as_string().equals("/tmp/logs"), eq: true)
     None:
       assert(false, eq: true)
 
-  let root = Path::new(s: "/".as_slice())
+  let root = Path::new("/".as_slice())
   match(root.parent())
     Some<Path>:
       assert(false, eq: true)
@@ -23,7 +23,7 @@ test "path parent handles root and nested paths":
       assert(true, eq: true)
 
 test "path file_name returns final segment":
-  let path = Path::new(s: "/tmp/logs/app.log".as_slice())
+  let path = Path::new("/tmp/logs/app.log".as_slice())
   match(path.file_name())
     Some<String> { value }:
       assert(value.equals("app.log"), eq: true)

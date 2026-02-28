@@ -1,3 +1,7 @@
+//! Time primitives and scheduling helpers backed by the host `Time` effect.
+//! Includes monotonic timing (`Instant`), wall-clock timing (`SystemTime`),
+//! duration utilities, and timer-based callbacks.
+
 use std::error::HostError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
@@ -5,17 +9,18 @@ use std::msgpack::self as msgpack
 use std::result::types::all
 use std::string::type::new_string
 
+/// Represents a millisecond-based time span.
 pub obj Duration {
   millis: i64
 }
 
 impl Duration
   /// Constructs a duration from milliseconds.
-  api fn from_millis({ ms: i64 }) -> Duration
+  api fn from_millis(ms: i64) -> Duration
     Duration { millis: ms }
 
   /// Constructs a duration from seconds.
-  api fn from_secs({ s: i64 }) -> Duration
+  api fn from_secs(s: i64) -> Duration
     Duration { millis: s * extend_i32_s(1000) }
 
   /// Returns the duration in milliseconds.
@@ -26,6 +31,7 @@ impl Duration
   api fn as_secs(self) -> i64
     self.millis / extend_i32_s(1000)
 
+/// Monotonic timestamp that is suitable for elapsed-time measurement.
 pub obj Instant {
   monotonic_millis: i64
 }
@@ -38,8 +44,9 @@ impl Instant
   /// Returns the duration since this instant was captured.
   api fn elapsed(self): Time -> Duration
     let now = Time::monotonic_now_millis()
-    Duration::from_millis(ms: now - self.monotonic_millis)
+    Duration::from_millis(now - self.monotonic_millis)
 
+/// Wall-clock timestamp represented as milliseconds from the Unix epoch.
 pub obj SystemTime {
   unix_millis_value: i64
 }
@@ -53,25 +60,46 @@ impl SystemTime
   api fn unix_millis(self) -> i64
     self.unix_millis_value
 
-@effect(id: "std::time::Time")
+/// Host-provided time and timer operations.
+///
+/// `std::time` encodes timer commands as MessagePack payloads and decodes host
+/// responses into typed success/error values.
+@effect(id: "voyd.std.time")
 pub eff Time
+  /// Returns a monotonic millisecond timestamp suitable for elapsed-time math.
   monotonic_now_millis(tail) -> i64
+  /// Returns wall-clock milliseconds since Unix epoch.
   system_now_millis(tail) -> i64
+  /// Suspends execution for `ms` milliseconds.
+  ///
+  /// Returns `{ ok: true }` on success or `{ ok: false, code, message }` on failure.
   sleep_millis(tail, ms: i64) -> MsgPack
+  /// Creates a one-shot timer that fires once after `ms` milliseconds.
+  ///
+  /// Returns `{ ok: true }` or an error DTO.
   set_timeout_millis(tail, ms: i64) -> MsgPack
+  /// Creates a repeating timer using `ms` as the interval.
+  ///
+  /// Returns `{ ok: true, value: timer_id }` or an error DTO.
   set_interval_millis(tail, ms: i64) -> MsgPack
+  /// Clears a timer created by `set_timeout_millis` or `set_interval_millis`.
+  ///
+  /// `timer_id` must be the host-provided timer identifier.
   clear_timer(tail, timer_id: i64) -> MsgPack
 
 /// Suspends execution for the provided millisecond count.
-pub fn sleep({ ms: i64 }): Time -> Result<Unit, HostError>
+/// Example: `time::sleep(250)`.
+pub fn sleep(ms: i64): Time -> Result<Unit, HostError>
   decode_host_void_result(Time::sleep_millis(ms))
 
 /// Suspends execution for the provided duration.
-pub fn sleep({ duration: Duration }): Time -> Result<Unit, HostError>
-  sleep(ms: duration.as_millis())
+/// Example: `time::sleep(Duration::from_secs(1))`.
+pub fn sleep(duration: Duration): Time -> Result<Unit, HostError>
+  sleep(duration.as_millis())
 
 /// Schedules and runs a callback once after the provided duration.
-pub fn on_timeout({ duration: Duration, callback: () -> void }): Time -> Result<Unit, HostError>
+/// Example: `time::on_timeout(Duration::from_millis(100), || do_work())`.
+pub fn on_timeout(duration: Duration, callback: () -> void): Time -> Result<Unit, HostError>
   let scheduled = decode_host_void_result(
     Time::set_timeout_millis(duration.as_millis())
   )
@@ -83,7 +111,9 @@ pub fn on_timeout({ duration: Duration, callback: () -> void }): Time -> Result<
       Ok<Unit> { value: Unit {} }
 
 /// Runs a callback repeatedly at the provided interval.
-pub fn on_interval({ interval: Duration, callback: () -> void }): Time -> Result<Unit, HostError>
+/// The callback runs after each successful interval wait.
+/// Example: `time::on_interval(Duration::from_secs(1), || tick())`.
+pub fn on_interval(interval: Duration, callback: () -> void): Time -> Result<Unit, HostError>
   while true do:
     let timer_result = decode_timer_id_result(
       Time::set_interval_millis(interval.as_millis())

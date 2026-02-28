@@ -1,3 +1,7 @@
+//! Virtual DOM helpers.
+//!
+//! Utilities for constructing VX element payloads encoded as MsgPack maps.
+
 use std::array::Array
 use std::dict::{ Dict, DictKey }
 use std::msgpack::MsgPack
@@ -5,18 +9,23 @@ use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::string::type::{ String, new_string }
 
-/// Creates a virtual DOM element value for rendering.
+/// Creates a virtual DOM element payload for renderer consumption.
+///
+/// The returned value is a MsgPack map with `name`, `children`, and optional `attributes`.
 pub fn create_element({
+  /// Element tag or component identifier.
   name: String,
+  /// Optional list of two-item key/value MsgPack pairs.
   attributes?: Array<Array<MsgPack>>,
+  /// Ordered child node payloads.
   children: Array<MsgPack>
 }) -> MsgPack
   let ~element = Dict<String, MsgPack>::init()
-  element.set(key: "name", value: name)
-  element.set(key: "children", value: children)
+  element.set("name", name)
+  element.set("children", children)
   if attributes is Some:
     let attrs = attributes_to_map(attributes.value)
-    element.set(key: "attributes", value: msgpack::make_map(attrs))
+    element.set("attributes", msgpack::make_map(attrs))
   msgpack::make_map(element)
 
 fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Dict<String, MsgPack>
@@ -29,7 +38,7 @@ fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Dict<String, MsgP
           Some<MsgPack> { value: key }:
             match(pair.get(1))
               Some<MsgPack> { value: value }:
-                acc.set(key: msgpack::unpack_string(key), value: value)
+                acc.set(msgpack::unpack_string(key), value)
               None:
                 void
           None:

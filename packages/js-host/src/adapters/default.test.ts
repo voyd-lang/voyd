@@ -104,8 +104,8 @@ describe("registerDefaultHostAdapters", () => {
 
   it("registers node env handlers that set and read values", async () => {
     const table = buildTable([
-      { effectId: "std::env::Env", opName: "get", opId: 0 },
-      { effectId: "std::env::Env", opName: "set", opId: 1 },
+      { effectId: "voyd.std.env", opName: "get", opId: 0 },
+      { effectId: "voyd.std.env", opName: "set", opId: 1 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -115,7 +115,7 @@ describe("registerDefaultHostAdapters", () => {
     });
     expect(report.registeredOps).toBeGreaterThanOrEqual(2);
 
-    const setHandler = getHandler("std::env::Env", "set");
+    const setHandler = getHandler("voyd.std.env", "set");
     const setResult = await setHandler(tailContinuation, {
       key: envKey,
       value: "hello",
@@ -123,7 +123,7 @@ describe("registerDefaultHostAdapters", () => {
     expect(setResult.kind).toBe("tail");
     expect(setResult.value).toMatchObject({ ok: true });
 
-    const getEnvHandler = getHandler("std::env::Env", "get");
+    const getEnvHandler = getHandler("voyd.std.env", "get");
     const getResult = await getEnvHandler(tailContinuation, envKey);
     expect(getResult.kind).toBe("tail");
     expect(getResult.value).toBe("hello");
@@ -133,15 +133,15 @@ describe("registerDefaultHostAdapters", () => {
     const trace = vi.fn();
     const info = vi.fn();
     const table = buildTable([
-      { effectId: "std::random::Random", opName: "next_i64", opId: 0 },
-      { effectId: "std::random::Random", opName: "fill_bytes", opId: 1 },
-      { effectId: "std::time::Time", opName: "monotonic_now_millis", opId: 2 },
-      { effectId: "std::time::Time", opName: "system_now_millis", opId: 3 },
-      { effectId: "std::time::Time", opName: "sleep_millis", opId: 4 },
-      { effectId: "std::time::Time", opName: "set_timeout_millis", opId: 5 },
-      { effectId: "std::time::Time", opName: "set_interval_millis", opId: 6 },
-      { effectId: "std::time::Time", opName: "clear_timer", opId: 7 },
-      { effectId: "std::log::Log", opName: "emit", opId: 8 },
+      { effectId: "voyd.std.random", opName: "next_i64", opId: 0 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 1 },
+      { effectId: "voyd.std.time", opName: "monotonic_now_millis", opId: 2 },
+      { effectId: "voyd.std.time", opName: "system_now_millis", opId: 3 },
+      { effectId: "voyd.std.time", opName: "sleep_millis", opId: 4 },
+      { effectId: "voyd.std.time", opName: "set_timeout_millis", opId: 5 },
+      { effectId: "voyd.std.time", opName: "set_interval_millis", opId: 6 },
+      { effectId: "voyd.std.time", opName: "clear_timer", opId: 7 },
+      { effectId: "voyd.std.log", opName: "emit", opId: 8 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -159,52 +159,52 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
 
-    const random64 = await getHandler("std::random::Random", "next_i64")(
+    const random64 = await getHandler("voyd.std.random", "next_i64")(
       tailContinuation
     );
     expect(typeof random64.value).toBe("bigint");
 
-    const randomBytes = await getHandler("std::random::Random", "fill_bytes")(
+    const randomBytes = await getHandler("voyd.std.random", "fill_bytes")(
       tailContinuation,
       8
     );
     expect(Array.isArray(randomBytes.value)).toBe(true);
     expect((randomBytes.value as unknown[]).length).toBe(8);
 
-    const mono = await getHandler("std::time::Time", "monotonic_now_millis")(
+    const mono = await getHandler("voyd.std.time", "monotonic_now_millis")(
       tailContinuation
     );
-    const sys = await getHandler("std::time::Time", "system_now_millis")(
+    const sys = await getHandler("voyd.std.time", "system_now_millis")(
       tailContinuation
     );
     expect(typeof mono.value).toBe("bigint");
     expect(typeof sys.value).toBe("bigint");
 
-    const slept = await getHandler("std::time::Time", "sleep_millis")(
+    const slept = await getHandler("voyd.std.time", "sleep_millis")(
       tailContinuation,
       0n
     );
     expect(slept.value).toMatchObject({ ok: true });
 
-    const timeout = await getHandler("std::time::Time", "set_timeout_millis")(
+    const timeout = await getHandler("voyd.std.time", "set_timeout_millis")(
       tailContinuation,
       0n
     );
     expect(timeout.value).toMatchObject({ ok: true });
 
-    const interval = await getHandler("std::time::Time", "set_interval_millis")(
+    const interval = await getHandler("voyd.std.time", "set_interval_millis")(
       tailContinuation,
       0n
     );
     expect(interval.value).toMatchObject({ ok: true, value: 1n });
 
-    const clear = await getHandler("std::time::Time", "clear_timer")(
+    const clear = await getHandler("voyd.std.time", "clear_timer")(
       tailContinuation,
       1n
     );
     expect(clear.value).toMatchObject({ ok: true });
 
-    await getHandler("std::log::Log", "emit")(tailContinuation, {
+    await getHandler("voyd.std.log", "emit")(tailContinuation, {
       level: "info",
       message: "hello",
       fields: [{ key: "x", value: 1 }],
@@ -214,10 +214,10 @@ describe("registerDefaultHostAdapters", () => {
 
   it("reports capabilities in the adapter registration order", async () => {
     const table = buildTable([
-      { effectId: "std::log::Log", opName: "emit", opId: 0 },
-      { effectId: "std::random::Random", opName: "fill_bytes", opId: 1 },
-      { effectId: "std::env::Env", opName: "get", opId: 2 },
-      { effectId: "std::time::Time", opName: "system_now_millis", opId: 3 },
+      { effectId: "voyd.std.log", opName: "emit", opId: 0 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 1 },
+      { effectId: "voyd.std.env", opName: "get", opId: 2 },
+      { effectId: "voyd.std.time", opName: "system_now_millis", opId: 3 },
     ]);
     const { host } = createFakeHost(table);
 
@@ -227,16 +227,16 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     expect(report.capabilities.map((capability) => capability.effectId)).toEqual([
-      "std::time::Time",
-      "std::env::Env",
-      "std::random::Random",
-      "std::log::Log",
+      "voyd.std.time",
+      "voyd.std.env",
+      "voyd.std.random",
+      "voyd.std.log",
     ]);
   });
 
   it("chains timers for long sleep durations", async () => {
     const table = buildTable([
-      { effectId: "std::time::Time", opName: "sleep_millis", opId: 0 },
+      { effectId: "voyd.std.time", opName: "sleep_millis", opId: 0 },
     ]);
     const delays: number[] = [];
     const setTimeoutSpy = vi.fn((task: () => void, delay?: number) => {
@@ -254,7 +254,7 @@ describe("registerDefaultHostAdapters", () => {
 
     const longSleep =
       2_147_483_647n + 2_147_483_647n + 123n;
-    const result = await getHandler("std::time::Time", "sleep_millis")(
+    const result = await getHandler("voyd.std.time", "sleep_millis")(
       tailContinuation,
       longSleep
     );
@@ -266,8 +266,8 @@ describe("registerDefaultHostAdapters", () => {
 
   it("cancels fallback interval timers when clear_timer is invoked", async () => {
     const table = buildTable([
-      { effectId: "std::time::Time", opName: "set_interval_millis", opId: 0 },
-      { effectId: "std::time::Time", opName: "clear_timer", opId: 1 },
+      { effectId: "voyd.std.time", opName: "set_interval_millis", opId: 0 },
+      { effectId: "voyd.std.time", opName: "clear_timer", opId: 1 },
     ]);
     let nextTimeoutToken = 1;
     const scheduled = new Map<number, { delay: number }>();
@@ -289,7 +289,7 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "node" },
     });
 
-    const intervalResult = await getHandler("std::time::Time", "set_interval_millis")(
+    const intervalResult = await getHandler("voyd.std.time", "set_interval_millis")(
       tailContinuation,
       5_000n
     );
@@ -297,7 +297,7 @@ describe("registerDefaultHostAdapters", () => {
     expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
     expect(scheduled.size).toBe(1);
 
-    const clearResult = await getHandler("std::time::Time", "clear_timer")(
+    const clearResult = await getHandler("voyd.std.time", "clear_timer")(
       tailContinuation,
       1n
     );
@@ -308,7 +308,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("registers actionable unsupported handlers on browser for fs", async () => {
     const table = buildTable([
-      { effectId: "std::fs::Fs", opName: "read_string", opId: 0 },
+      { effectId: "voyd.std.fs", opName: "read_string", opId: 0 },
     ]);
     const diagnostics: string[] = [];
     const { host, getHandler } = createFakeHost(table);
@@ -321,10 +321,10 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
 
-    expect(report.capabilities.find((cap) => cap.effectId === "std::fs::Fs")?.supported).toBe(
+    expect(report.capabilities.find((cap) => cap.effectId === "voyd.std.fs")?.supported).toBe(
       false
     );
-    const handler = getHandler("std::fs::Fs", "read_string");
+    const handler = getHandler("voyd.std.fs", "read_string");
     await expect((async () => handler(tailContinuation, "/tmp/file"))()).rejects.toThrow(
       /Default fs adapter is unavailable on browser/i
     );
@@ -333,7 +333,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("probes node fs when runtime is forced to node", async () => {
     const table = buildTable([
-      { effectId: "std::fs::Fs", opName: "read_string", opId: 0 },
+      { effectId: "voyd.std.fs", opName: "read_string", opId: 0 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -342,11 +342,11 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "node" },
     });
     expect(
-      report.capabilities.find((capability) => capability.effectId === "std::fs::Fs")
+      report.capabilities.find((capability) => capability.effectId === "voyd.std.fs")
         ?.supported
     ).toBe(true);
 
-    const result = await getHandler("std::fs::Fs", "read_string")(
+    const result = await getHandler("voyd.std.fs", "read_string")(
       tailContinuation,
       "/this/path/does/not/exist"
     );
@@ -356,7 +356,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("normalizes list_dir child paths for root and trailing separators", async () => {
     const table = buildTable([
-      { effectId: "std::fs::Fs", opName: "list_dir", opId: 0 },
+      { effectId: "voyd.std.fs", opName: "list_dir", opId: 0 },
     ]);
     vi.stubGlobal("Deno", {
       readFile: async () => new Uint8Array(),
@@ -382,7 +382,7 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "deno" },
     });
 
-    const listDir = getHandler("std::fs::Fs", "list_dir");
+    const listDir = getHandler("voyd.std.fs", "list_dir");
     const rootResult = await listDir(tailContinuation, "/");
     expect(rootResult).toEqual({
       kind: "tail",
@@ -398,9 +398,9 @@ describe("registerDefaultHostAdapters", () => {
 
   it("returns io errors when fs read/list payloads exceed transport buffer", async () => {
     const table = buildTable([
-      { effectId: "std::fs::Fs", opName: "read_bytes", opId: 0 },
-      { effectId: "std::fs::Fs", opName: "read_string", opId: 1 },
-      { effectId: "std::fs::Fs", opName: "list_dir", opId: 2 },
+      { effectId: "voyd.std.fs", opName: "read_bytes", opId: 0 },
+      { effectId: "voyd.std.fs", opName: "read_string", opId: 1 },
+      { effectId: "voyd.std.fs", opName: "list_dir", opId: 2 },
     ]);
     vi.stubGlobal("Deno", {
       readFile: async () => Uint8Array.from(Array.from({ length: 128 }, () => 7)),
@@ -426,7 +426,7 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
 
-    const readBytesResult = await getHandler("std::fs::Fs", "read_bytes")(
+    const readBytesResult = await getHandler("voyd.std.fs", "read_bytes")(
       tailContinuation,
       "/tmp/blob"
     );
@@ -439,7 +439,7 @@ describe("registerDefaultHostAdapters", () => {
       toStringOrUndefinedFromRecord(readBytesResult.value, "message")
     ).toMatch(/read_bytes response exceeds effect transport buffer/i);
 
-    const readStringResult = await getHandler("std::fs::Fs", "read_string")(
+    const readStringResult = await getHandler("voyd.std.fs", "read_string")(
       tailContinuation,
       "/tmp/text"
     );
@@ -452,7 +452,7 @@ describe("registerDefaultHostAdapters", () => {
       toStringOrUndefinedFromRecord(readStringResult.value, "message")
     ).toMatch(/read_string response exceeds effect transport buffer/i);
 
-    const listDirResult = await getHandler("std::fs::Fs", "list_dir")(
+    const listDirResult = await getHandler("voyd.std.fs", "list_dir")(
       tailContinuation,
       "/tmp"
     );
@@ -468,7 +468,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("registers fetch handlers and maps DTO payloads", async () => {
     const table = buildTable([
-      { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
+      { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
     ]);
     const seenRequests: unknown[] = [];
     const { host, getHandler } = createFakeHost(table);
@@ -491,7 +491,7 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
 
-    const result = await getHandler("std::fetch::Fetch", "request")(
+    const result = await getHandler("voyd.std.fetch", "request")(
       tailContinuation,
       {
         method: "post",
@@ -527,7 +527,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("returns host timeout errors when fetch aborts", async () => {
     const table = buildTable([
-      { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
+      { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
     ]);
     vi.stubGlobal(
       "fetch",
@@ -562,7 +562,7 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "node" },
     });
 
-    const result = await getHandler("std::fetch::Fetch", "request")(
+    const result = await getHandler("voyd.std.fetch", "request")(
       tailContinuation,
       {
         method: "GET",
@@ -583,7 +583,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("preserves fetch timeout capability errors when abort support is unavailable", async () => {
     const table = buildTable([
-      { effectId: "std::fetch::Fetch", opName: "request", opId: 0 },
+      { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
     ]);
     vi.stubGlobal(
       "fetch",
@@ -602,7 +602,7 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "node" },
     });
 
-    const result = await getHandler("std::fetch::Fetch", "request")(
+    const result = await getHandler("voyd.std.fetch", "request")(
       tailContinuation,
       {
         method: "GET",
@@ -623,9 +623,9 @@ describe("registerDefaultHostAdapters", () => {
 
   it("registers input handlers from runtime hooks", async () => {
     const table = buildTable([
-      { effectId: "std::input::Input", opName: "read_line", opId: 0 },
-      { effectId: "std::input::Input", opName: "read_bytes", opId: 1 },
-      { effectId: "std::input::Input", opName: "is_tty", opId: 2 },
+      { effectId: "voyd.std.input", opName: "read_line", opId: 0 },
+      { effectId: "voyd.std.input", opName: "read_bytes", opId: 1 },
+      { effectId: "voyd.std.input", opName: "is_tty", opId: 2 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -655,7 +655,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::input::Input", "read_line")(tailContinuation, {
+      getHandler("voyd.std.input", "read_line")(tailContinuation, {
         prompt: "Name: ",
       })
     ).resolves.toEqual({
@@ -664,7 +664,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::input::Input", "read_line")(tailContinuation, {
+      getHandler("voyd.std.input", "read_line")(tailContinuation, {
         prompt: "eof",
       })
     ).resolves.toEqual({
@@ -673,7 +673,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::input::Input", "read_line")(tailContinuation, {
+      getHandler("voyd.std.input", "read_line")(tailContinuation, {
         prompt: "fail",
       })
     ).resolves.toEqual({
@@ -686,7 +686,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+      getHandler("voyd.std.input", "read_bytes")(tailContinuation, {
         max_bytes: 2,
       })
     ).resolves.toEqual({
@@ -695,7 +695,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+      getHandler("voyd.std.input", "read_bytes")(tailContinuation, {
         max_bytes: 8,
       })
     ).resolves.toEqual({
@@ -704,7 +704,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+      getHandler("voyd.std.input", "read_bytes")(tailContinuation, {
         max_bytes: 0,
       })
     ).resolves.toEqual({
@@ -713,7 +713,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+      getHandler("voyd.std.input", "read_bytes")(tailContinuation, {
         max_bytes: 13,
       })
     ).resolves.toEqual({
@@ -725,7 +725,7 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
 
-    expect(getHandler("std::input::Input", "is_tty")(tailContinuation)).toEqual({
+    expect(getHandler("voyd.std.input", "is_tty")(tailContinuation)).toEqual({
       kind: "tail",
       value: true,
     });
@@ -733,10 +733,10 @@ describe("registerDefaultHostAdapters", () => {
 
   it("registers output handlers from runtime hooks", async () => {
     const table = buildTable([
-      { effectId: "std::output::Output", opName: "write", opId: 0 },
-      { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
-      { effectId: "std::output::Output", opName: "flush", opId: 2 },
-      { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
+      { effectId: "voyd.std.output", opName: "write", opId: 0 },
+      { effectId: "voyd.std.output", opName: "write_bytes", opId: 1 },
+      { effectId: "voyd.std.output", opName: "flush", opId: 2 },
+      { effectId: "voyd.std.output", opName: "is_tty", opId: 3 },
     ]);
     const writes: Array<{ target: string; value: string }> = [];
     const byteWrites: Array<{ target: string; bytes: number[] }> = [];
@@ -766,7 +766,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::output::Output", "write")(tailContinuation, {
+      getHandler("voyd.std.output", "write")(tailContinuation, {
         value: "hello",
       })
     ).resolves.toEqual({
@@ -775,7 +775,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::output::Output", "write")(tailContinuation, {
+      getHandler("voyd.std.output", "write")(tailContinuation, {
         value: "fail",
       })
     ).resolves.toEqual({
@@ -788,7 +788,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::output::Output", "write_bytes")(tailContinuation, {
+      getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
         target: "stderr",
         bytes: [7, 8, 9],
       })
@@ -798,7 +798,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::output::Output", "flush")(tailContinuation, {
+      getHandler("voyd.std.output", "flush")(tailContinuation, {
         target: "stderr",
       })
     ).resolves.toEqual({
@@ -807,7 +807,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     expect(
-      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+      getHandler("voyd.std.output", "is_tty")(tailContinuation, {
         target: "stdout",
       })
     ).toEqual({
@@ -816,7 +816,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     expect(
-      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+      getHandler("voyd.std.output", "is_tty")(tailContinuation, {
         target: "stderr",
       })
     ).toEqual({
@@ -831,7 +831,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("registers fallback input handlers when runtime lacks requested ops", async () => {
     const table = buildTable([
-      { effectId: "std::input::Input", opName: "read_bytes", opId: 0 },
+      { effectId: "voyd.std.input", opName: "read_bytes", opId: 0 },
     ]);
     vi.stubGlobal("prompt", undefined);
     const { host, getHandler } = createFakeHost(table);
@@ -841,21 +841,21 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "browser" },
     });
     expect(
-      report.capabilities.find((capability) => capability.effectId === "std::input::Input")
+      report.capabilities.find((capability) => capability.effectId === "voyd.std.input")
         ?.supported
     ).toBe(true);
 
     await expect(
       (async () =>
-        getHandler("std::input::Input", "read_bytes")(tailContinuation, {}))()
+        getHandler("voyd.std.input", "read_bytes")(tailContinuation, {}))()
     ).rejects.toThrow(/does not implement op read_bytes/i);
   });
 
   it("keeps input read_bytes active when read_line is unavailable", async () => {
     const table = buildTable([
-      { effectId: "std::input::Input", opName: "read_line", opId: 0 },
-      { effectId: "std::input::Input", opName: "read_bytes", opId: 1 },
-      { effectId: "std::input::Input", opName: "is_tty", opId: 2 },
+      { effectId: "voyd.std.input", opName: "read_line", opId: 0 },
+      { effectId: "voyd.std.input", opName: "read_bytes", opId: 1 },
+      { effectId: "voyd.std.input", opName: "is_tty", opId: 2 },
     ]);
     vi.stubGlobal("prompt", undefined);
     const { host, getHandler } = createFakeHost(table);
@@ -871,25 +871,25 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
     expect(
-      report.capabilities.find((capability) => capability.effectId === "std::input::Input")
+      report.capabilities.find((capability) => capability.effectId === "voyd.std.input")
         ?.supported
     ).toBe(true);
 
     await expect(
-      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+      getHandler("voyd.std.input", "read_bytes")(tailContinuation, {
         max_bytes: 2,
       })
     ).resolves.toEqual({
       kind: "tail",
       value: { ok: true, value: [7, 8] },
     });
-    expect(getHandler("std::input::Input", "is_tty")(tailContinuation)).toEqual({
+    expect(getHandler("voyd.std.input", "is_tty")(tailContinuation)).toEqual({
       kind: "tail",
       value: true,
     });
     await expect(
       (async () =>
-        getHandler("std::input::Input", "read_line")(tailContinuation, {
+        getHandler("voyd.std.input", "read_line")(tailContinuation, {
           prompt: "name: ",
         }))()
     ).rejects.toThrow(/does not implement op read_line/i);
@@ -897,7 +897,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("returns eof for read_bytes when node stdin is already ended", async () => {
     const table = buildTable([
-      { effectId: "std::input::Input", opName: "read_bytes", opId: 0 },
+      { effectId: "voyd.std.input", opName: "read_bytes", opId: 0 },
     ]);
     const stdin: any = {
       readableEnded: true,
@@ -916,7 +916,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+      getHandler("voyd.std.input", "read_bytes")(tailContinuation, {
         max_bytes: 4,
       })
     ).resolves.toEqual({
@@ -927,7 +927,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("returns an error when node stdin is configured for text chunks", async () => {
     const table = buildTable([
-      { effectId: "std::input::Input", opName: "read_bytes", opId: 0 },
+      { effectId: "voyd.std.input", opName: "read_bytes", opId: 0 },
     ]);
     const stdin: any = {
       readableEnded: false,
@@ -946,7 +946,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::input::Input", "read_bytes")(tailContinuation, {
+      getHandler("voyd.std.input", "read_bytes")(tailContinuation, {
         max_bytes: 4,
       })
     ).resolves.toEqual({
@@ -962,7 +962,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("registers fallback output handlers when stream APIs are unavailable", async () => {
     const table = buildTable([
-      { effectId: "std::output::Output", opName: "write", opId: 0 },
+      { effectId: "voyd.std.output", opName: "write", opId: 0 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -971,22 +971,22 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "browser" },
     });
     expect(
-      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
+      report.capabilities.find((capability) => capability.effectId === "voyd.std.output")
         ?.supported
     ).toBe(true);
 
     await expect(
       (async () =>
-        getHandler("std::output::Output", "write")(tailContinuation, {}))()
+        getHandler("voyd.std.output", "write")(tailContinuation, {}))()
     ).rejects.toThrow(/does not implement op write/i);
   });
 
   it("keeps output partially supported for write-only hooks", async () => {
     const table = buildTable([
-      { effectId: "std::output::Output", opName: "write", opId: 0 },
-      { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
-      { effectId: "std::output::Output", opName: "flush", opId: 2 },
-      { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
+      { effectId: "voyd.std.output", opName: "write", opId: 0 },
+      { effectId: "voyd.std.output", opName: "write_bytes", opId: 1 },
+      { effectId: "voyd.std.output", opName: "flush", opId: 2 },
+      { effectId: "voyd.std.output", opName: "is_tty", opId: 3 },
     ]);
     const writes: Array<{ target: string; value: string }> = [];
     const { host, getHandler } = createFakeHost(table);
@@ -1003,12 +1003,12 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
     expect(
-      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
+      report.capabilities.find((capability) => capability.effectId === "voyd.std.output")
         ?.supported
     ).toBe(true);
 
     await expect(
-      getHandler("std::output::Output", "write")(tailContinuation, {
+      getHandler("voyd.std.output", "write")(tailContinuation, {
         value: "hello",
       })
     ).resolves.toEqual({
@@ -1017,12 +1017,12 @@ describe("registerDefaultHostAdapters", () => {
     });
     await expect(
       (async () =>
-        getHandler("std::output::Output", "write_bytes")(tailContinuation, {
+        getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
           bytes: [1, 2, 3],
         }))()
     ).rejects.toThrow(/does not implement op write_bytes/i);
     await expect(
-      getHandler("std::output::Output", "flush")(tailContinuation, {
+      getHandler("voyd.std.output", "flush")(tailContinuation, {
         target: "stdout",
       })
     ).resolves.toEqual({
@@ -1030,7 +1030,7 @@ describe("registerDefaultHostAdapters", () => {
       value: { ok: true },
     });
     expect(
-      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+      getHandler("voyd.std.output", "is_tty")(tailContinuation, {
         target: "stdout",
       })
     ).toEqual({
@@ -1042,10 +1042,10 @@ describe("registerDefaultHostAdapters", () => {
 
   it("keeps output partially supported for bytes-only hooks", async () => {
     const table = buildTable([
-      { effectId: "std::output::Output", opName: "write", opId: 0 },
-      { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
-      { effectId: "std::output::Output", opName: "flush", opId: 2 },
-      { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
+      { effectId: "voyd.std.output", opName: "write", opId: 0 },
+      { effectId: "voyd.std.output", opName: "write_bytes", opId: 1 },
+      { effectId: "voyd.std.output", opName: "flush", opId: 2 },
+      { effectId: "voyd.std.output", opName: "is_tty", opId: 3 },
     ]);
     const byteWrites: Array<{ target: string; bytes: number[] }> = [];
     const { host, getHandler } = createFakeHost(table);
@@ -1062,12 +1062,12 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
     expect(
-      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
+      report.capabilities.find((capability) => capability.effectId === "voyd.std.output")
         ?.supported
     ).toBe(true);
 
     await expect(
-      getHandler("std::output::Output", "write")(tailContinuation, {
+      getHandler("voyd.std.output", "write")(tailContinuation, {
         value: "hello",
       })
     ).resolves.toEqual({
@@ -1075,7 +1075,7 @@ describe("registerDefaultHostAdapters", () => {
       value: { ok: true },
     });
     await expect(
-      getHandler("std::output::Output", "write_bytes")(tailContinuation, {
+      getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
         target: "stderr",
         bytes: [255, 0, 1],
       })
@@ -1084,7 +1084,7 @@ describe("registerDefaultHostAdapters", () => {
       value: { ok: true },
     });
     await expect(
-      getHandler("std::output::Output", "flush")(tailContinuation, {
+      getHandler("voyd.std.output", "flush")(tailContinuation, {
         target: "stdout",
       })
     ).resolves.toEqual({
@@ -1092,7 +1092,7 @@ describe("registerDefaultHostAdapters", () => {
       value: { ok: true },
     });
     expect(
-      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+      getHandler("voyd.std.output", "is_tty")(tailContinuation, {
         target: "stdout",
       })
     ).toEqual({
@@ -1107,7 +1107,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("routes write through writeBytes hooks before node streams", async () => {
     const table = buildTable([
-      { effectId: "std::output::Output", opName: "write", opId: 0 },
+      { effectId: "voyd.std.output", opName: "write", opId: 0 },
     ]);
     const streamWrites: Array<{ target: string; value: string }> = [];
     const stdout: any = {
@@ -1149,7 +1149,7 @@ describe("registerDefaultHostAdapters", () => {
     });
 
     await expect(
-      getHandler("std::output::Output", "write")(tailContinuation, {
+      getHandler("voyd.std.output", "write")(tailContinuation, {
         value: "hello",
       })
     ).resolves.toEqual({
@@ -1164,10 +1164,10 @@ describe("registerDefaultHostAdapters", () => {
 
   it("supports write and write_bytes while keeping flush and is_tty safe by default", async () => {
     const table = buildTable([
-      { effectId: "std::output::Output", opName: "write", opId: 0 },
-      { effectId: "std::output::Output", opName: "write_bytes", opId: 1 },
-      { effectId: "std::output::Output", opName: "flush", opId: 2 },
-      { effectId: "std::output::Output", opName: "is_tty", opId: 3 },
+      { effectId: "voyd.std.output", opName: "write", opId: 0 },
+      { effectId: "voyd.std.output", opName: "write_bytes", opId: 1 },
+      { effectId: "voyd.std.output", opName: "flush", opId: 2 },
+      { effectId: "voyd.std.output", opName: "is_tty", opId: 3 },
     ]);
     const writes: Array<{ target: string; value: string }> = [];
     const byteWrites: Array<{ target: string; bytes: number[] }> = [];
@@ -1188,12 +1188,12 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
     expect(
-      report.capabilities.find((capability) => capability.effectId === "std::output::Output")
+      report.capabilities.find((capability) => capability.effectId === "voyd.std.output")
         ?.supported
     ).toBe(true);
 
     await expect(
-      getHandler("std::output::Output", "write")(tailContinuation, {
+      getHandler("voyd.std.output", "write")(tailContinuation, {
         value: "hello",
       })
     ).resolves.toEqual({
@@ -1201,7 +1201,7 @@ describe("registerDefaultHostAdapters", () => {
       value: { ok: true },
     });
     await expect(
-      getHandler("std::output::Output", "write_bytes")(tailContinuation, {
+      getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
         target: "stderr",
         bytes: [4, 5, 6],
       })
@@ -1210,7 +1210,7 @@ describe("registerDefaultHostAdapters", () => {
       value: { ok: true },
     });
     await expect(
-      getHandler("std::output::Output", "flush")(tailContinuation, {
+      getHandler("voyd.std.output", "flush")(tailContinuation, {
         target: "stdout",
       })
     ).resolves.toEqual({
@@ -1218,7 +1218,7 @@ describe("registerDefaultHostAdapters", () => {
       value: { ok: true },
     });
     expect(
-      getHandler("std::output::Output", "is_tty")(tailContinuation, {
+      getHandler("voyd.std.output", "is_tty")(tailContinuation, {
         target: "stdout",
       })
     ).toEqual({
@@ -1231,7 +1231,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("chunks browser random fills to avoid WebCrypto quota errors", async () => {
     const table = buildTable([
-      { effectId: "std::random::Random", opName: "fill_bytes", opId: 0 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 0 },
     ]);
     const chunkSizes: number[] = [];
     vi.stubGlobal("crypto", {
@@ -1257,7 +1257,7 @@ describe("registerDefaultHostAdapters", () => {
     });
     chunkSizes.length = 0;
 
-    const result = await getHandler("std::random::Random", "fill_bytes")(
+    const result = await getHandler("voyd.std.random", "fill_bytes")(
       tailContinuation,
       70_000
     );
@@ -1269,7 +1269,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("bounds fill_bytes payloads to transport-safe size", async () => {
     const table = buildTable([
-      { effectId: "std::random::Random", opName: "fill_bytes", opId: 0 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 0 },
     ]);
     const randomBytes = vi.fn((length: number) =>
       Uint8Array.from(Array.from({ length }, () => 255))
@@ -1285,7 +1285,7 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
 
-    const result = await getHandler("std::random::Random", "fill_bytes")(
+    const result = await getHandler("voyd.std.random", "fill_bytes")(
       tailContinuation,
       100
     );
@@ -1297,7 +1297,7 @@ describe("registerDefaultHostAdapters", () => {
 
   it("accounts for array32 header overhead when bounding fill_bytes payloads", async () => {
     const table = buildTable([
-      { effectId: "std::random::Random", opName: "fill_bytes", opId: 0 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 0 },
     ]);
     const randomBytes = vi.fn((length: number) =>
       Uint8Array.from(Array.from({ length }, () => 255))
@@ -1313,7 +1313,7 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
 
-    const result = await getHandler("std::random::Random", "fill_bytes")(
+    const result = await getHandler("voyd.std.random", "fill_bytes")(
       tailContinuation,
       1_000_000
     );
@@ -1326,8 +1326,8 @@ describe("registerDefaultHostAdapters", () => {
 
   it("does not consume random hook bytes during adapter registration", async () => {
     const table = buildTable([
-      { effectId: "std::random::Random", opName: "next_i64", opId: 0 },
-      { effectId: "std::random::Random", opName: "fill_bytes", opId: 1 },
+      { effectId: "voyd.std.random", opName: "next_i64", opId: 0 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 1 },
     ]);
     const stream = Uint8Array.from(
       Array.from({ length: 16 }, (_, index) => index + 1)
@@ -1354,7 +1354,7 @@ describe("registerDefaultHostAdapters", () => {
 
     expect(randomBytes).not.toHaveBeenCalled();
 
-    const nextI64Result = await getHandler("std::random::Random", "next_i64")(
+    const nextI64Result = await getHandler("voyd.std.random", "next_i64")(
       tailContinuation
     );
     expect(nextI64Result).toEqual({
@@ -1362,7 +1362,7 @@ describe("registerDefaultHostAdapters", () => {
       value: 0x0807060504030201n,
     });
 
-    const fillBytesResult = await getHandler("std::random::Random", "fill_bytes")(
+    const fillBytesResult = await getHandler("voyd.std.random", "fill_bytes")(
       tailContinuation,
       4
     );
@@ -1375,8 +1375,8 @@ describe("registerDefaultHostAdapters", () => {
 
   it("returns null for denied deno env reads", async () => {
     const table = buildTable([
-      { effectId: "std::env::Env", opName: "get", opId: 0 },
-      { effectId: "std::env::Env", opName: "set", opId: 1 },
+      { effectId: "voyd.std.env", opName: "get", opId: 0 },
+      { effectId: "voyd.std.env", opName: "set", opId: 1 },
     ]);
     vi.stubGlobal("Deno", {
       env: {
@@ -1393,7 +1393,7 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "deno" },
     });
 
-    const result = await getHandler("std::env::Env", "get")(
+    const result = await getHandler("voyd.std.env", "get")(
       tailContinuation,
       "HOME"
     );
