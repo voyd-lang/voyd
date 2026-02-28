@@ -693,11 +693,12 @@ const ensureStaticMethodImport = ({
 
   const imported: { local: SymbolId; overloadId?: number }[] = [];
   methodSymbols.forEach((methodSymbol) => {
-    const importTargetSymbol =
+    const syntheticAliasConstructorTarget =
       resolveSyntheticAliasConstructorImportTarget({
         methodSymbol,
         dependency,
-      }) ?? methodSymbol;
+      });
+    const importTargetSymbol = syntheticAliasConstructorTarget ?? methodSymbol;
     const fn = dependency.functions.find(
       (entry) => entry.symbol === importTargetSymbol,
     );
@@ -735,7 +736,18 @@ const ensureStaticMethodImport = ({
     const overloadId =
       dependency.overloadBySymbol.get(methodSymbol) ??
       dependency.overloadBySymbol.get(importTargetSymbol);
-    imported.push({ local, overloadId });
+    const aliasAwareLocal =
+      typeof syntheticAliasConstructorTarget === "number"
+        ? declareAliasAwareImportedStaticMethod({
+            name: memberName,
+            declaredAt: syntax.syntaxId,
+            scope,
+            aliasSymbol: targetSymbol,
+            constructorSymbol: local,
+            ctx,
+          })
+        : local;
+    imported.push({ local: aliasAwareLocal, overloadId });
   });
 
   if (imported.length === 0) {
@@ -768,6 +780,45 @@ const ensureStaticMethodImport = ({
     ctx.importedOverloadOptions.set(setId, merged);
     merged.forEach((local) => ctx.overloadBySymbol.set(local, setId));
   }
+};
+
+const declareAliasAwareImportedStaticMethod = ({
+  name,
+  declaredAt,
+  scope,
+  aliasSymbol,
+  constructorSymbol,
+  ctx,
+}: {
+  name: string;
+  declaredAt: number;
+  scope: ScopeId;
+  aliasSymbol: SymbolId;
+  constructorSymbol: SymbolId;
+  ctx: BindingContext;
+}): SymbolId => {
+  const aliasRecord = ctx.symbolTable.getSymbol(aliasSymbol);
+  const aliasMetadata = aliasRecord.metadata as
+    | {
+        nominalTargetTypeArguments?: unknown;
+        nominalTargetTypeParameterNames?: unknown;
+      }
+    | undefined;
+  return ctx.symbolTable.declare(
+    {
+      name,
+      kind: "value",
+      declaredAt,
+      metadata: {
+        aliasConstructorTarget: constructorSymbol,
+        aliasConstructorAlias: aliasSymbol,
+        nominalTargetTypeArguments: aliasMetadata?.nominalTargetTypeArguments,
+        nominalTargetTypeParameterNames:
+          aliasMetadata?.nominalTargetTypeParameterNames,
+      },
+    },
+    scope,
+  );
 };
 
 const resolveSyntheticAliasConstructorImportTarget = ({

@@ -944,6 +944,31 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("enforces fixed type arguments for imported alias constructor references", () => {
+    const depFixture = "alias_constructor_cross_module_exported_alias/dep.voyd";
+    const mainFixture =
+      "alias_constructor_cross_module_exported_alias/main_ref_bad.voyd";
+
+    let caught: unknown;
+    try {
+      runMainWithSingleFixtureDependency({
+        depFixture,
+        mainFixture,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
   it("resolves constructor calls through object type aliases", () => {
     const result = semanticsPipeline(
       loadAst("constructor_call_through_type_alias.voyd"),

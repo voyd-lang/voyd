@@ -1,6 +1,6 @@
-import type { HirExpression } from "../../hir/index.js";
+import type { HirExpression, HirNamedTypeExpr } from "../../hir/index.js";
 import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
-import { resolveImportedValue } from "../imports.js";
+import { resolveImportedTypeExpr, resolveImportedValue } from "../imports.js";
 import type { TypingContext } from "../types.js";
 import { getIntrinsicType } from "./intrinsics.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
@@ -161,18 +161,22 @@ const specializeAliasConstructorType = ({
   ctx: TypingContext;
   span?: SourceSpan;
 }): TypeId => {
-  if (!ctx.typeAliases.hasTemplate(aliasSymbol)) {
-    return targetType;
-  }
   const signature = ctx.functions.getSignature(targetSymbol);
   if (!signature) {
     return targetType;
   }
 
-  let aliasType: TypeId;
+  let aliasType: TypeId | undefined;
   try {
     aliasType = resolveTypeAlias(aliasSymbol, ctx, createTypingState(), []);
   } catch {
+    aliasType = resolveImportedAliasType({
+      aliasSymbol,
+      ctx,
+      span,
+    });
+  }
+  if (typeof aliasType !== "number") {
     return targetType;
   }
 
@@ -191,4 +195,33 @@ const specializeAliasConstructorType = ({
     return targetType;
   }
   return ctx.arena.substitute(signature.typeId, unified.substitution);
+};
+
+const resolveImportedAliasType = ({
+  aliasSymbol,
+  ctx,
+  span,
+}: {
+  aliasSymbol: SymbolId;
+  ctx: TypingContext;
+  span?: SourceSpan;
+}): TypeId | undefined => {
+  const aliasRecord = ctx.symbolTable.getSymbol(aliasSymbol);
+  const namedAliasExpr: HirNamedTypeExpr = {
+    typeKind: "named",
+    path: [aliasRecord.name],
+    symbol: aliasSymbol,
+    ast: ctx.hir.module.ast,
+    span: normalizeSpan(span),
+  };
+  try {
+    return resolveImportedTypeExpr({
+      expr: namedAliasExpr,
+      typeArgs: [],
+      ctx,
+      state: { mode: "strict" },
+    });
+  } catch {
+    return undefined;
+  }
 };
