@@ -1,0 +1,15 @@
+obj Vec3 {
+  x: i32,
+  y: i32,
+  z: i32
+}
+
+impl Vec3
+  fn init(x: i32, y: i32, z: i32) -> Vec3
+    Vec3 { x, y, z }
+
+type Color = Vec3
+
+pub fn main() -> i32
+  let c = Color(1, 2, 3)
+  c.x + c.y + c.z

@@ -150,5 +150,15 @@ describe(
       const exports = instance.exports as Record<string, unknown>;
       expect((exports.main as () => number)()).toBe(11);
     });
+
+    it("supports constructor calls through object type aliases", async () => {
+      const module = await compileToBinaryenModule(
+        fixturePath("type-alias-object-constructor.voyd"),
+      );
+      const wasm = assertRunnableWasm(module);
+      const instance = getWasmInstance(wasm);
+      const exports = instance.exports as Record<string, unknown>;
+      expect((exports.main as () => number)()).toBe(6);
+    });
   }
 );

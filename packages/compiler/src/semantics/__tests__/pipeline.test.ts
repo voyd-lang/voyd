@@ -878,6 +878,13 @@ describe("semanticsPipeline", () => {
     expectAnimalConstructorBindings(mainSemantics);
   });
 
+  it("resolves constructor calls through object type aliases", () => {
+    const result = semanticsPipeline(
+      loadAst("constructor_call_through_type_alias.voyd"),
+    );
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("resolves operator calls to impl overloads", () => {
     const ast = loadAst("operator_overload_eq.voyd");
     const result = semanticsPipeline(ast);

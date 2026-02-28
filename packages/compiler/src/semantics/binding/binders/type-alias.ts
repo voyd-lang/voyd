@@ -11,6 +11,13 @@ import {
   enumVariantTypeNamesFromAliasTarget,
 } from "../../enum-namespace.js";
 import type { SymbolId } from "../../ids.js";
+import {
+  formCallsInternal,
+  isForm,
+  isIdentifierAtom,
+  isInternalIdentifierAtom,
+  type Expr,
+} from "../../../parser/index.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -84,6 +91,8 @@ export const seedEnumAliasNamespaces = (ctx: BindingContext): void => {
       ctx,
     });
   });
+
+  seedObjectAliasConstructorNamespaces(ctx);
 };
 
 const seedEnumVariantNamespace = ({
@@ -148,4 +157,85 @@ const resolveObjectTypeSymbol = ({
   }
 
   return symbol;
+};
+
+const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    ctx.decls.typeAliases.forEach((alias) => {
+      const targetSymbol = resolveNominalTypeSymbol({
+        target: alias.target,
+        scope: ctx.symbolTable.rootScope,
+        ctx,
+      });
+      if (typeof targetSymbol !== "number") {
+        return;
+      }
+      const constructors = ctx.staticMethods.get(targetSymbol)?.get("init");
+      if (!constructors || constructors.size === 0) {
+        return;
+      }
+      const bucket = ctx.staticMethods.get(alias.symbol) ?? new Map();
+      const aliasConstructors = bucket.get("init") ?? new Set<SymbolId>();
+      const sizeBefore = aliasConstructors.size;
+      constructors.forEach((constructorSymbol) =>
+        aliasConstructors.add(constructorSymbol),
+      );
+      if (aliasConstructors.size === sizeBefore) {
+        return;
+      }
+      bucket.set("init", aliasConstructors);
+      ctx.staticMethods.set(alias.symbol, bucket);
+      changed = true;
+    });
+  }
+};
+
+const resolveNominalTypeSymbol = ({
+  target,
+  scope,
+  ctx,
+}: {
+  target: Expr | undefined;
+  scope: number;
+  ctx: BindingContext;
+}): SymbolId | undefined => {
+  const name = extractNominalTypeName(target);
+  if (!name) {
+    return undefined;
+  }
+  const symbol = ctx.symbolTable.resolve(name, scope);
+  if (typeof symbol !== "number") {
+    return undefined;
+  }
+  const record = ctx.symbolTable.getSymbol(symbol);
+  return record.kind === "type" ? symbol : undefined;
+};
+
+const extractNominalTypeName = (target: Expr | undefined): string | undefined => {
+  if (!target) {
+    return undefined;
+  }
+  if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
+    return target.value;
+  }
+  if (!isForm(target)) {
+    return undefined;
+  }
+  if (formCallsInternal(target, "generics")) {
+    return extractNominalTypeName(target.at(1));
+  }
+  if (target.length === 2) {
+    const head = target.at(0);
+    const second = target.at(1);
+    if (
+      (isIdentifierAtom(head) || isInternalIdentifierAtom(head)) &&
+      isForm(second) &&
+      formCallsInternal(second, "generics")
+    ) {
+      return head.value;
+    }
+  }
+  return undefined;
 };
