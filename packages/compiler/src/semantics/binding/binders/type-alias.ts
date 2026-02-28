@@ -11,7 +11,10 @@ import {
   enumVariantTypeNamesFromAliasTarget,
 } from "../../enum-namespace.js";
 import type { SymbolId } from "../../ids.js";
-import { resolveNominalTypeSymbol } from "../../nominal-type-target.js";
+import {
+  nominalTypeTargetMetadataFromAliasTarget,
+  resolveNominalTypeSymbol,
+} from "../../nominal-type-target.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -34,6 +37,10 @@ export const bindTypeAlias = (
     target: decl.target,
     typeParameterNames: decl.typeParameters.map((entry) => entry.name.value),
   });
+  const nominalTargetMetadata = nominalTypeTargetMetadataFromAliasTarget({
+    target: decl.target,
+    typeParameterNames: decl.typeParameters.map((entry) => entry.name.value),
+  });
   reportOverloadNameCollision({
     name: decl.name.value,
     scope: tracker.current(),
@@ -49,6 +56,7 @@ export const bindTypeAlias = (
       entity: "type-alias",
       ...intrinsicTypeMetadata,
       ...(enumNamespaceMetadata ?? {}),
+      ...(nominalTargetMetadata ?? {}),
     },
   });
 
@@ -158,9 +166,13 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
   while (changed) {
     changed = false;
     ctx.decls.typeAliases.forEach((alias) => {
+      const aliasScope =
+        alias.form && ctx.scopeByNode.get(alias.form.syntaxId)
+          ? (ctx.scopeByNode.get(alias.form.syntaxId) as number)
+          : ctx.symbolTable.rootScope;
       const targetSymbol = resolveNominalTypeSymbol({
         target: alias.target,
-        scope: ctx.symbolTable.rootScope,
+        scope: aliasScope,
         symbolTable: ctx.symbolTable,
       });
       if (typeof targetSymbol !== "number") {

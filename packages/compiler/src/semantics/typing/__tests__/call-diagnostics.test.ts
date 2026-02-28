@@ -233,4 +233,44 @@ describe("call diagnostics", () => {
     expect(caught.diagnostic.code).toBe("TY0041");
     expect(caught.diagnostic.message).toMatch(/is a type, not a value/i);
   });
+
+  it("enforces fixed type arguments when calling constructors through aliases", () => {
+    const ast = loadAst("constructor_call_alias_fixed_type_args_enforced.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("does not treat aliases to type parameters as constructor values", () => {
+    const ast = loadAst("constructor_call_alias_type_parameter_shadowing.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0041");
+    expect(caught.diagnostic.message).toMatch(/is a type, not a value/i);
+  });
 });
