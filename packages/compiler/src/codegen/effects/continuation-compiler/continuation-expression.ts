@@ -37,12 +37,13 @@ import {
   compileIdentifierExpr,
   compileLiteralExpr,
 } from "../../expressions/primitives.js";
-import { withLoopScope } from "../../control-flow-stack.js";
+import { allocateLoopLabels, withLoopScope } from "../../control-flow-stack.js";
 import {
   exprContainsTarget,
   stmtContainsTarget,
 } from "../../expressions/contains.js";
 import { unboxOutcomeValue } from "../outcome-values.js";
+import { coerceToBinaryenType } from "../../expressions/utils.js";
 
 const compileContinuationBlockExpr = ({
   expr,
@@ -66,6 +67,7 @@ const compileContinuationBlockExpr = ({
   }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   const statements: binaryen.ExpressionRef[] = [];
   let foundResume = false;
 
@@ -99,14 +101,15 @@ const compileContinuationBlockExpr = ({
     tailPosition,
     expectedResultTypeId,
   });
+  const coercedValue = coerceToBinaryenType(ctx, valueExpr, resultType);
 
   if (statements.length === 0) {
-    return { expr: valueExpr, usedReturnCall };
+    return { expr: coercedValue, usedReturnCall };
   }
 
-  statements.push(valueExpr);
+  statements.push(coercedValue);
   return {
-    expr: ctx.mod.block(null, statements, getExprBinaryenType(expr.id, ctx, typeInstanceId)),
+    expr: ctx.mod.block(null, statements, resultType),
     usedReturnCall,
   };
 };
@@ -128,6 +131,8 @@ const compileContinuationIfExpr = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   if (!resumeTarget) {
     return compileIfExpr(expr, ctx, fnCtx, compileExpr, tailPosition, expectedResultTypeId);
   }
@@ -138,26 +143,34 @@ const compileContinuationIfExpr = ({
       !exprContainsTarget(branch.condition, resumeTarget, ctx)
   );
   if (branchWithTarget) {
-    return compileExpr({
+    const branchExpr = compileExpr({
       exprId: branchWithTarget.value,
       ctx,
       fnCtx,
       tailPosition,
       expectedResultTypeId,
     });
+    return {
+      expr: coerceToBinaryenType(ctx, branchExpr.expr, resultType),
+      usedReturnCall: branchExpr.usedReturnCall,
+    };
   }
 
   if (
     typeof expr.defaultBranch === "number" &&
     exprContainsTarget(expr.defaultBranch, resumeTarget, ctx)
   ) {
-    return compileExpr({
+    const defaultExpr = compileExpr({
       exprId: expr.defaultBranch,
       ctx,
       fnCtx,
       tailPosition,
       expectedResultTypeId,
     });
+    return {
+      expr: coerceToBinaryenType(ctx, defaultExpr.expr, resultType),
+      usedReturnCall: defaultExpr.usedReturnCall,
+    };
   }
 
   return compileIfExpr(expr, ctx, fnCtx, compileExpr, tailPosition, expectedResultTypeId);
@@ -180,19 +193,25 @@ const compileContinuationMatchExpr = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   if (!resumeTarget) {
     return compileMatchExpr(expr, ctx, fnCtx, compileExpr, tailPosition, expectedResultTypeId);
   }
 
   const armWithTarget = expr.arms.find((arm) => exprContainsTarget(arm.value, resumeTarget, ctx));
   if (armWithTarget) {
-    return compileExpr({
+    const armExpr = compileExpr({
       exprId: armWithTarget.value,
       ctx,
       fnCtx,
       tailPosition,
       expectedResultTypeId,
     });
+    return {
+      expr: coerceToBinaryenType(ctx, armExpr.expr, resultType),
+      usedReturnCall: armExpr.usedReturnCall,
+    };
   }
 
   return compileMatchExpr(expr, ctx, fnCtx, compileExpr, tailPosition, expectedResultTypeId);
@@ -221,8 +240,10 @@ const compileContinuationWhileExpr = ({
     resumeTarget,
     ctx
   );
-  const loopLabel = `while_loop_${expr.id}`;
-  const breakLabel = `${loopLabel}_break`;
+  const { loopLabel, breakLabel } = allocateLoopLabels({
+    fnCtx,
+    prefix: `while_loop_${expr.id}`,
+  });
   const skipConditionOnce = bodyContainsTarget && !conditionContainsTarget;
   const skipFlag = skipConditionOnce
     ? allocateTempLocal(binaryen.i32, fnCtx)

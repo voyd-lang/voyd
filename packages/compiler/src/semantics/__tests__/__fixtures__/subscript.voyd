@@ -45,4 +45,5 @@ fn main() -> i32
   let read = box[3]
   box[1] = 9
   let range_read = box[1..]
-  read + range_read + box.value
+  let full_range_read = box[..]
+  read + range_read + full_range_read + box.value

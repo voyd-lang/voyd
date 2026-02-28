@@ -12,7 +12,11 @@ import type {
   LocalBindingLocal,
   TypeId,
 } from "../context.js";
-import { resolveLoopScope, withLoopScope } from "../control-flow-stack.js";
+import {
+  allocateLoopLabels,
+  resolveLoopScope,
+  withLoopScope,
+} from "../control-flow-stack.js";
 import { allocateTempLocal, declareLocal } from "../locals.js";
 import { RTT_METADATA_SLOTS } from "../rtt/index.js";
 import {
@@ -363,8 +367,10 @@ export const compileWhileExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
 ): CompiledExpression => {
-  const loopLabel = `while_loop_${expr.id}`;
-  const breakLabel = `${loopLabel}_break`;
+  const { loopLabel, breakLabel } = allocateLoopLabels({
+    fnCtx,
+    prefix: `while_loop_${expr.id}`,
+  });
 
   const conditionExpr = compileExpr({
     exprId: expr.condition,
@@ -404,8 +410,10 @@ export const compileLoopExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
 ): CompiledExpression => {
-  const loopLabel = `loop_${expr.id}`;
-  const breakLabel = `${loopLabel}_break`;
+  const { loopLabel, breakLabel } = allocateLoopLabels({
+    fnCtx,
+    prefix: `loop_${expr.id}`,
+  });
   const body = withLoopScope(
     fnCtx,
     { breakLabel, continueLabel: loopLabel },

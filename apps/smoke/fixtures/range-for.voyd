@@ -1,0 +1,18 @@
+pub fn range_for_half_open() -> i32
+  var total = 0
+  for value in 0..5:
+    total = total + value
+  total
+
+pub fn range_for_inclusive() -> i32
+  var total = 0
+  for value in 0..=5:
+    total = total + value
+  total
+
+pub fn range_for_nested() -> i32
+  var total = 0
+  for y in 0..3:
+    for x in 0..3:
+      total = total + (x + y)
+  total

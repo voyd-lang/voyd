@@ -9,7 +9,7 @@ use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::number::cast::{ to_i32_wrapping, to_i64 }
 use std::optional::types::all
-use std::subscript::Range
+use std::range::Range
 
 /// Host-provided random source effect.
 ///

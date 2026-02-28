@@ -10,7 +10,7 @@
 
 use std::array::Array
 use std::optional::types::all
-use std::subscript::Range
+use std::range::Range
 
 /// A single byte value in the range `0..255`.
 pub type Byte = i32

@@ -1,20 +1,6 @@
-//! Subscript traits and range type.
+//! Subscript traits.
 //!
 //! Provides shared indexing contracts for read and write operations.
-
-use std::optional::types::Optional
-
-/// Range object used by subscript-capable APIs.
-pub obj Range {
-  /// Optional inclusive starting index.
-  api start: Optional<i32>,
-
-  /// Optional ending index.
-  api end: Optional<i32>,
-
-  /// Whether `end` is included in the range.
-  api include_end: bool
-}
 
 /// Read-only subscript contract.
 pub trait SubscriptRead<Index, Output>

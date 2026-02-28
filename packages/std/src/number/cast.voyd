@@ -64,29 +64,33 @@ pub fn to_i32_checked(value: i64): () -> Result<i32, CastError>
     return cast_error(cast_error_code_overflow())
   Ok<i32> { value: narrowed }
 
-/// Converts an `f32` to `i32`, requiring a finite in-range integer value.
+/// Converts an `f32` to `i32`, requiring a finite in-range value.
+///
+/// Fractional values are truncated toward zero.
 pub fn to_i32_checked(value: f32): () -> Result<i32, CastError>
   to_i32_checked(to_f64(value))
 
-/// Converts an `f64` to `i32`, requiring a finite in-range integer value.
+/// Converts an `f64` to `i32`, requiring a finite in-range value.
+///
+/// Fractional values are truncated toward zero.
 pub fn to_i32_checked(value: f64): () -> Result<i32, CastError>
   if not is_finite_f64(value):
-    return cast_error(cast_error_code_invalid_input())
-  if trunc_f64(value) != value:
     return cast_error(cast_error_code_invalid_input())
   if value < -2147483648.0 or value > 2147483647.0:
     return cast_error(cast_error_code_overflow())
   Ok<i32> { value: trunc_i32_f64_s(value) }
 
-/// Converts an `f32` to `i64`, requiring a finite in-range integer value.
+/// Converts an `f32` to `i64`, requiring a finite in-range value.
+///
+/// Fractional values are truncated toward zero.
 pub fn to_i64_checked(value: f32): () -> Result<i64, CastError>
   to_i64_checked(to_f64(value))
 
-/// Converts an `f64` to `i64`, requiring a finite in-range integer value.
+/// Converts an `f64` to `i64`, requiring a finite in-range value.
+///
+/// Fractional values are truncated toward zero.
 pub fn to_i64_checked(value: f64): () -> Result<i64, CastError>
   if not is_finite_f64(value):
-    return cast_error(cast_error_code_invalid_input())
-  if trunc_f64(value) != value:
     return cast_error(cast_error_code_invalid_input())
   // `2^63 - 1` is not exactly representable as `f64`, so use an exclusive upper bound.
   let min_i64 = 0.0 - 9223372036854775808.0

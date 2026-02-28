@@ -31,10 +31,10 @@ test "to_i32_checked validates float inputs":
       assert(false, eq: true)
 
   match(to_i32_checked(42.5))
-    Ok<i32>:
+    Ok<i32> { value }:
+      assert(value, eq: 42)
+    Err<CastError>:
       assert(false, eq: true)
-    Err<CastError> { error }:
-      assert(error.code, eq: cast_error_code_invalid_input())
 
   match(to_i32_checked(2147483648.0))
     Ok<i32>:
@@ -56,10 +56,10 @@ test "to_i64_checked validates float inputs":
       assert(false, eq: true)
 
   match(to_i64_checked(99.25))
-    Ok<i64>:
+    Ok<i64> { value }:
+      assert(value, eq: to_i64(99))
+    Err<CastError>:
       assert(false, eq: true)
-    Err<CastError> { error }:
-      assert(error.code, eq: cast_error_code_invalid_input())
 
   match(to_i64_checked(9223372036854775808.0))
     Ok<i64>:

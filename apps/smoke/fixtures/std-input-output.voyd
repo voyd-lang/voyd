@@ -37,6 +37,10 @@ pub fn io_write_line_probe() -> i32
   let _ = write_line("ok".as_slice())
   1
 
+pub fn io_write_line_embedded_newline_probe() -> i32
+  let _ = write_line("A\nB".as_slice())
+  1
+
 pub fn io_write_bytes_probe() -> i32
   let ~buffer = ByteBuffer::with_capacity(2)
   buffer.push(7)

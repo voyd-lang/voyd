@@ -1,5 +1,5 @@
 use std::optional::types::all
-use std::subscript::Range
+use std::range::Range
 use std::test::assertions::all
 
 fn option_i32_or(value: Option<i32>, fallback: i32) -> i32

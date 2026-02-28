@@ -234,6 +234,7 @@ export interface FunctionContext {
   tempLocals: Map<number, LocalBindingLocal>;
   locals: binaryen.Type[];
   nextLocalIndex: number;
+  nextControlFlowLabelId?: number;
   returnTypeId: TypeId;
   returnWasmType?: binaryen.Type;
   currentHandler?: { index: number; type: binaryen.Type };

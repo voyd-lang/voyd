@@ -122,6 +122,11 @@ const consumeDoubleQuotedSegments = ({
     const next = file.consumeChar();
 
     if (next === "\\") {
+      if (!file.hasCharacters) {
+        buffer += "\\";
+        value += "\\";
+        break;
+      }
       const escaped = file.consumeChar();
       if (escaped === "$" && file.next === "{") {
         file.consumeChar();
@@ -129,8 +134,9 @@ const consumeDoubleQuotedSegments = ({
         value += "${";
         continue;
       }
-      buffer += `${next}${escaped}`;
-      value += `${next}${escaped}`;
+      const decoded = decodeStringEscape(escaped);
+      buffer += decoded;
+      value += decoded;
       continue;
     }
 
@@ -155,6 +161,31 @@ const consumeDoubleQuotedSegments = ({
   }
 
   return { value, segments, hasInterpolation };
+};
+
+const decodeStringEscape = (escaped: string): string => {
+  switch (escaped) {
+    case "n":
+      return "\n";
+    case "r":
+      return "\r";
+    case "t":
+      return "\t";
+    case "b":
+      return "\b";
+    case "f":
+      return "\f";
+    case "0":
+      return "\0";
+    case "\\":
+      return "\\";
+    case '"':
+      return '"';
+    case "'":
+      return "'";
+    default:
+      return escaped;
+  }
 };
 
 export const stringMacro: ReaderMacro = {
