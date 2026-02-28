@@ -55,6 +55,7 @@ import {
   enumVariantTypeNamesFromAliasTarget,
   importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
+import { isPackageRootModule } from "../../packages.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -524,6 +525,26 @@ const shouldPreserveInlinePkgScope = ({
   );
 };
 
+const shouldAllowImplicitPackageRootAlias = ({
+  dependencyPath,
+  ctx,
+}: {
+  dependencyPath: ModulePath;
+  ctx: BindingContext;
+}): boolean => {
+  if (dependencyPath.segments.at(-1) !== "pkg") {
+    return false;
+  }
+  const dependency = ctx.graph.modules.get(modulePathToString(dependencyPath));
+  if (!dependency) {
+    return false;
+  }
+
+  return isPackageRootModule(dependency.path, {
+    sourcePackageRoot: dependency.sourcePackageRoot,
+  });
+};
+
 const resolveDependencyPath = ({
   entry,
   ctx,
@@ -538,6 +559,10 @@ const resolveDependencyPath = ({
       entry,
       currentModulePath: ctx.module.path,
       currentModuleIsPackageRoot: ctx.isPackageRoot && !preservesInlinePkgScope,
+      allowImplicitPackageRootAlias: shouldAllowImplicitPackageRootAlias({
+        dependencyPath: dep.path,
+        ctx,
+      }),
     }),
   );
   if (matches.length === 0) {

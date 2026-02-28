@@ -1463,6 +1463,15 @@ impl Eq<Box> for Box
       segments: ["pkgs", "vtrace", "pkg"] as const,
     };
     const vtracePkgId = modulePathToString(vtracePkgPath);
+    const vtracePkgModule: ModuleNode = {
+      id: vtracePkgId,
+      path: vtracePkgPath,
+      sourcePackageRoot: ["pkgs", "vtrace"],
+      origin: { kind: "file", filePath: "vtrace/pkg.voyd" },
+      ast: parse("", "vtrace/pkg.voyd"),
+      source: "",
+      dependencies: [],
+    };
 
     const moduleNode: ModuleNode = {
       id: moduleId,
@@ -1474,7 +1483,10 @@ impl Eq<Box> for Box
     };
     const graph: ModuleGraph = {
       entry: moduleId,
-      modules: new Map([[moduleId, moduleNode]]),
+      modules: new Map([
+        [moduleId, moduleNode],
+        [vtracePkgId, vtracePkgModule],
+      ]),
       diagnostics: [],
     };
     const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
@@ -1530,6 +1542,15 @@ impl Eq<Box> for Box
       segments: ["pkgs", "vtrace", "pkg"] as const,
     };
     const vtracePkgId = modulePathToString(vtracePkgPath);
+    const vtracePkgModule: ModuleNode = {
+      id: vtracePkgId,
+      path: vtracePkgPath,
+      sourcePackageRoot: ["pkgs", "vtrace"],
+      origin: { kind: "file", filePath: "vtrace/pkg.voyd" },
+      ast: parse("", "vtrace/pkg.voyd"),
+      source: "",
+      dependencies: [],
+    };
 
     const moduleNode: ModuleNode = {
       id: moduleId,
@@ -1541,7 +1562,10 @@ impl Eq<Box> for Box
     };
     const graph: ModuleGraph = {
       entry: moduleId,
-      modules: new Map([[moduleId, moduleNode]]),
+      modules: new Map([
+        [moduleId, moduleNode],
+        [vtracePkgId, vtracePkgModule],
+      ]),
       diagnostics: [],
     };
     const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
@@ -1582,6 +1606,115 @@ impl Eq<Box> for Box
     expect(binding.uses[0]?.entries[0]?.moduleId).toBe(vtracePkgId);
     const drawSymbol = symbolTable.resolve("draw", symbolTable.rootScope);
     expect(typeof drawSymbol).toBe("number");
+  });
+
+  it("does not treat regular trailing pkg submodules as implicit aliases for anchored imports", () => {
+    const source = "use self::foo::all";
+    const ast = parse(source, "main.voyd");
+    const useForm = ast.rest.find(
+      (entry) => isForm(entry) && entry.calls("use"),
+    ) as Form | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const fooPath = {
+      namespace: "src" as const,
+      segments: ["main", "foo"] as const,
+    };
+    const fooPkgPath = {
+      namespace: "src" as const,
+      segments: ["main", "foo", "pkg"] as const,
+    };
+    const fooId = modulePathToString(fooPath);
+    const fooPkgId = modulePathToString(fooPkgPath);
+
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "main.voyd" },
+      ast,
+      source,
+      dependencies: [
+        { kind: "use", path: fooPath, span },
+        { kind: "use", path: fooPkgPath, span },
+      ],
+    };
+    const fooModule: ModuleNode = {
+      id: fooId,
+      path: fooPath,
+      origin: { kind: "file", filePath: "foo.voyd" },
+      ast: parse("", "foo.voyd"),
+      source: "",
+      dependencies: [],
+    };
+    const fooPkgModule: ModuleNode = {
+      id: fooPkgId,
+      path: fooPkgPath,
+      origin: { kind: "file", filePath: "foo/pkg.voyd" },
+      ast: parse("", "foo/pkg.voyd"),
+      source: "",
+      dependencies: [],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([
+        [moduleId, moduleNode],
+        [fooId, fooModule],
+        [fooPkgId, fooPkgModule],
+      ]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+    const moduleExports: Map<string, ModuleExportTable> = new Map();
+    moduleExports.set(
+      fooId,
+      new Map([
+        [
+          "from_foo",
+          {
+            name: "from_foo",
+            symbol: 1,
+            moduleId: fooId,
+            modulePath: fooPath,
+            packageId: packageIdFromPath(fooPath),
+            kind: "value",
+            visibility: packageVisibility(),
+          },
+        ],
+      ]),
+    );
+    moduleExports.set(
+      fooPkgId,
+      new Map([
+        [
+          "from_pkg",
+          {
+            name: "from_pkg",
+            symbol: 2,
+            moduleId: fooPkgId,
+            modulePath: fooPkgPath,
+            packageId: packageIdFromPath(fooPkgPath),
+            kind: "value",
+            visibility: packageVisibility(),
+          },
+        ],
+      ]),
+    );
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    expect(binding.diagnostics).toHaveLength(0);
+    expect(binding.uses[0]?.entries[0]?.moduleId).toBe(fooId);
+    expect(symbolTable.resolve("from_foo", symbolTable.rootScope)).toBeDefined();
+    expect(symbolTable.resolve("from_pkg", symbolTable.rootScope)).toBeUndefined();
   });
 
   it("reports duplicate local variable names in the same scope", () => {

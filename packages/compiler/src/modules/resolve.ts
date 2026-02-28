@@ -101,7 +101,9 @@ const srcAliasEntryKeysFor = ({
 
 const segmentVariantsForMatching = (
   segments: readonly string[],
+  options: { allowImplicitPackageRootAlias?: boolean } = {},
 ): readonly (readonly string[])[] =>
+  options.allowImplicitPackageRootAlias !== false &&
   segments.at(-1) === PACKAGE_ROOT_SEGMENT
     ? [segments, segments.slice(0, -1)]
     : [segments];
@@ -115,49 +117,53 @@ const dependencyMatchKeysFor = ({
   packageName,
   includeNamespace = false,
   includePackageName = false,
+  allowImplicitPackageRootAlias = true,
 }: {
   segments: readonly string[];
   namespace?: ModulePath["namespace"];
   packageName?: string;
   includeNamespace?: boolean;
   includePackageName?: boolean;
+  allowImplicitPackageRootAlias?: boolean;
 }): readonly string[] => {
   const keys = new Set<string>();
 
-  segmentVariantsForMatching(segments).forEach((variant) => {
-    const segmentKey = keyForSegments(variant);
-    if (segmentKey) {
-      keys.add(segmentKey);
-    }
-
-    if (includeNamespace && namespace) {
-      const namespacedKey = keyForSegments([namespace, ...variant]);
-      if (namespacedKey) {
-        keys.add(namespacedKey);
+  segmentVariantsForMatching(segments, { allowImplicitPackageRootAlias }).forEach(
+    (variant) => {
+      const segmentKey = keyForSegments(variant);
+      if (segmentKey) {
+        keys.add(segmentKey);
       }
-    }
 
-    if (!includePackageName || !packageName) {
-      return;
-    }
-
-    keys.add(packageName);
-    const packageKey = keyForSegments([packageName, ...variant]);
-    if (packageKey) {
-      keys.add(packageKey);
-    }
-    if (includeNamespace && namespace) {
-      keys.add(`${namespace}::${packageName}`);
-      const namespacedPackageKey = keyForSegments([
-        namespace,
-        packageName,
-        ...variant,
-      ]);
-      if (namespacedPackageKey) {
-        keys.add(namespacedPackageKey);
+      if (includeNamespace && namespace) {
+        const namespacedKey = keyForSegments([namespace, ...variant]);
+        if (namespacedKey) {
+          keys.add(namespacedKey);
+        }
       }
-    }
-  });
+
+      if (!includePackageName || !packageName) {
+        return;
+      }
+
+      keys.add(packageName);
+      const packageKey = keyForSegments([packageName, ...variant]);
+      if (packageKey) {
+        keys.add(packageKey);
+      }
+      if (includeNamespace && namespace) {
+        keys.add(`${namespace}::${packageName}`);
+        const namespacedPackageKey = keyForSegments([
+          namespace,
+          packageName,
+          ...variant,
+        ]);
+        if (namespacedPackageKey) {
+          keys.add(namespacedPackageKey);
+        }
+      }
+    },
+  );
 
   return [...keys];
 };
@@ -240,11 +246,13 @@ export const matchesDependencyPath = ({
   entry,
   currentModulePath,
   currentModuleIsPackageRoot = false,
+  allowImplicitPackageRootAlias = true,
 }: {
   dependencyPath: ModulePath;
   entry: ModulePathMatchEntry;
   currentModulePath: ModulePath;
   currentModuleIsPackageRoot?: boolean;
+  allowImplicitPackageRootAlias?: boolean;
 }): boolean => {
   const entryKeys = [
     entry.moduleSegments.length > 0 ? entry.moduleSegments.join("::") : undefined,
@@ -282,7 +290,10 @@ export const matchesDependencyPath = ({
     );
     return hasMatchingEntryKey({
       entryKeys: allEntryKeys,
-      dependencyKeys: dependencyMatchKeysFor({ segments: relativeSegments }),
+      dependencyKeys: dependencyMatchKeysFor({
+        segments: relativeSegments,
+        allowImplicitPackageRootAlias,
+      }),
     });
   }
 
@@ -311,7 +322,10 @@ export const matchesDependencyPath = ({
     );
     return hasMatchingEntryKey({
       entryKeys: allEntryKeys,
-      dependencyKeys: dependencyMatchKeysFor({ segments: relativeSegments }),
+      dependencyKeys: dependencyMatchKeysFor({
+        segments: relativeSegments,
+        allowImplicitPackageRootAlias,
+      }),
     });
   }
 
