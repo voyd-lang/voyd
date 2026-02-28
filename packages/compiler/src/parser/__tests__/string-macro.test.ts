@@ -71,9 +71,15 @@ describe("string macro utf8 encoding", () => {
 
   it("parses interpolation into concat calls", () => {
     const expected = methodCall({
-      target: stringExpr("Hello, "),
+      target: stringExpr(""),
       method: "concat",
-      args: [identifier("name")],
+      args: [
+        methodCall({
+          target: stringExpr("Hello, "),
+          method: "concat",
+          args: [identifier("name")],
+        }),
+      ],
     });
 
     expect(toPlain(parseSingleExpression('"Hello, ${name}"'))).toEqual(
@@ -90,12 +96,22 @@ describe("string macro utf8 encoding", () => {
   it("supports interpolation-only and mixed interpolation strings", () => {
     const interpolationOnly = identifier("first");
     expect(toPlain(parseSingleExpression('"${first}"'))).toEqual(
-      toPlain(interpolationOnly)
+      toPlain(
+        methodCall({
+          target: stringExpr(""),
+          method: "concat",
+          args: [interpolationOnly],
+        })
+      )
     );
 
     const mixed = methodCall({
       target: methodCall({
-        target: identifier("first"),
+        target: methodCall({
+          target: stringExpr(""),
+          method: "concat",
+          args: [identifier("first")],
+        }),
         method: "concat",
         args: [stringExpr("-")],
       }),

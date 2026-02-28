@@ -51,21 +51,16 @@ const buildInterpolatedStringExpr = (
       : [segment.value]
   );
 
-  if (parts.length === 0) {
-    return string("");
-  }
-
-  return parts
-    .slice(1)
-    .reduce(
-      (left, right) =>
-        stringMethodCall({
-          target: left,
-          method: "concat",
-          args: [right],
-        }),
-      parts[0]!
-    );
+  const seed = string("");
+  return parts.reduce(
+    (left, right) =>
+      stringMethodCall({
+        target: left,
+        method: "concat",
+        args: [right],
+      }),
+    seed
+  );
 };
 
 const consumeQuotedIdentifier = ({
