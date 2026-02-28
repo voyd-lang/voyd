@@ -1,3 +1,7 @@
+---
+order: 250
+---
+
 # Unions
 
 Union types represent a value that can be one of a predefined set of types.
@@ -47,7 +51,7 @@ obj User {
 type FetchResult<T> = Success<T> | Failure<String>
 
 fn fetch_user(id: String) -> FetchResult<User>
-  if id == "root" then:
+  if id == "root":
     Success { value: User { name: "Root" } }
   else:
     Failure { error: "User not found" }

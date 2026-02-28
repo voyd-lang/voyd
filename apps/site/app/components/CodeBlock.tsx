@@ -1,6 +1,6 @@
 import type { FC } from "react";
 import { createHighlighter, type LanguageInput } from "shiki";
-import voydGrammar from "../../assets/voyd.tmLanguage.json";
+import voydGrammar from "../../../vscode/syntaxes/voyd.tmLanguage.json";
 
 export const highlighter = await createHighlighter({
   themes: ["github-dark"],
@@ -9,7 +9,11 @@ export const highlighter = await createHighlighter({
     "javascript",
     "typescript",
     "tsx",
-    voydGrammar as unknown as LanguageInput,
+    {
+      ...(voydGrammar as unknown as LanguageInput),
+      name: "voyd",
+      aliases: ["Voyd"],
+    } as LanguageInput,
   ],
 });
 
@@ -27,7 +31,7 @@ const CodeBlock: FC<Props> = ({ code, lang = "voyd" }) => {
         pre(node) {
           this.addClassToHast(
             node,
-            "not-prose size-full rounded p-4 overflow-x-scroll"
+            "not-prose size-full max-w-full rounded p-4 overflow-x-auto"
           );
         },
       },

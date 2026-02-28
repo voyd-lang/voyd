@@ -1,3 +1,7 @@
+---
+order: 260
+---
+
 # Intersections
 
 Voyd uses intersection types to combine the fields of multiple objects into a

@@ -1,3 +1,7 @@
+---
+order: 90
+---
+
 # Doc Comments
 
 Voyd supports Markdown doc comments on declarations, modules/files, and function parameters.

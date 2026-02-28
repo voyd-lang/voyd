@@ -1,3 +1,7 @@
+---
+order: 50
+---
+
 # Generics
 
 Generic parameters let APIs abstract over types:

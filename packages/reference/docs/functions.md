@@ -1,3 +1,7 @@
+---
+order: 40
+---
+
 # Functions
 
 ## Function Basics
