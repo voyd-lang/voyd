@@ -436,6 +436,16 @@ describe("language server project analysis", () => {
         kind: "markdown",
         value: "```voyd\nfn work(id: i32, middle?: i32) -> i32\n```",
       });
+
+      const optionalParamHover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 0, character: 18 },
+      });
+      expect(optionalParamHover?.contents).toEqual({
+        kind: "markdown",
+        value: "```voyd\nmiddle?: i32\n```",
+      });
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
