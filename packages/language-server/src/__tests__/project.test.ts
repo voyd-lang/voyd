@@ -240,6 +240,39 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("returns module diagnostics for malformed html syntax instead of throwing", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn main() -> i32\n  <div class="open"\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      const diagnostic = diagnostics.find((entry) => entry.code === "MD0002");
+      expect(diagnostic).toBeDefined();
+      if (!diagnostic) {
+        return;
+      }
+
+      expect(
+        diagnostic.message.includes("Failed to parse"),
+      ).toBe(true);
+      expect(diagnostic.range.start.line).toBeGreaterThan(0);
+      expect(diagnostic.range.end.line).toBeGreaterThanOrEqual(
+        diagnostic.range.start.line,
+      );
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("does not emit false unresolved-import diagnostics for std src aliases", async () => {
     const project = await createProject({
       "std/msgpack.voyd": `use src::msgpack::fns::marker\n\npub fn top() -> i32\n  marker()\n`,
