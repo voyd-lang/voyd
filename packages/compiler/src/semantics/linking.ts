@@ -385,7 +385,15 @@ export const monomorphizeProgram = ({
             traitMethod,
             implMethod,
           }));
-        methods.forEach(({ implMethod }) => {
+        methods.forEach(({ traitMethod, implMethod }) => {
+          const traitMethodImpl = callerCtx.traitMethodImpls.get(implMethod);
+          if (
+            !traitMethodImpl ||
+            traitMethodImpl.traitSymbol !== impl.traitSymbol ||
+            traitMethodImpl.traitMethodSymbol !== traitMethod
+          ) {
+            return;
+          }
           const localCalleeRef = { moduleId: callerModuleId, symbol: implMethod };
           const canonicalCallee = canonicalSymbolRef(localCalleeRef);
           const calleeCtx = typingContextFor(canonicalCallee.moduleId);

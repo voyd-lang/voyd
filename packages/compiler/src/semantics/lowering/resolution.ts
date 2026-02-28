@@ -5,18 +5,63 @@ import {
   intrinsicValueMetadataFor,
 } from "../intrinsics.js";
 
+const isImportedSymbol = (symbol: SymbolId, ctx: LowerContext): boolean => {
+  const record = ctx.symbolTable.getSymbol(symbol);
+  const metadata = record.metadata as { import?: unknown } | undefined;
+  return metadata?.import !== undefined;
+};
+
+const resolveValueSymbol = ({
+  identifier,
+  scope,
+  ctx,
+}: {
+  identifier: { name: string; isQuoted: boolean };
+  scope: ScopeId;
+  ctx: LowerContext;
+}): SymbolId | undefined => {
+  let currentScope: ScopeId | null = scope;
+  while (currentScope !== null) {
+    const matches = Array.from(ctx.symbolTable.symbolsInScope(currentScope))
+      .map((symbol) => ({ symbol, record: ctx.symbolTable.getSymbol(symbol) }))
+      .filter(({ record }) => {
+        if (record.name !== identifier.name || record.kind === "effect-op") {
+          return false;
+        }
+        const meta = (record.metadata ?? {}) as { quotedName?: boolean };
+        const declQuoted = meta.quotedName === true;
+        return identifier.isQuoted ? declQuoted : !declQuoted;
+      });
+
+    if (matches.length > 0) {
+      for (let index = matches.length - 1; index >= 0; index -= 1) {
+        const candidate = matches[index]!;
+        if (!isImportedSymbol(candidate.symbol, ctx)) {
+          return candidate.symbol;
+        }
+      }
+
+      for (let index = matches.length - 1; index >= 0; index -= 1) {
+        const candidate = matches[index]!;
+        if (isImportedSymbol(candidate.symbol, ctx)) {
+          return candidate.symbol;
+        }
+      }
+    }
+
+    currentScope = ctx.symbolTable.getScope(currentScope).parent;
+  }
+
+  return undefined;
+};
+
 export const resolveIdentifierValue = (
   identifier: { name: string; isQuoted: boolean },
   scope: ScopeId,
   ctx: LowerContext
 ): IdentifierResolution => {
   const name = identifier.name;
-  const resolved = ctx.symbolTable.resolveWhere(name, scope, (record) => {
-    const meta = (record.metadata ?? {}) as { quotedName?: boolean };
-    const declQuoted = meta.quotedName === true;
-    const quoteMatches = identifier.isQuoted ? declQuoted : !declQuoted;
-    return quoteMatches && record.kind !== "effect-op";
-  });
+  const resolved = resolveValueSymbol({ identifier, scope, ctx });
   if (typeof resolved === "number") {
     const record = ctx.symbolTable.getSymbol(resolved);
     if (record.kind === "type") {
