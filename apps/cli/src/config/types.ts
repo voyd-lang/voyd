@@ -17,11 +17,10 @@ export type VoydConfig = {
   run?: boolean;
   /** Run emitted wasm directly */
   runWasm?: boolean;
-  decodeMsgPackResponse?: boolean;
+  /** Entry function to run. Defaults to main */
+  runEntry?: string;
   /** Specifies the entry voyd file */
   index: string;
-  /** Run the internal test script */
-  internalTest?: boolean;
   /** Run voyd tests */
   test?: boolean;
   /** Select test reporter */
