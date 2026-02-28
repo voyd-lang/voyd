@@ -31,6 +31,10 @@ import {
 import { collectVoydFiles, toFileUri } from "./files.js";
 import { scanExportsFromSource } from "./export-scan.js";
 import {
+  buildTypeParamNameIndex,
+  typeSummaryForSymbol,
+} from "./type-display.js";
+import {
   LineIndex,
   locationRange,
   smallestRangeFirst,
@@ -46,6 +50,7 @@ type SymbolIndex = {
   occurrencesByUri: ReadonlyMap<string, readonly SymbolOccurrence[]>;
   declarationsByKey: ReadonlyMap<string, readonly SymbolOccurrence[]>;
   documentationByCanonicalKey: ReadonlyMap<string, string>;
+  typeInfoByCanonicalKey: ReadonlyMap<string, string>;
   exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
   moduleIdByFilePath: ReadonlyMap<string, string>;
 };
@@ -325,6 +330,9 @@ export const buildSymbolIndex = async ({
   };
 
   const symbolDocumentationByModule = new Map<string, Map<SymbolId, string>>();
+  const typeParamNamesByModule = buildTypeParamNameIndex({
+    semanticsByModule: semantics,
+  });
   semantics.forEach((entry, moduleId) => {
     const docsBySymbol = new Map<SymbolId, string>();
     const remember = (symbol: SymbolId, documentation: string | undefined) => {
@@ -1022,6 +1030,7 @@ export const buildSymbolIndex = async ({
   );
 
   const documentationByCanonicalKey = new Map<string, string>();
+  const typeInfoByCanonicalKey = new Map<string, string>();
   sortedDeclarations.forEach((entries, canonicalKey) => {
     const documentation = entries
       .map((entry) => symbolDocumentationByModule.get(entry.moduleId)?.get(entry.symbol))
@@ -1030,12 +1039,26 @@ export const buildSymbolIndex = async ({
     if (documentation !== undefined) {
       documentationByCanonicalKey.set(canonicalKey, documentation);
     }
+
+    const typeInfo = entries
+      .map((entry) =>
+        typeSummaryForSymbol({
+          ref: { moduleId: entry.moduleId, symbol: entry.symbol },
+          semanticsByModule: semantics,
+          typeParamNamesByModule,
+        }),
+      )
+      .find((summary): summary is string => summary !== undefined);
+    if (typeInfo !== undefined) {
+      typeInfoByCanonicalKey.set(canonicalKey, typeInfo);
+    }
   });
 
   return {
     occurrencesByUri: sortedOccurrences,
     declarationsByKey: sortedDeclarations,
     documentationByCanonicalKey,
+    typeInfoByCanonicalKey,
     exportsByName,
     moduleIdByFilePath,
   };
