@@ -1,0 +1,75 @@
+use std::test::assertions::all
+
+test "to_f32 and to_f64 convert primitive values":
+  assert(to_f64(7), eq: 7.0)
+  assert(to_f64(to_i64(9)), eq: 9.0)
+  assert(to_f64(to_f32(2.5)), eq: 2.5)
+  assert(to_f32(11), eq: to_f32(11.0))
+
+test "to_i32_wrapping and checked i64 narrowing":
+  let in_range = to_i64(1234)
+  match(to_i32_checked(in_range))
+    Ok<i32> { value }:
+      assert(value, eq: 1234)
+    Err<CastError>:
+      assert(false, eq: true)
+
+  let overflow = to_i64(2147483647) + to_i64(1)
+  assert(to_i32_wrapping(overflow), eq: -2147483648)
+
+  match(to_i32_checked(overflow))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<CastError> { error }:
+      assert(error.code, eq: cast_error_code_overflow())
+
+test "to_i32_checked validates float inputs":
+  match(to_i32_checked(42.0))
+    Ok<i32> { value }:
+      assert(value, eq: 42)
+    Err<CastError>:
+      assert(false, eq: true)
+
+  match(to_i32_checked(42.5))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<CastError> { error }:
+      assert(error.code, eq: cast_error_code_invalid_input())
+
+  match(to_i32_checked(2147483648.0))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<CastError> { error }:
+      assert(error.code, eq: cast_error_code_overflow())
+
+  match(to_i32_checked(1.0 / 0.0))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<CastError> { error }:
+      assert(error.code, eq: cast_error_code_invalid_input())
+
+test "to_i64_checked validates float inputs":
+  match(to_i64_checked(99.0))
+    Ok<i64> { value }:
+      assert(value, eq: to_i64(99))
+    Err<CastError>:
+      assert(false, eq: true)
+
+  match(to_i64_checked(99.25))
+    Ok<i64>:
+      assert(false, eq: true)
+    Err<CastError> { error }:
+      assert(error.code, eq: cast_error_code_invalid_input())
+
+  match(to_i64_checked(9223372036854775808.0))
+    Ok<i64>:
+      assert(false, eq: true)
+    Err<CastError> { error }:
+      assert(error.code, eq: cast_error_code_overflow())
+
+test "reinterpret helpers preserve bit patterns":
+  let i32_bits = 1069547520
+  assert(reinterpret_i32(reinterpret_f32(i32_bits)), eq: i32_bits)
+
+  let i64_bits = to_i64(1234567)
+  assert(reinterpret_i64(reinterpret_f64(i64_bits)), eq: i64_bits)

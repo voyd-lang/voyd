@@ -6,6 +6,7 @@ use std::fixed_array::fns::{ new_fixed_array }
 use std::dict::{ Dict, DictKey }
 use std::memory::self as memory
 use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
+use std::number::cast::self as cast
 use std::optional::types::all
 use std::string::type::{ new_string, String }
 
@@ -111,7 +112,7 @@ pub fn unpack_i32(value: MsgPack): () -> i32
     I32:
       decoded.value
     I64:
-      wrap_i64(decoded.value)
+      cast::to_i32_wrapping(decoded.value)
     else:
       0
 
@@ -121,9 +122,9 @@ pub fn unpack_i64(value: MsgPack): () -> i64
     I64:
       decoded.value
     I32:
-      extend_i32_s(decoded.value)
+      cast::to_i64(decoded.value)
     else:
-      extend_i32_s(0)
+      cast::to_i64(0)
 
 /// Extracts a 32-bit float from a MessagePack value.
 pub fn unpack_f32(value: MsgPack): () -> f32
@@ -131,9 +132,9 @@ pub fn unpack_f32(value: MsgPack): () -> f32
     F32:
       decoded.value
     F64:
-      demote_f64(decoded.value)
+      cast::to_f32(decoded.value)
     else:
-      reinterpret_i32_to_f32(0)
+      cast::reinterpret_f32(0)
 
 /// Extracts a 64-bit float from a MessagePack value.
 pub fn unpack_f64(value: MsgPack): () -> f64
@@ -141,7 +142,7 @@ pub fn unpack_f64(value: MsgPack): () -> f64
     F64:
       decoded.value
     F32:
-      promote_f32(decoded.value)
+      cast::to_f64(decoded.value)
     else:
       0.0
 
@@ -238,14 +239,14 @@ impl Encoder
   fn write_u64(~self, value: i64) -> void
     if self.can_write(8) == false:
       return void
-    self.write_u8(bit_and(wrap_i64(shift_ru(value, 56)), 255))
-    self.write_u8(bit_and(wrap_i64(shift_ru(value, 48)), 255))
-    self.write_u8(bit_and(wrap_i64(shift_ru(value, 40)), 255))
-    self.write_u8(bit_and(wrap_i64(shift_ru(value, 32)), 255))
-    self.write_u8(bit_and(wrap_i64(shift_ru(value, 24)), 255))
-    self.write_u8(bit_and(wrap_i64(shift_ru(value, 16)), 255))
-    self.write_u8(bit_and(wrap_i64(shift_ru(value, 8)), 255))
-    self.write_u8(bit_and(wrap_i64(value), 255))
+    self.write_u8(bit_and(cast::to_i32_wrapping(shift_ru(value, 56)), 255))
+    self.write_u8(bit_and(cast::to_i32_wrapping(shift_ru(value, 48)), 255))
+    self.write_u8(bit_and(cast::to_i32_wrapping(shift_ru(value, 40)), 255))
+    self.write_u8(bit_and(cast::to_i32_wrapping(shift_ru(value, 32)), 255))
+    self.write_u8(bit_and(cast::to_i32_wrapping(shift_ru(value, 24)), 255))
+    self.write_u8(bit_and(cast::to_i32_wrapping(shift_ru(value, 16)), 255))
+    self.write_u8(bit_and(cast::to_i32_wrapping(shift_ru(value, 8)), 255))
+    self.write_u8(bit_and(cast::to_i32_wrapping(value), 255))
 
   fn encode_numeric(~self, value: Numeric) -> void
     value.match(number)
@@ -274,11 +275,11 @@ impl Encoder
 
   fn encode_f32(~self, value: f32) -> void
     self.write_u8(202)
-    self.write_u32(reinterpret_f32_to_i32(value))
+    self.write_u32(cast::reinterpret_i32(value))
 
   fn encode_f64(~self, value: f64) -> void
     self.write_u8(203)
-    self.write_u64(reinterpret_f64_to_i64(value))
+    self.write_u64(cast::reinterpret_i64(value))
 
   fn encode_string(~self, value: String) -> void
     let len = value.byte_count
@@ -563,10 +564,10 @@ impl Decoder
       return make_binary(self.decode_binary(self.read_u32()))
     if prefix == 202:
       let raw = self.read_u32()
-      return make_f32(reinterpret_i32_to_f32(raw))
+      return make_f32(cast::reinterpret_f32(raw))
     if prefix == 203:
       let raw = self.read_u64()
-      return F64 { value: reinterpret_i64_to_f64(raw) }
+      return F64 { value: cast::reinterpret_f64(raw) }
     self.decode_integer(prefix)
 
 @intrinsic(name: "__shift_l")
@@ -590,29 +591,5 @@ fn bit_or(value: i32, other: i32): () -> i32 __bit_or(value, other)
 @intrinsic(name: "__bit_or")
 fn bit_or(value: i64, other: i64): () -> i64 __bit_or(value, other)
 
-@intrinsic(name: "__i32_wrap_i64")
-fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)
-
 @intrinsic(name: "__i64_extend_u")
 fn extend_i32_u(value: i32): () -> i64 __i64_extend_u(value)
-
-@intrinsic(name: "__i64_extend_s")
-fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
-
-@intrinsic(name: "__reinterpret_f32_to_i32")
-fn reinterpret_f32_to_i32(value: f32): () -> i32 __reinterpret_f32_to_i32(value)
-
-@intrinsic(name: "__reinterpret_i32_to_f32")
-fn reinterpret_i32_to_f32(value: i32): () -> f32 __reinterpret_i32_to_f32(value)
-
-@intrinsic(name: "__f32_demote_f64")
-fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
-
-@intrinsic(name: "__f64_promote_f32")
-fn promote_f32(value: f32): () -> f64 __f64_promote_f32(value)
-
-@intrinsic(name: "__reinterpret_f64_to_i64")
-fn reinterpret_f64_to_i64(value: f64): () -> i64 __reinterpret_f64_to_i64(value)
-
-@intrinsic(name: "__reinterpret_i64_to_f64")
-fn reinterpret_i64_to_f64(value: i64): () -> f64 __reinterpret_i64_to_f64(value)

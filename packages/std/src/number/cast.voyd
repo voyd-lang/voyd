@@ -1,0 +1,157 @@
+//! Primitive numeric conversion APIs.
+//!
+//! This module centralizes numeric conversion intrinsics behind explicit,
+//! typed std functions.
+
+use std::result::types::all
+
+/// Error returned by checked numeric casts.
+pub obj CastError {
+  /// Machine-readable error code.
+  api code: i32
+}
+
+/// Error code for non-finite or non-integer checked float inputs.
+pub fn cast_error_code_invalid_input() -> i32
+  1
+
+/// Error code for values that overflow the destination type.
+pub fn cast_error_code_overflow() -> i32
+  2
+
+/// Constructs a `CastError` result with the provided code.
+pub fn cast_error<T>(code: i32) -> Result<T, CastError>
+  Err<CastError> { error: CastError { code } }
+
+/// Converts an `i32` to `f64`.
+pub fn to_f64(value: i32) -> f64
+  convert_f64_i32_s(value)
+
+/// Converts an `i64` to `f64`.
+pub fn to_f64(value: i64) -> f64
+  convert_f64_i64_s(value)
+
+/// Converts an `f32` to `f64`.
+pub fn to_f64(value: f32) -> f64
+  promote_f32(value)
+
+/// Converts an `i32` to `f32`.
+pub fn to_f32(value: i32) -> f32
+  convert_f32_i32_s(value)
+
+/// Converts an `i64` to `f32`.
+pub fn to_f32(value: i64) -> f32
+  convert_f32_i64_s(value)
+
+/// Converts an `f64` to `f32`.
+pub fn to_f32(value: f64) -> f32
+  demote_f64(value)
+
+/// Sign-extends an `i32` into `i64`.
+pub fn to_i64(value: i32) -> i64
+  extend_i32_s(value)
+
+/// Wraps an `i64` into `i32` by truncating to the low 32 bits.
+pub fn to_i32_wrapping(value: i64) -> i32
+  wrap_i64(value)
+
+/// Converts an `i64` to `i32`, returning overflow on narrowing failure.
+pub fn to_i32_checked(value: i64): () -> Result<i32, CastError>
+  let narrowed = wrap_i64(value)
+  if extend_i32_s(narrowed) != value:
+    return cast_error(cast_error_code_overflow())
+  Ok<i32> { value: narrowed }
+
+/// Converts an `f32` to `i32`, requiring a finite in-range integer value.
+pub fn to_i32_checked(value: f32): () -> Result<i32, CastError>
+  to_i32_checked(to_f64(value))
+
+/// Converts an `f64` to `i32`, requiring a finite in-range integer value.
+pub fn to_i32_checked(value: f64): () -> Result<i32, CastError>
+  if not is_finite_f64(value):
+    return cast_error(cast_error_code_invalid_input())
+  if trunc_f64(value) != value:
+    return cast_error(cast_error_code_invalid_input())
+  if value < -2147483648.0 or value > 2147483647.0:
+    return cast_error(cast_error_code_overflow())
+  Ok<i32> { value: trunc_i32_f64_s(value) }
+
+/// Converts an `f32` to `i64`, requiring a finite in-range integer value.
+pub fn to_i64_checked(value: f32): () -> Result<i64, CastError>
+  to_i64_checked(to_f64(value))
+
+/// Converts an `f64` to `i64`, requiring a finite in-range integer value.
+pub fn to_i64_checked(value: f64): () -> Result<i64, CastError>
+  if not is_finite_f64(value):
+    return cast_error(cast_error_code_invalid_input())
+  if trunc_f64(value) != value:
+    return cast_error(cast_error_code_invalid_input())
+  // `2^63 - 1` is not exactly representable as `f64`, so use an exclusive upper bound.
+  let min_i64 = 0.0 - 9223372036854775808.0
+  if value < min_i64 or value >= 9223372036854775808.0:
+    return cast_error(cast_error_code_overflow())
+  Ok<i64> { value: trunc_i64_f64_s(value) }
+
+/// Reinterprets `f32` bits as `i32`.
+pub fn reinterpret_i32(value: f32) -> i32
+  reinterpret_f32_to_i32(value)
+
+/// Reinterprets `i32` bits as `f32`.
+pub fn reinterpret_f32(value: i32) -> f32
+  reinterpret_i32_to_f32(value)
+
+/// Reinterprets `f64` bits as `i64`.
+pub fn reinterpret_i64(value: f64) -> i64
+  reinterpret_f64_to_i64(value)
+
+/// Reinterprets `i64` bits as `f64`.
+pub fn reinterpret_f64(value: i64) -> f64
+  reinterpret_i64_to_f64(value)
+
+fn is_finite_f64(value: f64) -> bool
+  (value - value) == 0.0
+
+@intrinsic(name: "__f32_demote_f64")
+fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+@intrinsic(name: "__f64_promote_f32")
+fn promote_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+@intrinsic(name: "__f32_convert_i32_s")
+fn convert_f32_i32_s(value: i32): () -> f32 __f32_convert_i32_s(value)
+
+@intrinsic(name: "__f32_convert_i64_s")
+fn convert_f32_i64_s(value: i64): () -> f32 __f32_convert_i64_s(value)
+
+@intrinsic(name: "__f64_convert_i32_s")
+fn convert_f64_i32_s(value: i32): () -> f64 __f64_convert_i32_s(value)
+
+@intrinsic(name: "__f64_convert_i64_s")
+fn convert_f64_i64_s(value: i64): () -> f64 __f64_convert_i64_s(value)
+
+@intrinsic(name: "__i32_trunc_f64_s")
+fn trunc_i32_f64_s(value: f64): () -> i32 __i32_trunc_f64_s(value)
+
+@intrinsic(name: "__i64_trunc_f64_s")
+fn trunc_i64_f64_s(value: f64): () -> i64 __i64_trunc_f64_s(value)
+
+@intrinsic(name: "__trunc")
+fn trunc_f64(value: f64): () -> f64 __trunc(value)
+
+@intrinsic(name: "__i32_wrap_i64")
+fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)
+
+@intrinsic(name: "__i64_extend_s")
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
+
+@intrinsic(name: "__reinterpret_f32_to_i32")
+fn reinterpret_f32_to_i32(value: f32): () -> i32 __reinterpret_f32_to_i32(value)
+
+@intrinsic(name: "__reinterpret_i32_to_f32")
+fn reinterpret_i32_to_f32(value: i32): () -> f32 __reinterpret_i32_to_f32(value)
+
+@intrinsic(name: "__reinterpret_f64_to_i64")
+fn reinterpret_f64_to_i64(value: f64): () -> i64 __reinterpret_f64_to_i64(value)
+
+@intrinsic(name: "__reinterpret_i64_to_f64")
+fn reinterpret_i64_to_f64(value: i64): () -> f64 __reinterpret_i64_to_f64(value)

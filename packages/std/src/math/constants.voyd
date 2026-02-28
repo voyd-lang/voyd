@@ -1,12 +1,14 @@
 //! Mathematical constants and unit conversion helpers.
 
+use std::number::cast::{ to_f32, to_f64 }
+
 /// Returns Archimedes' constant as f64.
 pub fn pi_f64() -> f64
   3.141592653589793
 
 /// Returns Archimedes' constant as f32.
 pub fn pi_f32() -> f32
-  demote_f64(pi_f64())
+  to_f32(pi_f64())
 
 /// Returns Tau (`2π`) as f64.
 pub fn tau_f64() -> f64
@@ -14,7 +16,7 @@ pub fn tau_f64() -> f64
 
 /// Returns Tau (`2π`) as f32.
 pub fn tau_f32() -> f32
-  demote_f64(tau_f64())
+  to_f32(tau_f64())
 
 /// Returns Euler's number as f64.
 pub fn e_f64() -> f64
@@ -22,7 +24,7 @@ pub fn e_f64() -> f64
 
 /// Returns Euler's number as f32.
 pub fn e_f32() -> f32
-  demote_f64(e_f64())
+  to_f32(e_f64())
 
 /// Converts degrees to radians.
 /// `value` is interpreted as degrees.
@@ -31,7 +33,7 @@ pub fn deg_to_rad(value: f64) -> f64
 
 /// Converts degrees to radians.
 pub fn deg_to_rad(value: f32) -> f32
-  demote_f64(deg_to_rad(promote_f32(value)))
+  to_f32(deg_to_rad(to_f64(value)))
 
 /// Converts radians to degrees.
 /// `value` is interpreted as radians.
@@ -40,10 +42,4 @@ pub fn rad_to_deg(value: f64) -> f64
 
 /// Converts radians to degrees.
 pub fn rad_to_deg(value: f32) -> f32
-  demote_f64(rad_to_deg(promote_f32(value)))
-
-@intrinsic(name: "__f32_demote_f64")
-fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
-
-@intrinsic(name: "__f64_promote_f32")
-fn promote_f32(value: f32): () -> f64 __f64_promote_f32(value)
+  to_f32(rad_to_deg(to_f64(value)))

@@ -346,6 +346,38 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 1);
       return ctx.mod.i64.extend_s(args[0]!);
     }
+    case "__i32_trunc_f32_s": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i32.trunc_s.f32(args[0]!);
+    }
+    case "__i32_trunc_f64_s": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i32.trunc_s.f64(args[0]!);
+    }
+    case "__i64_trunc_f32_s": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i64.trunc_s.f32(args[0]!);
+    }
+    case "__i64_trunc_f64_s": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.i64.trunc_s.f64(args[0]!);
+    }
+    case "__f32_convert_i32_s": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f32.convert_s.i32(args[0]!);
+    }
+    case "__f32_convert_i64_s": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f32.convert_s.i64(args[0]!);
+    }
+    case "__f64_convert_i32_s": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f64.convert_s.i32(args[0]!);
+    }
+    case "__f64_convert_i64_s": {
+      assertArgCount(name, args, 1);
+      return ctx.mod.f64.convert_s.i64(args[0]!);
+    }
     case "__reinterpret_f32_to_i32": {
       assertArgCount(name, args, 1);
       return ctx.mod.i32.reinterpret(args[0]!);

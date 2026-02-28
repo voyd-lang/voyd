@@ -75,3 +75,4 @@ pub std::traits::all
 pub std::test::assertions::{ Test, assert }
 pub self::vx
 pub self::math
+pub self::number
