@@ -148,6 +148,10 @@ export const lowerNominalTargetTypeArgumentsFromMetadata = <TypeExpr>({
     return { consumeNamespaceTypeArguments: false };
   }
 
+  if ((namespaceTypeArguments?.length ?? 0) > metadata.typeParameterNames.length) {
+    return { consumeNamespaceTypeArguments: false };
+  }
+
   const hasNamespaceTypeArguments = (namespaceTypeArguments?.length ?? 0) > 0;
   if (
     !hasNamespaceTypeArguments &&

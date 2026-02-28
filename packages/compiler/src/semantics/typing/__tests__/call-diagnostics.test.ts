@@ -318,6 +318,20 @@ describe("call diagnostics", () => {
     );
   });
 
+  it("rejects extra type arguments for concrete alias constructor calls", () => {
+    const ast = loadAst("constructor_call_alias_rejects_extra_type_args.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /too many type arguments|type mismatch/i,
+    );
+  });
+
+  it("rejects extra type arguments for generic alias constructor calls", () => {
+    const ast = loadAst(
+      "constructor_call_alias_generic_rejects_extra_type_args.voyd",
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(/too many type arguments/i);
+  });
+
   it("does not treat aliases to type parameters as constructor values", () => {
     const ast = loadAst("constructor_call_alias_type_parameter_shadowing.voyd");
 
