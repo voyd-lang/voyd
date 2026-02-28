@@ -22,12 +22,12 @@ export function meta({}: Route.MetaArgs) {
 export default function Home() {
   return (
     <main className="w-full overflow-x-hidden space-y-12">
-      <div className="flex flex-col items-center bg-gray-800 p-4 pb-20">
+      <div className="flex flex-col items-center p-4 pb-20">
         <img src={logo} alt="Voyd logo" className="aspect-square w-60" />
         <div className="w-full max-w-2xl space-y-8">
           <div className="w-full space-y-4">
             <h1 className="text-6xl font-bold text-center">voyd</h1>
-            <p className="w-full text-xl text-center text-gray-300">
+            <p className="w-full text-xl text-center">
               A high performance WebAssembly programming language with a focus
               on full stack web development.
             </p>
@@ -193,19 +193,13 @@ const Links = () => {
     <div className="w-full items-center justify-center flex gap-4 flex-wrap">
       <Link
         to="/docs"
-        className="px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-500"
+        className="px-4 py-2 rounded-md bg-background-foreground text-text-inverted"
       >
         Read the Docs
       </Link>
       <a
-        href={stdDocsPath}
-        className="px-4 py-2 rounded-md bg-teal-600 text-white hover:bg-teal-500"
-      >
-        Read Std Docs
-      </a>
-      <a
         href="https://github.com/voyd-lang/voyd"
-        className="px-4 py-2 rounded-md border border-indigo-600 text-indigo-400 hover:bg-indigo-600 hover:text-white"
+        className="px-4 py-2 rounded-md border border-background-foreground"
         target="_blank"
         rel="noopener noreferrer"
       >
@@ -225,7 +219,7 @@ const Explainer = ({
   return (
     <div className="w-full space-y-4 max-w-2xl">
       <h1 className="text-4xl font-bold text-center">{title}</h1>
-      <p className="w-full text-xl text-center text-gray-300">{description}</p>
+      <p className="w-full text-xl text-center">{description}</p>
     </div>
   );
 };
