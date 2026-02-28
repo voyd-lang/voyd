@@ -10,6 +10,10 @@ const functionCallPatterns = grammar.repository["function-call"]?.patterns ?? []
 const clausePattern = functionCallPatterns.find(
   (pattern) => pattern.name === "meta.function-call.operator-word.voyd"
 );
+const interpolationPattern = grammar.repository["string-interpolation"];
+const stringPattern = grammar.repository.constants?.patterns?.find(
+  (pattern) => pattern.name === "string.quoted.double.voyd"
+);
 
 assert(clausePattern, "Expected clause-call grammar pattern to exist");
 assert.equal(
@@ -28,6 +32,25 @@ assert(
 assert(
   !regexMatches("    if required <= __array_len(self.storage):").includes("required"),
   "Comparison expressions should not be mistaken for clause-style function calls"
+);
+
+assert(interpolationPattern, "Expected string interpolation grammar pattern to exist");
+assert.equal(
+  interpolationPattern.begin,
+  "\\$\\{",
+  "String interpolation should begin with ${"
+);
+
+assert(stringPattern, "Expected double-quoted string grammar pattern to exist");
+assert(
+  stringPattern.patterns?.some((pattern) => pattern.include === "#string-interpolation"),
+  "Double-quoted strings should include interpolation parsing"
+);
+
+const interpolationRegex = new RegExp(interpolationPattern.begin, "g");
+assert(
+  [..."\"\\rScanlines remaining: ${image_height - i}\"".matchAll(interpolationRegex)].length === 1,
+  "Expected interpolation regex to match ${...} within strings that include escape prefixes"
 );
 
 console.log("Voyd grammar regression checks passed");

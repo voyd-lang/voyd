@@ -247,12 +247,31 @@
           "end": "\"",
           "patterns": [
             {
+              "include": "#string-interpolation"
+            },
+            {
               "name": "constant.character.escape.voyd",
               "match": "\\\\."
             }
           ]
         }
       ]
+    },
+    "string-interpolation": {
+      "name": "meta.interpolation.voyd",
+      "begin": "\\$\\{",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.interpolation.begin.voyd"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.interpolation.end.voyd"
+        }
+      },
+      "patterns": [{ "include": "#expression" }]
     },
     "paren-expression": {
       "begin": "[\\(\\{\\[]",
