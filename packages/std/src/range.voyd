@@ -43,7 +43,11 @@ impl Iterator<i32> for RangeIterator
         return None {}
 
     let value = self.current
-    self.current = self.current + 1
+    if self.include_end and self.current == self.end then:
+      // Avoid i32 overflow for inclusive ranges that end at i32::MAX.
+      self.include_end = false
+    else:
+      self.current = self.current + 1
     Some<i32> { value: value }
 
 fn range_bound_or(value: Optional<i32>, fallback: i32) -> i32

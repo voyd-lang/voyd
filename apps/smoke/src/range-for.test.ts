@@ -36,4 +36,11 @@ describe("smoke: range for loops", () => {
     const output = await compiled.run<number>({ entryName: "range_for_nested" });
     expect(output).toBe(18);
   });
+
+  it("stops inclusive iterators at i32::MAX", async () => {
+    const output = await compiled.run<number>({
+      entryName: "range_iterator_inclusive_i32_max_stops",
+    });
+    expect(output).toBe(1);
+  });
 });
