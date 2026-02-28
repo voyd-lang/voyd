@@ -1,0 +1,23 @@
+pub fn interpolation_basic() -> i32
+  let name = "Drew"
+  let greeting = "Hello, ${name}"
+  if greeting.equals("Hello, Drew") then:
+    1
+  else:
+    0
+
+pub fn interpolation_escape() -> i32
+  let greeting = "Hello, \${name}"
+  if greeting.equals("Hello, \${name}") then:
+    1
+  else:
+    0
+
+pub fn interpolation_chain() -> i32
+  let first = "Drew"
+  let last = "Hale"
+  let value = "${first} ${last}"
+  if value.equals("Drew Hale") then:
+    1
+  else:
+    0

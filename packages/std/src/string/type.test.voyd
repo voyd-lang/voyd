@@ -291,6 +291,11 @@ test "string repeat and padding":
   assert("x".pad_left(width: 3, with: 46).equals("..x"), eq: true)
   assert("x".pad_right(width: 3, with: 46).equals("x.."), eq: true)
 
+test "string concat overloads":
+  assert("Hello, ".concat("world").equals("Hello, world"), eq: true)
+  assert("Hello".concat("!".as_slice()).equals("Hello!"), eq: true)
+  assert(String::init().concat("voyd").equals("voyd"), eq: true)
+
 test "string parse_int result":
   match("42".parse_int())
     Ok<i32> { value }:

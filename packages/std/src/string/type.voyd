@@ -107,6 +107,22 @@ impl String
   api fn to_string(self): () -> String
     self
 
+  /// Returns a new string by appending `other`.
+  api fn concat(self, other: String) -> String
+    if self.byte_count == 0:
+      return other
+    if other.byte_count == 0:
+      return self
+
+    let ~bytes = Array<i32>::with_capacity(self.byte_count + other.byte_count)
+    append_bytes(bytes, self.raw_bytes(), self.byte_count)
+    append_bytes(bytes, other.raw_bytes(), other.byte_count)
+    new_string(bytes.to_fixed_array())
+
+  /// Returns a new string by appending `other`.
+  api fn concat(self, other: StringSlice) -> String
+    self.concat(other.to_string())
+
   /// Returns a non-owning slice view of the string.
   api fn as_slice(self): () -> StringSlice
     new_string_slice(self, 0, self.byte_count)
