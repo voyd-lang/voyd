@@ -1,3 +1,7 @@
+---
+order: 200
+---
+
 # Types Overview
 
 The Voyd type system is structural at its core and supports nominal types

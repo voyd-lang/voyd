@@ -1,10 +1,14 @@
+---
+order: 0
+---
+
 # Voyd
 
 Voyd is a high performance WebAssembly language with an emphasis on full stack web development.
 
 ```rust
 fn fib(n: i32) -> i32
-  if n < 2 then:
+  if n < 2:
     n
   else:
     fib(n - 1) + fib(n - 2)
@@ -66,4 +70,3 @@ Currently requires node v22
 # Or nvm
 fnm install v22
 ```
-

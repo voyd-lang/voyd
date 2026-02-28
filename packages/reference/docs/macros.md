@@ -1,3 +1,7 @@
+---
+order: 100
+---
+
 # Macros
 
 There are three types of macros in voyd, reader macros, functional macros, and
@@ -21,14 +25,14 @@ evaluated at compile time and always return a syntax template.
 Functional macros operate directly on the AST.
 
 Syntax templates can be constructed with the backtick (\`). Any identifier
-prefixed with `~` will be evaluated when the macro is called and replaced
+prefixed with `$` will be evaluated when the macro is called and replaced
 with it's value.
 
 
 ```voyd
 macro def_wasm_operator(op, wasm_fn, arg_type, return_type)
-  ` fn ~op(left: ~arg_type, right: ~arg_type) -> ~return_type
-    binaryen_mod (~arg_type, ~wasm_fn) (left, right)
+  ` fn $op(left: $arg_type, right: $arg_type) -> $return_type
+    binaryen_mod ($arg_type, $wasm_fn) (left, right)
 
 def_wasm_operator('<', lt_s, i32, i32)
 
@@ -37,15 +41,15 @@ fn '<'(left: i32, right: i32) -> i32
   binaryen_mod (i32, lt_s) (left, right)
 ```
 
-You can also use the `~~` prefix to splice a list in place:
+You can also use the `$$` prefix to splice a list in place:
 
 ```voyd
 macro foo(foo_call)
   let args = foo_call.slice(1)
-  if foo_call.get(0) == bar then:
-    ` you_chose_bar(~~args)
+  if foo_call.get(0) == bar:
+    ` you_chose_bar($$args)
   else:
-    ` you_chose_something_else(~~args)
+    ` you_chose_something_else($$args)
 
 foo bar(1, 2, 3) // or foo(bar(1, 2, 3))
 
@@ -53,15 +57,15 @@ foo bar(1, 2, 3) // or foo(bar(1, 2, 3))
 you_chose_bar(1, 2, 3)
 ```
 
-You can also use `~` and `~~` to evaluate and insert expressions. Just
+You can also use `$` and `$$` to evaluate and insert expressions. Just
 call them like a function with a single parameter:
 
 ```voyd
 macro foo(foo_call)
-  if foo_call.get(0) == bar then:
-    ` you_chose_bar(~~(foo_call.slice(1) ))
+  if foo_call.get(0) == bar:
+    ` you_chose_bar($$(foo_call.slice(1) ))
   else:
-    ` unknown_function_name(~(foo_call.get(0)))
+    ` unknown_function_name($(foo_call.get(0)))
 
 foo baz(1, 2, 3) // or foo(bar(1, 2, 3))
 
@@ -70,8 +74,8 @@ unknown_function_name(baz)
 ```
 
 (For lisp users)
-Syntax templates work similarly to backquotes. The `~` acts as the `,` in
-common lisp and the `~~` acts as the `,@`.
+Syntax templates work similarly to backquotes. The `$` acts as the `,` in
+common lisp and the `$$` acts as the `,@`.
 
 
 # Outdated info below

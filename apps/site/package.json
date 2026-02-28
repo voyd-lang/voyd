@@ -6,7 +6,7 @@
     "prebuild": "npm -w @voyd/reference run build",
     "build": "react-router build",
     "predev": "npm -w @voyd/reference run build",
-    "dev": "react-router dev",
+    "dev": "react-router dev --host",
     "start": "react-router-serve ./build/server/index.js",
     "preview": "npm run build && react-router-serve ./build/server/index.js",
     "typecheck": "react-router typegen && tsc -p tsconfig.typecheck.json",
