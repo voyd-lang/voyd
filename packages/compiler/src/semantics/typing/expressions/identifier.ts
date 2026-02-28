@@ -4,6 +4,8 @@ import { resolveImportedValue } from "../imports.js";
 import type { TypingContext } from "../types.js";
 import { getIntrinsicType } from "./intrinsics.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
+import { createTypingState } from "../context.js";
+import { resolveTypeAlias, unifyWithBudget } from "../type-system.js";
 
 export const typeIdentifierExpr = (
   expr: HirExpression & { exprKind: "identifier"; symbol: SymbolId },
@@ -29,6 +31,8 @@ export const getValueType = (
     intrinsicName?: string;
     intrinsicUsesSignature?: boolean;
     unresolved?: boolean;
+    aliasConstructorTarget?: unknown;
+    aliasConstructorAlias?: unknown;
   };
 
   if (metadata.unresolved === true) {
@@ -108,6 +112,30 @@ export const getValueType = (
     return unknownType;
   }
 
+  const aliasConstructorTarget = metadata.aliasConstructorTarget;
+  if (typeof aliasConstructorTarget === "number") {
+    const targetType = getValueType(aliasConstructorTarget, ctx, options);
+    const aliasConstructorAlias =
+      typeof metadata.aliasConstructorAlias === "number"
+        ? metadata.aliasConstructorAlias
+        : undefined;
+    const specialized = aliasConstructorAlias
+      ? specializeAliasConstructorType({
+          targetType,
+          targetSymbol: aliasConstructorTarget,
+          aliasSymbol: aliasConstructorAlias,
+          ctx,
+          span: options.span,
+        })
+      : targetType;
+    ctx.valueTypes.set(symbol, specialized);
+    if (!ctx.table.getSymbolScheme(symbol)) {
+      const scheme = ctx.arena.newScheme([], specialized);
+      ctx.table.setSymbolScheme(symbol, scheme);
+    }
+    return specialized;
+  }
+
   return emitDiagnostic({
     ctx,
     code: "TY0041",
@@ -118,4 +146,49 @@ export const getValueType = (
     },
     span: normalizeSpan(options.span),
   });
+};
+
+const specializeAliasConstructorType = ({
+  targetType,
+  targetSymbol,
+  aliasSymbol,
+  ctx,
+  span,
+}: {
+  targetType: TypeId;
+  targetSymbol: SymbolId;
+  aliasSymbol: SymbolId;
+  ctx: TypingContext;
+  span?: SourceSpan;
+}): TypeId => {
+  if (!ctx.typeAliases.hasTemplate(aliasSymbol)) {
+    return targetType;
+  }
+  const signature = ctx.functions.getSignature(targetSymbol);
+  if (!signature) {
+    return targetType;
+  }
+
+  let aliasType: TypeId;
+  try {
+    aliasType = resolveTypeAlias(aliasSymbol, ctx, createTypingState(), []);
+  } catch {
+    return targetType;
+  }
+
+  const unified = unifyWithBudget({
+    actual: aliasType,
+    expected: signature.returnType,
+    options: {
+      location: ctx.hir.module.ast,
+      reason: "alias constructor value specialization",
+      allowUnknown: true,
+    },
+    ctx,
+    span: normalizeSpan(span),
+  });
+  if (!unified.ok) {
+    return targetType;
+  }
+  return ctx.arena.substitute(signature.typeId, unified.substitution);
 };

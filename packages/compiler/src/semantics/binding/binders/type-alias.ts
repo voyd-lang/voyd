@@ -1,6 +1,6 @@
 import type { ParsedTypeAliasDecl } from "../parsing.js";
 import type { BindingContext } from "../types.js";
-import type { TypeParameterDecl } from "../../decls.js";
+import type { TypeAliasDecl, TypeParameterDecl } from "../../decls.js";
 import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
@@ -164,6 +164,7 @@ const resolveObjectTypeSymbol = ({
 };
 
 const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
+  const aliasConstructorSymbols = new Map<string, SymbolId>();
   let changed = true;
   while (changed) {
     changed = false;
@@ -202,6 +203,30 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
       if (targetRecord.kind !== "type") {
         return;
       }
+      const aliasRecord = ctx.symbolTable.getSymbol(alias.symbol);
+      const aliasMetadata = aliasRecord.metadata as
+        | {
+            nominalTargetTypeArguments?: unknown;
+            nominalTargetTypeParameterNames?: unknown;
+          }
+        | undefined;
+      const targetMetadata = targetRecord.metadata as
+        | {
+            nominalTargetTypeArguments?: unknown;
+            nominalTargetTypeParameterNames?: unknown;
+          }
+        | undefined;
+      const canCopyTargetNominalMetadata =
+        (alias.typeParameters?.length ?? 0) === 0 &&
+        !Array.isArray(aliasMetadata?.nominalTargetTypeArguments) &&
+        Array.isArray(targetMetadata?.nominalTargetTypeArguments);
+      if (canCopyTargetNominalMetadata) {
+        ctx.symbolTable.setSymbolMetadata(alias.symbol, {
+          nominalTargetTypeArguments: targetMetadata?.nominalTargetTypeArguments,
+          nominalTargetTypeParameterNames:
+            targetMetadata?.nominalTargetTypeParameterNames,
+        });
+      }
       ensureConstructorImport({
         targetSymbol,
         syntax: alias.target,
@@ -215,9 +240,16 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
       const bucket = ctx.staticMethods.get(alias.symbol) ?? new Map();
       const aliasConstructors = bucket.get("init") ?? new Set<SymbolId>();
       const sizeBefore = aliasConstructors.size;
-      constructors.forEach((constructorSymbol) =>
-        aliasConstructors.add(constructorSymbol),
-      );
+      constructors.forEach((constructorSymbol) => {
+        const aliasConstructor = ensureAliasConstructorSymbol({
+          alias,
+          aliasScope,
+          constructorSymbol,
+          aliasConstructorSymbols,
+          ctx,
+        });
+        aliasConstructors.add(aliasConstructor);
+      });
       if (aliasConstructors.size === sizeBefore) {
         return;
       }
@@ -226,4 +258,56 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
       changed = true;
     });
   }
+};
+
+const ensureAliasConstructorSymbol = ({
+  alias,
+  aliasScope,
+  constructorSymbol,
+  aliasConstructorSymbols,
+  ctx,
+}: {
+  alias: TypeAliasDecl;
+  aliasScope: number;
+  constructorSymbol: SymbolId;
+  aliasConstructorSymbols: Map<string, SymbolId>;
+  ctx: BindingContext;
+}): SymbolId => {
+  const key = `${alias.symbol}:${constructorSymbol}`;
+  const cached = aliasConstructorSymbols.get(key);
+  if (typeof cached === "number") {
+    return cached;
+  }
+
+  const constructorRecord = ctx.symbolTable.getSymbol(constructorSymbol);
+  const aliasRecord = ctx.symbolTable.getSymbol(alias.symbol);
+  const aliasMetadata = aliasRecord.metadata as
+    | {
+        nominalTargetTypeArguments?: unknown;
+        nominalTargetTypeParameterNames?: unknown;
+      }
+    | undefined;
+  const local = ctx.symbolTable.declare(
+    {
+      name: constructorRecord.name,
+      kind: "value",
+      declaredAt: alias.form?.syntaxId ?? alias.target.syntaxId,
+      metadata: {
+        aliasConstructorTarget: constructorSymbol,
+        aliasConstructorAlias: alias.symbol,
+        nominalTargetTypeArguments: aliasMetadata?.nominalTargetTypeArguments,
+        nominalTargetTypeParameterNames:
+          aliasMetadata?.nominalTargetTypeParameterNames,
+      },
+    },
+    aliasScope,
+  );
+
+  const overloadSet = ctx.overloadBySymbol.get(constructorSymbol);
+  if (typeof overloadSet === "number") {
+    ctx.overloadBySymbol.set(local, overloadSet);
+  }
+
+  aliasConstructorSymbols.set(key, local);
+  return local;
 };

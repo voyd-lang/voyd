@@ -276,6 +276,48 @@ describe("call diagnostics", () => {
     );
   });
 
+  it("enforces fixed type arguments across alias-to-alias constructor calls", () => {
+    const ast = loadAst("constructor_call_alias_chain_fixed_type_args_enforced.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("enforces fixed type arguments when alias ::init is referenced then called", () => {
+    const ast = loadAst("constructor_call_alias_static_init_ref_enforced.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
   it("does not treat aliases to type parameters as constructor values", () => {
     const ast = loadAst("constructor_call_alias_type_parameter_shadowing.voyd");
 

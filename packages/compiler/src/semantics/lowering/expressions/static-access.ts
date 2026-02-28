@@ -315,6 +315,10 @@ const lowerStaticMethodCall = ({
     methodTable,
     ctx,
   });
+  const callResolution = unwrapAliasConstructorResolution({
+    resolution,
+    ctx,
+  });
   const aliasConstructorTypeArguments =
     calleeExpr.value === "init"
       ? lowerAliasConstructorTypeArgumentsForSymbol({
@@ -325,16 +329,16 @@ const lowerStaticMethodCall = ({
         })
       : { consumeNamespaceTypeArguments: false as const };
   const constructorResolution =
-    resolution.kind === "symbol" &&
-    ctx.symbolTable.getSymbol(resolution.symbol).kind === "type"
+    callResolution.kind === "symbol" &&
+    ctx.symbolTable.getSymbol(callResolution.symbol).kind === "type"
       ? resolveConstructorResolution({
-          targetSymbol: resolution.symbol,
+          targetSymbol: callResolution.symbol,
           name: calleeExpr.value,
           ctx,
         })
       : undefined;
   const callee = lowerResolvedCallee({
-    resolution: constructorResolution ?? resolution,
+    resolution: constructorResolution ?? callResolution,
     syntax: calleeExpr,
     ctx,
   });
@@ -412,6 +416,27 @@ const lowerAliasConstructorTypeArgumentsForSymbol = ({
         substitutionsByName,
       }),
   });
+};
+
+const unwrapAliasConstructorResolution = ({
+  resolution,
+  ctx,
+}: {
+  resolution: ReturnType<typeof resolveStaticMethodResolution>;
+  ctx: LoweringParams["ctx"];
+}) => {
+  if (resolution.kind !== "symbol") {
+    return resolution;
+  }
+  const record = ctx.symbolTable.getSymbol(resolution.symbol);
+  const metadata = record.metadata as { aliasConstructorTarget?: unknown } | undefined;
+  if (typeof metadata?.aliasConstructorTarget !== "number") {
+    return resolution;
+  }
+  return {
+    ...resolution,
+    symbol: metadata.aliasConstructorTarget,
+  };
 };
 
 const lowerModuleQualifiedCall = ({

@@ -162,7 +162,16 @@ export const resolveConstructorResolution = ({
     return undefined;
   }
 
-  const symbols = Array.from(constructors);
+  const symbols = Array.from(
+    new Set(
+      Array.from(constructors).map((symbol) =>
+        unwrapAliasConstructorTargetSymbol({
+          symbol,
+          ctx,
+        }),
+      ),
+    ),
+  );
   const overloadIds = new Set(
     symbols
       .map((symbol) => ctx.overloadBySymbol.get(symbol))
@@ -190,4 +199,18 @@ export const resolveConstructorResolution = ({
   }
 
   throw new Error(`ambiguous constructor overloads for type ${name}`);
+};
+
+const unwrapAliasConstructorTargetSymbol = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: LowerContext;
+}): SymbolId => {
+  const record = ctx.symbolTable.getSymbol(symbol);
+  const metadata = record.metadata as { aliasConstructorTarget?: unknown } | undefined;
+  return typeof metadata?.aliasConstructorTarget === "number"
+    ? metadata.aliasConstructorTarget
+    : symbol;
 };
