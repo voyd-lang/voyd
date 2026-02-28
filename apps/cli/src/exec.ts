@@ -3,7 +3,6 @@ import { readFileSync, statSync, existsSync } from "fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
-import { testGc } from "@voyd/lib/binaryen-gc/test.js";
 import { createSdk, type CompileResult } from "@voyd/sdk";
 import { analyzeModules, loadModuleGraph, parse } from "@voyd/sdk/compiler";
 import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd/sdk/compiler";
@@ -76,15 +75,16 @@ async function main() {
   }
 
   if (config.run) {
-    return runVoyd(entryPath, roots, config.runBinaryenOptimizationPass);
+    return runVoyd({
+      entryPath,
+      entryName: config.runEntry,
+      roots,
+      optimize: config.runBinaryenOptimizationPass,
+    });
   }
 
   if (config.runWasm) {
-    return runWasm(entryPath);
-  }
-
-  if (config.internalTest) {
-    return testGc();
+    return runWasm(entryPath, config.runEntry);
   }
 
   console.log(
@@ -219,22 +219,28 @@ async function emitWasm(
   stdout.write(result.wasm);
 }
 
-async function runVoyd(
-  entryPath: string,
-  roots: ModuleRoots,
+async function runVoyd({
+  entryPath,
+  entryName = "main",
+  roots,
   optimize = false,
-) {
+}: {
+  entryPath: string;
+  entryName?: string;
+  roots: ModuleRoots;
+  optimize?: boolean;
+}) {
   const compiled = requireCompileSuccess(
     await sdk.compile({ entryPath, roots, optimize }),
   );
 
-  const result = await sdk.run({ wasm: compiled.wasm, entryName: "main" });
+  const result = await sdk.run({ wasm: compiled.wasm, entryName });
   printValue(result);
 }
 
-async function runWasm(entryPath: string) {
+async function runWasm(entryPath: string, entryName = "main") {
   const wasm = readFileSync(entryPath);
-  const result = await sdk.run({ wasm, entryName: "main" });
+  const result = await sdk.run({ wasm, entryName });
   printValue(result);
 }
 
