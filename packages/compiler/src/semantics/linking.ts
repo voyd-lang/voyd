@@ -161,16 +161,156 @@ export const monomorphizeProgram = ({
   };
   modules.forEach((mod) => enqueueModule(mod.moduleId));
 
+  const typeContainsUnknownPrimitive = ({
+    ctx,
+    typeId,
+    seen = new Set<TypeId>(),
+  }: {
+    ctx: TypingContext;
+    typeId: TypeId;
+    seen?: Set<TypeId>;
+  }): boolean => {
+    if (seen.has(typeId)) {
+      return false;
+    }
+    seen.add(typeId);
+    const desc = ctx.arena.get(typeId);
+    switch (desc.kind) {
+      case "primitive":
+        return desc.name === "unknown";
+      case "recursive":
+        return typeContainsUnknownPrimitive({ ctx, typeId: desc.body, seen });
+      case "type-param-ref":
+        return true;
+      case "trait":
+      case "nominal-object":
+        return desc.typeArgs.some((arg) =>
+          typeContainsUnknownPrimitive({ ctx, typeId: arg, seen }),
+        );
+      case "fixed-array":
+        return typeContainsUnknownPrimitive({ ctx, typeId: desc.element, seen });
+      case "structural-object":
+        return desc.fields.some((field) =>
+          typeContainsUnknownPrimitive({ ctx, typeId: field.type, seen }),
+        );
+      case "function":
+        return (
+          desc.parameters.some((param) =>
+            typeContainsUnknownPrimitive({ ctx, typeId: param.type, seen }),
+          ) ||
+          typeContainsUnknownPrimitive({
+            ctx,
+            typeId: desc.returnType,
+            seen,
+          })
+        );
+      case "union":
+        return desc.members.some((member) =>
+          typeContainsUnknownPrimitive({ ctx, typeId: member, seen }),
+        );
+      case "intersection":
+        return (
+          (typeof desc.nominal === "number" &&
+            typeContainsUnknownPrimitive({
+              ctx,
+              typeId: desc.nominal,
+              seen,
+            })) ||
+          (typeof desc.structural === "number" &&
+            typeContainsUnknownPrimitive({
+              ctx,
+              typeId: desc.structural,
+              seen,
+            })) ||
+          Boolean(
+            desc.traits?.some((trait) =>
+              typeContainsUnknownPrimitive({ ctx, typeId: trait, seen }),
+            ),
+          )
+        );
+      default:
+        return false;
+    }
+  };
+
+  const instantiationTypeArgsAreConcrete = ({
+    ctx,
+    typeArgs,
+  }: {
+    ctx: TypingContext;
+    typeArgs: readonly TypeId[];
+  }): boolean =>
+    !typeArgs.some((typeArg) =>
+      typeContainsUnknownPrimitive({ ctx, typeId: typeArg }),
+    );
+
+  const inferTraitImplMethodTypeArgs = ({
+    callerCtx,
+    calleeCtx,
+    calleeSymbol,
+    targetType,
+    traitType,
+  }: {
+    callerCtx: TypingContext;
+    calleeCtx: TypingContext;
+    calleeSymbol: SymbolId;
+    targetType: TypeId;
+    traitType: TypeId;
+  }): readonly TypeId[] | undefined => {
+    const signature = calleeCtx.functions.getSignature(calleeSymbol);
+    if (!signature) {
+      return undefined;
+    }
+    const scheme = calleeCtx.arena.getScheme(signature.scheme);
+    if (scheme.params.length === 0) {
+      return [];
+    }
+    const functionType = calleeCtx.arena.get(scheme.body);
+    if (functionType.kind !== "function" || functionType.parameters.length === 0) {
+      return undefined;
+    }
+    const receiverType = functionType.parameters[0]!.type;
+    const matchTarget = callerCtx.arena.unify(receiverType, targetType, {
+      location: callerCtx.hir.module.ast,
+      reason: "monomorphize trait impl method (target match)",
+      variance: "invariant",
+      allowUnknown: true,
+    });
+    const match =
+      matchTarget.ok
+        ? matchTarget
+        : callerCtx.arena.unify(receiverType, traitType, {
+            location: callerCtx.hir.module.ast,
+            reason: "monomorphize trait impl method (trait match)",
+            variance: "invariant",
+            allowUnknown: true,
+          });
+    if (!match.ok) {
+      return undefined;
+    }
+    const resolvedTypeArgs: TypeId[] = [];
+    for (const param of scheme.params) {
+      const resolved = match.substitution.get(param);
+      if (typeof resolved !== "number") {
+        return undefined;
+      }
+      resolvedTypeArgs.push(resolved);
+    }
+    return resolvedTypeArgs;
+  };
+
   const requestInstantiation = ({
     callerModuleId,
     calleeRef,
     typeArgs,
+    allowSameModule,
   }: {
     callerModuleId: string;
     calleeRef: TypingSymbolRef;
     typeArgs: readonly TypeId[];
+    allowSameModule?: boolean;
   }): void => {
-    if (calleeRef.moduleId === callerModuleId) {
+    if (!allowSameModule && calleeRef.moduleId === callerModuleId) {
       return;
     }
     const canonicalCallee = canonicalSymbolRef(calleeRef);
@@ -180,8 +320,9 @@ export const monomorphizeProgram = ({
       return;
     }
     const calleeSignature = callee.typing.functions.getSignature(canonicalCallee.symbol);
+    const calleeFunction = calleeCtx.functions.getFunction(canonicalCallee.symbol);
     const typeParams = calleeSignature?.typeParams ?? [];
-    if (!calleeSignature || typeParams.length === 0) {
+    if (!calleeSignature || !calleeFunction || typeParams.length === 0) {
       return;
     }
     if (typeArgs.length !== typeParams.length) {
@@ -208,6 +349,74 @@ export const monomorphizeProgram = ({
     });
     touchedModules.add(canonicalCallee.moduleId);
     enqueueModule(canonicalCallee.moduleId);
+  };
+
+  const requestTraitImplMethodInstantiations = ({
+    callerModuleId,
+    callerCtx,
+  }: {
+    callerModuleId: string;
+    callerCtx: TypingContext;
+  }): void => {
+    const templateMethodsByImplSymbol = new Map<
+      SymbolId,
+      { traitMethod: SymbolId; implMethod: SymbolId }[]
+    >();
+    callerCtx.traits.getImplTemplates().forEach((template) => {
+      const bucket = templateMethodsByImplSymbol.get(template.implSymbol) ?? [];
+      template.methods.forEach((implMethod, traitMethod) => {
+        const exists = bucket.some(
+          (method) =>
+            method.traitMethod === traitMethod &&
+            method.implMethod === implMethod,
+        );
+        if (!exists) {
+          bucket.push({ traitMethod, implMethod });
+        }
+      });
+      templateMethodsByImplSymbol.set(template.implSymbol, bucket);
+    });
+
+    callerCtx.traitImplsByNominal.forEach((impls) => {
+      impls.forEach((impl) => {
+        const methods =
+          templateMethodsByImplSymbol.get(impl.implSymbol) ??
+          Array.from(impl.methods.entries()).map(([traitMethod, implMethod]) => ({
+            traitMethod,
+            implMethod,
+          }));
+        methods.forEach(({ implMethod }) => {
+          const localCalleeRef = { moduleId: callerModuleId, symbol: implMethod };
+          const canonicalCallee = canonicalSymbolRef(localCalleeRef);
+          const calleeCtx = typingContextFor(canonicalCallee.moduleId);
+          if (!calleeCtx) {
+            return;
+          }
+          const inferredTypeArgs = inferTraitImplMethodTypeArgs({
+            callerCtx,
+            calleeCtx,
+            calleeSymbol: canonicalCallee.symbol,
+            targetType: impl.target,
+            traitType: impl.trait,
+          });
+          if (
+            !inferredTypeArgs ||
+            !instantiationTypeArgsAreConcrete({
+              ctx: calleeCtx,
+              typeArgs: inferredTypeArgs,
+            })
+          ) {
+            return;
+          }
+          requestInstantiation({
+            callerModuleId,
+            calleeRef: canonicalCallee,
+            typeArgs: inferredTypeArgs,
+            allowSameModule: true,
+          });
+        });
+      });
+    });
   };
 
   const processModuleQueue = (): void => {
@@ -269,6 +478,8 @@ export const monomorphizeProgram = ({
           });
         });
       });
+
+      requestTraitImplMethodInstantiations({ callerModuleId, callerCtx });
     }
   };
 
@@ -282,8 +493,9 @@ export const monomorphizeProgram = ({
       return;
     }
     const calleeSignature = callee.typing.functions.getSignature(calleeRef.symbol);
+    const calleeFunction = calleeCtx.functions.getFunction(calleeRef.symbol);
     const typeParams = calleeSignature?.typeParams ?? [];
-    if (!calleeSignature || typeParams.length === 0) {
+    if (!calleeSignature || !calleeFunction || typeParams.length === 0) {
       return;
     }
     if (request.typeArgs.length !== typeParams.length) {
