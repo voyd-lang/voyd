@@ -1,6 +1,6 @@
 import type { FC } from "react";
+import voydGrammar from "@voyd/lib/voyd.tmLanguage.json";
 import { createHighlighter, type LanguageInput } from "shiki";
-import voydGrammar from "../../../vscode/syntaxes/voyd.tmLanguage.json";
 
 export const highlighter = await createHighlighter({
   themes: ["github-dark"],

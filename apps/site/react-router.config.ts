@@ -8,6 +8,10 @@ export default {
   ssr: true,
   // Pre-render all routes for static hosting on GitHub Pages
   prerender: true,
+  // Avoid runtime manifest patch requests on static hosts.
+  routeDiscovery: {
+    mode: "initial",
+  },
   // Use the repo subpath when deployed to GitHub Pages project sites.
   basename,
 } satisfies Config;
