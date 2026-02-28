@@ -577,6 +577,31 @@ mod pkg
     );
   });
 
+  it("resolves self-relative imports to nested pkg.voyd modules without explicit pkg segments", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use src::pkgs::all",
+      [`${srcRoot}${sep}pkgs.voyd`]: "pub use self::vtrace::draw",
+      [`${srcRoot}${sep}pkgs${sep}vtrace${sep}pkg.voyd`]:
+        "pub fn draw() -> i32\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "src::pkgs",
+        "src::pkgs::vtrace::pkg",
+      ]),
+    );
+  });
+
   it("resolves super-relative imports from nested src pkg.voyd files", async () => {
     const srcRoot = resolve("/proj/src");
     const host = createMemoryHost({
@@ -599,6 +624,32 @@ mod pkg
         "src::main",
         "src::pkgs::math::pkg",
         "src::pkgs::math::ops",
+      ]),
+    );
+  });
+
+  it("resolves super-relative imports to nested pkg.voyd modules without explicit pkg segments", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use src::pkgs::nested::all",
+      [`${srcRoot}${sep}pkgs${sep}nested.voyd`]:
+        "pub use super::vtrace::draw",
+      [`${srcRoot}${sep}pkgs${sep}vtrace${sep}pkg.voyd`]:
+        "pub fn draw() -> i32\n  1",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "src::pkgs::nested",
+        "src::pkgs::vtrace::pkg",
       ]),
     );
   });
