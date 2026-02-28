@@ -1,7 +1,7 @@
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::{ some, none }
 pub std::result::types::{ Result, Ok, Err }
-pub std::result::fns::{ ok, err }
+pub std::result::fns::{ ok, err, and_then, unwrap_or }
 
 pub std::traits::{ Eq, Ord, Hash, Default, Clone, Copy }
 pub std::traits::{ Sequence, Iterator, for }

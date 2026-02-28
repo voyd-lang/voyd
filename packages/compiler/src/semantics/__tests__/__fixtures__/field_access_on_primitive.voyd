@@ -1,0 +1,3 @@
+pub fn main() -> i32
+  let scalar: f64 = 1.0
+  scalar.x
