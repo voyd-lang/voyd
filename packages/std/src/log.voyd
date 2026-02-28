@@ -50,8 +50,11 @@ pub obj LogField {
 
 pub type LogFields = Array<LogField>
 
-@effect(id: "std::log::Log")
 /// Host logging effect used by `std::log`.
+///
+/// `std::log` converts typed log-level and field values into a MessagePack map
+/// consumed by the host log sink.
+@effect(id: "std::log::Log")
 pub eff Log
   /// Emits one structured log event.
   ///
@@ -62,70 +65,90 @@ pub eff Log
   emit(tail, payload: MsgPack) -> void
 
 /// Emits a trace-level log message.
-pub fn trace({ message: StringSlice }): Log -> void
-  Log::emit(log_emit_payload(level: LogTrace {}, message: message.to_string(), fields: None {}))
+pub fn trace(message: StringSlice): Log -> void
+  Log::emit(log_emit_payload(LogTrace {}, message.to_string(), None {}))
 
 /// Emits a trace-level log message.
-pub fn trace({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(log_emit_payload(
-    level: LogTrace {},
-    message: message.to_string(),
-    fields: Some<LogFields> { value: fields }
-  ))
+pub fn trace(message: String): Log -> void
+  trace(message.as_slice())
+
+/// Emits a trace-level log message.
+pub fn trace(message: StringSlice, fields: LogFields): Log -> void
+  Log::emit(log_emit_payload(LogTrace {}, message.to_string(), Some<LogFields> { value: fields }))
+
+/// Emits a trace-level log message.
+pub fn trace(message: String, fields: LogFields): Log -> void
+  trace(message.as_slice(), fields)
 
 /// Emits a debug-level log message.
-pub fn debug({ message: StringSlice }): Log -> void
-  Log::emit(log_emit_payload(level: LogDebug {}, message: message.to_string(), fields: None {}))
+pub fn debug(message: StringSlice): Log -> void
+  Log::emit(log_emit_payload(LogDebug {}, message.to_string(), None {}))
 
 /// Emits a debug-level log message.
-pub fn debug({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(log_emit_payload(
-    level: LogDebug {},
-    message: message.to_string(),
-    fields: Some<LogFields> { value: fields }
-  ))
+pub fn debug(message: String): Log -> void
+  debug(message.as_slice())
+
+/// Emits a debug-level log message.
+pub fn debug(message: StringSlice, fields: LogFields): Log -> void
+  Log::emit(log_emit_payload(LogDebug {}, message.to_string(), Some<LogFields> { value: fields }))
+
+/// Emits a debug-level log message.
+pub fn debug(message: String, fields: LogFields): Log -> void
+  debug(message.as_slice(), fields)
 
 /// Emits an info-level log message.
-pub fn info({ message: StringSlice }): Log -> void
-  Log::emit(log_emit_payload(level: LogInfo {}, message: message.to_string(), fields: None {}))
+pub fn info(message: StringSlice): Log -> void
+  Log::emit(log_emit_payload(LogInfo {}, message.to_string(), None {}))
 
 /// Emits an info-level log message.
-pub fn info({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(log_emit_payload(
-    level: LogInfo {},
-    message: message.to_string(),
-    fields: Some<LogFields> { value: fields }
-  ))
+pub fn info(message: String): Log -> void
+  info(message.as_slice())
+
+/// Emits an info-level log message.
+pub fn info(message: StringSlice, fields: LogFields): Log -> void
+  Log::emit(log_emit_payload(LogInfo {}, message.to_string(), Some<LogFields> { value: fields }))
+
+/// Emits an info-level log message.
+pub fn info(message: String, fields: LogFields): Log -> void
+  info(message.as_slice(), fields)
 
 /// Emits a warning-level log message.
-pub fn warn({ message: StringSlice }): Log -> void
-  Log::emit(log_emit_payload(level: LogWarn {}, message: message.to_string(), fields: None {}))
+pub fn warn(message: StringSlice): Log -> void
+  Log::emit(log_emit_payload(LogWarn {}, message.to_string(), None {}))
 
 /// Emits a warning-level log message.
-pub fn warn({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(log_emit_payload(
-    level: LogWarn {},
-    message: message.to_string(),
-    fields: Some<LogFields> { value: fields }
-  ))
+pub fn warn(message: String): Log -> void
+  warn(message.as_slice())
+
+/// Emits a warning-level log message.
+pub fn warn(message: StringSlice, fields: LogFields): Log -> void
+  Log::emit(log_emit_payload(LogWarn {}, message.to_string(), Some<LogFields> { value: fields }))
+
+/// Emits a warning-level log message.
+pub fn warn(message: String, fields: LogFields): Log -> void
+  warn(message.as_slice(), fields)
 
 /// Emits an error-level log message.
-pub fn error({ message: StringSlice }): Log -> void
-  Log::emit(log_emit_payload(level: LogError {}, message: message.to_string(), fields: None {}))
+pub fn error(message: StringSlice): Log -> void
+  Log::emit(log_emit_payload(LogError {}, message.to_string(), None {}))
 
 /// Emits an error-level log message.
-pub fn error({ message: StringSlice, fields: LogFields }): Log -> void
-  Log::emit(log_emit_payload(
-    level: LogError {},
-    message: message.to_string(),
-    fields: Some<LogFields> { value: fields }
-  ))
+pub fn error(message: String): Log -> void
+  error(message.as_slice())
 
-fn log_emit_payload({ level: LogLevel, message: String, fields: Option<LogFields> }): () -> MsgPack
+/// Emits an error-level log message.
+pub fn error(message: StringSlice, fields: LogFields): Log -> void
+  Log::emit(log_emit_payload(LogError {}, message.to_string(), Some<LogFields> { value: fields }))
+
+/// Emits an error-level log message.
+pub fn error(message: String, fields: LogFields): Log -> void
+  error(message.as_slice(), fields)
+
+fn log_emit_payload(level: LogLevel, message: String, fields: Option<LogFields>): () -> MsgPack
   let ~payload = Dict<String, MsgPack>::init()
-  payload.set(key: "level", value: log_level_to_msgpack(level))
-  payload.set(key: "message", value: msgpack::make_string(message))
-  payload.set(key: "fields", value: log_fields_to_msgpack(fields))
+  payload.set("level", log_level_to_msgpack(level))
+  payload.set("message", msgpack::make_string(message))
+  payload.set("fields", log_fields_to_msgpack(fields))
   msgpack::make_map(payload)
 
 fn log_level_to_msgpack(level: LogLevel): () -> MsgPack
@@ -159,8 +182,8 @@ fn log_fields_to_msgpack(fields: Option<LogFields>): () -> MsgPack
 
 fn log_field_to_msgpack(field: LogField): () -> MsgPack
   let ~entry = Dict<String, MsgPack>::init()
-  entry.set(key: "key", value: msgpack::make_string(field.key))
-  entry.set(key: "value", value: log_field_value_to_msgpack(field.value))
+  entry.set("key", msgpack::make_string(field.key))
+  entry.set("value", log_field_value_to_msgpack(field.value))
   msgpack::make_map(entry)
 
 fn log_field_value_to_msgpack(value: LogFieldValue): () -> MsgPack

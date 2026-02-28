@@ -13,16 +13,20 @@ pub obj Path {
 
 impl Path
   /// Constructs a value from the provided input.
-  api fn new({ s: StringSlice }) -> Path
-    Path { raw: s.to_string() }
+  api fn new(path: String) -> Path
+    Path { raw: path }
+
+  /// Constructs a value from the provided input.
+  api fn new(path: StringSlice) -> Path
+    Path::new(path.to_string())
 
   /// Returns the path as a string value.
   api fn as_string(self) -> String
     self.raw
 
   /// Returns a path with `child` appended.
-  api fn join(self, { child: StringSlice }) -> Path
-    let child_path = child.to_string()
+  api fn join(self, child: String) -> Path
+    let child_path = child
     if string_len(child_path) == 0:
       return self
     if starts_with_separator(child_path):
@@ -39,6 +43,10 @@ impl Path
         concat_strings_with_separator(base, child_path)
     Path { raw: combined }
 
+  /// Returns a path with `child` appended.
+  api fn join(self, child: StringSlice) -> Path
+    self.join(child.to_string())
+
   /// Returns the parent path when one exists.
   api fn parent(self) -> Option<Path>
     let end = trim_trailing_separators(self.raw)
@@ -51,7 +59,7 @@ impl Path
     if separator == 0:
       if end == 1:
         return None {}
-      return Some<Path> { value: Path::new(s: "/".as_slice()) }
+      return Some<Path> { value: Path::new("/".as_slice()) }
 
     Some<Path> { value: Path { raw: self.raw.slice_bytes(0, separator) } }
 

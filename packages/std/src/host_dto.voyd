@@ -29,12 +29,12 @@ impl HostDto
   /// Returns a copy of the DTO with one field set.
   api fn set(self, key: String, value: MsgPack) -> HostDto
     let ~next = self.payload
-    next.set(key: key, value: value)
+    next.set(key, value)
     HostDto { payload: next }
 
   /// Reads a required MessagePack field from the payload.
   api fn read_msgpack(self, key: String) -> MsgPack
-    match(self.payload.get(key: key))
+    match(self.payload.get(key))
       Some<MsgPack> { value }:
         value
       None:

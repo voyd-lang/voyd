@@ -27,7 +27,7 @@ Doc comments do not attach to `let`, `var`, statements, expressions, or local-on
 `///` attaches to the next documentable target when:
 
 1. It is immediately before that target.
-2. Only whitespace and regular `//` comments appear in between.
+2. Only whitespace, regular `//` comments, and attribute lines (for example `@effect(...)`) appear in between.
 3. There is no blank line between the final `///` line and the target.
 
 ### Multiline `///` blocks

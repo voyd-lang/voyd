@@ -12,8 +12,8 @@ pub fn clamp(value: i32, min: i32, max: i32) -> i32
     else: value
 
 /// Returns `value` clamped between `min` and `max` (inclusive).
-pub fn clamp(value: i32, { min lower: i32, max upper: i32 }) -> i32
-  clamp(value, lower, upper)
+pub fn clamp(value: i32, { min: i32, max: i32 }) -> i32
+  clamp(value, min, max)
 
 /// Returns `value` clamped between `min` and `max` (inclusive).
 pub fn clamp(value: i64, min: i64, max: i64) -> i64
@@ -25,8 +25,8 @@ pub fn clamp(value: i64, min: i64, max: i64) -> i64
     else: value
 
 /// Returns `value` clamped between `min` and `max` (inclusive).
-pub fn clamp(value: i64, { min lower: i64, max upper: i64 }) -> i64
-  clamp(value, lower, upper)
+pub fn clamp(value: i64, { min: i64, max: i64 }) -> i64
+  clamp(value, min, max)
 
 /// Returns `value` clamped between `min` and `max` (inclusive).
 pub fn clamp(value: f32, min: f32, max: f32) -> f32
@@ -38,8 +38,8 @@ pub fn clamp(value: f32, min: f32, max: f32) -> f32
     else: value
 
 /// Returns `value` clamped between `min` and `max` (inclusive).
-pub fn clamp(value: f32, { min lower: f32, max upper: f32 }) -> f32
-  clamp(value, lower, upper)
+pub fn clamp(value: f32, { min: f32, max: f32 }) -> f32
+  clamp(value, min, max)
 
 /// Returns `value` clamped between `min` and `max` (inclusive).
 pub fn clamp(value: f64, min: f64, max: f64) -> f64
@@ -51,8 +51,8 @@ pub fn clamp(value: f64, min: f64, max: f64) -> f64
     else: value
 
 /// Returns `value` clamped between `min` and `max` (inclusive).
-pub fn clamp(value: f64, { min lower: f64, max upper: f64 }) -> f64
-  clamp(value, lower, upper)
+pub fn clamp(value: f64, { min: f64, max: f64 }) -> f64
+  clamp(value, min, max)
 
 /// Returns true when `value` is within `min..=max`.
 pub fn between(value: i32, min: i32, max: i32) -> bool
@@ -61,8 +61,8 @@ pub fn between(value: i32, min: i32, max: i32) -> bool
   value >= lower and value <= upper
 
 /// Returns true when `value` is within `min..=max`.
-pub fn between(value: i32, { min lower: i32, max upper: i32 }) -> bool
-  between(value, lower, upper)
+pub fn between(value: i32, { min: i32, max: i32 }) -> bool
+  between(value, min, max)
 
 /// Returns true when `value` is within `min..=max`.
 pub fn between(value: i64, min: i64, max: i64) -> bool
@@ -71,8 +71,8 @@ pub fn between(value: i64, min: i64, max: i64) -> bool
   value >= lower and value <= upper
 
 /// Returns true when `value` is within `min..=max`.
-pub fn between(value: i64, { min lower: i64, max upper: i64 }) -> bool
-  between(value, lower, upper)
+pub fn between(value: i64, { min: i64, max: i64 }) -> bool
+  between(value, min, max)
 
 /// Returns true when `value` is within `min..=max`.
 pub fn between(value: f32, min: f32, max: f32) -> bool
@@ -81,8 +81,8 @@ pub fn between(value: f32, min: f32, max: f32) -> bool
   value >= lower and value <= upper
 
 /// Returns true when `value` is within `min..=max`.
-pub fn between(value: f32, { min lower: f32, max upper: f32 }) -> bool
-  between(value, lower, upper)
+pub fn between(value: f32, { min: f32, max: f32 }) -> bool
+  between(value, min, max)
 
 /// Returns true when `value` is within `min..=max`.
 pub fn between(value: f64, min: f64, max: f64) -> bool
@@ -91,18 +91,18 @@ pub fn between(value: f64, min: f64, max: f64) -> bool
   value >= lower and value <= upper
 
 /// Returns true when `value` is within `min..=max`.
-pub fn between(value: f64, { min lower: f64, max upper: f64 }) -> bool
-  between(value, lower, upper)
+pub fn between(value: f64, { min: f64, max: f64 }) -> bool
+  between(value, min, max)
 
 /// Returns the linear interpolation between `start` and `end` at `t`.
 /// `t` is interpolation progress where `0` returns `start` and `1` returns `end`.
 /// Example: `lerp(10.0, 20.0, 0.25) == 12.5`.
-/// Supports UFCS call style: `0.0.lerp(to: 10.0, t: 0.25)`.
+/// Supports UFCS call style: `0.0.lerp(10.0, 0.25)`.
 pub fn lerp(start: f64, end: f64, t: f64) -> f64
   start + ((end - start) * t)
 
 /// Returns the linear interpolation between `start` and `end` at `t`.
-pub fn lerp(start: f64, { to end: f64, t: f64 }) -> f64
+pub fn lerp(start: f64, { to end: f64, at t: f64 }) -> f64
   lerp(start, end, t)
 
 /// Returns the linear interpolation between `start` and `end` at `t`.
@@ -111,13 +111,13 @@ pub fn lerp(start: f32, end: f32, t: f32) -> f32
   start + ((end - start) * t)
 
 /// Returns the linear interpolation between `start` and `end` at `t`.
-pub fn lerp(start: f32, { to end: f32, t: f32 }) -> f32
+pub fn lerp(start: f32, { to end: f32, at t: f32 }) -> f32
   lerp(start, end, t)
 
 /// Returns interpolation progress of `value` within the range `start..end`.
 /// A return value of `0` means `value == start`, and `1` means `value == end`.
 /// Example: `inverse_lerp(5.0, 0.0, 10.0) == 0.5`.
-/// Supports UFCS call style: `5.0.inverse_lerp(start: 0.0, end: 10.0)`.
+/// Supports UFCS call style: `5.0.inverse_lerp(0.0, 10.0)`.
 pub fn inverse_lerp(value: f64, start: f64, end: f64) -> f64
   (value - start) / (end - start)
 
@@ -137,12 +137,35 @@ pub fn inverse_lerp(value: f32, { start: f32, end: f32 }) -> f32
 /// Maps `value` from one range into another range.
 /// `in_min`/`in_max` define the input range and `out_min`/`out_max` define
 /// the destination range.
-/// Example: `map_range(5.0, in_min: 0.0, in_max: 10.0, out_min: 100.0, out_max: 200.0) == 150.0`.
-/// Supports UFCS call style with labels for readability:
-/// `5.0.map_range(in_min: 0.0, in_max: 10.0, out_min: 100.0, out_max: 200.0)`.
-pub fn map_range(value: f64, { in_min: f64, in_max: f64, out_min: f64, out_max: f64 }) -> f64
+/// Example: `map_range(5.0, 0.0, 10.0, 100.0, 200.0) == 150.0`.
+/// Supports UFCS call style: `5.0.map_range(0.0, 10.0, 100.0, 200.0)`.
+pub fn map_range(value: f64, in_min: f64, in_max: f64, out_min: f64, out_max: f64) -> f64
   lerp(out_min, out_max, inverse_lerp(value, in_min, in_max))
 
 /// Maps `value` from one range into another range.
-pub fn map_range(value: f32, { in_min: f32, in_max: f32, out_min: f32, out_max: f32 }) -> f32
+pub fn map_range(
+  value: f64,
+  {
+    in_min: f64,
+    in_max: f64,
+    out_min: f64,
+    out_max: f64
+  }
+) -> f64
+  map_range(value, in_min, in_max, out_min, out_max)
+
+/// Maps `value` from one range into another range.
+pub fn map_range(value: f32, in_min: f32, in_max: f32, out_min: f32, out_max: f32) -> f32
   lerp(out_min, out_max, inverse_lerp(value, in_min, in_max))
+
+/// Maps `value` from one range into another range.
+pub fn map_range(
+  value: f32,
+  {
+    in_min: f32,
+    in_max: f32,
+    out_min: f32,
+    out_max: f32
+  }
+) -> f32
+  map_range(value, in_min, in_max, out_min, out_max)

@@ -142,7 +142,7 @@ fn msgpack_map_new(): () -> Dict<String, MsgPack>
 
 fn msgpack_map_set(map: Dict<String, MsgPack>, key: String, value: MsgPack): () -> Dict<String, MsgPack>
   let ~next = map
-  next.set(key: key, value: value)
+  next.set(key, value)
   next
 
 /// Encodes one MessagePack value into a caller-provided memory region.

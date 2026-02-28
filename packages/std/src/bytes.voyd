@@ -5,7 +5,7 @@
 //! and interop with UTF-8 string APIs.
 //!
 //! Example:
-//! `String::from_utf8(bytes: buffer.as_bytes().to_array())`
+//! `String::from_utf8(buffer.as_bytes().to_array())`
 //! converts buffered bytes into a validated `String`.
 
 use std::array::Array
@@ -29,9 +29,9 @@ impl Bytes
   api fn is_empty(self) -> bool
     self.storage.is_empty()
 
-  /// Returns the byte at `at`, or `None` when out of bounds.
-  api fn get(self, { at: i32 }) -> Option<Byte>
-    self.storage.get(at)
+  /// Returns the byte at `index`, or `None` when out of bounds.
+  api fn get(self, index: i32) -> Option<Byte>
+    self.storage.get(index)
 
   /// Returns the byte at `index`, trapping when out of bounds.
   api fn at(self, index: i32) -> Byte
@@ -40,8 +40,12 @@ impl Bytes
   /// Returns a byte slice for the provided range.
   ///
   /// - `range`: half-open or closed range, following `Range` semantics.
+  api fn slice(self, range: Range) -> Bytes
+    bytes_from_array(self.storage.slice(range))
+
+  /// Returns a byte slice for the provided range.
   api fn slice(self, { range: Range }) -> Bytes
-    bytes_from_array(self.storage.slice(range: range))
+    self.slice(range)
 
   /// Returns a copied array of bytes.
   api fn to_array(self) -> Array<Byte>
@@ -60,7 +64,7 @@ impl ByteBuffer
   /// Creates an empty byte buffer with at least `bytes` capacity.
   ///
   /// Negative values are clamped to `0`.
-  api fn with_capacity({ bytes: i32 }) -> ByteBuffer
+  api fn with_capacity(bytes: i32) -> ByteBuffer
     let capacity = if bytes > 0 then: bytes else: 0
     ByteBuffer { storage: Array<Byte>::with_capacity(capacity) }
 
@@ -83,13 +87,13 @@ impl ByteBuffer
     bytes_from_array(self.storage.copied())
 
   /// Appends one byte.
-  api fn push(~self, { value: Byte }) -> void
+  api fn push(~self, value: Byte) -> void
     self.storage.push(value)
 
   /// Appends all bytes from `bytes`.
   ///
   /// This is useful for concatenating previously captured `Bytes` values.
-  api fn extend(~self, { bytes: Bytes }) -> void
+  api fn extend(~self, bytes: Bytes) -> void
     self.storage.extend(bytes.to_array())
 
   /// Removes all bytes.

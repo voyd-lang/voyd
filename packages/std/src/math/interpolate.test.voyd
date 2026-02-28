@@ -1,29 +1,29 @@
 use std::test::assertions::all
 
-test "clamp and between support positional and labeled overloads":
+test "clamp and between support positional calls":
   assert(clamp(7, 1, 5), eq: 5)
-  assert(clamp(2, min: 5, max: 1), eq: 2)
-  assert(clamp(0, min: 1, max: 5), eq: 1)
+  assert(clamp(2, 5, 1), eq: 2)
+  assert(clamp(0, 1, 5), eq: 1)
 
   assert(between(3, 1, 5), eq: true)
-  assert(between(6, min: 1, max: 5), eq: false)
-  assert(between(3, min: 5, max: 1), eq: true)
+  assert(between(6, 1, 5), eq: false)
+  assert(between(3, 5, 1), eq: true)
 
 test "float overloads clamp and between":
   assert(clamp(3.75, 1.0, 3.0), eq: 3.0)
-  assert(clamp(f32_from_f64(0.25), min: f32_from_f64(0.5), max: f32_from_f64(2.0)), eq: f32_from_f64(0.5))
+  assert(clamp(f32_from_f64(0.25), f32_from_f64(0.5), f32_from_f64(2.0)), eq: f32_from_f64(0.5))
 
   assert(between(2.5, 2.0, 3.0), eq: true)
-  assert(between(f32_from_f64(4.0), min: f32_from_f64(1.0), max: f32_from_f64(3.0)), eq: false)
+  assert(between(f32_from_f64(4.0), f32_from_f64(1.0), f32_from_f64(3.0)), eq: false)
 
 test "lerp inverse_lerp and map_range support overloads":
   assert(lerp(0.0, 10.0, 0.25), eq: 2.5)
-  assert(lerp(0.0, to: 10.0, t: 0.25), eq: 2.5)
+  assert(lerp(0.0, 10.0, 0.25), eq: 2.5)
 
   assert(approx_eq(inverse_lerp(2.5, 0.0, 10.0), 0.25, 0.000000000001), eq: true)
   assert(
     approx_eq(
-      inverse_lerp(2.5, start: 0.0, end: 10.0),
+      inverse_lerp(2.5, 0.0, 10.0),
       0.25,
       0.000000000001
     ),
@@ -32,7 +32,7 @@ test "lerp inverse_lerp and map_range support overloads":
 
   assert(
     approx_eq(
-      map_range(5.0, in_min: 0.0, in_max: 10.0, out_min: 100.0, out_max: 200.0),
+      map_range(5.0, 0.0, 10.0, 100.0, 200.0),
       150.0,
       0.000000000001
     ),
@@ -42,7 +42,7 @@ test "lerp inverse_lerp and map_range support overloads":
   let value32 = f32_from_f64(0.25)
   assert(
     approx_eq(
-      f64_from_f32(lerp(value32, to: f32_from_f64(1.0), t: f32_from_f64(0.5))),
+      f64_from_f32(lerp(value32, f32_from_f64(1.0), f32_from_f64(0.5))),
       0.625,
       0.00001
     ),
@@ -50,7 +50,7 @@ test "lerp inverse_lerp and map_range support overloads":
   )
   assert(
     approx_eq(
-      f64_from_f32(inverse_lerp(f32_from_f64(2.5), start: f32_from_f64(0.0), end: f32_from_f64(10.0))),
+      f64_from_f32(inverse_lerp(f32_from_f64(2.5), f32_from_f64(0.0), f32_from_f64(10.0))),
       0.25,
       0.00001
     ),
@@ -61,10 +61,10 @@ test "lerp inverse_lerp and map_range support overloads":
       f64_from_f32(
         map_range(
           f32_from_f64(5.0),
-          in_min: f32_from_f64(0.0),
-          in_max: f32_from_f64(10.0),
-          out_min: f32_from_f64(100.0),
-          out_max: f32_from_f64(200.0)
+          f32_from_f64(0.0),
+          f32_from_f64(10.0),
+          f32_from_f64(100.0),
+          f32_from_f64(200.0)
         )
       ),
       150.0,
@@ -73,12 +73,26 @@ test "lerp inverse_lerp and map_range support overloads":
     eq: true
   )
 
-test "interpolation APIs support UFCS style":
-  assert(0.0.lerp(to: 10.0, t: 0.5), eq: 5.0)
-  assert(approx_eq(5.0.inverse_lerp(start: 0.0, end: 10.0), 0.5, 0.000000000001), eq: true)
+test "label overloads remain available for interpolation helpers":
+  assert(clamp(7, min: 1, max: 5), eq: 5)
+  assert(between(3, min: 1, max: 5), eq: true)
+  assert(lerp(0.0, to: 10.0, at: 0.25), eq: 2.5)
+  assert(approx_eq(inverse_lerp(2.5, start: 0.0, end: 10.0), 0.25, 0.000000000001), eq: true)
   assert(
     approx_eq(
-      5.0.map_range(in_min: 0.0, in_max: 10.0, out_min: -1.0, out_max: 1.0),
+      map_range(5.0, in_min: 0.0, in_max: 10.0, out_min: 100.0, out_max: 200.0),
+      150.0,
+      0.000000000001
+    ),
+    eq: true
+  )
+
+test "interpolation APIs support UFCS style":
+  assert(0.0.lerp(10.0, 0.5), eq: 5.0)
+  assert(approx_eq(5.0.inverse_lerp(0.0, 10.0), 0.5, 0.000000000001), eq: true)
+  assert(
+    approx_eq(
+      5.0.map_range(0.0, 10.0, -1.0, 1.0),
       0.0,
       0.000000000001
     ),
@@ -88,15 +102,15 @@ test "interpolation APIs support UFCS style":
 test "clamp and map_range properties hold across deterministic sweep":
   var value = -12.0
   while value <= 12.0 do:
-    let clamped = clamp(value, min: -3.0, max: 5.0)
+    let clamped = clamp(value, -3.0, 5.0)
     assert(clamped >= -3.0, eq: true)
     assert(clamped <= 5.0, eq: true)
     value = value + 0.25
 
   var step = -20.0
   while step <= 20.0 do:
-    let normalized = map_range(step, in_min: -20.0, in_max: 20.0, out_min: 0.0, out_max: 1.0)
-    let roundtrip = map_range(normalized, in_min: 0.0, in_max: 1.0, out_min: -20.0, out_max: 20.0)
+    let normalized = map_range(step, -20.0, 20.0, 0.0, 1.0)
+    let roundtrip = map_range(normalized, 0.0, 1.0, -20.0, 20.0)
     assert(approx_eq(roundtrip, step, 0.000000001), eq: true)
     step = step + 0.5
 

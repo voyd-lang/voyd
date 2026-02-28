@@ -51,5 +51,8 @@ pub trait Error<T>
 fn panic_trap(): () -> void __panic_trap()
 
 /// Stops execution immediately with a panic.
-pub fn panic({ message _message: StringSlice }) -> void
+pub fn panic(_message: String) -> void
   panic_trap()
+
+pub fn panic(_message: StringSlice) -> void
+  panic(_message.to_string())

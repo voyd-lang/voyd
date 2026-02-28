@@ -10,16 +10,16 @@ test "set insert contains remove clear":
   let ~values = Set<String>::init()
   assert(values.is_empty(), eq: true)
 
-  assert(values.insert(value: "a"), eq: true)
-  assert(values.insert(value: "a"), eq: false)
-  assert(values.insert(value: "b"), eq: true)
+  assert(values.insert("a"), eq: true)
+  assert(values.insert("a"), eq: false)
+  assert(values.insert("b"), eq: true)
   assert(values.len(), eq: 2)
-  assert(values.contains(value: "a"), eq: true)
-  assert(values.contains(value: "z"), eq: false)
+  assert(values.contains("a"), eq: true)
+  assert(values.contains("z"), eq: false)
 
-  assert(values.remove(value: "a"), eq: true)
-  assert(values.remove(value: "a"), eq: false)
-  assert(values.contains(value: "a"), eq: false)
+  assert(values.remove("a"), eq: true)
+  assert(values.remove("a"), eq: false)
+  assert(values.contains("a"), eq: false)
 
   values.clear()
   assert(values.len(), eq: 0)
@@ -27,8 +27,8 @@ test "set insert contains remove clear":
 
 test "set values returns iterable keys":
   let ~values = Set<String>::init()
-  values.insert(value: "left")
-  values.insert(value: "right")
+  values.insert("left")
+  values.insert("right")
 
   assert(accepts_sequence(values: values.values()), eq: true)
 

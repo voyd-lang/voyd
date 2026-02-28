@@ -187,7 +187,7 @@ pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
       while index < entries.len() do:
         match(entries.get(index))
           Some<(String, MsgPack)> { value: entry }:
-            out.set(key: entry.0, value: entry.1)
+            out.set(entry.0, entry.1)
           None:
             void
         index = index + 1
@@ -488,7 +488,7 @@ impl Decoder
       let value = self.decode_any()
       key.match(decoded_key)
         String:
-          out.set(key: decoded_key, value: value)
+          out.set(decoded_key, value)
         else:
           void
       index = index + 1

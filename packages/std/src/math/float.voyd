@@ -11,7 +11,7 @@ pub fn abs(value: i32) -> Result<i32, MathError>
     return Ok<i32> { value }
   let out = 0 - value
   if out < 0:
-    return math_error(code: math_error_code_overflow())
+    return math_error(math_error_code_overflow())
   Ok<i32> { value: out }
 
 /// Returns the absolute value, rejecting signed overflow.
@@ -20,7 +20,7 @@ pub fn abs(value: i64) -> Result<i64, MathError>
     return Ok<i64> { value }
   let out = extend_i32_s(0) - value
   if out < extend_i32_s(0):
-    return math_error(code: math_error_code_overflow())
+    return math_error(math_error_code_overflow())
   Ok<i64> { value: out }
 
 /// Returns the absolute value.

@@ -2,7 +2,7 @@ use std::array::{ Array, new_array_unchecked }
 use std::test::assertions::all
 
 fn must_utf8(bytes: Array<i32>) -> String
-  match(from_utf8(bytes: bytes))
+  match(from_utf8(bytes))
     Ok<String> { value }:
       value
     Err<Utf8Error>:
@@ -56,7 +56,7 @@ test "string utf8 decode and encode":
   assert(roundtrip.equals("00ff10"), eq: true)
   assert(roundtrip.to_utf8().len(), eq: 6)
 
-  match(from_utf8(bytes: [255]))
+  match(from_utf8([255]))
     Ok<String>:
       assert(false)
     Err<Utf8Error> { error }:
@@ -64,13 +64,19 @@ test "string utf8 decode and encode":
 
 test "string slice and as_slice":
   let value = "a😀b"
-  let sliced = value.slice(range: Range {
+  let sliced = value.slice(Range {
     start: Some<i32> { value: 1 },
     end: Some<i32> { value: 5 },
     include_end: false
   })
   assert(sliced.to_string().equals("😀"), eq: true)
   assert(value.as_slice().to_string().equals(value), eq: true)
+
+test "string slice overloads and to_string forwarders":
+  let value = "a😀b"
+  assert(value.slice(bytes: 1, len: 4).equals("😀"), eq: true)
+  assert(value.slice(runes: 1, len: 1).equals("😀"), eq: true)
+  assert(value.to_string().equals(value), eq: true)
 
 test "string lengths and graphemes":
   let value = "a😀b"
@@ -139,32 +145,32 @@ test "string grapheme sequence iteration":
 
 test "string search helpers":
   let value = "alpha,beta,gamma"
-  assert(value.starts_with(prefix: "alpha"), eq: true)
-  assert(value.ends_with(suffix: "gamma"), eq: true)
-  assert(value.contains(substring: "beta"), eq: true)
+  assert(value.starts_with("alpha"), eq: true)
+  assert(value.ends_with("gamma"), eq: true)
+  assert(value.contains("beta"), eq: true)
   assert(value.contains(where: (rune: i32) -> bool => rune == 44), eq: true)
-  assert(option_string_index_or(value.find(substring: "beta"), -1) > 0, eq: true)
-  assert(option_string_index_or(value.rfind(substring: "a"), -1) >= 0, eq: true)
+  assert(option_string_index_or(value.find("beta"), -1) > 0, eq: true)
+  assert(option_string_index_or(value.rfind("a"), -1) >= 0, eq: true)
 
-  match(value.find_range(substring: "beta"))
+  match(value.find_range("beta"))
     Some<Range> { value }:
       assert(option_i32_or(value.start, -1) >= 0, eq: true)
     None:
       assert(false)
 
-  match(value.find_rune(rune: 44))
+  match(value.find_rune(44))
     Some<StringIndex> { value }:
       assert(value.to_i32() >= 0, eq: true)
     None:
       assert(false)
 
-  match(value.find_rune(rune: -1))
+  match(value.find_rune(-1))
     Some<StringIndex>:
       assert(false)
     None:
       assert(true)
 
-  match(value.find_rune(rune: 1114112))
+  match(value.find_rune(1114112))
     Some<StringIndex>:
       assert(false)
     None:
@@ -218,16 +224,16 @@ test "string lines and words":
   let multiline = must_utf8([97, 10, 98, 10])
   let lines = multiline.lines()
   assert(lines.len(), eq: 2)
-  match(lines.get(at: 0))
+  match(lines.get(0))
     Some<StringSlice>:
       assert(true, eq: true)
     None:
       assert(false)
 
   let lines_with_ends = multiline.lines(keep_ends: true)
-  match(lines_with_ends.get(at: 0))
+  match(lines_with_ends.get(0))
     Some<StringSlice> { value }:
-      assert(value.to_string().ends_with(suffix: must_utf8([10])), eq: true)
+      assert(value.to_string().ends_with(must_utf8([10])), eq: true)
     None:
       assert(false)
 
@@ -236,13 +242,13 @@ test "string lines and words":
 
 test "string trim pairs":
   assert("  hi  ".trimmed().equals("hi"), eq: true)
-  assert("--hi--".trimmed(chars: [45]).equals("hi"), eq: true)
+  assert("--hi--".trimmed([45]).equals("hi"), eq: true)
 
   let ~value = "  bye  "
   value.trim()
   assert(value.equals("bye"), eq: true)
   let ~value2 = "--z--"
-  value2.trim(chars: [45])
+  value2.trim([45])
   assert(value2.equals("z"), eq: true)
 
 test "string case and replace pairs":
@@ -268,20 +274,20 @@ test "string byte_at and rune_at return option":
     None:
       assert(false)
 
-  match(value.rune_at(index: 1))
+  match(value.rune_at(1))
     Some<i32> { value }:
       assert(value, eq: 128512)
     None:
       assert(false)
 
-  match(value.rune_at(index: 9))
+  match(value.rune_at(9))
     Some<i32>:
       assert(false)
     None:
       assert(true)
 
 test "string repeat and padding":
-  assert("x".repeat(count: 3).equals("xxx"), eq: true)
+  assert("x".repeat(3).equals("xxx"), eq: true)
   assert("x".pad_left(width: 3, with: 46).equals("..x"), eq: true)
   assert("x".pad_right(width: 3, with: 46).equals("x.."), eq: true)
 
@@ -347,6 +353,6 @@ test "string debug and repr helpers":
   let source = must_utf8([97, 10, 98])
   let debug = source.to_debug()
   let repr = source.to_repr()
-  assert(debug.contains(substring: escaped_newline), eq: true)
-  assert(repr.starts_with(prefix: quote), eq: true)
-  assert(repr.ends_with(suffix: quote), eq: true)
+  assert(debug.contains(escaped_newline), eq: true)
+  assert(repr.starts_with(quote), eq: true)
+  assert(repr.ends_with(quote), eq: true)

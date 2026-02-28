@@ -9,13 +9,13 @@ test "json parse handles objects, arrays, booleans, and numbers":
     34,97,114,114,34,58,91,102,97,108,115,101,44,110,117,108,108,93,125
   ])
 
-  match(parse(s: input.as_slice()))
+  match(parse(input))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonObject:
-          assert(root.value.contains_key(key: "ok"), eq: true)
-          assert(root.value.contains_key(key: "n"), eq: true)
-          assert(root.value.contains_key(key: "arr"), eq: true)
+          assert(root.value.contains("ok"), eq: true)
+          assert(root.value.contains("n"), eq: true)
+          assert(root.value.contains("arr"), eq: true)
         else:
           assert(false, eq: true)
     Err<JsonError>:
@@ -25,7 +25,7 @@ test "json parse decodes escaped strings":
   let input = from_ascii([34,108,105,110,101,92,110,34])
   let expected = from_ascii([108,105,110,101,10])
 
-  match(parse(s: input.as_slice()))
+  match(parse(input))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonString:
@@ -39,7 +39,7 @@ test "json parse decodes escaped surrogate pairs":
   let input = from_ascii([34,92,117,68,56,51,68,92,117,68,69,48,48,34])
   let expected = from_ascii([240,159,152,128])
 
-  match(parse(s: input.as_slice()))
+  match(parse(input))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonString:
@@ -53,7 +53,7 @@ test "json parse keeps escapes after unmatched high surrogate":
   let input = from_ascii([34,92,117,68,56,51,68,92,117,48,48,52,49,34])
   let expected = from_ascii([239,191,189,65])
 
-  match(parse(s: input.as_slice()))
+  match(parse(input))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonString:
@@ -64,21 +64,21 @@ test "json parse keeps escapes after unmatched high surrogate":
       assert(false, eq: true)
 
 test "json parse rejects invalid input":
-  match(parse(s: "{".as_slice()))
+  match(parse("{"))
     Ok<JsonValue>:
       assert(false, eq: true)
     Err<JsonError> { error }:
-      assert(error.message.contains(substring: "json parse error"), eq: true)
+      assert(error.message.contains("json parse error"), eq: true)
 
 test "json parse rejects oversized exponents":
-  match(parse(s: "1e100000000".as_slice()))
+  match(parse("1e100000000"))
     Ok<JsonValue>:
       assert(false, eq: true)
     Err<JsonError>:
       assert(true, eq: true)
 
 test "json parse preserves subnormal magnitudes":
-  match(parse(s: "1e-309".as_slice()))
+  match(parse("1e-309"))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
@@ -90,7 +90,7 @@ test "json parse preserves subnormal magnitudes":
 
 test "json parse rejects overflowing mantissas":
   let too_large = repeat_byte(57, 500)
-  match(parse(s: too_large.as_slice()))
+  match(parse(too_large))
     Ok<JsonValue>:
       assert(false, eq: true)
     Err<JsonError>:
@@ -98,7 +98,7 @@ test "json parse rejects overflowing mantissas":
 
 test "json parse accepts long fractional mantissas":
   let input = long_fraction_input(49, 400)
-  match(parse(s: input.as_slice()))
+  match(parse(input))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
@@ -110,7 +110,7 @@ test "json parse accepts long fractional mantissas":
       assert(false, eq: true)
 
 test "json parse allows zero mantissa with large exponent":
-  match(parse(s: "0e309".as_slice()))
+  match(parse("0e309"))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
@@ -120,7 +120,7 @@ test "json parse allows zero mantissa with large exponent":
     Err<JsonError>:
       assert(false, eq: true)
 
-  match(parse(s: "-0e400".as_slice()))
+  match(parse("-0e400"))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
@@ -131,7 +131,7 @@ test "json parse allows zero mantissa with large exponent":
       assert(false, eq: true)
 
 test "json parse accepts normalized finite exponents above 308":
-  match(parse(s: "0.1e309".as_slice()))
+  match(parse("0.1e309"))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
@@ -150,7 +150,7 @@ test "json parse accepts normalized finite exponents above 308":
 
 test "json parse keeps late fractional digits with exponent compensation":
   let input = compensated_fraction_input(350)
-  match(parse(s: input.as_slice()))
+  match(parse(input))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
@@ -169,40 +169,40 @@ test "json parse keeps late fractional digits with exponent compensation":
 
 test "json stringify emits compact object envelope":
   let ~fields = Dict<String, JsonValue>::init()
-  fields.set(key: "ok", value: JsonBool { value: true })
-  fields.set(key: "count", value: JsonNumber { value: 12.5 })
+  fields.set("ok", JsonBool { value: true })
+  fields.set("count", JsonNumber { value: 12.5 })
 
   let ~items = Array<JsonValue>::with_capacity(2)
-  items.push(value: JsonString { value: "x" })
-  items.push(value: JsonNull {})
-  fields.set(key: "items", value: JsonArray { value: items })
+  items.push(JsonString { value: "x" })
+  items.push(JsonNull {})
+  fields.set("items", JsonArray { value: items })
 
   let value = JsonObject { value: fields }
-  let compact = stringify(value: value)
+  let compact = stringify(value)
 
-  assert(compact.starts_with(prefix: "{"), eq: true)
-  assert(compact.ends_with(suffix: "}"), eq: true)
+  assert(compact.starts_with("{"), eq: true)
+  assert(compact.ends_with("}"), eq: true)
 
 test "json stringify includes object keys":
   let ~fields = Dict<String, JsonValue>::init()
-  fields.set(key: "ok", value: JsonBool { value: true })
-  fields.set(key: "count", value: JsonNumber { value: 12.5 })
+  fields.set("ok", JsonBool { value: true })
+  fields.set("count", JsonNumber { value: 12.5 })
 
   let ~items = Array<JsonValue>::with_capacity(2)
-  items.push(value: JsonString { value: "x" })
-  items.push(value: JsonNull {})
-  fields.set(key: "items", value: JsonArray { value: items })
+  items.push(JsonString { value: "x" })
+  items.push(JsonNull {})
+  fields.set("items", JsonArray { value: items })
 
   let value = JsonObject { value: fields }
-  let compact = stringify(value: value)
+  let compact = stringify(value)
 
-  match(parse(s: compact.as_slice()))
+  match(parse(compact))
     Ok<JsonValue> { value: roundtrip }:
       roundtrip.match(root)
         JsonObject:
-          assert(root.value.contains_key(key: "ok"), eq: true)
-          assert(root.value.contains_key(key: "count"), eq: true)
-          assert(root.value.contains_key(key: "items"), eq: true)
+          assert(root.value.contains("ok"), eq: true)
+          assert(root.value.contains("count"), eq: true)
+          assert(root.value.contains("items"), eq: true)
         else:
           assert(false, eq: true)
     Err<JsonError>:
@@ -210,23 +210,23 @@ test "json stringify includes object keys":
 
 test "json stringify_pretty emits newlines":
   let ~fields = Dict<String, JsonValue>::init()
-  fields.set(key: "ok", value: JsonBool { value: true })
-  fields.set(key: "count", value: JsonNumber { value: 12.5 })
+  fields.set("ok", JsonBool { value: true })
+  fields.set("count", JsonNumber { value: 12.5 })
 
   let ~items = Array<JsonValue>::with_capacity(2)
-  items.push(value: JsonString { value: "x" })
-  items.push(value: JsonNull {})
-  fields.set(key: "items", value: JsonArray { value: items })
+  items.push(JsonString { value: "x" })
+  items.push(JsonNull {})
+  fields.set("items", JsonArray { value: items })
 
   let value = JsonObject { value: fields }
-  let pretty = stringify_pretty(value: value)
+  let pretty = stringify_pretty(value)
 
-  assert(pretty.contains(substring: from_ascii([10])), eq: true)
+  assert(pretty.contains(from_ascii([10])), eq: true)
 
 test "json stringify falls back for non-finite numbers":
-  let nan_text = stringify(value: JsonNumber { value: 0.0 / 0.0 })
-  let inf_text = stringify(value: JsonNumber { value: 1.0 / 0.0 })
-  let neg_inf_text = stringify(value: JsonNumber { value: (0.0 - 1.0) / 0.0 })
+  let nan_text = stringify(JsonNumber { value: 0.0 / 0.0 })
+  let inf_text = stringify(JsonNumber { value: 1.0 / 0.0 })
+  let neg_inf_text = stringify(JsonNumber { value: (0.0 - 1.0) / 0.0 })
 
   assert(nan_text.equals("0"), eq: true)
   assert(inf_text.equals("0"), eq: true)
@@ -239,8 +239,8 @@ test "json stringify preserves magnitude for large finite numbers":
     huge = huge * 10.0
     index = index + 1
 
-  let encoded = stringify(value: JsonNumber { value: huge })
-  match(parse(s: encoded.as_slice()))
+  let encoded = stringify(JsonNumber { value: huge })
+  match(parse(encoded))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
@@ -259,11 +259,11 @@ test "json stringify preserves tiny non-zero magnitude":
     tiny = tiny / 10.0
     index = index + 1
 
-  let encoded = stringify(value: JsonNumber { value: tiny })
+  let encoded = stringify(JsonNumber { value: tiny })
   assert(encoded.equals("0"), eq: false)
   assert(encoded.equals("-0"), eq: false)
 
-  match(parse(s: encoded.as_slice()))
+  match(parse(encoded))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
@@ -277,10 +277,10 @@ test "json stringify preserves tiny non-zero magnitude":
 
 test "json stringify preserves extended fractional precision":
   let source = JsonNumber { value: 0.1234567890123456 }
-  let encoded = stringify(value: source)
+  let encoded = stringify(source)
   assert(encoded.equals("0.123456789012"), eq: false)
 
-  match(parse(s: encoded.as_slice()))
+  match(parse(encoded))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
@@ -293,14 +293,14 @@ test "json stringify preserves extended fractional precision":
       assert(false, eq: true)
 
 test "json stringify preserves subnormal numbers":
-  match(parse(s: "1e-309".as_slice()))
+  match(parse("1e-309"))
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
-          let encoded = stringify(value: JsonNumber { value: root.value })
+          let encoded = stringify(JsonNumber { value: root.value })
           assert(encoded.equals("0"), eq: false)
           assert(encoded.equals("-0"), eq: false)
-          match(parse(s: encoded.as_slice()))
+          match(parse(encoded))
             Ok<JsonValue> { value: roundtrip }:
               roundtrip.match(roundtrip_root)
                 JsonNumber:

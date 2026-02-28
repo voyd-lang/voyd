@@ -193,4 +193,22 @@ fn ok() -> i32
     const ok = mainSemantics?.binding.functions.find((fn) => fn.name === "ok");
     expect(ok?.documentation).toBe(" Works.");
   });
+
+  it("allows docs before attribute lines on declarations", async () => {
+    const { diagnostics, semantics } = await compileSingleModule(`/// Time effect docs.
+@effect(id: "std::time::Time")
+pub eff Time
+  /// Sleep docs.
+  sleep(tail, ms: i64) -> i64
+`);
+
+    expect(diagnostics.filter((entry) => entry.code === "MD0004")).toHaveLength(0);
+    const mainSemantics = semantics.get("src::main");
+    const effectDecl = mainSemantics?.binding.effects.find(
+      (effect) => effect.name === "Time",
+    );
+    expect(effectDecl?.documentation).toBe(" Time effect docs.");
+    const sleepOp = effectDecl?.operations.find((op) => op.name === "sleep");
+    expect(sleepOp?.documentation).toBe(" Sleep docs.");
+  });
 });

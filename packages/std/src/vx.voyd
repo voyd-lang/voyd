@@ -21,11 +21,11 @@ pub fn create_element({
   children: Array<MsgPack>
 }) -> MsgPack
   let ~element = Dict<String, MsgPack>::init()
-  element.set(key: "name", value: name)
-  element.set(key: "children", value: children)
+  element.set("name", name)
+  element.set("children", children)
   if attributes is Some:
     let attrs = attributes_to_map(attributes.value)
-    element.set(key: "attributes", value: msgpack::make_map(attrs))
+    element.set("attributes", msgpack::make_map(attrs))
   msgpack::make_map(element)
 
 fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Dict<String, MsgPack>
@@ -38,7 +38,7 @@ fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Dict<String, MsgP
           Some<MsgPack> { value: key }:
             match(pair.get(1))
               Some<MsgPack> { value: value }:
-                acc.set(key: msgpack::unpack_string(key), value: value)
+                acc.set(msgpack::unpack_string(key), value)
               None:
                 void
           None:

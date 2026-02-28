@@ -10,10 +10,18 @@ use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::subscript::Range
 
-@effect(id: "std::random::Random")
 /// Host-provided random source effect.
+///
+/// The host random provider should use a secure entropy source when available.
+/// `std::random` normalizes returned values into `i32` byte ranges where needed.
+@effect(id: "std::random::Random")
 pub eff Random
+  /// Returns a random signed 64-bit integer.
   next_i64(tail) -> i64
+  /// Returns an array of random byte values with length `len`.
+  ///
+  /// Host values are expected to be i32 entries; callers should normalize each
+  /// element into the `[0, 255]` range before treating them as bytes.
   fill_bytes(tail, len: i32) -> MsgPack
 
 /// Returns a random 64-bit integer.
@@ -38,13 +46,13 @@ pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
     if index < decoded.len():
       match(decoded.get(index))
         Some<MsgPack> { value }:
-          buf.push(value: mod_euclid_i32_or_zero(msgpack::unpack_i32(value), 256))
+          buf.push(mod_euclid_i32_or_zero(msgpack::unpack_i32(value), 256))
         None:
           let next = wrap_i64(next_i64())
-          buf.push(value: mod_euclid_i32_or_zero(next, 256))
+          buf.push(mod_euclid_i32_or_zero(next, 256))
     else:
       let next = wrap_i64(next_i64())
-      buf.push(value: mod_euclid_i32_or_zero(next, 256))
+      buf.push(mod_euclid_i32_or_zero(next, 256))
     index = index + 1
 
 /// Fills a byte buffer with cryptographically secure random bytes.
@@ -60,8 +68,8 @@ pub fn random_bool(): Random -> bool
 /// The range lower bound is inclusive. The upper bound follows `Range`:
 /// exclusive by default, inclusive when `include_end` is true.
 /// Example:
-/// `random::random_int(range: 1..6)` samples values in `[1, 5]`.
-pub fn random_int({ range: Range }): Random -> i32
+/// `random::random_int(1..6)` samples values in `[1, 5]`.
+pub fn random_int(range: Range): Random -> i32
   let start = range_start_or_zero(range.start)
   let start_i64 = extend_i32_s(start)
   let end_exclusive = range_end_exclusive(range, start_i64)

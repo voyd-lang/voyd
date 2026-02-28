@@ -20,6 +20,7 @@ type LineKind =
   | "outer-doc"
   | "inner-doc"
   | "regular-comment"
+  | "attribute"
   | "code";
 
 type SourceLine = {
@@ -114,6 +115,8 @@ const splitSourceLines = (source: string): SourceLine[] => {
       line.docText = trimmedStart.slice(3);
     } else if (trimmedStart.startsWith("//")) {
       line.kind = "regular-comment";
+    } else if (trimmedStart.startsWith("@")) {
+      line.kind = "attribute";
     }
 
     lines.push(line);
@@ -587,6 +590,9 @@ export const collectModuleDocumentation = ({
         continue;
       }
       if (line.kind === "regular-comment") {
+        continue;
+      }
+      if (line.kind === "attribute") {
         continue;
       }
       significant = line;

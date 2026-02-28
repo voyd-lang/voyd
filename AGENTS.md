@@ -74,5 +74,12 @@ Guide for writing voyd code and APIs. Voyd APIs should share a similar
 spirit to [Swift API Design Guidelines](https://www.swift.org/documentation/api-design-guidelines/)
 
 - Snake case for functions, variables, and effect ops. UpperCamelCase for types and effects
-- Always use labeled parameters when there are more than three parameters `fn foo({ a: i32, b: i32, c: i32 })` `foo(a: 1, b: 2, c: 3)`
+- Treat labels as required when a function has more than two non-`self` parameters, unless there is a clear readability reason not to.
+- For two non-`self` parameters, prefer labels when they improve clarity or prevent ambiguity.
 - Make use of function / method overloading when it makes semantic sense.
+- Prefer positional parameters when a label does not add clarity (for example `push(value: x)` should be `push(x)`).
+- Avoid labels that only repeat the function name or obvious role (`contains_key({ key })` should prefer `contains(key)`).
+- Use labels to distinguish overload families when argument types overlap (`contains(key: ...)`, `contains(value: ...)`, `contains(where: ...)`).
+- Prefer semantic base function names over type-encoded names. Use labels to describe input role/source instead of suffixes like `_bytes` when practical (for example `ascii_string_from(bytes: source)`).
+- Any public/api function that accepts `StringSlice` should also provide a `String` overload with equivalent behavior. Implement one overload as a thin forwarder to avoid duplicated logic.
+- Use stable effect ids with module-path naming: `@effect(id: "<package>::<module_path>::<EffectName>")` (for example `std::fs::Fs`), and keep IDs aligned with real module paths.

@@ -2,15 +2,18 @@
 //!
 //! Hosts effectful assertion helpers used by std and smoke tests.
 
+/// Host test-runner effect used by assertion helpers.
+///
+/// The runtime consumes these operations to mark test outcomes and emit test logs.
 @effect(id: "std::std::test::assertions::Test")
 pub eff Test
-  /// Marks the current test as failed.
+  /// Marks the current test as failed and stops normal assertion flow.
   fail(resume) -> void
 
   /// Marks the current test as skipped.
   skip(resume) -> void
 
-  /// Emits a structured test log event.
+  /// Emits a structured test log event for the active test case.
   log(resume) -> void
 
 /// Fails the current test when `cond` is false.

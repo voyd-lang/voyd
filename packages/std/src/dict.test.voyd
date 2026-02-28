@@ -23,7 +23,7 @@ impl DictKey<IntKey> for IntKey
     self.value
 
   /// Compares this key with another key for dictionary equality.
-  api fn dict_eq(self, { other: IntKey }) -> bool
+  api fn dict_eq(self, other: IntKey) -> bool
     self.value == other.value
 
 obj CollidingKey {
@@ -36,11 +36,11 @@ impl DictKey<CollidingKey> for CollidingKey
     7
 
   /// Compares this key with another key for dictionary equality.
-  api fn dict_eq(self, { other: CollidingKey }) -> bool
+  api fn dict_eq(self, other: CollidingKey) -> bool
     self.value == other.value
 
 fn must_utf8(bytes: Array<i32>) -> String
-  match(from_utf8(bytes: bytes))
+  match(from_utf8(bytes))
     Ok<String> { value }:
       value
     Err<Utf8Error>:
@@ -67,60 +67,60 @@ test "dict init is empty":
   assert(map.is_empty(), eq: true)
 
 test "dict with_capacity supports inserts":
-  let ~map = Dict<IntKey, i32>::with_capacity(size: 40)
+  let ~map = Dict<IntKey, i32>::with_capacity(40)
   var index = 0
   while index < 40 do:
-    map.set(key: IntKey { value: index }, value: index)
+    map.set(IntKey { value: index }, index)
     index = index + 1
   assert(map.len(), eq: 40)
 
-  match(map.get(key: IntKey { value: 10 }))
+  match(map.get(IntKey { value: 10 }))
     Some<i32> { value }:
       assert(value, eq: 10)
     None:
       assert(false)
 
 test "dict with_capacity clamps unsafe sizes":
-  let huge = Dict<IntKey, i32>::with_capacity(size: 2147483647)
+  let huge = Dict<IntKey, i32>::with_capacity(2147483647)
   assert(bucket_count_of(huge), eq: 65536)
 
-  let negative = Dict<IntKey, i32>::with_capacity(size: -7)
+  let negative = Dict<IntKey, i32>::with_capacity(-7)
   assert(bucket_count_of(negative), eq: 16)
 
 test "dict set insert get contains remove clear":
   let ~map = Dict<String, i32>::init()
-  map.set(key: "a", value: 1)
-  let previous = map.insert(key: "a", value: 2)
+  map.set("a", 1)
+  let previous = map.insert("a", 2)
   match(previous)
     Some<i32> { value }:
       assert(value, eq: 1)
     None:
       assert(false)
 
-  assert(map.contains_key(key: "a"), eq: true)
-  match(map.get(key: "a"))
+  assert(map.contains("a"), eq: true)
+  match(map.get("a"))
     Some<i32> { value }:
       assert(value, eq: 2)
     None:
       assert(false)
 
-  let removed = map.remove(key: "a")
+  let removed = map.remove("a")
   match(removed)
     Some<i32> { value }:
       assert(value, eq: 2)
     None:
       assert(false)
 
-  assert(map.contains_key(key: "a"), eq: false)
-  map.set(key: "x", value: 9)
+  assert(map.contains("a"), eq: false)
+  map.set("x", 9)
   map.clear()
   assert(map.len(), eq: 0)
 
 test "dict keys values entries each":
   let ~map = Dict<String, i32>::init()
-  map.set(key: "a", value: 1)
-  map.set(key: "b", value: 2)
-  map.set(key: "c", value: 3)
+  map.set("a", 1)
+  map.set("b", 2)
+  map.set("c", 3)
 
   let keys = map.keys()
   let values = map.values()
@@ -130,7 +130,7 @@ test "dict keys values entries each":
   assert(entries.len(), eq: 3)
 
   let ~stats = EachStats { count: 0, sum: 0, has_a: false }
-  map.each(do: (key: String, value: i32) -> void =>
+  map.each((key: String, value: i32) -> void =>
     stats.count = stats.count + 1
     stats.sum = stats.sum + value
     if key.equals("a"):
@@ -143,22 +143,22 @@ test "dict keys values entries each":
 
 test "dict extend merged merge":
   let ~left = Dict<String, i32>::init()
-  left.set(key: "a", value: 1)
+  left.set("a", 1)
   let ~right = Dict<String, i32>::init()
-  right.set(key: "b", value: 2)
-  right.set(key: "a", value: 9)
+  right.set("b", 2)
+  right.set("a", 9)
   let merged = left.merged(
-    other: right,
-    on_conflict: (_key: String, l: i32, r: i32) -> i32 => l + r
+    right,
+    (_key: String, l: i32, r: i32) -> i32 => l + r
   )
   let ~out = merged
-  out.merge(other: merged, on_conflict: (_k: String, l: i32, r: i32) -> i32 => l + r)
-  match(out.get(key: "a"))
+  out.merge(merged, (_k: String, l: i32, r: i32) -> i32 => l + r)
+  match(out.get("a"))
     Some<i32> { value }:
       assert(value, eq: 20)
     None:
       assert(false)
-  match(out.get(key: "b"))
+  match(out.get("b"))
     Some<i32> { value }:
       assert(value, eq: 4)
     None:
@@ -166,46 +166,46 @@ test "dict extend merged merge":
 
 test "dict map and filter":
   let ~map = Dict<String, i32>::init()
-  map.set(key: "a", value: 1)
-  map.set(key: "b", value: 2)
-  map.set(key: "c", value: 3)
+  map.set("a", 1)
+  map.set("b", 2)
+  map.set("c", 3)
 
-  let mapped = map.map<i32>(map: (_k: String, v: i32) -> i32 => v * 10)
-  match(mapped.get(key: "b"))
+  let mapped = map.map<i32>((_k: String, v: i32) -> i32 => v * 10)
+  match(mapped.get("b"))
     Some<i32> { value }:
       assert(value, eq: 20)
     None:
       assert(false)
 
-  let filtered = map.filter(where: (_k: String, v: i32) -> bool => v >= 2)
+  let filtered = map.filter((_k: String, v: i32) -> bool => v >= 2)
   assert(filtered.len(), eq: 2)
-  assert(filtered.contains_key(key: "a"), eq: false)
+  assert(filtered.contains("a"), eq: false)
 
 test "dict entry helpers":
   let base = Dict<String, i32>::init()
 
-  let next = base.entry(key: "kiwi").or_insert(default: 0)
-  match(next.get(key: "kiwi"))
+  let next = base.entry("kiwi").or_insert(0)
+  match(next.get("kiwi"))
     Some<i32> { value }:
       assert(value, eq: 0)
     None:
       assert(false)
 
-  let next2 = next.entry(key: "kiwi").and_modify(f: (v: i32) -> i32 => v + 1).dict
-  match(next2.get(key: "kiwi"))
+  let next2 = next.entry("kiwi").and_modify((v: i32) -> i32 => v + 1).dict
+  match(next2.get("kiwi"))
     Some<i32> { value }:
       assert(value, eq: 1)
     None:
       assert(false)
 
-  let next3 = next2.entry(key: "pear").or_insert_with(make: () -> i32 => 42)
-  match(next3.get(key: "pear"))
+  let next3 = next2.entry("pear").or_insert_with(() -> i32 => 42)
+  match(next3.get("pear"))
     Some<i32> { value }:
       assert(value, eq: 42)
     None:
       assert(false)
 
-  let removed = next3.entry(key: "pear").remove()
+  let removed = next3.entry("pear").remove()
   match(removed)
     Some<i32> { value }:
       assert(value, eq: 42)
@@ -216,17 +216,17 @@ test "dict grows and preserves entries":
   let ~map = Dict<IntKey, i32>::init()
   var index = 0
   while index < 80 do:
-    map.set(key: IntKey { value: index }, value: index)
+    map.set(IntKey { value: index }, index)
     index = index + 1
   assert(map.len(), eq: 80)
 
-  match(map.get(key: IntKey { value: 0 }))
+  match(map.get(IntKey { value: 0 }))
     Some<i32> { value }:
       assert(value, eq: 0)
     None:
       assert(false)
 
-  match(map.get(key: IntKey { value: 79 }))
+  match(map.get(IntKey { value: 79 }))
     Some<i32> { value }:
       assert(value, eq: 79)
     None:
@@ -234,10 +234,10 @@ test "dict grows and preserves entries":
 
 test "dict supports non-string key type":
   let ~map = Dict<IntKey, i32>::init()
-  map.set(key: IntKey { value: 1 }, value: 10)
-  map.set(key: IntKey { value: 2 }, value: 20)
+  map.set(IntKey { value: 1 }, 10)
+  map.set(IntKey { value: 2 }, 20)
 
-  match(map.get(key: IntKey { value: 1 }))
+  match(map.get(IntKey { value: 1 }))
     Some<i32> { value }:
       assert(value, eq: 10)
     None:
@@ -245,29 +245,29 @@ test "dict supports non-string key type":
 
 test "dict handles colliding custom key hashes":
   let ~map = Dict<CollidingKey, i32>::init()
-  map.set(key: CollidingKey { value: 1 }, value: 10)
-  map.set(key: CollidingKey { value: 2 }, value: 20)
-  map.set(key: CollidingKey { value: 3 }, value: 30)
+  map.set(CollidingKey { value: 1 }, 10)
+  map.set(CollidingKey { value: 2 }, 20)
+  map.set(CollidingKey { value: 3 }, 30)
   assert(map.len(), eq: 3)
-  match(map.get(key: CollidingKey { value: 2 }))
+  match(map.get(CollidingKey { value: 2 }))
     Some<i32> { value }:
       assert(value, eq: 20)
     None:
       assert(false)
 
 test "array group_by groups values by key":
-  let grouped = array_of_5(1, 2, 3, 4, 5).group_by<String>(key: (value: i32) -> String =>
+  let grouped = array_of_5(1, 2, 3, 4, 5).group_by<String>((value: i32) -> String =>
     let half = value / 2
     if half * 2 == value then: "even" else: "odd"
   )
 
-  match(grouped.get(key: "even"))
+  match(grouped.get("even"))
     Some<Array<i32>> { value }:
       assert(value.len(), eq: 2)
     None:
       assert(false)
 
-  match(grouped.get(key: "odd"))
+  match(grouped.get("odd"))
     Some<Array<i32>> { value }:
       assert(value.len(), eq: 3)
     None:

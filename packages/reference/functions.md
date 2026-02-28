@@ -103,6 +103,57 @@ catch(e):
 [1] The compiler will typically optimize this away, so there is no performance
 penalty for using labeled arguments.
 
+### Labeling Guidelines
+
+Use labels intentionally; avoid adding them by default.
+
+- Treat labels as required when a function has more than two non-`self` parameters, unless omitting them is clearly more readable.
+- For two non-`self` parameters, prefer labels when they clarify roles or prevent ambiguity.
+- Prefer positional parameters when the function name already makes the role obvious.
+- Avoid labels that only repeat the same concept already encoded in the function name.
+- Use labels to separate overloads when argument shapes or types overlap.
+
+```voyd
+// Prefer positional when the name already carries meaning.
+queue.push_back(1)
+
+// Prefer labels once an API has 3+ non-self parameters.
+clamp(7, min: 1, max: 5)
+lerp(0.0, to: 10.0, at: 0.5)
+
+// Prefer shared verb + labels to distinguish overload intent.
+dict.contains(key: user_id)
+records.contains(where: (record) => record.active)
+```
+
+### API Naming Guidelines
+
+- Prefer semantic base names over type-encoded names. Use labels to describe the source/role of an argument instead of encoding the type in the function name when practical.
+- Example:
+
+```voyd
+// Prefer
+ascii_string_from(bytes: source)
+
+// Over
+ascii_string_from_bytes(source)
+```
+
+### String/StringSlice Overloads
+
+For public/api-facing functions:
+
+- If one overload accepts `StringSlice`, provide a corresponding `String` overload with equivalent behavior.
+- Prefer a thin forwarding implementation to keep behavior identical.
+
+```voyd
+pub fn parse(source: StringSlice) -> Result<JsonValue, JsonError>
+  parse_impl(source)
+
+pub fn parse(source: String) -> Result<JsonValue, JsonError>
+  parse(source.as_slice())
+```
+
 ## Optional parameters
 
 Parameters may be marked optional by adding `?` before the colon. The parameter's

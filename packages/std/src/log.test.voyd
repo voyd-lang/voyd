@@ -10,11 +10,11 @@ test "trace with fields emits a msgpack payload":
   let ~payload_sizes = Array<i32>::init()
 
   try
-    trace(message: "hello".as_slice(), fields: fields)
+    trace("hello".as_slice().to_string(), fields)
   Log::emit(tail, payload):
-    seen.push(value: 1)
+    seen.push(1)
     let payload_map = msgpack::unpack_map(payload)
-    payload_sizes.push(value: payload_map.len())
+    payload_sizes.push(payload_map.len())
     tail()
 
   assert(seen.len(), eq: 1)
@@ -28,7 +28,7 @@ fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
 
 fn make_fields(): () -> LogFields
   let ~fields = Array<LogField>::init()
-  fields.push(value: LogField {
+  fields.push(LogField {
     key: "count",
     value: LogInt { value: i64_from_i32(7) }
   })

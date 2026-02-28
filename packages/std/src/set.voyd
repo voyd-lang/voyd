@@ -8,8 +8,8 @@ use std::traits::sequence::Sequence
 ///
 /// Example:
 /// `let ~tags = Set<String>::init()`
-/// `tags.insert(value: "alpha")`
-/// `tags.contains(value: "alpha")`
+/// `tags.insert("alpha")`
+/// `tags.contains("alpha")`
 pub obj Set<T> {
   storage: Dict<T, bool>
 }
@@ -28,19 +28,19 @@ impl<T: DictKey<T>> Set<T>
     self.storage.is_empty()
 
   /// Returns true when `value` is in the set.
-  api fn contains(self, { value: T }) -> bool
-    self.storage.contains_key(key: value)
+  api fn contains(self, value: T) -> bool
+    self.storage.contains(value)
 
   /// Inserts `value`, returning true only when it was newly inserted.
-  api fn insert(~self, { value: T }) -> bool
-    if self.storage.contains_key(key: value):
+  api fn insert(~self, value: T) -> bool
+    if self.storage.contains(value):
       return false
-    self.storage.set(key: value, value: true)
+    self.storage.set(value, true)
     true
 
   /// Removes `value`, returning true only when it existed.
-  api fn remove(~self, { value: T }) -> bool
-    match(self.storage.remove(key: value))
+  api fn remove(~self, value: T) -> bool
+    match(self.storage.remove(value))
       Some<bool>:
         true
       None:

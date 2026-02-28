@@ -5,17 +5,17 @@ use std::string::type::{ new_string }
 use std::test::assertions::all
 
 fn bytes_of_3(a: i32, b: i32, c: i32) -> Bytes
-  let ~buffer = ByteBuffer::with_capacity(bytes: 3)
-  buffer.push(value: a)
-  buffer.push(value: b)
-  buffer.push(value: c)
+  let ~buffer = ByteBuffer::with_capacity(3)
+  buffer.push(a)
+  buffer.push(b)
+  buffer.push(c)
   buffer.as_bytes()
 
 test "hex encode and decode":
-  let encoded = encode(bytes: bytes_of_3(0, 255, 16))
+  let encoded = encode(bytes_of_3(0, 255, 16))
   assert(encoded.equals("00ff10"), eq: true)
 
-  match(decode(s: "4869".as_slice()))
+  match(decode("4869".as_slice()))
     Ok<Bytes> { value }:
       let out = value.to_array()
       assert(out.len(), eq: 2)
@@ -25,8 +25,19 @@ test "hex encode and decode":
       assert(false)
 
 test "hex decode rejects invalid text":
-  match(decode(s: "4x".as_slice()))
+  match(decode("4x".as_slice()))
     Ok<Bytes>:
       assert(false)
     Err<DecodeError> { error }:
       assert(error.message.equals("hex input contains invalid characters"), eq: true)
+
+test "hex decode accepts String":
+  let encoded = "4869".as_slice().to_string()
+  match(decode(encoded))
+    Ok<Bytes> { value }:
+      let out = value.to_array()
+      assert(out.len(), eq: 2)
+      assert(out.at(0), eq: 72)
+      assert(out.at(1), eq: 105)
+    Err<DecodeError>:
+      assert(false)

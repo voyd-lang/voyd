@@ -8,8 +8,8 @@ use std::optional::types::Option
 ///
 /// Example:
 /// `let ~queue = Deque<i32>::init()`
-/// `queue.push_back(value: 1)`
-/// `queue.push_front(value: 0)`
+/// `queue.push_back(1)`
+/// `queue.push_front(0)`
 pub obj Deque<T> {
   storage: Array<T>
 }
@@ -28,11 +28,11 @@ impl<T> Deque<T>
     self.storage.is_empty()
 
   /// Pushes `value` to the front.
-  api fn push_front(~self, { value: T }) -> void
+  api fn push_front(~self, value: T) -> void
     self.storage.insert(value, at: 0)
 
   /// Pushes `value` to the back.
-  api fn push_back(~self, { value: T }) -> void
+  api fn push_back(~self, value: T) -> void
     self.storage.push(value)
 
   /// Pops and returns the front value.
@@ -45,11 +45,11 @@ impl<T> Deque<T>
 
   /// Returns the front value without removing it.
   api fn front(self) -> Option<T>
-    self.storage.get(at: 0)
+    self.storage.get(0)
 
   /// Returns the back value without removing it.
   api fn back(self) -> Option<T>
-    self.storage.get(at: -1)
+    self.storage.get(-1)
 
   /// Removes all values.
   api fn clear(~self) -> void

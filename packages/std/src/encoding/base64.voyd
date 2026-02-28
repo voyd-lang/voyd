@@ -3,7 +3,7 @@
 use std::array::Array
 use std::bytes::ByteBuffer
 use std::bytes::Bytes
-use std::encoding::ascii::ascii_string_from_bytes
+use std::encoding::ascii::ascii_string_from
 use std::encoding::errors::DecodeError
 use std::math::div_rem
 use std::optional::types::all
@@ -23,9 +23,9 @@ use std::string::{ String, StringSlice, new_string }
 /// use std::bytes::ByteBuffer
 ///
 /// let source = ByteBuffer::from_utf8("voyd")
-/// let encoded = base64::encode({ bytes: source.as_bytes() })
+/// let encoded = base64::encode(source.as_bytes())
 /// ```
-pub fn encode({ bytes: Bytes }) -> String
+pub fn encode(bytes: Bytes) -> String
   let source = bytes.to_array()
   if source.is_empty():
     return String::init()
@@ -59,7 +59,11 @@ pub fn encode({ bytes: Bytes }) -> String
 
     index = index + 3
 
-  ascii_string_from_bytes(bytes: out)
+  ascii_string_from(out)
+
+/// Decodes a base64 string into bytes.
+pub fn decode(s: String) -> Result<Bytes, DecodeError>
+  decode(s.as_slice())
 
 /// Decodes a base64 string into bytes.
 ///
@@ -74,9 +78,9 @@ pub fn encode({ bytes: Bytes }) -> String
 /// ```voyd
 /// use std::encoding::base64
 ///
-/// let decoded = base64::decode({ s: "dm95ZA==".as_slice() })
+/// let decoded = base64::decode("dm95ZA==".as_slice())
 /// ```
-pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
+pub fn decode(s: StringSlice) -> Result<Bytes, DecodeError>
   let source = s.to_string().to_utf8()
   let source_len = source.len()
   if source_len == 0:
@@ -84,7 +88,7 @@ pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
   if div_rem(source_len, 4).1 != 0:
     return decode_error("base64 input length must be a multiple of 4")
 
-  let ~buffer = ByteBuffer::with_capacity(bytes: source_len / 4 * 3)
+  let ~buffer = ByteBuffer::with_capacity(source_len / 4 * 3)
   var index = 0
   while index < source_len do:
     let c0 = source.at(index)
@@ -107,21 +111,21 @@ pub fn decode({ s: StringSlice }) -> Result<Bytes, DecodeError>
               return decode_error("base64 padding is only valid at the end")
 
             let byte0 = d0_value * 4 + (d1_value / 16)
-            buffer.push(value: byte0)
+            buffer.push(byte0)
 
             if not is_pad_2:
               let d2 = base64_ascii_to_digit(c2)
               match(d2)
                 Some<i32> { value: d2_value }:
                   let byte1 = div_rem(d1_value, 16).1 * 16 + (d2_value / 4)
-                  buffer.push(value: byte1)
+                  buffer.push(byte1)
 
                   if not is_pad_3:
                     let d3 = base64_ascii_to_digit(c3)
                     match(d3)
                       Some<i32> { value: d3_value }:
                         let byte2 = div_rem(d2_value, 4).1 * 64 + d3_value
-                        buffer.push(value: byte2)
+                        buffer.push(byte2)
                       None:
                         return decode_error("base64 input contains invalid characters")
                 None:

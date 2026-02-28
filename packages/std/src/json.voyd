@@ -54,7 +54,7 @@ obj JsonParser {
 /// Parses UTF-8 JSON text into a `JsonValue`.
 ///
 /// Params:
-/// - `s`: JSON source text.
+/// - `source`: JSON source text.
 ///
 /// Returns:
 /// - `Ok<JsonValue>` when the full input parses successfully.
@@ -64,10 +64,10 @@ obj JsonParser {
 /// ```voyd
 /// use std::json
 ///
-/// let parsed = json::parse({ s: "{\"ok\":true}".as_slice() })
+/// let parsed = json::parse("{\"ok\":true}")
 /// ```
-pub fn parse({ s: StringSlice }) -> Result<JsonValue, JsonError>
-  let ~parser = JsonParser { source: s.to_string(), index: 0 }
+pub fn parse(source: String) -> Result<JsonValue, JsonError>
+  let ~parser = JsonParser { source: source, index: 0 }
   skip_whitespace(parser)
   let value_result = parse_value(parser)
   match(value_result)
@@ -79,6 +79,9 @@ pub fn parse({ s: StringSlice }) -> Result<JsonValue, JsonError>
     Err<JsonError> { error }:
       Err<JsonError> { error: error }
 
+pub fn parse(source: StringSlice) -> Result<JsonValue, JsonError>
+  parse(source.to_string())
+
 /// Serializes a `JsonValue` to compact JSON text.
 ///
 /// Params:
@@ -88,9 +91,9 @@ pub fn parse({ s: StringSlice }) -> Result<JsonValue, JsonError>
 /// ```voyd
 /// use std::json
 ///
-/// let text = json::stringify({ value: JsonBool { value: true } })
+/// let text = json::stringify(JsonBool { value: true })
 /// ```
-pub fn stringify({ value: JsonValue }) -> String
+pub fn stringify(value: JsonValue) -> String
   let ~bytes = Array<i32>::with_capacity(64)
   write_json_value(bytes, value, false, 0)
   new_string(bytes.to_fixed_array())
@@ -99,7 +102,7 @@ pub fn stringify({ value: JsonValue }) -> String
 ///
 /// Params:
 /// - `value`: JSON value to serialize.
-pub fn stringify_pretty({ value: JsonValue }) -> String
+pub fn stringify_pretty(value: JsonValue) -> String
   let ~bytes = Array<i32>::with_capacity(64)
   write_json_value(bytes, value, true, 0)
   new_string(bytes.to_fixed_array())
@@ -215,7 +218,7 @@ fn parse_object(~parser: JsonParser): () -> Result<JsonValue, JsonError>
         skip_whitespace(parser)
         match(parse_value(parser))
           Ok<JsonValue> { value }:
-            fields.set(key: key, value: value)
+            fields.set(key, value)
           Err<JsonError> { error }:
             return Err<JsonError> { error: error }
       Err<JsonError> { error }:
