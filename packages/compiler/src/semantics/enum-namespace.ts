@@ -1,10 +1,10 @@
 import {
   type Expr,
-  formCallsInternal,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
 } from "../parser/index.js";
+import { extractNominalTypeTarget } from "./nominal-type-target.js";
 
 export type EnumNamespaceMember = {
   name: string;
@@ -201,51 +201,10 @@ const collectUnionNominalMembers = (
     return [...left, ...right];
   }
 
-  const nominal = extractNominalTypeMember(expr);
-  return nominal ? [nominal] : undefined;
-};
-
-const extractNominalTypeMember = (
-  expr: Expr | undefined,
-): EnumNamespaceMember | undefined => {
-  if (!expr) {
-    return undefined;
-  }
-
-  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
-    return { name: expr.value };
-  }
-
-  if (!isForm(expr)) {
-    return undefined;
-  }
-
-  if (formCallsInternal(expr, "generics")) {
-    const target = extractNominalTypeMember(expr.at(1));
-    if (!target) {
-      return undefined;
-    }
-    const typeArguments = expr.rest.slice(1);
-    return typeArguments.length > 0
-      ? { ...target, typeArguments }
-      : target;
-  }
-
-  if (expr.length === 2) {
-    const head = expr.at(0);
-    const second = expr.at(1);
-    if (
-      (isIdentifierAtom(head) || isInternalIdentifierAtom(head)) &&
-      isForm(second) &&
-      formCallsInternal(second, "generics")
-    ) {
-      return second.rest.length > 0
-        ? { name: head.value, typeArguments: second.rest }
-        : { name: head.value };
-    }
-  }
-
-  return undefined;
+  const nominal = extractNominalTypeTarget(expr);
+  return nominal
+    ? [{ name: nominal.name, typeArguments: nominal.typeArguments }]
+    : undefined;
 };
 
 const dedupeEnumNamespaceMembers = (

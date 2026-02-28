@@ -11,13 +11,7 @@ import {
   enumVariantTypeNamesFromAliasTarget,
 } from "../../enum-namespace.js";
 import type { SymbolId } from "../../ids.js";
-import {
-  formCallsInternal,
-  isForm,
-  isIdentifierAtom,
-  isInternalIdentifierAtom,
-  type Expr,
-} from "../../../parser/index.js";
+import { resolveNominalTypeSymbol } from "../../nominal-type-target.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -167,9 +161,13 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
       const targetSymbol = resolveNominalTypeSymbol({
         target: alias.target,
         scope: ctx.symbolTable.rootScope,
-        ctx,
+        symbolTable: ctx.symbolTable,
       });
       if (typeof targetSymbol !== "number") {
+        return;
+      }
+      const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
+      if (targetRecord.kind !== "type") {
         return;
       }
       const constructors = ctx.staticMethods.get(targetSymbol)?.get("init");
@@ -190,52 +188,4 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
       changed = true;
     });
   }
-};
-
-const resolveNominalTypeSymbol = ({
-  target,
-  scope,
-  ctx,
-}: {
-  target: Expr | undefined;
-  scope: number;
-  ctx: BindingContext;
-}): SymbolId | undefined => {
-  const name = extractNominalTypeName(target);
-  if (!name) {
-    return undefined;
-  }
-  const symbol = ctx.symbolTable.resolve(name, scope);
-  if (typeof symbol !== "number") {
-    return undefined;
-  }
-  const record = ctx.symbolTable.getSymbol(symbol);
-  return record.kind === "type" ? symbol : undefined;
-};
-
-const extractNominalTypeName = (target: Expr | undefined): string | undefined => {
-  if (!target) {
-    return undefined;
-  }
-  if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
-    return target.value;
-  }
-  if (!isForm(target)) {
-    return undefined;
-  }
-  if (formCallsInternal(target, "generics")) {
-    return extractNominalTypeName(target.at(1));
-  }
-  if (target.length === 2) {
-    const head = target.at(0);
-    const second = target.at(1);
-    if (
-      (isIdentifierAtom(head) || isInternalIdentifierAtom(head)) &&
-      isForm(second) &&
-      formCallsInternal(second, "generics")
-    ) {
-      return head.value;
-    }
-  }
-  return undefined;
 };
