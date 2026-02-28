@@ -3,6 +3,7 @@ import path from "node:path";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { TextDocument } from "vscode-languageserver-textdocument";
 import {
   analyzeProject,
   autoImportActions,
@@ -30,6 +31,27 @@ const createProject = async (
     rootDir,
     filePathFor: (relativePath: string) => path.join(rootDir, relativePath),
   };
+};
+
+const applyEditToSource = ({
+  uri,
+  source,
+  version,
+  text,
+}: {
+  uri: string;
+  source: string;
+  version: number;
+  text: {
+    range: {
+      start: { line: number; character: number };
+      end: { line: number; character: number };
+    };
+    newText: string;
+  };
+}): string => {
+  const document = TextDocument.create(uri, "voyd", version, source);
+  return TextDocument.applyEdits(document, [text]);
 };
 
 describe("language server project analysis", () => {
@@ -204,6 +226,99 @@ describe("language server project analysis", () => {
           action.title.includes("Import helper from src::util"),
         ),
       ).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves src root for nested source package entries", async () => {
+    const project = await createProject({
+      "main.voyd": `fn main() -> i32\n  0\n`,
+      "src/pkg.voyd": `pub use self::pkgs`,
+      "src/pkgs/vtrace/pkg.voyd": `pub use self::color`,
+      "src/pkgs/vtrace/color.voyd": `pub fn shade() -> i32\n  0\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/pkgs/vtrace/pkg.voyd");
+      const roots = resolveModuleRoots(entryPath);
+      expect(roots.src).toBe(project.filePathFor("src"));
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not force src-root to a parent src directory without project entry files", async () => {
+    const project = await createProject({
+      "main.voyd": `fn main() -> i32\n  0\n`,
+      "src/my_app/main.voyd": `fn main() -> i32\n  1\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/my_app/main.voyd");
+      const roots = resolveModuleRoots(entryPath);
+      expect(roots.src).toBe(project.filePathFor("src/my_app"));
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("inserts auto-imports after grouped use statements in nested source packages", async () => {
+    const project = await createProject({
+      "src/pkg.voyd": `pub use self::pkgs`,
+      "src/pkgs.voyd": `pub use self::vtrace`,
+      "src/pkgs/vtrace/pkg.voyd": `pub use self::color\npub use self::io`,
+      "src/pkgs/vtrace/color.voyd":
+        `use super::io::{ write_line, write, StdErr }\n\npub fn shade() -> i32\n  vec3()\n`,
+      "src/pkgs/vtrace/io.voyd":
+        `pub fn write_line() -> i32\n  0\n\npub fn write() -> i32\n  0\n\npub obj StdErr {}\n`,
+      "src/vec3.voyd": `pub fn vec3() -> i32\n  0\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/pkgs/vtrace/pkg.voyd");
+      const colorPath = project.filePathFor("src/pkgs/vtrace/color.voyd");
+      const uri = toFileUri(colorPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      const codeActions = autoImportActions({
+        analysis,
+        documentUri: uri,
+        diagnostics,
+      });
+
+      const actionTitles = codeActions.map((action) => action.title);
+      expect(actionTitles).toContain("Import vec3 from src::vec3");
+      const vec3Action = codeActions.find((action) =>
+        action.title.includes("Import vec3 from src::vec3"),
+      );
+      if (!vec3Action) {
+        return;
+      }
+
+      const edit = vec3Action.edit?.changes?.[uri]?.[0];
+      expect(edit).toBeDefined();
+      if (!edit) {
+        return;
+      }
+
+      const updated = applyEditToSource({
+        uri,
+        source:
+          `use super::io::{ write_line, write, StdErr }\n\npub fn shade() -> i32\n  vec3()\n`,
+        version: 1,
+        text: edit,
+      });
+
+      expect(updated).toContain(
+        "use super::io::{ write_line, write, StdErr }\nuse src::vec3::vec3\n\n",
+      );
+      expect(updated).not.toContain("StdErr\nuse src::vec3::vec3}");
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
