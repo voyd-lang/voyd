@@ -969,6 +969,17 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("resolves overloaded imported alias constructors", () => {
+    const depFixture = "alias_constructor_cross_module_overloaded_init/dep.voyd";
+    const mainFixture = "alias_constructor_cross_module_overloaded_init/main.voyd";
+    const mainSemantics = runMainWithSingleFixtureDependency({
+      depFixture,
+      mainFixture,
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
   it("resolves constructor calls through object type aliases", () => {
     const result = semanticsPipeline(
       loadAst("constructor_call_through_type_alias.voyd"),

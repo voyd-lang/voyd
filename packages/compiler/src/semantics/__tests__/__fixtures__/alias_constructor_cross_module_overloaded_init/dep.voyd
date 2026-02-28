@@ -1,0 +1,12 @@
+pub obj Counter {
+  value: i32
+}
+
+impl Counter
+  pub fn init() -> Counter
+    Counter { value: 0 }
+
+  pub fn init(value: i32) -> Counter
+    Counter { value }
+
+pub type Count = Counter

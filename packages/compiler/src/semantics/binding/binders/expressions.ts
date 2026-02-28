@@ -691,7 +691,11 @@ const ensureStaticMethodImport = ({
     return;
   }
 
-  const imported: { local: SymbolId; overloadId?: number }[] = [];
+  const imported: {
+    importLocal: SymbolId;
+    staticLocal: SymbolId;
+    overloadId?: number;
+  }[] = [];
   methodSymbols.forEach((methodSymbol) => {
     const syntheticAliasConstructorTarget =
       resolveSyntheticAliasConstructorImportTarget({
@@ -734,8 +738,10 @@ const ensureStaticMethodImport = ({
       span: toSourceSpan(syntax),
     });
     const overloadId =
-      dependency.overloadBySymbol.get(methodSymbol) ??
-      dependency.overloadBySymbol.get(importTargetSymbol);
+      typeof syntheticAliasConstructorTarget === "number"
+        ? undefined
+        : (dependency.overloadBySymbol.get(methodSymbol) ??
+          dependency.overloadBySymbol.get(importTargetSymbol));
     const aliasAwareLocal =
       typeof syntheticAliasConstructorTarget === "number"
         ? declareAliasAwareImportedStaticMethod({
@@ -747,16 +753,20 @@ const ensureStaticMethodImport = ({
             ctx,
           })
         : local;
-    imported.push({ local: aliasAwareLocal, overloadId });
+    imported.push({
+      importLocal: local,
+      staticLocal: aliasAwareLocal,
+      overloadId,
+    });
   });
 
   if (imported.length === 0) {
     return;
   }
 
-  const locals = imported.map((entry) => entry.local);
+  const staticLocals = imported.map((entry) => entry.staticLocal);
   const bucket = ctx.staticMethods.get(targetSymbol) ?? new Map();
-  bucket.set(memberName, new Set(locals));
+  bucket.set(memberName, new Set(staticLocals));
   ctx.staticMethods.set(targetSymbol, bucket);
 
   const importedOverloadIds = new Set(
@@ -764,7 +774,7 @@ const ensureStaticMethodImport = ({
       .map((entry) => entry.overloadId)
       .filter((entry): entry is number => typeof entry === "number"),
   );
-  const needsImportedSet = locals.length > 1 || importedOverloadIds.size === 1;
+  const needsImportedSet = staticLocals.length > 1 || importedOverloadIds.size === 1;
   if (needsImportedSet) {
     const nextId =
       Math.max(
@@ -774,11 +784,13 @@ const ensureStaticMethodImport = ({
       ) + 1;
     const setId = importedOverloadIds.size === 1 ? nextId : nextId;
     const existing = ctx.importedOverloadOptions.get(setId);
+    const overloadLocals = imported.map((entry) => entry.importLocal);
     const merged = existing
-      ? Array.from(new Set([...existing, ...locals]))
-      : locals;
+      ? Array.from(new Set([...existing, ...overloadLocals]))
+      : overloadLocals;
     ctx.importedOverloadOptions.set(setId, merged);
     merged.forEach((local) => ctx.overloadBySymbol.set(local, setId));
+    staticLocals.forEach((local) => ctx.overloadBySymbol.set(local, setId));
   }
 };
 
