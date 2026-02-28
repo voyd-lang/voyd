@@ -80,9 +80,8 @@ Effect IDs are part of your public integration contract. Optimize for long-term 
 
 - Use dotted capability IDs: `@effect(id: "<owner>.<package>.<capability>")`.
 - Use lowercase ASCII tokens (`a-z0-9` + `.`).
-- Treat `capability` as a stable semantic namespace, not a required file/module path mirror.
+- Treat `capability` as a stable semantic namespace.
 - Do not change IDs because of internal refactors (file moves, module renames, or code reorganization).
-- For this repository, prefer the `voyd.std.*` namespace for std effects.
 
 ```voyd
 // Stable semantic identity
@@ -95,5 +94,3 @@ eff Fs
 @effect(id: "voyd.std.fs")
 eff Fs
 ```
-
-Reverse-DNS-style IDs are valid, but this repository standard uses `voyd.std.*` for std consistency.
