@@ -455,6 +455,24 @@ mod pkg
     expect(moduleIds).not.toContain("std::prelude::all");
   });
 
+  it("does not crash prelude detection on incomplete use declarations", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use\npub fn main() -> i32\n  answer()",
+      [`${stdRoot}${sep}prelude.voyd`]: "pub fn answer() -> i32\n  42",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      host,
+      roots: { src: srcRoot, std: stdRoot },
+    });
+
+    const moduleIds = Array.from(graph.modules.keys());
+    expect(moduleIds).toEqual(expect.arrayContaining(["src::main", "std::prelude"]));
+  });
+
   it("loads std::pkg for src modules that rely on std root re-exports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
