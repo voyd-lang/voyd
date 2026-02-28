@@ -1,7 +1,5 @@
 //! Mathematical constants and unit conversion helpers.
 
-use std::number::cast::{ to_f32, to_f64 }
-
 /// Returns Archimedes' constant as f64.
 pub fn pi_f64() -> f64
   3.141592653589793
@@ -43,3 +41,15 @@ pub fn rad_to_deg(value: f64) -> f64
 /// Converts radians to degrees.
 pub fn rad_to_deg(value: f32) -> f32
   to_f32(rad_to_deg(to_f64(value)))
+
+@intrinsic(name: "__f32_demote_f64")
+fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+@intrinsic(name: "__f64_promote_f32")
+fn promote_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+fn to_f32(value: f64) -> f32
+  demote_f64(value)
+
+fn to_f64(value: f32) -> f64
+  promote_f32(value)

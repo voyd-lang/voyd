@@ -4,7 +4,7 @@ pub std::result::types::{ Result, Ok, Err }
 pub std::result::fns::{ ok, err }
 
 pub std::traits::{ Eq, Ord, Hash, Default, Clone, Copy }
-pub std::traits::{ Sequence, Iterator }
+pub std::traits::{ Sequence, Iterator, for }
 pub std::subscript::{ Range }
 
 pub std::array::{ Array, ArrayPop, new_array, new_array_unchecked }

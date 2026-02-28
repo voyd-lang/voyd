@@ -4,7 +4,6 @@
 
 use std::result::types::all
 use std::math::errors::{ MathError, math_error, math_error_code_overflow }
-use std::number::cast::{ to_f32, to_f64, to_i64 }
 
 /// Returns the absolute value, rejecting signed overflow.
 pub fn abs(value: i32) -> Result<i32, MathError>
@@ -273,3 +272,21 @@ fn log10_f64(value: f64): () -> f64 __log10(value)
 
 @intrinsic(name: "__exp")
 fn exp_f64(value: f64): () -> f64 __exp(value)
+
+@intrinsic(name: "__f32_demote_f64")
+fn demote_f64(value: f64): () -> f32 __f32_demote_f64(value)
+
+@intrinsic(name: "__f64_promote_f32")
+fn promote_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+@intrinsic(name: "__i64_extend_s")
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
+
+fn to_f32(value: f64) -> f32
+  demote_f64(value)
+
+fn to_f64(value: f32) -> f64
+  promote_f32(value)
+
+fn to_i64(value: i32) -> i64
+  extend_i32_s(value)

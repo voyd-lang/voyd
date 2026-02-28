@@ -1,7 +1,7 @@
 //! Numeric conversion APIs.
 //!
 //! Use `std::number::cast` for explicit primitive conversions and checked
-//! narrowing operations.
+//! narrowing operations, plus primitive numeric string formatting.
 
 pub self::cast
 pub use self::cast::all

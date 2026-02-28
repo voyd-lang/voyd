@@ -73,3 +73,37 @@ test "reinterpret helpers preserve bit patterns":
 
   let i64_bits = to_i64(1234567)
   assert(reinterpret_i64(reinterpret_f64(i64_bits)), eq: i64_bits)
+
+test "to_string formats signed integers":
+  assert(to_string(0).equals("0"), eq: true)
+  assert(to_string(-42).equals("-42"), eq: true)
+  assert(to_string(2147483647).equals("2147483647"), eq: true)
+  assert(to_string(-2147483647 - 1).equals("-2147483648"), eq: true)
+
+  let huge = pow2_i64(62)
+  assert(to_string(huge).equals("4611686018427387904"), eq: true)
+
+  let min_i64 = to_i64(0) - huge - huge
+  assert(to_string(min_i64).equals("-9223372036854775808"), eq: true)
+
+test "to_string formats floating-point values":
+  assert(to_string(12.5).equals("12.5"), eq: true)
+  assert(to_string(to_f32(12.5)).equals("12.5"), eq: true)
+
+  var tiny = 1.0
+  var index = 0
+  while index < 14 do:
+    tiny = tiny / 10.0
+    index = index + 1
+  assert(to_string(tiny).equals("0"), eq: false)
+
+  assert(to_string(1.0 / 0.0).equals("0"), eq: true)
+  assert(to_string(0.0 / 0.0).equals("0"), eq: true)
+
+fn pow2_i64(exp: i32): () -> i64
+  var out = to_i64(1)
+  var index = 0
+  while index < exp do:
+    out = out * to_i64(2)
+    index = index + 1
+  out

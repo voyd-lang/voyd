@@ -9,7 +9,6 @@ use std::math::errors::{
   math_error_code_overflow,
   math_error_code_divide_by_zero
 }
-use std::number::cast::{ to_i64 }
 
 /// Returns the larger of `a` and `b`.
 pub fn max<T>(a: T, b: T) -> T
@@ -175,3 +174,9 @@ fn bit_and_i32(left: i32, right: i32): () -> i32 __bit_and(left, right)
 
 @intrinsic(name: "__bit_and")
 fn bit_and_i64(left: i64, right: i64): () -> i64 __bit_and(left, right)
+
+@intrinsic(name: "__i64_extend_s")
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
+
+fn to_i64(value: i32) -> i64
+  extend_i32_s(value)
