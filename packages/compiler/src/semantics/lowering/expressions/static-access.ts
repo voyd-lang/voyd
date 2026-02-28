@@ -316,10 +316,9 @@ const lowerStaticMethodCall = ({
     ctx,
   });
   const aliasConstructorTypeArguments =
-    resolution.kind === "symbol" &&
-    ctx.symbolTable.getSymbol(resolution.symbol).kind === "type"
+    calleeExpr.value === "init"
       ? lowerAliasConstructorTypeArgumentsForSymbol({
-          symbol: resolution.symbol,
+          symbol: targetSymbol,
           namespaceTypeArguments: combinedTypeArguments,
           scope: scopes.current(),
           ctx,
