@@ -114,16 +114,21 @@ const hasProjectEntryInDir = (dirPath: string): boolean =>
 const resolveSrcRootFromEntry = (entryPath: string): string => {
   const fallback = path.dirname(path.resolve(entryPath));
   let current = fallback;
-  let highestProjectEntryDir: string | undefined;
+  let nearestProjectEntryDir: string | undefined;
 
   while (true) {
-    if (hasProjectEntryInDir(current)) {
-      highestProjectEntryDir = current;
+    const hasProjectEntry = hasProjectEntryInDir(current);
+    if (hasProjectEntry && !nearestProjectEntryDir) {
+      nearestProjectEntryDir = current;
+    }
+
+    if (hasProjectEntry && path.basename(current) === "src") {
+      return current;
     }
 
     const parent = path.dirname(current);
     if (parent === current) {
-      return highestProjectEntryDir ?? fallback;
+      return nearestProjectEntryDir ?? fallback;
     }
     current = parent;
   }

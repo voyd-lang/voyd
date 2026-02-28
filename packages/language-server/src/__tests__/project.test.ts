@@ -233,6 +233,7 @@ describe("language server project analysis", () => {
 
   it("resolves src root for nested source package entries", async () => {
     const project = await createProject({
+      "main.voyd": `fn main() -> i32\n  0\n`,
       "src/pkg.voyd": `pub use self::pkgs`,
       "src/pkgs/vtrace/pkg.voyd": `pub use self::color`,
       "src/pkgs/vtrace/color.voyd": `pub fn shade() -> i32\n  0\n`,
@@ -242,6 +243,21 @@ describe("language server project analysis", () => {
       const entryPath = project.filePathFor("src/pkgs/vtrace/pkg.voyd");
       const roots = resolveModuleRoots(entryPath);
       expect(roots.src).toBe(project.filePathFor("src"));
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not force src-root to a parent src directory without project entry files", async () => {
+    const project = await createProject({
+      "main.voyd": `fn main() -> i32\n  0\n`,
+      "src/my_app/main.voyd": `fn main() -> i32\n  1\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/my_app/main.voyd");
+      const roots = resolveModuleRoots(entryPath);
+      expect(roots.src).toBe(project.filePathFor("src/my_app"));
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
