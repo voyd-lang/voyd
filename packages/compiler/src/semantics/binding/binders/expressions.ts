@@ -879,7 +879,7 @@ const ensureEnumNamespaceImport = ({
   );
 };
 
-const ensureConstructorImport = ({
+export const ensureConstructorImport = ({
   targetSymbol,
   syntax,
   scope,
@@ -946,7 +946,7 @@ const extractMemberName = (expr: Expr | undefined): string | undefined => {
   return undefined;
 };
 
-const ensureModuleMemberImport = ({
+export const ensureModuleMemberImport = ({
   moduleId,
   moduleSymbol,
   memberName,

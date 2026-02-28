@@ -6,6 +6,7 @@ import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
+import { ensureConstructorImport, ensureModuleMemberImport } from "./expressions.js";
 import {
   enumNamespaceMetadataFromAliasTarget,
   enumVariantTypeNamesFromAliasTarget,
@@ -15,6 +16,7 @@ import {
   nominalTypeTargetMetadataFromAliasTarget,
   resolveNominalTypeSymbol,
 } from "../../nominal-type-target.js";
+import { importedModuleIdFrom } from "../../imports/metadata.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -174,6 +176,24 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
         target: alias.target,
         scope: aliasScope,
         symbolTable: ctx.symbolTable,
+        moduleMembers: ctx.moduleMembers,
+        ensureModuleMember: ({ moduleSymbol, memberName }) => {
+          const moduleRecord = ctx.symbolTable.getSymbol(moduleSymbol);
+          const moduleId = importedModuleIdFrom(
+            moduleRecord.metadata as Record<string, unknown> | undefined,
+          );
+          if (!moduleId) {
+            return;
+          }
+          ensureModuleMemberImport({
+            moduleId,
+            moduleSymbol,
+            memberName,
+            syntax: alias.target,
+            scope: aliasScope,
+            ctx,
+          });
+        },
       });
       if (typeof targetSymbol !== "number") {
         return;
@@ -182,6 +202,12 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
       if (targetRecord.kind !== "type") {
         return;
       }
+      ensureConstructorImport({
+        targetSymbol,
+        syntax: alias.target,
+        scope: aliasScope,
+        ctx,
+      });
       const constructors = ctx.staticMethods.get(targetSymbol)?.get("init");
       if (!constructors || constructors.size === 0) {
         return;

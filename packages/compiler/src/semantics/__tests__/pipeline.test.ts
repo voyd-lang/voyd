@@ -878,6 +878,94 @@ describe("semanticsPipeline", () => {
     expectAnimalConstructorBindings(mainSemantics);
   });
 
+  it("supports constructor calls through aliases targeting namespaced imported types", () => {
+    const depFixture = "alias_constructor_namespaced_import/dep.voyd";
+    const mainFixture = "alias_constructor_namespaced_import/main.voyd";
+    const dep = buildModule({
+      fixture: depFixture,
+      segments: ["dep"],
+    });
+    const depSemantics = semanticsPipeline({
+      module: dep.module,
+      graph: dep.graph,
+    });
+
+    const mainAst = loadAst(mainFixture);
+    const useForm = mainAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const dependency = {
+      kind: "use" as const,
+      path: dep.module.path,
+      span: toSourceSpan(useForm ?? mainAst),
+    };
+    const main = buildModule({
+      fixture: mainFixture,
+      ast: mainAst,
+      segments: ["main"],
+      dependencies: [dependency],
+    });
+
+    const mainSemantics = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[dep.module.id, depSemantics.exports]]),
+      dependencies: new Map([[dep.module.id, depSemantics]]),
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
+  it("enforces namespaced generic alias substitutions for static init calls", () => {
+    const depFixture = "alias_constructor_namespaced_generic_static/dep.voyd";
+    const mainFixture = "alias_constructor_namespaced_generic_static/main.voyd";
+    const dep = buildModule({
+      fixture: depFixture,
+      segments: ["dep"],
+    });
+    const depSemantics = semanticsPipeline({
+      module: dep.module,
+      graph: dep.graph,
+    });
+
+    const mainAst = loadAst(mainFixture);
+    const useForm = mainAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    );
+    const dependency = {
+      kind: "use" as const,
+      path: dep.module.path,
+      span: toSourceSpan(useForm ?? mainAst),
+    };
+    const main = buildModule({
+      fixture: mainFixture,
+      ast: mainAst,
+      segments: ["main"],
+      dependencies: [dependency],
+    });
+
+    let caught: unknown;
+    try {
+      semanticsPipeline({
+        module: main.module,
+        graph: main.graph,
+        exports: new Map([[dep.module.id, depSemantics.exports]]),
+        dependencies: new Map([[dep.module.id, depSemantics]]),
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
   it("resolves constructor calls through object type aliases", () => {
     const result = semanticsPipeline(
       loadAst("constructor_call_through_type_alias.voyd"),
