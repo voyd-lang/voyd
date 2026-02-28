@@ -36,9 +36,14 @@ const functionSignatureTypeParameters = ({
 const formatFunctionSignatureParameters = ({
   signature,
   formatType,
+  normalizeOptionalParameterType,
 }: {
   signature: FunctionSignature;
   formatType: (typeId: TypeId) => string;
+  normalizeOptionalParameterType: (input: {
+    typeId: TypeId;
+    optional: boolean | undefined;
+  }) => TypeId;
 }): string =>
   signature.parameters
     .map((parameter) => {
@@ -49,9 +54,13 @@ const formatFunctionSignatureParameters = ({
           ? `${label} ${name}`
           : name ?? label;
       const optionalSuffix = parameter.optional ? "?" : "";
-      const typeText = formatType(parameter.type);
+      const normalizedType = normalizeOptionalParameterType({
+        typeId: parameter.type,
+        optional: parameter.optional,
+      });
+      const typeText = formatType(normalizedType);
       return prefix
-        ? `${prefix}: ${typeText}${optionalSuffix}`
+        ? `${prefix}${optionalSuffix}: ${typeText}`
         : `${typeText}${optionalSuffix}`;
     })
     .join(", ");
@@ -72,7 +81,54 @@ const formatFunctionSignature = ({
     signature,
     semantics,
   });
-  const params = formatFunctionSignatureParameters({ signature, formatType });
+  const nominalNameForTypeId = (typeId: TypeId): string | undefined => {
+    const descriptor = semantics.typing.arena.get(typeId);
+    if (descriptor.kind === "nominal-object") {
+      return descriptor.name;
+    }
+    if (descriptor.kind === "intersection" && typeof descriptor.nominal === "number") {
+      return nominalNameForTypeId(descriptor.nominal);
+    }
+    return undefined;
+  };
+  const optionalInnerType = (typeId: TypeId): TypeId | undefined => {
+    const descriptor = semantics.typing.arena.get(typeId);
+    if (descriptor.kind !== "union") {
+      return undefined;
+    }
+
+    let someInner: TypeId | undefined;
+    let hasNone = false;
+
+    descriptor.members.forEach((member) => {
+      const nominalName = nominalNameForTypeId(member);
+      if (nominalName === "None") {
+        hasNone = true;
+        return;
+      }
+
+      if (nominalName !== "Some") {
+        return;
+      }
+
+      const memberDescriptor = semantics.typing.arena.get(member);
+      const someDescriptor =
+        memberDescriptor.kind === "intersection" && typeof memberDescriptor.nominal === "number"
+          ? semantics.typing.arena.get(memberDescriptor.nominal)
+          : memberDescriptor;
+      if (someDescriptor.kind === "nominal-object" && someDescriptor.typeArgs.length > 0) {
+        someInner = someDescriptor.typeArgs[0];
+      }
+    });
+
+    return hasNone && typeof someInner === "number" ? someInner : undefined;
+  };
+  const params = formatFunctionSignatureParameters({
+    signature,
+    formatType,
+    normalizeOptionalParameterType: ({ typeId, optional }) =>
+      optional ? (optionalInnerType(typeId) ?? typeId) : typeId,
+  });
   const returnType = formatType(signature.returnType);
   const effects = formatEffectRow(signature.effectRow, semantics.typing.effects);
   const effectSuffix = effects === "()" ? "" : ` ! ${effects}`;
@@ -255,10 +311,12 @@ export const typeSummaryForSymbol = ({
   ref,
   semanticsByModule,
   typeParamNamesByModule,
+  displayName,
 }: {
   ref: SymbolRef;
   semanticsByModule: ReadonlyMap<string, SemanticsPipelineResult>;
   typeParamNamesByModule: ReadonlyMap<string, ReadonlyMap<TypeParamId, string>>;
+  displayName?: string;
 }): string | undefined => {
   const semantics = semanticsByModule.get(ref.moduleId);
   if (!semantics) {
@@ -283,7 +341,7 @@ export const typeSummaryForSymbol = ({
     });
   }
 
-  const symbolName = semantics.binding.symbolTable.getSymbol(ref.symbol).name;
+  const symbolName = displayName ?? semantics.binding.symbolTable.getSymbol(ref.symbol).name;
 
   const directType = semantics.typing.valueTypes.get(ref.symbol);
   if (typeof directType === "number") {

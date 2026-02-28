@@ -413,6 +413,69 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("renders optional params with source-level ? syntax in function hovers", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn work(id: i32, middle?: i32) -> i32\n  id\n\nfn main() -> i32\n  work(1)\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 4, character: 3 },
+      });
+      expect(hover?.contents).toEqual({
+        kind: "markdown",
+        value: "```voyd\nfn work(id: i32, middle?: i32) -> i32\n```",
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses external labels for label hover type summaries", async () => {
+    const source = `fn reduce<T>(value: T, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  cb(start, value)\n\nfn main() -> i32\n  1.reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
+    const project = await createProject({
+      "src/main.voyd": source,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const lines = source.split("\n");
+      const callLine = lines.findIndex((line) => line.includes("reducer:"));
+      const callChar = lines[callLine]?.indexOf("reducer") ?? -1;
+      expect(callLine).toBeGreaterThanOrEqual(0);
+      expect(callChar).toBeGreaterThanOrEqual(0);
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: callLine, character: callChar + 1 },
+      });
+      expect(hover?.contents).toEqual({
+        kind: "markdown",
+        value: "```voyd\nreducer: (T, T) -> T ! open effect row\n```",
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it(
     "renames labeled parameters, including external labels",
     async () => {

@@ -1046,6 +1046,7 @@ export const buildSymbolIndex = async ({
           ref: { moduleId: entry.moduleId, symbol: entry.symbol },
           semanticsByModule: semantics,
           typeParamNamesByModule,
+          displayName: entry.name,
         }),
       )
       .find((summary): summary is string => summary !== undefined);
