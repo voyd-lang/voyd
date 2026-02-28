@@ -40,13 +40,22 @@ export const hoverAtPosition = ({
   const documentation = analysis.documentationByCanonicalKey.get(
     symbol.canonicalKey,
   );
-  if (documentation === undefined) {
+  const typeInfo = analysis.typeInfoByCanonicalKey.get(symbol.canonicalKey);
+  if (documentation === undefined && typeInfo === undefined) {
     return null;
+  }
+
+  const blocks: string[] = [];
+  if (typeInfo !== undefined) {
+    blocks.push(`\`\`\`voyd\n${typeInfo}\n\`\`\``);
+  }
+  if (documentation !== undefined) {
+    blocks.push(documentation);
   }
 
   const contents: MarkupContent = {
     kind: "markdown",
-    value: documentation,
+    value: blocks.join("\n\n"),
   };
   return { contents };
 };

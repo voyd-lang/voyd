@@ -50,6 +50,7 @@ export type ProjectNavigationIndex = {
   occurrencesByUri: ReadonlyMap<string, readonly SymbolOccurrence[]>;
   declarationsByKey: ReadonlyMap<string, readonly SymbolOccurrence[]>;
   documentationByCanonicalKey: ReadonlyMap<string, string>;
+  typeInfoByCanonicalKey: ReadonlyMap<string, string>;
 };
 
 export type ProjectAnalysis = ProjectCoreAnalysis &
@@ -59,7 +60,10 @@ export type ProjectAnalysis = ProjectCoreAnalysis &
 
 export type NavigationAnalysis = Pick<
   ProjectAnalysis,
-  "occurrencesByUri" | "declarationsByKey" | "documentationByCanonicalKey"
+  | "occurrencesByUri"
+  | "declarationsByKey"
+  | "documentationByCanonicalKey"
+  | "typeInfoByCanonicalKey"
 >;
 
 export type AutoImportAnalysis = Pick<

@@ -155,6 +155,7 @@ export const buildProjectNavigationIndex = async ({
     occurrencesByUri: symbolIndex.occurrencesByUri,
     declarationsByKey: symbolIndex.declarationsByKey,
     documentationByCanonicalKey: symbolIndex.documentationByCanonicalKey,
+    typeInfoByCanonicalKey: symbolIndex.typeInfoByCanonicalKey,
   };
 };
 
@@ -175,6 +176,7 @@ export const analyzeProject = async (inputs: AnalysisInputs): Promise<ProjectAna
     occurrencesByUri: symbolIndex.occurrencesByUri,
     declarationsByKey: symbolIndex.declarationsByKey,
     documentationByCanonicalKey: symbolIndex.documentationByCanonicalKey,
+    typeInfoByCanonicalKey: symbolIndex.typeInfoByCanonicalKey,
     exportsByName: symbolIndex.exportsByName,
     moduleIdByFilePath: analysis.moduleIdByFilePath,
     graph: analysis.graph,
