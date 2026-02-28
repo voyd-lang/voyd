@@ -231,19 +231,20 @@ describe("language server project analysis", () => {
     }
   });
 
-  it("resolves src root for nested source package entries", () => {
-    const entryPath = path.join(
-      os.tmpdir(),
-      "voyd-ls-root-test",
-      "src",
-      "pkgs",
-      "vtrace",
-      "pkg.voyd",
-    );
-    const roots = resolveModuleRoots(entryPath);
-    expect(roots.src).toBe(
-      path.join(os.tmpdir(), "voyd-ls-root-test", "src"),
-    );
+  it("resolves src root for nested source package entries", async () => {
+    const project = await createProject({
+      "src/pkg.voyd": `pub use self::pkgs`,
+      "src/pkgs/vtrace/pkg.voyd": `pub use self::color`,
+      "src/pkgs/vtrace/color.voyd": `pub fn shade() -> i32\n  0\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/pkgs/vtrace/pkg.voyd");
+      const roots = resolveModuleRoots(entryPath);
+      expect(roots.src).toBe(project.filePathFor("src"));
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
   });
 
   it("inserts auto-imports after grouped use statements in nested source packages", async () => {

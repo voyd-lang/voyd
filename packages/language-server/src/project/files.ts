@@ -107,18 +107,23 @@ export const resolveEntryPath = async (filePath: string): Promise<string> => {
   }
 };
 
+const hasProjectEntryInDir = (dirPath: string): boolean =>
+  existsSync(path.join(dirPath, "pkg.voyd")) ||
+  existsSync(path.join(dirPath, "main.voyd"));
+
 const resolveSrcRootFromEntry = (entryPath: string): string => {
   const fallback = path.dirname(path.resolve(entryPath));
   let current = fallback;
+  let highestProjectEntryDir: string | undefined;
 
   while (true) {
-    if (path.basename(current) === "src") {
-      return current;
+    if (hasProjectEntryInDir(current)) {
+      highestProjectEntryDir = current;
     }
 
     const parent = path.dirname(current);
     if (parent === current) {
-      return fallback;
+      return highestProjectEntryDir ?? fallback;
     }
     current = parent;
   }
