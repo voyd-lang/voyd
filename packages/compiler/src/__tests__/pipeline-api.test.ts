@@ -213,6 +213,42 @@ pub fn main() -> i32
     );
   });
 
+  it("reports unresolved overload calls as typing diagnostics when recovery is enabled", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+pub fn foo(value: String) -> i32
+  1
+
+pub fn foo(value: bool) -> i32
+  2
+
+pub fn main() -> i32
+  foo(1)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({
+      graph,
+      recoverFromTypingErrors: true,
+    });
+
+    expect(semantics.has("src::main")).toBe(true);
+    expect(diagnostics.some((diagnostic) => diagnostic.code === "TY0008")).toBe(
+      true,
+    );
+    expect(diagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(
+      false,
+    );
+  });
+
   it("reports missing nominal object fields as typing diagnostics", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;
