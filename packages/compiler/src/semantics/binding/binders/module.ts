@@ -55,6 +55,7 @@ import {
   enumVariantTypeNamesFromAliasTarget,
   importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
+import { isPackageRootModule } from "../../packages.js";
 
 export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
@@ -524,6 +525,26 @@ const shouldPreserveInlinePkgScope = ({
   );
 };
 
+const shouldAllowImplicitPackageRootAlias = ({
+  dependencyPath,
+  ctx,
+}: {
+  dependencyPath: ModulePath;
+  ctx: BindingContext;
+}): boolean => {
+  if (dependencyPath.segments.at(-1) !== "pkg") {
+    return false;
+  }
+  const dependency = ctx.graph.modules.get(modulePathToString(dependencyPath));
+  if (!dependency) {
+    return false;
+  }
+
+  return isPackageRootModule(dependency.path, {
+    sourcePackageRoot: dependency.sourcePackageRoot,
+  });
+};
+
 const resolveDependencyPath = ({
   entry,
   ctx,
@@ -532,14 +553,38 @@ const resolveDependencyPath = ({
   ctx: BindingContext;
 }): ModulePath | undefined => {
   const preservesInlinePkgScope = shouldPreserveInlinePkgScope({ entry, ctx });
-  const matches = ctx.module.dependencies.filter((dep) =>
-    matchesDependencyPath({
+  const matchingDependencies = ctx.module.dependencies.flatMap((dep) => {
+    const allowImplicitPackageRootAlias = shouldAllowImplicitPackageRootAlias({
+      dependencyPath: dep.path,
+      ctx,
+    });
+    const sharedOptions = {
       dependencyPath: dep.path,
       entry,
       currentModulePath: ctx.module.path,
       currentModuleIsPackageRoot: ctx.isPackageRoot && !preservesInlinePkgScope,
-    }),
-  );
+    };
+    const matchesWithAlias = matchesDependencyPath({
+      ...sharedOptions,
+      allowImplicitPackageRootAlias,
+    });
+    if (!matchesWithAlias) {
+      return [];
+    }
+    const matchesWithoutAlias = matchesDependencyPath({
+      ...sharedOptions,
+      allowImplicitPackageRootAlias: false,
+    });
+    return [{ dependency: dep, matchesWithoutAlias }];
+  });
+
+  const strictMatches = matchingDependencies
+    .filter((candidate) => candidate.matchesWithoutAlias)
+    .map((candidate) => candidate.dependency);
+  const matches =
+    strictMatches.length > 0
+      ? strictMatches
+      : matchingDependencies.map((candidate) => candidate.dependency);
   if (matches.length === 0) {
     return undefined;
   }
