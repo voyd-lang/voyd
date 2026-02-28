@@ -17,7 +17,7 @@ import {
 import { diagnosticFromCode } from "../../../diagnostics/index.js";
 import { rememberSyntax } from "../context.js";
 import { declareValueOrParameter } from "../redefinitions.js";
-import type { BindingContext } from "../types.js";
+import type { BindingContext, BindingResult } from "../types.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import { parseLambdaSignature } from "../../lambda.js";
 import { ensureForm } from "./utils.js";
@@ -693,8 +693,13 @@ const ensureStaticMethodImport = ({
 
   const imported: { local: SymbolId; overloadId?: number }[] = [];
   methodSymbols.forEach((methodSymbol) => {
+    const importTargetSymbol =
+      resolveSyntheticAliasConstructorImportTarget({
+        methodSymbol,
+        dependency,
+      }) ?? methodSymbol;
     const fn = dependency.functions.find(
-      (entry) => entry.symbol === methodSymbol,
+      (entry) => entry.symbol === importTargetSymbol,
     );
     if (!fn) {
       return;
@@ -710,24 +715,26 @@ const ensureStaticMethodImport = ({
     if (!visibilityAllowed) {
       return;
     }
-    const record = dependency.symbolTable.getSymbol(methodSymbol);
+    const record = dependency.symbolTable.getSymbol(importTargetSymbol);
     const local = ctx.symbolTable.declare(
       {
         name: memberName,
         kind: record.kind,
         declaredAt: syntax.syntaxId,
-        metadata: { import: { moduleId, symbol: methodSymbol } },
+        metadata: { import: { moduleId, symbol: importTargetSymbol } },
       },
       scope,
     );
     ctx.imports.push({
       name: memberName,
       local,
-      target: { moduleId, symbol: methodSymbol },
+      target: { moduleId, symbol: importTargetSymbol },
       visibility: moduleVisibility(),
       span: toSourceSpan(syntax),
     });
-    const overloadId = dependency.overloadBySymbol.get(methodSymbol);
+    const overloadId =
+      dependency.overloadBySymbol.get(methodSymbol) ??
+      dependency.overloadBySymbol.get(importTargetSymbol);
     imported.push({ local, overloadId });
   });
 
@@ -761,6 +768,23 @@ const ensureStaticMethodImport = ({
     ctx.importedOverloadOptions.set(setId, merged);
     merged.forEach((local) => ctx.overloadBySymbol.set(local, setId));
   }
+};
+
+const resolveSyntheticAliasConstructorImportTarget = ({
+  methodSymbol,
+  dependency,
+}: {
+  methodSymbol: SymbolId;
+  dependency: BindingResult;
+}): SymbolId | undefined => {
+  const methodRecord = dependency.symbolTable.getSymbol(methodSymbol);
+  const metadata = methodRecord.metadata as
+    | { aliasConstructorTarget?: unknown }
+    | undefined;
+  if (typeof metadata?.aliasConstructorTarget !== "number") {
+    return undefined;
+  }
+  return metadata.aliasConstructorTarget;
 };
 
 const ensureEnumNamespaceImport = ({

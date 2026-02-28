@@ -1,0 +1,9 @@
+pub obj Box<T> {
+  value: T
+}
+
+impl Box<T>
+  pub fn init(value: T) -> Box<T>
+    Box { value }
+
+pub type IntBox = Box<i32>
