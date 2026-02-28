@@ -30,6 +30,20 @@ const kindMatchesDiagnostic = ({ code, kind }: { code: string; kind: string }): 
   return kind !== "module";
 };
 
+const offsetAfterLine = ({
+  source,
+  offset,
+}: {
+  source: string;
+  offset: number;
+}): number => {
+  let cursor = Math.max(0, Math.min(offset, source.length));
+  while (cursor < source.length && source[cursor] !== "\n") {
+    cursor += 1;
+  }
+  return cursor < source.length ? cursor + 1 : source.length;
+};
+
 const insertImportEdit = ({
   analysis,
   documentUri,
@@ -59,18 +73,28 @@ const insertImportEdit = ({
         .filter((offset): offset is number => typeof offset === "number")
     : [];
 
-  const insertionOffset = useEndOffsets.length > 0 ? Math.max(...useEndOffsets) : 0;
+  const insertionOffset =
+    useEndOffsets.length > 0
+      ? offsetAfterLine({
+          source,
+          offset: Math.max(...useEndOffsets),
+        })
+      : 0;
   const insertionRange = {
     start: lineIndex.positionAt(insertionOffset),
     end: lineIndex.positionAt(insertionOffset),
   };
 
-  const prefix = insertionOffset > 0 ? "\n" : "";
-  const suffix = insertionOffset > 0 ? "" : "\n";
+  const prefix =
+    insertionOffset === source.length &&
+    insertionOffset > 0 &&
+    source[source.length - 1] !== "\n"
+      ? "\n"
+      : "";
 
   return {
     range: insertionRange,
-    newText: `${prefix}${importLine}${suffix}`,
+    newText: `${prefix}${importLine}\n`,
   };
 };
 
