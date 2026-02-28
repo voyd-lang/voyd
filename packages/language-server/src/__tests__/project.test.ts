@@ -319,7 +319,7 @@ describe("language server project analysis", () => {
       });
       expect(fnHover?.contents).toEqual({
         kind: "markdown",
-        value: " Adds two numbers.",
+        value: "```voyd\nfn add(left: i32, right: i32) -> i32\n```\n\n Adds two numbers.",
       });
 
       const paramHover = hoverAtPosition({
@@ -329,7 +329,7 @@ describe("language server project analysis", () => {
       });
       expect(paramHover?.contents).toEqual({
         kind: "markdown",
-        value: " Left operand.",
+        value: "```voyd\nleft: i32\n```\n\n Left operand.",
       });
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
@@ -358,7 +358,128 @@ describe("language server project analysis", () => {
       });
       expect(hover?.contents).toEqual({
         kind: "markdown",
-        value: " Label module docs.",
+        value: "```voyd\nfn tagged() -> i32\n```\n\n Label module docs.",
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns inferred types for locals and generic functions", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn identity<T>(value: T) -> T\n  let copy = value\n  copy\n\nfn main() -> i32\n  let number = identity(42)\n  number\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const functionHover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 5, character: 15 },
+      });
+      expect(functionHover?.contents).toEqual({
+        kind: "markdown",
+        value: "```voyd\nfn identity<T>(value: T) -> T\n```",
+      });
+
+      const localHover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 6, character: 3 },
+      });
+      expect(localHover?.contents).toEqual({
+        kind: "markdown",
+        value: "```voyd\nnumber: i32\n```",
+      });
+
+      const genericLocalHover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 2, character: 3 },
+      });
+      expect(genericLocalHover?.contents).toEqual({
+        kind: "markdown",
+        value: "```voyd\ncopy: i32\n```",
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("renders optional params with source-level ? syntax in function hovers", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn work(id: i32, middle?: i32) -> i32\n  id\n\nfn main() -> i32\n  work(1)\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 4, character: 3 },
+      });
+      expect(hover?.contents).toEqual({
+        kind: "markdown",
+        value: "```voyd\nfn work(id: i32, middle?: i32) -> i32\n```",
+      });
+
+      const optionalParamHover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 0, character: 18 },
+      });
+      expect(optionalParamHover?.contents).toEqual({
+        kind: "markdown",
+        value: "```voyd\nmiddle?: i32\n```",
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses external labels for label hover type summaries", async () => {
+    const source = `fn reduce<T>(value: T, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  cb(start, value)\n\nfn main() -> i32\n  1.reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
+    const project = await createProject({
+      "src/main.voyd": source,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const lines = source.split("\n");
+      const callLine = lines.findIndex((line) => line.includes("reducer:"));
+      const callChar = lines[callLine]?.indexOf("reducer") ?? -1;
+      expect(callLine).toBeGreaterThanOrEqual(0);
+      expect(callChar).toBeGreaterThanOrEqual(0);
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: callLine, character: callChar + 1 },
+      });
+      expect(hover?.contents).toEqual({
+        kind: "markdown",
+        value: "```voyd\nreducer: (T, T) -> T ! open effect row\n```",
       });
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
