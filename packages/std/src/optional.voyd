@@ -1,2 +1,6 @@
+//! Optional standard module.
+//!
+//! Re-exports optional value types and helper functions.
+
 pub use self::types::all
 pub use self::fns::all

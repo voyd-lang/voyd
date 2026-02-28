@@ -1,4 +1,10 @@
+//! Collection construction traits.
+//!
+//! Provides conversions from sequences into concrete collection types.
+
 use std::traits::sequence::Sequence
 
+/// Trait for creating a value from a sequence of items.
 pub trait Collect<T>
+  /// Builds `Self` from all items in `items`.
   fn from_sequence({ items: Sequence<T> }) -> Self

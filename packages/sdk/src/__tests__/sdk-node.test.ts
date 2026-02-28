@@ -349,7 +349,7 @@ use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::string::type::String
 
-@effect(id: "std::env::Env")
+@effect(id: "voyd.std.env")
 eff Env
   get(tail, key: MsgPack) -> MsgPack
   set(tail, payload: MsgPack) -> MsgPack
@@ -390,7 +390,7 @@ pub fn main(): Env -> i32
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 
-@effect(id: "std::fetch::Fetch")
+@effect(id: "voyd.std.fetch")
 eff Fetch
   request(tail, payload: MsgPack) -> MsgPack
 
@@ -447,7 +447,7 @@ use std::result::types::all
 use std::string::type::String
 
 pub fn main() -> i32
-  match(read_line(prompt: "Name: ".as_slice()))
+  match(read_line())
     Ok<Option<String>> { value }:
       match(value)
         Some<String> { value: line }:
@@ -502,10 +502,10 @@ pub fn main() -> i32
     return -10
   if output_is_tty() == false then:
     return -11
-  if output_is_tty(target: StdErr {}) then:
+  if output_is_tty(StdErr {}) then:
     return -12
 
-  let read_result = match(read_bytes(max_bytes: 4))
+  let read_result = match(read_bytes(4))
     Ok<Option<Bytes>> { value }:
       match(value)
         Some<Bytes> { value: bytes }:
@@ -515,14 +515,14 @@ pub fn main() -> i32
     Err<IoError>:
       return -1
 
-  let ~buffer = std::bytes::ByteBuffer::with_capacity(bytes: 2)
-  buffer.push(value: 7)
-  buffer.push(value: 8)
-  let _ = write(value: "hello".as_slice())
-  let _ = write_line(value: "ok".as_slice())
-  let _ = write_bytes(bytes: buffer.as_bytes(), target: StdErr {})
+  let ~buffer = std::bytes::ByteBuffer::with_capacity(2)
+  buffer.push(7)
+  buffer.push(8)
+  let _ = write("hello".as_slice())
+  let _ = write_line("ok".as_slice())
+  let _ = write_bytes(buffer.as_bytes(), StdErr {})
   let _ = flush()
-  let _ = flush(target: StdErr {})
+  let _ = flush(StdErr {})
 
   read_result
 `;

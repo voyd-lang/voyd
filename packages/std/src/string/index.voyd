@@ -1,12 +1,24 @@
+//! String index primitives.
+//!
+//! A `StringIndex` is an opaque byte offset into a UTF-8 string.
+//! Most callers should construct and move indices through `String` APIs like
+//! `start_index`, `end_index`, `index`, and `grapheme_index`.
+
+/// Opaque byte index used by string traversal APIs.
 pub obj StringIndex {
   value: i32
 }
 
 impl StringIndex
-  /// Returns the raw integer value of this index.
+  /// Returns the raw integer byte offset for this index.
+  ///
+  /// This is mainly useful for interop with low-level APIs.
   api fn to_i32(self) -> i32
     self.value
 
 /// Creates a string index from a byte offset.
+///
+/// Prefer using `String` navigation APIs when possible so rune/grapheme
+/// boundaries are validated automatically.
 pub fn make_string_index(value: i32) -> StringIndex
   StringIndex { value: value }

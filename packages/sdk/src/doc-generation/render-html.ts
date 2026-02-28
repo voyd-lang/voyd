@@ -111,7 +111,10 @@ const tokenizeSignature = (signature: string): SignatureToken[] => {
       while (end < signature.length && /\s/.test(signature[end] ?? "")) {
         end += 1;
       }
-      tokens.push({ text: signature.slice(index, end), className: "tok-space" });
+      tokens.push({
+        text: signature.slice(index, end),
+        className: "tok-space",
+      });
       index = end;
       continue;
     }
@@ -149,10 +152,7 @@ const tokenizeSignature = (signature: string): SignatureToken[] => {
       const word = signature.slice(index, end);
       if (SIGNATURE_KEYWORDS.has(word)) {
         tokens.push({ text: word, className: "tok-kw" });
-      } else if (
-        BUILTIN_TYPES.has(word) ||
-        /^[A-Z][A-Za-z0-9_]*$/.test(word)
-      ) {
+      } else if (BUILTIN_TYPES.has(word) || /^[A-Z][A-Za-z0-9_]*$/.test(word)) {
         tokens.push({ text: word, className: "tok-type" });
       } else {
         tokens.push({ text: word, className: "tok-id" });
@@ -177,7 +177,8 @@ const tokenizeSignature = (signature: string): SignatureToken[] => {
 
     if (
       nextText === "(" ||
-      (nextText === "<" && (previousText === undefined || previousText === "fn"))
+      (nextText === "<" &&
+        (previousText === undefined || previousText === "fn"))
     ) {
       return { ...token, className: "tok-name" };
     }
@@ -201,7 +202,9 @@ const renderSignatureHtml = (signature: string): string =>
   tokenizeSignature(signature)
     .map((token) => {
       const text = escapeHtml(token.text);
-      return token.className ? `<span class="${token.className}">${text}</span>` : text;
+      return token.className
+        ? `<span class="${token.className}">${text}</span>`
+        : text;
     })
     .join("");
 
@@ -290,7 +293,9 @@ const renderMarkdownToHtml = (markdown: string): string => {
       flushParagraph();
       flushList();
       const level = headingMatch[1]!.length;
-      html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2]!)}</h${level}>`);
+      html.push(
+        `<h${level}>${renderInlineMarkdown(headingMatch[2]!)}</h${level}>`,
+      );
       return;
     }
 
@@ -335,7 +340,9 @@ const collectAllModuleItems = (
 ): readonly DocumentationItem[] =>
   collectKindSections(moduleDoc).flatMap((section) => section.items);
 
-const buildTocTree = (modules: readonly ModuleDocumentationSection[]): TocNode[] => {
+const buildTocTree = (
+  modules: readonly ModuleDocumentationSection[],
+): TocNode[] => {
   const root: TocNode = {
     key: "__root__",
     label: "root",
@@ -387,11 +394,7 @@ const buildTocTree = (modules: readonly ModuleDocumentationSection[]): TocNode[]
   return rebaseDepths(shiftedNodes, 1);
 };
 
-const renderItemCard = ({
-  item,
-}: {
-  item: DocumentationItem;
-}): string => {
+const renderItemCard = ({ item }: { item: DocumentationItem }): string => {
   const docsHtml =
     item.documentation !== undefined
       ? `<div class="doc-body">${renderMarkdownToHtml(item.documentation)}</div>`
@@ -440,11 +443,11 @@ const renderItemCard = ({
 </article>`;
 };
 
-const renderKindSection = (section: KindSection): string => `<section class="kind-section">
+const renderKindSection = (
+  section: KindSection,
+): string => `<section class="kind-section">
   <h3>${escapeHtml(section.title)}</h3>
-  ${section.items
-    .map((item) => renderItemCard({ item }))
-    .join("\n")}
+  ${section.items.map((item) => renderItemCard({ item })).join("\n")}
 </section>`;
 
 const sidebarItemName = (item: DocumentationItem): string => {
@@ -457,7 +460,9 @@ const sidebarItemName = (item: DocumentationItem): string => {
   return item.name;
 };
 
-const renderSidebarDeclarationNode = (item: DocumentationItem): string => `<li class="sidebar-decl">
+const renderSidebarDeclarationNode = (
+  item: DocumentationItem,
+): string => `<li class="sidebar-decl">
   <a href="#${item.anchor}">
     <code>${SIDEBAR_KIND_LABEL[item.kind]}</code> ${escapeHtml(sidebarItemName(item))}
   </a>
@@ -469,11 +474,12 @@ const renderSidebarNode = (node: TocNode): string => {
     : `<span>${escapeHtml(node.label)}</span>`;
   const declarationNodes = node.module
     ? collectAllModuleItems(node.module)
-      .map(renderSidebarDeclarationNode)
-      .join("\n")
+        .map(renderSidebarDeclarationNode)
+        .join("\n")
     : "";
   const childModuleNodes = node.children.map(renderSidebarNode).join("\n");
-  const hasChildren = declarationNodes.length > 0 || childModuleNodes.length > 0;
+  const hasChildren =
+    declarationNodes.length > 0 || childModuleNodes.length > 0;
 
   if (!hasChildren) {
     return `<li>${link}</li>`;
@@ -497,12 +503,12 @@ const renderTopToc = (modules: readonly ModuleDocumentationSection[]): string =>
   <ul>
     ${modules
       .map((moduleDoc) => {
-        const counts = collectAllModuleItems(moduleDoc)
-          .length > 0
-          ? collectKindSections(moduleDoc)
-          .map((section) => `${section.title}: ${section.items.length}`)
-          .join(" | ")
-          : "No public API items";
+        const counts =
+          collectAllModuleItems(moduleDoc).length > 0
+            ? collectKindSections(moduleDoc)
+                .map((section) => `${section.title}: ${section.items.length}`)
+                .join(" | ")
+            : "No public API items";
         return `<li><a href="#${moduleDoc.anchor}"><code>mod</code> ${escapeHtml(
           moduleDoc.id,
         )}</a><span class="toc-counts">${escapeHtml(counts)}</span></li>`;
@@ -728,10 +734,10 @@ export const renderDocumentationHtml = ({
     .member {
       border-left: 3px solid #d2e2db;
       padding: 0.3rem 0.2rem 0.5rem 0.72rem;
-      margin: 0.55rem 0;
+      margin: 1rem 0;
     }
     .member h6 { margin: 0.3rem 0 0.35rem; font-size: 1.01rem; }
-    .doc-body p:first-child { margin-top: 0.2rem; }
+    .doc-body p:first-child { margin-top: 1rem; }
     .doc-body p { color: #273136; }
     .member-doc p { margin: 0.35rem 0; }
     a { color: var(--accent); text-decoration: none; }

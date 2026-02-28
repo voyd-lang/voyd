@@ -62,8 +62,8 @@ test "fs list_dir decodes path arrays":
   match(result)
     Ok<Array<Path>> { value }:
       assert(value.len(), eq: 2)
-      let first = optional_path_or(value.get(0), Path::new(s: "/missing".as_slice()))
-      let second = optional_path_or(value.get(1), Path::new(s: "/missing".as_slice()))
+      let first = optional_path_or(value.get(0), Path::new("/missing".as_slice()))
+      let second = optional_path_or(value.get(1), Path::new("/missing".as_slice()))
       assert(first.as_string().equals("/tmp/a"), eq: true)
       assert(second.as_string().equals("/tmp/b"), eq: true)
     Err<IoError>:
@@ -71,7 +71,7 @@ test "fs list_dir decodes path arrays":
 
 fn read_string_with_payload(payload: MsgPack): () -> Result<String, IoError>
   try
-    read_string(path: Path::new(s: "/tmp/app.log".as_slice()))
+    read(Path::new("/tmp/app.log".as_slice().to_string()))
   Fs::read_bytes(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::read_string(tail, _path):
@@ -87,7 +87,7 @@ fn read_string_with_payload(payload: MsgPack): () -> Result<String, IoError>
 
 fn read_bytes_with_payload(payload: MsgPack): () -> Result<Bytes, IoError>
   try
-    read_bytes(path: Path::new(s: "/tmp/data.bin".as_slice()))
+    read_bytes(Path::new("/tmp/data.bin".as_slice()))
   Fs::read_bytes(tail, _path):
     tail(payload)
   Fs::read_string(tail, _path):
@@ -103,7 +103,7 @@ fn read_bytes_with_payload(payload: MsgPack): () -> Result<Bytes, IoError>
 
 fn list_dir_with_payload(payload: MsgPack): () -> Result<Array<Path>, IoError>
   try
-    list_dir(path: Path::new(s: "/tmp".as_slice()))
+    list_dir(Path::new("/tmp".as_slice()))
   Fs::read_bytes(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::read_string(tail, _path):
@@ -119,7 +119,7 @@ fn list_dir_with_payload(payload: MsgPack): () -> Result<Array<Path>, IoError>
 
 fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () -> Result<Unit, IoError>
   try
-    write_string(path: Path::new(s: "/tmp/app.log".as_slice()), s: "line".as_slice())
+    write(Path::new("/tmp/app.log".as_slice().to_string()), "line".as_slice().to_string())
   Fs::read_bytes(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::read_string(tail, _path):
@@ -138,11 +138,11 @@ fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () 
 
 fn write_bytes_with_capture(~paths: Array<String>, ~values: Array<i32>): () -> Result<Unit, IoError>
   let ~buffer = ByteBuffer::init()
-  buffer.push(value: 7)
-  buffer.push(value: 8)
+  buffer.push(7)
+  buffer.push(8)
 
   try
-    write_bytes(path: Path::new(s: "/tmp/data.bin".as_slice()), bytes: buffer.as_bytes())
+    write_bytes(Path::new("/tmp/data.bin".as_slice()), buffer.as_bytes())
   Fs::read_bytes(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::read_string(tail, _path):

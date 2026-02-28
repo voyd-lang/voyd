@@ -1,3 +1,5 @@
+//! Mathematical constants and unit conversion helpers.
+
 /// Returns Archimedes' constant as f64.
 pub fn pi_f64() -> f64
   3.141592653589793
@@ -23,6 +25,7 @@ pub fn e_f32() -> f32
   demote_f64(e_f64())
 
 /// Converts degrees to radians.
+/// `value` is interpreted as degrees.
 pub fn deg_to_rad(value: f64) -> f64
   value * (pi_f64() / 180.0)
 
@@ -31,6 +34,7 @@ pub fn deg_to_rad(value: f32) -> f32
   demote_f64(deg_to_rad(promote_f32(value)))
 
 /// Converts radians to degrees.
+/// `value` is interpreted as radians.
 pub fn rad_to_deg(value: f64) -> f64
   value * (180.0 / pi_f64())
 

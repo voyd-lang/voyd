@@ -5,16 +5,16 @@ use std::string::type::{ new_string }
 use std::test::assertions::all
 
 fn bytes_of_2(a: i32, b: i32) -> Bytes
-  let ~buffer = ByteBuffer::with_capacity(bytes: 2)
-  buffer.push(value: a)
-  buffer.push(value: b)
+  let ~buffer = ByteBuffer::with_capacity(2)
+  buffer.push(a)
+  buffer.push(b)
   buffer.as_bytes()
 
 test "base64 encode and decode":
-  let encoded = encode(bytes: bytes_of_2(104, 105))
+  let encoded = encode(bytes_of_2(104, 105))
   assert(encoded.equals("aGk="), eq: true)
 
-  match(decode(s: "aGk=".as_slice()))
+  match(decode("aGk=".as_slice()))
     Ok<Bytes> { value }:
       let out = value.to_array()
       assert(out.len(), eq: 2)
@@ -24,8 +24,19 @@ test "base64 encode and decode":
       assert(false)
 
 test "base64 decode rejects invalid padding":
-  match(decode(s: "AA=A".as_slice()))
+  match(decode("AA=A".as_slice()))
     Ok<Bytes>:
       assert(false)
     Err<DecodeError> { error }:
       assert(error.message.equals("invalid base64 padding"), eq: true)
+
+test "base64 decode accepts String":
+  let encoded = "aGk=".as_slice().to_string()
+  match(decode(encoded))
+    Ok<Bytes> { value }:
+      let out = value.to_array()
+      assert(out.len(), eq: 2)
+      assert(out.at(0), eq: 104)
+      assert(out.at(1), eq: 105)
+    Err<DecodeError>:
+      assert(false)

@@ -59,6 +59,34 @@ to the handler and may be resumed zero or one time. Operations that start with a
 guaranteed to resume exactly once by the handler before any clause exit or effect
 propagation.
 
+### Effect ID Convention
+
+For public/stable effects, use dotted stable capability IDs:
+
+```voyd
+@effect(id: "voyd.std.fs")
+eff Fs
+```
+
+Use this shape consistently:
+- `"<owner>.<package>.<capability>"`
+- `owner` is the organization/ecosystem namespace (`voyd` for std).
+- `capability` is a stable semantic namespace, not a required mirror of file/module paths.
+- Use lowercase ASCII tokens (`a-z0-9` + `.`).
+
+Why this is preferred over reverse-DNS-like examples such as
+`"com.example.generic"`:
+- It aligns with Voyd imports and module organization.
+- It is easier to grep, audit, and refactor in-repo.
+- It keeps effect IDs predictable across std, compiler, SDK, and tests.
+- It preserves external contracts even when modules are moved or renamed.
+
+Stability rule:
+- Once a public effect ID ships, treat it as persistent API surface and do not
+  change it for internal refactors.
+
+`"com.example.*"` IDs are still valid, but they are not the repository standard.
+
 ---
 
 ## Raising and Handling Effects

@@ -1,3 +1,6 @@
+//! Growable contiguous arrays with copy-on-write storage.
+//! Supports negative indexing, range slicing, and eager sequence transforms.
+
 use std::fixed_array::fns::{ new_fixed_array }
 use std::traits::sequence::all
 use std::optional::all
@@ -5,14 +8,21 @@ use std::math::all
 use std::subscript::{ Range, SubscriptRead, SubscriptWrite }
 use std::traits::ord::{ Ordering, Less, Equal, Greater }
 
+/// A growable contiguous collection with copy-on-write semantics.
 pub obj Array<T> {
+  /// Internal fixed-size backing storage.
   pri storage: FixedArray<T>,
+  /// Number of initialized elements in `storage`.
   pri count: i32,
+  /// Shared ownership tracker used by copy-on-write operations.
   pri owners: ArrayOwners
 }
 
+/// Result payload returned by `Array::popped`.
 pub obj ArrayPop<T> {
+  /// Copy of the source array after pop.
   array: Array<T>,
+  /// Removed value, when the source array was non-empty.
   value?: T
 }
 
@@ -30,8 +40,13 @@ impl<T> Array<T>
   api fn from(source: FixedArray<T>) -> Optional<Array<T>>
     new_array<T>({ from: source })
 
-  // Produces a shallow copy; writes clone storage before mutation.
   /// Returns a shallow copy of the array.
+  ///
+  /// When `add_capacity` is provided, the copy is guaranteed to have room for
+  /// at least that many additional items without reallocation.
+  ///
+  /// Example:
+  /// `let copy = values.copied(add_capacity: 8)`
   api fn copied(self, add_capacity?: i32) -> Array<T>
     let additional = add_capacity?.max(0) ?? 0
     let required = self.count + additional
@@ -72,10 +87,6 @@ impl<T> Array<T>
     self.get(-1)
 
   /// Returns the element at `index`, or `None` when out of bounds.
-  api fn get(self, { at index: i32 }) -> Option<T>
-    self.get(index)
-
-  /// Returns the element at `index`, or `None` when out of bounds.
   api fn get(self, index: i32) -> Optional<T>
     let computed_index = compute_index(index, self.count)
     if computed_index < 0 or computed_index >= self.count:
@@ -89,13 +100,27 @@ impl<T> Array<T>
       return trap_out_of_bounds(self.storage)
     __array_get(self.storage, computed_index)
 
-  /// Returns a subrange view or copy for the requested range.
-  api fn slice(self, { range: Range }) -> Array<T>
+  /// Returns a subrange copy for the requested range.
+  ///
+  /// Example:
+  /// `let first_two = values.slice(0..2)`
+  api fn slice(self, range: Range) -> Array<T>
     let start = normalize_range_start(range, self.count)
     let end = normalize_range_end_exclusive(range, self.count)
     self.slice(from: start, to: end)
 
-  /// Returns a subrange view or copy for the requested range.
+  /// Returns a subrange copy for the requested range.
+  api fn slice(self, { range: Range }) -> Array<T>
+    self.slice(range)
+
+  /// Returns a subrange copy bounded by explicit indices.
+  ///
+  /// Parameters:
+  /// - `start`: Inclusive start index. Negative values index from the end.
+  /// - `end`: Exclusive end index. Negative values index from the end.
+  ///
+  /// Example:
+  /// `let middle = values.slice(from: 1, to: -1)`
   api fn slice(self, { from start: i32, to end: i32 }) -> Array<T>
     let computed_start = clamp_slice_index(start, self.count)
     let computed_end = clamp_slice_index(end, self.count)
@@ -125,10 +150,6 @@ impl<T> Array<T>
       index = index + 1
 
     Array<O> { storage: next_raw, count: self.count, owners: new_array_owners() }
-
-  /// Applies a transform to each element and returns a new array.
-  api fn map<O>(self, { map f: (value: T) -> O }) -> Array<O>
-    self.map(f)
 
   /// Returns a collection containing only values that satisfy the predicate.
   api fn filter(self, pred: (v: T) -> bool) -> Array<T>
@@ -252,19 +273,8 @@ impl<T> Array<T>
     self.find_index_raw(value) >= 0
 
   /// Returns true when a matching value exists.
-  api fn contains(self, { value: T }) -> bool
-    self.contains(value)
-
-  /// Returns true when a matching value exists.
   api fn contains(self, { where pred: (value: T) -> bool }) -> bool
     self.any(pred)
-
-  /// Returns the index of the first matching value.
-  api fn find_index(self, { value: T }) -> Option<i32>
-    let index = self.find_index_raw(value)
-    if index < 0:
-      return None {}
-    Some<i32> { value: index }
 
   /// Returns the index of the first matching value.
   api fn find_index(self, value: T) -> i32
@@ -342,10 +352,6 @@ impl<T> Array<T>
     let end = if n < self.count then: n else: self.count
     self.slice(from: 0, to: end)
 
-  /// Returns a new array containing the first `n` elements.
-  api fn take(self, { n: i32 }) -> Array<T>
-    self.take(n)
-
   /// Returns a new array without the first `n` elements.
   api fn drop(self, n: i32) -> Array<T>
     if n <= 0:
@@ -353,10 +359,6 @@ impl<T> Array<T>
     if n >= self.count:
       return Array<T>::with_capacity(0)
     self.slice(from: n, to: self.count)
-
-  /// Returns a new array without the first `n` elements.
-  api fn drop(self, { n: i32 }) -> Array<T>
-    self.drop(n)
 
   /// Splits values into two arrays based on the predicate result.
   api fn partition(self, pred: (v: T) -> bool) -> (Array<T>, Array<T>)
@@ -377,6 +379,9 @@ impl<T> Array<T>
     self.partition(pred)
 
   /// Splits values into consecutive chunks of the requested size.
+  ///
+  /// Parameter:
+  /// - `size`: Number of elements per chunk. Non-positive values return an empty array.
   api fn chunk(self, { of size: i32 }) -> Array<Array<T>>
     if size <= 0:
       return Array<Array<T>>::with_capacity(0)
@@ -391,6 +396,9 @@ impl<T> Array<T>
     out
 
   /// Returns all sliding windows of the requested size.
+  ///
+  /// Parameter:
+  /// - `size`: Number of values per window. Must be between `1` and `len`.
   api fn window(self, size: i32) -> Array<Array<T>>
     if size <= 0:
       return Array<Array<T>>::with_capacity(0)
@@ -403,10 +411,6 @@ impl<T> Array<T>
       out.push(self.slice(from: index, to: index + size))
       index = index + 1
     out
-
-  /// Returns all sliding windows of the requested size.
-  api fn window(self, { size: i32 }) -> Array<Array<T>>
-    self.window(size)
 
   /// Pairs values from two sequences until either sequence ends.
   api fn zip<U>(self, other: Array<U>) -> Array<(T, U)>
@@ -447,10 +451,6 @@ impl<T> Array<T>
       acc = combine(acc, __array_get(self.storage, index))
       index = index + 1
     Some<T> { value: acc }
-
-  /// Combines all values into one using a binary reducer.
-  api fn fold(self, { combine: (left: T, right: T) -> T }) -> Option<T>
-    self.fold(combine)
 
   /// Sorts values in place.
   api fn sort(~self, compare: (left: T, right: T) -> i32) -> void
@@ -522,7 +522,7 @@ impl<T> Array<T>
     self.count = 0
 
   /// Shrinks the array to the requested length.
-  api fn truncate(~self, { len: i32 }) -> void
+  api fn truncate(~self, len: i32) -> void
     if len >= self.count:
       return void
     if len <= 0:
@@ -539,23 +539,8 @@ impl<T> Array<T>
     let required = self.count + additional
     self.ensure_unique(required)
 
-  /// Ensures capacity for at least `additional` more elements.
-  api fn reserve(~self, { additional: i32 }) -> void
-    if additional <= 0:
-      return void
-
-    let required = self.count + additional
-    self.ensure_unique(required)
-
   /// Appends a value to the end.
   api fn push(~self, value: T) -> void
-    let required = self.count + 1
-    self.ensure_unique(required)
-    __array_set(self.storage, self.count, value)
-    self.count = required
-
-  /// Appends a value to the end.
-  api fn push(~self, { value: T }) -> void
     let required = self.count + 1
     self.ensure_unique(required)
     __array_set(self.storage, self.count, value)
@@ -574,14 +559,6 @@ impl<T> Array<T>
 
   /// Inserts a value at the target location.
   api fn insert(~self, value: T, { at index: i32 }) -> void
-    let insert_index = clamp_insert_index(index, self.count)
-    let ~items = Array<T>::with_capacity(1)
-    items.push(value)
-    self.splice(at: insert_index, removing: 0, inserting: items)
-    void
-
-  /// Inserts a value at the target location.
-  api fn insert(~self, { value: T, at index: i32 }) -> void
     let insert_index = clamp_insert_index(index, self.count)
     let ~items = Array<T>::with_capacity(1)
     items.push(value)
@@ -644,6 +621,14 @@ impl<T> Array<T>
           break
 
   /// Replaces a range with inserted values and returns removed values.
+  ///
+  /// Parameters:
+  /// - `start`: Index where the splice begins. Clamped into `0..len`.
+  /// - `remove_count`: Number of existing values to remove.
+  /// - `items`: Values inserted at `start`.
+  ///
+  /// Example:
+  /// `let removed = items.splice(at: 2, removing: 1, inserting: replacements)`
   api fn splice(~self, { at start: i32, removing remove_count: i32, inserting items: Array<T> }) -> Array<T>
     let clamped_start = clamp_insert_index(start, self.count)
     let safe_delete_count =
@@ -715,7 +700,7 @@ impl<T> Array<T>
   /// Returns a copy with one value appended.
   api fn pushed(self, value: T) -> Array<T>
     let ~copy = self.copied(1)
-    copy.push(value: value)
+    copy.push(value)
     copy
 
   /// Returns a copy with the last value removed.
@@ -748,6 +733,7 @@ impl<T> Array<T>
     copy.splice(at: start, removing: remove_count, inserting: items)
     copy
 
+  /// Ensures this array has unique storage and enough capacity for `required` values.
   fn ensure_unique(~self, required: i32) -> void
     let current_capacity = self.capacity()
     if required <= current_capacity and not self.owners.is_shared():
@@ -768,37 +754,46 @@ impl<T> Array<T>
     })
     self.replace_storage(next_raw)
 
+  /// Swaps backing storage and resets ownership tracking to this array instance.
   fn replace_storage(~self, next_raw: FixedArray<T>) -> void
     self.release_owner()
     self.storage = next_raw
     self.owners = new_array_owners()
 
+  /// Releases one local ownership reference before storage replacement.
   fn release_owner(~self) -> void
     let ~owners = self.owners
     owners.release()
 
+/// Shared reference counter for `Array` copy-on-write storage.
 obj ArrayOwners {
   refs: i32
 }
 
 impl ArrayOwners
+  /// Creates a tracker with one owner.
   fn init() -> ArrayOwners
     ArrayOwners { refs: 1 }
 
+  /// Records an additional shared owner.
   fn retain(~self) -> void
     self.refs = self.refs + 1
 
+  /// Releases a shared owner reference when possible.
   fn release(~self) -> void
     if self.refs <= 1:
       return void
     self.refs = self.refs - 1
 
+  /// Returns true when more than one array points at the same storage.
   fn is_shared(self) -> bool
     self.refs > 1
 
+/// Resolves negative indices relative to array length.
 fn compute_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
 
+/// Clamps a slice boundary index into `0..length`.
 fn clamp_slice_index(index: i32, length: i32) -> i32
   let computed = compute_index(index, length)
   if
@@ -806,6 +801,7 @@ fn clamp_slice_index(index: i32, length: i32) -> i32
     computed > length: length
     else: computed
 
+/// Clamps an insertion index into `0..length`.
 fn clamp_insert_index(index: i32, length: i32) -> i32
   let computed = compute_index(index, length)
   if
@@ -813,6 +809,7 @@ fn clamp_insert_index(index: i32, length: i32) -> i32
     computed > length: length
     else: computed
 
+/// Computes the next capacity using doubling growth until `required` fits.
 fn growth_capacity(current_capacity: i32, required: i32) -> i32
   if required <= 0:
     if current_capacity > 0:
@@ -825,19 +822,23 @@ fn growth_capacity(current_capacity: i32, required: i32) -> i32
     next_capacity = next_capacity * 2
   next_capacity
 
+/// Triggers the runtime out-of-bounds trap by issuing one invalid read.
 fn trap_out_of_bounds<T>(source: FixedArray<T>) -> T
   __array_get(source, __array_len(source))
 
+/// Allocates backing storage with non-negative capacity.
 fn make_storage<T>(capacity: i32) -> FixedArray<T>
   let safe_capacity = if capacity > 0 then: capacity else: 0
   new_fixed_array<T>(safe_capacity)
 
+/// Default comparator for values supporting `<` and `>`.
 fn default_compare_i32<T>(left: T, right: T) -> i32
   if
     left < right: -1
     left > right: 1
     else: 0
 
+/// Converts ordinal comparison results into integer comparator values.
 fn ordering_to_i32(value: Ordering) -> i32
   match(value)
     Less:
@@ -847,9 +848,11 @@ fn ordering_to_i32(value: Ordering) -> i32
     Greater:
       1
 
+/// Builds a fresh ownership tracker for array storage.
 fn new_array_owners() -> ArrayOwners
   ArrayOwners::init()
 
+/// Returns true when fixed storage contains any null reference entries.
 fn has_null_entries<T>(source: FixedArray<T>) -> bool
   let length = __array_len(source)
   var index = 0
@@ -863,6 +866,7 @@ fn has_null_entries<T>(source: FixedArray<T>) -> bool
 fn ref_is_null<T>(value: T) -> bool
   __ref_is_null(value)
 
+/// Internal iterator state for `Array::iter`.
 obj ArrayIterator<T> {
   array: Array<T>,
   index: i32
@@ -903,7 +907,7 @@ impl<T> SubscriptWrite<i32, T> for Array<T>
     __array_set(self.storage, self.capacity(), value)
     void
 
-/// Creates an array from fixed storage, returning `None` if allocation fails.
+/// Creates an array from fixed storage, returning `None` when null entries are present.
 pub fn new_array<T>({ from source: FixedArray<T> }) -> Optional<Array<T>>
   if has_null_entries(source):
     None {}
@@ -912,10 +916,11 @@ pub fn new_array<T>({ from source: FixedArray<T> }) -> Optional<Array<T>>
       value: Array<T> { storage: source, count: __array_len(source), owners: new_array_owners() }
     }
 
-/// Creates an array from fixed storage without allocation failure checks.
+/// Creates an array from fixed storage without null-entry checks.
 pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
   Array<T> { storage: source, count: __array_len(source), owners: new_array_owners() }
 
+/// Normalizes a range start into a concrete slice index.
 fn normalize_range_start(range: Range, length: i32) -> i32
   match(range.start)
     Some<i32> { value }:
@@ -923,6 +928,7 @@ fn normalize_range_start(range: Range, length: i32) -> i32
     None:
       0
 
+/// Normalizes a range end into an exclusive slice index.
 fn normalize_range_end_exclusive(range: Range, length: i32) -> i32
   match(range.end)
     Some<i32> { value }:

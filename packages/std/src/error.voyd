@@ -1,3 +1,8 @@
+//! Shared error object definitions and panic primitive for the standard library.
+//!
+//! These types model common failure categories surfaced by std modules and host
+//! effects, while `panic` exposes an intrinsic trap for unrecoverable failures.
+
 use std::string::type::{ String, StringSlice }
 
 pub obj Utf8Error {
@@ -46,5 +51,8 @@ pub trait Error<T>
 fn panic_trap(): () -> void __panic_trap()
 
 /// Stops execution immediately with a panic.
-pub fn panic({ message _message: StringSlice }) -> void
+pub fn panic(_message: String) -> void
   panic_trap()
+
+pub fn panic(_message: StringSlice) -> void
+  panic(_message.to_string())

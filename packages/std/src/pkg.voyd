@@ -1,3 +1,8 @@
+//! Standard library package root exports.
+//!
+//! This module re-exports core std modules and common types/functions for convenient
+//! import via `std::pkg`.
+
 pub self::array
 pub self::optional
 pub self::result

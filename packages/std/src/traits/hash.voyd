@@ -1,8 +1,18 @@
+//! Hashing traits.
+//!
+//! Defines writer and value hashing contracts used by hash-based collections.
+
 use std::array::Array
 
+/// Trait implemented by hash state writers.
 pub trait Hasher
+  /// Writes bytes into the hasher state.
   fn write(self, { bytes: Array<i32> }) -> void
+
+  /// Finalizes hashing and returns the digest value.
   fn finish(self) -> i64
 
+/// Trait for values that can feed bytes into a hasher.
 pub trait Hash<T>
+  /// Writes this value into `into`.
   fn hash(self, { into: Hasher }) -> void

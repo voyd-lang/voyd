@@ -1,6 +1,12 @@
+//! Low-level helpers for `FixedArray` allocation and indexed operations.
+//! Negative indices are normalized from the end (`-1` addresses the last element).
+
 use std::optional::types::all
 
 /// Allocates a fixed-size array.
+///
+/// Parameter:
+/// - `size`: Requested array length. Caller is responsible for passing a valid size.
 pub fn new_fixed_array<T>(size: i32): () -> FixedArray<T>
   __array_new<T>(size)
 
@@ -13,6 +19,8 @@ pub fn is_empty<T>(arr: FixedArray<T>): () -> bool
   arr.length<T>() == 0
 
 /// Returns the element at `index`, or `None` when out of bounds.
+///
+/// Negative indices are supported (`-1` addresses the last element).
 pub fn get<T>(arr: FixedArray<T>, index: i32): () -> Optional<T>
   let len = arr.length<T>()
   let idx = normalize_index(index, len)
@@ -28,7 +36,10 @@ pub fn get<T>(arr: FixedArray<T>, index: i32): () -> Optional<T>
 
   Some<T> { value: value }
 
-/// Writes `value` at `index` and traps when the index is out of bounds.
+/// Writes `value` at `index`.
+///
+/// Negative indices are supported (`-1` addresses the last element). Out-of-bounds
+/// writes are ignored and return the input array unchanged.
 pub fn set<T>(arr: FixedArray<T>, index: i32, value: T): () -> FixedArray<T>
   let len = arr.length<T>()
   let idx = normalize_index(index, len)
@@ -42,6 +53,15 @@ pub fn set<T>(arr: FixedArray<T>, index: i32, value: T): () -> FixedArray<T>
   arr
 
 /// Copies elements between fixed arrays according to the provided copy options.
+///
+/// Parameters:
+/// - `dest_array`: Destination storage to write into.
+/// - `opts.from`: Source storage to read from.
+/// - `opts.to_index`: Destination start index (supports negative indices).
+/// - `opts.from_index`: Source start index (supports negative indices).
+/// - `opts.count`: Maximum number of elements to copy.
+///
+/// Out-of-bounds ranges are ignored and return `dest_array` unchanged.
 pub fn copy<T>(dest_array: FixedArray<T>, opts: {
   from: FixedArray<T>,
   to_index: i32,
@@ -108,9 +128,11 @@ pub fn map<T, U>(arr: FixedArray<T>, f: (v: T) -> U) -> FixedArray<U>
     index = index + 1
   out
 
+/// Resolves negative indices relative to fixed-array length.
 fn normalize_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
 
 @intrinsic(name: "__ref_is_null")
+/// Returns true when a reference slot is uninitialized/null.
 fn ref_is_null<T>(value: T): () -> bool
   __ref_is_null(value)

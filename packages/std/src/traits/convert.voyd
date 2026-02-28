@@ -1,13 +1,25 @@
+//! Conversion traits.
+//!
+//! Provides infallible and fallible conversion contracts.
+
 use std::result::types::Result
 
+/// Infallible conversion into `To` from `From`.
 pub trait From<To, From>
+  /// Converts `value` into `To`.
   fn from({ value: From }) -> To
 
+/// Infallible conversion from `From` into `To`.
 pub trait Into<From, To>
+  /// Converts `self` into `To`.
   fn into(self) -> To
 
+/// Fallible conversion into `To` from `From`.
 pub trait TryFrom<To, From, E>
+  /// Attempts to convert `value` into `To`.
   fn try_from({ value: From }) -> Result<To, E>
 
+/// Fallible conversion from `From` into `To`.
 pub trait TryInto<From, To, E>
+  /// Attempts to convert `self` into `To`.
   fn try_into(self) -> Result<To, E>

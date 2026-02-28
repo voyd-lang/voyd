@@ -11,8 +11,8 @@ test "msgpack encode/decode roundtrip for nested values":
   items.push(make_string("hi"))
 
   let ~map = Dict<String, MsgPack>::init()
-  map.set(key: "items", value: make_array(items))
-  map.set(key: "flag", value: make_bool(true))
+  map.set("items", make_array(items))
+  map.set("flag", make_bool(true))
 
   let value = make_map(map)
   let written = encode_value(value, base, 1024)
@@ -21,13 +21,13 @@ test "msgpack encode/decode roundtrip for nested values":
   let decoded = decode_value(base, written)
   let decoded_map = unpack_map(decoded)
 
-  match(decoded_map.get(key: "flag"))
+  match(decoded_map.get("flag"))
     Some<MsgPack> { value: flag_value }:
       assert(unpack_bool(flag_value), eq: true)
     None:
       assert(false, eq: true)
 
-  match(decoded_map.get(key: "items"))
+  match(decoded_map.get("items"))
     Some<MsgPack> { value: items_value }:
       let arr = unpack_array(items_value)
       assert(arr.len(), eq: 2)

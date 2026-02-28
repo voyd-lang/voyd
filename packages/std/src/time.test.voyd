@@ -46,7 +46,7 @@ test "sleep decodes host errors":
 
 fn sleep_with_error({ code: i32, message: StringSlice }): () -> Result<Unit, HostError>
   try
-    sleep(ms: i64_from_i32(5))
+    sleep(i64_from_i32(5))
   Time::monotonic_now_millis(tail):
     tail(i64_from_i32(0))
   Time::system_now_millis(tail):
@@ -87,8 +87,8 @@ test "on_timeout decodes host errors and skips callback":
 fn on_timeout_with_payload({ payload: MsgPack }): () -> Result<Unit, HostError>
   try
     on_timeout(
-      duration: Duration::from_millis(ms: i64_from_i32(5)),
-      callback: () -> void => void
+      Duration::from_millis(i64_from_i32(5)),
+      () -> void => void
     )
   Time::monotonic_now_millis(tail):
     tail(i64_from_i32(0))
@@ -123,8 +123,8 @@ test "on_interval repeats callbacks and surfaces host errors":
 fn on_interval_until_error(~capture: IntervalCapture): () -> Result<Unit, HostError>
   try
     on_interval(
-      interval: Duration::from_millis(ms: i64_from_i32(5)),
-      callback: () -> void =>
+      Duration::from_millis(i64_from_i32(5)),
+      () -> void =>
         capture.callback_calls = capture.callback_calls + 1
     )
   Time::monotonic_now_millis(tail):
@@ -165,8 +165,8 @@ test "on_interval clears timer when sleep fails":
 fn on_interval_sleep_error(~capture: IntervalCapture): () -> Result<Unit, HostError>
   try
     on_interval(
-      interval: Duration::from_millis(ms: i64_from_i32(5)),
-      callback: () -> void =>
+      Duration::from_millis(i64_from_i32(5)),
+      () -> void =>
         capture.callback_calls = capture.callback_calls + 1
     )
   Time::monotonic_now_millis(tail):

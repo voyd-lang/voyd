@@ -1,11 +1,20 @@
+//! Equality trait.
+//!
+//! Defines semantic equality and common equality operator overloads.
+
+/// Trait for checking equality between two values of the same type.
 pub trait Eq<T>
+  /// Returns true when `self` equals `other`.
   fn eq(self, { other: T }) -> bool
 
+  /// Returns true when `self` does not equal `other`.
   fn ne(self, { other: T }) -> bool
     not self.eq(other: other)
 
+  /// Operator overload for equality checks.
   fn '=='(self, other: T) -> bool
     self.eq(other: other)
 
+  /// Operator overload for inequality checks.
   fn '!='(self, other: T) -> bool
     self.ne(other: other)

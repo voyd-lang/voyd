@@ -68,7 +68,7 @@ describe("effects wasm e2e", { timeout: 15_000 }, () => {
     host: Awaited<ReturnType<typeof createVoydHost>>
   ): Promise<void> => {
     host.table.ops
-      .filter((op) => op.effectId.endsWith("std::std::test::assertions::Test"))
+      .filter((op) => op.effectId.endsWith("voyd.std.test.assertions"))
       .forEach((op) => {
         host.registerHandler(
           op.effectId,

@@ -46,7 +46,7 @@ test "random_int includes i32 max for inclusive upper bounds":
 
 fn random_int_from_seed({ seed: i64, range: Range }) -> i32
   try
-    random_int(range: range)
+    random_int(range)
   Random::fill_bytes(tail, _len):
     tail(msgpack::make_null())
   Random::next_i64(tail):

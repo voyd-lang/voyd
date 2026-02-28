@@ -1,15 +1,32 @@
+//! Result helper functions.
+//!
+//! Functional constructors and combinators for working with `Result<T, E>`.
+
 use super::types::all
 
 /// Constructs a successful `Result` value.
-pub fn ok<T, E>(value: T): () -> Result<T, E>
+///
+/// Use this when an operation completes with a value.
+pub fn ok<T, E>(
+  /// Success value to wrap.
+  value: T
+): () -> Result<T, E>
   Ok<T> { value: value }
 
 /// Constructs a failing `Result` value.
-pub fn err<T, E>(error: E): () -> Result<T, E>
+///
+/// Use this when an operation cannot produce a success value.
+pub fn err<T, E>(
+  /// Error value to wrap.
+  error: E
+): () -> Result<T, E>
   Err<E> { error: error }
 
 /// Returns true when the result is successful.
-pub fn is_ok<T, E>(result: Result<T, E>): () -> bool
+pub fn is_ok<T, E>(
+  /// Result value to inspect.
+  result: Result<T, E>
+): () -> bool
   match(result)
     Ok<T>:
       true
@@ -17,27 +34,49 @@ pub fn is_ok<T, E>(result: Result<T, E>): () -> bool
       false
 
 /// Returns true when the result is an error.
-pub fn is_err<T, E>(result: Result<T, E>): () -> bool
+pub fn is_err<T, E>(
+  /// Result value to inspect.
+  result: Result<T, E>
+): () -> bool
   not is_ok<T, E>(result)
 
-/// Returns the contained value or the provided fallback.
-pub fn unwrap_or<T, E>(result: Result<T, E>, fallback: T): () -> T
+/// Returns the contained value or a fallback.
+///
+/// The fallback is returned unchanged when `result` is `Err`.
+pub fn unwrap_or<T, E>(
+  /// Result value to unwrap.
+  result: Result<T, E>,
+  /// Value returned for `Err` results.
+  fallback: T
+): () -> T
   match(result)
     Ok<T> { value }:
       value
     Err<E>:
       fallback
 
-/// Transforms the success value and leaves errors unchanged.
-pub fn map<T, E, U>(result: Result<T, E>, f: (v: T) -> U) -> Result<U, E>
+/// Transforms an `Ok` value and leaves `Err` unchanged.
+pub fn map<T, E, U>(
+  /// Source result value.
+  result: Result<T, E>,
+  /// Mapping function applied only to `Ok` payloads.
+  f: (v: T) -> U
+) -> Result<U, E>
   match(result)
     Ok<T> { value }:
       Ok<U> { value: f(value) }
     Err<E> { error }:
       Err<E> { error: error }
 
-/// Runs `f` only on success, propagating errors unchanged.
-pub fn and_then<T, E, U>(result: Result<T, E>, f: (v: T) -> Result<U, E>) -> Result<U, E>
+/// Chains another result-producing operation on success.
+///
+/// Errors are propagated without invoking `f`.
+pub fn and_then<T, E, U>(
+  /// Source result value.
+  result: Result<T, E>,
+  /// Continuation invoked for `Ok` payloads.
+  f: (v: T) -> Result<U, E>
+) -> Result<U, E>
   match(result)
     Ok<T> { value }:
       f(value)

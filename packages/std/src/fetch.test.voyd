@@ -38,7 +38,7 @@ test "fetch request encodes payload and decodes response":
       assert(value.status, eq: 200)
       assert(value.is_success(), eq: true)
       assert(value.body.equals("pong"), eq: true)
-      match(value.header(name: "Content-Type".as_slice()))
+      match(value.header("Content-Type".as_slice().to_string()))
         Some<String> { value: content_type }:
           assert(content_type.equals("text/plain"), eq: true)
         None:
@@ -60,7 +60,7 @@ test "fetch request decodes host errors":
 
 fn request_with_payload(payload: MsgPack): () -> Result<FetchResponse, HostError>
   try
-    FetchRequest::get(url: "https://voyd.dev".as_slice()).send()
+    FetchRequest::get("https://voyd.dev".as_slice().to_string()).send()
   Fetch::request(tail, _payload):
     tail(payload)
 
@@ -72,9 +72,15 @@ fn request_with_capture({
   ~header_names: Array<String>,
   ~header_values: Array<String>
 }): () -> Result<FetchResponse, HostError>
-  let fetch_request = FetchRequest::post(url: "https://voyd.dev/api".as_slice(), body: "ping".as_slice())
-    .with_header(name: "Accept".as_slice(), value: "text/plain".as_slice())
-    .with_timeout(millis: 500)
+  let fetch_request = FetchRequest::post(
+      url: "https://voyd.dev/api".as_slice().to_string(),
+      body: "ping".as_slice().to_string()
+    )
+    .with_header(
+      name: "Accept".as_slice().to_string(),
+      value: "text/plain".as_slice().to_string()
+    )
+    .with_timeout(500)
 
   try
     fetch_request.send()

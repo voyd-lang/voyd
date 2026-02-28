@@ -1,20 +1,36 @@
+//! Ordering trait and ordering marker types.
+//!
+//! Defines total ordering comparisons and relational operator overloads.
+
+/// Marker for values less than the compared value.
 pub obj Less {}
+
+/// Marker for values equal to the compared value.
 pub obj Equal {}
+
+/// Marker for values greater than the compared value.
 pub obj Greater {}
 
+/// Union type representing a comparison result.
 pub type Ordering = Less | Equal | Greater
 
+/// Trait for total ordering between values.
 pub trait Ord<T>
+  /// Compares `self` with `other` and returns an `Ordering` marker.
   fn cmp(self, { other: T }) -> Ordering
 
+  /// Operator overload for less-than checks.
   fn '<'(self, other: T) -> bool
     self.cmp(other: other) is Less
 
+  /// Operator overload for less-than-or-equal checks.
   fn '<='(self, other: T) -> bool
     not (self.cmp(other: other) is Greater)
 
+  /// Operator overload for greater-than checks.
   fn '>'(self, other: T) -> bool
     self.cmp(other: other) is Greater
 
+  /// Operator overload for greater-than-or-equal checks.
   fn '>='(self, other: T) -> bool
     not (self.cmp(other: other) is Less)

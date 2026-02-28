@@ -1,3 +1,7 @@
+//! JSON value model and UTF-8 parser/serializer helpers.
+//! Use `parse` to decode JSON text into `JsonValue` and `stringify`/`stringify_pretty`
+//! to encode values back to text.
+
 use std::array::Array
 use std::dict::Dict
 use std::optional::types::all
@@ -6,40 +10,40 @@ use std::string::{ String, StringSlice, new_string }
 
 pub use std::error::JsonError
 
-/// JSON null value.
+/// Represents the JSON `null` literal.
 pub obj JsonNull {}
 
-/// JSON boolean value.
+/// Represents a JSON boolean literal.
 pub obj JsonBool {
-  /// Stored boolean value.
+  /// Stored boolean payload.
   api value: bool
 }
 
-/// JSON numeric value.
+/// Represents a JSON number.
 pub obj JsonNumber {
-  /// Stored number value.
+  /// Stored numeric payload.
   api value: f64
 }
 
-/// JSON string value.
+/// Represents a JSON string.
 pub obj JsonString {
-  /// Stored string value.
+  /// Stored string payload.
   api value: String
 }
 
-/// JSON array value.
+/// Represents a JSON array.
 pub obj JsonArray {
-  /// Stored array value.
+  /// Stored element values.
   api value: Array<JsonValue>
 }
 
-/// JSON object value.
+/// Represents a JSON object keyed by strings.
 pub obj JsonObject {
   /// Stored object fields.
   api value: Dict<String, JsonValue>
 }
 
-/// JSON tagged union value.
+/// Tagged union over all supported JSON value variants.
 pub type JsonValue = JsonNull | JsonBool | JsonNumber | JsonString | JsonArray | JsonObject
 
 obj JsonParser {
@@ -47,9 +51,23 @@ obj JsonParser {
   index: i32
 }
 
-/// Parses a JSON string into a `JsonValue`.
-pub fn parse({ s: StringSlice }) -> Result<JsonValue, JsonError>
-  let ~parser = JsonParser { source: s.to_string(), index: 0 }
+/// Parses UTF-8 JSON text into a `JsonValue`.
+///
+/// Params:
+/// - `source`: JSON source text.
+///
+/// Returns:
+/// - `Ok<JsonValue>` when the full input parses successfully.
+/// - `Err<JsonError>` for malformed JSON or trailing characters.
+///
+/// Example:
+/// ```voyd
+/// use std::json
+///
+/// let parsed = json::parse("{\"ok\":true}")
+/// ```
+pub fn parse(source: String) -> Result<JsonValue, JsonError>
+  let ~parser = JsonParser { source: source, index: 0 }
   skip_whitespace(parser)
   let value_result = parse_value(parser)
   match(value_result)
@@ -61,14 +79,30 @@ pub fn parse({ s: StringSlice }) -> Result<JsonValue, JsonError>
     Err<JsonError> { error }:
       Err<JsonError> { error: error }
 
+pub fn parse(source: StringSlice) -> Result<JsonValue, JsonError>
+  parse(source.to_string())
+
 /// Serializes a `JsonValue` to compact JSON text.
-pub fn stringify({ value: JsonValue }) -> String
+///
+/// Params:
+/// - `value`: JSON value to serialize.
+///
+/// Example:
+/// ```voyd
+/// use std::json
+///
+/// let text = json::stringify(JsonBool { value: true })
+/// ```
+pub fn stringify(value: JsonValue) -> String
   let ~bytes = Array<i32>::with_capacity(64)
   write_json_value(bytes, value, false, 0)
   new_string(bytes.to_fixed_array())
 
-/// Serializes a `JsonValue` to pretty JSON text.
-pub fn stringify_pretty({ value: JsonValue }) -> String
+/// Serializes a `JsonValue` to pretty JSON text with indentation.
+///
+/// Params:
+/// - `value`: JSON value to serialize.
+pub fn stringify_pretty(value: JsonValue) -> String
   let ~bytes = Array<i32>::with_capacity(64)
   write_json_value(bytes, value, true, 0)
   new_string(bytes.to_fixed_array())
@@ -184,7 +218,7 @@ fn parse_object(~parser: JsonParser): () -> Result<JsonValue, JsonError>
         skip_whitespace(parser)
         match(parse_value(parser))
           Ok<JsonValue> { value }:
-            fields.set(key: key, value: value)
+            fields.set(key, value)
           Err<JsonError> { error }:
             return Err<JsonError> { error: error }
       Err<JsonError> { error }:
@@ -250,6 +284,13 @@ fn parse_number(~parser: JsonParser): () -> Result<JsonValue, JsonError>
     Err:
       Err<JsonError> { error: json_error("json parse error: invalid number") }
 
+/// Writes one JSON value into `out`.
+///
+/// Params:
+/// - `out`: Destination UTF-8 byte buffer.
+/// - `value`: Value to serialize.
+/// - `pretty`: Enables indentation/newlines when `true`.
+/// - `depth`: Current indentation depth.
 fn write_json_value(~out: Array<i32>, value: JsonValue, pretty: bool, depth: i32) -> void
   value.match(active)
     JsonNull:

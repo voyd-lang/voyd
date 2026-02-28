@@ -1,2 +1,8 @@
+//! Default value trait.
+//!
+//! Defines how a type can provide a canonical default value.
+
+/// Trait for producing a default instance of a type.
 pub trait Default<T>
+  /// Returns the default value for `T`.
   fn default() -> T
