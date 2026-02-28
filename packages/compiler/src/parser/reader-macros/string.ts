@@ -40,6 +40,9 @@ const stringMethodCall = ({
 }): Expr =>
   call(identifier("."), target, new Form([identifier(method), ...args]).toCall());
 
+const emptyString = () =>
+  call(identifier("::"), identifier("String"), call(identifier("init")));
+
 const buildInterpolatedStringExpr = (
   segments: readonly StringSegment[]
 ): Expr => {
@@ -51,7 +54,10 @@ const buildInterpolatedStringExpr = (
       : [segment.value]
   );
 
-  const seed = string("");
+  if (parts.length === 0) {
+    return string("");
+  }
+
   return parts.reduce(
     (left, right) =>
       stringMethodCall({
@@ -59,7 +65,7 @@ const buildInterpolatedStringExpr = (
         method: "concat",
         args: [right],
       }),
-    seed
+    emptyString()
   );
 };
 
