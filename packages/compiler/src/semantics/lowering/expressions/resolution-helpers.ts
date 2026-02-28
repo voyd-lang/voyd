@@ -3,6 +3,7 @@ import { toSourceSpan } from "../../utils.js";
 import { resolveConstructorResolution } from "../resolution.js";
 import type { IdentifierResolution, LowerContext } from "../types.js";
 import type { HirExprId, SourceSpan, SymbolId } from "../../ids.js";
+import type { HirTypeExpr } from "../../hir/index.js";
 
 type SymbolMetadata = {
   declarationSpan?: unknown;
@@ -254,10 +255,12 @@ const formatAmbiguousResolutionMessage = ({
 export const lowerResolvedCallee = ({
   resolution,
   syntax,
+  typeArguments,
   ctx,
 }: {
   resolution: IdentifierResolution;
   syntax: Syntax;
+  typeArguments?: readonly HirTypeExpr[];
   ctx: LowerContext;
 }): HirExprId => {
   const span = toSourceSpan(syntax);
@@ -268,6 +271,8 @@ export const lowerResolvedCallee = ({
       ast: syntax.syntaxId,
       span,
       symbol: resolution.symbol,
+      typeArguments:
+        typeArguments && typeArguments.length > 0 ? typeArguments : undefined,
     });
   }
 

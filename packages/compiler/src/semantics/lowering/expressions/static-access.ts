@@ -100,9 +100,21 @@ export const lowerStaticAccessExpr = ({
               ctx,
             })
           : undefined;
+      const resolutionRecord =
+        resolution.kind === "symbol"
+          ? ctx.symbolTable.getSymbol(resolution.symbol)
+          : undefined;
+      const resolutionMetadata = resolutionRecord?.metadata as
+        | { aliasConstructorAlias?: unknown }
+        | undefined;
       return lowerResolvedCallee({
         resolution: constructorResolution ?? resolution,
         syntax: memberExpr,
+        typeArguments:
+          resolution.kind === "symbol" &&
+          typeof resolutionMetadata?.aliasConstructorAlias === "number"
+            ? targetTypeArguments
+          : undefined,
         ctx,
       });
     }

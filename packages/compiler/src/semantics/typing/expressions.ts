@@ -136,7 +136,7 @@ const resolveExpressionType = (
     case "literal":
       return typeLiteralExpr(expr, ctx);
     case "identifier":
-      return typeIdentifierExpr(expr, ctx);
+      return typeIdentifierExpr(expr, ctx, state);
     case "overload-set":
       return typeOverloadSetExpr(expr, ctx);
     case "call":

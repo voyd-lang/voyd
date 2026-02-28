@@ -1,28 +1,44 @@
-import type { HirExpression, HirNamedTypeExpr } from "../../hir/index.js";
+import type { HirExpression, HirNamedTypeExpr, HirTypeExpr } from "../../hir/index.js";
 import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
 import { resolveImportedTypeExpr, resolveImportedValue } from "../imports.js";
-import type { TypingContext } from "../types.js";
+import type { TypingContext, TypingState } from "../types.js";
 import { getIntrinsicType } from "./intrinsics.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 import { createTypingState } from "../context.js";
-import { resolveTypeAlias, unifyWithBudget } from "../type-system.js";
+import { resolveTypeAlias, resolveTypeExpr, unifyWithBudget } from "../type-system.js";
 
 export const typeIdentifierExpr = (
   expr: HirExpression & { exprKind: "identifier"; symbol: SymbolId },
-  ctx: TypingContext
+  ctx: TypingContext,
+  state: TypingState,
 ): TypeId => {
   ctx.effects.setExprEffect(expr.id, ctx.effects.emptyRow);
-  return getValueType(expr.symbol, ctx, { span: expr.span });
+  const aliasConstructorTypeArguments = resolveIdentifierTypeArguments({
+    typeArguments: expr.typeArguments,
+    ctx,
+    state,
+  });
+  return getValueType(expr.symbol, ctx, {
+    span: expr.span,
+    aliasConstructorTypeArguments,
+  });
 };
 
 export const getValueType = (
   symbol: SymbolId,
   ctx: TypingContext,
-  options: { span?: SourceSpan } = {}
+  options: {
+    span?: SourceSpan;
+    aliasConstructorTypeArguments?: readonly TypeId[];
+  } = {},
 ): TypeId => {
-  const cached = ctx.valueTypes.get(symbol);
-  if (typeof cached === "number") {
-    return cached;
+  const hasExplicitAliasConstructorTypeArguments =
+    (options.aliasConstructorTypeArguments?.length ?? 0) > 0;
+  if (!hasExplicitAliasConstructorTypeArguments) {
+    const cached = ctx.valueTypes.get(symbol);
+    if (typeof cached === "number") {
+      return cached;
+    }
   }
 
   const record = ctx.symbolTable.getSymbol(symbol);
@@ -114,7 +130,9 @@ export const getValueType = (
 
   const aliasConstructorTarget = metadata.aliasConstructorTarget;
   if (typeof aliasConstructorTarget === "number") {
-    const targetType = getValueType(aliasConstructorTarget, ctx, options);
+    const targetType = getValueType(aliasConstructorTarget, ctx, {
+      span: options.span,
+    });
     const aliasConstructorAlias =
       typeof metadata.aliasConstructorAlias === "number"
         ? metadata.aliasConstructorAlias
@@ -124,14 +142,17 @@ export const getValueType = (
           targetType,
           targetSymbol: aliasConstructorTarget,
           aliasSymbol: aliasConstructorAlias,
+          aliasTypeArguments: options.aliasConstructorTypeArguments ?? [],
           ctx,
           span: options.span,
         })
       : targetType;
-    ctx.valueTypes.set(symbol, specialized);
-    if (!ctx.table.getSymbolScheme(symbol)) {
-      const scheme = ctx.arena.newScheme([], specialized);
-      ctx.table.setSymbolScheme(symbol, scheme);
+    if (!hasExplicitAliasConstructorTypeArguments) {
+      ctx.valueTypes.set(symbol, specialized);
+      if (!ctx.table.getSymbolScheme(symbol)) {
+        const scheme = ctx.arena.newScheme([], specialized);
+        ctx.table.setSymbolScheme(symbol, scheme);
+      }
     }
     return specialized;
   }
@@ -152,12 +173,14 @@ const specializeAliasConstructorType = ({
   targetType,
   targetSymbol,
   aliasSymbol,
+  aliasTypeArguments,
   ctx,
   span,
 }: {
   targetType: TypeId;
   targetSymbol: SymbolId;
   aliasSymbol: SymbolId;
+  aliasTypeArguments: readonly TypeId[];
   ctx: TypingContext;
   span?: SourceSpan;
 }): TypeId => {
@@ -168,10 +191,16 @@ const specializeAliasConstructorType = ({
 
   let aliasType: TypeId | undefined;
   try {
-    aliasType = resolveTypeAlias(aliasSymbol, ctx, createTypingState(), []);
+    aliasType = resolveTypeAlias(
+      aliasSymbol,
+      ctx,
+      createTypingState(),
+      aliasTypeArguments,
+    );
   } catch {
     aliasType = resolveImportedAliasType({
       aliasSymbol,
+      typeArguments: aliasTypeArguments,
       ctx,
       span,
     });
@@ -199,10 +228,12 @@ const specializeAliasConstructorType = ({
 
 const resolveImportedAliasType = ({
   aliasSymbol,
+  typeArguments,
   ctx,
   span,
 }: {
   aliasSymbol: SymbolId;
+  typeArguments: readonly TypeId[];
   ctx: TypingContext;
   span?: SourceSpan;
 }): TypeId | undefined => {
@@ -217,11 +248,28 @@ const resolveImportedAliasType = ({
   try {
     return resolveImportedTypeExpr({
       expr: namedAliasExpr,
-      typeArgs: [],
+      typeArgs: typeArguments,
       ctx,
       state: { mode: "strict" },
     });
   } catch {
     return undefined;
   }
+};
+
+const resolveIdentifierTypeArguments = ({
+  typeArguments,
+  ctx,
+  state,
+}: {
+  typeArguments: readonly HirTypeExpr[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): TypeId[] | undefined => {
+  if (!typeArguments || typeArguments.length === 0) {
+    return undefined;
+  }
+  return typeArguments.map((typeArgument) =>
+    resolveTypeExpr(typeArgument, ctx, state, ctx.primitives.unknown),
+  );
 };

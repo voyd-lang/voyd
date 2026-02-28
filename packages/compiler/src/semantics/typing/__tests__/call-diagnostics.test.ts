@@ -318,6 +318,29 @@ describe("call diagnostics", () => {
     );
   });
 
+  it("enforces namespace type arguments when alias ::init is referenced then called", () => {
+    const ast = loadAst(
+      "constructor_call_alias_static_init_ref_with_explicit_type_args_enforced.voyd",
+    );
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
   it("rejects extra type arguments for concrete alias constructor calls", () => {
     const ast = loadAst("constructor_call_alias_rejects_extra_type_args.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(
