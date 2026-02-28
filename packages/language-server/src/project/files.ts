@@ -107,8 +107,25 @@ export const resolveEntryPath = async (filePath: string): Promise<string> => {
   }
 };
 
+const resolveSrcRootFromEntry = (entryPath: string): string => {
+  const fallback = path.dirname(path.resolve(entryPath));
+  let current = fallback;
+
+  while (true) {
+    if (path.basename(current) === "src") {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return fallback;
+    }
+    current = parent;
+  }
+};
+
 export const resolveModuleRoots = (entryPath: string): ModuleRoots => {
-  const src = path.dirname(entryPath);
+  const src = resolveSrcRootFromEntry(entryPath);
   return {
     src,
     std: resolveStdRoot(),
