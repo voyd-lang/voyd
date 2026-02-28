@@ -61,4 +61,10 @@ describe("classifyTopLevelDecl", () => {
       kind: "other",
     });
   });
+
+  it("returns other for incomplete use declarations", () => {
+    expect(classifyFirst("use")).toMatchObject({
+      kind: "other",
+    });
+  });
 });
