@@ -57,7 +57,7 @@ propagation.
 
 ### Effect ID Convention
 
-For public/stable effects, prefer module-path IDs in Voyd namespace form:
+For public/stable effects, use Voyd namespace IDs with stable semantic naming:
 
 ```voyd
 @effect(id: "std::fs::Fs")
@@ -65,8 +65,8 @@ eff Fs
 ```
 
 Use this shape consistently:
-- `"<package>::<module_path>::<EffectName>"`
-- `package` and `module_path` should match the real Voyd module path.
+- `"<package>::<capability>::<EffectName>"`
+- `capability` is a stable semantic namespace, not a required mirror of file/module paths.
 - `EffectName` should match the declared effect type name (UpperCamelCase).
 
 Why this is preferred over reverse-DNS-like examples such as
@@ -74,6 +74,11 @@ Why this is preferred over reverse-DNS-like examples such as
 - It aligns with Voyd imports and module organization.
 - It is easier to grep, audit, and refactor in-repo.
 - It keeps effect IDs predictable across std, compiler, SDK, and tests.
+- It preserves external contracts even when modules are moved or renamed.
+
+Stability rule:
+- Once a public effect ID ships, treat it as persistent API surface and do not
+  change it for internal refactors.
 
 `"com.example.*"` IDs are still valid, but they are not the repository standard.
 
