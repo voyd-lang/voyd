@@ -1449,6 +1449,141 @@ impl Eq<Box> for Box
     expect(use.entries[0]?.moduleId).toBe(siblingId);
   });
 
+  it("resolves self-relative imports to nested pkg.voyd modules without explicit pkg segments", () => {
+    const source = "pub use self::vtrace::draw";
+    const ast = parse(source, "pkgs.voyd");
+    const useForm = ast.rest.find(
+      (entry) => isForm(entry) && entry.calls("use"),
+    ) as Form | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const modulePath = { namespace: "src" as const, segments: ["pkgs"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const vtracePkgPath = {
+      namespace: "src" as const,
+      segments: ["pkgs", "vtrace", "pkg"] as const,
+    };
+    const vtracePkgId = modulePathToString(vtracePkgPath);
+
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "pkgs.voyd" },
+      ast,
+      source,
+      dependencies: [{ kind: "use", path: vtracePkgPath, span }],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "pkgs.voyd", kind: "module", declaredAt: ast.syntaxId });
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        vtracePkgId,
+        new Map([
+          [
+            "draw",
+            {
+              name: "draw",
+              symbol: 1,
+              moduleId: vtracePkgId,
+              modulePath: vtracePkgPath,
+              packageId: packageIdFromPath(vtracePkgPath),
+              kind: "value",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    expect(binding.diagnostics.some((diag) => diag.code === "BD0001")).toBe(false);
+    expect(binding.uses[0]?.entries[0]?.moduleId).toBe(vtracePkgId);
+    const drawSymbol = symbolTable.resolve("draw", symbolTable.rootScope);
+    expect(typeof drawSymbol).toBe("number");
+  });
+
+  it("resolves super-relative imports to nested pkg.voyd modules without explicit pkg segments", () => {
+    const source = "pub use super::vtrace::draw";
+    const ast = parse(source, "nested.voyd");
+    const useForm = ast.rest.find(
+      (entry) => isForm(entry) && entry.calls("use"),
+    ) as Form | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const modulePath = {
+      namespace: "src" as const,
+      segments: ["pkgs", "nested"] as const,
+    };
+    const moduleId = modulePathToString(modulePath);
+    const vtracePkgPath = {
+      namespace: "src" as const,
+      segments: ["pkgs", "vtrace", "pkg"] as const,
+    };
+    const vtracePkgId = modulePathToString(vtracePkgPath);
+
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "nested.voyd" },
+      ast,
+      source,
+      dependencies: [{ kind: "use", path: vtracePkgPath, span }],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "nested.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        vtracePkgId,
+        new Map([
+          [
+            "draw",
+            {
+              name: "draw",
+              symbol: 1,
+              moduleId: vtracePkgId,
+              modulePath: vtracePkgPath,
+              packageId: packageIdFromPath(vtracePkgPath),
+              kind: "value",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    expect(binding.diagnostics.some((diag) => diag.code === "BD0001")).toBe(false);
+    expect(binding.uses[0]?.entries[0]?.moduleId).toBe(vtracePkgId);
+    const drawSymbol = symbolTable.resolve("draw", symbolTable.rootScope);
+    expect(typeof drawSymbol).toBe("number");
+  });
+
   it("reports duplicate local variable names in the same scope", () => {
     const source = `pub fn main() -> i32
   block

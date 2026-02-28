@@ -26,13 +26,6 @@ const packageAnchorSegments = ({
 }): readonly string[] =>
   isPackageRoot ? path.segments.slice(0, -1) : path.segments;
 
-const implicitPackageRootSegments = (
-  path: ModulePath,
-): readonly string[] | undefined =>
-  path.segments.at(-1) === PACKAGE_ROOT_SEGMENT
-    ? path.segments.slice(0, -1)
-    : undefined;
-
 const parentAnchorSegmentsFor = ({
   path,
   parentHops,
@@ -105,6 +98,80 @@ const srcAliasEntryKeysFor = ({
     const aliased = aliasSrcEntryKey({ key, importerNamespace });
     return aliased ? [aliased] : [];
   });
+
+const segmentVariantsForMatching = (
+  segments: readonly string[],
+): readonly (readonly string[])[] =>
+  segments.at(-1) === PACKAGE_ROOT_SEGMENT
+    ? [segments, segments.slice(0, -1)]
+    : [segments];
+
+const keyForSegments = (segments: readonly string[]): string | undefined =>
+  segments.length > 0 ? segments.join("::") : undefined;
+
+const dependencyMatchKeysFor = ({
+  segments,
+  namespace,
+  packageName,
+  includeNamespace = false,
+  includePackageName = false,
+}: {
+  segments: readonly string[];
+  namespace?: ModulePath["namespace"];
+  packageName?: string;
+  includeNamespace?: boolean;
+  includePackageName?: boolean;
+}): readonly string[] => {
+  const keys = new Set<string>();
+
+  segmentVariantsForMatching(segments).forEach((variant) => {
+    const segmentKey = keyForSegments(variant);
+    if (segmentKey) {
+      keys.add(segmentKey);
+    }
+
+    if (includeNamespace && namespace) {
+      const namespacedKey = keyForSegments([namespace, ...variant]);
+      if (namespacedKey) {
+        keys.add(namespacedKey);
+      }
+    }
+
+    if (!includePackageName || !packageName) {
+      return;
+    }
+
+    keys.add(packageName);
+    const packageKey = keyForSegments([packageName, ...variant]);
+    if (packageKey) {
+      keys.add(packageKey);
+    }
+    if (includeNamespace && namespace) {
+      keys.add(`${namespace}::${packageName}`);
+      const namespacedPackageKey = keyForSegments([
+        namespace,
+        packageName,
+        ...variant,
+      ]);
+      if (namespacedPackageKey) {
+        keys.add(namespacedPackageKey);
+      }
+    }
+  });
+
+  return [...keys];
+};
+
+const hasMatchingEntryKey = ({
+  entryKeys,
+  dependencyKeys,
+}: {
+  entryKeys: readonly string[];
+  dependencyKeys: readonly string[];
+}): boolean =>
+  dependencyKeys.some((dependencyKey) =>
+    entryKeys.some((entryKey) => entryKey === dependencyKey),
+  );
 
 export const resolveModuleRequest = (
   request: ModuleRequest,
@@ -213,8 +280,10 @@ export const matchesDependencyPath = ({
     const relativeSegments = dependencyPath.segments.slice(
       currentAnchorSegments.length
     );
-    const relativeKey = relativeSegments.join("::");
-    return allEntryKeys.some((key) => key === relativeKey);
+    return hasMatchingEntryKey({
+      entryKeys: allEntryKeys,
+      dependencyKeys: dependencyMatchKeysFor({ segments: relativeSegments }),
+    });
   }
 
   if ((entry.parentHops ?? 0) > 0) {
@@ -240,64 +309,27 @@ export const matchesDependencyPath = ({
     const relativeSegments = dependencyPath.segments.slice(
       parentAnchorSegments.length,
     );
-    const relativeKey = relativeSegments.join("::");
-    return allEntryKeys.some((key) => key === relativeKey);
+    return hasMatchingEntryKey({
+      entryKeys: allEntryKeys,
+      dependencyKeys: dependencyMatchKeysFor({ segments: relativeSegments }),
+    });
   }
 
-  const depSegments = dependencyPath.segments.join("::");
-  const namespacedDepKey = [dependencyPath.namespace, ...dependencyPath.segments].join(
-    "::"
-  );
-  const depImplicitSegments = implicitPackageRootSegments(dependencyPath);
-  const implicitDepKey = depImplicitSegments?.join("::");
-  const implicitNamespacedDepKey = depImplicitSegments
-    ? [dependencyPath.namespace, ...depImplicitSegments].join("::")
-    : undefined;
-  if (
-    allEntryKeys.some(
-      (key) =>
-        key === depSegments ||
-        key === namespacedDepKey ||
-        key === implicitDepKey ||
-        key === implicitNamespacedDepKey
-    )
-  ) {
-    return true;
-  }
-
-  if (dependencyPath.namespace === "pkg" && dependencyPath.packageName) {
-    const packageKey = `${dependencyPath.namespace}::${dependencyPath.packageName}`;
-    const pkgKey = [dependencyPath.packageName, ...dependencyPath.segments].join("::");
-    const namespacedPkgKey = [
-      dependencyPath.namespace,
-      dependencyPath.packageName,
-      ...dependencyPath.segments,
-    ].join("::");
-    const implicitPkgKey = depImplicitSegments
-      ? [dependencyPath.packageName, ...depImplicitSegments].join("::")
-      : undefined;
-    const implicitNamespacedPkgKey = depImplicitSegments
-      ? [
-          dependencyPath.namespace,
-          dependencyPath.packageName,
-          ...depImplicitSegments,
-        ].join("::")
-      : undefined;
-    if (
-      allEntryKeys.some(
-        (key) =>
-          key === packageKey ||
-          key === dependencyPath.packageName ||
-          key === pkgKey ||
-          key === namespacedPkgKey ||
-          key === implicitPkgKey ||
-          key === implicitNamespacedPkgKey
-      )
-    ) {
-      return true;
-    }
-  }
-  return false;
+  return hasMatchingEntryKey({
+    entryKeys: allEntryKeys,
+    dependencyKeys: dependencyMatchKeysFor({
+      segments: dependencyPath.segments,
+      namespace: dependencyPath.namespace,
+      packageName:
+        dependencyPath.namespace === "pkg"
+          ? dependencyPath.packageName
+          : undefined,
+      includeNamespace: true,
+      includePackageName:
+        dependencyPath.namespace === "pkg" &&
+        typeof dependencyPath.packageName === "string",
+    }),
+  });
 };
 
 const normalizeRequest = (request: ModuleRequest): ModuleRequest => {
