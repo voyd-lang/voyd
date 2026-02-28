@@ -16,7 +16,7 @@ import {
   getRequiredExprType,
   wasmTypeFor,
 } from "../types.js";
-import { asStatement } from "./utils.js";
+import { asStatement, coerceToBinaryenType } from "./utils.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { handlerCleanupOps } from "../effects/handler-stack.js";
 import { tailResumptionExitChecks } from "../effects/tail-resumptions.js";
@@ -30,6 +30,7 @@ export const compileBlockExpr = (
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const blockResultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   const statements: binaryen.ExpressionRef[] = [];
   expr.statements.forEach((stmtId) => {
     statements.push(compileStatement(stmtId, ctx, fnCtx, compileExpr));
@@ -44,7 +45,7 @@ export const compileBlockExpr = (
       expectedResultTypeId,
     });
     const requiredActualType = getRequiredExprType(expr.value, ctx, typeInstanceId);
-    const coerced =
+    const coercedToExpected =
       typeof expectedResultTypeId === "number" && !usedReturnCall
         ? coerceValueToType({
             value: valueExpr,
@@ -54,6 +55,11 @@ export const compileBlockExpr = (
             fnCtx,
           })
         : valueExpr;
+    const coerced = coerceToBinaryenType(
+      ctx,
+      coercedToExpected,
+      blockResultType
+    );
     if (statements.length === 0) {
       return { expr: coerced, usedReturnCall };
     }
@@ -63,7 +69,7 @@ export const compileBlockExpr = (
       expr: ctx.mod.block(
         null,
         statements,
-        getExprBinaryenType(expr.id, ctx, typeInstanceId)
+        blockResultType
       ),
       usedReturnCall,
     };

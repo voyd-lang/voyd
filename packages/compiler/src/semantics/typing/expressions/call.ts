@@ -4675,7 +4675,15 @@ const typeIntrinsicCall = (
       });
     case "__f32_demote_f64":
     case "__f64_promote_f32":
-      return typeFloatConvertIntrinsic({
+    case "__i32_trunc_f32_s":
+    case "__i32_trunc_f64_s":
+    case "__i64_trunc_f32_s":
+    case "__i64_trunc_f64_s":
+    case "__f32_convert_i32_s":
+    case "__f32_convert_i64_s":
+    case "__f64_convert_i32_s":
+    case "__f64_convert_i64_s":
+      return typeNumericConvertIntrinsic({
         name,
         args,
         ctx,
@@ -5471,7 +5479,7 @@ const typeReinterpretIntrinsic = ({
   }
 };
 
-const typeFloatConvertIntrinsic = ({
+const typeNumericConvertIntrinsic = ({
   name,
   args,
   ctx,
@@ -5486,6 +5494,8 @@ const typeFloatConvertIntrinsic = ({
 }): TypeId => {
   assertIntrinsicArgCount({ name, args, expected: 1 });
   assertNoIntrinsicTypeArgs(name, typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  const int64 = getPrimitiveType(ctx, "i64");
   const float32 = getPrimitiveType(ctx, "f32");
   const float64 = getPrimitiveType(ctx, "f64");
   switch (name) {
@@ -5494,6 +5504,30 @@ const typeFloatConvertIntrinsic = ({
       return float32;
     case "__f64_promote_f32":
       ensureTypeMatches(args[0]!.type, float32, ctx, state, name);
+      return float64;
+    case "__i32_trunc_f32_s":
+      ensureTypeMatches(args[0]!.type, float32, ctx, state, name);
+      return int32;
+    case "__i32_trunc_f64_s":
+      ensureTypeMatches(args[0]!.type, float64, ctx, state, name);
+      return int32;
+    case "__i64_trunc_f32_s":
+      ensureTypeMatches(args[0]!.type, float32, ctx, state, name);
+      return int64;
+    case "__i64_trunc_f64_s":
+      ensureTypeMatches(args[0]!.type, float64, ctx, state, name);
+      return int64;
+    case "__f32_convert_i32_s":
+      ensureTypeMatches(args[0]!.type, int32, ctx, state, name);
+      return float32;
+    case "__f32_convert_i64_s":
+      ensureTypeMatches(args[0]!.type, int64, ctx, state, name);
+      return float32;
+    case "__f64_convert_i32_s":
+      ensureTypeMatches(args[0]!.type, int32, ctx, state, name);
+      return float64;
+    case "__f64_convert_i64_s":
+      ensureTypeMatches(args[0]!.type, int64, ctx, state, name);
       return float64;
     default:
       throw new Error(`unsupported intrinsic ${name}`);

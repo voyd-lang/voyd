@@ -6,6 +6,7 @@ import { getExprEffectRow } from "../effects.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { assertFieldAccess } from "../visibility.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
+import { typeDescriptorToUserString } from "../type-arena.js";
 
 export const typeFieldAccessExpr = (
   expr: HirFieldAccessExpr,
@@ -21,7 +22,16 @@ export const typeFieldAccessExpr = (
     includeInaccessible: true,
   });
   if (!fields) {
-    throw new Error("field access requires an object type");
+    return emitDiagnostic({
+      ctx,
+      code: "TY0033",
+      params: {
+        kind: "unknown-field",
+        name: expr.field,
+        receiver: typeDescriptorToUserString(ctx.arena.get(targetType), ctx.arena),
+      },
+      span: normalizeSpan(expr.span),
+    });
   }
 
   const field = fields.find((candidate) => candidate.name === expr.field);

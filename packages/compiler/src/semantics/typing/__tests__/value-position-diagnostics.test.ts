@@ -37,4 +37,36 @@ describe("value position diagnostics", () => {
     const { start, end } = caught.diagnostic.span;
     expect(source.slice(start, end)).toBe("Ver");
   });
+
+  it("reports field access on primitive receivers without TY9999 fallback", () => {
+    const ast = loadAst("field_access_on_primitive.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0033");
+    expect(caught.diagnostic.message).toMatch(/unknown field 'x' on 'f64'/i);
+    expect(caught.diagnostic.code).not.toBe("TY9999");
+
+    const fixturePath = resolve(
+      import.meta.dirname,
+      "..",
+      "..",
+      "__tests__",
+      "__fixtures__",
+      "field_access_on_primitive.voyd"
+    );
+    const source = readFileSync(fixturePath, "utf8");
+    const { start, end } = caught.diagnostic.span;
+    expect(source.slice(start, end)).toContain("scalar.x");
+  });
 });

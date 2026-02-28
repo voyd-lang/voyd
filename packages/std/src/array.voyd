@@ -5,7 +5,8 @@ use std::fixed_array::fns::{ new_fixed_array }
 use std::traits::sequence::all
 use std::optional::all
 use std::math::all
-use std::subscript::{ Range, SubscriptRead, SubscriptWrite }
+use std::range::Range
+use std::subscript::{ SubscriptRead, SubscriptWrite }
 use std::traits::ord::{ Ordering, Less, Equal, Greater }
 
 /// A growable contiguous collection with copy-on-write semantics.

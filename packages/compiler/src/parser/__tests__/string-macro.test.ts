@@ -95,6 +95,18 @@ describe("string macro utf8 encoding", () => {
     );
   });
 
+  it("decodes newline and carriage-return escapes", () => {
+    expect(toPlain(parseSingleExpression('"A\\nB\\rC"'))).toEqual(
+      toPlain(stringExpr("A\nB\rC"))
+    );
+  });
+
+  it("preserves unknown escapes as raw text", () => {
+    expect(toPlain(parseSingleExpression('"A\\\\qB"'))).toEqual(
+      toPlain(stringExpr("A\\qB"))
+    );
+  });
+
   it("supports interpolation-only and mixed interpolation strings", () => {
     const interpolationOnly = identifier("first");
     expect(toPlain(parseSingleExpression('"${first}"'))).toEqual(

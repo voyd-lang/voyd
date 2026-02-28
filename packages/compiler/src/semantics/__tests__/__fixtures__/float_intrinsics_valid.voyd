@@ -38,3 +38,27 @@ fn use_f32(value: f32) -> f32
 fn both() -> f32
   let v32 = demote_f64(2.5)
   use_f32(v32)
+
+fn convert_and_truncate(
+  i32_value: i32,
+  i64_value: i64,
+  f32_value: f32,
+  f64_value: f64
+) -> f64
+  let f32_from_i32 = __f32_convert_i32_s(i32_value)
+  let f32_from_i64 = __f32_convert_i64_s(i64_value)
+  let f64_from_i32 = __f64_convert_i32_s(i32_value)
+  let f64_from_i64 = __f64_convert_i64_s(i64_value)
+
+  let i32_from_f32 = __i32_trunc_f32_s(f32_value)
+  let i32_from_f64 = __i32_trunc_f64_s(f64_value)
+  let i64_from_f32 = __i64_trunc_f32_s(f32_value)
+  let i64_from_f64 = __i64_trunc_f64_s(f64_value)
+
+  __f64_convert_i32_s(i32_from_f32)
+    + __f64_convert_i32_s(i32_from_f64)
+    + __f64_convert_i64_s(i64_from_f32)
+    + __f64_convert_i64_s(i64_from_f64)
+    + __f64_promote_f32(f32_from_i32 + f32_from_i64)
+    + f64_from_i32
+    + f64_from_i64

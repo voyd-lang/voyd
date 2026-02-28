@@ -38,9 +38,10 @@ import {
   compileIdentifierExpr,
   compileLiteralExpr,
 } from "../../expressions/primitives.js";
-import { withLoopScope } from "../../control-flow-stack.js";
+import { allocateLoopLabels, withLoopScope } from "../../control-flow-stack.js";
 import type { GroupContinuationCfg } from "../continuation-cfg.js";
 import { unboxOutcomeValue } from "../outcome-values.js";
+import { coerceToBinaryenType } from "../../expressions/utils.js";
 
 const hasGroupSites = (exprId: HirExprId, cfg: GroupContinuationCfg): boolean =>
   (cfg.sitesByExpr.get(exprId)?.size ?? 0) > 0;
@@ -97,6 +98,7 @@ const compileGroupedContinuationBlockExpr = ({
   }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
   const statements: binaryen.ExpressionRef[] = [];
 
@@ -134,16 +136,15 @@ const compileGroupedContinuationBlockExpr = ({
   });
 
   if (statements.length === 0) {
-    return value;
+    return {
+      expr: coerceToBinaryenType(ctx, value.expr, resultType),
+      usedReturnCall: value.usedReturnCall,
+    };
   }
 
-  statements.push(value.expr);
+  statements.push(coerceToBinaryenType(ctx, value.expr, resultType));
   return {
-    expr: ctx.mod.block(
-      null,
-      statements,
-      getExprBinaryenType(expr.id, ctx, typeInstanceId)
-    ),
+    expr: ctx.mod.block(null, statements, resultType),
     usedReturnCall: value.usedReturnCall,
   };
 };
@@ -169,6 +170,8 @@ const compileGroupedContinuationIfExpr = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   if (!hasGroupSites(expr.id, cfg)) {
     return compileIfExpr(
       expr as HirIfExpr,
@@ -208,8 +211,10 @@ const compileGroupedContinuationIfExpr = ({
         expectedResultTypeId,
       });
       const cond = ctx.mod.i32.and(beforeActive(), activeInDefault);
+      const typedThen = coerceToBinaryenType(ctx, defaultExpr.expr, resultType);
+      const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
       fallback = {
-        expr: ctx.mod.if(cond, defaultExpr.expr, fallback.expr),
+        expr: ctx.mod.if(cond, typedThen, typedElse),
         usedReturnCall: defaultExpr.usedReturnCall && fallback.usedReturnCall,
       };
     }
@@ -242,8 +247,10 @@ const compileGroupedContinuationIfExpr = ({
       beforeActive(),
       ctx.mod.i32.and(activeInValue, ctx.mod.i32.eqz(activeInCondition))
     );
+    const typedThen = coerceToBinaryenType(ctx, branchExpr.expr, resultType);
+    const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
     fallback = {
-      expr: ctx.mod.if(cond, branchExpr.expr, fallback.expr),
+      expr: ctx.mod.if(cond, typedThen, typedElse),
       usedReturnCall: branchExpr.usedReturnCall && fallback.usedReturnCall,
     };
   }
@@ -272,6 +279,8 @@ const compileGroupedContinuationMatchExpr = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   if (!hasGroupSites(expr.id, cfg)) {
     return compileMatchExpr(
       expr,
@@ -338,8 +347,10 @@ const compileGroupedContinuationMatchExpr = ({
         )
       )
     );
+    const typedThen = coerceToBinaryenType(ctx, armExpr.expr, resultType);
+    const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
     fallback = {
-      expr: ctx.mod.if(cond, armExpr.expr, fallback.expr),
+      expr: ctx.mod.if(cond, typedThen, typedElse),
       usedReturnCall: armExpr.usedReturnCall && fallback.usedReturnCall,
     };
   }
@@ -388,8 +399,10 @@ const compileGroupedContinuationWhileExpr = ({
     )
   );
 
-  const loopLabel = `while_loop_${expr.id}`;
-  const breakLabel = `${loopLabel}_break`;
+  const { loopLabel, breakLabel } = allocateLoopLabels({
+    fnCtx,
+    prefix: `while_loop_${expr.id}`,
+  });
   const initSkipFlag = ctx.mod.local.set(skipFlag.index, shouldSkipOnce);
 
   const conditionExpr = compileExpr({
@@ -492,8 +505,11 @@ export const createGroupedContinuationExpressionCompiler = ({
           ? ctx.mod.block(null, [ctx.mod.drop(resumeBox)], binaryen.none)
           : unboxOutcomeValue({ payload: resumeBox, valueType, ctx });
       const resumedExpr = ctx.mod.block(null, [resumeSet, resumedValue], valueType);
+      const exprResultType = getExprBinaryenType(exprId, ctx, typeInstanceId);
+      const typedResumed = coerceToBinaryenType(ctx, resumedExpr, exprResultType);
+      const typedNormal = coerceToBinaryenType(ctx, normal.expr, exprResultType);
       return {
-        expr: ctx.mod.if(cond, resumedExpr, normal.expr),
+        expr: ctx.mod.if(cond, typedResumed, typedNormal),
         usedReturnCall: normal.usedReturnCall,
       };
     }

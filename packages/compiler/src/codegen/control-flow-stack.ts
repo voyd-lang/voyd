@@ -14,6 +14,19 @@ export const withLoopScope = <T>(
   }
 };
 
+export const allocateLoopLabels = ({
+  fnCtx,
+  prefix,
+}: {
+  fnCtx: FunctionContext;
+  prefix: string;
+}): { loopLabel: string; breakLabel: string } => {
+  const nextId = fnCtx.nextControlFlowLabelId ?? 0;
+  fnCtx.nextControlFlowLabelId = nextId + 1;
+  const loopLabel = `${prefix}_${nextId}`;
+  return { loopLabel, breakLabel: `${loopLabel}_break` };
+};
+
 export const resolveLoopScope = ({
   fnCtx,
   label,
@@ -33,4 +46,3 @@ export const resolveLoopScope = ({
   }
   throw new Error(`unknown loop label '${label}'`);
 };
-
