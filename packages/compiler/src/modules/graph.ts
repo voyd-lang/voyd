@@ -387,6 +387,42 @@ type LoadedModule = {
   diagnostics: readonly Diagnostic[];
 };
 
+const parseModuleAst = ({
+  source,
+  filePath,
+  modulePath,
+}: {
+  source: string;
+  filePath: string;
+  modulePath: ModulePath;
+}): {
+  ast: Form;
+  diagnostics: readonly Diagnostic[];
+} => {
+  try {
+    return { ast: parseBase(source, filePath), diagnostics: [] };
+  } catch (error) {
+    return {
+      ast: parseBase("", filePath),
+      diagnostics: [
+        diagnosticFromCode({
+          code: "MD0002",
+          params: {
+            kind: "load-failed",
+            requested: modulePathToString(modulePath),
+            errorMessage: `Failed to parse ${filePath}: ${formatErrorMessage(error)}`,
+          },
+          span: {
+            file: filePath,
+            start: 0,
+            end: Math.max(1, source.length),
+          },
+        }),
+      ],
+    };
+  }
+};
+
 const loadFileModule = async ({
   filePath,
   modulePath,
@@ -404,7 +440,13 @@ const loadFileModule = async ({
 }): Promise<LoadedModule> => {
   const source = await host.readFile(filePath);
   const primaryParsed = parseModuleDirectives(source);
-  let ast = parseBase(primaryParsed.sanitizedSource, filePath);
+  const primaryAst = parseModuleAst({
+    source: primaryParsed.sanitizedSource,
+    filePath,
+    modulePath,
+  });
+  let ast = primaryAst.ast;
+  const parseDiagnostics: Diagnostic[] = [...primaryAst.diagnostics];
   let noPrelude = primaryParsed.noPrelude;
   const sourceByFile = new Map<string, string>([
     [filePath, primaryParsed.sanitizedSource],
@@ -416,11 +458,13 @@ const loadFileModule = async ({
       const companionSource = await host.readFile(companionFilePath);
       const companionParsed = parseModuleDirectives(companionSource);
       noPrelude = noPrelude || companionParsed.noPrelude;
-      const companionAst = parseBase(
-        companionParsed.sanitizedSource,
-        companionFilePath,
-      );
-      ast = mergeCompanionAst({ primary: ast, companion: companionAst });
+      const companion = parseModuleAst({
+        source: companionParsed.sanitizedSource,
+        filePath: companionFilePath,
+        modulePath,
+      });
+      parseDiagnostics.push(...companion.diagnostics);
+      ast = mergeCompanionAst({ primary: ast, companion: companion.ast });
       sourceByFile.set(companionFilePath, companionParsed.sanitizedSource);
     }
   }
@@ -467,7 +511,7 @@ const loadFileModule = async ({
   return {
     node,
     inlineModules: info.inlineModules,
-    diagnostics: info.diagnostics,
+    diagnostics: [...parseDiagnostics, ...info.diagnostics],
   };
 };
 

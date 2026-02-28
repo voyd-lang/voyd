@@ -214,6 +214,28 @@ mod pkg
     expect(diagnostic.related?.[0]?.message).toContain("main.voyd");
   });
 
+  it("reports parse failures as diagnostics without crashing graph construction", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: `fn main() -> i32\n  <div class="open"\n`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.modules.has("src::main")).toBe(true);
+    expect(graph.diagnostics.some((diagnostic) => diagnostic.code === "MD0002")).toBe(
+      true,
+    );
+    expect(
+      graph.diagnostics.some((diagnostic) => diagnostic.message.includes("Failed to parse")),
+    ).toBe(true);
+  });
+
   it("rejects entry modules named all", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
