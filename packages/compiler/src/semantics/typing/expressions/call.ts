@@ -42,6 +42,11 @@ import {
   type IntrinsicSignature,
 } from "./intrinsics.js";
 import {
+  classifyConsensusCallArgumentShapeFailure,
+  type CallArgumentShapeFailure,
+  type CallArgumentShapeFailureEntry,
+} from "./call-argument-shape-classifier.js";
+import {
   buildCallArgumentHintSubstitution,
   typeCallArgsWithSignatureContext,
 } from "./call-arg-context.js";
@@ -1101,16 +1106,7 @@ type SkippedOptionalCallParameter = {
 };
 
 type CallArgumentWalkFailure =
-  | { kind: "missing-argument"; paramIndex: number }
-  | { kind: "missing-labeled-argument"; paramIndex: number; label: string }
-  | {
-      kind: "label-mismatch";
-      paramIndex: number;
-      argIndex: number;
-      expectedLabel?: string;
-      actualLabel?: string;
-    }
-  | { kind: "extra-arguments"; extra: number }
+  | CallArgumentShapeFailure
   | { kind: "incompatible"; paramIndex: number; argIndex?: number };
 
 type CallArgumentWalkResult =
@@ -1313,14 +1309,6 @@ const walkCallArguments = ({
   return { kind: "ok" };
 };
 
-type CallArgumentShapeFailure = Extract<
-  CallArgumentWalkFailure,
-  | { kind: "missing-argument" }
-  | { kind: "missing-labeled-argument" }
-  | { kind: "label-mismatch" }
-  | { kind: "extra-arguments" }
->;
-
 const callArgumentShapeFailureForParams = ({
   args,
   params,
@@ -1352,19 +1340,6 @@ const callArgumentShapeFailureForParams = ({
     return undefined;
   }
   return { failure: result.failure, params };
-};
-
-const callArgumentShapeFailureKey = (failure: CallArgumentShapeFailure): string => {
-  switch (failure.kind) {
-    case "missing-argument":
-      return `missing-argument:${failure.paramIndex}`;
-    case "missing-labeled-argument":
-      return `missing-labeled-argument:${failure.paramIndex}:${failure.label}`;
-    case "label-mismatch":
-      return `label-mismatch:${failure.paramIndex}:${failure.argIndex}:${failure.expectedLabel ?? ""}:${failure.actualLabel ?? ""}`;
-    case "extra-arguments":
-      return `extra-arguments:${failure.extra}`;
-  }
 };
 
 const emitConsensusCallArgumentShapeDiagnostic = <
@@ -1404,20 +1379,14 @@ const emitConsensusCallArgumentShapeDiagnostic = <
     .filter(
       (
         entry,
-      ): entry is {
-        failure: CallArgumentShapeFailure;
-        params: readonly ParamSignature[];
-      } => Boolean(entry),
+      ): entry is CallArgumentShapeFailureEntry<ParamSignature> => Boolean(entry),
     );
   if (entries.length !== candidates.length || entries.length === 0) {
     return false;
   }
 
-  const first = entries[0]!;
-  const failureKey = callArgumentShapeFailureKey(first.failure);
-  if (
-    entries.some((entry) => callArgumentShapeFailureKey(entry.failure) !== failureKey)
-  ) {
+  const first = classifyConsensusCallArgumentShapeFailure(entries);
+  if (!first) {
     return false;
   }
 
