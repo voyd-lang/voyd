@@ -1,0 +1,5 @@
+pub fn sqrt(value: f64) -> f64
+  value
+
+pub fn sqrt(value: f32) -> f32
+  value
