@@ -459,7 +459,7 @@ const maybeBindConstructorCall = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
-  if (form.length < 2) {
+  if (form.length < 1) {
     return;
   }
   const callee = form.at(0);

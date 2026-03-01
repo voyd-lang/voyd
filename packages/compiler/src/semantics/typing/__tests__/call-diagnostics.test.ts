@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { DiagnosticError } from "../../../diagnostics/index.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("call diagnostics", () => {
   it("reports diagnostics for calling non-function values", () => {
@@ -232,6 +233,45 @@ describe("call diagnostics", () => {
 
     expect(caught.diagnostic.code).toBe("TY0041");
     expect(caught.diagnostic.message).toMatch(/is a type, not a value/i);
+  });
+
+  it("infers generic constructor type arguments for zero-arg calls from expected types", () => {
+    const semantics = semanticsPipeline(
+      loadAst("constructor_call_zero_arg_generic_infers_expected_type.voyd"),
+    );
+    expect(semantics.diagnostics).toHaveLength(0);
+
+    const { typing, hir } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const inferredCall = Array.from(typing.callTypeArguments.entries()).find(
+      ([callId, typeArgsByInstance]) => {
+        const expr = hir.expressions.get(callId);
+        if (!expr || expr.exprKind !== "call") {
+          return false;
+        }
+        const callee = hir.expressions.get(expr.callee);
+        if (!callee || callee.exprKind !== "identifier") {
+          return false;
+        }
+        if (symbolTable.getSymbol(callee.symbol).name !== "init") {
+          return false;
+        }
+        const typeArgs = Array.from(typeArgsByInstance.values())[0];
+        if (!typeArgs || typeArgs.length !== 1) {
+          return false;
+        }
+        const typeArg = typing.arena.get(typeArgs[0]!);
+        return typeArg.kind === "primitive" && typeArg.name === "i32";
+      },
+    );
+
+    expect(inferredCall).toBeDefined();
+  });
+
+  it("reports that unresolved generic constructor calls need explicit type arguments", () => {
+    expect(() =>
+      semanticsPipeline(loadAst("constructor_call_generic_missing_type_args.voyd")),
+    ).toThrow(/add explicit type arguments/i);
   });
 
   it("enforces fixed type arguments when calling constructors through aliases", () => {

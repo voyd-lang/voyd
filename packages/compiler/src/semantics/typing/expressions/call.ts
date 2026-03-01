@@ -3964,7 +3964,7 @@ const instantiateFunctionCall = ({
     throw new Error(
       `function ${resolveSymbolName(calleeSymbol, ctx, nameForSymbol)} is missing ${
         missing.length
-      } type argument(s)`,
+      } type argument(s); add explicit type arguments`,
     );
   }
 

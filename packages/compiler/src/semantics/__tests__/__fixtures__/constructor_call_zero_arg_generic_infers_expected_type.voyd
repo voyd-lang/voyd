@@ -1,0 +1,18 @@
+obj Box<T> {
+  marker: i32
+}
+
+impl<T> Box<T>
+  fn init() -> Box<T>
+    Box { marker: 0 }
+
+obj Holder {
+  value: Box<i32>
+}
+
+impl Holder
+  fn init() -> Holder
+    Holder { value: Box() }
+
+pub fn main() -> i32
+  Holder::init().value.marker
