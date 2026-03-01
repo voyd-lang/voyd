@@ -19,6 +19,7 @@ import {
 } from "./project/rename.js";
 import { hoverAtPosition } from "./project/hover.js";
 import { completionsAtPosition } from "./project/completion.js";
+import { buildCompletionIndex } from "./project/completion-index.js";
 import type {
   AnalysisInputs,
   CompletionAnalysis,
@@ -174,6 +175,12 @@ export const analyzeProject = async (inputs: AnalysisInputs): Promise<ProjectAna
     lineIndexByFile: analysis.lineIndexByFile,
     includeWorkspaceExports: true,
   });
+  const completionIndex = buildCompletionIndex({
+    semantics: analysis.semantics,
+    occurrencesByUri: symbolIndex.occurrencesByUri,
+    lineIndexByFile: analysis.lineIndexByFile,
+    exportsByName: symbolIndex.exportsByName,
+  });
 
   return {
     diagnosticsByUri: analysis.diagnosticsByUri,
@@ -182,6 +189,7 @@ export const analyzeProject = async (inputs: AnalysisInputs): Promise<ProjectAna
     documentationByCanonicalKey: symbolIndex.documentationByCanonicalKey,
     typeInfoByCanonicalKey: symbolIndex.typeInfoByCanonicalKey,
     exportsByName: symbolIndex.exportsByName,
+    completionIndex,
     moduleIdByFilePath: analysis.moduleIdByFilePath,
     graph: analysis.graph,
     semantics: analysis.semantics,

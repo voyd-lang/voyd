@@ -1,10 +1,9 @@
 import path from "node:path";
-import type { ScopeId, SymbolId } from "@voyd/compiler/semantics/ids.js";
+import type { ScopeId } from "@voyd/compiler/semantics/ids.js";
 import type {
   SymbolKind,
   SymbolRecord,
 } from "@voyd/compiler/semantics/binder/types.js";
-import type { SemanticsPipelineResult } from "@voyd/compiler/semantics/pipeline.js";
 import {
   CompletionItemKind,
   type CompletionItem,
@@ -17,28 +16,11 @@ import {
   insertImportEditFromContext,
   resolveImportInsertionContext,
 } from "./auto-imports.js";
-import type { ExportCandidate } from "./types.js";
 import type { CompletionAnalysis } from "./types.js";
 
 const MAX_COMPLETION_ITEMS = 200;
 const MAX_AUTO_IMPORT_ITEMS = 40;
 const AUTO_IMPORT_MIN_PREFIX_LENGTH = 2;
-
-type ScopedNodeSpan = {
-  start: number;
-  end: number;
-  scope: ScopeId;
-  width: number;
-};
-
-const scopedNodesByFileCache = new WeakMap<
-  SemanticsPipelineResult,
-  Map<string, ScopedNodeSpan[]>
->();
-const exportsByFirstCharacterCache = new WeakMap<
-  ReadonlyMap<string, readonly ExportCandidate[]>,
-  Map<string, Array<{ name: string; candidates: readonly ExportCandidate[] }>>
->();
 
 const isIdentifierCharacter = (value: string | undefined): boolean =>
   Boolean(value && /[A-Za-z0-9_]/.test(value));
@@ -173,48 +155,6 @@ const symbolScopeChain = ({
   return chain;
 };
 
-const scopedNodesByFile = ({
-  semantics,
-}: {
-  semantics: SemanticsPipelineResult;
-}): Map<string, ScopedNodeSpan[]> => {
-  const cached = scopedNodesByFileCache.get(semantics);
-  if (cached) {
-    return cached;
-  }
-
-  const nodesByFile = new Map<string, ScopedNodeSpan[]>();
-  const nodes = [
-    semantics.hir.module,
-    ...semantics.hir.items.values(),
-    ...semantics.hir.statements.values(),
-    ...semantics.hir.expressions.values(),
-  ];
-
-  nodes.forEach((node) => {
-    const scope = semantics.binding.scopeByNode.get(node.ast);
-    if (scope === undefined) {
-      return;
-    }
-
-    const filePath = path.resolve(node.span.file);
-    const byFile = nodesByFile.get(filePath) ?? [];
-    byFile.push({
-      start: node.span.start,
-      end: node.span.end,
-      scope,
-      width: node.span.end - node.span.start,
-    });
-    nodesByFile.set(filePath, byFile);
-  });
-
-  nodesByFile.forEach((entries) => {
-    entries.sort((left, right) => left.width - right.width);
-  });
-  scopedNodesByFileCache.set(semantics, nodesByFile);
-  return nodesByFile;
-};
-
 const findActiveScope = ({
   analysis,
   moduleId,
@@ -231,7 +171,8 @@ const findActiveScope = ({
     return undefined;
   }
 
-  const nodes = scopedNodesByFile({ semantics }).get(filePath) ?? [];
+  const nodes =
+    analysis.completionIndex.scopedNodesByModuleId.get(moduleId)?.get(filePath) ?? [];
   for (const node of nodes) {
     if (cursorOffset >= node.start && cursorOffset <= node.end) {
       return node.scope;
@@ -259,31 +200,6 @@ const isImportedSymbol = (record: Readonly<SymbolRecord>): boolean => {
   return metadata?.import !== undefined;
 };
 
-const exportEntriesByFirstCharacter = ({
-  exportsByName,
-}: {
-  exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
-}): Map<string, Array<{ name: string; candidates: readonly ExportCandidate[] }>> => {
-  const cached = exportsByFirstCharacterCache.get(exportsByName);
-  if (cached) {
-    return cached;
-  }
-
-  const byFirstCharacter = new Map<
-    string,
-    Array<{ name: string; candidates: readonly ExportCandidate[] }>
-  >();
-  exportsByName.forEach((candidates, name) => {
-    const firstCharacter = name.slice(0, 1).toLowerCase();
-    const entries = byFirstCharacter.get(firstCharacter) ?? [];
-    entries.push({ name, candidates });
-    byFirstCharacter.set(firstCharacter, entries);
-  });
-
-  exportsByFirstCharacterCache.set(exportsByName, byFirstCharacter);
-  return byFirstCharacter;
-};
-
 const completionsForInScopeSymbols = ({
   analysis,
   moduleId,
@@ -309,25 +225,9 @@ const completionsForInScopeSymbols = ({
     return { items: [], visibleNames: new Set<string>() };
   }
 
-  const declarationOffsetBySymbol = new Map<SymbolId, number>();
-  const canonicalKeyBySymbol = new Map<SymbolId, string>();
-  (analysis.occurrencesByUri.get(uri) ?? []).forEach((entry) => {
-    if (entry.moduleId !== moduleId) {
-      return;
-    }
-
-    if (entry.kind === "declaration") {
-      const current = declarationOffsetBySymbol.get(entry.symbol);
-      const next = lineIndex.offsetAt(entry.range.start);
-      if (current === undefined || next < current) {
-        declarationOffsetBySymbol.set(entry.symbol, next);
-      }
-    }
-
-    if (!canonicalKeyBySymbol.has(entry.symbol)) {
-      canonicalKeyBySymbol.set(entry.symbol, entry.canonicalKey);
-    }
-  });
+  const symbolLookup = analysis.completionIndex.symbolLookupByUri.get(uri)?.get(moduleId);
+  const declarationOffsetBySymbol = symbolLookup?.declarationOffsetBySymbol;
+  const canonicalKeyBySymbol = symbolLookup?.canonicalKeyBySymbol;
 
   const replacementRange = {
     start: lineIndex.positionAt(replacementStartOffset),
@@ -357,7 +257,7 @@ const completionsForInScopeSymbols = ({
         continue;
       }
 
-      const declarationOffset = declarationOffsetBySymbol.get(symbol);
+      const declarationOffset = declarationOffsetBySymbol?.get(symbol);
       const scopeKind = semantics.binding.symbolTable.getScope(record.scope).kind;
       const isModuleScoped =
         scopeKind === "module" || scopeKind === "macro";
@@ -372,7 +272,7 @@ const completionsForInScopeSymbols = ({
 
       visibleNames.add(record.name);
 
-      const canonicalKey = canonicalKeyBySymbol.get(symbol);
+      const canonicalKey = canonicalKeyBySymbol?.get(symbol);
       const typeInfo = canonicalKey
         ? analysis.typeInfoByCanonicalKey.get(canonicalKey)
         : undefined;
@@ -459,9 +359,7 @@ const completionsForAutoImports = ({
   const suggestions: CompletionItem[] = [];
   const firstCharacter = prefix.slice(0, 1).toLowerCase();
   const matchingEntries =
-    exportEntriesByFirstCharacter({
-      exportsByName: analysis.exportsByName,
-    }).get(firstCharacter) ?? [];
+    analysis.completionIndex.exportEntriesByFirstCharacter.get(firstCharacter) ?? [];
 
   for (const { name: exportedName, candidates } of matchingEntries) {
     if (!startsWithPrefix({ name: exportedName, prefix })) {

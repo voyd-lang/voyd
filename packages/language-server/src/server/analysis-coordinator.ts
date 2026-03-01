@@ -10,6 +10,7 @@ import {
   resolveEntryPath,
   resolveModuleRoots,
 } from "../project.js";
+import { buildCompletionIndex } from "../project/completion-index.js";
 import { createOverlayModuleHost } from "../project/files.js";
 import type {
   AutoImportAnalysis,
@@ -191,6 +192,12 @@ export class AnalysisCoordinator {
           roots: context.roots,
           semantics: analysis.semantics,
         });
+        const completionIndex = buildCompletionIndex({
+          semantics: analysis.semantics,
+          occurrencesByUri: navigation.occurrencesByUri,
+          lineIndexByFile: analysis.lineIndexByFile,
+          exportsByName,
+        });
         const completionAnalysis: CompletionAnalysis = {
           occurrencesByUri: navigation.occurrencesByUri,
           declarationsByKey: navigation.declarationsByKey,
@@ -202,6 +209,7 @@ export class AnalysisCoordinator {
           sourceByFile: analysis.sourceByFile,
           lineIndexByFile: analysis.lineIndexByFile,
           exportsByName,
+          completionIndex,
         };
 
         if (this.#revision === runRevision) {
