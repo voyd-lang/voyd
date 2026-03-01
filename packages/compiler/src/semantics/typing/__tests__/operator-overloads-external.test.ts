@@ -10,7 +10,11 @@ import { modulePathToString } from "../../../modules/path.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { toSourceSpan } from "../../utils.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
+import { SymbolTable } from "../../binder/index.js";
+import { runBindingPipeline } from "../../binding/binding.js";
 import type { HirCallExpr, HirIdentifierExpr } from "../../hir/nodes.js";
+import { createHirBuilder } from "../../hir/index.js";
+import { runLoweringPipeline } from "../../lowering/lowering.js";
 
 const buildModule = ({
   source,
@@ -94,6 +98,7 @@ pub fn main(): () -> bool
       graph: main.graph,
       exports: new Map([[external.module.id, externalSemantics.exports]]),
       dependencies: new Map([[external.module.id, externalSemantics]]),
+      recoverFromTypingErrors: true,
     });
 
     expect(result.diagnostics).toHaveLength(0);
@@ -436,5 +441,164 @@ pub fn main(): () -> bool
     });
 
     expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("falls back to intrinsic operators when imported overload sets have no match", () => {
+    const externalPath: ModulePath = {
+      namespace: "pkg",
+      packageName: "dep",
+      segments: ["pkg"],
+    };
+    const externalSource = `
+pub fn '/'(left: i32, right: i32) -> i32
+  left
+
+pub fn '/'(left: i64, right: i64) -> i64
+  left
+`;
+    const external = buildModule({ source: externalSource, path: externalPath });
+    const externalSemantics = semanticsPipeline({
+      module: external.module,
+      graph: external.graph,
+    });
+
+    const mainPath: ModulePath = { namespace: "src", segments: ["main"] };
+    const mainSource = `
+use pkg::dep
+
+pub fn main(): () -> f64
+  dep::'/'(8.0, 2.0)
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, externalPath)],
+    });
+
+    const preSpecializationSymbolTable = new SymbolTable({
+      rootOwner: mainAst.syntaxId,
+    });
+    const moduleSymbol = preSpecializationSymbolTable.declare({
+      name: main.module.id,
+      kind: "module",
+      declaredAt: mainAst.syntaxId,
+    });
+    const binding = runBindingPipeline({
+      moduleForm: mainAst,
+      symbolTable: preSpecializationSymbolTable,
+      module: main.module,
+      graph: main.graph,
+      moduleExports: new Map([[external.module.id, externalSemantics.exports]]),
+      dependencies: new Map([[external.module.id, externalSemantics.binding]]),
+      includeTests: false,
+    });
+    expect(binding.diagnostics).toHaveLength(0);
+
+    const lowered = runLoweringPipeline({
+      builder: createHirBuilder({
+        path: main.module.id,
+        scope: moduleSymbol,
+        ast: mainAst.syntaxId,
+        span: toSourceSpan(mainAst),
+      }),
+      binding,
+      moduleNodeId: mainAst.syntaxId,
+      moduleId: main.module.id,
+      modulePath: main.module.path,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+    const preSpecializationCall = Array.from(lowered.expressions.values()).find(
+      (expr): expr is HirCallExpr => expr.exprKind === "call",
+    );
+    expect(preSpecializationCall).toBeDefined();
+    if (preSpecializationCall) {
+      const preSpecializationCallee = lowered.expressions.get(
+        preSpecializationCall.callee,
+      );
+      expect(preSpecializationCallee?.exprKind).toBe("overload-set");
+      if (preSpecializationCallee?.exprKind === "overload-set") {
+        expect(preSpecializationCallee.name).toBe("/");
+      }
+    }
+
+    const result = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[external.module.id, externalSemantics.exports]]),
+      dependencies: new Map([[external.module.id, externalSemantics]]),
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    const symbolTable = getSymbolTable(result);
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") return;
+
+    const callExpr = Array.from(result.hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => expr.exprKind === "call",
+    );
+    expect(callExpr).toBeDefined();
+    if (!callExpr) return;
+
+    const target = result.typing.callTargets
+      .get(callExpr.id)
+      ?.get(`${mainSymbol}<>`);
+    expect(target).toBeDefined();
+    expect(target?.moduleId).toBe(main.module.id);
+    if (target) {
+      const targetRecord = symbolTable.getSymbol(target.symbol);
+      expect(targetRecord.name).toBe("/");
+      expect(
+        (targetRecord.metadata as { intrinsic?: boolean } | undefined)
+          ?.intrinsic,
+      ).toBe(true);
+    }
+  });
+
+  it("does not apply intrinsic fallback when explicit type arguments are present", () => {
+    const externalPath: ModulePath = {
+      namespace: "pkg",
+      packageName: "dep",
+      segments: ["pkg"],
+    };
+    const externalSource = `
+pub fn '/'(left: i32, right: i32) -> i32
+  left
+
+pub fn '/'(left: i64, right: i64) -> i64
+  left
+`;
+    const external = buildModule({ source: externalSource, path: externalPath });
+    const externalSemantics = semanticsPipeline({
+      module: external.module,
+      graph: external.graph,
+    });
+
+    const mainPath: ModulePath = { namespace: "src", segments: ["main"] };
+    const mainSource = `
+use pkg::dep
+
+pub fn main(): () -> f64
+  dep::'/'<i32>(8.0, 2.0)
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, externalPath)],
+    });
+
+    expect(() =>
+      semanticsPipeline({
+        module: main.module,
+        graph: main.graph,
+        exports: new Map([[external.module.id, externalSemantics.exports]]),
+        dependencies: new Map([[external.module.id, externalSemantics]]),
+      }),
+    ).toThrow(/TY0008|no overload of \//);
   });
 });
