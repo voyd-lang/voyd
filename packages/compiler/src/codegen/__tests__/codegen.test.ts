@@ -314,6 +314,11 @@ describe("next codegen", () => {
     expect(main()).toBe(1);
   });
 
+  it("supports prefix minus operator overload methods", () => {
+    const main = loadMain("operator_overload_prefix_minus.voyd");
+    expect(main()).toBe(4);
+  });
+
   it("canonicalizes recursive RTT keys for alpha-equivalent aliases", () => {
     const ast = loadAst("recursive_alias_alpha_equivalence.voyd");
     const semantics = semanticsPipeline(ast);

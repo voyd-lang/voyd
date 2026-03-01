@@ -1,0 +1,12 @@
+obj Counter {
+  value: i32
+}
+
+impl Counter
+  api fn '-'(self): () -> Counter
+    Counter { value: self.value - 1 }
+
+pub fn main(): () -> i32
+  let counter = Counter { value: 5 }
+  let decremented = -counter
+  decremented.value

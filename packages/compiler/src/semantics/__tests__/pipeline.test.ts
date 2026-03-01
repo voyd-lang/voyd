@@ -1121,6 +1121,53 @@ describe("semanticsPipeline", () => {
     expectPrimitiveType(typing, callType, "bool");
   });
 
+  it("resolves prefix minus calls to impl overloads", () => {
+    const ast = loadAst("operator_overload_prefix_minus.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+
+    const { hir, typing } = result;
+    const symbolTable = getSymbolTable(result);
+    const rootScope = symbolTable.rootScope;
+
+    const mainSymbol = symbolTable.resolve("main", rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") {
+      throw new Error("missing main symbol");
+    }
+
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction => item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) return;
+
+    const unaryMinusCall = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call" || expr.args.length !== 1) {
+          return false;
+        }
+        const callee = hir.expressions.get(expr.callee);
+        if (!callee || callee.exprKind !== "identifier") {
+          return false;
+        }
+        return symbolTable.getSymbol(callee.symbol).name === "-";
+      },
+    );
+    expect(unaryMinusCall).toBeDefined();
+    if (!unaryMinusCall) return;
+
+    const instanceKey = `${mainSymbol}<>`;
+    const target = typing.callTargets.get(unaryMinusCall.id)?.get(instanceKey);
+    expect(target).toBeDefined();
+    if (!target) return;
+
+    const targetRecord = symbolTable.getSymbol(target.symbol);
+    const targetMeta = (targetRecord.metadata ?? {}) as { intrinsic?: boolean };
+    expect(targetRecord.name).toBe("-");
+    expect(targetMeta.intrinsic).not.toBe(true);
+  });
+
   it("types additive expressions before comparison operators", () => {
     const ast = loadAst("operator_precedence_additive_comparison.voyd");
     const result = semanticsPipeline(ast);
