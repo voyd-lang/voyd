@@ -1,0 +1,77 @@
+use std::math::{
+  PI,
+  PI_F32,
+  TAU,
+  TAU_F32,
+  E,
+  E_F32,
+  INFINITY,
+  INFINITY_F32,
+  NEG_INFINITY,
+  NEG_INFINITY_F32,
+  NAN,
+  NAN_F32,
+  EPSILON,
+  EPSILON_F32,
+  abs,
+  deg_to_rad,
+  rad_to_deg,
+  is_nan,
+  is_infinite
+}
+use std::number::to_f64
+
+pub fn constants_core() -> i32
+  if PI <= 3.14 or PI >= 3.15 then:
+    return -1
+  if TAU <= 6.28 or TAU >= 6.29 then:
+    return -2
+  if E <= 2.71 or E >= 2.72 then:
+    return -3
+
+  let pi32 = to_f64(PI_F32)
+  if pi32 <= 3.14 or pi32 >= 3.15 then:
+    return -10
+  let tau32 = to_f64(TAU_F32)
+  if tau32 <= 6.28 or tau32 >= 6.29 then:
+    return -11
+  let e32 = to_f64(E_F32)
+  if e32 <= 2.71 or e32 >= 2.72 then:
+    return -12
+
+  if not is_infinite(INFINITY) then:
+    return -4
+  if not is_infinite(NEG_INFINITY) then:
+    return -5
+  if INFINITY <= 0.0 then:
+    return -6
+  if NEG_INFINITY >= 0.0 then:
+    return -7
+  if not is_nan(NAN) then:
+    return -8
+
+  if not is_infinite(to_f64(INFINITY_F32)) then:
+    return -13
+  if not is_infinite(to_f64(NEG_INFINITY_F32)) then:
+    return -14
+  if not is_nan(to_f64(NAN_F32)) then:
+    return -15
+
+  if EPSILON <= 0.0 or EPSILON >= 0.000000000000001 then:
+    return -9
+  let epsilon32 = to_f64(EPSILON_F32)
+  if epsilon32 <= 0.00000001 or epsilon32 >= 0.000001 then:
+    return -16
+
+  1
+
+pub fn constants_conversions() -> i32
+  let radians = deg_to_rad(180.0)
+  if abs(radians - PI) > 0.000000000001 then:
+    return -1
+
+  let degrees = rad_to_deg(PI)
+  if abs(degrees - 180.0) > 0.000000000001 then:
+    return -2
+
+  1

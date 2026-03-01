@@ -1,33 +1,51 @@
 //! Mathematical constants and unit conversion helpers.
 
-/// Returns Archimedes' constant as f64.
-pub fn pi_f64() -> f64
-  3.141592653589793
+/// Archimedes' constant (`π`) as f64.
+pub let PI = 3.141592653589793
 
-/// Returns Archimedes' constant as f32.
-pub fn pi_f32() -> f32
-  to_f32(pi_f64())
+/// Archimedes' constant (`π`) as f32.
+pub let PI_F32: f32 = to_f32(PI)
 
-/// Returns Tau (`2π`) as f64.
-pub fn tau_f64() -> f64
-  6.283185307179586
+/// Tau (`2π`) as f64.
+pub let TAU = 6.283185307179586
 
-/// Returns Tau (`2π`) as f32.
-pub fn tau_f32() -> f32
-  to_f32(tau_f64())
+/// Tau (`2π`) as f32.
+pub let TAU_F32: f32 = to_f32(TAU)
 
-/// Returns Euler's number as f64.
-pub fn e_f64() -> f64
-  2.718281828459045
+/// Euler's number (`e`) as f64.
+pub let E = 2.718281828459045
 
-/// Returns Euler's number as f32.
-pub fn e_f32() -> f32
-  to_f32(e_f64())
+/// Euler's number (`e`) as f32.
+pub let E_F32: f32 = to_f32(E)
+
+/// Positive infinity as f64.
+pub let INFINITY = 1.0 / 0.0
+
+/// Positive infinity as f32.
+pub let INFINITY_F32: f32 = to_f32(INFINITY)
+
+/// Negative infinity as f64.
+pub let NEG_INFINITY = -1.0 / 0.0
+
+/// Negative infinity as f32.
+pub let NEG_INFINITY_F32: f32 = to_f32(NEG_INFINITY)
+
+/// Not-a-number as f64.
+pub let NAN = 0.0 / 0.0
+
+/// Not-a-number as f32.
+pub let NAN_F32: f32 = to_f32(NAN)
+
+/// Difference between `1.0` and the next representable f64.
+pub let EPSILON = 0.0000000000000002220446049250313
+
+/// Difference between `1.0` and the next representable f32.
+pub let EPSILON_F32: f32 = to_f32(0.00000011920928955078125)
 
 /// Converts degrees to radians.
 /// `value` is interpreted as degrees.
 pub fn deg_to_rad(value: f64) -> f64
-  value * (pi_f64() / 180.0)
+  value * (PI / 180.0)
 
 /// Converts degrees to radians.
 pub fn deg_to_rad(value: f32) -> f32
@@ -36,7 +54,7 @@ pub fn deg_to_rad(value: f32) -> f32
 /// Converts radians to degrees.
 /// `value` is interpreted as radians.
 pub fn rad_to_deg(value: f64) -> f64
-  value * (180.0 / pi_f64())
+  value * (180.0 / PI)
 
 /// Converts radians to degrees.
 pub fn rad_to_deg(value: f32) -> f32
