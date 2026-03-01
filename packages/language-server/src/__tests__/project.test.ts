@@ -7,6 +7,7 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import {
   analyzeProject,
   autoImportActions,
+  completionsAtPosition,
   definitionsAtPosition,
   hoverAtPosition,
   renameAtPosition,
@@ -226,6 +227,127 @@ describe("language server project analysis", () => {
           action.title.includes("Import helper from src::util"),
         ),
       ).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("offers in-scope completion items for locals and types", async () => {
+    const project = await createProject({
+      "src/main.voyd":
+        `type Counter = i32\n\nfn main() -> i32\n  let count = 1\n  cou\n  Cou\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const lowerCaseCompletion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 4, character: 5 },
+      });
+      expect(
+        lowerCaseCompletion.items.some((item) => item.label === "count"),
+      ).toBe(true);
+
+      const upperCaseCompletion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 5, character: 5 },
+      });
+      expect(
+        upperCaseCompletion.items.some((item) => item.label === "Counter"),
+      ).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not suggest locals declared after the cursor", async () => {
+    const project = await createProject({
+      "src/main.voyd":
+        `fn main() -> i32\n  fut\n  let future_local_thing = 1\n  future_local_thing\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const completion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 1, character: 5 },
+      });
+      expect(
+        completion.items.some((item) => item.label === "future_local_thing"),
+      ).toBe(false);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("offers auto-import completions with import edits", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn main() -> i32\n  hel\n`,
+      "src/util.voyd": `pub fn helper(value: i32) -> i32\n  value\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const completion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 1, character: 5 },
+      });
+      const helperSuggestion = completion.items.find((item) => item.label === "helper");
+      expect(helperSuggestion).toBeDefined();
+      expect(helperSuggestion?.additionalTextEdits).toBeDefined();
+      expect(helperSuggestion?.additionalTextEdits?.[0]?.newText).toContain(
+        "use src::util::helper",
+      );
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("includes module-level completions declared after the cursor", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn main() -> i32\n  hel\n\nfn helper() -> i32\n  1\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const completion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 1, character: 5 },
+      });
+      expect(completion.items.some((item) => item.label === "helper")).toBe(true);
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
