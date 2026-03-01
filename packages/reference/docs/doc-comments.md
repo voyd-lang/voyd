@@ -20,11 +20,13 @@ Tooling (language server and docs generation) reads these comments directly.
 Doc comments can attach to:
 
 - `obj`, `type`, `trait`, `impl`, `fn`, and `mod` declarations
+- module-level `let` declarations (including `pub let` exports)
 - members inside `obj`, `trait`, and `impl` blocks
 - function parameters (including labeled and externally-labeled parameters)
 - file/module docs via `//!`
 
-Doc comments do not attach to `let`, `var`, statements, expressions, or local-only constructs.
+Doc comments do not attach to `var`, statements, expressions, local `let`
+bindings, or other local-only constructs.
 
 ## Outer Docs (`///`)
 
@@ -104,7 +106,8 @@ fn send(
 ## Attachment Breaks and Errors
 
 A blank line between a `///` block and its target breaks attachment and causes a dangling-doc error.
-Doc comments before non-documentable targets (for example `let` or `var`) also produce errors.
+Doc comments before non-documentable targets (for example local `let` or `var`)
+also produce errors.
 
 ```voyd
 /// I am dangling.
@@ -114,8 +117,10 @@ fn ok() -> i32
 ```
 
 ```voyd
-/// Invalid target.
-let x = 1
+fn main() -> i32
+  /// Invalid target.
+  let x = 1
+  x
 ```
 
 ## Markdown and Tooling
@@ -134,4 +139,6 @@ voyd doc
 voyd doc --out docs.html
 ```
 
-The output includes a title, table of contents, stable anchors, public documented items, signatures, and rendered Markdown docs.
+The output includes a title, table of contents, stable anchors, public
+documented items (including exported `pub let` declarations), signatures, and
+rendered Markdown docs.

@@ -10,6 +10,7 @@ import {
   parseEffectDecl,
   parseFunctionDecl,
   parseImplDecl,
+  parseModuleLetDecl,
   parseObjectDecl,
   parseTraitDecl,
   parseTypeAliasDecl,
@@ -342,6 +343,16 @@ const collectDocTargets = ({
       if (parsed) {
         addDeclaration(parsed.signature.name);
         parsed.signature.params.forEach((param) => addParameter(param.ast));
+        return;
+      }
+    } catch {
+      // Parser diagnostics for malformed declarations are handled elsewhere.
+    }
+
+    try {
+      const parsed = parseModuleLetDecl(entry);
+      if (parsed) {
+        addDeclaration(parsed.name);
         return;
       }
     } catch {

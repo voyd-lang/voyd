@@ -33,6 +33,13 @@ export type DocumentationFunctionView = {
   documentation?: string;
 };
 
+export type DocumentationModuleLetView = {
+  name: string;
+  visibility: DocumentationVisibilityView;
+  typeExpr?: unknown;
+  documentation?: string;
+};
+
 export type DocumentationMethodView = {
   name: string;
   typeParameters?: readonly DocumentationTypeParameterView[];
@@ -119,6 +126,7 @@ export type DocumentationModuleView = {
   packageId: string;
   documentation?: string;
   macros: readonly DocumentationMacroView[];
+  moduleLets: readonly DocumentationModuleLetView[];
   functions: readonly DocumentationFunctionView[];
   typeAliases: readonly DocumentationTypeAliasView[];
   objects: readonly DocumentationObjectView[];
@@ -473,6 +481,14 @@ const normalizeModules = ({
             .map((name) => ({
               name,
               documentation: macroDocsByName?.get(name),
+            })),
+          moduleLets: semantic.binding.moduleLets
+            .filter((moduleLet) => allowsName(moduleLet.name))
+            .map((moduleLet) => ({
+              name: moduleLet.name,
+              visibility: normalizeVisibility(moduleLet.visibility),
+              typeExpr: moduleLet.typeExpr,
+              documentation: moduleLet.documentation,
             })),
           functions: semantic.binding.functions
             .filter((fn) => allowsName(fn.name))

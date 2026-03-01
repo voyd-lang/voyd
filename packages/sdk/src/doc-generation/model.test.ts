@@ -7,6 +7,7 @@ const createBaseModule = (): DocumentationProgramView["modules"][number] => ({
   depth: 0,
   packageId: "src",
   macros: [],
+  moduleLets: [],
   functions: [],
   typeAliases: [],
   objects: [],
@@ -24,6 +25,35 @@ const createImplMethod = (): DocumentationProgramView["modules"][number]["impls"
 });
 
 describe("createDocumentationModel", () => {
+  it("includes public module lets", () => {
+    const module = createBaseModule();
+    module.moduleLets = [
+      {
+        name: "answer",
+        visibility: { level: "public" },
+        documentation: " Exported answer.",
+      },
+      {
+        name: "hidden",
+        visibility: { level: "module" },
+      },
+    ];
+
+    const model = createDocumentationModel({
+      program: {
+        entryModule: "src::main",
+        modules: [module],
+      },
+    });
+
+    expect(model.modules[0]?.moduleLets).toHaveLength(1);
+    expect(model.modules[0]?.moduleLets[0]?.name).toBe("answer");
+    expect(model.modules[0]?.moduleLets[0]?.documentation).toBe(
+      " Exported answer.",
+    );
+    expect(model.modules[0]?.moduleLets[0]?.signature).toBe("let answer");
+  });
+
   it("keeps visible impls for external target types", () => {
     const module = createBaseModule();
     module.impls = [

@@ -15,6 +15,7 @@ export type DocumentationMember = {
 export type DocumentationItemKind =
   | "re_export"
   | "macro"
+  | "module_let"
   | "function"
   | "type_alias"
   | "object"
@@ -41,6 +42,7 @@ export type ModuleDocumentationSection = {
   documentation?: string;
   macros: readonly DocumentationItem[];
   reexports: readonly DocumentationItem[];
+  moduleLets: readonly DocumentationItem[];
   functions: readonly DocumentationItem[];
   typeAliases: readonly DocumentationItem[];
   objects: readonly DocumentationItem[];

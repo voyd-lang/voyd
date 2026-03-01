@@ -25,6 +25,11 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       ") -> i32",
       "  value + 1",
       "",
+      "/// Archimedes would approve.",
+      "pub let pi = 3.14",
+      "",
+      "let hidden = 9",
+      "",
       "pub fn take_labeled({ n: i32 }) -> i32",
       "  n",
       "",
@@ -180,6 +185,10 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain(">pub</code> src::util::all");
       expect(html.content).toContain("class=\"tok-kw\">macro</span>");
       expect(html.content).toContain("class=\"tok-name\">enum</span>");
+      expect(html.content).toContain("class=\"tok-kw\">let</span>");
+      expect(html.content).toContain("Module Lets");
+      expect(html.content).toContain("Archimedes would approve.");
+      expect(html.content).not.toContain("let hidden");
       expect(html.content).toContain("Builds enum declarations.");
       expect(html.content).toContain("<pre><code>enum Result&lt;T, E&gt;");
       expect(html.content).not.toContain("<p>```voyd");
@@ -234,6 +243,11 @@ describe("smoke: sdk doc-generation", () => {
           reexports: Array<{
             signature: string;
           }>;
+          moduleLets: Array<{
+            name: string;
+            signature: string;
+            documentation?: string;
+          }>;
         }>;
       };
       const mainModule = parsed.modules.find((module) => module.id === "src::main");
@@ -261,6 +275,11 @@ describe("smoke: sdk doc-generation", () => {
       expect(hiddenMethodFn).toBeUndefined();
       expect(mainModule?.reexports.map((item) => item.signature)).toContain(
         "pub src::util::all",
+      );
+      expect(mainModule?.moduleLets.map((item) => item.name)).toEqual(["pi"]);
+      expect(mainModule?.moduleLets[0]?.signature).toBe("let pi");
+      expect(mainModule?.moduleLets[0]?.documentation).toBe(
+        " Archimedes would approve.",
       );
       const counterImpl = mainModule?.impls.find((impl) =>
         impl.signature.includes("Counter"),
