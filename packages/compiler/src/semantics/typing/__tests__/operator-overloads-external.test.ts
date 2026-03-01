@@ -98,6 +98,7 @@ pub fn main(): () -> bool
       graph: main.graph,
       exports: new Map([[external.module.id, externalSemantics.exports]]),
       dependencies: new Map([[external.module.id, externalSemantics]]),
+      recoverFromTypingErrors: true,
     });
 
     expect(result.diagnostics).toHaveLength(0);
@@ -555,5 +556,49 @@ pub fn main(): () -> f64
           ?.intrinsic,
       ).toBe(true);
     }
+  });
+
+  it("does not apply intrinsic fallback when explicit type arguments are present", () => {
+    const externalPath: ModulePath = {
+      namespace: "pkg",
+      packageName: "dep",
+      segments: ["pkg"],
+    };
+    const externalSource = `
+pub fn '/'(left: i32, right: i32) -> i32
+  left
+
+pub fn '/'(left: i64, right: i64) -> i64
+  left
+`;
+    const external = buildModule({ source: externalSource, path: externalPath });
+    const externalSemantics = semanticsPipeline({
+      module: external.module,
+      graph: external.graph,
+    });
+
+    const mainPath: ModulePath = { namespace: "src", segments: ["main"] };
+    const mainSource = `
+use pkg::dep
+
+pub fn main(): () -> f64
+  dep::'/'<i32>(8.0, 2.0)
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, externalPath)],
+    });
+
+    expect(() =>
+      semanticsPipeline({
+        module: main.module,
+        graph: main.graph,
+        exports: new Map([[external.module.id, externalSemantics.exports]]),
+        dependencies: new Map([[external.module.id, externalSemantics]]),
+      }),
+    ).toThrow(/TY0008|no overload of \//);
   });
 });

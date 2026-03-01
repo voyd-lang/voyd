@@ -4271,6 +4271,7 @@ const typeOverloadedCall = (
     if (matches.length === 0) {
       const intrinsicSignatures = intrinsicSignaturesFor(callee.name, ctx);
       const canUseIntrinsicFallback =
+        (!typeArguments || typeArguments.length === 0) &&
         intrinsicSignatures.length > 0 &&
         probeArgs.every((arg) => arg.type !== ctx.primitives.unknown) &&
         intrinsicSignatures.some(
