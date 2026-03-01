@@ -57,6 +57,11 @@ describe("primary syntax macro", () => {
     ]);
   });
 
+  it("binds unary minus as a prefix operator", () => {
+    const ast = expand("-self.x");
+    expect(ast).toEqual(["ast", ["-", [".", "self", "x"]]]);
+  });
+
   it("parses tuple destructuring", () => {
     const ast = expand("let (x, y) = (1, 2)");
     expect(ast).toEqual([

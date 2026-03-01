@@ -1,27 +1,39 @@
 use std::test::assertions::all
 
-test "pi tau and e constants are exposed":
-  assert(pi_f64() > 3.14, eq: true)
-  assert(pi_f64() < 3.15, eq: true)
-  assert(tau_f64() > 6.28, eq: true)
-  assert(tau_f64() < 6.29, eq: true)
-  assert(e_f64() > 2.71, eq: true)
-  assert(e_f64() < 2.72, eq: true)
+test "core math constants are exposed":
+  assert(PI > 3.14, eq: true)
+  assert(PI < 3.15, eq: true)
+  assert(TAU > 6.28, eq: true)
+  assert(TAU < 6.29, eq: true)
+  assert(E > 2.71, eq: true)
+  assert(E < 2.72, eq: true)
+  assert(f64_from_f32(PI_F32) > 3.14, eq: true)
+  assert(f64_from_f32(PI_F32) < 3.15, eq: true)
+  assert(f64_from_f32(TAU_F32) > 6.28, eq: true)
+  assert(f64_from_f32(TAU_F32) < 6.29, eq: true)
+  assert(f64_from_f32(E_F32) > 2.71, eq: true)
+  assert(f64_from_f32(E_F32) < 2.72, eq: true)
 
-  assert(f64_from_f32(pi_f32()) > 3.14, eq: true)
-  assert(f64_from_f32(pi_f32()) < 3.15, eq: true)
-  assert(f64_from_f32(tau_f32()) > 6.28, eq: true)
-  assert(f64_from_f32(tau_f32()) < 6.29, eq: true)
-  assert(f64_from_f32(e_f32()) > 2.71, eq: true)
-  assert(f64_from_f32(e_f32()) < 2.72, eq: true)
+  assert(is_infinite(INFINITY), eq: true)
+  assert(is_infinite(NEG_INFINITY), eq: true)
+  assert(INFINITY > 0.0, eq: true)
+  assert(NEG_INFINITY < 0.0, eq: true)
+  assert(is_infinite(f64_from_f32(INFINITY_F32)), eq: true)
+  assert(is_infinite(f64_from_f32(NEG_INFINITY_F32)), eq: true)
+  assert(is_nan(NAN), eq: true)
+  assert(is_nan(f64_from_f32(NAN_F32)), eq: true)
+  assert(EPSILON > 0.0, eq: true)
+  assert(EPSILON < 0.000000000000001, eq: true)
+  assert(f64_from_f32(EPSILON_F32) > 0.00000001, eq: true)
+  assert(f64_from_f32(EPSILON_F32) < 0.000001, eq: true)
 
 test "degree and radian conversion helpers roundtrip":
-  assert(approx_eq(deg_to_rad(180.0), pi_f64(), 0.000000000001), eq: true)
-  assert(approx_eq(rad_to_deg(pi_f64()), 180.0, 0.000000000001), eq: true)
+  assert(approx_eq(deg_to_rad(180.0), PI, 0.000000000001), eq: true)
+  assert(approx_eq(rad_to_deg(PI), 180.0, 0.000000000001), eq: true)
 
   let deg = f32_from_f64(90.0)
   let rad = deg_to_rad(deg)
-  assert(approx_eq(f64_from_f32(rad), pi_f64() / 2.0, 0.0001), eq: true)
+  assert(approx_eq(f64_from_f32(rad), PI / 2.0, 0.0001), eq: true)
   assert(approx_eq(f64_from_f32(rad_to_deg(rad)), 90.0, 0.0001), eq: true)
 
 fn approx_eq(left: f64, right: f64, epsilon: f64) -> bool
@@ -34,3 +46,9 @@ fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)
 
 @intrinsic(name: "__f64_promote_f32")
 fn f64_from_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+fn is_nan(value: f64) -> bool
+  value != value
+
+fn is_infinite(value: f64) -> bool
+  not is_nan(value) and (value - value) != 0.0

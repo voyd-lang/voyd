@@ -22,6 +22,12 @@ export const intrinsicSignaturesFor = (
     { parameters: [float32, float32], returnType: float32 },
     { parameters: [float64, float64], returnType: float64 },
   ];
+  const unaryNumericSignatures: IntrinsicSignature[] = [
+    { parameters: [int32], returnType: int32 },
+    { parameters: [int64], returnType: int64 },
+    { parameters: [float32], returnType: float32 },
+    { parameters: [float64], returnType: float64 },
+  ];
   const integerSignatures: IntrinsicSignature[] = [
     { parameters: [int32, int32], returnType: int32 },
     { parameters: [int64, int64], returnType: int64 },
@@ -59,10 +65,11 @@ export const intrinsicSignaturesFor = (
 
   switch (name) {
     case "+":
-    case "-":
     case "*":
     case "/":
       return numericSignatures;
+    case "-":
+      return [...numericSignatures, ...unaryNumericSignatures];
     case "%":
       return integerSignatures;
     case "<":
