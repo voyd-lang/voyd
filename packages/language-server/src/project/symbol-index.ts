@@ -24,10 +24,12 @@ import type { SemanticsPipelineResult } from "@voyd/compiler/semantics/pipeline.
 import {
   parseEffectDecl,
   parseFunctionDecl,
+  parseModuleLetDecl,
   parseObjectDecl,
   parseTraitDecl,
   parseTypeAliasDecl,
 } from "@voyd/compiler/semantics/binding/parsing.js";
+import { parseTopLevelUseDecl } from "@voyd/compiler/modules/use-decl.js";
 import { collectVoydFiles, toFileUri } from "./files.js";
 import { scanExportsFromSource } from "./export-scan.js";
 import {
@@ -45,6 +47,12 @@ import {
   findLabeledArgumentSyntaxes,
   findMethodNameSyntax,
 } from "./call-syntax.js";
+import {
+  collectModuleUsePathReferences,
+  createModuleDeclarationResolver,
+  keyForModule,
+  MODULE_SYMBOL_SENTINEL,
+} from "./module-navigation.js";
 
 type SymbolIndex = {
   occurrencesByUri: ReadonlyMap<string, readonly SymbolOccurrence[]>;
@@ -133,6 +141,15 @@ const resolveTypeAliasNameSyntax = (form: Form | undefined): Syntax | undefined 
   }
 
   const parsed = parseTypeAliasDecl(form);
+  return parsed?.name;
+};
+
+const resolveModuleLetNameSyntax = (form: Form | undefined): Syntax | undefined => {
+  if (!form) {
+    return undefined;
+  }
+
+  const parsed = parseModuleLetDecl(form);
   return parsed?.name;
 };
 
@@ -349,6 +366,10 @@ export const buildSymbolIndex = async ({
       });
     });
 
+    entry.binding.moduleLets.forEach((moduleLet) => {
+      remember(moduleLet.symbol, moduleLet.documentation);
+    });
+
     entry.binding.typeAliases.forEach((alias) => {
       remember(alias.symbol, alias.documentation);
     });
@@ -453,6 +474,39 @@ export const buildSymbolIndex = async ({
         moduleId,
         symbol,
         uri: toFileUri(filePath),
+        range,
+        name,
+        kind,
+      },
+      byUri: occurrencesByUri,
+      byKey: occurrencesByKey,
+      dedupeKeys,
+    });
+  };
+
+  const addCustomOccurrenceFromRange = ({
+    canonicalKey,
+    moduleId,
+    symbol,
+    uri,
+    range,
+    kind,
+    name,
+  }: {
+    canonicalKey: string;
+    moduleId: string;
+    symbol: SymbolId;
+    uri: string;
+    range: SymbolOccurrence["range"];
+    kind: SymbolOccurrence["kind"];
+    name: string;
+  }): void => {
+    pushOccurrence({
+      occurrence: {
+        canonicalKey,
+        moduleId,
+        symbol,
+        uri,
         range,
         name,
         kind,
@@ -658,6 +712,11 @@ export const buildSymbolIndex = async ({
   const moduleIdByFilePath = new Map<string, string>();
   const exportsByName = new Map<string, ExportCandidate[]>();
   const exportDedup = new Set<string>();
+  const moduleDeclarationResolver = createModuleDeclarationResolver({
+    graph,
+    roots,
+    lineIndexByFile,
+  });
 
   graph.modules.forEach((moduleNode, moduleId) => {
     const filePath = path.resolve(
@@ -688,6 +747,44 @@ export const buildSymbolIndex = async ({
       });
     });
 
+    entry.binding.uses.forEach((boundUse) => {
+      const parsedUseDecl = parseTopLevelUseDecl(boundUse.form);
+      if (!parsedUseDecl) {
+        return;
+      }
+
+      const moduleReferences = collectModuleUsePathReferences({
+        pathExpr: parsedUseDecl.pathExpr,
+        entries: boundUse.entries,
+      });
+
+      moduleReferences.forEach((reference) => {
+        const declaration = moduleDeclarationResolver.ensureDeclaration(reference.moduleId);
+        if (!declaration) {
+          return;
+        }
+
+        addCustomOccurrenceFromRange({
+          canonicalKey: keyForModule(declaration.moduleId),
+          moduleId: declaration.moduleId,
+          symbol: MODULE_SYMBOL_SENTINEL,
+          uri: declaration.uri,
+          range: declaration.range,
+          kind: "declaration",
+          name: declaration.name,
+        });
+
+        addCustomOccurrenceFromLocation({
+          canonicalKey: keyForModule(declaration.moduleId),
+          moduleId: declaration.moduleId,
+          symbol: MODULE_SYMBOL_SENTINEL,
+          location: reference.location,
+          kind: "reference",
+          name: declaration.name,
+        });
+      });
+    });
+
     entry.binding.functions.forEach((fn) => {
       addOccurrenceFromLocation({
         symbolRef: moduleRef(fn.symbol),
@@ -705,6 +802,14 @@ export const buildSymbolIndex = async ({
           target: moduleRef(param.symbol),
           parameter: param,
         });
+      });
+    });
+
+    entry.binding.moduleLets.forEach((moduleLet) => {
+      addOccurrenceFromLocation({
+        symbolRef: moduleRef(moduleLet.symbol),
+        location: resolveModuleLetNameSyntax(moduleLet.form)?.location,
+        kind: "declaration",
       });
     });
 

@@ -8,6 +8,23 @@ import type {
 import { isInRange } from "./text.js";
 import type { NavigationAnalysis, SymbolOccurrence } from "./types.js";
 
+const symbolsAtPosition = ({
+  analysis,
+  uri,
+  position,
+}: {
+  analysis: NavigationAnalysis;
+  uri: string;
+  position: Position;
+}): SymbolOccurrence[] => {
+  const occurrences = analysis.occurrencesByUri.get(uri);
+  if (!occurrences || occurrences.length === 0) {
+    return [];
+  }
+
+  return occurrences.filter((entry) => isInRange(position, entry.range));
+};
+
 const findSymbolAtPosition = ({
   analysis,
   uri,
@@ -17,12 +34,28 @@ const findSymbolAtPosition = ({
   uri: string;
   position: Position;
 }): SymbolOccurrence | undefined => {
-  const occurrences = analysis.occurrencesByUri.get(uri);
-  if (!occurrences || occurrences.length === 0) {
+  return symbolsAtPosition({ analysis, uri, position })[0];
+};
+
+const findSymbolWithDeclarationAtPosition = ({
+  analysis,
+  uri,
+  position,
+}: {
+  analysis: NavigationAnalysis;
+  uri: string;
+  position: Position;
+}): SymbolOccurrence | undefined => {
+  const matches = symbolsAtPosition({ analysis, uri, position });
+  if (matches.length === 0) {
     return undefined;
   }
 
-  return occurrences.find((entry) => isInRange(position, entry.range));
+  return (
+    matches.find(
+      (entry) => (analysis.declarationsByKey.get(entry.canonicalKey)?.length ?? 0) > 0,
+    ) ?? matches[0]
+  );
 };
 
 export const definitionsAtPosition = ({
@@ -34,7 +67,7 @@ export const definitionsAtPosition = ({
   uri: string;
   position: Position;
 }): Location[] => {
-  const symbol = findSymbolAtPosition({ analysis, uri, position });
+  const symbol = findSymbolWithDeclarationAtPosition({ analysis, uri, position });
   if (!symbol) {
     return [];
   }
@@ -56,7 +89,7 @@ export const prepareRenameAtPosition = ({
   position: Position;
 }): { range: Range; placeholder: string } | null => {
   const symbol = findSymbolAtPosition({ analysis, uri, position });
-  if (!symbol) {
+  if (!symbol || symbol.symbol < 0) {
     return null;
   }
 
@@ -75,7 +108,7 @@ export const renameAtPosition = ({
   newName: string;
 }): WorkspaceEdit | null => {
   const symbol = findSymbolAtPosition({ analysis, uri, position });
-  if (!symbol) {
+  if (!symbol || symbol.symbol < 0) {
     return null;
   }
 
