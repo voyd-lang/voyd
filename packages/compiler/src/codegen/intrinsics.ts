@@ -454,7 +454,6 @@ export const compileIntrinsicCall = ({
       });
     }
     case "+":
-    case "-":
     case "*":
     case "/": {
       assertArgCount(name, args, 2);
@@ -463,6 +462,27 @@ export const compileIntrinsicCall = ({
         ctx,
         instanceId
       );
+      return emitArithmeticIntrinsic({
+        op: name,
+        kind: operandKind,
+        args,
+        ctx,
+      });
+    }
+    case "-": {
+      const operandKind = requireHomogeneousNumericKind(
+        call.args.map((a) => a.expr),
+        ctx,
+        instanceId
+      );
+      if (args.length === 1) {
+        return emitUnaryNegationIntrinsic({
+          kind: operandKind,
+          arg: args[0]!,
+          ctx,
+        });
+      }
+      assertArgCount(name, args, 2);
       return emitArithmeticIntrinsic({
         op: name,
         kind: operandKind,
@@ -596,6 +616,27 @@ const emitArithmeticIntrinsic = ({
       break;
   }
   throw new Error(`unsupported ${op} intrinsic for numeric kind ${kind}`);
+};
+
+const emitUnaryNegationIntrinsic = ({
+  kind,
+  arg,
+  ctx,
+}: {
+  kind: NumericKind;
+  arg: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  switch (kind) {
+    case "i32":
+      return ctx.mod.i32.sub(ctx.mod.i32.const(0), arg);
+    case "i64":
+      return ctx.mod.i64.sub(ctx.mod.i64.const(0, 0), arg);
+    case "f32":
+      return ctx.mod.f32.neg(arg);
+    case "f64":
+      return ctx.mod.f64.neg(arg);
+  }
 };
 
 const emitFloatUnaryIntrinsic = ({

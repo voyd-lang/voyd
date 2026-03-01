@@ -1,0 +1,7 @@
+pub fn negate_int(value: i32) -> i32
+  let out = -value
+  out
+
+pub fn negate_float(value: f64) -> f64
+  let out = -value
+  out
