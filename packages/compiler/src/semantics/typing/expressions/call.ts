@@ -1313,6 +1313,169 @@ const walkCallArguments = ({
   return { kind: "ok" };
 };
 
+type CallArgumentShapeFailure = Extract<
+  CallArgumentWalkFailure,
+  | { kind: "missing-argument" }
+  | { kind: "missing-labeled-argument" }
+  | { kind: "label-mismatch" }
+  | { kind: "extra-arguments" }
+>;
+
+const callArgumentShapeFailureForParams = ({
+  args,
+  params,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  ctx: TypingContext;
+  state: TypingState;
+}):
+  | {
+      failure: CallArgumentShapeFailure;
+      params: readonly ParamSignature[];
+    }
+  | undefined => {
+  const result = walkCallArguments({
+    args,
+    params,
+    ctx,
+    state,
+    onMatch: () => true,
+    onSkipOptionalParam: () => true,
+  });
+  if (result.kind !== "error") {
+    return undefined;
+  }
+  if (result.failure.kind === "incompatible") {
+    return undefined;
+  }
+  return { failure: result.failure, params };
+};
+
+const callArgumentShapeFailureKey = (failure: CallArgumentShapeFailure): string => {
+  switch (failure.kind) {
+    case "missing-argument":
+      return `missing-argument:${failure.paramIndex}`;
+    case "missing-labeled-argument":
+      return `missing-labeled-argument:${failure.paramIndex}:${failure.label}`;
+    case "label-mismatch":
+      return `label-mismatch:${failure.paramIndex}:${failure.argIndex}:${failure.expectedLabel ?? ""}:${failure.actualLabel ?? ""}`;
+    case "extra-arguments":
+      return `extra-arguments:${failure.extra}`;
+  }
+};
+
+const emitConsensusCallArgumentShapeDiagnostic = <
+  T extends { signature: FunctionSignature },
+>({
+  candidates,
+  args,
+  ctx,
+  state,
+  span,
+  argsForCandidate,
+  signatureForCandidate,
+}: {
+  candidates: readonly T[];
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  span: SourceSpan;
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+  signatureForCandidate?: (candidate: T) => FunctionSignature;
+}): boolean => {
+  if (candidates.length === 0) {
+    return false;
+  }
+
+  const entries = candidates
+    .map((candidate) =>
+      callArgumentShapeFailureForParams({
+        args: argsForCandidate ? argsForCandidate(candidate) : args,
+        params: signatureForCandidate
+          ? signatureForCandidate(candidate).parameters
+          : candidate.signature.parameters,
+        ctx,
+        state,
+      }),
+    )
+    .filter(
+      (
+        entry,
+      ): entry is {
+        failure: CallArgumentShapeFailure;
+        params: readonly ParamSignature[];
+      } => Boolean(entry),
+    );
+  if (entries.length !== candidates.length || entries.length === 0) {
+    return false;
+  }
+
+  const first = entries[0]!;
+  const failureKey = callArgumentShapeFailureKey(first.failure);
+  if (
+    entries.some((entry) => callArgumentShapeFailureKey(entry.failure) !== failureKey)
+  ) {
+    return false;
+  }
+
+  switch (first.failure.kind) {
+    case "missing-argument": {
+      const param = first.params[first.failure.paramIndex];
+      emitDiagnostic({
+        ctx,
+        code: "TY0021",
+        params: {
+          kind: "call-missing-argument",
+          paramName:
+            param?.name ??
+            param?.label ??
+            `parameter ${first.failure.paramIndex + 1}`,
+        },
+        span,
+      });
+      return true;
+    }
+    case "missing-labeled-argument":
+      emitDiagnostic({
+        ctx,
+        code: "TY0021",
+        params: {
+          kind: "call-missing-labeled-argument",
+          label: first.failure.label,
+        },
+        span,
+      });
+      return true;
+    case "label-mismatch":
+      emitDiagnostic({
+        ctx,
+        code: "TY0021",
+        params: {
+          kind: "call-argument-label-mismatch",
+          argumentIndex: first.failure.paramIndex + 1,
+          expectedLabel: first.failure.expectedLabel,
+          actualLabel: first.failure.actualLabel,
+        },
+        span,
+      });
+      return true;
+    case "extra-arguments":
+      emitDiagnostic({
+        ctx,
+        code: "TY0021",
+        params: {
+          kind: "call-extra-arguments",
+          extra: first.failure.extra,
+        },
+        span,
+      });
+      return true;
+  }
+};
+
 const ensureOptionalParameterIsSkippable = ({
   param,
   paramIndex,
@@ -1589,14 +1752,23 @@ const formatFunctionSignatureForDiagnostic = ({
   name,
   signature,
   ctx,
+  nameForSymbol,
 }: {
   name: string;
   signature: FunctionSignature;
   ctx: TypingContext;
+  nameForSymbol?: SymbolNameResolver;
 }): string => {
-  const typeParams = signature.typeParams?.map((param) =>
-    getSymbolName(param.symbol, ctx),
-  );
+  const typeParams = signature.typeParams?.map((param, index) => {
+    if (nameForSymbol) {
+      try {
+        return nameForSymbol(param.symbol);
+      } catch {
+        return `T${index}`;
+      }
+    }
+    return getSymbolName(param.symbol, ctx);
+  });
   const typeParamSuffix =
     typeParams && typeParams.length > 0 ? `<${typeParams.join(", ")}>` : "";
 
@@ -1782,6 +1954,7 @@ const overloadDiagnosticCandidates = <
       name: resolveSymbolName(candidate.symbol, ctx, candidate.nameForSymbol),
       signature,
       ctx,
+      nameForSymbol: candidate.nameForSymbol,
     });
 
     if (!includeFailureReasons) {
@@ -2509,7 +2682,7 @@ const canonicalMethodCandidateKey = ({
   symbolRefKey(
     canonicalSymbolRefForModuleSymbol({
       moduleId: candidate.symbolRef.moduleId,
-      symbol: candidate.symbol,
+      symbol: candidate.symbolRef.symbol,
       ctx,
     }),
   );
@@ -2677,6 +2850,20 @@ const selectMethodCallCandidate = ({
   }
 
   if (matches.length === 0) {
+    if (
+      emitConsensusCallArgumentShapeDiagnostic({
+        candidates: noOverloadDiagnosticCandidates,
+        args: probeArgs,
+        ctx,
+        state,
+        span: expr.span,
+        argsForCandidate,
+        signatureForCandidate,
+      })
+    ) {
+      return { usedTraitDispatch: false };
+    }
+
     emitDiagnostic({
       ctx,
       code: "TY0008",
@@ -2986,6 +3173,21 @@ const typeOperatorOverloadCall = ({
 
   if (!selected) {
     if (matches.length === 0) {
+      if (
+        emitConsensusCallArgumentShapeDiagnostic({
+          candidates,
+          args,
+          ctx,
+          state,
+          span: call.span,
+        })
+      ) {
+        return {
+          returnType: ctx.primitives.unknown,
+          effectRow: ctx.effects.emptyRow,
+        };
+      }
+
       emitDiagnostic({
         ctx,
         code: "TY0008",
@@ -4682,6 +4884,20 @@ const typeOverloadedCall = (
       });
       if (intrinsicFallback) {
         return intrinsicFallback;
+      }
+      if (
+        emitConsensusCallArgumentShapeDiagnostic({
+          candidates: candidatesForResolution,
+          args: probeArgs,
+          ctx,
+          state,
+          span: call.span,
+        })
+      ) {
+        return {
+          returnType: ctx.primitives.unknown,
+          effectRow: ctx.effects.emptyRow,
+        };
       }
       emitDiagnostic({
         ctx,
