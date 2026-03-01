@@ -18,8 +18,10 @@ import {
   renameAtPosition,
 } from "./project/rename.js";
 import { hoverAtPosition } from "./project/hover.js";
+import { completionsAtPosition } from "./project/completion.js";
 import type {
   AnalysisInputs,
+  CompletionAnalysis,
   ProjectAnalysis,
   ProjectCoreAnalysis,
   ProjectNavigationIndex,
@@ -29,6 +31,7 @@ import type {
 export {
   autoImportActions,
   definitionsAtPosition,
+  completionsAtPosition,
   hoverAtPosition,
   prepareRenameAtPosition,
   renameAtPosition,
@@ -39,6 +42,7 @@ export {
 
 export type {
   ProjectAnalysis,
+  CompletionAnalysis,
   ProjectCoreAnalysis,
   ProjectNavigationIndex,
   SymbolOccurrence,
