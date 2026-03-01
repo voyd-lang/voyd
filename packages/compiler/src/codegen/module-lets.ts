@@ -10,6 +10,7 @@ import type { HirModuleLet } from "../semantics/hir/index.js";
 import { compileExpression } from "./expressions/index.js";
 import { wasmTypeFor } from "./types.js";
 import { walkHirExpression } from "./hir-walk.js";
+import { markDependencyFunctionReachable } from "./function-dependencies.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 
@@ -110,6 +111,15 @@ const markInitializerDependenciesReachable = ({
     visitHandlerBodies: true,
     visitor: {
       onExpr: (exprId, expr) => {
+        if (expr.exprKind === "literal" && expr.literalKind === "string") {
+          markDependencyFunctionReachable({
+            ctx,
+            dependency: "string-literal-constructor",
+            reachable,
+          });
+          return;
+        }
+
         if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
           return;
         }

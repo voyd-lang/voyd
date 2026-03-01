@@ -1269,6 +1269,32 @@ pub fn bounce() -> i32
     ).toBe(true);
   });
 
+  it("runs strict checks for module-let initializers", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+obj User {
+  id: i32
+}
+
+let broken = User { id: 1 }.missing
+
+pub fn main() -> i32
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const unknownField = diagnostics.find((diagnostic) => diagnostic.code === "TY0033");
+    expect(unknownField).toBeDefined();
+  });
+
   it("allows named macro re-exports in std package imports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

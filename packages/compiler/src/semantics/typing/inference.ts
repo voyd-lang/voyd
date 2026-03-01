@@ -83,7 +83,7 @@ export const typeAllFunctions = (
 
 const typeAllModuleLets = (
   ctx: TypingContext,
-  _state: TypingState,
+  state: TypingState,
   options: { collectChanges: boolean },
 ): boolean => {
   const moduleLets = Array.from(ctx.hir.items.values()).filter(
@@ -104,7 +104,10 @@ const typeAllModuleLets = (
   let changed = false;
   moduleLets.forEach((item) => {
     const previous = previousTypes.get(item.symbol);
-    const next = getValueType(item.symbol, ctx, { span: item.span });
+    const next = getValueType(item.symbol, ctx, {
+      span: item.span,
+      mode: state.mode,
+    });
     if (options.collectChanges && previous !== next) {
       changed = true;
     }

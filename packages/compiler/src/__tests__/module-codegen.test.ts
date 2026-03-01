@@ -383,6 +383,36 @@ pub fn main() -> i32
     expect((instance.exports.main as () => number)()).toBe(5);
   });
 
+  it("keeps string constructor dependencies reachable for module-let initializers", async () => {
+    const root = resolve("/proj/src");
+    const std = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use std::string::fns::new_string
+
+let greeting = "hello"
+
+pub fn main() -> i32
+  1`,
+      [`${std}${sep}string${sep}fns.voyd`]: `pub obj String {}
+pub obj FixedArray<T> {}
+
+@intrinsic(name: "__string_new", uses_signature: true)
+pub fn new_string(from_bytes: FixedArray<i32>): () -> String
+  String {}
+`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root, std },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(1);
+  });
+
   it("supports module-let initializers that reference imported module lets", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

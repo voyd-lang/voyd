@@ -28,6 +28,7 @@ export const typeIdentifierExpr = (
   return getValueType(expr.symbol, ctx, {
     span: expr.span,
     aliasConstructorTypeArguments,
+    mode: state.mode,
   });
 };
 
@@ -37,6 +38,7 @@ export const getValueType = (
   options: {
     span?: SourceSpan;
     aliasConstructorTypeArguments?: readonly TypeId[];
+    mode?: TypingState["mode"];
   } = {},
 ): TypeId => {
   const hasExplicitAliasConstructorTypeArguments =
@@ -141,6 +143,7 @@ export const getValueType = (
       symbol,
       ctx,
       span: options.span,
+      mode: options.mode,
     });
   }
 
@@ -148,6 +151,7 @@ export const getValueType = (
   if (typeof aliasConstructorTarget === "number") {
     const targetType = getValueType(aliasConstructorTarget, ctx, {
       span: options.span,
+      mode: options.mode,
     });
     const aliasConstructorAlias =
       typeof metadata.aliasConstructorAlias === "number"
@@ -189,10 +193,12 @@ const resolveModuleLetValueType = ({
   symbol,
   ctx,
   span,
+  mode,
 }: {
   symbol: SymbolId;
   ctx: TypingContext;
   span?: SourceSpan;
+  mode?: TypingState["mode"];
 }): TypeId => {
   const cached = ctx.valueTypes.get(symbol);
   if (typeof cached === "number") {
@@ -204,7 +210,7 @@ const resolveModuleLetValueType = ({
     throw new Error(`missing HIR module-let for symbol ${symbol}`);
   }
 
-  const moduleLetState = createTypingState();
+  const moduleLetState = createTypingState(mode ?? "relaxed");
   const annotationType = moduleLet.typeAnnotation
     ? resolveTypeExpr(
         moduleLet.typeAnnotation,
