@@ -1756,6 +1756,7 @@ const overloadDiagnosticCandidates = <
   typeArguments,
   includeFailureReasons,
   argsForCandidate,
+  signatureForCandidate,
 }: {
   candidates: readonly T[];
   args: readonly Arg[];
@@ -1764,12 +1765,16 @@ const overloadDiagnosticCandidates = <
   typeArguments?: readonly TypeId[];
   includeFailureReasons: boolean;
   argsForCandidate?: (candidate: T) => readonly Arg[];
+  signatureForCandidate?: (candidate: T) => FunctionSignature;
 }): { signature: string; reason?: string }[] => {
   const limitedCandidates = candidates.slice(0, MAX_OVERLOAD_DIAGNOSTIC_CANDIDATES);
   const details = limitedCandidates.map((candidate) => {
+    const signatureForCandidateEntry = signatureForCandidate
+      ? signatureForCandidate(candidate)
+      : candidate.signature;
     const signature = signatureWithExplicitTypeArgumentsForDiagnostic({
       symbol: candidate.symbol,
-      signature: candidate.signature,
+      signature: signatureForCandidateEntry,
       typeArguments,
       ctx,
     });
@@ -1785,7 +1790,7 @@ const overloadDiagnosticCandidates = <
 
     const reason = overloadCandidateFailureReason({
       symbol: candidate.symbol,
-      signature: candidate.signature,
+      signature: signatureForCandidateEntry,
       args: argsForCandidate ? argsForCandidate(candidate) : args,
       ctx,
       state,
@@ -1820,6 +1825,7 @@ const noOverloadDiagnosticParams = <
   state,
   typeArguments,
   argsForCandidate,
+  signatureForCandidate,
 }: {
   name: string;
   candidates: readonly T[];
@@ -1828,6 +1834,7 @@ const noOverloadDiagnosticParams = <
   state: TypingState;
   typeArguments?: readonly TypeId[];
   argsForCandidate?: (candidate: T) => readonly Arg[];
+  signatureForCandidate?: (candidate: T) => FunctionSignature;
 }) => ({
   kind: "no-overload" as const,
   name,
@@ -1840,6 +1847,7 @@ const noOverloadDiagnosticParams = <
     typeArguments,
     includeFailureReasons: true,
     argsForCandidate,
+    signatureForCandidate,
   }),
 });
 
@@ -2156,6 +2164,53 @@ const adjustTraitDispatchParameters = ({
   return updated;
 };
 
+const signatureWithAdjustedTraitDispatchParameters = ({
+  args,
+  signature,
+  calleeSymbol,
+  calleeModuleId,
+  ctx,
+}: {
+  args: readonly Arg[];
+  signature: FunctionSignature;
+  calleeSymbol: SymbolId;
+  calleeModuleId?: string;
+  ctx: TypingContext;
+}): FunctionSignature => {
+  const params =
+    adjustTraitDispatchParameters({
+      args,
+      params: signature.parameters,
+      calleeSymbol,
+      calleeModuleId,
+      ctx,
+    }) ?? signature.parameters;
+  if (params === signature.parameters) {
+    return signature;
+  }
+
+  const signatureDesc = ctx.arena.get(signature.typeId);
+  const effectRow =
+    signatureDesc.kind === "function"
+      ? signatureDesc.effectRow
+      : ctx.primitives.defaultEffectRow;
+  const adjustedType = ctx.arena.internFunction({
+    parameters: params.map((param) => ({
+      type: param.type,
+      label: param.label,
+      optional: param.optional ?? false,
+    })),
+    returnType: signature.returnType,
+    effectRow,
+  });
+  return {
+    ...signature,
+    parameters: params,
+    typeId: adjustedType,
+    effectRow,
+  };
+};
+
 const instantiationRefKeyForCall = ({
   calleeSymbol,
   calleeModuleId,
@@ -2444,6 +2499,21 @@ const resolveMethodTraitDispatchCandidate = ({
     .find((candidate) => candidate !== undefined);
 };
 
+const canonicalMethodCandidateKey = ({
+  candidate,
+  ctx,
+}: {
+  candidate: MethodCallCandidate;
+  ctx: TypingContext;
+}): string =>
+  symbolRefKey(
+    canonicalSymbolRefForModuleSymbol({
+      moduleId: candidate.symbolRef.moduleId,
+      symbol: candidate.symbol,
+      ctx,
+    }),
+  );
+
 const resolveFreeFunctionFallbackCandidates = ({
   methodName,
   existing,
@@ -2452,29 +2522,31 @@ const resolveFreeFunctionFallbackCandidates = ({
   methodName: string;
   existing: readonly MethodCallCandidate[];
   ctx: TypingContext;
-}): MethodCallCandidate[] =>
-  resolveFreeFunctionCandidates({
+}): MethodCallCandidate[] => {
+  const existingKeys = new Set(
+    existing.map((candidate) => canonicalMethodCandidateKey({ candidate, ctx })),
+  );
+  return resolveFreeFunctionCandidates({
     methodName,
     ctx,
   }).filter(
     (fallback) =>
-      !existing.some(
-        (candidate) =>
-          candidate.symbol === fallback.symbol &&
-          candidate.symbolRef.moduleId === fallback.symbolRef.moduleId,
-      ),
+      !existingKeys.has(canonicalMethodCandidateKey({ candidate: fallback, ctx })),
   );
+};
 
 const mergeCandidatesForMethodNoOverloadDiagnostic = ({
   methodCandidates,
   fallbackCandidates,
+  ctx,
 }: {
   methodCandidates: readonly MethodCallCandidate[];
   fallbackCandidates: readonly MethodCallCandidate[];
+  ctx: TypingContext;
 }): MethodCallCandidate[] => {
   const seen = new Set<string>();
   return [...methodCandidates, ...fallbackCandidates].filter((candidate) => {
-    const key = `${candidate.symbolRef.moduleId}:${candidate.symbol}`;
+    const key = canonicalMethodCandidateKey({ candidate, ctx });
     if (seen.has(key)) {
       return false;
     }
@@ -2512,6 +2584,16 @@ const selectMethodCallCandidate = ({
     argsForMethodCallCandidate({
       probeArgs,
       receiverTypeOverride: candidate.receiverTypeOverride,
+    });
+  const signatureForCandidate = (
+    candidate: MethodCallCandidate,
+  ): FunctionSignature =>
+    signatureWithAdjustedTraitDispatchParameters({
+      args: argsForCandidate(candidate),
+      signature: candidate.signature,
+      calleeSymbol: candidate.symbol,
+      calleeModuleId: candidate.symbolRef.moduleId,
+      ctx,
     });
 
   const methodCandidates = filterCandidatesByExplicitTypeArguments({
@@ -2568,6 +2650,7 @@ const selectMethodCallCandidate = ({
       noOverloadDiagnosticCandidates = mergeCandidatesForMethodNoOverloadDiagnostic({
         methodCandidates,
         fallbackCandidates: filteredFallbackCandidates,
+        ctx,
       });
       enforceOverloadCandidateBudget({
         name: expr.method,
@@ -2605,6 +2688,7 @@ const selectMethodCallCandidate = ({
         state,
         typeArguments,
         argsForCandidate,
+        signatureForCandidate,
       }),
       span: expr.span,
     });
@@ -3112,7 +3196,13 @@ const resolveTraitMethodCandidates = ({
     signature: FunctionSignature;
     nameForSymbol?: SymbolNameResolver;
   }) => {
-    const key = `${moduleId}:${symbol}`;
+    const key = symbolRefKey(
+      canonicalSymbolRefForModuleSymbol({
+        moduleId,
+        symbol,
+        ctx,
+      }),
+    );
     if (seen.has(key)) {
       return;
     }
@@ -4826,17 +4916,16 @@ const resolveTraitDispatchOverload = <
     if (!hasMatchingImpl && !hasCompatibleTemplate) {
       return false;
     }
-    const adjustedParams =
-      adjustTraitDispatchParameters({
-        args,
-        params: signature.parameters,
-        calleeSymbol: symbol,
-        calleeModuleId: candidateModuleId,
-        ctx,
-      }) ?? signature.parameters;
+    const adjustedSignature = signatureWithAdjustedTraitDispatchParameters({
+      args,
+      signature,
+      calleeSymbol: symbol,
+      calleeModuleId: candidateModuleId,
+      ctx,
+    });
     return callArgumentsSatisfyParams({
       args,
-      params: adjustedParams,
+      params: adjustedSignature.parameters,
       ctx,
       state,
     });
@@ -4846,42 +4935,20 @@ const resolveTraitDispatchOverload = <
     return undefined;
   }
 
-  const params =
-    adjustTraitDispatchParameters({
-      args,
-      params: candidate.signature.parameters,
-      calleeSymbol: candidate.symbol,
-      calleeModuleId: candidate.symbolRef?.moduleId ?? ctx.moduleId,
-      ctx,
-    }) ?? candidate.signature.parameters;
-
-  if (params === candidate.signature.parameters) {
+  const adjustedSignature = signatureWithAdjustedTraitDispatchParameters({
+    args,
+    signature: candidate.signature,
+    calleeSymbol: candidate.symbol,
+    calleeModuleId: candidate.symbolRef?.moduleId ?? ctx.moduleId,
+    ctx,
+  });
+  if (adjustedSignature === candidate.signature) {
     return candidate;
   }
 
-  const signatureDesc = ctx.arena.get(candidate.signature.typeId);
-  const effectRow =
-    signatureDesc.kind === "function"
-      ? signatureDesc.effectRow
-      : ctx.primitives.defaultEffectRow;
-  const adjustedType = ctx.arena.internFunction({
-    parameters: params.map((param) => ({
-      type: param.type,
-      label: param.label,
-      optional: param.optional ?? false,
-    })),
-    returnType: candidate.signature.returnType,
-    effectRow,
-  });
-
   return {
     ...candidate,
-    signature: {
-      ...candidate.signature,
-      parameters: params,
-      typeId: adjustedType,
-      effectRow,
-    },
+    signature: adjustedSignature,
   } as T;
 };
 
