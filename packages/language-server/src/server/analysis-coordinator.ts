@@ -123,41 +123,17 @@ export class AnalysisCoordinator {
   }
 
   async getNavigationForUri(uri: string): Promise<ProjectNavigationIndex> {
-    const { context, analysis } = await this.getCoreForUri(uri);
-    const cached = this.#navigationCache.get(context.cacheKey);
-    if (cached && cached.revision === this.#revision) {
-      return cached.index;
-    }
-
-    const runRevision = this.#revision;
-    const inFlightKey = AnalysisCoordinator.#inFlightKey({
-      contextKey: context.cacheKey,
-      revision: runRevision,
-    });
-    const pending = this.#navigationInFlight.get(inFlightKey);
-    if (pending) {
-      const result = await pending;
-      return runRevision === this.#revision ? result : this.getNavigationForUri(uri);
-    }
-
-    const task = (async () => {
-      const index = await buildProjectNavigationIndex({ analysis });
-      if (this.#revision === runRevision) {
-        this.#navigationCache.set(context.cacheKey, {
-          revision: runRevision,
-          index,
-        });
+    while (true) {
+      const { context, analysis } = await this.getCoreForUri(uri);
+      const runRevision = this.#revision;
+      const index = await this.#getNavigationForContext({
+        context,
+        analysis,
+        revision: runRevision,
+      });
+      if (runRevision === this.#revision) {
+        return index;
       }
-      return index;
-    })();
-
-    this.#navigationInFlight.set(inFlightKey, task);
-
-    try {
-      const result = await task;
-      return runRevision === this.#revision ? result : this.getNavigationForUri(uri);
-    } finally {
-      this.#navigationInFlight.delete(inFlightKey);
     }
   }
 
@@ -176,25 +152,35 @@ export class AnalysisCoordinator {
   }
 
   async getCompletionAnalysisForUri(uri: string): Promise<CompletionAnalysis> {
-    const { context, analysis } = await this.getCoreForUri(uri);
-    const navigation = await this.getNavigationForUri(uri);
-    const exportsByName = this.#exportIndex.buildAutoImportExports({
-      roots: context.roots,
-      semantics: analysis.semantics,
-    });
+    while (true) {
+      const { context, analysis } = await this.getCoreForUri(uri);
+      const runRevision = this.#revision;
+      const navigation = await this.#getNavigationForContext({
+        context,
+        analysis,
+        revision: runRevision,
+      });
+      if (runRevision !== this.#revision) {
+        continue;
+      }
 
-    return {
-      occurrencesByUri: navigation.occurrencesByUri,
-      declarationsByKey: navigation.declarationsByKey,
-      documentationByCanonicalKey: navigation.documentationByCanonicalKey,
-      typeInfoByCanonicalKey: navigation.typeInfoByCanonicalKey,
-      moduleIdByFilePath: analysis.moduleIdByFilePath,
-      semantics: analysis.semantics,
-      graph: analysis.graph,
-      sourceByFile: analysis.sourceByFile,
-      lineIndexByFile: analysis.lineIndexByFile,
-      exportsByName,
-    };
+      const exportsByName = this.#exportIndex.buildAutoImportExports({
+        roots: context.roots,
+        semantics: analysis.semantics,
+      });
+      return {
+        occurrencesByUri: navigation.occurrencesByUri,
+        declarationsByKey: navigation.declarationsByKey,
+        documentationByCanonicalKey: navigation.documentationByCanonicalKey,
+        typeInfoByCanonicalKey: navigation.typeInfoByCanonicalKey,
+        moduleIdByFilePath: analysis.moduleIdByFilePath,
+        semantics: analysis.semantics,
+        graph: analysis.graph,
+        sourceByFile: analysis.sourceByFile,
+        lineIndexByFile: analysis.lineIndexByFile,
+        exportsByName,
+      };
+    }
   }
 
   #invalidate(): void {
@@ -297,6 +283,49 @@ export class AnalysisCoordinator {
       return runRevision === this.#revision ? result : this.#getCoreForContext(context);
     } finally {
       this.#coreInFlight.delete(inFlightKey);
+    }
+  }
+
+  async #getNavigationForContext({
+    context,
+    analysis,
+    revision,
+  }: {
+    context: UriContext;
+    analysis: ProjectCoreAnalysis;
+    revision: number;
+  }): Promise<ProjectNavigationIndex> {
+    const cached = this.#navigationCache.get(context.cacheKey);
+    if (cached && cached.revision === revision) {
+      return cached.index;
+    }
+
+    const inFlightKey = AnalysisCoordinator.#inFlightKey({
+      contextKey: context.cacheKey,
+      revision,
+    });
+    const pending = this.#navigationInFlight.get(inFlightKey);
+    if (pending) {
+      return pending;
+    }
+
+    const task = (async () => {
+      const index = await buildProjectNavigationIndex({ analysis });
+      if (this.#revision === revision) {
+        this.#navigationCache.set(context.cacheKey, {
+          revision,
+          index,
+        });
+      }
+      return index;
+    })();
+
+    this.#navigationInFlight.set(inFlightKey, task);
+
+    try {
+      return await task;
+    } finally {
+      this.#navigationInFlight.delete(inFlightKey);
     }
   }
 }

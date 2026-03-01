@@ -12,7 +12,10 @@ import {
   type Position,
 } from "vscode-languageserver/lib/node/main.js";
 import { toFilePath } from "./files.js";
-import { insertImportEdit } from "./auto-imports.js";
+import {
+  insertImportEditFromContext,
+  resolveImportInsertionContext,
+} from "./auto-imports.js";
 import type { CompletionAnalysis } from "./types.js";
 
 const MAX_COMPLETION_ITEMS = 200;
@@ -398,6 +401,13 @@ const completionsForAutoImports = ({
     start: lineIndex.positionAt(replacementStartOffset),
     end: lineIndex.positionAt(replacementEndOffset),
   };
+  const importInsertionContext = resolveImportInsertionContext({
+    analysis,
+    documentUri: uri,
+  });
+  if (!importInsertionContext) {
+    return [];
+  }
   const existingImportLines = new Set(source.split("\n").map((line) => line.trim()));
   const seenSuggestions = new Set<string>();
   const suggestions: CompletionItem[] = [];
@@ -425,14 +435,10 @@ const completionsForAutoImports = ({
         return;
       }
 
-      const additionalEdit = insertImportEdit({
-        analysis,
-        documentUri: uri,
+      const additionalEdit = insertImportEditFromContext({
+        context: importInsertionContext,
         importLine,
       });
-      if (!additionalEdit) {
-        return;
-      }
 
       suggestions.push({
         label: candidate.name,
