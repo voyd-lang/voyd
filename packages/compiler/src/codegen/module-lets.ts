@@ -109,12 +109,20 @@ const markInitializerDependenciesReachable = ({
     visitLambdaBodies: true,
     visitHandlerBodies: true,
     visitor: {
-      onExpr: (_exprId, expr) => {
+      onExpr: (exprId, expr) => {
+        if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
+          return;
+        }
+        const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
+        callInfo.targets?.forEach((targetId) => {
+          reachable.add(targetId as ProgramSymbolId);
+        });
+
         if (expr.exprKind !== "call") {
           return;
         }
         const callee = ctx.module.hir.expressions.get(expr.callee);
-        if (!callee || callee.exprKind !== "identifier") {
+        if (callee?.exprKind !== "identifier") {
           return;
         }
         const resolved = resolveImportedSymbol({
@@ -133,7 +141,7 @@ const markInitializerDependenciesReachable = ({
   });
 };
 
-const compileModuleLetGetter = ({
+const computeModuleLetGetterMetadata = ({
   moduleLet,
   ctx,
 }: {
@@ -142,7 +150,9 @@ const compileModuleLetGetter = ({
 }): ModuleLetGetterMetadata => {
   const typeId = ctx.module.types.getValueType(moduleLet.symbol);
   if (typeof typeId !== "number") {
-    throw new Error(`codegen missing type information for module let ${moduleLet.symbol}`);
+    throw new Error(
+      `codegen missing type information for module let ${moduleLet.symbol}`,
+    );
   }
 
   const wasmType = wasmTypeFor(typeId, ctx, new Set(), "signature");
@@ -150,7 +160,25 @@ const compileModuleLetGetter = ({
     throw new Error(`module let ${moduleLet.symbol} cannot have void type`);
   }
 
-  const wasmName = getterNameFor({ ctx, symbol: moduleLet.symbol });
+  return {
+    moduleId: ctx.moduleId,
+    symbol: moduleLet.symbol,
+    wasmName: getterNameFor({ ctx, symbol: moduleLet.symbol }),
+    typeId,
+    wasmType,
+  };
+};
+
+const compileModuleLetGetter = ({
+  moduleLet,
+  metadata,
+  ctx,
+}: {
+  moduleLet: HirModuleLet;
+  metadata: ModuleLetGetterMetadata;
+  ctx: CodegenContext;
+}): void => {
+  const { wasmName, typeId, wasmType } = metadata;
   const readyGlobal = `${wasmName}__ready`;
   const valueGlobal = `${wasmName}__value`;
 
@@ -196,14 +224,6 @@ const compileModuleLetGetter = ({
   );
 
   ctx.mod.addFunction(wasmName, binaryen.none, wasmType, fnCtx.locals, body);
-
-  return {
-    moduleId: ctx.moduleId,
-    symbol: moduleLet.symbol,
-    wasmName,
-    typeId,
-    wasmType,
-  };
 };
 
 export const registerModuleLetGetters = (ctx: CodegenContext): void => {
@@ -218,12 +238,41 @@ export const registerModuleLetGetters = (ctx: CodegenContext): void => {
   ctx.moduleLetGetters.set(ctx.moduleId, bySymbol);
 
   moduleLets.forEach((moduleLet) => {
-    if (bySymbol.has(moduleLet.symbol)) {
+    const metadata = bySymbol.get(moduleLet.symbol);
+    if (!metadata) {
+      throw new Error(
+        `module let getter metadata not pre-registered for ${moduleLet.symbol}`,
+      );
+    }
+    if (ctx.mod.getFunction(metadata.wasmName) !== 0) {
       return;
     }
-    const getter = compileModuleLetGetter({ moduleLet, ctx });
-    bySymbol.set(moduleLet.symbol, getter);
+    compileModuleLetGetter({ moduleLet, metadata, ctx });
     markInitializerDependenciesReachable({ moduleLet, ctx });
+  });
+};
+
+export const preRegisterModuleLetGetters = (
+  contexts: readonly CodegenContext[],
+): void => {
+  contexts.forEach((ctx) => {
+    const moduleLets = moduleLetItems(ctx);
+    if (moduleLets.length === 0) {
+      return;
+    }
+    const bySymbol =
+      ctx.moduleLetGetters.get(ctx.moduleId) ??
+      new Map<SymbolId, ModuleLetGetterMetadata>();
+    ctx.moduleLetGetters.set(ctx.moduleId, bySymbol);
+    moduleLets.forEach((moduleLet) => {
+      if (bySymbol.has(moduleLet.symbol)) {
+        return;
+      }
+      bySymbol.set(
+        moduleLet.symbol,
+        computeModuleLetGetterMetadata({ moduleLet, ctx }),
+      );
+    });
   });
 };
 

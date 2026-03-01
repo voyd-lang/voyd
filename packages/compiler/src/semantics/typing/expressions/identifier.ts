@@ -216,7 +216,7 @@ const resolveModuleLetValueType = ({
   moduleLetState.currentFunction = {
     returnType:
       typeof annotationType === "number" ? annotationType : ctx.primitives.unknown,
-    instanceKey: `module-let:${symbol}`,
+    instanceKey: `${symbol}<>`,
     functionSymbol: symbol,
   };
 

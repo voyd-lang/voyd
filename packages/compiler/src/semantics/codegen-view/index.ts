@@ -1219,17 +1219,32 @@ export const buildProgramCodegenView = (
     });
   });
 
+  const syntheticCallerInstanceIds = new Map<string, ProgramFunctionInstanceId>();
+  let nextSyntheticCallerInstanceId = -1;
+
   const getCallerInstanceId = (
     moduleId: string,
     key: string
   ): ProgramFunctionInstanceId | undefined => {
     const normalized = normalizeCallerInstanceKey(key);
     const parsed = parseFunctionInstanceKey(normalized);
-    if (!parsed) return undefined;
-    return getProgramFunctionInstanceId(
+    const syntheticCallerKey = `${moduleId}:${normalized}`;
+    const fallbackCallerInstanceId = (): ProgramFunctionInstanceId => {
+      const existing = syntheticCallerInstanceIds.get(syntheticCallerKey);
+      if (typeof existing === "number") {
+        return existing;
+      }
+      const next = nextSyntheticCallerInstanceId as ProgramFunctionInstanceId;
+      nextSyntheticCallerInstanceId -= 1;
+      syntheticCallerInstanceIds.set(syntheticCallerKey, next);
+      return next;
+    };
+    if (!parsed) return fallbackCallerInstanceId();
+    const resolved = getProgramFunctionInstanceId(
       { moduleId, symbol: parsed.symbol },
       parsed.typeArgs
     );
+    return resolved ?? fallbackCallerInstanceId();
   };
 
   callsByModuleRaw.forEach((data, moduleId) => {

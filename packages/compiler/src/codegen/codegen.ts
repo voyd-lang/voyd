@@ -18,7 +18,10 @@ import {
   registerImportMetadata,
   registerFunctionMetadata,
 } from "./functions.js";
-import { registerModuleLetGetters } from "./module-lets.js";
+import {
+  preRegisterModuleLetGetters,
+  registerModuleLetGetters,
+} from "./module-lets.js";
 import { buildRuntimeTypeArtifacts } from "./runtime-pass.js";
 import {
   EFFECT_TABLE_EXPORT,
@@ -173,6 +176,7 @@ export const codegenProgram = ({
   });
   contexts.forEach(registerImportMetadata);
   buildRuntimeTypeArtifacts(contexts);
+  preRegisterModuleLetGetters(contexts);
   contexts.forEach(registerModuleLetGetters);
   const compileReachableFunctions = (): void => {
     let compiled = 0;
