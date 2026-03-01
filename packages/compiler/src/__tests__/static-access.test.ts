@@ -120,6 +120,28 @@ describe("static access e2e", () => {
     expect((instance.exports.main as () => number)()).toBe(5);
   });
 
+  it("falls back from expected-return overload narrowing when argument matching succeeds", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const vec3Path = `${root}${sep}vec3.voyd`;
+    const rayPath = `${root}${sep}ray.voyd`;
+    const mathxPath = `${root}${sep}mathx.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("overload_expected_return_hint_main.voyd"),
+      [vec3Path]: loadFixture("overload_expected_return_hint_vec3.voyd"),
+      [rayPath]: loadFixture("overload_expected_return_hint_ray.voyd"),
+      [mathxPath]: loadFixture("overload_expected_return_hint_mathx.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(1);
+  });
+
   it("keeps codegen call argument planning aligned with typing labels", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;

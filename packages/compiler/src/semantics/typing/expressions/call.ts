@@ -834,6 +834,9 @@ const getExpectedCallParameters = ({
       ctx,
       span: callSpan ?? callee.span,
     });
+    if (matchingReturn.length === 0) {
+      return {};
+    }
     const expectedReturnCandidates = new Set(
       matchingReturn.map((candidate) => candidate.symbol),
     );
@@ -4449,7 +4452,8 @@ const typeOverloadedCall = (
     candidates,
     typeArguments,
   });
-  const candidatesForResolution = expectedReturnCandidates
+  let candidatesForResolution =
+    expectedReturnCandidates && expectedReturnCandidates.size > 0
     ? candidatesForBudget.filter((candidate) =>
         expectedReturnCandidates.has(candidate.symbol),
       )
@@ -4460,19 +4464,37 @@ const typeOverloadedCall = (
         ctx,
         state,
       });
-  enforceOverloadCandidateBudget({
-    name: callee.name,
-    candidateCount: candidatesForResolution.length,
-    ctx,
-    span: call.span,
-  });
-  const matches = findMatchingOverloadCandidates({
-    candidates: candidatesForResolution,
-    args: probeArgs,
-    ctx,
-    state,
-    typeArguments,
-  });
+  const findMatches = (
+    resolutionCandidates: readonly {
+      symbol: SymbolId;
+      signature: FunctionSignature;
+    }[],
+  ): readonly {
+    symbol: SymbolId;
+    signature: FunctionSignature;
+  }[] => {
+    enforceOverloadCandidateBudget({
+      name: callee.name,
+      candidateCount: resolutionCandidates.length,
+      ctx,
+      span: call.span,
+    });
+    return findMatchingOverloadCandidates({
+      candidates: resolutionCandidates,
+      args: probeArgs,
+      ctx,
+      state,
+      typeArguments,
+    });
+  };
+
+  let matches = findMatches(candidatesForResolution);
+  if (matches.length === 0 && candidatesForResolution !== candidatesForBudget) {
+    // Expected-return narrowing is a hint. If it removes all valid matches,
+    // retry with the full overload set before failing.
+    candidatesForResolution = candidatesForBudget;
+    matches = findMatches(candidatesForResolution);
+  }
 
   const traitDispatch =
     matches.length === 0 && (!typeArguments || typeArguments.length === 0)

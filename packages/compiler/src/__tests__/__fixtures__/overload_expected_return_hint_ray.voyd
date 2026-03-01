@@ -1,0 +1,6 @@
+use src::vec3::Vec3
+
+pub obj Ray {
+  origin: Vec3,
+  direction: Vec3
+}

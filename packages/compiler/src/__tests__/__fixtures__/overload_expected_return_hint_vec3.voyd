@@ -1,0 +1,29 @@
+pub obj Vec3 {
+  x: f64,
+  y: f64,
+  z: f64
+}
+
+impl Vec3
+  fn init(x: f64, y: f64, z: f64) -> Vec3
+    Vec3 { x, y, z }
+
+  fn '+'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z }
+
+  fn '-'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x - other.x, y: self.y - other.y, z: self.z - other.z }
+
+  fn '*'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x * other.x, y: self.y * other.y, z: self.z * other.z }
+
+  fn '/'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x / other.x, y: self.y / other.y, z: self.z / other.z }
+
+  fn dot(self, other: Vec3) -> f64
+    self.x * other.x + self.y * other.y + self.z * other.z
+
+  fn len_squared(self) -> f64
+    self.x * self.x + self.y * self.y + self.z * self.z
+
+pub type Point3 = Vec3
