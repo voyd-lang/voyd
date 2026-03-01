@@ -980,6 +980,86 @@ describe("semanticsPipeline", () => {
     expect(mainSemantics.diagnostics).toHaveLength(0);
   });
 
+  it("resolves constructor calls through transitive exported alias chains", () => {
+    const depFixture = "alias_constructor_cross_module_exported_alias_chain/dep.voyd";
+    const mainFixture = "alias_constructor_cross_module_exported_alias_chain/main.voyd";
+    const mainSemantics = runMainWithSingleFixtureDependency({
+      depFixture,
+      mainFixture,
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
+  it("resolves constructor calls through aliases targeting imported object types", () => {
+    const baseFixture = "alias_constructor_cross_module_transitive_import/base.voyd";
+    const depFixture = "alias_constructor_cross_module_transitive_import/dep.voyd";
+    const mainFixture = "alias_constructor_cross_module_transitive_import/main.voyd";
+
+    const base = buildModule({
+      fixture: baseFixture,
+      segments: ["base"],
+    });
+    const baseSemantics = semanticsPipeline({
+      module: base.module,
+      graph: base.graph,
+    });
+
+    const depAst = loadAst(depFixture);
+    const depUseForm = depAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use"),
+    );
+    const dep = buildModule({
+      fixture: depFixture,
+      ast: depAst,
+      segments: ["dep"],
+      dependencies: [
+        {
+          kind: "use" as const,
+          path: base.module.path,
+          span: toSourceSpan(depUseForm ?? depAst),
+        },
+      ],
+    });
+    const depSemantics = semanticsPipeline({
+      module: dep.module,
+      graph: dep.graph,
+      exports: new Map([[base.module.id, baseSemantics.exports]]),
+      dependencies: new Map([[base.module.id, baseSemantics]]),
+    });
+
+    const mainAst = loadAst(mainFixture);
+    const mainUseForm = mainAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use"),
+    );
+    const main = buildModule({
+      fixture: mainFixture,
+      ast: mainAst,
+      segments: ["main"],
+      dependencies: [
+        {
+          kind: "use" as const,
+          path: dep.module.path,
+          span: toSourceSpan(mainUseForm ?? mainAst),
+        },
+      ],
+    });
+    const mainSemantics = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([
+        [dep.module.id, depSemantics.exports],
+        [base.module.id, baseSemantics.exports],
+      ]),
+      dependencies: new Map([
+        [dep.module.id, depSemantics],
+        [base.module.id, baseSemantics],
+      ]),
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
   it("resolves constructor calls through object type aliases", () => {
     const result = semanticsPipeline(
       loadAst("constructor_call_through_type_alias.voyd"),

@@ -703,18 +703,13 @@ const ensureStaticMethodImport = ({
         dependency,
       });
     const importTargetSymbol = syntheticAliasConstructorTarget ?? methodSymbol;
-    const fn = dependency.functions.find(
-      (entry) => entry.symbol === importTargetSymbol,
-    );
-    if (!fn) {
-      return;
-    }
-    const visibilityAllowed = canAccessSymbolVisibility({
-      visibility: fn.visibility,
-      ownerPackageId: dependency.packageId,
-      importedFromModuleId: moduleId,
+    const visibilityAllowed = canImportStaticMethodSymbol({
+      importTargetSymbol,
+      moduleId,
+      dependency,
       explicitlyTargetsStdSubmodule,
-      allowApiVisibility: true,
+      allowSyntheticAliasConstructorFallback:
+        memberName === "init" && typeof syntheticAliasConstructorTarget === "number",
       ctx,
     });
     if (!visibilityAllowed) {
@@ -794,6 +789,76 @@ const ensureStaticMethodImport = ({
   }
 };
 
+const canImportStaticMethodSymbol = ({
+  importTargetSymbol,
+  moduleId,
+  dependency,
+  explicitlyTargetsStdSubmodule,
+  allowSyntheticAliasConstructorFallback,
+  ctx,
+}: {
+  importTargetSymbol: SymbolId;
+  moduleId: string;
+  dependency: BindingResult;
+  explicitlyTargetsStdSubmodule: boolean;
+  allowSyntheticAliasConstructorFallback: boolean;
+  ctx: BindingContext;
+}): boolean => {
+  const fn = dependency.functions.find((entry) => entry.symbol === importTargetSymbol);
+  if (fn) {
+    return canAccessSymbolVisibility({
+      visibility: fn.visibility,
+      ownerPackageId: dependency.packageId,
+      importedFromModuleId: moduleId,
+      explicitlyTargetsStdSubmodule,
+      allowApiVisibility: true,
+      ctx,
+    });
+  }
+
+  const exported = findExportedSymbolInModule({
+    moduleId,
+    symbol: importTargetSymbol,
+    ctx,
+  });
+  if (!exported && allowSyntheticAliasConstructorFallback) {
+    // Synthetic alias constructor wrappers can ultimately target imported
+    // symbols that are not listed in dependency.functions or module exports.
+    // In that case, rely on alias-namespace reachability that produced the
+    // static method entry rather than dropping valid constructors.
+    return true;
+  }
+  if (!exported) {
+    return false;
+  }
+
+  return canAccessExport({
+    exported,
+    moduleId,
+    explicitlyTargetsStdSubmodule,
+    ctx,
+  });
+};
+
+const findExportedSymbolInModule = ({
+  moduleId,
+  symbol,
+  ctx,
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+  ctx: BindingContext;
+}): ModuleExportEntry | undefined => {
+  const exportTable = ctx.moduleExports.get(moduleId);
+  if (!exportTable) {
+    return undefined;
+  }
+  return Array.from(exportTable.values()).find(
+    (entry) =>
+      entry.symbol === symbol || entry.symbols?.some((candidate) => candidate === symbol),
+  );
+};
+
 const declareAliasAwareImportedStaticMethod = ({
   name,
   declaredAt,
@@ -840,14 +905,24 @@ const resolveSyntheticAliasConstructorImportTarget = ({
   methodSymbol: SymbolId;
   dependency: BindingResult;
 }): SymbolId | undefined => {
-  const methodRecord = dependency.symbolTable.getSymbol(methodSymbol);
-  const metadata = methodRecord.metadata as
-    | { aliasConstructorTarget?: unknown }
-    | undefined;
-  if (typeof metadata?.aliasConstructorTarget !== "number") {
-    return undefined;
+  let current = methodSymbol;
+  let resolved = false;
+  const visited = new Set<SymbolId>();
+
+  while (!visited.has(current)) {
+    visited.add(current);
+    const methodRecord = dependency.symbolTable.getSymbol(current);
+    const metadata = methodRecord.metadata as
+      | { aliasConstructorTarget?: unknown }
+      | undefined;
+    if (typeof metadata?.aliasConstructorTarget !== "number") {
+      return resolved ? current : undefined;
+    }
+    current = metadata.aliasConstructorTarget;
+    resolved = true;
   }
-  return metadata.aliasConstructorTarget;
+
+  return resolved ? current : undefined;
 };
 
 const ensureEnumNamespaceImport = ({

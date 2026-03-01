@@ -1,0 +1,3 @@
+use src::base
+
+pub type IntBox = base::Box<i32>

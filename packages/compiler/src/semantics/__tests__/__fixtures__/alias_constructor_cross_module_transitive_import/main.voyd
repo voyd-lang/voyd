@@ -1,0 +1,6 @@
+use src::dep
+
+pub fn main() -> i32
+  let first = dep::IntBox(1)
+  let second = dep::IntBox::init(2)
+  first.value + second.value

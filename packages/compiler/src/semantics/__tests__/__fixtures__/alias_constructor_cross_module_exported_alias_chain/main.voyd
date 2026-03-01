@@ -1,0 +1,6 @@
+use src::dep
+
+pub fn main() -> i32
+  let first = dep::Alias(1)
+  let second = dep::Alias::init(2)
+  first.value + second.value
