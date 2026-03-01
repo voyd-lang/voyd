@@ -113,6 +113,10 @@ const hasProjectEntryInDir = (dirPath: string): boolean =>
 
 const sourcePkgSrcAncestorForEntry = (entryPath: string): string | undefined => {
   const resolvedEntry = path.resolve(entryPath);
+  if (path.basename(resolvedEntry) !== "pkg.voyd") {
+    return undefined;
+  }
+
   let current = path.dirname(resolvedEntry);
 
   while (true) {
