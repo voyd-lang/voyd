@@ -19,12 +19,15 @@ export const typeIfExpr = (
 
   expr.branches.forEach((branch, index) => {
     const conditionType = typeExpression(branch.condition, ctx, state);
+    const conditionSpan =
+      ctx.hir.expressions.get(branch.condition)?.span ?? expr.span;
     ensureTypeMatches(
       conditionType,
       ctx.primitives.bool,
       ctx,
       state,
-      `if condition ${index + 1}`
+      `if condition ${index + 1}`,
+      conditionSpan,
     );
 
     const valueType = typeExpression(branch.value, ctx, state, { discardValue });

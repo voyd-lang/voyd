@@ -558,6 +558,83 @@ pub fn main(): () -> f64
     }
   });
 
+  it("falls back to intrinsic operators when a single imported operator symbol mismatches", () => {
+    const externalPath: ModulePath = {
+      namespace: "pkg",
+      packageName: "dep",
+      segments: ["pkg"],
+    };
+    const externalSource = `
+pub obj Vec3 {
+  x: f64,
+  y: f64,
+  z: f64
+}
+
+impl Vec3
+  api fn '-'(self, other: Vec3) -> Vec3
+    self
+`;
+    const external = buildModule({ source: externalSource, path: externalPath });
+    const externalSemantics = semanticsPipeline({
+      module: external.module,
+      graph: external.graph,
+    });
+
+    const mainPath: ModulePath = { namespace: "src", segments: ["main"] };
+    const mainSource = `
+use pkg::dep::all
+
+pub fn main(): () -> f64
+  8.0 - 2.0
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, externalPath)],
+    });
+
+    const result = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[external.module.id, externalSemantics.exports]]),
+      dependencies: new Map([[external.module.id, externalSemantics]]),
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+    const symbolTable = getSymbolTable(result);
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") {
+      return;
+    }
+
+    const callExpr = Array.from(result.hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => expr.exprKind === "call",
+    );
+    expect(callExpr).toBeDefined();
+    if (!callExpr) {
+      return;
+    }
+
+    const target = result.typing.callTargets
+      .get(callExpr.id)
+      ?.get(`${mainSymbol}<>`);
+    expect(target).toBeDefined();
+    expect(target?.moduleId).toBe(main.module.id);
+    if (!target) {
+      return;
+    }
+
+    const targetRecord = symbolTable.getSymbol(target.symbol);
+    expect(targetRecord.name).toBe("-");
+    expect(
+      (targetRecord.metadata as { intrinsic?: boolean } | undefined)?.intrinsic,
+    ).toBe(true);
+  });
+
   it("does not apply intrinsic fallback when explicit type arguments are present", () => {
     const externalPath: ModulePath = {
       namespace: "pkg",

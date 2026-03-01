@@ -11,12 +11,14 @@ export const typeWhileExpr = (
   state: TypingState
 ): TypeId => {
   const conditionType = typeExpression(expr.condition, ctx, state);
+  const conditionSpan = ctx.hir.expressions.get(expr.condition)?.span ?? expr.span;
   ensureTypeMatches(
     conditionType,
     ctx.primitives.bool,
     ctx,
     state,
-    "while condition"
+    "while condition",
+    conditionSpan,
   );
   typeExpression(expr.body, ctx, state, { discardValue: true });
   const effectRow = composeEffectRows(ctx.effects, [
