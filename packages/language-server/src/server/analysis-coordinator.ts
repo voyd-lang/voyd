@@ -10,6 +10,7 @@ import {
   resolveEntryPath,
   resolveModuleRoots,
 } from "../project.js";
+import { buildCompletionIndex } from "../project/completion-index.js";
 import { createOverlayModuleHost } from "../project/files.js";
 import type {
   AutoImportAnalysis,
@@ -36,6 +37,11 @@ type NavigationCacheEntry = {
   index: ProjectNavigationIndex;
 };
 
+type CompletionCacheEntry = {
+  revision: number;
+  analysis: CompletionAnalysis;
+};
+
 const normalizeFilePathFromUri = (uri: string): string =>
   path.resolve(URI.parse(uri).fsPath);
 
@@ -52,6 +58,8 @@ export class AnalysisCoordinator {
   readonly #coreInFlight = new Map<string, Promise<ProjectCoreAnalysis>>();
   readonly #navigationCache = new Map<string, NavigationCacheEntry>();
   readonly #navigationInFlight = new Map<string, Promise<ProjectNavigationIndex>>();
+  readonly #completionCache = new Map<string, CompletionCacheEntry>();
+  readonly #completionInFlight = new Map<string, Promise<CompletionAnalysis>>();
 
   constructor({
     exportIndex = new ExportIndexService(),
@@ -155,31 +163,75 @@ export class AnalysisCoordinator {
     while (true) {
       const { context, analysis } = await this.getCoreForUri(uri);
       const runRevision = this.#revision;
-      const navigation = await this.#getNavigationForContext({
-        context,
-        analysis,
+      const cached = this.#completionCache.get(context.cacheKey);
+      if (cached && cached.revision === runRevision) {
+        return cached.analysis;
+      }
+
+      const inFlightKey = AnalysisCoordinator.#inFlightKey({
+        contextKey: context.cacheKey,
         revision: runRevision,
       });
-      if (runRevision !== this.#revision) {
+      const pending = this.#completionInFlight.get(inFlightKey);
+      if (pending) {
+        const result = await pending;
+        if (runRevision === this.#revision) {
+          return result;
+        }
         continue;
       }
 
-      const exportsByName = this.#exportIndex.buildAutoImportExports({
-        roots: context.roots,
-        semantics: analysis.semantics,
-      });
-      return {
-        occurrencesByUri: navigation.occurrencesByUri,
-        declarationsByKey: navigation.declarationsByKey,
-        documentationByCanonicalKey: navigation.documentationByCanonicalKey,
-        typeInfoByCanonicalKey: navigation.typeInfoByCanonicalKey,
-        moduleIdByFilePath: analysis.moduleIdByFilePath,
-        semantics: analysis.semantics,
-        graph: analysis.graph,
-        sourceByFile: analysis.sourceByFile,
-        lineIndexByFile: analysis.lineIndexByFile,
-        exportsByName,
-      };
+      const task = (async () => {
+        const navigation = await this.#getNavigationForContext({
+          context,
+          analysis,
+          revision: runRevision,
+        });
+
+        const exportsByName = this.#exportIndex.buildAutoImportExports({
+          roots: context.roots,
+          semantics: analysis.semantics,
+        });
+        const completionIndex = buildCompletionIndex({
+          semantics: analysis.semantics,
+          occurrencesByUri: navigation.occurrencesByUri,
+          lineIndexByFile: analysis.lineIndexByFile,
+          exportsByName,
+        });
+        const completionAnalysis: CompletionAnalysis = {
+          occurrencesByUri: navigation.occurrencesByUri,
+          declarationsByKey: navigation.declarationsByKey,
+          documentationByCanonicalKey: navigation.documentationByCanonicalKey,
+          typeInfoByCanonicalKey: navigation.typeInfoByCanonicalKey,
+          moduleIdByFilePath: analysis.moduleIdByFilePath,
+          semantics: analysis.semantics,
+          graph: analysis.graph,
+          sourceByFile: analysis.sourceByFile,
+          lineIndexByFile: analysis.lineIndexByFile,
+          exportsByName,
+          completionIndex,
+        };
+
+        if (this.#revision === runRevision) {
+          this.#completionCache.set(context.cacheKey, {
+            revision: runRevision,
+            analysis: completionAnalysis,
+          });
+        }
+        return completionAnalysis;
+      })();
+
+      this.#completionInFlight.set(inFlightKey, task);
+
+      try {
+        const result = await task;
+        if (runRevision === this.#revision) {
+          return result;
+        }
+        continue;
+      } finally {
+        this.#completionInFlight.delete(inFlightKey);
+      }
     }
   }
 
@@ -187,6 +239,7 @@ export class AnalysisCoordinator {
     this.#revision += 1;
     this.#coreCache.clear();
     this.#navigationCache.clear();
+    this.#completionCache.clear();
   }
 
   static #inFlightKey({
