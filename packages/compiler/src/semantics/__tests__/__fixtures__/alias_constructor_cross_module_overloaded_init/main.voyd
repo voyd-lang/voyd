@@ -1,0 +1,7 @@
+use src::dep
+
+pub fn main() -> i32
+  let zero = dep::Count::init()
+  let two = dep::Count::init(2)
+  let three = dep::Count(3)
+  zero.value + two.value + three.value

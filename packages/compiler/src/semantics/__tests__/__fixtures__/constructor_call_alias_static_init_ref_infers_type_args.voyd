@@ -1,0 +1,14 @@
+obj Box<T> {
+  value: T
+}
+
+impl Box<T>
+  fn init(value: T) -> Box<T>
+    Box { value }
+
+type Wrap<T> = Box<T>
+
+pub fn main() -> i32
+  let ctor = Wrap::init
+  let _value = ctor(1)
+  0

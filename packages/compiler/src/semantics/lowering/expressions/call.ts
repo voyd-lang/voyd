@@ -6,6 +6,7 @@ import {
   formCallsInternal,
   isForm,
   isIdentifierAtom,
+  isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import { literalShouldLowerAsObjectLiteral } from "../../constructors.js";
 import type { HirExprId } from "../../ids.js";
@@ -22,6 +23,9 @@ import {
   lowerConstructorLiteralCall,
 } from "./constructor-call.js";
 import { createBoolLiteralExpr } from "./literal-helpers.js";
+import { resolveTypeSymbol } from "../resolution.js";
+import { lowerNominalTargetTypeArgumentsFromMetadata } from "../../nominal-type-target.js";
+import { substituteTypeParametersInTypeExpr } from "../../hir/type-expr-substitution.js";
 
 type LowerCallFromElementsParams = LoweringParams & {
   calleeExpr: Expr;
@@ -55,6 +59,15 @@ export const lowerCallFromElements = ({
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
         .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
     : undefined;
+  const aliasTargetTypeArguments = lowerAliasTargetTypeArguments({
+    calleeExpr,
+    namespaceTypeArguments: typeArguments,
+    ctx,
+    scope: scopes.current(),
+  });
+  const callTypeArguments = aliasTargetTypeArguments.consumeNamespaceTypeArguments
+    ? aliasTargetTypeArguments.typeArguments
+    : typeArguments;
   const isTypeCheck = tryLowerIsTypeCheckCall({
     calleeExpr,
     argsExprs: callArgsExprs,
@@ -91,7 +104,10 @@ export const lowerCallFromElements = ({
     span: toSourceSpan(ast),
     callee: calleeId,
     args,
-    typeArguments,
+    typeArguments:
+      callTypeArguments && callTypeArguments.length > 0
+        ? callTypeArguments
+        : undefined,
   });
 };
 
@@ -294,6 +310,44 @@ const resolveNominalTarget = ({
     calleeSyntax: target.name,
     typeArguments: target.typeArguments,
   };
+};
+
+const lowerAliasTargetTypeArguments = ({
+  calleeExpr,
+  namespaceTypeArguments,
+  scope,
+  ctx,
+}: {
+  calleeExpr: Expr;
+  namespaceTypeArguments?: readonly HirTypeExpr[];
+  scope: ReturnType<LoweringParams["scopes"]["current"]>;
+  ctx: LoweringParams["ctx"];
+}): {
+  typeArguments?: HirTypeExpr[];
+  consumeNamespaceTypeArguments: boolean;
+} => {
+  if (!isIdentifierAtom(calleeExpr) && !isInternalIdentifierAtom(calleeExpr)) {
+    return { consumeNamespaceTypeArguments: false };
+  }
+  const symbol = resolveTypeSymbol(calleeExpr.value, scope, ctx);
+  if (typeof symbol !== "number") {
+    return { consumeNamespaceTypeArguments: false };
+  }
+  const record = ctx.symbolTable.getSymbol(symbol);
+  if (record.kind !== "type") {
+    return { consumeNamespaceTypeArguments: false };
+  }
+
+  return lowerNominalTargetTypeArgumentsFromMetadata({
+    source: record.metadata as Record<string, unknown> | undefined,
+    namespaceTypeArguments,
+    lowerTypeArgument: (entry) => lowerTypeExpr(entry, ctx, scope),
+    substituteTypeArgument: ({ typeArgument, substitutionsByName }) =>
+      substituteTypeParametersInTypeExpr({
+        typeExpr: typeArgument,
+        substitutionsByName,
+      }),
+  });
 };
 
 export const lowerCall = ({

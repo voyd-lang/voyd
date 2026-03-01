@@ -126,6 +126,52 @@ const buildModule = ({
   return { module, graph };
 };
 
+const runMainWithSingleFixtureDependency = ({
+  depFixture,
+  mainFixture,
+  depSegments = ["dep"],
+  mainSegments = ["main"],
+}: {
+  depFixture: string;
+  mainFixture: string;
+  depSegments?: readonly string[];
+  mainSegments?: readonly string[];
+}): SemanticsResult => {
+  const dependencyModule = buildModule({
+    fixture: depFixture,
+    segments: depSegments,
+  });
+  const dependencySemantics = semanticsPipeline({
+    module: dependencyModule.module,
+    graph: dependencyModule.graph,
+  });
+  const mainAst = loadAst(mainFixture);
+  const useForm = mainAst.rest.find(
+    (entry) => isForm(entry) && entry.calls("use")
+  );
+  const main = buildModule({
+    fixture: mainFixture,
+    ast: mainAst,
+    segments: mainSegments,
+    dependencies: [
+      {
+        kind: "use" as const,
+        path: dependencyModule.module.path,
+        span: toSourceSpan(useForm ?? mainAst),
+      },
+    ],
+  });
+
+  return semanticsPipeline({
+    module: main.module,
+    graph: main.graph,
+    exports: new Map([[dependencyModule.module.id, dependencySemantics.exports]]),
+    dependencies: new Map([
+      [dependencyModule.module.id, dependencySemantics],
+    ]),
+  });
+};
+
 const expectAnimalConstructorBindings = (
   semantics: SemanticsResult
 ): void => {
@@ -804,36 +850,10 @@ describe("semanticsPipeline", () => {
   it("lowers nominal constructor overloads across modules", () => {
     const animalFixture = "nominal_constructors_cross_module/animal.voyd";
     const mainFixture = "nominal_constructors_cross_module/main.voyd";
-    const animal = buildModule({
-      fixture: animalFixture,
-      segments: ["animal"],
-    });
-    const animalSemantics = semanticsPipeline({
-      module: animal.module,
-      graph: animal.graph,
-    });
-
-    const mainAst = loadAst(mainFixture);
-    const useForm = mainAst.rest.find(
-      (entry) => isForm(entry) && entry.calls("use")
-    );
-    const dependency = {
-      kind: "use" as const,
-      path: animal.module.path,
-      span: toSourceSpan(useForm ?? mainAst),
-    };
-    const main = buildModule({
-      fixture: mainFixture,
-      ast: mainAst,
-      segments: ["main"],
-      dependencies: [dependency],
-    });
-
-    const mainSemantics = semanticsPipeline({
-      module: main.module,
-      graph: main.graph,
-      exports: new Map([[animal.module.id, animalSemantics.exports]]),
-      dependencies: new Map([[animal.module.id, animalSemantics]]),
+    const mainSemantics = runMainWithSingleFixtureDependency({
+      depFixture: animalFixture,
+      mainFixture,
+      depSegments: ["animal"],
     });
 
     expectAnimalConstructorBindings(mainSemantics);
@@ -842,40 +862,209 @@ describe("semanticsPipeline", () => {
   it("binds constructor overloads through module namespaces", () => {
     const animalFixture = "nominal_constructors_namespace/animal.voyd";
     const mainFixture = "nominal_constructors_namespace/main.voyd";
-    const animal = buildModule({
-      fixture: animalFixture,
-      segments: ["animal"],
-    });
-    const animalSemantics = semanticsPipeline({
-      module: animal.module,
-      graph: animal.graph,
-    });
-
-    const mainAst = loadAst(mainFixture);
-    const useForm = mainAst.rest.find(
-      (entry) => isForm(entry) && entry.calls("use")
-    );
-    const dependency = {
-      kind: "use" as const,
-      path: animal.module.path,
-      span: toSourceSpan(useForm ?? mainAst),
-    };
-    const main = buildModule({
-      fixture: mainFixture,
-      ast: mainAst,
-      segments: ["main"],
-      dependencies: [dependency],
-    });
-
-    const mainSemantics = semanticsPipeline({
-      module: main.module,
-      graph: main.graph,
-      exports: new Map([[animal.module.id, animalSemantics.exports]]),
-      dependencies: new Map([[animal.module.id, animalSemantics]]),
+    const mainSemantics = runMainWithSingleFixtureDependency({
+      depFixture: animalFixture,
+      mainFixture,
+      depSegments: ["animal"],
     });
 
     expect(mainSemantics.diagnostics).toHaveLength(0);
     expectAnimalConstructorBindings(mainSemantics);
+  });
+
+  it("supports constructor calls through aliases targeting namespaced imported types", () => {
+    const depFixture = "alias_constructor_namespaced_import/dep.voyd";
+    const mainFixture = "alias_constructor_namespaced_import/main.voyd";
+    const mainSemantics = runMainWithSingleFixtureDependency({
+      depFixture,
+      mainFixture,
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
+  it("enforces namespaced generic alias substitutions for static init calls", () => {
+    const depFixture = "alias_constructor_namespaced_generic_static/dep.voyd";
+    const mainFixture = "alias_constructor_namespaced_generic_static/main.voyd";
+
+    let caught: unknown;
+    try {
+      runMainWithSingleFixtureDependency({
+        depFixture,
+        mainFixture,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("supports constructor calls through imported public type aliases", () => {
+    const depFixture = "alias_constructor_cross_module_exported_alias/dep.voyd";
+    const mainFixture =
+      "alias_constructor_cross_module_exported_alias/main_ok.voyd";
+    const mainSemantics = runMainWithSingleFixtureDependency({
+      depFixture,
+      mainFixture,
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
+  it("enforces fixed type arguments for imported public alias constructors", () => {
+    const depFixture = "alias_constructor_cross_module_exported_alias/dep.voyd";
+    const mainFixture =
+      "alias_constructor_cross_module_exported_alias/main_bad.voyd";
+
+    let caught: unknown;
+    try {
+      runMainWithSingleFixtureDependency({
+        depFixture,
+        mainFixture,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("enforces fixed type arguments for imported alias constructor references", () => {
+    const depFixture = "alias_constructor_cross_module_exported_alias/dep.voyd";
+    const mainFixture =
+      "alias_constructor_cross_module_exported_alias/main_ref_bad.voyd";
+
+    let caught: unknown;
+    try {
+      runMainWithSingleFixtureDependency({
+        depFixture,
+        mainFixture,
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("resolves overloaded imported alias constructors", () => {
+    const depFixture = "alias_constructor_cross_module_overloaded_init/dep.voyd";
+    const mainFixture = "alias_constructor_cross_module_overloaded_init/main.voyd";
+    const mainSemantics = runMainWithSingleFixtureDependency({
+      depFixture,
+      mainFixture,
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
+  it("resolves constructor calls through transitive exported alias chains", () => {
+    const depFixture = "alias_constructor_cross_module_exported_alias_chain/dep.voyd";
+    const mainFixture = "alias_constructor_cross_module_exported_alias_chain/main.voyd";
+    const mainSemantics = runMainWithSingleFixtureDependency({
+      depFixture,
+      mainFixture,
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
+  it("resolves constructor calls through aliases targeting imported object types", () => {
+    const baseFixture = "alias_constructor_cross_module_transitive_import/base.voyd";
+    const depFixture = "alias_constructor_cross_module_transitive_import/dep.voyd";
+    const mainFixture = "alias_constructor_cross_module_transitive_import/main.voyd";
+
+    const base = buildModule({
+      fixture: baseFixture,
+      segments: ["base"],
+    });
+    const baseSemantics = semanticsPipeline({
+      module: base.module,
+      graph: base.graph,
+    });
+
+    const depAst = loadAst(depFixture);
+    const depUseForm = depAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use"),
+    );
+    const dep = buildModule({
+      fixture: depFixture,
+      ast: depAst,
+      segments: ["dep"],
+      dependencies: [
+        {
+          kind: "use" as const,
+          path: base.module.path,
+          span: toSourceSpan(depUseForm ?? depAst),
+        },
+      ],
+    });
+    const depSemantics = semanticsPipeline({
+      module: dep.module,
+      graph: dep.graph,
+      exports: new Map([[base.module.id, baseSemantics.exports]]),
+      dependencies: new Map([[base.module.id, baseSemantics]]),
+    });
+
+    const mainAst = loadAst(mainFixture);
+    const mainUseForm = mainAst.rest.find(
+      (entry) => isForm(entry) && entry.calls("use"),
+    );
+    const main = buildModule({
+      fixture: mainFixture,
+      ast: mainAst,
+      segments: ["main"],
+      dependencies: [
+        {
+          kind: "use" as const,
+          path: dep.module.path,
+          span: toSourceSpan(mainUseForm ?? mainAst),
+        },
+      ],
+    });
+    const mainSemantics = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([
+        [dep.module.id, depSemantics.exports],
+        [base.module.id, baseSemantics.exports],
+      ]),
+      dependencies: new Map([
+        [dep.module.id, depSemantics],
+        [base.module.id, baseSemantics],
+      ]),
+    });
+
+    expect(mainSemantics.diagnostics).toHaveLength(0);
+  });
+
+  it("resolves constructor calls through object type aliases", () => {
+    const result = semanticsPipeline(
+      loadAst("constructor_call_through_type_alias.voyd"),
+    );
+    expect(result.diagnostics).toHaveLength(0);
   });
 
   it("resolves operator calls to impl overloads", () => {

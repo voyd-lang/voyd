@@ -470,6 +470,7 @@ export interface HirLiteralExpr extends HirExpressionBase {
 export interface HirIdentifierExpr extends HirExpressionBase {
   exprKind: "identifier";
   symbol: SymbolId;
+  typeArguments?: readonly HirTypeExpr[];
 }
 
 export interface HirOverloadSetExpr extends HirExpressionBase {

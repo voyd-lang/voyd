@@ -1,0 +1,6 @@
+use src::dep
+
+pub fn main() -> i32
+  let ctor = dep::IntBox::init
+  let _bad = ctor(true)
+  0

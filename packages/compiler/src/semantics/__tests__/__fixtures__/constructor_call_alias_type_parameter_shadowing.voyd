@@ -1,0 +1,13 @@
+obj T {
+  value: i32
+}
+
+impl T
+  fn init(value: i32) -> T
+    T { value }
+
+type Alias<T> = T
+
+pub fn main() -> i32
+  let _value = Alias(1)
+  0

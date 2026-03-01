@@ -1,0 +1,6 @@
+use src::dep
+
+pub fn main() -> i32
+  let _bad_ctor = dep::IntBox(true)
+  let _bad_static = dep::IntBox::init(true)
+  0

@@ -1,0 +1,14 @@
+obj Box<T> {
+  value: T
+}
+
+impl Box<T>
+  fn init(value: T) -> Box<T>
+    Box { value }
+
+type IntBox = Box<i32>
+type AlsoInt = IntBox
+
+pub fn main() -> i32
+  let _bad = AlsoInt(true)
+  0

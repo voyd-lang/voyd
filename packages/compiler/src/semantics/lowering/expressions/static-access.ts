@@ -13,7 +13,6 @@ import type { HirExprId, ScopeId, SymbolId } from "../../ids.js";
 import type { HirTypeExpr } from "../../hir/index.js";
 import {
   lowerResolvedCallee,
-  resolveModuleMemberCallResolution,
   resolveModuleMemberResolution,
   resolveStaticMethodResolution,
 } from "./resolution-helpers.js";
@@ -24,6 +23,7 @@ import { lowerTypeExpr } from "../type-expressions.js";
 import { resolveModulePathSymbol } from "./namespace-resolution.js";
 import { lowerQualifiedTraitMethodCall } from "./qualified-trait-call.js";
 import { lowerEnumNamespaceMemberTypeArgumentsFromMetadata } from "../../enum-namespace.js";
+import { lowerNominalTargetTypeArgumentsFromMetadata } from "../../nominal-type-target.js";
 import { substituteTypeParametersInTypeExpr } from "../../hir/type-expr-substitution.js";
 
 export const lowerStaticAccessExpr = ({
@@ -100,9 +100,21 @@ export const lowerStaticAccessExpr = ({
               ctx,
             })
           : undefined;
+      const resolutionRecord =
+        resolution.kind === "symbol"
+          ? ctx.symbolTable.getSymbol(resolution.symbol)
+          : undefined;
+      const resolutionMetadata = resolutionRecord?.metadata as
+        | { aliasConstructorAlias?: unknown }
+        | undefined;
       return lowerResolvedCallee({
         resolution: constructorResolution ?? resolution,
         syntax: memberExpr,
+        typeArguments:
+          resolution.kind === "symbol" &&
+          typeof resolutionMetadata?.aliasConstructorAlias === "number"
+            ? targetTypeArguments
+          : undefined,
         ctx,
       });
     }
@@ -315,20 +327,37 @@ const lowerStaticMethodCall = ({
     methodTable,
     ctx,
   });
+  const callResolution = unwrapAliasConstructorResolution({
+    resolution,
+    ctx,
+  });
+  const aliasConstructorTypeArguments =
+    calleeExpr.value === "init"
+      ? lowerAliasConstructorTypeArgumentsForSymbol({
+          symbol: targetSymbol,
+          namespaceTypeArguments: combinedTypeArguments,
+          scope: scopes.current(),
+          ctx,
+        })
+      : { consumeNamespaceTypeArguments: false as const };
   const constructorResolution =
-    resolution.kind === "symbol" &&
-    ctx.symbolTable.getSymbol(resolution.symbol).kind === "type"
+    callResolution.kind === "symbol" &&
+    ctx.symbolTable.getSymbol(callResolution.symbol).kind === "type"
       ? resolveConstructorResolution({
-          targetSymbol: resolution.symbol,
+          targetSymbol: callResolution.symbol,
           name: calleeExpr.value,
           ctx,
         })
       : undefined;
   const callee = lowerResolvedCallee({
-    resolution: constructorResolution ?? resolution,
+    resolution: constructorResolution ?? callResolution,
     syntax: calleeExpr,
     ctx,
   });
+  const callTypeArguments =
+    aliasConstructorTypeArguments.consumeNamespaceTypeArguments
+      ? aliasConstructorTypeArguments.typeArguments
+      : combinedTypeArguments;
 
   return ctx.builder.addExpression({
     kind: "expr",
@@ -338,8 +367,8 @@ const lowerStaticMethodCall = ({
     callee,
     args,
     typeArguments:
-      combinedTypeArguments.length > 0
-        ? combinedTypeArguments
+      callTypeArguments && callTypeArguments.length > 0
+        ? callTypeArguments
         : undefined,
   });
 };
@@ -372,6 +401,54 @@ const lowerEnumNamespaceMemberTypeArguments = ({
         substitutionsByName,
       }),
   });
+};
+
+const lowerAliasConstructorTypeArgumentsForSymbol = ({
+  symbol,
+  namespaceTypeArguments,
+  scope,
+  ctx,
+}: {
+  symbol: SymbolId;
+  namespaceTypeArguments?: readonly HirTypeExpr[];
+  scope: ScopeId;
+  ctx: LoweringParams["ctx"];
+}): {
+  typeArguments?: HirTypeExpr[];
+  consumeNamespaceTypeArguments: boolean;
+} => {
+  const record = ctx.symbolTable.getSymbol(symbol);
+  return lowerNominalTargetTypeArgumentsFromMetadata({
+    source: record.metadata as Record<string, unknown> | undefined,
+    namespaceTypeArguments,
+    lowerTypeArgument: (entry) => lowerTypeExpr(entry, ctx, scope),
+    substituteTypeArgument: ({ typeArgument, substitutionsByName }) =>
+      substituteTypeParametersInTypeExpr({
+        typeExpr: typeArgument,
+        substitutionsByName,
+      }),
+  });
+};
+
+const unwrapAliasConstructorResolution = ({
+  resolution,
+  ctx,
+}: {
+  resolution: ReturnType<typeof resolveStaticMethodResolution>;
+  ctx: LoweringParams["ctx"];
+}) => {
+  if (resolution.kind !== "symbol") {
+    return resolution;
+  }
+  const record = ctx.symbolTable.getSymbol(resolution.symbol);
+  const metadata = record.metadata as { aliasConstructorTarget?: unknown } | undefined;
+  if (typeof metadata?.aliasConstructorTarget !== "number") {
+    return resolution;
+  }
+  return {
+    ...resolution,
+    symbol: metadata.aliasConstructorTarget,
+  };
 };
 
 const lowerModuleQualifiedCall = ({
@@ -447,24 +524,48 @@ const lowerModuleQualifiedCall = ({
     return nominal;
   }
 
-  const resolution = resolveModuleMemberCallResolution({
+  const baseResolution = resolveModuleMemberResolution({
     name: calleeExpr.value,
     moduleSymbol,
     memberTable,
     ctx,
   });
-  if (!resolution) {
+  if (!baseResolution) {
     const moduleName = ctx.symbolTable.getSymbol(moduleSymbol).name;
     throw new Error(
       `module ${moduleName} does not export ${calleeExpr.value}`
     );
   }
+  const aliasConstructorTypeArguments =
+    baseResolution.kind === "symbol" &&
+    ctx.symbolTable.getSymbol(baseResolution.symbol).kind === "type"
+      ? lowerAliasConstructorTypeArgumentsForSymbol({
+          symbol: baseResolution.symbol,
+          namespaceTypeArguments: combinedTypeArguments,
+          scope: scopes.current(),
+          ctx,
+        })
+      : { consumeNamespaceTypeArguments: false as const };
+  const constructorResolution =
+    baseResolution.kind === "symbol" &&
+    ctx.symbolTable.getSymbol(baseResolution.symbol).kind === "type"
+      ? resolveConstructorResolution({
+          targetSymbol: baseResolution.symbol,
+          name: calleeExpr.value,
+          ctx,
+        })
+      : undefined;
+  const resolution = constructorResolution ?? baseResolution;
 
   const callee = lowerResolvedCallee({
     resolution,
     syntax: calleeExpr,
     ctx,
   });
+  const callTypeArguments =
+    aliasConstructorTypeArguments.consumeNamespaceTypeArguments
+      ? aliasConstructorTypeArguments.typeArguments
+      : combinedTypeArguments;
 
   return ctx.builder.addExpression({
     kind: "expr",
@@ -474,8 +575,8 @@ const lowerModuleQualifiedCall = ({
     callee,
     args,
     typeArguments:
-      combinedTypeArguments && combinedTypeArguments.length > 0
-        ? combinedTypeArguments
+      callTypeArguments && callTypeArguments.length > 0
+        ? callTypeArguments
         : undefined,
   });
 };

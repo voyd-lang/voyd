@@ -1,0 +1,13 @@
+obj Box<T> {
+  value: T
+}
+
+impl Box<T>
+  fn init(value: T) -> Box<T>
+    Box { value }
+
+type Wrap<T> = Box<T>
+
+pub fn main() -> i32
+  let _bad = Wrap<i32, bool>(1)
+  0

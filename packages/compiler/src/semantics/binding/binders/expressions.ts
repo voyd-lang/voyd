@@ -17,7 +17,7 @@ import {
 import { diagnosticFromCode } from "../../../diagnostics/index.js";
 import { rememberSyntax } from "../context.js";
 import { declareValueOrParameter } from "../redefinitions.js";
-import type { BindingContext } from "../types.js";
+import type { BindingContext, BindingResult } from "../types.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import { parseLambdaSignature } from "../../lambda.js";
 import { ensureForm } from "./utils.js";
@@ -691,53 +691,77 @@ const ensureStaticMethodImport = ({
     return;
   }
 
-  const imported: { local: SymbolId; overloadId?: number }[] = [];
+  const imported: {
+    importLocal: SymbolId;
+    staticLocal: SymbolId;
+    overloadId?: number;
+  }[] = [];
   methodSymbols.forEach((methodSymbol) => {
-    const fn = dependency.functions.find(
-      (entry) => entry.symbol === methodSymbol,
-    );
-    if (!fn) {
-      return;
-    }
-    const visibilityAllowed = canAccessSymbolVisibility({
-      visibility: fn.visibility,
-      ownerPackageId: dependency.packageId,
-      importedFromModuleId: moduleId,
+    const syntheticAliasConstructorTarget =
+      resolveSyntheticAliasConstructorImportTarget({
+        methodSymbol,
+        dependency,
+      });
+    const importTargetSymbol = syntheticAliasConstructorTarget ?? methodSymbol;
+    const visibilityAllowed = canImportStaticMethodSymbol({
+      importTargetSymbol,
+      moduleId,
+      dependency,
       explicitlyTargetsStdSubmodule,
-      allowApiVisibility: true,
+      allowSyntheticAliasConstructorFallback:
+        memberName === "init" && typeof syntheticAliasConstructorTarget === "number",
       ctx,
     });
     if (!visibilityAllowed) {
       return;
     }
-    const record = dependency.symbolTable.getSymbol(methodSymbol);
+    const record = dependency.symbolTable.getSymbol(importTargetSymbol);
     const local = ctx.symbolTable.declare(
       {
         name: memberName,
         kind: record.kind,
         declaredAt: syntax.syntaxId,
-        metadata: { import: { moduleId, symbol: methodSymbol } },
+        metadata: { import: { moduleId, symbol: importTargetSymbol } },
       },
       scope,
     );
     ctx.imports.push({
       name: memberName,
       local,
-      target: { moduleId, symbol: methodSymbol },
+      target: { moduleId, symbol: importTargetSymbol },
       visibility: moduleVisibility(),
       span: toSourceSpan(syntax),
     });
-    const overloadId = dependency.overloadBySymbol.get(methodSymbol);
-    imported.push({ local, overloadId });
+    const overloadId =
+      typeof syntheticAliasConstructorTarget === "number"
+        ? undefined
+        : (dependency.overloadBySymbol.get(methodSymbol) ??
+          dependency.overloadBySymbol.get(importTargetSymbol));
+    const aliasAwareLocal =
+      typeof syntheticAliasConstructorTarget === "number"
+        ? declareAliasAwareImportedStaticMethod({
+            name: memberName,
+            declaredAt: syntax.syntaxId,
+            scope,
+            aliasSymbol: targetSymbol,
+            constructorSymbol: local,
+            ctx,
+          })
+        : local;
+    imported.push({
+      importLocal: local,
+      staticLocal: aliasAwareLocal,
+      overloadId,
+    });
   });
 
   if (imported.length === 0) {
     return;
   }
 
-  const locals = imported.map((entry) => entry.local);
+  const staticLocals = imported.map((entry) => entry.staticLocal);
   const bucket = ctx.staticMethods.get(targetSymbol) ?? new Map();
-  bucket.set(memberName, new Set(locals));
+  bucket.set(memberName, new Set(staticLocals));
   ctx.staticMethods.set(targetSymbol, bucket);
 
   const importedOverloadIds = new Set(
@@ -745,7 +769,7 @@ const ensureStaticMethodImport = ({
       .map((entry) => entry.overloadId)
       .filter((entry): entry is number => typeof entry === "number"),
   );
-  const needsImportedSet = locals.length > 1 || importedOverloadIds.size === 1;
+  const needsImportedSet = staticLocals.length > 1 || importedOverloadIds.size === 1;
   if (needsImportedSet) {
     const nextId =
       Math.max(
@@ -755,12 +779,150 @@ const ensureStaticMethodImport = ({
       ) + 1;
     const setId = importedOverloadIds.size === 1 ? nextId : nextId;
     const existing = ctx.importedOverloadOptions.get(setId);
+    const overloadLocals = imported.map((entry) => entry.importLocal);
     const merged = existing
-      ? Array.from(new Set([...existing, ...locals]))
-      : locals;
+      ? Array.from(new Set([...existing, ...overloadLocals]))
+      : overloadLocals;
     ctx.importedOverloadOptions.set(setId, merged);
     merged.forEach((local) => ctx.overloadBySymbol.set(local, setId));
+    staticLocals.forEach((local) => ctx.overloadBySymbol.set(local, setId));
   }
+};
+
+const canImportStaticMethodSymbol = ({
+  importTargetSymbol,
+  moduleId,
+  dependency,
+  explicitlyTargetsStdSubmodule,
+  allowSyntheticAliasConstructorFallback,
+  ctx,
+}: {
+  importTargetSymbol: SymbolId;
+  moduleId: string;
+  dependency: BindingResult;
+  explicitlyTargetsStdSubmodule: boolean;
+  allowSyntheticAliasConstructorFallback: boolean;
+  ctx: BindingContext;
+}): boolean => {
+  const fn = dependency.functions.find((entry) => entry.symbol === importTargetSymbol);
+  if (fn) {
+    return canAccessSymbolVisibility({
+      visibility: fn.visibility,
+      ownerPackageId: dependency.packageId,
+      importedFromModuleId: moduleId,
+      explicitlyTargetsStdSubmodule,
+      allowApiVisibility: true,
+      ctx,
+    });
+  }
+
+  const exported = findExportedSymbolInModule({
+    moduleId,
+    symbol: importTargetSymbol,
+    ctx,
+  });
+  if (!exported && allowSyntheticAliasConstructorFallback) {
+    // Synthetic alias constructor wrappers can ultimately target imported
+    // symbols that are not listed in dependency.functions or module exports.
+    // In that case, rely on alias-namespace reachability that produced the
+    // static method entry rather than dropping valid constructors.
+    return true;
+  }
+  if (!exported) {
+    return false;
+  }
+
+  return canAccessExport({
+    exported,
+    moduleId,
+    explicitlyTargetsStdSubmodule,
+    ctx,
+  });
+};
+
+const findExportedSymbolInModule = ({
+  moduleId,
+  symbol,
+  ctx,
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+  ctx: BindingContext;
+}): ModuleExportEntry | undefined => {
+  const exportTable = ctx.moduleExports.get(moduleId);
+  if (!exportTable) {
+    return undefined;
+  }
+  return Array.from(exportTable.values()).find(
+    (entry) =>
+      entry.symbol === symbol || entry.symbols?.some((candidate) => candidate === symbol),
+  );
+};
+
+const declareAliasAwareImportedStaticMethod = ({
+  name,
+  declaredAt,
+  scope,
+  aliasSymbol,
+  constructorSymbol,
+  ctx,
+}: {
+  name: string;
+  declaredAt: number;
+  scope: ScopeId;
+  aliasSymbol: SymbolId;
+  constructorSymbol: SymbolId;
+  ctx: BindingContext;
+}): SymbolId => {
+  const aliasRecord = ctx.symbolTable.getSymbol(aliasSymbol);
+  const aliasMetadata = aliasRecord.metadata as
+    | {
+        nominalTargetTypeArguments?: unknown;
+        nominalTargetTypeParameterNames?: unknown;
+      }
+    | undefined;
+  return ctx.symbolTable.declare(
+    {
+      name,
+      kind: "value",
+      declaredAt,
+      metadata: {
+        aliasConstructorTarget: constructorSymbol,
+        aliasConstructorAlias: aliasSymbol,
+        nominalTargetTypeArguments: aliasMetadata?.nominalTargetTypeArguments,
+        nominalTargetTypeParameterNames:
+          aliasMetadata?.nominalTargetTypeParameterNames,
+      },
+    },
+    scope,
+  );
+};
+
+const resolveSyntheticAliasConstructorImportTarget = ({
+  methodSymbol,
+  dependency,
+}: {
+  methodSymbol: SymbolId;
+  dependency: BindingResult;
+}): SymbolId | undefined => {
+  let current = methodSymbol;
+  let resolved = false;
+  const visited = new Set<SymbolId>();
+
+  while (!visited.has(current)) {
+    visited.add(current);
+    const methodRecord = dependency.symbolTable.getSymbol(current);
+    const metadata = methodRecord.metadata as
+      | { aliasConstructorTarget?: unknown }
+      | undefined;
+    if (typeof metadata?.aliasConstructorTarget !== "number") {
+      return resolved ? current : undefined;
+    }
+    current = metadata.aliasConstructorTarget;
+    resolved = true;
+  }
+
+  return resolved ? current : undefined;
 };
 
 const ensureEnumNamespaceImport = ({
@@ -879,7 +1041,7 @@ const ensureEnumNamespaceImport = ({
   );
 };
 
-const ensureConstructorImport = ({
+export const ensureConstructorImport = ({
   targetSymbol,
   syntax,
   scope,
@@ -946,7 +1108,7 @@ const extractMemberName = (expr: Expr | undefined): string | undefined => {
   return undefined;
 };
 
-const ensureModuleMemberImport = ({
+export const ensureModuleMemberImport = ({
   moduleId,
   moduleSymbol,
   memberName,

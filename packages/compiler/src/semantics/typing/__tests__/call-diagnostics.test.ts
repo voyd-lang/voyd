@@ -233,4 +233,159 @@ describe("call diagnostics", () => {
     expect(caught.diagnostic.code).toBe("TY0041");
     expect(caught.diagnostic.message).toMatch(/is a type, not a value/i);
   });
+
+  it("enforces fixed type arguments when calling constructors through aliases", () => {
+    const ast = loadAst("constructor_call_alias_fixed_type_args_enforced.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("enforces fixed type arguments for alias ::init constructor calls", () => {
+    const ast = loadAst("constructor_call_alias_fixed_type_args_static_init_enforced.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("enforces fixed type arguments across alias-to-alias constructor calls", () => {
+    const ast = loadAst("constructor_call_alias_chain_fixed_type_args_enforced.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("enforces fixed type arguments when alias ::init is referenced then called", () => {
+    const ast = loadAst("constructor_call_alias_static_init_ref_enforced.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("enforces namespace type arguments when alias ::init is referenced then called", () => {
+    const ast = loadAst(
+      "constructor_call_alias_static_init_ref_with_explicit_type_args_enforced.voyd",
+    );
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0027");
+    expect(caught.diagnostic.message).toMatch(
+      /type mismatch: expected 'i32', received 'bool'/i,
+    );
+  });
+
+  it("allows type inference when generic alias ::init is referenced then called", () => {
+    const ast = loadAst("constructor_call_alias_static_init_ref_infers_type_args.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects extra namespace type arguments on alias ::init references", () => {
+    const ast = loadAst(
+      "constructor_call_alias_static_init_ref_rejects_extra_namespace_type_args.voyd",
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /too many type arguments|argument count mismatch/i,
+    );
+  });
+
+  it("rejects extra type arguments for concrete alias constructor calls", () => {
+    const ast = loadAst("constructor_call_alias_rejects_extra_type_args.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /too many type arguments|type mismatch/i,
+    );
+  });
+
+  it("rejects extra type arguments for generic alias constructor calls", () => {
+    const ast = loadAst(
+      "constructor_call_alias_generic_rejects_extra_type_args.voyd",
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(/too many type arguments/i);
+  });
+
+  it("does not treat aliases to type parameters as constructor values", () => {
+    const ast = loadAst("constructor_call_alias_type_parameter_shadowing.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0041");
+    expect(caught.diagnostic.message).toMatch(/is a type, not a value/i);
+  });
 });

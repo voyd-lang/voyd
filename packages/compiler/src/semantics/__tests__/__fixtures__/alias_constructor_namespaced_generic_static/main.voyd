@@ -1,0 +1,7 @@
+use src::dep
+
+type IntBox = dep::Box<i32>
+
+pub fn main() -> i32
+  let _bad = IntBox::init(true)
+  0

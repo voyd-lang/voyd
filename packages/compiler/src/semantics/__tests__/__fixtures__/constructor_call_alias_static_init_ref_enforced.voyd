@@ -1,0 +1,14 @@
+obj Box<T> {
+  value: T
+}
+
+impl Box<T>
+  fn init(value: T) -> Box<T>
+    Box { value }
+
+type IntBox = Box<i32>
+
+pub fn main() -> i32
+  let ctor = IntBox::init
+  let _bad = ctor(true)
+  0

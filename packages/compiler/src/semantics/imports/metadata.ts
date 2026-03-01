@@ -10,6 +10,8 @@ const IMPORTABLE_KEYS = [
   "serializer",
   "enumNamespaceMembers",
   "enumNamespaceTypeParameterNames",
+  "nominalTargetTypeArguments",
+  "nominalTargetTypeParameterNames",
 ] as const;
 
 type ImportableMetadata = Partial<
