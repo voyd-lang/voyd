@@ -8,6 +8,23 @@ import type {
 import { isInRange } from "./text.js";
 import type { NavigationAnalysis, SymbolOccurrence } from "./types.js";
 
+const symbolsAtPosition = ({
+  analysis,
+  uri,
+  position,
+}: {
+  analysis: NavigationAnalysis;
+  uri: string;
+  position: Position;
+}): SymbolOccurrence[] => {
+  const occurrences = analysis.occurrencesByUri.get(uri);
+  if (!occurrences || occurrences.length === 0) {
+    return [];
+  }
+
+  return occurrences.filter((entry) => isInRange(position, entry.range));
+};
+
 const findSymbolAtPosition = ({
   analysis,
   uri,
@@ -17,12 +34,7 @@ const findSymbolAtPosition = ({
   uri: string;
   position: Position;
 }): SymbolOccurrence | undefined => {
-  const occurrences = analysis.occurrencesByUri.get(uri);
-  if (!occurrences || occurrences.length === 0) {
-    return undefined;
-  }
-
-  return occurrences.find((entry) => isInRange(position, entry.range));
+  return symbolsAtPosition({ analysis, uri, position })[0];
 };
 
 const findSymbolWithDeclarationAtPosition = ({
@@ -34,12 +46,7 @@ const findSymbolWithDeclarationAtPosition = ({
   uri: string;
   position: Position;
 }): SymbolOccurrence | undefined => {
-  const occurrences = analysis.occurrencesByUri.get(uri);
-  if (!occurrences || occurrences.length === 0) {
-    return undefined;
-  }
-
-  const matches = occurrences.filter((entry) => isInRange(position, entry.range));
+  const matches = symbolsAtPosition({ analysis, uri, position });
   if (matches.length === 0) {
     return undefined;
   }
