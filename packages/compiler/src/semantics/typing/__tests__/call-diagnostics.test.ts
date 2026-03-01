@@ -341,6 +341,12 @@ describe("call diagnostics", () => {
     );
   });
 
+  it("allows type inference when generic alias ::init is referenced then called", () => {
+    const ast = loadAst("constructor_call_alias_static_init_ref_infers_type_args.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("rejects extra namespace type arguments on alias ::init references", () => {
     const ast = loadAst(
       "constructor_call_alias_static_init_ref_rejects_extra_namespace_type_args.voyd",

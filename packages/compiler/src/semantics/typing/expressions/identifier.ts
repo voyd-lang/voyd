@@ -191,20 +191,29 @@ const specializeAliasConstructorType = ({
 
   const aliasRecord = ctx.symbolTable.getSymbol(aliasSymbol);
   const aliasMetadata = aliasRecord.metadata as { import?: unknown } | undefined;
-  const aliasType =
-    aliasMetadata?.import !== undefined
-      ? resolveImportedAliasType({
-          aliasSymbol,
-          typeArguments: aliasTypeArguments,
-          ctx,
-          span,
-        })
-      : resolveTypeAlias(
-          aliasSymbol,
-          ctx,
-          createTypingState(),
-          aliasTypeArguments,
-        );
+
+  let aliasType: TypeId | undefined;
+  try {
+    aliasType =
+      aliasMetadata?.import !== undefined
+        ? resolveImportedAliasType({
+            aliasSymbol,
+            typeArguments: aliasTypeArguments,
+            ctx,
+            span,
+          })
+        : resolveTypeAlias(
+            aliasSymbol,
+            ctx,
+            createTypingState(),
+            aliasTypeArguments,
+          );
+  } catch (error) {
+    if (shouldDeferAliasConstructorSpecialization({ error, aliasTypeArguments })) {
+      return targetType;
+    }
+    throw error;
+  }
   if (typeof aliasType !== "number") {
     return targetType;
   }
@@ -251,6 +260,19 @@ const resolveImportedAliasType = ({
     ctx,
     state: { mode: "strict" },
   });
+};
+
+const shouldDeferAliasConstructorSpecialization = ({
+  error,
+  aliasTypeArguments,
+}: {
+  error: unknown;
+  aliasTypeArguments: readonly TypeId[];
+}): boolean => {
+  if (aliasTypeArguments.length > 0 || !(error instanceof Error)) {
+    return false;
+  }
+  return /missing \d+ type argument\(s\)/i.test(error.message);
 };
 
 const resolveIdentifierTypeArguments = ({
