@@ -363,6 +363,35 @@ export const typeCallExpr = (
       });
     }
 
+    const intrinsicFallbackForIdentifier =
+      metadata.intrinsic !== true && signature
+        ? resolveIntrinsicFallbackForIdentifierCall({
+            call: expr,
+            calleeSymbol: calleeExpr.symbol,
+            signature,
+            args,
+            ctx,
+            state,
+            typeArguments,
+          })
+        : undefined;
+    if (intrinsicFallbackForIdentifier) {
+      ctx.table.setExprType(calleeExpr.id, intrinsicFallbackForIdentifier.calleeType);
+      ctx.resolvedExprTypes.set(
+        calleeExpr.id,
+        applyCurrentSubstitution(
+          intrinsicFallbackForIdentifier.calleeType,
+          ctx,
+          state,
+        ),
+      );
+      ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
+      return finalizeCall({
+        returnType: intrinsicFallbackForIdentifier.returnType,
+        latentEffectRow: intrinsicFallbackForIdentifier.effectRow,
+      });
+    }
+
     if (metadata.intrinsic && metadata.intrinsicUsesSignature === false) {
       const returnType = typeIntrinsicCall(
         intrinsicName,
@@ -4330,6 +4359,67 @@ const typeIntrinsicFallbackCall = ({
   return {
     returnType,
     effectRow: ctx.primitives.defaultEffectRow,
+  };
+};
+
+const resolveIntrinsicFallbackForIdentifierCall = ({
+  call,
+  calleeSymbol,
+  signature,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  call: HirCallExpr;
+  calleeSymbol: SymbolId;
+  signature: FunctionSignature;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments: readonly TypeId[] | undefined;
+}):
+  | { returnType: TypeId; effectRow: number; calleeType: TypeId }
+  | undefined => {
+  const signatureMatchesCall = matchesOverloadSignature(
+    calleeSymbol,
+    signature,
+    args,
+    ctx,
+    state,
+    typeArguments,
+  );
+  if (signatureMatchesCall) {
+    return undefined;
+  }
+
+  const calleeName = ctx.symbolTable.getSymbol(calleeSymbol).name;
+  const intrinsicFallback = typeIntrinsicFallbackCall({
+    name: calleeName,
+    args,
+    typeArguments,
+    callId: call.id,
+    callSpan: call.span,
+    ctx,
+    state,
+  });
+  if (!intrinsicFallback) {
+    return undefined;
+  }
+
+  const calleeType = ctx.arena.internFunction({
+    parameters: args.map((arg) => ({
+      type: arg.type,
+      label: arg.label,
+      optional: false,
+    })),
+    returnType: intrinsicFallback.returnType,
+    effectRow: ctx.primitives.defaultEffectRow,
+  });
+
+  return {
+    ...intrinsicFallback,
+    calleeType,
   };
 };
 
