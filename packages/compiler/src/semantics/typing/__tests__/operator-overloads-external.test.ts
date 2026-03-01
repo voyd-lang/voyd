@@ -558,7 +558,7 @@ pub fn main(): () -> f64
     }
   });
 
-  it("falls back to intrinsic operators when a single imported operator symbol mismatches", () => {
+  it("falls back to intrinsic operators when imported operator symbols shadow them", () => {
     const externalPath: ModulePath = {
       namespace: "pkg",
       packageName: "dep",
@@ -566,14 +566,16 @@ pub fn main(): () -> f64
     };
     const externalSource = `
 pub obj Vec3 {
-  x: f64,
-  y: f64,
-  z: f64
+  api x: f64,
+  api y: f64,
+  api z: f64
 }
 
-impl Vec3
-  api fn '-'(self, other: Vec3) -> Vec3
-    self
+pub fn '-'(left: Vec3, right: Vec3) -> Vec3
+  left
+
+pub fn '/'(left: f64, right: Vec3) -> Vec3
+  right
 `;
     const external = buildModule({ source: externalSource, path: externalPath });
     const externalSemantics = semanticsPipeline({
@@ -585,8 +587,13 @@ impl Vec3
     const mainSource = `
 use pkg::dep::all
 
+fn as_i32(v: i32) -> i32
+  v
+
 pub fn main(): () -> f64
-  8.0 - 2.0
+  let scalar = 8.0 / 2.0
+  let count = as_i32(10) - as_i32(3)
+  scalar
 `;
     const mainAst = parse(mainSource, modulePathToString(mainPath));
     const main = buildModule({
@@ -601,6 +608,7 @@ pub fn main(): () -> f64
       graph: main.graph,
       exports: new Map([[external.module.id, externalSemantics.exports]]),
       dependencies: new Map([[external.module.id, externalSemantics]]),
+      recoverFromTypingErrors: true,
     });
 
     expect(result.diagnostics).toHaveLength(0);
@@ -608,31 +616,35 @@ pub fn main(): () -> f64
     const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
     expect(typeof mainSymbol).toBe("number");
     if (typeof mainSymbol !== "number") {
-      return;
+      throw new Error("missing main symbol");
     }
 
-    const callExpr = Array.from(result.hir.expressions.values()).find(
-      (expr): expr is HirCallExpr => expr.exprKind === "call",
-    );
-    expect(callExpr).toBeDefined();
-    if (!callExpr) {
-      return;
-    }
+    const instanceKey = `${mainSymbol}<>`;
+    const operatorCalls = Array.from(result.hir.expressions.values())
+      .filter((expr): expr is HirCallExpr => expr.exprKind === "call")
+      .flatMap((call) => {
+        const callee = result.hir.expressions.get(call.callee);
+        if (!callee || callee.exprKind !== "identifier") {
+          return [];
+        }
+        const name = symbolTable.getSymbol(callee.symbol).name;
+        return name === "/" || name === "-" ? [{ call, name }] : [];
+      });
 
-    const target = result.typing.callTargets
-      .get(callExpr.id)
-      ?.get(`${mainSymbol}<>`);
-    expect(target).toBeDefined();
-    expect(target?.moduleId).toBe(main.module.id);
-    if (!target) {
-      return;
-    }
-
-    const targetRecord = symbolTable.getSymbol(target.symbol);
-    expect(targetRecord.name).toBe("-");
-    expect(
-      (targetRecord.metadata as { intrinsic?: boolean } | undefined)?.intrinsic,
-    ).toBe(true);
+    expect(operatorCalls).toHaveLength(2);
+    operatorCalls.forEach(({ call, name }) => {
+      const target = result.typing.callTargets.get(call.id)?.get(instanceKey);
+      expect(target).toBeDefined();
+      if (!target) {
+        return;
+      }
+      expect(target.moduleId).toBe(main.module.id);
+      const targetRecord = symbolTable.getSymbol(target.symbol);
+      expect(targetRecord.name).toBe(name);
+      expect(
+        (targetRecord.metadata as { intrinsic?: boolean } | undefined)?.intrinsic,
+      ).toBe(true);
+    });
   });
 
   it("does not apply intrinsic fallback when explicit type arguments are present", () => {

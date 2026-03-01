@@ -4,6 +4,7 @@ import {
   TextDocuments,
   TextDocumentSyncKind,
   type CodeActionParams,
+  type CompletionParams,
   type DefinitionParams,
   type DidChangeWatchedFilesParams,
   type HoverParams,
@@ -15,6 +16,7 @@ import {
 import { TextDocument } from "vscode-languageserver-textdocument";
 import {
   autoImportActions,
+  completionsAtPosition,
   definitionsAtPosition,
   hoverAtPosition,
   prepareRenameAtPosition,
@@ -130,6 +132,23 @@ const handleHover = async ({
   });
 };
 
+const handleCompletion = async ({
+  params,
+  coordinator,
+}: {
+  params: CompletionParams;
+  coordinator: AnalysisCoordinator;
+}) => {
+  const analysis = await coordinator.getCompletionAnalysisForUri(
+    params.textDocument.uri,
+  );
+  return completionsAtPosition({
+    analysis,
+    uri: params.textDocument.uri,
+    position: params.position,
+  });
+};
+
 export const startServer = ({
   connection = createConnection(ProposedFeatures.all),
 }: StartServerOptions = {}): void => {
@@ -159,6 +178,7 @@ export const startServer = ({
         prepareProvider: true,
       },
       codeActionProvider: true,
+      completionProvider: {},
     },
   }));
 
@@ -203,6 +223,10 @@ export const startServer = ({
 
   connection.onHover(async (params: HoverParams) =>
     handleHover({ params, coordinator }),
+  );
+
+  connection.onCompletion(async (params: CompletionParams) =>
+    handleCompletion({ params, coordinator }),
   );
 
   documents.listen(connection);

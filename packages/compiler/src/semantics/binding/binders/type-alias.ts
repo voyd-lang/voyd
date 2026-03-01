@@ -1,10 +1,12 @@
 import type { ParsedTypeAliasDecl } from "../parsing.js";
+import { diagnosticFromCode } from "../../../diagnostics/index.js";
 import type { BindingContext } from "../types.js";
 import type { TypeAliasDecl, TypeParameterDecl } from "../../decls.js";
+import type { ScopeId } from "../../ids.js";
 import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
-import { reportOverloadNameCollision } from "../name-collisions.js";
+import { reportOverloadNameCollision, spanForDeclaredSymbol } from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 import { ensureConstructorImport, ensureModuleMemberImport } from "./expressions.js";
 import {
@@ -17,6 +19,7 @@ import {
   resolveNominalTypeSymbol,
 } from "../../nominal-type-target.js";
 import { importedModuleIdFrom } from "../../imports/metadata.js";
+import { toSourceSpan } from "../../utils.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -48,6 +51,12 @@ export const bindTypeAlias = (
     scope: tracker.current(),
     syntax: decl.name,
     ctx,
+  });
+  reportDuplicateTypeAlias({
+    name: decl.name.value,
+    scope: tracker.current(),
+    ctx,
+    syntax: decl.name,
   });
 
   const symbol = ctx.symbolTable.declare({
@@ -84,6 +93,68 @@ export const bindTypeAlias = (
     moduleIndex: ctx.nextModuleIndex++,
     documentation: declarationDocForSyntax(decl.name, ctx),
   });
+};
+
+const reportDuplicateTypeAlias = ({
+  name,
+  scope,
+  ctx,
+  syntax,
+}: {
+  name: string;
+  scope: ScopeId;
+  ctx: BindingContext;
+  syntax: ParsedTypeAliasDecl["name"];
+}): void => {
+  const duplicate = duplicateTypeAliasInScope({ name, scope, ctx });
+  if (!duplicate) {
+    return;
+  }
+
+  ctx.diagnostics.push(
+    diagnosticFromCode({
+      code: "BD0006",
+      params: { kind: "duplicate-type-alias", name },
+      span: toSourceSpan(syntax),
+      related: [
+        diagnosticFromCode({
+          code: "BD0006",
+          params: { kind: "previous-type-alias" },
+          severity: "note",
+          span: spanForDeclaredSymbol({ symbol: duplicate, ctx }),
+        }),
+      ],
+    }),
+  );
+};
+
+const duplicateTypeAliasInScope = ({
+  name,
+  scope,
+  ctx,
+}: {
+  name: string;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): SymbolId | undefined => {
+  for (const symbolId of ctx.symbolTable.symbolsInScope(scope)) {
+    const record = ctx.symbolTable.getSymbol(symbolId);
+    const metadata = record.metadata as
+      | { entity?: unknown; import?: unknown }
+      | undefined;
+    if (record.name !== name || record.kind !== "type") {
+      continue;
+    }
+    if (metadata?.import !== undefined) {
+      continue;
+    }
+    if (metadata?.entity !== "type-alias") {
+      continue;
+    }
+    return symbolId;
+  }
+
+  return undefined;
 };
 
 export const seedEnumAliasNamespaces = (ctx: BindingContext): void => {
