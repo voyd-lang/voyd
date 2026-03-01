@@ -59,7 +59,6 @@ type SymbolIndex = {
   declarationsByKey: ReadonlyMap<string, readonly SymbolOccurrence[]>;
   documentationByCanonicalKey: ReadonlyMap<string, string>;
   typeInfoByCanonicalKey: ReadonlyMap<string, string>;
-  typeExpandedInfoByCanonicalKey: ReadonlyMap<string, string>;
   exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
   moduleIdByFilePath: ReadonlyMap<string, string>;
 };
@@ -1137,7 +1136,6 @@ export const buildSymbolIndex = async ({
 
   const documentationByCanonicalKey = new Map<string, string>();
   const typeInfoByCanonicalKey = new Map<string, string>();
-  const typeExpandedInfoByCanonicalKey = new Map<string, string>();
   sortedDeclarations.forEach((entries, canonicalKey) => {
     const documentation = entries
       .map((entry) => symbolDocumentationByModule.get(entry.moduleId)?.get(entry.symbol))
@@ -1161,21 +1159,6 @@ export const buildSymbolIndex = async ({
     if (typeInfo !== undefined) {
       typeInfoByCanonicalKey.set(canonicalKey, typeInfo);
     }
-
-    const typeExpandedInfo = entries
-      .map((entry) =>
-        typeSummaryForSymbol({
-          ref: { moduleId: entry.moduleId, symbol: entry.symbol },
-          semanticsByModule: semantics,
-          typeParamNamesByModule,
-          displayName: entry.name,
-          detailLevel: "full",
-        }),
-      )
-      .find((summary): summary is string => summary !== undefined);
-    if (typeExpandedInfo !== undefined && typeExpandedInfo !== typeInfo) {
-      typeExpandedInfoByCanonicalKey.set(canonicalKey, typeExpandedInfo);
-    }
   });
 
   return {
@@ -1183,7 +1166,6 @@ export const buildSymbolIndex = async ({
     declarationsByKey: sortedDeclarations,
     documentationByCanonicalKey,
     typeInfoByCanonicalKey,
-    typeExpandedInfoByCanonicalKey,
     exportsByName,
     moduleIdByFilePath,
   };
