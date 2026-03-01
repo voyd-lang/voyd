@@ -1424,7 +1424,7 @@ const emitConsensusCallArgumentShapeDiagnostic = <
         code: "TY0021",
         params: {
           kind: "call-argument-label-mismatch",
-          argumentIndex: first.failure.paramIndex + 1,
+          argumentIndex: first.failure.argIndex + 1,
           expectedLabel: first.failure.expectedLabel,
           actualLabel: first.failure.actualLabel,
         },
