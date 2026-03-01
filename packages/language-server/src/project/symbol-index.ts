@@ -1152,6 +1152,7 @@ export const buildSymbolIndex = async ({
           semanticsByModule: semantics,
           typeParamNamesByModule,
           displayName: entry.name,
+          detailLevel: "compact",
         }),
       )
       .find((summary): summary is string => summary !== undefined);
