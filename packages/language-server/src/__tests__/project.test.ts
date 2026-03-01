@@ -321,9 +321,10 @@ describe("language server project analysis", () => {
     }
   });
 
-  it("resolves src root for nested source packages without src pkg/main entries", async () => {
+  it("resolves src root for explicit nested source package layouts", async () => {
     const project = await createProject({
       "main.voyd": `fn main() -> i32\n  0\n`,
+      "src/pkg.voyd": `pub use self::pkgs`,
       "src/util.voyd": `fn helper() -> i32\n  1\n`,
       "src/pkgs/vtrace/pkg.voyd": `use src::util`,
     });
@@ -345,6 +346,35 @@ describe("language server project analysis", () => {
           (diagnostic) =>
             diagnostic.message.includes("Unable to resolve module src::util") ||
             diagnostic.message.includes("Module src::util is not available for import"),
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps nested package roots for src/pkgs/<name>/pkg.voyd without src/pkg.voyd", async () => {
+    const project = await createProject({
+      "main.voyd": `fn main() -> i32\n  0\n`,
+      "src/pkgs/vtrace/pkg.voyd": `use src::util`,
+      "src/pkgs/vtrace/util.voyd": `pub fn helper() -> i32\n  1\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/pkgs/vtrace/pkg.voyd");
+      const roots = resolveModuleRoots(entryPath);
+      expect(roots.src).toBe(project.filePathFor("src/pkgs/vtrace"));
+
+      const analysis = await analyzeProject({
+        entryPath,
+        roots,
+        openDocuments: new Map(),
+      });
+      expect(analysis.graph.modules.has("src::util")).toBe(true);
+      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      expect(
+        diagnostics.some((diagnostic) =>
+          diagnostic.message.includes("Unable to resolve module src::util"),
         ),
       ).toBe(false);
     } finally {

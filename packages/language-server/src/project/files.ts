@@ -111,6 +111,9 @@ const hasProjectEntryInDir = (dirPath: string): boolean =>
   existsSync(path.join(dirPath, "pkg.voyd")) ||
   existsSync(path.join(dirPath, "main.voyd"));
 
+const hasSourcePkgEntryInDir = (dirPath: string): boolean =>
+  existsSync(path.join(dirPath, "pkg.voyd"));
+
 const sourcePkgSrcAncestorForEntry = (entryPath: string): string | undefined => {
   const resolvedEntry = path.resolve(entryPath);
   if (path.basename(resolvedEntry) !== "pkg.voyd") {
@@ -121,11 +124,12 @@ const sourcePkgSrcAncestorForEntry = (entryPath: string): string | undefined => 
 
   while (true) {
     if (path.basename(current) === "src") {
+      if (!hasSourcePkgEntryInDir(current)) {
+        return undefined;
+      }
+
       const relativeFromSrc = path.relative(current, resolvedEntry);
       const [firstSegment, secondSegment] = relativeFromSrc.split(path.sep);
-      if (firstSegment === "pkgs.voyd") {
-        return current;
-      }
       if (
         firstSegment === "pkgs" &&
         typeof secondSegment === "string" &&
