@@ -1050,6 +1050,106 @@ pub fn main() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("accepts imported object values for trait-typed parameters when the impl is declared in another module", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}pkg.voyd`]: `
+use self::hit::HittableList
+use self::sphere::Sphere
+
+fn consume(world: HittableList) -> i32
+  1
+
+pub fn main() -> i32
+  consume(HittableList().add(Sphere()))
+`,
+      [`${srcRoot}${sep}hit.voyd`]: `
+pub trait Hittable
+  fn ping(self) -> i32
+
+pub obj HittableList {}
+
+impl HittableList
+  fn init()
+    HittableList {}
+
+  fn add(self, object: Hittable)
+    self
+`,
+      [`${srcRoot}${sep}sphere.voyd`]: `
+use super::hit::Hittable
+
+pub obj Sphere {}
+
+impl Hittable for Sphere
+  fn init()
+    Sphere {}
+
+  fn ping(self) -> i32
+    1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}pkg.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
+  it("accepts imported object values for trait-typed parameters when the impl is declared in another module with isolated interners", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}pkg.voyd`]: `
+use self::hit::HittableList
+use self::sphere::Sphere
+
+fn consume(world: HittableList) -> i32
+  1
+
+pub fn main() -> i32
+  consume(HittableList().add(Sphere()))
+`,
+      [`${srcRoot}${sep}hit.voyd`]: `
+pub trait Hittable
+  fn ping(self) -> i32
+
+pub obj HittableList {}
+
+impl HittableList
+  fn init()
+    HittableList {}
+
+  fn add(self, object: Hittable)
+    self
+`,
+      [`${srcRoot}${sep}sphere.voyd`]: `
+use super::hit::Hittable
+
+pub obj Sphere {}
+
+impl Hittable for Sphere
+  fn init()
+    Sphere {}
+
+  fn ping(self) -> i32
+    1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}pkg.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModulesWithIsolatedInterners({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
   it("accepts imported trait assignments for concrete implementors with isolated interners", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
