@@ -633,9 +633,9 @@ const emitUnaryNegationIntrinsic = ({
     case "i64":
       return ctx.mod.i64.sub(ctx.mod.i64.const(0, 0), arg);
     case "f32":
-      return ctx.mod.f32.sub(ctx.mod.f32.const(0), arg);
+      return ctx.mod.f32.neg(arg);
     case "f64":
-      return ctx.mod.f64.sub(ctx.mod.f64.const(0), arg);
+      return ctx.mod.f64.neg(arg);
   }
 };
 
