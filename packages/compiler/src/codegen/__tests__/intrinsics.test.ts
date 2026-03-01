@@ -509,6 +509,118 @@ describe("compileIntrinsicCall array intrinsics", () => {
     expect(i64Info.op).toBe(binaryen.Operations.RemSInt64);
   });
 
+  it("emits unary minus intrinsics for numeric kinds", () => {
+    const i64Type = 5 as TypeId;
+    const f32Type = 6 as TypeId;
+    const f64Type = 7 as TypeId;
+    const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(i64Type, { kind: "primitive", name: "i64" });
+    descriptors.set(f32Type, { kind: "primitive", name: "f32" });
+    descriptors.set(f64Type, { kind: "primitive", name: "f64" });
+
+    registerExpr(
+      { expressions, exprTypes, typeId: i32Type },
+      1 as HirExprId,
+      {
+        id: 1 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "i32",
+        value: "5",
+      } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: i64Type },
+      2 as HirExprId,
+      {
+        id: 2 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "i64",
+        value: "5",
+      } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: f64Type },
+      3 as HirExprId,
+      {
+        id: 3 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "float",
+        value: "5.0",
+      } as any
+    );
+    registerExpr(
+      { expressions, exprTypes, typeId: f32Type },
+      4 as HirExprId,
+      {
+        id: 4 as HirExprId,
+        ast: 0 as any,
+        span: span as any,
+        kind: "expr",
+        exprKind: "literal",
+        literalKind: "float",
+        value: "4.0",
+      } as any
+    );
+
+    fnCtx.returnTypeId = i32Type;
+    const i32Expr = compileIntrinsicCall({
+      name: "-",
+      call: makeCall([1 as HirExprId]),
+      args: [ctx.mod.i32.const(5)],
+      ctx,
+      fnCtx,
+    });
+    const i32Info = binaryen.getExpressionInfo(i32Expr) as binaryen.BinaryInfo;
+    expect(i32Info.id).toBe(binaryen.ExpressionIds.Binary);
+    expect(i32Info.op).toBe(binaryen.Operations.SubInt32);
+
+    fnCtx.returnTypeId = i64Type;
+    const i64Expr = compileIntrinsicCall({
+      name: "-",
+      call: makeCall([2 as HirExprId]),
+      args: [ctx.mod.i64.const(5, 0)],
+      ctx,
+      fnCtx,
+    });
+    const i64Info = binaryen.getExpressionInfo(i64Expr) as binaryen.BinaryInfo;
+    expect(i64Info.id).toBe(binaryen.ExpressionIds.Binary);
+    expect(i64Info.op).toBe(binaryen.Operations.SubInt64);
+
+    fnCtx.returnTypeId = f32Type;
+    const f32Expr = compileIntrinsicCall({
+      name: "-",
+      call: makeCall([4 as HirExprId]),
+      args: [ctx.mod.f32.const(4)],
+      ctx,
+      fnCtx,
+    });
+    const f32Info = binaryen.getExpressionInfo(f32Expr) as binaryen.UnaryInfo;
+    expect(f32Info.id).toBe(binaryen.ExpressionIds.Unary);
+    expect(f32Info.op).toBe(binaryen.Operations.NegFloat32);
+
+    fnCtx.returnTypeId = f64Type;
+    const f64Expr = compileIntrinsicCall({
+      name: "-",
+      call: makeCall([3 as HirExprId]),
+      args: [ctx.mod.f64.const(5)],
+      ctx,
+      fnCtx,
+    });
+    const f64Info = binaryen.getExpressionInfo(f64Expr) as binaryen.UnaryInfo;
+    expect(f64Info.id).toBe(binaryen.ExpressionIds.Unary);
+    expect(f64Info.op).toBe(binaryen.Operations.NegFloat64);
+  });
+
   it("emits boolean logic intrinsics", () => {
     const boolType = 4 as TypeId;
     const { ctx, descriptors, exprTypes, expressions, fnCtx } = createContext();

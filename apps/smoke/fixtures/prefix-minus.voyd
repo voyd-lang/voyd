@@ -1,0 +1,16 @@
+obj Counter {
+  value: i32
+}
+
+impl Counter
+  fn '-'(self): () -> Counter
+    Counter { value: self.value - 1 }
+
+pub fn prefix_minus_intrinsic() -> i32
+  let value = 5
+  -value
+
+pub fn prefix_minus_overload() -> i32
+  let value = Counter { value: 5 }
+  let decremented = -value
+  decremented.value
