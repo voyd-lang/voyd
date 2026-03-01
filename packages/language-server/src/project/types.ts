@@ -4,7 +4,7 @@ import type {
   ModuleRoots,
 } from "@voyd/compiler/modules/types.js";
 import type { SemanticsPipelineResult } from "@voyd/compiler/semantics/pipeline.js";
-import type { SymbolId } from "@voyd/compiler/semantics/ids.js";
+import type { ScopeId, SymbolId } from "@voyd/compiler/semantics/ids.js";
 import type { Diagnostic, Range } from "vscode-languageserver/lib/node/main.js";
 import type { LineIndex } from "./text.js";
 
@@ -28,6 +28,29 @@ export type ExportCandidate = {
   symbol: SymbolId;
   name: string;
   kind: string;
+};
+
+export type CompletionScopedNodeSpan = {
+  start: number;
+  end: number;
+  scope: ScopeId;
+  width: number;
+};
+
+export type CompletionSymbolLookup = {
+  declarationOffsetBySymbol: ReadonlyMap<SymbolId, number>;
+  canonicalKeyBySymbol: ReadonlyMap<SymbolId, string>;
+};
+
+export type CompletionExportEntry = {
+  name: string;
+  candidates: readonly ExportCandidate[];
+};
+
+export type CompletionIndex = {
+  scopedNodesByModuleId: ReadonlyMap<string, ReadonlyMap<string, readonly CompletionScopedNodeSpan[]>>;
+  symbolLookupByUri: ReadonlyMap<string, ReadonlyMap<string, CompletionSymbolLookup>>;
+  exportEntriesByFirstCharacter: ReadonlyMap<string, readonly CompletionExportEntry[]>;
 };
 
 export type AnalysisInputs = {
@@ -56,6 +79,7 @@ export type ProjectNavigationIndex = {
 export type ProjectAnalysis = ProjectCoreAnalysis &
   ProjectNavigationIndex & {
     exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
+    completionIndex: CompletionIndex;
   };
 
 export type NavigationAnalysis = Pick<
@@ -84,6 +108,7 @@ export type CompletionAnalysis = Pick<
   | "graph"
   | "sourceByFile"
   | "lineIndexByFile"
+  | "completionIndex"
 > & {
   exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
 };
