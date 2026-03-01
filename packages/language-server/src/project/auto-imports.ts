@@ -4,7 +4,6 @@ import {
   CodeActionKind,
   type Diagnostic,
   type CodeAction as LspCodeAction,
-  type Range,
   type TextEdit,
 } from "vscode-languageserver/lib/node/main.js";
 import { LineIndex } from "./text.js";
@@ -45,18 +44,15 @@ const offsetAfterLine = ({
   return cursor < source.length ? cursor + 1 : source.length;
 };
 
-export type ImportInsertionContext = {
-  range: Range;
-  prefix: string;
-};
-
-export const resolveImportInsertionContext = ({
+const insertImportEdit = ({
   analysis,
   documentUri,
+  importLine,
 }: {
-  analysis: Pick<AutoImportAnalysis, "moduleIdByFilePath" | "semantics" | "graph">;
+  analysis: AutoImportAnalysis;
   documentUri: string;
-}): ImportInsertionContext | undefined => {
+  importLine: string;
+}): TextEdit | undefined => {
   const filePath = path.resolve(toFilePath(documentUri));
   const moduleId = analysis.moduleIdByFilePath.get(filePath);
   if (!moduleId) {
@@ -98,41 +94,8 @@ export const resolveImportInsertionContext = ({
 
   return {
     range: insertionRange,
-    prefix,
+    newText: `${prefix}${importLine}\n`,
   };
-};
-
-export const insertImportEditFromContext = ({
-  context,
-  importLine,
-}: {
-  context: ImportInsertionContext;
-  importLine: string;
-}): TextEdit => ({
-  range: context.range,
-  newText: `${context.prefix}${importLine}\n`,
-});
-
-export const insertImportEdit = ({
-  analysis,
-  documentUri,
-  importLine,
-}: {
-  analysis: Pick<AutoImportAnalysis, "moduleIdByFilePath" | "semantics" | "graph">;
-  documentUri: string;
-  importLine: string;
-}): TextEdit | undefined => {
-  const context = resolveImportInsertionContext({
-    analysis,
-    documentUri,
-  });
-  if (!context) {
-    return undefined;
-  }
-  return insertImportEditFromContext({
-    context,
-    importLine,
-  });
 };
 
 const importActionsForDiagnostic = ({

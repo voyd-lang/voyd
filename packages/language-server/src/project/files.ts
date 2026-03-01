@@ -111,54 +111,8 @@ const hasProjectEntryInDir = (dirPath: string): boolean =>
   existsSync(path.join(dirPath, "pkg.voyd")) ||
   existsSync(path.join(dirPath, "main.voyd"));
 
-const hasSourcePkgEntryInDir = (dirPath: string): boolean =>
-  existsSync(path.join(dirPath, "pkg.voyd"));
-
-const hasSourcePkgsIndexInDir = (dirPath: string): boolean =>
-  existsSync(path.join(dirPath, "pkgs.voyd"));
-
-const sourcePkgSrcAncestorForEntry = (entryPath: string): string | undefined => {
-  const resolvedEntry = path.resolve(entryPath);
-  if (path.basename(resolvedEntry) !== "pkg.voyd") {
-    return undefined;
-  }
-
-  let current = path.dirname(resolvedEntry);
-
-  while (true) {
-    if (path.basename(current) === "src") {
-      if (!hasSourcePkgEntryInDir(current) || !hasSourcePkgsIndexInDir(current)) {
-        return undefined;
-      }
-
-      const relativeFromSrc = path.relative(current, resolvedEntry);
-      const [firstSegment, secondSegment] = relativeFromSrc.split(path.sep);
-      if (
-        firstSegment === "pkgs" &&
-        typeof secondSegment === "string" &&
-        secondSegment !== "pkg.voyd"
-      ) {
-        return current;
-      }
-    }
-
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return undefined;
-    }
-    current = parent;
-  }
-};
-
 const resolveSrcRootFromEntry = (entryPath: string): string => {
-  const resolvedEntry = path.resolve(entryPath);
-  const fallback = path.dirname(resolvedEntry);
-  const isPackageEntry = path.basename(resolvedEntry) === "pkg.voyd";
-  const sourcePkgSrcAncestor = sourcePkgSrcAncestorForEntry(entryPath);
-  if (sourcePkgSrcAncestor) {
-    return sourcePkgSrcAncestor;
-  }
-
+  const fallback = path.dirname(path.resolve(entryPath));
   let current = fallback;
   let nearestProjectEntryDir: string | undefined;
 
@@ -169,13 +123,6 @@ const resolveSrcRootFromEntry = (entryPath: string): string => {
     }
 
     if (hasProjectEntry && path.basename(current) === "src") {
-      if (
-        isPackageEntry &&
-        typeof nearestProjectEntryDir === "string" &&
-        nearestProjectEntryDir !== current
-      ) {
-        return nearestProjectEntryDir;
-      }
       return current;
     }
 

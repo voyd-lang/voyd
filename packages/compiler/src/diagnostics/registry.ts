@@ -89,9 +89,7 @@ type DiagnosticParamsMap = {
   BD0005: { kind: "unsupported-mod-decl" };
   BD0006:
     | { kind: "duplicate-binding"; name: string }
-    | { kind: "previous-binding" }
-    | { kind: "duplicate-type-alias"; name: string }
-    | { kind: "previous-type-alias" };
+    | { kind: "previous-binding" };
   BD0007: {
     kind: "invalid-type-name";
     declarationKind: "type alias" | "obj" | "trait" | "effect";
@@ -357,10 +355,6 @@ export const diagnosticsRegistry: {
           return `cannot redefine ${params.name} in the same scope`;
         case "previous-binding":
           return "previous binding declared here";
-        case "duplicate-type-alias":
-          return `type alias ${params.name} is already declared in this scope`;
-        case "previous-type-alias":
-          return "previous type alias declared here";
       }
       return exhaustive(params);
     },

@@ -43,16 +43,6 @@ export class LineIndex {
     return { line, character: clamped - this.#starts[line]! };
   }
 
-  offsetAt(position: Position): number {
-    const maxLine = Math.max(0, this.#starts.length - 1);
-    const line = Math.max(0, Math.min(position.line, maxLine));
-    const lineStart = this.#starts[line]!;
-    const lineEnd =
-      line + 1 < this.#starts.length ? this.#starts[line + 1]! - 1 : this.text.length;
-    const character = Math.max(0, Math.min(position.character, lineEnd - lineStart));
-    return lineStart + character;
-  }
-
   range(start: number, end: number): Range {
     const clampedStart = Math.max(0, Math.min(start, this.text.length));
     const clampedEnd = Math.max(clampedStart + 1, Math.min(end, this.text.length));

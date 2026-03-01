@@ -1869,31 +1869,6 @@ impl Eq<Box> for Box
     expect(sum?.params).toHaveLength(2);
   });
 
-  it("reports duplicate type alias names in the same scope", () => {
-    const source = `type Point3 = i32
-type Point3 = f64`;
-    const ast = parse(source, "main.voyd");
-    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
-    symbolTable.declare({
-      name: "main.voyd",
-      kind: "module",
-      declaredAt: ast.syntaxId,
-    });
-
-    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
-    const diagnostics = binding.diagnostics.filter(
-      (entry) =>
-        entry.code === "BD0006" &&
-        entry.message.includes("type alias Point3 is already declared"),
-    );
-
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]?.related?.[0]?.code).toBe("BD0006");
-    expect(diagnostics[0]?.related?.[0]?.message).toContain(
-      "previous type alias",
-    );
-  });
-
   it("keeps duplicate lambda parameter notes at the original form span", () => {
     const source = `pub fn main() -> i32
   let f = (~x, ~x) => x

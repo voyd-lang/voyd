@@ -72,18 +72,3 @@ export type AutoImportAnalysis = Pick<
 > & {
   exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
 };
-
-export type CompletionAnalysis = Pick<
-  ProjectAnalysis,
-  | "occurrencesByUri"
-  | "declarationsByKey"
-  | "documentationByCanonicalKey"
-  | "typeInfoByCanonicalKey"
-  | "moduleIdByFilePath"
-  | "semantics"
-  | "graph"
-  | "sourceByFile"
-  | "lineIndexByFile"
-> & {
-  exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
-};
