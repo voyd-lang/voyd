@@ -63,3 +63,19 @@ pub fn main() -> i32
   bump(a) // Ok
   bump(b) // Error - b is not mutable
 ```
+
+## Module Scope
+
+At module scope, `let` bindings are supported, including `pub let` exports:
+
+```voyd
+let answer = 41
+pub let pi = 3.14
+```
+
+But mutable object binding syntax (`~`) is only for local bindings/parameters,
+not for module-level `let` declarations:
+
+```voyd
+let ~cache = Dict<i32>::new() // Error
+```
