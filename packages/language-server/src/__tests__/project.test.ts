@@ -1168,6 +1168,35 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("shows compact nominal object signatures with expandable full details", async () => {
+    const project = await createProject({
+      "src/main.voyd": `obj Vec3 {\n  x: f64,\n  y: f64,\n  z: f64,\n}\n\nobj Sphere {\n  center: Vec3,\n  radius: f64,\n}\n\nfn init(center: Vec3, radius: f64) -> Sphere\n  Sphere { center, radius }\n\nfn main() -> Sphere\n  init(Vec3 { x: 0.0, y: 0.0, z: 0.0 }, 1.0)\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 15, character: 3 },
+      });
+      expect(hover?.contents).toEqual({
+        kind: "markdown",
+        value:
+          "```voyd\nfn init(center: Vec3, radius: f64) -> Sphere\n```\n\n<details><summary>Expanded type</summary>\n\n```voyd\nfn init(center: Vec3 & { x: f64, y: f64, z: f64 }, radius: f64) -> Sphere & { center: Vec3 & { x: f64, y: f64, z: f64 }, radius: f64 }\n```\n</details>",
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("uses external labels for label hover type summaries", async () => {
     const source = `fn reduce<T>(value: T, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  cb(start, value)\n\nfn main() -> i32\n  1.reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
     const project = await createProject({
