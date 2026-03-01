@@ -2499,6 +2499,21 @@ const resolveMethodTraitDispatchCandidate = ({
     .find((candidate) => candidate !== undefined);
 };
 
+const canonicalMethodCandidateKey = ({
+  candidate,
+  ctx,
+}: {
+  candidate: MethodCallCandidate;
+  ctx: TypingContext;
+}): string =>
+  symbolRefKey(
+    canonicalSymbolRefForModuleSymbol({
+      moduleId: candidate.symbolRef.moduleId,
+      symbol: candidate.symbol,
+      ctx,
+    }),
+  );
+
 const resolveFreeFunctionFallbackCandidates = ({
   methodName,
   existing,
@@ -2507,29 +2522,31 @@ const resolveFreeFunctionFallbackCandidates = ({
   methodName: string;
   existing: readonly MethodCallCandidate[];
   ctx: TypingContext;
-}): MethodCallCandidate[] =>
-  resolveFreeFunctionCandidates({
+}): MethodCallCandidate[] => {
+  const existingKeys = new Set(
+    existing.map((candidate) => canonicalMethodCandidateKey({ candidate, ctx })),
+  );
+  return resolveFreeFunctionCandidates({
     methodName,
     ctx,
   }).filter(
     (fallback) =>
-      !existing.some(
-        (candidate) =>
-          candidate.symbol === fallback.symbol &&
-          candidate.symbolRef.moduleId === fallback.symbolRef.moduleId,
-      ),
+      !existingKeys.has(canonicalMethodCandidateKey({ candidate: fallback, ctx })),
   );
+};
 
 const mergeCandidatesForMethodNoOverloadDiagnostic = ({
   methodCandidates,
   fallbackCandidates,
+  ctx,
 }: {
   methodCandidates: readonly MethodCallCandidate[];
   fallbackCandidates: readonly MethodCallCandidate[];
+  ctx: TypingContext;
 }): MethodCallCandidate[] => {
   const seen = new Set<string>();
   return [...methodCandidates, ...fallbackCandidates].filter((candidate) => {
-    const key = `${candidate.symbolRef.moduleId}:${candidate.symbol}`;
+    const key = canonicalMethodCandidateKey({ candidate, ctx });
     if (seen.has(key)) {
       return false;
     }
@@ -2633,6 +2650,7 @@ const selectMethodCallCandidate = ({
       noOverloadDiagnosticCandidates = mergeCandidatesForMethodNoOverloadDiagnostic({
         methodCandidates,
         fallbackCandidates: filteredFallbackCandidates,
+        ctx,
       });
       enforceOverloadCandidateBudget({
         name: expr.method,
