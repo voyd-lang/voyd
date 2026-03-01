@@ -341,6 +341,15 @@ describe("call diagnostics", () => {
     );
   });
 
+  it("rejects extra namespace type arguments on alias ::init references", () => {
+    const ast = loadAst(
+      "constructor_call_alias_static_init_ref_rejects_extra_namespace_type_args.voyd",
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /too many type arguments|argument count mismatch/i,
+    );
+  });
+
   it("rejects extra type arguments for concrete alias constructor calls", () => {
     const ast = loadAst("constructor_call_alias_rejects_extra_type_args.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(

@@ -189,22 +189,22 @@ const specializeAliasConstructorType = ({
     return targetType;
   }
 
-  let aliasType: TypeId | undefined;
-  try {
-    aliasType = resolveTypeAlias(
-      aliasSymbol,
-      ctx,
-      createTypingState(),
-      aliasTypeArguments,
-    );
-  } catch {
-    aliasType = resolveImportedAliasType({
-      aliasSymbol,
-      typeArguments: aliasTypeArguments,
-      ctx,
-      span,
-    });
-  }
+  const aliasRecord = ctx.symbolTable.getSymbol(aliasSymbol);
+  const aliasMetadata = aliasRecord.metadata as { import?: unknown } | undefined;
+  const aliasType =
+    aliasMetadata?.import !== undefined
+      ? resolveImportedAliasType({
+          aliasSymbol,
+          typeArguments: aliasTypeArguments,
+          ctx,
+          span,
+        })
+      : resolveTypeAlias(
+          aliasSymbol,
+          ctx,
+          createTypingState(),
+          aliasTypeArguments,
+        );
   if (typeof aliasType !== "number") {
     return targetType;
   }
@@ -245,16 +245,12 @@ const resolveImportedAliasType = ({
     ast: ctx.hir.module.ast,
     span: normalizeSpan(span),
   };
-  try {
-    return resolveImportedTypeExpr({
-      expr: namedAliasExpr,
-      typeArgs: typeArguments,
-      ctx,
-      state: { mode: "strict" },
-    });
-  } catch {
-    return undefined;
-  }
+  return resolveImportedTypeExpr({
+    expr: namedAliasExpr,
+    typeArgs: typeArguments,
+    ctx,
+    state: { mode: "strict" },
+  });
 };
 
 const resolveIdentifierTypeArguments = ({
