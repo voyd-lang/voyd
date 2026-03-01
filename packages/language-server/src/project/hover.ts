@@ -41,6 +41,9 @@ export const hoverAtPosition = ({
     symbol.canonicalKey,
   );
   const typeInfo = analysis.typeInfoByCanonicalKey.get(symbol.canonicalKey);
+  const typeExpandedInfo = analysis.typeExpandedInfoByCanonicalKey.get(
+    symbol.canonicalKey,
+  );
   if (documentation === undefined && typeInfo === undefined) {
     return null;
   }
@@ -48,6 +51,11 @@ export const hoverAtPosition = ({
   const blocks: string[] = [];
   if (typeInfo !== undefined) {
     blocks.push(`\`\`\`voyd\n${typeInfo}\n\`\`\``);
+  }
+  if (typeExpandedInfo !== undefined && typeExpandedInfo !== typeInfo) {
+    blocks.push(
+      `<details><summary>Expanded type</summary>\n\n\`\`\`voyd\n${typeExpandedInfo}\n\`\`\`\n</details>`,
+    );
   }
   if (documentation !== undefined) {
     blocks.push(documentation);

@@ -9,6 +9,8 @@ export type TypeDisplaySymbolRef = {
   symbol: SymbolId;
 };
 
+export type TypeDisplayDetailLevel = "compact" | "full";
+
 const formatTypeArguments = ({
   typeArgs,
   formatType,
@@ -180,11 +182,13 @@ const formatTypeId = ({
   moduleId,
   semanticsByModule,
   typeParamNamesByModule,
+  detailLevel,
 }: {
   typeId: TypeId;
   moduleId: string;
   semanticsByModule: ReadonlyMap<string, SemanticsPipelineResult>;
   typeParamNamesByModule: ReadonlyMap<string, ReadonlyMap<TypeParamId, string>>;
+  detailLevel: TypeDisplayDetailLevel;
 }): string => {
   const moduleSemantics = semanticsByModule.get(moduleId);
   if (!moduleSemantics) {
@@ -274,6 +278,10 @@ const formatTypeId = ({
       case "union":
         return descriptor.members.map((member) => formatTypeRef(member, active)).join(" | ");
       case "intersection": {
+        if (detailLevel === "compact" && typeof descriptor.nominal === "number") {
+          return formatTypeRef(descriptor.nominal, active);
+        }
+
         const parts: string[] = [];
         if (typeof descriptor.nominal === "number") {
           parts.push(formatTypeRef(descriptor.nominal, active));
@@ -328,11 +336,13 @@ export const typeSummaryForSymbol = ({
   semanticsByModule,
   typeParamNamesByModule,
   displayName,
+  detailLevel = "full",
 }: {
   ref: TypeDisplaySymbolRef;
   semanticsByModule: ReadonlyMap<string, SemanticsPipelineResult>;
   typeParamNamesByModule: ReadonlyMap<string, ReadonlyMap<TypeParamId, string>>;
   displayName?: string;
+  detailLevel?: TypeDisplayDetailLevel;
 }): string | undefined => {
   const semantics = semanticsByModule.get(ref.moduleId);
   if (!semantics) {
@@ -346,6 +356,7 @@ export const typeSummaryForSymbol = ({
       moduleId: ref.moduleId,
       semanticsByModule,
       typeParamNamesByModule,
+      detailLevel,
     });
 
   if (functionSignature) {

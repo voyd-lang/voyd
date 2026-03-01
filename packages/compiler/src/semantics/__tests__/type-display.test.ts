@@ -41,10 +41,12 @@ const summaryFor = ({
   context,
   symbol,
   displayName,
+  detailLevel,
 }: {
   context: TypeDisplayTestContext;
   symbol: SymbolId;
   displayName?: string;
+  detailLevel?: "compact" | "full";
 }): string | undefined => {
   const typeParamNamesByModule = buildTypeParamNameIndex({
     semanticsByModule: context.semanticsByModule,
@@ -54,6 +56,7 @@ const summaryFor = ({
     semanticsByModule: context.semanticsByModule,
     typeParamNamesByModule,
     displayName,
+    detailLevel,
   });
 };
 
@@ -167,5 +170,34 @@ describe("type display", () => {
         displayName: "reducer",
       }),
     ).toBe("reducer: (T, T) -> T ! open effect row");
+  });
+
+  it("supports compact formatting for nominal intersections", () => {
+    const context = createTypeDisplayTestContext(
+      `obj Vec3 {\n  x: f64,\n  y: f64,\n  z: f64,\n}\n\nobj Sphere {\n  center: Vec3,\n  radius: f64,\n}\n\nfn init(center: Vec3, radius: f64) -> Sphere\n  Sphere { center, radius }\n`,
+    );
+
+    const initSymbol = rootSymbolNamed({
+      semantics: context.semantics,
+      name: "init",
+    });
+
+    expect(
+      summaryFor({
+        context,
+        symbol: initSymbol,
+        detailLevel: "compact",
+      }),
+    ).toBe("fn init(center: Vec3, radius: f64) -> Sphere");
+
+    expect(
+      summaryFor({
+        context,
+        symbol: initSymbol,
+        detailLevel: "full",
+      }),
+    ).toBe(
+      "fn init(center: Vec3 & { x: f64, y: f64, z: f64 }, radius: f64) -> Sphere & { center: Vec3 & { x: f64, y: f64, z: f64 }, radius: f64 }",
+    );
   });
 });
