@@ -12,7 +12,11 @@ import { toSourceSpan } from "../../utils.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
 import { SymbolTable } from "../../binder/index.js";
 import { runBindingPipeline } from "../../binding/binding.js";
-import type { HirCallExpr, HirIdentifierExpr } from "../../hir/nodes.js";
+import type {
+  HirCallExpr,
+  HirIdentifierExpr,
+  HirLambdaExpr,
+} from "../../hir/nodes.js";
 import { createHirBuilder } from "../../hir/index.js";
 import { runLoweringPipeline } from "../../lowering/lowering.js";
 
@@ -646,6 +650,87 @@ pub fn main(): () -> f64
         (targetRecord.metadata as { intrinsic?: boolean } | undefined)?.intrinsic,
       ).toBe(true);
     });
+  });
+
+  it("preserves lambda argument context for imported operator identifiers", () => {
+    const externalPath: ModulePath = {
+      namespace: "pkg",
+      packageName: "dep",
+      segments: ["pkg"],
+    };
+    const externalSource = `
+pub fn '/'(mapper: (value: i32) -> i32, value: i32) -> i32
+  mapper(value)
+`;
+    const external = buildModule({ source: externalSource, path: externalPath });
+    const externalSemantics = semanticsPipeline({
+      module: external.module,
+      graph: external.graph,
+    });
+
+    const mainPath: ModulePath = { namespace: "src", segments: ["main"] };
+    const mainSource = `
+use pkg::dep
+
+pub fn main() -> i32
+  dep::'/'(x => x + 1, 1)
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, externalPath)],
+    });
+
+    const result = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[external.module.id, externalSemantics.exports]]),
+      dependencies: new Map([[external.module.id, externalSemantics]]),
+      recoverFromTypingErrors: true,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+
+    const symbolTable = getSymbolTable(result);
+
+    const callExpr = Array.from(result.hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") {
+          return false;
+        }
+        const callee = result.hir.expressions.get(expr.callee);
+        if (!callee || callee.exprKind !== "identifier") {
+          return false;
+        }
+        return symbolTable.getSymbol(callee.symbol).name === "/";
+      },
+    );
+    expect(callExpr).toBeDefined();
+    if (!callExpr) {
+      return;
+    }
+
+    const lambda = Array.from(result.hir.expressions.values()).find(
+      (expr): expr is HirLambdaExpr => expr.exprKind === "lambda",
+    );
+    expect(lambda).toBeDefined();
+    if (!lambda) {
+      return;
+    }
+    const lambdaTypeId = result.typing.table.getExprType(lambda.id);
+    expect(lambdaTypeId).toBeDefined();
+    if (lambdaTypeId === undefined) {
+      return;
+    }
+    const lambdaType = result.typing.arena.get(lambdaTypeId);
+    expect(lambdaType.kind).toBe("function");
+    if (lambdaType.kind !== "function") {
+      return;
+    }
+    expect(lambdaType.parameters[0]?.type).toBe(result.typing.primitives.i32);
+    expect(lambdaType.returnType).toBe(result.typing.primitives.i32);
   });
 
   it("does not apply intrinsic fallback when explicit type arguments are present", () => {

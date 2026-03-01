@@ -860,14 +860,6 @@ const getExpectedCallParameters = ({
   if (callee.exprKind !== "identifier") {
     return {};
   }
-  const record = ctx.symbolTable.getSymbol(callee.symbol);
-  const metadata = (record.metadata ?? {}) as { intrinsic?: boolean };
-  const hasIntrinsicFallbackCandidates =
-    metadata.intrinsic !== true &&
-    intrinsicSignaturesFor(record.name, ctx).length > 0;
-  if (hasIntrinsicFallbackCandidates) {
-    return {};
-  }
   const signature = ctx.functions.getSignature(callee.symbol);
   if (!signature) {
     return {};
