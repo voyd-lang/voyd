@@ -779,6 +779,61 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("does not merge auto-imports into pub use re-exports", async () => {
+    const project = await createProject({
+      "main.voyd": `fn main() -> i32\n  0\n`,
+      "src/pkg.voyd": `pub use self::main`,
+      "src/pkgs/vtrace/pkg.voyd":
+        `pub use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
+      "src/pkgs/vtrace/hit.voyd":
+        `pub fn hittable() -> i32\n  0\n\npub fn hit_record() -> i32\n  0\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/pkgs/vtrace/pkg.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      const codeActions = autoImportActions({
+        analysis,
+        documentUri: uri,
+        diagnostics,
+      });
+
+      const importAction = codeActions.find((action) =>
+        action.title.includes("Import hit_record from self::hit"),
+      );
+      expect(importAction).toBeDefined();
+      if (!importAction) {
+        return;
+      }
+
+      const edit = importAction.edit?.changes?.[uri]?.[0];
+      expect(edit).toBeDefined();
+      if (!edit) {
+        return;
+      }
+
+      const updated = applyEditToSource({
+        uri,
+        source:
+          `pub use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
+        version: 1,
+        text: edit,
+      });
+
+      expect(updated).toContain("pub use self::hit::hittable\nuse self::hit::hit_record\n\n");
+      expect(updated).not.toContain("pub use self::hit::{ hittable, hit_record }");
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("surfaces typing diagnostics when generics miss return annotations", async () => {
     const project = await createProject({
       "src/main.voyd": `fn identity<T>(value: T)\n  value\n\nfn main() -> i32\n  let counter = 1\n  counter\n`,

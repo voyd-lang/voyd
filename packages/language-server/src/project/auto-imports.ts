@@ -259,6 +259,7 @@ const useDeclRewriteContextFromForm = ({
 }):
   | {
       indentation: string;
+      isPublic: boolean;
       visibility: "" | "pub ";
       modulePath: string;
     }
@@ -288,6 +289,7 @@ const useDeclRewriteContextFromForm = ({
 
   return {
     indentation: leadingIndentationAt({ source, offset: startIndex }),
+    isPublic: parsedUseDecl.visibility === "pub",
     visibility: parsedUseDecl.visibility === "pub" ? "pub " : "",
     modulePath,
   };
@@ -379,6 +381,9 @@ const mergeImportEdit = ({
       startIndex,
     });
     if (!rewriteContext || rewriteContext.modulePath.length === 0) {
+      continue;
+    }
+    if (rewriteContext.isPublic) {
       continue;
     }
 
