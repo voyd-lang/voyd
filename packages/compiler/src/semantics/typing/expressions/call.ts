@@ -73,6 +73,7 @@ import { typeDescriptorToUserString } from "../type-arena.js";
 import { assertMemberAccess } from "../visibility.js";
 import { symbolRefEquals, type SymbolRef } from "../symbol-ref.js";
 import {
+  canonicalSymbolRefInTypingContext,
   canonicalSymbolRefForTypingContext,
   localSymbolForSymbolRef,
   symbolRefKey,
@@ -604,8 +605,16 @@ const resolveSymbolName = (
   symbol: SymbolId,
   ctx: TypingContext,
   nameForSymbol?: SymbolNameResolver,
-): string =>
-  nameForSymbol ? nameForSymbol(symbol) : getSymbolName(symbol, ctx);
+): string => {
+  if (nameForSymbol) {
+    return nameForSymbol(symbol);
+  }
+  try {
+    return getSymbolName(symbol, ctx);
+  } catch {
+    return `symbol ${symbol}`;
+  }
+};
 
 export const typeMethodCallExpr = (
   expr: HirMethodCallExpr,
@@ -722,9 +731,9 @@ export const typeMethodCallExpr = (
     }
   }
 
-  const selectedRef =
-    selected.symbolRef ??
-    canonicalSymbolRefForTypingContext(selected.symbol, ctx);
+  const selectedRef = selected.symbolRef
+    ? canonicalSymbolRefInTypingContext(selected.symbolRef, ctx)
+    : canonicalSymbolRefForTypingContext(selected.symbol, ctx);
   const targets =
     ctx.callResolution.targets.get(expr.id) ?? new Map<string, SymbolRef>();
   targets.set(instanceKey, selectedRef);
@@ -1736,7 +1745,11 @@ const formatFunctionSignatureForDiagnostic = ({
         return `T${index}`;
       }
     }
-    return getSymbolName(param.symbol, ctx);
+    try {
+      return getSymbolName(param.symbol, ctx);
+    } catch {
+      return `T${index}`;
+    }
   });
   const typeParamSuffix =
     typeParams && typeParams.length > 0 ? `<${typeParams.join(", ")}>` : "";
@@ -2183,9 +2196,48 @@ const traitMethodImplMetadataFor = ({
     const metadata = ctx.traitMethodImpls.get(symbol);
     return metadata ? { metadata, moduleId: resolvedModuleId } : undefined;
   }
+
   const dependency = ctx.dependencies.get(resolvedModuleId);
-  const metadata = dependency?.typing.traitMethodImpls.get(symbol);
+  const dependencySymbol = resolveSymbolForModule({
+    symbol,
+    moduleId: resolvedModuleId,
+    ctx,
+  });
+  const metadata = dependency?.typing.traitMethodImpls.get(dependencySymbol);
   return metadata ? { metadata, moduleId: resolvedModuleId } : undefined;
+};
+
+const resolveSymbolForModule = ({
+  symbol,
+  moduleId,
+  ctx,
+}: {
+  symbol: SymbolId;
+  moduleId: string;
+  ctx: TypingContext;
+}): SymbolId => {
+  if (moduleId === ctx.moduleId) {
+    return symbol;
+  }
+  const imported = ctx.importsByLocal.get(symbol);
+  if (imported && imported.moduleId === moduleId) {
+    return imported.symbol;
+  }
+  try {
+    const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+      import?: { moduleId?: unknown; symbol?: unknown };
+    };
+    if (
+      typeof metadata.import?.moduleId === "string" &&
+      metadata.import.moduleId === moduleId &&
+      typeof metadata.import.symbol === "number"
+    ) {
+      return metadata.import.symbol;
+    }
+  } catch {
+    // Symbol may already belong to the dependency table.
+  }
+  return symbol;
 };
 
 const symbolNameForRef = ({
@@ -2418,11 +2470,16 @@ const getTraitMethodTypeBindings = ({
           ?.typing.traits.getImplTemplatesForTrait(
             methodMetadata.metadata.traitSymbol,
           ) ?? []);
+  const templateMethodSymbol = resolveSymbolForModule({
+    symbol: calleeSymbol,
+    moduleId: methodMetadata.moduleId,
+    ctx,
+  });
   const template = templates
     .find(
       (entry) =>
         entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
-        calleeSymbol,
+        templateMethodSymbol,
     );
   if (!template) {
     return undefined;
@@ -2456,10 +2513,24 @@ const getTraitMethodTypeBindings = ({
   }
 
   const bindings = new Map<TypeParamId, TypeId>();
-  signature.typeParams.forEach((param) => {
-    const applied = symbolBindings.get(param.symbol);
-    if (typeof applied === "number") {
-      bindings.set(param.typeParam, applied);
+  signature.typeParams.forEach((param, index) => {
+    const fromSymbol = symbolBindings.get(param.symbol);
+    if (typeof fromSymbol === "number") {
+      bindings.set(param.typeParam, fromSymbol);
+      return;
+    }
+
+    const fromTypeParam = match.substitution.get(param.typeParam);
+    if (typeof fromTypeParam === "number") {
+      bindings.set(param.typeParam, fromTypeParam);
+      return;
+    }
+
+    const templateParam = template.typeParams[index];
+    const fromTemplateIndex =
+      templateParam && match.substitution.get(templateParam.typeParam);
+    if (typeof fromTemplateIndex === "number") {
+      bindings.set(param.typeParam, fromTemplateIndex);
     }
   });
   return bindings.size > 0 ? bindings : undefined;
@@ -3471,6 +3542,12 @@ const resolveFreeFunctionCandidates = ({
 
   return symbols
     .map((symbol) => {
+      const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+        entity?: unknown;
+      };
+      if (metadata.entity === "trait-method") {
+        return undefined;
+      }
       const signature = ctx.functions.getSignature(symbol);
       if (!signature) {
         return undefined;

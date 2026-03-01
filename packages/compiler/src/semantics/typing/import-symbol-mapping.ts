@@ -596,21 +596,24 @@ export const registerImportedTraitDecl = ({
         mapSymbol: mapTypeExprSymbol,
       }) ?? requirement
     ),
-    methods: traitDecl.methods.map((method) =>
-      translateTraitMethod({
+    methods: traitDecl.methods.map((method) => {
+      const localMethodSymbol = mapDependencySymbolToLocal({
+        owner: method.symbol,
+        dependency,
+        ctx,
+        allowUnexported: true,
+      });
+      symbolMap.set(method.symbol, localMethodSymbol);
+      symbolMap.set(localMethodSymbol, localMethodSymbol);
+      return translateTraitMethod({
         method: {
           ...method,
-          symbol: mapDependencySymbolToLocal({
-            owner: method.symbol,
-            dependency,
-            ctx,
-            allowUnexported: true,
-          }),
+          symbol: localMethodSymbol,
         },
         translation,
         mapSymbol: mapTypeExprSymbol,
-      })
-    ),
+      });
+    }),
   });
   const name = ctx.symbolTable.getSymbol(localSymbol).name;
   ctx.traits.setName(name, localSymbol);
