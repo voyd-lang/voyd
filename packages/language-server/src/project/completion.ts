@@ -54,7 +54,10 @@ const isVisibleSymbolKind = (kind: SymbolKind): boolean =>
   kind === "parameter" ||
   kind === "type" ||
   kind === "type-parameter" ||
-  kind === "trait";
+  kind === "trait" ||
+  kind === "effect" ||
+  kind === "effect-op" ||
+  kind === "module";
 
 const padSortRank = (value: number): string => value.toString().padStart(3, "0");
 
@@ -73,6 +76,12 @@ const inScopeSymbolPriority = ({
   }
   if (record.kind === "type" || record.kind === "type-parameter" || record.kind === "trait") {
     return 2;
+  }
+  if (record.kind === "effect-op") {
+    return 3;
+  }
+  if (record.kind === "effect" || record.kind === "module") {
+    return 4;
   }
   return 9;
 };
@@ -333,14 +342,14 @@ const completionsForAutoImports = ({
   replacementEndOffset: number;
   visibleNames: ReadonlySet<string>;
   maxItems: number;
-}): CompletionItem[] => {
+}): { items: CompletionItem[]; isIncomplete: boolean } => {
   if (prefix.length < AUTO_IMPORT_MIN_PREFIX_LENGTH || maxItems <= 0) {
-    return [];
+    return { items: [], isIncomplete: false };
   }
 
   const lineIndex = analysis.lineIndexByFile.get(path.resolve(toFilePath(uri)));
   if (!lineIndex) {
-    return [];
+    return { items: [], isIncomplete: false };
   }
 
   const replacementRange = {
@@ -352,7 +361,7 @@ const completionsForAutoImports = ({
     documentUri: uri,
   });
   if (!importInsertionContext) {
-    return [];
+    return { items: [], isIncomplete: false };
   }
   const existingImportLines = new Set(source.split("\n").map((line) => line.trim()));
   const seenSuggestions = new Set<string>();
@@ -407,12 +416,12 @@ const completionsForAutoImports = ({
       });
 
       if (suggestions.length >= maxItems) {
-        return suggestions;
+        return { items: suggestions, isIncomplete: true };
       }
     }
   }
 
-  return suggestions;
+  return { items: suggestions, isIncomplete: false };
 };
 
 export const completionsAtPosition = ({
@@ -481,9 +490,9 @@ export const completionsAtPosition = ({
     maxItems: autoImportLimit,
   });
 
-  const items = [...inScope.items, ...autoImports].slice(0, MAX_COMPLETION_ITEMS);
+  const items = [...inScope.items, ...autoImports.items].slice(0, MAX_COMPLETION_ITEMS);
   return {
-    isIncomplete: items.length >= MAX_COMPLETION_ITEMS,
+    isIncomplete: autoImports.isIncomplete || items.length >= MAX_COMPLETION_ITEMS,
     items,
   };
 };

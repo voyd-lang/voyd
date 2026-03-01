@@ -394,6 +394,67 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("keeps imported module symbols in in-scope completions", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::util\n\nfn main() -> i32\n  uti\n`,
+      "src/util.voyd": `pub fn helper(value: i32) -> i32\n  value\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const completion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 3, character: 5 },
+      });
+      expect(completion.items.some((item) => item.label === "util")).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks completion as incomplete when auto-import results are capped", async () => {
+    const helperExports = Array.from(
+      { length: 60 },
+      (_, index) => `pub fn helper_${index}(value: i32) -> i32\n  value`,
+    ).join("\n\n");
+    const project = await createProject({
+      "src/main.voyd": `fn main() -> i32\n  he\n`,
+      "src/util.voyd": helperExports,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const completion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 1, character: 4 },
+      });
+      const autoImportItems = completion.items.filter(
+        (item) => item.additionalTextEdits !== undefined,
+      );
+
+      expect(autoImportItems).toHaveLength(40);
+      expect(completion.isIncomplete).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("includes module-level completions declared after the cursor", async () => {
     const project = await createProject({
       "src/main.voyd": `fn main() -> i32\n  hel\n\nfn helper() -> i32\n  1\n`,
