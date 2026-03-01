@@ -81,6 +81,10 @@ import { hydrateImportedTraitMetadataForOwnerRef } from "../import-trait-impl-hy
 import { collectTraitOwnersFromTypeParams } from "../constraint-trait-owners.js";
 
 type SymbolNameResolver = (symbol: SymbolId) => string;
+type OverloadCandidate = {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+};
 
 type MethodCallCandidate = {
   symbol: SymbolId;
@@ -4419,6 +4423,87 @@ const resolveIntrinsicFallbackForIdentifierCall = ({
   };
 };
 
+const selectHintedOverloadCandidates = ({
+  candidates,
+  typeArguments,
+  expectedReturnType,
+  expectedReturnCandidates,
+  ctx,
+  state,
+}: {
+  candidates: readonly OverloadCandidate[];
+  typeArguments: readonly TypeId[] | undefined;
+  expectedReturnType: TypeId | undefined;
+  expectedReturnCandidates: ReadonlySet<SymbolId> | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): {
+  hintedCandidates: readonly OverloadCandidate[];
+  fallbackCandidates?: readonly OverloadCandidate[];
+} => {
+  const candidatesForBudget = filterCandidatesByExplicitTypeArguments({
+    candidates,
+    typeArguments,
+  });
+
+  const returnHintCandidates =
+    expectedReturnCandidates && expectedReturnCandidates.size > 0
+      ? candidatesForBudget.filter((candidate) =>
+          expectedReturnCandidates.has(candidate.symbol),
+        )
+      : filterCandidatesByExpectedReturnType({
+          candidates: candidatesForBudget,
+          expectedReturnType,
+          typeArguments,
+          ctx,
+          state,
+        });
+
+  if (
+    returnHintCandidates.length === 0 ||
+    returnHintCandidates.length === candidatesForBudget.length
+  ) {
+    return { hintedCandidates: candidatesForBudget };
+  }
+
+  return {
+    hintedCandidates: returnHintCandidates,
+    fallbackCandidates: candidatesForBudget,
+  };
+};
+
+const findOverloadMatches = ({
+  name,
+  candidates,
+  args,
+  typeArguments,
+  span,
+  ctx,
+  state,
+}: {
+  name: string;
+  candidates: readonly OverloadCandidate[];
+  args: readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  span: SourceSpan;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly OverloadCandidate[] => {
+  enforceOverloadCandidateBudget({
+    name,
+    candidateCount: candidates.length,
+    ctx,
+    span,
+  });
+  return findMatchingOverloadCandidates({
+    candidates,
+    args,
+    ctx,
+    state,
+    typeArguments,
+  });
+};
+
 const typeOverloadedCall = (
   call: HirCallExpr,
   callee: HirOverloadSetExpr,
@@ -4448,52 +4533,38 @@ const typeOverloadedCall = (
     }
     return { symbol, signature };
   });
-  const candidatesForBudget = filterCandidatesByExplicitTypeArguments({
+  const { hintedCandidates, fallbackCandidates } = selectHintedOverloadCandidates({
     candidates,
     typeArguments,
+    expectedReturnType,
+    expectedReturnCandidates,
+    ctx,
+    state,
   });
-  let candidatesForResolution =
-    expectedReturnCandidates && expectedReturnCandidates.size > 0
-    ? candidatesForBudget.filter((candidate) =>
-        expectedReturnCandidates.has(candidate.symbol),
-      )
-    : filterCandidatesByExpectedReturnType({
-        candidates: candidatesForBudget,
-        expectedReturnType,
-        typeArguments,
-        ctx,
-        state,
-      });
-  const findMatches = (
-    resolutionCandidates: readonly {
-      symbol: SymbolId;
-      signature: FunctionSignature;
-    }[],
-  ): readonly {
-    symbol: SymbolId;
-    signature: FunctionSignature;
-  }[] => {
-    enforceOverloadCandidateBudget({
-      name: callee.name,
-      candidateCount: resolutionCandidates.length,
-      ctx,
-      span: call.span,
-    });
-    return findMatchingOverloadCandidates({
-      candidates: resolutionCandidates,
-      args: probeArgs,
-      ctx,
-      state,
-      typeArguments,
-    });
-  };
 
-  let matches = findMatches(candidatesForResolution);
-  if (matches.length === 0 && candidatesForResolution !== candidatesForBudget) {
+  let candidatesForResolution = hintedCandidates;
+  let matches = findOverloadMatches({
+    name: callee.name,
+    candidates: candidatesForResolution,
+    args: probeArgs,
+    typeArguments,
+    span: call.span,
+    ctx,
+    state,
+  });
+  if (matches.length === 0 && fallbackCandidates) {
     // Expected-return narrowing is a hint. If it removes all valid matches,
     // retry with the full overload set before failing.
-    candidatesForResolution = candidatesForBudget;
-    matches = findMatches(candidatesForResolution);
+    candidatesForResolution = fallbackCandidates;
+    matches = findOverloadMatches({
+      name: callee.name,
+      candidates: candidatesForResolution,
+      args: probeArgs,
+      typeArguments,
+      span: call.span,
+      ctx,
+      state,
+    });
   }
 
   const traitDispatch =
