@@ -558,6 +558,96 @@ pub fn main(): () -> f64
     }
   });
 
+  it("falls back to intrinsic operators when imported operator symbols shadow them", () => {
+    const externalPath: ModulePath = {
+      namespace: "pkg",
+      packageName: "dep",
+      segments: ["pkg"],
+    };
+    const externalSource = `
+pub obj Vec3 {
+  api x: f64,
+  api y: f64,
+  api z: f64
+}
+
+pub fn '-'(left: Vec3, right: Vec3) -> Vec3
+  left
+
+pub fn '/'(left: f64, right: Vec3) -> Vec3
+  right
+`;
+    const external = buildModule({ source: externalSource, path: externalPath });
+    const externalSemantics = semanticsPipeline({
+      module: external.module,
+      graph: external.graph,
+    });
+
+    const mainPath: ModulePath = { namespace: "src", segments: ["main"] };
+    const mainSource = `
+use pkg::dep::all
+
+fn as_i32(v: i32) -> i32
+  v
+
+pub fn main(): () -> f64
+  let scalar = 8.0 / 2.0
+  let count = as_i32(10) - as_i32(3)
+  scalar
+`;
+    const mainAst = parse(mainSource, modulePathToString(mainPath));
+    const main = buildModule({
+      source: mainSource,
+      path: mainPath,
+      ast: mainAst,
+      dependencies: [dependencyForUse(mainAst, externalPath)],
+    });
+
+    const result = semanticsPipeline({
+      module: main.module,
+      graph: main.graph,
+      exports: new Map([[external.module.id, externalSemantics.exports]]),
+      dependencies: new Map([[external.module.id, externalSemantics]]),
+      recoverFromTypingErrors: true,
+    });
+
+    expect(result.diagnostics).toHaveLength(0);
+
+    const symbolTable = getSymbolTable(result);
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") {
+      throw new Error("missing main symbol");
+    }
+
+    const instanceKey = `${mainSymbol}<>`;
+    const operatorCalls = Array.from(result.hir.expressions.values())
+      .filter((expr): expr is HirCallExpr => expr.exprKind === "call")
+      .flatMap((call) => {
+        const callee = result.hir.expressions.get(call.callee);
+        if (!callee || callee.exprKind !== "identifier") {
+          return [];
+        }
+        const name = symbolTable.getSymbol(callee.symbol).name;
+        return name === "/" || name === "-" ? [{ call, name }] : [];
+      });
+
+    expect(operatorCalls).toHaveLength(2);
+    operatorCalls.forEach(({ call, name }) => {
+      const target = result.typing.callTargets.get(call.id)?.get(instanceKey);
+      expect(target).toBeDefined();
+      if (!target) {
+        return;
+      }
+      expect(target.moduleId).toBe(main.module.id);
+      const targetRecord = symbolTable.getSymbol(target.symbol);
+      expect(targetRecord.name).toBe(name);
+      expect(
+        (targetRecord.metadata as { intrinsic?: boolean } | undefined)?.intrinsic,
+      ).toBe(true);
+    });
+  });
+
   it("does not apply intrinsic fallback when explicit type arguments are present", () => {
     const externalPath: ModulePath = {
       namespace: "pkg",

@@ -366,6 +366,35 @@ export const typeCallExpr = (
       });
     }
 
+    const intrinsicFallbackForIdentifier =
+      metadata.intrinsic !== true && signature
+        ? resolveIntrinsicFallbackForIdentifierCall({
+            call: expr,
+            calleeSymbol: calleeExpr.symbol,
+            signature,
+            args,
+            ctx,
+            state,
+            typeArguments,
+          })
+        : undefined;
+    if (intrinsicFallbackForIdentifier) {
+      ctx.table.setExprType(calleeExpr.id, intrinsicFallbackForIdentifier.calleeType);
+      ctx.resolvedExprTypes.set(
+        calleeExpr.id,
+        applyCurrentSubstitution(
+          intrinsicFallbackForIdentifier.calleeType,
+          ctx,
+          state,
+        ),
+      );
+      ctx.effects.setExprEffect(calleeExpr.id, ctx.effects.emptyRow);
+      return finalizeCall({
+        returnType: intrinsicFallbackForIdentifier.returnType,
+        latentEffectRow: intrinsicFallbackForIdentifier.effectRow,
+      });
+    }
+
     if (metadata.intrinsic && metadata.intrinsicUsesSignature === false) {
       const returnType = typeIntrinsicCall(
         intrinsicName,
@@ -4196,6 +4225,113 @@ const resolveIntrinsicFallbackSymbol = ({
     declaredAt: ctx.hir.module.ast,
     metadata: { intrinsic: true, ...metadata },
   });
+};
+
+const resolveIntrinsicFallbackForIdentifierCall = ({
+  call,
+  calleeSymbol,
+  signature,
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  call: HirCallExpr;
+  calleeSymbol: SymbolId;
+  signature: FunctionSignature;
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments: readonly TypeId[] | undefined;
+}):
+  | { returnType: TypeId; effectRow: number; calleeType: TypeId }
+  | undefined => {
+  const calleeName = ctx.symbolTable.getSymbol(calleeSymbol).name;
+
+  if (typeArguments && typeArguments.length > 0) {
+    return undefined;
+  }
+
+  if (args.some((arg) => arg.type === ctx.primitives.unknown)) {
+    return undefined;
+  }
+
+  const intrinsicSignatures = intrinsicSignaturesFor(calleeName, ctx);
+  if (intrinsicSignatures.length === 0) {
+    return undefined;
+  }
+
+  const signatureMatchesCall = matchesOverloadSignature(
+    calleeSymbol,
+    signature,
+    args,
+    ctx,
+    state,
+    typeArguments,
+  );
+  if (signatureMatchesCall) {
+    return undefined;
+  }
+
+  const matchesIntrinsic = intrinsicSignatures.some(
+    (intrinsicSignature) =>
+      intrinsicSignature.parameters.length === args.length &&
+      intrinsicSignature.parameters.every(
+        (paramType, index) => args[index]!.type === paramType,
+      ),
+  );
+  if (!matchesIntrinsic) {
+    return undefined;
+  }
+
+  const intrinsicFallbackSymbol = resolveIntrinsicFallbackSymbol({
+    name: calleeName,
+    ctx,
+  });
+  if (typeof intrinsicFallbackSymbol !== "number") {
+    return undefined;
+  }
+
+  const instanceKey = state.currentFunction?.instanceKey;
+  if (!instanceKey) {
+    throw new Error(
+      `missing function instance key for overload resolution at call ${call.id}`,
+    );
+  }
+
+  const targets =
+    ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
+  targets.set(
+    instanceKey,
+    canonicalSymbolRefForTypingContext(intrinsicFallbackSymbol, ctx),
+  );
+  ctx.callResolution.targets.set(call.id, targets);
+  ctx.callResolution.traitDispatches.delete(call.id);
+
+  const returnType = typeIntrinsicCall(
+    calleeName,
+    args,
+    ctx,
+    state,
+    typeArguments,
+    false,
+    call.span,
+  );
+  const calleeType = ctx.arena.internFunction({
+    parameters: args.map((arg) => ({
+      type: arg.type,
+      label: arg.label,
+      optional: false,
+    })),
+    returnType,
+    effectRow: ctx.primitives.defaultEffectRow,
+  });
+
+  return {
+    returnType,
+    effectRow: ctx.primitives.defaultEffectRow,
+    calleeType,
+  };
 };
 
 const typeOverloadedCall = (
