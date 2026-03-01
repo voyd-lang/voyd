@@ -2197,30 +2197,47 @@ const traitMethodImplMetadataFor = ({
     return metadata ? { metadata, moduleId: resolvedModuleId } : undefined;
   }
 
-  let dependencySymbol = symbol;
-  const imported = ctx.importsByLocal.get(symbol);
-  if (imported && imported.moduleId === resolvedModuleId) {
-    dependencySymbol = imported.symbol;
-  } else {
-    try {
-      const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
-        import?: { moduleId?: unknown; symbol?: unknown };
-      };
-      if (
-        typeof metadata.import?.moduleId === "string" &&
-        metadata.import.moduleId === resolvedModuleId &&
-        typeof metadata.import.symbol === "number"
-      ) {
-        dependencySymbol = metadata.import.symbol;
-      }
-    } catch {
-      // Symbol may already belong to the dependency table.
-    }
-  }
-
   const dependency = ctx.dependencies.get(resolvedModuleId);
+  const dependencySymbol = resolveSymbolForModule({
+    symbol,
+    moduleId: resolvedModuleId,
+    ctx,
+  });
   const metadata = dependency?.typing.traitMethodImpls.get(dependencySymbol);
   return metadata ? { metadata, moduleId: resolvedModuleId } : undefined;
+};
+
+const resolveSymbolForModule = ({
+  symbol,
+  moduleId,
+  ctx,
+}: {
+  symbol: SymbolId;
+  moduleId: string;
+  ctx: TypingContext;
+}): SymbolId => {
+  if (moduleId === ctx.moduleId) {
+    return symbol;
+  }
+  const imported = ctx.importsByLocal.get(symbol);
+  if (imported && imported.moduleId === moduleId) {
+    return imported.symbol;
+  }
+  try {
+    const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+      import?: { moduleId?: unknown; symbol?: unknown };
+    };
+    if (
+      typeof metadata.import?.moduleId === "string" &&
+      metadata.import.moduleId === moduleId &&
+      typeof metadata.import.symbol === "number"
+    ) {
+      return metadata.import.symbol;
+    }
+  } catch {
+    // Symbol may already belong to the dependency table.
+  }
+  return symbol;
 };
 
 const symbolNameForRef = ({
@@ -2453,29 +2470,11 @@ const getTraitMethodTypeBindings = ({
           ?.typing.traits.getImplTemplatesForTrait(
             methodMetadata.metadata.traitSymbol,
           ) ?? []);
-  let templateMethodSymbol = calleeSymbol;
-  if (methodMetadata.moduleId !== ctx.moduleId) {
-    const imported = ctx.importsByLocal.get(calleeSymbol);
-    if (imported && imported.moduleId === methodMetadata.moduleId) {
-      templateMethodSymbol = imported.symbol;
-    } else {
-      try {
-        const metadata = (ctx.symbolTable.getSymbol(calleeSymbol).metadata ??
-          {}) as {
-          import?: { moduleId?: unknown; symbol?: unknown };
-        };
-        if (
-          typeof metadata.import?.moduleId === "string" &&
-          metadata.import.moduleId === methodMetadata.moduleId &&
-          typeof metadata.import.symbol === "number"
-        ) {
-          templateMethodSymbol = metadata.import.symbol;
-        }
-      } catch {
-        // Symbol may already be in dependency space.
-      }
-    }
-  }
+  const templateMethodSymbol = resolveSymbolForModule({
+    symbol: calleeSymbol,
+    moduleId: methodMetadata.moduleId,
+    ctx,
+  });
   const template = templates
     .find(
       (entry) =>
