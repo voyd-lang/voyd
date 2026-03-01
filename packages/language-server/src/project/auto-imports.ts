@@ -44,12 +44,12 @@ const offsetAfterLine = ({
   return cursor < source.length ? cursor + 1 : source.length;
 };
 
-const insertImportEdit = ({
+export const insertImportEdit = ({
   analysis,
   documentUri,
   importLine,
 }: {
-  analysis: AutoImportAnalysis;
+  analysis: Pick<AutoImportAnalysis, "moduleIdByFilePath" | "semantics" | "graph">;
   documentUri: string;
   importLine: string;
 }): TextEdit | undefined => {

@@ -13,6 +13,7 @@ import {
 import { createOverlayModuleHost } from "../project/files.js";
 import type {
   AutoImportAnalysis,
+  CompletionAnalysis,
   ProjectCoreAnalysis,
   ProjectNavigationIndex,
 } from "../project/types.js";
@@ -170,6 +171,28 @@ export class AnalysisCoordinator {
       moduleIdByFilePath: analysis.moduleIdByFilePath,
       semantics: analysis.semantics,
       graph: analysis.graph,
+      exportsByName,
+    };
+  }
+
+  async getCompletionAnalysisForUri(uri: string): Promise<CompletionAnalysis> {
+    const { context, analysis } = await this.getCoreForUri(uri);
+    const navigation = await this.getNavigationForUri(uri);
+    const exportsByName = this.#exportIndex.buildAutoImportExports({
+      roots: context.roots,
+      semantics: analysis.semantics,
+    });
+
+    return {
+      occurrencesByUri: navigation.occurrencesByUri,
+      declarationsByKey: navigation.declarationsByKey,
+      documentationByCanonicalKey: navigation.documentationByCanonicalKey,
+      typeInfoByCanonicalKey: navigation.typeInfoByCanonicalKey,
+      moduleIdByFilePath: analysis.moduleIdByFilePath,
+      semantics: analysis.semantics,
+      graph: analysis.graph,
+      sourceByFile: analysis.sourceByFile,
+      lineIndexByFile: analysis.lineIndexByFile,
       exportsByName,
     };
   }
