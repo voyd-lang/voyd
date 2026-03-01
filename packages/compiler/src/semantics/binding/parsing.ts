@@ -27,6 +27,14 @@ export interface ParsedFunctionDecl {
   intrinsic?: IntrinsicAttribute;
 }
 
+export interface ParsedModuleLetDecl {
+  form: Form;
+  visibility: HirVisibility;
+  name: IdentifierAtom;
+  initializer: Expr;
+  typeExpr?: Expr;
+}
+
 export interface ParsedTypeAliasDecl {
   form: Form;
   visibility: HirVisibility;
@@ -239,6 +247,45 @@ export const parseTypeAliasDecl = (form: Form): ParsedTypeAliasDecl | null => {
   }
 
   return { form, visibility, name, target, typeParameters };
+};
+
+export const parseModuleLetDecl = (form: Form): ParsedModuleLetDecl | null => {
+  let index = 0;
+  let visibility: HirVisibility = moduleVisibility();
+  const first = form.at(0);
+
+  if (isIdentifierWithValue(first, "pub")) {
+    visibility = packageVisibility();
+    index += 1;
+  }
+
+  const keyword = form.at(index);
+  if (!isIdentifierWithValue(keyword, "let")) {
+    return null;
+  }
+
+  const assignment = ensureForm(
+    form.at(index + 1),
+    "module-level let declaration expects an assignment",
+  );
+  if (!assignment.calls("=")) {
+    throw new Error("module-level let declaration must be an assignment form");
+  }
+
+  const pattern = assignment.at(1);
+  const initializer = assignment.at(2);
+  if (!initializer) {
+    throw new Error("module-level let declaration missing initializer");
+  }
+
+  const { name, typeExpr } = parseModuleLetPattern(pattern);
+  return {
+    form,
+    visibility,
+    name,
+    initializer,
+    typeExpr,
+  };
 };
 
 export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
@@ -719,6 +766,57 @@ const parseParamName = (
   }
 
   throw new Error("parameter name must be an identifier");
+};
+
+const parseModuleLetPattern = (
+  pattern: Expr | undefined,
+): { name: IdentifierAtom; typeExpr?: Expr } => {
+  if (!pattern) {
+    throw new Error("module-level let declaration missing binding name");
+  }
+  const { target, usesMutableRef } = unwrapMutablePattern(pattern);
+  if (usesMutableRef) {
+    throw new Error(
+      "module-level let does not support mutable object bindings ('~')",
+    );
+  }
+
+  if (isIdentifierAtom(target)) {
+    return { name: target };
+  }
+
+  if (isForm(target) && target.calls(":")) {
+    const nameExpr = target.at(1);
+    const typeExpr = target.at(2);
+    if (!isIdentifierAtom(nameExpr)) {
+      throw new Error(
+        "module-level let declaration expects an identifier binding",
+      );
+    }
+    if (!typeExpr) {
+      throw new Error(
+        "module-level let declaration missing type annotation",
+      );
+    }
+    return { name: nameExpr, typeExpr };
+  }
+
+  throw new Error(
+    "module-level let declaration supports only identifier bindings",
+  );
+};
+
+const unwrapMutablePattern = (
+  pattern: Expr,
+): { target: Expr; usesMutableRef: boolean } => {
+  if (isForm(pattern) && pattern.calls("~")) {
+    const target = pattern.at(1);
+    if (!target) {
+      throw new Error("mutable pattern is missing a target");
+    }
+    return { target, usesMutableRef: true };
+  }
+  return { target: pattern, usesMutableRef: false };
 };
 
 const parseObjectHead = (

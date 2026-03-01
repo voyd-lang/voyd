@@ -75,6 +75,7 @@ const buildLoweringSnapshot = () => {
     programHelpers,
     functions: new Map(),
     functionInstances: new Map() as any,
+    moduleLetGetters: new Map(),
     itemsToSymbols: new Map(),
     structTypes,
     structHeapTypes,

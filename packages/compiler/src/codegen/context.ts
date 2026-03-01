@@ -84,6 +84,14 @@ export interface FunctionMetadata {
   effectRow?: EffectRowId;
 }
 
+export interface ModuleLetGetterMetadata {
+  moduleId: string;
+  symbol: SymbolId;
+  wasmName: string;
+  typeId: TypeId;
+  wasmType: binaryen.Type;
+}
+
 export interface StructuralFieldInfo {
   name: string;
   typeId: TypeId;
@@ -153,6 +161,7 @@ export interface CodegenContext {
   programHelpers: ProgramHelperRegistry;
   functions: Map<string, Map<number, FunctionMetadata[]>>;
   functionInstances: Map<ProgramFunctionInstanceId, FunctionMetadata>;
+  moduleLetGetters: Map<string, Map<SymbolId, ModuleLetGetterMetadata>>;
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
   structHeapTypes: Map<TypeId, binaryen.Type>;

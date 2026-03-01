@@ -181,6 +181,7 @@ export type HirItem =
   | HirUseItem
   | HirModuleDecl
   | HirFunction
+  | HirModuleLet
   | HirTypeAlias
   | HirObjectDecl
   | HirTraitDecl
@@ -224,6 +225,13 @@ export interface HirFunction extends HirItemBase {
   body: HirExprId;
   effectRow?: EffectRowId;
   intrinsic?: IntrinsicAttribute;
+}
+
+export interface HirModuleLet extends HirItemBase {
+  kind: "module-let";
+  symbol: SymbolId;
+  typeAnnotation?: HirTypeExpr;
+  initializer: HirExprId;
 }
 
 export interface HirParameter {

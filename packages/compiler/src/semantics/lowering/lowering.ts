@@ -3,6 +3,7 @@ import { createLowerContext } from "./context.js";
 import {
   getModuleDeclarations,
   lowerFunctionDecl,
+  lowerModuleLetDecl,
   lowerObjectDecl,
   lowerTypeAliasDecl,
   lowerTraitDecl,
@@ -26,6 +27,11 @@ export const runLoweringPipeline = (inputs: LowerInputs): HirGraph => {
 
     if (decl.kind === "function") {
       lowerFunctionDecl(decl.fn, ctx);
+      continue;
+    }
+
+    if (decl.kind === "module-let") {
+      lowerModuleLetDecl(decl.moduleLet, ctx);
       continue;
     }
 

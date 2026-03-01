@@ -1,7 +1,8 @@
-import type { HirFunction } from "../hir/index.js";
+import type { HirFunction, HirModuleLet } from "../hir/index.js";
 import { ensureTypeMatches } from "./type-system.js";
 import type { FunctionSignature, TypingContext, TypingState } from "./types.js";
 import { formatFunctionInstanceKey, typeExpression } from "./expressions.js";
+import { getValueType } from "./expressions/identifier.js";
 import { mergeBranchType } from "./expressions/branching.js";
 import { ensureEffectCompatibility, getExprEffectRow } from "./effects.js";
 import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
@@ -16,7 +17,9 @@ export const runInferencePass = (
     clearFunctionInstances(ctx);
     ctx.table.clearExprTypes();
     ctx.resolvedExprTypes.clear();
-    changed = typeAllFunctions(ctx, state, { collectChanges: true });
+    changed =
+      typeAllModuleLets(ctx, state, { collectChanges: true }) ||
+      typeAllFunctions(ctx, state, { collectChanges: true });
   } while (changed);
 };
 
@@ -28,6 +31,7 @@ export const runStrictTypeCheck = (
   clearFunctionInstances(ctx);
   ctx.table.clearExprTypes();
   ctx.resolvedExprTypes.clear();
+  typeAllModuleLets(ctx, state, { collectChanges: false });
   typeAllFunctions(ctx, state, { collectChanges: false });
 };
 
@@ -74,6 +78,38 @@ export const typeAllFunctions = (
       changed = updated || changed;
     }
   }
+  return options.collectChanges ? changed : false;
+};
+
+const typeAllModuleLets = (
+  ctx: TypingContext,
+  _state: TypingState,
+  options: { collectChanges: boolean },
+): boolean => {
+  const moduleLets = Array.from(ctx.hir.items.values()).filter(
+    (item): item is HirModuleLet => item.kind === "module-let",
+  );
+  if (moduleLets.length === 0) {
+    return false;
+  }
+
+  const previousTypes = new Map(
+    moduleLets.map((item) => [item.symbol, ctx.valueTypes.get(item.symbol)]),
+  );
+
+  moduleLets.forEach((item) => {
+    ctx.valueTypes.delete(item.symbol);
+  });
+
+  let changed = false;
+  moduleLets.forEach((item) => {
+    const previous = previousTypes.get(item.symbol);
+    const next = getValueType(item.symbol, ctx, { span: item.span });
+    if (options.collectChanges && previous !== next) {
+      changed = true;
+    }
+  });
+
   return options.collectChanges ? changed : false;
 };
 

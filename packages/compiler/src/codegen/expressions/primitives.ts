@@ -5,10 +5,11 @@ import type {
   HirExpression,
   SymbolId,
 } from "../context.js";
-import { getRequiredBinding, loadBindingValue } from "../locals.js";
+import { loadBindingValue } from "../locals.js";
 import { arrayNew, arrayNewFixed } from "@voyd/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes, wasmTypeFor } from "../types.js";
 import { requireDependencyFunctionMeta } from "../function-dependencies.js";
+import { resolveModuleLetGetter } from "../module-lets.js";
 
 const encoder = new TextEncoder();
 
@@ -66,8 +67,48 @@ export const compileIdentifierExpr = (
   ctx: CodegenContext,
   fnCtx: FunctionContext
 ): CompiledExpression => {
-  const binding = getRequiredBinding(expr.symbol, ctx, fnCtx);
-  return { expr: loadBindingValue(binding, ctx), usedReturnCall: false };
+  const binding = fnCtx.bindings.get(expr.symbol);
+  if (binding) {
+    return { expr: loadBindingValue(binding, ctx), usedReturnCall: false };
+  }
+
+  const localGetter = resolveModuleLetGetter({
+    ctx,
+    moduleId: ctx.moduleId,
+    symbol: expr.symbol,
+  });
+  if (localGetter) {
+    return {
+      expr: ctx.mod.call(localGetter.wasmName, [], localGetter.wasmType),
+      usedReturnCall: false,
+    };
+  }
+
+  const targetId = ctx.program.imports.getTarget(ctx.moduleId, expr.symbol);
+  if (typeof targetId === "number") {
+    const targetRef = ctx.program.symbols.refOf(targetId);
+    const importedGetter = resolveModuleLetGetter({
+      ctx,
+      moduleId: targetRef.moduleId,
+      symbol: targetRef.symbol,
+    });
+    if (importedGetter) {
+      return {
+        expr: ctx.mod.call(
+          importedGetter.wasmName,
+          [],
+          importedGetter.wasmType,
+        ),
+        usedReturnCall: false,
+      };
+    }
+  }
+
+  const name =
+    ctx.program.symbols.getName(
+      ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: expr.symbol }),
+    ) ?? `${expr.symbol}`;
+  throw new Error(`codegen missing binding for symbol ${name}`);
 };
 
 export const emitStringLiteral = (value: string, ctx: CodegenContext): number => {

@@ -82,6 +82,7 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   scopeByNode: ctx.scopeByNode,
   decls: ctx.decls,
   functions: ctx.decls.functions,
+  moduleLets: ctx.decls.moduleLets,
   typeAliases: ctx.decls.typeAliases,
   objects: ctx.decls.objects,
   traits: ctx.decls.traits,

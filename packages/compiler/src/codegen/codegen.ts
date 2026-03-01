@@ -4,6 +4,7 @@ import type {
   CodegenOptions,
   CodegenResult,
   FunctionMetadata,
+  ModuleLetGetterMetadata,
   FixedArrayWasmType,
   RuntimeTypeIdRegistryEntry,
   StructuralTypeInfo,
@@ -17,6 +18,7 @@ import {
   registerImportMetadata,
   registerFunctionMetadata,
 } from "./functions.js";
+import { registerModuleLetGetters } from "./module-lets.js";
 import { buildRuntimeTypeArtifacts } from "./runtime-pass.js";
 import {
   EFFECT_TABLE_EXPORT,
@@ -35,7 +37,11 @@ import {
   type ProgramCodegenView,
 } from "../semantics/codegen-view/index.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
-import type { ProgramFunctionInstanceId, TypeId } from "../semantics/ids.js";
+import type {
+  ProgramFunctionInstanceId,
+  SymbolId,
+  TypeId,
+} from "../semantics/ids.js";
 import { DiagnosticEmitter } from "../diagnostics/index.js";
 import { createCodegenModule } from "./wasm-module.js";
 import { createProgramHelperRegistry } from "./program-helpers.js";
@@ -93,6 +99,10 @@ export const codegenProgram = ({
     ProgramFunctionInstanceId,
     FunctionMetadata
   >();
+  const moduleLetGetters: Map<
+    string,
+    Map<SymbolId, ModuleLetGetterMetadata>
+  > = new Map();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
@@ -115,6 +125,7 @@ export const codegenProgram = ({
     programHelpers,
     functions,
     functionInstances,
+    moduleLetGetters,
     itemsToSymbols: new Map(),
     structTypes,
     structHeapTypes,
@@ -162,6 +173,7 @@ export const codegenProgram = ({
   });
   contexts.forEach(registerImportMetadata);
   buildRuntimeTypeArtifacts(contexts);
+  contexts.forEach(registerModuleLetGetters);
   const compileReachableFunctions = (): void => {
     let compiled = 0;
     do {

@@ -6,6 +6,7 @@ import type {
   BindingResult,
   BoundObject,
   BoundFunction,
+  BoundModuleLet,
   BoundTypeAlias,
   BoundTrait,
   BoundImpl,
@@ -66,6 +67,7 @@ export type IdentifierResolution =
 
 export type ModuleDeclaration =
   | { kind: "function"; order: number; fn: BoundFunction }
+  | { kind: "module-let"; order: number; moduleLet: BoundModuleLet }
   | { kind: "type-alias"; order: number; alias: BoundTypeAlias }
   | { kind: "object"; order: number; object: BoundObject }
   | { kind: "trait"; order: number; trait: BoundTrait }

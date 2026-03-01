@@ -1978,6 +1978,42 @@ eff async_effect
     expect(diagnostic).toBeDefined();
   });
 
+  it("binds module-level let and pub let declarations", () => {
+    const source = `let x = 1
+pub let pi: f64 = 3.14
+
+pub fn main() -> i32
+  x + 1`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    expect(binding.moduleLets).toHaveLength(2);
+
+    const x = binding.moduleLets.find(
+      (decl) => symbolTable.getSymbol(decl.symbol).name === "x",
+    );
+    const pi = binding.moduleLets.find(
+      (decl) => symbolTable.getSymbol(decl.symbol).name === "pi",
+    );
+
+    expect(x?.visibility.level).toBe("module");
+    expect(pi?.visibility.level).toBe("package");
+    expect(pi?.typeExpr).toBeDefined();
+  });
+
+  it("rejects mutable object module-level let bindings", () => {
+    const source = `let ~x = 1`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    expect(() => runBindingPipeline({ moduleForm: ast, symbolTable })).toThrow(
+      /module-level let does not support mutable object bindings/,
+    );
+  });
+
   it("rejects bindings named void", () => {
     const source = "pub fn main() -> void\n  let void = 1";
     const ast = parse(source, "main.voyd");
