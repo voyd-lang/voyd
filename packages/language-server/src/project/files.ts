@@ -126,7 +126,11 @@ const sourcePkgSrcAncestorForEntry = (entryPath: string): string | undefined => 
       if (firstSegment === "pkgs.voyd") {
         return current;
       }
-      if (firstSegment === "pkgs" && typeof secondSegment === "string") {
+      if (
+        firstSegment === "pkgs" &&
+        typeof secondSegment === "string" &&
+        secondSegment !== "pkg.voyd"
+      ) {
         return current;
       }
     }

@@ -292,6 +292,35 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("keeps src/pkgs as the root when entry is src/pkgs/pkg.voyd", async () => {
+    const project = await createProject({
+      "main.voyd": `fn main() -> i32\n  0\n`,
+      "src/pkgs/pkg.voyd": `use src::util`,
+      "src/pkgs/util.voyd": `pub fn helper() -> i32\n  1\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/pkgs/pkg.voyd");
+      const roots = resolveModuleRoots(entryPath);
+      expect(roots.src).toBe(project.filePathFor("src/pkgs"));
+
+      const analysis = await analyzeProject({
+        entryPath,
+        roots,
+        openDocuments: new Map(),
+      });
+      expect(analysis.graph.modules.has("src::util")).toBe(true);
+      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      expect(
+        diagnostics.some((diagnostic) =>
+          diagnostic.message.includes("Unable to resolve module src::util"),
+        ),
+      ).toBe(false);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("resolves src root for nested source packages without src pkg/main entries", async () => {
     const project = await createProject({
       "main.voyd": `fn main() -> i32\n  0\n`,
