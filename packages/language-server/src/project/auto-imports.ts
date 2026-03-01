@@ -1,4 +1,11 @@
 import path from "node:path";
+import type { Form } from "@voyd/compiler/parser/index.js";
+import { parseTopLevelUseDecl } from "@voyd/compiler/modules/use-decl.js";
+import {
+  parseUsePaths,
+  type NormalizedUseEntry,
+} from "@voyd/compiler/modules/use-path.js";
+import { toSourceSpan } from "@voyd/compiler/semantics/utils.js";
 import {
   CodeAction,
   CodeActionKind,
@@ -10,6 +17,8 @@ import {
 import { LineIndex } from "./text.js";
 import { toFilePath } from "./files.js";
 import type { AutoImportAnalysis } from "./types.js";
+
+const IMPORTABLE_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_']*$/;
 
 const extractMissingSymbolName = (diagnostic: Diagnostic): string | undefined => {
   const match = /'([^']+)'/.exec(diagnostic.message);
@@ -43,6 +52,67 @@ const offsetAfterLine = ({
     cursor += 1;
   }
   return cursor < source.length ? cursor + 1 : source.length;
+};
+
+const sameSegments = ({
+  left,
+  right,
+}: {
+  left: readonly string[] | undefined;
+  right: readonly string[] | undefined;
+}): boolean => {
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+  return left.every((segment, index) => segment === right[index]);
+};
+
+const importModulePath = ({
+  analysis,
+  currentModuleId,
+  candidateModuleId,
+}: {
+  analysis: Pick<AutoImportAnalysis, "graph">;
+  currentModuleId?: string;
+  candidateModuleId: string;
+}): string => {
+  if (!currentModuleId) {
+    return candidateModuleId;
+  }
+
+  const currentModule = analysis.graph.modules.get(currentModuleId);
+  const candidateModule = analysis.graph.modules.get(candidateModuleId);
+  if (!currentModule || !candidateModule) {
+    return candidateModuleId;
+  }
+
+  const currentNamespace = currentModule.path.namespace;
+  if (currentNamespace !== "src" || candidateModule.path.namespace !== "src") {
+    return candidateModuleId;
+  }
+  if (currentModule.path.segments.at(-1) !== "pkg") {
+    return candidateModuleId;
+  }
+  if (
+    !sameSegments({
+      left: currentModule.sourcePackageRoot,
+      right: candidateModule.sourcePackageRoot,
+    })
+  ) {
+    return candidateModuleId;
+  }
+
+  const packageRoot = currentModule.sourcePackageRoot ?? [];
+  if (candidateModule.path.segments.length <= packageRoot.length) {
+    return candidateModuleId;
+  }
+
+  const relativeSegments = candidateModule.path.segments.slice(packageRoot.length);
+  if (relativeSegments.length === 0 || relativeSegments[0] === "pkg") {
+    return candidateModuleId;
+  }
+
+  return `self::${relativeSegments.join("::")}`;
 };
 
 export type ImportInsertionContext = {
@@ -135,6 +205,251 @@ export const insertImportEdit = ({
   });
 };
 
+const lineStartOffsetFor = ({
+  source,
+  offset,
+}: {
+  source: string;
+  offset: number;
+}): number => {
+  const boundedOffset = Math.max(0, Math.min(offset, source.length));
+  const previousNewline = source.lastIndexOf("\n", Math.max(0, boundedOffset - 1));
+  return previousNewline < 0 ? 0 : previousNewline + 1;
+};
+
+const leadingIndentationAt = ({
+  source,
+  offset,
+}: {
+  source: string;
+  offset: number;
+}): string => {
+  const lineStart = lineStartOffsetFor({ source, offset });
+  const indentation = source.slice(lineStart, offset);
+  return /^\s*$/.test(indentation) ? indentation : "";
+};
+
+const modulePathTextForUseEntry = (entry: NormalizedUseEntry): string | undefined => {
+  if (!entry.hasExplicitPrefix) {
+    return undefined;
+  }
+
+  const basePath = entry.moduleSegments.join("::");
+  if (entry.anchorToSelf) {
+    return basePath.length > 0 ? `self::${basePath}` : "self";
+  }
+
+  const parentHops = entry.parentHops ?? 0;
+  if (parentHops > 0) {
+    const superPath = Array.from({ length: parentHops }, () => "super").join("::");
+    return basePath.length > 0 ? `${superPath}::${basePath}` : superPath;
+  }
+
+  return basePath.length > 0 ? basePath : undefined;
+};
+
+const useDeclRewriteContextFromForm = ({
+  useForm,
+  source,
+  startIndex,
+}: {
+  useForm: Form;
+  source: string;
+  startIndex: number;
+}):
+  | {
+      indentation: string;
+      visibility: "" | "pub ";
+      modulePath: string;
+    }
+  | undefined => {
+  const parsedUseDecl = parseTopLevelUseDecl(useForm);
+  if (!parsedUseDecl) {
+    return undefined;
+  }
+
+  const entries = parseUsePaths(parsedUseDecl.pathExpr, toSourceSpan(useForm));
+  const first = entries[0];
+  if (!first) {
+    return undefined;
+  }
+
+  const modulePath = modulePathTextForUseEntry(first);
+  if (!modulePath) {
+    return undefined;
+  }
+
+  const allSameModulePath = entries.every(
+    (entry) => modulePathTextForUseEntry(entry) === modulePath,
+  );
+  if (!allSameModulePath) {
+    return undefined;
+  }
+
+  return {
+    indentation: leadingIndentationAt({ source, offset: startIndex }),
+    visibility: parsedUseDecl.visibility === "pub" ? "pub " : "",
+    modulePath,
+  };
+};
+
+const simpleNamedImportEntries = ({
+  entries,
+  candidateModuleId,
+}: {
+  entries: readonly {
+    moduleId?: string;
+    selectionKind: string;
+    targetName?: string;
+    alias?: string;
+  }[];
+  candidateModuleId: string;
+}): string[] | undefined => {
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  const names = entries.map((entry) => {
+    if (
+      entry.moduleId !== candidateModuleId ||
+      entry.selectionKind !== "name" ||
+      !entry.targetName ||
+      (entry.alias !== undefined && entry.alias !== entry.targetName) ||
+      !IMPORTABLE_IDENTIFIER_PATTERN.test(entry.targetName)
+    ) {
+      return undefined;
+    }
+    return entry.targetName;
+  });
+
+  if (names.some((name) => name === undefined)) {
+    return undefined;
+  }
+
+  return names as string[];
+};
+
+const mergeImportEdit = ({
+  analysis,
+  documentUri,
+  candidateModuleId,
+  candidateName,
+}: {
+  analysis: Pick<AutoImportAnalysis, "moduleIdByFilePath" | "semantics" | "graph">;
+  documentUri: string;
+  candidateModuleId: string;
+  candidateName: string;
+}): { edit?: TextEdit; modulePath?: string; alreadyImported: boolean } => {
+  const filePath = path.resolve(toFilePath(documentUri));
+  const currentModuleId = analysis.moduleIdByFilePath.get(filePath);
+  if (!currentModuleId) {
+    return { alreadyImported: false };
+  }
+
+  const semantics = analysis.semantics.get(currentModuleId);
+  const source = analysis.graph.modules.get(currentModuleId)?.source;
+  if (!semantics || source === undefined) {
+    return { alreadyImported: false };
+  }
+
+  const lineIndex = new LineIndex(source);
+
+  for (const useDecl of semantics.binding.uses) {
+    const names = simpleNamedImportEntries({
+      entries: useDecl.entries,
+      candidateModuleId,
+    });
+    if (!names) {
+      continue;
+    }
+
+    if (names.includes(candidateName)) {
+      return { alreadyImported: true };
+    }
+
+    const startIndex = useDecl.form.location?.startIndex;
+    const endIndex = useDecl.form.location?.endIndex;
+    if (typeof startIndex !== "number" || typeof endIndex !== "number") {
+      continue;
+    }
+
+    const rewriteContext = useDeclRewriteContextFromForm({
+      useForm: useDecl.form,
+      source,
+      startIndex,
+    });
+    if (!rewriteContext || rewriteContext.modulePath.length === 0) {
+      continue;
+    }
+
+    const mergedNames = [...new Set([...names, candidateName])];
+    return {
+      modulePath: rewriteContext.modulePath,
+      alreadyImported: false,
+      edit: {
+        range: {
+          start: lineIndex.positionAt(startIndex),
+          end: lineIndex.positionAt(endIndex),
+        },
+        newText: `${rewriteContext.indentation}${rewriteContext.visibility}use ${rewriteContext.modulePath}::{ ${mergedNames.join(", ")} }`,
+      },
+    };
+  }
+
+  return { alreadyImported: false };
+};
+
+export const resolveImportEdit = ({
+  analysis,
+  documentUri,
+  candidateModuleId,
+  candidateName,
+}: {
+  analysis: Pick<AutoImportAnalysis, "moduleIdByFilePath" | "semantics" | "graph">;
+  documentUri: string;
+  candidateModuleId: string;
+  candidateName: string;
+}): { edit: TextEdit; modulePath: string } | undefined => {
+  const currentFilePath = path.resolve(toFilePath(documentUri));
+  const currentModuleId = analysis.moduleIdByFilePath.get(currentFilePath);
+  const modulePath = importModulePath({
+    analysis,
+    currentModuleId,
+    candidateModuleId,
+  });
+
+  const merged = mergeImportEdit({
+    analysis,
+    documentUri,
+    candidateModuleId,
+    candidateName,
+  });
+  if (merged.alreadyImported) {
+    return undefined;
+  }
+  if (merged.edit) {
+    return {
+      edit: merged.edit,
+      modulePath: merged.modulePath ?? modulePath,
+    };
+  }
+
+  const importLine = `use ${modulePath}::${candidateName}`;
+  const insertEdit = insertImportEdit({
+    analysis,
+    documentUri,
+    importLine,
+  });
+  if (!insertEdit) {
+    return undefined;
+  }
+
+  return {
+    edit: insertEdit,
+    modulePath,
+  };
+};
+
 const importActionsForDiagnostic = ({
   analysis,
   documentUri,
@@ -161,30 +476,31 @@ const importActionsForDiagnostic = ({
     .filter((candidate) => candidate.moduleId !== currentModuleId)
     .filter((candidate) => kindMatchesDiagnostic({ code, kind: candidate.kind }));
 
-  const seenImportLines = new Set<string>();
+  const seenCandidates = new Set<string>();
 
   return candidates
     .map((candidate) => {
-      const importLine = `use ${candidate.moduleId}::${candidate.name}`;
-      if (seenImportLines.has(importLine)) {
+      const candidateKey = `${candidate.moduleId}:${candidate.name}`;
+      if (seenCandidates.has(candidateKey)) {
         return undefined;
       }
-      seenImportLines.add(importLine);
+      seenCandidates.add(candidateKey);
 
-      const edit = insertImportEdit({
+      const resolved = resolveImportEdit({
         analysis,
         documentUri,
-        importLine,
+        candidateModuleId: candidate.moduleId,
+        candidateName: candidate.name,
       });
-      if (!edit) {
+      if (!resolved) {
         return undefined;
       }
 
       return CodeAction.create(
-        `Import ${candidate.name} from ${candidate.moduleId}`,
+        `Import ${candidate.name} from ${resolved.modulePath}`,
         {
           changes: {
-            [documentUri]: [edit],
+            [documentUri]: [resolved.edit],
           },
         },
         CodeActionKind.QuickFix,

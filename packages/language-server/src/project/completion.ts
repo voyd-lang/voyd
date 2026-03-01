@@ -13,8 +13,7 @@ import {
 } from "vscode-languageserver/lib/node/main.js";
 import { toFilePath } from "./files.js";
 import {
-  insertImportEditFromContext,
-  resolveImportInsertionContext,
+  resolveImportEdit,
 } from "./auto-imports.js";
 import type { CompletionAnalysis } from "./types.js";
 
@@ -326,7 +325,6 @@ const completionsForAutoImports = ({
   analysis,
   moduleId,
   uri,
-  source,
   prefix,
   replacementStartOffset,
   replacementEndOffset,
@@ -336,7 +334,6 @@ const completionsForAutoImports = ({
   analysis: CompletionAnalysis;
   moduleId: string;
   uri: string;
-  source: string;
   prefix: string;
   replacementStartOffset: number;
   replacementEndOffset: number;
@@ -356,14 +353,6 @@ const completionsForAutoImports = ({
     start: lineIndex.positionAt(replacementStartOffset),
     end: lineIndex.positionAt(replacementEndOffset),
   };
-  const importInsertionContext = resolveImportInsertionContext({
-    analysis,
-    documentUri: uri,
-  });
-  if (!importInsertionContext) {
-    return { items: [], isIncomplete: false };
-  }
-  const existingImportLines = new Set(source.split("\n").map((line) => line.trim()));
   const seenSuggestions = new Set<string>();
   const suggestions: CompletionItem[] = [];
   const firstCharacter = prefix.slice(0, 1).toLowerCase();
@@ -388,20 +377,20 @@ const completionsForAutoImports = ({
       }
       seenSuggestions.add(suggestionKey);
 
-      const importLine = `use ${candidate.moduleId}::${candidate.name}`;
-      if (existingImportLines.has(importLine)) {
+      const resolvedImportEdit = resolveImportEdit({
+        analysis,
+        documentUri: uri,
+        candidateModuleId: candidate.moduleId,
+        candidateName: candidate.name,
+      });
+      if (!resolvedImportEdit) {
         continue;
       }
-
-      const additionalEdit = insertImportEditFromContext({
-        context: importInsertionContext,
-        importLine,
-      });
 
       suggestions.push({
         label: candidate.name,
         kind: kindFromExportKind(candidate.kind),
-        detail: `${candidate.kind} from ${candidate.moduleId}`,
+        detail: `${candidate.kind} from ${resolvedImportEdit.modulePath}`,
         sortText: [
           "9",
           padSortRank(autoImportPriorityFromKind(candidate.kind)),
@@ -412,7 +401,7 @@ const completionsForAutoImports = ({
           range: replacementRange,
           newText: candidate.name,
         },
-        additionalTextEdits: [additionalEdit],
+        additionalTextEdits: [resolvedImportEdit.edit],
       });
 
       if (suggestions.length >= maxItems) {
@@ -482,7 +471,6 @@ export const completionsAtPosition = ({
     analysis,
     moduleId,
     uri,
-    source,
     prefix: replacement.prefix,
     replacementStartOffset: replacement.start,
     replacementEndOffset: replacement.end,

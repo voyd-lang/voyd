@@ -633,29 +633,29 @@ describe("language server project analysis", () => {
     }
   });
 
-  it("keeps nested package roots when src/pkg.voyd exists without src/pkgs.voyd", async () => {
+  it("uses project src root when src/pkg.voyd exists without src/pkgs.voyd", async () => {
     const project = await createProject({
       "main.voyd": `fn main() -> i32\n  0\n`,
       "src/pkg.voyd": `pub use self::main`,
-      "src/pkgs/vtrace/pkg.voyd": `use src::util`,
+      "src/pkgs/vtrace/pkg.voyd": `use self::util`,
       "src/pkgs/vtrace/util.voyd": `pub fn helper() -> i32\n  1\n`,
     });
 
     try {
       const entryPath = project.filePathFor("src/pkgs/vtrace/pkg.voyd");
       const roots = resolveModuleRoots(entryPath);
-      expect(roots.src).toBe(project.filePathFor("src/pkgs/vtrace"));
+      expect(roots.src).toBe(project.filePathFor("src"));
 
       const analysis = await analyzeProject({
         entryPath,
         roots,
         openDocuments: new Map(),
       });
-      expect(analysis.graph.modules.has("src::util")).toBe(true);
+      expect(analysis.graph.modules.has("src::pkgs::vtrace::util")).toBe(true);
       const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
       expect(
         diagnostics.some((diagnostic) =>
-          diagnostic.message.includes("Unable to resolve module src::util"),
+          diagnostic.message.includes("Unable to resolve module self::util"),
         ),
       ).toBe(false);
     } finally {
@@ -719,6 +719,61 @@ describe("language server project analysis", () => {
         "use super::io::{ write_line, write, StdErr }\nuse src::vec3::vec3\n\n",
       );
       expect(updated).not.toContain("StdErr\nuse src::vec3::vec3}");
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("merges auto-imports into matching use declarations with grouped syntax", async () => {
+    const project = await createProject({
+      "main.voyd": `fn main() -> i32\n  0\n`,
+      "src/pkg.voyd": `pub use self::main`,
+      "src/pkgs/vtrace/pkg.voyd":
+        `use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
+      "src/pkgs/vtrace/hit.voyd":
+        `pub fn hittable() -> i32\n  0\n\npub fn hit_record() -> i32\n  0\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/pkgs/vtrace/pkg.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      const codeActions = autoImportActions({
+        analysis,
+        documentUri: uri,
+        diagnostics,
+      });
+
+      const importAction = codeActions.find((action) =>
+        action.title.includes("Import hit_record from self::hit"),
+      );
+      expect(importAction).toBeDefined();
+      if (!importAction) {
+        return;
+      }
+
+      const edit = importAction.edit?.changes?.[uri]?.[0];
+      expect(edit).toBeDefined();
+      if (!edit) {
+        return;
+      }
+
+      const updated = applyEditToSource({
+        uri,
+        source:
+          `use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
+        version: 1,
+        text: edit,
+      });
+
+      expect(updated).toContain("use self::hit::{ hittable, hit_record }");
+      expect(updated).not.toContain("use self::hit::hittable\nuse self::hit::hit_record");
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
