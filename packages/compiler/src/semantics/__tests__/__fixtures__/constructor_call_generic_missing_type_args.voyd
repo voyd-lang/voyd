@@ -1,0 +1,10 @@
+obj Box<T> {
+  marker: i32
+}
+
+impl<T> Box<T>
+  fn init() -> Box<T>
+    Box { marker: 0 }
+
+pub fn main()
+  let _value = Box()
