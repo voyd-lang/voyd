@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline } from "../binding/binding.js";
 import { loadAst } from "./load-ast.js";
-import { isForm, isIdentifierAtom, parse, type Form } from "../../parser/index.js";
+import {
+  isForm,
+  isIdentifierAtom,
+  isStringAtom,
+  parse,
+  type Form,
+} from "../../parser/index.js";
 import { toSourceSpan } from "../utils.js";
 import { modulePathToString } from "../../modules/path.js";
 import { buildModuleGraph } from "../../modules/graph.js";
@@ -2001,6 +2007,23 @@ pub fn main() -> i32
     expect(x?.visibility.level).toBe("module");
     expect(pi?.visibility.level).toBe("package");
     expect(pi?.typeExpr).toBeDefined();
+  });
+
+  it("supports string literal initializers for module-level let", () => {
+    const source = `let message = "hello"
+
+pub fn main() -> i32
+  0`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const message = binding.moduleLets.find(
+      (decl) => symbolTable.getSymbol(decl.symbol).name === "message",
+    );
+    expect(message).toBeDefined();
+    expect(message?.initializer).toBeDefined();
   });
 
   it("rejects mutable object module-level let bindings", () => {

@@ -213,6 +213,12 @@ const resolveModuleLetValueType = ({
         ctx.primitives.unknown,
       )
     : undefined;
+  moduleLetState.currentFunction = {
+    returnType:
+      typeof annotationType === "number" ? annotationType : ctx.primitives.unknown,
+    instanceKey: `module-let:${symbol}`,
+    functionSymbol: symbol,
+  };
 
   const moduleLetSpan = normalizeSpan(span ?? moduleLet.span);
   const symbolName = ctx.symbolTable.getSymbol(symbol).name;

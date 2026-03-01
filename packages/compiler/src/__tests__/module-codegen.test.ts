@@ -356,4 +356,30 @@ pub fn main() -> i32
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(42);
   });
+
+  it("supports expression initializers for module-level lets", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `let a = 1
+
+fn foo() -> i32
+  7
+
+let b = foo()
+let c = if b > 4 then: 4 else: b
+
+pub fn main() -> i32
+  a + c`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(5);
+  });
 });

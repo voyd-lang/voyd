@@ -215,6 +215,7 @@ export const registerModuleLetGetters = (ctx: CodegenContext): void => {
   const bySymbol =
     ctx.moduleLetGetters.get(ctx.moduleId) ??
     new Map<SymbolId, ModuleLetGetterMetadata>();
+  ctx.moduleLetGetters.set(ctx.moduleId, bySymbol);
 
   moduleLets.forEach((moduleLet) => {
     if (bySymbol.has(moduleLet.symbol)) {
@@ -224,8 +225,6 @@ export const registerModuleLetGetters = (ctx: CodegenContext): void => {
     bySymbol.set(moduleLet.symbol, getter);
     markInitializerDependenciesReachable({ moduleLet, ctx });
   });
-
-  ctx.moduleLetGetters.set(ctx.moduleId, bySymbol);
 };
 
 export const resolveModuleLetGetter = ({
