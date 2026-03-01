@@ -1,9 +1,10 @@
 import path from "node:path";
-import type { ScopeId, SourceSpan, SymbolId } from "@voyd/compiler/semantics/ids.js";
+import type { ScopeId, SymbolId } from "@voyd/compiler/semantics/ids.js";
 import type {
   SymbolKind,
   SymbolRecord,
 } from "@voyd/compiler/semantics/binder/types.js";
+import type { SemanticsPipelineResult } from "@voyd/compiler/semantics/pipeline.js";
 import {
   CompletionItemKind,
   type CompletionItem,
@@ -16,9 +17,28 @@ import {
   insertImportEditFromContext,
   resolveImportInsertionContext,
 } from "./auto-imports.js";
+import type { ExportCandidate } from "./types.js";
 import type { CompletionAnalysis } from "./types.js";
 
 const MAX_COMPLETION_ITEMS = 200;
+const MAX_AUTO_IMPORT_ITEMS = 40;
+const AUTO_IMPORT_MIN_PREFIX_LENGTH = 2;
+
+type ScopedNodeSpan = {
+  start: number;
+  end: number;
+  scope: ScopeId;
+  width: number;
+};
+
+const scopedNodesByFileCache = new WeakMap<
+  SemanticsPipelineResult,
+  Map<string, ScopedNodeSpan[]>
+>();
+const exportsByFirstCharacterCache = new WeakMap<
+  ReadonlyMap<string, readonly ExportCandidate[]>,
+  Map<string, Array<{ name: string; candidates: readonly ExportCandidate[] }>>
+>();
 
 const isIdentifierCharacter = (value: string | undefined): boolean =>
   Boolean(value && /[A-Za-z0-9_]/.test(value));
@@ -47,32 +67,33 @@ const offsetToReplace = ({
   };
 };
 
-const spanContainsOffset = ({
-  span,
-  filePath,
-  offset,
-}: {
-  span: SourceSpan;
-  filePath: string;
-  offset: number;
-}): boolean => {
-  if (path.resolve(span.file) !== filePath) {
-    return false;
-  }
-  return offset >= span.start && offset <= span.end;
-};
-
-const spanWidth = (span: SourceSpan): number => span.end - span.start;
-
 const isVisibleSymbolKind = (kind: SymbolKind): boolean =>
   kind === "value" ||
   kind === "parameter" ||
   kind === "type" ||
   kind === "type-parameter" ||
-  kind === "trait" ||
-  kind === "effect" ||
-  kind === "effect-op" ||
-  kind === "module";
+  kind === "trait";
+
+const padSortRank = (value: number): string => value.toString().padStart(3, "0");
+
+const inScopeSymbolPriority = ({
+  record,
+  typeInfo,
+}: {
+  record: Readonly<SymbolRecord>;
+  typeInfo: string | undefined;
+}): number => {
+  if (record.kind === "parameter") {
+    return 0;
+  }
+  if (record.kind === "value") {
+    return typeInfo?.startsWith("fn ") ? 1 : 0;
+  }
+  if (record.kind === "type" || record.kind === "type-parameter" || record.kind === "trait") {
+    return 2;
+  }
+  return 9;
+};
 
 const kindFromSymbolRecord = ({
   record,
@@ -121,6 +142,19 @@ const kindFromExportKind = (kind: string): CompletionItemKind => {
   return CompletionItemKind.Text;
 };
 
+const autoImportPriorityFromKind = (kind: string): number => {
+  if (kind === "value") {
+    return 0;
+  }
+  if (kind === "type" || kind === "trait") {
+    return 1;
+  }
+  if (kind === "module") {
+    return 2;
+  }
+  return 9;
+};
+
 const symbolScopeChain = ({
   startScope,
   getParentScope,
@@ -139,19 +173,17 @@ const symbolScopeChain = ({
   return chain;
 };
 
-const declarationStartOffsetsByAstNode = ({
-  moduleId,
-  analysis,
+const scopedNodesByFile = ({
+  semantics,
 }: {
-  moduleId: string;
-  analysis: CompletionAnalysis;
-}): Map<number, number> => {
-  const semantics = analysis.semantics.get(moduleId);
-  if (!semantics) {
-    return new Map<number, number>();
+  semantics: SemanticsPipelineResult;
+}): Map<string, ScopedNodeSpan[]> => {
+  const cached = scopedNodesByFileCache.get(semantics);
+  if (cached) {
+    return cached;
   }
 
-  const byAstNode = new Map<number, number>();
+  const nodesByFile = new Map<string, ScopedNodeSpan[]>();
   const nodes = [
     semantics.hir.module,
     ...semantics.hir.items.values(),
@@ -160,13 +192,27 @@ const declarationStartOffsetsByAstNode = ({
   ];
 
   nodes.forEach((node) => {
-    const current = byAstNode.get(node.ast);
-    if (current === undefined || node.span.start < current) {
-      byAstNode.set(node.ast, node.span.start);
+    const scope = semantics.binding.scopeByNode.get(node.ast);
+    if (scope === undefined) {
+      return;
     }
+
+    const filePath = path.resolve(node.span.file);
+    const byFile = nodesByFile.get(filePath) ?? [];
+    byFile.push({
+      start: node.span.start,
+      end: node.span.end,
+      scope,
+      width: node.span.end - node.span.start,
+    });
+    nodesByFile.set(filePath, byFile);
   });
 
-  return byAstNode;
+  nodesByFile.forEach((entries) => {
+    entries.sort((left, right) => left.width - right.width);
+  });
+  scopedNodesByFileCache.set(semantics, nodesByFile);
+  return nodesByFile;
 };
 
 const findActiveScope = ({
@@ -185,28 +231,11 @@ const findActiveScope = ({
     return undefined;
   }
 
-  const nodes = [
-    semantics.hir.module,
-    ...semantics.hir.items.values(),
-    ...semantics.hir.statements.values(),
-    ...semantics.hir.expressions.values(),
-  ];
-
-  const containing = nodes
-    .filter((node) =>
-      spanContainsOffset({
-        span: node.span,
-        filePath,
-        offset: cursorOffset,
-      }),
-    )
-    .sort((left, right) => spanWidth(left.span) - spanWidth(right.span));
-
-  const targetNode = containing.find((node) =>
-    semantics.binding.scopeByNode.has(node.ast),
-  );
-  if (targetNode) {
-    return semantics.binding.scopeByNode.get(targetNode.ast);
+  const nodes = scopedNodesByFile({ semantics }).get(filePath) ?? [];
+  for (const node of nodes) {
+    if (cursorOffset >= node.start && cursorOffset <= node.end) {
+      return node.scope;
+    }
   }
 
   return semantics.binding.symbolTable.rootScope;
@@ -228,6 +257,31 @@ const startsWithPrefix = ({
 const isImportedSymbol = (record: Readonly<SymbolRecord>): boolean => {
   const metadata = record.metadata as { import?: unknown } | undefined;
   return metadata?.import !== undefined;
+};
+
+const exportEntriesByFirstCharacter = ({
+  exportsByName,
+}: {
+  exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
+}): Map<string, Array<{ name: string; candidates: readonly ExportCandidate[] }>> => {
+  const cached = exportsByFirstCharacterCache.get(exportsByName);
+  if (cached) {
+    return cached;
+  }
+
+  const byFirstCharacter = new Map<
+    string,
+    Array<{ name: string; candidates: readonly ExportCandidate[] }>
+  >();
+  exportsByName.forEach((candidates, name) => {
+    const firstCharacter = name.slice(0, 1).toLowerCase();
+    const entries = byFirstCharacter.get(firstCharacter) ?? [];
+    entries.push({ name, candidates });
+    byFirstCharacter.set(firstCharacter, entries);
+  });
+
+  exportsByFirstCharacterCache.set(exportsByName, byFirstCharacter);
+  return byFirstCharacter;
 };
 
 const completionsForInScopeSymbols = ({
@@ -256,34 +310,23 @@ const completionsForInScopeSymbols = ({
   }
 
   const declarationOffsetBySymbol = new Map<SymbolId, number>();
-  (analysis.occurrencesByUri.get(uri) ?? [])
-    .filter((entry) => entry.moduleId === moduleId && entry.kind === "declaration")
-    .forEach((entry) => {
+  const canonicalKeyBySymbol = new Map<SymbolId, string>();
+  (analysis.occurrencesByUri.get(uri) ?? []).forEach((entry) => {
+    if (entry.moduleId !== moduleId) {
+      return;
+    }
+
+    if (entry.kind === "declaration") {
       const current = declarationOffsetBySymbol.get(entry.symbol);
       const next = lineIndex.offsetAt(entry.range.start);
       if (current === undefined || next < current) {
         declarationOffsetBySymbol.set(entry.symbol, next);
       }
-    });
-  const declarationOffsetByAstNode = declarationStartOffsetsByAstNode({
-    moduleId,
-    analysis,
-  });
-
-  const canonicalKeyBySymbol = new Map<SymbolId, string>();
-  analysis.declarationsByKey.forEach((entries, canonicalKey) => {
-    entries.forEach((entry) => {
-      if (entry.moduleId !== moduleId || canonicalKeyBySymbol.has(entry.symbol)) {
-        return;
-      }
-      canonicalKeyBySymbol.set(entry.symbol, canonicalKey);
-    });
-  });
-  (analysis.occurrencesByUri.get(uri) ?? []).forEach((entry) => {
-    if (entry.moduleId !== moduleId || canonicalKeyBySymbol.has(entry.symbol)) {
-      return;
     }
-    canonicalKeyBySymbol.set(entry.symbol, entry.canonicalKey);
+
+    if (!canonicalKeyBySymbol.has(entry.symbol)) {
+      canonicalKeyBySymbol.set(entry.symbol, entry.canonicalKey);
+    }
   });
 
   const replacementRange = {
@@ -298,7 +341,8 @@ const completionsForInScopeSymbols = ({
     getParentScope: (scope) => semantics.binding.symbolTable.getScope(scope).parent,
   });
 
-  for (const scope of scopeChain) {
+  for (let scopeDepth = 0; scopeDepth < scopeChain.length; scopeDepth += 1) {
+    const scope = scopeChain[scopeDepth]!;
     const scopeSymbols = Array.from(semantics.binding.symbolTable.symbolsInScope(scope));
     for (let index = scopeSymbols.length - 1; index >= 0; index -= 1) {
       const symbol = scopeSymbols[index]!;
@@ -314,19 +358,14 @@ const completionsForInScopeSymbols = ({
       }
 
       const declarationOffset = declarationOffsetBySymbol.get(symbol);
-      const declarationOffsetFromAst = declarationOffsetByAstNode.get(
-        record.declaredAt,
-      );
-      const effectiveDeclarationOffset =
-        declarationOffset ?? declarationOffsetFromAst;
       const scopeKind = semantics.binding.symbolTable.getScope(record.scope).kind;
       const isModuleScoped =
         scopeKind === "module" || scopeKind === "macro";
 
       if (
         !isModuleScoped &&
-        effectiveDeclarationOffset !== undefined &&
-        effectiveDeclarationOffset > cursorOffset
+        declarationOffset !== undefined &&
+        declarationOffset > cursorOffset
       ) {
         continue;
       }
@@ -346,7 +385,12 @@ const completionsForInScopeSymbols = ({
       const item: CompletionItem = {
         label: record.name,
         kind: kindFromSymbolRecord({ record, typeInfo }),
-        sortText: `1:${record.name}`,
+        sortText: [
+          "0",
+          padSortRank(scopeDepth),
+          padSortRank(inScopeSymbolPriority({ record, typeInfo })),
+          record.name,
+        ].join(":"),
         detail: typeInfo,
         documentation: markdownDocumentation,
         textEdit: {
@@ -378,6 +422,7 @@ const completionsForAutoImports = ({
   replacementStartOffset,
   replacementEndOffset,
   visibleNames,
+  maxItems,
 }: {
   analysis: CompletionAnalysis;
   moduleId: string;
@@ -387,8 +432,9 @@ const completionsForAutoImports = ({
   replacementStartOffset: number;
   replacementEndOffset: number;
   visibleNames: ReadonlySet<string>;
+  maxItems: number;
 }): CompletionItem[] => {
-  if (prefix.length === 0) {
+  if (prefix.length < AUTO_IMPORT_MIN_PREFIX_LENGTH || maxItems <= 0) {
     return [];
   }
 
@@ -411,28 +457,33 @@ const completionsForAutoImports = ({
   const existingImportLines = new Set(source.split("\n").map((line) => line.trim()));
   const seenSuggestions = new Set<string>();
   const suggestions: CompletionItem[] = [];
+  const firstCharacter = prefix.slice(0, 1).toLowerCase();
+  const matchingEntries =
+    exportEntriesByFirstCharacter({
+      exportsByName: analysis.exportsByName,
+    }).get(firstCharacter) ?? [];
 
-  analysis.exportsByName.forEach((candidates, exportedName) => {
+  for (const { name: exportedName, candidates } of matchingEntries) {
     if (!startsWithPrefix({ name: exportedName, prefix })) {
-      return;
+      continue;
     }
     if (visibleNames.has(exportedName)) {
-      return;
+      continue;
     }
 
-    candidates.forEach((candidate) => {
+    for (const candidate of candidates) {
       if (candidate.moduleId === moduleId) {
-        return;
+        continue;
       }
       const suggestionKey = `${candidate.name}:${candidate.moduleId}`;
       if (seenSuggestions.has(suggestionKey)) {
-        return;
+        continue;
       }
       seenSuggestions.add(suggestionKey);
 
       const importLine = `use ${candidate.moduleId}::${candidate.name}`;
       if (existingImportLines.has(importLine)) {
-        return;
+        continue;
       }
 
       const additionalEdit = insertImportEditFromContext({
@@ -444,15 +495,24 @@ const completionsForAutoImports = ({
         label: candidate.name,
         kind: kindFromExportKind(candidate.kind),
         detail: `${candidate.kind} from ${candidate.moduleId}`,
-        sortText: `2:${candidate.name}:${candidate.moduleId}`,
+        sortText: [
+          "9",
+          padSortRank(autoImportPriorityFromKind(candidate.kind)),
+          candidate.name,
+          candidate.moduleId,
+        ].join(":"),
         textEdit: {
           range: replacementRange,
           newText: candidate.name,
         },
         additionalTextEdits: [additionalEdit],
       });
-    });
-  });
+
+      if (suggestions.length >= maxItems) {
+        return suggestions;
+      }
+    }
+  }
 
   return suggestions;
 };
@@ -507,6 +567,10 @@ export const completionsAtPosition = ({
     };
   }
 
+  const autoImportLimit = Math.max(
+    0,
+    Math.min(MAX_AUTO_IMPORT_ITEMS, MAX_COMPLETION_ITEMS - inScope.items.length),
+  );
   const autoImports = completionsForAutoImports({
     analysis,
     moduleId,
@@ -516,6 +580,7 @@ export const completionsAtPosition = ({
     replacementStartOffset: replacement.start,
     replacementEndOffset: replacement.end,
     visibleNames: inScope.visibleNames,
+    maxItems: autoImportLimit,
   });
 
   const items = [...inScope.items, ...autoImports].slice(0, MAX_COMPLETION_ITEMS);
