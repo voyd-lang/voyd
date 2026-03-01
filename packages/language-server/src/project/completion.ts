@@ -136,6 +136,36 @@ const symbolScopeChain = ({
   return chain;
 };
 
+const declarationStartOffsetsByAstNode = ({
+  moduleId,
+  analysis,
+}: {
+  moduleId: string;
+  analysis: CompletionAnalysis;
+}): Map<number, number> => {
+  const semantics = analysis.semantics.get(moduleId);
+  if (!semantics) {
+    return new Map<number, number>();
+  }
+
+  const byAstNode = new Map<number, number>();
+  const nodes = [
+    semantics.hir.module,
+    ...semantics.hir.items.values(),
+    ...semantics.hir.statements.values(),
+    ...semantics.hir.expressions.values(),
+  ];
+
+  nodes.forEach((node) => {
+    const current = byAstNode.get(node.ast);
+    if (current === undefined || node.span.start < current) {
+      byAstNode.set(node.ast, node.span.start);
+    }
+  });
+
+  return byAstNode;
+};
+
 const findActiveScope = ({
   analysis,
   moduleId,
@@ -232,6 +262,10 @@ const completionsForInScopeSymbols = ({
         declarationOffsetBySymbol.set(entry.symbol, next);
       }
     });
+  const declarationOffsetByAstNode = declarationStartOffsetsByAstNode({
+    moduleId,
+    analysis,
+  });
 
   const canonicalKeyBySymbol = new Map<SymbolId, string>();
   analysis.declarationsByKey.forEach((entries, canonicalKey) => {
@@ -277,7 +311,20 @@ const completionsForInScopeSymbols = ({
       }
 
       const declarationOffset = declarationOffsetBySymbol.get(symbol);
-      if (declarationOffset !== undefined && declarationOffset > cursorOffset) {
+      const declarationOffsetFromAst = declarationOffsetByAstNode.get(
+        record.declaredAt,
+      );
+      const effectiveDeclarationOffset =
+        declarationOffset ?? declarationOffsetFromAst;
+      const scopeKind = semantics.binding.symbolTable.getScope(record.scope).kind;
+      const isModuleScoped =
+        scopeKind === "module" || scopeKind === "macro";
+
+      if (
+        !isModuleScoped &&
+        effectiveDeclarationOffset !== undefined &&
+        effectiveDeclarationOffset > cursorOffset
+      ) {
         continue;
       }
 

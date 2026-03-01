@@ -328,6 +328,31 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("includes module-level completions declared after the cursor", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn main() -> i32\n  hel\n\nfn helper() -> i32\n  1\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const completion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 1, character: 5 },
+      });
+      expect(completion.items.some((item) => item.label === "helper")).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("resolves src root for nested source package entries", async () => {
     const project = await createProject({
       "main.voyd": `fn main() -> i32\n  0\n`,
