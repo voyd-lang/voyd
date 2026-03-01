@@ -107,6 +107,70 @@ describe("language server project analysis", () => {
     }
   }, 15_000);
 
+  it("resolves go-to-definition for imported module-level lets", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::constants::answer\n\nfn main() -> i32\n  answer\n`,
+      "src/constants.voyd": `pub let answer = 42\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const definitions = definitionsAtPosition({
+        analysis,
+        uri: toFileUri(entryPath),
+        position: { line: 3, character: 3 },
+      });
+
+      expect(definitions).toHaveLength(1);
+      expect(definitions[0]?.uri).toBe(toFileUri(project.filePathFor("src/constants.voyd")));
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves go-to-definition for intermediate modules in use paths", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::util::math::helper\n\nfn main() -> i32\n  helper()\n`,
+      "src/util.voyd": `pub use self::math\n`,
+      "src/util/math.voyd": `pub fn helper() -> i32\n  1\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const utilDefinitions = definitionsAtPosition({
+        analysis,
+        uri: toFileUri(entryPath),
+        position: { line: 0, character: 10 },
+      });
+      const mathDefinitions = definitionsAtPosition({
+        analysis,
+        uri: toFileUri(entryPath),
+        position: { line: 0, character: 16 },
+      });
+
+      expect(utilDefinitions).toHaveLength(1);
+      expect(utilDefinitions[0]?.uri).toBe(toFileUri(project.filePathFor("src/util.voyd")));
+      expect(mathDefinitions).toHaveLength(1);
+      expect(mathDefinitions[0]?.uri).toBe(
+        toFileUri(project.filePathFor("src/util/math.voyd")),
+      );
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("treats symbol ranges as end-exclusive for navigation", async () => {
     const project = await createProject({
       "src/main.voyd": `use src::util::helper\n\nfn main() -> i32\n  helper(1)\n`,

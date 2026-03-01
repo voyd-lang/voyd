@@ -25,6 +25,32 @@ const findSymbolAtPosition = ({
   return occurrences.find((entry) => isInRange(position, entry.range));
 };
 
+const findSymbolWithDeclarationAtPosition = ({
+  analysis,
+  uri,
+  position,
+}: {
+  analysis: NavigationAnalysis;
+  uri: string;
+  position: Position;
+}): SymbolOccurrence | undefined => {
+  const occurrences = analysis.occurrencesByUri.get(uri);
+  if (!occurrences || occurrences.length === 0) {
+    return undefined;
+  }
+
+  const matches = occurrences.filter((entry) => isInRange(position, entry.range));
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  return (
+    matches.find(
+      (entry) => (analysis.declarationsByKey.get(entry.canonicalKey)?.length ?? 0) > 0,
+    ) ?? matches[0]
+  );
+};
+
 export const definitionsAtPosition = ({
   analysis,
   uri,
@@ -34,7 +60,7 @@ export const definitionsAtPosition = ({
   uri: string;
   position: Position;
 }): Location[] => {
-  const symbol = findSymbolAtPosition({ analysis, uri, position });
+  const symbol = findSymbolWithDeclarationAtPosition({ analysis, uri, position });
   if (!symbol) {
     return [];
   }
@@ -56,7 +82,7 @@ export const prepareRenameAtPosition = ({
   position: Position;
 }): { range: Range; placeholder: string } | null => {
   const symbol = findSymbolAtPosition({ analysis, uri, position });
-  if (!symbol) {
+  if (!symbol || symbol.symbol < 0) {
     return null;
   }
 
@@ -75,7 +101,7 @@ export const renameAtPosition = ({
   newName: string;
 }): WorkspaceEdit | null => {
   const symbol = findSymbolAtPosition({ analysis, uri, position });
-  if (!symbol) {
+  if (!symbol || symbol.symbol < 0) {
     return null;
   }
 
