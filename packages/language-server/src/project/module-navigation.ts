@@ -255,7 +255,17 @@ const declarationRangeFor = ({
   moduleId: string;
   lineIndex: LineIndex | undefined;
 }): Range => {
-  const moduleLocation = graph.modules.get(moduleId)?.ast.location;
+  const moduleNode = graph.modules.get(moduleId);
+  const inlineDeclarationSpan =
+    moduleNode?.origin.kind === "inline" ? moduleNode.origin.span : undefined;
+  if (inlineDeclarationSpan && lineIndex) {
+    return lineIndex.range(
+      inlineDeclarationSpan.start,
+      inlineDeclarationSpan.start + 1,
+    );
+  }
+
+  const moduleLocation = moduleNode?.ast.location;
   if (moduleLocation && lineIndex) {
     return lineIndex.range(moduleLocation.startIndex, moduleLocation.startIndex + 1);
   }

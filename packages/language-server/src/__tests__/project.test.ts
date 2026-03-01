@@ -171,6 +171,34 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("resolves inline module go-to-definition to mod declaration", async () => {
+    const project = await createProject({
+      "src/main.voyd":
+        `use self::util::helper\n\nmod util\n  pub fn helper() -> i32\n    1\n\nfn main() -> i32\n  helper()\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const utilDefinitions = definitionsAtPosition({
+        analysis,
+        uri: toFileUri(entryPath),
+        position: { line: 0, character: 10 },
+      });
+
+      expect(utilDefinitions).toHaveLength(1);
+      expect(utilDefinitions[0]?.uri).toBe(toFileUri(entryPath));
+      expect(utilDefinitions[0]?.range.start.line).toBe(2);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("treats symbol ranges as end-exclusive for navigation", async () => {
     const project = await createProject({
       "src/main.voyd": `use src::util::helper\n\nfn main() -> i32\n  helper(1)\n`,
