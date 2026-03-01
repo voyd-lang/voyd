@@ -633,6 +633,20 @@ describe("next codegen", () => {
     expect((callTo as () => number)()).toBe(3);
   });
 
+  it("routes intrinsic fallback targets for unspecialized overload-set instances", () => {
+    const instance = loadWasmInstance(
+      "operator_overload_intrinsic_fallback_instances.voyd",
+    );
+
+    const callInt = instance.exports.call_int;
+    expect(typeof callInt).toBe("function");
+    expect((callInt as () => number)()).toBe(8);
+
+    const callFloat = instance.exports.call_float;
+    expect(typeof callFloat).toBe("function");
+    expect((callFloat as () => number)()).toBeCloseTo(4);
+  });
+
   it("emits wasm for the elif sample and runs main()", () => {
     const main = loadMain("elif.voyd");
     expect(main()).toBe(0);

@@ -356,6 +356,36 @@ const compileResolvedSymbolCall = ({
     throw new Error(missingTraitDispatchMessage);
   }
 
+  const calleeId = ctx.program.symbols.canonicalIdOf(moduleId, symbol);
+  const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+  const shouldCompileIntrinsic =
+    intrinsicMetadata.intrinsic === true &&
+    intrinsicMetadata.intrinsicUsesSignature !== true;
+  if (shouldCompileIntrinsic) {
+    const args = compileCallArgExpressionsWithTemps({
+      callId: expr.id,
+      args: expr.args,
+      expectedTypeIdAt: () => undefined,
+      ctx,
+      fnCtx,
+      compileExpr,
+    });
+    return {
+      expr: compileIntrinsicCall({
+        name:
+          ctx.program.symbols.getIntrinsicName(calleeId) ??
+          ctx.program.symbols.getName(calleeId) ??
+          `${symbol}`,
+        call: expr,
+        args,
+        ctx,
+        fnCtx,
+        instanceId: typeInstanceId,
+      }),
+      usedReturnCall: false,
+    };
+  }
+
   const targetMeta = getFunctionMetadataForCall({
     symbol,
     callId: expr.id,

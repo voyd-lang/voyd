@@ -1,0 +1,14 @@
+fn '/'(left: i32, right: i32)
+  left
+
+fn '/'(left: i64, right: i64)
+  left
+
+fn divide<T>(left: T, right: T) -> T
+  '/'(left, right)
+
+pub fn call_int() -> i32
+  divide(8, 2)
+
+pub fn call_float() -> f64
+  divide(8.0, 2.0)
