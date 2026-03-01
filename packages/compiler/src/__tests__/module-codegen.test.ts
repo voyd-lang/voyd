@@ -14,10 +14,10 @@ const createMemoryHost = (files: Record<string, string>): ModuleHost =>
 const expectCompileSuccess = (
   result: CompileProgramResult,
 ): Extract<CompileProgramResult, { success: true }> => {
-  expect(result.success).toBe(true);
   if (!result.success) {
     throw new Error(JSON.stringify(result.diagnostics, null, 2));
   }
+  expect(result.success).toBe(true);
   return result;
 };
 
@@ -313,5 +313,155 @@ impl Animal
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(9);
+  });
+
+  it("reads module-level lets from local scope", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `let base = 40
+pub let addend = 2
+
+pub fn main() -> i32
+  base + addend`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("reads imported pub lets across modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use src::constants::all
+
+pub fn main() -> i32
+  answer + 1`,
+      [`${root}${sep}constants.voyd`]: `pub let answer = 41`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("supports expression initializers for module-level lets", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `let a = 1
+
+fn foo() -> i32
+  7
+
+let b = foo()
+let c = if b > 4 then: 4 else: b
+
+pub fn main() -> i32
+  a + c`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(5);
+  });
+
+  it("keeps string constructor dependencies reachable for module-let initializers", async () => {
+    const root = resolve("/proj/src");
+    const std = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use std::string::fns::new_string
+
+let greeting = "hello"
+
+pub fn main() -> i32
+  1`,
+      [`${std}${sep}string${sep}fns.voyd`]: `pub obj String {}
+pub obj FixedArray<T> {}
+
+@intrinsic(name: "__string_new", uses_signature: true)
+pub fn new_string(from_bytes: FixedArray<i32>): () -> String
+  String {}
+`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root, std },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(1);
+  });
+
+  it("supports module-let initializers that reference imported module lets", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use src::alpha::all
+
+pub fn main() -> i32
+  plus_one`,
+      [`${root}${sep}alpha.voyd`]: `use src::zeta::all
+
+pub let plus_one = base + 1`,
+      [`${root}${sep}zeta.voyd`]: `pub let base = 41`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("keeps method call targets reachable from module-let initializers", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `obj Box {
+  value: i32
+}
+
+impl Box
+  fn get(self) -> i32
+    self.value
+
+let computed = Box { value: 7 }.get()
+
+pub fn main() -> i32
+  computed`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(7);
   });
 });

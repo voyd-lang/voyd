@@ -11,6 +11,7 @@ import type { HirVisibility } from "../hir/index.js";
 import {
   DeclTable,
   type FunctionDecl,
+  type ModuleLetDecl,
   type ObjectDecl,
   type ParameterDecl,
   type TypeAliasDecl,
@@ -52,6 +53,7 @@ export interface BindingResult {
   scopeByNode: Map<NodeId, ScopeId>;
   decls: DeclTable;
   functions: readonly BoundFunction[];
+  moduleLets: readonly BoundModuleLet[];
   typeAliases: readonly BoundTypeAlias[];
   objects: readonly BoundObject[];
   traits: readonly BoundTrait[];
@@ -72,6 +74,7 @@ export interface BindingResult {
 }
 
 export type BoundFunction = FunctionDecl;
+export type BoundModuleLet = ModuleLetDecl;
 export type BoundTypeAlias = TypeAliasDecl;
 export type BoundParameter = ParameterDecl;
 export type BoundObject = ObjectDecl;

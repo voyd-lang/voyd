@@ -2,6 +2,7 @@ import { type Form, isForm } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import {
   parseFunctionDecl,
+  parseModuleLetDecl,
   parseObjectDecl,
   parseTypeAliasDecl,
   parseImplDecl,
@@ -9,6 +10,7 @@ import {
   parseEffectDecl,
 } from "../parsing.js";
 import { bindFunctionDecl } from "./function.js";
+import { bindModuleLetDecl } from "./module-let.js";
 import { bindObjectDecl } from "./object.js";
 import { bindTypeAlias, seedEnumAliasNamespaces } from "./type-alias.js";
 import { bindTraitDecl } from "./trait.js";
@@ -97,6 +99,12 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
       continue;
     }
 
+    const moduleLetDecl = parseModuleLetDecl(entry);
+    if (moduleLetDecl) {
+      bindModuleLetDecl(moduleLetDecl, ctx, tracker);
+      continue;
+    }
+
     const objectDecl = parseObjectDecl(entry);
     if (objectDecl) {
       bindObjectDecl(objectDecl, ctx, tracker);
@@ -128,7 +136,7 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
     }
 
     throw new Error(
-      "unsupported top-level form; expected a function or type declaration",
+      "unsupported top-level form; expected a declaration",
     );
   }
 

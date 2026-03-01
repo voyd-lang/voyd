@@ -10,6 +10,7 @@ import type { LowerContext, ModuleDeclaration } from "./types.js";
 import type {
   BindingResult,
   BoundFunction,
+  BoundModuleLet,
   BoundObject,
   BoundTypeAlias,
   BoundTrait,
@@ -36,6 +37,11 @@ export const getModuleDeclarations = (
       kind: "function" as const,
       order: fn.moduleIndex,
       fn,
+    })),
+    ...binding.moduleLets.map((moduleLet) => ({
+      kind: "module-let" as const,
+      order: moduleLet.moduleIndex,
+      moduleLet,
     })),
     ...binding.typeAliases.map((alias) => ({
       kind: "type-alias" as const,
@@ -184,6 +190,37 @@ export const lowerFunctionDecl = (
       visibility: toExportVisibility(fn.visibility, ctx),
       span: toSourceSpan(fn.form),
       item: fnId,
+    });
+  }
+};
+
+export const lowerModuleLetDecl = (
+  moduleLet: BoundModuleLet,
+  ctx: LowerContext,
+): void => {
+  const scopes = createLowerScopeStack(ctx.symbolTable.rootScope);
+  const initializer = lowerExpr(moduleLet.initializer, ctx, scopes);
+  const typeAnnotation = lowerTypeExpr(
+    moduleLet.typeExpr,
+    ctx,
+    scopes.current(),
+  );
+  const moduleLetId = ctx.builder.addItem({
+    kind: "module-let",
+    symbol: moduleLet.symbol,
+    visibility: moduleLet.visibility,
+    ast: moduleLet.form?.syntaxId ?? moduleLet.initializer.syntaxId,
+    span: toSourceSpan(moduleLet.form ?? moduleLet.initializer),
+    initializer,
+    typeAnnotation,
+  });
+
+  if (isPackageVisible(moduleLet.visibility)) {
+    ctx.builder.recordExport({
+      symbol: moduleLet.symbol,
+      visibility: toExportVisibility(moduleLet.visibility, ctx),
+      span: toSourceSpan(moduleLet.form ?? moduleLet.initializer),
+      item: moduleLetId,
     });
   }
 };

@@ -159,6 +159,7 @@ export const createTestCodegenContext = (): {
     programHelpers,
     functions: new Map(),
     functionInstances: new Map() as any,
+    moduleLetGetters: new Map(),
     itemsToSymbols: new Map(),
     structTypes: new Map(),
     structHeapTypes: new Map(),

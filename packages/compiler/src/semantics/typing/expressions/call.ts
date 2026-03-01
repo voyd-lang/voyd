@@ -458,6 +458,7 @@ export const typeCallExpr = (
           intrinsicSignatures.length > 0
         ? getValueType(calleeExpr.symbol, ctx, {
             span: calleeExpr.span ?? expr.span,
+            mode: state.mode,
           })
         : expectedCalleeType(args, ctx);
     ctx.table.setExprType(calleeExpr.id, calleeType);

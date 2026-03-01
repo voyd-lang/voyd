@@ -24,6 +24,9 @@ pub fn add(
 ) -> i32
   left
 
+/// Public module value.
+pub let pi = 3.14
+
 /// Builds enum declarations.
 pub macro enum(enum_name, variants_block)
   syntax_template (void)
@@ -76,6 +79,9 @@ pub mod math
     const enumMacro = mainModule?.macros.find((macro) => macro.name === "enum");
     expect(enumMacro).toBeDefined();
     expect(enumMacro?.documentation).toBe(" Builds enum declarations.");
+    const moduleLet = mainModule?.moduleLets.find((decl) => decl.name === "pi");
+    expect(moduleLet).toBeDefined();
+    expect(moduleLet?.documentation).toBe(" Public module value.");
     const addFn = mainModule?.functions.find((fn) => fn.name === "add");
     expect(addFn?.documentation).toBe(" Adds values.");
     const leftParam = addFn?.params.find((param) => param.name === "left");
@@ -165,6 +171,8 @@ mod visible
     pub fn deep() -> i32
       2
 
+  pub let pi = 3.14
+
   pub fn shown() -> i32
     1
 
@@ -189,6 +197,7 @@ mod visible
     ]);
     const visibleModule = view.modules.find((module) => module.id === "src::pkg::visible");
     expect(visibleModule?.functions.map((fn) => fn.name)).toEqual(["shown"]);
+    expect(visibleModule?.moduleLets).toHaveLength(0);
   });
 
   it("only collects module inner docs from module-level lines", async () => {

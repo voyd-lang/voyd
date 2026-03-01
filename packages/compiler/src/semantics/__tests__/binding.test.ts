@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { SymbolTable } from "../binder/index.js";
 import { runBindingPipeline } from "../binding/binding.js";
 import { loadAst } from "./load-ast.js";
-import { isForm, isIdentifierAtom, parse, type Form } from "../../parser/index.js";
+import {
+  isForm,
+  isIdentifierAtom,
+  parse,
+  type Form,
+} from "../../parser/index.js";
 import { toSourceSpan } from "../utils.js";
 import { modulePathToString } from "../../modules/path.js";
 import { buildModuleGraph } from "../../modules/graph.js";
@@ -1976,6 +1981,59 @@ eff async_effect
     const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
     const diagnostic = binding.diagnostics.find((entry) => entry.code === "BD0005");
     expect(diagnostic).toBeDefined();
+  });
+
+  it("binds module-level let and pub let declarations", () => {
+    const source = `let x = 1
+pub let pi: f64 = 3.14
+
+pub fn main() -> i32
+  x + 1`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    expect(binding.moduleLets).toHaveLength(2);
+
+    const x = binding.moduleLets.find(
+      (decl) => symbolTable.getSymbol(decl.symbol).name === "x",
+    );
+    const pi = binding.moduleLets.find(
+      (decl) => symbolTable.getSymbol(decl.symbol).name === "pi",
+    );
+
+    expect(x?.visibility.level).toBe("module");
+    expect(pi?.visibility.level).toBe("package");
+    expect(pi?.typeExpr).toBeDefined();
+  });
+
+  it("supports string literal initializers for module-level let", () => {
+    const source = `let message = "hello"
+
+pub fn main() -> i32
+  0`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const message = binding.moduleLets.find(
+      (decl) => symbolTable.getSymbol(decl.symbol).name === "message",
+    );
+    expect(message).toBeDefined();
+    expect(message?.initializer).toBeDefined();
+  });
+
+  it("rejects mutable object module-level let bindings", () => {
+    const source = `let ~x = 1`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    expect(() => runBindingPipeline({ moduleForm: ast, symbolTable })).toThrow(
+      /module-level let does not support mutable object bindings/,
+    );
   });
 
   it("rejects bindings named void", () => {

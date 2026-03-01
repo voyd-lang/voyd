@@ -25,6 +25,7 @@ type SignatureToken = {
 const SIDEBAR_KIND_LABEL: Record<DocumentationItem["kind"], string> = {
   re_export: "pub",
   macro: "macro",
+  module_let: "let",
   function: "fn",
   type_alias: "type",
   object: "obj",
@@ -38,6 +39,7 @@ const SIGNATURE_KEYWORDS = new Set([
   "use",
   "as",
   "macro",
+  "let",
   "fn",
   "obj",
   "trait",
@@ -327,6 +329,7 @@ const collectKindSections = (
   [
     { title: "Re-Exports", items: moduleDoc.reexports },
     { title: "Macros", items: moduleDoc.macros },
+    { title: "Module Lets", items: moduleDoc.moduleLets },
     { title: "Functions", items: moduleDoc.functions },
     { title: "Type Aliases", items: moduleDoc.typeAliases },
     { title: "Objects", items: moduleDoc.objects },

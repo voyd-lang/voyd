@@ -62,6 +62,12 @@ describe("classifyTopLevelDecl", () => {
     });
   });
 
+  it("returns other for pub let declarations", () => {
+    expect(classifyFirst("pub let PI = 3.14")).toMatchObject({
+      kind: "other",
+    });
+  });
+
   it("returns other for incomplete use declarations", () => {
     expect(classifyFirst("use")).toMatchObject({
       kind: "other",

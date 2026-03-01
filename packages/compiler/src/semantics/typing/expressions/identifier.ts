@@ -1,10 +1,17 @@
-import type { HirExpression, HirNamedTypeExpr, HirTypeExpr } from "../../hir/index.js";
+import type {
+  HirExpression,
+  HirModuleLet,
+  HirNamedTypeExpr,
+  HirTypeExpr,
+} from "../../hir/index.js";
 import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
 import { resolveImportedTypeExpr, resolveImportedValue } from "../imports.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { getIntrinsicType } from "./intrinsics.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 import { createTypingState } from "../context.js";
+import { typeExpression } from "../expressions.js";
+import { ensureEffectCompatibility, getExprEffectRow } from "../effects.js";
 import { resolveTypeAlias, resolveTypeExpr, unifyWithBudget } from "../type-system.js";
 
 export const typeIdentifierExpr = (
@@ -21,6 +28,7 @@ export const typeIdentifierExpr = (
   return getValueType(expr.symbol, ctx, {
     span: expr.span,
     aliasConstructorTypeArguments,
+    mode: state.mode,
   });
 };
 
@@ -30,6 +38,7 @@ export const getValueType = (
   options: {
     span?: SourceSpan;
     aliasConstructorTypeArguments?: readonly TypeId[];
+    mode?: TypingState["mode"];
   } = {},
 ): TypeId => {
   const hasExplicitAliasConstructorTypeArguments =
@@ -47,6 +56,7 @@ export const getValueType = (
     intrinsicName?: string;
     intrinsicUsesSignature?: boolean;
     unresolved?: boolean;
+    moduleLet?: unknown;
     aliasConstructorTarget?: unknown;
     aliasConstructorAlias?: unknown;
   };
@@ -128,10 +138,20 @@ export const getValueType = (
     return unknownType;
   }
 
+  if (metadata.moduleLet === true) {
+    return resolveModuleLetValueType({
+      symbol,
+      ctx,
+      span: options.span,
+      mode: options.mode,
+    });
+  }
+
   const aliasConstructorTarget = metadata.aliasConstructorTarget;
   if (typeof aliasConstructorTarget === "number") {
     const targetType = getValueType(aliasConstructorTarget, ctx, {
       span: options.span,
+      mode: options.mode,
     });
     const aliasConstructorAlias =
       typeof metadata.aliasConstructorAlias === "number"
@@ -168,6 +188,84 @@ export const getValueType = (
     span: normalizeSpan(options.span),
   });
 };
+
+const resolveModuleLetValueType = ({
+  symbol,
+  ctx,
+  span,
+  mode,
+}: {
+  symbol: SymbolId;
+  ctx: TypingContext;
+  span?: SourceSpan;
+  mode?: TypingState["mode"];
+}): TypeId => {
+  const cached = ctx.valueTypes.get(symbol);
+  if (typeof cached === "number") {
+    return cached;
+  }
+
+  const moduleLet = findModuleLetItem(symbol, ctx);
+  if (!moduleLet) {
+    throw new Error(`missing HIR module-let for symbol ${symbol}`);
+  }
+
+  const moduleLetState = createTypingState(mode ?? "relaxed");
+  const annotationType = moduleLet.typeAnnotation
+    ? resolveTypeExpr(
+        moduleLet.typeAnnotation,
+        ctx,
+        moduleLetState,
+        ctx.primitives.unknown,
+      )
+    : undefined;
+  moduleLetState.currentFunction = {
+    returnType:
+      typeof annotationType === "number" ? annotationType : ctx.primitives.unknown,
+    instanceKey: `${symbol}<>`,
+    functionSymbol: symbol,
+  };
+
+  const moduleLetSpan = normalizeSpan(span ?? moduleLet.span);
+  const symbolName = ctx.symbolTable.getSymbol(symbol).name;
+  ctx.activeValueTypeComputations.add(symbol);
+  try {
+    const inferred = typeExpression(
+      moduleLet.initializer,
+      ctx,
+      moduleLetState,
+      typeof annotationType === "number"
+        ? { expectedType: annotationType }
+        : {},
+    );
+    const finalType =
+      typeof annotationType === "number" ? annotationType : inferred;
+    ctx.valueTypes.set(symbol, finalType);
+    ctx.table.setSymbolScheme(symbol, ctx.arena.newScheme([], finalType));
+
+    ensureEffectCompatibility({
+      inferred: getExprEffectRow(moduleLet.initializer, ctx),
+      annotated: ctx.primitives.defaultEffectRow,
+      ctx,
+      span: moduleLetSpan,
+      location: moduleLet.ast,
+      reason: `module let ${symbolName} initializer effects`,
+    });
+
+    return finalType;
+  } finally {
+    ctx.activeValueTypeComputations.delete(symbol);
+  }
+};
+
+const findModuleLetItem = (
+  symbol: SymbolId,
+  ctx: TypingContext,
+): HirModuleLet | undefined =>
+  Array.from(ctx.hir.items.values()).find(
+    (item): item is HirModuleLet =>
+      item.kind === "module-let" && item.symbol === symbol,
+  );
 
 const specializeAliasConstructorType = ({
   targetType,

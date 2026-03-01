@@ -51,6 +51,7 @@ Top-level declarations include:
 
 * types/objects (`obj`)
 * functions (`fn`)
+* module-level value bindings (`let`)
 * type aliases, traits, etc.
 
 ### 2.1 Defaults

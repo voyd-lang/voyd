@@ -49,6 +49,9 @@ pub fn add(
 ) -> i32
   left + right + value
 
+/// Exported value docs.
+pub let answer = 42
+
 /// Creates enums.
 pub macro enum(enum_name, variants_block)
   syntax_template (void)
@@ -113,6 +116,10 @@ pub mod math
       (entry) => entry.name === "Value",
     );
     expect(alias?.documentation).toBe(" Value alias.");
+    const moduleLet = mainSemantics.binding.moduleLets.find(
+      (entry) => entry.name === "answer",
+    );
+    expect(moduleLet?.documentation).toBe(" Exported value docs.");
 
     const objectDecl = mainSemantics.binding.objects.find(
       (entry) => entry.name === "Box",

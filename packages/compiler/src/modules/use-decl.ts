@@ -36,6 +36,8 @@ export type TopLevelDeclClassification =
 
 const PUB_DECL_KEYWORDS = new Set([
   "fn",
+  "let",
+  "var",
   "type",
   "obj",
   "trait",

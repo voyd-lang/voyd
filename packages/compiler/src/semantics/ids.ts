@@ -9,6 +9,7 @@ export type SymbolId = number;
 export type OverloadSetId = number;
 export type FunctionDeclId = number;
 export type ParameterDeclId = number;
+export type ModuleLetDeclId = number;
 export type TypeAliasDeclId = number;
 export type ObjectDeclId = number;
 export type TraitDeclId = number;

@@ -1,6 +1,7 @@
 import type {
   DocumentationEffectOperationView,
   DocumentationFunctionView,
+  DocumentationModuleLetView,
   DocumentationMethodView,
   DocumentationParameterView,
   DocumentationProgramView,
@@ -450,6 +451,13 @@ const formatFunctionSignature = (fn: {
     returnTypeExpr: fn.returnTypeExpr,
   });
 
+const formatModuleLetSignature = (
+  moduleLet: DocumentationModuleLetView,
+): string =>
+  `let ${moduleLet.name}${
+    moduleLet.typeExpr ? `: ${formatTypeExpr(moduleLet.typeExpr)}` : ""
+  }`;
+
 const formatMethodSignature = (member: {
   name: string;
   typeParameters?: ReadonlyArray<{ name: string }>;
@@ -649,6 +657,19 @@ export const createDocumentationModel = ({
         }),
       );
 
+    const moduleLets = moduleDoc.moduleLets
+      .filter((moduleLet) => isPublic(moduleLet.visibility))
+      .map((moduleLet) =>
+        createItem({
+          moduleId: moduleDoc.id,
+          kind: "module_let",
+          name: moduleLet.name,
+          signature: formatModuleLetSignature(moduleLet),
+          documentation: moduleLet.documentation,
+          nextAnchor,
+        }),
+      );
+
     const reexports = moduleDoc.reexports
       .filter((reexport) => isPublic(reexport.visibility))
       .map((reexport, index) =>
@@ -781,6 +802,7 @@ export const createDocumentationModel = ({
       documentation: moduleDoc.documentation,
       macros,
       reexports,
+      moduleLets,
       functions,
       typeAliases,
       objects,

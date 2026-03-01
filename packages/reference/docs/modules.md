@@ -291,6 +291,28 @@ pub fn package_func()    // Available to any module in the same package
 fn private_func()        // Only inside this file/module
 ```
 
+### **Examples (module-level `let`)**
+
+```voyd
+let answer = 41          // module-private binding
+pub let pi = 3.14        // package-visible binding
+
+pub fn main() -> f64
+  pi + answer
+```
+
+Module-level `let` declarations are value bindings that can be referenced from
+functions in the same module (or imported when declared `pub`).
+
+Restrictions:
+
+* Module-level `let` initializers must be pure.
+* Mutable object binding syntax is not allowed at module scope:
+
+```voyd
+let ~cache = Dict<i32>::new()  // Error
+```
+
 ### **Examples (objects)**
 
 ```voyd

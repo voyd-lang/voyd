@@ -2,6 +2,7 @@ import type { Expr, Form, Syntax } from "../parser/index.js";
 import type { HirBindingKind, HirVisibility } from "./hir/index.js";
 import type {
   FunctionDeclId,
+  ModuleLetDeclId,
   OverloadSetId,
   ParameterDeclId,
   ScopeId,
@@ -64,6 +65,22 @@ export interface FunctionDecl {
 export type FunctionDeclInput = Omit<FunctionDecl, "id" | "params"> & {
   id?: FunctionDeclId;
   params: ParameterDeclInput[];
+};
+
+export interface ModuleLetDecl {
+  id: ModuleLetDeclId;
+  name: string;
+  form?: Form;
+  visibility: HirVisibility;
+  symbol: SymbolId;
+  initializer: Expr;
+  typeExpr?: Expr;
+  moduleIndex: number;
+  documentation?: string;
+}
+
+export type ModuleLetDeclInput = Omit<ModuleLetDecl, "id"> & {
+  id?: ModuleLetDeclId;
 };
 
 export interface TypeAliasDecl {
@@ -204,6 +221,7 @@ export type EffectDeclInput = Omit<EffectDecl, "id" | "operations"> & {
 
 export class DeclTable {
   functions: FunctionDecl[] = [];
+  moduleLets: ModuleLetDecl[] = [];
   typeAliases: TypeAliasDecl[] = [];
   objects: ObjectDecl[] = [];
   traits: TraitDecl[] = [];
@@ -212,6 +230,7 @@ export class DeclTable {
 
   private nextFunctionId: FunctionDeclId = 0;
   private nextParamId: ParameterDeclId = 0;
+  private nextModuleLetId: ModuleLetDeclId = 0;
   private nextAliasId: TypeAliasDeclId = 0;
   private nextObjectId: ObjectDeclId = 0;
   private nextTraitId: TraitDeclId = 0;
@@ -220,6 +239,8 @@ export class DeclTable {
 
   private functionsBySymbol = new Map<SymbolId, FunctionDecl>();
   private functionsById = new Map<FunctionDeclId, FunctionDecl>();
+  private moduleLetsBySymbol = new Map<SymbolId, ModuleLetDecl>();
+  private moduleLetsById = new Map<ModuleLetDeclId, ModuleLetDecl>();
   private parametersBySymbol = new Map<SymbolId, ParameterDecl>();
   private parametersById = new Map<ParameterDeclId, ParameterDecl>();
   private typeAliasesBySymbol = new Map<SymbolId, TypeAliasDecl>();
@@ -266,6 +287,18 @@ export class DeclTable {
     this.functionsBySymbol.set(withIds.symbol, withIds);
     this.functionsById.set(withIds.id, withIds);
     return withIds;
+  }
+
+  registerModuleLet(moduleLet: ModuleLetDeclInput): ModuleLetDecl {
+    const withId: ModuleLetDecl = {
+      ...moduleLet,
+      id: moduleLet.id ?? this.nextModuleLetId++,
+    };
+    this.nextModuleLetId = this.bumpId(this.nextModuleLetId, withId.id);
+    this.moduleLets.push(withId);
+    this.moduleLetsBySymbol.set(withId.symbol, withId);
+    this.moduleLetsById.set(withId.id, withId);
+    return withId;
   }
 
   registerTypeAlias(alias: TypeAliasDeclInput): TypeAliasDecl {
@@ -381,6 +414,14 @@ export class DeclTable {
 
   getFunctionById(id: FunctionDeclId): FunctionDecl | undefined {
     return this.functionsById.get(id);
+  }
+
+  getModuleLet(symbol: SymbolId): ModuleLetDecl | undefined {
+    return this.moduleLetsBySymbol.get(symbol);
+  }
+
+  getModuleLetById(id: ModuleLetDeclId): ModuleLetDecl | undefined {
+    return this.moduleLetsById.get(id);
   }
 
   getParameter(symbol: SymbolId): ParameterDecl | undefined {

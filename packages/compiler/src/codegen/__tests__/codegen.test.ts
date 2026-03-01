@@ -156,6 +156,7 @@ const buildCodegenProgram = (
     ProgramFunctionInstanceId,
     FunctionMetadata
   >();
+  const moduleLetGetters = new Map();
   const outcomeValueTypes = new Map<string, OutcomeValueBox>();
   const runtimeTypeRegistry = new Map<TypeId, RuntimeTypeIdRegistryEntry>();
   const runtimeTypeIdsByKey = new Map<string, number>();
@@ -178,6 +179,7 @@ const buildCodegenProgram = (
     programHelpers,
     functions,
     functionInstances,
+    moduleLetGetters,
     itemsToSymbols: new Map(),
     structTypes,
     structHeapTypes,
@@ -265,6 +267,7 @@ describe("next codegen", () => {
       programHelpers,
       functions,
       functionInstances,
+      moduleLetGetters: new Map(),
       itemsToSymbols: new Map(),
       structTypes,
       structHeapTypes,
