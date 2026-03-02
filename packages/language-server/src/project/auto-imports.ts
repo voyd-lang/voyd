@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { Form } from "@voyd/compiler/parser/index.js";
+import { formCallsInternal, isForm } from "@voyd/compiler/parser/index.js";
 import { parseTopLevelUseDecl } from "@voyd/compiler/modules/use-decl.js";
 import {
   parseUsePaths,
@@ -29,12 +30,12 @@ const supportsAutoImport = (code: string): boolean =>
   code === "TY0006" || code === "TY0026" || code === "TY0030";
 
 const kindMatchesDiagnostic = ({ code, kind }: { code: string; kind: string }): boolean => {
-  if (code === "TY0026") {
-    return kind === "type" || kind === "trait";
+  if (code === "TY0006") {
+    return kind === "value" || kind === "type";
   }
 
-  if (code === "TY0006") {
-    return kind === "value";
+  if (code === "TY0026") {
+    return kind === "type" || kind === "trait" || kind === "effect";
   }
 
   return kind !== "module";
@@ -52,6 +53,43 @@ const offsetAfterLine = ({
     cursor += 1;
   }
   return cursor < source.length ? cursor + 1 : source.length;
+};
+
+type UseDeclLocation = {
+  startIndex: number;
+  endIndex: number;
+};
+
+const useDeclLocationKey = ({
+  startIndex,
+  endIndex,
+}: {
+  startIndex: number;
+  endIndex: number;
+}): string => `${startIndex}:${endIndex}`;
+
+const topLevelUseDeclLocations = ({
+  moduleAst,
+}: {
+  moduleAst: Form;
+}): UseDeclLocation[] => {
+  const entries = formCallsInternal(moduleAst, "ast") ? moduleAst.rest : moduleAst.toArray();
+  return entries
+    .filter((entry): entry is Form => isForm(entry))
+    .flatMap((entry) => {
+      const parsed = parseTopLevelUseDecl(entry);
+      if (!parsed) {
+        return [];
+      }
+
+      const startIndex = entry.location?.startIndex;
+      const endIndex = entry.location?.endIndex;
+      if (typeof startIndex !== "number" || typeof endIndex !== "number") {
+        return [];
+      }
+
+      return [{ startIndex, endIndex }];
+    });
 };
 
 const sameSegments = ({
@@ -124,7 +162,7 @@ export const resolveImportInsertionContext = ({
   analysis,
   documentUri,
 }: {
-  analysis: Pick<AutoImportAnalysis, "moduleIdByFilePath" | "semantics" | "graph">;
+  analysis: Pick<AutoImportAnalysis, "moduleIdByFilePath" | "graph">;
   documentUri: string;
 }): ImportInsertionContext | undefined => {
   const filePath = path.resolve(toFilePath(documentUri));
@@ -133,7 +171,6 @@ export const resolveImportInsertionContext = ({
     return undefined;
   }
 
-  const semantics = analysis.semantics.get(moduleId);
   const moduleNode = analysis.graph.modules.get(moduleId);
   const source = moduleNode?.source;
   if (!source) {
@@ -141,11 +178,9 @@ export const resolveImportInsertionContext = ({
   }
 
   const lineIndex = new LineIndex(source);
-  const useEndOffsets = semantics
-    ? semantics.binding.uses
-        .map((useDecl) => useDecl.form.location?.endIndex)
-        .filter((offset): offset is number => typeof offset === "number")
-    : [];
+  const useEndOffsets = topLevelUseDeclLocations({ moduleAst: moduleNode.ast }).map(
+    (useDecl) => useDecl.endIndex,
+  );
 
   const insertionOffset =
     useEndOffsets.length > 0
@@ -188,7 +223,7 @@ export const insertImportEdit = ({
   documentUri,
   importLine,
 }: {
-  analysis: Pick<AutoImportAnalysis, "moduleIdByFilePath" | "semantics" | "graph">;
+  analysis: Pick<AutoImportAnalysis, "moduleIdByFilePath" | "graph">;
   documentUri: string;
   importLine: string;
 }): TextEdit | undefined => {
@@ -349,14 +384,27 @@ const mergeImportEdit = ({
   }
 
   const semantics = analysis.semantics.get(currentModuleId);
-  const source = analysis.graph.modules.get(currentModuleId)?.source;
-  if (!semantics || source === undefined) {
+  const moduleNode = analysis.graph.modules.get(currentModuleId);
+  const source = moduleNode?.source;
+  if (!semantics || source === undefined || !moduleNode) {
     return { alreadyImported: false };
   }
 
   const lineIndex = new LineIndex(source);
+  const topLevelUseRangeKeys = new Set(
+    topLevelUseDeclLocations({ moduleAst: moduleNode.ast }).map(useDeclLocationKey),
+  );
 
   for (const useDecl of semantics.binding.uses) {
+    const startIndex = useDecl.form.location?.startIndex;
+    const endIndex = useDecl.form.location?.endIndex;
+    if (typeof startIndex !== "number" || typeof endIndex !== "number") {
+      continue;
+    }
+    if (!topLevelUseRangeKeys.has(useDeclLocationKey({ startIndex, endIndex }))) {
+      continue;
+    }
+
     const names = simpleNamedImportEntries({
       entries: useDecl.entries,
       candidateModuleId,
@@ -367,12 +415,6 @@ const mergeImportEdit = ({
 
     if (names.includes(candidateName)) {
       return { alreadyImported: true };
-    }
-
-    const startIndex = useDecl.form.location?.startIndex;
-    const endIndex = useDecl.form.location?.endIndex;
-    if (typeof startIndex !== "number" || typeof endIndex !== "number") {
-      continue;
     }
 
     const rewriteContext = useDeclRewriteContextFromForm({
