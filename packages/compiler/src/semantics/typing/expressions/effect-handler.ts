@@ -16,6 +16,7 @@ import {
   type ContinuationUsage,
 } from "./continuation-usage.js";
 import { emitDiagnostic } from "../../../diagnostics/index.js";
+import { hydrateImportedValueLikeSymbol } from "../import-hydration.js";
 import type {
   HirExprId,
   SymbolId,
@@ -307,7 +308,11 @@ const typeHandlerClause = ({
   ctx: TypingContext;
   state: TypingState;
 }): number => {
-  const signature = ctx.functions.getSignature(clause.operation);
+  let signature = ctx.functions.getSignature(clause.operation);
+  if (!signature) {
+    hydrateImportedValueLikeSymbol({ symbol: clause.operation, ctx });
+    signature = ctx.functions.getSignature(clause.operation);
+  }
   if (!signature) {
     throw new Error(
       `missing effect operation signature for ${effectOpName(

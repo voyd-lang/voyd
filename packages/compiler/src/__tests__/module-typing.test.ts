@@ -646,6 +646,38 @@ pub fn main() -> i32
     );
   });
 
+  it("resolves imported effect operations used only in handler clauses", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}dep.voyd`]: `
+pub eff Fx
+  foo(tail) -> i32
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::dep::Fx
+
+pub fn main() -> i32
+  try
+    1
+  Fx::foo(tail):
+    tail(2)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const allDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(allDiagnostics).toHaveLength(0);
+    expect(allDiagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(
+      false,
+    );
+  });
+
   it("constructs imported generic enum namespace variants without direct member imports", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

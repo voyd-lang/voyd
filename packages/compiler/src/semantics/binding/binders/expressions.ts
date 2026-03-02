@@ -136,6 +136,10 @@ const bindTry = (
     const handlerBody = entry.at(2);
 
     tracker.enterScope(clauseScope, () => {
+      // Handler heads can reference imported operations (for example `Fx::op`).
+      // Bind the head itself so namespace member imports are materialized before
+      // lowering resolves handler operation symbols.
+      bindExpr(head, ctx, tracker);
       declareHandlerParams(head, ctx, clauseScope);
       bindExpr(handlerBody, ctx, tracker);
     });
