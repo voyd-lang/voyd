@@ -2,8 +2,14 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import type { ModuleNode } from "@voyd/compiler/modules/types.js";
+import { parse } from "@voyd/compiler/parser/index.js";
 import { describe, expect, it } from "vitest";
 import { TextDocument } from "vscode-languageserver-textdocument";
+import {
+  insertImportEditFromContext,
+  resolveImportInsertionContext,
+} from "../project/auto-imports.js";
 import {
   analyzeProject,
   autoImportActions,
@@ -322,6 +328,192 @@ describe("language server project analysis", () => {
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
+  });
+
+  it("offers auto-import quick fixes for unknown object constructors", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn main() -> i32\n  Animal(1)\n`,
+      "src/animal.voyd": `pub obj Animal { id: i32 }\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      const codeActions = autoImportActions({
+        analysis,
+        documentUri: uri,
+        diagnostics,
+      });
+
+      expect(
+        codeActions.some((action) =>
+          action.title.includes("Import Animal from src::animal"),
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("offers auto-import quick fixes for unknown type-alias constructors", async () => {
+    const project = await createProject({
+      "src/main.voyd": `fn main() -> i32\n  Color(1, 2, 3)\n`,
+      "src/model.voyd":
+        `pub obj Vec3 { x: i32, y: i32, z: i32 }\n\npub type Color = Vec3\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      const codeActions = autoImportActions({
+        analysis,
+        documentUri: uri,
+        diagnostics,
+      });
+
+      expect(
+        codeActions.some((action) =>
+          action.title.includes("Import Color from src::model"),
+        ),
+      ).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("inserts auto-imports at module scope when diagnostics originate inside impl blocks", async () => {
+    const project = await createProject({
+      "src/main.voyd":
+        `use src::existing::value\n\npub obj Counter {}\n\nimpl Counter\n  fn run() -> i32\n    helper()\n`,
+      "src/existing.voyd": `pub let value = 1\n`,
+      "src/util.voyd": `pub fn helper() -> i32\n  1\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
+      const codeActions = autoImportActions({
+        analysis,
+        documentUri: uri,
+        diagnostics,
+      });
+
+      const importAction = codeActions.find((action) =>
+        action.title.includes("Import helper from src::util"),
+      );
+      expect(importAction).toBeDefined();
+      if (!importAction) {
+        return;
+      }
+
+      const edit = importAction.edit?.changes?.[uri]?.[0];
+      expect(edit).toBeDefined();
+      if (!edit) {
+        return;
+      }
+
+      const updated = applyEditToSource({
+        uri,
+        source:
+          `use src::existing::value\n\npub obj Counter {}\n\nimpl Counter\n  fn run() -> i32\n    helper()\n`,
+        version: 1,
+        text: edit,
+      });
+
+      expect(updated).toContain(
+        "use src::existing::value\nuse src::util::helper\n\npub obj Counter",
+      );
+      expect(updated).not.toContain("impl Counter\nuse src::util::helper");
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses top-level declarations for insertion even when semantic use spans are deeper", () => {
+    const filePath = path.join(os.tmpdir(), "voyd-ls-auto-import-scope.voyd");
+    const uri = toFileUri(filePath);
+    const moduleId = "src::main";
+    const source =
+      `use src::existing::value\n\nimpl Counter\n  fn run() -> i32\n    0\n`;
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: { namespace: "src", segments: ["main"] },
+      origin: { kind: "file", filePath },
+      ast: parse(source),
+      source,
+      dependencies: [],
+    };
+
+    const analysis = {
+      moduleIdByFilePath: new Map([[path.resolve(filePath), moduleId]]),
+      semantics: new Map([
+        [
+          moduleId,
+          {
+            binding: {
+              uses: [
+                { form: { location: { endIndex: source.indexOf("\n") } } },
+                { form: { location: { endIndex: source.length - 1 } } },
+              ],
+            },
+          },
+        ],
+      ]),
+      graph: {
+        entry: moduleId,
+        modules: new Map([
+          [
+            moduleId,
+            moduleNode,
+          ],
+        ]),
+        diagnostics: [],
+      },
+    };
+
+    const context = resolveImportInsertionContext({
+      analysis,
+      documentUri: uri,
+    });
+    expect(context).toBeDefined();
+    if (!context) {
+      return;
+    }
+
+    const edit = insertImportEditFromContext({
+      context,
+      importLine: "use src::util::helper",
+    });
+    const updated = applyEditToSource({
+      uri,
+      source,
+      version: 1,
+      text: edit,
+    });
+
+    expect(updated).toContain("use src::existing::value\nuse src::util::helper\n\nimpl Counter");
+    expect(updated).not.toContain("fn run() -> i32\nuse src::util::helper");
   });
 
   it("offers in-scope completion items for locals and types", async () => {
