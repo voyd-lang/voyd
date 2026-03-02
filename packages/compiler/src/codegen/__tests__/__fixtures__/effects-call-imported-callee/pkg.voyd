@@ -1,0 +1,4 @@
+use src::dep::{ f, g, Async }
+
+pub fn main_effectful(): Async -> i32
+  f(g())

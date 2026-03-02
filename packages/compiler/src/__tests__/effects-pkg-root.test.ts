@@ -97,6 +97,40 @@ pub fn run(cb: fn() -> i32) -> i32
     expect(diagnostics.some((diag) => diag.code === "TY0016")).toBe(false);
   });
 
+  it("accepts annotations that name imported effects", async () => {
+    const root = resolve("/proj/app/src");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const depPath = `${root}${sep}dep.voyd`;
+    const host = createMemoryHost({
+      [pkgPath]: `
+use src::dep::{ run, Async }
+
+pub fn draw(): Async -> i32
+  run()
+
+pub fn main(): () -> i32
+  0
+`,
+      [depPath]: `
+pub eff Async
+  fn await(tail, value: i32) -> i32
+
+pub fn run(): Async -> i32
+  Async::await(1)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics.some((diag) => diag.code === "TY0014")).toBe(false);
+    expect(diagnostics.some((diag) => diag.code === "TY0016")).toBe(false);
+  });
+
   it("rejects unannotated effectful exports from pkg.voyd", async () => {
     const root = resolve("/proj/app/src");
     const pkgPath = `${root}${sep}pkg.voyd`;
@@ -129,6 +163,55 @@ pub fn effectful()
 
     const effectfulExport = semantics.get("src::pkg")?.exports.get("effectful");
     expect(effectfulExport?.effects?.[0]?.annotated).toBe(false);
+  });
+
+  it("rejects unannotated exports when imported generics collide with effect names", async () => {
+    const root = resolve("/proj/app/src");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const depPath = `${root}${sep}dep.voyd`;
+    const host = createMemoryHost({
+      [pkgPath]: `
+use src::dep::Wrap
+
+eff Output
+  fn write(tail) -> i32
+
+fn helper(): Output -> i32
+  Output::write()
+
+pub fn draw()
+  helper()
+  void
+
+pub fn main(): () -> i32
+  0
+`,
+      [depPath]: `
+pub obj Wrap<Output> {
+  value: Output
+}
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    expect(diagnostics.some((diag) => diag.code === "TY0016")).toBe(true);
+
+    const pkg = semantics.get("src::pkg");
+    expect(pkg).toBeDefined();
+    if (!pkg) {
+      return;
+    }
+
+    const outputSymbols = pkg.binding.symbolTable
+      .resolveAll("Output", pkg.binding.symbolTable.rootScope)
+      .map((symbol) => pkg.binding.symbolTable.getSymbol(symbol).kind);
+    expect(outputSymbols).toEqual(["effect"]);
   });
 
   it("requires pub fn main to be pure", async () => {

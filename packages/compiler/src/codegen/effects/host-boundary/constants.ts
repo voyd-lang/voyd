@@ -24,4 +24,4 @@ export const EFFECT_REQUEST_MSGPACK_KEYS = {
   args: "args",
 } as const;
 
-export const MIN_EFFECT_BUFFER_SIZE = 4 * 1024;
+export const MIN_EFFECT_BUFFER_SIZE = 64 * 1024;

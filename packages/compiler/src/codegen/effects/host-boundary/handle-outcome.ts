@@ -15,16 +15,6 @@ import type { EffectOpSignature } from "./types.js";
 
 const HANDLE_OUTCOME_DYNAMIC_KEY = Symbol("voyd.effects.hostBoundary.handleOutcomeDynamic");
 
-const trapOnNegative = (
-  value: binaryen.ExpressionRef,
-  ctx: CodegenContext
-): binaryen.ExpressionRef =>
-  ctx.mod.if(
-    ctx.mod.i32.lt_s(value, ctx.mod.i32.const(0)),
-    ctx.mod.unreachable(),
-    ctx.mod.nop()
-  );
-
 export const createHandleOutcomeDynamic = ({
   ctx,
   runtime,
@@ -78,7 +68,6 @@ export const createHandleOutcomeDynamic = ({
             binaryen.i32
           )
         ),
-        trapOnNegative(ctx.mod.local.get(payloadLenLocal, binaryen.i32), ctx),
       ]);
 
     const finishValue = (): binaryen.ExpressionRef =>
