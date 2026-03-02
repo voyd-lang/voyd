@@ -29,7 +29,7 @@ test "random_i32 defaults to full i32 domain":
 test "random_i32 handles spans larger than i32":
   let value = random_i32_from_seed_with_range({
     seed: i64_from_i32(2147483647),
-    range: Range {
+    range: Range<i32> {
       start: Some<i32> { value: -1 },
       end: Some<i32> { value: 2147483647 },
       include_end: false
@@ -41,7 +41,7 @@ test "random_i32 handles spans larger than i32":
 test "random_i32 includes i32 max for inclusive upper bounds":
   let value = random_i32_from_seed_with_range({
     seed: i64_from_i32(1),
-    range: Range {
+    range: Range<i32> {
       start: Some<i32> { value: 2147483646 },
       end: Some<i32> { value: 2147483647 },
       include_end: true
@@ -58,9 +58,9 @@ test "random_i64 defaults to full i64 domain":
 test "random_i64 supports range overload":
   let value = random_i64_from_seed_with_range({
     seed: i64_from_i32(2147483647),
-    range: Range {
-      start: Some<i32> { value: -1 },
-      end: Some<i32> { value: 2147483647 },
+    range: Range<i64> {
+      start: Some<i64> { value: i64_from_i32(-1) },
+      end: Some<i64> { value: i64_from_i32(2147483647) },
       include_end: false
     }
   })
@@ -70,9 +70,9 @@ test "random_i64 supports range overload":
 test "random_i64 includes i32 max for inclusive upper bounds":
   let value = random_i64_from_seed_with_range({
     seed: i64_from_i32(1),
-    range: Range {
-      start: Some<i32> { value: 2147483646 },
-      end: Some<i32> { value: 2147483647 },
+    range: Range<i64> {
+      start: Some<i64> { value: i64_from_i32(2147483646) },
+      end: Some<i64> { value: i64_from_i32(2147483647) },
       include_end: true
     }
   })
@@ -82,7 +82,7 @@ test "random_i64 includes i32 max for inclusive upper bounds":
 test "next_u64 forwards host bits":
   let seed = i64_from_i32(-5)
   let value = next_u64_from_seed(seed)
-  assert(value, eq: seed)
+  assert(value.bits, eq: seed)
 
 test "random_f64 defaults to unit interval":
   let value = random_f64_from_seed(half_unit_seed_i64())
@@ -93,9 +93,9 @@ test "random_f64 defaults to unit interval":
 test "random_f64 supports range overload":
   let value = random_f64_from_seed_with_range({
     seed: half_unit_seed_i64(),
-    range: Range {
-      start: Some<i32> { value: 10 },
-      end: Some<i32> { value: 20 },
+    range: Range<f64> {
+      start: Some<f64> { value: 10.0 },
+      end: Some<f64> { value: 20.0 },
       include_end: false
     }
   })
@@ -105,9 +105,9 @@ test "random_f64 supports range overload":
 test "random_f64 applies inclusive range end":
   let value = random_f64_from_seed_with_range({
     seed: half_unit_seed_i64(),
-    range: Range {
-      start: Some<i32> { value: 2 },
-      end: Some<i32> { value: 4 },
+    range: Range<f64> {
+      start: Some<f64> { value: 2.0 },
+      end: Some<f64> { value: 4.0 },
       include_end: true
     }
   })
@@ -123,9 +123,9 @@ test "random_f32 defaults to unit interval":
 test "random_f32 supports range overload":
   let value = random_f32_from_seed_with_range({
     seed: half_unit_seed_i64(),
-    range: Range {
-      start: Some<i32> { value: 2 },
-      end: Some<i32> { value: 4 },
+    range: Range<f32> {
+      start: Some<f32> { value: f32_from_f64(2.0) },
+      end: Some<f32> { value: f32_from_f64(4.0) },
       include_end: true
     }
   })
@@ -142,7 +142,7 @@ fn random_i32_from_seed(seed: i64) -> i32
   Random::next_u64(tail):
     tail(i64_from_i32(0))
 
-fn random_i32_from_seed_with_range({ seed: i64, range: Range }) -> i32
+fn random_i32_from_seed_with_range({ seed: i64, range: Range<i32> }) -> i32
   try
     random_i32(range)
   Random::fill_bytes(tail, _len):
@@ -162,7 +162,7 @@ fn random_i64_from_seed(seed: i64) -> i64
   Random::next_u64(tail):
     tail(i64_from_i32(0))
 
-fn random_i64_from_seed_with_range({ seed: i64, range: Range }) -> i64
+fn random_i64_from_seed_with_range({ seed: i64, range: Range<i64> }) -> i64
   try
     random_i64(range)
   Random::fill_bytes(tail, _len):
@@ -182,7 +182,7 @@ fn random_f64_from_seed(seed: i64) -> f64
   Random::next_i64(tail):
     tail(seed)
 
-fn random_f64_from_seed_with_range({ seed: i64, range: Range }) -> f64
+fn random_f64_from_seed_with_range({ seed: i64, range: Range<f64> }) -> f64
   try
     random_f64(range)
   Random::fill_bytes(tail, _len):
@@ -202,7 +202,7 @@ fn random_f32_from_seed(seed: i64) -> f32
   Random::next_i64(tail):
     tail(seed)
 
-fn random_f32_from_seed_with_range({ seed: i64, range: Range }) -> f32
+fn random_f32_from_seed_with_range({ seed: i64, range: Range<f32> }) -> f32
   try
     random_f32(range)
   Random::fill_bytes(tail, _len):
@@ -212,7 +212,7 @@ fn random_f32_from_seed_with_range({ seed: i64, range: Range }) -> f32
   Random::next_i64(tail):
     tail(seed)
 
-fn next_u64_from_seed(seed: i64) -> i64
+fn next_u64_from_seed(seed: i64) -> U64Bits
   try
     next_u64()
   Random::fill_bytes(tail, _len):
@@ -244,3 +244,6 @@ fn pow2_i64(exp: i32): () -> i64
 
 @intrinsic(name: "__f64_promote_f32")
 fn f64_from_f32(value: f32): () -> f64 __f64_promote_f32(value)
+
+@intrinsic(name: "__f32_demote_f64")
+fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)

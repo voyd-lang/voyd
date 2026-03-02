@@ -145,7 +145,7 @@ impl String
   /// Example:
   /// `name.slice(0..4).to_string()`
   /// returns the first four bytes, snapped to rune boundaries.
-  api fn slice(self, range: Range) -> StringSlice
+  api fn slice(self, range: Range<i32>) -> StringSlice
     let source = self.raw_bytes()
     let start = clamp_index_to_rune_boundary(source, self.byte_count, normalize_range_start(range, self.byte_count))
     let end =
@@ -158,7 +158,7 @@ impl String
       return new_string_slice(self, 0, 0)
     new_string_slice(self, start, end - start)
 
-  api fn slice(self, { range: Range }) -> StringSlice
+  api fn slice(self, { range: Range<i32> }) -> StringSlice
     self.slice(range)
 
   /// Moves a string index by rune steps.
@@ -419,7 +419,7 @@ impl String
     self.rfind(substring.as_slice(), to: to)
 
   /// Returns the start and end byte range of the first substring match.
-  api fn find_range(self, substring: StringSlice, { from?: StringIndex }) -> Option<Range>
+  api fn find_range(self, substring: StringSlice, { from?: StringIndex }) -> Option<Range<i32>>
     let start = from ?? self.start_index()
     let start_value = start.to_i32()
     if not is_rune_boundary(self.raw_bytes(), self.byte_len(), start_value):
@@ -429,8 +429,8 @@ impl String
       return None {}
 
     let end = match_index + substring.byte_len()
-    Some<Range> {
-      value: Range {
+    Some<Range<i32>> {
+      value: Range<i32> {
         start: Some<i32> { value: match_index },
         end: Some<i32> { value: end },
         include_end: false
@@ -438,7 +438,7 @@ impl String
     }
 
   /// Returns the start and end byte range of the first substring match.
-  api fn find_range(self, substring: String, { from?: StringIndex }) -> Option<Range>
+  api fn find_range(self, substring: String, { from?: StringIndex }) -> Option<Range<i32>>
     self.find_range(substring.as_slice(), from: from)
 
   /// Splits at the first matching separator.
@@ -1037,14 +1037,14 @@ fn rune_in_charset(chars: CharSet, rune: i32) -> bool
 fn is_whitespace_rune(rune: i32) -> bool
   rune == 32 or rune == 9 or rune == 10 or rune == 13
 
-fn normalize_range_start(range: Range, length: i32) -> i32
+fn normalize_range_start(range: Range<i32>, length: i32) -> i32
   match(range.start)
     Some<i32> { value }:
       clamp_slice_index(value, length)
     None:
       0
 
-fn normalize_range_end_exclusive(range: Range, length: i32) -> i32
+fn normalize_range_end_exclusive(range: Range<i32>, length: i32) -> i32
   match(range.end)
     Some<i32> { value }:
       let clamped = clamp_slice_index(value, length)

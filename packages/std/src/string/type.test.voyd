@@ -64,7 +64,7 @@ test "string utf8 decode and encode":
 
 test "string slice and as_slice":
   let value = "a😀b"
-  let sliced = value.slice(Range {
+  let sliced = value.slice(Range<i32> {
     start: Some<i32> { value: 1 },
     end: Some<i32> { value: 5 },
     include_end: false
@@ -153,7 +153,7 @@ test "string search helpers":
   assert(option_string_index_or(value.rfind("a"), -1) >= 0, eq: true)
 
   match(value.find_range("beta"))
-    Some<Range> { value }:
+    Some<Range<i32>> { value }:
       assert(option_i32_or(value.start, -1) >= 0, eq: true)
     None:
       assert(false)

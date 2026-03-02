@@ -6,13 +6,13 @@ use std::optional::all
 use std::optional::types::Optional
 use std::traits::sequence::all
 
-/// Integer range value used by slicing and bounded APIs.
-pub obj Range {
+/// Range value used by slicing and bounded APIs.
+pub obj Range<T> {
   /// Optional inclusive starting index.
-  api start: Optional<i32>,
+  api start: Optional<T>,
 
   /// Optional ending index.
-  api end: Optional<i32>,
+  api end: Optional<T>,
 
   /// Whether `end` is included in the range.
   api include_end: bool
@@ -25,7 +25,7 @@ obj RangeIterator {
   include_end: bool
 }
 
-impl Sequence<i32> for Range
+impl Sequence<i32> for Range<i32>
   /// Returns an iterator over integer range values.
   api fn iter(self) -> Iterator<i32>
     let start = range_bound_or(self.start, 0)

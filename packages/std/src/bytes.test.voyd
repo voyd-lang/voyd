@@ -36,7 +36,7 @@ test "bytes slice and buffer extend clear":
   second.extend(first.as_bytes())
   assert(second.len(), eq: 4)
 
-  let sliced = second.as_bytes().slice(Range {
+  let sliced = second.as_bytes().slice(Range<i32> {
     start: Some<i32> { value: 1 },
     end: Some<i32> { value: 3 },
     include_end: false
