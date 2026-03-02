@@ -98,4 +98,56 @@ describe("analysis coordinator", () => {
       await rm(completeStd.rootDir, { recursive: true, force: true });
     }
   });
+
+  it("reuses unaffected module semantics after an edit", async () => {
+    const project = await createProject({
+      "src/main.voyd":
+        `use src::util::value\nuse src::helper::helper\n\nfn main() -> i32\n  value() + helper()\n`,
+      "src/util.voyd": `pub fn value() -> i32\n  1\n`,
+      "src/helper.voyd": `pub fn helper() -> i32\n  2\n`,
+    });
+
+    try {
+      const mainUri = toFileUri(project.filePathFor("src/main.voyd"));
+      const utilUri = toFileUri(project.filePathFor("src/util.voyd"));
+      const coordinator = new AnalysisCoordinator();
+      coordinator.updateDocument(
+        TextDocument.create(
+          utilUri,
+          "voyd",
+          1,
+          `pub fn value() -> i32\n  1\n`,
+        ),
+      );
+
+      const initial = await coordinator.getCoreForUri(mainUri);
+      const initialMainSemantics = initial.analysis.semantics.get("src::main");
+      const initialUtilSemantics = initial.analysis.semantics.get("src::util");
+      const initialHelperSemantics = initial.analysis.semantics.get("src::helper");
+
+      expect(initialMainSemantics).toBeDefined();
+      expect(initialUtilSemantics).toBeDefined();
+      expect(initialHelperSemantics).toBeDefined();
+      if (!initialMainSemantics || !initialUtilSemantics || !initialHelperSemantics) {
+        return;
+      }
+
+      coordinator.updateDocument(
+        TextDocument.create(
+          utilUri,
+          "voyd",
+          2,
+          `pub fn value() -> i32\n  10\n`,
+        ),
+      );
+
+      const updated = await coordinator.getCoreForUri(mainUri);
+
+      expect(updated.analysis.semantics.get("src::main")).not.toBe(initialMainSemantics);
+      expect(updated.analysis.semantics.get("src::util")).not.toBe(initialUtilSemantics);
+      expect(updated.analysis.semantics.get("src::helper")).toBe(initialHelperSemantics);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
 });

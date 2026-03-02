@@ -5,18 +5,27 @@ import { type DidChangeWatchedFilesParams } from "vscode-languageserver/lib/node
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
 import {
-  analyzeProjectCore,
+  analyzeProjectCoreIncremental,
   buildProjectNavigationIndex,
+  buildProjectNavigationIndexForModules,
   resolveEntryPath,
   resolveModuleRoots,
 } from "../project.js";
-import { buildCompletionIndex } from "../project/completion-index.js";
+import {
+  buildCompletionExportEntriesByFirstCharacter,
+  buildCompletionIndex,
+  buildCompletionScopedNodesByModuleId,
+  buildCompletionSymbolLookupByUri,
+} from "../project/completion-index.js";
 import { createOverlayModuleHost } from "../project/files.js";
+import { smallestRangeFirst } from "../project/text.js";
 import type {
   AutoImportAnalysis,
   CompletionAnalysis,
+  CompletionSymbolLookup,
   ProjectCoreAnalysis,
   ProjectNavigationIndex,
+  SymbolOccurrence,
 } from "../project/types.js";
 import { ExportIndexService } from "./export-index-service.js";
 
@@ -30,6 +39,7 @@ type UriContext = {
 type CoreCacheEntry = {
   revision: number;
   analysis: ProjectCoreAnalysis;
+  recomputedModuleIds: readonly string[];
 };
 
 type NavigationCacheEntry = {
@@ -45,6 +55,163 @@ type CompletionCacheEntry = {
 const normalizeFilePathFromUri = (uri: string): string =>
   path.resolve(URI.parse(uri).fsPath);
 
+const toImpactedModuleSet = (
+  moduleIds: readonly string[],
+): Set<string> => new Set(moduleIds);
+
+const mergeOccurrencesByUri = ({
+  base,
+  delta,
+  impactedModuleIds,
+}: {
+  base: ReadonlyMap<string, readonly SymbolOccurrence[]>;
+  delta: ReadonlyMap<string, readonly SymbolOccurrence[]>;
+  impactedModuleIds: ReadonlySet<string>;
+}): Map<string, SymbolOccurrence[]> => {
+  const merged = new Map<string, SymbolOccurrence[]>();
+
+  base.forEach((entries, uri) => {
+    const kept = entries.filter((entry) => !impactedModuleIds.has(entry.moduleId));
+    if (kept.length > 0) {
+      merged.set(uri, [...kept]);
+    }
+  });
+
+  delta.forEach((entries, uri) => {
+    const existing = merged.get(uri) ?? [];
+    merged.set(uri, [...existing, ...entries].sort(smallestRangeFirst));
+  });
+
+  return merged;
+};
+
+const mergeDeclarationsByKey = ({
+  base,
+  delta,
+  impactedModuleIds,
+}: {
+  base: ReadonlyMap<string, readonly SymbolOccurrence[]>;
+  delta: ReadonlyMap<string, readonly SymbolOccurrence[]>;
+  impactedModuleIds: ReadonlySet<string>;
+}): Map<string, SymbolOccurrence[]> => {
+  const merged = new Map<string, SymbolOccurrence[]>();
+
+  base.forEach((entries, key) => {
+    const kept = entries.filter((entry) => !impactedModuleIds.has(entry.moduleId));
+    if (kept.length > 0) {
+      merged.set(key, [...kept]);
+    }
+  });
+
+  delta.forEach((entries, key) => {
+    const existing = merged.get(key) ?? [];
+    merged.set(key, [...existing, ...entries].sort(smallestRangeFirst));
+  });
+
+  return merged;
+};
+
+const mergeNavigationIndex = ({
+  base,
+  delta,
+  impactedModuleIds,
+}: {
+  base: ProjectNavigationIndex;
+  delta: ProjectNavigationIndex;
+  impactedModuleIds: ReadonlySet<string>;
+}): ProjectNavigationIndex => {
+  const occurrencesByUri = mergeOccurrencesByUri({
+    base: base.occurrencesByUri,
+    delta: delta.occurrencesByUri,
+    impactedModuleIds,
+  });
+  const declarationsByKey = mergeDeclarationsByKey({
+    base: base.declarationsByKey,
+    delta: delta.declarationsByKey,
+    impactedModuleIds,
+  });
+
+  const affectedCanonicalKeys = new Set<string>();
+  base.declarationsByKey.forEach((entries, key) => {
+    if (entries.some((entry) => impactedModuleIds.has(entry.moduleId))) {
+      affectedCanonicalKeys.add(key);
+    }
+  });
+  delta.declarationsByKey.forEach((_entries, key) => affectedCanonicalKeys.add(key));
+
+  const documentationByCanonicalKey = new Map(base.documentationByCanonicalKey);
+  const typeInfoByCanonicalKey = new Map(base.typeInfoByCanonicalKey);
+  affectedCanonicalKeys.forEach((key) => {
+    documentationByCanonicalKey.delete(key);
+    typeInfoByCanonicalKey.delete(key);
+  });
+  delta.documentationByCanonicalKey.forEach((value, key) =>
+    documentationByCanonicalKey.set(key, value),
+  );
+  delta.typeInfoByCanonicalKey.forEach((value, key) =>
+    typeInfoByCanonicalKey.set(key, value),
+  );
+
+  return {
+    occurrencesByUri,
+    declarationsByKey,
+    documentationByCanonicalKey,
+    typeInfoByCanonicalKey,
+  };
+};
+
+const mergeScopedNodesByModuleId = ({
+  base,
+  delta,
+  impactedModuleIds,
+}: {
+  base: CompletionAnalysis["completionIndex"]["scopedNodesByModuleId"];
+  delta: CompletionAnalysis["completionIndex"]["scopedNodesByModuleId"];
+  impactedModuleIds: ReadonlySet<string>;
+}): CompletionAnalysis["completionIndex"]["scopedNodesByModuleId"] => {
+  const merged = new Map(base);
+  impactedModuleIds.forEach((moduleId) => merged.delete(moduleId));
+  delta.forEach((value, moduleId) => merged.set(moduleId, value));
+  return merged;
+};
+
+const mergeSymbolLookupByUri = ({
+  base,
+  delta,
+  impactedModuleIds,
+}: {
+  base: CompletionAnalysis["completionIndex"]["symbolLookupByUri"];
+  delta: CompletionAnalysis["completionIndex"]["symbolLookupByUri"];
+  impactedModuleIds: ReadonlySet<string>;
+}): Map<string, ReadonlyMap<string, CompletionSymbolLookup>> => {
+  const merged = new Map<string, Map<string, CompletionSymbolLookup>>();
+
+  base.forEach((byModuleId, uri) => {
+    const keptByModuleId = new Map<string, CompletionSymbolLookup>();
+    byModuleId.forEach((lookup, moduleId) => {
+      if (impactedModuleIds.has(moduleId)) {
+        return;
+      }
+      keptByModuleId.set(moduleId, lookup);
+    });
+    if (keptByModuleId.size > 0) {
+      merged.set(uri, keptByModuleId);
+    }
+  });
+
+  delta.forEach((byModuleId, uri) => {
+    const existingByModuleId = merged.get(uri) ?? new Map<string, CompletionSymbolLookup>();
+    byModuleId.forEach((lookup, moduleId) => {
+      existingByModuleId.set(moduleId, lookup);
+    });
+    if (existingByModuleId.size > 0) {
+      merged.set(uri, existingByModuleId);
+    }
+  });
+
+  return merged;
+};
+
 export class AnalysisCoordinator {
   readonly openDocuments = new Map<string, string>();
   readonly #fileSystemHost = createFsModuleHost();
@@ -54,8 +221,9 @@ export class AnalysisCoordinator {
   });
   readonly #exportIndex: ExportIndexService;
   #revision = 0;
+  readonly #changedFilesByRevision = new Map<number, ReadonlySet<string>>();
   readonly #coreCache = new Map<string, CoreCacheEntry>();
-  readonly #coreInFlight = new Map<string, Promise<ProjectCoreAnalysis>>();
+  readonly #coreInFlight = new Map<string, Promise<CoreCacheEntry>>();
   readonly #navigationCache = new Map<string, NavigationCacheEntry>();
   readonly #navigationInFlight = new Map<string, Promise<ProjectNavigationIndex>>();
   readonly #completionCache = new Map<string, CompletionCacheEntry>();
@@ -77,19 +245,26 @@ export class AnalysisCoordinator {
       filePath,
       source,
     });
-    this.#invalidate();
+    this.#registerFileChanges([filePath]);
   }
 
   async removeDocument(document: TextDocument): Promise<void> {
     const filePath = normalizeFilePathFromUri(document.uri);
     this.openDocuments.delete(filePath);
     await this.#exportIndex.refreshFromDisk(filePath);
-    this.#invalidate();
+    this.#registerFileChanges([filePath]);
   }
 
   async handleWatchedFileChanges(
     changes: DidChangeWatchedFilesParams["changes"],
   ): Promise<boolean> {
+    const voydFilePaths = changes
+      .map((change) => normalizeFilePathFromUri(change.uri))
+      .filter((filePath) => filePath.endsWith(".voyd"));
+    if (voydFilePaths.length === 0) {
+      return false;
+    }
+
     const updated = await this.#exportIndex.applyWatchedFileChanges({
       changes,
       openDocuments: this.openDocuments,
@@ -98,46 +273,27 @@ export class AnalysisCoordinator {
       return false;
     }
 
-    this.#invalidate();
+    this.#registerFileChanges(voydFilePaths);
     return true;
   }
 
   async getCoreForUri(
     uri: string,
   ): Promise<{ context: UriContext; analysis: ProjectCoreAnalysis }> {
-    const context = await this.#resolveUriContext(uri);
-    const analysis = await this.#getCoreForContext(context);
-    if (
-      context.filePath === context.entryPath ||
-      analysis.moduleIdByFilePath.has(context.filePath)
-    ) {
-      return { context, analysis };
-    }
-
-    const fallbackContext: UriContext = {
-      filePath: context.filePath,
-      entryPath: context.filePath,
-      roots: context.roots,
-      cacheKey: AnalysisCoordinator.#contextCacheKey({
-        entryPath: context.filePath,
-        roots: context.roots,
-      }),
-    };
-    const fallbackAnalysis = await this.#getCoreForContext(fallbackContext);
+    const { context, entry } = await this.#getCoreEntryForUri(uri);
     return {
-      context: fallbackContext,
-      analysis: fallbackAnalysis,
+      context,
+      analysis: entry.analysis,
     };
   }
 
   async getNavigationForUri(uri: string): Promise<ProjectNavigationIndex> {
     while (true) {
-      const { context, analysis } = await this.getCoreForUri(uri);
-      const runRevision = this.#revision;
+      const { context, entry } = await this.#getCoreEntryForUri(uri);
+      const runRevision = entry.revision;
       const index = await this.#getNavigationForContext({
         context,
-        analysis,
-        revision: runRevision,
+        coreEntry: entry,
       });
       if (runRevision === this.#revision) {
         return index;
@@ -146,23 +302,23 @@ export class AnalysisCoordinator {
   }
 
   async getAutoImportAnalysisForUri(uri: string): Promise<AutoImportAnalysis> {
-    const { context, analysis } = await this.getCoreForUri(uri);
+    const { context, entry } = await this.#getCoreEntryForUri(uri);
     const exportsByName = this.#exportIndex.buildAutoImportExports({
       roots: context.roots,
-      semantics: analysis.semantics,
+      semantics: entry.analysis.semantics,
     });
     return {
-      moduleIdByFilePath: analysis.moduleIdByFilePath,
-      semantics: analysis.semantics,
-      graph: analysis.graph,
+      moduleIdByFilePath: entry.analysis.moduleIdByFilePath,
+      semantics: entry.analysis.semantics,
+      graph: entry.analysis.graph,
       exportsByName,
     };
   }
 
   async getCompletionAnalysisForUri(uri: string): Promise<CompletionAnalysis> {
     while (true) {
-      const { context, analysis } = await this.getCoreForUri(uri);
-      const runRevision = this.#revision;
+      const { context, entry } = await this.#getCoreEntryForUri(uri);
+      const runRevision = entry.revision;
       const cached = this.#completionCache.get(context.cacheKey);
       if (cached && cached.revision === runRevision) {
         return cached.analysis;
@@ -182,22 +338,60 @@ export class AnalysisCoordinator {
       }
 
       const task = (async () => {
+        const analysis = entry.analysis;
         const navigation = await this.#getNavigationForContext({
           context,
-          analysis,
-          revision: runRevision,
+          coreEntry: entry,
         });
-
+        const impactedModuleIds = toImpactedModuleSet(entry.recomputedModuleIds);
         const exportsByName = this.#exportIndex.buildAutoImportExports({
           roots: context.roots,
           semantics: analysis.semantics,
         });
-        const completionIndex = buildCompletionIndex({
-          semantics: analysis.semantics,
-          occurrencesByUri: navigation.occurrencesByUri,
-          lineIndexByFile: analysis.lineIndexByFile,
-          exportsByName,
-        });
+        const previousEntry = this.#completionCache.get(context.cacheKey);
+        const needsFullRebuild =
+          !previousEntry ||
+          impactedModuleIds.size === analysis.semantics.size;
+
+        const completionIndex = needsFullRebuild
+          ? buildCompletionIndex({
+              semantics: analysis.semantics,
+              occurrencesByUri: navigation.occurrencesByUri,
+              lineIndexByFile: analysis.lineIndexByFile,
+              exportsByName,
+            })
+          : impactedModuleIds.size === 0
+            ? {
+                ...previousEntry.analysis.completionIndex,
+                exportEntriesByFirstCharacter:
+                  buildCompletionExportEntriesByFirstCharacter({
+                    exportsByName,
+                  }),
+              }
+            : {
+                scopedNodesByModuleId: mergeScopedNodesByModuleId({
+                  base: previousEntry.analysis.completionIndex.scopedNodesByModuleId,
+                  delta: buildCompletionScopedNodesByModuleId({
+                    semantics: analysis.semantics,
+                    moduleIds: impactedModuleIds,
+                  }),
+                  impactedModuleIds,
+                }),
+                symbolLookupByUri: mergeSymbolLookupByUri({
+                  base: previousEntry.analysis.completionIndex.symbolLookupByUri,
+                  delta: buildCompletionSymbolLookupByUri({
+                    occurrencesByUri: navigation.occurrencesByUri,
+                    lineIndexByFile: analysis.lineIndexByFile,
+                    moduleIds: impactedModuleIds,
+                  }),
+                  impactedModuleIds,
+                }),
+                exportEntriesByFirstCharacter:
+                  buildCompletionExportEntriesByFirstCharacter({
+                    exportsByName,
+                  }),
+              };
+
         const completionAnalysis: CompletionAnalysis = {
           occurrencesByUri: navigation.occurrencesByUri,
           declarationsByKey: navigation.declarationsByKey,
@@ -235,13 +429,6 @@ export class AnalysisCoordinator {
     }
   }
 
-  #invalidate(): void {
-    this.#revision += 1;
-    this.#coreCache.clear();
-    this.#navigationCache.clear();
-    this.#completionCache.clear();
-  }
-
   static #inFlightKey({
     contextKey,
     revision,
@@ -276,6 +463,34 @@ export class AnalysisCoordinator {
     ].join("|");
   }
 
+  async #getCoreEntryForUri(
+    uri: string,
+  ): Promise<{ context: UriContext; entry: CoreCacheEntry }> {
+    const context = await this.#resolveUriContext(uri);
+    const entry = await this.#getCoreForContext(context);
+    if (
+      context.filePath === context.entryPath ||
+      entry.analysis.moduleIdByFilePath.has(context.filePath)
+    ) {
+      return { context, entry };
+    }
+
+    const fallbackContext: UriContext = {
+      filePath: context.filePath,
+      entryPath: context.filePath,
+      roots: context.roots,
+      cacheKey: AnalysisCoordinator.#contextCacheKey({
+        entryPath: context.filePath,
+        roots: context.roots,
+      }),
+    };
+    const fallbackEntry = await this.#getCoreForContext(fallbackContext);
+    return {
+      context: fallbackContext,
+      entry: fallbackEntry,
+    };
+  }
+
   async #resolveUriContext(uri: string): Promise<UriContext> {
     const filePath = normalizeFilePathFromUri(uri);
     const projectEntryPath = await resolveEntryPath(filePath);
@@ -292,10 +507,54 @@ export class AnalysisCoordinator {
     };
   }
 
-  async #getCoreForContext(context: UriContext): Promise<ProjectCoreAnalysis> {
+  #registerFileChanges(filePaths: readonly string[]): void {
+    const normalized = Array.from(
+      new Set(
+        filePaths
+          .map((filePath) => path.resolve(filePath))
+          .filter((filePath) => filePath.endsWith(".voyd")),
+      ),
+    );
+    if (normalized.length === 0) {
+      return;
+    }
+
+    this.#revision += 1;
+    this.#changedFilesByRevision.set(this.#revision, new Set(normalized));
+  }
+
+  #changedFilesSince(revision: number): Set<string> {
+    const changed = new Set<string>();
+    for (let nextRevision = revision + 1; nextRevision <= this.#revision; nextRevision += 1) {
+      const files = this.#changedFilesByRevision.get(nextRevision);
+      if (!files) {
+        continue;
+      }
+      files.forEach((filePath) => changed.add(filePath));
+    }
+    return changed;
+  }
+
+  #pruneChangedFileHistory(): void {
+    if (this.#coreCache.size === 0) {
+      this.#changedFilesByRevision.clear();
+      return;
+    }
+
+    const minCachedRevision = Math.min(
+      ...Array.from(this.#coreCache.values()).map((entry) => entry.revision),
+    );
+    Array.from(this.#changedFilesByRevision.keys()).forEach((revision) => {
+      if (revision <= minCachedRevision) {
+        this.#changedFilesByRevision.delete(revision);
+      }
+    });
+  }
+
+  async #getCoreForContext(context: UriContext): Promise<CoreCacheEntry> {
     const cached = this.#coreCache.get(context.cacheKey);
     if (cached && cached.revision === this.#revision) {
-      return cached.analysis;
+      return cached;
     }
 
     const runRevision = this.#revision;
@@ -314,19 +573,26 @@ export class AnalysisCoordinator {
         roots: context.roots,
         openDocuments: this.openDocuments,
       });
-      const analysis = await analyzeProjectCore({
+
+      const incremental = await analyzeProjectCoreIncremental({
         entryPath: context.entryPath,
         roots: context.roots,
         openDocuments: this.openDocuments,
         host: this.#moduleHost,
+        previousAnalysis: cached?.analysis,
+        changedFilePaths: this.#changedFilesSince(cached?.revision ?? -1),
       });
+      const nextEntry: CoreCacheEntry = {
+        revision: runRevision,
+        analysis: incremental.analysis,
+        recomputedModuleIds: incremental.recomputedModuleIds,
+      };
+
       if (this.#revision === runRevision) {
-        this.#coreCache.set(context.cacheKey, {
-          revision: runRevision,
-          analysis,
-        });
+        this.#coreCache.set(context.cacheKey, nextEntry);
+        this.#pruneChangedFileHistory();
       }
-      return analysis;
+      return nextEntry;
     })();
 
     this.#coreInFlight.set(inFlightKey, task);
@@ -341,13 +607,12 @@ export class AnalysisCoordinator {
 
   async #getNavigationForContext({
     context,
-    analysis,
-    revision,
+    coreEntry,
   }: {
     context: UriContext;
-    analysis: ProjectCoreAnalysis;
-    revision: number;
+    coreEntry: CoreCacheEntry;
   }): Promise<ProjectNavigationIndex> {
+    const revision = coreEntry.revision;
     const cached = this.#navigationCache.get(context.cacheKey);
     if (cached && cached.revision === revision) {
       return cached.index;
@@ -363,7 +628,25 @@ export class AnalysisCoordinator {
     }
 
     const task = (async () => {
-      const index = await buildProjectNavigationIndex({ analysis });
+      const impactedModuleIds = toImpactedModuleSet(coreEntry.recomputedModuleIds);
+      const previousEntry = this.#navigationCache.get(context.cacheKey);
+      const needsFullRebuild =
+        !previousEntry ||
+        impactedModuleIds.size === coreEntry.analysis.semantics.size;
+
+      const index = needsFullRebuild
+        ? await buildProjectNavigationIndex({ analysis: coreEntry.analysis })
+        : impactedModuleIds.size === 0
+          ? previousEntry.index
+          : mergeNavigationIndex({
+              base: previousEntry.index,
+              delta: await buildProjectNavigationIndexForModules({
+                analysis: coreEntry.analysis,
+                moduleIds: impactedModuleIds,
+              }),
+              impactedModuleIds,
+            });
+
       if (this.#revision === revision) {
         this.#navigationCache.set(context.cacheKey, {
           revision,

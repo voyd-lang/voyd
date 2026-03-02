@@ -314,6 +314,7 @@ export const buildSymbolIndex = async ({
   sourceByFile,
   lineIndexByFile,
   includeWorkspaceExports = true,
+  targetModuleIds,
 }: {
   graph: ModuleGraph;
   semantics: ReadonlyMap<string, SemanticsPipelineResult>;
@@ -321,6 +322,7 @@ export const buildSymbolIndex = async ({
   sourceByFile: ReadonlyMap<string, string>;
   lineIndexByFile: ReadonlyMap<string, LineIndex>;
   includeWorkspaceExports?: boolean;
+  targetModuleIds?: ReadonlySet<string>;
 }): Promise<SymbolIndex> => {
   const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined => {
     const module = semantics.get(ref.moduleId);
@@ -727,6 +729,10 @@ export const buildSymbolIndex = async ({
   });
 
   semantics.forEach((entry, moduleId) => {
+    if (targetModuleIds && !targetModuleIds.has(moduleId)) {
+      return;
+    }
+
     const moduleNode = graph.modules.get(moduleId);
     if (!moduleNode) {
       return;

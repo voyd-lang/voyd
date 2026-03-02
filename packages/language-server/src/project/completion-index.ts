@@ -23,12 +23,12 @@ export const buildCompletionIndex = ({
   lineIndexByFile: ReadonlyMap<string, LineIndex>;
   exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
 }): CompletionIndex => ({
-  scopedNodesByModuleId: buildScopedNodesByModuleId({ semantics }),
-  symbolLookupByUri: buildSymbolLookupByUri({
+  scopedNodesByModuleId: buildCompletionScopedNodesByModuleId({ semantics }),
+  symbolLookupByUri: buildCompletionSymbolLookupByUri({
     occurrencesByUri,
     lineIndexByFile,
   }),
-  exportEntriesByFirstCharacter: buildExportEntriesByFirstCharacter({
+  exportEntriesByFirstCharacter: buildCompletionExportEntriesByFirstCharacter({
     exportsByName,
   }),
 });
@@ -38,14 +38,20 @@ type SymbolLookupState = {
   canonicalKeyBySymbol: Map<SymbolId, string>;
 };
 
-const buildScopedNodesByModuleId = ({
+export const buildCompletionScopedNodesByModuleId = ({
   semantics,
+  moduleIds,
 }: {
   semantics: ReadonlyMap<string, SemanticsPipelineResult>;
+  moduleIds?: ReadonlySet<string>;
 }): Map<string, Map<string, CompletionScopedNodeSpan[]>> => {
   const byModuleId = new Map<string, Map<string, CompletionScopedNodeSpan[]>>();
 
   semantics.forEach((moduleSemantics, moduleId) => {
+    if (moduleIds && !moduleIds.has(moduleId)) {
+      return;
+    }
+
     const byFile = new Map<string, CompletionScopedNodeSpan[]>();
     const nodes = [
       moduleSemantics.hir.module,
@@ -80,12 +86,14 @@ const buildScopedNodesByModuleId = ({
   return byModuleId;
 };
 
-const buildSymbolLookupByUri = ({
+export const buildCompletionSymbolLookupByUri = ({
   occurrencesByUri,
   lineIndexByFile,
+  moduleIds,
 }: {
   occurrencesByUri: ReadonlyMap<string, readonly SymbolOccurrence[]>;
   lineIndexByFile: ReadonlyMap<string, LineIndex>;
+  moduleIds?: ReadonlySet<string>;
 }): Map<string, Map<string, CompletionSymbolLookup>> => {
   const symbolLookupByUri = new Map<string, Map<string, CompletionSymbolLookup>>();
 
@@ -95,6 +103,10 @@ const buildSymbolLookupByUri = ({
     const byModuleId = new Map<string, SymbolLookupState>();
 
     occurrences.forEach((occurrence) => {
+      if (moduleIds && !moduleIds.has(occurrence.moduleId)) {
+        return;
+      }
+
       const state = byModuleId.get(occurrence.moduleId) ?? {
         declarationOffsetBySymbol: new Map<SymbolId, number>(),
         canonicalKeyBySymbol: new Map<SymbolId, string>(),
@@ -116,6 +128,10 @@ const buildSymbolLookupByUri = ({
       }
     });
 
+    if (byModuleId.size === 0) {
+      return;
+    }
+
     symbolLookupByUri.set(
       uri,
       new Map(
@@ -133,7 +149,7 @@ const buildSymbolLookupByUri = ({
   return symbolLookupByUri;
 };
 
-const buildExportEntriesByFirstCharacter = ({
+export const buildCompletionExportEntriesByFirstCharacter = ({
   exportsByName,
 }: {
   exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;

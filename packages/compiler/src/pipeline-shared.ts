@@ -39,12 +39,15 @@ export type AnalyzeModulesOptions = {
   includeTests?: boolean;
   testScope?: TestScope;
   recoverFromTypingErrors?: boolean;
+  previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
+  changedModuleIds?: ReadonlySet<string>;
 };
 
 export type AnalyzeModulesResult = {
   semantics: Map<string, SemanticsPipelineResult>;
   diagnostics: Diagnostic[];
   tests: readonly TestCase[];
+  recomputedModuleIds: readonly string[];
 };
 
 export type TestScope = "all" | "entry";
@@ -107,11 +110,15 @@ export const analyzeModules = ({
   includeTests,
   testScope,
   recoverFromTypingErrors,
+  previousSemantics,
+  changedModuleIds,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
-  const { semantics, diagnostics } = analyzeModuleSemantics({
+  const { semantics, diagnostics, recomputedModuleIds } = analyzeModuleSemantics({
     graph,
     includeTests,
     recoverFromTypingErrors,
+    previousSemantics,
+    changedModuleIds,
   });
 
   diagnostics.push(...enforcePublicApiMethodEffectAnnotations({ semantics }));
@@ -119,7 +126,12 @@ export const analyzeModules = ({
   const tests = includeTests
     ? collectTests({ graph, semantics, scope: testScope ?? "all" })
     : [];
-  return { semantics, diagnostics, tests };
+  return {
+    semantics,
+    diagnostics,
+    tests,
+    recomputedModuleIds,
+  };
 };
 
 const enforcePublicApiMethodEffectAnnotations = ({

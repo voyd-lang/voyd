@@ -1,6 +1,7 @@
 import type { Diagnostic } from "../diagnostics/index.js";
 import { diagnosticFromCode, DiagnosticError } from "../diagnostics/index.js";
 import type { ModuleGraph, ModuleNode } from "./types.js";
+import { modulePathToString } from "./path.js";
 import {
   semanticsPipeline,
   type SemanticsPipelineResult,
@@ -14,22 +15,28 @@ export type AnalyzeModuleSemanticsOptions = {
   graph: ModuleGraph;
   includeTests?: boolean;
   recoverFromTypingErrors?: boolean;
+  previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
+  changedModuleIds?: ReadonlySet<string>;
 };
 
 export type AnalyzeModuleSemanticsResult = {
   semantics: Map<string, SemanticsPipelineResult>;
   diagnostics: Diagnostic[];
+  recomputedModuleIds: readonly string[];
 };
 
 export const analyzeModuleSemantics = ({
   graph,
   includeTests,
   recoverFromTypingErrors,
+  previousSemantics,
+  changedModuleIds,
 }: AnalyzeModuleSemanticsOptions): AnalyzeModuleSemanticsResult => {
   const sccGroups = getModuleSccGroups({ graph });
   const semantics = new Map<string, SemanticsPipelineResult>();
   const exports = new Map<string, ModuleExportTable>();
   const diagnostics: Diagnostic[] = [];
+  const recomputedModuleIds: string[] = [];
   const arena = createTypeArena();
   const effectInterner = createEffectInterner();
 
@@ -41,7 +48,43 @@ export const analyzeModuleSemantics = ({
     );
   });
 
+  const incrementalModuleIds = resolveIncrementalModuleIds({
+    graph,
+    previousSemantics,
+    changedModuleIds,
+  });
+  const isIncremental = incrementalModuleIds !== undefined;
+  const recomputeSet = new Set(incrementalModuleIds ?? graph.modules.keys());
+
+  if (isIncremental && previousSemantics) {
+    graph.modules.forEach((_module, moduleId) => {
+      if (recomputeSet.has(moduleId)) {
+        return;
+      }
+      const cached = previousSemantics.get(moduleId);
+      if (!cached) {
+        return;
+      }
+      semantics.set(moduleId, cached);
+      exports.set(moduleId, cached.exports);
+      diagnostics.push(...cached.diagnostics);
+    });
+  }
+
   sccGroups.forEach((group) => {
+    const shouldRecomputeGroup = group.moduleIds.some((moduleId) =>
+      recomputeSet.has(moduleId),
+    );
+    if (!shouldRecomputeGroup) {
+      return;
+    }
+
+    group.moduleIds.forEach((moduleId) => {
+      semantics.delete(moduleId);
+      exports.delete(moduleId);
+    });
+    recomputedModuleIds.push(...group.moduleIds);
+
     const moduleId = group.moduleIds[0];
     if (!moduleId) {
       return;
@@ -82,7 +125,11 @@ export const analyzeModuleSemantics = ({
     exports.set(moduleId, result.exports);
   });
 
-  return { semantics, diagnostics };
+  return {
+    semantics,
+    diagnostics,
+    recomputedModuleIds,
+  };
 };
 
 const analyzeCyclicScc = ({
@@ -274,3 +321,93 @@ const augmentCycleTy0022Diagnostics = ({
 const moduleDiagnosticFilePath = (module: ModuleNode): string =>
   module.ast.location?.filePath ??
   (module.origin.kind === "file" ? module.origin.filePath : module.id);
+
+const resolveIncrementalModuleIds = ({
+  graph,
+  previousSemantics,
+  changedModuleIds,
+}: {
+  graph: ModuleGraph;
+  previousSemantics: ReadonlyMap<string, SemanticsPipelineResult> | undefined;
+  changedModuleIds: ReadonlySet<string> | undefined;
+}): Set<string> | undefined => {
+  if (!previousSemantics) {
+    return undefined;
+  }
+
+  const currentModuleIds = new Set(graph.modules.keys());
+  const previousModuleIds = new Set(previousSemantics.keys());
+
+  if (
+    currentModuleIds.size !== previousModuleIds.size ||
+    Array.from(currentModuleIds).some((moduleId) => !previousModuleIds.has(moduleId))
+  ) {
+    return undefined;
+  }
+
+  if (!changedModuleIds || changedModuleIds.size === 0) {
+    return new Set();
+  }
+
+  const unknownChange = Array.from(changedModuleIds).some(
+    (moduleId) => !currentModuleIds.has(moduleId),
+  );
+  if (unknownChange) {
+    return undefined;
+  }
+
+  return collectReverseDependencyClosure({
+    graph,
+    seedModuleIds: changedModuleIds,
+  });
+};
+
+const collectReverseDependencyClosure = ({
+  graph,
+  seedModuleIds,
+}: {
+  graph: ModuleGraph;
+  seedModuleIds: ReadonlySet<string>;
+}): Set<string> => {
+  const reverseDependencies = buildReverseDependencies({ graph });
+  const visited = new Set<string>();
+  const queue = Array.from(seedModuleIds);
+
+  while (queue.length > 0) {
+    const next = queue.shift();
+    if (!next || visited.has(next)) {
+      continue;
+    }
+
+    visited.add(next);
+    (reverseDependencies.get(next) ?? []).forEach((dependent) => {
+      if (!visited.has(dependent)) {
+        queue.push(dependent);
+      }
+    });
+  }
+
+  return visited;
+};
+
+const buildReverseDependencies = ({
+  graph,
+}: {
+  graph: ModuleGraph;
+}): Map<string, Set<string>> => {
+  const reverseDependencies = new Map<string, Set<string>>();
+
+  graph.modules.forEach((moduleNode, moduleId) => {
+    moduleNode.dependencies.forEach((dependency) => {
+      const dependencyId = modulePathToString(dependency.path);
+      if (!graph.modules.has(dependencyId)) {
+        return;
+      }
+      const dependents = reverseDependencies.get(dependencyId) ?? new Set<string>();
+      dependents.add(moduleId);
+      reverseDependencies.set(dependencyId, dependents);
+    });
+  });
+
+  return reverseDependencies;
+};

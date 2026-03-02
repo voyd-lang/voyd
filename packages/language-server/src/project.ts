@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { Diagnostic as CompilerDiagnostic } from "@voyd/compiler/diagnostics/index.js";
 import { loadModuleGraph } from "@voyd/compiler/pipeline.js";
 import { analyzeModules } from "@voyd/compiler/pipeline-shared.js";
 import { buildDiagnosticsByUri } from "./project/diagnostics.js";
@@ -49,6 +50,13 @@ export type {
   SymbolOccurrence,
 };
 
+export type IncrementalProjectCoreResult = {
+  analysis: ProjectCoreAnalysis;
+  recomputedModuleIds: readonly string[];
+  changedModuleIds: readonly string[];
+  incremental: boolean;
+};
+
 const normalizeOpenDocumentMap = (
   openDocuments: ReadonlyMap<string, string>,
 ): Map<string, string> =>
@@ -94,30 +102,55 @@ const buildModuleIdByFilePath = ({
   return moduleIdByFilePath;
 };
 
-export const analyzeProjectCore = async ({
-  entryPath,
-  roots,
+const resolveChangedModuleIds = ({
+  changedFilePaths,
+  previousAnalysis,
+  nextModuleIdByFilePath,
+}: {
+  changedFilePaths: ReadonlySet<string> | undefined;
+  previousAnalysis: ProjectCoreAnalysis | undefined;
+  nextModuleIdByFilePath: ReadonlyMap<string, string>;
+}): Set<string> | undefined => {
+  if (!previousAnalysis) {
+    return undefined;
+  }
+
+  if (!changedFilePaths || changedFilePaths.size === 0) {
+    return new Set();
+  }
+
+  const changedModuleIds = new Set<string>();
+  const previousModuleIdByFilePath = previousAnalysis.moduleIdByFilePath;
+  changedFilePaths.forEach((filePath) => {
+    const normalizedFilePath = path.resolve(filePath);
+    const previousModuleId = previousModuleIdByFilePath.get(normalizedFilePath);
+    if (previousModuleId) {
+      changedModuleIds.add(previousModuleId);
+    }
+
+    const nextModuleId = nextModuleIdByFilePath.get(normalizedFilePath);
+    if (nextModuleId) {
+      changedModuleIds.add(nextModuleId);
+    }
+  });
+
+  return changedModuleIds;
+};
+
+const toProjectCoreAnalysis = ({
+  diagnostics,
+  graph,
+  semantics,
   openDocuments,
-  host,
-}: AnalysisInputs): Promise<ProjectCoreAnalysis> => {
-  const normalizedOpenDocuments = normalizeOpenDocumentMap(openDocuments);
-  const overlayHost =
-    host ?? createOverlayModuleHost({ openDocuments: normalizedOpenDocuments });
-  const graph = await loadModuleGraph({
-    entryPath: path.resolve(entryPath),
-    roots,
-    host: overlayHost,
-  });
-
-  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
-    graph,
-    recoverFromTypingErrors: true,
-  });
-  const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
-
+}: {
+  diagnostics: readonly CompilerDiagnostic[];
+  graph: ProjectCoreAnalysis["graph"];
+  semantics: ProjectCoreAnalysis["semantics"];
+  openDocuments: ReadonlyMap<string, string>;
+}): ProjectCoreAnalysis => {
   const sourceByFile = buildSourceByFile({
     graph,
-    openDocuments: normalizedOpenDocuments,
+    openDocuments,
   });
   const lineIndexByFile = new Map<string, LineIndex>(
     Array.from(sourceByFile.entries()).map(([filePath, source]) => [
@@ -143,6 +176,83 @@ export const analyzeProjectCore = async ({
   };
 };
 
+export const analyzeProjectCore = async ({
+  entryPath,
+  roots,
+  openDocuments,
+  host,
+}: AnalysisInputs): Promise<ProjectCoreAnalysis> => {
+  const normalizedOpenDocuments = normalizeOpenDocumentMap(openDocuments);
+  const overlayHost =
+    host ?? createOverlayModuleHost({ openDocuments: normalizedOpenDocuments });
+  const graph = await loadModuleGraph({
+    entryPath: path.resolve(entryPath),
+    roots,
+    host: overlayHost,
+  });
+
+  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
+    graph,
+    recoverFromTypingErrors: true,
+  });
+  return toProjectCoreAnalysis({
+    diagnostics: [...graph.diagnostics, ...semanticDiagnostics],
+    graph,
+    semantics,
+    openDocuments: normalizedOpenDocuments,
+  });
+};
+
+export const analyzeProjectCoreIncremental = async ({
+  entryPath,
+  roots,
+  openDocuments,
+  host,
+  previousAnalysis,
+  changedFilePaths,
+}: AnalysisInputs & {
+  previousAnalysis?: ProjectCoreAnalysis;
+  changedFilePaths?: ReadonlySet<string>;
+}): Promise<IncrementalProjectCoreResult> => {
+  const normalizedOpenDocuments = normalizeOpenDocumentMap(openDocuments);
+  const overlayHost =
+    host ?? createOverlayModuleHost({ openDocuments: normalizedOpenDocuments });
+  const graph = await loadModuleGraph({
+    entryPath: path.resolve(entryPath),
+    roots,
+    host: overlayHost,
+  });
+  const nextModuleIdByFilePath = buildModuleIdByFilePath({ graph });
+  const changedModuleIds = resolveChangedModuleIds({
+    changedFilePaths,
+    previousAnalysis,
+    nextModuleIdByFilePath,
+  });
+
+  const {
+    semantics,
+    diagnostics: semanticDiagnostics,
+    recomputedModuleIds,
+  } = analyzeModules({
+    graph,
+    recoverFromTypingErrors: true,
+    previousSemantics: previousAnalysis?.semantics,
+    changedModuleIds,
+  });
+
+  return {
+    analysis: toProjectCoreAnalysis({
+      diagnostics: [...graph.diagnostics, ...semanticDiagnostics],
+      graph,
+      semantics,
+      openDocuments: normalizedOpenDocuments,
+    }),
+    recomputedModuleIds,
+    changedModuleIds: Array.from(changedModuleIds ?? []),
+    incremental: changedModuleIds !== undefined,
+  };
+};
+
 export const buildProjectNavigationIndex = async ({
   analysis,
 }: {
@@ -154,6 +264,30 @@ export const buildProjectNavigationIndex = async ({
     sourceByFile: analysis.sourceByFile,
     lineIndexByFile: analysis.lineIndexByFile,
     includeWorkspaceExports: false,
+  });
+
+  return {
+    occurrencesByUri: symbolIndex.occurrencesByUri,
+    declarationsByKey: symbolIndex.declarationsByKey,
+    documentationByCanonicalKey: symbolIndex.documentationByCanonicalKey,
+    typeInfoByCanonicalKey: symbolIndex.typeInfoByCanonicalKey,
+  };
+};
+
+export const buildProjectNavigationIndexForModules = async ({
+  analysis,
+  moduleIds,
+}: {
+  analysis: ProjectCoreAnalysis;
+  moduleIds: ReadonlySet<string>;
+}): Promise<ProjectNavigationIndex> => {
+  const symbolIndex = await buildSymbolIndex({
+    graph: analysis.graph,
+    semantics: analysis.semantics,
+    sourceByFile: analysis.sourceByFile,
+    lineIndexByFile: analysis.lineIndexByFile,
+    includeWorkspaceExports: false,
+    targetModuleIds: moduleIds,
   });
 
   return {
