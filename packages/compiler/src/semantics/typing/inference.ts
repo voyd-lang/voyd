@@ -17,9 +17,13 @@ export const runInferencePass = (
     clearFunctionInstances(ctx);
     ctx.table.clearExprTypes();
     ctx.resolvedExprTypes.clear();
-    changed =
-      typeAllModuleLets(ctx, state, { collectChanges: true }) ||
-      typeAllFunctions(ctx, state, { collectChanges: true });
+    const moduleLetsChanged = typeAllModuleLets(ctx, state, {
+      collectChanges: true,
+    });
+    const functionsChanged = typeAllFunctions(ctx, state, {
+      collectChanges: true,
+    });
+    changed = moduleLetsChanged || functionsChanged;
   } while (changed);
 };
 

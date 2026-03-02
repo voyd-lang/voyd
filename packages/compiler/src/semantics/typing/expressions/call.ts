@@ -1495,6 +1495,7 @@ const validateCallArgs = (
 ): { ok: true; plan: readonly CallArgumentPlanEntry[] } | { ok: false } => {
   const span = callSpan ?? ctx.hir.module.span;
   const plan: CallArgumentPlanEntry[] = [];
+  const hasUnknownArgs = args.some((arg) => arg.type === ctx.primitives.unknown);
   const result = walkCallArguments({
     args,
     params,
@@ -1505,24 +1506,26 @@ const validateCallArgs = (
         match.kind === "structural-field" && match.fieldName
           ? spanForObjectLiteralFieldValue(match.arg, match.fieldName, ctx)
           : spanForArg(match.arg, ctx);
-      ensureTypeMatches(
-        match.matchedType,
-        match.param.type,
-        ctx,
-        state,
-        `call argument ${match.paramIndex + 1}`,
-        normalizeSpan(matchSpan, match.param.span, span),
-      );
-      ensureMutableArgument({
-        arg: {
-          ...match.arg,
-          type: match.matchedType,
-          exprId: match.matchedExprId ?? match.arg.exprId,
-        },
-        param: match.param,
-        index: match.paramIndex,
-        ctx,
-      });
+      if (!(state.mode === "relaxed" && hasUnknownArgs)) {
+        ensureTypeMatches(
+          match.matchedType,
+          match.param.type,
+          ctx,
+          state,
+          `call argument ${match.paramIndex + 1}`,
+          normalizeSpan(matchSpan, match.param.span, span),
+        );
+        ensureMutableArgument({
+          arg: {
+            ...match.arg,
+            type: match.matchedType,
+            exprId: match.matchedExprId ?? match.arg.exprId,
+          },
+          param: match.param,
+          index: match.paramIndex,
+          ctx,
+        });
+      }
       if (match.kind === "direct") {
         plan.push({ kind: "direct", argIndex: match.argIndex });
         return true;
