@@ -24,6 +24,12 @@ const sameNameFixturePath = resolve(
   "effects-op-wrapper-same-name.voyd",
 );
 
+const handledOnlyFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-handled-before-host-boundary.voyd",
+);
+
 describe("host boundary payload compatibility", () => {
   it("supports API-to-DTO shim wrappers for effect payloads", async () => {
     const { module } = await compileEffectFixture({ entryPath: dtoShimFixturePath });
@@ -75,5 +81,25 @@ describe("host boundary payload compatibility", () => {
     });
 
     expect(result.value).toBe(42);
+  });
+
+  it("does not require host DTO compatibility for effects handled before export", async () => {
+    const result = await compileEffectFixture({
+      entryPath: handledOnlyFixturePath,
+      throwOnError: false,
+    });
+    const payloadDiagnostic = result.diagnostics.find(
+      (diag) =>
+        diag.code === "CG0001" &&
+        diag.message.includes("Hidden.poke arg1") &&
+        diag.message.includes("unsupported type Box"),
+    );
+    expect(payloadDiagnostic).toBeUndefined();
+
+    const missingIdDiagnostic = result.diagnostics.find(
+      (diag) =>
+        diag.code === "CG0004" && diag.message.includes("public effect Hidden"),
+    );
+    expect(missingIdDiagnostic).toBeUndefined();
   });
 });

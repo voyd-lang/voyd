@@ -7,12 +7,6 @@ import type {
   TypeId,
   TypeParamId,
 } from "../../semantics/ids.js";
-import {
-  isPackageVisible,
-  type HirVisibility,
-} from "../../semantics/hir/index.js";
-import { diagnosticFromCode, normalizeSpan } from "../../diagnostics/index.js";
-import type { SourceSpan } from "../../diagnostics/types.js";
 import { getRequiredExprType } from "../types.js";
 import { resolveEffectSignatureTypes } from "./effect-signature.js";
 import { walkHirExpression } from "../hir-walk.js";
@@ -100,31 +94,12 @@ const resolveEffectId = ({
   ctx,
   effectName,
   explicitId,
-  visibility,
-  spanHint,
 }: {
   ctx: CodegenContext;
   effectName: string;
   explicitId?: string;
-  visibility: HirVisibility;
-  spanHint?: SourceSpan;
 }): EffectIdInfo => {
   const fallbackId = `${ctx.module.meta.packageId}::${ctx.moduleId}::${effectName}`;
-  if (!explicitId && isPackageVisible(visibility)) {
-    ctx.diagnostics.report(
-      diagnosticFromCode({
-        code: "CG0004",
-        params: {
-          kind: "missing-effect-id",
-          effectName,
-          fallbackId,
-        },
-        span: normalizeSpan(spanHint, ctx.module.hir.module.span),
-        severity: "warning",
-        phase: "codegen",
-      }),
-    );
-  }
   const id = explicitId ?? fallbackId;
   return { id, hash: hashEffectId(id) };
 };
@@ -401,18 +376,11 @@ const buildOwnerMap = (ctx: CodegenContext): Map<HirExprId, SymbolId> => {
 };
 
 const collectEffectIds = (ctx: CodegenContext): EffectIdInfo[] => {
-  const effectItems = new Map<SymbolId, { span: SourceSpan }>();
-  ctx.module.hir.items.forEach((item) => {
-    if (item.kind !== "effect") return;
-    effectItems.set(item.symbol, { span: item.span });
-  });
   return ctx.module.meta.effects.map((effect) =>
     resolveEffectId({
       ctx,
       effectName: effect.name,
       explicitId: effect.effectId,
-      visibility: effect.visibility,
-      spanHint: effectItems.get(effect.symbol)?.span,
     }),
   );
 };
