@@ -583,6 +583,7 @@ export interface HirEffectHandlerExpr extends HirExpressionBase {
   exprKind: "effect-handler";
   body: HirExprId;
   handlers: readonly HirEffectHandlerClause[];
+  forwardUnhandled?: boolean;
   finallyBranch?: HirExprId;
 }
 

@@ -529,7 +529,11 @@ export const typeEffectHandlerExpr = (
   const unhandled = remainingDesc.operations.filter(
     (op) => !reRaisedOps.has(op.name),
   );
-  if (unhandled.length > 0 && !remainingDesc.tailVar) {
+  if (
+    unhandled.length > 0 &&
+    !remainingDesc.tailVar &&
+    expr.forwardUnhandled !== true
+  ) {
     const opList = unhandled.map((op) => op.name).join(", ");
     emitDiagnostic({
       ctx,

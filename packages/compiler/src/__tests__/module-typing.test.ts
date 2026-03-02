@@ -678,6 +678,41 @@ pub fn main() -> i32
     );
   });
 
+  it("does not report imported handled operations as unhandled effects", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}dep.voyd`]: `
+pub eff Ctx
+  rand_f64(tail) -> f64
+
+pub fn sample(): Ctx -> f64
+  Ctx::rand_f64()
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::dep::{ Ctx, sample }
+
+pub fn main() -> f64
+  try
+    sample()
+  Ctx::rand_f64(tail):
+    tail(1.0)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const allDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(allDiagnostics).toHaveLength(0);
+    expect(allDiagnostics.some((diagnostic) => diagnostic.code === "TY0013")).toBe(
+      false,
+    );
+  });
+
   it("constructs imported generic enum namespace variants without direct member imports", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

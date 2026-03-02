@@ -133,4 +133,27 @@ fn main(): Async -> i32
     expect(handler.handlers[0]?.parameters).toHaveLength(1);
     expect(handler.handlers[0]?.resumable).toBe("fn");
   });
+
+  it("marks try forward handlers to propagate unhandled operations", () => {
+    const hir = lower(`
+eff Async
+  fn await(tail) -> i32
+eff Log
+  fn write(tail) -> void
+
+fn main(): (Async, Log) -> i32
+  try forward
+    let value = Async::await()
+    Log::write()
+    value
+  Async::await(tail):
+    tail(1)
+`);
+    const handler = Array.from(hir.expressions.values()).find(
+      (expr) => expr.kind === "expr" && expr.exprKind === "effect-handler"
+    );
+    expect(handler).toBeDefined();
+    if (!handler || handler.exprKind !== "effect-handler") return;
+    expect(handler.forwardUnhandled).toBe(true);
+  });
 });
