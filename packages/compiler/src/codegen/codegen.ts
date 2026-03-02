@@ -88,14 +88,7 @@ export const codegenProgram = ({
 }: CodegenProgramParams): CodegenResult => {
   const modules = Array.from(program.modules.values());
   const mod = createCodegenModule();
-  const mergedOptions: Required<CodegenOptions> = {
-    ...DEFAULT_OPTIONS,
-    ...options,
-    continuationBackend: {
-      ...DEFAULT_OPTIONS.continuationBackend,
-      ...(options.continuationBackend ?? {}),
-    },
-  };
+  const mergedOptions = normalizeCodegenOptions(options);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
   const functions = new Map<string, Map<number, FunctionMetadata[]>>();
@@ -278,6 +271,28 @@ export type { CodegenOptions, CodegenResult } from "./context.js";
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const normalizeCodegenOptions = (
+  options: CodegenOptions
+): Required<CodegenOptions> => ({
+  optimize: options.optimize ?? DEFAULT_OPTIONS.optimize,
+  validate: options.validate ?? DEFAULT_OPTIONS.validate,
+  runtimeDiagnostics:
+    options.runtimeDiagnostics ?? DEFAULT_OPTIONS.runtimeDiagnostics,
+  emitEffectHelpers: options.emitEffectHelpers ?? DEFAULT_OPTIONS.emitEffectHelpers,
+  effectsHostBoundary:
+    options.effectsHostBoundary ?? DEFAULT_OPTIONS.effectsHostBoundary,
+  linearMemoryExport:
+    options.linearMemoryExport ?? DEFAULT_OPTIONS.linearMemoryExport,
+  effectsMemoryExport:
+    options.effectsMemoryExport ?? DEFAULT_OPTIONS.effectsMemoryExport,
+  continuationBackend: {
+    ...DEFAULT_OPTIONS.continuationBackend,
+    ...(options.continuationBackend ?? {}),
+  },
+  testMode: options.testMode ?? DEFAULT_OPTIONS.testMode,
+  testScope: options.testScope ?? DEFAULT_OPTIONS.testScope,
+});
 
 const emitWasmBytes = (mod: binaryen.Module): Uint8Array => {
   const emitted = mod.emitBinary();
