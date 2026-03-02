@@ -134,14 +134,15 @@ describe("registerDefaultHostAdapters", () => {
     const info = vi.fn();
     const table = buildTable([
       { effectId: "voyd.std.random", opName: "next_i64", opId: 0 },
-      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 1 },
-      { effectId: "voyd.std.time", opName: "monotonic_now_millis", opId: 2 },
-      { effectId: "voyd.std.time", opName: "system_now_millis", opId: 3 },
-      { effectId: "voyd.std.time", opName: "sleep_millis", opId: 4 },
-      { effectId: "voyd.std.time", opName: "set_timeout_millis", opId: 5 },
-      { effectId: "voyd.std.time", opName: "set_interval_millis", opId: 6 },
-      { effectId: "voyd.std.time", opName: "clear_timer", opId: 7 },
-      { effectId: "voyd.std.log", opName: "emit", opId: 8 },
+      { effectId: "voyd.std.random", opName: "next_u64", opId: 1 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 2 },
+      { effectId: "voyd.std.time", opName: "monotonic_now_millis", opId: 3 },
+      { effectId: "voyd.std.time", opName: "system_now_millis", opId: 4 },
+      { effectId: "voyd.std.time", opName: "sleep_millis", opId: 5 },
+      { effectId: "voyd.std.time", opName: "set_timeout_millis", opId: 6 },
+      { effectId: "voyd.std.time", opName: "set_interval_millis", opId: 7 },
+      { effectId: "voyd.std.time", opName: "clear_timer", opId: 8 },
+      { effectId: "voyd.std.log", opName: "emit", opId: 9 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -163,6 +164,10 @@ describe("registerDefaultHostAdapters", () => {
       tailContinuation
     );
     expect(typeof random64.value).toBe("bigint");
+    const randomUnsigned64 = await getHandler("voyd.std.random", "next_u64")(
+      tailContinuation
+    );
+    expect(typeof randomUnsigned64.value).toBe("bigint");
 
     const randomBytes = await getHandler("voyd.std.random", "fill_bytes")(
       tailContinuation,
@@ -232,6 +237,44 @@ describe("registerDefaultHostAdapters", () => {
       "voyd.std.random",
       "voyd.std.log",
     ]);
+  });
+
+  it("registers actionable unsupported handlers when random source is unavailable", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.random", opName: "next_i64", opId: 0 },
+      { effectId: "voyd.std.random", opName: "next_u64", opId: 1 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 2 },
+    ]);
+    const diagnostics: string[] = [];
+    vi.stubGlobal("crypto", undefined);
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        onDiagnostic: (message) => diagnostics.push(message),
+      },
+    });
+
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "voyd.std.random")
+        ?.supported
+    ).toBe(false);
+
+    await expect(
+      (async () => getHandler("voyd.std.random", "next_i64")(tailContinuation))()
+    ).rejects.toThrow(/Default random adapter is unavailable on browser/i);
+    await expect(
+      (async () => getHandler("voyd.std.random", "next_u64")(tailContinuation))()
+    ).rejects.toThrow(/Default random adapter is unavailable on browser/i);
+    await expect(
+      (async () =>
+        getHandler("voyd.std.random", "fill_bytes")(tailContinuation, 4))()
+    ).rejects.toThrow(/Default random adapter is unavailable on browser/i);
+    expect(diagnostics.some((message) => message.includes("unsupported random"))).toBe(
+      true
+    );
   });
 
   it("chains timers for long sleep durations", async () => {
@@ -1327,10 +1370,11 @@ describe("registerDefaultHostAdapters", () => {
   it("does not consume random hook bytes during adapter registration", async () => {
     const table = buildTable([
       { effectId: "voyd.std.random", opName: "next_i64", opId: 0 },
-      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 1 },
+      { effectId: "voyd.std.random", opName: "next_u64", opId: 1 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 2 },
     ]);
     const stream = Uint8Array.from(
-      Array.from({ length: 16 }, (_, index) => index + 1)
+      Array.from({ length: 24 }, (_, index) => index + 1)
     );
     let offset = 0;
     const randomBytes = vi.fn((length: number) => {
@@ -1361,6 +1405,13 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: 0x0807060504030201n,
     });
+    const nextU64Result = await getHandler("voyd.std.random", "next_u64")(
+      tailContinuation
+    );
+    expect(nextU64Result).toEqual({
+      kind: "tail",
+      value: 0x100f0e0d0c0b0a09n,
+    });
 
     const fillBytesResult = await getHandler("voyd.std.random", "fill_bytes")(
       tailContinuation,
@@ -1368,9 +1419,9 @@ describe("registerDefaultHostAdapters", () => {
     );
     expect(fillBytesResult).toEqual({
       kind: "tail",
-      value: [9, 10, 11, 12],
+      value: [17, 18, 19, 20],
     });
-    expect(randomBytes).toHaveBeenCalledTimes(2);
+    expect(randomBytes).toHaveBeenCalledTimes(3);
   });
 
   it("returns null for denied deno env reads", async () => {

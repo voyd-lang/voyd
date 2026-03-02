@@ -99,7 +99,8 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         { effectId: "voyd.std.time", opName: "set_interval_millis", opId: 4 },
         { effectId: "voyd.std.time", opName: "clear_timer", opId: 5 },
         { effectId: "voyd.std.random", opName: "next_i64", opId: 0 },
-        { effectId: "voyd.std.random", opName: "fill_bytes", opId: 1 },
+        { effectId: "voyd.std.random", opName: "next_u64", opId: 1 },
+        { effectId: "voyd.std.random", opName: "fill_bytes", opId: 2 },
         { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
         { effectId: "voyd.std.input", opName: "read_line", opId: 0 },
         { effectId: "voyd.std.input", opName: "read_bytes", opId: 1 },
@@ -213,6 +214,7 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       const intervalHandler = getHandler("voyd.std.time", "set_interval_millis");
       const clearTimerHandler = getHandler("voyd.std.time", "clear_timer");
       const nextI64Handler = getHandler("voyd.std.random", "next_i64");
+      const nextU64Handler = getHandler("voyd.std.random", "next_u64");
       const fillBytesHandler = getHandler("voyd.std.random", "fill_bytes");
 
       await expect(invokeHandler(monotonicHandler)).resolves.toEqual({
@@ -275,6 +277,10 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       });
 
       await expect(invokeHandler(nextI64Handler)).resolves.toEqual({
+        kind: "tail",
+        value: 0x0807060504030201n,
+      });
+      await expect(invokeHandler(nextU64Handler)).resolves.toEqual({
         kind: "tail",
         value: 0x0807060504030201n,
       });

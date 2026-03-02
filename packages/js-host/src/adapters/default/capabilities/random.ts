@@ -122,6 +122,19 @@ export const randomCapabilityDefinition: CapabilityDefinition = {
     registered += registerOpHandler({
       host,
       effectId: RANDOM_EFFECT_ID,
+      opName: "next_u64",
+      handler: ({ tail }) => {
+        const bytes = randomSource.readBytes(8);
+        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        const unsigned = view.getBigUint64(0, true);
+        return tail(BigInt.asIntN(64, unsigned));
+      },
+    });
+    implementedOps.add("next_u64");
+
+    registered += registerOpHandler({
+      host,
+      effectId: RANDOM_EFFECT_ID,
       opName: "fill_bytes",
       handler: ({ tail }, lenPayload) => {
         const requested = Math.max(0, toNumberOrUndefined(lenPayload) ?? 0);
