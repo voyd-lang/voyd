@@ -1,18 +1,16 @@
 use std::error::HostError
 use std::fetch
-use std::fetch::Fetch
-use std::fetch::FetchResponse
 use std::result::types::all
 
-fn status_or_error(result: Result<FetchResponse, HostError>): () -> i32
+fn status_or_error(result: Result<fetch::FetchResponse, HostError>): () -> i32
   match(result)
-    Ok<FetchResponse> { value }:
+    Ok<fetch::FetchResponse> { value }:
       value.status
     Err<HostError> { error }:
       -error.code
 
-pub fn module_get_probe(): Fetch -> i32
+pub fn module_get_probe(): fetch::Fetch -> i32
   status_or_error(fetch::get("https://example.test/module".as_slice()))
 
-pub fn request_factory_probe(): Fetch -> i32
+pub fn request_factory_probe(): fetch::Fetch -> i32
   status_or_error(fetch::FetchRequest::from_get("https://example.test/factory".as_slice()).send())
