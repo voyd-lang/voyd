@@ -5,11 +5,11 @@
     { "include": "#jsx" },
     { "include": "#keywords" },
     { "include": "#type-definition" },
+    { "include": "#constants" },
     { "include": "#types" },
     { "include": "#function-definition" },
     { "include": "#function-call" },
     { "include": "#comment" },
-    { "include": "#constants" },
     { "include": "#identifiers" },
     { "include": "#paren-expression" }
   ],
@@ -19,11 +19,11 @@
         { "include": "#jsx" },
         { "include": "#keywords" },
         { "include": "#type-definition" },
+        { "include": "#constants" },
         { "include": "#types" },
         { "include": "#function-definition" },
         { "include": "#function-call" },
         { "include": "#comment" },
-        { "include": "#constants" },
         { "include": "#identifiers" },
         { "include": "#paren-expression" }
       ]
@@ -236,6 +236,10 @@
         {
           "name": "constant.numeric.voyd",
           "match": "[+-]?\\d+(\\.\\d+$)?"
+        },
+        {
+          "name": "constant.language.voyd",
+          "match": "\\b([A-Z]{2,}[A-Z0-9_]*|[A-Z][A-Z0-9]*_[A-Z0-9_]+)\\b"
         },
         {
           "name": "constant.language.boolean.voyd",
