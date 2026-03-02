@@ -132,6 +132,56 @@ test "random_f32 supports range overload":
 
   assert(f64_from_f32(value), eq: 3.5)
 
+test "local_rng uses deterministic sequence for a seed":
+  let ~left = LocalRng::seeded(i64_from_i32(42))
+  let ~right = LocalRng::seeded(i64_from_i32(42))
+  let int_range = Range<i32> {
+    start: Some<i32> { value: 10 },
+    end: Some<i32> { value: 20 },
+    include_end: false
+  }
+
+  assert(left.next_u64().bits, eq: right.next_u64().bits)
+  assert(left.next_i64(), eq: right.next_i64())
+  assert(left.random_f64(), eq: right.random_f64())
+  assert(left.random_i32(int_range), eq: right.random_i32(int_range))
+
+test "local_rng seeded_from_host consumes one host seed":
+  let ~calls = Array<i32>::init()
+  let ~unit_values = Array<f64>::init()
+  let ~ranged_values = Array<f64>::init()
+
+  try
+    let ~rng = LocalRng::seeded_from_host()
+    let unit = rng.random_f64()
+    let ranged = rng.random_f64(
+      Range<f64> {
+        start: Some<f64> { value: 10.0 },
+        end: Some<f64> { value: 20.0 },
+        include_end: false
+      }
+    )
+    unit_values.push(unit)
+    ranged_values.push(ranged)
+  Random::next_u64(tail):
+    calls.push(1)
+    tail(i64_from_i32(99))
+  Random::next_i64(tail):
+    calls.push(2)
+    tail(i64_from_i32(0))
+  Random::fill_bytes(tail, _len):
+    calls.push(3)
+    tail(msgpack::make_null())
+
+  let unit = optional_f64_or(unit_values.get(0), -1.0)
+  let ranged = optional_f64_or(ranged_values.get(0), -1.0)
+  assert(unit >= 0.0, eq: true)
+  assert(unit < 1.0, eq: true)
+  assert(ranged >= 10.0, eq: true)
+  assert(ranged < 20.0, eq: true)
+  assert(optional_i32_or(calls.get(0), -1), eq: 1)
+  assert(calls.len(), eq: 1)
+
 fn random_i32_from_seed(seed: i64) -> i32
   try
     random_i32()
@@ -225,6 +275,13 @@ fn next_u64_from_seed(seed: i64) -> U64Bits
 fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
   match(value)
     Some<i32> { value: present }:
+      present
+    None:
+      fallback
+
+fn optional_f64_or(value: Option<f64>, fallback: f64): () -> f64
+  match(value)
+    Some<f64> { value: present }:
       present
     None:
       fallback
