@@ -352,6 +352,10 @@ export const coerceValueToType = ({
     }
   }
 
+  if (typeHasTraitRequirements(targetType, ctx)) {
+    return value;
+  }
+
   const targetInfo = getStructuralTypeInfo(targetType, ctx);
   if (!targetInfo) {
     return value;
@@ -362,10 +366,6 @@ export const coerceValueToType = ({
     throw new Error("cannot coerce non-structural value to structural type");
   }
   if (actualInfo.structuralId === targetInfo.structuralId) {
-    return value;
-  }
-
-  if (typeHasTraitRequirements(targetType, ctx)) {
     return value;
   }
 
