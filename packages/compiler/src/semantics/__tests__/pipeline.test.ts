@@ -1354,6 +1354,48 @@ describe("semanticsPipeline", () => {
       )
     ).toBe(true);
   });
+
+  it("infers forward-referenced helpers used by overloaded operators across modules", () => {
+    const result = runMainWithSingleFixtureDependency({
+      depFixture: "forward_inference_overloaded_operator_cross_module/dep.voyd",
+      mainFixture: "forward_inference_overloaded_operator_cross_module/main.voyd",
+    });
+    const { typing } = result;
+    const symbolTable = getSymbolTable(result);
+    const rootScope = symbolTable.rootScope;
+    const sampleSquareSymbol = symbolTable.resolve("sample_square", rootScope);
+    expect(sampleSquareSymbol).toBeDefined();
+    if (typeof sampleSquareSymbol !== "number") {
+      return;
+    }
+
+    const sampleSquareScheme = typing.table.getSymbolScheme(sampleSquareSymbol);
+    expect(sampleSquareScheme).toBeDefined();
+    if (!sampleSquareScheme) {
+      return;
+    }
+
+    const sampleSquareFn = typing.arena.instantiate(sampleSquareScheme, []);
+    const sampleSquareDesc = typing.arena.get(sampleSquareFn);
+    expect(sampleSquareDesc.kind).toBe("function");
+    if (sampleSquareDesc.kind !== "function") {
+      return;
+    }
+
+    const returnDesc = typing.arena.get(sampleSquareDesc.returnType);
+    const nominalDesc =
+      returnDesc.kind === "nominal-object"
+        ? returnDesc
+        : returnDesc.kind === "intersection" &&
+          typeof returnDesc.nominal === "number"
+        ? typing.arena.get(returnDesc.nominal)
+        : undefined;
+    expect(nominalDesc?.kind).toBe("nominal-object");
+    if (nominalDesc?.kind !== "nominal-object") {
+      return;
+    }
+    expect(nominalDesc.name).toBe("Vec3");
+  });
 });
 
 const bindFixture = (fixtureName: string): BindingResult => {

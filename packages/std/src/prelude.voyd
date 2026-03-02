@@ -1,5 +1,5 @@
 pub std::optional::types::{ Optional, Option, Some, None }
-pub std::optional::fns::{ some, none }
+pub std::optional::fns::{ some, none, '??' }
 pub std::result::types::{ Result, Ok, Err }
 pub std::result::fns::{ ok, err, and_then, unwrap_or }
 
