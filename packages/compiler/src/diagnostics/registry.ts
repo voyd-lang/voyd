@@ -272,6 +272,12 @@ type DiagnosticParamsMap = {
     candidates: number;
     maxCandidates: number;
   };
+  TY0042: {
+    kind: "missing-trait-method";
+    traitName: string;
+    targetName: string;
+    missingMethods: readonly string[];
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -860,6 +866,16 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0041"]>,
+  TY0042: {
+    code: "TY0042",
+    message: (params) => {
+      const plural = params.missingMethods.length === 1 ? "" : "s";
+      const missingList = params.missingMethods.join(", ");
+      return `impl ${params.traitName} for ${params.targetName} is missing trait method${plural}: ${missingList}`;
+    },
+    severity: "error",
+    phase: "typing",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0042"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
