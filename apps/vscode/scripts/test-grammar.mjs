@@ -14,6 +14,9 @@ const interpolationPattern = grammar.repository["string-interpolation"];
 const stringPattern = grammar.repository.constants?.patterns?.find(
   (pattern) => pattern.name === "string.quoted.double.voyd"
 );
+const constantPattern = grammar.repository.constants?.patterns?.find(
+  (pattern) => pattern.name === "constant.language.voyd"
+);
 
 assert(clausePattern, "Expected clause-call grammar pattern to exist");
 assert.equal(
@@ -45,6 +48,17 @@ assert(stringPattern, "Expected double-quoted string grammar pattern to exist");
 assert(
   stringPattern.patterns?.some((pattern) => pattern.include === "#string-interpolation"),
   "Double-quoted strings should include interpolation parsing"
+);
+
+assert(constantPattern, "Expected named constant grammar pattern to exist");
+const constantRegex = new RegExp(constantPattern.match, "g");
+assert(
+  constantRegex.test("NEG_INFINITY"),
+  "Expected NEG_INFINITY to be highlighted as a named constant"
+);
+assert(
+  !constantRegex.test("MyType"),
+  "PascalCase type names should not be highlighted as named constants"
 );
 
 const interpolationRegex = new RegExp(interpolationPattern.begin, "g");
