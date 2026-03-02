@@ -21,8 +21,12 @@ import {
   getRequiredExprType,
 } from "../../types.js";
 import { allocateTempLocal } from "../../locals.js";
-import { coerceValueToType } from "../../structural.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
+import {
+  compileCallArgumentsForParams,
+  resolveTypedCallArgumentPlan,
+  sliceTypedCallArgumentPlan,
+} from "./arguments.js";
 import {
   currentHandlerValue,
   handlerType,
@@ -133,22 +137,35 @@ export const compileTraitDispatchCall = ({
   );
 
   const target = refCast(ctx.mod, accessor, fnRefType);
-  const args = expr.args.map((arg, index) => {
-    if (index === 0) {
-      return loadReceiver();
-    }
-
-    const expectedTypeId = meta.paramTypeIds[index];
-    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
-    const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
-    return coerceValueToType({
-      value: value.expr,
-      actualType: actualTypeId,
-      targetType: expectedTypeId,
+  const typedPlan = resolveTypedCallArgumentPlan({
+    callId: expr.id,
+    typeInstanceId,
+    ctx,
+  });
+  const allCallArgExprIds = expr.args.map((arg) => arg.expr);
+  const userTypedPlan = typedPlan
+    ? sliceTypedCallArgumentPlan({
+        typedPlan,
+        paramOffset: 1,
+        argOffset: 1,
+      })
+    : undefined;
+  const args = [
+    loadReceiver(),
+    ...compileCallArgumentsForParams({
+      call: { ...expr, args: expr.args.slice(1) },
+      params: meta.parameters.slice(1),
       ctx,
       fnCtx,
-    });
-  });
+      compileExpr,
+      options: {
+        typeInstanceId,
+        argIndexOffset: 1,
+        allCallArgExprIds,
+        typedPlan: userTypedPlan,
+      },
+    }),
+  ];
 
   const callArgs = meta.effectful
     ? [currentHandlerValue(ctx, fnCtx), ...args]
