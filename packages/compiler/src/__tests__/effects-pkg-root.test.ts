@@ -165,8 +165,19 @@ pub obj Wrap<Output> {
       host,
     });
 
-    const { diagnostics } = analyzeModules({ graph });
+    const { semantics, diagnostics } = analyzeModules({ graph });
     expect(diagnostics.some((diag) => diag.code === "TY0016")).toBe(true);
+
+    const pkg = semantics.get("src::pkg");
+    expect(pkg).toBeDefined();
+    if (!pkg) {
+      return;
+    }
+
+    const outputSymbols = pkg.binding.symbolTable
+      .resolveAll("Output", pkg.binding.symbolTable.rootScope)
+      .map((symbol) => pkg.binding.symbolTable.getSymbol(symbol).kind);
+    expect(outputSymbols).toEqual(["effect"]);
   });
 
   it("requires pub fn main to be pure", async () => {
