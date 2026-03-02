@@ -102,7 +102,11 @@ const bindTry = (
   tracker: BinderScopeTracker,
 ): void => {
   const handlerEntries: Form[] = [];
-  const body = form.at(1);
+  const markerExpr = form.at(1);
+  const hasForwardUnhandled =
+    isIdentifierAtom(markerExpr) && markerExpr.value === "forward";
+  const bodyIndex = hasForwardUnhandled ? 2 : 1;
+  const body = form.at(bodyIndex);
   if (isForm(body) && body.calls("block")) {
     body.rest.forEach((entry) => {
       if (isForm(entry) && entry.calls(":")) {
@@ -118,7 +122,9 @@ const bindTry = (
   }
 
   handlerEntries.push(
-    ...form.rest.slice(1).filter((entry): entry is Form => isForm(entry)),
+    ...form.rest
+      .slice(bodyIndex)
+      .filter((entry): entry is Form => isForm(entry)),
   );
   handlerEntries.forEach((entry) => {
     if (!isForm(entry) || !entry.calls(":")) {
@@ -136,6 +142,10 @@ const bindTry = (
     const handlerBody = entry.at(2);
 
     tracker.enterScope(clauseScope, () => {
+      // Handler heads can reference imported operations (for example `Fx::op`).
+      // Bind the head itself so namespace member imports are materialized before
+      // lowering resolves handler operation symbols.
+      bindExpr(head, ctx, tracker);
       declareHandlerParams(head, ctx, clauseScope);
       bindExpr(handlerBody, ctx, tracker);
     });

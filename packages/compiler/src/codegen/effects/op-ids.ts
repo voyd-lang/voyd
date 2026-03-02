@@ -23,10 +23,11 @@ export const getEffectOpIds = (
   if (!registry) {
     throw new Error("codegen missing effect registry");
   }
-  const effectId = registry.getEffectId(ctx.moduleId, info.localEffectIndex);
+  const sourceModuleId = info.sourceModuleId ?? ctx.moduleId;
+  const effectId = registry.getEffectId(sourceModuleId, info.localEffectIndex);
   if (!effectId) {
     throw new Error(
-      `codegen missing effect id for ${ctx.moduleId}:${info.localEffectIndex}`
+      `codegen missing effect id for ${sourceModuleId}:${info.localEffectIndex}`
     );
   }
   return {

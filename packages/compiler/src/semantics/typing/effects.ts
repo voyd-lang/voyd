@@ -43,6 +43,33 @@ const importedTargetFor = ({
 }): { moduleId: string; symbol: SymbolId } | undefined =>
   ctx.importsByLocal.get(symbol);
 
+const importedEffectOperationDeclFor = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: Pick<TypingContext, "importsByLocal" | "dependencies">;
+}):
+  | {
+      decl: NonNullable<ReturnType<TypingContext["decls"]["getEffectOperation"]>>;
+      moduleId: string;
+    }
+  | undefined => {
+  const imported = importedTargetFor({ symbol, ctx });
+  if (!imported) {
+    return undefined;
+  }
+  const dependency = ctx.dependencies.get(imported.moduleId);
+  if (!dependency) {
+    return undefined;
+  }
+  const decl = dependency.decls.getEffectOperation(imported.symbol);
+  if (!decl) {
+    return undefined;
+  }
+  return { decl, moduleId: imported.moduleId };
+};
+
 export const freshOpenEffectRow = (
   effects: EffectTable,
   options?: { rigid?: boolean }
@@ -68,21 +95,22 @@ export const effectOpName = (
   ctx: TypingContext
 ): string => {
   const record = ctx.symbolTable.getSymbol(symbol);
-  const ownerEffect = (record.metadata as { ownerEffect?: SymbolId } | undefined)
-    ?.ownerEffect;
-  if (typeof ownerEffect !== "number") {
+  const ownerEffect = (
+    record.metadata as { ownerEffect?: SymbolId } | undefined
+  )?.ownerEffect;
+  const localDecl = ctx.decls.getEffectOperation(symbol);
+  const importedDecl = localDecl
+    ? undefined
+    : importedEffectOperationDeclFor({ symbol, ctx });
+  const decl = localDecl ?? importedDecl?.decl;
+
+  const effectName =
+    typeof ownerEffect === "number"
+      ? ctx.symbolTable.getSymbol(ownerEffect).name
+      : decl?.effect.name;
+  if (!effectName) {
     return record.name;
   }
-  const decl =
-    ctx.decls.getEffectOperation(symbol) ??
-    (() => {
-      const imported = importedTargetFor({ symbol, ctx });
-      if (!imported) return undefined;
-      const dependency = ctx.dependencies.get(imported.moduleId);
-      if (!dependency) return undefined;
-      return dependency.decls.getEffectOperation(imported.symbol);
-    })();
-  const effectName = ctx.symbolTable.getSymbol(ownerEffect).name;
   if (!decl) {
     return `${effectName}.${record.name}`;
   }

@@ -61,7 +61,11 @@ export const lowerTry = ({
   scopes,
   lowerExpr,
 }: LoweringFormParams): number => {
-  const bodyExpr = form.at(1);
+  const markerExpr = form.at(1);
+  const hasForwardUnhandled =
+    isIdentifierAtom(markerExpr) && markerExpr.value === "forward";
+  const bodyIndex = hasForwardUnhandled ? 2 : 1;
+  const bodyExpr = form.at(bodyIndex);
   if (!bodyExpr) {
     throw new Error("try expression missing body");
   }
@@ -69,7 +73,10 @@ export const lowerTry = ({
     stripEmbeddedHandlerClauses(bodyExpr);
   const body = lowerExpr(strippedBody, ctx, scopes);
 
-  const handlerForms = [...collectHandlerForms(form), ...embeddedHandlers];
+  const handlerForms = [
+    ...collectHandlerForms({ form, bodyIndex }),
+    ...embeddedHandlers,
+  ];
   const handlers = handlerForms.flatMap((entry) => {
     const clauseScope = ctx.scopeByNode.get(entry.syntaxId);
     if (clauseScope !== undefined) {
@@ -110,13 +117,20 @@ export const lowerTry = ({
     span: toSourceSpan(form),
     body,
     handlers,
+    ...(hasForwardUnhandled ? { forwardUnhandled: true } : {}),
   });
 
   return exprId;
 };
 
-const collectHandlerForms = (form: Form): Form[] => {
-  const body = form.at(1);
+const collectHandlerForms = ({
+  form,
+  bodyIndex,
+}: {
+  form: Form;
+  bodyIndex: number;
+}): Form[] => {
+  const body = form.at(bodyIndex);
   const handlers: Form[] = [];
   if (isForm(body) && body.calls("block")) {
     body.rest.forEach((entry) => {
@@ -125,7 +139,7 @@ const collectHandlerForms = (form: Form): Form[] => {
       }
     });
   }
-  form.rest.slice(1).forEach((entry) => {
+  form.rest.slice(bodyIndex).forEach((entry) => {
     if (isForm(entry) && entry.calls(":")) {
       handlers.push(entry);
     }

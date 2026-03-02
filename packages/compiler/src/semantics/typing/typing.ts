@@ -20,12 +20,12 @@ import type {
 } from "./types.js";
 import {
   registerImportedObjectTemplate,
-  resolveImportedValue,
 } from "./imports.js";
 import { cloneNestedMap } from "./call-resolution.js";
 import { refreshTraitImplInstances, resolveTypeAlias } from "./type-system.js";
 import { DiagnosticError, type Diagnostic } from "../../diagnostics/index.js";
 import { hydrateImportedTraitMetadataForDependencySymbol } from "./import-trait-impl-hydration.js";
+import { hydrateImportedValueLikeSymbol } from "./import-hydration.js";
 
 export * from "./types.js";
 
@@ -149,15 +149,8 @@ const primeTypeAliases = (ctx: TypingContext, state: TypingState): void => {
 };
 
 const primeImportedValues = (ctx: TypingContext): void => {
-  ctx.importsByLocal.forEach((target, symbol) => {
-    const record = ctx.symbolTable.getSymbol(symbol);
-    if (record.kind !== "value") {
-      return;
-    }
-    if (!target) {
-      return;
-    }
-    resolveImportedValue({ symbol, ctx });
+  ctx.importsByLocal.forEach((_target, symbol) => {
+    hydrateImportedValueLikeSymbol({ symbol, ctx });
   });
 };
 

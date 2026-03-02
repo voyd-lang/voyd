@@ -13,7 +13,7 @@ const fixturePath = resolve(
 );
 
 describe("effects call imported callee", () => {
-  it("compiles effectful imported direct calls with effectful args", async () => {
+  it("compiles direct imported effect-op performs with effectful args", async () => {
     const { module } = await compileEffectFixture({ entryPath: fixturePath });
     const parsed = parseEffectTable(module);
     const awaitOp = parsed.ops.find((op) => op.label.endsWith("Async.await"));
