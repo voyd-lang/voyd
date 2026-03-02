@@ -15,13 +15,18 @@ const wantsSource =
 
 if (!wantsSource && existsSync(distCli)) {
   await import(pathToFileURL(distCli).href);
-  process.exit(0);
+} else {
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "--conditions=development",
+      srcCli,
+      ...process.argv.slice(2),
+    ],
+    { stdio: "inherit" }
+  );
+
+  child.on("exit", (code) => process.exit(code ?? 1));
 }
-
-const child = spawn(
-  process.execPath,
-  ["--import", "tsx", "--conditions=development", srcCli, ...process.argv.slice(2)],
-  { stdio: "inherit" }
-);
-
-child.on("exit", (code) => process.exit(code ?? 1));

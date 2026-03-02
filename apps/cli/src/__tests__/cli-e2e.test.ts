@@ -250,8 +250,41 @@ const createCompanionTypingErrorFixture = async (): Promise<{
   return { root, sourceFile, testFile };
 };
 
-const createCompanionScopedTargetFixture = async (): Promise<{
+const createCompanionPrivateAccessFixture = async (): Promise<{
   root: string;
+  testFile: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-companion-private-"));
+  const srcRoot = resolve(root, "src");
+  const sourceFile = resolve(srcRoot, "subject.voyd");
+  const testFile = resolve(srcRoot, "subject.test.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    sourceFile,
+    [
+      "fn hidden() -> i32",
+      "  7",
+      "",
+      "pub fn value() -> i32",
+      "  hidden()",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    testFile,
+    [
+      "test \"companion can access private symbols\":",
+      "  hidden()",
+      "",
+    ].join("\n"),
+  );
+
+  return { root, testFile };
+};
+
+const createCompanionTargetIncludesPrimaryFixture = async (): Promise<{
+  root: string;
+  sourceFile: string;
   testFile: string;
 }> => {
   const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-companion-scoped-"));
@@ -272,12 +305,44 @@ const createCompanionScopedTargetFixture = async (): Promise<{
     [
       "use std::test::assertions::all",
       "",
-      "test \"companion target stays scoped\":",
+      "test \"companion target includes primary module\":",
       "  assert(true)",
       "",
     ].join("\n"),
   );
-  return { root, testFile };
+  return { root, sourceFile, testFile };
+};
+
+const createNestedSrcFileTargetFixture = async (): Promise<{
+  root: string;
+  targetFile: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-nested-src-target-"));
+  const srcRoot = resolve(root, "src");
+  const nestedRoot = resolve(srcRoot, "pkgs", "consumer");
+  const targetFile = resolve(nestedRoot, "nested_test.voyd");
+  await mkdir(nestedRoot, { recursive: true });
+  await writeFile(
+    resolve(srcRoot, "shared.voyd"),
+    [
+      "pub fn value() -> i32",
+      "  42",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    targetFile,
+    [
+      "use std::test::assertions::all",
+      "use src::shared::all",
+      "",
+      "test \"nested target keeps src root\":",
+      "  assert(value(), eq: 42)",
+      "",
+    ].join("\n"),
+  );
+
+  return { root, targetFile };
 };
 
 const createMixedDirectoryFixture = async (): Promise<{
@@ -502,10 +567,10 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
     }
   });
 
-  it("keeps companion-file targets scoped to the companion file", async () => {
+  it("treats companion test files as part of their primary module", async () => {
     assertCliRunnerAvailable();
 
-    const fixture = await createCompanionScopedTargetFixture();
+    const fixture = await createCompanionPrivateAccessFixture();
     try {
       const result = runCli(fixture.root, ["test", fixture.testFile]);
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
@@ -515,7 +580,24 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       }
 
       expect(output).toContain("passed 1, failed 0, skipped 0");
-      expect(output).not.toContain("TY0027");
+      expect(output).not.toContain("TY0006");
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("includes primary module when targeting a companion test file", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createCompanionTargetIncludesPrimaryFixture();
+    try {
+      const result = runCli(fixture.root, ["test", fixture.testFile]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      expect(result.status).toBe(1);
+      expect(output).toContain("[typing] voyd test failed for target:");
+      expect(output).toContain(`${fixture.sourceFile}:1:1`);
+      expect(output).toContain("TY0027");
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }
@@ -553,6 +635,25 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(output).toContain("[typing] voyd test failed for target:");
       expect(output).toContain("TY9999");
       expect(output).toContain(`${fixture.targetFile}:1:1`);
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves src-root imports when targeting nested source files", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createNestedSrcFileTargetFixture();
+    try {
+      const result = runCli(fixture.root, ["test", fixture.targetFile]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      if (result.status !== 0) {
+        throw new Error(`voyd test failed: ${output}`);
+      }
+
+      expect(output).toContain("passed 1, failed 0, skipped 0");
+      expect(output).not.toContain("Unable to resolve module");
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }
@@ -794,6 +895,7 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(mainHelp.status).toBe(0);
       expect(mainOutput).toContain("Commands:");
       expect(mainOutput).toContain("doc [index]");
+      expect(mainOutput).not.toContain("--test");
       expect(mainOutput).not.toContain("--out <path>");
 
       const docHelp = runCli(root, ["doc", "--help"]);

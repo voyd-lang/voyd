@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   createSdk,
   type TestEvent,
@@ -157,14 +157,13 @@ const enrichFileTargetWithCompanion = async ({
   if (!resolvedScanRoot.endsWith(VOYD_SUFFIX)) {
     return [...files];
   }
-  if (resolvedScanRoot.endsWith(TEST_COMPANION_SUFFIX)) {
-    return [...files];
-  }
   if (!files.some((filePath) => resolve(filePath) === resolvedScanRoot)) {
     return [...files];
   }
 
-  const counterpart = companionFileFor(resolvedScanRoot);
+  const counterpart = resolvedScanRoot.endsWith(TEST_COMPANION_SUFFIX)
+    ? primaryFileForCompanion(resolvedScanRoot)
+    : companionFileFor(resolvedScanRoot);
   if (!(await fileExists(counterpart))) {
     return [...files];
   }
@@ -233,13 +232,31 @@ const buildAllowedTestFiles = ({
   return allowedFiles;
 };
 
+const detectSrcRoot = (targetPath: string): string => {
+  let current = resolve(targetPath);
+  while (true) {
+    if (basename(current) === "src") {
+      return current;
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      return resolve(targetPath);
+    }
+    current = parent;
+  }
+};
+
 const resolveRoots = (
   rootPath: string,
   pkgDirs: readonly string[] = [],
 ): { scanRoot: string; roots: ModuleRoots } => {
   const resolved = resolve(rootPath);
+  const inferredSrcRoot = resolved.endsWith(".voyd")
+    ? detectSrcRoot(dirname(resolved))
+    : detectSrcRoot(resolved);
   const scanRoot = resolved;
-  const srcRoot = resolved.endsWith(".voyd") ? dirname(resolved) : resolved;
+  const srcRoot = inferredSrcRoot;
   return {
     scanRoot,
     roots: {

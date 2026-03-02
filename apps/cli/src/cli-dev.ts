@@ -8,4 +8,4 @@ import { exec } from "./exec.js";
  * so this lets me bypass the compiler.
  */
 
-exec();
+await exec();
