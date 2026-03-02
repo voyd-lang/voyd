@@ -840,11 +840,17 @@ const validateImplTraitMethods = ({
     return;
   }
 
-  const plural = missingRequired.length > 1 ? "s" : "";
-  const missingList = missingRequired.join(", ");
-  throw new Error(
-    `impl ${traitName} for ${targetName} is missing trait method${plural}: ${missingList}`
-  );
+  emitDiagnostic({
+    code: "TY0042",
+    ctx,
+    span: normalizeSpan(impl.span, impl.trait?.span, impl.target.span),
+    params: {
+      kind: "missing-trait-method",
+      traitName,
+      targetName,
+      missingMethods: missingRequired,
+    },
+  });
 };
 
 const buildTraitMethodMap = ({

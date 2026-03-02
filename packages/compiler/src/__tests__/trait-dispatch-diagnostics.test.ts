@@ -125,6 +125,58 @@ impl Hittable for Dummy
     expect(result.diagnostics.some((entry) => entry.code === "TY0008")).toBe(false);
   });
 
+  it("reports missing trait impl methods without TY9999 fallback", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: `
+use src::hit::HittableList
+
+fn consume(world: HittableList) -> i32
+  1
+
+pub fn main() -> i32
+  consume(HittableList())
+`,
+      [`${root}${sep}hit.voyd`]: `
+pub obj Ray {}
+pub obj Interval {}
+pub obj HitRecord {}
+
+pub trait Hittable
+  fn hit(self, { ray: Ray, ray_t: Interval, rec: HitRecord }) -> bool
+
+pub obj HittableList {}
+
+impl Hittable for HittableList
+  fn miss(self) -> bool
+    true
+`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    expect(result.diagnostics.some((entry) => entry.code === "TY9999")).toBe(false);
+    const diagnostic = result.diagnostics.find((entry) => entry.code === "TY0042");
+    expect(diagnostic).toBeDefined();
+    if (!diagnostic) {
+      return;
+    }
+
+    expect(diagnostic.message).toContain(
+      "impl Hittable for HittableList is missing trait method",
+    );
+    expect(diagnostic.message).toContain(
+      "hit(self: _, ray: Ray, ray_t: Interval, rec: HitRecord)",
+    );
+  });
+
   it("does not crash when method fallback considers imported free functions", async () => {
     const root = resolve("/proj/src");
     const entryPath = `${root}${sep}pkg.voyd`;
