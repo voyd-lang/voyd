@@ -80,15 +80,7 @@ impl LocalRng
 
   /// Returns a random i32 value within the provided range.
   api fn random_i32(~self, range: Range<i32>) -> i32
-    let start = range_start_or_zero(range.start)
-    let start_i64 = to_i64(start)
-    let end_exclusive = range_end_exclusive(range, start_i64)
-    if end_exclusive <= start_i64:
-      return start
-
-    let span = end_exclusive - start_i64
-    let sample = start_i64 + mod_euclid_i64_or_zero(self.next_i64(), span)
-    to_i32_wrapping(sample)
+    sample_i32_from_seed(self.next_i64(), range)
 
   /// Returns a random i64 value.
   api fn random_i64(~self) -> i64
@@ -105,21 +97,17 @@ impl LocalRng
         None:
           void
     let end_exclusive = range_end_exclusive(range, start_i64)
-    if end_exclusive <= start_i64:
-      return start_i64
-
-    let span = end_exclusive - start_i64
-    start_i64 + mod_euclid_i64_or_zero(self.next_i64(), span)
+    sample_i64_from_seed(self.next_i64(), start_i64, end_exclusive)
 
   /// Returns a random floating-point value in `[0.0, 1.0)`.
   api fn random_f64(~self) -> f64
-    local_rng_f64_in_interval(self, 0.0, 1.0)
+    f64_in_interval_from_unit(local_rng_unit_f64(self), 0.0, 1.0)
 
   /// Returns a random floating-point value within the provided range.
   api fn random_f64(~self, range: Range<f64>) -> f64
     let start = range_start_or_zero(range.start)
     let end_exclusive = range_end_exclusive(range, start)
-    local_rng_f64_in_interval(self, start, end_exclusive)
+    f64_in_interval_from_unit(local_rng_unit_f64(self), start, end_exclusive)
 
   /// Returns a random floating-point value in `[0.0, 1.0)` as `f32`.
   api fn random_f32(~self) -> f32
@@ -129,11 +117,13 @@ impl LocalRng
   api fn random_f32(~self, range: Range<f32>) -> f32
     let start = range_start_or_zero(range.start)
     let end_exclusive = range_end_exclusive(range, start)
-    if end_exclusive <= start:
-      return start
-
-    let span = to_f64(end_exclusive) - to_f64(start)
-    to_f32(to_f64(start) + local_rng_unit_f64(self) * span)
+    to_f32(
+      f64_in_interval_from_unit(
+        local_rng_unit_f64(self),
+        to_f64(start),
+        to_f64(end_exclusive)
+      )
+    )
 
 /// Returns a random 64-bit integer.
 pub fn next_i64(): Random -> i64
@@ -191,16 +181,7 @@ pub fn random_i32(): Random -> i32
 /// Example:
 /// `random::random_i32(1..6)` samples values in `[1, 5]`.
 pub fn random_i32(range: Range<i32>): Random -> i32
-  let start = range_start_or_zero(range.start)
-  let start_i64 = to_i64(start)
-  let end_exclusive = range_end_exclusive(range, start_i64)
-  if end_exclusive <= start_i64:
-    return start
-
-  let span = end_exclusive - start_i64
-  let seed = next_i64()
-  let sample = start_i64 + mod_euclid_i64_or_zero(seed, span)
-  to_i32_wrapping(sample)
+  sample_i32_from_seed(next_i64(), range)
 
 /// Returns a random i64 value.
 ///
@@ -222,18 +203,13 @@ pub fn random_i64(range: Range<i64>): Random -> i64
       None:
         void
   let end_exclusive = range_end_exclusive(range, start_i64)
-  if end_exclusive <= start_i64:
-    return start_i64
-
-  let span = end_exclusive - start_i64
-  let seed = next_i64()
-  start_i64 + mod_euclid_i64_or_zero(seed, span)
+  sample_i64_from_seed(next_i64(), start_i64, end_exclusive)
 
 /// Returns a random floating-point value in `[0.0, 1.0)`.
 ///
 /// This no-argument overload is the default behavior.
 pub fn random_f64(): Random -> f64
-  random_f64_in_interval(0.0, 1.0)
+  f64_in_interval_from_unit(random_unit_f64(), 0.0, 1.0)
 
 /// Returns a random floating-point value within the provided range.
 ///
@@ -244,7 +220,7 @@ pub fn random_f64(): Random -> f64
 pub fn random_f64(range: Range<f64>): Random -> f64
   let start = range_start_or_zero(range.start)
   let end_exclusive = range_end_exclusive(range, start)
-  random_f64_in_interval(start, end_exclusive)
+  f64_in_interval_from_unit(random_unit_f64(), start, end_exclusive)
 
 /// Returns a random floating-point value in `[0.0, 1.0)` as `f32`.
 ///
@@ -259,11 +235,13 @@ pub fn random_f32(): Random -> f32
 pub fn random_f32(range: Range<f32>): Random -> f32
   let start = range_start_or_zero(range.start)
   let end_exclusive = range_end_exclusive(range, start)
-  if end_exclusive <= start:
-    return start
-
-  let span = to_f64(end_exclusive) - to_f64(start)
-  to_f32(to_f64(start) + random_unit_f64() * span)
+  to_f32(
+    f64_in_interval_from_unit(
+      random_unit_f64(),
+      to_f64(start),
+      to_f64(end_exclusive)
+    )
+  )
 
 fn range_start_or_zero(start: Option<i32>) -> i32
   match(start)
@@ -348,17 +326,8 @@ fn mod_euclid_i64_or_zero(value: i64, modulus: i64) -> i64
     Err<MathError>:
       to_i64(0)
 
-fn random_f64_in_interval(start: f64, end_exclusive: f64): Random -> f64
-  if end_exclusive <= start:
-    return start
-
-  let span = end_exclusive - start
-  start + random_unit_f64() * span
-
 fn random_unit_f64(): Random -> f64
-  let denominator_i64 = random_unit_denominator_i64()
-  let mantissa = mod_euclid_i64_or_zero(next_u64().bits, denominator_i64)
-  to_f64(mantissa) / to_f64(denominator_i64)
+  unit_f64_from_bits(next_u64().bits)
 
 fn random_unit_denominator_i64(): () -> i64
   to_i64(1073741824) * to_i64(8388608)
@@ -370,37 +339,50 @@ fn i64_min_value(): () -> i64
   -9223372036854775808i64
 
 fn random_i64_inclusive_to_max(start: i64): Random -> i64
-  let max = i64_max_value()
-  if start > max:
-    return start
   if start == i64_min_value():
     return next_i64()
+  i64_inclusive_to_max_from_bits(start, next_u64().bits)
 
-  let span_exclusive = (max - start) + to_i64(1)
-  let offset = mod_euclid_i64_or_zero(next_u64().bits, span_exclusive)
-  start + offset
+fn local_rng_unit_f64(~rng: LocalRng) -> f64
+  unit_f64_from_bits(rng.next_u64().bits)
 
-fn local_rng_f64_in_interval(~rng: LocalRng, start: f64, end_exclusive: f64) -> f64
+fn local_rng_i64_inclusive_to_max(~rng: LocalRng, start: i64) -> i64
+  if start == i64_min_value():
+    return rng.next_i64()
+  i64_inclusive_to_max_from_bits(start, rng.next_u64().bits)
+
+fn sample_i32_from_seed(seed: i64, range: Range<i32>): () -> i32
+  let start = range_start_or_zero(range.start)
+  let start_i64 = to_i64(start)
+  let end_exclusive = range_end_exclusive(range, start_i64)
+  to_i32_wrapping(sample_i64_from_seed(seed, start_i64, end_exclusive))
+
+fn sample_i64_from_seed(seed: i64, start: i64, end_exclusive: i64): () -> i64
   if end_exclusive <= start:
     return start
 
   let span = end_exclusive - start
-  start + local_rng_unit_f64(rng) * span
+  start + mod_euclid_i64_or_zero(seed, span)
 
-fn local_rng_unit_f64(~rng: LocalRng) -> f64
+fn f64_in_interval_from_unit(unit: f64, start: f64, end_exclusive: f64): () -> f64
+  if end_exclusive <= start:
+    return start
+
+  let span = end_exclusive - start
+  start + unit * span
+
+fn unit_f64_from_bits(bits: i64): () -> f64
   let denominator_i64 = random_unit_denominator_i64()
-  let mantissa = mod_euclid_i64_or_zero(rng.next_u64().bits, denominator_i64)
+  let mantissa = mod_euclid_i64_or_zero(bits, denominator_i64)
   to_f64(mantissa) / to_f64(denominator_i64)
 
-fn local_rng_i64_inclusive_to_max(~rng: LocalRng, start: i64) -> i64
+fn i64_inclusive_to_max_from_bits(start: i64, bits: i64): () -> i64
   let max = i64_max_value()
   if start > max:
     return start
-  if start == i64_min_value():
-    return rng.next_i64()
 
   let span_exclusive = (max - start) + to_i64(1)
-  let offset = mod_euclid_i64_or_zero(rng.next_u64().bits, span_exclusive)
+  let offset = mod_euclid_i64_or_zero(bits, span_exclusive)
   start + offset
 
 fn local_rng_next_state(current: i64): () -> i64
