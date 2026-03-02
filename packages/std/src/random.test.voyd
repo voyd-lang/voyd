@@ -13,6 +13,8 @@ test "fill_bytes calls host op and fills via fallback":
     tail(msgpack::make_null())
   Random::next_i64(tail):
     tail(i64_from_i32(1))
+  Random::next_u64(tail):
+    tail(i64_from_i32(0))
 
   let bytes = buf.as_bytes().to_array()
   assert(optional_i32_or(requested_lengths.get(0), -1), eq: 3)
@@ -77,15 +79,20 @@ test "random_i64 includes i32 max for inclusive upper bounds":
 
   assert(value, eq: i64_from_i32(2147483647))
 
+test "next_u64 forwards host bits":
+  let seed = i64_from_i32(-5)
+  let value = next_u64_from_seed(seed)
+  assert(value, eq: seed)
+
 test "random_f64 defaults to unit interval":
-  let value = random_f64_from_seed(i64_from_i32(0))
+  let value = random_f64_from_seed(half_unit_seed_i64())
   assert(value, eq: 0.5)
   assert(value >= 0.0, eq: true)
   assert(value < 1.0, eq: true)
 
 test "random_f64 supports range overload":
   let value = random_f64_from_seed_with_range({
-    seed: i64_from_i32(0),
+    seed: half_unit_seed_i64(),
     range: Range {
       start: Some<i32> { value: 10 },
       end: Some<i32> { value: 20 },
@@ -97,7 +104,7 @@ test "random_f64 supports range overload":
 
 test "random_f64 applies inclusive range end":
   let value = random_f64_from_seed_with_range({
-    seed: i64_from_i32(0),
+    seed: half_unit_seed_i64(),
     range: Range {
       start: Some<i32> { value: 2 },
       end: Some<i32> { value: 4 },
@@ -108,14 +115,14 @@ test "random_f64 applies inclusive range end":
   assert(value, eq: 3.5)
 
 test "random_f32 defaults to unit interval":
-  let value = random_f32_from_seed(i64_from_i32(0))
+  let value = random_f32_from_seed(half_unit_seed_i64())
   assert(f64_from_f32(value), eq: 0.5)
   assert(f64_from_f32(value) >= 0.0, eq: true)
   assert(f64_from_f32(value) < 1.0, eq: true)
 
 test "random_f32 supports range overload":
   let value = random_f32_from_seed_with_range({
-    seed: i64_from_i32(0),
+    seed: half_unit_seed_i64(),
     range: Range {
       start: Some<i32> { value: 2 },
       end: Some<i32> { value: 4 },
@@ -132,6 +139,8 @@ fn random_i32_from_seed(seed: i64) -> i32
     tail(msgpack::make_null())
   Random::next_i64(tail):
     tail(seed)
+  Random::next_u64(tail):
+    tail(i64_from_i32(0))
 
 fn random_i32_from_seed_with_range({ seed: i64, range: Range }) -> i32
   try
@@ -140,6 +149,8 @@ fn random_i32_from_seed_with_range({ seed: i64, range: Range }) -> i32
     tail(msgpack::make_null())
   Random::next_i64(tail):
     tail(seed)
+  Random::next_u64(tail):
+    tail(i64_from_i32(0))
 
 fn random_i64_from_seed(seed: i64) -> i64
   try
@@ -148,6 +159,8 @@ fn random_i64_from_seed(seed: i64) -> i64
     tail(msgpack::make_null())
   Random::next_i64(tail):
     tail(seed)
+  Random::next_u64(tail):
+    tail(i64_from_i32(0))
 
 fn random_i64_from_seed_with_range({ seed: i64, range: Range }) -> i64
   try
@@ -156,12 +169,16 @@ fn random_i64_from_seed_with_range({ seed: i64, range: Range }) -> i64
     tail(msgpack::make_null())
   Random::next_i64(tail):
     tail(seed)
+  Random::next_u64(tail):
+    tail(i64_from_i32(0))
 
 fn random_f64_from_seed(seed: i64) -> f64
   try
     random_f64()
   Random::fill_bytes(tail, _len):
     tail(msgpack::make_null())
+  Random::next_u64(tail):
+    tail(seed)
   Random::next_i64(tail):
     tail(seed)
 
@@ -170,6 +187,8 @@ fn random_f64_from_seed_with_range({ seed: i64, range: Range }) -> f64
     random_f64(range)
   Random::fill_bytes(tail, _len):
     tail(msgpack::make_null())
+  Random::next_u64(tail):
+    tail(seed)
   Random::next_i64(tail):
     tail(seed)
 
@@ -178,6 +197,8 @@ fn random_f32_from_seed(seed: i64) -> f32
     random_f32()
   Random::fill_bytes(tail, _len):
     tail(msgpack::make_null())
+  Random::next_u64(tail):
+    tail(seed)
   Random::next_i64(tail):
     tail(seed)
 
@@ -186,7 +207,19 @@ fn random_f32_from_seed_with_range({ seed: i64, range: Range }) -> f32
     random_f32(range)
   Random::fill_bytes(tail, _len):
     tail(msgpack::make_null())
+  Random::next_u64(tail):
+    tail(seed)
   Random::next_i64(tail):
+    tail(seed)
+
+fn next_u64_from_seed(seed: i64) -> i64
+  try
+    next_u64()
+  Random::fill_bytes(tail, _len):
+    tail(msgpack::make_null())
+  Random::next_i64(tail):
+    tail(i64_from_i32(0))
+  Random::next_u64(tail):
     tail(seed)
 
 fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
@@ -197,6 +230,17 @@ fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
       fallback
 
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
+
+fn half_unit_seed_i64() -> i64
+  pow2_i64(52)
+
+fn pow2_i64(exp: i32): () -> i64
+  var out = i64_from_i32(1)
+  var index = 0
+  while index < exp do:
+    out = out + out
+    index = index + 1
+  out
 
 @intrinsic(name: "__f64_promote_f32")
 fn f64_from_f32(value: f32): () -> f64 __f64_promote_f32(value)
