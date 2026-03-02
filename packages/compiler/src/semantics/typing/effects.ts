@@ -34,6 +34,15 @@ const effectOperationKeyFromDecl = ({
     .join(",")})`;
 };
 
+const importedTargetFor = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: Pick<TypingContext, "importsByLocal" | "dependencies">;
+}): { moduleId: string; symbol: SymbolId } | undefined =>
+  ctx.importsByLocal.get(symbol);
+
 export const freshOpenEffectRow = (
   effects: EffectTable,
   options?: { rigid?: boolean }
@@ -64,7 +73,15 @@ export const effectOpName = (
   if (typeof ownerEffect !== "number") {
     return record.name;
   }
-  const decl = ctx.decls.getEffectOperation(symbol);
+  const decl =
+    ctx.decls.getEffectOperation(symbol) ??
+    (() => {
+      const imported = importedTargetFor({ symbol, ctx });
+      if (!imported) return undefined;
+      const dependency = ctx.dependencies.get(imported.moduleId);
+      if (!dependency) return undefined;
+      return dependency.decls.getEffectOperation(imported.symbol);
+    })();
   const effectName = ctx.symbolTable.getSymbol(ownerEffect).name;
   if (!decl) {
     return `${effectName}.${record.name}`;
@@ -121,7 +138,15 @@ const resolveNamedEffectRow = (
 
   const record = ctx.symbolTable.getSymbol(symbol);
   if (record.kind === "effect") {
-    const decl = ctx.decls.getEffect(symbol);
+    const decl =
+      ctx.decls.getEffect(symbol) ??
+      (() => {
+        const imported = importedTargetFor({ symbol, ctx });
+        if (!imported) return undefined;
+        const dependency = ctx.dependencies.get(imported.moduleId);
+        if (!dependency) return undefined;
+        return dependency.decls.getEffect(imported.symbol);
+      })();
     const effectName = record.name;
     const ops =
       decl?.operations.map((op) => ({
