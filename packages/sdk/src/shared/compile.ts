@@ -35,6 +35,7 @@ export const compileWithLoader = async ({
   host,
   includeTests,
   testsOnly,
+  runtimeDiagnostics,
   loadModuleGraph,
   testScope,
 }: {
@@ -43,6 +44,7 @@ export const compileWithLoader = async ({
   host?: ModuleHost;
   includeTests?: boolean;
   testsOnly?: boolean;
+  runtimeDiagnostics?: boolean;
   loadModuleGraph: LoadModuleGraphFn;
   testScope?: TestScope;
 }): Promise<CompileArtifacts> => {
@@ -66,6 +68,8 @@ export const compileWithLoader = async ({
   }
 
   const scopedTestScope = testScope ?? "all";
+  const runtimeDiagnosticsCodegenOption =
+    typeof runtimeDiagnostics === "boolean" ? { runtimeDiagnostics } : {};
   const { semantics, diagnostics: semanticDiagnostics, tests } = analyzeModules({
     graph,
     includeTests: shouldIncludeTests,
@@ -86,7 +90,11 @@ export const compileWithLoader = async ({
       const testResult = await emitProgram({
         graph,
         semantics,
-        codegenOptions: { testMode: true, testScope: scopedTestScope },
+        codegenOptions: {
+          testMode: true,
+          testScope: scopedTestScope,
+          ...runtimeDiagnosticsCodegenOption,
+        },
       });
       const allDiagnostics = [...diagnostics, ...testResult.diagnostics];
       if (hasErrorDiagnostics(allDiagnostics)) {
@@ -101,7 +109,11 @@ export const compileWithLoader = async ({
       };
     }
 
-    const wasmResult = await emitProgram({ graph, semantics });
+    const wasmResult = await emitProgram({
+      graph,
+      semantics,
+      codegenOptions: runtimeDiagnosticsCodegenOption,
+    });
     const baseDiagnostics = [...diagnostics, ...wasmResult.diagnostics];
     if (hasErrorDiagnostics(baseDiagnostics)) {
       return { success: false, diagnostics: baseDiagnostics };
@@ -113,7 +125,11 @@ export const compileWithLoader = async ({
       const testResult = await emitProgram({
         graph,
         semantics,
-        codegenOptions: { testMode: true, testScope: scopedTestScope },
+        codegenOptions: {
+          testMode: true,
+          testScope: scopedTestScope,
+          ...runtimeDiagnosticsCodegenOption,
+        },
       });
       const allDiagnostics = [...baseDiagnostics, ...testResult.diagnostics];
       if (hasErrorDiagnostics(allDiagnostics)) {

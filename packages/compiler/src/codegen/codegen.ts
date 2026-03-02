@@ -53,6 +53,7 @@ import { applyConfiguredMemoryExports } from "./memory-exports.js";
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
   validate: true,
+  runtimeDiagnostics: true,
   emitEffectHelpers: false,
   effectsHostBoundary: "msgpack",
   linearMemoryExport: "always",
@@ -198,10 +199,12 @@ export const codegenProgram = ({
     mod,
     exportName: EFFECT_TABLE_EXPORT,
   });
-  emitRuntimeDiagnosticsSection({
-    contexts,
-    mod,
-  });
+  if (mergedOptions.runtimeDiagnostics) {
+    emitRuntimeDiagnosticsSection({
+      contexts,
+      mod,
+    });
+  }
   if (mergedOptions.emitEffectHelpers) {
     entryCtx.programHelpers.ensureEffectHelpers(entryCtx);
   }

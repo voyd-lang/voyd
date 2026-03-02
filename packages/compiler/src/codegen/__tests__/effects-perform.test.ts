@@ -64,6 +64,7 @@ const buildLoweringSnapshot = () => {
     options: {
       optimize: false,
       validate: true,
+      runtimeDiagnostics: true,
       emitEffectHelpers: false,
       continuationBackend: {},
       testMode: false,

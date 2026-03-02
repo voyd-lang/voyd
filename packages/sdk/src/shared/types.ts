@@ -47,6 +47,11 @@ export type CompileOptions = {
   /** Control which modules contribute test cases. */
   testScope?: "all" | "entry";
   optimize?: boolean;
+  /**
+   * Emit runtime trap-to-source metadata.
+   * Defaults to true for non-optimized builds and false for optimized builds.
+   */
+  runtimeDiagnostics?: boolean;
   emitWasmText?: boolean;
 };
 
