@@ -136,13 +136,27 @@ const createRangeEntries = ({
     {
       kind: "field",
       name: "start",
-      value: lowerExpr(createOptionalBoundExpr(bounds.start, syntax), ctx, scopes),
+      value: lowerExpr(
+        createOptionalBoundExpr({
+          bound: bounds.start,
+          fallbackLocation: syntax,
+        }),
+        ctx,
+        scopes
+      ),
       span: toSourceSpan(bounds.start ?? syntax),
     },
     {
       kind: "field",
       name: "end",
-      value: lowerExpr(createOptionalBoundExpr(bounds.end, syntax), ctx, scopes),
+      value: lowerExpr(
+        createOptionalBoundExpr({
+          bound: bounds.end,
+          fallbackLocation: syntax,
+        }),
+        ctx,
+        scopes
+      ),
       span: toSourceSpan(bounds.end ?? syntax),
     },
   ];
@@ -200,8 +214,13 @@ const isEmptyExpr = (expr: Expr | undefined): expr is Form =>
   isForm(expr) && expr.length === 0;
 
 const createOptionalBoundExpr = (
-  bound: Expr | undefined,
-  fallbackLocation: Expr
+  {
+    bound,
+    fallbackLocation,
+  }: {
+    bound: Expr | undefined;
+    fallbackLocation: Expr;
+  }
 ): Expr => {
   if (bound) {
     return new Form([identifier("some"), bound]).setLocation(
@@ -209,7 +228,7 @@ const createOptionalBoundExpr = (
     );
   }
 
-  return new Form([identifier("none"), call("generics", identifier("i32"))]).setLocation(
+  return call(identifier("none"), call("generics", identifier("i32"))).setLocation(
     fallbackLocation.location?.clone()
   );
 };

@@ -40,11 +40,11 @@ impl Bytes
   /// Returns a byte slice for the provided range.
   ///
   /// - `range`: half-open or closed range, following `Range` semantics.
-  api fn slice(self, range: Range) -> Bytes
+  api fn slice(self, range: Range<i32>) -> Bytes
     bytes_from_array(self.storage.slice(range))
 
   /// Returns a byte slice for the provided range.
-  api fn slice(self, { range: Range }) -> Bytes
+  api fn slice(self, { range: Range<i32> }) -> Bytes
     self.slice(range)
 
   /// Returns a copied array of bytes.
