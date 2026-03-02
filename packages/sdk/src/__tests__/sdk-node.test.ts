@@ -22,8 +22,24 @@ pub fn main(): Async -> i32
   Async::await(2) + 1
 `;
 const ASYNC_EFFECT_ID = "com.example.async";
+const RUNTIME_DIAGNOSTICS_SECTION = "voyd.runtime_diagnostics";
 const sdkTestRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(sdkTestRoot, "../../../../");
+
+const hasRuntimeDiagnosticsSection = (wasm: Uint8Array): boolean => {
+  const buffer =
+    wasm.buffer instanceof ArrayBuffer &&
+    wasm.byteOffset === 0 &&
+    wasm.byteLength === wasm.buffer.byteLength
+      ? wasm.buffer
+      : wasm.slice().buffer;
+  const module = new WebAssembly.Module(buffer);
+  const sections = WebAssembly.Module.customSections(
+    module,
+    RUNTIME_DIAGNOSTICS_SECTION
+  );
+  return sections.length > 0;
+};
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -260,11 +276,37 @@ pub fn main() -> i32
       const result = expectCompileSuccess(
         await sdk.compile({ entryPath, optimize: true }),
       );
+      expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(false);
       const output = await result.run<number>({ entryName: "main" });
       expect(output).toBe(42);
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }
+  });
+
+  it("can disable runtime diagnostics for non-optimized builds", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `pub fn main() -> i32
+  42
+`,
+        runtimeDiagnostics: false,
+      }),
+    );
+    expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(false);
+  });
+
+  it("emits runtime diagnostics metadata by default", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `pub fn main() -> i32
+  42
+`,
+      }),
+    );
+    expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(true);
   });
 
   it("supports handlersByLabelSuffix using :: separators", async () => {

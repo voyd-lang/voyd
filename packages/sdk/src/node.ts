@@ -64,6 +64,10 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       : createFsModuleHost();
 
     const testScope = options.testScope ?? (options.source ? "entry" : "all");
+    const runtimeDiagnostics = resolveRuntimeDiagnostics({
+      optimize: options.optimize,
+      runtimeDiagnostics: options.runtimeDiagnostics,
+    });
     const result = await compileWithLoader({
       entryPath,
       roots,
@@ -71,6 +75,7 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       includeTests: options.includeTests,
       testsOnly: options.testsOnly,
       testScope,
+      runtimeDiagnostics,
       loadModuleGraph,
     });
 
@@ -90,6 +95,14 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
     };
   }
 };
+
+const resolveRuntimeDiagnostics = ({
+  optimize,
+  runtimeDiagnostics,
+}: {
+  optimize?: boolean;
+  runtimeDiagnostics?: boolean;
+}): boolean => runtimeDiagnostics ?? !optimize;
 
 const resolveSrcRoot = ({
   roots,

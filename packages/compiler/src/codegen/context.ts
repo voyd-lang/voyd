@@ -48,6 +48,7 @@ import type { ProgramHelperRegistry } from "./program-helpers.js";
 export interface CodegenOptions {
   optimize?: boolean;
   validate?: boolean;
+  runtimeDiagnostics?: boolean;
   emitEffectHelpers?: boolean;
   effectsHostBoundary?: "msgpack" | "off";
   linearMemoryExport?: "always" | "auto" | "off";
