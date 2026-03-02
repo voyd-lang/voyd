@@ -268,12 +268,14 @@ describe("analysis coordinator perf harness", () => {
     "meets post-edit speed and RSS targets against full recompute baseline",
     async () => {
       const editRuns = Number.parseInt(process.env.VOYD_LS_PERF_EDIT_RUNS ?? "5", 10);
-      const minSpeedup = Number.parseFloat(
+      const configuredMinSpeedup = Number.parseFloat(
         process.env.VOYD_LS_PERF_MIN_SPEEDUP ?? "5",
       );
-      const minRssReductionPct = Number.parseFloat(
+      const configuredMinRssReductionPct = Number.parseFloat(
         process.env.VOYD_LS_PERF_MIN_RSS_REDUCTION_PCT ?? "30",
       );
+      const minSpeedup = Math.max(5, configuredMinSpeedup);
+      const minRssReductionPct = Math.max(30, configuredMinRssReductionPct);
       const scenarios = parseScenarios(process.env.VOYD_LS_PERF_SCENARIOS);
 
       for (const scenario of scenarios) {
