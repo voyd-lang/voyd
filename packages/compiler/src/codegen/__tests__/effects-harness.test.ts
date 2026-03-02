@@ -110,6 +110,25 @@ describe("effect table + harness", () => {
     expect(main?.span.startColumn).toBeGreaterThan(0);
   });
 
+  it("omits runtime trap diagnostics metadata when disabled", async () => {
+    const { wasm } = await compileEffectFixture({
+      entryPath: smokeFixturePath,
+      codegenOptions: { runtimeDiagnostics: false },
+    });
+    const wasmBuffer =
+      wasm.buffer instanceof ArrayBuffer &&
+      wasm.byteOffset === 0 &&
+      wasm.byteLength === wasm.buffer.byteLength
+        ? wasm.buffer
+        : wasm.slice().buffer;
+    const wasmModule = new WebAssembly.Module(wasmBuffer);
+    const sections = WebAssembly.Module.customSections(
+      wasmModule,
+      RUNTIME_DIAGNOSTICS_SECTION
+    );
+    expect(sections).toHaveLength(0);
+  });
+
   it("unwraps Outcome.value from an effectful export", async () => {
     const { module } = await loadSmokeModule();
     const parsed = parseEffectTable(module);
