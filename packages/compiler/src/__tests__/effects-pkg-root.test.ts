@@ -131,6 +131,44 @@ pub fn effectful()
     expect(effectfulExport?.effects?.[0]?.annotated).toBe(false);
   });
 
+  it("rejects unannotated exports when imported generics collide with effect names", async () => {
+    const root = resolve("/proj/app/src");
+    const pkgPath = `${root}${sep}pkg.voyd`;
+    const depPath = `${root}${sep}dep.voyd`;
+    const host = createMemoryHost({
+      [pkgPath]: `
+use src::dep::Wrap
+
+eff Output
+  fn write(tail) -> i32
+
+fn helper(): Output -> i32
+  Output::write()
+
+pub fn draw()
+  helper()
+  void
+
+pub fn main(): () -> i32
+  0
+`,
+      [depPath]: `
+pub obj Wrap<Output> {
+  value: Output
+}
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: pkgPath,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics.some((diag) => diag.code === "TY0016")).toBe(true);
+  });
+
   it("requires pub fn main to be pure", async () => {
     const root = resolve("/proj/app/src");
     const pkgPath = `${root}${sep}pkg.voyd`;

@@ -76,14 +76,45 @@ export const effectOpName = (
   });
 };
 
+const resolveEffectAnnotationSymbol = (
+  expr: HirNamedTypeExpr,
+  ctx: TypingContext
+): SymbolId | undefined => {
+  const name = expr.path[0];
+  const explicit = typeof expr.symbol === "number" ? expr.symbol : undefined;
+  if (typeof explicit === "number") {
+    const kind = ctx.symbolTable.getSymbol(explicit).kind;
+    if (kind === "effect" || kind === "effect-op") {
+      return explicit;
+    }
+  }
+
+  if (name) {
+    const byKind = ctx.symbolTable.resolveByKinds(
+      name,
+      ctx.symbolTable.rootScope,
+      ["effect", "effect-op"]
+    );
+    if (typeof byKind === "number") {
+      return byKind;
+    }
+  }
+
+  if (typeof explicit === "number") {
+    return explicit;
+  }
+
+  if (!name) {
+    return undefined;
+  }
+  return ctx.symbolTable.resolve(name, ctx.symbolTable.rootScope);
+};
+
 const resolveNamedEffectRow = (
   expr: HirNamedTypeExpr,
   ctx: TypingContext
 ): EffectRowId => {
-  const symbol =
-    typeof expr.symbol === "number"
-      ? expr.symbol
-      : ctx.symbolTable.resolve(expr.path[0] ?? "", ctx.symbolTable.rootScope);
+  const symbol = resolveEffectAnnotationSymbol(expr, ctx);
   if (typeof symbol !== "number") {
     return pureEffectRow(ctx.effects);
   }
