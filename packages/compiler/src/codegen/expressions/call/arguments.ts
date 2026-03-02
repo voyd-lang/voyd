@@ -184,6 +184,48 @@ export const resolveTypedCallArgumentPlan = ({
     : undefined;
 };
 
+export const sliceTypedCallArgumentPlan = ({
+  typedPlan,
+  paramOffset,
+  argOffset,
+}: {
+  typedPlan: readonly CallArgumentPlanEntry[];
+  paramOffset: number;
+  argOffset: number;
+}): readonly CallArgumentPlanEntry[] =>
+  typedPlan.slice(paramOffset).map((entry) => {
+    if (entry.kind === "direct") {
+      if (entry.argIndex < argOffset) {
+        throw new Error(
+          `typed call argument plan direct index ${entry.argIndex} is before slice offset ${argOffset}`
+        );
+      }
+      return {
+        kind: "direct",
+        argIndex: entry.argIndex - argOffset,
+      };
+    }
+
+    if (entry.kind === "container-field") {
+      if (entry.containerArgIndex < argOffset) {
+        throw new Error(
+          `typed call argument plan container index ${entry.containerArgIndex} is before slice offset ${argOffset}`
+        );
+      }
+      return {
+        kind: "container-field",
+        containerArgIndex: entry.containerArgIndex - argOffset,
+        fieldName: entry.fieldName,
+        targetTypeId: entry.targetTypeId,
+      };
+    }
+
+    return {
+      kind: "missing",
+      targetTypeId: entry.targetTypeId,
+    };
+  });
+
 const createCallArgumentFailure = ({
   call,
   params,

@@ -22,7 +22,11 @@ import {
 } from "../../types.js";
 import { allocateTempLocal } from "../../locals.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
-import { compileCallArgumentsForParams } from "./arguments.js";
+import {
+  compileCallArgumentsForParams,
+  resolveTypedCallArgumentPlan,
+  sliceTypedCallArgumentPlan,
+} from "./arguments.js";
 import {
   currentHandlerValue,
   handlerType,
@@ -133,6 +137,19 @@ export const compileTraitDispatchCall = ({
   );
 
   const target = refCast(ctx.mod, accessor, fnRefType);
+  const typedPlan = resolveTypedCallArgumentPlan({
+    callId: expr.id,
+    typeInstanceId,
+    ctx,
+  });
+  const allCallArgExprIds = expr.args.map((arg) => arg.expr);
+  const userTypedPlan = typedPlan
+    ? sliceTypedCallArgumentPlan({
+        typedPlan,
+        paramOffset: 1,
+        argOffset: 1,
+      })
+    : undefined;
   const args = [
     loadReceiver(),
     ...compileCallArgumentsForParams({
@@ -141,7 +158,12 @@ export const compileTraitDispatchCall = ({
       ctx,
       fnCtx,
       compileExpr,
-      options: { typeInstanceId },
+      options: {
+        typeInstanceId,
+        argIndexOffset: 1,
+        allCallArgExprIds,
+        typedPlan: userTypedPlan,
+      },
     }),
   ];
 
