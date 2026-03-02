@@ -234,6 +234,40 @@ describe("registerDefaultHostAdapters", () => {
     ]);
   });
 
+  it("registers actionable unsupported handlers when random source is unavailable", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.random", opName: "next_i64", opId: 0 },
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 1 },
+    ]);
+    const diagnostics: string[] = [];
+    vi.stubGlobal("crypto", undefined);
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        onDiagnostic: (message) => diagnostics.push(message),
+      },
+    });
+
+    expect(
+      report.capabilities.find((capability) => capability.effectId === "voyd.std.random")
+        ?.supported
+    ).toBe(false);
+
+    await expect(
+      (async () => getHandler("voyd.std.random", "next_i64")(tailContinuation))()
+    ).rejects.toThrow(/Default random adapter is unavailable on browser/i);
+    await expect(
+      (async () =>
+        getHandler("voyd.std.random", "fill_bytes")(tailContinuation, 4))()
+    ).rejects.toThrow(/Default random adapter is unavailable on browser/i);
+    expect(diagnostics.some((message) => message.includes("unsupported random"))).toBe(
+      true
+    );
+  });
+
   it("chains timers for long sleep durations", async () => {
     const table = buildTable([
       { effectId: "voyd.std.time", opName: "sleep_millis", opId: 0 },
