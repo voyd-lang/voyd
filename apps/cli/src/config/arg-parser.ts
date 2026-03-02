@@ -57,9 +57,6 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
     .option("-r, --run", "run voyd from src/ or provided path")
     .option("--run-wasm", "run the compiled wasm code directly")
     .option("--run-entry <name>", "entry function to run (default: main)")
-    .option("--test", "run voyd tests")
-    .option("--reporter <name>", "test reporter (default: minimal)")
-    .option("--fail-empty-tests", "exit 1 if no tests are found")
     .option(
       "--pkg-dir <path>",
       "additional package directory (repeatable)",
@@ -80,11 +77,9 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
   program.parse(["node", "voyd", ...argv]);
   const opts = program.opts();
   const [indexArg] = program.args as [string?];
-  const testMode = Boolean(opts.test);
-  const defaultIndex = testMode ? "." : "./src";
 
   return {
-    index: indexArg ?? defaultIndex,
+    index: indexArg ?? "./src",
     emitParserAst: opts.emitParserAst,
     emitCoreAst: opts.emitCoreAst,
     emitIrAst: opts.emitIrAst,
@@ -94,9 +89,6 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
     run: opts.run,
     runWasm: opts.runWasm,
     runEntry: opts.runEntry,
-    test: testMode,
-    testReporter: opts.reporter,
-    failOnEmptyTests: opts.failEmptyTests,
     pkgDirs: opts.pkgDir,
     doc: false,
     docFormat: "html",
@@ -171,7 +163,7 @@ const parseDocConfig = (argv: readonly string[]): VoydConfig => {
 };
 
 const findSubcommandIndex = (args: readonly string[]): number => {
-  const optionsWithValues = new Set(["--pkg-dir", "--reporter", "--run-entry"]);
+  const optionsWithValues = new Set(["--pkg-dir", "--run-entry"]);
 
   let index = 0;
   while (index < args.length) {
