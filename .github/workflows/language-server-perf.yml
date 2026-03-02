@@ -8,7 +8,7 @@ on:
 jobs:
   ls-perf:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Use Node.js
@@ -22,7 +22,9 @@ jobs:
         env:
           VOYD_USE_SRC: "1"
           VOYD_LS_PERF: "1"
-          VOYD_LS_PERF_LEAF_COUNT: "500"
           VOYD_LS_PERF_EDIT_RUNS: "5"
-          VOYD_LS_PERF_MIN_SPEEDUP: "1.5"
+          VOYD_LS_PERF_MIN_SPEEDUP: "5"
+          VOYD_LS_PERF_MIN_RSS_REDUCTION_PCT: "30"
+          VOYD_LS_PERF_SCENARIOS: "100k:400:85,300k:1100:90"
+          VOYD_LS_PERF_TIMEOUT_MS: "2400000"
         run: npm run --workspace @voyd/language-server test -- src/__tests__/analysis-coordinator.perf.test.ts

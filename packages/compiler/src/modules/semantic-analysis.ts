@@ -17,6 +17,7 @@ export type AnalyzeModuleSemanticsOptions = {
   recoverFromTypingErrors?: boolean;
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
+  isCancelled?: () => boolean;
 };
 
 export type AnalyzeModuleSemanticsResult = {
@@ -25,12 +26,40 @@ export type AnalyzeModuleSemanticsResult = {
   recomputedModuleIds: readonly string[];
 };
 
+const SEMANTICS_ANALYSIS_CANCELLED_CODE = "VOYD_SEMANTICS_ANALYSIS_CANCELLED";
+
+const createSemanticsAnalysisCancelledError = (): Error & { code: string } => {
+  const error = new Error("semantics analysis cancelled") as Error & {
+    code: string;
+  };
+  error.name = "SemanticsAnalysisCancelledError";
+  error.code = SEMANTICS_ANALYSIS_CANCELLED_CODE;
+  return error;
+};
+
+export const isSemanticsAnalysisCancelledError = (
+  error: unknown,
+): error is Error & { code: string } =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { code?: unknown }).code === SEMANTICS_ANALYSIS_CANCELLED_CODE;
+
+const throwIfCancelled = (isCancelled: (() => boolean) | undefined): void => {
+  if (!isCancelled?.()) {
+    return;
+  }
+
+  throw createSemanticsAnalysisCancelledError();
+};
+
 export const analyzeModuleSemantics = ({
   graph,
   includeTests,
   recoverFromTypingErrors,
   previousSemantics,
   changedModuleIds,
+  isCancelled,
 }: AnalyzeModuleSemanticsOptions): AnalyzeModuleSemanticsResult => {
   const sccGroups = getModuleSccGroups({ graph });
   const semantics = new Map<string, SemanticsPipelineResult>();
@@ -72,6 +101,8 @@ export const analyzeModuleSemantics = ({
   }
 
   sccGroups.forEach((group) => {
+    throwIfCancelled(isCancelled);
+
     const shouldRecomputeGroup = group.moduleIds.some((moduleId) =>
       recomputeSet.has(moduleId),
     );
@@ -102,6 +133,7 @@ export const analyzeModuleSemantics = ({
         diagnostics,
         arena,
         effectInterner,
+        isCancelled,
       });
       return;
     }
@@ -117,6 +149,7 @@ export const analyzeModuleSemantics = ({
       arena,
       effectInterner,
       diagnostics,
+      isCancelled,
     });
     if (!result) {
       return;
@@ -143,6 +176,7 @@ const analyzeCyclicScc = ({
   diagnostics,
   arena,
   effectInterner,
+  isCancelled,
 }: {
   moduleIds: readonly string[];
   includeTests: boolean | undefined;
@@ -154,6 +188,7 @@ const analyzeCyclicScc = ({
   diagnostics: Diagnostic[];
   arena: ReturnType<typeof createTypeArena>;
   effectInterner: ReturnType<typeof createEffectInterner>;
+  isCancelled: (() => boolean) | undefined;
 }) => {
   const firstPassSemantics = new Map<string, SemanticsPipelineResult>();
   const firstPassExports = new Map<string, ModuleExportTable>();
@@ -161,6 +196,8 @@ const analyzeCyclicScc = ({
   const secondPassExports = new Map<string, ModuleExportTable>();
 
   moduleIds.forEach((moduleId) => {
+    throwIfCancelled(isCancelled);
+
     const result = analyzeModule({
       moduleId,
       includeTests,
@@ -171,6 +208,7 @@ const analyzeCyclicScc = ({
       exports: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
       arena,
       effectInterner,
+      isCancelled,
     });
     if (!result) {
       return;
@@ -180,6 +218,8 @@ const analyzeCyclicScc = ({
   });
 
   moduleIds.forEach((moduleId) => {
+    throwIfCancelled(isCancelled);
+
     const result = analyzeModule({
       moduleId,
       includeTests,
@@ -197,6 +237,7 @@ const analyzeCyclicScc = ({
       arena,
       effectInterner,
       diagnostics,
+      isCancelled,
     });
     if (!result) {
       return;
@@ -219,6 +260,7 @@ const analyzeModule = ({
   arena,
   effectInterner,
   diagnostics,
+  isCancelled,
 }: {
   moduleId: string;
   includeTests: boolean | undefined;
@@ -230,7 +272,10 @@ const analyzeModule = ({
   arena: ReturnType<typeof createTypeArena>;
   effectInterner: ReturnType<typeof createEffectInterner>;
   diagnostics?: Diagnostic[];
+  isCancelled: (() => boolean) | undefined;
 }): SemanticsPipelineResult | undefined => {
+  throwIfCancelled(isCancelled);
+
   const module = graph.modules.get(moduleId);
   if (!module) {
     return undefined;
@@ -255,6 +300,10 @@ const analyzeModule = ({
     );
     return result;
   } catch (error) {
+    if (isSemanticsAnalysisCancelledError(error)) {
+      throw error;
+    }
+
     if (error instanceof DiagnosticError) {
       diagnostics?.push(
         ...augmentCycleTy0022Diagnostics({

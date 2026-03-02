@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import { buildModuleGraph } from "../graph.js";
 import { createMemoryModuleHost } from "../memory-host.js";
 import { createNodePathAdapter } from "../node-path-adapter.js";
-import { analyzeModuleSemantics } from "../semantic-analysis.js";
+import {
+  analyzeModuleSemantics,
+  isSemanticsAnalysisCancelledError,
+} from "../semantic-analysis.js";
 import type { ModuleHost } from "../types.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
@@ -91,5 +94,30 @@ describe("analyzeModuleSemantics", () => {
     });
 
     expect(updated.recomputedModuleIds.length).toBe(graph.modules.size);
+  });
+
+  it("supports cancellation before semantics work begins", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}main.voyd`;
+    const graph = await createGraph({
+      entryPath,
+      files: {
+        [entryPath]: `fn main() -> i32\n  1\n`,
+      },
+    });
+
+    const run = () =>
+      analyzeModuleSemantics({
+        graph,
+        recoverFromTypingErrors: true,
+        isCancelled: () => true,
+      });
+
+    expect(run).toThrow();
+    try {
+      run();
+    } catch (error) {
+      expect(isSemanticsAnalysisCancelledError(error)).toBe(true);
+    }
   });
 });

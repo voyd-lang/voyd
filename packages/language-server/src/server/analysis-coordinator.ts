@@ -1,6 +1,7 @@
 import path from "node:path";
 import { createFsModuleHost } from "@voyd/compiler/modules/fs-host.js";
-import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
+import type { ModuleHost, ModuleRoots } from "@voyd/compiler/modules/types.js";
+import { isSemanticsAnalysisCancelledError } from "@voyd/compiler/modules/semantic-analysis.js";
 import { type DidChangeWatchedFilesParams } from "vscode-languageserver/lib/node/main.js";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
@@ -8,6 +9,7 @@ import {
   analyzeProjectCoreIncremental,
   buildProjectNavigationIndex,
   buildProjectNavigationIndexForModules,
+  isProjectAnalysisCancelledError,
   resolveEntryPath,
   resolveModuleRoots,
 } from "../project.js";
@@ -54,6 +56,28 @@ type CompletionCacheEntry = {
 
 const normalizeFilePathFromUri = (uri: string): string =>
   path.resolve(URI.parse(uri).fsPath);
+
+const STALE_RUN_ERROR_CODE = "VOYD_LS_STALE_RUN";
+
+const createStaleRunError = (): Error & { code: string } => {
+  const error = new Error("stale language-server analysis run") as Error & {
+    code: string;
+  };
+  error.name = "StaleAnalysisRunError";
+  error.code = STALE_RUN_ERROR_CODE;
+  return error;
+};
+
+const isStaleRunError = (error: unknown): error is Error & { code: string } =>
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { code?: unknown }).code === STALE_RUN_ERROR_CODE;
+
+const isCancelledError = (error: unknown): boolean =>
+  isStaleRunError(error) ||
+  isProjectAnalysisCancelledError(error) ||
+  isSemanticsAnalysisCancelledError(error);
 
 const toImpactedModuleSet = (
   moduleIds: readonly string[],
@@ -291,10 +315,19 @@ export class AnalysisCoordinator {
     while (true) {
       const { context, entry } = await this.#getCoreEntryForUri(uri);
       const runRevision = entry.revision;
-      const index = await this.#getNavigationForContext({
-        context,
-        coreEntry: entry,
-      });
+      let index: ProjectNavigationIndex;
+      try {
+        index = await this.#getNavigationForContext({
+          context,
+          coreEntry: entry,
+        });
+      } catch (error) {
+        if (isCancelledError(error)) {
+          continue;
+        }
+        throw error;
+      }
+
       if (runRevision === this.#revision) {
         return index;
       }
@@ -330,7 +363,15 @@ export class AnalysisCoordinator {
       });
       const pending = this.#completionInFlight.get(inFlightKey);
       if (pending) {
-        const result = await pending;
+        let result: CompletionAnalysis;
+        try {
+          result = await pending;
+        } catch (error) {
+          if (isCancelledError(error)) {
+            continue;
+          }
+          throw error;
+        }
         if (runRevision === this.#revision) {
           return result;
         }
@@ -359,6 +400,7 @@ export class AnalysisCoordinator {
               occurrencesByUri: navigation.occurrencesByUri,
               lineIndexByFile: analysis.lineIndexByFile,
               exportsByName,
+              isCancelled: () => this.#isRunStale(runRevision),
             })
           : impactedModuleIds.size === 0
             ? {
@@ -374,6 +416,7 @@ export class AnalysisCoordinator {
                   delta: buildCompletionScopedNodesByModuleId({
                     semantics: analysis.semantics,
                     moduleIds: impactedModuleIds,
+                    isCancelled: () => this.#isRunStale(runRevision),
                   }),
                   impactedModuleIds,
                 }),
@@ -383,6 +426,7 @@ export class AnalysisCoordinator {
                     occurrencesByUri: navigation.occurrencesByUri,
                     lineIndexByFile: analysis.lineIndexByFile,
                     moduleIds: impactedModuleIds,
+                    isCancelled: () => this.#isRunStale(runRevision),
                   }),
                   impactedModuleIds,
                 }),
@@ -423,6 +467,11 @@ export class AnalysisCoordinator {
           return result;
         }
         continue;
+      } catch (error) {
+        if (isCancelledError(error)) {
+          continue;
+        }
+        throw error;
       } finally {
         this.#completionInFlight.delete(inFlightKey);
       }
@@ -507,6 +556,50 @@ export class AnalysisCoordinator {
     };
   }
 
+  #isRunStale(revision: number): boolean {
+    return this.#revision !== revision;
+  }
+
+  #throwIfRunStale(revision: number): void {
+    if (!this.#isRunStale(revision)) {
+      return;
+    }
+
+    throw createStaleRunError();
+  }
+
+  #createCancellableModuleHost(revision: number): ModuleHost {
+    const baseHost = this.#moduleHost;
+
+    return {
+      path: baseHost.path,
+      readFile: async (filePath) => {
+        this.#throwIfRunStale(revision);
+        const source = await baseHost.readFile(filePath);
+        this.#throwIfRunStale(revision);
+        return source;
+      },
+      readDir: async (directoryPath) => {
+        this.#throwIfRunStale(revision);
+        const entries = await baseHost.readDir(directoryPath);
+        this.#throwIfRunStale(revision);
+        return entries;
+      },
+      fileExists: async (filePath) => {
+        this.#throwIfRunStale(revision);
+        const exists = await baseHost.fileExists(filePath);
+        this.#throwIfRunStale(revision);
+        return exists;
+      },
+      isDirectory: async (directoryPath) => {
+        this.#throwIfRunStale(revision);
+        const isDirectory = await baseHost.isDirectory(directoryPath);
+        this.#throwIfRunStale(revision);
+        return isDirectory;
+      },
+    };
+  }
+
   #registerFileChanges(filePaths: readonly string[]): void {
     const normalized = Array.from(
       new Set(
@@ -564,7 +657,15 @@ export class AnalysisCoordinator {
     });
     const pending = this.#coreInFlight.get(inFlightKey);
     if (pending) {
-      const result = await pending;
+      let result: CoreCacheEntry;
+      try {
+        result = await pending;
+      } catch (error) {
+        if (isCancelledError(error)) {
+          return this.#getCoreForContext(context);
+        }
+        throw error;
+      }
       return runRevision === this.#revision ? result : this.#getCoreForContext(context);
     }
 
@@ -578,9 +679,10 @@ export class AnalysisCoordinator {
         entryPath: context.entryPath,
         roots: context.roots,
         openDocuments: this.openDocuments,
-        host: this.#moduleHost,
+        host: this.#createCancellableModuleHost(runRevision),
         previousAnalysis: cached?.analysis,
         changedFilePaths: this.#changedFilesSince(cached?.revision ?? -1),
+        isCancelled: () => this.#isRunStale(runRevision),
       });
       const nextEntry: CoreCacheEntry = {
         revision: runRevision,
@@ -600,6 +702,11 @@ export class AnalysisCoordinator {
     try {
       const result = await task;
       return runRevision === this.#revision ? result : this.#getCoreForContext(context);
+    } catch (error) {
+      if (isCancelledError(error)) {
+        return this.#getCoreForContext(context);
+      }
+      throw error;
     } finally {
       this.#coreInFlight.delete(inFlightKey);
     }
@@ -635,7 +742,10 @@ export class AnalysisCoordinator {
         impactedModuleIds.size === coreEntry.analysis.semantics.size;
 
       const index = needsFullRebuild
-        ? await buildProjectNavigationIndex({ analysis: coreEntry.analysis })
+        ? await buildProjectNavigationIndex({
+            analysis: coreEntry.analysis,
+            isCancelled: () => this.#isRunStale(revision),
+          })
         : impactedModuleIds.size === 0
           ? previousEntry.index
           : mergeNavigationIndex({
@@ -643,6 +753,7 @@ export class AnalysisCoordinator {
               delta: await buildProjectNavigationIndexForModules({
                 analysis: coreEntry.analysis,
                 moduleIds: impactedModuleIds,
+                isCancelled: () => this.#isRunStale(revision),
               }),
               impactedModuleIds,
             });

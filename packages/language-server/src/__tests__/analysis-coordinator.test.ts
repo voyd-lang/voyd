@@ -150,4 +150,44 @@ describe("analysis coordinator", () => {
       await rm(project.rootDir, { recursive: true, force: true });
     }
   });
+
+  it("preempts stale core runs during rapid edits", async () => {
+    const moduleCount = 220;
+    const project = await createProject({
+      ...Object.fromEntries(
+        Array.from({ length: moduleCount }, (_entry, index) => [
+          `src/mod_${index}.voyd`,
+          `pub fn value_${index}() -> i32\n  ${index}\n`,
+        ]),
+      ),
+      "src/core.voyd":
+        `${Array.from({ length: moduleCount }, (_entry, index) => `use src::mod_${index}::value_${index}`).join("\n")}\n\npub fn total() -> i32\n  ${Array.from({ length: moduleCount }, (_entry, index) => `value_${index}()`).join(" + ")}\n`,
+      "src/main.voyd": `use src::core::total\n\nfn main() -> i32\n  total()\n`,
+    });
+
+    try {
+      const mainUri = toFileUri(project.filePathFor("src/main.voyd"));
+      const mod0Path = project.filePathFor("src/mod_0.voyd");
+      const mod0Uri = toFileUri(mod0Path);
+      const coordinator = new AnalysisCoordinator();
+
+      const firstRun = coordinator.getCoreForUri(mainUri);
+      coordinator.updateDocument(
+        TextDocument.create(
+          mod0Uri,
+          "voyd",
+          2,
+          `pub fn value_0() -> i32\n  9999\n`,
+        ),
+      );
+      const secondRun = coordinator.getCoreForUri(mainUri);
+
+      const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+      const expectedUpdatedSource = `pub fn value_0() -> i32\n  9999\n`;
+      expect(firstResult.analysis.sourceByFile.get(mod0Path)).toBe(expectedUpdatedSource);
+      expect(secondResult.analysis.sourceByFile.get(mod0Path)).toBe(expectedUpdatedSource);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 25_000);
 });

@@ -41,6 +41,7 @@ export type AnalyzeModulesOptions = {
   recoverFromTypingErrors?: boolean;
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
+  isCancelled?: () => boolean;
 };
 
 export type AnalyzeModulesResult = {
@@ -112,6 +113,7 @@ export const analyzeModules = ({
   recoverFromTypingErrors,
   previousSemantics,
   changedModuleIds,
+  isCancelled,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
   const { semantics, diagnostics, recomputedModuleIds } = analyzeModuleSemantics({
     graph,
@@ -119,6 +121,7 @@ export const analyzeModules = ({
     recoverFromTypingErrors,
     previousSemantics,
     changedModuleIds,
+    isCancelled,
   });
 
   diagnostics.push(...enforcePublicApiMethodEffectAnnotations({ semantics }));

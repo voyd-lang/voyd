@@ -12,21 +12,42 @@ import type {
 import type { LineIndex } from "./text.js";
 import { toFilePath } from "./files.js";
 
+const PROJECT_ANALYSIS_CANCELLED_CODE = "VOYD_PROJECT_ANALYSIS_CANCELLED";
+
+const throwIfCancelled = (isCancelled: (() => boolean) | undefined): void => {
+  if (!isCancelled?.()) {
+    return;
+  }
+
+  const error = new Error("project analysis cancelled") as Error & {
+    code: string;
+  };
+  error.name = "ProjectAnalysisCancelledError";
+  error.code = PROJECT_ANALYSIS_CANCELLED_CODE;
+  throw error;
+};
+
 export const buildCompletionIndex = ({
   semantics,
   occurrencesByUri,
   lineIndexByFile,
   exportsByName,
+  isCancelled,
 }: {
   semantics: ReadonlyMap<string, SemanticsPipelineResult>;
   occurrencesByUri: ReadonlyMap<string, readonly SymbolOccurrence[]>;
   lineIndexByFile: ReadonlyMap<string, LineIndex>;
   exportsByName: ReadonlyMap<string, readonly ExportCandidate[]>;
+  isCancelled?: () => boolean;
 }): CompletionIndex => ({
-  scopedNodesByModuleId: buildCompletionScopedNodesByModuleId({ semantics }),
+  scopedNodesByModuleId: buildCompletionScopedNodesByModuleId({
+    semantics,
+    isCancelled,
+  }),
   symbolLookupByUri: buildCompletionSymbolLookupByUri({
     occurrencesByUri,
     lineIndexByFile,
+    isCancelled,
   }),
   exportEntriesByFirstCharacter: buildCompletionExportEntriesByFirstCharacter({
     exportsByName,
@@ -41,13 +62,19 @@ type SymbolLookupState = {
 export const buildCompletionScopedNodesByModuleId = ({
   semantics,
   moduleIds,
+  isCancelled,
 }: {
   semantics: ReadonlyMap<string, SemanticsPipelineResult>;
   moduleIds?: ReadonlySet<string>;
+  isCancelled?: () => boolean;
 }): Map<string, Map<string, CompletionScopedNodeSpan[]>> => {
+  throwIfCancelled(isCancelled);
+
   const byModuleId = new Map<string, Map<string, CompletionScopedNodeSpan[]>>();
 
   semantics.forEach((moduleSemantics, moduleId) => {
+    throwIfCancelled(isCancelled);
+
     if (moduleIds && !moduleIds.has(moduleId)) {
       return;
     }
@@ -90,14 +117,20 @@ export const buildCompletionSymbolLookupByUri = ({
   occurrencesByUri,
   lineIndexByFile,
   moduleIds,
+  isCancelled,
 }: {
   occurrencesByUri: ReadonlyMap<string, readonly SymbolOccurrence[]>;
   lineIndexByFile: ReadonlyMap<string, LineIndex>;
   moduleIds?: ReadonlySet<string>;
+  isCancelled?: () => boolean;
 }): Map<string, Map<string, CompletionSymbolLookup>> => {
+  throwIfCancelled(isCancelled);
+
   const symbolLookupByUri = new Map<string, Map<string, CompletionSymbolLookup>>();
 
   occurrencesByUri.forEach((occurrences, uri) => {
+    throwIfCancelled(isCancelled);
+
     const filePath = path.resolve(toFilePath(uri));
     const lineIndex = lineIndexByFile.get(filePath);
     const byModuleId = new Map<string, SymbolLookupState>();
