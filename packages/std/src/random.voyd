@@ -7,7 +7,7 @@ use std::bytes::ByteBuffer
 use std::math::{ MathError, mod_euclid }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
-use std::number::cast::{ to_i32_wrapping, to_i64 }
+use std::number::cast::{ to_f32, to_f64, to_i32_wrapping, to_i64 }
 use std::optional::types::all
 use std::range::Range
 
@@ -19,6 +19,11 @@ use std::range::Range
 pub eff Random
   /// Returns a random signed 64-bit integer.
   next_i64(tail) -> i64
+  /// Returns random 64-bit bits interpreted as an unsigned integer payload.
+  ///
+  /// Voyd currently transports this as `i64`; callers should treat the bits as
+  /// unsigned data when needed.
+  next_u64(tail) -> i64
   /// Returns an array of random byte values with length `len`.
   ///
   /// Host values are expected to be i32 entries; callers should normalize each
@@ -28,6 +33,13 @@ pub eff Random
 /// Returns a random 64-bit integer.
 pub fn next_i64(): Random -> i64
   Random::next_i64()
+
+/// Returns random 64-bit bits interpreted as an unsigned integer payload.
+///
+/// Voyd currently transports this as `i64`; callers should treat the bits as
+/// unsigned data when needed.
+pub fn next_u64(): Random -> i64
+  Random::next_u64()
 
 /// Fills a byte buffer with cryptographically secure random bytes.
 /// `len` controls the number of bytes appended to `buf`.
@@ -62,15 +74,21 @@ pub fn fill_buffer(~buf: ByteBuffer, len: i32): Random -> void
 
 /// Returns a random boolean value.
 pub fn random_bool(): Random -> bool
-  let value = to_i32_wrapping(next_i64())
+  let value = random_i32()
   value % 2 == 0
 
-/// Returns a random integer within the provided range.
+/// Returns a random i32 value.
+///
+/// Default behavior (no range): samples across the full `i32` domain.
+pub fn random_i32(): Random -> i32
+  to_i32_wrapping(next_i64())
+
+/// Returns a random i32 value within the provided range.
 /// The range lower bound is inclusive. The upper bound follows `Range`:
 /// exclusive by default, inclusive when `include_end` is true.
 /// Example:
-/// `random::random_int(1..6)` samples values in `[1, 5]`.
-pub fn random_int(range: Range): Random -> i32
+/// `random::random_i32(1..6)` samples values in `[1, 5]`.
+pub fn random_i32(range: Range): Random -> i32
   let start = range_start_or_zero(range.start)
   let start_i64 = to_i64(start)
   let end_exclusive = range_end_exclusive(range, start_i64)
@@ -81,6 +99,57 @@ pub fn random_int(range: Range): Random -> i32
   let seed = next_i64()
   let sample = start_i64 + mod_euclid_i64_or_zero(seed, span)
   to_i32_wrapping(sample)
+
+/// Returns a random i64 value.
+///
+/// Default behavior (no range): samples across the full `i64` domain.
+pub fn random_i64(): Random -> i64
+  next_i64()
+
+/// Returns a random i64 value within the provided range.
+///
+/// The range lower bound is inclusive. The upper bound follows `Range`:
+/// exclusive by default, inclusive when `include_end` is true.
+pub fn random_i64(range: Range): Random -> i64
+  let start_i64 = to_i64(range_start_or_zero(range.start))
+  let end_exclusive = range_end_exclusive(range, start_i64)
+  if end_exclusive <= start_i64:
+    return start_i64
+
+  let span = end_exclusive - start_i64
+  let seed = next_i64()
+  start_i64 + mod_euclid_i64_or_zero(seed, span)
+
+/// Returns a random floating-point value in `[0.0, 1.0)`.
+///
+/// This no-argument overload is the default behavior.
+pub fn random_f64(): Random -> f64
+  random_f64_in_interval(to_i64(0), to_i64(1))
+
+/// Returns a random floating-point value within the provided range.
+///
+/// The lower bound is inclusive. The upper bound follows `Range` semantics:
+/// exclusive by default, inclusive when `include_end` is true.
+/// Example:
+/// `random::random_f64(0..10)` samples values in `[0.0, 10.0)`.
+pub fn random_f64(range: Range): Random -> f64
+  let start = range_start_or_zero(range.start)
+  let start_i64 = to_i64(start)
+  let end_exclusive = range_end_exclusive(range, start_i64)
+  random_f64_in_interval(start_i64, end_exclusive)
+
+/// Returns a random floating-point value in `[0.0, 1.0)` as `f32`.
+///
+/// This no-argument overload is the default behavior.
+pub fn random_f32(): Random -> f32
+  to_f32(random_f64())
+
+/// Returns a random floating-point value within the provided range as `f32`.
+///
+/// The lower bound is inclusive. The upper bound follows `Range` semantics:
+/// exclusive by default, inclusive when `include_end` is true.
+pub fn random_f32(range: Range): Random -> f32
+  to_f32(random_f64(range))
 
 fn range_start_or_zero(start: Option<i32>) -> i32
   match(start)
@@ -113,3 +182,19 @@ fn mod_euclid_i64_or_zero(value: i64, modulus: i64) -> i64
       value
     Err<MathError>:
       to_i64(0)
+
+fn random_f64_in_interval(start: i64, end_exclusive: i64): Random -> f64
+  if end_exclusive <= start:
+    return to_f64(start)
+
+  let span = to_f64(end_exclusive - start)
+  let start_f64 = to_f64(start)
+  start_f64 + random_unit_f64() * span
+
+fn random_unit_f64(): Random -> f64
+  let denominator_i64 = random_unit_denominator_i64()
+  let mantissa = mod_euclid_i64_or_zero(next_u64(), denominator_i64)
+  to_f64(mantissa) / to_f64(denominator_i64)
+
+fn random_unit_denominator_i64(): () -> i64
+  to_i64(1073741824) * to_i64(8388608)
