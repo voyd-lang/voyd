@@ -24,12 +24,6 @@ describe("getConfigFromCli", () => {
     expect(config.test).toBe(true);
   });
 
-  it("defaults test root to repo for --test", () => {
-    const config = runWithArgv(["node", "voyd", "--test"]);
-    expect(config.index).toBe(".");
-    expect(config.test).toBe(true);
-  });
-
   it("collects repeatable --pkg-dir options", () => {
     const config = runWithArgv([
       "node",
@@ -102,11 +96,11 @@ describe("getConfigFromCli", () => {
     expect(config.pkgDirs).toEqual(["./vendor"]);
   });
 
-  it("does not treat --reporter values as subcommands", () => {
+  it("parses reporter when passed to `voyd test`", () => {
     const config = runWithArgv([
       "node",
       "voyd",
-      "--test",
+      "test",
       "--reporter",
       "doc",
     ]);
@@ -124,7 +118,7 @@ describe("getConfigFromCli", () => {
       "test",
     ]);
     expect(config.run).toBe(true);
-    expect(config.test).toBe(false);
+    expect(config.test).toBeFalsy();
     expect(config.doc).toBe(false);
     expect(config.runEntry).toBe("test");
   });

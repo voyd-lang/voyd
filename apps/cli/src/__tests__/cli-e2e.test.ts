@@ -794,6 +794,7 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(mainHelp.status).toBe(0);
       expect(mainOutput).toContain("Commands:");
       expect(mainOutput).toContain("doc [index]");
+      expect(mainOutput).not.toContain("--test");
       expect(mainOutput).not.toContain("--out <path>");
 
       const docHelp = runCli(root, ["doc", "--help"]);
