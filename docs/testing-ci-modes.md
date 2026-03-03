@@ -22,9 +22,10 @@ PR workflow (`.github/workflows/pr.yml`) runs two complementary checks:
 2. Build-only validation for non-CLI artifacts (when relevant files change):
    - `npx turbo run build --affected --filter=voyd.dev... --filter=voyd-vscode...`
    - Catches site/VSCode build regressions that package tests do not execute.
-3. Dist-specific CLI e2e (only on CLI/runtime-related changes):
+3. Dist-specific CLI e2e in a separate PR job (only on CLI/runtime-related changes):
    - Build targeted dist artifacts: `npx turbo run build --filter=@voyd/cli...`
    - Run dist e2e: `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist ...`
+   - Reported as its own status check (`cli-dist-e2e`) so heavy runtime validation is isolated from the main source-mode test sweep.
 
 This keeps most PRs fast while still protecting dist execution paths when they can be impacted.
 
