@@ -59,6 +59,16 @@ You should generally add unit tests (especially e2e ones)
 
 E2E Unit tests should go in apps/smoke (unless strictly scoped to the compiler). Always prefer the public API
 
+## Test Placement Guidance
+
+Before adding tests, read [`docs/testing/test-layer-ownership.md`](docs/testing/test-layer-ownership.md).
+
+- `packages/compiler`: parser/typing/lowering/codegen internals and compiler-only contracts.
+- `packages/sdk`: public compile/run/test APIs and runtime adapter contracts.
+- `apps/cli`: argument parsing, command wiring, process UX, and exit/reporting behavior.
+- `apps/smoke`: end-to-end user-visible flows via public APIs (cross-package integration).
+- Avoid duplicating semantic assertions across CLI/SDK/smoke unless it protects a boundary; if duplicated, document the boundary and keep exactly one canonical layer.
+
 # TS Style Guide
 
 - Keep functions small
