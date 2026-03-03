@@ -105,6 +105,96 @@ describe("module imports", () => {
     expect(combinedDiagnostics).toHaveLength(0);
   });
 
+  it("supports cyclic imports when trait and object declarations reference each other", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: [
+        "use src::a::A",
+        "",
+        "pub fn main() -> i32",
+        "  0",
+      ].join("\n"),
+      [`${root}${sep}a.voyd`]: [
+        "use src::b::B",
+        "",
+        "pub obj A {",
+        "  peer: B",
+        "}",
+      ].join("\n"),
+      [`${root}${sep}b.voyd`]: [
+        "use src::a::A",
+        "",
+        "pub trait B",
+        "  fn bounce(self, value: A) -> i32",
+      ].join("\n"),
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    if (combinedDiagnostics.length > 0) {
+      throw new Error(
+        JSON.stringify(
+          combinedDiagnostics.map((diag) => ({
+            code: diag.code,
+            message: diag.message,
+          })),
+        ),
+      );
+    }
+    expect(combinedDiagnostics).toHaveLength(0);
+  });
+
+  it("supports cyclic imports when trait signatures use labeled parameters", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: [
+        "use src::hit::HitRecord",
+        "",
+        "pub fn main() -> i32",
+        "  0",
+      ].join("\n"),
+      [`${root}${sep}hit.voyd`]: [
+        "use src::material::Material",
+        "",
+        "pub obj HitRecord {",
+        "  mat: Material",
+        "}",
+      ].join("\n"),
+      [`${root}${sep}material.voyd`]: [
+        "use src::hit::HitRecord",
+        "",
+        "pub trait Material",
+        "  fn scatter({ rec: HitRecord }) -> bool",
+      ].join("\n"),
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    if (combinedDiagnostics.length > 0) {
+      throw new Error(
+        JSON.stringify(
+          combinedDiagnostics.map((diag) => ({
+            code: diag.code,
+            message: diag.message,
+          })),
+        ),
+      );
+    }
+    expect(combinedDiagnostics).toHaveLength(0);
+  });
+
   it("resolves std module imports without explicit self selectors", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

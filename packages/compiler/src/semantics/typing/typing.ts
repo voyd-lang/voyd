@@ -38,10 +38,10 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     seedPrimitiveTypes(ctx);
     seedBaseObjectType(ctx);
     primeImportedValues(ctx);
-    primeImportedTypes(ctx);
     registerTypeAliases(ctx, state);
     registerObjectDecls(ctx);
     registerTraits(ctx);
+    primeImportedTypes(ctx);
     primeTypeAliases(ctx, state);
     registerFunctionSignatures(ctx, state);
     registerEffectOperations(ctx, state);
