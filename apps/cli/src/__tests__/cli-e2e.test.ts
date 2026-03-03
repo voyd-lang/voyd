@@ -635,6 +635,25 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
     }
   });
 
+  it("keeps src-root imports when running nested entry files", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createNestedEntryFixture();
+    try {
+      const result = runCli(fixture.root, ["--run", fixture.entryPath]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      if (result.status !== 0) {
+        throw new Error(`voyd run failed: ${output}`);
+      }
+
+      expect(output).toContain("42");
+      expect(output).not.toContain("Unable to resolve module");
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it(
     "uses default node_modules lookup for compile and test, including ancestor walking",
     async () => {
