@@ -63,6 +63,21 @@ type SymbolIndex = {
   moduleIdByFilePath: ReadonlyMap<string, string>;
 };
 
+const PROJECT_ANALYSIS_CANCELLED_CODE = "VOYD_PROJECT_ANALYSIS_CANCELLED";
+
+const throwIfCancelled = (isCancelled: (() => boolean) | undefined): void => {
+  if (!isCancelled?.()) {
+    return;
+  }
+
+  const error = new Error("project analysis cancelled") as Error & {
+    code: string;
+  };
+  error.name = "ProjectAnalysisCancelledError";
+  error.code = PROJECT_ANALYSIS_CANCELLED_CODE;
+  throw error;
+};
+
 const keyForSymbol = ({ moduleId, symbol }: SymbolRef): string => `${moduleId}::${symbol}`;
 const keyForExternalParameterLabel = ({
   moduleId,
@@ -314,6 +329,8 @@ export const buildSymbolIndex = async ({
   sourceByFile,
   lineIndexByFile,
   includeWorkspaceExports = true,
+  targetModuleIds,
+  isCancelled,
 }: {
   graph: ModuleGraph;
   semantics: ReadonlyMap<string, SemanticsPipelineResult>;
@@ -321,7 +338,11 @@ export const buildSymbolIndex = async ({
   sourceByFile: ReadonlyMap<string, string>;
   lineIndexByFile: ReadonlyMap<string, LineIndex>;
   includeWorkspaceExports?: boolean;
+  targetModuleIds?: ReadonlySet<string>;
+  isCancelled?: () => boolean;
 }): Promise<SymbolIndex> => {
+  throwIfCancelled(isCancelled);
+
   const resolveImportTarget = (ref: SymbolRef): SymbolRef | undefined => {
     const module = semantics.get(ref.moduleId);
     if (!module) {
@@ -727,6 +748,12 @@ export const buildSymbolIndex = async ({
   });
 
   semantics.forEach((entry, moduleId) => {
+    throwIfCancelled(isCancelled);
+
+    if (targetModuleIds && !targetModuleIds.has(moduleId)) {
+      return;
+    }
+
     const moduleNode = graph.modules.get(moduleId);
     if (!moduleNode) {
       return;
@@ -1085,6 +1112,8 @@ export const buildSymbolIndex = async ({
   if (includeWorkspaceExports && roots?.src) {
     const sourceFiles = await collectVoydFiles(path.resolve(roots.src));
     for (const filePath of sourceFiles) {
+      throwIfCancelled(isCancelled);
+
       const normalized = path.resolve(filePath);
       const source =
         sourceByFile.get(normalized) ??
