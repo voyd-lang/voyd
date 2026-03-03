@@ -113,6 +113,43 @@ const createPkgDirRelativeTestFixture = async (): Promise<{
   return { cwd: root, testRoot };
 };
 
+const createDefaultNodeModulesFixture = async (): Promise<{
+  cwd: string;
+  entryPath: string;
+  testRoot: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-node-modules-default-"));
+  const srcRoot = resolve(root, "workspace", "apps", "consumer", "src");
+  const testRoot = resolve(root, "workspace", "apps", "consumer", "test");
+  const packageSrcRoot = resolve(root, "workspace", "node_modules", "my_pkg", "src");
+  const entryPath = resolve(srcRoot, "main.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await mkdir(testRoot, { recursive: true });
+  await writePackageFixture(packageSrcRoot);
+  await writeFile(
+    entryPath,
+    [
+      "use pkg::my_pkg::all",
+      "",
+      "pub fn main() -> i32",
+      "  plus_one(41)",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    resolve(testRoot, "uses_pkg.voyd"),
+    [
+      "use std::test::assertions::all",
+      "use pkg::my_pkg::all",
+      "",
+      "test \"imports package through default node_modules lookup\":",
+      "  assert(plus_one(1) == 2)",
+      "",
+    ].join("\n"),
+  );
+  return { cwd: root, entryPath, testRoot };
+};
+
 const createNonTestTargetFixture = async (): Promise<{
   root: string;
   targetFile: string;
@@ -341,6 +378,23 @@ const createDocFixture = async (): Promise<string> => {
   return root;
 };
 
+const createDanglingDocFixture = async (): Promise<string> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-docs-dangling-"));
+  const srcRoot = resolve(root, "src");
+  await mkdir(srcRoot, { recursive: true });
+  await writeFile(
+    resolve(srcRoot, "main.voyd"),
+    [
+      "/// I am lost.",
+      "",
+      "fn main() -> i32",
+      "  1",
+      "",
+    ].join("\n"),
+  );
+  return root;
+};
+
 const createDiagnosticCompactionFixture = async (): Promise<{
   root: string;
   stdRoot: string;
@@ -532,7 +586,34 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 });
 
 describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
-  // SDK + smoke own package-resolution semantics. CLI e2e keeps only CLI flag wiring checks.
+  // SDK + smoke own deep package-resolution semantics. CLI e2e keeps wiring checks.
+  it(
+    "uses default node_modules lookup for compile and test, including ancestor walking",
+    async () => {
+      assertCliRunnerAvailable();
+
+      const fixture = await createDefaultNodeModulesFixture();
+      try {
+        const compileResult = runCli(fixture.cwd, ["--emit-ir-ast", fixture.entryPath]);
+        const compileOutput = `${compileResult.stdout ?? ""}${compileResult.stderr ?? ""}`;
+        if (compileResult.status !== 0) {
+          throw new Error(`voyd compile failed: ${compileOutput}`);
+        }
+        expect(compileOutput).not.toContain("Unable to resolve module");
+
+        const testResult = runCli(fixture.cwd, ["test", fixture.testRoot]);
+        const testOutput = `${testResult.stdout ?? ""}${testResult.stderr ?? ""}`;
+        if (testResult.status !== 0) {
+          throw new Error(`voyd test failed: ${testOutput}`);
+        }
+        expect(testOutput).toContain("passed 1, failed 0, skipped 0");
+        expect(testOutput).not.toContain("Unable to resolve module");
+      } finally {
+        await rm(fixture.cwd, { recursive: true, force: true });
+      }
+    },
+  );
+
   it(
     "resolves --pkg-dir relative to the target source root",
     async () => {
@@ -588,7 +669,7 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 });
 
 describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
-  // SDK + smoke own documentation rendering semantics. CLI e2e validates command wiring.
+  // SDK + smoke own documentation rendering semantics. CLI e2e validates command wiring and exit/reporting.
   it("writes JSON docs to a custom output path", async () => {
     assertCliRunnerAvailable();
 
@@ -611,6 +692,21 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
         modules: Array<{ id: string }>;
       };
       expect(json.modules.some((module) => module.id === "src::main")).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("exits non-zero and surfaces diagnostics for dangling doc comments", async () => {
+    assertCliRunnerAvailable();
+
+    const root = await createDanglingDocFixture();
+    try {
+      const result = runCli(root, ["doc"]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      expect(result.status).toBe(1);
+      expect(output).toContain("MD0004");
+      expect(output).toContain("Dangling doc comment");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
