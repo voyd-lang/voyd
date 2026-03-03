@@ -98,4 +98,96 @@ describe("analysis coordinator", () => {
       await rm(completeStd.rootDir, { recursive: true, force: true });
     }
   });
+
+  it("reuses unaffected module semantics after an edit", async () => {
+    const project = await createProject({
+      "src/main.voyd":
+        `use src::util::value\nuse src::helper::helper\n\nfn main() -> i32\n  value() + helper()\n`,
+      "src/util.voyd": `pub fn value() -> i32\n  1\n`,
+      "src/helper.voyd": `pub fn helper() -> i32\n  2\n`,
+    });
+
+    try {
+      const mainUri = toFileUri(project.filePathFor("src/main.voyd"));
+      const utilUri = toFileUri(project.filePathFor("src/util.voyd"));
+      const coordinator = new AnalysisCoordinator();
+      coordinator.updateDocument(
+        TextDocument.create(
+          utilUri,
+          "voyd",
+          1,
+          `pub fn value() -> i32\n  1\n`,
+        ),
+      );
+
+      const initial = await coordinator.getCoreForUri(mainUri);
+      const initialMainSemantics = initial.analysis.semantics.get("src::main");
+      const initialUtilSemantics = initial.analysis.semantics.get("src::util");
+      const initialHelperSemantics = initial.analysis.semantics.get("src::helper");
+
+      expect(initialMainSemantics).toBeDefined();
+      expect(initialUtilSemantics).toBeDefined();
+      expect(initialHelperSemantics).toBeDefined();
+      if (!initialMainSemantics || !initialUtilSemantics || !initialHelperSemantics) {
+        return;
+      }
+
+      coordinator.updateDocument(
+        TextDocument.create(
+          utilUri,
+          "voyd",
+          2,
+          `pub fn value() -> i32\n  10\n`,
+        ),
+      );
+
+      const updated = await coordinator.getCoreForUri(mainUri);
+
+      expect(updated.analysis.semantics.get("src::main")).not.toBe(initialMainSemantics);
+      expect(updated.analysis.semantics.get("src::util")).not.toBe(initialUtilSemantics);
+      expect(updated.analysis.semantics.get("src::helper")).toBe(initialHelperSemantics);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("preempts stale core runs during rapid edits", async () => {
+    const moduleCount = 220;
+    const project = await createProject({
+      ...Object.fromEntries(
+        Array.from({ length: moduleCount }, (_entry, index) => [
+          `src/mod_${index}.voyd`,
+          `pub fn value_${index}() -> i32\n  ${index}\n`,
+        ]),
+      ),
+      "src/core.voyd":
+        `${Array.from({ length: moduleCount }, (_entry, index) => `use src::mod_${index}::value_${index}`).join("\n")}\n\npub fn total() -> i32\n  ${Array.from({ length: moduleCount }, (_entry, index) => `value_${index}()`).join(" + ")}\n`,
+      "src/main.voyd": `use src::core::total\n\nfn main() -> i32\n  total()\n`,
+    });
+
+    try {
+      const mainUri = toFileUri(project.filePathFor("src/main.voyd"));
+      const mod0Path = project.filePathFor("src/mod_0.voyd");
+      const mod0Uri = toFileUri(mod0Path);
+      const coordinator = new AnalysisCoordinator();
+
+      const firstRun = coordinator.getCoreForUri(mainUri);
+      coordinator.updateDocument(
+        TextDocument.create(
+          mod0Uri,
+          "voyd",
+          2,
+          `pub fn value_0() -> i32\n  9999\n`,
+        ),
+      );
+      const secondRun = coordinator.getCoreForUri(mainUri);
+
+      const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+      const expectedUpdatedSource = `pub fn value_0() -> i32\n  9999\n`;
+      expect(firstResult.analysis.sourceByFile.get(mod0Path)).toBe(expectedUpdatedSource);
+      expect(secondResult.analysis.sourceByFile.get(mod0Path)).toBe(expectedUpdatedSource);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 25_000);
 });

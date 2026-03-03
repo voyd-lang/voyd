@@ -1,0 +1,28 @@
+name: Language Server Perf
+
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+jobs:
+  ls-perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --include=optional
+      - name: Run language server perf harness
+        env:
+          VOYD_USE_SRC: "1"
+          VOYD_LS_PERF: "1"
+          VOYD_LS_PERF_LEAF_COUNT: "500"
+          VOYD_LS_PERF_EDIT_RUNS: "5"
+          VOYD_LS_PERF_MIN_SPEEDUP: "1.5"
+        run: npm run --workspace @voyd/language-server test -- src/__tests__/analysis-coordinator.perf.test.ts
