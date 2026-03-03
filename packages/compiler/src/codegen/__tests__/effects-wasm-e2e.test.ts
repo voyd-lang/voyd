@@ -50,6 +50,11 @@ const effectfulExportFixturePath = resolve(
   "__fixtures__",
   "effects-export.voyd"
 );
+const returnPerformFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-return-perform.voyd"
+);
 
 const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
 
@@ -190,6 +195,13 @@ describe("effects wasm e2e", { timeout: 15_000 }, () => {
     const instance = instantiateEffectsModule(wasm);
     const target = instance.exports.tail_single_resume as CallableFunction;
     expect(target()).toBe(11);
+  });
+
+  it("supports performs in explicit return paths", async () => {
+    const { wasm } = await compileEffectFixture({ entryPath: returnPerformFixturePath });
+    const instance = instantiateEffectsModule(wasm);
+    const target = instance.exports.main as CallableFunction;
+    expect(target()).toBe(42);
   });
 
   it("traps when a tail clause propagates another effect before resuming", async () => {

@@ -1,0 +1,13 @@
+eff Async
+  await(tail) -> i32
+
+fn early_return(flag: i32): Async -> i32
+  if flag == 1 then:
+    return Async::await() + 1
+  return flag
+
+pub fn main(): () -> i32
+  try
+    early_return(1)
+  Async::await(tail):
+    tail(41)
