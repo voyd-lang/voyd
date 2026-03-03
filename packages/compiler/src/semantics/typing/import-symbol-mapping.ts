@@ -859,6 +859,16 @@ export const mapDependencySymbolToLocal = ({
       moduleId: candidateDependency.moduleId,
       symbol: candidateOwner,
     });
+    if (canonicalCandidate.moduleId === ctx.moduleId) {
+      const local = resolveLocalSymbolForModule({
+        candidateOwner,
+        candidateDependency,
+        ctx,
+      });
+      if (typeof local === "number") {
+        return local;
+      }
+    }
     const aliases = ctx.importAliasesByModule.get(canonicalCandidate.moduleId);
     const aliased = aliases?.get(canonicalCandidate.symbol);
     if (typeof aliased === "number") {
@@ -967,4 +977,40 @@ export const mapDependencySymbolToLocal = ({
   };
 
   return visit(owner, dependency, new Set());
+};
+
+const resolveLocalSymbolForModule = ({
+  candidateOwner,
+  candidateDependency,
+  ctx,
+}: {
+  candidateOwner: SymbolId;
+  candidateDependency: DependencySemantics;
+  ctx: TypingContext;
+}): SymbolId | undefined => {
+  if (candidateDependency.moduleId !== ctx.moduleId) {
+    return undefined;
+  }
+
+  let dependencyRecord: Readonly<{ name: string; kind: SymbolKind }>;
+  try {
+    dependencyRecord = candidateDependency.symbolTable.getSymbol(candidateOwner);
+  } catch {
+    return undefined;
+  }
+
+  const local = ctx.symbolTable.resolve(
+    dependencyRecord.name,
+    ctx.symbolTable.rootScope,
+  );
+  if (typeof local !== "number") {
+    return undefined;
+  }
+
+  try {
+    const localRecord = ctx.symbolTable.getSymbol(local);
+    return localRecord.kind === dependencyRecord.kind ? local : undefined;
+  } catch {
+    return undefined;
+  }
 };

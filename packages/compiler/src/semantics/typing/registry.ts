@@ -220,6 +220,12 @@ export const registerObjectDecls = (ctx: TypingContext): void => {
 export const registerTraits = (ctx: TypingContext): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "trait") continue;
+    ctx.traits.registerDecl(item);
+    const name = getSymbolName(item.symbol, ctx);
+    if (!ctx.traits.hasName(name)) {
+      ctx.traits.setName(name, item.symbol);
+    }
+
     const traitDecl = ctx.decls.getTrait(item.symbol);
     if (traitDecl) {
       const traitMethodsBySymbol = new Map(
@@ -234,11 +240,6 @@ export const registerTraits = (ctx: TypingContext): void => {
         traitName: getSymbolName(item.symbol, ctx),
         methods: traitInfos,
       });
-    }
-    ctx.traits.registerDecl(item);
-    const name = getSymbolName(item.symbol, ctx);
-    if (!ctx.traits.hasName(name)) {
-      ctx.traits.setName(name, item.symbol);
     }
   }
 };
