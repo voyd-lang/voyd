@@ -44,6 +44,7 @@ export interface SemanticsPipelineOptions {
   exports?: Map<string, ModuleExportTable>;
   dependencies?: Map<string, SemanticsPipelineResult>;
   typing?: Partial<Pick<TypingResult, "arena" | "effects">>;
+  allowMissingDependencySemantics?: boolean;
   includeTests?: boolean;
   recoverFromTypingErrors?: boolean;
 }
@@ -134,6 +135,9 @@ export const semanticsPipeline = (
       packageId: binding.packageId,
       moduleExports: exports ?? new Map(),
       availableSemantics: projectDependencySemantics(dependencies),
+      allowMissingDependencySemantics:
+        "allowMissingDependencySemantics" in input &&
+        input.allowMissingDependencySemantics === true,
       recoverDiagnosticErrors: recoverFromTypingErrors,
     });
   } catch (error) {

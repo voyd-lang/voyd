@@ -58,6 +58,7 @@ export interface TypingInputs {
   packageId?: string;
   moduleExports?: Map<string, ModuleExportTable>;
   availableSemantics?: Map<string, DependencySemantics>;
+  allowMissingDependencySemantics?: boolean;
   typeCheckBudget?: TypeCheckBudgetConfig;
 }
 
@@ -599,6 +600,7 @@ export interface TypingContext {
   decls: DeclTable;
   moduleId: string;
   packageId: string;
+  allowMissingDependencySemantics: boolean;
   moduleExports: Map<string, ModuleExportTable>;
   dependencies: Map<string, DependencySemantics>;
   importsByLocal: Map<SymbolId, { moduleId: string; symbol: SymbolId }>;

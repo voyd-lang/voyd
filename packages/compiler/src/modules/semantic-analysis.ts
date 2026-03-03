@@ -10,6 +10,7 @@ import { ModuleExportTable } from "../semantics/modules.js";
 import { createTypeArena } from "../semantics/typing/type-arena.js";
 import { createEffectInterner, createEffectTable } from "../semantics/effects/effect-table.js";
 import { getModuleSccGroups } from "./scc.js";
+import { seedCyclicModuleExports } from "./cyclic-export-seeds.js";
 
 export type AnalyzeModuleSemanticsOptions = {
   graph: ModuleGraph;
@@ -190,6 +191,21 @@ const analyzeCyclicScc = ({
   effectInterner: ReturnType<typeof createEffectInterner>;
   isCancelled: (() => boolean) | undefined;
 }) => {
+  const seedErrorByModuleId = new Map<string, string>();
+  const seededCycleExports = seedCyclicModuleExports({
+    graph,
+    moduleIds,
+    includeTests,
+    onSeedError: ({ module, error }) => {
+      if (seedErrorByModuleId.has(module.id)) {
+        return;
+      }
+      seedErrorByModuleId.set(
+        module.id,
+        error instanceof Error ? error.message : String(error),
+      );
+    },
+  });
   const firstPassSemantics = new Map<string, SemanticsPipelineResult>();
   const firstPassExports = new Map<string, ModuleExportTable>();
   const secondPassSemantics = new Map<string, SemanticsPipelineResult>();
@@ -202,10 +218,14 @@ const analyzeCyclicScc = ({
       moduleId,
       includeTests,
       recoverFromTypingErrors: true,
+      allowMissingDependencySemantics: true,
       cycleModuleIdsByModuleId,
       graph,
       semantics: mergeWithOverrides({ base: semantics, overrides: firstPassSemantics }),
-      exports: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
+      exports: mergeWithOverrides({
+        base: mergeWithOverrides({ base: exports, overrides: seededCycleExports }),
+        overrides: firstPassExports,
+      }),
       arena,
       effectInterner,
       isCancelled,
@@ -247,12 +267,38 @@ const analyzeCyclicScc = ({
     semantics.set(moduleId, result);
     exports.set(moduleId, result.exports);
   });
+
+  seedErrorByModuleId.forEach((message, moduleId) => {
+    const module = graph.modules.get(moduleId);
+    if (!module) {
+      return;
+    }
+    const file = moduleDiagnosticFilePath(module);
+    const alreadyReported = diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === "TY9999" && diagnostic.span?.file === file,
+    );
+    if (alreadyReported) {
+      return;
+    }
+    diagnostics.push(
+      diagnosticFromCode({
+        code: "TY9999",
+        params: {
+          kind: "unexpected-error",
+          message: `failed to seed cyclic exports for ${moduleId}: ${message}`,
+        },
+        span: { file, start: 0, end: 0 },
+      }),
+    );
+  });
 };
 
 const analyzeModule = ({
   moduleId,
   includeTests,
   recoverFromTypingErrors,
+  allowMissingDependencySemantics,
   cycleModuleIdsByModuleId,
   graph,
   semantics,
@@ -265,6 +311,7 @@ const analyzeModule = ({
   moduleId: string;
   includeTests: boolean | undefined;
   recoverFromTypingErrors: boolean | undefined;
+  allowMissingDependencySemantics?: boolean;
   cycleModuleIdsByModuleId: ReadonlyMap<string, readonly string[]>;
   graph: ModuleGraph;
   semantics: Map<string, SemanticsPipelineResult>;
@@ -290,6 +337,7 @@ const analyzeModule = ({
       typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
       includeTests,
       recoverFromTypingErrors,
+      allowMissingDependencySemantics,
     });
     diagnostics?.push(
       ...augmentCycleTy0022Diagnostics({

@@ -61,6 +61,9 @@ export const resolveImportedValue = ({
 
   const dependency = ctx.dependencies.get(target.moduleId);
   if (!dependency) {
+    if (ctx.allowMissingDependencySemantics) {
+      return undefined;
+    }
     throw new Error(
       `missing semantics for imported module ${target.moduleId}`,
     );
@@ -271,6 +274,9 @@ export const resolveImportedTypeExpr = ({
 
   const dependency = ctx.dependencies.get(target.moduleId);
   if (!dependency) {
+    if (ctx.allowMissingDependencySemantics) {
+      return undefined;
+    }
     throw new Error(
       `missing semantics for imported module ${target.moduleId}`,
     );
