@@ -470,6 +470,107 @@ fn id<T: Animal>(value: T) -> T
     expect(binding.diagnostics).toHaveLength(0);
   });
 
+  it("binds module-qualified type references in signatures via module imports", () => {
+    const source = `use self::util
+
+fn main(value: util::Thing): util::Fx -> util::Thing
+  value`;
+    const ast = parse(source, "module_qualified_types.voyd");
+    const useForm = ast.rest.find(
+      (entry) => isForm(entry) && entry.calls("use")
+    ) as Form | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "module_qualified_types.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const utilPath = {
+      namespace: "src" as const,
+      segments: ["main", "util"] as const,
+    };
+    const moduleId = modulePathToString(modulePath);
+    const utilId = modulePathToString(utilPath);
+    const dependency = { kind: "use" as const, path: utilPath, span };
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "module_qualified_types.voyd" },
+      ast,
+      source,
+      dependencies: [dependency],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+
+    const exportedTypeSymbol = 177;
+    const exportedEffectSymbol = 178;
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        utilId,
+        new Map([
+          [
+            "Thing",
+            {
+              name: "Thing",
+              symbol: exportedTypeSymbol,
+              moduleId: utilId,
+              modulePath: utilPath,
+              packageId: packageIdFromPath(utilPath),
+              kind: "type",
+              visibility: packageVisibility(),
+            },
+          ],
+          [
+            "Fx",
+            {
+              name: "Fx",
+              symbol: exportedEffectSymbol,
+              moduleId: utilId,
+              modulePath: utilPath,
+              packageId: packageIdFromPath(utilPath),
+              kind: "effect",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    const utilSymbol = symbolTable.resolve("util", symbolTable.rootScope);
+    expect(typeof utilSymbol).toBe("number");
+    if (typeof utilSymbol !== "number") return;
+
+    const thingMembers = binding.moduleMembers.get(utilSymbol)?.get("Thing");
+    const fxMembers = binding.moduleMembers.get(utilSymbol)?.get("Fx");
+    expect(thingMembers?.size).toBe(1);
+    expect(fxMembers?.size).toBe(1);
+
+    const thingLocal = thingMembers ? Array.from(thingMembers)[0] : undefined;
+    const fxLocal = fxMembers ? Array.from(fxMembers)[0] : undefined;
+    const thingImport = binding.imports.find((entry) => entry.local === thingLocal);
+    const fxImport = binding.imports.find((entry) => entry.local === fxLocal);
+    expect(thingImport?.target?.moduleId).toBe(utilId);
+    expect(thingImport?.target?.symbol).toBe(exportedTypeSymbol);
+    expect(fxImport?.target?.moduleId).toBe(utilId);
+    expect(fxImport?.target?.symbol).toBe(exportedEffectSymbol);
+    expect(binding.diagnostics).toHaveLength(0);
+  });
+
   it("reports a clear diagnostic when module and value imports collide by name", () => {
     const source = "use self::compare\nuse self::compare::all";
     const ast = parse(source, "pkg.voyd");

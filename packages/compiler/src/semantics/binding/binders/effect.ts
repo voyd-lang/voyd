@@ -8,6 +8,7 @@ import { declareValueOrParameter } from "../redefinitions.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
+import { bindTypeExpr } from "./expressions.js";
 
 const declareEffectOperationParams = ({
   op,
@@ -85,6 +86,9 @@ export const bindEffectDecl = (
   const typeParameters: TypeParameterDecl[] = [];
   tracker.enterScope(effectScope, () => {
     typeParameters.push(...bindTypeParameters(decl.typeParameters, ctx));
+    decl.typeParameters.forEach((param) =>
+      bindTypeExpr(param.constraint, ctx, tracker),
+    );
   });
 
   const operations = decl.operations.map((op) => {
@@ -109,6 +113,8 @@ export const bindEffectDecl = (
     let params: ReturnType<typeof declareEffectOperationParams> = [];
     tracker.enterScope(scope, () => {
       params = declareEffectOperationParams({ op, ctx, scope });
+      params.forEach((param) => bindTypeExpr(param.typeExpr, ctx, tracker));
+      bindTypeExpr(op.returnType, ctx, tracker);
     });
 
     const moduleMembers =

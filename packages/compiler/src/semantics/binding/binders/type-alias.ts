@@ -8,7 +8,11 @@ import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { reportOverloadNameCollision, spanForDeclaredSymbol } from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
-import { ensureConstructorImport, ensureModuleMemberImport } from "./expressions.js";
+import {
+  bindTypeExpr,
+  ensureConstructorImport,
+  ensureModuleMemberImport,
+} from "./expressions.js";
 import {
   enumNamespaceMetadataFromAliasTarget,
   enumVariantTypeNamesFromAliasTarget,
@@ -81,6 +85,10 @@ export const bindTypeAlias = (
   let typeParameters: TypeParameterDecl[] = [];
   tracker.enterScope(aliasScope, () => {
     typeParameters = bindTypeParameters(decl.typeParameters, ctx);
+    decl.typeParameters.forEach((param) =>
+      bindTypeExpr(param.constraint, ctx, tracker),
+    );
+    bindTypeExpr(decl.target, ctx, tracker);
   });
 
   ctx.decls.registerTypeAlias({

@@ -96,6 +96,23 @@ export const bindExpr = (
   }
 };
 
+export const bindTypeExpr = (
+  expr: Expr | undefined,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker,
+): void => {
+  if (!expr || !isForm(expr)) return;
+
+  if (expr.calls("::")) {
+    bindTypeNamespaceAccess(expr, ctx, tracker);
+    return;
+  }
+
+  for (const child of expr.toArray()) {
+    bindTypeExpr(child, ctx, tracker);
+  }
+};
+
 const bindTry = (
   form: Form,
   ctx: BindingContext,
@@ -391,6 +408,14 @@ const bindLambda = (
     signature.parameters.forEach((param) =>
       declareLambdaParam(param, scope, ctx),
     );
+    signature.parameters.forEach((param) => {
+      if (!isForm(param)) {
+        return;
+      }
+      bindTypeExpr(param.at(2), ctx, tracker);
+    });
+    bindTypeExpr(signature.returnType, ctx, tracker);
+    bindTypeExpr(signature.effectType, ctx, tracker);
     bindExpr(bodyExpr, ctx, tracker);
   });
 };
@@ -486,18 +511,48 @@ const bindNamespaceAccess = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
+  bindNamespaceAccessCore({
+    form,
+    ctx,
+    scope: tracker.current(),
+    bindChild: (expr) => bindExpr(expr, ctx, tracker),
+  });
+};
+
+const bindTypeNamespaceAccess = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker,
+): void => {
+  bindNamespaceAccessCore({
+    form,
+    ctx,
+    scope: tracker.current(),
+    bindChild: (expr) => bindTypeExpr(expr, ctx, tracker),
+  });
+};
+
+const bindNamespaceAccessCore = ({
+  form,
+  ctx,
+  scope,
+  bindChild,
+}: {
+  form: Form;
+  ctx: BindingContext;
+  scope: ScopeId;
+  bindChild: (expr: Expr | undefined) => void;
+}): void => {
   const target = form.at(1);
   const member = form.at(2);
 
-  bindExpr(target, ctx, tracker);
-  bindExpr(member, ctx, tracker);
+  bindChild(target);
+  bindChild(member);
 
   const memberName = extractMemberName(member);
   if (!memberName) {
     return;
   }
-
-  const scope = tracker.current();
 
   const moduleSymbol = resolveNamespaceModuleSymbol(target, scope, ctx);
   if (typeof moduleSymbol === "number") {
