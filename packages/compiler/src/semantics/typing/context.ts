@@ -88,8 +88,6 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     decls,
     moduleId,
     packageId: inputs.packageId ?? "local",
-    allowMissingDependencySemantics:
-      inputs.allowMissingDependencySemantics === true,
     moduleExports,
     dependencies,
     importsByLocal,

@@ -46,7 +46,6 @@ export const createTypingContextFromTypingResult = ({
   decls,
   moduleId,
   packageId,
-  allowMissingDependencySemantics: false,
   moduleExports,
   dependencies,
   importsByLocal,

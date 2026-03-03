@@ -40,7 +40,10 @@ import {
   packageVisibility,
 } from "../../hir/index.js";
 import type { SymbolKind } from "../../binder/index.js";
-import type { ModuleExportEntry } from "../../modules.js";
+import type {
+  ModuleExportEntry,
+  ModuleExportSurfaceEntry,
+} from "../../modules.js";
 import type { SourceSpan, SymbolId } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
 import {
@@ -51,6 +54,7 @@ import {
 import { findModuleNamespaceNameCollision } from "../name-collisions.js";
 import {
   canAccessExport,
+  canAccessSymbolVisibility,
   stdPkgExportsFor,
 } from "../export-visibility.js";
 import {
@@ -641,6 +645,7 @@ const bindImportsFromModule = ({
   visibility: HirVisibility;
 }): BoundImport[] => {
   let exports = ctx.moduleExports.get(moduleId);
+  let exportSurface = ctx.moduleExportSurfaces.get(moduleId);
   const explicitlyTargetsStdSubmodule =
     explicitStdSubmoduleOverride ?? isExplicitStdSubmoduleEntry(entry);
   const isStdImport =
@@ -650,16 +655,58 @@ const bindImportsFromModule = ({
     : undefined;
   if (isStdImport && !explicitlyTargetsStdSubmodule) {
     exports = stdPkgExports;
-  }
-  if (!exports) {
-    recordImportDiagnostic({
-      params: { kind: "module-unavailable", moduleId },
-      span: entry.span,
-      ctx,
-    });
-    return [];
+    exportSurface = undefined;
   }
 
+  if (exports) {
+    return bindImportsFromExportTable({
+      moduleId,
+      entry,
+      exports,
+      explicitlyTargetsStdSubmodule,
+      ctx,
+      declaredAt,
+      visibility,
+    });
+  }
+
+  if (exportSurface) {
+    return bindImportsFromExportSurface({
+      moduleId,
+      entry,
+      exportSurface,
+      explicitlyTargetsStdSubmodule,
+      ctx,
+      declaredAt,
+      visibility,
+    });
+  }
+
+  recordImportDiagnostic({
+    params: { kind: "module-unavailable", moduleId },
+    span: entry.span,
+    ctx,
+  });
+  return [];
+};
+
+const bindImportsFromExportTable = ({
+  moduleId,
+  entry,
+  exports,
+  explicitlyTargetsStdSubmodule,
+  ctx,
+  declaredAt,
+  visibility,
+}: {
+  moduleId: string;
+  entry: ParsedUseEntry;
+  exports: Map<string, ModuleExportEntry>;
+  explicitlyTargetsStdSubmodule: boolean;
+  ctx: BindingContext;
+  declaredAt: Form;
+  visibility: HirVisibility;
+}): BoundImport[] => {
   const ownerNameFor = (exported: ModuleExportEntry): string | undefined => {
     if (typeof exported.memberOwner !== "number") {
       return undefined;
@@ -786,6 +833,96 @@ const bindImportsFromModule = ({
   }
 
   return declareImportedSymbol({
+    exported,
+    alias: entry.alias ?? targetName,
+    explicitlyTargetsStdSubmodule,
+    ctx,
+    declaredAt,
+    span: entry.span,
+    visibility,
+  });
+};
+
+const bindImportsFromExportSurface = ({
+  moduleId,
+  entry,
+  exportSurface,
+  explicitlyTargetsStdSubmodule,
+  ctx,
+  declaredAt,
+  visibility,
+}: {
+  moduleId: string;
+  entry: ParsedUseEntry;
+  exportSurface: Map<string, ModuleExportSurfaceEntry>;
+  explicitlyTargetsStdSubmodule: boolean;
+  ctx: BindingContext;
+  declaredAt: Form;
+  visibility: HirVisibility;
+}): BoundImport[] => {
+  const isAccessible = (exported: ModuleExportSurfaceEntry): boolean =>
+    canAccessSymbolVisibility({
+      visibility: exported.visibility,
+      ownerPackageId: exported.packageId,
+      importedFromModuleId: moduleId,
+      explicitlyTargetsStdSubmodule,
+      ctx,
+    });
+
+  if (entry.selectionKind === "all") {
+    return Array.from(exportSurface.values())
+      .filter((item) => isAccessible(item))
+      .flatMap((item) =>
+        declareSurfaceImportedSymbol({
+          exported: item,
+          alias: item.name,
+          explicitlyTargetsStdSubmodule,
+          ctx,
+          declaredAt,
+          span: entry.span,
+          visibility,
+        }),
+      );
+  }
+
+  const targetName = entry.targetName ?? entry.alias;
+  if (!targetName) {
+    recordImportDiagnostic({
+      params: { kind: "missing-target" },
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+
+  const exported = exportSurface.get(targetName);
+  if (!exported) {
+    if (isMacroExportedFromModule({ moduleId, targetName, ctx })) {
+      return [];
+    }
+    recordImportDiagnostic({
+      params: { kind: "missing-export", moduleId, target: targetName },
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+
+  if (!isAccessible(exported)) {
+    recordImportDiagnostic({
+      params: {
+        kind: "out-of-scope-export",
+        moduleId,
+        target: targetName,
+        visibility: exported.visibility.level,
+      },
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+
+  return declareSurfaceImportedSymbol({
     exported,
     alias: entry.alias ?? targetName,
     explicitlyTargetsStdSubmodule,
@@ -935,6 +1072,62 @@ const declareImportedSymbol = ({
   }
 
   return locals;
+};
+
+const declareSurfaceImportedSymbol = ({
+  exported,
+  alias,
+  explicitlyTargetsStdSubmodule = false,
+  ctx,
+  declaredAt,
+  span,
+  visibility,
+}: {
+  exported: ModuleExportSurfaceEntry;
+  alias: string;
+  explicitlyTargetsStdSubmodule?: boolean;
+  ctx: BindingContext;
+  declaredAt: Form;
+  span: SourceSpan;
+  visibility: HirVisibility;
+}): BoundImport[] => {
+  const importNameCollision = findModuleNamespaceNameCollision({
+    name: alias,
+    scope: ctx.symbolTable.rootScope,
+    incomingKind: exported.kind,
+    ctx,
+  });
+  if (importNameCollision) {
+    recordImportNameConflict({
+      name: alias,
+      incomingKind: exported.kind,
+      existingKind: importNameCollision.kind,
+      span,
+      previousSpan: importNameCollision.span,
+      ctx,
+    });
+    return [];
+  }
+
+  const local = ctx.symbolTable.declare({
+    name: alias,
+    kind: exported.kind,
+    declaredAt: declaredAt.syntaxId,
+    metadata: {
+      import: {
+        moduleId: exported.moduleId,
+        explicitlyTargetsStdSubmodule,
+      },
+    },
+  });
+  const bound: BoundImport = {
+    name: alias,
+    local,
+    visibility,
+    span,
+  };
+  ctx.imports.push(bound);
+  return [bound];
 };
 
 const hydrateImportedEnumAliasNamespace = ({

@@ -6,11 +6,14 @@ import {
   semanticsPipeline,
   type SemanticsPipelineResult,
 } from "../semantics/pipeline.js";
-import { ModuleExportTable } from "../semantics/modules.js";
+import type {
+  ModuleExportSurfaceTable,
+  ModuleExportTable,
+} from "../semantics/modules.js";
 import { createTypeArena } from "../semantics/typing/type-arena.js";
 import { createEffectInterner, createEffectTable } from "../semantics/effects/effect-table.js";
 import { getModuleSccGroups } from "./scc.js";
-import { seedCyclicModuleExports } from "./cyclic-export-seeds.js";
+import { collectCyclicModuleExportSurfaces } from "./cyclic-export-surfaces.js";
 
 export type AnalyzeModuleSemanticsOptions = {
   graph: ModuleGraph;
@@ -192,11 +195,11 @@ const analyzeCyclicScc = ({
   isCancelled: (() => boolean) | undefined;
 }) => {
   const seedErrorByModuleId = new Map<string, string>();
-  const seededCycleExports = seedCyclicModuleExports({
+  const cyclicExportSurfaces = collectCyclicModuleExportSurfaces({
     graph,
     moduleIds,
     includeTests,
-    onSeedError: ({ module, error }) => {
+    onSurfaceError: ({ module, error }) => {
       if (seedErrorByModuleId.has(module.id)) {
         return;
       }
@@ -218,14 +221,11 @@ const analyzeCyclicScc = ({
       moduleId,
       includeTests,
       recoverFromTypingErrors: true,
-      allowMissingDependencySemantics: true,
       cycleModuleIdsByModuleId,
       graph,
+      exportSurfaces: cyclicExportSurfaces,
       semantics: mergeWithOverrides({ base: semantics, overrides: firstPassSemantics }),
-      exports: mergeWithOverrides({
-        base: mergeWithOverrides({ base: exports, overrides: seededCycleExports }),
-        overrides: firstPassExports,
-      }),
+      exports: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
       arena,
       effectInterner,
       isCancelled,
@@ -298,9 +298,9 @@ const analyzeModule = ({
   moduleId,
   includeTests,
   recoverFromTypingErrors,
-  allowMissingDependencySemantics,
   cycleModuleIdsByModuleId,
   graph,
+  exportSurfaces,
   semantics,
   exports,
   arena,
@@ -311,9 +311,9 @@ const analyzeModule = ({
   moduleId: string;
   includeTests: boolean | undefined;
   recoverFromTypingErrors: boolean | undefined;
-  allowMissingDependencySemantics?: boolean;
   cycleModuleIdsByModuleId: ReadonlyMap<string, readonly string[]>;
   graph: ModuleGraph;
+  exportSurfaces?: Map<string, ModuleExportSurfaceTable>;
   semantics: Map<string, SemanticsPipelineResult>;
   exports: Map<string, ModuleExportTable>;
   arena: ReturnType<typeof createTypeArena>;
@@ -333,11 +333,11 @@ const analyzeModule = ({
       module,
       graph,
       exports,
+      exportSurfaces,
       dependencies: semantics,
       typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
       includeTests,
       recoverFromTypingErrors,
-      allowMissingDependencySemantics,
     });
     diagnostics?.push(
       ...augmentCycleTy0022Diagnostics({
