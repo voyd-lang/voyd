@@ -15,6 +15,7 @@ import {
 } from "@voyd/lib/binaryen-gc/index.js";
 import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../../rtt/index.js";
 import { traitDispatchHash } from "../../trait-dispatch-key.js";
+import { isTraitDispatchMethodEffectful } from "../../trait-dispatch-abi.js";
 import {
   getExprBinaryenType,
   getFunctionRefType,
@@ -91,12 +92,21 @@ export const compileTraitDispatchCall = ({
 
   const receiverIndex = hiddenParamOffsetFor(meta);
   const userParamTypes = meta.paramTypes.slice(receiverIndex + 1);
-  const wrapperParamTypes = meta.effectful
+  const dispatchEffectful =
+    meta.effectful ||
+    isTraitDispatchMethodEffectful({
+      traitSymbol: mapping.traitSymbol,
+      traitMethodSymbol: mapping.traitMethodSymbol,
+      ctx,
+    });
+  const wrapperParamTypes = dispatchEffectful
     ? [handlerType(ctx), ctx.rtt.baseType, ...userParamTypes]
     : [ctx.rtt.baseType, ...userParamTypes];
   const fnRefType = getFunctionRefType({
     params: wrapperParamTypes,
-    result: meta.resultType,
+    result: dispatchEffectful
+      ? ctx.effectsBackend.abi.effectfulResultType(ctx)
+      : meta.resultType,
     ctx,
     label: "trait_method",
   });
@@ -167,17 +177,19 @@ export const compileTraitDispatchCall = ({
     }),
   ];
 
-  const callArgs = meta.effectful
+  const callArgs = dispatchEffectful
     ? [currentHandlerValue(ctx, fnCtx), ...args]
     : args;
   const callExpr = callRef(
     ctx.mod,
     target,
     callArgs as number[],
-    meta.resultType
+    dispatchEffectful
+      ? ctx.effectsBackend.abi.effectfulResultType(ctx)
+      : meta.resultType
   );
 
-  const lowered = meta.effectful
+  const lowered = dispatchEffectful
     ? ctx.effectsBackend.lowerEffectfulCallResult({
         callExpr,
         callId: expr.id,

@@ -922,6 +922,11 @@ describe("next codegen", () => {
     expect(main()).toBe(17);
   });
 
+  it("dispatches trait objects with mixed pure/effectful impl ABIs", () => {
+    const main = loadMain("trait_object_dispatch_mixed_effects.voyd");
+    expect(main()).toBe(18);
+  });
+
   it("emits wasm for impl methods on nominal objects", () => {
     const main = loadMain("impl_methods.voyd");
     expect(main()).toBe(4);
