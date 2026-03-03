@@ -211,8 +211,10 @@ const analyzeCyclicScc = ({
   });
   const firstPassSemantics = new Map<string, SemanticsPipelineResult>();
   const firstPassExports = new Map<string, ModuleExportTable>();
-  const secondPassSemantics = new Map<string, SemanticsPipelineResult>();
-  const secondPassExports = new Map<string, ModuleExportTable>();
+  const stabilizationSemantics = new Map<string, SemanticsPipelineResult>();
+  const stabilizationExports = new Map<string, ModuleExportTable>();
+  const finalPassSemantics = new Map<string, SemanticsPipelineResult>();
+  const finalPassExports = new Map<string, ModuleExportTable>();
 
   moduleIds.forEach((moduleId) => {
     throwIfCancelled(isCancelled);
@@ -243,16 +245,44 @@ const analyzeCyclicScc = ({
     const result = analyzeModule({
       moduleId,
       includeTests,
-      recoverFromTypingErrors,
+      recoverFromTypingErrors: true,
       cycleModuleIdsByModuleId,
       graph,
       semantics: mergeWithOverrides({
         base: mergeWithOverrides({ base: semantics, overrides: firstPassSemantics }),
-        overrides: secondPassSemantics,
+        overrides: stabilizationSemantics,
       }),
       exports: mergeWithOverrides({
         base: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
-        overrides: secondPassExports,
+        overrides: stabilizationExports,
+      }),
+      arena,
+      effectInterner,
+      isCancelled,
+    });
+    if (!result) {
+      return;
+    }
+    stabilizationSemantics.set(moduleId, result);
+    stabilizationExports.set(moduleId, result.exports);
+  });
+
+  moduleIds.forEach((moduleId) => {
+    throwIfCancelled(isCancelled);
+
+    const result = analyzeModule({
+      moduleId,
+      includeTests,
+      recoverFromTypingErrors,
+      cycleModuleIdsByModuleId,
+      graph,
+      semantics: mergeWithOverrides({
+        base: mergeWithOverrides({ base: semantics, overrides: stabilizationSemantics }),
+        overrides: finalPassSemantics,
+      }),
+      exports: mergeWithOverrides({
+        base: mergeWithOverrides({ base: exports, overrides: stabilizationExports }),
+        overrides: finalPassExports,
       }),
       arena,
       effectInterner,
@@ -262,8 +292,8 @@ const analyzeCyclicScc = ({
     if (!result) {
       return;
     }
-    secondPassSemantics.set(moduleId, result);
-    secondPassExports.set(moduleId, result.exports);
+    finalPassSemantics.set(moduleId, result);
+    finalPassExports.set(moduleId, result.exports);
     semantics.set(moduleId, result);
     exports.set(moduleId, result.exports);
   });

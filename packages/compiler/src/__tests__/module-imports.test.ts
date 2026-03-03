@@ -195,6 +195,206 @@ describe("module imports", () => {
     expect(combinedDiagnostics).toHaveLength(0);
   });
 
+  it("supports constructor calls imported through cyclic trait/object modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: [
+        "use src::hit::HitRecord",
+        "",
+        "pub fn main() -> i32",
+        "  HitRecord()",
+        "  0",
+      ].join("\n"),
+      [`${root}${sep}hit.voyd`]: [
+        "use src::material::{ Material, Lambertian }",
+        "use src::color::Color",
+        "",
+        "pub obj HitRecord {",
+        "  mat: Material",
+        "}",
+        "",
+        "impl HitRecord",
+        "  fn init()",
+        "    HitRecord { mat: Lambertian(Color()) }",
+      ].join("\n"),
+      [`${root}${sep}material.voyd`]: [
+        "use src::hit::HitRecord",
+        "use src::color::Color",
+        "",
+        "pub trait Material",
+        "  fn scatter(self, { rec: HitRecord }) -> bool",
+        "",
+        "pub obj Lambertian {",
+        "  albedo: Color",
+        "}",
+        "",
+        "impl Material for Lambertian",
+        "  fn init(albedo: Color)",
+        "    Lambertian { albedo }",
+        "",
+        "  fn scatter(self, { rec: HitRecord }) -> bool",
+        "    true",
+      ].join("\n"),
+      [`${root}${sep}color.voyd`]: [
+        "pub obj Color {",
+        "  value: i32",
+        "}",
+        "",
+        "impl Color",
+        "  fn init()",
+        "    Color { value: 0 }",
+      ].join("\n"),
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    if (combinedDiagnostics.length > 0) {
+      throw new Error(
+        JSON.stringify(
+          combinedDiagnostics.map((diag) => ({
+            code: diag.code,
+            message: diag.message,
+          })),
+        ),
+      );
+    }
+    expect(combinedDiagnostics).toHaveLength(0);
+  });
+
+  it("supports constructor calls across 3-module cyclic SCCs", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: [
+        "use src::a::HitRecord",
+        "",
+        "pub fn main() -> i32",
+        "  HitRecord()",
+        "  0",
+      ].join("\n"),
+      [`${root}${sep}a.voyd`]: [
+        "use src::b::{ Material, Lambertian }",
+        "use src::color::Color",
+        "",
+        "pub obj HitRecord {",
+        "  mat: Material",
+        "}",
+        "",
+        "impl HitRecord",
+        "  fn init()",
+        "    HitRecord { mat: Lambertian(Color()) }",
+      ].join("\n"),
+      [`${root}${sep}b.voyd`]: [
+        "use src::c::HitAlias",
+        "use src::color::Color",
+        "",
+        "pub trait Material",
+        "  fn scatter(self, { rec: HitAlias }) -> bool",
+        "",
+        "pub obj Lambertian {",
+        "  albedo: Color",
+        "}",
+        "",
+        "impl Material for Lambertian",
+        "  fn init(albedo: Color)",
+        "    Lambertian { albedo }",
+        "",
+        "  fn scatter(self, { rec: HitAlias }) -> bool",
+        "    true",
+      ].join("\n"),
+      [`${root}${sep}c.voyd`]: [
+        "use src::a::HitRecord",
+        "",
+        "pub type HitAlias = HitRecord",
+      ].join("\n"),
+      [`${root}${sep}color.voyd`]: [
+        "pub obj Color {",
+        "  value: i32",
+        "}",
+        "",
+        "impl Color",
+        "  fn init()",
+        "    Color { value: 0 }",
+      ].join("\n"),
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    if (combinedDiagnostics.length > 0) {
+      throw new Error(
+        JSON.stringify(
+          combinedDiagnostics.map((diag) => ({
+            code: diag.code,
+            message: diag.message,
+          })),
+        ),
+      );
+    }
+    expect(combinedDiagnostics).toHaveLength(0);
+  });
+
+  it("retains cyclic semantics in recover mode without missing-module cascades", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: [
+        "use src::a::A",
+        "",
+        "pub fn main() -> i32",
+        "  A()",
+      ].join("\n"),
+      [`${root}${sep}a.voyd`]: [
+        "use src::b::B",
+        "",
+        "pub obj A {",
+        "  peer: B",
+        "}",
+      ].join("\n"),
+      [`${root}${sep}b.voyd`]: [
+        "use src::a::A",
+        "",
+        "pub trait B",
+        "  fn bad(self, a: A) -> i32",
+        "",
+        "pub fn boom() -> i32",
+        "  missing()",
+      ].join("\n"),
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics, semantics } = analyzeModules({
+      graph,
+      recoverFromTypingErrors: true,
+    });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+
+    expect(semantics.has("src::a")).toBe(true);
+    expect(semantics.has("src::b")).toBe(true);
+    expect(combinedDiagnostics.some((diag) => diag.code === "TY0006")).toBe(true);
+    expect(
+      combinedDiagnostics.some(
+        (diag) =>
+          diag.code === "TY9999" &&
+          /missing semantics for imported module/i.test(diag.message),
+      ),
+    ).toBe(false);
+  });
+
   it("resolves std module imports without explicit self selectors", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
