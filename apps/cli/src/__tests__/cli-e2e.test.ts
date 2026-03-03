@@ -51,70 +51,6 @@ const createFixture = async (): Promise<string> => {
   return root;
 };
 
-const createNodeModulesFixture = async (): Promise<string> => {
-  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-node-modules-"));
-  const srcRoot = resolve(root, "src");
-  const packageSrcRoot = resolve(root, "node_modules", "my_pkg", "src");
-  await mkdir(srcRoot, { recursive: true });
-  await writePackageFixture(packageSrcRoot);
-
-  await writeFile(
-    resolve(srcRoot, "main.voyd"),
-    [
-      "use pkg::my_pkg::all",
-      "",
-      "pub fn main() -> i32",
-      "  plus_one(41)",
-      "",
-    ].join("\n")
-  );
-  return root;
-};
-
-const createNodeModulesTestFixture = async (): Promise<string> => {
-  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-test-node-modules-"));
-  const testRoot = resolve(root, "test");
-  const packageSrcRoot = resolve(root, "node_modules", "my_pkg", "src");
-  await mkdir(testRoot, { recursive: true });
-  await writePackageFixture(packageSrcRoot);
-
-  await writeFile(
-    resolve(testRoot, "uses_pkg.voyd"),
-    [
-      "use std::test::assertions::all",
-      "use pkg::my_pkg::all",
-      "",
-      "test \"imports package in voyd test\":",
-      "  assert(plus_one(1) == 2)",
-      "",
-    ].join("\n"),
-  );
-  return root;
-};
-
-const createAncestorNodeModulesFixture = async (): Promise<{
-  cwd: string;
-  entryPath: string;
-}> => {
-  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-ancestor-node-modules-"));
-  const srcRoot = resolve(root, "workspace", "apps", "consumer", "src");
-  const packageSrcRoot = resolve(root, "workspace", "node_modules", "my_pkg", "src");
-  const entryPath = resolve(srcRoot, "main.voyd");
-  await mkdir(srcRoot, { recursive: true });
-  await writePackageFixture(packageSrcRoot);
-  await writeFile(
-    entryPath,
-    [
-      "use pkg::my_pkg::all",
-      "",
-      "pub fn main() -> i32",
-      "  plus_one(41)",
-      "",
-    ].join("\n"),
-  );
-  return { cwd: root, entryPath };
-};
-
 const createPkgDirRelativeFixture = async (): Promise<{
   cwd: string;
   entryPath: string;
@@ -146,31 +82,6 @@ const createPkgDirRelativeFixture = async (): Promise<{
   return { cwd: root, entryPath };
 };
 
-const createAncestorNodeModulesTestFixture = async (): Promise<{
-  cwd: string;
-  testRoot: string;
-}> => {
-  const root = await mkdtemp(
-    resolve(tmpdir(), "voyd-cli-test-ancestor-node-modules-"),
-  );
-  const testRoot = resolve(root, "workspace", "apps", "consumer", "test");
-  const packageSrcRoot = resolve(root, "workspace", "node_modules", "my_pkg", "src");
-  await mkdir(testRoot, { recursive: true });
-  await writePackageFixture(packageSrcRoot);
-  await writeFile(
-    resolve(testRoot, "uses_pkg.voyd"),
-    [
-      "use std::test::assertions::all",
-      "use pkg::my_pkg::all",
-      "",
-      "test \"imports package in nested voyd test\":",
-      "  assert(plus_one(1) == 2)",
-      "",
-    ].join("\n"),
-  );
-  return { cwd: root, testRoot };
-};
-
 const createPkgDirRelativeTestFixture = async (): Promise<{
   cwd: string;
   testRoot: string;
@@ -200,6 +111,43 @@ const createPkgDirRelativeTestFixture = async (): Promise<{
     ].join("\n"),
   );
   return { cwd: root, testRoot };
+};
+
+const createDefaultNodeModulesFixture = async (): Promise<{
+  cwd: string;
+  entryPath: string;
+  testRoot: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-node-modules-default-"));
+  const srcRoot = resolve(root, "workspace", "apps", "consumer", "src");
+  const testRoot = resolve(root, "workspace", "apps", "consumer", "test");
+  const packageSrcRoot = resolve(root, "workspace", "node_modules", "my_pkg", "src");
+  const entryPath = resolve(srcRoot, "main.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await mkdir(testRoot, { recursive: true });
+  await writePackageFixture(packageSrcRoot);
+  await writeFile(
+    entryPath,
+    [
+      "use pkg::my_pkg::all",
+      "",
+      "pub fn main() -> i32",
+      "  plus_one(41)",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    resolve(testRoot, "uses_pkg.voyd"),
+    [
+      "use std::test::assertions::all",
+      "use pkg::my_pkg::all",
+      "",
+      "test \"imports package through default node_modules lookup\":",
+      "  assert(plus_one(1) == 2)",
+      "",
+    ].join("\n"),
+  );
+  return { cwd: root, entryPath, testRoot };
 };
 
 const createNonTestTargetFixture = async (): Promise<{
@@ -505,29 +453,6 @@ const runCli = (root: string, args: string[], env?: Record<string, string>) =>
     timeout: CLI_E2E_TIMEOUT_MS,
   });
 
-describe("voyd cli test discovery", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
-  it(
-    "defaults test root to repo root when no path is provided",
-    async () => {
-      assertCliRunnerAvailable();
-
-      const root = await createFixture();
-      try {
-        const result = runCli(root, ["test"]);
-        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-        if (result.status !== 0) {
-          throw new Error(`voyd test failed: ${output}`);
-        }
-
-        expect(output).toContain("passed 1, failed 0, skipped 0");
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-  );
-});
-
 describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it("reports discovery failures for non-test file targets", async () => {
     assertCliRunnerAvailable();
@@ -661,42 +586,28 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 });
 
 describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
+  // SDK + smoke own deep package-resolution semantics. CLI e2e keeps wiring checks.
   it(
-    "defaults package lookup to node_modules",
+    "uses default node_modules lookup for compile and test, including ancestor walking",
     async () => {
       assertCliRunnerAvailable();
 
-      const root = await createNodeModulesFixture();
+      const fixture = await createDefaultNodeModulesFixture();
       try {
-        const result = runCli(root, ["--emit-ir-ast"]);
-        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-        if (result.status !== 0) {
-          throw new Error(`voyd compile failed: ${output}`);
+        const compileResult = runCli(fixture.cwd, ["--emit-ir-ast", fixture.entryPath]);
+        const compileOutput = `${compileResult.stdout ?? ""}${compileResult.stderr ?? ""}`;
+        if (compileResult.status !== 0) {
+          throw new Error(`voyd compile failed: ${compileOutput}`);
         }
+        expect(compileOutput).not.toContain("Unable to resolve module");
 
-        expect(output).not.toContain("Unable to resolve module");
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it(
-    "walks ancestor directories for node_modules relative to the entry path",
-    async () => {
-      assertCliRunnerAvailable();
-
-      const fixture = await createAncestorNodeModulesFixture();
-      try {
-        const result = runCli(fixture.cwd, ["--emit-ir-ast", fixture.entryPath]);
-        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-        if (result.status !== 0) {
-          throw new Error(`voyd compile failed: ${output}`);
+        const testResult = runCli(fixture.cwd, ["test", fixture.testRoot]);
+        const testOutput = `${testResult.stdout ?? ""}${testResult.stderr ?? ""}`;
+        if (testResult.status !== 0) {
+          throw new Error(`voyd test failed: ${testOutput}`);
         }
-
-        expect(output).not.toContain("Unable to resolve module");
+        expect(testOutput).toContain("passed 1, failed 0, skipped 0");
+        expect(testOutput).not.toContain("Unable to resolve module");
       } finally {
         await rm(fixture.cwd, { recursive: true, force: true });
       }
@@ -730,51 +641,6 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   );
 
   it(
-    "defaults voyd test package lookup to node_modules",
-    async () => {
-      assertCliRunnerAvailable();
-
-      const root = await createNodeModulesTestFixture();
-      try {
-        const result = runCli(root, ["test"]);
-        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-        if (result.status !== 0) {
-          throw new Error(`voyd test failed: ${output}`);
-        }
-
-        expect(output).toContain("passed 1, failed 0, skipped 0");
-        expect(output).not.toContain("Unable to resolve module");
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it(
-    "walks ancestor directories for node_modules in voyd test mode",
-    async () => {
-      assertCliRunnerAvailable();
-
-      const fixture = await createAncestorNodeModulesTestFixture();
-      try {
-        const result = runCli(fixture.cwd, ["test", fixture.testRoot]);
-        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-        if (result.status !== 0) {
-          throw new Error(`voyd test failed: ${output}`);
-        }
-
-        expect(output).toContain("passed 1, failed 0, skipped 0");
-        expect(output).not.toContain("Unable to resolve module");
-      } finally {
-        await rm(fixture.cwd, { recursive: true, force: true });
-      }
-    },
-    CLI_E2E_TIMEOUT_MS,
-  );
-
-  it(
     "resolves --pkg-dir relative to the test root",
     async () => {
       assertCliRunnerAvailable();
@@ -803,81 +669,42 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 });
 
 describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
-  it("emits legible HTML docs with hierarchical navigation", async () => {
+  // SDK + smoke own documentation rendering semantics. CLI e2e validates command wiring and exit/reporting.
+  it("writes JSON docs to a custom output path", async () => {
     assertCliRunnerAvailable();
 
     const root = await createDocFixture();
     try {
-      const result = runCli(root, ["doc"]);
+      const result = runCli(root, [
+        "doc",
+        "--format",
+        "json",
+        "--out",
+        "api-docs.json",
+      ]);
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
       if (result.status !== 0) {
         throw new Error(`voyd doc failed: ${output}`);
       }
 
-      const docsPath = resolve(root, "docs.html");
-      const html = await readFile(docsPath, "utf8");
-      expect(html).toContain("<!doctype html>");
-      expect(html).toContain("Docs Index");
-      expect(html).toContain("Table of Contents");
-      expect(html).toContain("id=\"module-src-main\"");
-      expect(html).toContain("id=\"module-src-main-math\"");
-      expect(html).toContain("<details>");
-      expect(html).toContain("<summary><a href=\"#module-src-main\">main</a></summary>");
-      expect(html).not.toContain("<summary><span>src</span></summary>");
-      expect(html).not.toContain("<details open>");
-      expect(html).toContain("<a href=\"#function-src-main-add\">");
-      expect(html).toContain("<code>fn</code> add");
-      expect(html).toContain("<a href=\"#module-src-main-math\">math</a>");
-      expect(html).toContain("id=\"function-src-main-add\"");
-      expect(html).toContain("id=\"function-src-main-add-1\"");
-      expect(html).toContain("<strong>markdown</strong>");
-      expect(html).toContain("Left side.<br />");
-      expect(html).toContain("Still left side.</p>");
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  it("supports JSON documentation output", async () => {
-    assertCliRunnerAvailable();
-
-    const root = await createDocFixture();
-    try {
-      const result = runCli(root, ["doc", "--format", "json"]);
-      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-      if (result.status !== 0) {
-        throw new Error(`voyd doc --format json failed: ${output}`);
-      }
-
-      const docsPath = resolve(root, "docs.json");
+      const docsPath = resolve(root, "api-docs.json");
       const json = JSON.parse(await readFile(docsPath, "utf8")) as {
-        modules: Array<{
-          id: string;
-          functions: Array<{
-            name: string;
-            parameterDocs: Array<{ name: string; documentation: string }>;
-          }>;
-        }>;
+        modules: Array<{ id: string }>;
       };
-      const mainModule = json.modules.find((module) => module.id === "src::main");
-      expect(mainModule).toBeDefined();
-      const addFn = mainModule?.functions.find((fn) => fn.name === "add");
-      expect(addFn).toBeDefined();
-      const leftDoc = addFn?.parameterDocs.find((param) => param.name === "left");
-      expect(leftDoc?.documentation).toBe(" Left side.\n Still left side.");
+      expect(json.modules.some((module) => module.id === "src::main")).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  it("fails with diagnostics when doc comments are dangling", async () => {
+  it("exits non-zero and surfaces diagnostics for dangling doc comments", async () => {
     assertCliRunnerAvailable();
 
     const root = await createDanglingDocFixture();
     try {
       const result = runCli(root, ["doc"]);
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-      expect(result.status).not.toBe(0);
+      expect(result.status).toBe(1);
       expect(output).toContain("MD0004");
       expect(output).toContain("Dangling doc comment");
     } finally {

@@ -6,10 +6,14 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Buffer } from "node:buffer";
 
-type SmokeRunner = () => Promise<number>;
+type KitchenSinkResult = {
+  compilerSize: number;
+  vsxSize: number;
+};
+
+type SmokeRunner = () => Promise<KitchenSinkResult>;
 
 type BrowserContext = {
-  __voydBrowserSmoke__?: SmokeRunner;
   globalThis: BrowserContext;
   window: BrowserContext;
   self: BrowserContext;
@@ -58,7 +62,13 @@ const createBrowserContext = (): BrowserContext => {
 };
 
 describe("browser bundle smoke", () => {
-  const bundleAndRun = async (entryUrl: URL) => {
+  const bundleAndRun = async ({
+    entryUrl,
+    runnerExportName,
+  }: {
+    entryUrl: URL;
+    runnerExportName: string;
+  }): Promise<KitchenSinkResult> => {
     const entry = fileURLToPath(entryUrl);
     const outDir = await mkdtemp(join(tmpdir(), "voyd-browser-"));
 
@@ -112,8 +122,6 @@ describe("browser bundle smoke", () => {
         process: globalThis.process,
         btoa: globalThis.btoa,
         atob: globalThis.atob,
-        __voydBrowserSmoke__: (globalThis as { __voydBrowserSmoke__?: SmokeRunner })
-          .__voydBrowserSmoke__,
       };
       Object.assign(globalThis, {
         window: globalThis,
@@ -131,12 +139,13 @@ describe("browser bundle smoke", () => {
       });
 
       try {
-        await import(pathToFileURL(bundlePath).href);
-
-        const runner = (globalThis as { __voydBrowserSmoke__?: SmokeRunner })
-          .__voydBrowserSmoke__;
+        const bundleModule = await import(pathToFileURL(bundlePath).href) as Record<
+          string,
+          unknown
+        >;
+        const runner = bundleModule[runnerExportName];
         expect(typeof runner).toBe("function");
-        return runner!();
+        return (runner as SmokeRunner)();
       } finally {
         Object.assign(globalThis, previous);
       }
@@ -145,17 +154,15 @@ describe("browser bundle smoke", () => {
     }
   };
 
-  it("bundles and runs the browser compiler", { timeout: 60000 }, async () => {
-    const size = await bundleAndRun(
-      new URL("./__fixtures__/browser-bundle-entry.ts", import.meta.url),
-    );
-    expect(size).toBeGreaterThan(0);
-  });
-
-  it("bundles and compiles vsx lambdas", { timeout: 60000 }, async () => {
-    const size = await bundleAndRun(
-      new URL("./__fixtures__/browser-bundle-vsx-entry.ts", import.meta.url),
-    );
-    expect(size).toBeGreaterThan(0);
+  it("bundles and runs compiler + vsx browser smoke in one build", { timeout: 60000 }, async () => {
+    const result = await bundleAndRun({
+      entryUrl: new URL(
+        "./__fixtures__/browser-bundle-kitchen-sink-entry.ts",
+        import.meta.url,
+      ),
+      runnerExportName: "runBrowserKitchenSinkSmoke",
+    });
+    expect(result.compilerSize).toBeGreaterThan(0);
+    expect(result.vsxSize).toBeGreaterThan(0);
   });
 });
