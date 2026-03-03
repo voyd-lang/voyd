@@ -56,6 +56,55 @@ describe("module imports", () => {
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
   });
 
+  it("supports cyclic imports for declaration surfaces", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: [
+        "use src::a::all",
+        "use src::b::all",
+        "",
+        "pub fn main() -> i32",
+        "  takes_b(B {}) + takes_a(A {})",
+      ].join("\n"),
+      [`${root}${sep}a.voyd`]: [
+        "use src::b::B",
+        "",
+        "pub obj A {}",
+        "",
+        "pub fn takes_b(_value: B) -> i32",
+        "  1",
+      ].join("\n"),
+      [`${root}${sep}b.voyd`]: [
+        "use src::a::A",
+        "",
+        "pub obj B {}",
+        "",
+        "pub fn takes_a(_value: A) -> i32",
+        "  2",
+      ].join("\n"),
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    if (combinedDiagnostics.length > 0) {
+      throw new Error(
+        JSON.stringify(
+          combinedDiagnostics.map((diag) => ({
+            code: diag.code,
+            message: diag.message,
+          })),
+        ),
+      );
+    }
+    expect(combinedDiagnostics).toHaveLength(0);
+  });
+
   it("resolves std module imports without explicit self selectors", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

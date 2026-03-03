@@ -6,7 +6,10 @@ import type {
 import { DeclTable } from "../decls.js";
 import type { Syntax } from "../../parser/index.js";
 import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
-import type { ModuleExportTable } from "../modules.js";
+import type {
+  ModuleExportSurfaceTable,
+  ModuleExportTable,
+} from "../modules.js";
 import { isPackageRootModule, packageIdFromPath } from "../packages.js";
 
 export const createBindingContext = ({
@@ -15,6 +18,7 @@ export const createBindingContext = ({
   module,
   graph,
   moduleExports,
+  moduleExportSurfaces,
   dependencies,
   includeTests,
 }: BindingInputs): BindingContext => {
@@ -39,6 +43,8 @@ export const createBindingContext = ({
       diagnostics: [],
     } as ModuleGraph);
   const exportTables = moduleExports ?? new Map<string, ModuleExportTable>();
+  const exportSurfaceTables =
+    moduleExportSurfaces ?? new Map<string, ModuleExportSurfaceTable>();
   const dependencyBindings = dependencies ?? new Map<string, BindingResult>();
 
   const decls = new DeclTable();
@@ -64,6 +70,7 @@ export const createBindingContext = ({
       sourcePackageRoot: moduleNode.sourcePackageRoot,
     }),
     moduleExports: exportTables,
+    moduleExportSurfaces: exportSurfaceTables,
     dependencies: dependencyBindings,
     uses: [],
     imports: [],

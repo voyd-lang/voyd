@@ -6,10 +6,14 @@ import {
   semanticsPipeline,
   type SemanticsPipelineResult,
 } from "../semantics/pipeline.js";
-import { ModuleExportTable } from "../semantics/modules.js";
+import type {
+  ModuleExportSurfaceTable,
+  ModuleExportTable,
+} from "../semantics/modules.js";
 import { createTypeArena } from "../semantics/typing/type-arena.js";
 import { createEffectInterner, createEffectTable } from "../semantics/effects/effect-table.js";
 import { getModuleSccGroups } from "./scc.js";
+import { collectCyclicModuleExportSurfaces } from "./cyclic-export-surfaces.js";
 
 export type AnalyzeModuleSemanticsOptions = {
   graph: ModuleGraph;
@@ -190,6 +194,21 @@ const analyzeCyclicScc = ({
   effectInterner: ReturnType<typeof createEffectInterner>;
   isCancelled: (() => boolean) | undefined;
 }) => {
+  const seedErrorByModuleId = new Map<string, string>();
+  const cyclicExportSurfaces = collectCyclicModuleExportSurfaces({
+    graph,
+    moduleIds,
+    includeTests,
+    onSurfaceError: ({ module, error }) => {
+      if (seedErrorByModuleId.has(module.id)) {
+        return;
+      }
+      seedErrorByModuleId.set(
+        module.id,
+        error instanceof Error ? error.message : String(error),
+      );
+    },
+  });
   const firstPassSemantics = new Map<string, SemanticsPipelineResult>();
   const firstPassExports = new Map<string, ModuleExportTable>();
   const secondPassSemantics = new Map<string, SemanticsPipelineResult>();
@@ -204,6 +223,7 @@ const analyzeCyclicScc = ({
       recoverFromTypingErrors: true,
       cycleModuleIdsByModuleId,
       graph,
+      exportSurfaces: cyclicExportSurfaces,
       semantics: mergeWithOverrides({ base: semantics, overrides: firstPassSemantics }),
       exports: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
       arena,
@@ -247,6 +267,31 @@ const analyzeCyclicScc = ({
     semantics.set(moduleId, result);
     exports.set(moduleId, result.exports);
   });
+
+  seedErrorByModuleId.forEach((message, moduleId) => {
+    const module = graph.modules.get(moduleId);
+    if (!module) {
+      return;
+    }
+    const file = moduleDiagnosticFilePath(module);
+    const alreadyReported = diagnostics.some(
+      (diagnostic) =>
+        diagnostic.code === "TY9999" && diagnostic.span?.file === file,
+    );
+    if (alreadyReported) {
+      return;
+    }
+    diagnostics.push(
+      diagnosticFromCode({
+        code: "TY9999",
+        params: {
+          kind: "unexpected-error",
+          message: `failed to seed cyclic exports for ${moduleId}: ${message}`,
+        },
+        span: { file, start: 0, end: 0 },
+      }),
+    );
+  });
 };
 
 const analyzeModule = ({
@@ -255,6 +300,7 @@ const analyzeModule = ({
   recoverFromTypingErrors,
   cycleModuleIdsByModuleId,
   graph,
+  exportSurfaces,
   semantics,
   exports,
   arena,
@@ -267,6 +313,7 @@ const analyzeModule = ({
   recoverFromTypingErrors: boolean | undefined;
   cycleModuleIdsByModuleId: ReadonlyMap<string, readonly string[]>;
   graph: ModuleGraph;
+  exportSurfaces?: Map<string, ModuleExportSurfaceTable>;
   semantics: Map<string, SemanticsPipelineResult>;
   exports: Map<string, ModuleExportTable>;
   arena: ReturnType<typeof createTypeArena>;
@@ -286,6 +333,7 @@ const analyzeModule = ({
       module,
       graph,
       exports,
+      exportSurfaces,
       dependencies: semantics,
       typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
       includeTests,

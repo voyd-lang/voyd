@@ -12,6 +12,7 @@ export const runBindingPipeline = ({
   module,
   graph,
   moduleExports,
+  moduleExportSurfaces,
   dependencies,
   includeTests,
 }: BindingInputs): BindingResult => {
@@ -21,6 +22,7 @@ export const runBindingPipeline = ({
     module,
     graph,
     moduleExports,
+    moduleExportSurfaces,
     dependencies,
     includeTests,
   });
