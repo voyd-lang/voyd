@@ -69,20 +69,20 @@ impl FetchRequest
     )
 
   /// Builds a `GET` request.
-  api fn get(url: String) -> FetchRequest
+  api fn from_get(url: String) -> FetchRequest
     FetchRequest::init(method: http_get_method(), url: url)
 
   /// Builds a `GET` request.
-  api fn get(url: StringSlice) -> FetchRequest
-    FetchRequest::get(url.to_string())
+  api fn from_get(url: StringSlice) -> FetchRequest
+    FetchRequest::from_get(url.to_string())
 
   /// Builds a `POST` request with a text body.
-  api fn post({ url: String, body: String }) -> FetchRequest
+  api fn from_post({ url: String, body: String }) -> FetchRequest
     FetchRequest::init(method: http_post_method(), url: url).with_body(body)
 
   /// Builds a `POST` request with a text body.
-  api fn post({ url: StringSlice, body: StringSlice }) -> FetchRequest
-    FetchRequest::post(url: url.to_string(), body: body.to_string())
+  api fn from_post({ url: StringSlice, body: StringSlice }) -> FetchRequest
+    FetchRequest::from_post(url: url.to_string(), body: body.to_string())
 
   /// Returns a copy with one header appended.
   api fn with_header(self, { name: String, value: String }) -> FetchRequest
@@ -271,7 +271,7 @@ pub fn request_with({
 /// Example:
 /// `let response = fetch::request_get("https://voyd.dev".as_slice())`
 pub fn get(url: String): Fetch -> Result<FetchResponse, HostError>
-  request(request: FetchRequest::get(url))
+  request(request: FetchRequest::from_get(url))
 
 /// Sends a `GET` request.
 pub fn get(url: StringSlice): Fetch -> Result<FetchResponse, HostError>
@@ -290,7 +290,7 @@ pub fn request_get(url: StringSlice): Fetch -> Result<FetchResponse, HostError>
 
 /// Sends a `POST` request with a text body.
 pub fn post({ url: String, body: String }): Fetch -> Result<FetchResponse, HostError>
-  request(request: FetchRequest::post(url: url, body: body))
+  request(request: FetchRequest::from_post(url: url, body: body))
 
 /// Sends a `POST` request with a text body.
 pub fn post({ url: StringSlice, body: StringSlice }): Fetch -> Result<FetchResponse, HostError>

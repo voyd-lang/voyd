@@ -21,6 +21,7 @@ import {
   methodSignatureKey,
   methodSignatureParamTypeKey,
 } from "../../method-signature-key.js";
+import { bindTypeExpr } from "./expressions.js";
 
 const isStaticMethod = (fn: ParsedFunctionDecl): boolean =>
   fn.signature.params.length === 0 ||
@@ -152,6 +153,11 @@ export const bindImplDecl = (
 
   tracker.enterScope(implScope, () => {
     typeParameters.push(...bindTypeParameters(decl.typeParameters, ctx));
+    decl.typeParameters.forEach((param) =>
+      bindTypeExpr(param.constraint, ctx, tracker),
+    );
+    bindTypeExpr(decl.target, ctx, tracker);
+    bindTypeExpr(decl.trait, ctx, tracker);
 
     inferredTypeParams.forEach((name) => {
       if (typeParameters.some((param) => param.name === name)) {
