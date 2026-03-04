@@ -123,6 +123,7 @@ interface SignatureParam {
   ast: Syntax;
   typeExpr?: Expr;
   optional?: boolean;
+  defaultValue?: Expr;
   bindingKind?: HirBindingKind;
 }
 
@@ -558,6 +559,10 @@ const parseParameter = (expr: Expr): SignatureParam | SignatureParam[] => {
     return parseSingleParam(expr);
   }
 
+  if (isForm(expr) && expr.calls("=")) {
+    return parseDefaultedParam(expr);
+  }
+
   if (isForm(expr) && expr.callsInternal("object_literal")) {
     return parseLabeledParameters(expr);
   }
@@ -697,6 +702,9 @@ const parseEffectOperationSignature = (
     .slice(resumable === "resume" || resumable === "tail" ? 1 : 0)
     .flatMap(parseParameter)
     .flat();
+  if (params.some((param) => param.defaultValue)) {
+    throw new Error("effect operation parameters do not support default values");
+  }
 
   return {
     name: nameExpr,
@@ -708,6 +716,15 @@ const parseEffectOperationSignature = (
 
 const parseLabeledParameters = (form: Form): SignatureParam[] =>
   form.rest.map((expr) => {
+    if (isForm(expr) && expr.calls("=")) {
+      const param = parseDefaultedParam(expr);
+      return {
+        ...param,
+        label: param.name,
+        labelAst: param.ast,
+      };
+    }
+
     if (isForm(expr) && (expr.calls(":") || expr.calls("?:"))) {
       const param = parseSingleParam(expr);
       return {
@@ -720,14 +737,17 @@ const parseLabeledParameters = (form: Form): SignatureParam[] =>
     if (
       isForm(expr) &&
       isIdentifierAtom(expr.first) &&
-      isForm(expr.second) &&
-      (expr.second.calls(":") || expr.second.calls("?:"))
+      isForm(expr.second)
     ) {
       const labelExpr = expr.first;
+      const parsed = parseParameter(expr.second);
+      if (Array.isArray(parsed)) {
+        throw new Error("labeled parameter entry cannot contain nested parameter groups");
+      }
       return {
         label: labelExpr.value,
         labelAst: labelExpr,
-        ...parseSingleParam(expr.second),
+        ...parsed,
       };
     }
 
@@ -743,6 +763,28 @@ const parseSingleParam = (expr: Form): SignatureParam => {
     bindingKind,
     typeExpr: expr.at(2),
     optional: expr.calls("?:") ? true : undefined,
+  };
+};
+
+const parseDefaultedParam = (expr: Form): SignatureParam => {
+  const targetExpr = expr.at(1);
+  const defaultValue = expr.at(2);
+  if (!targetExpr || !defaultValue) {
+    throw new Error("default parameter is missing a target or default value");
+  }
+
+  const parsed = parseParameter(targetExpr);
+  if (Array.isArray(parsed)) {
+    throw new Error("default parameter target must be a single parameter");
+  }
+  if (parsed.optional) {
+    throw new Error("default parameters cannot use '?'; use either '?' or '='");
+  }
+
+  return {
+    ...parsed,
+    optional: true,
+    defaultValue,
   };
 };
 

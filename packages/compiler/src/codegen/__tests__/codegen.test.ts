@@ -568,6 +568,39 @@ describe("next codegen", () => {
     expect((main as () => number)()).toBe(25);
   });
 
+  it("supports default function parameters with and without annotations", () => {
+    const instance = loadWasmInstance("default_parameters.voyd");
+    const {
+      test1_positional_typed_missing,
+      test2_positional_typed_passed,
+      test3_positional_inferred_missing,
+      test4_positional_inferred_passed,
+      test5_labeled_typed_missing,
+      test6_labeled_typed_passed,
+      test7_labeled_typed_structural_missing,
+      test8_labeled_inferred_missing,
+      test9_mixed_missing,
+      test10_mixed_passed,
+      test11_forward_ref_default_missing,
+      test12_forward_ref_default_passed,
+      main,
+    } = instance.exports as Record<string, unknown>;
+
+    expect((test1_positional_typed_missing as () => number)()).toBe(4);
+    expect((test2_positional_typed_passed as () => number)()).toBe(8);
+    expect((test3_positional_inferred_missing as () => number)()).toBe(6);
+    expect((test4_positional_inferred_passed as () => number)()).toBe(12);
+    expect((test5_labeled_typed_missing as () => number)()).toBe(8);
+    expect((test6_labeled_typed_passed as () => number)()).toBe(7);
+    expect((test7_labeled_typed_structural_missing as () => number)()).toBe(8);
+    expect((test8_labeled_inferred_missing as () => number)()).toBe(7);
+    expect((test9_mixed_missing as () => number)()).toBe(6);
+    expect((test10_mixed_passed as () => number)()).toBe(9);
+    expect((test11_forward_ref_default_missing as () => number)()).toBe(42);
+    expect((test12_forward_ref_default_passed as () => number)()).toBe(5);
+    expect((main as () => number)()).toBe(122);
+  });
+
   it("uses return_call for tail-recursive functions", () => {
     const ast = loadAst("tail_fib.voyd");
     const semantics = semanticsPipeline(ast);

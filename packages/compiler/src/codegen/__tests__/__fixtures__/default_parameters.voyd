@@ -1,0 +1,78 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn positional_typed(value: i32 = 3) -> i32
+  value + 1
+
+fn positional_inferred(value = 4) -> i32
+  value + 2
+
+fn labeled_typed({ left: i32 = 5, right: i32 }) -> i32
+  left + right
+
+fn labeled_inferred({ left = 6, right: i32 }) -> i32
+  left + right
+
+fn mixed(a: i32, b: i32 = 2, { c: i32 }) -> i32
+  a + b + c
+
+fn use_forward_ref(value = helper()) -> i32
+  value
+
+fn helper() -> i32
+  42
+
+pub fn test1_positional_typed_missing() -> i32
+  positional_typed()
+
+pub fn test2_positional_typed_passed() -> i32
+  positional_typed(7)
+
+pub fn test3_positional_inferred_missing() -> i32
+  positional_inferred()
+
+pub fn test4_positional_inferred_passed() -> i32
+  positional_inferred(10)
+
+pub fn test5_labeled_typed_missing() -> i32
+  labeled_typed(right: 3)
+
+pub fn test6_labeled_typed_passed() -> i32
+  labeled_typed(left: 4, right: 3)
+
+pub fn test7_labeled_typed_structural_missing() -> i32
+  labeled_typed({ right: 3 })
+
+pub fn test8_labeled_inferred_missing() -> i32
+  labeled_inferred(right: 1)
+
+pub fn test9_mixed_missing() -> i32
+  mixed(1, c: 3)
+
+pub fn test10_mixed_passed() -> i32
+  mixed(1, 5, c: 3)
+
+pub fn test11_forward_ref_default_missing() -> i32
+  use_forward_ref()
+
+pub fn test12_forward_ref_default_passed() -> i32
+  use_forward_ref(5)
+
+pub fn main() -> i32
+  test1_positional_typed_missing() +
+  test2_positional_typed_passed() +
+  test3_positional_inferred_missing() +
+  test4_positional_inferred_passed() +
+  test5_labeled_typed_missing() +
+  test6_labeled_typed_passed() +
+  test7_labeled_typed_structural_missing() +
+  test8_labeled_inferred_missing() +
+  test9_mixed_missing() +
+  test10_mixed_passed() +
+  test11_forward_ref_default_missing() +
+  test12_forward_ref_default_passed()

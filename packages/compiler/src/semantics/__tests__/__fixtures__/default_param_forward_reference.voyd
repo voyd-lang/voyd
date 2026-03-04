@@ -1,0 +1,13 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn problematic(a: i32 = b, b: i32 = 7) -> i32
+  a + b
+
+pub fn main() -> i32
+  problematic()

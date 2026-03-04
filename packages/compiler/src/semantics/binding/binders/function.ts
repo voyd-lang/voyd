@@ -134,6 +134,7 @@ const bindFunctionParameters = (
       label: param.label,
       labelAst: param.labelAst,
       optional: param.optional,
+      defaultValue: param.defaultValue,
       symbol: paramSymbol,
       ast: param.ast,
       typeExpr:
@@ -146,6 +147,9 @@ const bindFunctionParameters = (
     });
   });
 
+  decl.signature.params.forEach((param) =>
+    bindExpr(param.defaultValue, ctx, tracker)
+  );
   bindExpr(decl.body, ctx, tracker);
 
   return boundParams;

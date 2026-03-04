@@ -153,6 +153,69 @@ f("John")
 f("John", "Quincy")
 ```
 
+## Default parameters
+
+Parameters can provide default values with `=`.
+
+```voyd
+fn greet(name: String = "world")
+  "Hello, " + name
+
+greet()        // "Hello, world"
+greet("Ada")   // "Hello, Ada"
+```
+
+Defaulted parameters are omitted at call sites the same way as `?` parameters.
+Conceptually, each defaulted parameter behaves like:
+
+```voyd
+param = param ?? default_value
+```
+
+The default expression is type-checked against the parameter type. If the
+parameter type is omitted, Voyd infers it from the default expression:
+
+```voyd
+fn repeat(times = 3) -> i32
+  times
+```
+
+In generic functions, defaulted parameters must declare an explicit type:
+
+```voyd
+fn pick<T>(a: T, b: T = a) -> T
+  b
+```
+
+Labeled parameters support defaults in both typed and inferred forms:
+
+```voyd
+fn log({ level: String = "info", message: String })
+  print("[${level}] ${message}")
+
+fn scale({ by = 2, value: i32 }) -> i32
+  value * by
+
+log(message: "ready")
+scale(value: 5)
+```
+
+Defaulted positional parameters can still appear before labeled parameter groups:
+
+```voyd
+fn sum(a: i32, b: i32 = 2, { c: i32 }) -> i32
+  a + b + c
+
+sum(1, c: 3) // b defaults to 2
+```
+
+Notes:
+- `?` and `=` are mutually exclusive on the same parameter.
+- Default expressions cannot reference parameters declared at the same position
+  or later in the parameter list.
+- Function declarations support default parameters. Trait methods, effect
+  operation signatures, and lambda parameters do not currently support `=`.
+
 ## Uniform Function Call Syntax (Dot Notation)
 
 The dot (or period) operator applies the expression on the left as an argument

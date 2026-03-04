@@ -186,6 +186,9 @@ const bindTraitMethodParameters = (
   scope: ScopeId
 ): ParameterDeclInput[] =>
   decl.signature.params.map((param) => {
+    if (param.defaultValue) {
+      throw new Error("trait methods do not support default parameters");
+    }
     rememberSyntax(param.ast, ctx);
     if (param.labelAst) {
       rememberSyntax(param.labelAst, ctx);
