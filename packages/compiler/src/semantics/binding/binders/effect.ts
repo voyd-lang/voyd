@@ -20,6 +20,9 @@ const declareEffectOperationParams = ({
   scope: number;
 }) =>
   op.params.map((param) => {
+    if (param.defaultValue) {
+      throw new Error("effect operation parameters do not support default values");
+    }
     rememberSyntax(param.ast, ctx);
     if (param.labelAst) {
       rememberSyntax(param.labelAst, ctx);

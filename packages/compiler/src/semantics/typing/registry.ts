@@ -31,6 +31,11 @@ import {
 } from "../../diagnostics/index.js";
 import { isStdOnlyIntrinsicName } from "../intrinsics.js";
 import {
+  getOptionalInfo,
+  optionalResolverContextForTypingContext,
+} from "./optionals.js";
+import { resolveOptionalTypeForDefaultParameter } from "./default-parameters.js";
+import {
   assertUniqueMethodSignatures,
   buildImplMethodSignatureInfos,
   buildTraitMethodMapByExactSignature,
@@ -337,14 +342,15 @@ export const registerFunctionSignatures = (
     }
 
     const parameters = item.parameters.map((param, index) => {
-      const resolved = resolveTypeExpr(
+      const functionName = getSymbolName(item.symbol, ctx);
+      const parameterName = getSymbolName(param.symbol, ctx);
+      const resolvedFromAnnotation = resolveTypeExpr(
         param.type,
         ctx,
         state,
         ctx.primitives.unknown,
-        paramMap
+        paramMap,
       );
-      ctx.valueTypes.set(param.symbol, resolved);
       const declParam =
         (typeof param.decl === "number"
           ? ctx.decls.getParameterById(param.decl)
@@ -356,7 +362,7 @@ export const registerFunctionSignatures = (
         throw new Error(
           `missing or mismatched parameter decl for symbol ${
             param.symbol
-          } in function ${getSymbolName(item.symbol, ctx)}`
+          } in function ${functionName}`,
         );
       }
       if (
@@ -364,20 +370,70 @@ export const registerFunctionSignatures = (
         fnDecl.params[index]!.symbol !== param.symbol
       ) {
         throw new Error(
-          `parameter order mismatch for function ${getSymbolName(
-            item.symbol,
-            ctx
-          )}`
+          `parameter order mismatch for function ${functionName}`,
         );
       }
+
+      const hasDefaultValue = typeof param.defaultValue === "number";
+      if (
+        hasDefaultValue &&
+        !param.type &&
+        signatureTypeParams &&
+        signatureTypeParams.length > 0
+      ) {
+        return emitDiagnostic({
+          ctx,
+          code: "TY0043",
+          params: {
+            kind: "generic-default-parameter-missing-type",
+            functionName,
+            parameterName,
+          },
+          span: normalizeSpan(param.span, item.span, ctx.hir.module.span),
+        });
+      }
+      let parameterType = resolvedFromAnnotation;
+
+      if (hasDefaultValue) {
+        const annotationOptionalInfo =
+          resolvedFromAnnotation === ctx.primitives.unknown
+            ? undefined
+            : getOptionalInfo(
+                resolvedFromAnnotation,
+                optionalResolverContextForTypingContext(ctx),
+              );
+        parameterType =
+          annotationOptionalInfo?.innerType ?? resolvedFromAnnotation;
+      }
+
+      ctx.valueTypes.set(param.symbol, parameterType);
+      const optional =
+        hasDefaultValue === true
+          ? true
+          : (declParam?.optional ?? param.optional);
+      const callParameterType =
+        hasDefaultValue === true
+          ? parameterType === ctx.primitives.unknown
+            ? parameterType
+            : resolveOptionalTypeForDefaultParameter({
+                innerType: parameterType,
+                scope: fnDecl?.scope ?? ctx.symbolTable.rootScope,
+                functionName,
+                parameterName,
+                ctx,
+                state,
+              })
+          : parameterType;
+
       return {
-        type: resolved,
+        type: callParameterType,
         label: declParam?.label ?? param.label,
         bindingKind: param.pattern.bindingKind,
         span: param.span,
-        name: getSymbolName(param.symbol, ctx),
+        name: parameterName,
         symbol: param.symbol,
-        optional: declParam?.optional ?? param.optional,
+        optional,
+        defaultValue: param.defaultValue,
       };
     });
 

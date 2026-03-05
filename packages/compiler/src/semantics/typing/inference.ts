@@ -4,7 +4,8 @@ import type { FunctionSignature, TypingContext, TypingState } from "./types.js";
 import { formatFunctionInstanceKey, typeExpression } from "./expressions.js";
 import { getValueType } from "./expressions/identifier.js";
 import { mergeBranchType } from "./expressions/branching.js";
-import { ensureEffectCompatibility, getExprEffectRow } from "./effects.js";
+import { composeEffectRows, ensureEffectCompatibility, getExprEffectRow } from "./effects.js";
+import { typeDefaultParameterValues } from "./default-parameters.js";
 import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
 
 export const runInferencePass = (
@@ -146,8 +147,21 @@ const typeFunction = (
   };
   let bodyType;
   let observedReturnType: number | undefined;
+  let defaultEffectRows: number[] = [];
   let updated = false;
   try {
+    const defaultParameterValues = typeDefaultParameterValues({
+      fn,
+      signature,
+      ctx,
+      state,
+      typeExpression,
+    });
+    defaultEffectRows = defaultParameterValues.effectRows;
+    if (defaultParameterValues.signatureUpdated) {
+      refreshFunctionSignatureType({ fn, signature, ctx });
+      updated = true;
+    }
     bodyType = typeExpression(fn.body, ctx, state, {
       expectedType: signature.returnType,
     });
@@ -156,7 +170,11 @@ const typeFunction = (
     state.currentFunction = previousFunction;
   }
 
-  const inferredEffectRow = getExprEffectRow(fn.body, ctx);
+  const bodyEffectRow = getExprEffectRow(fn.body, ctx);
+  const inferredEffectRow =
+    defaultEffectRows.length === 0
+      ? bodyEffectRow
+      : composeEffectRows(ctx.effects, [bodyEffectRow, ...defaultEffectRows]);
   if (signature.annotatedEffects) {
     ensureEffectCompatibility({
       inferred: inferredEffectRow,
@@ -261,10 +279,10 @@ const refreshFunctionSignatureType = ({
   ctx: TypingContext;
 }): void => {
   const functionType = ctx.arena.internFunction({
-    parameters: signature.parameters.map(({ type, label }) => ({
+    parameters: signature.parameters.map(({ type, label, optional }) => ({
       type,
       label,
-      optional: false,
+      optional: optional ?? false,
     })),
     returnType: signature.returnType,
     effectRow: signature.effectRow ?? ctx.primitives.defaultEffectRow,
