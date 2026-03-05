@@ -72,6 +72,13 @@ export const typeDefaultParameterValues = ({
   state: TypingState;
   typeExpression: TypeExpressionFn;
 }): { effectRows: number[]; signatureUpdated: boolean } => {
+  const hasDefaultParameters = fn.parameters.some(
+    (param) => typeof param.defaultValue === "number",
+  );
+  if (!hasDefaultParameters) {
+    return { effectRows: [], signatureUpdated: false };
+  }
+
   const effectRows: number[] = [];
   const functionName = ctx.symbolTable.getSymbol(fn.symbol).name;
   const functionScope =

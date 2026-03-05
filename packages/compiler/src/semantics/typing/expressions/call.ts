@@ -4457,10 +4457,11 @@ export const typeGenericFunctionBody = ({
       state,
       `function ${getSymbolName(symbol, ctx)} return type`,
     );
-    const inferredEffectRow = composeEffectRows(ctx.effects, [
-      getExprEffectRow(fn.body, ctx),
-      ...defaultEffectRows,
-    ]);
+    const bodyEffectRow = getExprEffectRow(fn.body, ctx);
+    const inferredEffectRow =
+      defaultEffectRows.length === 0
+        ? bodyEffectRow
+        : composeEffectRows(ctx.effects, [bodyEffectRow, ...defaultEffectRows]);
     if (signature.annotatedEffects) {
       ensureEffectCompatibility({
         inferred: inferredEffectRow,
