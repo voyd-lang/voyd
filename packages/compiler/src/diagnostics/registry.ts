@@ -278,6 +278,17 @@ type DiagnosticParamsMap = {
     targetName: string;
     missingMethods: readonly string[];
   };
+  TY0043: {
+    kind: "generic-default-parameter-missing-type";
+    functionName: string;
+    parameterName: string;
+  };
+  TY0044: {
+    kind: "default-parameter-forward-reference";
+    functionName: string;
+    parameterName: string;
+    referencedParameterName: string;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -876,6 +887,32 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0042"]>,
+  TY0043: {
+    code: "TY0043",
+    message: (params) =>
+      `default parameter ${params.parameterName} in generic function ${params.functionName} must declare a type`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Add an explicit parameter type (for example `param: T = ...`) so the generic signature can be resolved before overload selection.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0043"]>,
+  TY0044: {
+    code: "TY0044",
+    message: (params) =>
+      `default parameter ${params.parameterName} in function ${params.functionName} cannot reference parameter ${params.referencedParameterName} declared at or after it`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Move the referenced parameter earlier, or compute the shared value in a helper function instead of another default expression.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0044"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

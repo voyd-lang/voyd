@@ -14,6 +14,7 @@ import {
   effectsShareInterner,
   typingContextsShareInterners,
 } from "./shared-interners.js";
+import { declareImportedTypeParameterSymbol } from "./imported-type-parameter-scope.js";
 
 type TranslationContext = {
   sourceArena: TypingContext["arena"];
@@ -311,9 +312,8 @@ const cloneTypeParamSymbol = (
   ctx: TypingContext,
 ): SymbolId => {
   const name = dependency.symbolTable.getSymbol(symbol).name;
-  return ctx.symbolTable.declare({
+  return declareImportedTypeParameterSymbol({
     name,
-    kind: "type-parameter",
-    declaredAt: ctx.hir.module.ast,
+    ctx,
   });
 };

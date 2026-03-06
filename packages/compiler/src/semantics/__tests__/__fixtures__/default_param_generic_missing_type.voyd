@@ -1,0 +1,13 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn pick<T>(a: T, b = a) -> T
+  b
+
+pub fn main() -> i32
+  pick(1)

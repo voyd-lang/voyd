@@ -130,6 +130,7 @@ export interface ParamSignature {
   name?: string;
   symbol?: SymbolId;
   optional?: boolean;
+  defaultValue?: HirExprId;
 }
 
 export interface FunctionTypeParam {

@@ -3,6 +3,7 @@ import { ensureObjectType, getObjectTemplate } from "./type-system.js";
 import { importableMetadataFrom } from "../imports/metadata.js";
 import type { DependencySemantics, TypingContext } from "./types.js";
 import type { SymbolId, TypeId, TypeParamId } from "../ids.js";
+import type { SymbolKind } from "../binder/index.js";
 import type {
   HirMethodParameter,
   HirTraitMethod,
@@ -14,6 +15,7 @@ import {
   mapTypeParam,
   translateFunctionSignature,
 } from "./import-type-translation.js";
+import { declareImportedTypeParameterSymbol } from "./imported-type-parameter-scope.js";
 import { collectTraitOwnersFromTypeParams } from "./constraint-trait-owners.js";
 import { findExport, makeDependencyContext } from "./import-resolution.js";
 import {
@@ -54,6 +56,32 @@ const targetTypeIncludesDependencySymbol = ({
     });
   }
   return false;
+};
+
+const declareImportedSymbol = ({
+  name,
+  kind,
+  metadata,
+  ctx,
+}: {
+  name: string;
+  kind: SymbolKind;
+  metadata?: Record<string, unknown>;
+  ctx: TypingContext;
+}): SymbolId => {
+  if (kind === "type-parameter") {
+    const symbol = declareImportedTypeParameterSymbol({ name, ctx });
+    if (metadata) {
+      ctx.symbolTable.setSymbolMetadata(symbol, metadata);
+    }
+    return symbol;
+  }
+  return ctx.symbolTable.declare({
+    name,
+    kind,
+    declaredAt: ctx.hir.module.ast,
+    ...(metadata ? { metadata } : {}),
+  });
 };
 
 const mapImportedTraitMethodSymbol = ({
@@ -368,10 +396,10 @@ export const registerImportedObjectTemplate = ({
       return mapDependencySymbolToLocal({ owner: symbol, dependency, ctx });
     } catch {
       const depRecord = dependency.symbolTable.getSymbol(symbol);
-      return ctx.symbolTable.declare({
+      return declareImportedSymbol({
         name: depRecord.name,
         kind: depRecord.kind,
-        declaredAt: ctx.hir.module.ast,
+        ctx,
       });
     }
   };
@@ -392,10 +420,9 @@ export const registerImportedObjectTemplate = ({
       return existing;
     }
     const depRecord = dependency.symbolTable.getSymbol(symbol);
-    const local = ctx.symbolTable.declare({
+    const local = declareImportedTypeParameterSymbol({
       name: depRecord.name,
-      kind: "type-parameter",
-      declaredAt: ctx.hir.module.ast,
+      ctx,
     });
     paramSymbolMap.set(symbol, local);
     return local;
@@ -528,10 +555,10 @@ export const registerImportedTraitDecl = ({
       return existing;
     }
     const record = dependency.symbolTable.getSymbol(symbol);
-    const mapped = ctx.symbolTable.declare({
+    const mapped = declareImportedSymbol({
       name: record.name,
       kind: record.kind,
-      declaredAt: ctx.hir.module.ast,
+      ctx,
     });
     symbolMap.set(symbol, mapped);
     return mapped;
@@ -698,10 +725,9 @@ export const registerImportedTraitImplTemplates = ({
         return existing;
       }
       const depRecord = dependency.symbolTable.getSymbol(symbol);
-      const local = ctx.symbolTable.declare({
+      const local = declareImportedTypeParameterSymbol({
         name: depRecord.name,
-        kind: "type-parameter",
-        declaredAt: ctx.hir.module.ast,
+        ctx,
       });
       typeParamSymbolMap.set(symbol, local);
       return local;
@@ -833,6 +859,16 @@ export const mapDependencySymbolToLocal = ({
       moduleId: candidateDependency.moduleId,
       symbol: candidateOwner,
     });
+    if (canonicalCandidate.moduleId === ctx.moduleId) {
+      const local = resolveLocalSymbolForModule({
+        candidateOwner,
+        candidateDependency,
+        ctx,
+      });
+      if (typeof local === "number") {
+        return local;
+      }
+    }
     const aliases = ctx.importAliasesByModule.get(canonicalCandidate.moduleId);
     const aliased = aliases?.get(canonicalCandidate.symbol);
     if (typeof aliased === "number") {
@@ -862,10 +898,9 @@ export const mapDependencySymbolToLocal = ({
         const importableMetadata = importableMetadataFrom(
           record.metadata as Record<string, unknown> | undefined,
         );
-        const declared = ctx.symbolTable.declare({
+        const declared = declareImportedSymbol({
           name: record.name,
           kind: record.kind,
-          declaredAt: ctx.hir.module.ast,
           metadata: {
             import: {
               moduleId: candidateDependency.moduleId,
@@ -873,6 +908,7 @@ export const mapDependencySymbolToLocal = ({
             },
             ...(importableMetadata ?? {}),
           },
+          ctx,
         });
         const canonicalTarget = canonicalTargetFor({
           moduleId: candidateDependency.moduleId,
@@ -941,4 +977,40 @@ export const mapDependencySymbolToLocal = ({
   };
 
   return visit(owner, dependency, new Set());
+};
+
+const resolveLocalSymbolForModule = ({
+  candidateOwner,
+  candidateDependency,
+  ctx,
+}: {
+  candidateOwner: SymbolId;
+  candidateDependency: DependencySemantics;
+  ctx: TypingContext;
+}): SymbolId | undefined => {
+  if (candidateDependency.moduleId !== ctx.moduleId) {
+    return undefined;
+  }
+
+  let dependencyRecord: Readonly<{ name: string; kind: SymbolKind }>;
+  try {
+    dependencyRecord = candidateDependency.symbolTable.getSymbol(candidateOwner);
+  } catch {
+    return undefined;
+  }
+
+  const local = ctx.symbolTable.resolve(
+    dependencyRecord.name,
+    ctx.symbolTable.rootScope,
+  );
+  if (typeof local !== "number") {
+    return undefined;
+  }
+
+  try {
+    const localRecord = ctx.symbolTable.getSymbol(local);
+    return localRecord.kind === dependencyRecord.kind ? local : undefined;
+  } catch {
+    return undefined;
+  }
 };

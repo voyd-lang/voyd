@@ -22,6 +22,7 @@ export interface ParameterDecl {
   label?: string;
   labelAst?: Syntax;
   optional?: boolean;
+  defaultValue?: Expr;
   symbol: SymbolId;
   ast?: Syntax;
   typeExpr?: Expr;

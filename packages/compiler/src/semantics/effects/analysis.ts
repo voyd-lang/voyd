@@ -15,6 +15,7 @@ export interface EffectOperationRuntimeInfo {
   symbol: SymbolId;
   effectSymbol: SymbolId;
   localEffectIndex: number;
+  sourceModuleId?: string;
   opIndex: number;
   resumable: "resume" | "tail";
   name: string;
@@ -126,6 +127,67 @@ const effectNameFor = ({
 const callTarget = (expr: HirExpression): SymbolId | undefined =>
   expr.exprKind === "identifier" ? expr.symbol : undefined;
 
+const importedTargetFor = ({
+  symbol,
+  symbolTable,
+}: {
+  symbol: SymbolId;
+  symbolTable: SymbolTable;
+}): { moduleId: string; symbol: SymbolId } | undefined => {
+  const metadata = (symbolTable.getSymbol(symbol).metadata ?? {}) as {
+    import?: { moduleId?: unknown; symbol?: unknown };
+  };
+  return typeof metadata.import?.moduleId === "string" &&
+    typeof metadata.import?.symbol === "number"
+    ? {
+        moduleId: metadata.import.moduleId,
+        symbol: metadata.import.symbol,
+      }
+    : undefined;
+};
+
+const importedEffectOpInfoFor = ({
+  localSymbol,
+  binding,
+  symbolTable,
+}: {
+  localSymbol: SymbolId;
+  binding: BindingResult;
+  symbolTable: SymbolTable;
+}): EffectOperationRuntimeInfo | undefined => {
+  const imported = importedTargetFor({ symbol: localSymbol, symbolTable });
+  if (!imported) {
+    return undefined;
+  }
+  const dependency = binding.dependencies.get(imported.moduleId);
+  if (!dependency) {
+    return undefined;
+  }
+  for (
+    let localEffectIndex = 0;
+    localEffectIndex < dependency.effects.length;
+    localEffectIndex += 1
+  ) {
+    const effect = dependency.effects[localEffectIndex]!;
+    for (let opIndex = 0; opIndex < effect.operations.length; opIndex += 1) {
+      const op = effect.operations[opIndex]!;
+      if (op.symbol !== imported.symbol) {
+        continue;
+      }
+      return {
+        symbol: localSymbol,
+        effectSymbol: effect.symbol,
+        localEffectIndex,
+        sourceModuleId: imported.moduleId,
+        opIndex,
+        resumable: op.resumable,
+        name: `${effect.name}.${op.name}`,
+      };
+    }
+  }
+  return undefined;
+};
+
 const containsEffectHandler = ({
   rootExprId,
   hir,
@@ -185,6 +247,37 @@ export const buildEffectsLoweringInfo = ({
         }),
       });
     });
+  });
+
+  const referencedEffectOps = new Set<SymbolId>();
+  hir.expressions.forEach((expr) => {
+    if (expr.exprKind === "call") {
+      const callee = hir.expressions.get(expr.callee);
+      if (callee?.exprKind === "identifier") {
+        referencedEffectOps.add(callee.symbol);
+      }
+    }
+    if (expr.exprKind === "effect-handler") {
+      expr.handlers.forEach((clause) => {
+        referencedEffectOps.add(clause.operation);
+      });
+    }
+  });
+  referencedEffectOps.forEach((symbol) => {
+    if (operations.has(symbol)) {
+      return;
+    }
+    if (symbolTable.getSymbol(symbol).kind !== "effect-op") {
+      return;
+    }
+    const importedInfo = importedEffectOpInfoFor({
+      localSymbol: symbol,
+      binding,
+      symbolTable,
+    });
+    if (importedInfo) {
+      operations.set(symbol, importedInfo);
+    }
   });
 
   const functions = new Map<SymbolId, EffectsLoweringFunctionInfo>();

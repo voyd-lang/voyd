@@ -32,11 +32,26 @@ const decodePayload = ({
   ptr: number;
   length: number;
 }): unknown => {
-  if (length <= 0) {
-    throw new Error("no msgpack payload written to buffer");
-  }
   const bytes = new Uint8Array(memory.buffer, ptr, length);
   return decode(bytes, MSGPACK_OPTS);
+};
+
+const invalidPayloadLengthMessage = ({
+  status,
+  payloadLength,
+  bufferSize,
+}: {
+  status: number;
+  payloadLength: number;
+  bufferSize: number;
+}): string => {
+  const kind =
+    status === EFFECT_RESULT_STATUS.value
+      ? "value"
+      : status === EFFECT_RESULT_STATUS.effect
+        ? "effect request"
+        : `status ${status}`;
+  return `effect boundary ${kind} payload encoding failed (len=${payloadLength}, bufferSize=${bufferSize}); increase createVoydHost({ bufferSize })`;
 };
 
 const nonReturningHandlerMessage = (label: string): string =>
@@ -146,6 +161,15 @@ export const continueEffectLoopStep = async <T = unknown>({
         direction: "vm",
       },
     });
+  }
+  if (payloadLength <= 0 || payloadLength > bufferSize) {
+    throw new Error(
+      invalidPayloadLengthMessage({
+        status,
+        payloadLength,
+        bufferSize,
+      })
+    );
   }
   const decoded = decodePayload({
     memory: msgpackMemory,

@@ -294,6 +294,33 @@ describe("runEffectLoop", () => {
     ).rejects.toThrow("boom");
   });
 
+  it("fails with a clear error when wasm reports an invalid payload length", async () => {
+    const op = createParsedOp({ resumeKind: RESUME_KIND.resume });
+    const table = createParsedTable({ op });
+    const runtime = createRuntimeDriver({
+      entryResult: effectResult({
+        request: createEffectRequest({ args: [1], resumeKind: RESUME_KIND.resume }),
+        cont: Symbol("cont"),
+      }),
+      continuations: new Map(),
+    });
+
+    await expect(
+      runEffectLoop({
+        entry: runtime.entry,
+        effectStatus: runtime.effectStatus,
+        effectCont: runtime.effectCont,
+        effectLen: () => -1,
+        resumeEffectful: runtime.resumeEffectful,
+        table,
+        handlersByOpIndex: [({ resume }) => resume(1)],
+        msgpackMemory: runtime.msgpackMemory,
+        bufferPtr: BUFFER_PTR,
+        bufferSize: BUFFER_SIZE,
+      })
+    ).rejects.toThrow(/payload encoding failed/i);
+  });
+
   it("enforces resume-kind contracts before attempting resumption", async () => {
     const resumeOp = createParsedOp({ resumeKind: RESUME_KIND.resume });
     const resumeTable = createParsedTable({ op: resumeOp });

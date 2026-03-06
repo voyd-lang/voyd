@@ -45,6 +45,11 @@ import {
   traitDispatchHash,
   traitDispatchSignatureKey,
 } from "./trait-dispatch-key.js";
+import { wrapValueInOutcome } from "./effects/outcome-values.js";
+import {
+  isTraitDispatchMethodEffectful,
+  resolveImportedFunctionSymbol,
+} from "./trait-dispatch-abi.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
@@ -71,35 +76,6 @@ const markReachableFunctionSymbol = ({
   symbols.add(
     ctx.program.symbols.canonicalIdOf(moduleId, symbol) as ProgramSymbolId,
   );
-};
-
-const resolveImportedFunctionSymbol = ({
-  ctx,
-  moduleId,
-  symbol,
-}: {
-  ctx: CodegenContext;
-  moduleId: string;
-  symbol: SymbolId;
-}): { moduleId: string; symbol: SymbolId } => {
-  const seen = new Set<string>();
-  let currentModuleId = moduleId;
-  let currentSymbol = symbol;
-
-  while (true) {
-    const key = `${currentModuleId}:${currentSymbol}`;
-    if (seen.has(key)) {
-      return { moduleId: currentModuleId, symbol: currentSymbol };
-    }
-    seen.add(key);
-    const targetId = ctx.program.imports.getTarget(currentModuleId, currentSymbol);
-    if (typeof targetId !== "number") {
-      return { moduleId: currentModuleId, symbol: currentSymbol };
-    }
-    const targetRef = ctx.program.symbols.refOf(targetId);
-    currentModuleId = targetRef.moduleId;
-    currentSymbol = targetRef.symbol;
-  }
 };
 
 export type WasmTypeMode = "runtime" | "signature";
@@ -1510,6 +1486,7 @@ const createMethodLookupEntries = ({
   }
   const entries: MethodAccessorEntry[] = [];
   const hashes = new Map<number, string>();
+  const dispatchEffectfulBySignature = new Map<string, boolean>();
 
   impls.forEach((impl) => {
     impl.methods.forEach(({ traitMethod, implMethod }) => {
@@ -1585,44 +1562,71 @@ const createMethodLookupEntries = ({
           `codegen malformed parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
       }
+      const dispatchSignatureKey = traitDispatchSignatureKey({
+        traitSymbol: hashTraitSymbol,
+        traitMethodSymbol: hashTraitMethod,
+      });
+      const dispatchEffectful =
+        dispatchEffectfulBySignature.get(dispatchSignatureKey) ??
+        (() => {
+          const value = isTraitDispatchMethodEffectful({
+            traitSymbol: hashTraitSymbol,
+            traitMethodSymbol: hashTraitMethod,
+            ctx,
+          });
+          dispatchEffectfulBySignature.set(dispatchSignatureKey, value);
+          return value;
+        })();
+      if (!dispatchEffectful && meta.effectful) {
+        throw new Error(
+          [
+            "trait dispatch ABI mismatch",
+            `type: ${typeLabel}`,
+            `trait method: ${hashTraitSymbol}:${hashTraitMethod}`,
+            `impl: ${implRef.moduleId}::${implRef.symbol}`,
+            "dispatch requires pure ABI but impl lowered as effectful",
+          ].join("\n"),
+        );
+      }
       const handlerParamType = ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
-      const params = meta.effectful
+      const params = dispatchEffectful
         ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
         : [ctx.rtt.baseType, ...userParamTypes];
+      const receiverParamIndex = dispatchEffectful ? 1 : 0;
+      const firstUserParamIndex = dispatchEffectful ? 2 : 1;
+      const implCall = ctx.mod.call(
+        meta.wasmName,
+        [
+          ...(meta.effectful
+            ? [ctx.mod.local.get(0, handlerParamType)]
+            : []),
+          refCast(
+            ctx.mod,
+            ctx.mod.local.get(receiverParamIndex, ctx.rtt.baseType),
+            receiverType,
+          ),
+          ...userParamTypes.map((type, index) =>
+            ctx.mod.local.get(index + firstUserParamIndex, type),
+          ),
+        ],
+        meta.resultType,
+      );
+      const wrapperResultType = dispatchEffectful
+        ? ctx.effectsBackend.abi.effectfulResultType(ctx)
+        : meta.resultType;
       const wrapperName = `${typeLabel}__method_${hashTraitSymbol}_${hashTraitMethod}_${implRef.symbol}`;
       const wrapper = ctx.mod.addFunction(
         wrapperName,
         binaryen.createType(params as number[]),
-        meta.resultType,
+        wrapperResultType,
         [],
-        ctx.mod.call(
-          meta.wasmName,
-          [
-            ...(meta.effectful
-              ? [
-                  ctx.mod.local.get(0, handlerParamType),
-                  refCast(
-                    ctx.mod,
-                    ctx.mod.local.get(1, ctx.rtt.baseType),
-                    receiverType,
-                  ),
-                  ...userParamTypes.map((type, index) =>
-                    ctx.mod.local.get(index + 2, type),
-                  ),
-                ]
-              : [
-                  refCast(
-                    ctx.mod,
-                    ctx.mod.local.get(0, ctx.rtt.baseType),
-                    receiverType,
-                  ),
-                  ...userParamTypes.map((type, index) =>
-                    ctx.mod.local.get(index + 1, type),
-                  ),
-                ]),
-          ],
-          meta.resultType,
-        ),
+        dispatchEffectful && !meta.effectful
+          ? wrapValueInOutcome({
+              valueExpr: implCall,
+              valueType: meta.resultType,
+              ctx,
+            })
+          : implCall,
       );
       const heapType = bin._BinaryenFunctionGetType(wrapper);
       const fnType = bin._BinaryenTypeFromHeapType(heapType, false);

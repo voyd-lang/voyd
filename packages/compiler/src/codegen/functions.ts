@@ -1,4 +1,5 @@
 import binaryen from "binaryen";
+import { refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   FunctionContext,
@@ -11,8 +12,12 @@ import type {
   ProgramSymbolId,
 } from "../semantics/ids.js";
 import { compileExpression } from "./expressions/index.js";
-import { wasmTypeFor } from "./types.js";
+import { allocateTempLocal } from "./locals.js";
+import { loadStructuralField, coerceValueToType } from "./structural.js";
+import { RTT_METADATA_SLOTS } from "./rtt/index.js";
+import { getRequiredExprType, getStructuralTypeInfo, wasmTypeFor } from "./types.js";
 import {
+  type HirExpression,
   isPackageVisible,
   isPublicVisibility,
   type HirExportEntry,
@@ -89,6 +94,154 @@ const pushFunctionMeta = (
 
 const userParamOffsetFor = (meta: FunctionMetadata): number =>
   meta.effectful ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length) : 0;
+
+const bindRawFunctionParameters = ({
+  fn,
+  meta,
+  fnCtx,
+  handlerOffset,
+  paramTypesOffset,
+}: {
+  fn: HirFunction;
+  meta: FunctionMetadata;
+  fnCtx: FunctionContext;
+  handlerOffset: number;
+  paramTypesOffset: number;
+}): void => {
+  fn.parameters.forEach((param, index) => {
+    const wasmIndex = index + handlerOffset;
+    const wasmType = meta.paramTypes[index + paramTypesOffset];
+    if (typeof wasmType !== "number") {
+      throw new Error(
+        `codegen missing parameter type for symbol ${param.symbol} in function ${fn.symbol} (param index ${index}, handlerOffset ${handlerOffset}, paramTypesOffset ${paramTypesOffset}, meta paramTypes length ${meta.paramTypes.length})`,
+      );
+    }
+    fnCtx.bindings.set(param.symbol, {
+      kind: "local",
+      index: wasmIndex,
+      type: wasmType,
+      typeId: meta.paramTypeIds[index],
+    });
+  });
+};
+
+const compileDefaultParameterInitialization = ({
+  fn,
+  meta,
+  ctx,
+  fnCtx,
+  handlerOffset,
+  paramTypesOffset,
+}: {
+  fn: HirFunction;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  handlerOffset: number;
+  paramTypesOffset: number;
+}): binaryen.ExpressionRef[] => {
+  const ops: binaryen.ExpressionRef[] = [];
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+
+  fn.parameters.forEach((param, index) => {
+    if (typeof param.defaultValue !== "number") {
+      return;
+    }
+
+    const wasmIndex = index + handlerOffset;
+    const rawWasmType = meta.paramTypes[index + paramTypesOffset];
+    const rawTypeId = meta.paramTypeIds[index];
+    if (typeof rawWasmType !== "number" || typeof rawTypeId !== "number") {
+      throw new Error(
+        `codegen missing default parameter metadata for symbol ${param.symbol}`,
+      );
+    }
+
+    const optionalInfo = ctx.program.optionals.getOptionalInfo(
+      ctx.moduleId,
+      rawTypeId,
+    );
+    if (!optionalInfo) {
+      throw new Error("default parameter must use an Optional wrapper type");
+    }
+    const someInfo = getStructuralTypeInfo(optionalInfo.someType, ctx);
+    if (!someInfo || someInfo.fields.length !== 1) {
+      throw new Error(
+        "default parameter Optional Some member must contain one value field",
+      );
+    }
+    const someField = someInfo.fields[0]!;
+
+    const defaultCompiled = compileExpression({
+      exprId: param.defaultValue,
+      ctx,
+      fnCtx,
+      tailPosition: false,
+      expectedResultTypeId: optionalInfo.innerType,
+    }).expr;
+    const defaultTypeId = getRequiredExprType(
+      param.defaultValue,
+      ctx,
+      typeInstanceId,
+    );
+    const defaultValueExpr = coerceValueToType({
+      value: defaultCompiled,
+      actualType: defaultTypeId,
+      targetType: optionalInfo.innerType,
+      ctx,
+      fnCtx,
+    });
+
+    const resolved = allocateTempLocal(
+      wasmTypeFor(optionalInfo.innerType, ctx),
+      fnCtx,
+      optionalInfo.innerType,
+    );
+    fnCtx.bindings.set(param.symbol, {
+      ...resolved,
+      kind: "local",
+      typeId: optionalInfo.innerType,
+    });
+    const rawParamExpr = () => ctx.mod.local.get(wasmIndex, rawWasmType);
+    const ancestorsExpr = () =>
+      structGetFieldValue({
+        mod: ctx.mod,
+        fieldType: ctx.rtt.extensionHelpers.i32Array,
+        fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
+        exprRef: rawParamExpr(),
+      });
+    const isSome = ctx.mod.call(
+      "__extends",
+      [ctx.mod.i32.const(someInfo.runtimeTypeId), ancestorsExpr()],
+      binaryen.i32,
+    );
+    const extractedSomeValue = coerceValueToType({
+      value: loadStructuralField({
+        structInfo: someInfo,
+        field: someField,
+        pointer: refCast(ctx.mod, rawParamExpr(), someInfo.runtimeType),
+        ctx,
+      }),
+      actualType: someField.typeId,
+      targetType: optionalInfo.innerType,
+      ctx,
+      fnCtx,
+    });
+
+    ops.push(
+      ctx.mod.local.set(
+        resolved.index,
+        ctx.mod.if(
+          isSome,
+          extractedSomeValue,
+          defaultValueExpr,
+        ),
+      ),
+    );
+  });
+
+  return ops;
+};
 
 const getModuleExportEntries = (ctx: CodegenContext): readonly HirExportEntry[] => {
   const publicExports = ctx.module.hir.module.exports.filter((entry) =>
@@ -229,37 +382,33 @@ const collectReachableFunctionSymbols = ({
       }
       continue;
     }
-    walkHirExpression({
-      exprId: item.body,
+    walkFunctionReachabilityExpressions({
+      item,
       ctx: ownerCtx,
-      visitLambdaBodies: true,
-      visitHandlerBodies: true,
-      visitor: {
-        onExpr: (exprId, expr) => {
-          if (expr.exprKind === "call") {
-            const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
-            callInfo.targets?.forEach((targetId) =>
-              enqueue(targetId as ProgramSymbolId),
-            );
-            const callee = ownerCtx.module.hir.expressions.get(expr.callee);
-            if (callee?.exprKind === "identifier") {
-              enqueue(
-                ownerCtx.program.symbols.canonicalIdOf(
-                  ownerCtx.moduleId,
-                  callee.symbol,
-                ) as ProgramSymbolId,
-              );
-            }
-            return;
-          }
-          if (expr.exprKind !== "method-call") {
-            return;
-          }
+      onExpr: (exprId, expr) => {
+        if (expr.exprKind === "call") {
           const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
           callInfo.targets?.forEach((targetId) =>
             enqueue(targetId as ProgramSymbolId),
           );
-        },
+          const callee = ownerCtx.module.hir.expressions.get(expr.callee);
+          if (callee?.exprKind === "identifier") {
+            enqueue(
+              ownerCtx.program.symbols.canonicalIdOf(
+                ownerCtx.moduleId,
+                callee.symbol,
+              ) as ProgramSymbolId,
+            );
+          }
+          return;
+        }
+        if (expr.exprKind !== "method-call") {
+          return;
+        }
+        const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
+        callInfo.targets?.forEach((targetId) =>
+          enqueue(targetId as ProgramSymbolId),
+        );
       },
     });
   }
@@ -326,6 +475,32 @@ const markStringLiteralCtorReachable = ({
     ctx,
     dependency: "string-literal-constructor",
     reachable,
+  });
+};
+
+const walkFunctionReachabilityExpressions = ({
+  item,
+  ctx,
+  onExpr,
+}: {
+  item: HirFunction;
+  ctx: CodegenContext;
+  onExpr: (exprId: number, expr: HirExpression) => void;
+}): void => {
+  const expressionIds = [
+    item.body,
+    ...item.parameters
+      .map((param) => param.defaultValue)
+      .filter((exprId): exprId is number => typeof exprId === "number"),
+  ];
+  expressionIds.forEach((exprId) => {
+    walkHirExpression({
+      exprId,
+      ctx,
+      visitLambdaBodies: true,
+      visitHandlerBodies: true,
+      visitor: { onExpr },
+    });
   });
 };
 
@@ -538,41 +713,37 @@ export const compileFunctions = ({
     if (!hasPendingMeta) {
       continue;
     }
-    walkHirExpression({
-      exprId: item.body,
+    walkFunctionReachabilityExpressions({
+      item,
       ctx,
-      visitLambdaBodies: true,
-      visitHandlerBodies: true,
-      visitor: {
-        onExpr: (exprId, expr) => {
-          if (expr.exprKind === "call") {
-            const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
-            callInfo.targets?.forEach((targetId) =>
-              reachableFunctions.add(targetId as ProgramSymbolId),
-            );
-            const callee = ctx.module.hir.expressions.get(expr.callee);
-            if (callee?.exprKind === "identifier") {
-              reachableFunctions.add(
-                ctx.program.symbols.canonicalIdOf(
-                  ctx.moduleId,
-                  callee.symbol,
-                ) as ProgramSymbolId,
-              );
-            }
-            return;
-          }
-          if (expr.exprKind === "literal" && expr.literalKind === "string") {
-            markStringLiteralCtorReachable({ ctx, reachable: reachableFunctions });
-            return;
-          }
-          if (expr.exprKind !== "method-call") {
-            return;
-          }
+      onExpr: (exprId, expr) => {
+        if (expr.exprKind === "call") {
           const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
           callInfo.targets?.forEach((targetId) =>
             reachableFunctions.add(targetId as ProgramSymbolId),
           );
-        },
+          const callee = ctx.module.hir.expressions.get(expr.callee);
+          if (callee?.exprKind === "identifier") {
+            reachableFunctions.add(
+              ctx.program.symbols.canonicalIdOf(
+                ctx.moduleId,
+                callee.symbol,
+              ) as ProgramSymbolId,
+            );
+          }
+          return;
+        }
+        if (expr.exprKind === "literal" && expr.literalKind === "string") {
+          markStringLiteralCtorReachable({ ctx, reachable: reachableFunctions });
+          return;
+        }
+        if (expr.exprKind !== "method-call") {
+          return;
+        }
+        const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
+        callInfo.targets?.forEach((targetId) =>
+          reachableFunctions.add(targetId as ProgramSymbolId),
+        );
       },
     });
     metas.forEach((meta) => {
@@ -953,19 +1124,20 @@ const compileFunctionItem = (
       currentHandler: { index: 0, type: handlerParamType },
     };
 
-    fn.parameters.forEach((param, index) => {
-      const type = meta.paramTypes[index];
-      if (typeof type !== "number") {
-        throw new Error(
-          `codegen missing parameter type for symbol ${param.symbol}`,
-        );
-      }
-      implCtx.bindings.set(param.symbol, {
-        kind: "local",
-        index: index + implSignature.userParamOffset,
-        type,
-        typeId: meta.paramTypeIds[index],
-      });
+    bindRawFunctionParameters({
+      fn,
+      meta,
+      fnCtx: implCtx,
+      handlerOffset: implSignature.userParamOffset,
+      paramTypesOffset: 0,
+    });
+    const defaultInitOps = compileDefaultParameterInitialization({
+      fn,
+      meta,
+      ctx,
+      fnCtx: implCtx,
+      handlerOffset: implSignature.userParamOffset,
+      paramTypesOffset: 0,
     });
 
     const implBody = compileExpression({
@@ -975,9 +1147,17 @@ const compileFunctionItem = (
       tailPosition: false,
       expectedResultTypeId: implCtx.returnTypeId,
     });
+    const implBodyExpr =
+      defaultInitOps.length > 0
+        ? ctx.mod.block(
+            null,
+            [...defaultInitOps, implBody.expr],
+            binaryen.getExpressionType(implBody.expr),
+          )
+        : implBody.expr;
 
     const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
-    const implExprType = binaryen.getExpressionType(implBody.expr);
+    const implExprType = binaryen.getExpressionType(implBodyExpr);
     const shouldWrapOutcome =
       implExprType === returnValueType ||
       (returnValueType === ctx.rtt.baseType &&
@@ -986,11 +1166,11 @@ const compileFunctionItem = (
         implExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx));
     const functionBody = shouldWrapOutcome
       ? wrapValueInOutcome({
-        valueExpr: implBody.expr,
+          valueExpr: implBodyExpr,
           valueType: returnValueType,
           ctx,
         })
-      : implBody.expr;
+      : implBodyExpr;
 
     ctx.mod.addFunction(
       implName,
@@ -1035,20 +1215,20 @@ const compileFunctionItem = (
     };
   }
 
-  fn.parameters.forEach((param, index) => {
-    const wasmIndex = index + handlerOffset;
-    const type = meta.paramTypes[wasmIndex];
-    if (typeof type !== "number") {
-      throw new Error(
-        `codegen missing parameter type for symbol ${param.symbol}`,
-      );
-    }
-    fnCtx.bindings.set(param.symbol, {
-      kind: "local",
-      index: wasmIndex,
-      type,
-      typeId: meta.paramTypeIds[index],
-    });
+  bindRawFunctionParameters({
+    fn,
+    meta,
+    fnCtx,
+    handlerOffset,
+    paramTypesOffset: handlerOffset,
+  });
+  const defaultInitOps = compileDefaultParameterInitialization({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+    handlerOffset,
+    paramTypesOffset: handlerOffset,
   });
 
   const body = compileExpression({
@@ -1058,8 +1238,16 @@ const compileFunctionItem = (
     tailPosition: !meta.effectful,
     expectedResultTypeId: fnCtx.returnTypeId,
   });
+  const bodyExpr =
+    defaultInitOps.length > 0
+      ? ctx.mod.block(
+          null,
+          [...defaultInitOps, body.expr],
+          binaryen.getExpressionType(body.expr),
+        )
+      : body.expr;
   const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
-  const bodyExprType = binaryen.getExpressionType(body.expr);
+  const bodyExprType = binaryen.getExpressionType(bodyExpr);
   const shouldWrapOutcome =
     meta.effectful &&
     (bodyExprType === returnValueType ||
@@ -1069,11 +1257,11 @@ const compileFunctionItem = (
         bodyExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx)));
   const functionBody = shouldWrapOutcome
     ? wrapValueInOutcome({
-        valueExpr: body.expr,
+        valueExpr: bodyExpr,
         valueType: returnValueType,
         ctx,
       })
-    : body.expr;
+    : bodyExpr;
 
   ctx.mod.addFunction(
     meta.wasmName,

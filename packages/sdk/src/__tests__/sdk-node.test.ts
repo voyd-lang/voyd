@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectNodeModulesDirs,
   createSdk,
+  detectSrcRootForPath,
   type CompileResult,
   type EffectContinuation,
   type EffectHandler,
@@ -22,8 +23,24 @@ pub fn main(): Async -> i32
   Async::await(2) + 1
 `;
 const ASYNC_EFFECT_ID = "com.example.async";
+const RUNTIME_DIAGNOSTICS_SECTION = "voyd.runtime_diagnostics";
 const sdkTestRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(sdkTestRoot, "../../../../");
+
+const hasRuntimeDiagnosticsSection = (wasm: Uint8Array): boolean => {
+  const buffer =
+    wasm.buffer instanceof ArrayBuffer &&
+    wasm.byteOffset === 0 &&
+    wasm.byteLength === wasm.buffer.byteLength
+      ? wasm.buffer
+      : wasm.slice().buffer;
+  const module = new WebAssembly.Module(buffer);
+  const sections = WebAssembly.Module.customSections(
+    module,
+    RUNTIME_DIAGNOSTICS_SECTION
+  );
+  return sections.length > 0;
+};
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -125,6 +142,40 @@ describe("node sdk", () => {
     }
   });
 
+  it("keeps src-root imports when compiling nested entry paths", async () => {
+    const sdk = createSdk();
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-nested-src-"),
+    );
+    const srcDir = path.join(projectRoot, "src");
+    const entryDir = path.join(srcDir, "pkgs", "demo");
+    const entryPath = path.join(entryDir, "main.voyd");
+
+    await fs.mkdir(entryDir, { recursive: true });
+    await fs.writeFile(
+      path.join(srcDir, "shared.voyd"),
+      `pub fn value() -> i32
+  42
+`,
+    );
+    await fs.writeFile(
+      entryPath,
+      `use src::shared::all
+
+pub fn main() -> i32
+  value()
+`,
+    );
+
+    try {
+      const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+      const output = await result.run<number>({ entryName: "main" });
+      expect(output).toBe(42);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("collects node_modules directories from source up to filesystem root", () => {
     const startDir = path.join(path.sep, "tmp", "voyd", "nested");
     const resolvedStart = path.resolve(startDir);
@@ -136,6 +187,23 @@ describe("node sdk", () => {
     expect(dirs[0]).toBe(path.join(resolvedStart, "node_modules"));
     expect(dirs.at(-1)).toBe(path.join(rootDir, "node_modules"));
     expect(dirs).toContain(path.join(parentDir, "node_modules"));
+  });
+
+  it("detects the nearest src root for nested source files", () => {
+    const entryPath = path.join(
+      path.sep,
+      "tmp",
+      "voyd",
+      "workspace",
+      "src",
+      "pkgs",
+      "demo",
+      "main.voyd",
+    );
+
+    expect(detectSrcRootForPath(entryPath)).toBe(
+      path.join(path.sep, "tmp", "voyd", "workspace", "src"),
+    );
   });
 
   it("resolves packages from the default node_modules search path", async () => {
@@ -260,11 +328,37 @@ pub fn main() -> i32
       const result = expectCompileSuccess(
         await sdk.compile({ entryPath, optimize: true }),
       );
+      expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(false);
       const output = await result.run<number>({ entryName: "main" });
       expect(output).toBe(42);
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }
+  });
+
+  it("can disable runtime diagnostics for non-optimized builds", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `pub fn main() -> i32
+  42
+`,
+        runtimeDiagnostics: false,
+      }),
+    );
+    expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(false);
+  });
+
+  it("emits runtime diagnostics metadata by default", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `pub fn main() -> i32
+  42
+`,
+      }),
+    );
+    expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(true);
   });
 
   it("supports handlersByLabelSuffix using :: separators", async () => {

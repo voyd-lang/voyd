@@ -1,0 +1,25 @@
+trait Runner
+  fn run(self) -> i32
+
+obj PureRunner { value: i32 }
+obj AsyncRunner { value: i32 }
+
+eff Async
+  await(tail) -> i32
+
+impl Runner for PureRunner
+  fn run(self) -> i32
+    self.value + 1
+
+impl Runner for AsyncRunner
+  fn run(self) -> i32
+    self.value + Async::await()
+
+fn dispatch(r: Runner): Async -> i32
+  r.run()
+
+pub fn main() -> i32
+  try
+    dispatch(PureRunner { value: 3 }) + dispatch(AsyncRunner { value: 4 })
+  Async::await(tail):
+    tail(10)

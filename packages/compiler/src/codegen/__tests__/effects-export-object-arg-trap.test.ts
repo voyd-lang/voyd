@@ -21,5 +21,6 @@ describe("effectful exports with non-i32 args", () => {
         diag.message.includes("Supported payload categories")
     );
     expect(diagnostic).toBeDefined();
+    expect(diagnostic?.span.start).toBeGreaterThan(0);
   });
 });

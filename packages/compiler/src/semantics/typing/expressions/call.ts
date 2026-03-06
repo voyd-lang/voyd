@@ -85,6 +85,7 @@ import {
 } from "../import-symbol-mapping.js";
 import { hydrateImportedTraitMetadataForOwnerRef } from "../import-trait-impl-hydration.js";
 import { collectTraitOwnersFromTypeParams } from "../constraint-trait-owners.js";
+import { typeDefaultParameterValues } from "../default-parameters.js";
 
 type SymbolNameResolver = (symbol: SymbolId) => string;
 type OverloadCandidate = {
@@ -1474,6 +1475,9 @@ const ensureOptionalParameterIsSkippable = ({
     optionalResolverContextForTypingContext(ctx),
   );
   if (!optionalInfo) {
+    if (param.optional && param.type === ctx.primitives.unknown) {
+      return;
+    }
     throw new Error("optional parameter type must be Optional");
   }
   ensureTypeMatches(
@@ -1495,6 +1499,7 @@ const validateCallArgs = (
 ): { ok: true; plan: readonly CallArgumentPlanEntry[] } | { ok: false } => {
   const span = callSpan ?? ctx.hir.module.span;
   const plan: CallArgumentPlanEntry[] = [];
+  const hasUnknownArgs = args.some((arg) => arg.type === ctx.primitives.unknown);
   const result = walkCallArguments({
     args,
     params,
@@ -1505,24 +1510,26 @@ const validateCallArgs = (
         match.kind === "structural-field" && match.fieldName
           ? spanForObjectLiteralFieldValue(match.arg, match.fieldName, ctx)
           : spanForArg(match.arg, ctx);
-      ensureTypeMatches(
-        match.matchedType,
-        match.param.type,
-        ctx,
-        state,
-        `call argument ${match.paramIndex + 1}`,
-        normalizeSpan(matchSpan, match.param.span, span),
-      );
-      ensureMutableArgument({
-        arg: {
-          ...match.arg,
-          type: match.matchedType,
-          exprId: match.matchedExprId ?? match.arg.exprId,
-        },
-        param: match.param,
-        index: match.paramIndex,
-        ctx,
-      });
+      if (!(state.mode === "relaxed" && hasUnknownArgs)) {
+        ensureTypeMatches(
+          match.matchedType,
+          match.param.type,
+          ctx,
+          state,
+          `call argument ${match.paramIndex + 1}`,
+          normalizeSpan(matchSpan, match.param.span, span),
+        );
+        ensureMutableArgument({
+          arg: {
+            ...match.arg,
+            type: match.matchedType,
+            exprId: match.matchedExprId ?? match.arg.exprId,
+          },
+          param: match.param,
+          index: match.paramIndex,
+          ctx,
+        });
+      }
       if (match.kind === "direct") {
         plan.push({ kind: "direct", argIndex: match.argIndex });
         return true;
@@ -4132,7 +4139,7 @@ const typeFunctionCall = ({
     const calleeType = ctx.arena.internFunction({
       parameters: adjustedParameters.map((param) => ({
         ...param,
-        optional: false,
+        optional: param.optional ?? false,
       })),
       returnType: instantiation.returnType,
       effectRow: ctx.primitives.defaultEffectRow,
@@ -4427,8 +4434,19 @@ export const typeGenericFunctionBody = ({
   };
 
   let bodyType: TypeId | undefined;
+  let defaultEffectRows: number[] = [];
+  let signatureUpdated = false;
 
   try {
+    const defaultParameterValues = typeDefaultParameterValues({
+      fn,
+      signature,
+      ctx,
+      state,
+      typeExpression,
+    });
+    defaultEffectRows = defaultParameterValues.effectRows;
+    signatureUpdated = defaultParameterValues.signatureUpdated;
     bodyType = typeExpression(fn.body, ctx, state, {
       expectedType: expectedReturn,
     });
@@ -4439,7 +4457,11 @@ export const typeGenericFunctionBody = ({
       state,
       `function ${getSymbolName(symbol, ctx)} return type`,
     );
-    const inferredEffectRow = getExprEffectRow(fn.body, ctx);
+    const bodyEffectRow = getExprEffectRow(fn.body, ctx);
+    const inferredEffectRow =
+      defaultEffectRows.length === 0
+        ? bodyEffectRow
+        : composeEffectRows(ctx.effects, [bodyEffectRow, ...defaultEffectRows]);
     if (signature.annotatedEffects) {
       ensureEffectCompatibility({
         inferred: inferredEffectRow,
@@ -4451,23 +4473,14 @@ export const typeGenericFunctionBody = ({
       });
     } else if (signature.effectRow !== inferredEffectRow) {
       signature.effectRow = inferredEffectRow;
-      const functionType = ctx.arena.internFunction({
-        parameters: signature.parameters.map(({ type, label }) => ({
-          type,
-          label,
-          optional: false,
-        })),
-        returnType: signature.returnType,
-        effectRow: inferredEffectRow,
+      signatureUpdated = true;
+    }
+    if (signatureUpdated) {
+      refreshFunctionSignatureTypeForGenericBody({
+        symbol,
+        signature,
+        ctx,
       });
-      const scheme = ctx.arena.newScheme(
-        signature.typeParams?.map((param) => param.typeParam) ?? [],
-        functionType,
-      );
-      signature.typeId = functionType;
-      signature.scheme = scheme;
-      ctx.valueTypes.set(symbol, functionType);
-      ctx.table.setSymbolScheme(symbol, scheme);
     }
     if (state.mode === "strict" && signature.scheme) {
       if (ctx.effects.getFunctionEffect(symbol) === undefined) {
@@ -4496,6 +4509,34 @@ export const typeGenericFunctionBody = ({
     ctx.table.popExprTypeScope();
     ctx.functions.endInstantiation(key);
   }
+};
+
+const refreshFunctionSignatureTypeForGenericBody = ({
+  symbol,
+  signature,
+  ctx,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  ctx: TypingContext;
+}): void => {
+  const functionType = ctx.arena.internFunction({
+    parameters: signature.parameters.map(({ type, label, optional }) => ({
+      type,
+      label,
+      optional: optional ?? false,
+    })),
+    returnType: signature.returnType,
+    effectRow: signature.effectRow ?? ctx.primitives.defaultEffectRow,
+  });
+  const scheme = ctx.arena.newScheme(
+    signature.typeParams?.map((param) => param.typeParam) ?? [],
+    functionType,
+  );
+  signature.typeId = functionType;
+  signature.scheme = scheme;
+  ctx.valueTypes.set(symbol, functionType);
+  ctx.table.setSymbolScheme(symbol, scheme);
 };
 
 export const mergeSubstitutions = (

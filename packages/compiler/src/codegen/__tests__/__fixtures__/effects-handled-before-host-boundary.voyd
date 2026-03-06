@@ -1,0 +1,17 @@
+obj Box { value: i32 }
+
+pub eff Hidden
+  poke(tail, payload: Box) -> i32
+
+@effect(id: "test.host")
+pub eff Host
+  next_i32(tail) -> i32
+
+fn helper(): Hidden -> i32
+  Hidden::poke(Box { value: 41 })
+
+pub fn main(): Host -> i32
+  try forward
+    helper() + Host::next_i32()
+  Hidden::poke(tail, payload: Box):
+    tail(payload.value)

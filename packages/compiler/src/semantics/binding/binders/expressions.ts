@@ -96,13 +96,34 @@ export const bindExpr = (
   }
 };
 
+export const bindTypeExpr = (
+  expr: Expr | undefined,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker,
+): void => {
+  if (!expr || !isForm(expr)) return;
+
+  if (expr.calls("::")) {
+    bindTypeNamespaceAccess(expr, ctx, tracker);
+    return;
+  }
+
+  for (const child of expr.toArray()) {
+    bindTypeExpr(child, ctx, tracker);
+  }
+};
+
 const bindTry = (
   form: Form,
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
   const handlerEntries: Form[] = [];
-  const body = form.at(1);
+  const markerExpr = form.at(1);
+  const hasForwardUnhandled =
+    isIdentifierAtom(markerExpr) && markerExpr.value === "forward";
+  const bodyIndex = hasForwardUnhandled ? 2 : 1;
+  const body = form.at(bodyIndex);
   if (isForm(body) && body.calls("block")) {
     body.rest.forEach((entry) => {
       if (isForm(entry) && entry.calls(":")) {
@@ -118,7 +139,9 @@ const bindTry = (
   }
 
   handlerEntries.push(
-    ...form.rest.slice(1).filter((entry): entry is Form => isForm(entry)),
+    ...form.rest
+      .slice(bodyIndex)
+      .filter((entry): entry is Form => isForm(entry)),
   );
   handlerEntries.forEach((entry) => {
     if (!isForm(entry) || !entry.calls(":")) {
@@ -136,6 +159,10 @@ const bindTry = (
     const handlerBody = entry.at(2);
 
     tracker.enterScope(clauseScope, () => {
+      // Handler heads can reference imported operations (for example `Fx::op`).
+      // Bind the head itself so namespace member imports are materialized before
+      // lowering resolves handler operation symbols.
+      bindExpr(head, ctx, tracker);
       declareHandlerParams(head, ctx, clauseScope);
       bindExpr(handlerBody, ctx, tracker);
     });
@@ -381,6 +408,14 @@ const bindLambda = (
     signature.parameters.forEach((param) =>
       declareLambdaParam(param, scope, ctx),
     );
+    signature.parameters.forEach((param) => {
+      if (!isForm(param)) {
+        return;
+      }
+      bindTypeExpr(param.at(2), ctx, tracker);
+    });
+    bindTypeExpr(signature.returnType, ctx, tracker);
+    bindTypeExpr(signature.effectType, ctx, tracker);
     bindExpr(bodyExpr, ctx, tracker);
   });
 };
@@ -476,18 +511,48 @@ const bindNamespaceAccess = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
+  bindNamespaceAccessCore({
+    form,
+    ctx,
+    scope: tracker.current(),
+    bindChild: (expr) => bindExpr(expr, ctx, tracker),
+  });
+};
+
+const bindTypeNamespaceAccess = (
+  form: Form,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker,
+): void => {
+  bindNamespaceAccessCore({
+    form,
+    ctx,
+    scope: tracker.current(),
+    bindChild: (expr) => bindTypeExpr(expr, ctx, tracker),
+  });
+};
+
+const bindNamespaceAccessCore = ({
+  form,
+  ctx,
+  scope,
+  bindChild,
+}: {
+  form: Form;
+  ctx: BindingContext;
+  scope: ScopeId;
+  bindChild: (expr: Expr | undefined) => void;
+}): void => {
   const target = form.at(1);
   const member = form.at(2);
 
-  bindExpr(target, ctx, tracker);
-  bindExpr(member, ctx, tracker);
+  bindChild(target);
+  bindChild(member);
 
   const memberName = extractMemberName(member);
   if (!memberName) {
     return;
   }
-
-  const scope = tracker.current();
 
   const moduleSymbol = resolveNamespaceModuleSymbol(target, scope, ctx);
   if (typeof moduleSymbol === "number") {

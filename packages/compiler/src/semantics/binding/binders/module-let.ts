@@ -1,6 +1,6 @@
 import { toSourceSpan } from "../../utils.js";
 import { declarationDocForSyntax, rememberSyntax } from "../context.js";
-import { bindExpr } from "./expressions.js";
+import { bindExpr, bindTypeExpr } from "./expressions.js";
 import type { ParsedModuleLetDecl } from "../parsing.js";
 import type { BindingContext } from "../types.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
@@ -45,5 +45,6 @@ export const bindModuleLetDecl = (
     documentation: declarationDocForSyntax(decl.name, ctx),
   });
 
+  bindTypeExpr(decl.typeExpr, ctx, tracker);
   bindExpr(decl.initializer, ctx, tracker);
 };

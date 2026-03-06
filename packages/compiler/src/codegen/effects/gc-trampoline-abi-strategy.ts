@@ -1,6 +1,7 @@
 import binaryen from "binaryen";
 import type { CodegenContext } from "../context.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
+import { isPackageVisible } from "../../semantics/hir/index.js";
 import {
   collectEffectOperationSignatures,
   createEffectfulEntry,
@@ -15,6 +16,11 @@ import {
   collectHostBoundaryPayloadViolations,
   formatHostBoundaryPayloadViolation,
 } from "./host-boundary/payload-compatibility.js";
+import {
+  collectHostBoundaryOperationFilter,
+  filterSignaturesForHostBoundary,
+} from "./host-boundary/operation-filter.js";
+import type { EffectOpSignature } from "./host-boundary/types.js";
 import type { EffectsAbiStrategy } from "./codegen-backend.js";
 
 const hiddenHandlerParamType = (ctx: CodegenContext): binaryen.Type =>
@@ -39,6 +45,76 @@ const widenSignature: EffectsAbiStrategy["widenSignature"] = ({
         userParamOffset: 1,
       }
     : { paramTypes: userParamTypes, resultType: userResultType, userParamOffset: 0 };
+
+const parseSignatureLabel = (
+  label: string,
+): { moduleId: string; effectName: string } | undefined => {
+  const moduleSep = label.lastIndexOf("::");
+  if (moduleSep <= 0 || moduleSep >= label.length - 2) {
+    return undefined;
+  }
+  const moduleId = label.slice(0, moduleSep);
+  const operationLabel = label.slice(moduleSep + 2);
+  const opSep = operationLabel.lastIndexOf(".");
+  if (opSep <= 0) {
+    return undefined;
+  }
+  return {
+    moduleId,
+    effectName: operationLabel.slice(0, opSep),
+  };
+};
+
+const emitMissingEffectIdWarningsForHostBoundary = ({
+  contexts,
+  signatures,
+}: {
+  contexts: readonly CodegenContext[];
+  signatures: readonly EffectOpSignature[];
+}): void => {
+  const contextById = new Map(contexts.map((ctx) => [ctx.moduleId, ctx]));
+  const warned = new Set<string>();
+
+  signatures.forEach((signature) => {
+    const parsed = parseSignatureLabel(signature.label);
+    if (!parsed) {
+      return;
+    }
+    const warnKey = `${parsed.moduleId}::${parsed.effectName}`;
+    if (warned.has(warnKey)) {
+      return;
+    }
+    const moduleCtx = contextById.get(parsed.moduleId);
+    if (!moduleCtx) {
+      return;
+    }
+    const effectMeta = moduleCtx.module.meta.effects.find(
+      (effect) => effect.name === parsed.effectName,
+    );
+    if (!effectMeta || effectMeta.effectId || !isPackageVisible(effectMeta.visibility)) {
+      return;
+    }
+
+    const fallbackId = `${moduleCtx.module.meta.packageId}::${moduleCtx.moduleId}::${effectMeta.name}`;
+    const effectSpan =
+      Array.from(moduleCtx.module.hir.items.values()).find(
+        (item) => item.kind === "effect" && item.symbol === effectMeta.symbol,
+      )?.span ?? moduleCtx.module.hir.module.span;
+
+    moduleCtx.diagnostics.report(
+      diagnosticFromCode({
+        code: "CG0004",
+        params: {
+          kind: "missing-effect-id",
+          effectName: effectMeta.name,
+          fallbackId,
+        },
+        span: effectSpan,
+      }),
+    );
+    warned.add(warnKey);
+  });
+};
 
 const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
   entryCtx,
@@ -75,8 +151,22 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
 
   ensureEffectsMemory(entryCtx);
   const signatures = collectEffectOperationSignatures(entryCtx, contexts);
-  const payloadViolations = collectHostBoundaryPayloadViolations({
+  const operationFilter = collectHostBoundaryOperationFilter({
+    entryCtx,
+    effectfulExports,
+  });
+  const hostBoundarySignatures = filterSignaturesForHostBoundary({
+    entryCtx,
+    contexts,
     signatures,
+    filter: operationFilter,
+  });
+  emitMissingEffectIdWarningsForHostBoundary({
+    contexts,
+    signatures: hostBoundarySignatures,
+  });
+  const payloadViolations = collectHostBoundaryPayloadViolations({
+    signatures: hostBoundarySignatures,
     ctx: entryCtx,
   });
   if (payloadViolations.length > 0) {
@@ -97,12 +187,12 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
   const handleOutcome = createHandleOutcomeDynamic({
     ctx: entryCtx,
     runtime: entryCtx.effectsRuntime,
-    signatures,
+    signatures: hostBoundarySignatures,
   });
   const resumeContinuation = createResumeContinuation({
     ctx: entryCtx,
     runtime: entryCtx.effectsRuntime,
-    signatures,
+    signatures: hostBoundarySignatures,
   });
   createResumeEffectful({
     ctx: entryCtx,

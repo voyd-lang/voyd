@@ -10,7 +10,7 @@ import type { BindingContext } from "../types.js";
 import type { ParsedFunctionDecl } from "../parsing.js";
 import type { HirVisibility } from "../../hir/index.js";
 import type { ScopeId } from "../../ids.js";
-import { bindExpr } from "./expressions.js";
+import { bindExpr, bindTypeExpr } from "./expressions.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { toSourceSpan } from "../../utils.js";
@@ -71,6 +71,9 @@ export const bindFunctionDecl = (
   tracker.enterScope(fnScope, () => {
     typeParameters = bindFunctionTypeParameters(decl, ctx);
     boundParams = bindFunctionParameters(decl, ctx, tracker, options);
+    boundParams.forEach((param) => bindTypeExpr(param.typeExpr, ctx, tracker));
+    bindTypeExpr(decl.signature.returnType, ctx, tracker);
+    bindTypeExpr(decl.signature.effectType, ctx, tracker);
   });
 
   const visibility = options.visibilityOverride ?? decl.visibility;
@@ -131,6 +134,7 @@ const bindFunctionParameters = (
       label: param.label,
       labelAst: param.labelAst,
       optional: param.optional,
+      defaultValue: param.defaultValue,
       symbol: paramSymbol,
       ast: param.ast,
       typeExpr:
@@ -143,6 +147,9 @@ const bindFunctionParameters = (
     });
   });
 
+  decl.signature.params.forEach((param) =>
+    bindExpr(param.defaultValue, ctx, tracker)
+  );
   bindExpr(decl.body, ctx, tracker);
 
   return boundParams;

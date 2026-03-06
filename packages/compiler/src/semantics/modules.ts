@@ -27,3 +27,14 @@ export interface ModuleExportEntry {
 }
 
 export type ModuleExportTable = Map<string, ModuleExportEntry>;
+
+export interface ModuleExportSurfaceEntry {
+  name: string;
+  moduleId: string;
+  modulePath: ModulePath;
+  packageId: string;
+  kind: SymbolKind;
+  visibility: HirVisibility;
+}
+
+export type ModuleExportSurfaceTable = Map<string, ModuleExportSurfaceEntry>;

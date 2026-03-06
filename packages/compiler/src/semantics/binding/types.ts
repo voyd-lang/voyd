@@ -25,7 +25,10 @@ import type {
   ModulePath,
 } from "../../modules/types.js";
 import type { UsePathSelectionKind } from "../../modules/use-path.js";
-import type { ModuleExportTable } from "../modules.js";
+import type {
+  ModuleExportSurfaceTable,
+  ModuleExportTable,
+} from "../modules.js";
 import type { SourceSpan } from "../ids.js";
 
 export type StaticMethodTable = Map<
@@ -44,6 +47,7 @@ export interface BindingInputs {
   module?: ModuleNode;
   graph?: ModuleGraph;
   moduleExports?: Map<string, ModuleExportTable>;
+  moduleExportSurfaces?: Map<string, ModuleExportSurfaceTable>;
   dependencies?: Map<string, BindingResult>;
   includeTests?: boolean;
 }
@@ -113,6 +117,7 @@ export interface BindingContext {
   packageId: string;
   isPackageRoot: boolean;
   moduleExports: Map<string, ModuleExportTable>;
+  moduleExportSurfaces: Map<string, ModuleExportSurfaceTable>;
   dependencies: Map<string, BindingResult>;
   uses: BoundUse[];
   imports: BoundImport[];

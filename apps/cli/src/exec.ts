@@ -3,7 +3,7 @@ import { readFileSync, statSync, existsSync } from "fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
-import { createSdk, type CompileResult } from "@voyd/sdk";
+import { createSdk, detectSrcRootForPath, type CompileResult } from "@voyd/sdk";
 import { analyzeModules, loadModuleGraph, parse } from "@voyd/sdk/compiler";
 import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd/sdk/compiler";
 import {
@@ -13,7 +13,6 @@ import {
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
 import { resolvePackageDirs } from "./package-dirs.js";
-import { detectSrcRootForPath } from "./source-root.js";
 import { runTests } from "./test-runner.js";
 import { getConfig } from "./config/index.js";
 import {

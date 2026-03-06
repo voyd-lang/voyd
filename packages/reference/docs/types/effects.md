@@ -118,8 +118,10 @@ fn main(): () -> void
 Notes:
 - Effect operations are invoked like static functions (`Async::resolve`), or by
   importing them: `use Async::{resolve, reject}`.
-- Unhandled operations propagate to the caller and stay in the function's effect
-  row. Handled operations are removed from the row.
+- `try` is strict by default: if any operation in a closed row is unhandled,
+  type checking reports an error.
+- Use `try forward` to handle selected operations and explicitly forward all
+  remaining operations to the caller (they stay in the function's effect row).
 - A handler may re-raise an effect (keeping it in the row) or fully discharge
   it.
 - `resume` is one-shot: handlers may resume zero or one time; a second resume
@@ -129,6 +131,18 @@ Notes:
   resumes trap at runtime.
 - Handlers are written as clauses after `try`: each clause matches an operation
   by name and destructures its parameters (including `resume`/`tail`).
+
+`try forward` example:
+
+```voyd
+fn run_partially(): (Async, Log) -> i32
+  try forward
+    let value = Async::await()
+    Log::info("continuing")
+    value
+  Async::await(tail):
+    tail(1)
+```
 
 ---
 
@@ -146,8 +160,10 @@ Notes:
   explicit to keep semver-stable surface areas. Any function exported by the
   API that does not explicitly define it's effects will be assumed pure,
   and will result in a compiler error if not all effects are handled.
-- Handlers shrink effect rows. For example, `try ... with Async` yields a pure
-  result if the handler covers all Async operations and does not re-raise.
+- Handlers shrink effect rows. A strict `try` yields a pure result when its
+  clauses cover all performed operations and do not re-raise.
+- `try forward` removes handled operations and keeps all remaining operations in
+  the inferred row.
 
 ---
 

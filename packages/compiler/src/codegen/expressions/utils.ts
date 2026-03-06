@@ -16,9 +16,16 @@ export const coerceToBinaryenType = (
   ctx: CodegenContext,
   expr: binaryen.ExpressionRef,
   type: binaryen.Type
-): binaryen.ExpressionRef =>
-  type === binaryen.none
-    ? asStatement(ctx, expr)
-    : binaryen.getExpressionType(expr) === type
-      ? expr
-      : ctx.mod.block(null, [expr], type);
+): binaryen.ExpressionRef => {
+  const exprType = binaryen.getExpressionType(expr);
+  if (type === binaryen.none) {
+    return asStatement(ctx, expr);
+  }
+  if (exprType === type || exprType === binaryen.unreachable) {
+    return expr;
+  }
+  if (exprType === binaryen.none) {
+    return ctx.mod.block(null, [expr, ctx.mod.unreachable()], type);
+  }
+  return ctx.mod.block(null, [expr], type);
+};

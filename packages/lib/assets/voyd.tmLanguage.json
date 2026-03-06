@@ -178,7 +178,7 @@
       "patterns": [
         {
           "name": "keyword.control.voyd",
-          "match": "\\b(if|then|else|elif|while|for|return|break|do|tail|resume)\\b"
+          "match": "\\b(if|then|else|elif|while|for|return|break|do|tail|resume|try forward|try)\\b"
         },
         {
           "name": "keyword.other.voyd",
@@ -202,7 +202,7 @@
         },
         {
           "name": "keyword.operator.logical.voyd",
-          "match": "\\s(==|>=|<=|<|>|and|or|xor)\\s"
+          "match": "\\s(==|>=|<=|<|>|and|or|xor|not)\\s"
         },
         {
           "name": "keyword.operator.word.voyd",

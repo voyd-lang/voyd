@@ -1,0 +1,28 @@
+use src::dep
+
+pub obj Camera {
+  pixel00_loc: dep::Point3,
+  pixel_delta_u: dep::Vec3,
+  pixel_delta_v: dep::Vec3
+}
+
+impl Camera
+  fn init() -> Camera
+    Camera {
+      pixel00_loc: dep::Point3(0.0, 0.0, 0.0),
+      pixel_delta_u: dep::Vec3(1.0, 0.0, 0.0),
+      pixel_delta_v: dep::Vec3(0.0, 1.0, 0.0)
+    }
+
+  fn get_ray(self)
+    let offset = sample_square()
+    let i = 1.0
+    let pixel_sample = self.pixel00_loc
+      + (self.pixel_delta_u * (i + offset.x))
+    pixel_sample
+
+pub fn main()
+  Camera().get_ray()
+
+fn sample_square()
+  dep::Vec3(0.25, 0.0, 0.0)

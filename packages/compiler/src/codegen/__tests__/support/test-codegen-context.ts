@@ -148,6 +148,7 @@ export const createTestCodegenContext = (): {
     options: {
       optimize: false,
       validate: false,
+      runtimeDiagnostics: true,
       emitEffectHelpers: false,
       continuationBackend: {},
       testMode: false,

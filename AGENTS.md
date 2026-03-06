@@ -33,6 +33,8 @@ compiles to webassembly.
 Always build with long term maintainability in mind. Avoid short term hacks.
 If you encounter code or an architecture that could benefit from a refactor,
 report on it and suggest direction in your final response.
+When diagnosing bugs, prefer implementation-level root-cause fixes over
+call-site/type-annotation workarounds unless a workaround is explicitly requested.
 
 Voyd has not yet been released. Breaking changes to public APIs are ok. Just
 note the breaking changes if made.
@@ -56,6 +58,16 @@ Helpful commands:
 You should generally add unit tests (especially e2e ones)
 
 E2E Unit tests should go in apps/smoke (unless strictly scoped to the compiler). Always prefer the public API
+
+## Test Placement Guidance
+
+Before adding tests, read [`docs/testing/test-layer-ownership.md`](docs/testing/test-layer-ownership.md).
+
+- `packages/compiler`: parser/typing/lowering/codegen internals and compiler-only contracts.
+- `packages/sdk`: public compile/run/test APIs and runtime adapter contracts.
+- `apps/cli`: argument parsing, command wiring, process UX, and exit/reporting behavior.
+- `apps/smoke`: end-to-end user-visible flows via public APIs (cross-package integration).
+- Avoid duplicating semantic assertions across CLI/SDK/smoke unless it protects a boundary; if duplicated, document the boundary and keep exactly one canonical layer.
 
 # TS Style Guide
 

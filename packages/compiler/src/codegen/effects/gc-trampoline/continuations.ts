@@ -26,6 +26,7 @@ import { createGroupedContinuationExpressionCompiler } from "../continuation-com
 import { wrapValueInOutcome } from "../outcome-values.js";
 import { functionRefType } from "./shared.js";
 import { buildInstanceSubstitution } from "../../type-substitution.js";
+import { coerceToBinaryenType } from "../../expressions/utils.js";
 import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
@@ -521,9 +522,14 @@ export const ensureContinuationFunction = ({
     expectedResultTypeId: resolvedReturnTypeId,
   });
   const needsWrap = binaryen.getExpressionType(bodyExpr.expr) === returnWasmType;
-  const bodyOutcomeExpr = needsWrap
+  const rawBodyOutcomeExpr = needsWrap
     ? wrapValueInOutcome({ valueExpr: bodyExpr.expr, valueType: returnWasmType, ctx })
     : bodyExpr.expr;
+  const bodyOutcomeExpr = coerceToBinaryenType(
+    ctx,
+    rawBodyOutcomeExpr,
+    ctx.effectsRuntime.outcomeType
+  );
 
   let restoreChain = ctx.mod.nop();
 

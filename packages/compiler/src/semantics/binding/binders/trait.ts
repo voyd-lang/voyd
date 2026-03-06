@@ -35,6 +35,7 @@ import { moduleVisibility } from "../../hir/index.js";
 import { declareValueOrParameter } from "../redefinitions.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
+import { bindTypeExpr } from "./expressions.js";
 
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
@@ -153,7 +154,13 @@ const bindTraitMethod = ({
   let params: ParameterDeclInput[] = [];
   tracker.enterScope(methodScope, () => {
     typeParameters = bindTypeParameters(decl.signature.typeParameters, ctx);
+    decl.signature.typeParameters.forEach((param) =>
+      bindTypeExpr(param.constraint, ctx, tracker),
+    );
     params = bindTraitMethodParameters(decl, ctx, methodScope);
+    params.forEach((param) => bindTypeExpr(param.typeExpr, ctx, tracker));
+    bindTypeExpr(decl.signature.returnType, ctx, tracker);
+    bindTypeExpr(decl.signature.effectType, ctx, tracker);
     bindExpr(decl.body, ctx, tracker);
   });
 
@@ -179,6 +186,9 @@ const bindTraitMethodParameters = (
   scope: ScopeId
 ): ParameterDeclInput[] =>
   decl.signature.params.map((param) => {
+    if (param.defaultValue) {
+      throw new Error("trait methods do not support default parameters");
+    }
     rememberSyntax(param.ast, ctx);
     if (param.labelAst) {
       rememberSyntax(param.labelAst, ctx);

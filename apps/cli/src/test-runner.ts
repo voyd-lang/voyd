@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   createSdk,
+  detectSrcRootForPath,
   type TestEvent,
   type TestReporter,
   type TestRunSummary,
@@ -14,7 +15,6 @@ import {
 } from "@voyd/sdk/compiler";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { resolvePackageDirs } from "./package-dirs.js";
-import { detectSrcRootForPath } from "./source-root.js";
 
 const sdk = createSdk();
 

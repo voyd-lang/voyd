@@ -1,0 +1,8 @@
+pub eff Async
+  await(resume, value: i32) -> i32
+
+pub fn f(x: i32): Async -> i32
+  Async::await(x) + 1
+
+pub fn g(): Async -> i32
+  Async::await(1)

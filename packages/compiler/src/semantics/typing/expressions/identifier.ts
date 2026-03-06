@@ -5,7 +5,7 @@ import type {
   HirTypeExpr,
 } from "../../hir/index.js";
 import type { SourceSpan, SymbolId, TypeId } from "../../ids.js";
-import { resolveImportedTypeExpr, resolveImportedValue } from "../imports.js";
+import { resolveImportedTypeExpr } from "../imports.js";
 import type { TypingContext, TypingState } from "../types.js";
 import { getIntrinsicType } from "./intrinsics.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
@@ -13,6 +13,10 @@ import { createTypingState } from "../context.js";
 import { typeExpression } from "../expressions.js";
 import { ensureEffectCompatibility, getExprEffectRow } from "../effects.js";
 import { resolveTypeAlias, resolveTypeExpr, unifyWithBudget } from "../type-system.js";
+import {
+  hydrateImportedValueLikeSymbol,
+  isImportedValueLikeSymbol,
+} from "../import-hydration.js";
 
 export const typeIdentifierExpr = (
   expr: HirExpression & { exprKind: "identifier"; symbol: SymbolId },
@@ -120,12 +124,8 @@ export const getValueType = (
     return intrinsicType;
   }
 
-  const importMetadata = (record.metadata ?? {}) as {
-    intrinsic?: boolean;
-    import?: unknown;
-  };
-  if (importMetadata.import) {
-    const imported = resolveImportedValue({ symbol, ctx });
+  if (isImportedValueLikeSymbol({ symbol, ctx })) {
+    const imported = hydrateImportedValueLikeSymbol({ symbol, ctx });
     if (imported) {
       return imported.type;
     }

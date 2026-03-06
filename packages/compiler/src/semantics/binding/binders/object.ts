@@ -10,6 +10,7 @@ import { inheritMemberVisibility } from "../../hir/index.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
+import { bindTypeExpr } from "./expressions.js";
 
 export const bindObjectDecl = (
   decl: ParsedObjectDecl,
@@ -54,11 +55,16 @@ export const bindObjectDecl = (
   const fields: ObjectFieldDecl[] = [];
   tracker.enterScope(objectScope, () => {
     typeParameters = bindTypeParameters(decl.typeParameters, ctx);
+    decl.typeParameters.forEach((param) =>
+      bindTypeExpr(param.constraint, ctx, tracker),
+    );
+    bindTypeExpr(decl.base, ctx, tracker);
 
     decl.fields.forEach((field) => {
       rememberSyntax(field.ast, ctx);
       rememberSyntax(field.name, ctx);
       rememberSyntax(field.typeExpr, ctx);
+      bindTypeExpr(field.typeExpr, ctx, tracker);
 
       const fieldSymbol = ctx.symbolTable.declare({
         name: field.name.value,

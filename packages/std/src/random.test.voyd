@@ -79,6 +79,45 @@ test "random_i64 includes i32 max for inclusive upper bounds":
 
   assert(value, eq: i64_from_i32(2147483647))
 
+test "random_i64 includes i64 max for inclusive upper bounds":
+  let value = random_i64_from_seeds_with_range({
+    i64_seed: i64_from_i32(0),
+    u64_seed: i64_from_i32(1),
+    range: Range<i64> {
+      start: Some<i64> { value: 9223372036854775806i64 },
+      end: Some<i64> { value: test_i64_max_value() },
+      include_end: true
+    }
+  })
+
+  assert(value, eq: test_i64_max_value())
+
+test "random_i64 full-domain inclusive range uses next_i64 fast path":
+  let value = random_i64_from_seeds_with_range({
+    i64_seed: i64_from_i32(123),
+    u64_seed: i64_from_i32(0),
+    range: Range<i64> {
+      start: Some<i64> { value: test_i64_min_value() },
+      end: Some<i64> { value: test_i64_max_value() },
+      include_end: true
+    }
+  })
+
+  assert(value, eq: i64_from_i32(123))
+
+test "random_i64 returns start for empty ranges":
+  let value = random_i64_from_seeds_with_range({
+    i64_seed: i64_from_i32(999),
+    u64_seed: i64_from_i32(999),
+    range: Range<i64> {
+      start: Some<i64> { value: i64_from_i32(10) },
+      end: Some<i64> { value: i64_from_i32(10) },
+      include_end: false
+    }
+  })
+
+  assert(value, eq: i64_from_i32(10))
+
 test "next_u64 forwards host bits":
   let seed = i64_from_i32(-5)
   let value = next_u64_from_seed(seed)
@@ -114,6 +153,18 @@ test "random_f64 applies inclusive range end":
 
   assert(value, eq: 3.5)
 
+test "random_f64 returns start for empty ranges":
+  let value = random_f64_from_seed_with_range({
+    seed: half_unit_seed_i64(),
+    range: Range<f64> {
+      start: Some<f64> { value: 5.0 },
+      end: Some<f64> { value: 5.0 },
+      include_end: false
+    }
+  })
+
+  assert(value, eq: 5.0)
+
 test "random_f32 defaults to unit interval":
   let value = random_f32_from_seed(half_unit_seed_i64())
   assert(f64_from_f32(value), eq: 0.5)
@@ -131,6 +182,93 @@ test "random_f32 supports range overload":
   })
 
   assert(f64_from_f32(value), eq: 3.5)
+
+test "local_rng uses deterministic sequence for a seed":
+  let ~left = LocalRng::seeded(i64_from_i32(42))
+  let ~right = LocalRng::seeded(i64_from_i32(42))
+  let int_range = Range<i32> {
+    start: Some<i32> { value: 10 },
+    end: Some<i32> { value: 20 },
+    include_end: false
+  }
+
+  assert(left.next_u64().bits, eq: right.next_u64().bits)
+  assert(left.next_i64(), eq: right.next_i64())
+  assert(left.random_f64(), eq: right.random_f64())
+  assert(left.random_i32(int_range), eq: right.random_i32(int_range))
+
+test "local_rng seeded_from_host consumes one host seed":
+  let ~calls = Array<i32>::init()
+  let ~unit_values = Array<f64>::init()
+  let ~ranged_values = Array<f64>::init()
+
+  try
+    let ~rng = LocalRng::seeded_from_host()
+    let unit = rng.random_f64()
+    let ranged = rng.random_f64(
+      Range<f64> {
+        start: Some<f64> { value: 10.0 },
+        end: Some<f64> { value: 20.0 },
+        include_end: false
+      }
+    )
+    unit_values.push(unit)
+    ranged_values.push(ranged)
+  Random::next_u64(tail):
+    calls.push(1)
+    tail(i64_from_i32(99))
+  Random::next_i64(tail):
+    calls.push(2)
+    tail(i64_from_i32(0))
+  Random::fill_bytes(tail, _len):
+    calls.push(3)
+    tail(msgpack::make_null())
+
+  let unit = optional_f64_or(unit_values.get(0), -1.0)
+  let ranged = optional_f64_or(ranged_values.get(0), -1.0)
+  assert(unit >= 0.0, eq: true)
+  assert(unit < 1.0, eq: true)
+  assert(ranged >= 10.0, eq: true)
+  assert(ranged < 20.0, eq: true)
+  assert(optional_i32_or(calls.get(0), -1), eq: 1)
+  assert(calls.len(), eq: 1)
+
+test "local_rng random_i64 uses next_i64 for full-domain inclusive range":
+  let full_range = Range<i64> {
+    start: Some<i64> { value: test_i64_min_value() },
+    end: Some<i64> { value: test_i64_max_value() },
+    include_end: true
+  }
+  let ~expected_rng = LocalRng::seeded(i64_from_i32(77))
+  let expected = expected_rng.next_i64()
+  let ~actual_rng = LocalRng::seeded(i64_from_i32(77))
+  let actual = actual_rng.random_i64(full_range)
+
+  assert(actual, eq: expected)
+
+test "local_rng random_i64 returns start for empty ranges":
+  let ~rng = LocalRng::seeded(i64_from_i32(123))
+  let value = rng.random_i64(
+    Range<i64> {
+      start: Some<i64> { value: i64_from_i32(10) },
+      end: Some<i64> { value: i64_from_i32(10) },
+      include_end: false
+    }
+  )
+
+  assert(value, eq: i64_from_i32(10))
+
+test "local_rng random_f64 returns start for empty ranges":
+  let ~rng = LocalRng::seeded(i64_from_i32(123))
+  let value = rng.random_f64(
+    Range<f64> {
+      start: Some<f64> { value: 5.0 },
+      end: Some<f64> { value: 5.0 },
+      include_end: false
+    }
+  )
+
+  assert(value, eq: 5.0)
 
 fn random_i32_from_seed(seed: i64) -> i32
   try
@@ -163,14 +301,21 @@ fn random_i64_from_seed(seed: i64) -> i64
     tail(i64_from_i32(0))
 
 fn random_i64_from_seed_with_range({ seed: i64, range: Range<i64> }) -> i64
+  random_i64_from_seeds_with_range({
+    i64_seed: seed,
+    u64_seed: i64_from_i32(0),
+    range: range
+  })
+
+fn random_i64_from_seeds_with_range({ i64_seed: i64, u64_seed: i64, range: Range<i64> }) -> i64
   try
     random_i64(range)
   Random::fill_bytes(tail, _len):
     tail(msgpack::make_null())
   Random::next_i64(tail):
-    tail(seed)
+    tail(i64_seed)
   Random::next_u64(tail):
-    tail(i64_from_i32(0))
+    tail(u64_seed)
 
 fn random_f64_from_seed(seed: i64) -> f64
   try
@@ -229,10 +374,23 @@ fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
     None:
       fallback
 
+fn optional_f64_or(value: Option<f64>, fallback: f64): () -> f64
+  match(value)
+    Some<f64> { value: present }:
+      present
+    None:
+      fallback
+
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
 
 fn half_unit_seed_i64() -> i64
   pow2_i64(52)
+
+fn test_i64_max_value(): () -> i64
+  9223372036854775807i64
+
+fn test_i64_min_value(): () -> i64
+  -9223372036854775808i64
 
 fn pow2_i64(exp: i32): () -> i64
   var out = i64_from_i32(1)

@@ -7,12 +7,6 @@ import type {
   TypeId,
   TypeParamId,
 } from "../../semantics/ids.js";
-import {
-  isPackageVisible,
-  type HirVisibility,
-} from "../../semantics/hir/index.js";
-import { diagnosticFromCode, normalizeSpan } from "../../diagnostics/index.js";
-import type { SourceSpan } from "../../diagnostics/types.js";
 import { getRequiredExprType } from "../types.js";
 import { resolveEffectSignatureTypes } from "./effect-signature.js";
 import { walkHirExpression } from "../hir-walk.js";
@@ -100,31 +94,12 @@ const resolveEffectId = ({
   ctx,
   effectName,
   explicitId,
-  visibility,
-  spanHint,
 }: {
   ctx: CodegenContext;
   effectName: string;
   explicitId?: string;
-  visibility: HirVisibility;
-  spanHint?: SourceSpan;
 }): EffectIdInfo => {
   const fallbackId = `${ctx.module.meta.packageId}::${ctx.moduleId}::${effectName}`;
-  if (!explicitId && isPackageVisible(visibility)) {
-    ctx.diagnostics.report(
-      diagnosticFromCode({
-        code: "CG0004",
-        params: {
-          kind: "missing-effect-id",
-          effectName,
-          fallbackId,
-        },
-        span: normalizeSpan(spanHint, ctx.module.hir.module.span),
-        severity: "warning",
-        phase: "codegen",
-      }),
-    );
-  }
   const id = explicitId ?? fallbackId;
   return { id, hash: hashEffectId(id) };
 };
@@ -401,20 +376,29 @@ const buildOwnerMap = (ctx: CodegenContext): Map<HirExprId, SymbolId> => {
 };
 
 const collectEffectIds = (ctx: CodegenContext): EffectIdInfo[] => {
-  const effectItems = new Map<SymbolId, { span: SourceSpan }>();
-  ctx.module.hir.items.forEach((item) => {
-    if (item.kind !== "effect") return;
-    effectItems.set(item.symbol, { span: item.span });
-  });
   return ctx.module.meta.effects.map((effect) =>
     resolveEffectId({
       ctx,
       effectName: effect.name,
       explicitId: effect.effectId,
-      visibility: effect.visibility,
-      spanHint: effectItems.get(effect.symbol)?.span,
     }),
   );
+};
+
+const fallbackEffectAndOpNames = (
+  qualifiedName: string,
+): { effectName: string; opName: string } => {
+  const separatorIndex = qualifiedName.lastIndexOf(".");
+  if (separatorIndex <= 0 || separatorIndex >= qualifiedName.length - 1) {
+    return {
+      effectName: qualifiedName || "effect",
+      opName: qualifiedName || "operation",
+    };
+  }
+  return {
+    effectName: qualifiedName.slice(0, separatorIndex),
+    opName: qualifiedName.slice(separatorIndex + 1),
+  };
 };
 
 export const buildEffectRegistry = (
@@ -443,21 +427,27 @@ export const buildEffectRegistry = (
       if (!info) {
         throw new Error(`missing effect info for op ${site.effectSymbol}`);
       }
-      const effectIds = effectIdsByModule.get(ctx.moduleId);
+      const sourceModuleId = info.sourceModuleId ?? ctx.moduleId;
+      const sourceModule = ctx.program.modules.get(sourceModuleId);
+      if (!sourceModule) {
+        throw new Error(`missing source module for effect op ${site.effectSymbol}`);
+      }
+      const effectIds = effectIdsByModule.get(sourceModuleId);
       if (!effectIds) {
-        throw new Error(`missing effect ids for module ${ctx.moduleId}`);
+        throw new Error(`missing effect ids for module ${sourceModuleId}`);
       }
       const effectId = effectIds[info.localEffectIndex];
       if (!effectId) {
         throw new Error(
-          `missing effect id for ${ctx.moduleId}:${info.localEffectIndex}`,
+          `missing effect id for ${sourceModuleId}:${info.localEffectIndex}`,
         );
       }
-      const effectMeta = ctx.module.meta.effects[info.localEffectIndex];
+      const effectMeta = sourceModule.meta.effects[info.localEffectIndex];
+      const fallbackNames = fallbackEffectAndOpNames(info.name);
       const opMeta = effectMeta?.operations[info.opIndex];
-      const opName = opMeta?.name ?? `${info.opIndex}`;
-      const effectName = effectMeta?.name ?? `${info.localEffectIndex}`;
-      const label = `${ctx.moduleId}::${effectName}.${opName}`;
+      const opName = opMeta?.name ?? fallbackNames.opName;
+      const effectName = effectMeta?.name ?? fallbackNames.effectName;
+      const label = `${sourceModuleId}::${effectName}.${opName}`;
       const resumeKind =
         info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
       const owners = ownerByExpr.get(site.exprId);
@@ -546,23 +536,25 @@ export const getEffectOpInstanceInfo = ({
   if (!info) {
     throw new Error(`missing effect info for op ${site.effectSymbol}`);
   }
-  const effectMeta = ctx.module.meta.effects[info.localEffectIndex];
-  if (!effectMeta) {
-    throw new Error(
-      `missing effect metadata for ${ctx.moduleId}:${info.localEffectIndex}`,
-    );
+  const sourceModuleId = info.sourceModuleId ?? ctx.moduleId;
+  const sourceModule = ctx.program.modules.get(sourceModuleId);
+  if (!sourceModule) {
+    throw new Error(`missing source module for effect op ${site.effectSymbol}`);
   }
-  const effectId = registry.getEffectId(ctx.moduleId, info.localEffectIndex);
+  const effectMeta = sourceModule.meta.effects[info.localEffectIndex];
+  const effectId = registry.getEffectId(sourceModuleId, info.localEffectIndex);
   if (!effectId) {
     throw new Error(
-      `missing effect id for ${ctx.moduleId}:${info.localEffectIndex}`,
+      `missing effect id for ${sourceModuleId}:${info.localEffectIndex}`,
     );
   }
   const resumeKind =
     info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
-  const opMeta = effectMeta.operations[info.opIndex];
-  const opName = opMeta?.name ?? `${info.opIndex}`;
-  const label = `${ctx.moduleId}::${effectMeta.name}.${opName}`;
+  const fallbackNames = fallbackEffectAndOpNames(info.name);
+  const opMeta = effectMeta?.operations[info.opIndex];
+  const opName = opMeta?.name ?? fallbackNames.opName;
+  const effectName = effectMeta?.name ?? fallbackNames.effectName;
+  const label = `${sourceModuleId}::${effectName}.${opName}`;
   const signature = resolvePerformSignature({ site, ctx, typeInstanceId });
   const signatureHash = signatureHashFor({
     params: signature.params,

@@ -16,7 +16,11 @@ import { runTypingPipeline, type TypingResult } from "./typing/typing.js";
 import { specializeOverloadCallees } from "./typing/specialize-overloads.js";
 import { toSourceSpan } from "./utils.js";
 import type { OverloadSetId, SourceSpan, SymbolId } from "./ids.js";
-import type { ModuleExportEffect, ModuleExportTable } from "./modules.js";
+import type {
+  ModuleExportEffect,
+  ModuleExportSurfaceTable,
+  ModuleExportTable,
+} from "./modules.js";
 import type { DependencySemantics } from "./typing/types.js";
 import type { Diagnostic } from "../diagnostics/index.js";
 import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
@@ -42,6 +46,7 @@ export interface SemanticsPipelineOptions {
   module: ModuleNode;
   graph: ModuleGraph;
   exports?: Map<string, ModuleExportTable>;
+  exportSurfaces?: Map<string, ModuleExportSurfaceTable>;
   dependencies?: Map<string, SemanticsPipelineResult>;
   typing?: Partial<Pick<TypingResult, "arena" | "effects">>;
   includeTests?: boolean;
@@ -57,6 +62,7 @@ export const semanticsPipeline = (
     module,
     graph,
     exports,
+    exportSurfaces,
     dependencies,
     typing: typingState,
     recoverFromTypingErrors,
@@ -83,6 +89,7 @@ export const semanticsPipeline = (
     module,
     graph,
     moduleExports: exports ?? new Map(),
+    moduleExportSurfaces: exportSurfaces ?? new Map(),
     dependencies: dependencies
       ? new Map(
           Array.from(dependencies.entries()).map(([id, entry]) => [

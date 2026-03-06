@@ -1,0 +1,20 @@
+pub obj Vec3 {
+  x: f64,
+  y: f64,
+  z: f64
+}
+
+impl Vec3
+  fn init(x: f64, y: f64, z: f64) -> Vec3
+    Vec3 { x, y, z }
+
+  fn '+'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z }
+
+  fn '*'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x * other.x, y: self.y * other.y, z: self.z * other.z }
+
+  fn '*'(self, scalar: f64) -> Vec3
+    Vec3 { x: self.x * scalar, y: self.y * scalar, z: self.z * scalar }
+
+pub type Point3 = Vec3

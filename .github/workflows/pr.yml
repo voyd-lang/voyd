@@ -32,7 +32,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
     env:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -90,13 +90,6 @@ jobs:
         # Turbo (2.6.x) rejects combining --affected with --filter, so scope by this step guard
         # and keep affected package selection inside turbo.
         run: npx turbo run build --affected --output-logs=errors-only
-      # Dist mode is validated separately via targeted CLI e2e when CLI/runtime areas change.
-      - name: Build CLI dist for dist e2e
-        if: steps.changes.outputs.cli == 'true'
-        run: npx turbo run build --filter=@voyd/cli... --output-logs=errors-only
-      - name: Run CLI dist e2e
-        if: steps.changes.outputs.cli == 'true'
-        run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd/cli test -- src/__tests__/cli-e2e.test.ts
       - name: Run typing benchmark regression gate
         if: steps.changes.outputs.compiler_semantics == 'true'
         env:
@@ -104,3 +97,58 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TYPING_BENCH_MAX_REGRESSION_PCT: "15"
         run: node scripts/ci/check-typing-bench-regression.mjs
+
+  cli-dist-e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+      TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
+      - name: Detect changed areas
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cli:
+              - "apps/cli/**"
+              - "packages/sdk/**"
+              - "packages/lib/**"
+              - "packages/std/**"
+              - "packages/compiler/**"
+              - "packages/js-host/**"
+              - "scripts/voyd"
+              - "turbo.json"
+              - "package-lock.json"
+              - "vite.config.ts"
+              - "vitest.config.ts"
+              - "tsconfig*.json"
+      - name: Use Node.js
+        if: steps.changes.outputs.cli == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        if: steps.changes.outputs.cli == 'true'
+        run: npm ci --include=optional
+      # Dist mode is validated separately via targeted CLI e2e when CLI/runtime areas change.
+      - name: Build CLI dist for dist e2e
+        if: steps.changes.outputs.cli == 'true'
+        run: npx turbo run build --filter=@voyd/cli... --output-logs=errors-only
+      - name: Run CLI dist e2e
+        if: steps.changes.outputs.cli == 'true'
+        run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd/cli test -- src/__tests__/cli-e2e.test.ts

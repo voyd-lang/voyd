@@ -253,16 +253,31 @@ const computeLiveness = ({
 
 const shouldSkipCalleeIdentifierUse = ({
   symbol,
+  callHasResolvedTargets,
   ctx,
 }: {
   symbol: SymbolId;
+  callHasResolvedTargets: boolean;
   ctx: CodegenContext;
 }): boolean => {
-  if (!ctx.program.functions.getSignature(ctx.moduleId, symbol)) {
-    return false;
+  if (callHasResolvedTargets) {
+    return true;
   }
+  if (ctx.program.functions.getSignature(ctx.moduleId, symbol)) {
+    return true;
+  }
+
+  const importTarget = ctx.program.imports.getTarget(ctx.moduleId, symbol);
+  if (importTarget) {
+    const resolved = ctx.program.symbols.refOf(importTarget);
+    if (ctx.program.functions.getSignature(resolved.moduleId, resolved.symbol)) {
+      return true;
+    }
+  }
+
   const canonicalId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, symbol);
-  return ctx.program.symbols.isModuleScoped(canonicalId);
+  const intrinsic = ctx.program.symbols.getIntrinsicFunctionFlags(canonicalId);
+  return intrinsic.intrinsic === true;
 };
 
 const buildCfg = ({
@@ -597,15 +612,15 @@ const buildCfg = ({
       }
       case "call": {
         const calleeExpr = ctx.module.hir.expressions.get(expr.callee);
-        const calleeIdentifierIsModuleScoped =
-          calleeExpr?.exprKind === "identifier"
-            ? ctx.program.symbols.isModuleScoped(
-                ctx.program.symbols.canonicalIdOf(ctx.moduleId, calleeExpr.symbol)
-              )
-            : false;
+        const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
+        const callHasResolvedTargets = (callInfo.targets?.size ?? 0) > 0;
         const skipCalleeIdentifierUse =
           calleeExpr?.exprKind === "identifier"
-            ? shouldSkipCalleeIdentifierUse({ symbol: calleeExpr.symbol, ctx })
+            ? shouldSkipCalleeIdentifierUse({
+                symbol: calleeExpr.symbol,
+                callHasResolvedTargets,
+                ctx,
+              })
             : false;
         const calleeGraph =
           calleeExpr && calleeExpr.exprKind === "identifier"
@@ -647,7 +662,7 @@ const buildCfg = ({
           calleeExpr?.exprKind === "overload-set"
             ? false
             : calleeExpr?.exprKind === "identifier"
-              ? !calleeIdentifierIsModuleScoped
+              ? !skipCalleeIdentifierUse
               : true;
         attachCallArgTempCaptures(
           includeCalleeTempCapture

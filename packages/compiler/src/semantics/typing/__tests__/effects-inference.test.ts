@@ -654,6 +654,70 @@ fn missing()
     expect(caught && (caught as any).diagnostic?.code).toBe("TY0013");
   });
 
+  it("reports missing handlers for strict partial handlers", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+eff Log
+  fn write(tail) -> void
+
+fn missing()
+  try
+    let value = Async::await()
+    Log::write()
+    value
+  Async::await(tail):
+    tail(1)
+`,
+      "effects.voyd"
+    );
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught && (caught as any).diagnostic?.code).toBe("TY0013");
+  });
+
+  it("forwards unhandled operations in try forward handlers", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+eff Log
+  fn write(tail) -> void
+
+fn forward_partial()
+  try forward
+    let value = Async::await()
+    Log::write()
+    value
+  Async::await(tail):
+    tail(1)
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const symbol = symbolTable.resolve("forward_partial", symbolTable.rootScope);
+    expect(typeof symbol).toBe("number");
+    if (typeof symbol !== "number") {
+      return;
+    }
+    const signature = typing.functions.getSignature(symbol);
+    expect(signature).toBeDefined();
+    if (!signature) {
+      return;
+    }
+    expect(effectOps(signature.effectRow, typing.effects)).toEqual(["Log.write"]);
+  });
+
   it("infers effects for generic functions", () => {
     const ast = parse(
       `

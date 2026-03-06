@@ -115,7 +115,8 @@ const lowerNamedTypeForm = (
       entries
         .map((entry) => lowerTypeExpr(entry, ctx, scope))
         .filter(Boolean) as HirTypeExpr[],
-    allowNamespacedSymbolKind: (kind) => kind === "type" || kind === "trait",
+    allowNamespacedSymbolKind: (kind) =>
+      kind === "type" || kind === "trait" || kind === "effect",
   });
   if (!target) {
     return undefined;

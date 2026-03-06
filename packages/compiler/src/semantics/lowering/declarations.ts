@@ -146,12 +146,16 @@ export const lowerFunctionDecl = (
     } as const,
     label: param.label,
     ...(param.optional ? { optional: true } : {}),
+    ...(param.defaultValue ? { defaultValue: lowerExpr(param.defaultValue, ctx, scopes) } : {}),
     span: toSourceSpan(param.ast ?? fallbackSyntax),
     mutable: false,
     type: (() => {
       const lowered = lowerTypeExpr(param.typeExpr, ctx, currentScope);
       if (!param.optional) {
         return lowered;
+      }
+      if (param.defaultValue && !lowered) {
+        return undefined;
       }
       if (!lowered) {
         throw new Error(
