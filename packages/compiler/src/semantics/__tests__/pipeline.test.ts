@@ -1067,6 +1067,20 @@ describe("semanticsPipeline", () => {
     expect(result.diagnostics).toHaveLength(0);
   });
 
+  it("treats same-target impl constructor literals as base object initialization", () => {
+    const result = semanticsPipeline(
+      loadAst("constructor_literal_same_impl_base_init.voyd"),
+    );
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("allows constructor-literal delegation from same-target init overloads", () => {
+    const result = semanticsPipeline(
+      loadAst("constructor_literal_same_impl_init_delegation.voyd"),
+    );
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("resolves operator calls to impl overloads", () => {
     const ast = loadAst("operator_overload_eq.voyd");
     const result = semanticsPipeline(ast);

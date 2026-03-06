@@ -231,25 +231,64 @@ export const lowerNominalObjectLiteral = ({
     entity?: string;
   };
   const constructors = ctx.staticMethods.get(calleeResolution.symbol)?.get("init");
+  const decl = ctx.decls.getObject(calleeResolution.symbol);
+  const lowerAsObjectLiteral =
+    decl && literalShouldLowerAsObjectLiteral(literalForm, decl.fields);
+  const constructorDecls = constructors
+    ? Array.from(constructors)
+        .map((symbol) => ctx.decls.getFunction(symbol))
+        .filter(
+          (
+            entry,
+          ): entry is NonNullable<ReturnType<typeof ctx.decls.getFunction>> =>
+            Boolean(entry),
+        )
+    : [];
+  const enclosingFunctionDecl = resolveEnclosingFunctionDecl({
+    scope: scopes.current(),
+    ctx,
+  });
+  const enclosingMetadata = (() => {
+    if (!enclosingFunctionDecl) {
+      return undefined;
+    }
+    return ctx.symbolTable.getSymbol(enclosingFunctionDecl.symbol)
+      .metadata as
+      | {
+          implTarget?: unknown;
+        }
+      | undefined;
+  })();
+  const isBaseObjectInitializationInImpl =
+    enclosingFunctionDecl?.name === "init" &&
+    typeof enclosingMetadata?.implTarget === "number" &&
+    enclosingMetadata.implTarget === calleeResolution.symbol;
+  const forceBaseObjectInitializationInImpl =
+    isBaseObjectInitializationInImpl &&
+    constructorDecls.length > 0 &&
+    !constructorLiteralCanMatchAnySignature({
+      literal: literalForm,
+      constructors: constructorDecls,
+    });
   if (metadata.entity !== "object" && !(constructors && constructors.size > 0)) {
     return undefined;
   }
-  if (constructors && constructors.size > 0) {
-    const decl = ctx.decls.getObject(calleeResolution.symbol);
-    const lowerAsObjectLiteral =
-      decl && literalShouldLowerAsObjectLiteral(literalForm, decl.fields);
-    if (!lowerAsObjectLiteral) {
-      return lowerConstructorLiteralCall({
-        callee: calleeResolution.calleeSyntax,
-        literal: literalForm,
-        typeArguments,
-        targetSymbol: calleeResolution.symbol,
-        ctx,
-        scopes,
-        lowerExpr,
-        ast,
-      });
-    }
+  if (
+    constructors &&
+    constructors.size > 0 &&
+    !forceBaseObjectInitializationInImpl &&
+    !lowerAsObjectLiteral
+  ) {
+    return lowerConstructorLiteralCall({
+      callee: calleeResolution.calleeSyntax,
+      literal: literalForm,
+      typeArguments,
+      targetSymbol: calleeResolution.symbol,
+      ctx,
+      scopes,
+      lowerExpr,
+      ast,
+    });
   }
 
   const target = {
@@ -272,6 +311,141 @@ export const lowerNominalObjectLiteral = ({
       targetSymbol: calleeResolution.symbol,
     },
   });
+};
+
+const resolveEnclosingFunctionDecl = ({
+  scope,
+  ctx,
+}: {
+  scope: number;
+  ctx: LoweringParams["ctx"];
+}): LoweringParams["ctx"]["decls"]["functions"][number] | undefined => {
+  let currentScope: number | null = scope;
+
+  while (typeof currentScope === "number") {
+    const scopeInfo = ctx.symbolTable.getScope(currentScope);
+    if (scopeInfo.kind === "function") {
+      return ctx.decls.functions.find(
+        (entry) => entry.form?.syntaxId === scopeInfo.owner,
+      );
+    }
+    currentScope = scopeInfo.parent;
+  }
+
+  return undefined;
+};
+
+type ConstructorLiteralArgumentShape = {
+  label?: string;
+};
+
+const constructorLiteralCanMatchAnySignature = ({
+  literal,
+  constructors,
+}: {
+  literal: Form;
+  constructors: readonly { params: readonly { label?: string; optional?: boolean }[] }[];
+}): boolean => {
+  if (constructors.length === 0) {
+    return false;
+  }
+  const args = constructorLiteralArgumentsFromLiteral(literal);
+  return constructors.some((constructor) =>
+    constructorLiteralArgumentsMatchParams({
+      args,
+      params: constructor.params,
+    }),
+  );
+};
+
+const constructorLiteralArgumentsFromLiteral = (
+  literal: Form,
+): ConstructorLiteralArgumentShape[] =>
+  literal.rest.map((entry) => {
+    if (isForm(entry) && entry.calls(":")) {
+      const nameExpr = entry.at(1);
+      if (isIdentifierAtom(nameExpr) || isInternalIdentifierAtom(nameExpr)) {
+        return { label: nameExpr.value };
+      }
+      return {};
+    }
+    if (isIdentifierAtom(entry) || isInternalIdentifierAtom(entry)) {
+      return { label: entry.value };
+    }
+    return {};
+  });
+
+const constructorLiteralArgumentsMatchParams = ({
+  args,
+  params,
+}: {
+  args: readonly ConstructorLiteralArgumentShape[];
+  params: readonly { label?: string; optional?: boolean }[];
+}): boolean => {
+  if (
+    args.length > 0 &&
+    args.every((arg) => arg.label !== undefined) &&
+    params.length > 0 &&
+    params.every((param) => param.label !== undefined)
+  ) {
+    const paramsByLabel = new Map<string, { optional: boolean }>();
+    params.forEach((param) => {
+      if (param.label) {
+        paramsByLabel.set(param.label, { optional: Boolean(param.optional) });
+      }
+    });
+    const seenLabels = new Set<string>();
+    for (const arg of args) {
+      if (!arg.label || !paramsByLabel.has(arg.label) || seenLabels.has(arg.label)) {
+        return false;
+      }
+      seenLabels.add(arg.label);
+    }
+    return params.every(
+      (param) => param.optional || !param.label || seenLabels.has(param.label),
+    );
+  }
+
+  let argIndex = 0;
+  let paramIndex = 0;
+
+  while (paramIndex < params.length) {
+    const param = params[paramIndex]!;
+    const arg = args[argIndex];
+    if (!arg) {
+      if (param.optional) {
+        paramIndex += 1;
+        continue;
+      }
+      return false;
+    }
+
+    if (param.label) {
+      if (arg.label === param.label) {
+        argIndex += 1;
+        paramIndex += 1;
+        continue;
+      }
+      if (param.optional) {
+        paramIndex += 1;
+        continue;
+      }
+      return false;
+    }
+
+    if (arg.label !== undefined) {
+      if (param.optional) {
+        paramIndex += 1;
+        continue;
+      }
+      return false;
+    }
+
+    argIndex += 1;
+    paramIndex += 1;
+  }
+
+  return argIndex === args.length;
 };
 
 type NominalTargetResolution = {

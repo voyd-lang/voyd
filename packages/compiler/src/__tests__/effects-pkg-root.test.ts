@@ -1,12 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { resolve, sep } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve, sep } from "node:path";
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleHost } from "../modules/types.js";
-import { analyzeModules, loadModuleGraph } from "../pipeline.js";
+import {
+  analyzeModules,
+  compileProgram,
+  loadModuleGraph,
+  type CompileProgramResult,
+} from "../pipeline.js";
+import {
+  parseEffectTable,
+  runEffectfulExport,
+} from "../codegen/__tests__/support/effects-harness.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
+
+const expectCompileSuccess = (
+  result: CompileProgramResult,
+): Extract<CompileProgramResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(JSON.stringify(result.diagnostics, null, 2));
+  }
+  return result;
+};
 
 describe("pkg.voyd effect exports", () => {
   it("accepts annotated pure exports and records effect metadata", async () => {
@@ -264,5 +285,72 @@ test "effectful test":
 
     const { diagnostics } = analyzeModules({ graph, includeTests: true });
     expect(diagnostics.some((diag) => diag.code === "TY0016")).toBe(false);
+  });
+
+  it("codegens effectful exports with local handlers that capture locals", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), `voyd-effects-pkg-${Date.now()}-`));
+    try {
+      const pkgPath = join(projectRoot, "pkg.voyd");
+      writeFileSync(
+        pkgPath,
+        `
+use std::msgpack::all
+
+eff Random
+  fn next(tail) -> i32
+eff Output
+  fn write(tail, value: i32) -> void
+
+pub fn draw(): Output -> void
+  let seed = 7
+  try forward
+    let value = Random::next()
+    Output::write(value)
+  Random::next(tail):
+    tail(seed)
+
+pub fn main(): () -> i32
+  0
+`,
+        "utf8",
+      );
+
+      const stdRoot = resolve(import.meta.dirname, "..", "..", "..", "std", "src");
+      const result = expectCompileSuccess(
+        await compileProgram({
+          entryPath: pkgPath,
+          roots: { src: projectRoot, std: stdRoot },
+        }),
+      );
+      expect(result.wasm).toBeInstanceOf(Uint8Array);
+      if (!result.wasm) {
+        return;
+      }
+      const wasmBytes = new Uint8Array(result.wasm.byteLength);
+      wasmBytes.set(result.wasm);
+
+      const table = parseEffectTable(new WebAssembly.Module(wasmBytes.buffer));
+      const outputWrite = table.ops.find((op) => op.label.endsWith(".write"));
+      expect(outputWrite).toBeDefined();
+      if (!outputWrite) {
+        return;
+      }
+
+      const writes: number[] = [];
+      const runtime = await runEffectfulExport<void>({
+        wasm: wasmBytes,
+        entryName: "draw_effectful",
+        handlers: {
+          [`${outputWrite.opIndex}`]: (_req, value: unknown) => {
+            writes.push(typeof value === "number" ? value : Number(value));
+            return 0;
+          },
+        },
+      });
+      expect(runtime.value).toBeNull();
+      expect(writes).toEqual([7]);
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });

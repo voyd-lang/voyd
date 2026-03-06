@@ -70,11 +70,11 @@ export const lowerTry = ({
     throw new Error("try expression missing body");
   }
   const { expr: strippedBody, handlers: embeddedHandlers } =
-    stripEmbeddedHandlerClauses(bodyExpr);
+    stripEmbeddedHandlerClauses(bodyExpr, ctx, scopes.current());
   const body = lowerExpr(strippedBody, ctx, scopes);
 
   const handlerForms = [
-    ...collectHandlerForms({ form, bodyIndex }),
+    ...collectHandlerForms({ form, bodyIndex, ctx, scope: scopes.current() }),
     ...embeddedHandlers,
   ];
   const handlers = handlerForms.flatMap((entry) => {
@@ -126,50 +126,139 @@ export const lowerTry = ({
 const collectHandlerForms = ({
   form,
   bodyIndex,
+  ctx,
+  scope,
 }: {
   form: Form;
   bodyIndex: number;
+  ctx: LoweringFormParams["ctx"];
+  scope: number;
 }): Form[] => {
   const body = form.at(bodyIndex);
   const handlers: Form[] = [];
   if (isForm(body) && body.calls("block")) {
     body.rest.forEach((entry) => {
-      if (isForm(entry) && entry.calls(":")) {
+      if (isHandlerClause(entry, ctx, scope) && isForm(entry)) {
         handlers.push(entry);
       }
     });
   }
   form.rest.slice(bodyIndex).forEach((entry) => {
-    if (isForm(entry) && entry.calls(":")) {
+    if (isHandlerClause(entry, ctx, scope) && isForm(entry)) {
       handlers.push(entry);
     }
   });
   return handlers;
 };
 
-const isHandlerClause = (entry: Expr | undefined): entry is Form =>
-  isForm(entry) &&
-  entry.calls(":") &&
-  isForm(entry.at(2)) &&
-  (entry.at(2) as Form).calls("block");
+const isBareEffectHandlerHead = (
+  expr: Expr,
+  ctx: LoweringFormParams["ctx"],
+  scope: number,
+): boolean => {
+  if (!isForm(expr)) {
+    return false;
+  }
+  const callee = expr.at(0);
+  if (!isIdentifierAtom(callee) && !isInternalIdentifierAtom(callee)) {
+    return false;
+  }
+  return typeof ctx.symbolTable.resolveByKinds(callee.value, scope, ["effect-op"]) === "number";
+};
+
+const isHandlerClause = (
+  entry: Expr | undefined,
+  ctx: LoweringFormParams["ctx"],
+  scope: number,
+): boolean => {
+  if (!isForm(entry) || !entry.calls(":")) {
+    return false;
+  }
+
+  const head = entry.at(1);
+  if (!isForm(head)) {
+    return false;
+  }
+
+  if (head.calls("::")) {
+    if (!isForm(head.at(2))) {
+      return false;
+    }
+  } else if (!isBareEffectHandlerHead(head, ctx, scope)) {
+    return false;
+  }
+
+  const body = entry.at(2);
+  return isForm(body) && body.calls("block");
+};
 
 const stripEmbeddedHandlerClauses = (
-  expr: Expr
+  expr: Expr,
+  ctx: LoweringFormParams["ctx"],
+  scope: number,
 ): { expr: Expr; handlers: Form[] } => {
-  if (!isForm(expr)) {
+  if (!isForm(expr) || expr.calls("try")) {
     return { expr, handlers: [] };
   }
+
   let changed = false;
   const handlers: Form[] = [];
   const rewritten: Expr[] = [];
 
   expr.toArray().forEach((child) => {
-    if (isHandlerClause(child)) {
+    if (isHandlerClause(child, ctx, scope) && isForm(child)) {
       handlers.push(child);
       changed = true;
       return;
     }
-    const { expr: nextExpr, handlers: nested } = stripEmbeddedHandlerClauses(child);
+    if (isForm(child) && child.calls(":")) {
+      const nextElements = child.toArray();
+      const label = child.at(1);
+      const value = child.at(2);
+      const labelScope = isForm(label)
+        ? ctx.scopeByNode.get(label.syntaxId) ?? scope
+        : scope;
+      const valueScope = isForm(value)
+        ? ctx.scopeByNode.get(value.syntaxId) ?? scope
+        : scope;
+      const labelResult = label
+        ? stripEmbeddedHandlerClauses(label, ctx, labelScope)
+        : undefined;
+      const valueResult = value
+        ? stripEmbeddedHandlerClauses(value, ctx, valueScope)
+        : undefined;
+      const nextLabel = labelResult?.expr ?? label;
+      const labelHandlers = labelResult?.handlers ?? [];
+      const nextValue = valueResult?.expr ?? value;
+      const valueHandlers = valueResult?.handlers ?? [];
+      if (labelHandlers.length > 0 || valueHandlers.length > 0) {
+        handlers.push(...labelHandlers, ...valueHandlers);
+      }
+      if (nextLabel && nextLabel !== label) {
+        nextElements[1] = nextLabel;
+        changed = true;
+      }
+      if (nextValue && nextValue !== value) {
+        nextElements[2] = nextValue;
+        changed = true;
+      }
+      rewritten.push(
+        nextLabel !== label || nextValue !== value
+          ? new Form({
+              location: child.location?.clone(),
+              elements: nextElements,
+            }).unwrap()
+          : child
+      );
+      return;
+    }
+    const childScope =
+      isForm(child) ? ctx.scopeByNode.get(child.syntaxId) ?? scope : scope;
+    const { expr: nextExpr, handlers: nested } = stripEmbeddedHandlerClauses(
+      child,
+      ctx,
+      childScope,
+    );
     if (nested.length > 0) {
       handlers.push(...nested);
       if (nextExpr !== child) {
