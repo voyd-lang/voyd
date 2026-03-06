@@ -203,6 +203,7 @@ const createTestHost = async ({
     wasm,
     imports: options.imports,
     bufferSize: options.bufferSize,
+    defaultAdapters: options.defaultAdapters,
   });
   registerTestHandlers({ host, handlers: options.handlers, onLog });
   return host;

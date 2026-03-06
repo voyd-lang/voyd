@@ -124,6 +124,7 @@ export * from "@voyd/lib/wasm.js";
 export type {
   CompileOptions,
   CompileResult,
+  DefaultAdapterOptions,
   EffectsInfo,
   EffectContinuation,
   EffectContinuationCall,

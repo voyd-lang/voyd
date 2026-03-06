@@ -318,6 +318,7 @@ const createOverlayModuleHost = ({
 export type {
   CompileOptions,
   CompileResult,
+  DefaultAdapterOptions,
   EffectsInfo,
   EffectContinuation,
   EffectContinuationCall,

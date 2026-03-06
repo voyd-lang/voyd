@@ -2,6 +2,7 @@ import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
 import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
 import type { TestCase as CompilerTestCase } from "@voyd/compiler/pipeline-shared.js";
 import type {
+  DefaultAdapterOptions,
   EffectContinuation,
   EffectContinuationCall,
   EffectHandler,
@@ -12,6 +13,7 @@ import type {
 } from "@voyd/js-host";
 
 export type {
+  DefaultAdapterOptions,
   Diagnostic,
   EffectContinuation,
   EffectContinuationCall,
@@ -97,6 +99,7 @@ export type RunOptions = {
   handlersByLabelSuffix?: Record<string, EffectHandler>;
   imports?: WebAssembly.Imports;
   bufferSize?: number;
+  defaultAdapters?: boolean | DefaultAdapterOptions;
 };
 
 export type TestCollection = {
@@ -140,6 +143,7 @@ export type TestRunOptions = {
   handlers?: Record<string, EffectHandler>;
   imports?: WebAssembly.Imports;
   bufferSize?: number;
+  defaultAdapters?: boolean | DefaultAdapterOptions;
   filter?: (info: TestInfo) => boolean;
   isolation?: "per-test" | "shared";
 };
