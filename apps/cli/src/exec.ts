@@ -1,7 +1,7 @@
 import { stdout } from "process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
 import { createSdk, type CompileResult } from "@voyd/sdk";
 import { analyzeModules, loadModuleGraph, parse } from "@voyd/sdk/compiler";
@@ -13,6 +13,7 @@ import {
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
 import { resolvePackageDirs } from "./package-dirs.js";
+import { detectSrcRootForPath } from "./source-root.js";
 import { runTests } from "./test-runner.js";
 import { getConfig } from "./config/index.js";
 import {
@@ -124,7 +125,7 @@ const getModuleRoots = ({
   entryPath: string;
   additionalPkgDirs?: readonly string[];
 }): ModuleRoots => {
-  const srcRoot = dirname(entryPath);
+  const srcRoot = detectSrcRootForPath(entryPath);
   return {
     src: srcRoot,
     std: resolveStdRoot(),

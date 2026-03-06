@@ -345,6 +345,36 @@ const createNestedSrcFileTargetFixture = async (): Promise<{
   return { root, targetFile };
 };
 
+const createNestedSrcEntryFixture = async (): Promise<{
+  root: string;
+  entryPath: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-nested-src-entry-"));
+  const srcRoot = resolve(root, "src");
+  const entryDir = resolve(srcRoot, "pkgs", "consumer");
+  const entryPath = resolve(entryDir, "main.voyd");
+  await mkdir(entryDir, { recursive: true });
+  await writeFile(
+    resolve(srcRoot, "shared.voyd"),
+    [
+      "pub fn value() -> i32",
+      "  42",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    entryPath,
+    [
+      "use src::shared::all",
+      "",
+      "pub fn main() -> i32",
+      "  value()",
+      "",
+    ].join("\n"),
+  );
+  return { root, entryPath };
+};
+
 const createMixedDirectoryFixture = async (): Promise<{
   root: string;
   testRoot: string;
@@ -699,6 +729,27 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
         expect(output).not.toContain("Unable to resolve module");
       } finally {
         await rm(fixture.cwd, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    "preserves src-root imports when compiling nested source entry files",
+    async () => {
+      assertCliRunnerAvailable();
+
+      const fixture = await createNestedSrcEntryFixture();
+      try {
+        const result = runCli(fixture.root, ["--emit-ir-ast", fixture.entryPath]);
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+        if (result.status !== 0) {
+          throw new Error(`voyd compile failed: ${output}`);
+        }
+
+        expect(output).not.toContain("Unable to resolve module");
+      } finally {
+        await rm(fixture.root, { recursive: true, force: true });
       }
     },
   );
