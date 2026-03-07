@@ -79,6 +79,24 @@ const handlerInstanceKey = (fnCtx: FunctionContext): string => {
   return typeof instanceId === "number" ? `${instanceId}` : "base";
 };
 
+const handlerBindingLayoutKey = (fnCtx: FunctionContext): string =>
+  Array.from(fnCtx.bindings.entries())
+    .sort(([left], [right]) => left - right)
+    .map(
+      ([symbol, binding]) =>
+        `${symbol}:${binding.typeId ?? "unknown"}:${binding.type}`
+    )
+    .join(",");
+
+const handlerEnvLayoutKey = (
+  fields: readonly ClauseEnvField[],
+): string =>
+  fields
+    .map(
+      (field) => `${field.symbol}:${field.typeId}:${field.wasmType}:${field.fieldIndex}`
+    )
+    .join(",");
+
 
 const currentHandlerValue = (
   ctx: CodegenContext,
@@ -104,7 +122,8 @@ const buildClauseEnv = ({
   fields: ClauseEnvField[];
 } => {
   const state = handlerState(ctx);
-  const layoutKey = `${expr.id}:${handlerInstanceKey(fnCtx)}`;
+  const bindingKey = handlerBindingLayoutKey(fnCtx);
+  const layoutKey = `${ctx.moduleLabel}:${expr.id}:${handlerInstanceKey(fnCtx)}:${bindingKey}`;
   const cached = state.envLayouts.get(layoutKey);
   const layout =
     cached ??
@@ -178,9 +197,10 @@ const emitClauseFunction = ({
   compileExpr: ExpressionCompiler;
   typeInstanceId?: ProgramFunctionInstanceId;
 }): { fnName: string; fnRefType: binaryen.Type } => {
+  const bindingKey = sanitize(handlerEnvLayoutKey(env.fields));
   const fnName = `${ctx.moduleLabel}__handler_${expr.id}_${clauseIndex}${
     typeof typeInstanceId === "number" ? `__inst${typeInstanceId}` : "__instbase"
-  }`;
+  }__env_${bindingKey}`;
   const state = handlerState(ctx);
   const cachedRefType = state.clauseFnRefTypes.get(fnName);
   if (cachedRefType) {

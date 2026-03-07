@@ -98,4 +98,48 @@ pub fn main() -> i32
       rmSync(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it("highlights only the mismatched range bound without TY9999 fallback", async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), `voyd-span-${Date.now()}-`));
+    try {
+      const entryPath = join(projectRoot, "main.voyd");
+      writeFileSync(
+        entryPath,
+        `use std::all
+
+pub fn main() -> void
+  let x = 0.5..1
+  void
+`,
+        "utf8",
+      );
+
+      const stdRoot = resolve(
+        import.meta.dirname,
+        "..",
+        "..",
+        "..",
+        "std",
+        "src",
+      );
+      const graph = await loadModuleGraph({
+        entryPath,
+        roots: { src: projectRoot, std: stdRoot },
+      });
+
+      const { diagnostics } = analyzeModules({ graph });
+      expect(diagnostics.some((diag) => diag.code === "TY9999")).toBe(false);
+      const mismatch = diagnostics.find((diag) => diag.code === "TY0027");
+      expect(mismatch).toBeDefined();
+      if (!mismatch) {
+        return;
+      }
+
+      expect(mismatch.span.file).toBe(entryPath);
+      const source = readFileSync(entryPath, "utf8");
+      expect(source.slice(mismatch.span.start, mismatch.span.end)).toBe("1");
+    } finally {
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
 });

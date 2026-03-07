@@ -298,6 +298,130 @@ fn constrained<T: Named, U: { value: i32 }, V: Animal>(a: T, b: U, c: V) -> i32
     ).toBe(true);
   });
 
+  it("lowers same-target impl constructor literals as nominal object literals", () => {
+    const name = "constructor_literal_same_impl_base_init.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const renderCtxSymbol = symbolTable.resolve("RenderCtx", symbolTable.rootScope);
+    expect(typeof renderCtxSymbol).toBe("number");
+    if (typeof renderCtxSymbol !== "number") {
+      return;
+    }
+
+    const initFn = Array.from(hir.items.values()).find((item): item is HirFunction => {
+      if (item.kind !== "function") {
+        return false;
+      }
+      const record = symbolTable.getSymbol(item.symbol);
+      const metadata = record.metadata as { implTarget?: number } | undefined;
+      return record.name === "init" && metadata?.implTarget === renderCtxSymbol;
+    });
+    expect(initFn).toBeDefined();
+    if (!initFn) {
+      return;
+    }
+
+    const initBody = hir.expressions.get(initFn.body);
+    expect(initBody?.exprKind).toBe("block");
+    if (!initBody || initBody.exprKind !== "block") {
+      return;
+    }
+
+    const initValueExprId = initBody.value;
+    expect(typeof initValueExprId).toBe("number");
+    if (typeof initValueExprId !== "number") {
+      return;
+    }
+
+    const initValueExpr = hir.expressions.get(initValueExprId);
+    expect(initValueExpr?.exprKind).toBe("object-literal");
+    if (!initValueExpr || initValueExpr.exprKind !== "object-literal") {
+      return;
+    }
+
+    expect(initValueExpr.literalKind).toBe("nominal");
+    expect(initValueExpr.targetSymbol).toBe(renderCtxSymbol);
+  });
+
+  it("keeps constructor-literal delegation available inside same-target init overloads", () => {
+    const name = "constructor_literal_same_impl_init_delegation.voyd";
+    const ast = loadAst(name);
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name,
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: name,
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const pairSymbol = symbolTable.resolve("Pair", symbolTable.rootScope);
+    expect(typeof pairSymbol).toBe("number");
+    if (typeof pairSymbol !== "number") {
+      return;
+    }
+
+    const initBodies = Array.from(hir.items.values())
+      .filter((item): item is HirFunction => item.kind === "function")
+      .flatMap((item) => {
+        const record = symbolTable.getSymbol(item.symbol);
+        const metadata = record.metadata as { implTarget?: number } | undefined;
+        if (record.name !== "init" || metadata?.implTarget !== pairSymbol) {
+          return [];
+        }
+        return [hir.expressions.get(item.body)];
+      })
+      .filter(
+        (expr): expr is HirBlockExpr => Boolean(expr && expr.exprKind === "block"),
+      );
+
+    expect(initBodies.length).toBeGreaterThan(0);
+    const hasDelegatingInit = initBodies.some((body) => {
+      if (typeof body.value !== "number") {
+        return false;
+      }
+      const valueExpr = hir.expressions.get(body.value);
+      return valueExpr?.exprKind === "call";
+    });
+    expect(hasDelegatingInit).toBe(true);
+  });
+
   it("lowers dot calls into method-call expressions", () => {
     const name = "ufcs.voyd";
     const ast = loadAst(name);

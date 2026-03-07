@@ -134,6 +134,54 @@ fn main(): Async -> i32
     expect(handler.handlers[0]?.resumable).toBe("fn");
   });
 
+  it("does not hoist nested case clauses inside the try body", () => {
+    const hir = lower(`
+eff Async
+  fn await(tail) -> i32
+
+fn choose(flag: bool): Async -> i32
+  try
+    if
+      flag:
+        Async::await()
+      else:
+        1
+  Async::await(tail):
+    tail(2)
+`);
+    const handlers = Array.from(hir.expressions.values()).filter(
+      (expr) => expr.kind === "expr" && expr.exprKind === "effect-handler"
+    );
+    expect(handlers).toHaveLength(1);
+    const handler = handlers[0];
+    expect(handler).toBeDefined();
+    if (!handler || handler.exprKind !== "effect-handler") return;
+    expect(handler.handlers).toHaveLength(1);
+    expect(handler.handlers[0]?.parameters).toHaveLength(1);
+  });
+
+  it("recognizes bare zero-arg handlers for non-snake-case ops", () => {
+    const hir = lower(`
+eff Async
+  fn Await() -> i32
+
+fn main(): Async -> i32
+  try
+    Async::Await()
+  Await():
+    1
+`);
+    const handlers = Array.from(hir.expressions.values()).filter(
+      (expr) => expr.kind === "expr" && expr.exprKind === "effect-handler"
+    );
+    expect(handlers).toHaveLength(1);
+    const handler = handlers[0];
+    expect(handler).toBeDefined();
+    if (!handler || handler.exprKind !== "effect-handler") return;
+    expect(handler.handlers).toHaveLength(1);
+    expect(handler.handlers[0]?.parameters).toHaveLength(0);
+  });
+
   it("marks try forward handlers to propagate unhandled operations", () => {
     const hir = lower(`
 eff Async
