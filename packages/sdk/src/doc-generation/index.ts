@@ -4,6 +4,7 @@ import { analyzeModules, loadModuleGraph } from "@voyd/compiler/pipeline.js";
 import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
 import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
 import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
+import { detectSrcRootForPath } from "../shared/source-root.js";
 import { createDocumentationModel } from "./model.js";
 import { renderDocumentationHtml } from "./render-html.js";
 import { renderDocumentationJson } from "./render-json.js";
@@ -49,7 +50,7 @@ const resolveDocumentationRoots = ({
 }): ModuleRoots => {
   const src = roots?.src
     ? path.resolve(roots.src)
-    : path.dirname(path.resolve(entryPath));
+    : detectSrcRootForPath(entryPath);
   const configuredPkgDirs = [
     ...(roots?.pkgDirs ?? []),
     ...(roots?.pkg ? [roots.pkg] : []),
