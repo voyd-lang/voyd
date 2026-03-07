@@ -195,6 +195,7 @@ export class SymbolTable {
     predicate?: SymbolPredicate
   ): SymbolId | undefined {
     let scope: ScopeId | null = fromScope;
+    let importedFallback: SymbolId | undefined;
     while (scope !== null) {
       const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
       const hits = bucket.nameIndex.get(name);
@@ -210,13 +211,16 @@ export class SymbolTable {
           }
         }
 
-        for (const candidate of hits) {
-          const record = this.symbolRecords[candidate];
-          if (!record) {
-            continue;
-          }
-          if (!predicate || predicate(record)) {
-            return candidate;
+        if (typeof importedFallback !== "number") {
+          for (const candidate of hits) {
+            const record = this.symbolRecords[candidate];
+            if (!record) {
+              continue;
+            }
+            if (!predicate || predicate(record)) {
+              importedFallback = candidate;
+              break;
+            }
           }
         }
       }
@@ -224,7 +228,7 @@ export class SymbolTable {
       scope = bucket.info.parent;
     }
 
-    return undefined;
+    return importedFallback;
   }
 
   private resolveAllInternal(

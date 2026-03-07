@@ -21,6 +21,7 @@ const resolveValueSymbol = ({
   ctx: LowerContext;
 }): SymbolId | undefined => {
   let currentScope: ScopeId | null = scope;
+  let importedFallback: SymbolId | undefined;
   while (currentScope !== null) {
     const matches = Array.from(ctx.symbolTable.symbolsInScope(currentScope))
       .map((symbol) => ({ symbol, record: ctx.symbolTable.getSymbol(symbol) }))
@@ -41,10 +42,13 @@ const resolveValueSymbol = ({
         }
       }
 
-      for (let index = matches.length - 1; index >= 0; index -= 1) {
-        const candidate = matches[index]!;
-        if (isImportedSymbol(candidate.symbol, ctx)) {
-          return candidate.symbol;
+      if (typeof importedFallback !== "number") {
+        for (let index = matches.length - 1; index >= 0; index -= 1) {
+          const candidate = matches[index]!;
+          if (isImportedSymbol(candidate.symbol, ctx)) {
+            importedFallback = candidate.symbol;
+            break;
+          }
         }
       }
     }
@@ -52,7 +56,7 @@ const resolveValueSymbol = ({
     currentScope = ctx.symbolTable.getScope(currentScope).parent;
   }
 
-  return undefined;
+  return importedFallback;
 };
 
 export const resolveIdentifierValue = (
