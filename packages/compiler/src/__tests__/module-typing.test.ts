@@ -1462,6 +1462,53 @@ pub fn main() -> i32
     expect(unknownField).toBeDefined();
   });
 
+  it("prefers outer lexical bindings over imported static methods in nested scopes", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}vec3.voyd`]: `
+pub obj Vec3 { x: i32 }
+
+impl Vec3
+  fn init(x: i32) -> Vec3
+    Vec3 { x }
+
+  fn empty() -> Vec3
+    Vec3(0)
+`,
+      [`${root}${sep}color.voyd`]: `
+use src::vec3::Vec3
+
+pub type Color = Vec3
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::color::Color
+use src::vec3::Vec3
+
+let empty = Color(0)
+
+fn pick_empty() -> Color
+  if true:
+    let attenuation = Vec3::empty()
+    if false:
+      return attenuation
+    return empty
+  empty
+
+pub fn main() -> i32
+  pick_empty().x
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
   it("allows named macro re-exports in std package imports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
