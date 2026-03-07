@@ -1,8 +1,9 @@
-import type { HirFunction } from "../hir/index.js";
+import type { HirFunction, HirNamedTypeExpr } from "../hir/index.js";
 import type { HirExprId, TypeId } from "../ids.js";
 import { walkExpression } from "../hir/walk.js";
 import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
 import { getExprEffectRow } from "./effects.js";
+import { resolveImportedTypeExpr } from "./imports.js";
 import {
   getOptionalInfo,
   optionalResolverContextForTypingContext,
@@ -37,25 +38,80 @@ export const resolveOptionalTypeForDefaultParameter = ({
   ctx: TypingContext;
   state: TypingState;
 }): TypeId => {
-  const resolveAtScope = (scopeId: number): TypeId | undefined => {
-    const symbol = ctx.symbolTable.resolve("Optional", scopeId);
-    if (typeof symbol !== "number") {
+  const optionalResolverContext = optionalResolverContextForTypingContext(ctx);
+  const attemptedSymbols = new Set<number>();
+
+  const resolveViaSymbol = (symbol: number): TypeId | undefined => {
+    if (attemptedSymbols.has(symbol)) {
       return undefined;
     }
-    if (!ctx.typeAliases.getTemplate(symbol)) {
+    attemptedSymbols.add(symbol);
+
+    const localTemplate = ctx.typeAliases.getTemplate(symbol);
+    const resolved = localTemplate
+      ? resolveTypeAlias(symbol, ctx, state, [innerType])
+      : resolveImportedTypeExpr({
+          expr: {
+            typeKind: "named",
+            path: [ctx.symbolTable.getSymbol(symbol).name],
+            symbol,
+            ast: ctx.hir.module.ast,
+            span: ctx.hir.module.span,
+          } satisfies HirNamedTypeExpr,
+          typeArgs: [innerType],
+          ctx,
+          state,
+        });
+    if (typeof resolved !== "number") {
       return undefined;
     }
-    return resolveTypeAlias(symbol, ctx, state, [innerType]);
+    return getOptionalInfo(resolved, optionalResolverContext)
+      ? resolved
+      : undefined;
+  };
+
+  const resolveByNameAtScope = ({
+    name,
+    scopeId,
+  }: {
+    name: string;
+    scopeId: number;
+  }): TypeId | undefined => {
+    const symbol = ctx.symbolTable.resolve(name, scopeId);
+    return typeof symbol === "number" ? resolveViaSymbol(symbol) : undefined;
+  };
+
+  const resolveAtScope = (scopeId: number): TypeId | undefined =>
+    resolveByNameAtScope({ name: "Optional", scopeId }) ??
+    resolveByNameAtScope({ name: "Option", scopeId });
+
+  const resolveIntrinsicOptionalAlias = (): TypeId | undefined => {
+    for (const template of ctx.typeAliases.templates()) {
+      const metadata = (ctx.symbolTable.getSymbol(template.symbol).metadata ??
+        {}) as {
+        intrinsicType?: unknown;
+      };
+      if (metadata.intrinsicType !== "optional") {
+        continue;
+      }
+      const resolved = resolveViaSymbol(template.symbol);
+      if (typeof resolved === "number") {
+        return resolved;
+      }
+    }
+    return undefined;
   };
 
   const resolved =
-    resolveAtScope(scope) ?? resolveAtScope(ctx.symbolTable.rootScope);
+    resolveAtScope(scope) ??
+    resolveAtScope(ctx.symbolTable.rootScope) ??
+    resolveIntrinsicOptionalAlias();
   if (typeof resolved === "number") {
     return resolved;
   }
 
   throw new Error(
-    `default parameter ${parameterName} in function ${functionName} requires Optional<T> to be in scope`,
+    `default parameter ${parameterName} in function ${functionName} requires an optional type alias (for example Optional) to be in scope`,
   );
 };
 

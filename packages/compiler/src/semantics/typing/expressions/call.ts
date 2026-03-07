@@ -1145,6 +1145,155 @@ const resolveStructuralMatchedExprId = ({
   return directField?.kind === "field" ? directField.value : arg.exprId;
 };
 
+const walkAllLabeledCallArguments = ({
+  args,
+  params,
+  onMatch,
+  onSkipOptionalParam,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  onMatch: (match: MatchedCallArgument) => boolean;
+  onSkipOptionalParam: (skipped: SkippedOptionalCallParameter) => boolean;
+}): CallArgumentWalkResult => {
+  const argsByLabel = new Map<string, { arg: Arg; argIndex: number }>();
+  const unmatchedArgIndexes = new Set<number>();
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    const label = arg.label;
+    if (label === undefined) {
+      return {
+        kind: "error",
+        failure: { kind: "incompatible", paramIndex: 0, argIndex: index },
+      };
+    }
+    unmatchedArgIndexes.add(index);
+    if (!argsByLabel.has(label)) {
+      argsByLabel.set(label, { arg, argIndex: index });
+    }
+  }
+
+  for (let paramIndex = 0; paramIndex < params.length; paramIndex += 1) {
+    const param = params[paramIndex]!;
+    const label = param.label;
+    if (label === undefined) {
+      return {
+        kind: "error",
+        failure: { kind: "incompatible", paramIndex },
+      };
+    }
+
+    const matched = argsByLabel.get(label);
+    if (matched) {
+      unmatchedArgIndexes.delete(matched.argIndex);
+      if (
+        !onMatch({
+          arg: matched.arg,
+          argIndex: matched.argIndex,
+          param,
+          paramIndex,
+          matchedType: matched.arg.type,
+          matchedExprId: matched.arg.exprId,
+          kind: "direct",
+        })
+      ) {
+        return {
+          kind: "error",
+          failure: {
+            kind: "incompatible",
+            paramIndex,
+            argIndex: matched.argIndex,
+          },
+        };
+      }
+      continue;
+    }
+
+    if (param.optional) {
+      if (
+        !onSkipOptionalParam({
+          param,
+          paramIndex,
+          reason: "missing-argument",
+        })
+      ) {
+        return {
+          kind: "error",
+          failure: { kind: "incompatible", paramIndex },
+        };
+      }
+      continue;
+    }
+
+    const unexpectedArgIndex = pickUnexpectedLabeledArgIndex({
+      unmatchedArgIndexes,
+      args,
+      params,
+      startParamIndex: paramIndex,
+    });
+    if (typeof unexpectedArgIndex === "number") {
+      const unexpectedArg = args[unexpectedArgIndex];
+      return {
+        kind: "error",
+        failure: {
+          kind: "label-mismatch",
+          paramIndex,
+          argIndex: unexpectedArgIndex,
+          expectedLabel: labelForDiagnostic(label),
+          actualLabel: labelForDiagnostic(unexpectedArg?.label),
+        },
+      };
+    }
+
+    return {
+      kind: "error",
+      failure: {
+        kind: "missing-labeled-argument",
+        paramIndex,
+        label,
+      },
+    };
+  }
+
+  const extraArguments = unmatchedArgIndexes.size;
+  if (extraArguments > 0) {
+    return {
+      kind: "error",
+      failure: { kind: "extra-arguments", extra: extraArguments },
+    };
+  }
+
+  return { kind: "ok" };
+};
+
+const pickUnexpectedLabeledArgIndex = ({
+  unmatchedArgIndexes,
+  args,
+  params,
+  startParamIndex,
+}: {
+  unmatchedArgIndexes: ReadonlySet<number>;
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  startParamIndex: number;
+}): number | undefined => {
+  const remainingLabels = new Set(
+    params
+      .slice(startParamIndex)
+      .map((param) => param.label)
+      .filter((label): label is string => typeof label === "string"),
+  );
+
+  for (const index of unmatchedArgIndexes) {
+    const label = args[index]?.label;
+    if (label === undefined || !remainingLabels.has(label)) {
+      return index;
+    }
+  }
+
+  return unmatchedArgIndexes.values().next().value;
+};
+
 const walkCallArguments = ({
   args,
   params,
@@ -1160,6 +1309,20 @@ const walkCallArguments = ({
   onMatch: (match: MatchedCallArgument) => boolean;
   onSkipOptionalParam: (skipped: SkippedOptionalCallParameter) => boolean;
 }): CallArgumentWalkResult => {
+  if (
+    args.length > 0 &&
+    args.every((arg) => arg.label !== undefined) &&
+    params.length > 0 &&
+    params.every((param) => param.label !== undefined)
+  ) {
+    return walkAllLabeledCallArguments({
+      args,
+      params,
+      onMatch,
+      onSkipOptionalParam,
+    });
+  }
+
   let argIndex = 0;
   let paramIndex = 0;
 
@@ -1594,7 +1757,7 @@ const validateCallArgs = (
         code: "TY0021",
         params: {
           kind: "call-argument-label-mismatch",
-          argumentIndex: failure.paramIndex + 1,
+          argumentIndex: failure.argIndex + 1,
           expectedLabel: failure.expectedLabel,
           actualLabel: failure.actualLabel,
         },

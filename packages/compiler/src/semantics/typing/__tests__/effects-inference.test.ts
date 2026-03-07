@@ -718,6 +718,82 @@ fn forward_partial()
     expect(effectOps(signature.effectRow, typing.effects)).toEqual(["Log.write"]);
   });
 
+  it("keeps nested case clauses inside try bodies out of handler matching", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> void
+eff Log
+  fn write(tail) -> void
+
+fn forward_nested(flag: bool)
+  try forward
+    if
+      flag:
+        Async::await()
+      else:
+        Log::write()
+  Async::await(tail):
+    tail()
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const symbol = symbolTable.resolve("forward_nested", symbolTable.rootScope);
+    expect(typeof symbol).toBe("number");
+    if (typeof symbol !== "number") {
+      return;
+    }
+    const signature = typing.functions.getSignature(symbol);
+    expect(signature).toBeDefined();
+    if (!signature) {
+      return;
+    }
+    expect(effectOps(signature.effectRow, typing.effects)).toEqual(["Log.write"]);
+  });
+
+  it("matches handlers nested inside branch bodies", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> void
+eff Log
+  fn write(tail) -> void
+
+fn forward_nested_branch(flag: bool)
+  try forward
+    if
+      flag:
+        Async::await()
+        Async::await(tail):
+          tail()
+        void
+      else:
+        Log::write()
+        void
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const symbol = symbolTable.resolve("forward_nested_branch", symbolTable.rootScope);
+    expect(typeof symbol).toBe("number");
+    if (typeof symbol !== "number") {
+      return;
+    }
+    const signature = typing.functions.getSignature(symbol);
+    expect(signature).toBeDefined();
+    if (!signature) {
+      return;
+    }
+    expect(effectOps(signature.effectRow, typing.effects)).toEqual(["Log.write"]);
+  });
+
   it("infers effects for generic functions", () => {
     const ast = parse(
       `

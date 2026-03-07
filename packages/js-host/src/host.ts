@@ -560,7 +560,7 @@ export const createVoydHost = async ({
         host: { table, registerHandler },
         options: {
           ...options,
-          effectBufferSize: bufferSize,
+          effectBufferSize: options.effectBufferSize ?? bufferSize,
         },
       }),
     initEffects,

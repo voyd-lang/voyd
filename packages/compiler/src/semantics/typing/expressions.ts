@@ -23,7 +23,11 @@ import {
 } from "./expressions/index.js";
 import { applyCurrentSubstitution } from "./expressions/shared.js";
 import { ensureTypeMatches } from "./type-system.js";
-import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
+import {
+  DiagnosticError,
+  emitDiagnostic,
+  normalizeSpan,
+} from "../../diagnostics/index.js";
 import type { TypingContext, TypingState } from "./types.js";
 
 export { formatFunctionInstanceKey };
@@ -59,6 +63,7 @@ export const typeExpression = (
       ctx.effects.setExprEffect(exprId, ctx.effects.emptyRow);
     }
     const applied = applyCurrentSubstitution(cached.type, ctx, state);
+    const span = normalizeSpan(ctx.hir.expressions.get(exprId)?.span);
     if (
       hasConcreteExpected &&
       typeof appliedExpected === "number"
@@ -69,10 +74,13 @@ export const typeExpression = (
           appliedExpected,
           ctx,
           state,
-          "expression context"
+          "expression context",
+          span,
         );
       } catch (error) {
-        const span = normalizeSpan(ctx.hir.expressions.get(exprId)?.span);
+        if (error instanceof DiagnosticError) {
+          throw error;
+        }
         emitDiagnostic({
           ctx,
           code: "TY9999",

@@ -15,7 +15,10 @@ import {
   createUnexpectedDiagnostic,
   diagnosticsFromUnknownError,
 } from "./shared/diagnostics.js";
+import { detectSrcRootForPath } from "./shared/source-root.js";
 import type { CompileOptions, CompileResult, VoydSdk } from "./shared/types.js";
+
+export { detectSrcRootForPath } from "./shared/source-root.js";
 
 const DEFAULT_ENTRY = "index.voyd";
 const DEFAULT_VIRTUAL_ROOT = ".voyd";
@@ -46,7 +49,11 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       entryPath: entryName,
       source: options.source,
     });
-    const entryPath = resolveEntryPath({ entryPath: entryName, srcRoot });
+    const entryPath = resolveEntryPath({
+      entryPath: entryName,
+      srcRoot,
+      source: options.source,
+    });
     const roots = resolveRoots({ roots: options.roots, srcRoot });
     const host = options.source
       ? createOverlayModuleHost({
@@ -118,14 +125,11 @@ const resolveSrcRoot = ({
   }
 
   if (!source) {
-    if (path.isAbsolute(entryPath)) {
-      return path.dirname(path.resolve(entryPath));
-    }
-    return path.resolve(process.cwd());
+    return detectSrcRootForPath(entryPath);
   }
 
   if (path.isAbsolute(entryPath)) {
-    return path.dirname(path.resolve(entryPath));
+    return detectSrcRootForPath(entryPath);
   }
 
   return path.resolve(process.cwd(), DEFAULT_VIRTUAL_ROOT);
@@ -134,13 +138,17 @@ const resolveSrcRoot = ({
 const resolveEntryPath = ({
   entryPath,
   srcRoot,
+  source,
 }: {
   entryPath: string;
   srcRoot: string;
+  source?: string;
 }): string => {
   const normalized = ensureVoydExtension(entryPath);
   const resolved = path.isAbsolute(normalized)
     ? normalized
+    : source === undefined
+    ? path.resolve(normalized)
     : path.join(srcRoot, normalized);
   return path.resolve(resolved);
 };
@@ -318,6 +326,7 @@ const createOverlayModuleHost = ({
 export type {
   CompileOptions,
   CompileResult,
+  DefaultAdapterOptions,
   EffectsInfo,
   EffectContinuation,
   EffectContinuationCall,

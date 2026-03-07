@@ -1,7 +1,8 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   createSdk,
+  detectSrcRootForPath,
   type TestEvent,
   type TestReporter,
   type TestRunSummary,
@@ -232,29 +233,12 @@ const buildAllowedTestFiles = ({
   return allowedFiles;
 };
 
-const detectSrcRoot = (targetPath: string): string => {
-  let current = resolve(targetPath);
-  while (true) {
-    if (basename(current) === "src") {
-      return current;
-    }
-
-    const parent = dirname(current);
-    if (parent === current) {
-      return resolve(targetPath);
-    }
-    current = parent;
-  }
-};
-
 const resolveRoots = (
   rootPath: string,
   pkgDirs: readonly string[] = [],
 ): { scanRoot: string; roots: ModuleRoots } => {
   const resolved = resolve(rootPath);
-  const inferredSrcRoot = resolved.endsWith(".voyd")
-    ? detectSrcRoot(dirname(resolved))
-    : detectSrcRoot(resolved);
+  const inferredSrcRoot = detectSrcRootForPath(resolved);
   const scanRoot = resolved;
   const srcRoot = inferredSrcRoot;
   return {

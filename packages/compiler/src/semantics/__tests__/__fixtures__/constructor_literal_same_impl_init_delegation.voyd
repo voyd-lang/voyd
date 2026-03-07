@@ -1,0 +1,16 @@
+pub obj Pair {
+  x: i32,
+  pri y: i32,
+  pri z: i32
+}
+
+impl Pair
+  pub fn init(x: i32) -> Pair
+    Pair { x, y: 0 }
+
+  pub fn init({ x: i32, y: i32 }) -> Pair
+    Pair { x, y, z: 1 }
+
+pub fn main() -> i32
+  let pair = Pair(4)
+  pair.x

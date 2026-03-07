@@ -12,6 +12,7 @@ export const createSdk = (): VoydSdk => ({
 export type {
   CompileOptions,
   CompileResult,
+  DefaultAdapterOptions,
   EffectsInfo,
   EffectContinuation,
   EffectContinuationCall,

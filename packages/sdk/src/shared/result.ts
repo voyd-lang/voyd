@@ -81,9 +81,15 @@ const createRun = ({
     handlersByLabelSuffix,
     imports,
     bufferSize,
+    defaultAdapters,
     args,
   }: Omit<RunOptions, "wasm">): Promise<T> => {
-    const host = await createHost({ wasm, imports, bufferSize });
+    const host = await createHost({
+      wasm,
+      imports,
+      bufferSize,
+      defaultAdapters,
+    });
     if (handlersByLabelSuffix) {
       registerHandlersByLabelSuffix({ host, handlersByLabelSuffix });
     }

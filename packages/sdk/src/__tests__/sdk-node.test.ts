@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectNodeModulesDirs,
   createSdk,
+  detectSrcRootForPath,
   type CompileResult,
   type EffectContinuation,
   type EffectHandler,
@@ -141,6 +142,40 @@ describe("node sdk", () => {
     }
   });
 
+  it("keeps src-root imports when compiling nested entry paths", async () => {
+    const sdk = createSdk();
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-nested-src-"),
+    );
+    const srcDir = path.join(projectRoot, "src");
+    const entryDir = path.join(srcDir, "pkgs", "demo");
+    const entryPath = path.join(entryDir, "main.voyd");
+
+    await fs.mkdir(entryDir, { recursive: true });
+    await fs.writeFile(
+      path.join(srcDir, "shared.voyd"),
+      `pub fn value() -> i32
+  42
+`,
+    );
+    await fs.writeFile(
+      entryPath,
+      `use src::shared::all
+
+pub fn main() -> i32
+  value()
+`,
+    );
+
+    try {
+      const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+      const output = await result.run<number>({ entryName: "main" });
+      expect(output).toBe(42);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("collects node_modules directories from source up to filesystem root", () => {
     const startDir = path.join(path.sep, "tmp", "voyd", "nested");
     const resolvedStart = path.resolve(startDir);
@@ -152,6 +187,23 @@ describe("node sdk", () => {
     expect(dirs[0]).toBe(path.join(resolvedStart, "node_modules"));
     expect(dirs.at(-1)).toBe(path.join(rootDir, "node_modules"));
     expect(dirs).toContain(path.join(parentDir, "node_modules"));
+  });
+
+  it("detects the nearest src root for nested source files", () => {
+    const entryPath = path.join(
+      path.sep,
+      "tmp",
+      "voyd",
+      "workspace",
+      "src",
+      "pkgs",
+      "demo",
+      "main.voyd",
+    );
+
+    expect(detectSrcRootForPath(entryPath)).toBe(
+      path.join(path.sep, "tmp", "voyd", "workspace", "src"),
+    );
   });
 
   it("resolves packages from the default node_modules search path", async () => {
