@@ -1,0 +1,23 @@
+obj Some<T> { value: T }
+obj None {}
+type Optional<T> = Some<T> | None
+
+pub obj RenderCtx {
+  width: i32,
+  pri center: i32,
+  pri vfov: i32,
+  extra?: i32
+}
+
+impl RenderCtx
+  pub fn init({ width: i32, vfov = 90 }) -> RenderCtx
+    let center = width + 1
+    RenderCtx { width, center, vfov }
+
+  pub fn with_width(width: i32) -> RenderCtx
+    RenderCtx { width }
+
+pub fn main() -> i32
+  let _ctx = RenderCtx(width: 5)
+  let _ctx2 = RenderCtx::with_width(3)
+  0

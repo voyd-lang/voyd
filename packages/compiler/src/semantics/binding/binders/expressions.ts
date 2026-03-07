@@ -126,13 +126,13 @@ const bindTry = (
   const body = form.at(bodyIndex);
   if (isForm(body) && body.calls("block")) {
     body.rest.forEach((entry) => {
-      if (isForm(entry) && entry.calls(":")) {
+      if (isEffectHandlerClause(entry, ctx, tracker.current()) && isForm(entry)) {
         handlerEntries.push(entry);
       }
     });
   }
   if (body) {
-    handlerEntries.push(...findHandlerClauses(body));
+    handlerEntries.push(...findHandlerClauses(body, ctx, tracker.current()));
   }
   if (body) {
     bindExpr(body, ctx, tracker);
@@ -223,20 +223,78 @@ const extractHandlerParams = (
   return [];
 };
 
-const findHandlerClauses = (expr: Expr): Form[] => {
+const isEffectHandlerHead = (expr: Expr | undefined): boolean => {
   if (!isForm(expr)) {
+    return false;
+  }
+
+  if (expr.calls("::")) {
+    const operationCall = expr.at(2);
+    return isForm(operationCall);
+  }
+
+  return true;
+};
+
+const isBareEffectHandlerHead = (
+  expr: Expr,
+  ctx: BindingContext,
+  scope: number,
+): boolean => {
+  if (!isForm(expr)) {
+    return false;
+  }
+  const callee = expr.at(0);
+  if (!isIdentifierAtom(callee) && !isInternalIdentifierAtom(callee)) {
+    return false;
+  }
+  return typeof ctx.symbolTable.resolveByKinds(callee.value, scope, ["effect-op"]) === "number";
+};
+
+const isEffectHandlerClause = (
+  expr: Expr | undefined,
+  ctx: BindingContext,
+  scope: number,
+): boolean => {
+  if (!isForm(expr) || !expr.calls(":") || !isEffectHandlerHead(expr.at(1))) {
+    return false;
+  }
+  const head = expr.at(1);
+  if (isForm(head) && !head.calls("::") && !isBareEffectHandlerHead(head, ctx, scope)) {
+    return false;
+  }
+
+  const body = expr.at(2);
+  return isForm(body) && body.calls("block");
+};
+
+const findHandlerClauses = (
+  expr: Expr,
+  ctx: BindingContext,
+  scope: number,
+): Form[] => {
+  if (!isForm(expr) || expr.calls("try")) {
     return [];
   }
+
   const handlers: Form[] = [];
   expr.toArray().forEach((child) => {
-    if (isForm(child) && child.calls(":")) {
-      const body = child.at(2);
-      if (isForm(body) && body.calls("block")) {
-        handlers.push(child);
-        return;
-      }
+    if (isEffectHandlerClause(child, ctx, scope) && isForm(child)) {
+      handlers.push(child);
+      return;
     }
-    handlers.push(...findHandlerClauses(child));
+    if (isForm(child) && child.calls(":")) {
+      const label = child.at(1);
+      const value = child.at(2);
+      if (label) {
+        handlers.push(...findHandlerClauses(label, ctx, scope));
+      }
+      if (value) {
+        handlers.push(...findHandlerClauses(value, ctx, scope));
+      }
+      return;
+    }
+    handlers.push(...findHandlerClauses(child, ctx, scope));
   });
   return handlers;
 };

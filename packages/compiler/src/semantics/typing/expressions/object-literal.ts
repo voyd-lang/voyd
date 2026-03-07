@@ -241,14 +241,15 @@ const mergeNominalObjectEntry = (
     ctx,
     state,
     typeName,
-    onField: ({ name, expectedField, valueType, isSpread }) => {
+    onField: ({ fieldSpan, name, expectedField, valueType, isSpread }) => {
       if (expectedField.type !== ctx.primitives.unknown) {
         ensureTypeMatches(
           valueType,
           expectedField.type,
           ctx,
           state,
-          isSpread ? `spread field ${name}` : `field ${name}`
+          isSpread ? `spread field ${name}` : `field ${name}`,
+          fieldSpan,
         );
       }
       provided.add(name);
@@ -256,6 +257,7 @@ const mergeNominalObjectEntry = (
   });
 
 type NominalObjectEntryField = {
+  fieldSpan: SourceSpan;
   name: string;
   expectedField: StructuralField;
   valueType: TypeId;
@@ -298,7 +300,13 @@ const forEachNominalObjectEntryField = ({
     const valueType = typeExpression(entry.value, ctx, state, {
       expectedType: expectedField.type,
     });
-    onField({ name: entry.name, expectedField, valueType, isSpread: false });
+    onField({
+      fieldSpan: valueSpan,
+      name: entry.name,
+      expectedField,
+      valueType,
+      isSpread: false,
+    });
     return;
   }
 
@@ -321,6 +329,7 @@ const forEachNominalObjectEntryField = ({
       ctx,
     });
     onField({
+      fieldSpan: entry.span,
       name: field.name,
       expectedField,
       valueType: field.type,
