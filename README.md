@@ -1,489 +1,141 @@
 # Voyd
 
-Voyd is a high performance WebAssembly language with an emphasis on full stack web development.
+Voyd is a programming language that compiles to WebAssembly. The project sits
+between Rust and TypeScript in abstraction level: explicit enough to stay
+predictable, high-level enough to build real applications without fighting the
+runtime.
 
-```rust
+```voyd
 fn fib(n: i32) -> i32
-  if n < 2 then:
+  if n < 2:
     n
   else:
     fib(n - 1) + fib(n - 2)
 
-pub fn main()
+pub fn main() -> i32
   fib(10)
 ```
 
-**Disclaimer**
+## Status
 
-Voyd is in it's very early stages of development. Voyd is not ready for production use. Some syntax and semantics are still subject to change. Expect frequent breaking changes.
+Voyd is pre-release and not ready for production use yet. Expect breaking
+changes while the language, runtime, and tooling continue to settle.
 
-All features documented in README Overview are fully implemented unless otherwise stated. Features documented in the [reference](./reference/) are not yet marked with status and may not be implemented.
+## Highlights
 
-**Features**:
-
-- Functional
-- Hybrid Nominal & Structural type system
+- Compiles to WebAssembly
+- Structural and nominal types
+- Traits and generic constraints
 - Algebraic effects
-- First class wasm support
-- Macros and language extensions
-- Uniform function call syntax
+- Macros used for real surface-language features
+- CLI, SDK, language server, docs site, and VSCode extension in one repo
 
-**Guiding Principles**:
+## Install and try it
 
-- Fun to write _and_ read.
-- Predictability
-- Hackability
-- Balance a great developer experience with performance
-- Play nice with others
-
-# Getting Started
-
-**Install**
+Install the CLI:
 
 ```bash
-npm i -g voyd
+npm i -g @voyd/cli
 ```
 
-**Usage Examples**
+Run a program:
 
 ```bash
-# Run the exported main function
-voyd --run script.voyd
-
-# Compile a directory (containing an index.voyd) to webassembly
-voyd --emit-wasm src > output.wasm
-
-# Compile to optimized WebAssembly
-voyd --emit-wasm --opt src > output.wasm
+voyd --run ./src/main.voyd
 ```
 
-### Memory Export ABI (Compiler API)
+Compiler a program:
+```bash
+voyd --emit-wasm ./src
+```
 
-When compiling through the compiler API (`compileProgram` / `codegenOptions`),
-memory exports are deterministic and configurable:
-
-- `linearMemoryExport`: `"always" | "auto" | "off"` (default: `"always"`)
-- `effectsMemoryExport`: `"auto" | "always" | "off"` (default: `"auto"`)
-
-By default, Voyd exports `memory` and only exports `effects_memory` when effect
-runtime paths require it. When present, `effects_memory` is an alias of
-`memory` (same underlying linear memory).
-
-**Requirements**
-
-Currently requires node v22
+Inspect compiler output:
 
 ```bash
-# Or nvm
-fnm install v22
+voyd --emit-ir-ast ./src/main.voyd
+voyd --emit-wasm-text --opt ./src/main.voyd
 ```
 
-# Overview
+Generate API documentation:
 
-Quick overview of the language. More detailed reference available [here](./reference/)
-
-## Comments
-
-```rust
-// Comments are single line and are marked with a c style slash slash
+```bash
+voyd doc --out docs.html
 ```
 
-## Primitive Types
+## Use the SDK
 
-```rust
-true // Boolean
-false // Boolean
-1 // i32 by default
-1.0 // f64 by default
-"Hello!" // String literal, can be multiline, supports interpolation via ${} (NOTE: Interpolation not yet implemented)
-[1, 2, 3] // Array literal. (NOTE: Not yet implemented. Arrays can be initialized with new_array_unchecked<T>({ from: FixedArray(val1, val2, etc) })
-(1, 2, 3) // Tuple literal  (NOTE: Not yet implemented)
-{x: 2, y: 4} // Structural object literal
+For JavaScript or TypeScript integrations, use the SDK:
+
+```bash
+npm i @voyd-lang/sdk
 ```
-
-## Variables
-
-```rust
-// Immutable variable
-let my_immutable_var = 7
-
-// Mutable variable
-var my_var = 7
-```
-
-## Functions
-
-A Basic function:
-
-```rust
-fn add(a: i32, b: i32) -> i32
-  a + b
-```
-
-In most cases the return type can be inferred
-
-```rust
-fn add(a: i32, b: i32)
-  a + b
-```
-
-To call a function, use the function name followed by the arguments in parenthesis
-
-```rust
-add(1, 2)
-```
-
-Voyd also supports uniform function call syntax (UFCS), allowing functions to be called on a type as if they were methods of that type.
-
-```rust
-1.add(2)
-```
-
-### Labeled arguments
-
-> Status: Not yet implemented
-
-Labeled arguments can be defined by wrapping parameters you wish to be labeled
-on call in curly braces.
-
-```rust
-fn add(a: i32, { to: i32 }) = a + to
-
-add(1, to: 2)
-```
-
-By default, the argument label is the same as the parameter name. You can
-override this by specifying the label before the argument name.
-
-```rust
-fn add(a: i32, { to b: i32 }) = a + b
-
-add(1, to: 2)
-```
-
-Labeled arguments can be thought of as syntactic sugar for defining a object
-type parameter and destructuring it in the function body[1]:
-
-```rust
-fn move({ x: i32 y: i32 z: i32 }) -> void
-  // ...
-
-// Semantically equivalent to:
-fn move(vec: { x: i32 y: i32 z: i32 }) -> void
-  let { x, y, z } = vec
-  // ...
-
-move(x: 1, y: 2, z: 3)
-
-// Equivalent to:
-move({ x: 1, y: 2, z: 3 })
-```
-
-This allows you to still use object literal syntax for labeled arguments when
-it might be cleaner to do so. For example, when the variable names match the
-argument labels:
-
-```rust
-let (x, y, z) = (1, 2, 3)
-
-// Object field shorthand allows for this:
-move({ x, y, z })
-
-// Which is better than
-move(x: x, y: y, z: z)
-```
-
-[1] The compiler will typically optimize this away, so there is no performance
-penalty for using labeled arguments.
-
-
-## If Expressions
-
-```rust
-if 3 < val then:
-  "hello" // true case
-else:
-  "bye" // false case (optional)
-```
-
-Ifs are expressions that return a value
-
-```rust
-let x = if 3 < val then: "hello" else: "bye"
-```
-
-## VSX DOM Client (Browser)
-
-Voyd can encode VSX element trees as MsgPack from Wasm. A tiny client renderer mounts these trees to the DOM.
-
-- Import: `import { render } from 'voyd/vsx-dom/client'`
-- Call your component export (e.g. `run`) to write MsgPack into Wasm memory and return its byte length
-- Pass either the `WebAssembly.Instance` or `WebAssembly.Memory` so the renderer can decode the buffer
-
-Example (bundler-friendly):
 
 ```ts
-import { render } from 'voyd/vsx-dom/client'
+import { createSdk } from "@voyd-lang/sdk";
 
-// Assume you already have Wasm bytes from a compiled Voyd module
-const module = new WebAssembly.Module(wasmBytes)
-const instance = new WebAssembly.Instance(module)
+const sdk = createSdk();
+const result = await sdk.compile({
+  source: `pub fn main() -> i32
+  42
+`,
+});
 
-// Component function exported by Voyd module, which returns MsgPack length
-const component = instance.exports.run as () => number
-
-// Mount into the DOM
-const container = document.getElementById('app')!
-render(component, container, { instance })
-```
-
-## Loops
-
-> Status: Partially implemented.
-> - Tail call optimization fully implemented.
-> - While loops and break partially implemented. Do not yet support returning a value.
-
-Basic while loop:
-
-```rust
-while condition do:
-  do_work()
-```
-
-For-in loops iterate over arrays and iterables:
-
-```rust
-for item in array do:
-  print(item)
-```
-
-Voyd is also tail call optimized:
-
-```rust
-// This function is super speedy and uses very little memory
-pub fn fib(n: i32, a: i32, b: i32) -> i32
-  if n < 1 then: a
-  else: fib(n - 1, b, a + b)
-
-pub fn main() -> i32
-  fib(10, 0, 1)
-```
-
-## Structural Objects
-
-Structural objects are types compatible with any other type containing
-at least the same fields as the structure.
-
-```rust
-fn get_x(obj: { x: i32 })
-  obj.x
-
-pub fn main()
-  let vec = {
-    x: 1,
-    y: 2,
-    z: 3
-  }
-
-  vec.get_x() // 1
-```
-
-## Nominal Objects
-
-Nominal objects attach a name (or brand) to a structure, and are only
-compatible with extensions of themselves.
-
-```rust
-obj Animal {
-  age: i32
+if (result.success) {
+  const value = await result.run<number>({ entryName: "main" });
+  console.log(value);
 }
-
-obj Cat extends Animal {
-  age: i32,
-  lives: i32
-}
-
-obj Dog extends Animal {
-  age: i32,
-  borks: i32
-}
-
-fn get_age(animal: Animal)
-  animal.age
-
-pub fn main()
-  let dog = Dog { age: 3, borks: 0 }
-  dog.get_age() // 3
-  let person = { age: 32 }
-  person.get_age() // Error { age: 32 } is not a type of animal
 ```
 
-## Methods
+See [packages/reference/docs/sdk.md](./packages/reference/docs/sdk.md) for more.
 
-```rust
-obj Animal {
-  age: i32
-}
+## Documentation
 
-impl Animal
-  pub fn get_age(animal: Animal)
-    animal.age
+- Language reference: [packages/reference/docs](./packages/reference/docs)
+- Local docs site: `http://localhost:5173/docs`
+- Architecture note: [docs/architecture/codegen-semantics-boundary.md](./docs/architecture/codegen-semantics-boundary.md)
+
+## Monorepo layout
+
+- `apps/cli`: `voyd` / `vt` command line entrypoints
+- `apps/smoke`: end-to-end smoke tests
+- `apps/site`: `voyd.dev` docs and playground
+- `apps/vscode`: VSCode extension
+- `packages/compiler`: parser, semantics, and Wasm codegen
+- `packages/language-server`: LSP server
+- `packages/sdk`: public compile/run/test APIs
+- `packages/lib`: shared runtime and tooling helpers
+- `packages/js-host`: JS host runtime for executing compiled modules
+- `packages/std`: standard library source bundle
+- `packages/reference`: language reference source and generated nav bundle
+
+## Develop locally
+
+Install workspace dependencies:
+
+```bash
+npm install
 ```
 
-## Intersections
+Useful commands:
 
-Intersections combine a nominal type and a structural type to define
-a new type compatible with any subtype of the nominal type that also
-has the fields of the structural type.
-
-```rust
-obj Animal { age: i32 }
-obj Snake extends Animal {}
-obj Mammal extends Animal { legs: i32 }
-
-type Walker = Animal & { legs: i32 }
-
-fn get_legs(walker: Walker)
-  walker.legs
-
-pub fn main()
-  let dog = Mammal { age: 2, legs: 4 }
-  dog.get_legs
+```bash
+npm test
+npm run typecheck
+npm run build
+npm run dev
 ```
 
-## Unions
+Voyd-specific helpers:
 
-Unions define a type that can be one of a group of types
-
-```rust
-obj Apple {}
-obj Lime {}
-obj Orange {}
-
-type Produce = Apple | Lime | Orange
+```bash
+vt --emit-parser-ast ./path/to/file.voyd
+vt --run ./path/to/file.voyd
+vt --emit-wasm-text --opt ./path/to/file.voyd
 ```
 
-## Match Statements
+## Contributing
 
-Match statements are used for type narrowing
-
-```rust
-obj Animal
-obj Cat extends Animal
-obj Dog extends Animal
-
-let dog = Dog {}
-
-match(dog)
-  Dog: print "Woof"
-  Cat: print "Meow"
-  else:
-    print "Blurb"
-```
-
-Match statements must be exhaustive. When matching against a nominal
-object, they must have an else (default) condition. When matching against
-a union, they must have a case for each object in the union
-
-## Traits
-
-> Status: Partially implemented
-> Supported for nominal types. Trait scoping is not yet enforced.
-
-Traits define a set of behavior that can be implemented on any nominal object or intersection.
-
-```rust
-trait Walk
-  fn walk() -> i32
-
-// Implement walk for any animal that contains the field legs: i32
-impl Walk for Animal & { legs: i32 }
-  fn walk(self)
-    self.walk
-
-// Traits are first class types
-fn call_walk(walker: Walk)
-  walker.walk
-
-fn do_work(o: Object)
-  // Traits also have runtime types
-  if (o has_trait Walk) then:
-    o.call_walk()
-```
-
-## Closures
-
-> Status: Not yet implemented
-
-```rust
-let double = n => n * 2
-
-array.map n => n * 2
-```
-
-Voyd also supports a concise syntax for passing closures to labeled arguments (not yet implemented):
-
-```rust
-try do():
-  call_fn_that_has_exception_effect()
-catch:
-  print "Error!"
-```
-
-## Dot Notation
-
-The dot is a simple form of syntactic sugar
-
-```rust
-let x = 4
-
-x.squared
-
-// Translates to
-squared(x)
-```
-
-## Generics
-
-> Status: Basic implementation complete for objects, functions, impls, and type aliases. Inference is not yet supported.
-
-```rust
-fn add<T>(a: T, b: T) -> T
-  a + b
-```
-
-With trait constraints (not yet implemented)
-
-```rust
-fn add<T: Numeric>(a: T, b: T) -> T
-  a + b
-```
-
-## Effects
-
-> Status: Not yet implemented
-
-Effects (will be) a powerful construct of the voyd type system. Effects
-are useful for a large class of problems including type safe exceptions,
-dependency injection, test mocking and much more.
-
-Think of libraries like TypeScript's [Effect](https://effect.website/) library,
-built directly into the language.
-
-```rust
-effect Exception
-  // An effect that may be resumed by the handler
-  ctl throw(msg: String) -> void
-
-// Effects with one control can be defined concisely as
-effect ctl throw(msg: String) -> void
-
-effect State
-  // Tail resumptive effect, guaranteed to resume exactly once.
-  // Are defined like normal functions
-  fn get() -> Int
-  fn set(x: Int) -> void
-
-// Tail resumptive effects with one function can be defined more concisely as
-effect fn get() -> Int
-```
+The codebase is organized around a clear compiler boundary: semantics produce a
+codegen view, and Wasm codegen consumes that view rather than typing internals.
+If you are changing the compiler, start with
+[docs/architecture/codegen-semantics-boundary.md](./docs/architecture/codegen-semantics-boundary.md).
