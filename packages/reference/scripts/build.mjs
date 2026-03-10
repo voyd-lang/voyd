@@ -30,6 +30,64 @@ function walkMarkdownFiles(dir) {
   return out;
 }
 
+function extractMarkdownLinks(markdown) {
+  const links = [];
+  const pattern = /\[[^\]]+\]\(([^)\s]+)\)/g;
+  for (const match of markdown.matchAll(pattern)) {
+    const href = match[1];
+    if (href) links.push(href);
+  }
+  return links;
+}
+
+function hasExternalScheme(href) {
+  return /^[A-Za-z][A-Za-z\d+.-]*:/.test(href) || href.startsWith("//");
+}
+
+function stripSearchAndHash(href) {
+  const hashIndex = href.indexOf("#");
+  const queryIndex = href.indexOf("?");
+  const end =
+    hashIndex === -1
+      ? queryIndex === -1
+        ? href.length
+        : queryIndex
+      : queryIndex === -1
+        ? hashIndex
+        : Math.min(hashIndex, queryIndex);
+  return href.slice(0, end);
+}
+
+function validateMarkdownLinks(mdFiles) {
+  const knownFiles = new Set(mdFiles.map((filePath) => path.normalize(filePath)));
+
+  mdFiles.forEach((filePath) => {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const { body } = parseFrontmatter(raw);
+
+    extractMarkdownLinks(body).forEach((href) => {
+      if (href.startsWith("#") || hasExternalScheme(href)) {
+        return;
+      }
+
+      const targetPath = stripSearchAndHash(href);
+      if (!targetPath.endsWith(".md")) {
+        return;
+      }
+
+      const resolved = path.normalize(path.resolve(path.dirname(filePath), targetPath));
+      const relativeToDocs = path.relative(docsRoot, resolved);
+      const escapesDocsRoot =
+        relativeToDocs.startsWith("..") || path.isAbsolute(relativeToDocs);
+
+      if (escapesDocsRoot || !knownFiles.has(resolved)) {
+        const relSource = path.relative(referenceRoot, filePath).replaceAll(path.sep, "/");
+        throw new Error(`Broken doc link in ${relSource}: ${href}`);
+      }
+    });
+  });
+}
+
 function slugFromFile(filePath) {
   const rel = path.relative(docsRoot, filePath).replaceAll(path.sep, "/");
   if (!rel.endsWith(".md")) throw new Error(`Expected markdown file: ${rel}`);
@@ -89,6 +147,7 @@ function parseOrder(value) {
 
 function buildReference() {
   const mdFiles = walkMarkdownFiles(docsRoot);
+  validateMarkdownLinks(mdFiles);
 
   const docs = mdFiles
     .map((filePath) => {
@@ -196,24 +255,39 @@ function main() {
 
   // Coalesce bursts of file events into a single rebuild.
   let timer = null;
+  let previousSnapshot = createWatchSnapshot();
   const rebuild = () => {
     try {
       buildReference();
+      previousSnapshot = createWatchSnapshot();
       process.stdout.write("[reference] rebuilt\n");
     } catch (err) {
       process.stderr.write(String(err?.stack ?? err) + "\n");
     }
   };
 
-  fs.watch(referenceRoot, { recursive: true }, (_event, filename) => {
-    if (!filename) return;
-    if (filename.includes(`${path.sep}dist${path.sep}`)) return;
-    if (!filename.endsWith(".md")) return;
+  const interval = setInterval(() => {
+    const nextSnapshot = createWatchSnapshot();
+    if (snapshotsEqual(previousSnapshot, nextSnapshot)) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(rebuild, 50);
-  });
+  }, 250);
 
   process.stdout.write("[reference] watching...\n");
+}
+
+function createWatchSnapshot() {
+  return walkMarkdownFiles(docsRoot)
+    .map((filePath) => {
+      const stats = fs.statSync(filePath);
+      return `${filePath}:${stats.mtimeMs}`;
+    })
+    .sort();
+}
+
+function snapshotsEqual(previousSnapshot, nextSnapshot) {
+  if (previousSnapshot.length !== nextSnapshot.length) return false;
+  return previousSnapshot.every((entry, index) => entry === nextSnapshot[index]);
 }
 
 main();

@@ -4,16 +4,26 @@ order: 230
 
 # Tuples
 
-Tuples are a fixed sequence of values of different types.
+Tuples are fixed-size ordered values.
 
 ```voyd
-type MyTuple = (i32, String, bool)
-let my_tuple: MyTuple = (1, "hello", true)
+type Pair = (i32, String)
 
-let x = my_tuple.0
-let y = my_tuple.1
-let z = my_tuple.2
+let pair: Pair = (1, "two")
+let first = pair.0
+let second = pair.1
+```
 
-// Tuples can also be destructured
-let (a, b, c) = my_tuple
+Tuples support destructuring.
+
+```voyd
+let (x, y) = pair
+```
+
+Tuple patterns also work inside `match`.
+
+```voyd
+match(pair)
+  (id, name):
+    id
 ```

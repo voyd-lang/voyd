@@ -2,31 +2,41 @@
 order: 240
 ---
 
-# Enum
+# Enums
+
+`enum` defines a named union of nominal variants.
 
 ```voyd
-enum Drink
-  Coffee { size: Size, sugar: Grams, cream: Grams }
-  Tea { size: Size, sugar: Grams, cream: Grams }
-  Soda { size: Size }
-  Water
-
-let drink: Drink = Drink::Soda { size: Medium() }
+pub enum MaybeDrink
+  None
+  Some<T> { value: T }
 ```
 
-Internally, enums are syntactic sugar for unions:
+Construct variants through the enum namespace.
+
 ```voyd
-enum Drink
-  Coffee { size: Size, sugar: Grams, cream: Grams }
-  Tea { size: Size, sugar: Grams, cream: Grams }
-  Soda { size: Size }
-  Water
-
-// Resolves to:
-type Drink =
-  (obj Coffee { size: Size, sugar: Grams, cream: Grams }) |
-  (obj Tea { size: Size, sugar: Grams, cream: Grams }) |
-  (obj Soda { size: Size }) |
-  (obj Water) |
-  ```
+let drink: MaybeDrink<i32> = MaybeDrink::Some<i32> { value: 10 }
 ```
+
+Unit variants are also valid, including generic unit variants.
+
+```voyd
+pub enum Signal
+  Idle
+  Ready<T>
+
+let signal: Signal<i32> = Signal::Ready<i32> {}
+```
+
+Match on enum variants with normal `match` syntax.
+
+```voyd
+match(drink)
+  MaybeDrink::None:
+    0
+  MaybeDrink::Some { value }:
+    value
+```
+
+`enum` is implemented as macro-backed sugar over nominal unions, but the surface
+syntax above is the stable language feature most users should care about.

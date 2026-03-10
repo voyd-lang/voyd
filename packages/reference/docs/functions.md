@@ -4,362 +4,182 @@ order: 40
 
 # Functions
 
-## Function Basics
+## Declarations
 
 ```voyd
 fn add(a: i32, b: i32) -> i32
   a + b
 
-// Usage
-add(1, 2)
-
-// Or with UFCS
-1.add(2)
+fn inc(x: i32) = x + 1
 ```
 
-With return type inference:
+Return types may be omitted when inference is clear.
 
 ```voyd
-// Equal sign is used when the function is written on one line
-fn add(a: i32, b: i32) = a + b
-
-// = also works with return types and effects
-fn fib() = test()
-fn fib() -> i32 = test()
-fn fib(): effect -> i32 = test()
+fn fib(n: i32)
+  if n < 2:
+    n
+  else:
+    fib(n - 1) + fib(n - 2)
 ```
 
-With effects:
+Return types may be module-qualified or unions.
 
 ```voyd
-fn get_json(address: String): Async -> Dictionary
-  let json_text = await fetch(address)
-  parse_json(json_text)
-
-// Multiple effects may be specified in parenthesis
-fn get_json(address: String): (Async, Throws) -> Dictionary
-  let json_text = await fetch(address)
-  parse_json(json_text)
+fn build() -> math::Vec3
+  math::Vec3 { x: 1, y: 2, z: 3 }
 ```
 
-## Labeled arguments
+## Overloads
 
-Labeled arguments can be defined by wrapping parameters curly braces.
+Voyd supports function overloading.
 
-```rust
-fn add(a: i32, {to: i32}) = a + to
+- Overloads are selected by argument types and labels.
+- Overloads may differ by label style.
+- Overloads may not differ only by return type.
 
-add(1, to: 2)
-```
+## Labeled parameters
 
-By default, the argument label is the same as the parameter name. You can
-override this by specifying the label before the argument name.
-
-```rust
-fn add(a: i32, { to b: i32 }) = a + b
-
-add(1, to: 2)
-```
-
-Labeled arguments can be thought of as syntactic sugar for defining a object
-type parameter and destructuring it in the function body[1]:
-
-```rust
-fn move({ x: i32, y: i32, z: i32 }) -> void
-  // ...
-
-// Semantically equivalent to:
-fn move(vec: { x: i32, y: i32, z: i32, }) -> void
-  let { x, y, z } = vec
-  // ...
-
-move(x: 1, y: 2, z: 3)
-
-// Equivalent to:
-move({ x: 1, y: 2, z: 3 })
-```
-
-This allows you to still use object literal syntax for labeled arguments when
-it might be cleaner to do so. For example, when the variable names match the
-argument labels:
-
-```rust
-let (x, y, z) = (1, 2, 3)
-
-// Object field shorthand allows for this:
-move({ x, y, z })
-
-// Which is better than
-move(x: x, y: y, z: z)
-```
-
-Labeled arguments also support concise closure sugar on call sites:
+Wrap a parameter group in `{ ... }` to define labeled arguments.
 
 ```voyd
-fn foo({ do: fn(): throws -> void, catch: fn(e: Error) -> void })
+fn clamp(value: i32, { min: i32, max: i32 }) -> i32
+  if value < min:
+    min
+  else:
+    if value > max then: max else: value
 
-foo do():
-  this_may_throw()
-catch(e):
-  log e
+clamp(7, min: 1, max: 5)
 ```
 
-[1] The compiler will typically optimize this away, so there is no performance
-penalty for using labeled arguments.
+You can rename the internal parameter while keeping the external label.
 
-For API design guidance (labels, naming, overload design, and effect ID
-conventions), see [Guidelines](./guidelines.md#api-guidelines).
+```voyd
+fn reduce<T>(value: T, { reducer cb: (T, T) -> T, start: T }) -> T
+  cb(start, value)
+```
+
+Passing a structural object is also valid.
+
+```voyd
+clamp(7, { min: 1, max: 5 })
+```
 
 ## Optional parameters
 
-Parameters may be marked optional by adding `?` before the colon. The parameter's
-type becomes [`Optional`](./types/objects.md#optional) of the specified type.
+Use `?` to make a parameter optional. The source-level type displays as
+optional syntax, while the value behaves like an `Optional<T>`.
 
 ```voyd
-fn greet(name: String, middle?: String)
-  // middle has type Optional<String>
+fn greet(name: String, middle?: String) -> String
   match(middle)
-    Some<String>:
-      name + " " + middle.value
+    Some<String> { value }:
+      "${name} ${value}"
     None:
       name
 
-greet("Ada")          // middle -> none()
-greet("Ada", "Lovelace") // middle -> some("Lovelace")
+greet("Ada")
+greet("Ada", "Lovelace")
 ```
 
-When an optional parameter is omitted, `none()` is inserted automatically. When a
-non-optional value is supplied, it is wrapped with `some(...)` at the call site.
-
-Optional parameters can appear before labeled arguments. When skipped, later
-arguments must be labeled:
+Optional labeled parameters work the same way.
 
 ```voyd
-fn sum(a: i32, b?: i32, { c: i32 }) -> i32
-  a + c
-
-sum(1, c: 2) // b is omitted
-```
-
-Providing a leftover positional argument after skipping an optional one causes
-a compile error, and parameters typed as `Optional<T>` without `?` remain
-required.
-
-Closures support optional parameters using the same syntax:
-
-```voyd
-let f = (name: String, middle?: String) => greet(name, middle)
-f("John")
-f("John", "Quincy")
+fn render({ title: String, subtitle?: String }) -> String
+  title
 ```
 
 ## Default parameters
 
-Parameters can provide default values with `=`.
-
-```voyd
-fn greet(name: String = "world")
-  "Hello, " + name
-
-greet()        // "Hello, world"
-greet("Ada")   // "Hello, Ada"
-```
-
-Defaulted parameters are omitted at call sites the same way as `?` parameters.
-Conceptually, each defaulted parameter behaves like:
-
-```voyd
-param = param ?? default_value
-```
-
-The default expression is type-checked against the parameter type. If the
-parameter type is omitted, Voyd infers it from the default expression:
+Use `=` to supply a default argument value.
 
 ```voyd
 fn repeat(times = 3) -> i32
   times
+
+fn log({ level: String = "info", message: String }) -> String
+  "[${level}] ${message}"
 ```
 
-In generic functions, defaulted parameters must declare an explicit type:
+Defaults are supported on positional and labeled parameters. Trait methods,
+effect operation signatures, and lambda parameters do not currently support
+default values.
+
+Current restrictions:
+
+- In generic functions, a defaulted parameter must declare an explicit type.
+- A default expression cannot reference a parameter declared at the same
+  position or later in the parameter list.
+- `?` and `=` cannot be combined on the same parameter.
+
+## Lambdas
+
+Lambdas use `=>` and close over surrounding bindings.
 
 ```voyd
-fn pick<T>(a: T, b: T = a) -> T
-  b
+let inc = (x: i32) => x + 1
+
+fn make_adder(base: i32)
+  (delta: i32) -> i32 => base + delta
 ```
 
-Labeled parameters support defaults in both typed and inferred forms:
+Nested lambdas capture outer values as expected.
+
+## Methods and UFCS
+
+Methods are defined in `impl` blocks.
 
 ```voyd
-fn log({ level: String = "info", message: String })
-  print("[${level}] ${message}")
+obj Counter {
+  value: i32
+}
 
-fn scale({ by = 2, value: i32 }) -> i32
-  value * by
+impl Counter
+  fn inc(self) -> i32
+    self.value + 1
 
-log(message: "ready")
-scale(value: 5)
+let counter = Counter { value: 1 }
+counter.inc()
 ```
 
-Defaulted positional parameters can still appear before labeled parameter groups:
+UFCS-style dot calls also work for ordinary functions.
 
 ```voyd
-fn sum(a: i32, b: i32 = 2, { c: i32 }) -> i32
-  a + b + c
-
-sum(1, c: 3) // b defaults to 2
+1.add(2)
 ```
 
-Notes:
-- `?` and `=` are mutually exclusive on the same parameter.
-- Default expressions cannot reference parameters declared at the same position
-  or later in the parameter list.
-- Function declarations support default parameters. Trait methods, effect
-  operation signatures, and lambda parameters do not currently support `=`.
+Voyd also supports unparenthesized call syntax in DSL-like cases where it reads
+more clearly than nested punctuation.
 
-## Uniform Function Call Syntax (Dot Notation)
-
-The dot (or period) operator applies the expression on the left as an argument
-of the expression on the right.
-
-```
-5.add(1)
-
-// Becomes
-add(5, 1)
-
-// Parenthesis on the right expression are not required when the function only takes one argument
-5.squared
-
-// Becomes
-squared(5)
+```voyd
+log value
+clamp number min: 0 max: 10
 ```
 
-See the chapter on [Syntax](./syntax.md) for more information.
+Prefer ordinary parenthesized calls for general-purpose code and use the
+unparenthesized form sparingly.
+
+## Effects
+
+Functions can declare effects between the parameter list and return type.
+
+```voyd
+fn fetch(value: i32): Async -> i32
+  Async::await(value)
+```
+
+See [Effects](./types/effects.md) for the full effect model.
 
 ## Generics
 
-```rust
-fn add<T>(a: T, b: T) -> T
-  a + b
-```
-
-With constraints
-
-```rust
-fn add<T: Numeric>(a: T, b: T) -> T
-  a + b
-```
-
-Constraints may be trait, structural, or nominal requirements. See
-[Generics](./generics.md) for details and additional examples.
-
-
-## Parenthetical Elision
-
-When a function call is the top level call of its line, the parenthesis surrounding
-the arguments (as well as the commas) can be elided.
-
-```rust
-fn add_three_numbers(a: i32, b: i32, c: i32) -> i32
-  a + b + c
-
-add_three_numbers 1 2 3
-```
-
-Indented lines are treated as blocks and supplied as arguments to the function
-on the previous line
-
-```rust
-add_three_numbers 1 2
-  let x = 1
-  let y = 2
-  x + y
-```
-
-This can be used to achieve trailing closures, much like swift:
-
-```rust
-fn call_with_5(f: fn(i32) -> void) -> void
-  f(5)
-
-call_with_5 (x) =>
-  print(x)
-```
-
-Parenthetical elision also works with labeled arguments:
-
-```rust
-fn add(a: i32, {to: i32}) = a + to
-
-add 1 to: 2
-```
-
-Labeled arguments may also be supplied on a new line on the same indentation
-level as the function call provided no empty on that indentation level separate
-the two:
-
-```rust
-add 1
-to: 2
-```
-
-See the chapter on [Syntax](./syntax.md) for more information and detailed rules.
-
-## Function Overloading
-
-Voyd functions can be overloaded. Provided that function overload can be unambiguously distinguished via their parameters and return type.
+Functions can be generic and constrained.
 
 ```voyd
-fn sum(a: i32, b: i32)
-  print("Def 1")
-  a + b
+fn id<T>(value: T) -> T
+  value
 
-fn sum(vec: { a:i32, b: i32 })
-  print("Def 2")
-  vec.a + vec.b
-
-sum a: 1, b: 2 // Def 1
-sum { a: 1, b: 2 } // Def 2
+fn render<T: Drawable>(value: T) -> String
+  value.draw()
 ```
 
-This can be especially useful for overloading operators to support a custom
-type:
-
-```voyd
-fn '+'(a: Vec3, b: Vec3) -> Vec3
-  Vec3(a.x + b.x, a.y + b.y, a.z + b.z)
-
-Vec3(1, 2, 3) + Vec3(4, 5, 6) // Vec3(5, 7, 9)
-```
-
-A function call is considered to be ambiguous when multiple functions in
-the same scope share the same name, and the types of each parameter overlap
-in order.
-
-```voyd
-fn add(a: i32, b: i32) -> i32
-fn add(d: i32, e: i32) -> i32 // Ambiguous collision
-fn add(f: i32, c: f32) -> i32 // This is fine, the second parameter does not overlap with previous
-```
-
-Object types overlap if one is an extension of the other:
-
-```voyd
-obj Animal {}
-obj Dog: Animal {}
-obj Cat: Animal {}
-
-fn walk(animal: Animal)
-fn walk(dog: Dog) // Ambiguous collision with walk(animal: Animal)
-
-// Sibling types do not overlap
-fn speak(cat: Cat)
-fn speak(dog: Dog) // This is fine
-
-// Labeled parameters can be to add an explicit distinction between two overlapping
-// types, (provided they have different labels)
-fn walk({animal: Animal})
-fn walk({dog: Dog}) // This is fine, the label, dog, distinguishes this function from the previous
-
-walk(dog: dexter) // Woof!
-```
+See [Generics](./generics.md) for details.

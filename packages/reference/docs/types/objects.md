@@ -4,401 +4,110 @@ order: 210
 
 # Objects
 
-Objects are a reference data type that represent a fixed collection of key value
-pairs (fields).
+Voyd has two object-style type families:
 
-They are defined by listing their fields between curly braces `{}`.
+- structural object types, written with `type Name = { ... }`
+- nominal object types, written with `obj Name { ... }`
+
+## Structural objects
+
+Structural objects are satisfied by shape.
 
 ```voyd
-type MyObject = {
-  a: i32,
-  b: i32
+type Point = {
+  x: i32,
+  y: i32
+}
+
+fn length_sq(point: Point) -> i32
+  point.x * point.x + point.y * point.y
+
+length_sq({ x: 3, y: 4 })
+```
+
+Structural object literals support field shorthand and spread.
+
+```voyd
+let x = 1
+let y = 2
+let point = { x, y }
+let point3 = { ...point, z: 3 }
+```
+
+Optional fields use `?`.
+
+```voyd
+obj OptionalBox {
+  value?: i32
 }
 ```
 
-# Initializing an Object
+## Nominal objects
 
-An object is initialized using object literal syntax. Listing the fields and
-their corresponding values between curly braces `{}`.
-
-```voyd
-let my_object: MyObject = {
-  a: 5,
-  b: 4
-}
-```
-
-Field shorthand:
+Nominal objects have their own identity.
 
 ```voyd
-// When a variable has the same name as a field;
-let a = 5
-// The field can be omitted
-let value = { a, b: 4 }
-```
-
-Spread operator:
-
-```voyd
-type MyObject2 = {
-  a: i32,
-  b: i32,
-  c: i32
-}
-
-let a = 5
-let value = { a, b: 4 }
-let value2: MyObject2 = { ...value, c: 3 }
-```
-
-# Nominal Objects
-
-The objects we have defined so far were all structural types. That is, they were
-satisfied by any object that had the same fields:
-
-```voyd
-type Animal = {
-  name: string
-}
-
-fn print_animal_name(animal: Animal) -> void
-  log(animal.name)
-
-square_area({ name: "Spot" }) // Ok!
-square_area({ name: "Spot", species: "Dog" }) // Also Ok!
-```
-
-Sometimes, it may be desirable to define a type that is only satisfied by a type
-explicitly defined to satisfy it. This is called a nominal type.
-
-For example:
-
-```voyd
-type BaseballPlayer = {
-  has_bat: bool
-}
-
-type Cave = {
-  has_bat: bool
-}
-
-fn can_hit_ball(player: BaseballPlayer) -> bool
-  player.has_bat
-
-let ruth: BaseballPlayer = { has_bat: true }
-let bat_cave: Cave = { has_bat: true }
-
-can_hit_ball(ruth) // true
-can_hit_ball(bat_cave) // true
-```
-
-In this example, because `BaseballPlayer` and `Cave` both have a `has_bat`
-field, the `can_hit_ball` function can accept both types. So
-`can_hit_ball(bat_cave)` returned true, even though it doesn't make sense for a
-cave to hit a ball.
-
-to alleviate this, we can define a nominal subtype of `Object`:
-
-```voyd
-obj BaseballPlayer {
-  has_bat: bool
-}
-
-type Cave = {
-  has_bat: bool
-}
-
-fn can_hit_ball(player: BaseballPlayer) -> bool
-  player.has_bat
-
-let ruth = BaseballPlayer { has_bat: true }
-let bat_cave: Cave = { has_bat: true }
-
-can_hit_ball(ruth) // true
-can_hit_ball(bat_cave) // Error - bat_cave is not a BaseballPlayer
-```
-
-While a nominal object can satisfy a structural type with the same fields, the
-reverse is not true. A nominal object can only be used where the type it extends
-is expected.
-
-```voyd
-obj Animal {
+obj User {
+  id: i32,
   name: String
 }
 
-obj Cat: Animal {
-  lives_remaining: i32
-}
-
-obj Dog: Animal {
-  likes_belly_rubs: bool
-}
-
-fn pet(animal: Animal) -> void
-  // ...
-
-pet(Cat { name: "Whiskers", lives_remaining: 9 }) // Ok!
-pet(Dog { name: "Spot", likes_belly_rubs: true }) // Ok!
-
-// Error - pet expects an Animal, not a { name: String, lives_remaining: i32 }
-pet({ name: "Whiskers", lives_remaining: 9 })
-
-fn pet_structural(animal: { name: String }) -> void
-  // ...
-
-// Ok!
-pet_structural({ name: "Whiskers" })
-
-// Ok!
-pet_structural(Cat { name: "Whiskers", lives_remaining: 9 })
+let user = User { id: 1, name: "Ada" }
 ```
 
-## Assignment and Compatibility
-
-voyd blends nominal and structural typing. Assignments and parameter checks
-follow these rules:
-
-- When the expected type is structural (an inline object type or the base `Object`), any object with the required fields is accepted. Nominal objects carry a structural component, so they satisfy structural expectations.
-- When the expected type is nominal, the actual value must come from the same nominal object (including compatible type arguments). Having the same fields is not enough.
-- The base `Object` is the only nominal type that also accepts purely structural objects.
-- `unknown` is permissive during relaxed inference (it satisfies any expectation) but rejected during the strict pass if it remains on either side of a comparison.
+Structural compatibility does not satisfy a nominal parameter.
 
 ```voyd
-obj Person {
-  id: i32
-}
+fn load(user: User) -> i32
+  user.id
 
-fn take_person(person: Person) -> i32
-  person.id
-
-fn take_shape(shape: { id: i32 }) -> i32
-  shape.id
-
-let named = Person { id: 3 }
-
-take_person(named) // Ok - nominal identity matches
-take_shape(named) // Ok - nominal supplies its structural fields
-
-take_person({ id: 3 }) // Error - structural object cannot satisfy Person
-
-let base: Object = { any: 1 } // Ok - structural types satisfy Object
+// load({ id: 1, name: "Ada" })  // error
 ```
 
-## Generic Variance (Known Gap)
-
-Today, nominal type parameters are treated as **covariant** during compatibility
-checks. That means `Box<Dog>` is accepted where `Box<Animal>` is expected, even
-if the parameter is used in a mutable or input position where invariance or
-contravariance would be required for soundness.
-
-This is a known gap that will be addressed by adding variance annotations on
-nominal type parameters and making both the type checker and runtime RTT
-ancestry honor them.
-
-
-## Nominal Object Initializers
-
-Nominal objects have a default initializer that takes the fields of the object
-as arguments.
+Nominal values still satisfy compatible structural expectations.
 
 ```voyd
-obj Animal {
-  id: i32
-  name: String
-}
+fn load_id(value: { id: i32 }) -> i32
+  value.id
 
-let me = Animal { name: "John", id: 1 }
+load_id(user)
 ```
 
-You can add a custom initializers by defining static init methods
+## Constructors
+
+Nominal objects support constructor-literal syntax and `init` overloads.
 
 ```voyd
-obj Animal {
-  id: String
-  name: String
+obj Color {
+  x: i32,
+  y: i32,
+  z: i32
 }
 
-impl Animal
-  pub fn init({ name: String })
-    Animal { id: uuid(), name }
+impl Color
+  fn init(x: i32, y: i32, z: i32) -> Color
+    Color { x, y, z }
 
-  pub fn init({ nombre: String })
-    Animal { name: nombre }
+Color { x: 1, y: 2, z: 3 }
+Color(1, 2, 3)
+```
 
-  pub fn init(name: String)
-    Animal { name }
+Constructors also resolve through aliases that target nominal objects.
 
-// All these are now valid ways of initializing Animal
-Animal { name: "frog" }
-Animal { nombre: "frog" }
-Animal("frog")
+```voyd
+pub type Vec3Alias = Color
+
+let value = Vec3Alias(1, 2, 3)
 ```
 
 ## Methods
 
-Methods can be defined on nominal objects using the `impl` keyword.
+Methods live in `impl` blocks.
 
 ```voyd
-obj Animal {
-  name: String
-}
-
-impl Animal
-  fn run(self) -> String
-    "${self.name} is running!"
-
-
-let me = Animal { name: "John" }
-log me.run // "John is running!"
+impl Color
+  fn sum(self) -> i32
+    self.x + self.y + self.z
 ```
 
-// TODO: Document mutability
-
-### Inheritance
-
-Unlike other languages, objects do not inherit methods from their parent
-type by default. Instead, they must be opted in with use statements:
-
-```voyd
-obj Animal {
-  age: int
-}
-
-impl Animal
-  fn breathe()
-    ...
-
-impl Speak for: Animal
-  fn speak()
-
-obj Dog: Animal {
-  age: int // Must have same fields as Animal.
-}
-
-impl Dog with: Animal // or Animal::{ breath } to only inherit specified methods.
-  // Additonal methods
-  fn walk()
-    ...
-
-// Also works with traits
-impl Speak for: Dog, with: Animal::Speak
-
-fn main()
-  let dog = Dog { name: "Dexter" }
-  dog.run() // Dexter is running
-```
-
-
-Voyd uses static dispatch for all methods defined on a type. That is, when
-a function is called on a method, the function is determined at compile time.
-
-In practice, this means that compiler will pick the method on the declared type,
-even if a subtype is passed. For example:
-
-```voyd
-obj Animal {}
-obj Dog: Animal {}
-
-impl Animal
-  pub fn talk()
-    log "Glub glub"
-
-impl Dog
-  pub fn talk()
-    log "Bark"
-
-fn interact(animal: Animal)
-  animal.talk()
-
-let dog = Dog {}
-
-// Here, because interact only knows it will receive an animal, it calls talk from Animal
-interact(dog) // Glub glub
-
-// Here, the compiler knows dog is Dog, so it calls talk from Dog
-dog.talk() // Bark
-```
-
-The next section will discuss how to coerce a function like `interact` into
-using the methods of a subtype.
-
-## Object Type Narrowing
-
-```voyd
-obj Optional
-
-obj None: Optional
-
-obj Some: Optional {
-  value: i32
-}
-
-fn divide(a: i32, b: i32) -> Optional
-  if b == 0:
-    None { }
-  else:
-    Some { value: a / b }
-
-fn main(a: i32, b: i32)
-  a.divide(b)
-    .match(x)
-      Some:
-        log "The value is ${x.value}"
-      None:
-        log "Error: divide by zero"
-```
-
-## Final Objects
-
-Objects can be defined as final, meaning they cannot be extended.
-
-```voyd
-final obj Animal {
-  name: String
-}
-
-// Error - Animal is final
-obj Cat: Animal {
-  lives_remaining: i32
-}
-```
-
-# Built in Object Types
-
-## Strings
-
-Strings are a sequence of characters. The main string type, `String`, is can
-grow and shrink in size when defined as a mutable variable.
-
-Type: `String`
-
-```voyd
-let my_string = String()
-
-// String literals are of type `String`
-let my_string2 = "Hello, world!"
-```
-
-## Arrays
-
-Arrays are a growable sequence of values of the same type.
-
-Type: `Array`
-
-```voyd
-let my_array = Array(1, 2, 3)
-```
-
-## Dictionaries
-
-Dictionaries are a growable collection of key-value pairs.
-
-Type: `Dict`
-
-```voyd
-let ~my_dict = Dict<i32>::new()
-my_dict.set("a", 1)
-my_dict.set("b", 2)
-my_dict.set("c", 3)
-```
+See [Mutability](../mutability.md) for `~self` and mutable field access.

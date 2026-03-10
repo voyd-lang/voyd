@@ -7,6 +7,9 @@ import compression from "vite-plugin-compression";
 // Some environments import CJS default slightly differently. Normalize below.
 import tsconfigPaths from "vite-tsconfig-paths";
 
+const configDir = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(configDir, "..", "..");
+const referenceEntry = path.resolve(repoRoot, "packages/reference/dist/index.js");
 const basePath = process.env.GITHUB_PAGES_BASE_PATH?.trim() || "/";
 const baseDir = basePath.replace(/^\/|\/$/g, "");
 const assetsDir = baseDir ? `${baseDir}/assets` : "assets";
@@ -15,6 +18,15 @@ export default defineConfig({
   base: "/",
   build: {
     assetsDir,
+  },
+  server: {
+    fs: {
+      allow: [repoRoot],
+    },
+    watch: {
+      interval: 250,
+      usePolling: true,
+    },
   },
   plugins: [
     tailwindcss(),
@@ -35,10 +47,11 @@ export default defineConfig({
       "@voyd/std",
     ],
     alias: [
+      { find: /^@voyd\/reference$/, replacement: referenceEntry },
       // Avoid bundling Node-only deps pulled via optional paths in `voyd`
-      { find: /^glob(\/.*)?$/, replacement: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "stubs/glob.ts") },
-      { find: /^node:fs$/, replacement: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "stubs/node-fs.ts") },
-      { find: /^node:path$/, replacement: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "stubs/node-path.ts") },
+      { find: /^glob(\/.*)?$/, replacement: path.resolve(configDir, "stubs/glob.ts") },
+      { find: /^node:fs$/, replacement: path.resolve(configDir, "stubs/node-fs.ts") },
+      { find: /^node:path$/, replacement: path.resolve(configDir, "stubs/node-path.ts") },
     ],
   },
   optimizeDeps: {
@@ -46,7 +59,14 @@ export default defineConfig({
     include: ["binaryen"],
     // Workspace packages are already ESM and can be large; pre-bundling them
     // can lead to duplicated module instances (breaking `instanceof` checks).
-    exclude: ["@voyd/compiler", "@voyd/js-host", "@voyd/lib", "@voyd/sdk", "@voyd/std"],
+    exclude: [
+      "@voyd/compiler",
+      "@voyd/js-host",
+      "@voyd/lib",
+      "@voyd/reference",
+      "@voyd/sdk",
+      "@voyd/std",
+    ],
     esbuildOptions: {
       supported: {
         "top-level-await": true,
