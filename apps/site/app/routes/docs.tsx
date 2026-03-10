@@ -17,7 +17,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { useHref, useSearchParams } from "react-router";
+import { Link, useHref, useSearchParams } from "react-router";
 
 export const prerender = true;
 
@@ -220,6 +220,96 @@ const unwrapTickWrappedContent = (value: string): string => {
   }
 };
 
+const hasExternalScheme = (href: string) =>
+  /^[A-Za-z][A-Za-z\d+.-]*:/.test(href) || href.startsWith("//");
+
+const splitHrefParts = (href: string) => {
+  const hashIndex = href.indexOf("#");
+  const queryIndex = href.indexOf("?");
+  const pathEnd =
+    hashIndex === -1
+      ? queryIndex === -1
+        ? href.length
+        : queryIndex
+      : queryIndex === -1
+        ? hashIndex
+        : Math.min(hashIndex, queryIndex);
+
+  const path = href.slice(0, pathEnd);
+  const search =
+    queryIndex === -1
+      ? ""
+      : href.slice(queryIndex, hashIndex === -1 ? href.length : hashIndex);
+  const hash = hashIndex === -1 ? "" : href.slice(hashIndex);
+
+  return { path, search, hash };
+};
+
+const slugDirectorySegments = (slug: string) =>
+  slug === ""
+    ? []
+    : slug
+        .split("/")
+        .filter(Boolean)
+        .slice(0, -1);
+
+const normalizeDocSlug = (segments: string[]) => {
+  if (segments.length === 0) return "";
+
+  const normalized = [...segments];
+  const last = normalized.at(-1);
+  if (!last) return "";
+
+  if (last.endsWith(".md")) {
+    normalized[normalized.length - 1] = last.slice(0, -3);
+  }
+
+  if (normalized.at(-1) === "README") {
+    normalized.pop();
+  }
+
+  return normalized.join("/");
+};
+
+const resolveDocSlugFromHref = ({
+  currentSlug,
+  href,
+}: {
+  currentSlug: string;
+  href: string;
+}) => {
+  const { path } = splitHrefParts(href);
+  if (!path || path.startsWith("#")) return null;
+  if (hasExternalScheme(path)) return null;
+  if (path.startsWith("/")) return null;
+  if (!path.endsWith(".md")) return null;
+
+  const nextSegments = [...slugDirectorySegments(currentSlug)];
+
+  path.split("/").forEach((segment) => {
+    if (!segment || segment === ".") {
+      return;
+    }
+    if (segment === "..") {
+      nextSegments.pop();
+      return;
+    }
+    nextSegments.push(segment);
+  });
+
+  return normalizeDocSlug(nextSegments);
+};
+
+const buildDocHref = ({
+  docsPath,
+  slug,
+  hash = "",
+}: {
+  docsPath: string;
+  slug: string;
+  hash?: string;
+}) => `${slug ? `${docsPath}?p=${encodeURIComponent(slug)}` : docsPath}${hash}`;
+
 export default function Docs() {
   const [headings, setHeadings] = useState<Heading[]>([]);
   const navRef = useRef<HTMLDivElement>(null);
@@ -242,8 +332,7 @@ export default function Docs() {
     setSearchParams({});
   };
 
-  const getDocHref = (slug: string) =>
-    slug ? `?p=${encodeURIComponent(slug)}` : docsPath;
+  const getDocHref = (slug: string) => buildDocHref({ docsPath, slug });
 
   // Build headings (h2–h3) from the rendered DOM.
   useEffect(() => {
@@ -373,6 +462,35 @@ export default function Docs() {
         <pre className="not-prose overflow-x-auto" {...props}>
           {children}
         </pre>
+      );
+    },
+    a({ href = "", children, ...props }) {
+      if (href.startsWith("#")) {
+        return (
+          <a href={href} {...props}>
+            {children}
+          </a>
+        );
+      }
+
+      const resolvedSlug = resolveDocSlugFromHref({
+        currentSlug: doc.slug,
+        href,
+      });
+
+      if (resolvedSlug !== null && getReferenceDoc(resolvedSlug)) {
+        const { hash } = splitHrefParts(href);
+        return (
+          <Link to={buildDocHref({ docsPath, slug: resolvedSlug, hash })} {...props}>
+            {children}
+          </Link>
+        );
+      }
+
+      return (
+        <a href={href} {...props}>
+          {children}
+        </a>
       );
     },
   };

@@ -2,29 +2,29 @@
 order: 80
 ---
 
-# Mutability In Voyd
+# Mutability
 
-## Variable Mutability
+Voyd separates binding mutability from object mutation.
 
-Variable mutability determines if a variable can be **reassigned** or not.
+## Reassignable bindings
+
+Use `var` when the binding itself must be reassigned.
 
 ```voyd
-// Immutable variable
-let x = 5
-x = 6 // Error: Cannot reassign to immutable variable
-
-// Mutable variable
-var y = 3
-y = 4 // y is now 4
+var count = 0
+count = count + 1
 ```
 
-## Object Mutability
+`let` bindings are immutable.
 
-Object mutability determines if the **fields** of an object can be **reassigned**
-or not.
+```voyd
+let count = 0
+// count = 1  // error
+```
 
-Note that variable mutability is different from object mutability. A mutable
-variable can still hold an immutable object and vice versa.
+## Mutable object access
+
+Use `~` when a binding or parameter must support field mutation.
 
 ```voyd
 obj Point {
@@ -32,50 +32,32 @@ obj Point {
   y: i32
 }
 
-// Immutable object
-let p1 = Point { x: 5, y: 4 }
-p1.x = 6 // Error: Cannot reassign to immutable field
-
-// Mutable object
-let ~p2 = Point { x: 5, y: 4 }
-p2.x = 6 // p2.x is now 6
-
-// Variables can be mutable while holding an immutable object
-var p3 = Point { x: 5, y: 4 }
-p3.x = 6 // Error: Cannot reassign to immutable field
-
-p3 = Point { x: 6, y: 4 } // p3 is now a new object
-
-// Parameters and methods must also mark themselves as mutable references
-impl Point
-  fn unbump(~self) -> voyd
-    self.x = self.x - 1
-
-fn bump(~v: Point) -> voyd
-  v.x = v.x + 1
-
-fn bump_bad(v: Point) -> voyd
-  v.x = v.x + 1 // This will throw an error, it doesn't borrow a mutable Point
-
-pub fn main() -> i32
-  let ~a = VecTest { x: 1 }
-  let b = VecTest { x: 1 }
-  bump(a) // Ok
-  bump(b) // Error - b is not mutable
+let ~point = Point { x: 1, y: 2 }
+point.x = 3
 ```
 
-## Module Scope
+Methods and functions must also request mutable access explicitly.
 
-At module scope, `let` bindings are supported, including `pub let` exports:
+```voyd
+impl Point
+  fn move_x(~self, dx: i32) -> void
+    self.x = self.x + dx
+
+fn reset_x(~point: Point) -> void
+  point.x = 0
+```
+
+Without `~`, field mutation is rejected even if the type itself has mutable
+fields.
+
+## Module scope
+
+Module-level `let` declarations are allowed, including `pub let`.
 
 ```voyd
 let answer = 41
-pub let pi = 3.14
+pub let version = "0.1"
 ```
 
-But mutable object binding syntax (`~`) is only for local bindings/parameters,
-not for module-level `let` declarations:
-
-```voyd
-let ~cache = Dict<i32>::new() // Error
-```
+Mutable object-binding syntax is local-only. Module-level `let ~value = ...` is
+not supported.

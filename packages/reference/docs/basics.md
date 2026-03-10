@@ -7,149 +7,153 @@ order: 10
 ## Comments
 
 ```voyd
-// This is a single line comment
+// Single-line comment
 ```
 
-## Identifiers
+## Bindings
 
-Identifiers bind names to values, types, and other language constructs. They can
-contain letters, numbers, and underscores, and must start with a letter or underscore.
+`let` creates an immutable binding. `var` creates a reassignable binding.
 
 ```voyd
-hey
-hey_there
-MyType
-MyType2
+let answer = 41
+var count = 0
+
+count = count + 1
 ```
 
-## Variables
+## Functions
+
+Functions use `fn`. The last expression in the body is the result.
 
 ```voyd
-// Declare an immutable variable
-let x = 5
+fn add(a: i32, b: i32) -> i32
+  a + b
 
-// Declare a mutable variable (see note)
-var y = 3
+fn inc(x: i32) = x + 1
 ```
 
-## String Literals
+## Literals
 
 ```voyd
-// Strings are defined with double quotes
-let name = "John"
-
-// Double quotes also support multi-line strings
-let address = "
-123 Main St
-Anytown, USA
-"
-// String interpolation
-let greeting = "Hello, ${name}"
+let int_value = 5
+let float_value = 3.14
+let ok = true
+let name = "Voyd"
+let pair = (1, "two")
+let items = [1, 2, 3]
 ```
 
-## Numeric Literals
+String interpolation uses `${...}`.
 
 ```voyd
-// Integers
-let x = 5
-
-// Floats
-let y = 3.14
+let user = "Ada"
+let greeting = "Hello, ${user}"
 ```
 
-## Boolean Literals
+Escape `\${` when you want the literal text.
 
 ```voyd
-let x = true
-let y = false
+let template = "Hello, \${name}"
 ```
 
-## Object literals
+## Structural object literals
 
 ```voyd
-let value = {
-  a: 5,
-  b: 4
+let point = {
+  x: 3,
+  y: 4
 }
 
-let x = value.a // x will be bound to 5
+let x = point.x
 ```
 
-Field shorthand:
+Field shorthand works when the binding name already matches the field name.
 
 ```voyd
-let a = 5
-let value = { a, b: 4 }
-
-// Equivalent to
-let value = { a: a, b: 4 }
+let x = 3
+let y = 4
+let point = { x, y }
 ```
 
-## Tuple literals
+## Tuples
 
 ```voyd
-let value = (5, 4)
-let x = value.0 // x will be bound to 5
+let pair = (1, "two")
 
-// Destructuring
-let (a, b) = value
+let first = pair.0
+let second = pair.1
+
+let (a, b) = pair
 ```
 
-## Control Flow
+## Nominal objects
+
+Use `obj` when the type should have its own identity instead of being satisfied
+by any structurally compatible value.
 
 ```voyd
-// If statements
-if x > 5:
-  foo()
-else:
-  bar()
+obj User {
+  id: i32,
+  name: String
+}
 
-// Multi-clause if statements (elifs)
-if
-  x > 5:
-    foo()
-  x < 2:
-    bar()
-  else:
-    bax()
-
-// While loops
-while x > 5:
-  foo()
-
-
-
-// For-in loops
-for item in [1, 2, 3]:
-  foo(item)
-
-// Blocks are defined by 2 space indentation
-let y =
-  let x = 2 + 3
-  x + 3 // y will be bound to 8
+let user = User { id: 1, name: "Ada" }
 ```
+
 ## Expressions
 
-Expressions are statements that return a value. They can be used in a variety of contexts, such as variable assignment, function arguments, and more.
+Most constructs in Voyd are expressions, including blocks, `if`, and `match`.
 
 ```voyd
-// Binary expressions
-let x = 5 + 3
+let sign =
+  if answer > 0:
+    1
+  else:
+    -1
 
-// Function calls
-let y = add(5, 3)
+let total =
+  let x = 2
+  let y = 3
+  x + y
 ```
 
-Virtually every statement in Voyd is an expression, including control flow statements.
+## Control flow
 
 ```voyd
-let x = if true then: 1 else: 2
+if count == 0:
+  log("empty")
+else:
+  log("ready")
 
-// Blocks are also expressions, returning the result of the last statement
-let y =
-  let x = 5
-  x + 3
+while count < 3:
+  count = count + 1
 
-// Both z and u will be bound to 5
-let z = let u = 5
+for value in 0..3:
+  log(value)
 ```
+
+`match` destructures values by shape.
+
+```voyd
+match(user)
+  User { name }:
+    name
+  else:
+    "unknown"
+```
+
+## Ranges and subscripts
+
+Ranges are expressions and are commonly used in `for` loops and slicing.
+
+```voyd
+let half_open = 0..5
+let inclusive = 0..=5
+
+let items = [10, 20, 30, 40]
+let second = items[1]
+let middle = items[1..3]
+```
+
+See [Syntax](./syntax.md), [Functions](./functions.md), and
+[Control Flow](./control-flow.md) for the full rules.

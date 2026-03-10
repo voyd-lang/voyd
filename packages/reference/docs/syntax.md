@@ -2,516 +2,131 @@
 order: 20
 ---
 
-# The Surface Language Syntax
+# Syntax
 
-The surface language is a superset of the core language (a minimalistic lisp
-dialect). Its goal is to balance the power and simplicity of lisp with a more
-modern python like feel.
+Voyd is indentation-sensitive. Blocks use two-space indentation, and most code
+reads as straightforward expression syntax rather than explicit delimiters.
 
-On top of the syntax features supported by the core language syntax, the surface
-language syntax supports:
+## Blocks
 
--   Parenthetical ellison via syntactically significant whitespace
--   Standard function call syntax `f(x)`
--   Uniform function call syntax `hello.world()` -> `world(hello)`
--   Infix operators
--   Greedy identifiers
--   Macro expansion
--   Tuple, Struct, Array, and Dictionary literals etc
--   Nominal object initialization shorthand (`Type { ... }`)
--   Pattern matching (`match`) and `if`-as-`match` shorthand
-
-At its core, the surface language is still very lisp like. As in lisp,
-everything built on a list. Any valid s-expression, is a valid Surface Language
-Expression
-
-# Parenthetical Elision
-
-Voyd language is built around an s-expression syntax, like lisp:
+An indented suite forms a block. The last expression becomes the block result.
 
 ```voyd
-(if (n < 2)
-  (: then n)
-  (: else (+ (fib (- n 1)) (fib (- n 2)))))
+let total =
+  let x = 2
+  let y = 3
+  x + y
 ```
 
-To reduce visual noise, parenthesis can be elided, using tabs as a mechanism to
-infer where the parenthesis should be inserted:
+## Calls
+
+Standard calls use parentheses.
 
 ```voyd
-if (n < 2)
-  then: n
-  else: (+ (fib (- n 1)) (fib (- n 2)))
+add(1, 2)
 ```
 
-This feature is inspired by [Scheme sweet-expressions](https://srfi.schemers.org/srfi-110/)
-
-## Rules
-
-1.  Any line with more than one symbol is wrapped in parenthesis.
-
-  ```voyd
-  add 1 2
-
-  // Becomes
-  (add 1 2)
-  ```
-
-2.  Indented lines are grouped together in a block and passed to their parent
-  expression.
-
-  ```voyd
-  add 2
-    let x = 5
-    mul 4 x
-
-  // Becomes
-  (add 2
-    (block
-      (let (= x 5))
-      (mul 4 x)))
-  ```
-
-  If an indented suite contains only clause entries (`lhs: rhs`), the suite is
-  treated as additional arguments rather than a `block(...)`.
-
-  ```voyd
-  match(x)
-    Some: 1
-    None: 0
-
-  // Becomes (conceptually)
-  (match x
-    (: Some 1)
-    (: None 0))
-  ```
-
-3.  Isolated clauses (`lhs: rhs`) that are on their own line are applied to the
-  preceding call-like expression provided:
-
-  1. There are no empty lines separating the two
-  2. The clause is on the same indentation level, or 1 child
-     indentation level as the preceding function call.
-
-  ```voyd
-  if x > y then: 3
-  else: 5
-
-  // Becomes
-  (if (> x y)
-    (: then 3)
-    (: else 5))
-
-  // Another example
-  if x > y
-    then: 3
-    else: 5
-
-  // Becomes
-  (if (x > y)
-    (: then 3)
-    (: else 5))
-  ```
-
-  This generalizes to multiline `if` without `then:`/`elif:`:
-
-  ```voyd
-  if
-    x < 4:
-      do_thing()
-    x > 4:
-      do_another_thing()
-    else:
-      do_other_thing()
-
-  // Becomes (conceptually)
-  (if
-    (: (< x 4) (block do_thing))
-    (: (> x 4) (block do_another_thing))
-    (: else (block do_other_thing)))
-  ```
-
-  And the same-indent chaining form:
-
-  ```voyd
-  if x < 4:
-    do_thing()
-  x > 4:
-    do_another_thing()
-  else:
-    do_other_thing()
-  ```
-
-4.  Greedy operators (`=`, `=>`, `|>`, `<|`, `;` `|`) get special
-  handling.
-
-  1.  Greedy operators consume indented child blocks, rather than the parent function call
-
-    ```voyd
-    let x =
-      if (x > y)
-        then: 3
-        else: 5
-
-    // Becomes
-    (let (= x
-      (block
-        (if (> x y)
-        (: then 3)
-        (: else 5)))))
-    ```
-
-  2. If an expression follows a greedy operator on the same line, a new line is inserted after the operator and each child line has an additional level of indentation supplied.
-
-      ```voyd
-      let z = if x > y
-        then: 3
-        else: 5
-
-      // Becomes
-      let z =
-        if x > y
-          then: 3
-          else: 5
-
-      // Which in turn becomes
-      (let (=
-        z
-        (block
-          (if
-            (> z y)
-              (: then 3)
-              (: else 5)))))
-      ```
-
-5. Arguments already wrapped in parenthesis must be separated by a comma
-
-  ```voyd
-  add(1, 2)
-
-  // Becomes
-  (add 1 2)
-
-  add(sub 1 2, 3)
-
-  // Becomes
-  (add (sub 1 2) 3)
-  ```
-
-
-Examples:
+Voyd also supports unparenthesized calls.
 
 ```voyd
-if x > 3 then:
-  do_work()
-  blah()
+fib n
+clamp value min: 0 max: 10
+```
+
+Treat this as a readability tool for DSL-like code paths, not the default call
+style. In most code, parenthesized calls remain easier to scan.
+
+Method and UFCS-style calls use dot syntax.
+
+```voyd
+items.len()
+1.add(2)
+```
+
+Module-qualified names use `::`.
+
+```voyd
+math::Vec3 { x: 1, y: 2, z: 3 }
+```
+
+## Clauses
+
+Clause-based constructs use `:`.
+
+```voyd
+if count == 0:
+  0
 else:
-  do_other_work()
+  1
 
-// Becomes
-(if (> x 3)
-  (: then (block
-    do_work()
-    blah()))
-  (: else (block
-    do_other_work())))
-
-obj Pos
-  x: (if x > 3 then: b else: c)
-  y: 2
-  z: 3
-
-// Becomes
-(obj Pos
-  (: x (if (> x 3)
-    (: then b)
-    (: else c)))
-  (: y 2)
-  (: z 3))
-
-obj Pos
-x: 1
-y: 2
-z: 3
-
-// Becomes
-(obj Pos
-  (: x 1)
-  (: y 2)
-  (: z 3))
-
-let x = my_func(
-  add 1 2,
-  () =>
-    hello(),
-  3 + 4,
-)
-
-// Becomes
-(let
-  (=
-  x
-  (my_func
-    (add 1 2)
-    (=> () (block (hello)))
-    (+ 3 4))))
+match(value)
+  Some<i32> { value }:
+    value
+  None:
+    0
 ```
 
-# Nominal Object Initialization Shorthand
-
-Direct object initialization uses an object literal following a type name:
+Single-line `if` expressions use `then:`.
 
 ```voyd
-MyObj { field: 1 }
+let sign = if x < 0 then: -1 else: 1
 ```
 
-In the surface language, an `UpperCamelCase` identifier (or `module::UpperCamelCase`
-path) followed immediately by an object literal is treated as a *single*
-constructor-init expression. This fixes cases like:
+## Single-expression forms
+
+`=` is used when the right-hand side is a single expression.
 
 ```voyd
-return MyObj { field: 1 }
+fn inc(x: i32) = x + 1
+let answer = 42
 ```
 
-which should be interpreted as:
+## Lambdas
+
+Lambdas use `=>`.
 
 ```voyd
-return(MyObj({ field: 1 }))
+let inc = (x: i32) => x + 1
+let add = (x: i32) -> i32 => x + 1
 ```
 
-This also works with:
-
--   Generics: `MyObj<i32> { field: 1 }`
--   Deep module paths: `outer::inner::MyObj { field: 1 }`
-
-If you need to pass the type and the object literal as separate arguments, wrap
-the type in parentheses to disable the constructor-init merge:
+## Literals
 
 ```voyd
-my_two_arg_call (MyObj) { field: 1 }
+let tuple = (1, "two")
+let array = [1, 2, 3]
+let object = { x: 1, y: 2 }
+let value = "hello ${name}"
 ```
 
-# Standard Function Call Syntax
-
-To make Voyd language feel more familiar to users familiar with C style
-languages, Voyd supports standard function call syntax of the form `f(x)`.
-
-## Rules
-
-1.  Any identifier placed directly next to a list is inserted as the first
-  argument of that list
+Nominal constructors pair a type name with object-literal or call syntax.
 
 ```voyd
-add(1 2)
-
-// Becomes
-(add 1 2)
-
-// Whitespace cancels this affect
-add (1 2)
-
-// Becomes
-(add (1 2))
+User { id: 1, name: "Ada" }
+Color(1, 2, 3)
 ```
 
-# Subscript Syntax
-
-Square brackets are adjacency-sensitive:
+## Subscripting and ranges
 
 ```voyd
-foo[1]   // subscript
-foo [1]  // call with array literal argument
+let item = items[1]
+items[1] = 99
+
+let a = 0..5
+let b = 0..=5
+let c = 0..<5
+
+let left = items[..2]
+let right = items[2..]
+let whole = items[..]
 ```
 
-When `[` is adjacent to the previous expression, Voyd parses a subscript:
+## Comments and doc comments
 
 ```voyd
-items[0]
-items[1] = 42
+// regular comment
+/// declaration docs
+//! module docs
 ```
 
-Subscripts lower to trait-backed calls (`subscript_get` / `subscript_set`).
-
-## Range Operators
-
-Subscripts support explicit range operators:
-
-- `start..end` (end-exclusive)
-- `start..=end` (end-inclusive)
-- `..end`, `..=end`, `start..`, `..`
-- `..<` aliases the exclusive range forms (`start..<end`, `..<end`)
-
-# Pattern Matching (`match`)
-
-`match` is an expression that branches on a value using pattern arms:
-
-```voyd
-match(pet)
-  Dog as d: d.noses + 1
-  Cat as c: c.lives
-  else: 0
-```
-
-Arms are written as `pattern: expr` (or `pattern:` followed by an indented
-suite, which becomes `pattern: block(...)`).
-
-## Patterns
-
-Current pattern forms include:
-
--   **Wildcard**: `else` (or `_` in binding positions).
--   **Type check**: `Dog`
--   **Type + bind whole value**: `Dog as d`
--   **Type + destructure fields**:
-
-  ```voyd
-  (Dog { noses }): noses + 1
-  (Cat { lives: l }): l
-  ```
-
--   **Tuple patterns**:
-
-  ```voyd
-  (a, b): a + b
-  ```
-
--   **Nested patterns**:
-
-  ```voyd
-  (Some { v: (a, b) }): a * 10 + b
-  ```
-
-# `if` as `match` Shorthand
-
-An `if` chain is lowered as a `match` when all conditions are simple type tests
-of the same identifier and an `else` branch exists:
-
-```voyd
-if
-  pet is Dog: pet.noses
-  pet is Cat: pet.lives
-  else: 0
-```
-
-This is equivalent to a `match(pet)` with type patterns plus a wildcard arm.
-
-# Uniform Function Call Syntax (Dot Notation)
-
-The dot (or period) operator applies the expression on the left as an argument
-of the expression on the right.
-
-```voyd
-5.add(1)
-
-// Becomes
-add(5 1)
-
-// Parenthesis on the right expression are not required when the function only takes one argument
-5.squared
-
-// Becomes
-squared(5)
-```
-
-# Labeled Argument Lambda Syntax
-
-Labeled arguments have syntactic sugar that make passing lambda's much cleaner.
-
-When the left hand side of the `:` operator is a list, the first identifier in
-that list is treated as the name, additional identifiers become parameters.
-
-```voyd
-fn call(cb: fn(v: i32) -> void)
-  cb(5)
-
-call cb(v):
-  print(v)
-
-// Equivalent to
-call cb: (v) =>
-  print
-```
-
-This works nicely with the rules of labeled arguments to support a trailing
-lambda syntax similar to that of swift or koka.
-
-```voyd
-try this():
-  this_throws_an_error()
-catch(e):
-  print(e)
-
-// Becomes
-(try
-  (: this (lambda () (block (this_throws_an_error))))
-  (: catch (lambda (e) (block
-    print(e)))))
-```
-
-# Infix Notation
-
-Voyd supports infix notation using a predefined set of infix operators.
-
-Operators, their precedence, and associativity (in typescript):
-
-```typescript
-/** Key is the operator, value is its [precedence, associativity] */
-export const infixOperators = new Map<string, [number, Associativity]>([
-  ["+", [1, "left"]],
-  ["-", [1, "left"]],
-  ["*", [2, "left"]],
-  ["/", [2, "left"]],
-  ["%", [2, "left"]],
-  ["and", [0, "left"]],
-  ["or", [0, "left"]],
-  ["xor", [0, "left"]],
-  ["as", [0, "left"]],
-  ["is", [0, "left"]],
-  ["in", [0, "left"]],
-  ["==", [0, "left"]],
-  ["!=", [0, "left"]],
-  ["<", [0, "left"]],
-  [">", [0, "left"]],
-  ["<=", [0, "left"]],
-  [">=", [0, "left"]],
-  [".", [6, "left"]],
-  ["|>", [4, "left"]],
-  ["<|", [4, "right"]],
-  ["|", [4, "right"]],
-  ["=", [0, "left"]],
-  ["+=", [4, "right"]],
-  ["-=", [4, "right"]],
-  ["*=", [4, "right"]],
-  ["/=", [4, "right"]],
-  ["=>", [5, "right"]],
-  [":", [0, "left"]],
-  ["::", [0, "left"]],
-  [";", [4, "left"]],
-  ["??", [3, "right"]],
-  ["..", [3, "right"]],
-  ["..=", [3, "right"]],
-  ["..<", [3, "right"]],
-  ["?:", [3, "right"]],
-]);
-```
-
-## Rules
-
--   The infix operator must be surrounded by whitespace to be interpreted as an
-  infix operation
--   If the infix operator is the first identifier in a list, s-expression syntax
-  is used instead
--   Infix operators should use the same precedence and associative rules as
-  JavaScript
-
-# Terminal Identifier
-
-Terminal identifiers do not need to be separated by a whitespace from other
-identifiers.
-
-They are any list of OpChars (see grammar) that start with one of the following
-OpChars:
-
--   `.`, `:`, `;`, `?`, `\`, `!`, `&`, `|`
-
-Note: Being a terminal operator does not imply infix
+See [Doc Comments](./doc-comments.md) for attachment rules.

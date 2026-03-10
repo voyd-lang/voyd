@@ -4,72 +4,41 @@ order: 130
 
 # Runtime Diagnostics
 
-Voyd can embed source metadata in the emitted Wasm so runtime traps can be
-mapped back to Voyd functions and source spans.
+Voyd can embed source metadata in generated Wasm so runtime traps map back to
+Voyd functions and spans.
 
-## How it works
+## What gets recorded
 
 When runtime diagnostics are enabled, the compiler writes a Wasm custom section
-named `voyd.runtime_diagnostics`. This section contains:
+named `voyd.runtime_diagnostics` containing trap metadata such as:
 
-- Wasm function name
 - Voyd module id
 - Voyd function name
-- Source span (file, byte offsets, and line/column when available)
+- source file and span information
 
-At runtime, `@voyd/js-host` reads that section and attaches structured metadata
-to trapped errors as `error.voyd`.
+`@voyd/js-host` and `@voyd/sdk` read that section and attach structured data to
+runtime errors.
 
 ## SDK behavior
 
-`@voyd/sdk` compile options include:
+`@voyd/sdk` supports:
 
-- `runtimeDiagnostics?: boolean`
 - `optimize?: boolean`
+- `runtimeDiagnostics?: boolean`
 
 Default behavior:
 
-- Non-optimized builds: runtime diagnostics enabled
-- Optimized builds (`optimize: true`): runtime diagnostics disabled
-
-You can override explicitly:
-
-```ts
-import { createSdk } from "@voyd/sdk";
-import { isVoydRuntimeError } from "@voyd/sdk/js-host";
-
-const sdk = createSdk();
-const result = await sdk.compile({
-  source: `pub fn main() -> i32
-  1 / 0
-`,
-  optimize: true,
-  runtimeDiagnostics: true,
-});
-
-if (result.success) {
-  try {
-    await result.run({ entryName: "main" });
-  } catch (error) {
-    if (isVoydRuntimeError(error)) {
-      console.error(error.voyd.trap.functionName);
-      console.error(error.voyd.trap.span?.file);
-      console.error(error.voyd.trap.span?.startLine);
-    }
-  }
-}
-```
+- non-optimized builds enable runtime diagnostics
+- optimized builds disable them unless you opt back in
 
 ## CLI behavior
 
-`voyd --opt` compiles with optimization enabled, which disables runtime
-diagnostics by default via SDK compile behavior.
+`voyd --opt` follows the same SDK default and therefore disables runtime
+diagnostics unless the compile call is overridden elsewhere.
 
-## Getting the most out of it
+## Usage advice
 
-- Use non-optimized builds while debugging trap-heavy issues.
-- Keep runtime diagnostics enabled in integration tests that assert trap
-  locations.
-- Re-enable diagnostics on optimized builds when investigating production-only
+- Leave diagnostics enabled while debugging traps.
+- Re-enable them for optimized builds when investigating production-only
   failures.
-- Prefer `isVoydRuntimeError(error)` before reading `error.voyd`.
+- Check `isVoydRuntimeError(error)` before reading `error.voyd`.

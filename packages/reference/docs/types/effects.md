@@ -4,292 +4,70 @@ order: 280
 
 # Effects
 
-Effects are resumable exceptions. They capture side-effects in the type system
-so that functions must either expose them in their signature or handle them.
+Effects make side effects explicit in function types and let code handle them
+with typed handlers.
 
-Current backend status: Voyd currently materializes effects through the
-`gc-trampoline` backend. The `stack-switch` backend is planned but not yet
-implemented.
-
-## At a Glance
-
-- Effects bundle named operations that may suspend and resume execution.
-- Operation behavior is signaled by the first parameter:
-  - `resume` means resumable; the handler may resume zero or one time.
-  - `tail` means tail-resumptive; the handler must resume exactly once before returning or propagating another effect.
-- Function types carry an effect row: `fn load(): (Async, Log) -> Bytes`.
-- Effects are inferred locally, but exported APIs should **spell them out** or
-  handle everything and remain pure (`()`).
-- Effect rows can be polymorphic: `fn map<effects E>(f: fn(T): E -> U): E -> Array<U>`.
-- Handlers remove handled effects from the row; unhandled effects propagate.
-- Effects don’t “poison” the call stack: higher-order code can stay pure and
-  let callbacks carry or discharge their own effects.
-
-Voyd's effect system takes heavy inspiration from:
-- [Koka Language](https://koka-lang.github.io)
-- [Effeckt Language](https://effekt-lang.org/)
-- [Structured Asynchrony with Algebraic Effects (Daan Leijen)](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/05/asynceffects-msr-tr-2017-21.pdf)
-
----
-
-## Declaring Effects
-
-An effect is a set of named operations:
+## Declaring effects
 
 ```voyd
-eff Exception
-  // Resumable operation; the handler may resume zero or one time.
-  fn throw(resume, msg: String) -> void
-
-// Single-operation shorthand
-eff throw(resume, msg: String) -> void
-
-eff State
-  // Tail-resumptive operations; the handler will resume exactly once.
-  fn get(tail) -> Int
-  fn set(tail, x: Int) -> void
-
-// Single-operation shorthand
-eff get(tail) -> Int
-```
-
-Operations that start with a `resume` parameter expose the current continuation
-to the handler and may be resumed zero or one time. Operations that start with a
-`tail` parameter are tail-resumptive (like `await` or `yield from`) and are
-guaranteed to resume exactly once by the handler before any clause exit or effect
-propagation.
-
-### Effect ID Convention
-
-For public/stable effects, use dotted stable capability IDs:
-
-```voyd
-@effect(id: "voyd.std.fs")
-eff Fs
-```
-
-Use this shape consistently:
-- `"<owner>.<package>.<capability>"`
-- `owner` is the organization/ecosystem namespace (`voyd` for std).
-- `capability` is a stable semantic namespace, not a required mirror of file/module paths.
-- Use lowercase ASCII tokens (`a-z0-9` + `.`).
-
-Why this is preferred over reverse-DNS-like examples such as
-`"com.example.generic"`:
-- It aligns with Voyd imports and module organization.
-- It is easier to grep, audit, and refactor in-repo.
-- It keeps effect IDs predictable across std, compiler, SDK, and tests.
-- It preserves external contracts even when modules are moved or renamed.
-
-Stability rule:
-- Once a public effect ID ships, treat it as persistent API surface and do not
-  change it for internal refactors.
-
-`"com.example.*"` IDs are still valid, but they are not the repository standard.
-
----
-
-## Raising and Handling Effects
-
-```voyd
+@effect(id: "com.example.async")
 eff Async
-  await(tail) -> i32
-  resolve(resume, value: i32) -> void
-  reject(resume, msg: String) -> void
+  await(resume, value: i32) -> i32
+  await_tail(tail, value: i32) -> i32
+```
 
-fn async_task(): Async -> i32
-  let num = Async::await()
-  if num > 0:
-    Async::resolve(num)
-  else:
-    Async::reject("Number must be positive")
+The first parameter on an operation declares its continuation behavior:
 
-fn main(): () -> void
+- `resume`: the handler may resume zero or one time
+- `tail`: the handler must tail-resume exactly once before returning or
+  propagating another effect
+
+## Using effects in function types
+
+```voyd
+fn load(value: i32): Async -> i32
+  Async::await(value)
+
+fn load_twice(value: i32): Async -> i32
+  let first = Async::await(value)
+  Async::await_tail(first + 1)
+```
+
+If an effect row is omitted, Voyd infers it locally. Exported APIs should spell
+effects out explicitly.
+
+## Handling effects
+
+```voyd
+fn load_default(value: i32): () -> i32
   try
-    async_task(1)
-  await(tail):
-    tail(rand_int())
-  resolve(resume, num):
-    log("Resolved: " + num)
-  reject(resume, msg):
-    log("Rejected: " + msg)
+    Async::await(value)
+  Async::await(resume, current):
+    resume(current + 1)
 ```
 
-Notes:
-- Effect operations are invoked like static functions (`Async::resolve`), or by
-  importing them: `use Async::{resolve, reject}`.
-- `try` is strict by default: if any operation in a closed row is unhandled,
-  type checking reports an error.
-- Use `try forward` to handle selected operations and explicitly forward all
-  remaining operations to the caller (they stay in the function's effect row).
-- A handler may re-raise an effect (keeping it in the row) or fully discharge
-  it.
-- `resume` is one-shot: handlers may resume zero or one time; a second resume
-  traps at runtime.
-- `tail` resumes are strict: each `tail` continuation must be resumed exactly
-  once before the clause returns or propagates another effect. Missing or double
-  resumes trap at runtime.
-- Handlers are written as clauses after `try`: each clause matches an operation
-  by name and destructures its parameters (including `resume`/`tail`).
+`try forward` handles selected operations and forwards the rest to the caller.
 
-`try forward` example:
+## Row polymorphism
+
+Higher-order functions can stay generic over their callback effects.
 
 ```voyd
-fn run_partially(): (Async, Log) -> i32
-  try forward
-    let value = Async::await()
-    Log::info("continuing")
-    value
-  Async::await(tail):
-    tail(1)
-```
-
----
-
-## Typing and Inference
-
-- Function signatures use `: <effects> -> <return>`:
-
-  ```voyd
-  fn fetch(url: String): (Async, Log) -> Response
-  fn parse(data: Bytes): () -> Json // explicit pure annotation
-  ```
-
-- If the effect annotation is omitted, the compiler infers effects from the
-  body. Inference is fine inside a package, but exported APIs should be
-  explicit to keep semver-stable surface areas. Any function exported by the
-  API that does not explicitly define it's effects will be assumed pure,
-  and will result in a compiler error if not all effects are handled.
-- Handlers shrink effect rows. A strict `try` yields a pure result when its
-  clauses cover all performed operations and do not re-raise.
-- `try forward` removes handled operations and keeps all remaining operations in
-  the inferred row.
-
----
-
-## Polymorphic Effects
-
-Higher-order utilities should pass through effects rather than invent new ones.
-Voyd supports **effect row polymorphism** via `effects` parameters:
-
-```voyd
-// map does not add effects; it preserves whatever `f` does.
-fn map<T, U>(
-  items: Array<T>,
-  f: fn(T) -> U,
-): Array<U>
-```
-
-Effect parameters behave like type parameters:
-
-- Declared alongside type parameters with the `effects` keyword when you need
-  them explicitly.
-- Omitted for callbacks when you want inference; the compiler effectively
-  elaborates `fn map<T, U>(..., f: fn(T) -> U)` into
-  `fn map<T, U, effects E>(..., f: fn(T): E -> U): E -> Array<U>`.
-- You can still write the explicit form when you need to name/compose the
-  effect row:
-
-  ```voyd
-  fn with_logging<effects E, T>(f: fn() -> T): (Log, E) -> T
-  ```
-
-- Are generalized when not constrained, enabling call-site inference.
-
-### No call-stack poisoning
-
-Effects from callbacks do not “infect” unrelated callers—only invoked effects
-flow through the row, and you can keep higher-order utilities pure when they
-don’t call the callback:
-
-```voyd
-// Stores handlers without invoking them: stays pure.
-fn register(handler: fn() -> void): () -> void
-  handlers.push(handler)
-
-// Invokes the callback and transparently passes its effects through.
-fn run(handler: fn() -> void)
-  handler()
-
-// Inference keeps this simple: no effect annotation, but `Async` flows through.
 fn repeat_twice<T>(cb: fn() -> T): Array<T>
   [cb(), cb()]
-
-fn main(): Async -> Array<i32>
-  repeat_twice(() => Async::resolve(1))
 ```
 
-This mirrors Effekt: a callback’s potential effects matter only when you run it.
+The compiler infers an effect-row parameter for the callback when needed. You can also
+spell it out explicitly with `effects` parameters.
 
-### Handling callback effects inline
+## Exported APIs
 
-A function can also take a callback with an explicit effect and discharge it
-itself, keeping its own row pure:
+Smoke tests enforce these rules:
 
-```voyd
-eff Exception
-  throw(resume, msg: String) -> void
+- exported pure APIs may omit an effect annotation
+- exported effectful APIs must declare their effect row explicitly
 
-fn with_default<T>(cb: fn(): Exception -> T, fallback: T): () -> T
-  try
-    cb()
-  throw(resume):
-    fallback
-```
+## Stable ids
 
----
-
-## Exports and Purity (`pkg.voyd`)
-
-To keep package APIs explicit and auditable:
-
-- Inside a package (anything not exported from `src/pkg.voyd`), you can rely on
-  effect inference; explicit annotations are optional.
-- In `src/pkg.voyd` (the public API per `visibility.md`), every exported
-  function must either:
-  - spell out its effects (including any `effects` parameters), or
-  - be explicitly pure `()`.
-  Omitting an effect annotation in `pkg.voyd` means “assume pure”; if the body
-  is not pure, it is a compile-time error.
-- Exported polymorphic functions must still declare their effect parameters:
-
-  ```voyd
-  pub fn transform<effects E, T>(f: fn(T): E -> T): E -> T
-  ```
-
-- A function that handles all effects internally can advertise purity by
-  annotating `()` (even if effects were inferred in helpers it calls).
-
-This keeps cross-package dependencies predictable and prevents accidental API
-changes when internal implementations start using new effects.
-
----
-
-## Host Boundary (Exports, Continuations, Buffer Protocol)
-
-- Only pure exports are host-callable by default. If an export is effectful, you must either wrap it in a pure function or expose an explicit effectful entrypoint pair (snake case) that returns a struct (no multi-return):
-  - Define `type EffectResult = { status: i32, cont: externref }`.
-  - `pub fn main_effectful(buf_ptr: i32, buf_len: i32): EffectResult`
-  - `pub fn resume_effectful(cont_ref: externref, buf_ptr: i32, buf_len: i32): EffectResult`
-  - Accessors for hosts via primitives: `pub fn effect_status(res: EffectResult) -> i32`, `pub fn effect_cont(res: EffectResult) -> externref`.
-- Status codes: `0` => value written to `(buf_ptr, buf_len)`, `1` => effect request written, negative => trap/diagnostic.
-- Buffer contract (linear memory; MsgPack recommended):
-  - `status=0`: `{ kind: "value", value }`
-  - `status=1`: `{ kind: "effect", effectId, opId, resumeKind, args }` (args encoded as tuple/array)
-- Continuations stay as Wasm GC refs (`externref`); JS holds the opaque ref and passes it back to `resume_effectful`, preventing premature collection.
-- JS-side helpers use camelCase; Voyd exports stay snake_case.
-- Effect/op ids map to names via the emitted effect/op table so hosts can dispatch on ids safely.
-- Effect/op table export (data): header entries `{effectId, nameOffset, opsOffset, opCount}`, op entries `{opId, resumeKind, nameOffset}`, and a UTF-8 name blob; ids are stable in declaration order.
-- Runtime-owned helpers (not user-defined): `handle_outcome`, `read_value`, and `resume_continuation` are emitted/linked by the compiler to implement the entry/resume protocol.
-- Buffer overflow: writing past `buf_len` traps; hosts/harness should allocate sufficient space or retry with a larger buffer.
-
-### Deterministic memory exports
-
-- Memory exports are explicit and configurable:
-  - `linearMemoryExport`: `"always" | "auto" | "off"` (default: `"always"`).
-  - `effectsMemoryExport`: `"auto" | "always" | "off"` (default: `"auto"`).
-- Default behavior:
-  - `memory` is always exported.
-  - `effects_memory` is exported only when effects runtime paths require it.
-  - `effects_memory`, when exported, aliases `memory` (same linear memory).
-- If `effects_memory` is exported, `memory` is also exported.
+Public effects should use stable dotted ids such as
+`@effect(id: "voyd.std.fs")`.

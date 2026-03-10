@@ -4,69 +4,52 @@ order: 0
 
 # Voyd
 
-Voyd is a high performance WebAssembly language with an emphasis on full stack web development.
+Voyd is a language for building WebAssembly programs with a small surface area,
+strong type checking, and a runtime model that stays close to the generated
+code.
 
-```rust
+```voyd
 fn fib(n: i32) -> i32
   if n < 2:
     n
   else:
     fib(n - 1) + fib(n - 2)
 
-pub fn main()
+pub fn main() -> i32
   fib(10)
 ```
 
-**Disclaimer**
+## Design goals
 
-Voyd is in it's very early stages of development. Voyd is not ready for production use. Some syntax and semantics are still subject to change. Expect frequent breaking changes.
+- Read like a high-level language.
+- Compile like a systems language.
+- Keep package boundaries and effects explicit.
+- Make macros, traits, and Wasm-facing code practical instead of ornamental.
 
-Not all features are implemented. See tests in the github repo for the most
-up to date information on what features have been implemented.
+## Start here
 
-**Features**:
+- [Basics](./basics.md)
+- [CLI](./cli.md)
+- [SDK](./sdk.md)
+- [Syntax](./syntax.md)
+- [Functions](./functions.md)
+- [Control Flow](./control-flow.md)
+- [Modules](./modules.md)
+- [Types Overview](./types/overview.md)
 
-- Functional
-- Hybrid Nominal & Structural type system
-- Algebraic effects
-- First class wasm support
-- Macros and language extensions
-- Uniform function call syntax
+## Feature map
 
-**Guiding Principles**:
+- Structural and nominal types.
+- Traits with default methods.
+- Algebraic effects with typed handlers.
+- Macros for surface-language features such as `enum` and `for`.
+- A package/module system built around `src/` and `pkg.voyd`.
 
-- Fun to write _and_ read.
-- Predictability
-- Hackability
-- Balance a great developer experience with performance
-- Play nice with others
-
-## Getting Started
-
-**Install**
-
-```bash
-npm i -g voyd
-```
-
-**Usage Examples**
+## Installation
 
 ```bash
-# Run the exported main function
-voyd --run script.voyd
-
-# Compile a directory (containing an index.voyd) to webassembly
-voyd --emit-wasm src > output.wasm
-
-# Compile to optimized WebAssembly
-voyd --emit-wasm --opt src > output.wasm
+npm i -g @voyd/cli
 ```
 
-**Requirements**
-
-Currently requires node v22
-
-```bash
-# Or nvm
-fnm install v22
-```
+The installed command is `voyd`. When working inside the Voyd repository after
+`npm link`, the `vt` command points at the development CLI entrypoint.
