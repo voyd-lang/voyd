@@ -44,7 +44,7 @@ Run a program:
 voyd --run ./src/main.voyd
 ```
 
-Compiler a program:
+Compile a program:
 ```bash
 voyd --emit-wasm ./src
 ```
