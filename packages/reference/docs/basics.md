@@ -28,8 +28,25 @@ MyType2
 // Declare an immutable variable
 let x = 5
 
-// Declare a mutable variable (see note)
+// Declare a mutable variable
 var y = 3
+```
+
+## Functions
+
+```voyd
+fn fib(n: i32) -> i32
+  if n < 2:
+    n
+  else:
+    fib(n - 1) + fib(n - 2)
+
+// Return type can be inferred
+fn fib(n: i32)
+  if n < 2:
+    n
+  else:
+    fib(n - 1) + fib(n - 2)
 ```
 
 ## String Literals
@@ -116,8 +133,6 @@ if
 // While loops
 while x > 5:
   foo()
-
-
 
 // For-in loops
 for item in [1, 2, 3]:

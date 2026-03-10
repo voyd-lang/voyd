@@ -17,13 +17,6 @@ pub fn main()
   fib(10)
 ```
 
-**Disclaimer**
-
-Voyd is in it's very early stages of development. Voyd is not ready for production use. Some syntax and semantics are still subject to change. Expect frequent breaking changes.
-
-Not all features are implemented. See tests in the github repo for the most
-up to date information on what features have been implemented.
-
 **Features**:
 
 - Functional
@@ -46,7 +39,7 @@ up to date information on what features have been implemented.
 **Install**
 
 ```bash
-npm i -g voyd
+npm i -g @voyd-lang/cli
 ```
 
 **Usage Examples**
