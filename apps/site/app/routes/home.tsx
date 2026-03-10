@@ -107,33 +107,26 @@ move(from: point, to: moved)`,
     id: "effects",
     title: "Effects",
     description:
-      "Effects are typed and resumable, so you can express async behavior and host interactions without sacrificing safety.",
+      "Effects make required capabilities explicit, so domain logic can stay portable while hosts provide concrete behavior.",
     points: [
-      "Effect rows make side effects visible in signatures.",
-      "Handle effects locally with `try` clauses.",
-      "Keep pure APIs pure and explicit.",
+      "Effect rows make required capabilities visible in signatures.",
+      "Handle capabilities at the boundary with `try` clauses.",
+      "Keep domain logic decoupled from the host.",
     ],
-    code: `eff Async
-  await(tail) -> i32
-  resolve(resume, value: i32) -> void
-  reject(resume, msg: String) -> void
+    code: `eff Confirm
+  ask(tail, message: String) -> bool
 
-fn load_count(): Async -> i32
-  let value = Async::await()
-  if value > 0:
-    Async::resolve(value)
+fn delete_project(name: String): Confirm -> String
+  if Confirm::ask("Delete " + name + "?"):
+    "Deleted " + name
   else:
-    Async::reject("Expected positive count")
+    "Kept " + name
 
-fn main(): () -> i32
+fn main(): () -> String
   try
-    load_count()
-  await(tail):
-    tail(42)
-  resolve(resume, value):
-    value
-  reject(resume, msg):
-    0`,
+    delete_project("staging-dashboard")
+  ask(tail, message):
+    tail(true)`,
   },
   {
     id: "embeddable",
@@ -179,28 +172,22 @@ const TOOLING_FEATURES: Feature[] = [
       "Support skip/only and per-test diagnostics.",
       "Run isolated tests or shared-runtime suites.",
     ],
-    lang: "typescript",
-    code: `import { createSdk } from "@voyd/sdk";
+    lang: "bash",
+    code: `❯ voyd test
 
-const sdk = createSdk();
-const result = await sdk.compile({
-  entryPath: "./src/pkg.voyd",
-  includeTests: true,
-});
+PASS src::set::set insert contains remove clear
+PASS src::set::set values returns iterable keys
+PASS src::string_bytes_iterator.test::string to_utf8 iterates utf8 bytes
+PASS src::time::system_time unix_millis is pure
+PASS src::time::sleep decodes host errors
+PASS src::time::on_timeout invokes callback on success
+PASS src::time::on_timeout decodes host errors and skips callback
+PASS src::time::on_interval repeats callbacks and surfaces host errors
+PASS src::time::on_interval clears timer when sleep fails
+PASS src::traits::contracts.test::trait contracts work for baseline std traits
 
-if (result.success && result.tests) {
-  const summary = await result.tests.run({
-    reporter: {
-      onEvent(event) {
-        if (event.type === "test:result") {
-          console.log(event.result.displayName, event.result.status);
-        }
-      },
-    },
-  });
-
-  console.log(summary);
-}`,
+passed 210, failed 0, skipped 0 (210 total)
+`,
   },
   {
     id: "docs",
@@ -212,16 +199,8 @@ if (result.success && result.tests) {
       "Produce HTML for websites or JSON for custom pipelines.",
       "Reuse in CI to keep docs and code in lockstep.",
     ],
-    lang: "typescript",
-    code: `import { writeFile } from "node:fs/promises";
-import { generateDocumentation } from "@voyd/sdk/doc-generation";
-
-const { content } = await generateDocumentation({
-  entryPath: "./packages/std/src/pkg.voyd",
-  format: "html",
-});
-
-await writeFile("./build/std-docs.html", content);`,
+    lang: "bash",
+    code: `❯ voyd doc --out project_docs.html`,
   },
 ];
 
