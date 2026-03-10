@@ -77,14 +77,14 @@ async function main() {
   if (config.run) {
     return runVoyd({
       entryPath,
-      entryName: config.runEntry,
+      entryName: config.entry,
       roots,
       optimize: config.runBinaryenOptimizationPass,
     });
   }
 
   if (config.runWasm) {
-    return runWasm(entryPath, config.runEntry);
+    return runWasm(entryPath, config.entry);
   }
 
   console.log(

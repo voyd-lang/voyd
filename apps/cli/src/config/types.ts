@@ -18,7 +18,7 @@ export type VoydConfig = {
   /** Run emitted wasm directly */
   runWasm?: boolean;
   /** Entry function to run. Defaults to main */
-  runEntry?: string;
+  entry?: string;
   /** Specifies the entry voyd file */
   index: string;
   /** Run voyd tests */

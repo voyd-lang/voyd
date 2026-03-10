@@ -56,7 +56,7 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
     .option("-m, --msg-pack", "decode message pack response")
     .option("-r, --run", "run voyd from src/ or provided path")
     .option("--run-wasm", "run the compiled wasm code directly")
-    .option("--run-entry <name>", "entry function to run (default: main)")
+    .option("--entry <name>", "entry function to run (default: main)")
     .option(
       "--pkg-dir <path>",
       "additional package directory (repeatable)",
@@ -88,7 +88,7 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
     runBinaryenOptimizationPass: opts.opt,
     run: opts.run,
     runWasm: opts.runWasm,
-    runEntry: opts.runEntry,
+    entry: opts.entry,
     pkgDirs: opts.pkgDir,
     doc: false,
     docFormat: "html",
@@ -163,7 +163,7 @@ const parseDocConfig = (argv: readonly string[]): VoydConfig => {
 };
 
 const findSubcommandIndex = (args: readonly string[]): number => {
-  const optionsWithValues = new Set(["--pkg-dir", "--run-entry"]);
+  const optionsWithValues = new Set(["--pkg-dir", "--entry"]);
 
   let index = 0;
   while (index < args.length) {
