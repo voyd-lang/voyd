@@ -20,15 +20,25 @@ Most commands accept an optional `[index]` argument.
 ```bash
 voyd --run ./src/main.voyd
 voyd --run ./src
-voyd --run --run-entry custom_main ./src/main.voyd
+voyd --run --entry custom_main ./src/main.voyd
 ```
 
 ## Run an existing Wasm module
 
 ```bash
 voyd --run-wasm ./dist/module.wasm
-voyd --run-wasm --run-entry custom_main ./dist/module.wasm
+voyd --run-wasm --entry custom_main ./dist/module.wasm
 ```
+
+## Emit wasm binary
+
+```bash
+voyd --emit-wasm > module.wasm
+voyd --emit-wasm ./custom_src > module.wasm
+voyd --emit-wasm --opt ./src/main.voyd
+```
+
+`--opt` runs the standard Binaryen optimization pass.
 
 ## Inspect compiler output
 

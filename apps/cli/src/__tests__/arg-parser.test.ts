@@ -58,13 +58,7 @@ describe("getConfigFromCli", () => {
   });
 
   it("supports JSON doc output format", () => {
-    const config = runWithArgv([
-      "node",
-      "voyd",
-      "doc",
-      "--format",
-      "json",
-    ]);
+    const config = runWithArgv(["node", "voyd", "doc", "--format", "json"]);
     expect(config.doc).toBe(true);
     expect(config.docFormat).toBe("json");
   });
@@ -97,29 +91,17 @@ describe("getConfigFromCli", () => {
   });
 
   it("parses reporter when passed to `voyd test`", () => {
-    const config = runWithArgv([
-      "node",
-      "voyd",
-      "test",
-      "--reporter",
-      "doc",
-    ]);
+    const config = runWithArgv(["node", "voyd", "test", "--reporter", "doc"]);
     expect(config.test).toBe(true);
     expect(config.doc).toBe(false);
     expect(config.testReporter).toBe("doc");
   });
 
-  it("does not treat --run-entry values as subcommands", () => {
-    const config = runWithArgv([
-      "node",
-      "voyd",
-      "--run",
-      "--run-entry",
-      "test",
-    ]);
+  it("does not treat --entry values as subcommands", () => {
+    const config = runWithArgv(["node", "voyd", "--run", "--entry", "test"]);
     expect(config.run).toBe(true);
     expect(config.test).toBeFalsy();
     expect(config.doc).toBe(false);
-    expect(config.runEntry).toBe("test");
+    expect(config.entry).toBe("test");
   });
 });
