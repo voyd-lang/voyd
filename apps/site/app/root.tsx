@@ -90,7 +90,7 @@ const ThemeToggle = ({
 
   return (
     <div
-      className="inline-flex gap-1 rounded-full border border-[var(--site-border)] bg-[var(--site-surface-soft)] p-[3px]"
+      className="inline-flex gap-1 rounded-full bg-[var(--site-surface-soft)] p-[3px]"
       role="group"
       aria-label="Theme mode"
     >
@@ -137,9 +137,8 @@ export const links: Route.LinksFunction = () => [
 export function Layout({ children }: { children: React.ReactNode }) {
   const stdDocsPath = useHref("/std/");
   const location = useLocation();
-  const [themePreference, setThemePreference] = useState<ThemePreference>(
-    "system",
-  );
+  const [themePreference, setThemePreference] =
+    useState<ThemePreference>("system");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -171,14 +170,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <header
           className="sticky top-0 z-[60] border-b border-[var(--site-border)] backdrop-blur"
           style={{
-            background: "color-mix(in srgb, var(--site-surface) 86%, transparent)",
+            background:
+              "color-mix(in srgb, var(--site-surface) 86%, transparent)",
           }}
         >
           <div className="mx-auto w-full max-w-6xl px-4 py-3 sm:py-4">
             <div className="flex items-center justify-between gap-3">
               <Link
                 to="/"
-                className="inline-flex items-center gap-2 text-[1.05rem] font-extrabold tracking-[0.02em] lowercase"
+                className="inline-flex items-center gap-2 text-[1.3rem] font-extrabold tracking-[0.02em] lowercase"
               >
                 <img src={logo} alt="Voyd logo" className="h-7 w-7" />
                 <span>voyd</span>
@@ -204,14 +204,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   </Link>
                   <a href={stdDocsPath} className={NAV_LINK_CLASS}>
                     Std Docs
-                  </a>
-                  <a
-                    href="https://github.com/voyd-lang/voyd"
-                    className={NAV_LINK_CLASS}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    GitHub
                   </a>
                 </nav>
                 <ThemeToggle value={themePreference} onChange={onThemeChange} />

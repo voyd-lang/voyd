@@ -39,7 +39,7 @@
 
 :root {
   --background: #ffffff;
-  --foreground: #0f172a;
+  --foreground: #000000;
   --brand-50: #f8f5fe;
   --brand-100: #f1ecfe;
   --brand-200: #e4d9fd;
@@ -114,8 +114,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #282c34;
-    --foreground: #d7dae0;
+    --background: #000000;
+    --foreground: #ffffff;
     --brand-50: #f0f2fa;
     --brand-100: #d9dff2;
     --brand-200: #bac6e8;
@@ -185,7 +185,7 @@
     --color-primary-foreground: #ffffff;
     --color-secondary-foreground: #ffffff;
     --color-accent-foreground: #ffffff;
-    --color-card-foreground: #0b0b0b;
+    --color-card-foreground: #000000;
   }
 }
 
@@ -265,8 +265,8 @@
 }
 
 [data-theme="dark"] {
-  --background: #282c34;
-  --foreground: #d7dae0;
+  --background: #000000;
+  --foreground: #eeeeee;
   --brand-50: #f0f2fa;
   --brand-100: #d9dff2;
   --brand-200: #bac6e8;
@@ -361,17 +361,17 @@ body {
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --site-page-bg: #0a101c;
-    --site-surface: #101a2c;
-    --site-surface-soft: #0d1525;
+    --site-page-bg: #1f1f1f;
+    --site-surface: #000000;
+    --site-surface-soft: #1f1f1f;
     --site-border: rgba(183, 198, 230, 0.2);
-    --site-text-muted: #a8b5d0;
+    --site-text-muted: #bac1cf;
     --site-hero-halo: rgba(110, 135, 192, 0.22);
     --site-hero-warp: rgba(190, 212, 255, 0.18);
     --site-hero-ring: rgba(170, 191, 236, 0.27);
     --site-hero-core: rgba(2, 6, 14, 0.72);
-    --site-button-solid-bg: #dae5ff;
-    --site-button-solid-fg: #0f182c;
+    --site-button-solid-bg: #ffffff;
+    --site-button-solid-fg: #000000;
     --site-button-ghost-border: rgba(214, 225, 247, 0.34);
   }
 }
@@ -392,17 +392,17 @@ body {
 }
 
 [data-theme="dark"] {
-  --site-page-bg: #0a101c;
-  --site-surface: #101a2c;
-  --site-surface-soft: #0d1525;
+  --site-page-bg: #1f1f1f;
+  --site-surface: #000000;
+  --site-surface-soft: #1f1f1f;
   --site-border: rgba(183, 198, 230, 0.2);
-  --site-text-muted: #a8b5d0;
+  --site-text-muted: #bac1cf;
   --site-hero-halo: rgba(110, 135, 192, 0.22);
   --site-hero-warp: rgba(190, 212, 255, 0.18);
   --site-hero-ring: rgba(170, 191, 236, 0.27);
   --site-hero-core: rgba(2, 6, 14, 0.72);
-  --site-button-solid-bg: #dae5ff;
-  --site-button-solid-fg: #0f182c;
+  --site-button-solid-bg: #ffffff;
+  --site-button-solid-fg: #000000;
   --site-button-ghost-border: rgba(214, 225, 247, 0.34);
 }
 
