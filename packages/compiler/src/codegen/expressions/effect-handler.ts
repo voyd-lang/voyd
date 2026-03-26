@@ -123,12 +123,20 @@ const buildClauseEnv = ({
 } => {
   const state = handlerState(ctx);
   const bindingKey = handlerBindingLayoutKey(fnCtx);
-  const layoutKey = `${ctx.moduleLabel}:${expr.id}:${handlerInstanceKey(fnCtx)}:${bindingKey}`;
+  const allowedSymbols = ctx.optimization?.handlerClauseCaptures.get(ctx.moduleId)?.get(expr.id);
+  const allowedSymbolSet =
+    allowedSymbols && allowedSymbols.size > 0
+      ? new Set(
+          Array.from(allowedSymbols.values()).flatMap((symbols) => [...symbols]),
+        )
+      : undefined;
+  const layoutKey = `${ctx.moduleLabel}:${expr.id}:${handlerInstanceKey(fnCtx)}:${bindingKey}:${allowedSymbolSet ? [...allowedSymbolSet].join(",") : "all"}`;
   const cached = state.envLayouts.get(layoutKey);
   const layout =
     cached ??
     (() => {
       const captured = Array.from(fnCtx.bindings.entries())
+        .filter(([symbol]) => !allowedSymbolSet || allowedSymbolSet.has(symbol))
         .map(([symbol, binding]) => {
           const typeId =
             binding.typeId ??

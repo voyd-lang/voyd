@@ -1566,6 +1566,12 @@ const createMethodLookupEntries = ({
         traitSymbol: hashTraitSymbol,
         traitMethodSymbol: hashTraitMethod,
       });
+      if (
+        ctx.optimization &&
+        !ctx.optimization.usedTraitDispatchSignatures.has(dispatchSignatureKey)
+      ) {
+        return;
+      }
       const dispatchEffectful =
         dispatchEffectfulBySignature.get(dispatchSignatureKey) ??
         (() => {

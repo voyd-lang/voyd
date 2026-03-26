@@ -1,0 +1,25 @@
+trait Runner
+  fn run(self) -> i32
+
+obj Box {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self) -> i32
+    self.value
+
+fn add_one(value: i32) -> i32
+  value + 1
+
+fn dead<T>(value: T) -> T
+  value
+
+pub fn invoke<T: Runner>(runner: T) -> i32
+  runner.run()
+
+pub fn main() -> i32
+  if add_one(40) == 41 then:
+    invoke(Box { value: 7 })
+  else:
+    dead<i32>(0)

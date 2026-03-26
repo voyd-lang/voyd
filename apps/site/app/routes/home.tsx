@@ -3,6 +3,7 @@ import type { Route } from "./+types/home";
 import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router";
 import CodeBlock from "~/components/CodeBlock";
+import logo from "../../assets/logo.svg";
 
 export const prerender = true;
 
@@ -255,14 +256,13 @@ export default function Home() {
       </section>
       <section className="space-y-5 pt-6">
         <header className="flex max-w-3xl ml-3 flex-col gap-2">
-          <Eyebrow>Built-in tooling</Eyebrow>
           <h2 className="m-0 text-3xl leading-tight font-bold sm:text-4xl">
-            Production-ready workflow support
+            Batteries Included
           </h2>
           <MutedParagraph className="text-base leading-7">
             Voyd includes native support for tests, docs, and runtime
-            integration, so teams can standardize on one language and one
-            toolchain.
+            integration, so full stack projects can standardize on one language
+            and one toolchain.
           </MutedParagraph>
         </header>
 
@@ -312,52 +312,16 @@ const Hero = () => {
         background: "color-mix(in srgb, var(--site-surface) 90%, transparent)",
       }}
     >
-      <div
-        className="pointer-events-none absolute left-1/2 top-[46%] z-0 aspect-[2.35/1] w-[min(44rem,92vw)] -translate-x-1/2 -translate-y-1/2 opacity-[0.52]"
-        aria-hidden="true"
-      >
-        <div
-          className="absolute inset-0 rounded-[999px] blur-[15px]"
-          style={{
-            background:
-              "radial-gradient(ellipse at center, var(--site-hero-halo) 0%, color-mix(in srgb, var(--site-hero-halo) 50%, transparent) 38%, transparent 72%)",
-          }}
-        />
-        <div
-          className="animate-[lens-shift_16s_ease-in-out_infinite_alternate] absolute inset-0 rounded-[999px] blur-[5px]"
-          style={{
-            transform: "rotate(-11deg) scaleX(1.04)",
-            background:
-              "radial-gradient(ellipse at center, transparent 37%, var(--site-hero-warp) 47%, transparent 58%)",
-          }}
-        />
-        <div
-          className="absolute inset-0 rounded-[999px] blur-[1.2px]"
-          style={{
-            transform: "rotate(-12deg)",
-            background:
-              "radial-gradient(ellipse at center, transparent 42%, var(--site-hero-ring) 49%, transparent 56%)",
-          }}
-        />
-        <div
-          className="absolute rounded-full"
-          style={{
-            inset: "41% 46%",
-            background:
-              "radial-gradient(circle, var(--site-hero-core), transparent 75%)",
-            boxShadow:
-              "0 0 18px color-mix(in srgb, var(--site-hero-core) 65%, transparent)",
-          }}
-        />
-      </div>
-
       <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-col items-center gap-5 text-center">
-        <h1 className="m-0 text-[clamp(3rem,9vw,5.4rem)] leading-[0.92] font-bold tracking-[0.02em] lowercase">
-          voyd
-        </h1>
+        <div className="flex flex-row gap-2 items-center justify-center">
+          <img src={logo} alt="Voyd logo" className="aspect-square w-20" />
+          <h1 className="m-0 text-[clamp(3rem,9vw,5.4rem)] leading-[0.92] font-bold tracking-[0.02em] lowercase">
+            voyd
+          </h1>
+        </div>
         <MutedParagraph className="w-full max-w-[40rem] text-[clamp(1.05rem,2.15vw,1.45rem)] leading-relaxed">
-          A high-performance language for full stack web development with a
-          strong type system, typed effects, and first-class runtime embedding.
+          A programming language for full stack web development with a strong
+          type system, typed effects, and first-class runtime embedding.
         </MutedParagraph>
         <Links />
       </div>
@@ -401,8 +365,8 @@ const ToolingCard = ({ feature }: { feature: Feature }) => {
   return (
     <SurfaceArticle className="flex flex-col gap-10 p-4">
       <div className="gap-3">
-        <h3 className="m-0 text-2xl font-bold">{feature.title}</h3>
-        <MutedParagraph className="text-base leading-7">
+        <h3 className="m-0 mb-1.5 text-2xl font-bold">{feature.title}</h3>
+        <MutedParagraph className="text-base leading-6">
           {feature.description}
         </MutedParagraph>
         <FeaturePoints points={feature.points} />
@@ -423,7 +387,7 @@ const SurfaceSection = ({
 }) => {
   return (
     <section
-      className={`min-w-0 rounded-2xl border border-[var(--site-border)] bg-[var(--site-surface)] ${className}`}
+      className={`min-w-0 rounded-xl shadow-xl bg-[var(--site-surface)] ${className}`}
       style={style}
     >
       {children}
@@ -440,18 +404,10 @@ const SurfaceArticle = ({
 }) => {
   return (
     <article
-      className={`rounded-2xl border border-[var(--site-border)] bg-[var(--site-surface)] ${className}`}
+      className={`rounded-xl shadow-xl bg-[var(--site-surface)] ${className}`}
     >
       {children}
     </article>
-  );
-};
-
-const Eyebrow = ({ children }: { children: ReactNode }) => {
-  return (
-    <p className="m-0 text-xs font-extrabold tracking-[0.16em] text-[var(--site-text-muted)] uppercase">
-      {children}
-    </p>
   );
 };
 
@@ -471,7 +427,7 @@ const MutedParagraph = ({
 
 const FeaturePoints = ({ points }: { points: string[] }) => {
   return (
-    <ul className="grid gap-2 pl-5 leading-6 text-[var(--site-text-muted)]">
+    <ul className="mt-1.5 grid gap-2 pl-5 leading-5 text-[var(--site-text-muted)]">
       {points.map((point) => (
         <li key={point}>{point}</li>
       ))}
@@ -504,7 +460,7 @@ const Links = () => {
         to="/docs"
         className="rounded-md border border-transparent bg-[var(--site-button-solid-bg)] px-4 py-2 font-bold text-[var(--site-button-solid-fg)] transition hover:opacity-90"
       >
-        Read the Docs
+        Docs
       </Link>
       <a
         href="https://github.com/voyd-lang/voyd"
@@ -513,6 +469,14 @@ const Links = () => {
         rel="noopener noreferrer"
       >
         GitHub
+      </a>
+      <a
+        href="https://marketplace.visualstudio.com/items?itemName=voyd-lang.voyd-vscode"
+        className="rounded-md border border-[var(--site-button-ghost-border)] bg-[var(--site-surface)] px-4 py-2 font-bold transition hover:bg-[var(--site-surface-soft)]"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        VSCode
       </a>
     </div>
   );
