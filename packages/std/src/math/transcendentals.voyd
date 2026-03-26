@@ -236,22 +236,22 @@ fn scale_pow2_f64(value: f64, exponent: i32) -> f64
     return value
   if exponent > 0:
     var remaining = exponent
-    var factor = 2.0
     var out = value
+    while remaining >= 512 do:
+      out = out * pow2_512_f64()
+      remaining = remaining - 512
     while remaining > 0 do:
-      if (remaining % 2) != 0:
-        out = out * factor
-      factor = factor * factor
-      remaining = remaining / 2
+      out = out * 2.0
+      remaining = remaining - 1
     return out
   var remaining = 0 - exponent
-  var factor = 0.5
   var out = value
+  while remaining >= 512 do:
+    out = out * pow2_neg_512_f64()
+    remaining = remaining - 512
   while remaining > 0 do:
-    if (remaining % 2) != 0:
-      out = out * factor
-    factor = factor * factor
-    remaining = remaining / 2
+    out = out * 0.5
+    remaining = remaining - 1
   out
 
 fn reduce_trig_f64(value: f64) -> (i32, f64)
@@ -532,6 +532,12 @@ fn exp_overflow_limit_f64() -> f64
 
 fn exp_underflow_limit_f64() -> f64
   -745.1332191019411
+
+fn pow2_512_f64() -> f64
+  13407807929942597000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0
+
+fn pow2_neg_512_f64() -> f64
+  0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007458340731200207
 
 fn f64_fraction_mask_bits() -> i64
   4503599627370495i64

@@ -190,8 +190,15 @@ test "boundary behavior around nan and infinities":
   let inf = 1.0 / 0.0
   let neg_inf = -1.0 / 0.0
   let nan = 0.0 / 0.0
+  let huge_finite_exp = exp(709.5)
+  let huge_finite_pow = pow(2.0, 1023.0)
+  let next_lower_pow = pow(2.0, 1022.0)
 
   assert(is_infinite(exp(inf)), eq: true)
+  assert(is_infinite(huge_finite_exp), eq: false)
+  assert(is_infinite(huge_finite_pow), eq: false)
+  assert(huge_finite_exp > huge_finite_pow, eq: true)
+  assert(huge_finite_pow > next_lower_pow, eq: true)
   assert(is_infinite(pow(-2.0, 100000000000000000000.0)), eq: true)
   assert(is_infinite(pow(-2.0, inf)), eq: true)
   assert(pow(-2.0, neg_inf), eq: 0.0)
