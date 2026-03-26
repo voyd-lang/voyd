@@ -21,28 +21,41 @@ const createMemoryHost = (files: Record<string, string>): ModuleHost =>
 
 const buildOptimized = async ({
   files,
+  stdFiles = {},
   entryFile = "main.voyd",
   includeTests = false,
   optimizeOptions,
+  transformProgram,
 }: {
   files: Record<string, string>;
+  stdFiles?: Record<string, string>;
   entryFile?: string;
   includeTests?: boolean;
   optimizeOptions?: CodegenOptions;
+  transformProgram?: (program: ReturnType<typeof buildProgramCodegenView>) => void;
 }) => {
-  const root = resolve("/proj/src");
+  const srcRoot = resolve("/proj/src");
+  const stdRoot = resolve("/proj/std");
   const host = createMemoryHost(
-    Object.fromEntries(
-      Object.entries(files).map(([fileName, source]) => [
-        `${root}${sep}${fileName}`,
-        source,
-      ]),
-    ),
+    {
+      ...Object.fromEntries(
+        Object.entries(files).map(([fileName, source]) => [
+          `${srcRoot}${sep}${fileName}`,
+          source,
+        ]),
+      ),
+      ...Object.fromEntries(
+        Object.entries(stdFiles).map(([fileName, source]) => [
+          `${stdRoot}${sep}${fileName}`,
+          source,
+        ]),
+      ),
+    },
   );
-  const entryPath = `${root}${sep}${entryFile}`;
+  const entryPath = `${srcRoot}${sep}${entryFile}`;
   const graph = await loadModuleGraph({
     entryPath,
-    roots: { src: root },
+    roots: { src: srcRoot, std: stdRoot },
     host,
     includeTests,
   });
@@ -66,6 +79,7 @@ const buildOptimized = async ({
     instances: monomorphized.instances,
     moduleTyping: monomorphized.moduleTyping,
   });
+  transformProgram?.(program);
   const optimized = optimizeProgram({
     program,
     modules,
@@ -109,6 +123,28 @@ const findModuleLet = ({
       item.kind === "module-let" &&
       program.symbols.getName(program.symbols.idOf({ moduleId, symbol: item.symbol })) === name,
   );
+
+const getFunctionBodyValueExpr = ({
+  moduleId,
+  symbol,
+  program,
+}: {
+  moduleId: string;
+  symbol: number;
+  program: ReturnType<typeof buildProgramCodegenView>;
+}) => {
+  const moduleView = program.modules.get(moduleId);
+  const item = Array.from(moduleView?.hir.items.values() ?? []).find(
+    (candidate) => candidate.kind === "function" && candidate.symbol === symbol,
+  );
+  if (!item || item.kind !== "function") {
+    return undefined;
+  }
+  const body = moduleView?.hir.expressions.get(item.body);
+  return body?.exprKind === "block" && typeof body.value === "number"
+    ? moduleView?.hir.expressions.get(body.value)
+    : body;
+};
 
 describe("compiler optimization pipeline", () => {
   it("folds pure helper calls, prunes dead generic instances, and shrinks lambda captures", async () => {
@@ -345,17 +381,144 @@ pub fn main() -> i64
     expect(mainFn?.kind).toBe("function");
     if (!mainFn || mainFn.kind !== "function") return;
 
-    const moduleView = optimized.program.modules.get("src::main");
-    const body = moduleView?.hir.expressions.get(mainFn.body);
-    const folded =
-      body?.exprKind === "block" && typeof body.value === "number"
-        ? moduleView?.hir.expressions.get(body.value)
-        : body;
+    const folded = getFunctionBodyValueExpr({
+      moduleId: "src::main",
+      symbol: mainFn.symbol,
+      program: optimized.program,
+    });
     expect(folded).toMatchObject({
       exprKind: "literal",
       literalKind: "i64",
       value: "9007199254740995",
     });
+  });
+
+  it("folds i32 constants with 32-bit integer semantics", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+pub fn main() -> i32
+  2147483647i32 * 2147483647i32
+`,
+      },
+    });
+
+    const mainFn = findFunction({
+      moduleId: "src::main",
+      name: "main",
+      program: optimized.program,
+    });
+    expect(mainFn?.kind).toBe("function");
+    if (!mainFn || mainFn.kind !== "function") return;
+
+    const folded = getFunctionBodyValueExpr({
+      moduleId: "src::main",
+      symbol: mainFn.symbol,
+      program: optimized.program,
+    });
+    expect(folded).toMatchObject({
+      exprKind: "literal",
+      literalKind: "i32",
+      value: "1",
+    });
+  });
+
+  it("folds f32 constants with single-precision semantics", async () => {
+    const scenarios = [
+      {
+        name: "equality rounds operands to f32 first",
+        source: `
+pub fn main() -> bool
+  16777217.0 == 16777216.0
+`,
+        expected: {
+          exprKind: "literal",
+          literalKind: "boolean",
+          value: "true",
+        },
+      },
+      {
+        name: "arithmetic rounds each folded f32 result",
+        source: `
+pub fn main() -> f64
+  16777217.0 + 1.0
+`,
+        expected: {
+          exprKind: "literal",
+          literalKind: "f32",
+          value: "16777216",
+        },
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const { optimized } = await buildOptimized({
+        files: { "main.voyd": scenario.source },
+        transformProgram: (program) => {
+          program.modules.get("src::main")?.hir.expressions.forEach((expr) => {
+            if (expr.exprKind !== "literal" || expr.literalKind !== "f64") {
+              return;
+            }
+            expr.literalKind = "f32";
+          });
+        },
+      });
+
+      const mainFn = findFunction({
+        moduleId: "src::main",
+        name: "main",
+        program: optimized.program,
+      });
+      expect(mainFn?.kind, scenario.name).toBe("function");
+      if (!mainFn || mainFn.kind !== "function") continue;
+
+      const folded = getFunctionBodyValueExpr({
+        moduleId: "src::main",
+        symbol: mainFn.symbol,
+        program: optimized.program,
+      });
+      expect(folded, scenario.name).toMatchObject(scenario.expected);
+    }
+  });
+
+  it("preserves signed division overflow traps during constant folding", async () => {
+    const scenarios = [
+      {
+        name: "i32",
+        source: `
+pub fn main() -> i32
+  -2147483648i32 / -1i32
+`,
+      },
+      {
+        name: "i64",
+        source: `
+pub fn main() -> i64
+  -9223372036854775808i64 / -1i64
+`,
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const { optimized } = await buildOptimized({
+        files: { "main.voyd": scenario.source },
+      });
+
+      const mainFn = findFunction({
+        moduleId: "src::main",
+        name: "main",
+        program: optimized.program,
+      });
+      expect(mainFn?.kind).toBe("function");
+      if (!mainFn || mainFn.kind !== "function") continue;
+
+      const bodyExpr = getFunctionBodyValueExpr({
+        moduleId: "src::main",
+        symbol: mainFn.symbol,
+        program: optimized.program,
+      });
+      expect(bodyExpr?.exprKind, scenario.name).toBe("call");
+    }
   });
 
   it("keeps non-entry test exports reachable in optimized all-module test builds", async () => {

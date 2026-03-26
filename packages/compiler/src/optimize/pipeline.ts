@@ -323,7 +323,43 @@ const exprTypeFor = ({
 }): TypeId | undefined =>
   moduleView.types.getResolvedExprType(exprId) ?? moduleView.types.getExprType(exprId);
 
-const constantNumberOp = (
+const I32_MIN = -(1n << 31n);
+const I64_MIN = -(1n << 63n);
+
+const wrapI32 = (value: bigint): number => Number(BigInt.asIntN(32, value));
+
+const wrapI64 = (value: bigint): bigint => BigInt.asIntN(64, value);
+
+const normalizeI32ShiftCount = (value: bigint): bigint =>
+  BigInt.asUintN(32, value) & 31n;
+
+const normalizeI64ShiftCount = (value: bigint): bigint =>
+  BigInt.asUintN(64, value) & 63n;
+
+const normalizeF32 = (value: number): number => Math.fround(value);
+
+const constantF32Op = (
+  left: number,
+  right: number,
+  op: string,
+): number | undefined => {
+  switch (op) {
+    case "+":
+      return normalizeF32(left + right);
+    case "-":
+      return normalizeF32(left - right);
+    case "*":
+      return normalizeF32(left * right);
+    case "/":
+      return normalizeF32(left / right);
+    case "%":
+      return normalizeF32(left % right);
+    default:
+      return undefined;
+  }
+};
+
+const constantFloatOp = (
   left: number,
   right: number,
   op: string,
@@ -339,25 +375,52 @@ const constantNumberOp = (
       return right === 0 ? undefined : left / right;
     case "%":
       return right === 0 ? undefined : left % right;
-    case "__shift_l":
-      return left << right;
-    case "__shift_ru":
-      return left >>> right;
-    case "__bit_and":
-      return left & right;
-    case "__bit_or":
-      return left | right;
-    case "__bit_xor":
-      return left ^ right;
     default:
       return undefined;
   }
 };
 
-const wrapI64 = (value: bigint): bigint => BigInt.asIntN(64, value);
+const constantI32Op = (
+  left: number,
+  right: number,
+  op: string,
+): number | undefined => {
+  const leftBig = BigInt(left);
+  const rightBig = BigInt(right);
 
-const normalizeI64ShiftCount = (value: bigint): bigint =>
-  BigInt.asUintN(64, value) & 63n;
+  switch (op) {
+    case "+":
+      return wrapI32(leftBig + rightBig);
+    case "-":
+      return wrapI32(leftBig - rightBig);
+    case "*":
+      return wrapI32(leftBig * rightBig);
+    case "/":
+      if (rightBig === 0n) {
+        return undefined;
+      }
+      if (leftBig === I32_MIN && rightBig === -1n) {
+        return undefined;
+      }
+      return wrapI32(leftBig / rightBig);
+    case "%":
+      return rightBig === 0n ? undefined : wrapI32(leftBig % rightBig);
+    case "__shift_l":
+      return wrapI32(leftBig << normalizeI32ShiftCount(rightBig));
+    case "__shift_ru":
+      return wrapI32(
+        BigInt.asUintN(32, leftBig) >> normalizeI32ShiftCount(rightBig),
+      );
+    case "__bit_and":
+      return wrapI32(leftBig & rightBig);
+    case "__bit_or":
+      return wrapI32(leftBig | rightBig);
+    case "__bit_xor":
+      return wrapI32(leftBig ^ rightBig);
+    default:
+      return undefined;
+  }
+};
 
 const constantI64Op = (
   left: bigint,
@@ -372,7 +435,13 @@ const constantI64Op = (
     case "*":
       return wrapI64(left * right);
     case "/":
-      return right === 0n ? undefined : wrapI64(left / right);
+      if (right === 0n) {
+        return undefined;
+      }
+      if (left === I64_MIN && right === -1n) {
+        return undefined;
+      }
+      return wrapI64(left / right);
     case "%":
       return right === 0n ? undefined : wrapI64(left % right);
     case "__shift_l":
@@ -392,7 +461,7 @@ const constantI64Op = (
   }
 };
 
-const constantCompareOp = (
+const constantNumberCompareOp = (
   left: number,
   right: number,
   op: string,
@@ -465,11 +534,16 @@ const parseConstantLiteral = (expr: HirExpression): ConstantValue | undefined =>
   }
   switch (expr.literalKind) {
     case "i32":
-    case "f32":
     case "f64": {
       const parsed = Number(expr.value);
       return Number.isFinite(parsed)
         ? { literalKind: expr.literalKind, value: parsed }
+        : undefined;
+    }
+    case "f32": {
+      const parsed = Number(expr.value);
+      return Number.isFinite(parsed)
+        ? { literalKind: "f32", value: normalizeF32(parsed) }
         : undefined;
     }
     case "i64":
@@ -557,6 +631,10 @@ const evaluateIntrinsic = ({
     return { literalKind: "boolean", value: !args[0].value };
   }
 
+  if (args.length === 1 && name === "__f32_demote_f64" && args[0]?.literalKind === "f64") {
+    return { literalKind: "f32", value: normalizeF32(args[0].value) };
+  }
+
   if (args.length === 2) {
     const [left, right] = args;
     if (
@@ -575,16 +653,40 @@ const evaluateIntrinsic = ({
         }
       }
 
-      if (
-        (left.literalKind === "i32" && right.literalKind === "i32") ||
-        (left.literalKind === "f32" && right.literalKind === "f32") ||
-        (left.literalKind === "f64" && right.literalKind === "f64")
-      ) {
-        const compare = constantCompareOp(left.value, right.value, name);
+      if (left.literalKind === "i32" && right.literalKind === "i32") {
+        const compare = constantNumberCompareOp(left.value, right.value, name);
         if (typeof compare === "boolean") {
           return { literalKind: "boolean", value: compare };
         }
-        const computed = constantNumberOp(left.value, right.value, name);
+        const computed = constantI32Op(left.value, right.value, name);
+        if (typeof computed === "number") {
+          return {
+            literalKind: left.literalKind,
+            value: computed,
+          };
+        }
+      }
+
+      if (left.literalKind === "f32" && right.literalKind === "f32") {
+        const compare = constantNumberCompareOp(left.value, right.value, name);
+        if (typeof compare === "boolean") {
+          return { literalKind: "boolean", value: compare };
+        }
+        const computed = constantF32Op(left.value, right.value, name);
+        if (typeof computed === "number") {
+          return {
+            literalKind: left.literalKind,
+            value: computed,
+          };
+        }
+      }
+
+      if (left.literalKind === "f64" && right.literalKind === "f64") {
+        const compare = constantNumberCompareOp(left.value, right.value, name);
+        if (typeof compare === "boolean") {
+          return { literalKind: "boolean", value: compare };
+        }
+        const computed = constantFloatOp(left.value, right.value, name);
         if (typeof computed === "number") {
           return {
             literalKind: left.literalKind,
