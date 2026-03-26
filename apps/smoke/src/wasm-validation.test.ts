@@ -81,7 +81,7 @@ const normalize = (value: unknown): unknown => {
 
 describe(
   "smoke: wasm validation",
-  { timeout: 20_000 },
+  { timeout: 30_000 },
   () => {
     it("accepts wasm-gc modules that Node can validate", async () => {
       const module = await compileToBinaryenModule(
@@ -159,6 +159,22 @@ describe(
       const instance = getWasmInstance(wasm);
       const exports = instance.exports as Record<string, unknown>;
       expect((exports.main as () => number)()).toBe(6);
+    });
+
+    it("compiles std transcendental math without host math imports", async () => {
+      const module = await compileToBinaryenModule(
+        fixturePath("std-math-transcendentals.voyd"),
+      );
+      const wasm = assertRunnableWasm(module);
+      const compiled = new WebAssembly.Module(wasm as BufferSource);
+      const imports = WebAssembly.Module.imports(compiled).map(
+        ({ module, name }) => `${module}::${name}`,
+      );
+      expect(imports.some((name) => name.startsWith("voyd_math::"))).toBe(false);
+
+      const instance = new WebAssembly.Instance(compiled, { env: {} });
+      const exports = instance.exports as Record<string, unknown>;
+      expect((exports.main as () => number)()).toBe(1);
     });
   }
 );

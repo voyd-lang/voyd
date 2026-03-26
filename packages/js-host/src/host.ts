@@ -93,21 +93,8 @@ const unwrapRunOutcome = async <T>(outcome: Promise<RunOutcome<T>>): Promise<T> 
   throw new CancelledRunError(settled.reason);
 };
 
-const createVoydMathImports = (): Record<string, CallableFunction> => ({
-  sin: Math.sin,
-  cos: Math.cos,
-  tan: Math.tan,
-  ln: Math.log,
-  log2: Math.log2,
-  log10: Math.log10,
-  exp: Math.exp,
-  pow: Math.pow,
-  atan2: Math.atan2,
-});
-
 const defaultImports = (): WebAssembly.Imports => ({
   env: {},
-  voyd_math: createVoydMathImports(),
 });
 
 const isImportModuleRecord = (
@@ -128,7 +115,7 @@ const mergeDefaultImports = (
   } as Record<string, unknown>;
 
   const importRecord = imports as Record<string, unknown>;
-  ["env", "voyd_math"].forEach((moduleName) => {
+  ["env"].forEach((moduleName) => {
     const defaultModule = defaults[moduleName];
     const providedModule = importRecord[moduleName];
     if (

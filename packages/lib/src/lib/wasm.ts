@@ -1,20 +1,7 @@
 import binaryen from "binaryen";
 
-const createVoydMathImports = (): Record<string, CallableFunction> => ({
-  sin: Math.sin,
-  cos: Math.cos,
-  tan: Math.tan,
-  ln: Math.log,
-  log2: Math.log2,
-  log10: Math.log10,
-  exp: Math.exp,
-  pow: Math.pow,
-  atan2: Math.atan2,
-});
-
 const defaultImports = (): WebAssembly.Imports => ({
   env: {},
-  voyd_math: createVoydMathImports(),
 });
 
 const toBinary = (mod: Uint8Array | binaryen.Module): BufferSource =>
