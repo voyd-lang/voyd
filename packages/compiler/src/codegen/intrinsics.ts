@@ -1242,9 +1242,13 @@ const emitArrayCopyFromOptions = ({
   const destTemp = allocateTempLocal(arrayType, fnCtx);
   const temp = allocateTempLocal(structInfo.interfaceType, fnCtx);
   const target = ctx.mod.local.get(destTemp.index, arrayType);
-  const pointer = ctx.mod.local.get(temp.index, structInfo.interfaceType);
   const loadField = (field: (typeof fields)[number]): binaryen.ExpressionRef =>
-    loadStructuralField({ structInfo, field, pointer, ctx });
+    loadStructuralField({
+      structInfo,
+      field,
+      pointer: () => ctx.mod.local.get(temp.index, structInfo.interfaceType),
+      ctx,
+    });
 
   const copyExpr = arrayCopy(
     ctx.mod,

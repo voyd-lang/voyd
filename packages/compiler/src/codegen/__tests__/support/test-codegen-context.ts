@@ -53,6 +53,7 @@ export const createTestCodegenContext = (): {
       lambdas: new Map(),
     },
   } as const;
+  const moduleContexts = new Map<string, CodegenContext>();
 
   const ctx: CodegenContext = {
     mod,
@@ -144,6 +145,7 @@ export const createTestCodegenContext = (): {
       modules: new Map([["test", moduleView as any]]),
     } as any,
     module: moduleView as any,
+    moduleContexts,
     diagnostics,
     options: {
       optimize: false,
@@ -187,6 +189,7 @@ export const createTestCodegenContext = (): {
     },
     outcomeValueTypes: new Map(),
   };
+  moduleContexts.set(ctx.moduleId, ctx);
 
   ctx.effectsBackend = selectEffectsBackend(ctx);
 

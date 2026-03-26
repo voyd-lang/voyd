@@ -28,13 +28,20 @@ const assertNoErrors = (diagnostics: readonly Diagnostic[]): void => {
   throw new Error(`${error.code}: ${error.message}`);
 };
 
-const compileToBinaryenModule = async (entryPath: string) => {
+const compileToBinaryenModule = async (
+  entryPath: string,
+  options?: { optimize?: boolean },
+) => {
   const roots = { src: path.dirname(entryPath), std: resolveStdRoot() };
   const graph = await loadModuleGraph({ entryPath, roots });
   const { semantics, diagnostics } = analyzeModules({ graph });
   const allDiagnostics = [...graph.diagnostics, ...diagnostics] as Diagnostic[];
   assertNoErrors(allDiagnostics);
-  const { module } = await emitProgram({ graph, semantics });
+  const { module } = await emitProgram({
+    graph,
+    semantics,
+    codegenOptions: options,
+  });
   return module;
 };
 
@@ -160,5 +167,6 @@ describe(
       const exports = instance.exports as Record<string, unknown>;
       expect((exports.main as () => number)()).toBe(6);
     });
+
   }
 );

@@ -237,7 +237,10 @@ const compileModuleLetGetter = ({
 };
 
 export const registerModuleLetGetters = (ctx: CodegenContext): void => {
-  const moduleLets = moduleLetItems(ctx);
+  const reachableModuleLets = ctx.optimization?.reachableModuleLets.get(ctx.moduleId);
+  const moduleLets = moduleLetItems(ctx).filter(
+    (moduleLet) => !reachableModuleLets || reachableModuleLets.has(moduleLet.symbol),
+  );
   if (moduleLets.length === 0) {
     return;
   }
