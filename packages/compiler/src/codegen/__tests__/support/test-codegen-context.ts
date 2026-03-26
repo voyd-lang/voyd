@@ -147,6 +147,7 @@ export const createTestCodegenContext = (): {
     diagnostics,
     options: {
       optimize: false,
+      optimizationProfile: "aggressive",
       validate: false,
       runtimeDiagnostics: true,
       emitEffectHelpers: false,

@@ -1,4 +1,5 @@
 import binaryen from "binaryen";
+import { optimizeBinaryenModule } from "@voyd/lib/binaryen-optimize.js";
 import type {
   CodegenContext,
   CodegenOptions,
@@ -52,6 +53,7 @@ import { applyConfiguredMemoryExports } from "./memory-exports.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
+  optimizationProfile: "aggressive",
   validate: true,
   runtimeDiagnostics: true,
   emitEffectHelpers: false,
@@ -203,7 +205,10 @@ export const codegenProgram = ({
   }
 
   if (mergedOptions.optimize) {
-    mod.optimize();
+    optimizeBinaryenModule({
+      module: mod,
+      profile: mergedOptions.optimizationProfile,
+    });
   }
 
   if (mergedOptions.validate) {
@@ -276,6 +281,8 @@ const normalizeCodegenOptions = (
   options: CodegenOptions
 ): Required<CodegenOptions> => ({
   optimize: options.optimize ?? DEFAULT_OPTIONS.optimize,
+  optimizationProfile:
+    options.optimizationProfile ?? DEFAULT_OPTIONS.optimizationProfile,
   validate: options.validate ?? DEFAULT_OPTIONS.validate,
   runtimeDiagnostics:
     options.runtimeDiagnostics ?? DEFAULT_OPTIONS.runtimeDiagnostics,

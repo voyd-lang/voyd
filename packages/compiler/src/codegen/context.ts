@@ -47,6 +47,7 @@ import type { ProgramHelperRegistry } from "./program-helpers.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
+  optimizationProfile?: "aggressive" | "standard";
   validate?: boolean;
   runtimeDiagnostics?: boolean;
   emitEffectHelpers?: boolean;

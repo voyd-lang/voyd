@@ -317,6 +317,7 @@ That means:
 - do not expose raw Binaryen optimize/shrink/pass lists through the SDK yet
 - keep the canonical optimization policy in compiler code, not SDK post-processing
 - allow a coarse internal profile such as `"standard"` vs `"aggressive"` if the compiler needs it
+- keep the reusable Binaryen execution helper in a shared low-level package so compiler and SDK can invoke the same validated pass bundle
 
 ## Suggested Implementation Order
 

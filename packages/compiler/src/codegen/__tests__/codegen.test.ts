@@ -130,6 +130,7 @@ const getNominalPatternDesc = (
 
 const DEFAULT_OPTIONS = {
   optimize: false,
+  optimizationProfile: "aggressive",
   validate: true,
   runtimeDiagnostics: true,
   emitEffectHelpers: false,

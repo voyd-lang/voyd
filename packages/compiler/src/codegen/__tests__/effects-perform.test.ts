@@ -63,6 +63,7 @@ const buildLoweringSnapshot = () => {
     diagnostics,
     options: {
       optimize: false,
+      optimizationProfile: "aggressive",
       validate: true,
       runtimeDiagnostics: true,
       emitEffectHelpers: false,

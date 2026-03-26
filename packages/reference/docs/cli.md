@@ -38,7 +38,7 @@ voyd --emit-wasm ./custom_src > module.wasm
 voyd --emit-wasm --opt ./src/main.voyd
 ```
 
-`--opt` runs the standard Binaryen optimization pass.
+`--opt` enables Voyd's aggressive validated optimized build profile.
 
 ## Inspect compiler output
 
@@ -50,7 +50,7 @@ voyd --emit-wasm ./src > module.wasm
 voyd --emit-wasm-text --opt ./src/main.voyd
 ```
 
-`--opt` runs the standard Binaryen optimization pass.
+`--opt` enables Voyd's aggressive validated optimized build profile.
 
 ## Run tests
 

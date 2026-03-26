@@ -45,6 +45,10 @@ const result = await sdk.compile({
 });
 ```
 
+In the SDK, `optimize: true` selects Voyd's aggressive validated optimization
+profile.
+Binaryen pass configuration is intentionally not exposed as public SDK API.
+
 ## Module roots and package resolution
 
 `createSdk().compile(...)` accepts `roots` when you need to override module
