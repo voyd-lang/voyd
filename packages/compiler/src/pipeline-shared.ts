@@ -15,6 +15,7 @@ import { codegenErrorToDiagnostic } from "./codegen/diagnostics.js";
 import type { CodegenOptions } from "./codegen/context.js";
 import type { ContinuationBackendKind } from "./codegen/codegen.js";
 import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
+import { optimizeProgram } from "./optimize/pipeline.js";
 import { analyzeModuleSemantics } from "./modules/semantic-analysis.js";
 import { formatTestExportName } from "./tests/exports.js";
 import type { SourceSpan, SymbolId } from "./semantics/ids.js";
@@ -421,10 +422,19 @@ export const emitProgram = async ({
     instances: monomorphized.instances,
     moduleTyping: monomorphized.moduleTyping,
   });
+  const optimized = codegenOptions?.optimize
+    ? optimizeProgram({
+        program,
+        modules,
+        entryModuleId: targetModuleId,
+        options: codegenOptions,
+      })
+    : undefined;
   const result = codegen.codegenProgram({
-    program,
+    program: optimized?.program ?? program,
     entryModuleId: targetModuleId,
     options: codegenOptions,
+    optimization: optimized?.facts,
   });
   const binary = result.module.emitBinary();
   const wasm =
@@ -466,13 +476,22 @@ export const emitProgramWithContinuationFallback = async ({
     instances: monomorphized.instances,
     moduleTyping: monomorphized.moduleTyping,
   });
+  const optimized = codegenOptions?.optimize
+    ? optimizeProgram({
+        program,
+        modules,
+        entryModuleId: targetModuleId,
+        options: codegenOptions,
+      })
+    : undefined;
 
   const codegenImpl = await lazyCodegen();
   const { preferredKind, preferred, fallback } =
     codegenImpl.codegenProgramWithContinuationFallback({
-      program,
+      program: optimized?.program ?? program,
       entryModuleId: targetModuleId,
       options: codegenOptions,
+      optimization: optimized?.facts,
     });
 
   const toWasmBytes = (result: { module: binaryen.Module }): Uint8Array => {

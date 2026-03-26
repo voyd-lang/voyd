@@ -29,7 +29,8 @@ runtime errors.
 Default behavior:
 
 - non-optimized builds enable runtime diagnostics
-- optimized builds disable them unless you opt back in
+- optimized builds enable Voyd's aggressive validated optimization profile and disable
+  runtime diagnostics unless you opt back in
 
 ## CLI behavior
 

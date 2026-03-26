@@ -1,4 +1,5 @@
 import binaryen from "binaryen";
+import { optimizeBinaryenModule } from "@voyd/lib/binaryen-optimize.js";
 import type {
   CodegenContext,
   CodegenOptions,
@@ -39,6 +40,7 @@ import {
   buildProgramCodegenView,
   type ProgramCodegenView,
 } from "../semantics/codegen-view/index.js";
+import type { ProgramOptimizationFacts } from "../optimize/ir.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type {
   ProgramFunctionInstanceId,
@@ -52,6 +54,7 @@ import { applyConfiguredMemoryExports } from "./memory-exports.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
+  optimizationProfile: "aggressive",
   validate: true,
   runtimeDiagnostics: true,
   emitEffectHelpers: false,
@@ -67,6 +70,7 @@ export type CodegenProgramParams = {
   program: ProgramCodegenView;
   entryModuleId: string;
   options?: CodegenOptions;
+  optimization?: ProgramOptimizationFacts;
 };
 
 export type ContinuationBackendKind = "gc-trampoline" | "stack-switch";
@@ -85,6 +89,7 @@ export const codegenProgram = ({
   program,
   entryModuleId,
   options = {},
+  optimization,
 }: CodegenProgramParams): CodegenResult => {
   const modules = Array.from(program.modules.values());
   const mod = createCodegenModule();
@@ -111,12 +116,14 @@ export const codegenProgram = ({
   const structuralIdCache = new Map<TypeId, TypeId | null>();
   const resolvingStructuralIds = new Set<TypeId>();
   const fixedArrayTypes = new Map<TypeId, FixedArrayWasmType>();
+  const moduleContexts = new Map<string, CodegenContext>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
     program,
     module: sem,
+    moduleContexts,
     diagnostics,
     options: mergedOptions,
     programHelpers,
@@ -150,7 +157,9 @@ export const codegenProgram = ({
       tempTypeIds: new Map(),
     },
     outcomeValueTypes,
+    optimization,
   }));
+  contexts.forEach((ctx) => moduleContexts.set(ctx.moduleId, ctx));
 
   const siteCounter = { current: 0 };
   const entryCtx =
@@ -203,7 +212,10 @@ export const codegenProgram = ({
   }
 
   if (mergedOptions.optimize) {
-    mod.optimize();
+    optimizeBinaryenModule({
+      module: mod,
+      profile: mergedOptions.optimizationProfile,
+    });
   }
 
   if (mergedOptions.validate) {
@@ -225,6 +237,7 @@ export const codegenProgramWithContinuationFallback = ({
   program,
   entryModuleId,
   options = {},
+  optimization,
 }: CodegenProgramParams): {
   preferredKind: ContinuationBackendKind;
   preferred: CodegenResult;
@@ -234,13 +247,14 @@ export const codegenProgramWithContinuationFallback = ({
   if (!stackSwitchRequested) {
     return {
       preferredKind: "gc-trampoline",
-      preferred: codegenProgram({ program, entryModuleId, options }),
+      preferred: codegenProgram({ program, entryModuleId, options, optimization }),
     };
   }
 
   const preferred = codegenProgram({
     program,
     entryModuleId,
+    optimization,
     options: {
       ...options,
       continuationBackend: {
@@ -256,6 +270,7 @@ export const codegenProgramWithContinuationFallback = ({
   const fallback = codegenProgram({
     program,
     entryModuleId,
+    optimization,
     options: {
       ...options,
       continuationBackend: {
@@ -276,6 +291,8 @@ const normalizeCodegenOptions = (
   options: CodegenOptions
 ): Required<CodegenOptions> => ({
   optimize: options.optimize ?? DEFAULT_OPTIONS.optimize,
+  optimizationProfile:
+    options.optimizationProfile ?? DEFAULT_OPTIONS.optimizationProfile,
   validate: options.validate ?? DEFAULT_OPTIONS.validate,
   runtimeDiagnostics:
     options.runtimeDiagnostics ?? DEFAULT_OPTIONS.runtimeDiagnostics,

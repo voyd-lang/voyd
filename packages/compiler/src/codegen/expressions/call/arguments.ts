@@ -527,12 +527,10 @@ const materializeCallArgumentPlan = ({
         return created;
       })();
 
-    const pointer = () =>
-      ctx.mod.local.get(temp.index, containerInfo.interfaceType);
     const loaded = loadStructuralField({
       structInfo: containerInfo,
       field,
-      pointer: pointer(),
+      pointer: () => ctx.mod.local.get(temp.index, containerInfo.interfaceType),
       ctx,
     });
     const coerced = coerceValueToType({

@@ -1,0 +1,564 @@
+use std::math::{ INFINITY }
+use std::number::all
+use std::number::cast::to_i64
+use std::random::LocalRng
+
+pub fn main() -> i32
+  render_with_seed({
+    seed: to_i64(42),
+    image_width: 48,
+    samples_per_pixel: 4,
+    max_depth: 8
+  })
+
+pub fn benchmark() -> i32
+  render_with_seed({
+    seed: to_i64(42),
+    image_width: 200,
+    samples_per_pixel: 10,
+    max_depth: 30
+  })
+
+fn render_with_seed({
+  seed: i64,
+  image_width: i32,
+  samples_per_pixel: i32,
+  max_depth: i32
+}) -> i32
+  let ~rng = LocalRng::seeded(seed)
+
+  try forward
+    let ~world = HittableList()
+    let ground_material = Lambertian(Color(0.5, 0.5, 0.5))
+    world.add(Sphere(center: Point3(0.0, -1000.0, 0.0), radius: 1000.0, mat: ground_material))
+
+    for a in -11..11:
+      for b in -11..11:
+        let choose_mat = rng.random_f64()
+        let center = Point3(
+          a.to_f64() + 0.9 * rng.random_f64(),
+          0.2,
+          b.to_f64() + 0.9 * rng.random_f64()
+        )
+
+        if (center - Point3(4.0, 0.2, 0.0)).len() > 0.9:
+          if
+            choose_mat < 0.8:
+              let albedo = Vec3::random() * Vec3::random()
+              let sphere_material = Lambertian(albedo)
+              world.add(Sphere(center: center, radius: 0.2, mat: sphere_material))
+            choose_mat < 0.95:
+              let albedo = Vec3::random(0.5..1.0)
+              let fuzz = rng.random_f64(0.0..0.5)
+              let sphere_material = Metal(albedo, fuzz)
+              world.add(Sphere(center: center, radius: 0.2, mat: sphere_material))
+            else:
+              let sphere_material = Dielectric(1.5)
+              world.add(Sphere(center: center, radius: 0.2, mat: sphere_material))
+
+    let material1 = Dielectric(1.5)
+    world.add(Sphere(Point3(0.0, 1.0, 0.0), 1.0, material1))
+
+    let material2 = Lambertian(Color(0.4, 0.3, 0.2))
+    world.add(Sphere(Point3(-4.0, 1.0, 0.0), 1.0, material2))
+
+    let material3 = Metal(Color(0.7, 0.6, 0.5), 0.0)
+    world.add(Sphere(Point3(4.0, 1.0, 0.0), 1.0, material3))
+
+    Camera({
+      aspect_ratio: 16.0 / 9.0,
+      image_width,
+      samples_per_pixel,
+      max_depth,
+      look_from: Point3(13.0, 2.0, 3.0),
+      look_at: Point3(0.0, 0.0, 0.0),
+      vup: Vec3(0.0, 1.0, 0.0),
+      vfov: 20,
+      defocus_angle: 0.6,
+      focus_dist: 10.0
+    })
+      .render_checksum(world)
+  RenderCtx::rand_f64(tail):
+    tail(rng.random_f64())
+  RenderCtx::rand_f64(tail, range: Range<f64>):
+    tail(rng.random_f64(range))
+
+eff RenderCtx
+  rand_f64(tail) -> f64
+  rand_f64(tail, range: Range<f64>) -> f64
+
+type Color = Vec3
+type Point3 = Vec3
+
+obj Vec3 {
+  x: f64,
+  y: f64,
+  z: f64
+}
+
+impl Vec3
+  fn init(x: f64, y: f64, z: f64) -> Vec3
+    Vec3 { x, y, z }
+
+  fn apply(~self, vec: Vec3) -> void
+    self.x = vec.x
+    self.y = vec.y
+    self.z = vec.z
+
+  fn '+='(~self, other: Vec3) -> Vec3
+    self.x = self.x + other.x
+    self.y = self.y + other.y
+    self.z = self.z + other.z
+    self
+
+  fn '+'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z }
+
+  fn '-'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x - other.x, y: self.y - other.y, z: self.z - other.z }
+
+  fn '-'(self) -> Vec3
+    Vec3 { x: -self.x, y: -self.y, z: -self.z }
+
+  fn '*'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x * other.x, y: self.y * other.y, z: self.z * other.z }
+
+  fn '*'(self, scalar: f64) -> Vec3
+    Vec3 { x: self.x * scalar, y: self.y * scalar, z: self.z * scalar }
+
+  fn '/'(self, scalar: f64) -> Vec3
+    Vec3 { x: self.x / scalar, y: self.y / scalar, z: self.z / scalar }
+
+  fn cross(self, other: Vec3) -> Vec3
+    Vec3 {
+      x: self.y * other.z - self.z * other.y,
+      y: self.z * other.x - self.x * other.z,
+      z: self.x * other.y - self.y * other.x
+    }
+
+  fn dot(self, other: Vec3) -> f64
+    self.x * other.x + self.y * other.y + self.z * other.z
+
+  fn empty() -> Vec3
+    Vec3(0.0, 0.0, 0.0)
+
+  fn len(self) -> f64
+    math::sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
+
+  fn len_squared(self) -> f64
+    self.x * self.x + self.y * self.y + self.z * self.z
+
+  fn near_zero(self) -> bool
+    let s = math::pow(10.0, -8.0)
+    math::abs(self.x) < s and math::abs(self.y) < s and math::abs(self.z) < s
+
+  fn unit_vector(self) -> Vec3
+    self / self.len()
+
+  fn random() -> Vec3
+    Vec3(RenderCtx::rand_f64(), RenderCtx::rand_f64(), RenderCtx::rand_f64())
+
+  fn random(range: Range<f64>) -> Vec3
+    Vec3(
+      RenderCtx::rand_f64(range),
+      RenderCtx::rand_f64(range),
+      RenderCtx::rand_f64(range)
+    )
+
+  fn random_unit_vector() -> Vec3
+    while true:
+      let p = Vec3::random(-1.0..1.0)
+      let lensq = p.len_squared()
+      if math::pow(10.0, -160.0) < lensq and lensq <= 1.0:
+        return p / math::sqrt(lensq)
+    Vec3(0.0, 0.0, 0.0)
+
+  fn reflect(self, n: Vec3) -> Vec3
+    self - n * 2.0 * self.dot(n)
+
+  fn refract(self, n: Vec3, etai_over_etat: f64) -> Vec3
+    let cos_theta = math::min(-self.dot(n), 1.0)
+    let r_out_perp = (self + n * cos_theta) * etai_over_etat
+    let r_out_parallel = n * -math::sqrt(math::abs(1.0 - r_out_perp.len_squared()))
+    r_out_perp + r_out_parallel
+
+  fn random_in_unit_disk() -> Vec3
+    while true:
+      let p = Vec3(
+        RenderCtx::rand_f64(-1.0..1.0),
+        RenderCtx::rand_f64(-1.0..1.0),
+        0.0
+      )
+
+      if p.len_squared() < 1.0:
+        return p
+    Vec3(0.0, 0.0, 0.0)
+
+fn '*'(scalar: f64, vec: Vec3) -> Vec3
+  vec * scalar
+
+obj Ray {
+  origin: Vec3,
+  direction: Vec3
+}
+
+impl Ray
+  fn at(self, t: f64) -> Vec3
+    self.origin + self.direction * t
+
+  fn apply(~self, ray: Ray) -> void
+    self.origin = ray.origin
+    self.direction = ray.direction
+
+  fn empty() -> Ray
+    Ray { origin: Vec3::empty(), direction: Vec3::empty() }
+
+obj Interval {
+  min: f64,
+  max: f64
+}
+
+impl Interval
+  fn init(min: f64, max: f64) -> Interval
+    Interval { min, max }
+
+  fn clamp(self, x: f64) -> f64
+    if
+      x < self.min: self.min
+      x > self.max: self.max
+      else: x
+
+  fn surrounds(self, x: f64) -> bool
+    self.min < x and x < self.max
+
+trait Material
+  fn scatter(self, { r_in: Ray, rec: HitRecord, ~attenuation: Color, ~scattered: Ray }) -> bool
+
+obj Lambertian {
+  albedo: Color
+}
+
+impl Material for Lambertian
+  fn init(albedo?: Color) -> Lambertian
+    Lambertian { albedo: albedo ?? Color(0.0, 0.0, 0.0) }
+
+  fn scatter(self, { r_in: Ray, rec: HitRecord, ~attenuation: Color, ~scattered: Ray }) -> bool
+    var scatter_direction = rec.normal + Vec3::random_unit_vector()
+    if scatter_direction.near_zero():
+      scatter_direction = rec.normal
+
+    scattered.apply(Ray { origin: rec.p, direction: scatter_direction })
+    attenuation.apply(self.albedo)
+    true
+
+obj Metal {
+  albedo: Color,
+  fuzz: f64
+}
+
+impl Material for Metal
+  fn init(albedo?: Color, fuzz?: f64) -> Metal
+    Metal { albedo: albedo ?? Color(0.0, 0.0, 0.0), fuzz: fuzz ?? 0.0 }
+
+  fn scatter(self, { r_in: Ray, rec: HitRecord, ~attenuation: Color, ~scattered: Ray }) -> bool
+    var reflected = r_in.direction.reflect(rec.normal)
+    reflected = reflected.unit_vector() + (Vec3::random_unit_vector() * self.fuzz)
+    scattered.apply(Ray { origin: rec.p, direction: reflected })
+    attenuation.apply(self.albedo)
+    true
+
+obj Dielectric {
+  refraction_index: f64
+}
+
+impl Material for Dielectric
+  fn init(refraction_index?: f64) -> Dielectric
+    Dielectric { refraction_index: refraction_index ?? 0.0 }
+
+  fn scatter(self, { r_in: Ray, rec: HitRecord, ~attenuation: Color, ~scattered: Ray }) -> bool
+    attenuation.apply(Vec3(1.0, 1.0, 1.0))
+    let ri = if rec.front_face
+      then: 1.0 / self.refraction_index
+      else: self.refraction_index
+    let unit_direction = r_in.direction.unit_vector()
+    let cos_theta = math::min(-unit_direction.dot(rec.normal), 1.0)
+    let sin_theta = math::sqrt(1.0 - cos_theta * cos_theta)
+
+    let cannot_refract = ri * sin_theta > 1.0
+    let direction = if cannot_refract or self.reflectance(cos_theta) > RenderCtx::rand_f64()
+      then: unit_direction.reflect(rec.normal)
+      else: unit_direction.refract(rec.normal, ri)
+    scattered.apply(Ray { origin: rec.p, direction })
+    true
+
+  fn reflectance(self, cosine: f64) -> f64
+    var r0 = (1.0 - self.refraction_index) / (1.0 + self.refraction_index)
+    r0 = r0 * r0
+    r0 + (1.0 - r0) * math::pow((1.0 - cosine), 5.0)
+
+obj HitRecord {
+  p: Point3,
+  normal: Vec3,
+  mat: Material,
+  t: f64,
+  front_face: bool
+}
+
+impl HitRecord
+  fn init() -> HitRecord
+    HitRecord {
+      p: Point3(0.0, 0.0, 0.0),
+      normal: Vec3(0.0, 0.0, 0.0),
+      mat: Lambertian(Color(0.0, 0.0, 0.0)),
+      t: 0.0,
+      front_face: false
+    }
+
+  fn apply(~self, rec: HitRecord) -> HitRecord
+    self.p = rec.p
+    self.normal = rec.normal
+    self.mat = rec.mat
+    self.t = rec.t
+    self.front_face = rec.front_face
+    self
+
+  fn set_face_normal(~self, ray: Ray, outward_normal: Vec3) -> void
+    self.front_face = ray.direction.dot(outward_normal) < 0.0
+    self.normal =
+      if self.front_face then: outward_normal else: outward_normal * -1.0
+
+trait Hittable
+  fn hit(self, { ray: Ray, ray_t: Interval, ~rec: HitRecord }) -> bool
+
+obj HittableList {
+  pri objects: Array<Hittable>
+}
+
+impl HittableList
+  fn init() -> HittableList
+    HittableList { objects: Array<Hittable>() }
+
+  fn add(~self, object: Hittable) -> HittableList
+    self.objects.push(object)
+    self
+
+impl Hittable for HittableList
+  fn hit(self, { ray: Ray, ray_t: Interval, ~rec: HitRecord }) -> bool
+    var ~temp_rec = HitRecord()
+    var hit_anything = false
+    var closest_so_far = ray_t.max
+
+    for object in self.objects:
+      if object.hit({
+        ray,
+        ray_t: Interval(ray_t.min, closest_so_far),
+        rec: temp_rec
+      }):
+        hit_anything = true
+        closest_so_far = temp_rec.t
+        rec.apply(temp_rec)
+
+    hit_anything
+
+obj Sphere {
+  center: Point3,
+  radius: f64,
+  mat: Material
+}
+
+impl Sphere
+  fn init(center: Point3, radius: f64, mat: Material) -> Sphere
+    Sphere { center, radius: math::max(0.0, radius), mat }
+
+  fn init({ center: Point3, radius: f64, mat: Material }) -> Sphere
+    Sphere { center, radius, mat }
+
+impl Hittable for Sphere
+  fn hit(self, { ray: Ray, ray_t: Interval, ~rec: HitRecord }) -> bool
+    let oc = self.center - ray.origin
+    let a = ray.direction.len_squared()
+    let h = ray.direction.dot(oc)
+    let c = oc.len_squared() - self.radius * self.radius
+
+    let discriminant = h * h - a * c
+    if discriminant < 0.0:
+      return false
+
+    let sqrtd = math::sqrt(discriminant)
+
+    var root = (h - sqrtd) / a
+    if not ray_t.surrounds(root):
+      root = (h + sqrtd) / a
+      if not ray_t.surrounds(root):
+        return false
+
+    rec.t = root
+    rec.p = ray.at(rec.t)
+    rec.mat = self.mat
+    let outward_normal = (rec.p - self.center) / self.radius
+    rec.set_face_normal(ray, outward_normal)
+    true
+
+obj Camera {
+  aspect_ratio: f64,
+  image_width: i32,
+  samples_per_pixel: i32,
+  max_depth: i32,
+  look_from: Point3,
+  look_at: Point3,
+  vup: Vec3,
+  defocus_angle: f64,
+  focus_dist: f64,
+  pri center: Point3,
+  pri image_height: i32,
+  pri pixel_samples_scale: f64,
+  pri pixel00_loc: Point3,
+  pri pixel_delta_u: Vec3,
+  pri pixel_delta_v: Vec3,
+  pri vfov: i32,
+  pri u: Vec3,
+  pri v: Vec3,
+  pri w: Vec3,
+  pri defocus_disk_u: Vec3,
+  pri defocus_disk_v: Vec3
+}
+
+impl Camera
+  fn init({
+    aspect_ratio: f64,
+    image_width: i32,
+    samples_per_pixel: i32 = 10,
+    max_depth: i32 = 10,
+    vfov: i32 = 90,
+    look_from: Point3 = Point3(0.0, 0.0, 0.0),
+    look_at: Point3 = Point3(0.0, 0.0, -1.0),
+    vup: Vec3 = Vec3(0.0, 1.0, 0.0),
+    defocus_angle: f64 = 0.0,
+    focus_dist: f64 = 10.0
+  }) -> Camera
+    let raw_image_height = (image_width.to_f64() / aspect_ratio)
+      .to_i32_checked()
+      .unwrap_or(0)
+    let image_height = math::max(raw_image_height, 1)
+    let center = look_from
+
+    let theta = math::deg_to_rad(vfov.to_f64())
+    let h = math::tan(theta / 2.0)
+    let viewport_height = 2.0 * h * focus_dist
+    let viewport_width = viewport_height * (image_width.to_f64() / image_height.to_f64())
+
+    let w = (look_from - look_at).unit_vector()
+    let u = vup.cross(w)
+    let v = w.cross(u)
+
+    let viewport_u = u * viewport_width
+    let viewport_v = (-v) * viewport_height
+
+    let pixel_delta_u = viewport_u / image_width.to_f64()
+    let pixel_delta_v = viewport_v / image_height.to_f64()
+
+    let viewport_upper_left = center
+      - (w * focus_dist)
+      - viewport_u / 2.0
+      - viewport_v / 2.0
+
+    let pixel00_loc = viewport_upper_left + ((pixel_delta_u + pixel_delta_v) * 0.5)
+
+    let defocus_radius = focus_dist * math::tan(math::deg_to_rad(defocus_angle / 2.0))
+    let defocus_disk_u = u * defocus_radius
+    let defocus_disk_v = v * defocus_radius
+
+    Camera {
+      aspect_ratio,
+      center,
+      samples_per_pixel,
+      pixel_samples_scale: 1.0 / samples_per_pixel.to_f64(),
+      max_depth,
+      image_width,
+      image_height,
+      pixel00_loc,
+      pixel_delta_u,
+      pixel_delta_v,
+      vfov,
+      look_from,
+      look_at,
+      vup,
+      u,
+      v,
+      w,
+      defocus_disk_v,
+      defocus_disk_u,
+      defocus_angle,
+      focus_dist
+    }
+
+  pub fn render_checksum(self, world: Hittable) -> i32
+    var checksum = 0
+
+    for j in 0..self.image_height:
+      let j_f = j.to_f64()
+      for i in 0..self.image_width:
+        let i_f = i.to_f64()
+        let ~color = Color(1.0, 1.0, 1.0)
+        for sample in 0..self.samples_per_pixel:
+          let r = self.get_ray(i_f, j_f)
+          color.apply(color + ray_color(r, self.max_depth, world))
+
+        checksum = checksum + checksum_color(color * self.pixel_samples_scale)
+
+    checksum
+
+  fn get_ray(self, i: f64, j: f64) -> Ray
+    let offset = sample_square()
+    let pixel_sample = self.pixel00_loc
+      + (self.pixel_delta_u * (i + offset.x))
+      + (self.pixel_delta_v * (j + offset.y))
+    let ray_origin = if self.defocus_angle <= 0.0 then: self.center else: self.defocus_disk_sample()
+    let ray_direction = pixel_sample - ray_origin
+    Ray { origin: ray_origin, direction: ray_direction }
+
+  fn defocus_disk_sample(self) -> Point3
+    let p = Vec3::random_in_unit_disk()
+    self.center + (self.defocus_disk_u * p.x) + (self.defocus_disk_v * p.y)
+
+fn sample_square() -> Vec3
+  Vec3(RenderCtx::rand_f64() - 0.5, RenderCtx::rand_f64() - 0.5, 0.0)
+
+let empty = Color(0.0, 0.0, 0.0)
+let one = Color(1.0, 1.0, 1.0)
+let sky = Color(0.5, 0.7, 1.0)
+let intensity = Interval(0.0, 0.999)
+
+fn ray_color(ray: Ray, depth: i32, world: Hittable) -> Color
+  if depth <= 0:
+    return empty
+
+  let ~rec = HitRecord()
+
+  if world.hit({ rec, ray_t: Interval(0.001, INFINITY), ray }):
+    let ~scattered = Ray::empty()
+    let ~attenuation = Vec3::empty()
+    if rec.mat.scatter({ r_in: ray, rec, attenuation, scattered }):
+      return attenuation * ray_color(scattered, depth - 1, world)
+    return Color(0.0, 0.0, 0.0)
+
+  let unit_direction = ray.direction.unit_vector()
+  let a = 0.5 * (unit_direction.y + 1.0)
+  (one * (1.0 - a)) + (sky * a)
+
+fn checksum_color(color: Color) -> i32
+  let r = to_pixel(color.x)
+  let g = to_pixel(color.y)
+  let b = to_pixel(color.z)
+  (r * 3) + (g * 5) + (b * 7)
+
+fn to_pixel(color: f64) -> i32
+  (256.0 * intensity.clamp(linear_to_gamma(color)))
+    .to_i32_checked()
+    .unwrap_or(0)
+
+fn linear_to_gamma(linear_component: f64) -> f64
+  if linear_component > 0.0:
+    math::sqrt(linear_component)
+  else:
+    0.0

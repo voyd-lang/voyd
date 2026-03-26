@@ -52,7 +52,10 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
       "--emit-wasm-text",
       "write wasm text format (binaryen flavor) to stdout",
     )
-    .option("--opt", "have binaryen run its standard optimization pass")
+    .option(
+      "--opt",
+      "apply Voyd's aggressive validated wasm optimization profile",
+    )
     .option("-m, --msg-pack", "decode message pack response")
     .option("-r, --run", "run voyd from src/ or provided path")
     .option("--run-wasm", "run the compiled wasm code directly")

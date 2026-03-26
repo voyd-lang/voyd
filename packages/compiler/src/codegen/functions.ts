@@ -219,7 +219,7 @@ const compileDefaultParameterInitialization = ({
       value: loadStructuralField({
         structInfo: someInfo,
         field: someField,
-        pointer: refCast(ctx.mod, rawParamExpr(), someInfo.runtimeType),
+        pointer: () => refCast(ctx.mod, rawParamExpr(), someInfo.runtimeType),
         ctx,
       }),
       actualType: someField.typeId,
@@ -516,6 +516,11 @@ const getReachableFunctionSymbols = ({
   const state = reachabilityStateOf(ctx);
   if (state.symbols) {
     return state.symbols;
+  }
+  if (ctx.optimization?.reachableFunctionSymbols) {
+    const symbols = new Set(ctx.optimization.reachableFunctionSymbols);
+    state.symbols = symbols;
+    return symbols;
   }
   const symbols = collectReachableFunctionSymbols({ ctx, contexts, entryModuleId });
   state.symbols = symbols;
