@@ -115,6 +115,9 @@ test "hypot supports f64 and f32":
 test "pow trig log and exp support f64 and f32":
   assert(pow(2.0, 3.0), eq: 8.0)
   assert(close_enough(pow(9.0, 0.5), target: 3.0, epsilon: 0.0000000001), eq: true)
+  assert(pow(-2.0, 3.0), eq: -8.0)
+  assert(pow(-2.0, 4.0), eq: 16.0)
+  assert(is_nan(pow(-2.0, 0.5)), eq: true)
 
   assert(close_enough(exp(1.0), target: 2.718281828459045, epsilon: 0.000000001), eq: true)
   assert(close_enough(ln(2.718281828459045), target: 1.0, epsilon: 0.000000001), eq: true)
@@ -128,6 +131,22 @@ test "pow trig log and exp support f64 and f32":
     close_enough(
       atan2(1.0, 0.0),
       target: 1.5707963267948966,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(
+      atan2(1.0, -1.0),
+      target: 2.356194490192345,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(
+      atan2(-1.0, -1.0),
+      target: -2.356194490192345,
       epsilon: 0.000000001
     ),
     eq: true
@@ -173,12 +192,18 @@ test "boundary behavior around nan and infinities":
   let nan = 0.0 / 0.0
 
   assert(is_infinite(exp(inf)), eq: true)
+  assert(is_infinite(pow(-2.0, 100000000000000000000.0)), eq: true)
   assert(is_infinite(log2(0.0)), eq: true)
   assert(is_nan(ln(-1.0)), eq: true)
   assert(is_nan(sqrt(-1.0)), eq: true)
   assert(is_nan(fract(nan)), eq: true)
   assert(is_infinite(floor(inf)), eq: true)
   assert(is_infinite(ceil(neg_inf)), eq: true)
+  assert(close_enough(atan2(inf, inf), target: 0.7853981633974483, epsilon: 0.000000001), eq: true)
+  assert(close_enough(atan2(neg_inf, inf), target: -0.7853981633974483, epsilon: 0.000000001), eq: true)
+  let huge = 100000000000000000000.0
+  assert(abs(sin(huge)) <= 1.0, eq: true)
+  assert(abs(cos(huge)) <= 1.0, eq: true)
 
 test "deterministic sweep validates transcendental identities":
   var x = 0.25

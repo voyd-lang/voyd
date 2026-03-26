@@ -1,0 +1,12 @@
+use std::math::all
+
+pub fn main() -> i32
+  let pow_ok = pow(-2.0, 3.0) == -8.0
+  let exp_ln_ok = close_enough(exp(ln(3.5)), target: 3.5, epsilon: 0.000000001)
+  let trig_ok = close_enough((sin(1.25) * sin(1.25)) + (cos(1.25) * cos(1.25)), target: 1.0, epsilon: 0.000000001)
+  let atan_ok = close_enough(atan2(1.0, -1.0), target: 2.356194490192345, epsilon: 0.000000001)
+
+  if pow_ok and exp_ln_ok and trig_ok and atan_ok then: 1 else: 0
+
+fn close_enough(value: f64, { target: f64, epsilon: f64 }) -> bool
+  abs(value - target) <= epsilon
