@@ -759,13 +759,13 @@ export const loadStructuralField = ({
     return dynamicLoad;
   }
 
-  const layoutCompatible = ctx.mod.call(
-    "__extends",
+  const exactTypeMatch = ctx.mod.call(
+    "__has_type",
     [ctx.mod.i32.const(structInfo.runtimeTypeId), makeAncestorsExpr({ pointer, ctx })],
     binaryen.i32,
   );
   return ctx.mod.if(
-    layoutCompatible,
+    exactTypeMatch,
     makeDirectStructuralFieldLoad({
       structInfo,
       field,

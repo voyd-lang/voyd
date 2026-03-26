@@ -383,8 +383,8 @@ pub fn main() -> i32
     const optimizedWasmText = optimizedCodegen.module.emitText();
     const baselineWasmText = baselineCodegen.module.emitText();
 
-    expect(optimizedWasmText).toContain("call $__extends");
-    expect(baselineWasmText).not.toContain("call $__extends");
+    expect(optimizedWasmText).toContain("call $__has_type");
+    expect(baselineWasmText).not.toContain("call $__has_type");
   });
 
   it("lowers small trait-dispatch sets to direct type switches", async () => {
@@ -432,7 +432,7 @@ pub fn main() -> i32
     const wasmText = module.emitText();
 
     expect(wasmText).toContain("call $src__main__run_");
-    expect(wasmText).toContain("call $__extends");
+    expect(wasmText).toContain("call $__has_type");
     expect(wasmText).not.toContain("call $__lookup_method_accessor");
   });
 });

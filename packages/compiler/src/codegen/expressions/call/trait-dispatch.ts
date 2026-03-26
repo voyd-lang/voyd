@@ -258,7 +258,7 @@ const compileDirectTraitDispatchSwitch = ({
     (current, candidate) =>
       ctx.mod.if(
         ctx.mod.call(
-          "__extends",
+          "__has_type",
           [ctx.mod.i32.const(candidate.runtimeTypeId), makeAncestors()],
           binaryen.i32,
         ),
