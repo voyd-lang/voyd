@@ -14,10 +14,10 @@ pub fn pow_f64_native(value: f64, exponent: f64) -> f64
   if is_nan_f64(value) or is_nan_f64(exponent):
     return nan_f64()
   if value == 0.0:
-    if exponent > 0.0:
-      return 0.0
-    return inf_f64()
+    return pow_zero_f64(value, exponent)
   if value < 0.0:
+    if is_infinite_f64(exponent):
+      return pow_negative_base_infinite_exponent_f64(value, exponent)
     if not is_integral_f64(exponent):
       return nan_f64()
     if not can_round_to_i64(exponent):
@@ -79,10 +79,16 @@ pub fn atan2_f64_native(y: f64, x: f64) -> f64
     if y > 0.0:
       return half_pi_f64()
     return 0.0 - half_pi_f64()
+  if y == 0.0:
+    if x < 0.0 or is_negative_zero_f64(x):
+      if is_negative_zero_f64(y):
+        return 0.0 - pi_f64()
+      return pi_f64()
+    return y
   if is_infinite_f64(x):
     if x > 0.0:
       if y < 0.0:
-        return 0.0 - 0.0
+        return neg_zero_f64()
       return 0.0
     if y < 0.0:
       return 0.0 - pi_f64()
@@ -90,7 +96,7 @@ pub fn atan2_f64_native(y: f64, x: f64) -> f64
   if x > 0.0:
     return atan_f64_native(y / x)
   if x < 0.0:
-    if y >= 0.0:
+    if y > 0.0:
       return atan_f64_native(y / x) + pi_f64()
     return atan_f64_native(y / x) - pi_f64()
   if y > 0.0:
@@ -416,6 +422,13 @@ fn is_integral_f64(value: f64) -> bool
 fn is_odd_i64(value: i64) -> bool
   (value % to_i64(2)) != to_i64(0)
 
+fn is_odd_integral_f64(value: f64) -> bool
+  if not is_integral_f64(value):
+    return false
+  if not can_round_to_i64(value):
+    return false
+  is_odd_i64(round_to_i64(value))
+
 fn can_round_to_i64(value: f64) -> bool
   if not is_finite_f64(value):
     return false
@@ -439,11 +452,38 @@ fn is_finite_f64(value: f64) -> bool
 fn is_infinite_f64(value: f64) -> bool
   not is_nan_f64(value) and not is_finite_f64(value)
 
+fn is_negative_zero_f64(value: f64) -> bool
+  value == 0.0 and (1.0 / value) < 0.0
+
 fn nan_f64() -> f64
   0.0 / 0.0
 
 fn inf_f64() -> f64
   1.0 / 0.0
+
+fn neg_zero_f64() -> f64
+  0.0 / -1.0
+
+fn pow_zero_f64(value: f64, exponent: f64) -> f64
+  if exponent > 0.0:
+    if is_negative_zero_f64(value) and is_odd_integral_f64(exponent):
+      return neg_zero_f64()
+    return 0.0
+  if is_negative_zero_f64(value) and is_odd_integral_f64(exponent):
+    return 0.0 - inf_f64()
+  inf_f64()
+
+fn pow_negative_base_infinite_exponent_f64(value: f64, exponent: f64) -> f64
+  let magnitude = 0.0 - value
+  if magnitude == 1.0:
+    return nan_f64()
+  if exponent > 0.0:
+    if magnitude > 1.0:
+      return inf_f64()
+    return 0.0
+  if magnitude > 1.0:
+    return 0.0
+  inf_f64()
 
 fn pow_huge_integral_negative_base_f64(value: f64, exponent: f64) -> f64
   let magnitude = if value < 0.0 then: 0.0 - value else: value
