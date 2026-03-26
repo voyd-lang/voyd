@@ -205,6 +205,88 @@ test "boundary behavior around nan and infinities":
   assert(abs(sin(huge)) <= 1.0, eq: true)
   assert(abs(cos(huge)) <= 1.0, eq: true)
 
+test "large-angle trig uses high-precision reduction":
+  let huge = 100000000000000000000.0
+  let neg_huge = 0.0 - huge
+  let enormous = 9007199254740992.0 * 9007199254740992.0
+  let astronomical = enormous * enormous
+  let threshold_minus = 1048575.5
+  let threshold = 1048576.0
+  let threshold_plus = 1048576.5
+
+  assert(
+    close_enough(sin(huge), target: -0.6452512852657808, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(cos(huge), target: 0.7639704044417283, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(tan(huge), target: -0.8446024630198843, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(sin(neg_huge), target: 0.6452512852657808, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(cos(neg_huge), target: 0.7639704044417283, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(tan(neg_huge), target: 0.8446024630198843, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(sin(astronomical), target: -0.35268192419353095, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(cos(astronomical), target: -0.9357432662579777, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(tan(astronomical), target: 0.3769003068586326, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(
+      sin(threshold_minus),
+      target: -0.1624508310778367,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(cos(threshold_minus), target: 0.9867166399134658, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(
+      sin(threshold),
+      target: 0.3304931400217347,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(cos(threshold), target: 0.943808393901312, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(
+      sin(threshold_plus),
+      target: 0.7425208640927718,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(cos(threshold_plus), target: 0.669822936593637, epsilon: 0.000000001),
+    eq: true
+  )
+
 test "deterministic sweep validates transcendental identities":
   var x = 0.25
   while x <= 16.0 do:

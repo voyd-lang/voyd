@@ -4,6 +4,8 @@
 //! the approximation kernels and range-reduction machinery out of the public
 //! surface while preserving the same native-Wasm implementation.
 
+use std::fixed_array::fns::{ new_fixed_array }
+
 pub fn pow_f64_native(value: f64, exponent: f64) -> f64
   if exponent == 0.0:
     return 1.0
@@ -32,12 +34,9 @@ pub fn sin_f64_native(value: f64) -> f64
     return value
   if not is_finite_f64(value):
     return nan_f64()
-  let normalized = normalize_trig_argument_f64(value)
-  if not can_round_to_i64(normalized * inv_half_pi_f64()):
-    return 0.0
-  let quadrant = round_to_i64(normalized * inv_half_pi_f64())
-  let remainder = normalized - (to_f64(quadrant) * half_pi_f64())
-  let reduced = mod_4_i64(quadrant)
+  if value < 0.0:
+    return 0.0 - sin_f64_native(0.0 - value)
+  let (reduced, remainder) = reduce_trig_f64(value)
   if reduced == 0:
     return sin_kernel_f64(remainder)
   if reduced == 1:
@@ -51,12 +50,9 @@ pub fn cos_f64_native(value: f64) -> f64
     return value
   if not is_finite_f64(value):
     return nan_f64()
-  let normalized = normalize_trig_argument_f64(value)
-  if not can_round_to_i64(normalized * inv_half_pi_f64()):
-    return 1.0
-  let quadrant = round_to_i64(normalized * inv_half_pi_f64())
-  let remainder = normalized - (to_f64(quadrant) * half_pi_f64())
-  let reduced = mod_4_i64(quadrant)
+  if value < 0.0:
+    return cos_f64_native(0.0 - value)
+  let (reduced, remainder) = reduce_trig_f64(value)
   if reduced == 0:
     return cos_kernel_f64(remainder)
   if reduced == 1:
@@ -252,12 +248,144 @@ fn scale_pow2_f64(value: f64, exponent: i32) -> f64
     remaining = remaining / 2
   out
 
-fn normalize_trig_argument_f64(value: f64) -> f64
-  let scaled = value * inv_half_pi_f64()
-  if can_round_to_i64(scaled):
-    return value
-  let turns = round_f64(value / two_pi_f64())
-  value - (turns * two_pi_f64())
+fn reduce_trig_f64(value: f64) -> (i32, f64)
+  if value <= payne_hanek_threshold_f64():
+    return fast_reduce_trig_f64(value)
+  payne_hanek_reduce_f64(value)
+
+fn fast_reduce_trig_f64(value: f64) -> (i32, f64)
+  let quadrant = round_to_i64(value * inv_half_pi_f64())
+  let reduced = mod_4_i64(quadrant)
+  let quadrant_f64 = to_f64(quadrant)
+  let remainder =
+    ((value - (quadrant_f64 * half_pi_hi_f64())) - (quadrant_f64 * half_pi_mid_f64()))
+      - (quadrant_f64 * half_pi_lo_f64())
+  (reduced, remainder)
+
+fn payne_hanek_reduce_f64(value: f64) -> (i32, f64)
+  let bits = reinterpret_f64_to_i64(value)
+  let exponent_bits =
+    wrap_i64(shift_ru_i64(bit_and_i64(bits, f64_exponent_mask_bits()), 52))
+  let mantissa = bit_or_i64(bit_and_i64(bits, f64_fraction_mask_bits()), f64_hidden_bit_i64())
+  let shift = exponent_bits - 1075
+  let product = multiply_invpio2_by_mantissa(mantissa)
+  let cut = invpio2_total_bits() - shift
+  let quotient_mod_4 = extract_bits_i32(product, cut, 2)
+  let round_up = should_round_up_fraction(product, cut)
+  let rounded = quotient_mod_4 + if round_up then: 1 else: 0
+  let reduced = if rounded >= 4 then: rounded - 4 else: rounded
+  let fraction = fraction_from_digits_f64(product, cut, 72)
+  let signed_fraction = if round_up then: fraction - 1.0 else: fraction
+  let remainder =
+    ((signed_fraction * half_pi_hi_f64()) + (signed_fraction * half_pi_mid_f64()))
+      + (signed_fraction * half_pi_lo_f64())
+  (reduced, remainder)
+
+fn multiply_invpio2_by_mantissa(mantissa: i64) -> FixedArray<i32>
+  var digits = zeroed_i32_digits(invpio2_digit_count() + 3)
+  let invpio2 = invpio2_digits_le()
+  let low = wrap_i64(bit_and_i64(mantissa, limb_mask_i64()))
+  let shifted_mid = shift_ru_i64(mantissa, limb_bits_i32())
+  let mid = wrap_i64(bit_and_i64(shifted_mid, limb_mask_i64()))
+  let high = wrap_i64(shift_ru_i64(mantissa, limb_bits_i32() * 2))
+  digits = accumulate_product_limb(digits, invpio2, low, 0)
+  digits = accumulate_product_limb(digits, invpio2, mid, 1)
+  digits = accumulate_product_limb(digits, invpio2, high, 2)
+  digits
+
+fn zeroed_i32_digits(count: i32) -> FixedArray<i32>
+  var digits = new_fixed_array<i32>(count)
+  var index = 0
+  while index < count do:
+    digits = fixed_i32_set(digits, index, 0)
+    index = index + 1
+  digits
+
+fn accumulate_product_limb(
+  product: FixedArray<i32>,
+  invpio2: FixedArray<i32>,
+  factor: i32,
+  offset: i32
+) -> FixedArray<i32>
+  if factor == 0:
+    return product
+  var out = product
+  var carry = to_i64(0)
+  var index = 0
+  while index < invpio2_digit_count() do:
+    let target = index + offset
+    let value =
+      to_i64(fixed_i32_get(out, target))
+        + (to_i64(fixed_i32_get(invpio2, index)) * to_i64(factor))
+        + carry
+    out = fixed_i32_set(out, target, wrap_i64(bit_and_i64(value, limb_mask_i64())))
+    carry = shift_ru_i64(value, limb_bits_i32())
+    index = index + 1
+
+  var target = invpio2_digit_count() + offset
+  while carry > to_i64(0) do:
+    let value = to_i64(fixed_i32_get(out, target)) + carry
+    out = fixed_i32_set(out, target, wrap_i64(bit_and_i64(value, limb_mask_i64())))
+    carry = shift_ru_i64(value, limb_bits_i32())
+    target = target + 1
+  out
+
+fn extract_bits_i32(product: FixedArray<i32>, start_bit: i32, count: i32) -> i32
+  var out = 0
+  var index = 0
+  while index < count do:
+    if bit_at_product(product, start_bit + index):
+      out = out + shift_l_i32(1, index)
+    index = index + 1
+  out
+
+fn should_round_up_fraction(product: FixedArray<i32>, cut: i32) -> bool
+  if cut <= 0:
+    return false
+  let half_bit = bit_at_product(product, cut - 1)
+  if not half_bit:
+    return false
+  if has_any_bit_below(product, cut - 1):
+    return true
+  bit_at_product(product, cut)
+
+fn fraction_from_digits_f64(product: FixedArray<i32>, cut: i32, bits: i32) -> f64
+  var out = 0.0
+  var scale = 0.5
+  var bit_index = cut - 1
+  var count = 0
+  while bit_index >= 0 and count < bits do:
+    if bit_at_product(product, bit_index):
+      out = out + scale
+    scale = scale * 0.5
+    bit_index = bit_index - 1
+    count = count + 1
+  out
+
+fn bit_at_product(product: FixedArray<i32>, bit_index: i32) -> bool
+  if bit_index < 0:
+    return false
+  let limb_index = bit_index / limb_bits_i32()
+  if limb_index >= (invpio2_digit_count() + 3):
+    return false
+  let bit_offset = bit_index % limb_bits_i32()
+  let limb = fixed_i32_get(product, limb_index)
+  bit_and_i32(shift_ru_i32(limb, bit_offset), 1) == 1
+
+fn has_any_bit_below(product: FixedArray<i32>, bit_count: i32) -> bool
+  if bit_count <= 0:
+    return false
+  let full_limbs = bit_count / limb_bits_i32()
+  var index = 0
+  while index < full_limbs do:
+    if fixed_i32_get(product, index) != 0:
+      return true
+    index = index + 1
+  let remaining_bits = bit_count % limb_bits_i32()
+  if remaining_bits == 0:
+    return false
+  let mask = shift_l_i32(1, remaining_bits) - 1
+  bit_and_i32(fixed_i32_get(product, full_limbs), mask) != 0
 
 fn pow_integer_f64(base: f64, exponent: i64) -> f64
   if exponent == to_i64(0):
@@ -359,9 +487,6 @@ fn ln_10_f64() -> f64
 fn inv_half_pi_f64() -> f64
   0.6366197723675814
 
-fn two_pi_f64() -> f64
-  6.283185307179586
-
 fn exp_overflow_limit_f64() -> f64
   709.782712893384
 
@@ -376,6 +501,87 @@ fn f64_exponent_mask_bits() -> i64
 
 fn f64_one_bits() -> i64
   4607182418800017408i64
+
+fn f64_hidden_bit_i64() -> i64
+  4503599627370496i64
+
+fn payne_hanek_threshold_f64() -> f64
+  1048576.0
+
+fn half_pi_hi_f64() -> f64
+  1.5707963267341256
+
+fn half_pi_mid_f64() -> f64
+  0.00000000006077100506303966
+
+fn half_pi_lo_f64() -> f64
+  0.000000000000000000002022266248795951
+
+fn limb_bits_i32() -> i32
+  24
+
+fn limb_mask_i64() -> i64
+  16777215i64
+
+fn invpio2_total_bits() -> i32
+  invpio2_digit_count() * limb_bits_i32()
+
+fn invpio2_digit_count() -> i32
+  50
+
+fn invpio2_digits_le() -> FixedArray<i32>
+  var digits = new_fixed_array<i32>(invpio2_digit_count())
+  digits = fixed_i32_set(digits, 0, 4652155)
+  digits = fixed_i32_set(digits, 1, 5636912)
+  digits = fixed_i32_set(digits, 2, 9264392)
+  digits = fixed_i32_set(digits, 3, 6271263)
+  digits = fixed_i32_set(digits, 4, 15363067)
+  digits = fixed_i32_set(digits, 5, 9065106)
+  digits = fixed_i32_set(digits, 6, 473591)
+  digits = fixed_i32_set(digits, 7, 15825725)
+  digits = fixed_i32_set(digits, 8, 13102053)
+  digits = fixed_i32_set(digits, 9, 7677882)
+  digits = fixed_i32_set(digits, 10, 6285869)
+  digits = fixed_i32_set(digits, 11, 4155038)
+  digits = fixed_i32_set(digits, 12, 12013382)
+  digits = fixed_i32_set(digits, 13, 2607881)
+  digits = fixed_i32_set(digits, 14, 3571407)
+  digits = fixed_i32_set(digits, 15, 7151469)
+  digits = fixed_i32_set(digits, 16, 9132554)
+  digits = fixed_i32_set(digits, 17, 15675153)
+  digits = fixed_i32_set(digits, 18, 366607)
+  digits = fixed_i32_set(digits, 19, 9961438)
+  digits = fixed_i32_set(digits, 20, 3874808)
+  digits = fixed_i32_set(digits, 21, 12450088)
+  digits = fixed_i32_set(digits, 22, 8675211)
+  digits = fixed_i32_set(digits, 23, 3798172)
+  digits = fixed_i32_set(digits, 24, 3769171)
+  digits = fixed_i32_set(digits, 25, 3772886)
+  digits = fixed_i32_set(digits, 26, 6258241)
+  digits = fixed_i32_set(digits, 27, 7349940)
+  digits = fixed_i32_set(digits, 28, 8710556)
+  digits = fixed_i32_set(digits, 29, 3062596)
+  digits = fixed_i32_set(digits, 30, 8533493)
+  digits = fixed_i32_set(digits, 31, 10960616)
+  digits = fixed_i32_set(digits, 32, 1880361)
+  digits = fixed_i32_set(digits, 33, 16653803)
+  digits = fixed_i32_set(digits, 34, 13734428)
+  digits = fixed_i32_set(digits, 35, 3074569)
+  digits = fixed_i32_set(digits, 36, 14681673)
+  digits = fixed_i32_set(digits, 37, 4345298)
+  digits = fixed_i32_set(digits, 38, 2387514)
+  digits = fixed_i32_set(digits, 39, 12935607)
+  digits = fixed_i32_set(digits, 40, 11263675)
+  digits = fixed_i32_set(digits, 41, 16666979)
+  digits = fixed_i32_set(digits, 42, 4427841)
+  digits = fixed_i32_set(digits, 43, 9804092)
+  digits = fixed_i32_set(digits, 44, 12639074)
+  digits = fixed_i32_set(digits, 45, 16069853)
+  digits = fixed_i32_set(digits, 46, 2578385)
+  digits = fixed_i32_set(digits, 47, 1387004)
+  digits = fixed_i32_set(digits, 48, 7228996)
+  digits = fixed_i32_set(digits, 49, 10680707)
+  digits
 
 @intrinsic(name: "__round")
 fn round_f64(value: f64): () -> f64 __round(value)
@@ -418,6 +624,25 @@ fn bit_and_i64(left: i64, right: i64): () -> i64 __bit_and(left, right)
 
 @intrinsic(name: "__bit_or")
 fn bit_or_i64(left: i64, right: i64): () -> i64 __bit_or(left, right)
+
+@intrinsic(name: "__shift_l")
+fn shift_l_i32(value: i32, bits: i32): () -> i32 __shift_l(value, bits)
+
+@intrinsic(name: "__shift_ru")
+fn shift_ru_i32(value: i32, bits: i32): () -> i32 __shift_ru(value, bits)
+
+@intrinsic(name: "__bit_and")
+fn bit_and_i32(left: i32, right: i32): () -> i32 __bit_and(left, right)
+
+@intrinsic(name: "__array_get")
+fn fixed_i32_get(source: FixedArray<i32>, index: i32): () -> i32 __array_get(source, index)
+
+@intrinsic(name: "__array_set")
+fn fixed_i32_set(
+  target: FixedArray<i32>,
+  index: i32,
+  value: i32
+): () -> FixedArray<i32> __array_set(target, index, value)
 
 fn to_f64(value: i32) -> f64
   convert_i32_to_f64(value)
