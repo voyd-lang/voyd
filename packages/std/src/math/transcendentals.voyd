@@ -1,0 +1,700 @@
+//! Internal transcendental math helpers used by `std::math::float`.
+//!
+//! This module is intentionally not re-exported from `std::math`; it keeps
+//! the approximation kernels and range-reduction machinery out of the public
+//! surface while preserving the same native-Wasm implementation.
+
+use std::fixed_array::fns::{ new_fixed_array }
+
+pub fn pow_f64_native(value: f64, exponent: f64) -> f64
+  if exponent == 0.0:
+    return 1.0
+  if value == 1.0:
+    return 1.0
+  if is_nan_f64(value) or is_nan_f64(exponent):
+    return nan_f64()
+  if value == 0.0:
+    return pow_zero_f64(value, exponent)
+  if value < 0.0:
+    if is_infinite_f64(exponent):
+      return pow_negative_base_infinite_exponent_f64(value, exponent)
+    if not is_integral_f64(exponent):
+      return nan_f64()
+    if not can_round_to_i64(exponent):
+      return pow_huge_integral_negative_base_f64(value, exponent)
+    let integer_exponent = round_to_i64(exponent)
+    let magnitude = pow_integer_f64(0.0 - value, integer_exponent)
+    if is_odd_i64(integer_exponent):
+      return 0.0 - magnitude
+    return magnitude
+  exp_f64_native(exponent * ln_f64_native(value))
+
+pub fn sin_f64_native(value: f64) -> f64
+  if is_nan_f64(value):
+    return value
+  if not is_finite_f64(value):
+    return nan_f64()
+  if value < 0.0:
+    return 0.0 - sin_f64_native(0.0 - value)
+  let (reduced, remainder) = reduce_trig_f64(value)
+  if reduced == 0:
+    return sin_kernel_f64(remainder)
+  if reduced == 1:
+    return cos_kernel_f64(remainder)
+  if reduced == 2:
+    return 0.0 - sin_kernel_f64(remainder)
+  0.0 - cos_kernel_f64(remainder)
+
+pub fn cos_f64_native(value: f64) -> f64
+  if is_nan_f64(value):
+    return value
+  if not is_finite_f64(value):
+    return nan_f64()
+  if value < 0.0:
+    return cos_f64_native(0.0 - value)
+  let (reduced, remainder) = reduce_trig_f64(value)
+  if reduced == 0:
+    return cos_kernel_f64(remainder)
+  if reduced == 1:
+    return 0.0 - sin_kernel_f64(remainder)
+  if reduced == 2:
+    return 0.0 - cos_kernel_f64(remainder)
+  sin_kernel_f64(remainder)
+
+pub fn tan_f64_native(value: f64) -> f64
+  sin_f64_native(value) / cos_f64_native(value)
+
+pub fn atan2_f64_native(y: f64, x: f64) -> f64
+  if is_nan_f64(y) or is_nan_f64(x):
+    return nan_f64()
+  if is_infinite_f64(y) and is_infinite_f64(x):
+    if y > 0.0:
+      if x > 0.0:
+        return quarter_pi_f64()
+      return three_quarter_pi_f64()
+    if x > 0.0:
+      return 0.0 - quarter_pi_f64()
+    return quarter_pi_f64() - pi_f64()
+  if is_infinite_f64(y):
+    if y > 0.0:
+      return half_pi_f64()
+    return 0.0 - half_pi_f64()
+  if y == 0.0:
+    if x < 0.0 or is_negative_zero_f64(x):
+      if is_negative_zero_f64(y):
+        return 0.0 - pi_f64()
+      return pi_f64()
+    return y
+  if is_infinite_f64(x):
+    if x > 0.0:
+      if y < 0.0:
+        return neg_zero_f64()
+      return 0.0
+    if y < 0.0:
+      return 0.0 - pi_f64()
+    return pi_f64()
+  if x > 0.0:
+    return atan_f64_native(y / x)
+  if x < 0.0:
+    if y > 0.0:
+      return atan_f64_native(y / x) + pi_f64()
+    return atan_f64_native(y / x) - pi_f64()
+  if y > 0.0:
+    return half_pi_f64()
+  if y < 0.0:
+    return 0.0 - half_pi_f64()
+  0.0
+
+pub fn ln_f64_native(value: f64) -> f64
+  if is_nan_f64(value):
+    return value
+  if value == 0.0:
+    return 0.0 - inf_f64()
+  if value < 0.0:
+    return nan_f64()
+  if is_infinite_f64(value):
+    return inf_f64()
+  let (mantissa, exponent) = normalize_for_ln_f64(value)
+  let z = (mantissa - 1.0) / (mantissa + 1.0)
+  let z2 = z * z
+  var term = z
+  var sum = z
+  var denominator = 3.0
+  var step = 0
+  while step < 10 do:
+    term = term * z2
+    sum = sum + (term / denominator)
+    denominator = denominator + 2.0
+    step = step + 1
+  (2.0 * sum) + (to_f64(exponent) * ln_2_f64())
+
+pub fn log2_f64_native(value: f64) -> f64
+  ln_f64_native(value) / ln_2_f64()
+
+pub fn log10_f64_native(value: f64) -> f64
+  ln_f64_native(value) / ln_10_f64()
+
+pub fn exp_f64_native(value: f64) -> f64
+  if is_nan_f64(value):
+    return value
+  if value == inf_f64():
+    return inf_f64()
+  if value == 0.0 - inf_f64():
+    return 0.0
+  if value > exp_overflow_limit_f64():
+    return inf_f64()
+  if value < exp_underflow_limit_f64():
+    return 0.0
+  let scaled = round_f64(value * inv_ln_2_f64())
+  let exponent = trunc_i32_f64(scaled)
+  let remainder = value - (to_f64(exponent) * ln_2_f64())
+  scale_pow2_f64(exp_taylor_f64(remainder), exponent)
+
+fn atan_f64_native(value: f64) -> f64
+  if is_nan_f64(value):
+    return value
+  if value == 0.0:
+    return 0.0
+  let negative = value < 0.0
+  let abs_value = if negative then: 0.0 - value else: value
+  let reduced =
+    if abs_value > 1.0
+    then: half_pi_f64() - atan_reduced_f64(1.0 / abs_value)
+    else: atan_reduced_f64(abs_value)
+  if negative then: 0.0 - reduced else: reduced
+
+fn atan_reduced_f64(value: f64) -> f64
+  if value > tan_pi_over_8_f64():
+    return quarter_pi_f64() + atan_small_f64((value - 1.0) / (value + 1.0))
+  atan_small_f64(value)
+
+fn atan_small_f64(value: f64) -> f64
+  let z = value * value
+  var poly = 1.0 / 21.0
+  poly = (-1.0 / 19.0) + (z * poly)
+  poly = (1.0 / 17.0) + (z * poly)
+  poly = (-1.0 / 15.0) + (z * poly)
+  poly = (1.0 / 13.0) + (z * poly)
+  poly = (-1.0 / 11.0) + (z * poly)
+  poly = (1.0 / 9.0) + (z * poly)
+  poly = (-1.0 / 7.0) + (z * poly)
+  poly = (1.0 / 5.0) + (z * poly)
+  poly = (-1.0 / 3.0) + (z * poly)
+  value + (value * z * poly)
+
+fn sin_kernel_f64(value: f64) -> f64
+  let z = value * value
+  var poly = 1.0 / 6227020800.0
+  poly = (-1.0 / 39916800.0) + (z * poly)
+  poly = (1.0 / 362880.0) + (z * poly)
+  poly = (-1.0 / 5040.0) + (z * poly)
+  poly = (1.0 / 120.0) + (z * poly)
+  poly = (-1.0 / 6.0) + (z * poly)
+  value + (value * z * poly)
+
+fn cos_kernel_f64(value: f64) -> f64
+  let z = value * value
+  var poly = 1.0 / 479001600.0
+  poly = (-1.0 / 3628800.0) + (z * poly)
+  poly = (1.0 / 40320.0) + (z * poly)
+  poly = (-1.0 / 720.0) + (z * poly)
+  poly = (1.0 / 24.0) + (z * poly)
+  poly = (-1.0 / 2.0) + (z * poly)
+  1.0 + (z * poly)
+
+fn exp_taylor_f64(value: f64) -> f64
+  var poly = 1.0 / 39916800.0
+  poly = (1.0 / 3628800.0) + (value * poly)
+  poly = (1.0 / 362880.0) + (value * poly)
+  poly = (1.0 / 40320.0) + (value * poly)
+  poly = (1.0 / 5040.0) + (value * poly)
+  poly = (1.0 / 720.0) + (value * poly)
+  poly = (1.0 / 120.0) + (value * poly)
+  poly = (1.0 / 24.0) + (value * poly)
+  poly = (1.0 / 6.0) + (value * poly)
+  poly = 0.5 + (value * poly)
+  poly = 1.0 + (value * poly)
+  1.0 + (value * poly)
+
+fn normalize_for_ln_f64(value: f64) -> (f64, i32)
+  let bits = reinterpret_f64_to_i64(value)
+  let exponent_bits =
+    wrap_i64(shift_ru_i64(bit_and_i64(bits, f64_exponent_mask_bits()), 52))
+  if exponent_bits == 0:
+    let (mantissa, exponent) = normalize_for_ln_f64(value * 4503599627370496.0)
+    return (mantissa, exponent - 52)
+  let fraction_bits = bit_and_i64(bits, f64_fraction_mask_bits())
+  var exponent = exponent_bits - 1023
+  var mantissa = reinterpret_i64_to_f64(bit_or_i64(fraction_bits, f64_one_bits()))
+  if mantissa > sqrt_two_f64():
+    mantissa = mantissa * 0.5
+    exponent = exponent + 1
+  (mantissa, exponent)
+
+fn scale_pow2_f64(value: f64, exponent: i32) -> f64
+  if exponent == 0 or value == 0.0:
+    return value
+  if exponent > 0:
+    var remaining = exponent
+    var out = value
+    while remaining >= 512 do:
+      out = out * pow2_512_f64()
+      remaining = remaining - 512
+    while remaining > 0 do:
+      out = out * 2.0
+      remaining = remaining - 1
+    return out
+  var remaining = 0 - exponent
+  var out = value
+  while remaining >= 512 do:
+    out = out * pow2_neg_512_f64()
+    remaining = remaining - 512
+  while remaining > 0 do:
+    out = out * 0.5
+    remaining = remaining - 1
+  out
+
+fn reduce_trig_f64(value: f64) -> (i32, f64)
+  if value <= payne_hanek_threshold_f64():
+    return fast_reduce_trig_f64(value)
+  payne_hanek_reduce_f64(value)
+
+fn fast_reduce_trig_f64(value: f64) -> (i32, f64)
+  let quadrant = round_to_i64(value * inv_half_pi_f64())
+  let reduced = mod_4_i64(quadrant)
+  let quadrant_f64 = to_f64(quadrant)
+  let remainder =
+    ((value - (quadrant_f64 * half_pi_hi_f64())) - (quadrant_f64 * half_pi_mid_f64()))
+      - (quadrant_f64 * half_pi_lo_f64())
+  (reduced, remainder)
+
+fn payne_hanek_reduce_f64(value: f64) -> (i32, f64)
+  let bits = reinterpret_f64_to_i64(value)
+  let exponent_bits =
+    wrap_i64(shift_ru_i64(bit_and_i64(bits, f64_exponent_mask_bits()), 52))
+  let mantissa = bit_or_i64(bit_and_i64(bits, f64_fraction_mask_bits()), f64_hidden_bit_i64())
+  let shift = exponent_bits - 1075
+  let product = multiply_invpio2_by_mantissa(mantissa)
+  let cut = invpio2_total_bits() - shift
+  let quotient_mod_4 = extract_bits_i32(product, cut, 2)
+  let round_up = should_round_up_fraction(product, cut)
+  let rounded = quotient_mod_4 + if round_up then: 1 else: 0
+  let reduced = if rounded >= 4 then: rounded - 4 else: rounded
+  let fraction = fraction_from_digits_f64(product, cut, 72)
+  let signed_fraction = if round_up then: fraction - 1.0 else: fraction
+  let remainder =
+    ((signed_fraction * half_pi_hi_f64()) + (signed_fraction * half_pi_mid_f64()))
+      + (signed_fraction * half_pi_lo_f64())
+  (reduced, remainder)
+
+fn multiply_invpio2_by_mantissa(mantissa: i64) -> FixedArray<i32>
+  var digits = zeroed_i32_digits(invpio2_digit_count() + 3)
+  let invpio2 = invpio2_digits_le()
+  let low = wrap_i64(bit_and_i64(mantissa, limb_mask_i64()))
+  let shifted_mid = shift_ru_i64(mantissa, limb_bits_i32())
+  let mid = wrap_i64(bit_and_i64(shifted_mid, limb_mask_i64()))
+  let high = wrap_i64(shift_ru_i64(mantissa, limb_bits_i32() * 2))
+  digits = accumulate_product_limb(digits, invpio2, low, 0)
+  digits = accumulate_product_limb(digits, invpio2, mid, 1)
+  digits = accumulate_product_limb(digits, invpio2, high, 2)
+  digits
+
+fn zeroed_i32_digits(count: i32) -> FixedArray<i32>
+  var digits = new_fixed_array<i32>(count)
+  var index = 0
+  while index < count do:
+    digits = fixed_i32_set(digits, index, 0)
+    index = index + 1
+  digits
+
+fn accumulate_product_limb(
+  product: FixedArray<i32>,
+  invpio2: FixedArray<i32>,
+  factor: i32,
+  offset: i32
+) -> FixedArray<i32>
+  if factor == 0:
+    return product
+  var out = product
+  var carry = to_i64(0)
+  var index = 0
+  while index < invpio2_digit_count() do:
+    let target = index + offset
+    let value =
+      to_i64(fixed_i32_get(out, target))
+        + (to_i64(fixed_i32_get(invpio2, index)) * to_i64(factor))
+        + carry
+    out = fixed_i32_set(out, target, wrap_i64(bit_and_i64(value, limb_mask_i64())))
+    carry = shift_ru_i64(value, limb_bits_i32())
+    index = index + 1
+
+  var target = invpio2_digit_count() + offset
+  while carry > to_i64(0) do:
+    let value = to_i64(fixed_i32_get(out, target)) + carry
+    out = fixed_i32_set(out, target, wrap_i64(bit_and_i64(value, limb_mask_i64())))
+    carry = shift_ru_i64(value, limb_bits_i32())
+    target = target + 1
+  out
+
+fn extract_bits_i32(product: FixedArray<i32>, start_bit: i32, count: i32) -> i32
+  var out = 0
+  var index = 0
+  while index < count do:
+    if bit_at_product(product, start_bit + index):
+      out = out + shift_l_i32(1, index)
+    index = index + 1
+  out
+
+fn should_round_up_fraction(product: FixedArray<i32>, cut: i32) -> bool
+  if cut <= 0:
+    return false
+  let half_bit = bit_at_product(product, cut - 1)
+  if not half_bit:
+    return false
+  if has_any_bit_below(product, cut - 1):
+    return true
+  bit_at_product(product, cut)
+
+fn fraction_from_digits_f64(product: FixedArray<i32>, cut: i32, bits: i32) -> f64
+  var out = 0.0
+  var scale = 0.5
+  var bit_index = cut - 1
+  var count = 0
+  while bit_index >= 0 and count < bits do:
+    if bit_at_product(product, bit_index):
+      out = out + scale
+    scale = scale * 0.5
+    bit_index = bit_index - 1
+    count = count + 1
+  out
+
+fn bit_at_product(product: FixedArray<i32>, bit_index: i32) -> bool
+  if bit_index < 0:
+    return false
+  let limb_index = bit_index / limb_bits_i32()
+  if limb_index >= (invpio2_digit_count() + 3):
+    return false
+  let bit_offset = bit_index % limb_bits_i32()
+  let limb = fixed_i32_get(product, limb_index)
+  bit_and_i32(shift_ru_i32(limb, bit_offset), 1) == 1
+
+fn has_any_bit_below(product: FixedArray<i32>, bit_count: i32) -> bool
+  if bit_count <= 0:
+    return false
+  let full_limbs = bit_count / limb_bits_i32()
+  var index = 0
+  while index < full_limbs do:
+    if fixed_i32_get(product, index) != 0:
+      return true
+    index = index + 1
+  let remaining_bits = bit_count % limb_bits_i32()
+  if remaining_bits == 0:
+    return false
+  let mask = shift_l_i32(1, remaining_bits) - 1
+  bit_and_i32(fixed_i32_get(product, full_limbs), mask) != 0
+
+fn pow_integer_f64(base: f64, exponent: i64) -> f64
+  if exponent == to_i64(0):
+    return 1.0
+  if exponent > to_i64(0):
+    var power = exponent
+    var factor = base
+    var out = 1.0
+    while power > to_i64(0) do:
+      if (power % to_i64(2)) != to_i64(0):
+        out = out * factor
+      factor = factor * factor
+      power = power / to_i64(2)
+    return out
+  var power = exponent
+  var factor = base
+  var out = 1.0
+  while power < to_i64(0) do:
+    if (power % to_i64(2)) != to_i64(0):
+      out = out / factor
+    factor = factor * factor
+    power = power / to_i64(2)
+  out
+
+fn is_integral_f64(value: f64) -> bool
+  is_finite_f64(value) and trunc_f64(value) == value
+
+fn is_odd_i64(value: i64) -> bool
+  (value % to_i64(2)) != to_i64(0)
+
+fn is_odd_integral_f64(value: f64) -> bool
+  if not is_integral_f64(value):
+    return false
+  if not can_round_to_i64(value):
+    return false
+  is_odd_i64(round_to_i64(value))
+
+fn can_round_to_i64(value: f64) -> bool
+  if not is_finite_f64(value):
+    return false
+  let min_i64 = 0.0 - 9223372036854775808.0
+  value >= min_i64 and value < 9223372036854775808.0
+
+fn round_to_i64(value: f64) -> i64
+  trunc_i64_f64(round_f64(value))
+
+fn mod_4_i64(value: i64) -> i32
+  let remainder = wrap_i64(value % to_i64(4))
+  if remainder < 0 then: remainder + 4 else: remainder
+
+fn is_nan_f64(value: f64) -> bool
+  value != value
+
+fn is_finite_f64(value: f64) -> bool
+  let gap = value - value
+  gap == 0.0
+
+fn is_infinite_f64(value: f64) -> bool
+  not is_nan_f64(value) and not is_finite_f64(value)
+
+fn is_negative_zero_f64(value: f64) -> bool
+  value == 0.0 and (1.0 / value) < 0.0
+
+fn nan_f64() -> f64
+  0.0 / 0.0
+
+fn inf_f64() -> f64
+  1.0 / 0.0
+
+fn neg_zero_f64() -> f64
+  0.0 / -1.0
+
+fn pow_zero_f64(value: f64, exponent: f64) -> f64
+  if exponent > 0.0:
+    if is_negative_zero_f64(value) and is_odd_integral_f64(exponent):
+      return neg_zero_f64()
+    return 0.0
+  if is_negative_zero_f64(value) and is_odd_integral_f64(exponent):
+    return 0.0 - inf_f64()
+  inf_f64()
+
+fn pow_negative_base_infinite_exponent_f64(value: f64, exponent: f64) -> f64
+  let magnitude = 0.0 - value
+  if magnitude == 1.0:
+    return nan_f64()
+  if exponent > 0.0:
+    if magnitude > 1.0:
+      return inf_f64()
+    return 0.0
+  if magnitude > 1.0:
+    return 0.0
+  inf_f64()
+
+fn pow_huge_integral_negative_base_f64(value: f64, exponent: f64) -> f64
+  let magnitude = if value < 0.0 then: 0.0 - value else: value
+  if magnitude == 1.0:
+    return 1.0
+  if exponent > 0.0:
+    if magnitude > 1.0:
+      return inf_f64()
+    return 0.0
+  if magnitude > 1.0:
+    return 0.0
+  inf_f64()
+
+fn pi_f64() -> f64
+  3.141592653589793
+
+fn half_pi_f64() -> f64
+  1.5707963267948966
+
+fn quarter_pi_f64() -> f64
+  0.7853981633974483
+
+fn three_quarter_pi_f64() -> f64
+  2.356194490192345
+
+fn tan_pi_over_8_f64() -> f64
+  0.41421356237309503
+
+fn sqrt_two_f64() -> f64
+  1.4142135623730951
+
+fn ln_2_f64() -> f64
+  0.6931471805599453
+
+fn inv_ln_2_f64() -> f64
+  1.4426950408889634
+
+fn ln_10_f64() -> f64
+  2.302585092994046
+
+fn inv_half_pi_f64() -> f64
+  0.6366197723675814
+
+fn exp_overflow_limit_f64() -> f64
+  709.782712893384
+
+fn exp_underflow_limit_f64() -> f64
+  -745.1332191019411
+
+fn pow2_512_f64() -> f64
+  13407807929942597000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000.0
+
+fn pow2_neg_512_f64() -> f64
+  1.0 / pow2_512_f64()
+
+fn f64_fraction_mask_bits() -> i64
+  4503599627370495i64
+
+fn f64_exponent_mask_bits() -> i64
+  9218868437227405312i64
+
+fn f64_one_bits() -> i64
+  4607182418800017408i64
+
+fn f64_hidden_bit_i64() -> i64
+  4503599627370496i64
+
+fn payne_hanek_threshold_f64() -> f64
+  1048576.0
+
+fn half_pi_hi_f64() -> f64
+  1.5707963267341256
+
+fn half_pi_mid_f64() -> f64
+  0.00000000006077100506303966
+
+fn half_pi_lo_f64() -> f64
+  0.000000000000000000002022266248795951
+
+fn limb_bits_i32() -> i32
+  24
+
+fn limb_mask_i64() -> i64
+  16777215i64
+
+fn invpio2_total_bits() -> i32
+  invpio2_digit_count() * limb_bits_i32()
+
+fn invpio2_digit_count() -> i32
+  50
+
+fn invpio2_digits_le() -> FixedArray<i32>
+  var digits = new_fixed_array<i32>(invpio2_digit_count())
+  digits = fixed_i32_set(digits, 0, 4652155)
+  digits = fixed_i32_set(digits, 1, 5636912)
+  digits = fixed_i32_set(digits, 2, 9264392)
+  digits = fixed_i32_set(digits, 3, 6271263)
+  digits = fixed_i32_set(digits, 4, 15363067)
+  digits = fixed_i32_set(digits, 5, 9065106)
+  digits = fixed_i32_set(digits, 6, 473591)
+  digits = fixed_i32_set(digits, 7, 15825725)
+  digits = fixed_i32_set(digits, 8, 13102053)
+  digits = fixed_i32_set(digits, 9, 7677882)
+  digits = fixed_i32_set(digits, 10, 6285869)
+  digits = fixed_i32_set(digits, 11, 4155038)
+  digits = fixed_i32_set(digits, 12, 12013382)
+  digits = fixed_i32_set(digits, 13, 2607881)
+  digits = fixed_i32_set(digits, 14, 3571407)
+  digits = fixed_i32_set(digits, 15, 7151469)
+  digits = fixed_i32_set(digits, 16, 9132554)
+  digits = fixed_i32_set(digits, 17, 15675153)
+  digits = fixed_i32_set(digits, 18, 366607)
+  digits = fixed_i32_set(digits, 19, 9961438)
+  digits = fixed_i32_set(digits, 20, 3874808)
+  digits = fixed_i32_set(digits, 21, 12450088)
+  digits = fixed_i32_set(digits, 22, 8675211)
+  digits = fixed_i32_set(digits, 23, 3798172)
+  digits = fixed_i32_set(digits, 24, 3769171)
+  digits = fixed_i32_set(digits, 25, 3772886)
+  digits = fixed_i32_set(digits, 26, 6258241)
+  digits = fixed_i32_set(digits, 27, 7349940)
+  digits = fixed_i32_set(digits, 28, 8710556)
+  digits = fixed_i32_set(digits, 29, 3062596)
+  digits = fixed_i32_set(digits, 30, 8533493)
+  digits = fixed_i32_set(digits, 31, 10960616)
+  digits = fixed_i32_set(digits, 32, 1880361)
+  digits = fixed_i32_set(digits, 33, 16653803)
+  digits = fixed_i32_set(digits, 34, 13734428)
+  digits = fixed_i32_set(digits, 35, 3074569)
+  digits = fixed_i32_set(digits, 36, 14681673)
+  digits = fixed_i32_set(digits, 37, 4345298)
+  digits = fixed_i32_set(digits, 38, 2387514)
+  digits = fixed_i32_set(digits, 39, 12935607)
+  digits = fixed_i32_set(digits, 40, 11263675)
+  digits = fixed_i32_set(digits, 41, 16666979)
+  digits = fixed_i32_set(digits, 42, 4427841)
+  digits = fixed_i32_set(digits, 43, 9804092)
+  digits = fixed_i32_set(digits, 44, 12639074)
+  digits = fixed_i32_set(digits, 45, 16069853)
+  digits = fixed_i32_set(digits, 46, 2578385)
+  digits = fixed_i32_set(digits, 47, 1387004)
+  digits = fixed_i32_set(digits, 48, 7228996)
+  digits = fixed_i32_set(digits, 49, 10680707)
+  digits
+
+@intrinsic(name: "__round")
+fn round_f64(value: f64): () -> f64 __round(value)
+
+@intrinsic(name: "__trunc")
+fn trunc_f64(value: f64): () -> f64 __trunc(value)
+
+@intrinsic(name: "__f64_convert_i32_s")
+fn convert_i32_to_f64(value: i32): () -> f64 __f64_convert_i32_s(value)
+
+@intrinsic(name: "__f64_convert_i64_s")
+fn convert_i64_to_f64(value: i64): () -> f64 __f64_convert_i64_s(value)
+
+@intrinsic(name: "__i64_extend_s")
+fn extend_i32_s(value: i32): () -> i64 __i64_extend_s(value)
+
+@intrinsic(name: "__i32_trunc_f64_s")
+fn trunc_i32_f64(value: f64): () -> i32 __i32_trunc_f64_s(value)
+
+@intrinsic(name: "__i64_trunc_f64_s")
+fn trunc_i64_f64(value: f64): () -> i64 __i64_trunc_f64_s(value)
+
+@intrinsic(name: "__i32_wrap_i64")
+fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)
+
+@intrinsic(name: "__reinterpret_f64_to_i64")
+fn reinterpret_f64_to_i64(value: f64): () -> i64 __reinterpret_f64_to_i64(value)
+
+@intrinsic(name: "__reinterpret_i64_to_f64")
+fn reinterpret_i64_to_f64(value: i64): () -> f64 __reinterpret_i64_to_f64(value)
+
+@intrinsic(name: "__shift_l")
+fn shift_l_i64(value: i64, bits: i32): () -> i64 __shift_l(value, bits)
+
+@intrinsic(name: "__shift_ru")
+fn shift_ru_i64(value: i64, bits: i32): () -> i64 __shift_ru(value, bits)
+
+@intrinsic(name: "__bit_and")
+fn bit_and_i64(left: i64, right: i64): () -> i64 __bit_and(left, right)
+
+@intrinsic(name: "__bit_or")
+fn bit_or_i64(left: i64, right: i64): () -> i64 __bit_or(left, right)
+
+@intrinsic(name: "__shift_l")
+fn shift_l_i32(value: i32, bits: i32): () -> i32 __shift_l(value, bits)
+
+@intrinsic(name: "__shift_ru")
+fn shift_ru_i32(value: i32, bits: i32): () -> i32 __shift_ru(value, bits)
+
+@intrinsic(name: "__bit_and")
+fn bit_and_i32(left: i32, right: i32): () -> i32 __bit_and(left, right)
+
+@intrinsic(name: "__array_get")
+fn fixed_i32_get(source: FixedArray<i32>, index: i32): () -> i32 __array_get(source, index)
+
+@intrinsic(name: "__array_set")
+fn fixed_i32_set(
+  target: FixedArray<i32>,
+  index: i32,
+  value: i32
+): () -> FixedArray<i32> __array_set(target, index, value)
+
+fn to_f64(value: i32) -> f64
+  convert_i32_to_f64(value)
+
+fn to_f64(value: i64) -> f64
+  convert_i64_to_f64(value)
+
+fn to_i64(value: i32) -> i64
+  extend_i32_s(value)

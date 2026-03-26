@@ -1,2 +1,2 @@
 fn bad(value: i32) -> f64
-  __pow(value, value)
+  __sqrt(value)

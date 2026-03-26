@@ -23,7 +23,7 @@ const loadStdFixture = (fixtureName: string): { module: ModuleNode; graph: Modul
 };
 
 describe("float intrinsic typing", () => {
-  it("accepts unary float intrinsics in std modules", () => {
+  it("accepts supported float intrinsics in std modules", () => {
     expect(() =>
       semanticsPipeline(loadStdFixture("float_intrinsics_valid.voyd"))
     ).not.toThrow();
@@ -32,6 +32,6 @@ describe("float intrinsic typing", () => {
   it("rejects non-float operands", () => {
     expect(() =>
       semanticsPipeline(loadStdFixture("float_intrinsics_type_mismatch.voyd"))
-    ).toThrow(/no overload of __pow matches argument types/);
+    ).toThrow(/no overload of __sqrt matches argument types/);
   });
 });

@@ -19,7 +19,9 @@ type Diagnostic = {
 const fixturePath = (name: string): string =>
   fileURLToPath(new URL(`../fixtures/${name}`, import.meta.url));
 
-const findFirstError = (diagnostics: readonly Diagnostic[]): Diagnostic | undefined =>
+const findFirstError = (
+  diagnostics: readonly Diagnostic[],
+): Diagnostic | undefined =>
   diagnostics.find((diag) => diag.severity === "error");
 
 const assertNoErrors = (diagnostics: readonly Diagnostic[]): void => {
@@ -54,9 +56,9 @@ const emitWasmBytes = (mod: { emitBinary: () => unknown }): Uint8Array => {
   const emitted = mod.emitBinary();
   return emitted instanceof Uint8Array
     ? emitted
-    : (emitted as { binary?: Uint8Array; output?: Uint8Array }).output ??
+    : ((emitted as { binary?: Uint8Array; output?: Uint8Array }).output ??
         (emitted as { binary?: Uint8Array }).binary ??
-        new Uint8Array();
+        new Uint8Array());
 };
 
 const assertRunnableWasm = (mod: BinaryenLikeModule): Uint8Array => {
@@ -75,7 +77,10 @@ const normalize = (value: unknown): unknown => {
   }
   if (value instanceof Map) {
     return Object.fromEntries(
-      Array.from(value.entries()).map(([key, entry]) => [String(key), normalize(entry)]),
+      Array.from(value.entries()).map(([key, entry]) => [
+        String(key),
+        normalize(entry),
+      ]),
     );
   }
   if (value && typeof value === "object") {
@@ -86,87 +91,100 @@ const normalize = (value: unknown): unknown => {
   return value;
 };
 
-describe(
-  "smoke: wasm validation",
-  { timeout: 20_000 },
-  () => {
-    it("accepts wasm-gc modules that Node can validate", async () => {
-      const module = await compileToBinaryenModule(
-        fixturePath("match_destructure_fields.voyd"),
-      );
-      const mod = module as unknown as BinaryenLikeModule;
+describe("smoke: wasm validation", { timeout: 30_000 }, () => {
+  it("accepts wasm-gc modules that Node can validate", async () => {
+    const module = await compileToBinaryenModule(
+      fixturePath("match_destructure_fields.voyd"),
+    );
+    const mod = module as unknown as BinaryenLikeModule;
 
-      const originalValidate = mod.validate.bind(module);
-      mod.validate = () => {
-        throw new Error("binaryen validate should not run when wasm validates");
-      };
+    const originalValidate = mod.validate.bind(module);
+    mod.validate = () => {
+      throw new Error("binaryen validate should not run when wasm validates");
+    };
 
-      const wasm = assertRunnableWasm(mod);
-      expect(wasm).toBeInstanceOf(Uint8Array);
-      expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
+    const wasm = assertRunnableWasm(mod);
+    expect(wasm).toBeInstanceOf(Uint8Array);
+    expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
 
-      mod.validate = originalValidate;
-    });
+    mod.validate = originalValidate;
+  });
 
-    it("compiles std::optional and preserves optional semantics", async () => {
-      const module = await compileToBinaryenModule(fixturePath("std_optional_basic.voyd"));
-      const wasm = assertRunnableWasm(module);
-      const instance = getWasmInstance(wasm);
-      const exports = instance.exports as Record<string, unknown>;
-      expect((exports.main as () => number)()).toBe(12);
-    });
+  it("compiles std::optional and preserves optional semantics", async () => {
+    const module = await compileToBinaryenModule(
+      fixturePath("std_optional_basic.voyd"),
+    );
+    const wasm = assertRunnableWasm(module);
+    const instance = getWasmInstance(wasm);
+    const exports = instance.exports as Record<string, unknown>;
+    expect((exports.main as () => number)()).toBe(12);
+  });
 
-    it("supports module-qualified return type annotations", async () => {
-      const module = await compileToBinaryenModule(fixturePath("sink.test.voyd"));
-      const wasm = assertRunnableWasm(module);
-      const instance = getWasmInstance(wasm);
-      const exports = instance.exports as Record<string, unknown>;
-      expect((exports.main as () => number)()).toBe(42);
-    });
+  it("supports module-qualified return type annotations", async () => {
+    const module = await compileToBinaryenModule(fixturePath("sink.test.voyd"));
+    const wasm = assertRunnableWasm(module);
+    const instance = getWasmInstance(wasm);
+    const exports = instance.exports as Record<string, unknown>;
+    expect((exports.main as () => number)()).toBe(42);
+  });
 
-    it("compiles MsgPack recursive unions used by vx.voyd", async () => {
-      const module = await compileToBinaryenModule(fixturePath("vx.voyd"));
-      const wasm = assertRunnableWasm(module);
-      expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
+  it("compiles MsgPack recursive unions used by vx.voyd", async () => {
+    const module = await compileToBinaryenModule(fixturePath("vx.voyd"));
+    const wasm = assertRunnableWasm(module);
+    expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
 
-      const host = await createVoydHost({ wasm });
-      const result = await host.runPure("main");
+    const host = await createVoydHost({ wasm });
+    const result = await host.runPure("main");
 
-      const normalized = normalize(result) as Record<string, unknown>;
-      expect(normalized).toEqual(expect.objectContaining({ name: "div" }));
-      expect(normalized.attributes).toBeTypeOf("object");
-      expect(normalized.children).toBeInstanceOf(Array);
-    });
+    const normalized = normalize(result) as Record<string, unknown>;
+    expect(normalized).toEqual(expect.objectContaining({ name: "div" }));
+    expect(normalized.attributes).toBeTypeOf("object");
+    expect(normalized.children).toBeInstanceOf(Array);
+  });
 
-    it("supports generic enum macro expansion across modules", async () => {
-      const module = await compileToBinaryenModule(
-        fixturePath("enum-cross-module/main.voyd"),
-      );
-      const wasm = assertRunnableWasm(module);
-      const instance = getWasmInstance(wasm);
-      const exports = instance.exports as Record<string, unknown>;
-      expect((exports.main as () => number)()).toBe(20);
-    });
+  it("supports generic enum macro expansion across modules", async () => {
+    const module = await compileToBinaryenModule(
+      fixturePath("enum-cross-module/main.voyd"),
+    );
+    const wasm = assertRunnableWasm(module);
+    const instance = getWasmInstance(wasm);
+    const exports = instance.exports as Record<string, unknown>;
+    expect((exports.main as () => number)()).toBe(20);
+  });
 
-    it("supports generic enum inference regardless of variant order and generic unit variants", async () => {
-      const module = await compileToBinaryenModule(
-        fixturePath("enum-generic-variant-shapes.voyd"),
-      );
-      const wasm = assertRunnableWasm(module);
-      const instance = getWasmInstance(wasm);
-      const exports = instance.exports as Record<string, unknown>;
-      expect((exports.main as () => number)()).toBe(11);
-    });
+  it("supports generic enum inference regardless of variant order and generic unit variants", async () => {
+    const module = await compileToBinaryenModule(
+      fixturePath("enum-generic-variant-shapes.voyd"),
+    );
+    const wasm = assertRunnableWasm(module);
+    const instance = getWasmInstance(wasm);
+    const exports = instance.exports as Record<string, unknown>;
+    expect((exports.main as () => number)()).toBe(11);
+  });
 
-    it("supports constructor calls through object type aliases", async () => {
-      const module = await compileToBinaryenModule(
-        fixturePath("type-alias-object-constructor.voyd"),
-      );
-      const wasm = assertRunnableWasm(module);
-      const instance = getWasmInstance(wasm);
-      const exports = instance.exports as Record<string, unknown>;
-      expect((exports.main as () => number)()).toBe(6);
-    });
+  it("supports constructor calls through object type aliases", async () => {
+    const module = await compileToBinaryenModule(
+      fixturePath("type-alias-object-constructor.voyd"),
+    );
+    const wasm = assertRunnableWasm(module);
+    const instance = getWasmInstance(wasm);
+    const exports = instance.exports as Record<string, unknown>;
+    expect((exports.main as () => number)()).toBe(6);
+  });
 
-  }
-);
+  it("compiles std transcendental math without host math imports", async () => {
+    const module = await compileToBinaryenModule(
+      fixturePath("std-math-transcendentals.voyd"),
+    );
+    const wasm = assertRunnableWasm(module);
+    const compiled = new WebAssembly.Module(wasm as BufferSource);
+    const imports = WebAssembly.Module.imports(compiled).map(
+      ({ module, name }) => `${module}::${name}`,
+    );
+    expect(imports.some((name) => name.startsWith("voyd_math::"))).toBe(false);
+
+    const instance = new WebAssembly.Instance(compiled, { env: {} });
+    const exports = instance.exports as Record<string, unknown>;
+    expect((exports.main as () => number)()).toBe(1);
+  });
+});
