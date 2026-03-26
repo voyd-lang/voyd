@@ -32,6 +32,10 @@ export type ProgramOptimizationFacts = {
 export type ProgramOptimizationIR = {
   baseProgram: ProgramCodegenView;
   entryModuleId: string;
+  options: {
+    testMode: boolean;
+    testScope: "all" | "entry";
+  };
   modules: ReadonlyMap<string, OptimizedModuleView>;
   calls: ReadonlyMap<string, ReadonlyMap<HirExprId, OptimizedCallInfo>>;
   functionInstantiations: ReadonlyMap<

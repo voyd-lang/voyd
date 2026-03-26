@@ -35,6 +35,10 @@ import type {
 type MutableOptimizationIr = {
   baseProgram: ProgramCodegenView;
   entryModuleId: string;
+  options: {
+    testMode: boolean;
+    testScope: "all" | "entry";
+  };
   modules: Map<string, OptimizedModuleView>;
   calls: Map<string, Map<HirExprId, OptimizedCallInfo>>;
   functionInstantiations: Map<
@@ -55,7 +59,8 @@ type MutableOptimizationIr = {
 };
 
 type ConstantValue =
-  | { literalKind: "i32" | "i64" | "f32" | "f64"; value: number }
+  | { literalKind: "i32" | "f32" | "f64"; value: number }
+  | { literalKind: "i64"; value: bigint }
   | { literalKind: "boolean"; value: boolean }
   | { literalKind: "string"; value: string }
   | { literalKind: "void"; value: "" };
@@ -185,10 +190,12 @@ const buildOptimizationIr = ({
   program,
   modules,
   entryModuleId,
+  options,
 }: {
   program: ProgramCodegenView;
   modules: readonly SemanticsPipelineResult[];
   entryModuleId: string;
+  options?: CodegenOptions;
 }): MutableOptimizationIr => {
   const semanticsByModuleId = new Map(modules.map((module) => [module.moduleId, module] as const));
   const optimizedModules = new Map<string, OptimizedModuleView>();
@@ -209,6 +216,10 @@ const buildOptimizationIr = ({
   return {
     baseProgram: program,
     entryModuleId,
+    options: {
+      testMode: options?.testMode ?? false,
+      testScope: options?.testScope ?? "all",
+    },
     modules: optimizedModules,
     calls: normalizeCalls({ program }),
     functionInstantiations: normalizeFunctionInstantiations({ program }),
@@ -343,9 +354,70 @@ const constantNumberOp = (
   }
 };
 
+const wrapI64 = (value: bigint): bigint => BigInt.asIntN(64, value);
+
+const normalizeI64ShiftCount = (value: bigint): bigint =>
+  BigInt.asUintN(64, value) & 63n;
+
+const constantI64Op = (
+  left: bigint,
+  right: bigint,
+  op: string,
+): bigint | undefined => {
+  switch (op) {
+    case "+":
+      return wrapI64(left + right);
+    case "-":
+      return wrapI64(left - right);
+    case "*":
+      return wrapI64(left * right);
+    case "/":
+      return right === 0n ? undefined : wrapI64(left / right);
+    case "%":
+      return right === 0n ? undefined : wrapI64(left % right);
+    case "__shift_l":
+      return wrapI64(left << normalizeI64ShiftCount(right));
+    case "__shift_ru":
+      return wrapI64(
+        BigInt.asUintN(64, left) >> normalizeI64ShiftCount(right),
+      );
+    case "__bit_and":
+      return wrapI64(left & right);
+    case "__bit_or":
+      return wrapI64(left | right);
+    case "__bit_xor":
+      return wrapI64(left ^ right);
+    default:
+      return undefined;
+  }
+};
+
 const constantCompareOp = (
   left: number,
   right: number,
+  op: string,
+): boolean | undefined => {
+  switch (op) {
+    case "<":
+      return left < right;
+    case "<=":
+      return left <= right;
+    case ">":
+      return left > right;
+    case ">=":
+      return left >= right;
+    case "==":
+      return left === right;
+    case "!=":
+      return left !== right;
+    default:
+      return undefined;
+  }
+};
+
+const constantI64CompareOp = (
+  left: bigint,
+  right: bigint,
   op: string,
 ): boolean | undefined => {
   switch (op) {
@@ -393,7 +465,6 @@ const parseConstantLiteral = (expr: HirExpression): ConstantValue | undefined =>
   }
   switch (expr.literalKind) {
     case "i32":
-    case "i64":
     case "f32":
     case "f64": {
       const parsed = Number(expr.value);
@@ -401,6 +472,12 @@ const parseConstantLiteral = (expr: HirExpression): ConstantValue | undefined =>
         ? { literalKind: expr.literalKind, value: parsed }
         : undefined;
     }
+    case "i64":
+      try {
+        return { literalKind: "i64", value: BigInt(expr.value) };
+      } catch {
+        return undefined;
+      }
     case "boolean":
       return { literalKind: "boolean", value: expr.value === "true" };
     case "string":
@@ -485,21 +562,35 @@ const evaluateIntrinsic = ({
     if (
       left &&
       right &&
-      left.literalKind === right.literalKind &&
-      ["i32", "i64", "f32", "f64"].includes(left.literalKind)
+      left.literalKind === right.literalKind
     ) {
-      const leftNumber = left.value as number;
-      const rightNumber = right.value as number;
-      const compare = constantCompareOp(leftNumber, rightNumber, name);
-      if (typeof compare === "boolean") {
-        return { literalKind: "boolean", value: compare };
+      if (left.literalKind === "i64" && right.literalKind === "i64") {
+        const compare = constantI64CompareOp(left.value, right.value, name);
+        if (typeof compare === "boolean") {
+          return { literalKind: "boolean", value: compare };
+        }
+        const computed = constantI64Op(left.value, right.value, name);
+        if (typeof computed === "bigint") {
+          return { literalKind: "i64", value: computed };
+        }
       }
-      const computed = constantNumberOp(leftNumber, rightNumber, name);
-      if (typeof computed === "number") {
-        return {
-          literalKind: left.literalKind as "i32" | "i64" | "f32" | "f64",
-          value: computed,
-        };
+
+      if (
+        (left.literalKind === "i32" && right.literalKind === "i32") ||
+        (left.literalKind === "f32" && right.literalKind === "f32") ||
+        (left.literalKind === "f64" && right.literalKind === "f64")
+      ) {
+        const compare = constantCompareOp(left.value, right.value, name);
+        if (typeof compare === "boolean") {
+          return { literalKind: "boolean", value: compare };
+        }
+        const computed = constantNumberOp(left.value, right.value, name);
+        if (typeof computed === "number") {
+          return {
+            literalKind: left.literalKind,
+            value: computed,
+          };
+        }
       }
     }
 
@@ -1434,33 +1525,43 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       });
     };
 
+    const rootModules =
+      ctx.ir.options.testMode && ctx.ir.options.testScope === "all"
+        ? Array.from(ctx.ir.modules.values())
+        : [ctx.ir.modules.get(ctx.ir.entryModuleId)].filter(
+            (module): module is OptimizedModuleView => Boolean(module),
+          );
     const entryModule = ctx.ir.modules.get(ctx.ir.entryModuleId);
-    if (entryModule) {
-      entryModule.hir.module.exports.forEach((entry) => {
+    rootModules.forEach((rootModule) => {
+      rootModule.hir.module.exports.forEach((entry) => {
         recordResolvedSymbolReachability({
-          moduleId: entryModule.moduleId,
+          moduleId: rootModule.moduleId,
           symbol: entry.symbol,
         });
       });
+    });
 
-      if (queuedInstances.length === 0 && queuedModuleLets.length === 0) {
-        entryModule.hir.items.forEach((item) => {
-          if (item.kind === "function") {
-            enqueueKnownFunctionInstances({
-              moduleId: entryModule.moduleId,
-              symbol: item.symbol,
-            });
-            return;
-          }
-          if (item.kind !== "module-let") {
-            return;
-          }
-          enqueueModuleLet({
+    if (
+      entryModule &&
+      queuedInstances.length === 0 &&
+      queuedModuleLets.length === 0
+    ) {
+      entryModule.hir.items.forEach((item) => {
+        if (item.kind === "function") {
+          enqueueKnownFunctionInstances({
             moduleId: entryModule.moduleId,
             symbol: item.symbol,
           });
+          return;
+        }
+        if (item.kind !== "module-let") {
+          return;
+        }
+        enqueueModuleLet({
+          moduleId: entryModule.moduleId,
+          symbol: item.symbol,
         });
-      }
+      });
     }
 
     while (queuedInstances.length > 0 || queuedModuleLets.length > 0) {
@@ -1703,7 +1804,7 @@ export const optimizeProgram = ({
   entryModuleId: string;
   options?: CodegenOptions;
 }): ProgramOptimizationResult => {
-  const ir = buildOptimizationIr({ program, modules, entryModuleId });
+  const ir = buildOptimizationIr({ program, modules, entryModuleId, options });
   const context = new OptimizationContextImpl(ir);
   void entryModuleId;
   void options;

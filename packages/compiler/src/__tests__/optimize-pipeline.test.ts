@@ -9,6 +9,7 @@ import { optimizeProgram } from "../optimize/pipeline.js";
 import { walkExpression } from "../semantics/hir/index.js";
 import type { ModuleHost } from "../modules/types.js";
 import { codegenProgram } from "../codegen/index.js";
+import type { CodegenOptions } from "../codegen/context.js";
 import type {
   HirLambdaExpr,
   HirMethodCallExpr,
@@ -21,9 +22,13 @@ const createMemoryHost = (files: Record<string, string>): ModuleHost =>
 const buildOptimized = async ({
   files,
   entryFile = "main.voyd",
+  includeTests = false,
+  optimizeOptions,
 }: {
   files: Record<string, string>;
   entryFile?: string;
+  includeTests?: boolean;
+  optimizeOptions?: CodegenOptions;
 }) => {
   const root = resolve("/proj/src");
   const host = createMemoryHost(
@@ -39,8 +44,13 @@ const buildOptimized = async ({
     entryPath,
     roots: { src: root },
     host,
+    includeTests,
   });
-  const { semantics, diagnostics } = analyzeModules({ graph });
+  const { semantics, diagnostics, tests } = analyzeModules({
+    graph,
+    includeTests,
+    testScope: optimizeOptions?.testScope,
+  });
   const firstError = [...graph.diagnostics, ...diagnostics].find(
     (diagnostic) => diagnostic.severity === "error",
   );
@@ -60,11 +70,13 @@ const buildOptimized = async ({
     program,
     modules,
     entryModuleId: entry,
+    options: optimizeOptions,
   });
 
   return {
     entryModuleId: entry,
     optimized,
+    tests,
   };
 };
 
@@ -313,6 +325,98 @@ pub fn get_value() -> i32
     const reachableModuleLets = optimized.facts.reachableModuleLets.get(utilModuleId);
     expect(reachableModuleLets?.has(kept.symbol)).toBe(true);
     expect(reachableModuleLets?.has(discarded.symbol)).toBe(false);
+  });
+
+  it("folds i64 constants without losing 64-bit precision", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+pub fn main() -> i64
+  9007199254740993i64 + 2i64
+`,
+      },
+    });
+
+    const mainFn = findFunction({
+      moduleId: "src::main",
+      name: "main",
+      program: optimized.program,
+    });
+    expect(mainFn?.kind).toBe("function");
+    if (!mainFn || mainFn.kind !== "function") return;
+
+    const moduleView = optimized.program.modules.get("src::main");
+    const body = moduleView?.hir.expressions.get(mainFn.body);
+    const folded =
+      body?.exprKind === "block" && typeof body.value === "number"
+        ? moduleView?.hir.expressions.get(body.value)
+        : body;
+    expect(folded).toMatchObject({
+      exprKind: "literal",
+      literalKind: "i64",
+      value: "9007199254740995",
+    });
+  });
+
+  it("keeps non-entry test exports reachable in optimized all-module test builds", async () => {
+    const { optimized, entryModuleId, tests } = await buildOptimized({
+      files: {
+        "main.voyd": `
+use src::util::anchor
+
+pub fn main() -> i32
+  anchor()
+`,
+        "util.voyd": `
+pub fn anchor() -> i32
+  1
+
+test "reachable from export root":
+  anchor()
+`,
+      },
+      includeTests: true,
+      optimizeOptions: {
+        testMode: true,
+        testScope: "all",
+      },
+    });
+
+    const utilTest = tests.find((test) => test.moduleId === "src::util");
+    expect(utilTest?.exportName).toBeDefined();
+    if (!utilTest?.exportName) return;
+
+    const utilModuleId = "src::util";
+    const testFn = Array.from(optimized.program.modules.get(utilModuleId)?.hir.items.values() ?? [])
+      .find(
+        (item) =>
+          item.kind === "function" &&
+          optimized.program.symbols
+            .getName(optimized.program.symbols.idOf({ moduleId: utilModuleId, symbol: item.symbol }))
+            ?.startsWith("__test__"),
+      );
+    expect(testFn?.kind).toBe("function");
+    if (!testFn || testFn.kind !== "function") return;
+
+    const instanceId = optimized.program.functions.getInstanceId(utilModuleId, testFn.symbol, []);
+    expect(typeof instanceId).toBe("number");
+    if (typeof instanceId !== "number") return;
+    expect(optimized.facts.reachableFunctionInstances.has(instanceId)).toBe(true);
+
+    const codegen = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+        testMode: true,
+        testScope: "all",
+      },
+    });
+    expect(codegen.diagnostics).toHaveLength(0);
+    expect(codegen.module.emitText()).toContain(`(export "${utilTest.exportName}"`);
   });
 
   it("inlines small pure direct calls during optimized codegen", async () => {
