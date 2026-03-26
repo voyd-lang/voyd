@@ -521,6 +521,55 @@ pub fn main() -> i64
     }
   });
 
+  it("keeps discriminant evaluation when simplifying matches with known constructors", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+eff Log
+  info(resume) -> void
+
+obj Box {
+  value: i32
+}
+
+fn make_box(): Log -> Box
+  Log::info()
+  Box { value: 1 }
+
+pub fn main(): Log -> i32
+  match(make_box())
+    Box: 7
+    else: 8
+`,
+      },
+    });
+
+    const mainFn = findFunction({
+      moduleId: "src::main",
+      name: "main",
+      program: optimized.program,
+    });
+    expect(mainFn?.kind).toBe("function");
+    if (!mainFn || mainFn.kind !== "function") return;
+
+    const moduleView = optimized.program.modules.get("src::main");
+    const body = getFunctionBodyValueExpr({
+      moduleId: "src::main",
+      symbol: mainFn.symbol,
+      program: optimized.program,
+    });
+    expect(body?.exprKind).toBe("block");
+    if (!body || body.exprKind !== "block") return;
+    expect(body.statements).toHaveLength(1);
+
+    const stmt = moduleView?.hir.statements.get(body.statements[0]!);
+    expect(stmt?.kind).toBe("expr-stmt");
+    if (!stmt || stmt.kind !== "expr-stmt") return;
+
+    const discriminant = moduleView?.hir.expressions.get(stmt.expr);
+    expect(discriminant?.exprKind).toBe("call");
+  });
+
   it("keeps non-entry test exports reachable in optimized all-module test builds", async () => {
     const { optimized, entryModuleId, tests } = await buildOptimized({
       files: {

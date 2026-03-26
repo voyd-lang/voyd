@@ -74,6 +74,12 @@ const mutableExpressions = ({
 }): Map<HirExprId, HirExpression> =>
   moduleView.hir.expressions as Map<HirExprId, HirExpression>;
 
+const mutableStatements = ({
+  moduleView,
+}: {
+  moduleView: OptimizedModuleView;
+}) => moduleView.hir.statements as Map<number, (typeof moduleView.hir.statements extends ReadonlyMap<number, infer T> ? T : never)>;
+
 const mutableHandlerClauseCaptures = ({
   ir,
 }: {
@@ -136,6 +142,49 @@ const toValueBlockExpr = ({
   statements: [],
   value,
 });
+
+const nextHirId = ({
+  moduleView,
+}: {
+  moduleView: OptimizedModuleView;
+}): number =>
+  Math.max(
+    moduleView.hir.module.id,
+    ...moduleView.hir.items.keys(),
+    ...moduleView.hir.statements.keys(),
+    ...moduleView.hir.expressions.keys(),
+  ) + 1;
+
+const toEvaluatedValueBlockExpr = ({
+  original,
+  moduleView,
+  exprId,
+  value,
+}: {
+  original: HirExpression;
+  moduleView: OptimizedModuleView;
+  exprId: HirExprId;
+  value: HirExprId;
+}): HirExpression => {
+  const statementId = nextHirId({ moduleView });
+  mutableStatements({ moduleView }).set(statementId, {
+    id: statementId,
+    kind: "expr-stmt",
+    ast: original.ast,
+    span: original.span,
+    expr: exprId,
+  });
+  return {
+    kind: "expr",
+    exprKind: "block",
+    id: original.id,
+    ast: original.ast,
+    span: original.span,
+    typeHint: original.typeHint,
+    statements: [statementId],
+    value,
+  };
+};
 
 const normalizeFunctionInstantiations = ({
   program,
@@ -1062,7 +1111,12 @@ const constructorKnownSimplificationPass: ProgramOptimizationPass = {
 
           mutableExpressions({ moduleView }).set(
             exprId,
-            toValueBlockExpr({ original: expr, value: selectedArm.value }),
+            toEvaluatedValueBlockExpr({
+              original: expr,
+              moduleView,
+              exprId: expr.discriminant,
+              value: selectedArm.value,
+            }),
           );
           changed = true;
         });
