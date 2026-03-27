@@ -10,7 +10,7 @@ import type {
   TypeId,
 } from "../context.js";
 import { compilePatternInitialization } from "../patterns.js";
-import { coerceValueToType } from "../structural.js";
+import { coerceValueToType, storeValueIntoStorageRef } from "../structural.js";
 import {
   getRequiredExprType,
   wasmTypeFor,
@@ -150,6 +150,32 @@ export const compileStatement = (
           return valueExpr.expr;
         }
         const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
+        if (fnCtx.returnAbiKind === "out_ref" && fnCtx.returnOutPointer) {
+          const storedValue = coerceValueToType({
+            value: valueExpr.expr,
+            actualType: getRequiredExprType(stmt.value, ctx, typeInstanceId),
+            targetType: fnCtx.returnTypeId,
+            ctx,
+            fnCtx,
+          });
+          const cleanup = handlerCleanupOps({ ctx, fnCtx });
+          const storeReturn = storeValueIntoStorageRef({
+            pointer: () =>
+              ctx.mod.local.get(
+                fnCtx.returnOutPointer!.index,
+                fnCtx.returnOutPointer!.storageType,
+              ),
+            value: storedValue,
+            typeId: fnCtx.returnTypeId,
+            ctx,
+            fnCtx,
+          });
+          const ops =
+            cleanup.length === 0
+              ? [storeReturn, ...tailChecks, ctx.mod.return()]
+              : [...tailChecks, ...cleanup, storeReturn, ctx.mod.return()];
+          return ctx.mod.block(null, ops, binaryen.none);
+        }
         if (fnCtx.returnTypeId === ctx.program.primitives.void) {
           const cleanup = handlerCleanupOps({ ctx, fnCtx });
           const valueStmt = asStatement(ctx, valueExpr.expr, fnCtx);

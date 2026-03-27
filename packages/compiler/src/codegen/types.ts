@@ -32,6 +32,7 @@ import type {
   HirPattern,
   SymbolId,
   FixedArrayWasmType,
+  OptimizedValueAbiKind,
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
 import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
@@ -430,6 +431,86 @@ export const getDirectAbiTypesForSignature = (
   typeId: TypeId,
   ctx: CodegenContext,
 ): readonly binaryen.Type[] => flattenTypeToAbiTypes(typeId, ctx, new Set(), "signature");
+
+export const isWideValueType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): boolean =>
+  typeof getInlineHeapBoxType({ typeId, ctx }) === "number" &&
+  getDirectAbiTypesForSignature(typeId, ctx).length > MAX_MULTIVALUE_INLINE_LANES;
+
+export const getWideValueStorageType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.Type | undefined =>
+  isWideValueType({ typeId, ctx }) ? getInlineHeapBoxType({ typeId, ctx }) : undefined;
+
+export const getOptimizedParamAbiKind = ({
+  typeId,
+  bindingKind,
+  ctx,
+}: {
+  typeId: TypeId;
+  bindingKind?: string;
+  ctx: CodegenContext;
+}): OptimizedValueAbiKind => {
+  if (!isWideValueType({ typeId, ctx })) {
+    return "direct";
+  }
+  return bindingKind === "mutable-ref" ? "mutable_ref" : "readonly_ref";
+};
+
+export const getOptimizedResultAbiKind = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): OptimizedValueAbiKind =>
+  isWideValueType({ typeId, ctx }) ? "out_ref" : "direct";
+
+export const getOptimizedAbiTypesForParam = ({
+  typeId,
+  bindingKind,
+  ctx,
+}: {
+  typeId: TypeId;
+  bindingKind?: string;
+  ctx: CodegenContext;
+}): readonly binaryen.Type[] => {
+  const abiKind = getOptimizedParamAbiKind({ typeId, bindingKind, ctx });
+  if (abiKind === "direct") {
+    return getAbiTypesForSignature(typeId, ctx);
+  }
+  const storageType = getWideValueStorageType({ typeId, ctx });
+  if (typeof storageType !== "number") {
+    throw new Error(`missing wide storage type for parameter ${typeId}`);
+  }
+  return [storageType];
+};
+
+export const getOptimizedAbiTypeForResult = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.Type | undefined => {
+  if (getOptimizedResultAbiKind({ typeId, ctx }) !== "out_ref") {
+    return undefined;
+  }
+  const storageType = getWideValueStorageType({ typeId, ctx });
+  if (typeof storageType !== "number") {
+    throw new Error(`missing wide storage type for result ${typeId}`);
+  }
+  return storageType;
+};
 
 export const getSignatureSpillBoxType = ({
   typeId,
@@ -1737,7 +1818,7 @@ export const getStructuralTypeInfo = (
             field.inlineWasmTypes.map((type, fieldIndex) => ({
               name: `${field.name}_${fieldIndex}`,
               type,
-              mutable: false,
+              mutable: true,
             })),
           ),
           supertype: binaryenTypeToHeapType(ctx.rtt.rootType),
@@ -2253,6 +2334,7 @@ const synthesizeConcreteFunctionMeta = ({
       paramTypes: widened.paramTypes,
       paramAbiTypes,
       userParamOffset: widened.userParamOffset,
+      firstUserParamIndex: widened.userParamOffset,
       resultType: widened.resultType,
       resultAbiTypes,
       paramTypeIds: instantiatedTypeDesc.parameters.map((param) => param.type),
@@ -2269,7 +2351,9 @@ const synthesizeConcreteFunctionMeta = ({
               })
             : undefined,
       })),
+      paramAbiKinds: instantiatedTypeDesc.parameters.map(() => "direct"),
       resultTypeId: instantiatedTypeDesc.returnType,
+      resultAbiKind: "direct",
       typeArgs,
       instanceId,
       effectful,
@@ -2345,7 +2429,7 @@ const resolveTraitImplMethodMeta = ({
     }
     return (
       candidates.find((candidate) => {
-        const receiverTypeIndex = candidate.userParamOffset;
+        const receiverTypeIndex = candidate.firstUserParamIndex;
         return candidate.paramTypes[receiverTypeIndex] === runtimeType;
       }) ?? candidates[0]
     );
@@ -2507,15 +2591,7 @@ const createMethodLookupEntries = ({
           `codegen missing receiver parameter type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
       }
-      const hiddenParamOffset = meta.effectful
-        ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length)
-        : 0;
-      if (meta.effectful && meta.paramTypes.length < hiddenParamOffset + 1) {
-        throw new Error(
-          `codegen missing effectful receiver parameter type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
-        );
-      }
-      const receiverTypeIndex = hiddenParamOffset;
+      const receiverTypeIndex = meta.firstUserParamIndex;
       const receiverType = meta.paramTypes[receiverTypeIndex];
       if (typeof receiverType !== "number") {
         throw new Error(
@@ -2525,7 +2601,7 @@ const createMethodLookupEntries = ({
       const userParamTypes = meta.paramTypes.slice(receiverTypeIndex + 1);
       if (
         meta.effectful &&
-        userParamTypes.length + receiverTypeIndex + 1 !== meta.paramTypes.length
+        userParamTypes.length + meta.firstUserParamIndex + 1 !== meta.paramTypes.length
       ) {
         throw new Error(
           `codegen malformed effectful parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
@@ -2533,7 +2609,7 @@ const createMethodLookupEntries = ({
       }
       if (
         !meta.effectful &&
-        userParamTypes.length + 1 !== meta.paramTypes.length
+        userParamTypes.length + meta.firstUserParamIndex + 1 !== meta.paramTypes.length
       ) {
         throw new Error(
           `codegen malformed parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
@@ -2572,16 +2648,24 @@ const createMethodLookupEntries = ({
         );
       }
       const handlerParamType = ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
+      const outParamTypes =
+        meta.resultAbiKind === "out_ref" && typeof meta.outParamType === "number"
+          ? [meta.outParamType]
+          : [];
       const params = dispatchEffectful
-        ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
-        : [ctx.rtt.baseType, ...userParamTypes];
-      const receiverParamIndex = dispatchEffectful ? 1 : 0;
-      const firstUserParamIndex = dispatchEffectful ? 2 : 1;
+        ? [handlerParamType, ...outParamTypes, ctx.rtt.baseType, ...userParamTypes]
+        : [...outParamTypes, ctx.rtt.baseType, ...userParamTypes];
+      const receiverParamIndex =
+        (dispatchEffectful ? 1 : 0) + outParamTypes.length;
+      const firstUserParamIndex = receiverParamIndex + 1;
       const implCall = ctx.mod.call(
         meta.wasmName,
         [
           ...(meta.effectful
             ? [ctx.mod.local.get(0, handlerParamType)]
+            : []),
+          ...(outParamTypes.length > 0
+            ? [ctx.mod.local.get(dispatchEffectful ? 1 : 0, outParamTypes[0]!)]
             : []),
           refCast(
             ctx.mod,
@@ -2596,7 +2680,9 @@ const createMethodLookupEntries = ({
       );
       const wrapperResultType = dispatchEffectful
         ? ctx.effectsBackend.abi.effectfulResultType(ctx)
-        : meta.resultType;
+        : meta.resultAbiKind === "out_ref"
+          ? binaryen.none
+          : meta.resultType;
       const wrapperName = `${typeLabel}__method_${hashTraitSymbol}_${hashTraitMethod}_${implRef.symbol}`;
       const wrapper = ctx.mod.addFunction(
         wrapperName,

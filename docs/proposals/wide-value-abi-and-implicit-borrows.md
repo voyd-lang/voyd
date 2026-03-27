@@ -8,6 +8,9 @@ Scope: optimized internal ABI, container access lowering, codegen/runtime contra
 
 Make wide `value` types performant in hot code without adding new surface syntax.
 
+CTX: We are using /Users/drew/projects/voyd_examples/src/vtrace_fast.voyd as a benchmark
+for common hot wasm use cases.
+
 This proposal keeps the existing source-level `value` model and changes only the
 physical lowering strategy used by the compiler. The intended result is:
 
@@ -435,18 +438,18 @@ That gives the right semantic behavior without paying unconditional entry-copy c
 
 This matrix is normative for the first implementation.
 
-| Source operation | Wide non-`~` param | Required lowering |
-| --- | --- | --- |
-| Read field (`ray.origin`) | borrowable | readonly borrow |
-| Pass to non-`~` param | borrowable | readonly borrow |
-| Call non-`~self` method | borrowable | readonly borrow |
-| Bind to immutable local (`let x = ray`) | borrowable unless `x` later requires ownership | borrow initially, copy only if later demanded |
-| Bind to mutable local (`let ~x = ray`) | ownership-demanding | allocate local storage + copy once |
-| Pass to `~param` | ownership-demanding unless existing addressable owned storage is available | allocate/copy or reuse owned storage |
-| Call `~self` method on param | ownership-demanding unless existing addressable owned storage is available | allocate/copy or reuse owned storage |
-| Return as wide value | ownership-demanding in callee body, satisfied by caller out destination | write into out storage |
-| Capture in closure/effect env | ownership-demanding | allocate owned capture payload |
-| Store into object/container/global field | ownership-demanding | materialize owned stored value |
+| Source operation                         | Wide non-`~` param                                                         | Required lowering                             |
+| ---------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------- |
+| Read field (`ray.origin`)                | borrowable                                                                 | readonly borrow                               |
+| Pass to non-`~` param                    | borrowable                                                                 | readonly borrow                               |
+| Call non-`~self` method                  | borrowable                                                                 | readonly borrow                               |
+| Bind to immutable local (`let x = ray`)  | borrowable unless `x` later requires ownership                             | borrow initially, copy only if later demanded |
+| Bind to mutable local (`let ~x = ray`)   | ownership-demanding                                                        | allocate local storage + copy once            |
+| Pass to `~param`                         | ownership-demanding unless existing addressable owned storage is available | allocate/copy or reuse owned storage          |
+| Call `~self` method on param             | ownership-demanding unless existing addressable owned storage is available | allocate/copy or reuse owned storage          |
+| Return as wide value                     | ownership-demanding in callee body, satisfied by caller out destination    | write into out storage                        |
+| Capture in closure/effect env            | ownership-demanding                                                        | allocate owned capture payload                |
+| Store into object/container/global field | ownership-demanding                                                        | materialize owned stored value                |
 
 ## Lowering Algorithm
 

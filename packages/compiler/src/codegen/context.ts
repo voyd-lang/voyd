@@ -18,6 +18,7 @@ import type {
   HirLambdaExpr,
   HirCondExpr,
   HirEffectHandlerExpr,
+  HirBindingKind,
 } from "../semantics/hir/index.js";
 import type {
   HirExprId,
@@ -74,6 +75,7 @@ export interface FunctionMetadata {
   paramTypes: readonly binaryen.Type[];
   paramAbiTypes: readonly (readonly binaryen.Type[])[];
   userParamOffset: number;
+  firstUserParamIndex: number;
   resultType: binaryen.Type;
   resultAbiTypes: readonly binaryen.Type[];
   paramTypeIds: readonly TypeId[];
@@ -82,8 +84,12 @@ export interface FunctionMetadata {
     label?: string;
     optional?: boolean;
     name?: string;
+    bindingKind?: HirBindingKind;
   }[];
+  paramAbiKinds: readonly OptimizedValueAbiKind[];
   resultTypeId: TypeId;
+  resultAbiKind: OptimizedValueAbiKind;
+  outParamType?: binaryen.Type;
   typeArgs: readonly TypeId[];
   instanceId: ProgramFunctionInstanceId;
   effectful: boolean;
@@ -225,6 +231,12 @@ export interface LocalBindingBase {
   typeId?: TypeId;
 }
 
+export type OptimizedValueAbiKind =
+  | "direct"
+  | "readonly_ref"
+  | "mutable_ref"
+  | "out_ref";
+
 export interface LocalBindingLocal extends LocalBindingBase {
   kind: "local";
   index: number;
@@ -240,7 +252,16 @@ export interface LocalBindingCapture extends LocalBindingBase {
   mutable: boolean;
 }
 
-export type LocalBinding = LocalBindingLocal | LocalBindingCapture;
+export interface LocalBindingStorageRef extends LocalBindingBase {
+  kind: "storage-ref";
+  index: number;
+  mutable: boolean;
+}
+
+export type LocalBinding =
+  | LocalBindingLocal
+  | LocalBindingCapture
+  | LocalBindingStorageRef;
 
 export interface HandlerScope {
   prevHandler: LocalBindingLocal;
@@ -269,6 +290,8 @@ export interface FunctionContext {
   nextControlFlowLabelId?: number;
   returnTypeId: TypeId;
   returnWasmType?: binaryen.Type;
+  returnAbiKind?: OptimizedValueAbiKind;
+  returnOutPointer?: LocalBindingStorageRef;
   currentHandler?: { index: number; type: binaryen.Type };
   instanceId?: ProgramFunctionInstanceId;
   typeInstanceId?: ProgramFunctionInstanceId;

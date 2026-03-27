@@ -13,6 +13,7 @@ import {
   declareLocalWithTypeId,
   getRequiredBinding,
   loadLocalValue,
+  storeStorageRefBindingValue,
   storeLocalValue,
 } from "./locals.js";
 import {
@@ -85,6 +86,14 @@ const storeIntoBinding = ({
       fieldIndex: binding.fieldIndex,
       ref: typedEnv,
       value: coerced,
+    });
+  }
+  if (binding.kind === "storage-ref") {
+    return storeStorageRefBindingValue({
+      binding,
+      value: coerced,
+      ctx,
+      fnCtx,
     });
   }
   return storeLocalValue({ binding, value: coerced, ctx, fnCtx });

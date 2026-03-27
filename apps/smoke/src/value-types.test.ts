@@ -99,6 +99,27 @@ describe("smoke: value types", () => {
     expect(output).toBe(15);
   });
 
+  it("passes wide mutable params by addressable storage", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_five_lane_mutable_param",
+    });
+    expect(output).toBe(11);
+  });
+
+  it("preserves immutable aliases when a wide copy is later materialized for mutation", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_five_lane_alias_then_mutate_copy",
+    });
+    expect(output).toBe(10);
+  });
+
+  it("reads wide array fields through read-only access paths", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_field_access",
+    });
+    expect(output).toBe(12);
+  });
+
   it("marshals wide values across closure call boundaries", async () => {
     const output = await compiled.run<number>({
       entryName: "value_five_lane_closure_round_trip",

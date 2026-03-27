@@ -45,6 +45,9 @@ fn pair_sum<T: SumX<T>>(left: T, right: T) -> i32
 fn reflect_wide(value: WideVec5) -> WideVec5
   value
 
+fn bump_wide_a(~value: WideVec5)
+  value.a = value.a + 10
+
 pub value Left {
   value: i32
 }
@@ -162,6 +165,48 @@ pub fn value_five_lane_round_trip() -> i32
     e: 5
   })
   wide.a + wide.b + wide.c + wide.d + wide.e
+
+pub fn value_five_lane_mutable_param() -> i32
+  let ~wide = WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  }
+  bump_wide_a(wide)
+  wide.a
+
+pub fn value_five_lane_alias_then_mutate_copy() -> i32
+  let wide = WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  }
+  let alias = wide
+  let ~local = wide
+  local.a = 9
+  alias.a + local.a
+
+pub fn value_wide_array_field_access() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  items.at(0).b + items.at(1).e
 
 pub fn value_five_lane_closure_round_trip() -> i32
   let reflect = (value: WideVec5) -> WideVec5 =>

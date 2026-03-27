@@ -24,6 +24,8 @@ import {
   allocateTempLocal,
   getRequiredBinding,
   loadLocalValue,
+  materializeOwnedBinding,
+  storeStorageRefBindingValue,
   storeLocalValue,
 } from "../locals.js";
 import {
@@ -72,6 +74,15 @@ const storeIntoBinding = ({
       fieldIndex: binding.fieldIndex,
       ref: typedEnv,
       value: coerced,
+    });
+  }
+
+  if (binding.kind === "storage-ref") {
+    return storeStorageRefBindingValue({
+      binding,
+      value: coerced,
+      ctx,
+      fnCtx,
     });
   }
 
@@ -290,11 +301,23 @@ const compileFieldAssignment = ({
   }
 
   const binding = getRequiredBinding(rootExpr.symbol, ctx, fnCtx);
+  const materialized =
+    binding.kind === "storage-ref" && !binding.mutable
+      ? materializeOwnedBinding({
+          symbol: rootExpr.symbol,
+          ctx,
+          fnCtx,
+        })
+      : undefined;
+  if (materialized) {
+    ops.push(...materialized.setup);
+  }
+  const targetBinding = materialized?.binding ?? binding;
   ops.push(
     storeIntoBinding({
-      binding,
+      binding: targetBinding,
       value: replacementValue,
-      targetTypeId: binding.typeId ?? rootTypeId,
+      targetTypeId: targetBinding.typeId ?? rootTypeId,
       actualTypeId: replacementTypeId,
       ctx,
       fnCtx,
@@ -413,6 +436,18 @@ export const compileAssignExpr = (
                 ctx,
                 fnCtx,
               }),
+      }),
+      usedReturnCall: false,
+    };
+  }
+
+  if (binding.kind === "storage-ref") {
+    return {
+      expr: storeStorageRefBindingValue({
+        binding,
+        value: coerced,
+        ctx,
+        fnCtx,
       }),
       usedReturnCall: false,
     };

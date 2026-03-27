@@ -1,4 +1,9 @@
-import type { HirGraph, HirEffectHandlerClause, HirVisibility } from "../hir/index.js";
+import type {
+  HirBindingKind,
+  HirEffectHandlerClause,
+  HirGraph,
+  HirVisibility,
+} from "../hir/index.js";
 import type { EffectInterner } from "../effects/effect-table.js";
 import type { EffectTable } from "../effects/effect-table.js";
 import type {
@@ -143,6 +148,7 @@ export type CodegenFunctionSignature = {
     optional: boolean;
     name?: string;
     symbol?: SymbolId;
+    bindingKind?: HirBindingKind;
   }[];
   returnType: TypeId;
   effectRow: number;
@@ -1680,6 +1686,7 @@ export const buildProgramCodegenView = (
           optional: param.optional === true,
           name: param.name,
           symbol: param.symbol,
+          bindingKind: param.bindingKind,
         })),
         returnType: signature.returnType,
         effectRow: signature.effectRow,

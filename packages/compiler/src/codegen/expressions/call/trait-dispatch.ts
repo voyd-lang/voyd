@@ -20,6 +20,7 @@ import {
   resolveImportedFunctionSymbol,
 } from "../../trait-dispatch-abi.js";
 import {
+  getDirectAbiTypesForSignature,
   getExprBinaryenType,
   getFunctionRefType,
   getRequiredExprType,
@@ -38,9 +39,12 @@ import {
 import {
   currentHandlerValue,
   handlerType,
-  hiddenParamOffsetFor,
 } from "./shared.js";
 import { coerceValueToType } from "../../structural.js";
+import {
+  liftHeapValueToInline,
+  lowerValueForHeapField,
+} from "../../structural.js";
 import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
 import { typeContainsUnresolvedParam } from "../../../semantics/type-utils.js";
 import type { CodegenTraitImplInstance } from "../../../semantics/codegen-view/index.js";
@@ -82,6 +86,44 @@ const stabilizeMultivalueResult = ({
     null,
     [...captured.setup, tuple],
     binaryen.createType(abiTypes as number[]),
+  );
+};
+
+const defaultValueForWasmType = (
+  wasmType: binaryen.Type,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  if (wasmType === binaryen.i32) {
+    return ctx.mod.i32.const(0);
+  }
+  if (wasmType === binaryen.i64) {
+    return ctx.mod.i64.const(0, 0);
+  }
+  if (wasmType === binaryen.f32) {
+    return ctx.mod.f32.const(0);
+  }
+  if (wasmType === binaryen.f64) {
+    return ctx.mod.f64.const(0);
+  }
+  return ctx.mod.ref.null(wasmType);
+};
+
+const makeDefaultWideValue = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  const abiTypes = getDirectAbiTypesForSignature(typeId, ctx);
+  if (abiTypes.length === 0) {
+    return ctx.mod.nop();
+  }
+  if (abiTypes.length === 1) {
+    return defaultValueForWasmType(abiTypes[0]!, ctx);
+  }
+  return ctx.mod.tuple.make(
+    abiTypes.map((abiType) => defaultValueForWasmType(abiType, ctx)) as binaryen.ExpressionRef[],
   );
 };
 
@@ -263,13 +305,13 @@ const compileDirectTraitDispatchSwitch = ({
     return undefined;
   }
 
-  const baselineUserParamTypes = meta.paramTypes.slice(hiddenParamOffsetFor(meta) + 1);
+  const baselineUserParamTypes = meta.paramTypes.slice(meta.firstUserParamIndex + 1);
   if (baselineUserParamTypes.length !== 0) {
     return undefined;
   }
   const consistentUserParams = candidates.every((candidate) => {
     const candidateUserParamTypes = candidate.meta.paramTypes.slice(
-      hiddenParamOffsetFor(candidate.meta) + 1,
+      candidate.meta.firstUserParamIndex + 1,
     );
     return (
       candidateUserParamTypes.length === baselineUserParamTypes.length &&
@@ -522,7 +564,7 @@ const compileIndirectTraitDispatchCall = ({
   const loadReceiver = (): binaryen.ExpressionRef =>
     ctx.mod.local.get(resolvedReceiverTemp.index, resolvedReceiverTemp.type);
 
-  const receiverIndex = hiddenParamOffsetFor(meta);
+  const receiverIndex = meta.firstUserParamIndex;
   const userParamTypes = meta.paramTypes.slice(receiverIndex + 1);
   const dispatchEffectful =
     meta.effectful ||
@@ -531,14 +573,20 @@ const compileIndirectTraitDispatchCall = ({
       traitMethodSymbol: mapping.traitMethodSymbol,
       ctx,
     });
+  const outParamTypes =
+    meta.resultAbiKind === "out_ref" && typeof meta.outParamType === "number"
+      ? [meta.outParamType]
+      : [];
   const wrapperParamTypes = dispatchEffectful
-    ? [handlerType(ctx), ctx.rtt.baseType, ...userParamTypes]
-    : [ctx.rtt.baseType, ...userParamTypes];
+    ? [handlerType(ctx), ...outParamTypes, ctx.rtt.baseType, ...userParamTypes]
+    : [...outParamTypes, ctx.rtt.baseType, ...userParamTypes];
   const fnRefType = getFunctionRefType({
     params: wrapperParamTypes,
     result: dispatchEffectful
       ? ctx.effectsBackend.abi.effectfulResultType(ctx)
-      : meta.resultType,
+      : meta.resultAbiKind === "out_ref"
+        ? binaryen.none
+        : meta.resultType,
     ctx,
     label: "trait_method",
   });
@@ -604,18 +652,45 @@ const compileIndirectTraitDispatchCall = ({
     argSetups.push(...flattened.setup);
     return flattened.args;
   });
+  const wideResultStorage =
+    meta.resultAbiKind === "out_ref"
+      ? (() => {
+          if (typeof meta.outParamType !== "number") {
+            throw new Error("trait dispatch out_ref result is missing storage metadata");
+          }
+          return allocateTempLocal(meta.outParamType, fnCtx);
+        })()
+      : undefined;
+  const initializedWideResultStorage = wideResultStorage
+    ? ctx.mod.local.tee(
+        wideResultStorage.index,
+        lowerValueForHeapField({
+          value: makeDefaultWideValue({
+            typeId: meta.resultTypeId,
+            ctx,
+          }),
+          typeId: meta.resultTypeId,
+          targetType: wideResultStorage.type,
+          ctx,
+          fnCtx,
+        }),
+        wideResultStorage.type,
+      )
+    : undefined;
   const args = [loadReceiver(), ...flattenedUserArgs];
 
   const callArgs = dispatchEffectful
-    ? [currentHandlerValue(ctx, fnCtx), ...args]
-    : args;
+    ? [currentHandlerValue(ctx, fnCtx), ...(initializedWideResultStorage ? [initializedWideResultStorage] : []), ...args]
+    : [...(initializedWideResultStorage ? [initializedWideResultStorage] : []), ...args];
   const rawCall = callRef(
     ctx.mod,
     target,
     callArgs as number[],
     dispatchEffectful
       ? ctx.effectsBackend.abi.effectfulResultType(ctx)
-      : meta.resultType
+      : meta.resultAbiKind === "out_ref"
+        ? binaryen.none
+        : meta.resultType
   );
   const stabilizedCall = dispatchEffectful
     ? rawCall
@@ -657,6 +732,43 @@ const compileIndirectTraitDispatchCall = ({
         ctx,
         fnCtx,
       })
+    : meta.resultAbiKind === "out_ref" && wideResultStorage
+      ? (() => {
+          const reloaded = liftHeapValueToInline({
+            value: ctx.mod.local.get(
+              wideResultStorage.index,
+              wideResultStorage.type,
+            ),
+            typeId: meta.resultTypeId,
+            ctx,
+          });
+          const coerced =
+            meta.resultTypeId === expectedTypeId
+              ? reloaded
+              : coerceValueToType({
+                  value: reloaded,
+                  actualType: meta.resultTypeId,
+                  targetType: expectedTypeId,
+                  ctx,
+                  fnCtx,
+                });
+          const resultExpr = coerceExprToWasmType({
+            expr: coerced,
+            targetType: resultWasmType,
+            ctx,
+          });
+          return {
+            expr:
+              argSetups.length === 0
+                ? ctx.mod.block(null, [rawCall, resultExpr], resultWasmType)
+                : ctx.mod.block(
+                    null,
+                    [...argSetups, rawCall, resultExpr],
+                    resultWasmType,
+                  ),
+            usedReturnCall: false,
+          };
+        })()
     : {
         expr: coerceExprToWasmType({
           expr:

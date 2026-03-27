@@ -13,6 +13,7 @@ import type {
 import {
   allocateTempLocal,
   getRequiredBinding,
+  loadBindingStorageRef,
   loadBindingValue,
   loadLocalValue,
   storeLocalValue,
@@ -512,6 +513,12 @@ export const compileFieldAccessExpr = (
   if (!actualField) {
     throw new Error(`object does not contain field ${expr.field}`);
   }
+  const targetBinding =
+    targetExpr?.exprKind === "identifier"
+      ? getRequiredBinding(targetExpr.symbol, ctx, fnCtx)
+      : undefined;
+  const borrowedTargetPointer =
+    targetBinding ? loadBindingStorageRef(targetBinding, ctx) : undefined;
 
   const optionalInfo = shouldInlineUnionLayout(sourceTargetTypeId, ctx)
     ? getOptionalLayoutInfo(sourceTargetTypeId, ctx)
@@ -643,10 +650,33 @@ export const compileFieldAccessExpr = (
   }
 
   if (structInfo.layoutKind === "value-object") {
+    if (borrowedTargetPointer) {
+      const raw = loadStructuralField({
+        structInfo,
+        field: actualField,
+        pointer: () => borrowedTargetPointer,
+        ctx,
+      });
+      const coerced = coerceValueToType({
+        value: raw,
+        actualType: actualField.typeId,
+        targetType: expectedFieldTypeId,
+        ctx,
+        fnCtx,
+      });
+      return {
+        expr: coerceExprToWasmType({
+          expr: coerced,
+          targetType: expectedFieldWasmType,
+          ctx,
+        }),
+        usedReturnCall: false,
+      };
+    }
     const inlineTarget =
       targetExpr?.exprKind === "identifier"
         ? coerceValueToType({
-            value: loadBindingValue(getRequiredBinding(targetExpr.symbol, ctx, fnCtx), ctx),
+            value: loadBindingValue(targetBinding!, ctx),
             actualType: sourceTargetTypeId,
             targetType: targetTypeId,
             ctx,
@@ -729,35 +759,38 @@ export const compileFieldAccessExpr = (
     targetTypeId,
     ctx,
   );
-  const storePointer = storeLocalValue({
-    binding: pointerTemp,
-    value: targetExpr?.exprKind === "identifier"
-      ? coerceValueToType({
-          value: loadBindingValue(getRequiredBinding(targetExpr.symbol, ctx, fnCtx), ctx),
-          actualType: sourceTargetTypeId,
-          targetType: targetTypeId,
-          ctx,
-          fnCtx,
-        })
-      : coerceValueToType({
-          value: compileExpr({
-            exprId: expr.target,
-            ctx,
-            fnCtx,
-            expectedResultTypeId: targetTypeId,
-          }).expr,
-          actualType: sourceTargetTypeId,
-          targetType: targetTypeId,
-          ctx,
-          fnCtx,
-        }),
-    ctx,
-    fnCtx,
-  });
+  const directPointer = borrowedTargetPointer;
+  const storePointer = directPointer
+    ? undefined
+    : storeLocalValue({
+        binding: pointerTemp,
+        value: targetExpr?.exprKind === "identifier"
+          ? coerceValueToType({
+              value: loadBindingValue(targetBinding!, ctx),
+              actualType: sourceTargetTypeId,
+              targetType: targetTypeId,
+              ctx,
+              fnCtx,
+            })
+          : coerceValueToType({
+              value: compileExpr({
+                exprId: expr.target,
+                ctx,
+                fnCtx,
+                expectedResultTypeId: targetTypeId,
+              }).expr,
+              actualType: sourceTargetTypeId,
+              targetType: targetTypeId,
+              ctx,
+              fnCtx,
+            }),
+        ctx,
+        fnCtx,
+      });
   const raw = loadStructuralField({
     structInfo,
     field: actualField,
-    pointer: () => loadLocalValue(pointerTemp, ctx),
+    pointer: () => directPointer ?? loadLocalValue(pointerTemp, ctx),
     ctx,
   });
 
@@ -775,7 +808,10 @@ export const compileFieldAccessExpr = (
   });
 
   return {
-    expr: ctx.mod.block(null, [storePointer, value], expectedFieldWasmType),
+    expr:
+      storePointer
+        ? ctx.mod.block(null, [storePointer, value], expectedFieldWasmType)
+        : value,
     usedReturnCall: false,
   };
 };

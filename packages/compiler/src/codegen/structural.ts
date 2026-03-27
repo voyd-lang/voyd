@@ -11,6 +11,7 @@ import {
   refCast,
   refFunc,
   structGetFieldValue,
+  structSetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
 import { LOOKUP_FIELD_ACCESSOR, RTT_METADATA_SLOTS } from "./rtt/index.js";
 import type {
@@ -24,6 +25,7 @@ import { allocateTempLocal, loadLocalValue, storeLocalValue } from "./locals.js"
 import {
   abiTypeFor,
   getClosureTypeInfo,
+  getDirectAbiTypesForSignature,
   getInlineHeapBoxType,
   getInlineUnionLayout,
   getOptionalLayoutInfo,
@@ -143,14 +145,35 @@ const extractAbiLane = ({
 const emitInlineFieldValue = ({
   value,
   field,
+  storageBoxType,
   ctx,
 }: {
   value: binaryen.ExpressionRef;
   field: StructuralFieldInfo;
+  storageBoxType?: binaryen.Type;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   if (field.inlineWasmTypes.length === 0) {
     return ctx.mod.nop();
+  }
+  if (typeof storageBoxType === "number") {
+    if (field.inlineWasmTypes.length === 1) {
+      return structGetFieldValue({
+        mod: ctx.mod,
+        fieldIndex: field.runtimeIndex,
+        fieldType: field.heapWasmType,
+        exprRef: refCast(ctx.mod, value, storageBoxType),
+      });
+    }
+    const lanes = field.inlineWasmTypes.map((laneType, index) =>
+      structGetFieldValue({
+        mod: ctx.mod,
+        fieldIndex: field.runtimeIndex + index,
+        fieldType: laneType,
+        exprRef: refCast(ctx.mod, value, storageBoxType),
+      }),
+    );
+    return makeInlineValue({ values: lanes, ctx });
   }
   const valueAbiTypes = expandAbiTypes(binaryen.getExpressionType(value));
   if (field.inlineWasmTypes.length === 1) {
@@ -587,6 +610,55 @@ export const liftHeapValueToInline = ({
   });
 };
 
+export const storeValueIntoStorageRef = ({
+  pointer,
+  value,
+  typeId,
+  ctx,
+  fnCtx,
+}: {
+  pointer: () => binaryen.ExpressionRef;
+  value: binaryen.ExpressionRef;
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const storageType = getInlineHeapBoxType({ typeId, ctx });
+  if (!storageType) {
+    throw new Error(`cannot store non-inline value ${typeId} through a storage ref`);
+  }
+  const inlineValue =
+    binaryen.getExpressionType(value) === storageType
+      ? liftHeapValueToInline({ value, typeId, ctx })
+      : coerceExprToWasmType({
+          expr: value,
+          targetType: wasmTypeFor(typeId, ctx),
+          ctx,
+        });
+  const abiTypes = getDirectAbiTypesForSignature(typeId, ctx);
+  const captured = captureMultivalueLanes({
+    value: inlineValue,
+    abiTypes,
+    ctx,
+    fnCtx,
+  });
+  return ctx.mod.block(
+    null,
+    [
+      ...captured.setup,
+      ...abiTypes.map((_, index) =>
+        structSetFieldValue({
+          mod: ctx.mod,
+          fieldIndex: index,
+          ref: refCast(ctx.mod, pointer(), storageType),
+          value: captured.lanes[index]!,
+        }),
+      ),
+    ],
+    binaryen.none,
+  );
+};
+
 const normalizeValueToInlineAbi = ({
   value,
   typeId,
@@ -932,9 +1004,19 @@ const makeDirectStructuralFieldLoad = ({
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   if (structInfo.layoutKind === "value-object") {
+    const pointerValue = pointer();
+    const storageBoxType = getInlineHeapBoxType({
+      typeId: structInfo.typeId,
+      ctx,
+    });
     return emitInlineFieldValue({
-      value: pointer(),
+      value: pointerValue,
       field,
+      storageBoxType:
+        typeof storageBoxType === "number" &&
+        binaryen.getExpressionType(pointerValue) === storageBoxType
+          ? storageBoxType
+          : undefined,
       ctx,
     });
   }
