@@ -23,6 +23,7 @@ import {
   getExprBinaryenType,
   getFunctionRefType,
   getRequiredExprType,
+  getSignatureSpillBoxType,
   getStructuralTypeInfo,
   wasmTypeFor,
 } from "../../types.js";
@@ -45,8 +46,89 @@ import { typeContainsUnresolvedParam } from "../../../semantics/type-utils.js";
 import type { CodegenTraitImplInstance } from "../../../semantics/codegen-view/index.js";
 import type { ProgramSymbolId } from "../../../semantics/ids.js";
 import type { FunctionMetadata } from "../../context.js";
+import { captureMultivalueLanes } from "../../multivalue.js";
+import {
+  boxSignatureSpillValue,
+  unboxSignatureSpillValue,
+} from "../../signature-spill.js";
 
 const MAX_DIRECT_TRAIT_SWITCH_IMPLS = 4;
+
+const stabilizeMultivalueResult = ({
+  value,
+  abiTypes,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  abiTypes: readonly binaryen.Type[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  if (abiTypes.length <= 1) {
+    return value;
+  }
+  const captured = captureMultivalueLanes({
+    value,
+    abiTypes,
+    ctx,
+    fnCtx,
+  });
+  const tuple = ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]);
+  if (captured.setup.length === 0) {
+    return tuple;
+  }
+  return ctx.mod.block(
+    null,
+    [...captured.setup, tuple],
+    binaryen.createType(abiTypes as number[]),
+  );
+};
+
+const flattenTraitDispatchArgument = ({
+  value,
+  abiTypes,
+  typeId,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  abiTypes: readonly binaryen.Type[];
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): {
+  setup: readonly binaryen.ExpressionRef[];
+  args: readonly binaryen.ExpressionRef[];
+} => {
+  if (
+    abiTypes.length === 1 &&
+    getSignatureSpillBoxType({ typeId, ctx }) === abiTypes[0]
+  ) {
+    return {
+      setup: [],
+      args: [
+        boxSignatureSpillValue({
+          value,
+          typeId,
+          ctx,
+          fnCtx,
+        }),
+      ],
+    };
+  }
+
+  const captured = captureMultivalueLanes({
+    value,
+    abiTypes,
+    ctx,
+    fnCtx,
+  });
+  return {
+    setup: captured.setup,
+    args: captured.lanes,
+  };
+};
 
 type DirectTraitDispatchCandidate = {
   meta: FunctionMetadata;
@@ -510,12 +592,24 @@ const compileIndirectTraitDispatchCall = ({
           typedPlan: userTypedPlan,
         },
       });
-  const args = [loadReceiver(), ...compiledUserArgs];
+  const argSetups: binaryen.ExpressionRef[] = [];
+  const flattenedUserArgs = compiledUserArgs.flatMap((arg, index) => {
+    const flattened = flattenTraitDispatchArgument({
+      value: arg,
+      abiTypes: meta.paramAbiTypes[index + 1] ?? [binaryen.getExpressionType(arg)],
+      typeId: meta.paramTypeIds[index + 1]!,
+      ctx,
+      fnCtx,
+    });
+    argSetups.push(...flattened.setup);
+    return flattened.args;
+  });
+  const args = [loadReceiver(), ...flattenedUserArgs];
 
   const callArgs = dispatchEffectful
     ? [currentHandlerValue(ctx, fnCtx), ...args]
     : args;
-  const callExpr = callRef(
+  const rawCall = callRef(
     ctx.mod,
     target,
     callArgs as number[],
@@ -523,6 +617,31 @@ const compileIndirectTraitDispatchCall = ({
       ? ctx.effectsBackend.abi.effectfulResultType(ctx)
       : meta.resultType
   );
+  const stabilizedCall = dispatchEffectful
+    ? rawCall
+    : stabilizeMultivalueResult({
+        value: rawCall,
+        abiTypes: meta.resultAbiTypes,
+        ctx,
+        fnCtx,
+      });
+  const decodedCall =
+    !dispatchEffectful &&
+    getSignatureSpillBoxType({ typeId: meta.resultTypeId, ctx }) === meta.resultType
+      ? unboxSignatureSpillValue({
+          value: stabilizedCall,
+          typeId: meta.resultTypeId,
+          ctx,
+        })
+      : stabilizedCall;
+  const callExpr =
+    argSetups.length === 0
+      ? decodedCall
+      : ctx.mod.block(
+          null,
+          [...argSetups, decodedCall],
+          binaryen.getExpressionType(decodedCall),
+        );
 
   const returnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const expectedTypeId = expectedResultTypeId ?? returnTypeId;
