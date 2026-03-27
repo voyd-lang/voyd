@@ -13,7 +13,11 @@ import type {
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 import type { ContinuationEnvField, ContinuationSite } from "../effect-lowering.js";
 import { sanitizeIdentifier } from "../effect-lowering/layout.js";
-import { getRequiredExprType, wasmTypeFor } from "../../types.js";
+import {
+  getRequiredExprType,
+  wasmHeapFieldTypeFor,
+  wasmTypeFor,
+} from "../../types.js";
 import { buildInstanceSubstitution } from "../../type-substitution.js";
 import { walkHirExpression } from "../../hir-walk.js";
 import { resolveTempCaptureTypeId } from "../temp-capture-types.js";
@@ -152,6 +156,7 @@ const specializeEnvField = ({
       ...field,
       typeId: ctx.program.primitives.i32,
       wasmType: binaryen.i32,
+      storageType: binaryen.i32,
     };
   }
   if (field.sourceKind === "handler") {
@@ -159,6 +164,7 @@ const specializeEnvField = ({
       ...field,
       typeId: ctx.program.primitives.unknown,
       wasmType: ctx.effectsRuntime.handlerFrameType,
+      storageType: ctx.effectsRuntime.handlerFrameType,
     };
   }
   if (typeof field.tempId === "number" && field.tempId < 0) {
@@ -185,6 +191,7 @@ const specializeEnvField = ({
     ...field,
     typeId: specializedTypeId,
     wasmType: wasmTypeFor(specializedTypeId, ctx),
+    storageType: wasmHeapFieldTypeFor(specializedTypeId, ctx, new Set(), "runtime"),
   };
 };
 
@@ -227,7 +234,7 @@ export const specializeContinuationSite = ({
     )}_${site.siteId}__inst${typeInstanceId}`,
     fields: envFields.map((field) => ({
       name: field.name,
-      type: field.wasmType,
+      type: field.storageType,
       mutable: false,
     })),
     supertype: modBinaryenTypeToHeapType(ctx.mod, site.baseEnvType),

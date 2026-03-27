@@ -19,6 +19,7 @@ import {
   loadBindingValue,
 } from "../../locals.js";
 import { getExprBinaryenType, wasmTypeFor } from "../../types.js";
+import { lowerValueForHeapField } from "../../structural.js";
 import { currentHandlerValue } from "./shared.js";
 import {
   continuationFunctionName,
@@ -103,20 +104,33 @@ export const lowerEffectfulCallResult = ({
               return currentHandlerValue(ctx, fnCtx);
             case "param":
             case "local": {
-              if (typeof field.tempId === "number") {
-                const binding = fnCtx.tempLocals.get(field.tempId);
-                if (!binding) {
-                  throw new Error(
-                    `missing temp local binding for call env capture (call ${callId}, temp ${field.tempId})`
-                  );
-                }
-                return ctx.mod.local.get(binding.index, binding.type);
-              }
-              if (typeof field.symbol !== "number") {
-                throw new Error("missing symbol for env field");
-              }
-              const binding = getRequiredBinding(field.symbol, ctx, fnCtx);
-              return loadBindingValue(binding, ctx);
+              const inlineValue =
+                typeof field.tempId === "number"
+                  ? (() => {
+                      const binding = fnCtx.tempLocals.get(field.tempId);
+                      if (!binding) {
+                        throw new Error(
+                          `missing temp local binding for call env capture (call ${callId}, temp ${field.tempId})`
+                        );
+                      }
+                      return loadBindingValue(binding, ctx);
+                    })()
+                  : (() => {
+                      if (typeof field.symbol !== "number") {
+                        throw new Error("missing symbol for env field");
+                      }
+                      const binding = getRequiredBinding(field.symbol, ctx, fnCtx);
+                      return loadBindingValue(binding, ctx);
+                    })();
+              return field.storageType === field.wasmType
+                ? inlineValue
+                : lowerValueForHeapField({
+                    value: inlineValue,
+                    typeId: field.typeId,
+                    targetType: field.storageType,
+                    ctx,
+                    fnCtx,
+                  });
             }
           }
         });
@@ -137,12 +151,16 @@ export const lowerEffectfulCallResult = ({
           site: ctx.mod.i32.const(callSite.siteOrder),
         });
 
-        const request = refCast(
-          ctx.mod,
-          ctx.effectsRuntime.outcomePayload(loadOutcome()),
-          ctx.effectsRuntime.effectRequestType
-        );
-        const wrappedRequest = wrapRequestContinuationWithFrame({ ctx, request, frame: frameCont });
+        const wrappedRequest = wrapRequestContinuationWithFrame({
+          ctx,
+          request: () =>
+            refCast(
+              ctx.mod,
+              ctx.effectsRuntime.outcomePayload(loadOutcome()),
+              ctx.effectsRuntime.effectRequestType
+            ),
+          frame: frameCont,
+        });
         const wrappedOutcome = ctx.effectsRuntime.makeOutcomeEffect(wrappedRequest);
 
         const wrappedLocal = allocateTempLocal(ctx.effectsRuntime.outcomeType, fnCtx);

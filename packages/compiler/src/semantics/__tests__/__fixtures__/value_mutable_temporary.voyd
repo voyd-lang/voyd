@@ -1,0 +1,11 @@
+value Counter {
+  value: i32
+}
+
+impl Counter
+  fn bump(~self) -> Counter
+    self.value = self.value + 1
+    self
+
+fn main()
+  Counter { value: 1 }.bump()

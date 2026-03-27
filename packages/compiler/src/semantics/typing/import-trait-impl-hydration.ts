@@ -157,7 +157,10 @@ export const hydrateImportedTraitMetadataForNominal = ({
   ctx: TypingContext;
 }): boolean => {
   const nominalDesc = ctx.arena.get(nominal);
-  if (nominalDesc.kind !== "nominal-object") {
+  if (
+    nominalDesc.kind !== "nominal-object" &&
+    nominalDesc.kind !== "value-object"
+  ) {
     return false;
   }
   if (nominalDesc.owner.moduleId !== ctx.moduleId) {

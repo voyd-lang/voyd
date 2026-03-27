@@ -305,6 +305,7 @@ export const lowerObjectDecl = (
 
   const objectId = ctx.builder.addItem({
     kind: "object",
+    objectKind: object.objectKind,
     symbol: object.symbol,
     visibility: object.visibility,
     typeParameters: lowerTypeParameters({

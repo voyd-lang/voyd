@@ -500,7 +500,10 @@ const collectNominalPatternHints = (
       return;
     }
     const nominalDesc = ctx.arena.get(nominal);
-    if (nominalDesc.kind !== "nominal-object") {
+    if (
+      nominalDesc.kind !== "nominal-object" &&
+      nominalDesc.kind !== "value-object"
+    ) {
       return;
     }
     const ownerKey = symbolRefKeyForTyping(

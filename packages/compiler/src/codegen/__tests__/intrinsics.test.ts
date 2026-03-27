@@ -31,6 +31,7 @@ const cacheArrayType = (
   type: binaryen.Type
 ): void => {
   ctx.fixedArrayTypes.set(elementType, {
+    kind: "plain-array",
     type,
     heapType: modBinaryenTypeToHeapType(ctx.mod, type),
   });
@@ -231,7 +232,10 @@ describe("compileIntrinsicCall array intrinsics", () => {
   });
 
   it("emits array.len", () => {
-    const { ctx, fnCtx } = createContext();
+    const { ctx, descriptors, exprTypes, fnCtx } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
+    exprTypes.set(1 as HirExprId, arrayType);
     const expr = compileIntrinsicCall({
       name: "__array_len",
       call: makeCall([1 as HirExprId]),
@@ -244,7 +248,11 @@ describe("compileIntrinsicCall array intrinsics", () => {
   });
 
   it("emits array.copy", () => {
-    const { ctx, fnCtx } = createContext();
+    const { ctx, descriptors, exprTypes, fnCtx } = createContext();
+    descriptors.set(i32Type, { kind: "primitive", name: "i32" });
+    descriptors.set(arrayType, { kind: "fixed-array", element: i32Type });
+    exprTypes.set(1 as HirExprId, arrayType);
+    exprTypes.set(3 as HirExprId, arrayType);
     const expr = compileIntrinsicCall({
       name: "__array_copy",
       call: makeCall([

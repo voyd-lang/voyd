@@ -29,6 +29,7 @@ export interface ContinuationEnvField {
   symbol?: SymbolId;
   typeId: TypeId;
   wasmType: binaryen.Type;
+  storageType: binaryen.Type;
   sourceKind: ContinuationFieldSource;
   tempId?: number;
 }

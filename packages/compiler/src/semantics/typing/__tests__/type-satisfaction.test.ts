@@ -67,6 +67,7 @@ const registerNominal = ({
   const type = ctx.arena.internIntersection({ nominal, structural });
   ctx.objects.registerTemplate({
     symbol,
+    objectKind: "obj",
     params: [],
     nominal,
     structural,
@@ -76,6 +77,7 @@ const registerNominal = ({
   });
   ctx.objects.setName(name, symbol);
   ctx.objects.addInstance(`${symbol}<>`, {
+    objectKind: "obj",
     nominal,
     structural,
     type,

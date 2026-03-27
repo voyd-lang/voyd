@@ -72,11 +72,21 @@ const isTypeDeclForm = (form: Form): boolean => {
     const keyword = form.at(1);
     return (
       isIdentifierAtom(keyword) &&
-      (keyword.value === "obj" || keyword.value === "type" || keyword.value === "trait")
+      (
+        keyword.value === "obj" ||
+        keyword.value === "value" ||
+        keyword.value === "type" ||
+        keyword.value === "trait"
+      )
     );
   }
 
-  return head.value === "obj" || head.value === "type" || head.value === "trait";
+  return (
+    head.value === "obj" ||
+    head.value === "value" ||
+    head.value === "type" ||
+    head.value === "trait"
+  );
 };
 
 const isIntrinsicTypeAttributeForm = (expr: Expr): expr is Form =>

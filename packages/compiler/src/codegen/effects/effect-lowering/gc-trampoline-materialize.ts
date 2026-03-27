@@ -5,7 +5,7 @@ import {
 } from "@voyd/lib/binaryen-gc/index.js";
 import type { CodegenContext } from "../../context.js";
 import type { HirExprId } from "../../../semantics/ids.js";
-import { wasmTypeFor } from "../../types.js";
+import { wasmHeapFieldTypeFor, wasmTypeFor } from "../../types.js";
 import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
@@ -23,11 +23,13 @@ const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [
     name: "site",
     typeId: ctx.program.primitives.i32,
     wasmType: binaryen.i32,
+    storageType: binaryen.i32,
     sourceKind: "site",
   },
   {
     name: "handler",
     wasmType: ctx.effectsRuntime.handlerFrameType,
+    storageType: ctx.effectsRuntime.handlerFrameType,
     typeId: ctx.program.primitives.unknown,
     sourceKind: "handler",
   } as const,
@@ -45,6 +47,7 @@ const handlerClauseTemps = ({
     {
       name: "clause_cont",
       wasmType: ctx.effectsRuntime.continuationType,
+      storageType: ctx.effectsRuntime.continuationType,
       typeId: ctx.program.primitives.unknown,
       sourceKind: "local",
       tempId: handlerClauseContinuationTempId({
@@ -55,6 +58,7 @@ const handlerClauseTemps = ({
     {
       name: "clause_tail_guard",
       wasmType: ctx.effectsRuntime.tailGuardType,
+      storageType: ctx.effectsRuntime.tailGuardType,
       typeId: ctx.program.primitives.unknown,
       sourceKind: "local",
       tempId: handlerClauseTailGuardTempId({
@@ -81,6 +85,7 @@ const captureFields = ({
       return {
         name: `tmp_${tempId}`,
         wasmType: wasmTypeFor(field.typeId, ctx),
+        storageType: wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
         typeId: field.typeId,
         sourceKind: "local",
         tempId,
@@ -97,6 +102,7 @@ const captureFields = ({
       symbol,
       typeId: field.typeId,
       wasmType: wasmTypeFor(field.typeId, ctx),
+      storageType: wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
       sourceKind: field.sourceKind,
     };
   });
@@ -125,7 +131,7 @@ export const materializeGcTrampolineEffectLowering = ({
       )}_${eirSite.siteId}`,
       fields: envFields.map((field) => ({
         name: field.name,
-        type: field.wasmType,
+        type: field.storageType,
         mutable: false,
       })),
       supertype: baseHeapType,

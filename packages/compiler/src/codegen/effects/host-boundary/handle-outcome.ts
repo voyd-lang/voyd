@@ -34,6 +34,7 @@ export const createHandleOutcomeDynamic = ({
     const params = binaryen.createType([runtime.outcomeType, binaryen.i32, binaryen.i32]);
     const locals: binaryen.Type[] = [
       runtime.effectRequestType, // requestLocal
+      binaryen.i32, // opIndexLocal
       binaryen.i32, // payloadLenLocal
       binaryen.eqref, // payloadLocal
       msgpack.arrayWithCapacity.resultType, // arrayLocal
@@ -43,10 +44,11 @@ export const createHandleOutcomeDynamic = ({
     const bufPtrLocal = 1;
     const bufLenLocal = 2;
     const requestLocal = 3;
-    const payloadLenLocal = 4;
-    const payloadLocal = 5;
-    const arrayLocal = 6;
-    const mapLocal = 7;
+    const opIndexLocal = 4;
+    const payloadLenLocal = 5;
+    const payloadLocal = 6;
+    const arrayLocal = 7;
+    const mapLocal = 8;
 
     const boxTypeI32 = getOutcomeValueBoxType({ valueType: binaryen.i32, ctx });
     const boxTypeI64 = getOutcomeValueBoxType({ valueType: binaryen.i64, ctx });
@@ -207,18 +209,14 @@ export const createHandleOutcomeDynamic = ({
       ctx.mod.unreachable(),
     ];
 
-    const opIndexExpr = runtime.requestOpIndex(
-      ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-    );
-
     const branches = signatures.map((sig) => {
       const matches = ctx.mod.i32.eq(
-        opIndexExpr,
+        ctx.mod.local.get(opIndexLocal, binaryen.i32),
         ctx.mod.i32.const(sig.opIndex)
       );
       const msgpackMap = buildEffectRequestMsgPack({
         sig,
-        request: ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+        request: () => ctx.mod.local.get(requestLocal, runtime.effectRequestType),
         msgPackType,
         msgpack,
         arrayLocal,
@@ -248,6 +246,12 @@ export const createHandleOutcomeDynamic = ({
           ctx.mod,
           runtime.outcomePayload(ctx.mod.local.get(outcomeLocal, runtime.outcomeType)),
           runtime.effectRequestType
+        )
+      ),
+      ctx.mod.local.set(
+        opIndexLocal,
+        runtime.requestOpIndex(
+          ctx.mod.local.get(requestLocal, runtime.effectRequestType)
         )
       ),
       ...branches,

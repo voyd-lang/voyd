@@ -18,7 +18,7 @@ import {
   refCast,
   structGetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
-import { allocateTempLocal } from "../../locals.js";
+import { allocateTempLocal, storeLocalValue } from "../../locals.js";
 import { getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { walkHirExpression, walkHirPattern } from "../../hir-walk.js";
 import { buildGroupContinuationCfg } from "../continuation-cfg.js";
@@ -33,6 +33,7 @@ import {
 } from "../effect-lowering/handler-clause-temp-ids.js";
 import { effectsFacade } from "../facade.js";
 import { specializeContinuationSite } from "./specialize-site.js";
+import { liftHeapValueToInline } from "../../structural.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -416,15 +417,25 @@ export const ensureContinuationFunction = ({
       ? ctx.program.types.substitute(valueType, substitution)
       : valueType;
     const wasmType = wasmTypeFor(typeId, ctx);
-    const seeded = allocateTempLocal(wasmType, fnCtx, typeId);
+    const seeded = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
     fnCtx.bindings.set(symbol, { ...seeded, kind: "local", typeId });
   });
 
   const handlerLocal = allocateTempLocal(ctx.effectsRuntime.handlerFrameType, fnCtx);
   fnCtx.currentHandler = { index: handlerLocal.index, type: handlerLocal.type };
 
-  const startedLocal = allocateTempLocal(binaryen.i32, fnCtx, ctx.program.primitives.i32);
-  const activeSiteLocal = allocateTempLocal(binaryen.i32, fnCtx, ctx.program.primitives.i32);
+  const startedLocal = allocateTempLocal(
+    binaryen.i32,
+    fnCtx,
+    ctx.program.primitives.i32,
+    ctx,
+  );
+  const activeSiteLocal = allocateTempLocal(
+    binaryen.i32,
+    fnCtx,
+    ctx.program.primitives.i32,
+    ctx,
+  );
 
   const tempFields = new Map<number, { wasmType: binaryen.Type; typeId: TypeId }>();
   groupSites.forEach((groupSite) => {
@@ -435,7 +446,10 @@ export const ensureContinuationFunction = ({
     });
   });
   tempFields.forEach((spec, tempId) => {
-    fnCtx.tempLocals.set(tempId, allocateTempLocal(spec.wasmType, fnCtx, spec.typeId));
+    fnCtx.tempLocals.set(
+      tempId,
+      allocateTempLocal(spec.wasmType, fnCtx, spec.typeId, ctx),
+    );
   });
 
   const envParamIndex = 0;
@@ -504,6 +518,7 @@ export const ensureContinuationFunction = ({
     kind: "local",
     index: 1,
     type: resumeBoxType,
+    storageType: resumeBoxType,
     typeId: ctx.program.primitives.unknown,
   } as const;
 
@@ -539,12 +554,20 @@ export const ensureContinuationFunction = ({
     const initOps: binaryen.ExpressionRef[] = [];
     groupSite.envFields.forEach((field, fieldIndex) => {
       if (field.sourceKind === "site") return;
-      const value = structGetFieldValue({
+      const storedValue = structGetFieldValue({
         mod: ctx.mod,
         fieldIndex,
-        fieldType: field.wasmType,
+        fieldType: field.storageType,
         exprRef: envLocalGetter(),
       });
+      const value =
+        field.storageType === field.wasmType
+          ? storedValue
+          : liftHeapValueToInline({
+              value: storedValue,
+              typeId: field.typeId,
+              ctx,
+            });
       if (field.sourceKind === "handler") {
         initOps.push(ctx.mod.local.set(handlerLocal.index, value));
         return;
@@ -554,7 +577,7 @@ export const ensureContinuationFunction = ({
         if (!binding) {
           throw new Error("missing temp local binding for env restore");
         }
-        initOps.push(ctx.mod.local.set(binding.index, value));
+        initOps.push(storeLocalValue({ binding, value, ctx, fnCtx }));
         return;
       }
       if (typeof field.symbol !== "number") {
@@ -564,7 +587,7 @@ export const ensureContinuationFunction = ({
       if (!binding || binding.kind !== "local") {
         throw new Error("missing local binding for env restore");
       }
-      initOps.push(ctx.mod.local.set(binding.index, value));
+      initOps.push(storeLocalValue({ binding, value, ctx, fnCtx }));
     });
     const restoreBlock =
       initOps.length === 0 ? ctx.mod.nop() : ctx.mod.block(null, initOps, binaryen.none);

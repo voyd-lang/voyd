@@ -28,7 +28,7 @@ const nominalNameForTypeId = ({
   typeId: TypeId;
 }): string | undefined => {
   const descriptor = arena.get(typeId);
-  if (descriptor.kind === "nominal-object") {
+  if (descriptor.kind === "nominal-object" || descriptor.kind === "value-object") {
     return descriptor.name;
   }
   if (descriptor.kind === "intersection" && typeof descriptor.nominal === "number") {
@@ -67,7 +67,11 @@ const optionalInnerTypeForTypeId = ({
       memberDescriptor.kind === "intersection" && typeof memberDescriptor.nominal === "number"
         ? arena.get(memberDescriptor.nominal)
         : memberDescriptor;
-    if (someDescriptor.kind === "nominal-object" && someDescriptor.typeArgs.length > 0) {
+    if (
+      (someDescriptor.kind === "nominal-object" ||
+        someDescriptor.kind === "value-object") &&
+      someDescriptor.typeArgs.length > 0
+    ) {
       someInner = someDescriptor.typeArgs[0];
     }
   });
@@ -231,7 +235,8 @@ const formatTypeId = ({
         return descriptor.name;
       case "type-param-ref":
         return typeParamNames.get(descriptor.param) ?? `T${descriptor.param}`;
-      case "nominal-object": {
+      case "nominal-object":
+      case "value-object": {
         const name = resolveOwnerName({
           ownerModuleId: descriptor.owner.moduleId,
           ownerSymbol: descriptor.owner.symbol,

@@ -218,6 +218,15 @@ export const createTranslation = ({
         });
         break;
       }
+      case "value-object": {
+        const typeArgs = desc.typeArgs.map(translate);
+        result = targetArena.internValueObject({
+          owner: desc.owner,
+          name: desc.name,
+          typeArgs,
+        });
+        break;
+      }
       case "trait": {
         const typeArgs = desc.typeArgs.map(translate);
         result = targetArena.internTrait({

@@ -113,7 +113,9 @@ const stripSequence = (
   return { elements: result, changed };
 };
 
-const getTypeDeclKind = (form: Form): "obj" | "type" | "trait" | null => {
+const getTypeDeclKind = (
+  form: Form,
+): "obj" | "value" | "type" | "trait" | null => {
   const head = form.at(0);
   if (!isIdentifierAtom(head)) {
     return null;
@@ -126,6 +128,7 @@ const getTypeDeclKind = (form: Form): "obj" | "type" | "trait" | null => {
     }
     if (
       keyword.value === "obj" ||
+      keyword.value === "value" ||
       keyword.value === "type" ||
       keyword.value === "trait"
     ) {
@@ -134,7 +137,12 @@ const getTypeDeclKind = (form: Form): "obj" | "type" | "trait" | null => {
     return null;
   }
 
-  if (head.value === "obj" || head.value === "type" || head.value === "trait") {
+  if (
+    head.value === "obj" ||
+    head.value === "value" ||
+    head.value === "type" ||
+    head.value === "trait"
+  ) {
     return head.value;
   }
   return null;

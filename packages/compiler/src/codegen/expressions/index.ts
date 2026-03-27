@@ -41,7 +41,12 @@ export const compileExpression: ExpressionCompiler = ({
     case "literal":
       return compileLiteralExpr(expr, ctx);
     case "identifier":
-      return compileIdentifierExpr(expr, ctx, fnCtx);
+      return compileIdentifierExpr(
+        expr,
+        ctx,
+        fnCtx,
+        expectedResultTypeId,
+      );
     case "overload-set":
       throw new Error("overload sets cannot be evaluated directly");
     case "call":
@@ -92,7 +97,13 @@ export const compileExpression: ExpressionCompiler = ({
     case "assign":
       return compileAssignExpr(expr, ctx, fnCtx, compileExpression);
     case "object-literal":
-      return compileObjectLiteralExpr(expr, ctx, fnCtx, compileExpression);
+      return compileObjectLiteralExpr(
+        expr,
+        ctx,
+        fnCtx,
+        compileExpression,
+        expectedResultTypeId,
+      );
     case "field-access":
       return compileFieldAccessExpr(expr, ctx, fnCtx, compileExpression);
     case "tuple":

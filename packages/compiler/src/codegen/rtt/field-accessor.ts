@@ -16,6 +16,45 @@ import {
 import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
+const NON_REF_TYPES = new Set<number>([
+  bin.none,
+  bin.unreachable,
+  bin.i32,
+  bin.i64,
+  bin.f32,
+  bin.f64,
+]);
+
+const isRefType = (type: binaryen.Type): boolean =>
+  binaryen.expandType(type).length === 1 && !NON_REF_TYPES.has(type);
+
+const coerceAccessorExprType = ({
+  mod,
+  expr,
+  targetType,
+  baseType,
+}: {
+  mod: binaryen.Module;
+  expr: binaryen.ExpressionRef;
+  targetType: binaryen.Type;
+  baseType: binaryen.Type;
+}): binaryen.ExpressionRef => {
+  const exprType = binaryen.getExpressionType(expr);
+  if (exprType === targetType) {
+    return expr;
+  }
+  if (
+    targetType === baseType ||
+    targetType === bin.anyref ||
+    targetType === bin.eqref
+  ) {
+    return expr;
+  }
+  if (!isRefType(exprType) || !isRefType(targetType)) {
+    return expr;
+  }
+  return refCast(mod, expr, targetType);
+};
 
 export const LOOKUP_FIELD_ACCESSOR = "__lookup_field_accessor";
 
@@ -46,6 +85,7 @@ export interface FieldLookupHelpers {
 export const initFieldLookupHelpers = (
   mod: binaryen.Module
 ): FieldLookupHelpers => {
+  const tableByTypeLabel = new Map<string, binaryen.ExpressionRef>();
   const fieldAccessorStruct = defineStructType(mod, {
     name: "FieldAccessor",
     fields: [
@@ -140,6 +180,10 @@ export const initFieldLookupHelpers = (
   const registerType = (
     opts: RegisterFieldAccessorsOptions
   ): binaryen.ExpressionRef => {
+    const cachedTable = tableByTypeLabel.get(opts.typeLabel);
+    if (cachedTable) {
+      return cachedTable;
+    }
     const hashes = new Map<number, string>();
     const entries = opts.fields.map((field) => {
       const hash = murmurHash3(field.name);
@@ -163,28 +207,23 @@ export const initFieldLookupHelpers = (
       const getter = mod.addFunction(
         getterName,
         bin.createType([opts.baseType]),
-        field.wasmType,
+        field.heapWasmType,
         [],
-        (() => {
-          const loaded = structGetFieldValue({
+        structGetFieldValue({
+          mod,
+          fieldType: field.heapWasmType,
+          fieldIndex: field.runtimeIndex,
+          exprRef: refCast(
             mod,
-            fieldType: field.heapWasmType,
-            fieldIndex: field.runtimeIndex,
-            exprRef: refCast(
-              mod,
-              mod.local.get(0, opts.baseType),
-              opts.runtimeType
-            ),
-          });
-          return field.wasmType === field.heapWasmType
-            ? loaded
-            : mod.block(null, [loaded], field.wasmType);
-        })()
+            mod.local.get(0, opts.baseType),
+            opts.runtimeType
+          ),
+        })
       );
 
       const setter = mod.addFunction(
         setterName,
-        bin.createType([opts.baseType, field.wasmType]),
+        bin.createType([opts.baseType, field.heapWasmType]),
         bin.none,
         [],
         structSetFieldValue({
@@ -195,10 +234,12 @@ export const initFieldLookupHelpers = (
             mod.local.get(0, opts.baseType),
             opts.runtimeType
           ),
-          value:
-            field.wasmType === field.heapWasmType
-              ? mod.local.get(1, field.wasmType)
-              : refCast(mod, mod.local.get(1, field.wasmType), field.heapWasmType),
+          value: coerceAccessorExprType({
+            mod,
+            expr: mod.local.get(1, field.heapWasmType),
+            targetType: field.heapWasmType,
+            baseType: opts.baseType,
+          }),
         })
       );
 
@@ -217,11 +258,13 @@ export const initFieldLookupHelpers = (
       ]);
     });
 
-    return arrayNewFixed(
+    const tableExpr = arrayNewFixed(
       mod,
       binaryenTypeToHeapType(lookupTableType),
       entries
     );
+    tableByTypeLabel.set(opts.typeLabel, tableExpr);
+    return tableExpr;
   };
 
   return {

@@ -716,6 +716,7 @@ const createMethodTypeArgumentBudgetCase = (nongenericOverloadCount: number) => 
 
   ctx.builder.addItem({
     kind: "object",
+    objectKind: "obj",
     visibility: moduleVisibility(),
     symbol: boxSymbol,
     fields: [
@@ -925,6 +926,7 @@ const createOperatorTypeArgumentBudgetCase = (nongenericOverloadCount: number) =
 
   ctx.builder.addItem({
     kind: "object",
+    objectKind: "obj",
     visibility: moduleVisibility(),
     symbol: boxSymbol,
     fields: [

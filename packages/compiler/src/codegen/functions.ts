@@ -12,10 +12,19 @@ import type {
   ProgramSymbolId,
 } from "../semantics/ids.js";
 import { compileExpression } from "./expressions/index.js";
-import { allocateTempLocal } from "./locals.js";
+import { allocateTempLocal, loadLocalValue, storeLocalValue } from "./locals.js";
 import { loadStructuralField, coerceValueToType } from "./structural.js";
 import { RTT_METADATA_SLOTS } from "./rtt/index.js";
-import { getRequiredExprType, getStructuralTypeInfo, wasmTypeFor } from "./types.js";
+import {
+  getAbiTypesForSignature,
+  getInlineUnionLayout,
+  getRequiredExprType,
+  getSignatureSpillBoxType,
+  getSignatureWasmType,
+  getStructuralTypeInfo,
+  shouldInlineUnionLayout,
+  wasmTypeFor,
+} from "./types.js";
 import {
   type HirExpression,
   isPackageVisible,
@@ -37,11 +46,19 @@ import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
+import { boxSignatureSpillValue, unboxSignatureSpillValue } from "./signature-spill.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
+const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
+  "voyd.codegen.functionMetadataRegistrationState",
+);
 
 type ReachabilityState = {
   symbols?: Set<ProgramSymbolId>;
+};
+
+type FunctionMetadataRegistrationState = {
+  active?: boolean;
 };
 
 const debugEffects = (): boolean =>
@@ -92,37 +109,82 @@ const pushFunctionMeta = (
   }
 };
 
-const userParamOffsetFor = (meta: FunctionMetadata): number =>
-  meta.effectful ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length) : 0;
+const userParamOffsetFor = (meta: FunctionMetadata): number => meta.userParamOffset;
+
+const isOutcomeReferenceSupertype = (
+  wasmType: binaryen.Type,
+  ctx: CodegenContext,
+): boolean => wasmType === ctx.rtt.baseType || wasmType === ctx.rtt.rootType;
+
+const makeAbiValue = (
+  values: readonly binaryen.ExpressionRef[],
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  if (values.length === 0) {
+    return ctx.mod.nop();
+  }
+  if (values.length === 1) {
+    return values[0]!;
+  }
+  return ctx.mod.tuple.make(values as binaryen.ExpressionRef[]);
+};
 
 const bindRawFunctionParameters = ({
   fn,
   meta,
+  ctx,
   fnCtx,
   handlerOffset,
-  paramTypesOffset,
 }: {
   fn: HirFunction;
   meta: FunctionMetadata;
+  ctx: CodegenContext;
   fnCtx: FunctionContext;
   handlerOffset: number;
-  paramTypesOffset: number;
-}): void => {
+}): binaryen.ExpressionRef[] => {
+  const ops: binaryen.ExpressionRef[] = [];
+  let abiIndex = handlerOffset;
+
   fn.parameters.forEach((param, index) => {
-    const wasmIndex = index + handlerOffset;
-    const wasmType = meta.paramTypes[index + paramTypesOffset];
-    if (typeof wasmType !== "number") {
-      throw new Error(
-        `codegen missing parameter type for symbol ${param.symbol} in function ${fn.symbol} (param index ${index}, handlerOffset ${handlerOffset}, paramTypesOffset ${paramTypesOffset}, meta paramTypes length ${meta.paramTypes.length})`,
-      );
-    }
+    const abiTypes = meta.paramAbiTypes[index] ?? [];
+    const localType = wasmTypeFor(meta.paramTypeIds[index]!, ctx);
+    const binding = allocateTempLocal(
+      localType,
+      fnCtx,
+      meta.paramTypeIds[index],
+      ctx,
+    );
     fnCtx.bindings.set(param.symbol, {
+      ...binding,
       kind: "local",
-      index: wasmIndex,
-      type: wasmType,
       typeId: meta.paramTypeIds[index],
     });
+    const abiValues = abiTypes.map((abiType, abiOffset) =>
+      ctx.mod.local.get(abiIndex + abiOffset, abiType),
+    );
+    const paramValue =
+      typeof meta.paramTypeIds[index] === "number" &&
+      getSignatureSpillBoxType({
+        typeId: meta.paramTypeIds[index]!,
+        ctx,
+      }) === abiTypes[0]
+        ? unboxSignatureSpillValue({
+            value: abiValues[0]!,
+            typeId: meta.paramTypeIds[index]!,
+            ctx,
+          })
+        : makeAbiValue(abiValues, ctx);
+    ops.push(
+      storeLocalValue({
+        binding,
+        value: paramValue,
+        ctx,
+        fnCtx,
+      }),
+    );
+    abiIndex += abiTypes.length;
   });
+  return ops;
 };
 
 const compileDefaultParameterInitialization = ({
@@ -130,15 +192,11 @@ const compileDefaultParameterInitialization = ({
   meta,
   ctx,
   fnCtx,
-  handlerOffset,
-  paramTypesOffset,
 }: {
   fn: HirFunction;
   meta: FunctionMetadata;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-  handlerOffset: number;
-  paramTypesOffset: number;
 }): binaryen.ExpressionRef[] => {
   const ops: binaryen.ExpressionRef[] = [];
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
@@ -148,10 +206,8 @@ const compileDefaultParameterInitialization = ({
       return;
     }
 
-    const wasmIndex = index + handlerOffset;
-    const rawWasmType = meta.paramTypes[index + paramTypesOffset];
     const rawTypeId = meta.paramTypeIds[index];
-    if (typeof rawWasmType !== "number" || typeof rawTypeId !== "number") {
+    if (typeof rawTypeId !== "number") {
       throw new Error(
         `codegen missing default parameter metadata for symbol ${param.symbol}`,
       );
@@ -196,47 +252,102 @@ const compileDefaultParameterInitialization = ({
       wasmTypeFor(optionalInfo.innerType, ctx),
       fnCtx,
       optionalInfo.innerType,
+      ctx,
     );
+    const rawBinding = fnCtx.bindings.get(param.symbol);
+    if (!rawBinding || rawBinding.kind !== "local") {
+      throw new Error(
+        `codegen missing bound parameter local for optional default symbol ${param.symbol}`,
+      );
+    }
+    const rawParamExpr = () => loadLocalValue(rawBinding, ctx);
+    const rawAbiTypes = binaryen.expandType(rawBinding.type);
+    const [isSome, extractedSomeValue] = shouldInlineUnionLayout(rawTypeId, ctx)
+      ? (() => {
+          const layout = getInlineUnionLayout(rawTypeId, ctx);
+          const someLayout = layout.members.find(
+            (member) => member.typeId === optionalInfo.someType,
+          );
+          if (!someLayout) {
+            throw new Error(
+              "default parameter inline optional layout is missing Some member",
+            );
+          }
+          const tagValue =
+            rawAbiTypes.length === 1
+              ? rawParamExpr()
+              : ctx.mod.tuple.extract(rawParamExpr(), 0);
+          const payloadValues = someLayout.abiTypes.map((_, index) =>
+            rawAbiTypes.length === 1
+              ? rawParamExpr()
+              : ctx.mod.tuple.extract(
+                  rawParamExpr(),
+                  someLayout.abiStart + index,
+                ),
+          );
+          const payload =
+            payloadValues.length === 0
+              ? ctx.mod.nop()
+              : payloadValues.length === 1
+                ? payloadValues[0]!
+                : ctx.mod.tuple.make(payloadValues);
+          return [
+            ctx.mod.i32.eq(tagValue, ctx.mod.i32.const(someLayout.tag)),
+            coerceValueToType({
+              value: payload,
+              actualType: optionalInfo.innerType,
+              targetType: optionalInfo.innerType,
+              ctx,
+              fnCtx,
+            }),
+          ] as const;
+        })()
+      : (() => {
+          const ancestorsExpr = () =>
+            structGetFieldValue({
+              mod: ctx.mod,
+              fieldType: ctx.rtt.extensionHelpers.i32Array,
+              fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
+              exprRef: rawParamExpr(),
+            });
+          return [
+            ctx.mod.call(
+              "__extends",
+              [ctx.mod.i32.const(someInfo.runtimeTypeId), ancestorsExpr()],
+              binaryen.i32,
+            ),
+            coerceValueToType({
+              value: loadStructuralField({
+                structInfo: someInfo,
+                field: someField,
+                pointer: () => refCast(ctx.mod, rawParamExpr(), someInfo.runtimeType),
+                ctx,
+              }),
+              actualType: someField.typeId,
+              targetType: optionalInfo.innerType,
+              ctx,
+              fnCtx,
+            }),
+          ] as const;
+        })();
+
     fnCtx.bindings.set(param.symbol, {
       ...resolved,
       kind: "local",
       typeId: optionalInfo.innerType,
     });
-    const rawParamExpr = () => ctx.mod.local.get(wasmIndex, rawWasmType);
-    const ancestorsExpr = () =>
-      structGetFieldValue({
-        mod: ctx.mod,
-        fieldType: ctx.rtt.extensionHelpers.i32Array,
-        fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
-        exprRef: rawParamExpr(),
-      });
-    const isSome = ctx.mod.call(
-      "__extends",
-      [ctx.mod.i32.const(someInfo.runtimeTypeId), ancestorsExpr()],
-      binaryen.i32,
-    );
-    const extractedSomeValue = coerceValueToType({
-      value: loadStructuralField({
-        structInfo: someInfo,
-        field: someField,
-        pointer: () => refCast(ctx.mod, rawParamExpr(), someInfo.runtimeType),
-        ctx,
-      }),
-      actualType: someField.typeId,
-      targetType: optionalInfo.innerType,
-      ctx,
-      fnCtx,
-    });
 
     ops.push(
-      ctx.mod.local.set(
-        resolved.index,
-        ctx.mod.if(
+      storeLocalValue({
+        binding: resolved,
+        value: ctx.mod.if(
           isSome,
           extractedSomeValue,
           defaultValueExpr,
         ),
-      ),
+        ctx,
+        fnCtx,
+      }),
     );
   });
 
@@ -547,133 +658,149 @@ export const prepareReachableFunctionSymbols = ({
 };
 
 export const registerFunctionMetadata = (ctx: CodegenContext): void => {
+  const registrationState =
+    ctx.programHelpers.getHelperState<FunctionMetadataRegistrationState>(
+      FUNCTION_METADATA_REGISTRATION_STATE,
+      () => ({ active: false }),
+    );
+  const previousActive = registrationState.active === true;
+  registrationState.active = true;
   const effects = effectsFacade(ctx);
   const unknown = ctx.program.primitives.unknown;
 
-  for (const [itemId, item] of ctx.module.hir.items) {
-    if (item.kind !== "function") continue;
-    ctx.itemsToSymbols.set(itemId, {
-      moduleId: ctx.moduleId,
-      symbol: item.symbol,
-    });
-
-    const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
-      programSymbolIdOf(ctx, ctx.moduleId, item.symbol),
-    );
-    if (
-      intrinsicMetadata.intrinsic &&
-      intrinsicMetadata.intrinsicUsesSignature !== true
-    ) {
-      continue;
-    }
-
-    const signature = ctx.program.functions.getSignature(
-      ctx.moduleId,
-      item.symbol,
-    );
-    if (!signature) {
-      throw new Error(
-        `codegen missing type information for function ${item.symbol}`,
-      );
-    }
-
-    const schemeInfo = ctx.program.types.getScheme(signature.scheme);
-    const instantiationInfo = ctx.program.functions.getInstantiationInfo(
-      ctx.moduleId,
-      item.symbol,
-    );
-    const recordedInstantiations =
-      instantiationInfo && instantiationInfo.size > 0
-        ? Array.from(instantiationInfo.entries())
-        : [];
-    if (recordedInstantiations.length === 0 && schemeInfo.params.length > 0) {
-      continue;
-    }
-    const instantiations: [ProgramFunctionInstanceId, readonly TypeId[]][] =
-      recordedInstantiations.length > 0
-        ? recordedInstantiations
-        : getDefaultInstantiationArgs({
-            ctx,
-            symbol: item.symbol,
-            params: schemeInfo.params.length,
-          });
-
-    instantiations.forEach(([instanceId, typeArgs]) => {
-      if (typeArgs.some((arg) => arg === unknown)) {
-        const name = symbolName(ctx, ctx.moduleId, item.symbol);
-        const instanceLabel = ctx.program.functions.formatInstance(instanceId);
-        throw new Error(
-          `codegen cannot emit ${name} without resolved type arguments (instance ${instanceLabel})`,
-        );
-      }
-      if (ctx.functionInstances.has(instanceId)) {
-        return;
-      }
-
-      const typeId = ctx.program.types.instantiate(signature.scheme, typeArgs);
-      const descriptor = ctx.program.types.getTypeDesc(typeId);
-      if (descriptor.kind !== "function") {
-        throw new Error(
-          `codegen expected function type for symbol ${item.symbol}`,
-        );
-      }
-
-      const effectInfo = effects.functionAbi(item.symbol);
-      if (!effectInfo) {
-        throw new Error(
-          `codegen missing effect information for function ${item.symbol}`,
-        );
-      }
-      const effectful = effectInfo.typeEffectful;
-      if (effectful && debugEffects()) {
-        console.log(
-          `[effects] effectful ${ctx.moduleLabel}::${symbolName(ctx, ctx.moduleId, item.symbol)}`,
-          {
-            effectRow: effectInfo.effectRow,
-            row: ctx.program.effects.getRow(effectInfo.effectRow),
-            hasOps:
-              ctx.program.effects.getRow(effectInfo.effectRow).operations
-                .length > 0,
-          },
-        );
-      }
-
-      const userParamTypes = descriptor.parameters.map((param) =>
-        wasmTypeFor(param.type, ctx, new Set(), "signature"),
-      );
-      const widened = ctx.effectsBackend.abi.widenSignature({
-        ctx,
-        effectful,
-        userParamTypes,
-        userResultType: wasmTypeFor(descriptor.returnType, ctx, new Set(), "signature"),
-      });
-
-      const metadata: FunctionMetadata = {
+  try {
+    for (const [itemId, item] of ctx.module.hir.items) {
+      if (item.kind !== "function") continue;
+      ctx.itemsToSymbols.set(itemId, {
         moduleId: ctx.moduleId,
         symbol: item.symbol,
-        wasmName: makeFunctionName(item, ctx, typeArgs),
-        paramTypes: widened.paramTypes,
-        resultType: widened.resultType,
-        paramTypeIds: descriptor.parameters.map((param) => param.type),
-        parameters: descriptor.parameters.map((param, index) => ({
-          typeId: param.type,
-          label: param.label,
-          optional: param.optional,
-          name:
-            typeof item.parameters[index]?.symbol === "number"
-              ? symbolName(ctx, ctx.moduleId, item.parameters[index]!.symbol)
-              : undefined,
-        })),
-        resultTypeId: descriptor.returnType,
-        typeArgs,
-        instanceId,
-        effectful,
-        effectRow: effectInfo.effectRow,
-      };
+      });
 
-      pushFunctionMeta(ctx, ctx.moduleId, item.symbol, metadata);
-      ctx.functionInstances.set(instanceId, metadata);
-    });
+      const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(
+        programSymbolIdOf(ctx, ctx.moduleId, item.symbol),
+      );
+      if (
+        intrinsicMetadata.intrinsic &&
+        intrinsicMetadata.intrinsicUsesSignature !== true
+      ) {
+        continue;
+      }
+
+      const signature = ctx.program.functions.getSignature(
+        ctx.moduleId,
+        item.symbol,
+      );
+      if (!signature) {
+        throw new Error(
+          `codegen missing type information for function ${item.symbol}`,
+        );
+      }
+
+      const schemeInfo = ctx.program.types.getScheme(signature.scheme);
+      const instantiationInfo = ctx.program.functions.getInstantiationInfo(
+        ctx.moduleId,
+        item.symbol,
+      );
+      const recordedInstantiations =
+        instantiationInfo && instantiationInfo.size > 0
+          ? Array.from(instantiationInfo.entries())
+          : [];
+      if (recordedInstantiations.length === 0 && schemeInfo.params.length > 0) {
+        continue;
+      }
+      const instantiations: [ProgramFunctionInstanceId, readonly TypeId[]][] =
+        recordedInstantiations.length > 0
+          ? recordedInstantiations
+          : getDefaultInstantiationArgs({
+              ctx,
+              symbol: item.symbol,
+              params: schemeInfo.params.length,
+            });
+
+      instantiations.forEach(([instanceId, typeArgs]) => {
+        if (typeArgs.some((arg) => arg === unknown)) {
+          const name = symbolName(ctx, ctx.moduleId, item.symbol);
+          const instanceLabel = ctx.program.functions.formatInstance(instanceId);
+          throw new Error(
+            `codegen cannot emit ${name} without resolved type arguments (instance ${instanceLabel})`,
+          );
+        }
+        if (ctx.functionInstances.has(instanceId)) {
+          return;
+        }
+
+        const typeId = ctx.program.types.instantiate(signature.scheme, typeArgs);
+        const descriptor = ctx.program.types.getTypeDesc(typeId);
+        if (descriptor.kind !== "function") {
+          throw new Error(
+            `codegen expected function type for symbol ${item.symbol}`,
+          );
+        }
+
+        const effectInfo = effects.functionAbi(item.symbol);
+        if (!effectInfo) {
+          throw new Error(
+            `codegen missing effect information for function ${item.symbol}`,
+          );
+        }
+        const effectful = effectInfo.typeEffectful;
+        if (effectful && debugEffects()) {
+          console.log(
+            `[effects] effectful ${ctx.moduleLabel}::${symbolName(ctx, ctx.moduleId, item.symbol)}`,
+            {
+              effectRow: effectInfo.effectRow,
+              row: ctx.program.effects.getRow(effectInfo.effectRow),
+              hasOps:
+                ctx.program.effects.getRow(effectInfo.effectRow).operations
+                  .length > 0,
+            },
+          );
+        }
+
+        const paramAbiTypes = descriptor.parameters.map((param) =>
+          getAbiTypesForSignature(param.type, ctx),
+        );
+        const userParamTypes = paramAbiTypes.flat();
+        const resultAbiTypes = getAbiTypesForSignature(descriptor.returnType, ctx);
+        const widened = ctx.effectsBackend.abi.widenSignature({
+          ctx,
+          effectful,
+          userParamTypes,
+          userResultType: getSignatureWasmType(descriptor.returnType, ctx),
+        });
+
+        const metadata: FunctionMetadata = {
+          moduleId: ctx.moduleId,
+          symbol: item.symbol,
+          wasmName: makeFunctionName(item, ctx, typeArgs),
+          paramTypes: widened.paramTypes,
+          paramAbiTypes,
+          userParamOffset: widened.userParamOffset,
+          resultType: widened.resultType,
+          resultAbiTypes,
+          paramTypeIds: descriptor.parameters.map((param) => param.type),
+          parameters: descriptor.parameters.map((param, index) => ({
+            typeId: param.type,
+            label: param.label,
+            optional: param.optional,
+            name:
+              typeof item.parameters[index]?.symbol === "number"
+                ? symbolName(ctx, ctx.moduleId, item.parameters[index]!.symbol)
+                : undefined,
+          })),
+          resultTypeId: descriptor.returnType,
+          typeArgs,
+          instanceId,
+          effectful,
+          effectRow: effectInfo.effectRow,
+        };
+
+        pushFunctionMeta(ctx, ctx.moduleId, item.symbol, metadata);
+        ctx.functionInstances.set(instanceId, metadata);
+      });
+    }
+  } finally {
+    registrationState.active = previousActive;
   }
 };
 
@@ -833,26 +960,26 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         );
       }
 
-      const userParamTypes = instantiatedTypeDesc.parameters.map((param) =>
-        wasmTypeFor(param.type, ctx, new Set(), "signature"),
+      const paramAbiTypes = instantiatedTypeDesc.parameters.map((param) =>
+        getAbiTypesForSignature(param.type, ctx),
       );
+      const userParamTypes = paramAbiTypes.flat();
+      const resultAbiTypes = getAbiTypesForSignature(instantiatedTypeDesc.returnType, ctx);
       const widened = ctx.effectsBackend.abi.widenSignature({
         ctx,
         effectful,
         userParamTypes,
-        userResultType: wasmTypeFor(
-          instantiatedTypeDesc.returnType,
-          ctx,
-          new Set(),
-          "signature",
-        ),
+        userResultType: getSignatureWasmType(instantiatedTypeDesc.returnType, ctx),
       });
       const metadata: FunctionMetadata = {
         moduleId: ctx.moduleId,
         symbol: imp.local,
         wasmName: (targetMeta ?? targetMetas[0]!).wasmName,
         paramTypes: widened.paramTypes,
+        paramAbiTypes,
+        userParamOffset: widened.userParamOffset,
         resultType: widened.resultType,
+        resultAbiTypes,
         paramTypeIds: instantiatedTypeDesc.parameters.map(
           (param) => param.type,
         ),
@@ -1129,20 +1256,18 @@ const compileFunctionItem = (
       currentHandler: { index: 0, type: handlerParamType },
     };
 
-    bindRawFunctionParameters({
+    const paramInitOps = bindRawFunctionParameters({
       fn,
       meta,
+      ctx,
       fnCtx: implCtx,
       handlerOffset: implSignature.userParamOffset,
-      paramTypesOffset: 0,
     });
     const defaultInitOps = compileDefaultParameterInitialization({
       fn,
       meta,
       ctx,
       fnCtx: implCtx,
-      handlerOffset: implSignature.userParamOffset,
-      paramTypesOffset: 0,
     });
 
     const implBody = compileExpression({
@@ -1156,16 +1281,18 @@ const compileFunctionItem = (
       defaultInitOps.length > 0
         ? ctx.mod.block(
             null,
-            [...defaultInitOps, implBody.expr],
+            [...paramInitOps, ...defaultInitOps, implBody.expr],
             binaryen.getExpressionType(implBody.expr),
           )
-        : implBody.expr;
+        : paramInitOps.length > 0
+          ? ctx.mod.block(null, [...paramInitOps, implBody.expr], binaryen.getExpressionType(implBody.expr))
+          : implBody.expr;
 
     const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
     const implExprType = binaryen.getExpressionType(implBodyExpr);
     const shouldWrapOutcome =
       implExprType === returnValueType ||
-      (returnValueType === ctx.rtt.baseType &&
+      (isOutcomeReferenceSupertype(returnValueType, ctx) &&
         implExprType !== binaryen.none &&
         implExprType !== binaryen.unreachable &&
         implExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx));
@@ -1193,8 +1320,8 @@ const compileFunctionItem = (
       implName,
       buildImplCallArgs: () => [
         ctx.effectsBackend.abi.hiddenHandlerValue(ctx),
-        ...fn.parameters.map((_, index) =>
-          ctx.mod.local.get(index, meta.paramTypes[index] as number),
+        ...meta.paramTypes.map((type, index) =>
+          ctx.mod.local.get(index, type as number),
         ),
       ],
     });
@@ -1220,20 +1347,18 @@ const compileFunctionItem = (
     };
   }
 
-  bindRawFunctionParameters({
+  const paramInitOps = bindRawFunctionParameters({
     fn,
     meta,
+    ctx,
     fnCtx,
     handlerOffset,
-    paramTypesOffset: handlerOffset,
   });
   const defaultInitOps = compileDefaultParameterInitialization({
     fn,
     meta,
     ctx,
     fnCtx,
-    handlerOffset,
-    paramTypesOffset: handlerOffset,
   });
 
   const body = compileExpression({
@@ -1247,26 +1372,39 @@ const compileFunctionItem = (
     defaultInitOps.length > 0
       ? ctx.mod.block(
           null,
-          [...defaultInitOps, body.expr],
+          [...paramInitOps, ...defaultInitOps, body.expr],
           binaryen.getExpressionType(body.expr),
         )
-      : body.expr;
+      : paramInitOps.length > 0
+        ? ctx.mod.block(null, [...paramInitOps, body.expr], binaryen.getExpressionType(body.expr))
+        : body.expr;
   const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
   const bodyExprType = binaryen.getExpressionType(bodyExpr);
   const shouldWrapOutcome =
     meta.effectful &&
     (bodyExprType === returnValueType ||
-      (returnValueType === ctx.rtt.baseType &&
+      (isOutcomeReferenceSupertype(returnValueType, ctx) &&
         bodyExprType !== binaryen.none &&
         bodyExprType !== binaryen.unreachable &&
         bodyExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx)));
-  const functionBody = shouldWrapOutcome
+  const rawFunctionBody = shouldWrapOutcome
     ? wrapValueInOutcome({
         valueExpr: bodyExpr,
         valueType: returnValueType,
         ctx,
       })
     : bodyExpr;
+  const functionBody =
+    !meta.effectful && meta.resultTypeId !== ctx.program.primitives.void
+      && binaryen.getExpressionType(rawFunctionBody) !== binaryen.none
+      && binaryen.getExpressionType(rawFunctionBody) !== binaryen.unreachable
+      ? boxSignatureSpillValue({
+          value: rawFunctionBody,
+          typeId: meta.resultTypeId,
+          ctx,
+          fnCtx,
+        })
+      : rawFunctionBody;
 
   ctx.mod.addFunction(
     meta.wasmName,

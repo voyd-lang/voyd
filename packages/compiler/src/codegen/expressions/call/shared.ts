@@ -10,7 +10,7 @@ import type {
   TypeId,
 } from "../../context.js";
 import { coerceValueToType } from "../../structural.js";
-import { allocateTempLocal } from "../../locals.js";
+import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../../locals.js";
 import {
   getRequiredExprType,
   wasmTypeFor,
@@ -21,9 +21,7 @@ export const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
 
 export const hiddenParamOffsetFor = (meta: FunctionMetadata): number =>
-  meta.effectful
-    ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length)
-    : 0;
+  meta.userParamOffset;
 
 export const debugEffects = (): boolean =>
   typeof process !== "undefined" && process.env?.DEBUG_EFFECTS === "1";
@@ -69,7 +67,7 @@ const getOrCreateTempLocal = ({
   tempId: number;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): { index: number; type: binaryen.Type } => {
+}): ReturnType<typeof allocateTempLocal> => {
   const existing = fnCtx.tempLocals.get(tempId);
   if (existing) return existing;
 
@@ -85,7 +83,7 @@ const getOrCreateTempLocal = ({
         ctx.program.primitives.unknown);
 
   const wasmType = wasmTypeFor(typeId, ctx);
-  const local = allocateTempLocal(wasmType, fnCtx, typeId);
+  const local = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
   fnCtx.tempLocals.set(tempId, local);
   return local;
 };
@@ -168,8 +166,8 @@ export const compileCallArgExpressionsWithTemps = ({
     const compute = ctx.mod.block(
       null,
       [
-        ctx.mod.local.set(tempLocal.index, coerced),
-        ctx.mod.local.get(tempLocal.index, tempLocal.type),
+        storeLocalValue({ binding: tempLocal, value: coerced, ctx, fnCtx }),
+        loadLocalValue(tempLocal, ctx),
       ],
       tempLocal.type
     );
@@ -190,7 +188,7 @@ export const compileCallArgExpressionsWithTemps = ({
 
     return ctx.mod.if(
       shouldSkip,
-      ctx.mod.local.get(tempLocal.index, tempLocal.type),
+      loadLocalValue(tempLocal, ctx),
       compute
     );
   });
@@ -225,8 +223,8 @@ export const compileCallCalleeExpressionWithTemp = ({
   const compute = ctx.mod.block(
     null,
     [
-      ctx.mod.local.set(tempLocal.index, calleeValue.expr),
-      ctx.mod.local.get(tempLocal.index, tempLocal.type),
+      storeLocalValue({ binding: tempLocal, value: calleeValue.expr, ctx, fnCtx }),
+      loadLocalValue(tempLocal, ctx),
     ],
     tempLocal.type
   );
@@ -261,7 +259,7 @@ export const compileCallCalleeExpressionWithTemp = ({
   return {
     expr: ctx.mod.if(
       shouldSkip,
-      ctx.mod.local.get(tempLocal.index, tempLocal.type),
+      loadLocalValue(tempLocal, ctx),
       compute
     ),
     usedReturnCall: false,

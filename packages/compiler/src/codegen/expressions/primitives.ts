@@ -4,12 +4,15 @@ import type {
   FunctionContext,
   HirExpression,
   SymbolId,
+  TypeId,
 } from "../context.js";
 import { loadBindingValue } from "../locals.js";
 import { arrayNew, arrayNewFixed } from "@voyd/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes, wasmTypeFor } from "../types.js";
 import { requireDependencyFunctionMeta } from "../function-dependencies.js";
 import { resolveModuleLetGetter } from "../module-lets.js";
+import { coerceValueToType } from "../structural.js";
+import { unboxSignatureSpillValue } from "../signature-spill.js";
 
 const encoder = new TextEncoder();
 
@@ -65,11 +68,28 @@ export const compileLiteralExpr = (
 export const compileIdentifierExpr = (
   expr: HirExpression & { exprKind: "identifier"; symbol: SymbolId },
   ctx: CodegenContext,
-  fnCtx: FunctionContext
+  fnCtx: FunctionContext,
+  expectedResultTypeId?: TypeId,
 ): CompiledExpression => {
   const binding = fnCtx.bindings.get(expr.symbol);
   if (binding) {
-    return { expr: loadBindingValue(binding, ctx), usedReturnCall: false };
+    const value = loadBindingValue(binding, ctx);
+    if (
+      typeof expectedResultTypeId === "number" &&
+      typeof binding.typeId === "number"
+    ) {
+      return {
+        expr: coerceValueToType({
+          value,
+          actualType: binding.typeId,
+          targetType: expectedResultTypeId,
+          ctx,
+          fnCtx,
+        }),
+        usedReturnCall: false,
+      };
+    }
+    return { expr: value, usedReturnCall: false };
   }
 
   const localGetter = resolveModuleLetGetter({
@@ -78,8 +98,22 @@ export const compileIdentifierExpr = (
     symbol: expr.symbol,
   });
   if (localGetter) {
+    const value = unboxSignatureSpillValue({
+      value: ctx.mod.call(localGetter.wasmName, [], localGetter.wasmType),
+      typeId: localGetter.typeId,
+      ctx,
+    });
     return {
-      expr: ctx.mod.call(localGetter.wasmName, [], localGetter.wasmType),
+      expr:
+        typeof expectedResultTypeId === "number"
+          ? coerceValueToType({
+              value,
+              actualType: localGetter.typeId,
+              targetType: expectedResultTypeId,
+              ctx,
+              fnCtx,
+            })
+          : value,
       usedReturnCall: false,
     };
   }
@@ -93,12 +127,26 @@ export const compileIdentifierExpr = (
       symbol: targetRef.symbol,
     });
     if (importedGetter) {
-      return {
-        expr: ctx.mod.call(
+      const value = unboxSignatureSpillValue({
+        value: ctx.mod.call(
           importedGetter.wasmName,
           [],
           importedGetter.wasmType,
         ),
+        typeId: importedGetter.typeId,
+        ctx,
+      });
+      return {
+        expr:
+          typeof expectedResultTypeId === "number"
+            ? coerceValueToType({
+                value,
+                actualType: importedGetter.typeId,
+                targetType: expectedResultTypeId,
+                ctx,
+                fnCtx,
+              })
+            : value,
         usedReturnCall: false,
       };
     }

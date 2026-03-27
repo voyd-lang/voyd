@@ -1,0 +1,23 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+pub type Optional<T> = Some<T> | None
+
+value Vec2 {
+  x: i32,
+  y: i32
+}
+
+fn wrap<T>(value: T) -> Optional<T>
+  Some { value }
+
+pub fn main() -> i32
+  let first = wrap<Vec2>(Vec2 { x: 3, y: 4 })
+  match(first)
+    Some<Vec2>:
+      first.value.x
+    None:
+      -100

@@ -90,6 +90,7 @@ export const branchWasmRepresentation = (
       }
     case "trait":
     case "nominal-object":
+    case "value-object":
     case "structural-object":
     case "function":
     case "fixed-array":

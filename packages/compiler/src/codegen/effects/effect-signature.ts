@@ -82,7 +82,11 @@ const bindTypeParamsFromType = ({
     return;
   }
 
-  if (expectedDesc.kind === "nominal-object" || expectedDesc.kind === "trait") {
+  if (
+    expectedDesc.kind === "nominal-object" ||
+    expectedDesc.kind === "value-object" ||
+    expectedDesc.kind === "trait"
+  ) {
     const actualDesc = ctx.program.types.getTypeDesc(actual);
     if (actualDesc.kind !== expectedDesc.kind || actualDesc.owner !== expectedDesc.owner) {
       return;

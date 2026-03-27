@@ -65,6 +65,7 @@ export type DocumentationObjectFieldView = {
 
 export type DocumentationObjectView = {
   name: string;
+  objectKind: "obj" | "value";
   visibility: DocumentationVisibilityView;
   typeParameters?: readonly DocumentationTypeParameterView[];
   baseTypeExpr?: unknown;
@@ -506,6 +507,7 @@ const normalizeModules = ({
             .filter((objectDecl) => allowsName(objectDecl.name))
             .map((objectDecl) => ({
               name: objectDecl.name,
+              objectKind: objectDecl.objectKind,
               visibility: normalizeVisibility(objectDecl.visibility),
               typeParameters: normalizeTypeParameters(objectDecl.typeParameters),
               baseTypeExpr: objectDecl.baseTypeExpr,

@@ -55,29 +55,35 @@ export const createResumeContinuation = ({
     const guardLocal = 3;
     const contLocal = 4;
     const decodedLocal = 5;
-    const opIndexExpr = runtime.requestOpIndex(
-      ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-    );
+    const opIndexExpr = (): binaryen.ExpressionRef =>
+      runtime.requestOpIndex(
+        ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+      );
 
-    const guard = ctx.mod.local.get(guardLocal, runtime.tailGuardType);
+    const guard = (): binaryen.ExpressionRef =>
+      ctx.mod.local.get(guardLocal, runtime.tailGuardType);
     const guardInit = ctx.mod.if(
-      ctx.mod.ref.is_null(guard),
+      ctx.mod.ref.is_null(guard()),
       ctx.mod.local.set(guardLocal, runtime.makeTailGuard()),
       ctx.mod.nop()
     );
     const guardOps = [
       ctx.mod.if(
         ctx.mod.i32.and(
-          ctx.mod.i32.gt_u(runtime.tailGuardExpected(guard), ctx.mod.i32.const(0)),
-          ctx.mod.i32.ge_u(runtime.tailGuardObserved(guard), runtime.tailGuardExpected(guard))
+          ctx.mod.i32.gt_u(runtime.tailGuardExpected(guard()), ctx.mod.i32.const(0)),
+          ctx.mod.i32.ge_u(
+            runtime.tailGuardObserved(guard()),
+            runtime.tailGuardExpected(guard())
+          )
         ),
         ctx.mod.unreachable(),
         ctx.mod.nop()
       ),
-      runtime.bumpTailGuardObserved(guard),
+      runtime.bumpTailGuardObserved(guard()),
     ];
 
-    const contRef = ctx.mod.local.get(contLocal, runtime.continuationType);
+    const contRef = (): binaryen.ExpressionRef =>
+      ctx.mod.local.get(contLocal, runtime.continuationType);
     const fnRefType = functionRefType({
       params: [binaryen.anyref, binaryen.eqref],
       result: runtime.outcomeType,
@@ -85,7 +91,7 @@ export const createResumeContinuation = ({
     });
     const branches = signatures.map((sig) => {
       const matches = ctx.mod.i32.eq(
-        opIndexExpr,
+        opIndexExpr(),
         ctx.mod.i32.const(sig.opIndex)
       );
       const resumeValue =
@@ -106,10 +112,10 @@ export const createResumeContinuation = ({
               valueType: sig.returnType,
               ctx,
             });
-      const operands = [runtime.continuationEnv(contRef), resumeBox];
+      const operands = [runtime.continuationEnv(contRef()), resumeBox];
       const call = callRef(
         ctx.mod,
-        refCast(ctx.mod, runtime.continuationFn(contRef), fnRefType),
+        refCast(ctx.mod, runtime.continuationFn(contRef()), fnRefType),
         operands as number[],
         runtime.outcomeType
       );

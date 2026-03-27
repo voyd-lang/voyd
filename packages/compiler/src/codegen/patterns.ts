@@ -12,12 +12,15 @@ import {
   declareLocal,
   declareLocalWithTypeId,
   getRequiredBinding,
+  loadLocalValue,
+  storeLocalValue,
 } from "./locals.js";
 import {
   coerceValueToType,
   loadStructuralField,
 } from "./structural.js";
 import {
+  getDeclaredSymbolTypeId,
   getRequiredExprType,
   getStructuralTypeInfo,
   getSymbolTypeId,
@@ -42,8 +45,7 @@ interface PatternInitParams {
 
 interface PendingPatternAssignment {
   pattern: Extract<HirPattern, { kind: "identifier" }>;
-  tempIndex: number;
-  tempType: binaryen.Type;
+  temp: ReturnType<typeof allocateTempLocal>;
   typeId: TypeId;
 }
 
@@ -85,7 +87,7 @@ const storeIntoBinding = ({
       value: coerced,
     });
   }
-  return ctx.mod.local.set(binding.index, coerced);
+  return storeLocalValue({ binding, value: coerced, ctx, fnCtx });
 };
 
 export const compilePatternInitialization = ({
@@ -127,7 +129,8 @@ export const compilePatternInitialization = ({
     ops.push(
       asStatement(
         ctx,
-        compileExpr({ exprId: initializer, ctx, fnCtx }).expr
+        compileExpr({ exprId: initializer, ctx, fnCtx }).expr,
+        fnCtx,
       )
     );
     return;
@@ -142,11 +145,19 @@ export const compilePatternInitialization = ({
     ctx,
     typeInstanceId
   );
-  const targetTypeId = getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
+  const targetTypeId = options.declare
+    ? getDeclaredSymbolTypeId(pattern.symbol, ctx, typeInstanceId)
+    : getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
   const binding = options.declare
     ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
-  const value = compileExpr({ exprId: initializer, ctx, fnCtx });
+  const value = compileExpr({
+    exprId: initializer,
+    ctx,
+    fnCtx,
+    expectedResultTypeId:
+      initializerType === targetTypeId ? targetTypeId : undefined,
+  });
 
   ops.push(
     storeIntoBinding({
@@ -183,7 +194,9 @@ export const compilePatternInitializationFromValue = ({
   }
 
   if (pattern.kind === "identifier") {
-    const targetTypeId = getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
+    const targetTypeId = options.declare
+      ? getDeclaredSymbolTypeId(pattern.symbol, ctx, typeInstanceId)
+      : getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
     const binding = options.declare
       ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(pattern.symbol, ctx, fnCtx);
@@ -204,8 +217,26 @@ export const compilePatternInitializationFromValue = ({
     throw new Error(`unsupported pattern kind ${pattern.kind}`);
   }
 
-  const initializerTemp = allocateTempLocal(wasmTypeFor(valueTypeId, ctx), fnCtx);
-  ops.push(ctx.mod.local.set(initializerTemp.index, value));
+  const initializerTemp = allocateTempLocal(
+    wasmTypeFor(valueTypeId, ctx),
+    fnCtx,
+    valueTypeId,
+    ctx,
+  );
+  ops.push(
+    storeLocalValue({
+      binding: initializerTemp,
+      value: coerceValueToType({
+        value,
+        actualType: valueTypeId,
+        targetType: valueTypeId,
+        ctx,
+        fnCtx,
+      }),
+      ctx,
+      fnCtx,
+    }),
+  );
 
   const pending = collectAssignmentsFromValue({
     pattern,
@@ -216,15 +247,15 @@ export const compilePatternInitializationFromValue = ({
     ops,
   });
 
-  pending.forEach(({ pattern: subPattern, tempIndex, tempType, typeId }) => {
-    const targetTypeId = getSymbolTypeId(subPattern.symbol, ctx, typeInstanceId);
+  pending.forEach(({ pattern: subPattern, temp, typeId }) => {
+    const targetTypeId = typeId;
     const binding = options.declare
       ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
         binding,
-        value: ctx.mod.local.get(tempIndex, tempType),
+        value: loadLocalValue(temp, ctx),
         targetTypeId,
         actualTypeId: typeId,
         ctx,
@@ -251,13 +282,29 @@ const compileTuplePattern = ({
   );
   const initializerTemp = allocateTempLocal(
     wasmTypeFor(initializerType, ctx),
-    fnCtx
+    fnCtx,
+    initializerType,
+    ctx,
   );
+  const compiled = compileExpr({
+    exprId: initializer,
+    ctx,
+    fnCtx,
+    expectedResultTypeId: initializerType,
+  }).expr;
   ops.push(
-    ctx.mod.local.set(
-      initializerTemp.index,
-      compileExpr({ exprId: initializer, ctx, fnCtx }).expr
-    )
+    storeLocalValue({
+      binding: initializerTemp,
+      value: coerceValueToType({
+        value: compiled,
+        actualType: initializerType,
+        targetType: initializerType,
+        ctx,
+        fnCtx,
+      }),
+      ctx,
+      fnCtx,
+    }),
   );
 
   const pending = collectAssignmentsFromValue({
@@ -268,15 +315,15 @@ const compileTuplePattern = ({
     fnCtx,
     ops,
   });
-  pending.forEach(({ pattern: subPattern, tempIndex, tempType, typeId }) => {
-    const targetTypeId = getSymbolTypeId(subPattern.symbol, ctx, typeInstanceId);
+  pending.forEach(({ pattern: subPattern, temp, typeId }) => {
+    const targetTypeId = typeId;
     const binding = options.declare
       ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
         binding,
-        value: ctx.mod.local.get(tempIndex, tempType),
+        value: loadLocalValue(temp, ctx),
         targetTypeId,
         actualTypeId: typeId,
         ctx,
@@ -303,13 +350,29 @@ const compileDestructurePattern = ({
   );
   const initializerTemp = allocateTempLocal(
     wasmTypeFor(initializerType, ctx),
-    fnCtx
+    fnCtx,
+    initializerType,
+    ctx,
   );
+  const compiled = compileExpr({
+    exprId: initializer,
+    ctx,
+    fnCtx,
+    expectedResultTypeId: initializerType,
+  }).expr;
   ops.push(
-    ctx.mod.local.set(
-      initializerTemp.index,
-      compileExpr({ exprId: initializer, ctx, fnCtx }).expr
-    )
+    storeLocalValue({
+      binding: initializerTemp,
+      value: coerceValueToType({
+        value: compiled,
+        actualType: initializerType,
+        targetType: initializerType,
+        ctx,
+        fnCtx,
+      }),
+      ctx,
+      fnCtx,
+    }),
   );
 
   const pending = collectAssignmentsFromValue({
@@ -320,15 +383,15 @@ const compileDestructurePattern = ({
     fnCtx,
     ops,
   });
-  pending.forEach(({ pattern: subPattern, tempIndex, tempType, typeId }) => {
-    const targetTypeId = getSymbolTypeId(subPattern.symbol, ctx, typeInstanceId);
+  pending.forEach(({ pattern: subPattern, temp, typeId }) => {
+    const targetTypeId = typeId;
     const binding = options.declare
       ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
         binding,
-        value: ctx.mod.local.get(tempIndex, tempType),
+        value: loadLocalValue(temp, ctx),
         targetTypeId,
         actualTypeId: typeId,
         ctx,
@@ -347,7 +410,7 @@ const collectAssignmentsFromValue = ({
   ops,
 }: {
   pattern: HirPattern;
-  temp: { index: number; type: binaryen.Type };
+  temp: ReturnType<typeof allocateTempLocal>;
   typeId: TypeId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
@@ -367,14 +430,14 @@ const collectAssignmentsFromValue = ({
       if (!field) {
         throw new Error(`tuple is missing element ${index}`);
       }
-      const elementTemp = allocateTempLocal(field.wasmType, fnCtx);
+      const elementTemp = allocateTempLocal(field.wasmType, fnCtx, field.typeId, ctx);
       const load = loadStructuralField({
         structInfo,
         field,
-        pointer: () => ctx.mod.local.get(temp.index, temp.type),
+        pointer: () => loadLocalValue(temp, ctx),
         ctx,
       });
-      ops.push(ctx.mod.local.set(elementTemp.index, load));
+      ops.push(storeLocalValue({ binding: elementTemp, value: load, ctx, fnCtx }));
       collected.push(
         ...collectAssignmentsFromValue({
           pattern: subPattern,
@@ -403,14 +466,14 @@ const collectAssignmentsFromValue = ({
       if (!field) {
         throw new Error(`object is missing field ${name}`);
       }
-      const fieldTemp = allocateTempLocal(field.wasmType, fnCtx);
+      const fieldTemp = allocateTempLocal(field.wasmType, fnCtx, field.typeId, ctx);
       const load = loadStructuralField({
         structInfo,
         field,
-        pointer: () => ctx.mod.local.get(temp.index, temp.type),
+        pointer: () => loadLocalValue(temp, ctx),
         ctx,
       });
-      ops.push(ctx.mod.local.set(fieldTemp.index, load));
+      ops.push(storeLocalValue({ binding: fieldTemp, value: load, ctx, fnCtx }));
       collected.push(
         ...collectAssignmentsFromValue({
           pattern: subPattern,
@@ -433,12 +496,11 @@ const collectAssignmentsFromValue = ({
     throw new Error(`unsupported pattern kind ${pattern.kind}`);
   }
 
-  return [
-    {
-      pattern,
-      tempIndex: temp.index,
-      tempType: temp.type,
-      typeId,
-    },
-  ];
+    return [
+      {
+        pattern,
+        temp,
+        typeId,
+      },
+    ];
 };

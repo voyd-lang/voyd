@@ -146,6 +146,7 @@ export const seedBaseObjectType = (ctx: TypingContext): void => {
   });
   const type = ctx.arena.internIntersection({ nominal, structural });
   const info = {
+    objectKind: "obj" as const,
     nominal,
     structural,
     type,
@@ -154,6 +155,7 @@ export const seedBaseObjectType = (ctx: TypingContext): void => {
   };
   const template = {
     symbol,
+    objectKind: "obj" as const,
     params: [],
     nominal,
     structural,

@@ -81,6 +81,7 @@ describe("createDocumentationModel", () => {
     module.objects = [
       {
         name: "Hidden",
+        objectKind: "obj",
         visibility: { level: "module" },
         fields: [],
       },

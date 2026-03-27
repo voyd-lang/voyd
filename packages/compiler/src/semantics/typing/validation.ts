@@ -47,6 +47,7 @@ const createTypeValidator = (ctx: TypingContext): TypeValidator => {
         return;
       case "trait":
       case "nominal-object":
+      case "value-object":
         desc.typeArgs.forEach((arg, index) =>
           ensureKnownType(arg, `${context} type argument ${index + 1}`)
         );
@@ -111,6 +112,7 @@ const collectReferencedParams = (
     }
     case "trait":
     case "nominal-object":
+    case "value-object":
       return desc.typeArgs.reduce((acc, arg) => {
         collectReferencedParams(arg, ctx, seen).forEach((entry) =>
           acc.add(entry)
@@ -350,6 +352,7 @@ const enforceStructuralSubstitution = (
     }
     case "trait":
     case "nominal-object":
+    case "value-object":
       desc.typeArgs.forEach((arg) =>
         enforceStructuralSubstitution(arg, ctx, context, seen)
       );

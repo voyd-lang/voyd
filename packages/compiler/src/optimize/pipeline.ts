@@ -332,7 +332,7 @@ const exactNominalForType = ({
     return undefined;
   }
   const desc = program.types.getTypeDesc(typeId);
-  if (desc.kind === "nominal-object") {
+  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
     return typeId;
   }
   if (desc.kind === "intersection" && typeof desc.nominal === "number") {

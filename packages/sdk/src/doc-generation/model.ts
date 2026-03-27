@@ -704,7 +704,7 @@ export const createDocumentationModel = ({
           moduleId: moduleDoc.id,
           kind: "object",
           name: objectDecl.name,
-          signature: `obj ${objectDecl.name}${formatTypeParameters(
+          signature: `${objectDecl.objectKind} ${objectDecl.name}${formatTypeParameters(
             objectDecl.typeParameters,
           )}${
             objectDecl.baseTypeExpr

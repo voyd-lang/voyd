@@ -1,0 +1,16 @@
+trait Drawable
+  fn draw(self) -> i32
+
+value Pixel {
+  value: i32
+}
+
+impl Drawable for Pixel
+  fn draw(self) -> i32
+    self.value
+
+fn draw(shape: Drawable) -> i32
+  shape.draw()
+
+fn main() -> i32
+  draw(Pixel { value: 1 })

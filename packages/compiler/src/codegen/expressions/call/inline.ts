@@ -10,6 +10,7 @@ import type {
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
 import { walkHirExpression } from "../../hir-walk.js";
+import { getSignatureSpillBoxType } from "../../types.js";
 
 const INLINE_EXPR_LIMIT = 24;
 const INLINE_STMT_LIMIT = 8;
@@ -37,6 +38,18 @@ const isInlineCandidate = ({
   callerFnCtx: FunctionContext;
 }): boolean => {
   if (meta.effectful) {
+    return false;
+  }
+  if (
+    meta.paramTypeIds.some((typeId) =>
+      typeof typeId === "number" &&
+      typeof getSignatureSpillBoxType({ typeId, ctx: ownerCtx }) === "number",
+    ) ||
+    typeof getSignatureSpillBoxType({
+      typeId: meta.resultTypeId,
+      ctx: ownerCtx,
+    }) === "number"
+  ) {
     return false;
   }
   if (callerFnCtx.inliningStack?.includes(meta.instanceId)) {

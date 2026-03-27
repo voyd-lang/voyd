@@ -169,6 +169,7 @@ const buildCodegenProgram = (
   const structHeapTypes = new Map();
   const structuralIdCache = new Map<TypeId, TypeId | null>();
   const resolvingStructuralIds = new Set<TypeId>();
+  const resolvingStructuralHeapTypes = new Set<TypeId>();
   const fixedArrayTypes = new Map();
   const moduleContexts = new Map<string, CodegenContext>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
@@ -187,8 +188,10 @@ const buildCodegenProgram = (
     itemsToSymbols: new Map(),
     structTypes,
     structHeapTypes,
+    abiBoxTypes: new Map(),
     structuralIdCache,
     resolvingStructuralIds,
+    resolvingStructuralHeapTypes,
     fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),
@@ -259,6 +262,7 @@ describe("next codegen", () => {
     const structHeapTypes = new Map();
     const structuralIdCache = new Map<TypeId, TypeId | null>();
     const resolvingStructuralIds = new Set<TypeId>();
+    const resolvingStructuralHeapTypes = new Set<TypeId>();
     const fixedArrayTypes = new Map();
     const moduleContexts = new Map<string, CodegenContext>();
 
@@ -278,8 +282,10 @@ describe("next codegen", () => {
       itemsToSymbols: new Map(),
       structTypes,
       structHeapTypes,
+      abiBoxTypes: new Map(),
       structuralIdCache,
       resolvingStructuralIds,
+      resolvingStructuralHeapTypes,
       fixedArrayTypes,
       closureTypes: new Map(),
       functionRefTypes: new Map(),
@@ -486,6 +492,39 @@ describe("next codegen", () => {
     expect(nextField.heapWasmType).not.toBe(ctx.rtt.baseType);
   });
 
+  it("stores single-lane value elements inline in FixedArray", () => {
+    const semantics = loadSemanticsWithTyping(
+      "single_lane_value_fixed_array.voyd",
+      {
+        arena: createTypeArena(),
+        effects: createEffectTable({ interner: createEffectInterner() }),
+      },
+      { asStd: true },
+    );
+    const {
+      contexts: [ctx],
+    } = buildCodegenProgram([semantics]);
+
+    const resolveAliasType = (name: string): TypeId => {
+      const symbol = semantics.symbols.resolveTopLevel(name);
+      if (typeof symbol !== "number") {
+        throw new Error(`missing type alias symbol for ${name}`);
+      }
+      const key = `${symbol}<>`;
+      const typeId = semantics.typing.typeAliases.getCachedInstance(key);
+      if (typeof typeId !== "number") {
+        throw new Error(`missing type alias instance for ${name}`);
+      }
+      return typeId;
+    };
+
+    const fixedArrayType = resolveAliasType("ScalarBoxes");
+    const wasmTypes = getFixedArrayWasmTypes(fixedArrayType, ctx);
+
+    expect(wasmTypes.kind).toBe("inline-aggregate");
+    expect(wasmTypes.laneTypes).toEqual([binaryen.i32]);
+  });
+
   it("runs recursive heap types fixture", () => {
     const main = loadMain("recursive_heap_types.voyd", { asStd: true });
     expect(main()).toBe(18);
@@ -528,6 +567,11 @@ describe("next codegen", () => {
   it("coerces declared bindings to annotated optional types", () => {
     const main = loadMain("optional_binding_coercion.voyd");
     expect(main()).toBe(5);
+  });
+
+  it("coerces value payload optionals when the scrutinee is narrowed in match arms", () => {
+    const main = loadMain("optional_binding_value_coercion.voyd");
+    expect(main()).toBe(3);
   });
 
   it("handles functions declared with `=` syntax and calls them", () => {

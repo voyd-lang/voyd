@@ -24,6 +24,7 @@ import {
   getFunctionRefType,
   getRequiredExprType,
   getStructuralTypeInfo,
+  wasmTypeFor,
 } from "../../types.js";
 import { allocateTempLocal } from "../../locals.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
@@ -38,6 +39,8 @@ import {
   handlerType,
   hiddenParamOffsetFor,
 } from "./shared.js";
+import { coerceValueToType } from "../../structural.js";
+import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
 import { typeContainsUnresolvedParam } from "../../../semantics/type-utils.js";
 import type { CodegenTraitImplInstance } from "../../../semantics/codegen-view/index.js";
 import type { ProgramSymbolId } from "../../../semantics/ids.js";
@@ -47,8 +50,8 @@ const MAX_DIRECT_TRAIT_SWITCH_IMPLS = 4;
 
 type DirectTraitDispatchCandidate = {
   meta: FunctionMetadata;
-  receiverType: binaryen.Type;
   runtimeTypeId: number;
+  wrapperName: string;
 };
 
 const resolveDirectTraitDispatchCandidate = ({
@@ -112,16 +115,10 @@ const resolveDirectTraitDispatchCandidate = ({
     return undefined;
   }
 
-  const receiverTypeIndex = hiddenParamOffsetFor(meta);
-  const receiverType = meta.paramTypes[receiverTypeIndex];
-  if (typeof receiverType !== "number") {
-    return undefined;
-  }
-
   return {
     meta,
-    receiverType,
     runtimeTypeId: structInfo.runtimeTypeId,
+    wrapperName: `${structInfo.typeLabel}__method_${mapping.traitSymbol}_${mapping.traitMethodSymbol}_${method.implMethod}`,
   };
 };
 
@@ -129,6 +126,7 @@ const compileDirectTraitDispatchSwitch = ({
   expr,
   meta,
   mapping,
+  resolvedModuleId,
   ctx,
   fnCtx,
   compileExpr,
@@ -136,14 +134,22 @@ const compileDirectTraitDispatchSwitch = ({
   expr: HirCallExpr;
   meta: FunctionMetadata;
   mapping: NonNullable<ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>>;
+  resolvedModuleId: string;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): CompiledExpression | undefined => {
-  if (!ctx.optimization) {
+  if (meta.effectful || resolvedModuleId !== ctx.moduleId) {
     return undefined;
   }
-  if (meta.effectful) {
+
+  if (
+    isTraitDispatchMethodEffectful({
+      traitSymbol: mapping.traitSymbol,
+      traitMethodSymbol: mapping.traitMethodSymbol,
+      ctx,
+    })
+  ) {
     return undefined;
   }
 
@@ -165,7 +171,20 @@ const compileDirectTraitDispatchSwitch = ({
     return undefined;
   }
 
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const returnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultWasmType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  if (
+    ctx.program.types.getTypeDesc(returnTypeId).kind !== "primitive" ||
+    binaryen.expandType(resultWasmType).length !== 1
+  ) {
+    return undefined;
+  }
+
   const baselineUserParamTypes = meta.paramTypes.slice(hiddenParamOffsetFor(meta) + 1);
+  if (baselineUserParamTypes.length !== 0) {
+    return undefined;
+  }
   const consistentUserParams = candidates.every((candidate) => {
     const candidateUserParamTypes = candidate.meta.paramTypes.slice(
       hiddenParamOffsetFor(candidate.meta) + 1,
@@ -179,20 +198,21 @@ const compileDirectTraitDispatchSwitch = ({
     return undefined;
   }
 
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typedPlan = resolveTypedCallArgumentPlan({
     callId: expr.id,
     typeInstanceId,
     ctx,
   });
-  const userTypedPlan = typedPlan
-    ? sliceTypedCallArgumentPlan({
-        typedPlan,
-        paramOffset: 1,
-        argOffset: 1,
-      })
-    : undefined;
-
+  let userTypedPlan: ReturnType<typeof resolveTypedCallArgumentPlan>;
+  if (typedPlan !== undefined) {
+    const resolvedTypedPlan =
+      typedPlan as NonNullable<ReturnType<typeof resolveTypedCallArgumentPlan>>;
+    userTypedPlan = sliceTypedCallArgumentPlan({
+      typedPlan: resolvedTypedPlan,
+      paramOffset: 1,
+      argOffset: 1,
+    });
+  }
   const receiverValue = compileExpr({
     exprId: expr.args[0]!.expr,
     ctx,
@@ -227,15 +247,31 @@ const compileDirectTraitDispatchSwitch = ({
 
   const emitCandidateCall = (
     candidate: DirectTraitDispatchCandidate,
-  ): binaryen.ExpressionRef =>
-    ctx.mod.call(
-      candidate.meta.wasmName,
+  ): binaryen.ExpressionRef => {
+    const rawCall = ctx.mod.call(
+      candidate.wrapperName,
       [
-        refCast(ctx.mod, makeReceiver(), candidate.receiverType),
+        makeReceiver(),
         ...userArgTemps.map((temp) => ctx.mod.local.get(temp.index, temp.type)),
       ],
       candidate.meta.resultType,
     );
+    const coerced =
+      candidate.meta.resultTypeId === returnTypeId
+        ? rawCall
+        : coerceValueToType({
+            value: rawCall,
+            actualType: candidate.meta.resultTypeId,
+            targetType: returnTypeId,
+            ctx,
+            fnCtx,
+          });
+    return coerceExprToWasmType({
+      expr: coerced,
+      targetType: resultWasmType,
+      ctx,
+    });
+  };
 
   const fallback = compileIndirectTraitDispatchCall({
     expr,
@@ -278,7 +314,7 @@ const compileDirectTraitDispatchSwitch = ({
         ),
         switchedExpr,
       ],
-      getExprBinaryenType(expr.id, ctx, typeInstanceId),
+      resultWasmType,
     ),
     usedReturnCall: false,
   };
@@ -344,6 +380,7 @@ export const compileTraitDispatchCall = ({
     expr,
     meta,
     mapping,
+    resolvedModuleId,
     ctx,
     fnCtx,
     compileExpr,
@@ -487,18 +524,37 @@ const compileIndirectTraitDispatchCall = ({
       : meta.resultType
   );
 
+  const returnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const expectedTypeId = expectedResultTypeId ?? returnTypeId;
+  const resultWasmType = wasmTypeFor(expectedTypeId, ctx);
   const lowered = dispatchEffectful
     ? ctx.effectsBackend.lowerEffectfulCallResult({
         callExpr,
         callId: expr.id,
-        returnTypeId: getRequiredExprType(expr.id, ctx, typeInstanceId),
+        returnTypeId,
         expectedResultTypeId,
         tailPosition,
         typeInstanceId,
         ctx,
         fnCtx,
       })
-    : { expr: callExpr, usedReturnCall: false };
+    : {
+        expr: coerceExprToWasmType({
+          expr:
+            meta.resultTypeId === expectedTypeId
+              ? callExpr
+              : coerceValueToType({
+                  value: callExpr,
+                  actualType: meta.resultTypeId,
+                  targetType: expectedTypeId,
+                  ctx,
+                  fnCtx,
+                }),
+          targetType: resultWasmType,
+          ctx,
+        }),
+        usedReturnCall: false,
+      };
 
   ops.push(lowered.expr);
   const binaryenResult = getExprBinaryenType(expr.id, ctx, typeInstanceId);

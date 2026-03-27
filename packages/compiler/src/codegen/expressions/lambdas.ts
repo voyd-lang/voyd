@@ -14,20 +14,34 @@ import type {
 } from "../context.js";
 import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
 import {
+  getAbiTypesForSignature,
   getClosureTypeInfo,
+  getInlineHeapBoxType,
   getRequiredExprType,
+  getSignatureSpillBoxType,
   getSymbolTypeId,
   wasmTypeFor,
 } from "../types.js";
-import { getRequiredBinding, loadBindingValue } from "../locals.js";
+import {
+  allocateTempLocal,
+  getRequiredBinding,
+  loadBindingValue,
+  storeLocalValue,
+} from "../locals.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { effectsFacade } from "../effects/facade.js";
 import { emitPureSurfaceWrapper } from "../effects/abi-wrapper.js";
+import { coerceValueToType, lowerValueForHeapField } from "../structural.js";
+import {
+  boxSignatureSpillValue,
+  unboxSignatureSpillValue,
+} from "../signature-spill.js";
 
 type LambdaCaptureInfo = {
   symbol: number;
   typeId: number;
   wasmType: binaryen.Type;
+  storageType: binaryen.Type;
   mutable: boolean;
   fieldIndex: number;
 };
@@ -83,13 +97,75 @@ const defineLambdaEnvType = ({
       { name: "__fn", type: binaryen.funcref, mutable: false },
       ...captures.map((capture, index) => ({
         name: `c${index}`,
-        type: capture.wasmType,
+        type: capture.storageType,
         mutable: capture.mutable,
       })),
     ],
     supertype: binaryenTypeToHeapType(base.interfaceType),
     final: true,
   });
+
+const makeAbiValue = (
+  values: readonly binaryen.ExpressionRef[],
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  if (values.length === 0) {
+    return ctx.mod.nop();
+  }
+  if (values.length === 1) {
+    return values[0]!;
+  }
+  return ctx.mod.tuple.make(values as binaryen.ExpressionRef[]);
+};
+
+const initializeLambdaParameterBindings = ({
+  expr,
+  desc,
+  firstAbiIndex,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirLambdaExpr;
+  desc: Extract<
+    ReturnType<CodegenContext["program"]["types"]["getTypeDesc"]>,
+    { kind: "function" }
+  >;
+  firstAbiIndex: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef[] => {
+  let abiIndex = firstAbiIndex;
+
+  return expr.parameters.map((param, index) => {
+    const typeId = desc.parameters[index]!.type;
+    const localType = wasmTypeFor(typeId, ctx);
+    const binding = allocateTempLocal(localType, fnCtx, typeId, ctx);
+    fnCtx.bindings.set(param.symbol, {
+      ...binding,
+      kind: "local",
+      typeId,
+    });
+    const abiTypes = getAbiTypesForSignature(typeId, ctx);
+    const abiValues = abiTypes.map((abiType, abiOffset) =>
+      ctx.mod.local.get(abiIndex + abiOffset, abiType),
+    );
+    abiIndex += abiTypes.length;
+    const value =
+      getSignatureSpillBoxType({ typeId, ctx }) === abiTypes[0]
+        ? unboxSignatureSpillValue({
+            value: abiValues[0]!,
+            typeId,
+            ctx,
+          })
+        : makeAbiValue(abiValues, ctx);
+    return storeLocalValue({
+      binding,
+      value,
+      ctx,
+      fnCtx,
+    });
+  });
+};
 
 const emitLambdaFunction = ({
   expr,
@@ -121,7 +197,6 @@ const emitLambdaFunction = ({
   const lambdaInfo = effectsFacade(ctx).lambdaAbi(expr.id);
   const abiEffectful = lambdaInfo?.abiEffectful ?? typeEffectful;
   const needsWrapper = abiEffectful && !typeEffectful;
-  const userParamOffset = Math.max(0, env.base.paramTypes.length - expr.parameters.length);
 
   if (needsWrapper) {
     const implSignature = ctx.effectsBackend.abi.widenSignature({
@@ -147,14 +222,12 @@ const emitLambdaFunction = ({
       currentHandler: { index: 1, type: handlerParamType },
     };
 
-    expr.parameters.forEach((param, index) => {
-      const binding = {
-        kind: "local" as const,
-        index: index + 1 + implSignature.userParamOffset,
-        type: env.base.paramTypes[index]!,
-        typeId: desc.parameters[index]!.type,
-      };
-      implCtx.bindings.set(param.symbol, binding);
+    const implParamInits = initializeLambdaParameterBindings({
+      expr,
+      desc,
+      firstAbiIndex: 1 + implSignature.userParamOffset,
+      ctx,
+      fnCtx: implCtx,
     });
 
     env.captures.forEach((capture) => {
@@ -165,27 +238,36 @@ const emitLambdaFunction = ({
         envSuperType: env.base.interfaceType,
         fieldIndex: capture.fieldIndex,
         type: capture.wasmType,
+        storageType: capture.storageType,
         typeId: capture.typeId,
         mutable: capture.mutable,
       });
     });
 
-    const implBody = compileExpr({
+    const compiledImplBody = compileExpr({
       exprId: expr.body,
       ctx,
       fnCtx: implCtx,
       tailPosition: false,
       expectedResultTypeId: desc.returnType,
     });
+    const implBody =
+      implParamInits.length === 0
+        ? compiledImplBody.expr
+        : ctx.mod.block(
+            null,
+            [...implParamInits, compiledImplBody.expr],
+            binaryen.getExpressionType(compiledImplBody.expr),
+          );
     const returnWasmType = wasmTypeFor(desc.returnType, ctx);
     const implFunctionBody =
-      binaryen.getExpressionType(implBody.expr) === returnWasmType
+      binaryen.getExpressionType(implBody) === returnWasmType
         ? wrapValueInOutcome({
-            valueExpr: implBody.expr,
+            valueExpr: implBody,
             valueType: returnWasmType,
             ctx,
           })
-        : implBody.expr;
+        : implBody;
 
     ctx.mod.addFunction(
       implName,
@@ -204,8 +286,8 @@ const emitLambdaFunction = ({
       buildImplCallArgs: () => [
         ctx.mod.local.get(0, env.base.interfaceType),
         ctx.effectsBackend.abi.hiddenHandlerValue(ctx),
-        ...expr.parameters.map((_, index) =>
-          ctx.mod.local.get(index + 1, env.base.paramTypes[index] as number)
+        ...env.base.paramTypes.map((type, index) =>
+          ctx.mod.local.get(index + 1, type)
         ),
       ],
     });
@@ -231,14 +313,12 @@ const emitLambdaFunction = ({
     };
   }
 
-  expr.parameters.forEach((param, index) => {
-    const binding = {
-      kind: "local" as const,
-      index: index + 1 + userParamOffset,
-      type: env.base.paramTypes[index + userParamOffset]!,
-      typeId: desc.parameters[index]!.type,
-    };
-    lambdaCtx.bindings.set(param.symbol, binding);
+  const paramInits = initializeLambdaParameterBindings({
+    expr,
+    desc,
+    firstAbiIndex: 1 + env.base.userParamOffset,
+    ctx,
+    fnCtx: lambdaCtx,
   });
 
   env.captures.forEach((capture) => {
@@ -249,34 +329,48 @@ const emitLambdaFunction = ({
       envSuperType: env.base.interfaceType,
       fieldIndex: capture.fieldIndex,
       type: capture.wasmType,
+      storageType: capture.storageType,
       typeId: capture.typeId,
       mutable: capture.mutable,
     });
   });
 
-  const body = compileExpr({
+  const compiledBody = compileExpr({
     exprId: expr.body,
     ctx,
     fnCtx: lambdaCtx,
     tailPosition: !effectful,
     expectedResultTypeId: desc.returnType,
   });
+  const body =
+    paramInits.length === 0
+      ? compiledBody.expr
+      : ctx.mod.block(
+          null,
+          [...paramInits, compiledBody.expr],
+          binaryen.getExpressionType(compiledBody.expr),
+        );
   const returnWasmType = wasmTypeFor(desc.returnType, ctx);
-  const bodyExprType = binaryen.getExpressionType(body.expr);
+  const bodyExprType = binaryen.getExpressionType(body);
   const shouldWrapOutcome =
     effectful &&
     (bodyExprType === returnWasmType ||
-      (returnWasmType === ctx.rtt.baseType &&
+      ((returnWasmType === ctx.rtt.baseType || returnWasmType === ctx.rtt.rootType) &&
         bodyExprType !== binaryen.none &&
         bodyExprType !== binaryen.unreachable &&
         bodyExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx)));
   const functionBody = shouldWrapOutcome
     ? wrapValueInOutcome({
-        valueExpr: body.expr,
+        valueExpr: body,
         valueType: returnWasmType,
         ctx,
       })
-    : body.expr;
+    : boxSignatureSpillValue({
+        value: body,
+        typeId: desc.returnType,
+        ctx,
+        fnCtx: lambdaCtx,
+      });
 
   ctx.mod.addFunction(
     fnName,
@@ -312,6 +406,7 @@ export const compileLambdaExpr = (
           symbol: capture.symbol,
           typeId,
           wasmType: wasmTypeFor(typeId, ctx),
+          storageType: getInlineHeapBoxType({ typeId, ctx }) ?? wasmTypeFor(typeId, ctx),
           mutable: capture.mutable,
           fieldIndex: index + 1,
         };
@@ -347,14 +442,35 @@ export const compileLambdaExpr = (
   }
 
   const captureValues =
-    expr.captures?.map((capture) => {
+    expr.captures?.map((capture, index) => {
       const binding = getRequiredBinding(capture.symbol, ctx, fnCtx);
-      return loadBindingValue(binding, ctx);
+      const captureInfo = env.captures[index];
+      if (!captureInfo) {
+        throw new Error(`missing lambda capture metadata for symbol ${capture.symbol}`);
+      }
+      return coerceValueToType({
+        value: loadBindingValue(binding, ctx),
+        actualType: captureInfo.typeId,
+        targetType: captureInfo.typeId,
+        ctx,
+        fnCtx,
+      });
     }) ?? [];
 
   const closure = initStruct(ctx.mod, env.envType, [
     refFunc(ctx.mod, fnName, base.fnRefType),
-    ...captureValues,
+    ...captureValues.map((value, index) => {
+      const captureInfo = env.captures[index]!;
+      return captureInfo.storageType === captureInfo.wasmType
+        ? value
+        : lowerValueForHeapField({
+            value,
+            typeId: captureInfo.typeId,
+            targetType: captureInfo.storageType,
+            ctx,
+            fnCtx,
+          });
+    }),
   ]);
 
   return { expr: closure, usedReturnCall: false };

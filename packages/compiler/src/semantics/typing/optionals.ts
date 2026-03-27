@@ -88,7 +88,10 @@ const resolveStructuralTypeId = (
     }
     return undefined;
   }
-  if (desc.kind === "nominal-object" && ctx.getObjectStructuralTypeId) {
+  if (
+    (desc.kind === "nominal-object" || desc.kind === "value-object") &&
+    ctx.getObjectStructuralTypeId
+  ) {
     return ctx.getObjectStructuralTypeId(type);
   }
   return undefined;
@@ -103,14 +106,17 @@ const resolveNominalOwnerSymbol = (
   }
 
   const desc = ctx.arena.get(type);
-  if (desc.kind === "nominal-object") {
+  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
     return ctx.localSymbolForSymbolRef
       ? ctx.localSymbolForSymbolRef(desc.owner)
       : undefined;
   }
   if (desc.kind === "intersection" && typeof desc.nominal === "number") {
     const nominal = ctx.arena.get(desc.nominal);
-    if (nominal.kind !== "nominal-object" || !ctx.localSymbolForSymbolRef) {
+    if (
+      (nominal.kind !== "nominal-object" && nominal.kind !== "value-object") ||
+      !ctx.localSymbolForSymbolRef
+    ) {
       return undefined;
     }
     return ctx.localSymbolForSymbolRef(nominal.owner);

@@ -53,6 +53,7 @@ const buildLoweringSnapshot = () => {
   const structHeapTypes = new Map();
   const structuralIdCache = new Map<TypeId, TypeId | null>();
   const resolvingStructuralIds = new Set<TypeId>();
+  const resolvingStructuralHeapTypes = new Set<TypeId>();
   const fixedArrayTypes = new Map();
   const moduleContexts = new Map<string, CodegenContext>();
   const ctx: CodegenContext = {
@@ -83,8 +84,10 @@ const buildLoweringSnapshot = () => {
     itemsToSymbols: new Map(),
     structTypes,
     structHeapTypes,
+    abiBoxTypes: new Map(),
     structuralIdCache,
     resolvingStructuralIds,
+    resolvingStructuralHeapTypes,
     fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),

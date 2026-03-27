@@ -8,9 +8,11 @@ import type {
 import type { ProgramSymbolId } from "../semantics/ids.js";
 import type { HirModuleLet } from "../semantics/hir/index.js";
 import { compileExpression } from "./expressions/index.js";
-import { wasmTypeFor } from "./types.js";
+import { liftHeapValueToInline, lowerValueForHeapField } from "./structural.js";
+import { getInlineHeapBoxType, getSignatureWasmType, wasmTypeFor } from "./types.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
+import { boxSignatureSpillValue } from "./signature-spill.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 
@@ -165,7 +167,7 @@ const computeModuleLetGetterMetadata = ({
     );
   }
 
-  const wasmType = wasmTypeFor(typeId, ctx, new Set(), "signature");
+  const wasmType = getSignatureWasmType(typeId, ctx);
   if (wasmType === binaryen.none) {
     throw new Error(`module let ${moduleLet.symbol} cannot have void type`);
   }
@@ -191,13 +193,16 @@ const compileModuleLetGetter = ({
   const { wasmName, typeId, wasmType } = metadata;
   const readyGlobal = `${wasmName}__ready`;
   const valueGlobal = `${wasmName}__value`;
+  const runtimeType = wasmTypeFor(typeId, ctx);
+  const storageType =
+    getInlineHeapBoxType({ typeId, ctx, mode: "runtime" }) ?? runtimeType;
 
   ctx.mod.addGlobal(readyGlobal, binaryen.i32, true, ctx.mod.i32.const(0));
   ctx.mod.addGlobal(
     valueGlobal,
-    wasmType,
+    storageType,
     true,
-    defaultValueForWasmType(wasmType, ctx),
+    defaultValueForWasmType(storageType, ctx),
   );
 
   const fnCtx: FunctionContext = {
@@ -216,20 +221,46 @@ const compileModuleLetGetter = ({
     fnCtx,
     expectedResultTypeId: typeId,
   });
+  const loadStoredValue = (): binaryen.ExpressionRef =>
+    storageType === runtimeType
+      ? ctx.mod.global.get(valueGlobal, runtimeType)
+      : liftHeapValueToInline({
+          value: ctx.mod.global.get(valueGlobal, storageType),
+          typeId,
+          ctx,
+        });
+  const getterValue = (value: binaryen.ExpressionRef): binaryen.ExpressionRef =>
+    boxSignatureSpillValue({
+      value,
+      typeId,
+      ctx,
+      fnCtx,
+    });
 
   const initializeBranch = ctx.mod.block(
     null,
     [
-      ctx.mod.global.set(valueGlobal, initializer.expr),
+      ctx.mod.global.set(
+        valueGlobal,
+        storageType === runtimeType
+          ? initializer.expr
+          : lowerValueForHeapField({
+              value: initializer.expr,
+              typeId,
+              targetType: storageType,
+              ctx,
+              fnCtx,
+            }),
+      ),
       ctx.mod.global.set(readyGlobal, ctx.mod.i32.const(1)),
-      ctx.mod.global.get(valueGlobal, wasmType),
+      getterValue(loadStoredValue()),
     ],
     wasmType,
   );
 
   const body = ctx.mod.if(
     ctx.mod.i32.eq(ctx.mod.global.get(readyGlobal, binaryen.i32), ctx.mod.i32.const(1)),
-    ctx.mod.global.get(valueGlobal, wasmType),
+    getterValue(loadStoredValue()),
     initializeBranch,
   );
 

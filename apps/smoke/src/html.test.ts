@@ -2,6 +2,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createSdk, type CompileResult } from "@voyd/sdk";
 
+const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
+
 const expectCompileSuccess = (
   result: CompileResult,
 ): Extract<CompileResult, { success: true }> => {
@@ -15,7 +17,7 @@ const expectCompileSuccess = (
 describe("smoke: html.voyd", () => {
   it("returns the expected MsgPack object", async () => {
     const sdk = createSdk();
-    const entryPath = path.join(process.cwd(), "fixtures", "html.voyd");
+    const entryPath = path.join(fixtureRoot, "html.voyd");
     const result = expectCompileSuccess(await sdk.compile({ entryPath }));
 
     const output = await result.run<Record<string, unknown>>({

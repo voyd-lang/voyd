@@ -16,8 +16,14 @@ import type {
 import { effectsFacade } from "../effects/facade.js";
 import { ensureEffectArgsType } from "../effects/args-type.js";
 import { signatureHashFor } from "../effects/effect-registry.js";
-import { allocateTempLocal, loadBindingValue } from "../locals.js";
-import { getRequiredExprType, wasmTypeFor } from "../types.js";
+import { allocateTempLocal, loadBindingValue, storeLocalValue } from "../locals.js";
+import {
+  getInlineHeapBoxType,
+  getRequiredExprType,
+  wasmHeapFieldTypeFor,
+  wasmTypeFor,
+} from "../types.js";
+import { liftHeapValueToInline, lowerValueForHeapField } from "../structural.js";
 import {
   handlerCleanupOps,
   pushHandlerScope,
@@ -68,6 +74,7 @@ type ClauseEnvField = {
   symbol: number;
   typeId: number;
   wasmType: binaryen.Type;
+  storageType: binaryen.Type;
   fieldIndex: number;
 };
 
@@ -146,6 +153,14 @@ const buildClauseEnv = ({
             symbol,
             typeId,
             wasmType: binding.type,
+            storageType:
+              binding.kind === "local"
+                ? wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime")
+                : (getInlineHeapBoxType({
+                    typeId,
+                    ctx,
+                    mode: "runtime",
+                  }) ?? binding.type),
           };
         })
         .sort((a, b) => a.symbol - b.symbol)
@@ -155,7 +170,7 @@ const buildClauseEnv = ({
         name: `voydHandlerEnv_${sanitize(ctx.moduleLabel)}_${expr.id}`,
         fields: captured.map((field) => ({
           name: `c${field.fieldIndex}`,
-          type: field.wasmType,
+          type: field.storageType,
           mutable: false,
         })),
         final: true,
@@ -182,7 +197,16 @@ const buildClauseEnv = ({
       if (!binding) {
         throw new Error("missing handler env binding");
       }
-      return loadBindingValue(binding, ctx);
+      const value = loadBindingValue(binding, ctx);
+      return field.storageType === field.wasmType
+        ? value
+        : lowerValueForHeapField({
+            value,
+            typeId: field.typeId,
+            targetType: field.storageType,
+            ctx,
+            fnCtx,
+          });
     }) as number[]
   );
   return { envType: layout.envType, envValue, fields: layout.fields };
@@ -328,7 +352,7 @@ const emitClauseFunction = ({
   };
 
   env.fields.forEach((field) => {
-    const local = allocateTempLocal(field.wasmType, fnCtx, field.typeId);
+    const local = allocateTempLocal(field.wasmType, fnCtx, field.typeId, ctx);
     fnCtx.bindings.set(field.symbol, {
       ...local,
       kind: "local",
@@ -336,21 +360,31 @@ const emitClauseFunction = ({
     });
   });
 
-  const initOps: binaryen.ExpressionRef[] = env.fields.map((field) =>
-    ctx.mod.local.set(
-      field.fieldIndex + params.length,
-      structGetFieldValue({
-        mod: ctx.mod,
-        fieldIndex: field.fieldIndex,
-        fieldType: field.wasmType,
-        exprRef: refCast(
-          ctx.mod,
-          ctx.mod.local.get(1, binaryen.anyref),
-          env.envType
-        ),
-      })
-    )
-  );
+  const initOps: binaryen.ExpressionRef[] = env.fields.map((field) => {
+    const binding = fnCtx.bindings.get(field.symbol);
+    if (!binding || binding.kind !== "local") {
+      throw new Error("missing local binding for handler env field");
+    }
+    const stored = structGetFieldValue({
+      mod: ctx.mod,
+      fieldIndex: field.fieldIndex,
+      fieldType: field.storageType,
+      exprRef: refCast(
+        ctx.mod,
+        ctx.mod.local.get(1, binaryen.anyref),
+        env.envType
+      ),
+    });
+    const value =
+      field.storageType === field.wasmType
+        ? stored
+        : liftHeapValueToInline({
+            value: stored,
+            typeId: field.typeId,
+            ctx,
+          });
+    return storeLocalValue({ binding, value, ctx, fnCtx });
+  });
 
   const requestLocal = allocateTempLocal(
     ctx.effectsRuntime.effectRequestType,
@@ -424,7 +458,8 @@ const emitClauseFunction = ({
     const continuationBinding = allocateTempLocal(
       wasmTypeFor(continuationTypeId, ctx),
       fnCtx,
-      continuationTypeId
+      continuationTypeId,
+      ctx,
     );
     initOps.push(
       ctx.mod.local.set(
@@ -460,19 +495,27 @@ const emitClauseFunction = ({
   clause.parameters.slice(clause.parameters[0] ? 1 : 0).forEach((param, index) => {
     const typeId = resolvedParamTypes[index] ?? ctx.program.primitives.unknown;
     const wasmType = wasmTypeFor(typeId, ctx);
-    const binding = allocateTempLocal(wasmType, fnCtx, typeId);
+    const binding = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
+    const storedArgType = wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime");
+    const storedArg =
+      !argsType
+        ? ctx.mod.ref.null(storedArgType)
+        : structGetFieldValue({
+            mod: ctx.mod,
+            fieldIndex: index,
+            fieldType: storedArgType,
+            exprRef: refCast(ctx.mod, argsRef, argsType),
+          });
+    const value =
+      binding.storageType === binding.type
+        ? storedArg
+        : liftHeapValueToInline({
+            value: storedArg,
+            typeId,
+            ctx,
+          });
     initOps.push(
-      ctx.mod.local.set(
-        binding.index,
-        !argsType
-          ? ctx.mod.ref.null(wasmType)
-          : structGetFieldValue({
-              mod: ctx.mod,
-              fieldIndex: index,
-              fieldType: wasmType,
-              exprRef: refCast(ctx.mod, argsRef, argsType),
-            })
-      )
+      storeLocalValue({ binding, value, ctx, fnCtx })
     );
     fnCtx.bindings.set(param.symbol, { ...binding, kind: "local", typeId });
   });

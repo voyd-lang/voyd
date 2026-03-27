@@ -40,6 +40,7 @@ const PUB_DECL_KEYWORDS = new Set([
   "var",
   "type",
   "obj",
+  "value",
   "trait",
   "impl",
   "eff",

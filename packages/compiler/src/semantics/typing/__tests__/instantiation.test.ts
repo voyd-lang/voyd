@@ -85,6 +85,7 @@ const primeBoxTemplate = (
   const type = ctx.arena.internIntersection({ nominal, structural });
   ctx.objects.registerTemplate({
     symbol: boxSymbol,
+    objectKind: "obj",
     params: [{ symbol: typeParamSymbol, typeParam, constraint }],
     nominal,
     structural,
@@ -124,6 +125,7 @@ const primeSomeTemplate = (
   const type = ctx.arena.internIntersection({ nominal, structural });
   ctx.objects.registerTemplate({
     symbol: someSymbol,
+    objectKind: "obj",
     params: [{ symbol: typeParamSymbol, typeParam }],
     nominal,
     structural,
@@ -160,6 +162,7 @@ const primeNoneTemplate = (
   const type = ctx.arena.internIntersection({ nominal, structural });
   ctx.objects.registerTemplate({
     symbol: noneSymbol,
+    objectKind: "obj",
     params: [{ symbol: typeParamSymbol, typeParam }],
     nominal,
     structural,
@@ -213,6 +216,7 @@ const primeBucketMapTemplate = (
   const type = ctx.arena.internIntersection({ nominal, structural });
   ctx.objects.registerTemplate({
     symbol: mapSymbol,
+    objectKind: "obj",
     params: [
       { symbol: keyParamSymbol, typeParam: keyParam },
       { symbol: valueParamSymbol, typeParam: valueParam },

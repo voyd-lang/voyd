@@ -253,7 +253,7 @@ Value types should be valid generic arguments.
 However, layout strategy depends on the container:
 
 - `FixedArray<T>` should store value elements inline when `T` is a value type.
-- `Array<T>` may initially box value elements if inline storage is not ready yet.
+- `Array<T>` should store value elements inline in the MVP, including through its `FixedArray<T>` backing storage and reallocation paths.
 - Long term, stdlib containers should specialize layout for value elements where profitable.
 
 This proposal does not require inline-value specialization for every container on day one,
@@ -272,8 +272,8 @@ Required compiler consequences:
 Codegen should prefer:
 
 - plain Wasm locals for scalar fields
-- multi-value params/results where practical
-- stack-like temporary storage for larger aggregates
+- multi-value params/results where practical, using direct multi-value lowering for aggregates up to 4 ABI lanes
+- stack-like temporary storage for larger aggregates, spilling lanes once a value exceeds the 4-lane threshold
 - materializing a heap object only when code explicitly requests boxing or when a value
   escapes to a heap/reference context
 
@@ -317,8 +317,8 @@ Poor candidates for `value`:
 
 ## Open Questions
 
-- Do we want structural value types (`%{}`) after nominal `value` lands?
-- Should `Array<T>` inline value elements in the MVP or in a follow-up?
-- What size threshold should trigger stack-slot aggregation vs. multi-value lowering?
-- Do we want an explicit source-level boxing syntax, and if so what should it be?
-- Should unions/optionals with value payloads use dedicated inline layouts in the MVP?
+- Do we want structural value types (`%{}`) after nominal `value` lands? - NO
+- Should `Array<T>` inline value elements in the MVP or in a follow-up? - YES, in MVP
+- What size threshold should trigger stack-slot aggregation vs. multi-value lowering? - Use direct multi-value lowering through 4 ABI lanes, then spill to stack-like temporaries.
+- Do we want an explicit source-level boxing syntax, and if so what should it be? - Not for MVP.
+- Should unions/optionals with value payloads use dedicated inline layouts in the MVP? - YES.

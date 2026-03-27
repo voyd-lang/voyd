@@ -21,7 +21,10 @@ export const emitRecursiveStructuralHeapTypeGroup = ({
   structNameFor: (id: TypeId) => string;
   resolveStructuralTypeId: (typeId: TypeId) => TypeId | undefined;
   ensureStructuralRuntimeType: (structuralId: TypeId) => binaryen.Type;
-  lowerNonStructural: (typeId: TypeId) => binaryen.Type;
+  lowerNonStructural: (
+    typeId: TypeId,
+    ownerStructuralId?: TypeId,
+  ) => binaryen.Type;
   baseHeapType: number;
 }): void => {
   const inGroup = new Set(component);
@@ -70,6 +73,7 @@ export const emitRecursiveStructuralHeapTypeGroup = ({
           break;
         }
         case "nominal-object":
+        case "value-object":
         case "trait":
           desc.typeArgs.forEach((arg) => pending.push(arg));
           break;
@@ -194,6 +198,26 @@ export const emitRecursiveStructuralHeapTypeGroup = ({
           mutable: false,
         },
         ...desc.fields.map((field) => {
+          const fieldNominalId = (() => {
+            const typeDesc = ctx.program.types.getTypeDesc(field.type);
+            if (typeDesc.kind === "nominal-object" || typeDesc.kind === "value-object") {
+              return field.type;
+            }
+            if (typeDesc.kind === "intersection" && typeof typeDesc.nominal === "number") {
+              return typeDesc.nominal;
+            }
+            return undefined;
+          })();
+          if (typeof fieldNominalId === "number") {
+            const fieldNominalDesc = ctx.program.types.getTypeDesc(fieldNominalId);
+            if (fieldNominalDesc.kind === "value-object") {
+              return {
+                name: field.name,
+                type: lowerNonStructural(field.type, id),
+                mutable: true,
+              };
+            }
+          }
           const fieldStructural = resolveStructuralTypeId(field.type);
           if (typeof fieldStructural === "number") {
             const groupIndex = indexByType.get(fieldStructural);
@@ -205,7 +229,7 @@ export const emitRecursiveStructuralHeapTypeGroup = ({
           }
           return {
             name: field.name,
-            type: lowerNonStructural(field.type),
+            type: lowerNonStructural(field.type, id),
             mutable: true,
           };
         }),
@@ -246,7 +270,11 @@ export const emitRecursiveStructuralHeapTypeGroup = ({
           );
         }
         if (!ctx.fixedArrayTypes.has(elementType)) {
-          ctx.fixedArrayTypes.set(elementType, { type: typeRef, heapType });
+          ctx.fixedArrayTypes.set(elementType, {
+            kind: "plain-array",
+            type: typeRef,
+            heapType,
+          });
           try {
             bin._BinaryenModuleSetTypeName(
               (ctx.mod as any).ptr,

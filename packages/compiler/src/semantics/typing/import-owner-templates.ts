@@ -102,6 +102,7 @@ const collectOwnerRefs = (
     const desc = arena.get(current);
     switch (desc.kind) {
       case "nominal-object":
+      case "value-object":
       case "trait": {
         const ownerKey = symbolRefKey(desc.owner);
         if (!seenOwners.has(ownerKey)) {

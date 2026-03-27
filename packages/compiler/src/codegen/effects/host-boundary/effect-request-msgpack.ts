@@ -18,7 +18,7 @@ const buildArgsArray = ({
   runtime,
 }: {
   sig: EffectOpSignature;
-  request: binaryen.ExpressionRef;
+  request: () => binaryen.ExpressionRef;
   msgPackType: binaryen.Type;
   msgpack: ReturnType<typeof ensureMsgPackFunctions>;
   arrayLocal: number;
@@ -32,7 +32,7 @@ const buildArgsArray = ({
     [ctx.mod.i32.const(argsCount)],
     arrayType
   );
-  const argsRef = runtime.requestArgs(request);
+  const argsRef = runtime.requestArgs(request());
   const typedArgs = sig.argsType
     ? refCast(ctx.mod, argsRef, sig.argsType)
     : ctx.mod.ref.null(binaryen.eqref);
@@ -82,7 +82,7 @@ const buildEffectRequestMap = ({
   ctx,
   runtime,
 }: {
-  request: binaryen.ExpressionRef;
+  request: () => binaryen.ExpressionRef;
   argsArray: binaryen.ExpressionRef;
   msgPackType: binaryen.Type;
   msgpack: ReturnType<typeof ensureMsgPackFunctions>;
@@ -92,11 +92,11 @@ const buildEffectRequestMap = ({
 }): binaryen.ExpressionRef => {
   const mapType = msgpack.mapNew.resultType;
   const mapInit = ctx.mod.call(msgpack.mapNew.wasmName, [], mapType);
-  const effectId = runtime.requestEffectId(request);
-  const opId = runtime.requestOpId(request);
-  const opIndex = runtime.requestOpIndex(request);
-  const resumeKind = runtime.requestResumeKind(request);
-  const handle = runtime.requestHandle(request);
+  const effectId = runtime.requestEffectId(request());
+  const opId = runtime.requestOpId(request());
+  const opIndex = runtime.requestOpIndex(request());
+  const resumeKind = runtime.requestResumeKind(request());
+  const handle = runtime.requestHandle(request());
   const keys = {
     effectId: emitStringLiteral(EFFECT_REQUEST_MSGPACK_KEYS.effectId, ctx),
     opId: emitStringLiteral(EFFECT_REQUEST_MSGPACK_KEYS.opId, ctx),
@@ -207,7 +207,7 @@ export const buildEffectRequestMsgPack = ({
   runtime,
 }: {
   sig: EffectOpSignature;
-  request: binaryen.ExpressionRef;
+  request: () => binaryen.ExpressionRef;
   msgPackType: binaryen.Type;
   msgpack: ReturnType<typeof ensureMsgPackFunctions>;
   arrayLocal: number;
@@ -234,4 +234,3 @@ export const buildEffectRequestMsgPack = ({
     runtime,
   });
 };
-

@@ -12,7 +12,6 @@ import type {
 import { compilePatternInitialization } from "../patterns.js";
 import { coerceValueToType } from "../structural.js";
 import {
-  getExprBinaryenType,
   getRequiredExprType,
   wasmTypeFor,
 } from "../types.js";
@@ -20,6 +19,32 @@ import { asStatement, coerceToBinaryenType } from "./utils.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { handlerCleanupOps } from "../effects/handler-stack.js";
 import { tailResumptionExitChecks } from "../effects/tail-resumptions.js";
+import { boxSignatureSpillValue } from "../signature-spill.js";
+
+const expressionUsesExpectedResultType = ({
+  exprId,
+  ctx,
+}: {
+  exprId: number;
+  ctx: CodegenContext;
+}): boolean => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (!expr) {
+    return false;
+  }
+  switch (expr.exprKind) {
+    case "identifier":
+    case "call":
+    case "method-call":
+    case "block":
+    case "if":
+    case "match":
+    case "effect-handler":
+      return true;
+    default:
+      return false;
+  }
+};
 
 export const compileBlockExpr = (
   expr: HirBlockExpr,
@@ -30,7 +55,9 @@ export const compileBlockExpr = (
   expectedResultTypeId?: TypeId
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const blockResultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const blockResultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const blockResultType = wasmTypeFor(blockResultTypeId, ctx);
   const statements: binaryen.ExpressionRef[] = [];
   expr.statements.forEach((stmtId) => {
     statements.push(compileStatement(stmtId, ctx, fnCtx, compileExpr));
@@ -44,7 +71,12 @@ export const compileBlockExpr = (
       tailPosition,
       expectedResultTypeId,
     });
-    const requiredActualType = getRequiredExprType(expr.value, ctx, typeInstanceId);
+    const requiredActualType =
+      typeof expectedResultTypeId === "number" &&
+      !usedReturnCall &&
+      expressionUsesExpectedResultType({ exprId: expr.value, ctx })
+        ? expectedResultTypeId
+        : getRequiredExprType(expr.value, ctx, typeInstanceId);
     const coercedToExpected =
       typeof expectedResultTypeId === "number" && !usedReturnCall
         ? coerceValueToType({
@@ -58,7 +90,8 @@ export const compileBlockExpr = (
     const coerced = coerceToBinaryenType(
       ctx,
       coercedToExpected,
-      blockResultType
+      blockResultType,
+      fnCtx,
     );
     if (statements.length === 0) {
       return { expr: coerced, usedReturnCall };
@@ -101,7 +134,8 @@ export const compileStatement = (
     case "expr-stmt":
       return asStatement(
         ctx,
-        compileExpr({ exprId: stmt.expr, ctx, fnCtx }).expr
+        compileExpr({ exprId: stmt.expr, ctx, fnCtx }).expr,
+        fnCtx,
       );
     case "return":
       if (typeof stmt.value === "number") {
@@ -118,7 +152,7 @@ export const compileStatement = (
         const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
         if (fnCtx.returnTypeId === ctx.program.primitives.void) {
           const cleanup = handlerCleanupOps({ ctx, fnCtx });
-          const valueStmt = asStatement(ctx, valueExpr.expr);
+          const valueStmt = asStatement(ctx, valueExpr.expr, fnCtx);
           if (fnCtx.effectful) {
             const wrapped = wrapValueInOutcome({
               valueExpr: ctx.mod.nop(),
@@ -142,10 +176,20 @@ export const compileStatement = (
           ctx,
           typeInstanceId
         );
+        const actualTypeId =
+          expressionUsesExpectedResultType({ exprId: stmt.value, ctx })
+            ? fnCtx.returnTypeId
+            : requiredActualType;
         const coerced = coerceValueToType({
           value: valueExpr.expr,
-          actualType: requiredActualType,
+          actualType: actualTypeId,
           targetType: fnCtx.returnTypeId,
+          ctx,
+          fnCtx,
+        });
+        const returnedValue = boxSignatureSpillValue({
+          value: coerced,
+          typeId: fnCtx.returnTypeId,
           ctx,
           fnCtx,
         });
@@ -165,26 +209,26 @@ export const compileStatement = (
             binaryen.none
           );
         }
-        if (binaryen.getExpressionType(coerced) === binaryen.none) {
+        if (binaryen.getExpressionType(returnedValue) === binaryen.none) {
           if (cleanup.length === 0) {
             return ctx.mod.block(
               null,
-              [coerced, ...tailChecks, ctx.mod.return()],
+              [returnedValue, ...tailChecks, ctx.mod.return()],
               binaryen.none
             );
           }
           return ctx.mod.block(
             null,
-            [...tailChecks, ...cleanup, coerced, ctx.mod.return()],
+            [...tailChecks, ...cleanup, returnedValue, ctx.mod.return()],
             binaryen.none
           );
         }
         if (cleanup.length === 0) {
-          return ctx.mod.block(null, [...tailChecks, ctx.mod.return(coerced)], binaryen.none);
+          return ctx.mod.block(null, [...tailChecks, ctx.mod.return(returnedValue)], binaryen.none);
         }
         return ctx.mod.block(
           null,
-          [...tailChecks, ...cleanup, ctx.mod.return(coerced)],
+          [...tailChecks, ...cleanup, ctx.mod.return(returnedValue)],
           binaryen.none
         );
       }

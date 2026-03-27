@@ -46,6 +46,7 @@ export interface ParsedTypeAliasDecl {
 export interface ParsedObjectDecl {
   form: Form;
   visibility: HirVisibility;
+  objectKind: "obj" | "value";
   name: IdentifierAtom;
   base?: Expr;
   body: Form;
@@ -300,7 +301,12 @@ export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
   }
 
   const keyword = form.at(index);
-  if (!isIdentifierWithValue(keyword, "obj")) {
+  const objectKind = isIdentifierWithValue(keyword, "obj")
+    ? "obj"
+    : isIdentifierWithValue(keyword, "value")
+      ? "value"
+      : undefined;
+  if (!objectKind) {
     return null;
   }
 
@@ -337,15 +343,16 @@ export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
   const resolvedBody = body ?? extractedFromHead?.literal ?? extractedFromBase?.literal;
 
   if (!head || !resolvedBody) {
-    throw new Error("obj declaration requires a field list");
+    throw new Error(`${objectKind} declaration requires a field list`);
   }
 
-  const { name, base, typeParameters } = parseObjectHead(head);
+  const { name, base, typeParameters } = parseObjectHead(head, objectKind);
   const fields = parseObjectFields(resolvedBody);
 
   return {
     form,
     visibility,
+    objectKind,
     name,
     base,
     body: resolvedBody,
@@ -862,14 +869,15 @@ const unwrapMutablePattern = (
 };
 
 const parseObjectHead = (
-  expr: Expr | undefined
+  expr: Expr | undefined,
+  objectKind: "obj" | "value",
 ): {
   name: IdentifierAtom;
   base?: Expr;
   typeParameters: readonly ParsedTypeParameter[];
 } => {
   if (!expr) {
-    throw new Error("obj declaration missing name");
+    throw new Error(`${objectKind} declaration missing name`);
   }
 
   if (isIdentifierAtom(expr)) {
@@ -887,7 +895,7 @@ const parseObjectHead = (
     return parseNamedTypeHead(expr);
   }
 
-  throw new Error("invalid obj declaration head");
+  throw new Error(`invalid ${objectKind} declaration head`);
 };
 
 const parseNamedTypeHead = (
