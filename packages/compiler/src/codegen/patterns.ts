@@ -130,6 +130,8 @@ const canDirectInitializeStorageBackedResult = ({
   switch (expr.exprKind) {
     case "call":
     case "method-call":
+    case "object-literal":
+    case "tuple":
       return true;
     case "block":
       return (

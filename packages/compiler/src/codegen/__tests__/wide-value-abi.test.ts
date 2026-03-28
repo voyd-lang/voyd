@@ -84,6 +84,56 @@ pub fn main() -> i32
     expect((instance.exports.main as () => number)()).toBe(3);
   });
 
+  it("initializes wide mutable locals from literals without boxing a fresh value object", () => {
+    const module = compileModule(`
+pub value WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+pub fn main() -> i32
+  let ~value = WideVec5 { a: 1, b: 2, c: 3, d: 4, e: 5 }
+  value.c
+    `);
+
+    const text = module.emitText();
+    expect(text).toMatch(/\(struct\.new_default\s/);
+    expect(text).not.toMatch(/\(struct\.new\s/);
+
+    const instance = getWasmInstance(module);
+    expect((instance.exports.main as () => number)()).toBe(3);
+  });
+
+  it("writes wide literal returns into the caller-provided out-ref storage", () => {
+    const module = compileModule(`
+pub value WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+fn make() -> WideVec5
+  WideVec5 { a: 1, b: 2, c: 3, d: 4, e: 5 }
+
+pub fn main() -> i32
+  let ~value = make()
+  value.e
+`);
+
+    const text = module.emitText();
+    expect(text).toMatch(/\(call \$std__wide_value_abi__make_\d+\s+\(local\.get \$0\)/);
+    expect(text).toMatch(/\(struct\.new_default\s/);
+    expect(text).not.toMatch(/\(struct\.new\s/);
+
+    const instance = getWasmInstance(module);
+    expect((instance.exports.main as () => number)()).toBe(5);
+  });
+
   it("threads storage-backed initialization through if wrappers", () => {
     const module = compileModule(`
 pub value WideVec5 {

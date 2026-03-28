@@ -24,10 +24,12 @@ import {
   liftHeapValueToInline,
   lowerValueForHeapField,
   loadStructuralField,
+  storeValueIntoStorageRef,
 } from "../structural.js";
 import { compileOptionalNoneValue } from "../optionals.js";
 import {
   getExprBinaryenType,
+  getInlineHeapBoxType,
   getInlineUnionLayout,
   getOptionalLayoutInfo,
   getRequiredExprType,
@@ -47,6 +49,7 @@ export const compileObjectLiteralExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
   expectedResultTypeId?: number,
+  outResultStorageRef?: binaryen.ExpressionRef,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
@@ -80,24 +83,50 @@ export const compileObjectLiteralExpr = (
       fnCtx,
       expectedResultTypeId: expectedOptionalInfo.innerType,
     }).expr;
+    const coerced = coerceValueToType({
+      value: payload,
+      actualType: payloadTypeId,
+      targetType: expectedResultTypeId!,
+      ctx,
+      fnCtx,
+    });
+    const direct = storeDirectOutResultValue({
+      value: coerced,
+      actualTypeId: expectedResultTypeId!,
+      targetTypeId: expectedResultTypeId!,
+      outResultStorageRef,
+      ops: [],
+      ctx,
+      fnCtx,
+    });
+    if (direct) {
+      return direct;
+    }
     return {
-      expr: coerceValueToType({
-        value: payload,
-        actualType: payloadTypeId,
-        targetType: expectedResultTypeId!,
-        ctx,
-        fnCtx,
-      }),
+      expr: coerced,
       usedReturnCall: false,
     };
   }
   if (isDirectNoneToOptional) {
+    const noneValue = compileOptionalNoneValue({
+      targetTypeId: expectedResultTypeId!,
+      ctx,
+      fnCtx,
+    });
+    const direct = storeDirectOutResultValue({
+      value: noneValue,
+      actualTypeId: expectedResultTypeId!,
+      targetTypeId: expectedResultTypeId!,
+      outResultStorageRef,
+      ops: [],
+      ctx,
+      fnCtx,
+    });
+    if (direct) {
+      return direct;
+    }
     return {
-      expr: compileOptionalNoneValue({
-        targetTypeId: expectedResultTypeId!,
-        ctx,
-        fnCtx,
-      }),
+      expr: noneValue,
       usedReturnCall: false,
     };
   }
@@ -299,6 +328,18 @@ export const compileObjectLiteralExpr = (
     fieldValues,
     ctx,
   });
+  const direct = storeDirectOutResultValue({
+    value: literal,
+    actualTypeId: typeId,
+    targetTypeId: expectedResultTypeId ?? typeId,
+    outResultStorageRef,
+    ops,
+    ctx,
+    fnCtx,
+  });
+  if (direct) {
+    return direct;
+  }
   const stabilizedLiteral = (() => {
     const literalType = binaryen.getExpressionType(literal);
     if (binaryen.expandType(literalType).length <= 1) {
@@ -337,7 +378,9 @@ export const compileTupleExpr = (
   expr: HirExpression & { exprKind: "tuple"; elements: readonly HirExprId[] },
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
+  expectedResultTypeId?: number,
+  outResultStorageRef?: binaryen.ExpressionRef,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
@@ -416,6 +459,18 @@ export const compileTupleExpr = (
     fieldValues,
     ctx,
   });
+  const direct = storeDirectOutResultValue({
+    value: tupleValue,
+    actualTypeId: typeId,
+    targetTypeId: expectedResultTypeId ?? typeId,
+    outResultStorageRef,
+    ops,
+    ctx,
+    fnCtx,
+  });
+  if (direct) {
+    return direct;
+  }
   const stabilizedTupleValue = (() => {
     const tupleType = binaryen.getExpressionType(tupleValue);
     if (binaryen.expandType(tupleType).length <= 1) {
@@ -447,6 +502,58 @@ export const compileTupleExpr = (
       binaryen.getExpressionType(stabilizedTupleValue)
     ),
     usedReturnCall: false,
+  };
+};
+
+const storeDirectOutResultValue = ({
+  value,
+  actualTypeId,
+  targetTypeId,
+  outResultStorageRef,
+  ops,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  actualTypeId: number;
+  targetTypeId: number;
+  outResultStorageRef?: binaryen.ExpressionRef;
+  ops: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): CompiledExpression | undefined => {
+  if (typeof outResultStorageRef !== "number") {
+    return undefined;
+  }
+
+  if (typeof getInlineHeapBoxType({ typeId: targetTypeId, ctx }) !== "number") {
+    return undefined;
+  }
+
+  if (
+    actualTypeId !== targetTypeId &&
+    wasmTypeFor(actualTypeId, ctx) !== wasmTypeFor(targetTypeId, ctx)
+  ) {
+    return undefined;
+  }
+
+  return {
+    expr: ctx.mod.block(
+      null,
+      [
+        ...ops,
+        storeValueIntoStorageRef({
+          pointer: () => outResultStorageRef,
+          value,
+          typeId: targetTypeId,
+          ctx,
+          fnCtx,
+        }),
+      ],
+      binaryen.none,
+    ),
+    usedReturnCall: false,
+    usedOutResultStorageRef: true,
   };
 };
 

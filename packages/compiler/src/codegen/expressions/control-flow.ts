@@ -39,6 +39,7 @@ import { compilePatternInitializationFromValue } from "../patterns.js";
 import { asStatement, coerceToBinaryenType } from "./utils.js";
 import {
   coerceValueToType,
+  storeValueIntoStorageRef,
 } from "../structural.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import { captureMultivalueLanes } from "../multivalue.js";
@@ -174,6 +175,55 @@ const normalizeOutResultStorageForwarding = ({
   return compiled;
 };
 
+const lowerToOutResultStorageIfNeeded = ({
+  compiled,
+  exprId,
+  resultTypeId,
+  outResultStorageRef,
+  ctx,
+  fnCtx,
+}: {
+  compiled: CompiledExpression;
+  exprId: number;
+  resultTypeId: TypeId;
+  outResultStorageRef?: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): CompiledExpression => {
+  const normalized = normalizeOutResultStorageForwarding({ compiled });
+  if (
+    typeof outResultStorageRef !== "number" ||
+    normalized.usedOutResultStorageRef
+  ) {
+    return normalized;
+  }
+
+  const actualTypeId = expressionUsesExpectedResultType({
+    exprId,
+    ctx,
+  })
+    ? resultTypeId
+    : getValueSourceTypeId(exprId, ctx, fnCtx.typeInstanceId ?? fnCtx.instanceId);
+  const coerced = coerceValueToType({
+    value: normalized.expr,
+    actualType: actualTypeId,
+    targetType: resultTypeId,
+    ctx,
+    fnCtx,
+  });
+  return {
+    expr: storeValueIntoStorageRef({
+      pointer: () => outResultStorageRef,
+      value: coerced,
+      typeId: resultTypeId,
+      ctx,
+      fnCtx,
+    }),
+    usedReturnCall: normalized.usedReturnCall,
+    usedOutResultStorageRef: true,
+  };
+};
+
 export const compileIfExpr = (
   expr: HirIfExpr,
   ctx: CodegenContext,
@@ -232,7 +282,14 @@ export const compileIfExpr = (
   if (!fallback) {
     fallback = { expr: ctx.mod.nop(), usedReturnCall: false };
   } else {
-    fallback = normalizeOutResultStorageForwarding({ compiled: fallback });
+    fallback = lowerToOutResultStorageIfNeeded({
+      compiled: fallback,
+      exprId: expr.defaultBranch!,
+      resultTypeId,
+      outResultStorageRef,
+      ctx,
+      fnCtx,
+    });
     if (!fallback.usedOutResultStorageRef && typeof expr.defaultBranch === "number") {
       const coercedFallback = coerceBranchValue({
         compiled: fallback,
@@ -270,8 +327,13 @@ export const compileIfExpr = (
         : undefined,
       outResultStorageRef,
     });
-    const loweredValue = normalizeOutResultStorageForwarding({
+    const loweredValue = lowerToOutResultStorageIfNeeded({
       compiled: value,
+      exprId: branch.value,
+      resultTypeId,
+      outResultStorageRef,
+      ctx,
+      fnCtx,
     });
     if (
       loweredValue.usedOutResultStorageRef &&
@@ -648,7 +710,7 @@ export const compileMatchExpr = (
 
     const armValue = (() => {
       try {
-        return normalizeOutResultStorageForwarding({
+        return lowerToOutResultStorageIfNeeded({
           compiled: compileExpr({
             exprId: arm.value,
             ctx,
@@ -656,6 +718,11 @@ export const compileMatchExpr = (
             tailPosition,
             outResultStorageRef,
           }),
+          exprId: arm.value,
+          resultTypeId,
+          outResultStorageRef,
+          ctx,
+          fnCtx,
         });
       } finally {
         restoreDiscriminantBinding?.();

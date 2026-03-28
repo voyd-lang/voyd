@@ -1482,6 +1482,13 @@ const compileFunctionItem = (
     fnCtx,
     tailPosition: !meta.effectful,
     expectedResultTypeId: fnCtx.returnTypeId,
+    outResultStorageRef:
+      meta.resultAbiKind === "out_ref" && fnCtx.returnOutPointer
+        ? ctx.mod.local.get(
+            fnCtx.returnOutPointer.index,
+            fnCtx.returnOutPointer.storageType,
+          )
+        : undefined,
   });
   const bodyExpr =
     defaultInitOps.length > 0

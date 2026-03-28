@@ -160,6 +160,92 @@ pub fn main() -> i32
     expect(main()).toBe(10);
   });
 
+  it("keeps projected wide locals borrowed across readonly root accesses", () => {
+    const main = compileMain(`
+pub value WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+pub fn main() -> i32
+  let arr = __array_new<WideVec5>(2)
+  __array_set(arr, 0, WideVec5 { a: 1, b: 2, c: 3, d: 4, e: 5 })
+  __array_set(arr, 1, WideVec5 { a: 6, b: 7, c: 8, d: 9, e: 10 })
+  let value = __array_get(arr, 1)
+  value.e + __array_len(arr)
+`);
+    expect(main()).toBe(12);
+  });
+
+  it("keeps projected wide locals borrowed across readonly alias accesses", () => {
+    const main = compileMain(`
+pub value WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+pub fn main() -> i32
+  let arr = __array_new<WideVec5>(2)
+  __array_set(arr, 0, WideVec5 { a: 1, b: 2, c: 3, d: 4, e: 5 })
+  __array_set(arr, 1, WideVec5 { a: 6, b: 7, c: 8, d: 9, e: 10 })
+  let alias = arr
+  let value = __array_get(arr, 1)
+  value.e + __array_len(alias)
+`);
+    expect(main()).toBe(12);
+  });
+
+  it("keeps projected wide locals borrowed across readonly assignment aliases", () => {
+    const main = compileMain(`
+pub value WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+pub fn main() -> i32
+  let arr = __array_new<WideVec5>(2)
+  __array_set(arr, 0, WideVec5 { a: 1, b: 2, c: 3, d: 4, e: 5 })
+  __array_set(arr, 1, WideVec5 { a: 6, b: 7, c: 8, d: 9, e: 10 })
+  var alias = __array_new<WideVec5>(0)
+  let value = __array_get(arr, 1)
+  alias = arr
+  value.e + __array_len(alias)
+`);
+    expect(main()).toBe(12);
+  });
+
+  it("keeps projected wide locals borrowed across nested readonly assignment aliases", () => {
+    const main = compileMain(`
+pub value WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+pub fn main() -> i32
+  let arr = __array_new<WideVec5>(2)
+  __array_set(arr, 0, WideVec5 { a: 1, b: 2, c: 3, d: 4, e: 5 })
+  __array_set(arr, 1, WideVec5 { a: 6, b: 7, c: 8, d: 9, e: 10 })
+  var alias = __array_new<WideVec5>(0)
+  let value = __array_get(arr, 1)
+  if true:
+    alias = arr
+  value.e + __array_len(alias)
+`);
+    expect(main()).toBe(12);
+  });
+
   it("passes projected wide locals to non-mut methods without materializing eagerly", () => {
     const main = compileMain(`
 pub value WideVec5 {

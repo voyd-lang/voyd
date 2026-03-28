@@ -239,6 +239,69 @@ pub fn value_wide_array_local_view_access() -> i32
   let value = items.at(1)
   value.e + value.b
 
+pub fn value_wide_array_local_view_survives_readonly_alias_access() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  let alias = items
+  let value = items.at(1)
+  value.e + alias.len()
+
+pub fn value_wide_array_local_view_survives_readonly_assignment_alias() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  var alias = Array<WideVec5>::with_capacity(0)
+  let value = items.at(1)
+  alias = items
+  value.e + alias.len()
+
+pub fn value_wide_array_local_view_survives_nested_assignment_alias() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  var alias = Array<WideVec5>::with_capacity(0)
+  let value = items.at(1)
+  if true:
+    alias = items
+  value.e + alias.len()
+
 pub fn value_wide_array_local_materializes_for_mut_param() -> i32
   let ~items = Array<WideVec5>::with_capacity(1)
   items.push(WideVec5 {
@@ -404,6 +467,29 @@ pub fn value_wide_array_get_immediate_payload() -> i32
   match(items.get(1))
     Some<WideVec5> { value }:
       value.tail_sum()
+    None:
+      -1
+
+pub fn value_wide_array_get_immediate_payload_survives_readonly_alias_access() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  let alias = items
+  match(items.get(1))
+    Some<WideVec5> { value }:
+      value.e + alias.len()
     None:
       -1
 

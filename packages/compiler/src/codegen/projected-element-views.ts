@@ -349,10 +349,11 @@ export const tryCompileProjectedOptionalPayloadBinding = ({
       : undefined;
   if (
     rootAliases &&
-    expressionUsesAnyIdentifier({
+    expressionUsesProjectedRootUnsafely({
       exprId: armValueExprId,
       symbols: rootAliases,
       ctx,
+      fnCtx,
     })
   ) {
     return undefined;
@@ -1022,6 +1023,21 @@ const isIntrinsicArrayGetCall = ({
   return ctx.program.symbols.getIntrinsicName(calleeId) === "__array_get";
 };
 
+const isIntrinsicArrayLenCall = ({
+  expr,
+  ctx,
+}: {
+  expr: HirCallExpr;
+  ctx: CodegenContext;
+}): boolean => {
+  const callee = ctx.module.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return false;
+  }
+  const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+  return ctx.program.symbols.getIntrinsicName(calleeId) === "__array_len";
+};
+
 const isFixedArrayGetCall = ({
   expr,
   ctx,
@@ -1039,6 +1055,32 @@ const isFixedArrayGetCall = ({
   if (
     typeof targetFunctionId !== "number" ||
     ctx.program.symbols.getName(targetFunctionId as ProgramSymbolId) !== "get"
+  ) {
+    return false;
+  }
+
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const arrayTypeId = getRequiredExprType(expr.args[0]!.expr, ctx, typeInstanceId);
+  return ctx.program.types.getTypeDesc(arrayTypeId).kind === "fixed-array";
+};
+
+const isFixedArrayLenCall = ({
+  expr,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirCallExpr;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): boolean => {
+  if (expr.args.length !== 1) {
+    return false;
+  }
+
+  const targetFunctionId = resolveCallTarget({ exprId: expr.id, ctx, fnCtx });
+  if (
+    typeof targetFunctionId !== "number" ||
+    ctx.program.symbols.getName(targetFunctionId as ProgramSymbolId) !== "len"
   ) {
     return false;
   }
@@ -1093,14 +1135,16 @@ const resolveOptionalPayloadBindingSymbol = (
   return undefined;
 };
 
-const expressionUsesAnyIdentifier = ({
+export const expressionUsesProjectedRootUnsafely = ({
   exprId,
   symbols,
   ctx,
+  fnCtx,
 }: {
   exprId: HirExprId;
   symbols: ReadonlySet<SymbolId>;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
 }): boolean => {
   let used = false;
   walkHirExpression({
@@ -1109,7 +1153,33 @@ const expressionUsesAnyIdentifier = ({
     visitLambdaBodies: true,
     visitHandlerBodies: true,
     visitor: {
-      onExpr: (_exprId, expr) => {
+      onExpr: (currentExprId, expr) => {
+        if (
+          isSafeProjectedRootAliasAssignment({
+            exprId: currentExprId,
+            symbols,
+            ctx,
+          })
+        ) {
+          return "skip";
+        }
+        if (
+          expr.exprKind === "lambda" &&
+          expr.captures.some((capture) => symbols.has(capture.symbol))
+        ) {
+          used = true;
+          return "stop";
+        }
+        if (
+          isSafeReadonlyProjectedRootUse({
+            exprId: currentExprId,
+            symbols,
+            ctx,
+            fnCtx,
+          })
+        ) {
+          return "skip";
+        }
         if (expr.exprKind === "identifier" && symbols.has(expr.symbol)) {
           used = true;
           return "stop";
@@ -1119,6 +1189,173 @@ const expressionUsesAnyIdentifier = ({
     },
   });
   return used;
+};
+
+const isSafeReadonlyProjectedRootUse = ({
+  exprId,
+  symbols,
+  ctx,
+  fnCtx,
+}: {
+  exprId: HirExprId;
+  symbols: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): boolean => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (!expr) {
+    return false;
+  }
+
+  if (expr.exprKind === "field-access") {
+    return isSafeReadonlyProjectedRootBase({
+      exprId: expr.target,
+      symbols,
+      ctx,
+      fnCtx,
+    });
+  }
+
+  if (expr.exprKind === "method-call") {
+    if (
+      !isArrayMethodAccess({
+        expr,
+        methodName: expr.method,
+        ctx,
+        fnCtx,
+      }) ||
+      !new Set(["at", "get", "len"]).has(expr.method)
+    ) {
+      return false;
+    }
+
+    if (
+      !isSafeReadonlyProjectedRootBase({
+        exprId: expr.target,
+        symbols,
+        ctx,
+        fnCtx,
+      })
+    ) {
+      return false;
+    }
+
+    return expr.args.every(
+      (arg) =>
+        !expressionUsesProjectedRootUnsafely({
+          exprId: arg.expr,
+          symbols,
+          ctx,
+          fnCtx,
+        }),
+    );
+  }
+
+  if (expr.exprKind !== "call") {
+    return false;
+  }
+
+  const rootArgIndex = resolveSafeReadonlyProjectedRootArgIndex({
+    expr,
+    ctx,
+    fnCtx,
+  });
+  if (typeof rootArgIndex !== "number") {
+    return false;
+  }
+
+  return expr.args.every((arg, index) =>
+    index === rootArgIndex
+      ? isSafeReadonlyProjectedRootBase({
+          exprId: arg.expr,
+          symbols,
+          ctx,
+          fnCtx,
+        })
+      : !expressionUsesProjectedRootUnsafely({
+          exprId: arg.expr,
+          symbols,
+          ctx,
+          fnCtx,
+        }),
+  );
+};
+
+const isSafeReadonlyProjectedRootBase = ({
+  exprId,
+  symbols,
+  ctx,
+  fnCtx,
+}: {
+  exprId: HirExprId;
+  symbols: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): boolean => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (!expr) {
+    return false;
+  }
+  if (expr.exprKind === "identifier") {
+    return symbols.has(expr.symbol);
+  }
+  return isSafeReadonlyProjectedRootUse({
+    exprId,
+    symbols,
+    ctx,
+    fnCtx,
+  });
+};
+
+const resolveSafeReadonlyProjectedRootArgIndex = ({
+  expr,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirCallExpr;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): number | undefined => {
+  if (
+    (isIntrinsicArrayGetCall({ expr, ctx }) && expr.args.length === 2) ||
+    (isIntrinsicArrayLenCall({ expr, ctx }) && expr.args.length === 1) ||
+    (isFixedArrayGetCall({ expr, ctx, fnCtx }) && expr.args.length === 2) ||
+    (isFixedArrayLenCall({ expr, ctx, fnCtx }) && expr.args.length === 1)
+  ) {
+    return 0;
+  }
+  return undefined;
+};
+
+const isSafeProjectedRootAliasAssignment = ({
+  exprId,
+  symbols,
+  ctx,
+}: {
+  exprId: HirExprId;
+  symbols: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+}): boolean => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (expr?.exprKind !== "assign") {
+    return false;
+  }
+
+  const valueExpr = ctx.module.hir.expressions.get(expr.value);
+  if (valueExpr?.exprKind !== "identifier" || !symbols.has(valueExpr.symbol)) {
+    return false;
+  }
+
+  if (expr.pattern?.kind === "identifier") {
+    return !symbols.has(expr.pattern.symbol);
+  }
+
+  if (typeof expr.target !== "number") {
+    return false;
+  }
+
+  const targetExpr = ctx.module.hir.expressions.get(expr.target);
+  return targetExpr?.exprKind === "identifier" && !symbols.has(targetExpr.symbol);
 };
 
 const makeInlineValue = (

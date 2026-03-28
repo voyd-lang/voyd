@@ -132,6 +132,27 @@ describe("smoke: value types", () => {
     expect(output).toBe(17);
   });
 
+  it("keeps wide array locals borrowed across readonly alias access", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_local_view_survives_readonly_alias_access",
+    });
+    expect(output).toBe(12);
+  });
+
+  it("keeps wide array locals borrowed across readonly assignment aliases", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_local_view_survives_readonly_assignment_alias",
+    });
+    expect(output).toBe(12);
+  });
+
+  it("keeps wide array locals borrowed across nested readonly assignment aliases", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_local_view_survives_nested_assignment_alias",
+    });
+    expect(output).toBe(12);
+  });
+
   it("materializes wide array locals before mutable-ref calls", async () => {
     const output = await compiled.run<number>({
       entryName: "value_wide_array_local_materializes_for_mut_param",
@@ -193,6 +214,13 @@ describe("smoke: value types", () => {
       entryName: "value_wide_array_get_immediate_payload",
     });
     expect(output).toBe(17);
+  });
+
+  it("keeps wide Array.get payloads borrowed across readonly alias access", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_get_immediate_payload_survives_readonly_alias_access",
+    });
+    expect(output).toBe(12);
   });
 
   it("materializes projected Array.get payloads before alias mutation", async () => {

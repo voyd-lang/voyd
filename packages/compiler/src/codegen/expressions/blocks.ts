@@ -14,6 +14,7 @@ import { walkHirExpression } from "../hir-walk.js";
 import type { HirStatement } from "../../semantics/index.js";
 import { compilePatternInitialization } from "../patterns.js";
 import {
+  expressionUsesProjectedRootUnsafely,
   tryCompileProjectedElementBinding,
   tryResolveProjectedElementRootSymbol,
 } from "../projected-element-views.js";
@@ -202,17 +203,33 @@ export const compileStatement = (
       );
     case "return":
       if (typeof stmt.value === "number") {
+        const returnOutResultStorageRef =
+          fnCtx.returnAbiKind === "out_ref" && fnCtx.returnOutPointer
+            ? ctx.mod.local.get(
+                fnCtx.returnOutPointer.index,
+                fnCtx.returnOutPointer.storageType,
+              )
+            : undefined;
         const valueExpr = compileExpr({
           exprId: stmt.value,
           ctx,
           fnCtx,
           tailPosition: true,
           expectedResultTypeId: fnCtx.returnTypeId,
+          outResultStorageRef: returnOutResultStorageRef,
         });
         if (valueExpr.usedReturnCall) {
           return valueExpr.expr;
         }
         const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
+        if (valueExpr.usedOutResultStorageRef) {
+          const cleanup = handlerCleanupOps({ ctx, fnCtx });
+          const ops =
+            cleanup.length === 0
+              ? [valueExpr.expr, ...tailChecks, ctx.mod.return()]
+              : [...tailChecks, ...cleanup, valueExpr.expr, ctx.mod.return()];
+          return ctx.mod.block(null, ops, binaryen.none);
+        }
         if (fnCtx.returnAbiKind === "out_ref" && fnCtx.returnOutPointer) {
           const storedValue = coerceValueToType({
             value: valueExpr.expr,
@@ -445,6 +462,7 @@ const collectNonBorrowableProjectedSymbols = ({
         startStatementIndex: index + 1,
         symbols: rootAliases,
         ctx,
+        fnCtx,
       })
     ) {
       symbols.add(stmt.pattern.symbol);
@@ -539,15 +557,17 @@ const laterBlockCodeUsesAnySymbol = ({
   startStatementIndex,
   symbols,
   ctx,
+  fnCtx,
 }: {
   expr: HirBlockExpr;
   startStatementIndex: number;
   symbols: ReadonlySet<SymbolId>;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
 }): boolean => {
   for (let index = startStatementIndex; index < expr.statements.length; index += 1) {
     const stmt = ctx.module.hir.statements.get(expr.statements[index]!);
-    if (stmt && statementUsesAnySymbol({ stmt, symbols, ctx })) {
+    if (stmt && statementUsesAnySymbol({ stmt, symbols, ctx, fnCtx })) {
       return true;
     }
   }
@@ -558,6 +578,7 @@ const laterBlockCodeUsesAnySymbol = ({
       exprId: expr.value,
       symbols,
       ctx,
+      fnCtx,
     })
   );
 };
@@ -566,23 +587,46 @@ const statementUsesAnySymbol = ({
   stmt,
   symbols,
   ctx,
+  fnCtx,
 }: {
   stmt: HirStatement;
   symbols: ReadonlySet<SymbolId>;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
 }): boolean => {
   switch (stmt.kind) {
     case "let":
+      if (
+        stmt.pattern.kind === "identifier" &&
+        isSimpleIdentifierAliasExpr({
+          exprId: stmt.initializer,
+          symbols,
+          ctx,
+        })
+      ) {
+        return false;
+      }
       return expressionUsesAnySymbol({
         exprId: stmt.initializer,
         symbols,
         ctx,
+        fnCtx,
       });
     case "expr-stmt":
+      if (
+        isSimpleIdentifierAliasAssignmentExpr({
+          exprId: stmt.expr,
+          symbols,
+          ctx,
+        })
+      ) {
+        return false;
+      }
       return expressionUsesAnySymbol({
         exprId: stmt.expr,
         symbols,
         ctx,
+        fnCtx,
       });
     case "return":
       return (
@@ -591,6 +635,7 @@ const statementUsesAnySymbol = ({
           exprId: stmt.value,
           symbols,
           ctx,
+          fnCtx,
         })
       );
     default:
@@ -602,28 +647,64 @@ const expressionUsesAnySymbol = ({
   exprId,
   symbols,
   ctx,
+  fnCtx,
+}: {
+  exprId: number;
+  symbols: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): boolean =>
+  expressionUsesProjectedRootUnsafely({
+    exprId,
+    symbols,
+    ctx,
+    fnCtx,
+  });
+
+const isSimpleIdentifierAliasExpr = ({
+  exprId,
+  symbols,
+  ctx,
 }: {
   exprId: number;
   symbols: ReadonlySet<SymbolId>;
   ctx: CodegenContext;
 }): boolean => {
-  let used = false;
-  walkHirExpression({
-    exprId,
-    ctx,
-    visitLambdaBodies: true,
-    visitHandlerBodies: true,
-    visitor: {
-      onExpr: (_exprId, expr) => {
-        if (expr.exprKind === "identifier" && symbols.has(expr.symbol)) {
-          used = true;
-          return "stop";
-        }
-        return undefined;
-      },
-    },
-  });
-  return used;
+  const expr = ctx.module.hir.expressions.get(exprId);
+  return expr?.exprKind === "identifier" && symbols.has(expr.symbol);
+};
+
+const isSimpleIdentifierAliasAssignmentExpr = ({
+  exprId,
+  symbols,
+  ctx,
+}: {
+  exprId: number;
+  symbols: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+}): boolean => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (
+    expr?.exprKind !== "assign" ||
+    !isSimpleIdentifierAliasExpr({
+      exprId: expr.value,
+      symbols,
+      ctx,
+    })
+  ) {
+    return false;
+  }
+
+  if (expr.pattern?.kind === "identifier") {
+    return !symbols.has(expr.pattern.symbol);
+  }
+
+  if (typeof expr.target !== "number") {
+    return false;
+  }
+
+  const targetExpr = ctx.module.hir.expressions.get(expr.target);
+  return targetExpr?.exprKind === "identifier" && !symbols.has(targetExpr.symbol);
 };
 
 const collectSimpleIdentifierAliases = ({

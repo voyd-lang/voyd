@@ -134,11 +134,19 @@ export const compileExpression: ExpressionCompiler = ({
         fnCtx,
         compileExpression,
         expectedResultTypeId,
+        outResultStorageRef,
       );
     case "field-access":
       return compileFieldAccessExpr(expr, ctx, fnCtx, compileExpression);
     case "tuple":
-      return compileTupleExpr(expr, ctx, fnCtx, compileExpression);
+      return compileTupleExpr(
+        expr,
+        ctx,
+        fnCtx,
+        compileExpression,
+        expectedResultTypeId,
+        outResultStorageRef,
+      );
     case "lambda":
       return compileLambdaExpr(expr, ctx, fnCtx, compileExpression);
     case "effect-handler":
