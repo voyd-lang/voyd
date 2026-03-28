@@ -550,10 +550,17 @@ const materializeCallArgumentPlan = ({
     }
 
     if (entry.kind === "missing") {
-      return compileOptionalNoneValue({
-        targetTypeId: entry.targetTypeId,
+      return lowerCallArgumentForAbi({
+        argValue: compileOptionalNoneValue({
+          targetTypeId: entry.targetTypeId,
+          ctx,
+          fnCtx,
+        }),
+        paramTypeId,
+        abiKind,
         ctx,
         fnCtx,
+        compileExpr,
       });
     }
 

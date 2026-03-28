@@ -164,4 +164,61 @@ pub fn main() -> i32
     const instance = getWasmInstance(module);
     expect((instance.exports.main as () => number)()).toBe(11);
   });
+
+  it("supports wide default parameters lowered through storage-ref bindings", () => {
+    const module = compileModule(`
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+pub value WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+fn sum_edges(value: WideVec5 = WideVec5 { a: 9, b: 2, c: 3, d: 4, e: 1 }) -> i32
+  value.a + value.e
+
+pub fn main() -> i32
+  sum_edges() + sum_edges(WideVec5 { a: 1, b: 2, c: 3, d: 4, e: 5 })
+`);
+
+    const instance = getWasmInstance(module);
+    expect((instance.exports.main as () => number)()).toBe(16);
+  });
+
+  it("preserves out-ref returns in mixed-effect wrapper impls", () => {
+    const module = compileModule(`
+pub value WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+eff Async
+  await(tail) -> i32
+
+fn build() -> WideVec5
+  try
+    WideVec5 { a: Async::await(), b: 2, c: 3, d: 4, e: 5 }
+  Async::await(tail):
+    tail(11)
+
+pub fn main() -> i32
+  let value = build()
+  value.a + value.e
+`);
+
+    const instance = getWasmInstance(module);
+    expect((instance.exports.main as () => number)()).toBe(16);
+  });
 });

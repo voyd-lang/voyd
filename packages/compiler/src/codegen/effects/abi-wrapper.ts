@@ -2,12 +2,14 @@ import binaryen from "binaryen";
 import type { CodegenContext } from "../context.js";
 import {
   allocateTempLocal,
+  createStorageRefBinding,
   loadLocalValue,
   storeLocalValue,
 } from "../locals.js";
 import { unboxOutcomeValue } from "./outcome-values.js";
 import { ensureDispatcher } from "./dispatcher.js";
 import { OUTCOME_TAGS } from "./runtime-abi.js";
+import { storeValueIntoStorageRef } from "../structural.js";
 
 export const emitPureSurfaceWrapper = (params: {
   ctx: CodegenContext;
@@ -15,6 +17,7 @@ export const emitPureSurfaceWrapper = (params: {
   wrapperParamTypes: readonly binaryen.Type[];
   wrapperResultType: binaryen.Type;
   wrapperResultTypeId?: number;
+  wrapperStoresResultByRef?: boolean;
   implName: string;
   buildImplCallArgs: () => readonly binaryen.ExpressionRef[];
 }): void => {
@@ -24,6 +27,7 @@ export const emitPureSurfaceWrapper = (params: {
     wrapperParamTypes,
     wrapperResultType,
     wrapperResultTypeId,
+    wrapperStoresResultByRef,
     implName,
     buildImplCallArgs,
   } = params;
@@ -49,6 +53,15 @@ export const emitPureSurfaceWrapper = (params: {
           wrapperResultTypeId,
           ctx,
         );
+  const outResultPointer =
+    wrapperStoresResultByRef && typeof wrapperResultTypeId === "number"
+      ? createStorageRefBinding({
+          index: 0,
+          typeId: wrapperResultTypeId,
+          mutable: true,
+          ctx,
+        })
+      : undefined;
   const loadOutcome = () =>
     ctx.mod.local.get(outcomeTemp.index, ctx.effectsRuntime.outcomeType);
   const payload = () => ctx.effectsRuntime.outcomePayload(loadOutcome());
@@ -77,7 +90,27 @@ export const emitPureSurfaceWrapper = (params: {
       ctx.mod.local.set(outcomeTemp.index, dispatchedOutcome),
       ctx.mod.if(
         tagIsValue,
-        resultTemp
+        outResultPointer
+          ? ctx.mod.if(
+              payloadIsNull,
+              ctx.mod.nop(),
+              storeValueIntoStorageRef({
+                pointer: () =>
+                  ctx.mod.local.get(
+                    outResultPointer.index,
+                    outResultPointer.storageType,
+                  ),
+                value: unboxOutcomeValue({
+                  payload: payload(),
+                  valueType: outResultPointer.type,
+                  ctx,
+                }),
+                typeId: wrapperResultTypeId!,
+                ctx,
+                fnCtx: wrapperCtx,
+              }),
+            )
+          : resultTemp
           ? ctx.mod.if(
               payloadIsNull,
               ctx.mod.unreachable(),

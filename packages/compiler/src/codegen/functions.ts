@@ -15,7 +15,7 @@ import { compileExpression } from "./expressions/index.js";
 import {
   allocateTempLocal,
   createStorageRefBinding,
-  loadLocalValue,
+  loadBindingValue,
   storeLocalValue,
 } from "./locals.js";
 import {
@@ -285,12 +285,12 @@ const compileDefaultParameterInitialization = ({
       ctx,
     );
     const rawBinding = fnCtx.bindings.get(param.symbol);
-    if (!rawBinding || rawBinding.kind !== "local") {
+    if (!rawBinding) {
       throw new Error(
-        `codegen missing bound parameter local for optional default symbol ${param.symbol}`,
+        `codegen missing bound parameter for optional default symbol ${param.symbol}`,
       );
     }
-    const rawParamExpr = () => loadLocalValue(rawBinding, ctx);
+    const rawParamExpr = () => loadBindingValue(rawBinding, ctx);
     const rawAbiTypes = binaryen.expandType(rawBinding.type);
     const [isSome, extractedSomeValue] = shouldInlineUnionLayout(rawTypeId, ctx)
       ? (() => {
@@ -1354,19 +1354,28 @@ const compileFunctionItem = (
       nextLocalIndex: implSignature.paramTypes.length,
       returnTypeId: meta.resultTypeId,
       returnWasmType: ctx.effectsBackend.abi.effectfulResultType(ctx),
-      returnAbiKind: "direct",
+      returnAbiKind: meta.resultAbiKind,
       instanceId: meta.instanceId,
       typeInstanceId: meta.instanceId,
       effectful: true,
       currentHandler: { index: 0, type: handlerParamType },
     };
+    if (meta.resultAbiKind === "out_ref") {
+      implCtx.returnOutPointer = createStorageRefBinding({
+        index: implSignature.userParamOffset,
+        typeId: meta.resultTypeId,
+        mutable: true,
+        ctx,
+      });
+    }
 
     const paramInitOps = bindRawFunctionParameters({
       fn,
       meta,
       ctx,
       fnCtx: implCtx,
-      handlerOffset: implSignature.userParamOffset,
+      handlerOffset:
+        implSignature.userParamOffset + (meta.outParamType ? 1 : 0),
     });
     const defaultInitOps = compileDefaultParameterInitialization({
       fn,
@@ -1381,6 +1390,13 @@ const compileFunctionItem = (
       fnCtx: implCtx,
       tailPosition: false,
       expectedResultTypeId: implCtx.returnTypeId,
+      outResultStorageRef:
+        meta.resultAbiKind === "out_ref" && implCtx.returnOutPointer
+          ? ctx.mod.local.get(
+              implCtx.returnOutPointer.index,
+              implCtx.returnOutPointer.storageType,
+            )
+          : undefined,
     });
     const implBodyExpr =
       defaultInitOps.length > 0
@@ -1393,8 +1409,34 @@ const compileFunctionItem = (
           ? ctx.mod.block(null, [...paramInitOps, implBody.expr], binaryen.getExpressionType(implBody.expr))
           : implBody.expr;
 
-    const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
-    const implExprType = binaryen.getExpressionType(implBodyExpr);
+    const implFunctionBody =
+      meta.resultAbiKind === "out_ref" && implCtx.returnOutPointer
+        ? (binaryen.getExpressionType(implBodyExpr) === binaryen.none ||
+            binaryen.getExpressionType(implBodyExpr) === binaryen.unreachable
+            ? implBodyExpr
+            : ctx.mod.block(
+                null,
+                [
+                  storeValueIntoStorageRef({
+                    pointer: () =>
+                      ctx.mod.local.get(
+                        implCtx.returnOutPointer!.index,
+                        implCtx.returnOutPointer!.storageType,
+                      ),
+                    value: implBodyExpr,
+                    typeId: meta.resultTypeId,
+                    ctx,
+                    fnCtx: implCtx,
+                  }),
+                ],
+                binaryen.none,
+              ))
+        : implBodyExpr;
+    const wrappedValueType =
+      meta.resultAbiKind === "out_ref"
+        ? binaryen.none
+        : wasmTypeFor(meta.resultTypeId, ctx);
+    const implExprType = binaryen.getExpressionType(implFunctionBody);
     const shouldWrapOutcome =
       !isOutcomeCarrierType({
         wasmType: implExprType,
@@ -1402,12 +1444,12 @@ const compileFunctionItem = (
       });
     const functionBody = shouldWrapOutcome
       ? wrapValueInOutcome({
-          valueExpr: implBodyExpr,
-          valueType: returnValueType,
+          valueExpr: implFunctionBody,
+          valueType: wrappedValueType,
           ctx,
           fnCtx: implCtx,
         })
-      : implBodyExpr;
+      : implFunctionBody;
 
     ctx.mod.addFunction(
       implName,
@@ -1423,6 +1465,7 @@ const compileFunctionItem = (
       wrapperParamTypes: meta.paramTypes as number[],
       wrapperResultType: meta.resultType,
       wrapperResultTypeId: meta.resultTypeId,
+      wrapperStoresResultByRef: meta.resultAbiKind === "out_ref",
       implName,
       buildImplCallArgs: () => [
         ctx.effectsBackend.abi.hiddenHandlerValue(ctx),
