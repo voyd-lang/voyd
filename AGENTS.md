@@ -30,11 +30,12 @@ compiles to webassembly.
 
 # Guide
 
-Always build with long term maintainability in mind. Avoid short term hacks.
-If you encounter code or an architecture that could benefit from a refactor,
+- Always build with long term maintainability in mind. Avoid short term hacks.
+- If you encounter code or an architecture that could benefit from a refactor,
 report on it and suggest direction in your final response.
-When diagnosing bugs, prefer implementation-level root-cause fixes over
+- When diagnosing bugs, prefer implementation-level root-cause fixes over
 call-site/type-annotation workarounds unless a workaround is explicitly requested.
+- Always be mindful about clear code boundaries and contracts. Avoid introducing any unnecessary coupling.
 
 Voyd has not yet been released. Breaking changes to public APIs are ok. Just
 note the breaking changes if made.
