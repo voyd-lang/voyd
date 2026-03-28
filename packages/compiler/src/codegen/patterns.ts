@@ -12,6 +12,7 @@ import {
   declareLocal,
   declareLocalWithTypeId,
   getRequiredBinding,
+  loadBindingStorageRef,
   loadLocalValue,
   storeStorageRefBindingValue,
   storeLocalValue,
@@ -28,7 +29,11 @@ import {
   wasmTypeFor,
 } from "./types.js";
 import { asStatement } from "./expressions/utils.js";
-import { refCast, structSetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
+import {
+  initDefaultStruct,
+  refCast,
+  structSetFieldValue,
+} from "@voyd/lib/binaryen-gc/index.js";
 
 export interface PatternInitOptions {
   declare: boolean;
@@ -102,6 +107,118 @@ const storeIntoBinding = ({
   return storeLocalValue({ binding, value: coerced, ctx, fnCtx });
 };
 
+const canDirectInitializeStorageBackedResult = ({
+  initializer,
+  targetTypeId,
+  initializerType,
+  ctx,
+}: {
+  initializer: HirExprId;
+  targetTypeId: TypeId;
+  initializerType: TypeId;
+  ctx: CodegenContext;
+}): boolean => {
+  if (initializerType !== targetTypeId) {
+    return false;
+  }
+
+  const expr = ctx.module.hir.expressions.get(initializer);
+  if (!expr) {
+    return false;
+  }
+
+  switch (expr.exprKind) {
+    case "call":
+    case "method-call":
+      return true;
+    case "block":
+      return (
+        typeof expr.value === "number" &&
+        canDirectInitializeStorageBackedResult({
+          initializer: expr.value,
+          targetTypeId,
+          initializerType,
+          ctx,
+        })
+      );
+    case "if":
+      return (
+        typeof expr.defaultBranch === "number" &&
+        expr.branches.every((branch) =>
+          canDirectInitializeStorageBackedResult({
+            initializer: branch.value,
+            targetTypeId,
+            initializerType,
+            ctx,
+          }),
+        ) &&
+        canDirectInitializeStorageBackedResult({
+          initializer: expr.defaultBranch,
+          targetTypeId,
+          initializerType,
+          ctx,
+        })
+      );
+    case "match":
+      return expr.arms.every((arm) =>
+        canDirectInitializeStorageBackedResult({
+          initializer: arm.value,
+          targetTypeId,
+          initializerType,
+          ctx,
+        }),
+      );
+    default:
+      return false;
+  }
+};
+
+const getDirectStorageBackedInit = ({
+  binding,
+  initializer,
+  initializerType,
+  targetTypeId,
+  ctx,
+}: {
+  binding: ReturnType<typeof getRequiredBinding> | ReturnType<typeof declareLocal>;
+  initializer: HirExprId;
+  initializerType: TypeId;
+  targetTypeId: TypeId;
+  ctx: CodegenContext;
+}): { setup: binaryen.ExpressionRef[]; storageRef: binaryen.ExpressionRef } | undefined => {
+  if (
+    !canDirectInitializeStorageBackedResult({
+      initializer,
+      targetTypeId,
+      initializerType,
+      ctx,
+    })
+  ) {
+    return undefined;
+  }
+
+  const storageRef = loadBindingStorageRef(binding, ctx);
+  if (typeof storageRef !== "number") {
+    return undefined;
+  }
+
+  if (binding.kind !== "local") {
+    return { setup: [], storageRef };
+  }
+
+  const ensureStorage = ctx.mod.if(
+    ctx.mod.ref.is_null(storageRef),
+    ctx.mod.local.set(
+      binding.index,
+      initDefaultStruct(ctx.mod, binding.storageType),
+    ),
+  );
+  return {
+    setup: [ensureStorage],
+    storageRef: loadBindingStorageRef(binding, ctx)!,
+  };
+};
+
 export const compilePatternInitialization = ({
   pattern,
   initializer,
@@ -163,13 +280,25 @@ export const compilePatternInitialization = ({
   const binding = options.declare
     ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
+  const directStorageBackedInit = getDirectStorageBackedInit({
+    binding,
+    initializer,
+    initializerType,
+    targetTypeId,
+    ctx,
+  });
   const value = compileExpr({
     exprId: initializer,
     ctx,
     fnCtx,
     expectedResultTypeId:
       initializerType === targetTypeId ? targetTypeId : undefined,
+    outResultStorageRef: directStorageBackedInit?.storageRef,
   });
+  if (value.usedOutResultStorageRef) {
+    ops.push(...(directStorageBackedInit?.setup ?? []), value.expr);
+    return;
+  }
 
   ops.push(
     storeIntoBinding({

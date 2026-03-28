@@ -10,6 +10,7 @@ import type {
 } from "../../context.js";
 import {
   callRef,
+  initDefaultStruct,
   refCast,
   structGetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
@@ -20,7 +21,6 @@ import {
   resolveImportedFunctionSymbol,
 } from "../../trait-dispatch-abi.js";
 import {
-  getDirectAbiTypesForSignature,
   getExprBinaryenType,
   getFunctionRefType,
   getRequiredExprType,
@@ -43,7 +43,6 @@ import {
 import { coerceValueToType } from "../../structural.js";
 import {
   liftHeapValueToInline,
-  lowerValueForHeapField,
 } from "../../structural.js";
 import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
 import { typeContainsUnresolvedParam } from "../../../semantics/type-utils.js";
@@ -86,44 +85,6 @@ const stabilizeMultivalueResult = ({
     null,
     [...captured.setup, tuple],
     binaryen.createType(abiTypes as number[]),
-  );
-};
-
-const defaultValueForWasmType = (
-  wasmType: binaryen.Type,
-  ctx: CodegenContext,
-): binaryen.ExpressionRef => {
-  if (wasmType === binaryen.i32) {
-    return ctx.mod.i32.const(0);
-  }
-  if (wasmType === binaryen.i64) {
-    return ctx.mod.i64.const(0, 0);
-  }
-  if (wasmType === binaryen.f32) {
-    return ctx.mod.f32.const(0);
-  }
-  if (wasmType === binaryen.f64) {
-    return ctx.mod.f64.const(0);
-  }
-  return ctx.mod.ref.null(wasmType);
-};
-
-const makeDefaultWideValue = ({
-  typeId,
-  ctx,
-}: {
-  typeId: TypeId;
-  ctx: CodegenContext;
-}): binaryen.ExpressionRef => {
-  const abiTypes = getDirectAbiTypesForSignature(typeId, ctx);
-  if (abiTypes.length === 0) {
-    return ctx.mod.nop();
-  }
-  if (abiTypes.length === 1) {
-    return defaultValueForWasmType(abiTypes[0]!, ctx);
-  }
-  return ctx.mod.tuple.make(
-    abiTypes.map((abiType) => defaultValueForWasmType(abiType, ctx)) as binaryen.ExpressionRef[],
   );
 };
 
@@ -453,6 +414,7 @@ export const compileTraitDispatchCall = ({
   compileExpr,
   tailPosition,
   expectedResultTypeId,
+  outResultStorageRef,
 }: {
   expr: HirCallExpr;
   calleeSymbol: SymbolId;
@@ -462,6 +424,7 @@ export const compileTraitDispatchCall = ({
   compileExpr: ExpressionCompiler;
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
+  outResultStorageRef?: binaryen.ExpressionRef;
 }): CompiledExpression | undefined => {
   if (expr.args.length === 0) {
     return undefined;
@@ -522,6 +485,7 @@ export const compileTraitDispatchCall = ({
     compileExpr,
     tailPosition,
     expectedResultTypeId,
+    outResultStorageRef,
   });
 };
 
@@ -536,6 +500,7 @@ const compileIndirectTraitDispatchCall = ({
   compileExpr,
   tailPosition = false,
   expectedResultTypeId,
+  outResultStorageRef,
 }: {
   expr: HirCallExpr;
   meta: FunctionMetadata;
@@ -547,6 +512,7 @@ const compileIndirectTraitDispatchCall = ({
   compileExpr: ExpressionCompiler;
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
+  outResultStorageRef?: binaryen.ExpressionRef;
 }): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const receiverValue = receiverTemp
@@ -652,31 +618,31 @@ const compileIndirectTraitDispatchCall = ({
     argSetups.push(...flattened.setup);
     return flattened.args;
   });
+  const usingProvidedWideResultStorage =
+    !dispatchEffectful &&
+    meta.resultAbiKind === "out_ref" &&
+    typeof outResultStorageRef === "number";
   const wideResultStorage =
     meta.resultAbiKind === "out_ref"
       ? (() => {
+          if (usingProvidedWideResultStorage) {
+            return undefined;
+          }
           if (typeof meta.outParamType !== "number") {
             throw new Error("trait dispatch out_ref result is missing storage metadata");
           }
           return allocateTempLocal(meta.outParamType, fnCtx);
         })()
       : undefined;
-  const initializedWideResultStorage = wideResultStorage
-    ? ctx.mod.local.tee(
-        wideResultStorage.index,
-        lowerValueForHeapField({
-          value: makeDefaultWideValue({
-            typeId: meta.resultTypeId,
-            ctx,
-          }),
-          typeId: meta.resultTypeId,
-          targetType: wideResultStorage.type,
-          ctx,
-          fnCtx,
-        }),
-        wideResultStorage.type,
-      )
-    : undefined;
+  const initializedWideResultStorage = usingProvidedWideResultStorage
+    ? outResultStorageRef
+    : wideResultStorage
+      ? ctx.mod.local.tee(
+          wideResultStorage.index,
+          initDefaultStruct(ctx.mod, wideResultStorage.type),
+          wideResultStorage.type,
+        )
+      : undefined;
   const args = [loadReceiver(), ...flattenedUserArgs];
 
   const callArgs = dispatchEffectful
@@ -721,7 +687,7 @@ const compileIndirectTraitDispatchCall = ({
   const returnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const expectedTypeId = expectedResultTypeId ?? returnTypeId;
   const resultWasmType = wasmTypeFor(expectedTypeId, ctx);
-  const lowered = dispatchEffectful
+  const lowered: CompiledExpression = dispatchEffectful
     ? ctx.effectsBackend.lowerEffectfulCallResult({
         callExpr,
         callId: expr.id,
@@ -732,6 +698,15 @@ const compileIndirectTraitDispatchCall = ({
         ctx,
         fnCtx,
       })
+    : usingProvidedWideResultStorage
+      ? {
+          expr:
+            argSetups.length === 0
+              ? ctx.mod.block(null, [rawCall], binaryen.none)
+              : ctx.mod.block(null, [...argSetups, rawCall], binaryen.none),
+          usedReturnCall: false,
+          usedOutResultStorageRef: true,
+        }
     : meta.resultAbiKind === "out_ref" && wideResultStorage
       ? (() => {
           const reloaded = liftHeapValueToInline({
@@ -792,5 +767,6 @@ const compileIndirectTraitDispatchCall = ({
   return {
     expr: ops.length === 1 ? ops[0]! : ctx.mod.block(null, ops, binaryenResult),
     usedReturnCall: lowered.usedReturnCall,
+    usedOutResultStorageRef: lowered.usedOutResultStorageRef,
   };
 };

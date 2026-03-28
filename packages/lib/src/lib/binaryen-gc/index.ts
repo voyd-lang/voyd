@@ -135,6 +135,17 @@ export const initStruct = (
   return structNew;
 };
 
+export const initDefaultStruct = (
+  mod: binaryen.Module,
+  structType: TypeRef,
+): ExpressionRef =>
+  bin._BinaryenStructNew(
+    mod.ptr,
+    0,
+    0,
+    binaryenTypeToHeapType(structType),
+  );
+
 export const structGetFieldValue = ({
   mod,
   fieldType,

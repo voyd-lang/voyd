@@ -319,12 +319,14 @@ export interface FunctionContext {
 export interface CompiledExpression {
   expr: binaryen.ExpressionRef;
   usedReturnCall: boolean;
+  usedOutResultStorageRef?: boolean;
 }
 
 export interface CompileCallOptions {
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
   typeInstanceId?: ProgramFunctionInstanceId;
+  outResultStorageRef?: binaryen.ExpressionRef;
 }
 
 export interface ExpressionCompilerParams {
@@ -334,6 +336,7 @@ export interface ExpressionCompilerParams {
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
   preserveStorageRefs?: boolean;
+  outResultStorageRef?: binaryen.ExpressionRef;
 }
 
 export type ExpressionCompiler = (

@@ -160,6 +160,20 @@ const expressionUsesExpectedResultType = ({
   }
 };
 
+const normalizeOutResultStorageForwarding = ({
+  compiled,
+}: {
+  compiled: CompiledExpression;
+}): CompiledExpression => {
+  if (compiled.usedOutResultStorageRef) {
+    return {
+      ...compiled,
+      usedOutResultStorageRef: true,
+    };
+  }
+  return compiled;
+};
+
 export const compileIfExpr = (
   expr: HirIfExpr,
   ctx: CodegenContext,
@@ -167,6 +181,7 @@ export const compileIfExpr = (
   compileExpr: ExpressionCompiler,
   tailPosition: boolean,
   expectedResultTypeId?: TypeId,
+  outResultStorageRef?: binaryen.ExpressionRef,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const resultTypeId =
@@ -206,6 +221,7 @@ export const compileIfExpr = (
           })
             ? resultTypeId
             : undefined,
+          outResultStorageRef,
         })
       : undefined;
 
@@ -215,20 +231,23 @@ export const compileIfExpr = (
 
   if (!fallback) {
     fallback = { expr: ctx.mod.nop(), usedReturnCall: false };
-  } else if (typeof expr.defaultBranch === "number") {
-    const coercedFallback = coerceBranchValue({
-      compiled: fallback,
-      exprId: expr.defaultBranch,
-    });
-    fallback = {
-      expr: coerceToBinaryenType(
-        ctx,
-        coercedFallback,
-        resultType,
-        fnCtx,
-      ),
-      usedReturnCall: fallback.usedReturnCall,
-    };
+  } else {
+    fallback = normalizeOutResultStorageForwarding({ compiled: fallback });
+    if (!fallback.usedOutResultStorageRef && typeof expr.defaultBranch === "number") {
+      const coercedFallback = coerceBranchValue({
+        compiled: fallback,
+        exprId: expr.defaultBranch,
+      });
+      fallback = {
+        expr: coerceToBinaryenType(
+          ctx,
+          coercedFallback,
+          resultType,
+          fnCtx,
+        ),
+        usedReturnCall: fallback.usedReturnCall,
+      };
+    }
   }
 
   for (let index = expr.branches.length - 1; index >= 0; index -= 1) {
@@ -249,7 +268,25 @@ export const compileIfExpr = (
       })
         ? resultTypeId
         : undefined,
+      outResultStorageRef,
     });
+    const loweredValue = normalizeOutResultStorageForwarding({
+      compiled: value,
+    });
+    if (
+      loweredValue.usedOutResultStorageRef &&
+      fallback.usedOutResultStorageRef
+    ) {
+      fallback = {
+        expr: ctx.mod.if(condition, loweredValue.expr, fallback.expr),
+        usedReturnCall: loweredValue.usedReturnCall && fallback.usedReturnCall,
+        usedOutResultStorageRef: true,
+      };
+      continue;
+    }
+    if (loweredValue.usedOutResultStorageRef || fallback.usedOutResultStorageRef) {
+      throw new Error("mixed out-result forwarding in if expression");
+    }
     const coercedThen = coerceBranchValue({
       compiled: value,
       exprId: branch.value,
@@ -276,6 +313,7 @@ export const compileMatchExpr = (
   compileExpr: ExpressionCompiler,
   tailPosition: boolean,
   expectedResultTypeId?: TypeId,
+  outResultStorageRef?: binaryen.ExpressionRef,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const resultTypeId =
@@ -402,12 +440,24 @@ export const compileMatchExpr = (
     }
 
     if (arm.pattern.kind === "wildcard") {
-      const armValue = compileExpr({
-        exprId: arm.value,
-        ctx,
-        fnCtx,
-        tailPosition,
+      const armValue = normalizeOutResultStorageForwarding({
+        compiled: compileExpr({
+          exprId: arm.value,
+          ctx,
+          fnCtx,
+          tailPosition,
+          outResultStorageRef,
+        }),
       });
+      if (armValue.usedOutResultStorageRef) {
+        chain = {
+          expr: armValue.expr,
+          usedReturnCall: armValue.usedReturnCall,
+          usedOutResultStorageRef: true,
+        };
+        continue;
+      }
+      const armValueExpr = armValue;
       const armTypeId = expressionUsesExpectedResultType({
         exprId: arm.value,
         ctx,
@@ -418,7 +468,7 @@ export const compileMatchExpr = (
         expr: coerceToBinaryenType(
           ctx,
           coerceValueToType({
-            value: armValue.expr,
+            value: armValueExpr.expr,
             actualType: armTypeId,
             targetType: resultTypeId,
             ctx,
@@ -427,7 +477,7 @@ export const compileMatchExpr = (
           resultType,
           fnCtx,
         ),
-        usedReturnCall: armValue.usedReturnCall,
+        usedReturnCall: armValueExpr.usedReturnCall,
       };
       continue;
     }
@@ -598,11 +648,14 @@ export const compileMatchExpr = (
 
     const armValue = (() => {
       try {
-        return compileExpr({
-          exprId: arm.value,
-          ctx,
-          fnCtx,
-          tailPosition,
+        return normalizeOutResultStorageForwarding({
+          compiled: compileExpr({
+            exprId: arm.value,
+            ctx,
+            fnCtx,
+            tailPosition,
+            outResultStorageRef,
+          }),
         });
       } finally {
         restoreDiscriminantBinding?.();
@@ -619,6 +672,7 @@ export const compileMatchExpr = (
               binaryen.getExpressionType(armValue.expr),
             ),
             usedReturnCall: armValue.usedReturnCall,
+            usedOutResultStorageRef: armValue.usedOutResultStorageRef,
           };
 
     const fallback =
@@ -626,7 +680,21 @@ export const compileMatchExpr = (
       ({
         expr: ctx.mod.unreachable(),
         usedReturnCall: false,
+        usedOutResultStorageRef:
+          typeof outResultStorageRef === "number" ? true : undefined,
       } as CompiledExpression);
+
+    if (armExpr.usedOutResultStorageRef && fallback.usedOutResultStorageRef) {
+      chain = {
+        expr: ctx.mod.if(condition, armExpr.expr, fallback.expr),
+        usedReturnCall: armExpr.usedReturnCall && fallback.usedReturnCall,
+        usedOutResultStorageRef: true,
+      };
+      continue;
+    }
+    if (armExpr.usedOutResultStorageRef || fallback.usedOutResultStorageRef) {
+      throw new Error("mixed out-result forwarding in match expression");
+    }
 
     const armTypeId = expressionUsesExpectedResultType({
       exprId: arm.value,
@@ -656,8 +724,13 @@ export const compileMatchExpr = (
   };
 
   return {
-    expr: ctx.mod.block(null, [initDiscriminant, finalExpr.expr], resultType),
+    expr: ctx.mod.block(
+      null,
+      [initDiscriminant, finalExpr.expr],
+      finalExpr.usedOutResultStorageRef ? binaryen.none : resultType,
+    ),
     usedReturnCall: finalExpr.usedReturnCall,
+    usedOutResultStorageRef: finalExpr.usedOutResultStorageRef,
   };
 };
 

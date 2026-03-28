@@ -33,6 +33,7 @@ export const compileExpression: ExpressionCompiler = ({
   tailPosition = false,
   expectedResultTypeId,
   preserveStorageRefs = false,
+  outResultStorageRef,
 }: ExpressionCompilerParams): CompiledExpression => {
   const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr) {
@@ -66,6 +67,7 @@ export const compileExpression: ExpressionCompiler = ({
       return compileCallExpr(expr, ctx, fnCtx, compileExpression, {
         tailPosition,
         expectedResultTypeId,
+        outResultStorageRef,
       });
     }
     case "method-call": {
@@ -82,6 +84,7 @@ export const compileExpression: ExpressionCompiler = ({
       return compileMethodCallExpr(expr, ctx, fnCtx, compileExpression, {
         tailPosition,
         expectedResultTypeId,
+        outResultStorageRef,
       });
     }
     case "block":
@@ -91,7 +94,8 @@ export const compileExpression: ExpressionCompiler = ({
         fnCtx,
         compileExpression,
         tailPosition,
-        expectedResultTypeId
+        expectedResultTypeId,
+        outResultStorageRef,
       );
     case "if":
       return compileIfExpr(
@@ -100,7 +104,8 @@ export const compileExpression: ExpressionCompiler = ({
         fnCtx,
         compileExpression,
         tailPosition,
-        expectedResultTypeId
+        expectedResultTypeId,
+        outResultStorageRef,
       );
     case "match":
       return compileMatchExpr(
@@ -109,7 +114,8 @@ export const compileExpression: ExpressionCompiler = ({
         fnCtx,
         compileExpression,
         tailPosition,
-        expectedResultTypeId
+        expectedResultTypeId,
+        outResultStorageRef,
       );
     case "while":
       return compileWhileExpr(expr, ctx, fnCtx, compileExpression);

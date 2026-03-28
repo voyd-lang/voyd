@@ -1,4 +1,5 @@
 import binaryen from "binaryen";
+import { initDefaultStruct } from "@voyd/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   CompiledExpression,
@@ -10,7 +11,6 @@ import type {
 import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../../locals.js";
 import {
   abiTypeFor,
-  getDirectAbiTypesForSignature,
   getExprBinaryenType,
   getRequiredExprType,
   getSignatureSpillBoxType,
@@ -19,7 +19,6 @@ import {
 import {
   coerceValueToType,
   liftHeapValueToInline,
-  lowerValueForHeapField,
   requiresStructuralConversion,
 } from "../../structural.js";
 import { currentHandlerValue } from "./shared.js";
@@ -45,35 +44,6 @@ export const emitResolvedCall = ({
   fnCtx: FunctionContext;
   options?: CompileCallOptions;
 }): CompiledExpression => {
-  const defaultValueForWasmType = (wasmType: binaryen.Type): binaryen.ExpressionRef => {
-    if (wasmType === binaryen.i32) {
-      return ctx.mod.i32.const(0);
-    }
-    if (wasmType === binaryen.i64) {
-      return ctx.mod.i64.const(0, 0);
-    }
-    if (wasmType === binaryen.f32) {
-      return ctx.mod.f32.const(0);
-    }
-    if (wasmType === binaryen.f64) {
-      return ctx.mod.f64.const(0);
-    }
-    return ctx.mod.ref.null(wasmType);
-  };
-
-  const makeDefaultWideValue = (typeId: number): binaryen.ExpressionRef => {
-    const abiTypes = getDirectAbiTypesForSignature(typeId, ctx);
-    if (abiTypes.length === 0) {
-      return ctx.mod.nop();
-    }
-    if (abiTypes.length === 1) {
-      return defaultValueForWasmType(abiTypes[0]!);
-    }
-    return ctx.mod.tuple.make(
-      abiTypes.map((abiType) => defaultValueForWasmType(abiType)) as binaryen.ExpressionRef[],
-    );
-  };
-
   const stabilizeMultivalueResult = (
     value: binaryen.ExpressionRef,
     abiTypes: readonly binaryen.Type[],
@@ -159,6 +129,7 @@ export const emitResolvedCall = ({
     tailPosition = false,
     expectedResultTypeId,
     typeInstanceId,
+    outResultStorageRef,
   } = options;
 
   const lookupKey = typeInstanceId ?? meta.instanceId;
@@ -179,9 +150,16 @@ export const emitResolvedCall = ({
     argSetups.push(...flattened.setup);
     return flattened.args;
   });
+  const usingProvidedWideResultStorage =
+    !meta.effectful &&
+    meta.resultAbiKind === "out_ref" &&
+    typeof outResultStorageRef === "number";
   const wideResultStorage =
     meta.resultAbiKind === "out_ref"
       ? (() => {
+          if (usingProvidedWideResultStorage) {
+            return undefined;
+          }
           if (typeof meta.outParamType !== "number") {
             throw new Error(
               `codegen missing out param storage for ${meta.wasmName}`,
@@ -190,19 +168,15 @@ export const emitResolvedCall = ({
           return allocateTempLocal(meta.outParamType, fnCtx);
         })()
       : undefined;
-  const initializedWideResultStorage = wideResultStorage
-    ? ctx.mod.local.tee(
-        wideResultStorage.index,
-        lowerValueForHeapField({
-          value: makeDefaultWideValue(meta.resultTypeId),
-          typeId: meta.resultTypeId,
-          targetType: wideResultStorage.type,
-          ctx,
-          fnCtx,
-        }),
-        wideResultStorage.type,
-      )
-    : undefined;
+  const initializedWideResultStorage = usingProvidedWideResultStorage
+    ? outResultStorageRef
+    : wideResultStorage
+      ? ctx.mod.local.tee(
+          wideResultStorage.index,
+          initDefaultStruct(ctx.mod, wideResultStorage.type),
+          wideResultStorage.type,
+        )
+      : undefined;
   const callArgs = meta.effectful
     ? [
         currentHandlerValue(ctx, fnCtx),
@@ -275,6 +249,17 @@ export const emitResolvedCall = ({
   }
 
   const rawCall = ctx.mod.call(meta.wasmName, callArgs as number[], meta.resultType);
+  if (usingProvidedWideResultStorage) {
+    const ops =
+      argSetups.length === 0
+        ? [rawCall]
+        : [...argSetups, rawCall];
+    return {
+      expr: ctx.mod.block(null, ops, binaryen.none),
+      usedReturnCall: false,
+      usedOutResultStorageRef: true,
+    };
+  }
   if (meta.resultAbiKind === "out_ref" && wideResultStorage) {
     const reloaded = liftHeapValueToInline({
       value: ctx.mod.local.get(

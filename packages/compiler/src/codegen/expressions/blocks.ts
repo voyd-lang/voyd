@@ -92,7 +92,8 @@ export const compileBlockExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
   tailPosition: boolean,
-  expectedResultTypeId?: TypeId
+  expectedResultTypeId?: TypeId,
+  outResultStorageRef?: binaryen.ExpressionRef,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const blockResultTypeId =
@@ -108,13 +109,29 @@ export const compileBlockExpr = (
         statements.push(compileStatement(stmtId, ctx, fnCtx, compileExpr));
       });
       if (typeof expr.value === "number") {
-        const { expr: valueExpr, usedReturnCall } = compileExpr({
+        const value = compileExpr({
           exprId: expr.value,
           ctx,
           fnCtx,
           tailPosition,
           expectedResultTypeId,
+          outResultStorageRef,
         });
+        const { expr: valueExpr, usedReturnCall, usedOutResultStorageRef } = value;
+        if (usedOutResultStorageRef) {
+          if (statements.length === 0) {
+            return {
+              expr: valueExpr,
+              usedReturnCall,
+              usedOutResultStorageRef: true,
+            };
+          }
+          return {
+            expr: ctx.mod.block(null, [...statements, valueExpr], binaryen.none),
+            usedReturnCall,
+            usedOutResultStorageRef: true,
+          };
+        }
         const requiredActualType =
           typeof expectedResultTypeId === "number" &&
           !usedReturnCall &&
