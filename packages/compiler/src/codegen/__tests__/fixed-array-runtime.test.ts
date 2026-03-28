@@ -10,7 +10,7 @@ obj Some<T> { value: T }
 obj None {}
 pub type Optional<T> = Some<T> | None
 
-pub value Vec2 {
+pub val Vec2 {
   x: i32,
   y: i32
 }

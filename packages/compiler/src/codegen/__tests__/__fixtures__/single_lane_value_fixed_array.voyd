@@ -1,4 +1,4 @@
-pub value ScalarBox {
+pub val ScalarBox {
   value: i32
 }
 

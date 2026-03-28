@@ -1,4 +1,4 @@
-value Counter {
+val Counter {
   value: i32
 }
 

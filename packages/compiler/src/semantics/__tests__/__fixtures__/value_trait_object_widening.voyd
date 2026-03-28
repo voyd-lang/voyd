@@ -1,7 +1,7 @@
 trait Drawable
   fn draw(self) -> i32
 
-value Pixel {
+val Pixel {
   value: i32
 }
 

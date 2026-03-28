@@ -1,12 +1,12 @@
 use std::all
 use std::optional::all
 
-pub value Vec2 {
+pub val Vec2 {
   x: i32,
   y: i32
 }
 
-pub value ScalarBox {
+pub val ScalarBox {
   value: i32
 }
 
@@ -15,16 +15,16 @@ impl ScalarBox
     self.value = self.value + 1
     self
 
-pub value OptionalFieldBox {
+pub val OptionalFieldBox {
   value?: i32,
   fallback: i32
 }
 
-pub value OptionalOnlyBox {
+pub val OptionalOnlyBox {
   value?: i32
 }
 
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -67,11 +67,11 @@ fn bump_scalar_labeled(amount: i32, { ~box: ScalarBox }) -> i32
 fn wide_tail_sum(value: WideVec5) -> i32
   value.b + value.e
 
-pub value Left {
+pub val Left {
   value: i32
 }
 
-pub value Right {
+pub val Right {
   value: i32
 }
 
@@ -93,7 +93,7 @@ impl HeapCell
   fn read(self) -> i32
     self.value
 
-pub value HeapHolder {
+pub val HeapHolder {
   cell: HeapCell
 }
 

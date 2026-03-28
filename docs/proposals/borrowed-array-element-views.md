@@ -6,7 +6,7 @@ Scope: optimized IR/codegen-view lowering, stdlib container accessors, optional 
 
 ## Goal
 
-Eliminate unnecessary owned copies of wide `value` elements loaded from `Array<T>` and
+Eliminate unnecessary owned copies of wide `val` elements loaded from `Array<T>` and
 `FixedArray<T>` when the use site only needs a readonly view.
 
 CTX: after landing [`wide-value-abi-and-implicit-borrows.md`](./wide-value-abi-and-implicit-borrows.md),
@@ -167,7 +167,7 @@ The MVP keeps this narrow:
 
 If all of the following are true:
 
-1. the element type is a wide `value`
+1. the element type is a wide `val`
 2. the container root is addressable
 3. the use chain is entirely borrowable
 4. the borrow window stays within the MVP safety limits

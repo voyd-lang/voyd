@@ -35,7 +35,7 @@ const compileMain = (source: string): (() => number) => {
 describe("borrowed array element views", () => {
   it("reads wide fields from direct fixed-array element projections", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -54,7 +54,7 @@ pub fn main() -> i32
 
   it("keeps immutable local views borrowed across readonly field reads", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -74,7 +74,7 @@ pub fn main() -> i32
 
   it("materializes a projected wide local before mutable-ref calls", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -97,7 +97,7 @@ pub fn main() -> i32
 
   it("materializes a projected wide local before returning ownership", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -121,7 +121,7 @@ pub fn main() -> i32
 
   it("materializes a projected wide local before mutating the root container", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -141,7 +141,7 @@ pub fn main() -> i32
 
   it("materializes a projected wide local before mutating through a root alias", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -162,7 +162,7 @@ pub fn main() -> i32
 
   it("keeps projected wide locals borrowed across readonly root accesses", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -182,7 +182,7 @@ pub fn main() -> i32
 
   it("keeps projected wide locals borrowed across readonly alias accesses", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -203,7 +203,7 @@ pub fn main() -> i32
 
   it("keeps projected wide locals borrowed across readonly assignment aliases", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -225,7 +225,7 @@ pub fn main() -> i32
 
   it("keeps projected wide locals borrowed across nested readonly assignment aliases", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -248,7 +248,7 @@ pub fn main() -> i32
 
   it("passes projected wide locals to non-mut methods without materializing eagerly", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -272,7 +272,7 @@ pub fn main() -> i32
 
   it("passes direct projected wide receivers to non-mut methods", () => {
     const main = compileMain(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,

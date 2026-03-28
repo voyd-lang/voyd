@@ -6,7 +6,7 @@ obj None {}
 
 pub type Optional<T> = Some<T> | None
 
-value Vec2 {
+val Vec2 {
   x: i32,
   y: i32
 }

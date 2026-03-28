@@ -116,6 +116,16 @@ const stripSequence = (
 const getTypeDeclKind = (
   form: Form,
 ): "obj" | "value" | "type" | "trait" | null => {
+  const normalizeDeclKind = (keyword: string): "obj" | "value" | "type" | "trait" | null => {
+    if (keyword === "obj" || keyword === "type" || keyword === "trait") {
+      return keyword;
+    }
+    if (keyword === "val") {
+      return "value";
+    }
+    return null;
+  };
+
   const head = form.at(0);
   if (!isIdentifierAtom(head)) {
     return null;
@@ -123,29 +133,10 @@ const getTypeDeclKind = (
 
   if (head.value === "pub") {
     const keyword = form.at(1);
-    if (!isIdentifierAtom(keyword)) {
-      return null;
-    }
-    if (
-      keyword.value === "obj" ||
-      keyword.value === "value" ||
-      keyword.value === "type" ||
-      keyword.value === "trait"
-    ) {
-      return keyword.value;
-    }
-    return null;
+    return isIdentifierAtom(keyword) ? normalizeDeclKind(keyword.value) : null;
   }
 
-  if (
-    head.value === "obj" ||
-    head.value === "value" ||
-    head.value === "type" ||
-    head.value === "trait"
-  ) {
-    return head.value;
-  }
-  return null;
+  return normalizeDeclKind(head.value);
 };
 
 const isSerializerAttributeForm = (expr: Expr): expr is Form =>

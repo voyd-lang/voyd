@@ -962,7 +962,7 @@ export const diagnosticsRegistry: {
     hints: [
       {
         message:
-          "Use primitives, other values, tuples, fixed arrays, or explicit heap/reference types inside `value` declarations.",
+          "Use primitives, other values, tuples, fixed arrays, or explicit heap/reference types inside `val` declarations.",
       },
       {
         message:
