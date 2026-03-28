@@ -49,6 +49,10 @@ export const createResumeContinuation = ({
       runtime.continuationType,
       msgPackType,
     ];
+    const scratch = {
+      locals,
+      nextLocalIndex: binaryen.expandType(params).length + locals.length,
+    };
     const requestLocal = 0;
     const bufPtrLocal = 1;
     const resumeLenLocal = 2;
@@ -111,6 +115,7 @@ export const createResumeContinuation = ({
               value: resumeValue,
               valueType: sig.returnType,
               ctx,
+              fnCtx: scratch,
             });
       const operands = [runtime.continuationEnv(contRef()), resumeBox];
       const call = callRef(

@@ -114,6 +114,28 @@ export const allocateTempLocal = (
   return binding;
 };
 
+export const allocateAddressableLocal = ({
+  typeId,
+  ctx,
+  fnCtx,
+}: {
+  typeId: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): LocalBindingLocal => {
+  const type = wasmTypeFor(typeId, ctx);
+  const inlineBoxType = getInlineHeapBoxType({ typeId, ctx });
+  const allocated = allocateTempLocal(type, fnCtx, typeId, ctx);
+  if (typeof inlineBoxType !== "number" || allocated.storageType !== type) {
+    return allocated;
+  }
+  fnCtx.locals[fnCtx.locals.length - 1] = inlineBoxType;
+  return {
+    ...allocated,
+    storageType: inlineBoxType,
+  };
+};
+
 export const createStorageRefBinding = ({
   index,
   typeId,

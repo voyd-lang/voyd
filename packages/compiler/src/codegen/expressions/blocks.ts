@@ -264,6 +264,7 @@ export const compileStatement = (
               valueExpr: ctx.mod.nop(),
               valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
               ctx,
+              fnCtx,
             });
             const ops =
               cleanup.length === 0
@@ -305,6 +306,7 @@ export const compileStatement = (
             valueExpr: coerced,
             valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
             ctx,
+            fnCtx,
           });
           if (cleanup.length === 0) {
             return ctx.mod.block(null, [...tailChecks, ctx.mod.return(wrapped)], binaryen.none);
@@ -345,6 +347,7 @@ export const compileStatement = (
           valueExpr: ctx.mod.nop(),
           valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
           ctx,
+          fnCtx,
         });
         if (cleanup.length === 0) {
           return ctx.mod.block(null, [...tailChecks, ctx.mod.return(wrapped)], binaryen.none);

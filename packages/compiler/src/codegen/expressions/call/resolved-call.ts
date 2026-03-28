@@ -194,25 +194,13 @@ export const emitResolvedCall = ({
 
   if (meta.effectful) {
     const rawCall = ctx.mod.call(meta.wasmName, callArgs as number[], meta.resultType);
-    const stabilizedCall = stabilizeMultivalueResult(
-      rawCall,
-      meta.resultAbiTypes,
-    );
-    const decodedCall =
-      getSignatureSpillBoxType({ typeId: meta.resultTypeId, ctx }) === meta.resultType
-        ? unboxSignatureSpillValue({
-            value: stabilizedCall,
-            typeId: meta.resultTypeId,
-            ctx,
-          })
-        : stabilizedCall;
     const callExpr =
       argSetups.length === 0
-        ? decodedCall
+        ? rawCall
         : ctx.mod.block(
             null,
-            [...argSetups, decodedCall],
-            binaryen.getExpressionType(decodedCall),
+            [...argSetups, rawCall],
+            meta.resultType,
           );
     return ctx.effectsBackend.lowerEffectfulCallResult({
       callExpr,

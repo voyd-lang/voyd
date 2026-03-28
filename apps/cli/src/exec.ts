@@ -2,18 +2,11 @@ import { stdout } from "process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
-import { createSdk, detectSrcRootForPath, type CompileResult } from "@voyd/sdk";
-import { analyzeModules, loadModuleGraph, parse } from "@voyd/sdk/compiler";
+import type { CompileResult } from "@voyd/sdk";
 import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd/sdk/compiler";
-import {
-  generateDocumentation,
-  type DocumentationOutputFormat,
-} from "@voyd/sdk/doc-generation";
+import type { DocumentationOutputFormat } from "@voyd/sdk/doc-generation";
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
-import { resolvePackageDirs } from "./package-dirs.js";
-import { runTests } from "./test-runner.js";
 import { getConfig } from "./config/index.js";
 import {
   compactDiagnosticsForCli,
@@ -22,13 +15,16 @@ import {
 
 export const exec = () => main().catch(errorHandler);
 
-const sdk = createSdk();
+type VoydSdk = ReturnType<(typeof import("@voyd/sdk"))["createSdk"]>;
+
+let sdkPromise: Promise<VoydSdk> | undefined;
 
 type TestFailurePhase = "discovery" | "typing" | "execution";
 
 async function main() {
   const config = getConfig();
   if (config.test) {
+    const { runTests } = await import("./test-runner.js");
     return runTests({
       rootPath: config.index,
       reporter: config.testReporter,
@@ -37,20 +33,31 @@ async function main() {
     });
   }
 
-  const entryPath = resolveEntryPath(config.index);
-  const roots = getModuleRoots({
-    entryPath,
-    additionalPkgDirs: config.pkgDirs,
-  });
+  const entryPath = config.runWasm
+    ? resolve(config.index)
+    : resolveEntryPath(config.index);
+
+  if (config.runWasm) {
+    return runWasm(entryPath, config.entry);
+  }
 
   if (config.emitParserAst) {
     return printJson(await getParserAst(entryPath));
   }
 
+  let rootsPromise: Promise<ModuleRoots> | undefined;
+  const getRoots = () => {
+    rootsPromise ??= getModuleRoots({
+      entryPath,
+      additionalPkgDirs: config.pkgDirs,
+    });
+    return rootsPromise;
+  };
+
   if (config.doc) {
     return emitDocumentation({
       entryPath,
-      roots,
+      roots: await getRoots(),
       outPath: config.docOut,
       format: config.docFormat,
     });
@@ -61,30 +68,34 @@ async function main() {
   }
 
   if (config.emitIrAst) {
-    return printJson(await getIrAST(entryPath, roots));
+    return printJson(await getIrAST(entryPath, await getRoots()));
   }
 
   if (config.emitWasmText) {
     return console.log(
-      await getWasmText(entryPath, roots, config.runBinaryenOptimizationPass),
+      await getWasmText(
+        entryPath,
+        await getRoots(),
+        config.runBinaryenOptimizationPass,
+      ),
     );
   }
 
   if (config.emitWasm) {
-    return emitWasm(entryPath, roots, config.runBinaryenOptimizationPass);
+    return emitWasm(
+      entryPath,
+      await getRoots(),
+      config.runBinaryenOptimizationPass,
+    );
   }
 
   if (config.run) {
     return runVoyd({
       entryPath,
       entryName: config.entry,
-      roots,
+      roots: await getRoots(),
       optimize: config.runBinaryenOptimizationPass,
     });
-  }
-
-  if (config.runWasm) {
-    return runWasm(entryPath, config.entry);
   }
 
   console.log(
@@ -123,13 +134,37 @@ const getModuleRoots = ({
 }: {
   entryPath: string;
   additionalPkgDirs?: readonly string[];
-}): ModuleRoots => {
+}): Promise<ModuleRoots> => {
+  return loadModuleRoots({
+    entryPath,
+    additionalPkgDirs,
+  });
+};
+
+const loadModuleRoots = async ({
+  entryPath,
+  additionalPkgDirs,
+}: {
+  entryPath: string;
+  additionalPkgDirs: readonly string[];
+}): Promise<ModuleRoots> => {
+  const [{ detectSrcRootForPath }, { resolveStdRoot }, { resolvePackageDirs }] =
+    await Promise.all([
+      import("@voyd/sdk"),
+      import("@voyd/lib/resolve-std.js"),
+      import("./package-dirs.js"),
+    ]);
   const srcRoot = detectSrcRootForPath(entryPath);
   return {
     src: srcRoot,
     std: resolveStdRoot(),
     pkgDirs: resolvePackageDirs({ srcRoot, additionalPkgDirs }),
   };
+};
+
+const getSdk = async (): Promise<VoydSdk> => {
+  sdkPromise ??= import("@voyd/sdk").then(({ createSdk }) => createSdk());
+  return sdkPromise;
 };
 
 const failWithDiagnostics = (diagnostics: readonly Diagnostic[]): never => {
@@ -162,6 +197,7 @@ const serializeHir = (hir: HirGraph) => ({
 });
 
 async function getParserAst(entryPath: string) {
+  const { parse } = await import("@voyd/sdk/compiler");
   const file = readFileSync(entryPath, { encoding: "utf8" });
   return parse(file, entryPath).toJSON();
 }
@@ -171,6 +207,7 @@ async function getCoreAst(entryPath: string) {
 }
 
 async function getIrAST(entryPath: string, roots: ModuleRoots) {
+  const { analyzeModules, loadModuleGraph } = await import("@voyd/sdk/compiler");
   const graph = await loadModuleGraph({ entryPath, roots });
   const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
     graph,
@@ -192,6 +229,7 @@ async function getWasmText(
   roots: ModuleRoots,
   optimize = false,
 ) {
+  const sdk = await getSdk();
   const result = requireCompileSuccess(
     await sdk.compile({
       entryPath,
@@ -213,6 +251,7 @@ async function emitWasm(
   roots: ModuleRoots,
   optimize = false,
 ) {
+  const sdk = await getSdk();
   const result = requireCompileSuccess(
     await sdk.compile({ entryPath, roots, optimize }),
   );
@@ -230,6 +269,7 @@ async function runVoyd({
   roots: ModuleRoots;
   optimize?: boolean;
 }) {
+  const sdk = await getSdk();
   const compiled = requireCompileSuccess(
     await sdk.compile({ entryPath, roots, optimize }),
   );
@@ -239,8 +279,10 @@ async function runVoyd({
 }
 
 async function runWasm(entryPath: string, entryName = "main") {
+  const { createVoydHost } = await import("@voyd/sdk/js-host");
   const wasm = readFileSync(entryPath);
-  const result = await sdk.run({ wasm, entryName });
+  const host = await createVoydHost({ wasm });
+  const result = await host.run(entryName);
   printValue(result);
 }
 
@@ -255,6 +297,7 @@ async function emitDocumentation({
   outPath?: string;
   format?: DocumentationOutputFormat;
 }) {
+  const { generateDocumentation } = await import("@voyd/sdk/doc-generation");
   const resolvedFormat = format ?? "html";
   const { content } = await generateDocumentation({
     entryPath,

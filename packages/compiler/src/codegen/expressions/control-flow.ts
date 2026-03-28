@@ -265,12 +265,7 @@ export const compileIfExpr = (
           ctx,
           fnCtx,
           tailPosition,
-          expectedResultTypeId: expressionUsesExpectedResultType({
-            exprId: expr.defaultBranch,
-            ctx,
-          })
-            ? resultTypeId
-            : undefined,
+          expectedResultTypeId: resultTypeId,
           outResultStorageRef,
         })
       : undefined;
@@ -319,12 +314,7 @@ export const compileIfExpr = (
       ctx,
       fnCtx,
       tailPosition,
-      expectedResultTypeId: expressionUsesExpectedResultType({
-        exprId: branch.value,
-        ctx,
-      })
-        ? resultTypeId
-        : undefined,
+      expectedResultTypeId: resultTypeId,
       outResultStorageRef,
     });
     const loweredValue = lowerToOutResultStorageIfNeeded({
@@ -508,6 +498,7 @@ export const compileMatchExpr = (
           ctx,
           fnCtx,
           tailPosition,
+          expectedResultTypeId: resultTypeId,
           outResultStorageRef,
         }),
       });
@@ -716,6 +707,7 @@ export const compileMatchExpr = (
             ctx,
             fnCtx,
             tailPosition,
+            expectedResultTypeId: resultTypeId,
             outResultStorageRef,
           }),
           exprId: arm.value,

@@ -2690,16 +2690,23 @@ const createMethodLookupEntries = ({
           ? binaryen.none
           : meta.resultType;
       const wrapperName = `${typeLabel}__method_${hashTraitSymbol}_${hashTraitMethod}_${implRef.symbol}`;
+      const wrapperLocals: binaryen.Type[] = [];
+      const wrapperParamType = binaryen.createType(params as number[]);
+      const wrapperScratch = {
+        locals: wrapperLocals,
+        nextLocalIndex: binaryen.expandType(wrapperParamType).length,
+      };
       const wrapper = ctx.mod.addFunction(
         wrapperName,
-        binaryen.createType(params as number[]),
+        wrapperParamType,
         wrapperResultType,
-        [],
+        wrapperLocals,
         dispatchEffectful && !meta.effectful
           ? wrapValueInOutcome({
               valueExpr: implCall,
               valueType: meta.resultType,
               ctx,
+              fnCtx: wrapperScratch,
             })
           : implCall,
       );

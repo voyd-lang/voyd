@@ -536,9 +536,15 @@ export const ensureContinuationFunction = ({
     tailPosition: true,
     expectedResultTypeId: resolvedReturnTypeId,
   });
-  const needsWrap = binaryen.getExpressionType(bodyExpr.expr) === returnWasmType;
+  const bodyExprType = binaryen.getExpressionType(bodyExpr.expr);
+  const needsWrap = bodyExprType === returnWasmType;
   const rawBodyOutcomeExpr = needsWrap
-    ? wrapValueInOutcome({ valueExpr: bodyExpr.expr, valueType: returnWasmType, ctx })
+    ? wrapValueInOutcome({
+        valueExpr: bodyExpr.expr,
+        valueType: returnWasmType,
+        ctx,
+        fnCtx,
+      })
     : bodyExpr.expr;
   const bodyOutcomeExpr = coerceToBinaryenType(
     ctx,

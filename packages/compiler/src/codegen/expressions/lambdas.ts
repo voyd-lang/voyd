@@ -28,7 +28,9 @@ import {
   loadBindingValue,
   storeLocalValue,
 } from "../locals.js";
-import { wrapValueInOutcome } from "../effects/outcome-values.js";
+import {
+  wrapValueInOutcome,
+} from "../effects/outcome-values.js";
 import { effectsFacade } from "../effects/facade.js";
 import { emitPureSurfaceWrapper } from "../effects/abi-wrapper.js";
 import { coerceValueToType, lowerValueForHeapField } from "../structural.js";
@@ -260,12 +262,14 @@ const emitLambdaFunction = ({
             binaryen.getExpressionType(compiledImplBody.expr),
           );
     const returnWasmType = wasmTypeFor(desc.returnType, ctx);
+    const implBodyType = binaryen.getExpressionType(implBody);
     const implFunctionBody =
-      binaryen.getExpressionType(implBody) === returnWasmType
+      implBodyType === returnWasmType
         ? wrapValueInOutcome({
             valueExpr: implBody,
             valueType: returnWasmType,
             ctx,
+            fnCtx: implCtx,
           })
         : implBody;
 
@@ -364,6 +368,7 @@ const emitLambdaFunction = ({
         valueExpr: body,
         valueType: returnWasmType,
         ctx,
+        fnCtx: lambdaCtx,
       })
     : boxSignatureSpillValue({
         value: body,

@@ -10,6 +10,11 @@ pub value ScalarBox {
   value: i32
 }
 
+impl ScalarBox
+  fn bump(~self) -> ScalarBox
+    self.value = self.value + 1
+    self
+
 pub value OptionalFieldBox {
   value?: i32,
   fallback: i32
@@ -51,6 +56,13 @@ fn reflect_wide(value: WideVec5) -> WideVec5
 
 fn bump_wide_a(~value: WideVec5)
   value.a = value.a + 10
+
+fn bump_scalar(~value: ScalarBox)
+  value.value = value.value + 1
+
+fn bump_scalar_labeled(amount: i32, { ~box: ScalarBox }) -> i32
+  box.value = box.value + amount
+  box.value
 
 fn wide_tail_sum(value: WideVec5) -> i32
   value.b + value.e
@@ -145,6 +157,21 @@ pub fn value_single_lane_array_storage() -> i32
   items.push(ScalarBox { value: 3 })
   items.push(ScalarBox { value: 4 })
   items.at(0).value + items.at(1).value
+
+pub fn value_single_lane_mutable_param() -> i32
+  let ~box = ScalarBox { value: 3 }
+  bump_scalar(box)
+  box.value
+
+pub fn value_single_lane_mutable_receiver() -> i32
+  let ~box = ScalarBox { value: 3 }
+  box.bump()
+  box.value
+
+pub fn value_single_lane_labeled_mutable_param() -> i32
+  let ~box = ScalarBox { value: 3 }
+  let next = bump_scalar_labeled(2, { box })
+  box.value + next
 
 pub fn value_optional_field() -> i32
   let with_value = OptionalOnlyBox { value: 5 }

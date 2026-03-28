@@ -1,4 +1,8 @@
 import binaryen from "binaryen";
+import {
+  refCast,
+  structGetFieldValue,
+} from "@voyd/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   ExpressionCompiler,
@@ -17,13 +21,16 @@ import {
   loadStructuralField,
 } from "../../structural.js";
 import {
+  getInlineHeapBoxType,
   getRequiredExprType,
   getStructuralTypeInfo,
   wasmTypeFor,
 } from "../../types.js";
 import {
+  allocateAddressableLocal,
   allocateTempLocal,
   getRequiredBinding,
+  loadLocalValue,
   loadBindingValue,
   loadBindingStorageRef,
   storeLocalValue,
@@ -519,6 +526,13 @@ const materializeCallArgumentPlan = ({
 }): binaryen.ExpressionRef[] => {
   const containerTemps = new Map<number, ReturnType<typeof allocateTempLocal>>();
   const initializedContainers = new Set<number>();
+  const mutableRefContainerArgs = new Set(
+    plan.flatMap((entry, index) =>
+      entry.kind === "container-field" && paramAbiKinds?.[index] === "mutable_ref"
+        ? [entry.containerArgIndex]
+        : [],
+    ),
+  );
 
   return plan.map((entry, paramIndex) => {
     const abiKind = paramAbiKinds?.[paramIndex];
@@ -563,15 +577,38 @@ const materializeCallArgumentPlan = ({
     const temp =
       existingTemp ??
       (() => {
-        const created = allocateTempLocal(containerInfo.interfaceType, fnCtx);
+        const created = mutableRefContainerArgs.has(entry.containerArgIndex)
+          ? allocateAddressableLocal({
+              typeId: containerTypeId,
+              ctx,
+              fnCtx,
+            })
+          : allocateTempLocal(
+              containerInfo.interfaceType,
+              fnCtx,
+              containerTypeId,
+              ctx,
+            );
         containerTemps.set(entry.containerArgIndex, created);
         return created;
       })();
+    const initOps =
+      initializedContainers.has(entry.containerArgIndex)
+        ? []
+        : [
+            storeLocalValue({
+              binding: temp,
+              value: compiledArgs[entry.containerArgIndex]!,
+              ctx,
+              fnCtx,
+            }),
+          ];
+    initializedContainers.add(entry.containerArgIndex);
 
     const loaded = loadStructuralField({
       structInfo: containerInfo,
       field,
-      pointer: () => ctx.mod.local.get(temp.index, containerInfo.interfaceType),
+      pointer: () => loadLocalValue(temp, ctx),
       ctx,
     });
     const coerced = coerceValueToType({
@@ -581,27 +618,74 @@ const materializeCallArgumentPlan = ({
       ctx,
       fnCtx,
     });
+    const fieldExprId = resolveContainerFieldValueExprId({
+      containerExprId: containerArg.expr,
+      fieldName: entry.fieldName,
+      ctx,
+    });
+    const containerFieldStorageRef =
+      typeof fieldExprId === "number"
+        ? undefined
+        : tryCompileContainerFieldStorageRef({
+            containerExprId: containerArg.expr,
+            containerTypeId,
+            containerInfo,
+            field,
+            temp,
+            ctx,
+            fnCtx,
+          });
+
+    if (
+      abiKind === "mutable_ref" &&
+      typeof paramTypeId === "number" &&
+      typeof fieldExprId === "number" &&
+      typeof resolveAddressableIdentifierSymbol({ exprId: fieldExprId, ctx }) !== "number" &&
+      !containerFieldStorageRef
+    ) {
+      const fieldTemp = allocateAddressableLocal({
+        typeId: paramTypeId,
+        ctx,
+        fnCtx,
+      });
+      const fieldPointer = loadBindingStorageRef(fieldTemp, ctx);
+      if (!fieldPointer) {
+        throw new Error(
+          `mutable ref labeled argument requires addressable temp storage (type ${paramTypeId})`,
+        );
+      }
+      return ctx.mod.block(
+        null,
+        [
+          ...initOps,
+          storeLocalValue({
+            binding: fieldTemp,
+            value: coerced,
+            ctx,
+            fnCtx,
+          }),
+          fieldPointer,
+        ],
+        fieldTemp.storageType,
+      );
+    }
 
     const result = lowerCallArgumentForAbi({
-      argExprId: containerArg.expr,
+      argExprId: fieldExprId,
       argValue: coerced,
+      addressableValue: containerFieldStorageRef,
       paramTypeId,
       abiKind,
       ctx,
       fnCtx,
       compileExpr,
     });
-    if (initializedContainers.has(entry.containerArgIndex)) {
+    if (initOps.length === 0) {
       return result;
     }
-
-    initializedContainers.add(entry.containerArgIndex);
     return ctx.mod.block(
       null,
-      [
-        ctx.mod.local.set(temp.index, compiledArgs[entry.containerArgIndex]!),
-        result,
-      ],
+      [...initOps, result],
       binaryen.getExpressionType(result)
     );
   });
@@ -635,6 +719,7 @@ const collectPreservedStorageRefArgIndexes = ({
 const lowerCallArgumentForAbi = ({
   argExprId,
   argValue,
+  addressableValue,
   paramTypeId,
   abiKind,
   ctx,
@@ -643,6 +728,7 @@ const lowerCallArgumentForAbi = ({
 }: {
   argExprId?: HirExprId;
   argValue: binaryen.ExpressionRef;
+  addressableValue?: binaryen.ExpressionRef;
   paramTypeId?: TypeId;
   abiKind?: string;
   ctx: CodegenContext;
@@ -654,6 +740,9 @@ const lowerCallArgumentForAbi = ({
   }
   if (typeof paramTypeId !== "number") {
     throw new Error("ref ABI argument lowering requires a concrete parameter type");
+  }
+  if (addressableValue) {
+    return addressableValue;
   }
   const addressableSymbol =
     typeof argExprId === "number"
@@ -678,18 +767,22 @@ const lowerCallArgumentForAbi = ({
       const ownedValue = materialized
         ? loadBindingValue(materialized.binding, ctx)
         : argValue;
-      const owned = allocateTempLocal(
-        wasmTypeFor(paramTypeId, ctx),
-        fnCtx,
-        paramTypeId,
+      const owned = allocateAddressableLocal({
+        typeId: paramTypeId,
         ctx,
-      );
+        fnCtx,
+      });
       fnCtx.bindings.set(addressableSymbol, {
         ...owned,
         kind: "local",
         typeId: paramTypeId,
       });
-      const ownedPointer = ctx.mod.local.get(owned.index, owned.storageType);
+      const ownedPointer = loadBindingStorageRef(owned, ctx);
+      if (!ownedPointer) {
+        throw new Error(
+          `mutable ref call argument requires addressable temp storage (type ${paramTypeId})`,
+        );
+      }
       return ctx.mod.block(
         null,
         [
@@ -707,7 +800,13 @@ const lowerCallArgumentForAbi = ({
     }
   }
   if (abiKind === "mutable_ref") {
-    throw new Error("mutable ref call argument requires addressable storage");
+    const exprKind =
+      typeof argExprId === "number"
+        ? ctx.module.hir.expressions.get(argExprId)?.exprKind ?? "missing"
+        : "none";
+    throw new Error(
+      `mutable ref call argument requires addressable storage (type ${paramTypeId}, expr ${exprKind})`,
+    );
   }
   if (typeof argExprId === "number") {
     const projectedPointer = tryCompileProjectedElementStorageRefExpr({
@@ -772,4 +871,127 @@ const resolveAddressableIdentifierSymbol = ({
   }
   const inner = ctx.module.hir.expressions.get(expr.args[0]!.expr);
   return inner?.exprKind === "identifier" ? inner.symbol : undefined;
+};
+
+const NON_REF_TYPES = new Set<number>([
+  binaryen.none,
+  binaryen.unreachable,
+  binaryen.i32,
+  binaryen.i64,
+  binaryen.f32,
+  binaryen.f64,
+]);
+
+const resolveContainerFieldValueExprId = ({
+  containerExprId,
+  fieldName,
+  ctx,
+}: {
+  containerExprId: HirExprId;
+  fieldName: string;
+  ctx: CodegenContext;
+}): HirExprId | undefined => {
+  const containerExpr = ctx.module.hir.expressions.get(containerExprId);
+  if (containerExpr?.exprKind !== "object-literal") {
+    return undefined;
+  }
+  const fieldEntry = containerExpr.entries.find(
+    (entry) => entry.kind === "field" && entry.name === fieldName,
+  );
+  return fieldEntry?.kind === "field" ? fieldEntry.value : undefined;
+};
+
+const tryCompileContainerFieldStorageRef = ({
+  containerExprId,
+  containerTypeId,
+  containerInfo,
+  field,
+  temp,
+  ctx,
+  fnCtx,
+}: {
+  containerExprId: HirExprId;
+  containerTypeId: TypeId;
+  containerInfo: NonNullable<ReturnType<typeof getStructuralTypeInfo>>;
+  field: NonNullable<ReturnType<typeof getStructuralTypeInfo>>["fields"][number];
+  temp: ReturnType<typeof allocateTempLocal>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef | undefined => {
+  const fieldStorageType = getInlineHeapBoxType({ typeId: field.typeId, ctx });
+  if (
+    typeof fieldStorageType !== "number" ||
+    field.heapWasmType !== fieldStorageType
+  ) {
+    return undefined;
+  }
+
+  const containerPointer = tryLoadContainerPointer({
+    containerExprId,
+    containerTypeId,
+    containerInfo,
+    temp,
+    ctx,
+    fnCtx,
+  });
+  if (!containerPointer) {
+    return undefined;
+  }
+  if (containerInfo.layoutKind === "value-object") {
+    return undefined;
+  }
+
+  return structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: field.runtimeIndex,
+    fieldType: field.heapWasmType,
+    exprRef: refCast(ctx.mod, containerPointer, containerInfo.runtimeType),
+  });
+};
+
+const tryLoadContainerPointer = ({
+  containerExprId,
+  containerTypeId,
+  containerInfo,
+  temp,
+  ctx,
+  fnCtx,
+}: {
+  containerExprId: HirExprId;
+  containerTypeId: TypeId;
+  containerInfo: NonNullable<ReturnType<typeof getStructuralTypeInfo>>;
+  temp: ReturnType<typeof allocateTempLocal>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef | undefined => {
+  const addressableSymbol = resolveAddressableIdentifierSymbol({
+    exprId: containerExprId,
+    ctx,
+  });
+  if (typeof addressableSymbol === "number") {
+    const binding = getRequiredBinding(addressableSymbol, ctx, fnCtx);
+    const storageRef = loadBindingStorageRef(binding, ctx);
+    if (storageRef) {
+      return storageRef;
+    }
+    const bindingValue = loadBindingValue(binding, ctx);
+    const bindingValueType = binaryen.getExpressionType(bindingValue);
+    if (
+      binaryen.expandType(bindingValueType).length === 1 &&
+      !NON_REF_TYPES.has(bindingValueType)
+    ) {
+      return bindingValue;
+    }
+  }
+
+  const tempValue = ctx.mod.local.get(temp.index, temp.storageType);
+  if (containerInfo.layoutKind === "value-object") {
+    const containerStorageType = getInlineHeapBoxType({
+      typeId: containerTypeId,
+      ctx,
+    });
+    return temp.storageType === containerStorageType ? tempValue : undefined;
+  }
+
+  return tempValue;
 };

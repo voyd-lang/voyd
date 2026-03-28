@@ -84,6 +84,7 @@ export const compileContinuationCall = ({
           value: args[0]!,
           valueType: resumeWasmType,
           ctx,
+          fnCtx,
         });
   const callArgs = [ctx.effectsRuntime.continuationEnv(contRef), resumeBox];
   const fnRefType = functionRefType({

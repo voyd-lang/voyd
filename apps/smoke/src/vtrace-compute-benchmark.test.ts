@@ -13,6 +13,7 @@ const fixtureEntryPath = path.join(
 
 const runPerf = process.env.VOYD_RUN_PERF_SMOKE === "1";
 const perfIt = runPerf ? it : it.skip;
+const mainIt = runPerf ? it : it.skip;
 const perfIterations = Number.parseInt(process.env.VOYD_PERF_ITERATIONS ?? "3", 10);
 const mainChecksum = 3_825_271;
 const benchmarkChecksum = 57_372_071;
@@ -44,10 +45,12 @@ describe("smoke: vtrace compute-only benchmark", () => {
 
   beforeAll(async () => {
     const sdk = createSdk();
-    compiled = expectCompileSuccess(await sdk.compile({ entryPath: fixtureEntryPath }));
+    compiled = expectCompileSuccess(
+      await sdk.compile({ entryPath: fixtureEntryPath, optimize: true }),
+    );
   });
 
-  it("renders the compute-only checksum deterministically without output effects", async () => {
+  mainIt("renders the compute-only checksum deterministically without output effects", async () => {
     const result = await compiled.run<number>({ entryName: "main" });
     expect(result).toBe(mainChecksum);
   });

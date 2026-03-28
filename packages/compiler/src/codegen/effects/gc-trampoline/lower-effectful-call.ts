@@ -15,6 +15,8 @@ import { OUTCOME_TAGS } from "../runtime-abi.js";
 import { unboxOutcomeValue } from "../outcome-values.js";
 import {
   allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
 } from "../../locals.js";
 import { getExprBinaryenType, wasmTypeFor } from "../../types.js";
 import { captureContinuationEnvFieldValue } from "./shared.js";
@@ -149,10 +151,19 @@ export const lowerEffectfulCallResult = ({
     };
   }
 
-  const resultTemp = allocateTempLocal(valueType, fnCtx);
+  const resultTemp = allocateTempLocal(valueType, fnCtx, returnTypeId, ctx);
   ops.push(
-    ctx.mod.if(tagIsValue, ctx.mod.local.set(resultTemp.index, valueResult), effectReturn),
-    ctx.mod.local.get(resultTemp.index, valueType)
+    ctx.mod.if(
+      tagIsValue,
+      storeLocalValue({
+        binding: resultTemp,
+        value: valueResult,
+        ctx,
+        fnCtx,
+      }),
+      effectReturn
+    ),
+    loadLocalValue(resultTemp, ctx)
   );
 
   return {

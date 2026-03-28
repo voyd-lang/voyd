@@ -2208,16 +2208,26 @@ const coercePureClosureToEffectful = ({
     actualClosure.resultType
   );
   const innerValueType = wasmTypeFor(actualDescReturnTypeId(actualType, ctx), ctx);
+  const wrapperLocals: binaryen.Type[] = [];
+  const wrapperScratch = {
+    locals: wrapperLocals,
+    nextLocalIndex: binaryen.expandType(params).length,
+  };
   const wrapped =
     binaryen.getExpressionType(innerResult) === innerValueType
-      ? wrapValueInOutcome({ valueExpr: innerResult, valueType: innerValueType, ctx })
+      ? wrapValueInOutcome({
+          valueExpr: innerResult,
+          valueType: innerValueType,
+          ctx,
+          fnCtx: wrapperScratch,
+        })
       : innerResult;
 
   ctx.mod.addFunction(
     fnName,
     params,
     targetClosure.resultType,
-    [],
+    wrapperLocals,
     wrapped
   );
   cache.set(key, { envType, fnName, fnRefType });

@@ -16,7 +16,12 @@ import type {
 import { effectsFacade } from "../effects/facade.js";
 import { ensureEffectArgsType } from "../effects/args-type.js";
 import { signatureHashFor } from "../effects/effect-registry.js";
-import { allocateTempLocal, loadBindingValue, storeLocalValue } from "../locals.js";
+import {
+  allocateTempLocal,
+  loadBindingValue,
+  loadLocalValue,
+  storeLocalValue,
+} from "../locals.js";
 import {
   getInlineHeapBoxType,
   getRequiredExprType,
@@ -29,7 +34,9 @@ import {
   pushHandlerScope,
   popHandlerScope,
 } from "../effects/handler-stack.js";
-import { wrapValueInOutcome } from "../effects/outcome-values.js";
+import {
+  wrapValueInOutcome,
+} from "../effects/outcome-values.js";
 import { RESUME_KIND, type ResumeKind } from "../effects/runtime-abi.js";
 import type { HirEffectHandlerExpr } from "../../semantics/hir/index.js";
 import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
@@ -600,6 +607,7 @@ const emitClauseFunction = ({
           valueExpr: body.expr,
           valueType: returnWasmType,
           ctx,
+          fnCtx,
         })
       : body.expr;
 
@@ -759,9 +767,16 @@ export const compileEffectHandlerExpr = (
   const resultLocal =
     resultWasmType === binaryen.none
       ? undefined
-      : allocateTempLocal(resultWasmType, fnCtx, resultType);
+      : allocateTempLocal(resultWasmType, fnCtx, resultType, ctx);
   if (resultLocal) {
-    ops.push(ctx.mod.local.set(resultLocal.index, body.expr));
+    ops.push(
+      storeLocalValue({
+        binding: resultLocal,
+        value: body.expr,
+        ctx,
+        fnCtx,
+      }),
+    );
   } else {
     ops.push(body.expr);
   }
@@ -786,7 +801,7 @@ export const compileEffectHandlerExpr = (
   popHandlerScope(fnCtx);
   ops.push(...cleanup);
   if (resultLocal) {
-    ops.push(ctx.mod.local.get(resultLocal.index, resultLocal.type));
+    ops.push(loadLocalValue(resultLocal, ctx));
   }
 
   return {

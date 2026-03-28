@@ -223,22 +223,28 @@ export const compileClosureCall = ({
       ]
     : [ctx.mod.local.get(closureTemp.index, base.interfaceType), ...userArgs];
   const rawCall = callRef(ctx.mod, targetFn, callArgs as number[], base.resultType);
-  const stabilizedCall = stabilizeMultivalueResult(rawCall, base.resultAbiTypes);
-  const decodedCall =
-    getSignatureSpillBoxType({ typeId: resolvedDesc.returnType, ctx }) === base.resultType
-      ? unboxSignatureSpillValue({
-          value: stabilizedCall,
+  const directCallResult = effectful
+    ? rawCall
+    : (() => {
+        const stabilizedCall = stabilizeMultivalueResult(rawCall, base.resultAbiTypes);
+        return getSignatureSpillBoxType({
           typeId: resolvedDesc.returnType,
           ctx,
-        })
-      : stabilizedCall;
+        }) === base.resultType
+          ? unboxSignatureSpillValue({
+              value: stabilizedCall,
+              typeId: resolvedDesc.returnType,
+              ctx,
+            })
+          : stabilizedCall;
+      })();
   const callExpr =
     argSetups.length === 0
-      ? decodedCall
+      ? directCallResult
       : ctx.mod.block(
           null,
-          [...argSetups, decodedCall],
-          binaryen.getExpressionType(decodedCall),
+          [...argSetups, directCallResult],
+          binaryen.getExpressionType(directCallResult),
         );
 
   const lowered = effectful
@@ -502,22 +508,25 @@ export const compileCurriedClosureCall = ({
         ]
       : [ctx.mod.local.get(closureTemp.index, base.interfaceType), ...args];
     const rawCall = callRef(ctx.mod, targetFn, callArgs as number[], base.resultType);
-    const stabilizedCall = stabilizeMultivalueResult(rawCall, base.resultAbiTypes);
-    const decodedCall =
-      getSignatureSpillBoxType({ typeId: returnTypeId, ctx }) === base.resultType
-        ? unboxSignatureSpillValue({
-            value: stabilizedCall,
-            typeId: returnTypeId,
-            ctx,
-          })
-        : stabilizedCall;
+    const directCallResult = effectful
+      ? rawCall
+      : (() => {
+          const stabilizedCall = stabilizeMultivalueResult(rawCall, base.resultAbiTypes);
+          return getSignatureSpillBoxType({ typeId: returnTypeId, ctx }) === base.resultType
+            ? unboxSignatureSpillValue({
+                value: stabilizedCall,
+                typeId: returnTypeId,
+                ctx,
+              })
+            : stabilizedCall;
+        })();
     const callExpr =
       argSetups.length === 0
-        ? decodedCall
+        ? directCallResult
         : ctx.mod.block(
             null,
-            [...argSetups, decodedCall],
-            binaryen.getExpressionType(decodedCall),
+            [...argSetups, directCallResult],
+            binaryen.getExpressionType(directCallResult),
           );
 
     const lowered = effectful

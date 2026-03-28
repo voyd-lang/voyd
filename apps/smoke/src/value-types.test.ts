@@ -69,6 +69,27 @@ describe("smoke: value types", () => {
     expect(output).toBe(7);
   });
 
+  it("passes single-lane mutable params by addressable storage", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_single_lane_mutable_param",
+    });
+    expect(output).toBe(4);
+  });
+
+  it("passes single-lane mutable receivers by addressable storage", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_single_lane_mutable_receiver",
+    });
+    expect(output).toBe(4);
+  });
+
+  it("passes labeled single-lane mutable params by addressable storage", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_single_lane_labeled_mutable_param",
+    });
+    expect(output).toBe(10);
+  });
+
   it("supports optional fields on value types", async () => {
     const output = await compiled.run<number>({
       entryName: "value_optional_field",

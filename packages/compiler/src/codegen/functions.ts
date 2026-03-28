@@ -45,7 +45,10 @@ import {
   type HirExportEntry,
 } from "../semantics/hir/index.js";
 import { diagnosticFromCode } from "../diagnostics/index.js";
-import { wrapValueInOutcome } from "./effects/outcome-values.js";
+import {
+  isOutcomeCarrierType,
+  wrapValueInOutcome,
+} from "./effects/outcome-values.js";
 import { effectsFacade } from "./effects/facade.js";
 import { emitPureSurfaceWrapper } from "./effects/abi-wrapper.js";
 import { formatTestExportName } from "../tests/exports.js";
@@ -125,11 +128,6 @@ const pushFunctionMeta = (
 const userParamOffsetFor = (meta: FunctionMetadata): number => meta.userParamOffset;
 const firstUserParamIndexFor = (meta: FunctionMetadata): number =>
   meta.firstUserParamIndex;
-
-const isOutcomeReferenceSupertype = (
-  wasmType: binaryen.Type,
-  ctx: CodegenContext,
-): boolean => wasmType === ctx.rtt.baseType || wasmType === ctx.rtt.rootType;
 
 const makeAbiValue = (
   values: readonly binaryen.ExpressionRef[],
@@ -1133,6 +1131,7 @@ export const emitModuleExports = (
       wrapperName,
       wrapperParamTypes: userParamTypes,
       wrapperResultType: wasmTypeFor(meta.resultTypeId, exportCtx),
+      wrapperResultTypeId: meta.resultTypeId,
       implName: meta.wasmName,
       buildImplCallArgs: () => [
         exportCtx.effectsBackend.abi.hiddenHandlerValue(exportCtx),
@@ -1397,16 +1396,16 @@ const compileFunctionItem = (
     const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
     const implExprType = binaryen.getExpressionType(implBodyExpr);
     const shouldWrapOutcome =
-      implExprType === returnValueType ||
-      (isOutcomeReferenceSupertype(returnValueType, ctx) &&
-        implExprType !== binaryen.none &&
-        implExprType !== binaryen.unreachable &&
-        implExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx));
+      !isOutcomeCarrierType({
+        wasmType: implExprType,
+        ctx,
+      });
     const functionBody = shouldWrapOutcome
       ? wrapValueInOutcome({
           valueExpr: implBodyExpr,
           valueType: returnValueType,
           ctx,
+          fnCtx: implCtx,
         })
       : implBodyExpr;
 
@@ -1423,6 +1422,7 @@ const compileFunctionItem = (
       wrapperName: meta.wasmName,
       wrapperParamTypes: meta.paramTypes as number[],
       wrapperResultType: meta.resultType,
+      wrapperResultTypeId: meta.resultTypeId,
       implName,
       buildImplCallArgs: () => [
         ctx.effectsBackend.abi.hiddenHandlerValue(ctx),
@@ -1504,16 +1504,16 @@ const compileFunctionItem = (
   const bodyExprType = binaryen.getExpressionType(bodyExpr);
   const shouldWrapOutcome =
     meta.effectful &&
-    (bodyExprType === returnValueType ||
-      (isOutcomeReferenceSupertype(returnValueType, ctx) &&
-        bodyExprType !== binaryen.none &&
-        bodyExprType !== binaryen.unreachable &&
-        bodyExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx)));
+    !isOutcomeCarrierType({
+      wasmType: bodyExprType,
+      ctx,
+    });
   const rawFunctionBody = shouldWrapOutcome
     ? wrapValueInOutcome({
         valueExpr: bodyExpr,
         valueType: returnValueType,
         ctx,
+        fnCtx,
       })
     : bodyExpr;
   const functionBody =
