@@ -2311,19 +2311,47 @@ const synthesizeConcreteFunctionMeta = ({
       return;
     }
 
-    const paramAbiTypes = instantiatedTypeDesc.parameters.map((param) =>
-      getAbiTypesForSignature(param.type, ctx),
+    const paramAbiKinds = instantiatedTypeDesc.parameters.map((param, index) =>
+      getOptimizedParamAbiKind({
+        typeId: param.type,
+        bindingKind: signature.parameters[index]?.bindingKind,
+        ctx,
+      }),
+    );
+    const paramAbiTypes = instantiatedTypeDesc.parameters.map((param, index) =>
+      getOptimizedAbiTypesForParam({
+        typeId: param.type,
+        bindingKind: signature.parameters[index]?.bindingKind,
+        ctx,
+      }),
     );
     const userParamTypes = paramAbiTypes.flat();
-    const resultAbiTypes = getAbiTypesForSignature(
-      instantiatedTypeDesc.returnType,
-      ctx,
-    );
+    const resultAbiKind =
+      effectful
+        ? "direct"
+        : getOptimizedResultAbiKind({
+            typeId: instantiatedTypeDesc.returnType,
+            ctx,
+          });
+    const outParamType =
+      resultAbiKind === "out_ref"
+        ? getOptimizedAbiTypeForResult({
+            typeId: instantiatedTypeDesc.returnType,
+            ctx,
+          })
+        : undefined;
+    const resultAbiTypes =
+      resultAbiKind === "direct"
+        ? getAbiTypesForSignature(instantiatedTypeDesc.returnType, ctx)
+        : [];
     const widened = ctx.effectsBackend.abi.widenSignature({
       ctx,
       effectful,
-      userParamTypes,
-      userResultType: getSignatureWasmType(instantiatedTypeDesc.returnType, ctx),
+      userParamTypes: outParamType ? [outParamType, ...userParamTypes] : userParamTypes,
+      userResultType:
+        resultAbiKind === "out_ref"
+          ? binaryen.none
+          : getSignatureWasmType(instantiatedTypeDesc.returnType, ctx),
     });
 
     const metadata: FunctionMetadata = {
@@ -2340,7 +2368,8 @@ const synthesizeConcreteFunctionMeta = ({
       paramTypes: widened.paramTypes,
       paramAbiTypes,
       userParamOffset: widened.userParamOffset,
-      firstUserParamIndex: widened.userParamOffset,
+      firstUserParamIndex:
+        widened.userParamOffset + (outParamType ? 1 : 0),
       resultType: widened.resultType,
       resultAbiTypes,
       paramTypeIds: instantiatedTypeDesc.parameters.map((param) => param.type),
@@ -2356,10 +2385,12 @@ const synthesizeConcreteFunctionMeta = ({
                 ctx,
               })
             : undefined,
+        bindingKind: signature.parameters[index]?.bindingKind,
       })),
-      paramAbiKinds: instantiatedTypeDesc.parameters.map(() => "direct"),
+      paramAbiKinds,
       resultTypeId: instantiatedTypeDesc.returnType,
-      resultAbiKind: "direct",
+      resultAbiKind,
+      outParamType,
       typeArgs,
       instanceId,
       effectful,
