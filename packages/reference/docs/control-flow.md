@@ -28,15 +28,16 @@ if
     0
 ```
 
-Type-test chains also have a `then:` shorthand with `elif:`.
+If can also be used to narrow types.
 
 ```voyd
-if pet is Dog then:
-  pet.noses
-elif: pet is Cat then:
-  pet.lives
-else:
-  0
+if
+  pet is Dog:
+    pet.noses
+  pet is Cat:
+    pet.lives
+  else:
+    0
 ```
 
 This is a concise surface form for branching on repeated type tests of the same

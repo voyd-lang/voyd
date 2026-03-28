@@ -246,12 +246,7 @@ const splitHrefParts = (href: string) => {
 };
 
 const slugDirectorySegments = (slug: string) =>
-  slug === ""
-    ? []
-    : slug
-        .split("/")
-        .filter(Boolean)
-        .slice(0, -1);
+  slug === "" ? [] : slug.split("/").filter(Boolean).slice(0, -1);
 
 const normalizeDocSlug = (segments: string[]) => {
   if (segments.length === 0) return "";
@@ -340,7 +335,7 @@ export default function Docs() {
     if (!root) return;
 
     const nodes = Array.from(
-      root.querySelectorAll("h2, h3")
+      root.querySelectorAll("h2, h3"),
     ) as HTMLHeadingElement[];
 
     const list: Heading[] = nodes
@@ -378,7 +373,7 @@ export default function Docs() {
           });
         }
       },
-      { rootMargin: "0px 0px -80% 0px" }
+      { rootMargin: "0px 0px -80% 0px" },
     );
 
     targets.forEach((el) => observer.observe(el));
@@ -413,9 +408,8 @@ export default function Docs() {
       if (unwrapped.includes("\n")) {
         const multilineMatch = unwrapped.match(/^([A-Za-z0-9_-]+)\n([\s\S]*)$/);
         const potentialLang = multilineMatch?.[1]?.toLowerCase() ?? "";
-        const supportedLang = /^(voyd|rust|bash|javascript|typescript|tsx)$/.test(
-          potentialLang,
-        );
+        const supportedLang =
+          /^(voyd|rust|bash|javascript|typescript|tsx)$/.test(potentialLang);
         const lang = supportedLang
           ? potentialLang === "rust"
             ? "voyd"
@@ -437,7 +431,9 @@ export default function Docs() {
       const childNodes = Array.isArray(children) ? children : [children];
       const firstChild = childNodes[0];
 
-      if (isValidElement<{ className?: string; children?: unknown }>(firstChild)) {
+      if (
+        isValidElement<{ className?: string; children?: unknown }>(firstChild)
+      ) {
         if (
           typeof firstChild.props === "object" &&
           firstChild.props !== null &&
@@ -481,7 +477,10 @@ export default function Docs() {
       if (resolvedSlug !== null && getReferenceDoc(resolvedSlug)) {
         const { hash } = splitHrefParts(href);
         return (
-          <Link to={buildDocHref({ docsPath, slug: resolvedSlug, hash })} {...props}>
+          <Link
+            to={buildDocHref({ docsPath, slug: resolvedSlug, hash })}
+            {...props}
+          >
             {children}
           </Link>
         );
@@ -554,7 +553,9 @@ export default function Docs() {
                 ? "text-[var(--foreground)]"
                 : "pointer-events-none opacity-0",
             ].join(" ")}
-            aria-label={isOpen ? `Collapse ${node.title}` : `Expand ${node.title}`}
+            aria-label={
+              isOpen ? `Collapse ${node.title}` : `Expand ${node.title}`
+            }
             onClick={() =>
               setExpandedFolders((current) => {
                 const next = new Set(current);
@@ -596,7 +597,9 @@ export default function Docs() {
             </span>
           )}
         </div>
-        {isOpen ? node.children.map((child) => renderNavNode(child, depth + 1)) : null}
+        {isOpen
+          ? node.children.map((child) => renderNavNode(child, depth + 1))
+          : null}
       </div>
     );
   };
@@ -607,7 +610,7 @@ export default function Docs() {
         <div className="space-y-6">
           <div className="space-y-2">
             <p className="m-0 px-2 text-[11px] font-bold tracking-[0.08em] text-[var(--site-text-muted)] uppercase">
-              Docs
+              TABLE Of CONTENTS
             </p>
             <nav className="space-y-1">{renderNavNode(navTree)}</nav>
           </div>
@@ -616,7 +619,10 @@ export default function Docs() {
             <p className="m-0 px-2 text-[11px] font-bold tracking-[0.08em] text-[var(--site-text-muted)] uppercase">
               On this page
             </p>
-            <nav ref={navRef} className="space-y-1 text-xs text-[var(--site-text-muted)]">
+            <nav
+              ref={navRef}
+              className="space-y-1 text-xs text-[var(--site-text-muted)]"
+            >
               {headings.map((h) => (
                 <a
                   key={h.id}
@@ -636,7 +642,7 @@ export default function Docs() {
 
       <article
         ref={articleRef}
-        className="prose flex-1 max-w-3xl min-w-0 space-y-8 text-[var(--foreground)] prose-headings:text-[var(--foreground)] prose-p:text-[var(--foreground)] prose-li:text-[var(--foreground)] prose-strong:text-[var(--foreground)] prose-a:text-[var(--foreground)] prose-a:underline prose-a:decoration-[var(--site-text-muted)] prose-blockquote:text-[var(--site-text-muted)] prose-hr:border-[var(--site-border)] prose-code:text-[var(--foreground)] prose-code:before:content-none prose-code:after:content-none"
+        className="prose bg-[var(--site-surface)] p-6 rounded-xl flex-1 max-w-3xl min-w-0 space-y-8 text-[var(--foreground)] prose-headings:text-[var(--foreground)] prose-p:text-[var(--foreground)] prose-li:text-[var(--foreground)] prose-strong:text-[var(--foreground)] prose-a:text-[var(--foreground)] prose-a:underline prose-a:decoration-[var(--site-text-muted)] prose-blockquote:text-[var(--site-text-muted)] prose-hr:border-[var(--site-border)] prose-code:text-[var(--foreground)] prose-code:before:content-none prose-code:after:content-none"
       >
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
