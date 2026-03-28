@@ -125,6 +125,13 @@ fn make_adder(base: i32)
 
 Nested lambdas capture outer values as expected.
 
+Use `fn(Arg1Type, Arg2Type, Etc) -> ReturnType` to type a lambda.
+
+```voyd
+fn calls_lambda(cb: fn(f64, i32) -> String)
+  cb(7.8, 4)
+```
+
 ## Methods and UFCS
 
 Methods are defined in `impl` blocks.
