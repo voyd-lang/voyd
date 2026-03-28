@@ -34,7 +34,7 @@ If can also be used to narrow types.
 if
   pet is Dog:
     pet.noses
-  pet is Cat then:
+  pet is Cat:
     pet.lives
   else:
     0
