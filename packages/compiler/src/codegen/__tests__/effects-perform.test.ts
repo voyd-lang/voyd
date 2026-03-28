@@ -54,15 +54,18 @@ const buildLoweringSnapshot = () => {
   const structuralIdCache = new Map<TypeId, TypeId | null>();
   const resolvingStructuralIds = new Set<TypeId>();
   const fixedArrayTypes = new Map();
+  const moduleContexts = new Map<string, CodegenContext>();
   const ctx: CodegenContext = {
     mod,
     moduleId: semantics.moduleId,
     moduleLabel: sanitize(semantics.hir.module.path),
     program,
     module: moduleView,
+    moduleContexts,
     diagnostics,
     options: {
       optimize: false,
+      optimizationProfile: "aggressive",
       validate: true,
       runtimeDiagnostics: true,
       emitEffectHelpers: false,
@@ -102,6 +105,7 @@ const buildLoweringSnapshot = () => {
     },
     outcomeValueTypes: new Map(),
   };
+  moduleContexts.set(ctx.moduleId, ctx);
   ctx.effectsBackend = selectEffectsBackend(ctx);
   ctx.effectLowering = ctx.effectsBackend.buildLowering({
     ctx,

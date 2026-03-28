@@ -361,7 +361,6 @@ const collectAssignmentsFromValue = ({
     if (pattern.elements.length !== structInfo.fields.length) {
       throw new Error("tuple pattern arity mismatch");
     }
-    const pointer = ctx.mod.local.get(temp.index, temp.type);
     const collected: PendingPatternAssignment[] = [];
     pattern.elements.forEach((subPattern, index) => {
       const field = structInfo.fieldMap.get(`${index}`);
@@ -372,7 +371,7 @@ const collectAssignmentsFromValue = ({
       const load = loadStructuralField({
         structInfo,
         field,
-        pointer,
+        pointer: () => ctx.mod.local.get(temp.index, temp.type),
         ctx,
       });
       ops.push(ctx.mod.local.set(elementTemp.index, load));
@@ -398,7 +397,6 @@ const collectAssignmentsFromValue = ({
     if (pattern.spread && pattern.spread.kind !== "wildcard") {
       throw new Error("destructure spread bindings are not supported yet");
     }
-    const pointer = ctx.mod.local.get(temp.index, temp.type);
     const collected: PendingPatternAssignment[] = [];
     pattern.fields.forEach(({ name, pattern: subPattern }) => {
       const field = structInfo.fieldMap.get(name);
@@ -409,7 +407,7 @@ const collectAssignmentsFromValue = ({
       const load = loadStructuralField({
         structInfo,
         field,
-        pointer,
+        pointer: () => ctx.mod.local.get(temp.index, temp.type),
         ctx,
       });
       ops.push(ctx.mod.local.set(fieldTemp.index, load));

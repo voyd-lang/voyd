@@ -115,6 +115,9 @@ test "hypot supports f64 and f32":
 test "pow trig log and exp support f64 and f32":
   assert(pow(2.0, 3.0), eq: 8.0)
   assert(close_enough(pow(9.0, 0.5), target: 3.0, epsilon: 0.0000000001), eq: true)
+  assert(pow(-2.0, 3.0), eq: -8.0)
+  assert(pow(-2.0, 4.0), eq: 16.0)
+  assert(is_nan(pow(-2.0, 0.5)), eq: true)
 
   assert(close_enough(exp(1.0), target: 2.718281828459045, epsilon: 0.000000001), eq: true)
   assert(close_enough(ln(2.718281828459045), target: 1.0, epsilon: 0.000000001), eq: true)
@@ -128,6 +131,22 @@ test "pow trig log and exp support f64 and f32":
     close_enough(
       atan2(1.0, 0.0),
       target: 1.5707963267948966,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(
+      atan2(1.0, -1.0),
+      target: 2.356194490192345,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(
+      atan2(-1.0, -1.0),
+      target: -2.356194490192345,
       epsilon: 0.000000001
     ),
     eq: true
@@ -171,14 +190,123 @@ test "boundary behavior around nan and infinities":
   let inf = 1.0 / 0.0
   let neg_inf = -1.0 / 0.0
   let nan = 0.0 / 0.0
+  let huge_finite_exp = exp(709.5)
+  let huge_finite_pow = pow(2.0, 1023.0)
+  let next_lower_pow = pow(2.0, 1022.0)
+  let reciprocal_exp = exp(400.0) * exp(-400.0)
+  let reciprocal_pow = pow(2.0, 600.0) * pow(2.0, -600.0)
 
   assert(is_infinite(exp(inf)), eq: true)
+  assert(is_infinite(huge_finite_exp), eq: false)
+  assert(is_infinite(huge_finite_pow), eq: false)
+  assert(huge_finite_exp > huge_finite_pow, eq: true)
+  assert(huge_finite_pow > next_lower_pow, eq: true)
+  assert(close_enough(reciprocal_exp, target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(close_enough(reciprocal_pow, target: 1.0, epsilon: 0.000000001), eq: true)
+  assert(is_infinite(pow(-2.0, 100000000000000000000.0)), eq: true)
+  assert(is_infinite(pow(-2.0, inf)), eq: true)
+  assert(pow(-2.0, neg_inf), eq: 0.0)
+  assert(is_nan(pow(-1.0, inf)), eq: true)
   assert(is_infinite(log2(0.0)), eq: true)
   assert(is_nan(ln(-1.0)), eq: true)
   assert(is_nan(sqrt(-1.0)), eq: true)
   assert(is_nan(fract(nan)), eq: true)
   assert(is_infinite(floor(inf)), eq: true)
   assert(is_infinite(ceil(neg_inf)), eq: true)
+  assert((1.0 / pow(-0.0, 3.0)) == neg_inf, eq: true)
+  assert(is_infinite(pow(-0.0, -3.0)), eq: true)
+  assert((1.0 / pow(-0.0, 4.0)) == inf, eq: true)
+  assert(close_enough(atan2(inf, inf), target: 0.7853981633974483, epsilon: 0.000000001), eq: true)
+  assert(close_enough(atan2(neg_inf, inf), target: -0.7853981633974483, epsilon: 0.000000001), eq: true)
+  assert((1.0 / atan2(-0.0, 1.0)) == neg_inf, eq: true)
+  assert(close_enough(atan2(-0.0, -1.0), target: -3.141592653589793, epsilon: 0.000000001), eq: true)
+  assert(close_enough(atan2(0.0, -0.0), target: 3.141592653589793, epsilon: 0.000000001), eq: true)
+  assert(close_enough(atan2(-0.0, -0.0), target: -3.141592653589793, epsilon: 0.000000001), eq: true)
+  let huge = 100000000000000000000.0
+  assert(abs(sin(huge)) <= 1.0, eq: true)
+  assert(abs(cos(huge)) <= 1.0, eq: true)
+
+test "large-angle trig uses high-precision reduction":
+  let huge = 100000000000000000000.0
+  let neg_huge = 0.0 - huge
+  let enormous = 9007199254740992.0 * 9007199254740992.0
+  let astronomical = enormous * enormous
+  let threshold_minus = 1048575.5
+  let threshold = 1048576.0
+  let threshold_plus = 1048576.5
+
+  assert(
+    close_enough(sin(huge), target: -0.6452512852657808, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(cos(huge), target: 0.7639704044417283, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(tan(huge), target: -0.8446024630198843, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(sin(neg_huge), target: 0.6452512852657808, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(cos(neg_huge), target: 0.7639704044417283, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(tan(neg_huge), target: 0.8446024630198843, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(sin(astronomical), target: -0.35268192419353095, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(cos(astronomical), target: -0.9357432662579777, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(tan(astronomical), target: 0.3769003068586326, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(
+      sin(threshold_minus),
+      target: -0.1624508310778367,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(cos(threshold_minus), target: 0.9867166399134658, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(
+      sin(threshold),
+      target: 0.3304931400217347,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(cos(threshold), target: 0.943808393901312, epsilon: 0.000000001),
+    eq: true
+  )
+  assert(
+    close_enough(
+      sin(threshold_plus),
+      target: 0.7425208640927718,
+      epsilon: 0.000000001
+    ),
+    eq: true
+  )
+  assert(
+    close_enough(cos(threshold_plus), target: 0.669822936593637, epsilon: 0.000000001),
+    eq: true
+  )
 
 test "deterministic sweep validates transcendental identities":
   var x = 0.25

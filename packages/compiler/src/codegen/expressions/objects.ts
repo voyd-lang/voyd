@@ -1,10 +1,5 @@
 import binaryen from "binaryen";
-import {
-  callRef,
-  initStruct,
-  refCast,
-  structGetFieldValue,
-} from "@voyd/lib/binaryen-gc/index.js";
+import { initStruct } from "@voyd/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   CompiledExpression,
@@ -15,7 +10,6 @@ import type {
   HirFieldAccessExpr,
   HirObjectLiteralExpr,
 } from "../context.js";
-import { LOOKUP_FIELD_ACCESSOR, RTT_METADATA_SLOTS } from "../rtt/index.js";
 import { allocateTempLocal } from "../locals.js";
 import { coerceValueToType, loadStructuralField } from "../structural.js";
 import { compileOptionalNoneValue } from "../optionals.js";
@@ -99,27 +93,12 @@ export const compileObjectLiteralExpr = (
       if (!target) {
         return;
       }
-      const pointer = ctx.mod.local.get(
-        spreadTemp.index,
-        spreadInfo.interfaceType
-      );
-      const lookupTable = structGetFieldValue({
-        mod: ctx.mod,
-        fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,
-        fieldIndex: RTT_METADATA_SLOTS.FIELD_INDEX_TABLE,
-        exprRef: pointer,
+      const load = loadStructuralField({
+        structInfo: spreadInfo,
+        field: sourceField,
+        pointer: () => ctx.mod.local.get(spreadTemp.index, spreadInfo.interfaceType),
+        ctx,
       });
-      const accessor = ctx.mod.call(
-        LOOKUP_FIELD_ACCESSOR,
-        [
-          ctx.mod.i32.const(sourceField.hash),
-          lookupTable,
-          ctx.mod.i32.const(0),
-        ],
-        binaryen.funcref
-      );
-      const getter = refCast(ctx.mod, accessor, sourceField.getterType!);
-      const load = callRef(ctx.mod, getter, [pointer], sourceField.wasmType);
       const expectedTypeId = structInfo.fieldMap.get(sourceField.name)?.typeId;
       const coerced = coerceValueToType({
         value: load,
@@ -307,14 +286,10 @@ export const compileFieldAccessExpr = (
     pointerTemp.index,
     compileExpr({ exprId: expr.target, ctx, fnCtx }).expr
   );
-  const pointer = ctx.mod.local.get(
-    pointerTemp.index,
-    structInfo.interfaceType
-  );
   const raw = loadStructuralField({
     structInfo,
     field: actualField,
-    pointer,
+    pointer: () => ctx.mod.local.get(pointerTemp.index, structInfo.interfaceType),
     ctx,
   });
 

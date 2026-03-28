@@ -22,6 +22,7 @@ import { getFunctionMetadataForCall } from "./metadata.js";
 import { emitResolvedCall } from "./resolved-call.js";
 import { compileTraitDispatchCall } from "./trait-dispatch.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
+import { tryInlineResolvedCall } from "./inline.js";
 
 export const compileCallExpr = (
   expr: HirCallExpr,
@@ -177,16 +178,31 @@ export const compileCallExpr = (
       typeInstanceId,
     });
     if (meta) {
-      const args = compileCallArguments({
-        call: expr,
-        meta,
-        ctx,
-        fnCtx,
-        compileExpr,
-      });
-      return emitResolvedCall({
-        meta,
-        args,
+    const args = compileCallArguments({
+      call: expr,
+      meta,
+      ctx,
+      fnCtx,
+      compileExpr,
+    });
+    const inlined = tryInlineResolvedCall({
+      meta,
+      args,
+      ctx,
+      fnCtx,
+      compileExpr,
+      options: {
+        tailPosition,
+        expectedResultTypeId,
+        typeInstanceId,
+      },
+    });
+    if (inlined) {
+      return inlined;
+    }
+    return emitResolvedCall({
+      meta,
+      args,
         callId: expr.id,
         ctx,
         fnCtx,
@@ -287,6 +303,21 @@ export const compileMethodCallExpr = (
     fnCtx,
     compileExpr,
   });
+  const inlined = tryInlineResolvedCall({
+    meta,
+    args,
+    ctx,
+    fnCtx,
+    compileExpr,
+    options: {
+      tailPosition,
+      expectedResultTypeId,
+      typeInstanceId,
+    },
+  });
+  if (inlined) {
+    return inlined;
+  }
   return emitResolvedCall({
     meta,
     args,
@@ -404,6 +435,21 @@ const compileResolvedSymbolCall = ({
     fnCtx,
     compileExpr,
   });
+  const inlined = tryInlineResolvedCall({
+    meta: targetMeta,
+    args,
+    ctx,
+    fnCtx,
+    compileExpr,
+    options: {
+      tailPosition,
+      expectedResultTypeId,
+      typeInstanceId,
+    },
+  });
+  if (inlined) {
+    return inlined;
+  }
   return emitResolvedCall({
     meta: targetMeta,
     args,

@@ -130,6 +130,7 @@ const getNominalPatternDesc = (
 
 const DEFAULT_OPTIONS = {
   optimize: false,
+  optimizationProfile: "aggressive",
   validate: true,
   runtimeDiagnostics: true,
   emitEffectHelpers: false,
@@ -169,12 +170,14 @@ const buildCodegenProgram = (
   const structuralIdCache = new Map<TypeId, TypeId | null>();
   const resolvingStructuralIds = new Set<TypeId>();
   const fixedArrayTypes = new Map();
+  const moduleContexts = new Map<string, CodegenContext>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     program,
     module: program.modules.get(sem.moduleId)!,
     mod,
     moduleId: sem.moduleId,
     moduleLabel: sanitizeIdentifier(sem.hir.module.path),
+    moduleContexts,
     diagnostics,
     options: DEFAULT_OPTIONS,
     programHelpers,
@@ -209,6 +212,7 @@ const buildCodegenProgram = (
     },
     outcomeValueTypes,
   }));
+  contexts.forEach((ctx) => moduleContexts.set(ctx.moduleId, ctx));
 
   const siteCounter = { current: 0 };
   contexts.forEach((ctx) => {
@@ -256,6 +260,7 @@ describe("next codegen", () => {
     const structuralIdCache = new Map<TypeId, TypeId | null>();
     const resolvingStructuralIds = new Set<TypeId>();
     const fixedArrayTypes = new Map();
+    const moduleContexts = new Map<string, CodegenContext>();
 
     const ctx: CodegenContext = {
       program,
@@ -263,6 +268,7 @@ describe("next codegen", () => {
       mod,
       moduleId: semantics.moduleId,
       moduleLabel: sanitizeIdentifier(semantics.hir.module.path),
+      moduleContexts,
       diagnostics,
       options: DEFAULT_OPTIONS,
       programHelpers,
@@ -297,6 +303,7 @@ describe("next codegen", () => {
       },
       outcomeValueTypes,
     };
+    moduleContexts.set(ctx.moduleId, ctx);
 
     const siteCounter = { current: 0 };
     ctx.effectsBackend = selectEffectsBackend(ctx);

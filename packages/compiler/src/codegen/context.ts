@@ -44,9 +44,11 @@ import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
 import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
+import type { ProgramOptimizationFacts } from "../optimize/ir.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
+  optimizationProfile?: "aggressive" | "standard";
   validate?: boolean;
   runtimeDiagnostics?: boolean;
   emitEffectHelpers?: boolean;
@@ -157,6 +159,7 @@ export interface CodegenContext {
   moduleLabel: string;
   program: ProgramCodegenView;
   module: ModuleCodegenView;
+  moduleContexts: ReadonlyMap<string, CodegenContext>;
   diagnostics: DiagnosticEmitter;
   options: Required<CodegenOptions>;
   programHelpers: ProgramHelperRegistry;
@@ -197,6 +200,7 @@ export interface CodegenContext {
   effectsState: EffectsState;
   effectLowering: EffectLoweringResult;
   outcomeValueTypes: Map<string, OutcomeValueBox>;
+  optimization?: ProgramOptimizationFacts;
 }
 
 export interface LocalBindingBase {
@@ -244,6 +248,7 @@ export interface FunctionContext {
   tempLocals: Map<number, LocalBindingLocal>;
   locals: binaryen.Type[];
   nextLocalIndex: number;
+  inliningStack?: readonly ProgramFunctionInstanceId[];
   nextControlFlowLabelId?: number;
   returnTypeId: TypeId;
   returnWasmType?: binaryen.Type;

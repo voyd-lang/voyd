@@ -15,14 +15,19 @@ import {
 } from "@voyd/lib/binaryen-gc/index.js";
 import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../../rtt/index.js";
 import { traitDispatchHash } from "../../trait-dispatch-key.js";
-import { isTraitDispatchMethodEffectful } from "../../trait-dispatch-abi.js";
+import {
+  isTraitDispatchMethodEffectful,
+  resolveImportedFunctionSymbol,
+} from "../../trait-dispatch-abi.js";
 import {
   getExprBinaryenType,
   getFunctionRefType,
   getRequiredExprType,
+  getStructuralTypeInfo,
 } from "../../types.js";
 import { allocateTempLocal } from "../../locals.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
+import { pickTraitImplMethodMeta } from "../../function-lookup.js";
 import {
   compileCallArgumentsForParams,
   resolveTypedCallArgumentPlan,
@@ -33,6 +38,251 @@ import {
   handlerType,
   hiddenParamOffsetFor,
 } from "./shared.js";
+import { typeContainsUnresolvedParam } from "../../../semantics/type-utils.js";
+import type { CodegenTraitImplInstance } from "../../../semantics/codegen-view/index.js";
+import type { ProgramSymbolId } from "../../../semantics/ids.js";
+import type { FunctionMetadata } from "../../context.js";
+
+const MAX_DIRECT_TRAIT_SWITCH_IMPLS = 4;
+
+type DirectTraitDispatchCandidate = {
+  meta: FunctionMetadata;
+  receiverType: binaryen.Type;
+  runtimeTypeId: number;
+};
+
+const resolveDirectTraitDispatchCandidate = ({
+  impl,
+  mapping,
+  ctx,
+}: {
+  impl: CodegenTraitImplInstance;
+  mapping: NonNullable<ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>>;
+  ctx: CodegenContext;
+}): DirectTraitDispatchCandidate | undefined => {
+  if (
+    typeContainsUnresolvedParam({
+      typeId: impl.target,
+      getTypeDesc: (typeId) => ctx.program.types.getTypeDesc(typeId),
+    }) ||
+    typeContainsUnresolvedParam({
+      typeId: impl.trait,
+      getTypeDesc: (typeId) => ctx.program.types.getTypeDesc(typeId),
+    })
+  ) {
+    return undefined;
+  }
+
+  const structInfo = getStructuralTypeInfo(impl.target, ctx);
+  if (!structInfo) {
+    return undefined;
+  }
+
+  const method = impl.methods.find(({ traitMethod, implMethod }) => {
+    const traitMethodImpl = ctx.program.traits.getTraitMethodImpl(
+      implMethod as ProgramSymbolId,
+    );
+    const mappedTraitSymbol = traitMethodImpl?.traitSymbol ?? impl.traitSymbol;
+    const mappedTraitMethod = traitMethodImpl?.traitMethodSymbol ?? traitMethod;
+    return (
+      mappedTraitSymbol === mapping.traitSymbol &&
+      mappedTraitMethod === mapping.traitMethodSymbol
+    );
+  });
+  if (!method) {
+    return undefined;
+  }
+
+  const implRef = ctx.program.symbols.refOf(method.implMethod as ProgramSymbolId);
+  const resolvedImplRef = resolveImportedFunctionSymbol({
+    ctx,
+    moduleId: implRef.moduleId,
+    symbol: implRef.symbol,
+  });
+  const metas = ctx.functions
+    .get(resolvedImplRef.moduleId)
+    ?.get(resolvedImplRef.symbol);
+  const meta = pickTraitImplMethodMeta({
+    metas,
+    impl,
+    runtimeType: ctx.rtt.baseType,
+    ctx,
+  });
+  if (!meta || meta.effectful) {
+    return undefined;
+  }
+
+  const receiverTypeIndex = hiddenParamOffsetFor(meta);
+  const receiverType = meta.paramTypes[receiverTypeIndex];
+  if (typeof receiverType !== "number") {
+    return undefined;
+  }
+
+  return {
+    meta,
+    receiverType,
+    runtimeTypeId: structInfo.runtimeTypeId,
+  };
+};
+
+const compileDirectTraitDispatchSwitch = ({
+  expr,
+  meta,
+  mapping,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  expr: HirCallExpr;
+  meta: FunctionMetadata;
+  mapping: NonNullable<ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): CompiledExpression | undefined => {
+  if (!ctx.optimization) {
+    return undefined;
+  }
+  if (meta.effectful) {
+    return undefined;
+  }
+
+  const impls = ctx.program.traits.getImplsByTrait(mapping.traitSymbol);
+  if (impls.length === 0 || impls.length > MAX_DIRECT_TRAIT_SWITCH_IMPLS) {
+    return undefined;
+  }
+
+  let exhaustive = true;
+  const candidates = impls.flatMap((impl) => {
+    const candidate = resolveDirectTraitDispatchCandidate({ impl, mapping, ctx });
+    if (!candidate) {
+      exhaustive = false;
+      return [];
+    }
+    return [candidate];
+  });
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const baselineUserParamTypes = meta.paramTypes.slice(hiddenParamOffsetFor(meta) + 1);
+  const consistentUserParams = candidates.every((candidate) => {
+    const candidateUserParamTypes = candidate.meta.paramTypes.slice(
+      hiddenParamOffsetFor(candidate.meta) + 1,
+    );
+    return (
+      candidateUserParamTypes.length === baselineUserParamTypes.length &&
+      candidateUserParamTypes.every((type, index) => type === baselineUserParamTypes[index])
+    );
+  });
+  if (!consistentUserParams) {
+    return undefined;
+  }
+
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const typedPlan = resolveTypedCallArgumentPlan({
+    callId: expr.id,
+    typeInstanceId,
+    ctx,
+  });
+  const userTypedPlan = typedPlan
+    ? sliceTypedCallArgumentPlan({
+        typedPlan,
+        paramOffset: 1,
+        argOffset: 1,
+      })
+    : undefined;
+
+  const receiverValue = compileExpr({
+    exprId: expr.args[0]!.expr,
+    ctx,
+    fnCtx,
+  });
+  const receiverTemp = allocateTempLocal(ctx.rtt.baseType, fnCtx);
+  const userArgValues = compileCallArgumentsForParams({
+    call: { ...expr, args: expr.args.slice(1) },
+    params: meta.parameters.slice(1),
+    ctx,
+    fnCtx,
+    compileExpr,
+    options: {
+      typeInstanceId,
+      argIndexOffset: 1,
+      allCallArgExprIds: expr.args.map((arg) => arg.expr),
+      typedPlan: userTypedPlan,
+    },
+  });
+  const userArgTemps = baselineUserParamTypes.map((type) =>
+    allocateTempLocal(type, fnCtx),
+  );
+
+  const makeReceiver = () => ctx.mod.local.get(receiverTemp.index, receiverTemp.type);
+  const makeAncestors = () =>
+    structGetFieldValue({
+      mod: ctx.mod,
+      fieldType: ctx.rtt.extensionHelpers.i32Array,
+      fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
+      exprRef: makeReceiver(),
+    });
+
+  const emitCandidateCall = (
+    candidate: DirectTraitDispatchCandidate,
+  ): binaryen.ExpressionRef =>
+    ctx.mod.call(
+      candidate.meta.wasmName,
+      [
+        refCast(ctx.mod, makeReceiver(), candidate.receiverType),
+        ...userArgTemps.map((temp) => ctx.mod.local.get(temp.index, temp.type)),
+      ],
+      candidate.meta.resultType,
+    );
+
+  const fallback = compileIndirectTraitDispatchCall({
+    expr,
+    meta,
+    mapping,
+    receiverTemp,
+    userArgTemps,
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
+
+  const fallbackExpr =
+    exhaustive && candidates.length > 0
+      ? emitCandidateCall(candidates[candidates.length - 1]!)
+      : fallback.expr;
+  const branchCandidates =
+    exhaustive && candidates.length > 0 ? candidates.slice(0, -1) : candidates;
+  const switchedExpr = branchCandidates.reduceRight(
+    (current, candidate) =>
+      ctx.mod.if(
+        ctx.mod.call(
+          "__has_type",
+          [ctx.mod.i32.const(candidate.runtimeTypeId), makeAncestors()],
+          binaryen.i32,
+        ),
+        emitCandidateCall(candidate),
+        current,
+      ),
+    fallbackExpr,
+  );
+
+  return {
+    expr: ctx.mod.block(
+      null,
+      [
+        ctx.mod.local.set(receiverTemp.index, receiverValue.expr),
+        ...userArgTemps.map((temp, index) =>
+          ctx.mod.local.set(temp.index, userArgValues[index]!),
+        ),
+        switchedExpr,
+      ],
+      getExprBinaryenType(expr.id, ctx, typeInstanceId),
+    ),
+    usedReturnCall: false,
+  };
+};
 
 export const compileTraitDispatchCall = ({
   expr,
@@ -90,6 +340,69 @@ export const compileTraitDispatchCall = ({
     return undefined;
   }
 
+  const directDispatch = compileDirectTraitDispatchSwitch({
+    expr,
+    meta,
+    mapping,
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
+  if (directDispatch) {
+    return directDispatch;
+  }
+
+  return compileIndirectTraitDispatchCall({
+    expr,
+    meta,
+    mapping,
+    ctx,
+    fnCtx,
+    compileExpr,
+    tailPosition,
+    expectedResultTypeId,
+  });
+};
+
+const compileIndirectTraitDispatchCall = ({
+  expr,
+  meta,
+  mapping,
+  receiverTemp,
+  userArgTemps,
+  ctx,
+  fnCtx,
+  compileExpr,
+  tailPosition = false,
+  expectedResultTypeId,
+}: {
+  expr: HirCallExpr;
+  meta: FunctionMetadata;
+  mapping: NonNullable<ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>>;
+  receiverTemp?: { index: number; type: binaryen.Type };
+  userArgTemps?: readonly { index: number; type: binaryen.Type }[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  tailPosition?: boolean;
+  expectedResultTypeId?: TypeId;
+}): CompiledExpression => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const receiverValue = receiverTemp
+    ? undefined
+    : compileExpr({
+        exprId: expr.args[0].expr,
+        ctx,
+        fnCtx,
+      });
+  const resolvedReceiverTemp = receiverTemp ?? allocateTempLocal(ctx.rtt.baseType, fnCtx);
+  const ops: binaryen.ExpressionRef[] = receiverValue
+    ? [ctx.mod.local.set(resolvedReceiverTemp.index, receiverValue.expr)]
+    : [];
+
+  const loadReceiver = (): binaryen.ExpressionRef =>
+    ctx.mod.local.get(resolvedReceiverTemp.index, resolvedReceiverTemp.type);
+
   const receiverIndex = hiddenParamOffsetFor(meta);
   const userParamTypes = meta.paramTypes.slice(receiverIndex + 1);
   const dispatchEffectful =
@@ -110,21 +423,6 @@ export const compileTraitDispatchCall = ({
     ctx,
     label: "trait_method",
   });
-
-  const receiverValue = compileExpr({
-    exprId: expr.args[0].expr,
-    ctx,
-    fnCtx,
-  });
-
-  const receiverTemp = allocateTempLocal(ctx.rtt.baseType, fnCtx);
-  const ops: binaryen.ExpressionRef[] = [
-    ctx.mod.local.set(receiverTemp.index, receiverValue.expr),
-  ];
-
-  const loadReceiver = (): binaryen.ExpressionRef =>
-    ctx.mod.local.get(receiverTemp.index, receiverTemp.type);
-
   const methodTable = structGetFieldValue({
     mod: ctx.mod,
     fieldType: ctx.rtt.methodLookupHelpers.lookupTableType,
@@ -160,22 +458,22 @@ export const compileTraitDispatchCall = ({
         argOffset: 1,
       })
     : undefined;
-  const args = [
-    loadReceiver(),
-    ...compileCallArgumentsForParams({
-      call: { ...expr, args: expr.args.slice(1) },
-      params: meta.parameters.slice(1),
-      ctx,
-      fnCtx,
-      compileExpr,
-      options: {
-        typeInstanceId,
-        argIndexOffset: 1,
-        allCallArgExprIds,
-        typedPlan: userTypedPlan,
-      },
-    }),
-  ];
+  const compiledUserArgs = userArgTemps
+    ? userArgTemps.map((temp) => ctx.mod.local.get(temp.index, temp.type))
+    : compileCallArgumentsForParams({
+        call: { ...expr, args: expr.args.slice(1) },
+        params: meta.parameters.slice(1),
+        ctx,
+        fnCtx,
+        compileExpr,
+        options: {
+          typeInstanceId,
+          argIndexOffset: 1,
+          allCallArgExprIds,
+          typedPlan: userTypedPlan,
+        },
+      });
+  const args = [loadReceiver(), ...compiledUserArgs];
 
   const callArgs = dispatchEffectful
     ? [currentHandlerValue(ctx, fnCtx), ...args]

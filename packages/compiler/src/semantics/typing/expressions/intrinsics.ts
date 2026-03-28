@@ -58,10 +58,6 @@ export const intrinsicSignaturesFor = (
     { parameters: [float32], returnType: float32 },
     { parameters: [float64], returnType: float64 },
   ];
-  const floatBinarySignatures: IntrinsicSignature[] = [
-    { parameters: [float32, float32], returnType: float32 },
-    { parameters: [float64, float64], returnType: float64 },
-  ];
 
   switch (name) {
     case "+":
@@ -91,17 +87,7 @@ export const intrinsicSignaturesFor = (
     case "__round":
     case "__trunc":
     case "__sqrt":
-    case "__sin":
-    case "__cos":
-    case "__tan":
-    case "__ln":
-    case "__log2":
-    case "__log10":
-    case "__exp":
       return floatUnarySignatures;
-    case "__pow":
-    case "__atan2":
-      return floatBinarySignatures;
     default:
       return [];
   }

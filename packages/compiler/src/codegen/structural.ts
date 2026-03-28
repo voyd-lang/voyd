@@ -97,6 +97,72 @@ const pickUnionCoercionTarget = ({
   });
 };
 
+const shouldUseNominalFieldFastPath = (
+  structInfo: StructuralTypeInfo,
+  ctx: CodegenContext,
+): boolean =>
+  Boolean(ctx.optimization && typeof structInfo.nominalId === "number");
+
+const makeAncestorsExpr = ({
+  pointer,
+  ctx,
+}: {
+  pointer: () => binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef =>
+  structGetFieldValue({
+    mod: ctx.mod,
+    fieldType: ctx.rtt.extensionHelpers.i32Array,
+    fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
+    exprRef: pointer(),
+  });
+
+const makeDirectStructuralFieldLoad = ({
+  structInfo,
+  field,
+  pointer,
+  ctx,
+}: {
+  structInfo: StructuralTypeInfo;
+  field: StructuralTypeInfo["fields"][number];
+  pointer: () => binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  const loaded = structGetFieldValue({
+    mod: ctx.mod,
+    fieldType: field.heapWasmType,
+    fieldIndex: field.runtimeIndex,
+    exprRef: refCast(ctx.mod, pointer(), structInfo.runtimeType),
+  });
+  return field.wasmType === field.heapWasmType
+    ? loaded
+    : ctx.mod.block(null, [loaded], field.wasmType);
+};
+
+const makeDynamicStructuralFieldLoad = ({
+  field,
+  pointer,
+  ctx,
+}: {
+  field: StructuralTypeInfo["fields"][number];
+  pointer: () => binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  const lookupTable = structGetFieldValue({
+    mod: ctx.mod,
+    fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,
+    fieldIndex: RTT_METADATA_SLOTS.FIELD_INDEX_TABLE,
+    exprRef: pointer(),
+  });
+  const accessor = ctx.mod.call(
+    LOOKUP_FIELD_ACCESSOR,
+    [ctx.mod.i32.const(field.hash), lookupTable, ctx.mod.i32.const(0)],
+    binaryen.funcref,
+  );
+  const getter = refCast(ctx.mod, accessor, field.getterType!);
+  return callRef(ctx.mod, getter, [pointer()], field.wasmType);
+};
+
 export const requiresStructuralConversion = (
   actualType: TypeId,
   targetType: TypeId | undefined,
@@ -597,7 +663,8 @@ export const emitStructuralConversion = ({
 
   const temp = allocateTempLocal(actual.interfaceType, fnCtx);
   const ops: binaryen.ExpressionRef[] = [ctx.mod.local.set(temp.index, value)];
-  const sourceRef = ctx.mod.local.get(temp.index, actual.interfaceType);
+  const sourceRef = (): binaryen.ExpressionRef =>
+    ctx.mod.local.get(temp.index, actual.interfaceType);
 
   const shouldDirectFixedArrayLoad = (typeId: TypeId): boolean => {
     const desc = ctx.program.types.getTypeDesc(typeId);
@@ -622,7 +689,7 @@ export const emitStructuralConversion = ({
     const sourceField = actual.fieldMap.get(field.name)!;
     const raw = shouldDirectFixedArrayLoad(sourceField.typeId)
       ? (() => {
-          const casted = refCast(ctx.mod, sourceRef, actual.runtimeType);
+          const casted = refCast(ctx.mod, sourceRef(), actual.runtimeType);
           const loaded = structGetFieldValue({
             mod: ctx.mod,
             fieldType: sourceField.heapWasmType,
@@ -673,29 +740,40 @@ export const emitStructuralConversion = ({
 };
 
 export const loadStructuralField = ({
-  structInfo: _structInfo,
+  structInfo,
   field,
   pointer,
   ctx,
 }: {
   structInfo: StructuralTypeInfo;
   field: StructuralTypeInfo["fields"][number];
-  pointer: binaryen.ExpressionRef;
+  pointer: () => binaryen.ExpressionRef;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
-  const lookupTable = structGetFieldValue({
-    mod: ctx.mod,
-    fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,
-    fieldIndex: RTT_METADATA_SLOTS.FIELD_INDEX_TABLE,
-    exprRef: pointer,
+  const dynamicLoad = makeDynamicStructuralFieldLoad({
+    field,
+    pointer,
+    ctx,
   });
-  const accessor = ctx.mod.call(
-    LOOKUP_FIELD_ACCESSOR,
-    [ctx.mod.i32.const(field.hash), lookupTable, ctx.mod.i32.const(0)],
-    binaryen.funcref,
+  if (!shouldUseNominalFieldFastPath(structInfo, ctx)) {
+    return dynamicLoad;
+  }
+
+  const exactTypeMatch = ctx.mod.call(
+    "__has_type",
+    [ctx.mod.i32.const(structInfo.runtimeTypeId), makeAncestorsExpr({ pointer, ctx })],
+    binaryen.i32,
   );
-  const getter = refCast(ctx.mod, accessor, field.getterType!);
-  return callRef(ctx.mod, getter, [pointer], field.wasmType);
+  return ctx.mod.if(
+    exactTypeMatch,
+    makeDirectStructuralFieldLoad({
+      structInfo,
+      field,
+      pointer,
+      ctx,
+    }),
+    dynamicLoad,
+  );
 };
 
 export const storeStructuralField = ({

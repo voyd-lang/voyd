@@ -1,6 +1,7 @@
 import path from "node:path";
 import binaryen from "binaryen";
 import { VOYD_BINARYEN_FEATURES } from "@voyd/lib/binaryen-features.js";
+import { optimizeBinaryenModule } from "@voyd/lib/binaryen-optimize.js";
 import { createFsModuleHost } from "@voyd/compiler/modules/fs-host.js";
 import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
 import { createNodePathAdapter } from "@voyd/compiler/modules/node-path-adapter.js";
@@ -259,18 +260,22 @@ const finalizeCompile = ({
   const module = binaryen.readBinary(result.wasm);
   module.setFeatures(VOYD_BINARYEN_FEATURES);
   if (options.optimize) {
-    binaryen.setShrinkLevel(3);
-    binaryen.setOptimizeLevel(3);
-    module.optimize();
+    optimizeBinaryenModule({
+      module,
+      profile: "aggressive",
+    });
   }
+  const wasmText = options.emitWasmText ? module.emitText() : undefined;
 
   const wasm = options.optimize ? emitBinary(module) : result.wasm;
-  const wasmText = options.emitWasmText ? module.emitText() : undefined;
   let testsWasm = result.testsWasm;
   if (options.optimize && result.testsWasm) {
     const testsModule = binaryen.readBinary(result.testsWasm);
     testsModule.setFeatures(VOYD_BINARYEN_FEATURES);
-    testsModule.optimize();
+    optimizeBinaryenModule({
+      module: testsModule,
+      profile: "aggressive",
+    });
     testsWasm = emitBinary(testsModule);
   }
 
