@@ -118,7 +118,7 @@ move(from: point, to: moved)`,
   ask(tail, message: String) -> bool
 
 fn delete_project(name: String): Confirm -> String
-  if Confirm::ask("Delete \${name}}?"):
+  if Confirm::ask("Delete \${name}?"):
     "Deleted \${name}"
   else:
     "Kept \${name}"
