@@ -12,6 +12,7 @@ const fixtureEntryPath = path.join(
 );
 
 const runPerf = process.env.VOYD_RUN_PERF_SMOKE === "1";
+const benchmarkDescribe = runPerf ? describe : describe.skip;
 const perfIt = runPerf ? it : it.skip;
 const mainIt = runPerf ? it : it.skip;
 const perfIterations = Number.parseInt(process.env.VOYD_PERF_ITERATIONS ?? "3", 10);
@@ -40,13 +41,16 @@ const median = (values: number[]): number => {
     : sorted[middle];
 };
 
-describe("smoke: vtrace compute-only benchmark", () => {
+benchmarkDescribe("smoke: vtrace compute-only benchmark", () => {
   let compiled: Extract<CompileResult, { success: true }>;
 
   beforeAll(async () => {
     const sdk = createSdk();
     compiled = expectCompileSuccess(
-      await sdk.compile({ entryPath: fixtureEntryPath, optimize: true }),
+      await sdk.compile({
+        entryPath: fixtureEntryPath,
+        optimize: runPerf,
+      }),
     );
   });
 
