@@ -15,12 +15,9 @@ import { OUTCOME_TAGS } from "../runtime-abi.js";
 import { unboxOutcomeValue } from "../outcome-values.js";
 import {
   allocateTempLocal,
-  getRequiredBinding,
-  loadBindingValue,
 } from "../../locals.js";
 import { getExprBinaryenType, wasmTypeFor } from "../../types.js";
-import { lowerValueForHeapField } from "../../structural.js";
-import { currentHandlerValue } from "./shared.js";
+import { captureContinuationEnvFieldValue } from "./shared.js";
 import {
   continuationFunctionName,
   ensureContinuationFunction,
@@ -96,44 +93,14 @@ export const lowerEffectfulCallResult = ({
         }
 
         const callSite = site as ContinuationCallSite;
-        const frameEnvValues = callSite.envFields.map((field) => {
-          switch (field.sourceKind) {
-            case "site":
-              return ctx.mod.i32.const(callSite.siteOrder);
-            case "handler":
-              return currentHandlerValue(ctx, fnCtx);
-            case "param":
-            case "local": {
-              const inlineValue =
-                typeof field.tempId === "number"
-                  ? (() => {
-                      const binding = fnCtx.tempLocals.get(field.tempId);
-                      if (!binding) {
-                        throw new Error(
-                          `missing temp local binding for call env capture (call ${callId}, temp ${field.tempId})`
-                        );
-                      }
-                      return loadBindingValue(binding, ctx);
-                    })()
-                  : (() => {
-                      if (typeof field.symbol !== "number") {
-                        throw new Error("missing symbol for env field");
-                      }
-                      const binding = getRequiredBinding(field.symbol, ctx, fnCtx);
-                      return loadBindingValue(binding, ctx);
-                    })();
-              return field.storageType === field.wasmType
-                ? inlineValue
-                : lowerValueForHeapField({
-                    value: inlineValue,
-                    typeId: field.typeId,
-                    targetType: field.storageType,
-                    ctx,
-                    fnCtx,
-                  });
-            }
-          }
-        });
+        const frameEnvValues = callSite.envFields.map((field) =>
+          captureContinuationEnvFieldValue({
+            field,
+            siteOrder: callSite.siteOrder,
+            ctx,
+            fnCtx,
+          })
+        );
 
         const contRefType = ensureContinuationFunction({
           site: callSite,

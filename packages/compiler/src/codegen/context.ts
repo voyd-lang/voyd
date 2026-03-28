@@ -258,10 +258,18 @@ export interface LocalBindingStorageRef extends LocalBindingBase {
   mutable: boolean;
 }
 
+export interface LocalBindingProjectedElement extends LocalBindingBase {
+  kind: "projected-element-ref";
+  arrayIndex: number;
+  indexIndex: number;
+  arrayTypeId: TypeId;
+}
+
 export type LocalBinding =
   | LocalBindingLocal
   | LocalBindingCapture
-  | LocalBindingStorageRef;
+  | LocalBindingStorageRef
+  | LocalBindingProjectedElement;
 
 export interface HandlerScope {
   prevHandler: LocalBindingLocal;
@@ -295,6 +303,8 @@ export interface FunctionContext {
   currentHandler?: { index: number; type: binaryen.Type };
   instanceId?: ProgramFunctionInstanceId;
   typeInstanceId?: ProgramFunctionInstanceId;
+  simpleIdentifierAliases?: ReadonlyMap<SymbolId, ReadonlySet<SymbolId>>;
+  nonBorrowableProjectedSymbols?: ReadonlySet<SymbolId>;
   effectful: boolean;
   handlerStack?: HandlerScope[];
   loopStack?: LoopScope[];
@@ -323,6 +333,7 @@ export interface ExpressionCompilerParams {
   fnCtx: FunctionContext;
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
+  preserveStorageRefs?: boolean;
 }
 
 export type ExpressionCompiler = (

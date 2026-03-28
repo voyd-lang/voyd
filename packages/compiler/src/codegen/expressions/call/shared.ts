@@ -94,6 +94,7 @@ export const compileCallArgExpressionsWithTemps = ({
   argIndexOffset,
   allArgExprIds,
   expectedTypeIdAt,
+  preserveStorageRefsAt,
   ctx,
   fnCtx,
   compileExpr,
@@ -103,6 +104,7 @@ export const compileCallArgExpressionsWithTemps = ({
   argIndexOffset?: number;
   allArgExprIds?: readonly HirExprId[];
   expectedTypeIdAt: (index: number) => TypeId | undefined;
+  preserveStorageRefsAt?: (index: number) => boolean;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -143,7 +145,12 @@ export const compileCallArgExpressionsWithTemps = ({
     const tempId = tempsByIndex.get(index + offset);
 
     if (typeof tempId !== "number") {
-      const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+      const value = compileExpr({
+        exprId: arg.expr,
+        ctx,
+        fnCtx,
+        preserveStorageRefs: preserveStorageRefsAt?.(index) ?? false,
+      });
       return coerceValueToType({
         value: value.expr,
         actualType: actualTypeId,
@@ -154,7 +161,12 @@ export const compileCallArgExpressionsWithTemps = ({
     }
 
     const tempLocal = getOrCreateTempLocal({ tempId, ctx, fnCtx });
-    const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+    const value = compileExpr({
+      exprId: arg.expr,
+      ctx,
+      fnCtx,
+      preserveStorageRefs: preserveStorageRefsAt?.(index) ?? false,
+    });
     const coerced = coerceValueToType({
       value: value.expr,
       actualType: actualTypeId,

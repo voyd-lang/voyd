@@ -3,20 +3,27 @@ import type {
   CodegenContext,
   FunctionContext,
   LocalBinding,
+  LocalBindingProjectedElement,
   LocalBindingLocal,
   LocalBindingStorageRef,
   SymbolId,
 } from "./context.js";
-import { refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
+import {
+  arrayGet,
+  refCast,
+  structGetFieldValue,
+} from "@voyd/lib/binaryen-gc/index.js";
 import {
   liftHeapValueToInline,
   lowerValueForHeapField,
   storeValueIntoStorageRef,
 } from "./structural.js";
 import {
+  getFixedArrayWasmTypes,
   getInlineHeapBoxType,
   getSymbolTypeId,
   getWideValueStorageType,
+  wasmHeapFieldTypeFor,
   wasmTypeFor,
 } from "./types.js";
 import { coerceExprToWasmType } from "./wasm-type-coercions.js";
@@ -118,9 +125,9 @@ export const createStorageRefBinding = ({
   mutable: boolean;
   ctx: CodegenContext;
 }): LocalBindingStorageRef => {
-  const storageType = getWideValueStorageType({ typeId, ctx });
+  const storageType = getInlineHeapBoxType({ typeId, ctx });
   if (typeof storageType !== "number") {
-    throw new Error(`storage ref binding requires wide value storage for ${typeId}`);
+    throw new Error(`storage ref binding requires boxed inline storage for ${typeId}`);
   }
   return {
     kind: "storage-ref",
@@ -242,6 +249,9 @@ export const loadBindingValue = (
       ctx,
     });
   }
+  if (binding.kind === "projected-element-ref") {
+    return loadProjectedElementBindingValue(binding, ctx);
+  }
   if (binding.kind === "local") {
     return loadLocalValue(binding, ctx);
   }
@@ -287,10 +297,13 @@ export const loadBindingStorageRef = (
   if (binding.kind === "storage-ref") {
     return ctx.mod.local.get(binding.index, binding.storageType);
   }
+  if (binding.kind === "projected-element-ref") {
+    return loadProjectedElementBindingStorageRef(binding, ctx);
+  }
   if (binding.kind === "local") {
     if (
       typeof binding.typeId !== "number" ||
-      binding.storageType !== getWideValueStorageType({ typeId: binding.typeId, ctx })
+      binding.storageType !== getInlineHeapBoxType({ typeId: binding.typeId, ctx })
     ) {
       return undefined;
     }
@@ -298,7 +311,7 @@ export const loadBindingStorageRef = (
   }
   if (
     typeof binding.typeId !== "number" ||
-    binding.storageType !== getWideValueStorageType({ typeId: binding.typeId, ctx })
+    binding.storageType !== getInlineHeapBoxType({ typeId: binding.typeId, ctx })
   ) {
     return undefined;
   }
@@ -353,6 +366,107 @@ export const materializeOwnedBinding = ({
     typeId,
   });
   return { binding: owned, setup };
+};
+
+export const loadProjectedElementBindingStorageRef = (
+  binding: LocalBindingProjectedElement,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef | undefined => {
+  const storageType = getWideValueStorageType({ typeId: binding.typeId!, ctx });
+  if (typeof storageType !== "number") {
+    return undefined;
+  }
+
+  const wasmTypes = getFixedArrayWasmTypes(binding.arrayTypeId, ctx);
+  if (wasmTypes.kind !== "plain-array") {
+    return undefined;
+  }
+
+  return arrayGet(
+    ctx.mod,
+    ctx.mod.local.get(binding.arrayIndex, wasmTypeFor(binding.arrayTypeId, ctx)),
+    ctx.mod.local.get(binding.indexIndex, binaryen.i32),
+    storageType,
+    false,
+  );
+};
+
+export const loadProjectedElementBindingValue = (
+  binding: LocalBindingProjectedElement,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  const arrayRef = () =>
+    ctx.mod.local.get(binding.arrayIndex, wasmTypeFor(binding.arrayTypeId, ctx));
+  const indexRef = () => ctx.mod.local.get(binding.indexIndex, binaryen.i32);
+  const wasmTypes = getFixedArrayWasmTypes(binding.arrayTypeId, ctx);
+
+  if (wasmTypes.kind === "inline-aggregate" && wasmTypes.laneTypes) {
+    const lanes = wasmTypes.laneTypes.map((laneType, laneIndex) =>
+      arrayGet(
+        ctx.mod,
+        fixedArrayLaneField({
+          array: arrayRef(),
+          wasmTypes,
+          laneIndex,
+          ctx,
+        }),
+        indexRef(),
+        laneType,
+        false,
+      ),
+    );
+    return makeInlineValue(lanes, ctx);
+  }
+
+  return liftHeapValueToInline({
+    value: arrayGet(
+      ctx.mod,
+      arrayRef(),
+      indexRef(),
+      wasmHeapFieldTypeFor(binding.typeId!, ctx, new Set(), "runtime"),
+      false,
+    ),
+    typeId: binding.typeId!,
+    ctx,
+  });
+};
+
+const fixedArrayLaneField = ({
+  array,
+  wasmTypes,
+  laneIndex,
+  ctx,
+}: {
+  array: binaryen.ExpressionRef;
+  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
+  laneIndex: number;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  if (
+    wasmTypes.kind !== "inline-aggregate" ||
+    !wasmTypes.laneArrayTypes?.[laneIndex]
+  ) {
+    throw new Error("inline aggregate fixed array metadata is missing lane arrays");
+  }
+  return structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: laneIndex + 1,
+    fieldType: wasmTypes.laneArrayTypes[laneIndex]!,
+    exprRef: array,
+  });
+};
+
+const makeInlineValue = (
+  values: readonly binaryen.ExpressionRef[],
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  if (values.length === 0) {
+    return ctx.mod.nop();
+  }
+  if (values.length === 1) {
+    return values[0]!;
+  }
+  return ctx.mod.tuple.make(values as binaryen.ExpressionRef[]);
 };
 
 export const storeStorageRefBindingValue = ({

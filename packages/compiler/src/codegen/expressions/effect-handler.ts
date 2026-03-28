@@ -42,6 +42,7 @@ import {
   collectEffectTypeArgs,
   resolveEffectSignatureTypes,
 } from "../effects/effect-signature.js";
+import { walkHirExpression } from "../hir-walk.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -115,6 +116,37 @@ const currentHandlerValue = (
   return ctx.mod.local.get(fnCtx.currentHandler.index, fnCtx.currentHandler.type);
 };
 
+const collectClauseCaptureSymbols = ({
+  expr,
+  fnCtx,
+  ctx,
+}: {
+  expr: HirEffectHandlerExpr;
+  fnCtx: FunctionContext;
+  ctx: CodegenContext;
+}): ReadonlySet<number> => {
+  const symbols = new Set<number>();
+  expr.handlers.forEach((clause) => {
+    walkHirExpression({
+      exprId: clause.body,
+      ctx,
+      visitLambdaBodies: false,
+      visitor: {
+        onExpr: (_exprId, node) => {
+          if (node.exprKind !== "identifier") {
+            return;
+          }
+          if (!fnCtx.bindings.has(node.symbol)) {
+            return;
+          }
+          symbols.add(node.symbol);
+        },
+      },
+    });
+  });
+  return symbols;
+};
+
 const buildClauseEnv = ({
   expr,
   ctx,
@@ -130,20 +162,38 @@ const buildClauseEnv = ({
 } => {
   const state = handlerState(ctx);
   const bindingKey = handlerBindingLayoutKey(fnCtx);
-  const allowedSymbols = ctx.optimization?.handlerClauseCaptures.get(ctx.moduleId)?.get(expr.id);
-  const allowedSymbolSet =
-    allowedSymbols && allowedSymbols.size > 0
-      ? new Set(
-          Array.from(allowedSymbols.values()).flatMap((symbols) => [...symbols]),
+  const syntacticCaptureSet = collectClauseCaptureSymbols({ expr, fnCtx, ctx });
+  const optimizedCaptureSet = (() => {
+    const allowedSymbols = ctx.optimization?.handlerClauseCaptures
+      .get(ctx.moduleId)
+      ?.get(expr.id);
+    if (!allowedSymbols || allowedSymbols.size === 0) {
+      return undefined;
+    }
+    return new Set(
+      Array.from(allowedSymbols.values()).flatMap((symbols) => [...symbols]),
+    );
+  })();
+  const allowedSymbolSet = (() => {
+    if (optimizedCaptureSet && syntacticCaptureSet.size > 0) {
+      return new Set(
+        [...syntacticCaptureSet].filter((symbol) =>
+          optimizedCaptureSet.has(symbol)
         )
-      : undefined;
+      );
+    }
+    if (syntacticCaptureSet.size > 0) {
+      return syntacticCaptureSet;
+    }
+    return new Set<number>();
+  })();
   const layoutKey = `${ctx.moduleLabel}:${expr.id}:${handlerInstanceKey(fnCtx)}:${bindingKey}:${allowedSymbolSet ? [...allowedSymbolSet].join(",") : "all"}`;
   const cached = state.envLayouts.get(layoutKey);
   const layout =
     cached ??
     (() => {
       const captured = Array.from(fnCtx.bindings.entries())
-        .filter(([symbol]) => !allowedSymbolSet || allowedSymbolSet.has(symbol))
+        .filter(([symbol]) => allowedSymbolSet.has(symbol))
         .map(([symbol, binding]) => {
           const typeId =
             binding.typeId ??

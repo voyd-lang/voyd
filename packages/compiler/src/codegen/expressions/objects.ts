@@ -39,6 +39,7 @@ import {
 } from "../types.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import { maybeReportValueBoxingNote } from "../value-boxing-notes.js";
+import { tryCompileProjectedFieldAccess } from "../projected-element-views.js";
 
 export const compileObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
@@ -455,6 +456,16 @@ export const compileFieldAccessExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
+  const projected = tryCompileProjectedFieldAccess({
+    expr,
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
+  if (projected) {
+    return projected;
+  }
+
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const expectedFieldTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const expectedFieldWasmType = getExprBinaryenType(expr.id, ctx, typeInstanceId);

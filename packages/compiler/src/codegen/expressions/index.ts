@@ -20,6 +20,7 @@ import {
   compileTupleExpr,
 } from "./objects.js";
 import { compileLambdaExpr } from "./lambdas.js";
+import { tryCompileProjectedElementValueExpr } from "../projected-element-views.js";
 import {
   compileIdentifierExpr,
   compileLiteralExpr,
@@ -31,6 +32,7 @@ export const compileExpression: ExpressionCompiler = ({
   fnCtx,
   tailPosition = false,
   expectedResultTypeId,
+  preserveStorageRefs = false,
 }: ExpressionCompilerParams): CompiledExpression => {
   const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr) {
@@ -46,19 +48,42 @@ export const compileExpression: ExpressionCompiler = ({
         ctx,
         fnCtx,
         expectedResultTypeId,
+        preserveStorageRefs,
       );
     case "overload-set":
       throw new Error("overload sets cannot be evaluated directly");
-    case "call":
+    case "call": {
+      const projected = tryCompileProjectedElementValueExpr({
+        exprId,
+        ctx,
+        fnCtx,
+        compileExpr: compileExpression,
+        expectedResultTypeId,
+      });
+      if (projected) {
+        return projected;
+      }
       return compileCallExpr(expr, ctx, fnCtx, compileExpression, {
         tailPosition,
         expectedResultTypeId,
       });
-    case "method-call":
+    }
+    case "method-call": {
+      const projected = tryCompileProjectedElementValueExpr({
+        exprId,
+        ctx,
+        fnCtx,
+        compileExpr: compileExpression,
+        expectedResultTypeId,
+      });
+      if (projected) {
+        return projected;
+      }
       return compileMethodCallExpr(expr, ctx, fnCtx, compileExpression, {
         tailPosition,
         expectedResultTypeId,
       });
+    }
     case "block":
       return compileBlockExpr(
         expr,

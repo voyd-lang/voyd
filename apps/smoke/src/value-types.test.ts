@@ -27,6 +27,11 @@ describe("smoke: value types", () => {
     expect(output).toBe(1);
   });
 
+  it("passes narrow mutable params by addressable storage", async () => {
+    const output = await compiled.run<number>({ entryName: "value_narrow_mutable_param" });
+    expect(output).toBe(99);
+  });
+
   it("supports static trait-constrained calls with values", async () => {
     const output = await compiled.run<number>({ entryName: "value_static_trait_dispatch" });
     expect(output).toBe(7);
@@ -118,6 +123,83 @@ describe("smoke: value types", () => {
       entryName: "value_wide_array_field_access",
     });
     expect(output).toBe(12);
+  });
+
+  it("keeps wide array locals borrowed for readonly field access", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_local_view_access",
+    });
+    expect(output).toBe(17);
+  });
+
+  it("materializes wide array locals before mutable-ref calls", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_local_materializes_for_mut_param",
+    });
+    expect(output).toBe(12);
+  });
+
+  it("materializes wide array locals before root mutation", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_local_materializes_before_root_mutation",
+    });
+    expect(output).toBe(10);
+  });
+
+  it("materializes wide array locals before alias mutation", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_local_materializes_before_alias_mutation",
+    });
+    expect(output).toBe(10);
+  });
+
+  it("materializes wide array locals before nested alias mutation", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_local_materializes_before_nested_alias_mutation",
+    });
+    expect(output).toBe(10);
+  });
+
+  it("materializes wide array locals before returns", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_local_materializes_for_return",
+    });
+    expect(output).toBe(12);
+  });
+
+  it("passes projected wide array elements to readonly params", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_non_mut_call",
+    });
+    expect(output).toBe(17);
+  });
+
+  it("passes projected wide array elements to readonly methods", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_non_mut_method_call",
+    });
+    expect(output).toBe(17);
+  });
+
+  it("passes direct projected wide array receivers to readonly methods", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_direct_non_mut_method_call",
+    });
+    expect(output).toBe(17);
+  });
+
+  it("projects wide Array.get payloads when they are read immediately", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_get_immediate_payload",
+    });
+    expect(output).toBe(17);
+  });
+
+  it("materializes projected Array.get payloads before alias mutation", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_wide_array_get_immediate_payload_materializes_before_alias_mutation",
+    });
+    expect(output).toBe(10);
   });
 
   it("marshals wide values across closure call boundaries", async () => {

@@ -42,6 +42,7 @@ import {
 } from "../structural.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import { captureMultivalueLanes } from "../multivalue.js";
+import { tryCompileProjectedOptionalPayloadBinding } from "../projected-element-views.js";
 import type {
   HirBreakExpr,
   HirContinueExpr,
@@ -493,7 +494,20 @@ export const compileMatchExpr = (
             ctx,
           });
     if (arm.pattern.kind === "type" && arm.pattern.binding) {
-      if (
+      const projectedOptionalPayloadOps =
+        typeof optionalSomePayload !== "undefined"
+          ? tryCompileProjectedOptionalPayloadBinding({
+              pattern: arm.pattern.binding,
+              optionalExprId: expr.discriminant,
+              armValueExprId: arm.value,
+              ctx,
+              fnCtx,
+              compileExpr,
+            })
+          : undefined;
+      if (projectedOptionalPayloadOps) {
+        bindingOps.push(...projectedOptionalPayloadOps);
+      } else if (
         typeof optionalSomePayload !== "undefined" &&
         arm.pattern.binding.kind === "identifier"
       ) {

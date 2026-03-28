@@ -13,8 +13,6 @@ import {
 } from "@voyd/lib/binaryen-gc/index.js";
 import {
   allocateTempLocal,
-  getRequiredBinding,
-  loadBindingValue,
 } from "../../locals.js";
 import { coerceValueToType, lowerValueForHeapField } from "../../structural.js";
 import {
@@ -23,7 +21,7 @@ import {
   wasmHeapFieldTypeFor,
 } from "../../types.js";
 import { handlerCleanupOps } from "../handler-stack.js";
-import { currentHandlerValue } from "./shared.js";
+import { captureContinuationEnvFieldValue } from "./shared.js";
 import {
   continuationFunctionName,
   ensureContinuationFunction,
@@ -89,44 +87,14 @@ export const compileEffectOpCall = ({
     });
   });
 
-  const envValues = site.envFields.map((field) => {
-    switch (field.sourceKind) {
-      case "site":
-        return ctx.mod.i32.const(site.siteOrder);
-      case "handler":
-        return currentHandlerValue(ctx, fnCtx);
-      case "param":
-      case "local": {
-        const inlineValue =
-          typeof field.tempId === "number"
-            ? (() => {
-                const binding = fnCtx.tempLocals.get(field.tempId);
-                if (!binding) {
-                  throw new Error(
-                    `missing temp local binding for perform env capture (call ${expr.id}, temp ${field.tempId})`
-                  );
-                }
-                return loadBindingValue(binding, ctx);
-              })()
-            : (() => {
-                if (typeof field.symbol !== "number") {
-                  throw new Error("missing symbol for env field");
-                }
-                const binding = getRequiredBinding(field.symbol, ctx, fnCtx);
-                return loadBindingValue(binding, ctx);
-              })();
-        return field.storageType === field.wasmType
-          ? inlineValue
-          : lowerValueForHeapField({
-              value: inlineValue,
-              typeId: field.typeId,
-              targetType: field.storageType,
-              ctx,
-              fnCtx,
-            });
-      }
-    }
-  });
+  const envValues = site.envFields.map((field) =>
+    captureContinuationEnvFieldValue({
+      field,
+      siteOrder: site.siteOrder,
+      ctx,
+      fnCtx,
+    })
+  );
 
   const contRefType = ensureContinuationFunction({
     site,

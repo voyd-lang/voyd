@@ -18,7 +18,11 @@ import type {
 import { allocateTempLocal } from "../../locals.js";
 import { getExprBinaryenType, getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { compileCallExpr, compileMethodCallExpr } from "../../expressions/call/index.js";
-import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
+import {
+  compileBlockExpr,
+  compileStatement,
+  withBlockScope,
+} from "../../expressions/blocks.js";
 import {
   compileBreakExpr,
   compileContinueExpr,
@@ -100,53 +104,60 @@ const compileGroupedContinuationBlockExpr = ({
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
-  const statements: binaryen.ExpressionRef[] = [];
-
-  expr.statements.forEach((stmtId) => {
-    const sites = cfg.sitesByStmt.get(stmtId) ?? new Set<number>();
-    const shouldRun =
-      sites.size === 0
-        ? started()
-        : ctx.mod.i32.or(started(), activeSiteInSet({ sites, activeSiteOrder, ctx }));
-    statements.push(
-      ctx.mod.if(
-        shouldRun,
-        compileStatement(stmtId, ctx, fnCtx, compileExpr),
-        ctx.mod.nop()
-      )
-    );
-  });
-
-  if (typeof expr.value !== "number") {
-    if (statements.length === 0) {
-      return { expr: ctx.mod.nop(), usedReturnCall: false };
-    }
-    return {
-      expr: ctx.mod.block(null, statements, binaryen.none),
-      usedReturnCall: false,
-    };
-  }
-
-  const value = compileExpr({
-    exprId: expr.value,
+  return withBlockScope({
+    expr,
     ctx,
     fnCtx,
-    tailPosition,
-    expectedResultTypeId,
+    run: () => {
+      const statements: binaryen.ExpressionRef[] = [];
+
+      expr.statements.forEach((stmtId) => {
+        const sites = cfg.sitesByStmt.get(stmtId) ?? new Set<number>();
+        const shouldRun =
+          sites.size === 0
+            ? started()
+            : ctx.mod.i32.or(started(), activeSiteInSet({ sites, activeSiteOrder, ctx }));
+        statements.push(
+          ctx.mod.if(
+            shouldRun,
+            compileStatement(stmtId, ctx, fnCtx, compileExpr),
+            ctx.mod.nop()
+          )
+        );
+      });
+
+      if (typeof expr.value !== "number") {
+        if (statements.length === 0) {
+          return { expr: ctx.mod.nop(), usedReturnCall: false };
+        }
+        return {
+          expr: ctx.mod.block(null, statements, binaryen.none),
+          usedReturnCall: false,
+        };
+      }
+
+      const value = compileExpr({
+        exprId: expr.value,
+        ctx,
+        fnCtx,
+        tailPosition,
+        expectedResultTypeId,
+      });
+
+      if (statements.length === 0) {
+        return {
+          expr: coerceToBinaryenType(ctx, value.expr, resultType),
+          usedReturnCall: value.usedReturnCall,
+        };
+      }
+
+      statements.push(coerceToBinaryenType(ctx, value.expr, resultType));
+      return {
+        expr: ctx.mod.block(null, statements, resultType),
+        usedReturnCall: value.usedReturnCall,
+      };
+    },
   });
-
-  if (statements.length === 0) {
-    return {
-      expr: coerceToBinaryenType(ctx, value.expr, resultType),
-      usedReturnCall: value.usedReturnCall,
-    };
-  }
-
-  statements.push(coerceToBinaryenType(ctx, value.expr, resultType));
-  return {
-    expr: ctx.mod.block(null, statements, resultType),
-    usedReturnCall: value.usedReturnCall,
-  };
 };
 
 const compileGroupedContinuationIfExpr = ({

@@ -27,6 +27,10 @@ pub value WideVec5 {
   e: i32
 }
 
+impl WideVec5
+  fn tail_sum(self) -> i32
+    self.b + self.e
+
 impl Vec2
   fn set_x(~self, value: i32) -> Vec2
     self.x = value
@@ -47,6 +51,9 @@ fn reflect_wide(value: WideVec5) -> WideVec5
 
 fn bump_wide_a(~value: WideVec5)
   value.a = value.a + 10
+
+fn wide_tail_sum(value: WideVec5) -> i32
+  value.b + value.e
 
 pub value Left {
   value: i32
@@ -96,6 +103,11 @@ pub fn value_copy_semantics() -> i32
   let b = a
   a.set_x(99)
   b.x
+
+pub fn value_narrow_mutable_param() -> i32
+  let ~point = Vec2 { x: 1, y: 2 }
+  point.set_x(99)
+  point.x
 
 pub fn value_static_trait_dispatch() -> i32
   pair_sum(Vec2 { x: 3, y: 0 }, Vec2 { x: 4, y: 0 })
@@ -207,6 +219,216 @@ pub fn value_wide_array_field_access() -> i32
     e: 10
   })
   items.at(0).b + items.at(1).e
+
+pub fn value_wide_array_local_view_access() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  let value = items.at(1)
+  value.e + value.b
+
+pub fn value_wide_array_local_materializes_for_mut_param() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let value = items.at(0)
+  bump_wide_a(~value)
+  value.a + items.at(0).a
+
+pub fn value_wide_array_local_materializes_before_root_mutation() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let value = items.at(0)
+  items.replace(0, with: WideVec5 {
+    a: 9,
+    b: 10,
+    c: 11,
+    d: 12,
+    e: 13
+  })
+  value.a + items.at(0).a
+
+pub fn value_wide_array_local_materializes_before_alias_mutation() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let ~alias = items
+  let value = items.at(0)
+  alias.replace(0, with: WideVec5 {
+    a: 9,
+    b: 10,
+    c: 11,
+    d: 12,
+    e: 13
+  })
+  value.a + items.at(0).a
+
+pub fn value_wide_array_local_materializes_before_nested_alias_mutation() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let ~alias = items
+  let value = items.at(0)
+  if true:
+    let ~nested = alias
+    nested.replace(0, with: WideVec5 {
+      a: 9,
+      b: 10,
+      c: 11,
+      d: 12,
+      e: 13
+    })
+  value.a + items.at(0).a
+
+fn copy_first_wide(items: Array<WideVec5>) -> WideVec5
+  let value = items.at(0)
+  value
+
+pub fn value_wide_array_local_materializes_for_return() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let ~copy = copy_first_wide(items)
+  copy.a = copy.a + 10
+  copy.a + items.at(0).a
+
+pub fn value_wide_array_non_mut_call() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  wide_tail_sum(items.at(1))
+
+pub fn value_wide_array_non_mut_method_call() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  let value = items.at(1)
+  value.tail_sum()
+
+pub fn value_wide_array_direct_non_mut_method_call() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  items.at(1).tail_sum()
+
+pub fn value_wide_array_get_immediate_payload() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  match(items.get(1))
+    Some<WideVec5> { value }:
+      value.tail_sum()
+    None:
+      -1
+
+pub fn value_wide_array_get_immediate_payload_materializes_before_alias_mutation() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let ~alias = items
+  match(items.get(0))
+    Some<WideVec5> { value }:
+      alias.replace(0, with: WideVec5 {
+        a: 9,
+        b: 10,
+        c: 11,
+        d: 12,
+        e: 13
+      })
+      value.a + items.at(0).a
+    None:
+      -1
 
 pub fn value_five_lane_closure_round_trip() -> i32
   let reflect = (value: WideVec5) -> WideVec5 =>

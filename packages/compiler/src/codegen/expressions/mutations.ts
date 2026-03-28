@@ -85,6 +85,9 @@ const storeIntoBinding = ({
       fnCtx,
     });
   }
+  if (binding.kind === "projected-element-ref") {
+    throw new Error("cannot assign to a projected element binding");
+  }
 
   return storeLocalValue({ binding, value: coerced, ctx, fnCtx });
 };
@@ -451,6 +454,9 @@ export const compileAssignExpr = (
       }),
       usedReturnCall: false,
     };
+  }
+  if (binding.kind === "projected-element-ref") {
+    throw new Error("cannot assign to a projected element binding");
   }
 
   return {

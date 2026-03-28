@@ -460,6 +460,12 @@ export const getOptimizedParamAbiKind = ({
   bindingKind?: string;
   ctx: CodegenContext;
 }): OptimizedValueAbiKind => {
+  if (
+    bindingKind === "mutable-ref" &&
+    typeof getInlineHeapBoxType({ typeId, ctx }) === "number"
+  ) {
+    return "mutable_ref";
+  }
   if (!isWideValueType({ typeId, ctx })) {
     return "direct";
   }
@@ -488,9 +494,9 @@ export const getOptimizedAbiTypesForParam = ({
   if (abiKind === "direct") {
     return getAbiTypesForSignature(typeId, ctx);
   }
-  const storageType = getWideValueStorageType({ typeId, ctx });
+  const storageType = getInlineHeapBoxType({ typeId, ctx });
   if (typeof storageType !== "number") {
-    throw new Error(`missing wide storage type for parameter ${typeId}`);
+    throw new Error(`missing ref storage type for parameter ${typeId}`);
   }
   return [storageType];
 };

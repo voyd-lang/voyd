@@ -1,3 +1,5 @@
+use std::random::LocalRng
+
 pub fn range_for_half_open() -> i32
   var total = 0
   for value in 0..5:
@@ -32,3 +34,17 @@ pub fn range_iterator_inclusive_i32_max_stops() -> i32
       1
     Some<i32> { value: _ }:
       0
+
+pub fn range_for_handles_tail_effects_after_host_seed() -> f64
+  let ~rng = LocalRng::seeded_from_host()
+
+  try forward
+    var total = 0.0
+    for value in 0..32:
+      total = total + RangeForProbe::rand_f64()
+    total
+  RangeForProbe::rand_f64(tail):
+    tail(rng.random_f64())
+
+eff RangeForProbe
+  rand_f64(tail) -> f64

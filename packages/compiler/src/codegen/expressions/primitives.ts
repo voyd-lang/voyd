@@ -1,3 +1,4 @@
+import binaryen from "binaryen";
 import type {
   CodegenContext,
   CompiledExpression,
@@ -6,11 +7,15 @@ import type {
   SymbolId,
   TypeId,
 } from "../context.js";
-import { loadBindingValue } from "../locals.js";
+import {
+  loadBindingValue,
+  loadLocalValue,
+} from "../locals.js";
 import { arrayNew, arrayNewFixed } from "@voyd/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes, wasmTypeFor } from "../types.js";
 import { requireDependencyFunctionMeta } from "../function-dependencies.js";
 import { resolveModuleLetGetter } from "../module-lets.js";
+import { materializeProjectedElementBinding } from "../projected-element-views.js";
 import { coerceValueToType } from "../structural.js";
 import { unboxSignatureSpillValue } from "../signature-spill.js";
 
@@ -70,9 +75,56 @@ export const compileIdentifierExpr = (
   ctx: CodegenContext,
   fnCtx: FunctionContext,
   expectedResultTypeId?: TypeId,
+  preserveStorageRefs = false,
 ): CompiledExpression => {
   const binding = fnCtx.bindings.get(expr.symbol);
   if (binding) {
+    if (binding.kind === "projected-element-ref") {
+      if (preserveStorageRefs) {
+        const value = loadBindingValue(binding, ctx);
+        return {
+          expr:
+            typeof expectedResultTypeId === "number"
+              ? coerceValueToType({
+                  value,
+                  actualType: binding.typeId ?? expectedResultTypeId,
+                  targetType: expectedResultTypeId,
+                  ctx,
+                  fnCtx,
+                })
+              : value,
+          usedReturnCall: false,
+        };
+      }
+      const materialized = materializeProjectedElementBinding({
+        symbol: expr.symbol,
+        binding,
+        ctx,
+        fnCtx,
+      });
+      const value = loadLocalValue(materialized.binding, ctx);
+      const exprValue =
+        typeof expectedResultTypeId === "number"
+          ? coerceValueToType({
+              value,
+              actualType: materialized.binding.typeId ?? expectedResultTypeId,
+              targetType: expectedResultTypeId,
+              ctx,
+              fnCtx,
+            })
+          : value;
+      return {
+        expr:
+          materialized.setup.length === 0
+            ? exprValue
+            : ctx.mod.block(
+                null,
+                [...materialized.setup, exprValue],
+                binaryen.getExpressionType(exprValue),
+              ),
+        usedReturnCall: false,
+      };
+    }
     const value = loadBindingValue(binding, ctx);
     if (
       typeof expectedResultTypeId === "number" &&

@@ -7,11 +7,19 @@ import type {
   HirBlockExpr,
   HirLetStatement,
   HirStmtId,
+  SymbolId,
   TypeId,
 } from "../context.js";
+import { walkHirExpression } from "../hir-walk.js";
+import type { HirStatement } from "../../semantics/index.js";
 import { compilePatternInitialization } from "../patterns.js";
+import {
+  tryCompileProjectedElementBinding,
+  tryResolveProjectedElementRootSymbol,
+} from "../projected-element-views.js";
 import { coerceValueToType, storeValueIntoStorageRef } from "../structural.js";
 import {
+  getDeclaredSymbolTypeId,
   getRequiredExprType,
   wasmTypeFor,
 } from "../types.js";
@@ -46,6 +54,38 @@ const expressionUsesExpectedResultType = ({
   }
 };
 
+export const withBlockScope = <T>({
+  expr,
+  ctx,
+  fnCtx,
+  run,
+}: {
+  expr: HirBlockExpr;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  run: () => T;
+}): T => {
+  const previousAliases = fnCtx.simpleIdentifierAliases;
+  const aliasSets = mergeSimpleIdentifierAliases({
+    base: previousAliases,
+    next: collectSimpleIdentifierAliases({ expr, ctx }),
+  });
+  const previousNonBorrowable = fnCtx.nonBorrowableProjectedSymbols;
+  fnCtx.simpleIdentifierAliases = aliasSets;
+  fnCtx.nonBorrowableProjectedSymbols = collectNonBorrowableProjectedSymbols({
+    expr,
+    aliasSets,
+    ctx,
+    fnCtx,
+  });
+  try {
+    return run();
+  } finally {
+    fnCtx.simpleIdentifierAliases = previousAliases;
+    fnCtx.nonBorrowableProjectedSymbols = previousNonBorrowable;
+  }
+};
+
 export const compileBlockExpr = (
   expr: HirBlockExpr,
   ctx: CodegenContext,
@@ -59,63 +99,69 @@ export const compileBlockExpr = (
     expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
   const blockResultType = wasmTypeFor(blockResultTypeId, ctx);
   const statements: binaryen.ExpressionRef[] = [];
-  expr.statements.forEach((stmtId) => {
-    statements.push(compileStatement(stmtId, ctx, fnCtx, compileExpr));
+  return withBlockScope({
+    expr,
+    ctx,
+    fnCtx,
+    run: () => {
+      expr.statements.forEach((stmtId) => {
+        statements.push(compileStatement(stmtId, ctx, fnCtx, compileExpr));
+      });
+      if (typeof expr.value === "number") {
+        const { expr: valueExpr, usedReturnCall } = compileExpr({
+          exprId: expr.value,
+          ctx,
+          fnCtx,
+          tailPosition,
+          expectedResultTypeId,
+        });
+        const requiredActualType =
+          typeof expectedResultTypeId === "number" &&
+          !usedReturnCall &&
+          expressionUsesExpectedResultType({ exprId: expr.value, ctx })
+            ? expectedResultTypeId
+            : getRequiredExprType(expr.value, ctx, typeInstanceId);
+        const coercedToExpected =
+          typeof expectedResultTypeId === "number" && !usedReturnCall
+            ? coerceValueToType({
+                value: valueExpr,
+                actualType: requiredActualType,
+                targetType: expectedResultTypeId,
+                ctx,
+                fnCtx,
+              })
+            : valueExpr;
+        const coerced = coerceToBinaryenType(
+          ctx,
+          coercedToExpected,
+          blockResultType,
+          fnCtx,
+        );
+        if (statements.length === 0) {
+          return { expr: coerced, usedReturnCall };
+        }
+
+        statements.push(coerced);
+        return {
+          expr: ctx.mod.block(
+            null,
+            statements,
+            blockResultType
+          ),
+          usedReturnCall,
+        };
+      }
+
+      if (statements.length === 0) {
+        return { expr: ctx.mod.nop(), usedReturnCall: false };
+      }
+
+      return {
+        expr: ctx.mod.block(null, statements, binaryen.none),
+        usedReturnCall: false,
+      };
+    },
   });
-
-  if (typeof expr.value === "number") {
-    const { expr: valueExpr, usedReturnCall } = compileExpr({
-      exprId: expr.value,
-      ctx,
-      fnCtx,
-      tailPosition,
-      expectedResultTypeId,
-    });
-    const requiredActualType =
-      typeof expectedResultTypeId === "number" &&
-      !usedReturnCall &&
-      expressionUsesExpectedResultType({ exprId: expr.value, ctx })
-        ? expectedResultTypeId
-        : getRequiredExprType(expr.value, ctx, typeInstanceId);
-    const coercedToExpected =
-      typeof expectedResultTypeId === "number" && !usedReturnCall
-        ? coerceValueToType({
-            value: valueExpr,
-            actualType: requiredActualType,
-            targetType: expectedResultTypeId,
-            ctx,
-            fnCtx,
-          })
-        : valueExpr;
-    const coerced = coerceToBinaryenType(
-      ctx,
-      coercedToExpected,
-      blockResultType,
-      fnCtx,
-    );
-    if (statements.length === 0) {
-      return { expr: coerced, usedReturnCall };
-    }
-
-    statements.push(coerced);
-    return {
-      expr: ctx.mod.block(
-        null,
-        statements,
-        blockResultType
-      ),
-      usedReturnCall,
-    };
-  }
-
-  if (statements.length === 0) {
-    return { expr: ctx.mod.nop(), usedReturnCall: false };
-  }
-
-  return {
-    expr: ctx.mod.block(null, statements, binaryen.none),
-    usedReturnCall: false,
-  };
 };
 
 export const compileStatement = (
@@ -296,6 +342,38 @@ const compileLetStatement = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef => {
+  if (stmt.pattern.kind === "identifier" && !stmt.mutable) {
+    if (fnCtx.nonBorrowableProjectedSymbols?.has(stmt.pattern.symbol)) {
+      return compileDefaultLetStatement(stmt, ctx, fnCtx, compileExpr);
+    }
+    const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+    const targetTypeId = getDeclaredSymbolTypeId(
+      stmt.pattern.symbol,
+      ctx,
+      typeInstanceId,
+    );
+    const borrowedOps = tryCompileProjectedElementBinding({
+      symbol: stmt.pattern.symbol,
+      initializer: stmt.initializer,
+      targetTypeId,
+      ctx,
+      fnCtx,
+      compileExpr,
+    });
+    if (borrowedOps && borrowedOps.length > 0) {
+      return ctx.mod.block(null, [...borrowedOps], binaryen.none);
+    }
+  }
+
+  return compileDefaultLetStatement(stmt, ctx, fnCtx, compileExpr);
+};
+
+const compileDefaultLetStatement = (
+  stmt: HirLetStatement,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  compileExpr: ExpressionCompiler
+): binaryen.ExpressionRef => {
   const ops: binaryen.ExpressionRef[] = [];
   compilePatternInitialization({
     pattern: stmt.pattern,
@@ -310,4 +388,316 @@ const compileLetStatement = (
     return ctx.mod.nop();
   }
   return ctx.mod.block(null, ops, binaryen.none);
+};
+
+const collectNonBorrowableProjectedSymbols = ({
+  expr,
+  aliasSets,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirBlockExpr;
+  aliasSets: ReadonlyMap<SymbolId, ReadonlySet<SymbolId>>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): ReadonlySet<number> => {
+  const symbols = new Set<number>();
+  expr.statements.forEach((stmtId, index) => {
+    const stmt = ctx.module.hir.statements.get(stmtId);
+    if (
+      stmt?.kind !== "let" ||
+      stmt.mutable ||
+      stmt.pattern.kind !== "identifier"
+    ) {
+      return;
+    }
+
+    const rootSymbol = tryResolveProjectedElementRootSymbol({
+      exprId: stmt.initializer,
+      ctx,
+      fnCtx,
+    });
+    if (typeof rootSymbol !== "number") {
+      return;
+    }
+
+    const rootAliases = aliasSets.get(rootSymbol) ?? new Set([rootSymbol]);
+    if (
+      laterBlockCodeUsesAnySymbol({
+        expr,
+        startStatementIndex: index + 1,
+        symbols: rootAliases,
+        ctx,
+      })
+    ) {
+      symbols.add(stmt.pattern.symbol);
+    }
+  });
+
+  walkHirExpression({
+    exprId: expr.id,
+    ctx,
+    visitor: {
+      onExpr: (_exprId, node) => {
+        if (node.exprKind !== "call" || node.args.length !== 1) {
+          return;
+        }
+        const callee = ctx.module.hir.expressions.get(node.callee);
+        if (callee?.exprKind !== "identifier") {
+          return;
+        }
+        const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+        if (
+          ctx.program.symbols.getIntrinsicName(calleeId) !== "~" &&
+          ctx.program.symbols.getName(calleeId) !== "~"
+        ) {
+          return;
+        }
+        const argExpr = ctx.module.hir.expressions.get(node.args[0]!.expr);
+        if (argExpr?.exprKind === "identifier") {
+          symbols.add(argExpr.symbol);
+        }
+      },
+    },
+  });
+  return symbols;
+};
+
+const mergeSimpleIdentifierAliases = ({
+  base,
+  next,
+}: {
+  base?: ReadonlyMap<SymbolId, ReadonlySet<SymbolId>>;
+  next: ReadonlyMap<SymbolId, ReadonlySet<SymbolId>>;
+}): ReadonlyMap<SymbolId, ReadonlySet<SymbolId>> => {
+  if (!base || base.size === 0) {
+    return next;
+  }
+  if (next.size === 0) {
+    return base;
+  }
+
+  const adjacency = new Map<SymbolId, Set<SymbolId>>();
+  const linkComponent = (component: ReadonlySet<SymbolId>): void => {
+    const members = [...component];
+    members.forEach((member) => {
+      const neighbors = adjacency.get(member) ?? new Set<SymbolId>();
+      members.forEach((neighbor) => {
+        if (neighbor !== member) {
+          neighbors.add(neighbor);
+        }
+      });
+      adjacency.set(member, neighbors);
+    });
+  };
+
+  base.forEach((component) => linkComponent(component));
+  next.forEach((component) => linkComponent(component));
+
+  const merged = new Map<SymbolId, ReadonlySet<SymbolId>>();
+  adjacency.forEach((_neighbors, symbol) => {
+    if (merged.has(symbol)) {
+      return;
+    }
+    const component = new Set<SymbolId>();
+    const queue = [symbol];
+    while (queue.length > 0) {
+      const current = queue.pop()!;
+      if (component.has(current)) {
+        continue;
+      }
+      component.add(current);
+      (adjacency.get(current) ?? new Set<SymbolId>()).forEach((neighbor) => {
+        queue.push(neighbor);
+      });
+    }
+    component.forEach((member) => merged.set(member, component));
+  });
+
+  return merged;
+};
+
+const laterBlockCodeUsesAnySymbol = ({
+  expr,
+  startStatementIndex,
+  symbols,
+  ctx,
+}: {
+  expr: HirBlockExpr;
+  startStatementIndex: number;
+  symbols: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+}): boolean => {
+  for (let index = startStatementIndex; index < expr.statements.length; index += 1) {
+    const stmt = ctx.module.hir.statements.get(expr.statements[index]!);
+    if (stmt && statementUsesAnySymbol({ stmt, symbols, ctx })) {
+      return true;
+    }
+  }
+
+  return (
+    typeof expr.value === "number" &&
+    expressionUsesAnySymbol({
+      exprId: expr.value,
+      symbols,
+      ctx,
+    })
+  );
+};
+
+const statementUsesAnySymbol = ({
+  stmt,
+  symbols,
+  ctx,
+}: {
+  stmt: HirStatement;
+  symbols: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+}): boolean => {
+  switch (stmt.kind) {
+    case "let":
+      return expressionUsesAnySymbol({
+        exprId: stmt.initializer,
+        symbols,
+        ctx,
+      });
+    case "expr-stmt":
+      return expressionUsesAnySymbol({
+        exprId: stmt.expr,
+        symbols,
+        ctx,
+      });
+    case "return":
+      return (
+        typeof stmt.value === "number" &&
+        expressionUsesAnySymbol({
+          exprId: stmt.value,
+          symbols,
+          ctx,
+        })
+      );
+    default:
+      return false;
+  }
+};
+
+const expressionUsesAnySymbol = ({
+  exprId,
+  symbols,
+  ctx,
+}: {
+  exprId: number;
+  symbols: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+}): boolean => {
+  let used = false;
+  walkHirExpression({
+    exprId,
+    ctx,
+    visitLambdaBodies: true,
+    visitHandlerBodies: true,
+    visitor: {
+      onExpr: (_exprId, expr) => {
+        if (expr.exprKind === "identifier" && symbols.has(expr.symbol)) {
+          used = true;
+          return "stop";
+        }
+        return undefined;
+      },
+    },
+  });
+  return used;
+};
+
+const collectSimpleIdentifierAliases = ({
+  expr,
+  ctx,
+}: {
+  expr: HirBlockExpr;
+  ctx: CodegenContext;
+}): Map<SymbolId, ReadonlySet<SymbolId>> => {
+  const adjacency = new Map<SymbolId, Set<SymbolId>>();
+  const link = (left: SymbolId, right: SymbolId): void => {
+    if (left === right) {
+      return;
+    }
+    const leftAliases = adjacency.get(left) ?? new Set<SymbolId>();
+    leftAliases.add(right);
+    adjacency.set(left, leftAliases);
+    const rightAliases = adjacency.get(right) ?? new Set<SymbolId>();
+    rightAliases.add(left);
+    adjacency.set(right, rightAliases);
+  };
+  const maybeLinkIdentifierAlias = ({
+    targetSymbol,
+    valueExprId,
+  }: {
+    targetSymbol: SymbolId;
+    valueExprId: number;
+  }): void => {
+    const valueExpr = ctx.module.hir.expressions.get(valueExprId);
+    if (valueExpr?.exprKind === "identifier") {
+      link(targetSymbol, valueExpr.symbol);
+    }
+  };
+
+  expr.statements.forEach((stmtId) => {
+    const stmt = ctx.module.hir.statements.get(stmtId);
+    if (stmt?.kind === "let" && stmt.pattern.kind === "identifier") {
+      maybeLinkIdentifierAlias({
+        targetSymbol: stmt.pattern.symbol,
+        valueExprId: stmt.initializer,
+      });
+    }
+  });
+
+  walkHirExpression({
+    exprId: expr.id,
+    ctx,
+    visitor: {
+      onExpr: (_exprId, node) => {
+        if (node.exprKind !== "assign") {
+          return;
+        }
+        if (typeof node.target === "number") {
+          const targetExpr = ctx.module.hir.expressions.get(node.target);
+          if (targetExpr?.exprKind === "identifier") {
+            maybeLinkIdentifierAlias({
+              targetSymbol: targetExpr.symbol,
+              valueExprId: node.value,
+            });
+          }
+        }
+        if (node.pattern?.kind === "identifier") {
+          maybeLinkIdentifierAlias({
+            targetSymbol: node.pattern.symbol,
+            valueExprId: node.value,
+          });
+        }
+        return undefined;
+      },
+    },
+  });
+
+  const aliasSets = new Map<SymbolId, ReadonlySet<SymbolId>>();
+  adjacency.forEach((_neighbors, symbol) => {
+    if (aliasSets.has(symbol)) {
+      return;
+    }
+    const component = new Set<SymbolId>();
+    const queue = [symbol];
+    while (queue.length > 0) {
+      const current = queue.pop()!;
+      if (component.has(current)) {
+        continue;
+      }
+      component.add(current);
+      (adjacency.get(current) ?? new Set<SymbolId>()).forEach((neighbor) => {
+        queue.push(neighbor);
+      });
+    }
+    component.forEach((member) => aliasSets.set(member, component));
+  });
+
+  return aliasSets;
 };
