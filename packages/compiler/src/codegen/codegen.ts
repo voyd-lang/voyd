@@ -113,8 +113,10 @@ export const codegenProgram = ({
   const programHelpers = createProgramHelperRegistry();
   const structTypes = new Map<string, StructuralTypeInfo>();
   const structHeapTypes = new Map<TypeId, binaryen.Type>();
+  const abiBoxTypes = new Map<string, binaryen.Type>();
   const structuralIdCache = new Map<TypeId, TypeId | null>();
   const resolvingStructuralIds = new Set<TypeId>();
+  const resolvingStructuralHeapTypes = new Set<TypeId>();
   const fixedArrayTypes = new Map<TypeId, FixedArrayWasmType>();
   const moduleContexts = new Map<string, CodegenContext>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
@@ -133,8 +135,10 @@ export const codegenProgram = ({
     itemsToSymbols: new Map(),
     structTypes,
     structHeapTypes,
+    abiBoxTypes,
     structuralIdCache,
     resolvingStructuralIds,
+    resolvingStructuralHeapTypes,
     fixedArrayTypes,
     closureTypes: new Map(),
     functionRefTypes: new Map(),

@@ -77,8 +77,15 @@ export const ensureContinuationBindFunction = (
   const fnRefType = contCallRefType;
 
   const params = binaryen.createType([binaryen.anyref, binaryen.eqref]);
-  const locals: binaryen.Type[] = [ctx.effectsRuntime.outcomeType];
-  const outcomeLocal = 0;
+  const locals: binaryen.Type[] = [
+    ctx.effectsRuntime.outcomeType,
+    binaryen.i32,
+    ctx.effectsRuntime.effectRequestType,
+  ];
+  const paramCount = 2;
+  const outcomeLocal = paramCount;
+  const tagLocal = paramCount + 1;
+  const requestLocal = paramCount + 2;
 
   const envRef = () =>
     refCast(
@@ -121,29 +128,30 @@ export const ensureContinuationBindFunction = (
 
   const resumeBox = () => ctx.mod.local.get(1, binaryen.eqref);
   const outcome = () =>
-    ctx.mod.local.get(outcomeLocal + 2, ctx.effectsRuntime.outcomeType);
+    ctx.mod.local.get(outcomeLocal, ctx.effectsRuntime.outcomeType);
 
   const initOutcome = ctx.mod.local.set(
-    outcomeLocal + 2,
+    outcomeLocal,
     callCont({ cont: nextCont(), resumeBox: resumeBox() })
   );
 
-  const tag = ctx.effectsRuntime.outcomeTag(outcome());
-  const payload = ctx.effectsRuntime.outcomePayload(outcome());
+  const tag = () => ctx.mod.local.get(tagLocal, binaryen.i32);
+  const payload = () => ctx.effectsRuntime.outcomePayload(outcome());
+  const request = (): binaryen.ExpressionRef =>
+    ctx.mod.local.get(requestLocal, ctx.effectsRuntime.effectRequestType);
 
   const callFrame = ctx.mod.return(
     callCont({
       cont: frameCont(),
-      resumeBox: payload,
+      resumeBox: payload(),
     })
   );
 
   const wrapEffect = (() => {
-    const request = refCast(ctx.mod, payload, ctx.effectsRuntime.effectRequestType);
     const wrappedEnv = initStruct(ctx.mod, envType, [
       ctx.mod.i32.const(-1),
-      ctx.effectsRuntime.requestHandler(request),
-      ctx.effectsRuntime.requestContinuation(request),
+      ctx.effectsRuntime.requestHandler(request()),
+      ctx.effectsRuntime.requestContinuation(request()),
       frameCont(),
     ] as number[]);
     const bindCont = ctx.effectsRuntime.makeContinuation({
@@ -152,24 +160,31 @@ export const ensureContinuationBindFunction = (
       site: ctx.mod.i32.const(-1),
     });
     const wrappedReq = ctx.effectsRuntime.makeEffectRequest({
-      effectId: ctx.effectsRuntime.requestEffectId(request),
-      opId: ctx.effectsRuntime.requestOpId(request),
-      opIndex: ctx.effectsRuntime.requestOpIndex(request),
-      resumeKind: ctx.effectsRuntime.requestResumeKind(request),
-      handle: ctx.effectsRuntime.requestHandle(request),
-      args: ctx.effectsRuntime.requestArgs(request),
+      effectId: ctx.effectsRuntime.requestEffectId(request()),
+      opId: ctx.effectsRuntime.requestOpId(request()),
+      opIndex: ctx.effectsRuntime.requestOpIndex(request()),
+      resumeKind: ctx.effectsRuntime.requestResumeKind(request()),
+      handle: ctx.effectsRuntime.requestHandle(request()),
+      args: ctx.effectsRuntime.requestArgs(request()),
       continuation: bindCont,
-      tailGuard: ctx.effectsRuntime.requestTailGuard(request),
+      tailGuard: ctx.effectsRuntime.requestTailGuard(request()),
     });
     return ctx.mod.return(ctx.effectsRuntime.makeOutcomeEffect(wrappedReq));
   })();
 
   const body = ctx.mod.block(null, [
     initOutcome,
+    ctx.mod.local.set(tagLocal, ctx.effectsRuntime.outcomeTag(outcome())),
     ctx.mod.if(
-      ctx.mod.i32.eq(tag, ctx.mod.i32.const(0)),
+      ctx.mod.i32.eq(tag(), ctx.mod.i32.const(0)),
       callFrame,
-      wrapEffect
+      ctx.mod.block(null, [
+        ctx.mod.local.set(
+          requestLocal,
+          refCast(ctx.mod, payload(), ctx.effectsRuntime.effectRequestType)
+        ),
+        wrapEffect,
+      ])
     ),
   ]);
 
@@ -193,14 +208,14 @@ export const wrapRequestContinuationWithFrame = ({
   frame,
 }: {
   ctx: CodegenContext;
-  request: binaryen.ExpressionRef;
+  request: () => binaryen.ExpressionRef;
   frame: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef => {
   const { fnName, fnRefType, envType } = ensureContinuationBindFunction(ctx);
   const env = initStruct(ctx.mod, envType, [
     ctx.mod.i32.const(-1),
-    ctx.effectsRuntime.requestHandler(request),
-    ctx.effectsRuntime.requestContinuation(request),
+    ctx.effectsRuntime.requestHandler(request()),
+    ctx.effectsRuntime.requestContinuation(request()),
     frame,
   ] as number[]);
   const bindCont = ctx.effectsRuntime.makeContinuation({
@@ -209,13 +224,13 @@ export const wrapRequestContinuationWithFrame = ({
     site: ctx.mod.i32.const(-1),
   });
   return ctx.effectsRuntime.makeEffectRequest({
-    effectId: ctx.effectsRuntime.requestEffectId(request),
-    opId: ctx.effectsRuntime.requestOpId(request),
-    opIndex: ctx.effectsRuntime.requestOpIndex(request),
-    resumeKind: ctx.effectsRuntime.requestResumeKind(request),
-    handle: ctx.effectsRuntime.requestHandle(request),
-    args: ctx.effectsRuntime.requestArgs(request),
+    effectId: ctx.effectsRuntime.requestEffectId(request()),
+    opId: ctx.effectsRuntime.requestOpId(request()),
+    opIndex: ctx.effectsRuntime.requestOpIndex(request()),
+    resumeKind: ctx.effectsRuntime.requestResumeKind(request()),
+    handle: ctx.effectsRuntime.requestHandle(request()),
+    args: ctx.effectsRuntime.requestArgs(request()),
     continuation: bindCont,
-    tailGuard: ctx.effectsRuntime.requestTailGuard(request),
+    tailGuard: ctx.effectsRuntime.requestTailGuard(request()),
   });
 };

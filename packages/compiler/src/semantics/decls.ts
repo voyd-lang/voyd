@@ -115,6 +115,7 @@ export interface ObjectDecl {
   name: string;
   form?: Form;
   visibility: HirVisibility;
+  objectKind: "obj" | "value";
   symbol: SymbolId;
   baseTypeExpr?: Expr;
   fields: ObjectFieldDecl[];

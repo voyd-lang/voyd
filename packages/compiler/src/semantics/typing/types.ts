@@ -627,6 +627,7 @@ export interface TypingContext {
 }
 
 export interface ObjectTypeInfo {
+  objectKind: "obj" | "value";
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
@@ -638,6 +639,7 @@ export interface ObjectTypeInfo {
 
 export interface ObjectTemplate {
   symbol: SymbolId;
+  objectKind: "obj" | "value";
   params: readonly {
     symbol: SymbolId;
     typeParam: TypeParamId;

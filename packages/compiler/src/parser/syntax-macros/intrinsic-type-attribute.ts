@@ -63,6 +63,9 @@ const processSequence = (
 };
 
 const isTypeDeclForm = (form: Form): boolean => {
+  const isTypeKeyword = (value: string): boolean =>
+    value === "obj" || value === "val" || value === "type" || value === "trait";
+
   const head = form.at(0);
   if (!isIdentifierAtom(head)) {
     return false;
@@ -70,13 +73,10 @@ const isTypeDeclForm = (form: Form): boolean => {
 
   if (head.value === "pub") {
     const keyword = form.at(1);
-    return (
-      isIdentifierAtom(keyword) &&
-      (keyword.value === "obj" || keyword.value === "type" || keyword.value === "trait")
-    );
+    return isIdentifierAtom(keyword) && isTypeKeyword(keyword.value);
   }
 
-  return head.value === "obj" || head.value === "type" || head.value === "trait";
+  return isTypeKeyword(head.value);
 };
 
 const isIntrinsicTypeAttributeForm = (expr: Expr): expr is Form =>

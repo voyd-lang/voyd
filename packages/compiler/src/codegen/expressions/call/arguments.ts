@@ -1,4 +1,8 @@
 import binaryen from "binaryen";
+import {
+  refCast,
+  structGetFieldValue,
+} from "@voyd/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   ExpressionCompiler,
@@ -6,6 +10,7 @@ import type {
   FunctionMetadata,
   HirCallExpr,
   HirExprId,
+  SymbolId,
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
@@ -16,11 +21,24 @@ import {
   loadStructuralField,
 } from "../../structural.js";
 import {
+  getInlineHeapBoxType,
   getRequiredExprType,
   getStructuralTypeInfo,
   wasmTypeFor,
 } from "../../types.js";
-import { allocateTempLocal } from "../../locals.js";
+import {
+  allocateAddressableLocal,
+  allocateTempLocal,
+  getRequiredBinding,
+  loadLocalValue,
+  loadBindingValue,
+  loadBindingStorageRef,
+  storeLocalValue,
+} from "../../locals.js";
+import {
+  materializeProjectedElementBinding,
+  tryCompileProjectedElementStorageRefExpr,
+} from "../../projected-element-views.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
 import type {
   CallParam,
@@ -52,6 +70,7 @@ export const compileCallArguments = ({
   return compileCallArgumentsForParams({
     call,
     params: meta.parameters,
+    paramAbiKinds: meta.paramAbiKinds,
     ctx,
     fnCtx,
     compileExpr,
@@ -65,6 +84,7 @@ export const compileCallArguments = ({
 export const compileCallArgumentsForParams = ({
   call,
   params,
+  paramAbiKinds,
   ctx,
   fnCtx,
   compileExpr,
@@ -72,6 +92,7 @@ export const compileCallArgumentsForParams = ({
 }: {
   call: HirCallExpr;
   params: readonly CallParam[];
+  paramAbiKinds?: readonly string[];
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -80,6 +101,7 @@ export const compileCallArgumentsForParams = ({
   compileCallArgumentsForParamsWithDetails({
     call,
     params,
+    paramAbiKinds,
     ctx,
     fnCtx,
     compileExpr,
@@ -89,6 +111,7 @@ export const compileCallArgumentsForParams = ({
 export const compileCallArgumentsForParamsWithDetails = ({
   call,
   params,
+  paramAbiKinds,
   ctx,
   fnCtx,
   compileExpr,
@@ -96,6 +119,7 @@ export const compileCallArgumentsForParamsWithDetails = ({
 }: {
   call: HirCallExpr;
   params: readonly CallParam[];
+  paramAbiKinds?: readonly string[];
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -135,12 +159,17 @@ export const compileCallArgumentsForParamsWithDetails = ({
       });
 
   const consumedArgs = call.args.slice(0, planned.consumedArgCount);
+  const preservedArgIndexes = collectPreservedStorageRefArgIndexes({
+    plan: planned.plan,
+    paramAbiKinds,
+  });
   const compiledArgs = compileCallArgExpressionsWithTemps({
     callId: call.id,
     args: consumedArgs,
     argIndexOffset,
     allArgExprIds: allCallArgExprIds ?? call.args.map((arg) => arg.expr),
     expectedTypeIdAt: (index) => planned.expectedTypeByArgIndex.get(index),
+    preserveStorageRefsAt: (index) => preservedArgIndexes.has(index + argIndexOffset),
     ctx,
     fnCtx,
     compileExpr,
@@ -150,9 +179,12 @@ export const compileCallArgumentsForParamsWithDetails = ({
     plan: planned.plan,
     compiledArgs,
     callArgs: call.args,
+    paramTypeIds: params.map((param) => param.typeId),
+    paramAbiKinds,
     typeInstanceId,
     ctx,
     fnCtx,
+    compileExpr,
   });
 
   return { args, consumedArgCount: planned.consumedArgCount };
@@ -475,30 +507,60 @@ const materializeCallArgumentPlan = ({
   plan,
   compiledArgs,
   callArgs,
+  paramTypeIds,
+  paramAbiKinds,
   typeInstanceId,
   ctx,
   fnCtx,
+  compileExpr,
 }: {
   plan: readonly CallArgumentPlanEntry[];
   compiledArgs: readonly binaryen.ExpressionRef[];
   callArgs: readonly HirCallExpr["args"][number][];
+  paramTypeIds: readonly TypeId[];
+  paramAbiKinds?: readonly string[];
   typeInstanceId: ProgramFunctionInstanceId | undefined;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
 }): binaryen.ExpressionRef[] => {
   const containerTemps = new Map<number, ReturnType<typeof allocateTempLocal>>();
   const initializedContainers = new Set<number>();
+  const mutableRefContainerArgs = new Set(
+    plan.flatMap((entry, index) =>
+      entry.kind === "container-field" && paramAbiKinds?.[index] === "mutable_ref"
+        ? [entry.containerArgIndex]
+        : [],
+    ),
+  );
 
-  return plan.map((entry) => {
+  return plan.map((entry, paramIndex) => {
+    const abiKind = paramAbiKinds?.[paramIndex];
+    const paramTypeId = paramTypeIds[paramIndex];
     if (entry.kind === "direct") {
-      return compiledArgs[entry.argIndex]!;
+      return lowerCallArgumentForAbi({
+        argExprId: callArgs[entry.argIndex]?.expr,
+        argValue: compiledArgs[entry.argIndex]!,
+        paramTypeId,
+        abiKind,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
     }
 
     if (entry.kind === "missing") {
-      return compileOptionalNoneValue({
-        targetTypeId: entry.targetTypeId,
+      return lowerCallArgumentForAbi({
+        argValue: compileOptionalNoneValue({
+          targetTypeId: entry.targetTypeId,
+          ctx,
+          fnCtx,
+        }),
+        paramTypeId,
+        abiKind,
         ctx,
         fnCtx,
+        compileExpr,
       });
     }
 
@@ -522,15 +584,38 @@ const materializeCallArgumentPlan = ({
     const temp =
       existingTemp ??
       (() => {
-        const created = allocateTempLocal(containerInfo.interfaceType, fnCtx);
+        const created = mutableRefContainerArgs.has(entry.containerArgIndex)
+          ? allocateAddressableLocal({
+              typeId: containerTypeId,
+              ctx,
+              fnCtx,
+            })
+          : allocateTempLocal(
+              containerInfo.interfaceType,
+              fnCtx,
+              containerTypeId,
+              ctx,
+            );
         containerTemps.set(entry.containerArgIndex, created);
         return created;
       })();
+    const initOps =
+      initializedContainers.has(entry.containerArgIndex)
+        ? []
+        : [
+            storeLocalValue({
+              binding: temp,
+              value: compiledArgs[entry.containerArgIndex]!,
+              ctx,
+              fnCtx,
+            }),
+          ];
+    initializedContainers.add(entry.containerArgIndex);
 
     const loaded = loadStructuralField({
       structInfo: containerInfo,
       field,
-      pointer: () => ctx.mod.local.get(temp.index, containerInfo.interfaceType),
+      pointer: () => loadLocalValue(temp, ctx),
       ctx,
     });
     const coerced = coerceValueToType({
@@ -540,19 +625,380 @@ const materializeCallArgumentPlan = ({
       ctx,
       fnCtx,
     });
+    const fieldExprId = resolveContainerFieldValueExprId({
+      containerExprId: containerArg.expr,
+      fieldName: entry.fieldName,
+      ctx,
+    });
+    const containerFieldStorageRef =
+      typeof fieldExprId === "number"
+        ? undefined
+        : tryCompileContainerFieldStorageRef({
+            containerExprId: containerArg.expr,
+            containerTypeId,
+            containerInfo,
+            field,
+            temp,
+            ctx,
+            fnCtx,
+          });
 
-    if (initializedContainers.has(entry.containerArgIndex)) {
-      return coerced;
+    if (
+      abiKind === "mutable_ref" &&
+      typeof paramTypeId === "number" &&
+      typeof fieldExprId === "number" &&
+      typeof resolveAddressableIdentifierSymbol({ exprId: fieldExprId, ctx }) !== "number" &&
+      !containerFieldStorageRef
+    ) {
+      const fieldTemp = allocateAddressableLocal({
+        typeId: paramTypeId,
+        ctx,
+        fnCtx,
+      });
+      const fieldPointer = loadBindingStorageRef(fieldTemp, ctx);
+      if (!fieldPointer) {
+        throw new Error(
+          `mutable ref labeled argument requires addressable temp storage (type ${paramTypeId})`,
+        );
+      }
+      return ctx.mod.block(
+        null,
+        [
+          ...initOps,
+          storeLocalValue({
+            binding: fieldTemp,
+            value: coerced,
+            ctx,
+            fnCtx,
+          }),
+          fieldPointer,
+        ],
+        fieldTemp.storageType,
+      );
     }
 
-    initializedContainers.add(entry.containerArgIndex);
+    const result = lowerCallArgumentForAbi({
+      argExprId: fieldExprId,
+      argValue: coerced,
+      addressableValue: containerFieldStorageRef,
+      paramTypeId,
+      abiKind,
+      ctx,
+      fnCtx,
+      compileExpr,
+    });
+    if (initOps.length === 0) {
+      return result;
+    }
     return ctx.mod.block(
       null,
-      [
-        ctx.mod.local.set(temp.index, compiledArgs[entry.containerArgIndex]!),
-        coerced,
-      ],
-      wasmTypeFor(entry.targetTypeId, ctx)
+      [...initOps, result],
+      binaryen.getExpressionType(result)
     );
   });
+};
+
+const collectPreservedStorageRefArgIndexes = ({
+  plan,
+  paramAbiKinds,
+}: {
+  plan: readonly CallArgumentPlanEntry[];
+  paramAbiKinds?: readonly string[];
+}): ReadonlySet<number> => {
+  const usage = new Map<number, boolean>();
+
+  plan.forEach((entry, paramIndex) => {
+    if (entry.kind !== "direct") {
+      return;
+    }
+    const preserves = paramAbiKinds?.[paramIndex] === "readonly_ref";
+    const existing = usage.get(entry.argIndex);
+    usage.set(entry.argIndex, existing === undefined ? preserves : existing && preserves);
+  });
+
+  return new Set(
+    Array.from(usage.entries())
+      .filter(([, preserves]) => preserves)
+      .map(([argIndex]) => argIndex),
+  );
+};
+
+const lowerCallArgumentForAbi = ({
+  argExprId,
+  argValue,
+  addressableValue,
+  paramTypeId,
+  abiKind,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  argExprId?: HirExprId;
+  argValue: binaryen.ExpressionRef;
+  addressableValue?: binaryen.ExpressionRef;
+  paramTypeId?: TypeId;
+  abiKind?: string;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): binaryen.ExpressionRef => {
+  if (abiKind !== "readonly_ref" && abiKind !== "mutable_ref") {
+    return argValue;
+  }
+  if (typeof paramTypeId !== "number") {
+    throw new Error("ref ABI argument lowering requires a concrete parameter type");
+  }
+  if (addressableValue) {
+    return addressableValue;
+  }
+  const addressableSymbol =
+    typeof argExprId === "number"
+      ? resolveAddressableIdentifierSymbol({ exprId: argExprId, ctx })
+      : undefined;
+  if (typeof addressableSymbol === "number") {
+    const existing = getRequiredBinding(addressableSymbol, ctx, fnCtx);
+    const pointer = loadBindingStorageRef(existing, ctx);
+    if (pointer) {
+      return pointer;
+    }
+    if (abiKind === "mutable_ref") {
+      const materialized =
+        existing.kind === "projected-element-ref"
+          ? materializeProjectedElementBinding({
+              symbol: addressableSymbol,
+              binding: existing,
+              ctx,
+              fnCtx,
+            })
+          : undefined;
+      const ownedValue = materialized
+        ? loadBindingValue(materialized.binding, ctx)
+        : argValue;
+      const owned = allocateAddressableLocal({
+        typeId: paramTypeId,
+        ctx,
+        fnCtx,
+      });
+      fnCtx.bindings.set(addressableSymbol, {
+        ...owned,
+        kind: "local",
+        typeId: paramTypeId,
+      });
+      const ownedPointer = loadBindingStorageRef(owned, ctx);
+      if (!ownedPointer) {
+        throw new Error(
+          `mutable ref call argument requires addressable temp storage (type ${paramTypeId})`,
+        );
+      }
+      return ctx.mod.block(
+        null,
+        [
+          ...(materialized?.setup ?? []),
+          storeLocalValue({
+            binding: owned,
+            value: ownedValue,
+            ctx,
+            fnCtx,
+          }),
+          ownedPointer,
+        ],
+        owned.storageType,
+      );
+    }
+  }
+  if (abiKind === "mutable_ref") {
+    const exprKind =
+      typeof argExprId === "number"
+        ? ctx.module.hir.expressions.get(argExprId)?.exprKind ?? "missing"
+        : "none";
+    throw new Error(
+      `mutable ref call argument requires addressable storage (type ${paramTypeId}, expr ${exprKind})`,
+    );
+  }
+  if (typeof argExprId === "number") {
+    const projectedPointer = tryCompileProjectedElementStorageRefExpr({
+      exprId: argExprId,
+      paramTypeId,
+      ctx,
+      fnCtx,
+      compileExpr,
+    });
+    if (projectedPointer) {
+      return projectedPointer;
+    }
+  }
+  const temp = allocateTempLocal(
+    wasmTypeFor(paramTypeId, ctx),
+    fnCtx,
+    paramTypeId,
+    ctx,
+  );
+  return ctx.mod.block(
+    null,
+    [
+      storeLocalValue({
+        binding: temp,
+        value: argValue,
+        ctx,
+        fnCtx,
+      }),
+      ctx.mod.local.get(temp.index, temp.storageType),
+    ],
+    temp.storageType,
+  );
+};
+
+const resolveAddressableIdentifierSymbol = ({
+  exprId,
+  ctx,
+}: {
+  exprId: HirExprId;
+  ctx: CodegenContext;
+}): SymbolId | undefined => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (!expr) {
+    return undefined;
+  }
+  if (expr.exprKind === "identifier") {
+    return expr.symbol;
+  }
+  if (expr.exprKind !== "call" || expr.args.length !== 1) {
+    return undefined;
+  }
+  const callee = ctx.module.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return undefined;
+  }
+  const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+  if (
+    ctx.program.symbols.getIntrinsicName(calleeId) !== "~" &&
+    ctx.program.symbols.getName(calleeId) !== "~"
+  ) {
+    return undefined;
+  }
+  const inner = ctx.module.hir.expressions.get(expr.args[0]!.expr);
+  return inner?.exprKind === "identifier" ? inner.symbol : undefined;
+};
+
+const NON_REF_TYPES = new Set<number>([
+  binaryen.none,
+  binaryen.unreachable,
+  binaryen.i32,
+  binaryen.i64,
+  binaryen.f32,
+  binaryen.f64,
+]);
+
+const resolveContainerFieldValueExprId = ({
+  containerExprId,
+  fieldName,
+  ctx,
+}: {
+  containerExprId: HirExprId;
+  fieldName: string;
+  ctx: CodegenContext;
+}): HirExprId | undefined => {
+  const containerExpr = ctx.module.hir.expressions.get(containerExprId);
+  if (containerExpr?.exprKind !== "object-literal") {
+    return undefined;
+  }
+  const fieldEntry = containerExpr.entries.find(
+    (entry) => entry.kind === "field" && entry.name === fieldName,
+  );
+  return fieldEntry?.kind === "field" ? fieldEntry.value : undefined;
+};
+
+const tryCompileContainerFieldStorageRef = ({
+  containerExprId,
+  containerTypeId,
+  containerInfo,
+  field,
+  temp,
+  ctx,
+  fnCtx,
+}: {
+  containerExprId: HirExprId;
+  containerTypeId: TypeId;
+  containerInfo: NonNullable<ReturnType<typeof getStructuralTypeInfo>>;
+  field: NonNullable<ReturnType<typeof getStructuralTypeInfo>>["fields"][number];
+  temp: ReturnType<typeof allocateTempLocal>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef | undefined => {
+  const fieldStorageType = getInlineHeapBoxType({ typeId: field.typeId, ctx });
+  if (
+    typeof fieldStorageType !== "number" ||
+    field.heapWasmType !== fieldStorageType
+  ) {
+    return undefined;
+  }
+
+  const containerPointer = tryLoadContainerPointer({
+    containerExprId,
+    containerTypeId,
+    containerInfo,
+    temp,
+    ctx,
+    fnCtx,
+  });
+  if (!containerPointer) {
+    return undefined;
+  }
+  if (containerInfo.layoutKind === "value-object") {
+    return undefined;
+  }
+
+  return structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: field.runtimeIndex,
+    fieldType: field.heapWasmType,
+    exprRef: refCast(ctx.mod, containerPointer, containerInfo.runtimeType),
+  });
+};
+
+const tryLoadContainerPointer = ({
+  containerExprId,
+  containerTypeId,
+  containerInfo,
+  temp,
+  ctx,
+  fnCtx,
+}: {
+  containerExprId: HirExprId;
+  containerTypeId: TypeId;
+  containerInfo: NonNullable<ReturnType<typeof getStructuralTypeInfo>>;
+  temp: ReturnType<typeof allocateTempLocal>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef | undefined => {
+  const addressableSymbol = resolveAddressableIdentifierSymbol({
+    exprId: containerExprId,
+    ctx,
+  });
+  if (typeof addressableSymbol === "number") {
+    const binding = getRequiredBinding(addressableSymbol, ctx, fnCtx);
+    const storageRef = loadBindingStorageRef(binding, ctx);
+    if (storageRef) {
+      return storageRef;
+    }
+    const bindingValue = loadBindingValue(binding, ctx);
+    const bindingValueType = binaryen.getExpressionType(bindingValue);
+    if (
+      binaryen.expandType(bindingValueType).length === 1 &&
+      !NON_REF_TYPES.has(bindingValueType)
+    ) {
+      return bindingValue;
+    }
+  }
+
+  const tempValue = ctx.mod.local.get(temp.index, temp.storageType);
+  if (containerInfo.layoutKind === "value-object") {
+    const containerStorageType = getInlineHeapBoxType({
+      typeId: containerTypeId,
+      ctx,
+    });
+    return temp.storageType === containerStorageType ? tempValue : undefined;
+  }
+
+  return tempValue;
 };

@@ -4,14 +4,34 @@ order: 250
 
 # Unions
 
-Union types describe values that may be one of several nominal object variants.
+Union types describe values that may be one of several nominal object or value variants.
 
 ```voyd
 type Pet = Dog | Cat
 ```
 
-Union members are nominal object types. Structural object aliases, tuples, and
-intersections do not appear directly as union members.
+Union members are nominal object or value types. Structural object aliases,
+tuples, and intersections do not appear directly as union members.
+
+## Value unions
+
+Direct unions of value types are supported.
+
+```voyd
+val Left {
+  value: i32
+}
+
+val Right {
+  value: i32
+}
+
+type Side = Left | Right
+```
+
+If any direct union member is a `val` type, every direct union member must also
+be a `val` type. To mix value-like data with heap/object variants, wrap the
+value in an object first.
 
 ## Generic unions
 

@@ -3,11 +3,37 @@ import type {
   CodegenContext,
   FunctionContext,
   LocalBinding,
+  LocalBindingProjectedElement,
   LocalBindingLocal,
+  LocalBindingStorageRef,
   SymbolId,
 } from "./context.js";
-import { refCast, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
-import { getSymbolTypeId, wasmTypeFor } from "./types.js";
+import {
+  arrayGet,
+  refCast,
+  structGetFieldValue,
+} from "@voyd/lib/binaryen-gc/index.js";
+import {
+  liftHeapValueToInline,
+  lowerValueForHeapField,
+  storeValueIntoStorageRef,
+} from "./structural.js";
+import {
+  getFixedArrayWasmTypes,
+  getInlineHeapBoxType,
+  getSymbolTypeId,
+  getWideValueStorageType,
+  wasmHeapFieldTypeFor,
+  wasmTypeFor,
+} from "./types.js";
+import { coerceExprToWasmType } from "./wasm-type-coercions.js";
+import { captureMultivalueLanes } from "./multivalue.js";
+import {
+  boxSignatureSpillValue,
+  isSignatureSpillStorage,
+  signatureSpillStorageType,
+  unboxSignatureSpillValue,
+} from "./signature-spill.js";
 
 export const declareLocalWithTypeId = (
   symbol: SymbolId,
@@ -21,7 +47,7 @@ export const declareLocalWithTypeId = (
   }
 
   const wasmType = wasmTypeFor(typeId, ctx);
-  const binding = allocateTempLocal(wasmType, fnCtx, typeId);
+  const binding = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
   fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
   return binding;
 };
@@ -39,7 +65,7 @@ export const declareLocal = (
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typeId = getSymbolTypeId(symbol, ctx, typeInstanceId);
   const wasmType = wasmTypeFor(typeId, ctx);
-  const binding = allocateTempLocal(wasmType, fnCtx, typeId);
+  const binding = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
   fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
   return binding;
 };
@@ -65,25 +91,251 @@ export const getRequiredBinding = (
 export const allocateTempLocal = (
   type: binaryen.Type,
   fnCtx: FunctionContext,
-  typeId?: number
+  typeId?: number,
+  ctx?: CodegenContext
 ): LocalBindingLocal => {
+  const storageType =
+    typeof typeId === "number" && ctx && binaryen.expandType(type).length > 1
+      ? getInlineHeapBoxType({ typeId, ctx }) ??
+        signatureSpillStorageType({
+          typeId,
+          ctx,
+        })
+      : type;
   const binding: LocalBindingLocal = {
     kind: "local",
     index: fnCtx.nextLocalIndex,
     type,
+    storageType,
     typeId,
   };
   fnCtx.nextLocalIndex += 1;
-  fnCtx.locals.push(type);
+  fnCtx.locals.push(storageType);
   return binding;
+};
+
+export const allocateAddressableLocal = ({
+  typeId,
+  ctx,
+  fnCtx,
+}: {
+  typeId: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): LocalBindingLocal => {
+  const type = wasmTypeFor(typeId, ctx);
+  const inlineBoxType = getInlineHeapBoxType({ typeId, ctx });
+  const allocated = allocateTempLocal(type, fnCtx, typeId, ctx);
+  if (typeof inlineBoxType !== "number" || allocated.storageType !== type) {
+    return allocated;
+  }
+  fnCtx.locals[fnCtx.locals.length - 1] = inlineBoxType;
+  return {
+    ...allocated,
+    storageType: inlineBoxType,
+  };
+};
+
+export const createStorageRefBinding = ({
+  index,
+  typeId,
+  mutable,
+  ctx,
+}: {
+  index: number;
+  typeId: number;
+  mutable: boolean;
+  ctx: CodegenContext;
+}): LocalBindingStorageRef => {
+  const storageType = getInlineHeapBoxType({ typeId, ctx });
+  if (typeof storageType !== "number") {
+    throw new Error(`storage ref binding requires boxed inline storage for ${typeId}`);
+  }
+  return {
+    kind: "storage-ref",
+    index,
+    mutable,
+    type: wasmTypeFor(typeId, ctx),
+    storageType,
+    typeId,
+  };
+};
+
+export const loadLocalValue = (
+  binding: LocalBindingLocal,
+  ctx: CodegenContext
+): binaryen.ExpressionRef => {
+  const stored = ctx.mod.local.get(binding.index, binding.storageType);
+  if (
+    binding.storageType === binding.type ||
+    typeof binding.typeId !== "number"
+  ) {
+    return stored;
+  }
+  if (isSignatureSpillStorage({
+    typeId: binding.typeId,
+    storageType: binding.storageType,
+    ctx,
+  })) {
+    return unboxSignatureSpillValue({
+      value: stored,
+      typeId: binding.typeId,
+      ctx,
+    });
+  }
+  return liftHeapValueToInline({
+    value: stored,
+    typeId: binding.typeId,
+    ctx,
+  });
+};
+
+export const storeLocalValue = ({
+  binding,
+  value,
+  ctx,
+  fnCtx,
+}: {
+  binding: LocalBindingLocal;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  if (binaryen.expandType(binding.storageType).length > 1) {
+    const abiTypes = [...binaryen.expandType(binding.storageType)];
+    const captured = captureMultivalueLanes({
+      value: coerceExprToWasmType({
+        expr: value,
+        targetType: binding.storageType,
+        ctx,
+      }),
+      abiTypes,
+      ctx,
+      fnCtx,
+    });
+    const stabilized = ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]);
+    return captured.setup.length === 0
+      ? ctx.mod.local.set(binding.index, stabilized)
+      : ctx.mod.block(
+          null,
+          [...captured.setup, ctx.mod.local.set(binding.index, stabilized)],
+          binaryen.none,
+        );
+  }
+  if (
+    binding.storageType === binding.type ||
+    typeof binding.typeId !== "number"
+  ) {
+    return ctx.mod.local.set(
+      binding.index,
+      coerceExprToWasmType({
+        expr: value,
+        targetType: binding.storageType,
+        ctx,
+      }),
+    );
+  }
+  if (isSignatureSpillStorage({
+    typeId: binding.typeId,
+    storageType: binding.storageType,
+    ctx,
+  })) {
+    return ctx.mod.local.set(
+      binding.index,
+      boxSignatureSpillValue({
+        value,
+        typeId: binding.typeId,
+        ctx,
+        fnCtx,
+      }),
+    );
+  }
+  const stored = lowerValueForHeapField({
+    value,
+    typeId: binding.typeId,
+    targetType: binding.storageType,
+    ctx,
+    fnCtx,
+  });
+  return ctx.mod.local.set(binding.index, stored);
 };
 
 export const loadBindingValue = (
   binding: LocalBinding,
   ctx: CodegenContext
 ): binaryen.ExpressionRef => {
+  if (binding.kind === "storage-ref") {
+    return liftHeapValueToInline({
+      value: ctx.mod.local.get(binding.index, binding.storageType),
+      typeId: binding.typeId!,
+      ctx,
+    });
+  }
+  if (binding.kind === "projected-element-ref") {
+    return loadProjectedElementBindingValue(binding, ctx);
+  }
   if (binding.kind === "local") {
-    return ctx.mod.local.get(binding.index, binding.type);
+    return loadLocalValue(binding, ctx);
+  }
+  const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
+  const typedEnv =
+    binding.envType === binding.envSuperType
+      ? envRef
+      : refCast(ctx.mod, envRef, binding.envType);
+  const stored = structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: binding.fieldIndex,
+    fieldType: binding.storageType,
+    exprRef: typedEnv,
+  });
+  if (
+    binding.storageType === binding.type ||
+    typeof binding.typeId !== "number"
+  ) {
+    return stored;
+  }
+  if (isSignatureSpillStorage({
+    typeId: binding.typeId,
+    storageType: binding.storageType,
+    ctx,
+  })) {
+    return unboxSignatureSpillValue({
+      value: stored,
+      typeId: binding.typeId,
+      ctx,
+    });
+  }
+  return liftHeapValueToInline({
+    value: stored,
+    typeId: binding.typeId,
+    ctx,
+  });
+};
+
+export const loadBindingStorageRef = (
+  binding: LocalBinding,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef | undefined => {
+  if (binding.kind === "storage-ref") {
+    return ctx.mod.local.get(binding.index, binding.storageType);
+  }
+  if (binding.kind === "projected-element-ref") {
+    return loadProjectedElementBindingStorageRef(binding, ctx);
+  }
+  if (binding.kind === "local") {
+    if (
+      typeof binding.typeId !== "number" ||
+      binding.storageType !== getInlineHeapBoxType({ typeId: binding.typeId, ctx })
+    ) {
+      return undefined;
+    }
+    return ctx.mod.local.get(binding.index, binding.storageType);
+  }
+  if (
+    typeof binding.typeId !== "number" ||
+    binding.storageType !== getInlineHeapBoxType({ typeId: binding.typeId, ctx })
+  ) {
+    return undefined;
   }
   const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
   const typedEnv =
@@ -93,7 +345,174 @@ export const loadBindingValue = (
   return structGetFieldValue({
     mod: ctx.mod,
     fieldIndex: binding.fieldIndex,
-    fieldType: binding.type,
+    fieldType: binding.storageType,
     exprRef: typedEnv,
+  });
+};
+
+export const materializeOwnedBinding = ({
+  symbol,
+  ctx,
+  fnCtx,
+}: {
+  symbol: SymbolId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): {
+  binding: LocalBindingLocal;
+  setup: readonly binaryen.ExpressionRef[];
+} => {
+  const existing = getRequiredBinding(symbol, ctx, fnCtx);
+  if (existing.kind === "local") {
+    return { binding: existing, setup: [] };
+  }
+  if (existing.kind === "capture") {
+    throw new Error("cannot materialize capture binding into owned local storage");
+  }
+  const typeId = existing.typeId;
+  if (typeof typeId !== "number") {
+    throw new Error(`cannot materialize symbol ${symbol} without a concrete type`);
+  }
+  const owned = allocateTempLocal(existing.type, fnCtx, typeId, ctx);
+  const setup = [
+    storeLocalValue({
+      binding: owned,
+      value: loadBindingValue(existing, ctx),
+      ctx,
+      fnCtx,
+    }),
+  ];
+  fnCtx.bindings.set(symbol, {
+    ...owned,
+    kind: "local",
+    typeId,
+  });
+  return { binding: owned, setup };
+};
+
+export const loadProjectedElementBindingStorageRef = (
+  binding: LocalBindingProjectedElement,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef | undefined => {
+  const storageType = getWideValueStorageType({ typeId: binding.typeId!, ctx });
+  if (typeof storageType !== "number") {
+    return undefined;
+  }
+
+  const wasmTypes = getFixedArrayWasmTypes(binding.arrayTypeId, ctx);
+  if (wasmTypes.kind !== "plain-array") {
+    return undefined;
+  }
+
+  return arrayGet(
+    ctx.mod,
+    ctx.mod.local.get(binding.arrayIndex, wasmTypeFor(binding.arrayTypeId, ctx)),
+    ctx.mod.local.get(binding.indexIndex, binaryen.i32),
+    storageType,
+    false,
+  );
+};
+
+export const loadProjectedElementBindingValue = (
+  binding: LocalBindingProjectedElement,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  const arrayRef = () =>
+    ctx.mod.local.get(binding.arrayIndex, wasmTypeFor(binding.arrayTypeId, ctx));
+  const indexRef = () => ctx.mod.local.get(binding.indexIndex, binaryen.i32);
+  const wasmTypes = getFixedArrayWasmTypes(binding.arrayTypeId, ctx);
+
+  if (wasmTypes.kind === "inline-aggregate" && wasmTypes.laneTypes) {
+    const lanes = wasmTypes.laneTypes.map((laneType, laneIndex) =>
+      arrayGet(
+        ctx.mod,
+        fixedArrayLaneField({
+          array: arrayRef(),
+          wasmTypes,
+          laneIndex,
+          ctx,
+        }),
+        indexRef(),
+        laneType,
+        false,
+      ),
+    );
+    return makeInlineValue(lanes, ctx);
+  }
+
+  return liftHeapValueToInline({
+    value: arrayGet(
+      ctx.mod,
+      arrayRef(),
+      indexRef(),
+      wasmHeapFieldTypeFor(binding.typeId!, ctx, new Set(), "runtime"),
+      false,
+    ),
+    typeId: binding.typeId!,
+    ctx,
+  });
+};
+
+const fixedArrayLaneField = ({
+  array,
+  wasmTypes,
+  laneIndex,
+  ctx,
+}: {
+  array: binaryen.ExpressionRef;
+  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
+  laneIndex: number;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  if (
+    wasmTypes.kind !== "inline-aggregate" ||
+    !wasmTypes.laneArrayTypes?.[laneIndex]
+  ) {
+    throw new Error("inline aggregate fixed array metadata is missing lane arrays");
+  }
+  return structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: laneIndex + 1,
+    fieldType: wasmTypes.laneArrayTypes[laneIndex]!,
+    exprRef: array,
+  });
+};
+
+const makeInlineValue = (
+  values: readonly binaryen.ExpressionRef[],
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  if (values.length === 0) {
+    return ctx.mod.nop();
+  }
+  if (values.length === 1) {
+    return values[0]!;
+  }
+  return ctx.mod.tuple.make(values as binaryen.ExpressionRef[]);
+};
+
+export const storeStorageRefBindingValue = ({
+  binding,
+  value,
+  ctx,
+  fnCtx,
+}: {
+  binding: LocalBindingStorageRef;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  if (!binding.mutable) {
+    throw new Error("cannot store through a readonly storage ref binding");
+  }
+  if (typeof binding.typeId !== "number") {
+    throw new Error("storage ref binding is missing its type id");
+  }
+  return storeValueIntoStorageRef({
+    pointer: () => ctx.mod.local.get(binding.index, binding.storageType),
+    value,
+    typeId: binding.typeId,
+    ctx,
+    fnCtx,
   });
 };

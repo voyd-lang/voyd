@@ -2,13 +2,16 @@ import { createTypeCheckBudgetState, createTypingState } from "./typing/context.
 import type {
   CallArgumentPlanEntry,
   DependencySemantics,
+  ObjectTypeInfo,
   SymbolRefKey,
+  TraitImplInstance,
   TypingContext,
 } from "./typing/types.js";
 import {
   typeGenericFunctionBody,
   formatFunctionInstanceKey,
 } from "./typing/expressions/call.js";
+import { refreshTraitImplInstances } from "./typing/type-system.js";
 import { cloneNestedMap } from "./typing/call-resolution.js";
 import { createImportMaps } from "./typing/import-maps.js";
 import { createTypingContextFromTypingResult } from "./typing/context-from-typing-result.js";
@@ -57,6 +60,9 @@ export const monomorphizeProgram = ({
       callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
       callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
       callTraitDispatches: ReadonlySet<HirExprId>;
+      objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
+      traitImplsByNominal: ReadonlyMap<TypeId, readonly TraitImplInstance[]>;
+      traitImplsByTrait: ReadonlyMap<SymbolId, readonly TraitImplInstance[]>;
       valueTypes: ReadonlyMap<SymbolId, TypeId>;
     }
   >;
@@ -184,6 +190,7 @@ export const monomorphizeProgram = ({
         return true;
       case "trait":
       case "nominal-object":
+      case "value-object":
         return desc.typeArgs.some((arg) =>
           typeContainsUnknownPrimitive({ ctx, typeId: arg, seen }),
         );
@@ -576,6 +583,9 @@ export const monomorphizeProgram = ({
       callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
       callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
       callTraitDispatches: ReadonlySet<HirExprId>;
+      objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
+      traitImplsByNominal: ReadonlyMap<TypeId, readonly TraitImplInstance[]>;
+      traitImplsByTrait: ReadonlyMap<SymbolId, readonly TraitImplInstance[]>;
       valueTypes: ReadonlyMap<SymbolId, TypeId>;
     }
   >();
@@ -583,6 +593,7 @@ export const monomorphizeProgram = ({
   touchedModules.forEach((moduleId) => {
     const ctx = typingContexts.get(moduleId);
     if (!ctx) return;
+    refreshTraitImplInstances(ctx, createTypingState("relaxed"));
     moduleTyping.set(moduleId, {
       functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
       functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
@@ -592,6 +603,9 @@ export const monomorphizeProgram = ({
       callTypeArguments: cloneNestedMap(ctx.callResolution.typeArguments),
       callInstanceKeys: cloneNestedMap(ctx.callResolution.instanceKeys),
       callTraitDispatches: new Set(ctx.callResolution.traitDispatches),
+      objectsByNominal: ctx.objects.snapshotByNominal(),
+      traitImplsByNominal: new Map(ctx.traitImplsByNominal),
+      traitImplsByTrait: new Map(ctx.traitImplsByTrait),
       valueTypes: new Map(ctx.valueTypes),
     });
   });

@@ -22,7 +22,7 @@ export const bindObjectDecl = (
   rememberSyntax(decl.base, ctx);
   rememberSyntax(decl.body, ctx);
   reportInvalidTypeDeclarationName({
-    declarationKind: "obj",
+    declarationKind: decl.objectKind,
     name: decl.name,
     ctx,
   });
@@ -41,7 +41,7 @@ export const bindObjectDecl = (
     name: decl.name.value,
     kind: "type",
     declaredAt: decl.form.syntaxId,
-    metadata: { entity: "object", ...intrinsicTypeMetadata },
+    metadata: { entity: "object", objectKind: decl.objectKind, ...intrinsicTypeMetadata },
   });
 
   const objectScope = ctx.symbolTable.createScope({
@@ -92,6 +92,7 @@ export const bindObjectDecl = (
     name: decl.name.value,
     form: decl.form,
     visibility: decl.visibility,
+    objectKind: decl.objectKind,
     symbol,
     baseTypeExpr: decl.base,
     fields,

@@ -1,6 +1,6 @@
 import binaryen from "binaryen";
 import { initExtensionHelpers } from "@voyd/compiler/codegen/rtt/extension.js";
-import { defineStructType } from "@voyd/lib/binaryen-gc/index.js";
+import { binaryenTypeToHeapType, defineStructType } from "@voyd/lib/binaryen-gc/index.js";
 import {
   initFieldLookupHelpers,
   FieldLookupHelpers,
@@ -27,6 +27,7 @@ export type RttMetadataSlot =
   (typeof RTT_METADATA_SLOTS)[keyof typeof RTT_METADATA_SLOTS];
 
 export interface RttContext {
+  rootType: binaryen.Type;
   baseType: binaryen.Type;
   extensionHelpers: ReturnType<typeof initExtensionHelpers>;
   fieldLookupHelpers: FieldLookupHelpers;
@@ -37,6 +38,12 @@ export const createRttContext = (mod: binaryen.Module): RttContext => {
   const extensionHelpers = initExtensionHelpers(mod);
   const fieldLookupHelpers = initFieldLookupHelpers(mod);
   const methodLookupHelpers = initMethodLookupHelpers(mod);
+
+  const rootType = defineStructType(mod, {
+    name: "voydAnyObject",
+    fields: [],
+    final: false,
+  });
 
   const baseType = defineStructType(mod, {
     name: "voydBaseObject",
@@ -57,10 +64,12 @@ export const createRttContext = (mod: binaryen.Module): RttContext => {
         mutable: false,
       },
     ],
+    supertype: binaryenTypeToHeapType(rootType),
     final: false,
   });
 
   return {
+    rootType,
     baseType,
     extensionHelpers,
     fieldLookupHelpers,

@@ -20,6 +20,7 @@ import {
   compileTupleExpr,
 } from "./objects.js";
 import { compileLambdaExpr } from "./lambdas.js";
+import { tryCompileProjectedElementValueExpr } from "../projected-element-views.js";
 import {
   compileIdentifierExpr,
   compileLiteralExpr,
@@ -31,6 +32,8 @@ export const compileExpression: ExpressionCompiler = ({
   fnCtx,
   tailPosition = false,
   expectedResultTypeId,
+  preserveStorageRefs = false,
+  outResultStorageRef,
 }: ExpressionCompilerParams): CompiledExpression => {
   const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr) {
@@ -41,19 +44,49 @@ export const compileExpression: ExpressionCompiler = ({
     case "literal":
       return compileLiteralExpr(expr, ctx);
     case "identifier":
-      return compileIdentifierExpr(expr, ctx, fnCtx);
+      return compileIdentifierExpr(
+        expr,
+        ctx,
+        fnCtx,
+        expectedResultTypeId,
+        preserveStorageRefs,
+      );
     case "overload-set":
       throw new Error("overload sets cannot be evaluated directly");
-    case "call":
+    case "call": {
+      const projected = tryCompileProjectedElementValueExpr({
+        exprId,
+        ctx,
+        fnCtx,
+        compileExpr: compileExpression,
+        expectedResultTypeId,
+      });
+      if (projected) {
+        return projected;
+      }
       return compileCallExpr(expr, ctx, fnCtx, compileExpression, {
         tailPosition,
         expectedResultTypeId,
+        outResultStorageRef,
       });
-    case "method-call":
+    }
+    case "method-call": {
+      const projected = tryCompileProjectedElementValueExpr({
+        exprId,
+        ctx,
+        fnCtx,
+        compileExpr: compileExpression,
+        expectedResultTypeId,
+      });
+      if (projected) {
+        return projected;
+      }
       return compileMethodCallExpr(expr, ctx, fnCtx, compileExpression, {
         tailPosition,
         expectedResultTypeId,
+        outResultStorageRef,
       });
+    }
     case "block":
       return compileBlockExpr(
         expr,
@@ -61,7 +94,8 @@ export const compileExpression: ExpressionCompiler = ({
         fnCtx,
         compileExpression,
         tailPosition,
-        expectedResultTypeId
+        expectedResultTypeId,
+        outResultStorageRef,
       );
     case "if":
       return compileIfExpr(
@@ -70,7 +104,8 @@ export const compileExpression: ExpressionCompiler = ({
         fnCtx,
         compileExpression,
         tailPosition,
-        expectedResultTypeId
+        expectedResultTypeId,
+        outResultStorageRef,
       );
     case "match":
       return compileMatchExpr(
@@ -79,7 +114,8 @@ export const compileExpression: ExpressionCompiler = ({
         fnCtx,
         compileExpression,
         tailPosition,
-        expectedResultTypeId
+        expectedResultTypeId,
+        outResultStorageRef,
       );
     case "while":
       return compileWhileExpr(expr, ctx, fnCtx, compileExpression);
@@ -92,11 +128,25 @@ export const compileExpression: ExpressionCompiler = ({
     case "assign":
       return compileAssignExpr(expr, ctx, fnCtx, compileExpression);
     case "object-literal":
-      return compileObjectLiteralExpr(expr, ctx, fnCtx, compileExpression);
+      return compileObjectLiteralExpr(
+        expr,
+        ctx,
+        fnCtx,
+        compileExpression,
+        expectedResultTypeId,
+        outResultStorageRef,
+      );
     case "field-access":
       return compileFieldAccessExpr(expr, ctx, fnCtx, compileExpression);
     case "tuple":
-      return compileTupleExpr(expr, ctx, fnCtx, compileExpression);
+      return compileTupleExpr(
+        expr,
+        ctx,
+        fnCtx,
+        compileExpression,
+        expectedResultTypeId,
+        outResultStorageRef,
+      );
     case "lambda":
       return compileLambdaExpr(expr, ctx, fnCtx, compileExpression);
     case "effect-handler":

@@ -1,0 +1,589 @@
+use std::all
+use std::optional::all
+
+pub val Vec2 {
+  x: i32,
+  y: i32
+}
+
+pub val ScalarBox {
+  value: i32
+}
+
+impl ScalarBox
+  fn bump(~self) -> ScalarBox
+    self.value = self.value + 1
+    self
+
+pub val OptionalFieldBox {
+  value?: i32,
+  fallback: i32
+}
+
+pub val OptionalOnlyBox {
+  value?: i32
+}
+
+pub val WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+impl WideVec5
+  fn tail_sum(self) -> i32
+    self.b + self.e
+
+impl Vec2
+  fn set_x(~self, value: i32) -> Vec2
+    self.x = value
+    self
+
+pub trait SumX<T>
+  fn sum_x(self, other: T) -> i32
+
+impl SumX<Vec2> for Vec2
+  fn sum_x(self, other: Vec2) -> i32
+    self.x + other.x
+
+fn pair_sum<T: SumX<T>>(left: T, right: T) -> i32
+  left.sum_x(right)
+
+fn reflect_wide(value: WideVec5) -> WideVec5
+  value
+
+fn bump_wide_a(~value: WideVec5)
+  value.a = value.a + 10
+
+fn bump_scalar(~value: ScalarBox)
+  value.value = value.value + 1
+
+fn bump_scalar_labeled(amount: i32, { ~box: ScalarBox }) -> i32
+  box.value = box.value + amount
+  box.value
+
+fn wide_tail_sum(value: WideVec5) -> i32
+  value.b + value.e
+
+pub val Left {
+  value: i32
+}
+
+pub val Right {
+  value: i32
+}
+
+type ValueSide = Left | Right
+
+pub val ValueUnionBox {
+  side: ValueSide
+}
+
+fn choose(flag: bool) -> Left | Right
+  if flag then:
+    Left { value: 7 }
+  else:
+    Right { value: 9 }
+
+fn choose_side(flag: bool) -> ValueSide
+  choose(flag)
+
+pub obj Box {
+  point: Vec2
+}
+
+pub obj HeapCell {
+  value: i32
+}
+
+impl HeapCell
+  fn read(self) -> i32
+    self.value
+
+pub val HeapHolder {
+  cell: HeapCell
+}
+
+obj Counter {
+  current: i32
+}
+
+impl Counter
+  fn init() -> Counter
+    Counter { current: 0 }
+
+  fn next(~self) -> Option<i32>
+    let value = self.current
+    self.current = self.current + 1
+    Some<i32> { value }
+
+pub fn value_copy_semantics() -> i32
+  let ~a = Vec2 { x: 1, y: 2 }
+  let b = a
+  a.set_x(99)
+  b.x
+
+pub fn value_narrow_mutable_param() -> i32
+  let ~point = Vec2 { x: 1, y: 2 }
+  point.set_x(99)
+  point.x
+
+pub fn value_static_trait_dispatch() -> i32
+  pair_sum(Vec2 { x: 3, y: 0 }, Vec2 { x: 4, y: 0 })
+
+pub fn value_match() -> i32
+  match(choose(true))
+    Left { value }: value
+    Right { value }: value + 100
+
+pub fn value_union_alias_match() -> i32
+  match(choose_side(true))
+    Left { value }: value
+    Right { value }: value + 100
+
+pub fn value_union_field_round_trip() -> i32
+  let box = ValueUnionBox { side: choose(false) }
+  match(box.side)
+    Left { value }: value
+    Right { value }: value
+
+pub fn value_inside_object() -> i32
+  let box = Box { point: Vec2 { x: 6, y: 8 } }
+  box.point.y
+
+pub fn optional_binding_evaluates_once() -> i32
+  let ~counter = Counter()
+  let result = counter.next()
+  counter.current
+
+pub fn value_array_storage() -> i32
+  let ~items = Array<Vec2>::with_capacity(2)
+  items.push(Vec2 { x: 3, y: 4 })
+  items.push(Vec2 { x: 5, y: 6 })
+  let first = items.at(0)
+  first.x + items.at(1).y
+
+pub fn value_array_resize_copy() -> i32
+  let ~items = Array<Vec2>::with_capacity(1)
+  items.push(Vec2 { x: 2, y: 3 })
+  items.push(Vec2 { x: 4, y: 5 })
+  let first = items.at(0)
+  first.y + items.at(1).x
+
+pub fn value_single_lane_array_storage() -> i32
+  let ~items = Array<ScalarBox>::with_capacity(1)
+  items.push(ScalarBox { value: 3 })
+  items.push(ScalarBox { value: 4 })
+  items.at(0).value + items.at(1).value
+
+pub fn value_single_lane_mutable_param() -> i32
+  let ~box = ScalarBox { value: 3 }
+  bump_scalar(box)
+  box.value
+
+pub fn value_single_lane_mutable_receiver() -> i32
+  let ~box = ScalarBox { value: 3 }
+  box.bump()
+  box.value
+
+pub fn value_single_lane_labeled_mutable_param() -> i32
+  let ~box = ScalarBox { value: 3 }
+  let next = bump_scalar_labeled(2, { box })
+  box.value + next
+
+pub fn value_optional_field() -> i32
+  let with_value = OptionalOnlyBox { value: 5 }
+  let without_value = OptionalOnlyBox {}
+  unwrap_or(with_value.value, 0) + unwrap_or(without_value.value, 0)
+
+pub fn value_optional_field_some_match() -> i32
+  let with_value = OptionalOnlyBox { value: 5 }
+  match(with_value.value)
+    Some { value }: value
+    None: 0
+
+pub fn value_optional_field_none_match() -> i32
+  let without_value = OptionalOnlyBox {}
+  match(without_value.value)
+    Some { value }: value
+    None: 0
+
+pub fn value_contains_heap_reference() -> i32
+  let cell = HeapCell { value: 9 }
+  let holder = HeapHolder { cell }
+  holder.cell.read()
+
+pub fn value_five_lane_round_trip() -> i32
+  let wide = reflect_wide(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  wide.a + wide.b + wide.c + wide.d + wide.e
+
+pub fn value_five_lane_mutable_param() -> i32
+  let ~wide = WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  }
+  bump_wide_a(wide)
+  wide.a
+
+pub fn value_five_lane_alias_then_mutate_copy() -> i32
+  let wide = WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  }
+  let alias = wide
+  let ~local = wide
+  local.a = 9
+  alias.a + local.a
+
+pub fn value_wide_array_field_access() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  items.at(0).b + items.at(1).e
+
+pub fn value_wide_array_local_view_access() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  let value = items.at(1)
+  value.e + value.b
+
+pub fn value_wide_array_local_view_survives_readonly_alias_access() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  let alias = items
+  let value = items.at(1)
+  value.e + alias.len()
+
+pub fn value_wide_array_local_view_survives_readonly_assignment_alias() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  var alias = Array<WideVec5>::with_capacity(0)
+  let value = items.at(1)
+  alias = items
+  value.e + alias.len()
+
+pub fn value_wide_array_local_view_survives_nested_assignment_alias() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  var alias = Array<WideVec5>::with_capacity(0)
+  let value = items.at(1)
+  if true:
+    alias = items
+  value.e + alias.len()
+
+pub fn value_wide_array_local_materializes_for_mut_param() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let value = items.at(0)
+  bump_wide_a(~value)
+  value.a + items.at(0).a
+
+pub fn value_wide_array_local_materializes_before_root_mutation() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let value = items.at(0)
+  items.replace(0, with: WideVec5 {
+    a: 9,
+    b: 10,
+    c: 11,
+    d: 12,
+    e: 13
+  })
+  value.a + items.at(0).a
+
+pub fn value_wide_array_local_materializes_before_alias_mutation() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let ~alias = items
+  let value = items.at(0)
+  alias.replace(0, with: WideVec5 {
+    a: 9,
+    b: 10,
+    c: 11,
+    d: 12,
+    e: 13
+  })
+  value.a + items.at(0).a
+
+pub fn value_wide_array_local_materializes_before_nested_alias_mutation() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let ~alias = items
+  let value = items.at(0)
+  if true:
+    let ~nested = alias
+    nested.replace(0, with: WideVec5 {
+      a: 9,
+      b: 10,
+      c: 11,
+      d: 12,
+      e: 13
+    })
+  value.a + items.at(0).a
+
+fn copy_first_wide(items: Array<WideVec5>) -> WideVec5
+  let value = items.at(0)
+  value
+
+pub fn value_wide_array_local_materializes_for_return() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let ~copy = copy_first_wide(items)
+  copy.a = copy.a + 10
+  copy.a + items.at(0).a
+
+pub fn value_wide_array_non_mut_call() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  wide_tail_sum(items.at(1))
+
+pub fn value_wide_array_non_mut_method_call() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  let value = items.at(1)
+  value.tail_sum()
+
+pub fn value_wide_array_direct_non_mut_method_call() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  items.at(1).tail_sum()
+
+pub fn value_wide_array_get_immediate_payload() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  match(items.get(1))
+    Some<WideVec5> { value }:
+      value.tail_sum()
+    None:
+      -1
+
+pub fn value_wide_array_get_immediate_payload_survives_readonly_alias_access() -> i32
+  let ~items = Array<WideVec5>::with_capacity(2)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  items.push(WideVec5 {
+    a: 6,
+    b: 7,
+    c: 8,
+    d: 9,
+    e: 10
+  })
+  let alias = items
+  match(items.get(1))
+    Some<WideVec5> { value }:
+      value.e + alias.len()
+    None:
+      -1
+
+pub fn value_wide_array_get_immediate_payload_materializes_before_alias_mutation() -> i32
+  let ~items = Array<WideVec5>::with_capacity(1)
+  items.push(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  let ~alias = items
+  match(items.get(0))
+    Some<WideVec5> { value }:
+      alias.replace(0, with: WideVec5 {
+        a: 9,
+        b: 10,
+        c: 11,
+        d: 12,
+        e: 13
+      })
+      value.a + items.at(0).a
+    None:
+      -1
+
+pub fn value_five_lane_closure_round_trip() -> i32
+  let reflect = (value: WideVec5) -> WideVec5 =>
+    value
+  let wide = reflect(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+  wide.a + wide.b + wide.c + wide.d + wide.e
+
+pub fn value_five_lane_closure_capture() -> i32
+  let wide = WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  }
+  let reflect = () -> WideVec5 =>
+    wide
+  let result = reflect()
+  result.a + result.b + result.c + result.d + result.e

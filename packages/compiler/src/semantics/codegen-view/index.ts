@@ -1,4 +1,9 @@
-import type { HirGraph, HirEffectHandlerClause, HirVisibility } from "../hir/index.js";
+import type {
+  HirBindingKind,
+  HirEffectHandlerClause,
+  HirGraph,
+  HirVisibility,
+} from "../hir/index.js";
 import type { EffectInterner } from "../effects/effect-table.js";
 import type { EffectTable } from "../effects/effect-table.js";
 import type {
@@ -66,6 +71,7 @@ export type CodegenTypeDesc =
   | { kind: "recursive"; binder: TypeParamId; body: TypeId }
   | { kind: "trait"; owner: ProgramSymbolId; name?: string; typeArgs: readonly TypeId[] }
   | { kind: "nominal-object"; owner: ProgramSymbolId; name?: string; typeArgs: readonly TypeId[] }
+  | { kind: "value-object"; owner: ProgramSymbolId; name?: string; typeArgs: readonly TypeId[] }
   | { kind: "structural-object"; fields: readonly CodegenStructuralField[] }
   | { kind: "function"; parameters: readonly CodegenFunctionParameter[]; returnType: TypeId; effectRow: number }
   | { kind: "union"; members: readonly TypeId[] }
@@ -142,6 +148,7 @@ export type CodegenFunctionSignature = {
     optional: boolean;
     name?: string;
     symbol?: SymbolId;
+    bindingKind?: HirBindingKind;
   }[];
   returnType: TypeId;
   effectRow: number;
@@ -322,6 +329,7 @@ export type ProgramCodegenView = {
 
 export type CodegenObjectTemplate = {
   symbol: ProgramSymbolId;
+  objectKind: "obj" | "value";
   params: readonly { symbol: SymbolId; typeParam: TypeParamId; constraint?: TypeId }[];
   nominal: TypeId;
   structural: TypeId;
@@ -332,6 +340,7 @@ export type CodegenObjectTemplate = {
 };
 
 export type CodegenObjectTypeInfo = {
+  objectKind: "obj" | "value";
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
@@ -395,6 +404,9 @@ export const buildProgramCodegenView = (
         >;
         callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
         callTraitDispatches: ReadonlySet<HirExprId>;
+        objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
+        traitImplsByNominal: ReadonlyMap<TypeId, readonly TraitImplInstance[]>;
+        traitImplsByTrait: ReadonlyMap<SymbolId, readonly TraitImplInstance[]>;
         valueTypes: ReadonlyMap<SymbolId, TypeId>;
       }
     >;
@@ -555,6 +567,7 @@ export const buildProgramCodegenView = (
         return typeContainsUnknownPrimitive(desc.body, seen);
       case "trait":
       case "nominal-object":
+      case "value-object":
         return desc.typeArgs.some((arg) => typeContainsUnknownPrimitive(arg, seen));
       case "fixed-array":
         return typeContainsUnknownPrimitive(desc.element, seen);
@@ -639,6 +652,13 @@ export const buildProgramCodegenView = (
       case "nominal-object":
         return cacheTypeDesc(typeId, {
           kind: "nominal-object",
+          owner: symbols.idOf(toSymbolRef(desc.owner)),
+          name: desc.name,
+          typeArgs: [...desc.typeArgs],
+        });
+      case "value-object":
+        return cacheTypeDesc(typeId, {
+          kind: "value-object",
           owner: symbols.idOf(toSymbolRef(desc.owner)),
           name: desc.name,
           typeArgs: [...desc.typeArgs],
@@ -764,6 +784,7 @@ export const buildProgramCodegenView = (
     symbol: ProgramSymbolId;
   }): CodegenObjectTemplate => ({
     symbol,
+    objectKind: template.objectKind,
     params: template.params.map((param) => ({
       symbol: param.symbol,
       typeParam: param.typeParam,
@@ -784,6 +805,7 @@ export const buildProgramCodegenView = (
     info: ObjectTypeInfo;
     traitImpls?: readonly CodegenTraitImplInstance[];
   }): CodegenObjectTypeInfo => ({
+    objectKind: info.objectKind,
     nominal: info.nominal,
     structural: info.structural,
     type: info.type,
@@ -952,9 +974,12 @@ export const buildProgramCodegenView = (
       }
     }
 
-    mod.typing.objectsByNominal.forEach((info, nominal) => {
+    const objectInfos =
+      moduleTyping.get(mod.moduleId)?.objectsByNominal ??
+      mod.typing.objects.snapshotByNominal();
+    objectInfos.forEach((info, nominal) => {
       const desc = arena.get(nominal);
-      if (desc.kind !== "nominal-object") {
+      if (desc.kind !== "nominal-object" && desc.kind !== "value-object") {
         return;
       }
 
@@ -977,13 +1002,19 @@ export const buildProgramCodegenView = (
       );
     });
 
-    mod.typing.traitImplsByNominal.forEach((impls, nominal) => {
+    const traitImplsForNominal =
+      moduleTyping.get(mod.moduleId)?.traitImplsByNominal ??
+      mod.typing.traitImplsByNominal;
+    traitImplsForNominal.forEach((impls, nominal) => {
       const bucket = traitImplsByNominal.get(nominal) ?? [];
       bucket.push(...impls.map((impl) => toCodegenTraitImplInstanceForModule(impl, mod.moduleId)));
       traitImplsByNominal.set(nominal, bucket);
     });
 
-    mod.typing.traitImplsByTrait.forEach((impls, traitSymbol) => {
+    const traitImplsForTrait =
+      moduleTyping.get(mod.moduleId)?.traitImplsByTrait ??
+      mod.typing.traitImplsByTrait;
+    traitImplsForTrait.forEach((impls, traitSymbol) => {
       const traitSymbolId = canonicalProgramSymbolIdOf(mod.moduleId, traitSymbol);
       const bucket = traitImplsByTrait.get(traitSymbolId) ?? [];
       bucket.push(...impls.map((impl) => toCodegenTraitImplInstanceForModule(impl, mod.moduleId)));
@@ -1537,7 +1568,9 @@ export const buildProgramCodegenView = (
     substitute: (typeId, subst) => arena.substitute(typeId, subst),
     getNominalOwner: (typeId) => {
       const desc = arena.get(typeId);
-      return desc.kind === "nominal-object" ? symbols.idOf(toSymbolRef(desc.owner)) : undefined;
+      return desc.kind === "nominal-object" || desc.kind === "value-object"
+        ? symbols.idOf(toSymbolRef(desc.owner))
+        : undefined;
     },
     getNominalAncestry: (typeId) => {
       const seen = new Set<TypeId>();
@@ -1546,7 +1579,7 @@ export const buildProgramCodegenView = (
       while (typeof current === "number" && !seen.has(current)) {
         seen.add(current);
         const desc = arena.get(current);
-        if (desc.kind !== "nominal-object") {
+        if (desc.kind !== "nominal-object" && desc.kind !== "value-object") {
           break;
         }
         const info = objectInfoByNominal.get(current);
@@ -1653,6 +1686,7 @@ export const buildProgramCodegenView = (
           optional: param.optional === true,
           name: param.name,
           symbol: param.symbol,
+          bindingKind: param.bindingKind,
         })),
         returnType: signature.returnType,
         effectRow: signature.effectRow,

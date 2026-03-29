@@ -15,7 +15,7 @@ import type {
   TypeId,
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
-import { getExprBinaryenType, getRequiredExprType, wasmTypeFor } from "../../types.js";
+import { getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { compileCallExpr, compileMethodCallExpr } from "../../expressions/call/index.js";
 import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
 import {
@@ -44,6 +44,37 @@ import {
 } from "../../expressions/contains.js";
 import { unboxOutcomeValue } from "../outcome-values.js";
 import { coerceToBinaryenType } from "../../expressions/utils.js";
+import { coerceValueToType } from "../../structural.js";
+
+const coerceDirectContinuationResult = ({
+  value,
+  valueExprId,
+  targetExprId,
+  expectedResultTypeId,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  valueExprId: HirExprId;
+  targetExprId: HirExprId;
+  expectedResultTypeId?: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const targetTypeId =
+    expectedResultTypeId ?? getRequiredExprType(targetExprId, ctx, typeInstanceId);
+  const targetType = wasmTypeFor(targetTypeId, ctx);
+  const actualTypeId = getRequiredExprType(valueExprId, ctx, typeInstanceId);
+  const coerced = coerceValueToType({
+    value,
+    actualType: actualTypeId,
+    targetType: targetTypeId,
+    ctx,
+    fnCtx,
+  });
+  return coerceToBinaryenType(ctx, coerced, targetType, fnCtx);
+};
 
 const compileContinuationBlockExpr = ({
   expr,
@@ -67,7 +98,9 @@ const compileContinuationBlockExpr = ({
   }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const resultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultType = wasmTypeFor(resultTypeId, ctx);
   const statements: binaryen.ExpressionRef[] = [];
   let foundResume = false;
 
@@ -101,7 +134,14 @@ const compileContinuationBlockExpr = ({
     tailPosition,
     expectedResultTypeId,
   });
-  const coercedValue = coerceToBinaryenType(ctx, valueExpr, resultType);
+  const coercedValue = coerceDirectContinuationResult({
+    value: valueExpr,
+    valueExprId: expr.value,
+    targetExprId: expr.id,
+    expectedResultTypeId,
+    ctx,
+    fnCtx,
+  });
 
   if (statements.length === 0) {
     return { expr: coercedValue, usedReturnCall };
@@ -131,8 +171,6 @@ const compileContinuationIfExpr = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   if (!resumeTarget) {
     return compileIfExpr(expr, ctx, fnCtx, compileExpr, tailPosition, expectedResultTypeId);
   }
@@ -151,7 +189,14 @@ const compileContinuationIfExpr = ({
       expectedResultTypeId,
     });
     return {
-      expr: coerceToBinaryenType(ctx, branchExpr.expr, resultType),
+      expr: coerceDirectContinuationResult({
+        value: branchExpr.expr,
+        valueExprId: branchWithTarget.value,
+        targetExprId: expr.id,
+        expectedResultTypeId,
+        ctx,
+        fnCtx,
+      }),
       usedReturnCall: branchExpr.usedReturnCall,
     };
   }
@@ -168,7 +213,14 @@ const compileContinuationIfExpr = ({
       expectedResultTypeId,
     });
     return {
-      expr: coerceToBinaryenType(ctx, defaultExpr.expr, resultType),
+      expr: coerceDirectContinuationResult({
+        value: defaultExpr.expr,
+        valueExprId: expr.defaultBranch,
+        targetExprId: expr.id,
+        expectedResultTypeId,
+        ctx,
+        fnCtx,
+      }),
       usedReturnCall: defaultExpr.usedReturnCall,
     };
   }
@@ -193,8 +245,6 @@ const compileContinuationMatchExpr = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   if (!resumeTarget) {
     return compileMatchExpr(expr, ctx, fnCtx, compileExpr, tailPosition, expectedResultTypeId);
   }
@@ -209,7 +259,14 @@ const compileContinuationMatchExpr = ({
       expectedResultTypeId,
     });
     return {
-      expr: coerceToBinaryenType(ctx, armExpr.expr, resultType),
+      expr: coerceDirectContinuationResult({
+        value: armExpr.expr,
+        valueExprId: armWithTarget.value,
+        targetExprId: expr.id,
+        expectedResultTypeId,
+        ctx,
+        fnCtx,
+      }),
       usedReturnCall: armExpr.usedReturnCall,
     };
   }
@@ -410,11 +467,23 @@ export const createContinuationExpressionCompiler = ({
       case "continue":
         return compileContinueExpr(expr, ctx, fnCtx);
       case "object-literal":
-        return compileObjectLiteralExpr(expr, ctx, fnCtx, compileExpr);
+        return compileObjectLiteralExpr(
+          expr,
+          ctx,
+          fnCtx,
+          compileExpr,
+          expectedResultTypeId,
+        );
       case "field-access":
         return compileFieldAccessExpr(expr, ctx, fnCtx, compileExpr);
       case "tuple":
-        return compileTupleExpr(expr, ctx, fnCtx, compileExpr);
+        return compileTupleExpr(
+          expr,
+          ctx,
+          fnCtx,
+          compileExpr,
+          expectedResultTypeId,
+        );
       case "lambda":
         return compileLambdaExpr(expr, ctx, fnCtx, compileExpr);
       case "effect-handler":

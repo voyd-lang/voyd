@@ -18,6 +18,7 @@ import type {
   HirLambdaExpr,
   HirCondExpr,
   HirEffectHandlerExpr,
+  HirBindingKind,
 } from "../semantics/hir/index.js";
 import type {
   HirExprId,
@@ -72,15 +73,23 @@ export interface FunctionMetadata {
   symbol: SymbolId;
   wasmName: string;
   paramTypes: readonly binaryen.Type[];
+  paramAbiTypes: readonly (readonly binaryen.Type[])[];
+  userParamOffset: number;
+  firstUserParamIndex: number;
   resultType: binaryen.Type;
+  resultAbiTypes: readonly binaryen.Type[];
   paramTypeIds: readonly TypeId[];
   parameters: readonly {
     typeId: TypeId;
     label?: string;
     optional?: boolean;
     name?: string;
+    bindingKind?: HirBindingKind;
   }[];
+  paramAbiKinds: readonly OptimizedValueAbiKind[];
   resultTypeId: TypeId;
+  resultAbiKind: OptimizedValueAbiKind;
+  outParamType?: binaryen.Type;
   typeArgs: readonly TypeId[];
   instanceId: ProgramFunctionInstanceId;
   effectful: boolean;
@@ -99,6 +108,9 @@ export interface StructuralFieldInfo {
   name: string;
   typeId: TypeId;
   wasmType: binaryen.Type;
+  inlineWasmTypes: readonly binaryen.Type[];
+  inlineStart: number;
+  inlineArity: number;
   heapWasmType: binaryen.Type;
   runtimeIndex: number;
   optional?: boolean;
@@ -109,6 +121,7 @@ export interface StructuralFieldInfo {
 
 export interface StructuralTypeInfo {
   typeId: TypeId;
+  layoutKind: "heap-object" | "value-object";
   runtimeTypeId: number;
   structuralId: TypeId;
   nominalId?: TypeId;
@@ -117,9 +130,9 @@ export interface StructuralTypeInfo {
   interfaceType: binaryen.Type;
   fields: StructuralFieldInfo[];
   fieldMap: Map<string, StructuralFieldInfo>;
-  ancestorsGlobal: string;
-  fieldTableGlobal: string;
-  methodTableGlobal: string;
+  ancestorsGlobal?: string;
+  fieldTableGlobal?: string;
+  methodTableGlobal?: string;
   typeLabel: string;
 }
 
@@ -135,8 +148,11 @@ export type RuntimeTypeIdState = {
 };
 
 export interface FixedArrayWasmType {
+  kind: "plain-array" | "inline-aggregate";
   type: binaryen.Type;
   heapType: HeapTypeRef;
+  laneTypes?: readonly binaryen.Type[];
+  laneArrayTypes?: readonly binaryen.Type[];
 }
 
 export interface ClosureTypeInfo {
@@ -145,7 +161,10 @@ export interface ClosureTypeInfo {
   interfaceType: binaryen.Type;
   fnRefType: binaryen.Type;
   paramTypes: readonly binaryen.Type[];
+  paramAbiTypes: readonly (readonly binaryen.Type[])[];
+  userParamOffset: number;
   resultType: binaryen.Type;
+  resultAbiTypes: readonly binaryen.Type[];
 }
 
 export interface ActiveRecursiveHeapTypeGroup {
@@ -169,8 +188,10 @@ export interface CodegenContext {
   itemsToSymbols: Map<HirItemId, { moduleId: string; symbol: SymbolId }>;
   structTypes: Map<string, StructuralTypeInfo>;
   structHeapTypes: Map<TypeId, binaryen.Type>;
+  abiBoxTypes: Map<string, binaryen.Type>;
   structuralIdCache: Map<TypeId, TypeId | null>;
   resolvingStructuralIds: Set<TypeId>;
+  resolvingStructuralHeapTypes: Set<TypeId>;
   activeRecursiveHeapTypeGroup?: ActiveRecursiveHeapTypeGroup;
   fixedArrayTypes: Map<number, FixedArrayWasmType>;
   closureTypes: Map<string, ClosureTypeInfo>;
@@ -186,6 +207,7 @@ export interface CodegenContext {
         symbol: SymbolId;
         typeId: TypeId;
         wasmType: binaryen.Type;
+        storageType: binaryen.Type;
         mutable: boolean;
         fieldIndex: number;
       }[];
@@ -205,8 +227,15 @@ export interface CodegenContext {
 
 export interface LocalBindingBase {
   type: binaryen.Type;
+  storageType: binaryen.Type;
   typeId?: TypeId;
 }
+
+export type OptimizedValueAbiKind =
+  | "direct"
+  | "readonly_ref"
+  | "mutable_ref"
+  | "out_ref";
 
 export interface LocalBindingLocal extends LocalBindingBase {
   kind: "local";
@@ -223,7 +252,24 @@ export interface LocalBindingCapture extends LocalBindingBase {
   mutable: boolean;
 }
 
-export type LocalBinding = LocalBindingLocal | LocalBindingCapture;
+export interface LocalBindingStorageRef extends LocalBindingBase {
+  kind: "storage-ref";
+  index: number;
+  mutable: boolean;
+}
+
+export interface LocalBindingProjectedElement extends LocalBindingBase {
+  kind: "projected-element-ref";
+  arrayIndex: number;
+  indexIndex: number;
+  arrayTypeId: TypeId;
+}
+
+export type LocalBinding =
+  | LocalBindingLocal
+  | LocalBindingCapture
+  | LocalBindingStorageRef
+  | LocalBindingProjectedElement;
 
 export interface HandlerScope {
   prevHandler: LocalBindingLocal;
@@ -252,9 +298,13 @@ export interface FunctionContext {
   nextControlFlowLabelId?: number;
   returnTypeId: TypeId;
   returnWasmType?: binaryen.Type;
+  returnAbiKind?: OptimizedValueAbiKind;
+  returnOutPointer?: LocalBindingStorageRef;
   currentHandler?: { index: number; type: binaryen.Type };
   instanceId?: ProgramFunctionInstanceId;
   typeInstanceId?: ProgramFunctionInstanceId;
+  simpleIdentifierAliases?: ReadonlyMap<SymbolId, ReadonlySet<SymbolId>>;
+  nonBorrowableProjectedSymbols?: ReadonlySet<SymbolId>;
   effectful: boolean;
   handlerStack?: HandlerScope[];
   loopStack?: LoopScope[];
@@ -269,12 +319,14 @@ export interface FunctionContext {
 export interface CompiledExpression {
   expr: binaryen.ExpressionRef;
   usedReturnCall: boolean;
+  usedOutResultStorageRef?: boolean;
 }
 
 export interface CompileCallOptions {
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
   typeInstanceId?: ProgramFunctionInstanceId;
+  outResultStorageRef?: binaryen.ExpressionRef;
 }
 
 export interface ExpressionCompilerParams {
@@ -283,6 +335,8 @@ export interface ExpressionCompilerParams {
   fnCtx: FunctionContext;
   tailPosition?: boolean;
   expectedResultTypeId?: TypeId;
+  preserveStorageRefs?: boolean;
+  outResultStorageRef?: binaryen.ExpressionRef;
 }
 
 export type ExpressionCompiler = (

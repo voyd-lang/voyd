@@ -43,4 +43,13 @@ describe("smoke: range for loops", () => {
     });
     expect(output).toBe(1);
   });
+
+  it("keeps handled tail effects working inside for loops after host seeding", async () => {
+    const output = await compiled.run<number>({
+      entryName: "range_for_handles_tail_effects_after_host_seed",
+    });
+
+    expect(output).toBeGreaterThanOrEqual(0);
+    expect(output).toBeLessThan(32);
+  });
 });

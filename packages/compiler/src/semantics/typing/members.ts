@@ -15,7 +15,7 @@ const ownerSymbolFromType = (
     return undefined;
   }
   const desc = ctx.arena.get(nominal);
-  if (desc.kind !== "nominal-object") {
+  if (desc.kind !== "nominal-object" && desc.kind !== "value-object") {
     return undefined;
   }
   return localSymbolForSymbolRef(desc.owner, ctx);

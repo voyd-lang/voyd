@@ -1,0 +1,8 @@
+pub val ScalarBox {
+  value: i32
+}
+
+pub type ScalarBoxes = FixedArray<ScalarBox>
+
+pub fn main() -> i32
+  0

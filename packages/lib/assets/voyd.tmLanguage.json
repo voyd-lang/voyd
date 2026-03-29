@@ -186,7 +186,7 @@
         },
         {
           "name": "storage.type.voyd",
-          "match": "\\b(fn|type|obj|trait|union|let|var|global|macro|eff)\\b"
+          "match": "\\b(fn|type|obj|val|trait|union|let|var|global|macro|eff)\\b"
         },
         {
           "name": "entity.name.type.voyd",

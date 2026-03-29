@@ -10,6 +10,11 @@ obj Some<T> { value: T }
 obj None {}
 pub type Optional<T> = Some<T> | None
 
+pub val Vec2 {
+  x: i32,
+  y: i32
+}
+
 fn normalize_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
 
@@ -170,6 +175,79 @@ pub fn iterate_sum() -> i32
         acc = acc
     index = index + 1
   acc
+
+pub fn value_set_get() -> i32
+  var arr = new_fixed_array<Vec2>(2)
+  arr = arr.set<Vec2>(0, Vec2 { x: 3, y: 4 })
+  arr = arr.set<Vec2>(1, Vec2 { x: 5, y: 6 })
+  let first = arr.get<Vec2>(0)
+  let second = arr.get<Vec2>(1)
+  match(first)
+    Some<Vec2> { value: left }:
+      match(second)
+        Some<Vec2> { value: right }:
+          left.x + right.y
+        None:
+          -200
+    None:
+      -100
+
+pub fn value_direct_get() -> i32
+  var arr = new_fixed_array<Vec2>(2)
+  arr = arr.set<Vec2>(0, Vec2 { x: 3, y: 4 })
+  arr = arr.set<Vec2>(1, Vec2 { x: 5, y: 6 })
+  let first = __array_get(arr, 0)
+  let second = __array_get(arr, 1)
+  first.x + second.y
+
+pub fn value_direct_get_single() -> i32
+  var arr = new_fixed_array<Vec2>(1)
+  arr = arr.set<Vec2>(0, Vec2 { x: 3, y: 4 })
+  let only = __array_get(arr, 0)
+  only.x + only.y
+
+pub fn value_optional_destructure_single() -> i32
+  var arr = new_fixed_array<Vec2>(1)
+  arr = arr.set<Vec2>(0, Vec2 { x: 3, y: 4 })
+  let only = arr.get<Vec2>(0)
+  match(only)
+    Some<Vec2> { value: vec }:
+      vec.x + vec.y
+    None:
+      -100
+
+pub fn value_length_after_set() -> i32
+  var arr = new_fixed_array<Vec2>(2)
+  arr = arr.set<Vec2>(0, Vec2 { x: 3, y: 4 })
+  arr = arr.set<Vec2>(1, Vec2 { x: 5, y: 6 })
+  arr.length<Vec2>()
+
+pub fn value_copy_clamps() -> i32
+  var dest = new_fixed_array<Vec2>(2)
+  var src = new_fixed_array<Vec2>(2)
+  dest = dest.set<Vec2>(0, Vec2 { x: 1, y: 2 })
+  dest = dest.set<Vec2>(1, Vec2 { x: 3, y: 4 })
+  src = src.set<Vec2>(0, Vec2 { x: 5, y: 6 })
+  src = src.set<Vec2>(1, Vec2 { x: 7, y: 8 })
+  dest = dest.copy<Vec2>({
+    from: src,
+    to_index: 0,
+    from_index: 0,
+    count: 2
+  })
+  let first = __array_get(dest, 0)
+  let second = __array_get(dest, 1)
+  first.y + second.x
+
+pub fn value_optional_match_binding() -> i32
+  var arr = new_fixed_array<Vec2>(1)
+  arr = arr.set<Vec2>(0, Vec2 { x: 3, y: 4 })
+  let first = arr.get<Vec2>(0)
+  match(first)
+    Some<Vec2>:
+      first.value.x
+    None:
+      -100
 `;
 
 const loadExports = (): Record<string, CallableFunction> => {
@@ -207,5 +285,15 @@ describe("std FixedArray runtime behavior", () => {
     expect(exports.copy_clamps()).toBe(11);
     expect(exports.copy_oob_noop()).toBe(10);
     expect(exports.iterate_sum()).toBe(12);
+  });
+
+  it("stores value elements in fixed arrays", () => {
+    const exports = loadExports();
+    expect(exports.value_length_after_set()).toBe(2);
+    expect(exports.value_direct_get()).toBe(9);
+    expect(exports.value_direct_get_single()).toBe(7);
+    expect(exports.value_optional_destructure_single()).toBe(7);
+    expect(exports.value_copy_clamps()).toBe(13);
+    expect(exports.value_optional_match_binding()).toBe(3);
   });
 });

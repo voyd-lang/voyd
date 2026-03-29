@@ -1,7 +1,6 @@
 import binaryen from "binaryen";
-import { initStruct } from "@voyd/lib/binaryen-gc/index.js";
 import type { CodegenContext, FunctionContext, TypeId } from "./context.js";
-import { coerceValueToType } from "./structural.js";
+import { coerceValueToType, initStructuralValue } from "./structural.js";
 import { getStructuralTypeInfo } from "./types.js";
 
 export const compileOptionalNoneValue = ({
@@ -26,20 +25,11 @@ export const compileOptionalNoneValue = ({
     throw new Error("optional default None type must not declare fields");
   }
 
-  const noneValue = initStruct(ctx.mod, noneInfo.runtimeType, [
-    ctx.mod.global.get(
-      noneInfo.ancestorsGlobal,
-      ctx.rtt.extensionHelpers.i32Array
-    ),
-    ctx.mod.global.get(
-      noneInfo.fieldTableGlobal,
-      ctx.rtt.fieldLookupHelpers.lookupTableType
-    ),
-    ctx.mod.global.get(
-      noneInfo.methodTableGlobal,
-      ctx.rtt.methodLookupHelpers.lookupTableType
-    ),
-  ]);
+  const noneValue = initStructuralValue({
+    structInfo: noneInfo,
+    fieldValues: [],
+    ctx,
+  });
   return coerceValueToType({
     value: noneValue,
     actualType: optionalInfo.noneType,

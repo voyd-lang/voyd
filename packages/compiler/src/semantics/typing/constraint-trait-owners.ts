@@ -31,6 +31,7 @@ const collectTraitOwnersInType = ({
       );
       return;
     case "nominal-object":
+    case "value-object":
       desc.typeArgs.forEach((arg) =>
         collectTraitOwnersInType({ type: arg, arena, owners, seen }),
       );

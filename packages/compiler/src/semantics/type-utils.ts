@@ -6,6 +6,7 @@ type TypeDescriptorLike =
   | { kind: "type-param-ref"; param: TypeParamId }
   | { kind: "trait"; typeArgs: readonly TypeId[] }
   | { kind: "nominal-object"; typeArgs: readonly TypeId[] }
+  | { kind: "value-object"; typeArgs: readonly TypeId[] }
   | { kind: "structural-object"; fields: readonly { type: TypeId }[] }
   | {
       kind: "function";
@@ -49,6 +50,7 @@ export const typeContainsUnresolvedParam = ({
       return desc.name === "unknown";
     case "trait":
     case "nominal-object":
+    case "value-object":
       return desc.typeArgs.some((arg) =>
         typeContainsUnresolvedParam({ typeId: arg, getTypeDesc, boundParams, seen })
       );

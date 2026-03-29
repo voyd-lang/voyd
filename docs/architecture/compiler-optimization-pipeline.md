@@ -166,6 +166,10 @@ The compiler-owned layer should focus on transformations that need typed, effect
   - Forward fields out of freshly constructed aggregates when the aggregate is immediately destructured and does not escape.
   - This should stay narrowly focused on semantic constructs, not devolve into a generic local-value optimizer.
 
+- Addressable wide-local scratch lowering
+  - Reuse already-addressable local/out-result storage for wide aggregate construction and mutation when the storage stays within the current lowering region.
+  - This is intentionally narrower than future escape-analysis (`V-325`) or scalar-replacement (`V-326`) work: it does not infer reusable whole-program escape facts and it does not split aggregates into scalar locals.
+
 ### Explicit non-goals for the compiler pass layer
 
 - Arithmetic peepholes

@@ -16,10 +16,13 @@ import type { ModuleExportEntry } from "../../modules.js";
 import { intrinsicValueMetadataFor } from "../../intrinsics.js";
 import {
   bindTypeParamsFromType,
+  disallowedValueTraitObjectWidening,
   ensureTypeMatches,
   getNominalComponent,
+  getObjectInfoForNominal,
   getPrimitiveType,
   getStructuralFields,
+  internCheckedUnion,
   resolveTypeExpr,
   typeSatisfies,
   getSymbolName,
@@ -117,6 +120,24 @@ const dependencyMethodSignatureCache = new WeakMap<
   TypingContext,
   Map<string, FunctionSignature>
 >();
+
+const valueTraitObjectWideningFor = ({
+  actual,
+  expected,
+  ctx,
+  state,
+}: {
+  actual: TypeId;
+  expected: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}) =>
+  disallowedValueTraitObjectWidening({
+    actual,
+    expected,
+    ctx,
+    state,
+  });
 
 const ensureImportedConstraintTraitsForSignature = ({
   signature,
@@ -1691,6 +1712,7 @@ const validateCallArgs = (
           param: match.param,
           index: match.paramIndex,
           ctx,
+          state,
         });
       }
       if (match.kind === "direct") {
@@ -1805,7 +1827,13 @@ const callArgumentsSatisfyParams = ({
     onMatch: (match) =>
       match.matchedType === ctx.primitives.unknown
         ? true
-        : typeSatisfies(match.matchedType, match.param.type, ctx, state),
+        : !valueTraitObjectWideningFor({
+            actual: match.matchedType,
+            expected: match.param.type,
+            ctx,
+            state,
+          }) &&
+          typeSatisfies(match.matchedType, match.param.type, ctx, state),
     onSkipOptionalParam: () => true,
   }).kind === "ok";
 
@@ -1830,6 +1858,16 @@ const typeSatisfiesForDiagnostic = ({
   ctx: TypingContext;
   state: TypingState;
 }): boolean => {
+  if (
+    valueTraitObjectWideningFor({
+      actual,
+      expected,
+      ctx,
+      state,
+    })
+  ) {
+    return false;
+  }
   const originalMax = ctx.typeCheckBudget.maxUnifySteps;
   const originalSteps = ctx.typeCheckBudget.unifyStepsUsed.value;
   ctx.typeCheckBudget.maxUnifySteps = Number.MAX_SAFE_INTEGER;
@@ -2298,11 +2336,13 @@ const ensureMutableArgument = ({
   param,
   index,
   ctx,
+  state,
 }: {
   arg: Arg;
   param: ParamSignature;
   index: number;
   ctx: TypingContext;
+  state: TypingState;
 }): void => {
   if (param.bindingKind !== "mutable-ref") {
     return;
@@ -2330,6 +2370,25 @@ const ensureMutableArgument = ({
   const paramName = param.name ?? param.label ?? `parameter ${index + 1}`;
 
   if (typeof symbol !== "number") {
+    const nominal = getNominalComponent(arg.type, ctx);
+    const valueInfo =
+      typeof nominal === "number"
+        ? getObjectInfoForNominal(nominal, ctx, state)
+        : undefined;
+    if (valueInfo?.objectKind === "value") {
+      emitDiagnostic({
+        ctx,
+        code: "TY0045",
+        params: {
+          kind: "mutable-value-temporary",
+          valueTypeName: typeDescriptorToUserString(
+            ctx.arena.get(valueInfo.nominal),
+            ctx.arena,
+          ),
+        },
+        span,
+      });
+    }
     emitDiagnostic({
       ctx,
       code: "TY0004",
@@ -3506,7 +3565,10 @@ const resolveNominalMethodCandidates = ({
   }
 
   const receiverDesc = ctx.arena.get(receiverNominal);
-  if (receiverDesc.kind !== "nominal-object") {
+  if (
+    receiverDesc.kind !== "nominal-object" &&
+    receiverDesc.kind !== "value-object"
+  ) {
     return undefined;
   }
 
@@ -4010,8 +4072,9 @@ const collectEffectTailSubstitutionsFromTypes = ({
   }
 
   if (
-    actualDesc.kind === "nominal-object" &&
-    expectedDesc.kind === "nominal-object" &&
+    (actualDesc.kind === "nominal-object" ||
+      actualDesc.kind === "value-object") &&
+    actualDesc.kind === expectedDesc.kind &&
     symbolRefEquals(actualDesc.owner, expectedDesc.owner)
   ) {
     const count = Math.min(actualDesc.typeArgs.length, expectedDesc.typeArgs.length);
@@ -5821,7 +5884,11 @@ const inferArrayLiteralElementType = ({
   });
 
   if (allNominalObjects) {
-    return ctx.arena.internUnion(unique);
+    return internCheckedUnion({
+      members: unique,
+      ctx,
+      span: callSpan,
+    });
   }
 
   const allStructural = unique.every((type) => {

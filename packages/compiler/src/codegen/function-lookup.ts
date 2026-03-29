@@ -3,11 +3,6 @@ import type { CodegenContext, FunctionMetadata } from "./context.js";
 import type { SymbolId, TypeId } from "../semantics/ids.js";
 import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
 
-const hiddenParamOffsetFor = (meta: FunctionMetadata): number =>
-  meta.effectful
-    ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length)
-    : 0;
-
 export const requireFunctionMetaByName = ({
   ctx,
   moduleId,
@@ -88,7 +83,7 @@ export const pickTraitImplMethodMeta = ({
   }
 
   const matchingReceiver = metas.filter((meta) => {
-    const receiverTypeIndex = hiddenParamOffsetFor(meta);
+    const receiverTypeIndex = meta.firstUserParamIndex;
     const receiverType = meta.paramTypes[receiverTypeIndex] ?? runtimeType;
     return receiverType === runtimeType;
   });
@@ -138,7 +133,7 @@ const selectPreferredMethodMetadata = (
   return concrete ?? metas[0];
 };
 
-const receiverTypeMatches = ({
+export const receiverTypeMatches = ({
   receiverTypeId,
   expectedTypeId,
   ctx,

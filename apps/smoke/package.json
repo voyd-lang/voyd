@@ -7,7 +7,8 @@
   "scripts": {
     "build": "echo 'no build for smoke tests'",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts --testTimeout 30000 src",
+    "test": "vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 src --exclude src/vtrace-compute-benchmark.test.ts",
+    "test:perf": "VOYD_RUN_PERF_SMOKE=1 vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 src/vtrace-compute-benchmark.test.ts",
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {

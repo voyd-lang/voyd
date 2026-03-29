@@ -13,16 +13,15 @@ import {
 } from "@voyd/lib/binaryen-gc/index.js";
 import {
   allocateTempLocal,
-  getRequiredBinding,
-  loadBindingValue,
 } from "../../locals.js";
-import { coerceValueToType } from "../../structural.js";
+import { coerceValueToType, lowerValueForHeapField } from "../../structural.js";
 import {
   getExprBinaryenType,
   getRequiredExprType,
+  wasmHeapFieldTypeFor,
 } from "../../types.js";
 import { handlerCleanupOps } from "../handler-stack.js";
-import { currentHandlerValue } from "./shared.js";
+import { captureContinuationEnvFieldValue } from "./shared.js";
 import {
   continuationFunctionName,
   ensureContinuationFunction,
@@ -88,31 +87,14 @@ export const compileEffectOpCall = ({
     });
   });
 
-  const envValues = site.envFields.map((field) => {
-    switch (field.sourceKind) {
-      case "site":
-        return ctx.mod.i32.const(site.siteOrder);
-      case "handler":
-        return currentHandlerValue(ctx, fnCtx);
-      case "param":
-      case "local": {
-        if (typeof field.tempId === "number") {
-          const binding = fnCtx.tempLocals.get(field.tempId);
-          if (!binding) {
-            throw new Error(
-              `missing temp local binding for perform env capture (call ${expr.id}, temp ${field.tempId})`
-            );
-          }
-          return ctx.mod.local.get(binding.index, binding.type);
-        }
-        if (typeof field.symbol !== "number") {
-          throw new Error("missing symbol for env field");
-        }
-        const binding = getRequiredBinding(field.symbol, ctx, fnCtx);
-        return loadBindingValue(binding, ctx);
-      }
-    }
-  });
+  const envValues = site.envFields.map((field) =>
+    captureContinuationEnvFieldValue({
+      field,
+      siteOrder: site.siteOrder,
+      ctx,
+      fnCtx,
+    })
+  );
 
   const contRefType = ensureContinuationFunction({
     site,
@@ -138,7 +120,23 @@ export const compileEffectOpCall = ({
     paramTypes: signatureTypes.params,
   });
   const argsBoxed = argsType
-    ? initStruct(ctx.mod, argsType, args as number[])
+    ? initStruct(
+        ctx.mod,
+        argsType,
+        args.map((arg, index) => {
+          const typeId = signatureTypes.params[index]!;
+          const storageType = wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime");
+          return storageType === binaryen.getExpressionType(arg)
+            ? arg
+            : lowerValueForHeapField({
+                value: arg,
+                typeId,
+                targetType: storageType,
+                ctx,
+                fnCtx,
+              });
+        }) as number[],
+      )
     : ctx.mod.ref.null(binaryen.eqref);
   ensureEffectsMemory(ctx);
   const handleTable = ensureEffectHandleTable(ctx);

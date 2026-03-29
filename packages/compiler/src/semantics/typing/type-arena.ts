@@ -16,6 +16,7 @@ export type TypeDescriptor =
   | RecursiveType
   | TraitType
   | NominalObjectType
+  | ValueObjectType
   | StructuralObjectType
   | FunctionType
   | UnionType
@@ -43,6 +44,13 @@ export interface TraitType {
 
 export interface NominalObjectType {
   kind: "nominal-object";
+  owner: SymbolRef;
+  name?: string;
+  typeArgs: readonly TypeId[];
+}
+
+export interface ValueObjectType {
+  kind: "value-object";
   owner: SymbolRef;
   name?: string;
   typeArgs: readonly TypeId[];
@@ -155,6 +163,7 @@ export interface TypeArena {
   ): TypeId;
   internTrait(desc: Omit<TraitType, "kind">): TypeId;
   internNominalObject(desc: Omit<NominalObjectType, "kind">): TypeId;
+  internValueObject(desc: Omit<ValueObjectType, "kind">): TypeId;
   internStructuralObject(desc: Omit<StructuralObjectType, "kind">): TypeId;
   internFunction(desc: Omit<FunctionType, "kind">): TypeId;
   internUnion(members: readonly TypeId[]): TypeId;
@@ -213,6 +222,8 @@ export const createTypeArena = (): TypeArena => {
         return `trait:${symbolRefKeyForCache(desc.owner)}:${desc.name === undefined ? "u" : jsonStringKey(desc.name)}:[${desc.typeArgs.join(",")}]`;
       case "nominal-object":
         return `nominal-object:${symbolRefKeyForCache(desc.owner)}:${desc.name === undefined ? "u" : jsonStringKey(desc.name)}:[${desc.typeArgs.join(",")}]`;
+      case "value-object":
+        return `value-object:${symbolRefKeyForCache(desc.owner)}:${desc.name === undefined ? "u" : jsonStringKey(desc.name)}:[${desc.typeArgs.join(",")}]`;
       case "structural-object": {
         const fieldsKey = desc.fields
           .map((field) => {
@@ -327,6 +338,7 @@ export const createTypeArena = (): TypeArena => {
           );
         case "trait":
         case "nominal-object":
+        case "value-object":
           return rootDesc.typeArgs.some((arg) =>
             containsTypeId(arg, needle, seen),
           );
@@ -452,6 +464,14 @@ export const createTypeArena = (): TypeArena => {
                 cloneReplacingSelf(arg),
               ),
             });
+          case "value-object":
+            return internValueObject({
+              owner: currentDesc.owner,
+              name: currentDesc.name,
+              typeArgs: currentDesc.typeArgs.map((arg) =>
+                cloneReplacingSelf(arg),
+              ),
+            });
           case "structural-object":
             return internStructuralObject({
               fields: currentDesc.fields.map((field) => ({
@@ -518,6 +538,14 @@ export const createTypeArena = (): TypeArena => {
   const internNominalObject = (desc: Omit<NominalObjectType, "kind">): TypeId =>
     storeDescriptor({
       kind: "nominal-object",
+      owner: desc.owner,
+      name: desc.name,
+      typeArgs: [...desc.typeArgs],
+    });
+
+  const internValueObject = (desc: Omit<ValueObjectType, "kind">): TypeId =>
+    storeDescriptor({
+      kind: "value-object",
       owner: desc.owner,
       name: desc.name,
       typeArgs: [...desc.typeArgs],
@@ -1199,7 +1227,8 @@ export const createTypeArena = (): TypeArena => {
           return conflict(resolvedLeft, resolvedRight);
         }
         case "trait":
-        case "nominal-object": {
+        case "nominal-object":
+        case "value-object": {
           if (leftDesc.kind !== rightDesc.kind) {
             return conflict(resolvedLeft, resolvedRight);
           }
@@ -1368,6 +1397,7 @@ export const createTypeArena = (): TypeArena => {
               break;
             case "trait":
             case "nominal-object":
+            case "value-object":
               desc.typeArgs.forEach((arg) => stack.push({ id: arg, stage: 0 }));
               break;
             case "structural-object":
@@ -1409,6 +1439,7 @@ export const createTypeArena = (): TypeArena => {
               );
             case "trait":
             case "nominal-object":
+            case "value-object":
               return desc.typeArgs.some((arg) => needsCache.get(arg) ?? false);
             case "structural-object":
               return desc.fields.some(
@@ -1522,6 +1553,7 @@ export const createTypeArena = (): TypeArena => {
               break;
             case "trait":
             case "nominal-object":
+            case "value-object":
               desc.typeArgs.forEach((arg) => stack.push({ id: arg, stage: 0 }));
               break;
             case "structural-object":
@@ -1643,6 +1675,22 @@ export const createTypeArena = (): TypeArena => {
                   }
                 : { type: current, changed: false };
             }
+            case "value-object": {
+              const typeArgs = desc.typeArgs.map((arg) => getSubstituted(arg));
+              const changed = typeArgs.some(
+                (arg, idx) => arg !== desc.typeArgs[idx],
+              );
+              return changed
+                ? {
+                    type: internValueObject({
+                      owner: desc.owner,
+                      name: desc.name,
+                      typeArgs,
+                    }),
+                    changed: true,
+                  }
+                : { type: current, changed: false };
+            }
             case "structural-object": {
               let changed = false;
               const fields = desc.fields.map((field) => {
@@ -1727,6 +1775,7 @@ export const createTypeArena = (): TypeArena => {
     createRecursiveType,
     internTrait,
     internNominalObject,
+    internValueObject,
     internStructuralObject,
     internFunction,
     internUnion,
@@ -1753,6 +1802,8 @@ export const typeDescriptorToUserString = (
       return `trait ${type.name}`;
     case "nominal-object":
       return `object ${type.name}`;
+    case "value-object":
+      return `value ${type.name}`;
     case "structural-object":
       return `{ ${type.fields.map((f) => `${f.name}: ${typeDescriptorToUserString(arena.get(f.type), arena)}`).join(", ")} }`;
     case "function":

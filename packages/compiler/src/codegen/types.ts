@@ -12,10 +12,14 @@ import { ensureClosureTypeInfo } from "./closure-types.js";
 import {
   ensureFixedArrayWasmTypes,
   ensureFixedArrayWasmTypesByElement,
+  ensureInlineFixedArrayWasmTypes,
 } from "./fixed-array-types.js";
+import { MAX_MULTIVALUE_INLINE_LANES } from "./multivalue.js";
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
-import { pickTraitImplMethodMeta } from "./function-lookup.js";
+import {
+  pickTraitImplMethodMeta,
+} from "./function-lookup.js";
 import type {
   CodegenContext,
   ClosureTypeInfo,
@@ -28,6 +32,7 @@ import type {
   HirPattern,
   SymbolId,
   FixedArrayWasmType,
+  OptimizedValueAbiKind,
 } from "./context.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
 import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
@@ -53,9 +58,603 @@ import {
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
+const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
+  "voyd.codegen.functionMetadataRegistrationState",
+);
 
 type ReachabilityState = {
   symbols?: Set<ProgramSymbolId>;
+};
+
+type FunctionMetadataRegistrationState = {
+  active?: boolean;
+};
+
+const STRUCT_METADATA_STATE = Symbol.for("voyd.codegen.structMetadata");
+
+type StructMetadataState = {
+  registered?: Set<string>;
+};
+
+const INLINE_BOX_STATE = Symbol.for("voyd.codegen.inlineBoxes");
+
+type InlineBoxState = {
+  boxes?: Map<string, binaryen.Type>;
+};
+
+const NON_REF_TYPES = new Set<number>([
+  binaryen.none,
+  binaryen.unreachable,
+  binaryen.i32,
+  binaryen.i64,
+  binaryen.f32,
+  binaryen.f64,
+]);
+
+const isRefType = (type: binaryen.Type): boolean =>
+  binaryen.expandType(type).length === 1 && !NON_REF_TYPES.has(type);
+
+const expandAbiTypes = (type: binaryen.Type): binaryen.Type[] =>
+  type === binaryen.none ? [] : [...binaryen.expandType(type)];
+
+export const abiTypeFor = (types: readonly binaryen.Type[]): binaryen.Type => {
+  if (types.length === 0) {
+    return binaryen.none;
+  }
+  if (types.length === 1) {
+    return types[0]!;
+  }
+  return binaryen.createType(types as number[]);
+};
+
+type InlineUnionMemberLayout = {
+  typeId: TypeId;
+  tag: number;
+  abiTypes: readonly binaryen.Type[];
+  abiStart: number;
+};
+
+type InlineUnionLayout = {
+  typeId: TypeId;
+  abiTypes: readonly binaryen.Type[];
+  interfaceType: binaryen.Type;
+  members: readonly InlineUnionMemberLayout[];
+};
+
+export type OptionalLayoutInfo = {
+  optionalType: TypeId;
+  innerType: TypeId;
+  someType: TypeId;
+  noneType: TypeId;
+};
+
+const nominalValueComponent = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): TypeId | undefined => {
+  const nominalId = getNominalComponentId(typeId, ctx);
+  if (typeof nominalId !== "number") {
+    return undefined;
+  }
+  return ctx.program.types.getTypeDesc(nominalId).kind === "value-object"
+    ? nominalId
+    : undefined;
+};
+
+const nominalObjectishComponent = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): TypeId | undefined => {
+  const nominalId = getNominalComponentId(typeId, ctx);
+  if (typeof nominalId !== "number") {
+    return undefined;
+  }
+  const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
+  return nominalDesc.kind === "nominal-object" || nominalDesc.kind === "value-object"
+    ? nominalId
+    : undefined;
+};
+
+const collectUnionMembers = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  seen: Set<TypeId> = new Set(),
+): TypeId[] => {
+  if (seen.has(typeId)) {
+    return [];
+  }
+  seen.add(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    const unfolded = ctx.program.types.substitute(
+      desc.body,
+      new Map([[desc.binder, typeId]]),
+    );
+    return collectUnionMembers(unfolded, ctx, seen);
+  }
+  if (desc.kind !== "union") {
+    return [typeId];
+  }
+  return desc.members.flatMap((member) => collectUnionMembers(member, ctx, seen));
+};
+
+export const shouldInlineUnionLayout = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  seen: Set<TypeId> = new Set(),
+): boolean => {
+  if (seen.has(typeId)) {
+    return false;
+  }
+  seen.add(typeId);
+  const optionalInfo = getOptionalLayoutInfo(typeId, ctx);
+  if (optionalInfo) {
+    const innerDesc = ctx.program.types.getTypeDesc(optionalInfo.innerType);
+    if (innerDesc.kind === "primitive" || innerDesc.kind === "value-object") {
+      return true;
+    }
+    if (innerDesc.kind === "intersection") {
+      const nominalId = getNominalComponentId(optionalInfo.innerType, ctx);
+      if (typeof nominalId === "number") {
+        const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
+        return nominalDesc.kind === "value-object";
+      }
+    }
+    return false;
+  }
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    const unfolded = ctx.program.types.substitute(
+      desc.body,
+      new Map([[desc.binder, typeId]]),
+    );
+    return shouldInlineUnionLayout(unfolded, ctx, seen);
+  }
+  if (desc.kind !== "union") {
+    return false;
+  }
+  return desc.members.some((member) => {
+    const memberDesc = ctx.program.types.getTypeDesc(member);
+    if (memberDesc.kind === "value-object") {
+      return true;
+    }
+    const nominalId = getNominalComponentId(member, ctx);
+    if (typeof nominalId === "number") {
+      const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
+      return nominalDesc.kind === "value-object";
+    }
+    return false;
+  });
+};
+
+const flattenTypeToAbiTypes = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  seen: Set<TypeId> = new Set(),
+  mode: WasmTypeMode = "signature",
+): binaryen.Type[] => {
+  if (seen.has(typeId)) {
+    return expandAbiTypes(wasmTypeFor(typeId, ctx, seen, mode));
+  }
+  seen.add(typeId);
+  try {
+    const desc = ctx.program.types.getTypeDesc(typeId);
+    if (desc.kind === "recursive") {
+      const unfolded = ctx.program.types.substitute(
+        desc.body,
+        new Map([[desc.binder, typeId]]),
+      );
+      return flattenTypeToAbiTypes(unfolded, ctx, seen, mode);
+    }
+    if (shouldInlineUnionLayout(typeId, ctx)) {
+      return getInlineUnionLayout(typeId, ctx, seen, mode).abiTypes.slice();
+    }
+    if (desc.kind === "value-object") {
+      const info = getStructuralTypeInfo(typeId, ctx, seen);
+      if (!info) {
+        throw new Error("missing value-object structural type info");
+      }
+      return info.fields.flatMap((field) => field.inlineWasmTypes);
+    }
+    if (desc.kind === "intersection") {
+      const nominalId = getNominalComponentId(typeId, ctx);
+      if (typeof nominalId === "number") {
+        const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
+        if (nominalDesc.kind === "value-object") {
+          const info = getStructuralTypeInfo(typeId, ctx, seen);
+          if (!info) {
+            throw new Error("missing value intersection structural type info");
+          }
+          return info.fields.flatMap((field) => field.inlineWasmTypes);
+        }
+      }
+    }
+    const lowerSeen = new Set(seen);
+    lowerSeen.delete(typeId);
+    return expandAbiTypes(wasmTypeFor(typeId, ctx, lowerSeen, mode));
+  } finally {
+    seen.delete(typeId);
+  }
+};
+
+export const getInlineUnionLayout = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  seen: Set<TypeId> = new Set(),
+  mode: WasmTypeMode = "signature",
+): InlineUnionLayout => {
+  const optionalInfo = getOptionalLayoutInfo(typeId, ctx);
+  if (optionalInfo && shouldInlineUnionLayout(typeId, ctx)) {
+    const abiTypes = flattenTypeToAbiTypes(optionalInfo.innerType, ctx, seen, mode);
+    return {
+      typeId,
+      abiTypes: [binaryen.i32, ...abiTypes],
+      interfaceType: abiTypeFor([binaryen.i32, ...abiTypes]),
+      members: [
+        {
+          typeId: optionalInfo.noneType,
+          tag: 0,
+          abiTypes: [],
+          abiStart: 1,
+        },
+        {
+          typeId: optionalInfo.someType,
+          tag: 1,
+          abiTypes,
+          abiStart: 1,
+        },
+      ],
+    };
+  }
+  const members = collectUnionMembers(typeId, ctx);
+  let abiStart = 1;
+  const memberLayouts = members.map((member, index) => {
+    const abiTypes = flattenTypeToAbiTypes(member, ctx, seen, mode);
+    const layout: InlineUnionMemberLayout = {
+      typeId: member,
+      tag: index,
+      abiTypes,
+      abiStart,
+    };
+    abiStart += abiTypes.length;
+    return layout;
+  });
+  const abiTypes = [binaryen.i32, ...memberLayouts.flatMap((member) => member.abiTypes)];
+  return {
+    typeId,
+    abiTypes,
+    interfaceType: abiTypeFor(abiTypes),
+    members: memberLayouts,
+  };
+};
+
+export const getOptionalLayoutInfo = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): OptionalLayoutInfo | undefined => {
+  const direct = ctx.program.optionals.getOptionalInfo(ctx.moduleId, typeId);
+  if (direct) {
+    return direct;
+  }
+
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    const unfolded = ctx.program.types.substitute(
+      desc.body,
+      new Map([[desc.binder, typeId]]),
+    );
+    return getOptionalLayoutInfo(unfolded, ctx);
+  }
+
+  if (desc.kind !== "union") {
+    return undefined;
+  }
+
+  const members = collectUnionMembers(typeId, ctx);
+  if (members.length !== 2) {
+    return undefined;
+  }
+
+  const classified = members
+    .map((member) => classifyOptionalMember({ typeId: member, ctx }))
+    .filter((member): member is NonNullable<typeof member> => Boolean(member));
+  if (classified.length !== 2) {
+    return undefined;
+  }
+
+  const noneMember = classified.find((member) => member.kind === "none");
+  const someMember = classified.find((member) => member.kind === "some");
+  if (!noneMember || !someMember) {
+    return undefined;
+  }
+
+  return {
+    optionalType: typeId,
+    innerType: someMember.innerType,
+    someType: someMember.typeId,
+    noneType: noneMember.typeId,
+  };
+};
+
+const classifyOptionalMember = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}):
+  | { kind: "none"; typeId: TypeId }
+  | { kind: "some"; typeId: TypeId; innerType: TypeId }
+  | undefined => {
+  const nominalId = getNominalComponentId(typeId, ctx);
+  if (typeof nominalId !== "number") {
+    return undefined;
+  }
+
+  const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
+  if (
+    nominalDesc.kind !== "nominal-object" &&
+    nominalDesc.kind !== "value-object"
+  ) {
+    return undefined;
+  }
+  const ownerRef = ctx.program.symbols.refOf(nominalDesc.owner);
+  if (ownerRef.moduleId !== "std::optional::types") {
+    return undefined;
+  }
+
+  const structInfo = getStructuralTypeInfo(typeId, ctx);
+  if (!structInfo) {
+    return undefined;
+  }
+
+  if (nominalDesc.name === "None" && structInfo.fields.length === 0) {
+    return { kind: "none", typeId };
+  }
+
+  if (
+    nominalDesc.name === "Some" &&
+    structInfo.fields.length === 1 &&
+    structInfo.fields[0]!.name === "value"
+  ) {
+    return {
+      kind: "some",
+      typeId,
+      innerType: structInfo.fields[0]!.typeId,
+    };
+  }
+
+  return undefined;
+};
+
+export const getDirectAbiTypesForSignature = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): readonly binaryen.Type[] => flattenTypeToAbiTypes(typeId, ctx, new Set(), "signature");
+
+export const isWideValueType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): boolean =>
+  typeof getInlineHeapBoxType({ typeId, ctx }) === "number" &&
+  getDirectAbiTypesForSignature(typeId, ctx).length > MAX_MULTIVALUE_INLINE_LANES;
+
+export const getWideValueStorageType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.Type | undefined =>
+  isWideValueType({ typeId, ctx }) ? getInlineHeapBoxType({ typeId, ctx }) : undefined;
+
+export const getOptimizedParamAbiKind = ({
+  typeId,
+  bindingKind,
+  ctx,
+}: {
+  typeId: TypeId;
+  bindingKind?: string;
+  ctx: CodegenContext;
+}): OptimizedValueAbiKind => {
+  if (
+    bindingKind === "mutable-ref" &&
+    typeof getInlineHeapBoxType({ typeId, ctx }) === "number"
+  ) {
+    return "mutable_ref";
+  }
+  if (!isWideValueType({ typeId, ctx })) {
+    return "direct";
+  }
+  return bindingKind === "mutable-ref" ? "mutable_ref" : "readonly_ref";
+};
+
+export const getOptimizedResultAbiKind = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): OptimizedValueAbiKind =>
+  isWideValueType({ typeId, ctx }) ? "out_ref" : "direct";
+
+export const getOptimizedAbiTypesForParam = ({
+  typeId,
+  bindingKind,
+  ctx,
+}: {
+  typeId: TypeId;
+  bindingKind?: string;
+  ctx: CodegenContext;
+}): readonly binaryen.Type[] => {
+  const abiKind = getOptimizedParamAbiKind({ typeId, bindingKind, ctx });
+  if (abiKind === "direct") {
+    return getAbiTypesForSignature(typeId, ctx);
+  }
+  const storageType = getInlineHeapBoxType({ typeId, ctx });
+  if (typeof storageType !== "number") {
+    throw new Error(`missing ref storage type for parameter ${typeId}`);
+  }
+  return [storageType];
+};
+
+export const getOptimizedAbiTypeForResult = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.Type | undefined => {
+  if (getOptimizedResultAbiKind({ typeId, ctx }) !== "out_ref") {
+    return undefined;
+  }
+  const storageType = getWideValueStorageType({ typeId, ctx });
+  if (typeof storageType !== "number") {
+    throw new Error(`missing wide storage type for result ${typeId}`);
+  }
+  return storageType;
+};
+
+export const getSignatureSpillBoxType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.Type | undefined => {
+  const abiTypes = getDirectAbiTypesForSignature(typeId, ctx);
+  if (abiTypes.length <= MAX_MULTIVALUE_INLINE_LANES) {
+    return undefined;
+  }
+  return ensureAbiBoxType({
+    typeId,
+    abiTypes,
+    ctx,
+    label: `${ctx.moduleLabel}__sig_${runtimeTypeKeyFor({ typeId, ctx })}`,
+  });
+};
+
+export const getAbiTypesForSignature = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): readonly binaryen.Type[] => {
+  const spillBoxType = getSignatureSpillBoxType({ typeId, ctx });
+  return spillBoxType
+    ? [spillBoxType]
+    : getDirectAbiTypesForSignature(typeId, ctx);
+};
+
+export const getSignatureWasmType = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): binaryen.Type => abiTypeFor(getAbiTypesForSignature(typeId, ctx));
+
+export const ensureAbiBoxType = ({
+  typeId,
+  abiTypes,
+  ctx,
+  label,
+}: {
+  typeId: TypeId;
+  abiTypes: readonly binaryen.Type[];
+  ctx: CodegenContext;
+  label: string;
+}): binaryen.Type => {
+  if (abiTypes.length === 1) {
+    return abiTypes[0]!;
+  }
+  const key = `${runtimeTypeKeyFor({ typeId, ctx })}::${abiTypes.join(",")}`;
+  const cached = ctx.abiBoxTypes.get(key);
+  if (cached) {
+    return cached;
+  }
+  const boxType = defineStructType(ctx.mod, {
+    name: `${label}__abi_box`,
+    fields: abiTypes.map((type, index) => ({
+      name: `v${index}`,
+      type,
+      mutable: false,
+    })),
+    supertype: binaryenTypeToHeapType(ctx.rtt.rootType),
+    final: true,
+  });
+  ctx.abiBoxTypes.set(key, boxType);
+  return boxType;
+};
+
+const getInlineBoxType = ({
+  key,
+  abiTypes,
+  label,
+  ctx,
+}: {
+  key: string;
+  abiTypes: readonly binaryen.Type[];
+  label: string;
+  ctx: CodegenContext;
+}): binaryen.Type => {
+  const safeLabel = label.replace(/[^a-zA-Z0-9_]/g, "_");
+  const state = ctx.programHelpers.getHelperState<InlineBoxState>(
+    INLINE_BOX_STATE,
+    () => ({ boxes: new Map<string, binaryen.Type>() }),
+  );
+  const boxes = state.boxes ?? new Map<string, binaryen.Type>();
+  state.boxes = boxes;
+  const cached = boxes.get(key);
+  if (cached) {
+    return cached;
+  }
+  const runtimeType = defineStructType(ctx.mod, {
+    name: `${safeLabel}__box`,
+    fields: abiTypes.map((type, index) => ({
+      name: `v${index}`,
+      type,
+      mutable: true,
+    })),
+    supertype: binaryenTypeToHeapType(ctx.rtt.rootType),
+    final: true,
+  });
+  boxes.set(key, runtimeType);
+  return runtimeType;
+};
+
+export const getInlineHeapBoxType = ({
+  typeId,
+  ctx,
+  seen = new Set<TypeId>(),
+  mode = "signature",
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+  seen?: Set<TypeId>;
+  mode?: WasmTypeMode;
+}): binaryen.Type | undefined => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "value-object") {
+    return getStructuralTypeInfo(typeId, ctx, seen)?.runtimeType;
+  }
+  if (desc.kind === "intersection") {
+    const nominalId = getNominalComponentId(typeId, ctx);
+    if (typeof nominalId === "number") {
+      const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
+      if (nominalDesc.kind === "value-object") {
+        return getStructuralTypeInfo(typeId, ctx, seen)?.runtimeType;
+      }
+    }
+  }
+  if (!shouldInlineUnionLayout(typeId, ctx)) {
+    return undefined;
+  }
+  const layout = getInlineUnionLayout(typeId, ctx, seen, mode);
+  return getInlineBoxType({
+    key: `union:${runtimeTypeKeyFor({ typeId, ctx })}:${layout.abiTypes.join(",")}`,
+    abiTypes: layout.abiTypes,
+    label: `${ctx.moduleLabel}__union_${runtimeTypeKeyFor({ typeId, ctx })}`,
+    ctx,
+  });
 };
 
 const markReachableFunctionSymbol = ({
@@ -101,6 +700,30 @@ const runtimeTypeKeyFor = ({
     binders: new Map<TypeParamId, number>(),
   });
 
+const getRuntimeTypeIdentityTypeId = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+  seen: Set<TypeId> = new Set(),
+): TypeId => {
+  if (seen.has(typeId)) {
+    return typeId;
+  }
+  seen.add(typeId);
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    return getRuntimeTypeIdentityTypeId(desc.body, ctx, seen);
+  }
+  if (desc.kind === "intersection") {
+    if (typeof desc.nominal === "number") {
+      return getRuntimeTypeIdentityTypeId(desc.nominal, ctx, seen);
+    }
+    if (typeof desc.structural === "number") {
+      return getRuntimeTypeIdentityTypeId(desc.structural, ctx, seen);
+    }
+  }
+  return typeId;
+};
+
 const runtimeTypeKeyForInternal = ({
   typeId,
   ctx,
@@ -137,6 +760,12 @@ const runtimeTypeKeyForInternal = ({
       }
       case "nominal-object":
         return `nominal:${desc.owner}<${desc.typeArgs
+          .map((arg) =>
+            runtimeTypeKeyForInternal({ typeId: arg, ctx, active, binders }),
+          )
+          .join(",")}>`;
+      case "value-object":
+        return `value:${desc.owner}<${desc.typeArgs
           .map((arg) =>
             runtimeTypeKeyForInternal({ typeId: arg, ctx, active, binders }),
           )
@@ -186,24 +815,22 @@ const runtimeTypeKeyForInternal = ({
         return `union:${members.join("|")}`;
       }
       case "intersection": {
-        const nominal =
-          typeof desc.nominal === "number"
-            ? runtimeTypeKeyForInternal({
-                typeId: desc.nominal,
-                ctx,
-                active,
-                binders,
-              })
-            : "none";
-        const structural =
-          typeof desc.structural === "number"
-            ? runtimeTypeKeyForInternal({
-                typeId: desc.structural,
-                ctx,
-                active,
-                binders,
-              })
-            : "none";
+        if (typeof desc.nominal === "number") {
+          return runtimeTypeKeyForInternal({
+            typeId: desc.nominal,
+            ctx,
+            active,
+            binders,
+          });
+        }
+        if (typeof desc.structural === "number") {
+          return `intersection:${runtimeTypeKeyForInternal({
+            typeId: desc.structural,
+            ctx,
+            active,
+            binders,
+          })}`;
+        }
         const traits =
           desc.traits && desc.traits.length > 0
             ? desc.traits
@@ -218,7 +845,7 @@ const runtimeTypeKeyForInternal = ({
                 .sort()
                 .join("|")
             : "none";
-        return `intersection:${nominal}&${structural}&traits:${traits}`;
+        return `intersection:traits:${traits}`;
       }
       case "fixed-array":
         return `fixed-array:${runtimeTypeKeyForInternal({
@@ -237,13 +864,14 @@ const runtimeTypeKeyForInternal = ({
 
 const runtimeTypeIdFor = (typeId: TypeId, ctx: CodegenContext): number =>
   (() => {
-    const key = runtimeTypeKeyFor({ typeId, ctx });
+    const identityTypeId = getRuntimeTypeIdentityTypeId(typeId, ctx);
+    const key = runtimeTypeKeyFor({ typeId: identityTypeId, ctx });
     const existing = ctx.runtimeTypeRegistry.get(typeId);
     if (!existing) {
       ctx.runtimeTypeRegistry.set(typeId, {
         key,
         moduleId: ctx.moduleId,
-        typeId,
+        typeId: identityTypeId,
       });
     }
 
@@ -276,7 +904,7 @@ export const getClosureTypeInfo = (
     desc,
     ctx,
     seen: new Set<TypeId>(),
-    mode: "runtime",
+    mode: "signature",
     lowerType: (id, ctx, seen, mode) => wasmTypeFor(id, ctx, seen, mode),
   });
 };
@@ -302,12 +930,32 @@ export const getFixedArrayWasmTypes = (
           );
         if (typeof tempArrayType === "number") {
           return {
+            kind: "plain-array",
             type: tempArrayType,
             heapType: binaryenTypeToHeapType(tempArrayType),
           };
         }
       }
     }
+  }
+
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind !== "fixed-array") {
+    throw new Error("intrinsic requires a fixed-array type");
+  }
+  const laneTypes = flattenTypeToAbiTypes(desc.element, ctx, seen, "signature");
+  const inlineElementBox = getInlineHeapBoxType({
+    typeId: desc.element,
+    ctx,
+    seen: new Set(seen),
+    mode: "signature",
+  });
+  if (typeof inlineElementBox === "number" || laneTypes.length > 1) {
+    return ensureInlineFixedArrayWasmTypes({
+      key: `${runtimeTypeKeyFor({ typeId: desc.element, ctx })}:${laneTypes.join(",")}`,
+      laneTypes,
+      ctx,
+    });
   }
 
   return ensureFixedArrayWasmTypes({
@@ -343,6 +991,12 @@ export const wasmTypeFor = (
         "runtime",
       );
       return ensureFixedArrayWasmTypesByElement({ elementType, ctx }).type;
+    }
+    if (desc.kind === "value-object") {
+      const structInfo = getStructuralTypeInfo(typeId, ctx, seen);
+      if (structInfo) {
+        return structInfo.interfaceType;
+      }
     }
     return ctx.rtt.baseType;
   }
@@ -396,6 +1050,14 @@ export const wasmTypeFor = (
       return structInfo.interfaceType;
     }
 
+    if (desc.kind === "value-object") {
+      const structInfo = getStructuralTypeInfo(typeId, ctx, seen);
+      if (!structInfo) {
+        throw new Error("missing structural type info");
+      }
+      return structInfo.interfaceType;
+    }
+
     if (desc.kind === "structural-object") {
       if (mode === "signature") {
         return ctx.rtt.baseType;
@@ -407,6 +1069,10 @@ export const wasmTypeFor = (
       return structInfo.interfaceType;
     }
 
+    if (shouldInlineUnionLayout(typeId, ctx)) {
+      return getInlineUnionLayout(typeId, ctx, seen, mode).interfaceType;
+    }
+
     if (desc.kind === "union") {
       if (desc.members.length === 0) {
         throw new Error("cannot map empty union to wasm");
@@ -416,6 +1082,24 @@ export const wasmTypeFor = (
       );
       const first = memberTypes[0]!;
       if (!memberTypes.every((candidate) => candidate === first)) {
+        if (memberTypes.every(isRefType)) {
+          const hasValueMember = desc.members.some((member) =>
+            typeof nominalValueComponent(member, ctx) === "number"
+          );
+          const allObjectish = desc.members.every((member) => {
+            const memberDesc = ctx.program.types.getTypeDesc(member);
+            return (
+              memberDesc.kind === "trait" ||
+              memberDesc.kind === "structural-object" ||
+              memberDesc.kind === "intersection" ||
+              typeof nominalObjectishComponent(member, ctx) === "number"
+            );
+          });
+          if (allObjectish && !hasValueMember) {
+            return ctx.rtt.baseType;
+          }
+          return hasValueMember ? binaryen.anyref : ctx.rtt.baseType;
+        }
         throw new Error("union members map to different wasm types");
       }
       return first;
@@ -423,11 +1107,27 @@ export const wasmTypeFor = (
 
     if (desc.kind === "intersection" && typeof desc.structural === "number") {
       if (mode === "signature") {
-        return ctx.rtt.baseType;
+        const nominalDesc =
+          typeof desc.nominal === "number"
+            ? ctx.program.types.getTypeDesc(desc.nominal)
+            : undefined;
+        if (nominalDesc?.kind !== "value-object") {
+          return ctx.rtt.baseType;
+        }
       }
       const structInfo = getStructuralTypeInfo(typeId, ctx, seen);
       if (!structInfo) {
         throw new Error("missing structural type info");
+      }
+      if (mode === "signature") {
+        const nominalId = getNominalComponentId(typeId, ctx);
+        if (typeof nominalId === "number") {
+          const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
+          if (nominalDesc.kind === "value-object") {
+            return structInfo.interfaceType;
+          }
+        }
+        return ctx.rtt.baseType;
       }
       return structInfo.interfaceType;
     }
@@ -535,7 +1235,149 @@ const ensureStructuralRuntimeType = (
   if (cached) {
     return cached;
   }
+  if (ctx.resolvingStructuralHeapTypes.has(structuralId)) {
+    return ctx.rtt.baseType;
+  }
+  ctx.resolvingStructuralHeapTypes.add(structuralId);
 
+  try {
+    const depsCache = new Map<TypeId, readonly TypeId[]>();
+    const getDeps = (id: TypeId): readonly TypeId[] => {
+      const existing = depsCache.get(id);
+      if (existing) {
+        return existing;
+      }
+      const computed = directStructuralDeps(id, ctx);
+      depsCache.set(id, computed);
+      return computed;
+    };
+
+    const scc = getSccContainingRoot({ root: structuralId, getDeps });
+
+    const isRecursive =
+      scc.length > 1 || getDeps(structuralId).some((dep) => dep === structuralId);
+
+    const baseHeapType = binaryenTypeToHeapType(ctx.rtt.baseType);
+
+    const lowerNonStructural = (
+      typeId: TypeId,
+      _ownerStructuralId?: TypeId,
+    ): binaryen.Type =>
+      wasmTypeFor(
+        typeId,
+        ctx,
+        new Set(),
+        "signature",
+      );
+
+    const buildNonRecursive = (id: TypeId): binaryen.Type => {
+      getDeps(id).forEach((dep) => {
+        if (dep !== id) {
+          ensureStructuralRuntimeType(dep, ctx);
+        }
+      });
+
+      const desc = ctx.program.types.getTypeDesc(id);
+      if (desc.kind !== "structural-object") {
+        throw new Error(`expected structural-object type ${id}`);
+      }
+
+      const structType = defineStructType(ctx.mod, {
+        name: structuralHeapTypeName(id),
+        fields: [
+          {
+            name: "__ancestors_table",
+            type: ctx.rtt.extensionHelpers.i32Array,
+            mutable: false,
+          },
+          {
+            name: "__field_index_table",
+            type: ctx.rtt.fieldLookupHelpers.lookupTableType,
+            mutable: false,
+          },
+          {
+            name: "__method_lookup_table",
+            type: ctx.rtt.methodLookupHelpers.lookupTableType,
+            mutable: false,
+          },
+          ...desc.fields.map((field) => {
+            const type = lowerHeapObjectFieldRuntimeType({
+              typeId: field.type,
+              ownerStructuralId: id,
+              ctx,
+            });
+            return { name: field.name, type, mutable: true };
+          }),
+        ],
+        supertype: baseHeapType,
+        final: true,
+      });
+      ctx.structHeapTypes.set(id, structType);
+      return structType;
+    };
+
+    if (!isRecursive) {
+      return buildNonRecursive(structuralId);
+    }
+
+    const alreadyBuilt = scc.filter((id) => ctx.structHeapTypes.has(id));
+    if (alreadyBuilt.length > 0) {
+      const missing = scc.filter((id) => !ctx.structHeapTypes.has(id));
+      if (missing.length > 0) {
+        throw new Error(
+          `partial recursive heap type cache: built [${alreadyBuilt.join(
+            ",",
+          )}], missing [${missing.join(",")}]`,
+        );
+      }
+      return ctx.structHeapTypes.get(structuralId)!;
+    }
+
+    try {
+      emitRecursiveStructuralHeapTypeGroup({
+        component: scc,
+        ctx,
+        getDirectDeps: getDeps,
+        structNameFor: structuralHeapTypeName,
+        resolveStructuralTypeId: (typeId) => resolveStructuralTypeId(typeId, ctx),
+        ensureStructuralRuntimeType: (id) => ensureStructuralRuntimeType(id, ctx),
+        lowerNonStructural: (typeId, ownerStructuralId) =>
+          lowerNonStructural(typeId, ownerStructuralId),
+        baseHeapType,
+      });
+    } catch (error) {
+      if (error instanceof TypeBuilderBuildError) {
+        ctx.diagnostics.report({
+          code: "CG_RECURSIVE_HEAP_TYPE_BUILDER_FAILED",
+          phase: "codegen",
+          message: [
+            "failed to build recursive heap type group",
+            `module: ${ctx.moduleId}`,
+            `structural type: ${structuralId}`,
+            `error index: ${error.errorIndex}`,
+            `error reason: ${error.errorReason}`,
+          ].join("\n"),
+          span: { file: ctx.moduleId, start: 0, end: 0 },
+        });
+      }
+      throw error;
+    }
+    const built = ctx.structHeapTypes.get(structuralId);
+    if (!built) {
+      throw new Error(
+        `failed to cache runtime heap type for structural id ${structuralId}`,
+      );
+    }
+    return built;
+  } finally {
+    ctx.resolvingStructuralHeapTypes.delete(structuralId);
+  }
+};
+
+const isStructurallyRecursive = (
+  structuralId: TypeId,
+  ctx: CodegenContext,
+): boolean => {
   const depsCache = new Map<TypeId, readonly TypeId[]>();
   const getDeps = (id: TypeId): readonly TypeId[] => {
     const existing = depsCache.get(id);
@@ -546,122 +1388,84 @@ const ensureStructuralRuntimeType = (
     depsCache.set(id, computed);
     return computed;
   };
-
   const scc = getSccContainingRoot({ root: structuralId, getDeps });
+  return scc.length > 1 || getDeps(structuralId).some((dep) => dep === structuralId);
+};
 
-  const isRecursive =
-    scc.length > 1 || getDeps(structuralId).some((dep) => dep === structuralId);
-
-  const baseHeapType = binaryenTypeToHeapType(ctx.rtt.baseType);
-
-  const lowerNonStructural = (typeId: TypeId): binaryen.Type =>
-    wasmTypeFor(typeId, ctx, new Set(), "signature");
-
-  const buildNonRecursive = (id: TypeId): binaryen.Type => {
-    getDeps(id).forEach((dep) => {
-      if (dep !== id) {
-        ensureStructuralRuntimeType(dep, ctx);
-      }
-    });
-
-    const desc = ctx.program.types.getTypeDesc(id);
-    if (desc.kind !== "structural-object") {
-      throw new Error(`expected structural-object type ${id}`);
-    }
-
-    const structType = defineStructType(ctx.mod, {
-      name: structuralHeapTypeName(id),
-      fields: [
-        {
-          name: "__ancestors_table",
-          type: ctx.rtt.extensionHelpers.i32Array,
-          mutable: false,
-        },
-        {
-          name: "__field_index_table",
-          type: ctx.rtt.fieldLookupHelpers.lookupTableType,
-          mutable: false,
-        },
-        {
-          name: "__method_lookup_table",
-          type: ctx.rtt.methodLookupHelpers.lookupTableType,
-          mutable: false,
-        },
-        ...desc.fields.map((field) => {
-          const fieldStructural = resolveStructuralTypeId(field.type, ctx);
-          const type =
-            typeof fieldStructural === "number"
-              ? ensureStructuralRuntimeType(fieldStructural, ctx)
-              : lowerNonStructural(field.type);
-          return { name: field.name, type, mutable: true };
-        }),
-      ],
-      supertype: baseHeapType,
-      final: true,
-    });
-    ctx.structHeapTypes.set(id, structType);
-    return structType;
-  };
-
-  if (!isRecursive) {
-    return buildNonRecursive(structuralId);
-  }
-
-  const alreadyBuilt = scc.filter((id) => ctx.structHeapTypes.has(id));
-  if (alreadyBuilt.length > 0) {
-    const missing = scc.filter((id) => !ctx.structHeapTypes.has(id));
-    if (missing.length > 0) {
+const lowerHeapObjectFieldRuntimeType = ({
+  typeId,
+  ownerStructuralId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ownerStructuralId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.Type => {
+  const assertHeapCompatible = (candidate: binaryen.Type): binaryen.Type => {
+    if (binaryen.expandType(candidate).length > 1) {
       throw new Error(
-        `partial recursive heap type cache: built [${alreadyBuilt.join(
-          ",",
-        )}], missing [${missing.join(",")}]`,
+        `heap field lowered to multivalue type for owner ${ownerStructuralId}, field ${typeId}`,
       );
     }
-    return ctx.structHeapTypes.get(structuralId)!;
+    return candidate;
+  };
+  const inlineBoxType = getInlineHeapBoxType({
+    typeId,
+    ctx,
+    seen: new Set([ownerStructuralId]),
+    mode: "signature",
+  });
+  if (inlineBoxType) {
+    return assertHeapCompatible(inlineBoxType);
   }
-
-  try {
-    emitRecursiveStructuralHeapTypeGroup({
-      component: scc,
+  const abiTypes = flattenTypeToAbiTypes(
+    typeId,
+    ctx,
+    new Set([ownerStructuralId]),
+    "signature",
+  );
+  if (abiTypes.length > 1) {
+    const inlineBoxType = getInlineHeapBoxType({
+      typeId,
       ctx,
-      getDirectDeps: getDeps,
-      structNameFor: structuralHeapTypeName,
-      resolveStructuralTypeId: (typeId) => resolveStructuralTypeId(typeId, ctx),
-      ensureStructuralRuntimeType: (id) => ensureStructuralRuntimeType(id, ctx),
-      lowerNonStructural,
-      baseHeapType,
+      seen: new Set([ownerStructuralId]),
+      mode: "signature",
     });
-  } catch (error) {
-    if (error instanceof TypeBuilderBuildError) {
-      ctx.diagnostics.report({
-        code: "CG_RECURSIVE_HEAP_TYPE_BUILDER_FAILED",
-        phase: "codegen",
-        message: [
-          "failed to build recursive heap type group",
-          `module: ${ctx.moduleId}`,
-          `structural type: ${structuralId}`,
-          `error index: ${error.errorIndex}`,
-          `error reason: ${error.errorReason}`,
-        ].join("\n"),
-        span: { file: ctx.moduleId, start: 0, end: 0 },
-      });
+    if (inlineBoxType) {
+      return assertHeapCompatible(inlineBoxType);
     }
-    throw error;
+    return assertHeapCompatible(ensureAbiBoxType({
+      typeId,
+      abiTypes,
+      ctx,
+      label: `voyd_field_${ownerStructuralId}_${typeId}`,
+    }));
   }
-  const built = ctx.structHeapTypes.get(structuralId);
-  if (!built) {
-    throw new Error(
-      `failed to cache runtime heap type for structural id ${structuralId}`,
+  const fieldStructural = resolveStructuralTypeId(typeId, ctx);
+  if (typeof fieldStructural === "number") {
+    if (isStructurallyRecursive(fieldStructural, ctx)) {
+      return assertHeapCompatible(ensureStructuralRuntimeType(fieldStructural, ctx));
+    }
+    const info = getStructuralTypeInfo(
+      fieldStructural,
+      ctx,
+      new Set([ownerStructuralId]),
     );
+    if (info) {
+      return assertHeapCompatible(info.runtimeType);
+    }
   }
-  return built;
+  return assertHeapCompatible(
+    wasmTypeFor(typeId, ctx, new Set([ownerStructuralId]), "signature"),
+  );
 };
 
 const wasmStructFieldTypeFor = (
   typeId: TypeId,
   ctx: CodegenContext,
+  seen: Set<TypeId> = new Set(),
 ): binaryen.Type => {
-  return wasmHeapFieldTypeFor(typeId, ctx);
+  return wasmHeapFieldTypeFor(typeId, ctx, seen);
 };
 
 export const wasmHeapFieldTypeFor = (
@@ -670,11 +1474,42 @@ export const wasmHeapFieldTypeFor = (
   seen: Set<TypeId> = new Set(),
   mode: WasmTypeMode = "signature",
 ): binaryen.Type => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  const inlineBoxType = getInlineHeapBoxType({ typeId, ctx, seen, mode });
+  if (inlineBoxType) {
+    return inlineBoxType;
+  }
+  if (desc.kind === "value-object") {
+    const info = getStructuralTypeInfo(typeId, ctx, seen);
+    if (!info) {
+      throw new Error("missing structural type info for value object field");
+    }
+    return info.runtimeType;
+  }
+  if (desc.kind === "intersection") {
+    const nominalId = getNominalComponentId(typeId, ctx);
+    if (typeof nominalId === "number") {
+      const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
+      if (nominalDesc.kind === "value-object") {
+        const info = getStructuralTypeInfo(typeId, ctx, seen);
+        if (!info) {
+          throw new Error("missing structural type info for value intersection field");
+        }
+        return info.runtimeType;
+      }
+    }
+  }
   const structuralId = resolveStructuralTypeId(typeId, ctx);
   if (typeof structuralId === "number") {
-    return ensureStructuralRuntimeType(structuralId, ctx);
+    if (isStructurallyRecursive(structuralId, ctx)) {
+      return ensureStructuralRuntimeType(structuralId, ctx);
+    }
+    const info = getStructuralTypeInfo(typeId, ctx, seen);
+    if (!info) {
+      throw new Error("missing structural type info for heap field");
+    }
+    return info.runtimeType;
   }
-  const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "recursive") {
     // Avoid unfolding arbitrary recursive wrappers for field heap types; if a recursive
     // type doesn't resolve to a structural heap type, treat it conservatively.
@@ -705,6 +1540,18 @@ export const getSymbolTypeId = (
       ctx,
     )} (module ${ctx.moduleId}, symbol ${symbol})`,
   );
+};
+
+export const getDeclaredSymbolTypeId = (
+  symbol: SymbolId,
+  ctx: CodegenContext,
+  instanceId?: ProgramFunctionInstanceId,
+): TypeId => {
+  const typeId = ctx.module.types.getValueType(symbol);
+  if (typeof typeId === "number") {
+    return substituteTypeForInstance({ typeId, ctx, instanceId });
+  }
+  return getSymbolTypeId(symbol, ctx, instanceId);
 };
 
 const getInstanceExprType = (
@@ -834,7 +1681,7 @@ export const getStructuralTypeInfo = (
   seen: Set<TypeId> = new Set(),
 ): StructuralTypeInfo | undefined => {
   const typeDesc = ctx.program.types.getTypeDesc(typeId);
-  if (typeDesc.kind === "nominal-object") {
+  if (typeDesc.kind === "nominal-object" || typeDesc.kind === "value-object") {
     const info = ctx.program.objects.getInfoByNominal(typeId);
     if (info && info.type !== typeId) {
       return getStructuralTypeInfo(info.type, ctx, seen);
@@ -856,16 +1703,20 @@ export const getStructuralTypeInfo = (
     if (desc.kind !== "structural-object") {
       return undefined;
     }
-
-    const runtimeType = ensureStructuralRuntimeType(structuralId, ctx);
-
     const nominalId = getNominalComponentId(typeId, ctx);
+    const objectInfo =
+      typeof nominalId === "number"
+        ? ctx.program.objects.getInfoByNominal(nominalId)
+        : undefined;
     const substitution = (() => {
-      if (typeof nominalId !== "number") {
+      if (objectInfo || typeof nominalId !== "number") {
         return undefined;
       }
       const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
-      if (nominalDesc.kind !== "nominal-object") {
+      if (
+        nominalDesc.kind !== "nominal-object" &&
+        nominalDesc.kind !== "value-object"
+      ) {
         return undefined;
       }
       const owner = nominalDesc.owner;
@@ -886,24 +1737,13 @@ export const getStructuralTypeInfo = (
         ),
       );
     })();
-    const sourceFields = desc.fields;
-    const fields: StructuralFieldInfo[] = sourceFields.map((field, index) => {
-      const fieldTypeId =
-        substitution && substitution.size > 0
-          ? ctx.program.types.substitute(field.type, substitution)
-          : field.type;
-      const wasmType = wasmTypeFor(fieldTypeId, ctx, new Set(), "signature");
-      const heapWasmType = wasmStructFieldTypeFor(fieldTypeId, ctx);
-      return {
-        name: field.name,
-        typeId: fieldTypeId,
-        wasmType,
-        heapWasmType,
-        runtimeIndex: index + RTT_METADATA_SLOT_COUNT,
-        optional: field.optional,
-        hash: 0,
-      };
-    });
+
+    const nominalLayoutDesc =
+      typeof nominalId === "number"
+        ? ctx.program.types.getTypeDesc(nominalId)
+        : undefined;
+    const isValueLayout =
+      objectInfo?.objectKind === "value" || nominalLayoutDesc?.kind === "value-object";
     const nominalAncestry = getNominalAncestry(nominalId, ctx);
     const nominalAncestors = nominalAncestry.map((entry) => entry.nominalId);
     const typeLabel = makeRuntimeTypeLabel({
@@ -913,71 +1753,204 @@ export const getStructuralTypeInfo = (
       nominalId,
     });
     const runtimeTypeId = runtimeTypeIdFor(typeId, ctx);
-    const ancestors = buildRuntimeAncestors({
+    const provisionalInfo =
+      !isValueLayout
+        ? {
+            typeId,
+            layoutKind: "heap-object" as const,
+            runtimeTypeId,
+            structuralId,
+            nominalId,
+            nominalAncestors,
+            runtimeType: ctx.rtt.baseType,
+            interfaceType: ctx.rtt.baseType,
+            fields: [],
+            fieldMap: new Map<string, StructuralFieldInfo>(),
+            typeLabel,
+          }
+        : undefined;
+    if (provisionalInfo) {
+      ctx.structTypes.set(cacheKey, provisionalInfo);
+    }
+    let inlineStart = 0;
+    let valueRuntimeIndex = 0;
+    const fields: StructuralFieldInfo[] = desc.fields.map((field, index) => {
+      const fieldSeen = new Set(seen);
+      fieldSeen.add(typeId);
+      const fieldTypeId =
+        substitution &&
+        substitution.size > 0 &&
+        typeContainsUnresolvedParam({
+          typeId: field.type,
+          getTypeDesc: (candidate) => ctx.program.types.getTypeDesc(candidate),
+        })
+          ? ctx.program.types.substitute(field.type, substitution)
+          : field.type;
+      const wasmType = isValueLayout
+        ? wasmTypeFor(fieldTypeId, ctx, fieldSeen, "signature")
+        : wasmTypeFor(fieldTypeId, ctx, new Set(), "signature");
+      const heapWasmType = isValueLayout
+        ? wasmStructFieldTypeFor(fieldTypeId, ctx, fieldSeen)
+        : lowerHeapObjectFieldRuntimeType({
+            typeId: fieldTypeId,
+            ownerStructuralId: structuralId,
+            ctx,
+          });
+      const inlineWasmTypes = expandAbiTypes(wasmType);
+      const fieldInfo: StructuralFieldInfo = {
+        name: field.name,
+        typeId: fieldTypeId,
+        wasmType,
+        inlineWasmTypes,
+        inlineStart,
+        inlineArity: inlineWasmTypes.length,
+        heapWasmType,
+        runtimeIndex: isValueLayout
+          ? valueRuntimeIndex
+          : index + RTT_METADATA_SLOT_COUNT,
+        optional: field.optional,
+        hash: 0,
+      };
+      inlineStart += inlineWasmTypes.length;
+      if (isValueLayout) {
+        valueRuntimeIndex += inlineWasmTypes.length;
+      }
+      return fieldInfo;
+    });
+    const runtimeType = isValueLayout
+      ? defineStructType(ctx.mod, {
+          name: `${typeLabel}__value`,
+          fields: fields.flatMap((field) =>
+            field.inlineWasmTypes.map((type, fieldIndex) => ({
+              name: `${field.name}_${fieldIndex}`,
+              type,
+              mutable: true,
+            })),
+          ),
+          supertype: binaryenTypeToHeapType(ctx.rtt.rootType),
+          final: true,
+        })
+      : (() => {
+          const cachedRuntime = ctx.structHeapTypes.get(structuralId);
+          if (cachedRuntime) {
+            return cachedRuntime;
+          }
+          if (isStructurallyRecursive(structuralId, ctx)) {
+            return ensureStructuralRuntimeType(structuralId, ctx);
+          }
+          const runtime = defineStructType(ctx.mod, {
+            name: structuralHeapTypeName(structuralId),
+            fields: [
+              {
+                name: "__ancestors_table",
+                type: ctx.rtt.extensionHelpers.i32Array,
+                mutable: false,
+              },
+              {
+                name: "__field_index_table",
+                type: ctx.rtt.fieldLookupHelpers.lookupTableType,
+                mutable: false,
+              },
+              {
+                name: "__method_lookup_table",
+                type: ctx.rtt.methodLookupHelpers.lookupTableType,
+                mutable: false,
+              },
+              ...fields.map((field) => ({
+                name: field.name,
+                type: field.heapWasmType,
+                mutable: true,
+              })),
+            ],
+            supertype: binaryenTypeToHeapType(ctx.rtt.baseType),
+            final: true,
+          });
+          ctx.structHeapTypes.set(structuralId, runtime);
+          return runtime;
+        })();
+    const info: StructuralTypeInfo = provisionalInfo ?? {
       typeId,
-      structuralId,
-      nominalAncestry,
-      ctx,
-    });
-    const fieldTableExpr = ctx.rtt.fieldLookupHelpers.registerType({
-      typeLabel,
-      runtimeType,
-      baseType: ctx.rtt.baseType,
-      fields,
-    });
-    const methodEntries = createMethodLookupEntries({
-      impls:
-        typeof nominalId === "number"
-          ? instantiateTraitImplsForNominal({ nominal: nominalId, ctx })
-          : [],
-      ctx,
-      typeLabel,
-      runtimeType,
-    });
-    const methodTableExpr =
-      ctx.rtt.methodLookupHelpers.createTable(methodEntries);
-
-    const ancestorsGlobal = `__ancestors_table_${typeLabel}`;
-    ctx.mod.addGlobal(
-      ancestorsGlobal,
-      ctx.rtt.extensionHelpers.i32Array,
-      false,
-      ctx.rtt.extensionHelpers.initExtensionArray(ancestors),
-    );
-
-    const fieldTableGlobal = `__field_index_table_${typeLabel}`;
-    ctx.mod.addGlobal(
-      fieldTableGlobal,
-      ctx.rtt.fieldLookupHelpers.lookupTableType,
-      false,
-      fieldTableExpr,
-    );
-
-    const methodTableGlobal = `__method_table_${typeLabel}`;
-    ctx.mod.addGlobal(
-      methodTableGlobal,
-      ctx.rtt.methodLookupHelpers.lookupTableType,
-      false,
-      methodTableExpr,
-    );
-
-    const info: StructuralTypeInfo = {
-      typeId,
+      layoutKind: "value-object",
       runtimeTypeId,
       structuralId,
       nominalId,
       nominalAncestors,
       runtimeType,
-      interfaceType: ctx.rtt.baseType,
-      fields,
-      fieldMap: new Map(fields.map((field) => [field.name, field])),
-      ancestorsGlobal,
-      fieldTableGlobal,
-      methodTableGlobal,
+      interfaceType: abiTypeFor(fields.flatMap((field) => field.inlineWasmTypes)),
+      fields: [],
+      fieldMap: new Map<string, StructuralFieldInfo>(),
       typeLabel,
     };
+    info.runtimeType = runtimeType;
+    info.interfaceType = isValueLayout
+      ? abiTypeFor(fields.flatMap((field) => field.inlineWasmTypes))
+      : ctx.rtt.baseType;
+    info.fields = fields;
+    info.fieldMap = new Map(fields.map((field) => [field.name, field]));
     ctx.structTypes.set(cacheKey, info);
+
+    if (!isValueLayout) {
+      info.ancestorsGlobal = `__ancestors_table_${typeLabel}`;
+      info.fieldTableGlobal = `__field_index_table_${typeLabel}`;
+      info.methodTableGlobal = `__method_table_${typeLabel}`;
+      const structMetadataState =
+        ctx.programHelpers.getHelperState<StructMetadataState>(
+          STRUCT_METADATA_STATE,
+          () => ({ registered: new Set<string>() }),
+        );
+      const registered = structMetadataState.registered ?? new Set<string>();
+      structMetadataState.registered = registered;
+      if (!registered.has(typeLabel)) {
+        registered.add(typeLabel);
+        const ancestors = buildRuntimeAncestors({
+          typeId,
+          structuralId,
+          nominalAncestry,
+          ctx,
+        });
+        const fieldTableExpr = ctx.rtt.fieldLookupHelpers.registerType({
+          typeLabel,
+          runtimeType,
+          baseType: ctx.rtt.baseType,
+          fields,
+        });
+        const methodEntries = createMethodLookupEntries({
+          impls:
+            typeof nominalId === "number"
+              ? instantiateTraitImplsForNominal({ nominal: nominalId, ctx })
+              : [],
+          ctx,
+          typeLabel,
+          runtimeType,
+        });
+        const methodTableExpr =
+          ctx.rtt.methodLookupHelpers.createTable(methodEntries);
+
+        ctx.mod.addGlobal(
+          info.ancestorsGlobal,
+          ctx.rtt.extensionHelpers.i32Array,
+          false,
+          ctx.rtt.extensionHelpers.initExtensionArray(ancestors),
+        );
+        ctx.mod.addGlobal(
+          info.fieldTableGlobal,
+          ctx.rtt.fieldLookupHelpers.lookupTableType,
+          false,
+          fieldTableExpr,
+        );
+        ctx.mod.addGlobal(
+          info.methodTableGlobal,
+          ctx.rtt.methodLookupHelpers.lookupTableType,
+          false,
+          methodTableExpr,
+        );
+      }
+    }
+
     return info;
+  } catch (error) {
+    ctx.structTypes.delete(cacheKey);
+    throw error;
   } finally {
   }
 };
@@ -1008,7 +1981,7 @@ export const resolveStructuralTypeId = (
       if (desc.kind === "structural-object") {
         return typeId;
       }
-      if (desc.kind === "nominal-object") {
+      if (desc.kind === "nominal-object" || desc.kind === "value-object") {
         const info = ctx.program.objects.getInfoByNominal(typeId);
         if (info) {
           return info.structural;
@@ -1288,80 +2261,150 @@ const synthesizeConcreteFunctionMeta = ({
     return undefined;
   }
   const scheme = ctx.program.types.getScheme(signature.scheme);
-  if (scheme.params.length > 0) {
-    return undefined;
-  }
-
-  const instanceId = ctx.program.functions.getInstanceId(moduleId, symbol, []);
-  if (typeof instanceId !== "number") {
-    return undefined;
-  }
 
   const effectInfo = moduleView.effectsInfo.functions.get(symbol);
   if (!effectInfo) {
     return undefined;
   }
   const effectful = effectInfo.pure === false;
-  const instantiatedTypeId = ctx.program.types.instantiate(signature.scheme, []);
-  const instantiatedTypeDesc = ctx.program.types.getTypeDesc(instantiatedTypeId);
-  if (instantiatedTypeDesc.kind !== "function") {
+  const instantiations =
+    scheme.params.length === 0
+      ? (() => {
+          const instanceId = ctx.program.functions.getInstanceId(
+            moduleId,
+            symbol,
+            [],
+          );
+          return typeof instanceId === "number"
+            ? ([[instanceId, []]] as const)
+            : ([] as const);
+        })()
+      : Array.from(
+          ctx.program.functions.getInstantiationInfo(moduleId, symbol)?.entries() ??
+            [],
+        );
+  if (instantiations.length === 0) {
     return undefined;
   }
 
-  const userParamTypes = instantiatedTypeDesc.parameters.map((param) =>
-    wasmTypeFor(param.type, ctx, new Set(), "signature"),
-  );
-  const widened = ctx.effectsBackend.abi.widenSignature({
-    ctx,
-    effectful,
-    userParamTypes,
-    userResultType: wasmTypeFor(
-      instantiatedTypeDesc.returnType,
+  const bySymbol =
+    ctx.functions.get(moduleId) ?? new Map<number, FunctionMetadata[]>();
+
+  for (const [instanceId, typeArgs] of instantiations) {
+    const existing = bySymbol.get(symbol) ?? [];
+    if (existing.some((entry) => entry.instanceId === instanceId)) {
+      continue;
+    }
+
+    const reused = ctx.functionInstances.get(instanceId);
+    if (reused) {
+      bySymbol.set(symbol, [...existing, reused]);
+      continue;
+    }
+
+    const instantiatedTypeId = ctx.program.types.instantiate(
+      signature.scheme,
+      typeArgs,
+    );
+    const instantiatedTypeDesc = ctx.program.types.getTypeDesc(instantiatedTypeId);
+    if (instantiatedTypeDesc.kind !== "function") {
+      return;
+    }
+
+    const paramAbiKinds = instantiatedTypeDesc.parameters.map((param, index) =>
+      getOptimizedParamAbiKind({
+        typeId: param.type,
+        bindingKind: signature.parameters[index]?.bindingKind,
+        ctx,
+      }),
+    );
+    const paramAbiTypes = instantiatedTypeDesc.parameters.map((param, index) =>
+      getOptimizedAbiTypesForParam({
+        typeId: param.type,
+        bindingKind: signature.parameters[index]?.bindingKind,
+        ctx,
+      }),
+    );
+    const userParamTypes = paramAbiTypes.flat();
+    const resultAbiKind =
+      effectful
+        ? "direct"
+        : getOptimizedResultAbiKind({
+            typeId: instantiatedTypeDesc.returnType,
+            ctx,
+          });
+    const outParamType =
+      resultAbiKind === "out_ref"
+        ? getOptimizedAbiTypeForResult({
+            typeId: instantiatedTypeDesc.returnType,
+            ctx,
+          })
+        : undefined;
+    const resultAbiTypes =
+      resultAbiKind === "direct"
+        ? getAbiTypesForSignature(instantiatedTypeDesc.returnType, ctx)
+        : [];
+    const widened = ctx.effectsBackend.abi.widenSignature({
       ctx,
-      new Set(),
-      "signature",
-    ),
-  });
+      effectful,
+      userParamTypes: outParamType ? [outParamType, ...userParamTypes] : userParamTypes,
+      userResultType:
+        resultAbiKind === "out_ref"
+          ? binaryen.none
+          : getSignatureWasmType(instantiatedTypeDesc.returnType, ctx),
+    });
 
-  const metadata: FunctionMetadata = {
-    moduleId,
-    symbol,
-    wasmName: `${sanitizeIdentifierForWasm(
-      moduleView.hir.module.path,
-    )}__${sanitizeIdentifierForWasm(
-      symbolNameForModuleSymbol({ moduleId, symbol, ctx }),
-    )}_${symbol}`,
-    paramTypes: widened.paramTypes,
-    resultType: widened.resultType,
-    paramTypeIds: instantiatedTypeDesc.parameters.map((param) => param.type),
-    parameters: instantiatedTypeDesc.parameters.map((param, index) => ({
-      typeId: param.type,
-      label: param.label,
-      optional: param.optional,
-      name:
-        typeof functionItem.parameters[index]?.symbol === "number"
-          ? symbolNameForModuleSymbol({
-              moduleId,
-              symbol: functionItem.parameters[index]!.symbol,
-              ctx,
-            })
-          : undefined,
-    })),
-    resultTypeId: instantiatedTypeDesc.returnType,
-    typeArgs: [],
-    instanceId,
-    effectful,
-    effectRow: effectInfo.effectRow,
-  };
+    const metadata: FunctionMetadata = {
+      moduleId,
+      symbol,
+      wasmName:
+        `${sanitizeIdentifierForWasm(moduleView.hir.module.path)}__` +
+        `${sanitizeIdentifierForWasm(
+          symbolNameForModuleSymbol({ moduleId, symbol, ctx }),
+        )}_${symbol}` +
+        (typeArgs.length === 0
+          ? ""
+          : `__inst_${sanitizeIdentifierForWasm(typeArgs.join("_"))}`),
+      paramTypes: widened.paramTypes,
+      paramAbiTypes,
+      userParamOffset: widened.userParamOffset,
+      firstUserParamIndex:
+        widened.userParamOffset + (outParamType ? 1 : 0),
+      resultType: widened.resultType,
+      resultAbiTypes,
+      paramTypeIds: instantiatedTypeDesc.parameters.map((param) => param.type),
+      parameters: instantiatedTypeDesc.parameters.map((param, index) => ({
+        typeId: param.type,
+        label: param.label,
+        optional: param.optional,
+        name:
+          typeof functionItem.parameters[index]?.symbol === "number"
+            ? symbolNameForModuleSymbol({
+                moduleId,
+                symbol: functionItem.parameters[index]!.symbol,
+                ctx,
+              })
+            : undefined,
+        bindingKind: signature.parameters[index]?.bindingKind,
+      })),
+      paramAbiKinds,
+      resultTypeId: instantiatedTypeDesc.returnType,
+      resultAbiKind,
+      outParamType,
+      typeArgs,
+      instanceId,
+      effectful,
+      effectRow: effectInfo.effectRow,
+    };
 
-  const bySymbol = ctx.functions.get(moduleId) ?? new Map<number, FunctionMetadata[]>();
-  const existing = bySymbol.get(symbol) ?? [];
-  if (!existing.some((entry) => entry.instanceId === metadata.instanceId)) {
     bySymbol.set(symbol, [...existing, metadata]);
-    ctx.functions.set(moduleId, bySymbol);
-    ctx.functionInstances.set(metadata.instanceId, metadata);
+    ctx.functionInstances.set(instanceId, metadata);
   }
-  return metadata;
+
+  if (bySymbol.size > 0) {
+    ctx.functions.set(moduleId, bySymbol);
+  }
+  return bySymbol.get(symbol)?.[0];
 };
 
 const resolveTraitImplMethodMeta = ({
@@ -1396,6 +2439,14 @@ const resolveTraitImplMethodMeta = ({
     metas && metas.length > 0
       ? metas
       : (() => {
+          const registrationState =
+            ctx.programHelpers.getHelperState<FunctionMetadataRegistrationState>(
+              FUNCTION_METADATA_REGISTRATION_STATE,
+              () => ({ active: false }),
+            );
+          if (registrationState.active) {
+            return metas;
+          }
           const synthesized = synthesizeConcreteFunctionMeta({
             moduleId: implRef.moduleId,
             symbol: implRef.symbol,
@@ -1406,6 +2457,53 @@ const resolveTraitImplMethodMeta = ({
           }
           return ctx.functions.get(implRef.moduleId)?.get(implRef.symbol);
         })();
+
+  const pickPreferredMeta = (
+    candidates: readonly FunctionMetadata[] | undefined,
+  ): FunctionMetadata | undefined => {
+    if (!candidates || candidates.length === 0) {
+      return undefined;
+    }
+    return (
+      candidates.find((candidate) => {
+        const receiverTypeIndex = candidate.firstUserParamIndex;
+        return candidate.paramTypes[receiverTypeIndex] === runtimeType;
+      }) ?? candidates[0]
+    );
+  };
+
+  const receiverMatches = ({
+    receiverTypeId,
+    expectedTypeId,
+  }: {
+    receiverTypeId: TypeId | undefined;
+    expectedTypeId: TypeId;
+  }): boolean =>
+    typeof receiverTypeId === "number" &&
+    ctx.program.types.unify(receiverTypeId, expectedTypeId, {
+      location: ctx.module.hir.module.ast,
+      reason: "trait method metadata selection",
+      variance: "invariant",
+    }).ok;
+
+  const exactTargetMeta = pickPreferredMeta(
+    knownMetas?.filter((candidate) => candidate.paramTypeIds[0] === impl.target),
+  );
+  if (exactTargetMeta) {
+    return exactTargetMeta;
+  }
+
+  const invariantTargetMeta = pickPreferredMeta(
+    knownMetas?.filter((candidate) =>
+      receiverMatches({
+        receiverTypeId: candidate.paramTypeIds[0],
+        expectedTypeId: impl.target,
+      }),
+    ),
+  );
+  if (invariantTargetMeta) {
+    return invariantTargetMeta;
+  }
 
   const meta = pickTraitImplMethodMeta({
     metas: knownMetas,
@@ -1530,15 +2628,7 @@ const createMethodLookupEntries = ({
           `codegen missing receiver parameter type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
       }
-      const hiddenParamOffset = meta.effectful
-        ? Math.max(0, meta.paramTypes.length - meta.paramTypeIds.length)
-        : 0;
-      if (meta.effectful && meta.paramTypes.length < hiddenParamOffset + 1) {
-        throw new Error(
-          `codegen missing effectful receiver parameter type for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
-        );
-      }
-      const receiverTypeIndex = hiddenParamOffset;
+      const receiverTypeIndex = meta.firstUserParamIndex;
       const receiverType = meta.paramTypes[receiverTypeIndex];
       if (typeof receiverType !== "number") {
         throw new Error(
@@ -1548,7 +2638,7 @@ const createMethodLookupEntries = ({
       const userParamTypes = meta.paramTypes.slice(receiverTypeIndex + 1);
       if (
         meta.effectful &&
-        userParamTypes.length + receiverTypeIndex + 1 !== meta.paramTypes.length
+        userParamTypes.length + meta.firstUserParamIndex + 1 !== meta.paramTypes.length
       ) {
         throw new Error(
           `codegen malformed effectful parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
@@ -1556,7 +2646,7 @@ const createMethodLookupEntries = ({
       }
       if (
         !meta.effectful &&
-        userParamTypes.length + 1 !== meta.paramTypes.length
+        userParamTypes.length + meta.firstUserParamIndex + 1 !== meta.paramTypes.length
       ) {
         throw new Error(
           `codegen malformed parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
@@ -1595,16 +2685,24 @@ const createMethodLookupEntries = ({
         );
       }
       const handlerParamType = ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
+      const outParamTypes =
+        meta.resultAbiKind === "out_ref" && typeof meta.outParamType === "number"
+          ? [meta.outParamType]
+          : [];
       const params = dispatchEffectful
-        ? [handlerParamType, ctx.rtt.baseType, ...userParamTypes]
-        : [ctx.rtt.baseType, ...userParamTypes];
-      const receiverParamIndex = dispatchEffectful ? 1 : 0;
-      const firstUserParamIndex = dispatchEffectful ? 2 : 1;
+        ? [handlerParamType, ...outParamTypes, ctx.rtt.baseType, ...userParamTypes]
+        : [...outParamTypes, ctx.rtt.baseType, ...userParamTypes];
+      const receiverParamIndex =
+        (dispatchEffectful ? 1 : 0) + outParamTypes.length;
+      const firstUserParamIndex = receiverParamIndex + 1;
       const implCall = ctx.mod.call(
         meta.wasmName,
         [
           ...(meta.effectful
             ? [ctx.mod.local.get(0, handlerParamType)]
+            : []),
+          ...(outParamTypes.length > 0
+            ? [ctx.mod.local.get(dispatchEffectful ? 1 : 0, outParamTypes[0]!)]
             : []),
           refCast(
             ctx.mod,
@@ -1619,18 +2717,31 @@ const createMethodLookupEntries = ({
       );
       const wrapperResultType = dispatchEffectful
         ? ctx.effectsBackend.abi.effectfulResultType(ctx)
-        : meta.resultType;
+        : meta.resultAbiKind === "out_ref"
+          ? binaryen.none
+          : meta.resultType;
+      const wrappedValueType =
+        meta.resultAbiKind === "out_ref"
+          ? binaryen.none
+          : meta.resultType;
       const wrapperName = `${typeLabel}__method_${hashTraitSymbol}_${hashTraitMethod}_${implRef.symbol}`;
+      const wrapperLocals: binaryen.Type[] = [];
+      const wrapperParamType = binaryen.createType(params as number[]);
+      const wrapperScratch = {
+        locals: wrapperLocals,
+        nextLocalIndex: binaryen.expandType(wrapperParamType).length,
+      };
       const wrapper = ctx.mod.addFunction(
         wrapperName,
-        binaryen.createType(params as number[]),
+        wrapperParamType,
         wrapperResultType,
-        [],
+        wrapperLocals,
         dispatchEffectful && !meta.effectful
           ? wrapValueInOutcome({
               valueExpr: implCall,
-              valueType: meta.resultType,
+              valueType: wrappedValueType,
               ctx,
+              fnCtx: wrapperScratch,
             })
           : implCall,
       );
@@ -1689,7 +2800,7 @@ const getNominalComponentId = (
     );
     return getNominalComponentId(unfolded, ctx);
   }
-  if (desc.kind === "nominal-object") {
+  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
     return typeId;
   }
   if (desc.kind === "intersection" && typeof desc.nominal === "number") {

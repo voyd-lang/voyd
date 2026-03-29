@@ -91,6 +91,19 @@ export const analyzeExpr = ({
   };
 };
 
+const collectResumeSetupUses = ({
+  exprId,
+  ctx,
+}: {
+  exprId: HirExprId;
+  ctx: CodegenContext;
+}): ReadonlySet<SymbolId> =>
+  analyzeExpr({
+    exprId,
+    liveAfter: new Set<SymbolId>(),
+    ctx,
+  }).live;
+
 const setsEqual = <T>(a: ReadonlySet<T>, b: ReadonlySet<T>): boolean => {
   if (a.size !== b.size) return false;
   for (const value of a) {
@@ -319,6 +332,18 @@ const buildCfg = ({
       throw new Error(`invalid cfg edge from ${from}`);
     }
     node.succ.push(to);
+  };
+
+  const attachResumeDependency = ({
+    siteNodes,
+    uses,
+  }: {
+    siteNodes: readonly NodeId[];
+    uses: ReadonlySet<SymbolId>;
+  }): void => {
+    if (siteNodes.length === 0 || uses.size === 0) return;
+    const dependencyNode = addNode({ uses });
+    siteNodes.forEach((siteNodeId) => addEdge(siteNodeId, dependencyNode));
   };
 
   const nop = (): Subgraph => {
@@ -568,6 +593,10 @@ const buildCfg = ({
       case "match": {
         const join = addNode({});
         const discriminantGraph = buildExpr(expr.discriminant, flow);
+        const discriminantResumeUses = collectResumeSetupUses({
+          exprId: expr.discriminant,
+          ctx,
+        });
         let nextEntry: NodeId = join;
         const siteNodes: NodeId[] = [...discriminantGraph.siteNodes];
 
@@ -579,11 +608,28 @@ const buildCfg = ({
           addEdge(bindNode, nextEntry);
 
           const valueGraph = buildExpr(arm.value, flow);
+          attachResumeDependency({
+            siteNodes: valueGraph.siteNodes,
+            uses: discriminantResumeUses,
+          });
           valueGraph.exits.forEach((exit) => addEdge(exit, join));
           siteNodes.push(...valueGraph.siteNodes);
 
           if (typeof arm.guard === "number") {
             const guardGraph = buildExpr(arm.guard, flow);
+            const guardResumeUses = collectResumeSetupUses({
+              exprId: arm.guard,
+              ctx,
+            });
+            const setupUses = union(discriminantResumeUses, guardResumeUses);
+            attachResumeDependency({
+              siteNodes: valueGraph.siteNodes,
+              uses: setupUses,
+            });
+            attachResumeDependency({
+              siteNodes: guardGraph.siteNodes,
+              uses: discriminantResumeUses,
+            });
             guardGraph.exits.forEach((exit) => {
               addEdge(exit, valueGraph.entry);
               addEdge(exit, nextEntry);

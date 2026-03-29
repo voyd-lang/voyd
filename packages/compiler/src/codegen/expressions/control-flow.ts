@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
+import { refTest, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   CompiledExpression,
@@ -17,15 +17,33 @@ import {
   resolveLoopScope,
   withLoopScope,
 } from "../control-flow-stack.js";
-import { allocateTempLocal, declareLocal } from "../locals.js";
+import {
+  allocateTempLocal,
+  declareLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../locals.js";
 import { RTT_METADATA_SLOTS } from "../rtt/index.js";
 import {
-  getExprBinaryenType,
+  getInlineUnionLayout,
+  getOptionalLayoutInfo,
+  getRequiredExprType,
   getStructuralTypeInfo,
   getMatchPatternTypeId,
+  getTypeIdFromTypeExpr,
+  getUnresolvedExprType,
+  shouldInlineUnionLayout,
+  wasmTypeFor,
 } from "../types.js";
 import { compilePatternInitializationFromValue } from "../patterns.js";
-import { coerceToBinaryenType } from "./utils.js";
+import { asStatement, coerceToBinaryenType } from "./utils.js";
+import {
+  coerceValueToType,
+  storeValueIntoStorageRef,
+} from "../structural.js";
+import { coerceExprToWasmType } from "../wasm-type-coercions.js";
+import { captureMultivalueLanes } from "../multivalue.js";
+import { tryCompileProjectedOptionalPayloadBinding } from "../projected-element-views.js";
 import type {
   HirBreakExpr,
   HirContinueExpr,
@@ -73,7 +91,7 @@ const getNominalComponent = (
   ctx: CodegenContext,
 ): TypeId | undefined => {
   const desc = ctx.program.types.getTypeDesc(type);
-  if (desc.kind === "nominal-object") {
+  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
     return type;
   }
   if (desc.kind === "intersection") {
@@ -87,6 +105,125 @@ const getNominalComponent = (
   return undefined;
 };
 
+const getValueSourceTypeId = (
+  exprId: number,
+  ctx: CodegenContext,
+  instanceId?: FunctionContext["typeInstanceId"],
+): TypeId => {
+  let currentExprId = exprId;
+  while (true) {
+    const expr = ctx.module.hir.expressions.get(currentExprId);
+    if (expr?.exprKind === "object-literal") {
+      if (expr.literalKind === "nominal" && typeof expr.targetSymbol === "number") {
+        const canonicalTarget = ctx.program.symbols.canonicalIdOf(
+          ctx.moduleId,
+          expr.targetSymbol,
+        );
+        const template = ctx.program.objects.getTemplate(canonicalTarget);
+        if (template) {
+          return template.type;
+        }
+      }
+      if (expr.literalKind === "nominal" && expr.target) {
+        return getTypeIdFromTypeExpr(expr.target, ctx);
+      }
+      return getRequiredExprType(currentExprId, ctx, instanceId);
+    }
+    if (!expr || expr.exprKind !== "block" || typeof expr.value !== "number") {
+      return getUnresolvedExprType(currentExprId, ctx, instanceId);
+    }
+    currentExprId = expr.value;
+  }
+};
+
+const expressionUsesExpectedResultType = ({
+  exprId,
+  ctx,
+}: {
+  exprId: number;
+  ctx: CodegenContext;
+}): boolean => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (!expr) {
+    return false;
+  }
+  switch (expr.exprKind) {
+    case "identifier":
+    case "call":
+    case "method-call":
+    case "block":
+    case "if":
+    case "match":
+    case "effect-handler":
+      return true;
+    default:
+      return false;
+  }
+};
+
+const normalizeOutResultStorageForwarding = ({
+  compiled,
+}: {
+  compiled: CompiledExpression;
+}): CompiledExpression => {
+  if (compiled.usedOutResultStorageRef) {
+    return {
+      ...compiled,
+      usedOutResultStorageRef: true,
+    };
+  }
+  return compiled;
+};
+
+const lowerToOutResultStorageIfNeeded = ({
+  compiled,
+  exprId,
+  resultTypeId,
+  outResultStorageRef,
+  ctx,
+  fnCtx,
+}: {
+  compiled: CompiledExpression;
+  exprId: number;
+  resultTypeId: TypeId;
+  outResultStorageRef?: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): CompiledExpression => {
+  const normalized = normalizeOutResultStorageForwarding({ compiled });
+  if (
+    typeof outResultStorageRef !== "number" ||
+    normalized.usedOutResultStorageRef
+  ) {
+    return normalized;
+  }
+
+  const actualTypeId = expressionUsesExpectedResultType({
+    exprId,
+    ctx,
+  })
+    ? resultTypeId
+    : getValueSourceTypeId(exprId, ctx, fnCtx.typeInstanceId ?? fnCtx.instanceId);
+  const coerced = coerceValueToType({
+    value: normalized.expr,
+    actualType: actualTypeId,
+    targetType: resultTypeId,
+    ctx,
+    fnCtx,
+  });
+  return {
+    expr: storeValueIntoStorageRef({
+      pointer: () => outResultStorageRef,
+      value: coerced,
+      typeId: resultTypeId,
+      ctx,
+      fnCtx,
+    }),
+    usedReturnCall: normalized.usedReturnCall,
+    usedOutResultStorageRef: true,
+  };
+};
+
 export const compileIfExpr = (
   expr: HirIfExpr,
   ctx: CodegenContext,
@@ -94,9 +231,33 @@ export const compileIfExpr = (
   compileExpr: ExpressionCompiler,
   tailPosition: boolean,
   expectedResultTypeId?: TypeId,
+  outResultStorageRef?: binaryen.ExpressionRef,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const resultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultType = wasmTypeFor(resultTypeId, ctx);
+  const coerceBranchValue = ({
+    compiled,
+    exprId,
+  }: {
+    compiled: CompiledExpression;
+    exprId: number;
+  }): binaryen.ExpressionRef => {
+    const actualTypeId = expressionUsesExpectedResultType({
+      exprId,
+      ctx,
+    })
+      ? resultTypeId
+      : getValueSourceTypeId(exprId, ctx, typeInstanceId);
+    return coerceValueToType({
+      value: compiled.expr,
+      actualType: actualTypeId,
+      targetType: resultTypeId,
+      ctx,
+      fnCtx,
+    });
+  };
   let fallback =
     typeof expr.defaultBranch === "number"
       ? compileExpr({
@@ -104,7 +265,8 @@ export const compileIfExpr = (
           ctx,
           fnCtx,
           tailPosition,
-          expectedResultTypeId,
+          expectedResultTypeId: resultTypeId,
+          outResultStorageRef,
         })
       : undefined;
 
@@ -114,6 +276,30 @@ export const compileIfExpr = (
 
   if (!fallback) {
     fallback = { expr: ctx.mod.nop(), usedReturnCall: false };
+  } else {
+    fallback = lowerToOutResultStorageIfNeeded({
+      compiled: fallback,
+      exprId: expr.defaultBranch!,
+      resultTypeId,
+      outResultStorageRef,
+      ctx,
+      fnCtx,
+    });
+    if (!fallback.usedOutResultStorageRef && typeof expr.defaultBranch === "number") {
+      const coercedFallback = coerceBranchValue({
+        compiled: fallback,
+        exprId: expr.defaultBranch,
+      });
+      fallback = {
+        expr: coerceToBinaryenType(
+          ctx,
+          coercedFallback,
+          resultType,
+          fnCtx,
+        ),
+        usedReturnCall: fallback.usedReturnCall,
+      };
+    }
   }
 
   for (let index = expr.branches.length - 1; index >= 0; index -= 1) {
@@ -128,16 +314,47 @@ export const compileIfExpr = (
       ctx,
       fnCtx,
       tailPosition,
-      expectedResultTypeId,
+      expectedResultTypeId: resultTypeId,
+      outResultStorageRef,
     });
-    const typedThen = coerceToBinaryenType(ctx, value.expr, resultType);
-    const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
+    const loweredValue = lowerToOutResultStorageIfNeeded({
+      compiled: value,
+      exprId: branch.value,
+      resultTypeId,
+      outResultStorageRef,
+      ctx,
+      fnCtx,
+    });
+    if (
+      loweredValue.usedOutResultStorageRef &&
+      fallback.usedOutResultStorageRef
+    ) {
+      fallback = {
+        expr: ctx.mod.if(condition, loweredValue.expr, fallback.expr),
+        usedReturnCall: loweredValue.usedReturnCall && fallback.usedReturnCall,
+        usedOutResultStorageRef: true,
+      };
+      continue;
+    }
+    if (loweredValue.usedOutResultStorageRef || fallback.usedOutResultStorageRef) {
+      throw new Error("mixed out-result forwarding in if expression");
+    }
+    const coercedThen = coerceBranchValue({
+      compiled: value,
+      exprId: branch.value,
+    });
+    const typedThen = coerceToBinaryenType(
+      ctx,
+      coercedThen,
+      resultType,
+      fnCtx,
+    );
+    const typedElse: binaryen.ExpressionRef = fallback.expr;
     fallback = {
       expr: ctx.mod.if(condition, typedThen, typedElse),
       usedReturnCall: value.usedReturnCall && fallback.usedReturnCall,
     };
   }
-
   return fallback;
 };
 
@@ -148,20 +365,52 @@ export const compileMatchExpr = (
   compileExpr: ExpressionCompiler,
   tailPosition: boolean,
   expectedResultTypeId?: TypeId,
+  outResultStorageRef?: binaryen.ExpressionRef,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
-  const discriminantType = getExprBinaryenType(
-    expr.discriminant,
+  const resultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultType = wasmTypeFor(resultTypeId, ctx);
+  const discriminantTypeId = getRequiredExprType(expr.discriminant, ctx, typeInstanceId);
+  const discriminantType = wasmTypeFor(discriminantTypeId, ctx);
+  const discriminantTemp = allocateTempLocal(
+    discriminantType,
+    fnCtx,
+    discriminantTypeId,
     ctx,
-    typeInstanceId,
   );
-  const discriminantTemp = allocateTempLocal(discriminantType, fnCtx);
-  const discriminantValue = compileExpr({
-    exprId: expr.discriminant,
+  const discriminantValue = coerceValueToType({
+    value: compileExpr({
+      exprId: expr.discriminant,
+      ctx,
+      fnCtx,
+      expectedResultTypeId: discriminantTypeId,
+    }).expr,
+    actualType: discriminantTypeId,
+    targetType: discriminantTypeId,
     ctx,
     fnCtx,
-  }).expr;
+  });
+  const inlineDiscriminantLayout = shouldInlineUnionLayout(discriminantTypeId, ctx)
+    ? getInlineUnionLayout(discriminantTypeId, ctx)
+    : undefined;
+  const discriminantLaneTemps =
+    inlineDiscriminantLayout && inlineDiscriminantLayout.abiTypes.length > 1
+      ? inlineDiscriminantLayout.abiTypes.map((type) =>
+          allocateTempLocal(type, fnCtx),
+        )
+      : undefined;
+  const loadStoredDiscriminant = (): binaryen.ExpressionRef => {
+    if (discriminantLaneTemps) {
+      const lanes = discriminantLaneTemps.map((lane) =>
+        loadLocalValue(lane, ctx),
+      );
+      return lanes.length === 1
+        ? lanes[0]!
+        : ctx.mod.tuple.make(lanes as binaryen.ExpressionRef[]);
+    }
+    return loadLocalValue(discriminantTemp, ctx);
+  };
 
   const patternTypeIdFor = (pattern: HirPattern): TypeId | undefined => {
     if (pattern.kind === "wildcard") return undefined;
@@ -195,10 +444,43 @@ export const compileMatchExpr = (
     return dupes;
   })();
 
-  const initDiscriminant = ctx.mod.local.set(
-    discriminantTemp.index,
-    discriminantValue,
-  );
+  const initDiscriminant = discriminantLaneTemps
+    ? (() => {
+        const captured = captureMultivalueLanes({
+          value: coerceExprToWasmType({
+            expr: discriminantValue,
+            targetType: inlineDiscriminantLayout!.interfaceType,
+            ctx,
+          }),
+          abiTypes: inlineDiscriminantLayout!.abiTypes,
+          ctx,
+          fnCtx,
+        });
+        return ctx.mod.block(
+          null,
+          [
+            ...captured.setup,
+            ...discriminantLaneTemps.map((lane, index) =>
+              storeLocalValue({
+                binding: lane,
+                value: captured.lanes[index]!,
+                ctx,
+                fnCtx,
+              }),
+            ),
+          ],
+          binaryen.none,
+        );
+      })()
+    : storeLocalValue({
+        binding: discriminantTemp,
+        value: discriminantValue,
+        ctx,
+        fnCtx,
+      });
+  const discriminantExpr = ctx.module.hir.expressions.get(expr.discriminant);
+  const discriminantSymbol =
+    discriminantExpr?.exprKind === "identifier" ? discriminantExpr.symbol : undefined;
 
   let chain: CompiledExpression | undefined;
   for (let index = expr.arms.length - 1; index >= 0; index -= 1) {
@@ -209,16 +491,47 @@ export const compileMatchExpr = (
       declarePatternLocals(arm.pattern, ctx, fnCtx);
     }
 
-    const armValue = compileExpr({
-      exprId: arm.value,
-      ctx,
-      fnCtx,
-      tailPosition,
-      expectedResultTypeId,
-    });
-
     if (arm.pattern.kind === "wildcard") {
-      chain = armValue;
+      const armValue = normalizeOutResultStorageForwarding({
+        compiled: compileExpr({
+          exprId: arm.value,
+          ctx,
+          fnCtx,
+          tailPosition,
+          expectedResultTypeId: resultTypeId,
+          outResultStorageRef,
+        }),
+      });
+      if (armValue.usedOutResultStorageRef) {
+        chain = {
+          expr: armValue.expr,
+          usedReturnCall: armValue.usedReturnCall,
+          usedOutResultStorageRef: true,
+        };
+        continue;
+      }
+      const armValueExpr = armValue;
+      const armTypeId = expressionUsesExpectedResultType({
+        exprId: arm.value,
+        ctx,
+      })
+        ? resultTypeId
+        : getValueSourceTypeId(arm.value, ctx, typeInstanceId);
+      chain = {
+        expr: coerceToBinaryenType(
+          ctx,
+          coerceValueToType({
+            value: armValueExpr.expr,
+            actualType: armTypeId,
+            targetType: resultTypeId,
+            ctx,
+            fnCtx,
+          }),
+          resultType,
+          fnCtx,
+        ),
+        usedReturnCall: armValueExpr.usedReturnCall,
+      };
       continue;
     }
 
@@ -231,26 +544,116 @@ export const compileMatchExpr = (
 
     const condition = compileMatchCondition(
       patternTypeId,
+      discriminantTypeId,
+      loadStoredDiscriminant,
       discriminantTemp,
       ctx,
       duplicateNominals,
     );
 
+    const discriminantOptionalInfo = shouldInlineUnionLayout(discriminantTypeId, ctx)
+      ? getOptionalLayoutInfo(discriminantTypeId, ctx)
+      : undefined;
+    const optionalSomePayload =
+      discriminantOptionalInfo &&
+      patternTypeId === discriminantOptionalInfo.someType
+        ? (() => {
+            const someLayout = getInlineUnionLayout(discriminantTypeId, ctx).members.find(
+              (member) => member.typeId === discriminantOptionalInfo.someType,
+            );
+            if (!someLayout) {
+              throw new Error("inline optional layout is missing Some member");
+            }
+            const discriminantValue = loadStoredDiscriminant();
+            if (someLayout.abiTypes.length === 0) {
+              return ctx.mod.nop();
+            }
+            if (someLayout.abiTypes.length === 1) {
+              return ctx.mod.tuple.extract(discriminantValue, someLayout.abiStart);
+            }
+            return ctx.mod.tuple.make(
+              someLayout.abiTypes.map((_, index) =>
+                ctx.mod.tuple.extract(
+                  discriminantValue,
+                  someLayout.abiStart + index,
+                ),
+              ),
+            );
+          })()
+        : undefined;
     const bindingOps: binaryen.ExpressionRef[] = [];
+    const narrowedDiscriminant = (): binaryen.ExpressionRef =>
+      shouldInlineUnionLayout(discriminantTypeId, ctx)
+        ? coerceValueToType({
+            value: loadStoredDiscriminant(),
+            actualType: discriminantTypeId,
+            targetType: patternTypeId,
+            ctx,
+            fnCtx,
+          })
+        : coerceExprToWasmType({
+            expr: loadStoredDiscriminant(),
+            targetType: wasmTypeFor(patternTypeId, ctx),
+            ctx,
+          });
     if (arm.pattern.kind === "type" && arm.pattern.binding) {
-      compilePatternInitializationFromValue({
-        pattern: arm.pattern.binding,
-        value: ctx.mod.local.get(discriminantTemp.index, discriminantTemp.type),
-        valueTypeId: patternTypeId,
-        ctx,
-        fnCtx,
-        ops: bindingOps,
-        options: { declare: true },
-      });
+      const projectedOptionalPayloadOps =
+        typeof optionalSomePayload !== "undefined"
+          ? tryCompileProjectedOptionalPayloadBinding({
+              pattern: arm.pattern.binding,
+              optionalExprId: expr.discriminant,
+              armValueExprId: arm.value,
+              ctx,
+              fnCtx,
+              compileExpr,
+            })
+          : undefined;
+      if (projectedOptionalPayloadOps) {
+        bindingOps.push(...projectedOptionalPayloadOps);
+      } else if (
+        typeof optionalSomePayload !== "undefined" &&
+        arm.pattern.binding.kind === "identifier"
+      ) {
+        compilePatternInitializationFromValue({
+          pattern: arm.pattern.binding,
+          value: optionalSomePayload,
+          valueTypeId: discriminantOptionalInfo!.innerType,
+          ctx,
+          fnCtx,
+          ops: bindingOps,
+          options: { declare: true },
+        });
+      } else if (
+        typeof optionalSomePayload !== "undefined" &&
+        arm.pattern.binding.kind === "destructure" &&
+        !arm.pattern.binding.spread &&
+        arm.pattern.binding.fields.length === 1 &&
+        arm.pattern.binding.fields[0]!.name === "value"
+      ) {
+        compilePatternInitializationFromValue({
+          pattern: arm.pattern.binding.fields[0]!.pattern,
+          value: optionalSomePayload,
+          valueTypeId: discriminantOptionalInfo!.innerType,
+          ctx,
+          fnCtx,
+          ops: bindingOps,
+          options: { declare: true },
+        });
+      } else {
+        compilePatternInitializationFromValue({
+          pattern: arm.pattern.binding,
+          value: narrowedDiscriminant(),
+          valueTypeId: patternTypeId,
+          ctx,
+          fnCtx,
+          ops: bindingOps,
+          options: { declare: true },
+        });
+      }
     } else if (arm.pattern.kind !== "type") {
       compilePatternInitializationFromValue({
         pattern: arm.pattern,
-        value: ctx.mod.local.get(discriminantTemp.index, discriminantTemp.type),
+        value: narrowedDiscriminant(),
         valueTypeId: patternTypeId,
         ctx,
         fnCtx,
@@ -258,6 +661,65 @@ export const compileMatchExpr = (
         options: { declare: true },
       });
     }
+
+    let restoreDiscriminantBinding: (() => void) | undefined;
+    if (typeof discriminantSymbol === "number") {
+      const narrowedBinding = allocateTempLocal(
+        wasmTypeFor(patternTypeId, ctx),
+        fnCtx,
+        patternTypeId,
+        ctx,
+      );
+      bindingOps.push(
+        storeLocalValue({
+          binding: narrowedBinding,
+          value: coerceValueToType({
+            value: narrowedDiscriminant(),
+            actualType: patternTypeId,
+            targetType: patternTypeId,
+            ctx,
+            fnCtx,
+          }),
+          ctx,
+          fnCtx,
+        }),
+      );
+      const originalBinding = fnCtx.bindings.get(discriminantSymbol);
+      fnCtx.bindings.set(discriminantSymbol, {
+        ...narrowedBinding,
+        kind: "local",
+        typeId: patternTypeId,
+      });
+      restoreDiscriminantBinding = () => {
+        if (originalBinding) {
+          fnCtx.bindings.set(discriminantSymbol, originalBinding);
+          return;
+        }
+        fnCtx.bindings.delete(discriminantSymbol);
+      };
+    }
+
+    const armValue = (() => {
+      try {
+        return lowerToOutResultStorageIfNeeded({
+          compiled: compileExpr({
+            exprId: arm.value,
+            ctx,
+            fnCtx,
+            tailPosition,
+            expectedResultTypeId: resultTypeId,
+            outResultStorageRef,
+          }),
+          exprId: arm.value,
+          resultTypeId,
+          outResultStorageRef,
+          ctx,
+          fnCtx,
+        });
+      } finally {
+        restoreDiscriminantBinding?.();
+      }
+    })();
 
     const armExpr =
       bindingOps.length === 0
@@ -269,6 +731,7 @@ export const compileMatchExpr = (
               binaryen.getExpressionType(armValue.expr),
             ),
             usedReturnCall: armValue.usedReturnCall,
+            usedOutResultStorageRef: armValue.usedOutResultStorageRef,
           };
 
     const fallback =
@@ -276,10 +739,37 @@ export const compileMatchExpr = (
       ({
         expr: ctx.mod.unreachable(),
         usedReturnCall: false,
+        usedOutResultStorageRef:
+          typeof outResultStorageRef === "number" ? true : undefined,
       } as CompiledExpression);
 
-    const typedThen = coerceToBinaryenType(ctx, armExpr.expr, resultType);
-    const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
+    if (armExpr.usedOutResultStorageRef && fallback.usedOutResultStorageRef) {
+      chain = {
+        expr: ctx.mod.if(condition, armExpr.expr, fallback.expr),
+        usedReturnCall: armExpr.usedReturnCall && fallback.usedReturnCall,
+        usedOutResultStorageRef: true,
+      };
+      continue;
+    }
+    if (armExpr.usedOutResultStorageRef || fallback.usedOutResultStorageRef) {
+      throw new Error("mixed out-result forwarding in match expression");
+    }
+
+    const armTypeId = expressionUsesExpectedResultType({
+      exprId: arm.value,
+      ctx,
+    })
+      ? resultTypeId
+      : getValueSourceTypeId(arm.value, ctx, typeInstanceId);
+    const coercedThen = coerceValueToType({
+      value: armExpr.expr,
+      actualType: armTypeId,
+      targetType: resultTypeId,
+      ctx,
+      fnCtx,
+    });
+    const typedThen = coerceToBinaryenType(ctx, coercedThen, resultType, fnCtx);
+    const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType, fnCtx);
 
     chain = {
       expr: ctx.mod.if(condition, typedThen, typedElse),
@@ -293,17 +783,65 @@ export const compileMatchExpr = (
   };
 
   return {
-    expr: ctx.mod.block(null, [initDiscriminant, finalExpr.expr], resultType),
+    expr: ctx.mod.block(
+      null,
+      [initDiscriminant, finalExpr.expr],
+      finalExpr.usedOutResultStorageRef ? binaryen.none : resultType,
+    ),
     usedReturnCall: finalExpr.usedReturnCall,
+    usedOutResultStorageRef: finalExpr.usedOutResultStorageRef,
   };
 };
 
 const compileMatchCondition = (
   patternTypeId: TypeId,
+  discriminantTypeId: TypeId,
+  loadDiscriminant: () => binaryen.ExpressionRef,
   discriminant: LocalBindingLocal,
   ctx: CodegenContext,
   duplicateNominals: ReadonlySet<TypeId>,
 ): binaryen.ExpressionRef => {
+  if (
+    shouldInlineUnionLayout(discriminantTypeId, ctx)
+  ) {
+    const layout = getInlineUnionLayout(discriminantTypeId, ctx);
+    const tagValue =
+      layout.abiTypes.length === 1
+        ? loadDiscriminant()
+        : ctx.mod.tuple.extract(
+            loadDiscriminant(),
+            0,
+          );
+    const collectTargets = (
+      typeId: TypeId,
+      seen: Set<TypeId>,
+      targets: TypeId[],
+    ): void => {
+      if (seen.has(typeId)) {
+        return;
+      }
+      seen.add(typeId);
+      const desc = ctx.program.types.getTypeDesc(typeId);
+      if (desc.kind === "union") {
+        desc.members.forEach((member) => collectTargets(member, seen, targets));
+        return;
+      }
+      targets.push(typeId);
+    };
+    const targets: TypeId[] = [];
+    collectTargets(patternTypeId, new Set<TypeId>(), targets);
+    const conditions = targets
+      .map((target) => layout.members.find((member) => member.typeId === target))
+      .filter((member): member is NonNullable<typeof member> => Boolean(member))
+      .map((member) => ctx.mod.i32.eq(tagValue, ctx.mod.i32.const(member.tag)));
+    if (conditions.length === 0) {
+      throw new Error("match pattern requires an inline union member");
+    }
+    return conditions.reduce(
+      (condition, test) => ctx.mod.i32.or(condition, test),
+      conditions[0]!,
+    );
+  }
   const patternNominals = new Set<TypeId>();
   collectNominalComponents(patternTypeId, ctx, patternNominals);
   const useStrict = Array.from(patternNominals).some((nominal) =>
@@ -314,13 +852,20 @@ const compileMatchCondition = (
       mod: ctx.mod,
       fieldType: ctx.rtt.extensionHelpers.i32Array,
       fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
-      exprRef: ctx.mod.local.get(discriminant.index, discriminant.type),
+      exprRef: loadLocalValue(discriminant, ctx),
     });
 
   const compileTypeTest = (typeId: TypeId): binaryen.ExpressionRef => {
     const structInfo = getStructuralTypeInfo(typeId, ctx);
     if (!structInfo) {
       throw new Error("match pattern requires a structural type");
+    }
+    if (structInfo.layoutKind === "value-object") {
+      return refTest(
+        ctx.mod,
+        loadLocalValue(discriminant, ctx),
+        structInfo.runtimeType,
+      );
     }
 
     return ctx.mod.call(
@@ -445,11 +990,7 @@ export const compileBreakExpr = (
 
   if (typeof expr.value === "number") {
     const valueExpr = compileExpr({ exprId: expr.value, ctx, fnCtx }).expr;
-    ops.push(
-      binaryen.getExpressionType(valueExpr) === binaryen.none
-        ? valueExpr
-        : ctx.mod.drop(valueExpr),
-    );
+    ops.push(asStatement(ctx, valueExpr, fnCtx));
   }
   ops.push(ctx.mod.br(target.breakLabel));
 

@@ -171,6 +171,13 @@ const signatureTypeKeyForInternal = ({
           )
           .join(",")}>`;
         break;
+      case "value-object":
+        baseKey = `value:${desc.owner}<${desc.typeArgs
+          .map((arg) =>
+            signatureTypeKeyForInternal({ typeId: arg, ctx, active, binders }),
+          )
+          .join(",")}>`;
+        break;
       case "trait":
         baseKey = `trait:${desc.owner}<${desc.typeArgs
           .map((arg) =>

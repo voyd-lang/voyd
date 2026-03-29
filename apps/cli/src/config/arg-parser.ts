@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
 
 const DOC_FORMATS = ["html", "json"] as const;
+const MAIN_OPTIONS_WITH_VALUES = ["--pkg-dir", "--entry"] as const;
 
 const appendOptionValue = (value: string, previous: string[]): string[] => [
   ...previous,
@@ -35,6 +36,37 @@ const createBaseCommand = ({
     .version(version, "-v, --version", "display the current version")
     .helpOption("-h, --help", "display help for command")
     .allowExcessArguments();
+
+const findFirstPositionalArg = (
+  args: readonly string[],
+  optionsWithValues: ReadonlySet<string>,
+): string | undefined => {
+  let index = 0;
+  while (index < args.length) {
+    const arg = args[index]!;
+
+    if (arg === "--") {
+      return args[index + 1];
+    }
+
+    if (optionsWithValues.has(arg)) {
+      index += 2;
+      continue;
+    }
+
+    const optionWithInlineValue = Array.from(optionsWithValues).some((option) =>
+      arg.startsWith(`${option}=`),
+    );
+    if (optionWithInlineValue || arg.startsWith("-")) {
+      index += 1;
+      continue;
+    }
+
+    return arg;
+  }
+
+  return undefined;
+};
 
 const parseMainConfig = (argv: readonly string[]): VoydConfig => {
   const program = createBaseCommand({
@@ -79,7 +111,10 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
 
   program.parse(["node", "voyd", ...argv]);
   const opts = program.opts();
-  const [indexArg] = program.args as [string?];
+  const indexArg = findFirstPositionalArg(
+    argv,
+    new Set(MAIN_OPTIONS_WITH_VALUES),
+  );
 
   return {
     index: indexArg ?? "./src",
@@ -166,7 +201,7 @@ const parseDocConfig = (argv: readonly string[]): VoydConfig => {
 };
 
 const findSubcommandIndex = (args: readonly string[]): number => {
-  const optionsWithValues = new Set(["--pkg-dir", "--entry"]);
+  const optionsWithValues: ReadonlySet<string> = new Set(MAIN_OPTIONS_WITH_VALUES);
 
   let index = 0;
   while (index < args.length) {

@@ -13,7 +13,7 @@ export const reportInvalidTypeDeclarationName = ({
   name,
   ctx,
 }: {
-  declarationKind: "type alias" | "obj" | "trait" | "effect";
+  declarationKind: "type alias" | "obj" | "value" | "trait" | "effect";
   name: IdentifierAtom;
   ctx: BindingContext;
 }): void => {

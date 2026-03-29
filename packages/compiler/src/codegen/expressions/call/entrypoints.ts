@@ -31,7 +31,11 @@ export const compileCallExpr = (
   compileExpr: ExpressionCompiler,
   options: CompileCallOptions = {}
 ): CompiledExpression => {
-  const { tailPosition = false, expectedResultTypeId } = options;
+  const {
+    tailPosition = false,
+    expectedResultTypeId,
+    outResultStorageRef,
+  } = options;
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const callInstanceId = fnCtx.instanceId ?? typeInstanceId;
 
@@ -81,6 +85,7 @@ export const compileCallExpr = (
       tailPosition,
       expectedResultTypeId,
       typeInstanceId,
+      outResultStorageRef,
     });
   }
 
@@ -120,6 +125,7 @@ export const compileCallExpr = (
         tailPosition,
         expectedResultTypeId,
         typeInstanceId,
+        outResultStorageRef,
       });
     }
 
@@ -132,6 +138,7 @@ export const compileCallExpr = (
           compileExpr,
           tailPosition,
           expectedResultTypeId,
+          outResultStorageRef,
         })
       : undefined;
     if (traitDispatch) {
@@ -195,6 +202,7 @@ export const compileCallExpr = (
         tailPosition,
         expectedResultTypeId,
         typeInstanceId,
+        outResultStorageRef,
       },
     });
     if (inlined) {
@@ -210,6 +218,7 @@ export const compileCallExpr = (
           tailPosition,
           expectedResultTypeId,
           typeInstanceId,
+          outResultStorageRef,
         },
       });
     }
@@ -250,7 +259,11 @@ export const compileMethodCallExpr = (
   compileExpr: ExpressionCompiler,
   options: CompileCallOptions = {}
 ): CompiledExpression => {
-  const { tailPosition = false, expectedResultTypeId } = options;
+  const {
+    tailPosition = false,
+    expectedResultTypeId,
+    outResultStorageRef,
+  } = options;
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const callInstanceId = fnCtx.instanceId ?? typeInstanceId;
 
@@ -276,6 +289,7 @@ export const compileMethodCallExpr = (
         compileExpr,
         tailPosition,
         expectedResultTypeId,
+        outResultStorageRef,
       })
     : undefined;
   if (traitDispatch) {
@@ -313,6 +327,7 @@ export const compileMethodCallExpr = (
       tailPosition,
       expectedResultTypeId,
       typeInstanceId,
+      outResultStorageRef,
     },
   });
   if (inlined) {
@@ -328,6 +343,7 @@ export const compileMethodCallExpr = (
       tailPosition,
       expectedResultTypeId,
       typeInstanceId,
+      outResultStorageRef,
     },
   });
 };
@@ -355,6 +371,7 @@ const compileResolvedSymbolCall = ({
   tailPosition,
   expectedResultTypeId,
   typeInstanceId,
+  outResultStorageRef,
 }: {
   expr: HirCallExpr;
   symbol: number;
@@ -367,6 +384,7 @@ const compileResolvedSymbolCall = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
   typeInstanceId: ProgramFunctionInstanceId | undefined;
+  outResultStorageRef?: CompileCallOptions["outResultStorageRef"];
 }): CompiledExpression => {
   const traitDispatch = traitDispatchEnabled
     ? compileTraitDispatchCall({
@@ -378,6 +396,7 @@ const compileResolvedSymbolCall = ({
         compileExpr,
         tailPosition,
         expectedResultTypeId,
+        outResultStorageRef,
       })
     : undefined;
   if (traitDispatch) {
@@ -445,6 +464,7 @@ const compileResolvedSymbolCall = ({
       tailPosition,
       expectedResultTypeId,
       typeInstanceId,
+      outResultStorageRef,
     },
   });
   if (inlined) {
@@ -460,6 +480,7 @@ const compileResolvedSymbolCall = ({
       tailPosition,
       expectedResultTypeId,
       typeInstanceId,
+      outResultStorageRef,
     },
   });
 };

@@ -16,9 +16,13 @@ import type {
   TypeId,
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
-import { getExprBinaryenType, getRequiredExprType, wasmTypeFor } from "../../types.js";
+import { getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { compileCallExpr, compileMethodCallExpr } from "../../expressions/call/index.js";
-import { compileBlockExpr, compileStatement } from "../../expressions/blocks.js";
+import {
+  compileBlockExpr,
+  compileStatement,
+  withBlockScope,
+} from "../../expressions/blocks.js";
 import {
   compileBreakExpr,
   compileContinueExpr,
@@ -42,6 +46,37 @@ import { allocateLoopLabels, withLoopScope } from "../../control-flow-stack.js";
 import type { GroupContinuationCfg } from "../continuation-cfg.js";
 import { unboxOutcomeValue } from "../outcome-values.js";
 import { coerceToBinaryenType } from "../../expressions/utils.js";
+import { coerceValueToType } from "../../structural.js";
+
+const coerceDirectContinuationResult = ({
+  value,
+  valueExprId,
+  targetExprId,
+  expectedResultTypeId,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  valueExprId: HirExprId;
+  targetExprId: HirExprId;
+  expectedResultTypeId?: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const targetTypeId =
+    expectedResultTypeId ?? getRequiredExprType(targetExprId, ctx, typeInstanceId);
+  const targetType = wasmTypeFor(targetTypeId, ctx);
+  const actualTypeId = getRequiredExprType(valueExprId, ctx, typeInstanceId);
+  const coerced = coerceValueToType({
+    value,
+    actualType: actualTypeId,
+    targetType: targetTypeId,
+    ctx,
+    fnCtx,
+  });
+  return coerceToBinaryenType(ctx, coerced, targetType, fnCtx);
+};
 
 const hasGroupSites = (exprId: HirExprId, cfg: GroupContinuationCfg): boolean =>
   (cfg.sitesByExpr.get(exprId)?.size ?? 0) > 0;
@@ -98,55 +133,79 @@ const compileGroupedContinuationBlockExpr = ({
   }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const resultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultType = wasmTypeFor(resultTypeId, ctx);
   const started = () => ctx.mod.local.get(startedLocal.index, startedLocal.type);
-  const statements: binaryen.ExpressionRef[] = [];
-
-  expr.statements.forEach((stmtId) => {
-    const sites = cfg.sitesByStmt.get(stmtId) ?? new Set<number>();
-    const shouldRun =
-      sites.size === 0
-        ? started()
-        : ctx.mod.i32.or(started(), activeSiteInSet({ sites, activeSiteOrder, ctx }));
-    statements.push(
-      ctx.mod.if(
-        shouldRun,
-        compileStatement(stmtId, ctx, fnCtx, compileExpr),
-        ctx.mod.nop()
-      )
-    );
-  });
-
-  if (typeof expr.value !== "number") {
-    if (statements.length === 0) {
-      return { expr: ctx.mod.nop(), usedReturnCall: false };
-    }
-    return {
-      expr: ctx.mod.block(null, statements, binaryen.none),
-      usedReturnCall: false,
-    };
-  }
-
-  const value = compileExpr({
-    exprId: expr.value,
+  return withBlockScope({
+    expr,
     ctx,
     fnCtx,
-    tailPosition,
-    expectedResultTypeId,
+    run: () => {
+      const statements: binaryen.ExpressionRef[] = [];
+
+      expr.statements.forEach((stmtId) => {
+        const sites = cfg.sitesByStmt.get(stmtId) ?? new Set<number>();
+        const shouldRun =
+          sites.size === 0
+            ? started()
+            : ctx.mod.i32.or(started(), activeSiteInSet({ sites, activeSiteOrder, ctx }));
+        statements.push(
+          ctx.mod.if(
+            shouldRun,
+            compileStatement(stmtId, ctx, fnCtx, compileExpr),
+            ctx.mod.nop()
+          )
+        );
+      });
+
+      if (typeof expr.value !== "number") {
+        if (statements.length === 0) {
+          return { expr: ctx.mod.nop(), usedReturnCall: false };
+        }
+        return {
+          expr: ctx.mod.block(null, statements, binaryen.none),
+          usedReturnCall: false,
+        };
+      }
+
+      const value = compileExpr({
+        exprId: expr.value,
+        ctx,
+        fnCtx,
+        tailPosition,
+        expectedResultTypeId,
+      });
+
+      if (statements.length === 0) {
+        return {
+          expr: coerceDirectContinuationResult({
+            value: value.expr,
+            valueExprId: expr.value,
+            targetExprId: expr.id,
+            expectedResultTypeId,
+            ctx,
+            fnCtx,
+          }),
+          usedReturnCall: value.usedReturnCall,
+        };
+      }
+
+      const coerced = coerceDirectContinuationResult({
+        value: value.expr,
+        valueExprId: expr.value,
+        targetExprId: expr.id,
+        expectedResultTypeId,
+        ctx,
+        fnCtx,
+      });
+      statements.push(coerced);
+      return {
+        expr: ctx.mod.block(null, statements, resultType),
+        usedReturnCall: value.usedReturnCall,
+      };
+    },
   });
-
-  if (statements.length === 0) {
-    return {
-      expr: coerceToBinaryenType(ctx, value.expr, resultType),
-      usedReturnCall: value.usedReturnCall,
-    };
-  }
-
-  statements.push(coerceToBinaryenType(ctx, value.expr, resultType));
-  return {
-    expr: ctx.mod.block(null, statements, resultType),
-    usedReturnCall: value.usedReturnCall,
-  };
 };
 
 const compileGroupedContinuationIfExpr = ({
@@ -171,7 +230,9 @@ const compileGroupedContinuationIfExpr = ({
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const resultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultType = wasmTypeFor(resultTypeId, ctx);
   if (!hasGroupSites(expr.id, cfg)) {
     return compileIfExpr(
       expr as HirIfExpr,
@@ -211,7 +272,14 @@ const compileGroupedContinuationIfExpr = ({
         expectedResultTypeId,
       });
       const cond = ctx.mod.i32.and(beforeActive(), activeInDefault);
-      const typedThen = coerceToBinaryenType(ctx, defaultExpr.expr, resultType);
+      const typedThen = coerceDirectContinuationResult({
+        value: defaultExpr.expr,
+        valueExprId: expr.defaultBranch,
+        targetExprId: expr.id,
+        expectedResultTypeId,
+        ctx,
+        fnCtx,
+      });
       const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
       fallback = {
         expr: ctx.mod.if(cond, typedThen, typedElse),
@@ -247,7 +315,14 @@ const compileGroupedContinuationIfExpr = ({
       beforeActive(),
       ctx.mod.i32.and(activeInValue, ctx.mod.i32.eqz(activeInCondition))
     );
-    const typedThen = coerceToBinaryenType(ctx, branchExpr.expr, resultType);
+    const typedThen = coerceDirectContinuationResult({
+      value: branchExpr.expr,
+      valueExprId: branch.value,
+      targetExprId: expr.id,
+      expectedResultTypeId,
+      ctx,
+      fnCtx,
+    });
     const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
     fallback = {
       expr: ctx.mod.if(cond, typedThen, typedElse),
@@ -280,7 +355,9 @@ const compileGroupedContinuationMatchExpr = ({
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const resultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultType = wasmTypeFor(resultTypeId, ctx);
   if (!hasGroupSites(expr.id, cfg)) {
     return compileMatchExpr(
       expr,
@@ -347,7 +424,14 @@ const compileGroupedContinuationMatchExpr = ({
         )
       )
     );
-    const typedThen = coerceToBinaryenType(ctx, armExpr.expr, resultType);
+    const typedThen = coerceDirectContinuationResult({
+      value: armExpr.expr,
+      valueExprId: arm.value,
+      targetExprId: expr.id,
+      expectedResultTypeId,
+      ctx,
+      fnCtx,
+    });
     const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType);
     fallback = {
       expr: ctx.mod.if(cond, typedThen, typedElse),
@@ -505,7 +589,9 @@ export const createGroupedContinuationExpressionCompiler = ({
           ? ctx.mod.block(null, [ctx.mod.drop(resumeBox)], binaryen.none)
           : unboxOutcomeValue({ payload: resumeBox, valueType, ctx });
       const resumedExpr = ctx.mod.block(null, [resumeSet, resumedValue], valueType);
-      const exprResultType = getExprBinaryenType(exprId, ctx, typeInstanceId);
+      const exprResultTypeId =
+        expectedResultTypeId ?? getRequiredExprType(exprId, ctx, typeInstanceId);
+      const exprResultType = wasmTypeFor(exprResultTypeId, ctx);
       const typedResumed = coerceToBinaryenType(ctx, resumedExpr, exprResultType);
       const typedNormal = coerceToBinaryenType(ctx, normal.expr, exprResultType);
       return {
@@ -625,11 +711,23 @@ export const createGroupedContinuationExpressionCompiler = ({
       case "continue":
         return compileContinueExpr(expr, ctx, fnCtx);
       case "object-literal":
-        return compileObjectLiteralExpr(expr, ctx, fnCtx, compileExpr);
+        return compileObjectLiteralExpr(
+          expr,
+          ctx,
+          fnCtx,
+          compileExpr,
+          expectedResultTypeId,
+        );
       case "field-access":
         return compileFieldAccessExpr(expr, ctx, fnCtx, compileExpr);
       case "tuple":
-        return compileTupleExpr(expr, ctx, fnCtx, compileExpr);
+        return compileTupleExpr(
+          expr,
+          ctx,
+          fnCtx,
+          compileExpr,
+          expectedResultTypeId,
+        );
       case "lambda":
         return compileLambdaExpr(expr, ctx, fnCtx, compileExpr);
       case "effect-handler":

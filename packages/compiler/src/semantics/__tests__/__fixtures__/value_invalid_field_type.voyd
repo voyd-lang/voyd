@@ -1,0 +1,6 @@
+pub val BadValue {
+  payload: unknown
+}
+
+pub fn main() -> i32
+  0

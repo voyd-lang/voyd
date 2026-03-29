@@ -11,3 +11,4 @@ output/
 /*.sb.*
 .turbo
 .tmp-voyd-sdk-*
+/tmp/

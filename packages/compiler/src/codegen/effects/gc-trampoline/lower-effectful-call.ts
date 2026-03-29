@@ -15,11 +15,11 @@ import { OUTCOME_TAGS } from "../runtime-abi.js";
 import { unboxOutcomeValue } from "../outcome-values.js";
 import {
   allocateTempLocal,
-  getRequiredBinding,
-  loadBindingValue,
+  loadLocalValue,
+  storeLocalValue,
 } from "../../locals.js";
 import { getExprBinaryenType, wasmTypeFor } from "../../types.js";
-import { currentHandlerValue } from "./shared.js";
+import { captureContinuationEnvFieldValue } from "./shared.js";
 import {
   continuationFunctionName,
   ensureContinuationFunction,
@@ -95,31 +95,14 @@ export const lowerEffectfulCallResult = ({
         }
 
         const callSite = site as ContinuationCallSite;
-        const frameEnvValues = callSite.envFields.map((field) => {
-          switch (field.sourceKind) {
-            case "site":
-              return ctx.mod.i32.const(callSite.siteOrder);
-            case "handler":
-              return currentHandlerValue(ctx, fnCtx);
-            case "param":
-            case "local": {
-              if (typeof field.tempId === "number") {
-                const binding = fnCtx.tempLocals.get(field.tempId);
-                if (!binding) {
-                  throw new Error(
-                    `missing temp local binding for call env capture (call ${callId}, temp ${field.tempId})`
-                  );
-                }
-                return ctx.mod.local.get(binding.index, binding.type);
-              }
-              if (typeof field.symbol !== "number") {
-                throw new Error("missing symbol for env field");
-              }
-              const binding = getRequiredBinding(field.symbol, ctx, fnCtx);
-              return loadBindingValue(binding, ctx);
-            }
-          }
-        });
+        const frameEnvValues = callSite.envFields.map((field) =>
+          captureContinuationEnvFieldValue({
+            field,
+            siteOrder: callSite.siteOrder,
+            ctx,
+            fnCtx,
+          })
+        );
 
         const contRefType = ensureContinuationFunction({
           site: callSite,
@@ -137,12 +120,16 @@ export const lowerEffectfulCallResult = ({
           site: ctx.mod.i32.const(callSite.siteOrder),
         });
 
-        const request = refCast(
-          ctx.mod,
-          ctx.effectsRuntime.outcomePayload(loadOutcome()),
-          ctx.effectsRuntime.effectRequestType
-        );
-        const wrappedRequest = wrapRequestContinuationWithFrame({ ctx, request, frame: frameCont });
+        const wrappedRequest = wrapRequestContinuationWithFrame({
+          ctx,
+          request: () =>
+            refCast(
+              ctx.mod,
+              ctx.effectsRuntime.outcomePayload(loadOutcome()),
+              ctx.effectsRuntime.effectRequestType
+            ),
+          frame: frameCont,
+        });
         const wrappedOutcome = ctx.effectsRuntime.makeOutcomeEffect(wrappedRequest);
 
         const wrappedLocal = allocateTempLocal(ctx.effectsRuntime.outcomeType, fnCtx);
@@ -164,10 +151,19 @@ export const lowerEffectfulCallResult = ({
     };
   }
 
-  const resultTemp = allocateTempLocal(valueType, fnCtx);
+  const resultTemp = allocateTempLocal(valueType, fnCtx, returnTypeId, ctx);
   ops.push(
-    ctx.mod.if(tagIsValue, ctx.mod.local.set(resultTemp.index, valueResult), effectReturn),
-    ctx.mod.local.get(resultTemp.index, valueType)
+    ctx.mod.if(
+      tagIsValue,
+      storeLocalValue({
+        binding: resultTemp,
+        value: valueResult,
+        ctx,
+        fnCtx,
+      }),
+      effectReturn
+    ),
+    loadLocalValue(resultTemp, ctx)
   );
 
   return {

@@ -36,7 +36,7 @@ const targetTypeIncludesDependencySymbol = ({
   symbol: SymbolId;
 }): boolean => {
   const desc = dependency.typing.arena.get(type);
-  if (desc.kind === "nominal-object") {
+  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
     return (
       desc.owner.moduleId === dependency.moduleId && desc.owner.symbol === symbol
     );
@@ -509,6 +509,7 @@ export const registerImportedObjectTemplate = ({
 
   ctx.objects.registerTemplate({
     symbol: localSymbol,
+    objectKind: template.objectKind,
     params,
     nominal: translation(template.nominal),
     structural: translation(template.structural),

@@ -2,7 +2,7 @@ import type binaryen from "binaryen";
 import { defineStructType } from "@voyd/lib/binaryen-gc/index.js";
 import type { CodegenContext } from "../context.js";
 import type { TypeId } from "../../semantics/ids.js";
-import { wasmTypeFor } from "../types.js";
+import { wasmHeapFieldTypeFor } from "../types.js";
 
 export const ensureEffectArgsType = ({
   ctx,
@@ -19,7 +19,7 @@ export const ensureEffectArgsType = ({
 
   const fields = paramTypes.map((typeId, index) => ({
     name: `arg${index}`,
-    type: wasmTypeFor(typeId, ctx),
+    type: wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime"),
     mutable: false,
   }));
   const type = defineStructType(ctx.mod, {

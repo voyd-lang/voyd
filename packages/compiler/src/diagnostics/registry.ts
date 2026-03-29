@@ -94,7 +94,7 @@ type DiagnosticParamsMap = {
     | { kind: "previous-type-alias" };
   BD0007: {
     kind: "invalid-type-name";
-    declarationKind: "type alias" | "obj" | "trait" | "effect";
+    declarationKind: "type alias" | "obj" | "value" | "trait" | "effect";
     name: string;
   };
   CG0001: { kind: "codegen-error"; message: string };
@@ -288,6 +288,37 @@ type DiagnosticParamsMap = {
     functionName: string;
     parameterName: string;
     referencedParameterName: string;
+  };
+  TY0045:
+    | {
+        kind: "invalid-value-field-type";
+        valueTypeName: string;
+        fieldName: string;
+        fieldType: string;
+      }
+    | {
+        kind: "recursive-value-type";
+        valueTypeName: string;
+        fieldName?: string;
+      }
+    | {
+        kind: "value-trait-object-widening";
+        valueTypeName: string;
+        traitTypeName: string;
+      }
+    | {
+        kind: "mutable-value-temporary";
+        valueTypeName: string;
+      }
+    | {
+        kind: "value-boxing-note";
+        valueTypeName: string;
+        context: string;
+      };
+  TY0046: {
+    kind: "mixed-value-union";
+    valueMemberType: string;
+    otherMemberType: string;
   };
   TY9999: { kind: "unexpected-error"; message: string };
 };
@@ -913,6 +944,54 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0044"]>,
+  TY0045: {
+    code: "TY0045",
+    message: (params) => {
+      switch (params.kind) {
+        case "invalid-value-field-type":
+          return `value ${params.valueTypeName} field ${params.fieldName} must have a fixed-layout value-compatible type, but found ${params.fieldType}`;
+        case "recursive-value-type":
+          return params.fieldName
+            ? `value ${params.valueTypeName} recursively contains itself through field ${params.fieldName}`
+            : `value ${params.valueTypeName} recursively contains itself`;
+        case "value-trait-object-widening":
+          return `value ${params.valueTypeName} cannot be widened implicitly to trait object ${params.traitTypeName}`;
+        case "mutable-value-temporary":
+          return `cannot call a mutable receiver on temporary value ${params.valueTypeName}`;
+        case "value-boxing-note":
+          return `using value ${params.valueTypeName} in ${params.context} requires explicit boxing in the current backend`;
+      }
+    },
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Use primitives, other values, tuples, fixed arrays, or explicit heap/reference types inside `val` declarations.",
+      },
+      {
+        message:
+          "Wrap the value in an object or use an explicit boxing adapter before crossing a trait-object boundary.",
+      },
+      {
+        message:
+          "Store the value in a mutable binding first, then borrow that location for `~self` or `~param`.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0045"]>,
+  TY0046: {
+    code: "TY0046",
+    message: (params) =>
+      `union member ${params.valueMemberType} is a value type, so all top-level union members must be value types; found ${params.otherMemberType}`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Keep direct value unions all-value, or wrap the value in an object before mixing it with heap/object variants.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0046"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

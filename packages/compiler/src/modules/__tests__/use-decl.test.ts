@@ -68,6 +68,12 @@ describe("classifyTopLevelDecl", () => {
     });
   });
 
+  it("returns other for pub val declarations", () => {
+    expect(classifyFirst("pub val Vec2 { x: i32, y: i32 }")).toMatchObject({
+      kind: "other",
+    });
+  });
+
   it("returns other for incomplete use declarations", () => {
     expect(classifyFirst("use")).toMatchObject({
       kind: "other",

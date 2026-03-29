@@ -11,7 +11,8 @@ const NON_REF_TYPES = new Set<number>([
   binaryen.f64,
 ]);
 
-const isRefType = (type: binaryen.Type): boolean => !NON_REF_TYPES.has(type);
+const isRefType = (type: binaryen.Type): boolean =>
+  binaryen.expandType(type).length === 1 && !NON_REF_TYPES.has(type);
 
 export const coerceExprToWasmType = ({
   expr,
@@ -26,17 +27,15 @@ export const coerceExprToWasmType = ({
   if (exprType === targetType) {
     return expr;
   }
-  if (targetType === ctx.rtt.baseType) {
+  if (
+    targetType === ctx.rtt.baseType ||
+    targetType === ctx.rtt.rootType ||
+    targetType === binaryen.anyref ||
+    targetType === binaryen.eqref
+  ) {
     return expr;
   }
   if (!isRefType(exprType) || !isRefType(targetType)) {
-    return expr;
-  }
-  const shouldCast =
-    exprType === ctx.rtt.baseType ||
-    exprType === binaryen.anyref ||
-    exprType === binaryen.eqref;
-  if (!shouldCast) {
     return expr;
   }
   return refCast(ctx.mod, expr, targetType);

@@ -23,6 +23,7 @@ primitives and runtime-provided reference types.
 
 - Structural object types describe shape: `type Point = { x: i32, y: i32 }`
 - Nominal object types describe identity: `obj User { id: i32 }`
+- Value types describe copied fixed-layout aggregates: `val Vec3 { x: f64, y: f64, z: f64 }`
 - Tuples describe ordered fixed-size values: `(i32, String)`
 - Unions describe one-of-many values
 - Intersections describe values that must satisfy multiple requirements
@@ -36,4 +37,4 @@ primitives and runtime-provided reference types.
 - [Intersections](./intersections.md)
 - [Traits](./traits.md)
 - [Effects](./effects.md)
-- [Structs](./structs.md)
+- [Value Types](./value-types.md)

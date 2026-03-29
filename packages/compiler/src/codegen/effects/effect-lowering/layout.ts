@@ -11,7 +11,7 @@ import type {
   SymbolId,
   TypeId,
 } from "../../context.js";
-import { wasmTypeFor } from "../../types.js";
+import { wasmHeapFieldTypeFor, wasmTypeFor } from "../../types.js";
 import { walkHirExpression, walkHirPattern } from "../../hir-walk.js";
 import type { ContinuationEnvField } from "./types.js";
 import { effectsFacade } from "../facade.js";
@@ -183,6 +183,7 @@ export const envFieldsFor = ({
         symbol,
         typeId,
         wasmType: wasmTypeFor(typeId, ctx),
+        storageType: wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime"),
         sourceKind: params.has(symbol) ? "param" : "local",
       };
     });
@@ -205,7 +206,7 @@ export const ensureArgsType = ({
 
   const fields = paramTypes.map((typeId, index) => ({
     name: `arg${index}`,
-    type: wasmTypeFor(typeId, ctx),
+    type: wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime"),
     mutable: false,
   }));
   const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: opSymbol });

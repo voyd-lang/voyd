@@ -19,6 +19,59 @@ pub fn benchmark() -> i32
     max_depth: 30
   })
 
+pub fn debug_effect_rand_plain() -> f64
+  let ~rng = LocalRng::seeded(to_i64(42))
+
+  try forward
+    RenderCtx::rand_f64()
+  RenderCtx::rand_f64(tail):
+    tail(rng.random_f64())
+  RenderCtx::rand_f64(tail, range: Range<f64>):
+    tail(rng.random_f64(range))
+
+pub fn debug_effect_rand_range() -> f64
+  let ~rng = LocalRng::seeded(to_i64(42))
+
+  try forward
+    RenderCtx::rand_f64(0.0..0.5)
+  RenderCtx::rand_f64(tail):
+    tail(rng.random_f64())
+  RenderCtx::rand_f64(tail, range: Range<f64>):
+    tail(rng.random_f64(range))
+
+pub fn debug_effect_rand_vec3_sum() -> f64
+  let ~rng = LocalRng::seeded(to_i64(42))
+
+  try forward
+    let value = Vec3::random(0.0..0.5)
+    value.x + value.y + value.z
+  RenderCtx::rand_f64(tail):
+    tail(rng.random_f64())
+  RenderCtx::rand_f64(tail, range: Range<f64>):
+    tail(rng.random_f64(range))
+
+pub fn debug_empty_world_checksum() -> i32
+  let ~rng = LocalRng::seeded(to_i64(42))
+
+  try forward
+    Camera({
+      aspect_ratio: 16.0 / 9.0,
+      image_width: 48,
+      samples_per_pixel: 4,
+      max_depth: 8,
+      look_from: Point3(13.0, 2.0, 3.0),
+      look_at: Point3(0.0, 0.0, 0.0),
+      vup: Vec3(0.0, 1.0, 0.0),
+      vfov: 20,
+      defocus_angle: 0.6,
+      focus_dist: 10.0
+    })
+      .render_checksum(HittableList())
+  RenderCtx::rand_f64(tail):
+    tail(rng.random_f64())
+  RenderCtx::rand_f64(tail, range: Range<f64>):
+    tail(rng.random_f64(range))
+
 fn render_with_seed({
   seed: i64,
   image_width: i32,

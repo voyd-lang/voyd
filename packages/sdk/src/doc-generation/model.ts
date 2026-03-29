@@ -23,6 +23,9 @@ const isVisibleImpl = (visibility: { level?: string } | undefined): boolean =>
   visibility?.level === "package" ||
   visibility?.level === "module";
 
+const documentationObjectKeyword = (objectKind: "obj" | "value"): "obj" | "val" =>
+  objectKind === "value" ? "val" : objectKind;
+
 const sanitizeAnchorSegment = (value: string): string =>
   value
     .toLowerCase()
@@ -704,7 +707,7 @@ export const createDocumentationModel = ({
           moduleId: moduleDoc.id,
           kind: "object",
           name: objectDecl.name,
-          signature: `obj ${objectDecl.name}${formatTypeParameters(
+          signature: `${documentationObjectKeyword(objectDecl.objectKind)} ${objectDecl.name}${formatTypeParameters(
             objectDecl.typeParameters,
           )}${
             objectDecl.baseTypeExpr

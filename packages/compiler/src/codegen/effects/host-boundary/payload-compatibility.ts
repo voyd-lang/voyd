@@ -80,6 +80,7 @@ const formatTypeForHostBoundary = ({
       case "type-param-ref":
         return `typeparam#${desc.param}`;
       case "nominal-object":
+      case "value-object":
       case "trait": {
         const baseName =
           desc.name ??

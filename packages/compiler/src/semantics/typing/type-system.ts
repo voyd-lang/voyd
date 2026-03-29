@@ -40,7 +40,7 @@ import {
   localSymbolForSymbolRef,
 } from "./symbol-ref-utils.js";
 import { symbolRefEquals } from "./symbol-ref.js";
-import { emitDiagnostic } from "../../diagnostics/index.js";
+import { diagnosticFromCode, emitDiagnostic } from "../../diagnostics/index.js";
 import {
   incrementCompilerPerfCounter,
   isCompilerPerfEnabled,
@@ -140,7 +140,8 @@ const paramsReferencedInType = (
     case "type-param-ref":
       return allowed.has(desc.param) ? new Set([desc.param]) : new Set();
     case "trait":
-    case "nominal-object": {
+    case "nominal-object":
+    case "value-object": {
       return desc.typeArgs.reduce((acc, arg) => {
         paramsReferencedInType(arg, allowed, ctx, seen).forEach((entry) =>
           acc.add(entry),
@@ -244,6 +245,7 @@ const containsUnknownType = (
       return containsUnknownType(desc.body, ctx, seen);
     case "trait":
     case "nominal-object":
+    case "value-object":
       return desc.typeArgs.some((arg) => containsUnknownType(arg, ctx, seen));
     case "structural-object":
       return desc.fields.some((field) =>
@@ -292,6 +294,7 @@ const containsTypeParam = (
       return containsTypeParam(desc.body, param, ctx, seen);
     case "trait":
     case "nominal-object":
+    case "value-object":
       return desc.typeArgs.some((arg) =>
         containsTypeParam(arg, param, ctx, seen),
       );
@@ -341,6 +344,7 @@ const containsAnyTypeParam = (
       return containsAnyTypeParam(desc.body, ctx, seen);
     case "trait":
     case "nominal-object":
+    case "value-object":
       return desc.typeArgs.some((arg) => containsAnyTypeParam(arg, ctx, seen));
     case "structural-object":
       return desc.fields.some((field) =>
@@ -430,6 +434,7 @@ const containsAliasSelfUnguarded = (
         ),
       );
     case "nominal-object":
+    case "value-object":
       return desc.typeArgs.some((arg) =>
         containsAliasSelfUnguarded(
           arg,
@@ -562,6 +567,7 @@ const assertAliasContractive = ({
           return containsBinderUnguarded(desc.body, binder, guarded, seen);
         case "trait":
         case "nominal-object":
+        case "value-object":
           return desc.typeArgs.some((arg) =>
             containsBinderUnguarded(arg, binder, true, seen),
           );
@@ -966,6 +972,7 @@ export const resolveTypeAlias = (
           }
           case "trait":
           case "nominal-object":
+          case "value-object":
             desc.typeArgs.forEach((arg) => collect(arg, boundRecursive));
             return;
           case "structural-object":
@@ -1023,6 +1030,7 @@ export const resolveTypeAlias = (
         }
         case "trait":
         case "nominal-object":
+        case "value-object":
           return desc.typeArgs.some((arg) =>
             containsUnboundTypeParam(arg, boundRecursive, seen),
           );
@@ -1069,7 +1077,7 @@ export const resolveTypeAlias = (
         const desc = ctx.arena.get(type);
         if (desc.kind === "intersection" && typeof desc.nominal === "number") {
           const nominal = ctx.arena.get(desc.nominal);
-          if (nominal.kind === "nominal-object") {
+          if (nominal.kind === "nominal-object" || nominal.kind === "value-object") {
             const args = nominal.typeArgs.map(formatType).join(", ");
             return `${nominal.name}${args.length > 0 ? `<${args}>` : ""}`;
           }
@@ -1363,6 +1371,59 @@ const resolveTupleTypeExpr = (
   return ctx.arena.internStructuralObject({ fields });
 };
 
+const isTopLevelValueUnionMember = (
+  type: TypeId,
+  ctx: TypingContext,
+): boolean => {
+  const nominal = getNominalComponent(type, ctx);
+  if (typeof nominal !== "number") {
+    return false;
+  }
+
+  return ctx.arena.get(nominal).kind === "value-object";
+};
+
+export const internCheckedUnion = ({
+  members,
+  ctx,
+  span,
+}: {
+  members: readonly TypeId[];
+  ctx: TypingContext;
+  span: SourceSpan;
+}): TypeId => {
+  const valueMember = members.find((member) =>
+    isTopLevelValueUnionMember(member, ctx),
+  );
+  if (!valueMember) {
+    return ctx.arena.internUnion(members);
+  }
+
+  const otherMember = members.find(
+    (member) => !isTopLevelValueUnionMember(member, ctx),
+  );
+  if (typeof otherMember === "number") {
+    emitDiagnostic({
+      ctx,
+      code: "TY0046",
+      params: {
+        kind: "mixed-value-union",
+        valueMemberType: typeDescriptorToUserString(
+          ctx.arena.get(valueMember),
+          ctx.arena,
+        ),
+        otherMemberType: typeDescriptorToUserString(
+          ctx.arena.get(otherMember),
+          ctx.arena,
+        ),
+      },
+      span,
+    });
+  }
+
+  return ctx.arena.internUnion(members);
+};
+
 const resolveUnionTypeExpr = (
   expr: HirUnionTypeExpr,
   ctx: TypingContext,
@@ -1372,7 +1433,11 @@ const resolveUnionTypeExpr = (
   const members = expr.members.map((member) =>
     resolveTypeExpr(member, ctx, state, ctx.primitives.unknown, typeParams),
   );
-  return ctx.arena.internUnion(members);
+  return internCheckedUnion({
+    members,
+    ctx,
+    span: expr.span,
+  });
 };
 
 const resolveIntersectionTypeExpr = (
@@ -1496,7 +1561,7 @@ const resolveIntersectionTypeExpr = (
       ensureFieldsSubstituted(desc.fields, ctx, "intersection fields");
       return unfolded;
     }
-    if (desc.kind === "nominal-object") {
+    if (desc.kind === "nominal-object" || desc.kind === "value-object") {
       const owner = localSymbolForSymbolRef(desc.owner, ctx);
       const info =
         typeof owner === "number"
@@ -1589,6 +1654,429 @@ const makeObjectInstanceKey = (
   typeArgs: readonly TypeId[],
 ): string => `${symbol}<${typeArgs.join(",")}>`;
 
+const nominalObjectTypeFor = ({
+  objectKind,
+  symbol,
+  ctx,
+  typeArgs,
+}: {
+  objectKind: "obj" | "value";
+  symbol: SymbolId;
+  ctx: TypingContext;
+  typeArgs: readonly TypeId[];
+}): TypeId =>
+  objectKind === "value"
+    ? ctx.arena.internValueObject({
+        owner: canonicalSymbolRefForTypingContext(symbol, ctx),
+        name: getSymbolName(symbol, ctx),
+        typeArgs,
+      })
+    : ctx.arena.internNominalObject({
+        owner: canonicalSymbolRefForTypingContext(symbol, ctx),
+        name: getSymbolName(symbol, ctx),
+        typeArgs,
+      });
+
+const explicitTraitObjectBoundaryFor = (
+  expected: TypeId,
+  ctx: TypingContext,
+): TypeId | undefined => {
+  const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "trait") {
+    return expected;
+  }
+  if (
+    expectedDesc.kind === "intersection" &&
+    expectedDesc.traits &&
+    expectedDesc.traits.length > 0 &&
+    typeof expectedDesc.nominal !== "number" &&
+    typeof expectedDesc.structural !== "number"
+  ) {
+    return expectedDesc.traits[0];
+  }
+  return undefined;
+};
+
+const valueObjectInfoForType = ({
+  type,
+  ctx,
+  state,
+}: {
+  type: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): ObjectTypeInfo | undefined => {
+  const nominal = getNominalComponent(type, ctx);
+  if (typeof nominal !== "number") {
+    return undefined;
+  }
+  const info = getObjectInfoForNominal(nominal, ctx, state);
+  return info?.objectKind === "value" ? info : undefined;
+};
+
+type ValueTypeWideningDiagnostic = {
+  valueTypeName: string;
+  traitTypeName: string;
+};
+
+export const disallowedValueTraitObjectWidening = ({
+  actual,
+  expected,
+  ctx,
+  state,
+}: {
+  actual: TypeId;
+  expected: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): ValueTypeWideningDiagnostic | undefined => {
+  const traitBoundary = explicitTraitObjectBoundaryFor(expected, ctx);
+  if (typeof traitBoundary !== "number") {
+    return undefined;
+  }
+  const valueInfo = valueObjectInfoForType({ type: actual, ctx, state });
+  if (!valueInfo) {
+    return undefined;
+  }
+  return {
+    valueTypeName: typeDescriptorToUserString(
+      ctx.arena.get(valueInfo.nominal),
+      ctx.arena,
+    ),
+    traitTypeName: typeDescriptorToUserString(
+      ctx.arena.get(traitBoundary),
+      ctx.arena,
+    ),
+  };
+};
+
+const substituteObjectFields = ({
+  fields,
+  substitution,
+  ctx,
+}: {
+  fields: readonly StructuralField[];
+  substitution?: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+}): readonly StructuralField[] =>
+  substitution && substitution.size > 0
+    ? fields.map((field) => ({
+        ...field,
+        type: ctx.arena.substitute(field.type, substitution),
+      }))
+    : fields;
+
+const validateValueDeclRecursion = ({
+  typeExpr,
+  rootSymbol,
+  valueTypeName,
+  fieldName,
+  ctx,
+  span,
+  visitedValueDecls,
+}: {
+  typeExpr: HirTypeExpr;
+  rootSymbol: SymbolId;
+  valueTypeName: string;
+  fieldName: string;
+  ctx: TypingContext;
+  span: SourceSpan;
+  visitedValueDecls: Set<SymbolId>;
+}): void => {
+  switch (typeExpr.typeKind) {
+    case "named": {
+      typeExpr.typeArguments?.forEach((typeArg) =>
+        validateValueDeclRecursion({
+          typeExpr: typeArg,
+          rootSymbol,
+          valueTypeName,
+          fieldName,
+          ctx,
+          span,
+          visitedValueDecls,
+        }),
+      );
+
+      if (typeof typeExpr.symbol !== "number") {
+        return;
+      }
+
+      const decl = ctx.objects.getDecl(typeExpr.symbol);
+      if (!decl || decl.objectKind !== "value") {
+        return;
+      }
+
+      if (typeExpr.symbol === rootSymbol || visitedValueDecls.has(typeExpr.symbol)) {
+        emitDiagnostic({
+          ctx,
+          code: "TY0045",
+          params: {
+            kind: "recursive-value-type",
+            valueTypeName,
+            fieldName,
+          },
+          span,
+        });
+      }
+
+      visitedValueDecls.add(typeExpr.symbol);
+      decl.fields.forEach((field) => {
+        const fieldType = field.type;
+        if (!fieldType) {
+          return;
+        }
+        validateValueDeclRecursion({
+          typeExpr: fieldType,
+          rootSymbol,
+          valueTypeName,
+          fieldName: `${fieldName}.${field.name}`,
+          ctx,
+          span,
+          visitedValueDecls,
+        });
+      });
+      visitedValueDecls.delete(typeExpr.symbol);
+      return;
+    }
+    case "object":
+      typeExpr.fields.forEach((field) =>
+        validateValueDeclRecursion({
+          typeExpr: field.type,
+          rootSymbol,
+          valueTypeName,
+          fieldName: `${fieldName}.${field.name}`,
+          ctx,
+          span,
+          visitedValueDecls,
+        }),
+      );
+      return;
+    case "tuple":
+      typeExpr.elements.forEach((element, index) =>
+        validateValueDeclRecursion({
+          typeExpr: element,
+          rootSymbol,
+          valueTypeName,
+          fieldName: `${fieldName}.${index}`,
+          ctx,
+          span,
+          visitedValueDecls,
+        }),
+      );
+      return;
+    case "union":
+    case "intersection":
+      typeExpr.members.forEach((member, index) =>
+        validateValueDeclRecursion({
+          typeExpr: member,
+          rootSymbol,
+          valueTypeName,
+          fieldName: `${fieldName}.${index}`,
+          ctx,
+          span,
+          visitedValueDecls,
+        }),
+      );
+      return;
+    case "function":
+      return;
+    default:
+      return;
+  }
+};
+
+const validateValueFieldType = ({
+  type,
+  rootNominal,
+  valueTypeName,
+  fieldName,
+  ctx,
+  state,
+  span,
+  seenInlineValues,
+}: {
+  type: TypeId;
+  rootNominal: TypeId;
+  valueTypeName: string;
+  fieldName: string;
+  ctx: TypingContext;
+  state: TypingState;
+  span: SourceSpan;
+  seenInlineValues: Set<TypeId>;
+}): void => {
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "primitive":
+      if (desc.name === "unknown") {
+        emitDiagnostic({
+          ctx,
+          code: "TY0045",
+          params: {
+            kind: "invalid-value-field-type",
+            valueTypeName,
+            fieldName,
+            fieldType: typeDescriptorToUserString(desc, ctx.arena),
+          },
+          span,
+        });
+      }
+      return;
+    case "type-param-ref":
+    case "nominal-object":
+    case "trait":
+    case "function":
+      return;
+    case "fixed-array":
+      validateValueFieldType({
+        type: desc.element,
+        rootNominal,
+        valueTypeName,
+        fieldName: `${fieldName}[]`,
+        ctx,
+        state,
+        span,
+        seenInlineValues,
+      });
+      return;
+    case "structural-object":
+      desc.fields.forEach((field) =>
+        validateValueFieldType({
+          type: field.type,
+          rootNominal,
+          valueTypeName,
+          fieldName: `${fieldName}.${field.name}`,
+          ctx,
+          state,
+          span,
+          seenInlineValues,
+        }),
+      );
+      return;
+    case "union":
+      desc.members.forEach((member, index) =>
+        validateValueFieldType({
+          type: member,
+          rootNominal,
+          valueTypeName,
+          fieldName: `${fieldName}.${index}`,
+          ctx,
+          state,
+          span,
+          seenInlineValues,
+        }),
+      );
+      return;
+    case "intersection": {
+      const nominal = typeof desc.nominal === "number"
+        ? getNominalComponent(desc.nominal, ctx)
+        : undefined;
+      if (typeof nominal === "number") {
+        validateValueFieldType({
+          type: nominal,
+          rootNominal,
+          valueTypeName,
+          fieldName,
+          ctx,
+          state,
+          span,
+          seenInlineValues,
+        });
+        return;
+      }
+      return;
+    }
+    case "value-object": {
+      if (type === rootNominal || seenInlineValues.has(type)) {
+        emitDiagnostic({
+          ctx,
+          code: "TY0045",
+          params: {
+            kind: "recursive-value-type",
+            valueTypeName,
+            fieldName,
+          },
+          span,
+        });
+      }
+
+      seenInlineValues.add(type);
+      const owner = localSymbolForSymbolRef(desc.owner, ctx);
+      const template =
+        typeof owner === "number" ? getObjectTemplate(owner, ctx, state) : undefined;
+      if (template) {
+        const substitution =
+          template.params.length === desc.typeArgs.length
+            ? new Map(
+                template.params.map(
+                  (param, index) => [param.typeParam, desc.typeArgs[index]!] as const,
+                ),
+              )
+            : undefined;
+        substituteObjectFields({
+          fields: template.fields,
+          substitution,
+          ctx,
+        }).forEach((field) =>
+          validateValueFieldType({
+            type: field.type,
+            rootNominal,
+            valueTypeName,
+            fieldName: `${fieldName}.${field.name}`,
+            ctx,
+            state,
+            span,
+            seenInlineValues,
+          }),
+        );
+      }
+      seenInlineValues.delete(type);
+      return;
+    }
+    default:
+      emitDiagnostic({
+        ctx,
+        code: "TY0045",
+        params: {
+          kind: "invalid-value-field-type",
+          valueTypeName,
+          fieldName,
+          fieldType: typeDescriptorToUserString(desc, ctx.arena),
+        },
+        span,
+      });
+  }
+};
+
+const validateValueFields = ({
+  nominal,
+  fields,
+  valueTypeName,
+  ctx,
+  state,
+  span,
+}: {
+  nominal: TypeId;
+  fields: readonly StructuralField[];
+  valueTypeName: string;
+  ctx: TypingContext;
+  state: TypingState;
+  span: SourceSpan;
+}): void => {
+  const seenInlineValues = new Set<TypeId>([nominal]);
+  fields.forEach((field) =>
+    validateValueFieldType({
+      type: field.type,
+      rootNominal: nominal,
+      valueTypeName,
+      fieldName: field.name,
+      ctx,
+      state,
+      span,
+      seenInlineValues,
+    }),
+  );
+};
+
 export const getObjectTemplate = (
   symbol: SymbolId,
   ctx: TypingContext,
@@ -1607,6 +2095,7 @@ export const getObjectTemplate = (
   if (!decl) {
     return undefined;
   }
+  const objectName = getSymbolName(symbol, ctx);
 
   ctx.objects.beginResolving(symbol);
   try {
@@ -1634,24 +2123,53 @@ export const getObjectTemplate = (
 
     const templateParams = new Set(params.map((param) => param.typeParam));
 
-    const baseType = resolveTypeExpr(
-      decl.base,
-      ctx,
-      state,
-      ctx.objects.base.type,
-      paramMap,
-    );
+    if (decl.objectKind === "value" && decl.base) {
+      throw new Error(`value ${objectName} cannot inherit from a base object`);
+    }
+
+    if (decl.objectKind === "value") {
+      const visitedValueDecls = new Set<SymbolId>([symbol]);
+      decl.fields.forEach((field) => {
+        const fieldType = field.type;
+        if (!fieldType) {
+          return;
+        }
+        validateValueDeclRecursion({
+          typeExpr: fieldType,
+          rootSymbol: symbol,
+          valueTypeName: objectName,
+          fieldName: field.name,
+          ctx,
+          span: field.span,
+          visitedValueDecls,
+        });
+      });
+    }
+
+    const baseType =
+      decl.objectKind === "value"
+        ? ctx.objects.base.type
+        : resolveTypeExpr(
+            decl.base,
+            ctx,
+            state,
+            ctx.objects.base.type,
+            paramMap,
+          );
     const baseFields = (
-      getStructuralFields(baseType, ctx, state, {
-        includeInaccessible: true,
-        allowOwnerPrivate: true,
-      }) ?? []
+      decl.objectKind === "value"
+        ? []
+        : (getStructuralFields(baseType, ctx, state, {
+            includeInaccessible: true,
+            allowOwnerPrivate: true,
+          }) ?? [])
     ).map((field) => ({
       ...field,
       declaringParams: declaringParamsForField(field.type, templateParams, ctx),
       packageId: field.packageId ?? ctx.packageId,
     }));
-    const baseNominal = getNominalComponent(baseType, ctx);
+    const baseNominal =
+      decl.objectKind === "value" ? undefined : getNominalComponent(baseType, ctx);
 
     const ownFields = decl.fields.map((field) => {
       const type = resolveTypeExpr(
@@ -1680,10 +2198,7 @@ export const getObjectTemplate = (
         const declared = declaredFields.get(baseField.name);
         if (!declared) {
           throw new Error(
-            `object ${getSymbolName(
-              symbol,
-              ctx,
-            )} must redeclare inherited field ${baseField.name}`,
+            `object ${objectName} must redeclare inherited field ${baseField.name}`,
           );
         }
         const compatibility = unifyWithBudget({
@@ -1698,10 +2213,7 @@ export const getObjectTemplate = (
         });
         if (!compatibility.ok) {
           throw new Error(
-            `field ${baseField.name} in object ${getSymbolName(
-              symbol,
-              ctx,
-            )} must match base object type`,
+            `field ${baseField.name} in object ${objectName} must match base object type`,
           );
         }
       });
@@ -1709,9 +2221,10 @@ export const getObjectTemplate = (
 
     const fields = mergeDeclaredFields(baseFields, ownFields);
     const structural = ctx.arena.internStructuralObject({ fields });
-    const nominal = ctx.arena.internNominalObject({
-      owner: canonicalSymbolRefForTypingContext(symbol, ctx),
-      name: getSymbolName(symbol, ctx),
+    const nominal = nominalObjectTypeFor({
+      objectKind: decl.objectKind,
+      symbol,
+      ctx,
       typeArgs: params.map((param) => paramMap.get(param.symbol)!),
     });
     const type = ctx.arena.internIntersection({
@@ -1721,6 +2234,7 @@ export const getObjectTemplate = (
 
     const template: ObjectTemplate = {
       symbol,
+      objectKind: decl.objectKind,
       params,
       nominal,
       structural,
@@ -1730,6 +2244,16 @@ export const getObjectTemplate = (
       baseNominal,
     };
     ctx.objects.registerTemplate(template);
+    if (template.objectKind === "value") {
+      validateValueFields({
+        nominal: template.nominal,
+        fields: template.fields,
+        valueTypeName: objectName,
+        ctx,
+        state,
+        span: decl.span ?? ctx.hir.module.span,
+      });
+    }
     return template;
   } finally {
     ctx.objects.endResolving(symbol);
@@ -1812,6 +2336,7 @@ export const ensureObjectType = (
     : undefined;
 
   const info: ObjectTypeInfo = {
+    objectKind: template.objectKind,
     nominal,
     structural,
     type,
@@ -1819,6 +2344,16 @@ export const ensureObjectType = (
     visibility: template.visibility,
     baseNominal,
   };
+  if (info.objectKind === "value") {
+    validateValueFields({
+      nominal: info.nominal,
+      fields: info.fields,
+      valueTypeName: objectName,
+      ctx,
+      state,
+      span: ctx.hir.module.span,
+    });
+  }
   const traitImpls = instantiateTraitImplsFor({
     nominal,
     ctx,
@@ -2042,7 +2577,7 @@ export const getObjectInfoForNominal = (
     return cached;
   }
   const desc = ctx.arena.get(nominal);
-  if (desc.kind !== "nominal-object") {
+  if (desc.kind !== "nominal-object" && desc.kind !== "value-object") {
     return undefined;
   }
   const owner = localSymbolForSymbolRef(desc.owner, ctx);
@@ -2063,6 +2598,7 @@ export const getNominalComponent = (
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
     case "nominal-object":
+    case "value-object":
       return type;
     case "intersection":
       if (typeof desc.nominal === "number") {
@@ -2091,8 +2627,8 @@ export const nominalSatisfies = (
   const actualDesc = ctx.arena.get(actual);
   const expectedDesc = ctx.arena.get(expected);
   if (
-    actualDesc.kind === "nominal-object" &&
-    expectedDesc.kind === "nominal-object" &&
+    (actualDesc.kind === "nominal-object" || actualDesc.kind === "value-object") &&
+    actualDesc.kind === expectedDesc.kind &&
     symbolRefEquals(actualDesc.owner, expectedDesc.owner)
   ) {
     if (expectedDesc.typeArgs.length === 0) {
@@ -2173,7 +2709,7 @@ export const getStructuralFields = (
         });
   }
 
-  if (desc.kind === "nominal-object") {
+  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
     const owner = localSymbolForSymbolRef(desc.owner, ctx);
     const info =
       typeof owner === "number"
@@ -2275,7 +2811,8 @@ const structuralExpectationOf = (
     case "structural-object":
       ensureFieldsSubstituted(desc.fields, ctx, "structural comparison");
       return type;
-    case "nominal-object": {
+    case "nominal-object":
+    case "value-object": {
       const owner = localSymbolForSymbolRef(desc.owner, ctx);
       const info =
         typeof owner === "number"
@@ -2618,6 +3155,37 @@ export const ensureTypeMatches = (
   _reason: string,
   span?: SourceSpan,
 ): void => {
+  const valueWidening = disallowedValueTraitObjectWidening({
+    actual,
+    expected,
+    ctx,
+    state,
+  });
+  if (valueWidening) {
+    const diagnosticSpan = span ?? ctx.hir.module.span;
+    emitDiagnostic({
+      ctx,
+      code: "TY0045",
+      params: {
+        kind: "value-trait-object-widening",
+        valueTypeName: valueWidening.valueTypeName,
+        traitTypeName: valueWidening.traitTypeName,
+      },
+      span: diagnosticSpan,
+      related: [
+        diagnosticFromCode({
+          code: "TY0045",
+          params: {
+            kind: "value-boxing-note",
+            valueTypeName: valueWidening.valueTypeName,
+            context: `trait object or generic container positions that require a heap/reference representation (for example ${valueWidening.traitTypeName})`,
+          },
+          span: diagnosticSpan,
+          severity: "note",
+        }),
+      ],
+    });
+  }
   if (typeSatisfies(actual, expected, ctx, state)) {
     return;
   }
@@ -2650,8 +3218,9 @@ const nominalInstantiationMatches = (
     const currentDesc = ctx.arena.get(current);
     const expectedDesc = ctx.arena.get(expected);
     if (
-      currentDesc.kind === "nominal-object" &&
-      expectedDesc.kind === "nominal-object" &&
+      (currentDesc.kind === "nominal-object" ||
+        currentDesc.kind === "value-object") &&
+      currentDesc.kind === expectedDesc.kind &&
       symbolRefEquals(currentDesc.owner, expectedDesc.owner) &&
       currentDesc.typeArgs.length === expectedDesc.typeArgs.length &&
       !currentDesc.typeArgs.some((arg) => containsUnknownType(arg, ctx)) &&
@@ -2793,7 +3362,10 @@ const bindNominalObject = ({
   ctx,
   state,
 }: BindTypeParamsArgs): void => {
-  if (expectedDesc.kind !== "nominal-object") {
+  if (
+    expectedDesc.kind !== "nominal-object" &&
+    expectedDesc.kind !== "value-object"
+  ) {
     return;
   }
 
@@ -2803,7 +3375,7 @@ const bindNominalObject = ({
   }
   const actualDesc = ctx.arena.get(actualNominal);
   if (
-    actualDesc.kind !== "nominal-object" ||
+    actualDesc.kind !== expectedDesc.kind ||
     !symbolRefEquals(actualDesc.owner, expectedDesc.owner)
   ) {
     return;
@@ -2953,6 +3525,7 @@ const bindTypeParamsHandlers: Partial<
 > = {
   "type-param-ref": bindTypeParamRef,
   "nominal-object": bindNominalObject,
+  "value-object": bindNominalObject,
   "structural-object": bindStructuralObject,
   "fixed-array": bindFixedArray,
   function: bindFunction,

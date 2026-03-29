@@ -13,13 +13,23 @@ import {
   refCast,
   structGetFieldValue,
 } from "@voyd/lib/binaryen-gc/index.js";
-import { allocateTempLocal } from "../../locals.js";
+import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../../locals.js";
 import {
+  abiTypeFor,
   getClosureTypeInfo,
   getExprBinaryenType,
+  getRequiredExprType,
+  getSignatureSpillBoxType,
   wasmTypeFor,
 } from "../../types.js";
 import { buildInstanceSubstitution } from "../../type-substitution.js";
+import { captureMultivalueLanes } from "../../multivalue.js";
+import { coerceValueToType } from "../../structural.js";
+import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
+import {
+  boxSignatureSpillValue,
+  unboxSignatureSpillValue,
+} from "../../signature-spill.js";
 import {
   compileCallArgumentsForParams,
   compileCallArgumentsForParamsWithDetails,
@@ -55,6 +65,87 @@ export const compileClosureCall = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
+  const stabilizeMultivalueResult = (
+    value: binaryen.ExpressionRef,
+    abiTypes: readonly binaryen.Type[],
+  ): binaryen.ExpressionRef => {
+    if (abiTypes.length <= 1) {
+      return value;
+    }
+    const captured = captureMultivalueLanes({
+      value,
+      abiTypes,
+      ctx,
+      fnCtx,
+    });
+    const tuple = ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]);
+    if (captured.setup.length === 0) {
+      return tuple;
+    }
+    return ctx.mod.block(null, [...captured.setup, tuple], abiTypeFor(abiTypes));
+  };
+
+  const flattenAbiArgument = (
+    value: binaryen.ExpressionRef,
+    abiTypes: readonly binaryen.Type[],
+    typeId?: TypeId,
+  ): {
+    setup: readonly binaryen.ExpressionRef[];
+    args: readonly binaryen.ExpressionRef[];
+  } => {
+    const valueAbiTypes = binaryen.getExpressionType(value) === binaryen.none
+      ? []
+      : [...binaryen.expandType(binaryen.getExpressionType(value))];
+    if (
+      typeof typeId === "number" &&
+      abiTypes.length === 1 &&
+      getSignatureSpillBoxType({ typeId, ctx }) === abiTypes[0]
+    ) {
+      return {
+        setup: [],
+        args: [
+          boxSignatureSpillValue({
+            value,
+            typeId,
+            ctx,
+            fnCtx,
+          }),
+        ],
+      };
+    }
+    if (abiTypes.length <= 1) {
+      return {
+        setup: [],
+        args: abiTypes.length === 0 ? [] : [value],
+      };
+    }
+    if (valueAbiTypes.length !== abiTypes.length) {
+      throw new Error(
+        `closure ABI flatten mismatch: expected ${abiTypes.length} lanes, got ${valueAbiTypes.length}`,
+      );
+    }
+    if (typeof typeId === "number") {
+      const tempType = abiTypeFor(valueAbiTypes);
+      const temp = allocateTempLocal(tempType, fnCtx, typeId, ctx);
+      return {
+        setup: [storeLocalValue({ binding: temp, value, ctx, fnCtx })],
+        args: abiTypes.map((_, index) =>
+          ctx.mod.tuple.extract(loadLocalValue(temp, ctx), index),
+        ),
+      };
+    }
+    const captured = captureMultivalueLanes({
+      value,
+      abiTypes,
+      ctx,
+      fnCtx,
+    });
+    return {
+      setup: captured.setup,
+      args: captured.lanes,
+    };
+  };
+
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
   const resolvedCalleeTypeId = substitution
@@ -72,6 +163,9 @@ export const compileClosureCall = ({
   const effectful =
     typeof resolvedDesc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(resolvedDesc.effectRow);
+  const returnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const expectedTypeId = expectedResultTypeId ?? returnTypeId;
+  const callResultWasmType = wasmTypeFor(expectedTypeId, ctx);
 
   if (effectful && debugEffects()) {
     console.log("[effects] closure call", {
@@ -110,34 +204,77 @@ export const compileClosureCall = ({
     fnCtx,
     compileExpr,
   });
+  const argSetups: binaryen.ExpressionRef[] = [];
+  const userArgs = args.flatMap((arg, index) => {
+    const flattened = flattenAbiArgument(
+      arg,
+      base.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
+      resolvedDesc.parameters[index]?.type,
+    );
+    argSetups.push(...flattened.setup);
+    return flattened.args;
+  });
 
   const callArgs = effectful
     ? [
         ctx.mod.local.get(closureTemp.index, base.interfaceType),
         currentHandlerValue(ctx, fnCtx),
-        ...args,
+        ...userArgs,
       ]
-    : [ctx.mod.local.get(closureTemp.index, base.interfaceType), ...args];
-
-  const call = callRef(
-    ctx.mod,
-    targetFn,
-    callArgs as number[],
-    base.resultType
-  );
+    : [ctx.mod.local.get(closureTemp.index, base.interfaceType), ...userArgs];
+  const rawCall = callRef(ctx.mod, targetFn, callArgs as number[], base.resultType);
+  const directCallResult = effectful
+    ? rawCall
+    : (() => {
+        const stabilizedCall = stabilizeMultivalueResult(rawCall, base.resultAbiTypes);
+        return getSignatureSpillBoxType({
+          typeId: resolvedDesc.returnType,
+          ctx,
+        }) === base.resultType
+          ? unboxSignatureSpillValue({
+              value: stabilizedCall,
+              typeId: resolvedDesc.returnType,
+              ctx,
+            })
+          : stabilizedCall;
+      })();
+  const callExpr =
+    argSetups.length === 0
+      ? directCallResult
+      : ctx.mod.block(
+          null,
+          [...argSetups, directCallResult],
+          binaryen.getExpressionType(directCallResult),
+        );
 
   const lowered = effectful
     ? ctx.effectsBackend.lowerEffectfulCallResult({
-        callExpr: call,
+        callExpr,
         callId: expr.id,
-        returnTypeId: resolvedDesc.returnType,
+        returnTypeId,
         expectedResultTypeId,
         tailPosition,
         typeInstanceId,
         ctx,
         fnCtx,
       })
-    : { expr: call, usedReturnCall: false };
+    : {
+        expr:
+          returnTypeId === expectedTypeId
+            ? callExpr
+            : coerceExprToWasmType({
+                expr: coerceValueToType({
+                  value: callExpr,
+                  actualType: returnTypeId,
+                  targetType: expectedTypeId,
+                  ctx,
+                  fnCtx,
+                }),
+                targetType: callResultWasmType,
+                ctx,
+              }),
+        usedReturnCall: false,
+      };
 
   ops.push(lowered.expr);
   return {
@@ -170,6 +307,87 @@ export const compileCurriedClosureCall = ({
   tailPosition: boolean;
   expectedResultTypeId?: TypeId;
 }): CompiledExpression => {
+  const stabilizeMultivalueResult = (
+    value: binaryen.ExpressionRef,
+    abiTypes: readonly binaryen.Type[],
+  ): binaryen.ExpressionRef => {
+    if (abiTypes.length <= 1) {
+      return value;
+    }
+    const captured = captureMultivalueLanes({
+      value,
+      abiTypes,
+      ctx,
+      fnCtx,
+    });
+    const tuple = ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]);
+    if (captured.setup.length === 0) {
+      return tuple;
+    }
+    return ctx.mod.block(null, [...captured.setup, tuple], abiTypeFor(abiTypes));
+  };
+
+  const flattenAbiArgument = (
+    value: binaryen.ExpressionRef,
+    abiTypes: readonly binaryen.Type[],
+    typeId?: TypeId,
+  ): {
+    setup: readonly binaryen.ExpressionRef[];
+    args: readonly binaryen.ExpressionRef[];
+  } => {
+    const valueAbiTypes = binaryen.getExpressionType(value) === binaryen.none
+      ? []
+      : [...binaryen.expandType(binaryen.getExpressionType(value))];
+    if (
+      typeof typeId === "number" &&
+      abiTypes.length === 1 &&
+      getSignatureSpillBoxType({ typeId, ctx }) === abiTypes[0]
+    ) {
+      return {
+        setup: [],
+        args: [
+          boxSignatureSpillValue({
+            value,
+            typeId,
+            ctx,
+            fnCtx,
+          }),
+        ],
+      };
+    }
+    if (abiTypes.length <= 1) {
+      return {
+        setup: [],
+        args: abiTypes.length === 0 ? [] : [value],
+      };
+    }
+    if (valueAbiTypes.length !== abiTypes.length) {
+      throw new Error(
+        `closure ABI flatten mismatch: expected ${abiTypes.length} lanes, got ${valueAbiTypes.length}`,
+      );
+    }
+    if (typeof typeId === "number") {
+      const tempType = abiTypeFor(valueAbiTypes);
+      const temp = allocateTempLocal(tempType, fnCtx, typeId, ctx);
+      return {
+        setup: [storeLocalValue({ binding: temp, value, ctx, fnCtx })],
+        args: abiTypes.map((_, index) =>
+          ctx.mod.tuple.extract(loadLocalValue(temp, ctx), index),
+        ),
+      };
+    }
+    const captured = captureMultivalueLanes({
+      value,
+      abiTypes,
+      ctx,
+      fnCtx,
+    });
+    return {
+      setup: captured.setup,
+      args: captured.lanes,
+    };
+  };
+
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
 
@@ -266,8 +484,21 @@ export const compileCurriedClosureCall = ({
     }
 
     const returnTypeId = currentDesc.returnType;
-    const returnWasmType = wasmTypeFor(returnTypeId, ctx);
-    const args = compiledSlice.args;
+    const expectedTypeId =
+      isFinalSlice && typeof expectedResultTypeId === "number"
+        ? expectedResultTypeId
+        : returnTypeId;
+    const returnWasmType = wasmTypeFor(expectedTypeId, ctx);
+    const argSetups: binaryen.ExpressionRef[] = [];
+    const args = compiledSlice.args.flatMap((arg, index) => {
+      const flattened = flattenAbiArgument(
+        arg,
+        base.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
+        currentDesc.parameters[index]?.type,
+      );
+      argSetups.push(...flattened.setup);
+      return flattened.args;
+    });
 
     const callArgs = effectful
       ? [
@@ -276,16 +507,31 @@ export const compileCurriedClosureCall = ({
           ...args,
         ]
       : [ctx.mod.local.get(closureTemp.index, base.interfaceType), ...args];
-    const call = callRef(
-      ctx.mod,
-      targetFn,
-      callArgs as number[],
-      base.resultType
-    );
+    const rawCall = callRef(ctx.mod, targetFn, callArgs as number[], base.resultType);
+    const directCallResult = effectful
+      ? rawCall
+      : (() => {
+          const stabilizedCall = stabilizeMultivalueResult(rawCall, base.resultAbiTypes);
+          return getSignatureSpillBoxType({ typeId: returnTypeId, ctx }) === base.resultType
+            ? unboxSignatureSpillValue({
+                value: stabilizedCall,
+                typeId: returnTypeId,
+                ctx,
+              })
+            : stabilizedCall;
+        })();
+    const callExpr =
+      argSetups.length === 0
+        ? directCallResult
+        : ctx.mod.block(
+            null,
+            [...argSetups, directCallResult],
+            binaryen.getExpressionType(directCallResult),
+          );
 
     const lowered = effectful
       ? ctx.effectsBackend.lowerEffectfulCallResult({
-          callExpr: call,
+          callExpr,
           callId: expr.id,
           returnTypeId,
           expectedResultTypeId: isFinalSlice ? expectedResultTypeId : undefined,
@@ -294,7 +540,23 @@ export const compileCurriedClosureCall = ({
           ctx,
           fnCtx,
         })
-      : { expr: call, usedReturnCall: false };
+      : {
+          expr:
+            returnTypeId === expectedTypeId
+              ? callExpr
+              : coerceExprToWasmType({
+                  expr: coerceValueToType({
+                    value: callExpr,
+                    actualType: returnTypeId,
+                    targetType: expectedTypeId,
+                    ctx,
+                    fnCtx,
+                  }),
+                  targetType: returnWasmType,
+                  ctx,
+                }),
+          usedReturnCall: false,
+        };
 
     ops.push(lowered.expr);
     currentValue = {

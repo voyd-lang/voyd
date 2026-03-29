@@ -2,11 +2,15 @@ import binaryen from "binaryen";
 import { defineStructType } from "@voyd/lib/binaryen-gc/index.js";
 import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import type { ClosureTypeInfo, CodegenContext, TypeId } from "./context.js";
+import { getAbiTypesForSignature, getSignatureWasmType } from "./types.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
 const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const expandAbiTypes = (type: binaryen.Type): binaryen.Type[] =>
+  type === binaryen.none ? [] : [...binaryen.expandType(type)];
 
 type WasmTypeMode = "runtime" | "signature";
 
@@ -49,6 +53,7 @@ const closureSignatureKey = ({
   parameters,
   returnType,
   effectRow,
+  mode,
 }: {
   moduleId: string;
   parameters: ReadonlyArray<{
@@ -58,6 +63,7 @@ const closureSignatureKey = ({
   }>;
   returnType: TypeId;
   effectRow: unknown;
+  mode: WasmTypeMode;
 }): string => {
   const params = parameters
     .map((param) => {
@@ -66,7 +72,7 @@ const closureSignatureKey = ({
       return `${label}:${param.type}${optional}`;
     })
     .join("|");
-  return `${moduleId}::(${params})->${returnType}|${effectRow}`;
+  return `${moduleId}::${mode}::(${params})->${returnType}|${effectRow}`;
 };
 
 const closureStructName = ({
@@ -122,6 +128,7 @@ export const ensureClosureTypeInfo = ({
     parameters: desc.parameters,
     returnType: desc.returnType,
     effectRow: desc.effectRow,
+    mode,
   });
   const cached = ctx.closureTypes.get(key);
   if (cached) {
@@ -131,14 +138,24 @@ export const ensureClosureTypeInfo = ({
   const effectful =
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
-  const userParamTypes = desc.parameters.map((param) =>
-    lowerType(param.type, ctx, seen, mode)
+  const paramAbiTypes = desc.parameters.map((param) =>
+    mode === "signature"
+      ? getAbiTypesForSignature(param.type, ctx)
+      : expandAbiTypes(lowerType(param.type, ctx, seen, mode)),
   );
+  const userParamTypes = paramAbiTypes.flat();
+  const resultAbiTypes =
+    mode === "signature"
+      ? getAbiTypesForSignature(desc.returnType, ctx)
+      : expandAbiTypes(lowerType(desc.returnType, ctx, seen, mode));
   const widened = ctx.effectsBackend.abi.widenSignature({
     ctx,
     effectful,
     userParamTypes,
-    userResultType: lowerType(desc.returnType, ctx, seen, mode),
+    userResultType:
+      mode === "signature"
+        ? getSignatureWasmType(desc.returnType, ctx)
+        : lowerType(desc.returnType, ctx, seen, mode),
   });
   const paramTypes = widened.paramTypes;
   const resultType = widened.resultType;
@@ -158,7 +175,10 @@ export const ensureClosureTypeInfo = ({
     interfaceType,
     fnRefType,
     paramTypes,
+    paramAbiTypes,
+    userParamOffset: widened.userParamOffset,
     resultType,
+    resultAbiTypes,
   };
   ctx.closureTypes.set(key, info);
   return info;

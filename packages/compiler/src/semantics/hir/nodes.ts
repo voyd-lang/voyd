@@ -307,6 +307,7 @@ export interface HirObjectField {
 
 export interface HirObjectDecl extends HirItemBase {
   kind: "object";
+  objectKind: "obj" | "value";
   symbol: SymbolId;
   typeParameters?: readonly HirTypeParameter[];
   base?: HirTypeExpr;
