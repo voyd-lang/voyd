@@ -1544,26 +1544,11 @@ const compileFunctionItem = (
         ? ctx.mod.block(null, [...paramInitOps, body.expr], binaryen.getExpressionType(body.expr))
         : body.expr;
   const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
-  const bodyExprType = binaryen.getExpressionType(bodyExpr);
-  const shouldWrapOutcome =
-    meta.effectful &&
-    !isOutcomeCarrierType({
-      wasmType: bodyExprType,
-      ctx,
-    });
-  const rawFunctionBody = shouldWrapOutcome
-    ? wrapValueInOutcome({
-        valueExpr: bodyExpr,
-        valueType: returnValueType,
-        ctx,
-        fnCtx,
-      })
-    : bodyExpr;
-  const functionBody =
+  const functionBodyBeforeWrap =
     meta.resultAbiKind === "out_ref" && fnCtx.returnOutPointer
-      ? (binaryen.getExpressionType(rawFunctionBody) === binaryen.none ||
-          binaryen.getExpressionType(rawFunctionBody) === binaryen.unreachable
-          ? rawFunctionBody
+      ? (binaryen.getExpressionType(bodyExpr) === binaryen.none ||
+          binaryen.getExpressionType(bodyExpr) === binaryen.unreachable
+          ? bodyExpr
           : ctx.mod.block(
               null,
               [
@@ -1573,7 +1558,7 @@ const compileFunctionItem = (
                       fnCtx.returnOutPointer!.index,
                       fnCtx.returnOutPointer!.storageType,
                     ),
-                  value: rawFunctionBody,
+                  value: bodyExpr,
                   typeId: meta.resultTypeId,
                   ctx,
                   fnCtx,
@@ -1581,7 +1566,28 @@ const compileFunctionItem = (
               ],
               binaryen.none,
             ))
-      : !meta.effectful && meta.resultTypeId !== ctx.program.primitives.void
+      : bodyExpr;
+  const wrappedValueType =
+    meta.resultAbiKind === "out_ref"
+      ? binaryen.none
+      : returnValueType;
+  const bodyExprType = binaryen.getExpressionType(functionBodyBeforeWrap);
+  const shouldWrapOutcome =
+    meta.effectful &&
+    !isOutcomeCarrierType({
+      wasmType: bodyExprType,
+      ctx,
+    });
+  const rawFunctionBody = shouldWrapOutcome
+    ? wrapValueInOutcome({
+        valueExpr: functionBodyBeforeWrap,
+        valueType: wrappedValueType,
+        ctx,
+        fnCtx,
+      })
+    : functionBodyBeforeWrap;
+  const functionBody =
+    !meta.effectful && meta.resultTypeId !== ctx.program.primitives.void
           && binaryen.getExpressionType(rawFunctionBody) !== binaryen.none
           && binaryen.getExpressionType(rawFunctionBody) !== binaryen.unreachable
         ? boxSignatureSpillValue({
