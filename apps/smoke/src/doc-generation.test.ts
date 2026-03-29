@@ -58,6 +58,8 @@ const createFixture = async (): Promise<{ root: string; entryPath: string }> => 
       "",
       "pub obj Counter { api value: i32, pri hidden: i32 }",
       "",
+      "pub val Meter { raw: i32 }",
+      "",
       "obj Hidden { api value: i32 }",
       "",
       "impl Counter",
@@ -193,6 +195,8 @@ describe("smoke: sdk doc-generation", () => {
       expect(html.content).toContain("<pre><code>enum Result&lt;T, E&gt;");
       expect(html.content).not.toContain("<p>```voyd");
       expect(html.content).toContain("class=\"tok-kw\">impl</span>");
+      expect(html.content).toContain("class=\"tok-kw\">val</span>");
+      expect(html.content).toContain("class=\"tok-type\">Meter</span>");
       expect(html.content).toContain("class=\"tok-name\">double</span>");
       expect(html.content).toContain(
         "href=\"https://example.com/docs?q=voyd&amp;lang=en\"",
@@ -229,6 +233,7 @@ describe("smoke: sdk doc-generation", () => {
           }>;
           objects: Array<{
             name: string;
+            signature: string;
             members: Array<{ name: string; signature: string }>;
           }>;
           effects: Array<{
@@ -301,6 +306,8 @@ describe("smoke: sdk doc-generation", () => {
       expect(externalMethod?.signature).toContain("~self");
       const counterObject = mainModule?.objects.find((objectDecl) => objectDecl.name === "Counter");
       expect(counterObject?.members.map((member) => member.name)).toEqual(["value"]);
+      const meterObject = mainModule?.objects.find((objectDecl) => objectDecl.name === "Meter");
+      expect(meterObject?.signature).toBe("val Meter");
       const decodeEffect = mainModule?.effects.find((effectDecl) => effectDecl.name === "Decode");
       expect(decodeEffect?.documentation).toBe(" Decode effect docs.");
       const decodeNextOp = decodeEffect?.members.find((member) => member.name === "decode_next");

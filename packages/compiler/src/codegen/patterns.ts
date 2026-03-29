@@ -33,7 +33,7 @@ import {
   initDefaultStruct,
   refCast,
   structSetFieldValue,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
+} from "@voyd/lib/binaryen-gc/index.js";
 
 export interface PatternInitOptions {
   declare: boolean;

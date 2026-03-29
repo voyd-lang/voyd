@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { initDefaultStruct } from "@voyd-lang/lib/binaryen-gc/index.js";
+import { initDefaultStruct } from "@voyd/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   CompiledExpression,

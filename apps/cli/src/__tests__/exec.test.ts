@@ -40,13 +40,13 @@ describe("exec", () => {
       printJson: vi.fn(),
       printValue,
     }));
-    vi.doMock("@voyd-lang/sdk", failOnLoad("@voyd-lang/sdk"));
-    vi.doMock("@voyd-lang/sdk/compiler", failOnLoad("@voyd-lang/sdk/compiler"));
-    vi.doMock("@voyd-lang/sdk/doc-generation", failOnLoad("@voyd-lang/sdk/doc-generation"));
-    vi.doMock("@voyd-lang/lib/resolve-std.js", failOnLoad("@voyd-lang/lib/resolve-std.js"));
+    vi.doMock("@voyd/sdk", failOnLoad("@voyd/sdk"));
+    vi.doMock("@voyd/sdk/compiler", failOnLoad("@voyd/sdk/compiler"));
+    vi.doMock("@voyd/sdk/doc-generation", failOnLoad("@voyd/sdk/doc-generation"));
+    vi.doMock("@voyd/lib/resolve-std.js", failOnLoad("@voyd/lib/resolve-std.js"));
     vi.doMock("../package-dirs.js", failOnLoad("./package-dirs.js"));
     vi.doMock("../test-runner.js", failOnLoad("./test-runner.js"));
-    vi.doMock("@voyd-lang/sdk/js-host", () => ({
+    vi.doMock("@voyd/sdk/js-host", () => ({
       createVoydHost,
     }));
 

@@ -1,4 +1,4 @@
-pub value BadValue {
+pub val BadValue {
   payload: unknown
 }
 

@@ -1,3 +1,3 @@
-value Node {
+val Node {
   next: Node
 }

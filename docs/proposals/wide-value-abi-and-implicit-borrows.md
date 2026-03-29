@@ -2,16 +2,16 @@
 
 Status: Proposed
 Owner: Compiler Architecture + Codegen Working Group
-Scope: optimized internal ABI, container access lowering, codegen/runtime contracts for `value` types
+Scope: optimized internal ABI, container access lowering, codegen/runtime contracts for `val` types
 
 ## Goal
 
-Make wide `value` types performant in hot code without adding new surface syntax.
+Make wide `val` types performant in hot code without adding new surface syntax.
 
 CTX: We are using /Users/drew/projects/voyd_examples/src/vtrace_fast.voyd as a benchmark
 for common hot wasm use cases.
 
-This proposal keeps the existing source-level `value` model and changes only the
+This proposal keeps the existing source-level `val` model and changes only the
 physical lowering strategy used by the compiler. The intended result is:
 
 - small values like `Vec3` stay cheap and inline
@@ -21,7 +21,7 @@ physical lowering strategy used by the compiler. The intended result is:
 
 ## Why This Proposal Exists
 
-The current `value` implementation is sufficient for small fixed-layout aggregates. It
+The current `val` implementation is sufficient for small fixed-layout aggregates. It
 performs poorly for wide values in call-heavy and container-heavy code.
 
 The current implementation has two main issues:
@@ -39,7 +39,7 @@ The `vtrace_fast` benchmark demonstrates both problems:
 - In practice, reverting those wide hot-path types to heap objects improves performance
   substantially even while keeping `Vec3` as a value.
 
-That means the next step is not "more `value` syntax". The next step is "better lowering
+That means the next step is not "more `val` syntax". The next step is "better lowering
 for wide values".
 
 ## Non-goals
@@ -54,7 +54,7 @@ for wide values".
 
 Separate semantic ownership from physical representation.
 
-A source-level `value` remains a value semantically:
+A source-level `val` remains a value semantically:
 
 - assignment produces independent values
 - passing a value does not expose aliasing to the callee
@@ -206,7 +206,7 @@ This section specifies the required behavior, not just the intended behavior.
 
 ### Rule A: wide non-`~` params are borrowed at function entry
 
-For optimized internal calls, a parameter of wide `value` type declared without `~`
+For optimized internal calls, a parameter of wide `val` type declared without `~`
 must be lowered as a readonly reference, unless the call is at a boundary that is still
 using the legacy ABI.
 
@@ -236,7 +236,7 @@ require mutation of the caller-provided location.
 
 ### Rule D: wide returns use out storage
 
-For optimized internal calls, a function returning a wide `value` must lower to an
+For optimized internal calls, a function returning a wide `val` must lower to an
 out-destination ABI.
 
 The caller is responsible for allocating destination storage. The callee writes directly

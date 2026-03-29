@@ -1,13 +1,13 @@
 trait EmitWide
   fn emit(self) -> Sphere
 
-value Vec3 {
+val Vec3 {
   x: f64,
   y: f64,
   z: f64
 }
 
-value Sphere {
+val Sphere {
   center: Vec3,
   radius: f64,
   albedo: Vec3,

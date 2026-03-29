@@ -255,4 +255,20 @@ pub declare_alias NumberLike
     const plain = toPlain(ast);
     expect(plain).toContainEqual(["pub", "type", ["=", "NumberLike", "i32"]]);
   });
+
+  test("supports pub-wrapped value declarations from macros", () => {
+    const code = `\
+macro declare_value(name)
+  \`(val $name { answer: i32 })
+pub declare_value NumberLike
+`;
+    const ast = parse(code);
+    const plain = toPlain(ast);
+    expect(plain).toContainEqual([
+      "pub",
+      "val",
+      "NumberLike",
+      ["object_literal", [":", "answer", "i32"]],
+    ]);
+  });
 });

@@ -12,7 +12,7 @@ import {
   arrayGet,
   refCast,
   structGetFieldValue,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
+} from "@voyd/lib/binaryen-gc/index.js";
 import {
   liftHeapValueToInline,
   lowerValueForHeapField,

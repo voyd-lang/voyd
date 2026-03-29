@@ -206,7 +206,7 @@ const PUB_ELIGIBLE_TOP_LEVEL_HEADS = new Set([
   "fn",
   "type",
   "obj",
-  "value",
+  "val",
   "trait",
   "impl",
   "eff",

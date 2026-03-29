@@ -19,5 +19,6 @@ This specification is broken down into two main parts:
 
 - [The Surface Language Specification](./surface.md) (What users write and know
   as the Voyd language)
+- [Value Types](./value-types.md) (The `val` declaration and value-type semantics)
 - [The Core Language Specification](./core.md) (What macros expand into,
   resembles the structure the compiler works with directly)

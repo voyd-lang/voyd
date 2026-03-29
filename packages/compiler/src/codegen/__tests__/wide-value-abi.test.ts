@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
+import { getWasmInstance } from "@voyd/lib/wasm.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
@@ -34,7 +34,7 @@ const compileModule = (source: string) => {
 describe("wide value abi", () => {
   it("allocates out-ref return storage directly", () => {
     const module = compileModule(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -58,7 +58,7 @@ pub fn main() -> i32
 
   it("initializes wide call results directly into local storage", () => {
     const module = compileModule(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -86,7 +86,7 @@ pub fn main() -> i32
 
   it("initializes wide mutable locals from literals without boxing a fresh value object", () => {
     const module = compileModule(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -109,7 +109,7 @@ pub fn main() -> i32
 
   it("writes wide literal returns into the caller-provided out-ref storage", () => {
     const module = compileModule(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -136,7 +136,7 @@ pub fn main() -> i32
 
   it("threads storage-backed initialization through if wrappers", () => {
     const module = compileModule(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -175,7 +175,7 @@ obj None {}
 
 type Optional<T> = Some<T> | None
 
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,
@@ -196,7 +196,7 @@ pub fn main() -> i32
 
   it("preserves out-ref returns in mixed-effect wrapper impls", () => {
     const module = compileModule(`
-pub value WideVec5 {
+pub val WideVec5 {
   a: i32,
   b: i32,
   c: i32,

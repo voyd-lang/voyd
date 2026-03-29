@@ -315,6 +315,11 @@ type DiagnosticParamsMap = {
         valueTypeName: string;
         context: string;
       };
+  TY0046: {
+    kind: "mixed-value-union";
+    valueMemberType: string;
+    otherMemberType: string;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -962,7 +967,7 @@ export const diagnosticsRegistry: {
     hints: [
       {
         message:
-          "Use primitives, other values, tuples, fixed arrays, or explicit heap/reference types inside `value` declarations.",
+          "Use primitives, other values, tuples, fixed arrays, or explicit heap/reference types inside `val` declarations.",
       },
       {
         message:
@@ -974,6 +979,19 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0045"]>,
+  TY0046: {
+    code: "TY0046",
+    message: (params) =>
+      `union member ${params.valueMemberType} is a value type, so all top-level union members must be value types; found ${params.otherMemberType}`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Keep direct value unions all-value, or wrap the value in an object before mixing it with heap/object variants.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0046"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

@@ -1,0 +1,13 @@
+pub val Left {
+  value: i32
+}
+
+pub obj Right {
+  value: i32
+}
+
+pub fn choose(flag: bool)
+  if flag then:
+    Left { value: 1 }
+  else:
+    Right { value: 2 }

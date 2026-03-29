@@ -1,6 +1,6 @@
 # Value Types
 
-Status: Proposed
+Status: Finished
 Owner: Language + Compiler Working Group
 Scope: parser surface, semantics/type arena, optimizer, codegen, stdlib container specialization
 
@@ -35,33 +35,33 @@ runtime overhead.
 - Solving every performance problem with a single surface feature. Value types should
   complement optimizer work such as escape analysis and scalar replacement.
 - Designing structural value types in the MVP. Existing notes mention `%{}` for future
-  structural value literals; this proposal focuses on nominal value declarations first.
+  structural value literals; this proposal focuses on nominal `val` declarations first.
 
 ## Surface Syntax
 
 Introduce a new top-level declaration form:
 
 ```voyd
-pub value Vec3 {
+pub val Vec3 {
   x: f64,
   y: f64,
   z: f64
 }
 ```
 
-`value` is nominal, like `obj`, but uses value semantics.
+`val` is nominal, like `obj`, but uses value semantics.
 
 Initial rules:
 
-- `value` fields must have statically known layout.
-- A `value` may contain:
+- `val` fields must have statically known layout.
+- A `val` may contain:
   - primitive scalars
   - other value types
   - tuples of value-compatible fields
   - fixed arrays of value-compatible fields
   - references to heap/object types when explicitly desired
-- A `value` may not be recursive in the MVP.
-- A `value` has no implicit runtime RTT/method-table payload.
+- A `val` may not be recursive in the MVP.
+- A `val` has no implicit runtime RTT/method-table payload.
 
 ## Core Semantics
 
@@ -77,7 +77,7 @@ Value types are copied on:
 Example:
 
 ```voyd
-pub value Ray {
+pub val Ray {
   origin: Vec3,
   direction: Vec3
 }
@@ -96,7 +96,7 @@ fn demo()
 Mutation still requires an addressable mutable location via `~self` or `~param`.
 
 ```voyd
-pub value Vec3 {
+pub val Vec3 {
   x: f64,
   y: f64,
   z: f64
@@ -138,7 +138,7 @@ imply heap identity or reference sharing.
 ### Example 1: `Vec3`
 
 ```voyd
-pub value Vec3 {
+pub val Vec3 {
   x: f64,
   y: f64,
   z: f64
@@ -301,23 +301,23 @@ Diagnostics should make the model obvious:
 
 ## Migration Guidance
 
-Good candidates for `value`:
+Good candidates for `val`:
 
 - vectors, points, rays, colors, intervals
 - small geometry records
 - numeric helper types
 - small immutable or borrow-mutated structs with no identity
 
-Poor candidates for `value`:
+Poor candidates for `val`:
 
 - graphs, trees, or recursive shapes
 - capability/handle wrappers that rely on identity
 - large mutable aggregates routinely shared across modules
 - types primarily consumed via trait objects
 
-## Open Questions
+## Resolved Decisions
 
-- Do we want structural value types (`%{}`) after nominal `value` lands? - NO
+- Do we want structural value types (`%{}`) after nominal `val` lands? - NO
 - Should `Array<T>` inline value elements in the MVP or in a follow-up? - YES, in MVP
 - What size threshold should trigger stack-slot aggregation vs. multi-value lowering? - Use direct multi-value lowering through 4 ABI lanes, then spill to stack-like temporaries.
 - Do we want an explicit source-level boxing syntax, and if so what should it be? - Not for MVP.

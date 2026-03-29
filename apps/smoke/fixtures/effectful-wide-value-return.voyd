@@ -1,0 +1,35 @@
+eff Probe
+  touch(resume) -> void
+
+val Vec3 {
+  x: f64,
+  y: f64,
+  z: f64
+}
+
+val Sphere {
+  center: Vec3,
+  radius: f64,
+  albedo: Vec3,
+  fuzz: f64,
+  refraction_index: f64,
+  material_kind: i32
+}
+
+fn build_sphere(): Probe -> Sphere
+  Probe::touch()
+  return Sphere {
+    center: Vec3 { x: 1.0, y: 2.0, z: 3.0 },
+    radius: 4.0,
+    albedo: Vec3 { x: 5.0, y: 6.0, z: 7.0 },
+    fuzz: 8.0,
+    refraction_index: 9.0,
+    material_kind: 10
+  }
+
+pub fn main(): () -> f64
+  try
+    let sphere = build_sphere()
+    sphere.center.x + sphere.radius + sphere.albedo.y
+  Probe::touch(resume):
+    resume()

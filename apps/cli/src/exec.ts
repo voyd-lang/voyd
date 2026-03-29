@@ -2,9 +2,9 @@ import { stdout } from "process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { CompileResult } from "@voyd-lang/sdk";
-import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd-lang/sdk/compiler";
-import type { DocumentationOutputFormat } from "@voyd-lang/sdk/doc-generation";
+import type { CompileResult } from "@voyd/sdk";
+import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd/sdk/compiler";
+import type { DocumentationOutputFormat } from "@voyd/sdk/doc-generation";
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
 import { getConfig } from "./config/index.js";
@@ -15,7 +15,7 @@ import {
 
 export const exec = () => main().catch(errorHandler);
 
-type VoydSdk = ReturnType<(typeof import("@voyd-lang/sdk"))["createSdk"]>;
+type VoydSdk = ReturnType<(typeof import("@voyd/sdk"))["createSdk"]>;
 
 let sdkPromise: Promise<VoydSdk> | undefined;
 
@@ -150,8 +150,8 @@ const loadModuleRoots = async ({
 }): Promise<ModuleRoots> => {
   const [{ detectSrcRootForPath }, { resolveStdRoot }, { resolvePackageDirs }] =
     await Promise.all([
-      import("@voyd-lang/sdk"),
-      import("@voyd-lang/lib/resolve-std.js"),
+      import("@voyd/sdk"),
+      import("@voyd/lib/resolve-std.js"),
       import("./package-dirs.js"),
     ]);
   const srcRoot = detectSrcRootForPath(entryPath);
@@ -163,7 +163,7 @@ const loadModuleRoots = async ({
 };
 
 const getSdk = async (): Promise<VoydSdk> => {
-  sdkPromise ??= import("@voyd-lang/sdk").then(({ createSdk }) => createSdk());
+  sdkPromise ??= import("@voyd/sdk").then(({ createSdk }) => createSdk());
   return sdkPromise;
 };
 
@@ -197,7 +197,7 @@ const serializeHir = (hir: HirGraph) => ({
 });
 
 async function getParserAst(entryPath: string) {
-  const { parse } = await import("@voyd-lang/sdk/compiler");
+  const { parse } = await import("@voyd/sdk/compiler");
   const file = readFileSync(entryPath, { encoding: "utf8" });
   return parse(file, entryPath).toJSON();
 }
@@ -207,7 +207,7 @@ async function getCoreAst(entryPath: string) {
 }
 
 async function getIrAST(entryPath: string, roots: ModuleRoots) {
-  const { analyzeModules, loadModuleGraph } = await import("@voyd-lang/sdk/compiler");
+  const { analyzeModules, loadModuleGraph } = await import("@voyd/sdk/compiler");
   const graph = await loadModuleGraph({ entryPath, roots });
   const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
     graph,
@@ -279,7 +279,7 @@ async function runVoyd({
 }
 
 async function runWasm(entryPath: string, entryName = "main") {
-  const { createVoydHost } = await import("@voyd-lang/sdk/js-host");
+  const { createVoydHost } = await import("@voyd/sdk/js-host");
   const wasm = readFileSync(entryPath);
   const host = await createVoydHost({ wasm });
   const result = await host.run(entryName);
@@ -297,7 +297,7 @@ async function emitDocumentation({
   outPath?: string;
   format?: DocumentationOutputFormat;
 }) {
-  const { generateDocumentation } = await import("@voyd-lang/sdk/doc-generation");
+  const { generateDocumentation } = await import("@voyd/sdk/doc-generation");
   const resolvedFormat = format ?? "html";
   const { content } = await generateDocumentation({
     entryPath,

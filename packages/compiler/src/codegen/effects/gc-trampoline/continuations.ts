@@ -17,7 +17,7 @@ import type { ResumeKind } from "../runtime-abi.js";
 import {
   refCast,
   structGetFieldValue,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
+} from "@voyd/lib/binaryen-gc/index.js";
 import { allocateTempLocal, storeLocalValue } from "../../locals.js";
 import { getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { walkHirExpression, walkHirPattern } from "../../hir-walk.js";

@@ -3,7 +3,7 @@ import {
   binaryenTypeToHeapType,
   defineArrayType,
   defineStructType,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
+} from "@voyd/lib/binaryen-gc/index.js";
 import type { CodegenContext, FixedArrayWasmType, TypeId } from "./context.js";
 
 type WasmTypeMode = "runtime" | "signature";

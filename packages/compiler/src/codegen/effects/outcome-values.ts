@@ -4,7 +4,7 @@ import {
   initStruct,
   refCast,
   structGetFieldValue,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
+} from "@voyd/lib/binaryen-gc/index.js";
 import type { CodegenContext, FunctionContext } from "../context.js";
 import { captureMultivalueLanes } from "../multivalue.js";
 

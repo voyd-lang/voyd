@@ -1,6 +1,6 @@
 import binaryen from "binaryen";
-import { initExtensionHelpers } from "@voyd-lang/compiler/codegen/rtt/extension.js";
-import { binaryenTypeToHeapType, defineStructType } from "@voyd-lang/lib/binaryen-gc/index.js";
+import { initExtensionHelpers } from "@voyd/compiler/codegen/rtt/extension.js";
+import { binaryenTypeToHeapType, defineStructType } from "@voyd/lib/binaryen-gc/index.js";
 import {
   initFieldLookupHelpers,
   FieldLookupHelpers,

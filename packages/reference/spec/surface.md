@@ -7,6 +7,7 @@ This surface language spec includes:
 
 -   The surface grammar
 -   The surface syntax
+-   Nominal value type declarations via `val` (specified in [Value Types](./value-types.md))
 -   Macros
 -   A standard library (Built in macros, types, and functions)
 -   More?

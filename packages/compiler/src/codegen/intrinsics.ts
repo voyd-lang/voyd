@@ -33,8 +33,8 @@ import {
   initStruct,
   modBinaryenTypeToHeapType,
   structGetFieldValue,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
-import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
+} from "@voyd/lib/binaryen-gc/index.js";
+import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { captureMultivalueLanes } from "./multivalue.js";
 import { ensureFixedArrayWasmTypesByElement } from "./fixed-array-types.js";

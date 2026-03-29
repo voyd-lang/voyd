@@ -303,7 +303,7 @@ export const parseObjectDecl = (form: Form): ParsedObjectDecl | null => {
   const keyword = form.at(index);
   const objectKind = isIdentifierWithValue(keyword, "obj")
     ? "obj"
-    : isIdentifierWithValue(keyword, "value")
+    : isIdentifierWithValue(keyword, "val")
       ? "value"
       : undefined;
   if (!objectKind) {

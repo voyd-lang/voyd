@@ -12,7 +12,7 @@ import {
   callRef,
   refCast,
   structGetFieldValue,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
+} from "@voyd/lib/binaryen-gc/index.js";
 import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../../locals.js";
 import {
   abiTypeFor,

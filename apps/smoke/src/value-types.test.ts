@@ -1,6 +1,6 @@
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createSdk, type CompileResult } from "@voyd-lang/sdk";
+import { createSdk, type CompileResult } from "@voyd/sdk";
 
 const fixtureEntryPath = path.join(import.meta.dirname, "..", "fixtures", "value-types.voyd");
 
@@ -40,6 +40,20 @@ describe("smoke: value types", () => {
   it("matches unions of values", async () => {
     const output = await compiled.run<number>({ entryName: "value_match" });
     expect(output).toBe(7);
+  });
+
+  it("supports value unions through aliases", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_union_alias_match",
+    });
+    expect(output).toBe(7);
+  });
+
+  it("stores direct value unions inside value fields", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_union_field_round_trip",
+    });
+    expect(output).toBe(9);
   });
 
   it("stores values inside objects and reads them back", async () => {

@@ -11,11 +11,11 @@ automatically lowering eligible heap-object values into value-like storage when 
 compiler can prove identity is not observable.
 
 This should let users keep ergonomic `obj` code in straightforward cases while still
-getting some of the runtime benefits that explicit `value` declarations provide today.
+getting some of the runtime benefits that explicit `val` declarations provide today.
 
 ## Motivation
 
-Voyd now has explicit `value` declarations for types that are intentionally fixed-layout
+Voyd now has explicit `val` declarations for types that are intentionally fixed-layout
 and copy-oriented. That covers the deliberate, source-visible performance path.
 
 There is still a large class of code that looks like this:
@@ -34,16 +34,16 @@ fn sum() -> i32
 Semantically this is an identity-bearing heap object. Operationally, in many cases it is
 just a short-lived aggregate whose allocation and field loads could be eliminated.
 
-Explicit `value` should remain the strongest and most predictable way to request
+Explicit `val` should remain the strongest and most predictable way to request
 value-style lowering. But the optimizer should also recover obvious non-escaping heap
 allocations where identity is never observed.
 
 ## Non-goals
 
-- Reinterpreting `obj` declarations as `value` declarations in the type arena.
+- Reinterpreting `obj` declarations as `val` declarations in the type arena.
 - Changing source-level typing, compatibility, or API surface.
 - Making every heap object eligible for stack or scalar lowering.
-- Replacing explicit `value`; this proposal is a complement, not a substitute.
+- Replacing explicit `val`; this proposal is a complement, not a substitute.
 - Solving trait-object lowering, dynamic identity, and recursive heap structures in the
   first pass.
 
@@ -177,9 +177,9 @@ If a later use requires heap form after all, codegen may materialize the object 
 boundary as a fallback, but the first pass should prefer simply refusing optimization when
 such a boundary exists.
 
-## Interaction with Explicit `value`
+## Interaction with Explicit `val`
 
-Explicit `value` remains:
+Explicit `val` remains:
 
 - the user-controlled layout contract
 - the preferred representation for hot-path fixed-layout data

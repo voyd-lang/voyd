@@ -15,7 +15,7 @@ import {
   ensureInlineFixedArrayWasmTypes,
 } from "./fixed-array-types.js";
 import { MAX_MULTIVALUE_INLINE_LANES } from "./multivalue.js";
-import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
+import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
 import {
   pickTraitImplMethodMeta,
@@ -2720,6 +2720,10 @@ const createMethodLookupEntries = ({
         : meta.resultAbiKind === "out_ref"
           ? binaryen.none
           : meta.resultType;
+      const wrappedValueType =
+        meta.resultAbiKind === "out_ref"
+          ? binaryen.none
+          : meta.resultType;
       const wrapperName = `${typeLabel}__method_${hashTraitSymbol}_${hashTraitMethod}_${implRef.symbol}`;
       const wrapperLocals: binaryen.Type[] = [];
       const wrapperParamType = binaryen.createType(params as number[]);
@@ -2735,7 +2739,7 @@ const createMethodLookupEntries = ({
         dispatchEffectful && !meta.effectful
           ? wrapValueInOutcome({
               valueExpr: implCall,
-              valueType: meta.resultType,
+              valueType: wrappedValueType,
               ctx,
               fnCtx: wrapperScratch,
             })

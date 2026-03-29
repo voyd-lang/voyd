@@ -1,0 +1,12 @@
+pub val Left {
+  value: i32
+}
+
+pub obj Right {
+  value: i32
+}
+
+type Mixed = Left | Right
+
+pub fn main() -> i32
+  0

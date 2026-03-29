@@ -1,8 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createSdk, type CompileResult } from "@voyd-lang/sdk";
-import { createVoydHost } from "@voyd-lang/sdk/js-host";
+import { createSdk, type CompileResult } from "@voyd/sdk";
+import { createVoydHost } from "@voyd/sdk/js-host";
 
 const fixtureEntryPath = path.resolve(
   import.meta.dirname,

@@ -1371,6 +1371,59 @@ const resolveTupleTypeExpr = (
   return ctx.arena.internStructuralObject({ fields });
 };
 
+const isTopLevelValueUnionMember = (
+  type: TypeId,
+  ctx: TypingContext,
+): boolean => {
+  const nominal = getNominalComponent(type, ctx);
+  if (typeof nominal !== "number") {
+    return false;
+  }
+
+  return ctx.arena.get(nominal).kind === "value-object";
+};
+
+export const internCheckedUnion = ({
+  members,
+  ctx,
+  span,
+}: {
+  members: readonly TypeId[];
+  ctx: TypingContext;
+  span: SourceSpan;
+}): TypeId => {
+  const valueMember = members.find((member) =>
+    isTopLevelValueUnionMember(member, ctx),
+  );
+  if (!valueMember) {
+    return ctx.arena.internUnion(members);
+  }
+
+  const otherMember = members.find(
+    (member) => !isTopLevelValueUnionMember(member, ctx),
+  );
+  if (typeof otherMember === "number") {
+    emitDiagnostic({
+      ctx,
+      code: "TY0046",
+      params: {
+        kind: "mixed-value-union",
+        valueMemberType: typeDescriptorToUserString(
+          ctx.arena.get(valueMember),
+          ctx.arena,
+        ),
+        otherMemberType: typeDescriptorToUserString(
+          ctx.arena.get(otherMember),
+          ctx.arena,
+        ),
+      },
+      span,
+    });
+  }
+
+  return ctx.arena.internUnion(members);
+};
+
 const resolveUnionTypeExpr = (
   expr: HirUnionTypeExpr,
   ctx: TypingContext,
@@ -1380,7 +1433,11 @@ const resolveUnionTypeExpr = (
   const members = expr.members.map((member) =>
     resolveTypeExpr(member, ctx, state, ctx.primitives.unknown, typeParams),
   );
-  return ctx.arena.internUnion(members);
+  return internCheckedUnion({
+    members,
+    ctx,
+    span: expr.span,
+  });
 };
 
 const resolveIntersectionTypeExpr = (

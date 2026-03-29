@@ -7,7 +7,7 @@ const fixtureEntryPath = path.join(
   import.meta.dirname,
   "..",
   "fixtures",
-  "trait-dispatch-wide-value-return.voyd",
+  "effectful-wide-value-return.voyd",
 );
 
 const expectCompileSuccess = (
@@ -19,7 +19,7 @@ const expectCompileSuccess = (
   throw new Error(result.diagnostics.map((diag) => diag.message).join("\n"));
 };
 
-describe("smoke: optimized trait dispatch wide value return", () => {
+describe("smoke: effectful wide value return", () => {
   let compiled: Extract<CompileResult, { success: true }>;
 
   beforeAll(async () => {
@@ -29,7 +29,7 @@ describe("smoke: optimized trait dispatch wide value return", () => {
     );
   });
 
-  it("preserves wide value results", async () => {
+  it("preserves wide value results for direct effectful functions", async () => {
     const output = await compiled.run<number>({ entryName: "main" });
     expect(output).toBe(11);
   });
