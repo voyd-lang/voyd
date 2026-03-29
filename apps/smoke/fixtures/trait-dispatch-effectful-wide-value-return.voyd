@@ -25,7 +25,7 @@ obj Holder {
 
 impl EmitWide for Holder
   fn emit(self) -> Sphere
-    self.sphere
+    return self.sphere
 
 fn read(emitter: EmitWide): Probe -> f64
   let sphere = emitter.emit()

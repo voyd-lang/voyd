@@ -224,6 +224,19 @@ export const compileStatement = (
         const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
         if (valueExpr.usedOutResultStorageRef) {
           const cleanup = handlerCleanupOps({ ctx, fnCtx });
+          if (fnCtx.effectful) {
+            const wrapped = wrapValueInOutcome({
+              valueExpr: ctx.mod.nop(),
+              valueType: binaryen.none,
+              ctx,
+              fnCtx,
+            });
+            const ops =
+              cleanup.length === 0
+                ? [valueExpr.expr, ...tailChecks, ctx.mod.return(wrapped)]
+                : [...tailChecks, ...cleanup, valueExpr.expr, ctx.mod.return(wrapped)];
+            return ctx.mod.block(null, ops, binaryen.none);
+          }
           const ops =
             cleanup.length === 0
               ? [valueExpr.expr, ...tailChecks, ctx.mod.return()]
@@ -250,6 +263,19 @@ export const compileStatement = (
             ctx,
             fnCtx,
           });
+          if (fnCtx.effectful) {
+            const wrapped = wrapValueInOutcome({
+              valueExpr: ctx.mod.nop(),
+              valueType: binaryen.none,
+              ctx,
+              fnCtx,
+            });
+            const ops =
+              cleanup.length === 0
+                ? [storeReturn, ...tailChecks, ctx.mod.return(wrapped)]
+                : [...tailChecks, ...cleanup, storeReturn, ctx.mod.return(wrapped)];
+            return ctx.mod.block(null, ops, binaryen.none);
+          }
           const ops =
             cleanup.length === 0
               ? [storeReturn, ...tailChecks, ctx.mod.return()]
