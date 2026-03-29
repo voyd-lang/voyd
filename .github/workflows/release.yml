@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       targets:
-        description: "Comma-separated release targets"
+        description: "Comma-separated release targets, or --all"
         required: true
         type: string
       dry_run:
@@ -48,10 +48,13 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
-          args=(
-            --targets "${{ inputs.targets }}"
-            --tag "${{ inputs.npm_tag }}"
-          )
+          args=(--tag "${{ inputs.npm_tag }}")
+
+          if [ "${{ inputs.targets }}" = "--all" ]; then
+            args+=(--all)
+          else
+            args+=(--targets "${{ inputs.targets }}")
+          fi
 
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             args+=(--dry-run)

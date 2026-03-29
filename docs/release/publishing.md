@@ -26,6 +26,7 @@ Current supported targets:
 `voyd_semver` is intentionally private and excluded from the release flow.
 
 Use `--all` to select every supported target without listing them explicitly.
+The GitHub release workflow accepts the same `--all` value in its `targets` input.
 
 ## Versioning
 
@@ -125,3 +126,6 @@ Equivalent workspace shortcuts are available in `apps/vscode/package.json`:
 - `npm run --workspace voyd-vscode publish:patch`
 - `npm run --workspace voyd-vscode publish:minor`
 - `npm run --workspace voyd-vscode publish:major`
+
+Those shortcuts enforce the same clean-worktree rule. Pass `-- --allow-dirty` only
+if you intentionally need to bypass it.
