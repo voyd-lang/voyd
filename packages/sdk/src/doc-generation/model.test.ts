@@ -104,4 +104,26 @@ describe("createDocumentationModel", () => {
 
     expect(model.modules[0]?.impls).toHaveLength(0);
   });
+
+  it("renders public value type signatures with val syntax", () => {
+    const module = createBaseModule();
+    module.objects = [
+      {
+        name: "Point",
+        objectKind: "value",
+        visibility: { level: "public" },
+        fields: [],
+      },
+    ];
+
+    const model = createDocumentationModel({
+      program: {
+        entryModule: "src::main",
+        modules: [module],
+      },
+    });
+
+    expect(model.modules[0]?.objects).toHaveLength(1);
+    expect(model.modules[0]?.objects[0]?.signature).toBe("val Point");
+  });
 });

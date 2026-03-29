@@ -42,6 +42,7 @@ const SIGNATURE_KEYWORDS = new Set([
   "let",
   "fn",
   "obj",
+  "val",
   "value",
   "trait",
   "impl",
