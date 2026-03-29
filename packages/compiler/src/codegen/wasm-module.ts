@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { VOYD_BINARYEN_FEATURES } from "@voyd/lib/binaryen-features.js";
+import { VOYD_BINARYEN_FEATURES } from "@voyd-lang/lib/binaryen-features.js";
 
 const MEMORY_SEED_WAT = `(module (memory 1))`;
 let seededModuleBytes: Uint8Array | undefined;

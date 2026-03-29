@@ -7,7 +7,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "paths": {
-      "@voyd/compiler/*": ["./src/*"]
+      "@voyd-lang/compiler/*": ["./src/*"]
     }
   },
   "include": ["src/**/*"]

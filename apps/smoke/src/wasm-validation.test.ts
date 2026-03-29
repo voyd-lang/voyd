@@ -1,14 +1,14 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
-import { getWasmInstance } from "@voyd/lib/wasm.js";
-import { createVoydHost } from "@voyd/js-host";
+import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
+import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
+import { createVoydHost } from "@voyd-lang/js-host";
 import {
   analyzeModules,
   emitProgram,
   loadModuleGraph,
-} from "@voyd/sdk/compiler";
+} from "@voyd-lang/sdk/compiler";
 
 type Diagnostic = {
   severity: string;

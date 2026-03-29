@@ -40,14 +40,14 @@ export default defineConfig({
     // Keep symlinked packages under node_modules path
     preserveSymlinks: true,
     dedupe: [
-      "@voyd/compiler",
-      "@voyd/js-host",
-      "@voyd/lib",
-      "@voyd/sdk",
-      "@voyd/std",
+      "@voyd-lang/compiler",
+      "@voyd-lang/js-host",
+      "@voyd-lang/lib",
+      "@voyd-lang/sdk",
+      "@voyd-lang/std",
     ],
     alias: [
-      { find: /^@voyd\/reference$/, replacement: referenceEntry },
+      { find: /^@voyd-lang\/reference$/, replacement: referenceEntry },
       // Avoid bundling Node-only deps pulled via optional paths in `voyd`
       { find: /^glob(\/.*)?$/, replacement: path.resolve(configDir, "stubs/glob.ts") },
       { find: /^node:fs$/, replacement: path.resolve(configDir, "stubs/node-fs.ts") },
@@ -60,12 +60,12 @@ export default defineConfig({
     // Workspace packages are already ESM and can be large; pre-bundling them
     // can lead to duplicated module instances (breaking `instanceof` checks).
     exclude: [
-      "@voyd/compiler",
-      "@voyd/js-host",
-      "@voyd/lib",
-      "@voyd/reference",
-      "@voyd/sdk",
-      "@voyd/std",
+      "@voyd-lang/compiler",
+      "@voyd-lang/js-host",
+      "@voyd-lang/lib",
+      "@voyd-lang/reference",
+      "@voyd-lang/sdk",
+      "@voyd-lang/std",
     ],
     esbuildOptions: {
       supported: {
@@ -87,7 +87,7 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes("node_modules/binaryen")) return "binaryen";
           if (id.includes("node_modules/@msgpack")) return "msgpack";
-          if (id.includes("node_modules/@voyd")) return "voyd-lib";
+          if (id.includes("node_modules/@voyd-lang")) return "voyd-lib";
         },
       },
     },

@@ -24,8 +24,8 @@ compiles to webassembly.
 - Monorepo layout: product surfaces live in `apps/*`, reusable language/runtime components live in `packages/*`.
 - Compilation flow (authoritative path): parser -> semantics (typing/binding/lowering) -> `ProgramCodegenView` -> Wasm codegen.
 - Boundary rule: `packages/compiler/src/semantics/codegen-view` is the contract; codegen should consume this view, not typing internals.
-- Runtime split: compiler emits Wasm, while `@voyd/js-host` + `@voyd/lib` provide JS-side execution and interop helpers.
-- Public integration point: `@voyd/sdk` composes compiler + host + std and is the preferred API for tests and external tooling.
+- Runtime split: compiler emits Wasm, while `@voyd-lang/js-host` + `@voyd-lang/lib` provide JS-side execution and interop helpers.
+- Public integration point: `@voyd-lang/sdk` composes compiler + host + std and is the preferred API for tests and external tooling.
 - Developer tooling stack: CLI (`apps/cli`), language server (`packages/language-server`), and VSCode extension (`apps/vscode`) all build on shared packages.
 
 # Guide

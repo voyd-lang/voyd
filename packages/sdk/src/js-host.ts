@@ -1,8 +1,8 @@
-export { createVoydHost } from "@voyd/js-host";
-export { CancelledRunError } from "@voyd/js-host";
-export { detectHostRuntime, registerDefaultHostAdapters, scheduleTaskForRuntime } from "@voyd/js-host";
-export { createDeterministicRuntime } from "@voyd/js-host";
-export { createVoydTrapDiagnostics, isVoydRuntimeError } from "@voyd/js-host";
+export { createVoydHost } from "@voyd-lang/js-host";
+export { CancelledRunError } from "@voyd-lang/js-host";
+export { detectHostRuntime, registerDefaultHostAdapters, scheduleTaskForRuntime } from "@voyd-lang/js-host";
+export { createDeterministicRuntime } from "@voyd-lang/js-host";
+export { createVoydTrapDiagnostics, isVoydRuntimeError } from "@voyd-lang/js-host";
 export type {
   DefaultAdapterCapability,
   DefaultAdapterHost,
@@ -23,7 +23,7 @@ export type {
   LabelHandlerHost,
   VoydHost,
   VoydRunHandle,
-} from "@voyd/js-host";
+} from "@voyd-lang/js-host";
 export {
   buildHandlerKey,
   buildHandlersByLabelSuffix,
@@ -33,11 +33,11 @@ export {
   registerHandlersByLabelSuffix,
   resolveEffectOp,
   resolveSignatureHashForOp,
-} from "@voyd/js-host";
+} from "@voyd-lang/js-host";
 export type {
   KeyedHandlerHost,
   LabelHandlerMatch,
   ParsedHandlerKey,
   RuntimeSchedulerOptions,
   RuntimeStepResult,
-} from "@voyd/js-host";
+} from "@voyd-lang/js-host";

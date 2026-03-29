@@ -9,8 +9,8 @@ import {
   type CompileResult,
   type EffectContinuation,
   type EffectHandler,
-} from "@voyd/sdk";
-import { createVoydHost } from "@voyd/sdk/js-host";
+} from "@voyd-lang/sdk";
+import { createVoydHost } from "@voyd-lang/sdk/js-host";
 
 const EFFECT_SOURCE = `use std::msgpack::self as __std_msgpack
 use std::string::self as __std_string

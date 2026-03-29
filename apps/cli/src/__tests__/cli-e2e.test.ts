@@ -465,7 +465,7 @@ const assertCliRunnerAvailable = (): void => {
   }
   if (cliE2eRuntime === "dist" && !existsSync(distCliPath)) {
     throw new Error(
-      `Missing built CLI entry at ${distCliPath}. Run npm run --workspace @voyd/cli build.`,
+      `Missing built CLI entry at ${distCliPath}. Run npm run --workspace @voyd-lang/cli build.`,
     );
   }
 };

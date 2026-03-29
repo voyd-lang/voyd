@@ -1,6 +1,6 @@
 {
-  "name": "@voyd/lib",
-  "version": "0.9.0",
+  "name": "@voyd-lang/lib",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -34,7 +34,7 @@
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2",
-    "@voyd/std": "*",
+    "@voyd-lang/std": "*",
     "binaryen": "^125.0.0"
   }
 }

@@ -51,15 +51,15 @@ Where:
 
 ## Host-Agnostic Policy vs Host Mechanism
 
-| Topic | Host-agnostic policy (normative) | Current JS-host mechanism (`packages/js-host`) |
-| --- | --- | --- |
-| Continuation ownership | A run has at most one active continuation step at a time. | `runEffectLoop` processes one `result` in a `while` loop. |
-| Internal scheduling | Internal tasks are serialized per run. | Handler is awaited before the next `resume_effectful` call. |
-| External scheduling | External task completion may resume a run only through the handler return path. | Handler may return a promise; `await handler(...)` resumes when it settles. |
-| Yield model | Execution is cooperative, not preemptive. Scheduler MUST enforce bounded starvation with a fairness budget. | Suspension points are promise settlements from handlers. |
-| Early completion | Host may terminate a run without resuming wasm by returning `end(...)`. | `handlerResult.kind === "end"` returns directly from `runEffectLoop`. |
-| Missing capability | If no handler exists for a requested op, run fails deterministically. | Throws `Unhandled effect ...`. |
-| Cancellation API | Conforming adapters MUST support explicit run cancellation. | No public cancellation API today (gap to close). |
+| Topic                  | Host-agnostic policy (normative)                                                                            | Current JS-host mechanism (`packages/js-host`)                              |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Continuation ownership | A run has at most one active continuation step at a time.                                                   | `runEffectLoop` processes one `result` in a `while` loop.                   |
+| Internal scheduling    | Internal tasks are serialized per run.                                                                      | Handler is awaited before the next `resume_effectful` call.                 |
+| External scheduling    | External task completion may resume a run only through the handler return path.                             | Handler may return a promise; `await handler(...)` resumes when it settles. |
+| Yield model            | Execution is cooperative, not preemptive. Scheduler MUST enforce bounded starvation with a fairness budget. | Suspension points are promise settlements from handlers.                    |
+| Early completion       | Host may terminate a run without resuming wasm by returning `end(...)`.                                     | `handlerResult.kind === "end"` returns directly from `runEffectLoop`.       |
+| Missing capability     | If no handler exists for a requested op, run fails deterministically.                                       | Throws `Unhandled effect ...`.                                              |
+| Cancellation API       | Conforming adapters MUST support explicit run cancellation.                                                 | No public cancellation API today (gap to close).                            |
 
 ## Task Classes
 
@@ -175,7 +175,7 @@ This spec defines time semantics independent of language/runtime APIs:
 - If multiple timers are due at the same monotonic instant, adapters SHOULD
   process them FIFO by registration order.
 
-Current JS-host note: `@voyd/js-host` default adapters provide `std::time::Time`
+Current JS-host note: `@voyd-lang/js-host` default adapters provide `std::time::Time`
 handlers where host timer APIs exist (`setTimeout` or explicit runtime hooks).
 
 ## Capability Availability and Failure Semantics
@@ -244,18 +244,18 @@ Error response payload:
 
 ## Conformance Scenarios
 
-| Scenario | Input | Expected terminal/result behavior |
-| --- | --- | --- |
-| Resume step | handler returns `resume(v)` for a `resume` op | Runtime encodes `v`, calls `resume_effectful`, continues loop |
-| Tail step | handler returns `tail(v)` for a `tail` op | Runtime encodes `v`, calls `resume_effectful`, continues loop |
-| Resume kind violation | `resume` op handler returns `tail(...)` | Run fails before resumption |
-| Tail kind violation | `tail` op handler returns `resume(...)` or `end(...)` | Run fails before resumption |
-| Early host completion | handler returns `end(v)` | Run completes with `v`; no `resume_effectful` call for that step |
-| Missing capability | no handler for requested op | Run fails deterministically (`Unhandled effect`) |
-| Async handler rejection | handler promise rejects | Run fails with rejection reason |
-| Protocol mismatch | invalid status or payload mismatch | Run fails with protocol error |
-| Explicit cancellation | host requests cancel(runId) | Run transitions to `cancelled`; late completions are dropped |
-| Fairness pressure | one run emits long immediate chain while others are ready | Scheduler yields at budget boundary; other ready work progresses |
+| Scenario                | Input                                                     | Expected terminal/result behavior                                |
+| ----------------------- | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| Resume step             | handler returns `resume(v)` for a `resume` op             | Runtime encodes `v`, calls `resume_effectful`, continues loop    |
+| Tail step               | handler returns `tail(v)` for a `tail` op                 | Runtime encodes `v`, calls `resume_effectful`, continues loop    |
+| Resume kind violation   | `resume` op handler returns `tail(...)`                   | Run fails before resumption                                      |
+| Tail kind violation     | `tail` op handler returns `resume(...)` or `end(...)`     | Run fails before resumption                                      |
+| Early host completion   | handler returns `end(v)`                                  | Run completes with `v`; no `resume_effectful` call for that step |
+| Missing capability      | no handler for requested op                               | Run fails deterministically (`Unhandled effect`)                 |
+| Async handler rejection | handler promise rejects                                   | Run fails with rejection reason                                  |
+| Protocol mismatch       | invalid status or payload mismatch                        | Run fails with protocol error                                    |
+| Explicit cancellation   | host requests cancel(runId)                               | Run transitions to `cancelled`; late completions are dropped     |
+| Fairness pressure       | one run emits long immediate chain while others are ready | Scheduler yields at budget boundary; other ready work progresses |
 
 ## Adapter API Guidance
 
@@ -295,7 +295,7 @@ continuation call is applied.
 
 ## Implementation Status
 
-`@voyd/js-host` implements scheduler-driven ordering, cancellation outcomes,
+`@voyd-lang/js-host` implements scheduler-driven ordering, cancellation outcomes,
 fairness-budget controls, deterministic conformance coverage (virtual clock +
 controlled queues), and default adapter contracts for std capabilities
 including `std::fetch::Fetch` and `std::input::Input`.

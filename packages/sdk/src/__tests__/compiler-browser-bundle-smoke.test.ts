@@ -82,10 +82,10 @@ describe("browser bundle smoke", () => {
         logLevel: "silent",
         resolve: {
           alias: {
-            "@voyd/lib": join(packagesRoot, "lib/src/lib"),
-            "@voyd/compiler": join(packagesRoot, "compiler/src"),
-            "@voyd/js-host": join(packagesRoot, "js-host/src"),
-            "@voyd/sdk": join(packagesRoot, "sdk/src"),
+            "@voyd-lang/lib": join(packagesRoot, "lib/src/lib"),
+            "@voyd-lang/compiler": join(packagesRoot, "compiler/src"),
+            "@voyd-lang/js-host": join(packagesRoot, "js-host/src"),
+            "@voyd-lang/sdk": join(packagesRoot, "sdk/src"),
           },
         },
         build: {

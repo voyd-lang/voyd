@@ -5,7 +5,7 @@ import {
   type CompileResult,
   type EffectHandler,
   type EffectsInfo,
-} from "@voyd/sdk";
+} from "@voyd-lang/sdk";
 
 const fixtureEntryPath = path.join(
   import.meta.dirname,

@@ -1,4 +1,4 @@
-import { FastShiftArray } from "@voyd/lib/fast-shift-array.js";
+import { FastShiftArray } from "@voyd-lang/lib/fast-shift-array.js";
 import { Expr } from "./expr.js";
 import {
   cloneAttributes,

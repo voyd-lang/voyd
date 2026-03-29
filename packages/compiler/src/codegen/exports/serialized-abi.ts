@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { arrayGet } from "@voyd/lib/binaryen-gc/index.js";
+import { arrayGet } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { CodegenContext, FunctionContext, FunctionMetadata } from "../context.js";
 import { findSerializerForType, resolveSerializerForTypes } from "../serializer.js";
 import { coerceValueToType } from "../structural.js";

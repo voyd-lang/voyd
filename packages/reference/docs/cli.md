@@ -4,8 +4,21 @@ order: 15
 
 # CLI
 
-Voyd ships with the `voyd` CLI. In a linked repository checkout, `vt` points at
-the development entrypoint and accepts the same arguments.
+Voyd ships with the `voyd` CLI.
+
+## Installation
+
+```bash
+npm i -g @voyd-lang/cli
+```
+
+## Basic usage
+
+```bash
+voyd --run
+voyd --emit-wasm --opt > out.wasm
+voyd --run-wasm out.wasm
+```
 
 ## Entry paths
 

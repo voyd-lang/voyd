@@ -17,7 +17,7 @@ boundary.
   annotated with `@serializer("msgpack", encode_value, decode_value)`.
 - The compiler emits a `voyd.export_abi` custom section and serialized export
   wrappers for serializer-marked signatures.
-- `@voyd/js-host` reads `voyd.export_abi` to route direct vs serialized calls
+- `@voyd-lang/js-host` reads `voyd.export_abi` to route direct vs serialized calls
   and can round-trip complex values for pure exports.
 - Effects host boundary payloads are encoded/decoded in Wasm via `std::msgpack`,
   and the runtime ABI includes `effect_len` and resume length for MsgPack buffers.
@@ -141,7 +141,7 @@ different serializer `format_id`s in a single signature.
 
 Host behavior:
 
-- `@voyd/js-host` reads a small custom section (e.g. `voyd.export_abi`) that
+- `@voyd-lang/js-host` reads a small custom section (e.g. `voyd.export_abi`) that
   declares, per export, whether it uses the direct ABI or the serialized ABI
   (and the serializer `format_id`).
 - `run` chooses the right call path based on that metadata.
@@ -274,4 +274,4 @@ or allocate via a simple bump allocator in `std::msgpack` (future work).
 `packages/compiler/src/codegen/effects/host-runner.ts` and
 `packages/js-host/src/runtime/dispatch.ts` duplicate msgpack host logic. Once
 MsgPack stdlib encoding is in place, consider extracting shared helpers or
-dropping the compiler test host in favor of `@voyd/js-host`.
+dropping the compiler test host in favor of `@voyd-lang/js-host`.

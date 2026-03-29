@@ -10,7 +10,7 @@ import type {
   TestRunSummary,
 } from "./types.js";
 import { createHost, registerHandlers } from "./host.js";
-import type { VoydHost } from "@voyd/js-host";
+import type { VoydHost } from "@voyd-lang/js-host";
 
 class TestFailure extends Error {
   constructor(message?: string) {

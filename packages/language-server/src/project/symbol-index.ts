@@ -6,21 +6,21 @@ import {
   isInternalIdentifierAtom,
   type Form,
   type Syntax,
-} from "@voyd/compiler/parser/index.js";
-import type { SourceLocation } from "@voyd/compiler/parser/ast/syntax.js";
-import type { SourceSpan } from "@voyd/compiler/diagnostics/index.js";
+} from "@voyd-lang/compiler/parser/index.js";
+import type { SourceLocation } from "@voyd-lang/compiler/parser/ast/syntax.js";
+import type { SourceSpan } from "@voyd-lang/compiler/diagnostics/index.js";
 import {
   modulePathFromFile,
   modulePathToString,
-} from "@voyd/compiler/modules/path.js";
-import { createNodePathAdapter } from "@voyd/compiler/modules/node-path-adapter.js";
+} from "@voyd-lang/compiler/modules/path.js";
+import { createNodePathAdapter } from "@voyd-lang/compiler/modules/node-path-adapter.js";
 import type {
   ModuleGraph,
   ModuleRoots,
-} from "@voyd/compiler/modules/types.js";
-import { createCanonicalSymbolRefResolver } from "@voyd/compiler/semantics/canonical-symbol-ref.js";
-import type { SymbolId } from "@voyd/compiler/semantics/ids.js";
-import type { SemanticsPipelineResult } from "@voyd/compiler/semantics/pipeline.js";
+} from "@voyd-lang/compiler/modules/types.js";
+import { createCanonicalSymbolRefResolver } from "@voyd-lang/compiler/semantics/canonical-symbol-ref.js";
+import type { SymbolId } from "@voyd-lang/compiler/semantics/ids.js";
+import type { SemanticsPipelineResult } from "@voyd-lang/compiler/semantics/pipeline.js";
 import {
   parseEffectDecl,
   parseFunctionDecl,
@@ -28,14 +28,14 @@ import {
   parseObjectDecl,
   parseTraitDecl,
   parseTypeAliasDecl,
-} from "@voyd/compiler/semantics/binding/parsing.js";
-import { parseTopLevelUseDecl } from "@voyd/compiler/modules/use-decl.js";
+} from "@voyd-lang/compiler/semantics/binding/parsing.js";
+import { parseTopLevelUseDecl } from "@voyd-lang/compiler/modules/use-decl.js";
 import { collectVoydFiles, toFileUri } from "./files.js";
 import { scanExportsFromSource } from "./export-scan.js";
 import {
   buildTypeParamNameIndex,
   typeSummaryForSymbol,
-} from "@voyd/compiler/semantics/type-display.js";
+} from "@voyd-lang/compiler/semantics/type-display.js";
 import {
   LineIndex,
   locationRange,

@@ -1,12 +1,12 @@
 import binaryen from "binaryen";
-import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
+import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import {
   arrayGet,
   arrayLen,
   arrayNewFixed,
   binaryenTypeToHeapType,
   defineArrayType,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 

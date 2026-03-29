@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSdk, type CompileResult, type TestEvent } from "@voyd/sdk";
+import { createSdk, type CompileResult, type TestEvent } from "@voyd-lang/sdk";
 
 const expectCompileSuccess = (
   result: CompileResult,

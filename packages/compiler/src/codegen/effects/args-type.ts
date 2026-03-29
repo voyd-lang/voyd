@@ -1,5 +1,5 @@
 import type binaryen from "binaryen";
-import { defineStructType } from "@voyd/lib/binaryen-gc/index.js";
+import { defineStructType } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { CodegenContext } from "../context.js";
 import type { TypeId } from "../../semantics/ids.js";
 import { wasmHeapFieldTypeFor } from "../types.js";

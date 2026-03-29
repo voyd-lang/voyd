@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { refCast } from "@voyd/lib/binaryen-gc/index.js";
+import { refCast } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { wasmTypeFor } from "../../types.js";
 import type { CodegenContext } from "../../context.js";
 import { ensureMsgPackFunctions } from "./msgpack.js";

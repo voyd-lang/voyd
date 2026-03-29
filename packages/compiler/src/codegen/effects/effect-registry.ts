@@ -1,4 +1,4 @@
-import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
+import { murmurHash3 } from "@voyd-lang/lib/murmur-hash.js";
 import type { CodegenContext } from "../context.js";
 import type {
   HirExprId,

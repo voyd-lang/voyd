@@ -1,6 +1,6 @@
 {
-  "name": "@voyd/sdk",
-  "version": "0.9.0",
+  "name": "@voyd-lang/sdk",
+  "version": "0.1.0",
   "description": "Voyd SDK",
   "type": "module",
   "main": "./dist/node.js",
@@ -51,10 +51,10 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "@voyd/compiler": "*",
-    "@voyd/js-host": "*",
-    "@voyd/std": "*",
-    "@voyd/lib": "*",
+    "@voyd-lang/compiler": "*",
+    "@voyd-lang/js-host": "*",
+    "@voyd-lang/std": "*",
+    "@voyd-lang/lib": "*",
     "binaryen": "^125.0.0"
   }
 }

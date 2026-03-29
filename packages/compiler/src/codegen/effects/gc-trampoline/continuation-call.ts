@@ -7,7 +7,7 @@ import type {
   FunctionContext,
   HirCallExpr,
 } from "../../context.js";
-import { callRef, refCast } from "@voyd/lib/binaryen-gc/index.js";
+import { callRef, refCast } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { boxOutcomeValue } from "../outcome-values.js";
 import { coerceValueToType } from "../../structural.js";
 import { getRequiredExprType, wasmTypeFor } from "../../types.js";

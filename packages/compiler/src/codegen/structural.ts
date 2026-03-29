@@ -12,7 +12,7 @@ import {
   refFunc,
   structGetFieldValue,
   structSetFieldValue,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import { LOOKUP_FIELD_ACCESSOR, RTT_METADATA_SLOTS } from "./rtt/index.js";
 import type {
   CodegenContext,

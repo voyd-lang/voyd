@@ -13,7 +13,7 @@ import {
   initDefaultStruct,
   refCast,
   structGetFieldValue,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import { LOOKUP_METHOD_ACCESSOR, RTT_METADATA_SLOTS } from "../../rtt/index.js";
 import { traitDispatchHash } from "../../trait-dispatch-key.js";
 import {

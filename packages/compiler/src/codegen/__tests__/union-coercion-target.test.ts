@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getWasmInstance } from "@voyd/lib/wasm.js";
+import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { codegen } from "../index.js";
@@ -30,4 +30,3 @@ pub fn main() -> i32
     expect((instance.exports.main as () => number)()).toBe(41);
   });
 });
-

@@ -3,9 +3,9 @@ import { createRequire } from "node:module";
 import { access, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { URI } from "vscode-uri";
-import { createFsModuleHost } from "@voyd/compiler/modules/fs-host.js";
-import { createNodePathAdapter } from "@voyd/compiler/modules/node-path-adapter.js";
-import type { ModuleHost, ModuleRoots } from "@voyd/compiler/modules/types.js";
+import { createFsModuleHost } from "@voyd-lang/compiler/modules/fs-host.js";
+import { createNodePathAdapter } from "@voyd-lang/compiler/modules/node-path-adapter.js";
+import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -35,7 +35,7 @@ const hasStdSourceLayout = (rootPath: string): boolean =>
 
 const resolveStdRootFromPackage = (): string | undefined => {
   try {
-    const packageJsonPath = require.resolve("@voyd/std/package.json");
+    const packageJsonPath = require.resolve("@voyd-lang/std/package.json");
     const packageRoot = dirname(packageJsonPath);
     const srcRoot = join(packageRoot, "src");
     return hasStdSourceLayout(srcRoot) ? srcRoot : packageRoot;
@@ -60,7 +60,7 @@ const resolveStdRoot = (): string => {
     return resolvedEnvRoot;
   }
 
-  return path.resolve(process.cwd(), "node_modules", "@voyd", "std", "src");
+  return path.resolve(process.cwd(), "node_modules", "@voyd-lang", "std", "src");
 };
 
 export const normalizeFilePath = (filePath: string): string => path.resolve(filePath);

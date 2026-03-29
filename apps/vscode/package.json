@@ -83,8 +83,8 @@
     ]
   },
   "devDependencies": {
-    "@voyd/compiler": "*",
-    "@voyd/lib": "*",
+    "@voyd-lang/compiler": "*",
+    "@voyd-lang/lib": "*",
     "@types/vscode": "^1.74.0",
     "@vscode/vsce": "^3.6.2",
     "typescript": "^5.6.2",

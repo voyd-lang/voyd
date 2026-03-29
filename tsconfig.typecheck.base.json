@@ -5,19 +5,19 @@
     "noUnusedParameters": true,
     "baseUrl": "./",
     "paths": {
-      "@voyd/lib": ["packages/lib/src/lib/index.ts"],
-      "@voyd/lib/*": ["packages/lib/src/lib/*"],
-      "@voyd/compiler": ["packages/compiler/src/pipeline.ts"],
-      "@voyd/compiler/*": ["packages/compiler/src/*"],
-      "@voyd/sdk": ["packages/sdk/src/node.ts"],
-      "@voyd/sdk/*": [
+      "@voyd-lang/lib": ["packages/lib/src/lib/index.ts"],
+      "@voyd-lang/lib/*": ["packages/lib/src/lib/*"],
+      "@voyd-lang/compiler": ["packages/compiler/src/pipeline.ts"],
+      "@voyd-lang/compiler/*": ["packages/compiler/src/*"],
+      "@voyd-lang/sdk": ["packages/sdk/src/node.ts"],
+      "@voyd-lang/sdk/*": [
         "packages/sdk/src/*/index.ts",
         "packages/sdk/src/*.ts",
         "packages/sdk/src/*"
       ],
-      "@voyd/js-host": ["packages/js-host/src/index.ts"],
-      "@voyd/js-host/*": ["packages/js-host/src/*"],
-      "@voyd/reference": ["packages/reference/index.d.ts"]
+      "@voyd-lang/js-host": ["packages/js-host/src/index.ts"],
+      "@voyd-lang/js-host/*": ["packages/js-host/src/*"],
+      "@voyd-lang/reference": ["packages/reference/index.d.ts"]
     }
   }
 }

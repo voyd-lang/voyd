@@ -1,7 +1,7 @@
 import path from "node:path";
-import { createFsModuleHost } from "@voyd/compiler/modules/fs-host.js";
-import type { ModuleHost, ModuleRoots } from "@voyd/compiler/modules/types.js";
-import { isSemanticsAnalysisCancelledError } from "@voyd/compiler/modules/semantic-analysis.js";
+import { createFsModuleHost } from "@voyd-lang/compiler/modules/fs-host.js";
+import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import { isSemanticsAnalysisCancelledError } from "@voyd-lang/compiler/modules/semantic-analysis.js";
 import { type DidChangeWatchedFilesParams } from "vscode-languageserver/lib/node/main.js";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";

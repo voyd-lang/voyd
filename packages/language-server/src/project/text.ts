@@ -1,5 +1,5 @@
-import type { SourceLocation } from "@voyd/compiler/parser/ast/syntax.js";
-import type { SourceSpan } from "@voyd/compiler/diagnostics/index.js";
+import type { SourceLocation } from "@voyd-lang/compiler/parser/ast/syntax.js";
+import type { SourceSpan } from "@voyd-lang/compiler/diagnostics/index.js";
 import type { Position, Range } from "vscode-languageserver/lib/node/main.js";
 import type { SymbolOccurrence } from "./types.js";
 

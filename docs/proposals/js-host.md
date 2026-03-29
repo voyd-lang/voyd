@@ -15,14 +15,14 @@ See `docs/specs/host-protocol.md` for the wire format and ABI details.
 ## Goals
 
 - Single, ergonomic API for JS hosts.
-- No dependency on `@voyd/compiler`.
+- No dependency on `@voyd-lang/compiler`.
 - Protocol surface is reusable by other hosts (Rust, etc.).
 
 ## Package Location
 
 `packages/js-host`
 
-Suggested npm name: `@voyd/js-host`.
+Suggested npm name: `@voyd-lang/js-host`.
 
 ## Proposed File Layout
 
@@ -117,14 +117,14 @@ const result = await host.run("main");
 
 ## Compiler Test Use
 
-Compiler tests can import `@voyd/js-host` as a **dev dependency** without
+Compiler tests can import `@voyd-lang/js-host` as a **dev dependency** without
 introducing a runtime dependency on the host library. The JS host must **not**
-depend on `@voyd/compiler` to avoid a circular dependency.
+depend on `@voyd-lang/compiler` to avoid a circular dependency.
 
 ## Migration Notes
 
 - Move the effect host loop used in `apps/cli/src/test-runner.ts` into
-  `@voyd/js-host` and have the CLI call the shared API.
+  `@voyd-lang/js-host` and have the CLI call the shared API.
 
 ## Run Semantics
 

@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createVoydHost } from "@voyd/js-host";
+import { createVoydHost } from "@voyd-lang/js-host";
 import { createEffectsImports } from "./support/wasm-imports.js";
 import { compileEffectFixture } from "./support/effects-harness.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";

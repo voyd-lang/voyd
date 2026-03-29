@@ -148,7 +148,7 @@ jobs:
       # Dist mode is validated separately via targeted CLI e2e when CLI/runtime areas change.
       - name: Build CLI dist for dist e2e
         if: steps.changes.outputs.cli == 'true'
-        run: npx turbo run build --filter=@voyd/cli... --output-logs=errors-only
+        run: npx turbo run build --filter=@voyd-lang/cli... --output-logs=errors-only
       - name: Run CLI dist e2e
         if: steps.changes.outputs.cli == 'true'
-        run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd/cli test -- src/__tests__/cli-e2e.test.ts
+        run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd-lang/cli test -- src/__tests__/cli-e2e.test.ts

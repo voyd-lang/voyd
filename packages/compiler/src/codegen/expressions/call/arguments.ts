@@ -2,7 +2,7 @@ import binaryen from "binaryen";
 import {
   refCast,
   structGetFieldValue,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   ExpressionCompiler,

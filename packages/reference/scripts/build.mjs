@@ -236,7 +236,7 @@ function buildReference() {
 
     if (existingJs !== js || existingDistDts !== dts || existingRootDts !== dts) {
       throw new Error(
-        "packages/reference dist is out of date. Run `npm -w @voyd/reference run build`."
+        "packages/reference dist is out of date. Run `npm -w @voyd-lang/reference run build`."
       );
     }
     return;

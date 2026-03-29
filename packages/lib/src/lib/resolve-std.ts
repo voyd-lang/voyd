@@ -16,7 +16,7 @@ export const resolveStdRoot = (): string => {
     }
   }
 
-  const packageJsonPath = require.resolve("@voyd/std/package.json");
+  const packageJsonPath = require.resolve("@voyd-lang/std/package.json");
   const packageRoot = dirname(packageJsonPath);
   const srcRoot = join(packageRoot, "src");
   return hasStdSourceLayout(srcRoot) ? srcRoot : packageRoot;

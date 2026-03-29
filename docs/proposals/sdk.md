@@ -13,7 +13,7 @@ compose the compiler and JS host libraries while keeping them decoupled.
 The SDK relies on the host protocol defined in `docs/specs/host-protocol.md`.
 
 This proposal also migrates the current `packages/browser-compiler` into the
-SDK as `@voyd/sdk/browser`.
+SDK as `@voyd-lang/sdk/browser`.
 
 ## Goals
 
@@ -24,7 +24,7 @@ SDK as `@voyd/sdk/browser`.
 
 ## Non-Goals
 
-- Replace `@voyd/compiler` or `@voyd/js-host` directly.
+- Replace `@voyd-lang/compiler` or `@voyd-lang/js-host` directly.
 - Provide a Rust host implementation.
 
 ## Package Layout
@@ -32,9 +32,9 @@ SDK as `@voyd/sdk/browser`.
 ```
 packages/sdk/
   src/
-    node.ts        // @voyd/sdk
-    browser.ts     // @voyd/sdk/browser
-    deno.ts        // @voyd/sdk/deno (stub initially)
+    node.ts        // @voyd-lang/sdk
+    browser.ts     // @voyd-lang/sdk/browser
+    deno.ts        // @voyd-lang/sdk/deno (stub initially)
     shared/
       types.ts
       compile.ts
@@ -45,12 +45,12 @@ packages/sdk/
 
 ## Entry Points
 
-- `@voyd/sdk` (Node default)
-  - Uses `@voyd/compiler` + fs host + `@voyd/js-host`.
-- `@voyd/sdk/browser`
+- `@voyd-lang/sdk` (Node default)
+  - Uses `@voyd-lang/compiler` + fs host + `@voyd-lang/js-host`.
+- `@voyd-lang/sdk/browser`
   - Uses browser compiler (migrated from `packages/browser-compiler`) +
-    `@voyd/js-host` with browser-friendly wasm loading.
-- `@voyd/sdk/deno`
+    `@voyd-lang/js-host` with browser-friendly wasm loading.
+- `@voyd-lang/sdk/deno`
   - Mirrors Node entry point with Deno IO adapters (initially minimal).
 
 ## Public API (Sketch)
@@ -99,7 +99,7 @@ export type VoydHost = {
 ## Example Usage (Node)
 
 ```ts
-import { createSdk } from "@voyd/sdk";
+import { createSdk } from "@voyd-lang/sdk";
 
 const sdk = createSdk();
 const { wasm } = await sdk.compile({ entryPath: "src/main.voyd" });
@@ -114,16 +114,16 @@ const result = await host.run("main");
 ## Migration Plan
 
 - Move `packages/browser-compiler` into `packages/sdk` and re-export it from
-  `@voyd/sdk/browser`.
-- Deprecate `@voyd/browser-compiler` with a migration notice.
+  `@voyd-lang/sdk/browser`.
+- Deprecate `@voyd-lang/browser-compiler` with a migration notice.
 - Update internal tests and examples to import from the SDK.
 
 ## Dependencies
 
 SDK depends on:
 
-- `@voyd/compiler` (or the browser variant for `@voyd/sdk/browser`)
-- `@voyd/js-host`
-- `@voyd/lib` helpers (wasm loader, std resolver)
+- `@voyd-lang/compiler` (or the browser variant for `@voyd-lang/sdk/browser`)
+- `@voyd-lang/js-host`
+- `@voyd-lang/lib` helpers (wasm loader, std resolver)
 
 The SDK should not be depended on by compiler or host packages.

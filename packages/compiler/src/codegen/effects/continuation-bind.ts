@@ -7,8 +7,8 @@ import {
   refCast,
   refFunc,
   structGetFieldValue,
-} from "@voyd/lib/binaryen-gc/index.js";
-import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
+import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import type { CodegenContext } from "../context.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;

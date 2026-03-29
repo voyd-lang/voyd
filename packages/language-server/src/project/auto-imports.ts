@@ -1,12 +1,12 @@
 import path from "node:path";
-import type { Form } from "@voyd/compiler/parser/index.js";
-import { formCallsInternal, isForm } from "@voyd/compiler/parser/index.js";
-import { parseTopLevelUseDecl } from "@voyd/compiler/modules/use-decl.js";
+import type { Form } from "@voyd-lang/compiler/parser/index.js";
+import { formCallsInternal, isForm } from "@voyd-lang/compiler/parser/index.js";
+import { parseTopLevelUseDecl } from "@voyd-lang/compiler/modules/use-decl.js";
 import {
   parseUsePaths,
   type NormalizedUseEntry,
-} from "@voyd/compiler/modules/use-path.js";
-import { toSourceSpan } from "@voyd/compiler/semantics/utils.js";
+} from "@voyd-lang/compiler/modules/use-path.js";
+import { toSourceSpan } from "@voyd-lang/compiler/semantics/utils.js";
 import {
   CodeAction,
   CodeActionKind,

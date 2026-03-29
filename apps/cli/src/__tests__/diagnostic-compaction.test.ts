@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Diagnostic } from "@voyd/sdk/compiler";
+import type { Diagnostic } from "@voyd-lang/sdk/compiler";
 import {
   compactDiagnosticsForCli,
   formatCompactionSummary,

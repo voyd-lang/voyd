@@ -16,12 +16,12 @@ named `voyd.runtime_diagnostics` containing trap metadata such as:
 - Voyd function name
 - source file and span information
 
-`@voyd/js-host` and `@voyd/sdk` read that section and attach structured data to
+`@voyd-lang/js-host` and `@voyd-lang/sdk` read that section and attach structured data to
 runtime errors.
 
 ## SDK behavior
 
-`@voyd/sdk` supports:
+`@voyd-lang/sdk` supports:
 
 - `optimize?: boolean`
 - `runtimeDiagnostics?: boolean`

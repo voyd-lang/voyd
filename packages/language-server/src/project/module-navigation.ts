@@ -5,13 +5,13 @@ import {
   isIdentifierAtom,
   isInternalIdentifierAtom,
   type Expr,
-} from "@voyd/compiler/parser/index.js";
-import type { SourceLocation } from "@voyd/compiler/parser/ast/syntax.js";
+} from "@voyd-lang/compiler/parser/index.js";
+import type { SourceLocation } from "@voyd-lang/compiler/parser/ast/syntax.js";
 import type {
   ModuleGraph,
   ModuleRoots,
-} from "@voyd/compiler/modules/types.js";
-import type { SymbolId } from "@voyd/compiler/semantics/ids.js";
+} from "@voyd-lang/compiler/modules/types.js";
+import type { SymbolId } from "@voyd-lang/compiler/semantics/ids.js";
 import type { Range } from "vscode-languageserver/lib/node/main.js";
 import { toFileUri } from "./files.js";
 import type { LineIndex } from "./text.js";

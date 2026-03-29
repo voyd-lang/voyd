@@ -1,6 +1,6 @@
 {
-  "name": "@voyd/std",
-  "version": "0.9.0",
+  "name": "@voyd-lang/std",
+  "version": "0.1.0",
   "private": true,
   "description": "Voyd standard library sources",
   "scripts": {

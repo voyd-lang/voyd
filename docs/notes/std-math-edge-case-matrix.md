@@ -1,7 +1,7 @@
 # std::math Edge-Case Matrix
 
 This note tracks the deterministic hardening coverage for `std::math`.
-These suites run in CI via `npm test -w @voyd/std`.
+These suites run in CI via `npm test -w @voyd-lang/std`.
 
 ## Integer invariants and boundaries
 

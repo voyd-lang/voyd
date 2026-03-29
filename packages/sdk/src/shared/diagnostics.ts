@@ -2,7 +2,7 @@ import {
   DiagnosticError,
   diagnosticFromCode,
   type Diagnostic,
-} from "@voyd/compiler/diagnostics/index.js";
+} from "@voyd-lang/compiler/diagnostics/index.js";
 
 export const normalizeErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);

@@ -35,7 +35,7 @@ changes while the language, runtime, and tooling continue to settle.
 Install the CLI:
 
 ```bash
-npm i -g @voyd/cli
+npm i -g @voyd-lang/cli
 ```
 
 Run a program:

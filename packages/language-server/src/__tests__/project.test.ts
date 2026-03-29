@@ -2,8 +2,8 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { ModuleNode } from "@voyd/compiler/modules/types.js";
-import { parse } from "@voyd/compiler/parser/index.js";
+import type { ModuleNode } from "@voyd-lang/compiler/modules/types.js";
+import { parse } from "@voyd-lang/compiler/parser/index.js";
 import { describe, expect, it } from "vitest";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import {

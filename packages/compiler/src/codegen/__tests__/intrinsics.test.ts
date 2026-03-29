@@ -5,7 +5,7 @@ import {
   defineArrayType,
   binaryenTypeFromHeapType,
   modBinaryenTypeToHeapType,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes } from "../types.js";
 import type { CodegenContext, HirCallExpr, HirExpression, HirExprId, TypeId } from "../context.js";
 import { createTestCodegenContext } from "./support/test-codegen-context.js";
