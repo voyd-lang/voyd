@@ -2,9 +2,9 @@ import type {
   ModuleGraph,
   ModuleHost,
   ModuleRoots,
-} from "@voyd/compiler/modules/types.js";
-import type { SemanticsPipelineResult } from "@voyd/compiler/semantics/pipeline.js";
-import type { ScopeId, SymbolId } from "@voyd/compiler/semantics/ids.js";
+} from "@voyd-lang/compiler/modules/types.js";
+import type { SemanticsPipelineResult } from "@voyd-lang/compiler/semantics/pipeline.js";
+import type { ScopeId, SymbolId } from "@voyd-lang/compiler/semantics/ids.js";
 import type { Diagnostic, Range } from "vscode-languageserver/lib/node/main.js";
 import type { LineIndex } from "./text.js";
 

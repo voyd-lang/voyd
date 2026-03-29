@@ -2,7 +2,7 @@ import path from "node:path";
 import type {
   Diagnostic as CompilerDiagnostic,
   SourceSpan,
-} from "@voyd/compiler/diagnostics/index.js";
+} from "@voyd-lang/compiler/diagnostics/index.js";
 import {
   Diagnostic,
   DiagnosticSeverity,

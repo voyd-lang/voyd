@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
+import { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import {
   arrayGet,
   arrayLen,
@@ -12,8 +12,8 @@ import {
   refFunc,
   structGetFieldValue,
   structSetFieldValue,
-} from "@voyd/lib/binaryen-gc/index.js";
-import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
+import { murmurHash3 } from "@voyd-lang/lib/murmur-hash.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 const NON_REF_TYPES = new Set<number>([

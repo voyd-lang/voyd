@@ -2,7 +2,7 @@ import binaryen from "binaryen";
 import {
   refCast,
   refTest,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import { wasmTypeFor } from "../../types.js";
 import { getOutcomeValueBoxType, unboxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext } from "../../context.js";

@@ -31,7 +31,7 @@ import type {
   EffectRowId,
 } from "../semantics/ids.js";
 import type { createRttContext } from "./rtt/index.js";
-import type { HeapTypeRef } from "@voyd/lib/binaryen-gc/types.js";
+import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import type { EffectRuntime } from "./effects/runtime-abi.js";
 import type { OutcomeValueBox } from "./effects/outcome-values.js";
 import type { EffectTableSidecar } from "./effects/effect-table-types.js";

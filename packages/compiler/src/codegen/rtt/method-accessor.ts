@@ -8,7 +8,7 @@ import {
   defineStructType,
   initStruct,
   structGetFieldValue,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 
 export const LOOKUP_METHOD_ACCESSOR = "__lookup_method_accessor";
 

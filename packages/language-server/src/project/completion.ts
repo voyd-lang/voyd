@@ -1,9 +1,9 @@
 import path from "node:path";
-import type { ScopeId } from "@voyd/compiler/semantics/ids.js";
+import type { ScopeId } from "@voyd-lang/compiler/semantics/ids.js";
 import type {
   SymbolKind,
   SymbolRecord,
-} from "@voyd/compiler/semantics/binder/types.js";
+} from "@voyd-lang/compiler/semantics/binder/types.js";
 import {
   CompletionItemKind,
   type CompletionItem,

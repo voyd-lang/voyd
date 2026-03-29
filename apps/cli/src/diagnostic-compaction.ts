@@ -1,4 +1,4 @@
-import type { Diagnostic } from "@voyd/sdk/compiler";
+import type { Diagnostic } from "@voyd-lang/sdk/compiler";
 
 export type DiagnosticsCompactionResult = {
   diagnostics: Diagnostic[];

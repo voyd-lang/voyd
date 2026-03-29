@@ -1,4 +1,4 @@
-import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
+import { murmurHash3 } from "@voyd-lang/lib/murmur-hash.js";
 import type { ProgramSymbolId } from "../semantics/ids.js";
 
 export type TraitDispatchKey = {

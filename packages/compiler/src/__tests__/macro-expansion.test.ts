@@ -4,7 +4,7 @@ import { compileProgram, type CompileProgramResult } from "../pipeline.js";
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleHost } from "../modules/types.js";
-import { getWasmInstance } from "@voyd/lib/wasm.js";
+import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });

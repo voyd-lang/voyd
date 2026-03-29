@@ -3,10 +3,10 @@ import { readFile } from "node:fs/promises";
 import {
   modulePathFromFile,
   modulePathToString,
-} from "@voyd/compiler/modules/path.js";
-import { createNodePathAdapter } from "@voyd/compiler/modules/node-path-adapter.js";
-import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
-import type { SemanticsPipelineResult } from "@voyd/compiler/semantics/pipeline.js";
+} from "@voyd-lang/compiler/modules/path.js";
+import { createNodePathAdapter } from "@voyd-lang/compiler/modules/node-path-adapter.js";
+import type { ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import type { SemanticsPipelineResult } from "@voyd-lang/compiler/semantics/pipeline.js";
 import { collectVoydFiles } from "./files.js";
 import { scanExportsFromSource } from "./export-scan.js";
 import type { ExportCandidate } from "./types.js";

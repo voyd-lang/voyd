@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
+import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import type {
   CodegenContext,
   FunctionContext,
@@ -17,7 +17,7 @@ import type { ResumeKind } from "../runtime-abi.js";
 import {
   refCast,
   structGetFieldValue,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import { allocateTempLocal, storeLocalValue } from "../../locals.js";
 import { getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { walkHirExpression, walkHirPattern } from "../../hir-walk.js";

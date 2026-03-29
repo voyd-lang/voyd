@@ -1,6 +1,6 @@
 import binaryen from "binaryen";
-import { annotateStructNames, TypeBuilder } from "@voyd/lib/binaryen-gc/index.js";
-import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
+import { annotateStructNames, TypeBuilder } from "@voyd-lang/lib/binaryen-gc/index.js";
+import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import type { CodegenContext, TypeId } from "./context.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;

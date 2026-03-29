@@ -12,7 +12,7 @@
       "dependsOn": [],
       "outputs": []
     },
-    "@voyd/smoke#test": {
+    "@voyd-lang/smoke#test": {
       "dependsOn": ["^build"],
       "outputs": []
     },

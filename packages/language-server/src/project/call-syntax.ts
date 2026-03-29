@@ -5,7 +5,7 @@ import {
   isInternalIdentifierAtom,
   type Form,
   type Syntax,
-} from "@voyd/compiler/parser/index.js";
+} from "@voyd-lang/compiler/parser/index.js";
 
 export type LabeledArgumentSyntax = {
   label: string;

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import { getWasmInstance } from "@voyd/lib/wasm.js";
+import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
 import type { ModuleHost } from "../modules/types.js";

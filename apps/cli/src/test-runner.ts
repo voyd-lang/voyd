@@ -6,14 +6,14 @@ import {
   type TestEvent,
   type TestReporter,
   type TestRunSummary,
-} from "@voyd/sdk";
+} from "@voyd-lang/sdk";
 import {
   createFsModuleHost,
   EFFECTS_HOST_BOUNDARY_STD_DEPS,
   modulePathFromFile,
   type ModuleRoots,
-} from "@voyd/sdk/compiler";
-import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
+} from "@voyd-lang/sdk/compiler";
+import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import { resolvePackageDirs } from "./package-dirs.js";
 
 const sdk = createSdk();

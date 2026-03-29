@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { createSdk, type CompileResult } from "@voyd/sdk";
+import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 
 const LARGE_READ_BYTES = 33_000;
 const source = `use std::bytes::Bytes

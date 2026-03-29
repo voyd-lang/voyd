@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import VoydEditor from "./VoydEditor";
-import { renderMsgPackNode } from "@voyd/lib/vsx-dom/client";
+import { renderMsgPackNode } from "@voyd-lang/lib/vsx-dom/client";
 
 export const VsxPlayground = ({ value }: { value: string }) => {
   const renderRef = useRef<HTMLDivElement>(null);

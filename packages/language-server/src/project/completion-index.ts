@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { SymbolId } from "@voyd/compiler/semantics/ids.js";
-import type { SemanticsPipelineResult } from "@voyd/compiler/semantics/pipeline.js";
+import type { SymbolId } from "@voyd-lang/compiler/semantics/ids.js";
+import type { SemanticsPipelineResult } from "@voyd-lang/compiler/semantics/pipeline.js";
 import type {
   CompletionExportEntry,
   CompletionIndex,

@@ -1,6 +1,6 @@
 {
-  "name": "@voyd/language-server",
-  "version": "0.9.0",
+  "name": "@voyd-lang/language-server",
+  "version": "0.1.0",
   "description": "Voyd language server",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,8 +29,8 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "@voyd/compiler": "*",
-    "@voyd/std": "*",
+    "@voyd-lang/compiler": "*",
+    "@voyd-lang/std": "*",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",
     "vscode-uri": "^3.0.8"

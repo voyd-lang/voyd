@@ -3,7 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { createSdk } from "@voyd/sdk";
+import { createSdk } from "@voyd-lang/sdk";
 
 const smokeRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(smokeRoot, "..", "..");

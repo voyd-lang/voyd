@@ -19,7 +19,7 @@ Today the relevant whole-program pipeline is:
 3. `buildProgramCodegenView(...)`
 4. `codegen.codegenProgram(...)`
 5. Binaryen `module.optimize()` when `CodegenOptions.optimize` is enabled
-6. In `@voyd/sdk`, read emitted wasm back into Binaryen and run another `module.optimize()`
+6. In `@voyd-lang/sdk`, read emitted wasm back into Binaryen and run another `module.optimize()`
 
 The current call sites are:
 
@@ -294,7 +294,7 @@ Public SDK policy should stay intentionally narrow for now:
 
 - `optimize?: boolean` remains the public SDK switch.
 - `optimize: true` should mean the most aggressive validated optimization behavior.
-- Less aggressive behavior should be opt-in through compiler-internal or codegen-internal profiles, not through public Binaryen pass configuration in `@voyd/sdk`.
+- Less aggressive behavior should be opt-in through compiler-internal or codegen-internal profiles, not through public Binaryen pass configuration in `@voyd-lang/sdk`.
 
 Current aggressive Binaryen policy should include safe non-default passes,
 especially heap-focused passes such as `heap-store-optimization` and

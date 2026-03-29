@@ -35,7 +35,7 @@ changes while the language, runtime, and tooling continue to settle.
 Install the CLI:
 
 ```bash
-npm i -g @voyd/cli
+npm i -g @voyd-lang/cli
 ```
 
 Run a program:
@@ -67,11 +67,11 @@ voyd doc --out docs.html
 For JavaScript or TypeScript integrations, use the SDK:
 
 ```bash
-npm i @voyd-lang/sdk
+npm i @voyd-lang-lang/sdk
 ```
 
 ```ts
-import { createSdk } from "@voyd-lang/sdk";
+import { createSdk } from "@voyd-lang-lang/sdk";
 
 const sdk = createSdk();
 const result = await sdk.compile({

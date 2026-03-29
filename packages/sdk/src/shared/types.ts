@@ -1,6 +1,6 @@
-import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
-import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
-import type { TestCase as CompilerTestCase } from "@voyd/compiler/pipeline-shared.js";
+import type { Diagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
+import type { ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import type { TestCase as CompilerTestCase } from "@voyd-lang/compiler/pipeline-shared.js";
 import type {
   DefaultAdapterOptions,
   EffectContinuation,
@@ -10,7 +10,7 @@ import type {
   SignatureHash,
   VoydRuntimeDiagnostics,
   VoydRuntimeError,
-} from "@voyd/js-host";
+} from "@voyd-lang/js-host";
 
 export type {
   DefaultAdapterOptions,

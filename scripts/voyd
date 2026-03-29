@@ -22,7 +22,7 @@ if (forceDist && useSource) {
 }
 
 if (mustUseDist && !existsSync(distCli)) {
-  console.error("Voyd CLI dist build not found. Run `npm run build -w @voyd/cli`.");
+  console.error("Voyd CLI dist build not found. Run `npm run build -w @voyd-lang/cli`.");
   process.exit(1);
 }
 

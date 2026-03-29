@@ -1,9 +1,9 @@
 import path from "node:path";
-import type { Diagnostic as CompilerDiagnostic } from "@voyd/compiler/diagnostics/index.js";
-import { modulePathToString } from "@voyd/compiler/modules/path.js";
-import type { ModuleGraph, ModuleNode } from "@voyd/compiler/modules/types.js";
-import { loadModuleGraph } from "@voyd/compiler/pipeline.js";
-import { analyzeModules } from "@voyd/compiler/pipeline-shared.js";
+import type { Diagnostic as CompilerDiagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
+import { modulePathToString } from "@voyd-lang/compiler/modules/path.js";
+import type { ModuleGraph, ModuleNode } from "@voyd-lang/compiler/modules/types.js";
+import { loadModuleGraph } from "@voyd-lang/compiler/pipeline.js";
+import { analyzeModules } from "@voyd-lang/compiler/pipeline-shared.js";
 import { buildDiagnosticsByUri } from "./project/diagnostics.js";
 import {
   createOverlayModuleHost,

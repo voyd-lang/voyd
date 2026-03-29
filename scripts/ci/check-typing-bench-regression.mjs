@@ -91,7 +91,7 @@ const runBenchAtRef = ({ ref, outputPath }) => {
     [
       "run",
       "--workspace",
-      "@voyd/compiler",
+      "@voyd-lang/compiler",
       "bench:typing",
       "--",
       `--outputJson=${outputPath}`,

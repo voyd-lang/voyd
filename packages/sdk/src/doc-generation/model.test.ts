@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { DocumentationProgramView } from "@voyd/compiler/docs/documentation-view.js";
+import type { DocumentationProgramView } from "@voyd-lang/compiler/docs/documentation-view.js";
 import { createDocumentationModel } from "./model.js";
 
 const createBaseModule = (): DocumentationProgramView["modules"][number] => ({

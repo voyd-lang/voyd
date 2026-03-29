@@ -7,7 +7,7 @@ import {
   type EffectContinuation,
   type ParsedEffectOp,
   type ParsedEffectTable,
-} from "@voyd/js-host";
+} from "@voyd-lang/js-host";
 import type { Diagnostic } from "../../../diagnostics/index.js";
 import type { CodegenOptions } from "../../context.js";
 import { codegenProgram } from "../../codegen.js";

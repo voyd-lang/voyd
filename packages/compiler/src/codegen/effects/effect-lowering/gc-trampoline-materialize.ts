@@ -2,7 +2,7 @@ import binaryen from "binaryen";
 import {
   defineStructType,
   modBinaryenTypeToHeapType,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { CodegenContext } from "../../context.js";
 import type { HirExprId } from "../../../semantics/ids.js";
 import { wasmHeapFieldTypeFor, wasmTypeFor } from "../../types.js";

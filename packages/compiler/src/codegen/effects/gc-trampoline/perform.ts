@@ -10,7 +10,7 @@ import type {
 import {
   initStruct,
   refFunc,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import {
   allocateTempLocal,
 } from "../../locals.js";

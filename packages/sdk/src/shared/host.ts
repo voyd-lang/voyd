@@ -4,7 +4,7 @@ import {
   type EffectHandler,
   type HostInitOptions,
   type VoydHost,
-} from "@voyd/js-host";
+} from "@voyd-lang/js-host";
 import type { RunOptions } from "./types.js";
 
 export const createHost = (options: HostInitOptions): Promise<VoydHost> =>

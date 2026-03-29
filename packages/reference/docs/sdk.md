@@ -10,13 +10,13 @@ TypeScript.
 ## Installation
 
 ```bash
-npm i @voyd-lang/sdk
+npm i @voyd-lang-lang/sdk
 ```
 
 ## Node usage
 
 ```ts
-import { createSdk } from "@voyd-lang/sdk";
+import { createSdk } from "@voyd-lang-lang/sdk";
 
 const sdk = createSdk();
 const result = await sdk.compile({
@@ -36,7 +36,7 @@ if (!result.success) {
 Compile from files by passing `entryPath`.
 
 ```ts
-import { createSdk } from "@voyd-lang/sdk";
+import { createSdk } from "@voyd-lang-lang/sdk";
 
 const sdk = createSdk();
 const result = await sdk.compile({
@@ -111,10 +111,10 @@ if (result.success && result.tests) {
 
 ## Browser usage
 
-The browser entrypoint lives at `@voyd-lang/sdk/browser`.
+The browser entrypoint lives at `@voyd-lang-lang/sdk/browser`.
 
 ```ts
-import { createSdk } from "@voyd-lang/sdk/browser";
+import { createSdk } from "@voyd-lang-lang/sdk/browser";
 
 const sdk = createSdk();
 const result = await sdk.compile({
@@ -129,10 +129,10 @@ Browser builds require `source` input and do not support `optimize` or
 
 ## Documentation generation
 
-The documentation generator lives at `@voyd-lang/sdk/doc-generation`.
+The documentation generator lives at `@voyd-lang-lang/sdk/doc-generation`.
 
 ```ts
-import { generateDocumentation } from "@voyd-lang/sdk/doc-generation";
+import { generateDocumentation } from "@voyd-lang-lang/sdk/doc-generation";
 
 const { content } = await generateDocumentation({
   entryPath: "./src/pkg.voyd",
@@ -142,7 +142,7 @@ const { content } = await generateDocumentation({
 
 ## Related entrypoints
 
-- `@voyd-lang/sdk/browser`
-- `@voyd-lang/sdk/compiler`
-- `@voyd-lang/sdk/doc-generation`
-- `@voyd-lang/sdk/js-host`
+- `@voyd-lang-lang/sdk/browser`
+- `@voyd-lang-lang/sdk/compiler`
+- `@voyd-lang-lang/sdk/doc-generation`
+- `@voyd-lang-lang/sdk/js-host`

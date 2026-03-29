@@ -11,7 +11,7 @@ import {
   loadBindingValue,
   loadLocalValue,
 } from "../locals.js";
-import { arrayNew, arrayNewFixed } from "@voyd/lib/binaryen-gc/index.js";
+import { arrayNew, arrayNewFixed } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { getFixedArrayWasmTypes, wasmTypeFor } from "../types.js";
 import { requireDependencyFunctionMeta } from "../function-dependencies.js";
 import { resolveModuleLetGetter } from "../module-lets.js";

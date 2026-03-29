@@ -1,9 +1,9 @@
 import path from "node:path";
-import { buildDocumentationView } from "@voyd/compiler/docs/documentation-view.js";
-import { analyzeModules, loadModuleGraph } from "@voyd/compiler/pipeline.js";
-import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
-import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
-import { resolveStdRoot } from "@voyd/lib/resolve-std.js";
+import { buildDocumentationView } from "@voyd-lang/compiler/docs/documentation-view.js";
+import { analyzeModules, loadModuleGraph } from "@voyd-lang/compiler/pipeline.js";
+import type { Diagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
+import type { ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import { detectSrcRootForPath } from "../shared/source-root.js";
 import { createDocumentationModel } from "./model.js";
 import { renderDocumentationHtml } from "./render-html.js";

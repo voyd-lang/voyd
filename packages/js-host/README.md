@@ -1,9 +1,9 @@
-# @voyd/js-host
+# @voyd-lang/js-host
 
 Thin JS host implementation for the Voyd host protocol.
 
 ```ts
-import { createVoydHost } from "@voyd/js-host";
+import { createVoydHost } from "@voyd-lang/js-host";
 
 const host = await createVoydHost({ wasm });
 host.registerHandler("com.acme.log", 0, "0x91f2abcd", (msg) => console.log(msg));
@@ -51,7 +51,7 @@ context (`point`/`direction`).
 Deterministic runtime harness for scheduler/adapter conformance tests:
 
 ```ts
-import { createDeterministicRuntime } from "@voyd/js-host";
+import { createDeterministicRuntime } from "@voyd-lang/js-host";
 
 const runtime = createDeterministicRuntime({
   startMonotonicMs: 0,

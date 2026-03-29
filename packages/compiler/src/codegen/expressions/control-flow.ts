@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { refTest, structGetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
+import { refTest, structGetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   CompiledExpression,

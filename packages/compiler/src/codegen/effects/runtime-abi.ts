@@ -5,7 +5,7 @@ import {
   refCast,
   structGetFieldValue,
   structSetFieldValue,
-} from "@voyd/lib/binaryen-gc/index.js";
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 
 export const OUTCOME_TAGS = {
   value: 0,

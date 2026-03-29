@@ -1,4 +1,4 @@
-import { createSdk } from "@voyd/sdk/browser";
+import { createSdk } from "@voyd-lang/sdk/browser";
 
 type Inbound = { id: number; code: string };
 type Outbound =

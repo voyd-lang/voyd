@@ -1,13 +1,13 @@
-import { codegenErrorToDiagnostic } from "@voyd/compiler/codegen/diagnostics.js";
-import type { Diagnostic } from "@voyd/compiler/diagnostics/index.js";
-import { DiagnosticError } from "@voyd/compiler/diagnostics/index.js";
-import type { ModuleHost, ModuleRoots } from "@voyd/compiler/modules/types.js";
+import { codegenErrorToDiagnostic } from "@voyd-lang/compiler/codegen/diagnostics.js";
+import type { Diagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
+import { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
+import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
 import {
   analyzeModules,
   emitProgram,
   type LoadModuleGraphFn,
   type TestScope,
-} from "@voyd/compiler/pipeline-shared.js";
+} from "@voyd-lang/compiler/pipeline-shared.js";
 import type { TestCase } from "./types.js";
 import { diagnosticsFromUnknownError } from "./diagnostics.js";
 

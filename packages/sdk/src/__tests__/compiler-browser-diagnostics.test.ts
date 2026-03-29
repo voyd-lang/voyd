@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compile } from "@voyd/sdk/browser";
+import { compile } from "@voyd-lang/sdk/browser";
 
 describe("browser compiler diagnostics", () => {
   it("preserves structured codegen diagnostics without throwing", async () => {

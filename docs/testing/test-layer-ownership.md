@@ -6,12 +6,12 @@ Voyd tests are split across compiler, SDK, CLI, and smoke layers. This guide def
 
 ## Ownership Matrix
 
-| Layer | Owns | Avoid in this layer |
-| --- | --- | --- |
-| `packages/compiler` | Parser, semantics, lowering, codegen internals, diagnostics, and compiler contracts | CLI process behavior and public end-to-end product flows |
-| `packages/sdk` | Public compile/run/test APIs, runtime host adapter contracts, module root resolution APIs | Deep CLI UX assertions and implementation-detail compiler internals |
-| `apps/cli` | Flag parsing, command dispatch, output/exit behavior, CLI-only wiring to SDK/test runner/doc generation | Re-validating SDK semantics already covered in SDK/smoke |
-| `apps/smoke` | Public end-to-end user flows across packages (`@voyd/sdk`, std, js-host) | Fine-grained CLI option parsing and compiler-private behavior |
+| Layer               | Owns                                                                                                    | Avoid in this layer                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `packages/compiler` | Parser, semantics, lowering, codegen internals, diagnostics, and compiler contracts                     | CLI process behavior and public end-to-end product flows            |
+| `packages/sdk`      | Public compile/run/test APIs, runtime host adapter contracts, module root resolution APIs               | Deep CLI UX assertions and implementation-detail compiler internals |
+| `apps/cli`          | Flag parsing, command dispatch, output/exit behavior, CLI-only wiring to SDK/test runner/doc generation | Re-validating SDK semantics already covered in SDK/smoke            |
+| `apps/smoke`        | Public end-to-end user flows across packages (`@voyd-lang/sdk`, std, js-host)                           | Fine-grained CLI option parsing and compiler-private behavior       |
 
 ## Canonical Placement For Common Scenarios
 

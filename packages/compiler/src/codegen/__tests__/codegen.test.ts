@@ -2,7 +2,7 @@ import binaryen from "binaryen";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { getWasmInstance } from "@voyd/lib/wasm.js";
+import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
 import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";

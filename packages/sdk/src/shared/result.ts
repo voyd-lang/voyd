@@ -5,7 +5,7 @@ import {
   resolveSignatureHashForOp,
   toHostProtocolTable,
   type HostProtocolTable,
-} from "@voyd/js-host";
+} from "@voyd-lang/js-host";
 import type { CompileArtifactsSuccess } from "./compile.js";
 import { createHost, registerHandlers, registerHandlersByLabelSuffix } from "./host.js";
 import { createTestCollection } from "./tests.js";

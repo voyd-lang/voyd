@@ -1,6 +1,6 @@
 import path from "node:path";
-import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
-import type { SemanticsPipelineResult } from "@voyd/compiler/semantics/pipeline.js";
+import type { ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import type { SemanticsPipelineResult } from "@voyd-lang/compiler/semantics/pipeline.js";
 import { FileChangeType, type DidChangeWatchedFilesParams } from "vscode-languageserver/lib/node/main.js";
 import { URI } from "vscode-uri";
 import {

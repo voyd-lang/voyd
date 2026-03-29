@@ -1,7 +1,7 @@
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createSdk, type CompileResult } from "@voyd/sdk";
-import { createVoydHost } from "@voyd/sdk/js-host";
+import { createSdk, type CompileResult } from "@voyd-lang/sdk";
+import { createVoydHost } from "@voyd-lang/sdk/js-host";
 
 const fixtureEntryPath = path.join(
   import.meta.dirname,

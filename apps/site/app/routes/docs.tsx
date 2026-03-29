@@ -3,7 +3,7 @@ import {
   getReferenceDoc,
   referenceNav,
   type ReferenceNavItem,
-} from "@voyd/reference";
+} from "@voyd-lang/reference";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";

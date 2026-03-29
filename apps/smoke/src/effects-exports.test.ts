@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { createSdk } from "@voyd/sdk";
+import { createSdk } from "@voyd-lang/sdk";
 
 describe("smoke: exported effects annotations", () => {
   it("allows omitting pure effect annotations on exported api methods", async () => {

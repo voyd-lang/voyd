@@ -29,7 +29,7 @@ Added typing performance guardrails and CI benchmarks:
 
 - `packages/compiler/src/semantics/typing/__tests__/typing.bench.ts` covers
   overload fanout and union-heavy typing paths.
-- CI now runs `npm run --workspace @voyd/compiler bench:typing` in
+- CI now runs `npm run --workspace @voyd-lang/compiler bench:typing` in
   `.github/workflows/pr.yml`.
 
 Typing disambiguation policy:

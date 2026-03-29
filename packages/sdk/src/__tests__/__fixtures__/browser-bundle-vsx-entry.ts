@@ -1,5 +1,5 @@
-import { compile } from "@voyd/sdk/browser";
-import { createVoydHost } from "@voyd/js-host";
+import { compile } from "@voyd-lang/sdk/browser";
+import { createVoydHost } from "@voyd-lang/js-host";
 
 type SmokeRunner = () => Promise<number>;
 

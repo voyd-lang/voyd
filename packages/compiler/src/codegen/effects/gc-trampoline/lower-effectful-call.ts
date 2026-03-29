@@ -25,7 +25,7 @@ import {
   ensureContinuationFunction,
 } from "./continuations.js";
 import { specializeContinuationSite } from "./specialize-site.js";
-import { initStruct, refCast, refFunc } from "@voyd/lib/binaryen-gc/index.js";
+import { initStruct, refCast, refFunc } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { tailResumptionExitChecks } from "../tail-resumptions.js";
 
 export const lowerEffectfulCallResult = ({

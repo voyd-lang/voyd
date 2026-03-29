@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { optimizeBinaryenModule } from "@voyd/lib/binaryen-optimize.js";
+import { optimizeBinaryenModule } from "@voyd-lang/lib/binaryen-optimize.js";
 import type {
   CodegenContext,
   CodegenOptions,

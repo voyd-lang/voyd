@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { generateDocumentation } from "@voyd/sdk/doc-generation";
+import { generateDocumentation } from "@voyd-lang/sdk/doc-generation";
 
 const createFixture = async (): Promise<{ root: string; entryPath: string }> => {
   const root = await fs.mkdtemp(path.join(tmpdir(), "voyd-doc-generation-smoke-"));

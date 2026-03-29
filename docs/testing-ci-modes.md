@@ -23,7 +23,7 @@ PR workflow (`.github/workflows/pr.yml`) runs two complementary checks:
    - `npx turbo run build --affected --filter=voyd.dev... --filter=voyd-vscode...`
    - Catches site/VSCode build regressions that package tests do not execute.
 3. Dist-specific CLI e2e in a separate PR job (only on CLI/runtime-related changes):
-   - Build targeted dist artifacts: `npx turbo run build --filter=@voyd/cli...`
+   - Build targeted dist artifacts: `npx turbo run build --filter=@voyd-lang/cli...`
    - Run dist e2e: `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist ...`
    - Reported as its own status check (`cli-dist-e2e`) so heavy runtime validation is isolated from the main source-mode test sweep.
 
@@ -44,5 +44,5 @@ If you modify any of the following, ensure dist CLI e2e still runs:
 Recommended local commands before merging CLI/runtime changes:
 
 - `VOYD_USE_SRC=1 npm test`
-- `npx turbo run build --filter=@voyd/cli...`
-- `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd/cli test -- src/__tests__/cli-e2e.test.ts`
+- `npx turbo run build --filter=@voyd-lang/cli...`
+- `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd-lang/cli test -- src/__tests__/cli-e2e.test.ts`

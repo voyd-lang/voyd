@@ -1,6 +1,6 @@
 {
-  "name": "@voyd/cli",
-  "version": "0.9.0",
+  "name": "@voyd-lang/cli",
+  "version": "0.1.0",
   "private": false,
   "description": "Voyd CLI",
   "type": "module",
@@ -15,9 +15,9 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "@voyd/sdk": "*",
-    "@voyd/lib": "*",
-    "@voyd/std": "*",
+    "@voyd-lang/sdk": "*",
+    "@voyd-lang/lib": "*",
+    "@voyd-lang/std": "*",
     "binaryen": "^125.0.0",
     "commander": "^14.0.0"
   }

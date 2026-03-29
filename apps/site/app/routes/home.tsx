@@ -35,6 +35,18 @@ type Capability = {
   linkLabel?: string;
 };
 
+type HeroStar = {
+  originX: number;
+  originY: number;
+  angle: number;
+  start: number;
+  end: number;
+  size: number;
+  delay: number;
+  duration: number;
+  opacity: number;
+};
+
 const CORE_FEATURES: Feature[] = [
   {
     id: "full-stack",
@@ -142,7 +154,7 @@ fn main(): () -> String
     lang: "typescript",
     code: `
 // This is a JS file.
-import { compile } from "@voyd/sdk/browser";
+import { compile } from "@voyd-lang/sdk/browser";
 
 const source = \
 \`use src::plugin::all
@@ -241,11 +253,48 @@ const MORE_CAPABILITIES: Capability[] = [
   },
 ];
 
+const HERO_STARS: HeroStar[] = Array.from({ length: 1280 }, (_, index) => {
+  const layer = index % 5;
+  const angle = ((index * 137.507764 + layer * 29) % 360) - 180;
+  const bandStart = [182, 220, 270, 330, 395][layer];
+  const bandTravel = [220, 265, 315, 370, 450][layer];
+  const start = bandStart + ((index * 31) % 78);
+  const end = start + bandTravel + ((index * 17) % 140);
+  const delay = ((index * 7) % 180) * 0.22;
+  const duration = 28 + layer * 4 + ((index * 13) % 30) * 0.38;
+  const isLarge = index % 41 === 0;
+  const isMedium = !isLarge && index % 9 === 0;
+  const size = isLarge
+    ? 2.5 + ((index * 11) % 3) * 0.38
+    : isMedium
+      ? 1.45 + ((index * 19) % 3) * 0.24
+      : 0.68 + ((index * 17) % 4) * 0.16;
+  const opacity = isLarge
+    ? 0.94
+    : isMedium
+      ? 0.76
+      : 0.38 + (((index * 23) % 28) / 100);
+  const originX = 50 + Math.cos(index * 0.73) * (2.4 + (layer % 2) * 1.2);
+  const originY = 47 + Math.sin(index * 0.51) * (1.9 + ((layer + 1) % 2) * 0.9);
+
+  return {
+    originX,
+    originY,
+    angle,
+    start,
+    end,
+    size,
+    delay,
+    duration,
+    opacity,
+  };
+});
+
 export default function Home() {
   return (
     <main className="mx-auto w-full max-w-6xl space-y-6 overflow-x-clip px-4 pb-16 pt-6">
       <Hero />
-      <section className="space-y-5" aria-label="Core features">
+      <SurfaceSection className="space-y-5" aria-label="Core features">
         {CORE_FEATURES.map((feature, index) => (
           <FeatureSection
             key={feature.id}
@@ -253,10 +302,10 @@ export default function Home() {
             reverse={index % 2 === 1}
           />
         ))}
-      </section>
-      <section className="space-y-5 pt-6">
+      </SurfaceSection>
+      <SurfaceSection className="space-y-8">
         <header className="flex max-w-3xl ml-3 flex-col gap-2">
-          <h2 className="m-0 text-3xl leading-tight font-bold sm:text-4xl">
+          <h2 className="mt-3 text-3xl leading-tight font-bold sm:text-4xl">
             Batteries Included
           </h2>
           <MutedParagraph className="text-base leading-7">
@@ -266,15 +315,18 @@ export default function Home() {
           </MutedParagraph>
         </header>
 
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-2 lg:auto-rows-fr">
           {TOOLING_FEATURES.map((feature) => (
             <ToolingCard key={feature.id} feature={feature} />
           ))}
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <SurfaceArticle className="grid gap-3 sm:grid-cols-2 sm:auto-rows-fr lg:grid-cols-3 p-3">
           {MORE_CAPABILITIES.map((capability) => (
-            <SurfaceArticle key={capability.title} className="p-4">
+            <div
+              key={capability.title}
+              className="flex h-full flex-col p-4"
+            >
               <h3 className="m-0 text-base font-bold">{capability.title}</h3>
               <MutedParagraph className="mt-2 text-sm leading-6">
                 {capability.detail}
@@ -296,10 +348,10 @@ export default function Home() {
                   {capability.linkLabel ?? "Learn more"}
                 </a>
               ) : null}
-            </SurfaceArticle>
+            </div>
           ))}
-        </div>
-      </section>
+        </SurfaceArticle>
+      </SurfaceSection>
     </main>
   );
 }
@@ -312,6 +364,7 @@ const Hero = () => {
         background: "color-mix(in srgb, var(--site-surface) 90%, transparent)",
       }}
     >
+      <HeroStars />
       <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-col items-center gap-5 text-center">
         <div className="flex flex-row gap-2 items-center justify-center">
           <img src={logo} alt="Voyd logo" className="aspect-square w-20" />
@@ -329,6 +382,35 @@ const Hero = () => {
   );
 };
 
+const HeroStars = () => {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+    >
+      {HERO_STARS.map((star, index) => (
+        <span
+          key={`${star.angle}-${index}`}
+          className="hero-star"
+          style={
+            {
+              "--hero-star-origin-x": `${star.originX}%`,
+              "--hero-star-origin-y": `${star.originY}%`,
+              "--hero-star-angle": `${star.angle}deg`,
+              "--hero-star-start": `${star.start}px`,
+              "--hero-star-end": `${star.end}px`,
+              "--hero-star-size": `${star.size}px`,
+              "--hero-star-delay": `${star.delay}s`,
+              "--hero-star-duration": `${star.duration}s`,
+              "--hero-star-opacity": `${star.opacity}`,
+            } as CSSProperties
+          }
+        />
+      ))}
+    </div>
+  );
+};
+
 const FeatureSection = ({
   feature,
   reverse,
@@ -340,7 +422,7 @@ const FeatureSection = ({
   const codeOrderClass = reverse ? "lg:order-1" : "lg:order-2";
 
   return (
-    <SurfaceArticle className="flex min-w-0 flex-col gap-4 p-3 md:flex-row">
+    <div className="flex min-w-0 flex-col gap-4 p-3 md:flex-row">
       <div
         className={`m-1 flex min-w-0 flex-col gap-3 p-1 ${contentOrderClass} md:w-1/2`}
       >
@@ -357,13 +439,13 @@ const FeatureSection = ({
         lang={feature.lang ?? "voyd"}
         className={`min-w-0 ${codeOrderClass} md:w-1/2`}
       />
-    </SurfaceArticle>
+    </div>
   );
 };
 
 const ToolingCard = ({ feature }: { feature: Feature }) => {
   return (
-    <SurfaceArticle className="flex flex-col gap-10 p-4">
+    <div className="flex h-full flex-col gap-10 p-3">
       <div className="gap-3">
         <h3 className="m-0 mb-1.5 text-2xl font-bold">{feature.title}</h3>
         <MutedParagraph className="text-base leading-6">
@@ -371,8 +453,11 @@ const ToolingCard = ({ feature }: { feature: Feature }) => {
         </MutedParagraph>
         <FeaturePoints points={feature.points} />
       </div>
-      <CodePanel code={feature.code} lang={feature.lang ?? "voyd"} />
-    </SurfaceArticle>
+      <CodePanel
+        code={feature.code}
+        lang={feature.lang ?? "voyd"}
+      />
+    </div>
   );
 };
 
@@ -387,7 +472,7 @@ const SurfaceSection = ({
 }) => {
   return (
     <section
-      className={`min-w-0 rounded-xl shadow-xl bg-[var(--site-surface)] ${className}`}
+      className={`min-w-0 rounded-xl shadow-xl bg-[var(--site-surface)] p-3 ${className}`}
       style={style}
     >
       {children}

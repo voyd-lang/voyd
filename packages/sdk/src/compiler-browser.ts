@@ -1,19 +1,19 @@
 // NOTE: Browser integration relies on the browser pipeline entry and the in-memory
-// module host. Node-only filesystem hosts remain in @voyd/compiler/modules/fs-host.
+// module host. Node-only filesystem hosts remain in @voyd-lang/compiler/modules/fs-host.
 import binaryen from "binaryen";
 import {
   analyzeModules,
   emitProgram,
   loadModuleGraph,
-} from "@voyd/compiler/pipeline-browser.js";
-import { codegenErrorToDiagnostic } from "@voyd/compiler/codegen/diagnostics.js";
-import type { CodegenOptions } from "@voyd/compiler/codegen/context.js";
+} from "@voyd-lang/compiler/pipeline-browser.js";
+import { codegenErrorToDiagnostic } from "@voyd-lang/compiler/codegen/diagnostics.js";
+import type { CodegenOptions } from "@voyd-lang/compiler/codegen/context.js";
 import {
   DiagnosticError,
   type Diagnostic,
-} from "@voyd/compiler/diagnostics/index.js";
-import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
-import type { ModuleRoots } from "@voyd/compiler/modules/types.js";
+} from "@voyd-lang/compiler/diagnostics/index.js";
+import { createMemoryModuleHost } from "@voyd-lang/compiler/modules/memory-host.js";
+import type { ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
 import { diagnosticsFromUnknownError } from "./shared/diagnostics.js";
 
 const STD_ROOT = "/std";

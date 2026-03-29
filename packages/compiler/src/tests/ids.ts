@@ -1,4 +1,4 @@
-import { murmurHash3 } from "@voyd/lib/murmur-hash.js";
+import { murmurHash3 } from "@voyd-lang/lib/murmur-hash.js";
 import type { ModulePath } from "../modules/types.js";
 import { modulePathToString } from "../modules/path.js";
 import {

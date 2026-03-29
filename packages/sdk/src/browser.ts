@@ -1,5 +1,5 @@
-import { createMemoryModuleHost } from "@voyd/compiler/modules/memory-host.js";
-import { loadModuleGraph } from "@voyd/compiler/pipeline-browser.js";
+import { createMemoryModuleHost } from "@voyd-lang/compiler/modules/memory-host.js";
+import { loadModuleGraph } from "@voyd-lang/compiler/pipeline-browser.js";
 import { compileWithLoader } from "./shared/compile.js";
 import { runWithHandlers } from "./shared/host.js";
 import { createCompileResult } from "./shared/result.js";
@@ -119,8 +119,8 @@ export {
   type BrowserCompileSuccessResult,
   type ParsedModule,
 };
-export { parse } from "@voyd/compiler/parser/parser.js";
-export * from "@voyd/lib/wasm.js";
+export { parse } from "@voyd-lang/compiler/parser/parser.js";
+export * from "@voyd-lang/lib/wasm.js";
 export type {
   CompileOptions,
   CompileResult,

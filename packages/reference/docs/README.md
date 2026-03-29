@@ -48,7 +48,7 @@ pub fn main() -> i32
 ## Installation
 
 ```bash
-npm i -g @voyd/cli
+npm i -g @voyd-lang/cli
 ```
 
 The installed command is `voyd`. When working inside the Voyd repository after

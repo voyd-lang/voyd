@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolve } from "node:path";
-import { createVoydHost, parseExportAbi } from "@voyd/js-host";
+import { createVoydHost, parseExportAbi } from "@voyd-lang/js-host";
 import { compileProgram, type CompileProgramResult } from "../../pipeline.js";
 import { createFsModuleHost } from "../../modules/fs-host.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";

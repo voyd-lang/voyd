@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { collectNodeModulesDirs } from "@voyd/sdk";
+import { collectNodeModulesDirs } from "@voyd-lang/sdk";
 
 export const resolvePackageDirs = ({
   srcRoot,

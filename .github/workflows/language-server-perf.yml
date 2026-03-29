@@ -25,4 +25,4 @@ jobs:
           VOYD_LS_PERF_LEAF_COUNT: "500"
           VOYD_LS_PERF_EDIT_RUNS: "5"
           VOYD_LS_PERF_MIN_SPEEDUP: "1.5"
-        run: npm run --workspace @voyd/language-server test -- src/__tests__/analysis-coordinator.perf.test.ts
+        run: npm run --workspace @voyd-lang/language-server test -- src/__tests__/analysis-coordinator.perf.test.ts

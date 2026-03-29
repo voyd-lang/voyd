@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import { callRef, refCast } from "@voyd/lib/binaryen-gc/index.js";
+import { callRef, refCast } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { getFunctionRefType, wasmTypeFor } from "../../types.js";
 import { boxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext } from "../../context.js";

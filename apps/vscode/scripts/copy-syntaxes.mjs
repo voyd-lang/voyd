@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const extensionRoot = path.resolve(scriptDir, "..");
-const libPackagePath = require.resolve("@voyd/lib/package.json");
+const libPackagePath = require.resolve("@voyd-lang/lib/package.json");
 const libRoot = path.dirname(libPackagePath);
 const sourceDir = path.resolve(libRoot, "assets");
 const targetDir = path.resolve(extensionRoot, "syntaxes");

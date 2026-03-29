@@ -1,6 +1,6 @@
 import binaryen from "binaryen";
-import { defineStructType } from "@voyd/lib/binaryen-gc/index.js";
-import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
+import { defineStructType } from "@voyd-lang/lib/binaryen-gc/index.js";
+import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import type { ClosureTypeInfo, CodegenContext, TypeId } from "./context.js";
 import { getAbiTypesForSignature, getSignatureWasmType } from "./types.js";
 

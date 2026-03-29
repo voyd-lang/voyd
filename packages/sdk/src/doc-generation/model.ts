@@ -6,7 +6,7 @@ import type {
   DocumentationParameterView,
   DocumentationProgramView,
   DocumentationReExportView,
-} from "@voyd/compiler/docs/documentation-view.js";
+} from "@voyd-lang/compiler/docs/documentation-view.js";
 import type {
   DocumentationItem,
   DocumentationItemKind,

@@ -1,4 +1,4 @@
-import { compile } from "@voyd/sdk/browser";
+import { compile } from "@voyd-lang/sdk/browser";
 
 type SmokeRunner = () => Promise<number>;
 
