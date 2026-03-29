@@ -15,7 +15,7 @@ import {
   ensureInlineFixedArrayWasmTypes,
 } from "./fixed-array-types.js";
 import { MAX_MULTIVALUE_INLINE_LANES } from "./multivalue.js";
-import type { AugmentedBinaryen } from "@voyd/lib/binaryen-gc/types.js";
+import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
 import {
   pickTraitImplMethodMeta,

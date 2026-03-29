@@ -4,8 +4,6 @@ import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
 
-const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
-
 const expectCompileSuccess = (
   result: CompileResult,
 ): Extract<CompileResult, { success: true }> => {

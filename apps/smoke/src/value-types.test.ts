@@ -1,6 +1,6 @@
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createSdk, type CompileResult } from "@voyd/sdk";
+import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 
 const fixtureEntryPath = path.join(import.meta.dirname, "..", "fixtures", "value-types.voyd");
 

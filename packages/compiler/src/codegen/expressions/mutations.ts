@@ -34,7 +34,7 @@ import {
   getSymbolTypeId,
   wasmTypeFor,
 } from "../types.js";
-import { refCast, structSetFieldValue } from "@voyd/lib/binaryen-gc/index.js";
+import { refCast, structSetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
 
 const storeIntoBinding = ({
