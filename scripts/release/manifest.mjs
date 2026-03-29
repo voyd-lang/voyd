@@ -153,8 +153,22 @@ export const resolveTargetCwd = (targetName) =>
 export const readJson = (filePath) =>
   JSON.parse(fs.readFileSync(filePath, "utf8"));
 
+export const writeJson = (filePath, value) => {
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+};
+
 export const readTargetPackageJson = (targetName) =>
   readJson(path.join(resolveTargetCwd(targetName), "package.json"));
+
+export const listWorkspacePackageJsonPaths = () =>
+  ["apps", "packages"].flatMap((segment) => {
+    const directory = path.join(repoRoot, segment);
+    return fs
+      .readdirSync(directory, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(directory, entry.name, "package.json"))
+      .filter((packageJsonPath) => fs.existsSync(packageJsonPath));
+  });
 
 export const parseTargetSelection = (argv) => {
   const targets = [];

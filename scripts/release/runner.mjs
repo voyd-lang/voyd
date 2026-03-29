@@ -2,10 +2,13 @@ import { execFileSync } from "node:child_process";
 import {
   collectPublishDependencies,
   getTarget,
+  listWorkspacePackageJsonPaths,
   parseTargetSelection,
+  readJson,
   readTargetPackageJson,
   repoRoot,
   resolveTargetCwd,
+  writeJson,
 } from "./manifest.mjs";
 
 const inheritEnv = (extraEnv = {}) => ({
@@ -37,6 +40,155 @@ const npmRunWorkspaceScript = ({ workspace, script, args = [], env }) =>
     args: ["run", "--workspace", workspace, script, ...args],
     env,
   });
+
+const semverPattern =
+  /^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>[0-9A-Za-z-.]+))?(?:\+[0-9A-Za-z-.]+)?$/;
+
+const parseSemver = (version) => {
+  const match = version.match(semverPattern);
+  if (!match?.groups) {
+    throw new Error(`Expected a semver version, received "${version}".`);
+  }
+
+  return {
+    major: Number(match.groups.major),
+    minor: Number(match.groups.minor),
+    patch: Number(match.groups.patch),
+    prerelease: match.groups.prerelease,
+  };
+};
+
+const bumpSemver = ({ currentVersion, bump }) => {
+  const parsed = parseSemver(currentVersion);
+
+  if (parsed.prerelease) {
+    throw new Error(
+      `Version bumping does not support prerelease versions yet (${currentVersion}). Use --version instead.`,
+    );
+  }
+
+  if (bump === "patch") {
+    return `${parsed.major}.${parsed.minor}.${parsed.patch + 1}`;
+  }
+
+  if (bump === "minor") {
+    return `${parsed.major}.${parsed.minor + 1}.0`;
+  }
+
+  if (bump === "major") {
+    return `${parsed.major + 1}.0.0`;
+  }
+
+  throw new Error(`Unsupported bump "${bump}". Use patch, minor, major, or --version.`);
+};
+
+const internalDependencyFields = [
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+];
+
+const validateExactVersion = (version) => {
+  parseSemver(version);
+  return version;
+};
+
+const resolveVersionPlan = ({ targetNames, bump, version }) => {
+  if (!bump && !version) {
+    return null;
+  }
+
+  if (bump && version) {
+    throw new Error("Use either --bump or --version, not both.");
+  }
+
+  return new Map(
+    targetNames.map((targetName) => {
+      const currentVersion = readTargetPackageJson(targetName).version;
+      const nextVersion = version
+        ? validateExactVersion(version)
+        : bumpSemver({ currentVersion, bump });
+
+      return [getTarget(targetName).workspace, nextVersion];
+    }),
+  );
+};
+
+const syncInternalDependencyRanges = ({ packageJson, versionPlan }) => {
+  let changed = false;
+
+  internalDependencyFields.forEach((fieldName) => {
+    const field = packageJson[fieldName];
+    if (!field) {
+      return;
+    }
+
+    Object.keys(field).forEach((dependencyName) => {
+      const nextVersion = versionPlan.get(dependencyName);
+      if (!nextVersion) {
+        return;
+      }
+
+      const nextRange = `^${nextVersion}`;
+      if (field[dependencyName] === nextRange) {
+        return;
+      }
+
+      field[dependencyName] = nextRange;
+      changed = true;
+    });
+  });
+
+  return changed;
+};
+
+export const versionSelectedTargets = ({ targetNames, bump, version }) => {
+  const versionPlan = resolveVersionPlan({ targetNames, bump, version });
+  if (!versionPlan) {
+    return null;
+  }
+
+  let changedFiles = 0;
+  const nextVersions = [];
+
+  listWorkspacePackageJsonPaths().forEach((packageJsonPath) => {
+    const packageJson = readJson(packageJsonPath);
+    let changed = false;
+
+    const nextOwnVersion = versionPlan.get(packageJson.name);
+    if (nextOwnVersion && packageJson.version !== nextOwnVersion) {
+      packageJson.version = nextOwnVersion;
+      changed = true;
+    }
+
+    if (syncInternalDependencyRanges({ packageJson, versionPlan })) {
+      changed = true;
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    writeJson(packageJsonPath, packageJson);
+    changedFiles += 1;
+
+    if (nextOwnVersion) {
+      nextVersions.push(`${packageJson.name}@${nextOwnVersion}`);
+    }
+  });
+
+  runCommand({
+    command: "npm",
+    args: ["install", "--package-lock-only", "--ignore-scripts"],
+  });
+
+  process.stdout.write(
+    `[release] Updated ${changedFiles} manifest(s): ${nextVersions.join(", ")}\n`,
+  );
+
+  return versionPlan;
+};
 
 const needsRelatedTest = (targetNames, relatedTest) =>
   targetNames.some((targetName) => getTarget(targetName).relatedTests.includes(relatedTest));
@@ -203,6 +355,8 @@ export const parseSharedArgs = (argv) => {
     allowDirty: argv.includes("--allow-dirty"),
     tag: "latest",
     otp: undefined,
+    bump: undefined,
+    version: undefined,
     vscodeRelease: undefined,
   };
 
@@ -230,6 +384,28 @@ export const parseSharedArgs = (argv) => {
       continue;
     }
 
+    if (arg === "--bump") {
+      options.bump = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--bump=")) {
+      options.bump = arg.split("=")[1];
+      continue;
+    }
+
+    if (arg === "--version") {
+      options.version = argv[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--version=")) {
+      options.version = arg.split("=")[1];
+      continue;
+    }
+
     if (arg === "--release" || arg === "--vscode-release") {
       options.vscodeRelease = argv[index + 1];
       index += 1;
@@ -239,6 +415,20 @@ export const parseSharedArgs = (argv) => {
     if (arg.startsWith("--release=") || arg.startsWith("--vscode-release=")) {
       options.vscodeRelease = arg.split("=")[1];
     }
+  }
+
+  if (options.bump && options.version) {
+    throw new Error("Use either --bump or --version, not both.");
+  }
+
+  if (
+    (options.bump || options.version) &&
+    options.vscodeRelease &&
+    options.targetNames.includes("voyd-vscode")
+  ) {
+    throw new Error(
+      "Use either --bump/--version or --vscode-release when publishing voyd-vscode, not both.",
+    );
   }
 
   return options;
@@ -311,19 +501,19 @@ export const publishNpmTargets = ({ targetNames, dryRun, tag, otp }) => {
   });
 };
 
-export const runVscodePublish = ({ dryRun, release }) => {
+export const runVscodePublish = ({ dryRun, release, useExistingVersion = false }) => {
   if (dryRun) {
     npmRunWorkspaceScript({ workspace: "voyd-vscode", script: "package" });
     return;
   }
 
-  if (!release) {
+  if (!release && !useExistingVersion) {
     throw new Error("Publishing voyd-vscode requires --release patch|minor|major|<version>.");
   }
 
   runCommand({
     command: "npx",
-    args: ["vsce", "publish", release, "--no-dependencies"],
+    args: ["vsce", "publish", ...(release ? [release] : []), "--no-dependencies"],
     cwd: resolveTargetCwd("voyd-vscode"),
     env: {
       VOYD_RELEASE_SKIP_PUBLISH_CHECK: "1",
@@ -344,8 +534,8 @@ export const resolveWorkspaceNameFromEnv = () => {
 export const describeTargets = (targetNames) =>
   targetNames.map((targetName) => {
     const target = getTarget(targetName);
-    const packageJson = target.kind === "npm" ? readTargetPackageJson(targetName) : null;
-    const version = packageJson?.version ?? "extension";
+    const packageJson = readTargetPackageJson(targetName);
+    const version = packageJson.version ?? "unknown";
     return {
       targetName,
       kind: target.kind,

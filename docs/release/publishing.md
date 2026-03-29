@@ -25,6 +25,34 @@ Current supported targets:
 
 `voyd_semver` is intentionally private and excluded from the release flow.
 
+Use `--all` to select every supported target without listing them explicitly.
+
+## Versioning
+
+Bump every supported target by one patch version:
+
+```sh
+npm run release:version:all -- --bump patch
+```
+
+Bump a subset:
+
+```sh
+npm run release:version -- --targets @voyd-lang/sdk,@voyd-lang/cli --bump minor
+```
+
+Set an exact version instead:
+
+```sh
+npm run release:version -- --all --version 0.2.0
+```
+
+Version updates:
+
+- rewrite the selected targets' own `version` fields
+- update internal workspace dependency ranges that point at those targets
+- refresh `package-lock.json`
+
 ## Validation
 
 Before publishing, run:
@@ -59,18 +87,32 @@ Dry-run a publish:
 npm run release:publish -- --targets @voyd-lang/std,@voyd-lang/lib,@voyd-lang/sdk --dry-run
 ```
 
+Dry-run every supported target:
+
+```sh
+npm run release:publish:all -- --dry-run
+```
+
 Publish npm packages:
 
 ```sh
 npm run release:publish -- --targets @voyd-lang/std,@voyd-lang/lib,@voyd-lang/sdk,@voyd-lang/cli
 ```
 
+Version-bump and publish every supported target in one go:
+
+```sh
+npm run release:publish:all -- --bump patch
+```
+
 Notes:
 
 - The publish script requires a clean git worktree unless `--allow-dirty` is passed.
+- `--bump patch|minor|major` and `--version x.y.z` can be used with `release:publish` to update versions before validation and publishing.
 - npm targets publish in dependency order.
 - The script reuses the release validation pass, then skips duplicate `prepublishOnly`
   work during the actual publish step.
+- If `voyd-vscode` is included and you already used `--bump` or `--version`, the extension publishes its current package version without a second version bump.
 
 Publish the VSCode extension:
 

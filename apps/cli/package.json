@@ -6,7 +6,7 @@
   "type": "module",
   "bin": {
     "voyd": "./bin/voyd.js",
-    "vt": "./bin/voyd.js"
+    "vt": "./bin/vt.js"
   },
   "files": [
     "bin",

@@ -18,8 +18,11 @@
     "dev": "turbo run dev --affected --parallel",
     "clean": "turbo run clean --affected --parallel",
     "release:list": "node ./scripts/release/list.mjs",
+    "release:version": "node ./scripts/release/version.mjs",
+    "release:version:all": "node ./scripts/release/version.mjs --all",
     "release:check": "node ./scripts/release/check.mjs",
-    "release:publish": "node ./scripts/release/publish.mjs"
+    "release:publish": "node ./scripts/release/publish.mjs",
+    "release:publish:all": "node ./scripts/release/publish.mjs --all"
   },
   "devDependencies": {
     "@types/node": "^22.5.1",
