@@ -273,7 +273,7 @@ const HERO_STARS: HeroStar[] = Array.from({ length: 1280 }, (_, index) => {
     ? 0.94
     : isMedium
       ? 0.76
-      : 0.38 + (((index * 23) % 28) / 100);
+      : 0.38 + ((index * 23) % 28) / 100;
   const originX = 50 + Math.cos(index * 0.73) * (2.4 + (layer % 2) * 1.2);
   const originY = 47 + Math.sin(index * 0.51) * (1.9 + ((layer + 1) % 2) * 0.9);
 
@@ -317,16 +317,13 @@ export default function Home() {
 
         <div className="grid gap-4 lg:grid-cols-2 lg:auto-rows-fr">
           {TOOLING_FEATURES.map((feature) => (
-            <ToolingCard key={feature.id} feature={feature} />
+            <ToolingFeature key={feature.id} feature={feature} />
           ))}
         </div>
 
         <SurfaceArticle className="grid gap-3 sm:grid-cols-2 sm:auto-rows-fr lg:grid-cols-3 p-3">
           {MORE_CAPABILITIES.map((capability) => (
-            <div
-              key={capability.title}
-              className="flex h-full flex-col p-4"
-            >
+            <div key={capability.title} className="flex h-full flex-col p-4">
               <h3 className="m-0 text-base font-bold">{capability.title}</h3>
               <MutedParagraph className="mt-2 text-sm leading-6">
                 {capability.detail}
@@ -443,9 +440,9 @@ const FeatureSection = ({
   );
 };
 
-const ToolingCard = ({ feature }: { feature: Feature }) => {
+const ToolingFeature = ({ feature }: { feature: Feature }) => {
   return (
-    <div className="flex h-full flex-col gap-10 p-3">
+    <div className="flex h-full flex-col gap-10 p-3 max-w-full min-w-0">
       <div className="gap-3">
         <h3 className="m-0 mb-1.5 text-2xl font-bold">{feature.title}</h3>
         <MutedParagraph className="text-base leading-6">
@@ -453,10 +450,7 @@ const ToolingCard = ({ feature }: { feature: Feature }) => {
         </MutedParagraph>
         <FeaturePoints points={feature.points} />
       </div>
-      <CodePanel
-        code={feature.code}
-        lang={feature.lang ?? "voyd"}
-      />
+      <CodePanel code={feature.code} lang={feature.lang ?? "voyd"} />
     </div>
   );
 };
