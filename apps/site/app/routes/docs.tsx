@@ -15,9 +15,10 @@ import {
   useRef,
   useState,
   type MouseEvent,
+  type ChangeEvent,
   type ReactNode,
 } from "react";
-import { Link, useHref, useSearchParams } from "react-router";
+import { Link, useHref, useNavigate, useSearchParams } from "react-router";
 
 export const prerender = true;
 
@@ -51,6 +52,11 @@ type NavFolderNode = {
 
 type NavNode = NavLeafNode | NavFolderNode;
 
+type NavOption = {
+  slug: string;
+  label: string;
+};
+
 type MutableNavFolder = {
   path: string;
   title: string;
@@ -80,7 +86,7 @@ const buildNavTree = (items: ReferenceNavItem[]) => {
     if (!slug) return;
     const parts = slug.split("/");
     if (parts.length < 2) return;
-    parts.slice(1).forEach((_, index) => {
+    parts.slice(1).forEach((_part: string, index: number) => {
       parentSlugs.add(parts.slice(0, index + 1).join("/"));
     });
   });
@@ -125,7 +131,7 @@ const buildNavTree = (items: ReferenceNavItem[]) => {
     const segments = item.slug.split("/").filter(Boolean);
     let cursor = root;
 
-    segments.forEach((segment, index) => {
+    segments.forEach((segment: string, index: number) => {
       const segmentPath = segments.slice(0, index + 1).join("/");
       const isLeaf = index === segments.length - 1;
       const isFolderDoc = parentSlugs.has(segmentPath);
@@ -173,6 +179,35 @@ const buildNavTree = (items: ReferenceNavItem[]) => {
   };
 
   return folderTree(root);
+};
+
+const buildNavOptions = (node: NavNode, depth = 0): NavOption[] => {
+  const labelPrefix = depth === 0 ? "" : `${"- ".repeat(depth)}`;
+
+  if (node.kind === "doc") {
+    return [
+      {
+        slug: node.slug,
+        label: `${labelPrefix}${node.title}`,
+      },
+    ];
+  }
+
+  const current =
+    node.slug !== undefined
+      ? [
+          {
+            slug: node.slug,
+            label: `${labelPrefix}${node.title}`,
+          },
+        ]
+      : [];
+
+  const children = node.children.flatMap((child) =>
+    buildNavOptions(child, node.path ? depth + 1 : depth),
+  );
+
+  return [...current, ...children];
 };
 
 const NavItemLink = ({
@@ -309,25 +344,27 @@ export default function Docs() {
   const [headings, setHeadings] = useState<Heading[]>([]);
   const navRef = useRef<HTMLDivElement>(null);
   const articleRef = useRef<HTMLDivElement>(null);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const docsPath = useHref("/docs");
 
   const requestedSlug = searchParams.get("p") ?? "";
   const doc = getReferenceDoc(requestedSlug) ?? getReferenceDoc("")!;
   const navTree = useMemo(() => buildNavTree(referenceNav), []);
+  const navOptions = useMemo(() => buildNavOptions(navTree), [navTree]);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     () => new Set(),
   );
 
   const setDocSlug = (slug: string) => {
-    if (slug) {
-      setSearchParams({ p: slug });
-      return;
-    }
-    setSearchParams({});
+    navigate(buildDocHref({ docsPath, slug }));
   };
 
   const getDocHref = (slug: string) => buildDocHref({ docsPath, slug });
+
+  const handleMobileNavChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    setDocSlug(event.target.value);
+  };
 
   // Build headings (h2–h3) from the rendered DOM.
   useEffect(() => {
@@ -387,7 +424,7 @@ export default function Docs() {
 
     setExpandedFolders((current) => {
       const next = new Set(current);
-      segments.slice(0, -1).forEach((_, index) => {
+      segments.slice(0, -1).forEach((_segment: string, index: number) => {
         next.add(segments.slice(0, index + 1).join("/"));
       });
       return next;
@@ -640,18 +677,60 @@ export default function Docs() {
         </div>
       </aside>
 
-      <article
-        ref={articleRef}
-        className="prose bg-[var(--site-surface)] p-6 rounded-xl flex-1 max-w-3xl min-w-0 space-y-8 text-[var(--foreground)] prose-headings:text-[var(--foreground)] prose-p:text-[var(--foreground)] prose-li:text-[var(--foreground)] prose-strong:text-[var(--foreground)] prose-a:text-[var(--foreground)] prose-a:underline prose-a:decoration-[var(--site-text-muted)] prose-blockquote:text-[var(--site-text-muted)] prose-hr:border-[var(--site-border)] prose-code:text-[var(--foreground)] prose-code:before:content-none prose-code:after:content-none"
-      >
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          rehypePlugins={[rehypeSlug]}
-          components={components}
+      <div className="flex-1 min-w-0 max-w-3xl space-y-4">
+        <section className="rounded-xl border border-[var(--site-border)] bg-[var(--site-surface)] p-4 md:hidden">
+          <label
+            htmlFor="docs-toc-select"
+            className="mb-2 block text-[11px] font-bold tracking-[0.08em] text-[var(--site-text-muted)] uppercase"
+          >
+            Table of contents
+          </label>
+          <div className="relative">
+            <select
+              id="docs-toc-select"
+              value={doc.slug}
+              onChange={handleMobileNavChange}
+              className="w-full appearance-none rounded-lg border border-[var(--site-border)] bg-[var(--site-surface-soft)] px-3 py-2 pr-12 text-sm text-[var(--foreground)]"
+            >
+              {navOptions.map((option) => (
+                <option key={option.slug} value={option.slug}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-[var(--site-text-muted)]">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 12 8"
+                className="h-2.5 w-3.5"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M1 1.5 6 6.5l5-5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          </div>
+        </section>
+
+        <article
+          ref={articleRef}
+          className="prose rounded-xl bg-[var(--site-surface)] p-6 max-w-3xl min-w-0 space-y-8 text-[var(--foreground)] prose-headings:text-[var(--foreground)] prose-p:text-[var(--foreground)] prose-li:text-[var(--foreground)] prose-strong:text-[var(--foreground)] prose-a:text-[var(--foreground)] prose-a:underline prose-a:decoration-[var(--site-text-muted)] prose-blockquote:text-[var(--site-text-muted)] prose-hr:border-[var(--site-border)] prose-code:text-[var(--foreground)] prose-code:before:content-none prose-code:after:content-none"
         >
-          {doc.body}
-        </ReactMarkdown>
-      </article>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            rehypePlugins={[rehypeSlug]}
+            components={components}
+          >
+            {doc.body}
+          </ReactMarkdown>
+        </article>
+      </div>
     </main>
   );
 }
