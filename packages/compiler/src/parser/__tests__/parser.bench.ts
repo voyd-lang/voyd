@@ -1,6 +1,6 @@
 import { bench } from "vitest";
 import { parse } from "../parser.js";
-import { BENCH_FILE } from "./fixtures/benchmark-file.js";
+import { BENCH_FILE } from "../fixtures/benchmark-file.js";
 import { CharStream } from "../char-stream.js";
 import { read } from "../reader.js";
 

@@ -5,6 +5,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./index.d.ts",
+  "files": [
+    "dist",
+    "index.d.ts"
+  ],
   "exports": {
     ".": {
       "types": "./index.d.ts",
@@ -15,9 +19,12 @@
   },
   "scripts": {
     "build": "node ./scripts/build.mjs",
+    "clean": "rm -rf dist index.d.ts",
     "dev": "node ./scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo 'no tests for reference docs'",
-    "lint": "echo 'no lint configured'"
+    "lint": "echo 'no lint configured'",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   }
 }

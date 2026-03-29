@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: "Comma-separated release targets"
+        required: true
+        type: string
+      dry_run:
+        description: "Run validation and publish dry-runs only"
+        required: true
+        default: true
+        type: boolean
+      npm_tag:
+        description: "npm dist-tag for npm packages"
+        required: true
+        default: "latest"
+        type: string
+      vscode_release:
+        description: "VSCode release bump for voyd-vscode (patch/minor/major/version)"
+        required: false
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci --include=optional
+
+      - name: Publish selected targets
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          args=(
+            --targets "${{ inputs.targets }}"
+            --tag "${{ inputs.npm_tag }}"
+          )
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+
+          if [ -n "${{ inputs.vscode_release }}" ]; then
+            args+=(--vscode-release "${{ inputs.vscode_release }}")
+          fi
+
+          npm run release:publish -- "${args[@]}"

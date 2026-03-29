@@ -29,7 +29,9 @@
     "test": "npm run bundle:syntaxes && node ./scripts/test-grammar.mjs",
     "lint": "echo 'no lint configured'",
     "clean": "rm -rf dist",
-    "publish:patch": "npm run compile && vsce publish patch --no-dependencies",
+    "publish:patch": "node ../../scripts/release/publish-vscode.mjs --release patch",
+    "publish:minor": "node ../../scripts/release/publish-vscode.mjs --release minor",
+    "publish:major": "node ../../scripts/release/publish-vscode.mjs --release major",
     "package": "npm run compile && vsce package --no-dependencies -o dist/voyd-vscode.vsix",
     "install:local": "npm run package && code --install-extension dist/voyd-vscode.vsix"
   },
@@ -83,8 +85,8 @@
     ]
   },
   "devDependencies": {
-    "@voyd-lang/compiler": "*",
-    "@voyd-lang/lib": "*",
+    "@voyd-lang/compiler": "^0.1.0",
+    "@voyd-lang/lib": "^0.1.0",
     "@types/vscode": "^1.74.0",
     "@vscode/vsce": "^3.6.2",
     "typescript": "^5.6.2",

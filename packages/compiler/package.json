@@ -4,6 +4,9 @@
   "description": "Voyd compiler",
   "type": "module",
   "main": "./dist/pipeline.js",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/pipeline.d.ts",
@@ -20,17 +23,20 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 --minWorkers 1 src",
+    "test": "vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 --maxWorkers=1 --minWorkers=1 src",
     "bench:typing": "vitest bench --config ../../vitest.config.ts src/semantics/typing/__tests__/typing.bench.ts",
     "test:w": "vitest --config ../../vitest.config.ts src",
-    "lint": "echo 'no lint configured'"
+    "lint": "echo 'no lint configured'",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2",
-    "@voyd-lang/lib": "*"
+    "@voyd-lang/lib": "^0.1.0"
   },
   "devDependencies": {
-    "@voyd-lang/js-host": "*"
+    "@voyd-lang/js-host": "^0.1.0"
   }
 }

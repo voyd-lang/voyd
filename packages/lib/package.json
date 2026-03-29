@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
+  "files": [
+    "dist",
+    "assets"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -28,13 +32,16 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config ../../vitest.config.ts src/lib/__tests__",
-    "lint": "echo 'no lint configured'"
+    "lint": "echo 'no lint configured'",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2",
-    "@voyd-lang/std": "*",
+    "@voyd-lang/std": "^0.1.0",
     "binaryen": "^125.0.0"
   }
 }

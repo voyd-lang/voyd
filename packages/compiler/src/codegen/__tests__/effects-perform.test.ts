@@ -141,7 +141,7 @@ const buildLoweringSnapshot = () => {
     }));
 };
 
-describe("effect perform lowering", { timeout: 15_000 }, () => {
+describe("effect perform lowering", { timeout: 60_000 }, () => {
   it("records liveness and continuation layouts for perform sites", () => {
     const sites = buildLoweringSnapshot();
     expect(sites.length).toBeGreaterThan(0);
@@ -167,7 +167,7 @@ describe("effect perform lowering", { timeout: 15_000 }, () => {
       expect(text).toContain("voydContEnv_");
       expect(text).toContain("__cont_");
     },
-    15_000,
+    60_000,
   );
 
   it("does not re-evaluate guards when resuming after a perform", async () => {

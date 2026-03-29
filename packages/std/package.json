@@ -1,12 +1,19 @@
 {
   "name": "@voyd-lang/std",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "Voyd standard library sources",
+  "files": [
+    "src",
+    "dist"
+  ],
   "scripts": {
     "build": "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/.placeholder','standard library source bundle');\"",
+    "clean": "rm -rf dist",
     "typecheck": "echo 'no types for voyd std'",
     "test": "VOYD_USE_SRC=1 node ../../scripts/voyd test ./src --fail-empty-tests",
-    "lint": "echo 'no lint configured'"
+    "lint": "echo 'no lint configured'",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   }
 }
