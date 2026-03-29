@@ -1,0 +1,48 @@
+eff Probe
+  touch(resume) -> void
+
+trait EmitWide
+  fn emit(self): Probe -> Sphere
+
+val Vec3 {
+  x: f64,
+  y: f64,
+  z: f64
+}
+
+val Sphere {
+  center: Vec3,
+  radius: f64,
+  albedo: Vec3,
+  fuzz: f64,
+  refraction_index: f64,
+  material_kind: i32
+}
+
+obj Holder {
+  sphere: Sphere
+}
+
+impl EmitWide for Holder
+  fn emit(self) -> Sphere
+    self.sphere
+
+fn read(emitter: EmitWide): Probe -> f64
+  let sphere = emitter.emit()
+  Probe::touch()
+  sphere.center.x + sphere.radius + sphere.albedo.y
+
+pub fn main(): () -> f64
+  try
+    read(Holder {
+      sphere: Sphere {
+        center: Vec3 { x: 1.0, y: 2.0, z: 3.0 },
+        radius: 4.0,
+        albedo: Vec3 { x: 5.0, y: 6.0, z: 7.0 },
+        fuzz: 8.0,
+        refraction_index: 9.0,
+        material_kind: 10
+      }
+    })
+  Probe::touch(resume):
+    resume()

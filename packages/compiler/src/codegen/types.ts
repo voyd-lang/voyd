@@ -2720,6 +2720,10 @@ const createMethodLookupEntries = ({
         : meta.resultAbiKind === "out_ref"
           ? binaryen.none
           : meta.resultType;
+      const wrappedValueType =
+        meta.resultAbiKind === "out_ref"
+          ? binaryen.none
+          : meta.resultType;
       const wrapperName = `${typeLabel}__method_${hashTraitSymbol}_${hashTraitMethod}_${implRef.symbol}`;
       const wrapperLocals: binaryen.Type[] = [];
       const wrapperParamType = binaryen.createType(params as number[]);
@@ -2735,7 +2739,7 @@ const createMethodLookupEntries = ({
         dispatchEffectful && !meta.effectful
           ? wrapValueInOutcome({
               valueExpr: implCall,
-              valueType: meta.resultType,
+              valueType: wrappedValueType,
               ctx,
               fnCtx: wrapperScratch,
             })
