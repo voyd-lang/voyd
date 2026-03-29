@@ -104,4 +104,45 @@ describe("getConfigFromCli", () => {
     expect(config.doc).toBe(false);
     expect(config.entry).toBe("test");
   });
+
+  it("parses --run-wasm when the wasm path appears before --entry", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "--run-wasm",
+      "./dist/module.wasm",
+      "--entry",
+      "custom_main",
+    ]);
+    expect(config.runWasm).toBe(true);
+    expect(config.index).toBe("./dist/module.wasm");
+    expect(config.entry).toBe("custom_main");
+  });
+
+  it("parses --run-wasm when the wasm path appears after --entry", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "--run-wasm",
+      "--entry",
+      "custom_main",
+      "./dist/module.wasm",
+    ]);
+    expect(config.runWasm).toBe(true);
+    expect(config.index).toBe("./dist/module.wasm");
+    expect(config.entry).toBe("custom_main");
+  });
+
+  it("parses --run-wasm when --entry uses an inline value", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "--run-wasm",
+      "./dist/module.wasm",
+      "--entry=custom_main",
+    ]);
+    expect(config.runWasm).toBe(true);
+    expect(config.index).toBe("./dist/module.wasm");
+    expect(config.entry).toBe("custom_main");
+  });
 });

@@ -27,7 +27,7 @@ voyd --run --entry custom_main ./src/main.voyd
 
 ```bash
 voyd --run-wasm ./dist/module.wasm
-voyd --run-wasm --entry custom_main ./dist/module.wasm
+voyd --run-wasm ./dist/module.wasm --entry custom_main
 ```
 
 ## Emit wasm binary
