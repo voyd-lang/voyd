@@ -1,6 +1,6 @@
 import type { SourceSpan, TypeId } from "../../ids.js";
 import type { TypingContext, TypingState } from "../types.js";
-import { typeSatisfies } from "../type-system.js";
+import { internCheckedUnion, typeSatisfies } from "../type-system.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 
 export const mergeBranchType = ({
@@ -33,7 +33,11 @@ export const mergeBranchType = ({
   const accRepr = branchWasmRepresentation(acc, ctx);
   const nextRepr = branchWasmRepresentation(next, ctx);
   if (accRepr === "unknown" || nextRepr === "unknown") {
-    return ctx.arena.internUnion([acc, next]);
+    return internCheckedUnion({
+      members: [acc, next],
+      ctx,
+      span: normalizeSpan(span, ctx.hir.module.span),
+    });
   }
   if (accRepr === "mixed" || nextRepr === "mixed" || accRepr !== nextRepr) {
     emitDiagnostic({
@@ -43,7 +47,11 @@ export const mergeBranchType = ({
       span: normalizeSpan(span, ctx.hir.module.span),
     });
   }
-  return ctx.arena.internUnion([acc, next]);
+  return internCheckedUnion({
+    members: [acc, next],
+    ctx,
+    span: normalizeSpan(span, ctx.hir.module.span),
+  });
 };
 
 type BranchWasmRepresentation =

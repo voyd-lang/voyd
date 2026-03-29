@@ -23,7 +23,7 @@ Choose `val` when the type is small or predictably fixed-layout and the program 
 
 ## Rules
 
-- Fields must be layout-compatible. Valid field shapes include primitives, other value types, tuples and structural object fields, fixed arrays, unions and optionals of compatible members, and explicit heap/reference-like fields such as `obj`, trait, or function types.
+- Fields must be layout-compatible. Valid field shapes include primitives, other value types, tuples and structural object fields, fixed arrays, direct unions whose top-level members are all value types, optionals with value-compatible payloads, and explicit heap/reference-like fields such as `obj`, trait, or function types.
 - Recursive inline value layouts are rejected.
 - `val` declarations cannot inherit from a base object.
 - Mutable methods and mutable parameters still require `~self` or `~param`.

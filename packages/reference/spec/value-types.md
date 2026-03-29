@@ -25,7 +25,8 @@ A field type is value-layout-compatible if it is one of:
 - another `val` type
 - a tuple or structural object whose members are value-layout-compatible
 - a fixed array whose element type is value-layout-compatible
-- a union or optional whose members are value-layout-compatible
+- a direct union whose top-level members are all value-layout-compatible values
+- an optional whose payload is value-layout-compatible
 - a type parameter
 - a nominal object, trait, or function type used as an explicit reference-like field
 
@@ -74,3 +75,8 @@ Mutating one `val` binding must not mutate any other binding unless both names r
 - as payloads of unions and optionals
 
 Embedding a `val` in another aggregate does not give the embedded value independent identity.
+
+If a direct union member is a `val` type, every direct member of that union must
+also be a `val` type. This restriction applies to the top-level union members
+only, so `Some<Vec2> | None` remains valid because the direct members are
+`Some<Vec2>` and `None`, not `Vec2`.

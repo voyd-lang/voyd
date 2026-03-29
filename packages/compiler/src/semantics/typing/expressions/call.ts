@@ -22,6 +22,7 @@ import {
   getObjectInfoForNominal,
   getPrimitiveType,
   getStructuralFields,
+  internCheckedUnion,
   resolveTypeExpr,
   typeSatisfies,
   getSymbolName,
@@ -5883,7 +5884,11 @@ const inferArrayLiteralElementType = ({
   });
 
   if (allNominalObjects) {
-    return ctx.arena.internUnion(unique);
+    return internCheckedUnion({
+      members: unique,
+      ctx,
+      span: callSpan,
+    });
   }
 
   const allStructural = unique.every((type) => {

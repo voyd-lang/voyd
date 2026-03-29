@@ -74,4 +74,41 @@ describe("value types", () => {
     expect(caught.diagnostic.message).toContain("fixed-layout value-compatible type");
     expect(caught.diagnostic.message).toContain("payload");
   });
+
+  it("rejects direct unions that mix value and heap members", () => {
+    let caught: unknown;
+    try {
+      semanticsPipeline(loadAst("value_mixed_union_alias.voyd"));
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0046");
+    expect(caught.diagnostic.message).toContain("Left");
+    expect(caught.diagnostic.message).toContain("Right");
+    expect(caught.diagnostic.message).toContain("top-level union members must be value types");
+  });
+
+  it("rejects inferred unions that mix value and heap members", () => {
+    let caught: unknown;
+    try {
+      semanticsPipeline(loadAst("value_mixed_union_inferred_return.voyd"));
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0046");
+    expect(caught.diagnostic.message).toContain("Left");
+    expect(caught.diagnostic.message).toContain("Right");
+  });
 });

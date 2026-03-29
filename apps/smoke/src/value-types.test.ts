@@ -42,6 +42,20 @@ describe("smoke: value types", () => {
     expect(output).toBe(7);
   });
 
+  it("supports value unions through aliases", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_union_alias_match",
+    });
+    expect(output).toBe(7);
+  });
+
+  it("stores direct value unions inside value fields", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_union_field_round_trip",
+    });
+    expect(output).toBe(9);
+  });
+
   it("stores values inside objects and reads them back", async () => {
     const output = await compiled.run<number>({ entryName: "value_inside_object" });
     expect(output).toBe(8);

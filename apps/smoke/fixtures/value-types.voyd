@@ -75,11 +75,20 @@ pub val Right {
   value: i32
 }
 
+type ValueSide = Left | Right
+
+pub val ValueUnionBox {
+  side: ValueSide
+}
+
 fn choose(flag: bool) -> Left | Right
   if flag then:
     Left { value: 7 }
   else:
     Right { value: 9 }
+
+fn choose_side(flag: bool) -> ValueSide
+  choose(flag)
 
 pub obj Box {
   point: Vec2
@@ -128,6 +137,17 @@ pub fn value_match() -> i32
   match(choose(true))
     Left { value }: value
     Right { value }: value + 100
+
+pub fn value_union_alias_match() -> i32
+  match(choose_side(true))
+    Left { value }: value
+    Right { value }: value + 100
+
+pub fn value_union_field_round_trip() -> i32
+  let box = ValueUnionBox { side: choose(false) }
+  match(box.side)
+    Left { value }: value
+    Right { value }: value
 
 pub fn value_inside_object() -> i32
   let box = Box { point: Vec2 { x: 6, y: 8 } }
