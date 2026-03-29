@@ -26,6 +26,14 @@ pub fn main() -> i32
 - Keep package boundaries and effects explicit.
 - Make macros, traits, and Wasm-facing code practical instead of ornamental.
 
+## Installation
+
+```bash
+npm i -g @voyd-lang/cli
+```
+
+The installed command is `voyd`.
+
 ## Start here
 
 - [Basics](./basics.md)
@@ -44,12 +52,3 @@ pub fn main() -> i32
 - Algebraic effects with typed handlers.
 - Macros for surface-language features such as `enum` and `for`.
 - A package/module system built around `src/` and `pkg.voyd`.
-
-## Installation
-
-```bash
-npm i -g @voyd-lang/cli
-```
-
-The installed command is `voyd`. When working inside the Voyd repository after
-`npm link`, the `vt` command points at the development CLI entrypoint.

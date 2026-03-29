@@ -67,11 +67,11 @@ voyd doc --out docs.html
 For JavaScript or TypeScript integrations, use the SDK:
 
 ```bash
-npm i @voyd-lang-lang/sdk
+npm i @voyd-lang/sdk
 ```
 
 ```ts
-import { createSdk } from "@voyd-lang-lang/sdk";
+import { createSdk } from "@voyd-lang/sdk";
 
 const sdk = createSdk();
 const result = await sdk.compile({
