@@ -77,6 +77,7 @@ test "string slice overloads and to_string forwarders":
   assert(value.slice(bytes: 1, len: 4).equals("😀"), eq: true)
   assert(value.slice(runes: 1, len: 1).equals("😀"), eq: true)
   assert(value.to_string().equals(value), eq: true)
+  assert(value.as_slice().slice(bytes: 1, len: 4).to_string().equals("😀"), eq: true)
 
 test "string lengths and graphemes":
   let value = "a😀b"
@@ -150,7 +151,7 @@ test "string search helpers":
   assert(value.contains("beta"), eq: true)
   assert(value.contains(where: (rune: i32) -> bool => rune == 44), eq: true)
   assert(option_string_index_or(value.find("beta"), -1) > 0, eq: true)
-  assert(option_string_index_or(value.rfind("a"), -1) >= 0, eq: true)
+  assert(option_string_index_or(value.reverse_find("a"), -1) >= 0, eq: true)
 
   match(value.find_range("beta"))
     Some<Range<i32>> { value }:
@@ -200,6 +201,49 @@ test "string split_once on rune":
       assert(false)
     None:
       assert(true)
+
+test "string slice read apis stay non-owning":
+  let source = "  alpha,beta,gamma  "
+  let slice = source.as_slice().trimmed()
+
+  assert(slice.starts_with("alpha"), eq: true)
+  assert(slice.ends_with("gamma"), eq: true)
+  assert(slice.contains("beta"), eq: true)
+  match(slice.get_byte(0))
+    Some<i32> { value }:
+      assert(value, eq: 97)
+    None:
+      assert(false)
+
+  match(slice.split_once(on: 44))
+    Some<(StringSlice, StringSlice)> { value }:
+      assert(value.0.to_string().equals("alpha"), eq: true)
+      assert(value.1.to_string().equals("beta,gamma"), eq: true)
+    None:
+      assert(false)
+
+  let parts = slice.split(on: ",")
+  assert(parts.len(), eq: 3)
+  match(parts.get(1))
+    Some<StringSlice> { value }:
+      assert(value.to_string().equals("beta"), eq: true)
+    None:
+      assert(false)
+
+test "string slice integer parsing":
+  let digits = "  9223372036854775807  ".as_slice().trimmed()
+  match(digits.parse_i64())
+    Ok<i64> { value }:
+      assert(value, eq: 9223372036854775807i64)
+    Err<ParseIntError>:
+      assert(false)
+
+  let too_large = "9223372036854775808".as_slice()
+  match(too_large.parse_i64())
+    Ok<i64>:
+      assert(false)
+    Err<ParseIntError> { error }:
+      assert(error.code, eq: 4)
 
 test "string split on substring":
   let value = "a,b,,c"

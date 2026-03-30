@@ -68,7 +68,7 @@ test "json parse rejects invalid input":
     Ok<JsonValue>:
       assert(false, eq: true)
     Err<JsonError> { error }:
-      assert(error.message.contains("json parse error"), eq: true)
+      assert(error.message.as_slice().contains("json parse error"), eq: true)
 
 test "json parse rejects oversized exponents":
   match(parse("1e100000000"))
@@ -180,8 +180,8 @@ test "json stringify emits compact object envelope":
   let value = JsonObject { value: fields }
   let compact = stringify(value)
 
-  assert(compact.starts_with("{"), eq: true)
-  assert(compact.ends_with("}"), eq: true)
+  assert(compact.as_slice().starts_with("{"), eq: true)
+  assert(compact.as_slice().ends_with("}"), eq: true)
 
 test "json stringify includes object keys":
   let ~fields = Dict<String, JsonValue>::init()
@@ -221,7 +221,7 @@ test "json stringify_pretty emits newlines":
   let value = JsonObject { value: fields }
   let pretty = stringify_pretty(value)
 
-  assert(pretty.contains(from_ascii([10])), eq: true)
+  assert(pretty.as_slice().contains(from_ascii([10])), eq: true)
 
 test "json stringify falls back for non-finite numbers":
   let nan_text = stringify(JsonNumber { value: 0.0 / 0.0 })

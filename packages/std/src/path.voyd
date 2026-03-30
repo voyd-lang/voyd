@@ -26,34 +26,35 @@ impl Path
 
   /// Returns a path with `child` appended.
   api fn join(self, child: String) -> Path
+    self.join(child.as_slice())
+
+  /// Returns a path with `child` appended.
+  api fn join(self, child: StringSlice) -> Path
     let child_path = child
     if string_len(child_path) == 0:
       return self
     if starts_with_separator(child_path):
-      return Path { raw: child_path }
+      return Path { raw: child_path.to_string() }
 
-    let base = self.raw
+    let base = self.raw.as_slice()
     if string_len(base) == 0:
-      return Path { raw: child_path }
+      return Path { raw: child_path.to_string() }
 
     let combined =
       if ends_with_separator(base):
-        concat_strings(base, child_path)
+        concat_slices(base, child_path)
       else:
-        concat_strings_with_separator(base, child_path)
+        concat_slices_with_separator(base, child_path)
     Path { raw: combined }
-
-  /// Returns a path with `child` appended.
-  api fn join(self, child: StringSlice) -> Path
-    self.join(child.to_string())
 
   /// Returns the parent path when one exists.
   api fn parent(self) -> Option<Path>
-    let end = trim_trailing_separators(self.raw)
+    let source = self.raw.as_slice()
+    let end = trim_trailing_separators(source)
     if end <= 0:
       return None {}
 
-    let separator = last_separator_before(self.raw, end)
+    let separator = last_separator_before(source, end)
     if separator < 0:
       return None {}
     if separator == 0:
@@ -61,22 +62,23 @@ impl Path
         return None {}
       return Some<Path> { value: Path::new("/".as_slice()) }
 
-    Some<Path> { value: Path { raw: self.raw.slice_bytes(0, separator) } }
+    Some<Path> { value: Path { raw: source.slice(bytes: 0, len: separator).to_string() } }
 
   /// Returns the final path segment when one exists.
   api fn file_name(self) -> Option<String>
-    let end = trim_trailing_separators(self.raw)
+    let source = self.raw.as_slice()
+    let end = trim_trailing_separators(source)
     if end <= 0:
       return None {}
 
-    let separator = last_separator_before(self.raw, end)
+    let separator = last_separator_before(source, end)
     let start = separator + 1
     if start >= end:
       return None {}
 
-    Some<String> { value: self.raw.slice_bytes(start, end - start) }
+    Some<String> { value: source.slice(bytes: start, len: end - start).to_string() }
 
-fn trim_trailing_separators(value: String) -> i32
+fn trim_trailing_separators(value: StringSlice) -> i32
   let len = string_len(value)
   if len == 0:
     return 0
@@ -88,7 +90,7 @@ fn trim_trailing_separators(value: String) -> i32
     end = end - 1
   end
 
-fn last_separator_before(value: String, end_exclusive: i32) -> i32
+fn last_separator_before(value: StringSlice, end_exclusive: i32) -> i32
   if end_exclusive <= 0:
     return -1
 
@@ -99,44 +101,45 @@ fn last_separator_before(value: String, end_exclusive: i32) -> i32
     index = index - 1
   -1
 
-fn starts_with_separator(value: String) -> bool
+fn starts_with_separator(value: StringSlice) -> bool
   byte_at_or(value, 0, -1) == 47
 
-fn ends_with_separator(value: String) -> bool
+fn ends_with_separator(value: StringSlice) -> bool
   let len = string_len(value)
   if len == 0:
     return false
   byte_at_or(value, len - 1, -1) == 47
 
-fn byte_at_or(value: String, index: i32, fallback: i32) -> i32
+fn byte_at_or(value: StringSlice, index: i32, fallback: i32) -> i32
   match(value.get_byte(index))
     Some<i32> { value: read }:
       read
     None:
       fallback
 
-fn concat_strings(left: String, right: String): () -> String
+fn concat_slices(left: StringSlice, right: StringSlice): () -> String
   let left_len = string_len(left)
   let right_len = string_len(right)
   let ~bytes = Array<i32>::with_capacity(left_len + right_len)
-  append_bytes(bytes, left.raw_bytes(), left_len)
-  append_bytes(bytes, right.raw_bytes(), right_len)
+  append_slice_bytes(bytes, left)
+  append_slice_bytes(bytes, right)
   new_string(bytes.to_fixed_array())
 
-fn concat_strings_with_separator(left: String, right: String): () -> String
+fn concat_slices_with_separator(left: StringSlice, right: StringSlice): () -> String
   let left_len = string_len(left)
   let right_len = string_len(right)
   let ~bytes = Array<i32>::with_capacity(left_len + right_len + 1)
-  append_bytes(bytes, left.raw_bytes(), left_len)
+  append_slice_bytes(bytes, left)
   bytes.push(47)
-  append_bytes(bytes, right.raw_bytes(), right_len)
+  append_slice_bytes(bytes, right)
   new_string(bytes.to_fixed_array())
 
-fn string_len(value: String): () -> i32
-  value.as_slice().byte_len()
+fn string_len(value: StringSlice): () -> i32
+  value.byte_len()
 
-fn append_bytes(~into: Array<i32>, source: FixedArray<i32>, count: i32) -> void
+fn append_slice_bytes(~into: Array<i32>, source: StringSlice) -> void
+  let raw = source.source.raw_bytes()
   var index = 0
-  while index < count do:
-    into.push(__array_get(source, index))
+  while index < source.byte_len() do:
+    into.push(__array_get(raw, source.start + index))
     index = index + 1

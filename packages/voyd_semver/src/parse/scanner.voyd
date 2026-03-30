@@ -1,14 +1,20 @@
 use std::optional::all
-use std::traits::sequence::all
-use std::string::type::String
+use std::string::type::StringSlice
 
-pub fn parse_non_negative_segment(input: String): () -> Optional<i32>
+pub fn parse_non_negative_segment(input: StringSlice): () -> Optional<i32>
   var value = 0
   var digit_count = 0
   var leading_zero = false
 
-  let bytes = input.to_utf8()
-  for byte in bytes:
+  var index = 0
+  while index < input.byte_len():
+    var byte = 0
+    match(input.get_byte(index))
+      Some<i32> { value }:
+        byte = value
+      None:
+        return none<i32>()
+
     if byte < 48 or byte > 57 then:
       return none<i32>()
 
@@ -25,6 +31,7 @@ pub fn parse_non_negative_segment(input: String): () -> Optional<i32>
 
     value = value * 10 + digit
     digit_count = digit_count + 1
+    index = index + 1
 
   if digit_count == 0 then:
     return none<i32>()

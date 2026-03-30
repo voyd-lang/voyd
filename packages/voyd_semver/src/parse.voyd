@@ -1,30 +1,30 @@
 use std::optional::all
-use std::string::type::String
+use std::string::type::{ String, StringSlice }
 use self::scanner::parse_non_negative_segment
 
 type Ver = { major: i32, minor: i32, patch: i32 }
 
 pub fn parse(input: String): () -> Optional<Ver>
-  match(input.split_once(on: 46))
-    Some<(String, String)> { value: major_and_rest }:
+  match(input.as_slice().split_once(on: 46))
+    Some<(StringSlice, StringSlice)> { value: major_and_rest }:
       parse_minor_and_patch(major_and_rest.0, major_and_rest.1)
     None:
       none<Ver>()
 
 fn parse_minor_and_patch(
-  major_text: String,
-  remainder: String
+  major_text: StringSlice,
+  remainder: StringSlice
 ): () -> Optional<Ver>
   match(remainder.split_once(on: 46))
-    Some<(String, String)> { value: minor_and_patch }:
+    Some<(StringSlice, StringSlice)> { value: minor_and_patch }:
       parse_segments(major_text, minor_and_patch.0, minor_and_patch.1)
     None:
       none<Ver>()
 
 fn parse_segments(
-  major_text: String,
-  minor_text: String,
-  patch_text: String
+  major_text: StringSlice,
+  minor_text: StringSlice,
+  patch_text: StringSlice
 ): () -> Optional<Ver>
   match(parse_non_negative_segment(major_text))
     Some { value: major }:
@@ -34,8 +34,8 @@ fn parse_segments(
 
 fn parse_minor(
   major: i32,
-  minor_text: String,
-  patch_text: String
+  minor_text: StringSlice,
+  patch_text: StringSlice
 ): () -> Optional<Ver>
   match(parse_non_negative_segment(minor_text))
     Some { value: minor }:
@@ -46,7 +46,7 @@ fn parse_minor(
 fn parse_patch(
   major: i32,
   minor: i32,
-  patch_text: String
+  patch_text: StringSlice
 ): () -> Optional<Ver>
   match(parse_non_negative_segment(patch_text))
     Some { value: patch }:

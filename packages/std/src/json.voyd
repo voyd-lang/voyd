@@ -48,7 +48,7 @@ pub obj JsonObject {
 pub type JsonValue = JsonNull | JsonBool | JsonNumber | JsonString | JsonArray | JsonObject
 
 obj JsonParser {
-  source: String,
+  source: StringSlice,
   index: i32
 }
 
@@ -68,20 +68,20 @@ obj JsonParser {
 /// let parsed = json::parse("{\"ok\":true}")
 /// ```
 pub fn parse(source: String) -> Result<JsonValue, JsonError>
+  parse(source.as_slice())
+
+pub fn parse(source: StringSlice) -> Result<JsonValue, JsonError>
   let ~parser = JsonParser { source: source, index: 0 }
   skip_whitespace(parser)
   let value_result = parse_value(parser)
   match(value_result)
     Ok<JsonValue> { value }:
       skip_whitespace(parser)
-      if parser.index != parser.source.as_slice().byte_len():
+      if parser.index != parser.source.byte_len():
         return Err<JsonError> { error: json_error("json parse error: trailing characters") }
       Ok<JsonValue> { value: value }
     Err<JsonError> { error }:
       Err<JsonError> { error: error }
-
-pub fn parse(source: StringSlice) -> Result<JsonValue, JsonError>
-  parse(source.to_string())
 
 /// Serializes a `JsonValue` to compact JSON text.
 ///
@@ -129,17 +129,17 @@ fn parse_value(~parser: JsonParser): () -> Result<JsonValue, JsonError>
       Err<JsonError> { error: json_error("json parse error: unexpected end of input") }
 
 fn parse_literal_null(~parser: JsonParser): () -> Result<JsonValue, JsonError>
-  if consume_literal(parser, "null"):
+  if consume_literal(parser, "null".as_slice()):
     return Ok<JsonValue> { value: JsonNull {} }
   Err<JsonError> { error: json_error("json parse error: invalid literal") }
 
 fn parse_literal_true(~parser: JsonParser): () -> Result<JsonValue, JsonError>
-  if consume_literal(parser, "true"):
+  if consume_literal(parser, "true".as_slice()):
     return Ok<JsonValue> { value: JsonBool { value: true } }
   Err<JsonError> { error: json_error("json parse error: invalid literal") }
 
 fn parse_literal_false(~parser: JsonParser): () -> Result<JsonValue, JsonError>
-  if consume_literal(parser, "false"):
+  if consume_literal(parser, "false".as_slice()):
     return Ok<JsonValue> { value: JsonBool { value: false } }
   Err<JsonError> { error: json_error("json parse error: invalid literal") }
 
@@ -278,7 +278,7 @@ fn parse_number(~parser: JsonParser): () -> Result<JsonValue, JsonError>
       None:
         return Err<JsonError> { error: json_error("json parse error: invalid exponent") }
 
-  let lexeme = parser.source.slice_bytes(start, parser.index - start)
+  let lexeme = parser.source.slice(bytes: start, len: parser.index - start)
   match(parse_json_number(lexeme))
     Ok<f64> { value }:
       Ok<JsonValue> { value: JsonNumber { value: value } }
@@ -295,16 +295,16 @@ fn parse_number(~parser: JsonParser): () -> Result<JsonValue, JsonError>
 fn write_json_value(~out: Array<i32>, value: JsonValue, pretty: bool, depth: i32) -> void
   value.match(active)
     JsonNull:
-      append_ascii(out, "null")
+      append_ascii(out, "null".as_slice())
     JsonBool:
       if active.value:
-        append_ascii(out, "true")
+        append_ascii(out, "true".as_slice())
       else:
-        append_ascii(out, "false")
+        append_ascii(out, "false".as_slice())
     JsonNumber:
-      append_string(out, number_cast::to_string(active.value))
+      append_string(out, number_cast::to_string(active.value).as_slice())
     JsonString:
-      append_json_string(out, active.value)
+      append_json_string(out, active.value.as_slice())
     JsonArray:
       append_json_array(out, active.value, pretty, depth)
     JsonObject:
@@ -331,7 +331,7 @@ fn append_json_array(
       Some<JsonValue> { value }:
         write_json_value(out, value, pretty, depth + 1)
       None:
-        append_ascii(out, "null")
+        append_ascii(out, "null".as_slice())
 
     index = index + 1
     if index < items.len():
@@ -364,13 +364,13 @@ fn append_json_object(
 
     match(entries.get(index))
       Some<(String, JsonValue)> { value: entry }:
-        append_json_string(out, entry.0)
+        append_json_string(out, entry.0.as_slice())
         out.push(58)
         if pretty:
           out.push(32)
         write_json_value(out, entry.1, pretty, depth + 1)
       None:
-        append_ascii(out, "\"\"")
+        append_ascii(out, "\"\"".as_slice())
 
     index = index + 1
     if index < entries.len():
@@ -381,10 +381,10 @@ fn append_json_object(
     append_indent(out, depth)
   out.push(125)
 
-fn append_json_string(~out: Array<i32>, value: String) -> void
+fn append_json_string(~out: Array<i32>, value: StringSlice) -> void
   out.push(34)
   var index = 0
-  while index < value.as_slice().byte_len() do:
+  while index < value.byte_len() do:
     let byte = byte_at_or(value, index, -1)
     if not append_json_escape(out, byte):
       out.push(byte)
@@ -437,14 +437,14 @@ fn append_indent(~out: Array<i32>, depth: i32) -> void
     out.push(32)
     index = index + 1
 
-fn append_ascii(~out: Array<i32>, value: String) -> void
+fn append_ascii(~out: Array<i32>, value: StringSlice) -> void
   append_string(out, value)
 
-fn append_string(~out: Array<i32>, value: String) -> void
-  let source = value.raw_bytes()
+fn append_string(~out: Array<i32>, value: StringSlice) -> void
+  let source = value.source.raw_bytes()
   var index = 0
-  while index < value.as_slice().byte_len() do:
-    out.push(__array_get(source, index))
+  while index < value.byte_len() do:
+    out.push(__array_get(source, value.start + index))
     index = index + 1
 
 fn consume_digits(~parser: JsonParser) -> void
@@ -458,14 +458,13 @@ fn consume_digits(~parser: JsonParser) -> void
       None:
         break
 
-fn consume_literal(~parser: JsonParser, literal: String) -> bool
+fn consume_literal(~parser: JsonParser, literal: StringSlice) -> bool
   let start = parser.index
-  let source = literal.to_utf8()
   var index = 0
-  while index < source.len() do:
+  while index < literal.byte_len() do:
     match(next_byte(parser))
       Some<i32> { value }:
-        if value != source.at(index):
+        if value != byte_at_or(literal, index, -1):
           parser.index = start
           return false
       None:
@@ -612,7 +611,7 @@ fn append_replacement(~out: Array<i32>) -> void
 fn string_from_utf8(bytes: Array<i32>): () -> Result<String, JsonError>
   Ok<String> { value: new_string(bytes.to_fixed_array()) }
 
-fn byte_at_or(value: String, index: i32, fallback: i32) -> i32
+fn byte_at_or(value: StringSlice, index: i32, fallback: i32) -> i32
   match(value.get_byte(index))
     Some<i32> { value: read }:
       read
@@ -677,8 +676,8 @@ fn digit_to_f64(value: i32) -> f64
     return 9.0
   0.0
 
-fn parse_json_number(source: String): () -> Result<f64, JsonError>
-  let len = source.as_slice().byte_len()
+fn parse_json_number(source: StringSlice): () -> Result<f64, JsonError>
+  let len = source.byte_len()
   if len <= 0:
     return Err<JsonError> { error: json_error("json parse error: invalid number") }
 

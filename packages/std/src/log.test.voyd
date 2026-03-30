@@ -10,7 +10,7 @@ test "trace with fields emits a msgpack payload":
   let ~payload_sizes = Array<i32>::init()
 
   try
-    trace("hello".as_slice().to_string(), fields)
+    trace("hello", fields)
   Log::emit(tail, payload):
     seen.push(1)
     let payload_map = msgpack::unpack_map(payload)
@@ -23,6 +23,22 @@ test "trace with fields emits a msgpack payload":
       assert(payload_size >= 3, eq: true)
     None:
       assert(false, eq: true)
+
+test "trace accepts string slices without rebuilding call-site strings":
+  let ~seen = Array<i32>::init()
+
+  try
+    trace("hello".as_slice())
+  Log::emit(tail, payload):
+    let payload_map = msgpack::unpack_map(payload)
+    seen.push(payload_map.len())
+    tail()
+
+  match(seen.get(0))
+    Some<i32> { value }:
+      assert(value >= 3, eq: true)
+    None:
+      assert(false)
 
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
 
