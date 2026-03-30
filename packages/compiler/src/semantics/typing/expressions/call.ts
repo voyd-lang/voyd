@@ -3843,14 +3843,7 @@ const findExportedMethodCandidates = ({
     return [];
   }
   const exported = dependency.exports.get(methodName);
-  if (
-    !exported ||
-    typeof exported.memberOwner !== "number" ||
-    exported.memberOwner !== ownerRef.symbol
-  ) {
-    return [];
-  }
-  if (exported.isStatic === true) {
+  if (!exported) {
     return [];
   }
 
@@ -3858,10 +3851,32 @@ const findExportedMethodCandidates = ({
     exported.symbols && exported.symbols.length > 0
       ? exported.symbols
       : [exported.symbol];
+  const matchingSymbols = symbols.filter((symbol) => {
+    const memberMetadata = dependency.typing.memberMetadata.get(symbol);
+    const owner = memberMetadata?.owner;
+    if (typeof owner === "number") {
+      if (owner !== ownerRef.symbol) {
+        return false;
+      }
+    } else if (
+      typeof exported.memberOwner === "number" &&
+      exported.memberOwner !== ownerRef.symbol
+    ) {
+      return false;
+    }
+
+    const metadata = (dependency.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+      static?: boolean;
+    };
+    return metadata.static !== true;
+  });
+  if (matchingSymbols.length === 0) {
+    return [];
+  }
   const nameForSymbol = (symbol: SymbolId): string =>
     dependency.symbolTable.getSymbol(symbol).name;
 
-  return symbols.map((symbol): MethodCallCandidate => {
+  return matchingSymbols.map((symbol): MethodCallCandidate => {
     const signature = getDependencyMethodSignature({
       dependency,
       symbol,

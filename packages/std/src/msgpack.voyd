@@ -5,7 +5,7 @@ use self::fns::self as msgpack_fns
 use self::fns::MsgPack
 use std::array::Array
 use std::dict::{ Dict, DictKey }
-use std::string::type::String
+use std::string::type::{ String, StringSlice }
 pub use self::fns::MsgPack
 pub use self::types::{ Binary, Bool, F64, Null, Numeric }
 
@@ -19,6 +19,10 @@ pub fn make_bool(value: bool): () -> MsgPack
 
 /// Wraps a string as a MessagePack value.
 pub fn make_string(value: String): () -> MsgPack
+  msgpack_fns::make_string(value)
+
+/// Wraps a string slice as a MessagePack value.
+pub fn make_string(value: StringSlice): () -> MsgPack
   msgpack_fns::make_string(value)
 
 /// Wraps binary data as a MessagePack value.
@@ -95,6 +99,10 @@ pub fn pack_bool(value: bool): () -> MsgPack
 
 /// Alias for creating a MessagePack string value.
 pub fn pack_string(value: String): () -> MsgPack
+  make_string(value)
+
+/// Alias for creating a MessagePack string value.
+pub fn pack_string(value: StringSlice): () -> MsgPack
   make_string(value)
 
 /// Alias for creating a MessagePack binary value.

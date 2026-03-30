@@ -8,7 +8,7 @@ use std::memory::self as memory
 use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 use std::number::cast::self as cast
 use std::optional::types::all
-use std::string::type::{ new_string, String }
+use std::string::type::{ new_string, String, StringSlice }
 
 @serializer("msgpack", encode_value, decode_value)
 /// Recursive MessagePack value union used by the serializer boundary.
@@ -93,6 +93,10 @@ pub fn make_bool(value: bool): () -> MsgPack
 /// Wraps a string as a MessagePack value.
 pub fn make_string(value: String): () -> MsgPack
   value
+
+/// Wraps a string slice as a MessagePack value.
+pub fn make_string(value: StringSlice): () -> MsgPack
+  value.to_string()
 
 /// Wraps binary data as a MessagePack value.
 pub fn make_binary(value: Binary): () -> MsgPack
