@@ -159,7 +159,7 @@ Voyd also supports unparenthesized call syntax in DSL-like cases where it reads
 more clearly than nested punctuation.
 
 ```voyd
-log value
+print value
 clamp number min: 0 max: 10
 ```
 

@@ -121,15 +121,15 @@ let total =
 
 ```voyd
 if count == 0:
-  log("empty")
+  print("empty")
 else:
-  log("ready")
+  print("ready")
 
 while count < 3:
   count = count + 1
 
 for value in 0..3:
-  log(value)
+  print(value)
 ```
 
 `match` destructures values by shape.
