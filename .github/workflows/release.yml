@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,7 +46,6 @@ jobs:
 
       - name: Publish selected targets
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: |
           args=(--tag "${{ inputs.npm_tag }}")
