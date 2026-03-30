@@ -82,6 +82,22 @@ publishes still enforce the related checks.
 
 ## Publishing
 
+### GitHub Actions Auth
+
+The GitHub release workflow uses npm trusted publishing for npm packages.
+
+GitHub setup:
+
+- configure each published npm package as a trusted publisher for the `voyd-lang/voyd` repository and `.github/workflows/release.yml`
+- do not set `NPM_TOKEN` for this workflow
+- keep `VSCE_PAT` as a GitHub Actions secret if you want CI to publish `voyd-vscode`
+
+Notes:
+
+- npm trusted publishing only works after the package already exists on npm, so the first publish may still need a token-based/manual bootstrap
+- the workflow has `id-token: write` enabled so npm can verify the GitHub OIDC identity during publish
+- the VS Code extension does not have an equivalent trusted-publisher flow in this repo today; CI still uses `VSCE_PAT`
+
 Dry-run a publish:
 
 ```sh
