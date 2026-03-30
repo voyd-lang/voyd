@@ -91,7 +91,7 @@ const normalize = (value: unknown): unknown => {
   return value;
 };
 
-describe("smoke: wasm validation", { timeout: 30_000 }, () => {
+describe("smoke: wasm validation", { timeout: 120_000 }, () => {
   it("accepts wasm-gc modules that Node can validate", async () => {
     const module = await compileToBinaryenModule(
       fixturePath("match_destructure_fields.voyd"),

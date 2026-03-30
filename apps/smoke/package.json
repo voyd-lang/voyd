@@ -7,12 +7,12 @@
   "scripts": {
     "build": "echo 'no build for smoke tests'",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 src --exclude src/vtrace-compute-benchmark.test.ts",
+    "test": "vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 --maxWorkers=50% --minWorkers=1 src --exclude src/vtrace-compute-benchmark.test.ts",
     "test:perf": "VOYD_RUN_PERF_SMOKE=1 vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 src/vtrace-compute-benchmark.test.ts",
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "@voyd-lang/sdk": "*",
-    "voyd_semver": "*"
+    "@voyd-lang/sdk": "^0.1.0",
+    "voyd_semver": "0.1.0"
   }
 }

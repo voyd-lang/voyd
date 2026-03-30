@@ -4,6 +4,9 @@
   "description": "Voyd language server",
   "type": "module",
   "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
   "bin": {
     "voyd-language-server": "./dist/server.js"
   },
@@ -23,14 +26,17 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config ../../vitest.config.ts --maxWorkers=50% --minWorkers=1 src",
     "test:w": "vitest --config ../../vitest.config.ts src",
-    "lint": "echo 'no lint configured'"
+    "lint": "echo 'no lint configured'",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   },
   "dependencies": {
-    "@voyd-lang/compiler": "*",
-    "@voyd-lang/std": "*",
+    "@voyd-lang/compiler": "^0.1.0",
+    "@voyd-lang/std": "^0.1.0",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",
     "vscode-uri": "^3.0.8"

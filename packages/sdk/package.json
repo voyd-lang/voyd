@@ -4,6 +4,9 @@
   "description": "Voyd SDK",
   "type": "module",
   "main": "./dist/node.js",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
       "types": "./dist/node.d.ts",
@@ -45,16 +48,19 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && vite build -c ../../vite.config.ts",
+    "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts --testTimeout 30000 src",
+    "test": "vitest run --config ../../vitest.config.ts --testTimeout 30000 --maxWorkers=50% --minWorkers=1 src",
     "test:w": "vitest --config ../../vitest.config.ts src",
-    "lint": "echo 'no lint configured'"
+    "lint": "echo 'no lint configured'",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   },
   "dependencies": {
-    "@voyd-lang/compiler": "*",
-    "@voyd-lang/js-host": "*",
-    "@voyd-lang/std": "*",
-    "@voyd-lang/lib": "*",
+    "@voyd-lang/compiler": "^0.1.0",
+    "@voyd-lang/js-host": "^0.1.0",
+    "@voyd-lang/std": "^0.1.0",
+    "@voyd-lang/lib": "^0.1.0",
     "binaryen": "^125.0.0"
   }
 }

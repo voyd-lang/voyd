@@ -25,4 +25,4 @@ export type {
   ModuleRoots,
 } from "@voyd-lang/compiler/modules/types.js";
 export type { HirGraph } from "@voyd-lang/compiler/semantics/hir/index.js";
-export { BENCH_FILE } from "@voyd-lang/compiler/parser/__tests__/fixtures/benchmark-file.js";
+export { BENCH_FILE } from "@voyd-lang/compiler/parser/index.js";

@@ -1,7 +1,7 @@
 {
   "name": "voyd_semver",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "description": "Example semver library for Voyd package/module resolution validation",
   "files": [
     "src",

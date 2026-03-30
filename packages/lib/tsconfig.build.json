@@ -6,5 +6,6 @@
     "outDir": "./dist",
     "rootDir": "./src/lib"
   },
-  "include": ["src/lib/**/*"]
+  "include": ["src/lib/**/*"],
+  "exclude": ["src/lib/__tests__"]
 }

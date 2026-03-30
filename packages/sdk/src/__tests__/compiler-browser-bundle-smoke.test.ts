@@ -154,7 +154,7 @@ describe("browser bundle smoke", () => {
     }
   };
 
-  it("bundles and runs compiler + vsx browser smoke in one build", { timeout: 90000 }, async () => {
+  it("bundles and runs compiler + vsx browser smoke in one build", { timeout: 120000 }, async () => {
     const result = await bundleAndRun({
       entryUrl: new URL(
         "./__fixtures__/browser-bundle-kitchen-sink-entry.ts",
