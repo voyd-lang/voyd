@@ -14,7 +14,6 @@ pub std::set::{ Set }
 pub std::bytes::{ Byte, Bytes, ByteBuffer }
 pub std::box::{ Box }
 pub std::math
-pub std::log
 pub std::output
 pub std::output::print
 
