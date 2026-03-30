@@ -166,9 +166,9 @@ Voyd is still early. This `0.1.0` release is not me saying the language is
 finished. It is me saying it has reached the point where I am excited to share
 it properly.
 
-I have spent a long time building this on nights, weekends, and in between
-other work because I care deeply about the space it occupies. I wanted a
-language that was ambitious about types and effects, practical about tooling,
-and grounded in real application programming.
+I have spent a long time building this on nights and weekends because I care
+deeply about the space it occupies. I wanted a language that was ambitious about
+types and effects, practical about tooling, and grounded in real application
+programming.
 
 That is what Voyd is trying to be.
