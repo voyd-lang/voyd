@@ -9,6 +9,7 @@ use std::error::IoError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
+use std::number::to_string
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
 
@@ -77,6 +78,30 @@ pub fn write_line(value: StringSlice, target: OutputTarget): Output -> Result<Un
 /// Writes text followed by exactly `\n` to the selected target.
 pub fn write_line(value: String, target: OutputTarget): Output -> Result<Unit, IoError>
   write_line(value.as_slice(), target)
+
+/// Writes one whole line to stdout.
+pub fn print(value: StringSlice): Output -> Result<Unit, IoError>
+  write_line(value)
+
+/// Writes one whole line to stdout.
+pub fn print(value: String): Output -> Result<Unit, IoError>
+  write_line(value)
+
+/// Writes one whole line to stdout.
+pub fn print(value: i32): Output -> Result<Unit, IoError>
+  print(to_string(value))
+
+/// Writes one whole line to stdout.
+pub fn print(value: i64): Output -> Result<Unit, IoError>
+  print(to_string(value))
+
+/// Writes one whole line to stdout.
+pub fn print(value: f32): Output -> Result<Unit, IoError>
+  print(to_string(value))
+
+/// Writes one whole line to stdout.
+pub fn print(value: f64): Output -> Result<Unit, IoError>
+  print(to_string(value))
 
 /// Writes bytes to the selected output target (stdout by default).
 ///

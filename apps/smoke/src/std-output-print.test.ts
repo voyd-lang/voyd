@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
 
@@ -12,39 +12,43 @@ const expectCompileSuccess = (
   return result;
 };
 
-describe("smoke: std log print", () => {
+describe("smoke: std output print", () => {
   it("supports bare print from the implicit prelude", async () => {
     const sdk = createSdk();
     const compiled = expectCompileSuccess(
       await sdk.compile({
-        source: `pub fn print_text(): log::Log -> void
-  print("hello")
+        source: `use std::output::Output
 
-pub fn print_number(): log::Log -> void
-  print(42)
+pub fn print_text(): Output -> i32
+  let _ = print("hello")
+  1
+
+pub fn print_number(): Output -> i32
+  let _ = print(42)
+  1
 `,
       })
     );
 
-    const info = vi.fn();
+    const writes: Array<{ target: string; value: string }> = [];
     const host = await createVoydHost({
       wasm: compiled.wasm,
       defaultAdapters: {
         runtime: "node",
-        logWriter: {
-          trace: vi.fn(),
-          debug: vi.fn(),
-          info,
-          warn: vi.fn(),
-          error: vi.fn(),
+        runtimeHooks: {
+          write: async ({ target, value }) => {
+            writes.push({ target, value });
+          },
         },
       },
     });
 
-    await host.run<void>("print_text");
-    await host.run<void>("print_number");
+    await expect(host.run<number>("print_text")).resolves.toBe(1);
+    await expect(host.run<number>("print_number")).resolves.toBe(1);
 
-    expect(info).toHaveBeenNthCalledWith(1, "hello", {});
-    expect(info).toHaveBeenNthCalledWith(2, "42", {});
+    expect(writes).toEqual([
+      { target: "stdout", value: "hello\n" },
+      { target: "stdout", value: "42\n" },
+    ]);
   });
 });
