@@ -8,6 +8,7 @@ use std::dict::Dict
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
+use std::number::to_string
 use std::string::{ String, StringSlice }
 use std::string::type::new_string
 
@@ -143,6 +144,24 @@ pub fn error(message: StringSlice, fields: LogFields): Log -> void
 /// Emits an error-level log message.
 pub fn error(message: String, fields: LogFields): Log -> void
   error(message.as_slice(), fields)
+
+pub fn print(message: String)
+  info(message)
+
+pub fn print(message: StringSlice)
+  info(message)
+
+pub fn print(message: i32)
+  print(message.to_string())
+
+pub fn print(message: i64)
+  print(message.to_string())
+
+pub fn print(message: f32)
+  print(message.to_string())
+
+pub fn print(message: f64)
+  print(message.to_string())
 
 fn log_emit_payload(level: LogLevel, message: String, fields: Option<LogFields>): () -> MsgPack
   let ~payload = Dict<String, MsgPack>::init()

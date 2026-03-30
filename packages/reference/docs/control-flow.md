@@ -62,10 +62,10 @@ while count < 10:
 
 ```voyd
 for item in [1, 2, 3]:
-  log(item)
+  print(item)
 
 for value in 0..5:
-  log(value)
+  print(value)
 ```
 
 Supported range forms include:
@@ -127,5 +127,5 @@ while true:
     None:
       break
     Some<i32> { value }:
-      log(value)
+      print(value)
 ```

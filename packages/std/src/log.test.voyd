@@ -24,6 +24,41 @@ test "trace with fields emits a msgpack payload":
     None:
       assert(false, eq: true)
 
+test "print emits an info-level msgpack payload":
+  let ~levels = Array<String>::init()
+  let ~messages = Array<String>::init()
+
+  try
+    print(7)
+  Log::emit(tail, payload):
+    let payload_map = msgpack::unpack_map(payload)
+    match(payload_map.get("level"))
+      Some<MsgPack> { value }:
+        levels.push(msgpack::unpack_string(value))
+      None:
+        void
+    match(payload_map.get("message"))
+      Some<MsgPack> { value }:
+        messages.push(msgpack::unpack_string(value))
+      None:
+        void
+    tail()
+
+  assert(levels.len(), eq: 1)
+  assert(messages.len(), eq: 1)
+
+  match(levels.get(0))
+    Some<String> { value }:
+      assert(value.equals("info"), eq: true)
+    None:
+      assert(false, eq: true)
+
+  match(messages.get(0))
+    Some<String> { value }:
+      assert(value.equals("7"), eq: true)
+    None:
+      assert(false, eq: true)
+
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)
 
 fn make_fields(): () -> LogFields
