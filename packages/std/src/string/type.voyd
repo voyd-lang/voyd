@@ -571,45 +571,24 @@ impl String
       byte_index = byte_index + read.width
     None {}
 
-  /// Returns a substring using byte offsets.
-  api fn slice(self, { bytes start: i32, len: i32 }): () -> String
+  /// Returns a substring view using byte offsets.
+  api fn slice(self, { bytes start: i32, len: i32 }): () -> StringSlice
     self.slice_bytes(start, len)
 
-  /// Returns a substring using byte offsets.
-  api fn slice_bytes(self, start: i32, len: i32): () -> String
-    if len <= 0:
-      return empty_string()
+  /// Returns a substring view using byte offsets.
+  api fn slice_bytes(self, start: i32, len: i32): () -> StringSlice
+    self.as_slice().slice(bytes: start, len: len)
 
-    let clamped_start = if start < 0 then: 0 else: start
-    if clamped_start >= self.byte_count:
-      return empty_string()
-
-    let raw_end = clamped_start + len
-    let end = if raw_end > self.byte_count then: self.byte_count else: raw_end
-    let slice_len = end - clamped_start
-    if slice_len <= 0:
-      return empty_string()
-
-    let source = self.bytes.raw_storage()
-    let storage = new_fixed_array<i32>(slice_len)
-    __array_copy(storage, {
-      from: source,
-      to_index: 0,
-      from_index: clamped_start,
-      count: slice_len
-    })
-    new_string(storage)
-
-  /// Returns a substring using rune offsets.
-  api fn slice(self, { runes start: i32, len: i32 }): () -> String
+  /// Returns a substring view using rune offsets.
+  api fn slice(self, { runes start: i32, len: i32 }): () -> StringSlice
     self.slice_runes(start, len)
 
-  /// Returns a substring using rune offsets.
-  api fn slice_runes(self, start: i32, len: i32): () -> String
+  /// Returns a substring view using rune offsets.
+  api fn slice_runes(self, start: i32, len: i32): () -> StringSlice
     if len <= 0:
-      return empty_string()
+      return new_string_slice(self, 0, 0)
     if start < 0:
-      return empty_string()
+      return new_string_slice(self, 0, 0)
 
     let target_end = start + len
     var byte_index = 0
@@ -629,21 +608,13 @@ impl String
       rune_index = rune_index + 1
 
     if slice_start < 0:
-      return empty_string()
+      return new_string_slice(self, 0, 0)
 
     let final_end = if slice_end < 0 then: byte_index else: slice_end
     let slice_len = final_end - slice_start
     if slice_len <= 0:
-      return empty_string()
-
-    let storage = new_fixed_array<i32>(slice_len)
-    __array_copy(storage, {
-      from: source,
-      to_index: 0,
-      from_index: slice_start,
-      count: slice_len
-    })
-    new_string(storage)
+      return new_string_slice(self, slice_start, 0)
+    new_string_slice(self, slice_start, slice_len)
 
   /// Returns the index of the first matching rune.
   api fn find_rune(self, rune: i32, { from?: StringIndex }) -> Option<StringIndex>
@@ -765,21 +736,8 @@ impl String
     self.find_range(substring.as_slice(), from: from)
 
   /// Splits at the first matching separator.
-  api fn split_once(self, { on separator: i32 }): () -> Option<(String, String)>
-    let match_index = self.find_rune(separator)
-    var separator_index = 0
-    match(match_index)
-      Some<StringIndex> { value }:
-        separator_index = value.to_i32()
-      None:
-        return None {}
-
-    let source = self.bytes.raw_storage()
-    let separator_read = decode_utf8_at(source, self.byte_count, separator_index)
-    let left = self.slice_bytes(0, separator_index)
-    let right_start = separator_index + separator_read.width
-    let right = self.slice_bytes(right_start, self.byte_count - right_start)
-    Some { value: (left, right) }
+  api fn split_once(self, { on separator: i32 }): () -> Option<(StringSlice, StringSlice)>
+    self.as_slice().split_once(on: separator)
 
   /// Splits a string by a delimiter or predicate.
   api fn split(
@@ -879,45 +837,23 @@ impl String
       parts.push(new_string_slice(self, start, self.byte_count - start))
     parts
 
-  /// Returns a trimmed copy.
-  api fn trimmed(self): () -> String
+  /// Returns a trimmed slice view.
+  api fn trimmed(self): () -> StringSlice
     self.trimmed(whitespace_charset())
 
-  /// Returns a trimmed copy.
-  api fn trimmed(self, chars: CharSet) -> String
-    if self.byte_count == 0:
-      return self
-
-    let source = self.raw_bytes()
-    var start = 0
-    while start < self.byte_count:
-      let read = decode_utf8_at(source, self.byte_count, start)
-      if not rune_in_charset(chars, read.codepoint):
-        break
-      start = start + read.width
-
-    if start >= self.byte_count:
-      return empty_string()
-
-    var end = self.byte_count
-    while end > start:
-      let prev = previous_rune_boundary(source, end)
-      let read = decode_utf8_at(source, self.byte_count, prev)
-      if not rune_in_charset(chars, read.codepoint):
-        break
-      end = prev
-
-    self.slice_bytes(start, end - start)
+  /// Returns a trimmed slice view.
+  api fn trimmed(self, chars: CharSet) -> StringSlice
+    self.as_slice().trimmed(chars)
 
   /// Trims leading and trailing characters in place.
   api fn trim(~self) -> void
-    let next = self.trimmed()
+    let next = self.trimmed().to_string()
     self.bytes = next.bytes
     self.byte_count = next.byte_count
 
   /// Trims leading and trailing characters in place.
   api fn trim(~self, chars: CharSet) -> void
-    let next = self.trimmed(chars)
+    let next = self.trimmed(chars).to_string()
     self.bytes = next.bytes
     self.byte_count = next.byte_count
 

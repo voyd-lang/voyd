@@ -12,16 +12,29 @@ const expectCompileSuccess = (
 };
 
 describe("smoke: string slice apis", () => {
-  it("supports slice-first parsing helpers from outside std", async () => {
+  it("supports owned String read helpers that forward to slices from outside std", async () => {
     const sdk = createSdk();
     const compiled = expectCompileSuccess(
       await sdk.compile({
         source: `use std::string::type::{ ParseIntError, StringIndex, StringSlice }
 
 pub fn main() -> i32
-  let request = " count=41 ".as_slice().trimmed()
+  let request = " count=41 ".trimmed()
+  if not "count".starts_with("co"):
+    return 0
   if not request.starts_with("count"):
     return 0
+  if not "abc".slice(bytes: 1, len: 1).starts_with("b"):
+    return 0
+  if not "a😀c".slice(runes: 1, len: 1).starts_with("😀"):
+    return 0
+
+  match(" count=41 ".get_byte(0))
+    Some<i32> { value }:
+      if value != 32:
+        return 0
+    None:
+      return 0
 
   match(request.split_once(on: 61))
     Some<(StringSlice, StringSlice)> { value: pair }:
