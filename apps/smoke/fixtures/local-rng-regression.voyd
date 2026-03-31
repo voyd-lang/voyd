@@ -1,0 +1,25 @@
+use std::number::cast::to_i64
+use std::random::LocalRng
+
+pub fn seeded_42_sum_200() -> f64
+  local_rng_f64_sum({
+    seed: to_i64(42),
+    count: 200
+  })
+
+pub fn seeded_negative_sum_200() -> f64
+  local_rng_f64_sum({
+    seed: to_i64(-5),
+    count: 200
+  })
+
+fn local_rng_f64_sum({ seed: i64, count: i32 }) -> f64
+  let ~rng = LocalRng::seeded(seed)
+  var index = 0
+  var sum = 0.0
+
+  while index < count do:
+    sum = sum + rng.random_f64()
+    index = index + 1
+
+  sum

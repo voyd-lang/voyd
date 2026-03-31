@@ -270,6 +270,24 @@ test "local_rng random_f64 returns start for empty ranges":
 
   assert(value, eq: 5.0)
 
+test "local_rng random_f64 stays in a sane band for positive seeds":
+  let sum = local_rng_f64_sum_from_seed({
+    seed: i64_from_i32(42),
+    count: 200
+  })
+
+  assert(sum > 90.0, eq: true)
+  assert(sum < 110.0, eq: true)
+
+test "local_rng random_f64 stays in a sane band for negative seeds":
+  let sum = local_rng_f64_sum_from_seed({
+    seed: i64_from_i32(-5),
+    count: 200
+  })
+
+  assert(sum > 90.0, eq: true)
+  assert(sum < 120.0, eq: true)
+
 fn random_i32_from_seed(seed: i64) -> i32
   try
     random_i32()
@@ -366,6 +384,17 @@ fn next_u64_from_seed(seed: i64) -> U64Bits
     tail(i64_from_i32(0))
   Random::next_u64(tail):
     tail(seed)
+
+fn local_rng_f64_sum_from_seed({ seed: i64, count: i32 }) -> f64
+  let ~rng = LocalRng::seeded(seed)
+  var index = 0
+  var sum = 0.0
+
+  while index < count do:
+    sum = sum + rng.random_f64()
+    index = index + 1
+
+  sum
 
 fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
   match(value)
