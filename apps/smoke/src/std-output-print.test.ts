@@ -20,11 +20,11 @@ describe("smoke: std output print", () => {
         source: `use std::output::Output
 
 pub fn print_text(): Output -> i32
-  let _ = print("hello")
+  print("hello")
   1
 
 pub fn print_number(): Output -> i32
-  let _ = print(42)
+  print(42)
   1
 `,
       })

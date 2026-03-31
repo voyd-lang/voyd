@@ -3,7 +3,11 @@ import { readFileSync, statSync, existsSync } from "fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { CompileResult } from "@voyd-lang/sdk";
-import type { Diagnostic, HirGraph, ModuleRoots } from "@voyd-lang/sdk/compiler";
+import type {
+  Diagnostic,
+  HirGraph,
+  ModuleRoots,
+} from "@voyd-lang/sdk/compiler";
 import type { DocumentationOutputFormat } from "@voyd-lang/sdk/doc-generation";
 import { formatCliDiagnostic } from "./diagnostics.js";
 import { printJson, printValue } from "./output.js";
@@ -207,7 +211,8 @@ async function getCoreAst(entryPath: string) {
 }
 
 async function getIrAST(entryPath: string, roots: ModuleRoots) {
-  const { analyzeModules, loadModuleGraph } = await import("@voyd-lang/sdk/compiler");
+  const { analyzeModules, loadModuleGraph } =
+    await import("@voyd-lang/sdk/compiler");
   const graph = await loadModuleGraph({ entryPath, roots });
   const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
     graph,
@@ -275,7 +280,7 @@ async function runVoyd({
   );
 
   const result = await sdk.run({ wasm: compiled.wasm, entryName });
-  printValue(result);
+  printRunResult(result);
 }
 
 async function runWasm(entryPath: string, entryName = "main") {
@@ -283,7 +288,15 @@ async function runWasm(entryPath: string, entryName = "main") {
   const wasm = readFileSync(entryPath);
   const host = await createVoydHost({ wasm });
   const result = await host.run(entryName);
-  printValue(result);
+  printRunResult(result);
+}
+
+function printRunResult(value: unknown): void {
+  if (value === null || typeof value === "undefined") {
+    return;
+  }
+
+  printValue(value);
 }
 
 async function emitDocumentation({
@@ -297,7 +310,8 @@ async function emitDocumentation({
   outPath?: string;
   format?: DocumentationOutputFormat;
 }) {
-  const { generateDocumentation } = await import("@voyd-lang/sdk/doc-generation");
+  const { generateDocumentation } =
+    await import("@voyd-lang/sdk/doc-generation");
   const resolvedFormat = format ?? "html";
   const { content } = await generateDocumentation({
     entryPath,

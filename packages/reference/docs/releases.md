@@ -160,6 +160,24 @@ Generate API documentation:
 voyd doc --out docs.html
 ```
 
+Try it out!:
+
+```voyd
+// fib.voyd
+fn fib(n: i32) -> i32
+  if n < 2:
+    n
+  else:
+    fib(n - 1) + fib(n - 2)
+
+pub fn main()
+  fib(10).print()
+```
+
+```
+voyd --run fib.voyd
+```
+
 ### Closing
 
 Voyd is still early. This `0.1.0` release is not me saying the language is
