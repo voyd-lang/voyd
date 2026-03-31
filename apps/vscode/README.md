@@ -2,8 +2,11 @@
 
 Features:
 
+- Type hints
+- Symbol renames
+- Error highlighting
+- Auto imports
 - Syntax highlighting
-- ... more to come.
 
 Acknowledgments:
 
