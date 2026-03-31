@@ -1,137 +1,146 @@
 //! Public MessagePack API surface for constructing values and encoding/decoding
 //! them at the Wasm memory boundary.
+//!
+//! `make_*` functions construct typed MessagePack values, `unpack_*` functions
+//! validate and extract native values, and `encode_value` / `decode_value`
+//! bridge MessagePack bytes across linear memory.
 
 use self::fns::self as msgpack_fns
 use self::fns::MsgPack
 use std::array::Array
 use std::dict::{ Dict, DictKey }
-use std::string::type::{ String, StringSlice }
+use std::msgpack::errors::{
+  MsgPackError,
+  error_code_missing_field,
+  error_code_numeric_overflow,
+  error_code_type_mismatch,
+  make_error
+}
+use std::number::cast::self as cast
+use std::number::cast::CastError
+use std::result::types::all
+use std::string::type::{ String, StringSlice, new_string }
 pub use self::fns::MsgPack
-pub use self::types::{ Binary, Bool, F64, Null, Numeric }
+pub use self::errors::MsgPackError
+pub use self::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 
-/// Returns a MessagePack null value.
+/// Constructs the MessagePack `null` value.
 pub fn make_null(): () -> MsgPack
   msgpack_fns::make_null()
 
-/// Wraps a boolean as a MessagePack value.
 pub fn make_bool(value: bool): () -> MsgPack
   msgpack_fns::make_bool(value)
 
-/// Wraps a string as a MessagePack value.
+/// Constructs a MessagePack string from owned text.
 pub fn make_string(value: String): () -> MsgPack
   msgpack_fns::make_string(value)
 
-/// Wraps a string slice as a MessagePack value.
+/// Shorthand for `make_string(value.to_string())`.
 pub fn make_string(value: StringSlice): () -> MsgPack
   msgpack_fns::make_string(value)
 
-/// Wraps binary data as a MessagePack value.
 pub fn make_binary(value: Binary): () -> MsgPack
   msgpack_fns::make_binary(value)
 
-/// Wraps an array as a MessagePack value.
+/// Constructs a MessagePack array from an existing sequence of values.
 pub fn make_array(value: Array<MsgPack>): () -> MsgPack
   msgpack_fns::make_array(value)
 
-/// Wraps a 32-bit float as a MessagePack value.
 pub fn make_f32(value: f32): () -> MsgPack
   msgpack_fns::make_f32(value)
 
-/// Wraps a 64-bit float as a MessagePack value.
 pub fn make_f64(value: f64): () -> MsgPack
   F64 { value }
 
-/// Wraps a 32-bit integer as a MessagePack value.
 pub fn make_i32(value: i32): () -> MsgPack
   msgpack_fns::make_i32(value)
 
-/// Wraps a 64-bit integer as a MessagePack value.
 pub fn make_i64(value: i64): () -> MsgPack
   msgpack_fns::make_i64(value)
 
-/// Wraps a string-keyed dictionary as a MessagePack map value.
+/// Constructs a MessagePack map from string keys to values.
 pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
   msgpack_fns::make_map(value)
 
-/// Extracts a boolean from a MessagePack value.
-pub fn unpack_bool(value: MsgPack): () -> bool
-  msgpack_fns::unpack_bool(value)
+pub fn unpack_bool(value: MsgPack): () -> Result<bool, MsgPackError>
+  value.match(decoded)
+    Bool:
+      Ok<bool> { value: decoded.value }
+    else:
+      type_mismatch_result<bool>("bool")
 
-/// Extracts a string from a MessagePack value.
-pub fn unpack_string(value: MsgPack): () -> String
-  msgpack_fns::unpack_string(value)
+pub fn unpack_string(value: MsgPack): () -> Result<String, MsgPackError>
+  value.match(decoded)
+    String:
+      Ok<String> { value: decoded }
+    else:
+      type_mismatch_result<String>("string")
 
-/// Extracts binary data from a MessagePack value.
-pub fn unpack_binary(value: MsgPack): () -> Binary
-  msgpack_fns::unpack_binary(value)
+pub fn unpack_binary(value: MsgPack): () -> Result<Binary, MsgPackError>
+  value.match(decoded)
+    Binary:
+      Ok<Binary> { value: decoded }
+    else:
+      type_mismatch_result<Binary>("binary")
 
-/// Extracts an array from a MessagePack value.
-pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
-  msgpack_fns::unpack_array(value)
+pub fn unpack_array(value: MsgPack): () -> Result<Array<MsgPack>, MsgPackError>
+  value.match(decoded)
+    Array<MsgPack>:
+      Ok<Array<MsgPack>> { value: decoded }
+    else:
+      type_mismatch_result<Array<MsgPack>>("array")
 
-/// Extracts a 32-bit float from a MessagePack value.
-pub fn unpack_f32(value: MsgPack): () -> f32
-  msgpack_fns::unpack_f32(value)
+/// Extracts an `f32`, accepting both MessagePack `f32` and `f64` values.
+pub fn unpack_f32(value: MsgPack): () -> Result<f32, MsgPackError>
+  value.match(decoded)
+    F32:
+      Ok<f32> { value: decoded.value }
+    F64:
+      Ok<f32> { value: cast::to_f32(decoded.value) }
+    else:
+      type_mismatch_result<f32>("f32")
 
-/// Extracts a 64-bit float from a MessagePack value.
-pub fn unpack_f64(value: MsgPack): () -> f64
-  msgpack_fns::unpack_f64(value)
+/// Extracts an `f64`, accepting both MessagePack `f32` and `f64` values.
+pub fn unpack_f64(value: MsgPack): () -> Result<f64, MsgPackError>
+  value.match(decoded)
+    F64:
+      Ok<f64> { value: decoded.value }
+    F32:
+      Ok<f64> { value: cast::to_f64(decoded.value) }
+    else:
+      type_mismatch_result<f64>("f64")
 
-/// Extracts a 32-bit integer from a MessagePack value.
-pub fn unpack_i32(value: MsgPack): () -> i32
-  msgpack_fns::unpack_i32(value)
+/// Extracts an `i32`, rejecting values that overflow that range.
+pub fn unpack_i32(value: MsgPack): () -> Result<i32, MsgPackError>
+  value.match(decoded)
+    I32:
+      Ok<i32> { value: decoded.value }
+    I64:
+      match(cast::to_i32_checked(decoded.value))
+        Ok<i32> { value }:
+          Ok<i32> { value: value }
+        Err<CastError>:
+          Err<MsgPackError> {
+            error: make_error(
+              error_code_numeric_overflow(),
+              "msgpack unpack failed: integer does not fit in i32"
+            )
+          }
+    else:
+      type_mismatch_result<i32>("i32")
 
-/// Extracts a 64-bit integer from a MessagePack value.
-pub fn unpack_i64(value: MsgPack): () -> i64
-  msgpack_fns::unpack_i64(value)
+pub fn unpack_i64(value: MsgPack): () -> Result<i64, MsgPackError>
+  value.match(decoded)
+    I64:
+      Ok<i64> { value: decoded.value }
+    I32:
+      Ok<i64> { value: cast::to_i64(decoded.value) }
+    else:
+      type_mismatch_result<i64>("i64")
 
-/// Extracts a string-keyed map from a MessagePack value.
-pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
-  msgpack_fns::unpack_map(value)
-
-/// Alias for creating a MessagePack null value.
-pub fn pack_null(): () -> MsgPack
-  make_null()
-
-/// Alias for creating a MessagePack boolean value.
-pub fn pack_bool(value: bool): () -> MsgPack
-  make_bool(value)
-
-/// Alias for creating a MessagePack string value.
-pub fn pack_string(value: String): () -> MsgPack
-  make_string(value)
-
-/// Alias for creating a MessagePack string value.
-pub fn pack_string(value: StringSlice): () -> MsgPack
-  make_string(value)
-
-/// Alias for creating a MessagePack binary value.
-pub fn pack_binary(value: Binary): () -> MsgPack
-  make_binary(value)
-
-/// Alias for creating a MessagePack array value.
-pub fn pack_array(value: Array<MsgPack>): () -> MsgPack
-  make_array(value)
-
-/// Alias for creating a MessagePack 32-bit float value.
-pub fn pack_f32(value: f32): () -> MsgPack
-  make_f32(value)
-
-/// Alias for creating a MessagePack 64-bit float value.
-pub fn pack_f64(value: f64): () -> MsgPack
-  F64 { value }
-
-/// Alias for creating a MessagePack 32-bit integer value.
-pub fn pack_i32(value: i32): () -> MsgPack
-  make_i32(value)
-
-/// Alias for creating a MessagePack 64-bit integer value.
-pub fn pack_i64(value: i64): () -> MsgPack
-  make_i64(value)
-
-/// Alias for creating a MessagePack map value.
-pub fn pack_map(value: Dict<String, MsgPack>): () -> MsgPack
-  make_map(value)
+/// Extracts a string-keyed map.
+pub fn unpack_map(value: MsgPack): () -> Result<Dict<String, MsgPack>, MsgPackError>
+  msgpack_fns::unpack_map_result(value)
 
 fn msgpack_array_with_capacity(size: i32): () -> Array<MsgPack>
   Array<MsgPack>::with_capacity(size)
@@ -153,37 +162,32 @@ fn msgpack_map_set(map: Dict<String, MsgPack>, key: String, value: MsgPack): () 
   next.set(key, value)
   next
 
-/// Encodes one MessagePack value into a caller-provided memory region.
+/// Encodes `value` into the caller-provided memory region `[ptr, ptr + len)`.
 ///
-/// Params:
-/// - `value`: MessagePack value to encode.
-/// - `ptr`: Start offset in linear memory where bytes are written.
-/// - `len`: Maximum bytes available at `ptr`.
-///
-/// Returns the number of bytes written, or `-1` if the destination region is too small.
-///
-/// Example:
-/// ```voyd
-/// use std::msgpack
-///
-/// let used = msgpack::encode_value(msgpack::make_i32(7), ptr, len)
-/// ```
-pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
-  msgpack_fns::encode_value(value, ptr, len)
+/// Returns the number of bytes written, or `Err(MsgPackError)` when the region
+/// is too small for the encoded payload.
+pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> Result<i32, MsgPackError>
+  msgpack_fns::encode_value_result(value, ptr, len)
 
-/// Decodes one MessagePack value from a memory region.
+/// Decodes one MessagePack value from the readable memory region `[ptr, ptr + len)`.
 ///
-/// Params:
-/// - `ptr`: Start offset in linear memory where encoded bytes are read.
-/// - `len`: Number of readable bytes from `ptr`.
-///
-/// Returns the decoded value, or `Null` when decoding fails.
-///
-/// Example:
-/// ```voyd
-/// use std::msgpack
-///
-/// let value = msgpack::decode_value(ptr, len)
-/// ```
-pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
-  msgpack_fns::decode_value(ptr, len)
+/// Returns `Err(MsgPackError)` when decoding fails or when trailing bytes remain
+/// after the first value.
+pub fn decode_value(ptr: i32, len: i32): () -> Result<MsgPack, MsgPackError>
+  msgpack_fns::decode_value_result(ptr, len)
+
+pub fn missing_field<T>(field: String): () -> Result<T, MsgPackError>
+  Err<MsgPackError> {
+    error: make_error(
+      error_code_missing_field(),
+      "msgpack unpack failed: missing field `".concat(field).concat("`")
+    )
+  }
+
+fn type_mismatch_result<T>(expected: String): () -> Result<T, MsgPackError>
+  Err<MsgPackError> {
+    error: make_error(
+      error_code_type_mismatch(),
+      "msgpack unpack failed: expected ".concat(expected)
+    )
+  }

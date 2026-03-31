@@ -1,6 +1,7 @@
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createSdk, type CompileResult, type VoydRuntimeError } from "@voyd-lang/sdk";
+import { createVoydHost } from "@voyd-lang/sdk/js-host";
 
 const fixtureEntryPath = path.join(
   import.meta.dirname,
@@ -10,6 +11,17 @@ const fixtureEntryPath = path.join(
 );
 
 const TRAP_EFFECT_ID = "com.example.trap";
+
+const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  if (
+    bytes.buffer instanceof ArrayBuffer &&
+    bytes.byteOffset === 0 &&
+    bytes.byteLength === bytes.buffer.byteLength
+  ) {
+    return bytes.buffer;
+  }
+  return bytes.slice().buffer;
+};
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -43,6 +55,31 @@ describe("smoke: runtime trap diagnostics", () => {
     compiled = expectCompileSuccess(await sdk.compile({ entryPath: fixtureEntryPath }));
   });
 
+  it("does not require a custom panic import to instantiate the module", async () => {
+    const imports = WebAssembly.Module.imports(
+      new WebAssembly.Module(toArrayBuffer(compiled.wasm))
+    );
+    expect(imports.some(({ module, name }) => module === "env" && name === "__voyd_panic_trap")).toBe(false);
+  });
+
+  it("reuses panic scratch storage across repeated panics on one host instance", async () => {
+    const host = await createVoydHost({ wasm: compiled.wasm });
+    const memory = host.instance.exports.memory;
+    expect(memory).toBeInstanceOf(WebAssembly.Memory);
+    if (!(memory instanceof WebAssembly.Memory)) {
+      return;
+    }
+
+    const before = memory.buffer.byteLength;
+    await expectRuntimeTrap(host.run("panic_trap"));
+    const afterFirst = memory.buffer.byteLength;
+    await expectRuntimeTrap(host.run("panic_slice_trap"));
+    const afterSecond = memory.buffer.byteLength;
+
+    expect(afterFirst).toBeGreaterThanOrEqual(before);
+    expect(afterSecond).toBe(afterFirst);
+  });
+
   it("surfaces module/function/span diagnostics for pure wasm traps", async () => {
     const error = await expectRuntimeTrap(compiled.run({ entryName: "pure_trap" }));
 
@@ -70,5 +107,29 @@ describe("smoke: runtime trap diagnostics", () => {
     expect(error.voyd.effect?.continuationBoundary).toBe("resume");
     expect(error.voyd.transition?.point).toBe("resume_effectful");
     expect(error.voyd.transition?.direction).toBe("host->vm");
+  });
+
+  it("preserves panic message text in runtime diagnostics", async () => {
+    const error = await expectRuntimeTrap(compiled.run({ entryName: "panic_trap" }));
+
+    expect(error.voyd.trap.functionName).toBe("panic_trap");
+    expect(error.voyd.panic).toEqual({
+      status: "available",
+      message: "panic with context",
+      byteLength: 18,
+    });
+  });
+
+  it("preserves panic messages from the StringSlice overload", async () => {
+    const error = await expectRuntimeTrap(
+      compiled.run({ entryName: "panic_slice_trap" })
+    );
+
+    expect(error.voyd.trap.functionName).toBe("panic_slice_trap");
+    expect(error.voyd.panic).toEqual({
+      status: "available",
+      message: "slice panic with context",
+      byteLength: 24,
+    });
   });
 });

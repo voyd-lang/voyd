@@ -1,7 +1,8 @@
 use std::array::{ Array, new_array_unchecked }
-use std::error::HostError
+use std::error::{ HostError, panic }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
+use std::msgpack::MsgPackError
 use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
@@ -85,18 +86,18 @@ fn request_with_capture({
   try
     fetch_request.send()
   Fetch::request(tail, payload):
-    let decoded = HostDto::unpack(payload)
-    methods.push(decoded.read_string("method"))
-    urls.push(decoded.read_string("url"))
-    bodies.push(decoded.read_string("body"))
-    timeouts.push(decoded.read_i32("timeout_millis"))
+    let decoded = unpack_host_dto(payload)
+    methods.push(read_host_string(decoded, "method"))
+    urls.push(read_host_string(decoded, "url"))
+    bodies.push(read_host_string(decoded, "body"))
+    timeouts.push(read_host_i32(decoded, "timeout_millis"))
 
-    let encoded_headers = msgpack::unpack_array(decoded.read_msgpack("headers"))
+    let encoded_headers = unpack_msgpack_array(read_host_msgpack(decoded, "headers"))
     match(encoded_headers.get(0))
       Some<MsgPack> { value }:
-        let header_payload = HostDto::unpack(value)
-        header_names.push(header_payload.read_string("name"))
-        header_values.push(header_payload.read_string("value"))
+        let header_payload = unpack_host_dto(value)
+        header_names.push(read_host_string(header_payload, "name"))
+        header_values.push(read_host_string(header_payload, "value"))
       None:
         void
 
@@ -147,3 +148,43 @@ fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
       present
     None:
       fallback
+
+fn unpack_host_dto(payload: MsgPack): () -> HostDto
+  match(HostDto::unpack(payload))
+    Ok<HostDto> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto".as_slice())
+      HostDto::init()
+
+fn read_host_string(payload: HostDto, key: String): () -> String
+  match(payload.read_string(key))
+    Ok<String> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto string".as_slice())
+      String::init()
+
+fn read_host_i32(payload: HostDto, key: String): () -> i32
+  match(payload.read_i32(key))
+    Ok<i32> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto i32".as_slice())
+      0
+
+fn read_host_msgpack(payload: HostDto, key: String): () -> MsgPack
+  match(payload.read_msgpack(key))
+    Ok<MsgPack> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto msgpack".as_slice())
+      msgpack::make_null()
+
+fn unpack_msgpack_array(payload: MsgPack): () -> Array<MsgPack>
+  match(msgpack::unpack_array(payload))
+    Ok<Array<MsgPack>> { value }:
+      value
+    Err<MsgPackError>:
+      panic("invalid msgpack array".as_slice())
+      Array<MsgPack>::init()

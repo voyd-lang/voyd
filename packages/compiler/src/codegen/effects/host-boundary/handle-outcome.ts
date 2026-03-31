@@ -89,7 +89,7 @@ export const createHandleOutcomeDynamic = ({
       ctx.mod.if(
         ctx.mod.ref.is_null(ctx.mod.local.get(payloadLocal, binaryen.eqref)),
         ctx.mod.block(null, [
-          encodeToBuffer(ctx.mod.call(msgpack.packNull.wasmName, [], msgPackType)),
+          encodeToBuffer(ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType)),
           finishValue(),
         ])
       ),
@@ -102,7 +102,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.block(null, [
           encodeToBuffer(
             ctx.mod.call(
-              msgpack.packI32.wasmName,
+              msgpack.makeI32.wasmName,
               [
                 unboxOutcomeValue({
                   payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
@@ -125,7 +125,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.block(null, [
           encodeToBuffer(
             ctx.mod.call(
-              msgpack.packI64.wasmName,
+              msgpack.makeI64.wasmName,
               [
                 unboxOutcomeValue({
                   payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
@@ -148,7 +148,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.block(null, [
           encodeToBuffer(
             ctx.mod.call(
-              msgpack.packF32.wasmName,
+              msgpack.makeF32.wasmName,
               [
                 unboxOutcomeValue({
                   payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
@@ -171,7 +171,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.block(null, [
           encodeToBuffer(
             ctx.mod.call(
-              msgpack.packF64.wasmName,
+              msgpack.makeF64.wasmName,
               [
                 unboxOutcomeValue({
                   payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),

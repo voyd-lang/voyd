@@ -4,7 +4,12 @@ use std::array::Array
 use std::bytes::ByteBuffer
 use std::bytes::Bytes
 use std::encoding::ascii::ascii_string_from
-use std::encoding::errors::DecodeError
+use std::encoding::errors::{
+  DecodeError,
+  decode_error_invalid_character,
+  decode_error_invalid_length,
+  decode_error_invalid_padding
+}
 use std::math::div_rem
 use std::optional::types::all
 use std::result::types::{ Result, Ok, Err }
@@ -86,7 +91,9 @@ pub fn decode(s: StringSlice) -> Result<Bytes, DecodeError>
   if source_len == 0:
     return Ok<Bytes> { value: ByteBuffer::init().as_bytes() }
   if div_rem(source_len, 4).1 != 0:
-    return decode_error("base64 input length must be a multiple of 4")
+    return decode_error(
+      decode_error_invalid_length("base64 input length must be a multiple of 4")
+    )
 
   let ~buffer = ByteBuffer::with_capacity(source_len / 4 * 3)
   var index = 0
@@ -106,9 +113,13 @@ pub fn decode(s: StringSlice) -> Result<Bytes, DecodeError>
         match(d1)
           Some<i32> { value: d1_value }:
             if is_pad_2 and not is_pad_3:
-              return decode_error("invalid base64 padding")
+              return decode_error(
+                decode_error_invalid_padding("invalid base64 padding")
+              )
             if (is_pad_2 or is_pad_3) and not is_last_quartet:
-              return decode_error("base64 padding is only valid at the end")
+              return decode_error(
+                decode_error_invalid_padding("base64 padding is only valid at the end")
+              )
 
             let byte0 = d0_value * 4 + (d1_value / 16)
             buffer.push(byte0)
@@ -127,20 +138,34 @@ pub fn decode(s: StringSlice) -> Result<Bytes, DecodeError>
                         let byte2 = div_rem(d2_value, 4).1 * 64 + d3_value
                         buffer.push(byte2)
                       None:
-                        return decode_error("base64 input contains invalid characters")
+                        return decode_error(
+                          decode_error_invalid_character(
+                            "base64 input contains invalid characters"
+                          )
+                        )
                 None:
-                  return decode_error("base64 input contains invalid characters")
+                  return decode_error(
+                    decode_error_invalid_character(
+                      "base64 input contains invalid characters"
+                    )
+                  )
           None:
-            return decode_error("base64 input contains invalid characters")
+            return decode_error(
+              decode_error_invalid_character(
+                "base64 input contains invalid characters"
+              )
+            )
       None:
-        return decode_error("base64 input contains invalid characters")
+        return decode_error(
+          decode_error_invalid_character("base64 input contains invalid characters")
+        )
 
     index = index + 4
 
   Ok<Bytes> { value: buffer.as_bytes() }
 
-fn decode_error<T>(message: String) -> Result<T, DecodeError>
-  Err<DecodeError> { error: DecodeError { message: message } }
+fn decode_error<T>(error: DecodeError) -> Result<T, DecodeError>
+  Err<DecodeError> { error: error }
 
 fn base64_ascii_to_digit(value: i32) -> Option<i32>
   if value >= 65 and value <= 90:

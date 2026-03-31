@@ -29,6 +29,7 @@ test "hex decode rejects invalid text":
     Ok<Bytes>:
       assert(false)
     Err<DecodeError> { error }:
+      assert(error.code, eq: 2)
       assert(error.message.equals("hex input contains invalid characters"), eq: true)
 
 test "hex decode accepts String":

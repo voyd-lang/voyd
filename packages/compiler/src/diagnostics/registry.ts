@@ -145,9 +145,7 @@ type DiagnosticParamsMap = {
     | { kind: "immutable-object"; binding: string; reason: string }
     | { kind: "binding-declaration"; binding: string };
   TY0005: { kind: "not-callable" };
-  TY0006:
-    | { kind: "unknown-function"; name: string }
-    | { kind: "missing-string-helper"; name: "new_string" };
+  TY0006: { kind: "unknown-function"; name: string };
   TY0007: {
     kind: "ambiguous-overload";
     name: string;
@@ -536,10 +534,7 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0005"]>,
   TY0006: {
     code: "TY0006",
-    message: (params) =>
-      params.kind === "unknown-function"
-        ? `function '${params.name}' is not defined`
-        : "function 'new_string' is not defined; import std::string::fns::new_string",
+    message: (params) => `function '${params.name}' is not defined`,
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0006"]>,

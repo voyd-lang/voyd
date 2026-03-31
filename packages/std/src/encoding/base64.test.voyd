@@ -28,6 +28,7 @@ test "base64 decode rejects invalid padding":
     Ok<Bytes>:
       assert(false)
     Err<DecodeError> { error }:
+      assert(error.code, eq: 3)
       assert(error.message.equals("invalid base64 padding"), eq: true)
 
 test "base64 decode accepts String":

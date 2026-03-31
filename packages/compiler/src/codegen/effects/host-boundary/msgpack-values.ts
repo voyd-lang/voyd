@@ -29,17 +29,17 @@ export const packMsgPackValueForType = ({
     }
     switch (support.primitive) {
       case "bool":
-        return ctx.mod.call(msgpack.packBool.wasmName, [value], msgPackType);
+        return ctx.mod.call(msgpack.makeBool.wasmName, [value], msgPackType);
       case "i32":
-        return ctx.mod.call(msgpack.packI32.wasmName, [value], msgPackType);
+        return ctx.mod.call(msgpack.makeI32.wasmName, [value], msgPackType);
       case "i64":
-        return ctx.mod.call(msgpack.packI64.wasmName, [value], msgPackType);
+        return ctx.mod.call(msgpack.makeI64.wasmName, [value], msgPackType);
       case "f32":
-        return ctx.mod.call(msgpack.packF32.wasmName, [value], msgPackType);
+        return ctx.mod.call(msgpack.makeF32.wasmName, [value], msgPackType);
       case "f64":
-        return ctx.mod.call(msgpack.packF64.wasmName, [value], msgPackType);
+        return ctx.mod.call(msgpack.makeF64.wasmName, [value], msgPackType);
       case "void":
-        return ctx.mod.call(msgpack.packNull.wasmName, [], msgPackType);
+        return ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType);
     }
   }
 

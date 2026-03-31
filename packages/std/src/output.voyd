@@ -1,15 +1,16 @@
 //! Standard output/error stream helpers backed by host runtime operations.
 //!
-//! `std::output` provides text and byte writes, flushing, and TTY checks for
-//! stdout and stderr using MessagePack DTO payloads.
+//! `std::output` is the public surface for stdout/stderr writes, flushing, and
+//! terminal detection. Single-argument helpers default to stdout; pass
+//! `StdErr {}` when you need to target stderr explicitly.
 
 use std::array::Array
 use std::bytes::{ Bytes }
-use std::error::IoError
+use std::error::{ HostError, IoError }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
+use std::msgpack::MsgPackError
 use std::msgpack::self as msgpack
-use std::number::to_string
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
 
@@ -41,101 +42,68 @@ pub eff Output
   /// `payload` contains `{ target }`.
   is_tty_op(tail, payload: MsgPack) -> bool
 
-/// Writes text to the selected output target (stdout by default).
-///
-/// Example:
-/// `let result = output::write("hello".as_slice())`
+/// Shorthand for `write(value, StdOut {})`.
 pub fn write(value: StringSlice): Output -> Result<Unit, IoError>
   write(value, StdOut {})
 
-/// Writes text to the selected output target (stdout by default).
+/// Shorthand for `write(value.as_slice())`.
 pub fn write(value: String): Output -> Result<Unit, IoError>
   write(value.as_slice())
 
-/// Writes text to the selected output target.
+/// Writes UTF-8 text to `target`.
+///
+/// Use this overload as the canonical text-write entry point when you need to
+/// choose stdout vs stderr explicitly.
 pub fn write(value: StringSlice, target: OutputTarget): Output -> Result<Unit, IoError>
   decode_write_result(Output::write_op(encode_write_payload(value.to_string(), target)))
 
-/// Writes text to the selected output target.
+/// Shorthand for `write(value.as_slice(), target)`.
 pub fn write(value: String, target: OutputTarget): Output -> Result<Unit, IoError>
   write(value.as_slice(), target)
 
-/// Writes text followed by exactly `\n` to the selected target (stdout by default).
+/// Shorthand for `write_line(value, StdOut {})`.
 pub fn write_line(value: StringSlice): Output -> Result<Unit, IoError>
   write_line(value, StdOut {})
 
-/// Writes text followed by exactly `\n` to the selected target (stdout by default).
+/// Shorthand for `write_line(value.as_slice())`.
 pub fn write_line(value: String): Output -> Result<Unit, IoError>
   write_line(value.as_slice())
 
-/// Writes text followed by exactly `\n` to the selected target.
+/// Writes `value` followed by exactly one line-feed byte to `target`.
 ///
-/// This always appends a single line-feed byte (`0x0A`).
+/// This is the canonical line-oriented write API for this module. It always
+/// appends `\n` and does not inspect whether `value` already ends with one.
 pub fn write_line(value: StringSlice, target: OutputTarget): Output -> Result<Unit, IoError>
   let line = line_string(value)
   write(line.as_slice(), target)
 
-/// Writes text followed by exactly `\n` to the selected target.
+/// Shorthand for `write_line(value.as_slice(), target)`.
 pub fn write_line(value: String, target: OutputTarget): Output -> Result<Unit, IoError>
   write_line(value.as_slice(), target)
 
-/// Writes one whole line to stdout.
-pub fn print(value: StringSlice): Output -> Result<Unit, IoError>
-  write_line(value)
-
-/// Writes one whole line to stdout.
-pub fn print(value: String): Output -> Result<Unit, IoError>
-  write_line(value)
-
-/// Writes one whole line to stdout.
-pub fn print(value: i32): Output -> Result<Unit, IoError>
-  print(to_string(value))
-
-/// Writes one whole line to stdout.
-pub fn print(value: i64): Output -> Result<Unit, IoError>
-  print(to_string(value))
-
-/// Writes one whole line to stdout.
-pub fn print(value: f32): Output -> Result<Unit, IoError>
-  print(to_string(value))
-
-/// Writes one whole line to stdout.
-pub fn print(value: f64): Output -> Result<Unit, IoError>
-  print(to_string(value))
-
-/// Writes bytes to the selected output target (stdout by default).
-///
-/// Use this when you need binary output instead of UTF-8 text.
+/// Shorthand for `write(bytes, StdOut {})`.
 pub fn write(bytes: Bytes): Output -> Result<Unit, IoError>
   write(bytes, StdOut {})
 
-/// Writes bytes to the selected output target.
+/// Writes raw bytes to `target` without UTF-8 encoding.
+///
+/// Use this for binary output or when text conversion would be incorrect.
 pub fn write(bytes: Bytes, target: OutputTarget): Output -> Result<Unit, IoError>
   decode_write_result(Output::write_bytes_op(encode_write_bytes_payload(bytes, target)))
 
-/// Writes bytes to the selected output target (stdout by default).
-///
-/// Use this when you need binary output instead of UTF-8 text.
-pub fn write_bytes(bytes: Bytes): Output -> Result<Unit, IoError>
-  write(bytes)
-
-/// Writes bytes to the selected output target.
-pub fn write_bytes(bytes: Bytes, target: OutputTarget): Output -> Result<Unit, IoError>
-  write(bytes, target)
-
-/// Flushes the selected output target (stdout by default).
+/// Shorthand for `flush(StdOut {})`.
 pub fn flush(): Output -> Result<Unit, IoError>
   flush(StdOut {})
 
-/// Flushes the selected output target.
+/// Flushes buffered output for `target`.
 pub fn flush(target: OutputTarget): Output -> Result<Unit, IoError>
   decode_write_result(Output::flush_op(encode_target_payload(target)))
 
-/// Returns true when the selected output target is a terminal (stdout by default).
+/// Shorthand for `is_tty(StdOut {})`.
 pub fn is_tty(): Output -> bool
   is_tty(StdOut {})
 
-/// Returns true when the selected output target is a terminal.
+/// Returns whether `target` is attached to an interactive terminal.
 pub fn is_tty(target: OutputTarget): Output -> bool
   Output::is_tty_op(encode_target_payload(target))
 
@@ -182,14 +150,31 @@ fn encode_bytes(bytes: Bytes): () -> MsgPack
   msgpack::make_array(encoded)
 
 fn decode_write_result(payload: MsgPack): () -> Result<Unit, IoError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") then:
-    return Ok<Unit> { value: Unit {} }
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<IoError> { error: host_error_to_io_error(error) }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok"))
+        Err<HostError> { error }:
+          Err<IoError> { error: host_error_to_io_error(error) }
+        Ok<bool> { value }:
+          if value:
+            Ok<Unit> { value: Unit {} }
+          else:
+            decode_io_error_result(decoded)
 
-  Err<IoError> { error: decode_io_error(decoded) }
+fn decode_io_error_result(payload: HostDto): () -> Result<Unit, IoError>
+  match(payload.read_i32("code"))
+    Err<HostError> { error }:
+      Err<IoError> { error: host_error_to_io_error(error) }
+    Ok<i32> { value: code }:
+      match(payload.read_string("message"))
+        Err<HostError> { error }:
+          Err<IoError> { error: host_error_to_io_error(error) }
+        Ok<String> { value: message }:
+          Err<IoError> {
+            error: IoError { code: code, message: message }
+          }
 
-fn decode_io_error(payload: HostDto): () -> IoError
-  IoError {
-    code: payload.read_i32("code"),
-    message: payload.read_string("message")
-  }
+fn host_error_to_io_error(error: HostError): () -> IoError
+  IoError { code: error.code, message: error.message }

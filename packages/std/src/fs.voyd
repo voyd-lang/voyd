@@ -6,9 +6,10 @@
 
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
-use std::error::IoError
+use std::error::{ HostError, IoError }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
+use std::msgpack::MsgPackError
 use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::path::Path
@@ -48,14 +49,8 @@ pub fn read_bytes(path: Path): Fs -> Result<Bytes, IoError>
 /// Reads text from a file.
 ///
 /// This expects host-side UTF-8 text decoding.
-pub fn read(path: Path): Fs -> Result<String, IoError>
-  decode_read_string_result(Fs::read_string(encode_path(path)))
-
-/// Reads text from a file.
-///
-/// This expects host-side UTF-8 text decoding.
 pub fn read_string(path: Path): Fs -> Result<String, IoError>
-  read(path)
+  decode_read_string_result(Fs::read_string(encode_path(path)))
 
 /// Writes bytes to a file.
 ///
@@ -64,19 +59,6 @@ pub fn read_string(path: Path): Fs -> Result<String, IoError>
 pub fn write_bytes(path: Path, bytes: Bytes): Fs -> Result<Unit, IoError>
   let payload = encode_write_bytes_payload(path, bytes)
   decode_write_result(Fs::write_bytes(payload))
-
-/// Writes text to a file.
-///
-/// Example:
-/// `let write_result = fs::write_string(file_path, "hello".as_slice())`
-pub fn write(path: Path, value: String): Fs -> Result<Unit, IoError>
-  let payload = encode_write_string_payload(path, value)
-  decode_write_result(Fs::write_string(payload))
-
-/// Writes text to a file.
-pub fn write(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
-  let payload = encode_write_string_payload(path, value.to_string())
-  decode_write_result(Fs::write_string(payload))
 
 /// Writes text to a file.
 ///
@@ -130,67 +112,125 @@ fn encode_byte_array(bytes: Bytes): () -> MsgPack
   msgpack::make_array(encoded)
 
 fn decode_read_bytes_result(payload: MsgPack): () -> Result<Bytes, IoError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false:
-    return Err<IoError> { error: decode_io_error(decoded) }
-
-  Ok<Bytes> { value: decode_bytes(decoded.read_msgpack("value")) }
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<IoError> { error: host_error_to_io_error(error) }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok"))
+        Err<HostError> { error }:
+          Err<IoError> { error: host_error_to_io_error(error) }
+        Ok<bool> { value }:
+          if value == false:
+            decode_io_error_result<Bytes>(decoded)
+          else:
+            match(decoded.read_msgpack("value"))
+              Err<HostError> { error }:
+                Err<IoError> { error: host_error_to_io_error(error) }
+              Ok<MsgPack> { value }:
+                decode_bytes(value)
 
 fn decode_read_string_result(payload: MsgPack): () -> Result<String, IoError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false:
-    return Err<IoError> { error: decode_io_error(decoded) }
-
-  Ok<String> { value: decoded.read_string("value") }
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<IoError> { error: host_error_to_io_error(error) }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok"))
+        Err<HostError> { error }:
+          Err<IoError> { error: host_error_to_io_error(error) }
+        Ok<bool> { value }:
+          if value == false:
+            decode_io_error_result<String>(decoded)
+          else:
+            match(decoded.read_string("value"))
+              Err<HostError> { error }:
+                Err<IoError> { error: host_error_to_io_error(error) }
+              Ok<String> { value }:
+                Ok<String> { value: value }
 
 fn decode_write_result(payload: MsgPack): () -> Result<Unit, IoError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok"):
-    return Ok<Unit> { value: Unit {} }
-  Err<IoError> { error: decode_io_error(decoded) }
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<IoError> { error: host_error_to_io_error(error) }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok"))
+        Err<HostError> { error }:
+          Err<IoError> { error: host_error_to_io_error(error) }
+        Ok<bool> { value }:
+          if value:
+            Ok<Unit> { value: Unit {} }
+          else:
+            decode_io_error_result<Unit>(decoded)
 
 fn decode_list_dir_result(payload: MsgPack): () -> Result<Array<Path>, IoError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false:
-    return Err<IoError> { error: decode_io_error(decoded) }
-
-  Ok<Array<Path>> { value: decode_path_array(decoded.read_msgpack("value")) }
-
-fn decode_io_error(payload: HostDto): () -> IoError
-  IoError {
-    code: payload.read_i32("code"),
-    message: payload.read_string("message")
-  }
-
-fn decode_bytes(payload: MsgPack): () -> Bytes
-  let source = msgpack::unpack_array(payload)
-  let ~buffer = ByteBuffer::with_capacity(source.len())
-  var index = 0
-  while index < source.len() do:
-    match(source.get(index))
-      Some<MsgPack> { value }:
-        buffer.push(normalize_byte(msgpack::unpack_i32(value)))
-      None:
-        void
-    index = index + 1
-  buffer.as_bytes()
-
-fn decode_path_array(payload: MsgPack): () -> Array<Path>
-  let source = msgpack::unpack_array(payload)
-  let ~out = Array<Path>::with_capacity(source.len())
-  var index = 0
-  while index < source.len() do:
-    match(source.get(index))
-      Some<MsgPack> { value }:
-        value.match(path_value)
-          String:
-            out.push(Path { raw: path_value })
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<IoError> { error: host_error_to_io_error(error) }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok"))
+        Err<HostError> { error }:
+          Err<IoError> { error: host_error_to_io_error(error) }
+        Ok<bool> { value }:
+          if value == false:
+            decode_io_error_result<Array<Path>>(decoded)
           else:
+            match(decoded.read_msgpack("value"))
+              Err<HostError> { error }:
+                Err<IoError> { error: host_error_to_io_error(error) }
+              Ok<MsgPack> { value }:
+                decode_path_array(value)
+
+fn decode_io_error_result<T>(payload: HostDto): () -> Result<T, IoError>
+  match(payload.read_i32("code"))
+    Err<HostError> { error }:
+      Err<IoError> { error: host_error_to_io_error(error) }
+    Ok<i32> { value: code }:
+      match(payload.read_string("message"))
+        Err<HostError> { error }:
+          Err<IoError> { error: host_error_to_io_error(error) }
+        Ok<String> { value: message }:
+          Err<IoError> {
+            error: IoError { code: code, message: message }
+          }
+
+fn decode_bytes(payload: MsgPack): () -> Result<Bytes, IoError>
+  match(msgpack::unpack_array(payload))
+    Err<MsgPackError> { error }:
+      Err<IoError> { error: msgpack_error_to_io_error(error) }
+    Ok<Array<MsgPack>> { value: source }:
+      let ~buffer = ByteBuffer::with_capacity(source.len())
+      var index = 0
+      while index < source.len() do:
+        match(source.get(index))
+          Some<MsgPack> { value }:
+            match(msgpack::unpack_i32(value))
+              Ok<i32> { value }:
+                buffer.push(normalize_byte(value))
+              Err<MsgPackError> { error }:
+                return Err<IoError> { error: msgpack_error_to_io_error(error) }
+          None:
             void
-      None:
-        void
-    index = index + 1
-  out
+        index = index + 1
+      Ok<Bytes> { value: buffer.as_bytes() }
+
+fn decode_path_array(payload: MsgPack): () -> Result<Array<Path>, IoError>
+  match(msgpack::unpack_array(payload))
+    Err<MsgPackError> { error }:
+      Err<IoError> { error: msgpack_error_to_io_error(error) }
+    Ok<Array<MsgPack>> { value: source }:
+      let ~out = Array<Path>::with_capacity(source.len())
+      var index = 0
+      while index < source.len() do:
+        match(source.get(index))
+          Some<MsgPack> { value }:
+            match(msgpack::unpack_string(value))
+              Ok<String> { value }:
+                out.push(Path { raw: value })
+              Err<MsgPackError> { error }:
+                return Err<IoError> { error: msgpack_error_to_io_error(error) }
+          None:
+            void
+        index = index + 1
+      Ok<Array<Path>> { value: out }
 
 fn normalize_byte(value: i32): () -> i32
   let remainder = value % 256
@@ -198,3 +238,9 @@ fn normalize_byte(value: i32): () -> i32
     remainder + 256
   else:
     remainder
+
+fn host_error_to_io_error(error: HostError): () -> IoError
+  IoError { code: error.code, message: error.message }
+
+fn msgpack_error_to_io_error(error: MsgPackError): () -> IoError
+  IoError { code: error.code, message: error.message }

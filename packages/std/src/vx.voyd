@@ -4,6 +4,7 @@
 
 use std::array::Array
 use std::dict::{ Dict, DictKey }
+use std::error::panic
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
@@ -38,7 +39,11 @@ fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Dict<String, MsgP
           Some<MsgPack> { value: key }:
             match(pair.get(1))
               Some<MsgPack> { value: value }:
-                acc.set(msgpack::unpack_string(key), value)
+                match(msgpack::unpack_string(key))
+                  Ok<String> { value: name }:
+                    acc.set(name, value)
+                  Err:
+                    panic("vx attribute key must decode as string".as_slice())
               None:
                 void
           None:

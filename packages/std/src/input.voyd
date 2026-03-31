@@ -9,6 +9,8 @@ use std::error::{ HostError, IoError }
 use std::host_dto::HostDto
 use std::math::{ MathError, mod_euclid }
 use std::msgpack::MsgPack
+use std::msgpack::MsgPackError
+use std::msgpack::Null
 use std::msgpack::self as msgpack
 use std::optional::all
 use std::result::types::all
@@ -93,20 +95,33 @@ fn encode_read_line_payload(request: InputRequest): () -> MsgPack
         .pack()
 
 fn decode_read_line_result(payload: MsgPack): () -> Result<Option<String>, HostError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false:
-    return Err<HostError> { error: decode_host_error(decoded) }
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok"))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<bool> { value }:
+          if value == false:
+            decode_host_error_result(decoded)
+          else:
+            match(decoded.read_msgpack("value"))
+              Err<HostError> { error }:
+                Err<HostError> { error: error }
+              Ok<MsgPack> { value }:
+                decode_optional_string(value)
 
-  Ok<Option<String>> {
-    value: decode_optional_string(decoded.read_msgpack("value"))
-  }
-
-fn decode_optional_string(payload: MsgPack): () -> Option<String>
+fn decode_optional_string(payload: MsgPack): () -> Result<Option<String>, HostError>
   payload.match(active)
-    String:
-      Some<String> { value: active }
+    Null:
+      Ok<Option<String>> { value: None {} }
     else:
-      None {}
+      match(msgpack::unpack_string(payload))
+        Ok<String> { value }:
+          Ok<Option<String>> { value: Some<String> { value: value } }
+        Err<MsgPackError> { error }:
+          Err<HostError> { error: msgpack_error_to_host_error(error) }
 
 fn encode_read_bytes_payload(max_bytes: i32): () -> MsgPack
   HostDto::init()
@@ -114,30 +129,53 @@ fn encode_read_bytes_payload(max_bytes: i32): () -> MsgPack
     .pack()
 
 fn decode_read_bytes_result(payload: MsgPack): () -> Result<Option<Bytes>, IoError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false then:
-    return Err<IoError> { error: decode_io_error(decoded) }
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<IoError> { error: host_error_to_io_error(error) }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok"))
+        Err<HostError> { error }:
+          Err<IoError> { error: host_error_to_io_error(error) }
+        Ok<bool> { value }:
+          if value == false:
+            decode_io_error_result(decoded)
+          else:
+            match(decoded.read_msgpack("value"))
+              Err<HostError> { error }:
+                Err<IoError> { error: host_error_to_io_error(error) }
+              Ok<MsgPack> { value }:
+                decode_optional_bytes(value)
 
-  Ok<Option<Bytes>> { value: decode_optional_bytes(decoded.read_msgpack("value")) }
-
-fn decode_optional_bytes(payload: MsgPack): () -> Option<Bytes>
+fn decode_optional_bytes(payload: MsgPack): () -> Result<Option<Bytes>, IoError>
   payload.match(active)
-    Array:
-      Some<Bytes> { value: decode_bytes_array(active) }
+    Null:
+      Ok<Option<Bytes>> { value: None {} }
     else:
-      None {}
+      match(msgpack::unpack_array(payload))
+        Err<MsgPackError> { error }:
+          Err<IoError> { error: msgpack_error_to_io_error(error) }
+        Ok<Array<MsgPack>> { value }:
+          match(decode_bytes_array(value))
+            Ok<Bytes> { value }:
+              Ok<Option<Bytes>> { value: Some<Bytes> { value: value } }
+            Err<IoError> { error }:
+              Err<IoError> { error: error }
 
-fn decode_bytes_array(source: Array<MsgPack>): () -> Bytes
+fn decode_bytes_array(source: Array<MsgPack>): () -> Result<Bytes, IoError>
   let ~buffer = ByteBuffer::with_capacity(source.len())
   var index = 0
   while index < source.len() do:
     match(source.get(index))
       Some<MsgPack> { value }:
-        buffer.push(normalize_byte(msgpack::unpack_i32(value)))
+        match(msgpack::unpack_i32(value))
+          Ok<i32> { value }:
+            buffer.push(normalize_byte(value))
+          Err<MsgPackError> { error }:
+            return Err<IoError> { error: msgpack_error_to_io_error(error) }
       None:
         void
     index = index + 1
-  buffer.as_bytes()
+  Ok<Bytes> { value: buffer.as_bytes() }
 
 fn normalize_byte(value: i32): () -> i32
   match(mod_euclid(value, 256))
@@ -146,14 +184,33 @@ fn normalize_byte(value: i32): () -> i32
     Err<MathError>:
       0
 
-fn decode_io_error(payload: HostDto): () -> IoError
-  IoError {
-    code: payload.read_i32("code"),
-    message: payload.read_string("message")
-  }
+fn decode_io_error_result(payload: HostDto): () -> Result<Option<Bytes>, IoError>
+  match(payload.read_i32("code"))
+    Err<HostError> { error }:
+      Err<IoError> { error: host_error_to_io_error(error) }
+    Ok<i32> { value: code }:
+      match(payload.read_string("message"))
+        Err<HostError> { error }:
+          Err<IoError> { error: host_error_to_io_error(error) }
+        Ok<String> { value: message }:
+          Err<IoError> { error: IoError { code: code, message: message } }
 
-fn decode_host_error(payload: HostDto): () -> HostError
-  HostError {
-    code: payload.read_i32("code"),
-    message: payload.read_string("message")
-  }
+fn decode_host_error_result(payload: HostDto): () -> Result<Option<String>, HostError>
+  match(payload.read_i32("code"))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<i32> { value: code }:
+      match(payload.read_string("message"))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<String> { value: message }:
+          Err<HostError> { error: HostError { code: code, message: message } }
+
+fn host_error_to_io_error(error: HostError): () -> IoError
+  IoError { code: error.code, message: error.message }
+
+fn msgpack_error_to_io_error(error: MsgPackError): () -> IoError
+  IoError { code: error.code, message: error.message }
+
+fn msgpack_error_to_host_error(error: MsgPackError): () -> HostError
+  HostError { code: error.code, message: error.message }

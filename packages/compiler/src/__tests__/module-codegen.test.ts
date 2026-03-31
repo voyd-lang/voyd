@@ -383,17 +383,16 @@ pub fn main() -> i32
     expect((instance.exports.main as () => number)()).toBe(5);
   });
 
-  it("keeps string constructor dependencies reachable for module-let initializers", async () => {
+  it("keeps string constructor dependencies reachable for module-let initializers without a prelude new_string export", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: `use std::string::fns::new_string
-
-let greeting = "hello"
+      [`${root}${sep}main.voyd`]: `let greeting = "hello"
 
 pub fn main() -> i32
   1`,
-      [`${std}${sep}string${sep}fns.voyd`]: `pub obj String {}
+      [`${std}${sep}prelude.voyd`]: `pub std::string::String`,
+      [`${std}${sep}string.voyd`]: `pub obj String {}
 pub obj FixedArray<T> {}
 
 @intrinsic(name: "__string_new", uses_signature: true)

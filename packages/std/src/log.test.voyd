@@ -1,4 +1,7 @@
+use std::dict::Dict
+use std::error::panic
 use std::msgpack::MsgPack
+use std::msgpack::MsgPackError
 use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::test::assertions::all
@@ -13,8 +16,11 @@ test "trace with fields emits a msgpack payload":
     trace("hello", fields)
   Log::emit(tail, payload):
     seen.push(1)
-    let payload_map = msgpack::unpack_map(payload)
-    payload_sizes.push(payload_map.len())
+    match(msgpack::unpack_map(payload))
+      Ok<Dict<String, MsgPack>> { value: payload_map }:
+        payload_sizes.push(payload_map.entries().len())
+      Err<MsgPackError>:
+        panic("invalid msgpack map".as_slice())
     tail()
 
   assert(seen.len(), eq: 1)
@@ -30,8 +36,11 @@ test "trace accepts string slices without rebuilding call-site strings":
   try
     trace("hello".as_slice())
   Log::emit(tail, payload):
-    let payload_map = msgpack::unpack_map(payload)
-    seen.push(payload_map.len())
+    match(msgpack::unpack_map(payload))
+      Ok<Dict<String, MsgPack>> { value: payload_map }:
+        seen.push(payload_map.entries().len())
+      Err<MsgPackError>:
+        panic("invalid msgpack map".as_slice())
     tail()
 
   match(seen.get(0))

@@ -82,6 +82,7 @@ export type {
   VoydRuntimeDiagnostics,
   VoydRuntimeEffectContext,
   VoydRuntimeError,
+  VoydRuntimePanicContext,
   VoydRuntimeSourceSpan,
   VoydRuntimeTransitionContext,
   VoydTrapAnnotation,

@@ -80,6 +80,48 @@ interface EmitFloatUnaryIntrinsicParams {
   ctx: CodegenContext;
 }
 
+const PANIC_TRAP_PTR_GLOBAL = "__voyd_panic_ptr";
+const PANIC_TRAP_LEN_GLOBAL = "__voyd_panic_len";
+const PANIC_SCRATCH_PTR_GLOBAL = "__voyd_panic_scratch_ptr";
+const PANIC_SCRATCH_CAPACITY_GLOBAL = "__voyd_panic_scratch_capacity";
+
+const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
+  if (ctx.mod.getGlobal(PANIC_TRAP_PTR_GLOBAL) === 0) {
+    ctx.mod.addGlobal(
+      PANIC_TRAP_PTR_GLOBAL,
+      binaryen.i32,
+      true,
+      ctx.mod.i32.const(-1)
+    );
+    ctx.mod.addGlobalExport(PANIC_TRAP_PTR_GLOBAL, PANIC_TRAP_PTR_GLOBAL);
+  }
+  if (ctx.mod.getGlobal(PANIC_TRAP_LEN_GLOBAL) === 0) {
+    ctx.mod.addGlobal(
+      PANIC_TRAP_LEN_GLOBAL,
+      binaryen.i32,
+      true,
+      ctx.mod.i32.const(0)
+    );
+    ctx.mod.addGlobalExport(PANIC_TRAP_LEN_GLOBAL, PANIC_TRAP_LEN_GLOBAL);
+  }
+  if (ctx.mod.getGlobal(PANIC_SCRATCH_PTR_GLOBAL) === 0) {
+    ctx.mod.addGlobal(
+      PANIC_SCRATCH_PTR_GLOBAL,
+      binaryen.i32,
+      true,
+      ctx.mod.i32.const(-1)
+    );
+  }
+  if (ctx.mod.getGlobal(PANIC_SCRATCH_CAPACITY_GLOBAL) === 0) {
+    ctx.mod.addGlobal(
+      PANIC_SCRATCH_CAPACITY_GLOBAL,
+      binaryen.i32,
+      true,
+      ctx.mod.i32.const(0)
+    );
+  }
+};
+
 const makeInlineValue = ({
   values,
   ctx,
@@ -649,9 +691,32 @@ export const compileIntrinsicCall = ({
         LINEAR_MEMORY_INTERNAL
       );
     }
-    case "__panic_trap": {
+    case "__panic_scratch_ptr": {
       assertArgCount(name, args, 0);
-      return ctx.mod.unreachable();
+      ensurePanicTrapGlobals(ctx);
+      return ctx.mod.global.get(PANIC_SCRATCH_PTR_GLOBAL, binaryen.i32);
+    }
+    case "__panic_scratch_capacity": {
+      assertArgCount(name, args, 0);
+      ensurePanicTrapGlobals(ctx);
+      return ctx.mod.global.get(PANIC_SCRATCH_CAPACITY_GLOBAL, binaryen.i32);
+    }
+    case "__panic_scratch_set": {
+      assertArgCount(name, args, 2);
+      ensurePanicTrapGlobals(ctx);
+      return ctx.mod.block(null, [
+        ctx.mod.global.set(PANIC_SCRATCH_PTR_GLOBAL, args[0]!),
+        ctx.mod.global.set(PANIC_SCRATCH_CAPACITY_GLOBAL, args[1]!),
+      ]);
+    }
+    case "__panic_trap": {
+      assertArgCount(name, args, 2);
+      ensurePanicTrapGlobals(ctx);
+      return ctx.mod.block(null, [
+        ctx.mod.global.set(PANIC_TRAP_PTR_GLOBAL, args[0]!),
+        ctx.mod.global.set(PANIC_TRAP_LEN_GLOBAL, args[1]!),
+        ctx.mod.unreachable(),
+      ]);
     }
     case "__shift_l":
     case "__shift_ru": {

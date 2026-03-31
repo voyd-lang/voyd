@@ -1,14 +1,13 @@
-//! Time primitives and scheduling helpers backed by the host `Time` effect.
+//! Time primitives backed by the host `Time` effect.
 //! Includes monotonic timing (`Instant`), wall-clock timing (`SystemTime`),
-//! duration utilities, and timer-based callbacks.
+//! duration utilities, and blocking sleep.
 
 use std::error::HostError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::number::cast::{ to_i64 }
 use std::result::types::all
-use std::string::type::new_string
+use std::string::type::{ String, new_string }
 
 /// Represents a millisecond-based time span.
 pub obj Duration {
@@ -61,10 +60,9 @@ impl SystemTime
   api fn unix_millis(self) -> i64
     self.unix_millis_value
 
-/// Host-provided time and timer operations.
+/// Host-provided time operations.
 ///
-/// `std::time` encodes timer commands as MessagePack payloads and decodes host
-/// responses into typed success/error values.
+/// `std::time` decodes host responses into typed success/error values.
 @effect(id: "voyd.std.time")
 pub eff Time
   /// Returns a monotonic millisecond timestamp suitable for elapsed-time math.
@@ -75,18 +73,6 @@ pub eff Time
   ///
   /// Returns `{ ok: true }` on success or `{ ok: false, code, message }` on failure.
   sleep_millis(tail, ms: i64) -> MsgPack
-  /// Creates a one-shot timer that fires once after `ms` milliseconds.
-  ///
-  /// Returns `{ ok: true }` or an error DTO.
-  set_timeout_millis(tail, ms: i64) -> MsgPack
-  /// Creates a repeating timer using `ms` as the interval.
-  ///
-  /// Returns `{ ok: true, value: timer_id }` or an error DTO.
-  set_interval_millis(tail, ms: i64) -> MsgPack
-  /// Clears a timer created by `set_timeout_millis` or `set_interval_millis`.
-  ///
-  /// `timer_id` must be the host-provided timer identifier.
-  clear_timer(tail, timer_id: i64) -> MsgPack
 
 /// Suspends execution for the provided millisecond count.
 /// Example: `time::sleep(250)`.
@@ -98,73 +84,29 @@ pub fn sleep(ms: i64): Time -> Result<Unit, HostError>
 pub fn sleep(duration: Duration): Time -> Result<Unit, HostError>
   sleep(duration.as_millis())
 
-/// Schedules and runs a callback once after the provided duration.
-/// Example: `time::on_timeout(Duration::from_millis(100), || do_work())`.
-pub fn on_timeout(duration: Duration, callback: () -> void): Time -> Result<Unit, HostError>
-  let scheduled = decode_host_void_result(
-    Time::set_timeout_millis(duration.as_millis())
-  )
-  match(scheduled)
+fn decode_host_void_result(payload: MsgPack): () -> Result<Unit, HostError>
+  match(HostDto::unpack(payload))
     Err<HostError> { error }:
       Err<HostError> { error: error }
-    Ok<Unit>:
-      callback()
-      Ok<Unit> { value: Unit {} }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<bool> { value }:
+          if value:
+            Ok<Unit> { value: Unit {} }
+          else:
+            decode_host_error_result(decoded)
 
-/// Runs a callback repeatedly at the provided interval.
-/// The callback runs after each successful interval wait.
-/// Example: `time::on_interval(Duration::from_secs(1), || tick())`.
-pub fn on_interval(interval: Duration, callback: () -> void): Time -> Result<Unit, HostError>
-  while true do:
-    let timer_result = decode_timer_id_result(
-      Time::set_interval_millis(interval.as_millis())
-    )
-    match(timer_result)
-      Err<HostError> { error }:
-        return Err<HostError> { error: error }
-      Ok<i64> { value: timer_id }:
-        let sleep_result = decode_host_void_result(
-          Time::sleep_millis(interval.as_millis())
-        )
-        match(sleep_result)
-          Err<HostError> { error }:
-            let sleep_error = error
-            let clear_result = decode_host_void_result(Time::clear_timer(timer_id))
-            match(clear_result)
-              Err<HostError> { error }:
-                return Err<HostError> { error: error }
-              Ok<Unit>:
-                return Err<HostError> { error: sleep_error }
-          Ok<Unit>:
-            void
-        let clear_result = decode_host_void_result(Time::clear_timer(timer_id))
-        match(clear_result)
-          Err<HostError> { error }:
-            return Err<HostError> { error: error }
-          Ok<Unit>:
-            callback()
-  Ok<Unit> { value: Unit {} }
-
-fn decode_host_void_result(payload: MsgPack): () -> Result<Unit, HostError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok"):
-    return Ok<Unit> { value: Unit {} }
-  Err<HostError> {
-    error: HostError {
-      code: decoded.read_i32("code"),
-      message: decoded.read_string("message")
-    }
-  }
-
-fn decode_timer_id_result(payload: MsgPack): () -> Result<i64, HostError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok"):
-    return Ok<i64> {
-      value: msgpack::unpack_i64(decoded.read_msgpack("value"))
-    }
-  Err<HostError> {
-    error: HostError {
-      code: decoded.read_i32("code"),
-      message: decoded.read_string("message")
-    }
-  }
+fn decode_host_error_result(payload: HostDto): () -> Result<Unit, HostError>
+  match(payload.read_i32("code".as_slice().to_string()))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<i32> { value: code }:
+      match(payload.read_string("message".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<String> { value: message }:
+          Err<HostError> {
+            error: HostError { code: code, message: message }
+          }

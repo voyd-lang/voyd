@@ -1,3 +1,19 @@
-//! Encoding-specific error re-exports.
+//! Encoding-specific decode error definitions.
 
-pub use std::error::DecodeError
+use std::string::String
+
+pub obj DecodeError {
+  /// Machine-readable error code.
+  api code: i32,
+  /// Human-readable error message.
+  api message: String
+}
+
+pub fn decode_error_invalid_length(message: String): () -> DecodeError
+  DecodeError { code: 1, message: message }
+
+pub fn decode_error_invalid_character(message: String): () -> DecodeError
+  DecodeError { code: 2, message: message }
+
+pub fn decode_error_invalid_padding(message: String): () -> DecodeError
+  DecodeError { code: 3, message: message }

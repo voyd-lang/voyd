@@ -1,5 +1,4 @@
-use std::msgpack
-use std::string
+use std::error::panic
 
 @effect(id: "com.example.trap")
 eff TrapFx
@@ -14,3 +13,9 @@ pub fn pure_trap() -> i32
 pub fn effectful_trap(): TrapFx -> i32
   let denominator = TrapFx::denom(1)
   10 / denominator
+
+pub fn panic_trap() -> void
+  panic("panic with context")
+
+pub fn panic_slice_trap() -> void
+  panic("slice panic with context".as_slice())

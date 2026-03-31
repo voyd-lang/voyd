@@ -4,11 +4,13 @@ import { createVoydHost } from "@voyd-lang/js-host";
 type SmokeRunner = () => Promise<number>;
 
 const source = `use std::all
+use std::array::new_array_unchecked
+use std::string::type::new_string
 use std::msgpack::MsgPack
 use std::vx::all
 
 fn App()
-  let features = ["WASM speed", "Tiny runtime", "Clean syntax"]
+  let features = feature_list()
   <Card>
     <Title>Voyd + VSX</Title>
     <p style="margin: 0 0 10px 0; color: #cbd5e1;">Build clean UIs in language, no extensions required</p>
@@ -43,6 +45,13 @@ fn List({ value: Array<String> })
   <ul style="margin: 0; padding-left: 16px;">
     {value.map(f => <li style="line-height: 1.6;">{f}</li>)}
   </ul>
+
+fn feature_list() -> Array<String>
+  let ~features = Array<String>::with_capacity(3)
+  features.push("WASM speed".as_slice().to_string())
+  features.push("Tiny runtime".as_slice().to_string())
+  features.push("Clean syntax".as_slice().to_string())
+  features
 
 
 pub fn main()

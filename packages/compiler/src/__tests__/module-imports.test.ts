@@ -1037,4 +1037,45 @@ pub fn keep_parser_happy() -> i32
 
     expect(repeated).toHaveLength(1);
   });
+
+  it("does not expose raw constructors from std root exports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::{ new_string }
+
+pub fn main() -> i32
+  1
+`,
+      [`${stdRoot}${sep}pkg.voyd`]: `
+pub self::string
+`,
+      [`${stdRoot}${sep}prelude.voyd`]: `
+pub fn keep_parser_happy() -> i32
+  0
+`,
+      [`${stdRoot}${sep}string.voyd`]: `
+pub fn new_string(_from_bytes: FixedArray<i32>) -> i32
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+
+    expect(
+      combinedDiagnostics.some(
+        (diag) =>
+          diag.code === "BD0001" &&
+          diag.message.includes("std::pkg does not export new_string"),
+      ),
+    ).toBe(true);
+  });
 });

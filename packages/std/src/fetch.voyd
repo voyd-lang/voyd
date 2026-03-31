@@ -1,13 +1,15 @@
 //! HTTP request/response helpers backed by the host networking runtime.
 //!
-//! `std::fetch` provides typed request and response DTOs plus convenience helpers
-//! for common HTTP workflows. Requests are encoded as MessagePack maps for the host
-//! `Fetch` effect and decoded back into `Result<FetchResponse, HostError>`.
+//! `std::fetch` is organized around `FetchRequest` for deliberate request
+//! construction, plus `get` and `post` helpers for the common cases. Requests
+//! cross the host boundary as MessagePack DTOs and come back as
+//! `Result<FetchResponse, HostError>`.
 
 use std::array::Array
 use std::error::HostError
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
+use std::msgpack::MsgPackError
 use std::msgpack::self as msgpack
 use std::optional::all
 use std::result::types::all
@@ -36,7 +38,10 @@ pub obj FetchRequest {
 }
 
 impl FetchRequest
-  /// Builds a request from explicit values.
+  /// Canonical request builder for fully-specified HTTP requests.
+  ///
+  /// Prefer this when you need to set multiple fields before sending, or when
+  /// you want to reuse a request value with `with_*` helpers.
   api fn init({
     method: String,
     url: String,
@@ -52,7 +57,7 @@ impl FetchRequest
       timeout_millis
     }
 
-  /// Builds a request from explicit values.
+  /// Shorthand for `init` with string-slice inputs.
   api fn init({
     method: StringSlice,
     url: StringSlice,
@@ -68,23 +73,26 @@ impl FetchRequest
       timeout_millis: timeout_millis
     )
 
-  /// Builds a `GET` request.
+  /// Builds a `GET` request for `url`.
   api fn from_get(url: String) -> FetchRequest
     FetchRequest::init(method: http_get_method(), url: url)
 
-  /// Builds a `GET` request.
+  /// Shorthand for `from_get(url.to_string())`.
   api fn from_get(url: StringSlice) -> FetchRequest
     FetchRequest::from_get(url.to_string())
 
-  /// Builds a `POST` request with a text body.
+  /// Builds a `POST` request with a UTF-8 text body.
   api fn from_post({ url: String, body: String }) -> FetchRequest
     FetchRequest::init(method: http_post_method(), url: url).with_body(body)
 
-  /// Builds a `POST` request with a text body.
+  /// Shorthand for `from_post` with string-slice inputs.
   api fn from_post({ url: StringSlice, body: StringSlice }) -> FetchRequest
     FetchRequest::from_post(url: url.to_string(), body: body.to_string())
 
   /// Returns a copy with one header appended.
+  ///
+  /// Header-name matching in responses is case-insensitive, but this method
+  /// preserves the exact casing you supply.
   api fn with_header(self, { name: String, value: String }) -> FetchRequest
     let ~next_headers = self.headers.copied(1)
     next_headers.push(header(name: name, value: value))
@@ -96,11 +104,11 @@ impl FetchRequest
       timeout_millis: self.timeout_millis
     }
 
-  /// Returns a copy with one header appended.
+  /// Shorthand for `with_header` with string-slice inputs.
   api fn with_header(self, { name: StringSlice, value: StringSlice }) -> FetchRequest
     self.with_header(name: name.to_string(), value: value.to_string())
 
-  /// Returns a copy with a text body.
+  /// Returns a copy with a UTF-8 text body.
   api fn with_body(self, body: String) -> FetchRequest
     FetchRequest {
       method: self.method,
@@ -110,7 +118,7 @@ impl FetchRequest
       timeout_millis: self.timeout_millis
     }
 
-  /// Returns a copy with a text body.
+  /// Shorthand for `with_body(body.to_string())`.
   api fn with_body(self, body: StringSlice) -> FetchRequest
     self.with_body(body.to_string())
 
@@ -124,7 +132,7 @@ impl FetchRequest
       timeout_millis: Some<i32> { value: millis }
     }
 
-  /// Sends this request.
+  /// Sends this request through the host networking effect.
   api fn send(self): Fetch -> Result<FetchResponse, HostError>
     request(request: self)
 
@@ -144,7 +152,9 @@ impl FetchResponse
   api fn is_success(self) -> bool
     self.status >= 200 and self.status < 300
 
-  /// Returns the first header value matching `name`.
+  /// Returns the first response header value matching `name`.
+  ///
+  /// Matching is case-insensitive to align with HTTP header semantics.
   api fn header(self, name: String) -> Option<String>
     let target = name.lowered()
     var index = 0
@@ -158,7 +168,7 @@ impl FetchResponse
       index = index + 1
     None {}
 
-  /// Returns the first header value matching `name`.
+  /// Shorthand for `header(name.to_string())`.
   api fn header(self, name: StringSlice) -> Option<String>
     self.header(name.to_string())
 
@@ -185,21 +195,20 @@ pub eff Fetch
 pub fn header({ name: String, value: String }): () -> FetchHeader
   FetchHeader { name: name, value: value }
 
-/// Creates one header value.
+/// Shorthand for `header` with string-slice inputs.
 pub fn header({ name: StringSlice, value: StringSlice }): () -> FetchHeader
   header(name: name.to_string(), value: value.to_string())
 
 /// Sends an HTTP request.
 ///
-/// This is the lowest-level public API in this module and accepts a fully-built
-/// `FetchRequest` value.
+/// This is the canonical send path for pre-built `FetchRequest` values.
+/// Use it when request construction and request execution should stay separate.
 pub fn request({ request: FetchRequest }): Fetch -> Result<FetchResponse, HostError>
   decode_request_result(Fetch::request(encode_request_payload(request)))
 
 /// Sends an HTTP request from explicit values.
 ///
-/// Example:
-/// `let response = fetch::request_with(method: "PUT".as_slice(), url: url)`
+/// This is the convenience entry point when building a one-off request inline.
 pub fn request({
   method: String,
   url: String,
@@ -215,10 +224,7 @@ pub fn request({
     timeout_millis: timeout_millis
   ))
 
-/// Sends an HTTP request from explicit values.
-///
-/// Example:
-/// `let response = fetch::request_with(method: "PUT".as_slice(), url: url)`
+/// Shorthand for `request` with string-slice inputs.
 pub fn request({
   method: StringSlice,
   url: StringSlice,
@@ -234,78 +240,21 @@ pub fn request({
     timeout_millis: timeout_millis
   )
 
-/// Sends an HTTP request from explicit values.
-pub fn request_with({
-  method: String,
-  url: String,
-  headers?: FetchHeaders,
-  body?: String,
-  timeout_millis?: i32
-}): Fetch -> Result<FetchResponse, HostError>
-  request(
-    method: method,
-    url: url,
-    headers: headers,
-    body: body,
-    timeout_millis: timeout_millis
-  )
-
-/// Sends an HTTP request from explicit values.
-pub fn request_with({
-  method: StringSlice,
-  url: StringSlice,
-  headers?: FetchHeaders,
-  body?: StringSlice,
-  timeout_millis?: i32
-}): Fetch -> Result<FetchResponse, HostError>
-  request(
-    method: method,
-    url: url,
-    headers: headers,
-    body: body,
-    timeout_millis: timeout_millis
-  )
-
 /// Sends a `GET` request.
-///
-/// Example:
-/// `let response = fetch::request_get("https://voyd.dev".as_slice())`
 pub fn get(url: String): Fetch -> Result<FetchResponse, HostError>
   request(request: FetchRequest::from_get(url))
 
-/// Sends a `GET` request.
+/// Shorthand for `get(url.to_string())`.
 pub fn get(url: StringSlice): Fetch -> Result<FetchResponse, HostError>
   get(url.to_string())
 
-/// Sends a `GET` request.
-///
-/// Example:
-/// `let response = fetch::request_get("https://voyd.dev".as_slice())`
-pub fn request_get(url: String): Fetch -> Result<FetchResponse, HostError>
-  get(url)
-
-/// Sends a `GET` request.
-pub fn request_get(url: StringSlice): Fetch -> Result<FetchResponse, HostError>
-  get(url)
-
-/// Sends a `POST` request with a text body.
+/// Sends a `POST` request with a UTF-8 text body.
 pub fn post({ url: String, body: String }): Fetch -> Result<FetchResponse, HostError>
   request(request: FetchRequest::from_post(url: url, body: body))
 
-/// Sends a `POST` request with a text body.
+/// Shorthand for `post` with string-slice inputs.
 pub fn post({ url: StringSlice, body: StringSlice }): Fetch -> Result<FetchResponse, HostError>
   post(url: url.to_string(), body: body.to_string())
-
-/// Sends a `POST` request with a text body.
-///
-/// Example:
-/// `let response = fetch::request_post(url: api.as_slice(), body: payload.as_slice())`
-pub fn request_post({ url: String, body: String }): Fetch -> Result<FetchResponse, HostError>
-  post(url: url, body: body)
-
-/// Sends a `POST` request with a text body.
-pub fn request_post({ url: StringSlice, body: StringSlice }): Fetch -> Result<FetchResponse, HostError>
-  post(url: url, body: body)
 
 fn encode_request_payload(request: FetchRequest): () -> MsgPack
   HostDto::init()
@@ -349,46 +298,105 @@ fn encode_optional_i32(value: Option<i32>): () -> MsgPack
       msgpack::make_null()
 
 fn decode_request_result(payload: MsgPack): () -> Result<FetchResponse, HostError>
-  let decoded = HostDto::unpack(payload)
-  if decoded.read_bool("ok") == false:
-    return Err<HostError> { error: decode_host_error(decoded) }
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok"))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<bool> { value }:
+          if value == false:
+            decode_host_error_result(decoded)
+          else:
+            match(decoded.read_msgpack("value"))
+              Err<HostError> { error }:
+                Err<HostError> { error: error }
+              Ok<MsgPack> { value }:
+                decode_fetch_response(value)
 
-  Ok<FetchResponse> { value: decode_fetch_response(decoded.read_msgpack("value")) }
+fn decode_fetch_response(payload: MsgPack): () -> Result<FetchResponse, HostError>
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_i32("status"))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<i32> { value: status }:
+          match(decoded.read_string("status_text"))
+            Err<HostError> { error }:
+              Err<HostError> { error: error }
+            Ok<String> { value: status_text }:
+              match(decoded.read_msgpack("headers"))
+                Err<HostError> { error }:
+                  Err<HostError> { error: error }
+                Ok<MsgPack> { value: headers_payload }:
+                  match(decode_headers(headers_payload))
+                    Err<HostError> { error }:
+                      Err<HostError> { error: error }
+                    Ok<FetchHeaders> { value: headers }:
+                      match(decoded.read_string("body"))
+                        Err<HostError> { error }:
+                          Err<HostError> { error: error }
+                        Ok<String> { value: body }:
+                          Ok<FetchResponse> {
+                            value: FetchResponse {
+                              status: status,
+                              status_text: status_text,
+                              headers: headers,
+                              body: body
+                            }
+                          }
 
-fn decode_fetch_response(payload: MsgPack): () -> FetchResponse
-  let decoded = HostDto::unpack(payload)
-  FetchResponse {
-    status: decoded.read_i32("status"),
-    status_text: decoded.read_string("status_text"),
-    headers: decode_headers(decoded.read_msgpack("headers")),
-    body: decoded.read_string("body")
-  }
+fn decode_headers(payload: MsgPack): () -> Result<FetchHeaders, HostError>
+  match(msgpack::unpack_array(payload))
+    Err<MsgPackError> { error }:
+      Err<HostError> { error: msgpack_error_to_host_error(error) }
+    Ok<Array<MsgPack>> { value: source }:
+      let ~headers = Array<FetchHeader>::with_capacity(source.len())
+      var index = 0
+      while index < source.len() do:
+        match(source.get(index))
+          Some<MsgPack> { value }:
+            match(decode_header(value))
+              Ok<FetchHeader> { value }:
+                headers.push(value)
+              Err<HostError> { error }:
+                return Err<HostError> { error: error }
+          None:
+            void
+        index = index + 1
+      Ok<FetchHeaders> { value: headers }
 
-fn decode_headers(payload: MsgPack): () -> FetchHeaders
-  let source = msgpack::unpack_array(payload)
-  let ~headers = Array<FetchHeader>::with_capacity(source.len())
-  var index = 0
-  while index < source.len() do:
-    match(source.get(index))
-      Some<MsgPack> { value }:
-        headers.push(decode_header(value))
-      None:
-        void
-    index = index + 1
-  headers
+fn decode_header(payload: MsgPack): () -> Result<FetchHeader, HostError>
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_string("name"))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<String> { value: name }:
+          match(decoded.read_string("value"))
+            Err<HostError> { error }:
+              Err<HostError> { error: error }
+            Ok<String> { value }:
+              Ok<FetchHeader> { value: FetchHeader { name: name, value: value } }
 
-fn decode_header(payload: MsgPack): () -> FetchHeader
-  let decoded = HostDto::unpack(payload)
-  FetchHeader {
-    name: decoded.read_string("name"),
-    value: decoded.read_string("value")
-  }
+fn decode_host_error_result(payload: HostDto): () -> Result<FetchResponse, HostError>
+  match(payload.read_i32("code"))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<i32> { value: code }:
+      match(payload.read_string("message"))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<String> { value: message }:
+          Err<HostError> { error: HostError { code: code, message: message } }
 
-fn decode_host_error(payload: HostDto): () -> HostError
-  HostError {
-    code: payload.read_i32("code"),
-    message: payload.read_string("message")
-  }
+fn msgpack_error_to_host_error(error: MsgPackError): () -> HostError
+  HostError { code: error.code, message: error.message }
 
 fn http_get_method() -> String
   "GET".as_slice().to_string()

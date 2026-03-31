@@ -1,32 +1,27 @@
 //! Public string module surface.
 //!
 //! This module re-exports the core string types and parse/error helpers from
-//! `std::string::type`, and provides top-level constructors for UTF-8 data.
-//! Use this module when you want the default string APIs without importing
-//! implementation details.
+//! `std::string::type`. Prefer `from_utf8` for external bytes and reserve
+//! `new_string` for advanced code that already owns trusted UTF-8 storage.
 
 use std::array::Array
 use std::result::types::{ Result }
 use self::type::self as string_type
-pub use self::errors::{ ParseFloatError, ParseIntError, Utf8Error }
 pub use self::index::StringIndex
-pub use self::type::{ CharSet, String, StringSlice }
+pub use self::type::{ CharSet, ParseFloatError, ParseIntError, String, StringSlice, Utf8Error }
 
 @intrinsic(name: "__string_new", uses_signature: true)
-/// Builds a string from owned UTF-8 byte storage without validation.
+/// Builds a string from owned UTF-8 byte storage without re-validating it.
 ///
-/// This constructor assumes `from_bytes` already contains UTF-8 data.
-/// Invalid sequences are normalized into replacement runes by the lower-level
-/// decoder used internally.
+/// This is the sharp-edge constructor for code that already controls the
+/// underlying bytes. Invalid sequences are normalized into replacement runes
+/// during decoding, so prefer `from_utf8` when bytes come from external input.
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   string_type::new_string(from_bytes)
 
 /// Validates UTF-8 bytes and builds a string on success.
 ///
-/// - `source`: UTF-8 bytes to validate and convert.
-///
-/// Example:
-/// `String::from_utf8([72, 101, 108, 108, 111])`
-/// returns `Ok("Hello")`.
+/// This is the canonical public entry point for converting byte arrays into
+/// strings from untrusted or host-provided data.
 pub fn from_utf8(source: Array<i32>) -> Result<String, Utf8Error>
   String::from_utf8(source)

@@ -1,6 +1,6 @@
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
-use std::error::{ HostError, IoError }
+use std::error::{ HostError, IoError, panic }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
@@ -122,8 +122,8 @@ fn read_line_with_capture(~prompts: Array<String>): () -> Result<Option<String>,
   try
     read_line("Name: ".as_slice().to_string())
   Input::read_line(tail, payload):
-    let decoded = HostDto::unpack(payload)
-    prompts.push(decoded.read_string("prompt"))
+    let decoded = unpack_host_dto(payload)
+    prompts.push(read_host_string(decoded, "prompt"))
     tail(host_dto_test::host_ok_with_value(msgpack::make_string("voyd".as_slice().to_string())))
   Input::read_bytes_op(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
@@ -144,8 +144,8 @@ fn read_bytes_with_capture(~max_values: Array<i32>): () -> Result<Option<Bytes>,
   try
     read_bytes(3)
   Input::read_bytes_op(tail, payload):
-    let decoded = HostDto::unpack(payload)
-    max_values.push(decoded.read_i32("max_bytes"))
+    let decoded = unpack_host_dto(payload)
+    max_values.push(read_host_i32(decoded, "max_bytes"))
     let ~bytes = ByteBuffer::with_capacity(3)
     bytes.push(7)
     bytes.push(8)
@@ -192,3 +192,27 @@ fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
       present
     None:
       fallback
+
+fn unpack_host_dto(payload: MsgPack): () -> HostDto
+  match(HostDto::unpack(payload))
+    Ok<HostDto> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto".as_slice())
+      HostDto::init()
+
+fn read_host_string(payload: HostDto, key: String): () -> String
+  match(payload.read_string(key))
+    Ok<String> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto string".as_slice())
+      String::init()
+
+fn read_host_i32(payload: HostDto, key: String): () -> i32
+  match(payload.read_i32(key))
+    Ok<i32> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto i32".as_slice())
+      0

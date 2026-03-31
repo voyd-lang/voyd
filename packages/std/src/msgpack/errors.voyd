@@ -1,0 +1,31 @@
+//! Public MessagePack boundary error definitions.
+
+use std::string::String
+
+pub obj MsgPackError {
+  /// Machine-readable error code.
+  api code: i32,
+  /// Human-readable error message.
+  api message: String
+}
+
+pub fn error_code_buffer_too_small() -> i32
+  1
+
+pub fn error_code_decode_failed() -> i32
+  2
+
+pub fn error_code_trailing_bytes() -> i32
+  3
+
+pub fn error_code_type_mismatch() -> i32
+  4
+
+pub fn error_code_numeric_overflow() -> i32
+  5
+
+pub fn error_code_missing_field() -> i32
+  6
+
+pub fn make_error(code: i32, message: String): () -> MsgPackError
+  MsgPackError { code: code, message: message }

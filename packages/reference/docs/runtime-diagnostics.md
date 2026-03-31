@@ -19,6 +19,11 @@ named `voyd.runtime_diagnostics` containing trap metadata such as:
 `@voyd-lang/js-host` and `@voyd-lang/sdk` read that section and attach structured data to
 runtime errors.
 
+When a program calls `std::error::panic(message)`, the runtime also preserves
+that human-readable message in the structured diagnostics when the host can
+read it. If transport fails at the lowest level, diagnostics report that the
+panic message was unavailable instead of silently dropping it.
+
 ## SDK behavior
 
 `@voyd-lang/sdk` supports:
@@ -43,3 +48,5 @@ diagnostics unless the compile call is overridden elsewhere.
 - Re-enable them for optimized builds when investigating production-only
   failures.
 - Check `isVoydRuntimeError(error)` before reading `error.voyd`.
+- Read `error.voyd.panic` when you need the original `panic(message)` text or
+  an explicit reason the message could not be recovered.

@@ -193,13 +193,9 @@ PASS src::set::set values returns iterable keys
 PASS src::string_bytes_iterator.test::string to_utf8 iterates utf8 bytes
 PASS src::time::system_time unix_millis is pure
 PASS src::time::sleep decodes host errors
-PASS src::time::on_timeout invokes callback on success
-PASS src::time::on_timeout decodes host errors and skips callback
-PASS src::time::on_interval repeats callbacks and surfaces host errors
-PASS src::time::on_interval clears timer when sleep fails
 PASS src::traits::contracts.test::trait contracts work for baseline std traits
 
-passed 210, failed 0, skipped 0 (210 total)
+passed 206, failed 0, skipped 0 (206 total)
 `,
   },
   {

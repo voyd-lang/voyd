@@ -3,18 +3,21 @@ import type { ProgramSymbolId, TypeId } from "../../../semantics/ids.js";
 import { requireFunctionMetaByName } from "../../function-lookup.js";
 import { stateFor } from "./state.js";
 
+const PUBLIC_MSGPACK_MODULE_ID = "std::msgpack";
+const RAW_MSGPACK_MODULE_ID = "std::msgpack::fns";
+
 export type MsgPackFunctions = {
   msgPackTypeId: TypeId;
   encodeValue: FunctionMetadata;
   decodeValue: FunctionMetadata;
-  packNull: FunctionMetadata;
-  packBool: FunctionMetadata;
-  packArray: FunctionMetadata;
-  packI32: FunctionMetadata;
-  packI64: FunctionMetadata;
-  packF32: FunctionMetadata;
-  packF64: FunctionMetadata;
-  packMap: FunctionMetadata;
+  makeNull: FunctionMetadata;
+  makeBool: FunctionMetadata;
+  makeArray: FunctionMetadata;
+  makeI32: FunctionMetadata;
+  makeI64: FunctionMetadata;
+  makeF32: FunctionMetadata;
+  makeF64: FunctionMetadata;
+  makeMap: FunctionMetadata;
   unpackBool: FunctionMetadata;
   unpackArray: FunctionMetadata;
   unpackI32: FunctionMetadata;
@@ -63,17 +66,19 @@ export const ensureMsgPackFunctions = (
   stateFor(ctx, MSGPACK_FUNCS_KEY, () => {
     const encodeValue = requireFunctionMetaByName({
       ctx,
-      moduleId: "std::msgpack",
+      moduleId: RAW_MSGPACK_MODULE_ID,
       name: "encode_value",
       paramCount: 3,
     });
     const signature = ctx.program.functions.getSignature(
-      "std::msgpack",
+      RAW_MSGPACK_MODULE_ID,
       encodeValue.symbol
     );
     const msgPackTypeId = signature?.parameters[0]?.typeId;
     if (typeof msgPackTypeId !== "number") {
-      throw new Error("std::msgpack::encode_value missing MsgPack parameter");
+      throw new Error(
+        "std::msgpack::fns::encode_value missing MsgPack parameter"
+      );
     }
 
     const msgpack = {
@@ -81,133 +86,133 @@ export const ensureMsgPackFunctions = (
       encodeValue,
       decodeValue: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: RAW_MSGPACK_MODULE_ID,
         name: "decode_value",
         paramCount: 2,
       }),
-      packNull: requireFunctionMetaByName({
+      makeNull: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
-        name: "pack_null",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "make_null",
         paramCount: 0,
       }),
-      packBool: requireFunctionMetaByName({
+      makeBool: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
-        name: "pack_bool",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "make_bool",
         paramCount: 1,
       }),
-      packArray: requireFunctionMetaByName({
+      makeArray: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
-        name: "pack_array",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "make_array",
         paramCount: 1,
       }),
-      packI32: requireFunctionMetaByName({
+      makeI32: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
-        name: "pack_i32",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "make_i32",
         paramCount: 1,
       }),
-      packI64: requireFunctionMetaByName({
+      makeI64: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
-        name: "pack_i64",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "make_i64",
         paramCount: 1,
       }),
-      packF32: requireFunctionMetaByName({
+      makeF32: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
-        name: "pack_f32",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "make_f32",
         paramCount: 1,
       }),
-      packF64: requireFunctionMetaByName({
+      makeF64: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
-        name: "pack_f64",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "make_f64",
         paramCount: 1,
       }),
-      packMap: requireFunctionMetaByName({
+      makeMap: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
-        name: "pack_map",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "make_map",
         paramCount: 1,
       }),
       unpackBool: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: RAW_MSGPACK_MODULE_ID,
         name: "unpack_bool",
         paramCount: 1,
       }),
       unpackArray: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: RAW_MSGPACK_MODULE_ID,
         name: "unpack_array",
         paramCount: 1,
       }),
       unpackI32: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: RAW_MSGPACK_MODULE_ID,
         name: "unpack_i32",
         paramCount: 1,
       }),
       unpackI64: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: RAW_MSGPACK_MODULE_ID,
         name: "unpack_i64",
         paramCount: 1,
       }),
       unpackF32: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: RAW_MSGPACK_MODULE_ID,
         name: "unpack_f32",
         paramCount: 1,
       }),
       unpackF64: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: RAW_MSGPACK_MODULE_ID,
         name: "unpack_f64",
         paramCount: 1,
       }),
       unpackMap: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: RAW_MSGPACK_MODULE_ID,
         name: "unpack_map",
         paramCount: 1,
       }),
       arrayWithCapacity: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
         name: "msgpack_array_with_capacity",
         paramCount: 1,
       }),
       arrayPush: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
         name: "msgpack_array_push",
         paramCount: 2,
       }),
       arrayLength: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
         name: "msgpack_array_length",
         paramCount: 1,
       }),
       arrayRawStorage: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
         name: "msgpack_array_raw_storage",
         paramCount: 1,
       }),
       mapNew: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
         name: "msgpack_map_new",
         paramCount: 0,
       }),
       mapSet: requireFunctionMetaByName({
         ctx,
-        moduleId: "std::msgpack",
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
         name: "msgpack_map_set",
         paramCount: 3,
       }),
@@ -216,14 +221,14 @@ export const ensureMsgPackFunctions = (
     [
       msgpack.encodeValue,
       msgpack.decodeValue,
-      msgpack.packNull,
-      msgpack.packBool,
-      msgpack.packArray,
-      msgpack.packI32,
-      msgpack.packI64,
-      msgpack.packF32,
-      msgpack.packF64,
-      msgpack.packMap,
+      msgpack.makeNull,
+      msgpack.makeBool,
+      msgpack.makeArray,
+      msgpack.makeI32,
+      msgpack.makeI64,
+      msgpack.makeF32,
+      msgpack.makeF64,
+      msgpack.makeMap,
       msgpack.unpackBool,
       msgpack.unpackArray,
       msgpack.unpackI32,

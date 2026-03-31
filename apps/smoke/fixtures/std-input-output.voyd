@@ -3,7 +3,7 @@ use std::bytes::ByteBuffer
 use std::error::IoError
 use std::input::{ read_bytes, is_tty as input_is_tty }
 use std::optional::types::all
-use std::output::{ write, write_line, write_bytes, flush, is_tty as output_is_tty, StdErr }
+use std::output::{ write, write_line, flush, is_tty as output_is_tty, StdErr }
 use std::result::types::all
 
 fn sum_bytes(bytes: Bytes): () -> i32
@@ -45,7 +45,7 @@ pub fn io_write_bytes_probe() -> i32
   let ~buffer = ByteBuffer::with_capacity(2)
   buffer.push(7)
   buffer.push(8)
-  let _ = write_bytes(buffer.as_bytes(), StdErr {})
+  let _ = write(buffer.as_bytes(), StdErr {})
   1
 
 pub fn io_write_combo_probe() -> i32
@@ -54,7 +54,7 @@ pub fn io_write_combo_probe() -> i32
   buffer.push(8)
   let _ = write("hello".as_slice())
   let _ = write_line("ok".as_slice())
-  let _ = write_bytes(buffer.as_bytes(), StdErr {})
+  let _ = write(buffer.as_bytes(), StdErr {})
   let _ = flush()
   let _ = flush(StdErr {})
   1
@@ -75,7 +75,7 @@ pub fn io_read_bytes_to_write_probe() -> i32
     Ok<Option<Bytes>> { value }:
       match(value)
         Some<Bytes> { value: bytes }:
-          let _ = write_bytes(bytes, StdErr {})
+          let _ = write(bytes, StdErr {})
           1
         None:
           -1
@@ -105,7 +105,7 @@ pub fn io_output_combo_probe() -> i32
   buffer.push(8)
   let _ = write("hello".as_slice())
   let _ = write_line("ok".as_slice())
-  let _ = write_bytes(buffer.as_bytes(), StdErr {})
+  let _ = write(buffer.as_bytes(), StdErr {})
   let _ = flush()
   let _ = flush(StdErr {})
   1

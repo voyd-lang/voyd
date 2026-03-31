@@ -1,4 +1,5 @@
 use std::all
+use std::array::new_array_unchecked
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 

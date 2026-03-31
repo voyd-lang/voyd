@@ -2793,10 +2793,7 @@ const reportUnknownFunction = ({
   emitDiagnostic({
     ctx,
     code: "TY0006",
-    params:
-      name === "new_string"
-        ? { kind: "missing-string-helper", name: "new_string" }
-        : { kind: "unknown-function", name },
+    params: { kind: "unknown-function", name },
     span: normalizeSpan(span),
   });
 
@@ -5619,8 +5616,13 @@ const typeIntrinsicCall = (
       });
     case "__memory_copy":
       return typeMemoryCopyIntrinsic({ args, ctx, state, typeArguments });
+    case "__panic_scratch_ptr":
+    case "__panic_scratch_capacity":
+      return typeMemorySizeIntrinsic({ args, ctx, typeArguments });
+    case "__panic_scratch_set":
+      return typePanicScratchSetIntrinsic({ args, ctx, state, typeArguments });
     case "__panic_trap":
-      return typePanicTrapIntrinsic({ args, ctx, typeArguments });
+      return typePanicTrapIntrinsic({ args, ctx, state, typeArguments });
     case "__shift_l":
     case "__shift_ru":
       return typeShiftIntrinsic({ name, args, ctx, state, typeArguments });
@@ -6313,14 +6315,50 @@ const typeMemoryCopyIntrinsic = ({
 const typePanicTrapIntrinsic = ({
   args,
   ctx,
+  state,
   typeArguments,
 }: {
   args: readonly Arg[];
   ctx: TypingContext;
+  state: TypingState;
   typeArguments?: readonly TypeId[];
 }): TypeId => {
-  assertIntrinsicArgCount({ name: "__panic_trap", args, expected: 0 });
+  assertIntrinsicArgCount({ name: "__panic_trap", args, expected: 2 });
   assertNoIntrinsicTypeArgs("__panic_trap", typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(args[0]!.type, int32, ctx, state, "__panic_trap ptr");
+  ensureTypeMatches(args[1]!.type, int32, ctx, state, "__panic_trap len");
+  return ctx.primitives.void;
+};
+
+const typePanicScratchSetIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name: "__panic_scratch_set", args, expected: 2 });
+  assertNoIntrinsicTypeArgs("__panic_scratch_set", typeArguments);
+  const int32 = getPrimitiveType(ctx, "i32");
+  ensureTypeMatches(
+    args[0]!.type,
+    int32,
+    ctx,
+    state,
+    "__panic_scratch_set ptr"
+  );
+  ensureTypeMatches(
+    args[1]!.type,
+    int32,
+    ctx,
+    state,
+    "__panic_scratch_set capacity"
+  );
   return ctx.primitives.void;
 };
 

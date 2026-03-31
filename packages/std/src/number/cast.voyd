@@ -132,10 +132,14 @@ pub fn to_string(value: f32) -> String
 
 /// Formats an `f64` as decimal text.
 ///
-/// Non-finite values format as `"0"` to preserve JSON-safe encoding behavior.
+/// Non-finite values format as `NaN`, `Infinity`, or `-Infinity`.
 pub fn to_string(value: f64) -> String
+  if is_nan_f64(value):
+    return "NaN"
   if is_non_finite_f64(value):
-    return "0"
+    if value < 0.0:
+      return "-Infinity"
+    return "Infinity"
   if value == 0.0:
     return "0"
 
@@ -174,6 +178,9 @@ pub fn to_string(value: f64) -> String
 
 fn is_finite_f64(value: f64) -> bool
   (value - value) == 0.0
+
+fn is_nan_f64(value: f64) -> bool
+  value != value
 
 fn is_non_finite_f64(value: f64) -> bool
   not is_finite_f64(value)

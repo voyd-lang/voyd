@@ -167,6 +167,67 @@ pub fn main() -> i32
     expect(allDiagnostics.some((diag) => /answer/i.test(diag.message))).toBe(true);
   });
 
+  it("does not bring raw std constructors into scope through the implicit prelude", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: `
+pub fn main() -> i32
+  new_string()
+`,
+      [`${stdRoot}${sep}prelude.voyd`]: `
+pub fn keep_parser_happy() -> i32
+  0
+`,
+      [`${stdRoot}${sep}string.voyd`]: `
+pub fn new_string() -> i32
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const allDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      allDiagnostics.some((diag) => /new_string/i.test(diag.message))
+    ).toBe(true);
+  });
+
+  it("still allows raw std constructors through explicit module imports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: `
+use std::string::new_string
+
+pub fn main() -> i32
+  new_string()
+`,
+      [`${stdRoot}${sep}prelude.voyd`]: `
+pub fn keep_parser_happy() -> i32
+  0
+`,
+      [`${stdRoot}${sep}string.voyd`]: `
+pub fn new_string() -> i32
+  1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
   it("type-checks imported functions with their dependency signatures", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

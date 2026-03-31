@@ -1,34 +1,10 @@
-//! Shared error object definitions and panic primitive for the standard library.
+//! Shared runtime and host error definitions for the standard library.
 //!
-//! These types model common failure categories surfaced by std modules and host
-//! effects, while `panic` exposes an intrinsic trap for unrecoverable failures.
+//! Domain-specific parse and codec errors live with their owning modules.
+//! `std::error` only defines cross-cutting runtime failures plus panic support.
 
-use std::string::type::{ String, StringSlice }
-
-pub obj Utf8Error {
-  /// Human-readable error message.
-  api message: String
-}
-
-pub obj ParseIntError {
-  /// Human-readable error message.
-  api message: String
-}
-
-pub obj ParseFloatError {
-  /// Human-readable error message.
-  api message: String
-}
-
-pub obj DecodeError {
-  /// Human-readable error message.
-  api message: String
-}
-
-pub obj JsonError {
-  /// Human-readable error message.
-  api message: String
-}
+use std::memory::self as memory
+use std::string::type::{ String, StringSlice, new_string }
 
 pub obj HostError {
   /// Machine-readable error code.
@@ -48,11 +24,57 @@ pub trait Error<T>
   fn message(self) -> String
 
 @intrinsic(name: "__panic_trap")
-fn panic_trap(): () -> void __panic_trap()
+fn panic_trap(ptr: i32, len: i32): () -> void __panic_trap(ptr, len)
+
+@intrinsic(name: "__panic_scratch_ptr")
+fn panic_scratch_ptr(): () -> i32 __panic_scratch_ptr()
+
+@intrinsic(name: "__panic_scratch_capacity")
+fn panic_scratch_capacity(): () -> i32 __panic_scratch_capacity()
+
+@intrinsic(name: "__panic_scratch_set")
+fn panic_scratch_set(ptr: i32, capacity: i32): () -> void
+  __panic_scratch_set(ptr, capacity)
 
 /// Stops execution immediately with a panic.
-pub fn panic(_message: String) -> void
-  panic_trap()
+///
+/// When host/runtime diagnostics are available, the panic message is preserved
+/// so runtimes can surface human-readable failure context instead of a bare trap.
+pub fn panic(message: String) -> void
+  let len = message.byte_len()
+  let ptr = reserve_panic_message_storage(len)
+  if ptr >= 0 and len > 0:
+    copy_string_to_linear_memory(message, ptr)
+  panic_trap(ptr, len)
 
-pub fn panic(_message: StringSlice) -> void
-  panic(_message.to_string())
+pub fn panic(message: StringSlice) -> void
+  panic(message.to_string())
+
+fn reserve_panic_message_storage(byte_count: i32): () -> i32
+  if byte_count <= 0:
+    return 0
+
+  if byte_count > panic_scratch_capacity_bytes():
+    return -1
+
+  let existing_ptr = panic_scratch_ptr()
+  let existing_capacity = panic_scratch_capacity()
+  if existing_ptr >= 0 and byte_count <= existing_capacity:
+    return existing_ptr
+
+  let base = memory::size() * 65536
+  let reserved_pages = panic_scratch_capacity_bytes() / 65536
+  if memory::grow(reserved_pages) == -1:
+    return -1
+  panic_scratch_set(base, panic_scratch_capacity_bytes())
+  base
+
+fn panic_scratch_capacity_bytes(): () -> i32
+  65536
+
+fn copy_string_to_linear_memory(message: String, ptr: i32) -> void
+  let raw = message.raw_bytes()
+  var index = 0
+  while index < message.byte_len() do:
+    memory::store_u8(ptr + index, __array_get(raw, index))
+    index = index + 1

@@ -97,8 +97,9 @@ test "to_string formats floating-point values":
     index = index + 1
   assert(to_string(tiny).equals("0"), eq: false)
 
-  assert(to_string(1.0 / 0.0).equals("0"), eq: true)
-  assert(to_string(0.0 / 0.0).equals("0"), eq: true)
+  assert(to_string(1.0 / 0.0).equals("Infinity"), eq: true)
+  assert(to_string((0.0 - 1.0) / 0.0).equals("-Infinity"), eq: true)
+  assert(to_string(0.0 / 0.0).equals("NaN"), eq: true)
 
 fn pow2_i64(exp: i32): () -> i64
   var out = to_i64(1)

@@ -115,7 +115,7 @@ const buildEffectRequestMap = ({
         [
           ctx.mod.local.get(mapLocal, mapType),
           keys.effectId,
-          ctx.mod.call(msgpack.packI64.wasmName, [effectId], msgPackType),
+          ctx.mod.call(msgpack.makeI64.wasmName, [effectId], msgPackType),
         ],
         mapType
       )
@@ -127,7 +127,7 @@ const buildEffectRequestMap = ({
         [
           ctx.mod.local.get(mapLocal, mapType),
           keys.opId,
-          ctx.mod.call(msgpack.packI32.wasmName, [opId], msgPackType),
+          ctx.mod.call(msgpack.makeI32.wasmName, [opId], msgPackType),
         ],
         mapType
       )
@@ -139,7 +139,7 @@ const buildEffectRequestMap = ({
         [
           ctx.mod.local.get(mapLocal, mapType),
           keys.opIndex,
-          ctx.mod.call(msgpack.packI32.wasmName, [opIndex], msgPackType),
+          ctx.mod.call(msgpack.makeI32.wasmName, [opIndex], msgPackType),
         ],
         mapType
       )
@@ -151,7 +151,7 @@ const buildEffectRequestMap = ({
         [
           ctx.mod.local.get(mapLocal, mapType),
           keys.resumeKind,
-          ctx.mod.call(msgpack.packI32.wasmName, [resumeKind], msgPackType),
+          ctx.mod.call(msgpack.makeI32.wasmName, [resumeKind], msgPackType),
         ],
         mapType
       )
@@ -163,7 +163,7 @@ const buildEffectRequestMap = ({
         [
           ctx.mod.local.get(mapLocal, mapType),
           keys.handle,
-          ctx.mod.call(msgpack.packI32.wasmName, [handle], msgPackType),
+          ctx.mod.call(msgpack.makeI32.wasmName, [handle], msgPackType),
         ],
         mapType
       )
@@ -175,7 +175,7 @@ const buildEffectRequestMap = ({
         [
           ctx.mod.local.get(mapLocal, mapType),
           keys.args,
-          ctx.mod.call(msgpack.packArray.wasmName, [argsArray], msgPackType),
+          ctx.mod.call(msgpack.makeArray.wasmName, [argsArray], msgPackType),
         ],
         mapType
       )
@@ -187,7 +187,7 @@ const buildEffectRequestMap = ({
     [
       ...ops,
       ctx.mod.call(
-        msgpack.packMap.wasmName,
+        msgpack.makeMap.wasmName,
         [ctx.mod.local.get(mapLocal, mapType)],
         msgPackType
       ),

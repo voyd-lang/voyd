@@ -2,6 +2,11 @@
 //!
 //! This module re-exports core std modules and common types/functions for convenient
 //! import via `std::pkg`.
+//!
+//! Package-root exports intentionally mirror the safe default surface area.
+//! Advanced/raw constructors stay available from their owning modules so callers
+//! opt in explicitly, for example `std::array::new_array_unchecked` or
+//! `std::string::new_string`.
 
 pub self::array
 pub self::optional
@@ -34,13 +39,12 @@ pub self::output
 pub self::path
 pub self::fs
 pub self::test
-pub std::output::print
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::all
 pub std::result::types::{ Result, Ok, Err }
 pub std::result::fns::all
 pub std::enums::{ enum }
-pub std::array::{ Array, ArrayPop, new_array_unchecked }
+pub std::array::{ Array, ArrayPop }
 pub std::dict::{ Dict, DictEntry, DictKey }
 pub std::traits::{ Sequence, Iterator, for }
 pub std::range::{ Range }
@@ -57,7 +61,6 @@ pub std::string::{
   Utf8Error,
   ParseIntError,
   ParseFloatError,
-  new_string,
   from_utf8
 }
 pub std::box::{ Box }

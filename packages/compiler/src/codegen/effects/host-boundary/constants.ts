@@ -7,6 +7,7 @@ export const EFFECTS_MEMORY_INTERNAL = LINEAR_MEMORY_INTERNAL;
 
 export const EFFECTS_HOST_BOUNDARY_STD_DEPS = [
   "std::msgpack",
+  "std::msgpack::fns",
   "std::string",
 ] as const;
 

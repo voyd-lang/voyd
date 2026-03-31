@@ -6,7 +6,7 @@ import {
 } from "../ast/index.js";
 import { cloneAttributes } from "../ast/syntax.js";
 import { SyntaxMacro } from "./types.js";
-import { parseStringValue } from "./string-value.js";
+import { parseStringValue } from "../string-value.js";
 import { transformFormSequence } from "./sequence-transform.js";
 
 type PendingIntrinsicTypeAttribute = { intrinsicType: string; source: Form };

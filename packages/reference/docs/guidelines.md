@@ -26,6 +26,16 @@ clamp(7, min: 1, max: 5)
 records.contains(where: (record) => record.active)
 ```
 
+## API docs
+
+- Document the canonical operation, not every forwarding overload.
+- Give one primary doc block to each conceptual API family.
+- Thin overloads may omit docs entirely or use a one-line redirect.
+- Use doc comments for semantics, failure behavior, ownership/performance
+  caveats, and recommended usage.
+- Keep examples on the preferred public spelling rather than compatibility
+  helpers or aliases.
+
 ## Effects
 
 For public effects, use stable dotted ids.
