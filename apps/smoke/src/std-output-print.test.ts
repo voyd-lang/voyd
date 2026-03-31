@@ -12,19 +12,19 @@ const expectCompileSuccess = (
   return result;
 };
 
-describe("smoke: std output write_line", () => {
-  it("supports bare write_line from an explicit std import", async () => {
+describe("smoke: std output print", () => {
+  it("supports bare print from the implicit prelude", async () => {
     const sdk = createSdk();
     const compiled = expectCompileSuccess(
       await sdk.compile({
-        source: `use std::output::{ Output, write_line }
+        source: `use std::output::Output
 
-pub fn write_text(): Output -> i32
-  let _ = write_line("hello")
+pub fn print_text(): Output -> i32
+  print("hello")
   1
 
-pub fn write_text_again(): Output -> i32
-  let _ = write_line("42")
+pub fn print_number(): Output -> i32
+  print(42)
   1
 `,
       })
@@ -43,8 +43,8 @@ pub fn write_text_again(): Output -> i32
       },
     });
 
-    await expect(host.run<number>("write_text")).resolves.toBe(1);
-    await expect(host.run<number>("write_text_again")).resolves.toBe(1);
+    await expect(host.run<number>("print_text")).resolves.toBe(1);
+    await expect(host.run<number>("print_number")).resolves.toBe(1);
 
     expect(writes).toEqual([
       { target: "stdout", value: "hello\n" },

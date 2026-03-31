@@ -11,6 +11,7 @@ use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::MsgPackError
 use std::msgpack::self as msgpack
+use std::number::to_string
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
 
@@ -80,6 +81,38 @@ pub fn write_line(value: StringSlice, target: OutputTarget): Output -> Result<Un
 /// Shorthand for `write_line(value.as_slice(), target)`.
 pub fn write_line(value: String, target: OutputTarget): Output -> Result<Unit, IoError>
   write_line(value.as_slice(), target)
+
+/// Writes one whole line to stdout.
+///
+/// `print` is a best-effort convenience helper for debugging and scripting. It
+/// intentionally ignores write failures instead of surfacing `IoError`. Use
+/// `write_line` when you need to observe or handle output errors.
+pub fn print(value: StringSlice): Output -> void
+  match(write_line(value))
+    Ok<Unit>:
+      void
+    Err<IoError>:
+      void
+
+/// Shorthand for `print(value.as_slice())`.
+pub fn print(value: String): Output -> void
+  print(value.as_slice())
+
+/// Shorthand for `print(to_string(value))`.
+pub fn print(value: i32): Output -> void
+  print(to_string(value))
+
+/// Shorthand for `print(to_string(value))`.
+pub fn print(value: i64): Output -> void
+  print(to_string(value))
+
+/// Shorthand for `print(to_string(value))`.
+pub fn print(value: f32): Output -> void
+  print(to_string(value))
+
+/// Shorthand for `print(to_string(value))`.
+pub fn print(value: f64): Output -> void
+  print(to_string(value))
 
 /// Shorthand for `write(bytes, StdOut {})`.
 pub fn write(bytes: Bytes): Output -> Result<Unit, IoError>
