@@ -1,4 +1,3 @@
-use std::array::new_array_unchecked
 use std::msgpack::MsgPack
 use std::all
 use std::string::type::new_string

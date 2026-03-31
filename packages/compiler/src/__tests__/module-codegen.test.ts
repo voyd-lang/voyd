@@ -412,6 +412,36 @@ pub fn new_string(from_bytes: FixedArray<i32>): () -> String
     expect((instance.exports.main as () => number)()).toBe(1);
   });
 
+  it("keeps array constructor dependencies reachable for module-let initializers without a prelude new_array_unchecked export", async () => {
+    const root = resolve("/proj/src");
+    const std = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `let values = [1, 2, 3]
+
+pub fn main() -> i32
+  1`,
+      [`${std}${sep}prelude.voyd`]: `pub std::array::Array`,
+      [`${std}${sep}array.voyd`]: `pub obj FixedArray<T> {}
+pub obj Array<T> {
+  storage: FixedArray<T>
+}
+
+pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
+  Array<T> { storage: source }
+`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root, std },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(1);
+  });
+
   it("supports module-let initializers that reference imported module lets", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

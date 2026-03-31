@@ -1,11 +1,10 @@
 import {
   Expr,
+  call,
   isCommentAtom,
   isIdentifierAtom,
   isWhitespaceAtom,
-  call,
   label,
-  surfaceCall,
 } from "../ast/index.js";
 import { isOp } from "../grammar.js";
 import { Token } from "../token.js";
@@ -18,9 +17,9 @@ export const arrayLiteralMacro: ReaderMacro = {
     if (shouldParseAsSubscript({ token, previous })) {
       return call("subscript", previous!, items.unwrap());
     }
-    return surfaceCall(
+    return call(
       "new_array_unchecked",
-      label("from", items.splitInto("fixed_array_literal"))
+      label("from", items.splitInto("fixed_array_literal")),
     );
   },
 };

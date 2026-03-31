@@ -2,7 +2,7 @@ import type { Form } from "../../../parser/index.js";
 import type { HirExprId } from "../../ids.js";
 import type { LowerContext, LowerScopeStack } from "../types.js";
 import { toSourceSpan } from "../../utils.js";
-import { GENERATED_STRING_LITERAL_HELPER } from "../../string-literal-helper.js";
+import { GENERATED_STRING_LITERAL_HELPER } from "../../generated-syntax-helpers.js";
 
 export const isGeneratedStringLiteralForm = (form: Form): boolean =>
   form.callsInternal("new_string");

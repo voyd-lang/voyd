@@ -4,7 +4,6 @@ import { createVoydHost } from "@voyd-lang/js-host";
 type SmokeRunner = () => Promise<number>;
 
 const source = `use std::all
-use std::array::new_array_unchecked
 use std::string::type::new_string
 use std::msgpack::MsgPack
 use std::vx::all
@@ -47,11 +46,7 @@ fn List({ value: Array<String> })
   </ul>
 
 fn feature_list() -> Array<String>
-  let ~features = Array<String>::with_capacity(3)
-  features.push("WASM speed".as_slice().to_string())
-  features.push("Tiny runtime".as_slice().to_string())
-  features.push("Clean syntax".as_slice().to_string())
-  features
+  ["WASM speed", "Tiny runtime", "Clean syntax"]
 
 
 pub fn main()

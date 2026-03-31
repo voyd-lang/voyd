@@ -5,6 +5,7 @@ export type Internal =
   | "tuple"
   | "paren"
   | "array_literal"
+  | "new_array_unchecked"
   | "fixed_array_literal"
   | "object_literal"
   | "label"
