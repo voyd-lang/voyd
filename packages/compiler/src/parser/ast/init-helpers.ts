@@ -24,9 +24,9 @@ export const paren = (...args: FormInitElements) => call("paren", ...args);
 export const tuple = (...args: FormInitElements) => call("tuple", ...args);
 
 export const arrayLiteral = (...args: FormInitElements) =>
-  surfaceCall(
+  call(
     "new_array_unchecked",
-    label("from", surfaceCall("fixed_array_literal", ...args)),
+    label("from", call("fixed_array_literal", ...args)),
   );
 
 export const objectLiteral = (...args: FormInitElements) =>

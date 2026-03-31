@@ -12,7 +12,6 @@ use std::optional::all
 use std::result::types::all
 use std::range::{ Range }
 
-pub use std::string::errors::{ ParseFloatError, ParseIntError, Utf8Error }
 pub use std::string::index::StringIndex
 
 /// Owned UTF-8 string value.
@@ -27,6 +26,66 @@ pub obj StringSlice {
   start: i32,
   byte_count: i32
 }
+
+/// Error returned when UTF-8 validation fails.
+pub obj Utf8Error {
+  /// Machine-readable error code.
+  api code: i32,
+  /// Human-readable error message.
+  api message: String
+}
+
+/// Error returned when integer parsing fails.
+pub obj ParseIntError {
+  /// Machine-readable error code.
+  api code: i32,
+  /// Human-readable error message.
+  api message: String
+}
+
+/// Error returned when floating-point parsing fails.
+pub obj ParseFloatError {
+  /// Machine-readable error code.
+  api code: i32,
+  /// Human-readable error message.
+  api message: String
+}
+
+pub fn utf8_error_invalid_utf8(): () -> Utf8Error
+  Utf8Error {
+    code: 1,
+    message: "utf8 decode failed: invalid utf-8 byte sequence"
+  }
+
+pub fn parse_int_error_invalid_radix(): () -> ParseIntError
+  ParseIntError {
+    code: 1,
+    message: "parse_int failed: radix must be between 2 and 36"
+  }
+
+pub fn parse_int_error_empty_input(): () -> ParseIntError
+  ParseIntError {
+    code: 2,
+    message: "parse_int failed: expected at least one digit"
+  }
+
+pub fn parse_int_error_invalid_digit(): () -> ParseIntError
+  ParseIntError {
+    code: 3,
+    message: "parse_int failed: digit is not valid for the requested radix"
+  }
+
+pub fn parse_int_error_overflow(): () -> ParseIntError
+  ParseIntError {
+    code: 4,
+    message: "parse_int failed: value overflowed the target integer type"
+  }
+
+pub fn parse_float_error_invalid_format(): () -> ParseFloatError
+  ParseFloatError {
+    code: 1,
+    message: "parse_float failed: invalid or incomplete numeric format"
+  }
 
 /// Rune set used by trimming and character membership APIs.
 pub type CharSet = Array<i32>
@@ -1005,9 +1064,9 @@ impl String
         10
 
     if base < 2 or base > 36:
-      return Err<ParseIntError> { error: ParseIntError { code: 1 } }
+      return Err<ParseIntError> { error: parse_int_error_invalid_radix() }
     if self.byte_count == 0:
-      return Err<ParseIntError> { error: ParseIntError { code: 2 } }
+      return Err<ParseIntError> { error: parse_int_error_empty_input() }
 
     let source = self.bytes.raw_storage()
     var index = 0
@@ -1020,7 +1079,7 @@ impl String
       index = 1
 
     if index >= self.byte_count:
-      return Err<ParseIntError> { error: ParseIntError { code: 2 } }
+      return Err<ParseIntError> { error: parse_int_error_empty_input() }
 
     let max_i32 = 2147483647
     let min_i32 = -2147483647 - 1
@@ -1028,27 +1087,27 @@ impl String
     while index < self.byte_count:
       let digit = parse_digit(__array_get(source, index))
       if digit < 0 or digit >= base:
-        return Err<ParseIntError> { error: ParseIntError { code: 3 } }
+        return Err<ParseIntError> { error: parse_int_error_invalid_digit() }
 
       if sign > 0:
         let max_before_mul = max_i32 / base
         if value > max_before_mul:
-          return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+          return Err<ParseIntError> { error: parse_int_error_overflow() }
 
         let next = value * base
         let max_allowed = max_i32 - digit
         if next > max_allowed:
-          return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+          return Err<ParseIntError> { error: parse_int_error_overflow() }
         value = next + digit
       else:
         let min_before_mul = min_i32 / base
         if value < min_before_mul:
-          return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+          return Err<ParseIntError> { error: parse_int_error_overflow() }
 
         let next = value * base
         let min_allowed = min_i32 + digit
         if next < min_allowed:
-          return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+          return Err<ParseIntError> { error: parse_int_error_overflow() }
         value = next - digit
       index = index + 1
 
@@ -1066,7 +1125,7 @@ impl String
   /// `number.parse_float()` parses `"3.5e2"` into `350.0`.
   api fn parse_float(self): () -> Result<f64, ParseFloatError>
     if self.byte_count == 0:
-      return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+      return Err<ParseFloatError> { error: parse_float_error_invalid_format() }
 
     let source = self.raw_bytes()
     var index = 0
@@ -1079,7 +1138,7 @@ impl String
       index = 1
 
     if index >= self.byte_count:
-      return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+      return Err<ParseFloatError> { error: parse_float_error_invalid_format() }
 
     var int_part = 0.0
     var saw_digit = false
@@ -1105,7 +1164,7 @@ impl String
         index = index + 1
 
     if not saw_digit:
-      return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+      return Err<ParseFloatError> { error: parse_float_error_invalid_format() }
 
     var exponent = 0
     var exponent_sign = 1
@@ -1114,7 +1173,7 @@ impl String
       if exp_marker == 101 or exp_marker == 69:
         index = index + 1
         if index >= self.byte_count:
-          return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+          return Err<ParseFloatError> { error: parse_float_error_invalid_format() }
 
         let exp_sign_byte = __array_get(source, index)
         if exp_sign_byte == 45:
@@ -1124,7 +1183,7 @@ impl String
           index = index + 1
 
         if index >= self.byte_count:
-          return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+          return Err<ParseFloatError> { error: parse_float_error_invalid_format() }
 
         var saw_exp_digit = false
         while index < self.byte_count:
@@ -1136,10 +1195,10 @@ impl String
           index = index + 1
 
         if not saw_exp_digit:
-          return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+          return Err<ParseFloatError> { error: parse_float_error_invalid_format() }
 
     if index != self.byte_count:
-      return Err<ParseFloatError> { error: ParseFloatError { code: 1 } }
+      return Err<ParseFloatError> { error: parse_float_error_invalid_format() }
 
     let base = int_part + frac_part / frac_scale
     let pow = pow10_i32(exponent_sign * exponent)
@@ -1590,9 +1649,9 @@ fn parse_i32_from_slice(value: StringSlice, { radix?: i32 }): () -> Result<i32, 
       10
 
   if base < 2 or base > 36:
-    return Err<ParseIntError> { error: ParseIntError { code: 1 } }
+    return Err<ParseIntError> { error: parse_int_error_invalid_radix() }
   if value.byte_count == 0:
-    return Err<ParseIntError> { error: ParseIntError { code: 2 } }
+    return Err<ParseIntError> { error: parse_int_error_empty_input() }
 
   let source = value.source.raw_bytes()
   let end = value.start + value.byte_count
@@ -1606,7 +1665,7 @@ fn parse_i32_from_slice(value: StringSlice, { radix?: i32 }): () -> Result<i32, 
     index = index + 1
 
   if index >= end:
-    return Err<ParseIntError> { error: ParseIntError { code: 2 } }
+    return Err<ParseIntError> { error: parse_int_error_empty_input() }
 
   let max_i32 = 2147483647
   let min_i32 = -2147483647 - 1
@@ -1614,27 +1673,27 @@ fn parse_i32_from_slice(value: StringSlice, { radix?: i32 }): () -> Result<i32, 
   while index < end:
     let digit = parse_digit(__array_get(source, index))
     if digit < 0 or digit >= base:
-      return Err<ParseIntError> { error: ParseIntError { code: 3 } }
+      return Err<ParseIntError> { error: parse_int_error_invalid_digit() }
 
     if sign > 0:
       let max_before_mul = max_i32 / base
       if parsed > max_before_mul:
-        return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        return Err<ParseIntError> { error: parse_int_error_overflow() }
 
       let next = parsed * base
       let max_allowed = max_i32 - digit
       if next > max_allowed:
-        return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        return Err<ParseIntError> { error: parse_int_error_overflow() }
       parsed = next + digit
     else:
       let min_before_mul = min_i32 / base
       if parsed < min_before_mul:
-        return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        return Err<ParseIntError> { error: parse_int_error_overflow() }
 
       let next = parsed * base
       let min_allowed = min_i32 + digit
       if next < min_allowed:
-        return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        return Err<ParseIntError> { error: parse_int_error_overflow() }
       parsed = next - digit
     index = index + 1
 
@@ -1648,9 +1707,9 @@ fn parse_i64_from_slice(value: StringSlice, { radix?: i32 }): () -> Result<i64, 
       10
 
   if base < 2 or base > 36:
-    return Err<ParseIntError> { error: ParseIntError { code: 1 } }
+    return Err<ParseIntError> { error: parse_int_error_invalid_radix() }
   if value.byte_count == 0:
-    return Err<ParseIntError> { error: ParseIntError { code: 2 } }
+    return Err<ParseIntError> { error: parse_int_error_empty_input() }
 
   let source = value.source.raw_bytes()
   let end = value.start + value.byte_count
@@ -1664,7 +1723,7 @@ fn parse_i64_from_slice(value: StringSlice, { radix?: i32 }): () -> Result<i64, 
     index = index + 1
 
   if index >= end:
-    return Err<ParseIntError> { error: ParseIntError { code: 2 } }
+    return Err<ParseIntError> { error: parse_int_error_empty_input() }
 
   let base_i64 = to_i64(base)
   let max_i64 = 9223372036854775807i64
@@ -1673,28 +1732,28 @@ fn parse_i64_from_slice(value: StringSlice, { radix?: i32 }): () -> Result<i64, 
   while index < end:
     let digit = parse_digit(__array_get(source, index))
     if digit < 0 or digit >= base:
-      return Err<ParseIntError> { error: ParseIntError { code: 3 } }
+      return Err<ParseIntError> { error: parse_int_error_invalid_digit() }
 
     let digit_i64 = to_i64(digit)
     if not negative:
       let max_before_mul = max_i64 / base_i64
       if parsed > max_before_mul:
-        return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        return Err<ParseIntError> { error: parse_int_error_overflow() }
 
       let next = parsed * base_i64
       let max_allowed = max_i64 - digit_i64
       if next > max_allowed:
-        return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        return Err<ParseIntError> { error: parse_int_error_overflow() }
       parsed = next + digit_i64
     else:
       let min_before_mul = min_i64 / base_i64
       if parsed < min_before_mul:
-        return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        return Err<ParseIntError> { error: parse_int_error_overflow() }
 
       let next = parsed * base_i64
       let min_allowed = min_i64 + digit_i64
       if next < min_allowed:
-        return Err<ParseIntError> { error: ParseIntError { code: 4 } }
+        return Err<ParseIntError> { error: parse_int_error_overflow() }
       parsed = next - digit_i64
     index = index + 1
 
@@ -1865,7 +1924,7 @@ fn append_bytes(~out: Array<i32>, source: FixedArray<i32>, count: i32) -> void
 
 /// Validates UTF-8 bytes and builds a string on success.
 ///
-/// Returns `Err(Utf8Error { code: 1 })` when any byte sequence is invalid UTF-8.
+/// Returns `Err(Utf8Error)` when any byte sequence is invalid UTF-8.
 ///
 /// Example:
 /// `from_utf8([240, 159, 154, 128])` yields the rune `U+1F680`.
@@ -1877,7 +1936,7 @@ pub fn from_utf8(bytes: Array<i32>) -> Result<String, Utf8Error>
   while index < len:
     let width = valid_utf8_width_at(source, len, index)
     if width <= 0:
-      return Err<Utf8Error> { error: Utf8Error { code: 1 } }
+      return Err<Utf8Error> { error: utf8_error_invalid_utf8() }
     index = index + width
   Ok<String> { value: new_string(source_bytes.to_fixed_array()) }
 

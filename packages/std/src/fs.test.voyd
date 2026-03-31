@@ -1,8 +1,9 @@
 use std::array::{ Array, new_array_unchecked }
 use std::bytes::{ ByteBuffer, Bytes }
-use std::error::IoError
+use std::error::{ HostError, IoError, panic }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
+use std::msgpack::MsgPackError
 use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::path::Path
@@ -71,7 +72,7 @@ test "fs list_dir decodes path arrays":
 
 fn read_string_with_payload(payload: MsgPack): () -> Result<String, IoError>
   try
-    read(Path::new("/tmp/app.log".as_slice().to_string()))
+    read_string(Path::new("/tmp/app.log".as_slice().to_string()))
   Fs::read_bytes(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::read_string(tail, _path):
@@ -119,7 +120,7 @@ fn list_dir_with_payload(payload: MsgPack): () -> Result<Array<Path>, IoError>
 
 fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () -> Result<Unit, IoError>
   try
-    write(Path::new("/tmp/app.log".as_slice().to_string()), "line".as_slice().to_string())
+    write_string(Path::new("/tmp/app.log".as_slice().to_string()), "line".as_slice().to_string())
   Fs::read_bytes(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::read_string(tail, _path):
@@ -127,9 +128,9 @@ fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () 
   Fs::write_bytes(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
   Fs::write_string(tail, payload):
-    let decoded = HostDto::unpack(payload)
-    paths.push(decoded.read_string("path"))
-    values.push(decoded.read_string("value"))
+    let decoded = unpack_host_dto(payload)
+    paths.push(read_host_string(decoded, "path"))
+    values.push(read_host_string(decoded, "value"))
     tail(host_dto_test::host_ok_payload())
   Fs::exists(tail, _path):
     tail(false)
@@ -148,14 +149,14 @@ fn write_bytes_with_capture(~paths: Array<String>, ~values: Array<i32>): () -> R
   Fs::read_string(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::write_bytes(tail, payload):
-    let decoded = HostDto::unpack(payload)
-    paths.push(decoded.read_string("path"))
-    let encoded_values = msgpack::unpack_array(decoded.read_msgpack("bytes"))
+    let decoded = unpack_host_dto(payload)
+    paths.push(read_host_string(decoded, "path"))
+    let encoded_values = unpack_msgpack_array(read_host_msgpack(decoded, "bytes"))
     var index = 0
     while index < encoded_values.len() do:
       match(encoded_values.get(index))
         Some<MsgPack> { value }:
-          values.push(msgpack::unpack_i32(value))
+          values.push(unpack_msgpack_i32(value))
         None:
           void
       index = index + 1
@@ -193,3 +194,43 @@ fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
       present
     None:
       fallback
+
+fn unpack_host_dto(payload: MsgPack): () -> HostDto
+  match(HostDto::unpack(payload))
+    Ok<HostDto> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto".as_slice())
+      HostDto::init()
+
+fn read_host_string(payload: HostDto, key: String): () -> String
+  match(payload.read_string(key))
+    Ok<String> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto string".as_slice())
+      String::init()
+
+fn read_host_msgpack(payload: HostDto, key: String): () -> MsgPack
+  match(payload.read_msgpack(key))
+    Ok<MsgPack> { value }:
+      value
+    Err<HostError>:
+      panic("invalid host dto msgpack".as_slice())
+      msgpack::make_null()
+
+fn unpack_msgpack_array(payload: MsgPack): () -> Array<MsgPack>
+  match(msgpack::unpack_array(payload))
+    Ok<Array<MsgPack>> { value }:
+      value
+    Err<MsgPackError>:
+      panic("invalid msgpack array".as_slice())
+      Array<MsgPack>::init()
+
+fn unpack_msgpack_i32(payload: MsgPack): () -> i32
+  match(msgpack::unpack_i32(payload))
+    Ok<i32> { value }:
+      value
+    Err<MsgPackError>:
+      panic("invalid msgpack i32".as_slice())
+      0

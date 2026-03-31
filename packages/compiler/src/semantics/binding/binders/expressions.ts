@@ -39,6 +39,14 @@ import {
   enumVariantTypeNamesFromAliasTarget,
   importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
+import {
+  ARRAY_LITERAL_CONSTRUCTOR_EXPORT,
+  ARRAY_LITERAL_CONSTRUCTOR_MODULE_ID,
+  GENERATED_ARRAY_LITERAL_HELPER,
+  GENERATED_STRING_LITERAL_HELPER,
+  STRING_LITERAL_CONSTRUCTOR_EXPORT,
+  STRING_LITERAL_CONSTRUCTOR_MODULE_ID,
+} from "../../generated-syntax-helpers.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -46,6 +54,22 @@ export const bindExpr = (
   tracker: BinderScopeTracker,
 ): void => {
   if (!expr || !isForm(expr)) return;
+
+  if (expr.callsInternal("new_string")) {
+    ensureGeneratedStringLiteralImport({
+      syntax: expr,
+      scope: tracker.current(),
+      ctx,
+    });
+  }
+
+  if (expr.callsInternal("new_array_unchecked")) {
+    ensureGeneratedArrayLiteralImport({
+      syntax: expr,
+      scope: tracker.current(),
+      ctx,
+    });
+  }
 
   if (expr.calls("::")) {
     bindNamespaceAccess(expr, ctx, tracker);
@@ -1290,6 +1314,126 @@ const createMemberBucket = (
   const bucket = new Map<string, Set<number>>();
   table.set(key, bucket);
   return bucket;
+};
+
+const ensureGeneratedStringLiteralImport = ({
+  syntax,
+  scope,
+  ctx,
+}: {
+  syntax: Syntax;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): void => {
+  if (typeof ctx.symbolTable.resolve(GENERATED_STRING_LITERAL_HELPER, scope) === "number") {
+    return;
+  }
+
+  const exportTable = ctx.moduleExports.get(STRING_LITERAL_CONSTRUCTOR_MODULE_ID);
+  const exported = exportTable?.get(STRING_LITERAL_CONSTRUCTOR_EXPORT);
+  if (!exported || exported.kind === "module") {
+    return;
+  }
+
+  const dependency = ctx.dependencies.get(exported.moduleId);
+  if (!dependency) {
+    return;
+  }
+
+  const sourceMetadata = dependency.symbolTable.getSymbol(exported.symbol).metadata;
+  const importableMetadata = importableMetadataFrom(
+    sourceMetadata as Record<string, unknown> | undefined,
+  );
+  const importedSymbolTarget = importedSymbolTargetFromMetadata(
+    sourceMetadata as Record<string, unknown> | undefined,
+  );
+  const importedModuleId = importedSymbolTarget?.moduleId ?? exported.moduleId;
+  const importedSymbolId = importedSymbolTarget?.symbol ?? exported.symbol;
+  const local = ctx.symbolTable.declare({
+    name: GENERATED_STRING_LITERAL_HELPER,
+    kind: exported.kind,
+    declaredAt: syntax.syntaxId,
+    metadata: {
+      import: {
+        moduleId: importedModuleId,
+        symbol: importedSymbolId,
+        explicitlyTargetsStdSubmodule: true,
+      },
+      implicitCompilerImport: true,
+      ...(importableMetadata ?? {}),
+    },
+  });
+
+  ctx.imports.push({
+    name: GENERATED_STRING_LITERAL_HELPER,
+    local,
+    target: {
+      moduleId: importedModuleId,
+      symbol: importedSymbolId,
+    },
+    visibility: moduleVisibility(),
+    span: toSourceSpan(syntax),
+  });
+};
+
+const ensureGeneratedArrayLiteralImport = ({
+  syntax,
+  scope,
+  ctx,
+}: {
+  syntax: Syntax;
+  scope: ScopeId;
+  ctx: BindingContext;
+}): void => {
+  if (typeof ctx.symbolTable.resolve(GENERATED_ARRAY_LITERAL_HELPER, scope) === "number") {
+    return;
+  }
+
+  const exportTable = ctx.moduleExports.get(ARRAY_LITERAL_CONSTRUCTOR_MODULE_ID);
+  const exported = exportTable?.get(ARRAY_LITERAL_CONSTRUCTOR_EXPORT);
+  if (!exported || exported.kind === "module") {
+    return;
+  }
+
+  const dependency = ctx.dependencies.get(exported.moduleId);
+  if (!dependency) {
+    return;
+  }
+
+  const sourceMetadata = dependency.symbolTable.getSymbol(exported.symbol).metadata;
+  const importableMetadata = importableMetadataFrom(
+    sourceMetadata as Record<string, unknown> | undefined,
+  );
+  const importedSymbolTarget = importedSymbolTargetFromMetadata(
+    sourceMetadata as Record<string, unknown> | undefined,
+  );
+  const importedModuleId = importedSymbolTarget?.moduleId ?? exported.moduleId;
+  const importedSymbolId = importedSymbolTarget?.symbol ?? exported.symbol;
+  const local = ctx.symbolTable.declare({
+    name: GENERATED_ARRAY_LITERAL_HELPER,
+    kind: exported.kind,
+    declaredAt: syntax.syntaxId,
+    metadata: {
+      import: {
+        moduleId: importedModuleId,
+        symbol: importedSymbolId,
+        explicitlyTargetsStdSubmodule: true,
+      },
+      implicitCompilerImport: true,
+      ...(importableMetadata ?? {}),
+    },
+  });
+
+  ctx.imports.push({
+    name: GENERATED_ARRAY_LITERAL_HELPER,
+    local,
+    target: {
+      moduleId: importedModuleId,
+      symbol: importedSymbolId,
+    },
+    visibility: moduleVisibility(),
+    span: toSourceSpan(syntax),
+  });
 };
 
 const declareModuleMemberImport = ({

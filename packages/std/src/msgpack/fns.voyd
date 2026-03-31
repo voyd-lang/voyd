@@ -5,17 +5,19 @@ use std::array::Array
 use std::fixed_array::fns::{ new_fixed_array }
 use std::dict::{ Dict, DictKey }
 use std::memory::self as memory
+use std::msgpack::errors::{ MsgPackError, error_code_buffer_too_small, error_code_decode_failed, error_code_trailing_bytes, error_code_type_mismatch, make_error }
 use std::msgpack::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 use std::number::cast::self as cast
 use std::optional::types::all
+use std::result::types::all
 use std::string::type::{ new_string, String, StringSlice }
 
-@serializer("msgpack", encode_value, decode_value)
+@serializer("msgpack", encode_value_raw, decode_value_raw)
 /// Recursive MessagePack value union used by the serializer boundary.
 pub type MsgPack = Null | Numeric | Bool | String | Binary | Array<MsgPack> | MsgPackMap
 
 /// Internal representation for MessagePack maps before conversion to `Dict`.
-obj MsgPackMap {
+pub obj MsgPackMap {
   entries: Array<(String, MsgPack)>
 }
 
@@ -40,11 +42,27 @@ obj Decoder {
 /// - `ptr`: Start offset in linear memory where bytes are written.
 /// - `len`: Maximum writable bytes at `ptr`.
 ///
-/// Returns the number of bytes written, or `-1` when encoding fails due to bounds checks.
-pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
+/// Returns the number of bytes written, or `-1` when encoding fails due to
+/// bounds checks. Prefer `std::msgpack::encode_value` for the public fallible
+/// API.
+pub fn encode_value_raw(value: MsgPack, ptr: i32, len: i32): () -> i32
   let ~encoder = Encoder(ptr, len)
   encoder.encode_any(value)
   if encoder.ok then: encoder.pos else: -1
+
+pub fn encode_value_result(value: MsgPack, ptr: i32, len: i32): () -> Result<i32, MsgPackError>
+  let written = encode_value_raw(value, ptr, len)
+  if written >= 0:
+    return Ok<i32> { value: written }
+  Err<MsgPackError> {
+    error: make_error(
+      error_code_buffer_too_small(),
+      "msgpack encode failed: destination buffer is too small"
+    )
+  }
+
+pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
+  encode_value_raw(value, ptr, len)
 
 /// Decodes one MessagePack value from a memory region.
 ///
@@ -52,11 +70,34 @@ pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
 /// - `ptr`: Start offset in linear memory where encoded bytes are read.
 /// - `len`: Number of readable bytes from `ptr`.
 ///
-/// Returns the decoded value, or `Null` when decoding fails.
-pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
+/// Returns the decoded value, or `Null` when decoding fails. Prefer
+/// `std::msgpack::decode_value` for the public fallible API.
+pub fn decode_value_raw(ptr: i32, len: i32): () -> MsgPack
   let ~decoder = Decoder(ptr, len)
   let value = decoder.decode_any()
   if decoder.ok then: value else: make_null()
+
+pub fn decode_value_result(ptr: i32, len: i32): () -> Result<MsgPack, MsgPackError>
+  let ~decoder = Decoder(ptr, len)
+  let value = decoder.decode_any()
+  if decoder.ok == false:
+    return Err<MsgPackError> {
+      error: make_error(
+        error_code_decode_failed(),
+        "msgpack decode failed: malformed or truncated payload"
+      )
+    }
+  if decoder.pos != len:
+    return Err<MsgPackError> {
+      error: make_error(
+        error_code_trailing_bytes(),
+        "msgpack decode failed: trailing bytes remain after one value"
+      )
+    }
+  Ok<MsgPack> { value: value }
+
+pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
+  decode_value_raw(ptr, len)
 
 fn empty_binary(): () -> Binary
   Binary { bytes: Array<i32>::init() }
@@ -199,6 +240,18 @@ pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
       out
     else:
       empty_map()
+
+pub fn unpack_map_result(value: MsgPack): () -> Result<Dict<String, MsgPack>, MsgPackError>
+  value.match(boxed)
+    MsgPackMap:
+      Ok<Dict<String, MsgPack>> { value: unpack_map(value) }
+    else:
+      Err<MsgPackError> {
+        error: make_error(
+          error_code_type_mismatch(),
+          "msgpack unpack failed: expected map"
+        )
+      }
 
 impl Encoder
   /// Initializes a codec cursor over the provided memory region.
@@ -527,7 +580,8 @@ impl Decoder
       return make_i32(self.read_u32())
     if prefix == 211:
       return make_i64(self.read_u64())
-    make_i32(0)
+    self.ok = false
+    make_null()
 
   fn decode_any(~self) -> MsgPack
     let prefix = self.read_u8()

@@ -4,7 +4,7 @@ use std::msgpack::MsgPack
 use std::vx::all
 
 fn App() -> MsgPack
-  let features = ["WASM speed", "Tiny runtime", "Clean syntax"]
+  let features = feature_list()
   <Card>
     <Title>Voyd + VSX</Title>
     <p style="margin: 0 0 10px 0; color: #cbd5e1;">Build clean UIs in language, no extensions required</p>
@@ -39,6 +39,9 @@ fn List({ value: Array<String> })
   <ul style="margin: 0; padding-left: 16px;">
     {value.map(f => <li style="line-height: 1.6;">{f}</li>)}
   </ul>
+
+fn feature_list() -> Array<String>
+  ["WASM speed", "Tiny runtime", "Clean syntax"]
 
 pub fn main()
   App()

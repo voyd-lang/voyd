@@ -20,10 +20,6 @@ pub fn ascii_string_from(bytes: Array<i32>) -> String
     index = index + 1
   new_string(normalized.to_fixed_array())
 
-/// Compatibility alias for `ascii_string_from(bytes: ...)`.
-pub fn ascii_string_from_bytes(bytes: Array<i32>) -> String
-  ascii_string_from(bytes)
-
 fn normalize_ascii_byte(value: i32) -> i32
   if value < 0 or value > 127:
     return 63

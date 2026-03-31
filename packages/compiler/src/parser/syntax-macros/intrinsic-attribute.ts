@@ -8,7 +8,7 @@ import {
 import { cloneAttributes } from "../ast/syntax.js";
 import type { IntrinsicAttribute } from "../attributes.js";
 import { SyntaxMacro } from "./types.js";
-import { parseStringValue } from "./string-value.js";
+import { parseStringValue } from "../string-value.js";
 import { transformFormSequence } from "./sequence-transform.js";
 
 type PendingIntrinsicAttribute = IntrinsicAttribute & { source: Form };

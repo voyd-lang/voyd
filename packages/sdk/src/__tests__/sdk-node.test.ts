@@ -441,7 +441,7 @@ pub fn main() -> i32
     const source = `use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
-use std::string::type::String
+use std::string::type::{ String, new_string }
 
 @effect(id: "voyd.std.env")
 eff Env
@@ -480,9 +480,11 @@ pub fn main(): Env -> i32
 
   it("runs std fetch effects with default host adapters", async () => {
     const sdk = createSdk();
-    const source = `use std::host_dto::HostDto
+    const source = `use std::array::Array
+use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
+use std::string::type::new_string
 
 @effect(id: "voyd.std.fetch")
 eff Fetch
@@ -493,24 +495,47 @@ pub fn main(): Fetch -> i32
     .set("name", msgpack::make_string("accept".as_slice().to_string()))
     .set("value", msgpack::make_string("text/plain".as_slice().to_string()))
     .pack()
+  let ~headers = Array<MsgPack>::with_capacity(1)
+  headers.push(header)
   let request_payload = HostDto::init()
     .set("method", msgpack::make_string("POST".as_slice().to_string()))
     .set("url", msgpack::make_string("https://example.test/echo".as_slice().to_string()))
-    .set("headers", msgpack::make_array([header]))
+    .set("headers", msgpack::make_array(headers))
     .set("body", msgpack::make_string("ping".as_slice().to_string()))
     .set("timeout_millis", msgpack::make_i32(10))
     .pack()
 
   let response_payload = Fetch::request(request_payload)
-  let response = HostDto::unpack(response_payload)
-  if response.read_bool("ok") == false then:
-    return -1
-
-  let value = HostDto::unpack(response.read_msgpack("value"))
-  if value.read_i32("status") == 201 and value.read_string("body").equals("pong") then:
-    201
-  else:
-    -2
+  match(HostDto::unpack(response_payload))
+    Err:
+      -1
+    Ok<HostDto> { value: response }:
+      match(response.read_bool("ok"))
+        Err:
+          -1
+        Ok<bool> { value: ok }:
+          if ok == false:
+            return -1
+          match(response.read_msgpack("value"))
+            Err:
+              -2
+            Ok<MsgPack> { value: value_payload }:
+              match(HostDto::unpack(value_payload))
+                Err:
+                  -2
+                Ok<HostDto> { value }:
+                  match(value.read_i32("status"))
+                    Err:
+                      -2
+                    Ok<i32> { value: status }:
+                      match(value.read_string("body"))
+                        Err:
+                          -2
+                        Ok<String> { value: body }:
+                          if status == 201 and body.equals("pong") then:
+                            201
+                          else:
+                            -2
 `;
     const result = expectCompileSuccess(await sdk.compile({ source }));
     const host = await createVoydHost({
@@ -538,7 +563,7 @@ pub fn main(): Fetch -> i32
 use std::input::read_line
 use std::optional::types::all
 use std::result::types::all
-use std::string::type::String
+use std::string::type::{ String, new_string }
 
 pub fn main() -> i32
   match(read_line())
@@ -575,8 +600,9 @@ pub fn main() -> i32
 use std::error::IoError
 use std::input::{ read_bytes, is_tty as input_is_tty }
 use std::optional::types::all
-use std::output::{ write, write_line, write_bytes, flush, is_tty as output_is_tty, StdErr }
+use std::output::{ write, write_line, flush, is_tty as output_is_tty, StdErr }
 use std::result::types::all
+use std::string::type::new_string
 
 fn sum_bytes(bytes: Bytes): () -> i32
   let values = bytes.to_array()
@@ -614,7 +640,7 @@ pub fn main() -> i32
   buffer.push(8)
   let _ = write("hello".as_slice())
   let _ = write_line("ok".as_slice())
-  let _ = write_bytes(buffer.as_bytes(), StdErr {})
+  let _ = write(buffer.as_bytes(), StdErr {})
   let _ = flush()
   let _ = flush(StdErr {})
 

@@ -68,6 +68,7 @@ test "json parse rejects invalid input":
     Ok<JsonValue>:
       assert(false, eq: true)
     Err<JsonError> { error }:
+      assert(error.code, eq: 1)
       assert(error.message.as_slice().contains("json parse error"), eq: true)
 
 test "json parse rejects oversized exponents":
@@ -178,7 +179,7 @@ test "json stringify emits compact object envelope":
   fields.set("items", JsonArray { value: items })
 
   let value = JsonObject { value: fields }
-  let compact = stringify(value)
+  let compact = must_stringify(value)
 
   assert(compact.as_slice().starts_with("{"), eq: true)
   assert(compact.as_slice().ends_with("}"), eq: true)
@@ -194,7 +195,7 @@ test "json stringify includes object keys":
   fields.set("items", JsonArray { value: items })
 
   let value = JsonObject { value: fields }
-  let compact = stringify(value)
+  let compact = must_stringify(value)
 
   match(parse(compact))
     Ok<JsonValue> { value: roundtrip }:
@@ -219,18 +220,15 @@ test "json stringify_pretty emits newlines":
   fields.set("items", JsonArray { value: items })
 
   let value = JsonObject { value: fields }
-  let pretty = stringify_pretty(value)
+  let pretty = must_stringify_pretty(value)
 
   assert(pretty.as_slice().contains(from_ascii([10])), eq: true)
 
-test "json stringify falls back for non-finite numbers":
-  let nan_text = stringify(JsonNumber { value: 0.0 / 0.0 })
-  let inf_text = stringify(JsonNumber { value: 1.0 / 0.0 })
-  let neg_inf_text = stringify(JsonNumber { value: (0.0 - 1.0) / 0.0 })
-
-  assert(nan_text.equals("0"), eq: true)
-  assert(inf_text.equals("0"), eq: true)
-  assert(neg_inf_text.equals("0"), eq: true)
+test "json stringify rejects non-finite numbers":
+  assert_json_stringify_error(stringify(JsonNumber { value: 0.0 / 0.0 }))
+  assert_json_stringify_error(stringify(JsonNumber { value: 1.0 / 0.0 }))
+  assert_json_stringify_error(stringify(JsonNumber { value: (0.0 - 1.0) / 0.0 }))
+  assert_json_stringify_error(stringify_pretty(JsonNumber { value: 1.0 / 0.0 }))
 
 test "json stringify preserves magnitude for large finite numbers":
   var huge = 1.0
@@ -239,7 +237,7 @@ test "json stringify preserves magnitude for large finite numbers":
     huge = huge * 10.0
     index = index + 1
 
-  let encoded = stringify(JsonNumber { value: huge })
+  let encoded = must_stringify(JsonNumber { value: huge })
   match(parse(encoded))
     Ok<JsonValue> { value }:
       value.match(root)
@@ -259,7 +257,7 @@ test "json stringify preserves tiny non-zero magnitude":
     tiny = tiny / 10.0
     index = index + 1
 
-  let encoded = stringify(JsonNumber { value: tiny })
+  let encoded = must_stringify(JsonNumber { value: tiny })
   assert(encoded.equals("0"), eq: false)
   assert(encoded.equals("-0"), eq: false)
 
@@ -277,7 +275,7 @@ test "json stringify preserves tiny non-zero magnitude":
 
 test "json stringify preserves extended fractional precision":
   let source = JsonNumber { value: 0.1234567890123456 }
-  let encoded = stringify(source)
+  let encoded = must_stringify(source)
   assert(encoded.equals("0.123456789012"), eq: false)
 
   match(parse(encoded))
@@ -297,7 +295,7 @@ test "json stringify preserves subnormal numbers":
     Ok<JsonValue> { value }:
       value.match(root)
         JsonNumber:
-          let encoded = stringify(JsonNumber { value: root.value })
+          let encoded = must_stringify(JsonNumber { value: root.value })
           assert(encoded.equals("0"), eq: false)
           assert(encoded.equals("-0"), eq: false)
           match(parse(encoded))
@@ -316,6 +314,30 @@ test "json stringify preserves subnormal numbers":
 
 fn from_ascii(bytes: Array<i32>): () -> String
   new_string(bytes.to_fixed_array())
+
+fn must_stringify(value: JsonValue): Test -> String
+  match(stringify(value))
+    Ok<String> { value }:
+      value
+    Err<JsonError>:
+      assert(false, eq: true)
+      String::init()
+
+fn must_stringify_pretty(value: JsonValue): Test -> String
+  match(stringify_pretty(value))
+    Ok<String> { value }:
+      value
+    Err<JsonError>:
+      assert(false, eq: true)
+      String::init()
+
+fn assert_json_stringify_error(result: Result<String, JsonError>): Test -> void
+  match(result)
+    Ok<String>:
+      assert(false, eq: true)
+    Err<JsonError> { error }:
+      assert(error.code, eq: 2)
+      assert(error.message.as_slice().contains("numbers must be finite"), eq: true)
 
 fn repeat_byte(byte: i32, count: i32): () -> String
   let ~bytes = Array<i32>::with_capacity(count)

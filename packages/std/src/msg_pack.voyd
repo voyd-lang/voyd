@@ -1,3 +1,0 @@
-//! Legacy alias module for `std::msgpack`.
-
-pub use std::msgpack

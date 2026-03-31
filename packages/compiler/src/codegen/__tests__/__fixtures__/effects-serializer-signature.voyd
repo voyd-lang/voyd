@@ -1,5 +1,5 @@
-use std::msgpack::{ MsgPack, pack_null }
-use std::msgpack::{ encode_value as encode_msgpack, decode_value as decode_msgpack }
+use std::msgpack::{ MsgPack, make_null }
+use std::msgpack::fns::{ encode_value as encode_msgpack, decode_value as decode_msgpack }
 
 @serializer("msgpack", encode_alias, decode_alias)
 pub type Alias = MsgPack
@@ -15,6 +15,6 @@ eff Serializer
   alias(resume, value: Alias) -> void
 
 pub fn main(): Serializer -> i32
-  Serializer::direct(pack_null())
-  Serializer::alias(pack_null())
+  Serializer::direct(make_null())
+  Serializer::alias(make_null())
   0

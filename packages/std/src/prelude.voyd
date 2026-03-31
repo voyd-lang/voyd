@@ -1,3 +1,10 @@
+//! Safe default imports for source modules.
+//!
+//! `std::prelude` is implicitly imported for `src` modules and should stay
+//! limited to everyday, high-confidence APIs. Advanced constructors that depend
+//! on raw storage invariants, such as `std::array::new_array_unchecked` and
+//! `std::string::new_string`, require explicit module-qualified imports.
+
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::{ some, none, '??' }
 pub std::result::types::{ Result, Ok, Err }
@@ -7,7 +14,7 @@ pub std::traits::{ Eq, Ord, Hash, Default, Clone, Copy }
 pub std::traits::{ Sequence, Iterator, for }
 pub std::range::{ Range }
 
-pub std::array::{ Array, ArrayPop, new_array, new_array_unchecked }
+pub std::array::{ Array, ArrayPop }
 pub std::dict::{ Dict, DictEntry, DictKey }
 pub std::deque::{ Deque }
 pub std::set::{ Set }
@@ -15,8 +22,6 @@ pub std::bytes::{ Byte, Bytes, ByteBuffer }
 pub std::box::{ Box }
 pub std::math
 pub std::output
-pub std::output::print
-
 
 pub std::string::{
   String,
@@ -26,7 +31,6 @@ pub std::string::{
   Utf8Error,
   ParseIntError,
   ParseFloatError,
-  new_string,
   from_utf8
 }
 

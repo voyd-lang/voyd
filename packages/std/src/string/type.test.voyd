@@ -61,6 +61,7 @@ test "string utf8 decode and encode":
       assert(false)
     Err<Utf8Error> { error }:
       assert(error.code, eq: 1)
+      assert(error.message.equals("utf8 decode failed: invalid utf-8 byte sequence"), eq: true)
 
 test "string slice and as_slice":
   let value = "a😀b"
@@ -364,6 +365,7 @@ test "string parse_int result":
       assert(false)
     Err<ParseIntError> { error }:
       assert(error.code, eq: 1)
+      assert(error.message.equals("parse_int failed: radix must be between 2 and 36"), eq: true)
 
   match("-2147483648".parse_int())
     Ok<i32> { value }:
@@ -395,6 +397,7 @@ test "string parse_float result":
       assert(false)
     Err<ParseFloatError> { error }:
       assert(error.code, eq: 1)
+      assert(error.message.equals("parse_float failed: invalid or incomplete numeric format"), eq: true)
 
 test "string debug and repr helpers":
   let escaped_newline = must_utf8([92, 110])

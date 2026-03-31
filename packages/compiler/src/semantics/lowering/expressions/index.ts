@@ -44,6 +44,10 @@ import {
   lowerRangeExpr,
   lowerRangeOperatorExpr,
 } from "./range.js";
+import {
+  isGeneratedStringLiteralForm,
+  lowerGeneratedStringLiteralExpr,
+} from "./string-literal.js";
 
 export { isObjectLiteralForm } from "./object-literal.js";
 
@@ -207,6 +211,18 @@ export const lowerExpr: LowerExprFn = (
   }
 
   if (isForm(expr)) {
+    if (isGeneratedStringLiteralForm(expr)) {
+      const lowered = lowerGeneratedStringLiteralExpr({
+        form: expr,
+        ctx,
+        scopes,
+        lowerExpr,
+      });
+      if (typeof lowered === "number") {
+        return lowered;
+      }
+    }
+
     if (
       isIdentifierAtom(expr.first) &&
       (expr.first.value === "break" || expr.first.value === "continue")

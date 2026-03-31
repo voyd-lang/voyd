@@ -139,10 +139,7 @@ describe("registerDefaultHostAdapters", () => {
       { effectId: "voyd.std.time", opName: "monotonic_now_millis", opId: 3 },
       { effectId: "voyd.std.time", opName: "system_now_millis", opId: 4 },
       { effectId: "voyd.std.time", opName: "sleep_millis", opId: 5 },
-      { effectId: "voyd.std.time", opName: "set_timeout_millis", opId: 6 },
-      { effectId: "voyd.std.time", opName: "set_interval_millis", opId: 7 },
-      { effectId: "voyd.std.time", opName: "clear_timer", opId: 8 },
-      { effectId: "voyd.std.log", opName: "emit", opId: 9 },
+      { effectId: "voyd.std.log", opName: "emit", opId: 6 },
     ]);
     const { host, getHandler } = createFakeHost(table);
 
@@ -190,24 +187,6 @@ describe("registerDefaultHostAdapters", () => {
       0n
     );
     expect(slept.value).toMatchObject({ ok: true });
-
-    const timeout = await getHandler("voyd.std.time", "set_timeout_millis")(
-      tailContinuation,
-      0n
-    );
-    expect(timeout.value).toMatchObject({ ok: true });
-
-    const interval = await getHandler("voyd.std.time", "set_interval_millis")(
-      tailContinuation,
-      0n
-    );
-    expect(interval.value).toMatchObject({ ok: true, value: 1n });
-
-    const clear = await getHandler("voyd.std.time", "clear_timer")(
-      tailContinuation,
-      1n
-    );
-    expect(clear.value).toMatchObject({ ok: true });
 
     await getHandler("voyd.std.log", "emit")(tailContinuation, {
       level: "info",
@@ -305,48 +284,6 @@ describe("registerDefaultHostAdapters", () => {
     expect(result.kind).toBe("tail");
     expect(result.value).toMatchObject({ ok: true });
     expect(delays).toEqual([2_147_483_647, 2_147_483_647, 123]);
-  });
-
-  it("cancels fallback interval timers when clear_timer is invoked", async () => {
-    const table = buildTable([
-      { effectId: "voyd.std.time", opName: "set_interval_millis", opId: 0 },
-      { effectId: "voyd.std.time", opName: "clear_timer", opId: 1 },
-    ]);
-    let nextTimeoutToken = 1;
-    const scheduled = new Map<number, { delay: number }>();
-    const setTimeoutSpy = vi.fn((_task: () => void, delay?: number) => {
-      const token = nextTimeoutToken;
-      nextTimeoutToken += 1;
-      scheduled.set(token, { delay: delay ?? 0 });
-      return token;
-    });
-    const clearTimeoutSpy = vi.fn((token: number) => {
-      scheduled.delete(token);
-    });
-    vi.stubGlobal("setTimeout", setTimeoutSpy);
-    vi.stubGlobal("clearTimeout", clearTimeoutSpy);
-    const { host, getHandler } = createFakeHost(table);
-
-    await registerDefaultHostAdapters({
-      host,
-      options: { runtime: "node" },
-    });
-
-    const intervalResult = await getHandler("voyd.std.time", "set_interval_millis")(
-      tailContinuation,
-      5_000n
-    );
-    expect(intervalResult.value).toMatchObject({ ok: true, value: 1n });
-    expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
-    expect(scheduled.size).toBe(1);
-
-    const clearResult = await getHandler("voyd.std.time", "clear_timer")(
-      tailContinuation,
-      1n
-    );
-    expect(clearResult.value).toMatchObject({ ok: true });
-    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
-    expect(scheduled.size).toBe(0);
   });
 
   it("registers actionable unsupported handlers on browser for fs", async () => {

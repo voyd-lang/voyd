@@ -8,7 +8,7 @@ import { cloneAttributes } from "../ast/syntax.js";
 import type { SerializerAttribute } from "../attributes.js";
 import { SyntaxMacroError } from "./macro-error.js";
 import type { SyntaxMacro } from "./types.js";
-import { parseStringValue } from "./string-value.js";
+import { parseStringValue } from "../string-value.js";
 import { transformFormSequence } from "./sequence-transform.js";
 
 type PendingSerializerAttribute = SerializerAttribute & { source: Form };

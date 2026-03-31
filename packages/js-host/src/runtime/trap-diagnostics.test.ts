@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createVoydPanicTrapError,
   createVoydTrapDiagnostics,
   isVoydRuntimeError,
 } from "./trap-diagnostics.js";
@@ -178,5 +179,37 @@ describe("createVoydTrapDiagnostics", () => {
     expect(annotated.voyd.trap.span?.file).toBe("runtime-trap-diagnostics.voyd");
     expect(annotated.voyd.trap.span?.startLine).toBe(3);
     expect(annotated.voyd.trap.span?.startColumn).toBe(7);
+  });
+
+  it("annotates explicit panic traps even when the throwing frame is host-side", () => {
+    const diagnostics = createVoydTrapDiagnostics({
+      module: moduleWithRuntimeDiagnostics(),
+    });
+    const error = createVoydPanicTrapError({
+      status: "available",
+      message: "boom",
+      byteLength: 4,
+    });
+
+    const annotated = diagnostics.annotateTrap(error, {
+      fallbackFunctionName: "pure_trap",
+      transition: {
+        point: "run_pure_entry",
+        direction: "host->vm",
+      },
+    });
+
+    expect(isVoydRuntimeError(annotated)).toBe(true);
+    if (!isVoydRuntimeError(annotated)) {
+      throw new Error("expected annotated error to be a voyd runtime error");
+    }
+    expect(annotated.voyd.panic).toEqual({
+      status: "available",
+      message: "boom",
+      byteLength: 4,
+    });
+    expect(annotated.voyd.trap.functionName).toBe("pure_trap");
+    expect(annotated.voyd.trap.moduleId).toBe("math");
+    expect(annotated.voyd.transition?.point).toBe("run_pure_entry");
   });
 });

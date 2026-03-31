@@ -383,22 +383,51 @@ pub fn main() -> i32
     expect((instance.exports.main as () => number)()).toBe(5);
   });
 
-  it("keeps string constructor dependencies reachable for module-let initializers", async () => {
+  it("keeps string constructor dependencies reachable for module-let initializers without a prelude new_string export", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");
     const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: `use std::string::fns::new_string
-
-let greeting = "hello"
+      [`${root}${sep}main.voyd`]: `let greeting = "hello"
 
 pub fn main() -> i32
   1`,
-      [`${std}${sep}string${sep}fns.voyd`]: `pub obj String {}
+      [`${std}${sep}prelude.voyd`]: `pub std::string::String`,
+      [`${std}${sep}string.voyd`]: `pub obj String {}
 pub obj FixedArray<T> {}
 
 @intrinsic(name: "__string_new", uses_signature: true)
 pub fn new_string(from_bytes: FixedArray<i32>): () -> String
   String {}
+`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root, std },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(1);
+  });
+
+  it("keeps array constructor dependencies reachable for module-let initializers without a prelude new_array_unchecked export", async () => {
+    const root = resolve("/proj/src");
+    const std = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `let values = [1, 2, 3]
+
+pub fn main() -> i32
+  1`,
+      [`${std}${sep}prelude.voyd`]: `pub std::array::Array`,
+      [`${std}${sep}array.voyd`]: `pub obj FixedArray<T> {}
+pub obj Array<T> {
+  storage: FixedArray<T>
+}
+
+pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
+  Array<T> { storage: source }
 `,
     });
 

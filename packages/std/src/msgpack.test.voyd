@@ -1,0 +1,62 @@
+use std::memory::self as memory
+use self::errors::{
+  MsgPackError,
+  error_code_buffer_too_small,
+  error_code_decode_failed,
+  error_code_numeric_overflow,
+  error_code_trailing_bytes,
+  error_code_type_mismatch
+}
+use std::number::cast::to_i64
+use std::test::assertions::all
+
+test "msgpack encode_value returns error when the destination buffer is too small":
+  let base = reserve_test_page()
+
+  match(encode_value(make_string("hello"), base, 1))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MsgPackError> { error }:
+      assert(error.code, eq: error_code_buffer_too_small())
+
+test "msgpack decode_value rejects malformed bytes":
+  let base = reserve_test_page()
+  memory::store_u8(base, 193)
+
+  match(decode_value(base, 1))
+    Ok<MsgPack>:
+      assert(false, eq: true)
+    Err<MsgPackError> { error }:
+      assert(error.code, eq: error_code_decode_failed())
+
+test "msgpack decode_value rejects trailing bytes":
+  let base = reserve_test_page()
+  memory::store_u8(base, 192)
+  memory::store_u8(base + 1, 192)
+
+  match(decode_value(base, 2))
+    Ok<MsgPack>:
+      assert(false, eq: true)
+    Err<MsgPackError> { error }:
+      assert(error.code, eq: error_code_trailing_bytes())
+
+test "msgpack unpack helpers reject mismatched variants":
+  match(unpack_bool(make_i32(7)))
+    Ok<bool>:
+      assert(false, eq: true)
+    Err<MsgPackError> { error }:
+      assert(error.code, eq: error_code_type_mismatch())
+
+test "msgpack unpack_i32 rejects numeric overflow":
+  let overflow = to_i64(2147483647) + to_i64(1)
+
+  match(unpack_i32(make_i64(overflow)))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<MsgPackError> { error }:
+      assert(error.code, eq: error_code_numeric_overflow())
+
+fn reserve_test_page(): () -> i32
+  let base = memory::size() * 65536
+  memory::grow(1)
+  base

@@ -34,6 +34,7 @@ import { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment
 import {
   createVoydTrapDiagnostics,
   type VoydTrapAnnotation,
+  type VoydRuntimePanicContext,
 } from "./runtime/trap-diagnostics.js";
 
 export type HostInitOptions = {
@@ -93,6 +94,9 @@ const unwrapRunOutcome = async <T>(outcome: Promise<RunOutcome<T>>): Promise<T> 
   throw new CancelledRunError(settled.reason);
 };
 
+const PANIC_TRAP_PTR_GLOBAL = "__voyd_panic_ptr";
+const PANIC_TRAP_LEN_GLOBAL = "__voyd_panic_len";
+
 const defaultImports = (): WebAssembly.Imports => ({
   env: {},
 });
@@ -103,20 +107,21 @@ const isImportModuleRecord = (
   typeof value === "object" && value !== null;
 
 const mergeDefaultImports = (
+  defaults: WebAssembly.Imports,
   imports?: WebAssembly.Imports
 ): WebAssembly.Imports => {
-  const defaults = defaultImports() as Record<string, unknown>;
+  const defaultModules = defaults as Record<string, unknown>;
   if (!imports) {
-    return defaults as WebAssembly.Imports;
+    return defaultModules as WebAssembly.Imports;
   }
   const merged = {
-    ...defaults,
+    ...defaultModules,
     ...(imports as Record<string, unknown>),
   } as Record<string, unknown>;
 
   const importRecord = imports as Record<string, unknown>;
   ["env"].forEach((moduleName) => {
-    const defaultModule = defaults[moduleName];
+    const defaultModule = defaultModules[moduleName];
     const providedModule = importRecord[moduleName];
     if (
       isImportModuleRecord(defaultModule) &&
@@ -174,6 +179,122 @@ const requireExportedMemory = ({
     throw new Error(`expected module to export ${name}`);
   }
   return exported;
+};
+
+const panicContextFromTrapGlobals = ({
+  instance,
+  ptr,
+  len,
+}: {
+  instance?: WebAssembly.Instance;
+  ptr: number;
+  len: number;
+}): VoydRuntimePanicContext => {
+  if (len < 0) {
+    return {
+      status: "unavailable",
+      byteLength: len,
+      reason: "invalid-length",
+    };
+  }
+  if (ptr < 0) {
+    return {
+      status: "unavailable",
+      byteLength: len,
+      reason: "message-storage-unavailable",
+    };
+  }
+  if (!instance) {
+    return {
+      status: "unavailable",
+      byteLength: len,
+      reason: "instance-unavailable",
+    };
+  }
+  const exported = instance.exports[LINEAR_MEMORY_EXPORT];
+  if (!(exported instanceof WebAssembly.Memory)) {
+    return {
+      status: "unavailable",
+      byteLength: len,
+      reason: "memory-export-missing",
+    };
+  }
+  if (len === 0) {
+    return {
+      status: "available",
+      message: "",
+      byteLength: 0,
+    };
+  }
+  if (ptr + len > exported.buffer.byteLength) {
+    return {
+      status: "unavailable",
+      byteLength: len,
+      reason: "invalid-bounds",
+    };
+  }
+
+  try {
+    const bytes = new Uint8Array(exported.buffer, ptr, len);
+    return {
+      status: "available",
+      message: new TextDecoder().decode(bytes),
+      byteLength: len,
+    };
+  } catch {
+    return {
+      status: "unavailable",
+      byteLength: len,
+      reason: "decode-failed",
+    };
+  }
+};
+
+const requireMutableI32Global = ({
+  instance,
+  name,
+}: {
+  instance: WebAssembly.Instance;
+  name: string;
+}): WebAssembly.Global | undefined => {
+  const exported = instance.exports[name];
+  return exported instanceof WebAssembly.Global ? exported : undefined;
+};
+
+const consumePanicContext = ({
+  instance,
+}: {
+  instance?: WebAssembly.Instance;
+}): VoydRuntimePanicContext | undefined => {
+  if (!instance) {
+    return undefined;
+  }
+  const ptrGlobal = requireMutableI32Global({
+    instance,
+    name: PANIC_TRAP_PTR_GLOBAL,
+  });
+  const lenGlobal = requireMutableI32Global({
+    instance,
+    name: PANIC_TRAP_LEN_GLOBAL,
+  });
+  if (!ptrGlobal || !lenGlobal) {
+    return undefined;
+  }
+
+  const ptr = ptrGlobal.value as number;
+  const len = lenGlobal.value as number;
+  const context =
+    ptr === -1 && len === 0
+      ? undefined
+      : panicContextFromTrapGlobals({
+          instance,
+          ptr,
+          len,
+        });
+
+  ptrGlobal.value = -1;
+  lenGlobal.value = 0;
+  return context;
 };
 
 const effectfulExportNameFor = (entryName: string): string =>
@@ -264,17 +385,28 @@ export const createVoydHost = async ({
 }: HostInitOptions): Promise<VoydHost> => {
   const module = toModule(wasm);
   const trapDiagnostics = createVoydTrapDiagnostics({ module });
+  let instanceRef: WebAssembly.Instance | undefined;
   const annotateTrap = (
     error: unknown,
     opts?: VoydTrapAnnotation
-  ): Error => trapDiagnostics.annotateTrap(error, opts);
+  ): Error => {
+    const panic = consumePanicContext({ instance: instanceRef });
+    return trapDiagnostics.annotateTrap(error, {
+      ...opts,
+      ...(panic ? { panic } : {}),
+    });
+  };
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
   const table = toHostProtocolTable(parsedTable);
   const exportAbi = parseExportAbi(module);
   const exportAbiByName = new Map(
     exportAbi.exports.map((entry) => [entry.name, entry] as const)
   );
-  const instance = new WebAssembly.Instance(module, mergeDefaultImports(imports));
+  instanceRef = new WebAssembly.Instance(
+    module,
+    mergeDefaultImports(defaultImports(), imports)
+  );
+  const instance = instanceRef;
 
   const handlersByKey = new Map<string, EffectHandler>();
   const opByKey = buildParsedEffectOpMap({ ops: parsedTable.ops });

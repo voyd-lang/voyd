@@ -3,10 +3,14 @@
 //! `HostDto` wraps a MessagePack map and provides ergonomic read/write helpers for
 //! host interop contracts used across std effect modules.
 
+use std::error::HostError
 use std::dict::Dict
 use std::msgpack::MsgPack
+use std::msgpack::MsgPackError
 use std::msgpack::self as msgpack
+use std::msgpack::errors::error_code_missing_field
 use std::optional::types::all
+use std::result::types::all
 use std::string::type::{ String, new_string }
 
 pub obj HostDto {
@@ -19,8 +23,12 @@ impl HostDto
     HostDto { payload: Dict<String, MsgPack>::init() }
 
   /// Builds a DTO from a MessagePack payload.
-  api fn unpack(payload: MsgPack) -> HostDto
-    HostDto { payload: msgpack::unpack_map(payload) }
+  api fn unpack(payload: MsgPack) -> Result<HostDto, HostError>
+    match(msgpack::unpack_map(payload))
+      Ok<Dict<String, MsgPack>> { value }:
+        Ok<HostDto> { value: HostDto { payload: value } }
+      Err<MsgPackError> { error }:
+        Err<HostError> { error: host_dto_error(error.code, error.message) }
 
   /// Serializes this DTO into a MessagePack map payload.
   api fn pack(self) -> MsgPack
@@ -33,21 +41,54 @@ impl HostDto
     HostDto { payload: next }
 
   /// Reads a required MessagePack field from the payload.
-  api fn read_msgpack(self, key: String) -> MsgPack
+  api fn read_msgpack(self, key: String) -> Result<MsgPack, HostError>
     match(self.payload.get(key))
       Some<MsgPack> { value }:
-        value
+        Ok<MsgPack> { value: value }
       None:
-        msgpack::make_null()
+        Err<HostError> { error: missing_field_error(key) }
 
   /// Reads a required boolean field from the payload.
-  api fn read_bool(self, key: String) -> bool
-    msgpack::unpack_bool(self.read_msgpack(key))
+  api fn read_bool(self, key: String) -> Result<bool, HostError>
+    match(self.read_msgpack(key))
+      Ok<MsgPack> { value }:
+        match(msgpack::unpack_bool(value))
+          Ok<bool> { value }:
+            Ok<bool> { value: value }
+          Err<MsgPackError> { error }:
+            Err<HostError> { error: host_dto_error(error.code, error.message) }
+      Err<HostError> { error }:
+        Err<HostError> { error: error }
 
   /// Reads a required 32-bit integer field from the payload.
-  api fn read_i32(self, key: String) -> i32
-    msgpack::unpack_i32(self.read_msgpack(key))
+  api fn read_i32(self, key: String) -> Result<i32, HostError>
+    match(self.read_msgpack(key))
+      Ok<MsgPack> { value }:
+        match(msgpack::unpack_i32(value))
+          Ok<i32> { value }:
+            Ok<i32> { value: value }
+          Err<MsgPackError> { error }:
+            Err<HostError> { error: host_dto_error(error.code, error.message) }
+      Err<HostError> { error }:
+        Err<HostError> { error: error }
 
   /// Reads a required string field from the payload.
-  api fn read_string(self, key: String) -> String
-    msgpack::unpack_string(self.read_msgpack(key))
+  api fn read_string(self, key: String) -> Result<String, HostError>
+    match(self.read_msgpack(key))
+      Ok<MsgPack> { value }:
+        match(msgpack::unpack_string(value))
+          Ok<String> { value }:
+            Ok<String> { value: value }
+          Err<MsgPackError> { error }:
+            Err<HostError> { error: host_dto_error(error.code, error.message) }
+      Err<HostError> { error }:
+        Err<HostError> { error: error }
+
+fn host_dto_error(code: i32, message: String): () -> HostError
+  HostError { code: code, message: message }
+
+fn missing_field_error(key: String): () -> HostError
+  host_dto_error(
+    error_code_missing_field(),
+    "msgpack unpack failed: missing field `".concat(key).concat("`")
+  )

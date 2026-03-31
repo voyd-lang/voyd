@@ -1,5 +1,5 @@
 use std::array::Array
-use std::msgpack::{ MsgPack, pack_array, pack_i32, pack_string }
+use std::msgpack::{ MsgPack, make_array, make_i32, make_string }
 use std::string::type::{ new_string }
 
 eff Exchange
@@ -7,13 +7,13 @@ eff Exchange
 
 fn build_payload(): () -> MsgPack
   let ~items = Array<MsgPack>::with_capacity(3)
-  items.push(pack_i32(1))
-  items.push(pack_string("hi"))
+  items.push(make_i32(1))
+  items.push(make_string("hi"))
   let ~nested = Array<MsgPack>::with_capacity(2)
-  nested.push(pack_i32(2))
-  nested.push(pack_i32(3))
-  items.push(pack_array(nested))
-  pack_array(items)
+  nested.push(make_i32(2))
+  nested.push(make_i32(3))
+  items.push(make_array(nested))
+  make_array(items)
 
 pub fn main(): Exchange -> MsgPack
   let payload = build_payload()

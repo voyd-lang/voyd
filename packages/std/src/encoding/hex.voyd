@@ -4,7 +4,11 @@ use std::array::Array
 use std::bytes::ByteBuffer
 use std::bytes::Bytes
 use std::encoding::ascii::ascii_string_from
-use std::encoding::errors::DecodeError
+use std::encoding::errors::{
+  DecodeError,
+  decode_error_invalid_character,
+  decode_error_invalid_length
+}
 use std::math::div_rem
 use std::optional::types::all
 use std::result::types::{ Result, Ok, Err }
@@ -65,7 +69,7 @@ pub fn decode(s: StringSlice) -> Result<Bytes, DecodeError>
   if source_len == 0:
     return Ok<Bytes> { value: ByteBuffer::init().as_bytes() }
   if div_rem(source_len, 2).1 != 0:
-    return decode_error("hex input length must be even")
+    return decode_error(decode_error_invalid_length("hex input length must be even"))
 
   let ~buffer = ByteBuffer::with_capacity(source_len / 2)
   var index = 0
@@ -79,15 +83,19 @@ pub fn decode(s: StringSlice) -> Result<Bytes, DecodeError>
           Some<i32> { value: low_value }:
             buffer.push(high_value * 16 + low_value)
           None:
-            return decode_error("hex input contains invalid characters")
+            return decode_error(
+              decode_error_invalid_character("hex input contains invalid characters")
+            )
       None:
-        return decode_error("hex input contains invalid characters")
+        return decode_error(
+          decode_error_invalid_character("hex input contains invalid characters")
+        )
     index = index + 2
 
   Ok<Bytes> { value: buffer.as_bytes() }
 
-fn decode_error<T>(message: String) -> Result<T, DecodeError>
-  Err<DecodeError> { error: DecodeError { message: message } }
+fn decode_error<T>(error: DecodeError) -> Result<T, DecodeError>
+  Err<DecodeError> { error: error }
 
 fn hex_ascii_to_digit(value: i32) -> Option<i32>
   if value >= 48 and value <= 57:

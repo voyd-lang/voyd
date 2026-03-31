@@ -57,10 +57,29 @@ export type VoydRuntimeTransitionContext = {
   direction: "host->vm" | "vm->host" | "vm";
 };
 
+export type VoydRuntimePanicContext =
+  | {
+      status: "available";
+      message: string;
+      byteLength: number;
+    }
+  | {
+      status: "unavailable";
+      byteLength: number;
+      reason:
+        | "message-storage-unavailable"
+        | "instance-unavailable"
+        | "memory-export-missing"
+        | "invalid-bounds"
+        | "invalid-length"
+        | "decode-failed";
+    };
+
 export type VoydRuntimeDiagnostics = {
   version: 1;
   kind: "wasm-trap";
   trap: VoydRuntimeTrapSite;
+  panic?: VoydRuntimePanicContext;
   effect?: VoydRuntimeEffectContext;
   transition?: VoydRuntimeTransitionContext;
 };
@@ -70,6 +89,7 @@ export type VoydRuntimeError = Error & {
 };
 
 export type VoydTrapAnnotation = {
+  panic?: VoydRuntimePanicContext;
   effect?: VoydRuntimeEffectContext;
   transition?: VoydRuntimeTransitionContext;
   fallbackFunctionName?: string;
@@ -81,6 +101,33 @@ export type VoydTrapDiagnostics = {
 
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
+
+const VOYD_PANIC_TRAP = Symbol("voyd.runtime.panic-trap");
+
+type VoydPanicTaggedError = Error & {
+  [VOYD_PANIC_TRAP]?: VoydRuntimePanicContext;
+};
+
+const panicTrapMessage = (panic: VoydRuntimePanicContext): string =>
+  panic.status === "available"
+    ? `panic: ${panic.message}`
+    : `panic (message unavailable: ${panic.reason}, byteLength=${panic.byteLength})`;
+
+const panicContextFromError = (
+  error: Error
+): VoydRuntimePanicContext | undefined =>
+  (error as VoydPanicTaggedError)[VOYD_PANIC_TRAP];
+
+export const createVoydPanicTrapError = (
+  panic: VoydRuntimePanicContext
+): Error => {
+  const error = new Error(panicTrapMessage(panic)) as VoydPanicTaggedError;
+  Object.defineProperty(error, VOYD_PANIC_TRAP, {
+    value: panic,
+    configurable: true,
+  });
+  return error;
+};
 
 const readCustomSectionUtf8Json = <T>({
   module,
@@ -436,9 +483,10 @@ const buildDiagnostics = ({
     : undefined;
   const safeFallbackMetadata =
     !resolved?.metadata &&
-    frames.length === 1 &&
     annotation?.fallbackFunctionName
-      ? metadataByFunctionName.get(annotation.fallbackFunctionName)
+      ? annotation.panic || frames.length === 1
+        ? metadataByFunctionName.get(annotation.fallbackFunctionName)
+        : undefined
       : undefined;
   const trap: VoydRuntimeTrapSite = {
     ...(chosenFrame
@@ -470,6 +518,7 @@ const buildDiagnostics = ({
     version: 1,
     kind: "wasm-trap",
     trap,
+    ...(annotation?.panic ? { panic: annotation.panic } : {}),
     ...(annotation?.effect ? { effect: annotation.effect } : {}),
     ...(annotation?.transition ? { transition: annotation.transition } : {}),
   };
@@ -488,6 +537,7 @@ const mergeDiagnostics = ({
     ...existing.trap,
     ...next.trap,
   },
+  ...(existing.panic || next.panic ? { panic: next.panic ?? existing.panic } : {}),
   ...(existing.effect || next.effect
     ? { effect: next.effect ?? existing.effect }
     : {}),
@@ -524,7 +574,8 @@ export const createVoydTrapDiagnostics = ({
   return {
     annotateTrap: (error, annotation) => {
       const normalized = toError(error);
-      if (!isWasmTrapError(normalized)) {
+      const panic = annotation?.panic ?? panicContextFromError(normalized);
+      if (!isWasmTrapError(normalized) && !panic) {
         return normalized;
       }
       const nextDiagnostics = buildDiagnostics({
@@ -532,7 +583,7 @@ export const createVoydTrapDiagnostics = ({
         functionNamesByIndex,
         metadataByWasmName,
         metadataByFunctionName,
-        annotation,
+        annotation: panic ? { ...annotation, panic } : annotation,
       });
       const withDiagnostics = normalized as VoydRuntimeError;
       withDiagnostics.voyd = isVoydRuntimeError(normalized)
