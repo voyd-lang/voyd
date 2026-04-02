@@ -125,6 +125,13 @@ describe("smoke: task runtime", () => {
     await expect(outcome).resolves.toBe(41);
   });
 
+  it("joins pure bool task values through the public task API", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const outcome = host.run<number>("spawn_join_bool_probe");
+    await drainRuntime(runtime);
+    await expect(outcome).resolves.toBe(1);
+  });
+
   it("joins effectful child task values through the public task API", async () => {
     const { host, runtime } = await createTaskHost({ compiled });
     const outcome = host.run<number>("effectful_join_probe");

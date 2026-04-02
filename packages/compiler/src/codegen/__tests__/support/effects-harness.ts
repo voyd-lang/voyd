@@ -1,10 +1,13 @@
 import type binaryen from "binaryen";
 import { dirname, resolve } from "node:path";
 import {
+  buildHandlersByLabelSuffix,
   createVoydHost,
   formatSignatureHash,
   parseEffectTable,
+  toHostProtocolTable,
   type EffectContinuation,
+  type EffectHandler as HostEffectHandler,
   type ParsedEffectOp,
   type ParsedEffectTable,
 } from "@voyd-lang/js-host";
@@ -232,12 +235,14 @@ export const runEffectfulExport = async <T = unknown>({
   wasm,
   entryName,
   handlers,
+  handlersByLabelSuffix,
   imports,
   bufferSize,
 }: {
   wasm: WasmSource;
   entryName: string;
   handlers?: Record<string, EffectHandler>;
+  handlersByLabelSuffix?: Record<string, EffectHandler>;
   imports?: WebAssembly.Imports;
   bufferSize?: number;
 }): Promise<{
@@ -247,13 +252,15 @@ export const runEffectfulExport = async <T = unknown>({
 }> => {
   const module = toModule(wasm);
   const table = parseEffectTable(module);
+  const hostTable = toHostProtocolTable(table);
   const host = await createVoydHost({ wasm: module, imports, bufferSize });
-
-  table.ops.forEach((op) => {
-    const handler = lookupHandler(handlers, op);
-    const resolvedHandler =
-      handler ?? (isTestAssertionOp(op) ? defaultTestAssertionHandler : undefined);
-    if (!resolvedHandler) return;
+  const registerHandler = ({
+    op,
+    handler,
+  }: {
+    op: ParsedEffectOp;
+    handler: EffectHandler;
+  }) => {
     const request: EffectHandlerRequest = {
       handle: op.opIndex,
       opIndex: op.opIndex,
@@ -273,9 +280,39 @@ export const runEffectfulExport = async <T = unknown>({
         toContinuationResult({
           continuation,
           request,
-          value: await resolvedHandler(request, ...args),
+          value: await handler(request, ...args),
         })
     );
+  };
+  if (handlersByLabelSuffix) {
+    const matches = buildHandlersByLabelSuffix({
+      table: hostTable,
+      handlersByLabelSuffix:
+        handlersByLabelSuffix as unknown as Record<string, HostEffectHandler>,
+    });
+    matches.forEach((match) => {
+      const hostOp = hostTable.ops.find(
+        (entry) =>
+          entry.effectId === match.effectId &&
+          entry.opId === match.opId &&
+          entry.signatureHash === match.signatureHash
+      );
+      if (!hostOp) return;
+      const op = table.ops[hostOp.opIndex];
+      if (!op) return;
+      registerHandler({
+        op,
+        handler: match.handler as unknown as EffectHandler,
+      });
+    });
+  }
+
+  table.ops.forEach((op) => {
+    const handler = lookupHandler(handlers, op);
+    const resolvedHandler =
+      handler ?? (isTestAssertionOp(op) ? defaultTestAssertionHandler : undefined);
+    if (!resolvedHandler) return;
+    registerHandler({ op, handler: resolvedHandler });
   });
 
   const value = await host.runEffectful<T>(entryName);

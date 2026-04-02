@@ -23,6 +23,19 @@ pub fn spawn_join_probe(): task::TaskRuntime -> i32
     TaskCancelled:
       -3
 
+pub fn spawn_join_bool_probe(): task::TaskRuntime -> i32
+  let child = task::spawn(() =>
+    true
+  )
+  match(task::join(child))
+    TaskValue { value }:
+      if value then: 1 else: 0
+    TaskFailed { error }:
+      let _ = error
+      -1
+    TaskCancelled:
+      -2
+
 pub fn cancel_probe(): (task::TaskRuntime, time::Time) -> i32
   let child = task::spawn(() =>
     let _ = time::sleep(millis(20))

@@ -1,25 +1,8 @@
+fn fib(n: i32) -> i32
+  if n < 2:
+    n
+  else:
+    fib(n - 1) + fib(n - 2)
 
 pub fn main()
-  // Trailing, with label
-  take::cb(dur: 5) task: () =>
-    foo()
-
-pub fn main()
-  // No parens, with label
-  take::cb dur: 5 task: () =>
-    foo()
-
-pub fn main()
-  // Trailing without label
-  take::cb(dur: 5) () =>
-    foo()
-
-pub fn main()
-  // No parens, without label
-  take::cb dur: 5 () =>
-    foo()
-
-pub fn main()
-  // We could also add label():, which is similar to effect handler syntax
-  take::cb dur: 5 task():
-    foo()
+  fib(10).print()

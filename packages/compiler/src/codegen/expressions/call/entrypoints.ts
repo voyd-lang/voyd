@@ -173,6 +173,7 @@ export const compileCallExpr = (
           ctx,
           fnCtx,
           instanceId: typeInstanceId,
+          expectedResultTypeId,
         }),
         usedReturnCall: false,
       };
@@ -431,6 +432,7 @@ const compileResolvedSymbolCall = ({
         ctx,
         fnCtx,
         instanceId: typeInstanceId,
+        expectedResultTypeId,
       }),
       usedReturnCall: false,
     };

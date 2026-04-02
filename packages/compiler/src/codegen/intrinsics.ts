@@ -63,6 +63,7 @@ interface CompileIntrinsicCallParams {
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   instanceId?: ProgramFunctionInstanceId;
+  expectedResultTypeId?: TypeId;
 }
 
 interface EmitNumericIntrinsicParams {
@@ -230,6 +231,7 @@ const ensureTaskStarterHelper = ({
     : wrapValueInOutcome({
         valueExpr: callExpr,
         valueType: base.resultType,
+        typeId: desc.returnType,
         ctx,
         fnCtx: helperFnCtx,
       });
@@ -531,6 +533,7 @@ export const compileIntrinsicCall = ({
   ctx,
   fnCtx,
   instanceId,
+  expectedResultTypeId,
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   switch (name) {
     case "~": {
@@ -893,7 +896,11 @@ export const compileIntrinsicCall = ({
         ctx.effectsRuntime.outcomeType,
       );
       const payload = ctx.effectsRuntime.outcomePayload(outcome);
-      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      const exprTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      const returnTypeId =
+        exprTypeId === ctx.program.primitives.unknown
+          ? expectedResultTypeId ?? exprTypeId
+          : exprTypeId;
       return unboxOutcomeValue({
         payload,
         valueType: wasmTypeFor(returnTypeId, ctx),
