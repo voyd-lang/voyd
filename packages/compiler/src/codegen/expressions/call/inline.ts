@@ -40,6 +40,9 @@ const isInlineCandidate = ({
   if (meta.effectful) {
     return false;
   }
+  if (meta.paramAbiKinds.some((kind) => kind !== "direct")) {
+    return false;
+  }
   if (
     meta.paramTypeIds.some((typeId) =>
       typeof typeId === "number" &&
