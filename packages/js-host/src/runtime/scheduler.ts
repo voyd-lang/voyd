@@ -8,6 +8,10 @@ export type RuntimeSchedulerOptions = {
   maxInternalStepsPerTick?: number;
   scheduleTask?: (task: () => void) => void;
   onRunFailed?: (error: Error, runId: string) => void;
+  onUnhandledTaskFailed?: (
+    error: Error,
+    details: { runId: string; taskId: number }
+  ) => void;
 };
 
 export type RuntimeStepResult<T = unknown> =

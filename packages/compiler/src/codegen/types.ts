@@ -1077,24 +1077,27 @@ export const wasmTypeFor = (
       if (desc.members.length === 0) {
         throw new Error("cannot map empty union to wasm");
       }
+      const hasValueMember = desc.members.some((member) =>
+        typeof nominalValueComponent(member, ctx) === "number",
+      );
+      const allObjectish = desc.members.every((member) => {
+        const memberDesc = ctx.program.types.getTypeDesc(member);
+        return (
+          memberDesc.kind === "trait" ||
+          memberDesc.kind === "structural-object" ||
+          memberDesc.kind === "intersection" ||
+          typeof nominalObjectishComponent(member, ctx) === "number"
+        );
+      });
+      if (allObjectish && !hasValueMember) {
+        return ctx.rtt.baseType;
+      }
       const memberTypes = desc.members.map((member) =>
         wasmTypeFor(member, ctx, seen, mode),
       );
       const first = memberTypes[0]!;
       if (!memberTypes.every((candidate) => candidate === first)) {
         if (memberTypes.every(isRefType)) {
-          const hasValueMember = desc.members.some((member) =>
-            typeof nominalValueComponent(member, ctx) === "number"
-          );
-          const allObjectish = desc.members.every((member) => {
-            const memberDesc = ctx.program.types.getTypeDesc(member);
-            return (
-              memberDesc.kind === "trait" ||
-              memberDesc.kind === "structural-object" ||
-              memberDesc.kind === "intersection" ||
-              typeof nominalObjectishComponent(member, ctx) === "number"
-            );
-          });
           if (allObjectish && !hasValueMember) {
             return ctx.rtt.baseType;
           }
@@ -1401,6 +1404,13 @@ const lowerHeapObjectFieldRuntimeType = ({
   ownerStructuralId: TypeId;
   ctx: CodegenContext;
 }): binaryen.Type => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (
+    desc.kind === "primitive" &&
+    (desc.name === "void" || desc.name === "voyd" || desc.name === "Voyd")
+  ) {
+    return binaryen.eqref;
+  }
   const assertHeapCompatible = (candidate: binaryen.Type): binaryen.Type => {
     if (binaryen.expandType(candidate).length > 1) {
       throw new Error(
@@ -1475,6 +1485,14 @@ export const wasmHeapFieldTypeFor = (
   mode: WasmTypeMode = "signature",
 ): binaryen.Type => {
   const desc = ctx.program.types.getTypeDesc(typeId);
+  if (
+    desc.kind === "primitive" &&
+    (desc.name === "void" || desc.name === "voyd" || desc.name === "Voyd")
+  ) {
+    // Heap storage needs a concrete runtime type even when the source-level field
+    // carries no value. Store an inert null eqref and drop it on load.
+    return binaryen.eqref;
+  }
   const inlineBoxType = getInlineHeapBoxType({ typeId, ctx, seen, mode });
   if (inlineBoxType) {
     return inlineBoxType;
@@ -1950,7 +1968,10 @@ export const getStructuralTypeInfo = (
     return info;
   } catch (error) {
     ctx.structTypes.delete(cacheKey);
-    throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `structural type ${typeId}/${structuralId} (${typeDesc.kind}) build failed: ${message}`,
+    );
   } finally {
   }
 };
@@ -2740,6 +2761,7 @@ const createMethodLookupEntries = ({
           ? wrapValueInOutcome({
               valueExpr: implCall,
               valueType: wrappedValueType,
+              typeId: meta.resultTypeId,
               ctx,
               fnCtx: wrapperScratch,
             })

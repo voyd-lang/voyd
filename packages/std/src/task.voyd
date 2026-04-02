@@ -1,0 +1,100 @@
+//! Same-run task primitives backed by the runtime task scheduler.
+//!
+//! Tasks are concurrent units of work inside a single Voyd run. They are
+//! cooperative and event-loop driven, not thread-parallel.
+
+use std::msgpack::MsgPack
+use std::msgpack::MsgPackError
+use std::msgpack::self as msgpack
+use std::result::types::all
+use std::string::type::String
+
+pub obj Task<T> {
+  api id: i32
+}
+
+pub obj TaskError {
+  api message: String
+}
+
+pub obj TaskValue<T> {
+  api value: T
+}
+
+pub obj TaskFailed {
+  api error: TaskError
+}
+
+pub obj TaskCancelled {}
+
+pub type TaskOutcome<T> = TaskValue<T> | TaskFailed | TaskCancelled
+
+@effect(id: "voyd.std.task.runtime")
+pub eff TaskRuntime
+  wait(resume, id: i32) -> i32
+
+  yield_once(resume) -> void
+
+  failure_message(tail, id: i32) -> MsgPack
+
+@intrinsic(name: "__task_spawn")
+fn spawn_attached_id<T>(work: fn() -> T): () -> i32 __task_spawn(work)
+
+@intrinsic(name: "__task_detach")
+fn spawn_detached_id<T>(work: fn() -> T): () -> i32 __task_detach(work)
+
+@intrinsic(name: "__task_cancel")
+fn cancel_task_id(id: i32): () -> bool __task_cancel(id)
+
+@intrinsic(name: "__task_take_value")
+fn take_task_value<T>(id: i32): () -> T __task_take_value(id)
+
+pub fn spawn<T>(work: fn() -> T): TaskRuntime -> Task<T>
+  Task<T> { id: spawn_attached_id(work) }
+
+pub fn detach<T>(work: fn() -> T): TaskRuntime -> Task<T>
+  Task<T> { id: spawn_detached_id(work) }
+
+pub fn join(task: Task<void>): TaskRuntime -> TaskOutcome<Unit>
+  let status = TaskRuntime::wait(task.id)
+  if status == 0 then:
+    return TaskValue<Unit> { value: Unit {} }
+
+  if status == 1 then:
+    return TaskFailed {
+      error: decode_task_failure(TaskRuntime::failure_message(task.id))
+    }
+
+  TaskCancelled {}
+
+pub fn join<T>(task: Task<T>): TaskRuntime -> TaskOutcome<T>
+  join_task(task)
+
+fn join_task<T>(task: Task<T>): TaskRuntime -> TaskOutcome<T>
+  let status = TaskRuntime::wait(task.id)
+  if status == 0 then:
+    return TaskValue<T> { value: take_task_value(task.id) }
+
+  if status == 1 then:
+    return TaskFailed {
+      error: decode_task_failure(TaskRuntime::failure_message(task.id))
+    }
+
+  TaskCancelled {}
+
+pub fn cancel<T>(task: Task<T>): TaskRuntime -> bool
+  cancel_task(task)
+
+fn cancel_task<T>(task: Task<T>): TaskRuntime -> bool
+  cancel_task_id(task.id)
+
+pub fn yield_now(): TaskRuntime -> Unit
+  TaskRuntime::yield_once()
+  Unit {}
+
+fn decode_task_failure(payload: MsgPack): () -> TaskError
+  match(msgpack::unpack_string(payload))
+    Ok<String> { value }:
+      TaskError { message: value }
+    Err<MsgPackError> { error }:
+      TaskError { message: error.message }

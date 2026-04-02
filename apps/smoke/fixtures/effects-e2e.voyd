@@ -14,6 +14,10 @@ eff Gen<T>
   pass_tail(tail, value: T) -> T
   pass_f64(resume, value: T) -> T
 
+@effect(id: "com.example.generic-stop")
+eff GenericStop
+  stop(resume) -> void
+
 eff IO
   read(tail) -> i32
 
@@ -54,6 +58,10 @@ fn async_worker_basic(x: i32): IntAwait -> i32
 fn async_worker_notify(): IntNotify -> i32
   IntNotify::notify(7)
   10
+
+fn generic_stop<T>(value: T): GenericStop -> T
+  GenericStop::stop()
+  value
 
 pub fn main(): () -> i32
   let cb = hold(() => Async::await(5))
@@ -96,6 +104,12 @@ pub fn host_boundary_host_state_updates(): Async -> i32
 pub fn host_boundary_end_on_void(): Async -> i32
   Async::notify(9)
   99
+
+pub fn host_boundary_generic_end_i32(): GenericStop -> i32
+  generic_stop(7)
+
+pub fn host_boundary_generic_end_bool(): GenericStop -> bool
+  generic_stop(true)
 
 pub fn host_boundary_resume_then_tail(): Async -> i32
   let first = Async::await(3)

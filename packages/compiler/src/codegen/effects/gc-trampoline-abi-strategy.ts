@@ -5,9 +5,12 @@ import { isPackageVisible } from "../../semantics/hir/index.js";
 import {
   collectEffectOperationSignatures,
   createEffectfulEntry,
+  createEffectfulEntryRaw,
+  createEndRequestRaw,
   createHandleOutcomeDynamic,
   createResumeContinuation,
   createResumeEffectful,
+  createResumeEffectfulRaw,
   ensureEffectResultAccessors,
   ensureEffectsMemory,
 } from "./host-boundary.js";
@@ -194,10 +197,20 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
     runtime: entryCtx.effectsRuntime,
     signatures: hostBoundarySignatures,
   });
+  createEndRequestRaw({
+    ctx: entryCtx,
+    runtime: entryCtx.effectsRuntime,
+    signatures: hostBoundarySignatures,
+  });
   createResumeEffectful({
     ctx: entryCtx,
     runtime: entryCtx.effectsRuntime,
     handleOutcome,
+    resumeContinuation,
+  });
+  createResumeEffectfulRaw({
+    ctx: entryCtx,
+    runtime: entryCtx.effectsRuntime,
     resumeContinuation,
   });
   ensureEffectResultAccessors({ ctx: entryCtx, runtime: entryCtx.effectsRuntime });
@@ -209,6 +222,12 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
       meta,
       handleOutcome,
       exportName: `${exportName}_effectful`,
+    });
+    createEffectfulEntryRaw({
+      ctx: entryCtx,
+      runtime: entryCtx.effectsRuntime,
+      meta,
+      exportName: `${exportName}_effectful_raw`,
     });
   });
 };

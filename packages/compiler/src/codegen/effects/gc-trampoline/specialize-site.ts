@@ -93,6 +93,89 @@ const ownerBodyExprId = ({
   return clause.body;
 };
 
+const ownerReturnTypeIdFor = ({
+  site,
+  ctx,
+  typeInstanceId,
+}: {
+  site: ContinuationSite;
+  ctx: CodegenContext;
+  typeInstanceId?: ProgramFunctionInstanceId;
+}): TypeId => {
+  if (typeof site.ownerReturnTypeId === "number") {
+    return site.ownerReturnTypeId;
+  }
+
+  if (site.owner.kind === "function") {
+    if (typeof typeInstanceId === "number") {
+      const meta = ctx.functionInstances.get(typeInstanceId);
+      if (meta) {
+        return meta.resultTypeId;
+      }
+    }
+    const metas = ctx.functions.get(ctx.moduleId)?.get(site.owner.symbol);
+    const meta = metas?.[0];
+    if (meta) {
+      return meta.resultTypeId;
+    }
+    throw new Error("missing function metadata for continuation site owner");
+  }
+
+  const baseTypeId =
+    site.owner.kind === "lambda"
+      ? (() => {
+          const expr = ctx.module.hir.expressions.get(site.owner.exprId);
+          if (!expr || expr.exprKind !== "lambda") {
+            throw new Error("missing lambda owner for continuation site");
+          }
+          const lambdaType = ctx.program.types.getTypeDesc(
+            getRequiredExprType(site.owner.exprId, ctx, typeInstanceId)
+          );
+          if (lambdaType.kind !== "function") {
+            throw new Error("lambda continuation owner must have a function type");
+          }
+          return lambdaType.returnType;
+        })()
+      : (() => {
+          const handlerExpr = ctx.module.hir.expressions.get(site.owner.handlerExprId);
+          if (!handlerExpr || handlerExpr.exprKind !== "effect-handler") {
+            throw new Error("missing handler owner for continuation site");
+          }
+          const clause = handlerExpr.handlers[site.owner.clauseIndex];
+          if (!clause) {
+            throw new Error("missing handler clause owner for continuation site");
+          }
+          return getRequiredExprType(clause.body, ctx, typeInstanceId);
+        })();
+
+  if (typeof typeInstanceId !== "number") {
+    return baseTypeId;
+  }
+  const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
+  return substitution
+    ? ctx.program.types.substitute(baseTypeId, substitution)
+    : baseTypeId;
+};
+
+const specializedSiteOrderFor = ({
+  key,
+  ctx,
+}: {
+  key: string;
+  ctx: CodegenContext;
+}): number => {
+  const cached = ctx.effectsState.contSiteOrderByKey.get(key);
+  if (typeof cached === "number") {
+    return cached;
+  }
+  const next =
+    ctx.effectsState.nextSpecializedSiteOrder ??
+    Math.max(-1, ...ctx.effectLowering.sites.map((site) => site.siteOrder)) + 1;
+  ctx.effectsState.nextSpecializedSiteOrder = next + 1;
+  ctx.effectsState.contSiteOrderByKey.set(key, next);
+  return next;
+};
+
 const ownerSymbolTypesFor = ({
   site,
   ctx,
@@ -122,7 +205,9 @@ const ownerSymbolTypesFor = ({
     visitor: {
       onExpr: (id, expr) => {
         if (expr.exprKind !== "identifier") return;
-        const typeId = getRequiredExprType(id, ctx, typeInstanceId);
+        const typeId =
+          ctx.module.types.getValueType(expr.symbol) ??
+          getRequiredExprType(id, ctx, typeInstanceId);
         const existing = collected.get(expr.symbol);
         if (
           typeof existing === "number" &&
@@ -219,6 +304,12 @@ export const specializeContinuationSite = ({
     ctx,
     typeInstanceId,
   });
+  const ownerReturnTypeId = ownerReturnTypeIdFor({
+    site,
+    ctx,
+    typeInstanceId,
+  });
+  const siteOrder = specializedSiteOrderFor({ key, ctx });
   const envFields = site.envFields.map((field) =>
     specializeEnvField({
       field,
@@ -245,11 +336,17 @@ export const specializeContinuationSite = ({
     site.kind === "perform"
       ? {
           ...site,
+          typeInstanceId,
+          ownerReturnTypeId,
+          siteOrder,
           envFields,
           envType,
         }
       : {
           ...site,
+          typeInstanceId,
+          ownerReturnTypeId,
+          siteOrder,
           envFields,
           envType,
         };

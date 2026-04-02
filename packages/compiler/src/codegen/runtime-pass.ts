@@ -99,7 +99,19 @@ export const buildRuntimeTypeArtifacts = (
           });
 
           typeIds.forEach((typeId) => {
-            wasmRuntimeTypeFor(typeId, ctx);
+            try {
+              wasmRuntimeTypeFor(typeId, ctx);
+            } catch (error) {
+              const typeDesc = ctx.program.types.getTypeDesc(typeId);
+              const typeSummary =
+                typeDesc.kind === "primitive"
+                  ? `${typeDesc.kind}:${typeDesc.name}`
+                  : typeDesc.kind;
+              const message = error instanceof Error ? error.message : String(error);
+              throw new Error(
+                `type ${typeId} (${typeSummary}): ${message}`,
+              );
+            }
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);

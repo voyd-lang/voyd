@@ -2,12 +2,13 @@
 //! Includes monotonic timing (`Instant`), wall-clock timing (`SystemTime`),
 //! duration utilities, and blocking sleep.
 
-use std::error::HostError
+use std::error::{ HostError, panic }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::number::cast::{ to_i64 }
 use std::result::types::all
 use std::string::type::{ String, new_string }
+use std::task::self as task
 
 /// Represents a millisecond-based time span.
 pub obj Duration {
@@ -60,6 +61,23 @@ impl SystemTime
   api fn unix_millis(self) -> i64
     self.unix_millis_value
 
+/// Interval overlap policy.
+///
+/// Policies are explicit so repeating work does not silently adopt JS-style
+/// concurrent overlap.
+pub obj Overlap {
+  kind: i32
+}
+
+impl Overlap
+  /// Run one callback at a time. The next delay starts after the callback finishes.
+  api fn serial() -> Overlap
+    Overlap { kind: 0 }
+
+  /// Allow ticks to overlap by spawning a detached callback task for each tick.
+  api fn concurrent() -> Overlap
+    Overlap { kind: 1 }
+
 /// Host-provided time operations.
 ///
 /// `std::time` decodes host responses into typed success/error values.
@@ -83,6 +101,44 @@ pub fn sleep(ms: i64): Time -> Result<Unit, HostError>
 /// Example: `time::sleep(Duration::from_secs(1))`.
 pub fn sleep(duration: Duration): Time -> Result<Unit, HostError>
   sleep(duration.as_millis())
+
+/// Schedules a detached callback task to run after the provided delay.
+pub fn set_timeout<T>(delay: Duration, work: fn() -> T): task::TaskRuntime -> task::Task<T>
+  task::detach(() => run_timeout(delay, work))
+
+/// Runs callback work after waiting for the provided delay.
+pub fn after_delay<T>(delay: Duration, work: fn() -> T): (task::TaskRuntime, Time) -> T
+  run_timeout(delay, work)
+
+/// Schedules repeating callback work using the provided overlap policy.
+///
+/// The returned task is the interval driver. Cancelling it prevents future ticks.
+pub fn set_interval<T>(delay: Duration, overlap: Overlap, work: fn() -> T): task::TaskRuntime -> task::Task<Unit>
+  task::detach(() => run_interval(delay, overlap, work))
+
+fn run_timeout<T>(delay: Duration, work: fn() -> T): (task::TaskRuntime, Time) -> T
+  sleep_or_panic(delay)
+  invoke_callback(work)
+
+fn run_interval<T>(delay: Duration, overlap: Overlap, work: fn() -> T): (task::TaskRuntime, Time) -> Unit
+  while true do:
+    sleep_or_panic(delay)
+    if overlap.kind == 1 then:
+      let _ = task::detach(work)
+    else:
+      let _ = invoke_callback(work)
+  Unit {}
+
+fn invoke_callback<T>(work: fn() -> T) -> T
+  work()
+
+fn sleep_or_panic(delay: Duration): Time -> Unit
+  match(sleep(delay))
+    Ok<Unit>:
+      Unit {}
+    Err<HostError> { error }:
+      panic(error.message)
+      Unit {}
 
 fn decode_host_void_result(payload: MsgPack): () -> Result<Unit, HostError>
   match(HostDto::unpack(payload))

@@ -51,6 +51,11 @@ export const createHandleOutcomeDynamic = ({
     const mapLocal = 8;
 
     const boxTypeI32 = getOutcomeValueBoxType({ valueType: binaryen.i32, ctx });
+    const boxTypeBool = getOutcomeValueBoxType({
+      valueType: binaryen.i32,
+      typeId: ctx.program.primitives.bool,
+      ctx,
+    });
     const boxTypeI64 = getOutcomeValueBoxType({ valueType: binaryen.i64, ctx });
     const boxTypeF32 = getOutcomeValueBoxType({ valueType: binaryen.f32, ctx });
     const boxTypeF64 = getOutcomeValueBoxType({ valueType: binaryen.f64, ctx });
@@ -90,6 +95,30 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.ref.is_null(ctx.mod.local.get(payloadLocal, binaryen.eqref)),
         ctx.mod.block(null, [
           encodeToBuffer(ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType)),
+          finishValue(),
+        ])
+      ),
+      ctx.mod.if(
+        refTest(
+          ctx.mod,
+          ctx.mod.local.get(payloadLocal, binaryen.eqref),
+          boxTypeBool
+        ),
+        ctx.mod.block(null, [
+          encodeToBuffer(
+            ctx.mod.call(
+              msgpack.makeBool.wasmName,
+              [
+                unboxOutcomeValue({
+                  payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                  valueType: binaryen.i32,
+                  typeId: ctx.program.primitives.bool,
+                  ctx,
+                }),
+              ],
+              msgPackType
+            )
+          ),
           finishValue(),
         ])
       ),

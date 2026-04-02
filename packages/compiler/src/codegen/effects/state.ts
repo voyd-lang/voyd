@@ -8,6 +8,8 @@ export interface EffectsState {
   contBuilt: Set<string>;
   contBuilding: Set<string>;
   contCfgByName: Map<string, GroupContinuationCfg>;
+  contSiteOrderByKey: Map<string, number>;
+  nextSpecializedSiteOrder?: number;
   contRefTypeByKey: Map<string, binaryen.Type>;
   contSignatureByKey: Map<string, { returnType: number; envTypes: number[] }>;
   contSiteByKey: Map<string, ContinuationSite>;
@@ -24,6 +26,7 @@ export const createEffectsState = (): EffectsState => ({
   contBuilt: new Set<string>(),
   contBuilding: new Set<string>(),
   contCfgByName: new Map<string, GroupContinuationCfg>(),
+  contSiteOrderByKey: new Map<string, number>(),
   contRefTypeByKey: new Map<string, binaryen.Type>(),
   contSignatureByKey: new Map<string, { returnType: number; envTypes: number[] }>(),
   contSiteByKey: new Map<string, ContinuationSite>(),

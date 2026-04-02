@@ -4,6 +4,7 @@ import type {
   CodegenContext,
   CodegenOptions,
   CodegenResult,
+  ClosureTypeInfo,
   FunctionMetadata,
   ModuleLetGetterMetadata,
   FixedArrayWasmType,
@@ -118,6 +119,8 @@ export const codegenProgram = ({
   const resolvingStructuralIds = new Set<TypeId>();
   const resolvingStructuralHeapTypes = new Set<TypeId>();
   const fixedArrayTypes = new Map<TypeId, FixedArrayWasmType>();
+  const closureTypes = new Map<string, ClosureTypeInfo>();
+  const functionRefTypes = new Map<string, binaryen.Type>();
   const moduleContexts = new Map<string, CodegenContext>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     mod,
@@ -140,8 +143,8 @@ export const codegenProgram = ({
     resolvingStructuralIds,
     resolvingStructuralHeapTypes,
     fixedArrayTypes,
-    closureTypes: new Map(),
-    functionRefTypes: new Map(),
+    closureTypes,
+    functionRefTypes,
     recursiveBinders: new Map(),
     runtimeTypeRegistry,
     runtimeTypeIds: {

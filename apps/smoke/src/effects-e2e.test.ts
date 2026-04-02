@@ -15,6 +15,7 @@ const fixtureEntryPath = path.join(
 );
 const ASYNC_EFFECT_ID = "com.example.async";
 const GENERIC_EFFECT_ID = "com.example.generic";
+const GENERIC_STOP_EFFECT_ID = "com.example.generic-stop";
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -206,6 +207,24 @@ describe("smoke: effects e2e", () => {
     });
 
     expect(output).toBe(1009);
+  });
+
+  it("decodes end() payloads using the specialized generic owner return type", async () => {
+    const intOutput = await compiled.run<number>({
+      entryName: "host_boundary_generic_end_i32",
+      handlers: {
+        [`${GENERIC_STOP_EFFECT_ID}::stop`]: ({ end }) => end(11),
+      },
+    });
+    expect(intOutput).toBe(11);
+
+    const boolOutput = await compiled.run<boolean>({
+      entryName: "host_boundary_generic_end_bool",
+      handlers: {
+        [`${GENERIC_STOP_EFFECT_ID}::stop`]: ({ end }) => end(true),
+      },
+    });
+    expect(boolOutput).toBe(true);
   });
 
   it("exposes signatureHashFor for explicit effectId::opName::signatureHash keys", async () => {

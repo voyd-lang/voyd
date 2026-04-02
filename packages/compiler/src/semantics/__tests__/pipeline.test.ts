@@ -1201,6 +1201,63 @@ describe("semanticsPipeline", () => {
     expect(() => semanticsPipeline(ast)).toThrow(/ambiguous overload for add/);
   });
 
+  it("prefers concrete overloads over generic matches", () => {
+    const ast = loadAst("function_overloads_prefer_concrete_over_generic.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+
+    const symbolTable = getSymbolTable(result);
+    const rootScope = symbolTable.rootScope;
+    const mainSymbol = symbolTable.resolve("main", rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") return;
+
+    expectFunctionReturnPrimitive(result.typing, mainSymbol, "i32");
+  });
+
+  it("prefers structured overloads over bare generic matches", () => {
+    const ast = loadAst("function_overloads_prefer_structured_over_bare_generic.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+
+    const { hir, typing } = result;
+    const symbolTable = getSymbolTable(result);
+    const rootScope = symbolTable.rootScope;
+    const mainSymbol = symbolTable.resolve("main", rootScope);
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof mainSymbol !== "number") return;
+
+    const mainFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction => item.kind === "function" && item.symbol === mainSymbol
+    );
+    expect(mainFn).toBeDefined();
+    if (!mainFn) return;
+
+    const body = hir.expressions.get(mainFn.body);
+    expect(body?.exprKind).toBe("block");
+    if (!body || body.exprKind !== "block") return;
+
+    const callExprId = body.value;
+    expect(typeof callExprId).toBe("number");
+    if (typeof callExprId !== "number") return;
+
+    const callExpr = hir.expressions.get(callExprId);
+    expect(callExpr?.exprKind).toBe("call");
+    if (!callExpr || callExpr.exprKind !== "call") return;
+
+    const instanceKey = `${mainSymbol}<>`;
+    const target = typing.callTargets.get(callExpr.id)?.get(instanceKey);
+    expect(target).toBeDefined();
+    if (!target) return;
+
+    const chooseSymbols = symbolTable.resolveAll("choose", rootScope) ?? [];
+    const structuredTarget = chooseSymbols.find((symbol) => {
+      const signature = typing.functions.getSignature(symbol);
+      return signature?.typeParams?.length === 2;
+    });
+    expect(target.symbol).toBe(structuredTarget);
+  });
+
   it("reports typed overload mismatch details for function calls", () => {
     const ast = loadAst("function_overloads_no_match_details.voyd");
 

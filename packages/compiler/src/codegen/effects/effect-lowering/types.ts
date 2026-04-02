@@ -5,6 +5,7 @@ import type {
   SymbolId,
   TypeId,
 } from "../../context.js";
+import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 
 export type ContinuationFieldSource =
   | "param"
@@ -38,6 +39,8 @@ export interface ContinuationSiteBase {
   exprId: HirExprId;
   siteId: number;
   siteOrder: number;
+  typeInstanceId?: ProgramFunctionInstanceId;
+  ownerReturnTypeId?: TypeId;
   owner: ContinuationSiteOwner;
   contBaseName: string;
   baseEnvType: binaryen.Type;

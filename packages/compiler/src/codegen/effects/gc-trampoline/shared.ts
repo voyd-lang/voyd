@@ -1,9 +1,10 @@
-import type binaryen from "binaryen";
+import binaryen from "binaryen";
 import type { CodegenContext, FunctionContext } from "../../context.js";
 import type { ContinuationEnvField } from "../effect-lowering.js";
 import { getRequiredBinding, loadBindingValue } from "../../locals.js";
 import { coerceValueToType, lowerValueForHeapField } from "../../structural.js";
 import { getFunctionRefType } from "../../types.js";
+import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
 
 export const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
@@ -67,6 +68,28 @@ export const captureContinuationEnvFieldValue = ({
       const actualTypeId =
         typeof binding.typeId === "number" ? binding.typeId : field.typeId;
       const inlineValue = loadBindingValue(binding, ctx);
+      if (
+        typeof process !== "undefined" &&
+        process.env.DEBUG_EFFECTS === "1" &&
+        ctx.moduleId === "std::time"
+      ) {
+        console.error("[effects] capture field", {
+          name: field.name,
+          sourceKind: field.sourceKind,
+          symbol: field.symbol,
+          tempId: field.tempId,
+          fieldTypeId: field.typeId,
+          bindingKind: binding.kind,
+          bindingIndex: "index" in binding ? binding.index : undefined,
+          bindingTypeId: binding.typeId,
+          bindingType: binding.type,
+          bindingStorageType: binding.storageType,
+          actualTypeId,
+          inlineValueType: binaryen.getExpressionType(inlineValue),
+          fieldWasmType: field.wasmType,
+          fieldStorageType: field.storageType,
+        });
+      }
       const coercedValue =
         actualTypeId === field.typeId
           ? inlineValue
@@ -77,10 +100,15 @@ export const captureContinuationEnvFieldValue = ({
               ctx,
               fnCtx,
             });
+      const normalizedValue = coerceExprToWasmType({
+        expr: coercedValue,
+        targetType: field.wasmType,
+        ctx,
+      });
       return field.storageType === field.wasmType
-        ? coercedValue
+        ? normalizedValue
         : lowerValueForHeapField({
-            value: coercedValue,
+            value: normalizedValue,
             typeId: field.typeId,
             targetType: field.storageType,
             ctx,

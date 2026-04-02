@@ -1446,6 +1446,7 @@ const compileFunctionItem = (
       ? wrapValueInOutcome({
           valueExpr: implFunctionBody,
           valueType: wrappedValueType,
+          typeId: meta.resultTypeId,
           ctx,
           fnCtx: implCtx,
         })
@@ -1582,6 +1583,7 @@ const compileFunctionItem = (
     ? wrapValueInOutcome({
         valueExpr: functionBodyBeforeWrap,
         valueType: wrappedValueType,
+        typeId: meta.resultTypeId,
         ctx,
         fnCtx,
       })

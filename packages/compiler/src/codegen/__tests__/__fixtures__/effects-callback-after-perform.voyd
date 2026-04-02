@@ -1,0 +1,22 @@
+eff Async
+  await(resume, value: i32) -> i32
+
+fn after_await<T>(value: i32, work: fn() -> T): (Async) -> T
+  let _ = Async::await(value)
+  work()
+
+pub fn main(): Async -> i32
+  after_await<i32>(5, () => 7)
+
+pub fn lambda_capture_main(): Async -> i32
+  let work = () => 7
+  let thunk = () =>
+    let _ = Async::await(5)
+    work()
+  thunk()
+
+pub fn nested_generic_lambda_main(): Async -> i32
+  let work = () => 7
+  let thunk = () =>
+    after_await<i32>(5, work)
+  thunk()

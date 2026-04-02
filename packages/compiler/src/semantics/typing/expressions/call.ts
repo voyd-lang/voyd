@@ -5121,6 +5121,148 @@ const findOverloadMatches = ({
   });
 };
 
+const typeSpecificityScore = ({
+  type,
+  ctx,
+  visiting = new Set<TypeId>(),
+}: {
+  type: TypeId;
+  ctx: TypingContext;
+  visiting?: Set<TypeId>;
+}): number => {
+  if (visiting.has(type)) {
+    return 0;
+  }
+  visiting.add(type);
+  const score = (() => {
+    const desc = ctx.arena.get(type);
+    switch (desc.kind) {
+      case "type-param-ref":
+        return 0;
+      case "primitive":
+        return 2;
+      case "recursive":
+        return 1 + typeSpecificityScore({ type: desc.body, ctx, visiting });
+      case "fixed-array":
+        return 1 + typeSpecificityScore({ type: desc.element, ctx, visiting });
+      case "union":
+        return (
+          1 +
+          desc.members.reduce(
+            (sum, member) => sum + typeSpecificityScore({ type: member, ctx, visiting }),
+            0,
+          )
+        );
+      case "intersection":
+        return (
+          (typeof desc.nominal === "number"
+            ? typeSpecificityScore({ type: desc.nominal, ctx, visiting })
+            : 0) +
+          (typeof desc.structural === "number"
+            ? typeSpecificityScore({ type: desc.structural, ctx, visiting })
+            : 0) +
+          (desc.traits?.reduce(
+            (sum, trait) => sum + typeSpecificityScore({ type: trait, ctx, visiting }),
+            0,
+          ) ?? 0)
+        );
+      case "trait":
+      case "nominal-object":
+      case "value-object":
+        return (
+          1 +
+          desc.typeArgs.reduce(
+            (sum, arg) => sum + typeSpecificityScore({ type: arg, ctx, visiting }),
+            0,
+          )
+        );
+      case "structural-object":
+        return (
+          1 +
+          desc.fields.reduce(
+            (sum, field) => sum + typeSpecificityScore({ type: field.type, ctx, visiting }),
+            0,
+          )
+        );
+      case "function":
+        return (
+          1 +
+          desc.parameters.reduce(
+            (sum, param) => sum + typeSpecificityScore({ type: param.type, ctx, visiting }),
+            0,
+          ) +
+          typeSpecificityScore({ type: desc.returnType, ctx, visiting })
+        );
+    }
+  })();
+  visiting.delete(type);
+  return score;
+};
+
+const overloadParameterSpecificity = ({
+  symbol,
+  signature,
+  typeArguments,
+  ctx,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  typeArguments?: readonly TypeId[];
+  ctx: TypingContext;
+}): number => {
+  const explicitSubstitution =
+    signature.typeParams && signature.typeParams.length > 0
+      ? applyExplicitTypeArguments({
+          signature,
+          typeArguments,
+          calleeSymbol: symbol,
+          ctx,
+        })
+      : undefined;
+
+  return signature.parameters.reduce((score, param) => {
+    const type = explicitSubstitution
+      ? ctx.arena.substitute(param.type, explicitSubstitution)
+      : param.type;
+    return score + typeSpecificityScore({ type, ctx });
+  }, 0);
+};
+
+const narrowOverloadMatches = <T extends { symbol: SymbolId; signature: FunctionSignature }>({
+  matches,
+  typeArguments,
+  ctx,
+}: {
+  matches: readonly T[];
+  typeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+}): readonly T[] => {
+  if (matches.length <= 1) {
+    return matches;
+  }
+
+  const maxSpecificity = Math.max(
+    ...matches.map((candidate) =>
+      overloadParameterSpecificity({
+        symbol: candidate.symbol,
+        signature: candidate.signature,
+        typeArguments,
+        ctx,
+      }),
+    ),
+  );
+  const narrowed = matches.filter(
+    (candidate) =>
+      overloadParameterSpecificity({
+        symbol: candidate.symbol,
+        signature: candidate.signature,
+        typeArguments,
+        ctx,
+      }) === maxSpecificity,
+  );
+  return narrowed.length > 0 ? narrowed : matches;
+};
+
 const typeOverloadedCall = (
   call: HirCallExpr,
   callee: HirOverloadSetExpr,
@@ -5183,6 +5325,7 @@ const typeOverloadedCall = (
       state,
     });
   }
+  matches = [...narrowOverloadMatches({ matches, typeArguments, ctx })];
 
   const traitDispatch =
     matches.length === 0 && (!typeArguments || typeArguments.length === 0)
@@ -5623,6 +5766,13 @@ const typeIntrinsicCall = (
       return typePanicScratchSetIntrinsic({ args, ctx, state, typeArguments });
     case "__panic_trap":
       return typePanicTrapIntrinsic({ args, ctx, state, typeArguments });
+    case "__task_spawn":
+    case "__task_detach":
+      return typeTaskSpawnIntrinsic({ name, args, ctx, state, typeArguments });
+    case "__task_cancel":
+      return typeTaskCancelIntrinsic({ args, ctx, state, typeArguments });
+    case "__task_take_value":
+      return typeTaskTakeValueIntrinsic({ args, ctx, state, typeArguments });
     case "__shift_l":
     case "__shift_ru":
       return typeShiftIntrinsic({ name, args, ctx, state, typeArguments });
@@ -6360,6 +6510,75 @@ const typePanicScratchSetIntrinsic = ({
     "__panic_scratch_set capacity"
   );
   return ctx.primitives.void;
+};
+
+const typeTaskSpawnIntrinsic = ({
+  name,
+  args,
+  ctx,
+  state: _state,
+  typeArguments,
+}: {
+  name: "__task_spawn" | "__task_detach";
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name, args, expected: 1, detail: "work function" });
+  assertNoIntrinsicTypeArgs(name, typeArguments);
+  const workType = args[0]!.type;
+  const desc = ctx.arena.get(workType);
+  if (desc.kind !== "function") {
+    throw new Error(`intrinsic ${name} expects a function argument`);
+  }
+  return getPrimitiveType(ctx, "i32");
+};
+
+const typeTaskCancelIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name: "__task_cancel", args, expected: 1 });
+  assertNoIntrinsicTypeArgs("__task_cancel", typeArguments);
+  ensureTypeMatches(
+    args[0]!.type,
+    getPrimitiveType(ctx, "i32"),
+    ctx,
+    state,
+    "__task_cancel task id"
+  );
+  return ctx.primitives.bool;
+};
+
+const typeTaskTakeValueIntrinsic = ({
+  args,
+  ctx,
+  state,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  state: TypingState;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({ name: "__task_take_value", args, expected: 1 });
+  assertNoIntrinsicTypeArgs("__task_take_value", typeArguments);
+  ensureTypeMatches(
+    args[0]!.type,
+    getPrimitiveType(ctx, "i32"),
+    ctx,
+    state,
+    "__task_take_value task id"
+  );
+  return ctx.primitives.unknown;
 };
 
 const typeShiftIntrinsic = ({

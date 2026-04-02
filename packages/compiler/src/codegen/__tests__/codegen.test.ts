@@ -167,10 +167,13 @@ const buildCodegenProgram = (
   const programHelpers = createProgramHelperRegistry();
   const structTypes = new Map();
   const structHeapTypes = new Map();
+  const abiBoxTypes = new Map();
   const structuralIdCache = new Map<TypeId, TypeId | null>();
   const resolvingStructuralIds = new Set<TypeId>();
   const resolvingStructuralHeapTypes = new Set<TypeId>();
   const fixedArrayTypes = new Map();
+  const closureTypes = new Map();
+  const functionRefTypes = new Map();
   const moduleContexts = new Map<string, CodegenContext>();
   const contexts: CodegenContext[] = modules.map((sem) => ({
     program,
@@ -188,13 +191,13 @@ const buildCodegenProgram = (
     itemsToSymbols: new Map(),
     structTypes,
     structHeapTypes,
-    abiBoxTypes: new Map(),
+    abiBoxTypes,
     structuralIdCache,
     resolvingStructuralIds,
     resolvingStructuralHeapTypes,
     fixedArrayTypes,
-    closureTypes: new Map(),
-    functionRefTypes: new Map(),
+    closureTypes,
+    functionRefTypes,
     recursiveBinders: new Map(),
     runtimeTypeRegistry,
     runtimeTypeIds: {
@@ -1056,7 +1059,7 @@ describe("next codegen", () => {
       .map((line) => line.trim())
       .filter((line) => line.startsWith("(type"));
     expect(
-      typeLines.some((line) => line.includes("__closure_base_lambdas_voyd")),
+      typeLines.some((line) => line.includes("voyd__closure_base_")),
     ).toBe(true);
     expect(
       typeLines.some(
@@ -1145,14 +1148,9 @@ describe("next codegen", () => {
 
     const closureKeysA = Array.from(ctxA.closureTypes.keys());
     const closureKeysB = Array.from(ctxB.closureTypes.keys());
-    expect(
-      closureKeysA.every((key) => key.startsWith(`${moduleA.moduleId}::`)),
-    ).toBe(true);
-    expect(
-      closureKeysB.every((key) => key.startsWith(`${moduleB.moduleId}::`)),
-    ).toBe(true);
+    expect(ctxA.closureTypes).toBe(ctxB.closureTypes);
     expect(new Set([...closureKeysA, ...closureKeysB]).size).toBe(
-      closureKeysA.length + closureKeysB.length,
+      closureKeysA.length,
     );
 
     const {

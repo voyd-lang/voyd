@@ -72,7 +72,12 @@ export const lowerEffectfulCallResult = ({
     ctx.mod.i32.const(OUTCOME_TAGS.value)
   );
   const payload = ctx.effectsRuntime.outcomePayload(loadOutcome());
-  const valueResult = unboxOutcomeValue({ payload, valueType, ctx });
+  const valueResult = unboxOutcomeValue({
+    payload,
+    valueType,
+    typeId: returnTypeId,
+    ctx,
+  });
 
   const effectReturn = fnCtx.effectful
       ? (() => {

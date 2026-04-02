@@ -50,3 +50,37 @@ export const createEffectfulEntry = ({
   return name;
 };
 
+export const createEffectfulEntryRaw = ({
+  ctx,
+  runtime,
+  meta,
+  exportName,
+}: {
+  ctx: CodegenContext;
+  runtime: EffectRuntime;
+  meta: FunctionMetadata;
+  exportName: string;
+}): string => {
+  if (meta.paramTypes.length > 1) {
+    throw new Error(
+      `effectful exports with parameters are not supported yet (${exportName})`
+    );
+  }
+
+  const name = `${ctx.moduleLabel}__${exportName}`;
+  const params = binaryen.createType([binaryen.i32, binaryen.i32]);
+  const dispatched = ctx.mod.call(
+    ensureDispatcher(ctx),
+    [
+      ctx.mod.call(
+        meta.wasmName,
+        [ctx.mod.ref.null(runtime.handlerFrameType)],
+        runtime.outcomeType
+      ),
+    ],
+    runtime.outcomeType
+  );
+  ctx.mod.addFunction(name, params, runtime.outcomeType, [], dispatched);
+  ctx.mod.addFunctionExport(name, exportName);
+  return name;
+};

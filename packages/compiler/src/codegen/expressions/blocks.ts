@@ -228,6 +228,7 @@ export const compileStatement = (
             const wrapped = wrapValueInOutcome({
               valueExpr: ctx.mod.nop(),
               valueType: binaryen.none,
+              typeId: fnCtx.returnTypeId,
               ctx,
               fnCtx,
             });
@@ -267,6 +268,7 @@ export const compileStatement = (
             const wrapped = wrapValueInOutcome({
               valueExpr: ctx.mod.nop(),
               valueType: binaryen.none,
+              typeId: fnCtx.returnTypeId,
               ctx,
               fnCtx,
             });
@@ -289,6 +291,7 @@ export const compileStatement = (
             const wrapped = wrapValueInOutcome({
               valueExpr: ctx.mod.nop(),
               valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
+              typeId: fnCtx.returnTypeId,
               ctx,
               fnCtx,
             });
@@ -331,6 +334,7 @@ export const compileStatement = (
           const wrapped = wrapValueInOutcome({
             valueExpr: coerced,
             valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
+            typeId: fnCtx.returnTypeId,
             ctx,
             fnCtx,
           });
@@ -372,6 +376,7 @@ export const compileStatement = (
         const wrapped = wrapValueInOutcome({
           valueExpr: ctx.mod.nop(),
           valueType: wasmTypeFor(fnCtx.returnTypeId, ctx),
+          typeId: fnCtx.returnTypeId,
           ctx,
           fnCtx,
         });

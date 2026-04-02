@@ -8,6 +8,7 @@ import type {
 } from "./context.js";
 import type { ProgramFunctionInstanceId } from "../semantics/ids.js";
 import {
+  getClosureTypeInfo,
   getExprBinaryenType,
   getRequiredExprType,
   getStructuralTypeInfo,
@@ -30,12 +31,16 @@ import {
   arrayNewFixed,
   arraySet,
   binaryenTypeToHeapType,
+  callRef,
   initStruct,
   modBinaryenTypeToHeapType,
+  refCast,
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
+import { ensureDispatcher } from "./effects/dispatcher.js";
+import { unboxOutcomeValue, wrapValueInOutcome } from "./effects/outcome-values.js";
 import { captureMultivalueLanes } from "./multivalue.js";
 import { ensureFixedArrayWasmTypesByElement } from "./fixed-array-types.js";
 
@@ -84,6 +89,9 @@ const PANIC_TRAP_PTR_GLOBAL = "__voyd_panic_ptr";
 const PANIC_TRAP_LEN_GLOBAL = "__voyd_panic_len";
 const PANIC_SCRATCH_PTR_GLOBAL = "__voyd_panic_scratch_ptr";
 const PANIC_SCRATCH_CAPACITY_GLOBAL = "__voyd_panic_scratch_capacity";
+const TASK_IMPORT_MODULE = "voyd.task";
+const TASK_IMPORTS_KEY = Symbol("voyd.task.imports");
+const TASK_STARTERS_KEY = Symbol("voyd.task.starters");
 
 const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
   if (ctx.mod.getGlobal(PANIC_TRAP_PTR_GLOBAL) === 0) {
@@ -120,6 +128,124 @@ const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
       ctx.mod.i32.const(0)
     );
   }
+};
+
+const sanitizeTaskKey = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const ensureTaskImport = ({
+  name,
+  base,
+  params,
+  result,
+  ctx,
+}: {
+  name: string;
+  base: string;
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+}): string => {
+  const imports = ctx.programHelpers.getHelperState(
+    TASK_IMPORTS_KEY,
+    () => new Set<string>()
+  );
+  if (imports.has(name)) {
+    return name;
+  }
+  ctx.mod.addFunctionImport(
+    name,
+    TASK_IMPORT_MODULE,
+    base,
+    binaryen.createType(params as number[]),
+    result
+  );
+  imports.add(name);
+  return name;
+};
+
+const ensureTaskStarterHelper = ({
+  closureTypeId,
+  ctx,
+}: {
+  closureTypeId: TypeId;
+  ctx: CodegenContext;
+}): string => {
+  const starters = ctx.programHelpers.getHelperState(
+    TASK_STARTERS_KEY,
+    () => new Map<number, string>()
+  );
+  const cached = starters.get(closureTypeId);
+  if (cached) {
+    return cached;
+  }
+
+  const desc = ctx.program.types.getTypeDesc(closureTypeId);
+  if (desc.kind !== "function") {
+    throw new Error("task spawn requires a function-typed work value");
+  }
+  if (desc.parameters.length !== 0) {
+    throw new Error("task spawn only supports zero-argument work functions");
+  }
+
+  const base = getClosureTypeInfo(closureTypeId, ctx);
+  const effectful =
+    typeof desc.effectRow === "number" &&
+    !ctx.program.effects.isEmpty(desc.effectRow);
+  const exportName = `__voyd_task_start_${sanitizeTaskKey(base.key)}`;
+  const params = binaryen.createType([base.interfaceType]);
+  const helperFnCtx = {
+    locals: [] as binaryen.Type[],
+    nextLocalIndex: 1,
+  };
+  const closureRef = ctx.mod.local.get(0, base.interfaceType);
+  const fnField = structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: 0,
+    fieldType: binaryen.funcref,
+    exprRef: closureRef,
+  });
+  const targetFn =
+    base.fnRefType === binaryen.funcref
+      ? fnField
+      : refCast(ctx.mod, fnField, base.fnRefType);
+  const callArgs = [
+    closureRef,
+    ...base.paramTypes
+      .slice(0, base.userParamOffset)
+      .map(() => ctx.effectsBackend.abi.hiddenHandlerValue(ctx)),
+  ];
+  const callExpr = callRef(
+    ctx.mod,
+    targetFn,
+    callArgs as number[],
+    base.resultType
+  );
+  const body = effectful
+    ? ctx.mod.call(
+        ensureDispatcher(ctx),
+        [callExpr],
+        ctx.effectsRuntime.outcomeType
+      )
+    : wrapValueInOutcome({
+        valueExpr: callExpr,
+        valueType: base.resultType,
+        ctx,
+        fnCtx: helperFnCtx,
+      });
+
+  ctx.mod.addFunction(
+    exportName,
+    params,
+    ctx.effectsRuntime.outcomeType,
+    helperFnCtx.locals,
+    body
+  );
+  if (ctx.programHelpers.registerExportName(exportName)) {
+    ctx.mod.addFunctionExport(exportName, exportName);
+  }
+  starters.set(closureTypeId, exportName);
+  return exportName;
 };
 
 const makeInlineValue = ({
@@ -717,6 +843,63 @@ export const compileIntrinsicCall = ({
         ctx.mod.global.set(PANIC_TRAP_LEN_GLOBAL, args[1]!),
         ctx.mod.unreachable(),
       ]);
+    }
+    case "__task_spawn":
+    case "__task_detach": {
+      assertArgCount(name, args, 1);
+      const workTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const workType = ctx.program.types.getTypeDesc(workTypeId);
+      if (workType.kind !== "function") {
+        throw new Error(`${name} requires a function-typed work value`);
+      }
+      const starterExport = ensureTaskStarterHelper({
+        closureTypeId: workTypeId,
+        ctx,
+      });
+      const closureInfo = getClosureTypeInfo(workTypeId, ctx);
+      const importName = `__voyd_${name}_${sanitizeTaskKey(starterExport)}`;
+      const importFn = ensureTaskImport({
+        name: importName,
+        base: `${name === "__task_detach" ? "spawn_detached" : "spawn_attached"}__${starterExport}`,
+        params: [closureInfo.interfaceType],
+        result: binaryen.i32,
+        ctx,
+      });
+      return ctx.mod.call(importFn, [args[0]!], binaryen.i32);
+    }
+    case "__task_cancel": {
+      assertArgCount(name, args, 1);
+      const importFn = ensureTaskImport({
+        name: "__voyd_task_cancel",
+        base: "cancel",
+        params: [binaryen.i32],
+        result: binaryen.i32,
+        ctx,
+      });
+      return ctx.mod.call(importFn, [args[0]!], binaryen.i32);
+    }
+    case "__task_take_value": {
+      assertArgCount(name, args, 1);
+      const importFn = ensureTaskImport({
+        name: "__voyd_task_take_value",
+        base: "take_value",
+        params: [binaryen.i32],
+        result: ctx.effectsRuntime.outcomeType,
+        ctx,
+      });
+      const outcome = ctx.mod.call(
+        importFn,
+        [args[0]!],
+        ctx.effectsRuntime.outcomeType,
+      );
+      const payload = ctx.effectsRuntime.outcomePayload(outcome);
+      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      return unboxOutcomeValue({
+        payload,
+        valueType: wasmTypeFor(returnTypeId, ctx),
+        typeId: returnTypeId,
+        ctx,
+      });
     }
     case "__shift_l":
     case "__shift_ru": {
