@@ -3,6 +3,9 @@ import type { ProgramSymbolId, TypeId } from "../../../semantics/ids.js";
 import { requireFunctionMetaByName } from "../../function-lookup.js";
 import { stateFor } from "./state.js";
 
+// Host-boundary lowering targets module-qualified std contracts directly.
+// This is an intentional compiler<->std boundary rather than a dependency on
+// prelude or other convenience exports.
 const PUBLIC_MSGPACK_MODULE_ID = "std::msgpack";
 const RAW_MSGPACK_MODULE_ID = "std::msgpack::fns";
 

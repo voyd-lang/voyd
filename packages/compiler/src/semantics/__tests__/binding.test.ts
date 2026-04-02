@@ -27,9 +27,31 @@ import {
   publicVisibility,
 } from "../hir/index.js";
 import { packageIdFromPath } from "../packages.js";
+import {
+  GENERATED_ARRAY_LITERAL_HELPER,
+  GENERATED_STRING_LITERAL_HELPER,
+} from "../generated-syntax-helpers.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
+
+const bindTestSource = ({
+  source,
+  filePath,
+}: {
+  source: string;
+  filePath: string;
+}) => {
+  const ast = parse(source, filePath);
+  const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+  symbolTable.declare({ name: filePath, kind: "module", declaredAt: ast.syntaxId });
+
+  return {
+    ast,
+    symbolTable,
+    binding: runBindingPipeline({ moduleForm: ast, symbolTable }),
+  };
+};
 
 describe("binding pipeline", () => {
   it("collects functions, parameters, and scopes for the fib sample module", () => {
@@ -1017,6 +1039,194 @@ impl Eq<Box> for Box
       (method) => symbolTable.getSymbol(method.symbol).name === "parse",
     );
     expect(parseMethods).toHaveLength(2);
+  });
+
+  it("adds a hidden compiler import for generated string literals", () => {
+    const stringModulePath = {
+      namespace: "std" as const,
+      segments: ["string"] as const,
+    };
+    const stringModuleId = modulePathToString(stringModulePath);
+    const {
+      symbolTable: dependencySymbols,
+      binding: dependencyBinding,
+    } = bindTestSource({
+      filePath: stringModuleId,
+      source: `pub obj String {}
+pub obj FixedArray<T> {}
+
+pub fn new_string(from_bytes: FixedArray<i32>): () -> String
+  String {}`,
+    });
+    const newStringSymbol = dependencySymbols.resolve(
+      "new_string",
+      dependencySymbols.rootScope,
+    );
+    expect(typeof newStringSymbol).toBe("number");
+    if (typeof newStringSymbol !== "number") {
+      return;
+    }
+
+    const source = `pub fn main() -> i32
+  let greeting = "hello"
+  1`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        stringModuleId,
+        new Map([
+          [
+            "new_string",
+            {
+              name: "new_string",
+              symbol: newStringSymbol,
+              moduleId: stringModuleId,
+              modulePath: stringModulePath,
+              packageId: packageIdFromPath(stringModulePath),
+              kind: "value",
+              visibility: publicVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      moduleExports,
+      dependencies: new Map([[stringModuleId, dependencyBinding]]),
+    });
+
+    const generatedImport = binding.imports.find(
+      (entry) => entry.name === GENERATED_STRING_LITERAL_HELPER,
+    );
+    expect(generatedImport).toBeDefined();
+    if (!generatedImport) {
+      return;
+    }
+
+    expect(generatedImport.target).toEqual({
+      moduleId: stringModuleId,
+      symbol: newStringSymbol,
+    });
+    expect(symbolTable.getSymbol(generatedImport.local).name).toBe(
+      GENERATED_STRING_LITERAL_HELPER,
+    );
+
+    const metadata = symbolTable.getSymbol(generatedImport.local).metadata as
+      | {
+          implicitCompilerImport?: boolean;
+          import?: {
+            moduleId: string;
+            symbol: number;
+            explicitlyTargetsStdSubmodule?: boolean;
+          };
+        }
+      | undefined;
+
+    expect(metadata?.implicitCompilerImport).toBe(true);
+    expect(metadata?.import).toEqual({
+      moduleId: stringModuleId,
+      symbol: newStringSymbol,
+      explicitlyTargetsStdSubmodule: true,
+    });
+  });
+
+  it("adds a hidden compiler import for generated array literals", () => {
+    const arrayModulePath = {
+      namespace: "std" as const,
+      segments: ["array"] as const,
+    };
+    const arrayModuleId = modulePathToString(arrayModulePath);
+    const {
+      symbolTable: dependencySymbols,
+      binding: dependencyBinding,
+    } = bindTestSource({
+      filePath: arrayModuleId,
+      source: `pub obj FixedArray<T> {}
+pub obj Array<T> {}
+
+pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
+  Array<T> {}`,
+    });
+    const newArraySymbol = dependencySymbols.resolve(
+      "new_array_unchecked",
+      dependencySymbols.rootScope,
+    );
+    expect(typeof newArraySymbol).toBe("number");
+    if (typeof newArraySymbol !== "number") {
+      return;
+    }
+
+    const source = `pub fn main() -> i32
+  let values = [1, 2, 3]
+  1`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        arrayModuleId,
+        new Map([
+          [
+            "new_array_unchecked",
+            {
+              name: "new_array_unchecked",
+              symbol: newArraySymbol,
+              moduleId: arrayModuleId,
+              modulePath: arrayModulePath,
+              packageId: packageIdFromPath(arrayModulePath),
+              kind: "value",
+              visibility: publicVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      moduleExports,
+      dependencies: new Map([[arrayModuleId, dependencyBinding]]),
+    });
+
+    const generatedImport = binding.imports.find(
+      (entry) => entry.name === GENERATED_ARRAY_LITERAL_HELPER,
+    );
+    expect(generatedImport).toBeDefined();
+    if (!generatedImport) {
+      return;
+    }
+
+    expect(generatedImport.target).toEqual({
+      moduleId: arrayModuleId,
+      symbol: newArraySymbol,
+    });
+    expect(symbolTable.getSymbol(generatedImport.local).name).toBe(
+      GENERATED_ARRAY_LITERAL_HELPER,
+    );
+
+    const metadata = symbolTable.getSymbol(generatedImport.local).metadata as
+      | {
+          implicitCompilerImport?: boolean;
+          import?: {
+            moduleId: string;
+            symbol: number;
+            explicitlyTargetsStdSubmodule?: boolean;
+          };
+        }
+      | undefined;
+
+    expect(metadata?.implicitCompilerImport).toBe(true);
+    expect(metadata?.import).toEqual({
+      moduleId: arrayModuleId,
+      symbol: newArraySymbol,
+      explicitlyTargetsStdSubmodule: true,
+    });
   });
 
   it("resolves self-relative use declarations using module export dependencies", () => {
