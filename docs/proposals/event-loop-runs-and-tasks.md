@@ -20,8 +20,9 @@ Core direction:
 - define timers as library APIs built on the same task model rather than as a
   separate concurrency mechanism
 
-This proposal builds directly on `docs/specs/runtime-event-loop.md` and the
-existing JS host `runManaged(...)` scheduler.
+This proposal builds directly on `docs/specs/runtime-event-loop.md`, the
+existing high-level SDK `sdk.run(...)` execution path, and the lower-level JS
+host managed-run scheduler.
 
 ## Why This Exists
 
@@ -81,7 +82,10 @@ Today the runtime already has the right host-side shape:
 
 - `docs/specs/runtime-event-loop.md` defines ready, external-completion, and
   timer queues plus cancellation and fairness.
-- `packages/js-host` exposes `VoydRunHandle<T>` with `outcome` and `cancel`.
+- `packages/sdk` already exposes `sdk.run(...)` as the simple high-level
+  execution API.
+- `packages/js-host` exposes `VoydRunHandle<T>` with `outcome` and `cancel` for
+  lower-level managed-run control.
 - `std::time` currently provides `Duration`, `Instant`, `SystemTime`, and
   `sleep`.
 
@@ -96,12 +100,16 @@ concurrent continuation chain inside the same run.
 
 A **run** remains the host/runtime concept.
 
-- A host creates a run by invoking an entrypoint such as `host.runManaged("main")`.
+- A host/runtime layer creates a run when executing an entrypoint.
+- At the high-level SDK surface this is already done via `sdk.run(...)`.
+- At the lower-level JS host surface this exists as managed-run execution with
+  a `VoydRunHandle<T>`.
 - A run owns the event loop instance, task registry, timer registrations, and
   host capability bookkeeping for that invocation.
 - A run is the root cancellation boundary.
 
-This preserves the current JS host API and keeps `RunHandle` as a host-facing
+This preserves the current SDK API shape, keeps `sdk.run(...)` as the simple
+default execution entrypoint, and keeps `RunHandle` as a lower-level host-facing
 concept rather than the primary language surface.
 
 #### Task
