@@ -317,7 +317,7 @@ export default function Home() {
           ))}
         </div>
 
-        <SurfaceArticle className="grid gap-3 sm:grid-cols-2 sm:auto-rows-fr lg:grid-cols-3 p-3">
+        <div className="grid gap-3 sm:grid-cols-2 sm:auto-rows-fr lg:grid-cols-3 p-3">
           {MORE_CAPABILITIES.map((capability) => (
             <div key={capability.title} className="flex h-full flex-col p-4">
               <h3 className="m-0 text-base font-bold">{capability.title}</h3>
@@ -343,7 +343,7 @@ export default function Home() {
               ) : null}
             </div>
           ))}
-        </SurfaceArticle>
+        </div>
       </SurfaceSection>
     </main>
   );
