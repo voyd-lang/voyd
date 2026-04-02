@@ -1,7 +1,7 @@
 import {
   type Expr,
-  type Form,
   type IdentifierAtom,
+  type Form,
   type Syntax,
   type InternalIdentifierAtom,
   formCallsInternal,
@@ -47,6 +47,10 @@ import {
   STRING_LITERAL_CONSTRUCTOR_EXPORT,
   STRING_LITERAL_CONSTRUCTOR_MODULE_ID,
 } from "../../generated-syntax-helpers.js";
+import {
+  collectTryHandlerClauses,
+  isTryHandlerClause,
+} from "../../try-handler-clauses.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -150,13 +154,28 @@ const bindTry = (
   const body = form.at(bodyIndex);
   if (isForm(body) && body.calls("block")) {
     body.rest.forEach((entry) => {
-      if (isEffectHandlerClause(entry, ctx, tracker.current()) && isForm(entry)) {
+      if (
+        isTryHandlerClause({
+          expr: entry,
+          scope: tracker.current(),
+          resolveBareHandlerHead: ({ name, scope }) =>
+            typeof ctx.symbolTable.resolveByKinds(name, scope, ["effect-op"]) === "number",
+        }) &&
+        isForm(entry)
+      ) {
         handlerEntries.push(entry);
       }
     });
   }
   if (body) {
-    handlerEntries.push(...findHandlerClauses(body, ctx, tracker.current()));
+    handlerEntries.push(
+      ...collectTryHandlerClauses({
+        expr: body,
+        scope: tracker.current(),
+        resolveBareHandlerHead: ({ name, scope }) =>
+          typeof ctx.symbolTable.resolveByKinds(name, scope, ["effect-op"]) === "number",
+      }),
+    );
   }
   if (body) {
     bindExpr(body, ctx, tracker);
@@ -245,82 +264,6 @@ const extractHandlerParams = (
     return head.rest;
   }
   return [];
-};
-
-const isEffectHandlerHead = (expr: Expr | undefined): boolean => {
-  if (!isForm(expr)) {
-    return false;
-  }
-
-  if (expr.calls("::")) {
-    const operationCall = expr.at(2);
-    return isForm(operationCall);
-  }
-
-  return true;
-};
-
-const isBareEffectHandlerHead = (
-  expr: Expr,
-  ctx: BindingContext,
-  scope: number,
-): boolean => {
-  if (!isForm(expr)) {
-    return false;
-  }
-  const callee = expr.at(0);
-  if (!isIdentifierAtom(callee) && !isInternalIdentifierAtom(callee)) {
-    return false;
-  }
-  return typeof ctx.symbolTable.resolveByKinds(callee.value, scope, ["effect-op"]) === "number";
-};
-
-const isEffectHandlerClause = (
-  expr: Expr | undefined,
-  ctx: BindingContext,
-  scope: number,
-): boolean => {
-  if (!isForm(expr) || !expr.calls(":") || !isEffectHandlerHead(expr.at(1))) {
-    return false;
-  }
-  const head = expr.at(1);
-  if (isForm(head) && !head.calls("::") && !isBareEffectHandlerHead(head, ctx, scope)) {
-    return false;
-  }
-
-  const body = expr.at(2);
-  return isForm(body) && body.calls("block");
-};
-
-const findHandlerClauses = (
-  expr: Expr,
-  ctx: BindingContext,
-  scope: number,
-): Form[] => {
-  if (!isForm(expr) || expr.calls("try")) {
-    return [];
-  }
-
-  const handlers: Form[] = [];
-  expr.toArray().forEach((child) => {
-    if (isEffectHandlerClause(child, ctx, scope) && isForm(child)) {
-      handlers.push(child);
-      return;
-    }
-    if (isForm(child) && child.calls(":")) {
-      const label = child.at(1);
-      const value = child.at(2);
-      if (label) {
-        handlers.push(...findHandlerClauses(label, ctx, scope));
-      }
-      if (value) {
-        handlers.push(...findHandlerClauses(value, ctx, scope));
-      }
-      return;
-    }
-    handlers.push(...findHandlerClauses(child, ctx, scope));
-  });
-  return handlers;
 };
 
 const bindBlock = (
