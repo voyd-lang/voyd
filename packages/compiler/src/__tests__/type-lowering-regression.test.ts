@@ -20,10 +20,10 @@ const createMemoryHost = (files: Record<string, string>): ModuleHost =>
 const expectCompileSuccess = (
   result: CompileProgramResult,
 ): Extract<CompileProgramResult, { success: true }> => {
-  expect(result.success).toBe(true);
   if (!result.success) {
     throw new Error(JSON.stringify(result.diagnostics, null, 2));
   }
+  expect(result.success).toBe(true);
   return result;
 };
 
@@ -176,5 +176,79 @@ impl Countable for Box
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("preserves mutable value receiver updates through optimized helper forwarding", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `pub val Counter {
+  current: i32
+}
+
+impl Counter
+  fn next(~self) -> i32
+    self.current = self.current + 1
+    self.current
+
+fn sample(~counter: Counter) -> i32
+  counter.next()
+
+pub fn main() -> i32
+  let ~counter = Counter { current: 0 }
+  let first = sample(counter)
+  let second = sample(counter)
+  first + second + counter.current
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+        codegenOptions: { optimize: true },
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(5);
+  });
+
+  it("preserves mutable value receiver updates across while-loop iterations", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `pub val Counter {
+  current: i64
+}
+
+impl Counter
+  fn next(~self) -> i64
+    self.current = self.current + 1i64
+    self.current
+
+pub fn main() -> i32
+  let ~counter = Counter { current: 0i64 }
+  var index = 0
+  var sum = 0i64
+
+  while index < 3 do:
+    sum = sum + counter.next()
+    index = index + 1
+
+  if sum == 6i64 and counter.current == 3i64 then:
+    1
+  else:
+    0
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(1);
   });
 });

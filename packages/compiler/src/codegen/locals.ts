@@ -46,8 +46,11 @@ export const declareLocalWithTypeId = (
     return existing;
   }
 
-  const wasmType = wasmTypeFor(typeId, ctx);
-  const binding = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
+  const binding = allocateAddressableLocal({
+    typeId,
+    ctx,
+    fnCtx,
+  });
   fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
   return binding;
 };
@@ -64,8 +67,11 @@ export const declareLocal = (
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typeId = getSymbolTypeId(symbol, ctx, typeInstanceId);
-  const wasmType = wasmTypeFor(typeId, ctx);
-  const binding = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
+  const binding = allocateAddressableLocal({
+    typeId,
+    ctx,
+    fnCtx,
+  });
   fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
   return binding;
 };

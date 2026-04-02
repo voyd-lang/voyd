@@ -42,11 +42,7 @@ pub obj U64Bits {
 /// `LocalRng` is not cryptographically secure. It is intended for hot local
 /// loops (for example, render jitter) where host-effect round-trips are too
 /// expensive.
-///
-/// Keep this stateful sampler as an object. Its `~self` methods rely on
-/// in-place state updates, and the value-type lowering path is not yet
-/// validated for this mutation pattern.
-pub obj LocalRng {
+pub val LocalRng {
   state: i64
 }
 
