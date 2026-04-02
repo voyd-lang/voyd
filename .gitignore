@@ -12,3 +12,4 @@ output/
 .turbo
 .tmp-voyd-sdk-*
 /tmp/
+DS_Store

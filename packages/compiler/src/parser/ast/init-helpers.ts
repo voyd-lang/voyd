@@ -5,17 +5,21 @@ import {
   InternalIdentifierAtom,
 } from "./atom.js";
 import { Expr } from "./expr.js";
-import { CallForm, FormInitElements } from "./form.js";
+import { CallForm, FormInitElement, FormInitElements } from "./form.js";
 import { Internal } from "./internals.js";
 
 export const call = (
   fn: Internal | IdentifierAtom | InternalIdentifierAtom,
   ...args: FormInitElements
+) => callWithArgs(fn, args);
+
+export const callWithArgs = (
+  fn: Internal | IdentifierAtom | InternalIdentifierAtom,
+  args: Iterable<FormInitElement>
 ) =>
-  new CallForm([
+  new CallForm().appendAll([
     typeof fn === "string" ? new InternalIdentifierAtom(fn) : fn,
-    ...args,
-  ]);
+  ]).appendAll(args);
 
 export const surfaceCall = (fn: string, ...args: FormInitElements) =>
   call(identifier(fn), ...args);

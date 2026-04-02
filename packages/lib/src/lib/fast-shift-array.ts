@@ -23,7 +23,9 @@ export class FastShiftArray<T> {
   }
 
   push(...items: T[]): number {
-    this.items.push(...items);
+    items.forEach((item) => {
+      this.items.push(item);
+    });
     return this.length;
   }
 

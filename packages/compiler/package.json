@@ -29,8 +29,7 @@
     "bench:typing": "vitest bench --config ../../vitest.config.ts src/semantics/typing/__tests__/typing.bench.ts",
     "test:w": "vitest --config ../../vitest.config.ts src",
     "lint": "echo 'no lint configured'",
-    "prepack": "npm run clean && npm run build",
-    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
+    "prepack": "npm run clean && npm run build"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2",
