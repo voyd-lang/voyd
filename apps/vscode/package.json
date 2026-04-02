@@ -3,7 +3,7 @@
   "private": true,
   "displayName": "Voyd Language",
   "description": "VSCode Support For The Voyd Programming Language",
-  "version": "0.0.28",
+  "version": "0.1.1",
   "icon": "images/logo.png",
   "homepage": "https://voyd.dev",
   "repository": {
