@@ -33,7 +33,7 @@ export class Form extends Syntax {
       ? { elements: opts }
       : opts;
     super(normalized);
-    this.push(...(normalized.elements ?? []));
+    this.pushElements(normalized.elements ?? []);
 
     if (!this.location) {
       this.location = deriveLocation(this.#elements);
@@ -60,15 +60,15 @@ export class Form extends Syntax {
     return this.#elements.at(-1);
   }
 
-  private push(...elements: FormInitElements) {
-    const normalized = elements.map((e) =>
-      typeof e === "string"
-        ? new IdentifierAtom(e)
-        : e instanceof Array
-        ? new Form(e)
-        : e
-    );
-    this.#elements.push(...normalized);
+  appendAll(elements: Iterable<FormInitElement>): this {
+    this.pushElements(elements);
+    return this;
+  }
+
+  private pushElements(elements: Iterable<FormInitElement>) {
+    for (const element of elements) {
+      this.#elements.push(normalizeFormElement(element));
+    }
   }
 
   calls(name: IdentifierAtom | string): boolean {
@@ -199,6 +199,13 @@ const deriveLocation = (
   location.setEndToEndOf(lastWithLocation ?? firstWithLocation);
   return location;
 };
+
+const normalizeFormElement = (element: FormInitElement): Expr =>
+  typeof element === "string"
+    ? new IdentifierAtom(element)
+    : element instanceof Array
+    ? new Form(element)
+    : element;
 
 /** Turns [[]] -> [] and keeps [[], []] as [[], []] */
 const unwrapArray = <T>(arr: T[]): T | T[] => {

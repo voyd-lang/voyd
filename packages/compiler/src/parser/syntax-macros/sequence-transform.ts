@@ -1,5 +1,5 @@
 import { type Expr, Form } from "../ast/index.js";
-import { call } from "../ast/init-helpers.js";
+import { callWithArgs } from "../ast/init-helpers.js";
 import { cloneAttributes } from "../ast/syntax.js";
 
 type SequenceTransformResult = { elements: Expr[]; changed: boolean };
@@ -20,7 +20,7 @@ export const transformFormSequence = ({
     if (!changed) {
       return form;
     }
-    const wrapped = call("ast", ...elements);
+    const wrapped = callWithArgs("ast", elements);
     wrapped.setLocation(form.location?.clone());
     wrapped.attributes = cloneAttributes(form.attributes);
     return wrapped;

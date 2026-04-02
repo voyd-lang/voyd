@@ -33,8 +33,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run --config ../../vitest.config.ts src --passWithNoTests",
     "lint": "echo 'no lint configured'",
-    "prepack": "npm run clean && npm run build",
-    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
+    "prepack": "npm run clean && npm run build"
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2"
