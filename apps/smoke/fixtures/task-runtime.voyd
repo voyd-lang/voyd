@@ -65,6 +65,27 @@ pub fn owner_cancel_cascades_probe(): (task::TaskRuntime, time::Time) -> i32
       let _ = error
       -2
 
+pub fn owner_failure_does_not_hang_probe(): (task::TaskRuntime, time::Time) -> i32
+  let owner = task::spawn(() =>
+    let _ = task::spawn(() =>
+      let _ = time::sleep(millis(20))
+      99
+    )
+    panic("owner failed".as_slice())
+  )
+  let _ = time::sleep(millis(5))
+  match(task::join(owner))
+    TaskFailed { error }:
+      if error.message.equals("owner failed") then:
+        1
+      else:
+        -1
+    TaskValue { value }:
+      let _ = value
+      -3
+    TaskCancelled:
+      -2
+
 pub fn effectful_join_probe(): (task::TaskRuntime, time::Time) -> i32
   let child = task::spawn(() =>
     let _ = time::sleep(millis(5))

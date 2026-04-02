@@ -68,28 +68,6 @@ export const captureContinuationEnvFieldValue = ({
       const actualTypeId =
         typeof binding.typeId === "number" ? binding.typeId : field.typeId;
       const inlineValue = loadBindingValue(binding, ctx);
-      if (
-        typeof process !== "undefined" &&
-        process.env.DEBUG_EFFECTS === "1" &&
-        ctx.moduleId === "std::time"
-      ) {
-        console.error("[effects] capture field", {
-          name: field.name,
-          sourceKind: field.sourceKind,
-          symbol: field.symbol,
-          tempId: field.tempId,
-          fieldTypeId: field.typeId,
-          bindingKind: binding.kind,
-          bindingIndex: "index" in binding ? binding.index : undefined,
-          bindingTypeId: binding.typeId,
-          bindingType: binding.type,
-          bindingStorageType: binding.storageType,
-          actualTypeId,
-          inlineValueType: binaryen.getExpressionType(inlineValue),
-          fieldWasmType: field.wasmType,
-          fieldStorageType: field.storageType,
-        });
-      }
       const coercedValue =
         actualTypeId === field.typeId
           ? inlineValue

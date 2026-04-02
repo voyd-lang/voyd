@@ -1,0 +1,15 @@
+// Unlabeled, no args, trailing
+stream::fold(init: 0) do:
+  acc + item
+
+// Labeled, no args
+stream::fold(init: 0) task():
+  acc + item
+
+// Unlabeled, with args
+stream::fold(init: 0) do(acc, item):
+  acc + item
+
+// Labeled with args (passed to task label)
+stream::fold(init: 0) task(acc, item):
+  acc + item

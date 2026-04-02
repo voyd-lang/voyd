@@ -5121,7 +5121,104 @@ const findOverloadMatches = ({
   });
 };
 
-const typeSpecificityScore = ({
+const applyExplicitTypeArgumentSubstitution = ({
+  symbol,
+  signature,
+  typeArguments,
+  ctx,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  typeArguments?: readonly TypeId[];
+  ctx: TypingContext;
+}) =>
+  signature.typeParams && signature.typeParams.length > 0
+    ? applyExplicitTypeArguments({
+        signature,
+        typeArguments,
+        calleeSymbol: symbol,
+        ctx,
+      })
+    : undefined;
+
+const specializeOverloadParameters = ({
+  symbol,
+  signature,
+  typeArguments,
+  ctx,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  typeArguments?: readonly TypeId[];
+  ctx: TypingContext;
+}): readonly ParamSignature[] => {
+  const explicitSubstitution = applyExplicitTypeArgumentSubstitution({
+    symbol,
+    signature,
+    typeArguments,
+    ctx,
+  });
+  if (!explicitSubstitution) {
+    return signature.parameters;
+  }
+
+  return signature.parameters.map((param) => ({
+    ...param,
+    type: ctx.arena.substitute(param.type, explicitSubstitution),
+  }));
+};
+
+const overloadDominates = ({
+  candidate,
+  other,
+  typeArguments,
+  ctx,
+  state,
+}: {
+  candidate: { symbol: SymbolId; signature: FunctionSignature };
+  other: { symbol: SymbolId; signature: FunctionSignature };
+  typeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const candidateParams = specializeOverloadParameters({
+    symbol: candidate.symbol,
+    signature: candidate.signature,
+    typeArguments,
+    ctx,
+  });
+  const otherParams = specializeOverloadParameters({
+    symbol: other.symbol,
+    signature: other.signature,
+    typeArguments,
+    ctx,
+  });
+  if (candidateParams.length !== otherParams.length) {
+    return false;
+  }
+
+  let strictlyMoreSpecific = false;
+  for (let index = 0; index < candidateParams.length; index += 1) {
+    const candidateParam = candidateParams[index]!;
+    const otherParam = otherParams[index]!;
+    if (
+      candidateParam.label !== otherParam.label ||
+      candidateParam.optional !== otherParam.optional
+    ) {
+      return false;
+    }
+    if (!typeSatisfies(candidateParam.type, otherParam.type, ctx, state)) {
+      return false;
+    }
+    if (!typeSatisfies(otherParam.type, candidateParam.type, ctx, state)) {
+      strictlyMoreSpecific = true;
+    }
+  }
+
+  return strictlyMoreSpecific;
+};
+
+const unresolvedTypeParamPenalty = ({
   type,
   ctx,
   visiting = new Set<TypeId>(),
@@ -5134,133 +5231,132 @@ const typeSpecificityScore = ({
     return 0;
   }
   visiting.add(type);
-  const score = (() => {
+  const penalty = (() => {
     const desc = ctx.arena.get(type);
     switch (desc.kind) {
       case "type-param-ref":
-        return 0;
+        return 1;
       case "primitive":
-        return 2;
+        return 0;
       case "recursive":
-        return 1 + typeSpecificityScore({ type: desc.body, ctx, visiting });
+        return unresolvedTypeParamPenalty({ type: desc.body, ctx, visiting });
       case "fixed-array":
-        return 1 + typeSpecificityScore({ type: desc.element, ctx, visiting });
+        return unresolvedTypeParamPenalty({ type: desc.element, ctx, visiting });
       case "union":
-        return (
-          1 +
-          desc.members.reduce(
-            (sum, member) => sum + typeSpecificityScore({ type: member, ctx, visiting }),
-            0,
-          )
+        return desc.members.reduce(
+          (sum, member) => sum + unresolvedTypeParamPenalty({ type: member, ctx, visiting }),
+          0,
         );
       case "intersection":
         return (
           (typeof desc.nominal === "number"
-            ? typeSpecificityScore({ type: desc.nominal, ctx, visiting })
+            ? unresolvedTypeParamPenalty({ type: desc.nominal, ctx, visiting })
             : 0) +
           (typeof desc.structural === "number"
-            ? typeSpecificityScore({ type: desc.structural, ctx, visiting })
+            ? unresolvedTypeParamPenalty({ type: desc.structural, ctx, visiting })
             : 0) +
           (desc.traits?.reduce(
-            (sum, trait) => sum + typeSpecificityScore({ type: trait, ctx, visiting }),
+            (sum, trait) => sum + unresolvedTypeParamPenalty({ type: trait, ctx, visiting }),
             0,
           ) ?? 0)
         );
       case "trait":
       case "nominal-object":
       case "value-object":
-        return (
-          1 +
-          desc.typeArgs.reduce(
-            (sum, arg) => sum + typeSpecificityScore({ type: arg, ctx, visiting }),
-            0,
-          )
+        return desc.typeArgs.reduce(
+          (sum, arg) => sum + unresolvedTypeParamPenalty({ type: arg, ctx, visiting }),
+          0,
         );
       case "structural-object":
-        return (
-          1 +
-          desc.fields.reduce(
-            (sum, field) => sum + typeSpecificityScore({ type: field.type, ctx, visiting }),
-            0,
-          )
+        return desc.fields.reduce(
+          (sum, field) => sum + unresolvedTypeParamPenalty({ type: field.type, ctx, visiting }),
+          0,
         );
       case "function":
         return (
-          1 +
           desc.parameters.reduce(
-            (sum, param) => sum + typeSpecificityScore({ type: param.type, ctx, visiting }),
+            (sum, param) =>
+              sum + unresolvedTypeParamPenalty({ type: param.type, ctx, visiting }),
             0,
-          ) +
-          typeSpecificityScore({ type: desc.returnType, ctx, visiting })
+          ) + unresolvedTypeParamPenalty({ type: desc.returnType, ctx, visiting })
         );
     }
   })();
   visiting.delete(type);
-  return score;
+  return penalty;
 };
 
-const overloadParameterSpecificity = ({
-  symbol,
-  signature,
+const overloadGenericityPenalty = ({
+  candidate,
   typeArguments,
   ctx,
 }: {
-  symbol: SymbolId;
-  signature: FunctionSignature;
-  typeArguments?: readonly TypeId[];
+  candidate: { symbol: SymbolId; signature: FunctionSignature };
+  typeArguments: readonly TypeId[] | undefined;
   ctx: TypingContext;
-}): number => {
-  const explicitSubstitution =
-    signature.typeParams && signature.typeParams.length > 0
-      ? applyExplicitTypeArguments({
-          signature,
-          typeArguments,
-          calleeSymbol: symbol,
-          ctx,
-        })
-      : undefined;
-
-  return signature.parameters.reduce((score, param) => {
-    const type = explicitSubstitution
-      ? ctx.arena.substitute(param.type, explicitSubstitution)
-      : param.type;
-    return score + typeSpecificityScore({ type, ctx });
-  }, 0);
-};
+}): number =>
+  specializeOverloadParameters({
+    symbol: candidate.symbol,
+    signature: candidate.signature,
+    typeArguments,
+    ctx,
+  }).reduce(
+    (sum, param) => sum + unresolvedTypeParamPenalty({ type: param.type, ctx }),
+    0,
+  );
 
 const narrowOverloadMatches = <T extends { symbol: SymbolId; signature: FunctionSignature }>({
   matches,
   typeArguments,
   ctx,
+  state,
 }: {
   matches: readonly T[];
   typeArguments: readonly TypeId[] | undefined;
   ctx: TypingContext;
+  state: TypingState;
 }): readonly T[] => {
   if (matches.length <= 1) {
     return matches;
   }
 
-  const maxSpecificity = Math.max(
-    ...matches.map((candidate) =>
-      overloadParameterSpecificity({
-        symbol: candidate.symbol,
-        signature: candidate.signature,
+  const maximalMatches = matches.filter((candidate) =>
+    matches.every(
+      (other) =>
+        candidate === other ||
+        !overloadDominates({
+          candidate: other,
+          other: candidate,
+          typeArguments,
+          ctx,
+          state,
+        }),
+    ),
+  );
+
+  if (maximalMatches.length === 1) {
+    return maximalMatches;
+  }
+
+  const minPenalty = Math.min(
+    ...maximalMatches.map((candidate) =>
+      overloadGenericityPenalty({
+        candidate,
         typeArguments,
         ctx,
       }),
     ),
   );
-  const narrowed = matches.filter(
+  const leastGenericMatches = maximalMatches.filter(
     (candidate) =>
-      overloadParameterSpecificity({
-        symbol: candidate.symbol,
-        signature: candidate.signature,
+      overloadGenericityPenalty({
+        candidate,
         typeArguments,
         ctx,
-      }) === maxSpecificity,
+      }) === minPenalty,
   );
-  return narrowed.length > 0 ? narrowed : matches;
+
+  return leastGenericMatches.length === 1 ? leastGenericMatches : matches;
 };
 
 const typeOverloadedCall = (
@@ -5325,7 +5421,7 @@ const typeOverloadedCall = (
       state,
     });
   }
-  matches = [...narrowOverloadMatches({ matches, typeArguments, ctx })];
+  matches = [...narrowOverloadMatches({ matches, typeArguments, ctx, state })];
 
   const traitDispatch =
     matches.length === 0 && (!typeArguments || typeArguments.length === 0)

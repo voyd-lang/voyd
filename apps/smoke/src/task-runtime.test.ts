@@ -160,6 +160,13 @@ describe("smoke: task runtime", () => {
     await expect(outcome).resolves.toBe(0);
   });
 
+  it("surfaces owner failures even when attached children were still live", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const outcome = host.run<number>("owner_failure_does_not_hang_probe");
+    await advanceRuntime(runtime, [5, 20]);
+    await expect(outcome).resolves.toBe(1);
+  });
+
   it("builds timeouts on detached tasks", async () => {
     const { host, runtime } = await createTaskHost({ compiled });
     const outcome = host.run<number>("timeout_probe");

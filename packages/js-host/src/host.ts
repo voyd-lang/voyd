@@ -1200,14 +1200,17 @@ export const createVoydHost = async ({
             };
           };
 
+          const liveChildrenFor = (task: TaskRecord): TaskRecord[] =>
+            Array.from(task.children)
+              .map((childId) => state.tasks.get(childId))
+              .filter((entry): entry is TaskRecord => !!entry && entry.state !== "terminal");
+
           const maybeCompleteOwner = (taskId: number): void => {
             const owner = state.tasks.get(taskId);
             if (!owner || owner.state !== "completing" || !owner.pendingCompletion) {
               return;
             }
-            const liveChildren = Array.from(owner.children)
-              .map((childId) => state.tasks.get(childId))
-              .filter((entry) => entry && entry.state !== "terminal");
+            const liveChildren = liveChildrenFor(owner);
             if (liveChildren.length > 0) {
               return;
             }
@@ -1287,14 +1290,12 @@ export const createVoydHost = async ({
             if (!current || current.state === "terminal") {
               return;
             }
-            const liveChildren = Array.from(current.children)
-              .map((childId) => state.tasks.get(childId))
-              .filter((entry) => entry && entry.state !== "terminal");
             if (completion.kind !== "value") {
               current.children.forEach((childId) => {
                 state.cancelTask(childId);
               });
             }
+            const liveChildren = liveChildrenFor(current);
             if (liveChildren.length > 0) {
               current.state = "completing";
               current.pendingCompletion = completion;
