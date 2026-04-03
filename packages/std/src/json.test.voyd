@@ -138,7 +138,7 @@ test "json parse accepts normalized finite exponents above 308":
         JsonNumber:
           var expected = 1.0
           var index = 0
-          while index < 308 do:
+          while index < 308:
             expected = expected * 10.0
             index = index + 1
           let ratio = root.value / expected
@@ -157,7 +157,7 @@ test "json parse keeps late fractional digits with exponent compensation":
         JsonNumber:
           var expected = 1.0
           var index = 0
-          while index < 26 do:
+          while index < 26:
             expected = expected / 10.0
             index = index + 1
           let ratio = root.value / expected
@@ -233,7 +233,7 @@ test "json stringify rejects non-finite numbers":
 test "json stringify preserves magnitude for large finite numbers":
   var huge = 1.0
   var index = 0
-  while index < 20 do:
+  while index < 20:
     huge = huge * 10.0
     index = index + 1
 
@@ -253,7 +253,7 @@ test "json stringify preserves magnitude for large finite numbers":
 test "json stringify preserves tiny non-zero magnitude":
   var tiny = 1.0
   var index = 0
-  while index < 14 do:
+  while index < 14:
     tiny = tiny / 10.0
     index = index + 1
 
@@ -342,7 +342,7 @@ fn assert_json_stringify_error(result: Result<String, JsonError>): Test -> void
 fn repeat_byte(byte: i32, count: i32): () -> String
   let ~bytes = Array<i32>::with_capacity(count)
   var index = 0
-  while index < count do:
+  while index < count:
     bytes.push(byte)
     index = index + 1
   new_string(bytes.to_fixed_array())
@@ -353,7 +353,7 @@ fn long_fraction_input(digit: i32, digits: i32): () -> String
   bytes.push(46)
 
   var index = 0
-  while index < digits do:
+  while index < digits:
     bytes.push(digit)
     index = index + 1
 
@@ -365,7 +365,7 @@ fn compensated_fraction_input(zero_digits: i32): () -> String
   bytes.push(46)
 
   var index = 0
-  while index < zero_digits do:
+  while index < zero_digits:
     bytes.push(48)
     index = index + 1
 

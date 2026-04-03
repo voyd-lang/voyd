@@ -95,7 +95,7 @@ pub fn checked_div_rem(value: i64, { by divisor: i64 }) -> Result<(i64, i64), Ma
 pub fn next_power_of_two(value: i32) -> Result<i32, MathError>
   let start = if value > 1 then: value else: 1
   var out = 1
-  while out < start do:
+  while out < start:
     if out > 1073741823:
       return math_error(math_error_code_overflow())
     out = out * 2
@@ -119,7 +119,7 @@ pub fn prev_power_of_two(value: i32) -> Result<i32, MathError>
   if value <= 0:
     return math_error(math_error_code_invalid_input())
   var out = 1
-  while out <= (value / 2) do:
+  while out <= (value / 2):
     out = out * 2
   Ok<i32> { value: out }
 
@@ -129,7 +129,7 @@ pub fn prev_power_of_two(value: i64) -> Result<i64, MathError>
   if value <= to_i64(0):
     return math_error(math_error_code_invalid_input())
   var out = to_i64(1)
-  while out <= (value / to_i64(2)) do:
+  while out <= (value / to_i64(2)):
     out = out * to_i64(2)
   Ok<i64> { value: out }
 

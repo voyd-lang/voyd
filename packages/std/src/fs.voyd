@@ -102,7 +102,7 @@ fn encode_byte_array(bytes: Bytes): () -> MsgPack
   let source = bytes.to_array()
   let ~encoded = Array<MsgPack>::with_capacity(bytes.len())
   var index = 0
-  while index < source.len() do:
+  while index < source.len():
     match(source.get(index))
       Some<i32> { value }:
         encoded.push(msgpack::make_i32(value))
@@ -199,7 +199,7 @@ fn decode_bytes(payload: MsgPack): () -> Result<Bytes, IoError>
     Ok<Array<MsgPack>> { value: source }:
       let ~buffer = ByteBuffer::with_capacity(source.len())
       var index = 0
-      while index < source.len() do:
+      while index < source.len():
         match(source.get(index))
           Some<MsgPack> { value }:
             match(msgpack::unpack_i32(value))
@@ -219,7 +219,7 @@ fn decode_path_array(payload: MsgPack): () -> Result<Array<Path>, IoError>
     Ok<Array<MsgPack>> { value: source }:
       let ~out = Array<Path>::with_capacity(source.len())
       var index = 0
-      while index < source.len() do:
+      while index < source.len():
         match(source.get(index))
           Some<MsgPack> { value }:
             match(msgpack::unpack_string(value))

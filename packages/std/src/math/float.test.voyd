@@ -310,12 +310,12 @@ test "large-angle trig uses high-precision reduction":
 
 test "deterministic sweep validates transcendental identities":
   var x = 0.25
-  while x <= 16.0 do:
+  while x <= 16.0:
     assert(close_enough(exp(ln(x)), target: x, epsilon: 0.000000001), eq: true)
     x = x + 0.25
 
   var angle = -3.0
-  while angle <= 3.0 do:
+  while angle <= 3.0:
     let identity = (sin(angle) * sin(angle)) + (cos(angle) * cos(angle))
     assert(close_enough(identity, target: 1.0, epsilon: 0.000000001), eq: true)
     angle = angle + 0.25

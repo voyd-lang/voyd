@@ -46,7 +46,7 @@ pub fn iterate_sum() -> i32
   let len = __array_len(arr)
   var index = 0
   var acc = 0
-  while index < len do:
+  while index < len:
     let step = iterator.next(index)
     acc = acc + step
     index = index + 1

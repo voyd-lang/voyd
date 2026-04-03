@@ -18,7 +18,7 @@ fn local_rng_f64_sum({ seed: i64, count: i32 }) -> f64
   var index = 0
   var sum = 0.0
 
-  while index < count do:
+  while index < count:
     sum = sum + rng.random_f64()
     index = index + 1
 

@@ -10,7 +10,7 @@ fn sum_bytes(bytes: Bytes): () -> i32
   let values = bytes.to_array()
   var index = 0
   var total = 0
-  while index < values.len() do:
+  while index < values.len():
     match(values.get(index))
       Some<i32> { value }:
         total = total + value

@@ -39,7 +39,7 @@ pub fn encode(bytes: Bytes) -> String
   let out_len = ((source_len + 2) / 3) * 4
   let ~out = Array<i32>::with_capacity(out_len)
   var index = 0
-  while index < source_len do:
+  while index < source_len:
     let b0 = source.at(index)
     let has_b1 = (index + 1) < source_len
     let has_b2 = (index + 2) < source_len
@@ -97,7 +97,7 @@ pub fn decode(s: StringSlice) -> Result<Bytes, DecodeError>
 
   let ~buffer = ByteBuffer::with_capacity(source_len / 4 * 3)
   var index = 0
-  while index < source_len do:
+  while index < source_len:
     let c0 = source.at(index)
     let c1 = source.at(index + 1)
     let c2 = source.at(index + 2)

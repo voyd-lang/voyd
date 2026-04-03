@@ -231,9 +231,9 @@ test "next_multiple_of rounds up and rejects invalid input":
 
 test "rem_euclid invariants hold across signed range":
   var value = -128
-  while value <= 128 do:
+  while value <= 128:
     var modulus = 1
-    while modulus <= 16 do:
+    while modulus <= 16:
       match(rem_euclid(value, modulus))
         Ok<i32> { value: rem }:
           assert(rem >= 0, eq: true)
@@ -246,9 +246,9 @@ test "rem_euclid invariants hold across signed range":
 
 test "next_multiple_of invariants hold across signed range":
   var value = -128
-  while value <= 128 do:
+  while value <= 128:
     var factor = 1
-    while factor <= 16 do:
+    while factor <= 16:
       match(next_multiple_of(value, factor))
         Ok<i32> { value: next }:
           assert(next >= value, eq: true)
@@ -284,7 +284,7 @@ test "integer boundaries around signed extremes stay stable":
 test "perf smoke for hot integer helpers":
   var index = 1
   var checksum = 0
-  while index < 20000 do:
+  while index < 20000:
     let value = (index * 37) - 10000
 
     match(rem_euclid(value, 97))

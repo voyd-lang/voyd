@@ -34,18 +34,6 @@ const toColonClause = (expr: Expr | undefined): ColonClause | undefined => {
   };
 };
 
-const expectColonClause = (
-  expr: Expr | undefined,
-  errorMessage: string
-): ColonClause => {
-  const clause = toColonClause(expr);
-  if (!clause) {
-    throw new Error(errorMessage);
-  }
-
-  return clause;
-};
-
 const expectClauseLabel = (clause: ColonClause, errorMessage: string): Expr => {
   if (!clause.labelExpr) {
     throw new Error(errorMessage);
@@ -62,34 +50,6 @@ const expectClauseValue = (clause: ColonClause, errorMessage: string): Expr => {
   return clause.valueExpr;
 };
 
-export const expectLabeledExpr = (
-  expr: Expr | undefined,
-  label: string,
-  context: string
-): Expr => {
-  if (!expr) {
-    throw new Error(`${context} missing body expression`);
-  }
-
-  const clause = expectColonClause(
-    expr,
-    `${context} requires '${label}:' before the body`
-  );
-  const labelExpr = expectClauseLabel(
-    clause,
-    `${context} requires '${label}:' before the body`
-  );
-
-  if (!isIdentifierWithValue(labelExpr, label)) {
-    throw new Error(`${context} requires '${label}:' before the body`);
-  }
-
-  return expectClauseValue(
-    clause,
-    `${context} missing body expression after '${label}:'`
-  );
-};
-
 export const parseWhileConditionAndBody = (
   form: Form,
   context = "while expression"
@@ -101,15 +61,16 @@ export const parseWhileConditionAndBody = (
 
   const explicitBodyExpr = form.at(2);
   if (explicitBodyExpr) {
-    return {
-      condition: conditionExpr,
-      body: expectLabeledExpr(explicitBodyExpr, "do", context),
-    };
+    throw new Error(
+      `${context} requires clause-style syntax: 'while condition:'`
+    );
   }
 
   const caseClause = toColonClause(conditionExpr);
   if (!caseClause) {
-    throw new Error(`${context} requires 'do:' before the body`);
+    throw new Error(
+      `${context} requires clause-style syntax: 'while condition:'`
+    );
   }
 
   const caseCondition = expectClauseLabel(

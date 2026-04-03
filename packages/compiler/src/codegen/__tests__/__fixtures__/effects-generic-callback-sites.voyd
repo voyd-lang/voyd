@@ -7,14 +7,14 @@ eff Trace
 fn map_like<T, U>(count: i32, value: T, f: fn(T) -> U) -> U
   var index = 0
   var last = f(value)
-  while index < count do:
+  while index < count:
     last = f(value)
     index = index + 1
   last
 
 fn find_like<T>(count: i32, value: T, pred: fn(T) -> bool) -> i32
   var index = 0
-  while index < count do:
+  while index < count:
     if pred(value):
       return index
     index = index + 1

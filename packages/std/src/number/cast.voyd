@@ -164,7 +164,7 @@ pub fn to_string(value: f64) -> String
 
   bytes.push(46)
   var digits = 0
-  while digits < 17 do:
+  while digits < 17:
     fractional = fractional * 10.0
     let digit = floor_digit_f64(fractional)
     bytes.push(ascii_digit(digit))
@@ -207,7 +207,7 @@ fn to_string_f64_scientific(value: f64, negative: bool, exponent: i32): () -> St
   if fractional > 0.0000000000005:
     bytes.push(46)
     var digits = 0
-    while digits < 15 do:
+    while digits < 15:
       fractional = fractional * 10.0
       let digit = floor_digit_f64(fractional)
       bytes.push(ascii_digit(digit))
@@ -224,10 +224,10 @@ fn to_string_f64_scientific(value: f64, negative: bool, exponent: i32): () -> St
 fn decimal_exponent_f64(value: f64): () -> i32
   var exponent = 0
   var normalized = value
-  while normalized >= 10.0 do:
+  while normalized >= 10.0:
     normalized = normalized / 10.0
     exponent = exponent + 1
-  while normalized < 1.0 do:
+  while normalized < 1.0:
     normalized = normalized * 10.0
     exponent = exponent - 1
   exponent
@@ -238,11 +238,11 @@ fn append_float_integer_part_f64(~out: Array<i32>, value: f64) -> void
     return void
 
   var scale = value / value
-  while (value / scale) >= 10.0 do:
+  while (value / scale) >= 10.0:
     scale = scale * 10.0
 
   var remaining = value
-  while scale >= 1.0 do:
+  while scale >= 1.0:
     let normalized = remaining / scale
     let digit = floor_digit_f64(normalized)
     out.push(ascii_digit(digit))
@@ -250,7 +250,7 @@ fn append_float_integer_part_f64(~out: Array<i32>, value: f64) -> void
     scale = scale / 10.0
 
 fn trim_fractional_zeroes(~bytes: Array<i32>) -> void
-  while bytes.len() > 0 do:
+  while bytes.len() > 0:
     let last = bytes.at(bytes.len() - 1)
     if last != 48:
       break
@@ -264,12 +264,12 @@ fn floor_f64(value: f64) -> f64
     return 0.0
 
   var scale = value / value
-  while (value / scale) >= 10.0 do:
+  while (value / scale) >= 10.0:
     scale = scale * 10.0
 
   var remaining = value
   var out = value - value
-  while scale >= 1.0 do:
+  while scale >= 1.0:
     let normalized = remaining / scale
     let digit = floor_digit_f64(normalized)
     out = out + to_f64(digit) * scale
@@ -310,14 +310,14 @@ fn append_signed_i64(~out: Array<i32>, value: i64) -> void
   var remaining = value
   if remaining < to_i64(0):
     out.push(45)
-    while remaining != to_i64(0) do:
+    while remaining != to_i64(0):
       let digit = to_i32_wrapping(to_i64(0) - (remaining % to_i64(10)))
       reversed.push(ascii_digit(digit))
       remaining = remaining / to_i64(10)
     append_reverse(out, reversed)
     return void
 
-  while remaining != to_i64(0) do:
+  while remaining != to_i64(0):
     let digit = to_i32_wrapping(remaining % to_i64(10))
     reversed.push(ascii_digit(digit))
     remaining = remaining / to_i64(10)
@@ -325,7 +325,7 @@ fn append_signed_i64(~out: Array<i32>, value: i64) -> void
 
 fn append_reverse(~out: Array<i32>, values: Array<i32>) -> void
   var index = values.len() - 1
-  while index >= 0 do:
+  while index >= 0:
     out.push(values.at(index))
     index = index - 1
 
@@ -336,12 +336,12 @@ fn pow10_i32(value: i32) -> f64
   var exponent = value
   var out = 1.0
   if exponent >= 0:
-    while exponent > 0 do:
+    while exponent > 0:
       out = out * 10.0
       exponent = exponent - 1
     return out
 
-  while exponent < 0 do:
+  while exponent < 0:
     out = out / 10.0
     exponent = exponent + 1
   out

@@ -80,7 +80,7 @@ fn test(cb: fn(i32) -> i32) -> i32
       source: `
 fn test(cb: fn(i32) -> i32, count: i32) -> i32
   var i = 0
-  while i < count do:
+  while i < count:
     cb(i)
     i = i + 1
   0

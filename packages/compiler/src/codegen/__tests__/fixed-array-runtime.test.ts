@@ -166,7 +166,7 @@ pub fn iterate_sum() -> i32
   var acc = 0
   let len = arr.length<i32>()
   var index = 0
-  while index < len do:
+  while index < len:
     let step = arr.get<i32>(index)
     match(step)
       Some<i32>:

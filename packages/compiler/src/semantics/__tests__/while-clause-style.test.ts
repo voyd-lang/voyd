@@ -31,10 +31,10 @@ describe("parseWhileConditionAndBody", () => {
     expect(body.toJSON()).toEqual(["block", ["do_work"]]);
   });
 
-  it("keeps ':' conditions when an explicit do body is present", () => {
+  it("keeps ':' expressions in clause-style while conditions", () => {
     const whileExpr = parseWhile(
       [
-        "while lhs : rhs do:",
+        "while lhs : rhs:",
         "  do_work()",
         "",
       ].join("\n")
@@ -43,5 +43,19 @@ describe("parseWhileConditionAndBody", () => {
 
     expect(condition.toJSON()).toEqual([":", "lhs", "rhs"]);
     expect(body.toJSON()).toEqual(["block", ["do_work"]]);
+  });
+
+  it("rejects legacy explicit do bodies", () => {
+    const whileExpr = parseWhile(
+      [
+        "while x < 4 do:",
+        "  do_work()",
+        "",
+      ].join("\n")
+    );
+
+    expect(() => parseWhileConditionAndBody(whileExpr)).toThrow(
+      "while expression requires clause-style syntax: 'while condition:'"
+    );
   });
 });
