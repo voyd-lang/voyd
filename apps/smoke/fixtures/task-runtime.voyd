@@ -11,9 +11,8 @@ fn millis(value: i32): () -> Duration
   Duration::from_millis(to_i64(value))
 
 pub fn spawn_join_probe(): task::TaskRuntime -> i32
-  let child = task::spawn(() =>
+  let child = task::spawn do:
     41
-  )
   match(task::join(child))
     Ok { value }:
       value
@@ -24,9 +23,8 @@ pub fn spawn_join_probe(): task::TaskRuntime -> i32
       -3
 
 pub fn spawn_await_probe(): task::TaskRuntime -> i32
-  let child = task::spawn(() =>
+  let child = task::spawn do:
     41
-  )
   match(child.await())
     Ok { value }:
       value
@@ -37,9 +35,8 @@ pub fn spawn_await_probe(): task::TaskRuntime -> i32
       -3
 
 pub fn spawn_join_bool_probe(): task::TaskRuntime -> i32
-  let child = task::spawn(() =>
+  let child = task::spawn do:
     true
-  )
   match(task::join(child))
     Ok { value }:
       if value then: 1 else: 0
@@ -50,10 +47,9 @@ pub fn spawn_join_bool_probe(): task::TaskRuntime -> i32
       -2
 
 pub fn cancel_probe(): (task::TaskRuntime, time::Time) -> i32
-  let child = task::spawn(() =>
+  let child = task::spawn do:
     let _ = time::sleep(millis(20))
     99
-  )
   let _ = time::sleep(millis(5))
   if task::cancel<i32>(child) == false then:
     return -10
@@ -69,15 +65,13 @@ pub fn cancel_probe(): (task::TaskRuntime, time::Time) -> i32
 
 pub fn owner_cancel_cascades_probe(): (task::TaskRuntime, time::Time) -> i32
   let ~events = Array<i32>::init()
-  let owner = task::spawn(() =>
-    let _ = task::spawn(() =>
+  let owner = task::spawn do:
+    let _ = task::spawn do:
       let _ = time::sleep(millis(20))
       events.push(1)
       99
-    )
     let _ = time::sleep(millis(50))
     7
-  )
   let _ = time::sleep(millis(5))
   if task::cancel<i32>(owner) == false then:
     return -10
@@ -92,17 +86,14 @@ pub fn owner_cancel_cascades_probe(): (task::TaskRuntime, time::Time) -> i32
       -2
 
 pub fn owner_completion_after_child_cancel_probe(): (task::TaskRuntime, time::Time) -> i32
-  let owner = task::spawn(() =>
-    let child = task::spawn(() =>
+  let owner = task::spawn do:
+    let child = task::spawn do:
       let _ = time::sleep(millis(50))
       99
-    )
-    let _ = task::detach(() =>
+    let _ = task::detach do:
       let _ = time::sleep(millis(5))
       task::cancel(child)
-    )
     7
-  )
   match(task::join(owner))
     Ok { value }:
       value
@@ -113,13 +104,11 @@ pub fn owner_completion_after_child_cancel_probe(): (task::TaskRuntime, time::Ti
       -3
 
 pub fn owner_failure_does_not_hang_probe(): (task::TaskRuntime, time::Time) -> i32
-  let owner = task::spawn(() =>
-    let _ = task::spawn(() =>
+  let owner = task::spawn do:
+    let _ = task::spawn do:
       let _ = time::sleep(millis(20))
       99
-    )
     panic("owner failed".as_slice())
-  )
   let _ = time::sleep(millis(5))
   match(task::join(owner))
     Err { error }:
@@ -134,10 +123,9 @@ pub fn owner_failure_does_not_hang_probe(): (task::TaskRuntime, time::Time) -> i
       -2
 
 pub fn effectful_join_probe(): (task::TaskRuntime, time::Time) -> i32
-  let child = task::spawn(() =>
+  let child = task::spawn do:
     let _ = time::sleep(millis(5))
     7
-  )
   match(task::join(child))
     Ok { value }:
       value
@@ -149,10 +137,9 @@ pub fn effectful_join_probe(): (task::TaskRuntime, time::Time) -> i32
 
 pub fn yield_now_probe(): task::TaskRuntime -> i32
   let ~events = Array<i32>::init()
-  let child = task::spawn(() =>
+  let child = task::spawn do:
     events.push(1)
     7
-  )
   let _ = task::yield_now()
   let observed = events.len()
   match(task::join(child))
@@ -166,9 +153,8 @@ pub fn yield_now_probe(): task::TaskRuntime -> i32
       -2
 
 pub fn join_failure_probe(): task::TaskRuntime -> i32
-  let child = task::spawn(() =>
+  let child = task::spawn do:
     panic("joined child failed".as_slice())
-  )
   match(task::join(child))
     Err { error }:
       if error.message.equals("joined child failed") then:
@@ -182,8 +168,7 @@ pub fn join_failure_probe(): task::TaskRuntime -> i32
       -3
 
 pub fn timeout_probe(): (task::TaskRuntime, time::Time) -> i32
-  let callback = () => 7
-  let timeout = time::set_timeout(millis(5), callback)
+  let timeout = time::set_timeout(millis(5)) do: 7
   match(task::join(timeout))
     Ok { value }:
       value
@@ -194,7 +179,7 @@ pub fn timeout_probe(): (task::TaskRuntime, time::Time) -> i32
       -2
 
 pub fn timeout_sleep_failure_probe(): task::TaskRuntime -> i32
-  let timeout = time::set_timeout(millis(5), () => 7)
+  let timeout = time::set_timeout(millis(5)) do: 7
   match(task::join(timeout))
     Err { error }:
       if error.message.equals("blocked") then:
@@ -209,17 +194,15 @@ pub fn timeout_sleep_failure_probe(): task::TaskRuntime -> i32
 pub fn interval_sleep_failure_probe(): task::TaskRuntime -> i32
   let _ = time::set_interval<i32>(
     millis(5),
-    Overlap::serial(),
-    () => 1
-  )
+    Overlap::serial()
+  ) do: 1
   let _ = task::yield_now()
   1
 
 pub fn timeout_direct_probe(): (task::TaskRuntime, time::Time) -> i32
-  let timeout = task::detach(() =>
+  let timeout = task::detach do:
     let _ = time::sleep(millis(5))
     7
-  )
   match(task::join(timeout))
     Ok { value }:
       value
@@ -231,9 +214,8 @@ pub fn timeout_direct_probe(): (task::TaskRuntime, time::Time) -> i32
 
 pub fn detached_callback_probe(): task::TaskRuntime -> i32
   let callback = () => 7
-  let child = task::detach(() =>
+  let child = task::detach do:
     callback()
-  )
   match(task::join(child))
     Ok { value }:
       value
@@ -244,25 +226,22 @@ pub fn detached_callback_probe(): task::TaskRuntime -> i32
       -2
 
 pub fn after_delay_probe(): (task::TaskRuntime, time::Time) -> i32
-  time::after_delay(millis(5), () => 7)
+  time::after_delay(millis(5)) do: 7
 
 pub fn after_delay_effectful_probe(): (task::TaskRuntime, time::Time) -> i32
-  time::after_delay(millis(5), () =>
+  time::after_delay(millis(5)) do:
     let _ = time::sleep(millis(7))
     7
-  )
 
 pub fn interval_serial_probe(): (task::TaskRuntime, time::Time) -> i32
   let ~events = Array<i32>::init()
-  let callback = () =>
+  let interval = time::set_interval<Unit>(
+    millis(5),
+    Overlap::serial()
+  ) do:
     let _ = time::sleep(millis(7))
     events.push(1)
     Unit {}
-  let interval = time::set_interval<Unit>(
-    millis(5),
-    Overlap::serial(),
-    callback
-  )
   let _ = time::sleep(millis(20))
   let _ = task::cancel<Unit>(interval)
   let _ = time::sleep(millis(20))
@@ -270,14 +249,12 @@ pub fn interval_serial_probe(): (task::TaskRuntime, time::Time) -> i32
 
 pub fn interval_serial_pure_probe(): (task::TaskRuntime, time::Time) -> i32
   let ~events = Array<i32>::init()
-  let callback = () =>
-    events.push(1)
-    Unit {}
   let interval = time::set_interval<Unit>(
     millis(5),
-    Overlap::serial(),
-    callback
-  )
+    Overlap::serial()
+  ) do:
+    events.push(1)
+    Unit {}
   let _ = time::sleep(millis(20))
   let _ = task::cancel<Unit>(interval)
   let _ = time::sleep(millis(20))
@@ -285,28 +262,24 @@ pub fn interval_serial_pure_probe(): (task::TaskRuntime, time::Time) -> i32
 
 pub fn interval_concurrent_probe(): (task::TaskRuntime, time::Time) -> i32
   let ~events = Array<i32>::init()
-  let callback = () =>
+  let interval = time::set_interval<Unit>(
+    millis(5),
+    Overlap::concurrent()
+  ) do:
     let _ = time::sleep(millis(7))
     events.push(1)
     Unit {}
-  let interval = time::set_interval<Unit>(
-    millis(5),
-    Overlap::concurrent(),
-    callback
-  )
   let _ = time::sleep(millis(20))
   let _ = task::cancel<Unit>(interval)
   let _ = time::sleep(millis(20))
   events.len()
 
 pub fn attached_failure_probe(): task::TaskRuntime -> i32
-  let _ = task::spawn(() =>
+  let _ = task::spawn do:
     panic("attached child failed".as_slice())
-  )
   1
 
 pub fn detached_failure_probe(): task::TaskRuntime -> i32
-  let _ = task::detach(() =>
+  let _ = task::detach do:
     panic("detached child failed".as_slice())
-  )
   1

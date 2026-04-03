@@ -6,7 +6,8 @@ fn after_await<T>(value: i32, work: fn() -> T): (Async) -> T
   work()
 
 pub fn main(): Async -> i32
-  after_await<i32>(5, () => 7)
+  after_await<i32>(5) do:
+    7
 
 pub fn lambda_capture_main(): Async -> i32
   let work = () => 7
@@ -18,5 +19,6 @@ pub fn lambda_capture_main(): Async -> i32
 pub fn nested_generic_lambda_main(): Async -> i32
   let work = () => 7
   let thunk = () =>
-    after_await<i32>(5, work)
+    after_await<i32>(5) do:
+      work()
   thunk()
