@@ -169,7 +169,7 @@ impl<T> Array<T>
     self.filter(pred)
 
   /// Invokes a callback for each element.
-  api fn each(self, { do f: (value: T) -> void }) -> void
+  api fn each(self, { visit f: (value: T) -> void }) -> void
     var index = 0
     while index < self.count:
       f(__array_get(self.storage, index))
