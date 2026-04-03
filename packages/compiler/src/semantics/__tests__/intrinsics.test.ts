@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../pipeline.js";
 import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
-import type { HirFunction } from "../hir/nodes.js";
+import type { HirCallExpr, HirFunction, HirIdentifierExpr } from "../hir/index.js";
 import { getSymbolTable } from "../_internal/symbol-table.js";
 import { loadAst } from "./load-ast.js";
 
@@ -142,4 +142,51 @@ describe("intrinsic metadata", () => {
       expect(metadata?.intrinsic).toBeUndefined();
     });
   });
+
+  it("threads expected return types through generic __task_take_value wrappers", () => {
+    const source = `
+@intrinsic(name: "__task_take_value")
+fn take_task_value<T>(id: i32): () -> T __task_take_value(id)
+
+fn read_bool(id: i32): () -> bool
+  take_task_value(id)
+`;
+    const filePath = "packages/std/task_test.voyd";
+    const ast = parse(source, filePath);
+    const semantics = semanticsPipeline(
+      buildPipelineInput({
+        ast,
+        moduleId: filePath,
+        filePath,
+      })
+    );
+    const { hir, typing, diagnostics } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+
+    expect(diagnostics).toHaveLength(0);
+
+    const intrinsicCall = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr => {
+        if (expr.exprKind !== "call") {
+          return false;
+        }
+        const callee = hir.expressions.get(expr.callee);
+        return (
+          callee?.exprKind === "identifier" &&
+          symbolTable.getSymbol((callee as HirIdentifierExpr).symbol).name ===
+            "take_task_value"
+        );
+      }
+    );
+
+    expect(intrinsicCall).toBeDefined();
+    if (!intrinsicCall) {
+      return;
+    }
+
+    expect(typing.table.getExprType(intrinsicCall.id)).toBe(
+      typing.arena.internPrimitive("bool")
+    );
+  });
+
 });

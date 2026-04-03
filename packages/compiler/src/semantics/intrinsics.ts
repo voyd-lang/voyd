@@ -54,6 +54,13 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ],
   ["__panic_scratch_set", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__panic_trap", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__task_spawn", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__task_detach", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__task_cancel", { intrinsicUsesSignature: false, access: "std-only" }],
+  [
+    "__task_take_value",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
   ["__shift_l", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__shift_ru", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__bit_and", { intrinsicUsesSignature: false, access: "std-only" }],

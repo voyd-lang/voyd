@@ -148,8 +148,9 @@ export const ensureContinuationBindFunction = (
   );
 
   const wrapEffect = (() => {
+    const frameSite = () => ctx.effectsRuntime.continuationSite(frameCont());
     const wrappedEnv = initStruct(ctx.mod, envType, [
-      ctx.mod.i32.const(-1),
+      frameSite(),
       ctx.effectsRuntime.requestHandler(request()),
       ctx.effectsRuntime.requestContinuation(request()),
       frameCont(),
@@ -157,7 +158,7 @@ export const ensureContinuationBindFunction = (
     const bindCont = ctx.effectsRuntime.makeContinuation({
       fnRef: refFunc(ctx.mod, fnName, fnRefType),
       env: wrappedEnv,
-      site: ctx.mod.i32.const(-1),
+      site: frameSite(),
     });
     const wrappedReq = ctx.effectsRuntime.makeEffectRequest({
       effectId: ctx.effectsRuntime.requestEffectId(request()),
@@ -212,8 +213,9 @@ export const wrapRequestContinuationWithFrame = ({
   frame: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef => {
   const { fnName, fnRefType, envType } = ensureContinuationBindFunction(ctx);
+  const frameSite = ctx.effectsRuntime.continuationSite(frame);
   const env = initStruct(ctx.mod, envType, [
-    ctx.mod.i32.const(-1),
+    frameSite,
     ctx.effectsRuntime.requestHandler(request()),
     ctx.effectsRuntime.requestContinuation(request()),
     frame,
@@ -221,7 +223,7 @@ export const wrapRequestContinuationWithFrame = ({
   const bindCont = ctx.effectsRuntime.makeContinuation({
     fnRef: refFunc(ctx.mod, fnName, fnRefType),
     env,
-    site: ctx.mod.i32.const(-1),
+    site: frameSite,
   });
   return ctx.effectsRuntime.makeEffectRequest({
     effectId: ctx.effectsRuntime.requestEffectId(request()),

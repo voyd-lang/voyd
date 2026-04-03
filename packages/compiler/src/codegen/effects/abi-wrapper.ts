@@ -103,6 +103,7 @@ export const emitPureSurfaceWrapper = (params: {
                 value: unboxOutcomeValue({
                   payload: payload(),
                   valueType: outResultPointer.type,
+                  typeId: wrapperResultTypeId,
                   ctx,
                 }),
                 typeId: wrapperResultTypeId!,
@@ -119,6 +120,7 @@ export const emitPureSurfaceWrapper = (params: {
                 value: unboxOutcomeValue({
                   payload: payload(),
                   valueType: wrapperResultType,
+                  typeId: wrapperResultTypeId,
                   ctx,
                 }),
                 ctx,
@@ -128,6 +130,7 @@ export const emitPureSurfaceWrapper = (params: {
           : unboxOutcomeValue({
               payload: payload(),
               valueType: wrapperResultType,
+              typeId: wrapperResultTypeId,
               ctx,
             }),
         ctx.mod.unreachable()

@@ -1,0 +1,13 @@
+//! Async completion type definitions.
+//!
+//! Defines the shared completion vocabulary for values that may become ready later.
+
+use std::result::types::{ Result }
+
+/// Completion variant for work cancelled before producing a value or error.
+pub obj Cancelled {}
+
+/// Cancellation-aware completion alias.
+///
+/// Async work completes with either a success value, an error, or cancellation.
+pub type Completion<T, E> = Result<T, E> | Cancelled

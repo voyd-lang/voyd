@@ -1,0 +1,32 @@
+use std::async::types::{ Cancelled, Completion }
+use std::result::types::all
+use std::test::assertions::all
+
+test "completion reuses result success and failure plus cancellation":
+  let success: Completion<i32, i32> = Ok<i32> { value: 7 }
+  let failure: Completion<i32, i32> = Err<i32> { error: 9 }
+  let cancelled: Completion<i32, i32> = Cancelled {}
+
+  match(success)
+    Ok<i32> { value }:
+      assert(value, eq: 7)
+    Err<i32>:
+      assert(false, eq: true)
+    Cancelled:
+      assert(false, eq: true)
+
+  match(failure)
+    Err<i32> { error }:
+      assert(error, eq: 9)
+    Ok<i32>:
+      assert(false, eq: true)
+    Cancelled:
+      assert(false, eq: true)
+
+  match(cancelled)
+    Cancelled:
+      assert(true, eq: true)
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<i32>:
+      assert(false, eq: true)

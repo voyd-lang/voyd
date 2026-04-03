@@ -3,7 +3,7 @@ import type {
   HirObjectLiteralExpr,
 } from "../../hir/index.js";
 import type { SourceSpan, TypeId, TypeParamId } from "../../ids.js";
-import { typeExpression } from "../expressions.js";
+import { typeExpression, withSpeculativeExprTyping } from "../expressions.js";
 import { composeEffectRows, getExprEffectRow } from "../effects.js";
 import {
   bindTypeParamsFromType,
@@ -103,25 +103,34 @@ const typeNominalObjectLiteral = (
   const templateFields = new Map<string, StructuralField>(
     template.fields.map((field) => [field.name, field])
   );
-  const typeParamBindings = new Map<TypeParamId, TypeId>();
-  const seenFields = new Set<string>();
-
-  expr.entries.forEach((entry) =>
-    bindNominalObjectEntry({
-      entry,
-      declared: templateFields,
-      bindings: typeParamBindings,
-      provided: seenFields,
-      ctx,
-      state,
-      typeName,
-    })
-  );
-
   const explicitTypeArgs =
     namedTarget?.typeArguments?.map((arg) =>
       resolveTypeExpr(arg, ctx, state, ctx.primitives.unknown)
     ) ?? [];
+  const hasExplicitTypeArgsForAllParams =
+    template.params.length > 0 &&
+    template.params.every(
+      (_, index) =>
+        typeof explicitTypeArgs[index] === "number" &&
+        explicitTypeArgs[index] !== ctx.primitives.unknown
+    );
+  const typeParamBindings = new Map<TypeParamId, TypeId>();
+
+  if (!hasExplicitTypeArgsForAllParams) {
+    withSpeculativeExprTyping(ctx, () => {
+      expr.entries.forEach((entry) =>
+        bindNominalObjectEntry({
+          entry,
+          declared: templateFields,
+          bindings: typeParamBindings,
+          ctx,
+          state,
+          typeName,
+        })
+      );
+    });
+  }
+
   const typeArgs = template.params.map((param, index) => {
     const explicit = explicitTypeArgs[index];
     if (typeof explicit === "number") {
@@ -192,7 +201,6 @@ const bindNominalObjectEntry = (
     entry,
     declared,
     bindings,
-    provided,
     ctx,
     state,
     typeName,
@@ -200,7 +208,6 @@ const bindNominalObjectEntry = (
     entry: HirObjectLiteralEntry;
     declared: Map<string, StructuralField>;
     bindings: Map<TypeParamId, TypeId>;
-    provided: Set<string>;
     ctx: TypingContext;
     state: TypingState;
     typeName: string;
@@ -212,9 +219,8 @@ const bindNominalObjectEntry = (
     ctx,
     state,
     typeName,
-    onField: ({ name, expectedField, valueType }) => {
+    onField: ({ expectedField, valueType }) => {
       bindTypeParamsFromType(expectedField.type, valueType, bindings, ctx, state);
-      provided.add(name);
     },
   });
 

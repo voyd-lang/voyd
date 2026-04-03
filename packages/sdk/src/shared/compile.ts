@@ -69,7 +69,9 @@ export const compileWithLoader = async ({
 
   const scopedTestScope = testScope ?? "all";
   const runtimeDiagnosticsCodegenOption =
-    typeof runtimeDiagnostics === "boolean" ? { runtimeDiagnostics } : {};
+    typeof runtimeDiagnostics === "boolean"
+      ? { runtimeDiagnostics, emitEffectHelpers: true }
+      : { emitEffectHelpers: true };
   const { semantics, diagnostics: semanticDiagnostics, tests } = analyzeModules({
     graph,
     includeTests: shouldIncludeTests,

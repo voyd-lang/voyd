@@ -130,6 +130,7 @@ const collectIdentifierSymbolTypes = ({
       onExpr: (id, expr) => {
         if (expr.exprKind !== "identifier") return;
         const typeId =
+          ctx.module.types.getValueType(expr.symbol) ??
           ctx.module.types.getResolvedExprType(id) ??
           ctx.module.types.getExprType(id);
         if (typeof typeId !== "number") return;
@@ -288,6 +289,22 @@ export const buildEffectLoweringEir = ({
       handlerAtSite: true,
       symbolTypes,
     });
+    if (
+      typeof process !== "undefined" &&
+      process.env.DEBUG_EFFECTS === "1" &&
+      ctx.moduleId === "std::time" &&
+      (ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`) === "run_timeout"
+    ) {
+      console.error(
+        "[effects] run_timeout sites",
+        analysis.sites.map((site) => ({
+          exprId: site.exprId,
+          kind: site.kind,
+          liveAfter: [...site.liveAfter],
+          tempCaptures: site.tempCaptures,
+        })),
+      );
+    }
   });
 
   ctx.module.hir.expressions.forEach((expr) => {

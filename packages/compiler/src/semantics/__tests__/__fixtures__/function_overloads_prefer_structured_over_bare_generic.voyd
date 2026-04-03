@@ -1,0 +1,15 @@
+obj Pair<A, B> {
+  left: A,
+  right: B
+}
+
+pub fn choose<T>(value: T) -> bool
+  let _ = value
+  true
+
+pub fn choose<A, B>(value: Pair<A, B>) -> bool
+  let _ = value
+  false
+
+pub fn main() -> bool
+  choose(Pair<i32, bool> { left: 1, right: true })

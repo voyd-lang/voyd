@@ -386,7 +386,12 @@ export const createContinuationExpressionCompiler = ({
           expr:
             valueType === binaryen.none
               ? ctx.mod.block(null, [ctx.mod.drop(payload)], binaryen.none)
-              : unboxOutcomeValue({ payload, valueType, ctx }),
+              : unboxOutcomeValue({
+                  payload,
+                  valueType,
+                  typeId: resolvedTypeId,
+                  ctx,
+                }),
           usedReturnCall: false,
         };
       }

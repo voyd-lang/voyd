@@ -12,8 +12,13 @@ export {
 export { collectEffectOperationSignatures } from "./host-boundary/signatures.js";
 export { createHandleOutcomeDynamic } from "./host-boundary/handle-outcome.js";
 export { ensureEffectResultAccessors } from "./host-boundary/effect-result.js";
-export { createEffectfulEntry } from "./host-boundary/effectful-entry.js";
+export {
+  createEffectfulEntry,
+  createEffectfulEntryRaw,
+} from "./host-boundary/effectful-entry.js";
 export {
   createResumeContinuation,
+  createEndRequestRaw,
   createResumeEffectful,
+  createResumeEffectfulRaw,
 } from "./host-boundary/resume.js";

@@ -427,13 +427,13 @@ const compileResolvedSymbolCall = ({
           ctx.program.symbols.getName(calleeId) ??
           `${symbol}`,
         call: expr,
-        args,
-        ctx,
-        fnCtx,
-        instanceId: typeInstanceId,
-      }),
-      usedReturnCall: false,
-    };
+      args,
+      ctx,
+      fnCtx,
+      instanceId: typeInstanceId,
+    }),
+    usedReturnCall: false,
+  };
   }
 
   const targetMeta = getFunctionMetadataForCall({

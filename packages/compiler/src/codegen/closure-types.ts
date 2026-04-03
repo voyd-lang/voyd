@@ -49,13 +49,11 @@ export const getFunctionRefType = ({
 };
 
 const closureSignatureKey = ({
-  moduleId,
   parameters,
   returnType,
   effectRow,
   mode,
 }: {
-  moduleId: string;
   parameters: ReadonlyArray<{
     type: TypeId;
     label?: string;
@@ -72,16 +70,14 @@ const closureSignatureKey = ({
       return `${label}:${param.type}${optional}`;
     })
     .join("|");
-  return `${moduleId}::${mode}::(${params})->${returnType}|${effectRow}`;
+  return `${mode}::(${params})->${returnType}|${effectRow}`;
 };
 
 const closureStructName = ({
-  moduleLabel,
   key,
 }: {
-  moduleLabel: string;
   key: string;
-}): string => `${moduleLabel}__closure_base_${sanitizeIdentifier(key)}`;
+}): string => `voyd__closure_base_${sanitizeIdentifier(key)}`;
 
 const getClosureFunctionRefType = ({
   params,
@@ -124,7 +120,6 @@ export const ensureClosureTypeInfo = ({
   ) => binaryen.Type;
 }): ClosureTypeInfo => {
   const key = closureSignatureKey({
-    moduleId: ctx.moduleId,
     parameters: desc.parameters,
     returnType: desc.returnType,
     effectRow: desc.effectRow,
@@ -160,7 +155,7 @@ export const ensureClosureTypeInfo = ({
   const paramTypes = widened.paramTypes;
   const resultType = widened.resultType;
   const interfaceType = defineStructType(ctx.mod, {
-    name: closureStructName({ moduleLabel: ctx.moduleLabel, key }),
+    name: closureStructName({ key }),
     fields: [{ name: "__fn", type: binaryen.funcref, mutable: false }],
     final: false,
   });

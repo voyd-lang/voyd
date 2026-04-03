@@ -1,0 +1,5 @@
+//! Async standard module.
+//!
+//! Re-exports cancellation-aware completion types shared across std async APIs.
+
+pub use self::types::all

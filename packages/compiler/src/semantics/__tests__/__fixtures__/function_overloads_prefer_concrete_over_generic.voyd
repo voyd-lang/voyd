@@ -1,0 +1,12 @@
+pub fn prefer(x: i32) -> bool
+  true
+
+pub fn prefer<T>(x: T) -> T
+  x
+
+pub fn main() -> i32
+  let value = prefer(1)
+  if value then:
+    1
+  else:
+    0

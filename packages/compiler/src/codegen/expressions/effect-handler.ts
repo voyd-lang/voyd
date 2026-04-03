@@ -606,6 +606,7 @@ const emitClauseFunction = ({
       ? wrapValueInOutcome({
           valueExpr: body.expr,
           valueType: returnWasmType,
+          typeId: expectedClauseReturnTypeId,
           ctx,
           fnCtx,
         })

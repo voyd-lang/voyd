@@ -1,9 +1,10 @@
-import type binaryen from "binaryen";
+import binaryen from "binaryen";
 import type { CodegenContext, FunctionContext } from "../../context.js";
 import type { ContinuationEnvField } from "../effect-lowering.js";
 import { getRequiredBinding, loadBindingValue } from "../../locals.js";
 import { coerceValueToType, lowerValueForHeapField } from "../../structural.js";
 import { getFunctionRefType } from "../../types.js";
+import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
 
 export const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
@@ -77,10 +78,15 @@ export const captureContinuationEnvFieldValue = ({
               ctx,
               fnCtx,
             });
+      const normalizedValue = coerceExprToWasmType({
+        expr: coercedValue,
+        targetType: field.wasmType,
+        ctx,
+      });
       return field.storageType === field.wasmType
-        ? coercedValue
+        ? normalizedValue
         : lowerValueForHeapField({
-            value: coercedValue,
+            value: normalizedValue,
             typeId: field.typeId,
             targetType: field.storageType,
             ctx,

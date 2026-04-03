@@ -580,6 +580,13 @@ export const lowerValueForHeapField = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
+  if (wasmTypeFor(typeId, ctx) === binaryen.none) {
+    return ctx.mod.block(
+      null,
+      [ctx.mod.drop(value), ctx.mod.ref.null(targetType)],
+      targetType,
+    );
+  }
   const inlineBoxType = getInlineHeapBoxType({ typeId, ctx });
   if (inlineBoxType && targetType === inlineBoxType) {
     return boxInlineValue({ value, typeId, ctx, fnCtx });
@@ -600,6 +607,9 @@ export const liftHeapValueToInline = ({
   typeId: TypeId;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
+  if (wasmTypeFor(typeId, ctx) === binaryen.none) {
+    return ctx.mod.block(null, [ctx.mod.drop(value)], binaryen.none);
+  }
   if (getInlineHeapBoxType({ typeId, ctx })) {
     return unboxInlineValue({ value, typeId, ctx });
   }
@@ -1965,15 +1975,8 @@ export const coerceValueToType = ({
   }
 
   if (targetDesc.kind === "function" && actualDesc.kind === "function") {
-    const targetEffectful =
-      typeof targetDesc.effectRow === "number" &&
-      !ctx.program.effects.isEmpty(targetDesc.effectRow);
-    const actualEffectful =
-      typeof actualDesc.effectRow === "number" &&
-      !ctx.program.effects.isEmpty(actualDesc.effectRow);
-
-    if (targetEffectful && !actualEffectful) {
-      return coercePureClosureToEffectful({
+    if (actualType !== targetType) {
+      return coerceClosureToTarget({
         value,
         actualType,
         targetType,
@@ -2133,7 +2136,7 @@ export const coerceValueToType = ({
   });
 };
 
-const coercePureClosureToEffectful = ({
+const coerceClosureToTarget = ({
   value,
   actualType,
   targetType,
@@ -2156,6 +2159,20 @@ const coercePureClosureToEffectful = ({
 
   const actualClosure = getClosureTypeInfo(actualType, ctx);
   const targetClosure = getClosureTypeInfo(targetType, ctx);
+  const actualDesc = ctx.program.types.getTypeDesc(actualType);
+  const targetDesc = ctx.program.types.getTypeDesc(targetType);
+  if (actualDesc.kind !== "function" || targetDesc.kind !== "function") {
+    throw new Error("expected function type for closure coercion");
+  }
+  const actualEffectful =
+    typeof actualDesc.effectRow === "number" &&
+    !ctx.program.effects.isEmpty(actualDesc.effectRow);
+  const targetEffectful =
+    typeof targetDesc.effectRow === "number" &&
+    !ctx.program.effects.isEmpty(targetDesc.effectRow);
+  if (actualEffectful && !targetEffectful) {
+    return value;
+  }
   const wrapperIndex = cache.size;
   const fnName = `__voyd_effect_closure_wrap_${wrapperIndex}_${actualType}_${targetType}`;
   const envType = defineStructType(ctx.mod, {
@@ -2194,12 +2211,15 @@ const coercePureClosureToEffectful = ({
       ? innerFnField
       : refCast(ctx.mod, innerFnField, actualClosure.fnRefType);
 
-  const userArgsStart = 2; // [self, handler, ...userArgs]
+  const forwardedParamTypes = actualEffectful
+    ? targetClosure.paramTypes
+    : targetClosure.paramTypes.slice(targetClosure.userParamOffset);
+  const forwardedArgsStart = 1 + (actualEffectful ? 0 : targetClosure.userParamOffset);
   const callArgs = [
     innerClosure(),
-    ...targetClosure.paramTypes
-      .slice(1)
-      .map((type, index) => ctx.mod.local.get(userArgsStart + index, type)),
+    ...forwardedParamTypes.map((type, index) =>
+      ctx.mod.local.get(forwardedArgsStart + index, type),
+    ),
   ];
   const innerResult = callRef(
     ctx.mod,
@@ -2207,21 +2227,41 @@ const coercePureClosureToEffectful = ({
     callArgs as number[],
     actualClosure.resultType
   );
-  const innerValueType = wasmTypeFor(actualDescReturnTypeId(actualType, ctx), ctx);
+  const actualReturnTypeId = closureReturnTypeId(actualType, ctx);
+  const targetReturnTypeId = closureReturnTypeId(targetType, ctx);
+  const actualValueType = wasmTypeFor(actualReturnTypeId, ctx);
+  const targetValueType = wasmTypeFor(targetReturnTypeId, ctx);
   const wrapperLocals: binaryen.Type[] = [];
   const wrapperScratch = {
+    bindings: new Map(),
+    tempLocals: new Map(),
     locals: wrapperLocals,
     nextLocalIndex: binaryen.expandType(params).length,
+    returnTypeId: targetReturnTypeId,
+    effectful: targetEffectful,
   };
+  const innerValue =
+    binaryen.getExpressionType(innerResult) === actualValueType
+      ? actualReturnTypeId === targetReturnTypeId
+        ? innerResult
+        : coerceValueToType({
+            value: innerResult,
+            actualType: actualReturnTypeId,
+            targetType: targetReturnTypeId,
+            ctx,
+            fnCtx: wrapperScratch,
+          })
+      : innerResult;
   const wrapped =
-    binaryen.getExpressionType(innerResult) === innerValueType
+    targetEffectful && binaryen.getExpressionType(innerValue) === targetValueType
       ? wrapValueInOutcome({
-          valueExpr: innerResult,
-          valueType: innerValueType,
+          valueExpr: innerValue,
+          valueType: targetValueType,
+          typeId: targetReturnTypeId,
           ctx,
           fnCtx: wrapperScratch,
         })
-      : innerResult;
+      : innerValue;
 
   ctx.mod.addFunction(
     fnName,
@@ -2235,7 +2275,7 @@ const coercePureClosureToEffectful = ({
   return initStruct(ctx.mod, envType, [refFunc(ctx.mod, fnName, fnRefType), value]);
 };
 
-const actualDescReturnTypeId = (typeId: TypeId, ctx: CodegenContext): TypeId => {
+const closureReturnTypeId = (typeId: TypeId, ctx: CodegenContext): TypeId => {
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "function") {
     throw new Error("expected function type for closure coercion");

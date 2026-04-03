@@ -83,6 +83,7 @@ export const compileContinuationCall = ({
       : boxOutcomeValue({
           value: args[0]!,
           valueType: resumeWasmType,
+          typeId: resumeTypeId,
           ctx,
           fnCtx,
         });

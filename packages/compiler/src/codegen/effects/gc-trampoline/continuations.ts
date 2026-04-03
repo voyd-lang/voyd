@@ -88,7 +88,11 @@ const collectIdentifierExprTypes = ({
         if (expr.exprKind !== "identifier") return;
         if (!shouldCaptureIdentifierSymbol(expr.symbol, ctx)) return;
         if (types.has(expr.symbol)) return;
-        types.set(expr.symbol, getRequiredExprType(id, ctx, typeInstanceId));
+        types.set(
+          expr.symbol,
+          ctx.module.types.getValueType(expr.symbol) ??
+            getRequiredExprType(id, ctx, typeInstanceId)
+        );
       },
     },
     visitLambdaBodies: false,
@@ -470,10 +474,10 @@ export const ensureContinuationFunction = ({
 
   const cfgCache = ctx.effectsState.contCfgByName;
   const cfg =
-    cfgCache.get(specializedSite.contBaseName) ??
+    cfgCache.get(contKey) ??
     (() => {
       const builtCfg = buildGroupContinuationCfg({ fn: cfgFn, groupSites, ctx });
-      cfgCache.set(specializedSite.contBaseName, builtCfg);
+      cfgCache.set(contKey, builtCfg);
       return builtCfg;
     })();
 
@@ -542,6 +546,7 @@ export const ensureContinuationFunction = ({
     ? wrapValueInOutcome({
         valueExpr: bodyExpr.expr,
         valueType: returnWasmType,
+        typeId: resolvedReturnTypeId,
         ctx,
         fnCtx,
       })

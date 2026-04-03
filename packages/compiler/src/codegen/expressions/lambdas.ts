@@ -268,6 +268,7 @@ const emitLambdaFunction = ({
         ? wrapValueInOutcome({
             valueExpr: implBody,
             valueType: returnWasmType,
+            typeId: desc.returnType,
             ctx,
             fnCtx: implCtx,
           })
@@ -367,6 +368,7 @@ const emitLambdaFunction = ({
     ? wrapValueInOutcome({
         valueExpr: body,
         valueType: returnWasmType,
+        typeId: desc.returnType,
         ctx,
         fnCtx: lambdaCtx,
       })

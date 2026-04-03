@@ -5,7 +5,7 @@ import {
   refCast,
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
-import type { CodegenContext, FunctionContext } from "../context.js";
+import type { CodegenContext, FunctionContext, TypeId } from "../context.js";
 import { captureMultivalueLanes } from "../multivalue.js";
 
 export interface OutcomeValueBox {
@@ -13,9 +13,20 @@ export interface OutcomeValueBox {
   boxType: binaryen.Type;
   valueType: binaryen.Type;
   abiTypes: readonly binaryen.Type[];
+  storageTypes: readonly binaryen.Type[];
+  markerValue?: number;
 }
 
-const valueTypeKey = (valueType: binaryen.Type): string => `${valueType}`;
+const valueTypeKey = ({
+  valueType,
+  typeId,
+  ctx,
+}: {
+  valueType: binaryen.Type;
+  typeId?: TypeId;
+  ctx: CodegenContext;
+}): string =>
+  typeId === ctx.program.primitives.bool ? `bool:${valueType}` : `${valueType}`;
 
 const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
@@ -41,47 +52,68 @@ const makeInlineValue = ({
 
 const ensureOutcomeValueBox = ({
   valueType,
+  typeId,
   ctx,
 }: {
   valueType: binaryen.Type;
+  typeId?: TypeId;
   ctx: CodegenContext;
 }): OutcomeValueBox => {
-  const key = valueTypeKey(valueType);
+  const key = valueTypeKey({ valueType, typeId, ctx });
   const cached = ctx.outcomeValueTypes.get(key);
   if (cached) return cached;
   const abiTypes = expandValueType(valueType);
+  const markerValue = typeId === ctx.program.primitives.bool ? 1 : undefined;
+  const storageTypes =
+    typeof markerValue === "number" ? [...abiTypes, binaryen.i32] : abiTypes;
 
   const boxType = defineStructType(ctx.mod, {
     name: `voydOutcomeValue_${sanitize(`${ctx.outcomeValueTypes.size}_${key}`)}`,
-    fields: abiTypes.map((type, index) => ({
-      name: abiTypes.length === 1 ? "value" : `v${index}`,
+    fields: storageTypes.map((type, index) => ({
+      name:
+        index < abiTypes.length
+          ? abiTypes.length === 1
+            ? "value"
+            : `v${index}`
+          : "marker",
       type,
       mutable: false,
     })),
     final: true,
   });
 
-  const box: OutcomeValueBox = { key, boxType, valueType, abiTypes };
+  const box: OutcomeValueBox = {
+    key,
+    boxType,
+    valueType,
+    abiTypes,
+    storageTypes,
+    markerValue,
+  };
   ctx.outcomeValueTypes.set(key, box);
   return box;
 };
 
 export const getOutcomeValueBoxType = ({
   valueType,
+  typeId,
   ctx,
 }: {
   valueType: binaryen.Type;
+  typeId?: TypeId;
   ctx: CodegenContext;
-}): binaryen.Type => ensureOutcomeValueBox({ valueType, ctx }).boxType;
+}): binaryen.Type => ensureOutcomeValueBox({ valueType, typeId, ctx }).boxType;
 
 export const boxOutcomeValue = ({
   value,
   valueType,
+  typeId,
   ctx,
   fnCtx,
 }: {
   value: binaryen.ExpressionRef;
   valueType: binaryen.Type;
+  typeId?: TypeId;
   ctx: CodegenContext;
   fnCtx?: Pick<FunctionContext, "locals" | "nextLocalIndex">;
 }): binaryen.ExpressionRef => {
@@ -89,9 +121,14 @@ export const boxOutcomeValue = ({
     return ctx.mod.ref.null(binaryen.eqref);
   }
 
-  const box = ensureOutcomeValueBox({ valueType, ctx });
+  const box = ensureOutcomeValueBox({ valueType, typeId, ctx });
   if (box.abiTypes.length === 1) {
-    return initStruct(ctx.mod, box.boxType, [value]);
+    return initStruct(ctx.mod, box.boxType, [
+      value,
+      ...(typeof box.markerValue === "number"
+        ? [ctx.mod.i32.const(box.markerValue)]
+        : []),
+    ]);
   }
   if (!fnCtx) {
     throw new Error("boxing multivalue outcome requires local scratch storage");
@@ -105,7 +142,12 @@ export const boxOutcomeValue = ({
   const boxed = initStruct(
     ctx.mod,
     box.boxType,
-    captured.lanes as binaryen.ExpressionRef[],
+    [
+      ...(captured.lanes as binaryen.ExpressionRef[]),
+      ...(typeof box.markerValue === "number"
+        ? [ctx.mod.i32.const(box.markerValue)]
+        : []),
+    ],
   );
   if (captured.setup.length === 0) {
     return boxed;
@@ -116,17 +158,19 @@ export const boxOutcomeValue = ({
 export const unboxOutcomeValue = ({
   payload,
   valueType,
+  typeId,
   ctx,
 }: {
   payload: binaryen.ExpressionRef;
   valueType: binaryen.Type;
+  typeId?: TypeId;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   if (valueType === binaryen.none) {
     return ctx.mod.block(null, [ctx.mod.drop(payload)], binaryen.none);
   }
 
-  const box = ensureOutcomeValueBox({ valueType, ctx });
+  const box = ensureOutcomeValueBox({ valueType, typeId, ctx });
   if (box.abiTypes.length === 1) {
     return structGetFieldValue({
       mod: ctx.mod,
@@ -151,11 +195,13 @@ export const unboxOutcomeValue = ({
 export const wrapValueInOutcome = ({
   valueExpr,
   valueType,
+  typeId,
   ctx,
   fnCtx,
 }: {
   valueExpr: binaryen.ExpressionRef;
   valueType: binaryen.Type;
+  typeId?: TypeId;
   ctx: CodegenContext;
   fnCtx?: Pick<FunctionContext, "locals" | "nextLocalIndex">;
 }): binaryen.ExpressionRef => {
@@ -170,7 +216,7 @@ export const wrapValueInOutcome = ({
     );
   }
 
-  const payload = boxOutcomeValue({ value: valueExpr, valueType, ctx, fnCtx });
+  const payload = boxOutcomeValue({ value: valueExpr, valueType, typeId, ctx, fnCtx });
   return ctx.effectsRuntime.makeOutcomeValue(payload);
 };
 

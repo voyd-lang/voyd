@@ -587,7 +587,12 @@ export const createGroupedContinuationExpressionCompiler = ({
       const resumedValue =
         valueType === binaryen.none
           ? ctx.mod.block(null, [ctx.mod.drop(resumeBox)], binaryen.none)
-          : unboxOutcomeValue({ payload: resumeBox, valueType, ctx });
+          : unboxOutcomeValue({
+              payload: resumeBox,
+              valueType,
+              typeId: resumeTypeId,
+              ctx,
+            });
       const resumedExpr = ctx.mod.block(null, [resumeSet, resumedValue], valueType);
       const exprResultTypeId =
         expectedResultTypeId ?? getRequiredExprType(exprId, ctx, typeInstanceId);

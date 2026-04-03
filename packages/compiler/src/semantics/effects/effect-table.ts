@@ -58,13 +58,20 @@ export interface EffectTable {
   freshTailVar(options?: { rigid?: boolean }): EffectRowVariable;
   setExprEffect(expr: HirExprId, row: EffectRowId): void;
   getExprEffect(expr: HirExprId): EffectRowId | undefined;
+  snapshotExprEffects(): ReadonlyMap<HirExprId, EffectRowId>;
+  restoreExprEffects(snapshot: ReadonlyMap<HirExprId, EffectRowId>): void;
   setFunctionEffect(symbol: SymbolId, scheme: TypeSchemeId, row: EffectRowId): void;
   getFunctionEffect(symbol: SymbolId): EffectRowId | undefined;
 }
 
 export type EffectInterner = Omit<
   EffectTable,
-  "setExprEffect" | "getExprEffect" | "setFunctionEffect" | "getFunctionEffect"
+  | "setExprEffect"
+  | "getExprEffect"
+  | "snapshotExprEffects"
+  | "restoreExprEffects"
+  | "setFunctionEffect"
+  | "getFunctionEffect"
 >;
 
 export const createEffectInterner = (): EffectInterner => {
@@ -292,6 +299,18 @@ export const createEffectTable = ({
   const getExprEffect = (expr: HirExprId): EffectRowId | undefined =>
     exprEffects.get(expr);
 
+  const snapshotExprEffects = (): ReadonlyMap<HirExprId, EffectRowId> =>
+    new Map(exprEffects);
+
+  const restoreExprEffects = (
+    snapshot: ReadonlyMap<HirExprId, EffectRowId>
+  ): void => {
+    exprEffects.clear();
+    snapshot.forEach((row, expr) => {
+      exprEffects.set(expr, row);
+    });
+  };
+
   const setFunctionEffect = (
     symbol: SymbolId,
     scheme: TypeSchemeId,
@@ -313,6 +332,8 @@ export const createEffectTable = ({
     ...shared,
     setExprEffect,
     getExprEffect,
+    snapshotExprEffects,
+    restoreExprEffects,
     setFunctionEffect,
     getFunctionEffect,
   };

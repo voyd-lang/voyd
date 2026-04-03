@@ -1,5 +1,6 @@
 import type { HirExpression } from "../hir/index.js";
 import type { HirExprId, TypeId } from "../ids.js";
+import { cloneNestedMap } from "./call-resolution.js";
 import {
   typeAssignExpr,
   typeBlockExpr,
@@ -36,6 +37,43 @@ export type TypeExpressionOptions = {
   expectedType?: TypeId;
   /** When true, the expression's resulting value is not used (statement context). */
   discardValue?: boolean;
+};
+
+export const withSpeculativeExprTyping = <T>(
+  ctx: TypingContext,
+  run: () => T,
+): T => {
+  const previousResolved = ctx.resolvedExprTypes;
+  const previousTailResumptions = ctx.tailResumptions;
+  const previousExprEffects = ctx.effects.snapshotExprEffects();
+  const previousTargets = ctx.callResolution.targets;
+  const previousArgumentPlans = ctx.callResolution.argumentPlans;
+  const previousTypeArguments = ctx.callResolution.typeArguments;
+  const previousInstanceKeys = ctx.callResolution.instanceKeys;
+  const previousTraitDispatches = ctx.callResolution.traitDispatches;
+
+  ctx.table.pushExprTypeScope();
+  ctx.resolvedExprTypes = new Map(previousResolved);
+  ctx.tailResumptions = new Map(previousTailResumptions);
+  ctx.callResolution.targets = cloneNestedMap(previousTargets);
+  ctx.callResolution.argumentPlans = cloneNestedMap(previousArgumentPlans);
+  ctx.callResolution.typeArguments = cloneNestedMap(previousTypeArguments);
+  ctx.callResolution.instanceKeys = cloneNestedMap(previousInstanceKeys);
+  ctx.callResolution.traitDispatches = new Set(previousTraitDispatches);
+
+  try {
+    return run();
+  } finally {
+    ctx.effects.restoreExprEffects(previousExprEffects);
+    ctx.callResolution.targets = previousTargets;
+    ctx.callResolution.argumentPlans = previousArgumentPlans;
+    ctx.callResolution.typeArguments = previousTypeArguments;
+    ctx.callResolution.instanceKeys = previousInstanceKeys;
+    ctx.callResolution.traitDispatches = previousTraitDispatches;
+    ctx.tailResumptions = previousTailResumptions;
+    ctx.resolvedExprTypes = previousResolved;
+    ctx.table.popExprTypeScope();
+  }
 };
 
 export const typeExpression = (
