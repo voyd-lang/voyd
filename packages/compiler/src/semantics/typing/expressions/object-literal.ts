@@ -219,9 +219,8 @@ const bindNominalObjectEntry = (
     ctx,
     state,
     typeName,
-    onField: ({ name, expectedField, valueType }) => {
+    onField: ({ expectedField, valueType }) => {
       bindTypeParamsFromType(expectedField.type, valueType, bindings, ctx, state);
-      const _ = name;
     },
   });
 

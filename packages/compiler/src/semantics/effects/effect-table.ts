@@ -66,7 +66,12 @@ export interface EffectTable {
 
 export type EffectInterner = Omit<
   EffectTable,
-  "setExprEffect" | "getExprEffect" | "setFunctionEffect" | "getFunctionEffect"
+  | "setExprEffect"
+  | "getExprEffect"
+  | "snapshotExprEffects"
+  | "restoreExprEffects"
+  | "setFunctionEffect"
+  | "getFunctionEffect"
 >;
 
 export const createEffectInterner = (): EffectInterner => {

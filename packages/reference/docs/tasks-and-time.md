@@ -11,6 +11,7 @@ threads.
 ## Core Task APIs
 
 ```voyd
+use std::async::types::{ Cancelled }
 use std::error::panic
 use std::task::self as task
 
@@ -19,18 +20,19 @@ pub fn main(): task::TaskRuntime -> i32
     41
   )
 
-  match(task::join(child))
-    TaskValue { value }:
+  match(child.await())
+    Ok { value }:
       value
-    TaskFailed { error }:
+    Err { error }:
       panic(error.message.as_slice())
-    TaskCancelled:
+    Cancelled:
       0
 ```
 
 - `task::spawn(...)` creates an attached child task.
 - `task::detach(...)` creates a detached task owned by the run.
-- `task::join(...)` waits for `TaskValue`, `TaskFailed`, or `TaskCancelled`.
+- `task.await()` waits for `Ok`, `Err`, or `Cancelled`.
+- `task::join(...)` remains available as the task-specific free-function form.
 - `task::cancel(...)` requests cancellation.
 - `task::yield_now()` yields cooperatively to the run scheduler.
 
@@ -59,6 +61,7 @@ pub fn main(): time::Time -> i32
 Timer helpers build on the same task model.
 
 ```voyd
+use std::async::types::{ Cancelled }
 use std::error::panic
 use std::task::self as task
 use std::time::{ Duration, Overlap }
@@ -78,12 +81,12 @@ pub fn main(): (task::TaskRuntime, time::Time) -> i32
 
   let _ = task::cancel<Unit>(interval)
 
-  match(task::join(timeout))
-    TaskValue { value }:
+  match(timeout.await())
+    Ok { value }:
       value
-    TaskFailed { error }:
+    Err { error }:
       panic(error.message.as_slice())
-    TaskCancelled:
+    Cancelled:
       0
 
 fn sync_once(): time::Time -> Unit

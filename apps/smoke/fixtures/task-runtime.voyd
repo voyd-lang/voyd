@@ -1,8 +1,8 @@
 use std::array::Array
+use std::async::types::{ Cancelled }
 use std::error::panic
 use std::number::cast::{ to_i64 }
 use std::result::types::all
-use std::task::{ TaskCancelled, TaskFailed, TaskValue }
 use std::task::self as task
 use std::time::{ Duration, Overlap }
 use std::time::self as time
@@ -15,12 +15,25 @@ pub fn spawn_join_probe(): task::TaskRuntime -> i32
     41
   )
   match(task::join(child))
-    TaskValue { value }:
+    Ok { value }:
       value
-    TaskFailed { error }:
+    Err { error }:
       let _ = error
       -2
-    TaskCancelled:
+    Cancelled:
+      -3
+
+pub fn spawn_await_probe(): task::TaskRuntime -> i32
+  let child = task::spawn(() =>
+    41
+  )
+  match(child.await())
+    Ok { value }:
+      value
+    Err { error }:
+      let _ = error
+      -2
+    Cancelled:
       -3
 
 pub fn spawn_join_bool_probe(): task::TaskRuntime -> i32
@@ -28,12 +41,12 @@ pub fn spawn_join_bool_probe(): task::TaskRuntime -> i32
     true
   )
   match(task::join(child))
-    TaskValue { value }:
+    Ok { value }:
       if value then: 1 else: 0
-    TaskFailed { error }:
+    Err { error }:
       let _ = error
       -1
-    TaskCancelled:
+    Cancelled:
       -2
 
 pub fn cancel_probe(): (task::TaskRuntime, time::Time) -> i32
@@ -46,11 +59,11 @@ pub fn cancel_probe(): (task::TaskRuntime, time::Time) -> i32
     return -10
   let _ = time::sleep(millis(30))
   match(task::join(child))
-    TaskCancelled:
+    Cancelled:
       1
-    TaskValue { value }:
+    Ok { value }:
       value
-    TaskFailed { error }:
+    Err { error }:
       let _ = error
       -2
 
@@ -70,11 +83,11 @@ pub fn owner_cancel_cascades_probe(): (task::TaskRuntime, time::Time) -> i32
     return -10
   let _ = time::sleep(millis(40))
   match(task::join(owner))
-    TaskCancelled:
+    Cancelled:
       events.len()
-    TaskValue { value }:
+    Ok { value }:
       value
-    TaskFailed { error }:
+    Err { error }:
       let _ = error
       -2
 
@@ -88,15 +101,15 @@ pub fn owner_failure_does_not_hang_probe(): (task::TaskRuntime, time::Time) -> i
   )
   let _ = time::sleep(millis(5))
   match(task::join(owner))
-    TaskFailed { error }:
+    Err { error }:
       if error.message.equals("owner failed") then:
         1
       else:
         -1
-    TaskValue { value }:
+    Ok { value }:
       let _ = value
       -3
-    TaskCancelled:
+    Cancelled:
       -2
 
 pub fn effectful_join_probe(): (task::TaskRuntime, time::Time) -> i32
@@ -105,12 +118,12 @@ pub fn effectful_join_probe(): (task::TaskRuntime, time::Time) -> i32
     7
   )
   match(task::join(child))
-    TaskValue { value }:
+    Ok { value }:
       value
-    TaskFailed { error }:
+    Err { error }:
       let _ = error
       -1
-    TaskCancelled:
+    Cancelled:
       -2
 
 pub fn yield_now_probe(): task::TaskRuntime -> i32
@@ -122,13 +135,13 @@ pub fn yield_now_probe(): task::TaskRuntime -> i32
   let _ = task::yield_now()
   let observed = events.len()
   match(task::join(child))
-    TaskValue { value }:
+    Ok { value }:
       let _ = value
       observed
-    TaskFailed { error }:
+    Err { error }:
       let _ = error
       -1
-    TaskCancelled:
+    Cancelled:
       -2
 
 pub fn join_failure_probe(): task::TaskRuntime -> i32
@@ -136,40 +149,40 @@ pub fn join_failure_probe(): task::TaskRuntime -> i32
     panic("joined child failed".as_slice())
   )
   match(task::join(child))
-    TaskFailed { error }:
+    Err { error }:
       if error.message.equals("joined child failed") then:
         1
       else:
         -1
-    TaskValue { value }:
+    Ok { value }:
       let _ = value
       -2
-    TaskCancelled:
+    Cancelled:
       -3
 
 pub fn timeout_probe(): (task::TaskRuntime, time::Time) -> i32
   let callback = () => 7
   let timeout = time::set_timeout(millis(5), callback)
   match(task::join(timeout))
-    TaskValue { value }:
+    Ok { value }:
       value
-    TaskFailed { error }:
+    Err { error }:
       let _ = error
       -1
-    TaskCancelled:
+    Cancelled:
       -2
 
 pub fn timeout_sleep_failure_probe(): task::TaskRuntime -> i32
   let timeout = time::set_timeout(millis(5), () => 7)
   match(task::join(timeout))
-    TaskFailed { error }:
+    Err { error }:
       if error.message.equals("blocked") then:
         1
       else:
         -1
-    TaskValue { value }:
+    Ok { value }:
       value
-    TaskCancelled:
+    Cancelled:
       -2
 
 pub fn interval_sleep_failure_probe(): task::TaskRuntime -> i32
@@ -187,12 +200,12 @@ pub fn timeout_direct_probe(): (task::TaskRuntime, time::Time) -> i32
     7
   )
   match(task::join(timeout))
-    TaskValue { value }:
+    Ok { value }:
       value
-    TaskFailed { error }:
+    Err { error }:
       let _ = error
       -1
-    TaskCancelled:
+    Cancelled:
       -2
 
 pub fn detached_callback_probe(): task::TaskRuntime -> i32
@@ -201,12 +214,12 @@ pub fn detached_callback_probe(): task::TaskRuntime -> i32
     callback()
   )
   match(task::join(child))
-    TaskValue { value }:
+    Ok { value }:
       value
-    TaskFailed { error }:
+    Err { error }:
       let _ = error
       -1
-    TaskCancelled:
+    Cancelled:
       -2
 
 pub fn after_delay_probe(): (task::TaskRuntime, time::Time) -> i32

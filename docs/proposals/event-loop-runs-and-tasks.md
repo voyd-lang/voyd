@@ -230,7 +230,7 @@ Proposed surface:
 
 ```voyd
 let task = task::spawn(() => work())
-let outcome = task::join(task)
+let outcome = task.await()
 ```
 
 `join(...)` rules:
@@ -247,10 +247,7 @@ the language surface should keep that distinction visible.
 Possible surface type:
 
 ```voyd
-pub enum TaskOutcome<T>
-  Value(T)
-  Failed(TaskError)
-  Cancelled
+pub type TaskOutcome<T> = async::Completion<T, TaskError>
 ```
 
 Exact spelling can change, but the three-way outcome should remain.
@@ -405,10 +402,10 @@ This is illustrative rather than final parser-ready syntax:
 pub mod task
   pub obj Task<T>
   pub obj TaskGroup
-  pub enum TaskOutcome<T>
-    Value(T)
-    Failed(TaskError)
-    Cancelled
+  pub type TaskOutcome<T> = async::Completion<T, TaskError>
+
+  impl<T> Task<T>
+    pub fn await(self) -> TaskOutcome<T>
 
   pub fn spawn<T>(work: fn() -> T) -> Task<T>
   pub fn detach<T>(work: fn() -> T) -> Task<T>

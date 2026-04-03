@@ -3,6 +3,7 @@
 //! Tasks are concurrent units of work inside a single Voyd run. They are
 //! cooperative and event-loop driven, not thread-parallel.
 
+use std::async::types::{ Cancelled, Completion }
 use std::msgpack::MsgPack
 use std::msgpack::MsgPackError
 use std::msgpack::self as msgpack
@@ -17,17 +18,17 @@ pub obj TaskError {
   api message: String
 }
 
-pub obj TaskValue<T> {
-  api value: T
-}
+pub type TaskOutcome<T> = Completion<T, TaskError>
 
-pub obj TaskFailed {
-  api error: TaskError
-}
+impl Task<void>
+  /// Waits for a `Task<void>` to finish and reports a `Unit` success payload.
+  api fn await(self): TaskRuntime -> Completion<Unit, TaskError>
+    join(self)
 
-pub obj TaskCancelled {}
-
-pub type TaskOutcome<T> = TaskValue<T> | TaskFailed | TaskCancelled
+impl<T> Task<T>
+  /// Waits for this task to reach a terminal outcome.
+  api fn await(self): TaskRuntime -> Completion<T, TaskError>
+    join(self)
 
 @effect(id: "voyd.std.task.runtime")
 pub eff TaskRuntime
@@ -58,14 +59,14 @@ pub fn detach<T>(work: fn() -> T): TaskRuntime -> Task<T>
 pub fn join(task: Task<void>): TaskRuntime -> TaskOutcome<Unit>
   let status = TaskRuntime::wait(task.id)
   if status == 0 then:
-    return TaskValue<Unit> { value: Unit {} }
+    return Ok<Unit> { value: Unit {} }
 
   if status == 1 then:
-    return TaskFailed {
+    return Err<TaskError> {
       error: decode_task_failure(TaskRuntime::failure_message(task.id))
     }
 
-  TaskCancelled {}
+  Cancelled {}
 
 pub fn join<T>(task: Task<T>): TaskRuntime -> TaskOutcome<T>
   join_task(task)
@@ -73,14 +74,14 @@ pub fn join<T>(task: Task<T>): TaskRuntime -> TaskOutcome<T>
 fn join_task<T>(task: Task<T>): TaskRuntime -> TaskOutcome<T>
   let status = TaskRuntime::wait(task.id)
   if status == 0 then:
-    return TaskValue<T> { value: take_task_value(task.id) }
+    return Ok<T> { value: take_task_value(task.id) }
 
   if status == 1 then:
-    return TaskFailed {
+    return Err<TaskError> {
       error: decode_task_failure(TaskRuntime::failure_message(task.id))
     }
 
-  TaskCancelled {}
+  Cancelled {}
 
 pub fn cancel<T>(task: Task<T>): TaskRuntime -> bool
   cancel_task(task)

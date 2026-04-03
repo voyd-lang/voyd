@@ -11,6 +11,7 @@
 pub self::array
 pub self::optional
 pub self::result
+pub self::async
 pub self::prelude
 pub self::error
 pub self::version
