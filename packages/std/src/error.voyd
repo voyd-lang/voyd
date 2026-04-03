@@ -75,6 +75,6 @@ fn panic_scratch_capacity_bytes(): () -> i32
 fn copy_string_to_linear_memory(message: String, ptr: i32) -> void
   let raw = message.raw_bytes()
   var index = 0
-  while index < message.byte_len() do:
+  while index < message.byte_len():
     memory::store_u8(ptr + index, __array_get(raw, index))
     index = index + 1

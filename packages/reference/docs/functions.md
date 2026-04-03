@@ -125,6 +125,35 @@ fn make_adder(base: i32)
 
 Nested lambdas capture outer values as expected.
 
+Calls with a trailing callback can also use clause syntax instead of spelling
+the callback as an inline `=>` lambda.
+
+```voyd
+stream::fold(init: 0) do:
+  zero()
+
+stream::fold(init: 0) task():
+  zero()
+
+stream::fold(init: 0) do(acc, item):
+  acc + item
+
+stream::fold(init: 0) task(acc, item):
+  acc + item
+```
+
+These forms lower to ordinary lambda values:
+
+- `do:` is an unlabeled zero-argument callback.
+- `do(a, b):` is an unlabeled callback with parameters.
+- `label():` is a labeled zero-argument callback.
+- `label(a, b):` is a labeled callback with parameters.
+
+Prefer clause syntax when a callback is the final argument and the body reads
+best as an indented suite. Prefer ordinary `=>` lambdas when you need a lambda
+as a standalone value, in a non-trailing argument position, or when the inline
+expression form is clearer.
+
 Use `fn(Arg1Type, Arg2Type, Etc) -> ReturnType` to type a lambda.
 
 ```voyd

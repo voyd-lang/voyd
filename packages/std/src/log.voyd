@@ -169,7 +169,7 @@ fn log_fields_to_msgpack(fields: Option<LogFields>): () -> MsgPack
     Some<LogFields> { value: field_values }:
       let ~encoded = Array<MsgPack>::with_capacity(field_values.len())
       var index = 0
-      while index < field_values.len() do:
+      while index < field_values.len():
         match(field_values.get(index))
           Some<LogField> { value: field }:
             encoded.push(log_field_to_msgpack(field))

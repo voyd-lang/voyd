@@ -164,7 +164,7 @@ fn decode_optional_bytes(payload: MsgPack): () -> Result<Option<Bytes>, IoError>
 fn decode_bytes_array(source: Array<MsgPack>): () -> Result<Bytes, IoError>
   let ~buffer = ByteBuffer::with_capacity(source.len())
   var index = 0
-  while index < source.len() do:
+  while index < source.len():
     match(source.get(index))
       Some<MsgPack> { value }:
         match(msgpack::unpack_i32(value))

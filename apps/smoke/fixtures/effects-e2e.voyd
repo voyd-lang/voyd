@@ -64,7 +64,7 @@ fn generic_stop<T>(value: T): GenericStop -> T
   value
 
 pub fn main(): () -> i32
-  let cb = hold(() => Async::await(5))
+  let cb = hold do: Async::await(5)
   try
     cb()
   Async::await(resume, value):
@@ -84,11 +84,10 @@ pub fn host_boundary_multi(): (Async, IO, Log) -> void
   Log::info(a + b)
 
 pub fn host_boundary_generic(): (Async, Log) -> i32
-  run_cb(() =>
+  run_cb do:
     let value = Async::await(5)
     Log::info(value)
     value
-  )
 
 pub fn host_boundary_multi_arg_op(): Async -> i32
   let seed = Async::await(2)

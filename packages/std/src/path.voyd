@@ -84,7 +84,7 @@ fn trim_trailing_separators(value: StringSlice) -> i32
     return 0
 
   var end = len
-  while end > 1 do:
+  while end > 1:
     if byte_at_or(value, end - 1, -1) != 47:
       break
     end = end - 1
@@ -95,7 +95,7 @@ fn last_separator_before(value: StringSlice, end_exclusive: i32) -> i32
     return -1
 
   var index = end_exclusive - 1
-  while index >= 0 do:
+  while index >= 0:
     if byte_at_or(value, index, -1) == 47:
       return index
     index = index - 1
@@ -140,6 +140,6 @@ fn string_len(value: StringSlice): () -> i32
 fn append_slice_bytes(~into: Array<i32>, source: StringSlice) -> void
   let raw = source.source.raw_bytes()
   var index = 0
-  while index < source.byte_len() do:
+  while index < source.byte_len():
     into.push(__array_get(raw, source.start + index))
     index = index + 1

@@ -249,7 +249,7 @@ fn write_with_payload(payload: MsgPack): () -> Result<Unit, IoError>
 fn decode_bytes_into(payload: MsgPack, ~values: Array<i32>) -> void
   let source = unpack_msgpack_array(payload)
   var index = 0
-  while index < source.len() do:
+  while index < source.len():
     match(source.get(index))
       Some<MsgPack> { value }:
         values.push(unpack_msgpack_i32(value))

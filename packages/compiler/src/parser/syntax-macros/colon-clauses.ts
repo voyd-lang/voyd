@@ -2,8 +2,11 @@ import { CallForm, type Expr, Form, isForm, isIdentifierAtom } from "../ast/inde
 import * as p from "../ast/predicates.js";
 import { isOp } from "../grammar.js";
 import type { SyntaxMacro } from "./types.js";
-
-const blockBindingOps = new Set([":", "=", "=>"]);
+import {
+  canTakeTrailingCallbackClauses,
+  isCallLikeForm,
+  isNonBindingOp,
+} from "./surface-forms.js";
 
 const isClause = (expr: Expr | undefined): expr is Form =>
   isForm(expr) && expr.calls(":") && expr.length >= 3;
@@ -14,14 +17,6 @@ const isClauseSuiteBlock = (expr: Expr | undefined): expr is Form => {
   return entries.length > 0 && entries.every((entry) => isClause(entry));
 };
 
-const isCallLikeForm = (form: Form): boolean => {
-  const head = form.first;
-  return !(isIdentifierAtom(head) && isOp(head));
-};
-
-const isNonBindingOp = (expr: Expr | undefined): boolean =>
-  isIdentifierAtom(expr) && isOp(expr) && !blockBindingOps.has(expr.value);
-
 const rebuildSameKind = (original: Form, elements: Expr[]): Form => {
   const rebuilt = new Form({
     location: original.location?.clone(),
@@ -30,9 +25,90 @@ const rebuildSameKind = (original: Form, elements: Expr[]): Form => {
   return original instanceof CallForm ? rebuilt.toCall() : rebuilt;
 };
 
+type ParsedTrailingCallbackHead = {
+  label?: Expr;
+  parameters: readonly Expr[];
+};
+
+const parseTrailingCallbackHead = (
+  expr: Expr | undefined
+): ParsedTrailingCallbackHead | undefined => {
+  if (isIdentifierAtom(expr) && expr.value === "do") {
+    return { parameters: [] };
+  }
+
+  if (!isForm(expr) || !isIdentifierAtom(expr.first) || isOp(expr.first)) {
+    return undefined;
+  }
+
+  const [name, ...parameters] = expr.toArray();
+  if (!isIdentifierAtom(name)) {
+    return undefined;
+  }
+
+  return name.value === "do"
+    ? { parameters }
+    : { label: name, parameters };
+};
+
+const lambdaParametersExpr = (parameters: readonly Expr[]): Expr =>
+  parameters.length === 0
+    ? new Form({ elements: [] })
+    : parameters.length === 1
+      ? parameters[0]!
+      : new Form({ elements: [...parameters] });
+
+const toTrailingCallbackArgument = (clause: Form): Expr => {
+  const bodyExpr = clause.at(2);
+  const parsedHead = parseTrailingCallbackHead(clause.at(1));
+  if (!bodyExpr || !parsedHead) {
+    return clause;
+  }
+
+  const lambdaExpr = new Form({
+    location: clause.location?.clone(),
+    elements: [
+      "=>",
+      lambdaParametersExpr(parsedHead.parameters),
+      bodyExpr,
+    ],
+  });
+
+  if (!parsedHead.label) {
+    return lambdaExpr;
+  }
+
+  return new Form({
+    location: clause.location?.clone(),
+    elements: [":", parsedHead.label, lambdaExpr],
+  });
+};
+
+const rewriteTrailingCallbackClauses = (form: Form): Form => {
+  if (!canTakeTrailingCallbackClauses(form)) {
+    return form;
+  }
+
+  let changed = false;
+  const elements = form.toArray().map((element, index) => {
+    if (index === 0 || !isClause(element)) {
+      return element;
+    }
+
+    const rewritten = toTrailingCallbackArgument(element);
+    changed ||= rewritten !== element;
+    return rewritten;
+  });
+
+  return changed ? rebuildSameKind(form, elements) : form;
+};
+
 const attachClausesToRightmostCall = (expr: Form, clauses: Form[]): Form => {
   if (!expr.calls(":") && isCallLikeForm(expr)) {
-    return rebuildSameKind(expr, [...expr.toArray(), ...clauses]);
+    const args = canTakeTrailingCallbackClauses(expr)
+      ? clauses.map((clause) => toTrailingCallbackArgument(clause))
+      : clauses;
+    return rebuildSameKind(expr, [...expr.toArray(), ...args]);
   }
 
   const last = expr.last;
@@ -111,9 +187,11 @@ const rewriteExpr = (expr: Expr): Expr => {
   const isSuiteContainer =
     withSplicedTrailingSuite.calls("block") || withSplicedTrailingSuite.callsInternal("ast");
 
-  return isSuiteContainer
+  const withAttachedClauses = isSuiteContainer
     ? attachFollowingClauses(withSplicedTrailingSuite)
     : withSplicedTrailingSuite;
+
+  return rewriteTrailingCallbackClauses(withAttachedClauses);
 };
 
 /**

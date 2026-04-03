@@ -153,7 +153,7 @@ fn write_bytes_with_capture(~paths: Array<String>, ~values: Array<i32>): () -> R
     paths.push(read_host_string(decoded, "path"))
     let encoded_values = unpack_msgpack_array(read_host_msgpack(decoded, "bytes"))
     var index = 0
-    while index < encoded_values.len() do:
+    while index < encoded_values.len():
       match(encoded_values.get(index))
         Some<MsgPack> { value }:
           values.push(unpack_msgpack_i32(value))

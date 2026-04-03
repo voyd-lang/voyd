@@ -146,4 +146,18 @@ describe("lambda binding and captures", () => {
       innerLambda?.owner?.kind === "lambda" ? innerLambda.owner.expr : undefined
     ).toBe(outerLambda?.id);
   });
+
+  it("lowers trailing callback clauses as ordinary lambdas", () => {
+    const { hir, symbolTable } = buildSemantics("trailing_callback_clauses.voyd");
+
+    const callbackLambda = lambdaByParam(hir, symbolTable, "value");
+    expect(callbackLambda).toBeDefined();
+    expect(captureNames(callbackLambda!, symbolTable)).toEqual(["base"]);
+
+    const zeroArgLambda = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirLambdaExpr => expr.exprKind === "lambda" && expr.parameters.length === 0
+    );
+    expect(zeroArgLambda).toBeDefined();
+    expect(captureNames(zeroArgLambda!, symbolTable)).toEqual(["base"]);
+  });
 });

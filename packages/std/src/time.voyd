@@ -121,7 +121,7 @@ fn run_timeout<T>(delay: Duration, work: fn() -> T): (task::TaskRuntime, Time) -
   invoke_callback(work)
 
 fn run_interval<T>(delay: Duration, overlap: Overlap, work: fn() -> T): (task::TaskRuntime, Time) -> Unit
-  while true do:
+  while true:
     sleep_or_panic(delay)
     if overlap.kind == 1 then:
       let _ = task::detach(work)

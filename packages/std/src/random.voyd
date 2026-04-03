@@ -148,7 +148,7 @@ pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
   let decoded = decode_random_byte_payload(payload)
 
   var index = 0
-  while index < len do:
+  while index < len:
     if index < decoded.len():
       match(decoded.get(index))
         Some<MsgPack> { value }:

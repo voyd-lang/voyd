@@ -36,7 +36,7 @@ test "set values returns iterable keys":
   var count = 0
   var has_left = false
   var has_right = false
-  while true do:
+  while true:
     match(iter.next())
       Some<String> { value }:
         count = count + 1

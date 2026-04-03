@@ -92,7 +92,7 @@ test "to_string formats floating-point values":
 
   var tiny = 1.0
   var index = 0
-  while index < 14 do:
+  while index < 14:
     tiny = tiny / 10.0
     index = index + 1
   assert(to_string(tiny).equals("0"), eq: false)
@@ -104,7 +104,7 @@ test "to_string formats floating-point values":
 fn pow2_i64(exp: i32): () -> i64
   var out = to_i64(1)
   var index = 0
-  while index < exp do:
+  while index < exp:
     out = out * to_i64(2)
     index = index + 1
   out

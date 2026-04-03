@@ -32,7 +32,7 @@ pub fn create_element({
 fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Dict<String, MsgPack>
   let ~acc = Dict<String, MsgPack>::init()
   var index = 0
-  while index < attributes.len() do:
+  while index < attributes.len():
     match(attributes.get(index))
       Some<Array<MsgPack>> { value: pair }:
         match(pair.get(0))

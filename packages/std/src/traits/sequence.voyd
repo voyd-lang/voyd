@@ -24,7 +24,7 @@ pub macro for(case)
 
   `
     let ~($iterator_id) = $iterable.iter()
-    while true do:
+    while true:
       let $iterator_val_id = ($iterator_id).next()
       $iterator_val_id.match
         Some:

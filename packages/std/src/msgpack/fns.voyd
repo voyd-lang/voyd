@@ -230,7 +230,7 @@ pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
       let ~out = Dict<String, MsgPack>::init()
       let entries = boxed.entries
       var index = 0
-      while index < entries.len() do:
+      while index < entries.len():
         match(entries.get(index))
           Some<(String, MsgPack)> { value: entry }:
             out.set(entry.0, entry.1)
@@ -355,7 +355,7 @@ impl Encoder
 
     let source = value.bytes.raw_storage()
     var index = 0
-    while index < len do:
+    while index < len:
       self.write_u8(__array_get(source, index))
       index = index + 1
 
@@ -374,7 +374,7 @@ impl Encoder
 
     let source = bytes.raw_storage()
     var index = 0
-    while index < len do:
+    while index < len:
       self.write_u8(__array_get(source, index))
       index = index + 1
 
@@ -392,7 +392,7 @@ impl Encoder
 
     let source = value.raw_storage()
     var index = 0
-    while index < len do:
+    while index < len:
       self.encode_any(__array_get(source, index))
       index = index + 1
 
@@ -414,7 +414,7 @@ impl Encoder
     let storage = entries.raw_storage()
     let entry_count = entries.len()
     var index = 0
-    while index < entry_count do:
+    while index < entry_count:
       let entry = __array_get(storage, index)
       self.encode_string(entry.0)
       self.encode_any(entry.1)
@@ -514,7 +514,7 @@ impl Decoder
       return empty_text()
     let storage = new_fixed_array<i32>(length)
     var index = 0
-    while index < length do:
+    while index < length:
       __array_set(storage, index, self.read_u8())
       index = index + 1
     new_string(storage)
@@ -524,7 +524,7 @@ impl Decoder
       return Binary { bytes: Array<i32>::with_capacity(0) }
     let ~bytes = Array<i32>::with_capacity(length)
     var index = 0
-    while index < length do:
+    while index < length:
       bytes.push(self.read_u8())
       index = index + 1
     Binary { bytes: bytes }
@@ -533,7 +533,7 @@ impl Decoder
     let capacity = if length < 0 then: 0 else: length
     let ~out = Array<MsgPack>::with_capacity(capacity)
     var index = 0
-    while index < length do:
+    while index < length:
       out.push(self.decode_any())
       index = index + 1
     out
@@ -541,7 +541,7 @@ impl Decoder
   fn decode_map(~self, length: i32) -> Dict<String, MsgPack>
     let ~out = Dict<String, MsgPack>::init()
     var index = 0
-    while index < length do:
+    while index < length:
       let key = self.decode_any()
       let value = self.decode_any()
       key.match(decoded_key)

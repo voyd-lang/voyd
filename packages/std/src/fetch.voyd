@@ -158,7 +158,7 @@ impl FetchResponse
   api fn header(self, name: String) -> Option<String>
     let target = name.lowered()
     var index = 0
-    while index < self.headers.len() do:
+    while index < self.headers.len():
       match(self.headers.get(index))
         Some<FetchHeader> { value }:
           if value.name.lowered().equals(target):
@@ -268,7 +268,7 @@ fn encode_request_payload(request: FetchRequest): () -> MsgPack
 fn encode_headers(headers: FetchHeaders): () -> MsgPack
   let ~encoded = Array<MsgPack>::with_capacity(headers.len())
   var index = 0
-  while index < headers.len() do:
+  while index < headers.len():
     match(headers.get(index))
       Some<FetchHeader> { value }:
         encoded.push(encode_header(value))
@@ -356,7 +356,7 @@ fn decode_headers(payload: MsgPack): () -> Result<FetchHeaders, HostError>
     Ok<Array<MsgPack>> { value: source }:
       let ~headers = Array<FetchHeader>::with_capacity(source.len())
       var index = 0
-      while index < source.len() do:
+      while index < source.len():
         match(source.get(index))
           Some<MsgPack> { value }:
             match(decode_header(value))

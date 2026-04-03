@@ -91,6 +91,91 @@ describe("colon clause attachment", () => {
     ]);
   });
 
+  test("rewrites unlabeled trailing callback clauses into lambda args", () => {
+    const ast = parse(
+      [
+        "fold(init: 0) do:",
+        "  zero()",
+        "fold(init: 0) do(acc, item):",
+        "  acc + item",
+        "",
+      ].join("\n")
+    ).toJSON();
+
+    expect(ast).toEqual([
+      "ast",
+      [
+        "fold",
+        [":", "init", "0"],
+        ["=>", [], ["block", ["zero"]]],
+      ],
+      [
+        "fold",
+        [":", "init", "0"],
+        ["=>", ["acc", "item"], ["block", ["+", "acc", "item"]]],
+      ],
+    ]);
+  });
+
+  test("rewrites labeled trailing callback clauses into labeled lambda args", () => {
+    const ast = parse(
+      [
+        "fold(init: 0) task():",
+        "  zero()",
+        "fold(init: 0) task(acc, item):",
+        "  acc + item",
+        "",
+      ].join("\n")
+    ).toJSON();
+
+    expect(ast).toEqual([
+      "ast",
+      [
+        "fold",
+        [":", "init", "0"],
+        [":", "task", ["=>", [], ["block", ["zero"]]]],
+      ],
+      [
+        "fold",
+        [":", "init", "0"],
+        [":", "task", ["=>", ["acc", "item"], ["block", ["+", "acc", "item"]]]],
+      ],
+    ]);
+  });
+
+  test("keeps plain labeled block clauses unchanged on ordinary calls", () => {
+    const ast = parse(
+      [
+        "fold(init: 0) task:",
+        "  zero()",
+        "",
+      ].join("\n")
+    ).toJSON();
+
+    expect(ast).toEqual([
+      "ast",
+      [
+        "fold",
+        [":", "init", "0"],
+        [":", "task", ["block", ["zero"]]],
+      ],
+    ]);
+  });
+
+  test("rewrites inline call-shaped labeled arguments into callback lambdas", () => {
+    const ast = parse("hi there(what): is(up)\nwhat(): is(up)\n").toJSON();
+
+    expect(ast).toEqual([
+      "ast",
+      [
+        "hi",
+        [":", "there", ["=>", "what", "is"]],
+        "up",
+        [":", "what", ["=>", [], ["is", "up"]]],
+      ],
+    ]);
+  });
+
   test("keeps inline object literal branch values inside if clauses", () => {
     const ast = parse(
       [

@@ -1,0 +1,6 @@
+pub fn main()
+  let base = 2
+  let _ = run do(value):
+    value + base
+  let _ = run task():
+    base

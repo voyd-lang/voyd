@@ -36,7 +36,7 @@ pub fn encode(bytes: Bytes) -> String
 
   let ~out = Array<i32>::with_capacity(source.len() * 2)
   var index = 0
-  while index < source.len() do:
+  while index < source.len():
     let value = source.at(index)
     out.push(hex_digit_to_ascii(div_rem(value, 16).0))
     out.push(hex_digit_to_ascii(div_rem(value, 16).1))
@@ -73,7 +73,7 @@ pub fn decode(s: StringSlice) -> Result<Bytes, DecodeError>
 
   let ~buffer = ByteBuffer::with_capacity(source_len / 2)
   var index = 0
-  while index < source_len do:
+  while index < source_len:
     let high = hex_ascii_to_digit(source.at(index))
     let low = hex_ascii_to_digit(source.at(index + 1))
 

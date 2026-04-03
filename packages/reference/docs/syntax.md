@@ -72,6 +72,18 @@ Single-line `if` expressions use `then:`.
 let sign = if x < 0 then: -1 else: 1
 ```
 
+Calls can also use clause syntax for a trailing callback argument. This is
+limited to trailing callback position after a call expression; ordinary block
+clauses keep their existing meaning.
+
+```voyd
+stream::fold(init: 0) do:
+  zero()
+
+stream::fold(init: 0) task(acc, item):
+  acc + item
+```
+
 ## Single-expression forms
 
 `=` is used when the right-hand side is a single expression.
@@ -83,11 +95,15 @@ let answer = 42
 
 ## Lambdas
 
-Lambdas use `=>`.
+Lambdas use `=>`. Trailing callback clauses are an alternate syntax for passing
+callback values at the end of a call.
 
 ```voyd
 let inc = (x: i32) => x + 1
 let add = (x: i32) -> i32 => x + 1
+
+stream::fold(init: 0) do(acc, item):
+  acc + item
 ```
 
 ## Literals

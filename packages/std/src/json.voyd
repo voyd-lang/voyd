@@ -172,7 +172,7 @@ fn parse_string(~parser: JsonParser): () -> Result<String, JsonError>
     return Err<JsonError> { error: json_parse_error("json parse error: expected string") }
 
   let ~bytes = Array<i32>::with_capacity(16)
-  while true do:
+  while true:
     let byte = next_byte_or(parser, -1)
     if byte < 0:
       return Err<JsonError> { error: json_parse_error("json parse error: unterminated string") }
@@ -202,7 +202,7 @@ fn parse_array(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   if consume_byte(parser, 93):
     return Ok<JsonValue> { value: JsonArray { value: items } }
 
-  while true do:
+  while true:
     match(parse_value(parser))
       Ok<JsonValue> { value }:
         items.push(value)
@@ -227,7 +227,7 @@ fn parse_object(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   if consume_byte(parser, 125):
     return Ok<JsonValue> { value: JsonObject { value: fields } }
 
-  while true do:
+  while true:
     match(parse_string(parser))
       Ok<String> { value: key }:
         skip_whitespace(parser)
@@ -345,7 +345,7 @@ fn append_json_array(
     return Ok<Unit> { value: Unit {} }
 
   var index = 0
-  while index < items.len() do:
+  while index < items.len():
     if pretty:
       out.push(10)
       append_indent(out, depth + 1)
@@ -385,7 +385,7 @@ fn append_json_object(
     return Ok<Unit> { value: Unit {} }
 
   var index = 0
-  while index < entries.len() do:
+  while index < entries.len():
     if pretty:
       out.push(10)
       append_indent(out, depth + 1)
@@ -417,7 +417,7 @@ fn append_json_object(
 fn append_json_string(~out: Array<i32>, value: StringSlice) -> void
   out.push(34)
   var index = 0
-  while index < value.byte_len() do:
+  while index < value.byte_len():
     let byte = byte_at_or(value, index, -1)
     if not append_json_escape(out, byte):
       out.push(byte)
@@ -465,7 +465,7 @@ fn append_json_escape(~out: Array<i32>, byte: i32) -> bool
 
 fn append_indent(~out: Array<i32>, depth: i32) -> void
   var index = 0
-  while index < depth do:
+  while index < depth:
     out.push(32)
     out.push(32)
     index = index + 1
@@ -476,12 +476,12 @@ fn append_ascii(~out: Array<i32>, value: StringSlice) -> void
 fn append_string(~out: Array<i32>, value: StringSlice) -> void
   let source = value.source.raw_bytes()
   var index = 0
-  while index < value.byte_len() do:
+  while index < value.byte_len():
     out.push(__array_get(source, value.start + index))
     index = index + 1
 
 fn consume_digits(~parser: JsonParser) -> void
-  while true do:
+  while true:
     match(peek(parser))
       Some<i32> { value }:
         if is_digit(value):
@@ -494,7 +494,7 @@ fn consume_digits(~parser: JsonParser) -> void
 fn consume_literal(~parser: JsonParser, literal: StringSlice) -> bool
   let start = parser.index
   var index = 0
-  while index < literal.byte_len() do:
+  while index < literal.byte_len():
     match(next_byte(parser))
       Some<i32> { value }:
         if value != byte_at_or(literal, index, -1):
@@ -507,7 +507,7 @@ fn consume_literal(~parser: JsonParser, literal: StringSlice) -> bool
   true
 
 fn skip_whitespace(~parser: JsonParser) -> void
-  while true do:
+  while true:
     match(peek(parser))
       Some<i32> { value }:
         if is_whitespace(value):
@@ -597,7 +597,7 @@ fn append_escaped(~out: Array<i32>, escaped: i32, ~parser: JsonParser) -> i32
 fn read_unicode_escape(~parser: JsonParser) -> i32
   var codepoint = 0
   var index = 0
-  while index < 4 do:
+  while index < 4:
     match(next_byte(parser))
       Some<i32> { value }:
         let digit = hex_to_i32(value)
@@ -734,7 +734,7 @@ fn parse_json_number(source: StringSlice): () -> Result<f64, JsonError>
     saw_int_digit = true
     index = index + 1
   else:
-    while index < len do:
+    while index < len:
       let digit = parse_decimal_digit(byte_at_or(source, index, -1))
       if digit < 0:
         break
@@ -756,7 +756,7 @@ fn parse_json_number(source: StringSlice): () -> Result<f64, JsonError>
       return Err<JsonError> { error: json_parse_error("json parse error: invalid number") }
 
     var saw_fraction_digit = false
-    while index < len do:
+    while index < len:
       let digit = parse_decimal_digit(byte_at_or(source, index, -1))
       if digit < 0:
         break
@@ -793,7 +793,7 @@ fn parse_json_number(source: StringSlice): () -> Result<f64, JsonError>
         return Err<JsonError> { error: json_parse_error("json parse error: invalid number") }
 
       var saw_exp_digit = false
-      while index < len do:
+      while index < len:
         let digit = parse_decimal_digit(byte_at_or(source, index, -1))
         if digit < 0:
           break
@@ -835,7 +835,7 @@ fn pow10_positive_i32(value: i32) -> f64
   var out = 1.0
   var base = 10.0
   var remaining = value
-  while remaining > 0 do:
+  while remaining > 0:
     let half = remaining / 2
     let odd = remaining - half * 2
     if odd == 1:
@@ -848,7 +848,7 @@ fn pow10_negative_i32(value: i32) -> f64
   var out = 1.0
   var base = 0.1
   var remaining = value
-  while remaining > 0 do:
+  while remaining > 0:
     let half = remaining / 2
     let odd = remaining - half * 2
     if odd == 1:

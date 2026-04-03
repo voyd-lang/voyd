@@ -13,7 +13,7 @@ pub fn while_test(): await -> i32
   var i = 0
   var sum = 0
   let n = 5
-  while i < n do:
+  while i < n:
     i = i + 1
     let v = Async::await(i)
     sum = sum + v
@@ -22,10 +22,10 @@ pub fn while_test(): await -> i32
 pub fn nested_break_continue_test(): await -> i32
   var i = 0
   var sum = 0
-  while i < 3 do:
+  while i < 3:
     i = i + 1
     var j = 0
-    while j < 4 do:
+    while j < 4:
       j = j + 1
       if j == 2 then: continue
       if i == 2 and j == 4 then: break

@@ -104,7 +104,7 @@ pub fn copy<T>(dest_array: FixedArray<T>, opts: {
 pub fn fill<T>(arr: FixedArray<T>, value: T): () -> FixedArray<T>
   let len = arr.length<T>()
   var index = 0
-  while index < len do:
+  while index < len:
     __array_set(arr, index, value)
     index = index + 1
   arr
@@ -113,7 +113,7 @@ pub fn fill<T>(arr: FixedArray<T>, value: T): () -> FixedArray<T>
 pub fn each<T>(arr: FixedArray<T>, f: (v: T) -> void) -> void
   let len = arr.length<T>()
   var index = 0
-  while index < len do:
+  while index < len:
     f(__array_get(arr, index))
     index = index + 1
 
@@ -122,7 +122,7 @@ pub fn map<T, U>(arr: FixedArray<T>, f: (v: T) -> U) -> FixedArray<U>
   let len = arr.length<T>()
   let out = new_fixed_array<U>(len)
   var index = 0
-  while index < len do:
+  while index < len:
     let value = __array_get(arr, index)
     __array_set(out, index, f(value))
     index = index + 1

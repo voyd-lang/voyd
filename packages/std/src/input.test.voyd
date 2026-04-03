@@ -170,7 +170,7 @@ fn encode_bytes(bytes: Bytes): () -> MsgPack
   let source = bytes.to_array()
   let ~encoded = Array<MsgPack>::with_capacity(source.len())
   var index = 0
-  while index < source.len() do:
+  while index < source.len():
     match(source.get(index))
       Some<i32> { value }:
         encoded.push(msgpack::make_i32(value))

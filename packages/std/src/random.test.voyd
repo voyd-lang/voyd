@@ -390,7 +390,7 @@ fn local_rng_f64_sum_from_seed({ seed: i64, count: i32 }) -> f64
   var index = 0
   var sum = 0.0
 
-  while index < count do:
+  while index < count:
     sum = sum + rng.random_f64()
     index = index + 1
 
@@ -424,7 +424,7 @@ fn test_i64_min_value(): () -> i64
 fn pow2_i64(exp: i32): () -> i64
   var out = i64_from_i32(1)
   var index = 0
-  while index < exp do:
+  while index < exp:
     out = out + out
     index = index + 1
   out

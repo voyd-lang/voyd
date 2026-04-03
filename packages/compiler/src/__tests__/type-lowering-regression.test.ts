@@ -230,7 +230,7 @@ pub fn main() -> i32
   var index = 0
   var sum = 0i64
 
-  while index < 3 do:
+  while index < 3:
     sum = sum + counter.next()
     index = index + 1
 

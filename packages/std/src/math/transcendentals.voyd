@@ -121,7 +121,7 @@ pub fn ln_f64_native(value: f64) -> f64
   var sum = z
   var denominator = 3.0
   var step = 0
-  while step < 10 do:
+  while step < 10:
     term = term * z2
     sum = sum + (term / denominator)
     denominator = denominator + 2.0
@@ -237,19 +237,19 @@ fn scale_pow2_f64(value: f64, exponent: i32) -> f64
   if exponent > 0:
     var remaining = exponent
     var out = value
-    while remaining >= 512 do:
+    while remaining >= 512:
       out = out * pow2_512_f64()
       remaining = remaining - 512
-    while remaining > 0 do:
+    while remaining > 0:
       out = out * 2.0
       remaining = remaining - 1
     return out
   var remaining = 0 - exponent
   var out = value
-  while remaining >= 512 do:
+  while remaining >= 512:
     out = out * pow2_neg_512_f64()
     remaining = remaining - 512
-  while remaining > 0 do:
+  while remaining > 0:
     out = out * 0.5
     remaining = remaining - 1
   out
@@ -302,7 +302,7 @@ fn multiply_invpio2_by_mantissa(mantissa: i64) -> FixedArray<i32>
 fn zeroed_i32_digits(count: i32) -> FixedArray<i32>
   var digits = new_fixed_array<i32>(count)
   var index = 0
-  while index < count do:
+  while index < count:
     digits = fixed_i32_set(digits, index, 0)
     index = index + 1
   digits
@@ -318,7 +318,7 @@ fn accumulate_product_limb(
   var out = product
   var carry = to_i64(0)
   var index = 0
-  while index < invpio2_digit_count() do:
+  while index < invpio2_digit_count():
     let target = index + offset
     let value =
       to_i64(fixed_i32_get(out, target))
@@ -329,7 +329,7 @@ fn accumulate_product_limb(
     index = index + 1
 
   var target = invpio2_digit_count() + offset
-  while carry > to_i64(0) do:
+  while carry > to_i64(0):
     let value = to_i64(fixed_i32_get(out, target)) + carry
     out = fixed_i32_set(out, target, wrap_i64(bit_and_i64(value, limb_mask_i64())))
     carry = shift_ru_i64(value, limb_bits_i32())
@@ -339,7 +339,7 @@ fn accumulate_product_limb(
 fn extract_bits_i32(product: FixedArray<i32>, start_bit: i32, count: i32) -> i32
   var out = 0
   var index = 0
-  while index < count do:
+  while index < count:
     if bit_at_product(product, start_bit + index):
       out = out + shift_l_i32(1, index)
     index = index + 1
@@ -360,7 +360,7 @@ fn fraction_from_digits_f64(product: FixedArray<i32>, cut: i32, bits: i32) -> f6
   var scale = 0.5
   var bit_index = cut - 1
   var count = 0
-  while bit_index >= 0 and count < bits do:
+  while bit_index >= 0 and count < bits:
     if bit_at_product(product, bit_index):
       out = out + scale
     scale = scale * 0.5
@@ -383,7 +383,7 @@ fn has_any_bit_below(product: FixedArray<i32>, bit_count: i32) -> bool
     return false
   let full_limbs = bit_count / limb_bits_i32()
   var index = 0
-  while index < full_limbs do:
+  while index < full_limbs:
     if fixed_i32_get(product, index) != 0:
       return true
     index = index + 1
@@ -400,7 +400,7 @@ fn pow_integer_f64(base: f64, exponent: i64) -> f64
     var power = exponent
     var factor = base
     var out = 1.0
-    while power > to_i64(0) do:
+    while power > to_i64(0):
       if (power % to_i64(2)) != to_i64(0):
         out = out * factor
       factor = factor * factor
@@ -409,7 +409,7 @@ fn pow_integer_f64(base: f64, exponent: i64) -> f64
   var power = exponent
   var factor = base
   var out = 1.0
-  while power < to_i64(0) do:
+  while power < to_i64(0):
     if (power % to_i64(2)) != to_i64(0):
       out = out / factor
     factor = factor * factor

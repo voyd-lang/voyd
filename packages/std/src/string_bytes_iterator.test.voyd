@@ -8,7 +8,7 @@ test "string to_utf8 iterates utf8 bytes":
   var count = 0
   var sum = 0
 
-  while true do:
+  while true:
     let next = iterator.next()
     match(next)
       Some<i32> { value }:

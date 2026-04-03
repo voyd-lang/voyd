@@ -164,12 +164,12 @@ impl<K: DictKey<K>, V> Dict<K, V>
     let ~out = Array<K>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
-    while bucket_index < bucket_count do:
+    while bucket_index < bucket_count:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
       let len = bucket.len()
       var index = 0
-      while index < len do:
+      while index < len:
         let entry = __array_get(storage, index)
         out.push(entry.key)
         index = index + 1
@@ -184,12 +184,12 @@ impl<K: DictKey<K>, V> Dict<K, V>
     let ~out = Array<V>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
-    while bucket_index < bucket_count do:
+    while bucket_index < bucket_count:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
       let len = bucket.len()
       var index = 0
-      while index < len do:
+      while index < len:
         let entry = __array_get(storage, index)
         out.push(entry.value)
         index = index + 1
@@ -204,12 +204,12 @@ impl<K: DictKey<K>, V> Dict<K, V>
     let ~out = Array<(K, V)>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
-    while bucket_index < bucket_count do:
+    while bucket_index < bucket_count:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
       let len = bucket.len()
       var index = 0
-      while index < len do:
+      while index < len:
         let entry = __array_get(storage, index)
         out.push((entry.key, entry.value))
         index = index + 1
@@ -223,12 +223,12 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
-    while bucket_index < bucket_count do:
+    while bucket_index < bucket_count:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
       let len = bucket.len()
       var index = 0
-      while index < len do:
+      while index < len:
         let entry = __array_get(storage, index)
         f(entry.key, entry.value)
         index = index + 1
@@ -241,7 +241,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
   /// Appends values from another collection or sequence.
   api fn extend(~self, { entries: Sequence<(K, V)> }) -> void
     let ~iter = entries.iter()
-    while true do:
+    while true:
       match(iter.next())
         Some<(K, V)> { value }:
           self.set(value.0, value.1)
@@ -271,12 +271,12 @@ impl<K: DictKey<K>, V> Dict<K, V>
     var out = self
     let bucket_count = __array_len(other.buckets)
     var bucket_index = 0
-    while bucket_index < bucket_count do:
+    while bucket_index < bucket_count:
       let bucket = __array_get(other.buckets, bucket_index)
       let storage = bucket.raw_storage()
       let len = bucket.len()
       var index = 0
-      while index < len do:
+      while index < len:
         let entry = __array_get(storage, index)
         match(out.get(entry.key))
           Some<V> { value: left }:
@@ -305,12 +305,12 @@ impl<K: DictKey<K>, V> Dict<K, V>
 
     let bucket_count = __array_len(other.buckets)
     var bucket_index = 0
-    while bucket_index < bucket_count do:
+    while bucket_index < bucket_count:
       let bucket = __array_get(other.buckets, bucket_index)
       let storage = bucket.raw_storage()
       let len = bucket.len()
       var index = 0
-      while index < len do:
+      while index < len:
         let entry = __array_get(storage, index)
         match(self.get(entry.key))
           Some<V> { value: left }:
@@ -328,12 +328,12 @@ impl<K: DictKey<K>, V> Dict<K, V>
     var out = Dict<K, U>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
-    while bucket_index < bucket_count do:
+    while bucket_index < bucket_count:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
       let len = bucket.len()
       var index = 0
-      while index < len do:
+      while index < len:
         let entry = __array_get(storage, index)
         out = out.with_set(entry.key, f(entry.key, entry.value))
         index = index + 1
@@ -348,12 +348,12 @@ impl<K: DictKey<K>, V> Dict<K, V>
     var out = Dict<K, V>::with_capacity(self.count)
     let bucket_count = __array_len(self.buckets)
     var bucket_index = 0
-    while bucket_index < bucket_count do:
+    while bucket_index < bucket_count:
       let bucket = __array_get(self.buckets, bucket_index)
       let storage = bucket.raw_storage()
       let len = bucket.len()
       var index = 0
-      while index < len do:
+      while index < len:
         let entry = __array_get(storage, index)
         if pred(entry.key, entry.value):
           out = out.with_set(entry.key, entry.value)
@@ -438,7 +438,7 @@ impl<T> Array<T>
   api fn group_by<K: DictKey<K>>(self, f: (value: T) -> K) -> Dict<K, Array<T>>
     let ~out = Dict<K, Array<T>>::with_capacity(self.len())
     var index = 0
-    while index < self.len() do:
+    while index < self.len():
       match(self.get(index))
         Some<T> { value }:
           let group_key = f(value)
@@ -469,7 +469,7 @@ fn new_buckets<K, V>(bucket_count: i32) -> FixedArray<Array<DictPair<K, V>>>
   let safe_bucket_count = if bucket_count > 0 then: bucket_count else: 1
   let buckets = new_fixed_array<Array<DictPair<K, V>>>(safe_bucket_count)
   var index = 0
-  while index < safe_bucket_count do:
+  while index < safe_bucket_count:
     __array_set(buckets, index, Array<DictPair<K, V>>::init())
     index = index + 1
   buckets
@@ -492,7 +492,7 @@ fn rehash_to_bucket_count<K: DictKey<K>, V>(dict: Dict<K, V>, bucket_count: i32)
 
   let previous_bucket_count = __array_len(dict.buckets)
   var bucket_index = 0
-  while bucket_index < previous_bucket_count do:
+  while bucket_index < previous_bucket_count:
     let bucket = __array_get(dict.buckets, bucket_index)
     insert_bucket_entries(next_buckets, next_bucket_count, bucket)
     bucket_index = bucket_index + 1
@@ -507,7 +507,7 @@ fn insert_bucket_entries<K: DictKey<K>, V>(
   let storage = bucket.raw_storage()
   let len = bucket.len()
   var index = 0
-  while index < len do:
+  while index < len:
     let entry = __array_get(storage, index)
     insert_entry(buckets, bucket_count, entry)
     index = index + 1
@@ -526,7 +526,7 @@ fn find_entry_index_in_bucket<K: DictKey<K>, V>(bucket: Array<DictPair<K, V>>, k
   let storage = bucket.raw_storage()
   let len = bucket.len()
   var index = 0
-  while index < len do:
+  while index < len:
     let entry = __array_get(storage, index)
     if key_equals(entry.key, key):
       return index

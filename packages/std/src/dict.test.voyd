@@ -69,7 +69,7 @@ test "dict init is empty":
 test "dict with_capacity supports inserts":
   let ~map = Dict<IntKey, i32>::with_capacity(40)
   var index = 0
-  while index < 40 do:
+  while index < 40:
     map.set(IntKey { value: index }, index)
     index = index + 1
   assert(map.len(), eq: 40)
@@ -215,7 +215,7 @@ test "dict entry helpers":
 test "dict grows and preserves entries":
   let ~map = Dict<IntKey, i32>::init()
   var index = 0
-  while index < 80 do:
+  while index < 80:
     map.set(IntKey { value: index }, index)
     index = index + 1
   assert(map.len(), eq: 80)
