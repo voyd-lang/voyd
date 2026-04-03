@@ -425,6 +425,28 @@ export const typeCallExpr = (
     }
 
     if (metadata.intrinsic && metadata.intrinsicUsesSignature === false) {
+      const instantiation = signature
+        ? (() => {
+            const hasTypeParams =
+              (signature.typeParams?.length ?? 0) > 0;
+            if (hasTypeParams) {
+              return instantiateFunctionCall({
+                signature,
+                args,
+                typeArguments,
+                expectedReturnType,
+                calleeSymbol: calleeExpr.symbol,
+                ctx,
+                state,
+              });
+            }
+            return {
+              substitution: new Map<TypeParamId, TypeId>(),
+              parameters: signature.parameters,
+              returnType: signature.returnType,
+            };
+          })()
+        : undefined;
       const returnType = typeIntrinsicCall(
         intrinsicName,
         args,
@@ -433,18 +455,23 @@ export const typeCallExpr = (
         typeArguments,
         allowIntrinsicTypeArgs,
         expr.span,
+        instantiation?.returnType ?? expectedReturnType,
       );
-      const calleeType =
-        signature?.typeId ??
-        ctx.arena.internFunction({
-          parameters: args.map(({ type, label }) => ({
+      const calleeType = ctx.arena.internFunction({
+        parameters:
+          instantiation?.parameters.map(({ type, label, optional }) => ({
+            type,
+            label,
+            optional: optional ?? false,
+          })) ??
+          args.map(({ type, label }) => ({
             type,
             label,
             optional: false,
           })),
-          returnType,
-          effectRow: ctx.primitives.defaultEffectRow,
-        });
+        returnType,
+        effectRow: ctx.primitives.defaultEffectRow,
+      });
       ctx.table.setExprType(calleeExpr.id, calleeType);
       ctx.resolvedExprTypes.set(
         calleeExpr.id,
@@ -474,6 +501,7 @@ export const typeCallExpr = (
             typeArguments,
             allowIntrinsicTypeArgs,
             expr.span,
+            expectedReturnType,
           );
           return ctx.arena.internFunction({
             parameters: args.map(({ type, label }) => ({
@@ -561,6 +589,7 @@ export const typeCallExpr = (
           typeArguments,
           allowIntrinsicTypeArgs,
           expr.span,
+          expectedReturnType,
         ),
         latentEffectRow: ctx.primitives.defaultEffectRow,
       });
@@ -5786,6 +5815,7 @@ const typeIntrinsicCall = (
   typeArguments?: readonly TypeId[],
   allowTypeArguments = false,
   span?: SourceSpan,
+  expectedReturnType?: TypeId,
 ): TypeId => {
   const callSpan = normalizeSpan(span);
   switch (name) {
@@ -5868,7 +5898,13 @@ const typeIntrinsicCall = (
     case "__task_cancel":
       return typeTaskCancelIntrinsic({ args, ctx, state, typeArguments });
     case "__task_take_value":
-      return typeTaskTakeValueIntrinsic({ args, ctx, state, typeArguments });
+      return typeTaskTakeValueIntrinsic({
+        args,
+        ctx,
+        state,
+        typeArguments,
+        expectedReturnType,
+      });
     case "__shift_l":
     case "__shift_ru":
       return typeShiftIntrinsic({ name, args, ctx, state, typeArguments });
@@ -6659,11 +6695,13 @@ const typeTaskTakeValueIntrinsic = ({
   ctx,
   state,
   typeArguments,
+  expectedReturnType,
 }: {
   args: readonly Arg[];
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  expectedReturnType?: TypeId;
 }): TypeId => {
   assertIntrinsicArgCount({ name: "__task_take_value", args, expected: 1 });
   assertNoIntrinsicTypeArgs("__task_take_value", typeArguments);
@@ -6674,7 +6712,7 @@ const typeTaskTakeValueIntrinsic = ({
     state,
     "__task_take_value task id"
   );
-  return ctx.primitives.unknown;
+  return expectedReturnType ?? ctx.primitives.unknown;
 };
 
 const typeShiftIntrinsic = ({
