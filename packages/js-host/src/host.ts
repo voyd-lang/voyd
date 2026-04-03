@@ -228,7 +228,7 @@ const mergeDefaultImports = (
   } as Record<string, unknown>;
 
   const importRecord = imports as Record<string, unknown>;
-  ["env"].forEach((moduleName) => {
+  Object.keys(defaultModules).forEach((moduleName) => {
     const defaultModule = defaultModules[moduleName];
     const providedModule = importRecord[moduleName];
     if (
@@ -847,6 +847,7 @@ export const createVoydHost = async ({
       readyQueue: number[];
       wakeResolver?: (result: RuntimeStepResult<RunState>) => void;
       finalOutcome?: RunOutcome<T>;
+      onTaskTerminal?: (taskId: number) => void;
     };
 
     const encodeToBuffer = (value: unknown): number => {
@@ -1091,6 +1092,7 @@ export const createVoydHost = async ({
                 }
               });
               task.waiters = [];
+              state.onTaskTerminal?.(taskId);
               return true;
             };
             const changed = cancelTask(id);
@@ -1198,6 +1200,17 @@ export const createVoydHost = async ({
               kind: "cancelled",
               reason: rootTask.terminal.reason,
             };
+          };
+
+          state.onTaskTerminal = (taskId: number): void => {
+            const task = state.tasks.get(taskId);
+            if (!task) {
+              return;
+            }
+            if (task.ownerId !== null) {
+              maybeCompleteOwner(task.ownerId);
+            }
+            finalizeIfDone();
           };
 
           const liveChildrenFor = (task: TaskRecord): TaskRecord[] =>

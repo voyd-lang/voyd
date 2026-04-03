@@ -23,13 +23,16 @@ const expectCompileSuccess = (
 const createTaskHost = async ({
   compiled,
   onUnhandledTaskFailed,
+  imports,
 }: {
   compiled: Extract<CompileResult, { success: true }>;
   onUnhandledTaskFailed?: (error: Error, details: { runId: string; taskId: number }) => void;
+  imports?: WebAssembly.Imports;
 }) => {
   const runtime = createDeterministicRuntime();
   const host = await createVoydHost({
     wasm: compiled.wasm,
+    imports,
     scheduler: {
       scheduleTask: runtime.scheduleTask,
       onUnhandledTaskFailed,
@@ -174,6 +177,13 @@ describe("smoke: task runtime", () => {
     await expect(outcome).resolves.toBe(0);
   });
 
+  it("finishes owners once an attached child is explicitly cancelled", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const outcome = host.run<number>("owner_completion_after_child_cancel_probe");
+    await advanceRuntime(runtime, [5]);
+    await expect(outcome).resolves.toBe(7);
+  });
+
   it("surfaces owner failures even when attached children were still live", async () => {
     const { host, runtime } = await createTaskHost({ compiled });
     const outcome = host.run<number>("owner_failure_does_not_hang_probe");
@@ -289,5 +299,19 @@ describe("smoke: task runtime", () => {
     await expect(outcome).resolves.toBe(1);
     expect(unhandledFailures).toHaveLength(1);
     expect(unhandledFailures[0]?.message).toMatch(/detached child failed/);
+  });
+
+  it("merges caller-provided voyd.task imports with internal task runtime hooks", async () => {
+    const { host, runtime } = await createTaskHost({
+      compiled,
+      imports: {
+        "voyd.task": {
+          sentinel: () => 1,
+        },
+      },
+    });
+    const outcome = host.run<number>("spawn_join_probe");
+    await drainRuntime(runtime);
+    await expect(outcome).resolves.toBe(41);
   });
 });

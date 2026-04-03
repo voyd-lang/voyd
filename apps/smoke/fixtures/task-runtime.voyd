@@ -91,6 +91,27 @@ pub fn owner_cancel_cascades_probe(): (task::TaskRuntime, time::Time) -> i32
       let _ = error
       -2
 
+pub fn owner_completion_after_child_cancel_probe(): (task::TaskRuntime, time::Time) -> i32
+  let owner = task::spawn(() =>
+    let child = task::spawn(() =>
+      let _ = time::sleep(millis(50))
+      99
+    )
+    let _ = task::detach(() =>
+      let _ = time::sleep(millis(5))
+      task::cancel(child)
+    )
+    7
+  )
+  match(task::join(owner))
+    Ok { value }:
+      value
+    Err { error }:
+      let _ = error
+      -2
+    Cancelled:
+      -3
+
 pub fn owner_failure_does_not_hang_probe(): (task::TaskRuntime, time::Time) -> i32
   let owner = task::spawn(() =>
     let _ = task::spawn(() =>
