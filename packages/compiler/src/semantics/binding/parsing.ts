@@ -1,6 +1,7 @@
 import {
   type Expr,
   Form,
+  IdentifierAtom as IdentifierAtomNode,
   type IdentifierAtom,
   type Syntax,
   formCallsInternal,
@@ -266,8 +267,9 @@ export const parseModuleLetDecl = (form: Form): ParsedModuleLetDecl | null => {
     return null;
   }
 
+  const rawAssignment = form.at(index + 1);
   const assignment = ensureForm(
-    form.at(index + 1),
+    rawAssignment,
     "module-level let declaration expects an assignment",
   );
   if (!assignment.calls("=")) {
@@ -455,8 +457,8 @@ export const parseImplDecl = (form: Form): ParsedImplDecl | null => {
 };
 
 const parseFunctionSignature = (form: Form): ParsedFunctionSignature => {
-  if (form.calls(":") && form.at(2) && isForm(form.at(2)) && (form.at(2) as Form).calls("->")) {
-    const effectTail = form.at(2) as Form;
+  const effectTail = form.calls(":") ? form.at(2) : undefined;
+  if (form.calls(":") && isForm(effectTail) && effectTail.calls("->")) {
     const head = parseFunctionHead(form.at(1));
     return {
       name: head.name,
@@ -763,6 +765,30 @@ const parseLabeledParameters = (form: Form): SignatureParam[] =>
 
 const parseSingleParam = (expr: Form): SignatureParam => {
   const nameExpr = expr.at(1);
+  const candidateTypeExpr = expr.at(2);
+  const effectTail =
+    isForm(candidateTypeExpr) && candidateTypeExpr.calls("->")
+      ? candidateTypeExpr
+      : undefined;
+  const nestedFunctionType =
+    isForm(nameExpr) &&
+    (nameExpr.calls(":") || nameExpr.calls("?:")) &&
+    effectTail
+      ? parseSingleParam(nameExpr)
+      : undefined;
+  if (nestedFunctionType?.typeExpr) {
+    return {
+      ...nestedFunctionType,
+      typeExpr: new Form([
+        new IdentifierAtomNode(":"),
+        nestedFunctionType.typeExpr,
+        effectTail!,
+      ]),
+      optional:
+        expr.calls("?:") || nestedFunctionType.optional ? true : undefined,
+    };
+  }
+
   const { name, ast, bindingKind } = parseParamName(nameExpr);
   return {
     name,
@@ -793,6 +819,30 @@ const parseDefaultedParam = (expr: Form): SignatureParam => {
     optional: true,
     defaultValue,
   };
+};
+
+const normalizeNestedFunctionTypeAnnotation = (
+  expr: Form
+): { nameExpr: Expr | undefined; typeExpr: Expr | undefined } => {
+  const nameExpr = expr.at(1);
+  const typeExpr = expr.at(2);
+  if (
+    isForm(nameExpr) &&
+    (nameExpr.calls(":") || nameExpr.calls("?:")) &&
+    isForm(typeExpr) &&
+    typeExpr.calls("->")
+  ) {
+    return {
+      nameExpr: nameExpr.at(1),
+      typeExpr: new Form([
+        new IdentifierAtomNode(":"),
+        nameExpr.at(2)!,
+        typeExpr,
+      ]),
+    };
+  }
+
+  return { nameExpr, typeExpr };
 };
 
 const parseParamName = (
@@ -835,8 +885,7 @@ const parseModuleLetPattern = (
   }
 
   if (isForm(target) && target.calls(":")) {
-    const nameExpr = target.at(1);
-    const typeExpr = target.at(2);
+    const { nameExpr, typeExpr } = normalizeNestedFunctionTypeAnnotation(target);
     if (!isIdentifierAtom(nameExpr)) {
       throw new Error(
         "module-level let declaration expects an identifier binding",

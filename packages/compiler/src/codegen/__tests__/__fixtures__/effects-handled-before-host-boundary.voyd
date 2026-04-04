@@ -11,7 +11,7 @@ fn helper(): Hidden -> i32
   Hidden::poke(Box { value: 41 })
 
 pub fn main(): Host -> i32
-  try forward
+  try open
     helper() + Host::next_i32()
   Hidden::poke(tail, payload: Box):
     tail(payload.value)

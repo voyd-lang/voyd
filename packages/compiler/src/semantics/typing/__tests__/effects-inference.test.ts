@@ -683,7 +683,7 @@ fn missing()
     expect(caught && (caught as any).diagnostic?.code).toBe("TY0013");
   });
 
-  it("forwards unhandled operations in try forward handlers", () => {
+  it("forwards unhandled operations in try open handlers", () => {
     const ast = parse(
       `
 eff Async
@@ -692,7 +692,7 @@ eff Log
   fn write(tail) -> void
 
 fn forward_partial()
-  try forward
+  try open
     let value = Async::await()
     Log::write()
     value
@@ -718,6 +718,121 @@ fn forward_partial()
     expect(effectOps(signature.effectRow, typing.effects)).toEqual(["Log.write"]);
   });
 
+  it("supports open callback rows with a required handled prefix", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail, value: i32) -> i32
+eff Log
+  fn write(tail) -> void
+
+fn call<T>(cb: fn() : (Async, open) -> T) -> T
+  try open
+    cb()
+  Async::await(tail, value):
+    tail(value + 1)
+
+fn main()
+  call(() =>
+    let value = Async::await(10)
+    Log::write()
+    value
+  )
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const callSymbol = symbolTable.resolve("call", symbolTable.rootScope);
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof callSymbol).toBe("number");
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof callSymbol !== "number" || typeof mainSymbol !== "number") {
+      return;
+    }
+
+    const callSig = typing.functions.getSignature(callSymbol);
+    const mainSig = typing.functions.getSignature(mainSymbol);
+    expect(callSig && mainSig).toBeTruthy();
+    if (!callSig || !mainSig) {
+      return;
+    }
+
+    expect(typing.effects.isOpen(callSig.effectRow)).toBe(true);
+    expect(effectOps(mainSig.effectRow, typing.effects)).toEqual(["Log.write"]);
+  });
+
+  it("rejects callback rows that miss a required known prefix", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+eff Log
+  fn write(tail) -> void
+
+fn main()
+  let cb: fn() : (Async, open) -> i32 = () =>
+    Log::write()
+    1
+  cb()
+`,
+      "effects.voyd"
+    );
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect((caught as any)?.diagnostic?.code).toBe("TY0027");
+    expect((caught as any)?.diagnostic?.message).toContain("Async.await");
+    expect((caught as any)?.diagnostic?.message).not.toContain(
+      "expected 'function', received 'function'"
+    );
+  });
+
+  it("supports explicit open rows in callback params, function annotations, lets, and = declarations", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+
+fn run(cb: fn() : (open) -> i32) -> i32
+  cb()
+
+fn main() : (open) -> i32 = run(() =>
+  Async::await()
+)
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const runSymbol = symbolTable.resolve("run", symbolTable.rootScope);
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof runSymbol).toBe("number");
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof runSymbol !== "number" || typeof mainSymbol !== "number") {
+      return;
+    }
+
+    const runSig = typing.functions.getSignature(runSymbol);
+    const mainSig = typing.functions.getSignature(mainSymbol);
+    expect(runSig && mainSig).toBeTruthy();
+    if (!runSig || !mainSig) {
+      return;
+    }
+
+    expect(typing.effects.isOpen(runSig.effectRow)).toBe(true);
+    expect(typing.effects.isOpen(mainSig.effectRow)).toBe(true);
+  });
+
   it("keeps nested case clauses inside try bodies out of handler matching", () => {
     const ast = parse(
       `
@@ -727,7 +842,7 @@ eff Log
   fn write(tail) -> void
 
 fn forward_nested(flag: bool)
-  try forward
+  try open
     if
       flag:
         Async::await()
@@ -764,7 +879,7 @@ eff Log
   fn write(tail) -> void
 
 fn forward_nested_branch(flag: bool)
-  try forward
+  try open
     if
       flag:
         Async::await()

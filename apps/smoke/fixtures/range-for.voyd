@@ -38,7 +38,7 @@ pub fn range_iterator_inclusive_i32_max_stops() -> i32
 pub fn range_for_handles_tail_effects_after_host_seed() -> f64
   let ~rng = LocalRng::seeded_from_host()
 
-  try forward
+  try open
     var total = 0.0
     for value in 0..32:
       total = total + RangeForProbe::rand_f64()
