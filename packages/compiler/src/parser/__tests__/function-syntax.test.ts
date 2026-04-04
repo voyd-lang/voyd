@@ -27,6 +27,106 @@ test("parses fn with effect annotation and =", (t) => {
   ]);
 });
 
+test("parses explicit open callback effect rows in parameter types", (t) => {
+  const code = `
+fn run(cb: fn() : (open) -> i32)
+  cb()`;
+
+  t.expect(toPlain(code)).toEqual([
+    "ast",
+    [
+      "fn",
+      [
+        "run",
+        [
+          ":",
+          [":", "cb", ["fn"]],
+          ["->", "open", "i32"],
+        ],
+      ],
+      ["block", ["cb"]],
+    ],
+  ]);
+});
+
+test("parses explicit open rows on function declarations", (t) => {
+  const code = `
+fn call() : (open) -> i32
+  1`;
+
+  t.expect(toPlain(code)).toEqual([
+    "ast",
+    [
+      "fn",
+      [
+        ":",
+        ["call"],
+        ["->", "open", "i32"],
+      ],
+      ["block", "1"],
+    ],
+  ]);
+});
+
+test("parses explicit open callback effect rows in local let annotations", (t) => {
+  const code = `
+fn main()
+  let cb: fn() : (open) -> i32 = () => 1
+  cb()`;
+
+  t.expect(toPlain(code)).toEqual([
+    "ast",
+    [
+      "fn",
+      ["main"],
+      [
+        "block",
+        [
+          "let",
+          [
+            "=",
+            [
+              ":",
+              [":", "cb", ["fn"]],
+              ["->", "open", "i32"],
+            ],
+            ["=>", [], "1"],
+          ],
+        ],
+        ["cb"],
+      ],
+    ],
+  ]);
+});
+
+test("parses explicit open rows on = declarations", (t) => {
+  t.expect(toPlain("fn run() : (open) -> i32 = 1")).toEqual([
+    "ast",
+    [
+      "fn",
+      ["=", [":", ["run"], ["->", "open", "i32"]], "1"],
+    ],
+  ]);
+});
+
+test("parses explicit open rows on trait default methods", (t) => {
+  const code = `
+trait T
+  fn run() : (open) -> i32 = 1`;
+
+  t.expect(toPlain(code)).toEqual([
+    "ast",
+    [
+      "trait",
+      "T",
+      [
+        "block",
+        ["fn", ["=", [":", ["run"], ["->", "open", "i32"]], "1"]],
+      ],
+    ],
+  ]);
+});
+
 test("ignores inline line comments in function bodies", (t) => {
   t.expect(toPlain("fn fib() = // comment\n  test()")) .toEqual([
     "ast",

@@ -1416,7 +1416,7 @@ describe("language server project analysis", () => {
       });
       expect(hover?.contents).toEqual({
         kind: "markdown",
-        value: "```voyd\nreducer: (T, T) -> T ! open effect row\n```",
+        value: "```voyd\nreducer: (T, T) -> T ! (open)\n```",
       });
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });

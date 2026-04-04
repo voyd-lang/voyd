@@ -148,9 +148,9 @@ const bindTry = (
 ): void => {
   const handlerEntries: Form[] = [];
   const markerExpr = form.at(1);
-  const hasForwardUnhandled =
-    isIdentifierAtom(markerExpr) && markerExpr.value === "forward";
-  const bodyIndex = hasForwardUnhandled ? 2 : 1;
+  const hasOpenUnhandled =
+    isIdentifierAtom(markerExpr) && markerExpr.value === "open";
+  const bodyIndex = hasOpenUnhandled ? 2 : 1;
   const body = form.at(bodyIndex);
   if (isForm(body) && body.calls("block")) {
     body.rest.forEach((entry) => {
@@ -378,10 +378,7 @@ const bindVar = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
-  const assignment = ensureForm(
-    form.at(1),
-    "var statement expects an assignment",
-  );
+  const assignment = ensureForm(form.at(1), "var statement expects an assignment");
   if (!assignment.calls("=")) {
     throw new Error("var statement must be an assignment form");
   }

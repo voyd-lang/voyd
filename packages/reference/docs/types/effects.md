@@ -36,6 +36,13 @@ fn load_twice(value: i32): Async -> i32
 If an effect row is omitted, Voyd infers it locally. Exported APIs should spell
 effects out explicitly.
 
+Function types can also spell effect rows directly:
+
+```voyd
+fn load_with(cb: fn() : Async -> i32) -> i32
+  cb()
+```
+
 ## Handling effects
 
 ```voyd
@@ -46,7 +53,7 @@ fn load_default(value: i32): () -> i32
     resume(current + 1)
 ```
 
-`try forward` handles selected operations and forwards the rest to the caller.
+`try open` handles selected operations and leaves the rest open to the caller.
 
 ## Row polymorphism
 
@@ -57,8 +64,33 @@ fn repeat_twice<T>(cb: fn() -> T): Array<T>
   [cb(), cb()]
 ```
 
-The compiler infers an effect-row parameter for the callback when needed. You can also
-spell it out explicitly with `effects` parameters.
+The compiler infers an effect-row parameter for the callback when needed. You can
+also spell the row out explicitly when you need to distinguish between omitted,
+closed, and open callback effect rows:
+
+```voyd
+fn omitted<T>(cb: fn() -> T) -> T
+  cb()
+
+fn closed<T>(cb: fn() : Async -> T) -> T
+  cb()
+
+fn call_open<T>(cb: fn() : (Async, open) -> T) : (open) -> T
+  try open
+    cb()
+  Async::await(tail, value):
+    tail(value + 1)
+```
+
+- `fn() -> T` omits the callback row and leaves it effect-polymorphic.
+- `fn() : Async -> T` is a closed callback annotation with only `Async`.
+- `fn() : (Async, open) -> T` requires `Async` and keeps the remaining callback
+  effects open.
+- `fn() : (open) -> T` is the explicit spelling for a fully open callback row.
+
+`try open` composes with open callback rows. When a higher-order function
+handles `Async` from `fn() : (Async, open) -> T`, the remaining callback effects
+continue to bubble outward through the open tail row.
 
 ## Exported APIs
 

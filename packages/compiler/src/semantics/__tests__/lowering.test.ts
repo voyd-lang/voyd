@@ -248,6 +248,130 @@ fn constrained<T: Named, U: { value: i32 }, V: Animal>(a: T, b: U, c: V) -> i32
     }
   });
 
+  it("lowers explicit open callback effect rows in function types", () => {
+    const source = `
+eff Async
+  fn await(tail) -> i32
+
+fn call(cb: fn() : (Async, open) -> i32)
+  cb()
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: "main.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const callSymbol = symbolTable.resolve("call", symbolTable.rootScope);
+    expect(typeof callSymbol).toBe("number");
+    if (typeof callSymbol !== "number") {
+      return;
+    }
+
+    const callFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === callSymbol
+    );
+    expect(callFn).toBeDefined();
+    if (!callFn) {
+      return;
+    }
+
+    const callbackType = callFn.parameters[0]?.type;
+    expect(callbackType?.typeKind).toBe("function");
+    if (callbackType?.typeKind !== "function") {
+      return;
+    }
+
+    expect(callbackType.effectType?.typeKind).toBe("tuple");
+    if (callbackType.effectType?.typeKind !== "tuple") {
+      return;
+    }
+
+    expect(
+      callbackType.effectType.elements.map((element) =>
+        element.typeKind === "named" ? element.path.join("::") : element.typeKind
+      )
+    ).toEqual(["Async", "open"]);
+  });
+
+  it("preserves ordinary type symbols named open outside effect rows", () => {
+    const source = `
+type open = i32
+
+fn id(value: open) -> open
+  value
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: "main.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const openSymbol = symbolTable.resolve("open", symbolTable.rootScope);
+    const idSymbol = symbolTable.resolve("id", symbolTable.rootScope);
+    expect(typeof openSymbol).toBe("number");
+    expect(typeof idSymbol).toBe("number");
+    if (typeof openSymbol !== "number" || typeof idSymbol !== "number") {
+      return;
+    }
+
+    const idFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === idSymbol
+    );
+    expect(idFn).toBeDefined();
+    if (!idFn) {
+      return;
+    }
+
+    const paramType = idFn.parameters[0]?.type;
+    expect(paramType?.typeKind).toBe("named");
+    expect(idFn.returnType?.typeKind).toBe("named");
+    if (paramType?.typeKind === "named") {
+      expect(paramType.symbol).toBe(openSymbol);
+    }
+    if (idFn.returnType?.typeKind === "named") {
+      expect(idFn.returnType.symbol).toBe(openSymbol);
+    }
+  });
+
   it("lowers nominal constructor literals with spreads as nominal object literals", () => {
     const name = "nominal_constructor_spread.voyd";
     const ast = loadAst(name);

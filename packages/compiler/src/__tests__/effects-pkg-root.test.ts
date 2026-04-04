@@ -303,7 +303,7 @@ eff Output
 
 pub fn draw(): Output -> void
   let seed = 7
-  try forward
+  try open
     let value = Random::next()
     Output::write(value)
   Random::next(tail):
