@@ -52,6 +52,9 @@ export const createTestCodegenContext = (): {
       handlerTails: new Map(),
       lambdas: new Map(),
     },
+    effectsIr: {
+      calls: new Map(),
+    },
   } as const;
   const moduleContexts = new Map<string, CodegenContext>();
 

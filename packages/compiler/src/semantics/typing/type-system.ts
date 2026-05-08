@@ -14,7 +14,6 @@ import {
   type UnificationContext,
   type UnificationResult,
   typeDescriptorToUserString,
-  type StructuralField,
   type TypeDescriptor,
 } from "./type-arena.js";
 import {
@@ -28,6 +27,7 @@ import {
   type TypingContext,
   type ObjectTemplate,
   type ObjectTypeInfo,
+  type ObjectField,
   type TypingState,
   type TraitImplInstance,
 } from "./types.js";
@@ -626,7 +626,7 @@ const assertAliasContractive = ({
 };
 
 const ensureFieldsSubstituted = (
-  fields: readonly StructuralField[],
+  fields: readonly ObjectField[],
   ctx: TypingContext,
   context: string,
 ): void => {
@@ -799,24 +799,7 @@ export const getPrimitiveType = (ctx: TypingContext, name: string): TypeId => {
 export const unfoldRecursiveType = (
   type: TypeId,
   ctx: TypingContext,
-): TypeId => {
-  let current = type;
-  const seen = new Set<TypeId>();
-
-  while (!seen.has(current)) {
-    seen.add(current);
-    const desc = ctx.arena.get(current);
-    if (desc.kind !== "recursive") {
-      return current;
-    }
-    current = ctx.arena.substitute(
-      desc.body,
-      new Map([[desc.binder, current]]),
-    );
-  }
-
-  return current;
-};
+): TypeId => ctx.arena.unfoldRecursive(type);
 
 export const resolveTypeExpr = (
   expr: HirTypeExpr | undefined,
@@ -1455,11 +1438,11 @@ const resolveIntersectionTypeExpr = (
     resolveTypeExpr(member, ctx, state, ctx.primitives.unknown, typeParams),
   );
 
-  const mergedFields = new Map<string, StructuralField>();
+  const mergedFields = new Map<string, ObjectField>();
   const traits: TypeId[] = [];
   let nominal: TypeId | undefined;
 
-  const mergeField = (field: StructuralField): void => {
+  const mergeField = (field: ObjectField): void => {
     const existing = mergedFields.get(field.name);
     if (!existing) {
       mergedFields.set(field.name, field);
@@ -1760,10 +1743,10 @@ const substituteObjectFields = ({
   substitution,
   ctx,
 }: {
-  fields: readonly StructuralField[];
+  fields: readonly ObjectField[];
   substitution?: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
-}): readonly StructuralField[] =>
+}): readonly ObjectField[] =>
   substitution && substitution.size > 0
     ? fields.map((field) => ({
         ...field,
@@ -2061,7 +2044,7 @@ const validateValueFields = ({
   span,
 }: {
   nominal: TypeId;
-  fields: readonly StructuralField[];
+  fields: readonly ObjectField[];
   valueTypeName: string;
   ctx: TypingContext;
   state: TypingState;
@@ -2563,10 +2546,10 @@ export const refreshTraitImplInstances = (
 };
 
 const mergeDeclaredFields = (
-  inherited: readonly StructuralField[],
-  own: readonly StructuralField[],
-): StructuralField[] => {
-  const fields = new Map<string, StructuralField>();
+  inherited: readonly ObjectField[],
+  own: readonly ObjectField[],
+): ObjectField[] => {
+  const fields = new Map<string, ObjectField>();
   inherited.forEach((field) => fields.set(field.name, field));
   own.forEach((field) => fields.set(field.name, field));
   return Array.from(fields.values());
@@ -2595,28 +2578,7 @@ export const getObjectInfoForNominal = (
 export const getNominalComponent = (
   type: TypeId,
   ctx: TypingContext,
-): TypeId | undefined => {
-  if (type === ctx.primitives.unknown) {
-    return undefined;
-  }
-
-  const desc = ctx.arena.get(type);
-  switch (desc.kind) {
-    case "nominal-object":
-    case "value-object":
-      return type;
-    case "intersection":
-      if (typeof desc.nominal === "number") {
-        return desc.nominal;
-      }
-      if (typeof desc.structural === "number") {
-        return getNominalComponent(desc.structural, ctx);
-      }
-      return undefined;
-    default:
-      return undefined;
-  }
-};
+): TypeId | undefined => ctx.arena.nominalComponent(type);
 
 export const nominalSatisfies = (
   actual: TypeId,
@@ -2694,7 +2656,7 @@ export const getStructuralFields = (
   ctx: TypingContext,
   state: TypingState,
   options: { includeInaccessible?: boolean; allowOwnerPrivate?: boolean } = {},
-): readonly StructuralField[] | undefined => {
+): readonly ObjectField[] | undefined => {
   if (type === ctx.primitives.unknown) {
     return undefined;
   }
@@ -2733,13 +2695,13 @@ export const getStructuralFields = (
 
   if (desc.kind === "intersection") {
     const merge = (
-      base: readonly StructuralField[],
-      extra: readonly StructuralField[],
-    ): StructuralField[] => {
+      base: readonly ObjectField[],
+      extra: readonly ObjectField[],
+    ): ObjectField[] => {
       if (extra.length === 0) {
         return [...base];
       }
-      const byName = new Map<string, StructuralField>(
+      const byName = new Map<string, ObjectField>(
         base.map((field) => [field.name, field]),
       );
       extra.forEach((field) => {
@@ -3372,7 +3334,7 @@ export const narrowTypeForPattern = (
     if (matches.length === 0) {
       return undefined;
     }
-    return matches.length === 1 ? matches[0] : ctx.arena.internUnion(matches);
+    return ctx.arena.internUnion(matches);
   }
   return unionMemberMatchesPattern(discriminantType, patternType, ctx, state)
     ? discriminantType
@@ -3705,8 +3667,7 @@ const bindTypeParamsFromUnion = ({
           return;
         }
       } else {
-        const remainderType =
-          remainder.length === 1 ? remainder[0]! : ctx.arena.internUnion(remainder);
+        const remainderType = ctx.arena.internUnion(remainder);
         bindTypeParamsFromType(
           remainderTarget,
           remainderType,
