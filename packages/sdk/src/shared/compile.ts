@@ -5,6 +5,7 @@ import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.
 import {
   analyzeModules,
   emitProgram,
+  preloadCodegen,
   type LoadModuleGraphFn,
   type TestScope,
 } from "@voyd-lang/compiler/pipeline-shared.js";
@@ -49,6 +50,8 @@ export const compileWithLoader = async ({
   testScope?: TestScope;
 }): Promise<CompileArtifacts> => {
   const shouldIncludeTests = includeTests || testsOnly;
+  const codegenLoadPromise = preloadCodegen();
+  void codegenLoadPromise.catch(() => undefined);
   let graph: Awaited<ReturnType<LoadModuleGraphFn>>;
   try {
     graph = await loadModuleGraph({
