@@ -9,11 +9,11 @@ import type {
   TypeParamId,
 } from "../../ids.js";
 import {
-  bindTypeParamsFromType,
   ensureTypeMatches,
   resolveTypeExpr,
   getSymbolName,
 } from "../type-system.js";
+import { bindTypeParams as bindTypeParamsFromType } from "../type-relations.js";
 import { typeExpression } from "../expressions.js";
 import {
   enforceTypeParamConstraint,

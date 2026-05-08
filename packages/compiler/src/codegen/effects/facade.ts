@@ -4,11 +4,9 @@ import type {
   EffectsLoweringHandlerInfo,
 } from "../../semantics/effects/analysis.js";
 import { getEffectOpIds } from "./op-ids.js";
-import { buildEffectsIr } from "../../semantics/effects/ir/build.js";
 import type { EffectsIr, EffectsIrCallKind } from "../../semantics/effects/ir/types.js";
 
 const FACADE_KEY = Symbol("voyd.effects.facade");
-const IR_KEY = Symbol("voyd.effects.ir");
 
 export type FunctionAbiInfo = {
   effectRow: EffectRowId;
@@ -36,18 +34,10 @@ export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
   const existing = memo.get(FACADE_KEY) as EffectsFacade | undefined;
   if (existing) return existing;
 
-  const ensureIr = (): EffectsIr => {
-    const cached = memo.get(IR_KEY) as EffectsIr | undefined;
-    if (cached) return cached;
-    const built = buildEffectsIr({ hir: ctx.module.hir, info: ctx.module.effectsInfo });
-    memo.set(IR_KEY, built);
-    return built;
-  };
-
   const facade: EffectsFacade = {
-    getIr: () => ensureIr(),
+    getIr: () => ctx.module.effectsIr,
     functionAbi: (symbol) => {
-      const info = ctx.module.effectsInfo.functions.get(symbol);
+      const info = ctx.module.effectsIr.info.functions.get(symbol);
       if (!info) return undefined;
       return {
         effectRow: info.effectRow,
@@ -56,7 +46,7 @@ export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
       };
     },
     lambdaAbi: (exprId) => {
-      const info = ctx.module.effectsInfo.lambdas.get(exprId);
+      const info = ctx.module.effectsIr.info.lambdas.get(exprId);
       if (!info) return undefined;
       return {
         effectfulType: info.effectfulType,
@@ -64,8 +54,8 @@ export const effectsFacade = (ctx: CodegenContext): EffectsFacade => {
         shouldLower: info.shouldLower,
       };
     },
-    handler: (exprId) => ctx.module.effectsInfo.handlers.get(exprId),
-    callKind: (exprId) => ensureIr().calls.get(exprId)?.kind,
+    handler: (exprId) => ctx.module.effectsIr.info.handlers.get(exprId),
+    callKind: (exprId) => ctx.module.effectsIr.calls.get(exprId)?.kind,
     effectOpIds: (symbol) => getEffectOpIds(symbol, ctx),
   };
 

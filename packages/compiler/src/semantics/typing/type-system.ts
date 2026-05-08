@@ -14,15 +14,20 @@ import {
   type UnificationContext,
   type UnificationResult,
   typeDescriptorToUserString,
-  type StructuralField,
   type TypeDescriptor,
 } from "./type-arena.js";
-import { freshOpenEffectRow, resolveEffectAnnotation } from "./effects.js";
+import {
+  constrainFunctionEffectRows,
+  freshOpenEffectRow,
+  resolveEffectAnnotation,
+} from "./effects.js";
+import { formatEffectRow } from "../effects/format.js";
 import {
   BASE_OBJECT_NAME,
   type TypingContext,
   type ObjectTemplate,
   type ObjectTypeInfo,
+  type ObjectField,
   type TypingState,
   type TraitImplInstance,
 } from "./types.js";
@@ -621,7 +626,7 @@ const assertAliasContractive = ({
 };
 
 const ensureFieldsSubstituted = (
-  fields: readonly StructuralField[],
+  fields: readonly ObjectField[],
   ctx: TypingContext,
   context: string,
 ): void => {
@@ -794,24 +799,7 @@ export const getPrimitiveType = (ctx: TypingContext, name: string): TypeId => {
 export const unfoldRecursiveType = (
   type: TypeId,
   ctx: TypingContext,
-): TypeId => {
-  let current = type;
-  const seen = new Set<TypeId>();
-
-  while (!seen.has(current)) {
-    seen.add(current);
-    const desc = ctx.arena.get(current);
-    if (desc.kind !== "recursive") {
-      return current;
-    }
-    current = ctx.arena.substitute(
-      desc.body,
-      new Map([[desc.binder, current]]),
-    );
-  }
-
-  return current;
-};
+): TypeId => ctx.arena.unfoldRecursive(type);
 
 export const resolveTypeExpr = (
   expr: HirTypeExpr | undefined,
@@ -1450,11 +1438,11 @@ const resolveIntersectionTypeExpr = (
     resolveTypeExpr(member, ctx, state, ctx.primitives.unknown, typeParams),
   );
 
-  const mergedFields = new Map<string, StructuralField>();
+  const mergedFields = new Map<string, ObjectField>();
   const traits: TypeId[] = [];
   let nominal: TypeId | undefined;
 
-  const mergeField = (field: StructuralField): void => {
+  const mergeField = (field: ObjectField): void => {
     const existing = mergedFields.get(field.name);
     if (!existing) {
       mergedFields.set(field.name, field);
@@ -1755,10 +1743,10 @@ const substituteObjectFields = ({
   substitution,
   ctx,
 }: {
-  fields: readonly StructuralField[];
+  fields: readonly ObjectField[];
   substitution?: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
-}): readonly StructuralField[] =>
+}): readonly ObjectField[] =>
   substitution && substitution.size > 0
     ? fields.map((field) => ({
         ...field,
@@ -2056,7 +2044,7 @@ const validateValueFields = ({
   span,
 }: {
   nominal: TypeId;
-  fields: readonly StructuralField[];
+  fields: readonly ObjectField[];
   valueTypeName: string;
   ctx: TypingContext;
   state: TypingState;
@@ -2558,10 +2546,10 @@ export const refreshTraitImplInstances = (
 };
 
 const mergeDeclaredFields = (
-  inherited: readonly StructuralField[],
-  own: readonly StructuralField[],
-): StructuralField[] => {
-  const fields = new Map<string, StructuralField>();
+  inherited: readonly ObjectField[],
+  own: readonly ObjectField[],
+): ObjectField[] => {
+  const fields = new Map<string, ObjectField>();
   inherited.forEach((field) => fields.set(field.name, field));
   own.forEach((field) => fields.set(field.name, field));
   return Array.from(fields.values());
@@ -2590,28 +2578,7 @@ export const getObjectInfoForNominal = (
 export const getNominalComponent = (
   type: TypeId,
   ctx: TypingContext,
-): TypeId | undefined => {
-  if (type === ctx.primitives.unknown) {
-    return undefined;
-  }
-
-  const desc = ctx.arena.get(type);
-  switch (desc.kind) {
-    case "nominal-object":
-    case "value-object":
-      return type;
-    case "intersection":
-      if (typeof desc.nominal === "number") {
-        return desc.nominal;
-      }
-      if (typeof desc.structural === "number") {
-        return getNominalComponent(desc.structural, ctx);
-      }
-      return undefined;
-    default:
-      return undefined;
-  }
-};
+): TypeId | undefined => ctx.arena.nominalComponent(type);
 
 export const nominalSatisfies = (
   actual: TypeId,
@@ -2689,7 +2656,7 @@ export const getStructuralFields = (
   ctx: TypingContext,
   state: TypingState,
   options: { includeInaccessible?: boolean; allowOwnerPrivate?: boolean } = {},
-): readonly StructuralField[] | undefined => {
+): readonly ObjectField[] | undefined => {
   if (type === ctx.primitives.unknown) {
     return undefined;
   }
@@ -2728,13 +2695,13 @@ export const getStructuralFields = (
 
   if (desc.kind === "intersection") {
     const merge = (
-      base: readonly StructuralField[],
-      extra: readonly StructuralField[],
-    ): StructuralField[] => {
+      base: readonly ObjectField[],
+      extra: readonly ObjectField[],
+    ): ObjectField[] => {
       if (extra.length === 0) {
         return [...base];
       }
-      const byName = new Map<string, StructuralField>(
+      const byName = new Map<string, ObjectField>(
         base.map((field) => [field.name, field]),
       );
       extra.forEach((field) => {
@@ -2872,9 +2839,14 @@ const functionTypeSatisfies = ({
     return false;
   }
 
-  return ctx.effects.constrain(actualDesc.effectRow, expectedDesc.effectRow, {
-    location: ctx.hir.module.ast,
-    reason: "function type effect compatibility",
+  return constrainFunctionEffectRows({
+    actual: actualDesc.effectRow,
+    expected: expectedDesc.effectRow,
+    effects: ctx.effects,
+    ctx: {
+      location: ctx.hir.module.ast,
+      reason: "function type effect compatibility",
+    },
   }).ok;
 };
 
@@ -3195,11 +3167,72 @@ export const ensureTypeMatches = (
     code: "TY0027",
     params: {
       kind: "type-mismatch",
-      actual: typeDescriptorToUserString(ctx.arena.get(actual), ctx.arena),
-      expected: typeDescriptorToUserString(ctx.arena.get(expected), ctx.arena),
+      actual: typeIdToDiagnosticString(actual, ctx),
+      expected: typeIdToDiagnosticString(expected, ctx),
     },
     span: span ?? ctx.hir.module.span,
   });
+};
+
+const typeIdToDiagnosticString = (
+  typeId: TypeId,
+  ctx: TypingContext,
+  active = new Set<TypeId>(),
+): string => {
+  if (active.has(typeId)) {
+    return "recursive";
+  }
+
+  active.add(typeId);
+  const desc = ctx.arena.get(typeId);
+  const formatted = (() => {
+    switch (desc.kind) {
+      case "function": {
+        const params = desc.parameters
+          .map((param) => {
+            const label = param.label ? `${param.label}: ` : "";
+            const optionalSuffix = param.optional ? "?" : "";
+            return `${label}${typeIdToDiagnosticString(param.type, ctx, active)}${optionalSuffix}`;
+          })
+          .join(", ");
+        const returnType = typeIdToDiagnosticString(desc.returnType, ctx, active);
+        const effects = formatEffectRow(desc.effectRow, ctx.effects);
+        return effects === "()"
+          ? `(${params}) -> ${returnType}`
+          : `(${params}) -> ${returnType} ! ${effects}`;
+      }
+      case "structural-object":
+        return `{ ${desc.fields
+          .map(
+            (field) =>
+              `${field.name}: ${typeIdToDiagnosticString(field.type, ctx, active)}`
+          )
+          .join(", ")} }`;
+      case "union":
+        return desc.members
+          .map((member) => typeIdToDiagnosticString(member, ctx, active))
+          .join(" | ");
+      case "intersection": {
+        const parts: string[] = [];
+        if (typeof desc.nominal === "number") {
+          parts.push(typeIdToDiagnosticString(desc.nominal, ctx, active));
+        }
+        if (desc.traits && desc.traits.length > 0) {
+          desc.traits.forEach((trait) =>
+            parts.push(typeIdToDiagnosticString(trait, ctx, active))
+          );
+        }
+        if (typeof desc.structural === "number") {
+          parts.push(typeIdToDiagnosticString(desc.structural, ctx, active));
+        }
+        return parts.join(" & ");
+      }
+      default:
+        return typeDescriptorToUserString(desc, ctx.arena);
+    }
+  })();
+  active.delete(typeId);
+  return formatted;
 };
 
 const nominalInstantiationMatches = (
@@ -3301,7 +3334,7 @@ export const narrowTypeForPattern = (
     if (matches.length === 0) {
       return undefined;
     }
-    return matches.length === 1 ? matches[0] : ctx.arena.internUnion(matches);
+    return ctx.arena.internUnion(matches);
   }
   return unionMemberMatchesPattern(discriminantType, patternType, ctx, state)
     ? discriminantType
@@ -3634,8 +3667,7 @@ const bindTypeParamsFromUnion = ({
           return;
         }
       } else {
-        const remainderType =
-          remainder.length === 1 ? remainder[0]! : ctx.arena.internUnion(remainder);
+        const remainderType = ctx.arena.internUnion(remainder);
         bindTypeParamsFromType(
           remainderTarget,
           remainderType,

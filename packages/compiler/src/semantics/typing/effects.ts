@@ -14,6 +14,7 @@ import type {
 } from "../hir/index.js";
 import type { Expr } from "../../parser/index.js";
 import { formatTypeAnnotation } from "../utils.js";
+import type { UnificationContext, UnificationResult } from "../effects/effect-table.js";
 
 const pureEffectRow = (effects: EffectTable): EffectRowId => effects.emptyRow;
 
@@ -84,6 +85,130 @@ export const composeEffectRows = (
   rows: readonly EffectRowId[]
 ): EffectRowId =>
   rows.reduce((acc, row) => effects.compose(acc, row), pureEffectRow(effects));
+
+export const constrainFunctionEffectRows = ({
+  actual,
+  expected,
+  effects,
+  ctx,
+}: {
+  actual: EffectRowId;
+  expected: EffectRowId;
+  effects: EffectTable;
+  ctx: UnificationContext;
+}): UnificationResult => {
+  const actualRow = effects.getRow(actual);
+  const expectedRow = effects.getRow(expected);
+  const opKey = ({ name, region }: { name: string; region?: number }): string =>
+    `${name}#${typeof region === "number" ? region : ""}`;
+  const formatOps = (
+    ops: readonly { name: string; region?: number }[]
+  ): string =>
+    ops
+      .map((op) =>
+        typeof op.region === "number" ? `${op.name}@${op.region}` : op.name
+      )
+      .join(", ");
+
+  const actualOps = new Set(actualRow.operations.map(opKey));
+  const expectedOps = new Set(expectedRow.operations.map(opKey));
+  const missingRequired = expectedRow.operations.filter(
+    (op) => !actualOps.has(opKey(op))
+  );
+  const extraActual = actualRow.operations.filter(
+    (op) => !expectedOps.has(opKey(op))
+  );
+
+  const actualCanSpecialize = Boolean(
+    actualRow.tailVar && !actualRow.tailVar.rigid
+  );
+  const expectedAllowsExtra = Boolean(
+    expectedRow.tailVar && !expectedRow.tailVar.rigid
+  );
+  const substitution = new Map<number, EffectRowId>();
+
+  if (missingRequired.length > 0 && !actualCanSpecialize) {
+    return {
+      ok: false,
+      conflict: {
+        left: actual,
+        right: expected,
+        message: `missing required effects (${ctx.reason}): ${formatOps(missingRequired)}`,
+      },
+    };
+  }
+
+  if (extraActual.length > 0 && !expectedAllowsExtra) {
+    return {
+      ok: false,
+      conflict: {
+        left: actual,
+        right: expected,
+        message: `unexpected effects (${ctx.reason}): ${formatOps(extraActual)}`,
+      },
+    };
+  }
+
+  const needsSharedTail =
+    actualCanSpecialize &&
+    expectedAllowsExtra &&
+    (missingRequired.length > 0 || extraActual.length > 0);
+  const sharedTail = needsSharedTail ? effects.freshTailVar() : undefined;
+
+  if (actualCanSpecialize) {
+    if (
+      missingRequired.length > 0 ||
+      !expectedRow.tailVar ||
+      expectedRow.tailVar.rigid ||
+      sharedTail
+    ) {
+      substitution.set(
+        actualRow.tailVar!.id,
+        effects.internRow({
+          operations: missingRequired,
+          tailVar: sharedTail,
+        })
+      );
+    }
+  }
+
+  if (expectedAllowsExtra) {
+    substitution.set(
+      expectedRow.tailVar!.id,
+      extraActual.length > 0 || sharedTail
+        ? effects.internRow({
+            operations: extraActual,
+            tailVar:
+              sharedTail ??
+              (actualRow.tailVar &&
+              actualRow.tailVar.id !== expectedRow.tailVar?.id
+                ? actualRow.tailVar
+                : undefined),
+          })
+        : actualRow.tailVar
+          ? effects.internRow({ operations: [], tailVar: actualRow.tailVar })
+          : effects.emptyRow
+    );
+  }
+
+  if (actualRow.tailVar && (!expectedRow.tailVar || expectedRow.tailVar.rigid)) {
+    if (actualRow.tailVar.rigid) {
+      return {
+        ok: false,
+        conflict: {
+          left: actual,
+          right: expected,
+          message: `effect row is too open (${ctx.reason})`,
+        },
+      };
+    }
+    if (!substitution.has(actualRow.tailVar.id)) {
+      substitution.set(actualRow.tailVar.id, effects.emptyRow);
+    }
+  }
+
+  return { ok: true, substitution: { rows: substitution } };
+};
 
 export const getExprEffectRow = (
   expr: HirExprId,
@@ -159,6 +284,14 @@ const resolveNamedEffectRow = (
   expr: HirNamedTypeExpr,
   ctx: TypingContext
 ): EffectRowId => {
+  if (
+    expr.path.length === 1 &&
+    expr.path[0] === "open" &&
+    typeof expr.symbol !== "number"
+  ) {
+    return freshOpenEffectRow(ctx.effects);
+  }
+
   const symbol = resolveEffectAnnotationSymbol(expr, ctx);
   if (typeof symbol !== "number") {
     return pureEffectRow(ctx.effects);

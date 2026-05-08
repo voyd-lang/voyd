@@ -6,6 +6,7 @@ import { semanticsPipeline } from "../../pipeline.js";
 import { buildEffectsLoweringInfo } from "../analysis.js";
 import { buildEffectsIr } from "../ir/build.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
+import { buildProgramCodegenView } from "../../codegen-view/index.js";
 
 const loadFixture = () => {
   const source = readFileSync(
@@ -27,6 +28,30 @@ describe("EffectsIR (overlay)", () => {
     const ir = buildEffectsIr({ hir: semantics.hir, info });
 
     const calls = Array.from(ir.calls.values()).map((call) => ({
+      kind: call.kind,
+      callee:
+        typeof call.calleeSymbol === "number"
+          ? getSymbolTable(semantics).getSymbol(call.calleeSymbol).name
+          : "<unknown>",
+      op: call.operation?.name,
+    }));
+
+    expect(calls.some((call) => call.kind === "perform" && call.op === "Async.await")).toBe(true);
+    expect(calls.some((call) => call.kind === "pure-call" && call.callee === "pure_add")).toBe(
+      true
+    );
+    expect(
+      calls.some((call) => call.kind === "effectful-call" && call.callee === "effectful")
+    ).toBe(true);
+  });
+
+  it("is exposed as a codegen-view module artifact", () => {
+    const semantics = loadFixture();
+    const program = buildProgramCodegenView([semantics]);
+    const module = program.modules.get(semantics.moduleId);
+    expect(module).toBeDefined();
+
+    const calls = Array.from(module!.effectsIr.calls.values()).map((call) => ({
       kind: call.kind,
       callee:
         typeof call.calleeSymbol === "number"

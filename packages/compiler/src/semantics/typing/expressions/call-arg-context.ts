@@ -9,7 +9,7 @@ import type {
   TypingContext,
   TypingState,
 } from "../types.js";
-import { bindTypeParamsFromType } from "../type-system.js";
+import { bindTypeParams as bindTypeParamsFromType } from "../type-relations.js";
 import { typeExpression } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
 

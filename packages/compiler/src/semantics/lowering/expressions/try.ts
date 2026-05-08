@@ -66,9 +66,9 @@ export const lowerTry = ({
   lowerExpr,
 }: LoweringFormParams): number => {
   const markerExpr = form.at(1);
-  const hasForwardUnhandled =
-    isIdentifierAtom(markerExpr) && markerExpr.value === "forward";
-  const bodyIndex = hasForwardUnhandled ? 2 : 1;
+  const hasOpenUnhandled =
+    isIdentifierAtom(markerExpr) && markerExpr.value === "open";
+  const bodyIndex = hasOpenUnhandled ? 2 : 1;
   const bodyExpr = form.at(bodyIndex);
   if (!bodyExpr) {
     throw new Error("try expression missing body");
@@ -128,7 +128,7 @@ export const lowerTry = ({
     span: toSourceSpan(form),
     body,
     handlers,
-    ...(hasForwardUnhandled ? { forwardUnhandled: true } : {}),
+    ...(hasOpenUnhandled ? { openUnhandled: true } : {}),
   });
 
   return exprId;
