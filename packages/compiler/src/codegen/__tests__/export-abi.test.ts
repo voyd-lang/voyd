@@ -8,6 +8,7 @@ import type { CodegenOptions } from "../context.js";
 
 const fixtureRoot = resolve(import.meta.dirname, "__fixtures__");
 const stdRoot = resolve(import.meta.dirname, "../../../../std/src");
+const buildModuleCache = new Map<string, Promise<Uint8Array>>();
 
 const expectCompileSuccess = (
   result: CompileProgramResult,
@@ -26,17 +27,25 @@ const buildModule = async ({
   entryFile?: string;
   codegenOptions?: CodegenOptions;
 } = {}): Promise<Uint8Array> => {
+  const cacheKey = JSON.stringify({ entryFile, codegenOptions: codegenOptions ?? {} });
+  const cached = buildModuleCache.get(cacheKey);
+  if (cached) return cached;
+
   const entryPath = resolve(fixtureRoot, entryFile);
-  const result = expectCompileSuccess(await compileProgram({
+  const wasm = compileProgram({
     entryPath,
     roots: { src: fixtureRoot, std: stdRoot },
     host: createFsModuleHost(),
     codegenOptions,
-  }));
-  if (!result.wasm) {
-    throw new Error("missing wasm output");
-  }
-  return result.wasm;
+  }).then((result) => {
+    const compiled = expectCompileSuccess(result);
+    if (!compiled.wasm) {
+      throw new Error("missing wasm output");
+    }
+    return compiled.wasm;
+  });
+  buildModuleCache.set(cacheKey, wasm);
+  return wasm;
 };
 
 describe("export abi metadata", { timeout: 60_000 }, () => {

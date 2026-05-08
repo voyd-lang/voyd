@@ -14,18 +14,23 @@ If both `VOYD_USE_DIST=1` and `VOYD_USE_SRC=1` are set, source mode wins and a w
 
 ## What CI Validates
 
-PR workflow (`.github/workflows/pr.yml`) runs two complementary checks:
+PR workflow (`.github/workflows/pr.yml`) runs complementary checks:
 
 1. Main test sweep in source mode:
    - `VOYD_USE_SRC=1 npx turbo run test --affected ...`
-   - Fast path for broad correctness checks.
-2. Build-only validation for non-CLI artifacts (when relevant files change):
-   - `npx turbo run build --affected --filter=voyd.dev... --filter=voyd-vscode...`
+   - Fast path for broad correctness checks. Compiler codegen tests are split
+     into their own sharded CI job because they dominate wall-clock time.
+2. Compiler codegen in a separate sharded job (when compiler/runtime files change):
+   - `npm run --workspace @voyd-lang/compiler test:codegen -- --shard=N/4`
+   - Keeps the slowest compiler e2e-style tests off the main PR critical path.
+3. Build-only validation for non-CLI artifacts (when relevant files change):
+   - `npx turbo run build --affected --output-logs=errors-only`
    - Catches site/VSCode build regressions that package tests do not execute.
-3. Dist-specific CLI e2e in a separate PR job (only on CLI/runtime-related changes):
+4. Dist-specific CLI e2e in a separate PR job (only on CLI/runtime-related changes):
    - Build targeted dist artifacts: `npx turbo run build --filter=@voyd-lang/cli...`
-   - Run dist e2e: `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist ...`
-   - Reported as its own status check (`cli-dist-e2e`) so heavy runtime validation is isolated from the main source-mode test sweep.
+   - Run dist e2e: `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd-lang/cli test:e2e`
+   - Reported as its own status check (`cli-dist-e2e`) and runs in parallel
+     with the main source-mode test sweep when the relevant files change.
 
 This keeps most PRs fast while still protecting dist execution paths when they can be impacted.
 
@@ -44,5 +49,6 @@ If you modify any of the following, ensure dist CLI e2e still runs:
 Recommended local commands before merging CLI/runtime changes:
 
 - `VOYD_USE_SRC=1 npm test`
+- `npm run test:codegen`
 - `npx turbo run build --filter=@voyd-lang/cli...`
-- `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd-lang/cli test -- src/__tests__/cli-e2e.test.ts`
+- `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd-lang/cli test:e2e`
