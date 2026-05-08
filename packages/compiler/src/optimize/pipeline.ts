@@ -38,6 +38,11 @@ import type {
   OptimizedModuleView,
   ProgramOptimizationResult,
 } from "./ir.js";
+import type {
+  ProgramCodegenOptimizationPlan,
+  ScalarObjectLocalRepresentationPlan,
+  ScalarObjectMethodReceiverInlinePlan,
+} from "./codegen-plan.js";
 
 type MutableOptimizationIr = {
   baseProgram: ProgramCodegenView;
@@ -62,7 +67,11 @@ type MutableOptimizationIr = {
     reachableFunctionSymbols: Set<ProgramSymbolId>;
     reachableModuleLets: Map<string, Set<SymbolId>>;
     usedTraitDispatchSignatures: Set<string>;
-    scalarReplacedObjectLocals: Map<string, Set<SymbolId>>;
+    codegenPlan: {
+      representations: {
+        scalarObjectLocals: Map<string, Map<SymbolId, ScalarObjectLocalRepresentationPlan>>;
+      };
+    };
   };
 };
 
@@ -291,7 +300,11 @@ const buildOptimizationIr = ({
       reachableFunctionSymbols: new Set(),
       reachableModuleLets: new Map(),
       usedTraitDispatchSignatures: new Set(),
-      scalarReplacedObjectLocals: new Map(),
+      codegenPlan: {
+        representations: {
+          scalarObjectLocals: new Map(),
+        },
+      },
     },
   };
 };
@@ -1631,39 +1644,81 @@ const expressionIsDirectAssignmentTarget = ({
   return moduleView.hir.expressions.get(parent.exprId)?.exprKind === "assign";
 };
 
-const objectLiteralHasDirectFieldInitializers = ({
+const buildScalarObjectInitializerPlan = ({
+  moduleId,
+  symbol,
   expr,
   typeId,
   program,
 }: {
+  moduleId: string;
+  symbol: SymbolId;
   expr: HirObjectLiteralExpr;
   typeId: TypeId;
   program: ProgramCodegenView;
-}): boolean => {
+}): Pick<
+  ScalarObjectLocalRepresentationPlan,
+  | "kind"
+  | "moduleId"
+  | "symbol"
+  | "initializerExpr"
+  | "typeId"
+  | "representation"
+  | "fields"
+  | "initializerFields"
+> | undefined => {
   if (expr.literalKind !== "nominal") {
-    return false;
+    return undefined;
   }
   const nominalTypeId = exactNominalForType({ typeId, program });
   if (typeof nominalTypeId !== "number") {
-    return false;
+    return undefined;
   }
   const desc = program.types.getTypeDesc(nominalTypeId);
   if (desc.kind !== "nominal-object") {
-    return false;
+    return undefined;
   }
   const objectInfo = program.objects.getInfoByNominal(nominalTypeId);
   if (!objectInfo) {
-    return false;
+    return undefined;
   }
-  const fieldNames = new Set(objectInfo.fields.map((field) => field.name));
+  const structuralLayout = program.types.getStructuralLayout(objectInfo.structural);
+  if (structuralLayout?.kind !== "structural-object") {
+    return undefined;
+  }
+  const fieldNames = new Set(structuralLayout.fields.map((field) => field.name));
   const entries = new Set<string>();
   for (const entry of expr.entries) {
     if (entry.kind !== "field" || !fieldNames.has(entry.name)) {
-      return false;
+      return undefined;
     }
     entries.add(entry.name);
   }
-  return entries.size === fieldNames.size;
+  if (entries.size !== fieldNames.size) {
+    return undefined;
+  }
+
+  return {
+    kind: "scalar-object-local",
+    moduleId,
+    symbol,
+    initializerExpr: expr.id,
+    typeId,
+    representation: "field-locals",
+    fields: structuralLayout.fields.map((field) => ({
+      name: field.name,
+      typeId: field.typeId,
+    })),
+    initializerFields: expr.entries.map((entry) => {
+      if (entry.kind !== "field") {
+        throw new Error("scalar object plan cannot include spread initializers");
+      }
+      return {
+        name: entry.name,
+        valueExpr: entry.value,
+      };
+    }),
+  };
 };
 
 const symbolTypeFor = ({
@@ -1746,7 +1801,7 @@ const isScalarLeafIntrinsicCall = ({
   );
 };
 
-const scalarInlineableMethodReceiverUse = ({
+const scalarInlineableMethodReceiverPlan = ({
   expr,
   moduleId,
   program,
@@ -1754,15 +1809,15 @@ const scalarInlineableMethodReceiverUse = ({
   expr: Extract<HirExpression, { exprKind: "method-call" }>;
   moduleId: string;
   program: ProgramCodegenView;
-}): boolean => {
+}): ScalarObjectMethodReceiverInlinePlan | undefined => {
   const target = singletonMethodTarget({ expr, moduleId, program });
   if (!target) {
-    return false;
+    return undefined;
   }
 
   const ownerModule = program.modules.get(target.moduleId);
   if (!ownerModule) {
-    return false;
+    return undefined;
   }
   const fn = functionItemBySymbol({
     moduleView: ownerModule,
@@ -1770,10 +1825,10 @@ const scalarInlineableMethodReceiverUse = ({
   });
   const signature = program.functions.getSignature(target.moduleId, target.symbol);
   if (!fn || !signature || !program.effects.isEmpty(signature.effectRow)) {
-    return false;
+    return undefined;
   }
   if (fn.parameters.some((parameter) => typeof parameter.defaultValue === "number")) {
-    return false;
+    return undefined;
   }
   if (
     signature.parameters.length === 0 ||
@@ -1783,12 +1838,12 @@ const scalarInlineableMethodReceiverUse = ({
     ) ||
     !simpleDirectSignatureType({ typeId: signature.returnType, program })
   ) {
-    return false;
+    return undefined;
   }
 
   const receiverSymbol = fn.parameters[0]?.symbol;
   if (typeof receiverSymbol !== "number") {
-    return false;
+    return undefined;
   }
   const parents = buildExpressionParents({ moduleView: ownerModule });
   let exprCount = 0;
@@ -1868,7 +1923,13 @@ const scalarInlineableMethodReceiverUse = ({
     },
   });
 
-  return allowed;
+  return allowed
+    ? {
+        callExpr: expr.id,
+        targetModuleId: target.moduleId,
+        targetSymbol: target.symbol,
+      }
+    : undefined;
 };
 
 const localIsLiveAcrossEffectfulExpression = ({
@@ -1921,7 +1982,7 @@ const localIsLiveAcrossEffectfulExpression = ({
   return (seenEffectful && valueHasSymbol) || (valueHasEffect && valueHasSymbol);
 };
 
-const isScalarReplaceableLocal = ({
+const buildScalarObjectLocalRepresentationPlan = ({
   stmt,
   block,
   stmtIndex,
@@ -1939,13 +2000,13 @@ const isScalarReplaceableLocal = ({
   moduleView: OptimizedModuleView;
   parents: ReadonlyMap<HirExprId, ExpressionParent>;
   program: ProgramCodegenView;
-}): boolean => {
+}): ScalarObjectLocalRepresentationPlan | undefined => {
   if (stmt.pattern.kind !== "identifier") {
-    return false;
+    return undefined;
   }
   const initializer = moduleView.hir.expressions.get(stmt.initializer);
   if (!initializer || initializer.exprKind !== "object-literal") {
-    return false;
+    return undefined;
   }
   if (
     expressionContainsEffectfulCall({
@@ -1959,7 +2020,7 @@ const isScalarReplaceableLocal = ({
       moduleView,
     })
   ) {
-    return false;
+    return undefined;
   }
   const typeId =
     symbolTypeFor({
@@ -1970,18 +2031,22 @@ const isScalarReplaceableLocal = ({
       moduleView,
       exprId: stmt.initializer,
     });
-  if (
-    typeof typeId !== "number" ||
-    !objectLiteralHasDirectFieldInitializers({
-      expr: initializer,
-      typeId,
-      program,
-    })
-  ) {
-    return false;
+  if (typeof typeId !== "number") {
+    return undefined;
+  }
+  const initializerPlan = buildScalarObjectInitializerPlan({
+    moduleId,
+    symbol: stmt.pattern.symbol,
+    expr: initializer,
+    typeId,
+    program,
+  });
+  if (!initializerPlan) {
+    return undefined;
   }
 
   const symbol = stmt.pattern.symbol;
+  const methodReceiverInline: ScalarObjectMethodReceiverInlinePlan[] = [];
   let allowed = true;
   walkExpression({
     exprId: functionBody,
@@ -2030,7 +2095,7 @@ const isScalarReplaceableLocal = ({
             parents,
             moduleView,
           }));
-      const allowedMethodReceiverUse =
+      const methodReceiverPlan =
         parent?.kind === "expr" &&
         parentExpr?.exprKind === "method-call" &&
         parent.role === "target" &&
@@ -2038,21 +2103,43 @@ const isScalarReplaceableLocal = ({
           exprId: parent.exprId,
           parents,
           moduleView,
-        }) &&
-        scalarInlineableMethodReceiverUse({
+        })
+          ? scalarInlineableMethodReceiverPlan({
           expr: parentExpr,
           moduleId,
           program,
-        });
-      if (!allowedFieldUse && !allowedMethodReceiverUse) {
+            })
+          : undefined;
+      if (!allowedFieldUse && !methodReceiverPlan) {
         allowed = false;
         return { stop: true };
+      }
+      if (methodReceiverPlan) {
+        methodReceiverInline.push(methodReceiverPlan);
       }
       return undefined;
     },
   });
 
-  return allowed;
+  if (!allowed) {
+    return undefined;
+  }
+
+  return {
+    ...initializerPlan,
+    operations: {
+      fieldRead: "local",
+      fieldWrite: "local",
+      methodReceiverInline,
+      wholeValueMaterialization: { allowed: false },
+    },
+    verified: {
+      directFieldInitializers: true,
+      noUnsafeEscapes: true,
+      noContinuationCapture: true,
+      sourceOrderInitializers: true,
+    },
+  };
 };
 
 const scalarReplacementOfObjectLocalsPass: ProgramOptimizationPass = {
@@ -2062,7 +2149,7 @@ const scalarReplacementOfObjectLocalsPass: ProgramOptimizationPass = {
 
     ctx.ir.modules.forEach((moduleView, moduleId) => {
       const parents = buildExpressionParents({ moduleView });
-      const symbols = new Set<SymbolId>();
+      const plans = new Map<SymbolId, ScalarObjectLocalRepresentationPlan>();
       moduleView.hir.items.forEach((item) => {
         if (item.kind !== "function") {
           return;
@@ -2085,10 +2172,10 @@ const scalarReplacementOfObjectLocalsPass: ProgramOptimizationPass = {
           }
           expr.statements.forEach((stmtId, stmtIndex) => {
             const stmt = moduleView.hir.statements.get(stmtId);
-            if (
+            const plan =
               stmt?.kind === "let" &&
               stmt.pattern.kind === "identifier" &&
-              isScalarReplaceableLocal({
+              buildScalarObjectLocalRepresentationPlan({
                 stmt,
                 block: expr,
                 stmtIndex,
@@ -2097,19 +2184,20 @@ const scalarReplacementOfObjectLocalsPass: ProgramOptimizationPass = {
                 moduleView,
                 parents,
                 program: ctx.ir.baseProgram,
-              })
-            ) {
-              symbols.add(stmt.pattern.symbol);
+              });
+            if (plan) {
+              plans.set(plan.symbol, plan);
             }
           });
         });
       });
 
-      const existing = ctx.ir.facts.scalarReplacedObjectLocals.get(moduleId);
-      if (!existing || !setEquals(existing, symbols)) {
-        (ctx.ir as MutableOptimizationIr).facts.scalarReplacedObjectLocals.set(
+      const existing =
+        ctx.ir.facts.codegenPlan.representations.scalarObjectLocals.get(moduleId);
+      if (!existing || !scalarObjectPlanMapEquals(existing, plans)) {
+        (ctx.ir as MutableOptimizationIr).facts.codegenPlan.representations.scalarObjectLocals.set(
           moduleId,
-          symbols,
+          plans,
         );
         changed = true;
       }
@@ -2201,6 +2289,16 @@ const canonicalProgramSymbolIdOf = ({
 
 const setEquals = <T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean =>
   left.size === right.size && Array.from(left).every((value) => right.has(value));
+
+const scalarObjectPlanMapEquals = (
+  left: ReadonlyMap<SymbolId, ScalarObjectLocalRepresentationPlan>,
+  right: ReadonlyMap<SymbolId, ScalarObjectLocalRepresentationPlan>,
+): boolean =>
+  left.size === right.size &&
+  Array.from(left.entries()).every(([symbol, plan]) => {
+    const other = right.get(symbol);
+    return other ? JSON.stringify(plan) === JSON.stringify(other) : false;
+  });
 
 const mapOfSetEquals = <K, V>(
   left: ReadonlyMap<K, ReadonlySet<V>>,
@@ -2654,6 +2752,16 @@ const finalizeOptimization = ({
     ),
   };
 
+  const codegenPlan: ProgramCodegenOptimizationPlan = {
+    representations: {
+      scalarObjectLocals: new Map(
+        Array.from(ir.facts.codegenPlan.representations.scalarObjectLocals.entries()).map(
+          ([moduleId, plans]) => [moduleId, new Map(plans)],
+        ),
+      ),
+    },
+  };
+
   return {
     program: optimizedProgram,
     facts: {
@@ -2677,12 +2785,7 @@ const finalizeOptimization = ({
         ]),
       ),
       usedTraitDispatchSignatures: new Set(ir.facts.usedTraitDispatchSignatures),
-      scalarReplacedObjectLocals: new Map(
-        Array.from(ir.facts.scalarReplacedObjectLocals.entries()).map(([moduleId, symbols]) => [
-          moduleId,
-          new Set(symbols),
-        ]),
-      ),
+      codegenPlan,
     },
   };
 };

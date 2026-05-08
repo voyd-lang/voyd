@@ -8,11 +8,14 @@ import type {
   FunctionMetadata,
   HirFieldAccessExpr,
   HirMethodCallExpr,
-  HirObjectLiteralExpr,
   LocalBindingScalarObject,
-  SymbolId,
   TypeId,
 } from "./context.js";
+import type { ScalarObjectLocalRepresentationPlan } from "../optimize/codegen-plan.js";
+import {
+  allowsScalarObjectMethodReceiverInline,
+  getScalarObjectFieldPlan,
+} from "../optimize/codegen-plan.js";
 import {
   compileCallArgumentsForParams,
   resolveTypedCallArgumentPlan,
@@ -38,41 +41,34 @@ import {
 import { coerceExprToWasmType } from "./wasm-type-coercions.js";
 
 export const tryCompileScalarObjectBinding = ({
-  symbol,
-  initializer,
-  targetTypeId,
+  plan,
   ctx,
   fnCtx,
   compileExpr,
 }: {
-  symbol: SymbolId;
-  initializer: HirObjectLiteralExpr;
-  targetTypeId: TypeId;
+  plan: ScalarObjectLocalRepresentationPlan;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): readonly binaryen.ExpressionRef[] | undefined => {
-  const structInfo = getStructuralTypeInfo(targetTypeId, ctx);
+  const structInfo = getStructuralTypeInfo(plan.typeId, ctx);
   if (!structInfo || structInfo.layoutKind !== "heap-object") {
     return undefined;
   }
 
-  const entriesByName = new Map(
-    initializer.entries
-      .filter((entry) => entry.kind === "field")
-      .map((entry) => [entry.name, entry] as const),
-  );
-  if (
-    entriesByName.size !== initializer.entries.length ||
-    entriesByName.size !== structInfo.fields.length
-  ) {
+  const planFieldNames = new Set(plan.fields.map((field) => field.name));
+  if (plan.fields.length !== structInfo.fields.length) {
     return undefined;
   }
 
   const fields = new Map<string, ReturnType<typeof allocateTempLocal>>();
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
 
-  for (const field of structInfo.fields) {
+  for (const field of plan.fields) {
+    const structField = structInfo.fieldMap.get(field.name);
+    if (!structField || structField.typeId !== field.typeId) {
+      return undefined;
+    }
     const local = allocateTempLocal(
       wasmTypeFor(field.typeId, ctx),
       fnCtx,
@@ -82,18 +78,22 @@ export const tryCompileScalarObjectBinding = ({
     fields.set(field.name, local);
   }
 
-  const ops = initializer.entries.map((entry) => {
-    if (entry.kind !== "field") {
-      throw new Error("scalar object binding only supports direct field initializers");
-    }
-    const field = structInfo.fieldMap.get(entry.name);
+  if (
+    plan.initializerFields.length !== plan.fields.length ||
+    !plan.initializerFields.every((entry) => planFieldNames.has(entry.name))
+  ) {
+    return undefined;
+  }
+
+  const ops = plan.initializerFields.map((entry) => {
+    const field = getScalarObjectFieldPlan({ plan, field: entry.name });
     const local = fields.get(entry.name);
     if (!field || !local) {
       throw new Error(`scalar object binding cannot set unknown field ${entry.name}`);
     }
-    const actualTypeId = getRequiredExprType(entry.value, ctx, typeInstanceId);
+    const actualTypeId = getRequiredExprType(entry.valueExpr, ctx, typeInstanceId);
     const value = compileExpr({
-      exprId: entry.value,
+      exprId: entry.valueExpr,
       ctx,
       fnCtx,
       expectedResultTypeId: field.typeId,
@@ -114,11 +114,12 @@ export const tryCompileScalarObjectBinding = ({
     );
   });
 
-  fnCtx.bindings.set(symbol, {
+  fnCtx.bindings.set(plan.symbol, {
     kind: "scalar-object",
-    type: wasmTypeFor(targetTypeId, ctx),
-    storageType: wasmTypeFor(targetTypeId, ctx),
-    typeId: targetTypeId,
+    plan,
+    type: wasmTypeFor(plan.typeId, ctx),
+    storageType: wasmTypeFor(plan.typeId, ctx),
+    typeId: plan.typeId,
     fields,
   });
 
@@ -140,6 +141,10 @@ export const tryCompileScalarObjectFieldAccess = ({
   }
   const binding = fnCtx.bindings.get(target.symbol);
   if (binding?.kind !== "scalar-object") {
+    return undefined;
+  }
+  const fieldPlan = getScalarObjectFieldPlan({ plan: binding.plan, field: expr.field });
+  if (!fieldPlan) {
     return undefined;
   }
   const fieldBinding = binding.fields.get(expr.field);
@@ -188,6 +193,13 @@ export const tryCompileScalarObjectFieldAssignment = ({
   if (binding?.kind !== "scalar-object") {
     return undefined;
   }
+  const fieldPlan = getScalarObjectFieldPlan({
+    plan: binding.plan,
+    field: targetExpr.field,
+  });
+  if (!fieldPlan) {
+    return undefined;
+  }
   const fieldBinding = binding.fields.get(targetExpr.field);
   if (!fieldBinding || typeof fieldBinding.typeId !== "number") {
     return undefined;
@@ -233,6 +245,16 @@ export const tryCompileScalarObjectMethodCall = ({
   if (binding?.kind !== "scalar-object") {
     return undefined;
   }
+  if (
+    !allowsScalarObjectMethodReceiverInline({
+      plan: binding.plan,
+      callExpr: expr.id,
+      targetModuleId: meta.moduleId,
+      targetSymbol: meta.symbol,
+    })
+  ) {
+    return undefined;
+  }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typedPlan = resolveTypedCallArgumentPlan({
@@ -269,7 +291,7 @@ export const tryCompileScalarObjectMethodCall = ({
     },
   });
 
-  return tryInlineResolvedCall({
+  const inlined = tryInlineResolvedCall({
     meta,
     args: [undefined, ...args],
     parameterBindings: new Map([[0, binding]]),
@@ -278,6 +300,10 @@ export const tryCompileScalarObjectMethodCall = ({
     compileExpr,
     options,
   });
+  if (!inlined) {
+    throw new Error("scalar object method receiver plan could not be lowered");
+  }
+  return inlined;
 };
 
 export const materializeScalarObjectBindingValue = ({
@@ -289,6 +315,9 @@ export const materializeScalarObjectBindingValue = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
+  if (!binding.plan.operations.wholeValueMaterialization.allowed) {
+    throw new Error("scalar object plan does not allow whole-value materialization");
+  }
   if (typeof binding.typeId !== "number") {
     throw new Error("scalar object binding is missing a type id");
   }
