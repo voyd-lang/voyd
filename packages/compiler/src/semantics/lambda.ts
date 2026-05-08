@@ -1,6 +1,6 @@
 import {
   type Expr,
-  type Form,
+  Form,
   type IdentifierAtom,
   formCallsInternal,
   isForm,
@@ -43,12 +43,12 @@ const parseSignatureParts = (
   }
 
   if (isForm(expr) && expr.calls(":")) {
-    const candidateTail = expr.at(2);
-    if (isForm(candidateTail) && candidateTail.calls("->")) {
+    const effectTail = expr.at(2);
+    if (isForm(effectTail) && effectTail.calls("->")) {
       return {
         paramsExpr: expr.at(1) ?? expr,
-        effectType: candidateTail.at(1),
-        returnType: candidateTail.at(2),
+        effectType: effectTail.at(1),
+        returnType: effectTail.at(2),
       };
     }
   }

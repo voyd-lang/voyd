@@ -592,6 +592,14 @@ export interface MemberMetadata {
   packageId?: string;
 }
 
+export interface ObjectFieldAccessMetadata {
+  owner?: SymbolId;
+  visibility?: HirVisibility;
+  packageId?: string;
+}
+
+export type ObjectField = StructuralField & ObjectFieldAccessMetadata;
+
 export interface TypingContext {
   symbolTable: SymbolTable;
   hir: HirGraph;
@@ -631,7 +639,7 @@ export interface ObjectTypeInfo {
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
-  fields: readonly StructuralField[];
+  fields: readonly ObjectField[];
   visibility?: HirVisibility;
   baseNominal?: TypeId;
   traitImpls?: readonly TraitImplInstance[];
@@ -648,7 +656,7 @@ export interface ObjectTemplate {
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
-  fields: readonly StructuralField[];
+  fields: readonly ObjectField[];
   visibility?: HirVisibility;
   baseNominal?: TypeId;
 }

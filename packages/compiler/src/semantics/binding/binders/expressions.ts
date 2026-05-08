@@ -20,6 +20,7 @@ import { declareValueOrParameter } from "../redefinitions.js";
 import type { BindingContext, BindingResult } from "../types.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import { parseLambdaSignature } from "../../lambda.js";
+import { normalizeNestedFunctionTypeAnnotation } from "../../function-type-annotations.js";
 import { ensureForm } from "./utils.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import {
@@ -148,9 +149,9 @@ const bindTry = (
 ): void => {
   const handlerEntries: Form[] = [];
   const markerExpr = form.at(1);
-  const hasForwardUnhandled =
-    isIdentifierAtom(markerExpr) && markerExpr.value === "forward";
-  const bodyIndex = hasForwardUnhandled ? 2 : 1;
+  const hasOpenUnhandled =
+    isIdentifierAtom(markerExpr) && markerExpr.value === "open";
+  const bodyIndex = hasOpenUnhandled ? 2 : 1;
   const body = form.at(bodyIndex);
   if (isForm(body) && body.calls("block")) {
     body.rest.forEach((entry) => {
@@ -378,10 +379,7 @@ const bindVar = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
-  const assignment = ensureForm(
-    form.at(1),
-    "var statement expects an assignment",
-  );
+  const assignment = ensureForm(form.at(1), "var statement expects an assignment");
   if (!assignment.calls("=")) {
     throw new Error("var statement must be an assignment form");
   }
@@ -437,7 +435,11 @@ const bindLambda = (
       if (!isForm(param)) {
         return;
       }
-      bindTypeExpr(param.at(2), ctx, tracker);
+      bindTypeExpr(
+        normalizeNestedFunctionTypeAnnotation(param).typeExpr,
+        ctx,
+        tracker
+      );
     });
     bindTypeExpr(signature.returnType, ctx, tracker);
     bindTypeExpr(signature.effectType, ctx, tracker);
@@ -487,13 +489,13 @@ const declareLambdaParam = (
 
   if (isForm(param) && (param.calls(":") || param.calls("?:"))) {
     rememberSyntax(param, ctx);
-    const nameExpr = param.at(1);
+    const { nameExpr, typeExpr } = normalizeNestedFunctionTypeAnnotation(param);
     const { target, bindingKind } = unwrapMutablePattern(nameExpr);
     if (!isIdentifierAtom(target)) {
       throw new Error("lambda parameter name must be an identifier");
     }
     rememberSyntax(target, ctx);
-    rememberSyntax(param.at(2) as Syntax, ctx);
+    rememberSyntax(typeExpr as Syntax, ctx);
     declareValueOrParameter({
       name: target.value,
       kind: "parameter",

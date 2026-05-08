@@ -60,11 +60,13 @@ If any answer is unclear, stop and document rationale in PR/issue notes before a
 ## Performance Standards (Preventing Test Bloat)
 
 - Prefer one expensive integration setup with multiple assertions over many near-identical expensive tests.
+- For smoke tests, prefer one fixture with multiple exported entrypoints when the scenarios share the same dependency stack and public boundary.
 - Keep CLI e2e focused on CLI ownership; move semantic depth to SDK/smoke.
 - Reuse fixtures and compiled modules where practical.
 - Avoid adding duplicate compile-heavy tests across layers.
 - For new compile-heavy suites, record before/after timing in PR notes.
 - If a single file consistently exceeds ~15s locally, split intent (fast checks vs deep e2e) or reduce redundant scenarios.
+- Keep representative sweeps modest in the default suite; move true perf/benchmark loops to explicit perf commands.
 
 ## Kitchen-Sink Guidance
 

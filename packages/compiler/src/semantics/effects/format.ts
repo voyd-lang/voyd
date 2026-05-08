@@ -11,12 +11,13 @@ export const formatEffectRow = (
   const desc = effects.getRow(row);
   const ops = desc.operations.map(formatEffectOp);
   if (ops.length === 0 && desc.tailVar) {
-    return "open effect row";
+    return "(open)";
   }
   if (ops.length === 0) {
     return "()";
   }
-  const suffix = desc.tailVar ? ", ..." : "";
-  return `${ops.join(", ")}${suffix}`;
+  if (!desc.tailVar) {
+    return ops.join(", ");
+  }
+  return `(${ops.join(", ")}, open)`;
 };
-

@@ -29,12 +29,15 @@ import type {
 import type { SemanticsPipelineResult } from "../pipeline.js";
 import { buildEffectsLoweringInfo } from "../effects/analysis.js";
 import type { EffectsLoweringInfo } from "../effects/analysis.js";
+import { buildEffectsIr } from "../effects/ir/build.js";
+import type { EffectsIr } from "../effects/ir/types.js";
 import { getSymbolTable } from "../_internal/symbol-table.js";
 import type { SymbolRef as TypingSymbolRef } from "../typing/symbol-ref.js";
 import type {
   CallArgumentPlanEntry,
   ObjectTemplate,
   ObjectTypeInfo,
+  ObjectField,
   SymbolRefKey,
   TraitImplInstance,
 } from "../typing/types.js";
@@ -282,6 +285,7 @@ export type ModuleCodegenView = {
   effects: EffectTable;
   types: ModuleTypeIndex;
   effectsInfo: EffectsLoweringInfo;
+  effectsIr: EffectsIr;
   functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
 
@@ -616,14 +620,16 @@ export const buildProgramCodegenView = (
     instantiationsByFunctionId.set(functionId, bucket);
   };
 
-  const toCodegenStructuralField = (field: StructuralField): CodegenStructuralField => ({
+  const toCodegenStructuralField = (
+    field: StructuralField | ObjectField,
+  ): CodegenStructuralField => ({
     name: field.name,
     type: field.type,
     optional: field.optional === true,
     declaringParams: field.declaringParams,
-    visibility: field.visibility,
-    owner: field.owner,
-    packageId: field.packageId,
+    visibility: "visibility" in field ? field.visibility : undefined,
+    owner: "owner" in field ? field.owner : undefined,
+    packageId: "packageId" in field ? field.packageId : undefined,
   });
 
   const toCodegenTypeDesc = (typeId: TypeId, desc: TypeDescriptor): CodegenTypeDesc => {
@@ -1794,6 +1800,12 @@ export const buildProgramCodegenView = (
         endColumn: location.endColumn,
       });
     });
+    const effectsInfo = buildEffectsLoweringInfo({
+      binding: mod.binding,
+      symbolTable: getSymbolTable(mod),
+      hir: mod.hir,
+      typing: mod.typing,
+    });
     moduleViews.set(mod.moduleId, {
       moduleId: mod.moduleId,
       meta,
@@ -1808,12 +1820,8 @@ export const buildProgramCodegenView = (
           moduleTyping.get(mod.moduleId)?.valueTypes.get(symbol),
         getTailResumption: (expr) => mod.typing.tailResumptions.get(expr),
       },
-      effectsInfo: buildEffectsLoweringInfo({
-        binding: mod.binding,
-        symbolTable: getSymbolTable(mod),
-        hir: mod.hir,
-        typing: mod.typing,
-      }),
+      effectsInfo,
+      effectsIr: buildEffectsIr({ hir: mod.hir, info: effectsInfo }),
       functionLocations,
     });
   });

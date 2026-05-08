@@ -169,7 +169,7 @@ describe("type display", () => {
         symbol: reducerParam.symbol,
         displayName: "reducer",
       }),
-    ).toBe("reducer: (T, T) -> T ! open effect row");
+    ).toBe("reducer: (T, T) -> T ! (open)");
   });
 
   it("supports compact formatting for nominal intersections", () => {

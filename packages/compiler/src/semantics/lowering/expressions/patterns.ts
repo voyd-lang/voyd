@@ -3,6 +3,7 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../../../parser/index.js";
+import { normalizeNestedFunctionTypeAnnotation } from "../../function-type-annotations.js";
 import { toSourceSpan } from "../../utils.js";
 import type { HirBindingKind, HirPattern } from "../../hir/index.js";
 import type { LowerContext, LowerScopeStack } from "../types.js";
@@ -105,8 +106,10 @@ export const lowerPattern = (
   }
 
   if (isForm(target) && target.calls(":")) {
-    const nameExpr = target.at(1);
-    const typeExpr = target.at(2);
+    const {
+      nameExpr,
+      typeExpr,
+    } = normalizeNestedFunctionTypeAnnotation(target);
     if (!typeExpr) {
       throw new Error("typed pattern is missing a type annotation");
     }

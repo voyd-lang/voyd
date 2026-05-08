@@ -172,7 +172,6 @@ export const createTranslation = ({
   targetEffects,
   paramMap,
   cache,
-  mapSymbol,
 }: TranslationContext): ((id: TypeId) => TypeId) => {
   const translate = (type: TypeId): TypeId => {
     const cached = cache.get(type);
@@ -237,25 +236,12 @@ export const createTranslation = ({
         break;
       }
       case "structural-object": {
-        const mapOwnerSymbol = (
-          owner: number | undefined,
-        ): number | undefined => {
-          if (typeof owner !== "number") return owner;
-          try {
-            return mapSymbol(owner);
-          } catch {
-            return undefined;
-          }
-        };
         const fields = desc.fields.map((field) => ({
           name: field.name,
           type: translate(field.type),
           declaringParams: field.declaringParams?.map((param) =>
             mapTypeParam(param, paramMap, { arena: targetArena }),
           ),
-          visibility: field.visibility,
-          owner: mapOwnerSymbol(field.owner),
-          packageId: field.packageId,
         }));
         result = targetArena.internStructuralObject({ fields });
         break;

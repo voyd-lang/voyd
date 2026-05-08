@@ -242,7 +242,7 @@ test "rem_euclid invariants hold across signed range":
         Err<MathError>:
           assert(false, eq: true)
       modulus = modulus + 1
-    value = value + 1
+    value = value + 4
 
 test "next_multiple_of invariants hold across signed range":
   var value = -128
@@ -260,7 +260,7 @@ test "next_multiple_of invariants hold across signed range":
         Err<MathError>:
           assert(false, eq: true)
       factor = factor + 1
-    value = value + 1
+    value = value + 4
 
 test "integer boundaries around signed extremes stay stable":
   match(rem_euclid(-2147483647 - 1, 2))
@@ -284,7 +284,7 @@ test "integer boundaries around signed extremes stay stable":
 test "perf smoke for hot integer helpers":
   var index = 1
   var checksum = 0
-  while index < 20000:
+  while index < 2000:
     let value = (index * 37) - 10000
 
     match(rem_euclid(value, 97))

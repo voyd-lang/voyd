@@ -514,6 +514,17 @@ export type LoadModuleGraphFn = (
   options: LoadModulesOptions
 ) => Promise<ModuleGraph>;
 
+let codegenModulePromise:
+  | Promise<typeof import("./codegen/codegen.js")>
+  | undefined;
+
+export const preloadCodegen = (): Promise<
+  typeof import("./codegen/codegen.js")
+> => {
+  codegenModulePromise ??= import("./codegen/codegen.js");
+  return codegenModulePromise;
+};
+
 const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
@@ -558,6 +569,10 @@ export const compileProgramWithLoader = async (
   options: CompileProgramOptions,
   loadModuleGraph: LoadModuleGraphFn
 ): Promise<CompileProgramResult> => {
+  const codegenLoadPromise = options.skipSemantics
+    ? undefined
+    : preloadCodegen();
+  void codegenLoadPromise?.catch(() => undefined);
   const perfEnabled = isCompilerPerfEnabled();
   const compileStartedAt = perfEnabled ? performance.now() : 0;
   const perfCountersBefore = perfEnabled
@@ -667,6 +682,4 @@ export const compileProgramWithLoader = async (
 const moduleIdForPath = (path: ModulePath): string => modulePathToString(path);
 
 const lazyCodegen = async () =>
-  (await import(
-    "./codegen/codegen.js"
-  )) as typeof import("./codegen/codegen.js");
+  preloadCodegen();

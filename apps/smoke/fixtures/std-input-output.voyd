@@ -2,6 +2,7 @@ use std::bytes::Bytes
 use std::bytes::ByteBuffer
 use std::error::IoError
 use std::input::{ read_bytes, is_tty as input_is_tty }
+use std::output::Output
 use std::optional::types::all
 use std::output::{ write, write_line, flush, is_tty as output_is_tty, StdErr }
 use std::result::types::all
@@ -155,3 +156,11 @@ pub fn io_output_error() -> i32
         1
       else:
         -2
+
+pub fn print_text(): Output -> i32
+  print("hello")
+  1
+
+pub fn print_number(): Output -> i32
+  print(42)
+  1

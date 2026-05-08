@@ -8,8 +8,8 @@ import {
 import {
   ensureTypeMatches,
   resolveTypeExpr,
-  typeSatisfies,
 } from "../type-system.js";
+import { satisfies as typeSatisfies } from "../type-relations.js";
 import type { TypingContext, TypingState } from "../types.js";
 import {
   analyzeContinuationUsage,
@@ -532,7 +532,7 @@ export const typeEffectHandlerExpr = (
   if (
     unhandled.length > 0 &&
     !remainingDesc.tailVar &&
-    expr.forwardUnhandled !== true
+    expr.openUnhandled !== true
   ) {
     const opList = unhandled.map((op) => op.name).join(", ");
     emitDiagnostic({
