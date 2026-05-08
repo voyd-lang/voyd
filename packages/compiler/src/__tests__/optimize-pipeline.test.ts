@@ -854,6 +854,41 @@ pub fn main() -> i32
     expect(mainText).not.toContain("struct.new");
   });
 
+  it("scalar-replaces generic function object locals with instantiated field types", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Box<T> {
+  value: T
+}
+
+fn unwrap<T>(value: T) -> T
+  let box = Box<T> { value }
+  box.value
+
+pub fn main() -> i32
+  unwrap<i32>(3)
+`,
+      },
+    });
+
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
+    expect(scalarLocals?.size).toBe(1);
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    const unwrapText = extractFunctionText(module.emitText(), "src__main__unwrap_");
+    expect(unwrapText).not.toContain("struct.new");
+  });
+
   it("does not scalar-replace object locals that escape as whole values", async () => {
     const { optimized } = await buildOptimized({
       files: {

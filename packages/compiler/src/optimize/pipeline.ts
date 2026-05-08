@@ -1654,7 +1654,7 @@ const buildScalarObjectInitializerPlan = ({
   moduleId: string;
   symbol: SymbolId;
   expr: HirObjectLiteralExpr;
-  typeId: TypeId;
+  typeId?: TypeId;
   program: ProgramCodegenView;
 }): Pick<
   ScalarObjectLocalRepresentationPlan,
@@ -1671,18 +1671,57 @@ const buildScalarObjectInitializerPlan = ({
     return undefined;
   }
   const nominalTypeId = exactNominalForType({ typeId, program });
-  if (typeof nominalTypeId !== "number") {
+  const desc =
+    typeof nominalTypeId === "number"
+      ? program.types.getTypeDesc(nominalTypeId)
+      : undefined;
+  if (desc && desc.kind !== "nominal-object") {
     return undefined;
   }
-  const desc = program.types.getTypeDesc(nominalTypeId);
-  if (desc.kind !== "nominal-object") {
+  const owner =
+    desc?.owner ??
+    (typeof expr.targetSymbol === "number"
+      ? program.symbols.canonicalIdOf(moduleId, expr.targetSymbol)
+      : undefined);
+  const objectInfo =
+    typeof nominalTypeId === "number"
+      ? program.objects.getInfoByNominal(nominalTypeId)
+      : undefined;
+  const objectTemplate =
+    !objectInfo && typeof owner === "number"
+      ? program.objects.getTemplate(owner)
+      : undefined;
+  if (!objectInfo && !objectTemplate) {
     return undefined;
   }
-  const objectInfo = program.objects.getInfoByNominal(nominalTypeId);
-  if (!objectInfo) {
+  const targetTypeArgs =
+    expr.target?.typeKind === "named"
+      ? expr.target.typeArguments?.map((arg) => arg.typeId)
+      : undefined;
+  const templateTypeArgs =
+    desc?.typeArgs ??
+    (targetTypeArgs?.every((arg): arg is TypeId => typeof arg === "number")
+      ? targetTypeArgs
+      : undefined);
+  const templateSubstitution =
+    objectTemplate &&
+    templateTypeArgs &&
+    objectTemplate.params.length === templateTypeArgs.length
+      ? new Map(
+          objectTemplate.params.map(
+            (param, index) => [param.typeParam, templateTypeArgs[index]!] as const,
+          ),
+        )
+      : undefined;
+  const structuralId = objectInfo
+    ? objectInfo.structural
+    : objectTemplate && templateSubstitution
+      ? program.types.substitute(objectTemplate.structural, templateSubstitution)
+      : objectTemplate?.structural;
+  if (typeof structuralId !== "number") {
     return undefined;
   }
-  const structuralLayout = program.types.getStructuralLayout(objectInfo.structural);
+  const structuralLayout = program.types.getStructuralLayout(structuralId);
   if (structuralLayout?.kind !== "structural-object") {
     return undefined;
   }
@@ -1697,13 +1736,22 @@ const buildScalarObjectInitializerPlan = ({
   if (entries.size !== fieldNames.size) {
     return undefined;
   }
+  const planTypeId =
+    typeof typeId === "number"
+      ? typeId
+      : objectTemplate && templateSubstitution
+        ? program.types.substitute(objectTemplate.nominal, templateSubstitution)
+        : objectTemplate?.nominal;
+  if (typeof planTypeId !== "number") {
+    return undefined;
+  }
 
   return {
     kind: "scalar-object-local",
     moduleId,
     symbol,
     initializerExpr: expr.id,
-    typeId,
+    typeId: planTypeId,
     representation: "field-locals",
     fields: structuralLayout.fields.map((field) => ({
       name: field.name,
@@ -2031,9 +2079,6 @@ const buildScalarObjectLocalRepresentationPlan = ({
       moduleView,
       exprId: stmt.initializer,
     });
-  if (typeof typeId !== "number") {
-    return undefined;
-  }
   const initializerPlan = buildScalarObjectInitializerPlan({
     moduleId,
     symbol: stmt.pattern.symbol,

@@ -33,6 +33,7 @@ import {
   lowerValueForHeapField,
 } from "./structural.js";
 import {
+  getDeclaredSymbolTypeId,
   getExprBinaryenType,
   getRequiredExprType,
   getStructuralTypeInfo,
@@ -51,7 +52,13 @@ export const tryCompileScalarObjectBinding = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): readonly binaryen.ExpressionRef[] | undefined => {
-  const structInfo = getStructuralTypeInfo(plan.typeId, ctx);
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const targetTypeId = getDeclaredSymbolTypeId(
+    plan.symbol,
+    ctx,
+    typeInstanceId,
+  );
+  const structInfo = getStructuralTypeInfo(targetTypeId, ctx);
   if (!structInfo || structInfo.layoutKind !== "heap-object") {
     return undefined;
   }
@@ -62,17 +69,16 @@ export const tryCompileScalarObjectBinding = ({
   }
 
   const fields = new Map<string, ReturnType<typeof allocateTempLocal>>();
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
 
   for (const field of plan.fields) {
     const structField = structInfo.fieldMap.get(field.name);
-    if (!structField || structField.typeId !== field.typeId) {
+    if (!structField) {
       return undefined;
     }
     const local = allocateTempLocal(
-      wasmTypeFor(field.typeId, ctx),
+      wasmTypeFor(structField.typeId, ctx),
       fnCtx,
-      field.typeId,
+      structField.typeId,
       ctx,
     );
     fields.set(field.name, local);
@@ -88,7 +94,8 @@ export const tryCompileScalarObjectBinding = ({
   const ops = plan.initializerFields.map((entry) => {
     const field = getScalarObjectFieldPlan({ plan, field: entry.name });
     const local = fields.get(entry.name);
-    if (!field || !local) {
+    const structField = structInfo.fieldMap.get(entry.name);
+    if (!field || !local || !structField) {
       throw new Error(`scalar object binding cannot set unknown field ${entry.name}`);
     }
     const actualTypeId = getRequiredExprType(entry.valueExpr, ctx, typeInstanceId);
@@ -96,7 +103,7 @@ export const tryCompileScalarObjectBinding = ({
       exprId: entry.valueExpr,
       ctx,
       fnCtx,
-      expectedResultTypeId: field.typeId,
+      expectedResultTypeId: structField.typeId,
     });
     return (
       storeLocalValue({
@@ -104,7 +111,7 @@ export const tryCompileScalarObjectBinding = ({
         value: coerceValueToType({
           value: value.expr,
           actualType: actualTypeId,
-          targetType: field.typeId,
+          targetType: structField.typeId,
           ctx,
           fnCtx,
         }),
@@ -117,9 +124,9 @@ export const tryCompileScalarObjectBinding = ({
   fnCtx.bindings.set(plan.symbol, {
     kind: "scalar-object",
     plan,
-    type: wasmTypeFor(plan.typeId, ctx),
-    storageType: wasmTypeFor(plan.typeId, ctx),
-    typeId: plan.typeId,
+    type: wasmTypeFor(targetTypeId, ctx),
+    storageType: wasmTypeFor(targetTypeId, ctx),
+    typeId: targetTypeId,
     fields,
   });
 
