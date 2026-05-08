@@ -30,6 +30,7 @@ import { handlerCleanupOps } from "../effects/handler-stack.js";
 import { tailResumptionExitChecks } from "../effects/tail-resumptions.js";
 import { boxSignatureSpillValue } from "../signature-spill.js";
 import { tryCompileScalarObjectBinding } from "../scalar-objects.js";
+import { getScalarObjectLocalPlan } from "../../optimize/codegen-plan.js";
 
 const expressionUsesExpectedResultType = ({
   exprId,
@@ -412,24 +413,14 @@ const compileLetStatement = (
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef => {
   if (stmt.pattern.kind === "identifier") {
-    const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-    const targetTypeId = getDeclaredSymbolTypeId(
-      stmt.pattern.symbol,
-      ctx,
-      typeInstanceId,
-    );
-    const scalarReplacedSymbols = ctx.optimization?.scalarReplacedObjectLocals.get(
-      ctx.moduleId,
-    );
-    const initializer = ctx.module.hir.expressions.get(stmt.initializer);
-    if (
-      scalarReplacedSymbols?.has(stmt.pattern.symbol) &&
-      initializer?.exprKind === "object-literal"
-    ) {
+    const scalarObjectPlan = getScalarObjectLocalPlan({
+      plan: ctx.optimization?.codegenPlan,
+      moduleId: ctx.moduleId,
+      symbol: stmt.pattern.symbol,
+    });
+    if (scalarObjectPlan?.initializerExpr === stmt.initializer) {
       const scalarOps = tryCompileScalarObjectBinding({
-        symbol: stmt.pattern.symbol,
-        initializer,
-        targetTypeId,
+        plan: scalarObjectPlan,
         ctx,
         fnCtx,
         compileExpr,

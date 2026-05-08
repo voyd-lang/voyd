@@ -155,6 +155,11 @@ const extractFunctionText = (wasmText: string, nameFragment: string): string => 
   return next < 0 ? wasmText.slice(start) : wasmText.slice(start, next);
 };
 
+const scalarObjectPlansFor = (
+  optimized: ReturnType<typeof optimizeProgram>,
+  moduleId: string,
+) => optimized.facts.codegenPlan.representations.scalarObjectLocals.get(moduleId);
+
 describe("compiler optimization pipeline", () => {
   it("folds pure helper calls, prunes dead generic instances, and shrinks lambda captures", async () => {
     const { optimized } = await buildOptimized({
@@ -788,12 +793,17 @@ pub fn main() -> i32
     expect(mainFn?.kind).toBe("function");
     if (!mainFn || mainFn.kind !== "function") return;
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     const pairLet = Array.from(optimized.program.modules.get("src::main")?.hir.statements.values() ?? [])
       .find((stmt) => stmt.kind === "let" && stmt.pattern.kind === "identifier");
     expect(pairLet?.kind).toBe("let");
     if (!pairLet || pairLet.kind !== "let" || pairLet.pattern.kind !== "identifier") return;
     expect(scalarLocals?.has(pairLet.pattern.symbol)).toBe(true);
+    const pairPlan = scalarLocals?.get(pairLet.pattern.symbol);
+    expect(pairPlan?.kind).toBe("scalar-object-local");
+    expect(pairPlan?.representation).toBe("field-locals");
+    expect(pairPlan?.fields.map((field) => field.name)).toEqual(["left", "right"]);
+    expect(pairPlan?.operations.wholeValueMaterialization.allowed).toBe(false);
 
     const { module } = codegenProgram({
       program: optimized.program,
@@ -807,6 +817,76 @@ pub fn main() -> i32
     });
     const mainText = extractFunctionText(module.emitText(), "src__main__main_");
     expect(mainText).not.toContain("struct.new");
+  });
+
+  it("scalar-replaces generic object locals with instantiated field types", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Box<T> {
+  value: T
+}
+
+pub fn main() -> i32
+  let box = Box<i32> { value: 3 }
+  box.value
+`,
+      },
+    });
+
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
+    expect(scalarLocals?.size).toBe(1);
+    const boxPlan = Array.from(scalarLocals?.values() ?? [])[0];
+    const valueType = boxPlan?.fields.find((field) => field.name === "value")?.typeId;
+    expect(valueType).toBeTypeOf("number");
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    const mainText = extractFunctionText(module.emitText(), "src__main__main_");
+    expect(mainText).not.toContain("struct.new");
+  });
+
+  it("scalar-replaces generic function object locals with instantiated field types", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Box<T> {
+  value: T
+}
+
+fn unwrap<T>(value: T) -> T
+  let box = Box<T> { value }
+  box.value
+
+pub fn main() -> i32
+  unwrap<i32>(3)
+`,
+      },
+    });
+
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
+    expect(scalarLocals?.size).toBe(1);
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    const unwrapText = extractFunctionText(module.emitText(), "src__main__unwrap_");
+    expect(unwrapText).not.toContain("struct.new");
   });
 
   it("does not scalar-replace object locals that escape as whole values", async () => {
@@ -828,7 +908,7 @@ pub fn main() -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size ?? 0).toBe(0);
   });
 
@@ -852,8 +932,10 @@ pub fn main() -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size).toBe(1);
+    const pairPlan = Array.from(scalarLocals?.values() ?? [])[0];
+    expect(pairPlan?.operations.methodReceiverInline).toHaveLength(1);
 
     const { module } = codegenProgram({
       program: optimized.program,
@@ -894,7 +976,40 @@ pub fn main(): Log -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
+    expect(scalarLocals?.size ?? 0).toBe(0);
+  });
+
+  it("does not scalar-replace method receivers that exceed inline limits", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+impl Pair
+  fn sum(self) -> i32
+    let a = 1
+    let b = 2
+    let c = 3
+    let d = 4
+    let e = 5
+    let f = 6
+    let g = 7
+    let h = 8
+    let i = 9
+    self.left + self.right + a + b + c + d + e + f + g + h + i
+
+pub fn main() -> i32
+  let pair = Pair { left: 3, right: 4 }
+  pair.sum()
+`,
+      },
+    });
+
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size ?? 0).toBe(0);
   });
 
@@ -921,7 +1036,7 @@ pub fn main() -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size ?? 0).toBe(0);
   });
 
@@ -949,7 +1064,7 @@ pub fn main() -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size ?? 0).toBe(0);
   });
 
@@ -980,7 +1095,7 @@ pub fn main() -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size ?? 0).toBe(0);
   });
 
@@ -1000,7 +1115,7 @@ pub fn main() -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size).toBe(1);
 
     const { module } = codegenProgram({
@@ -1039,7 +1154,7 @@ pub fn main(): Log -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size ?? 0).toBe(0);
   });
 
@@ -1063,7 +1178,7 @@ pub fn main(): Log -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size).toBe(1);
   });
 
@@ -1084,7 +1199,7 @@ pub fn main() -> i32
       },
     });
 
-    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const scalarLocals = scalarObjectPlansFor(optimized, "src::main");
     expect(scalarLocals?.size).toBe(1);
 
     const { module } = codegenProgram({
