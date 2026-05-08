@@ -53,19 +53,6 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            cli:
-              - "apps/cli/**"
-              - "packages/sdk/**"
-              - "packages/lib/**"
-              - "packages/std/**"
-              - "packages/compiler/**"
-              - "packages/js-host/**"
-              - "scripts/voyd"
-              - "turbo.json"
-              - "package-lock.json"
-              - "vite.config.ts"
-              - "vitest.config.ts"
-              - "tsconfig*.json"
             compiler_semantics:
               - "packages/compiler/src/semantics/**"
             non_cli_build:
