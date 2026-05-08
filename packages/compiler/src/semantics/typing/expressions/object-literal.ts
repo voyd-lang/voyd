@@ -6,7 +6,6 @@ import type { SourceSpan, TypeId, TypeParamId } from "../../ids.js";
 import { typeExpression, withSpeculativeExprTyping } from "../expressions.js";
 import { composeEffectRows, getExprEffectRow } from "../effects.js";
 import {
-  bindTypeParamsFromType,
   ensureObjectType,
   ensureTypeMatches,
   getObjectTemplate,
@@ -14,11 +13,9 @@ import {
   getSymbolName,
   resolveTypeExpr,
 } from "../type-system.js";
-import {
-  typeDescriptorToUserString,
-  type StructuralField,
-} from "../type-arena.js";
-import type { TypingContext, TypingState } from "../types.js";
+import { bindTypeParams as bindTypeParamsFromType } from "../type-relations.js";
+import { typeDescriptorToUserString } from "../type-arena.js";
+import type { ObjectField, TypingContext, TypingState } from "../types.js";
 import {
   assertFieldAccess,
   canAccessField,
@@ -100,7 +97,7 @@ const typeNominalObjectLiteral = (
   }
 
   const typeName = getSymbolName(targetSymbol, ctx);
-  const templateFields = new Map<string, StructuralField>(
+  const templateFields = new Map<string, ObjectField>(
     template.fields.map((field) => [field.name, field])
   );
   const explicitTypeArgs =
@@ -145,7 +142,7 @@ const typeNominalObjectLiteral = (
     throw new Error("missing object type information for nominal literal");
   }
 
-  const declaredFields = new Map<string, StructuralField>(
+  const declaredFields = new Map<string, ObjectField>(
     objectInfo.fields.map((field) => [field.name, field])
   );
   const provided = new Set<string>();
@@ -206,7 +203,7 @@ const bindNominalObjectEntry = (
     typeName,
   }: {
     entry: HirObjectLiteralEntry;
-    declared: Map<string, StructuralField>;
+    declared: Map<string, ObjectField>;
     bindings: Map<TypeParamId, TypeId>;
     ctx: TypingContext;
     state: TypingState;
@@ -234,7 +231,7 @@ const mergeNominalObjectEntry = (
     typeName,
   }: {
     entry: HirObjectLiteralEntry;
-    declared: Map<string, StructuralField>;
+    declared: Map<string, ObjectField>;
     provided: Set<string>;
     ctx: TypingContext;
     state: TypingState;
@@ -265,7 +262,7 @@ const mergeNominalObjectEntry = (
 type NominalObjectEntryField = {
   fieldSpan: SourceSpan;
   name: string;
-  expectedField: StructuralField;
+  expectedField: ObjectField;
   valueType: TypeId;
   isSpread: boolean;
 };
@@ -279,7 +276,7 @@ const forEachNominalObjectEntryField = ({
   onField,
 }: {
   entry: HirObjectLiteralEntry;
-  declared: Map<string, StructuralField>;
+  declared: Map<string, ObjectField>;
   ctx: TypingContext;
   state: TypingState;
   typeName: string;
@@ -354,7 +351,7 @@ const resolveAccessibleObjectSpreadFields = ({
   ctx: TypingContext;
   state: TypingState;
   allowOwnerPrivate?: boolean;
-}): readonly StructuralField[] | undefined => {
+}): readonly ObjectField[] | undefined => {
   const spreadType = typeExpression(entry.value, ctx, state);
   if (spreadType === ctx.primitives.unknown) {
     return undefined;
@@ -385,12 +382,12 @@ const resolveExpectedNominalField = ({
   span,
   ctx,
 }: {
-  declared: Map<string, StructuralField>;
+  declared: Map<string, ObjectField>;
   name: string;
   typeName: string;
   span: SourceSpan;
   ctx: TypingContext;
-}): StructuralField => {
+}): ObjectField => {
   const expectedField = declared.get(name);
   if (expectedField) {
     return expectedField;

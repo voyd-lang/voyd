@@ -5,14 +5,15 @@ import { getExprEffectRow } from "../effects.js";
 import {
   getNominalComponent,
   matchedUnionMembers,
-  narrowTypeForPattern,
   ensureTypeMatches,
   resolveTypeExpr,
-  unfoldRecursiveType,
   getStructuralFields,
   getSymbolName,
-  unifyWithBudget,
 } from "../type-system.js";
+import {
+  narrowForPattern as narrowTypeForPattern,
+  unify as unifyWithBudget,
+} from "../type-relations.js";
 import {
   diagnosticFromCode,
   DiagnosticError,
@@ -36,7 +37,7 @@ export const typeMatchExpr = (
 ): TypeId => {
   const discardValue = options.discardValue === true;
   const rawDiscriminantType = typeExpression(expr.discriminant, ctx, state);
-  const discriminantType = unfoldRecursiveType(rawDiscriminantType, ctx);
+  const discriminantType = ctx.arena.unfoldRecursive(rawDiscriminantType);
   const discriminantExpr = ctx.hir.expressions.get(expr.discriminant);
   const discriminantSymbol =
     discriminantExpr?.exprKind === "identifier"
@@ -287,8 +288,7 @@ const narrowMatchPattern = (
         pattern.typeId = ctx.primitives.unknown;
         return ctx.primitives.unknown;
       }
-      const narrowed =
-        candidates.length === 1 ? candidates[0]! : ctx.arena.internUnion(candidates);
+      const narrowed = ctx.arena.internUnion(candidates);
       pattern.typeId = narrowed;
       return narrowed;
     }

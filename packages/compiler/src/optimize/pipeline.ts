@@ -7,6 +7,7 @@ import type {
   ProgramCodegenView,
 } from "../semantics/codegen-view/index.js";
 import { buildEffectsLoweringInfo } from "../semantics/effects/analysis.js";
+import { buildEffectsIr } from "../semantics/effects/ir/build.js";
 import { getSymbolTable } from "../semantics/_internal/symbol-table.js";
 import {
   analyzeLambdaCaptures,
@@ -259,6 +260,10 @@ const buildOptimizationIr = ({
       semantics,
       hir: cloneHir(moduleView.hir),
       effectsInfo: cloneHir(moduleView.effectsInfo),
+      effectsIr: buildEffectsIr({
+        hir: moduleView.hir,
+        info: moduleView.effectsInfo,
+      }),
     });
   });
 
@@ -1850,11 +1855,16 @@ const rebuildEffectsInfo = ({
 }: {
   moduleView: OptimizedModuleView;
 }): void => {
-  moduleView.effectsInfo = buildEffectsLoweringInfo({
+  const effectsInfo = buildEffectsLoweringInfo({
     binding: moduleView.semantics.binding,
     symbolTable: getSymbolTable(moduleView.semantics),
     hir: moduleView.hir,
     typing: moduleView.semantics.typing,
+  });
+  moduleView.effectsInfo = effectsInfo;
+  moduleView.effectsIr = buildEffectsIr({
+    hir: moduleView.hir,
+    info: effectsInfo,
   });
 };
 

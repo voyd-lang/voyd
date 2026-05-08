@@ -8,8 +8,8 @@ import {
 import {
   ensureTypeMatches,
   resolveTypeExpr,
-  typeSatisfies,
 } from "../type-system.js";
+import { satisfies as typeSatisfies } from "../type-relations.js";
 import type { TypingContext, TypingState } from "../types.js";
 import {
   analyzeContinuationUsage,

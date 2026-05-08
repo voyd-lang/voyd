@@ -1,14 +1,15 @@
 import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
 import type { SourceSpan } from "../ids.js";
-import type { StructuralField } from "./type-arena.js";
 import type {
   MemberMetadata,
+  ObjectField,
+  ObjectFieldAccessMetadata,
   TypingContext,
   TypingState,
 } from "./types.js";
 
 const visibilityLabel = (
-  visibility: StructuralField["visibility"] | MemberMetadata["visibility"]
+  visibility: ObjectFieldAccessMetadata["visibility"] | MemberMetadata["visibility"]
 ): string => {
   if (!visibility) {
     return "unknown";
@@ -23,7 +24,7 @@ const sharesPackage = (
 ): boolean => (packageId ?? ctx.packageId) === ctx.packageId;
 
 export const canAccessField = (
-  field: StructuralField,
+  field: ObjectField,
   ctx: TypingContext,
   state: TypingState,
   options: { allowOwnerPrivate?: boolean } = {}
@@ -53,11 +54,11 @@ export const canAccessField = (
 };
 
 export const filterAccessibleFields = (
-  fields: readonly StructuralField[],
+  fields: readonly ObjectField[],
   ctx: TypingContext,
   state: TypingState,
   options: { allowOwnerPrivate?: boolean } = {}
-): StructuralField[] =>
+): ObjectField[] =>
   fields.filter((field) => canAccessField(field, ctx, state, options));
 
 const canAccessMember = (
@@ -89,7 +90,7 @@ export const assertFieldAccess = ({
   context,
   allowOwnerPrivate,
 }: {
-  field: StructuralField;
+  field: ObjectField;
   ctx: TypingContext;
   state: TypingState;
   span?: SourceSpan;
@@ -153,7 +154,7 @@ export const reportInaccessibleFieldRequirement = ({
   span,
   allowOwnerPrivate,
 }: {
-  field: StructuralField;
+  field: ObjectField;
   typeName: string;
   ctx: TypingContext;
   state: TypingState;

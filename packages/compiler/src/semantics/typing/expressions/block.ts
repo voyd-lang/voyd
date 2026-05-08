@@ -12,9 +12,9 @@ import { mergeBranchType } from "./branching.js";
 import {
   ensureTypeMatches,
   resolveTypeExpr,
-  typeSatisfies,
   getSymbolName,
 } from "../type-system.js";
+import { satisfies as typeSatisfies } from "../type-relations.js";
 import { DiagnosticError, emitDiagnostic } from "../../../diagnostics/index.js";
 import type { TypingContext, TypingState } from "../types.js";
 

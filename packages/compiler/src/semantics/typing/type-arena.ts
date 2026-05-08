@@ -1,12 +1,10 @@
 import type {
   EffectRowId,
   NodeId,
-  SymbolId,
   TypeId,
   TypeParamId,
   TypeSchemeId,
 } from "../ids.js";
-import type { HirVisibility } from "../hir/index.js";
 import { symbolRefEquals, type SymbolRef } from "./symbol-ref.js";
 
 export type Substitution = ReadonlyMap<TypeParamId, TypeId>;
@@ -61,9 +59,6 @@ export interface StructuralField {
   type: TypeId;
   optional?: boolean;
   declaringParams?: readonly TypeParamId[];
-  visibility?: HirVisibility;
-  owner?: SymbolId;
-  packageId?: string;
 }
 
 export interface StructuralObjectType {
@@ -170,6 +165,10 @@ export interface TypeArena {
   internIntersection(desc: Omit<IntersectionType, "kind">): TypeId;
   internFixedArray(element: TypeId): TypeId;
   internTypeParamRef(param: TypeParamId): TypeId;
+  unfoldRecursive(type: TypeId): TypeId;
+  nominalComponent(type: TypeId): TypeId | undefined;
+  structuralComponent(type: TypeId): TypeId | undefined;
+  isUnknownPrimitive(type: TypeId): boolean;
   freshTypeParam(): TypeParamId;
   newScheme(
     params: readonly TypeParamId[],
@@ -479,9 +478,6 @@ export const createTypeArena = (): TypeArena => {
                 type: cloneReplacingSelf(field.type),
                 optional: field.optional,
                 declaringParams: field.declaringParams,
-                visibility: field.visibility,
-                owner: field.owner,
-                packageId: field.packageId,
               })),
             });
           case "function":
@@ -551,24 +547,61 @@ export const createTypeArena = (): TypeArena => {
       typeArgs: [...desc.typeArgs],
     });
 
+  const fieldShapeKey = (field: StructuralField): string => {
+    const declaringParamsKey =
+      field.declaringParams && field.declaringParams.length > 0
+        ? field.declaringParams.join(",")
+        : "u";
+    const optionalKey = field.optional ? "1" : "0";
+    return `${jsonStringKey(field.name)}:${field.type}:${optionalKey}:${declaringParamsKey}`;
+  };
+
+  const normalizeStructuralFieldShapes = (
+    fields: readonly StructuralField[],
+  ): readonly StructuralField[] => {
+    const normalized = fields
+      .map((field) => ({
+        name: field.name,
+        type: field.type,
+        optional: field.optional ?? false,
+        declaringParams:
+          field.declaringParams && field.declaringParams.length > 0
+            ? Array.from(new Set(field.declaringParams)).sort((a, b) => a - b)
+            : undefined,
+      }))
+      .sort((a, b) => {
+        const byName = a.name.localeCompare(b.name, undefined, {
+          numeric: true,
+        });
+        if (byName !== 0) {
+          return byName;
+        }
+        if (a.type !== b.type) {
+          return a.type - b.type;
+        }
+        if ((a.optional ?? false) !== (b.optional ?? false)) {
+          return a.optional ? 1 : -1;
+        }
+        return fieldShapeKey(a).localeCompare(fieldShapeKey(b));
+      });
+
+    const seen = new Set<string>();
+    return normalized.filter((field) => {
+      const key = fieldShapeKey(field);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+  };
+
   const internStructuralObject = (
     desc: Omit<StructuralObjectType, "kind">,
   ): TypeId =>
     storeDescriptor({
       kind: "structural-object",
-      fields: desc.fields
-        .map((field) => ({
-          name: field.name,
-          type: field.type,
-          optional: field.optional ?? false,
-          declaringParams:
-            field.declaringParams && field.declaringParams.length > 0
-              ? Array.from(new Set(field.declaringParams)).sort((a, b) => a - b)
-              : undefined,
-        }))
-        .sort((a, b) =>
-          a.name.localeCompare(b.name, undefined, { numeric: true }),
-        ),
+      fields: normalizeStructuralFieldShapes(desc.fields),
     });
 
   const internFunction = (desc: Omit<FunctionType, "kind">): TypeId =>
@@ -595,6 +628,9 @@ export const createTypeArena = (): TypeArena => {
     });
 
     const canonical = [...new Set(flattened)].sort((a, b) => a - b);
+    if (canonical.length === 1) {
+      return canonical[0]!;
+    }
     return storeDescriptor({ kind: "union", members: canonical });
   };
 
@@ -649,6 +685,89 @@ export const createTypeArena = (): TypeArena => {
   const isUnknownPrimitive = (type: TypeId): boolean => {
     const desc = getDescriptor(type);
     return desc.kind === "primitive" && desc.name === "unknown";
+  };
+
+  const unfoldRecursiveOnce = (type: TypeId): TypeId => {
+    const desc = getDescriptor(type);
+    if (desc.kind !== "recursive") {
+      return type;
+    }
+    const cached = recursiveUnfoldCache.get(type);
+    if (typeof cached === "number") {
+      return cached;
+    }
+    const unfolded = substitute(desc.body, new Map([[desc.binder, type]]));
+    recursiveUnfoldCache.set(type, unfolded);
+    return unfolded;
+  };
+
+  const unfoldRecursive = (type: TypeId): TypeId => {
+    let current = type;
+    const seen = new Set<TypeId>();
+
+    while (!seen.has(current)) {
+      seen.add(current);
+      const unfolded = unfoldRecursiveOnce(current);
+      if (unfolded === current) {
+        return current;
+      }
+      current = unfolded;
+    }
+
+    return current;
+  };
+
+  const nominalComponent = (
+    type: TypeId,
+    seen: Set<TypeId> = new Set(),
+  ): TypeId | undefined => {
+    if (seen.has(type) || isUnknownPrimitive(type)) {
+      return undefined;
+    }
+    seen.add(type);
+
+    const unfolded = unfoldRecursive(type);
+    const desc = getDescriptor(unfolded);
+    switch (desc.kind) {
+      case "nominal-object":
+      case "value-object":
+        return unfolded;
+      case "intersection":
+        if (typeof desc.nominal === "number") {
+          return desc.nominal;
+        }
+        return typeof desc.structural === "number"
+          ? nominalComponent(desc.structural, seen)
+          : undefined;
+      default:
+        return undefined;
+    }
+  };
+
+  const structuralComponent = (
+    type: TypeId,
+    seen: Set<TypeId> = new Set(),
+  ): TypeId | undefined => {
+    if (seen.has(type) || isUnknownPrimitive(type)) {
+      return undefined;
+    }
+    seen.add(type);
+
+    const unfolded = unfoldRecursive(type);
+    const desc = getDescriptor(unfolded);
+    switch (desc.kind) {
+      case "structural-object":
+        return unfolded;
+      case "intersection":
+        if (typeof desc.structural === "number") {
+          return desc.structural;
+        }
+        return typeof desc.nominal === "number"
+          ? structuralComponent(desc.nominal, seen)
+          : undefined;
+      default:
+        return undefined;
+    }
   };
 
   const instantiate = (
@@ -1084,20 +1203,6 @@ export const createTypeArena = (): TypeArena => {
       const resolved = structuralResolver(type);
       // Returning undefined means no projection; the original type is preserved.
       return typeof resolved === "number" ? resolved : type;
-    };
-
-    const unfoldRecursiveOnce = (type: TypeId): TypeId => {
-      const desc = getDescriptor(type);
-      if (desc.kind !== "recursive") {
-        return type;
-      }
-      const cached = recursiveUnfoldCache.get(type);
-      if (typeof cached === "number") {
-        return cached;
-      }
-      const unfolded = substitute(desc.body, new Map([[desc.binder, type]]));
-      recursiveUnfoldCache.set(type, unfolded);
-      return unfolded;
     };
 
     const unifyInternal = (
@@ -1703,9 +1808,6 @@ export const createTypeArena = (): TypeArena => {
                       type: substituted,
                       optional: field.optional,
                       declaringParams: field.declaringParams,
-                      visibility: field.visibility,
-                      owner: field.owner,
-                      packageId: field.packageId,
                     };
               });
               return changed
@@ -1782,6 +1884,10 @@ export const createTypeArena = (): TypeArena => {
     internIntersection,
     internFixedArray,
     internTypeParamRef,
+    unfoldRecursive,
+    nominalComponent,
+    structuralComponent,
+    isUnknownPrimitive,
     freshTypeParam,
     newScheme,
     instantiate,

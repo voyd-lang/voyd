@@ -1,6 +1,7 @@
 import type { SourceSpan, TypeId } from "../../ids.js";
 import type { TypingContext, TypingState } from "../types.js";
-import { internCheckedUnion, typeSatisfies } from "../type-system.js";
+import { internCheckedUnion } from "../type-system.js";
+import { satisfies as typeSatisfies } from "../type-relations.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 
 export const mergeBranchType = ({
