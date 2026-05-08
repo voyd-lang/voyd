@@ -18,17 +18,8 @@ test "float overloads clamp and between":
 
 test "lerp inverse_lerp and map_range support overloads":
   assert(lerp(0.0, 10.0, 0.25), eq: 2.5)
-  assert(lerp(0.0, 10.0, 0.25), eq: 2.5)
 
   assert(approx_eq(inverse_lerp(2.5, 0.0, 10.0), 0.25, 0.000000000001), eq: true)
-  assert(
-    approx_eq(
-      inverse_lerp(2.5, 0.0, 10.0),
-      0.25,
-      0.000000000001
-    ),
-    eq: true
-  )
 
   assert(
     approx_eq(

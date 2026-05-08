@@ -1,0 +1,79 @@
+eff Probe
+  touch(resume) -> void
+
+val Vec3 {
+  x: f64,
+  y: f64,
+  z: f64
+}
+
+val Sphere {
+  center: Vec3,
+  radius: f64,
+  albedo: Vec3,
+  fuzz: f64,
+  refraction_index: f64,
+  material_kind: i32
+}
+
+fn sample_sphere() -> Sphere
+  Sphere {
+    center: Vec3 { x: 1.0, y: 2.0, z: 3.0 },
+    radius: 4.0,
+    albedo: Vec3 { x: 5.0, y: 6.0, z: 7.0 },
+    fuzz: 8.0,
+    refraction_index: 9.0,
+    material_kind: 10
+  }
+
+fn read_sphere(sphere: Sphere) -> f64
+  sphere.center.x + sphere.radius + sphere.albedo.y
+
+fn build_sphere_with_effect(): Probe -> Sphere
+  Probe::touch()
+  sample_sphere()
+
+pub fn direct_effectful_wide_value_return(): () -> f64
+  try
+    read_sphere(build_sphere_with_effect())
+  Probe::touch(resume):
+    resume()
+
+trait PureEmitWide
+  fn emit(self) -> Sphere
+
+obj PureHolder {
+  sphere: Sphere
+}
+
+impl PureEmitWide for PureHolder
+  fn emit(self) -> Sphere
+    self.sphere
+
+fn read_pure_trait(emitter: PureEmitWide) -> f64
+  read_sphere(emitter.emit())
+
+pub fn trait_dispatch_wide_value_return() -> f64
+  read_pure_trait(PureHolder { sphere: sample_sphere() })
+
+trait EffectfulEmitWide
+  fn emit_effectful(self): Probe -> Sphere
+
+obj EffectfulHolder {
+  sphere: Sphere
+}
+
+impl EffectfulEmitWide for EffectfulHolder
+  fn emit_effectful(self) -> Sphere
+    return self.sphere
+
+fn read_effectful_trait(emitter: EffectfulEmitWide): Probe -> f64
+  let sphere = emitter.emit_effectful()
+  Probe::touch()
+  read_sphere(sphere)
+
+pub fn trait_dispatch_effectful_wide_value_return(): () -> f64
+  try
+    read_effectful_trait(EffectfulHolder { sphere: sample_sphere() })
+  Probe::touch(resume):
+    resume()
