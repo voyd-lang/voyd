@@ -201,6 +201,35 @@ export const createTypeArena = (): TypeArena => {
   const symbolRefKeyForCache = (ref: SymbolRef): string =>
     `${jsonStringKey(ref.moduleId)}:${ref.symbol}`;
 
+  const fieldVisibilityKeyForCache = (
+    visibility: StructuralField["visibility"],
+  ): string => {
+    if (!visibility) {
+      return "u";
+    }
+    return `${visibility.level}:${visibility.api === true ? "1" : "0"}`;
+  };
+
+  const structuralFieldKeyForCache = (field: StructuralField): string => {
+    const declaringParamsKey =
+      field.declaringParams && field.declaringParams.length > 0
+        ? field.declaringParams.join(",")
+        : "u";
+    const optionalKey = field.optional ? "1" : "0";
+    const ownerKey = typeof field.owner === "number" ? field.owner : "u";
+    const packageKey =
+      field.packageId === undefined ? "u" : jsonStringKey(field.packageId);
+    return [
+      jsonStringKey(field.name),
+      field.type,
+      optionalKey,
+      declaringParamsKey,
+      fieldVisibilityKeyForCache(field.visibility),
+      ownerKey,
+      packageKey,
+    ].join(":");
+  };
+
   const keyFor = (desc: TypeDescriptor): string => {
     switch (desc.kind) {
       case "primitive":
@@ -226,14 +255,7 @@ export const createTypeArena = (): TypeArena => {
         return `value-object:${symbolRefKeyForCache(desc.owner)}:${desc.name === undefined ? "u" : jsonStringKey(desc.name)}:[${desc.typeArgs.join(",")}]`;
       case "structural-object": {
         const fieldsKey = desc.fields
-          .map((field) => {
-            const declaringParamsKey =
-              field.declaringParams && field.declaringParams.length > 0
-                ? field.declaringParams.join(",")
-                : "u";
-            const optionalKey = field.optional ? "1" : "0";
-            return `${jsonStringKey(field.name)}:${field.type}:${optionalKey}:${declaringParamsKey}`;
-          })
+          .map((field) => structuralFieldKeyForCache(field))
           .join("|");
         return `structural-object:{${fieldsKey}}`;
       }
@@ -565,6 +587,9 @@ export const createTypeArena = (): TypeArena => {
             field.declaringParams && field.declaringParams.length > 0
               ? Array.from(new Set(field.declaringParams)).sort((a, b) => a - b)
               : undefined,
+          visibility: field.visibility,
+          owner: field.owner,
+          packageId: field.packageId,
         }))
         .sort((a, b) =>
           a.name.localeCompare(b.name, undefined, { numeric: true }),
@@ -595,6 +620,9 @@ export const createTypeArena = (): TypeArena => {
     });
 
     const canonical = [...new Set(flattened)].sort((a, b) => a - b);
+    if (canonical.length === 1) {
+      return canonical[0]!;
+    }
     return storeDescriptor({ kind: "union", members: canonical });
   };
 

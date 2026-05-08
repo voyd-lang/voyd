@@ -3301,7 +3301,7 @@ export const narrowTypeForPattern = (
     if (matches.length === 0) {
       return undefined;
     }
-    return matches.length === 1 ? matches[0] : ctx.arena.internUnion(matches);
+    return ctx.arena.internUnion(matches);
   }
   return unionMemberMatchesPattern(discriminantType, patternType, ctx, state)
     ? discriminantType
@@ -3634,8 +3634,7 @@ const bindTypeParamsFromUnion = ({
           return;
         }
       } else {
-        const remainderType =
-          remainder.length === 1 ? remainder[0]! : ctx.arena.internUnion(remainder);
+        const remainderType = ctx.arena.internUnion(remainder);
         bindTypeParamsFromType(
           remainderTarget,
           remainderType,

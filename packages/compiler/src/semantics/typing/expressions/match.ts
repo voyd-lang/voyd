@@ -288,7 +288,7 @@ const narrowMatchPattern = (
         return ctx.primitives.unknown;
       }
       const narrowed =
-        candidates.length === 1 ? candidates[0]! : ctx.arena.internUnion(candidates);
+        ctx.arena.internUnion(candidates);
       pattern.typeId = narrowed;
       return narrowed;
     }
