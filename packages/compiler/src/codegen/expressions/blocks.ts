@@ -29,6 +29,7 @@ import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { handlerCleanupOps } from "../effects/handler-stack.js";
 import { tailResumptionExitChecks } from "../effects/tail-resumptions.js";
 import { boxSignatureSpillValue } from "../signature-spill.js";
+import { tryCompileScalarObjectBinding } from "../scalar-objects.js";
 
 const expressionUsesExpectedResultType = ({
   exprId,
@@ -410,6 +411,37 @@ const compileLetStatement = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef => {
+  if (stmt.pattern.kind === "identifier") {
+    const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+    const targetTypeId = getDeclaredSymbolTypeId(
+      stmt.pattern.symbol,
+      ctx,
+      typeInstanceId,
+    );
+    const scalarReplacedSymbols = ctx.optimization?.scalarReplacedObjectLocals.get(
+      ctx.moduleId,
+    );
+    const initializer = ctx.module.hir.expressions.get(stmt.initializer);
+    if (
+      scalarReplacedSymbols?.has(stmt.pattern.symbol) &&
+      initializer?.exprKind === "object-literal"
+    ) {
+      const scalarOps = tryCompileScalarObjectBinding({
+        symbol: stmt.pattern.symbol,
+        initializer,
+        targetTypeId,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
+      if (scalarOps) {
+        return scalarOps.length === 0
+          ? ctx.mod.nop()
+          : ctx.mod.block(null, [...scalarOps], binaryen.none);
+      }
+    }
+  }
+
   if (stmt.pattern.kind === "identifier" && !stmt.mutable) {
     if (fnCtx.nonBorrowableProjectedSymbols?.has(stmt.pattern.symbol)) {
       return compileDefaultLetStatement(stmt, ctx, fnCtx, compileExpr);

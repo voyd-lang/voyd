@@ -7,6 +7,7 @@ import type {
   FunctionContext,
   FunctionMetadata,
   HirFunction,
+  LocalBinding,
 } from "../../context.js";
 import { allocateTempLocal } from "../../locals.js";
 import { walkHirExpression } from "../../hir-walk.js";
@@ -117,13 +118,15 @@ const isInlineCandidate = ({
 export const tryInlineResolvedCall = ({
   meta,
   args,
+  parameterBindings,
   ctx,
   fnCtx,
   compileExpr,
   options = {},
 }: {
   meta: FunctionMetadata;
-  args: readonly binaryen.ExpressionRef[];
+  args: readonly (binaryen.ExpressionRef | undefined)[];
+  parameterBindings?: ReadonlyMap<number, LocalBinding>;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -158,7 +161,20 @@ export const tryInlineResolvedCall = ({
     effectful: false,
   };
 
-  const setupOps = args.map((arg, index) => {
+  const setupOps = meta.parameters.flatMap((_parameter, index) => {
+    const prebound = parameterBindings?.get(index);
+    if (prebound) {
+      inlineFnCtx.bindings.set(fn.parameters[index]!.symbol, {
+        ...prebound,
+        typeId: meta.paramTypeIds[index],
+      });
+      return [];
+    }
+
+    const arg = args[index];
+    if (arg === undefined) {
+      throw new Error("inline call argument was not compiled");
+    }
     const local = allocateTempLocal(
       meta.paramTypes[index] as binaryen.Type,
       inlineFnCtx,
@@ -169,7 +185,7 @@ export const tryInlineResolvedCall = ({
       kind: "local",
       typeId: meta.paramTypeIds[index],
     });
-    return ownerCtx.mod.local.set(local.index, arg);
+    return [ownerCtx.mod.local.set(local.index, arg)];
   });
 
   const body = compileExpr({

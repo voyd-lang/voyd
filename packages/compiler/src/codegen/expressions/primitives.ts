@@ -18,6 +18,7 @@ import { resolveModuleLetGetter } from "../module-lets.js";
 import { materializeProjectedElementBinding } from "../projected-element-views.js";
 import { coerceValueToType } from "../structural.js";
 import { unboxSignatureSpillValue } from "../signature-spill.js";
+import { materializeScalarObjectBindingValue } from "../scalar-objects.js";
 
 const encoder = new TextEncoder();
 
@@ -122,6 +123,26 @@ export const compileIdentifierExpr = (
                 [...materialized.setup, exprValue],
                 binaryen.getExpressionType(exprValue),
               ),
+        usedReturnCall: false,
+      };
+    }
+    if (binding.kind === "scalar-object") {
+      const value = materializeScalarObjectBindingValue({
+        binding,
+        ctx,
+        fnCtx,
+      });
+      return {
+        expr:
+          typeof expectedResultTypeId === "number"
+            ? coerceValueToType({
+                value,
+                actualType: binding.typeId ?? expectedResultTypeId,
+                targetType: expectedResultTypeId,
+                ctx,
+                fnCtx,
+              })
+            : value,
         usedReturnCall: false,
       };
     }

@@ -265,11 +265,17 @@ export interface LocalBindingProjectedElement extends LocalBindingBase {
   arrayTypeId: TypeId;
 }
 
+export interface LocalBindingScalarObject extends LocalBindingBase {
+  kind: "scalar-object";
+  fields: ReadonlyMap<string, LocalBindingLocal>;
+}
+
 export type LocalBinding =
   | LocalBindingLocal
   | LocalBindingCapture
   | LocalBindingStorageRef
-  | LocalBindingProjectedElement;
+  | LocalBindingProjectedElement
+  | LocalBindingScalarObject;
 
 export interface HandlerScope {
   prevHandler: LocalBindingLocal;

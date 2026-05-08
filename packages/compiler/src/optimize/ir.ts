@@ -27,6 +27,7 @@ export type ProgramOptimizationFacts = {
   reachableFunctionSymbols: ReadonlySet<ProgramSymbolId>;
   reachableModuleLets: ReadonlyMap<string, ReadonlySet<SymbolId>>;
   usedTraitDispatchSignatures: ReadonlySet<string>;
+  scalarReplacedObjectLocals: ReadonlyMap<string, ReadonlySet<SymbolId>>;
 };
 
 export type ProgramOptimizationIR = {
