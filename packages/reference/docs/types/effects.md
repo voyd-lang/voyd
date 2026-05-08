@@ -80,6 +80,11 @@ fn call_open<T>(cb: fn() : (Async, open) -> T) : (open) -> T
     cb()
   Async::await(tail, value):
     tail(value + 1)
+
+fn with_nested_callback(
+  cb: fn(inner: fn() : (open) -> i32) -> i32
+) : (open) -> i32
+  cb(() => 1)
 ```
 
 - `fn() -> T` omits the callback row and leaves it effect-polymorphic.
@@ -91,6 +96,11 @@ fn call_open<T>(cb: fn() : (Async, open) -> T) : (open) -> T
 `try open` composes with open callback rows. When a higher-order function
 handles `Async` from `fn() : (Async, open) -> T`, the remaining callback effects
 continue to bubble outward through the open tail row.
+
+Nested callback parameters use the same spelling. In
+`fn(inner: fn() : (open) -> i32) -> i32`, the `inner` callback can perform any
+effects and the outer callback remains polymorphic over effects caused by
+calling it.
 
 ## Exported APIs
 

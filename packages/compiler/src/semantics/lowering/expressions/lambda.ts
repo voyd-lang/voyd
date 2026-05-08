@@ -12,6 +12,7 @@ import {
   lowerTypeParameters,
   wrapInOptionalTypeExpr,
 } from "../type-expressions.js";
+import { normalizeNestedFunctionTypeAnnotation } from "../../function-type-annotations.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirParameter } from "../../hir/index.js";
 import { unwrapMutablePattern } from "./patterns.js";
@@ -95,8 +96,9 @@ const lowerLambdaParameter = (
     };
   }
 
-  if (isForm(target) && target.calls(":")) {
-    const nameExpr = target.at(1);
+  if (isForm(target) && (target.calls(":") || target.calls("?:"))) {
+    const { nameExpr, typeExpr, optional } =
+      normalizeNestedFunctionTypeAnnotation(target);
     const { target: nameTarget, bindingKind: nameBinding } =
       unwrapMutablePattern(nameExpr);
     if (
@@ -106,35 +108,14 @@ const lowerLambdaParameter = (
       throw new Error("lambda parameter name must be an identifier");
     }
     const symbol = resolveSymbol(nameTarget.value, scopes.current(), ctx);
-    return {
-      symbol,
-      pattern: {
-        kind: "identifier",
-        symbol,
-        span: toSourceSpan(param),
-        bindingKind: nameBinding ?? bindingKind,
-      },
-      mutable: false,
-      span: toSourceSpan(param),
-      type: lowerTypeExpr(target.at(2), ctx, scopes.current()),
-    };
-  }
-
-  if (isForm(target) && target.calls("?:")) {
-    const nameExpr = target.at(1);
-    const { target: nameTarget, bindingKind: nameBinding } =
-      unwrapMutablePattern(nameExpr);
-    if (
-      !isIdentifierAtom(nameTarget) &&
-      !isInternalIdentifierAtom(nameTarget)
-    ) {
-      throw new Error("lambda parameter name must be an identifier");
-    }
-    const symbol = resolveSymbol(nameTarget.value, scopes.current(), ctx);
-    const lowered = lowerTypeExpr(target.at(2), ctx, scopes.current());
-    if (!lowered) {
+    const lowered = lowerTypeExpr(typeExpr, ctx, scopes.current());
+    if (optional && !lowered) {
       throw new Error("optional lambda parameter missing type");
     }
+    const type =
+      lowered && optional
+        ? wrapInOptionalTypeExpr({ inner: lowered, ctx, scope: scopes.current() })
+        : lowered;
     return {
       symbol,
       pattern: {
@@ -145,8 +126,8 @@ const lowerLambdaParameter = (
       },
       mutable: false,
       span: toSourceSpan(param),
-      optional: true,
-      type: wrapInOptionalTypeExpr({ inner: lowered, ctx, scope: scopes.current() }),
+      optional,
+      type,
     };
   }
 

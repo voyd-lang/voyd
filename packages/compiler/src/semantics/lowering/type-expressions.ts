@@ -17,6 +17,7 @@ import { resolveNamedTypeTarget } from "./named-type-resolution.js";
 import type { LowerContext } from "./types.js";
 import type { ScopeId, SymbolId } from "../ids.js";
 import { parseLambdaSignature } from "../lambda.js";
+import { normalizeNestedFunctionTypeAnnotation } from "../function-type-annotations.js";
 
 export const wrapInOptionalTypeExpr = ({
   inner,
@@ -259,9 +260,12 @@ const lowerFunctionTypeExpr = (
   );
 
   const parameters = signature.parameters.map((param) => {
-    const isOptional = isForm(param) && param.calls("?:");
-    const paramTypeExpr =
-      isForm(param) && (param.calls(":") || isOptional) ? param.at(2) : param;
+    const normalized =
+      isForm(param) && (param.calls(":") || param.calls("?:"))
+        ? normalizeNestedFunctionTypeAnnotation(param)
+        : undefined;
+    const isOptional = normalized?.optional === true;
+    const paramTypeExpr = normalized?.typeExpr ?? param;
     const lowered = lowerTypeExpr(paramTypeExpr, ctx, scope);
     if (!lowered) {
       throw new Error("function type parameter missing type");

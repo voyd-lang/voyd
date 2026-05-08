@@ -313,6 +313,77 @@ fn call(cb: fn() : (Async, open) -> i32)
     ).toEqual(["Async", "open"]);
   });
 
+  it("lowers explicit open rows in nested callback parameter types", () => {
+    const source = `
+eff Async
+  fn await(tail) -> i32
+
+fn call(cb: fn(inner: fn() : (Async, open) -> i32) -> i32)
+  cb(() => 1)
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    const moduleSymbol = symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    const builder = createHirBuilder({
+      path: "main.voyd",
+      scope: moduleSymbol,
+      ast: ast.syntaxId,
+      span: toSourceSpan(ast),
+    });
+
+    const hir = runLoweringPipeline({
+      builder,
+      binding,
+      moduleNodeId: ast.syntaxId,
+      modulePath: binding.modulePath,
+      packageId: binding.packageId,
+      isPackageRoot: binding.isPackageRoot,
+    });
+
+    const callSymbol = symbolTable.resolve("call", symbolTable.rootScope);
+    expect(typeof callSymbol).toBe("number");
+    if (typeof callSymbol !== "number") {
+      return;
+    }
+
+    const callFn = Array.from(hir.items.values()).find(
+      (item): item is HirFunction =>
+        item.kind === "function" && item.symbol === callSymbol
+    );
+    expect(callFn).toBeDefined();
+    if (!callFn) {
+      return;
+    }
+
+    const callbackType = callFn.parameters[0]?.type;
+    expect(callbackType?.typeKind).toBe("function");
+    if (callbackType?.typeKind !== "function") {
+      return;
+    }
+
+    const innerCallbackType = callbackType.parameters[0]?.type;
+    expect(innerCallbackType?.typeKind).toBe("function");
+    if (innerCallbackType?.typeKind !== "function") {
+      return;
+    }
+
+    expect(innerCallbackType.effectType?.typeKind).toBe("tuple");
+    if (innerCallbackType.effectType?.typeKind !== "tuple") {
+      return;
+    }
+
+    expect(
+      innerCallbackType.effectType.elements.map((element) =>
+        element.typeKind === "named" ? element.path.join("::") : element.typeKind
+      )
+    ).toEqual(["Async", "open"]);
+  });
+
   it("preserves ordinary type symbols named open outside effect rows", () => {
     const source = `
 type open = i32

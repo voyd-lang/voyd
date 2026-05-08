@@ -18,6 +18,7 @@ import { isIdentifierWithValue } from "../utils.js";
 import type { EffectAttribute, IntrinsicAttribute } from "../../parser/attributes.js";
 import type { HirBindingKind } from "../hir/index.js";
 import { ensureForm } from "./binders/utils.js";
+import { normalizeNestedFunctionTypeAnnotation } from "../function-type-annotations.js";
 
 export interface ParsedFunctionDecl {
   form: Form;
@@ -819,30 +820,6 @@ const parseDefaultedParam = (expr: Form): SignatureParam => {
     optional: true,
     defaultValue,
   };
-};
-
-const normalizeNestedFunctionTypeAnnotation = (
-  expr: Form
-): { nameExpr: Expr | undefined; typeExpr: Expr | undefined } => {
-  const nameExpr = expr.at(1);
-  const typeExpr = expr.at(2);
-  if (
-    isForm(nameExpr) &&
-    (nameExpr.calls(":") || nameExpr.calls("?:")) &&
-    isForm(typeExpr) &&
-    typeExpr.calls("->")
-  ) {
-    return {
-      nameExpr: nameExpr.at(1),
-      typeExpr: new Form([
-        new IdentifierAtomNode(":"),
-        nameExpr.at(2)!,
-        typeExpr,
-      ]),
-    };
-  }
-
-  return { nameExpr, typeExpr };
 };
 
 const parseParamName = (

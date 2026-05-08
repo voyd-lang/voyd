@@ -1,10 +1,9 @@
 import {
   type Expr,
-  Form,
-  IdentifierAtom,
   isForm,
   isIdentifierAtom,
 } from "../../../parser/index.js";
+import { normalizeNestedFunctionTypeAnnotation } from "../../function-type-annotations.js";
 import { toSourceSpan } from "../../utils.js";
 import type { HirBindingKind, HirPattern } from "../../hir/index.js";
 import type { LowerContext, LowerScopeStack } from "../types.js";
@@ -110,7 +109,7 @@ export const lowerPattern = (
     const {
       nameExpr,
       typeExpr,
-    } = normalizeNestedFunctionTypePattern(target);
+    } = normalizeNestedFunctionTypeAnnotation(target);
     if (!typeExpr) {
       throw new Error("typed pattern is missing a type annotation");
     }
@@ -145,28 +144,4 @@ export const unwrapMutablePattern = (
   }
 
   return { target: pattern };
-};
-
-const normalizeNestedFunctionTypePattern = (
-  target: Form
-): { nameExpr: Expr | undefined; typeExpr: Expr | undefined } => {
-  const nameExpr = target.at(1);
-  const typeExpr = target.at(2);
-  if (
-    isForm(nameExpr) &&
-    (nameExpr.calls(":") || nameExpr.calls("?:")) &&
-    isForm(typeExpr) &&
-    typeExpr.calls("->")
-  ) {
-    return {
-      nameExpr: nameExpr.at(1),
-      typeExpr: new Form([
-        new IdentifierAtom(":"),
-        nameExpr.at(2)!,
-        typeExpr,
-      ]),
-    };
-  }
-
-  return { nameExpr, typeExpr };
 };

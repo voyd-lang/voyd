@@ -833,6 +833,44 @@ fn main() : (open) -> i32 = run(() =>
     expect(typing.effects.isOpen(mainSig.effectRow)).toBe(true);
   });
 
+  it("supports explicit open rows in nested callback parameter types", () => {
+    const ast = parse(
+      `
+eff Async
+  fn await(tail) -> i32
+
+fn run(cb: fn(inner: fn() : (open) -> i32) -> i32) -> i32
+  cb(() => 1)
+
+fn main(): (open) -> i32
+  let f = (inner: fn() : (open) -> i32) -> i32 => inner()
+  run(f)
+`,
+      "effects.voyd"
+    );
+
+    const semantics = semanticsPipeline(ast);
+    const { typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const runSymbol = symbolTable.resolve("run", symbolTable.rootScope);
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(typeof runSymbol).toBe("number");
+    expect(typeof mainSymbol).toBe("number");
+    if (typeof runSymbol !== "number" || typeof mainSymbol !== "number") {
+      return;
+    }
+
+    const runSig = typing.functions.getSignature(runSymbol);
+    const mainSig = typing.functions.getSignature(mainSymbol);
+    expect(runSig && mainSig).toBeTruthy();
+    if (!runSig || !mainSig) {
+      return;
+    }
+
+    expect(typing.effects.isOpen(runSig.effectRow)).toBe(true);
+    expect(typing.effects.isOpen(mainSig.effectRow)).toBe(true);
+  });
+
   it("keeps nested case clauses inside try bodies out of handler matching", () => {
     const ast = parse(
       `

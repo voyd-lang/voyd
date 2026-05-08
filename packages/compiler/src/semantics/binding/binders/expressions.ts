@@ -20,6 +20,7 @@ import { declareValueOrParameter } from "../redefinitions.js";
 import type { BindingContext, BindingResult } from "../types.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import { parseLambdaSignature } from "../../lambda.js";
+import { normalizeNestedFunctionTypeAnnotation } from "../../function-type-annotations.js";
 import { ensureForm } from "./utils.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import {
@@ -434,7 +435,11 @@ const bindLambda = (
       if (!isForm(param)) {
         return;
       }
-      bindTypeExpr(param.at(2), ctx, tracker);
+      bindTypeExpr(
+        normalizeNestedFunctionTypeAnnotation(param).typeExpr,
+        ctx,
+        tracker
+      );
     });
     bindTypeExpr(signature.returnType, ctx, tracker);
     bindTypeExpr(signature.effectType, ctx, tracker);
@@ -484,13 +489,13 @@ const declareLambdaParam = (
 
   if (isForm(param) && (param.calls(":") || param.calls("?:"))) {
     rememberSyntax(param, ctx);
-    const nameExpr = param.at(1);
+    const { nameExpr, typeExpr } = normalizeNestedFunctionTypeAnnotation(param);
     const { target, bindingKind } = unwrapMutablePattern(nameExpr);
     if (!isIdentifierAtom(target)) {
       throw new Error("lambda parameter name must be an identifier");
     }
     rememberSyntax(target, ctx);
-    rememberSyntax(param.at(2) as Syntax, ctx);
+    rememberSyntax(typeExpr as Syntax, ctx);
     declareValueOrParameter({
       name: target.value,
       kind: "parameter",
