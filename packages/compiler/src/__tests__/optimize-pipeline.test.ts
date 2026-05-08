@@ -146,6 +146,15 @@ const getFunctionBodyValueExpr = ({
     : body;
 };
 
+const extractFunctionText = (wasmText: string, nameFragment: string): string => {
+  const start = wasmText.indexOf(`\n (func $${nameFragment}`);
+  if (start < 0) {
+    return "";
+  }
+  const next = wasmText.indexOf("\n (func $", start + 1);
+  return next < 0 ? wasmText.slice(start) : wasmText.slice(start, next);
+};
+
 describe("compiler optimization pipeline", () => {
   it("folds pure helper calls, prunes dead generic instances, and shrinks lambda captures", async () => {
     const { optimized } = await buildOptimized({
@@ -670,9 +679,12 @@ obj Vec2 {
   y: i32
 }
 
+fn read(vec: Vec2) -> i32
+  vec.x + vec.y
+
 pub fn main() -> i32
   let vec = Vec2 { x: 1, y: 2 }
-  vec.x + vec.y
+  read(vec)
 `,
       },
     });
@@ -750,5 +762,343 @@ pub fn main() -> i32
     expect(wasmText).toContain("call $src__main__run_");
     expect(wasmText).toContain("call $__has_type");
     expect(wasmText).not.toContain("call $__lookup_method_accessor");
+  });
+
+  it("scalar-replaces non-escaping object literal locals", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+pub fn main() -> i32
+  let pair = Pair { left: 3, right: 4 }
+  pair.left + pair.right
+`,
+      },
+    });
+
+    const mainFn = findFunction({
+      moduleId: "src::main",
+      name: "main",
+      program: optimized.program,
+    });
+    expect(mainFn?.kind).toBe("function");
+    if (!mainFn || mainFn.kind !== "function") return;
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    const pairLet = Array.from(optimized.program.modules.get("src::main")?.hir.statements.values() ?? [])
+      .find((stmt) => stmt.kind === "let" && stmt.pattern.kind === "identifier");
+    expect(pairLet?.kind).toBe("let");
+    if (!pairLet || pairLet.kind !== "let" || pairLet.pattern.kind !== "identifier") return;
+    expect(scalarLocals?.has(pairLet.pattern.symbol)).toBe(true);
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    const mainText = extractFunctionText(module.emitText(), "src__main__main_");
+    expect(mainText).not.toContain("struct.new");
+  });
+
+  it("does not scalar-replace object locals that escape as whole values", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+fn identity(pair: Pair) -> Pair
+  pair
+
+pub fn main() -> i32
+  let pair = Pair { left: 3, right: 4 }
+  identity(pair).left
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size ?? 0).toBe(0);
+  });
+
+  it("scalar-replaces non-escaping object method receivers", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+impl Pair
+  fn sum(self) -> i32
+    self.left + self.right
+
+pub fn main() -> i32
+  let pair = Pair { left: 3, right: 4 }
+  pair.sum()
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size).toBe(1);
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    const mainText = extractFunctionText(module.emitText(), "src__main__main_");
+    expect(mainText).not.toContain("struct.new");
+    expect(mainText).not.toContain("call $src__main__sum_");
+  });
+
+  it("does not scalar-replace method receivers that cannot stay scalar", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+eff Log
+  info(resume) -> void
+
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+impl Pair
+  fn sum(self): Log -> i32
+    Log::info()
+    self.left + self.right
+
+pub fn main(): Log -> i32
+  let pair = Pair { left: 3, right: 4 }
+  pair.sum()
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size ?? 0).toBe(0);
+  });
+
+  it("does not scalar-replace method receivers passed as whole values inside methods", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+fn identity(pair: Pair) -> Pair
+  pair
+
+impl Pair
+  fn sum(self) -> i32
+    identity(self).left
+
+pub fn main() -> i32
+  let pair = Pair { left: 3, right: 4 }
+  pair.sum()
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size ?? 0).toBe(0);
+  });
+
+  it("does not scalar-replace recursive method receivers inside method bodies", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+impl Pair
+  fn sum(self) -> i32
+    let other = Pair { left: 1, right: 2 }
+    if self.left > 0 then:
+      other.sum()
+    else:
+      self.right
+
+pub fn main() -> i32
+  let pair = Pair { left: 3, right: 4 }
+  pair.sum()
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size ?? 0).toBe(0);
+  });
+
+  it("does not scalar-replace method receivers with helper calls that can recurse", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+fn helper() -> i32
+  let other = Pair { left: 1, right: 2 }
+  other.sum()
+
+impl Pair
+  fn sum(self) -> i32
+    if self.left > 0 then:
+      helper()
+    else:
+      self.right
+
+pub fn main() -> i32
+  let pair = Pair { left: 3, right: 4 }
+  pair.sum()
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size ?? 0).toBe(0);
+  });
+
+  it("preserves scalar object field initializer evaluation order", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+pub fn main() -> i32
+  let pair = Pair { right: 1, left: 2 }
+  pair.left * 10 + pair.right
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size).toBe(1);
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    const mainText = extractFunctionText(module.emitText(), "src__main__main_");
+    expect(mainText.indexOf("(i32.const 1)")).toBeLessThan(
+      mainText.indexOf("(i32.const 2)"),
+    );
+  });
+
+  it("does not scalar-replace locals that can be captured by effect continuations", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+eff Log
+  info(resume) -> void
+
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+pub fn main(): Log -> i32
+  let pair = Pair { left: 3, right: 4 }
+  Log::info()
+  pair.left + pair.right
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size ?? 0).toBe(0);
+  });
+
+  it("scalar-replaces effectful function locals created after effect sites", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+eff Log
+  info(resume) -> void
+
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+pub fn main(): Log -> i32
+  Log::info()
+  let pair = Pair { left: 3, right: 4 }
+  pair.left + pair.right
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size).toBe(1);
+  });
+
+  it("scalar-replaces non-escaping mutable object field updates", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Pair {
+  left: i32,
+  right: i32
+}
+
+pub fn main() -> i32
+  let ~pair = Pair { left: 3, right: 4 }
+  pair.left = 9
+  pair.left + pair.right
+`,
+      },
+    });
+
+    const scalarLocals = optimized.facts.scalarReplacedObjectLocals.get("src::main");
+    expect(scalarLocals?.size).toBe(1);
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    const mainText = extractFunctionText(module.emitText(), "src__main__main_");
+    expect(mainText).not.toContain("struct.new");
+    expect(mainText).toContain("(i32.const 9)");
   });
 });

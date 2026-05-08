@@ -1,4 +1,10 @@
-import type { HirExpression, HirFunction, HirModuleLet } from "../semantics/hir/index.js";
+import type {
+  HirExpression,
+  HirFunction,
+  HirLetStatement,
+  HirModuleLet,
+  HirObjectLiteralExpr,
+} from "../semantics/hir/index.js";
 import { walkExpression } from "../semantics/hir/index.js";
 import type {
   CallLoweringInfo,
@@ -56,6 +62,7 @@ type MutableOptimizationIr = {
     reachableFunctionSymbols: Set<ProgramSymbolId>;
     reachableModuleLets: Map<string, Set<SymbolId>>;
     usedTraitDispatchSignatures: Set<string>;
+    scalarReplacedObjectLocals: Map<string, Set<SymbolId>>;
   };
 };
 
@@ -284,6 +291,7 @@ const buildOptimizationIr = ({
       reachableFunctionSymbols: new Set(),
       reachableModuleLets: new Map(),
       usedTraitDispatchSignatures: new Set(),
+      scalarReplacedObjectLocals: new Map(),
     },
   };
 };
@@ -1386,11 +1394,736 @@ const continuationAndHandlerEnvironmentShrinkingPass: ProgramOptimizationPass = 
   },
 };
 
+type ExpressionParent =
+  | { kind: "expr"; exprId: HirExprId; role: string }
+  | { kind: "stmt"; stmtId: number; role: string };
+
+const expressionChildren = (expr: HirExpression): readonly { id: HirExprId; role: string }[] => {
+  switch (expr.exprKind) {
+    case "literal":
+    case "identifier":
+    case "overload-set":
+    case "continue":
+      return [];
+    case "break":
+      return typeof expr.value === "number" ? [{ id: expr.value, role: "value" }] : [];
+    case "lambda":
+      return [{ id: expr.body, role: "body" }];
+    case "effect-handler":
+      return [
+        { id: expr.body, role: "body" },
+        ...expr.handlers.map((handler, index) => ({
+          id: handler.body,
+          role: `handler:${index}`,
+        })),
+        ...(typeof expr.finallyBranch === "number"
+          ? [{ id: expr.finallyBranch, role: "finally" }]
+          : []),
+      ];
+    case "block":
+      return typeof expr.value === "number" ? [{ id: expr.value, role: "value" }] : [];
+    case "call":
+      return [
+        { id: expr.callee, role: "callee" },
+        ...expr.args.map((arg, index) => ({ id: arg.expr, role: `arg:${index}` })),
+      ];
+    case "method-call":
+      return [
+        { id: expr.target, role: "target" },
+        ...expr.args.map((arg, index) => ({ id: arg.expr, role: `arg:${index}` })),
+      ];
+    case "tuple":
+      return expr.elements.map((id, index) => ({ id, role: `element:${index}` }));
+    case "loop":
+      return [{ id: expr.body, role: "body" }];
+    case "while":
+      return [
+        { id: expr.condition, role: "condition" },
+        { id: expr.body, role: "body" },
+      ];
+    case "cond":
+    case "if":
+      return [
+        ...expr.branches.flatMap((branch, index) => [
+          { id: branch.condition, role: `branch:${index}:condition` },
+          { id: branch.value, role: `branch:${index}:value` },
+        ]),
+        ...(typeof expr.defaultBranch === "number"
+          ? [{ id: expr.defaultBranch, role: "default" }]
+          : []),
+      ];
+    case "match":
+      return [
+        { id: expr.discriminant, role: "discriminant" },
+        ...expr.arms.flatMap((arm, index) => [
+          ...(typeof arm.guard === "number"
+            ? [{ id: arm.guard, role: `arm:${index}:guard` }]
+            : []),
+          { id: arm.value, role: `arm:${index}:value` },
+        ]),
+      ];
+    case "object-literal":
+      return expr.entries.map((entry, index) => ({
+        id: entry.value,
+        role: `entry:${index}`,
+      }));
+    case "field-access":
+      return [{ id: expr.target, role: "target" }];
+    case "assign":
+      return [
+        ...(typeof expr.target === "number"
+          ? [{ id: expr.target, role: "target" }]
+          : []),
+        { id: expr.value, role: "value" },
+      ];
+  }
+};
+
+const buildExpressionParents = ({
+  moduleView,
+}: {
+  moduleView: ModuleCodegenView;
+}): Map<HirExprId, ExpressionParent> => {
+  const parents = new Map<HirExprId, ExpressionParent>();
+  moduleView.hir.expressions.forEach((expr, exprId) => {
+    expressionChildren(expr).forEach((child) => {
+      parents.set(child.id, { kind: "expr", exprId, role: child.role });
+    });
+  });
+  moduleView.hir.statements.forEach((stmt, stmtId) => {
+    if (stmt.kind === "let") {
+      parents.set(stmt.initializer, { kind: "stmt", stmtId, role: "initializer" });
+      return;
+    }
+    if (stmt.kind === "expr-stmt") {
+      parents.set(stmt.expr, { kind: "stmt", stmtId, role: "expr" });
+      return;
+    }
+    if (stmt.kind === "return" && typeof stmt.value === "number") {
+      parents.set(stmt.value, { kind: "stmt", stmtId, role: "value" });
+    }
+  });
+  return parents;
+};
+
+const expressionContainsSymbol = ({
+  exprId,
+  symbol,
+  moduleView,
+}: {
+  exprId: HirExprId;
+  symbol: SymbolId;
+  moduleView: ModuleCodegenView;
+}): boolean => {
+  let found = false;
+  walkExpression({
+    exprId,
+    hir: moduleView.hir,
+    options: {
+      skipLambdas: false,
+      visitHandlerBodies: true,
+    },
+    onEnterExpression: (_id, expr) => {
+      if (expr.exprKind === "identifier" && expr.symbol === symbol) {
+        found = true;
+        return { stop: true };
+      }
+      return undefined;
+    },
+  });
+  return found;
+};
+
+const expressionContainsEffectHandler = ({
+  exprId,
+  moduleView,
+}: {
+  exprId: HirExprId;
+  moduleView: ModuleCodegenView;
+}): boolean => {
+  let found = false;
+  walkExpression({
+    exprId,
+    hir: moduleView.hir,
+    options: {
+      skipLambdas: false,
+      visitHandlerBodies: true,
+    },
+    onEnterExpression: (_id, expr) => {
+      if (expr.exprKind === "effect-handler") {
+        found = true;
+        return { stop: true };
+      }
+      return undefined;
+    },
+  });
+  return found;
+};
+
+const expressionContainsEffectfulCall = ({
+  exprId,
+  moduleView,
+}: {
+  exprId: HirExprId;
+  moduleView: ModuleCodegenView;
+}): boolean => {
+  let found = false;
+  walkExpression({
+    exprId,
+    hir: moduleView.hir,
+    options: {
+      skipLambdas: true,
+      visitHandlerBodies: false,
+    },
+    onEnterExpression: (_id, expr) => {
+      if (
+        (expr.exprKind === "call" || expr.exprKind === "method-call") &&
+        moduleView.effectsIr.calls.get(expr.id)?.kind !== "pure-call"
+      ) {
+        found = true;
+        return { stop: true };
+      }
+      return undefined;
+    },
+  });
+  return found;
+};
+
+const expressionIsAssignmentTarget = ({
+  exprId,
+  parents,
+  moduleView,
+}: {
+  exprId: HirExprId;
+  parents: ReadonlyMap<HirExprId, ExpressionParent>;
+  moduleView: ModuleCodegenView;
+}): boolean => {
+  let current = exprId;
+  while (true) {
+    const parent = parents.get(current);
+    if (!parent || parent.kind !== "expr") {
+      return false;
+    }
+    const parentExpr = moduleView.hir.expressions.get(parent.exprId);
+    if (parentExpr?.exprKind === "assign" && parent.role === "target") {
+      return true;
+    }
+    if (parentExpr?.exprKind !== "field-access" || parent.role !== "target") {
+      return false;
+    }
+    current = parent.exprId;
+  }
+};
+
+const expressionIsDirectAssignmentTarget = ({
+  exprId,
+  parents,
+  moduleView,
+}: {
+  exprId: HirExprId;
+  parents: ReadonlyMap<HirExprId, ExpressionParent>;
+  moduleView: ModuleCodegenView;
+}): boolean => {
+  const parent = parents.get(exprId);
+  if (!parent || parent.kind !== "expr" || parent.role !== "target") {
+    return false;
+  }
+  return moduleView.hir.expressions.get(parent.exprId)?.exprKind === "assign";
+};
+
+const objectLiteralHasDirectFieldInitializers = ({
+  expr,
+  typeId,
+  program,
+}: {
+  expr: HirObjectLiteralExpr;
+  typeId: TypeId;
+  program: ProgramCodegenView;
+}): boolean => {
+  if (expr.literalKind !== "nominal") {
+    return false;
+  }
+  const nominalTypeId = exactNominalForType({ typeId, program });
+  if (typeof nominalTypeId !== "number") {
+    return false;
+  }
+  const desc = program.types.getTypeDesc(nominalTypeId);
+  if (desc.kind !== "nominal-object") {
+    return false;
+  }
+  const objectInfo = program.objects.getInfoByNominal(nominalTypeId);
+  if (!objectInfo) {
+    return false;
+  }
+  const fieldNames = new Set(objectInfo.fields.map((field) => field.name));
+  const entries = new Set<string>();
+  for (const entry of expr.entries) {
+    if (entry.kind !== "field" || !fieldNames.has(entry.name)) {
+      return false;
+    }
+    entries.add(entry.name);
+  }
+  return entries.size === fieldNames.size;
+};
+
+const symbolTypeFor = ({
+  symbol,
+  moduleView,
+}: {
+  symbol: SymbolId;
+  moduleView: OptimizedModuleView;
+}): TypeId | undefined => {
+  const schemeId = moduleView.semantics.typing.table.getSymbolScheme(symbol);
+  return typeof schemeId === "number"
+    ? moduleView.semantics.typing.arena.getScheme(schemeId).body
+    : undefined;
+};
+
+const SCALAR_METHOD_INLINE_EXPR_LIMIT = 24;
+const SCALAR_METHOD_INLINE_STMT_LIMIT = 8;
+
+const simpleDirectSignatureType = ({
+  typeId,
+  program,
+}: {
+  typeId: TypeId;
+  program: ProgramCodegenView;
+}): boolean => {
+  const desc = program.types.getTypeDesc(typeId);
+  return desc.kind === "primitive" || desc.kind === "function";
+};
+
+const singletonMethodTarget = ({
+  expr,
+  moduleId,
+  program,
+}: {
+  expr: Extract<HirExpression, { exprKind: "method-call" }>;
+  moduleId: string;
+  program: ProgramCodegenView;
+}): { moduleId: string; symbol: SymbolId } | undefined => {
+  const callInfo = program.calls.getCallInfo(moduleId, expr.id);
+  if (callInfo.traitDispatch || callInfo.targets?.size !== 1) {
+    return undefined;
+  }
+  const functionId = callInfo.targets.values().next().value;
+  return typeof functionId === "number"
+    ? program.functions.getFunctionRef(functionId)
+    : undefined;
+};
+
+const isScalarLeafIntrinsicCall = ({
+  expr,
+  moduleId,
+  ownerModule,
+  program,
+}: {
+  expr: Extract<HirExpression, { exprKind: "call" }>;
+  moduleId: string;
+  ownerModule: ModuleCodegenView;
+  program: ProgramCodegenView;
+}): boolean => {
+  const callee = ownerModule.hir.expressions.get(expr.callee);
+  if (callee?.exprKind === "identifier") {
+    const localId = program.symbols.tryIdOf({
+      moduleId,
+      symbol: callee.symbol,
+    });
+    if (
+      typeof localId === "number" &&
+      program.symbols.getIntrinsicFunctionFlags(localId).intrinsic === true
+    ) {
+      return true;
+    }
+  }
+
+  const targets = program.calls.getCallInfo(moduleId, expr.id).targets;
+  if (!targets || targets.size === 0) {
+    return false;
+  }
+  return Array.from(targets.values()).every((target) =>
+    program.symbols.getIntrinsicFunctionFlags(target as ProgramSymbolId).intrinsic === true
+  );
+};
+
+const scalarInlineableMethodReceiverUse = ({
+  expr,
+  moduleId,
+  program,
+}: {
+  expr: Extract<HirExpression, { exprKind: "method-call" }>;
+  moduleId: string;
+  program: ProgramCodegenView;
+}): boolean => {
+  const target = singletonMethodTarget({ expr, moduleId, program });
+  if (!target) {
+    return false;
+  }
+
+  const ownerModule = program.modules.get(target.moduleId);
+  if (!ownerModule) {
+    return false;
+  }
+  const fn = functionItemBySymbol({
+    moduleView: ownerModule,
+    symbol: target.symbol,
+  });
+  const signature = program.functions.getSignature(target.moduleId, target.symbol);
+  if (!fn || !signature || !program.effects.isEmpty(signature.effectRow)) {
+    return false;
+  }
+  if (fn.parameters.some((parameter) => typeof parameter.defaultValue === "number")) {
+    return false;
+  }
+  if (
+    signature.parameters.length === 0 ||
+    signature.parameters.some((parameter) => (parameter.bindingKind ?? "value") !== "value") ||
+    !signature.parameters.slice(1).every((parameter) =>
+      simpleDirectSignatureType({ typeId: parameter.typeId, program }),
+    ) ||
+    !simpleDirectSignatureType({ typeId: signature.returnType, program })
+  ) {
+    return false;
+  }
+
+  const receiverSymbol = fn.parameters[0]?.symbol;
+  if (typeof receiverSymbol !== "number") {
+    return false;
+  }
+  const parents = buildExpressionParents({ moduleView: ownerModule });
+  let exprCount = 0;
+  let stmtCount = 0;
+  let allowed = true;
+  walkExpression({
+    exprId: fn.body,
+    hir: ownerModule.hir,
+    options: {
+      skipLambdas: false,
+      visitHandlerBodies: true,
+    },
+    onEnterExpression: (exprId, bodyExpr) => {
+      exprCount += 1;
+      if (exprCount > SCALAR_METHOD_INLINE_EXPR_LIMIT) {
+        allowed = false;
+        return { stop: true };
+      }
+
+      if (bodyExpr.exprKind === "identifier" && bodyExpr.symbol === receiverSymbol) {
+        const parent = parents.get(exprId);
+        const parentExpr =
+          parent?.kind === "expr"
+            ? ownerModule.hir.expressions.get(parent.exprId)
+            : undefined;
+        if (
+          parent?.kind !== "expr" ||
+          parentExpr?.exprKind !== "field-access" ||
+          parent.role !== "target" ||
+          expressionIsAssignmentTarget({
+            exprId: parent.exprId,
+            parents,
+            moduleView: ownerModule,
+          })
+        ) {
+          allowed = false;
+          return { stop: true };
+        }
+      }
+
+      switch (bodyExpr.exprKind) {
+        case "literal":
+        case "identifier":
+          return undefined;
+        case "call":
+          if (
+            isScalarLeafIntrinsicCall({
+              expr: bodyExpr,
+              moduleId: target.moduleId,
+              ownerModule,
+              program,
+            })
+          ) {
+            return undefined;
+          }
+          allowed = false;
+          return { stop: true };
+        case "block":
+        case "tuple":
+        case "cond":
+        case "if":
+        case "object-literal":
+        case "field-access":
+          return undefined;
+        default:
+          allowed = false;
+          return { stop: true };
+      }
+    },
+    onEnterStatement: (_stmtId, stmt) => {
+      stmtCount += 1;
+      if (stmtCount > SCALAR_METHOD_INLINE_STMT_LIMIT || stmt.kind === "return") {
+        allowed = false;
+        return { stop: true };
+      }
+      return undefined;
+    },
+  });
+
+  return allowed;
+};
+
+const localIsLiveAcrossEffectfulExpression = ({
+  block,
+  stmtIndex,
+  symbol,
+  moduleView,
+}: {
+  block: Extract<HirExpression, { exprKind: "block" }>;
+  stmtIndex: number;
+  symbol: SymbolId;
+  moduleView: ModuleCodegenView;
+}): boolean => {
+  let seenEffectful = false;
+  const laterStatements = block.statements.slice(stmtIndex + 1);
+  for (const stmtId of laterStatements) {
+    const stmt = moduleView.hir.statements.get(stmtId);
+    const exprId =
+      stmt?.kind === "let"
+        ? stmt.initializer
+        : stmt?.kind === "expr-stmt"
+          ? stmt.expr
+          : stmt?.kind === "return" && typeof stmt.value === "number"
+            ? stmt.value
+            : undefined;
+    if (typeof exprId !== "number") {
+      continue;
+    }
+
+    const hasSymbol = expressionContainsSymbol({ exprId, symbol, moduleView });
+    const hasEffect = expressionContainsEffectfulCall({ exprId, moduleView });
+    if ((seenEffectful && hasSymbol) || (hasEffect && hasSymbol)) {
+      return true;
+    }
+    seenEffectful = seenEffectful || hasEffect;
+  }
+
+  if (typeof block.value !== "number") {
+    return false;
+  }
+  const valueHasSymbol = expressionContainsSymbol({
+    exprId: block.value,
+    symbol,
+    moduleView,
+  });
+  const valueHasEffect = expressionContainsEffectfulCall({
+    exprId: block.value,
+    moduleView,
+  });
+  return (seenEffectful && valueHasSymbol) || (valueHasEffect && valueHasSymbol);
+};
+
+const isScalarReplaceableLocal = ({
+  stmt,
+  block,
+  stmtIndex,
+  functionBody,
+  moduleId,
+  moduleView,
+  parents,
+  program,
+}: {
+  stmt: HirLetStatement;
+  block: Extract<HirExpression, { exprKind: "block" }>;
+  stmtIndex: number;
+  functionBody: HirExprId;
+  moduleId: string;
+  moduleView: OptimizedModuleView;
+  parents: ReadonlyMap<HirExprId, ExpressionParent>;
+  program: ProgramCodegenView;
+}): boolean => {
+  if (stmt.pattern.kind !== "identifier") {
+    return false;
+  }
+  const initializer = moduleView.hir.expressions.get(stmt.initializer);
+  if (!initializer || initializer.exprKind !== "object-literal") {
+    return false;
+  }
+  if (
+    expressionContainsEffectfulCall({
+      exprId: stmt.initializer,
+      moduleView,
+    }) ||
+    localIsLiveAcrossEffectfulExpression({
+      block,
+      stmtIndex,
+      symbol: stmt.pattern.symbol,
+      moduleView,
+    })
+  ) {
+    return false;
+  }
+  const typeId =
+    symbolTypeFor({
+      symbol: stmt.pattern.symbol,
+      moduleView,
+    }) ??
+    exprTypeFor({
+      moduleView,
+      exprId: stmt.initializer,
+    });
+  if (
+    typeof typeId !== "number" ||
+    !objectLiteralHasDirectFieldInitializers({
+      expr: initializer,
+      typeId,
+      program,
+    })
+  ) {
+    return false;
+  }
+
+  const symbol = stmt.pattern.symbol;
+  let allowed = true;
+  walkExpression({
+    exprId: functionBody,
+    hir: moduleView.hir,
+    options: {
+      skipLambdas: false,
+      visitHandlerBodies: true,
+    },
+    onEnterExpression: (exprId, expr) => {
+      if (expr.exprKind === "lambda" && expr.captures.some((capture) => capture.symbol === symbol)) {
+        allowed = false;
+        return { stop: true };
+      }
+      if (expr.exprKind === "effect-handler") {
+        const handlerUsesSymbol = expr.handlers.some((handler) =>
+          expressionContainsSymbol({
+            exprId: handler.body,
+            symbol,
+            moduleView,
+          }),
+        );
+        if (handlerUsesSymbol) {
+          allowed = false;
+          return { stop: true };
+        }
+      }
+      if (expr.exprKind !== "identifier" || expr.symbol !== symbol) {
+        return undefined;
+      }
+      const parent = parents.get(exprId);
+      const parentExpr =
+        parent?.kind === "expr"
+          ? moduleView.hir.expressions.get(parent.exprId)
+          : undefined;
+      const allowedFieldUse =
+        parent?.kind === "expr" &&
+        parentExpr?.exprKind === "field-access" &&
+        parent.role === "target" &&
+        (!expressionIsAssignmentTarget({
+          exprId: parent.exprId,
+          parents,
+          moduleView,
+        }) ||
+          expressionIsDirectAssignmentTarget({
+            exprId: parent.exprId,
+            parents,
+            moduleView,
+          }));
+      const allowedMethodReceiverUse =
+        parent?.kind === "expr" &&
+        parentExpr?.exprKind === "method-call" &&
+        parent.role === "target" &&
+        !expressionIsAssignmentTarget({
+          exprId: parent.exprId,
+          parents,
+          moduleView,
+        }) &&
+        scalarInlineableMethodReceiverUse({
+          expr: parentExpr,
+          moduleId,
+          program,
+        });
+      if (!allowedFieldUse && !allowedMethodReceiverUse) {
+        allowed = false;
+        return { stop: true };
+      }
+      return undefined;
+    },
+  });
+
+  return allowed;
+};
+
+const scalarReplacementOfObjectLocalsPass: ProgramOptimizationPass = {
+  name: "scalar-replacement-of-object-locals",
+  run(ctx) {
+    let changed = false;
+
+    ctx.ir.modules.forEach((moduleView, moduleId) => {
+      const parents = buildExpressionParents({ moduleView });
+      const symbols = new Set<SymbolId>();
+      moduleView.hir.items.forEach((item) => {
+        if (item.kind !== "function") {
+          return;
+        }
+        if (
+          expressionContainsEffectHandler({
+            exprId: item.body,
+            moduleView,
+          })
+        ) {
+          return;
+        }
+        collectPostOrderExprIds({
+          rootExprId: item.body,
+          moduleView,
+        }).forEach((exprId) => {
+          const expr = moduleView.hir.expressions.get(exprId);
+          if (!expr || expr.exprKind !== "block") {
+            return;
+          }
+          expr.statements.forEach((stmtId, stmtIndex) => {
+            const stmt = moduleView.hir.statements.get(stmtId);
+            if (
+              stmt?.kind === "let" &&
+              stmt.pattern.kind === "identifier" &&
+              isScalarReplaceableLocal({
+                stmt,
+                block: expr,
+                stmtIndex,
+                functionBody: item.body,
+                moduleId,
+                moduleView,
+                parents,
+                program: ctx.ir.baseProgram,
+              })
+            ) {
+              symbols.add(stmt.pattern.symbol);
+            }
+          });
+        });
+      });
+
+      const existing = ctx.ir.facts.scalarReplacedObjectLocals.get(moduleId);
+      if (!existing || !setEquals(existing, symbols)) {
+        (ctx.ir as MutableOptimizationIr).facts.scalarReplacedObjectLocals.set(
+          moduleId,
+          symbols,
+        );
+        changed = true;
+      }
+    });
+
+    return { changed };
+  },
+};
+
 const functionItemBySymbol = ({
   moduleView,
   symbol,
 }: {
-  moduleView: OptimizedModuleView;
+  moduleView: ModuleCodegenView;
   symbol: SymbolId;
 }): HirFunction | undefined =>
   Array.from(moduleView.hir.items.values()).find(
@@ -1944,6 +2677,12 @@ const finalizeOptimization = ({
         ]),
       ),
       usedTraitDispatchSignatures: new Set(ir.facts.usedTraitDispatchSignatures),
+      scalarReplacedObjectLocals: new Map(
+        Array.from(ir.facts.scalarReplacedObjectLocals.entries()).map(([moduleId, symbols]) => [
+          moduleId,
+          new Set(symbols),
+        ]),
+      ),
     },
   };
 };
@@ -1955,6 +2694,7 @@ const OPTIMIZATION_PASSES: readonly ProgramOptimizationPass[] = [
   effectFastPathEliminationPass,
   closureEnvironmentShrinkingPass,
   traitDispatchDevirtualizationPass,
+  scalarReplacementOfObjectLocalsPass,
   continuationAndHandlerEnvironmentShrinkingPass,
   wholeProgramSpecializationPruningPass,
 ];
