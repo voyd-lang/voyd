@@ -17,6 +17,9 @@ const stringPattern = grammar.repository.constants?.patterns?.find(
 const constantPattern = grammar.repository.constants?.patterns?.find(
   (pattern) => pattern.name === "constant.language.voyd"
 );
+const openEffectRowPattern = grammar.repository.keywords?.patterns?.find(
+  (pattern) => pattern.name === "keyword.other.effect-row.voyd"
+);
 
 assert(clausePattern, "Expected clause-call grammar pattern to exist");
 assert.equal(
@@ -59,6 +62,17 @@ assert(
 assert(
   !constantRegex.test("MyType"),
   "PascalCase type names should not be highlighted as named constants"
+);
+
+assert(openEffectRowPattern, "Expected explicit open effect-row grammar pattern to exist");
+const openEffectRowRegex = new RegExp(openEffectRowPattern.match, "g");
+assert(
+  openEffectRowRegex.test("fn call(cb: fn() : (Async, open) -> i32) -> i32"),
+  "Expected open callback effect-row markers to be highlighted"
+);
+assert(
+  !openEffectRowRegex.test("let open = 1"),
+  "Expected ordinary identifiers named open to avoid effect-row highlighting"
 );
 
 const interpolationRegex = new RegExp(interpolationPattern.begin, "g");

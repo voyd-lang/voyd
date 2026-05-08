@@ -59,7 +59,7 @@ eff Log
   fn write(tail) -> void
 
 fn forward_nested(flag: bool)
-  try forward
+  try open
     if
       flag:
         Async::await()
@@ -92,7 +92,7 @@ eff Log
   fn write(tail) -> void
 
 fn forward_nested_branch(flag: bool)
-  try forward
+  try open
     if
       flag:
         Async::await()

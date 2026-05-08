@@ -34,6 +34,7 @@ import {
 } from "../optionals.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 import {
+  constrainFunctionEffectRows,
   composeEffectRows,
   freshOpenEffectRow,
   getExprEffectRow,
@@ -4071,9 +4072,14 @@ const collectEffectTailSubstitutionsFromTypes = ({
       variance === "covariant"
         ? expectedDesc.effectRow
         : actualDesc.effectRow;
-    const constrained = ctx.effects.constrain(subEffectRow, supEffectRow, {
-      location,
-      reason,
+    const constrained = constrainFunctionEffectRows({
+      actual: subEffectRow,
+      expected: supEffectRow,
+      effects: ctx.effects,
+      ctx: {
+        location,
+        reason,
+      },
     });
     if (constrained.ok) {
       mergeEffectTailSubstitutions({
