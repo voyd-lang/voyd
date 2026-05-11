@@ -375,6 +375,27 @@ export const typeSummaryForSymbol = ({
 
   const symbolName = displayName ?? semantics.binding.symbolTable.getSymbol(ref.symbol).name;
 
+  const constructors = semantics.binding.staticMethods.get(ref.symbol)?.get("init");
+  if (constructors && constructors.size > 0) {
+    const constructorSummaries = Array.from(constructors)
+      .map((symbol) => {
+        const signature = semantics.typing.functions.getSignature(symbol);
+        return signature
+          ? formatFunctionSignature({
+              ref,
+              semantics,
+              signature,
+              formatType,
+            })
+          : undefined;
+      })
+      .filter((summary): summary is string => summary !== undefined);
+
+    if (constructorSummaries.length > 0) {
+      return Array.from(new Set(constructorSummaries)).join("\n");
+    }
+  }
+
   const findParameterSummary = (): string | undefined => {
     const toLocalParameter = ({
       ownerSymbol,

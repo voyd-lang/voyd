@@ -1388,6 +1388,47 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("shows overloaded object init constructor signatures in hover before a target is selected", async () => {
+    const project = await createProject({
+      "src/main.voyd": `obj MyObj {\n  x: i32,\n}\n\nimpl MyObj\n  fn init(y: i32)\n    MyObj { x: y }\n\n  fn init(flag: bool)\n    MyObj { x: 0 }\n\nfn main() -> MyObj\n  MyObj()\n\nfn other() -> MyObj\n  My\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 12, character: 3 },
+      });
+      expect(hover?.contents).toEqual({
+        kind: "markdown",
+        value:
+          "```voyd\nfn MyObj(y: i32) -> MyObj\nfn MyObj(flag: bool) -> MyObj\n```",
+      });
+
+      const completion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 15, character: 4 },
+      });
+      const constructorCompletion = completion.items.find(
+        (item) => item.label === "MyObj",
+      );
+      expect(constructorCompletion?.detail).toBe(
+        "fn MyObj(y: i32) -> MyObj\nfn MyObj(flag: bool) -> MyObj",
+      );
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("uses external labels for label hover type summaries", async () => {
     const source = `fn reduce<T>(value: T, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  cb(start, value)\n\nfn main() -> i32\n  1.reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
     const project = await createProject({
