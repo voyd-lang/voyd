@@ -28,6 +28,33 @@ Current supported targets:
 Use `--all` to select every supported target without listing them explicitly.
 The GitHub release workflow accepts the same `--all` value in its `targets` input.
 
+## Full Release
+
+Cut a full release from a clean, up-to-date `main` checkout:
+
+```sh
+npm run release:cut -- --all --version 0.2.0 --publish --github-release
+```
+
+That single command:
+
+- verifies the worktree is clean and `main` matches `origin/main`
+- versions selected packages and internal dependency ranges
+- updates `packages/std/src/version.voyd` when `@voyd-lang/std` is selected
+- refreshes `package-lock.json`
+- runs the release validation suite
+- commits the version changes
+- pushes `main`
+- dispatches the GitHub `Release` workflow
+- asks the workflow to publish packages and create a GitHub release
+
+Omit `--publish` to dispatch the workflow in dry-run mode after the release
+prep commit is pushed. Use `--skip-workflow` to stop after pushing the version
+commit.
+
+`release:cut` is the preferred full-release entrypoint. The lower-level
+commands below are useful for manual recovery, partial publishes, and debugging.
+
 ## Versioning
 
 Bump every supported target by one patch version:
@@ -52,7 +79,11 @@ Version updates:
 
 - rewrite the selected targets' own `version` fields
 - update internal workspace dependency ranges that point at those targets
+- update `packages/std/src/version.voyd` when `@voyd-lang/std` is selected
 - refresh `package-lock.json`
+
+Commit version updates before publishing. The GitHub release workflow publishes
+the checked-out commit; it does not create an uncommitted version bump for you.
 
 ## Validation
 
@@ -73,6 +104,7 @@ Release checks always:
 - run uncached Turbo builds for the selected targets and their dependency closure
 - run each selected target's own `typecheck` and `test` scripts
 - run shared boundary suites when needed:
+  - compiler codegen tests for compiler/runtime-facing packages
   - `@voyd-lang/smoke` for runtime-facing packages
   - CLI dist e2e for CLI/runtime packages
 - run `npm pack --dry-run` and verify the published tarball contains only the expected files
@@ -97,6 +129,33 @@ Notes:
 - npm trusted publishing only works after the package already exists on npm, so the first publish may still need a token-based/manual bootstrap
 - the workflow has `id-token: write` enabled so npm can verify the GitHub OIDC identity during publish
 - the VS Code extension does not have an equivalent trusted-publisher flow in this repo today; CI still uses `VSCE_PAT`
+- when `voyd-vscode` is selected without `vscode_release`, the workflow publishes the version already committed in `apps/vscode/package.json`
+
+### GitHub Releases
+
+Create a GitHub release after the package publish succeeds:
+
+```sh
+npm run release:github -- --all
+```
+
+That command infers `v<version>` from the selected targets, verifies the tag
+exists, and runs `gh release create`. To create and push the tag as part of the
+same step:
+
+```sh
+npm run release:github -- --all --create-tag
+```
+
+Use an explicit tag or notes when needed:
+
+```sh
+npm run release:github -- --all --github-tag v0.2.0 --notes-file release-notes.md
+```
+
+The GitHub Actions workflow has an optional `github_release` input. When enabled
+on a non-dry-run publish, it runs the same helper after publishing. Leave
+`github_tag` blank to use `v<version>` or pass one explicitly.
 
 Dry-run a publish:
 
