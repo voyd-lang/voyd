@@ -761,6 +761,28 @@ export const buildSymbolIndex = async ({
     const syntaxById = collectSyntaxById(moduleNode.ast);
 
     const moduleRef = (symbol: SymbolId): SymbolRef => ({ moduleId, symbol });
+    const constructorOwnerForOverloadSet = (
+      overloadSetId: number,
+    ): SymbolRef | undefined => {
+      const overloadSet = entry.binding.overloads.get(overloadSetId);
+      if (!overloadSet) {
+        return undefined;
+      }
+
+      const overloadSymbols = new Set(overloadSet.functions.map((fn) => fn.symbol));
+      for (const [targetSymbol, methods] of entry.binding.staticMethods) {
+        const constructors = methods.get("init");
+        if (!constructors) {
+          continue;
+        }
+
+        if (Array.from(constructors).some((symbol) => overloadSymbols.has(symbol))) {
+          return moduleRef(targetSymbol);
+        }
+      }
+
+      return undefined;
+    };
 
     entry.binding.imports.forEach((imported) => {
       if (!imported.target || !imported.span) {
@@ -1037,6 +1059,18 @@ export const buildSymbolIndex = async ({
               symbol: selected.symbol,
             },
           });
+        } else {
+          const callee = entry.hir.expressions.get(expression.callee);
+          if (callee?.exprKind === "overload-set") {
+            const constructorOwner = constructorOwnerForOverloadSet(callee.set);
+            if (constructorOwner) {
+              addOccurrenceFromSpan({
+                symbolRef: constructorOwner,
+                span: callee.span,
+                kind: "reference",
+              });
+            }
+          }
         }
       }
 
