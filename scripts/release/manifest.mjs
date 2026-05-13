@@ -26,7 +26,7 @@ export const releaseTargets = {
     cwd: "packages/std",
     description: "Voyd standard library source bundle",
     packRequiredFiles: ["package.json", "src/pkg.voyd", "dist/.placeholder"],
-    relatedTests: ["own", "smoke", "cli-dist"],
+    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
   }),
   "@voyd-lang/lib": npmTarget({
     workspace: "@voyd-lang/lib",
@@ -40,7 +40,7 @@ export const releaseTargets = {
       "assets/voyd-markdown-injection.json",
     ],
     packForbiddenPatterns: [/^src\//, /^dist\/__tests__\//, /^dist\/.*\/src\//],
-    relatedTests: ["own", "smoke", "cli-dist"],
+    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
   }),
   "@voyd-lang/compiler": npmTarget({
     workspace: "@voyd-lang/compiler",
@@ -53,7 +53,7 @@ export const releaseTargets = {
       /^dist\/.*\/__tests__\//,
       /\.test\.(d\.ts|d\.ts\.map|js|js\.map)$/,
     ],
-    relatedTests: ["own", "smoke", "cli-dist"],
+    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
   }),
   "@voyd-lang/js-host": npmTarget({
     workspace: "@voyd-lang/js-host",
@@ -65,7 +65,7 @@ export const releaseTargets = {
       /^dist\/__tests__\//,
       /\.test\.(d\.ts|d\.ts\.map|js|js\.map)$/,
     ],
-    relatedTests: ["own", "smoke", "cli-dist"],
+    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
   }),
   "@voyd-lang/sdk": npmTarget({
     workspace: "@voyd-lang/sdk",
@@ -85,7 +85,7 @@ export const releaseTargets = {
       /^dist\/.*\/src\//,
       /\.test\.(d\.ts|d\.ts\.map|js|js\.map)$/,
     ],
-    relatedTests: ["own", "smoke", "cli-dist"],
+    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
   }),
   "@voyd-lang/language-server": npmTarget({
     workspace: "@voyd-lang/language-server",
@@ -126,7 +126,7 @@ export const releaseTargets = {
       "dist/test-runner.js",
     ],
     packForbiddenPatterns: [/^src\//, /^dist\/__tests__\//],
-    relatedTests: ["own", "smoke", "cli-dist"],
+    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
   }),
   "voyd-vscode": {
     kind: "vscode",
