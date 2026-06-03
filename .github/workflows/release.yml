@@ -107,7 +107,7 @@ jobs:
             exit 1
           fi
 
-          npm run release:publish -- "${args[@]}"
+          node ./scripts/release/publish-targets.mjs "${args[@]}"
 
           if [ "${{ inputs.dry_run }}" = "false" ] && [ "${{ inputs.github_release }}" = "true" ]; then
             github_args=("${target_args[@]}" --create-tag)
@@ -126,5 +126,5 @@ jobs:
               github_args+=(--notes "$VOYD_GITHUB_RELEASE_NOTES")
             fi
 
-            npm run release:github -- "${github_args[@]}"
+            node ./scripts/release/github-release.mjs "${github_args[@]}"
           fi

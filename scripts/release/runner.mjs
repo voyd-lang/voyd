@@ -520,7 +520,11 @@ export const sortNpmTargetsForPublish = (targetNames) => {
   return sorted;
 };
 
-export const assertNpmTargetsAlreadyPublished = ({ targetNames, dryRun }) => {
+export const assertNpmTargetsAlreadyPublished = ({
+  targetNames,
+  dryRun,
+  allowTokenBootstrap = false,
+}) => {
   if (dryRun) {
     return;
   }
@@ -542,7 +546,8 @@ export const assertNpmTargetsAlreadyPublished = ({ targetNames, dryRun }) => {
     }
   });
 
-  const hasTokenBootstrap = Boolean(process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN);
+  const hasTokenBootstrap =
+    allowTokenBootstrap && Boolean(process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN);
   if (missingTargets.length === 0 || hasTokenBootstrap) {
     return;
   }
@@ -551,7 +556,7 @@ export const assertNpmTargetsAlreadyPublished = ({ targetNames, dryRun }) => {
     [
       "Trusted publishing cannot bootstrap unpublished npm packages in this release flow.",
       `Bootstrap or configure these packages before publishing: ${missingTargets.join(", ")}`,
-      "Alternatively run a token-based first publish with NPM_TOKEN or NODE_AUTH_TOKEN.",
+      "Run a one-time bootstrap publish before using release:publish.",
     ].join(" "),
   );
 };
