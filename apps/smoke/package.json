@@ -12,7 +12,7 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "@voyd-lang/sdk": "^0.1.0",
+    "@voyd-lang/sdk": "^0.2.0",
     "voyd_semver": "0.1.0"
   }
 }
