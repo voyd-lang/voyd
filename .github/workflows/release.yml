@@ -38,6 +38,10 @@ on:
         description: "Inline GitHub release notes; generated notes are used when empty"
         required: false
         type: string
+      github_release_notes_file:
+        description: "Repository-relative release notes file; takes precedence over inline notes"
+        required: false
+        type: string
 
 jobs:
   release:
@@ -68,6 +72,7 @@ jobs:
           VOYD_GITHUB_TAG: ${{ inputs.github_tag }}
           VOYD_GITHUB_RELEASE_TITLE: ${{ inputs.github_release_title }}
           VOYD_GITHUB_RELEASE_NOTES: ${{ inputs.github_release_notes }}
+          VOYD_GITHUB_RELEASE_NOTES_FILE: ${{ inputs.github_release_notes_file }}
         run: |
           args=(--tag "${{ inputs.npm_tag }}")
           target_args=()
@@ -90,6 +95,18 @@ jobs:
             args+=(--use-existing-vscode-version)
           fi
 
+          if [ -n "$VOYD_GITHUB_RELEASE_NOTES_FILE" ] && [ ! -f "$VOYD_GITHUB_RELEASE_NOTES_FILE" ]; then
+            echo "GitHub release notes file does not exist: $VOYD_GITHUB_RELEASE_NOTES_FILE" >&2
+            exit 1
+          fi
+
+          if [ "${{ inputs.dry_run }}" = "false" ] &&
+             { [ "${{ inputs.targets }}" = "--all" ] || [[ ",${{ inputs.targets }}," == *",voyd-vscode,"* ]]; } &&
+             [ -z "$VSCE_PAT" ]; then
+            echo "VSCE_PAT is required to publish voyd-vscode. Set the GitHub Actions secret or exclude voyd-vscode." >&2
+            exit 1
+          fi
+
           npm run release:publish -- "${args[@]}"
 
           if [ "${{ inputs.dry_run }}" = "false" ] && [ "${{ inputs.github_release }}" = "true" ]; then
@@ -103,7 +120,9 @@ jobs:
               github_args+=(--title "$VOYD_GITHUB_RELEASE_TITLE")
             fi
 
-            if [ -n "$VOYD_GITHUB_RELEASE_NOTES" ]; then
+            if [ -n "$VOYD_GITHUB_RELEASE_NOTES_FILE" ]; then
+              github_args+=(--notes-file "$VOYD_GITHUB_RELEASE_NOTES_FILE")
+            elif [ -n "$VOYD_GITHUB_RELEASE_NOTES" ]; then
               github_args+=(--notes "$VOYD_GITHUB_RELEASE_NOTES")
             fi
 

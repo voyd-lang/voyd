@@ -28,32 +28,65 @@ Current supported targets:
 Use `--all` to select every supported target without listing them explicitly.
 The GitHub release workflow accepts the same `--all` value in its `targets` input.
 
-## Full Release
+## Full Release With Protected `main`
 
-Cut a full release from a clean, up-to-date `main` checkout:
+Use the protected-branch flow when `main` requires pull requests.
+
+Prepare the release commit from a clean release branch:
 
 ```sh
-npm run release:cut -- --all --version 0.2.0 --publish --github-release
+git switch -c release/v0.2.0
+npm run release:prepare -- --all --version 0.2.0
+git push -u origin release/v0.2.0
 ```
 
-That single command:
+Open and merge a pull request into `main`. After the PR lands, dispatch the
+GitHub release workflow from the merged `main` commit:
 
-- verifies the worktree is clean and `main` matches `origin/main`
+```sh
+gh workflow run release.yml \
+  --ref main \
+  --raw-field targets=--all \
+  --raw-field dry_run=false \
+  --raw-field npm_tag=latest \
+  --raw-field github_release=true \
+  --raw-field github_release_notes_file=docs/release/v0.2.0-notes.md
+```
+
+This flow:
+
+- keeps branch protection in front of release commits
 - versions selected packages and internal dependency ranges
 - updates `packages/std/src/version.voyd` when `@voyd-lang/std` is selected
 - refreshes `package-lock.json`
-- runs the release validation suite
-- commits the version changes
-- pushes `main`
-- dispatches the GitHub `Release` workflow
-- asks the workflow to publish packages and create a GitHub release
+- runs the release validation suite before the PR is opened
+- publishes from the exact commit that was merged to `main`
+- asks the workflow to publish packages, create the git tag, and create the
+  GitHub release
 
-Omit `--publish` to dispatch the workflow in dry-run mode after the release
-prep commit is pushed. Use `--skip-workflow` to stop after pushing the version
-commit.
+`release:prepare` commits by default. Pass `--no-commit` to leave the release
+changes staged for manual review:
 
-`release:cut` is the preferred full-release entrypoint. The lower-level
-commands below are useful for manual recovery, partial publishes, and debugging.
+```sh
+npm run release:prepare -- --all --version 0.2.0 --no-commit
+```
+
+## Direct-Main Release
+
+`release:cut` is only for maintainers who can push directly to `main`, such as
+repositories without branch protection or accounts with bypass rights:
+
+```sh
+npm run release:cut -- --all --version 0.2.0 --publish --github-release --github-release-notes-file docs/release/v0.2.0-notes.md
+```
+
+That command verifies the worktree is clean, verifies local `main` matches
+`origin/main`, versions packages, runs validation, commits, pushes `main`, and
+dispatches the GitHub `Release` workflow. It will fail on protected branches
+when direct pushes to `main` are not allowed.
+
+The lower-level commands below are useful for manual recovery, partial
+publishes, and debugging.
 
 ## Versioning
 
@@ -116,19 +149,26 @@ publishes still enforce the related checks.
 
 ### GitHub Actions Auth
 
-The GitHub release workflow uses npm trusted publishing for npm packages.
+The GitHub release workflow uses npm trusted publishing for npm packages. This
+is the preferred publishing path because npm verifies the GitHub Actions OIDC
+identity for this repository and workflow, avoiding long-lived npm publish
+tokens.
 
 GitHub setup:
 
 - configure each published npm package as a trusted publisher for the `voyd-lang/voyd` repository and `.github/workflows/release.yml`
 - do not set `NPM_TOKEN` for this workflow
-- keep `VSCE_PAT` as a GitHub Actions secret if you want CI to publish `voyd-vscode`
+- keep `VSCE_PAT` as a GitHub Actions secret if you want CI to publish `voyd-vscode`; it is required for `--all`
+- ensure GitHub Actions can create tags and releases with `contents: write`
+- ensure no protected tag rule blocks release tags such as `v0.2.0`
 
 Notes:
 
 - npm trusted publishing only works after the package already exists on npm, so the first publish may still need a token-based/manual bootstrap
+- real publishes fail before any package is published when a selected npm target is not already on npm and no `NPM_TOKEN`/`NODE_AUTH_TOKEN` bootstrap is present
 - the workflow has `id-token: write` enabled so npm can verify the GitHub OIDC identity during publish
 - the VS Code extension does not have an equivalent trusted-publisher flow in this repo today; CI still uses `VSCE_PAT`
+- the publish script fails before publishing npm packages when `voyd-vscode` is selected for a real publish and `VSCE_PAT` is missing
 - when `voyd-vscode` is selected without `vscode_release`, the workflow publishes the version already committed in `apps/vscode/package.json`
 
 ### GitHub Releases

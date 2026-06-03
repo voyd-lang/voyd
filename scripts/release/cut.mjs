@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 import {
   parseTargetSelection,
   repoRoot,
@@ -98,6 +99,7 @@ const githubWorkflowArgs = ({
   githubTag,
   githubReleaseTitle,
   githubReleaseNotes,
+  githubReleaseNotesFile,
   vscodeRelease,
 }) => {
   const args = [
@@ -132,6 +134,10 @@ const githubWorkflowArgs = ({
     args.push("--raw-field", `github_release_notes=${githubReleaseNotes}`);
   }
 
+  if (githubReleaseNotesFile) {
+    args.push("--raw-field", `github_release_notes_file=${githubReleaseNotesFile}`);
+  }
+
   return args;
 };
 
@@ -147,9 +153,13 @@ const githubRelease = hasFlag({ argv, flag: "--github-release" });
 const githubTag = readFlagValue({ argv, flag: "--github-tag" });
 const githubReleaseTitle = readFlagValue({ argv, flag: "--github-release-title" });
 const githubReleaseNotes = readFlagValue({ argv, flag: "--github-release-notes" });
+const githubReleaseNotesFile = readFlagValue({ argv, flag: "--github-release-notes-file" });
 const vscodeRelease = readFlagValue({ argv, flag: "--vscode-release" });
 
 requireVersionPlan({ bump, version });
+if (githubReleaseNotesFile && !fs.existsSync(githubReleaseNotesFile)) {
+  throw new Error(`GitHub release notes file does not exist: ${githubReleaseNotesFile}`);
+}
 assertCleanWorktreeForReleaseCut();
 assertOnMain();
 assertUpToDate();
@@ -185,6 +195,7 @@ if (skipWorkflow) {
       githubTag,
       githubReleaseTitle,
       githubReleaseNotes,
+      githubReleaseNotesFile,
       vscodeRelease,
     }),
   });

@@ -20,6 +20,7 @@
     "dev": "turbo run dev --affected --parallel",
     "clean": "turbo run clean --affected --parallel",
     "release:list": "node ./scripts/release/list.mjs",
+    "release:prepare": "node ./scripts/release/prepare.mjs",
     "release:cut": "node ./scripts/release/cut.mjs",
     "release:version": "node ./scripts/release/version.mjs",
     "release:version:all": "node ./scripts/release/version.mjs --all",

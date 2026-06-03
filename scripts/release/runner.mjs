@@ -480,14 +480,14 @@ export const parseSharedArgs = (argv) => {
   return options;
 };
 
-export const assertCleanWorktree = () => {
+export const assertCleanWorktree = ({ purpose = "release publish" } = {}) => {
   const status = readStdout({
     command: "git",
     args: ["status", "--short"],
   }).trim();
 
   if (status.length > 0) {
-    throw new Error("Release publish requires a clean git worktree. Commit or stash changes first.");
+    throw new Error(`${purpose} requires a clean git worktree. Commit or stash changes first.`);
   }
 };
 
@@ -518,6 +518,42 @@ export const sortNpmTargetsForPublish = (targetNames) => {
 
   npmTargetNames.forEach(visit);
   return sorted;
+};
+
+export const assertNpmTargetsAlreadyPublished = ({ targetNames, dryRun }) => {
+  if (dryRun) {
+    return;
+  }
+
+  const npmTargetNames = sortNpmTargetsForPublish(targetNames);
+  const missingTargets = npmTargetNames.filter((targetName) => {
+    const target = getTarget(targetName);
+    try {
+      readStdout({
+        command: "npm",
+        args: ["view", target.workspace, "version"],
+        env: {
+          NPM_CONFIG_CACHE: releaseNpmCache,
+        },
+      });
+      return false;
+    } catch {
+      return true;
+    }
+  });
+
+  const hasTokenBootstrap = Boolean(process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN);
+  if (missingTargets.length === 0 || hasTokenBootstrap) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Trusted publishing cannot bootstrap unpublished npm packages in this release flow.",
+      `Bootstrap or configure these packages before publishing: ${missingTargets.join(", ")}`,
+      "Alternatively run a token-based first publish with NPM_TOKEN or NODE_AUTH_TOKEN.",
+    ].join(" "),
+  );
 };
 
 export const publishNpmTargets = ({ targetNames, dryRun, tag, otp }) => {
