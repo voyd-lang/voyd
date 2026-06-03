@@ -1,4 +1,7 @@
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   collectPublishDependencies,
   getTarget,
@@ -94,6 +97,9 @@ const validateExactVersion = (version) => {
   return version;
 };
 
+const stdVersionSourcePath = path.join(repoRoot, "packages/std/src/version.voyd");
+const releaseNpmCache = process.env.NPM_CONFIG_CACHE ?? path.join(os.tmpdir(), "voyd-release-npm-cache");
+
 const resolveVersionPlan = ({ targetNames, bump, version }) => {
   if (!bump && !version) {
     return null;
@@ -143,6 +149,26 @@ const syncInternalDependencyRanges = ({ packageJson, versionPlan }) => {
   return changed;
 };
 
+const syncStdSourceVersion = ({ versionPlan }) => {
+  const nextVersion = versionPlan.get("@voyd-lang/std");
+  if (!nextVersion) {
+    return false;
+  }
+
+  const source = fs.readFileSync(stdVersionSourcePath, "utf8");
+  const updated = source.replace(
+    /(pub fn (?:std_version|language_version)\(\) -> String\s+)"[^"]+"/g,
+    `$1"${nextVersion}"`,
+  );
+
+  if (updated === source) {
+    return false;
+  }
+
+  fs.writeFileSync(stdVersionSourcePath, updated);
+  return true;
+};
+
 export const versionSelectedTargets = ({ targetNames, bump, version }) => {
   const versionPlan = resolveVersionPlan({ targetNames, bump, version });
   if (!versionPlan) {
@@ -177,6 +203,13 @@ export const versionSelectedTargets = ({ targetNames, bump, version }) => {
       nextVersions.push(`${packageJson.name}@${nextOwnVersion}`);
     }
   });
+
+  if (syncStdSourceVersion({ versionPlan })) {
+    changedFiles += 1;
+    process.stdout.write(
+      `[release] Updated packages/std/src/version.voyd for @voyd-lang/std\n`,
+    );
+  }
 
   runCommand({
     command: "npm",
@@ -257,6 +290,9 @@ const validatePackContents = (targetName) => {
       "--workspace",
       target.workspace,
     ],
+    env: {
+      NPM_CONFIG_CACHE: releaseNpmCache,
+    },
   });
   const [packResult] = JSON.parse(raw);
   const filePaths = new Set(packResult.files.map((file) => file.path));
@@ -296,6 +332,14 @@ const runSmokeChecks = (targetNames) => {
   }
 
   npmRunWorkspaceScript({ workspace: "@voyd-lang/smoke", script: "test" });
+};
+
+const runCompilerCodegenChecks = (targetNames) => {
+  if (!needsRelatedTest(targetNames, "compiler-codegen")) {
+    return;
+  }
+
+  npmRunWorkspaceScript({ workspace: "@voyd-lang/compiler", script: "test:codegen" });
 };
 
 const runCliDistChecks = (targetNames) => {
@@ -341,6 +385,7 @@ export const runReleaseCheck = ({ targetNames }) => {
   runTurboClean(targetNames);
   runTurboBuild(targetNames);
   runOwnChecks(targetNames);
+  runCompilerCodegenChecks(targetNames);
   runSmokeChecks(targetNames);
   runCliDistChecks(targetNames);
   runVscodePackageCheck(targetNames);
@@ -358,6 +403,7 @@ export const parseSharedArgs = (argv) => {
     bump: undefined,
     version: undefined,
     vscodeRelease: undefined,
+    useExistingVscodeVersion: argv.includes("--use-existing-vscode-version"),
   };
 
   for (let index = 0; index < argv.length; index += 1) {

@@ -18,13 +18,33 @@ const smokeFixturePath = resolve(
   "effects-smoke.voyd"
 );
 
+const compileCache = new Map<string, ReturnType<typeof compileEffectFixture>>();
+
+const compileCachedEffectFixture = (
+  params: Parameters<typeof compileEffectFixture>[0],
+) => {
+  const key = JSON.stringify({
+    entryPath: params.entryPath,
+    codegenOptions: params.codegenOptions ?? {},
+    throwOnError: params.throwOnError ?? true,
+    extraEntries: params.extraEntries ?? [],
+  });
+  const cached = compileCache.get(key);
+  if (cached) return cached;
+
+  const compiled = compileEffectFixture(params);
+  compileCache.set(key, compiled);
+  return compiled;
+};
+
 const loadSmokeModule = () =>
-  compileEffectFixture({
+  compileCachedEffectFixture({
     entryPath: smokeFixturePath,
     codegenOptions: { emitEffectHelpers: true },
   });
 
-const buildFixtureEffectModule = () => compileEffectFixture({ entryPath: fixturePath });
+const buildFixtureEffectModule = () =>
+  compileCachedEffectFixture({ entryPath: fixturePath });
 
 const maybeWriteWat = (tag: string, module: { emitText: () => string }) => {
   if (process.env.DEBUG_EFFECTS_WAT !== "1") return;
@@ -111,7 +131,7 @@ describe("effect table + harness", () => {
   });
 
   it("omits runtime trap diagnostics metadata when disabled", async () => {
-    const { wasm } = await compileEffectFixture({
+    const { wasm } = await compileCachedEffectFixture({
       entryPath: smokeFixturePath,
       codegenOptions: { runtimeDiagnostics: false },
     });
@@ -170,7 +190,7 @@ describe("effect table + harness", () => {
   });
 
   it("runs effectful exports when effectsMemoryExport is off", async () => {
-    const { module } = await compileEffectFixture({
+    const { module } = await compileCachedEffectFixture({
       entryPath: smokeFixturePath,
       codegenOptions: { effectsMemoryExport: "off" },
     });
@@ -200,7 +220,7 @@ describe("effect table + harness", () => {
   });
 
   it("snapshots the perform fixture via codegen", async () => {
-    const { module, effectTable } = await compileEffectFixture({
+    const { module, effectTable } = await compileCachedEffectFixture({
       entryPath: fixturePath,
       codegenOptions: { emitEffectHelpers: true },
     });

@@ -182,7 +182,7 @@ fn main(): Async -> i32
     expect(handler.handlers[0]?.parameters).toHaveLength(0);
   });
 
-  it("marks try forward handlers to propagate unhandled operations", () => {
+  it("marks try open handlers to propagate unhandled operations", () => {
     const hir = lower(`
 eff Async
   fn await(tail) -> i32
@@ -190,7 +190,7 @@ eff Log
   fn write(tail) -> void
 
 fn main(): (Async, Log) -> i32
-  try forward
+  try open
     let value = Async::await()
     Log::write()
     value
@@ -202,6 +202,6 @@ fn main(): (Async, Log) -> i32
     );
     expect(handler).toBeDefined();
     if (!handler || handler.exprKind !== "effect-handler") return;
-    expect(handler.forwardUnhandled).toBe(true);
+    expect(handler.openUnhandled).toBe(true);
   });
 });

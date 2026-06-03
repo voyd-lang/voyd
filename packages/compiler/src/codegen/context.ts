@@ -46,6 +46,7 @@ import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
 import type { ProgramOptimizationFacts } from "../optimize/ir.js";
+import type { ScalarObjectLocalRepresentationPlan } from "../optimize/codegen-plan.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -265,11 +266,18 @@ export interface LocalBindingProjectedElement extends LocalBindingBase {
   arrayTypeId: TypeId;
 }
 
+export interface LocalBindingScalarObject extends LocalBindingBase {
+  kind: "scalar-object";
+  plan: ScalarObjectLocalRepresentationPlan;
+  fields: ReadonlyMap<string, LocalBindingLocal>;
+}
+
 export type LocalBinding =
   | LocalBindingLocal
   | LocalBindingCapture
   | LocalBindingStorageRef
-  | LocalBindingProjectedElement;
+  | LocalBindingProjectedElement
+  | LocalBindingScalarObject;
 
 export interface HandlerScope {
   prevHandler: LocalBindingLocal;

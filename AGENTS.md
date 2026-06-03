@@ -56,7 +56,8 @@ Helpful commands:
 - `npm run typecheck`.
 - `npx vitest <path-to-test>`
 
-You should generally add unit tests (especially e2e ones)
+You should generally add unit tests when they protect new behavior or a regression.
+Do not add tests just to mirror coverage that already exists at another layer.
 
 E2E Unit tests should go in apps/smoke (unless strictly scoped to the compiler). Always prefer the public API
 
@@ -69,6 +70,14 @@ Before adding tests, read [`docs/testing/test-layer-ownership.md`](docs/testing/
 - `apps/cli`: argument parsing, command wiring, process UX, and exit/reporting behavior.
 - `apps/smoke`: end-to-end user-visible flows via public APIs (cross-package integration).
 - Avoid duplicating semantic assertions across CLI/SDK/smoke unless it protects a boundary; if duplicated, document the boundary and keep exactly one canonical layer.
+
+## Test Hygiene
+
+- Prefer batching expensive compile/run setup: one Voyd fixture with several focused entrypoints is usually better than several tiny fixtures that each compile the std/runtime stack.
+- Keep compile-heavy smoke tests at the highest useful boundary only. If compiler or std unit tests already own the semantics, smoke should assert a narrow public integration signal.
+- Before adding a new `.test.ts` smoke file or `.test.voyd` module, check whether an existing fixture can host the scenario without mixing unrelated ownership.
+- Avoid brute-force sweeps in the default suite. Use representative edge cases in normal tests, and put benchmark/perf loops behind an explicit perf script or keep them intentionally small.
+- When adding or expanding a slow test, note the boundary it protects and the expected runtime cost in the PR or final handoff.
 
 # TS Style Guide
 

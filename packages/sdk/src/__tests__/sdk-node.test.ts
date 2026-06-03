@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   collectNodeModulesDirs,
   createSdk,
@@ -26,6 +26,7 @@ const ASYNC_EFFECT_ID = "com.example.async";
 const RUNTIME_DIAGNOSTICS_SECTION = "voyd.runtime_diagnostics";
 const sdkTestRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(sdkTestRoot, "../../../../");
+let effectCompileResult: Extract<CompileResult, { success: true }>;
 
 const hasRuntimeDiagnosticsSection = (wasm: Uint8Array): boolean => {
   const buffer =
@@ -84,6 +85,13 @@ const buildFallbackHandlers = ({
   ) as Record<string, EffectHandler>;
 
 describe("node sdk", () => {
+  beforeAll(async () => {
+    const sdk = createSdk();
+    effectCompileResult = expectCompileSuccess(
+      await sdk.compile({ source: EFFECT_SOURCE }),
+    );
+  });
+
   it("returns diagnostics on compile failure instead of throwing", async () => {
     const sdk = createSdk();
     const result = await sdk.compile({
@@ -362,10 +370,7 @@ pub fn main() -> i32
   });
 
   it("supports handlersByLabelSuffix using :: separators", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({ source: EFFECT_SOURCE }),
-    );
+    const result = effectCompileResult;
     const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
     const output = await result.run<number>({
       entryName: "main",
@@ -388,10 +393,7 @@ pub fn main() -> i32
   });
 
   it("supports effectId::opName keys without signatureHash for non-overloaded ops", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({ source: EFFECT_SOURCE }),
-    );
+    const result = effectCompileResult;
     const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
     expect(op.effectId).toBe(ASYNC_EFFECT_ID);
     const handlers: Record<string, EffectHandler> = {
@@ -407,10 +409,7 @@ pub fn main() -> i32
   });
 
   it("exposes signatureHashFor and handlerKeyFor helpers", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({ source: EFFECT_SOURCE }),
-    );
+    const result = effectCompileResult;
     const op = result.effects.findUniqueOpByLabelSuffix("Async::await");
     expect(op.effectId).toBe(ASYNC_EFFECT_ID);
     const signatureHash = result.effects.signatureHashFor({

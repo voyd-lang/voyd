@@ -21,13 +21,30 @@ on:
         description: "VSCode release bump for voyd-vscode (patch/minor/major/version)"
         required: false
         type: string
+      github_release:
+        description: "Create a GitHub release after a successful non-dry-run publish"
+        required: true
+        default: false
+        type: boolean
+      github_tag:
+        description: "Git tag for the GitHub release; defaults to v<selected package version>"
+        required: false
+        type: string
+      github_release_title:
+        description: "GitHub release title; defaults to Voyd <selected package version>"
+        required: false
+        type: string
+      github_release_notes:
+        description: "Inline GitHub release notes; generated notes are used when empty"
+        required: false
+        type: string
 
 jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -47,13 +64,20 @@ jobs:
       - name: Publish selected targets
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          GH_TOKEN: ${{ github.token }}
+          VOYD_GITHUB_TAG: ${{ inputs.github_tag }}
+          VOYD_GITHUB_RELEASE_TITLE: ${{ inputs.github_release_title }}
+          VOYD_GITHUB_RELEASE_NOTES: ${{ inputs.github_release_notes }}
         run: |
           args=(--tag "${{ inputs.npm_tag }}")
+          target_args=()
 
           if [ "${{ inputs.targets }}" = "--all" ]; then
             args+=(--all)
+            target_args+=(--all)
           else
             args+=(--targets "${{ inputs.targets }}")
+            target_args+=(--targets "${{ inputs.targets }}")
           fi
 
           if [ "${{ inputs.dry_run }}" = "true" ]; then
@@ -62,6 +86,26 @@ jobs:
 
           if [ -n "${{ inputs.vscode_release }}" ]; then
             args+=(--vscode-release "${{ inputs.vscode_release }}")
+          else
+            args+=(--use-existing-vscode-version)
           fi
 
           npm run release:publish -- "${args[@]}"
+
+          if [ "${{ inputs.dry_run }}" = "false" ] && [ "${{ inputs.github_release }}" = "true" ]; then
+            github_args=("${target_args[@]}" --create-tag)
+
+            if [ -n "$VOYD_GITHUB_TAG" ]; then
+              github_args+=(--github-tag "$VOYD_GITHUB_TAG")
+            fi
+
+            if [ -n "$VOYD_GITHUB_RELEASE_TITLE" ]; then
+              github_args+=(--title "$VOYD_GITHUB_RELEASE_TITLE")
+            fi
+
+            if [ -n "$VOYD_GITHUB_RELEASE_NOTES" ]; then
+              github_args+=(--notes "$VOYD_GITHUB_RELEASE_NOTES")
+            fi
+
+            npm run release:github -- "${github_args[@]}"
+          fi

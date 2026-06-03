@@ -22,6 +22,6 @@ if (options.targetNames.includes("voyd-vscode")) {
   runVscodePublish({
     dryRun: options.dryRun,
     release: options.vscodeRelease,
-    useExistingVersion: Boolean(versionPlan),
+    useExistingVersion: Boolean(versionPlan) || options.useExistingVscodeVersion,
   });
 }

@@ -109,6 +109,29 @@ describe("smoke: std input/output", () => {
     expect(writes).toEqual([{ target: "stdout", value: "A\nB\n" }]);
   });
 
+  it("supports bare print from the implicit prelude", async () => {
+    const writes: Array<{ target: string; value: string }> = [];
+    const host = await createVoydHost({
+      wasm: compiled.wasm,
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: {
+          write: async ({ target, value }) => {
+            writes.push({ target, value });
+          },
+        },
+      },
+    });
+
+    await expect(host.run<number>("print_text")).resolves.toBe(1);
+    await expect(host.run<number>("print_number")).resolves.toBe(1);
+
+    expect(writes).toEqual([
+      { target: "stdout", value: "hello\n" },
+      { target: "stdout", value: "42\n" },
+    ]);
+  });
+
   it("covers read eof/error and output error paths", async () => {
     const eofHost = await createVoydHost({
       wasm: compiled.wasm,

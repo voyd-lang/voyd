@@ -66,6 +66,9 @@ const createDependencyContext = (
           handlerTails: new Map(),
           lambdas: new Map(),
         },
+        effectsIr: {
+          calls: new Map(),
+        },
       },
     ] as const;
   });

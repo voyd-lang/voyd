@@ -72,28 +72,16 @@ const resolveStructuralTypeId = (
     return undefined;
   }
 
-  const desc = ctx.arena.get(type);
-  if (desc.kind === "structural-object") {
-    return type;
+  const structural = ctx.arena.structuralComponent(type);
+  if (typeof structural === "number") {
+    return structural;
   }
-  if (desc.kind === "intersection") {
-    if (typeof desc.structural === "number") {
-      return desc.structural;
-    }
-    if (
-      typeof desc.nominal === "number" &&
-      ctx.getObjectStructuralTypeId
-    ) {
-      return ctx.getObjectStructuralTypeId(desc.nominal);
-    }
-    return undefined;
+
+  const nominal = ctx.arena.nominalComponent(type);
+  if (typeof nominal === "number" && ctx.getObjectStructuralTypeId) {
+    return ctx.getObjectStructuralTypeId(nominal);
   }
-  if (
-    (desc.kind === "nominal-object" || desc.kind === "value-object") &&
-    ctx.getObjectStructuralTypeId
-  ) {
-    return ctx.getObjectStructuralTypeId(type);
-  }
+
   return undefined;
 };
 
@@ -105,21 +93,12 @@ const resolveNominalOwnerSymbol = (
     return undefined;
   }
 
-  const desc = ctx.arena.get(type);
+  const nominalComponent = ctx.arena.nominalComponent(type);
+  const desc = ctx.arena.get(nominalComponent ?? type);
   if (desc.kind === "nominal-object" || desc.kind === "value-object") {
     return ctx.localSymbolForSymbolRef
       ? ctx.localSymbolForSymbolRef(desc.owner)
       : undefined;
-  }
-  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
-    const nominal = ctx.arena.get(desc.nominal);
-    if (
-      (nominal.kind !== "nominal-object" && nominal.kind !== "value-object") ||
-      !ctx.localSymbolForSymbolRef
-    ) {
-      return undefined;
-    }
-    return ctx.localSymbolForSymbolRef(nominal.owner);
   }
   return undefined;
 };

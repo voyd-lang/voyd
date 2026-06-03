@@ -11,6 +11,7 @@ import type {
   SymbolId,
 } from "../semantics/ids.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
+import type { ProgramCodegenOptimizationPlan } from "./codegen-plan.js";
 
 export type OptimizedCallInfo = CallLoweringInfo;
 
@@ -27,6 +28,7 @@ export type ProgramOptimizationFacts = {
   reachableFunctionSymbols: ReadonlySet<ProgramSymbolId>;
   reachableModuleLets: ReadonlyMap<string, ReadonlySet<SymbolId>>;
   usedTraitDispatchSignatures: ReadonlySet<string>;
+  codegenPlan: ProgramCodegenOptimizationPlan;
 };
 
 export type ProgramOptimizationIR = {

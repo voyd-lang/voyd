@@ -1,5 +1,7 @@
 import binaryen from "binaryen";
 import {
+  binaryenTypeFromHeapType,
+  binaryenTypeToHeapType,
   defineStructType,
   initStruct,
   refFunc,
@@ -52,6 +54,21 @@ import {
 import { walkHirExpression } from "../hir-walk.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
+
+const NON_REF_WASM_TYPES = new Set<number>([
+  binaryen.none,
+  binaryen.unreachable,
+  binaryen.i32,
+  binaryen.i64,
+  binaryen.f32,
+  binaryen.f64,
+  binaryen.v128,
+]);
+
+const ensureNullableRefType = (type: binaryen.Type): binaryen.Type =>
+  NON_REF_WASM_TYPES.has(type)
+    ? type
+    : binaryenTypeFromHeapType(binaryenTypeToHeapType(type), true);
 
 type HandlerCodegenState = {
   envLayouts: Map<
@@ -275,6 +292,7 @@ const emitClauseFunction = ({
   env,
   ctx,
   handlerResumeKind,
+  handlerResultTypeId,
   compileExpr,
   typeInstanceId,
 }: {
@@ -283,6 +301,7 @@ const emitClauseFunction = ({
   env: ReturnType<typeof buildClauseEnv>;
   ctx: CodegenContext;
   handlerResumeKind: ResumeKind;
+  handlerResultTypeId: TypeId;
   compileExpr: ExpressionCompiler;
   typeInstanceId?: ProgramFunctionInstanceId;
 }): { fnName: string; fnRefType: binaryen.Type } => {
@@ -512,23 +531,25 @@ const emitClauseFunction = ({
       continuationDesc.kind === "function"
         ? continuationDesc.parameters[0]?.type ?? ctx.program.primitives.void
         : resolvedReturnTypeId;
-    const continuationBinding = allocateTempLocal(
-      wasmTypeFor(continuationTypeId, ctx),
-      fnCtx,
-      continuationTypeId,
-      ctx,
-    );
-    initOps.push(
-      ctx.mod.local.set(
-        continuationBinding.index,
-        ctx.mod.ref.null(continuationBinding.type)
-      )
-    );
-    fnCtx.bindings.set(clause.parameters[0].symbol, {
-      ...continuationBinding,
-      kind: "local",
-      typeId: continuationTypeId,
-    });
+    if (continuationDesc.kind === "function") {
+      const continuationBinding = allocateTempLocal(
+        ensureNullableRefType(wasmTypeFor(continuationTypeId, ctx)),
+        fnCtx,
+        continuationTypeId,
+        ctx,
+      );
+      initOps.push(
+        ctx.mod.local.set(
+          continuationBinding.index,
+          ctx.mod.ref.null(ensureNullableRefType(continuationBinding.type))
+        )
+      );
+      fnCtx.bindings.set(clause.parameters[0].symbol, {
+        ...continuationBinding,
+        kind: "local",
+        typeId: continuationTypeId,
+      });
+    }
     fnCtx.continuations = new Map([
       [
         clause.parameters[0].symbol,
@@ -556,7 +577,7 @@ const emitClauseFunction = ({
     const storedArgType = wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime");
     const storedArg =
       !argsType
-        ? ctx.mod.ref.null(storedArgType)
+        ? ctx.mod.ref.null(ensureNullableRefType(storedArgType))
         : structGetFieldValue({
             mod: ctx.mod,
             fieldIndex: index,
@@ -581,18 +602,18 @@ const emitClauseFunction = ({
     clause.parameters[0] &&
     typeof ctx.module.types.getValueType(clause.parameters[0].symbol) === "number"
       ? ((): TypeId => {
-          const continuationTypeId = ctx.module.types.getValueType(
+          const rawContinuationTypeId = ctx.module.types.getValueType(
             clause.parameters[0].symbol
           ) as TypeId;
-          const resolvedContinuationTypeId = substitution
-            ? ctx.program.types.substitute(continuationTypeId, substitution)
-            : continuationTypeId;
-          const desc = ctx.program.types.getTypeDesc(resolvedContinuationTypeId);
+          const continuationTypeId = activeSubstitution
+            ? ctx.program.types.substitute(rawContinuationTypeId, activeSubstitution)
+            : rawContinuationTypeId;
+          const desc = ctx.program.types.getTypeDesc(continuationTypeId);
           return desc.kind === "function"
             ? desc.returnType
-            : resolvedReturnTypeId;
+            : handlerResultTypeId;
         })()
-      : resolvedReturnTypeId;
+      : handlerResultTypeId;
   const body = compileExpr({
     exprId: clause.body,
     ctx,
@@ -672,6 +693,7 @@ export const compileEffectHandlerExpr = (
     throw new Error("effect handler requires an effectful function context");
   }
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const handlerResultTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
 
   const env = buildClauseEnv({ expr, ctx, fnCtx });
   const prevHandlerLocal = allocateTempLocal(
@@ -724,6 +746,7 @@ export const compileEffectHandlerExpr = (
         env,
         ctx,
         handlerResumeKind: resumeKind,
+        handlerResultTypeId,
         compileExpr,
         typeInstanceId,
       });

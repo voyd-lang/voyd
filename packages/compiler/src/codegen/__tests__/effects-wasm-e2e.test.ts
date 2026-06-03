@@ -56,7 +56,18 @@ const returnPerformFixturePath = resolve(
   "effects-return-perform.voyd"
 );
 
-const buildModule = () => compileEffectFixture({ entryPath: fixturePath });
+const compileCache = new Map<string, ReturnType<typeof compileEffectFixture>>();
+
+const compileFixture = (entryPath: string) => {
+  const cached = compileCache.get(entryPath);
+  if (cached) return cached;
+
+  const compiled = compileEffectFixture({ entryPath });
+  compileCache.set(entryPath, compiled);
+  return compiled;
+};
+
+const buildModule = () => compileFixture(fixturePath);
 
 describe("effects wasm e2e", { timeout: 60_000 }, () => {
   const instantiateEffectsModule = (
@@ -94,7 +105,7 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
   it("rejects escaped resume at compile time", async () => {
     let caught: unknown;
     try {
-      await compileEffectFixture({ entryPath: invalidResumeFixturePath });
+      await compileFixture(invalidResumeFixturePath);
     } catch (error) {
       caught = error;
     }
@@ -106,7 +117,7 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
   it("rejects conditional missing tail at compile time", async () => {
     let caught: unknown;
     try {
-      await compileEffectFixture({ entryPath: invalidTailFixturePath });
+      await compileFixture(invalidTailFixturePath);
     } catch (error) {
       caught = error;
     }
@@ -130,7 +141,7 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
   });
 
   it("treats resume as a return in internal handlers", async () => {
-    const { wasm } = await compileEffectFixture({ entryPath: internalNoResumeFixturePath });
+    const { wasm } = await compileFixture(internalNoResumeFixturePath);
     const instance = instantiateEffectsModule(wasm);
     const target = instance.exports.internal_no_resume as CallableFunction;
     expect(target(5)).toBe(10);
@@ -138,7 +149,7 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
   });
 
   it("supports host handlers that can choose not to resume", async () => {
-    const { wasm } = await compileEffectFixture({ entryPath: hostNoResumeFixturePath });
+    const { wasm } = await compileFixture(hostNoResumeFixturePath);
     const runHostEntry = async (entryName: string): Promise<number> => {
       const host = await createVoydHost({ wasm });
       await registerStdTestFallbackHandlers(host);
@@ -159,7 +170,7 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
   });
 
   it("traps/rejects missing tail resume from host handlers", async () => {
-    const { wasm } = await compileEffectFixture({ entryPath: hostTailNoResumeFixturePath });
+    const { wasm } = await compileFixture(hostTailNoResumeFixturePath);
     const host = await createVoydHost({ wasm });
     await registerStdTestFallbackHandlers(host);
     const count = host.registerHandlersByLabelSuffix({
@@ -178,7 +189,7 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
   });
 
   it("allows handler clauses to mutate hosting locals for resume and tail", async () => {
-    const { wasm } = await compileEffectFixture({ entryPath: handlerHostMutationFixturePath });
+    const { wasm } = await compileFixture(handlerHostMutationFixturePath);
     const instance = instantiateEffectsModule(wasm);
 
     const resumeTarget = instance.exports
@@ -191,28 +202,28 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
   });
 
   it("allows a single tail resume in wasm handler clauses", async () => {
-    const { wasm } = await compileEffectFixture({ entryPath: tailPropagationFixturePath });
+    const { wasm } = await compileFixture(tailPropagationFixturePath);
     const instance = instantiateEffectsModule(wasm);
     const target = instance.exports.tail_single_resume as CallableFunction;
     expect(target()).toBe(11);
   });
 
   it("supports performs in explicit return paths", async () => {
-    const { wasm } = await compileEffectFixture({ entryPath: returnPerformFixturePath });
+    const { wasm } = await compileFixture(returnPerformFixturePath);
     const instance = instantiateEffectsModule(wasm);
     const target = instance.exports.main as CallableFunction;
     expect(target()).toBe(42);
   });
 
   it("traps when a tail clause propagates another effect before resuming", async () => {
-    const { wasm } = await compileEffectFixture({ entryPath: tailPropagationFixturePath });
+    const { wasm } = await compileFixture(tailPropagationFixturePath);
     const instance = instantiateEffectsModule(wasm);
     const target = instance.exports.tail_unresolved_then_propagate as CallableFunction;
     expect(() => target()).toThrow(/unreachable|runtime/i);
   });
 
   it("traps on double tail resume of the same host continuation", async () => {
-    const { wasm } = await compileEffectFixture({ entryPath: effectfulExportFixturePath });
+    const { wasm } = await compileFixture(effectfulExportFixturePath);
     const instance = instantiateEffectsModule(wasm);
     const memory = instance.exports.memory as WebAssembly.Memory;
     const mainEffectful = instance.exports.main_effectful as CallableFunction;

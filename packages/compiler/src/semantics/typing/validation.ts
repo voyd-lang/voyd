@@ -8,9 +8,8 @@ import type {
   HirTypeParameter,
 } from "../hir/index.js";
 import type { TypeId, TypeParamId } from "../ids.js";
-import type { StructuralField } from "./type-arena.js";
 import { getSymbolName } from "./type-system.js";
-import type { TypingContext } from "./types.js";
+import type { ObjectField, TypingContext } from "./types.js";
 
 type TypeValidator = (typeId: TypeId, context: string) => void;
 
@@ -162,7 +161,7 @@ const collectReferencedParams = (
 };
 
 const referencedTemplateParams = (
-  field: StructuralField,
+  field: ObjectField,
   templateParams: ReadonlySet<TypeParamId>,
   ctx: TypingContext
 ): Set<TypeParamId> => new Set(
@@ -179,7 +178,7 @@ const ensureFieldsSubstituted = ({
   requireSubstitution,
   validateType,
 }: {
-  fields: readonly StructuralField[];
+  fields: readonly ObjectField[];
   ctx: TypingContext;
   context: string;
   templateParams?: ReadonlySet<TypeParamId>;

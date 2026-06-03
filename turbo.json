@@ -12,10 +12,6 @@
       "dependsOn": [],
       "outputs": []
     },
-    "@voyd-lang/smoke#test": {
-      "dependsOn": ["^build"],
-      "outputs": []
-    },
     "lint": {
       "outputs": []
     },
