@@ -68,8 +68,8 @@ pub fn main()
   t.expect(findFirstCall(ast, "create_element")).toBeUndefined();
   t.expect(findFirstCall(ast, "class")).toBeDefined();
   t.expect(findFirstCall(ast, "disabled")).toBeDefined();
-  t.expect(findFirstCall(ast, "on_click_message")).toBeDefined();
-  t.expect(findFirstCall(ast, "on_click")).toBeUndefined();
+  t.expect(findFirstCall(ast, "event_message")).toBeDefined();
+  t.expect(findFirstCall(ast, "event_handler")).toBeUndefined();
 });
 
 test("lowers closure-valued HTML events to retained VX event helpers", (t) => {
@@ -86,9 +86,9 @@ pub fn main() -> MsgPack
 `;
 
   const ast = toPlain(code);
-  t.expect(findFirstCall(ast, "on_click_payload")).toBeDefined();
-  t.expect(findFirstCall(ast, "on_click")).toBeUndefined();
-  t.expect(findFirstCall(ast, "on_click_message")).toBeUndefined();
+  t.expect(findFirstCall(ast, "event_payload_handler")).toBeDefined();
+  t.expect(findFirstCall(ast, "event_handler")).toBeUndefined();
+  t.expect(findFirstCall(ast, "event_message")).toBeUndefined();
 });
 
 test("lowers non-click HTML event values to message and payload helpers", (t) => {
@@ -104,11 +104,9 @@ pub fn main() -> MsgPack
 `;
 
   const ast = toPlain(code);
-  t.expect(findFirstCall(ast, "on_submit_message")).toBeDefined();
-  t.expect(findFirstCall(ast, "on_submit")).toBeUndefined();
-  t.expect(findFirstCall(ast, "on_input_payload")).toBeDefined();
-  t.expect(findFirstCall(ast, "on_input")).toBeUndefined();
-  t.expect(findFirstCall(ast, "on_input_message")).toBeUndefined();
+  t.expect(findFirstCall(ast, "event_message")).toBeDefined();
+  t.expect(findFirstCall(ast, "event_handler")).toBeUndefined();
+  t.expect(findFirstCall(ast, "event_payload_handler")).toBeDefined();
 });
 
 test("lowers empty built-in HTML children to a typed MsgPack array", (t) => {

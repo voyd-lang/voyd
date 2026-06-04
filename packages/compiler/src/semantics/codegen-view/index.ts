@@ -225,6 +225,7 @@ export type TypeLoweringIndex = {
   getStructuralLayout(typeId: TypeId): StructuralLayout | undefined;
   getRuntimeTypeId(typeId: TypeId): number;
   getAliasSymbols(typeId: TypeId): readonly ProgramSymbolId[];
+  getStandaloneVariantTag(typeId: TypeId): string | undefined;
 };
 
 export type ObjectLayoutIndex = {
@@ -447,6 +448,7 @@ export const buildProgramCodegenView = (
   const nominalOwnerByNominal = new Map<TypeId, ProgramSymbolId>();
   const nominalsByOwner = new Map<ProgramSymbolId, TypeId[]>();
   const aliasSymbolsByType = new Map<TypeId, Set<ProgramSymbolId>>();
+  const standaloneVariantAliasesByType = new Map<TypeId, Set<ProgramSymbolId>>();
 
   const traitImplsByNominal = new Map<TypeId, CodegenTraitImplInstance[]>();
   const traitImplsByTrait = new Map<ProgramSymbolId, CodegenTraitImplInstance[]>();
@@ -504,6 +506,49 @@ export const buildProgramCodegenView = (
         bucket.add(symbols.idOf({ moduleId: mod.moduleId, symbol }));
       });
       aliasSymbolsByType.set(typeId, bucket);
+    }
+  });
+
+  const addStandaloneVariantAlias = (
+    typeId: TypeId,
+    aliasSymbols: Iterable<ProgramSymbolId>,
+  ): void => {
+    const bucket = standaloneVariantAliasesByType.get(typeId) ?? new Set<ProgramSymbolId>();
+    for (const alias of aliasSymbols) {
+      bucket.add(alias);
+    }
+    standaloneVariantAliasesByType.set(typeId, bucket);
+  };
+
+  const addStandaloneVariantAliasForTarget = (
+    typeId: TypeId,
+    aliasSymbols: Iterable<ProgramSymbolId>,
+  ): void => {
+    const desc = arena.get(typeId);
+    if (desc.kind === "union") {
+      desc.members.forEach((member) =>
+        addStandaloneVariantAliasForTarget(member, aliasSymbols),
+      );
+      return;
+    }
+    if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+      addStandaloneVariantAlias(desc.nominal, aliasSymbols);
+    }
+    addStandaloneVariantAlias(typeId, aliasSymbols);
+  };
+
+  aliasSymbolsByType.forEach((symbolSet, typeId) => {
+    addStandaloneVariantAliasForTarget(typeId, symbolSet);
+  });
+
+  stableModules.forEach((mod) => {
+    for (const template of mod.typing.typeAliases.templates()) {
+      if (typeof template.target.typeId !== "number") {
+        continue;
+      }
+      addStandaloneVariantAliasForTarget(template.target.typeId, [
+        symbols.idOf({ moduleId: mod.moduleId, symbol: template.symbol }),
+      ]);
     }
   });
 
@@ -1625,6 +1670,34 @@ export const buildProgramCodegenView = (
     getAliasSymbols: (typeId) => {
       const symbolsForType = aliasSymbolsByType.get(typeId);
       return symbolsForType ? Array.from(symbolsForType).sort((a, b) => a - b) : [];
+    },
+    getStandaloneVariantTag: (typeId) => {
+      const desc = arena.get(typeId);
+      const nominalTypeId =
+        desc.kind === "intersection" && typeof desc.nominal === "number"
+          ? desc.nominal
+          : typeId;
+      const nominalDesc = arena.get(nominalTypeId);
+      if (
+        nominalDesc.kind !== "nominal-object" &&
+        nominalDesc.kind !== "value-object"
+      ) {
+        return undefined;
+      }
+      if (!nominalDesc.name) {
+        return undefined;
+      }
+      const aliases =
+        standaloneVariantAliasesByType.get(typeId) ??
+        standaloneVariantAliasesByType.get(nominalTypeId);
+      if (!aliases || aliases.size === 0) {
+        return undefined;
+      }
+      const hasDistinctAlias = Array.from(aliases).some((alias) => {
+        const aliasName = symbols.getName(alias);
+        return Boolean(aliasName && aliasName !== nominalDesc.name);
+      });
+      return hasDistinctAlias ? nominalDesc.name : undefined;
     },
   };
 

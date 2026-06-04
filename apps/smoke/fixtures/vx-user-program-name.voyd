@@ -1,0 +1,4 @@
+type Program = i32
+
+pub fn main() -> Program
+  42

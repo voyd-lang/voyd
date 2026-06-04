@@ -1,0 +1,63 @@
+use std::enums::{ enum }
+use std::string::type::String
+use std::vx::all
+
+obj Model {
+  count: i32,
+  title: String
+}
+
+enum Msg
+  Increment
+  Rename { value: String }
+
+pub fn init() -> Program<Model, Msg>
+  program<Model, Msg>(
+    model: Model { count: 0, title: "Ready" },
+    commands: Cmd<Msg>::message(Msg::Increment {})
+  )
+
+pub fn update(model: Model, msg: Msg) -> Model
+  match(msg)
+    Msg::Increment:
+      Model { count: model.count + 1, title: model.title }
+    Msg::Rename { value }:
+      Model { count: model.count, title: value }
+
+pub fn view(model: Model) -> Html<Msg>
+  <div>
+    <button on_click={Msg::Increment {}}>
+      Count: {count_label(model.count)}
+    </button>
+    <input value={model.title} on_input={(event: InputEvent) -> Msg => Msg::Rename { value: event.value }} />
+    <p>{model.title}</p>
+  </div>
+
+pub fn delayed() -> Cmd<Msg>
+  Cmd<Msg>::delay(millis: 25i64, value: Msg::Increment {})
+
+pub fn program_command(model: Model) -> Program<Model, Msg>
+  program<Model, Msg>(model: model, commands: Cmd<Msg>::message(Msg::Increment {}))
+
+pub fn mapped_command() -> Cmd<Msg>
+  Cmd<Msg>::message(Msg::Increment {}).map<Msg>((message: Msg) -> Msg => message)
+
+pub fn subscriptions(model: Model) -> Sub<Msg>
+  if
+    model.count == 0:
+      Sub<Msg>::every(key: "counter", millis: 1000i64, value: Msg::Increment {})
+    else:
+      Sub<Msg>::none()
+
+pub fn mapped_subscription() -> Sub<Msg>
+  Sub<Msg>::every(key: "counter", millis: 1000i64, value: Msg::Increment {}).map<Msg>(
+    (message: Msg) -> Msg => message
+  )
+
+fn count_label(value: i32) -> String
+  if
+    value == 0: "0"
+    value == 1: "1"
+    value == 2: "2"
+    value == 3: "3"
+    else: "many"

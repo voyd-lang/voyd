@@ -35,6 +35,7 @@ export type CreateVoydVxAppRuntimeOptions = {
 };
 
 type RuntimeResult = Record<string, unknown> & {
+  $vx: "runtime_result";
   model?: unknown;
   frame?: unknown;
   commands?: unknown;
@@ -46,6 +47,11 @@ const defaultExports = {
   update: "update",
   view: "view",
 } satisfies Required<Omit<VoydVxAppRuntimeExports, "subscriptions">>;
+
+const runtimeResult = (value: Omit<RuntimeResult, "$vx">): RuntimeResult => ({
+  $vx: "runtime_result",
+  ...value,
+});
 
 export function createVoydVxAppRuntime(
   options: CreateVoydVxAppRuntimeOptions,
@@ -111,7 +117,7 @@ export function createVoydVxAppRuntime(
   return {
     init: async () => {
       const result = initialized
-        ? { model }
+        ? runtimeResult({ model })
         : await options.host.run(entryNames.init);
       return toRuntimeStep(result, true);
     },
@@ -192,5 +198,10 @@ function eventPayloadFallback(payload: NormalizedEventPayload): unknown {
 }
 
 function isRuntimeResult(input: unknown): input is RuntimeResult {
-  return !!input && typeof input === "object" && !Array.isArray(input);
+  return (
+    !!input &&
+    typeof input === "object" &&
+    !Array.isArray(input) &&
+    (input as { $vx?: unknown }).$vx === "runtime_result"
+  );
 }

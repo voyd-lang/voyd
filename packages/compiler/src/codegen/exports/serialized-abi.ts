@@ -1,18 +1,43 @@
 import binaryen from "binaryen";
-import { arrayGet } from "@voyd-lang/lib/binaryen-gc/index.js";
-import type { CodegenContext, FunctionContext, FunctionMetadata } from "../context.js";
-import { findSerializerForType, resolveSerializerForTypes } from "../serializer.js";
-import { coerceValueToType } from "../structural.js";
-import { wasmTypeFor } from "../types.js";
-import { requireFunctionMeta } from "../function-lookup.js";
+import { arrayGet, initDefaultStruct } from "@voyd-lang/lib/binaryen-gc/index.js";
+import type {
+  CodegenContext,
+  FunctionContext,
+  FunctionMetadata,
+  StructuralFieldInfo,
+  TypeId,
+} from "../context.js";
+import type { ProgramSymbolId } from "../../semantics/ids.js";
+import { findSerializerForType } from "../serializer.js";
+import {
+  coerceValueToType,
+  liftHeapValueToInline,
+  loadStructuralField,
+  storeValueIntoStorageRef,
+} from "../structural.js";
+import {
+  abiTypeFor,
+  getSignatureSpillBoxType,
+  getStructuralTypeInfo,
+  wasmTypeFor,
+} from "../types.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
 import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
+import { deriveBoundarySchema } from "../boundary/schema.js";
 import {
-  packMsgPackValueForType,
-  unpackMsgPackValueForType,
-} from "../effects/host-boundary/msgpack-values.js";
-
-type ExportSerializer = ReturnType<typeof resolveSerializerForTypes>;
+  packBoundaryValueAsMsgPack,
+  unpackBoundaryValueFromMsgPack,
+} from "../boundary/msgpack-codec.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../locals.js";
+import { captureMultivalueLanes } from "../multivalue.js";
+import {
+  boxSignatureSpillValue,
+  unboxSignatureSpillValue,
+} from "../signature-spill.js";
 
 export const emitSerializedExportWrapper = ({
   ctx,
@@ -22,19 +47,7 @@ export const emitSerializedExportWrapper = ({
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
-}): { wrapperName: string; serializer: ExportSerializer } => {
-  const serializer = resolveSerializerForTypes(
-    [...meta.paramTypeIds, meta.resultTypeId],
-    ctx
-  );
-  if (!serializer) {
-    throw new Error(`missing serializer for ${exportName}`);
-  }
-  if (serializer.formatId !== "msgpack") {
-    throw new Error(
-      `unsupported export serializer format for ${exportName}: ${serializer.formatId}`
-    );
-  }
+}): { wrapperName: string; formatId: "msgpack" } => {
   ensureLinearMemoryExport(ctx);
   validateExportTypes({ ctx, meta, exportName });
 
@@ -42,17 +55,6 @@ export const emitSerializedExportWrapper = ({
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const arrayType = msgpack.arrayWithCapacity.resultType;
   const storageType = msgpack.arrayRawStorage.resultType;
-
-  const encodeMeta = requireFunctionMeta({
-    ctx,
-    moduleId: serializer.encode.moduleId,
-    symbol: serializer.encode.symbol,
-  });
-  const decodeMeta = requireFunctionMeta({
-    ctx,
-    moduleId: serializer.decode.moduleId,
-    symbol: serializer.decode.symbol,
-  });
 
   const wrapperName = `${meta.wasmName}__serialized_export_${sanitizeIdentifier(exportName)}`;
   const paramCount = 4;
@@ -87,24 +89,17 @@ export const emitSerializedExportWrapper = ({
   };
 
   const decoded = ctx.mod.call(
-    decodeMeta.wasmName,
+    msgpack.decodeValue.wasmName,
     [
       ctx.mod.local.get(argsPtrLocal, binaryen.i32),
       ctx.mod.local.get(argsLenLocal, binaryen.i32),
     ],
     msgPackType
   );
-  const decodedValue = coerceValueToType({
-    value: decoded,
-    actualType: decodeMeta.resultTypeId,
-    targetType: msgpack.msgPackTypeId,
-    ctx,
-    fnCtx,
-  });
 
   const argsArray = ctx.mod.call(
     msgpack.unpackArray.wasmName,
-    [decodedValue],
+    [ctx.mod.local.get(decodedLocal, msgPackType)],
     arrayType
   );
   const argsCount = ctx.mod.call(
@@ -137,6 +132,11 @@ export const emitSerializedExportWrapper = ({
     );
     const serializer = findSerializerForType(typeId, ctx);
     if (serializer) {
+      if (serializer.formatId !== "msgpack") {
+        throw new Error(
+          `unsupported export serializer format for ${exportName}: ${serializer.formatId}`
+        );
+      }
       return coerceValueToType({
         value: element,
         actualType: msgpack.msgPackTypeId,
@@ -145,53 +145,36 @@ export const emitSerializedExportWrapper = ({
         fnCtx,
       });
     }
-    return unpackMsgPackValueForType({
+    return unpackBoundaryValueFromMsgPack({
       ctx,
-      msgpack,
       value: element,
-      typeId,
-      label: `${exportName} arg${index}`,
+      schema: deriveBoundarySchema({
+        typeId,
+        ctx,
+        label: `${exportName} arg${index}`,
+      }),
+      fnCtx,
     });
   };
 
   const callArgs = meta.paramTypeIds.map((typeId, index) =>
     buildParamExpr(typeId, index)
   );
-  const resultValue = ctx.mod.call(
-    meta.wasmName,
-    callArgs as number[],
-    wasmTypeFor(meta.resultTypeId, ctx)
-  );
-  const encodeParamType = encodeMeta.paramTypeIds[0];
-  if (typeof encodeParamType !== "number") {
-    throw new Error(`missing serializer input type for ${exportName}`);
-  }
-  const resultSerializer = findSerializerForType(meta.resultTypeId, ctx);
-  const encodeValue = resultSerializer
-    ? coerceValueToType({
-        value: resultValue,
-        actualType: meta.resultTypeId,
-        targetType: encodeParamType,
-        ctx,
-        fnCtx,
-      })
-    : coerceValueToType({
-        value: packMsgPackValueForType({
-          ctx,
-          msgpack,
-          msgPackType,
-          value: resultValue,
-          typeId: meta.resultTypeId,
-          label: `${exportName} result`,
-          onUnsupported: "throw",
-        }),
-        actualType: msgpack.msgPackTypeId,
-        targetType: encodeParamType,
-        ctx,
-        fnCtx,
-      });
+  const loweredCall = lowerSerializedExportCall({
+    meta,
+    args: callArgs,
+    ctx,
+    fnCtx,
+  });
+  const encodeValue = packSerializedResultValue({
+    value: loweredCall.value,
+    typeId: meta.resultTypeId,
+    ctx,
+    fnCtx,
+    exportName,
+  });
   const encodedLength = ctx.mod.call(
-    encodeMeta.wasmName,
+    msgpack.encodeValue.wasmName,
     [
       encodeValue,
       ctx.mod.local.get(outPtrLocal, binaryen.i32),
@@ -206,17 +189,244 @@ export const emitSerializedExportWrapper = ({
     binaryen.i32,
     locals,
     ctx.mod.block(null, [
-      ctx.mod.local.set(decodedLocal, decodedValue),
+      ctx.mod.local.set(decodedLocal, decoded),
       ctx.mod.local.set(argsArrayLocal, argsArray),
       ctx.mod.local.set(storageLocal, storage),
       ctx.mod.local.set(argsCountLocal, argsCount),
       checkArgs,
+      ...loweredCall.setup,
       ctx.mod.return(encodedLength),
     ])
   );
 
   ctx.mod.addFunctionExport(wrapperName, exportName);
-  return { wrapperName, serializer };
+  return { wrapperName, formatId: "msgpack" };
+};
+
+const lowerSerializedExportCall = ({
+  meta,
+  args,
+  ctx,
+  fnCtx,
+}: {
+  meta: FunctionMetadata;
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): { setup: readonly binaryen.ExpressionRef[]; value: binaryen.ExpressionRef } => {
+  const loweredArgs = args.map((arg, index) =>
+    lowerSerializedAbiArg({
+      wasmName: meta.wasmName,
+      abiKind: meta.paramAbiKinds[index] ?? "direct",
+      abiTypes: meta.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
+      typeId: meta.paramTypeIds[index]!,
+      value: arg,
+      ctx,
+      fnCtx,
+    }),
+  );
+  const argSetup = loweredArgs.flatMap((arg) => arg.setup);
+  const userArgs = loweredArgs.flatMap((arg) => arg.args);
+
+  if (meta.resultAbiKind === "out_ref") {
+    if (typeof meta.outParamType !== "number") {
+      throw new Error(`serialized export ${meta.wasmName} is missing out-ref storage`);
+    }
+    const out = allocateTempLocal(meta.outParamType, fnCtx);
+    const outRef = () => ctx.mod.local.get(out.index, out.type);
+    const initializedOut = ctx.mod.local.tee(
+      out.index,
+      initDefaultStruct(ctx.mod, out.type),
+      out.type,
+    );
+    const rawCall = ctx.mod.call(
+      meta.wasmName,
+      [initializedOut, ...userArgs] as number[],
+      meta.resultType,
+    );
+    return {
+      setup: [...argSetup, rawCall],
+      value: liftHeapValueToInline({
+        value: outRef(),
+        typeId: meta.resultTypeId,
+        ctx,
+      }),
+    };
+  }
+
+  const rawCall = ctx.mod.call(meta.wasmName, userArgs as number[], meta.resultType);
+  const stabilized = stabilizeSerializedAbiResult({
+    value: rawCall,
+    resultType: meta.resultType,
+    resultAbiTypes: meta.resultAbiTypes,
+    resultTypeId: meta.resultTypeId,
+    ctx,
+    fnCtx,
+  });
+  return {
+    setup: argSetup,
+    value: stabilized,
+  };
+};
+
+export const lowerSerializedAbiArg = ({
+  wasmName,
+  abiKind,
+  abiTypes,
+  typeId,
+  value,
+  ctx,
+  fnCtx,
+}: {
+  wasmName: string;
+  abiKind: string;
+  abiTypes: readonly binaryen.Type[];
+  typeId: TypeId;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): { setup: readonly binaryen.ExpressionRef[]; args: readonly binaryen.ExpressionRef[] } => {
+  if (abiKind === "readonly_ref" || abiKind === "mutable_ref") {
+    if (abiTypes.length !== 1) {
+      throw new Error(`serialized ABI call ${wasmName} expected one ref ABI lane`);
+    }
+    const storage = allocateTempLocal(abiTypes[0]!, fnCtx);
+    const storageRef = () => ctx.mod.local.get(storage.index, storage.type);
+    return {
+      setup: [
+        ctx.mod.local.set(
+          storage.index,
+          initDefaultStruct(ctx.mod, storage.type),
+        ),
+        storeValueIntoStorageRef({
+          pointer: storageRef,
+          value,
+          typeId,
+          ctx,
+          fnCtx,
+        }),
+      ],
+      args: [storageRef()],
+    };
+  }
+
+  return flattenSerializedExportArg({
+    value,
+    abiTypes,
+    typeId,
+    wasmName,
+    ctx,
+    fnCtx,
+  });
+};
+
+const flattenSerializedExportArg = ({
+  value,
+  abiTypes,
+  typeId,
+  wasmName,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  abiTypes: readonly binaryen.Type[];
+  typeId: TypeId;
+  wasmName: string;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): { setup: readonly binaryen.ExpressionRef[]; args: readonly binaryen.ExpressionRef[] } => {
+  if (
+    abiTypes.length === 1 &&
+    getSignatureSpillBoxType({ typeId, ctx }) === abiTypes[0]
+  ) {
+    return {
+      setup: [],
+      args: [
+        boxSignatureSpillValue({
+          value,
+          typeId,
+          ctx,
+          fnCtx,
+        }),
+      ],
+    };
+  }
+  if (abiTypes.length <= 1) {
+    return {
+      setup: [],
+      args: abiTypes.length === 0 ? [] : [value],
+    };
+  }
+
+  const valueAbiTypes = [...binaryen.expandType(binaryen.getExpressionType(value))];
+  if (valueAbiTypes.length !== abiTypes.length) {
+    throw new Error(
+      `serialized ABI flatten mismatch for ${wasmName}: expected ${abiTypes.length} lanes, got ${valueAbiTypes.length}`,
+    );
+  }
+  const temp = allocateTempLocal(abiTypeFor(valueAbiTypes), fnCtx, typeId, ctx);
+  return {
+    setup: [storeLocalValue({ binding: temp, value, ctx, fnCtx })],
+    args: abiTypes.map((_, lane) =>
+      ctx.mod.tuple.extract(loadLocalValue(temp, ctx), lane),
+    ),
+  };
+};
+
+export const stabilizeSerializedAbiResult = ({
+  value,
+  resultType,
+  resultAbiTypes,
+  resultTypeId,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  resultType: binaryen.Type;
+  resultAbiTypes: readonly binaryen.Type[];
+  resultTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const stabilized = stabilizeMultivalueResult({
+    value,
+    abiTypes: resultAbiTypes,
+    ctx,
+    fnCtx,
+  });
+  return getSignatureSpillBoxType({ typeId: resultTypeId, ctx }) === resultType
+    ? unboxSignatureSpillValue({
+        value: stabilized,
+        typeId: resultTypeId,
+        ctx,
+      })
+    : stabilized;
+};
+
+const stabilizeMultivalueResult = ({
+  value,
+  abiTypes,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  abiTypes: readonly binaryen.Type[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  if (abiTypes.length <= 1) {
+    return value;
+  }
+  const captured = captureMultivalueLanes({
+    value,
+    abiTypes,
+    ctx,
+    fnCtx,
+  });
+  const tuple = ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]);
+  return captured.setup.length === 0
+    ? tuple
+    : ctx.mod.block(null, [...captured.setup, tuple], abiTypeFor(abiTypes));
 };
 
 const validateExportTypes = ({
@@ -239,18 +449,136 @@ const validateExportTypes = ({
       }
       return;
     }
-    const isPrimitive =
-      typeId === ctx.program.primitives.bool ||
-      typeId === ctx.program.primitives.i32 ||
-      typeId === ctx.program.primitives.i64 ||
-      typeId === ctx.program.primitives.f32 ||
-      typeId === ctx.program.primitives.f64 ||
-      typeId === ctx.program.primitives.void;
-    if (!isPrimitive) {
-      const target = index < meta.paramTypeIds.length ? "parameter" : "return";
-      throw new Error(`unsupported ${target} type for ${exportName}`);
+    if (isVxMsgPackAlias(typeId, ctx) || vxPayloadField(typeId, ctx)) {
+      return;
     }
+    const target = index < meta.paramTypeIds.length ? `parameter ${index + 1}` : "return";
+    deriveBoundarySchema({
+      typeId,
+      ctx,
+      label: `${exportName} ${target}`,
+    });
   });
+};
+
+const packSerializedResultValue = ({
+  value,
+  typeId,
+  ctx,
+  fnCtx,
+  exportName,
+}: {
+  value: binaryen.ExpressionRef;
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  exportName: string;
+}): binaryen.ExpressionRef => {
+  const msgpack = ensureMsgPackFunctions(ctx);
+  const serializer = findSerializerForType(typeId, ctx);
+  if (serializer) {
+    if (serializer.formatId !== "msgpack") {
+      throw new Error(
+        `unsupported serializer format for ${exportName}: ${serializer.formatId}`
+      );
+    }
+    return coerceValueToType({
+      value,
+      actualType: typeId,
+      targetType: msgpack.msgPackTypeId,
+      ctx,
+      fnCtx,
+    });
+  }
+  if (isVxMsgPackAlias(typeId, ctx)) {
+    return value;
+  }
+  const payloadField = vxPayloadField(typeId, ctx);
+  if (payloadField) {
+    const info = getStructuralTypeInfo(typeId, ctx);
+    if (!info) {
+      throw new Error(`VX payload envelope ${typeId} is missing structural info`);
+    }
+    return loadStructuralField({
+      structInfo: info,
+      field: payloadField,
+      pointer: () => value,
+      ctx,
+    });
+  }
+  return packBoundaryValueAsMsgPack({
+    value,
+    schema: deriveBoundarySchema({
+      typeId,
+      ctx,
+      label: `${exportName} result`,
+    }),
+    ctx,
+    fnCtx,
+  });
+};
+
+const VX_MSGPACK_ALIAS_NAMES = new Set(["Html", "Attr", "Program"]);
+const VX_PAYLOAD_ENVELOPE_NAMES = new Set(["Cmd", "Sub"]);
+const VX_STD_MODULE_ID = "std::vx";
+
+const isStdVxSymbolNamed = (
+  symbol: ProgramSymbolId,
+  names: ReadonlySet<string>,
+  ctx: CodegenContext,
+): boolean =>
+  ctx.program.symbols.refOf(symbol).moduleId === VX_STD_MODULE_ID &&
+  names.has(ctx.program.symbols.getName(symbol) ?? "");
+
+const isVxMsgPackAlias = (typeId: TypeId, ctx: CodegenContext): boolean =>
+  ctx.program.types
+    .getAliasSymbols(typeId)
+    .some((symbol) => isStdVxSymbolNamed(symbol, VX_MSGPACK_ALIAS_NAMES, ctx));
+
+const vxPayloadField = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): StructuralFieldInfo | undefined => {
+  if (!nominalTypeSymbolIsStdVxNamed(typeId, VX_PAYLOAD_ENVELOPE_NAMES, ctx)) {
+    return undefined;
+  }
+  const info = getStructuralTypeInfo(typeId, ctx);
+  const payload = info?.fieldMap.get("payload");
+  if (!payload) {
+    return undefined;
+  }
+  const serializer = findSerializerForType(payload.typeId, ctx);
+  return serializer?.formatId === "msgpack" ? payload : undefined;
+};
+
+const nominalTypeName = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): string | undefined => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
+    return desc.name;
+  }
+  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+    return nominalTypeName(desc.nominal, ctx);
+  }
+  return undefined;
+};
+
+const nominalTypeSymbolIsStdVxNamed = (
+  typeId: TypeId,
+  names: ReadonlySet<string>,
+  ctx: CodegenContext,
+): boolean => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  const nominal =
+    desc.kind === "intersection" && typeof desc.nominal === "number"
+      ? ctx.program.types.getTypeDesc(desc.nominal)
+      : desc;
+  if (nominal.kind !== "nominal-object" && nominal.kind !== "value-object") {
+    return false;
+  }
+  return isStdVxSymbolNamed(nominal.owner, names, ctx);
 };
 
 const sanitizeIdentifier = (value: string): string =>

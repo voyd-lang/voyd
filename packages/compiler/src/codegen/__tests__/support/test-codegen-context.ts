@@ -97,6 +97,7 @@ export const createTestCodegenContext = (): {
         getNominalAncestry: () => [],
         getStructuralLayout: () => undefined,
         getRuntimeTypeId: (typeId: number) => typeId,
+        getStandaloneVariantTag: () => undefined,
       },
       symbols: {
         getName: () => undefined,

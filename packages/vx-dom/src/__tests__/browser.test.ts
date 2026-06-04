@@ -333,13 +333,15 @@ describe("vx-dom browser renderer", () => {
 
     expect(allowed).toBe(false);
     expect(event.defaultPrevented).toBe(true);
-    expect(dispatch).toHaveBeenCalledWith(30, {
+    expect(dispatch).toHaveBeenCalledWith(30, expect.objectContaining({
       kind: "submit",
       form_data: {
         published: "yes",
         title: "Draft",
       },
-    });
+      form_keys: ["title", "published"],
+      form_values: ["Draft", "yes"],
+    }));
   });
 
   it("runs custom command executors and dispatches completions", async () => {

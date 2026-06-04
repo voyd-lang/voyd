@@ -5558,6 +5558,13 @@ const typeIntrinsicCall = (
         ctx,
         typeArguments,
       });
+    case "__boundary_value_to_msgpack":
+      return typeBoundaryValueToMsgPackIntrinsic({
+        args,
+        ctx,
+        typeArguments,
+        expectedReturnType,
+      });
     case "__shift_l":
     case "__shift_ru":
       return typeShiftIntrinsic({ name, args, ctx, state, typeArguments });
@@ -6365,6 +6372,27 @@ const typeVxRetainEventHandlerIntrinsic = ({
     throw new Error("__vx_retain_event_handler expects a function argument");
   }
   return getPrimitiveType(ctx, "i32");
+};
+
+const typeBoundaryValueToMsgPackIntrinsic = ({
+  args,
+  ctx,
+  typeArguments,
+  expectedReturnType,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  typeArguments?: readonly TypeId[];
+  expectedReturnType?: TypeId;
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__boundary_value_to_msgpack",
+    args,
+    expected: 1,
+    detail: "boundary value",
+  });
+  assertNoIntrinsicTypeArgs("__boundary_value_to_msgpack", typeArguments);
+  return expectedReturnType ?? ctx.primitives.unknown;
 };
 
 const typeTaskTakeValueIntrinsic = ({

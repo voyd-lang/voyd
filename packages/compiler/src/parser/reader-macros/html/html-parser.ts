@@ -191,14 +191,22 @@ export class HTMLParser {
   private lowerVxAttribute(name: string, value: Expr): Expr {
     if (name.startsWith("on_")) {
       const eventValue = unwrapInlineLambdaExpr(value);
-      const eventHelper = isLambdaExpr(eventValue)
-        ? eventLambdaAcceptsPayload(eventValue)
-          ? `${name}_payload`
-          : name
-        : `${name}_message`;
-      return surfaceCall(eventHelper, eventValue).setLocation(
-        this.stream.currentSourceLocation(),
-      );
+      const eventName = domEventNameForVxAttribute(name);
+      if (!isLambdaExpr(eventValue)) {
+        return surfaceCall(
+          "event_message",
+          label("name", string(eventName)),
+          label("message", eventValue),
+        ).setLocation(this.stream.currentSourceLocation());
+      }
+      const eventHelper = eventLambdaAcceptsPayload(eventValue)
+        ? "event_payload_handler"
+        : "event_handler";
+      return surfaceCall(
+        eventHelper,
+        label("name", string(eventName)),
+        label("handler", eventValue),
+      ).setLocation(this.stream.currentSourceLocation());
     }
 
     if (
@@ -394,6 +402,12 @@ const eventLambdaAcceptsPayload = (expr: Expr): boolean => {
         ? item.length > 1
         : typeof item === "string" && item.trim().length > 0
     );
+};
+
+const domEventNameForVxAttribute = (name: string): string => {
+  const eventName = name.slice("on_".length);
+  if (eventName === "double_click") return "dblclick";
+  return eventName.replaceAll("_", "");
 };
 
 const emptyVxChildren = (): Expr =>

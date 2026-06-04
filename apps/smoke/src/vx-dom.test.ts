@@ -9,57 +9,14 @@ import {
   mountVxApp,
   renderMsgPackNode,
   type VxAppRuntime,
-} from "@voyd-lang/vx-dom/browser";
+} from "@voyd-lang/vx-dom";
 
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
 const siteExampleRoot = path.resolve(import.meta.dirname, "../../site/examples");
-const playgroundCounterSource = `use std::dict::Dict
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
-use std::result::types::all
-use std::vx::all
-
-pub fn init() -> MsgPack
-  model(count: 0)
-
-pub fn update(current: MsgPack, message: MsgPack) -> MsgPack
-  model(count: count_from(current) + 1)
-
-pub fn view(model: MsgPack) -> MsgPack
-  <Counter label="Count" value={count_from(model)} />
-
-fn Counter({ label: String, value: i32 })
-  <button on_click={msgpack::make_string("increment")}>
-    {label}: {count_label(value)}
-  </button>
-
-fn count_from(value: MsgPack) -> i32
-  match(msgpack::unpack_map(value))
-    Ok<Dict<String, MsgPack>> { value }:
-      match(value.get("count"))
-        Some<MsgPack> { value }:
-          match(msgpack::unpack_i32(value))
-            Ok<i32> { value }:
-              value
-            Err:
-              0
-        None:
-          0
-    Err:
-      0
-
-fn count_label(value: i32) -> String
-  if
-    value == 0: "0"
-    value == 1: "1"
-    value == 2: "2"
-    value == 3: "3"
-    else: "many"
-
-fn model({ count: i32 }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("count", msgpack::make_i32(count))
-  msgpack::make_map(out)`;
+const typedCounterEntryPath = path.join(fixtureRoot, "vx-typed-counter.voyd");
+const typedMouseEventEntryPath = path.join(fixtureRoot, "vx-typed-mouse-event.voyd");
+const userProgramNameEntryPath = path.join(fixtureRoot, "vx-user-program-name.voyd");
+const wideValueModelEntryPath = path.join(fixtureRoot, "vx-wide-value-model.voyd");
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -163,29 +120,127 @@ describe("smoke: compiled VX DOM rendering", () => {
     expect(message).toEqual(payload);
   });
 
-  it("updates the playground-style app counter in a mounted Voyd app", async () => {
+  it("updates a typed VX app counter in a mounted Voyd app", async () => {
     const sdk = createSdk();
-    const result = expectCompileSuccess(await sdk.compile({ source: playgroundCounterSource }));
+    const result = expectCompileSuccess(await sdk.compile({ entryPath: typedCounterEntryPath }));
     const host = await createVoydHost({
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
     const app = createVoydVxAppRuntime({
       host,
+      exports: { subscriptions: "subscriptions" },
     });
 
     const container = document.createElement("div");
     const mounted = await mountVxApp({ container, app });
 
-    expect(container.querySelector("button")?.textContent).toContain("Count: 0");
+    expect(container.querySelector("button")?.textContent).toContain("Count: 1");
+    expect(container.querySelector("p")?.textContent).toBe("Ready");
+    expect(container.querySelector<HTMLInputElement>("input")?.value).toBe("Ready");
 
     container.querySelector<HTMLButtonElement>("button")?.click();
     await nextTurn();
 
-    expect(container.querySelector("button")?.textContent).toContain("Count: 1");
+    expect(container.querySelector("button")?.textContent).toContain("Count: 2");
+
+    const input = container.querySelector<HTMLInputElement>("input")!;
+    input.value = "Typed VX";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+    await nextTurn();
+
+    expect(container.querySelector("p")?.textContent).toBe("Typed VX");
 
     mounted.dispose();
     expect(container.innerHTML).toBe("");
+  });
+
+  it("marshals wide value models through typed VX export wrappers", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(await sdk.compile({ entryPath: wideValueModelEntryPath }));
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+    const app = createVoydVxAppRuntime({ host });
+
+    const container = document.createElement("div");
+    const mounted = await mountVxApp({ container, app });
+
+    expect(container.querySelector("button")?.textContent).toContain("Wide: 0");
+
+    container.querySelector<HTMLButtonElement>("button")?.click();
+    await nextTurn();
+
+    expect(container.querySelector("button")?.textContent).toContain("Wide: 1");
+
+    mounted.dispose();
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("marshals typed mouse payload callbacks and integer JS numbers to f64 fields", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(await sdk.compile({ entryPath: typedMouseEventEntryPath }));
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+    const app = createVoydVxAppRuntime({ host });
+
+    const container = document.createElement("div");
+    const mounted = await mountVxApp({ container, app });
+
+    expect(container.querySelector("button")?.textContent).toContain("X: 0");
+
+    container.querySelector<HTMLButtonElement>("button")?.dispatchEvent(
+      new MouseEvent("mousemove", { bubbles: true, clientX: 10 }),
+    );
+    await nextTurn();
+
+    expect(container.querySelector("button")?.textContent).toContain("X: 10");
+
+    mounted.dispose();
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("rejects unsupported typed message variant fields at compile time", async () => {
+    const sdk = createSdk();
+    const result = await sdk.compile({
+      source: `
+use std::enums::{ enum }
+use std::optional::types::Optional
+use std::string::type::String
+use std::vx::all
+
+obj Model { count: i32 }
+
+enum Msg
+  Save { value?: String }
+
+pub fn init() -> Model
+  Model { count: 0 }
+
+pub fn update(model: Model, msg: Msg) -> Model
+  model
+
+pub fn view(model: Model) -> Html<Msg>
+  <button on_click={Msg::Save {}}>Save</button>
+`,
+      entryPath: "invalid-vx-message.voyd",
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.diagnostics.some((diagnostic) =>
+      diagnostic.message.includes("optional object fields are not supported at the boundary yet"),
+    )).toBe(true);
+  });
+
+  it("does not apply std::vx ABI shortcuts to user types with VX-like names", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(await sdk.compile({ entryPath: userProgramNameEntryPath }));
+
+    await expect(result.run<number>({ entryName: "main" })).resolves.toBe(42);
   });
 
   it("renders the site wiki example from compiled Voyd source", async () => {
@@ -230,19 +285,22 @@ describe("smoke: compiled VX DOM rendering", () => {
     });
 
     const container = document.createElement("div");
-    const mounted = await mountVxApp({ container, app });
+    const appContainer = document.createElement("div");
     const componentStateContainer = document.createElement("div");
-    const componentStateMounted = await mountVxApp({
+    container.append(appContainer, componentStateContainer);
+
+    const mounted = await mountVxApp({ container: appContainer, app });
+    const mountedComponentState = await mountVxApp({
       container: componentStateContainer,
       app: componentStateApp,
     });
 
-    expect(componentStateContainer.querySelector(".wiki-demo-component-state")?.textContent).toContain(
+    expect(container.querySelector(".wiki-demo-component-state")?.textContent).toContain(
       "remembered",
     );
-    componentStateContainer.querySelector<HTMLButtonElement>("button")?.click();
+    container.querySelector<HTMLButtonElement>(".wiki-demo-component-state button")?.click();
     await nextTurn();
-    expect(componentStateContainer.querySelector(".wiki-demo-component-state")?.textContent).toContain(
+    expect(container.querySelector(".wiki-demo-component-state")?.textContent).toContain(
       "remembered",
     );
 
@@ -325,8 +383,8 @@ describe("smoke: compiled VX DOM rendering", () => {
     expect(container.querySelector(".wiki-demo-inspector")?.className).toContain("is-closed");
 
     mounted.dispose();
-    componentStateMounted.dispose();
-    expect(container.innerHTML).toBe("");
+    mountedComponentState.dispose();
+    expect(appContainer.innerHTML).toBe("");
     expect(componentStateContainer.innerHTML).toBe("");
   });
 });
