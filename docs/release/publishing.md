@@ -1,17 +1,120 @@
 # Publishing
 
-Voyd publishes through the root release scripts instead of ad hoc `npm publish`
-commands.
+Voyd has two public release commands:
 
-## Supported Targets
+- `npm run release:prepare`
+- `npm run release:publish`
 
-List release targets:
+Everything else in `scripts/release/` is an internal maintenance helper. The
+documented release flow should go through the two root commands above.
+
+## One-Time Setup
+
+Before a full `--all` release can publish successfully:
+
+- configure npm trusted publishing for each published npm package
+- bootstrap any npm package that does not exist yet
+- add the `VSCE_PAT` GitHub Actions secret for the VS Code Marketplace
+- make sure the release workflow can create GitHub tags and releases
+
+For `0.2.0`, the known blockers are:
+
+- `VSCE_PAT` is not configured in GitHub Actions secrets
+- `@voyd-lang/language-server` does not exist on npm yet
+- `@voyd-lang/reference` does not exist on npm yet
+
+See [GitHub and Token Setup](#github-and-token-setup) for the exact setup
+steps.
+
+## Release Flow
+
+Prepare the release commit from a clean release branch:
 
 ```sh
-npm run release:list
+git switch -c release/v0.2.0
+npm run release:prepare -- --all --version 0.2.0
+git push -u origin release/v0.2.0
 ```
 
-Current supported targets:
+Open and merge a pull request into `main`. This keeps branch protection and the
+required `test` status check in front of the release commit.
+
+After the PR is merged, update local `main` and publish:
+
+```sh
+git switch main
+git pull --ff-only origin main
+npm run release:publish -- --all
+```
+
+`release:publish` dispatches `.github/workflows/release.yml` on `main`. For a
+real publish it also asks the workflow to create the GitHub tag and release. If
+`docs/release/v<version>-notes.md` exists and all selected targets share the
+same version, it is passed to the workflow automatically as the GitHub release
+notes file.
+
+Dry-run the workflow without publishing:
+
+```sh
+npm run release:publish -- --all --dry-run
+```
+
+Publish a subset:
+
+```sh
+npm run release:prepare -- --targets @voyd-lang/std,@voyd-lang/lib --version 0.2.0
+npm run release:publish -- --targets @voyd-lang/std,@voyd-lang/lib
+```
+
+Skip GitHub release creation when publishing packages:
+
+```sh
+npm run release:publish -- --all --skip-github-release
+```
+
+Use an explicit notes file:
+
+```sh
+npm run release:publish -- --all --notes-file docs/release/v0.2.0-notes.md
+```
+
+## What The Commands Do
+
+`release:prepare`:
+
+- requires a clean non-`main` branch
+- versions selected package manifests
+- updates internal package ranges
+- updates `packages/std/src/version.voyd` when `@voyd-lang/std` is selected
+- refreshes `package-lock.json`
+- runs the release validation suite
+- stages and commits the release changes
+
+Pass `--no-commit` to leave the release changes staged:
+
+```sh
+npm run release:prepare -- --all --version 0.2.0 --no-commit
+```
+
+`release:publish`:
+
+- requires a clean, up-to-date local `main`
+- checks selected npm packages already exist before dispatching a real trusted
+  publishing release
+- checks `VSCE_PAT` exists before dispatching a real `voyd-vscode` release
+- dispatches the GitHub `Release` workflow on `main`
+- passes package targets, dry-run mode, npm tag, VS Code release options, and
+  GitHub release notes to the workflow
+
+The GitHub workflow then:
+
+- installs dependencies from the merged release commit
+- runs release validation
+- publishes npm packages in dependency order
+- publishes the VS Code extension when selected
+- creates the git tag and GitHub release for real publishes
+
+## Supported Targets
 
 - `@voyd-lang/std`
 - `@voyd-lang/lib`
@@ -25,182 +128,141 @@ Current supported targets:
 
 `voyd_semver` is intentionally private and excluded from the release flow.
 
-Use `--all` to select every supported target without listing them explicitly.
-The GitHub release workflow accepts the same `--all` value in its `targets` input.
+Use `--all` to select every supported target. Use `--target` or `--targets` for
+subsets.
 
-## Full Release
+## GitHub and Token Setup
 
-Cut a full release from a clean, up-to-date `main` checkout:
+### GitHub Actions Secret For VS Code
 
-```sh
-npm run release:cut -- --all --version 0.2.0 --publish --github-release
-```
+`voyd-vscode` publishes through `vsce`, which requires a Visual Studio
+Marketplace personal access token.
 
-That single command:
+Create the token:
 
-- verifies the worktree is clean and `main` matches `origin/main`
-- versions selected packages and internal dependency ranges
-- updates `packages/std/src/version.voyd` when `@voyd-lang/std` is selected
-- refreshes `package-lock.json`
-- runs the release validation suite
-- commits the version changes
-- pushes `main`
-- dispatches the GitHub `Release` workflow
-- asks the workflow to publish packages and create a GitHub release
+1. Open `https://dev.azure.com/`.
+2. Select the Azure DevOps organization that owns the Visual Studio Marketplace
+   publisher.
+3. Open the user settings menu next to your profile image.
+4. Select **Personal access tokens**.
+5. Select **New Token**.
+6. Set **Name** to something like `voyd-vscode-release`.
+7. Set **Organization** to **All accessible organizations**.
+8. Set an expiration you are comfortable with.
+9. Choose **Custom defined** scopes.
+10. Click **Show all scopes**.
+11. Under **Marketplace**, select **Manage**.
+12. Click **Create**.
+13. Copy the token immediately; Azure DevOps will not show it again.
 
-Omit `--publish` to dispatch the workflow in dry-run mode after the release
-prep commit is pushed. Use `--skip-workflow` to stop after pushing the version
-commit.
+Add it to GitHub as `VSCE_PAT`:
 
-`release:cut` is the preferred full-release entrypoint. The lower-level
-commands below are useful for manual recovery, partial publishes, and debugging.
+1. Open `https://github.com/voyd-lang/voyd/settings/secrets/actions`.
+2. Click **New repository secret**.
+3. Name it `VSCE_PAT`.
+4. Paste the Azure DevOps token.
+5. Save it.
 
-## Versioning
-
-Bump every supported target by one patch version:
-
-```sh
-npm run release:version:all -- --bump patch
-```
-
-Bump a subset:
+Or use the GitHub CLI:
 
 ```sh
-npm run release:version -- --targets @voyd-lang/sdk,@voyd-lang/cli --bump minor
+gh secret set VSCE_PAT --app actions -R voyd-lang/voyd
 ```
 
-Set an exact version instead:
+`release:publish -- --all` refuses to dispatch a real release until this secret
+exists, because otherwise npm packages could publish before the VS Code publish
+fails.
+
+### npm Bootstrap For New Packages
+
+Trusted publishing needs the package to exist on npm first. For `0.2.0`,
+bootstrap these missing packages from the current `0.1.0` `main` before merging
+the `0.2.0` release PR:
+
+- `@voyd-lang/language-server`
+- `@voyd-lang/reference`
+
+Bootstrap from a clean, current `main` checkout:
 
 ```sh
-npm run release:version -- --all --version 0.2.0
+git switch main
+git pull --ff-only origin main
+npm publish --workspace @voyd-lang/language-server --access public
+npm publish --workspace @voyd-lang/reference --access public
 ```
 
-Version updates:
+Use your normal npm interactive login or a one-time npm automation token for
+that bootstrap. After these packages exist at `0.1.0`, configure trusted
+publishing for them, then let the release workflow publish `0.2.0`.
 
-- rewrite the selected targets' own `version` fields
-- update internal workspace dependency ranges that point at those targets
-- update `packages/std/src/version.voyd` when `@voyd-lang/std` is selected
-- refresh `package-lock.json`
+Do not bootstrap the missing packages at `0.2.0` before the release workflow.
+If `0.2.0` already exists, the workflow cannot publish that same version.
 
-Commit version updates before publishing. The GitHub release workflow publishes
-the checked-out commit; it does not create an uncommitted version bump for you.
-
-## Validation
-
-Before publishing, run:
+Verify package existence:
 
 ```sh
-npm run release:check -- --target @voyd-lang/sdk
+npm view @voyd-lang/language-server version
+npm view @voyd-lang/reference version
 ```
 
-Or validate several targets together:
+### npm Trusted Publishing
+
+Voyd uses npm trusted publishing from GitHub Actions. That avoids long-lived npm
+publish tokens for normal releases.
+
+For each npm package, configure trusted publishing on `npmjs.com`:
+
+1. Open the package page while signed in as an owner/maintainer.
+2. Go to **Settings**.
+3. Find **Trusted publishing** or **Trusted Publisher**.
+4. Choose **GitHub Actions** as the publisher.
+5. Fill in:
+   - **Organization or user**: `voyd-lang`
+   - **Repository**: `voyd`
+   - **Workflow filename**: `release.yml`
+   - **Environment name**: leave blank
+   - **Allowed actions**: allow `npm publish`
+6. Save the trusted publisher.
+
+Configure these packages:
+
+
+- `@voyd-lang/std`
+- `@voyd-lang/lib`
+- `@voyd-lang/compiler`
+- `@voyd-lang/js-host`
+- `@voyd-lang/sdk`
+- `@voyd-lang/language-server`
+- `@voyd-lang/reference`
+- `@voyd-lang/cli`
+
+`release:publish` refuses to dispatch a real workflow when selected npm targets
+do not already exist. Bootstrap missing packages before using the release
+workflow.
+
+Verify trusted publishing by running a workflow dry-run after setup:
 
 ```sh
-npm run release:check -- --targets @voyd-lang/std,@voyd-lang/lib,@voyd-lang/sdk,@voyd-lang/cli
+npm run release:publish -- --all --dry-run
 ```
 
-Release checks always:
+### GitHub Release Permissions
 
-- run uncached Turbo builds for the selected targets and their dependency closure
-- run each selected target's own `typecheck` and `test` scripts
-- run shared boundary suites when needed:
-  - compiler codegen tests for compiler/runtime-facing packages
-  - `@voyd-lang/smoke` for runtime-facing packages
-  - CLI dist e2e for CLI/runtime packages
-- run `npm pack --dry-run` and verify the published tarball contains only the expected files
+The release workflow requests:
 
-Direct `npm publish` is also guarded via `prepublishOnly`, so per-package
-publishes still enforce the related checks.
+- `contents: write` to create tags and GitHub releases
+- `id-token: write` for npm trusted publishing
 
-## Publishing
+The repository currently has protected `main` rules, so release commits should
+go through pull requests. There is no direct-push release command.
 
-### GitHub Actions Auth
+## Watching A Release
 
-The GitHub release workflow uses npm trusted publishing for npm packages.
-
-GitHub setup:
-
-- configure each published npm package as a trusted publisher for the `voyd-lang/voyd` repository and `.github/workflows/release.yml`
-- do not set `NPM_TOKEN` for this workflow
-- keep `VSCE_PAT` as a GitHub Actions secret if you want CI to publish `voyd-vscode`
-
-Notes:
-
-- npm trusted publishing only works after the package already exists on npm, so the first publish may still need a token-based/manual bootstrap
-- the workflow has `id-token: write` enabled so npm can verify the GitHub OIDC identity during publish
-- the VS Code extension does not have an equivalent trusted-publisher flow in this repo today; CI still uses `VSCE_PAT`
-- when `voyd-vscode` is selected without `vscode_release`, the workflow publishes the version already committed in `apps/vscode/package.json`
-
-### GitHub Releases
-
-Create a GitHub release after the package publish succeeds:
+After dispatch:
 
 ```sh
-npm run release:github -- --all
+gh run list --workflow release.yml --limit 5
 ```
 
-That command infers `v<version>` from the selected targets, verifies the tag
-exists, and runs `gh release create`. To create and push the tag as part of the
-same step:
-
-```sh
-npm run release:github -- --all --create-tag
-```
-
-Use an explicit tag or notes when needed:
-
-```sh
-npm run release:github -- --all --github-tag v0.2.0 --notes-file release-notes.md
-```
-
-The GitHub Actions workflow has an optional `github_release` input. When enabled
-on a non-dry-run publish, it runs the same helper after publishing. Leave
-`github_tag` blank to use `v<version>` or pass one explicitly.
-
-Dry-run a publish:
-
-```sh
-npm run release:publish -- --targets @voyd-lang/std,@voyd-lang/lib,@voyd-lang/sdk --dry-run
-```
-
-Dry-run every supported target:
-
-```sh
-npm run release:publish:all -- --dry-run
-```
-
-Publish npm packages:
-
-```sh
-npm run release:publish -- --targets @voyd-lang/std,@voyd-lang/lib,@voyd-lang/sdk,@voyd-lang/cli
-```
-
-Version-bump and publish every supported target in one go:
-
-```sh
-npm run release:publish:all -- --bump patch
-```
-
-Notes:
-
-- The publish script requires a clean git worktree unless `--allow-dirty` is passed.
-- `--bump patch|minor|major` and `--version x.y.z` can be used with `release:publish` to update versions before validation and publishing.
-- npm targets publish in dependency order.
-- The script reuses the release validation pass, then skips duplicate `prepublishOnly`
-  work during the actual publish step.
-- If `voyd-vscode` is included and you already used `--bump` or `--version`, the extension publishes its current package version without a second version bump.
-
-Publish the VSCode extension:
-
-```sh
-npm run release:publish -- --target voyd-vscode --vscode-release patch
-```
-
-Equivalent workspace shortcuts are available in `apps/vscode/package.json`:
-
-- `npm run --workspace voyd-vscode publish:patch`
-- `npm run --workspace voyd-vscode publish:minor`
-- `npm run --workspace voyd-vscode publish:major`
-
-Those shortcuts enforce the same clean-worktree rule. Pass `-- --allow-dirty` only
-if you intentionally need to bypass it.
+Open the newest run in GitHub Actions to watch package publishing and GitHub
+release creation.
