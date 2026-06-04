@@ -99,6 +99,7 @@ const validateExactVersion = (version) => {
 
 const stdVersionSourcePath = path.join(repoRoot, "packages/std/src/version.voyd");
 const releaseNpmCache = process.env.NPM_CONFIG_CACHE ?? path.join(os.tmpdir(), "voyd-release-npm-cache");
+const provenanceRepositoryUrl = "https://github.com/voyd-lang/voyd";
 
 const resolveVersionPlan = ({ targetNames, bump, version }) => {
   if (!bump && !version) {
@@ -314,6 +315,30 @@ const validatePackContents = (targetName) => {
   }
 };
 
+const readRepositoryUrl = (packageJson) => {
+  if (typeof packageJson.repository === "string") {
+    return packageJson.repository;
+  }
+
+  return packageJson.repository?.url;
+};
+
+const validateNpmPackageMetadata = (targetName) => {
+  const target = getTarget(targetName);
+  if (target.kind !== "npm") {
+    return;
+  }
+
+  const packageJson = readTargetPackageJson(targetName);
+  const repositoryUrl = readRepositoryUrl(packageJson);
+
+  if (repositoryUrl !== provenanceRepositoryUrl) {
+    throw new Error(
+      `${targetName} package.json repository.url must be ${provenanceRepositoryUrl} for npm provenance publishing.`,
+    );
+  }
+};
+
 const runOwnChecks = (targetNames) => {
   targetNames.forEach((targetName) => {
     const target = getTarget(targetName);
@@ -382,6 +407,7 @@ const runVscodePackageCheck = (targetNames) => {
 };
 
 export const runReleaseCheck = ({ targetNames }) => {
+  targetNames.forEach(validateNpmPackageMetadata);
   runTurboClean(targetNames);
   runTurboBuild(targetNames);
   runOwnChecks(targetNames);

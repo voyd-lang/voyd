@@ -210,6 +210,16 @@ npm view @voyd-lang/reference version
 Voyd uses npm trusted publishing from GitHub Actions. That avoids long-lived npm
 publish tokens for normal releases.
 
+The release workflow must use npm CLI `11.5.1` or newer so `npm publish` can
+authenticate through GitHub Actions OIDC. The workflow installs a compatible npm
+version after `npm ci` and before publishing. Dependency installation still uses
+the runner's bundled npm so `npm ci` stays compatible with the committed
+lockfile.
+
+Each published npm workspace must also set `repository.url` to
+`https://github.com/voyd-lang/voyd`. npm validates that package metadata against
+the GitHub Actions provenance bundle when trusted publishing is enabled.
+
 For each npm package, configure trusted publishing on `npmjs.com`:
 
 1. Open the package page while signed in as an owner/maintainer.
@@ -223,6 +233,10 @@ For each npm package, configure trusted publishing on `npmjs.com`:
    - **Environment name**: leave blank
    - **Allowed actions**: allow `npm publish`
 6. Save the trusted publisher.
+
+Only set an npm trusted-publisher environment if the GitHub Actions job declares
+the same `environment:` value. The Voyd release workflow does not currently use
+a GitHub Actions environment, so the npm environment field should stay blank.
 
 Configure these packages:
 

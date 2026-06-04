@@ -65,6 +65,12 @@ jobs:
 
       - run: npm ci --include=optional
 
+      - name: Use npm trusted-publishing CLI
+        run: |
+          npm install -g npm@^11.5.1
+          node --version
+          npm --version
+
       - name: Publish selected targets
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
