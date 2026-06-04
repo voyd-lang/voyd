@@ -149,6 +149,27 @@ These forms lower to ordinary lambda values:
 - `label():` is a labeled zero-argument callback.
 - `label(a, b):` is a labeled callback with parameters.
 
+When a call accepts more than one labeled callback argument, place each
+callback in its own clause after the call.
+
+```voyd
+stream::fold(init: 0)
+  task_a(acc, item):
+    acc + item
+  task_b(acc, item):
+    acc + item
+```
+
+That is the same as passing both callbacks as labeled lambda arguments.
+
+```voyd
+stream::fold(
+  init: 0,
+  task_a: (acc, item) => acc + item,
+  task_b: (acc, item) => acc + item,
+)
+```
+
 Prefer clause syntax when a callback is the final argument and the body reads
 best as an indented suite. Prefer ordinary `=>` lambdas when you need a lambda
 as a standalone value, in a non-trailing argument position, or when the inline

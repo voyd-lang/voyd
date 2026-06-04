@@ -143,6 +143,29 @@ describe("colon clause attachment", () => {
     ]);
   });
 
+  test("rewrites multiple labeled trailing callback clauses into labeled lambda args", () => {
+    const ast = parse(
+      [
+        "fold(init: 0)",
+        "  task_a(acc, item):",
+        "    acc + item",
+        "  task_b(acc, item):",
+        "    acc * item",
+        "",
+      ].join("\n")
+    ).toJSON();
+
+    expect(ast).toEqual([
+      "ast",
+      [
+        "fold",
+        [":", "init", "0"],
+        [":", "task_a", ["=>", ["acc", "item"], ["block", ["+", "acc", "item"]]]],
+        [":", "task_b", ["=>", ["acc", "item"], ["block", ["*", "acc", "item"]]]],
+      ],
+    ]);
+  });
+
   test("keeps plain labeled block clauses unchanged on ordinary calls", () => {
     const ast = parse(
       [

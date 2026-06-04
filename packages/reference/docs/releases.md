@@ -7,13 +7,13 @@ order: 5
 ## Voyd v0.2.0 - M87*
 
 The first Voyd release was mostly about getting the language out into the
-world. This one is about making the center of the language sturdier and more
-useful in everyday programs.
+world. This one is about putting more of the language's core ideas to work in
+everyday programs.
 
 `0.2.0` brings tasks, timers, open effects, trailing callback clauses, compiler
-optimization work, and a set of bug fixes around typing and lowering. The theme
-is practical composition: effectful code should be easier to write, easier to
-read, and easier for the compiler to optimize.
+optimization work, and a set of bug fixes around typing and lowering. The
+thread running through the release is practical composition: effectful code can
+now do more while staying visible in Voyd's type and runtime model.
 
 ### Highlights
 
@@ -30,19 +30,18 @@ read, and easier for the compiler to optimize.
 - Bug fixes landed for mutable value receiver lowering, object init signature
   hints, structural field metadata, and singleton union inference.
 
-### Tasks are now part of the language story
+### Tasks
 
-Voyd has had effects for a while, and effects are still the part of the
-language I care about most. They let a function say what kind of outside-world
-work it can do. But once you have effects, the next question shows up pretty
-quickly: how do effectful programs wait, resume, schedule, and compose without
-turning the runtime boundary into a pile of special cases?
+The biggest new runtime feature in `0.2.0` is tasks. Voyd programs can now
+spawn work, await its result, cancel it, yield cooperatively, and suspend with
+timers through APIs in `std::task` and `std::time`.
 
-This release adds the first real answer to that question. There is now a
-same-run task model wired through the standard library, compiler, SDK, and JS
-host. The new task and timer APIs are still early, but they give Voyd programs
-a real vocabulary for async work that is visible in the language and runtime
-model.
+Tasks are same-run and same-event-loop. Spawning a task does not create a new
+thread. It schedules another piece of Voyd work inside the current run, and the
+runtime moves between tasks when they complete, await, yield, or suspend on
+time. That gives Voyd a concurrency model that fits the JS host and browser
+event loop while still giving programs a real language-level handle for
+scheduled work.
 
 ```voyd
 use std::async::types::{ Cancelled }
@@ -62,21 +61,49 @@ pub fn main(): task::TaskRuntime -> i32
       0
 ```
 
-That matters because Voyd's effect system needs to hold up when programs need
-time, IO, or scheduling. Tasks need to fit inside the model. In `0.2.0`, they
-start to.
-
-### Open effects got easier to read
-
-There is also a syntax change: `try forward` is now `try open`.
-
-That is a breaking change, but it is the right one. "Forward" described a bit
-of implementation machinery. "Open" better describes the shape of the effect
-row that the code is exposing. This is one of those small language-design
-renames that I would rather do now, while Voyd is still early, than carry
-forever because changing it later would be annoying.
+Timers use the same model. `time::sleep` suspends the current task, while
+`time::set_timeout` schedules new task work and returns a task you can await or
+cancel.
 
 ```voyd
+use std::async::types::{ Cancelled }
+use std::task
+use std::time::{ Duration }
+use std::time
+
+pub fn main(): (task::TaskRuntime, time::Time) -> i32
+  let timeout = time::set_timeout(Duration::from_millis(5)) do:
+    7
+
+  match(timeout.await())
+    Ok { value }:
+      value
+    Err { error }:
+      0
+    Cancelled:
+      0
+```
+
+This is useful because async work stops being a host-side special case. A Voyd
+program can start background work, wait for a result, model cancellation, build
+timer-based APIs, and keep those operations visible in ordinary function
+signatures. Attached child tasks also participate in structured concurrency, so
+owner cancellation and unobserved child failures have defined behavior.
+
+Tasks also make the effect system feel more concrete. Waiting, scheduling, and
+resuming are all effectful work, and `0.2.0` lets those operations live inside
+Voyd's effect model instead of beside it. The task runtime gives effects a
+real scheduling surface, and effects give tasks a clear place in the type
+system.
+
+### Open effects
+
+The language now supports defining explicit open effect rows in function and
+callback types. With this change, a function can now require a callback to
+explicitly have some effects, without preventing it from having others.
+
+```voyd
+// `cb` must be allowed to perform Async. Any other callback effects remain open to the caller.
 fn call_open<T>(cb: fn() : (Async, open) -> T) : (open) -> T
   try open
     cb()
@@ -84,10 +111,14 @@ fn call_open<T>(cb: fn() : (Async, open) -> T) : (open) -> T
     tail(value + 1)
 ```
 
+To make `open` effects more ergonomic, `try forward` was renamed to `try open`.
+This is a breaking change, so existing code will need to be updated before
+upgrading to `0.2.0`.
+
 ### Trailing callback clauses
 
 The release also adds full trailing callback clauses. Callback-heavy APIs can
-now read as indented Voyd code, which is especially nice for task and timer
+now read as indented Voyd code, which is especially useful for task and timer
 work.
 
 ```voyd
@@ -99,11 +130,28 @@ let worker = task::spawn do:
   sync_once()
 ```
 
-### Compiler polish users should feel
+The clause head can name callback parameters too:
+
+```voyd
+stream::fold(init: 0) do(acc, item):
+  // `acc` and `item` are parameters of the callback lambda.
+  acc + item
+```
+
+And labeled callback arguments can use the same clause style:
+
+```voyd
+stream::fold(init: 0)
+  step(acc, item):
+    // This passes the lambda to the labeled `step` argument.
+    acc + item
+```
+
+### Compiler polish
 
 The compiler also gets a round of optimization and correctness work. Scalar
 replacement lets codegen avoid materializing some non-escaping object locals,
-and codegen is preloaded during graph loading so compilation work starts from a
+and codegen is preloaded during graph loading so compilation starts from a
 warmer path.
 
 Several fixes should make everyday code less surprising: mutable value
@@ -132,18 +180,6 @@ effect row spelling.
 All published Voyd packages now move together at `0.2.0`, including the
 compiler, SDK, JS host, standard library, reference package, language server,
 CLI, and VS Code extension.
-
-### Closing
-
-I think of `0.1.0` as the "hello, this exists" release.
-
-`0.2.0` feels like the first release where Voyd starts growing outward from its
-core ideas. The core is still explicit effects, strong types, WebAssembly as the
-target, and tooling that is part of the language instead of an afterthought.
-The new runtime and compiler work gives those ideas more room.
-
-That is the work I am most excited about right now: making the language easier
-to extend while keeping the thread of what it is trying to be.
 
 ## Voyd v0.1.0 - Sagittarius A*
 
