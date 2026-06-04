@@ -4,6 +4,10 @@
   "private": false,
   "description": "Voyd CLI",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voyd-lang/voyd"
+  },
   "bin": {
     "voyd": "./bin/voyd.js",
     "vt": "./bin/vt.js"

@@ -4,6 +4,10 @@
   "description": "Voyd language server",
   "type": "module",
   "main": "./dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voyd-lang/voyd"
+  },
   "files": [
     "dist"
   ],

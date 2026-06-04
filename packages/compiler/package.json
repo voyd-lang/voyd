@@ -4,6 +4,10 @@
   "description": "Voyd compiler",
   "type": "module",
   "main": "./dist/pipeline.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voyd-lang/voyd"
+  },
   "files": [
     "dist"
   ],
