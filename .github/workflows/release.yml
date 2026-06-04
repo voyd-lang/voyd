@@ -63,6 +63,12 @@ jobs:
           cache-dependency-path: package-lock.json
           registry-url: "https://registry.npmjs.org"
 
+      - name: Use npm trusted-publishing CLI
+        run: |
+          npm install -g npm@^11.5.1
+          node --version
+          npm --version
+
       - run: npm ci --include=optional
 
       - name: Publish selected targets
