@@ -150,9 +150,16 @@ export const compileCallExpr = (
     }
 
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+    const intrinsicName =
+      ctx.program.symbols.getIntrinsicName(calleeId) ??
+      ctx.program.symbols.getName(calleeId) ??
+      `${callee.symbol}`;
     const shouldCompileIntrinsic =
       intrinsicMetadata.intrinsic === true &&
-      intrinsicMetadata.intrinsicUsesSignature !== true;
+      shouldCompileIntrinsicCall({
+        intrinsicName,
+        usesSignature: intrinsicMetadata.intrinsicUsesSignature,
+      });
 
     if (shouldCompileIntrinsic) {
       const args = compileCallArgExpressionsWithTemps({
@@ -165,10 +172,7 @@ export const compileCallExpr = (
       });
       return {
         expr: compileIntrinsicCall({
-          name:
-            ctx.program.symbols.getIntrinsicName(calleeId) ??
-            ctx.program.symbols.getName(calleeId) ??
-            `${callee.symbol}`,
+          name: intrinsicName,
           call: expr,
           args,
           ctx,
@@ -426,9 +430,16 @@ const compileResolvedSymbolCall = ({
 
   const calleeId = ctx.program.symbols.canonicalIdOf(moduleId, symbol);
   const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+  const intrinsicName =
+    ctx.program.symbols.getIntrinsicName(calleeId) ??
+    ctx.program.symbols.getName(calleeId) ??
+    `${symbol}`;
   const shouldCompileIntrinsic =
     intrinsicMetadata.intrinsic === true &&
-    intrinsicMetadata.intrinsicUsesSignature !== true;
+    shouldCompileIntrinsicCall({
+      intrinsicName,
+      usesSignature: intrinsicMetadata.intrinsicUsesSignature,
+    });
   if (shouldCompileIntrinsic) {
     const args = compileCallArgExpressionsWithTemps({
       callId: expr.id,
@@ -440,10 +451,7 @@ const compileResolvedSymbolCall = ({
     });
     return {
       expr: compileIntrinsicCall({
-        name:
-          ctx.program.symbols.getIntrinsicName(calleeId) ??
-          ctx.program.symbols.getName(calleeId) ??
-          `${symbol}`,
+        name: intrinsicName,
         call: expr,
       args,
       ctx,
@@ -524,6 +532,15 @@ const getCalleeTypeId = ({
 
   return getRequiredExprType(expr.callee, ctx, typeInstanceId);
 };
+
+const shouldCompileIntrinsicCall = ({
+  intrinsicName,
+  usesSignature,
+}: {
+  intrinsicName: string;
+  usesSignature: boolean;
+}): boolean =>
+  usesSignature !== true || intrinsicName === "__vx_retain_event_handler";
 
 const resolveTargetFunctionId = ({
   targets,
