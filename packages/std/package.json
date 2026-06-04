@@ -3,6 +3,10 @@
   "version": "0.2.0",
   "private": false,
   "description": "Voyd standard library sources",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voyd-lang/voyd"
+  },
   "files": [
     "src",
     "dist"

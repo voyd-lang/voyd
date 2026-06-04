@@ -216,6 +216,10 @@ version after `npm ci` and before publishing. Dependency installation still uses
 the runner's bundled npm so `npm ci` stays compatible with the committed
 lockfile.
 
+Each published npm workspace must also set `repository.url` to
+`https://github.com/voyd-lang/voyd`. npm validates that package metadata against
+the GitHub Actions provenance bundle when trusted publishing is enabled.
+
 For each npm package, configure trusted publishing on `npmjs.com`:
 
 1. Open the package page while signed in as an owner/maintainer.
