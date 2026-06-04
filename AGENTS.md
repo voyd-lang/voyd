@@ -40,6 +40,14 @@ call-site/type-annotation workarounds unless a workaround is explicitly requeste
 Voyd has not yet been released. Breaking changes to public APIs are ok. Just
 note the breaking changes if made.
 
+# Required Pre-Reads
+
+- Before contributing to `packages/compiler` or `packages/std`, read
+[`docs/agent-voyd-quick-reference.md`](docs/agent-voyd-quick-reference.md).
+This is required for compiler/std work because those areas often need precise,
+idiomatic Voyd syntax in std sources, fixtures, smoke tests, and reference
+examples.
+
 # Debugging
 
 A cli is available after `npm link`
