@@ -51,7 +51,7 @@ export type CompileOptions = {
   optimize?: boolean;
   /**
    * Emit runtime trap-to-source metadata.
-   * Defaults to true for non-optimized builds and false for optimized builds.
+   * Defaults to false; pass true to include trap metadata.
    */
   runtimeDiagnostics?: boolean;
   emitWasmText?: boolean;

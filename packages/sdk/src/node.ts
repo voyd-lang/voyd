@@ -73,7 +73,6 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
 
     const testScope = options.testScope ?? (options.source ? "entry" : "all");
     const runtimeDiagnostics = resolveRuntimeDiagnostics({
-      optimize: options.optimize,
       runtimeDiagnostics: options.runtimeDiagnostics,
     });
     const result = await compileWithLoader({
@@ -105,12 +104,10 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
 };
 
 const resolveRuntimeDiagnostics = ({
-  optimize,
   runtimeDiagnostics,
 }: {
-  optimize?: boolean;
   runtimeDiagnostics?: boolean;
-}): boolean => runtimeDiagnostics ?? !optimize;
+}): boolean => runtimeDiagnostics ?? false;
 
 const resolveSrcRoot = ({
   roots,

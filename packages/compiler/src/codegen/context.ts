@@ -64,6 +64,7 @@ export interface CodegenOptions {
 
 export interface CodegenResult {
   module: binaryen.Module;
+  wasm?: Uint8Array;
   effectTable?: EffectTableSidecar;
   diagnostics: Diagnostic[];
   continuationBackendKind: "gc-trampoline" | "stack-switch";

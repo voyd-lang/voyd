@@ -436,13 +436,7 @@ export const emitProgram = async ({
     options: codegenOptions,
     optimization: optimized?.facts,
   });
-  const binary = result.module.emitBinary();
-  const wasm =
-    binary instanceof Uint8Array
-      ? binary
-      : (binary as { binary?: Uint8Array; output?: Uint8Array }).output ??
-        (binary as { binary?: Uint8Array }).binary ??
-        new Uint8Array();
+  const wasm = result.wasm ?? emitBinary(result.module);
   return { wasm, module: result.module, diagnostics: result.diagnostics };
 };
 
@@ -495,12 +489,9 @@ export const emitProgramWithContinuationFallback = async ({
     });
 
   const toWasmBytes = (result: { module: binaryen.Module }): Uint8Array => {
-    const binary = result.module.emitBinary();
-    return binary instanceof Uint8Array
-      ? binary
-      : (binary as { binary?: Uint8Array; output?: Uint8Array }).output ??
-          (binary as { binary?: Uint8Array }).binary ??
-          new Uint8Array();
+    return "wasm" in result && result.wasm instanceof Uint8Array
+      ? result.wasm
+      : emitBinary(result.module);
   };
 
   return {
@@ -683,3 +674,12 @@ const moduleIdForPath = (path: ModulePath): string => modulePathToString(path);
 
 const lazyCodegen = async () =>
   preloadCodegen();
+
+const emitBinary = (module: binaryen.Module): Uint8Array => {
+  const binary = module.emitBinary();
+  return binary instanceof Uint8Array
+    ? binary
+    : (binary as { binary?: Uint8Array; output?: Uint8Array }).output ??
+        (binary as { binary?: Uint8Array }).binary ??
+        new Uint8Array();
+};
