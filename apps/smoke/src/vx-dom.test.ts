@@ -13,6 +13,53 @@ import {
 
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
 const siteExampleRoot = path.resolve(import.meta.dirname, "../../site/examples");
+const playgroundCounterSource = `use std::dict::Dict
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::result::types::all
+use std::vx::all
+
+pub fn init() -> MsgPack
+  model(count: 0)
+
+pub fn update(current: MsgPack, message: MsgPack) -> MsgPack
+  model(count: count_from(current) + 1)
+
+pub fn view(model: MsgPack) -> MsgPack
+  <Counter label="Count" value={count_from(model)} />
+
+fn Counter({ label: String, value: i32 })
+  <button on_click={msgpack::make_string("increment")}>
+    {label}: {count_label(value)}
+  </button>
+
+fn count_from(value: MsgPack) -> i32
+  match(msgpack::unpack_map(value))
+    Ok<Dict<String, MsgPack>> { value }:
+      match(value.get("count"))
+        Some<MsgPack> { value }:
+          match(msgpack::unpack_i32(value))
+            Ok<i32> { value }:
+              value
+            Err:
+              0
+        None:
+          0
+    Err:
+      0
+
+fn count_label(value: i32) -> String
+  if
+    value == 0: "0"
+    value == 1: "1"
+    value == 2: "2"
+    value == 3: "3"
+    else: "many"
+
+fn model({ count: i32 }) -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("count", msgpack::make_i32(count))
+  msgpack::make_map(out)`;
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -114,6 +161,31 @@ describe("smoke: compiled VX DOM rendering", () => {
     const message = await host.retainedCallbacks.dispatch(handlerId!, payload);
 
     expect(message).toEqual(payload);
+  });
+
+  it("updates the playground-style app counter in a mounted Voyd app", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(await sdk.compile({ source: playgroundCounterSource }));
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+    const app = createVoydVxAppRuntime({
+      host,
+    });
+
+    const container = document.createElement("div");
+    const mounted = await mountVxApp({ container, app });
+
+    expect(container.querySelector("button")?.textContent).toContain("Count: 0");
+
+    container.querySelector<HTMLButtonElement>("button")?.click();
+    await nextTurn();
+
+    expect(container.querySelector("button")?.textContent).toContain("Count: 1");
+
+    mounted.dispose();
+    expect(container.innerHTML).toBe("");
   });
 
   it("renders the site wiki example from compiled Voyd source", async () => {

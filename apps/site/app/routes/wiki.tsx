@@ -3,6 +3,7 @@ import type { Route } from "./+types/wiki";
 import wikiSource from "../../examples/wiki/wiki.voyd?raw";
 import stdPkgSource from "../../../../packages/std/src/pkg.voyd?raw";
 import vxStdSource from "../../../../packages/std/src/vx.voyd?raw";
+import "./wiki.css";
 
 type DisposableRenderer = {
   dispose(): void;

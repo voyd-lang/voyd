@@ -58,7 +58,7 @@ fn as_string(payload: MsgPack) -> String
     Ok { value }:
       value
     Err:
-      "".to_string()
+      String::init()
 ```
 
 `init` creates the first model. `view` turns the model into HTML. `update`
@@ -88,8 +88,22 @@ fn Toolbar({ on_save: fn() -> MsgPack })
 
 fn Editor()
   <section>
-    {Toolbar(on_save: () -> MsgPack => msgpack::make_string("save"))}
+    <Toolbar on_save={() => msgpack::make_string("save")} />
   </section>
+```
+
+Components can also receive child nodes. Add a `children` parameter, then call
+the component with normal opening and closing tags:
+
+```voyd
+fn Panel({ class: String, children: Array<MsgPack> })
+  element(tag: "section", attrs: [attr(name: "class", value: class)], children: children)
+
+fn Editor()
+  <Panel class="editor-panel">
+    <h1>Draft</h1>
+    <textarea value={body}></textarea>
+  </Panel>
 ```
 
 Use `class`, `id`, `role`, `name`, `placeholder`, `input_type`, `value`,
@@ -141,20 +155,19 @@ on_submit_with(
 Most app state belongs in your model. Keep form values, selected records, save
 status, filters, and open panels there, then return a new model from `update`.
 
-VX also exposes a lower-level component effect for local serialized state:
+VX also exposes component-local state for small UI details that do not belong in
+the app model:
 
 ```voyd
-let (value, handle) = state(
-  id: 1,
-  initial: msgpack::make_string("closed")
-)
+let (panel, panel_state) = state(id: 1, initial: "closed")
 
-handle.set(msgpack::make_string("open"))
+if panel == "closed":
+  panel_state.set("open")
 ```
 
-Use model state for browser apps today. Treat component-local state as a
-component-runtime primitive for small UI-only details, not as a replacement for
-the app model.
+Component state supports typed `String` and `i32` values. Use it for small,
+component-owned UI memory. Use the app model when other parts of the app need to
+read or update the same value.
 
 ## Commands
 
@@ -236,8 +249,8 @@ events without replacing matching server-rendered DOM.
 - Event payload: `on_input={(payload: MsgPack) -> MsgPack => ...}`
 - Reusable component action: pass `fn() -> MsgPack` into a component
 - App state: keep it in the model and return the next model from `update`
-- Component-local UI state: use model fields in browser apps; use
-  `state(id:, initial:)` only in component-runtime code
+- Component-local UI state: use `state(id:, initial:)` inside component-runtime
+  views for small `String` or `i32` values
 - Later work: return a `Cmd`
 - Outside events: return a `Sub`
 - Browser mount: `createVoydVxAppRuntime` + `mountVxApp`

@@ -1,10 +1,10 @@
 //! Compiled VX wiki demo mounted by the site route.
 
-use std::dict::{ Dict, DictKey }
+use std::dict::Dict
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::result::types::all
-use std::string::type::{ String, StringSlice, new_string }
+use std::string::type::String
 use std::vx::all
 
 obj WikiModel {
@@ -20,21 +20,21 @@ obj WikiModel {
 
 pub fn init() -> MsgPack
   encode_model(WikiModel {
-    selected: "intro".to_string(),
-    query: "".to_string(),
-    title: page_title("intro".to_string()),
-    body: page_body("intro".to_string()),
-    saved_title: page_title("intro".to_string()),
-    saved_body: page_body("intro".to_string()),
-    panel: "open".to_string(),
-    status: "Ready".to_string()
+    selected: "intro",
+    query: String::init(),
+    title: page_title("intro"),
+    body: page_body("intro"),
+    saved_title: page_title("intro"),
+    saved_body: page_body("intro"),
+    panel: "open",
+    status: "Ready"
   })
 
 pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
   let current = decode_model(model)
   let action = message_action(message)
 
-  if action == "select".to_string():
+  if action == "select":
     let page = message_value_string(message, current.selected)
     return encode_model(WikiModel {
       selected: page,
@@ -44,10 +44,10 @@ pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
       saved_title: page_title(page),
       saved_body: page_body(page),
       panel: current.panel,
-      status: "Page opened".to_string()
+      status: "Page opened"
     })
 
-  if action == "search".to_string():
+  if action == "search":
     let query = message_value_string(message, current.query)
     return encode_model(WikiModel {
       selected: current.selected,
@@ -60,19 +60,19 @@ pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
       status: search_status(query)
     })
 
-  if action == "new".to_string():
+  if action == "new":
     return encode_model(WikiModel {
-      selected: "draft".to_string(),
-      query: "".to_string(),
-      title: "Untitled page".to_string(),
-      body: "".to_string(),
-      saved_title: "".to_string(),
-      saved_body: "".to_string(),
-      panel: "open".to_string(),
-      status: "New page".to_string()
+      selected: "draft",
+      query: String::init(),
+      title: "Untitled page",
+      body: String::init(),
+      saved_title: String::init(),
+      saved_body: String::init(),
+      panel: "open",
+      status: "New page"
     })
 
-  if action == "edit_title".to_string():
+  if action == "edit_title":
     return encode_model(WikiModel {
       selected: current.selected,
       query: current.query,
@@ -81,10 +81,10 @@ pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
       saved_title: current.saved_title,
       saved_body: current.saved_body,
       panel: current.panel,
-      status: "Unsaved changes".to_string()
+      status: "Unsaved changes"
     })
 
-  if action == "edit_body".to_string():
+  if action == "edit_body":
     return encode_model(WikiModel {
       selected: current.selected,
       query: current.query,
@@ -93,10 +93,10 @@ pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
       saved_title: current.saved_title,
       saved_body: current.saved_body,
       panel: current.panel,
-      status: "Unsaved changes".to_string()
+      status: "Unsaved changes"
     })
 
-  if action == "save".to_string():
+  if action == "save":
     return step(
       model: encode_model(WikiModel {
         selected: current.selected,
@@ -106,12 +106,12 @@ pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
         saved_title: current.saved_title,
         saved_body: current.saved_body,
         panel: current.panel,
-        status: "Saving...".to_string()
+        status: "Saving..."
       }),
       commands: Cmd<MsgPack>::delay(millis: 1i64, value: action_msg("saved")).payload
     )
 
-  if action == "saved".to_string():
+  if action == "saved":
     return encode_model(WikiModel {
       selected: current.selected,
       query: current.query,
@@ -120,10 +120,10 @@ pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
       saved_title: current.title,
       saved_body: current.body,
       panel: current.panel,
-      status: "Saved".to_string()
+      status: "Saved"
     })
 
-  if action == "cancel".to_string():
+  if action == "cancel":
     return encode_model(WikiModel {
       selected: current.selected,
       query: current.query,
@@ -132,10 +132,10 @@ pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
       saved_title: current.saved_title,
       saved_body: current.saved_body,
       panel: current.panel,
-      status: "Draft restored".to_string()
+      status: "Draft restored"
     })
 
-  if action == "toggle_panel".to_string():
+  if action == "toggle_panel":
     return encode_model(WikiModel {
       selected: current.selected,
       query: current.query,
@@ -144,7 +144,7 @@ pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
       saved_title: current.saved_title,
       saved_body: current.saved_body,
       panel: toggled_panel(current.panel),
-      status: "Panel toggled".to_string()
+      status: "Panel toggled"
     })
 
   model
@@ -155,8 +155,8 @@ pub fn subscriptions(model: MsgPack) -> MsgPack
 pub fn view(model: MsgPack) -> MsgPack
   let decoded = decode_model(model)
   <main class="wiki-demo-shell" tabindex="0" data-vx-ref="wiki-shell">
-    {Sidebar(decoded)}
-    {Editor(decoded)}
+    <Sidebar model={decoded} />
+    <Editor model={decoded} />
   </main>
 
 pub fn main() -> MsgPack
@@ -169,12 +169,11 @@ pub fn component_state_update(model: MsgPack, message: MsgPack) -> MsgPack
   model
 
 pub fn component_state_view(): Component -> MsgPack
-  let (panel_state, panel_handle) = state(id: 1, initial: msgpack::make_string("open"))
-  let component_panel = msgpack_string(panel_state, "open".to_string())
+  let (component_panel, panel_handle) = state(id: 1, initial: "open")
   var visible_panel = component_panel
-  if component_panel == "open".to_string():
-    panel_handle.set(msgpack::make_string("remembered"))
-    visible_panel = "remembered".to_string()
+  if component_panel == "open":
+    panel_handle.set("remembered")
+    visible_panel = "remembered"
 
   <section class="wiki-demo-inspector wiki-demo-component-state">
     <h3>Component state</h3>
@@ -184,7 +183,7 @@ pub fn component_state_view(): Component -> MsgPack
     </button>
   </section>
 
-fn Sidebar(model: WikiModel)
+fn Sidebar({ model: WikiModel })
   <aside class="wiki-demo-sidebar" aria-label="Wiki pages">
     <form class="wiki-demo-search" role="search">
       <input
@@ -194,30 +193,26 @@ fn Sidebar(model: WikiModel)
         value={model.query}
         on_input={(payload: MsgPack) -> MsgPack => search_msg(payload)}
       />
-      {ActionButton(
-        label: "New".to_string(),
-        class_name: "secondary".to_string(),
-        on_press: () -> MsgPack => action_msg("new")
-      )}
+      <ActionButton label="New" class="secondary" on_press={() => action_msg("new")} />
     </form>
     <nav class="wiki-demo-page-list">
-      {MaybePageButton(id: "intro".to_string(), title: "Getting started".to_string(), model: model)}
-      {MaybePageButton(id: "state".to_string(), title: "State lives in Voyd".to_string(), model: model)}
-      {MaybePageButton(id: "events".to_string(), title: "Events".to_string(), model: model)}
-      {MaybeDraftButton(model)}
+      <MaybePageButton id="intro" title="Getting started" model={model} />
+      <MaybePageButton id="state" title="State lives in Voyd" model={model} />
+      <MaybePageButton id="events" title="Events" model={model} />
+      <MaybeDraftButton model={model} />
     </nav>
     <p class="wiki-demo-hint">{query_label(model.query)}</p>
   </aside>
 
 fn MaybePageButton({ id: String, title: String, model: WikiModel })
   if page_matches_query(title, model.query):
-    PageButton(id: id, title: title, model: model)
+    <PageButton id={id} title={title} model={model} />
   else:
     fragment(Array<MsgPack>::init())
 
-fn MaybeDraftButton(model: WikiModel)
-  if model.selected == "draft".to_string() and page_matches_query(model.title, model.query):
-    PageButton(id: "draft".to_string(), title: draft_page_title(model), model: model)
+fn MaybeDraftButton({ model: WikiModel })
+  if model.selected == "draft" and page_matches_query(model.title, model.query):
+    <PageButton id="draft" title={draft_page_title(model)} model={model} />
   else:
     fragment(Array<MsgPack>::init())
 
@@ -231,26 +226,14 @@ fn PageButton({ id: String, title: String, model: WikiModel })
     {title}
   </button>
 
-fn Editor(model: WikiModel)
+fn Editor({ model: WikiModel })
   <section class="wiki-demo-editor" aria-label="Page editor">
     <div class="wiki-demo-toolbar">
       <span class="wiki-demo-status">{model.status}</span>
       <span class={dirty_class(model)}>{dirty_label(model)}</span>
-      {ActionButton(
-        label: "Save draft".to_string(),
-        class_name: "primary".to_string(),
-        on_press: () -> MsgPack => action_msg("save")
-      )}
-      {ActionButton(
-        label: "Cancel".to_string(),
-        class_name: "secondary".to_string(),
-        on_press: () -> MsgPack => action_msg("cancel")
-      )}
-      {ActionButton(
-        label: panel_button_label(model.panel),
-        class_name: "secondary".to_string(),
-        on_press: () -> MsgPack => action_msg("toggle_panel")
-      )}
+      <ActionButton label="Save draft" class="primary" on_press={() => action_msg("save")} />
+      <ActionButton label="Cancel" class="secondary" on_press={() => action_msg("cancel")} />
+      <ActionButton label={model.panel} class="secondary" on_press={() => action_msg("toggle_panel")} />
     </div>
     <label class="wiki-demo-label">
       Title
@@ -267,17 +250,17 @@ fn Editor(model: WikiModel)
         on_input={(payload: MsgPack) -> MsgPack => edit_body_msg(payload)}
       ></textarea>
     </label>
-    {Inspector(model)}
+    <Inspector model={model} />
   </section>
 
-fn Inspector(model: WikiModel)
-  if model.panel == "closed".to_string():
-    <section class="wiki-demo-inspector is-closed">
+fn Inspector({ model: WikiModel })
+  if model.panel == "closed":
+    <PanelSection class="wiki-demo-inspector is-closed">
       <h3>Panel</h3>
       <p>Closed</p>
-    </section>
+    </PanelSection>
   else:
-    <section class="wiki-demo-inspector">
+    <PanelSection class="wiki-demo-inspector">
       <h3>Panel</h3>
       <dl>
         <dt>Selected</dt>
@@ -287,14 +270,21 @@ fn Inspector(model: WikiModel)
         <dt>Subscription</dt>
         <dd>Escape restores the draft</dd>
       </dl>
-    </section>
+    </PanelSection>
 
-fn ActionButton({ label: String, class_name: String, on_press: fn() -> MsgPack })
+fn PanelSection({ class: String, children: Array<MsgPack> })
+  element(
+    tag: "section",
+    attrs: [attr(name: "class", value: class)],
+    children: children
+  )
+
+fn ActionButton({ label: String, class: String, on_press: fn() -> MsgPack })
   element(
     tag: "button",
     attrs: [
       attr(name: "type", value: "button"),
-      class(class_name),
+      attr(name: "class", value: class),
       on_click(on_press)
     ],
     children: [text(label)]
@@ -319,9 +309,9 @@ fn decode_model(payload: MsgPack) -> WikiModel
         selected: field_string(value, "selected", "intro"),
         query: field_string(value, "query", ""),
         title: field_string(value, "title", "Getting started"),
-        body: field_string(value, "body", page_body("intro".to_string())),
+        body: field_string(value, "body", page_body("intro")),
         saved_title: field_string(value, "saved_title", "Getting started"),
-        saved_body: field_string(value, "saved_body", page_body("intro".to_string())),
+        saved_body: field_string(value, "saved_body", page_body("intro")),
         panel: field_string(value, "panel", "open"),
         status: field_string(value, "status", "Ready")
       }
@@ -346,9 +336,6 @@ fn edit_title_msg(payload: MsgPack) -> MsgPack
 fn edit_body_msg(payload: MsgPack) -> MsgPack
   message(action: "edit_body", value: input_value(payload))
 
-fn action_msg(action: StringSlice) -> MsgPack
-  message(action: action, value: msgpack::make_null())
-
 fn action_msg(action: String) -> MsgPack
   message(action: action, value: msgpack::make_null())
 
@@ -357,9 +344,6 @@ fn message({ action: String, value: MsgPack }) -> MsgPack
   out.set("action", action)
   out.set("value", value)
   msgpack::make_map(out)
-
-fn message({ action: StringSlice, value: MsgPack }) -> MsgPack
-  message(action: action.to_string(), value: value)
 
 fn input_value(payload: MsgPack) -> MsgPack
   match(msgpack::unpack_map(payload))
@@ -377,7 +361,7 @@ fn message_action(message: MsgPack) -> String
     Ok<Dict<String, MsgPack>> { value }:
       field_string(value, "action", "")
     Err:
-      "".to_string()
+      String::init()
 
 fn message_value_string(message: MsgPack, fallback: String) -> String
   match(msgpack::unpack_map(message))
@@ -397,19 +381,8 @@ fn msgpack_string(value: MsgPack, fallback: String) -> String
     Err:
       fallback
 
-fn field_string(map: Dict<String, MsgPack>, field: StringSlice, fallback: StringSlice) -> String
-  match(map.get(field.to_string()))
-    Some<MsgPack> { value }:
-      match(msgpack::unpack_string(value))
-        Ok<String> { value }:
-          value
-        Err:
-          fallback.to_string()
-    None:
-      fallback.to_string()
-
-fn field_string(map: Dict<String, MsgPack>, field: StringSlice, fallback: String) -> String
-  match(map.get(field.to_string()))
+fn field_string(map: Dict<String, MsgPack>, field: String, fallback: String) -> String
+  match(map.get(field))
     Some<MsgPack> { value }:
       match(msgpack::unpack_string(value))
         Ok<String> { value }:
@@ -419,86 +392,74 @@ fn field_string(map: Dict<String, MsgPack>, field: StringSlice, fallback: String
     None:
       fallback
 
-fn field_string(map: Dict<String, MsgPack>, field: String, fallback: StringSlice) -> String
-  field_string(map, field.as_slice(), fallback)
-
-fn field_string(map: Dict<String, MsgPack>, field: String, fallback: String) -> String
-  field_string(map, field.as_slice(), fallback)
-
 fn selected_class(selected: String, id: String) -> String
   if selected == id:
-    "is-selected".to_string()
+    "is-selected"
   else:
-    "".to_string()
+    String::init()
 
 fn dirty_class(model: WikiModel) -> String
   if is_dirty(model):
-    "wiki-demo-dirty".to_string()
+    "wiki-demo-dirty"
   else:
-    "wiki-demo-dirty is-clean".to_string()
+    "wiki-demo-dirty is-clean"
 
 fn dirty_label(model: WikiModel) -> String
   if is_dirty(model):
-    "Unsaved".to_string()
+    "Unsaved"
   else:
-    "Saved".to_string()
+    "Saved"
 
 fn is_dirty(model: WikiModel) -> bool
   not (model.title == model.saved_title and model.body == model.saved_body)
 
 fn toggled_panel(panel: String) -> String
-  if panel == "closed".to_string():
-    "open".to_string()
+  if panel == "closed":
+    "open"
   else:
-    "closed".to_string()
-
-fn panel_button_label(panel: String) -> String
-  if panel == "closed".to_string():
-    "Show panel".to_string()
-  else:
-    "Hide panel".to_string()
+    "closed"
 
 fn query_label(query: String) -> String
   if query.byte_len() == 0:
-    "3 pages".to_string()
+    "3 pages"
   else:
-    "Search: ".to_string().concat(query)
+    "Search: ".concat(query)
 
 fn search_status(query: String) -> String
   if query.byte_len() == 0:
-    "Search cleared".to_string()
+    "Search cleared"
   else:
-    "Search updated".to_string()
+    "Search updated"
 
 fn page_matches_query(title: String, query: String) -> bool
   query.byte_len() == 0 or title.contains(query)
 
 fn draft_page_title(model: WikiModel) -> String
   if model.title.byte_len() == 0:
-    "Untitled page".to_string()
+    "Untitled page"
   else:
     model.title
 
 fn page_title(selected: String) -> String
-  if selected == "state".to_string():
-    "State lives in Voyd".to_string()
+  if selected == "state":
+    "State lives in Voyd"
   else:
-    if selected == "events".to_string():
-      "Events".to_string()
+    if selected == "events":
+      "Events"
     else:
-      if selected == "draft".to_string():
-        "Untitled page".to_string()
+      if selected == "draft":
+        "Untitled page"
       else:
-        "Getting started".to_string()
+        "Getting started"
 
 fn page_body(selected: String) -> String
-  if selected == "state".to_string():
-    "The model, draft fields, selected page, save status, and side panel all update through Voyd.".to_string()
+  if selected == "state":
+    "The model, draft fields, selected page, save status, and side panel all update through Voyd."
   else:
-    if selected == "events".to_string():
-      "Static messages, inline payload closures, and passed button closures all produce app messages.".to_string()
+    if selected == "events":
+      "Static messages, inline payload closures, and passed button closures all produce app messages."
     else:
-      if selected == "draft".to_string():
-        "".to_string()
+      if selected == "draft":
+        String::init()
       else:
-        "VX renders typed virtual DOM from Voyd and lets the browser host patch concrete DOM nodes.".to_string()
+        "VX renders typed virtual DOM from Voyd and lets the browser host patch concrete DOM nodes."

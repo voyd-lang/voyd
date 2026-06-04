@@ -103,13 +103,39 @@ fn retain_event_handler_with_payload_id(handler: fn(MsgPack) -> MsgPack): () -> 
 
 impl StateHandle<MsgPack>
   /// Replaces component-local serialized state and schedules the component runtime.
-  api fn set(self, value: MsgPack): Component -> void
+  api fn set_serialized(self, value: MsgPack): Component -> void
     Component::state_set(self.id, value)
 
   /// Replaces component-local serialized state and returns the updated handle.
-  api fn update(self, value: MsgPack): Component -> StateHandle<MsgPack>
+  api fn update_serialized(self, value: MsgPack): Component -> StateHandle<MsgPack>
     Component::state_set(self.id, value)
     StateHandle<MsgPack> { id: self.id, value: value }
+
+impl StateHandle<String>
+  /// Replaces component-local text state and schedules the component runtime.
+  api fn set(self, value: String): Component -> void
+    Component::state_set(self.id, msgpack::make_string(value))
+
+  api fn set(self, value: StringSlice): Component -> void
+    self.set(value.to_string())
+
+  /// Replaces component-local text state and returns the updated handle.
+  api fn update(self, value: String): Component -> StateHandle<String>
+    Component::state_set(self.id, msgpack::make_string(value))
+    StateHandle<String> { id: self.id, value: value }
+
+  api fn update(self, value: StringSlice): Component -> StateHandle<String>
+    self.update(value.to_string())
+
+impl StateHandle<i32>
+  /// Replaces component-local integer state and schedules the component runtime.
+  api fn set(self, value: i32): Component -> void
+    Component::state_set(self.id, msgpack::make_i32(value))
+
+  /// Replaces component-local integer state and returns the updated handle.
+  api fn update(self, value: i32): Component -> StateHandle<i32>
+    Component::state_set(self.id, msgpack::make_i32(value))
+    StateHandle<i32> { id: self.id, value: value }
 
 impl<Msg> Cmd<Msg>
   /// Creates an empty command.
@@ -271,10 +297,60 @@ pub fn state_handle({ id: i32, initial: MsgPack }): Component -> StateHandle<Msg
     value: Component::state_get(id, initial)
   }
 
+/// Reads a component-local text state handle.
+pub fn state_handle({ id: i32, initial: String }): Component -> StateHandle<String>
+  StateHandle<String> {
+    id: id,
+    value: component_string_state_value(
+      value: Component::state_get(id, msgpack::make_string(initial)),
+      fallback: initial
+    )
+  }
+
+pub fn state_handle({ id: i32, initial: StringSlice }): Component -> StateHandle<String>
+  state_handle(id: id, initial: initial.to_string())
+
+/// Reads a component-local integer state handle.
+pub fn state_handle({ id: i32, initial: i32 }): Component -> StateHandle<i32>
+  StateHandle<i32> {
+    id: id,
+    value: component_i32_state_value(
+      value: Component::state_get(id, msgpack::make_i32(initial)),
+      fallback: initial
+    )
+  }
+
 /// Reads component-local serialized state as a `(value, handle)` pair.
 pub fn state({ id: i32, initial: MsgPack }): Component -> (MsgPack, StateHandle<MsgPack>)
   let handle = state_handle(id: id, initial: initial)
   (handle.value, handle)
+
+/// Reads component-local text state as a `(value, handle)` pair.
+pub fn state({ id: i32, initial: String }): Component -> (String, StateHandle<String>)
+  let handle = state_handle(id: id, initial: initial)
+  (handle.value, handle)
+
+pub fn state({ id: i32, initial: StringSlice }): Component -> (String, StateHandle<String>)
+  state(id: id, initial: initial.to_string())
+
+/// Reads component-local integer state as a `(value, handle)` pair.
+pub fn state({ id: i32, initial: i32 }): Component -> (i32, StateHandle<i32>)
+  let handle = state_handle(id: id, initial: initial)
+  (handle.value, handle)
+
+fn component_string_state_value({ value: MsgPack, fallback: String }): () -> String
+  match(msgpack::unpack_string(value))
+    Ok<String> { value }:
+      value
+    Err:
+      fallback
+
+fn component_i32_state_value({ value: MsgPack, fallback: i32 }): () -> i32
+  match(msgpack::unpack_i32(value))
+    Ok<i32> { value }:
+      value
+    Err:
+      fallback
 
 /// Registers a task with the current component instance.
 pub fn task<T>({ key: MsgPack, task: Task<T> }): Component -> Unit

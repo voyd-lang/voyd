@@ -366,7 +366,7 @@ test "vx component state and task APIs use component effect":
 
   let handle = StateHandle<MsgPack> { id: 3, value: msgpack::make_string("current") }
   try open
-    handle.set(msgpack::make_string("next"))
+    handle.set_serialized(msgpack::make_string("next"))
   Component::state_set(tail, id, value):
     seen.push("set".to_string())
     assert(id, eq: 3)
