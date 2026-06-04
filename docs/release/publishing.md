@@ -212,7 +212,9 @@ publish tokens for normal releases.
 
 The release workflow must use npm CLI `11.5.1` or newer so `npm publish` can
 authenticate through GitHub Actions OIDC. The workflow installs a compatible npm
-version before running `npm ci` or publishing.
+version after `npm ci` and before publishing. Dependency installation still uses
+the runner's bundled npm so `npm ci` stays compatible with the committed
+lockfile.
 
 For each npm package, configure trusted publishing on `npmjs.com`:
 
