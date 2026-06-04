@@ -15,6 +15,8 @@
     "rootDirs": [".", "./.react-router/types"],
     "baseUrl": ".",
     "paths": {
+      "@voyd-lang/vx-dom": ["../../packages/vx-dom/src/index.ts"],
+      "@voyd-lang/vx-dom/*": ["../../packages/vx-dom/src/*"],
       "~/*": ["./app/*"]
     },
     "esModuleInterop": true,

@@ -10,7 +10,7 @@ export function meta({}: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Try Voyd in the browser with an interactive compiler and VSX renderer.",
+        "Try Voyd in the browser with an interactive compiler and VX renderer.",
     },
   ];
 }
@@ -63,7 +63,7 @@ export default function Playground() {
         <h1 className="m-0 text-3xl font-bold sm:text-4xl">Playground</h1>
         <p className="m-0 mt-3 max-w-3xl text-[var(--site-text-muted)]">
           Run Voyd directly in your browser. The left pane is the editor, and
-          the right pane renders the VSX output from your `main` entrypoint.
+          the right pane renders the VX output from your `main` entrypoint.
         </p>
       </section>
 

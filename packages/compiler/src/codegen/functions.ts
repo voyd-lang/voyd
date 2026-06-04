@@ -1183,13 +1183,13 @@ export const emitModuleExports = (
       if (!exportCtx.programHelpers.registerExportName(exportName)) {
         return;
       }
-      if (meta.effectful) {
-        emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
+        if (meta.effectful) {
+          emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
 
         if (meta.paramTypes.length > firstUserParamIndexFor(meta)) {
           return;
         }
-        const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
+          const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
         const serializer = resolveSerializerForTypes(
           [meta.resultTypeId],
           exportCtx,

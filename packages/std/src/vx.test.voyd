@@ -1,0 +1,547 @@
+use std::array::Array
+use std::dict::Dict
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::task::Task
+use std::test::assertions::all
+
+test "vx text node encodes versioned renderer shape":
+  match(msgpack::unpack_map(text("Hello")))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "text")
+      assert_string_field(value, "value", "Hello")
+    Err:
+      assert(false, eq: true)
+
+test "vx frame encodes version marker and root":
+  match(msgpack::unpack_map(frame(text("Hi"))))
+    Ok<Dict<String, MsgPack>> { value }:
+      match(value.get("version"))
+        Some<MsgPack> { value: version }:
+          match(msgpack::unpack_i32(version))
+            Ok<i32> { value: number }:
+              assert(number, eq: 1)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+      match(value.get("root"))
+        Some<MsgPack>:
+          assert(true, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+test "vx element separates attributes and events":
+  let attrs = [class("primary"), disabled(true), style(name: "display", value: "grid"), on_click_id(7)]
+  let button = element(
+    tag: "button",
+    attrs: attrs,
+    children: [text("Save")]
+  )
+
+  match(msgpack::unpack_map(button))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "element")
+      assert_string_field(value, "tag", "button")
+      match(value.get("attrs"))
+        Some<MsgPack> { value: attrs }:
+          match(msgpack::unpack_map(attrs))
+            Ok<Dict<String, MsgPack>> { value: attr_map }:
+              assert_string_field(attr_map, "class", "primary")
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+      match(value.get("props"))
+        Some<MsgPack> { value: props }:
+          match(msgpack::unpack_map(props))
+            Ok<Dict<String, MsgPack>> { value: prop_map }:
+              assert_bool_field(prop_map, "disabled", true)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+      match(value.get("styles"))
+        Some<MsgPack> { value: styles }:
+          match(msgpack::unpack_map(styles))
+            Ok<Dict<String, MsgPack>> { value: style_map }:
+              assert_string_field(style_map, "display", "grid")
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+      match(value.get("events"))
+        Some<MsgPack> { value: events }:
+          match(msgpack::unpack_array(events))
+            Ok<Array<MsgPack>> { value: event_list }:
+              assert(event_list.len(), eq: 1)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+test "vx class prop styles and keyed helpers encode renderer fields":
+  let editor_ref = Ref<DomElement> { id: "editor".to_string() }
+  let input = element(
+    tag: "input",
+    attrs: [
+      classes(["field", "active"]),
+      role("textbox"),
+      name("title"),
+      placeholder("Untitled"),
+      input_type("text"),
+      tab_index(0),
+      ref(editor_ref),
+      value("Draft"),
+      checked(true),
+      prop(name: "ariaLabel", value: "Title"),
+      prop(name: "maxLength", value: 120),
+      style(name: "grid-template-columns", value: "1fr auto")
+    ],
+    children: Array<MsgPack>::init()
+  )
+
+  match(msgpack::unpack_map(input))
+    Ok<Dict<String, MsgPack>> { value }:
+      match(value.get("attrs"))
+        Some<MsgPack> { value: attrs }:
+          match(msgpack::unpack_map(attrs))
+            Ok<Dict<String, MsgPack>> { value: attr_map }:
+              assert_string_field(attr_map, "class", "field active")
+              assert_string_field(attr_map, "role", "textbox")
+              assert_string_field(attr_map, "name", "title")
+              assert_string_field(attr_map, "placeholder", "Untitled")
+              assert_string_field(attr_map, "type", "text")
+              assert_i32_field(attr_map, "tabindex", 0)
+              assert_string_field(attr_map, "data-vx-ref", "editor")
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+      match(value.get("props"))
+        Some<MsgPack> { value: props }:
+          match(msgpack::unpack_map(props))
+            Ok<Dict<String, MsgPack>> { value: prop_map }:
+              assert_string_field(prop_map, "value", "Draft")
+              assert_bool_field(prop_map, "checked", true)
+              assert_string_field(prop_map, "ariaLabel", "Title")
+              assert_i32_field(prop_map, "maxLength", 120)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+      match(value.get("styles"))
+        Some<MsgPack> { value: styles }:
+          match(msgpack::unpack_map(styles))
+            Ok<Dict<String, MsgPack>> { value: style_map }:
+              assert_string_field(style_map, "grid-template-columns", "1fr auto")
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+  match(msgpack::unpack_map(keyed(key: "page-1", child: text("Page"))))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "key", "page-1")
+    Err:
+      assert(false, eq: true)
+
+  match(msgpack::unpack_map(map_html<MsgPack, MsgPack>(html: text("Child"), handler_id: 21)))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "map")
+      assert_i32_field(value, "handlerId", 21)
+      match(value.get("child"))
+        Some<MsgPack>:
+          assert(true, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+test "vx event helpers encode browser names and options":
+  let click = on_click_with(
+    options: EventOptions { prevent_default: true, stop_propagation: true },
+    handler_id: 42
+  )
+  assert_event_descriptor(click, "click", 42)
+
+  match(msgpack::unpack_map(click))
+    Ok<Dict<String, MsgPack>> { value }:
+      match(value.get("options"))
+        Some<MsgPack> { value: options }:
+          match(msgpack::unpack_map(options))
+            Ok<Dict<String, MsgPack>> { value: option_map }:
+              assert_bool_field(option_map, "preventDefault", true)
+              assert_bool_field(option_map, "stopPropagation", true)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+  assert_event_descriptor(on_double_click(1), "dblclick", 1)
+  assert_event_descriptor(on_drag_start(2), "dragstart", 2)
+  assert_event_descriptor(on_context_menu(3), "contextmenu", 3)
+  assert_event_descriptor(
+    on_submit_with(options: EventOptions { prevent_default: true }, handler_id: 4),
+    "submit",
+    4
+  )
+  assert_event_descriptor(
+    on_key_up_with(options: EventOptions { stop_propagation: true }, handler_id: 5),
+    "keyup",
+    5
+  )
+
+test "vx event helpers encode static runtime messages":
+  let click = on_click_message(msgpack::make_string("save"))
+  match(msgpack::unpack_map(click))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "event")
+      assert_string_field(value, "event", "click")
+      assert_string_field(value, "message", "save")
+    Err:
+      assert(false, eq: true)
+
+  let submit = on_submit_with(
+    options: EventOptions { prevent_default: true },
+    message: msgpack::make_string("submit")
+  )
+  match(msgpack::unpack_map(submit))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "event")
+      assert_string_field(value, "event", "submit")
+      assert_string_field(value, "message", "submit")
+      match(value.get("options"))
+        Some<MsgPack> { value: options }:
+          match(msgpack::unpack_map(options))
+            Ok<Dict<String, MsgPack>> { value: option_map }:
+              assert_bool_field(option_map, "preventDefault", true)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+  let input = on_input_message(msgpack::make_string("draft"))
+  match(msgpack::unpack_map(input))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "event")
+      assert_string_field(value, "event", "input")
+      assert_string_field(value, "message", "draft")
+    Err:
+      assert(false, eq: true)
+
+test "vx command constructors encode runtime payloads":
+  let none = Cmd<MsgPack>::none()
+  assert_string_payload_field(none.payload, "type", "cmd")
+  assert_string_payload_field(none.payload, "kind", "none")
+
+  let message = Cmd<MsgPack>::message(msgpack::make_string("save"))
+  assert_string_payload_field(message.payload, "type", "cmd")
+  assert_string_payload_field(message.payload, "kind", "message")
+  assert_string_payload_field(message.payload, "value", "save")
+
+  let batch = Cmd<MsgPack>::batch([none, message])
+  assert_string_payload_field(batch.payload, "type", "cmd")
+  assert_string_payload_field(batch.payload, "kind", "batch")
+  assert_array_payload_len(batch.payload, "children", 2)
+
+  let mapped_message = message.map<MsgPack>(handler_id: 77)
+  assert_string_payload_field(mapped_message.payload, "type", "cmd")
+  assert_string_payload_field(mapped_message.payload, "kind", "map")
+  assert_i32_payload_field(mapped_message.payload, "handlerId", 77)
+  assert_payload_has_field(mapped_message.payload, "child")
+
+  let runtime = Cmd<MsgPack>::runtime(
+    kind: "focus",
+    value: msgpack::make_string("editor")
+  )
+  assert_string_payload_field(runtime.payload, "type", "cmd")
+  assert_string_payload_field(runtime.payload, "kind", "focus")
+  assert_string_payload_field(runtime.payload, "value", "editor")
+
+  let task = Cmd<MsgPack>::perform(task_id: 9, handler_id: 12)
+  assert_string_payload_field(task.payload, "type", "cmd")
+  assert_string_payload_field(task.payload, "kind", "task")
+  assert_i32_payload_field(task.payload, "taskId", 9)
+  assert_i32_payload_field(task.payload, "handlerId", 12)
+
+  let task_value = Task<MsgPack> { id: 10 }
+  let task_from_handle = Cmd<MsgPack>::perform<MsgPack>(task: task_value, handler_id: 13)
+  assert_string_payload_field(task_from_handle.payload, "type", "cmd")
+  assert_string_payload_field(task_from_handle.payload, "kind", "task")
+  assert_i32_payload_field(task_from_handle.payload, "taskId", 10)
+  assert_i32_payload_field(task_from_handle.payload, "handlerId", 13)
+
+  let editor_ref = Ref<DomElement> { id: "editor".to_string() }
+  let focus = Cmd<MsgPack>::focus<DomElement>(editor_ref)
+  assert_string_payload_field(focus.payload, "type", "cmd")
+  assert_string_payload_field(focus.payload, "kind", "focus")
+  assert_string_payload_field(focus.payload, "value", "editor")
+
+  let scroll_ref = Ref<DomElement> { id: "editor".to_string() }
+  let scroll = Cmd<MsgPack>::scroll_into_view<DomElement>(scroll_ref)
+  assert_string_payload_field(scroll.payload, "type", "cmd")
+  assert_string_payload_field(scroll.payload, "kind", "scroll_into_view")
+  assert_string_payload_field(scroll.payload, "value", "editor")
+
+  let delayed = Cmd<MsgPack>::delay(
+    millis: 250i64,
+    value: msgpack::make_string("later")
+  )
+  assert_string_payload_field(delayed.payload, "type", "cmd")
+  assert_string_payload_field(delayed.payload, "kind", "delay")
+  assert_i64_payload_field(delayed.payload, "ms", 250i64)
+  assert_string_payload_field(delayed.payload, "value", "later")
+
+test "vx subscription constructors encode runtime payloads":
+  let none = Sub<MsgPack>::none()
+  assert_string_payload_field(none.payload, "type", "sub")
+  assert_string_payload_field(none.payload, "kind", "none")
+
+  let batch = Sub<MsgPack>::batch([none])
+  assert_string_payload_field(batch.payload, "type", "sub")
+  assert_string_payload_field(batch.payload, "kind", "batch")
+  assert_array_payload_len(batch.payload, "children", 1)
+
+  let mapped_batch = batch.map<MsgPack>(handler_id: 78)
+  assert_string_payload_field(mapped_batch.payload, "type", "sub")
+  assert_string_payload_field(mapped_batch.payload, "kind", "map")
+  assert_i32_payload_field(mapped_batch.payload, "handlerId", 78)
+  assert_payload_has_field(mapped_batch.payload, "child")
+
+  let runtime = Sub<MsgPack>::runtime(
+    kind: "keyboard",
+    key: "global",
+    value: msgpack::make_string("keydown")
+  )
+  assert_string_payload_field(runtime.payload, "type", "sub")
+  assert_string_payload_field(runtime.payload, "kind", "keyboard")
+  assert_string_payload_field(runtime.payload, "key", "global")
+  assert_string_payload_field(runtime.payload, "value", "keydown")
+
+  let keyboard = keyboard_on_key_down<MsgPack>(
+    key: "global-shortcuts",
+    value: msgpack::make_string("key")
+  )
+  assert_string_payload_field(keyboard.payload, "type", "sub")
+  assert_string_payload_field(keyboard.payload, "kind", "keyboard")
+  assert_string_payload_field(keyboard.payload, "key", "global-shortcuts")
+  assert_string_payload_field(keyboard.payload, "event", "keydown")
+  assert_string_payload_field(keyboard.payload, "value", "key")
+
+  let interval = Sub<MsgPack>::every(
+    key: "autosave",
+    millis: 30000i64,
+    value: msgpack::make_string("tick")
+  )
+  assert_string_payload_field(interval.payload, "type", "sub")
+  assert_string_payload_field(interval.payload, "kind", "interval")
+  assert_string_payload_field(interval.payload, "key", "autosave")
+  assert_i64_payload_field(interval.payload, "ms", 30000i64)
+  assert_string_payload_field(interval.payload, "value", "tick")
+
+test "vx component state and task APIs use component effect":
+  let ~seen = Array<String>::init()
+
+  try open
+    let handle = state_handle(id: 3, initial: msgpack::make_string("initial"))
+    assert_msgpack_string(handle.value, "current")
+  Component::state_get(tail, id, initial):
+    seen.push("get".to_string())
+    assert(id, eq: 3)
+    assert_msgpack_string(initial, "initial")
+    tail(msgpack::make_string("current"))
+
+  let handle = StateHandle<MsgPack> { id: 3, value: msgpack::make_string("current") }
+  try open
+    handle.set(msgpack::make_string("next"))
+  Component::state_set(tail, id, value):
+    seen.push("set".to_string())
+    assert(id, eq: 3)
+    assert_msgpack_string(value, "next")
+    tail()
+
+  let task_value = Task<MsgPack> { id: 11 }
+  try open
+    task<MsgPack>(key: msgpack::make_string("preview"), task: task_value)
+  Component::task_started(tail, key, task_id):
+    seen.push("task".to_string())
+    assert_msgpack_string(key, "preview")
+    assert(task_id, eq: 11)
+    tail()
+
+  assert(seen.len(), eq: 3)
+
+test "vx program constructor encodes lifecycle handles":
+  let app = program<MsgPack, MsgPack>(
+    init: msgpack::make_i32(1),
+    update: msgpack::make_i32(2),
+    view: msgpack::make_i32(3),
+    subscriptions: msgpack::make_i32(4),
+    decode_msg: msgpack::make_i32(5)
+  )
+
+  match(msgpack::unpack_map(app))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "program")
+      assert_i32_field(value, "init", 1)
+      assert_i32_field(value, "update", 2)
+      assert_i32_field(value, "view", 3)
+      assert_i32_field(value, "subscriptions", 4)
+      assert_i32_field(value, "decode_msg", 5)
+    Err:
+      assert(false, eq: true)
+
+fn assert_string_field(map: Dict<String, MsgPack>, field: String, expected: String) -> void
+  match(map.get(field))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_string(value))
+        Ok<String> { value: actual }:
+          assert(actual.equals(expected), eq: true)
+        Err:
+          assert(false, eq: true)
+    None:
+      assert(false, eq: true)
+
+fn assert_string_field(map: Dict<String, MsgPack>, field: StringSlice, expected: StringSlice) -> void
+  assert_string_field(map, field.to_string(), expected.to_string())
+
+fn assert_bool_field(map: Dict<String, MsgPack>, field: StringSlice, expected: bool) -> void
+  match(map.get(field.to_string()))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_bool(value))
+        Ok<bool> { value: actual }:
+          assert(actual, eq: expected)
+        Err:
+          assert(false, eq: true)
+    None:
+      assert(false, eq: true)
+
+fn assert_bool_field(map: Dict<String, MsgPack>, field: String, expected: bool) -> void
+  assert_bool_field(map, field.as_slice(), expected)
+
+fn assert_i32_field(map: Dict<String, MsgPack>, field: StringSlice, expected: i32) -> void
+  match(map.get(field.to_string()))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_i32(value))
+        Ok<i32> { value: actual }:
+          assert(actual, eq: expected)
+        Err:
+          assert(false, eq: true)
+    None:
+      assert(false, eq: true)
+
+fn assert_i32_field(map: Dict<String, MsgPack>, field: String, expected: i32) -> void
+  assert_i32_field(map, field.as_slice(), expected)
+
+fn assert_event_descriptor(value: MsgPack, event_name: StringSlice, handler_id: i32) -> void
+  match(msgpack::unpack_map(value))
+    Ok<Dict<String, MsgPack>> { value: event }:
+      assert_string_field(event, "kind", "event")
+      assert_string_field(event, "event".as_slice(), event_name)
+      match(event.get("handlerId"))
+        Some<MsgPack> { value: id }:
+          match(msgpack::unpack_i32(id))
+            Ok<i32> { value: actual_id }:
+              assert(actual_id, eq: handler_id)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+fn assert_event_descriptor(value: MsgPack, event_name: String, handler_id: i32) -> void
+  assert_event_descriptor(value, event_name.as_slice(), handler_id)
+
+fn assert_string_payload_field(payload: MsgPack, field: StringSlice, expected: StringSlice) -> void
+  match(msgpack::unpack_map(payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, field, expected)
+    Err:
+      assert(false, eq: true)
+
+fn assert_string_payload_field(payload: MsgPack, field: String, expected: String) -> void
+  assert_string_payload_field(payload, field.as_slice(), expected.as_slice())
+
+fn assert_msgpack_string(value: MsgPack, expected: StringSlice) -> void
+  match(msgpack::unpack_string(value))
+    Ok<String> { value: actual }:
+      assert(actual.equals(expected.to_string()), eq: true)
+    Err:
+      assert(false, eq: true)
+
+fn assert_msgpack_string(value: MsgPack, expected: String) -> void
+  assert_msgpack_string(value, expected.as_slice())
+
+fn assert_i32_payload_field(payload: MsgPack, field: StringSlice, expected: i32) -> void
+  match(msgpack::unpack_map(payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_i32_field(value, field, expected)
+    Err:
+      assert(false, eq: true)
+
+fn assert_i32_payload_field(payload: MsgPack, field: String, expected: i32) -> void
+  assert_i32_payload_field(payload, field.as_slice(), expected)
+
+fn assert_i64_payload_field(payload: MsgPack, field: StringSlice, expected: i64) -> void
+  match(msgpack::unpack_map(payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      match(value.get(field.to_string()))
+        Some<MsgPack> { value: field_value }:
+          match(msgpack::unpack_i64(field_value))
+            Ok<i64> { value: actual }:
+              assert(actual, eq: expected)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+fn assert_i64_payload_field(payload: MsgPack, field: String, expected: i64) -> void
+  assert_i64_payload_field(payload, field.as_slice(), expected)
+
+fn assert_array_payload_len(payload: MsgPack, field: StringSlice, expected: i32) -> void
+  match(msgpack::unpack_map(payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      match(value.get(field.to_string()))
+        Some<MsgPack> { value: children }:
+          match(msgpack::unpack_array(children))
+            Ok<Array<MsgPack>> { value: list }:
+              assert(list.len(), eq: expected)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+fn assert_array_payload_len(payload: MsgPack, field: String, expected: i32) -> void
+  assert_array_payload_len(payload, field.as_slice(), expected)
+
+fn assert_payload_has_field(payload: MsgPack, field: StringSlice) -> void
+  match(msgpack::unpack_map(payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      match(value.get(field.to_string()))
+        Some<MsgPack>:
+          assert(true, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+fn assert_payload_has_field(payload: MsgPack, field: String) -> void
+  assert_payload_has_field(payload, field.as_slice())

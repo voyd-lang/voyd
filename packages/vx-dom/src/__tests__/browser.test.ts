@@ -1,0 +1,802 @@
+// @vitest-environment happy-dom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createVxDomRenderer, hydrateVxApp, mountVxApp } from "../browser.js";
+import type {
+  NormalizedEventPayload,
+  VNode,
+  VxAppRuntime,
+  VxElementNode,
+  VxRenderFrame,
+  VxSubscriptionSyncContext,
+  VxSubscriptionRunner,
+} from "../types.js";
+
+describe("vx-dom browser renderer", () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  afterEach(() => {
+    container.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("patches text and props without replacing the element", () => {
+    const renderer = createVxDomRenderer(container);
+
+    renderer.render(frame(inputNode({ value: "Draft", disabled: true })));
+    const input = container.querySelector("input")!;
+
+    expect(input.value).toBe("Draft");
+    expect(input.disabled).toBe(true);
+
+    renderer.render(frame(inputNode({ value: "Saved" })));
+
+    expect(container.querySelector("input")).toBe(input);
+    expect(input.value).toBe("Saved");
+    expect(input.disabled).toBe(false);
+  });
+
+  it("reorders keyed children without recreating existing DOM nodes", () => {
+    const renderer = createVxDomRenderer(container);
+
+    renderer.render(frame(listNode(["a", "b", "c"])));
+    const firstRender = Array.from(container.querySelectorAll("li"));
+
+    renderer.render(frame(listNode(["c", "a", "b"])));
+    const secondRender = Array.from(container.querySelectorAll("li"));
+
+    expect(secondRender.map((node) => node.textContent)).toEqual(["c", "a", "b"]);
+    expect(secondRender[0]).toBe(firstRender[2]);
+    expect(secondRender[1]).toBe(firstRender[0]);
+    expect(secondRender[2]).toBe(firstRender[1]);
+  });
+
+  it("dispatches normalized events and releases removed handlers", () => {
+    const dispatch = vi.fn<RetainedDispatch>();
+    const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
+    const renderer = createVxDomRenderer(container, {
+      handlers: { dispatch, releaseMany },
+    });
+
+    renderer.render(frame(buttonNode(1)));
+    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      clientX: 12,
+      clientY: 24,
+    }));
+
+    expect(dispatch).toHaveBeenCalledWith(1, expect.objectContaining({
+      kind: "mouse",
+      client_x: 12,
+      client_y: 24,
+    }));
+
+    renderer.render(frame(buttonNode(2)));
+    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(releaseMany).toHaveBeenCalledWith([1]);
+    expect(dispatch).toHaveBeenLastCalledWith(2, expect.objectContaining({ kind: "mouse" }));
+  });
+
+  it("hydrates matching DOM, attaches listeners, and disposes cleanly", () => {
+    const dispatch = vi.fn<RetainedDispatch>();
+    const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
+    container.innerHTML = `<button class="old" title="stale" style="color: red">Server<span>extra</span></button>`;
+
+    const renderer = createVxDomRenderer(container, {
+      handlers: { dispatch, releaseMany },
+    });
+    const serverButton = container.querySelector("button")!;
+
+    renderer.hydrate(frame({
+      ...buttonNode(7),
+      attrs: { class: "live" },
+      styles: { background: "blue" },
+      children: [{ kind: "text", value: "Client" }],
+    }));
+
+    const hydratedButton = container.querySelector("button")!;
+    expect(hydratedButton).toBe(serverButton);
+    expect(hydratedButton.className).toBe("live");
+    expect(hydratedButton.hasAttribute("title")).toBe(false);
+    expect(hydratedButton.style.color).toBe("");
+    expect(hydratedButton.style.background).toBe("blue");
+    expect(hydratedButton.children).toHaveLength(0);
+    expect(hydratedButton.textContent).toBe("Client");
+
+    hydratedButton.click();
+    expect(dispatch).toHaveBeenCalledWith(7, expect.objectContaining({ kind: "mouse" }));
+
+    renderer.dispose();
+    expect(container.innerHTML).toBe("");
+    expect(releaseMany).toHaveBeenLastCalledWith(new Set([7]));
+  });
+
+  it("mounts a runtime-owned app and runs message commands through dispatch", async () => {
+    let count = 0;
+    const dispose = vi.fn();
+    const syncSubscriptions = vi.fn<(
+      next: unknown,
+      context: VxSubscriptionSyncContext,
+    ) => void>();
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(count),
+        commands: { type: "cmd", kind: "message", value: { type: "increment" } },
+        subscriptions: { type: "sub", kind: "none" },
+      }),
+      render: () => counterNode(count),
+      dispatch: (message) => {
+        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        return {
+          frame: counterNode(count),
+          commands: { type: "cmd", kind: "none" },
+          subscriptions: { type: "sub", kind: "none" },
+        };
+      },
+      syncSubscriptions,
+      dispose,
+      getSnapshot: () => ({ count }),
+    };
+
+    const mounted = await mountVxApp({ container, app });
+
+    expect(container.textContent).toBe("Count: 1");
+    expect(syncSubscriptions).toHaveBeenCalledWith(
+      { type: "sub", kind: "none" },
+      expect.objectContaining({ previous: undefined }),
+    );
+
+    await mounted.dispatch({ kind: "msgpack", value: { type: "increment" } });
+
+    expect(container.textContent).toBe("Count: 2");
+    expect(mounted.getSnapshot()).toEqual({ count: 2 });
+
+    mounted.dispose();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("routes retained DOM events into the runtime by default", async () => {
+    let count = 0;
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => counterButtonNode({ count, handlerId: 99 }),
+      render: () => counterButtonNode({ count, handlerId: 99 }),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        if (message.kind === "event" && message.handlerId === 99) count += 1;
+        return counterButtonNode({ count, handlerId: 99 });
+      },
+    };
+
+    await mountVxApp({ container, app });
+    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+      clientX: 8,
+      clientY: 13,
+    }));
+
+    await nextTurn();
+
+    expect(container.textContent).toBe("Count: 1");
+    expect(seenMessages).toEqual([
+      expect.objectContaining({
+        kind: "event",
+        handlerId: 99,
+        payload: expect.objectContaining({
+          kind: "mouse",
+          client_x: 8,
+          client_y: 13,
+        }),
+      }),
+    ]);
+  });
+
+  it("routes static DOM event messages into the runtime by default", async () => {
+    let count = 0;
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => counterMessageButtonNode(count),
+      render: () => counterMessageButtonNode(count),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        return counterMessageButtonNode(count);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", {
+      bubbles: true,
+    }));
+
+    await nextTurn();
+
+    expect(container.textContent).toBe("Count: 1");
+    expect(seenMessages).toEqual([
+      { kind: "msgpack", value: { type: "increment" } },
+    ]);
+  });
+
+  it("allows explicit handler registries to override runtime event dispatch", async () => {
+    const runtimeDispatch = vi.fn<VxAppRuntime["dispatch"]>();
+    const handlerDispatch = vi.fn<RetainedDispatch>();
+    const app: VxAppRuntime = {
+      init: () => counterButtonNode({ count: 0, handlerId: 5 }),
+      render: () => counterButtonNode({ count: 0, handlerId: 5 }),
+      dispatch: runtimeDispatch,
+    };
+
+    await mountVxApp({
+      container,
+      app,
+      handlers: { dispatch: handlerDispatch },
+    });
+
+    container.querySelector("button")!.click();
+
+    expect(handlerDispatch).toHaveBeenCalledWith(5, expect.objectContaining({ kind: "mouse" }));
+    expect(runtimeDispatch).not.toHaveBeenCalled();
+  });
+
+  it("normalizes input events from controlled form fields", async () => {
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => frame({
+        kind: "element",
+        tag: "input",
+        props: { value: "Draft" },
+        events: [{ kind: "event", event: "input", handlerId: 14 }],
+      }),
+      render: () => frame({
+        kind: "element",
+        tag: "input",
+        props: { value: "Draft" },
+        events: [{ kind: "event", event: "input", handlerId: 14 }],
+      }),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return frame({
+          kind: "element",
+          tag: "input",
+          props: { value: "Renamed" },
+          events: [{ kind: "event", event: "input", handlerId: 14 }],
+        });
+      },
+    };
+
+    await mountVxApp({ container, app });
+    const input = container.querySelector("input")!;
+    input.value = "Renamed";
+    input.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      inputType: "insertText",
+    }));
+    await nextTurn();
+
+    expect(input.value).toBe("Renamed");
+    expect(seenMessages).toEqual([
+      expect.objectContaining({
+        kind: "event",
+        handlerId: 14,
+        payload: expect.objectContaining({
+          kind: "input",
+          value: "Renamed",
+          checked: false,
+          input_type: "insertText",
+        }),
+      }),
+    ]);
+  });
+
+  it("normalizes form submit payloads and honors preventDefault", () => {
+    const dispatch = vi.fn<RetainedDispatch>();
+    const renderer = createVxDomRenderer(container, {
+      handlers: { dispatch },
+    });
+
+    renderer.render(frame({
+      kind: "element",
+      tag: "form",
+      events: [{
+        kind: "event",
+        event: "submit",
+        handlerId: 30,
+        options: { preventDefault: true },
+      }],
+      children: [
+        {
+          kind: "element",
+          tag: "input",
+          attrs: { name: "title" },
+          props: { value: "Draft" },
+        },
+        {
+          kind: "element",
+          tag: "input",
+          attrs: { name: "published", type: "checkbox" },
+          props: { checked: true, value: "yes" },
+        },
+      ],
+    }));
+
+    const form = container.querySelector("form")!;
+    const event = new SubmitEvent("submit", { bubbles: true, cancelable: true });
+    const allowed = form.dispatchEvent(event);
+
+    expect(allowed).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+    expect(dispatch).toHaveBeenCalledWith(30, {
+      kind: "submit",
+      form_data: {
+        published: "yes",
+        title: "Draft",
+      },
+    });
+  });
+
+  it("runs custom command executors and dispatches completions", async () => {
+    let count = 0;
+    const runCommand = vi.fn(async (_command, { dispatch }) => {
+      await dispatch({ kind: "debug", name: "loaded" });
+    });
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(count),
+        commands: { type: "cmd", kind: "load" },
+      }),
+      render: () => counterNode(count),
+      dispatch: (message) => {
+        if (message.kind === "debug" && message.name === "loaded") count += 1;
+        return counterNode(count);
+      },
+    };
+
+    await mountVxApp({
+      container,
+      app,
+      runtimeHost: { commands: { load: runCommand } },
+    });
+
+    expect(runCommand).toHaveBeenCalledWith(
+      { type: "cmd", kind: "load" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(container.textContent).toBe("Count: 1");
+  });
+
+  it("wraps mapped command completions for the app runtime", async () => {
+    const seenMessages: unknown[] = [];
+    let count = 0;
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(count),
+        commands: {
+          type: "cmd",
+          kind: "map",
+          handlerId: 44,
+          child: { type: "cmd", kind: "message", value: { type: "child" } },
+        },
+      }),
+      render: () => counterNode(count),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        if (message.kind === "map" && message.handlerId === 44) count += 1;
+        return counterNode(count);
+      },
+    };
+
+    await mountVxApp({ container, app });
+
+    expect(container.textContent).toBe("Count: 1");
+    expect(seenMessages).toEqual([
+      {
+        kind: "map",
+        handlerId: 44,
+        message: { kind: "msgpack", value: { type: "child" } },
+      },
+    ]);
+  });
+
+  it("runs delay commands with the default browser runtime host", async () => {
+    vi.useFakeTimers();
+    let count = 0;
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(count),
+        commands: {
+          type: "cmd",
+          kind: "delay",
+          ms: 25,
+          value: { type: "increment" },
+        },
+      }),
+      render: () => counterNode(count),
+      dispatch: (message) => {
+        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        return counterNode(count);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    expect(container.textContent).toBe("Count: 0");
+
+    await vi.advanceTimersByTimeAsync(24);
+    expect(container.textContent).toBe("Count: 0");
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(container.textContent).toBe("Count: 1");
+  });
+
+  it("runs ref DOM commands with the default browser runtime host", async () => {
+    const focus = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => undefined);
+    const scrollIntoView = vi.fn();
+    const previousScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      const app: VxAppRuntime = {
+        init: () => ({
+          frame: frame({
+            kind: "element",
+            tag: "input",
+            attrs: { "data-vx-ref": "editor" },
+            props: { value: "Draft" },
+          }),
+          commands: {
+            type: "cmd",
+            kind: "batch",
+            children: [
+              { type: "cmd", kind: "focus", value: "editor" },
+              { type: "cmd", kind: "scroll_into_view", value: "editor" },
+            ],
+          },
+        }),
+        render: () => frame({
+          kind: "element",
+          tag: "input",
+          attrs: { "data-vx-ref": "editor" },
+          props: { value: "Draft" },
+        }),
+        dispatch: () => frame({ kind: "text", value: "" }),
+      };
+
+      await mountVxApp({ container, app });
+
+      expect(focus).toHaveBeenCalledOnce();
+      expect(scrollIntoView).toHaveBeenCalledOnce();
+    } finally {
+      HTMLElement.prototype.scrollIntoView = previousScrollIntoView;
+    }
+  });
+
+  it("diffs custom subscriptions and disposes removed runners", async () => {
+    let count = 0;
+    let subscribed = true;
+    let tick: (() => Promise<void>) | undefined;
+    const dispose = vi.fn();
+    const runSubscription = vi.fn((_subscription, { dispatch }) => {
+      tick = () => dispatch({ kind: "debug", name: "tick" });
+      return dispose;
+    });
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(count),
+        subscriptions: { type: "sub", kind: "timer", key: "main" },
+      }),
+      render: () => counterNode(count),
+      dispatch: (message) => {
+        if (message.kind === "debug" && message.name === "tick") count += 1;
+        if (message.kind === "debug" && message.name === "stop") subscribed = false;
+        return {
+          frame: counterNode(count),
+          subscriptions: subscribed
+            ? { type: "sub", kind: "timer", key: "main" }
+            : { type: "sub", kind: "none" },
+        };
+      },
+    };
+
+    const mounted = await mountVxApp({
+      container,
+      app,
+      runtimeHost: { subscriptions: { timer: runSubscription } },
+    });
+
+    expect(runSubscription).toHaveBeenCalledOnce();
+
+    await tick?.();
+    expect(container.textContent).toBe("Count: 1");
+    expect(runSubscription).toHaveBeenCalledOnce();
+
+    await mounted.dispatch({ kind: "debug", name: "stop" });
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it("wraps mapped subscription completions and keeps mapped keys distinct", async () => {
+    const seenMessages: unknown[] = [];
+    let subscribed = true;
+    const dispose = vi.fn();
+    const runSubscription = vi.fn<VxSubscriptionRunner>((subscription, _context) => {
+      void subscription;
+      return dispose;
+    });
+    const mappedSubscription = {
+      type: "sub",
+      kind: "map",
+      handlerId: 45,
+      child: { type: "sub", kind: "timer", key: "shared" },
+    };
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: [
+          { type: "sub", kind: "timer", key: "shared" },
+          mappedSubscription,
+        ],
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        if (message.kind === "debug" && message.name === "stop") subscribed = false;
+        return {
+          frame: counterNode(seenMessages.length),
+          subscriptions: subscribed
+            ? [
+              { type: "sub", kind: "timer", key: "shared" },
+              mappedSubscription,
+            ]
+            : { type: "sub", kind: "none" },
+        };
+      },
+    };
+
+    const mounted = await mountVxApp({
+      container,
+      app,
+      runtimeHost: { subscriptions: { timer: runSubscription } },
+    });
+
+    expect(runSubscription).toHaveBeenCalledTimes(2);
+
+    const unmappedDispatch = runSubscription.mock.calls[0]?.[1].dispatch;
+    const mappedDispatch = runSubscription.mock.calls[1]?.[1].dispatch;
+    await unmappedDispatch?.({ kind: "debug", name: "shared" });
+    expect(seenMessages[0]).toEqual({ kind: "debug", name: "shared" });
+
+    await mappedDispatch?.({ kind: "debug", name: "mapped" });
+    expect(seenMessages[1]).toEqual({
+      kind: "map",
+      handlerId: 45,
+      message: { kind: "debug", name: "mapped" },
+    });
+
+    await mounted.dispatch({ kind: "debug", name: "stop" });
+    expect(dispose).toHaveBeenCalledTimes(2);
+  });
+
+  it("runs interval subscriptions with the default browser runtime host", async () => {
+    vi.useFakeTimers();
+    let count = 0;
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(count),
+        subscriptions: {
+          type: "sub",
+          kind: "interval",
+          key: "counter",
+          ms: 10,
+          value: { type: "increment" },
+        },
+      }),
+      render: () => counterNode(count),
+      dispatch: (message) => {
+        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        return {
+          frame: counterNode(count),
+          subscriptions: {
+            type: "sub",
+            kind: "interval",
+            key: "counter",
+            ms: 10,
+            value: { type: "increment" },
+          },
+        };
+      },
+    };
+
+    const mounted = await mountVxApp({ container, app });
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(container.textContent).toBe("Count: 1");
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(container.textContent).toBe("Count: 2");
+
+    mounted.dispose();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(container.textContent).toBe("");
+  });
+
+  it("runs keyboard subscriptions with the default browser runtime host", async () => {
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: {
+          type: "sub",
+          kind: "keyboard",
+          key: "s",
+          event: "keydown",
+          value: { type: "global-key" },
+        },
+      }),
+      render: () => counterNode(0),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    const mounted = await mountVxApp({ container, app });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await nextTurn();
+    expect(container.textContent).toBe("Count: 0");
+
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "s",
+      code: "KeyS",
+      ctrlKey: true,
+    }));
+    await nextTurn();
+
+    expect(container.textContent).toBe("Count: 1");
+    expect(seenMessages).toEqual([
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "keyboard",
+        key: "s",
+        value: { type: "global-key" },
+        payload: expect.objectContaining({
+          kind: "keyboard",
+          key: "s",
+          code: "KeyS",
+          ctrl_key: true,
+        }),
+      }),
+    ]);
+
+    mounted.dispose();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "s" }));
+    await nextTurn();
+    expect(seenMessages).toHaveLength(1);
+  });
+
+  it("hydrates a runtime-owned app without replacing matching server nodes", async () => {
+    container.innerHTML = `<p>Count: 4</p>`;
+    const serverNode = container.firstChild;
+    let count = 4;
+    const app: VxAppRuntime = {
+      init: () => counterNode(count),
+      render: () => counterNode(count),
+      dispatch: () => {
+        count += 1;
+        return counterNode(count);
+      },
+    };
+
+    const mounted = await hydrateVxApp({ container, app });
+
+    expect(container.firstChild).toBe(serverNode);
+    expect(container.textContent).toBe("Count: 4");
+
+    await mounted.dispatch({ kind: "debug", name: "increment" });
+
+    expect(container.firstChild).toBe(serverNode);
+    expect(container.textContent).toBe("Count: 5");
+  });
+
+  it("mounts a provided frame without requiring Wasm", async () => {
+    const mounted = await mountVxApp({
+      container,
+      frame: counterNode(3),
+    });
+
+    expect(container.textContent).toBe("Count: 3");
+
+    await mounted.dispatch({ kind: "debug", name: "noop" });
+    expect(container.textContent).toBe("Count: 3");
+  });
+});
+
+type RetainedDispatch = (
+  id: number,
+  payload: NormalizedEventPayload,
+) => Promise<void> | void;
+
+function frame(root: VNode): VxRenderFrame {
+  return { version: 1, root };
+}
+
+function inputNode(props: Record<string, unknown>): VxElementNode {
+  return {
+    kind: "element",
+    tag: "input",
+    props,
+    children: [],
+  };
+}
+
+function listNode(keys: string[]): VxElementNode {
+  return {
+    kind: "element",
+    tag: "ul",
+    children: keys.map((key) => ({
+      kind: "element",
+      tag: "li",
+      key,
+      children: [{ kind: "text", value: key }],
+    })),
+  };
+}
+
+function buttonNode(handlerId: number): VxElementNode {
+  return {
+    kind: "element",
+    tag: "button",
+    events: [{ kind: "event", event: "click", handlerId }],
+    children: [{ kind: "text", value: "Save" }],
+  };
+}
+
+function counterNode(value: number): VxRenderFrame {
+  return frame({
+    kind: "element",
+    tag: "p",
+    children: [{ kind: "text", value: `Count: ${value}` }],
+  });
+}
+
+function counterButtonNode({
+  count,
+  handlerId,
+}: {
+  count: number;
+  handlerId: number;
+}): VxRenderFrame {
+  return frame({
+    kind: "element",
+    tag: "button",
+    events: [{ kind: "event", event: "click", handlerId }],
+    children: [{ kind: "text", value: `Count: ${count}` }],
+  });
+}
+
+function counterMessageButtonNode(count: number): VxRenderFrame {
+  return frame({
+    kind: "element",
+    tag: "button",
+    events: [{
+      kind: "event",
+      event: "click",
+      message: { type: "increment" },
+    }],
+    children: [{ kind: "text", value: `Count: ${count}` }],
+  });
+}
+
+function isIncrement(input: unknown): input is { type: "increment" } {
+  return typeof input === "object" && input !== null && "type" in input
+    && input.type === "increment";
+}
+
+function nextTurn(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}

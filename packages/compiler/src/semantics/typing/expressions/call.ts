@@ -5552,6 +5552,12 @@ const typeIntrinsicCall = (
         typeArguments,
         expectedReturnType,
       });
+    case "__vx_retain_event_handler":
+      return typeVxRetainEventHandlerIntrinsic({
+        args,
+        ctx,
+        typeArguments,
+      });
     case "__shift_l":
     case "__shift_ru":
       return typeShiftIntrinsic({ name, args, ctx, state, typeArguments });
@@ -6335,6 +6341,30 @@ const typeTaskCancelIntrinsic = ({
     "__task_cancel task id"
   );
   return ctx.primitives.bool;
+};
+
+const typeVxRetainEventHandlerIntrinsic = ({
+  args,
+  ctx,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  ctx: TypingContext;
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__vx_retain_event_handler",
+    args,
+    expected: 1,
+    detail: "handler function",
+  });
+  assertNoIntrinsicTypeArgs("__vx_retain_event_handler", typeArguments);
+  const handlerType = args[0]!.type;
+  const desc = ctx.arena.get(handlerType);
+  if (desc.kind !== "function") {
+    throw new Error("__vx_retain_event_handler expects a function argument");
+  }
+  return getPrimitiveType(ctx, "i32");
 };
 
 const typeTaskTakeValueIntrinsic = ({

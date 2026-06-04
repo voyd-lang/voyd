@@ -100,5 +100,8 @@ const encodeUtf8Bytes = (value: string): number[] => {
 
 export const string = (value: string) => {
   const bytes = encodeUtf8Bytes(value).map((byte) => int(byte));
+  if (bytes.length === 0) {
+    return call(identifier("::"), identifier("String"), call(identifier("init")));
+  }
   return call("new_string", call("fixed_array_literal", ...bytes));
 };

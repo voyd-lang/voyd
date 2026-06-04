@@ -4,6 +4,7 @@ import {
   isForm,
   surfaceCall,
 } from "../../ast/index.js";
+import { BoolAtom } from "../../ast/atom.js";
 import {
   call,
   identifier,
@@ -94,28 +95,20 @@ export class HTMLParser {
       );
     }
 
-    // Built-in element: create_element("div", [(k, v), ...], [...])
-    const nameExpr = string(tagName);
-    const attributes = propsOrAttrs;
-    const children = selfClosing ? arrayLiteral() : this.parseChildren(tagName);
-    const args = [label("name", nameExpr)];
+    // Built-in element: element(tag: "div", attrs: [...], children: [...])
+    const attributes = propsOrAttrs.map(({ name, value }) =>
+      this.lowerVxAttribute(name, value),
+    );
+    const children = selfClosing ? emptyVxChildren() : this.parseChildren(tagName);
+    const args = [label("tag", string(tagName))];
 
     if (attributes.length) {
-      args.push(
-        label(
-          "attributes",
-          arrayLiteral(
-            ...attributes.map(({ name, value }) =>
-              arrayLiteral(string(name), value),
-            ),
-          ),
-        ),
-      );
+      args.push(label("attrs", arrayLiteral(...attributes)));
     }
 
     args.push(label("children", children));
 
-    return surfaceCall("create_element", ...args).setLocation(
+    return surfaceCall("element", ...args).setLocation(
       this.stream.currentSourceLocation(),
     );
   }
@@ -143,8 +136,8 @@ export class HTMLParser {
         const value = this.parseAttributeValue();
         items.push({ name, value });
       } else {
-        // Boolean attribute -> "true" string
-        items.push({ name, value: string("true") });
+        // Boolean attribute -> true
+        items.push({ name, value: new BoolAtom("true") });
       }
       this.consumeWhitespace();
     }
@@ -155,7 +148,7 @@ export class HTMLParser {
     let name = "";
     while (this.stream.hasCharacters) {
       const char = this.stream.next;
-      if (!char || !/[a-zA-Z0-9-]/.test(char)) {
+      if (!char || !/[a-zA-Z0-9_-]/.test(char)) {
         break;
       }
       name += this.stream.consumeChar();
@@ -193,6 +186,37 @@ export class HTMLParser {
     }
     this.stream.consumeChar(); // Consume the closing quote
     return string(text);
+  }
+
+  private lowerVxAttribute(name: string, value: Expr): Expr {
+    if (name.startsWith("on_")) {
+      const eventValue = unwrapInlineLambdaExpr(value);
+      const eventHelper = isLambdaExpr(eventValue)
+        ? eventLambdaAcceptsPayload(eventValue)
+          ? `${name}_payload`
+          : name
+        : `${name}_message`;
+      return surfaceCall(eventHelper, eventValue).setLocation(
+        this.stream.currentSourceLocation(),
+      );
+    }
+
+    if (
+      name === "class" ||
+      name === "value" ||
+      name === "disabled" ||
+      name === "checked"
+    ) {
+      return surfaceCall(name, value).setLocation(
+        this.stream.currentSourceLocation(),
+      );
+    }
+
+    return surfaceCall(
+      "attr",
+      label("name", string(name)),
+      label("value", value),
+    ).setLocation(this.stream.currentSourceLocation());
   }
 
   private parseChildren(tagName: string) {
@@ -249,7 +273,7 @@ export class HTMLParser {
       });
     }
 
-    const result = arrayLiteral(...children);
+    const result = children.length > 0 ? arrayLiteral(...children) : emptyVxChildren();
 
     // Restore mode on exiting children
     this.whitespaceMode = prevMode;
@@ -329,12 +353,55 @@ export class HTMLParser {
 }
 
 const unwrapInlineExpr = (expr: Expr): Expr => {
+  const lambda = unwrapInlineLambdaExpr(expr);
+  if (lambda !== expr) return lambda;
   if (isForm(expr) && expr.length === 1) {
     const only = expr.at(0);
     if (only && !isForm(only)) return only;
   }
   return expr;
 };
+
+const unwrapInlineLambdaExpr = (expr: Expr): Expr => {
+  if (!isObjectLiteralExpr(expr) || expr.length !== 2) return expr;
+  const only = expr.at(1);
+  return only && isLambdaExpr(only) ? only : expr;
+};
+
+const isLambdaExpr = (expr: Expr): boolean => {
+  const serialized = expr.toJSON();
+  return Array.isArray(serialized) && serialized.includes("=>");
+};
+
+const isObjectLiteralExpr = (expr: Expr): expr is Extract<Expr, { at(index: number): Expr | undefined; length: number }> =>
+  isForm(expr) &&
+  Array.isArray(expr.toJSON()) &&
+  (expr.toJSON() as unknown[])[0] === "object_literal";
+
+const eventLambdaAcceptsPayload = (expr: Expr): boolean => {
+  const serialized = expr.toJSON();
+  if (!Array.isArray(serialized)) return false;
+  const arrowIndex = serialized.indexOf("=>");
+  if (arrowIndex <= 0) return false;
+  const signatureArrowIndex = serialized
+    .slice(0, arrowIndex)
+    .findIndex((item) => item === "->");
+  if (signatureArrowIndex < 0) return false;
+  return serialized
+    .slice(0, signatureArrowIndex)
+    .some((item) =>
+      Array.isArray(item)
+        ? item.length > 1
+        : typeof item === "string" && item.trim().length > 0
+    );
+};
+
+const emptyVxChildren = (): Expr =>
+  surfaceCall(
+    "::",
+    surfaceCall("Array", call("generics", identifier("MsgPack"))),
+    surfaceCall("init"),
+  );
 
 // Build nested left side for a module path (e.g., ["::", ["::", A, B], C])
 const buildModulePathLeft = (segments: string[]) => {

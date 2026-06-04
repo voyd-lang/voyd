@@ -1,14 +1,1148 @@
-//! Virtual DOM helpers.
-//!
-//! Utilities for constructing VX element payloads encoded as MsgPack maps.
-
 use std::array::Array
 use std::dict::{ Dict, DictKey }
 use std::error::panic
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
-use std::string::type::{ String, new_string }
+use std::result::types::Unit
+use std::string::type::{ String, StringSlice, new_string }
+use std::task::{ Task }
+
+pub type Html<Msg> = MsgPack
+pub type Attr<Msg> = MsgPack
+pub type Program<Model, Msg> = MsgPack
+pub type RenderKey = String
+
+pub obj Cmd<Msg> {
+  api payload: MsgPack
+}
+
+pub obj Sub<Msg> {
+  api payload: MsgPack
+}
+
+pub obj EventOptions {
+  api prevent_default?: bool,
+  api stop_propagation?: bool,
+  api capture?: bool,
+  api passive?: bool
+}
+
+pub obj DomElement {}
+
+pub obj Ref<T> {
+  api id: String
+}
+
+pub obj StateHandle<T> {
+  api id: i32,
+  api value: T
+}
+
+pub type MouseEvent = {
+  kind: String,
+  x: f64,
+  y: f64,
+  client_x: f64,
+  client_y: f64,
+  button: i32,
+  alt_key: bool,
+  ctrl_key: bool,
+  meta_key: bool,
+  shift_key: bool,
+  delta_x: Optional<f64>,
+  delta_y: Optional<f64>
+}
+
+pub type KeyboardEvent = {
+  kind: String,
+  key: String,
+  code: String,
+  alt_key: bool,
+  ctrl_key: bool,
+  meta_key: bool,
+  shift_key: bool
+}
+
+pub type InputEvent = {
+  kind: String,
+  value: String,
+  checked: bool,
+  input_type: Optional<String>
+}
+
+pub type SubmitEvent = {
+  kind: String,
+  form_data: Dict<String, String>
+}
+
+pub type GenericEvent = {
+  kind: String,
+  event: String
+}
+
+@effect(id: "voyd.std.vx.dom")
+pub eff Dom
+  dispatch(tail, payload: MsgPack) -> MsgPack
+
+@effect(id: "voyd.std.vx.component")
+pub eff Component
+  state_get(tail, id: i32, initial: MsgPack) -> MsgPack
+
+  state_set(tail, id: i32, value: MsgPack) -> void
+
+  task_started(tail, key: MsgPack, task_id: i32) -> void
+
+@intrinsic(name: "__vx_retain_event_handler")
+fn retain_event_handler_id(handler: fn() -> MsgPack): () -> i32
+  __vx_retain_event_handler(handler)
+
+@intrinsic(name: "__vx_retain_event_handler")
+fn retain_event_handler_with_payload_id(handler: fn(MsgPack) -> MsgPack): () -> i32
+  __vx_retain_event_handler(handler)
+
+impl StateHandle<MsgPack>
+  /// Replaces component-local serialized state and schedules the component runtime.
+  api fn set(self, value: MsgPack): Component -> void
+    Component::state_set(self.id, value)
+
+  /// Replaces component-local serialized state and returns the updated handle.
+  api fn update(self, value: MsgPack): Component -> StateHandle<MsgPack>
+    Component::state_set(self.id, value)
+    StateHandle<MsgPack> { id: self.id, value: value }
+
+impl<Msg> Cmd<Msg>
+  /// Creates an empty command.
+  api fn none() -> Cmd<Msg>
+    Cmd<Msg> { payload: command_payload("none") }
+
+  /// Creates a command that dispatches a serialized host/runtime message.
+  api fn message(value: MsgPack) -> Cmd<Msg>
+    let ~out = command_map("message")
+    out.set("value", value)
+    Cmd<Msg> { payload: msgpack::make_map(out) }
+
+  /// Creates a command batch from existing command values.
+  api fn batch(values: Array<Cmd<Msg>>) -> Cmd<Msg>
+    let ~children = Array<MsgPack>::with_capacity(values.len())
+    var index = 0
+    while index < values.len():
+      match(values.get(index))
+        Some<Cmd<Msg>> { value }:
+          children.push(value.payload)
+        None:
+          void
+      index = index + 1
+
+    let ~out = command_map("batch")
+    out.set("children", children)
+    Cmd<Msg> { payload: msgpack::make_map(out) }
+
+  /// Lifts a child command through a retained message mapper.
+  api fn map<NextMsg>(self, { handler_id: i32 }) -> Cmd<NextMsg>
+    let ~out = command_map("map")
+    out.set("child", self.payload)
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    Cmd<NextMsg> { payload: msgpack::make_map(out) }
+
+  /// Lifts a child command through a retained Voyd message mapper.
+  api fn map<NextMsg>(self, handler: fn(MsgPack) -> MsgPack) -> Cmd<NextMsg>
+    self.map<NextMsg>(handler_id: retain_message_mapper(handler))
+
+  /// Creates a host/runtime command envelope for a registered VX command executor.
+  api fn runtime({ kind: String, value?: MsgPack }) -> Cmd<Msg>
+    let ~out = command_map(kind)
+    if value is Some:
+      out.set("value", value.value)
+    Cmd<Msg> { payload: msgpack::make_map(out) }
+
+  api fn runtime({ kind: StringSlice, value?: MsgPack }) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: kind.to_string(), value: value)
+
+  /// Creates a task command envelope for a retained result mapper.
+  api fn perform({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
+    let ~out = command_map("task")
+    out.set("taskId", msgpack::make_i32(task_id))
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    Cmd<Msg> { payload: msgpack::make_map(out) }
+
+  /// Creates a task command envelope for a retained Voyd result mapper.
+  api fn perform({ task_id: i32, handler: fn(MsgPack) -> MsgPack }) -> Cmd<Msg>
+    Cmd<Msg>::perform(task_id: task_id, handler_id: retain_message_mapper(handler))
+
+  /// Creates a task command envelope from a Voyd task and retained result mapper.
+  api fn perform<T>({ task: Task<T>, handler_id: i32 }) -> Cmd<Msg>
+    let ~out = command_map("task")
+    out.set("taskId", msgpack::make_i32(task.id))
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    Cmd<Msg> { payload: msgpack::make_map(out) }
+
+  /// Creates a task command envelope from a Voyd task and retained result mapper.
+  api fn perform<T>({ task: Task<T>, handler: fn(MsgPack) -> MsgPack }) -> Cmd<Msg>
+    Cmd<Msg>::perform<T>(task: task, handler_id: retain_message_mapper(handler))
+
+  /// Creates a timer command that dispatches `value` after the delay.
+  api fn delay({ millis: i64, value: MsgPack }) -> Cmd<Msg>
+    let ~out = command_map("delay")
+    out.set("ms", msgpack::make_i64(millis))
+    out.set("value", value)
+    Cmd<Msg> { payload: msgpack::make_map(out) }
+
+  /// Creates a DOM focus command for a constrained VX ref.
+  api fn focus<T>(target: Ref<T>) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "focus", value: msgpack::make_string(target.id))
+
+  /// Creates a scroll-into-view command for a constrained VX ref.
+  api fn scroll_into_view<T>(target: Ref<T>) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "scroll_into_view", value: msgpack::make_string(target.id))
+
+impl<Msg> Sub<Msg>
+  /// Creates an empty subscription set.
+  api fn none() -> Sub<Msg>
+    Sub<Msg> { payload: subscription_payload("none") }
+
+  /// Creates a subscription batch from existing subscription values.
+  api fn batch(values: Array<Sub<Msg>>) -> Sub<Msg>
+    let ~children = Array<MsgPack>::with_capacity(values.len())
+    var index = 0
+    while index < values.len():
+      match(values.get(index))
+        Some<Sub<Msg>> { value }:
+          children.push(value.payload)
+        None:
+          void
+      index = index + 1
+
+    let ~out = subscription_map("batch")
+    out.set("children", children)
+    Sub<Msg> { payload: msgpack::make_map(out) }
+
+  /// Lifts a child subscription through a retained message mapper.
+  api fn map<NextMsg>(self, { handler_id: i32 }) -> Sub<NextMsg>
+    let ~out = subscription_map("map")
+    out.set("child", self.payload)
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    Sub<NextMsg> { payload: msgpack::make_map(out) }
+
+  /// Lifts a child subscription through a retained Voyd message mapper.
+  api fn map<NextMsg>(self, handler: fn(MsgPack) -> MsgPack) -> Sub<NextMsg>
+    self.map<NextMsg>(handler_id: retain_message_mapper(handler))
+
+  /// Creates a host/runtime subscription envelope for a registered VX subscription runner.
+  api fn runtime({ kind: String, key: String, value?: MsgPack }) -> Sub<Msg>
+    let ~out = subscription_map(kind)
+    out.set("key", key)
+    if value is Some:
+      out.set("value", value.value)
+    Sub<Msg> { payload: msgpack::make_map(out) }
+
+  api fn runtime({ kind: StringSlice, key: StringSlice, value?: MsgPack }) -> Sub<Msg>
+    Sub<Msg>::runtime(kind: kind.to_string(), key: key.to_string(), value: value)
+
+  /// Creates an interval subscription envelope for a host runtime interval runner.
+  api fn every({ key: String, millis: i64, value: MsgPack }) -> Sub<Msg>
+    let ~out = subscription_map("interval")
+    out.set("key", key)
+    out.set("ms", msgpack::make_i64(millis))
+    out.set("value", value)
+    Sub<Msg> { payload: msgpack::make_map(out) }
+
+  api fn every({ key: StringSlice, millis: i64, value: MsgPack }) -> Sub<Msg>
+    Sub<Msg>::every(key: key.to_string(), millis: millis, value: value)
+
+/// Subscribes to global keydown events through the browser VX runtime host.
+pub fn keyboard_on_key_down<Msg>({ key: String, value: MsgPack }) -> Sub<Msg>
+  keyboard_subscription(kind: "keydown", key: key, value: value)
+
+pub fn keyboard_on_key_down<Msg>({ key: StringSlice, value: MsgPack }) -> Sub<Msg>
+  keyboard_on_key_down<Msg>(key: key.to_string(), value: value)
+
+/// Subscribes to global keyup events through the browser VX runtime host.
+pub fn keyboard_on_key_up<Msg>({ key: String, value: MsgPack }) -> Sub<Msg>
+  keyboard_subscription(kind: "keyup", key: key, value: value)
+
+pub fn keyboard_on_key_up<Msg>({ key: StringSlice, value: MsgPack }) -> Sub<Msg>
+  keyboard_on_key_up<Msg>(key: key.to_string(), value: value)
+
+/// Reads a component-local serialized state handle.
+pub fn state_handle({ id: i32, initial: MsgPack }): Component -> StateHandle<MsgPack>
+  StateHandle<MsgPack> {
+    id: id,
+    value: Component::state_get(id, initial)
+  }
+
+/// Reads component-local serialized state as a `(value, handle)` pair.
+pub fn state({ id: i32, initial: MsgPack }): Component -> (MsgPack, StateHandle<MsgPack>)
+  let handle = state_handle(id: id, initial: initial)
+  (handle.value, handle)
+
+/// Registers a task with the current component instance.
+pub fn task<T>({ key: MsgPack, task: Task<T> }): Component -> Unit
+  Component::task_started(key, task.id)
+  Unit {}
+
+/// Retains a pure Voyd event callback in the host and returns its DOM handler id.
+pub fn retain_event_handler(handler: fn() -> MsgPack): () -> i32
+  retain_event_handler_id(handler)
+
+/// Retains a pure Voyd event callback that receives the normalized event payload.
+pub fn retain_event_payload_handler(handler: fn(MsgPack) -> MsgPack): () -> i32
+  retain_event_handler_with_payload_id(handler)
+
+/// Retains a pure Voyd message mapper for commands, subscriptions, or events.
+pub fn retain_message_mapper(handler: fn(MsgPack) -> MsgPack): () -> i32
+  retain_event_handler_with_payload_id(handler)
+
+/// Creates a versioned VX render frame.
+pub fn frame(root: MsgPack): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("version", msgpack::make_i32(1))
+  out.set("root", root)
+  msgpack::make_map(out)
+
+/// Creates a VX text node.
+pub fn text(value: String): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "text")
+  out.set("value", value)
+  msgpack::make_map(out)
+
+/// Creates a VX text node from a string slice.
+pub fn text(value: StringSlice): () -> MsgPack
+  text(value.to_string())
+
+/// Creates a VX fragment node.
+pub fn fragment(children: Array<MsgPack>): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "fragment")
+  out.set("children", children)
+  msgpack::make_map(out)
+
+/// Creates a VX element node using the versioned renderer schema.
+pub fn element({
+  tag: String,
+  attrs?: Array<MsgPack>,
+  children: Array<MsgPack>
+}) -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "element")
+  out.set("tag", tag)
+  out.set("children", children)
+  if attrs is Some:
+    let normalized = normalize_attrs(attrs.value)
+    if normalized.attrs.len() > 0:
+      out.set("attrs", msgpack::make_map(normalized.attrs))
+    if normalized.props.len() > 0:
+      out.set("props", msgpack::make_map(normalized.props))
+    if normalized.styles.len() > 0:
+      out.set("styles", msgpack::make_map(normalized.styles))
+    if normalized.events.len() > 0:
+      out.set("events", normalized.events)
+  msgpack::make_map(out)
+
+/// Creates a string-valued DOM attribute.
+pub fn attr({ name: String, value: String }): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "attr")
+  out.set("name", name)
+  out.set("value", value)
+  msgpack::make_map(out)
+
+pub fn attr({ name: String, value: bool }): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "attr")
+  out.set("name", name)
+  out.set("value", msgpack::make_bool(value))
+  msgpack::make_map(out)
+
+pub fn attr({ name: String, value: i32 }): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "attr")
+  out.set("name", name)
+  out.set("value", msgpack::make_i32(value))
+  msgpack::make_map(out)
+
+pub fn attr({ name: StringSlice, value: String }): () -> MsgPack
+  attr(name: name.to_string(), value: value)
+
+pub fn attr({ name: StringSlice, value: bool }): () -> MsgPack
+  attr(name: name.to_string(), value: value)
+
+pub fn attr({ name: StringSlice, value: i32 }): () -> MsgPack
+  attr(name: name.to_string(), value: value)
+
+pub fn attr({ name: String, value: StringSlice }): () -> MsgPack
+  attr(name: name, value: value.to_string())
+
+pub fn attr({ name: StringSlice, value: StringSlice }): () -> MsgPack
+  attr(name: name.to_string(), value: value.to_string())
+
+pub fn id(value: String): () -> MsgPack
+  attr(name: "id", value: value)
+
+pub fn id(value: StringSlice): () -> MsgPack
+  id(value.to_string())
+
+pub fn class(value: String): () -> MsgPack
+  attr(name: "class", value: value)
+
+pub fn class(value: StringSlice): () -> MsgPack
+  class(value.to_string())
+
+pub fn classes(values: Array<String>): () -> MsgPack
+  class(join_classes(values))
+
+pub fn role(value: String): () -> MsgPack
+  attr(name: "role", value: value)
+
+pub fn role(value: StringSlice): () -> MsgPack
+  role(value.to_string())
+
+pub fn name(value: String): () -> MsgPack
+  attr(name: "name", value: value)
+
+pub fn name(value: StringSlice): () -> MsgPack
+  name(value.to_string())
+
+pub fn placeholder(value: String): () -> MsgPack
+  attr(name: "placeholder", value: value)
+
+pub fn placeholder(value: StringSlice): () -> MsgPack
+  placeholder(value.to_string())
+
+pub fn input_type(value: String): () -> MsgPack
+  attr(name: "type", value: value)
+
+pub fn input_type(value: StringSlice): () -> MsgPack
+  input_type(value.to_string())
+
+pub fn tab_index(value: i32): () -> MsgPack
+  attr(name: "tabindex", value: value)
+
+pub fn ref<T>(target: Ref<T>): () -> MsgPack
+  attr(name: "data-vx-ref", value: target.id)
+
+pub fn value(value: String): () -> MsgPack
+  prop(name: "value", value: value)
+
+pub fn value(value: StringSlice): () -> MsgPack
+  prop(name: "value", value: value.to_string())
+
+pub fn disabled(value: bool): () -> MsgPack
+  prop(name: "disabled", value: value)
+
+pub fn checked(value: bool): () -> MsgPack
+  prop(name: "checked", value: value)
+
+pub fn prop({ name: String, value: MsgPack }): () -> MsgPack
+  named_value("prop", name, value)
+
+pub fn prop({ name: String, value: String }): () -> MsgPack
+  prop(name: name, value: msgpack::make_string(value))
+
+pub fn prop({ name: StringSlice, value: StringSlice }): () -> MsgPack
+  prop(name: name.to_string(), value: value.to_string())
+
+pub fn prop({ name: String, value: bool }): () -> MsgPack
+  prop(name: name, value: msgpack::make_bool(value))
+
+pub fn prop({ name: StringSlice, value: bool }): () -> MsgPack
+  prop(name: name.to_string(), value: value)
+
+pub fn prop({ name: String, value: i32 }): () -> MsgPack
+  prop(name: name, value: msgpack::make_i32(value))
+
+pub fn prop({ name: StringSlice, value: i32 }): () -> MsgPack
+  prop(name: name.to_string(), value: value)
+
+pub fn style({ name: String, value: String }): () -> MsgPack
+  named_value("style", name, value)
+
+pub fn style({ name: StringSlice, value: StringSlice }): () -> MsgPack
+  style(name: name.to_string(), value: value.to_string())
+
+pub fn styles(values: Array<(String, String)>): () -> Array<MsgPack>
+  let ~out = Array<MsgPack>::with_capacity(values.len())
+  var index = 0
+  while index < values.len():
+    match(values.get(index))
+      Some<(String, String)> { value }:
+        out.push(style(name: value.0, value: value.1))
+      None:
+        void
+    index = index + 1
+  out
+
+pub fn keyed({ key: String, child: MsgPack }): () -> MsgPack
+  match(msgpack::unpack_map(child))
+    Ok<Dict<String, MsgPack>> { value }:
+      let ~next = value
+      next.set("key", key)
+      msgpack::make_map(next)
+    Err:
+      child
+
+pub fn keyed({ key: StringSlice, child: MsgPack }): () -> MsgPack
+  keyed(key: key.to_string(), child: child)
+
+/// Lifts child HTML through a retained message mapper.
+pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler_id: i32 }) -> Html<ParentMsg>
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "map")
+  out.set("child", html)
+  out.set("handlerId", msgpack::make_i32(handler_id))
+  msgpack::make_map(out)
+
+/// Creates an event descriptor from a host-retained handler id.
+///
+/// This is the low-level interop API for callers that need to manage retained
+/// handlers explicitly. Higher-level helpers such as `on_click` forward to the
+/// closure-backed shape or the static-message shape below.
+pub fn event({ name: String, handler_id: i32, options?: EventOptions }): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "event")
+  out.set("event", name)
+  out.set("handlerId", msgpack::make_i32(handler_id))
+  if options is Some:
+    out.set("options", msgpack::make_map(event_options_to_map(options.value)))
+  msgpack::make_map(out)
+
+pub fn event({ name: String, handler: fn() -> MsgPack, options?: EventOptions }): () -> MsgPack
+  event(name: name, handler_id: retain_event_handler(handler), options: options)
+
+pub fn event({ name: StringSlice, handler: fn() -> MsgPack, options?: EventOptions }): () -> MsgPack
+  event(name: name.to_string(), handler: handler, options: options)
+
+pub fn event_payload({ name: String, handler: fn(MsgPack) -> MsgPack, options?: EventOptions }): () -> MsgPack
+  event(name: name, handler_id: retain_event_payload_handler(handler), options: options)
+
+pub fn event_payload({ name: StringSlice, handler: fn(MsgPack) -> MsgPack, options?: EventOptions }): () -> MsgPack
+  event_payload(name: name.to_string(), handler: handler, options: options)
+
+/// Creates an event descriptor that dispatches a serialized runtime message.
+pub fn event({ name: String, message: MsgPack, options?: EventOptions }): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "event")
+  out.set("event", name)
+  out.set("message", message)
+  if options is Some:
+    out.set("options", msgpack::make_map(event_options_to_map(options.value)))
+  msgpack::make_map(out)
+
+pub fn event({ name: StringSlice, message: MsgPack, options?: EventOptions }): () -> MsgPack
+  event(name: name.to_string(), message: message, options: options)
+
+pub fn on_click(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "click", handler: handler)
+
+pub fn on_click_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "click", handler: handler)
+
+pub fn on_click_id(handler_id: i32): () -> MsgPack
+  event(name: "click", handler_id: handler_id)
+
+pub fn on_click_message(message: MsgPack): () -> MsgPack
+  event(name: "click", message: message)
+
+pub fn on_click_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "click", handler_id: handler_id, options: options)
+
+pub fn on_click_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "click", message: message, options: options)
+
+pub fn on_click_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "click", handler: handler, options: options)
+
+pub fn on_click_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "click", handler: handler, options: options)
+
+pub fn on_double_click(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "dblclick", handler: handler)
+
+pub fn on_double_click_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "dblclick", handler: handler)
+
+pub fn on_double_click(handler_id: i32): () -> MsgPack
+  event(name: "dblclick", handler_id: handler_id)
+
+pub fn on_double_click_message(message: MsgPack): () -> MsgPack
+  event(name: "dblclick", message: message)
+
+pub fn on_double_click_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "dblclick", handler_id: handler_id, options: options)
+
+pub fn on_double_click_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "dblclick", handler: handler, options: options)
+
+pub fn on_double_click_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "dblclick", message: message, options: options)
+
+pub fn on_double_click_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "dblclick", handler: handler, options: options)
+
+pub fn on_mouse_down(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "mousedown", handler: handler)
+
+pub fn on_mouse_down_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "mousedown", handler: handler)
+
+pub fn on_mouse_down(handler_id: i32): () -> MsgPack
+  event(name: "mousedown", handler_id: handler_id)
+
+pub fn on_mouse_down_message(message: MsgPack): () -> MsgPack
+  event(name: "mousedown", message: message)
+
+pub fn on_mouse_down_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "mousedown", handler_id: handler_id, options: options)
+
+pub fn on_mouse_down_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "mousedown", handler: handler, options: options)
+
+pub fn on_mouse_down_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "mousedown", message: message, options: options)
+
+pub fn on_mouse_down_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "mousedown", handler: handler, options: options)
+
+pub fn on_mouse_up(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "mouseup", handler: handler)
+
+pub fn on_mouse_up_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "mouseup", handler: handler)
+
+pub fn on_mouse_up(handler_id: i32): () -> MsgPack
+  event(name: "mouseup", handler_id: handler_id)
+
+pub fn on_mouse_up_message(message: MsgPack): () -> MsgPack
+  event(name: "mouseup", message: message)
+
+pub fn on_mouse_up_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "mouseup", handler_id: handler_id, options: options)
+
+pub fn on_mouse_up_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "mouseup", handler: handler, options: options)
+
+pub fn on_mouse_up_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "mouseup", message: message, options: options)
+
+pub fn on_mouse_up_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "mouseup", handler: handler, options: options)
+
+pub fn on_mouse_move(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "mousemove", handler: handler)
+
+pub fn on_mouse_move_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "mousemove", handler: handler)
+
+pub fn on_mouse_move(handler_id: i32): () -> MsgPack
+  event(name: "mousemove", handler_id: handler_id)
+
+pub fn on_mouse_move_message(message: MsgPack): () -> MsgPack
+  event(name: "mousemove", message: message)
+
+pub fn on_mouse_move_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "mousemove", handler_id: handler_id, options: options)
+
+pub fn on_mouse_move_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "mousemove", handler: handler, options: options)
+
+pub fn on_mouse_move_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "mousemove", message: message, options: options)
+
+pub fn on_mouse_move_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "mousemove", handler: handler, options: options)
+
+pub fn on_mouse_enter(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "mouseenter", handler: handler)
+
+pub fn on_mouse_enter_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "mouseenter", handler: handler)
+
+pub fn on_mouse_enter(handler_id: i32): () -> MsgPack
+  event(name: "mouseenter", handler_id: handler_id)
+
+pub fn on_mouse_enter_message(message: MsgPack): () -> MsgPack
+  event(name: "mouseenter", message: message)
+
+pub fn on_mouse_enter_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "mouseenter", handler_id: handler_id, options: options)
+
+pub fn on_mouse_enter_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "mouseenter", handler: handler, options: options)
+
+pub fn on_mouse_enter_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "mouseenter", message: message, options: options)
+
+pub fn on_mouse_enter_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "mouseenter", handler: handler, options: options)
+
+pub fn on_mouse_leave(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "mouseleave", handler: handler)
+
+pub fn on_mouse_leave_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "mouseleave", handler: handler)
+
+pub fn on_mouse_leave(handler_id: i32): () -> MsgPack
+  event(name: "mouseleave", handler_id: handler_id)
+
+pub fn on_mouse_leave_message(message: MsgPack): () -> MsgPack
+  event(name: "mouseleave", message: message)
+
+pub fn on_mouse_leave_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "mouseleave", handler_id: handler_id, options: options)
+
+pub fn on_mouse_leave_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "mouseleave", handler: handler, options: options)
+
+pub fn on_mouse_leave_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "mouseleave", message: message, options: options)
+
+pub fn on_mouse_leave_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "mouseleave", handler: handler, options: options)
+
+pub fn on_pointer_down(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "pointerdown", handler: handler)
+
+pub fn on_pointer_down_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "pointerdown", handler: handler)
+
+pub fn on_pointer_down(handler_id: i32): () -> MsgPack
+  event(name: "pointerdown", handler_id: handler_id)
+
+pub fn on_pointer_down_message(message: MsgPack): () -> MsgPack
+  event(name: "pointerdown", message: message)
+
+pub fn on_pointer_down_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "pointerdown", handler_id: handler_id, options: options)
+
+pub fn on_pointer_down_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "pointerdown", handler: handler, options: options)
+
+pub fn on_pointer_down_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "pointerdown", message: message, options: options)
+
+pub fn on_pointer_down_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "pointerdown", handler: handler, options: options)
+
+pub fn on_pointer_up(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "pointerup", handler: handler)
+
+pub fn on_pointer_up_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "pointerup", handler: handler)
+
+pub fn on_pointer_up(handler_id: i32): () -> MsgPack
+  event(name: "pointerup", handler_id: handler_id)
+
+pub fn on_pointer_up_message(message: MsgPack): () -> MsgPack
+  event(name: "pointerup", message: message)
+
+pub fn on_pointer_up_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "pointerup", handler_id: handler_id, options: options)
+
+pub fn on_pointer_up_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "pointerup", handler: handler, options: options)
+
+pub fn on_pointer_up_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "pointerup", message: message, options: options)
+
+pub fn on_pointer_up_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "pointerup", handler: handler, options: options)
+
+pub fn on_pointer_move(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "pointermove", handler: handler)
+
+pub fn on_pointer_move_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "pointermove", handler: handler)
+
+pub fn on_pointer_move(handler_id: i32): () -> MsgPack
+  event(name: "pointermove", handler_id: handler_id)
+
+pub fn on_pointer_move_message(message: MsgPack): () -> MsgPack
+  event(name: "pointermove", message: message)
+
+pub fn on_pointer_move_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "pointermove", handler_id: handler_id, options: options)
+
+pub fn on_pointer_move_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "pointermove", handler: handler, options: options)
+
+pub fn on_pointer_move_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "pointermove", message: message, options: options)
+
+pub fn on_pointer_move_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "pointermove", handler: handler, options: options)
+
+pub fn on_key_down(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "keydown", handler: handler)
+
+pub fn on_key_down_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "keydown", handler: handler)
+
+pub fn on_key_down(handler_id: i32): () -> MsgPack
+  event(name: "keydown", handler_id: handler_id)
+
+pub fn on_key_down(message: MsgPack): () -> MsgPack
+  event(name: "keydown", message: message)
+
+pub fn on_key_down_message(message: MsgPack): () -> MsgPack
+  event(name: "keydown", message: message)
+
+pub fn on_key_down_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "keydown", handler_id: handler_id, options: options)
+
+pub fn on_key_down_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "keydown", message: message, options: options)
+
+pub fn on_key_down_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "keydown", handler: handler, options: options)
+
+pub fn on_key_down_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "keydown", handler: handler, options: options)
+
+pub fn on_key_up(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "keyup", handler: handler)
+
+pub fn on_key_up_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "keyup", handler: handler)
+
+pub fn on_key_up(handler_id: i32): () -> MsgPack
+  event(name: "keyup", handler_id: handler_id)
+
+pub fn on_key_up(message: MsgPack): () -> MsgPack
+  event(name: "keyup", message: message)
+
+pub fn on_key_up_message(message: MsgPack): () -> MsgPack
+  event(name: "keyup", message: message)
+
+pub fn on_key_up_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "keyup", handler_id: handler_id, options: options)
+
+pub fn on_key_up_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "keyup", message: message, options: options)
+
+pub fn on_key_up_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "keyup", handler: handler, options: options)
+
+pub fn on_key_up_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "keyup", handler: handler, options: options)
+
+pub fn on_input(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "input", handler: handler)
+
+pub fn on_input_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "input", handler: handler)
+
+pub fn on_input(handler_id: i32): () -> MsgPack
+  event(name: "input", handler_id: handler_id)
+
+pub fn on_input(message: MsgPack): () -> MsgPack
+  event(name: "input", message: message)
+
+pub fn on_input_message(message: MsgPack): () -> MsgPack
+  event(name: "input", message: message)
+
+pub fn on_input_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "input", handler_id: handler_id, options: options)
+
+pub fn on_input_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "input", message: message, options: options)
+
+pub fn on_input_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "input", handler: handler, options: options)
+
+pub fn on_input_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "input", handler: handler, options: options)
+
+pub fn on_change(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "change", handler: handler)
+
+pub fn on_change_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "change", handler: handler)
+
+pub fn on_change(handler_id: i32): () -> MsgPack
+  event(name: "change", handler_id: handler_id)
+
+pub fn on_change(message: MsgPack): () -> MsgPack
+  event(name: "change", message: message)
+
+pub fn on_change_message(message: MsgPack): () -> MsgPack
+  event(name: "change", message: message)
+
+pub fn on_change_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "change", handler_id: handler_id, options: options)
+
+pub fn on_change_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "change", message: message, options: options)
+
+pub fn on_change_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "change", handler: handler, options: options)
+
+pub fn on_change_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "change", handler: handler, options: options)
+
+pub fn on_submit(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "submit", handler: handler)
+
+pub fn on_submit_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "submit", handler: handler)
+
+pub fn on_submit(handler_id: i32): () -> MsgPack
+  event(name: "submit", handler_id: handler_id)
+
+pub fn on_submit(message: MsgPack): () -> MsgPack
+  event(name: "submit", message: message)
+
+pub fn on_submit_message(message: MsgPack): () -> MsgPack
+  event(name: "submit", message: message)
+
+pub fn on_submit_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "submit", handler_id: handler_id, options: options)
+
+pub fn on_submit_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "submit", message: message, options: options)
+
+pub fn on_submit_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "submit", handler: handler, options: options)
+
+pub fn on_submit_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "submit", handler: handler, options: options)
+
+pub fn on_focus(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "focus", handler: handler)
+
+pub fn on_focus_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "focus", handler: handler)
+
+pub fn on_focus(handler_id: i32): () -> MsgPack
+  event(name: "focus", handler_id: handler_id)
+
+pub fn on_focus_message(message: MsgPack): () -> MsgPack
+  event(name: "focus", message: message)
+
+pub fn on_focus_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "focus", handler_id: handler_id, options: options)
+
+pub fn on_focus_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "focus", handler: handler, options: options)
+
+pub fn on_focus_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "focus", message: message, options: options)
+
+pub fn on_focus_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "focus", handler: handler, options: options)
+
+pub fn on_blur(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "blur", handler: handler)
+
+pub fn on_blur_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "blur", handler: handler)
+
+pub fn on_blur(handler_id: i32): () -> MsgPack
+  event(name: "blur", handler_id: handler_id)
+
+pub fn on_blur_message(message: MsgPack): () -> MsgPack
+  event(name: "blur", message: message)
+
+pub fn on_blur_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "blur", handler_id: handler_id, options: options)
+
+pub fn on_blur_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "blur", handler: handler, options: options)
+
+pub fn on_blur_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "blur", message: message, options: options)
+
+pub fn on_blur_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "blur", handler: handler, options: options)
+
+pub fn on_scroll(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "scroll", handler: handler)
+
+pub fn on_scroll_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "scroll", handler: handler)
+
+pub fn on_scroll(handler_id: i32): () -> MsgPack
+  event(name: "scroll", handler_id: handler_id)
+
+pub fn on_scroll_message(message: MsgPack): () -> MsgPack
+  event(name: "scroll", message: message)
+
+pub fn on_scroll_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "scroll", handler_id: handler_id, options: options)
+
+pub fn on_scroll_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "scroll", handler: handler, options: options)
+
+pub fn on_scroll_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "scroll", message: message, options: options)
+
+pub fn on_scroll_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "scroll", handler: handler, options: options)
+
+pub fn on_wheel(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "wheel", handler: handler)
+
+pub fn on_wheel_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "wheel", handler: handler)
+
+pub fn on_wheel(handler_id: i32): () -> MsgPack
+  event(name: "wheel", handler_id: handler_id)
+
+pub fn on_wheel_message(message: MsgPack): () -> MsgPack
+  event(name: "wheel", message: message)
+
+pub fn on_wheel_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "wheel", handler_id: handler_id, options: options)
+
+pub fn on_wheel_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "wheel", handler: handler, options: options)
+
+pub fn on_wheel_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "wheel", message: message, options: options)
+
+pub fn on_wheel_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "wheel", handler: handler, options: options)
+
+pub fn on_drag_start(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "dragstart", handler: handler)
+
+pub fn on_drag_start_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "dragstart", handler: handler)
+
+pub fn on_drag_start(handler_id: i32): () -> MsgPack
+  event(name: "dragstart", handler_id: handler_id)
+
+pub fn on_drag_start_message(message: MsgPack): () -> MsgPack
+  event(name: "dragstart", message: message)
+
+pub fn on_drag_start_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "dragstart", handler_id: handler_id, options: options)
+
+pub fn on_drag_start_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "dragstart", handler: handler, options: options)
+
+pub fn on_drag_start_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "dragstart", message: message, options: options)
+
+pub fn on_drag_start_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "dragstart", handler: handler, options: options)
+
+pub fn on_drag(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "drag", handler: handler)
+
+pub fn on_drag_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "drag", handler: handler)
+
+pub fn on_drag(handler_id: i32): () -> MsgPack
+  event(name: "drag", handler_id: handler_id)
+
+pub fn on_drag_message(message: MsgPack): () -> MsgPack
+  event(name: "drag", message: message)
+
+pub fn on_drag_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "drag", handler_id: handler_id, options: options)
+
+pub fn on_drag_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "drag", handler: handler, options: options)
+
+pub fn on_drag_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "drag", message: message, options: options)
+
+pub fn on_drag_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "drag", handler: handler, options: options)
+
+pub fn on_drag_end(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "dragend", handler: handler)
+
+pub fn on_drag_end_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "dragend", handler: handler)
+
+pub fn on_drag_end(handler_id: i32): () -> MsgPack
+  event(name: "dragend", handler_id: handler_id)
+
+pub fn on_drag_end_message(message: MsgPack): () -> MsgPack
+  event(name: "dragend", message: message)
+
+pub fn on_drag_end_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "dragend", handler_id: handler_id, options: options)
+
+pub fn on_drag_end_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "dragend", handler: handler, options: options)
+
+pub fn on_drag_end_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "dragend", message: message, options: options)
+
+pub fn on_drag_end_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "dragend", handler: handler, options: options)
+
+pub fn on_drop(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "drop", handler: handler)
+
+pub fn on_drop_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "drop", handler: handler)
+
+pub fn on_drop(handler_id: i32): () -> MsgPack
+  event(name: "drop", handler_id: handler_id)
+
+pub fn on_drop_message(message: MsgPack): () -> MsgPack
+  event(name: "drop", message: message)
+
+pub fn on_drop_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "drop", handler_id: handler_id, options: options)
+
+pub fn on_drop_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "drop", handler: handler, options: options)
+
+pub fn on_drop_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "drop", message: message, options: options)
+
+pub fn on_drop_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "drop", handler: handler, options: options)
+
+pub fn on_context_menu(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "contextmenu", handler: handler)
+
+pub fn on_context_menu_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "contextmenu", handler: handler)
+
+pub fn on_context_menu(handler_id: i32): () -> MsgPack
+  event(name: "contextmenu", handler_id: handler_id)
+
+pub fn on_context_menu_message(message: MsgPack): () -> MsgPack
+  event(name: "contextmenu", message: message)
+
+pub fn on_context_menu_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "contextmenu", handler_id: handler_id, options: options)
+
+pub fn on_context_menu_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "contextmenu", handler: handler, options: options)
+
+pub fn on_context_menu_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "contextmenu", message: message, options: options)
+
+pub fn on_context_menu_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "contextmenu", handler: handler, options: options)
+
+pub fn program<Model, Msg>({
+  init: MsgPack,
+  update: MsgPack,
+  view: MsgPack,
+  subscriptions?: MsgPack,
+  decode_msg?: MsgPack,
+  encode_msg?: MsgPack
+}) -> Program<Model, Msg>
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "program")
+  out.set("init", init)
+  out.set("update", update)
+  out.set("view", view)
+  if subscriptions is Some:
+    out.set("subscriptions", subscriptions.value)
+  if decode_msg is Some:
+    out.set("decode_msg", decode_msg.value)
+  if encode_msg is Some:
+    out.set("encode_msg", encode_msg.value)
+  msgpack::make_map(out)
 
 /// Creates a virtual DOM element payload for renderer consumption.
 ///
@@ -28,6 +1162,141 @@ pub fn create_element({
     let attrs = attributes_to_map(attributes.value)
     element.set("attributes", msgpack::make_map(attrs))
   msgpack::make_map(element)
+
+obj NormalizedAttrs {
+  attrs: Dict<String, MsgPack>,
+  props: Dict<String, MsgPack>,
+  styles: Dict<String, MsgPack>,
+  events: Array<MsgPack>
+}
+
+fn normalize_attrs(attributes: Array<MsgPack>): () -> NormalizedAttrs
+  let ~attrs = Dict<String, MsgPack>::init()
+  let ~props = Dict<String, MsgPack>::init()
+  let ~styles = Dict<String, MsgPack>::init()
+  let ~events = Array<MsgPack>::init()
+  var index = 0
+  while index < attributes.len():
+    match(attributes.get(index))
+      Some<MsgPack> { value }:
+        match(msgpack::unpack_map(value))
+          Ok<Dict<String, MsgPack>> { value: entry }:
+            consume_attr_entry(entry, attrs, props, styles, events)
+          Err:
+            void
+      None:
+        void
+    index = index + 1
+  NormalizedAttrs { attrs: attrs, props: props, styles: styles, events: events }
+
+fn consume_attr_entry(
+  entry: Dict<String, MsgPack>,
+  ~attrs: Dict<String, MsgPack>,
+  ~props: Dict<String, MsgPack>,
+  ~styles: Dict<String, MsgPack>,
+  ~events: Array<MsgPack>
+) -> void
+  match(entry.get("kind"))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_string(value))
+        Ok<String> { value: kind }:
+          if kind == "event":
+            events.push(msgpack::make_map(entry))
+          else:
+            if kind == "style":
+              consume_named_attr(entry, styles)
+            else:
+              if kind == "prop":
+                consume_named_attr(entry, props)
+              else:
+                consume_named_attr(entry, attrs)
+        Err:
+          void
+    None:
+      void
+
+fn consume_named_attr(entry: Dict<String, MsgPack>, ~attrs: Dict<String, MsgPack>) -> void
+  match(entry.get("name"))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_string(value))
+        Ok<String> { value: name }:
+          match(entry.get("value"))
+            Some<MsgPack> { value: attr_value }:
+              attrs.set(name, attr_value)
+            None:
+              void
+        Err:
+          void
+    None:
+      void
+
+fn bool_attr({ name: String, value: bool }): () -> MsgPack
+  named_value("attr", name, msgpack::make_bool(value))
+
+fn named_value(kind: String, name: String, value: MsgPack): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", kind)
+  out.set("name", name)
+  out.set("value", value)
+  msgpack::make_map(out)
+
+fn named_value(kind: String, name: String, value: String): () -> MsgPack
+  named_value(kind, name, msgpack::make_string(value))
+
+fn join_classes(values: Array<String>): () -> String
+  var out = String::init()
+  var index = 0
+  while index < values.len():
+    match(values.get(index))
+      Some<String> { value }:
+        if out.byte_len() == 0:
+          out = value
+        else:
+          out = out.concat(" ").concat(value)
+      None:
+        void
+    index = index + 1
+  out
+
+fn event_options_to_map(options: EventOptions): () -> Dict<String, MsgPack>
+  let ~out = Dict<String, MsgPack>::init()
+  set_bool_option(out, "preventDefault", options.prevent_default)
+  set_bool_option(out, "stopPropagation", options.stop_propagation)
+  set_bool_option(out, "capture", options.capture)
+  set_bool_option(out, "passive", options.passive)
+  out
+
+fn set_bool_option(~out: Dict<String, MsgPack>, name: String, value: Optional<bool>) -> void
+  match(value)
+    Some<bool> { value }:
+      out.set(name, msgpack::make_bool(value))
+    None:
+      void
+
+fn command_payload(kind: String): () -> MsgPack
+  msgpack::make_map(command_map(kind))
+
+fn command_map(kind: String): () -> Dict<String, MsgPack>
+  tagged_vx_runtime_map("cmd", kind)
+
+fn subscription_payload(kind: String): () -> MsgPack
+  msgpack::make_map(subscription_map(kind))
+
+fn subscription_map(kind: String): () -> Dict<String, MsgPack>
+  tagged_vx_runtime_map("sub", kind)
+
+fn keyboard_subscription<Msg>({ kind: String, key: String, value: MsgPack }) -> Sub<Msg>
+  let ~out = subscription_map("keyboard")
+  out.set("key", key)
+  out.set("event", kind)
+  out.set("value", value)
+  Sub<Msg> { payload: msgpack::make_map(out) }
+
+fn tagged_vx_runtime_map(type_name: String, kind: String): () -> Dict<String, MsgPack>
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("type", type_name)
+  out.set("kind", kind)
+  out
 
 fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Dict<String, MsgPack>
   let ~acc = Dict<String, MsgPack>::init()

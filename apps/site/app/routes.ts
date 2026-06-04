@@ -3,4 +3,5 @@ export default [
   index("routes/home.tsx"),
   route("docs", "routes/docs.tsx"),
   route("playground", "routes/playground.tsx"),
+  route("wiki", "routes/wiki.tsx"),
 ] satisfies RouteConfig;
