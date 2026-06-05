@@ -26,7 +26,6 @@ enum WikiMsg
   Saved
   Cancel
   TogglePanel
-  RefreshComponentState
 
 type TextInputEvent = {
   kind: String,
@@ -150,9 +149,6 @@ pub fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         panel: toggled_panel(model.panel),
         status: "Panel toggled"
       })
-    WikiMsg::RefreshComponentState:
-      next(model)
-
 pub fn subscriptions(model: WikiModel) -> Sub<WikiMsg>
   keyboard_on_key_down<WikiMsg>(key: "Escape", value: WikiMsg::Cancel {})
 
@@ -172,17 +168,13 @@ pub fn component_state_update(model: MsgPack, message: MsgPack) -> MsgPack
   model
 
 pub fn component_state_view(): Component -> MsgPack
-  let (component_panel, panel_handle) = state(id: 1, initial: "open")
-  var visible_panel = component_panel
-  if component_panel == "open":
-    panel_handle.set("remembered")
-    visible_panel = "remembered"
+  let (local_clicks, click_state) = state(id: 1, initial: 0)
 
   <section class="wiki-demo-inspector wiki-demo-component-state">
     <h3>Component state</h3>
-    <p>{visible_panel}</p>
-    <button type="button" on_click={WikiMsg::RefreshComponentState {}}>
-      Refresh
+    <p>Local clicks: {local_count_label(local_clicks)}</p>
+    <button type="button" on_click={() => click_state.set(local_clicks + 1)}>
+      Local click
     </button>
   </section>
 
@@ -340,6 +332,14 @@ fn draft_page_title(model: WikiModel) -> String
     "Untitled page"
   else:
     model.title
+
+fn local_count_label(value: i32) -> String
+  if
+    value == 0: "0"
+    value == 1: "1"
+    value == 2: "2"
+    value == 3: "3"
+    else: "many"
 
 fn page_title(selected: String) -> String
   if selected == "state":

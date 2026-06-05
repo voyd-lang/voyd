@@ -20,25 +20,23 @@ use std::string::type::String
 use std::vx::all
 
 obj Model {
-  count: i32,
-  label: String
+  local_clicks: i32
 }
 
 enum Msg
-  Increment
-  Reset
+  Noop
 
 pub fn init() -> Model
-  Model { count: 0, label: "Count" }
+  Model { local_clicks: 0 }
 
 pub fn update(model: Model, message: Msg) -> Model
   match(message)
-    Msg::Increment:
-      Model { count: model.count + 1, label: model.label }
-    Msg::Reset:
-      Model { count: 0, label: model.label }
+    Msg::Noop:
+      model
 
-pub fn view(model: Model) -> Html<Msg>
+pub fn view(): Component -> MsgPack
+  let (local_count, local_state) = state(id: 1, initial: 0)
+
   <main style="
     margin: 8px;
     padding: 16px;
@@ -55,59 +53,25 @@ pub fn view(model: Model) -> Html<Msg>
       background: rgba(148, 163, 184, 0.12);
     ">
       <p style="margin: 0 0 12px 0; color: #cbd5e1;">
-        App state keeps this counter alive between renders.
+        Component-local state updates from a retained event closure.
       </p>
-      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <button
-          type="button"
-          on_click={Msg::Increment {}}
-          style="
-            border: 0;
-            border-radius: 8px;
-            padding: 10px 14px;
-            background: #38bdf8;
-            color: #082f49;
-            font-weight: 700;
-            cursor: pointer;
-          "
-        >
-          {model.label}: {count_label(model.count)}
-        </button>
-        <button
-          type="button"
-          on_click={Msg::Reset {}}
-          style="
-            border: 1px solid rgba(226, 232, 240, 0.3);
-            border-radius: 8px;
-            padding: 10px 14px;
-            background: transparent;
-            color: #e2e8f0;
-            font-weight: 700;
-            cursor: pointer;
-          "
-        >
-          Reset
-        </button>
-      </div>
+      <button
+        type="button"
+        on_click={() => local_state.set(local_count + 1)}
+        style="
+          border: 1px solid rgba(125, 211, 252, 0.45);
+          border-radius: 8px;
+          padding: 10px 14px;
+          background: #0f172a;
+          color: #e0f2fe;
+          font-weight: 700;
+          cursor: pointer;
+        "
+      >
+        Local clicks: {count_label(local_count)}
+      </button>
     </section>
   </main>
-
-fn Counter({ label: String, value: i32 }) -> Html<Msg>
-    <button
-      type="button"
-      on_click={Msg::Increment {}}
-      style="
-        border: 0;
-        border-radius: 8px;
-        padding: 10px 14px;
-        background: #38bdf8;
-        color: #082f49;
-        font-weight: 700;
-        cursor: pointer;
-      "
-    >
-      {label}: {count_label(value)}
-    </button>
 
 fn count_label(value: i32) -> String
   if

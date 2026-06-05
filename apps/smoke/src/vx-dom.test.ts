@@ -365,12 +365,16 @@ pub fn view(model: Model) -> Html<Msg>
     });
 
     expect(container.querySelector(".wiki-demo-component-state")?.textContent).toContain(
-      "remembered",
+      "Local clicks: 0",
     );
     container.querySelector<HTMLButtonElement>(".wiki-demo-component-state button")?.click();
-    await nextTurn();
+    await waitForTextContaining(
+      container,
+      ".wiki-demo-component-state",
+      "Local clicks: 1",
+    );
     expect(container.querySelector(".wiki-demo-component-state")?.textContent).toContain(
-      "remembered",
+      "Local clicks: 1",
     );
 
     expect(container.querySelector(".wiki-demo-page-list .is-selected")?.textContent).toBe(
