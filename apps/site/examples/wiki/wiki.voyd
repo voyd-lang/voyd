@@ -168,12 +168,12 @@ pub fn component_state_update(model: MsgPack, message: MsgPack) -> MsgPack
   model
 
 pub fn component_state_view(): Component -> MsgPack
-  let (local_clicks, click_state) = state(id: 1, initial: 0)
+  let (local_clicks, set_local_clicks) = state(id: 1, initial: 0)
 
   <section class="wiki-demo-inspector wiki-demo-component-state">
     <h3>Component state</h3>
     <p>Local clicks: {local_count_label(local_clicks)}</p>
-    <button type="button" on_click={() => click_state.set(local_clicks + 1)}>
+    <button type="button" on_click={() => set_local_clicks(local_clicks + 1)}>
       Local click
     </button>
   </section>

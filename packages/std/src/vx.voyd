@@ -383,23 +383,24 @@ pub fn state_handle({ id: i32, initial: i32 }): Component -> StateHandle<i32>
     )
   }
 
-/// Reads component-local serialized state as a `(value, handle)` pair.
-pub fn state({ id: i32, initial: MsgPack }): Component -> (MsgPack, StateHandle<MsgPack>)
+/// Reads component-local serialized state as a `(value, setter)` pair.
+pub fn state({ id: i32, initial: MsgPack }): Component -> (MsgPack, fn(MsgPack) -> void)
   let handle = state_handle(id: id, initial: initial)
-  (handle.value, handle)
+  (handle.value, (value: MsgPack) -> void => handle.set_serialized(value))
 
-/// Reads component-local text state as a `(value, handle)` pair.
-pub fn state({ id: i32, initial: String }): Component -> (String, StateHandle<String>)
+/// Reads component-local text state as a `(value, setter)` pair.
+pub fn state({ id: i32, initial: String }): Component -> (String, fn(String) -> void)
   let handle = state_handle(id: id, initial: initial)
-  (handle.value, handle)
+  (handle.value, (value: String) -> void => handle.set(value))
 
-pub fn state({ id: i32, initial: StringSlice }): Component -> (String, StateHandle<String>)
-  state(id: id, initial: initial.to_string())
-
-/// Reads component-local integer state as a `(value, handle)` pair.
-pub fn state({ id: i32, initial: i32 }): Component -> (i32, StateHandle<i32>)
+pub fn state({ id: i32, initial: StringSlice }): Component -> (String, fn(String) -> void)
   let handle = state_handle(id: id, initial: initial)
-  (handle.value, handle)
+  (handle.value, (value: String) -> void => handle.set(value))
+
+/// Reads component-local integer state as a `(value, setter)` pair.
+pub fn state({ id: i32, initial: i32 }): Component -> (i32, fn(i32) -> void)
+  let handle = state_handle(id: id, initial: initial)
+  (handle.value, (value: i32) -> void => handle.set(value))
 
 fn component_string_state_value({ value: MsgPack, fallback: String }): () -> String
   match(msgpack::unpack_string(value))

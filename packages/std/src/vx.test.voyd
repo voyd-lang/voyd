@@ -467,6 +467,36 @@ test "vx component state and task APIs use component effect":
     assert_msgpack_string(value, "next")
     tail()
 
+  try open
+    let (value, set_value) = state(id: 4, initial: 1)
+    assert(value, eq: 7)
+    set_value(value + 1)
+  Component::state_get(tail, id, initial):
+    seen.push("state-get".to_string())
+    assert(id, eq: 4)
+    assert_msgpack_i32(initial, 1)
+    tail(msgpack::make_i32(7))
+  Component::state_set(tail, id, value):
+    seen.push("state-set".to_string())
+    assert(id, eq: 4)
+    assert_msgpack_i32(value, 8)
+    tail()
+
+  try open
+    let (text_value, set_text) = state(id: 5, initial: "initial")
+    assert(text_value.equals("current".to_string()), eq: true)
+    set_text(text_value)
+  Component::state_get(tail, id, initial):
+    seen.push("text-get".to_string())
+    assert(id, eq: 5)
+    assert_msgpack_string(initial, "initial")
+    tail(msgpack::make_string("current"))
+  Component::state_set(tail, id, value):
+    seen.push("text-set".to_string())
+    assert(id, eq: 5)
+    assert_msgpack_string(value, "current")
+    tail()
+
   let task_value = Task<MsgPack> { id: 11 }
   try open
     task<MsgPack>(key: msgpack::make_string("preview"), task: task_value)
@@ -476,7 +506,7 @@ test "vx component state and task APIs use component effect":
     assert(task_id, eq: 11)
     tail()
 
-  assert(seen.len(), eq: 3)
+  assert(seen.len(), eq: 7)
 
 test "vx program constructor encodes lifecycle handles":
   let step = program<TypedVxTestModel, TypedVxTestMsg>(
@@ -623,6 +653,13 @@ fn assert_msgpack_string(value: MsgPack, expected: StringSlice) -> void
 
 fn assert_msgpack_string(value: MsgPack, expected: String) -> void
   assert_msgpack_string(value, expected.as_slice())
+
+fn assert_msgpack_i32(value: MsgPack, expected: i32) -> void
+  match(msgpack::unpack_i32(value))
+    Ok<i32> { value: actual }:
+      assert(actual, eq: expected)
+    Err:
+      assert(false, eq: true)
 
 fn assert_i32_payload_field(payload: MsgPack, field: StringSlice, expected: i32) -> void
   match(msgpack::unpack_map(payload))

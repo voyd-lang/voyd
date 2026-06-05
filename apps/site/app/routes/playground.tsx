@@ -15,52 +15,33 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-const PLAYGROUND_STARTER = `use std::enums::{ enum }
-use std::string::type::String
-use std::vx::all
+const PLAYGROUND_STARTER = `use std::vx::all
 
-obj Model {
-  local_clicks: i32
-}
-
-enum Msg
-  Noop
-
-pub fn init() -> Model
-  Model { local_clicks: 0 }
-
-pub fn update(model: Model, message: Msg) -> Model
-  match(message)
-    Msg::Noop:
-      model
-
-pub fn view(): Component -> MsgPack
-  let (local_count, local_state) = state(id: 1, initial: 0)
+pub fn view()
+  let (local_count, set_local_count) = state(id: 1, initial: 0)
 
   <main style="
     margin: 8px;
     padding: 16px;
-    border-radius: 8px;
     background: #0b1020;
     color: #e2e8f0;
     border: 1px solid rgba(255, 255, 255, 0.1);
   ">
-    <h2 style="margin: 0 0 8px 0; font-size: 20px; color: #e2e8f0;">Voyd Playground</h2>
-    <p style="margin: 0 0 14px 0; color: #94a3b8;">Edit this file, then run it again.</p>
+    <h2>Voyd Playground</h2>
+    <p>Edit this file, then run it again.</p>
     <section style="
       padding: 14px;
       border-radius: 8px;
       background: rgba(148, 163, 184, 0.12);
     ">
-      <p style="margin: 0 0 12px 0; color: #cbd5e1;">
+      <p>
         Component-local state updates from a retained event closure.
       </p>
       <button
         type="button"
-        on_click={() => local_state.set(local_count + 1)}
+        on_click={() => set_local_count(local_count + 1)}
         style="
           border: 1px solid rgba(125, 211, 252, 0.45);
-          border-radius: 8px;
           padding: 10px 14px;
           background: #0f172a;
           color: #e0f2fe;
@@ -79,7 +60,12 @@ fn count_label(value: i32) -> String
     value == 1: "1"
     value == 2: "2"
     value == 3: "3"
-    else: "many"`;
+    else: "many"
+
+obj Model {}
+
+pub fn init() -> Model
+  Model {}`;
 
 export default function Playground() {
   return (

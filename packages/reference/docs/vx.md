@@ -173,21 +173,22 @@ VX also exposes component-local state for small UI details that do not belong in
 the app model:
 
 ```voyd
-let (panel, panel_state) = state(id: 1, initial: "closed")
+let (panel, set_panel) = state(id: 1, initial: "closed")
 
-if panel == "closed":
-  panel_state.set("open")
+<button on_click={() => set_panel("open")}>Open</button>
 ```
 
 Component state supports typed `String` and `i32` values. Use it for small,
 component-owned UI memory. Use the app model when other parts of the app need to
 read or update the same value.
 
-Event callbacks that mutate component-local state are intentionally not part of
-the typed event surface yet. Keep retained event callbacks pure message builders
-for now, and update app state through `update`; effectful component event
-callbacks need the separate retained-callback runtime work before they are
-advertised as stable.
+Use `state_handle` when you need the advanced handle API:
+
+```voyd
+let panel_state = state_handle(id: 1, initial: "closed")
+
+<button on_click={() => panel_state.set("open")}>Open</button>
+```
 
 ## Commands
 
@@ -296,8 +297,8 @@ explicit so ordinary app code can stay typed.
 - Event payload: `on_input={(event: TextInput) -> Msg => ...}`
 - Reusable component action: pass `fn() -> Msg` into a component
 - App state: keep it in the model and return the next model from `update`
-- Component-local UI state: use `state(id:, initial:)` inside component-runtime
-  views for small `String` or `i32` values
+- Component-local UI state: use `let (value, set_value) = state(id:, initial:)`
+  inside component-runtime views for small `String` or `i32` values
 - Later work: return a `Cmd`
 - Outside events: return a `Sub`
 - Browser mount: `createVoydVxAppRuntime` + `mountVxApp`
