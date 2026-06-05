@@ -58,11 +58,17 @@ import {
   emitExportAbiSection,
   type ExportAbiEntry,
 } from "./exports/export-abi.js";
+import {
+  BoundarySchemaError,
+  deriveBoundarySchema,
+  type BoundarySchema,
+} from "./boundary/schema.js";
 import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
 import { boxSignatureSpillValue, unboxSignatureSpillValue } from "./signature-spill.js";
+import { createSerializedExportSpecialCaseResolver } from "./serialized-export-special-cases.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -75,6 +81,12 @@ type ReachabilityState = {
 
 type FunctionMetadataRegistrationState = {
   active?: boolean;
+};
+
+type ResolvedBoundaryExportOptions = {
+  mode: "auto" | "off" | "only";
+  include?: ReadonlySet<string>;
+  onUnsupported: "skip" | "diagnostic";
 };
 
 const debugEffects = (): boolean =>
@@ -129,97 +141,112 @@ const userParamOffsetFor = (meta: FunctionMetadata): number => meta.userParamOff
 const firstUserParamIndexFor = (meta: FunctionMetadata): number =>
   meta.firstUserParamIndex;
 
-const VX_BOUNDARY_EXPORT_NAMES = new Set([
-  "init",
-  "update",
-  "view",
-  "subscriptions",
-]);
-
-const isVxBoundaryExportName = (exportName: string): boolean =>
-  VX_BOUNDARY_EXPORT_NAMES.has(exportName);
-
-const VX_MSGPACK_ALIAS_NAMES = new Set(["Html", "Program"]);
-const VX_PAYLOAD_ENVELOPE_NAMES = new Set(["Sub"]);
-const VX_STD_MODULE_ID = "std::vx";
-
-const isStdVxSymbolNamed = (
-  symbol: ProgramSymbolId,
-  names: ReadonlySet<string>,
+const resolveBoundaryExportOptions = (
   ctx: CodegenContext,
-): boolean =>
-  ctx.program.symbols.refOf(symbol).moduleId === VX_STD_MODULE_ID &&
-  names.has(ctx.program.symbols.getName(symbol) ?? "");
-
-const hasTypeAliasNamed = (
-  typeId: TypeId,
-  names: ReadonlySet<string>,
-  ctx: CodegenContext,
-): boolean =>
-  ctx.program.types
-    .getAliasSymbols(typeId)
-    .some((symbol) => isStdVxSymbolNamed(symbol, names, ctx));
-
-const nominalTypeName = (
-  typeId: TypeId,
-  ctx: CodegenContext,
-): string | undefined => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
-    return desc.name;
+): ResolvedBoundaryExportOptions => {
+  const option = ctx.options.boundaryExports;
+  if (option === false || option === "off") {
+    return { mode: "off", onUnsupported: "skip" };
   }
-  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
-    return nominalTypeName(desc.nominal, ctx);
+  if (option === "auto") {
+    return { mode: "auto", onUnsupported: "skip" };
   }
-  return undefined;
+  const mode = option.mode ?? (option.include ? "only" : "auto");
+  return {
+    mode,
+    include: option.include ? new Set(option.include) : undefined,
+    onUnsupported:
+      option.onUnsupported ??
+      (mode === "only" || option.include ? "diagnostic" : "skip"),
+  };
 };
 
-const nominalTypeSymbolIsStdVxNamed = (
-  typeId: TypeId,
-  names: ReadonlySet<string>,
-  ctx: CodegenContext,
-): boolean => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  const nominal =
-    desc.kind === "intersection" && typeof desc.nominal === "number"
-      ? ctx.program.types.getTypeDesc(desc.nominal)
-      : desc;
-  if (nominal.kind !== "nominal-object" && nominal.kind !== "value-object") {
-    return false;
-  }
-  return isStdVxSymbolNamed(nominal.owner, names, ctx);
-};
-
-const isVxPayloadEnvelope = (typeId: TypeId, ctx: CodegenContext): boolean =>
-  nominalTypeSymbolIsStdVxNamed(typeId, VX_PAYLOAD_ENVELOPE_NAMES, ctx);
-
-const isVxViewBoundaryMeta = (meta: FunctionMetadata, ctx: CodegenContext): boolean =>
-  meta.paramTypeIds.length === 1 &&
-  hasTypeAliasNamed(meta.resultTypeId, VX_MSGPACK_ALIAS_NAMES, ctx);
-
-const isVxSubscriptionsBoundaryMeta = (
-  meta: FunctionMetadata,
-  ctx: CodegenContext,
-): boolean =>
-  meta.paramTypeIds.length === 1 && isVxPayloadEnvelope(meta.resultTypeId, ctx);
-
-const shouldEmitVxBoundaryWrapper = ({
+const shouldConsiderBoundaryExport = ({
   exportName,
-  meta,
-  moduleHasVxAppShape,
-  ctx,
+  options,
 }: {
   exportName: string;
-  meta: FunctionMetadata;
-  moduleHasVxAppShape: boolean;
-  ctx: CodegenContext;
+  options: ResolvedBoundaryExportOptions;
 }): boolean => {
-  if (!isVxBoundaryExportName(exportName)) return false;
-  if (exportName === "view") return isVxViewBoundaryMeta(meta, ctx);
-  if (exportName === "subscriptions") return isVxSubscriptionsBoundaryMeta(meta, ctx);
-  if (exportName === "init") return moduleHasVxAppShape && meta.paramTypeIds.length === 0;
-  if (exportName === "update") return moduleHasVxAppShape && meta.paramTypeIds.length === 2;
-  return false;
+  if (options.mode === "off") return false;
+  if (options.include && !options.include.has(exportName)) return false;
+  if (options.mode === "only") return options.include?.has(exportName) ?? false;
+  return true;
+};
+
+const boundarySchemasForExport = ({
+  ctx,
+  meta,
+  exportName,
+}: {
+  ctx: CodegenContext;
+  meta: FunctionMetadata;
+  exportName: string;
+}): { params: BoundarySchema[]; result: BoundarySchema } => ({
+  params: meta.paramTypeIds.map((typeId, index) =>
+    deriveBoundarySchema({
+      typeId,
+      ctx,
+      label: `${exportName} arg${index}`,
+      options: { tagStandaloneVariants: true },
+    }),
+  ),
+  result: deriveBoundarySchema({
+    typeId: meta.resultTypeId,
+    ctx,
+    label: `${exportName} result`,
+    options: { tagStandaloneVariants: true },
+  }),
+});
+
+const reportBoundaryExportUnsupported = ({
+  ctx,
+  entry,
+  exportName,
+  error,
+}: {
+  ctx: CodegenContext;
+  entry: HirExportEntry;
+  exportName: string;
+  error: unknown;
+}): void => {
+  const message =
+    error instanceof BoundarySchemaError || error instanceof Error
+      ? error.message
+      : String(error);
+  ctx.diagnostics.report(
+    diagnosticFromCode({
+      code: "CG0001",
+      params: {
+        kind: "codegen-error",
+        message: `typed boundary export ${exportName} is not supported: ${message}`,
+      },
+      span: entry.span,
+    }),
+  );
+};
+
+const allocateBoundaryWrapperExportName = ({
+  ctx,
+  exportName,
+  reservedExportNames,
+}: {
+  ctx: CodegenContext;
+  exportName: string;
+  reservedExportNames: ReadonlySet<string>;
+}): string => {
+  const baseName = `__voyd_serialized_export_${sanitizeIdentifier(exportName)}`;
+  let index = 0;
+  while (true) {
+    const candidate = index === 0 ? baseName : `${baseName}_${index}`;
+    index += 1;
+    if (reservedExportNames.has(candidate)) {
+      continue;
+    }
+    if (ctx.programHelpers.registerExportName(candidate)) {
+      return candidate;
+    }
+  }
 };
 
 const makeAbiValue = (
@@ -1206,6 +1233,8 @@ export const emitModuleExports = (
 ): void => {
   const effectfulExports: EffectfulExportTarget[] = [];
   const exportAbiEntries: ExportAbiEntry[] = [];
+  const boundaryExportOptions = resolveBoundaryExportOptions(ctx);
+  const emittedBoundaryExports = new Set<string>();
 
   const emitEffectfulWasmExportWrapper = ({
     ctx: exportCtx,
@@ -1239,8 +1268,21 @@ export const emitModuleExports = (
   const testScope = ctx.options.testScope ?? "all";
   const exportContexts =
     ctx.options.testMode && testScope === "all" ? contexts : [ctx];
+  const reservedExportNames = new Set<string>();
   exportContexts.forEach((exportCtx) => {
     const exportEntries = getModuleExportEntries(exportCtx);
+    exportEntries.forEach((entry) => {
+      const baseExportName =
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
+      reservedExportNames.add(
+        exportCtx.options.testMode
+          ? formatTestExportName({
+              moduleId: exportCtx.moduleId,
+              testId: baseExportName,
+            })
+          : baseExportName,
+      );
+    });
     const metaForEntry = (entry: HirExportEntry): FunctionMetadata | undefined => {
       const metas = getFunctionMetas(
         exportCtx,
@@ -1249,16 +1291,12 @@ export const emitModuleExports = (
       );
       return metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
     };
-    const moduleHasVxAppShape = exportEntries.some((entry) => {
-      const exportName =
-        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
-      const meta = metaForEntry(entry);
-      if (!meta) return false;
-      return (
-        (exportName === "view" && isVxViewBoundaryMeta(meta, exportCtx)) ||
-        (exportName === "subscriptions" &&
-          isVxSubscriptionsBoundaryMeta(meta, exportCtx))
-      );
+    const resolveSpecialSerializedExport = createSerializedExportSpecialCaseResolver({
+      entries: exportEntries,
+      exportNameForEntry: (entry) =>
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol),
+      metaForEntry,
+      ctx: exportCtx,
     });
 
     exportEntries.forEach((entry) => {
@@ -1346,24 +1384,36 @@ export const emitModuleExports = (
         return;
       }
 
-      const shouldUseVxBoundary = shouldEmitVxBoundaryWrapper({
+      const specialSerializedExport = resolveSpecialSerializedExport({
         exportName,
         meta,
-        moduleHasVxAppShape,
-        ctx: exportCtx,
       });
 
-      if (serializer || shouldUseVxBoundary) {
+      if (serializer || specialSerializedExport) {
         if (serializer) {
           markSerializerReachable({ ctx: exportCtx, serializer });
         }
         try {
-          emitSerializedExportWrapper({ ctx: exportCtx, meta, exportName });
+          emitSerializedExportWrapper({
+            ctx: exportCtx,
+            meta,
+            exportName,
+            typeAdapter: specialSerializedExport?.typeAdapter,
+          });
           exportAbiEntries.push({
             name: exportName,
             abi: "serialized",
             formatId: "msgpack",
+            ...(specialSerializedExport?.params
+              ? { params: specialSerializedExport.params }
+              : {}),
+            ...(specialSerializedExport?.result
+              ? { result: specialSerializedExport.result }
+              : {}),
           });
+          if (specialSerializedExport) {
+            emittedBoundaryExports.add(exportName);
+          }
         } catch (error) {
           exportCtx.diagnostics.report(
             diagnosticFromCode({
@@ -1380,9 +1430,73 @@ export const emitModuleExports = (
       }
 
       exportCtx.mod.addFunctionExport(meta.wasmName, exportName);
+      if (
+        !exportCtx.options.testMode &&
+        shouldConsiderBoundaryExport({
+          exportName,
+          options: boundaryExportOptions,
+        })
+      ) {
+        try {
+          const schemas = boundarySchemasForExport({
+            ctx: exportCtx,
+            meta,
+            exportName,
+          });
+          const wrapperExportName = allocateBoundaryWrapperExportName({
+            ctx: exportCtx,
+            exportName,
+            reservedExportNames,
+          });
+          const wrapper = emitSerializedExportWrapper({
+            ctx: exportCtx,
+            meta,
+            exportName,
+            wrapperExportName,
+          });
+          exportAbiEntries.push({
+            name: exportName,
+            abi: "serialized",
+            wrapperName: wrapper.wrapperName,
+            formatId: wrapper.formatId,
+            params: schemas.params,
+            result: schemas.result,
+          });
+          emittedBoundaryExports.add(exportName);
+          return;
+        } catch (error) {
+          if (
+            boundaryExportOptions.mode === "only" ||
+            boundaryExportOptions.onUnsupported === "diagnostic"
+          ) {
+            reportBoundaryExportUnsupported({
+              ctx: exportCtx,
+              entry,
+              exportName,
+              error,
+            });
+          }
+        }
+      }
       exportAbiEntries.push({ name: exportName, abi: "direct" });
     });
   });
+
+  if (boundaryExportOptions.include) {
+    boundaryExportOptions.include?.forEach((name) => {
+      if (emittedBoundaryExports.has(name)) return;
+      ctx.diagnostics.report(
+        diagnosticFromCode({
+          code: "CG0001",
+          params: {
+            kind: "codegen-error",
+            message: `typed boundary export ${name} was requested but was not emitted`,
+          },
+          span: ctx.module.hir.module.span,
+        }),
+      );
+    });
+  }
 
   if (exportAbiEntries.length > 0) {
     emitExportAbiSection({ mod: ctx.mod, entries: exportAbiEntries });

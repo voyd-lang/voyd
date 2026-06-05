@@ -5552,8 +5552,9 @@ const typeIntrinsicCall = (
         typeArguments,
         expectedReturnType,
       });
-    case "__vx_retain_event_handler":
-      return typeVxRetainEventHandlerIntrinsic({
+    case "__boundary_retain_callback":
+      return typeBoundaryRetainCallbackIntrinsic({
+        name,
         args,
         ctx,
         typeArguments,
@@ -6350,26 +6351,28 @@ const typeTaskCancelIntrinsic = ({
   return ctx.primitives.bool;
 };
 
-const typeVxRetainEventHandlerIntrinsic = ({
+const typeBoundaryRetainCallbackIntrinsic = ({
+  name,
   args,
   ctx,
   typeArguments,
 }: {
+  name: string;
   args: readonly Arg[];
   ctx: TypingContext;
   typeArguments?: readonly TypeId[];
 }): TypeId => {
   assertIntrinsicArgCount({
-    name: "__vx_retain_event_handler",
+    name,
     args,
     expected: 1,
     detail: "handler function",
   });
-  assertNoIntrinsicTypeArgs("__vx_retain_event_handler", typeArguments);
+  assertNoIntrinsicTypeArgs(name, typeArguments);
   const handlerType = args[0]!.type;
   const desc = ctx.arena.get(handlerType);
   if (desc.kind !== "function") {
-    throw new Error("__vx_retain_event_handler expects a function argument");
+    throw new Error(`${name} expects a function argument`);
   }
   return getPrimitiveType(ctx, "i32");
 };

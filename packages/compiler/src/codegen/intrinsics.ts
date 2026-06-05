@@ -104,9 +104,9 @@ const PANIC_SCRATCH_CAPACITY_GLOBAL = "__voyd_panic_scratch_capacity";
 const TASK_IMPORT_MODULE = "voyd.task";
 const TASK_IMPORTS_KEY = Symbol("voyd.task.imports");
 const TASK_STARTERS_KEY = Symbol("voyd.task.starters");
-const VX_CALLBACK_IMPORT_MODULE = "voyd.vx.callback";
-const VX_CALLBACK_IMPORTS_KEY = Symbol("voyd.vx.callback.imports");
-const VX_CALLBACK_HELPERS_KEY = Symbol("voyd.vx.callback.helpers");
+const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
+const BOUNDARY_CALLBACK_IMPORTS_KEY = Symbol("voyd.boundary.callback.imports");
+const BOUNDARY_CALLBACK_HELPERS_KEY = Symbol("voyd.boundary.callback.helpers");
 
 const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
   if (ctx.mod.getGlobal(PANIC_TRAP_PTR_GLOBAL) === 0) {
@@ -179,7 +179,7 @@ const ensureTaskImport = ({
   return name;
 };
 
-const ensureVxCallbackImport = ({
+const ensureBoundaryCallbackImport = ({
   name,
   base,
   params,
@@ -193,7 +193,7 @@ const ensureVxCallbackImport = ({
   ctx: CodegenContext;
 }): string => {
   const imports = ctx.programHelpers.getHelperState(
-    VX_CALLBACK_IMPORTS_KEY,
+    BOUNDARY_CALLBACK_IMPORTS_KEY,
     () => new Set<string>()
   );
   if (imports.has(name)) {
@@ -201,7 +201,7 @@ const ensureVxCallbackImport = ({
   }
   ctx.mod.addFunctionImport(
     name,
-    VX_CALLBACK_IMPORT_MODULE,
+    BOUNDARY_CALLBACK_IMPORT_MODULE,
     base,
     binaryen.createType(params as number[]),
     result
@@ -295,7 +295,7 @@ const ensureTaskStarterHelper = ({
   return exportName;
 };
 
-const ensureVxEventCallbackHelper = ({
+const ensureBoundaryRetainedCallbackHelper = ({
   closureTypeId,
   ctx,
 }: {
@@ -303,7 +303,7 @@ const ensureVxEventCallbackHelper = ({
   ctx: CodegenContext;
 }): string => {
   const helpers = ctx.programHelpers.getHelperState(
-    VX_CALLBACK_HELPERS_KEY,
+    BOUNDARY_CALLBACK_HELPERS_KEY,
     () => new Map<number, string>()
   );
   const cached = helpers.get(closureTypeId);
@@ -313,10 +313,10 @@ const ensureVxEventCallbackHelper = ({
 
   const desc = ctx.program.types.getTypeDesc(closureTypeId);
   if (desc.kind !== "function") {
-    throw new Error("VX event handler retention requires a function value");
+    throw new Error("boundary callback retention requires a function value");
   }
   if (desc.parameters.length > 1) {
-    throw new Error("VX event handler retention supports fn() -> Msg or fn(Event) -> Msg");
+    throw new Error("boundary callback retention supports fn() -> Msg or fn(Event) -> Msg");
   }
   ensureLinearMemoryExport(ctx);
   const msgpack = ensureMsgPackFunctions(ctx);
@@ -327,7 +327,7 @@ const ensureVxEventCallbackHelper = ({
       : undefined;
   if (parameterSerializer && parameterSerializer.formatId !== "msgpack") {
     throw new Error(
-      `VX event handler parameter serializer format ${parameterSerializer.formatId} is not supported`
+      `boundary callback parameter serializer format ${parameterSerializer.formatId} is not supported`
     );
   }
   const parameterSchema =
@@ -335,7 +335,7 @@ const ensureVxEventCallbackHelper = ({
       ? deriveBoundarySchema({
           typeId: parameterTypeId,
           ctx,
-          label: "VX event handler parameter",
+          label: "boundary callback parameter",
         })
       : undefined;
   const returnWasmType = wasmTypeFor(desc.returnType, ctx);
@@ -345,7 +345,7 @@ const ensureVxEventCallbackHelper = ({
     : findSerializerForType(desc.returnType, ctx);
   if (returnSerializer && returnSerializer.formatId !== "msgpack") {
     throw new Error(
-      `VX event handler return serializer format ${returnSerializer.formatId} is not supported`
+      `boundary callback return serializer format ${returnSerializer.formatId} is not supported`
     );
   }
   const returnSchema = returnSerializer || returnsVoid
@@ -353,7 +353,7 @@ const ensureVxEventCallbackHelper = ({
     : deriveBoundarySchema({
         typeId: desc.returnType,
         ctx,
-        label: "VX event handler return",
+        label: "boundary callback return",
       });
   const effectful =
     typeof desc.effectRow === "number" &&
@@ -361,7 +361,7 @@ const ensureVxEventCallbackHelper = ({
 
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const base = getClosureTypeInfo(closureTypeId, ctx);
-  const exportName = `__voyd_vx_event_callback_${sanitizeTaskKey(base.key)}`;
+  const exportName = `__voyd_boundary_callback_${sanitizeTaskKey(base.key)}`;
   const locals: binaryen.Type[] = [];
   const helperFnCtx: FunctionContext = {
     bindings: new Map(),
@@ -1190,22 +1190,22 @@ export const compileIntrinsicCall = ({
         ctx,
       });
     }
-    case "__vx_retain_event_handler": {
+    case "__boundary_retain_callback": {
       assertArgCount(name, args, 1);
       const handlerTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
       const handlerType = ctx.program.types.getTypeDesc(handlerTypeId);
       if (handlerType.kind !== "function") {
-        throw new Error("__vx_retain_event_handler requires a function-typed value");
+        throw new Error(`${name} requires a function-typed value`);
       }
-      const helperExport = ensureVxEventCallbackHelper({
+      const helperExport = ensureBoundaryRetainedCallbackHelper({
         closureTypeId: handlerTypeId,
         ctx,
       });
       const closureInfo = getClosureTypeInfo(handlerTypeId, ctx);
-      const importName = `__voyd_vx_retain_event_handler_${sanitizeTaskKey(helperExport)}`;
-      const importFn = ensureVxCallbackImport({
+      const importName = `__voyd_boundary_retain_callback_${sanitizeTaskKey(helperExport)}`;
+      const importFn = ensureBoundaryCallbackImport({
         name: importName,
-        base: `retain_event__${helperExport}`,
+        base: `retain_callback__${helperExport}`,
         params: [closureInfo.interfaceType],
         result: binaryen.i32,
         ctx,

@@ -540,7 +540,8 @@ const shouldCompileIntrinsicCall = ({
   intrinsicName: string;
   usesSignature: boolean;
 }): boolean =>
-  usesSignature !== true || intrinsicName === "__vx_retain_event_handler";
+  usesSignature !== true ||
+  intrinsicName === "__boundary_retain_callback";
 
 const resolveTargetFunctionId = ({
   targets,
