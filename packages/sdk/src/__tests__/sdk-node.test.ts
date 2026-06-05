@@ -11,6 +11,7 @@ import {
   type EffectHandler,
 } from "@voyd-lang/sdk";
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
+import { parseExportAbi } from "@voyd-lang/js-host";
 
 const EFFECT_SOURCE = `use std::msgpack::self as __std_msgpack
 use std::string::self as __std_string
@@ -22,6 +23,72 @@ eff Async
 pub fn main(): Async -> i32
   Async::await(2) + 1
 `;
+const BOUNDARY_EXPORTS_SOURCE = `use std::array::Array
+use std::enums::{ enum }
+use std::string::type::String
+
+obj Point {
+  x: i32,
+  y: i32
+}
+
+enum LookupResult
+  Found { value: String }
+  Missing
+
+enum NestedResult
+  Wrapped { inner: LookupResult::Found }
+  Empty {}
+
+pub fn primitive() -> i32
+  42
+
+pub fn translate(point: Point, dx: i32, dy: i32) -> Point
+  Point {
+    x: point.x + dx,
+    y: point.y + dy
+  }
+
+pub fn get_point() -> { x: i32, y: i32 }
+  { x: 1, y: 2 }
+
+pub fn lookup(key: String) -> LookupResult
+  if key == "name" then:
+    LookupResult::Found { value: "Ada" }
+  else:
+    LookupResult::Missing {}
+
+pub fn sum_values(values: Array<i32>) -> i32
+  var index = 0
+  var total = 0
+  while index < values.len():
+    total = total + values.at(index)
+    index = index + 1
+  total
+
+pub fn add_float(value: f64) -> f64
+  value + 1.0
+
+pub fn nan_value() -> f64
+  0.0 / 0.0
+
+pub fn found_only() -> LookupResult::Found
+  LookupResult::Found { value: "Ada" }
+
+pub fn found_value(found: LookupResult::Found) -> String
+  found.value
+
+pub fn nested_found() -> NestedResult
+  NestedResult::Wrapped {
+    inner: LookupResult::Found { value: "Ada" }
+  }
+
+pub fn nested_found_value(wrapped: NestedResult::Wrapped) -> String
+  wrapped.inner.value
+
+pub fn long_text() -> String
+  "this result is intentionally longer than a tiny host buffer"
+`;
 const ASYNC_EFFECT_ID = "com.example.async";
 const RUNTIME_DIAGNOSTICS_SECTION = "voyd.runtime_diagnostics";
 const sdkTestRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -29,18 +96,25 @@ const repoRoot = path.resolve(sdkTestRoot, "../../../../");
 let effectCompileResult: Extract<CompileResult, { success: true }>;
 
 const hasRuntimeDiagnosticsSection = (wasm: Uint8Array): boolean => {
-  const buffer =
-    wasm.buffer instanceof ArrayBuffer &&
-    wasm.byteOffset === 0 &&
-    wasm.byteLength === wasm.buffer.byteLength
-      ? wasm.buffer
-      : wasm.slice().buffer;
-  const module = new WebAssembly.Module(buffer);
+  const module = new WebAssembly.Module(wasmBufferSource(wasm));
   const sections = WebAssembly.Module.customSections(
     module,
     RUNTIME_DIAGNOSTICS_SECTION
   );
   return sections.length > 0;
+};
+
+const wasmBufferSource = (wasm: Uint8Array): BufferSource => {
+  if (
+    wasm.buffer instanceof ArrayBuffer &&
+    wasm.byteOffset === 0 &&
+    wasm.byteLength === wasm.buffer.byteLength
+  ) {
+    return wasm.buffer;
+  }
+  const copy = new Uint8Array(wasm.byteLength);
+  copy.set(wasm);
+  return copy.buffer;
 };
 
 const expectCompileSuccess = (
@@ -122,6 +196,118 @@ describe("node sdk", () => {
 
     const output = await result.run<number>({ entryName: "main" });
     expect(output).toBe(42);
+  });
+
+  it("runs typed boundary exports through the existing host and sdk APIs", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({ source: BOUNDARY_EXPORTS_SOURCE }),
+    );
+    const host = await createVoydHost({ wasm: result.wasm });
+
+    await expect(host.run("primitive")).resolves.toBe(42);
+    await expect(
+      host.run("translate", [{ x: 1, y: 2 }, 10, 20]),
+    ).resolves.toEqual({ x: 11, y: 22 });
+    await expect(result.run({ entryName: "get_point" })).resolves.toEqual({
+      x: 1,
+      y: 2,
+    });
+    await expect(host.run("lookup", ["name"])).resolves.toEqual({
+      tag: "Found",
+      value: "Ada",
+    });
+    await expect(host.run("lookup", ["other"])).resolves.toEqual({
+      tag: "Missing",
+    });
+    await expect(host.run("sum_values", [[1, 2, 3]])).resolves.toBe(6);
+    await expect(host.run("add_float", [Number.POSITIVE_INFINITY])).resolves.toBe(
+      Number.POSITIVE_INFINITY,
+    );
+    const nanResult = await host.run<number>("nan_value");
+    expect(Number.isNaN(nanResult)).toBe(true);
+    await expect(host.run("found_only")).resolves.toEqual({
+      tag: "Found",
+      value: "Ada",
+    });
+    await expect(
+      host.run("found_value", [{ tag: "Found", value: "Grace" }]),
+    ).resolves.toBe("Grace");
+    await expect(
+      host.run("found_value", [{ tag: "Missing", value: "Grace" }]),
+    ).rejects.toThrow("typed export found_value arg0 expected variant tag Found");
+    await expect(host.run("nested_found")).resolves.toEqual({
+      tag: "Wrapped",
+      inner: { tag: "Found", value: "Ada" },
+    });
+    await expect(
+      host.run("nested_found_value", [
+        { tag: "Wrapped", inner: { tag: "Found", value: "Grace" } },
+      ]),
+    ).resolves.toBe("Grace");
+    await expect(
+      host.run("nested_found_value", [
+        { tag: "Wrapped", inner: { tag: "Missing", value: "Grace" } },
+      ]),
+    ).rejects.toThrow("typed export nested_found_value arg0.inner expected variant tag Found");
+    await expect(
+      host.run("translate", [{ x: "bad", y: 2 }, 10, 20]),
+    ).rejects.toThrow("typed export translate arg0.x expected i32, got string");
+
+    const tinyBufferHost = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 8,
+    });
+    await expect(
+      tinyBufferHost.run(
+        "sum_values",
+        [Array.from({ length: 32 }, (_, index) => index)],
+      ),
+    ).rejects.toThrow("increase createVoydHost({ bufferSize })");
+    await expect(tinyBufferHost.run("long_text")).rejects.toThrow(
+      "increase createVoydHost({ bufferSize })",
+    );
+  });
+
+  it("does not treat ordinary DTO type aliases as standalone variants", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `obj Point {
+  x: i32,
+  y: i32
+}
+
+type AliasPoint = Point
+
+pub fn shift(point: AliasPoint) -> AliasPoint
+  point
+`,
+      }),
+    );
+    const host = await createVoydHost({ wasm: result.wasm });
+
+    await expect(host.run("shift", [{ x: 1, y: 2 }])).resolves.toEqual({
+      x: 1,
+      y: 2,
+    });
+  });
+
+  it("can opt out of typed boundary export wrappers", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: BOUNDARY_EXPORTS_SOURCE,
+        boundaryExports: false,
+      }),
+    );
+    const module = new WebAssembly.Module(wasmBufferSource(result.wasm));
+    const abi = parseExportAbi(module);
+    const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);
+
+    expect(exports).toContain("translate");
+    expect(exports).not.toContain("__voyd_serialized_export_translate");
+    expect(abi.exports).toContainEqual({ name: "translate", abi: "direct" });
   });
 
   it("compiles when entryPath is relative with subdirectories", async () => {

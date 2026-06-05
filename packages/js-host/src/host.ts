@@ -26,6 +26,11 @@ import type { ParsedEffectOp, ParsedEffectTable } from "./protocol/table.js";
 import { registerHandlersByLabelSuffix } from "./handlers.js";
 import { parseExportAbi } from "./protocol/export-abi.js";
 import {
+  decodeBoundaryResult,
+  encodeBoundaryArgs,
+} from "./boundary-values.js";
+import type { ExportAbiEntry } from "./protocol/export-abi.js";
+import {
   createRuntimeScheduler,
   type RuntimeSchedulerOptions,
   type RuntimeStepResult,
@@ -85,7 +90,8 @@ export type VoydHost = {
 
 const MSGPACK_OPTS = { useBigInt64: true } as const;
 const TASK_RUNTIME_IMPORT_MODULE = "voyd.task";
-const VX_CALLBACK_IMPORT_MODULE = "voyd.vx.callback";
+const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
+const LEGACY_VX_CALLBACK_IMPORT_MODULE = "voyd.vx.callback";
 const TASK_RUNTIME_EFFECT_ID = "voyd.std.task.runtime";
 const TASK_RUNTIME_WAIT_OP_ID = 0;
 const TASK_RUNTIME_YIELD_OP_ID = 1;
@@ -227,7 +233,7 @@ const buildTaskRuntimeImportModule = ({
     };
 };
 
-const buildVxCallbackImportModule = ({
+const buildRetainedCallbackImportModules = ({
   importDescriptors,
   getInstance,
   registry,
@@ -242,19 +248,22 @@ const buildVxCallbackImportModule = ({
   annotateTrap: (error: unknown, opts?: VoydTrapAnnotation) => Error;
   runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner;
 }): WebAssembly.Imports => {
-  const callbackImports: Record<string, CallableFunction> = {};
+  const callbackImportsByModule = new Map<string, Record<string, CallableFunction>>();
 
   importDescriptors
     .filter(
       (descriptor) =>
-        descriptor.module === VX_CALLBACK_IMPORT_MODULE &&
+        (descriptor.module === BOUNDARY_CALLBACK_IMPORT_MODULE ||
+          descriptor.module === LEGACY_VX_CALLBACK_IMPORT_MODULE) &&
         descriptor.kind === "function",
     )
     .forEach((descriptor) => {
-      if (!descriptor.name.startsWith("retain_event__")) {
+      const callbackExportName = retainedCallbackExportNameFrom(descriptor.name);
+      if (!callbackExportName) {
         return;
       }
-      const callbackExportName = descriptor.name.slice("retain_event__".length);
+      const callbackImports = callbackImportsByModule.get(descriptor.module) ?? {};
+      callbackImportsByModule.set(descriptor.module, callbackImports);
       callbackImports[descriptor.name] = ((handlerRef: unknown): number =>
         registry.retain((payload) => {
           const instance = getInstance();
@@ -287,7 +296,7 @@ const buildVxCallbackImportModule = ({
           });
           const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
           if (encodedPayload.length > bufferSize) {
-            throw new Error("VX retained event callback payload exceeds buffer size");
+            throw new Error("retained boundary callback payload exceeds buffer size");
           }
           ensureMemoryCapacity({
             memory: msgpackMemory,
@@ -319,10 +328,10 @@ const buildVxCallbackImportModule = ({
               return returnsVoid ? outcome.then(() => undefined) : outcome;
             }
             throw annotateTrap(error, {
-              transition: {
-                point: "vx_retained_event_callback",
-                direction: "host->vm",
-              },
+                transition: {
+                  point: "retained_boundary_callback",
+                  direction: "host->vm",
+                },
               fallbackFunctionName: callbackExportName,
             });
           }
@@ -330,21 +339,27 @@ const buildVxCallbackImportModule = ({
             return undefined;
           }
           if (written < 0) {
-            throw new Error("VX retained event callback encoding failed");
+            throw new Error("retained boundary callback encoding failed");
           }
           if (written > bufferSize) {
-            throw new Error("VX retained event callback payload exceeds buffer size");
+            throw new Error("retained boundary callback payload exceeds buffer size");
           }
           const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
           return decode(bytes, MSGPACK_OPTS);
         })) as CallableFunction;
     });
 
-  return Object.keys(callbackImports).length === 0
-    ? {}
-    : {
-        [VX_CALLBACK_IMPORT_MODULE]: callbackImports,
-      };
+  return Object.fromEntries(callbackImportsByModule.entries()) as WebAssembly.Imports;
+};
+
+const retainedCallbackExportNameFrom = (importName: string): string | undefined => {
+  if (importName.startsWith("retain_callback__")) {
+    return importName.slice("retain_callback__".length);
+  }
+  if (importName.startsWith("retain_event__")) {
+    return importName.slice("retain_event__".length);
+  }
+  return undefined;
 };
 
 const isImportModuleRecord = (
@@ -665,13 +680,13 @@ export const createVoydHost = async ({
   const callbackRegistry =
     retainedCallbacks ?? createRetainedEventHandlerRegistry();
   let runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner = () => {
-    throw new Error("VX retained event callback called before host runtime initialization");
+    throw new Error("retained boundary callback called before host runtime initialization");
   };
-  const vxCallbackImports = buildVxCallbackImportModule({
+  const retainedCallbackImports = buildRetainedCallbackImportModules({
     importDescriptors: WebAssembly.Module.imports(module),
     getInstance: () => {
       if (!instanceRef) {
-        throw new Error("VX callback import called before host instance initialization");
+        throw new Error("retained boundary callback import called before host instance initialization");
       }
       return instanceRef;
     },
@@ -686,7 +701,7 @@ export const createVoydHost = async ({
       {
         ...defaultImports(),
         ...(taskRuntimeImports as Record<string, unknown>),
-        ...(vxCallbackImports as Record<string, unknown>),
+        ...(retainedCallbackImports as Record<string, unknown>),
       } as WebAssembly.Imports,
       imports
     )
@@ -761,9 +776,11 @@ export const createVoydHost = async ({
 
   const runSerialized = async <T = unknown>(
     entryName: string,
-    args: unknown[] = []
+    args: unknown[] = [],
+    abi?: Extract<ExportAbiEntry, { abi: "serialized" }>
   ): Promise<T> => {
-    const entry = requireExportedFunction({ instance, name: entryName });
+    const wrapperName = abi?.wrapperName ?? entryName;
+    const entry = requireExportedFunction({ instance, name: wrapperName });
     const msgpackMemory = requireExportedMemory({
       instance,
       name: LINEAR_MEMORY_EXPORT,
@@ -774,9 +791,18 @@ export const createVoydHost = async ({
       label: LINEAR_MEMORY_EXPORT,
     });
 
-    const encodedArgs = encode(args, MSGPACK_OPTS) as Uint8Array;
+    const boundaryArgs = abi?.params
+      ? encodeBoundaryArgs({
+          exportName: entryName,
+          schemas: abi.params,
+          args,
+        })
+      : args;
+    const encodedArgs = encode(boundaryArgs, MSGPACK_OPTS) as Uint8Array;
     if (encodedArgs.length > bufferSize) {
-      throw new Error("serialized args exceed buffer size");
+      throw new Error(
+        `serialized export ${entryName} args exceed buffer size (${encodedArgs.length} > ${bufferSize}); increase createVoydHost({ bufferSize }) or pass a smaller payload`,
+      );
     }
     const inPtr = 0;
     const outPtr = bufferSize;
@@ -801,13 +827,24 @@ export const createVoydHost = async ({
       });
     }
     if (written < 0) {
-      throw new Error("serialized export encoding failed");
+      throw new Error(
+        `serialized export ${entryName} result encoding failed (bufferSize=${bufferSize}); increase createVoydHost({ bufferSize }) or return a smaller payload`,
+      );
     }
     if (written > bufferSize) {
-      throw new Error("serialized export payload exceeds buffer size");
+      throw new Error(
+        `serialized export ${entryName} result exceeds buffer size (${written} > ${bufferSize}); increase createVoydHost({ bufferSize }) or return a smaller payload`,
+      );
     }
     const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
-    return decode(bytes, MSGPACK_OPTS) as T;
+    const decoded = decode(bytes, MSGPACK_OPTS);
+    return (abi?.result
+      ? decodeBoundaryResult({
+          exportName: entryName,
+          schema: abi.result,
+          value: decoded,
+        })
+      : decoded) as T;
   };
 
   const runPure = async <T = unknown>(
@@ -819,7 +856,7 @@ export const createVoydHost = async ({
       if (abi.formatId !== "msgpack") {
         throw new Error(`unsupported serializer format ${abi.formatId}`);
       }
-      return runSerialized<T>(entryName, args);
+      return runSerialized<T>(entryName, args, abi);
     }
     const entry = requireExportedFunction({ instance, name: entryName });
     try {
@@ -1857,7 +1894,7 @@ export const createVoydHost = async ({
     });
     const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
     if (encodedPayload.length > bufferSize) {
-      throw new Error("VX retained event callback payload exceeds buffer size");
+      throw new Error("retained boundary callback payload exceeds buffer size");
     }
     return unwrapRunOutcome(
       runEffectfulManaged(callbackExportName, [], ({ bufferPtr, bufferSize }) => {
@@ -1880,7 +1917,7 @@ export const createVoydHost = async ({
         } catch (error) {
           throw annotateTrap(error, {
             transition: {
-              point: "vx_retained_event_callback",
+              point: "retained_boundary_callback",
               direction: "host->vm",
             },
             fallbackFunctionName: rawCallbackExportName,

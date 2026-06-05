@@ -139,6 +139,7 @@ const DEFAULT_OPTIONS = {
   effectsHostBoundary: "off",
   linearMemoryExport: "always",
   effectsMemoryExport: "auto",
+  boundaryExports: false,
   testScope: "all",
 } as const;
 

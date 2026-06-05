@@ -70,12 +70,18 @@ export const packBoundaryValueAsMsgPack = ({
       return ctx.mod.call(msgpack.makeF32.wasmName, [value], msgPackType);
     case "f64":
       return ctx.mod.call(msgpack.makeF64.wasmName, [value], msgPackType);
-    case "void":
+    case "void": {
+      const valueType = binaryen.getExpressionType(value);
+      const valueOp =
+        valueType === binaryen.none || valueType === binaryen.unreachable
+          ? value
+          : ctx.mod.drop(value);
       return ctx.mod.block(
         null,
-        [ctx.mod.drop(value), ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType)],
+        [valueOp, ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType)],
         msgPackType,
       );
+    }
     case "string":
       return ctx.mod.call(
         msgpack.makeString.wasmName,
