@@ -1,0 +1,23 @@
+{
+  "name": "todo-vx",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "voyd:build": "node scripts/compile-voyd.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@voyd-lang/sdk": "^0.2.0",
+    "@voyd-lang/vx-dom": "^0.2.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
+    "@voyd-lang/cli": "^0.2.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.0"
+  }
+}

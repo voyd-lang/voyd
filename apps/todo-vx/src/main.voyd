@@ -1,0 +1,230 @@
+use std::enums::{ enum }
+use std::string::type::String
+use std::vx::all
+
+obj Model {
+  draft: String,
+  first: String,
+  first_done: bool,
+  second: String,
+  second_done: bool,
+  third: String,
+  third_done: bool,
+  notice: String
+}
+
+enum Msg
+  EditDraft { value: String }
+  Add
+  ToggleFirst
+  ToggleSecond
+  ToggleThird
+  ClearCompleted
+
+pub fn init() -> Model
+  Model {
+    draft: String::init(),
+    first: "Wire up the bootstrap app",
+    first_done: true,
+    second: "Try hot reload",
+    second_done: false,
+    third: String::init(),
+    third_done: false,
+    notice: "Ready"
+  }
+
+pub fn update(model: Model, message: Msg) -> Model
+  match(message)
+    Msg::EditDraft { value }:
+      Model {
+        draft: value,
+        first: model.first,
+        first_done: model.first_done,
+        second: model.second,
+        second_done: model.second_done,
+        third: model.third,
+        third_done: model.third_done,
+        notice: model.notice
+      }
+    Msg::Add:
+      add_todo(model)
+    Msg::ToggleFirst:
+      Model {
+        draft: model.draft,
+        first: model.first,
+        first_done: not_bool(model.first_done),
+        second: model.second,
+        second_done: model.second_done,
+        third: model.third,
+        third_done: model.third_done,
+        notice: status_for(not_bool(model.first_done))
+      }
+    Msg::ToggleSecond:
+      Model {
+        draft: model.draft,
+        first: model.first,
+        first_done: model.first_done,
+        second: model.second,
+        second_done: not_bool(model.second_done),
+        third: model.third,
+        third_done: model.third_done,
+        notice: status_for(not_bool(model.second_done))
+      }
+    Msg::ToggleThird:
+      Model {
+        draft: model.draft,
+        first: model.first,
+        first_done: model.first_done,
+        second: model.second,
+        second_done: model.second_done,
+        third: model.third,
+        third_done: not_bool(model.third_done),
+        notice: status_for(not_bool(model.third_done))
+      }
+    Msg::ClearCompleted:
+      clear_completed(model)
+
+pub fn view(model: Model) -> Html<Msg>
+  <main class="min-h-screen bg-slate-950 px-5 py-10 text-slate-100">
+    <section class="mx-auto flex max-w-2xl flex-col gap-6">
+      <header class="space-y-2">
+        <p class="text-sm font-semibold uppercase tracking-wide text-emerald-300">Voyd VX Bootstrap</p>
+        <h1 class="text-4xl font-bold text-white">TODO Lab</h1>
+        <p class="text-slate-300">A tiny production-style app compiled from Voyd into WebAssembly before the browser loads.</p>
+      </header>
+
+      <div class="rounded-lg border border-slate-800 bg-slate-900 p-5 shadow-xl shadow-emerald-950/30">
+        <label class="block text-sm font-medium text-slate-300" for="todo-input">New task</label>
+        <div class="mt-2 flex flex-col gap-3 sm:flex-row">
+          <input
+            id="todo-input"
+            class="min-h-11 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white outline-none ring-emerald-400 transition placeholder:text-slate-500 focus:ring-2"
+            placeholder="Ship the next thing"
+            value={model.draft}
+            on_input={(event: InputEvent) -> Msg => Msg::EditDraft { value: event.value }}
+          />
+          <button class="min-h-11 rounded-md bg-emerald-400 px-5 font-semibold text-slate-950 transition hover:bg-emerald-300" on_click={Msg::Add {}}>
+            Add
+          </button>
+        </div>
+
+        <div class="mt-5 flex items-center justify-between gap-4 border-t border-slate-800 pt-4">
+          <p class="text-sm text-slate-400">{model.notice}</p>
+          <button class="rounded-md border border-slate-700 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-emerald-400 hover:text-emerald-200" on_click={Msg::ClearCompleted {}}>
+            Clear completed
+          </button>
+        </div>
+      </div>
+
+      <section class="grid gap-3">
+        {todo_row(text: model.first, done: model.first_done, toggle: Msg::ToggleFirst {})}
+        {todo_row(text: model.second, done: model.second_done, toggle: Msg::ToggleSecond {})}
+        {todo_row(text: model.third, done: model.third_done, toggle: Msg::ToggleThird {})}
+      </section>
+
+      <footer class="rounded-lg border border-dashed border-slate-700 p-4 text-sm text-slate-400">
+        Tailwind is scanning <code class="text-emerald-200">src/main.voyd</code>; edit a class and Vite will reload the app.
+      </footer>
+    </section>
+  </main>
+
+fn add_todo(model: Model) -> Model
+  if
+    model.draft == "":
+      Model {
+        draft: model.draft,
+        first: model.first,
+        first_done: model.first_done,
+        second: model.second,
+        second_done: model.second_done,
+        third: model.third,
+        third_done: model.third_done,
+        notice: "Type a task first"
+      }
+    model.first == "":
+      Model {
+        draft: String::init(),
+        first: model.draft,
+        first_done: false,
+        second: model.second,
+        second_done: model.second_done,
+        third: model.third,
+        third_done: model.third_done,
+        notice: "Added task"
+      }
+    model.second == "":
+      Model {
+        draft: String::init(),
+        first: model.first,
+        first_done: model.first_done,
+        second: model.draft,
+        second_done: false,
+        third: model.third,
+        third_done: model.third_done,
+        notice: "Added task"
+      }
+    model.third == "":
+      Model {
+        draft: String::init(),
+        first: model.first,
+        first_done: model.first_done,
+        second: model.second,
+        second_done: model.second_done,
+        third: model.draft,
+        third_done: false,
+        notice: "Added task"
+      }
+    else:
+      Model {
+        draft: model.draft,
+        first: model.first,
+        first_done: model.first_done,
+        second: model.second,
+        second_done: model.second_done,
+        third: model.third,
+        third_done: model.third_done,
+        notice: "Three tasks is enough for this tiny demo"
+      }
+
+fn clear_completed(model: Model) -> Model
+  Model {
+    draft: model.draft,
+    first: if model.first_done then: String::init() else: model.first,
+    first_done: false,
+    second: if model.second_done then: String::init() else: model.second,
+    second_done: false,
+    third: if model.third_done then: String::init() else: model.third,
+    third_done: false,
+    notice: "Cleared completed tasks"
+  }
+
+fn todo_row({ text: String, done: bool, toggle: Msg }) -> Html<Msg>
+  if
+    text == "":
+      <div class="hidden"></div>
+    else:
+      <button class={row_class(done)} on_click={toggle}>
+        <span class={check_class(done)}>{check_label(done)}</span>
+        <span class={text_class(done)}>{text}</span>
+      </button>
+
+fn row_class(done: bool) -> String
+  if done then: "group flex items-center gap-3 rounded-lg border border-emerald-900/60 bg-emerald-950/40 p-4 text-left transition hover:border-emerald-500"
+  else: "group flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-900 p-4 text-left transition hover:border-emerald-500"
+
+fn check_class(done: bool) -> String
+  if done then: "flex size-6 items-center justify-center rounded-full bg-emerald-400 text-sm font-bold text-slate-950"
+  else: "flex size-6 items-center justify-center rounded-full border border-slate-600 text-sm font-bold text-slate-500 group-hover:border-emerald-400"
+
+fn text_class(done: bool) -> String
+  if done then: "text-slate-400 line-through"
+  else: "text-slate-100"
+
+fn check_label(done: bool) -> String
+  if done then: "v" else: ""
+
+fn status_for(done: bool) -> String
+  if done then: "Marked complete" else: "Marked active"
+
+fn not_bool(value: bool) -> bool
+  if value then: false else: true
