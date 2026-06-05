@@ -47,6 +47,12 @@ const tempArgExprIdFor = ({
       ? callExpr.target
       : callExpr.args[argIndex - 1]?.expr;
   }
+  if (callExpr.exprKind === "object-literal") {
+    return callExpr.entries[argIndex]?.value;
+  }
+  if (callExpr.exprKind === "tuple") {
+    return callExpr.elements[argIndex];
+  }
   return undefined;
 };
 

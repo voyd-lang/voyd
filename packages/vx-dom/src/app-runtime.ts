@@ -53,6 +53,8 @@ const runtimeResult = (value: Omit<RuntimeResult, "$vx">): RuntimeResult => ({
   ...value,
 });
 
+const noRuntimeMessage = Symbol("vx.noRuntimeMessage");
+
 export function createVoydVxAppRuntime(
   options: CreateVoydVxAppRuntimeOptions,
 ): VxAppRuntime {
@@ -124,6 +126,9 @@ export function createVoydVxAppRuntime(
     render,
     dispatch: async (message) => {
       const resolved = await resolveRuntimeMessage(options.host, message);
+      if (resolved === noRuntimeMessage) {
+        return toRuntimeStep(runtimeResult({ model: requireModel() }), false);
+      }
       const result = await options.host.run(entryNames.update, [
         requireModel(),
         resolved,
@@ -177,8 +182,14 @@ async function resolveEventMessage(
   host: VoydVxAppHost,
   message: VxRuntimeEventMessage,
 ): Promise<unknown> {
-  return host.retainedCallbacks?.dispatch(message.handlerId, message.payload) ??
-    eventPayloadFallback(message.payload);
+  if (!host.retainedCallbacks) {
+    return eventPayloadFallback(message.payload);
+  }
+  const result = await host.retainedCallbacks.dispatch(
+    message.handlerId,
+    message.payload,
+  );
+  return result === undefined ? noRuntimeMessage : result;
 }
 
 async function resolveMapMessage(
@@ -186,6 +197,9 @@ async function resolveMapMessage(
   message: VxRuntimeMapMessage,
 ): Promise<unknown> {
   const child = await resolveRuntimeMessage(host, message.message);
+  if (child === noRuntimeMessage) {
+    return noRuntimeMessage;
+  }
   return host.retainedCallbacks?.dispatch(message.handlerId, child) ?? child;
 }
 

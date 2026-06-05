@@ -18,7 +18,11 @@
       "@voyd-lang/js-host": ["packages/js-host/src/index.ts"],
       "@voyd-lang/js-host/*": ["packages/js-host/src/*"],
       "@voyd-lang/vx-dom": ["packages/vx-dom/src/index.ts"],
-      "@voyd-lang/vx-dom/*": ["packages/vx-dom/src/*"],
+      "@voyd-lang/vx-dom/*": [
+        "packages/vx-dom/src/*/index.ts",
+        "packages/vx-dom/src/*.ts",
+        "packages/vx-dom/src/*"
+      ],
       "@voyd-lang/reference": ["packages/reference/index.d.ts"]
     }
   }

@@ -110,6 +110,17 @@ type ActiveTaskContext = ActiveTaskImportContext & {
   activeTaskId: number;
 };
 
+type RetainedEffectfulCallbackRunner = (params: {
+  callbackExportName: string;
+  handlerRef: unknown;
+  payload: unknown;
+}) => Promise<unknown>;
+
+type RawEffectfulStarter = (params: {
+  bufferPtr: number;
+  bufferSize: number;
+}) => unknown;
+
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
@@ -222,12 +233,14 @@ const buildVxCallbackImportModule = ({
   registry,
   bufferSize,
   annotateTrap,
+  runEffectfulRetainedCallback,
 }: {
   importDescriptors: WebAssembly.ModuleImportDescriptor[];
   getInstance: () => WebAssembly.Instance;
   registry: RetainedEventHandlerRegistry;
   bufferSize: number;
   annotateTrap: (error: unknown, opts?: VoydTrapAnnotation) => Error;
+  runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner;
 }): WebAssembly.Imports => {
   const callbackImports: Record<string, CallableFunction> = {};
 
@@ -245,6 +258,25 @@ const buildVxCallbackImportModule = ({
       callbackImports[descriptor.name] = ((handlerRef: unknown): number =>
         registry.retain((payload) => {
           const instance = getInstance();
+          const rawCallbackExportName = `${callbackExportName}_effectful_raw`;
+          const returnsVoid = hasExportedFunction({
+            instance,
+            name: `${callbackExportName}_returns_void`,
+          });
+          const hasRawEffectfulCallback =
+            hasExportedFunction({ instance, name: rawCallbackExportName }) &&
+            hasExportedFunction({ instance, name: "init_effects" }) &&
+            hasExportedFunction({ instance, name: OUTCOME_TAG_EXPORT }) &&
+            hasExportedFunction({ instance, name: RESUME_EFFECTFUL_RAW_EXPORT }) &&
+            hasExportedFunction({ instance, name: END_REQUEST_RAW_EXPORT }) &&
+            hasExportedFunction({ instance, name: HANDLE_OUTCOME_EXPORT });
+          if (returnsVoid && hasRawEffectfulCallback) {
+            return runEffectfulRetainedCallback({
+              callbackExportName,
+              handlerRef,
+              payload,
+            }).then(() => undefined);
+          }
           const callback = requireExportedFunction({
             instance,
             name: callbackExportName,
@@ -278,6 +310,14 @@ const buildVxCallbackImportModule = ({
               bufferSize,
             ) as number;
           } catch (error) {
+            if (hasRawEffectfulCallback) {
+              const outcome = runEffectfulRetainedCallback({
+                callbackExportName,
+                handlerRef,
+                payload,
+              });
+              return returnsVoid ? outcome.then(() => undefined) : outcome;
+            }
             throw annotateTrap(error, {
               transition: {
                 point: "vx_retained_event_callback",
@@ -285,6 +325,9 @@ const buildVxCallbackImportModule = ({
               },
               fallbackFunctionName: callbackExportName,
             });
+          }
+          if (written === -2 && returnsVoid) {
+            return undefined;
           }
           if (written < 0) {
             throw new Error("VX retained event callback encoding failed");
@@ -621,6 +664,9 @@ export const createVoydHost = async ({
   });
   const callbackRegistry =
     retainedCallbacks ?? createRetainedEventHandlerRegistry();
+  let runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner = () => {
+    throw new Error("VX retained event callback called before host runtime initialization");
+  };
   const vxCallbackImports = buildVxCallbackImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
     getInstance: () => {
@@ -632,6 +678,7 @@ export const createVoydHost = async ({
     registry: callbackRegistry,
     bufferSize,
     annotateTrap,
+    runEffectfulRetainedCallback: (params) => runEffectfulRetainedCallback(params),
   });
   instanceRef = new WebAssembly.Instance(
     module,
@@ -790,9 +837,10 @@ export const createVoydHost = async ({
 
   const runEffectfulManaged = <T = unknown>(
     entryName: string,
-    args: unknown[] = []
+    args: unknown[] = [],
+    startRaw?: RawEffectfulStarter
   ): VoydRunHandle<T> => {
-    if (args.length > 0) {
+    if (args.length > 0 && !startRaw) {
       throw new Error("effectful exports do not accept arguments yet");
     }
     if (!initialized) {
@@ -812,7 +860,7 @@ export const createVoydHost = async ({
 
     const rawEntryName = `${effectfulExportNameFor(entryName)}_raw`;
     const hasRawTaskRuntime =
-      hasExportedFunction({ instance, name: rawEntryName }) &&
+      (startRaw !== undefined || hasExportedFunction({ instance, name: rawEntryName })) &&
       hasExportedFunction({ instance, name: OUTCOME_TAG_EXPORT }) &&
       hasExportedFunction({ instance, name: RESUME_EFFECTFUL_RAW_EXPORT }) &&
       hasExportedFunction({ instance, name: END_REQUEST_RAW_EXPORT });
@@ -897,10 +945,12 @@ export const createVoydHost = async ({
       };
     }
 
-    const rawEntry = requireExportedFunction({
-      instance,
-      name: rawEntryName,
-    });
+    const rawEntry = startRaw
+      ? undefined
+      : requireExportedFunction({
+          instance,
+          name: rawEntryName,
+        });
     const effectCont = requireExportedFunction({
       instance,
       name: "effect_cont",
@@ -1236,7 +1286,9 @@ export const createVoydHost = async ({
               }),
                   () => {
                     try {
-                      return rawEntry(bufferPtr, bufferSize);
+                      return startRaw
+                        ? startRaw({ bufferPtr, bufferSize })
+                        : rawEntry!(bufferPtr, bufferSize);
                     } catch (error) {
                   throw annotateTrap(error, {
                     transition: {
@@ -1787,6 +1839,55 @@ export const createVoydHost = async ({
       releaseEffectRunBufferPtr(bufferPtr);
     });
     return managedRun;
+  };
+
+  runEffectfulRetainedCallback = async ({
+    callbackExportName,
+    handlerRef,
+    payload,
+  }) => {
+    const rawCallbackExportName = `${callbackExportName}_effectful_raw`;
+    const callback = requireExportedFunction({
+      instance,
+      name: rawCallbackExportName,
+    });
+    const msgpackMemory = requireExportedMemory({
+      instance,
+      name: LINEAR_MEMORY_EXPORT,
+    });
+    const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
+    if (encodedPayload.length > bufferSize) {
+      throw new Error("VX retained event callback payload exceeds buffer size");
+    }
+    return unwrapRunOutcome(
+      runEffectfulManaged(callbackExportName, [], ({ bufferPtr, bufferSize }) => {
+        ensureMemoryCapacity({
+          memory: msgpackMemory,
+          requiredBytes: bufferPtr + bufferSize,
+          label: LINEAR_MEMORY_EXPORT,
+        });
+        new Uint8Array(msgpackMemory.buffer, bufferPtr, encodedPayload.length).set(
+          encodedPayload,
+        );
+        try {
+          return (callback as CallableFunction)(
+            handlerRef,
+            bufferPtr,
+            encodedPayload.length,
+            0,
+            0,
+          );
+        } catch (error) {
+          throw annotateTrap(error, {
+            transition: {
+              point: "vx_retained_event_callback",
+              direction: "host->vm",
+            },
+            fallbackFunctionName: rawCallbackExportName,
+          });
+        }
+      }).outcome,
+    );
   };
 
   const runManaged = <T = unknown>(

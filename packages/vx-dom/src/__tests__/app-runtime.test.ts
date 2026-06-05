@@ -136,6 +136,49 @@ describe("createVoydVxAppRuntime", () => {
       { id: 9, payload: "child" },
     ]);
   });
+
+  it("rerenders mapped local-only retained callbacks without update or mapper dispatch", async () => {
+    const seenMessages: unknown[] = [];
+    const retainedDispatch = vi.fn(async (id: number) => {
+      if (id === 7) return undefined;
+      throw new Error(`unexpected retained mapper ${id}`);
+    });
+    const host = fakeHost({
+      init: async () => "ready",
+      view: async ([current]) => textFrame(`View: ${String(current)}`),
+      update: async ([current, message]) => {
+        seenMessages.push(message);
+        return current;
+      },
+    });
+    host.retainedCallbacks = { dispatch: retainedDispatch };
+    const app = createVoydVxAppRuntime({ host });
+
+    await app.init?.();
+    await expect(
+      app.dispatch({
+        kind: "map",
+        handlerId: 9,
+        message: {
+          kind: "event",
+          handlerId: 7,
+          payload: { kind: "event", event: "click" },
+        },
+      }),
+    ).resolves.toEqual({
+      frame: textFrame("View: ready"),
+      commands: undefined,
+      subscriptions: undefined,
+      snapshot: "ready",
+    });
+
+    expect(seenMessages).toEqual([]);
+    expect(retainedDispatch).toHaveBeenCalledTimes(1);
+    expect(retainedDispatch).toHaveBeenCalledWith(7, {
+      kind: "event",
+      event: "click",
+    });
+  });
 });
 
 type FakeRun = (args: unknown[]) => Promise<unknown>;

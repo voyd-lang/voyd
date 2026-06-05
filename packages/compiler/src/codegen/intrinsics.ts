@@ -338,13 +338,17 @@ const ensureVxEventCallbackHelper = ({
           label: "VX event handler parameter",
         })
       : undefined;
-  const returnSerializer = findSerializerForType(desc.returnType, ctx);
+  const returnWasmType = wasmTypeFor(desc.returnType, ctx);
+  const returnsVoid = returnWasmType === binaryen.none;
+  const returnSerializer = returnsVoid
+    ? undefined
+    : findSerializerForType(desc.returnType, ctx);
   if (returnSerializer && returnSerializer.formatId !== "msgpack") {
     throw new Error(
       `VX event handler return serializer format ${returnSerializer.formatId} is not supported`
     );
   }
-  const returnSchema = returnSerializer
+  const returnSchema = returnSerializer || returnsVoid
     ? undefined
     : deriveBoundarySchema({
         typeId: desc.returnType,
@@ -356,7 +360,6 @@ const ensureVxEventCallbackHelper = ({
     !ctx.program.effects.isEmpty(desc.effectRow);
 
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
-  const returnWasmType = wasmTypeFor(desc.returnType, ctx);
   const base = getClosureTypeInfo(closureTypeId, ctx);
   const exportName = `__voyd_vx_event_callback_${sanitizeTaskKey(base.key)}`;
   const locals: binaryen.Type[] = [];
@@ -434,14 +437,36 @@ const ensureVxEventCallbackHelper = ({
     ] as number[],
     base.resultType
   );
+  const setup = loweredPayload?.setup ?? [];
+  if (effectful) {
+    const rawExportName = `${exportName}_effectful_raw`;
+    const dispatched = ctx.mod.call(
+      ensureDispatcher(ctx),
+      [callExpr],
+      ctx.effectsRuntime.outcomeType,
+    );
+    ctx.mod.addFunction(
+      rawExportName,
+      params,
+      ctx.effectsRuntime.outcomeType,
+      locals,
+      setup.length === 0
+        ? dispatched
+        : ctx.mod.block(null, [...setup, dispatched], ctx.effectsRuntime.outcomeType),
+    );
+    if (ctx.programHelpers.registerExportName(rawExportName)) {
+      ctx.mod.addFunctionExport(rawExportName, rawExportName);
+    }
+  }
+
   const resultValue = effectful
     ? unboxOutcomeValue({
         payload: ctx.effectsRuntime.outcomePayload(
           ctx.mod.call(
             ensureDispatcher(ctx),
             [callExpr],
-            ctx.effectsRuntime.outcomeType
-          )
+            ctx.effectsRuntime.outcomeType,
+          ),
         ),
         valueType: returnWasmType,
         typeId: desc.returnType,
@@ -455,31 +480,34 @@ const ensureVxEventCallbackHelper = ({
         ctx,
         fnCtx: helperFnCtx,
       });
-  const encodedResultValue = returnSerializer
-    ? coerceValueToType({
-        value: resultValue,
-        actualType: desc.returnType,
-        targetType: msgpack.msgPackTypeId,
-        ctx,
-        fnCtx: helperFnCtx,
-      })
-    : packBoundaryValueAsMsgPack({
-        value: resultValue,
-        schema: returnSchema!,
-        ctx,
-        fnCtx: helperFnCtx,
-      });
-  const encodedLength = ctx.mod.call(
-    msgpack.encodeValue.wasmName,
-    [
-      encodedResultValue,
-      ctx.mod.local.get(3, binaryen.i32),
-      ctx.mod.local.get(4, binaryen.i32),
-    ],
-    binaryen.i32
-  );
+  const encodedLength = returnsVoid
+    ? ctx.mod.block(null, [resultValue, ctx.mod.i32.const(-2)], binaryen.i32)
+    : (() => {
+        const encodedResultValue = returnSerializer
+          ? coerceValueToType({
+              value: resultValue,
+              actualType: desc.returnType,
+              targetType: msgpack.msgPackTypeId,
+              ctx,
+              fnCtx: helperFnCtx,
+            })
+          : packBoundaryValueAsMsgPack({
+              value: resultValue,
+              schema: returnSchema!,
+              ctx,
+              fnCtx: helperFnCtx,
+            });
+        return ctx.mod.call(
+          msgpack.encodeValue.wasmName,
+          [
+            encodedResultValue,
+            ctx.mod.local.get(3, binaryen.i32),
+            ctx.mod.local.get(4, binaryen.i32),
+          ],
+          binaryen.i32
+        );
+      })();
 
-  const setup = loweredPayload?.setup ?? [];
   ctx.mod.addFunction(
     exportName,
     params,
@@ -491,6 +519,19 @@ const ensureVxEventCallbackHelper = ({
   );
   if (ctx.programHelpers.registerExportName(exportName)) {
     ctx.mod.addFunctionExport(exportName, exportName);
+  }
+  if (returnsVoid) {
+    const markerName = `${exportName}_returns_void`;
+    ctx.mod.addFunction(
+      markerName,
+      binaryen.none,
+      binaryen.i32,
+      [],
+      ctx.mod.i32.const(1),
+    );
+    if (ctx.programHelpers.registerExportName(markerName)) {
+      ctx.mod.addFunctionExport(markerName, markerName);
+    }
   }
   helpers.set(closureTypeId, exportName);
   return exportName;

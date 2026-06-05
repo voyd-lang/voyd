@@ -94,13 +94,17 @@ pub eff Component
 
   task_started(tail, key: MsgPack, task_id: i32) -> void
 
-@intrinsic(name: "__vx_retain_event_handler")
+@intrinsic(name: "__vx_retain_event_handler", uses_signature: true)
 fn retain_event_handler_id(handler: fn() -> MsgPack): () -> i32
-  __vx_retain_event_handler(handler)
+  0
 
-@intrinsic(name: "__vx_retain_event_handler")
+@intrinsic(name: "__vx_retain_event_handler", uses_signature: true)
+fn retain_event_handler_void_id(handler: fn() -> void): () -> i32
+  0
+
+@intrinsic(name: "__vx_retain_event_handler", uses_signature: true)
 fn retain_event_handler_with_payload_id(handler: fn(MsgPack) -> MsgPack): () -> i32
-  __vx_retain_event_handler(handler)
+  0
 
 @intrinsic(name: "__vx_retain_event_handler", uses_signature: true)
 fn retain_typed_event_handler_id<Msg>(handler: fn() -> Msg): () -> i32
@@ -420,6 +424,10 @@ pub fn task<T>({ key: MsgPack, task: Task<T> }): Component -> Unit
 pub fn retain_event_handler(handler: fn() -> MsgPack): () -> i32
   retain_event_handler_id(handler)
 
+/// Retains a component-local effect callback that does not dispatch an app message.
+pub fn retain_event_handler(handler: fn() -> void): () -> i32
+  retain_event_handler_void_id(handler)
+
 /// Retains a pure Voyd event callback that receives the normalized event payload.
 pub fn retain_event_payload_handler(handler: fn(MsgPack) -> MsgPack): () -> i32
   retain_event_handler_with_payload_id(handler)
@@ -666,6 +674,12 @@ pub fn event({ name: String, handler: fn() -> MsgPack, options?: EventOptions })
 pub fn event({ name: StringSlice, handler: fn() -> MsgPack, options?: EventOptions }): () -> MsgPack
   event(name: name.to_string(), handler: handler, options: options)
 
+pub fn event({ name: String, handler: fn() -> void, options?: EventOptions }): () -> MsgPack
+  event(name: name, handler_id: retain_event_handler(handler), options: options)
+
+pub fn event({ name: StringSlice, handler: fn() -> void, options?: EventOptions }): () -> MsgPack
+  event(name: name.to_string(), handler: handler, options: options)
+
 pub fn event_payload({ name: String, handler: fn(MsgPack) -> MsgPack, options?: EventOptions }): () -> MsgPack
   event(name: name, handler_id: retain_event_payload_handler(handler), options: options)
 
@@ -718,6 +732,9 @@ pub fn event_message<Msg>({ name: StringSlice, message: Msg, options?: EventOpti
 pub fn on_click(handler: fn() -> MsgPack): () -> MsgPack
   event(name: "click", handler: handler)
 
+pub fn on_click(handler: fn() -> void): () -> MsgPack
+  event(name: "click", handler: handler)
+
 pub fn on_click_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
   event_payload(name: "click", handler: handler)
 
@@ -734,6 +751,9 @@ pub fn on_click_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
   event(name: "click", message: message, options: options)
 
 pub fn on_click_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "click", handler: handler, options: options)
+
+pub fn on_click_with({ options: EventOptions, handler: fn() -> void }): () -> MsgPack
   event(name: "click", handler: handler, options: options)
 
 pub fn on_click_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack

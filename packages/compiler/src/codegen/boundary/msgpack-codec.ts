@@ -3,6 +3,8 @@ import {
   arrayGet,
   arrayNew,
   arraySet,
+  binaryenTypeToHeapType,
+  initStruct,
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
@@ -20,7 +22,9 @@ import {
   liftHeapValueToInline,
   loadStructuralField,
   lowerValueForHeapField,
+  makeInlineValue,
 } from "../structural.js";
+import { captureMultivalueLanes } from "../multivalue.js";
 import {
   getFixedArrayWasmTypes,
   getInlineUnionLayout,
@@ -275,31 +279,40 @@ const unpackArray = ({
   const targetStorageRef = () => loadLocalValue(targetStorage, ctx);
   const loopLabel = freshLabel("boundary_array_unpack");
 
-  const arrayValue = initStructuralValue({
-    structInfo: info,
-    fieldValues: [
-      lowerValueForHeapField({
+  const fieldValueFor = (field: StructuralFieldInfo): binaryen.ExpressionRef => {
+    if (field.name === "storage") {
+      return lowerValueForHeapField({
         value: targetStorageRef(),
         typeId: storageField.typeId,
         targetType: storageField.heapWasmType,
         ctx,
         fnCtx,
-      }),
-      lowerValueForHeapField({
+      });
+    }
+    if (field.name === "count") {
+      return lowerValueForHeapField({
         value: countRef(),
         typeId: countField.typeId,
         targetType: countField.heapWasmType,
         ctx,
         fnCtx,
-      }),
-      lowerValueForHeapField({
+      });
+    }
+    if (field.name === "owners") {
+      return lowerValueForHeapField({
         value: freshArrayOwners({ typeId: ownersField.typeId, ctx, fnCtx }),
         typeId: ownersField.typeId,
         targetType: ownersField.heapWasmType,
         ctx,
         fnCtx,
-      }),
-    ],
+      });
+    }
+    throw new Error(`unexpected Array boundary field ${field.name}`);
+  };
+
+  const arrayValue = initStructuralValue({
+    structInfo: info,
+    fieldValues: info.fields.map(fieldValueFor),
     ctx,
   });
 
@@ -715,8 +728,20 @@ const fixedArrayNew = ({
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-  if (wasmTypes.kind !== "plain-array") {
-    throw new Error("boundary arrays with inline aggregate elements are not supported yet");
+  if (wasmTypes.kind === "inline-aggregate") {
+    const laneTypes = wasmTypes.laneTypes ?? [];
+    const laneArrayTypes = wasmTypes.laneArrayTypes ?? [];
+    return initStruct(ctx.mod, wasmTypes.type, [
+      length,
+      ...laneTypes.map((laneType, index) =>
+        arrayNew(
+          ctx.mod,
+          binaryenTypeToHeapType(laneArrayTypes[index]!),
+          length,
+          defaultValueForWasmType(laneType, ctx),
+        ),
+      ),
+    ]);
   }
   const elementType = wasmHeapFieldTypeFor(elementTypeId, ctx, new Set(), "runtime");
   return arrayNew(
@@ -742,8 +767,24 @@ const fixedArrayGet = ({
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-  if (wasmTypes.kind !== "plain-array") {
-    throw new Error("boundary arrays with inline aggregate elements are not supported yet");
+  if (wasmTypes.kind === "inline-aggregate") {
+    const laneTypes = wasmTypes.laneTypes ?? [];
+    const laneArrayTypes = wasmTypes.laneArrayTypes ?? [];
+    const lanes = laneTypes.map((laneType, laneIndex) =>
+      arrayGet(
+        ctx.mod,
+        structGetFieldValue({
+          mod: ctx.mod,
+          fieldIndex: laneIndex + 1,
+          fieldType: laneArrayTypes[laneIndex]!,
+          exprRef: array,
+        }),
+        index,
+        laneType,
+        false,
+      ),
+    );
+    return makeInlineValue({ values: lanes, ctx });
   }
   const elementType = wasmHeapFieldTypeFor(elementTypeId, ctx, new Set(), "runtime");
   return liftHeapValueToInline({
@@ -771,8 +812,31 @@ const fixedArraySet = ({
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-  if (wasmTypes.kind !== "plain-array") {
-    throw new Error("boundary arrays with inline aggregate elements are not supported yet");
+  if (wasmTypes.kind === "inline-aggregate") {
+    const laneTypes = wasmTypes.laneTypes ?? [];
+    const laneArrayTypes = wasmTypes.laneArrayTypes ?? [];
+    const captured = captureMultivalueLanes({
+      value,
+      abiTypes: laneTypes,
+      ctx,
+      fnCtx,
+    });
+    return ctx.mod.block(null, [
+      ...captured.setup,
+      ...captured.lanes.map((lane, laneIndex) =>
+        arraySet(
+          ctx.mod,
+          structGetFieldValue({
+            mod: ctx.mod,
+            fieldIndex: laneIndex + 1,
+            fieldType: laneArrayTypes[laneIndex]!,
+            exprRef: array,
+          }),
+          index,
+          lane,
+        ),
+      ),
+    ]);
   }
   const elementType = wasmHeapFieldTypeFor(elementTypeId, ctx, new Set(), "runtime");
   return arraySet(

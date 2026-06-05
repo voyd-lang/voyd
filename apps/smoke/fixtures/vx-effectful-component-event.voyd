@@ -1,0 +1,24 @@
+use std::msgpack
+use std::msgpack::MsgPack
+use std::string::type::String
+use std::vx::all
+
+pub fn init() -> MsgPack
+  msgpack::make_null()
+
+pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
+  model
+
+pub fn view(): Component -> MsgPack
+  let (count, count_state) = state(id: 1, initial: 0)
+  <button on_click={() =>
+    count_state.set(count + 1)
+  }>
+    Count: {label(count)}
+  </button>
+
+fn label(value: i32) -> String
+  if
+    value == 0: "0"
+    value == 1: "1"
+    else: "many"

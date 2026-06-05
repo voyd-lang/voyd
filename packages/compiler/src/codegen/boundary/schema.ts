@@ -208,15 +208,19 @@ const deriveBoundarySchemaInternal = ({
 
   active.add(typeId);
   try {
-    const arrayElement = arrayElementType({ typeId, ctx });
-    if (typeof arrayElement === "number") {
-      assertSupportedArrayStorage({ typeId, elementTypeId: arrayElement, ctx, path });
+    const array = arrayInfo({ typeId, ctx });
+    if (array) {
+      assertSupportedArrayStorage({
+        typeId: array.arrayTypeId,
+        ctx,
+        path,
+      });
       return {
         kind: "array",
-        typeId,
-        elementTypeId: arrayElement,
+        typeId: array.arrayTypeId,
+        elementTypeId: array.elementTypeId,
         element: deriveBoundarySchemaInternal({
-          typeId: arrayElement,
+          typeId: array.elementTypeId,
           ctx,
           path: `${path}[]`,
           active,
@@ -283,12 +287,10 @@ const deriveBoundarySchemaInternal = ({
 
 const assertSupportedArrayStorage = ({
   typeId,
-  elementTypeId,
   ctx,
   path,
 }: {
   typeId: TypeId;
-  elementTypeId: TypeId;
   ctx: CodegenContext;
   path: string;
 }): void => {
@@ -304,14 +306,8 @@ const assertSupportedArrayStorage = ({
     return;
   }
   const storageTypes = getFixedArrayWasmTypes(storage.typeId, ctx);
-  if (storageTypes.kind !== "plain-array") {
-    unsupported({
-      typeId: elementTypeId,
-      ctx,
-      path: `${path}[]`,
-      reason: "arrays of inline aggregate DTO values are not supported at the boundary yet",
-    });
-  }
+  if (storageTypes.kind === "plain-array") return;
+  if (storageTypes.kind === "inline-aggregate") return;
 };
 
 const deriveRecordSchema = ({
@@ -480,23 +476,23 @@ const primitiveSchema = ({
   return undefined;
 };
 
-const arrayElementType = ({
+const arrayInfo = ({
   typeId,
   ctx,
 }: {
   typeId: TypeId;
   ctx: CodegenContext;
-}): TypeId | undefined => {
+}): { arrayTypeId: TypeId; elementTypeId: TypeId } | undefined => {
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (
     (desc.kind === "nominal-object" || desc.kind === "value-object") &&
     desc.name === "Array" &&
     desc.typeArgs.length === 1
   ) {
-    return desc.typeArgs[0];
+    return { arrayTypeId: typeId, elementTypeId: desc.typeArgs[0]! };
   }
   if (desc.kind === "intersection" && typeof desc.nominal === "number") {
-    return arrayElementType({ typeId: desc.nominal, ctx });
+    return arrayInfo({ typeId: desc.nominal, ctx });
   }
   return undefined;
 };

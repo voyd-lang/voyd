@@ -372,13 +372,13 @@ const buildCfg = ({
     return { entry, exits, siteNodes };
   };
 
-  const attachCallArgTempCaptures = ({
-    callExprId,
+  const attachPreEffectTempCaptures = ({
+    ownerExprId,
     argExprIds,
     argGraphs,
     argIndexOffset = 0,
   }: {
-    callExprId: HirExprId;
+    ownerExprId: HirExprId;
     argExprIds: readonly HirExprId[];
     argGraphs: readonly Subgraph[];
     argIndexOffset?: number;
@@ -404,8 +404,11 @@ const buildCfg = ({
         ctx.module.types.getExprType(argExprId) ??
         ctx.program.primitives.unknown;
       tempCapturesByIndex[argIndex] = {
-        key: callArgTempKey({ callExprId, argIndex: argIndex + argIndexOffset }),
-        callExprId,
+        key: callArgTempKey({
+          callExprId: ownerExprId,
+          argIndex: argIndex + argIndexOffset,
+        }),
+        callExprId: ownerExprId,
         argIndex: argIndex + argIndexOffset,
         typeId,
       };
@@ -493,6 +496,11 @@ const buildCfg = ({
       }
       case "tuple": {
         const graphs = expr.elements.map((element) => buildExpr(element, flow));
+        attachPreEffectTempCaptures({
+          ownerExprId: expr.id,
+          argExprIds: expr.elements,
+          argGraphs: graphs,
+        });
         return sequence(graphs);
       }
       case "field-access": {
@@ -500,6 +508,11 @@ const buildCfg = ({
       }
       case "object-literal": {
         const graphs = expr.entries.map((entry) => buildExpr(entry.value, flow));
+        attachPreEffectTempCaptures({
+          ownerExprId: expr.id,
+          argExprIds: expr.entries.map((entry) => entry.value),
+          argGraphs: graphs,
+        });
         return sequence(graphs);
       }
       case "assign": {
@@ -710,16 +723,16 @@ const buildCfg = ({
             : calleeExpr?.exprKind === "identifier"
               ? !skipCalleeIdentifierUse
               : true;
-        attachCallArgTempCaptures(
+        attachPreEffectTempCaptures(
           includeCalleeTempCapture
             ? {
-                callExprId: expr.id,
+                ownerExprId: expr.id,
                 argExprIds: [expr.callee, ...expr.args.map((arg) => arg.expr)],
                 argGraphs: [calleeGraph, ...argGraphs],
                 argIndexOffset: -1,
               }
             : {
-                callExprId: expr.id,
+                ownerExprId: expr.id,
                 argExprIds: expr.args.map((arg) => arg.expr),
                 argGraphs,
               }
@@ -752,8 +765,8 @@ const buildCfg = ({
                 : undefined,
         });
 
-        attachCallArgTempCaptures({
-          callExprId: expr.id,
+        attachPreEffectTempCaptures({
+          ownerExprId: expr.id,
           argExprIds: [expr.target, ...expr.args.map((arg) => arg.expr)],
           argGraphs: callArgGraphs,
         });

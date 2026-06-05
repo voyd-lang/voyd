@@ -14,6 +14,14 @@ import {
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
 const siteExampleRoot = path.resolve(import.meta.dirname, "../../site/examples");
 const typedCounterEntryPath = path.join(fixtureRoot, "vx-typed-counter.voyd");
+const effectfulComponentEventEntryPath = path.join(
+  fixtureRoot,
+  "vx-effectful-component-event.voyd",
+);
+const inlineAggregateArrayEntryPath = path.join(
+  fixtureRoot,
+  "vx-inline-aggregate-array.voyd",
+);
 const typedMouseEventEntryPath = path.join(fixtureRoot, "vx-typed-mouse-event.voyd");
 const userProgramNameEntryPath = path.join(fixtureRoot, "vx-user-program-name.voyd");
 const wideValueModelEntryPath = path.join(fixtureRoot, "vx-wide-value-model.voyd");
@@ -178,6 +186,67 @@ describe("smoke: compiled VX DOM rendering", () => {
     expect(container.innerHTML).toBe("");
   });
 
+  it("marshals inline aggregate arrays through typed VX export wrappers", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({ entryPath: inlineAggregateArrayEntryPath }),
+    );
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+    const app = createVoydVxAppRuntime({ host });
+
+    const container = document.createElement("div");
+    const mounted = await mountVxApp({ container, app });
+
+    expect(mounted.getSnapshot()).toEqual([
+      { x: 1, y: 2 },
+      { x: 3, y: 4 },
+    ]);
+    expect(container.querySelector("button")?.textContent).toContain("Point: 1");
+
+    container.querySelector<HTMLButtonElement>("button")?.click();
+    await nextTurn();
+
+    expect(mounted.getSnapshot()).toEqual([
+      { x: 11, y: 22 },
+      { x: 13, y: 24 },
+    ]);
+    expect(container.querySelector("button")?.textContent).toContain("Point: 11");
+
+    mounted.dispose();
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("runs effectful component-local state updates from retained event callbacks", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({ entryPath: effectfulComponentEventEntryPath }),
+    );
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+    const app = createVoydVxAppRuntime({
+      host,
+      viewReceivesModel: false,
+    });
+
+    const container = document.createElement("div");
+    const mounted = await mountVxApp({ container, app });
+
+    expect(container.querySelector("button")?.textContent).toContain("Count: 0");
+
+    container.querySelector<HTMLButtonElement>("button")?.click();
+    await waitForTextContaining(container, "button", "Count: 1");
+
+    expect(container.querySelector("button")?.textContent).toContain("Count: 1");
+
+    mounted.dispose();
+    expect(container.innerHTML).toBe("");
+  });
+
   it("marshals typed mouse payload callbacks and integer JS numbers to f64 fields", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(await sdk.compile({ entryPath: typedMouseEventEntryPath }));
@@ -311,14 +380,18 @@ pub fn view(model: Model) -> Html<Msg>
     const searchInput = container.querySelector<HTMLInputElement>('.wiki-demo-search input')!;
     searchInput.value = "Events";
     searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
-    await nextTurn();
+    await waitForPageButtonLabels(container, ["Events"]);
 
     expect(pageButtonLabels(container)).toEqual(["Events"]);
     expect(container.querySelector(".wiki-demo-hint")?.textContent).toBe("Search: Events");
 
     searchInput.value = "";
     searchInput.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" }));
-    await nextTurn();
+    await waitForPageButtonLabels(container, [
+      "Getting started",
+      "State lives in Voyd",
+      "Events",
+    ]);
 
     expect(pageButtonLabels(container)).toEqual([
       "Getting started",
@@ -362,7 +435,7 @@ pub fn view(model: Model) -> Html<Msg>
     expect(container.querySelector(".wiki-demo-dirty")?.textContent).toBe("Unsaved");
 
     container.querySelector<HTMLButtonElement>(".wiki-demo-toolbar button.primary")?.click();
-    await wait(10);
+    await waitForText(container, ".wiki-demo-status", "Saved");
 
     expect(container.querySelector(".wiki-demo-status")?.textContent).toBe("Saved");
     expect(container.querySelector(".wiki-demo-dirty")?.textContent).toBe("Saved");
@@ -397,7 +470,55 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForText(
+  container: Element,
+  selector: string,
+  expected: string,
+  timeoutMs = 250,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    if (container.querySelector(selector)?.textContent === expected) {
+      return;
+    }
+    await wait(5);
+  }
+}
+
+async function waitForTextContaining(
+  container: Element,
+  selector: string,
+  expected: string,
+  timeoutMs = 250,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    if (container.querySelector(selector)?.textContent?.includes(expected)) {
+      return;
+    }
+    await wait(5);
+  }
+}
+
 function pageButtonLabels(container: Element): string[] {
   return Array.from(container.querySelectorAll(".wiki-demo-page-list button"))
     .map((button) => button.textContent ?? "");
+}
+
+async function waitForPageButtonLabels(
+  container: Element,
+  expected: string[],
+  timeoutMs = 250,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    const actual = pageButtonLabels(container);
+    if (
+      actual.length === expected.length &&
+      actual.every((label, index) => label === expected[index])
+    ) {
+      return;
+    }
+    await wait(5);
+  }
 }
