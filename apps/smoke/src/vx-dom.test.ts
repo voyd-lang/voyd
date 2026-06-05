@@ -304,7 +304,7 @@ describe("smoke: compiled VX DOM rendering", () => {
     expect(container.querySelector(".wiki-demo-dirty")?.textContent).toBe("Unsaved");
 
     container.querySelector<HTMLButtonElement>(".wiki-demo-toolbar button.primary")?.click();
-    await wait(10);
+    await waitForText(container, ".wiki-demo-status", "Saved");
 
     expect(container.querySelector(".wiki-demo-status")?.textContent).toBe("Saved");
     expect(container.querySelector(".wiki-demo-dirty")?.textContent).toBe("Saved");
@@ -337,6 +337,21 @@ function nextTurn(): Promise<void> {
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForText(
+  container: Element,
+  selector: string,
+  expected: string,
+  timeoutMs = 250,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() <= deadline) {
+    if (container.querySelector(selector)?.textContent === expected) {
+      return;
+    }
+    await wait(5);
+  }
 }
 
 function pageButtonLabels(container: Element): string[] {
