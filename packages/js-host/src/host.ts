@@ -42,6 +42,10 @@ import {
   type VoydTrapAnnotation,
   type VoydRuntimePanicContext,
 } from "./runtime/trap-diagnostics.js";
+import {
+  createRetainedEventHandlerRegistry,
+  type RetainedEventHandlerRegistry,
+} from "./retained-callbacks.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
@@ -49,6 +53,7 @@ export type HostInitOptions = {
   bufferSize?: number;
   scheduler?: RuntimeSchedulerOptions;
   defaultAdapters?: boolean | DefaultAdapterOptions;
+  retainedCallbacks?: RetainedEventHandlerRegistry;
 };
 
 export type VoydHost = {
@@ -75,10 +80,12 @@ export type VoydHost = {
   runManaged: <T = unknown>(entryName: string, args?: unknown[]) => VoydRunHandle<T>;
   runEffectful: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
   run: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
+  retainedCallbacks: RetainedEventHandlerRegistry;
 };
 
 const MSGPACK_OPTS = { useBigInt64: true } as const;
 const TASK_RUNTIME_IMPORT_MODULE = "voyd.task";
+const VX_CALLBACK_IMPORT_MODULE = "voyd.vx.callback";
 const TASK_RUNTIME_EFFECT_ID = "voyd.std.task.runtime";
 const TASK_RUNTIME_WAIT_OP_ID = 0;
 const TASK_RUNTIME_YIELD_OP_ID = 1;
@@ -206,6 +213,94 @@ const buildTaskRuntimeImportModule = ({
     ? {}
     : {
         [TASK_RUNTIME_IMPORT_MODULE]: taskRuntimeImports,
+    };
+};
+
+const buildVxCallbackImportModule = ({
+  importDescriptors,
+  getInstance,
+  registry,
+  bufferSize,
+  annotateTrap,
+}: {
+  importDescriptors: WebAssembly.ModuleImportDescriptor[];
+  getInstance: () => WebAssembly.Instance;
+  registry: RetainedEventHandlerRegistry;
+  bufferSize: number;
+  annotateTrap: (error: unknown, opts?: VoydTrapAnnotation) => Error;
+}): WebAssembly.Imports => {
+  const callbackImports: Record<string, CallableFunction> = {};
+
+  importDescriptors
+    .filter(
+      (descriptor) =>
+        descriptor.module === VX_CALLBACK_IMPORT_MODULE &&
+        descriptor.kind === "function",
+    )
+    .forEach((descriptor) => {
+      if (!descriptor.name.startsWith("retain_event__")) {
+        return;
+      }
+      const callbackExportName = descriptor.name.slice("retain_event__".length);
+      callbackImports[descriptor.name] = ((handlerRef: unknown): number =>
+        registry.retain((payload) => {
+          const instance = getInstance();
+          const callback = requireExportedFunction({
+            instance,
+            name: callbackExportName,
+          });
+          const msgpackMemory = requireExportedMemory({
+            instance,
+            name: LINEAR_MEMORY_EXPORT,
+          });
+          const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
+          if (encodedPayload.length > bufferSize) {
+            throw new Error("VX retained event callback payload exceeds buffer size");
+          }
+          ensureMemoryCapacity({
+            memory: msgpackMemory,
+            requiredBytes: bufferSize * 2,
+            label: LINEAR_MEMORY_EXPORT,
+          });
+          const inPtr = 0;
+          const outPtr = bufferSize;
+          new Uint8Array(msgpackMemory.buffer, inPtr, encodedPayload.length).set(
+            encodedPayload,
+          );
+
+          let written: number;
+          try {
+            written = (callback as CallableFunction)(
+              handlerRef,
+              inPtr,
+              encodedPayload.length,
+              outPtr,
+              bufferSize,
+            ) as number;
+          } catch (error) {
+            throw annotateTrap(error, {
+              transition: {
+                point: "vx_retained_event_callback",
+                direction: "host->vm",
+              },
+              fallbackFunctionName: callbackExportName,
+            });
+          }
+          if (written < 0) {
+            throw new Error("VX retained event callback encoding failed");
+          }
+          if (written > bufferSize) {
+            throw new Error("VX retained event callback payload exceeds buffer size");
+          }
+          const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
+          return decode(bytes, MSGPACK_OPTS);
+        })) as CallableFunction;
+    });
+
+  return Object.keys(callbackImports).length === 0
+    ? {}
+    : {
+        [VX_CALLBACK_IMPORT_MODULE]: callbackImports,
       };
 };
 
@@ -498,6 +593,7 @@ export const createVoydHost = async ({
   bufferSize = MIN_EFFECT_BUFFER_SIZE,
   scheduler,
   defaultAdapters = true,
+  retainedCallbacks,
 }: HostInitOptions): Promise<VoydHost> => {
   const module = toModule(wasm);
   const trapDiagnostics = createVoydTrapDiagnostics({ module });
@@ -523,12 +619,27 @@ export const createVoydHost = async ({
     importDescriptors: WebAssembly.Module.imports(module),
     getContext: () => activeTaskImportContext,
   });
+  const callbackRegistry =
+    retainedCallbacks ?? createRetainedEventHandlerRegistry();
+  const vxCallbackImports = buildVxCallbackImportModule({
+    importDescriptors: WebAssembly.Module.imports(module),
+    getInstance: () => {
+      if (!instanceRef) {
+        throw new Error("VX callback import called before host instance initialization");
+      }
+      return instanceRef;
+    },
+    registry: callbackRegistry,
+    bufferSize,
+    annotateTrap,
+  });
   instanceRef = new WebAssembly.Instance(
     module,
     mergeDefaultImports(
       {
         ...defaultImports(),
         ...(taskRuntimeImports as Record<string, unknown>),
+        ...(vxCallbackImports as Record<string, unknown>),
       } as WebAssembly.Imports,
       imports
     )
@@ -1123,10 +1234,10 @@ export const createVoydHost = async ({
                 state,
                 activeTaskId: rootTaskId,
               }),
-              () => {
-                try {
-                  return rawEntry(bufferPtr, bufferSize);
-                } catch (error) {
+                  () => {
+                    try {
+                      return rawEntry(bufferPtr, bufferSize);
+                    } catch (error) {
                   throw annotateTrap(error, {
                     transition: {
                       point: "effectful_entry",
@@ -1736,6 +1847,7 @@ export const createVoydHost = async ({
     runManaged,
     runEffectful,
     run,
+    retainedCallbacks: callbackRegistry,
   };
 
   if (defaultAdapters !== false) {

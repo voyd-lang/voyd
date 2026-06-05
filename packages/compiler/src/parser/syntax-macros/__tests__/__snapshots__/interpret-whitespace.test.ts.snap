@@ -1011,10 +1011,10 @@ exports[`it correctly handles the kitchen sink 1`] = `
         [
           "block",
           [
-            "create_element",
+            "element",
             [
               ":",
-              "name",
+              "tag",
               [
                 "new_string",
                 [
@@ -1027,7 +1027,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
             ],
             [
               ":",
-              "attributes",
+              "attrs",
               [
                 "new_array_unchecked",
                 [
@@ -1036,54 +1036,47 @@ exports[`it correctly handles the kitchen sink 1`] = `
                   [
                     "fixed_array_literal",
                     [
-                      "new_array_unchecked",
+                      "attr",
                       [
                         ":",
-                        "from",
+                        "name",
                         [
-                          "fixed_array_literal",
+                          "new_string",
                           [
-                            "new_string",
-                            [
-                              "fixed_array_literal",
-                              "104",
-                              "105",
-                            ],
-                          ],
-                          [
-                            "new_string",
-                            [
-                              "fixed_array_literal",
-                              "116",
-                              "114",
-                              "117",
-                              "101",
-                            ],
+                            "fixed_array_literal",
+                            "104",
+                            "105",
                           ],
                         ],
                       ],
-                    ],
-                    [
-                      "new_array_unchecked",
                       [
                         ":",
-                        "from",
+                        "value",
+                        "true",
+                      ],
+                    ],
+                    [
+                      "attr",
+                      [
+                        ":",
+                        "name",
                         [
-                          "fixed_array_literal",
+                          "new_string",
                           [
-                            "new_string",
-                            [
-                              "fixed_array_literal",
-                              "105",
-                            ],
+                            "fixed_array_literal",
+                            "105",
                           ],
+                        ],
+                      ],
+                      [
+                        ":",
+                        "value",
+                        [
+                          "new_string",
                           [
-                            "new_string",
-                            [
-                              "fixed_array_literal",
-                              "97",
-                              "109",
-                            ],
+                            "fixed_array_literal",
+                            "97",
+                            "109",
                           ],
                         ],
                       ],
@@ -1103,10 +1096,10 @@ exports[`it correctly handles the kitchen sink 1`] = `
                   [
                     "fixed_array_literal",
                     [
-                      "create_element",
+                      "element",
                       [
                         ":",
-                        "name",
+                        "tag",
                         [
                           "new_string",
                           [
@@ -1117,7 +1110,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                       ],
                       [
                         ":",
-                        "attributes",
+                        "attrs",
                         [
                           "new_array_unchecked",
                           [
@@ -1126,32 +1119,33 @@ exports[`it correctly handles the kitchen sink 1`] = `
                             [
                               "fixed_array_literal",
                               [
-                                "new_array_unchecked",
+                                "attr",
                                 [
                                   ":",
-                                  "from",
+                                  "name",
                                   [
-                                    "fixed_array_literal",
+                                    "new_string",
                                     [
-                                      "new_string",
-                                      [
-                                        "fixed_array_literal",
-                                        "114",
-                                        "101",
-                                        "97",
-                                        "100",
-                                        "121",
-                                      ],
+                                      "fixed_array_literal",
+                                      "114",
+                                      "101",
+                                      "97",
+                                      "100",
+                                      "121",
                                     ],
+                                  ],
+                                ],
+                                [
+                                  ":",
+                                  "value",
+                                  [
+                                    "new_string",
                                     [
-                                      "new_string",
-                                      [
-                                        "fixed_array_literal",
-                                        "116",
-                                        "114",
-                                        "117",
-                                        "101",
-                                      ],
+                                      "fixed_array_literal",
+                                      "116",
+                                      "114",
+                                      "117",
+                                      "101",
                                     ],
                                   ],
                                 ],
@@ -1196,10 +1190,10 @@ exports[`it correctly handles the kitchen sink 1`] = `
                       ],
                     ],
                     [
-                      "create_element",
+                      "element",
                       [
                         ":",
-                        "name",
+                        "tag",
                         [
                           "new_string",
                           [

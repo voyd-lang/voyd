@@ -137,8 +137,10 @@ describe("smoke: wasm validation", { timeout: 120_000 }, () => {
     const result = await host.runPure("main");
 
     const normalized = normalize(result) as Record<string, unknown>;
-    expect(normalized).toEqual(expect.objectContaining({ name: "div" }));
-    expect(normalized.attributes).toBeTypeOf("object");
+    expect(normalized).toEqual(
+      expect.objectContaining({ kind: "element", tag: "div" }),
+    );
+    expect(normalized.attrs).toBeTypeOf("object");
     expect(normalized.children).toBeInstanceOf(Array);
   });
 

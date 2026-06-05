@@ -13,7 +13,8 @@ compiles to webassembly.
 - `packages/compiler`: Parser, semantics, and Wasm codegen pipeline.
 - `packages/language-server`: LSP server built on compiler + std.
 - `packages/sdk`: Public Node/browser/deno APIs for compile/run/test flows.
-- `packages/lib`: Shared runtime/tooling utilities (CLI helpers, binaryen helpers, VSX DOM client).
+- `packages/lib`: Shared runtime/tooling utilities (CLI helpers, binaryen helpers).
+- `packages/vx-dom`: Browser/server VX DOM renderer and hydration APIs.
 - `packages/js-host`: JS host runtime used for executing compiled modules.
 - `packages/std`: Standard library source bundle (Voyd source).
 - `packages/reference`: Language reference source/build scripts.
@@ -36,9 +37,7 @@ report on it and suggest direction in your final response.
 - When diagnosing bugs, prefer implementation-level root-cause fixes over
 call-site/type-annotation workarounds unless a workaround is explicitly requested.
 - Always be mindful about clear code boundaries and contracts. Avoid introducing any unnecessary coupling.
-
-Voyd has not yet been released. Breaking changes to public APIs are ok. Just
-note the breaking changes if made.
+- When you encounter a bug or important missing feature that is likely to have a real impact on users and is unrelated to your current task, file a ticket in linear tagged with codex.
 
 # Required Pre-Reads
 

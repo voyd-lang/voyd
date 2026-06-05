@@ -60,6 +60,16 @@ const methodCall = ({
 }): Expr => call(identifier("."), target, new Form([identifier(method), ...args]).toCall());
 
 describe("string macro utf8 encoding", () => {
+  it("lowers empty strings to String init without an untyped empty byte array", () => {
+    const expected = call(
+      identifier("::"),
+      identifier("String"),
+      call(identifier("init")),
+    );
+
+    expect(toPlain(stringExpr(""))).toEqual(toPlain(expected));
+  });
+
   it("encodes surrogate pairs as utf8 bytes", () => {
     expect(bytesFromStringLiteral("😀")).toEqual([240, 159, 152, 128]);
   });

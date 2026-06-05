@@ -45,6 +45,7 @@ export default defineConfig({
       "@voyd-lang/lib",
       "@voyd-lang/sdk",
       "@voyd-lang/std",
+      "@voyd-lang/vx-dom",
     ],
     alias: [
       { find: /^@voyd-lang\/reference$/, replacement: referenceEntry },
@@ -66,6 +67,7 @@ export default defineConfig({
       "@voyd-lang/reference",
       "@voyd-lang/sdk",
       "@voyd-lang/std",
+      "@voyd-lang/vx-dom",
     ],
     esbuildOptions: {
       supported: {

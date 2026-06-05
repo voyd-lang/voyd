@@ -1,12 +1,14 @@
 
-use std::all
+use std::array::Array
 use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::string::type::{ String, new_string }
 use std::vx::all
 
 fn App() -> MsgPack
   let features = feature_list()
   <Card>
-    <Title>Voyd + VSX</Title>
+    <Title>Voyd + VX</Title>
     <p style="margin: 0 0 10px 0; color: #cbd5e1;">Build clean UIs in language, no extensions required</p>
     <List value={features} />
   </Card>
@@ -45,3 +47,6 @@ fn feature_list() -> Array<String>
 
 pub fn main()
   App()
+
+pub fn event_message_button() -> MsgPack
+  <button on_click={msgpack::make_string("save")}>Save</button>

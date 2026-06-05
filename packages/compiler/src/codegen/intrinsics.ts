@@ -40,9 +40,11 @@ import {
 import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { ensureDispatcher } from "./effects/dispatcher.js";
+import { ensureMsgPackFunctions } from "./effects/host-boundary/msgpack.js";
 import { unboxOutcomeValue, wrapValueInOutcome } from "./effects/outcome-values.js";
 import { captureMultivalueLanes } from "./multivalue.js";
 import { ensureFixedArrayWasmTypesByElement } from "./fixed-array-types.js";
+import { ensureLinearMemoryExport } from "./memory-exports.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
@@ -92,6 +94,9 @@ const PANIC_SCRATCH_CAPACITY_GLOBAL = "__voyd_panic_scratch_capacity";
 const TASK_IMPORT_MODULE = "voyd.task";
 const TASK_IMPORTS_KEY = Symbol("voyd.task.imports");
 const TASK_STARTERS_KEY = Symbol("voyd.task.starters");
+const VX_CALLBACK_IMPORT_MODULE = "voyd.vx.callback";
+const VX_CALLBACK_IMPORTS_KEY = Symbol("voyd.vx.callback.imports");
+const VX_CALLBACK_HELPERS_KEY = Symbol("voyd.vx.callback.helpers");
 
 const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
   if (ctx.mod.getGlobal(PANIC_TRAP_PTR_GLOBAL) === 0) {
@@ -156,6 +161,37 @@ const ensureTaskImport = ({
   ctx.mod.addFunctionImport(
     name,
     TASK_IMPORT_MODULE,
+    base,
+    binaryen.createType(params as number[]),
+    result
+  );
+  imports.add(name);
+  return name;
+};
+
+const ensureVxCallbackImport = ({
+  name,
+  base,
+  params,
+  result,
+  ctx,
+}: {
+  name: string;
+  base: string;
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+}): string => {
+  const imports = ctx.programHelpers.getHelperState(
+    VX_CALLBACK_IMPORTS_KEY,
+    () => new Set<string>()
+  );
+  if (imports.has(name)) {
+    return name;
+  }
+  ctx.mod.addFunctionImport(
+    name,
+    VX_CALLBACK_IMPORT_MODULE,
     base,
     binaryen.createType(params as number[]),
     result
@@ -246,6 +282,117 @@ const ensureTaskStarterHelper = ({
     ctx.mod.addFunctionExport(exportName, exportName);
   }
   starters.set(closureTypeId, exportName);
+  return exportName;
+};
+
+const ensureVxEventCallbackHelper = ({
+  closureTypeId,
+  ctx,
+}: {
+  closureTypeId: TypeId;
+  ctx: CodegenContext;
+}): string => {
+  const helpers = ctx.programHelpers.getHelperState(
+    VX_CALLBACK_HELPERS_KEY,
+    () => new Map<number, string>()
+  );
+  const cached = helpers.get(closureTypeId);
+  if (cached) {
+    return cached;
+  }
+
+  const desc = ctx.program.types.getTypeDesc(closureTypeId);
+  if (desc.kind !== "function") {
+    throw new Error("VX event handler retention requires a function value");
+  }
+  if (desc.parameters.length > 1) {
+    throw new Error("VX event handler retention supports fn() -> MsgPack or fn(MsgPack) -> MsgPack");
+  }
+  ensureLinearMemoryExport(ctx);
+  const msgpack = ensureMsgPackFunctions(ctx);
+  if (
+    desc.parameters.length === 1 &&
+    desc.parameters[0]?.type !== msgpack.msgPackTypeId
+  ) {
+    throw new Error("VX event handler payload parameter must be MsgPack");
+  }
+  if (desc.returnType !== msgpack.msgPackTypeId) {
+    throw new Error("VX event handler retention requires a MsgPack return value");
+  }
+  const effectful =
+    typeof desc.effectRow === "number" &&
+    !ctx.program.effects.isEmpty(desc.effectRow);
+
+  const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+  const base = getClosureTypeInfo(closureTypeId, ctx);
+  const exportName = `__voyd_vx_event_callback_${sanitizeTaskKey(base.key)}`;
+  const params = binaryen.createType([
+    base.interfaceType,
+    binaryen.i32,
+    binaryen.i32,
+    binaryen.i32,
+    binaryen.i32,
+  ]);
+  const closureRef = ctx.mod.local.get(0, base.interfaceType);
+  const payloadValue =
+    desc.parameters.length === 1
+      ? ctx.mod.call(
+          msgpack.decodeValue.wasmName,
+          [ctx.mod.local.get(1, binaryen.i32), ctx.mod.local.get(2, binaryen.i32)],
+          msgPackType
+        )
+      : undefined;
+  const fnField = structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: 0,
+    fieldType: binaryen.funcref,
+    exprRef: closureRef,
+  });
+  const targetFn =
+    base.fnRefType === binaryen.funcref
+      ? fnField
+      : refCast(ctx.mod, fnField, base.fnRefType);
+  const callExpr = callRef(
+    ctx.mod,
+    targetFn,
+    [
+      closureRef,
+      ...base.paramTypes
+        .slice(0, base.userParamOffset)
+        .map(() => ctx.effectsBackend.abi.hiddenHandlerValue(ctx)),
+      ...(payloadValue ? [payloadValue] : []),
+    ] as number[],
+    base.resultType
+  );
+  const resultValue = effectful
+    ? unboxOutcomeValue({
+        payload: ctx.effectsRuntime.outcomePayload(
+          ctx.mod.call(
+            ensureDispatcher(ctx),
+            [callExpr],
+            ctx.effectsRuntime.outcomeType
+          )
+        ),
+        valueType: msgPackType,
+        typeId: msgpack.msgPackTypeId,
+        ctx,
+      })
+    : callExpr;
+  const encodedLength = ctx.mod.call(
+    msgpack.encodeValue.wasmName,
+    [
+      resultValue,
+      ctx.mod.local.get(3, binaryen.i32),
+      ctx.mod.local.get(4, binaryen.i32),
+    ],
+    binaryen.i32
+  );
+
+  ctx.mod.addFunction(exportName, params, binaryen.i32, [], encodedLength);
+  if (ctx.programHelpers.registerExportName(exportName)) {
+    ctx.mod.addFunctionExport(exportName, exportName);
+  }
+  helpers.set(closureTypeId, exportName);
   return exportName;
 };
 
@@ -901,6 +1048,28 @@ export const compileIntrinsicCall = ({
         typeId: returnTypeId,
         ctx,
       });
+    }
+    case "__vx_retain_event_handler": {
+      assertArgCount(name, args, 1);
+      const handlerTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const handlerType = ctx.program.types.getTypeDesc(handlerTypeId);
+      if (handlerType.kind !== "function") {
+        throw new Error("__vx_retain_event_handler requires a function-typed value");
+      }
+      const helperExport = ensureVxEventCallbackHelper({
+        closureTypeId: handlerTypeId,
+        ctx,
+      });
+      const closureInfo = getClosureTypeInfo(handlerTypeId, ctx);
+      const importName = `__voyd_vx_retain_event_handler_${sanitizeTaskKey(helperExport)}`;
+      const importFn = ensureVxCallbackImport({
+        name: importName,
+        base: `retain_event__${helperExport}`,
+        params: [closureInfo.interfaceType],
+        result: binaryen.i32,
+        ctx,
+      });
+      return ctx.mod.call(importFn, [args[0]!], binaryen.i32);
     }
     case "__shift_l":
     case "__shift_ru": {

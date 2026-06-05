@@ -1,0 +1,12 @@
+use std::msgpack
+use std::msgpack::MsgPack
+use std::vx::all
+
+fn clicked(payload: MsgPack) -> MsgPack
+  payload
+
+pub fn main() -> MsgPack
+  <button on_click={(payload: MsgPack) -> MsgPack => clicked(payload)}>Click</button>
+
+pub fn input_echo() -> MsgPack
+  <input value="hello" on_input={(payload: MsgPack) -> MsgPack => clicked(payload)} />
