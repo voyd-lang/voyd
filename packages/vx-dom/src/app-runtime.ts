@@ -35,6 +35,7 @@ export type CreateVoydVxAppRuntimeOptions = {
 };
 
 type RuntimeResult = Record<string, unknown> & {
+  $vx: "runtime_result";
   model?: unknown;
   frame?: unknown;
   commands?: unknown;
@@ -46,6 +47,13 @@ const defaultExports = {
   update: "update",
   view: "view",
 } satisfies Required<Omit<VoydVxAppRuntimeExports, "subscriptions">>;
+
+const runtimeResult = (value: Omit<RuntimeResult, "$vx">): RuntimeResult => ({
+  $vx: "runtime_result",
+  ...value,
+});
+
+const noRuntimeMessage = Symbol("vx.noRuntimeMessage");
 
 export function createVoydVxAppRuntime(
   options: CreateVoydVxAppRuntimeOptions,
@@ -111,13 +119,16 @@ export function createVoydVxAppRuntime(
   return {
     init: async () => {
       const result = initialized
-        ? { model }
+        ? runtimeResult({ model })
         : await options.host.run(entryNames.init);
       return toRuntimeStep(result, true);
     },
     render,
     dispatch: async (message) => {
       const resolved = await resolveRuntimeMessage(options.host, message);
+      if (resolved === noRuntimeMessage) {
+        return toRuntimeStep(runtimeResult({ model: requireModel() }), false);
+      }
       const result = await options.host.run(entryNames.update, [
         requireModel(),
         resolved,
@@ -171,8 +182,14 @@ async function resolveEventMessage(
   host: VoydVxAppHost,
   message: VxRuntimeEventMessage,
 ): Promise<unknown> {
-  return host.retainedCallbacks?.dispatch(message.handlerId, message.payload) ??
-    eventPayloadFallback(message.payload);
+  if (!host.retainedCallbacks) {
+    return eventPayloadFallback(message.payload);
+  }
+  const result = await host.retainedCallbacks.dispatch(
+    message.handlerId,
+    message.payload,
+  );
+  return result === undefined ? noRuntimeMessage : result;
 }
 
 async function resolveMapMessage(
@@ -180,6 +197,9 @@ async function resolveMapMessage(
   message: VxRuntimeMapMessage,
 ): Promise<unknown> {
   const child = await resolveRuntimeMessage(host, message.message);
+  if (child === noRuntimeMessage) {
+    return noRuntimeMessage;
+  }
   return host.retainedCallbacks?.dispatch(message.handlerId, child) ?? child;
 }
 
@@ -192,5 +212,10 @@ function eventPayloadFallback(payload: NormalizedEventPayload): unknown {
 }
 
 function isRuntimeResult(input: unknown): input is RuntimeResult {
-  return !!input && typeof input === "object" && !Array.isArray(input);
+  return (
+    !!input &&
+    typeof input === "object" &&
+    !Array.isArray(input) &&
+    (input as { $vx?: unknown }).$vx === "runtime_result"
+  );
 }

@@ -162,6 +162,27 @@ fn msgpack_map_set(map: Dict<String, MsgPack>, key: String, value: MsgPack): () 
   next.set(key, value)
   next
 
+fn msgpack_map_get(map: Dict<String, MsgPack>, key: String): () -> MsgPack
+  match(map.get(key))
+    Some<MsgPack> { value }:
+      value
+    None:
+      make_null()
+
+fn msgpack_map_tag_is(map: Dict<String, MsgPack>, expected: String): () -> bool
+  match(map.get("$variant"))
+    Some<MsgPack> { value }:
+      match(unpack_string(value))
+        Ok<String> { value }:
+          value == expected
+        Err<MsgPackError>:
+          false
+    None:
+      false
+
+fn msgpack_make_string(value: String): () -> MsgPack
+  msgpack_fns::make_string(value)
+
 /// Encodes `value` into the caller-provided memory region `[ptr, ptr + len)`.
 ///
 /// Returns the number of bytes written, or `Err(MsgPackError)` when the region

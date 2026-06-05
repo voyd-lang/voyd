@@ -22,48 +22,61 @@ Use VX when you want:
 A VX app usually has three exported functions:
 
 ```voyd
-use std::dict::Dict
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
+use std::enums::{ enum }
+use std::string::type::String
 use std::vx::all
 
-pub fn init() -> MsgPack
-  msgpack::make_string("Draft")
+obj Model {
+  title: String,
+  saved: bool
+}
 
-pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
-  message
+enum Msg
+  Edit { value: String }
+  Save
+  Saved
 
-pub fn view(model: MsgPack) -> MsgPack
+type TextInput = {
+  kind: String,
+  value: String,
+  checked: bool
+}
+
+pub fn init() -> Model
+  Model { title: "Draft", saved: false }
+
+pub fn update(model: Model, message: Msg) -> Model
+  match(message)
+    Msg::Edit { value }:
+      Model { title: value, saved: false }
+    Msg::Save:
+      Model { title: model.title, saved: false }
+    Msg::Saved:
+      Model { title: model.title, saved: true }
+
+pub fn view(model: Model) -> Html<Msg>
   <main>
     <input
-      value={as_string(model)}
-      on_input={(payload: MsgPack) -> MsgPack => input_value(payload)}
+      value={model.title}
+      on_input={(event: TextInput) -> Msg => Msg::Edit { value: event.value }}
     />
-    <button on_click={msgpack::make_string("Saved")}>Save</button>
+    <button on_click={Msg::Save {}}>Save</button>
+    <p>{save_label(model.saved)}</p>
   </main>
 
-fn input_value(payload: MsgPack) -> MsgPack
-  match(msgpack::unpack_map(payload))
-    Ok<Dict<String, MsgPack>> { value }:
-      match(value.get("value"))
-        Some<MsgPack> { value }:
-          value
-        None:
-          msgpack::make_string("")
-    Err:
-      msgpack::make_string("")
-
-fn as_string(payload: MsgPack) -> String
-  match(msgpack::unpack_string(payload))
-    Ok { value }:
-      value
-    Err:
-      String::init()
+fn save_label(saved: bool) -> String
+  if saved then: "Saved" else: "Unsaved"
 ```
 
 `init` creates the first model. `view` turns the model into HTML. `update`
 receives messages from events, commands, and subscriptions and returns the next
 model.
+
+Typed lifecycle values must be boundary-compatible DTOs: primitives, `String`,
+records/objects with public DTO fields, named message variants, and arrays of
+heap-stored DTO values. Inline aggregate arrays, arbitrary dictionaries,
+functions, trait objects, and recursive object graphs are not part of the typed
+VX boundary yet.
 
 ## Views
 
@@ -79,16 +92,12 @@ Use HTML syntax for normal UI:
 Built-in elements lower to VX nodes. Components are regular Voyd functions:
 
 ```voyd
-fn Toolbar({ on_save: fn() -> MsgPack })
-  element(
-    tag: "button",
-    attrs: [on_click(on_save)],
-    children: [text("Save")]
-  )
+fn Toolbar({ on_save: fn() -> Msg }) -> Html<Msg>
+  <button on_click={on_save}>Save</button>
 
 fn Editor()
   <section>
-    <Toolbar on_save={() => msgpack::make_string("save")} />
+    <Toolbar on_save={() => Msg::Save {}} />
   </section>
 ```
 
@@ -96,7 +105,9 @@ Components can also receive child nodes. Add a `children` parameter, then call
 the component with normal opening and closing tags:
 
 ```voyd
-fn Panel({ class: String, children: Array<MsgPack> })
+use std::array::Array
+
+fn Panel({ class: String, children: Array<Html<Msg>> }) -> Html<Msg>
   element(tag: "section", attrs: [attr(name: "class", value: class)], children: children)
 
 fn Editor()
@@ -116,13 +127,13 @@ identity while reordering.
 Events can send a fixed message:
 
 ```voyd
-<button on_click={msgpack::make_string("save")}>Save</button>
+<button on_click={Msg::Save {}}>Save</button>
 ```
 
 They can run an inline closure:
 
 ```voyd
-<button on_click={() -> MsgPack => msgpack::make_string("cancel")}>
+<button on_click={() -> Msg => Msg::Cancel {}}>
   Cancel
 </button>
 ```
@@ -132,21 +143,24 @@ They can also receive the normalized browser event payload:
 ```voyd
 <input
   value={title}
-  on_input={(payload: MsgPack) -> MsgPack => title_changed(payload)}
+  on_input={(event: InputEvent) -> Msg => Msg::Edit { value: event.value }}
 />
 ```
 
 Common helpers include `on_click`, `on_input`, `on_change`, `on_submit`,
 `on_key_down`, `on_key_up`, mouse, pointer, focus, scroll, wheel, drag/drop, and
-context menu events. Payload helpers use the `_payload` suffix, for example
-`on_input_payload`.
+context menu events. HTML attributes pick the right typed helper for static
+messages, passed pure callbacks, and inline pure closures. Normalized event
+payload records such as `InputEvent`, `KeyboardEvent`, `MouseEvent`,
+`SubmitEvent`, and `GenericEvent` are DTO-compatible and can be used directly in
+typed payload callbacks.
 
 Use `EventOptions` when the browser default should change:
 
 ```voyd
 on_submit_with(
   options: EventOptions { prevent_default: true },
-  message: msgpack::make_string("save")
+  message: Msg::Save {}
 )
 ```
 
@@ -159,32 +173,45 @@ VX also exposes component-local state for small UI details that do not belong in
 the app model:
 
 ```voyd
-let (panel, panel_state) = state(id: 1, initial: "closed")
+let (panel, set_panel) = state(id: 1, initial: "closed")
 
-if panel == "closed":
-  panel_state.set("open")
+<button on_click={() => set_panel("open")}>Open</button>
 ```
 
 Component state supports typed `String` and `i32` values. Use it for small,
 component-owned UI memory. Use the app model when other parts of the app need to
 read or update the same value.
 
+Use `state_handle` when you need the advanced handle API:
+
+```voyd
+let panel_state = state_handle(id: 1, initial: "closed")
+
+<button on_click={() => panel_state.set("open")}>Open</button>
+```
+
 ## Commands
 
 Commands describe work that should produce a future message:
 
 ```voyd
-Cmd<MsgPack>::message(msgpack::make_string("saved"))
-Cmd<MsgPack>::delay(millis: 250i64, value: msgpack::make_string("saved"))
-Cmd<MsgPack>::batch([first, second])
-Cmd<MsgPack>::focus<DomElement>(editor_ref)
-Cmd<MsgPack>::scroll_into_view<DomElement>(editor_ref)
+Cmd<Msg>::message(Msg::Saved {})
+Cmd<Msg>::delay(millis: 250i64, value: Msg::Saved {})
+Cmd<Msg>::batch([first, second])
+Cmd<Msg>::focus<DomElement>(editor_ref)
+Cmd<Msg>::scroll_into_view<DomElement>(editor_ref)
 ```
 
 Use `map` when a child command needs to become a parent message:
 
 ```voyd
-child_cmd.map<MsgPack>((payload: MsgPack) -> MsgPack => payload)
+child_cmd.map<Msg>((message: ChildMsg) -> Msg => Msg::Child { value: message })
+```
+
+Task commands can also retain typed result mappers:
+
+```voyd
+Cmd<Msg>::perform(task: save_task, handler: (saved: SavedDraft) -> Msg => Msg::Saved { value: saved })
 ```
 
 ## Subscriptions
@@ -192,14 +219,18 @@ child_cmd.map<MsgPack>((payload: MsgPack) -> MsgPack => payload)
 Subscriptions listen for outside events:
 
 ```voyd
-pub fn subscriptions(model: MsgPack) -> MsgPack
-  keyboard_on_key_down<MsgPack>(
+pub fn subscriptions(model: Model) -> Sub<Msg>
+  keyboard_on_key_down<Msg>(
     key: "Escape",
-    value: msgpack::make_string("cancel")
-  ).payload
+    value: Msg::Cancel {}
+  )
 ```
 
 Use `Sub::every` for intervals and `Sub::batch` to combine subscriptions.
+
+```voyd
+Sub<Msg>::every(key: "clock", millis: 1000i64, value: Msg::Tick {})
+```
 
 ## Mounting
 
@@ -208,7 +239,7 @@ and mount:
 
 ```ts
 import { createVoydHost } from "@voyd-lang/js-host";
-import { createVoydVxAppRuntime, mountVxApp } from "@voyd-lang/vx-dom/browser";
+import { createVoydVxAppRuntime, mountVxApp } from "@voyd-lang/vx-dom";
 
 const host = await createVoydHost({ wasm });
 const app = createVoydVxAppRuntime({
@@ -222,20 +253,10 @@ await mountVxApp({
 });
 ```
 
-By default the adapter looks for `init`, `update`, and `view`. Add
-`subscriptions` when your app exports one, or rename any export explicitly:
-
-```ts
-createVoydVxAppRuntime({
-  host,
-  exports: {
-    init: "start",
-    update: "step",
-    view: "render",
-    subscriptions: "listen",
-  },
-});
-```
+Typed apps should export lifecycle functions with the canonical names `init`,
+`update`, and `view`. Add `subscriptions` in the adapter when your app exports
+one. Custom lifecycle names are still available for raw interop exports, but
+typed lifecycle wrappers are generated for the canonical app surface.
 
 ## Server Rendering
 
@@ -243,14 +264,41 @@ Use `renderVxToString` or `renderNodeToString` from `@voyd-lang/vx-dom/server`
 to render HTML on the server. Use `hydrateVxApp` in the browser to attach
 events without replacing matching server-rendered DOM.
 
+## Raw MsgPack Interop
+
+VX still uses MsgPack as its current runtime wire codec. Most apps should use
+native `Model` and `Msg` types, but raw interop remains available when a custom
+host boundary or dynamic payload needs it:
+
+```voyd
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::vx::all
+
+pub fn event_for_host() -> Html<MsgPack>
+  element(
+    tag: "button",
+    attrs: [on_click_message(msgpack::make_string("host-save"))],
+    children: [text("Save")]
+  )
+
+pub fn raw_command() -> Cmd<MsgPack>
+  Cmd<MsgPack>::message_serialized(msgpack::make_string("host-message"))
+```
+
+Raw event helpers such as `on_click_message`, `event_payload`, and
+serialized command/subscription helpers such as `message_serialized`,
+`delay_serialized`, `every_serialized`, and `map_serialized` are intentionally
+explicit so ordinary app code can stay typed.
+
 ## What To Reach For
 
-- Static message: `on_click={msgpack::make_string("save")}`
-- Event payload: `on_input={(payload: MsgPack) -> MsgPack => ...}`
-- Reusable component action: pass `fn() -> MsgPack` into a component
+- Static message: `on_click={Msg::Save {}}`
+- Event payload: `on_input={(event: TextInput) -> Msg => ...}`
+- Reusable component action: pass `fn() -> Msg` into a component
 - App state: keep it in the model and return the next model from `update`
-- Component-local UI state: use `state(id:, initial:)` inside component-runtime
-  views for small `String` or `i32` values
+- Component-local UI state: use `let (value, set_value) = state(id:, initial:)`
+  inside component-runtime views for small `String` or `i32` values
 - Later work: return a `Cmd`
 - Outside events: return a `Sub`
 - Browser mount: `createVoydVxAppRuntime` + `mountVxApp`

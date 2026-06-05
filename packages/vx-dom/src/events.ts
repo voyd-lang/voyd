@@ -62,6 +62,7 @@ function normalizeInputEvent(event: Event): InputEventPayload {
     kind: "input",
     value: input?.value ?? "",
     checked: input && "checked" in input ? input.checked : false,
+    input_type: "",
   };
   const maybeInput = event as InputEvent;
   if (typeof maybeInput.inputType === "string" && maybeInput.inputType) {
@@ -82,6 +83,8 @@ function normalizeSubmitEvent(event: Event): SubmitEventPayload {
   return {
     kind: "submit",
     form_data: Object.fromEntries(entries),
+    form_keys: entries.map(([key]) => key),
+    form_values: entries.map(([, value]) => value),
   };
 }
 
@@ -100,6 +103,8 @@ function normalizeMouseEvent(
     ctrl_key: event.ctrlKey,
     meta_key: event.metaKey,
     shift_key: event.shiftKey,
+    delta_x: 0,
+    delta_y: 0,
   };
   if (isInstance(event, "WheelEvent")) {
     const wheel = event as WheelEvent;

@@ -15,86 +15,44 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-const PLAYGROUND_STARTER = `use std::all
-use std::dict::Dict
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
-use std::result::types::all
-use std::vx::all
+const PLAYGROUND_STARTER = `use std::vx::all
 
-pub fn init() -> MsgPack
-  model(count: 0)
+pub fn view()
+  let (local_count, set_local_count) = state(id: 1, initial: 0)
 
-pub fn update(current: MsgPack, message: MsgPack) -> MsgPack
-  model(count: count_from(current) + 1)
-
-pub fn view(model: MsgPack) -> MsgPack
-  <Card>
-    <Title>Voyd Playground</Title>
-    <p style="margin: 0 0 14px 0; color: #94a3b8;">Edit this file, then run it again.</p>
-    <Counter label="Count" value={count_from(model)} />
-  </Card>
-
-fn Title({ children: Array<MsgPack> })
-  <h2 style="margin: 0 0 8px 0; font-size: 20px; color: #e2e8f0;">{children}</h2>
-
-fn Card({ children: Array<MsgPack> })
-  <div style="
+  <main style="
     margin: 8px;
     padding: 16px;
-    border-radius: 8px;
     background: #0b1020;
     color: #e2e8f0;
     border: 1px solid rgba(255, 255, 255, 0.1);
   ">
-    {children}
-  </div>
-
-fn Counter({ label: String, value: i32 })
-  <Panel>
-    <p style="margin: 0 0 12px 0; color: #cbd5e1;">
-      App state keeps this counter alive between renders.
-    </p>
-    <button
-      type="button"
-      on_click={msgpack::make_string("increment")}
-      style="
-        border: 0;
-        border-radius: 8px;
-        padding: 10px 14px;
-        background: #38bdf8;
-        color: #082f49;
-        font-weight: 700;
-        cursor: pointer;
-      "
-    >
-      {label}: {count_label(value)}
-    </button>
-  </Panel>
-
-fn Panel({ children: Array<MsgPack> })
-  <section style="
-    padding: 14px;
-    border-radius: 8px;
-    background: rgba(148, 163, 184, 0.12);
-  ">
-    {children}
-  </section>
-
-fn count_from(value: MsgPack) -> i32
-  match(msgpack::unpack_map(value))
-    Ok<Dict<String, MsgPack>> { value }:
-      match(value.get("count"))
-        Some<MsgPack> { value }:
-          match(msgpack::unpack_i32(value))
-            Ok<i32> { value }:
-              value
-            Err:
-              0
-        None:
-          0
-    Err:
-      0
+    <h2>Voyd Playground</h2>
+    <p>Edit this file, then run it again.</p>
+    <section style="
+      padding: 14px;
+      border-radius: 8px;
+      background: rgba(148, 163, 184, 0.12);
+    ">
+      <p>
+        Component-local state updates from a retained event closure.
+      </p>
+      <button
+        type="button"
+        on_click={() => set_local_count(local_count + 1)}
+        style="
+          border: 1px solid rgba(125, 211, 252, 0.45);
+          padding: 10px 14px;
+          background: #0f172a;
+          color: #e0f2fe;
+          font-weight: 700;
+          cursor: pointer;
+        "
+      >
+        Local clicks: {count_label(local_count)}
+      </button>
+    </section>
+  </main>
 
 fn count_label(value: i32) -> String
   if
@@ -104,10 +62,10 @@ fn count_label(value: i32) -> String
     value == 3: "3"
     else: "many"
 
-fn model({ count: i32 }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("count", msgpack::make_i32(count))
-  msgpack::make_map(out)`;
+obj Model {}
+
+pub fn init() -> Model
+  Model {}`;
 
 export default function Playground() {
   return (

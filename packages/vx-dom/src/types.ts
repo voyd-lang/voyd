@@ -66,8 +66,8 @@ export type MouseEventPayload = {
   ctrl_key: boolean;
   meta_key: boolean;
   shift_key: boolean;
-  delta_x?: number;
-  delta_y?: number;
+  delta_x: number;
+  delta_y: number;
 };
 
 export type KeyboardEventPayload = {
@@ -84,12 +84,14 @@ export type InputEventPayload = {
   kind: "input";
   value: string;
   checked: boolean;
-  input_type?: string;
+  input_type: string;
 };
 
 export type SubmitEventPayload = {
   kind: "submit";
   form_data: Record<string, string>;
+  form_keys: string[];
+  form_values: string[];
 };
 
 export type GenericEventPayload = {

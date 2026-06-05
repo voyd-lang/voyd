@@ -1,0 +1,29 @@
+use std::enums::{ enum }
+use std::string::type::String
+use std::vx::all
+
+obj Model {
+  x: f64
+}
+
+enum Msg
+  Moved { x: f64 }
+
+pub fn init() -> Model
+  Model { x: 0.0 }
+
+pub fn update(model: Model, msg: Msg) -> Model
+  match(msg)
+    Msg::Moved { x }:
+      Model { x: x }
+
+pub fn view(model: Model) -> Html<Msg>
+  <button on_mouse_move={(event: MouseEvent) -> Msg => Msg::Moved { x: event.client_x }}>
+    X: {label(model.x)}
+  </button>
+
+fn label(value: f64) -> String
+  if
+    value == 0.0: "0"
+    value == 10.0: "10"
+    else: "many"

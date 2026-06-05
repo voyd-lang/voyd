@@ -43,8 +43,18 @@ import { ensureDispatcher } from "./effects/dispatcher.js";
 import { ensureMsgPackFunctions } from "./effects/host-boundary/msgpack.js";
 import { unboxOutcomeValue, wrapValueInOutcome } from "./effects/outcome-values.js";
 import { captureMultivalueLanes } from "./multivalue.js";
+import {
+  lowerSerializedAbiArg,
+  stabilizeSerializedAbiResult,
+} from "./exports/serialized-abi.js";
 import { ensureFixedArrayWasmTypesByElement } from "./fixed-array-types.js";
 import { ensureLinearMemoryExport } from "./memory-exports.js";
+import { deriveBoundarySchema } from "./boundary/schema.js";
+import {
+  packBoundaryValueAsMsgPack,
+  unpackBoundaryValueFromMsgPack,
+} from "./boundary/msgpack-codec.js";
+import { findSerializerForType } from "./serializer.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
@@ -306,19 +316,45 @@ const ensureVxEventCallbackHelper = ({
     throw new Error("VX event handler retention requires a function value");
   }
   if (desc.parameters.length > 1) {
-    throw new Error("VX event handler retention supports fn() -> MsgPack or fn(MsgPack) -> MsgPack");
+    throw new Error("VX event handler retention supports fn() -> Msg or fn(Event) -> Msg");
   }
   ensureLinearMemoryExport(ctx);
   const msgpack = ensureMsgPackFunctions(ctx);
-  if (
-    desc.parameters.length === 1 &&
-    desc.parameters[0]?.type !== msgpack.msgPackTypeId
-  ) {
-    throw new Error("VX event handler payload parameter must be MsgPack");
+  const parameterTypeId = desc.parameters[0]?.type;
+  const parameterSerializer =
+    parameterTypeId !== undefined
+      ? findSerializerForType(parameterTypeId, ctx)
+      : undefined;
+  if (parameterSerializer && parameterSerializer.formatId !== "msgpack") {
+    throw new Error(
+      `VX event handler parameter serializer format ${parameterSerializer.formatId} is not supported`
+    );
   }
-  if (desc.returnType !== msgpack.msgPackTypeId) {
-    throw new Error("VX event handler retention requires a MsgPack return value");
+  const parameterSchema =
+    parameterTypeId !== undefined && !parameterSerializer
+      ? deriveBoundarySchema({
+          typeId: parameterTypeId,
+          ctx,
+          label: "VX event handler parameter",
+        })
+      : undefined;
+  const returnWasmType = wasmTypeFor(desc.returnType, ctx);
+  const returnsVoid = returnWasmType === binaryen.none;
+  const returnSerializer = returnsVoid
+    ? undefined
+    : findSerializerForType(desc.returnType, ctx);
+  if (returnSerializer && returnSerializer.formatId !== "msgpack") {
+    throw new Error(
+      `VX event handler return serializer format ${returnSerializer.formatId} is not supported`
+    );
   }
+  const returnSchema = returnSerializer || returnsVoid
+    ? undefined
+    : deriveBoundarySchema({
+        typeId: desc.returnType,
+        ctx,
+        label: "VX event handler return",
+      });
   const effectful =
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
@@ -326,6 +362,15 @@ const ensureVxEventCallbackHelper = ({
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const base = getClosureTypeInfo(closureTypeId, ctx);
   const exportName = `__voyd_vx_event_callback_${sanitizeTaskKey(base.key)}`;
+  const locals: binaryen.Type[] = [];
+  const helperFnCtx: FunctionContext = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals,
+    nextLocalIndex: 5,
+    returnTypeId: desc.returnType,
+    effectful: false,
+  };
   const params = binaryen.createType([
     base.interfaceType,
     binaryen.i32,
@@ -334,14 +379,31 @@ const ensureVxEventCallbackHelper = ({
     binaryen.i32,
   ]);
   const closureRef = ctx.mod.local.get(0, base.interfaceType);
-  const payloadValue =
-    desc.parameters.length === 1
+  const rawPayloadValue =
+    parameterTypeId !== undefined
       ? ctx.mod.call(
           msgpack.decodeValue.wasmName,
           [ctx.mod.local.get(1, binaryen.i32), ctx.mod.local.get(2, binaryen.i32)],
           msgPackType
         )
       : undefined;
+  const payloadValue =
+    rawPayloadValue === undefined || parameterTypeId === undefined
+      ? undefined
+      : parameterSerializer
+        ? coerceValueToType({
+            value: rawPayloadValue,
+            actualType: msgpack.msgPackTypeId,
+            targetType: parameterTypeId,
+            ctx,
+            fnCtx: helperFnCtx,
+          })
+        : unpackBoundaryValueFromMsgPack({
+            value: rawPayloadValue,
+            schema: parameterSchema!,
+            ctx,
+            fnCtx: helperFnCtx,
+          });
   const fnField = structGetFieldValue({
     mod: ctx.mod,
     fieldIndex: 0,
@@ -352,6 +414,17 @@ const ensureVxEventCallbackHelper = ({
     base.fnRefType === binaryen.funcref
       ? fnField
       : refCast(ctx.mod, fnField, base.fnRefType);
+  const loweredPayload = payloadValue
+    ? lowerSerializedAbiArg({
+        wasmName: exportName,
+        abiKind: "direct",
+        abiTypes: base.paramAbiTypes[0] ?? [binaryen.getExpressionType(payloadValue)],
+        typeId: parameterTypeId!,
+        value: payloadValue,
+        ctx,
+        fnCtx: helperFnCtx,
+      })
+    : undefined;
   const callExpr = callRef(
     ctx.mod,
     targetFn,
@@ -360,37 +433,105 @@ const ensureVxEventCallbackHelper = ({
       ...base.paramTypes
         .slice(0, base.userParamOffset)
         .map(() => ctx.effectsBackend.abi.hiddenHandlerValue(ctx)),
-      ...(payloadValue ? [payloadValue] : []),
+      ...(loweredPayload?.args ?? []),
     ] as number[],
     base.resultType
   );
+  const setup = loweredPayload?.setup ?? [];
+  if (effectful) {
+    const rawExportName = `${exportName}_effectful_raw`;
+    const dispatched = ctx.mod.call(
+      ensureDispatcher(ctx),
+      [callExpr],
+      ctx.effectsRuntime.outcomeType,
+    );
+    ctx.mod.addFunction(
+      rawExportName,
+      params,
+      ctx.effectsRuntime.outcomeType,
+      locals,
+      setup.length === 0
+        ? dispatched
+        : ctx.mod.block(null, [...setup, dispatched], ctx.effectsRuntime.outcomeType),
+    );
+    if (ctx.programHelpers.registerExportName(rawExportName)) {
+      ctx.mod.addFunctionExport(rawExportName, rawExportName);
+    }
+  }
+
   const resultValue = effectful
     ? unboxOutcomeValue({
         payload: ctx.effectsRuntime.outcomePayload(
           ctx.mod.call(
             ensureDispatcher(ctx),
             [callExpr],
-            ctx.effectsRuntime.outcomeType
-          )
+            ctx.effectsRuntime.outcomeType,
+          ),
         ),
-        valueType: msgPackType,
-        typeId: msgpack.msgPackTypeId,
+        valueType: returnWasmType,
+        typeId: desc.returnType,
         ctx,
       })
-    : callExpr;
-  const encodedLength = ctx.mod.call(
-    msgpack.encodeValue.wasmName,
-    [
-      resultValue,
-      ctx.mod.local.get(3, binaryen.i32),
-      ctx.mod.local.get(4, binaryen.i32),
-    ],
-    binaryen.i32
-  );
+    : stabilizeSerializedAbiResult({
+        value: callExpr,
+        resultType: base.resultType,
+        resultAbiTypes: base.resultAbiTypes,
+        resultTypeId: desc.returnType,
+        ctx,
+        fnCtx: helperFnCtx,
+      });
+  const encodedLength = returnsVoid
+    ? ctx.mod.block(null, [resultValue, ctx.mod.i32.const(-2)], binaryen.i32)
+    : (() => {
+        const encodedResultValue = returnSerializer
+          ? coerceValueToType({
+              value: resultValue,
+              actualType: desc.returnType,
+              targetType: msgpack.msgPackTypeId,
+              ctx,
+              fnCtx: helperFnCtx,
+            })
+          : packBoundaryValueAsMsgPack({
+              value: resultValue,
+              schema: returnSchema!,
+              ctx,
+              fnCtx: helperFnCtx,
+            });
+        return ctx.mod.call(
+          msgpack.encodeValue.wasmName,
+          [
+            encodedResultValue,
+            ctx.mod.local.get(3, binaryen.i32),
+            ctx.mod.local.get(4, binaryen.i32),
+          ],
+          binaryen.i32
+        );
+      })();
 
-  ctx.mod.addFunction(exportName, params, binaryen.i32, [], encodedLength);
+  ctx.mod.addFunction(
+    exportName,
+    params,
+    binaryen.i32,
+    locals,
+    setup.length === 0
+      ? encodedLength
+      : ctx.mod.block(null, [...setup, encodedLength], binaryen.i32),
+  );
   if (ctx.programHelpers.registerExportName(exportName)) {
     ctx.mod.addFunctionExport(exportName, exportName);
+  }
+  if (returnsVoid) {
+    const markerName = `${exportName}_returns_void`;
+    ctx.mod.addFunction(
+      markerName,
+      binaryen.none,
+      binaryen.i32,
+      [],
+      ctx.mod.i32.const(1),
+    );
+    if (ctx.programHelpers.registerExportName(markerName)) {
+      ctx.mod.addFunctionExport(markerName, markerName);
+    }
   }
   helpers.set(closureTypeId, exportName);
   return exportName;
@@ -1070,6 +1211,37 @@ export const compileIntrinsicCall = ({
         ctx,
       });
       return ctx.mod.call(importFn, [args[0]!], binaryen.i32);
+    }
+    case "__boundary_value_to_msgpack": {
+      assertArgCount(name, args, 1);
+      const valueTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const serializer = findSerializerForType(valueTypeId, ctx);
+      if (serializer) {
+        if (serializer.formatId !== "msgpack") {
+          throw new Error(
+            `boundary value serializer format ${serializer.formatId} is not supported`
+          );
+        }
+        const msgpack = ensureMsgPackFunctions(ctx);
+        return coerceValueToType({
+          value: args[0]!,
+          actualType: valueTypeId,
+          targetType: msgpack.msgPackTypeId,
+          ctx,
+          fnCtx,
+        });
+      }
+      return packBoundaryValueAsMsgPack({
+        value: args[0]!,
+        schema: deriveBoundarySchema({
+          typeId: valueTypeId,
+          ctx,
+          label: "__boundary_value_to_msgpack value",
+          options: { tagStandaloneVariants: true },
+        }),
+        ctx,
+        fnCtx,
+      });
     }
     case "__shift_l":
     case "__shift_ru": {

@@ -1,0 +1,37 @@
+use std::enums::{ enum }
+use std::string::type::String
+use std::vx::all
+
+type Point = { x: i32, y: i32 }
+type Model = Array<{ x: i32, y: i32 }>
+
+enum Msg
+  Shift
+
+pub fn init() -> Model
+  let ~points = Array<Point>::with_capacity(2)
+  points.push({ x: 1, y: 2 })
+  points.push({ x: 3, y: 4 })
+  points
+
+pub fn update(model: Model, msg: Msg) -> Model
+  match(msg)
+    Msg::Shift:
+      let ~points = Array<Point>::with_capacity(2)
+      let first = model.at(0)
+      let second = model.at(1)
+      points.push({ x: first.x + 10, y: first.y + 20 })
+      points.push({ x: second.x + 10, y: second.y + 20 })
+      points
+
+pub fn view(model: Model) -> Html<Msg>
+  let first = model.at(0)
+  <button on_click={Msg::Shift {}}>
+    Point: {label(first.x)}
+  </button>
+
+fn label(value: i32) -> String
+  if
+    value == 1: "1"
+    value == 11: "11"
+    else: "other"

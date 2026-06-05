@@ -41,12 +41,14 @@ describe("createVoydVxAppRuntime", () => {
   it("passes commands and explicit frames through runtime result objects", async () => {
     const host = fakeHost({
       init: async () => ({
+        $vx: "runtime_result",
         model: 0,
         frame: textFrame("Boot"),
         commands: { type: "cmd", kind: "message", value: "tick" },
       }),
       view: async ([count]) => textFrame(`Count: ${String(count)}`),
       update: async ([count]) => ({
+        $vx: "runtime_result",
         model: Number(count) + 1,
         frame: textFrame("Updated"),
         commands: { type: "cmd", kind: "none" },
@@ -65,6 +67,38 @@ describe("createVoydVxAppRuntime", () => {
       commands: { type: "cmd", kind: "none" },
       subscriptions: undefined,
       snapshot: 1,
+    });
+  });
+
+  it("treats plain object results as models even when they use runtime field names", async () => {
+    const firstModel = {
+      model: "nested",
+      commands: "not-a-command",
+      frame: "not-a-frame",
+    };
+    const secondModel = {
+      model: "updated",
+      commands: "still-not-a-command",
+      frame: "still-not-a-frame",
+    };
+    const host = fakeHost({
+      init: async () => firstModel,
+      view: async ([current]) => textFrame(`Model: ${JSON.stringify(current)}`),
+      update: async () => secondModel,
+    });
+    const app = createVoydVxAppRuntime({ host });
+
+    await expect(app.init?.()).resolves.toEqual({
+      frame: textFrame(`Model: ${JSON.stringify(firstModel)}`),
+      commands: undefined,
+      subscriptions: undefined,
+      snapshot: firstModel,
+    });
+    await expect(app.dispatch({ kind: "msgpack", value: "tick" })).resolves.toEqual({
+      frame: textFrame(`Model: ${JSON.stringify(secondModel)}`),
+      commands: undefined,
+      subscriptions: undefined,
+      snapshot: secondModel,
     });
   });
 
@@ -101,6 +135,49 @@ describe("createVoydVxAppRuntime", () => {
       { id: 7, payload: { kind: "event", event: "focus" } },
       { id: 9, payload: "child" },
     ]);
+  });
+
+  it("rerenders mapped local-only retained callbacks without update or mapper dispatch", async () => {
+    const seenMessages: unknown[] = [];
+    const retainedDispatch = vi.fn(async (id: number) => {
+      if (id === 7) return undefined;
+      throw new Error(`unexpected retained mapper ${id}`);
+    });
+    const host = fakeHost({
+      init: async () => "ready",
+      view: async ([current]) => textFrame(`View: ${String(current)}`),
+      update: async ([current, message]) => {
+        seenMessages.push(message);
+        return current;
+      },
+    });
+    host.retainedCallbacks = { dispatch: retainedDispatch };
+    const app = createVoydVxAppRuntime({ host });
+
+    await app.init?.();
+    await expect(
+      app.dispatch({
+        kind: "map",
+        handlerId: 9,
+        message: {
+          kind: "event",
+          handlerId: 7,
+          payload: { kind: "event", event: "click" },
+        },
+      }),
+    ).resolves.toEqual({
+      frame: textFrame("View: ready"),
+      commands: undefined,
+      subscriptions: undefined,
+      snapshot: "ready",
+    });
+
+    expect(seenMessages).toEqual([]);
+    expect(retainedDispatch).toHaveBeenCalledTimes(1);
+    expect(retainedDispatch).toHaveBeenCalledWith(7, {
+      kind: "event",
+      event: "click",
+    });
   });
 });
 

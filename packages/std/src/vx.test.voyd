@@ -1,11 +1,21 @@
 use std::array::Array
 use std::dict::Dict
+use std::enums::{ enum }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::task::Task
 use std::test::assertions::all
+
+enum TypedVxTestMsg
+  Saved
+  Tick
+  Rename { value: String }
+
+obj TypedVxTestModel {
+  count: i32
+}
 
 test "vx text node encodes versioned renderer shape":
   match(msgpack::unpack_map(text("Hello")))
@@ -242,12 +252,52 @@ test "vx event helpers encode static runtime messages":
     Err:
       assert(false, eq: true)
 
+test "vx typed event messages encode through the boundary":
+  let click = event_message(name: "click", message: TypedVxTestMsg::Saved {})
+  match(msgpack::unpack_map(click))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "event")
+      assert_string_field(value, "event", "click")
+      assert_variant_field(value, "message", "Saved")
+    Err:
+      assert(false, eq: true)
+
+  let named = on_submit_with<TypedVxTestMsg>(
+    options: EventOptions { prevent_default: true },
+    message: TypedVxTestMsg::Tick {}
+  )
+  match(msgpack::unpack_map(named))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "event")
+      assert_string_field(value, "event", "submit")
+      assert_variant_field(value, "message", "Tick")
+      match(value.get("options"))
+        Some<MsgPack> { value: options }:
+          match(msgpack::unpack_map(options))
+            Ok<Dict<String, MsgPack>> { value: option_map }:
+              assert_bool_field(option_map, "preventDefault", true)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+  let retained = retained_typed_event(() -> TypedVxTestMsg => TypedVxTestMsg::Saved {})
+  match(msgpack::unpack_map(retained))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "event")
+      assert_string_field(value, "event", "click")
+      assert_payload_has_field(retained, "handlerId")
+    Err:
+      assert(false, eq: true)
+
 test "vx command constructors encode runtime payloads":
   let none = Cmd<MsgPack>::none()
   assert_string_payload_field(none.payload, "type", "cmd")
   assert_string_payload_field(none.payload, "kind", "none")
 
-  let message = Cmd<MsgPack>::message(msgpack::make_string("save"))
+  let message = Cmd<MsgPack>::message_serialized(msgpack::make_string("save"))
   assert_string_payload_field(message.payload, "type", "cmd")
   assert_string_payload_field(message.payload, "kind", "message")
   assert_string_payload_field(message.payload, "value", "save")
@@ -296,7 +346,7 @@ test "vx command constructors encode runtime payloads":
   assert_string_payload_field(scroll.payload, "kind", "scroll_into_view")
   assert_string_payload_field(scroll.payload, "value", "editor")
 
-  let delayed = Cmd<MsgPack>::delay(
+  let delayed = Cmd<MsgPack>::delay_serialized(
     millis: 250i64,
     value: msgpack::make_string("later")
   )
@@ -304,6 +354,33 @@ test "vx command constructors encode runtime payloads":
   assert_string_payload_field(delayed.payload, "kind", "delay")
   assert_i64_payload_field(delayed.payload, "ms", 250i64)
   assert_string_payload_field(delayed.payload, "value", "later")
+
+test "vx typed command constructors encode messages through the boundary":
+  let message = Cmd<TypedVxTestMsg>::message(TypedVxTestMsg::Saved {})
+  assert_string_payload_field(message.payload, "type", "cmd")
+  assert_string_payload_field(message.payload, "kind", "message")
+  assert_variant_payload_field(message.payload, "value", "Saved")
+
+  let delay = Cmd<TypedVxTestMsg>::delay(millis: 25i64, value: TypedVxTestMsg::Tick {})
+  assert_string_payload_field(delay.payload, "type", "cmd")
+  assert_string_payload_field(delay.payload, "kind", "delay")
+  assert_i64_payload_field(delay.payload, "ms", 25i64)
+  assert_variant_payload_field(delay.payload, "value", "Tick")
+
+  let batch = Cmd<TypedVxTestMsg>::batch([message, delay])
+  assert_string_payload_field(batch.payload, "type", "cmd")
+  assert_string_payload_field(batch.payload, "kind", "batch")
+  assert_array_payload_len(batch.payload, "children", 2)
+
+  let task = Task<String> { id: 23 }
+  let performed = Cmd<TypedVxTestMsg>::perform<String>(
+    task: task,
+    handler: (value: String) -> TypedVxTestMsg => TypedVxTestMsg::Saved {}
+  )
+  assert_string_payload_field(performed.payload, "type", "cmd")
+  assert_string_payload_field(performed.payload, "kind", "task")
+  assert_i32_payload_field(performed.payload, "taskId", 23)
+  assert_payload_has_field(performed.payload, "handlerId")
 
 test "vx subscription constructors encode runtime payloads":
   let none = Sub<MsgPack>::none()
@@ -331,7 +408,7 @@ test "vx subscription constructors encode runtime payloads":
   assert_string_payload_field(runtime.payload, "key", "global")
   assert_string_payload_field(runtime.payload, "value", "keydown")
 
-  let keyboard = keyboard_on_key_down<MsgPack>(
+  let keyboard = keyboard_on_key_down_serialized<MsgPack>(
     key: "global-shortcuts",
     value: msgpack::make_string("key")
   )
@@ -341,7 +418,7 @@ test "vx subscription constructors encode runtime payloads":
   assert_string_payload_field(keyboard.payload, "event", "keydown")
   assert_string_payload_field(keyboard.payload, "value", "key")
 
-  let interval = Sub<MsgPack>::every(
+  let interval = Sub<MsgPack>::every_serialized(
     key: "autosave",
     millis: 30000i64,
     value: msgpack::make_string("tick")
@@ -351,6 +428,23 @@ test "vx subscription constructors encode runtime payloads":
   assert_string_payload_field(interval.payload, "key", "autosave")
   assert_i64_payload_field(interval.payload, "ms", 30000i64)
   assert_string_payload_field(interval.payload, "value", "tick")
+
+test "vx typed subscription constructors encode messages through the boundary":
+  let every = Sub<TypedVxTestMsg>::every(
+    key: "clock",
+    millis: 1000i64,
+    value: TypedVxTestMsg::Tick {}
+  )
+  assert_string_payload_field(every.payload, "type", "sub")
+  assert_string_payload_field(every.payload, "kind", "interval")
+  assert_string_payload_field(every.payload, "key", "clock")
+  assert_i64_payload_field(every.payload, "ms", 1000i64)
+  assert_variant_payload_field(every.payload, "value", "Tick")
+
+  let batch = Sub<TypedVxTestMsg>::batch([every])
+  assert_string_payload_field(batch.payload, "type", "sub")
+  assert_string_payload_field(batch.payload, "kind", "batch")
+  assert_array_payload_len(batch.payload, "children", 1)
 
 test "vx component state and task APIs use component effect":
   let ~seen = Array<String>::init()
@@ -373,6 +467,36 @@ test "vx component state and task APIs use component effect":
     assert_msgpack_string(value, "next")
     tail()
 
+  try open
+    let (value, set_value) = state(id: 4, initial: 1)
+    assert(value, eq: 7)
+    set_value(value + 1)
+  Component::state_get(tail, id, initial):
+    seen.push("state-get".to_string())
+    assert(id, eq: 4)
+    assert_msgpack_i32(initial, 1)
+    tail(msgpack::make_i32(7))
+  Component::state_set(tail, id, value):
+    seen.push("state-set".to_string())
+    assert(id, eq: 4)
+    assert_msgpack_i32(value, 8)
+    tail()
+
+  try open
+    let (text_value, set_text) = state(id: 5, initial: "initial")
+    assert(text_value.equals("current".to_string()), eq: true)
+    set_text(text_value)
+  Component::state_get(tail, id, initial):
+    seen.push("text-get".to_string())
+    assert(id, eq: 5)
+    assert_msgpack_string(initial, "initial")
+    tail(msgpack::make_string("current"))
+  Component::state_set(tail, id, value):
+    seen.push("text-set".to_string())
+    assert(id, eq: 5)
+    assert_msgpack_string(value, "current")
+    tail()
+
   let task_value = Task<MsgPack> { id: 11 }
   try open
     task<MsgPack>(key: msgpack::make_string("preview"), task: task_value)
@@ -382,9 +506,30 @@ test "vx component state and task APIs use component effect":
     assert(task_id, eq: 11)
     tail()
 
-  assert(seen.len(), eq: 3)
+  assert(seen.len(), eq: 7)
 
 test "vx program constructor encodes lifecycle handles":
+  let step = program<TypedVxTestModel, TypedVxTestMsg>(
+    model: TypedVxTestModel { count: 1 },
+    commands: Cmd<TypedVxTestMsg>::message(TypedVxTestMsg::Saved {})
+  )
+
+  match(msgpack::unpack_map(step))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "$vx", "runtime_result")
+      match(value.get("model"))
+        Some<MsgPack>:
+          assert(true, eq: true)
+        None:
+          assert(false, eq: true)
+      match(value.get("commands"))
+        Some<MsgPack>:
+          assert(true, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
   let app = program<MsgPack, MsgPack>(
     init: msgpack::make_i32(1),
     update: msgpack::make_i32(2),
@@ -418,6 +563,9 @@ fn assert_string_field(map: Dict<String, MsgPack>, field: String, expected: Stri
 fn assert_string_field(map: Dict<String, MsgPack>, field: StringSlice, expected: StringSlice) -> void
   assert_string_field(map, field.to_string(), expected.to_string())
 
+fn retained_typed_event(handler: fn() -> TypedVxTestMsg) -> MsgPack
+  event_message(name: "click", message: handler)
+
 fn assert_bool_field(map: Dict<String, MsgPack>, field: StringSlice, expected: bool) -> void
   match(map.get(field.to_string()))
     Some<MsgPack> { value }:
@@ -431,6 +579,26 @@ fn assert_bool_field(map: Dict<String, MsgPack>, field: StringSlice, expected: b
 
 fn assert_bool_field(map: Dict<String, MsgPack>, field: String, expected: bool) -> void
   assert_bool_field(map, field.as_slice(), expected)
+
+fn assert_variant_field(map: Dict<String, MsgPack>, field: StringSlice, expected: StringSlice) -> void
+  match(map.get(field.to_string()))
+    Some<MsgPack> { value }:
+      assert_variant(value, expected)
+    None:
+      assert(false, eq: true)
+
+fn assert_variant_field(map: Dict<String, MsgPack>, field: String, expected: String) -> void
+  assert_variant_field(map, field.as_slice(), expected.as_slice())
+
+fn assert_variant(value: MsgPack, expected: StringSlice) -> void
+  match(msgpack::unpack_map(value))
+    Ok<Dict<String, MsgPack>> { value: variant_map }:
+      assert_string_field(variant_map, "$variant".as_slice(), expected)
+    Err:
+      assert(false, eq: true)
+
+fn assert_variant(value: MsgPack, expected: String) -> void
+  assert_variant(value, expected.as_slice())
 
 fn assert_i32_field(map: Dict<String, MsgPack>, field: StringSlice, expected: i32) -> void
   match(map.get(field.to_string()))
@@ -486,6 +654,13 @@ fn assert_msgpack_string(value: MsgPack, expected: StringSlice) -> void
 fn assert_msgpack_string(value: MsgPack, expected: String) -> void
   assert_msgpack_string(value, expected.as_slice())
 
+fn assert_msgpack_i32(value: MsgPack, expected: i32) -> void
+  match(msgpack::unpack_i32(value))
+    Ok<i32> { value: actual }:
+      assert(actual, eq: expected)
+    Err:
+      assert(false, eq: true)
+
 fn assert_i32_payload_field(payload: MsgPack, field: StringSlice, expected: i32) -> void
   match(msgpack::unpack_map(payload))
     Ok<Dict<String, MsgPack>> { value }:
@@ -513,6 +688,16 @@ fn assert_i64_payload_field(payload: MsgPack, field: StringSlice, expected: i64)
 
 fn assert_i64_payload_field(payload: MsgPack, field: String, expected: i64) -> void
   assert_i64_payload_field(payload, field.as_slice(), expected)
+
+fn assert_variant_payload_field(payload: MsgPack, field: StringSlice, expected: StringSlice) -> void
+  match(msgpack::unpack_map(payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_variant_field(value, field, expected)
+    Err:
+      assert(false, eq: true)
+
+fn assert_variant_payload_field(payload: MsgPack, field: String, expected: String) -> void
+  assert_variant_payload_field(payload, field.as_slice(), expected.as_slice())
 
 fn assert_array_payload_len(payload: MsgPack, field: StringSlice, expected: i32) -> void
   match(msgpack::unpack_map(payload))
