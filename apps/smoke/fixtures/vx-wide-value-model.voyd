@@ -15,9 +15,9 @@ enum Msg
 
 pub fn app() -> Program<Model, Msg>
   program<Model, Msg>(
-    init: () -> Model => init(),
-    update: (model: Model, msg: Msg) -> Program<Model, Msg> => update(model, msg),
-    view: (model: Model) -> Html<Msg> => view(model)
+    init: init,
+    update: update,
+    view: view
   )
 
 fn init() -> Model

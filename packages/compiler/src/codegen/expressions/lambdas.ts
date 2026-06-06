@@ -9,6 +9,7 @@ import type {
   CodegenContext,
   CompiledExpression,
   ExpressionCompiler,
+  FunctionMetadata,
   FunctionContext,
   HirLambdaExpr,
 } from "../context.js";
@@ -103,6 +104,54 @@ const defineLambdaEnvType = ({
         mutable: capture.mutable,
       })),
     ],
+    supertype: binaryenTypeToHeapType(base.interfaceType),
+    final: true,
+  });
+
+const sameTypes = (
+  left: readonly binaryen.Type[],
+  right: readonly binaryen.Type[],
+): boolean =>
+  left.length === right.length && left.every((type, index) => type === right[index]);
+
+const namedFunctionClosureKey = ({
+  meta,
+  functionTypeId,
+}: {
+  meta: FunctionMetadata;
+  functionTypeId: number;
+}): string =>
+  `named-fn:${meta.moduleId}:${meta.symbol}:${meta.instanceId}:${functionTypeId}`;
+
+const makeNamedFunctionWrapperName = ({
+  meta,
+  key,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  key: string;
+  ctx: CodegenContext;
+}): string => {
+  const safeKey = key.replace(/[^a-zA-Z0-9_]/g, "_");
+  const symbolName =
+    ctx.program.symbols.getName(
+      ctx.program.symbols.idOf({ moduleId: meta.moduleId, symbol: meta.symbol }),
+    ) ?? `${meta.symbol}`;
+  return `${ctx.moduleLabel}__fnref_${symbolName}_${safeKey}`;
+};
+
+const defineNamedFunctionEnvType = ({
+  base,
+  wrapperName,
+  ctx,
+}: {
+  base: ReturnType<typeof getClosureTypeInfo>;
+  wrapperName: string;
+  ctx: CodegenContext;
+}): binaryen.Type =>
+  defineStructType(ctx.mod, {
+    name: `${wrapperName}__env`,
+    fields: [{ name: "__fn", type: binaryen.funcref, mutable: false }],
     supertype: binaryenTypeToHeapType(base.interfaceType),
     final: true,
   });
@@ -481,4 +530,62 @@ export const compileLambdaExpr = (
   ]);
 
   return { expr: closure, usedReturnCall: false };
+};
+
+export const compileNamedFunctionClosure = ({
+  meta,
+  functionTypeId,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  functionTypeId: number;
+  ctx: CodegenContext;
+}): CompiledExpression => {
+  const base = getClosureTypeInfo(functionTypeId, ctx);
+  if (
+    !sameTypes(meta.paramTypes, base.paramTypes) ||
+    !sameTypes(meta.resultAbiTypes, base.resultAbiTypes) ||
+    meta.resultType !== base.resultType
+  ) {
+    throw new Error(
+      `named function closure ABI mismatch for ${meta.wasmName}`,
+    );
+  }
+
+  const key = namedFunctionClosureKey({ meta, functionTypeId });
+  let wrapperName = ctx.lambdaFunctions.get(key);
+  if (!wrapperName) {
+    wrapperName = makeNamedFunctionWrapperName({ meta, key, ctx });
+    const params = [base.interfaceType, ...base.paramTypes];
+    const args = meta.paramTypes.map((type, index) =>
+      ctx.mod.local.get(index + 1, type),
+    );
+    ctx.mod.addFunction(
+      wrapperName,
+      binaryen.createType(params as number[]),
+      base.resultType,
+      [],
+      ctx.mod.call(meta.wasmName, args as number[], meta.resultType),
+    );
+    ctx.lambdaFunctions.set(key, wrapperName);
+  }
+
+  const envKey = `${key}:env`;
+  let envInfo = ctx.lambdaEnvs.get(envKey);
+  if (!envInfo) {
+    envInfo = {
+      envType: defineNamedFunctionEnvType({ base, wrapperName, ctx }),
+      captures: [],
+      base,
+      typeId: functionTypeId,
+    };
+    ctx.lambdaEnvs.set(envKey, envInfo);
+  }
+
+  return {
+    expr: initStruct(ctx.mod, envInfo.envType, [
+      refFunc(ctx.mod, wrapperName, base.fnRefType),
+    ]),
+    usedReturnCall: false,
+  };
 };

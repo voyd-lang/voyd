@@ -27,10 +27,13 @@ enum Msg
 
 pub fn app() -> Program<Model, Msg>
   program<Model, Msg>(
-    init: () -> Model => Model { count: 0 },
-    update: (model: Model, message: Msg) -> Program<Model, Msg> => update(model, message),
-    view: (model: Model) -> Html<Msg> => view(model)
+    init: init,
+    update: update,
+    view: view
   )
+
+fn init() -> Model
+  Model { count: 0 }
 
 fn update(model: Model, message: Msg) -> Program<Model, Msg>
   match(message)

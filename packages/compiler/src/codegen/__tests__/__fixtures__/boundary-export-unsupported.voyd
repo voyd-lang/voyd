@@ -10,8 +10,16 @@ enum Msg
 
 pub fn app() -> Program<MaybeCount, Msg>
   program<MaybeCount, Msg>(
-    init: () -> MaybeCount => MaybeCount {},
-    update: (model: MaybeCount, _msg: Msg) -> Program<MaybeCount, Msg> =>
-      program<MaybeCount, Msg>(model: model),
-    view: (_model: MaybeCount) -> Html<Msg> => <div></div>
+    init: init,
+    update: update,
+    view: view
   )
+
+fn init() -> MaybeCount
+  MaybeCount {}
+
+fn update(model: MaybeCount, _msg: Msg) -> Program<MaybeCount, Msg>
+  program<MaybeCount, Msg>(model: model)
+
+fn view(_model: MaybeCount) -> Html<Msg>
+  <div></div>

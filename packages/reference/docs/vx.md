@@ -45,9 +45,9 @@ type TextInput = {
 
 pub fn app() -> Program<Model, Msg>
   program<Model, Msg>(
-    init: () -> Model => init(),
-    update: (model: Model, message: Msg) -> Program<Model, Msg> => update(model, message),
-    view: (model: Model) -> Html<Msg> => view(model)
+    init: init,
+    update: update,
+    view: view
   )
 
 fn init() -> Model

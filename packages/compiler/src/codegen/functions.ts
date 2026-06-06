@@ -582,6 +582,14 @@ const collectReachableFunctionSymbols = ({
           }
           return;
         }
+        if (expr.exprKind === "identifier") {
+          enqueueReferencedFunctionIdentifier({
+            ctx: ownerCtx,
+            symbol: expr.symbol,
+            enqueue,
+          });
+          return;
+        }
         if (expr.exprKind !== "method-call") {
           return;
         }
@@ -656,6 +664,38 @@ const markStringLiteralCtorReachable = ({
     dependency: "string-literal-constructor",
     reachable,
   });
+};
+
+const enqueueReferencedFunctionIdentifier = ({
+  ctx,
+  symbol,
+  enqueue,
+}: {
+  ctx: CodegenContext;
+  symbol: number;
+  enqueue: (symbolId: ProgramSymbolId) => void;
+}): boolean => {
+  if (!ctx.program.functions.getSignature(ctx.moduleId, symbol)) {
+    return false;
+  }
+  const targetId = ctx.program.imports.getTarget(ctx.moduleId, symbol);
+  if (typeof targetId === "number") {
+    const targetRef = ctx.program.symbols.refOf(targetId);
+    enqueue(
+      ctx.program.symbols.canonicalIdOf(
+        targetRef.moduleId,
+        targetRef.symbol,
+      ) as ProgramSymbolId,
+    );
+    return true;
+  }
+  enqueue(
+    ctx.program.symbols.canonicalIdOf(
+      ctx.moduleId,
+      symbol,
+    ) as ProgramSymbolId,
+  );
+  return true;
 };
 
 const walkFunctionReachabilityExpressions = ({
@@ -970,6 +1010,14 @@ export const compileFunctions = ({
               ) as ProgramSymbolId,
             );
           }
+          return;
+        }
+        if (expr.exprKind === "identifier") {
+          enqueueReferencedFunctionIdentifier({
+            ctx,
+            symbol: expr.symbol,
+            enqueue: (symbolId) => reachableFunctions.add(symbolId),
+          });
           return;
         }
         if (expr.exprKind === "literal" && expr.literalKind === "string") {
