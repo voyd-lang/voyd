@@ -1,0 +1,17 @@
+use std::enums::{ enum }
+use std::vx::all
+
+obj MaybeCount {
+  value?: i32
+}
+
+enum Msg
+  Noop
+
+pub fn app() -> Program<MaybeCount, Msg>
+  program<MaybeCount, Msg>(
+    init: () -> MaybeCount => MaybeCount {},
+    update: (model: MaybeCount, _msg: Msg) -> Program<MaybeCount, Msg> =>
+      program<MaybeCount, Msg>(model: model),
+    view: (_model: MaybeCount) -> Html<Msg> => <div></div>
+  )

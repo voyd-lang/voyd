@@ -62,6 +62,63 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("does not serialize unrelated DTO-compatible exports in boundary modules", async () => {
+    const wasm = await buildModule({ entryFile: "boundary-export-contract.voyd" });
+    const module = new WebAssembly.Module(wasmBufferSource(wasm));
+    const abi = parseExportAbi(module);
+
+    expect(abi.exports).toEqual(
+      expect.arrayContaining([
+        { name: "app", abi: "serialized", formatId: "msgpack" },
+        { name: "echo_command", abi: "serialized", formatId: "msgpack" },
+        { name: "add", abi: "direct" },
+      ]),
+    );
+  });
+
+  it("decodes boundary payload envelopes in serialized params", async () => {
+    const wasm = await buildModule({ entryFile: "boundary-export-contract.voyd" });
+    const host = await createVoydHost({ wasm });
+    const payload = {
+      type: "cmd",
+      kind: "message",
+      value: { Increment: {} },
+    };
+
+    const result = await host.runPure("echo_command", [payload]);
+
+    expect(result).toEqual(payload);
+  });
+
+  it("does not activate companion boundary exports from unrelated boundary helpers", async () => {
+    const wasm = await buildModule({
+      entryFile: "boundary-preview-export-contract.voyd",
+    });
+    const module = new WebAssembly.Module(wasmBufferSource(wasm));
+    const abi = parseExportAbi(module);
+
+    expect(abi.exports).toEqual(
+      expect.arrayContaining([
+        { name: "view", abi: "serialized", formatId: "msgpack" },
+        { name: "init", abi: "direct" },
+      ]),
+    );
+  });
+
+  it("reports unsupported explicit boundary export DTOs", async () => {
+    const result = await compileProgram({
+      entryPath: resolve(fixtureRoot, "boundary-export-unsupported.voyd"),
+      roots: { src: fixtureRoot, std: stdRoot },
+      host: createFsModuleHost(),
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
+      "boundary DTO incompatibility",
+    );
+  });
+
   it("round-trips msgpack values for serialized exports", async () => {
     const wasm = await buildModule();
     const host = await createVoydHost({ wasm });

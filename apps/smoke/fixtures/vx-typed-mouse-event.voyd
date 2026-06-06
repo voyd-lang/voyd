@@ -9,15 +9,22 @@ obj Model {
 enum Msg
   Moved { x: f64 }
 
-pub fn init() -> Model
+pub fn app() -> Program<Model, Msg>
+  program<Model, Msg>(
+    init: () -> Model => init(),
+    update: (model: Model, msg: Msg) -> Program<Model, Msg> => update(model, msg),
+    view: (model: Model) -> Html<Msg> => view(model)
+  )
+
+fn init() -> Model
   Model { x: 0.0 }
 
-pub fn update(model: Model, msg: Msg) -> Model
+fn update(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Moved { x }:
-      Model { x: x }
+      program<Model, Msg>(model: Model { x: x })
 
-pub fn view(model: Model) -> Html<Msg>
+fn view(model: Model) -> Html<Msg>
   <button on_mouse_move={(event: MouseEvent) -> Msg => Msg::Moved { x: event.client_x }}>
     X: {label(model.x)}
   </button>

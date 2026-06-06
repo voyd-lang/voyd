@@ -77,6 +77,7 @@ export type VoydHost = {
     entryName: string,
     args?: unknown[]
   ) => VoydRunHandle<T>;
+  hasExport: (entryName: string) => boolean;
   runManaged: <T = unknown>(entryName: string, args?: unknown[]) => VoydRunHandle<T>;
   runEffectful: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
   run: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
@@ -85,7 +86,7 @@ export type VoydHost = {
 
 const MSGPACK_OPTS = { useBigInt64: true } as const;
 const TASK_RUNTIME_IMPORT_MODULE = "voyd.task";
-const VX_CALLBACK_IMPORT_MODULE = "voyd.vx.callback";
+const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const TASK_RUNTIME_EFFECT_ID = "voyd.std.task.runtime";
 const TASK_RUNTIME_WAIT_OP_ID = 0;
 const TASK_RUNTIME_YIELD_OP_ID = 1;
@@ -227,7 +228,7 @@ const buildTaskRuntimeImportModule = ({
     };
 };
 
-const buildVxCallbackImportModule = ({
+const buildCallbackImportModule = ({
   importDescriptors,
   getInstance,
   registry,
@@ -247,14 +248,14 @@ const buildVxCallbackImportModule = ({
   importDescriptors
     .filter(
       (descriptor) =>
-        descriptor.module === VX_CALLBACK_IMPORT_MODULE &&
+        descriptor.module === CALLBACK_IMPORT_MODULE &&
         descriptor.kind === "function",
     )
     .forEach((descriptor) => {
-      if (!descriptor.name.startsWith("retain_event__")) {
+      if (!descriptor.name.startsWith("retain__")) {
         return;
       }
-      const callbackExportName = descriptor.name.slice("retain_event__".length);
+      const callbackExportName = descriptor.name.slice("retain__".length);
       callbackImports[descriptor.name] = ((handlerRef: unknown): number =>
         registry.retain((payload) => {
           const instance = getInstance();
@@ -287,7 +288,7 @@ const buildVxCallbackImportModule = ({
           });
           const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
           if (encodedPayload.length > bufferSize) {
-            throw new Error("VX retained event callback payload exceeds buffer size");
+            throw new Error("retained callback payload exceeds buffer size");
           }
           ensureMemoryCapacity({
             memory: msgpackMemory,
@@ -320,7 +321,7 @@ const buildVxCallbackImportModule = ({
             }
             throw annotateTrap(error, {
               transition: {
-                point: "vx_retained_event_callback",
+                point: "retained_callback",
                 direction: "host->vm",
               },
               fallbackFunctionName: callbackExportName,
@@ -330,10 +331,10 @@ const buildVxCallbackImportModule = ({
             return undefined;
           }
           if (written < 0) {
-            throw new Error("VX retained event callback encoding failed");
+            throw new Error("retained callback encoding failed");
           }
           if (written > bufferSize) {
-            throw new Error("VX retained event callback payload exceeds buffer size");
+            throw new Error("retained callback payload exceeds buffer size");
           }
           const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
           return decode(bytes, MSGPACK_OPTS);
@@ -343,7 +344,7 @@ const buildVxCallbackImportModule = ({
   return Object.keys(callbackImports).length === 0
     ? {}
     : {
-        [VX_CALLBACK_IMPORT_MODULE]: callbackImports,
+        [CALLBACK_IMPORT_MODULE]: callbackImports,
       };
 };
 
@@ -665,13 +666,13 @@ export const createVoydHost = async ({
   const callbackRegistry =
     retainedCallbacks ?? createRetainedEventHandlerRegistry();
   let runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner = () => {
-    throw new Error("VX retained event callback called before host runtime initialization");
+    throw new Error("retained callback called before host runtime initialization");
   };
-  const vxCallbackImports = buildVxCallbackImportModule({
+  const callbackImports = buildCallbackImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
     getInstance: () => {
       if (!instanceRef) {
-        throw new Error("VX callback import called before host instance initialization");
+        throw new Error("callback import called before host instance initialization");
       }
       return instanceRef;
     },
@@ -686,7 +687,7 @@ export const createVoydHost = async ({
       {
         ...defaultImports(),
         ...(taskRuntimeImports as Record<string, unknown>),
-        ...(vxCallbackImports as Record<string, unknown>),
+        ...(callbackImports as Record<string, unknown>),
       } as WebAssembly.Imports,
       imports
     )
@@ -1857,7 +1858,7 @@ export const createVoydHost = async ({
     });
     const encodedPayload = encode(payload, MSGPACK_OPTS) as Uint8Array;
     if (encodedPayload.length > bufferSize) {
-      throw new Error("VX retained event callback payload exceeds buffer size");
+      throw new Error("retained callback payload exceeds buffer size");
     }
     return unwrapRunOutcome(
       runEffectfulManaged(callbackExportName, [], ({ bufferPtr, bufferSize }) => {
@@ -1880,7 +1881,7 @@ export const createVoydHost = async ({
         } catch (error) {
           throw annotateTrap(error, {
             transition: {
-              point: "vx_retained_event_callback",
+              point: "retained_callback",
               direction: "host->vm",
             },
             fallbackFunctionName: rawCallbackExportName,
@@ -1945,6 +1946,7 @@ export const createVoydHost = async ({
     initEffects,
     runPure,
     runEffectfulManaged,
+    hasExport: (entryName) => hasExportedFunction({ instance, name: entryName }),
     runManaged,
     runEffectful,
     run,

@@ -15,11 +15,29 @@ export function meta({}: Route.MetaArgs) {
   ];
 }
 
-const PLAYGROUND_STARTER = `use std::vx::all
+const PLAYGROUND_STARTER = `use std::enums::{ enum }
+use std::vx::all
 
-pub fn view()
-  let (local_count, set_local_count) = state(id: 1, initial: 0)
+obj Model {
+  count: i32
+}
 
+enum Msg
+  Increment
+
+pub fn app() -> Program<Model, Msg>
+  program<Model, Msg>(
+    init: () -> Model => Model { count: 0 },
+    update: (model: Model, message: Msg) -> Program<Model, Msg> => update(model, message),
+    view: (model: Model) -> Html<Msg> => view(model)
+  )
+
+fn update(model: Model, message: Msg) -> Program<Model, Msg>
+  match(message)
+    Msg::Increment:
+      program<Model, Msg>(model: Model { count: model.count + 1 })
+
+fn view(model: Model) -> Html<Msg>
   <main style="
     margin: 8px;
     padding: 16px;
@@ -35,11 +53,11 @@ pub fn view()
       background: rgba(148, 163, 184, 0.12);
     ">
       <p>
-        Component-local state updates from a retained event closure.
+        Typed messages update the model in Voyd.
       </p>
       <button
         type="button"
-        on_click={() => set_local_count(local_count + 1)}
+        on_click={Msg::Increment {}}
         style="
           border: 1px solid rgba(125, 211, 252, 0.45);
           padding: 10px 14px;
@@ -49,7 +67,7 @@ pub fn view()
           cursor: pointer;
         "
       >
-        Local clicks: {count_label(local_count)}
+        Count: {count_label(model.count)}
       </button>
     </section>
   </main>
@@ -60,12 +78,7 @@ fn count_label(value: i32) -> String
     value == 1: "1"
     value == 2: "2"
     value == 3: "3"
-    else: "many"
-
-obj Model {}
-
-pub fn init() -> Model
-  Model {}`;
+    else: "many"`;
 
 export default function Playground() {
   return (

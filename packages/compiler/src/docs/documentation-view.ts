@@ -391,6 +391,7 @@ const normalizeParameter = (
 const normalizeFunction = (
   fn: {
     id: number;
+    symbol: number;
     name: string;
     visibility: { level?: string };
     implId?: number;
@@ -407,17 +408,42 @@ const normalizeFunction = (
     effectTypeExpr?: unknown;
     documentation?: string;
   },
+  semantic: SemanticsPipelineResult,
 ): DocumentationFunctionView => ({
   id: fn.id,
   name: fn.name,
   visibility: normalizeVisibility(fn.visibility),
   implId: fn.implId,
   typeParameters: normalizeTypeParameters(fn.typeParameters),
-  params: fn.params.map(normalizeParameter),
+  params: publicParamsForFunction(fn, semantic).map(normalizeParameter),
   returnTypeExpr: fn.returnTypeExpr,
   effectTypeExpr: fn.effectTypeExpr,
   documentation: fn.documentation,
 });
+
+const publicParamsForFunction = (
+  fn: {
+    symbol: number;
+    params: ReadonlyArray<{
+      name: string;
+      label?: string;
+      bindingKind?: string;
+      optional?: boolean;
+      typeExpr?: unknown;
+      documentation?: string;
+    }>;
+  },
+  semantic: SemanticsPipelineResult,
+) => {
+  const signature = semantic.typing.functions.getSignature(fn.symbol);
+  if (!signature) {
+    return fn.params;
+  }
+  return fn.params.filter(
+    (_param, index) =>
+      signature.parameters[index]?.synthetic !== "stable-callsite-id",
+  );
+};
 
 const normalizeMethod = (
   method: {
@@ -493,7 +519,7 @@ const normalizeModules = ({
             })),
           functions: semantic.binding.functions
             .filter((fn) => allowsName(fn.name))
-            .map(normalizeFunction),
+            .map((fn) => normalizeFunction(fn, semantic)),
           typeAliases: semantic.binding.typeAliases
             .filter((typeAlias) => allowsName(typeAlias.name))
             .map((typeAlias) => ({
@@ -557,7 +583,7 @@ const normalizeModules = ({
               typeParameters: normalizeTypeParameters(implDecl.typeParameters),
               methods: implDecl.methods
                 .filter((method) => method.memberVisibility?.api === true)
-                .map(normalizeFunction),
+                .map((method) => normalizeFunction(method, semantic)),
               documentation: implDecl.documentation,
             })),
           reexports: semantic.binding.uses.flatMap((useDecl) =>

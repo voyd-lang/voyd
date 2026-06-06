@@ -11,6 +11,11 @@ export type SerializerAttribute = {
   decode: Expr;
 };
 
+export type BoundaryAttribute = {
+  type: "value" | "payload";
+  field?: string;
+};
+
 export type TestAttribute = {
   id: string;
   description?: string;

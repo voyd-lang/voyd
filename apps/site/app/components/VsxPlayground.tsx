@@ -126,8 +126,6 @@ export const VsxPlayground = ({ value }: { value: string }) => {
       });
       const app = createVoydVxAppRuntime({
         host,
-        exports: { view: "view" },
-        viewReceivesModel: viewReceivesModel(code),
       });
 
       rendererRef.current?.dispose();
@@ -169,6 +167,3 @@ export const VsxPlayground = ({ value }: { value: string }) => {
     </div>
   );
 };
-
-const viewReceivesModel = (source: string): boolean =>
-  /\bpub\s+fn\s+view\s*\(\s*[^)\s]/.test(source);

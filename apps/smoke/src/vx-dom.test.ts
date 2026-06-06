@@ -18,6 +18,10 @@ const effectfulComponentEventEntryPath = path.join(
   fixtureRoot,
   "vx-effectful-component-event.voyd",
 );
+const explicitStateIdEntryPath = path.join(
+  fixtureRoot,
+  "vx-state-explicit-id-rejected.voyd",
+);
 const inlineAggregateArrayEntryPath = path.join(
   fixtureRoot,
   "vx-inline-aggregate-array.voyd",
@@ -37,6 +41,19 @@ const expectCompileSuccess = (
 };
 
 describe("smoke: compiled VX DOM rendering", () => {
+  it("rejects explicit component state ids", async () => {
+    const sdk = createSdk();
+    const result = await sdk.compile({ entryPath: explicitStateIdEntryPath });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      return;
+    }
+    expect(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
+      "{ id: i32, initial: i32 }",
+    );
+  });
+
   it("renders a compiled Voyd VX tree through vx-dom in a browser-like DOM", async () => {
     const sdk = createSdk();
     const entryPath = path.join(fixtureRoot, "vx.voyd");
@@ -135,10 +152,7 @@ describe("smoke: compiled VX DOM rendering", () => {
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const app = createVoydVxAppRuntime({
-      host,
-      exports: { subscriptions: "subscriptions" },
-    });
+    const app = createVoydVxAppRuntime({ host });
 
     const container = document.createElement("div");
     const mounted = await mountVxApp({ container, app });
@@ -286,13 +300,20 @@ obj Model { count: i32 }
 enum Msg
   Save { value?: String }
 
-pub fn init() -> Model
+pub fn app() -> Program<Model, Msg>
+  program<Model, Msg>(
+    init: () -> Model => init(),
+    update: (model: Model, msg: Msg) -> Program<Model, Msg> => update(model, msg),
+    view: (model: Model) -> Html<Msg> => view(model)
+  )
+
+fn init() -> Model
   Model { count: 0 }
 
-pub fn update(model: Model, msg: Msg) -> Model
-  model
+fn update(model: Model, msg: Msg) -> Program<Model, Msg>
+  program<Model, Msg>(model: model)
 
-pub fn view(model: Model) -> Html<Msg>
+fn view(model: Model) -> Html<Msg>
   <button on_click={Msg::Save {}}>Save</button>
 `,
       entryPath: "invalid-vx-message.voyd",
@@ -339,10 +360,7 @@ pub fn view(model: Model) -> Html<Msg>
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const app = createVoydVxAppRuntime({
-      host,
-      exports: { subscriptions: "subscriptions" },
-    });
+    const app = createVoydVxAppRuntime({ host });
     const componentStateApp = createVoydVxAppRuntime({
       host,
       exports: {

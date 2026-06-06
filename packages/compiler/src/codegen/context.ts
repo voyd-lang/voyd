@@ -86,6 +86,7 @@ export interface FunctionMetadata {
     optional?: boolean;
     name?: string;
     bindingKind?: HirBindingKind;
+    synthetic?: "stable-callsite-id";
   }[];
   paramAbiKinds: readonly OptimizedValueAbiKind[];
   resultTypeId: TypeId;

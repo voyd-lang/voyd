@@ -8,15 +8,22 @@ use std::string::type::{ String, StringSlice, new_string }
 use std::task::{ Task }
 pub use std::msgpack::MsgPack
 
+@boundary(type: "value")
 pub type Html<Msg> = MsgPack
+pub type HtmlNode = MsgPack
+@boundary(type: "value")
 pub type Attr<Msg> = MsgPack
+pub type HtmlAttr = MsgPack
+@boundary(type: "value")
 pub type Program<Model, Msg> = MsgPack
 pub type RenderKey = String
 
+@boundary(type: "payload", field: "payload")
 pub obj Cmd<Msg> {
   api payload: MsgPack
 }
 
+@boundary(type: "payload", field: "payload")
 pub obj Sub<Msg> {
   api payload: MsgPack
 }
@@ -88,31 +95,39 @@ pub eff Dom
 
 @effect(id: "voyd.std.vx.component")
 pub eff Component
+  state_scope(tail, key: MsgPack) -> void
+
+  state_key(tail, id: i32) -> i32
+
   state_get(tail, id: i32, initial: MsgPack) -> MsgPack
 
   state_set(tail, id: i32, value: MsgPack) -> void
 
   task_started(tail, key: MsgPack, task_id: i32) -> void
 
-@intrinsic(name: "__vx_retain_event_handler", uses_signature: true)
+@intrinsic(name: "__retain_callback", uses_signature: true)
 fn retain_event_handler_id(handler: fn() -> MsgPack): () -> i32
   0
 
-@intrinsic(name: "__vx_retain_event_handler", uses_signature: true)
+@intrinsic(name: "__retain_callback", uses_signature: true)
 fn retain_event_handler_void_id(handler: fn() -> void): () -> i32
   0
 
-@intrinsic(name: "__vx_retain_event_handler", uses_signature: true)
+@intrinsic(name: "__retain_callback", uses_signature: true)
 fn retain_event_handler_with_payload_id(handler: fn(MsgPack) -> MsgPack): () -> i32
   0
 
-@intrinsic(name: "__vx_retain_event_handler", uses_signature: true)
+@intrinsic(name: "__retain_callback", uses_signature: true)
 fn retain_typed_event_handler_id<Msg>(handler: fn() -> Msg): () -> i32
-  __vx_retain_event_handler(handler)
+  __retain_callback(handler)
 
-@intrinsic(name: "__vx_retain_event_handler", uses_signature: true)
+@intrinsic(name: "__retain_callback", uses_signature: true)
 fn retain_typed_event_handler_with_payload_id<Event, Msg>(handler: fn(Event) -> Msg): () -> i32
-  __vx_retain_event_handler(handler)
+  __retain_callback(handler)
+
+@intrinsic(name: "__stable_callsite_id")
+fn stable_callsite_id(): () -> i32
+  0
 
 @intrinsic(name: "__boundary_value_to_msgpack")
 fn boundary_value_to_msgpack<Msg>(message: Msg): () -> MsgPack
@@ -354,52 +369,88 @@ pub fn keyboard_on_key_up<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
   keyboard_on_key_up<Msg>(key: key.to_string(), value: value)
 
 /// Reads a component-local serialized state handle.
-pub fn state_handle({ id: i32, initial: MsgPack }): Component -> StateHandle<MsgPack>
+pub fn state_handle({
+  initial: MsgPack,
+  id: i32 = stable_callsite_id()
+}): Component -> StateHandle<MsgPack>
+  state_handle_at(id: id, initial: initial)
+
+fn state_handle_at({ id: i32, initial: MsgPack }): Component -> StateHandle<MsgPack>
+  let slot = Component::state_key(id)
   StateHandle<MsgPack> {
-    id: id,
-    value: Component::state_get(id, initial)
+    id: slot,
+    value: Component::state_get(slot, initial)
   }
 
 /// Reads a component-local text state handle.
-pub fn state_handle({ id: i32, initial: String }): Component -> StateHandle<String>
+pub fn state_handle({
+  initial: String,
+  id: i32 = stable_callsite_id()
+}): Component -> StateHandle<String>
+  state_handle_at(id: id, initial: initial)
+
+fn state_handle_at({ id: i32, initial: String }): Component -> StateHandle<String>
+  let slot = Component::state_key(id)
   StateHandle<String> {
-    id: id,
+    id: slot,
     value: component_string_state_value(
-      value: Component::state_get(id, msgpack::make_string(initial)),
+      value: Component::state_get(slot, msgpack::make_string(initial)),
       fallback: initial
     )
   }
 
-pub fn state_handle({ id: i32, initial: StringSlice }): Component -> StateHandle<String>
-  state_handle(id: id, initial: initial.to_string())
+pub fn state_handle({
+  initial: StringSlice,
+  id: i32 = stable_callsite_id()
+}): Component -> StateHandle<String>
+  state_handle_at(id: id, initial: initial.to_string())
 
 /// Reads a component-local integer state handle.
-pub fn state_handle({ id: i32, initial: i32 }): Component -> StateHandle<i32>
+pub fn state_handle({
+  initial: i32,
+  id: i32 = stable_callsite_id()
+}): Component -> StateHandle<i32>
+  state_handle_at(id: id, initial: initial)
+
+fn state_handle_at({ id: i32, initial: i32 }): Component -> StateHandle<i32>
+  let slot = Component::state_key(id)
   StateHandle<i32> {
-    id: id,
+    id: slot,
     value: component_i32_state_value(
-      value: Component::state_get(id, msgpack::make_i32(initial)),
+      value: Component::state_get(slot, msgpack::make_i32(initial)),
       fallback: initial
     )
   }
 
 /// Reads component-local serialized state as a `(value, setter)` pair.
-pub fn state({ id: i32, initial: MsgPack }): Component -> (MsgPack, fn(MsgPack) -> void)
-  let handle = state_handle(id: id, initial: initial)
+pub fn state({
+  initial: MsgPack,
+  id: i32 = stable_callsite_id()
+}): Component -> (MsgPack, fn(MsgPack) -> void)
+  let handle = state_handle_at(id: id, initial: initial)
   (handle.value, (value: MsgPack) -> void => handle.set_serialized(value))
 
 /// Reads component-local text state as a `(value, setter)` pair.
-pub fn state({ id: i32, initial: String }): Component -> (String, fn(String) -> void)
-  let handle = state_handle(id: id, initial: initial)
+pub fn state({
+  initial: String,
+  id: i32 = stable_callsite_id()
+}): Component -> (String, fn(String) -> void)
+  let handle = state_handle_at(id: id, initial: initial)
   (handle.value, (value: String) -> void => handle.set(value))
 
-pub fn state({ id: i32, initial: StringSlice }): Component -> (String, fn(String) -> void)
-  let handle = state_handle(id: id, initial: initial)
+pub fn state({
+  initial: StringSlice,
+  id: i32 = stable_callsite_id()
+}): Component -> (String, fn(String) -> void)
+  let handle = state_handle_at(id: id, initial: initial.to_string())
   (handle.value, (value: String) -> void => handle.set(value))
 
 /// Reads component-local integer state as a `(value, setter)` pair.
-pub fn state({ id: i32, initial: i32 }): Component -> (i32, fn(i32) -> void)
-  let handle = state_handle(id: id, initial: initial)
+pub fn state({
+  initial: i32,
+  id: i32 = stable_callsite_id()
+}): Component -> (i32, fn(i32) -> void)
+  let handle = state_handle_at(id: id, initial: initial)
   (handle.value, (value: i32) -> void => handle.set(value))
 
 fn component_string_state_value({ value: MsgPack, fallback: String }): () -> String
@@ -495,6 +546,13 @@ pub fn element({
     if normalized.events.len() > 0:
       out.set("events", normalized.events)
   msgpack::make_map(out)
+
+pub fn html_element({
+  tag: String,
+  attrs?: Array<HtmlAttr>,
+  children: Array<HtmlNode>
+}) -> HtmlNode
+  element(tag: tag, attrs: attrs, children: children)
 
 /// Creates a string-valued DOM attribute.
 pub fn attr({ name: String, value: String }): () -> MsgPack
@@ -641,6 +699,13 @@ pub fn keyed({ key: String, child: MsgPack }): () -> MsgPack
 pub fn keyed({ key: StringSlice, child: MsgPack }): () -> MsgPack
   keyed(key: key.to_string(), child: child)
 
+pub fn keyed({ key: String, body: fn() -> MsgPack }): Component -> MsgPack
+  Component::state_scope(msgpack::make_string(key))
+  keyed(key: key, child: body())
+
+pub fn keyed({ key: StringSlice, body: fn() -> MsgPack }): Component -> MsgPack
+  keyed(key: key.to_string(), body: body)
+
 /// Lifts child HTML through a retained message mapper.
 pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler_id: i32 }) -> Html<ParentMsg>
   let ~out = Dict<String, MsgPack>::init()
@@ -729,6 +794,29 @@ pub fn event_message<Msg>({ name: String, message: Msg, options?: EventOptions }
 
 pub fn event_message<Msg>({ name: StringSlice, message: Msg, options?: EventOptions }): () -> MsgPack
   event_message<Msg>(name: name.to_string(), message: message, options: options)
+
+pub fn html_event_message<Msg>({ name: String, message: fn() -> Msg, options?: EventOptions }): () -> HtmlAttr
+  event_message<Msg>(name: name, message: message, options: options)
+
+pub fn html_event_message<Event, Msg>({
+  name: String,
+  message: fn(Event) -> Msg,
+  options?: EventOptions
+}): () -> HtmlAttr
+  event_message<Event, Msg>(name: name, message: message, options: options)
+
+pub fn html_event_message<Msg>({ name: String, message: Msg, options?: EventOptions }): () -> HtmlAttr
+  event_message<Msg>(name: name, message: message, options: options)
+
+pub fn html_event_handler<Msg>({ name: String, handler: fn() -> Msg, options?: EventOptions }): () -> HtmlAttr
+  event_handler<Msg>(name: name, handler: handler, options: options)
+
+pub fn html_event_payload_handler<Event, Msg>({
+  name: String,
+  handler: fn(Event) -> Msg,
+  options?: EventOptions
+}): () -> HtmlAttr
+  event_payload_handler<Event, Msg>(name: name, handler: handler, options: options)
 
 pub fn on_click(handler: fn() -> MsgPack): () -> MsgPack
   event(name: "click", handler: handler)
@@ -1489,24 +1577,66 @@ pub fn program<Model, Msg>({
   msgpack::make_map(out)
 
 pub fn program<Model, Msg>({
-  init: MsgPack,
-  update: MsgPack,
-  view: MsgPack,
-  subscriptions?: MsgPack,
-  decode_msg?: MsgPack,
-  encode_msg?: MsgPack
+  init: fn() -> Model,
+  update: fn(Model, Msg) -> Program<Model, Msg>,
+  view: fn(Model) -> Html<Msg>
+}) -> Program<Model, Msg>
+  program_handlers<Model, Msg>(
+    init_id: __retain_callback(init),
+    update_id: __retain_callback(update),
+    view_id: __retain_callback(view)
+  )
+
+pub fn program<Model, Msg>({
+  init: fn() -> Program<Model, Msg>,
+  update: fn(Model, Msg) -> Program<Model, Msg>,
+  view: fn(Model) -> Html<Msg>
+}) -> Program<Model, Msg>
+  program_handlers<Model, Msg>(
+    init_id: __retain_callback(init),
+    update_id: __retain_callback(update),
+    view_id: __retain_callback(view)
+  )
+
+pub fn program<Model, Msg>({
+  init: fn() -> Model,
+  update: fn(Model, Msg) -> Program<Model, Msg>,
+  view: fn(Model) -> Html<Msg>,
+  subscriptions: fn(Model) -> Sub<Msg>
+}) -> Program<Model, Msg>
+  program_handlers<Model, Msg>(
+    init_id: __retain_callback(init),
+    update_id: __retain_callback(update),
+    view_id: __retain_callback(view),
+    subscriptions_id: __retain_callback(subscriptions)
+  )
+
+pub fn program<Model, Msg>({
+  init: fn() -> Program<Model, Msg>,
+  update: fn(Model, Msg) -> Program<Model, Msg>,
+  view: fn(Model) -> Html<Msg>,
+  subscriptions: fn(Model) -> Sub<Msg>
+}) -> Program<Model, Msg>
+  program_handlers<Model, Msg>(
+    init_id: __retain_callback(init),
+    update_id: __retain_callback(update),
+    view_id: __retain_callback(view),
+    subscriptions_id: __retain_callback(subscriptions)
+  )
+
+fn program_handlers<Model, Msg>({
+  init_id: i32,
+  update_id: i32,
+  view_id: i32,
+  subscriptions_id?: i32
 }) -> Program<Model, Msg>
   let ~out = Dict<String, MsgPack>::init()
   out.set("kind", "program")
-  out.set("init", init)
-  out.set("update", update)
-  out.set("view", view)
-  if subscriptions is Some:
-    out.set("subscriptions", subscriptions.value)
-  if decode_msg is Some:
-    out.set("decode_msg", decode_msg.value)
-  if encode_msg is Some:
-    out.set("encode_msg", encode_msg.value)
+  out.set("initHandlerId", msgpack::make_i32(init_id))
+  out.set("updateHandlerId", msgpack::make_i32(update_id))
+  out.set("viewHandlerId", msgpack::make_i32(view_id))
+  if subscriptions_id is Some:
+    out.set("subscriptionsHandlerId", msgpack::make_i32(subscriptions_id.value))
   msgpack::make_map(out)
 
 /// Creates a virtual DOM element payload for renderer consumption.

@@ -58,11 +58,16 @@ import {
   emitExportAbiSection,
   type ExportAbiEntry,
 } from "./exports/export-abi.js";
+import { deriveBoundarySchema } from "./boundary/schema.js";
 import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
 import { boxSignatureSpillValue, unboxSignatureSpillValue } from "./signature-spill.js";
+import {
+  isBoundaryMsgPackPayload,
+  isBoundaryMsgPackValue,
+} from "./boundary-metadata.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -129,97 +134,38 @@ const userParamOffsetFor = (meta: FunctionMetadata): number => meta.userParamOff
 const firstUserParamIndexFor = (meta: FunctionMetadata): number =>
   meta.firstUserParamIndex;
 
-const VX_BOUNDARY_EXPORT_NAMES = new Set([
-  "init",
-  "update",
-  "view",
-  "subscriptions",
-]);
-
-const isVxBoundaryExportName = (exportName: string): boolean =>
-  VX_BOUNDARY_EXPORT_NAMES.has(exportName);
-
-const VX_MSGPACK_ALIAS_NAMES = new Set(["Html", "Program"]);
-const VX_PAYLOAD_ENVELOPE_NAMES = new Set(["Sub"]);
-const VX_STD_MODULE_ID = "std::vx";
-
-const isStdVxSymbolNamed = (
-  symbol: ProgramSymbolId,
-  names: ReadonlySet<string>,
+const typeUsesBoundaryMsgPack = (
+  typeId: TypeId,
   ctx: CodegenContext,
 ): boolean =>
-  ctx.program.symbols.refOf(symbol).moduleId === VX_STD_MODULE_ID &&
-  names.has(ctx.program.symbols.getName(symbol) ?? "");
+  isBoundaryMsgPackValue(typeId, ctx) || isBoundaryMsgPackPayload(typeId, ctx);
 
-const hasTypeAliasNamed = (
-  typeId: TypeId,
-  names: ReadonlySet<string>,
-  ctx: CodegenContext,
-): boolean =>
-  ctx.program.types
-    .getAliasSymbols(typeId)
-    .some((symbol) => isStdVxSymbolNamed(symbol, names, ctx));
-
-const nominalTypeName = (
-  typeId: TypeId,
-  ctx: CodegenContext,
-): string | undefined => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
-    return desc.name;
-  }
-  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
-    return nominalTypeName(desc.nominal, ctx);
-  }
-  return undefined;
-};
-
-const nominalTypeSymbolIsStdVxNamed = (
-  typeId: TypeId,
-  names: ReadonlySet<string>,
-  ctx: CodegenContext,
-): boolean => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  const nominal =
-    desc.kind === "intersection" && typeof desc.nominal === "number"
-      ? ctx.program.types.getTypeDesc(desc.nominal)
-      : desc;
-  if (nominal.kind !== "nominal-object" && nominal.kind !== "value-object") {
-    return false;
-  }
-  return isStdVxSymbolNamed(nominal.owner, names, ctx);
-};
-
-const isVxPayloadEnvelope = (typeId: TypeId, ctx: CodegenContext): boolean =>
-  nominalTypeSymbolIsStdVxNamed(typeId, VX_PAYLOAD_ENVELOPE_NAMES, ctx);
-
-const isVxViewBoundaryMeta = (meta: FunctionMetadata, ctx: CodegenContext): boolean =>
-  meta.paramTypeIds.length === 1 &&
-  hasTypeAliasNamed(meta.resultTypeId, VX_MSGPACK_ALIAS_NAMES, ctx);
-
-const isVxSubscriptionsBoundaryMeta = (
+const functionUsesBoundaryMsgPack = (
   meta: FunctionMetadata,
   ctx: CodegenContext,
 ): boolean =>
-  meta.paramTypeIds.length === 1 && isVxPayloadEnvelope(meta.resultTypeId, ctx);
+  [...meta.paramTypeIds, meta.resultTypeId].some((typeId) =>
+    typeUsesBoundaryMsgPack(typeId, ctx),
+  );
 
-const shouldEmitVxBoundaryWrapper = ({
-  exportName,
+const assertTypesSupportSerializedBoundary = ({
   meta,
-  moduleHasVxAppShape,
   ctx,
 }: {
-  exportName: string;
   meta: FunctionMetadata;
-  moduleHasVxAppShape: boolean;
   ctx: CodegenContext;
 }): boolean => {
-  if (!isVxBoundaryExportName(exportName)) return false;
-  if (exportName === "view") return isVxViewBoundaryMeta(meta, ctx);
-  if (exportName === "subscriptions") return isVxSubscriptionsBoundaryMeta(meta, ctx);
-  if (exportName === "init") return moduleHasVxAppShape && meta.paramTypeIds.length === 0;
-  if (exportName === "update") return moduleHasVxAppShape && meta.paramTypeIds.length === 2;
-  return false;
+  [...meta.paramTypeIds, meta.resultTypeId].forEach((typeId) => {
+    if (typeUsesBoundaryMsgPack(typeId, ctx)) {
+      return;
+    }
+    deriveBoundarySchema({
+      typeId,
+      ctx,
+      label: "serialized boundary export",
+    });
+  });
+  return true;
 };
 
 const makeAbiValue = (
@@ -944,6 +890,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
                 ? symbolName(ctx, ctx.moduleId, item.parameters[index]!.symbol)
                 : undefined,
             bindingKind: signature.parameters[index]?.bindingKind,
+            synthetic: signature.parameters[index]?.synthetic,
           })),
           paramAbiKinds,
           resultTypeId: descriptor.returnType,
@@ -1182,6 +1129,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
           optional: param.optional,
           name: signature.parameters[index]?.name,
           bindingKind: signature.parameters[index]?.bindingKind,
+          synthetic: signature.parameters[index]?.synthetic,
         })),
         paramAbiKinds,
         resultTypeId: instantiatedTypeDesc.returnType,
@@ -1249,18 +1197,6 @@ export const emitModuleExports = (
       );
       return metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
     };
-    const moduleHasVxAppShape = exportEntries.some((entry) => {
-      const exportName =
-        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
-      const meta = metaForEntry(entry);
-      if (!meta) return false;
-      return (
-        (exportName === "view" && isVxViewBoundaryMeta(meta, exportCtx)) ||
-        (exportName === "subscriptions" &&
-          isVxSubscriptionsBoundaryMeta(meta, exportCtx))
-      );
-    });
-
     exportEntries.forEach((entry) => {
       const intrinsicMetadata =
         exportCtx.program.symbols.getIntrinsicFunctionFlags(
@@ -1346,14 +1282,31 @@ export const emitModuleExports = (
         return;
       }
 
-      const shouldUseVxBoundary = shouldEmitVxBoundaryWrapper({
-        exportName,
-        meta,
-        moduleHasVxAppShape,
-        ctx: exportCtx,
-      });
+      const shouldUseBoundarySerialization =
+        functionUsesBoundaryMsgPack(meta, exportCtx);
 
-      if (serializer || shouldUseVxBoundary) {
+      if (shouldUseBoundarySerialization) {
+        try {
+          assertTypesSupportSerializedBoundary({
+            meta,
+            ctx: exportCtx,
+          });
+        } catch (error) {
+          exportCtx.diagnostics.report(
+            diagnosticFromCode({
+              code: "CG0001",
+              params: {
+                kind: "codegen-error",
+                message: (error as Error).message,
+              },
+              span: entry.span,
+            }),
+          );
+          return;
+        }
+      }
+
+      if (serializer || shouldUseBoundarySerialization) {
         if (serializer) {
           markSerializerReachable({ ctx: exportCtx, serializer });
         }
