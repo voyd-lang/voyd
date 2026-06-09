@@ -1,9 +1,14 @@
 import type { SymbolId, TypeId, TypeParamId } from "../../ids.js";
 import { satisfies as typeSatisfies } from "../type-relations.js";
-import type { FunctionSignature, TypingContext, TypingState } from "../types.js";
+import type {
+  FunctionSignature,
+  ParamSignature,
+  TypingContext,
+  TypingState,
+} from "../types.js";
 
 export type ExpectedCallContext = {
-  params?: readonly TypeId[];
+  params?: readonly ParamSignature[];
   expectedReturnCandidates?: ReadonlySet<SymbolId>;
 };
 

@@ -53,7 +53,9 @@ import {
   type CallArgumentShapeFailureEntry,
 } from "./call-argument-shape-classifier.js";
 import {
+  bindCallArgumentTypeParams,
   buildCallArgumentHintSubstitution,
+  expectedCallArgType,
   typeCallArgsWithSignatureContext,
 } from "./call-arg-context.js";
 import {
@@ -90,11 +92,12 @@ import {
   localSymbolForSymbolRef,
   symbolRefKey,
 } from "../symbol-ref-utils.js";
-import { createTranslation, translateFunctionSignature } from "../import-type-translation.js";
-import { typingContextsShareInterners } from "../shared-interners.js";
 import {
-  mapDependencySymbolToLocal,
-} from "../import-symbol-mapping.js";
+  createTranslation,
+  translateFunctionSignature,
+} from "../import-type-translation.js";
+import { typingContextsShareInterners } from "../shared-interners.js";
+import { mapDependencySymbolToLocal } from "../import-symbol-mapping.js";
 import { hydrateImportedTraitMetadataForOwnerRef } from "../import-trait-impl-hydration.js";
 import { collectTraitOwnersFromTypeParams } from "../constraint-trait-owners.js";
 import { typeDefaultParameterValues } from "../default-parameters.js";
@@ -261,7 +264,16 @@ export const typeCallExpr = (
   const shouldDeferLambdaProbeTyping = calleeExpr.exprKind === "overload-set";
 
   const args = expr.args.map((arg, index) => {
-    const expectedType = expectedParams?.[index];
+    const expectedType = expectedParams
+      ? expectedCallArgType({
+          args: expr.args,
+          index,
+          argIndex: index,
+          params: expectedParams,
+          hintSubstitution: undefined,
+          ctx,
+        })
+      : undefined;
     const shouldDeferLambdaArgTyping =
       shouldDeferLambdaProbeTyping &&
       ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda" &&
@@ -413,7 +425,10 @@ export const typeCallExpr = (
           })
         : undefined;
     if (intrinsicFallbackForIdentifier) {
-      ctx.table.setExprType(calleeExpr.id, intrinsicFallbackForIdentifier.calleeType);
+      ctx.table.setExprType(
+        calleeExpr.id,
+        intrinsicFallbackForIdentifier.calleeType,
+      );
       ctx.resolvedExprTypes.set(
         calleeExpr.id,
         applyCurrentSubstitution(
@@ -432,8 +447,7 @@ export const typeCallExpr = (
     if (metadata.intrinsic && metadata.intrinsicUsesSignature === false) {
       const instantiation = signature
         ? (() => {
-            const hasTypeParams =
-              (signature.typeParams?.length ?? 0) > 0;
+            const hasTypeParams = (signature.typeParams?.length ?? 0) > 0;
             if (hasTypeParams) {
               return instantiateFunctionCall({
                 signature,
@@ -518,9 +532,7 @@ export const typeCallExpr = (
             effectRow: ctx.primitives.defaultEffectRow,
           });
         })()
-      : signature ||
-          !metadata.intrinsic ||
-          intrinsicSignatures.length > 0
+      : signature || !metadata.intrinsic || intrinsicSignatures.length > 0
         ? getValueType(calleeExpr.symbol, ctx, {
             span: calleeExpr.span ?? expr.span,
             mode: state.mode,
@@ -928,8 +940,11 @@ const getExpectedCallParameters = ({
           })
         : undefined;
     return {
-      params: publicCallParametersFor({ signature: selected.signature }).map((param) =>
-        substitution ? ctx.arena.substitute(param.type, substitution) : param.type,
+      params: publicCallParametersFor({ signature: selected.signature }).map(
+        (param) =>
+          substitution
+            ? { ...param, type: ctx.arena.substitute(param.type, substitution) }
+            : param,
       ),
       expectedReturnCandidates,
     };
@@ -953,7 +968,9 @@ const getExpectedCallParameters = ({
       : undefined;
   return {
     params: publicCallParametersFor({ signature }).map((param) =>
-      substitution ? ctx.arena.substitute(param.type, substitution) : param.type,
+      substitution
+        ? { ...param, type: ctx.arena.substitute(param.type, substitution) }
+        : param,
     ),
   };
 };
@@ -1342,7 +1359,10 @@ const walkCallArguments = ({
         paramIndex += 1;
         continue;
       }
-      return { kind: "error", failure: { kind: "missing-argument", paramIndex } };
+      return {
+        kind: "error",
+        failure: { kind: "missing-argument", paramIndex },
+      };
     }
 
     if (param.label && arg.label === undefined) {
@@ -1570,10 +1590,8 @@ const emitConsensusCallArgumentShapeDiagnostic = <
         state,
       }),
     )
-    .filter(
-      (
-        entry,
-      ): entry is CallArgumentShapeFailureEntry<ParamSignature> => Boolean(entry),
+    .filter((entry): entry is CallArgumentShapeFailureEntry<ParamSignature> =>
+      Boolean(entry),
     );
   if (entries.length !== candidates.length || entries.length === 0) {
     return false;
@@ -1728,7 +1746,9 @@ const validateCallArgs = (
     return { ok: false };
   }
   const plan: CallArgumentPlanEntry[] = [];
-  const hasUnknownArgs = args.some((arg) => arg.type === ctx.primitives.unknown);
+  const hasUnknownArgs = args.some(
+    (arg) => arg.type === ctx.primitives.unknown,
+  );
   const result = walkCallArguments({
     args,
     params,
@@ -1885,8 +1905,7 @@ const callArgumentsSatisfyParams = ({
             expected: match.param.type,
             ctx,
             state,
-          }) &&
-          typeSatisfies(match.matchedType, match.param.type, ctx, state),
+          }) && typeSatisfies(match.matchedType, match.param.type, ctx, state),
     onSkipOptionalParam: () => true,
   }).kind === "ok";
 
@@ -1983,7 +2002,10 @@ const signatureWithExplicitTypeArgumentsForDiagnostic = ({
       ...param,
       type: ctx.arena.substitute(param.type, explicitSubstitution),
     })),
-    returnType: ctx.arena.substitute(signature.returnType, explicitSubstitution),
+    returnType: ctx.arena.substitute(
+      signature.returnType,
+      explicitSubstitution,
+    ),
   };
 };
 
@@ -2022,7 +2044,10 @@ const formatFunctionSignatureForDiagnostic = ({
     const optionalSuffix = param.optional ? "?" : "";
     return `${labelPrefix}${typeLabel}${optionalSuffix}`;
   });
-  const returnType = formatTypeForDiagnostic({ type: signature.returnType, ctx });
+  const returnType = formatTypeForDiagnostic({
+    type: signature.returnType,
+    ctx,
+  });
   return `${name}${typeParamSuffix}(${params.join(", ")}) -> ${returnType}`;
 };
 
@@ -2038,7 +2063,10 @@ const formatIntrinsicSignatureForDiagnostic = ({
   const params = signature.parameters.map((param) =>
     formatTypeForDiagnostic({ type: param, ctx }),
   );
-  const returnType = formatTypeForDiagnostic({ type: signature.returnType, ctx });
+  const returnType = formatTypeForDiagnostic({
+    type: signature.returnType,
+    ctx,
+  });
   return `${name}(${params.join(", ")}) -> ${returnType}`;
 };
 
@@ -2138,7 +2166,10 @@ const overloadCandidateFailureReason = ({
           type: mismatch.expectedType,
           ctx,
         });
-        const actual = formatTypeForDiagnostic({ type: mismatch.actualType, ctx });
+        const actual = formatTypeForDiagnostic({
+          type: mismatch.actualType,
+          ctx,
+        });
         return `type incompatibility at argument ${mismatch.argIndex + 1}: expected ${expected}, got ${actual}`;
       }
 
@@ -2182,7 +2213,10 @@ const overloadDiagnosticCandidates = <
   argsForCandidate?: (candidate: T) => readonly Arg[];
   signatureForCandidate?: (candidate: T) => FunctionSignature;
 }): { signature: string; reason?: string }[] => {
-  const limitedCandidates = candidates.slice(0, MAX_OVERLOAD_DIAGNOSTIC_CANDIDATES);
+  const limitedCandidates = candidates.slice(
+    0,
+    MAX_OVERLOAD_DIAGNOSTIC_CANDIDATES,
+  );
   const details = limitedCandidates.map((candidate) => {
     const signatureForCandidateEntry = signatureForCandidate
       ? signatureForCandidate(candidate)
@@ -2331,7 +2365,9 @@ const intrinsicNoOverloadDiagnosticParams = ({
       }
       const mismatchIndex = signature.parameters.findIndex((param, index) => {
         const arg = args[index];
-        return Boolean(arg && arg.type !== ctx.primitives.unknown && arg.type !== param);
+        return Boolean(
+          arg && arg.type !== ctx.primitives.unknown && arg.type !== param,
+        );
       });
       if (mismatchIndex >= 0) {
         const expected = formatTypeForDiagnostic({
@@ -2380,7 +2416,11 @@ const intrinsicAmbiguousOverloadDiagnosticParams = ({
   candidates: matches
     .slice(0, MAX_OVERLOAD_DIAGNOSTIC_CANDIDATES)
     .map((signature) => ({
-      signature: formatIntrinsicSignatureForDiagnostic({ name, signature, ctx }),
+      signature: formatIntrinsicSignatureForDiagnostic({
+        name,
+        signature,
+        ctx,
+      }),
     })),
 });
 
@@ -2469,7 +2509,9 @@ const traitMethodImplMetadataFor = ({
   ctx: TypingContext;
 }):
   | {
-      metadata: NonNullable<ReturnType<TypingContext["traitMethodImpls"]["get"]>>;
+      metadata: NonNullable<
+        ReturnType<TypingContext["traitMethodImpls"]["get"]>
+      >;
       moduleId: string;
     }
   | undefined => {
@@ -2757,12 +2799,11 @@ const getTraitMethodTypeBindings = ({
     moduleId: methodMetadata.moduleId,
     ctx,
   });
-  const template = templates
-    .find(
-      (entry) =>
-        entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
-        templateMethodSymbol,
-    );
+  const template = templates.find(
+    (entry) =>
+      entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
+      templateMethodSymbol,
+  );
   if (!template) {
     return undefined;
   }
@@ -3016,14 +3057,18 @@ const resolveFreeFunctionFallbackCandidates = ({
   ctx: TypingContext;
 }): MethodCallCandidate[] => {
   const existingKeys = new Set(
-    existing.map((candidate) => canonicalMethodCandidateKey({ candidate, ctx })),
+    existing.map((candidate) =>
+      canonicalMethodCandidateKey({ candidate, ctx }),
+    ),
   );
   return resolveFreeFunctionCandidates({
     methodName,
     ctx,
   }).filter(
     (fallback) =>
-      !existingKeys.has(canonicalMethodCandidateKey({ candidate: fallback, ctx })),
+      !existingKeys.has(
+        canonicalMethodCandidateKey({ candidate: fallback, ctx }),
+      ),
   );
 };
 
@@ -3134,16 +3179,18 @@ const selectMethodCallCandidate = ({
     });
 
     if (fallbackCandidates.length > 0) {
-      const filteredFallbackCandidates = filterCandidatesByExplicitTypeArguments({
-        candidates: fallbackCandidates,
-        typeArguments,
-      });
+      const filteredFallbackCandidates =
+        filterCandidatesByExplicitTypeArguments({
+          candidates: fallbackCandidates,
+          typeArguments,
+        });
       candidates = filteredFallbackCandidates;
-      noOverloadDiagnosticCandidates = mergeCandidatesForMethodNoOverloadDiagnostic({
-        methodCandidates,
-        fallbackCandidates: filteredFallbackCandidates,
-        ctx,
-      });
+      noOverloadDiagnosticCandidates =
+        mergeCandidatesForMethodNoOverloadDiagnostic({
+          methodCandidates,
+          fallbackCandidates: filteredFallbackCandidates,
+          ctx,
+        });
       enforceOverloadCandidateBudget({
         name: expr.method,
         candidateCount: candidates.length,
@@ -3320,7 +3367,10 @@ const resolveQualifiedTraitMethodCallCandidates = ({
 }): MethodCallResolution => {
   const traitRecord = ctx.symbolTable.getSymbol(traitSymbol);
   const traitName = traitRecord.name;
-  const qualifiedTraitRef = canonicalSymbolRefForTypingContext(traitSymbol, ctx);
+  const qualifiedTraitRef = canonicalSymbolRefForTypingContext(
+    traitSymbol,
+    ctx,
+  );
 
   if (receiverType === ctx.primitives.unknown) {
     return { candidates: [], receiverName: traitName };
@@ -3370,24 +3420,22 @@ const resolveQualifiedTraitMethodCallCandidates = ({
     return { candidates: [], receiverName: traitName };
   }
 
-  const candidates = nominalResolution.candidates.filter(
-    (candidate) => {
-      const methodMetadata = traitMethodImplMetadataFor({
-        symbol: candidate.symbol,
-        moduleId: candidate.symbolRef.moduleId,
-        ctx,
-      });
-      if (!methodMetadata) {
-        return false;
-      }
-      const methodTraitRef = traitSymbolRefFor({
-        traitSymbol: methodMetadata.metadata.traitSymbol,
-        moduleId: methodMetadata.moduleId,
-        ctx,
-      });
-      return symbolRefEquals(methodTraitRef, qualifiedTraitRef);
-    },
-  );
+  const candidates = nominalResolution.candidates.filter((candidate) => {
+    const methodMetadata = traitMethodImplMetadataFor({
+      symbol: candidate.symbol,
+      moduleId: candidate.symbolRef.moduleId,
+      ctx,
+    });
+    if (!methodMetadata) {
+      return false;
+    }
+    const methodTraitRef = traitSymbolRefFor({
+      traitSymbol: methodMetadata.metadata.traitSymbol,
+      moduleId: methodMetadata.moduleId,
+      ctx,
+    });
+    return symbolRefEquals(methodTraitRef, qualifiedTraitRef);
+  });
 
   return { candidates, receiverName: traitName };
 };
@@ -3666,7 +3714,8 @@ const canonicalSymbolRefForModuleSymbol = ({
     return { moduleId, symbol };
   }
 
-  const metadata = (dependency.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+  const metadata = (dependency.symbolTable.getSymbol(symbol).metadata ??
+    {}) as {
     import?: { moduleId?: unknown; symbol?: unknown };
   };
   if (
@@ -3915,7 +3964,8 @@ const findExportedMethodCandidates = ({
       return false;
     }
 
-    const metadata = (dependency.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+    const metadata = (dependency.symbolTable.getSymbol(symbol).metadata ??
+      {}) as {
       static?: boolean;
     };
     return metadata.static !== true;
@@ -3980,7 +4030,13 @@ const resolveCurriedCallReturnType = ({
     }
 
     const segment = remainingArgs.slice(0, parameters.length);
-    const validation = validateCallArgs(segment, parameters, ctx, state, callSpan);
+    const validation = validateCallArgs(
+      segment,
+      parameters,
+      ctx,
+      state,
+      callSpan,
+    );
     if (!validation.ok) {
       return ctx.primitives.unknown;
     }
@@ -4088,13 +4144,9 @@ const collectEffectTailSubstitutionsFromTypes = ({
   const expectedDesc = ctx.arena.get(expectedType);
   if (actualDesc.kind === "function" && expectedDesc.kind === "function") {
     const subEffectRow =
-      variance === "covariant"
-        ? actualDesc.effectRow
-        : expectedDesc.effectRow;
+      variance === "covariant" ? actualDesc.effectRow : expectedDesc.effectRow;
     const supEffectRow =
-      variance === "covariant"
-        ? expectedDesc.effectRow
-        : actualDesc.effectRow;
+      variance === "covariant" ? expectedDesc.effectRow : actualDesc.effectRow;
     const constrained = constrainFunctionEffectRows({
       actual: subEffectRow,
       expected: supEffectRow,
@@ -4147,7 +4199,10 @@ const collectEffectTailSubstitutionsFromTypes = ({
     actualDesc.kind === expectedDesc.kind &&
     symbolRefEquals(actualDesc.owner, expectedDesc.owner)
   ) {
-    const count = Math.min(actualDesc.typeArgs.length, expectedDesc.typeArgs.length);
+    const count = Math.min(
+      actualDesc.typeArgs.length,
+      expectedDesc.typeArgs.length,
+    );
     for (let index = 0; index < count; index += 1) {
       collectEffectTailSubstitutionsFromTypes({
         actualType: actualDesc.typeArgs[index]!,
@@ -4168,7 +4223,10 @@ const collectEffectTailSubstitutionsFromTypes = ({
     expectedDesc.kind === "trait" &&
     symbolRefEquals(actualDesc.owner, expectedDesc.owner)
   ) {
-    const count = Math.min(actualDesc.typeArgs.length, expectedDesc.typeArgs.length);
+    const count = Math.min(
+      actualDesc.typeArgs.length,
+      expectedDesc.typeArgs.length,
+    );
     for (let index = 0; index < count; index += 1) {
       collectEffectTailSubstitutionsFromTypes({
         actualType: actualDesc.typeArgs[index]!,
@@ -4184,7 +4242,10 @@ const collectEffectTailSubstitutionsFromTypes = ({
     return;
   }
 
-  if (actualDesc.kind === "fixed-array" && expectedDesc.kind === "fixed-array") {
+  if (
+    actualDesc.kind === "fixed-array" &&
+    expectedDesc.kind === "fixed-array"
+  ) {
     collectEffectTailSubstitutionsFromTypes({
       actualType: actualDesc.element,
       expectedType: expectedDesc.element,
@@ -4224,7 +4285,10 @@ const collectEffectTailSubstitutionsFromTypes = ({
   }
 
   if (actualDesc.kind === "union" && expectedDesc.kind === "union") {
-    const count = Math.min(actualDesc.members.length, expectedDesc.members.length);
+    const count = Math.min(
+      actualDesc.members.length,
+      expectedDesc.members.length,
+    );
     for (let index = 0; index < count; index += 1) {
       collectEffectTailSubstitutionsFromTypes({
         actualType: actualDesc.members[index]!,
@@ -4594,13 +4658,12 @@ const instantiateFunctionCall = ({
     }
   });
 
-  args.forEach((arg, index) => {
-    const expected = signature.parameters[index];
-    if (!expected) {
-      return;
-    }
-    const expectedType = ctx.arena.substitute(expected.type, substitution);
-    bindTypeParamsFromType(expectedType, arg.type, substitution, ctx, state);
+  bindCallArgumentTypeParams({
+    signature,
+    args,
+    substitution,
+    ctx,
+    state,
   });
 
   if (
@@ -4657,7 +4720,10 @@ export const enforceTypeParamConstraint = (
   }
   const constraint = ctx.arena.substitute(param.constraint, substitution);
   if (!typeSatisfies(applied, constraint, ctx, state)) {
-    const appliedType = typeDescriptorToUserString(ctx.arena.get(applied), ctx.arena);
+    const appliedType = typeDescriptorToUserString(
+      ctx.arena.get(applied),
+      ctx.arena,
+    );
     const constraintType = typeDescriptorToUserString(
       ctx.arena.get(constraint),
       ctx.arena,
@@ -5005,7 +5071,9 @@ const typeIntrinsicFallbackCall = ({
   }
   const instanceKey = state.currentFunction?.instanceKey;
   if (!instanceKey) {
-    throw new Error(`missing function instance key for intrinsic fallback at call ${callId}`);
+    throw new Error(
+      `missing function instance key for intrinsic fallback at call ${callId}`,
+    );
   }
   const targets =
     ctx.callResolution.targets.get(callId) ?? new Map<string, SymbolRef>();
@@ -5138,14 +5206,15 @@ const typeOverloadedCall = (
     }
     return { symbol, signature };
   });
-  const { hintedCandidates, fallbackCandidates } = selectHintedOverloadCandidates({
-    candidates,
-    typeArguments,
-    expectedReturnType,
-    expectedReturnCandidates,
-    ctx,
-    state,
-  });
+  const { hintedCandidates, fallbackCandidates } =
+    selectHintedOverloadCandidates({
+      candidates,
+      typeArguments,
+      expectedReturnType,
+      expectedReturnCandidates,
+      ctx,
+      state,
+    });
 
   let candidatesForResolution = hintedCandidates;
   let matches = findOverloadMatches({
@@ -5384,9 +5453,7 @@ const resolveTraitDispatchOverload = <
         ? ctx.traitImplsByTrait.get(methodMetadata.metadata.traitSymbol)
         : ctx.dependencies
             .get(methodMetadata.moduleId)
-            ?.typing.traitImplsByTrait.get(
-              methodMetadata.metadata.traitSymbol,
-            );
+            ?.typing.traitImplsByTrait.get(methodMetadata.metadata.traitSymbol);
     const templates =
       methodMetadata.moduleId === ctx.moduleId
         ? ctx.traits.getImplTemplatesForTrait(
@@ -5428,7 +5495,10 @@ const resolveTraitDispatchOverload = <
     const toLocalType = (type: TypeId): TypeId =>
       translateDependencyType ? translateDependencyType(type) : type;
 
-    if ((!impls || impls.length === 0) && (!templates || templates.length === 0)) {
+    if (
+      (!impls || impls.length === 0) &&
+      (!templates || templates.length === 0)
+    ) {
       return false;
     }
 
@@ -5511,19 +5581,28 @@ const matchesOverloadSignature = (
   if (typeArguments && typeArguments.length > typeParamCount) {
     return false;
   }
-  const explicitSubstitution =
+  const substitution =
     signature.typeParams && signature.typeParams.length > 0
-      ? applyExplicitTypeArguments({
+      ? inferOverloadCandidateSubstitution({
           signature,
+          args,
           typeArguments,
           calleeSymbol: symbol,
           ctx,
+          state,
         })
       : undefined;
-  const params = explicitSubstitution
+  if (
+    signature.typeParams &&
+    signature.typeParams.length > 0 &&
+    !substitution
+  ) {
+    return false;
+  }
+  const params = substitution
     ? publicCallParametersFor({ signature }).map((param) => ({
         ...param,
-        type: ctx.arena.substitute(param.type, explicitSubstitution),
+        type: ctx.arena.substitute(param.type, substitution),
       }))
     : publicCallParametersFor({ signature });
 
@@ -5543,6 +5622,53 @@ const matchesOverloadSignature = (
   });
 
   return true;
+};
+
+const inferOverloadCandidateSubstitution = ({
+  signature,
+  args,
+  typeArguments,
+  calleeSymbol,
+  ctx,
+  state,
+}: {
+  signature: FunctionSignature;
+  args: readonly Arg[];
+  typeArguments?: readonly TypeId[];
+  calleeSymbol: SymbolId;
+  ctx: TypingContext;
+  state: TypingState;
+}): ReadonlyMap<TypeParamId, TypeId> | undefined => {
+  const typeParams = signature.typeParams ?? [];
+  if (typeParams.length === 0) {
+    return undefined;
+  }
+
+  const substitution = new Map<TypeParamId, TypeId>(
+    applyExplicitTypeArguments({
+      signature,
+      typeArguments,
+      calleeSymbol,
+      ctx,
+    }),
+  );
+  bindCallArgumentTypeParams({
+    signature,
+    args,
+    substitution,
+    ctx,
+    state,
+  });
+
+  try {
+    typeParams.forEach((param) =>
+      enforceTypeParamConstraint(param, substitution, ctx, state),
+    );
+  } catch {
+    return undefined;
+  }
+
+  return substitution;
 };
 
 const typeIntrinsicCall = (
@@ -6393,14 +6519,14 @@ const typePanicScratchSetIntrinsic = ({
     int32,
     ctx,
     state,
-    "__panic_scratch_set ptr"
+    "__panic_scratch_set ptr",
   );
   ensureTypeMatches(
     args[1]!.type,
     int32,
     ctx,
     state,
-    "__panic_scratch_set capacity"
+    "__panic_scratch_set capacity",
   );
   return ctx.primitives.void;
 };
@@ -6446,7 +6572,7 @@ const typeTaskCancelIntrinsic = ({
     getPrimitiveType(ctx, "i32"),
     ctx,
     state,
-    "__task_cancel task id"
+    "__task_cancel task id",
   );
   return ctx.primitives.bool;
 };
@@ -6518,7 +6644,7 @@ const typeTaskTakeValueIntrinsic = ({
     getPrimitiveType(ctx, "i32"),
     ctx,
     state,
-    "__task_take_value task id"
+    "__task_take_value task id",
   );
   return expectedReturnType ?? ctx.primitives.unknown;
 };
