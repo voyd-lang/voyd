@@ -168,7 +168,7 @@ export const compileEffectFixture = async ({
 
   return {
     ...result,
-    wasm: toWasmBytes(result.module),
+    wasm: result.wasm ?? toWasmBytes(result.module),
     diagnostics: allDiagnostics,
     entryModuleId,
     graph,

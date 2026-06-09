@@ -56,8 +56,8 @@ import { applyConfiguredMemoryExports } from "./memory-exports.js";
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
   optimizationProfile: "aggressive",
-  validate: true,
-  runtimeDiagnostics: true,
+  validate: false,
+  runtimeDiagnostics: false,
   emitEffectHelpers: false,
   effectsHostBoundary: "msgpack",
   linearMemoryExport: "always",
@@ -226,8 +226,8 @@ export const codegenProgram = ({
     });
   }
 
-  if (mergedOptions.validate) {
-    const wasm = emitWasmBytes(mod);
+  const wasm = mergedOptions.validate ? emitWasmBytes(mod) : undefined;
+  if (wasm) {
     if (!WebAssembly.validate(wasm as BufferSource)) {
       mod.validate();
     }
@@ -235,6 +235,7 @@ export const codegenProgram = ({
 
   return {
     module: mod,
+    wasm,
     effectTable,
     diagnostics: [...diagnostics.diagnostics],
     continuationBackendKind: entryCtx.effectsBackend.kind,

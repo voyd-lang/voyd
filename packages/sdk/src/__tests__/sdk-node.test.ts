@@ -530,26 +530,26 @@ pub fn main() -> i32
     }
   });
 
-  it("can disable runtime diagnostics for non-optimized builds", async () => {
+  it("omits runtime diagnostics by default", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(
       await sdk.compile({
         source: `pub fn main() -> i32
   42
 `,
-        runtimeDiagnostics: false,
       }),
     );
     expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(false);
   });
 
-  it("emits runtime diagnostics metadata by default", async () => {
+  it("emits runtime diagnostics metadata when requested", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(
       await sdk.compile({
         source: `pub fn main() -> i32
   42
 `,
+        runtimeDiagnostics: true,
       }),
     );
     expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(true);
