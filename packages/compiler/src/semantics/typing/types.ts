@@ -300,6 +300,7 @@ export interface BaseObjectInfo {
 export class ObjectStore {
   #templates = new Map<SymbolId, ObjectTemplate>();
   #instances = new Map<string, ObjectTypeInfo>();
+  #activeResolutions = new Map<string, ObjectTypeInfo>();
   #byName = new Map<string, SymbolId>();
   #byNominal = new Map<TypeId, ObjectTypeInfo>();
   #decls = new Map<SymbolId, HirObjectDecl>();
@@ -341,6 +342,18 @@ export class ObjectStore {
 
   getInstanceByNominal(nominal: TypeId): ObjectTypeInfo | undefined {
     return this.#byNominal.get(nominal);
+  }
+
+  beginActiveResolution(key: string, info: ObjectTypeInfo): void {
+    this.#activeResolutions.set(key, info);
+  }
+
+  getActiveResolution(key: string): ObjectTypeInfo | undefined {
+    return this.#activeResolutions.get(key);
+  }
+
+  endActiveResolution(key: string): void {
+    this.#activeResolutions.delete(key);
   }
 
   hasNominal(nominal: TypeId): boolean {
