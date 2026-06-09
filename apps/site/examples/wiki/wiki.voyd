@@ -1,0 +1,374 @@
+//! Compiled VX wiki demo mounted by the site route.
+
+use std::array::Array
+use std::enums::{ enum }
+use std::string::type::String
+use std::vx::all
+
+obj WikiModel {
+  selected: String,
+  query: String,
+  title: String,
+  body: String,
+  saved_title: String,
+  saved_body: String,
+  panel: String,
+  status: String
+}
+
+enum WikiMsg
+  Select { page: String }
+  Search { value: String }
+  New
+  EditTitle { value: String }
+  EditBody { value: String }
+  Save
+  Saved
+  Cancel
+  TogglePanel
+
+type TextInputEvent = {
+  kind: String,
+  value: String,
+  checked: bool
+}
+
+pub fn app() -> Program<WikiModel, WikiMsg>
+  program<WikiModel, WikiMsg>(
+    init: init,
+    update: update,
+    view: view,
+    subscriptions: subscriptions
+  )
+
+fn init() -> WikiModel
+  WikiModel {
+    selected: "intro",
+    query: String::init(),
+    title: page_title("intro"),
+    body: page_body("intro"),
+    saved_title: page_title("intro"),
+    saved_body: page_body("intro"),
+    panel: "open",
+    status: "Ready"
+  }
+
+fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
+  match(message)
+    WikiMsg::Select { page }:
+      next(WikiModel {
+        selected: page,
+        query: model.query,
+        title: page_title(page),
+        body: page_body(page),
+        saved_title: page_title(page),
+        saved_body: page_body(page),
+        panel: model.panel,
+        status: "Page opened"
+      })
+    WikiMsg::Search { value }:
+      next(WikiModel {
+        selected: model.selected,
+        query: value,
+        title: model.title,
+        body: model.body,
+        saved_title: model.saved_title,
+        saved_body: model.saved_body,
+        panel: model.panel,
+        status: search_status(value)
+      })
+    WikiMsg::New:
+      next(WikiModel {
+        selected: "draft",
+        query: String::init(),
+        title: "Untitled page",
+        body: String::init(),
+        saved_title: String::init(),
+        saved_body: String::init(),
+        panel: "open",
+        status: "New page"
+      })
+    WikiMsg::EditTitle { value }:
+      next(WikiModel {
+        selected: model.selected,
+        query: model.query,
+        title: value,
+        body: model.body,
+        saved_title: model.saved_title,
+        saved_body: model.saved_body,
+        panel: model.panel,
+        status: "Unsaved changes"
+      })
+    WikiMsg::EditBody { value }:
+      next(WikiModel {
+        selected: model.selected,
+        query: model.query,
+        title: model.title,
+        body: value,
+        saved_title: model.saved_title,
+        saved_body: model.saved_body,
+        panel: model.panel,
+        status: "Unsaved changes"
+      })
+    WikiMsg::Save:
+      next(
+        model: WikiModel {
+          selected: model.selected,
+          query: model.query,
+          title: model.title,
+          body: model.body,
+          saved_title: model.saved_title,
+          saved_body: model.saved_body,
+          panel: model.panel,
+          status: "Saving..."
+        },
+        commands: Cmd<WikiMsg>::delay(millis: 1i64, value: WikiMsg::Saved {})
+      )
+    WikiMsg::Saved:
+      next(WikiModel {
+        selected: model.selected,
+        query: model.query,
+        title: model.title,
+        body: model.body,
+        saved_title: model.title,
+        saved_body: model.body,
+        panel: model.panel,
+        status: "Saved"
+      })
+    WikiMsg::Cancel:
+      next(WikiModel {
+        selected: model.selected,
+        query: model.query,
+        title: model.saved_title,
+        body: model.saved_body,
+        saved_title: model.saved_title,
+        saved_body: model.saved_body,
+        panel: model.panel,
+        status: "Draft restored"
+      })
+    WikiMsg::TogglePanel:
+      next(WikiModel {
+        selected: model.selected,
+        query: model.query,
+        title: model.title,
+        body: model.body,
+        saved_title: model.saved_title,
+        saved_body: model.saved_body,
+        panel: toggled_panel(model.panel),
+        status: "Panel toggled"
+      })
+fn subscriptions(model: WikiModel) -> Sub<WikiMsg>
+  keyboard_on_key_down<WikiMsg>(key: "Escape", value: WikiMsg::Cancel {})
+
+fn view(model: WikiModel) -> Html<WikiMsg>
+  <main class="wiki-demo-shell" tabindex="0" data-vx-ref="wiki-shell">
+    <Sidebar model={model} />
+    <Editor model={model} />
+  </main>
+
+pub fn main() -> MsgPack
+  view(init())
+
+pub fn component_state_init() -> MsgPack
+  text("")
+
+pub fn component_state_update(model: MsgPack, message: MsgPack) -> MsgPack
+  model
+
+pub fn component_state_view(): Component -> MsgPack
+  let (local_clicks, set_local_clicks) = state(initial: 0)
+
+  <section class="wiki-demo-inspector wiki-demo-component-state">
+    <h3>Component state</h3>
+    <p>Local clicks: {local_count_label(local_clicks)}</p>
+    <button type="button" on_click={() => set_local_clicks(local_clicks + 1)}>
+      Local click
+    </button>
+  </section>
+
+fn Sidebar({ model: WikiModel }) -> Html<WikiMsg>
+  <aside class="wiki-demo-sidebar" aria-label="Wiki pages">
+    <form class="wiki-demo-search" role="search">
+      <input
+        aria-label="Search pages"
+        placeholder="Search pages"
+        type="search"
+        value={model.query}
+        on_input={(event: TextInputEvent) -> WikiMsg => WikiMsg::Search { value: event.value }}
+      />
+      <ActionButton label="New" button_class="secondary" on_press={() -> WikiMsg => WikiMsg::New {}} />
+    </form>
+    <nav class="wiki-demo-page-list">
+      <MaybePageButton id="intro" title="Getting started" model={model} />
+      <MaybePageButton id="state" title="State lives in Voyd" model={model} />
+      <MaybePageButton id="events" title="Events" model={model} />
+      <MaybeDraftButton model={model} />
+    </nav>
+    <p class="wiki-demo-hint">{query_label(model.query)}</p>
+  </aside>
+
+fn MaybePageButton({ id: String, title: String, model: WikiModel }) -> Html<WikiMsg>
+  if page_matches_query(title, model.query):
+    <PageButton id={id} title={title} model={model} />
+  else:
+    fragment(Array<MsgPack>::init())
+
+fn MaybeDraftButton({ model: WikiModel }) -> Html<WikiMsg>
+  if model.selected == "draft" and page_matches_query(model.title, model.query):
+    <PageButton id="draft" title={draft_page_title(model)} model={model} />
+  else:
+    fragment(Array<MsgPack>::init())
+
+fn PageButton({ id: String, title: String, model: WikiModel }) -> Html<WikiMsg>
+  <button
+    type="button"
+    class={selected_class(model.selected, id)}
+    data-page-id={id}
+    on_click={WikiMsg::Select { page: id }}
+  >
+    {title}
+  </button>
+
+fn Editor({ model: WikiModel }) -> Html<WikiMsg>
+  <section class="wiki-demo-editor" aria-label="Page editor">
+    <div class="wiki-demo-toolbar">
+      <span class="wiki-demo-status">{model.status}</span>
+      <span class={dirty_class(model)}>{dirty_label(model)}</span>
+      <ActionButton label="Save draft" button_class="primary" on_press={() -> WikiMsg => WikiMsg::Save {}} />
+      <ActionButton label="Cancel" button_class="secondary" on_press={() -> WikiMsg => WikiMsg::Cancel {}} />
+      <ActionButton label={model.panel} button_class="secondary" on_press={() -> WikiMsg => WikiMsg::TogglePanel {}} />
+    </div>
+    <label class="wiki-demo-label">
+      Title
+      <input
+        type="text"
+        value={model.title}
+        on_input={(event: TextInputEvent) -> WikiMsg => WikiMsg::EditTitle { value: event.value }}
+      />
+    </label>
+    <label class="wiki-demo-label wiki-demo-body-label">
+      Body
+      <textarea
+        value={model.body}
+        on_input={(event: TextInputEvent) -> WikiMsg => WikiMsg::EditBody { value: event.value }}
+      ></textarea>
+    </label>
+    <Inspector model={model} />
+  </section>
+
+fn Inspector({ model: WikiModel }) -> Html<WikiMsg>
+  if model.panel == "closed":
+    <PanelSection class="wiki-demo-inspector is-closed">
+      <h3>Panel</h3>
+      <p>Closed</p>
+    </PanelSection>
+  else:
+    <PanelSection class="wiki-demo-inspector">
+      <h3>Panel</h3>
+      <dl>
+        <dt>Selected</dt>
+        <dd>{model.selected}</dd>
+        <dt>Draft</dt>
+        <dd>{dirty_label(model)}</dd>
+        <dt>Subscription</dt>
+        <dd>Escape restores the draft</dd>
+      </dl>
+    </PanelSection>
+
+fn PanelSection({ class: String, children: Array<MsgPack> }) -> Html<WikiMsg>
+  element(
+    tag: "section",
+    attrs: [attr(name: "class", value: class)],
+    children: children
+  )
+
+fn ActionButton({ label: String, button_class: String, on_press: fn() -> WikiMsg }) -> Html<WikiMsg>
+  <button type="button" class={button_class} on_click={on_press}>
+    {label}
+  </button>
+
+fn next(model: WikiModel) -> Program<WikiModel, WikiMsg>
+  program<WikiModel, WikiMsg>(model: model)
+
+fn next({ model: WikiModel, commands: Cmd<WikiMsg> }) -> Program<WikiModel, WikiMsg>
+  program<WikiModel, WikiMsg>(model: model, commands: commands)
+
+fn selected_class(selected: String, id: String) -> String
+  if selected == id:
+    "is-selected"
+  else:
+    String::init()
+
+fn dirty_class(model: WikiModel) -> String
+  if is_dirty(model):
+    "wiki-demo-dirty"
+  else:
+    "wiki-demo-dirty is-clean"
+
+fn dirty_label(model: WikiModel) -> String
+  if is_dirty(model):
+    "Unsaved"
+  else:
+    "Saved"
+
+fn is_dirty(model: WikiModel) -> bool
+  not (model.title == model.saved_title and model.body == model.saved_body)
+
+fn toggled_panel(panel: String) -> String
+  if panel == "closed":
+    "open"
+  else:
+    "closed"
+
+fn query_label(query: String) -> String
+  if query.byte_len() == 0:
+    "3 pages"
+  else:
+    "Search: ".concat(query)
+
+fn search_status(query: String) -> String
+  if query.byte_len() == 0:
+    "Search cleared"
+  else:
+    "Search updated"
+
+fn page_matches_query(title: String, query: String) -> bool
+  query.byte_len() == 0 or title.contains(query)
+
+fn draft_page_title(model: WikiModel) -> String
+  if model.title.byte_len() == 0:
+    "Untitled page"
+  else:
+    model.title
+
+fn local_count_label(value: i32) -> String
+  if
+    value == 0: "0"
+    value == 1: "1"
+    value == 2: "2"
+    value == 3: "3"
+    else: "many"
+
+fn page_title(selected: String) -> String
+  if selected == "state":
+    "State lives in Voyd"
+  else:
+    if selected == "events":
+      "Events"
+    else:
+      if selected == "draft":
+        "Untitled page"
+      else:
+        "Getting started"
+
+fn page_body(selected: String) -> String
+  if selected == "state":
+    "The model, draft fields, selected page, save status, and side panel all update through Voyd."
+  else:
+    if selected == "events":
+      "Static messages, inline payload closures, and passed button closures all produce app messages."
+    else:
+      if selected == "draft":
+        String::init()
+      else:
+        "VX renders typed virtual DOM from Voyd and lets the browser host patch concrete DOM nodes."

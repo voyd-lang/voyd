@@ -484,7 +484,9 @@ const buildDiagnostics = ({
   const safeFallbackMetadata =
     !resolved?.metadata &&
     annotation?.fallbackFunctionName
-      ? annotation.panic || frames.length === 1
+      ? annotation.panic ||
+        frames.length === 1 ||
+        annotation.transition?.point === "run_serialized_entry"
         ? metadataByFunctionName.get(annotation.fallbackFunctionName)
         : undefined
       : undefined;

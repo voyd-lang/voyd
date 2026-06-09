@@ -62,6 +62,7 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   effectsHostBoundary: "msgpack",
   linearMemoryExport: "always",
   effectsMemoryExport: "auto",
+  boundaryExports: false,
   continuationBackend: {},
   testMode: false,
   testScope: "all",
@@ -311,6 +312,7 @@ const normalizeCodegenOptions = (
     options.linearMemoryExport ?? DEFAULT_OPTIONS.linearMemoryExport,
   effectsMemoryExport:
     options.effectsMemoryExport ?? DEFAULT_OPTIONS.effectsMemoryExport,
+  boundaryExports: options.boundaryExports ?? DEFAULT_OPTIONS.boundaryExports,
   continuationBackend: {
     ...DEFAULT_OPTIONS.continuationBackend,
     ...(options.continuationBackend ?? {}),

@@ -1,0 +1,13 @@
+use std::enums::{ enum }
+use std::vx::all
+
+enum Msg
+  Clicked
+
+pub fn view() -> Html<Msg>
+  <button on_click={Msg::Clicked {}}>
+    Preview
+  </button>
+
+pub fn init(value: i32) -> i32
+  value + 1

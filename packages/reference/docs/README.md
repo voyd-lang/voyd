@@ -43,6 +43,7 @@ The installed command is `voyd`.
 - [Functions](./functions.md)
 - [Control Flow](./control-flow.md)
 - [Tasks and Time](./tasks-and-time.md)
+- [VX](./vx.md)
 - [Modules](./modules.md)
 - [Types Overview](./types/overview.md)
 
@@ -52,5 +53,6 @@ The installed command is `voyd`.
 - Traits with default methods.
 - Algebraic effects with typed handlers.
 - Same-run task concurrency and timer APIs built on the event loop.
+- Built-in VX render frames for browser/server UI runtimes.
 - Macros for surface-language features such as `enum` and `for`.
 - A package/module system built around `src/` and `pkg.voyd`.

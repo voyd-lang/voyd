@@ -57,10 +57,21 @@ export interface CodegenOptions {
   effectsHostBoundary?: "msgpack" | "off";
   linearMemoryExport?: "always" | "auto" | "off";
   effectsMemoryExport?: "auto" | "always" | "off";
+  boundaryExports?: BoundaryExportsOption;
   continuationBackend?: ContinuationBackendOptions;
   testMode?: boolean;
   testScope?: "all" | "entry";
 }
+
+export type BoundaryExportsOption =
+  | "auto"
+  | "off"
+  | false
+  | {
+      mode?: "auto" | "off" | "only";
+      include?: string[];
+      onUnsupported?: "skip" | "diagnostic";
+    };
 
 export interface CodegenResult {
   module: binaryen.Module;
@@ -87,6 +98,7 @@ export interface FunctionMetadata {
     optional?: boolean;
     name?: string;
     bindingKind?: HirBindingKind;
+    synthetic?: "stable-callsite-id";
   }[];
   paramAbiKinds: readonly OptimizedValueAbiKind[];
   resultTypeId: TypeId;

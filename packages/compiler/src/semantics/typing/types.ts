@@ -131,6 +131,7 @@ export interface ParamSignature {
   symbol?: SymbolId;
   optional?: boolean;
   defaultValue?: HirExprId;
+  synthetic?: "stable-callsite-id";
 }
 
 export interface FunctionTypeParam {
@@ -149,6 +150,7 @@ export interface Arg {
 export type CallArgumentPlanEntry =
   | { kind: "direct"; argIndex: number }
   | { kind: "missing"; targetTypeId: TypeId }
+  | { kind: "stable-callsite-id"; targetTypeId: TypeId; value: number }
   | {
       kind: "container-field";
       containerArgIndex: number;

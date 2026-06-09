@@ -2,6 +2,7 @@ import binaryen from "binaryen";
 import type {
   CodegenContext,
   CompiledExpression,
+  FunctionMetadata,
   FunctionContext,
   HirExpression,
   SymbolId,
@@ -12,15 +13,63 @@ import {
   loadLocalValue,
 } from "../locals.js";
 import { arrayNew, arrayNewFixed } from "@voyd-lang/lib/binaryen-gc/index.js";
-import { getFixedArrayWasmTypes, wasmTypeFor } from "../types.js";
+import {
+  getFixedArrayWasmTypes,
+  getRequiredExprType,
+  wasmTypeFor,
+} from "../types.js";
 import { requireDependencyFunctionMeta } from "../function-dependencies.js";
 import { resolveModuleLetGetter } from "../module-lets.js";
 import { materializeProjectedElementBinding } from "../projected-element-views.js";
 import { coerceValueToType } from "../structural.js";
 import { unboxSignatureSpillValue } from "../signature-spill.js";
 import { materializeScalarObjectBindingValue } from "../scalar-objects.js";
+import { compileNamedFunctionClosure } from "./lambdas.js";
 
 const encoder = new TextEncoder();
+
+const functionMetaMatchesType = ({
+  meta,
+  functionTypeId,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  functionTypeId: TypeId;
+  ctx: CodegenContext;
+}): boolean => {
+  const desc = ctx.program.types.getTypeDesc(functionTypeId);
+  if (desc.kind !== "function") {
+    return false;
+  }
+  return (
+    meta.resultTypeId === desc.returnType &&
+    meta.paramTypeIds.length === desc.parameters.length &&
+    meta.paramTypeIds.every((typeId, index) => typeId === desc.parameters[index]?.type)
+  );
+};
+
+const findFunctionMetaForIdentifier = ({
+  symbol,
+  functionTypeId,
+  ctx,
+}: {
+  symbol: SymbolId;
+  functionTypeId: TypeId;
+  ctx: CodegenContext;
+}): FunctionMetadata | undefined => {
+  const candidates = [{ moduleId: ctx.moduleId, symbol }];
+  const targetId = ctx.program.imports.getTarget(ctx.moduleId, symbol);
+  if (typeof targetId === "number") {
+    const targetRef = ctx.program.symbols.refOf(targetId);
+    candidates.push({ moduleId: targetRef.moduleId, symbol: targetRef.symbol });
+  }
+
+  return candidates
+    .flatMap(({ moduleId, symbol: candidateSymbol }) =>
+      ctx.functions.get(moduleId)?.get(candidateSymbol) ?? [],
+    )
+    .find((meta) => functionMetaMatchesType({ meta, functionTypeId, ctx }));
+};
 
 export const compileLiteralExpr = (
   expr: HirExpression & {
@@ -189,6 +238,24 @@ export const compileIdentifierExpr = (
           : value,
       usedReturnCall: false,
     };
+  }
+
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const functionTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  if (ctx.program.types.getTypeDesc(functionTypeId).kind === "function") {
+    const meta = findFunctionMetaForIdentifier({
+      symbol: expr.symbol,
+      functionTypeId,
+      ctx,
+    });
+    if (meta) {
+      return compileNamedFunctionClosure({
+        meta,
+        functionTypeId,
+        ctx,
+      });
+    }
   }
 
   const targetId = ctx.program.imports.getTarget(ctx.moduleId, expr.symbol);

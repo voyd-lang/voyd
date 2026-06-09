@@ -25,6 +25,11 @@ export {
   resolveSignatureHashForOp,
 } from "./keyed-handlers.js";
 export type { KeyedHandlerHost, ParsedHandlerKey } from "./keyed-handlers.js";
+export { createRetainedEventHandlerRegistry } from "./retained-callbacks.js";
+export type {
+  RetainedEventHandlerRegistry,
+  WasmEventHandlerRef,
+} from "./retained-callbacks.js";
 export {
   parseEffectTable,
   formatSignatureHash,

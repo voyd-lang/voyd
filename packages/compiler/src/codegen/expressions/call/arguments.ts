@@ -15,7 +15,11 @@ import type {
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 import type { CallArgumentPlanEntry } from "../../../semantics/typing/types.js";
-import { compileOptionalNoneValue } from "../../optionals.js";
+import {
+  compileOptionalNoneValue,
+  compileOptionalSomeValue,
+} from "../../optionals.js";
+import { stableCallsiteIdFor } from "../../../stable-callsite-id.js";
 import {
   coerceValueToType,
   loadStructuralField,
@@ -252,6 +256,14 @@ export const sliceTypedCallArgumentPlan = ({
       };
     }
 
+    if (entry.kind === "stable-callsite-id") {
+      return {
+        kind: "stable-callsite-id",
+        targetTypeId: entry.targetTypeId,
+        value: entry.value,
+      };
+    }
+
     return {
       kind: "missing",
       targetTypeId: entry.targetTypeId,
@@ -344,6 +356,17 @@ const planCallArgumentsForParamsFallback = ({
   const allowsOmittedArgument = (param: CallParam): boolean =>
     param.optional === true ||
     ctx.program.optionals.getOptionalInfo(ctx.moduleId, param.typeId) !== undefined;
+  const omittedArgumentPlanEntry = (
+    param: CallParam,
+    paramIndex: number,
+  ): CallArgumentPlanEntry =>
+    param.synthetic === "stable-callsite-id"
+      ? {
+          kind: "stable-callsite-id",
+          targetTypeId: param.typeId,
+          value: stableCallsiteIdFor(call.span, `${paramIndex}`),
+        }
+      : { kind: "missing", targetTypeId: param.typeId };
 
   const plan: CallArgumentPlanEntry[] = [];
   const expectedTypeByArgIndex = new Map<number, TypeId>();
@@ -356,7 +379,7 @@ const planCallArgumentsForParamsFallback = ({
 
     if (!arg) {
       if (allowsOmittedArgument(param)) {
-        plan.push({ kind: "missing", targetTypeId: param.typeId });
+        plan.push(omittedArgumentPlanEntry(param, paramIndex));
         paramIndex += 1;
         continue;
       }
@@ -387,7 +410,7 @@ const planCallArgumentsForParamsFallback = ({
           }
 
           if (allowsOmittedArgument(runParam)) {
-            plan.push({ kind: "missing", targetTypeId: runParam.typeId });
+            plan.push(omittedArgumentPlanEntry(runParam, cursor));
             cursor += 1;
             continue;
           }
@@ -412,7 +435,7 @@ const planCallArgumentsForParamsFallback = ({
     }
 
     if (allowsOmittedArgument(param)) {
-      plan.push({ kind: "missing", targetTypeId: param.typeId });
+      plan.push(omittedArgumentPlanEntry(param, paramIndex));
       paramIndex += 1;
       continue;
     }
@@ -473,6 +496,15 @@ const planCallArgumentsFromTypedPlan = ({
       plan.push({
         kind: "missing",
         targetTypeId: currentParam.typeId,
+      });
+      return;
+    }
+
+    if (entry.kind === "stable-callsite-id") {
+      plan.push({
+        kind: "stable-callsite-id",
+        targetTypeId: currentParam.typeId,
+        value: entry.value,
       });
       return;
     }
@@ -553,6 +585,23 @@ const materializeCallArgumentPlan = ({
       return lowerCallArgumentForAbi({
         argValue: compileOptionalNoneValue({
           targetTypeId: entry.targetTypeId,
+          ctx,
+          fnCtx,
+        }),
+        paramTypeId,
+        abiKind,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
+    }
+
+    if (entry.kind === "stable-callsite-id") {
+      return lowerCallArgumentForAbi({
+        argValue: compileOptionalSomeValue({
+          targetTypeId: entry.targetTypeId,
+          value: ctx.mod.i32.const(entry.value),
+          valueTypeId: ctx.program.primitives.i32,
           ctx,
           fnCtx,
         }),

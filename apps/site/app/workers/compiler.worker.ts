@@ -2,7 +2,7 @@ import { createSdk } from "@voyd-lang/sdk/browser";
 
 type Inbound = { id: number; code: string };
 type Outbound =
-  | { id: number; ok: true; tree: any }
+  | { id: number; ok: true; wasm: Uint8Array }
   | { id: number; ok: false; error: string };
 
 // Signal readiness so the main thread can queue messages safely
@@ -20,8 +20,7 @@ self.addEventListener("message", async (event: MessageEvent<Inbound>) => {
       throw new Error(message);
     }
 
-    const tree = await program.run({ entryName: "main" });
-    const message: Outbound = { id, ok: true, tree };
+    const message: Outbound = { id, ok: true, wasm: program.wasm };
     (self as unknown as Worker).postMessage(message);
   } catch (err) {
     const message: Outbound = {

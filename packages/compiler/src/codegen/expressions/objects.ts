@@ -43,6 +43,7 @@ import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import { maybeReportValueBoxingNote } from "../value-boxing-notes.js";
 import { tryCompileProjectedFieldAccess } from "../projected-element-views.js";
 import { tryCompileScalarObjectFieldAccess } from "../scalar-objects.js";
+import { compileCallArgExpressionsWithTemps } from "./call/shared.js";
 
 export const compileObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
@@ -149,7 +150,22 @@ export const compileObjectLiteralExpr = (
       );
   });
 
-  expr.entries.forEach((entry) => {
+  const entryValues = compileCallArgExpressionsWithTemps({
+    callId: expr.id,
+    args: expr.entries.map((entry) => ({ expr: entry.value })),
+    expectedTypeIdAt: (index) => {
+      const entry = expr.entries[index];
+      if (!entry) return undefined;
+      return entry.kind === "field"
+        ? structInfo.fieldMap.get(entry.name)?.typeId
+        : getRequiredExprType(entry.value, ctx, typeInstanceId);
+    },
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
+
+  expr.entries.forEach((entry, entryIndex) => {
     if (entry.kind === "field") {
       const binding = fieldTemps.get(entry.name);
       if (!binding) {
@@ -159,19 +175,7 @@ export const compileObjectLiteralExpr = (
       }
       const expectedTypeId = structInfo.fieldMap.get(entry.name)?.typeId;
       const actualTypeId = getRequiredExprType(entry.value, ctx, typeInstanceId);
-      const value = compileExpr({
-        exprId: entry.value,
-        ctx,
-        fnCtx,
-        expectedResultTypeId: expectedTypeId,
-      });
-      const coerced = coerceValueToType({
-        value: value.expr,
-        actualType: actualTypeId,
-        targetType: expectedTypeId,
-        ctx,
-        fnCtx,
-      });
+      const coerced = entryValues[entryIndex]!;
       const stored = usesInlineLayout
         ? coerced
         : lowerValueForHeapField({
@@ -213,12 +217,7 @@ export const compileObjectLiteralExpr = (
     ops.push(
       storeLocalValue({
         binding: spreadTemp,
-        value: compileExpr({
-          exprId: entry.value,
-          ctx,
-          fnCtx,
-          expectedResultTypeId: spreadType,
-        }).expr,
+        value: entryValues[entryIndex]!,
         ctx,
         fnCtx,
       }),
@@ -398,7 +397,19 @@ export const compileTupleExpr = (
   const fieldTemps = new Map<string, ReturnType<typeof allocateTempLocal>>();
   const usesInlineLayout = structInfo.layoutKind === "value-object";
 
-  expr.elements.forEach((elementId, index) => {
+  const elementValues = compileCallArgExpressionsWithTemps({
+    callId: expr.id,
+    args: expr.elements.map((element) => ({ expr: element })),
+    expectedTypeIdAt: (index) => {
+      const fieldName = `${index}`;
+      return structInfo.fieldMap.get(fieldName)?.typeId;
+    },
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
+
+  expr.elements.forEach((_, index) => {
     const fieldName = `${index}`;
     const field = structInfo.fieldMap.get(fieldName);
     if (!field) {
@@ -411,12 +422,7 @@ export const compileTupleExpr = (
       ctx,
     );
     fieldTemps.set(field.name, temp);
-    const compiled = compileExpr({
-      exprId: elementId,
-      ctx,
-      fnCtx,
-      expectedResultTypeId: field.typeId,
-    }).expr;
+    const compiled = elementValues[index]!;
     ops.push(
       storeLocalValue({
         binding: temp,

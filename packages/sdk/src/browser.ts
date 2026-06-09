@@ -92,6 +92,7 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       testScope: options.testScope ?? "entry",
       runtimeDiagnostics: options.runtimeDiagnostics,
       loadModuleGraph,
+      boundaryExports: options.boundaryExports,
     });
     if (!result.success) {
       return result;

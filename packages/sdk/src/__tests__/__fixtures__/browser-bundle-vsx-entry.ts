@@ -3,15 +3,15 @@ import { createVoydHost } from "@voyd-lang/js-host";
 
 type SmokeRunner = () => Promise<number>;
 
-const source = `use std::all
-use std::string::type::new_string
+const source = `use std::array::Array
 use std::msgpack::MsgPack
+use std::string::type::{ String, new_string }
 use std::vx::all
 
 fn App()
   let features = feature_list()
   <Card>
-    <Title>Voyd + VSX</Title>
+    <Title>Voyd + VX</Title>
     <p style="margin: 0 0 10px 0; color: #cbd5e1;">Build clean UIs in language, no extensions required</p>
     <List value={features} />
   </Card>
@@ -68,8 +68,13 @@ export const runBrowserVsxBundleSmoke: SmokeRunner = async () => {
   const wasm = toBytes(result.module.emitBinary());
   const host = await createVoydHost({ wasm, bufferSize: 256 * 1024 });
   const tree = await host.run<any>("main");
-  if (!tree || typeof tree !== "object" || typeof tree.name !== "string") {
-    throw new Error("expected main() to return a msgpack node");
+  if (
+    !tree ||
+    typeof tree !== "object" ||
+    tree.kind !== "element" ||
+    typeof tree.tag !== "string"
+  ) {
+    throw new Error("expected main() to return a VX element node");
   }
   return wasm.length;
 };

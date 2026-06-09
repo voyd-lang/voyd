@@ -1,0 +1,43 @@
+use std::enums::{ enum }
+use std::string::type::String
+use std::vx::all
+
+obj Model {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+enum Msg
+  Increment
+
+pub fn app() -> Program<Model, Msg>
+  program<Model, Msg>(
+    init: init,
+    update: update,
+    view: view
+  )
+
+fn init() -> Model
+  Model { a: 0, b: 1, c: 2, d: 3, e: 4 }
+
+fn update(model: Model, msg: Msg) -> Program<Model, Msg>
+  match(msg)
+    Msg::Increment:
+      program<Model, Msg>(
+        model: Model { a: model.a + 1, b: model.b, c: model.c, d: model.d, e: model.e }
+      )
+
+fn view(model: Model) -> Html<Msg>
+  <button on_click={Msg::Increment {}}>
+    Wide: {label(model.a)}
+  </button>
+
+fn label(value: i32) -> String
+  if
+    value == 0: "0"
+    value == 1: "1"
+    value == 2: "2"
+    else: "many"

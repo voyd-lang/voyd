@@ -80,7 +80,7 @@ const defaultValueForWasmType = (
 const expandAbiTypes = (type: binaryen.Type): binaryen.Type[] =>
   type === binaryen.none ? [] : [...binaryen.expandType(type)];
 
-const makeInlineValue = ({
+export const makeInlineValue = ({
   values,
   ctx,
 }: {

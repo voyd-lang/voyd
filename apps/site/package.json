@@ -18,6 +18,7 @@
     "@react-router/serve": "^7.7.1",
     "@shikijs/monaco": "^3.12.2",
     "@voyd-lang/lib": "^0.2.0",
+    "@voyd-lang/vx-dom": "^0.2.0",
     "@voyd-lang/reference": "^0.2.0",
     "@voyd-lang/sdk": "^0.2.0",
     "binaryen": "^125.0.0",

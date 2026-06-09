@@ -1,4 +1,5 @@
 import type { Diagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
+import type { BoundaryExportsOption } from "@voyd-lang/compiler/codegen/context.js";
 import type { ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
 import type { TestCase as CompilerTestCase } from "@voyd-lang/compiler/pipeline-shared.js";
 import type {
@@ -6,6 +7,7 @@ import type {
   EffectContinuation,
   EffectContinuationCall,
   EffectHandler,
+  ExportAbiEntry,
   HostProtocolTable,
   SignatureHash,
   VoydRuntimeDiagnostics,
@@ -18,6 +20,7 @@ export type {
   EffectContinuation,
   EffectContinuationCall,
   EffectHandler,
+  ExportAbiEntry,
   HostProtocolTable,
   ModuleRoots,
   SignatureHash,
@@ -26,12 +29,6 @@ export type {
 };
 
 export type TestCase = CompilerTestCase;
-
-export type ExportAbiEntry = {
-  name: string;
-  abi: "direct" | "serialized";
-  formatId?: string;
-};
 
 export type ExportAbiMetadata = {
   version: number;
@@ -49,6 +46,7 @@ export type CompileOptions = {
   /** Control which modules contribute test cases. */
   testScope?: "all" | "entry";
   optimize?: boolean;
+  boundaryExports?: BoundaryExportsOption;
   /**
    * Emit runtime trap-to-source metadata.
    * Defaults to false; pass true to include trap metadata.

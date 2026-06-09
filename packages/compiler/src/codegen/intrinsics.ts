@@ -40,9 +40,26 @@ import {
 import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { ensureDispatcher } from "./effects/dispatcher.js";
+import { ensureMsgPackFunctions } from "./effects/host-boundary/msgpack.js";
 import { unboxOutcomeValue, wrapValueInOutcome } from "./effects/outcome-values.js";
 import { captureMultivalueLanes } from "./multivalue.js";
+import {
+  lowerSerializedAbiArg,
+  stabilizeSerializedAbiResult,
+} from "./exports/serialized-abi.js";
 import { ensureFixedArrayWasmTypesByElement } from "./fixed-array-types.js";
+import { ensureLinearMemoryExport } from "./memory-exports.js";
+import { deriveBoundarySchema } from "./boundary/schema.js";
+import {
+  packBoundaryValueAsMsgPack,
+  unpackBoundaryValueFromMsgPack,
+} from "./boundary/msgpack-codec.js";
+import { findSerializerForType } from "./serializer.js";
+import { stableCallsiteIdFor } from "../stable-callsite-id.js";
+import {
+  boundaryMsgPackPayloadField,
+  isBoundaryMsgPackValue,
+} from "./boundary-metadata.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
@@ -92,6 +109,11 @@ const PANIC_SCRATCH_CAPACITY_GLOBAL = "__voyd_panic_scratch_capacity";
 const TASK_IMPORT_MODULE = "voyd.task";
 const TASK_IMPORTS_KEY = Symbol("voyd.task.imports");
 const TASK_STARTERS_KEY = Symbol("voyd.task.starters");
+const CALLBACK_IMPORT_MODULE = "voyd.callback";
+const CALLBACK_IMPORTS_KEY = Symbol("voyd.callback.imports");
+const CALLBACK_HELPERS_KEY = Symbol("voyd.callback.helpers");
+const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
+const BOUNDARY_CALLBACK_IMPORTS_KEY = Symbol("voyd.boundary.callback.imports");
 
 const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
   if (ctx.mod.getGlobal(PANIC_TRAP_PTR_GLOBAL) === 0) {
@@ -156,6 +178,68 @@ const ensureTaskImport = ({
   ctx.mod.addFunctionImport(
     name,
     TASK_IMPORT_MODULE,
+    base,
+    binaryen.createType(params as number[]),
+    result
+  );
+  imports.add(name);
+  return name;
+};
+
+const ensureCallbackImport = ({
+  name,
+  base,
+  params,
+  result,
+  ctx,
+}: {
+  name: string;
+  base: string;
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+}): string => {
+  const imports = ctx.programHelpers.getHelperState(
+    CALLBACK_IMPORTS_KEY,
+    () => new Set<string>()
+  );
+  if (imports.has(name)) {
+    return name;
+  }
+  ctx.mod.addFunctionImport(
+    name,
+    CALLBACK_IMPORT_MODULE,
+    base,
+    binaryen.createType(params as number[]),
+    result
+  );
+  imports.add(name);
+  return name;
+};
+
+const ensureBoundaryCallbackImport = ({
+  name,
+  base,
+  params,
+  result,
+  ctx,
+}: {
+  name: string;
+  base: string;
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+}): string => {
+  const imports = ctx.programHelpers.getHelperState(
+    BOUNDARY_CALLBACK_IMPORTS_KEY,
+    () => new Set<string>()
+  );
+  if (imports.has(name)) {
+    return name;
+  }
+  ctx.mod.addFunctionImport(
+    name,
+    BOUNDARY_CALLBACK_IMPORT_MODULE,
     base,
     binaryen.createType(params as number[]),
     result
@@ -246,6 +330,287 @@ const ensureTaskStarterHelper = ({
     ctx.mod.addFunctionExport(exportName, exportName);
   }
   starters.set(closureTypeId, exportName);
+  return exportName;
+};
+
+const ensureRetainedCallbackHelper = ({
+  closureTypeId,
+  ctx,
+}: {
+  closureTypeId: TypeId;
+  ctx: CodegenContext;
+}): string => {
+  const helpers = ctx.programHelpers.getHelperState(
+    CALLBACK_HELPERS_KEY,
+    () => new Map<number, string>()
+  );
+  const cached = helpers.get(closureTypeId);
+  if (cached) {
+    return cached;
+  }
+
+  const desc = ctx.program.types.getTypeDesc(closureTypeId);
+  if (desc.kind !== "function") {
+    throw new Error("callback retention requires a function value");
+  }
+  ensureLinearMemoryExport(ctx);
+  const msgpack = ensureMsgPackFunctions(ctx);
+  const parameterCodecs = desc.parameters.map((parameter, index) => {
+    const serializer = findSerializerForType(parameter.type, ctx);
+    if (serializer && serializer.formatId !== "msgpack") {
+      throw new Error(
+        `callback parameter serializer format ${serializer.formatId} is not supported`
+      );
+    }
+    return {
+      typeId: parameter.type,
+      serializer,
+      schema: serializer
+        ? undefined
+        : deriveBoundarySchema({
+            typeId: parameter.type,
+            ctx,
+            label: `callback parameter ${index + 1}`,
+          }),
+    };
+  });
+  const returnWasmType = wasmTypeFor(desc.returnType, ctx);
+  const returnsVoid = returnWasmType === binaryen.none;
+  const returnSerializer = returnsVoid
+    ? undefined
+    : findSerializerForType(desc.returnType, ctx);
+  if (returnSerializer && returnSerializer.formatId !== "msgpack") {
+    throw new Error(
+      `callback return serializer format ${returnSerializer.formatId} is not supported`
+    );
+  }
+  const returnUsesBoundary =
+    isBoundaryMsgPackValue(desc.returnType, ctx) ||
+    Boolean(boundaryMsgPackPayloadField(desc.returnType, ctx));
+  const returnSchema = returnSerializer || returnsVoid || returnUsesBoundary
+    ? undefined
+    : deriveBoundarySchema({
+        typeId: desc.returnType,
+        ctx,
+        label: "callback return",
+      });
+  const effectful =
+    typeof desc.effectRow === "number" &&
+    !ctx.program.effects.isEmpty(desc.effectRow);
+
+  const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+  const base = getClosureTypeInfo(closureTypeId, ctx);
+  const exportName = `__voyd_callback_${sanitizeTaskKey(base.key)}`;
+  const locals: binaryen.Type[] = [];
+  const helperFnCtx: FunctionContext = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals,
+    nextLocalIndex: 5,
+    returnTypeId: desc.returnType,
+    effectful: false,
+  };
+  const params = binaryen.createType([
+    base.interfaceType,
+    binaryen.i32,
+    binaryen.i32,
+    binaryen.i32,
+    binaryen.i32,
+  ]);
+  const closureRef = ctx.mod.local.get(0, base.interfaceType);
+  const decodedPayloadValue = (): binaryen.ExpressionRef =>
+    ctx.mod.call(
+      msgpack.decodeValue.wasmName,
+      [ctx.mod.local.get(1, binaryen.i32), ctx.mod.local.get(2, binaryen.i32)],
+      msgPackType,
+    );
+  const payloadElementValue = (index: number): binaryen.ExpressionRef => {
+    if (parameterCodecs.length === 1) {
+      return decodedPayloadValue();
+    }
+    const argsArray = ctx.mod.call(
+      msgpack.unpackArray.wasmName,
+      [decodedPayloadValue()],
+      msgpack.arrayWithCapacity.resultType,
+    );
+    const storage = ctx.mod.call(
+      msgpack.arrayRawStorage.wasmName,
+      [argsArray],
+      msgpack.arrayRawStorage.resultType,
+    );
+    return arrayGet(
+      ctx.mod,
+      storage,
+      ctx.mod.i32.const(index),
+      msgPackType,
+      false,
+    );
+  };
+  const payloadValues = parameterCodecs.map((codec, index) => {
+    const value = payloadElementValue(index);
+    return codec.serializer
+      ? coerceValueToType({
+          value,
+          actualType: msgpack.msgPackTypeId,
+          targetType: codec.typeId,
+          ctx,
+          fnCtx: helperFnCtx,
+        })
+      : unpackBoundaryValueFromMsgPack({
+          value,
+          schema: codec.schema!,
+          ctx,
+          fnCtx: helperFnCtx,
+        });
+  });
+  const fnField = structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: 0,
+    fieldType: binaryen.funcref,
+    exprRef: closureRef,
+  });
+  const targetFn =
+    base.fnRefType === binaryen.funcref
+      ? fnField
+      : refCast(ctx.mod, fnField, base.fnRefType);
+  const loweredPayloads = payloadValues.map((payloadValue, index) =>
+    lowerSerializedAbiArg({
+      wasmName: exportName,
+      abiKind: "direct",
+      abiTypes: base.paramAbiTypes[index] ?? [binaryen.getExpressionType(payloadValue)],
+      typeId: parameterCodecs[index]!.typeId,
+      value: payloadValue,
+      ctx,
+      fnCtx: helperFnCtx,
+    }),
+  );
+  const callExpr = callRef(
+    ctx.mod,
+    targetFn,
+    [
+      closureRef,
+      ...base.paramTypes
+        .slice(0, base.userParamOffset)
+        .map(() => ctx.effectsBackend.abi.hiddenHandlerValue(ctx)),
+      ...loweredPayloads.flatMap((payload) => payload.args),
+    ] as number[],
+    base.resultType
+  );
+  const setup = loweredPayloads.flatMap((payload) => payload.setup);
+  if (effectful) {
+    const rawExportName = `${exportName}_effectful_raw`;
+    const dispatched = ctx.mod.call(
+      ensureDispatcher(ctx),
+      [callExpr],
+      ctx.effectsRuntime.outcomeType,
+    );
+    ctx.mod.addFunction(
+      rawExportName,
+      params,
+      ctx.effectsRuntime.outcomeType,
+      locals,
+      setup.length === 0
+        ? dispatched
+        : ctx.mod.block(null, [...setup, dispatched], ctx.effectsRuntime.outcomeType),
+    );
+    if (ctx.programHelpers.registerExportName(rawExportName)) {
+      ctx.mod.addFunctionExport(rawExportName, rawExportName);
+    }
+  }
+
+  const resultValue = effectful
+    ? unboxOutcomeValue({
+        payload: ctx.effectsRuntime.outcomePayload(
+          ctx.mod.call(
+            ensureDispatcher(ctx),
+            [callExpr],
+            ctx.effectsRuntime.outcomeType,
+          ),
+        ),
+        valueType: returnWasmType,
+        typeId: desc.returnType,
+        ctx,
+      })
+    : stabilizeSerializedAbiResult({
+        value: callExpr,
+        resultType: base.resultType,
+        resultAbiTypes: base.resultAbiTypes,
+        resultTypeId: desc.returnType,
+        ctx,
+        fnCtx: helperFnCtx,
+      });
+  const encodedLength = returnsVoid
+    ? ctx.mod.block(null, [resultValue, ctx.mod.i32.const(-2)], binaryen.i32)
+    : (() => {
+        const payloadField = boundaryMsgPackPayloadField(desc.returnType, ctx);
+        const encodedResultValue = returnSerializer
+          ? coerceValueToType({
+              value: resultValue,
+              actualType: desc.returnType,
+              targetType: msgpack.msgPackTypeId,
+              ctx,
+              fnCtx: helperFnCtx,
+            })
+          : isBoundaryMsgPackValue(desc.returnType, ctx)
+            ? resultValue
+          : payloadField
+            ? (() => {
+                const info = getStructuralTypeInfo(desc.returnType, ctx);
+                if (!info) {
+                  throw new Error(
+                    `boundary payload callback return ${desc.returnType} is missing structural info`,
+                  );
+                }
+                return loadStructuralField({
+                  structInfo: info,
+                  field: payloadField,
+                  pointer: () => resultValue,
+                  ctx,
+                });
+              })()
+          : packBoundaryValueAsMsgPack({
+              value: resultValue,
+              schema: returnSchema!,
+              ctx,
+              fnCtx: helperFnCtx,
+            });
+        return ctx.mod.call(
+          msgpack.encodeValue.wasmName,
+          [
+            encodedResultValue,
+            ctx.mod.local.get(3, binaryen.i32),
+            ctx.mod.local.get(4, binaryen.i32),
+          ],
+          binaryen.i32
+        );
+      })();
+
+  ctx.mod.addFunction(
+    exportName,
+    params,
+    binaryen.i32,
+    locals,
+    setup.length === 0
+      ? encodedLength
+      : ctx.mod.block(null, [...setup, encodedLength], binaryen.i32),
+  );
+  if (ctx.programHelpers.registerExportName(exportName)) {
+    ctx.mod.addFunctionExport(exportName, exportName);
+  }
+  if (returnsVoid) {
+    const markerName = `${exportName}_returns_void`;
+    ctx.mod.addFunction(
+      markerName,
+      binaryen.none,
+      binaryen.i32,
+      [],
+      ctx.mod.i32.const(1),
+    );
+    if (ctx.programHelpers.registerExportName(markerName)) {
+      ctx.mod.addFunctionExport(markerName, markerName);
+    }
+  }
+  helpers.set(closureTypeId, exportName);
   return exportName;
 };
 
@@ -900,6 +1265,75 @@ export const compileIntrinsicCall = ({
         valueType: wasmTypeFor(returnTypeId, ctx),
         typeId: returnTypeId,
         ctx,
+      });
+    }
+    case "__retain_callback":
+    case "__boundary_retain_callback": {
+      assertArgCount(name, args, 1);
+      const handlerTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const handlerType = ctx.program.types.getTypeDesc(handlerTypeId);
+      if (handlerType.kind !== "function") {
+        throw new Error(`${name} requires a function-typed value`);
+      }
+      const helperExport = ensureRetainedCallbackHelper({
+        closureTypeId: handlerTypeId,
+        ctx,
+      });
+      const closureInfo = getClosureTypeInfo(handlerTypeId, ctx);
+      const boundary = name === "__boundary_retain_callback";
+      const importName = boundary
+        ? `__voyd_boundary_retain_callback_${sanitizeTaskKey(helperExport)}`
+        : `__voyd_retain_callback_${sanitizeTaskKey(helperExport)}`;
+      const importFn = boundary
+        ? ensureBoundaryCallbackImport({
+            name: importName,
+            base: `retain_callback__${helperExport}`,
+            params: [closureInfo.interfaceType],
+            result: binaryen.i32,
+            ctx,
+          })
+        : ensureCallbackImport({
+            name: importName,
+            base: `retain__${helperExport}`,
+            params: [closureInfo.interfaceType],
+            result: binaryen.i32,
+            ctx,
+          });
+      return ctx.mod.call(importFn, [args[0]!], binaryen.i32);
+    }
+    case "__stable_callsite_id": {
+      assertArgCount(name, args, 0);
+      return ctx.mod.i32.const(stableCallsiteIdFor(call.span));
+    }
+    case "__boundary_value_to_msgpack": {
+      assertArgCount(name, args, 1);
+      const valueTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const serializer = findSerializerForType(valueTypeId, ctx);
+      if (serializer) {
+        if (serializer.formatId !== "msgpack") {
+          throw new Error(
+            `boundary value serializer format ${serializer.formatId} is not supported`
+          );
+        }
+        const msgpack = ensureMsgPackFunctions(ctx);
+        return coerceValueToType({
+          value: args[0]!,
+          actualType: valueTypeId,
+          targetType: msgpack.msgPackTypeId,
+          ctx,
+          fnCtx,
+        });
+      }
+      return packBoundaryValueAsMsgPack({
+        value: args[0]!,
+        schema: deriveBoundarySchema({
+          typeId: valueTypeId,
+          ctx,
+          label: "__boundary_value_to_msgpack value",
+          options: { tagStandaloneVariants: true },
+        }),
+        ctx,
+        fnCtx,
       });
     }
     case "__shift_l":

@@ -12,6 +12,11 @@ export type SerializerMetadata = {
   decode: { moduleId: string; symbol: SymbolId };
 };
 
+export type BoundaryMetadata = {
+  type: "value" | "payload";
+  field?: string;
+};
+
 export type ModuleSymbolIndex = {
   moduleId: string;
   packageId: string;
@@ -22,6 +27,7 @@ export type ModuleSymbolIndex = {
   getIntrinsicName(symbol: SymbolId): string | undefined;
   getIntrinsicFunctionFlags(symbol: SymbolId): IntrinsicFunctionFlags;
   getSerializer(symbol: SymbolId): SerializerMetadata | undefined;
+  getBoundary(symbol: SymbolId): BoundaryMetadata | undefined;
 };
 
 export const buildModuleSymbolIndex = ({
@@ -40,6 +46,7 @@ export const buildModuleSymbolIndex = ({
   const intrinsicNameBySymbol = new Map<SymbolId, string>();
   const intrinsicFlagsBySymbol = new Map<SymbolId, IntrinsicFunctionFlags>();
   const serializerBySymbol = new Map<SymbolId, SerializerMetadata>();
+  const boundaryBySymbol = new Map<SymbolId, BoundaryMetadata>();
 
   const snapshot = symbolTable.snapshot();
   snapshot.symbols.forEach((record) => {
@@ -57,6 +64,7 @@ export const buildModuleSymbolIndex = ({
       intrinsic?: unknown;
       intrinsicUsesSignature?: unknown;
       serializer?: unknown;
+      boundary?: unknown;
     };
 
     if (typeof metadata.intrinsicType === "string") {
@@ -74,6 +82,9 @@ export const buildModuleSymbolIndex = ({
     if (isSerializerMetadata(metadata.serializer)) {
       serializerBySymbol.set(symbol, metadata.serializer);
     }
+    if (isBoundaryMetadata(metadata.boundary)) {
+      boundaryBySymbol.set(symbol, metadata.boundary);
+    }
   });
 
   return {
@@ -90,6 +101,7 @@ export const buildModuleSymbolIndex = ({
         intrinsicUsesSignature: false,
       },
     getSerializer: (symbol) => serializerBySymbol.get(symbol),
+    getBoundary: (symbol) => boundaryBySymbol.get(symbol),
   };
 };
 
@@ -108,5 +120,16 @@ const isSerializerMetadata = (value: unknown): value is SerializerMetadata => {
     typeof record.encode?.symbol === "number" &&
     typeof record.decode?.moduleId === "string" &&
     typeof record.decode?.symbol === "number"
+  );
+};
+
+const isBoundaryMetadata = (value: unknown): value is BoundaryMetadata => {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as { type?: unknown; field?: unknown };
+  return (
+    (record.type === "value" || record.type === "payload") &&
+    (record.field === undefined || typeof record.field === "string")
   );
 };

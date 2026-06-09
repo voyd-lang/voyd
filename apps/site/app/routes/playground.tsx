@@ -10,51 +10,78 @@ export function meta({}: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "Try Voyd in the browser with an interactive compiler and VSX renderer.",
+        "Try Voyd in the browser with an interactive compiler and VX renderer.",
     },
   ];
 }
 
-const PLAYGROUND_STARTER = `use std::all
-use std::msgpack::MsgPack
+const PLAYGROUND_STARTER = `use std::enums::{ enum }
 use std::vx::all
 
-fn App()
-  let features = [
-    "WASM speed",
-    "Strong types",
-    "Typed effects",
-    "Embeddable runtime"
-  ]
+obj Model {
+  count: i32
+}
 
-  <Card>
-    <Title>Voyd Playground</Title>
-    <p style="margin: 0 0 12px 0; color: #94a3b8;">Edit and run this file in-browser.</p>
-    <List value={features} />
-  </Card>
+enum Msg
+  Increment
 
-fn Title({ children: Array<MsgPack> })
-  <h2 style="margin: 0 0 8px 0; font-size: 20px; color: #e2e8f0;">{children}</h2>
+pub fn app() -> Program<Model, Msg>
+  program<Model, Msg>(
+    init: init,
+    update: update,
+    view: view
+  )
 
-fn Card({ children: Array<MsgPack> })
-  <div style="
+fn init() -> Model
+  Model { count: 0 }
+
+fn update(model: Model, message: Msg) -> Program<Model, Msg>
+  match(message)
+    Msg::Increment:
+      program<Model, Msg>(model: Model { count: model.count + 1 })
+
+fn view(model: Model) -> Html<Msg>
+  <main style="
     margin: 8px;
     padding: 16px;
-    border-radius: 12px;
     background: #0b1020;
     color: #e2e8f0;
     border: 1px solid rgba(255, 255, 255, 0.1);
   ">
-    {children}
-  </div>
+    <h2>Voyd Playground</h2>
+    <p>Edit this file, then run it again.</p>
+    <section style="
+      padding: 14px;
+      border-radius: 8px;
+      background: rgba(148, 163, 184, 0.12);
+    ">
+      <p>
+        Typed messages update the model in Voyd.
+      </p>
+      <button
+        type="button"
+        on_click={Msg::Increment {}}
+        style="
+          border: 1px solid rgba(125, 211, 252, 0.45);
+          padding: 10px 14px;
+          background: #0f172a;
+          color: #e0f2fe;
+          font-weight: 700;
+          cursor: pointer;
+        "
+      >
+        Count: {count_label(model.count)}
+      </button>
+    </section>
+  </main>
 
-fn List({ value: Array<String> })
-  <ul style="margin: 0; padding-left: 16px; color: #cbd5e1;">
-    {value.map(item => <li style="line-height: 1.6;">{item}</li>)}
-  </ul>
-
-pub fn main()
-  App()`;
+fn count_label(value: i32) -> String
+  if
+    value == 0: "0"
+    value == 1: "1"
+    value == 2: "2"
+    value == 3: "3"
+    else: "many"`;
 
 export default function Playground() {
   return (
@@ -63,7 +90,7 @@ export default function Playground() {
         <h1 className="m-0 text-3xl font-bold sm:text-4xl">Playground</h1>
         <p className="m-0 mt-3 max-w-3xl text-[var(--site-text-muted)]">
           Run Voyd directly in your browser. The left pane is the editor, and
-          the right pane renders the VSX output from your `main` entrypoint.
+          the right pane renders the VX output from your `view` entrypoint.
         </p>
       </section>
 
