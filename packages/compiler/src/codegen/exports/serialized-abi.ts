@@ -11,7 +11,6 @@ import {
   coerceValueToType,
   initStructuralValue,
   liftHeapValueToInline,
-  loadStructuralField,
   lowerValueForHeapField,
   storeValueIntoStorageRef,
 } from "../structural.js";
@@ -44,17 +43,35 @@ import {
 } from "../boundary-metadata.js";
 import { compileOptionalNoneValue } from "../optionals.js";
 
+export type SerializedExportTypeAdapter = {
+  acceptsType?: (params: {
+    typeId: TypeId;
+    ctx: CodegenContext;
+  }) => boolean;
+  packResultValue?: (params: {
+    value: binaryen.ExpressionRef;
+    typeId: TypeId;
+    ctx: CodegenContext;
+    fnCtx: FunctionContext;
+    exportName: string;
+  }) => binaryen.ExpressionRef | undefined;
+};
+
 export const emitSerializedExportWrapper = ({
   ctx,
   meta,
   exportName,
+  wrapperExportName = exportName,
+  typeAdapter,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
+  wrapperExportName?: string;
+  typeAdapter?: SerializedExportTypeAdapter;
 }): { wrapperName: string; formatId: "msgpack" } => {
   ensureLinearMemoryExport(ctx);
-  validateExportTypes({ ctx, meta, exportName });
+  validateExportTypes({ ctx, meta, exportName, typeAdapter });
 
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
@@ -150,6 +167,15 @@ export const emitSerializedExportWrapper = ({
         fnCtx,
       });
     }
+    if (isBoundaryMsgPackValue(typeId, ctx)) {
+      return coerceValueToType({
+        value: element,
+        actualType: msgpack.msgPackTypeId,
+        targetType: typeId,
+        ctx,
+        fnCtx,
+      });
+    }
     const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
     if (payloadField) {
       return buildPayloadEnvelopeParamExpr({
@@ -188,6 +214,7 @@ export const emitSerializedExportWrapper = ({
     ctx,
     fnCtx,
     exportName,
+    typeAdapter,
   });
   const encodedLength = ctx.mod.call(
     msgpack.encodeValue.wasmName,
@@ -215,8 +242,8 @@ export const emitSerializedExportWrapper = ({
     ])
   );
 
-  ctx.mod.addFunctionExport(wrapperName, exportName);
-  return { wrapperName, formatId: "msgpack" };
+  ctx.mod.addFunctionExport(wrapperName, wrapperExportName);
+  return { wrapperName: wrapperExportName, formatId: "msgpack" };
 };
 
 const buildPayloadEnvelopeParamExpr = ({
@@ -514,10 +541,12 @@ const validateExportTypes = ({
   ctx,
   meta,
   exportName,
+  typeAdapter,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
+  typeAdapter?: SerializedExportTypeAdapter;
 }): void => {
   const allTypes = [...meta.paramTypeIds, meta.resultTypeId];
   allTypes.forEach((typeId, index) => {
@@ -530,7 +559,7 @@ const validateExportTypes = ({
       }
       return;
     }
-    if (isBoundaryMsgPackValue(typeId, ctx) || boundaryMsgPackPayloadField(typeId, ctx)) {
+    if (typeAdapter?.acceptsType?.({ typeId, ctx }) === true) {
       return;
     }
     const target = index < meta.paramTypeIds.length ? `parameter ${index + 1}` : "return";
@@ -548,12 +577,14 @@ const packSerializedResultValue = ({
   ctx,
   fnCtx,
   exportName,
+  typeAdapter,
 }: {
   value: binaryen.ExpressionRef;
   typeId: TypeId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   exportName: string;
+  typeAdapter?: SerializedExportTypeAdapter;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const serializer = findSerializerForType(typeId, ctx);
@@ -571,21 +602,15 @@ const packSerializedResultValue = ({
       fnCtx,
     });
   }
-  if (isBoundaryMsgPackValue(typeId, ctx)) {
-    return value;
-  }
-  const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
-  if (payloadField) {
-    const info = getStructuralTypeInfo(typeId, ctx);
-    if (!info) {
-      throw new Error(`boundary payload envelope ${typeId} is missing structural info`);
-    }
-    return loadStructuralField({
-      structInfo: info,
-      field: payloadField,
-      pointer: () => value,
-      ctx,
-    });
+  const adapted = typeAdapter?.packResultValue?.({
+    value,
+    typeId,
+    ctx,
+    fnCtx,
+    exportName,
+  });
+  if (adapted) {
+    return adapted;
   }
   return packBoundaryValueAsMsgPack({
     value,

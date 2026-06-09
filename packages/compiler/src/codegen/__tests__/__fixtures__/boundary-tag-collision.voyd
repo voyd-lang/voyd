@@ -1,0 +1,9 @@
+use std::enums::{ enum }
+use std::string::type::String
+
+enum TaggedResult
+  Tagged { tag: String }
+  Other {}
+
+pub fn tagged_result() -> TaggedResult
+  TaggedResult::Tagged { tag: "payload" }

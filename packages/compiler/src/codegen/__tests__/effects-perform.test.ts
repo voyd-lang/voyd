@@ -75,6 +75,7 @@ const buildLoweringSnapshot = () => {
       effectsHostBoundary: "off",
       linearMemoryExport: "always",
       effectsMemoryExport: "auto",
+      boundaryExports: false,
       testScope: "all",
     },
     programHelpers,

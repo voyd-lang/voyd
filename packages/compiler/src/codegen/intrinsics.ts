@@ -112,6 +112,8 @@ const TASK_STARTERS_KEY = Symbol("voyd.task.starters");
 const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const CALLBACK_IMPORTS_KEY = Symbol("voyd.callback.imports");
 const CALLBACK_HELPERS_KEY = Symbol("voyd.callback.helpers");
+const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
+const BOUNDARY_CALLBACK_IMPORTS_KEY = Symbol("voyd.boundary.callback.imports");
 
 const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
   if (ctx.mod.getGlobal(PANIC_TRAP_PTR_GLOBAL) === 0) {
@@ -207,6 +209,37 @@ const ensureCallbackImport = ({
   ctx.mod.addFunctionImport(
     name,
     CALLBACK_IMPORT_MODULE,
+    base,
+    binaryen.createType(params as number[]),
+    result
+  );
+  imports.add(name);
+  return name;
+};
+
+const ensureBoundaryCallbackImport = ({
+  name,
+  base,
+  params,
+  result,
+  ctx,
+}: {
+  name: string;
+  base: string;
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+}): string => {
+  const imports = ctx.programHelpers.getHelperState(
+    BOUNDARY_CALLBACK_IMPORTS_KEY,
+    () => new Set<string>()
+  );
+  if (imports.has(name)) {
+    return name;
+  }
+  ctx.mod.addFunctionImport(
+    name,
+    BOUNDARY_CALLBACK_IMPORT_MODULE,
     base,
     binaryen.createType(params as number[]),
     result
@@ -1234,26 +1267,38 @@ export const compileIntrinsicCall = ({
         ctx,
       });
     }
-    case "__retain_callback": {
+    case "__retain_callback":
+    case "__boundary_retain_callback": {
       assertArgCount(name, args, 1);
       const handlerTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
       const handlerType = ctx.program.types.getTypeDesc(handlerTypeId);
       if (handlerType.kind !== "function") {
-        throw new Error("__retain_callback requires a function-typed value");
+        throw new Error(`${name} requires a function-typed value`);
       }
       const helperExport = ensureRetainedCallbackHelper({
         closureTypeId: handlerTypeId,
         ctx,
       });
       const closureInfo = getClosureTypeInfo(handlerTypeId, ctx);
-      const importName = `__voyd_retain_callback_${sanitizeTaskKey(helperExport)}`;
-      const importFn = ensureCallbackImport({
-        name: importName,
-        base: `retain__${helperExport}`,
-        params: [closureInfo.interfaceType],
-        result: binaryen.i32,
-        ctx,
-      });
+      const boundary = name === "__boundary_retain_callback";
+      const importName = boundary
+        ? `__voyd_boundary_retain_callback_${sanitizeTaskKey(helperExport)}`
+        : `__voyd_retain_callback_${sanitizeTaskKey(helperExport)}`;
+      const importFn = boundary
+        ? ensureBoundaryCallbackImport({
+            name: importName,
+            base: `retain_callback__${helperExport}`,
+            params: [closureInfo.interfaceType],
+            result: binaryen.i32,
+            ctx,
+          })
+        : ensureCallbackImport({
+            name: importName,
+            base: `retain__${helperExport}`,
+            params: [closureInfo.interfaceType],
+            result: binaryen.i32,
+            ctx,
+          });
       return ctx.mod.call(importFn, [args[0]!], binaryen.i32);
     }
     case "__stable_callsite_id": {

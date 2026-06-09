@@ -5644,7 +5644,9 @@ const typeIntrinsicCall = (
         expectedReturnType,
       });
     case "__retain_callback":
-      return typeRetainCallbackIntrinsic({
+    case "__boundary_retain_callback":
+      return typeBoundaryRetainCallbackIntrinsic({
+        name,
         args,
         ctx,
         typeArguments,
@@ -6449,26 +6451,28 @@ const typeTaskCancelIntrinsic = ({
   return ctx.primitives.bool;
 };
 
-const typeRetainCallbackIntrinsic = ({
+const typeBoundaryRetainCallbackIntrinsic = ({
+  name,
   args,
   ctx,
   typeArguments,
 }: {
+  name: string;
   args: readonly Arg[];
   ctx: TypingContext;
   typeArguments?: readonly TypeId[];
 }): TypeId => {
   assertIntrinsicArgCount({
-    name: "__retain_callback",
+    name,
     args,
     expected: 1,
     detail: "handler function",
   });
-  assertNoIntrinsicTypeArgs("__retain_callback", typeArguments);
+  assertNoIntrinsicTypeArgs(name, typeArguments);
   const handlerType = args[0]!.type;
   const desc = ctx.arena.get(handlerType);
   if (desc.kind !== "function") {
-    throw new Error("__retain_callback expects a function argument");
+    throw new Error(`${name} expects a function argument`);
   }
   return getPrimitiveType(ctx, "i32");
 };

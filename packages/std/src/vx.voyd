@@ -105,25 +105,29 @@ pub eff Component
 
   task_started(tail, key: MsgPack, task_id: i32) -> void
 
-@intrinsic(name: "__retain_callback", uses_signature: true)
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
 fn retain_event_handler_id(handler: fn() -> MsgPack): () -> i32
   0
 
-@intrinsic(name: "__retain_callback", uses_signature: true)
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
 fn retain_event_handler_void_id(handler: fn() -> void): () -> i32
   0
 
-@intrinsic(name: "__retain_callback", uses_signature: true)
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
 fn retain_event_handler_with_payload_id(handler: fn(MsgPack) -> MsgPack): () -> i32
   0
 
-@intrinsic(name: "__retain_callback", uses_signature: true)
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
 fn retain_typed_event_handler_id<Msg>(handler: fn() -> Msg): () -> i32
-  __retain_callback(handler)
+  __boundary_retain_callback(handler)
+
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+fn retain_typed_event_handler_with_payload_id<Event, Msg>(handler: fn(Event) -> Msg): () -> i32
+  __boundary_retain_callback(handler)
 
 @intrinsic(name: "__retain_callback", uses_signature: true)
-fn retain_typed_event_handler_with_payload_id<Event, Msg>(handler: fn(Event) -> Msg): () -> i32
-  __retain_callback(handler)
+fn retain_program_callback_id<Handler>(handler: Handler): () -> i32
+  0
 
 @intrinsic(name: "__stable_callsite_id")
 fn stable_callsite_id(): () -> i32
@@ -1582,9 +1586,9 @@ pub fn program<Model, Msg>({
   view: fn(Model) -> Html<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
-    init_id: __retain_callback(init),
-    update_id: __retain_callback(update),
-    view_id: __retain_callback(view)
+    init_id: retain_program_callback_id(init),
+    update_id: retain_program_callback_id(update),
+    view_id: retain_program_callback_id(view)
   )
 
 pub fn program<Model, Msg>({
@@ -1593,9 +1597,9 @@ pub fn program<Model, Msg>({
   view: fn(Model) -> Html<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
-    init_id: __retain_callback(init),
-    update_id: __retain_callback(update),
-    view_id: __retain_callback(view)
+    init_id: retain_program_callback_id(init),
+    update_id: retain_program_callback_id(update),
+    view_id: retain_program_callback_id(view)
   )
 
 pub fn program<Model, Msg>({
@@ -1605,10 +1609,10 @@ pub fn program<Model, Msg>({
   subscriptions: fn(Model) -> Sub<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
-    init_id: __retain_callback(init),
-    update_id: __retain_callback(update),
-    view_id: __retain_callback(view),
-    subscriptions_id: __retain_callback(subscriptions)
+    init_id: retain_program_callback_id(init),
+    update_id: retain_program_callback_id(update),
+    view_id: retain_program_callback_id(view),
+    subscriptions_id: retain_program_callback_id(subscriptions)
   )
 
 pub fn program<Model, Msg>({
@@ -1618,10 +1622,10 @@ pub fn program<Model, Msg>({
   subscriptions: fn(Model) -> Sub<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
-    init_id: __retain_callback(init),
-    update_id: __retain_callback(update),
-    view_id: __retain_callback(view),
-    subscriptions_id: __retain_callback(subscriptions)
+    init_id: retain_program_callback_id(init),
+    update_id: retain_program_callback_id(update),
+    view_id: retain_program_callback_id(view),
+    subscriptions_id: retain_program_callback_id(subscriptions)
   )
 
 fn program_handlers<Model, Msg>({

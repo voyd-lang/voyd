@@ -162,6 +162,7 @@ export const createTestCodegenContext = (): {
       effectsHostBoundary: "off",
       linearMemoryExport: "always",
       effectsMemoryExport: "auto",
+      boundaryExports: false,
       testScope: "all",
     },
     programHelpers,

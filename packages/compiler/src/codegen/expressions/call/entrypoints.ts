@@ -540,7 +540,9 @@ const shouldCompileIntrinsicCall = ({
   intrinsicName: string;
   usesSignature: boolean;
 }): boolean =>
-  usesSignature !== true || intrinsicName === "__retain_callback";
+  usesSignature !== true ||
+  intrinsicName === "__retain_callback" ||
+  intrinsicName === "__boundary_retain_callback";
 
 const resolveTargetFunctionId = ({
   targets,

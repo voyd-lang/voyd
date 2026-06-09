@@ -58,16 +58,17 @@ import {
   emitExportAbiSection,
   type ExportAbiEntry,
 } from "./exports/export-abi.js";
-import { deriveBoundarySchema } from "./boundary/schema.js";
+import {
+  BoundarySchemaError,
+  deriveBoundarySchema,
+  type BoundarySchema,
+} from "./boundary/schema.js";
 import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
 import { boxSignatureSpillValue, unboxSignatureSpillValue } from "./signature-spill.js";
-import {
-  isBoundaryMsgPackPayload,
-  isBoundaryMsgPackValue,
-} from "./boundary-metadata.js";
+import { createSerializedExportSpecialCaseResolver } from "./serialized-export-special-cases.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -80,6 +81,12 @@ type ReachabilityState = {
 
 type FunctionMetadataRegistrationState = {
   active?: boolean;
+};
+
+type ResolvedBoundaryExportOptions = {
+  mode: "auto" | "off" | "only";
+  include?: ReadonlySet<string>;
+  onUnsupported: "skip" | "diagnostic";
 };
 
 const debugEffects = (): boolean =>
@@ -134,38 +141,112 @@ const userParamOffsetFor = (meta: FunctionMetadata): number => meta.userParamOff
 const firstUserParamIndexFor = (meta: FunctionMetadata): number =>
   meta.firstUserParamIndex;
 
-const typeUsesBoundaryMsgPack = (
-  typeId: TypeId,
+const resolveBoundaryExportOptions = (
   ctx: CodegenContext,
-): boolean =>
-  isBoundaryMsgPackValue(typeId, ctx) || isBoundaryMsgPackPayload(typeId, ctx);
+): ResolvedBoundaryExportOptions => {
+  const option = ctx.options.boundaryExports;
+  if (option === false || option === "off") {
+    return { mode: "off", onUnsupported: "skip" };
+  }
+  if (option === "auto") {
+    return { mode: "auto", onUnsupported: "skip" };
+  }
+  const mode = option.mode ?? (option.include ? "only" : "auto");
+  return {
+    mode,
+    include: option.include ? new Set(option.include) : undefined,
+    onUnsupported:
+      option.onUnsupported ??
+      (mode === "only" || option.include ? "diagnostic" : "skip"),
+  };
+};
 
-const functionUsesBoundaryMsgPack = (
-  meta: FunctionMetadata,
-  ctx: CodegenContext,
-): boolean =>
-  [...meta.paramTypeIds, meta.resultTypeId].some((typeId) =>
-    typeUsesBoundaryMsgPack(typeId, ctx),
-  );
-
-const assertTypesSupportSerializedBoundary = ({
-  meta,
-  ctx,
+const shouldConsiderBoundaryExport = ({
+  exportName,
+  options,
 }: {
-  meta: FunctionMetadata;
-  ctx: CodegenContext;
+  exportName: string;
+  options: ResolvedBoundaryExportOptions;
 }): boolean => {
-  [...meta.paramTypeIds, meta.resultTypeId].forEach((typeId) => {
-    if (typeUsesBoundaryMsgPack(typeId, ctx)) {
-      return;
-    }
+  if (options.mode === "off") return false;
+  if (options.include && !options.include.has(exportName)) return false;
+  if (options.mode === "only") return options.include?.has(exportName) ?? false;
+  return true;
+};
+
+const boundarySchemasForExport = ({
+  ctx,
+  meta,
+  exportName,
+}: {
+  ctx: CodegenContext;
+  meta: FunctionMetadata;
+  exportName: string;
+}): { params: BoundarySchema[]; result: BoundarySchema } => ({
+  params: meta.paramTypeIds.map((typeId, index) =>
     deriveBoundarySchema({
       typeId,
       ctx,
-      label: "serialized boundary export",
-    });
-  });
-  return true;
+      label: `${exportName} arg${index}`,
+      options: { tagStandaloneVariants: true },
+    }),
+  ),
+  result: deriveBoundarySchema({
+    typeId: meta.resultTypeId,
+    ctx,
+    label: `${exportName} result`,
+    options: { tagStandaloneVariants: true },
+  }),
+});
+
+const reportBoundaryExportUnsupported = ({
+  ctx,
+  entry,
+  exportName,
+  error,
+}: {
+  ctx: CodegenContext;
+  entry: HirExportEntry;
+  exportName: string;
+  error: unknown;
+}): void => {
+  const message =
+    error instanceof BoundarySchemaError || error instanceof Error
+      ? error.message
+      : String(error);
+  ctx.diagnostics.report(
+    diagnosticFromCode({
+      code: "CG0001",
+      params: {
+        kind: "codegen-error",
+        message: `typed boundary export ${exportName} is not supported: ${message}`,
+      },
+      span: entry.span,
+    }),
+  );
+};
+
+const allocateBoundaryWrapperExportName = ({
+  ctx,
+  exportName,
+  reservedExportNames,
+}: {
+  ctx: CodegenContext;
+  exportName: string;
+  reservedExportNames: ReadonlySet<string>;
+}): string => {
+  const baseName = `__voyd_serialized_export_${sanitizeIdentifier(exportName)}`;
+  let index = 0;
+  while (true) {
+    const candidate = index === 0 ? baseName : `${baseName}_${index}`;
+    index += 1;
+    if (reservedExportNames.has(candidate)) {
+      continue;
+    }
+    if (ctx.programHelpers.registerExportName(candidate)) {
+      return candidate;
+    }
+  }
 };
 
 const makeAbiValue = (
@@ -1202,6 +1283,8 @@ export const emitModuleExports = (
 ): void => {
   const effectfulExports: EffectfulExportTarget[] = [];
   const exportAbiEntries: ExportAbiEntry[] = [];
+  const boundaryExportOptions = resolveBoundaryExportOptions(ctx);
+  const emittedBoundaryExports = new Set<string>();
 
   const emitEffectfulWasmExportWrapper = ({
     ctx: exportCtx,
@@ -1235,8 +1318,21 @@ export const emitModuleExports = (
   const testScope = ctx.options.testScope ?? "all";
   const exportContexts =
     ctx.options.testMode && testScope === "all" ? contexts : [ctx];
+  const reservedExportNames = new Set<string>();
   exportContexts.forEach((exportCtx) => {
     const exportEntries = getModuleExportEntries(exportCtx);
+    exportEntries.forEach((entry) => {
+      const baseExportName =
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
+      reservedExportNames.add(
+        exportCtx.options.testMode
+          ? formatTestExportName({
+              moduleId: exportCtx.moduleId,
+              testId: baseExportName,
+            })
+          : baseExportName,
+      );
+    });
     const metaForEntry = (entry: HirExportEntry): FunctionMetadata | undefined => {
       const metas = getFunctionMetas(
         exportCtx,
@@ -1245,6 +1341,14 @@ export const emitModuleExports = (
       );
       return metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
     };
+    const resolveSpecialSerializedExport = createSerializedExportSpecialCaseResolver({
+      entries: exportEntries,
+      exportNameForEntry: (entry) =>
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol),
+      metaForEntry,
+      ctx: exportCtx,
+    });
+
     exportEntries.forEach((entry) => {
       const intrinsicMetadata =
         exportCtx.program.symbols.getIntrinsicFunctionFlags(
@@ -1330,41 +1434,36 @@ export const emitModuleExports = (
         return;
       }
 
-      const shouldUseBoundarySerialization =
-        functionUsesBoundaryMsgPack(meta, exportCtx);
+      const specialSerializedExport = resolveSpecialSerializedExport({
+        exportName,
+        meta,
+      });
 
-      if (shouldUseBoundarySerialization) {
-        try {
-          assertTypesSupportSerializedBoundary({
-            meta,
-            ctx: exportCtx,
-          });
-        } catch (error) {
-          exportCtx.diagnostics.report(
-            diagnosticFromCode({
-              code: "CG0001",
-              params: {
-                kind: "codegen-error",
-                message: (error as Error).message,
-              },
-              span: entry.span,
-            }),
-          );
-          return;
-        }
-      }
-
-      if (serializer || shouldUseBoundarySerialization) {
+      if (serializer || specialSerializedExport) {
         if (serializer) {
           markSerializerReachable({ ctx: exportCtx, serializer });
         }
         try {
-          emitSerializedExportWrapper({ ctx: exportCtx, meta, exportName });
+          emitSerializedExportWrapper({
+            ctx: exportCtx,
+            meta,
+            exportName,
+            typeAdapter: specialSerializedExport?.typeAdapter,
+          });
           exportAbiEntries.push({
             name: exportName,
             abi: "serialized",
             formatId: "msgpack",
+            ...(specialSerializedExport?.params
+              ? { params: specialSerializedExport.params }
+              : {}),
+            ...(specialSerializedExport?.result
+              ? { result: specialSerializedExport.result }
+              : {}),
           });
+          if (specialSerializedExport) {
+            emittedBoundaryExports.add(exportName);
+          }
         } catch (error) {
           exportCtx.diagnostics.report(
             diagnosticFromCode({
@@ -1381,9 +1480,73 @@ export const emitModuleExports = (
       }
 
       exportCtx.mod.addFunctionExport(meta.wasmName, exportName);
+      if (
+        !exportCtx.options.testMode &&
+        shouldConsiderBoundaryExport({
+          exportName,
+          options: boundaryExportOptions,
+        })
+      ) {
+        try {
+          const schemas = boundarySchemasForExport({
+            ctx: exportCtx,
+            meta,
+            exportName,
+          });
+          const wrapperExportName = allocateBoundaryWrapperExportName({
+            ctx: exportCtx,
+            exportName,
+            reservedExportNames,
+          });
+          const wrapper = emitSerializedExportWrapper({
+            ctx: exportCtx,
+            meta,
+            exportName,
+            wrapperExportName,
+          });
+          exportAbiEntries.push({
+            name: exportName,
+            abi: "serialized",
+            wrapperName: wrapper.wrapperName,
+            formatId: wrapper.formatId,
+            params: schemas.params,
+            result: schemas.result,
+          });
+          emittedBoundaryExports.add(exportName);
+          return;
+        } catch (error) {
+          if (
+            boundaryExportOptions.mode === "only" ||
+            boundaryExportOptions.onUnsupported === "diagnostic"
+          ) {
+            reportBoundaryExportUnsupported({
+              ctx: exportCtx,
+              entry,
+              exportName,
+              error,
+            });
+          }
+        }
+      }
       exportAbiEntries.push({ name: exportName, abi: "direct" });
     });
   });
+
+  if (boundaryExportOptions.include) {
+    boundaryExportOptions.include?.forEach((name) => {
+      if (emittedBoundaryExports.has(name)) return;
+      ctx.diagnostics.report(
+        diagnosticFromCode({
+          code: "CG0001",
+          params: {
+            kind: "codegen-error",
+            message: `typed boundary export ${name} was requested but was not emitted`,
+          },
+          span: ctx.module.hir.module.span,
+        }),
+      );
+    });
+  }
 
   if (exportAbiEntries.length > 0) {
     emitExportAbiSection({ mod: ctx.mod, entries: exportAbiEntries });

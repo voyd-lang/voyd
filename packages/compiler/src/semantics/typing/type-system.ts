@@ -889,9 +889,8 @@ export const resolveTypeAlias = (
         ctx,
       });
       ctx.typeAliases.markValidated(key);
-    } else {
-      recordAliasInstanceSymbol(cached, symbol, ctx);
     }
+    recordAliasInstanceSymbol(cached, symbol, ctx);
     return cached;
   }
 
@@ -1107,6 +1106,7 @@ export const resolveTypeAlias = (
       ctx.typeAliases.cacheInstance(key, resolved);
       ctx.typeAliases.markValidated(key);
     }
+    recordAliasInstanceSymbol(resolved, symbol, ctx);
     return resolved;
   } catch (error) {
     ctx.typeAliases.markFailed(key);

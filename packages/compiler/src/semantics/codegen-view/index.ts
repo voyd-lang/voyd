@@ -50,6 +50,7 @@ import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
 import { parseSymbolRefKey } from "../typing/symbol-ref-utils.js";
+import { enumNamespaceMemberNamesFromMetadata } from "../enum-namespace.js";
 
 export type { SymbolRef } from "../program-symbol-arena.js";
 
@@ -538,6 +539,8 @@ export const buildProgramCodegenView = (
     TypeId,
     Set<ProgramSymbolId>
   >();
+  const standaloneVariantMemberTypes = new Set<TypeId>();
+  const standaloneVariantOwners = new Set<ProgramSymbolId>();
 
   const traitImplsByNominal = new Map<TypeId, CodegenTraitImplInstance[]>();
   const traitImplsByTrait = new Map<
@@ -629,22 +632,72 @@ export const buildProgramCodegenView = (
     standaloneVariantAliasesByType.set(typeId, bucket);
   };
 
+  const collectStandaloneVariantMembersForTarget = (typeId: TypeId): void => {
+    const desc = arena.get(typeId);
+    if (desc.kind !== "union") return;
+    desc.members.forEach((member) => {
+      const memberDesc = arena.get(member);
+      if (memberDesc.kind === "union") {
+        collectStandaloneVariantMembersForTarget(member);
+        return;
+      }
+      standaloneVariantMemberTypes.add(member);
+      if (
+        memberDesc.kind === "intersection" &&
+        typeof memberDesc.nominal === "number"
+      ) {
+        standaloneVariantMemberTypes.add(memberDesc.nominal);
+      }
+    });
+  };
+
   const addStandaloneVariantAliasForTarget = (
+    typeId: TypeId,
+    aliasSymbols: Iterable<ProgramSymbolId>,
+  ): void => {
+    const desc = arena.get(typeId);
+    if (desc.kind !== "union") {
+      if (standaloneVariantMemberTypes.has(typeId)) {
+        addStandaloneVariantAliasForUnionMember(typeId, aliasSymbols);
+      }
+      return;
+    }
+    desc.members.forEach((member) =>
+      addStandaloneVariantAliasForUnionMember(member, aliasSymbols),
+    );
+  };
+
+  const addStandaloneVariantAliasForUnionMember = (
     typeId: TypeId,
     aliasSymbols: Iterable<ProgramSymbolId>,
   ): void => {
     const desc = arena.get(typeId);
     if (desc.kind === "union") {
       desc.members.forEach((member) =>
-        addStandaloneVariantAliasForTarget(member, aliasSymbols),
+        addStandaloneVariantAliasForUnionMember(member, aliasSymbols),
       );
       return;
     }
+    standaloneVariantMemberTypes.add(typeId);
     if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+      standaloneVariantMemberTypes.add(desc.nominal);
       addStandaloneVariantAlias(desc.nominal, aliasSymbols);
     }
     addStandaloneVariantAlias(typeId, aliasSymbols);
   };
+
+  aliasSymbolsByType.forEach((_, typeId) => {
+    collectStandaloneVariantMembersForTarget(typeId);
+  });
+
+  stableModules.forEach((mod) => {
+    for (const template of mod.typing.typeAliases.templates()) {
+      if (typeof template.target.typeId !== "number") {
+        continue;
+      }
+      collectStandaloneVariantMembersForTarget(template.target.typeId);
+    }
+  });
 
   aliasSymbolsByType.forEach((symbolSet, typeId) => {
     addStandaloneVariantAliasForTarget(typeId, symbolSet);
@@ -1139,6 +1192,80 @@ export const buildProgramCodegenView = (
     symbol: SymbolId,
   ): ProgramSymbolId => symbols.idOf(canonicalSymbolRef({ moduleId, symbol }));
 
+  const isObjectTypeRecord = (
+    record: ReturnType<ReturnType<typeof getSymbolTable>["getSymbol"]>,
+  ): boolean => {
+    const metadata = (record.metadata ?? {}) as { entity?: unknown };
+    return record.kind === "type" && metadata.entity === "object";
+  };
+
+  const addStandaloneVariantOwner = (
+    moduleId: string,
+    symbol: SymbolId,
+  ): void => {
+    standaloneVariantOwners.add(canonicalProgramSymbolIdOf(moduleId, symbol));
+  };
+
+  const addStandaloneVariantOwnersFromEnumAlias = (
+    mod: SemanticsPipelineResult,
+    aliasSymbol: SymbolId,
+    targetTypeId: TypeId | undefined,
+  ): void => {
+    if (typeof targetTypeId !== "number") {
+      return;
+    }
+    const targetDesc = arena.get(targetTypeId);
+    if (targetDesc.kind !== "union") {
+      return;
+    }
+    const symbolTable = getSymbolTable(mod);
+    const aliasRecord = symbolTable.getSymbol(aliasSymbol);
+    const metadata = (aliasRecord.metadata ?? {}) as Record<string, unknown>;
+    const memberNames = enumNamespaceMemberNamesFromMetadata(metadata);
+    if (!memberNames || memberNames.length === 0) {
+      return;
+    }
+
+    memberNames.forEach((name) => {
+      const local = symbolTable.resolveWhere(
+        name,
+        symbolTable.rootScope,
+        isObjectTypeRecord,
+      );
+      if (typeof local === "number") {
+        addStandaloneVariantOwner(mod.moduleId, local);
+      }
+    });
+
+    const importMetadata = metadata.import as
+      | { moduleId?: unknown; symbol?: unknown }
+      | undefined;
+    const importedModuleId = importMetadata?.moduleId;
+    if (typeof importedModuleId !== "string") {
+      return;
+    }
+    const importedModule = modulesById.get(importedModuleId);
+    if (!importedModule) {
+      return;
+    }
+    const importedSymbolTable = getSymbolTable(importedModule);
+    memberNames.forEach((name) => {
+      const exported = importedModule.exports.get(name)?.symbol;
+      if (typeof exported === "number") {
+        addStandaloneVariantOwner(importedModule.moduleId, exported);
+        return;
+      }
+      const local = importedSymbolTable.resolveWhere(
+        name,
+        importedSymbolTable.rootScope,
+        isObjectTypeRecord,
+      );
+      if (typeof local === "number") {
+        addStandaloneVariantOwner(importedModule.moduleId, local);
+      }
+    });
+  };
+
   const toCodegenTraitImplInstanceForModule = (
     impl: TraitImplInstance,
     moduleId: string,
@@ -1193,6 +1320,14 @@ export const buildProgramCodegenView = (
           toCodegenObjectTemplate({ template, symbol: ownerId }),
         );
       }
+    }
+
+    for (const template of mod.typing.typeAliases.templates()) {
+      addStandaloneVariantOwnersFromEnumAlias(
+        mod,
+        template.symbol,
+        template.target.typeId,
+      );
     }
 
     const objectInfos =
@@ -1900,17 +2035,14 @@ export const buildProgramCodegenView = (
       if (!nominalDesc.name) {
         return undefined;
       }
-      const aliases =
-        standaloneVariantAliasesByType.get(typeId) ??
-        standaloneVariantAliasesByType.get(nominalTypeId);
-      if (!aliases || aliases.size === 0) {
-        return undefined;
-      }
-      const hasDistinctAlias = Array.from(aliases).some((alias) => {
-        const aliasName = symbols.getName(alias);
-        return Boolean(aliasName && aliasName !== nominalDesc.name);
-      });
-      return hasDistinctAlias ? nominalDesc.name : undefined;
+      const owner = symbols.tryIdOf(canonicalSymbolRef(nominalDesc.owner));
+      const isEnumNamespaceMember =
+        typeof owner === "number" && standaloneVariantOwners.has(owner);
+      return isEnumNamespaceMember ||
+        standaloneVariantMemberTypes.has(typeId) ||
+        standaloneVariantMemberTypes.has(nominalTypeId)
+        ? nominalDesc.name
+        : undefined;
     },
   };
 

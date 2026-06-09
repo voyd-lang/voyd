@@ -181,6 +181,8 @@ export const formatBoundaryType = ({
 const DTO_SUMMARY =
   "boundary-compatible DTO values are bool, i32, i64, f32, f64, String, Array<T>, records/objects with boundary-compatible non-private fields, and named enum/union variants with boundary-compatible fields";
 
+const RESERVED_VARIANT_FIELD_NAMES = new Set(["tag", "$variant"]);
+
 const deriveBoundarySchemaInternal = ({
   typeId,
   ctx,
@@ -332,6 +334,20 @@ const deriveRecordSchema = ({
       reason: "record/object layout is not available at the boundary",
     });
   }
+  const standaloneTag = options.tagStandaloneVariants
+    ? ctx.program.types.getStandaloneVariantTag(typeId)
+    : undefined;
+  const reservedStandaloneVariantField = standaloneTag
+    ? reservedVariantField(info.fields)
+    : undefined;
+  if (reservedStandaloneVariantField) {
+    unsupported({
+      typeId,
+      ctx,
+      path: `${path}.${reservedStandaloneVariantField.name}`,
+      reason: `variant payload fields named "${reservedStandaloneVariantField.name}" conflict with the JS boundary discriminator`,
+    });
+  }
   const fields = deriveBoundaryFields({
     ownerTypeId: typeId,
     fields: info.fields,
@@ -344,9 +360,7 @@ const deriveRecordSchema = ({
     kind: "record",
     typeId,
     name: formatBoundaryType({ typeId, ctx }),
-    tag: options.tagStandaloneVariants
-      ? ctx.program.types.getStandaloneVariantTag(typeId)
-      : undefined,
+    tag: standaloneTag,
     fields,
   };
 };
@@ -439,16 +453,26 @@ const deriveUnionSchema = ({
         reason: "union variant layout is not available at the boundary",
       });
     }
+    const name = variantName({ typeId: member, ctx });
+    const reservedField = reservedVariantField(info.fields);
+    if (reservedField) {
+      unsupported({
+        typeId: member,
+        ctx,
+        path: `${path}.${name}.${reservedField.name}`,
+        reason: `variant payload fields named "${reservedField.name}" conflict with the JS boundary discriminator`,
+      });
+    }
     return {
-      name: variantName({ typeId: member, ctx }),
+      name,
       typeId: member,
       fields: deriveBoundaryFields({
         ownerTypeId: member,
         fields: info.fields,
         ctx,
-        path: `${path}.${variantName({ typeId: member, ctx })}`,
+        path: `${path}.${name}`,
         active,
-        options: { tagStandaloneVariants: false },
+        options: { tagStandaloneVariants: true },
       }),
     };
   });
@@ -459,6 +483,11 @@ const deriveUnionSchema = ({
     variants,
   };
 };
+
+const reservedVariantField = (
+  fields: readonly StructuralFieldInfo[],
+): StructuralFieldInfo | undefined =>
+  fields.find((field) => RESERVED_VARIANT_FIELD_NAMES.has(field.name));
 
 const primitiveSchema = ({
   typeId,
