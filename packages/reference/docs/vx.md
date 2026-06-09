@@ -44,11 +44,7 @@ type TextInput = {
 }
 
 pub fn app() -> Program<Model, Msg>
-  program<Model, Msg>(
-    init: init,
-    update: update,
-    view: view
-  )
+  program({ init, update, view })
 
 fn init() -> Model
   Model { title: "Draft", saved: false }
@@ -80,16 +76,6 @@ fn save_label(saved: bool) -> String
 the model into HTML. `update` receives messages from events, commands, and
 subscriptions and returns the next model. The lifecycle functions are ordinary
 Voyd functions; VX keeps their retained callback ids internally.
-
-The compact form below is the intended API shape once generic inference for
-function-valued object fields lands:
-
-```voyd
-pub fn app() -> Program<Model, Msg>
-  program({ init, update, view })
-```
-
-For now, use the explicit generic labeled call shown above.
 
 Typed lifecycle values must be host-callable DTOs: primitives, `String`,
 records/objects with public DTO fields, named message variants, and arrays of
