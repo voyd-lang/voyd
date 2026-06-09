@@ -66,6 +66,75 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("does not serialize unrelated DTO-compatible exports in boundary modules", async () => {
+    const wasm = await buildModule({ entryFile: "boundary-export-contract.voyd" });
+    const module = new WebAssembly.Module(wasmBufferSource(wasm));
+    const abi = parseExportAbi(module);
+
+    expect(abi.exports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "app",
+          abi: "serialized",
+          formatId: "msgpack",
+        }),
+        expect.objectContaining({
+          name: "echo_command",
+          abi: "serialized",
+          formatId: "msgpack",
+        }),
+        expect.objectContaining({ name: "add", abi: "direct" }),
+      ]),
+    );
+  });
+
+  it("decodes boundary payload envelopes in serialized params", async () => {
+    const wasm = await buildModule({ entryFile: "boundary-export-contract.voyd" });
+    const host = await createVoydHost({ wasm });
+    const payload = {
+      type: "cmd",
+      kind: "message",
+      value: { Increment: {} },
+    };
+
+    const result = await host.runPure("echo_command", [payload]);
+
+    expect(result).toEqual(payload);
+  });
+
+  it("does not activate companion boundary exports from unrelated boundary helpers", async () => {
+    const wasm = await buildModule({
+      entryFile: "boundary-preview-export-contract.voyd",
+    });
+    const module = new WebAssembly.Module(wasmBufferSource(wasm));
+    const abi = parseExportAbi(module);
+
+    expect(abi.exports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "view",
+          abi: "serialized",
+          formatId: "msgpack",
+        }),
+        expect.objectContaining({ name: "init", abi: "direct" }),
+      ]),
+    );
+  });
+
+  it("reports unsupported explicit boundary export DTOs", async () => {
+    const result = await compileProgram({
+      entryPath: resolve(fixtureRoot, "boundary-export-unsupported.voyd"),
+      roots: { src: fixtureRoot, std: stdRoot },
+      host: createFsModuleHost(),
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
+      "boundary DTO incompatibility",
+    );
+  });
+
   it("round-trips msgpack values for serialized exports", async () => {
     const wasm = await buildModule();
     const host = await createVoydHost({ wasm });
@@ -271,7 +340,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     ).toBe(true);
   });
 
-  it("counts VX lifecycle special serialized exports as explicit boundary includes", async () => {
+  it("does not count private VX lifecycle callbacks as explicit boundary includes", async () => {
     const result = await compileProgram({
       entryPath: resolve(smokeFixtureRoot, "vx-typed-counter.voyd"),
       roots: { src: smokeFixtureRoot, std: stdRoot },
@@ -281,22 +350,15 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
       },
     });
 
-    const compiled = expectCompileSuccess(result);
-    if (!compiled.wasm) {
-      throw new Error("missing wasm output");
-    }
-    const module = new WebAssembly.Module(wasmBufferSource(compiled.wasm));
-    const abi = parseExportAbi(module);
-    const view = abi.exports.find((entry) => entry.name === "view");
-
-    expect(view).toEqual(
-      expect.objectContaining({
-        name: "view",
-        abi: "serialized",
-        formatId: "msgpack",
-        params: [expect.objectContaining({ kind: "record" })],
-      }),
-    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.diagnostics.some((diagnostic) =>
+        diagnostic.message.includes(
+          "typed boundary export view was requested but was not emitted",
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("avoids wrapper export name collisions with user exports", async () => {

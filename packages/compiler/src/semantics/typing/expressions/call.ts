@@ -98,6 +98,7 @@ import {
 import { hydrateImportedTraitMetadataForOwnerRef } from "../import-trait-impl-hydration.js";
 import { collectTraitOwnersFromTypeParams } from "../constraint-trait-owners.js";
 import { typeDefaultParameterValues } from "../default-parameters.js";
+import { stableCallsiteIdFor } from "../../../stable-callsite-id.js";
 
 type SymbolNameResolver = (symbol: SymbolId) => string;
 type MethodCallCandidate = {
@@ -927,7 +928,7 @@ const getExpectedCallParameters = ({
           })
         : undefined;
     return {
-      params: selected.signature.parameters.map((param) =>
+      params: publicCallParametersFor({ signature: selected.signature }).map((param) =>
         substitution ? ctx.arena.substitute(param.type, substitution) : param.type,
       ),
       expectedReturnCandidates,
@@ -951,7 +952,7 @@ const getExpectedCallParameters = ({
         })
       : undefined;
   return {
-    params: signature.parameters.map((param) =>
+    params: publicCallParametersFor({ signature }).map((param) =>
       substitution ? ctx.arena.substitute(param.type, substitution) : param.type,
     ),
   };
@@ -1353,6 +1354,32 @@ const walkCallArguments = ({
           if (!runParam.label) {
             break;
           }
+          if (isStableCallsiteIdParam(runParam)) {
+            const explicitSyntheticField = structuralFields.find(
+              (field) =>
+                field.name === runParam.label || field.name === runParam.name,
+            );
+            if (explicitSyntheticField) {
+              return {
+                kind: "error",
+                failure: { kind: "extra-arguments", extra: 1 },
+              };
+            }
+            if (
+              !onSkipOptionalParam({
+                param: runParam,
+                paramIndex: cursor,
+                reason: "structural-missing-field",
+              })
+            ) {
+              return {
+                kind: "error",
+                failure: { kind: "incompatible", paramIndex: cursor, argIndex },
+              };
+            }
+            cursor += 1;
+            continue;
+          }
           const match = structuralFields.find(
             (field) => field.name === runParam.label,
           );
@@ -1647,6 +1674,36 @@ const ensureOptionalParameterIsSkippable = ({
   );
 };
 
+const isStableCallsiteIdParam = (param: ParamSignature): boolean =>
+  param.synthetic === "stable-callsite-id";
+
+const argumentTargetsSyntheticParam = (
+  arg: Arg,
+  params: readonly ParamSignature[],
+): boolean =>
+  typeof arg.label === "string" &&
+  params.some(
+    (param) =>
+      isStableCallsiteIdParam(param) &&
+      (param.label === arg.label || param.name === arg.label),
+  );
+
+const publicCallParametersFor = ({
+  signature,
+}: {
+  signature: FunctionSignature;
+}): readonly ParamSignature[] =>
+  signature.parameters.filter((param) => !isStableCallsiteIdParam(param));
+
+const callPlanParametersFor = ({
+  signature,
+}: {
+  signature: FunctionSignature;
+}): readonly ParamSignature[] =>
+  signature.parameters.map((param) =>
+    isStableCallsiteIdParam(param) ? { ...param } : param,
+  );
+
 const validateCallArgs = (
   args: readonly Arg[],
   params: readonly ParamSignature[],
@@ -1655,6 +1712,21 @@ const validateCallArgs = (
   callSpan?: SourceSpan,
 ): { ok: true; plan: readonly CallArgumentPlanEntry[] } | { ok: false } => {
   const span = callSpan ?? ctx.hir.module.span;
+  const explicitSyntheticArg = args.find((arg) =>
+    argumentTargetsSyntheticParam(arg, params),
+  );
+  if (explicitSyntheticArg) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0021",
+      params: {
+        kind: "call-extra-arguments",
+        extra: 1,
+      },
+      span,
+    });
+    return { ok: false };
+  }
   const plan: CallArgumentPlanEntry[] = [];
   const hasUnknownArgs = args.some((arg) => arg.type === ctx.primitives.unknown);
   const result = walkCallArguments({
@@ -1709,7 +1781,15 @@ const validateCallArgs = (
         callSpan,
         fallbackSpan: span,
       });
-      plan.push({ kind: "missing", targetTypeId: param.type });
+      plan.push(
+        isStableCallsiteIdParam(param)
+          ? {
+              kind: "stable-callsite-id",
+              targetTypeId: param.type,
+              value: stableCallsiteIdFor(callSpan ?? span, `${paramIndex}`),
+            }
+          : { kind: "missing", targetTypeId: param.type },
+      );
       return true;
     },
   });
@@ -1935,7 +2015,7 @@ const formatFunctionSignatureForDiagnostic = ({
   const typeParamSuffix =
     typeParams && typeParams.length > 0 ? `<${typeParams.join(", ")}>` : "";
 
-  const params = signature.parameters.map((param) => {
+  const params = publicCallParametersFor({ signature }).map((param) => {
     const typeLabel = formatTypeForDiagnostic({ type: param.type, ctx });
     const label = param.label ?? param.name;
     const labelPrefix = label ? `${label}: ` : "";
@@ -1992,11 +2072,11 @@ const overloadCandidateFailureReason = ({
         })
       : undefined;
   const params = explicitSubstitution
-    ? signature.parameters.map((param) => ({
+    ? publicCallParametersFor({ signature }).map((param) => ({
         ...param,
         type: ctx.arena.substitute(param.type, explicitSubstitution),
       }))
-    : signature.parameters;
+    : publicCallParametersFor({ signature });
 
   let mismatch:
     | {
@@ -4320,11 +4400,17 @@ const typeFunctionCall = ({
       calleeModuleId: resolvedModuleId,
       ctx,
     }) ?? instantiation.parameters;
+  const planParameters = callPlanParametersFor({
+    signature: {
+      ...signature,
+      parameters: adjustedParameters,
+    },
+  });
 
   const callSpan = ctx.hir.expressions.get(callId)?.span;
   const validation = validateCallArgs(
     args,
-    adjustedParameters,
+    planParameters,
     ctx,
     state,
     callSpan,
@@ -4346,7 +4432,12 @@ const typeFunctionCall = ({
   const specializedEffectRow = specializeCallEffectRow({
     effectRow: signature.effectRow,
     args,
-    params: adjustedParameters,
+    params: publicCallParametersFor({
+      signature: {
+        ...signature,
+        parameters: adjustedParameters,
+      },
+    }),
     callId,
     ctx,
   });
@@ -5430,11 +5521,11 @@ const matchesOverloadSignature = (
         })
       : undefined;
   const params = explicitSubstitution
-    ? signature.parameters.map((param) => ({
+    ? publicCallParametersFor({ signature }).map((param) => ({
         ...param,
         type: ctx.arena.substitute(param.type, explicitSubstitution),
       }))
-    : signature.parameters;
+    : publicCallParametersFor({ signature });
 
   if (!callArgumentsSatisfyParams({ args, params, ctx, state })) {
     return false;
@@ -5552,6 +5643,7 @@ const typeIntrinsicCall = (
         typeArguments,
         expectedReturnType,
       });
+    case "__retain_callback":
     case "__boundary_retain_callback":
       return typeBoundaryRetainCallbackIntrinsic({
         name,
@@ -5559,6 +5651,14 @@ const typeIntrinsicCall = (
         ctx,
         typeArguments,
       });
+    case "__stable_callsite_id":
+      assertIntrinsicArgCount({
+        name: "__stable_callsite_id",
+        args,
+        expected: 0,
+      });
+      assertNoIntrinsicTypeArgs("__stable_callsite_id", typeArguments);
+      return getPrimitiveType(ctx, "i32");
     case "__boundary_value_to_msgpack":
       return typeBoundaryValueToMsgPackIntrinsic({
         args,

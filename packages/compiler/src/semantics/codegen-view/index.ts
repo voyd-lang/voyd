@@ -179,6 +179,7 @@ export type CodegenFunctionSignature = {
     name?: string;
     symbol?: SymbolId;
     bindingKind?: HirBindingKind;
+    synthetic?: "stable-callsite-id";
   }[];
   returnType: TypeId;
   effectRow: number;
@@ -431,6 +432,32 @@ export type CodegenTraitImplInstance = {
     implMethod: ProgramSymbolId;
   }[];
   implSymbol: ProgramSymbolId;
+};
+
+const defaultValueIsStableCallsiteId = ({
+  exprId,
+  module,
+}: {
+  exprId: HirExprId | undefined;
+  module: SemanticsPipelineResult;
+}): boolean => {
+  if (typeof exprId !== "number") {
+    return false;
+  }
+  const expr = module.hir.expressions.get(exprId);
+  if (expr?.exprKind !== "call" || expr.args.length !== 0) {
+    return false;
+  }
+  const callee = module.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return false;
+  }
+  const symbol = getSymbolTable(module).getSymbol(callee.symbol);
+  const metadata = (symbol.metadata ?? {}) as {
+    intrinsic?: unknown;
+    intrinsicName?: unknown;
+  };
+  return metadata.intrinsic === true && metadata.intrinsicName === "__stable_callsite_id";
 };
 
 export const buildProgramCodegenView = (
@@ -2090,6 +2117,12 @@ export const buildProgramCodegenView = (
           name: param.name,
           symbol: param.symbol,
           bindingKind: param.bindingKind,
+          ...(defaultValueIsStableCallsiteId({
+            exprId: param.defaultValue,
+            module: mod,
+          })
+            ? { synthetic: "stable-callsite-id" as const }
+            : {}),
         })),
         returnType: signature.returnType,
         effectRow: signature.effectRow,

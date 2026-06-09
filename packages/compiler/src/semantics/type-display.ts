@@ -111,6 +111,7 @@ const formatFunctionSignatureParameters = ({
   }) => TypeId;
 }): string =>
   signature.parameters
+    .filter((parameter) => parameter.synthetic !== "stable-callsite-id")
     .map((parameter) => {
       const label = parameter.label;
       const name = parameter.name;

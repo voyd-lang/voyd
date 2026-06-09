@@ -9,12 +9,15 @@ import type {
 import { findSerializerForType } from "../serializer.js";
 import {
   coerceValueToType,
+  initStructuralValue,
   liftHeapValueToInline,
+  lowerValueForHeapField,
   storeValueIntoStorageRef,
 } from "../structural.js";
 import {
   abiTypeFor,
   getSignatureSpillBoxType,
+  getStructuralTypeInfo,
   wasmTypeFor,
 } from "../types.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
@@ -34,6 +37,11 @@ import {
   boxSignatureSpillValue,
   unboxSignatureSpillValue,
 } from "../signature-spill.js";
+import {
+  boundaryMsgPackPayloadField,
+  isBoundaryMsgPackValue,
+} from "../boundary-metadata.js";
+import { compileOptionalNoneValue } from "../optionals.js";
 
 export type SerializedExportTypeAdapter = {
   acceptsType?: (params: {
@@ -159,6 +167,26 @@ export const emitSerializedExportWrapper = ({
         fnCtx,
       });
     }
+    if (isBoundaryMsgPackValue(typeId, ctx)) {
+      return coerceValueToType({
+        value: element,
+        actualType: msgpack.msgPackTypeId,
+        targetType: typeId,
+        ctx,
+        fnCtx,
+      });
+    }
+    const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
+    if (payloadField) {
+      return buildPayloadEnvelopeParamExpr({
+        value: element,
+        typeId,
+        payloadField,
+        ctx,
+        fnCtx,
+        label: `${exportName} arg${index}`,
+      });
+    }
     return unpackBoundaryValueFromMsgPack({
       ctx,
       value: element,
@@ -216,6 +244,71 @@ export const emitSerializedExportWrapper = ({
 
   ctx.mod.addFunctionExport(wrapperName, wrapperExportName);
   return { wrapperName: wrapperExportName, formatId: "msgpack" };
+};
+
+const buildPayloadEnvelopeParamExpr = ({
+  value,
+  typeId,
+  payloadField,
+  ctx,
+  fnCtx,
+  label,
+}: {
+  value: binaryen.ExpressionRef;
+  typeId: TypeId;
+  payloadField: NonNullable<ReturnType<typeof boundaryMsgPackPayloadField>>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  label: string;
+}): binaryen.ExpressionRef => {
+  const msgpack = ensureMsgPackFunctions(ctx);
+  const structInfo = getStructuralTypeInfo(typeId, ctx);
+  if (!structInfo) {
+    throw new Error(`boundary payload envelope ${label} is missing structural info`);
+  }
+
+  const fieldValues = structInfo.fields.map((field) => {
+    if (field.name === payloadField.name) {
+      const payload = coerceValueToType({
+        value,
+        actualType: msgpack.msgPackTypeId,
+        targetType: field.typeId,
+        ctx,
+        fnCtx,
+      });
+      return structInfo.layoutKind === "value-object"
+        ? payload
+        : lowerValueForHeapField({
+            value: payload,
+            typeId: field.typeId,
+            targetType: field.heapWasmType,
+            ctx,
+            fnCtx,
+          });
+    }
+
+    if (!field.optional) {
+      throw new Error(
+        `boundary payload envelope ${label} has non-payload field ${field.name}`
+      );
+    }
+    const none = compileOptionalNoneValue({
+      targetTypeId: field.typeId,
+      ctx,
+      fnCtx,
+    });
+    return structInfo.layoutKind === "value-object"
+      ? none
+      : lowerValueForHeapField({
+          value: none,
+          typeId: field.typeId,
+          targetType: field.heapWasmType,
+          ctx,
+          fnCtx,
+        });
+  });
+
+  return initStructuralValue({ structInfo, fieldValues, ctx });
 };
 
 const lowerSerializedExportCall = ({

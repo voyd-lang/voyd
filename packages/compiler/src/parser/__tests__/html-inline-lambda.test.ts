@@ -54,7 +54,7 @@ pub fn main() -> MsgPack
   t.expect(lambda[1]).toBe("f");
 });
 
-test("lowers built-in HTML elements to VX constructors", (t) => {
+test("lowers built-in HTML elements to HTML helpers", (t) => {
   const code = `
 use std::all
 use std::vx::all
@@ -64,15 +64,15 @@ pub fn main()
 `;
 
   const ast = toPlain(code);
-  t.expect(findFirstCall(ast, "element")).toBeDefined();
+  t.expect(findFirstCall(ast, "html_element")).toBeDefined();
   t.expect(findFirstCall(ast, "create_element")).toBeUndefined();
   t.expect(findFirstCall(ast, "class")).toBeDefined();
   t.expect(findFirstCall(ast, "disabled")).toBeDefined();
-  t.expect(findFirstCall(ast, "event_message")).toBeDefined();
-  t.expect(findFirstCall(ast, "event_handler")).toBeUndefined();
+  t.expect(findFirstCall(ast, "html_event_message")).toBeDefined();
+  t.expect(findFirstCall(ast, "html_event_handler")).toBeUndefined();
 });
 
-test("lowers closure-valued HTML events to retained VX event helpers", (t) => {
+test("lowers closure-valued HTML events to retained HTML event helpers", (t) => {
   const code = `
 use std::msgpack
 use std::msgpack::MsgPack
@@ -86,9 +86,9 @@ pub fn main() -> MsgPack
 `;
 
   const ast = toPlain(code);
-  t.expect(findFirstCall(ast, "event_payload_handler")).toBeDefined();
-  t.expect(findFirstCall(ast, "event_handler")).toBeUndefined();
-  t.expect(findFirstCall(ast, "event_message")).toBeUndefined();
+  t.expect(findFirstCall(ast, "html_event_payload_handler")).toBeDefined();
+  t.expect(findFirstCall(ast, "html_event_handler")).toBeUndefined();
+  t.expect(findFirstCall(ast, "html_event_message")).toBeUndefined();
 });
 
 test("lowers non-click HTML event values to message and payload helpers", (t) => {
@@ -104,12 +104,12 @@ pub fn main() -> MsgPack
 `;
 
   const ast = toPlain(code);
-  t.expect(findFirstCall(ast, "event_message")).toBeDefined();
-  t.expect(findFirstCall(ast, "event_handler")).toBeUndefined();
-  t.expect(findFirstCall(ast, "event_payload_handler")).toBeDefined();
+  t.expect(findFirstCall(ast, "html_event_message")).toBeDefined();
+  t.expect(findFirstCall(ast, "html_event_handler")).toBeUndefined();
+  t.expect(findFirstCall(ast, "html_event_payload_handler")).toBeDefined();
 });
 
-test("lowers empty built-in HTML children to a typed MsgPack array", (t) => {
+test("lowers empty built-in HTML children to a typed HTML node array", (t) => {
   const code = `
 use std::array::Array
 use std::msgpack::MsgPack
@@ -125,7 +125,7 @@ pub fn main() -> MsgPack
   const ast = toPlain(code);
   t.expect(containsNode(ast, [
     "::",
-    ["Array", ["generics", "MsgPack"]],
+    ["Array", ["generics", "HtmlNode"]],
     ["init"],
   ])).toBe(true);
 });

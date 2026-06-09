@@ -12,6 +12,7 @@ export type CallParam = {
   label?: string;
   optional?: boolean;
   name?: string;
+  synthetic?: "stable-callsite-id";
 };
 
 export type CompileCallArgumentOptions = {

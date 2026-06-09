@@ -1,13 +1,8 @@
 use std::enums::{ enum }
-use std::string::type::String
 use std::vx::all
 
 obj Model {
-  a: i32,
-  b: i32,
-  c: i32,
-  d: i32,
-  e: i32
+  count: i32
 }
 
 enum Msg
@@ -21,23 +16,20 @@ pub fn app() -> Program<Model, Msg>
   )
 
 fn init() -> Model
-  Model { a: 0, b: 1, c: 2, d: 3, e: 4 }
+  Model { count: 0 }
 
 fn update(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Increment:
-      program<Model, Msg>(
-        model: Model { a: model.a + 1, b: model.b, c: model.c, d: model.d, e: model.e }
-      )
+      program<Model, Msg>(model: Model { count: model.count + 1 })
 
 fn view(model: Model) -> Html<Msg>
   <button on_click={Msg::Increment {}}>
-    Wide: {label(model.a)}
+    Count
   </button>
 
-fn label(value: i32) -> String
-  if
-    value == 0: "0"
-    value == 1: "1"
-    value == 2: "2"
-    else: "many"
+pub fn echo_command(command: Cmd<Msg>) -> Cmd<Msg>
+  command
+
+pub fn add(a: i32, b: i32) -> i32
+  a + b

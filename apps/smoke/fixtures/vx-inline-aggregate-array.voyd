@@ -8,13 +8,20 @@ type Model = Array<{ x: i32, y: i32 }>
 enum Msg
   Shift
 
-pub fn init() -> Model
+pub fn app() -> Program<Model, Msg>
+  program<Model, Msg>(
+    init: init,
+    update: update,
+    view: view
+  )
+
+fn init() -> Model
   let ~points = Array<Point>::with_capacity(2)
   points.push({ x: 1, y: 2 })
   points.push({ x: 3, y: 4 })
   points
 
-pub fn update(model: Model, msg: Msg) -> Model
+fn update(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Shift:
       let ~points = Array<Point>::with_capacity(2)
@@ -22,9 +29,9 @@ pub fn update(model: Model, msg: Msg) -> Model
       let second = model.at(1)
       points.push({ x: first.x + 10, y: first.y + 20 })
       points.push({ x: second.x + 10, y: second.y + 20 })
-      points
+      program<Model, Msg>(model: points)
 
-pub fn view(model: Model) -> Html<Msg>
+fn view(model: Model) -> Html<Msg>
   let first = model.at(0)
   <button on_click={Msg::Shift {}}>
     Point: {label(first.x)}

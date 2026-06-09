@@ -5,11 +5,13 @@ import {
   type BoundarySchema,
 } from "./boundary/schema.js";
 import {
-  createVxLifecycleSerializedExportPredicate,
-  vxSerializedExportTypeAdapter,
-} from "./vx-boundary-contract.js";
+  boundaryMsgPackPayloadField,
+  isBoundaryMsgPackValue,
+} from "./boundary-metadata.js";
 import { findSerializerForType } from "./serializer.js";
 import type { SerializedExportTypeAdapter } from "./exports/serialized-abi.js";
+import { getStructuralTypeInfo } from "./types.js";
+import { loadStructuralField } from "./structural.js";
 
 export type SerializedExportSpecialCase = {
   typeAdapter?: SerializedExportTypeAdapter;
@@ -18,9 +20,6 @@ export type SerializedExportSpecialCase = {
 };
 
 export const createSerializedExportSpecialCaseResolver = <Entry>({
-  entries,
-  exportNameForEntry,
-  metaForEntry,
   ctx,
 }: {
   entries: readonly Entry[];
@@ -31,26 +30,53 @@ export const createSerializedExportSpecialCaseResolver = <Entry>({
   exportName: string;
   meta: FunctionMetadata;
 }) => SerializedExportSpecialCase | undefined) => {
-  const isVxLifecycleExport = createVxLifecycleSerializedExportPredicate({
-    entries,
-    exportNameForEntry,
-    metaForEntry,
-    ctx,
-  });
   return ({ exportName, meta }) => {
-    if (!isVxLifecycleExport({ exportName, meta })) {
+    if (!functionUsesBoundaryMsgPack(meta, ctx)) {
       return undefined;
     }
     return {
-      typeAdapter: vxSerializedExportTypeAdapter,
+      typeAdapter: boundaryMsgPackTypeAdapter,
       ...boundaryMetadataFor({
         exportName,
         meta,
         ctx,
-        typeAdapter: vxSerializedExportTypeAdapter,
+        typeAdapter: boundaryMsgPackTypeAdapter,
       }),
     };
   };
+};
+
+const functionUsesBoundaryMsgPack = (
+  meta: FunctionMetadata,
+  ctx: CodegenContext,
+): boolean =>
+  [...meta.paramTypeIds, meta.resultTypeId].some((typeId) =>
+    boundaryMsgPackTypeAdapter.acceptsType?.({ typeId, ctx }) === true,
+  );
+
+const boundaryMsgPackTypeAdapter: SerializedExportTypeAdapter = {
+  acceptsType: ({ typeId, ctx }) =>
+    isBoundaryMsgPackValue(typeId, ctx) ||
+    Boolean(boundaryMsgPackPayloadField(typeId, ctx)),
+  packResultValue: ({ value, typeId, ctx }) => {
+    if (isBoundaryMsgPackValue(typeId, ctx)) {
+      return value;
+    }
+    const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
+    if (!payloadField) {
+      return undefined;
+    }
+    const info = getStructuralTypeInfo(typeId, ctx);
+    if (!info) {
+      throw new Error(`boundary payload envelope ${typeId} is missing structural info`);
+    }
+    return loadStructuralField({
+      structInfo: info,
+      field: payloadField,
+      pointer: () => value,
+      ctx,
+    });
+  },
 };
 
 const boundaryMetadataFor = ({

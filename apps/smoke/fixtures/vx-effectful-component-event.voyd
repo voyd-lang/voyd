@@ -10,7 +10,7 @@ pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
   model
 
 pub fn view(): Component -> MsgPack
-  let (count, set_count) = state(id: 1, initial: 0)
+  let (count, set_count) = state(initial: 0)
   <button on_click={() =>
     set_count(count + 1)
   }>

@@ -11,20 +11,25 @@ enum Msg
   Increment
   Rename { value: String }
 
-pub fn init() -> Program<Model, Msg>
+pub fn app() -> Program<Model, Msg>
   program<Model, Msg>(
-    model: Model { count: 0, title: "Ready" },
-    commands: Cmd<Msg>::message(Msg::Increment {})
+    init: init,
+    update: update,
+    view: view,
+    subscriptions: subscriptions
   )
 
-pub fn update(model: Model, msg: Msg) -> Model
+fn init() -> Model
+  Model { count: 1, title: "Ready" }
+
+fn update(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Increment:
-      Model { count: model.count + 1, title: model.title }
+      program<Model, Msg>(model: Model { count: model.count + 1, title: model.title })
     Msg::Rename { value }:
-      Model { count: model.count, title: value }
+      program<Model, Msg>(model: Model { count: model.count, title: value })
 
-pub fn view(model: Model) -> Html<Msg>
+fn view(model: Model) -> Html<Msg>
   <div>
     <button on_click={Msg::Increment {}}>
       Count: {count_label(model.count)}
@@ -42,7 +47,7 @@ pub fn program_command(model: Model) -> Program<Model, Msg>
 pub fn mapped_command() -> Cmd<Msg>
   Cmd<Msg>::message(Msg::Increment {}).map<Msg>((message: Msg) -> Msg => message)
 
-pub fn subscriptions(model: Model) -> Sub<Msg>
+fn subscriptions(model: Model) -> Sub<Msg>
   if
     model.count == 0:
       Sub<Msg>::every(key: "counter", millis: 1000i64, value: Msg::Increment {})

@@ -62,6 +62,14 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   [
+    "__retain_callback",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__stable_callsite_id",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
     "__boundary_retain_callback",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],

@@ -164,6 +164,19 @@ test "vx class prop styles and keyed helpers encode renderer fields":
     Err:
       assert(false, eq: true)
 
+  let ~seen_scopes = Array<String>::init()
+  try open
+    match(msgpack::unpack_map(keyed(key: "page-2", body: () -> MsgPack => text("Lazy"))))
+      Ok<Dict<String, MsgPack>> { value }:
+        assert_string_field(value, "key", "page-2")
+      Err:
+        assert(false, eq: true)
+  Component::state_scope(tail, key):
+    seen_scopes.push("scope".to_string())
+    assert_msgpack_string(key, "page-2")
+    tail()
+  assert(seen_scopes.len(), eq: 1)
+
   match(msgpack::unpack_map(map_html<MsgPack, MsgPack>(html: text("Child"), handler_id: 21)))
     Ok<Dict<String, MsgPack>> { value }:
       assert_string_field(value, "kind", "map")
@@ -450,11 +463,12 @@ test "vx component state and task APIs use component effect":
   let ~seen = Array<String>::init()
 
   try open
-    let handle = state_handle(id: 3, initial: msgpack::make_string("initial"))
+    let handle = state_handle(initial: msgpack::make_string("initial"))
     assert_msgpack_string(handle.value, "current")
+  Component::state_key(tail, id):
+    tail(id)
   Component::state_get(tail, id, initial):
     seen.push("get".to_string())
-    assert(id, eq: 3)
     assert_msgpack_string(initial, "initial")
     tail(msgpack::make_string("current"))
 
@@ -468,32 +482,32 @@ test "vx component state and task APIs use component effect":
     tail()
 
   try open
-    let (value, set_value) = state(id: 4, initial: 1)
+    let (value, set_value) = state(initial: 1)
     assert(value, eq: 7)
     set_value(value + 1)
+  Component::state_key(tail, id):
+    tail(id)
   Component::state_get(tail, id, initial):
     seen.push("state-get".to_string())
-    assert(id, eq: 4)
     assert_msgpack_i32(initial, 1)
     tail(msgpack::make_i32(7))
   Component::state_set(tail, id, value):
     seen.push("state-set".to_string())
-    assert(id, eq: 4)
     assert_msgpack_i32(value, 8)
     tail()
 
   try open
-    let (text_value, set_text) = state(id: 5, initial: "initial")
+    let (text_value, set_text) = state(initial: "initial")
     assert(text_value.equals("current".to_string()), eq: true)
     set_text(text_value)
+  Component::state_key(tail, id):
+    tail(id)
   Component::state_get(tail, id, initial):
     seen.push("text-get".to_string())
-    assert(id, eq: 5)
     assert_msgpack_string(initial, "initial")
     tail(msgpack::make_string("current"))
   Component::state_set(tail, id, value):
     seen.push("text-set".to_string())
-    assert(id, eq: 5)
     assert_msgpack_string(value, "current")
     tail()
 
@@ -527,25 +541,6 @@ test "vx program constructor encodes lifecycle handles":
           assert(true, eq: true)
         None:
           assert(false, eq: true)
-    Err:
-      assert(false, eq: true)
-
-  let app = program<MsgPack, MsgPack>(
-    init: msgpack::make_i32(1),
-    update: msgpack::make_i32(2),
-    view: msgpack::make_i32(3),
-    subscriptions: msgpack::make_i32(4),
-    decode_msg: msgpack::make_i32(5)
-  )
-
-  match(msgpack::unpack_map(app))
-    Ok<Dict<String, MsgPack>> { value }:
-      assert_string_field(value, "kind", "program")
-      assert_i32_field(value, "init", 1)
-      assert_i32_field(value, "update", 2)
-      assert_i32_field(value, "view", 3)
-      assert_i32_field(value, "subscriptions", 4)
-      assert_i32_field(value, "decode_msg", 5)
     Err:
       assert(false, eq: true)
 
