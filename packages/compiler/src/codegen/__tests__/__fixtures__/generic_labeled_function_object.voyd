@@ -1,0 +1,41 @@
+obj Model {
+  value: i32
+}
+
+obj Msg {
+  value: i32
+}
+
+fn configure<T, U>({
+  init: fn() -> T,
+  update: fn(T, U) -> T,
+  view: fn(T) -> U
+}) -> i32
+  let model = init()
+  let message = view(model)
+  update(model, message)
+  7
+
+fn configure<T>({ model: T }) -> i32
+  99
+
+fn init() -> Model
+  Model { value: 1 }
+
+fn update(model: Model, message: Msg) -> Model
+  Model { value: model.value + message.value }
+
+fn view(model: Model) -> Msg
+  Msg { value: model.value + 1 }
+
+pub fn explicit_structural() -> i32
+  configure<Model, Msg>({ init, update, view })
+
+pub fn inferred_structural() -> i32
+  configure({ init, update, view })
+
+pub fn inferred_labeled() -> i32
+  configure(init: init, update: update, view: view)
+
+pub fn main() -> i32
+  explicit_structural() + inferred_structural() + inferred_labeled()
