@@ -49,11 +49,11 @@ In the SDK, `optimize: true` selects Voyd's aggressive validated optimization
 profile.
 Binaryen pass configuration is intentionally not exposed as public SDK API.
 
-## Typed JavaScript boundary exports
+## Typed JavaScript Host Exports
 
-SDK builds automatically expose boundary-compatible public Voyd functions
-through the existing host and compiled-result run APIs. JavaScript callers pass
-plain JS values; the host validates and encodes them at the Wasm boundary.
+SDK builds automatically expose DTO-compatible public Voyd functions through
+the existing host and compiled-result run APIs. JavaScript callers pass plain JS
+values; the host validates them and handles the Wasm call details.
 
 ```ts
 const result = await sdk.compile({
@@ -108,12 +108,13 @@ if (result.success) {
 ```
 
 Supported DTO shapes include booleans, numeric primitives, strings, arrays,
-records/objects with public boundary-compatible fields, structural records, and
-named enum/union variants represented in JS as `{ tag: "Variant", ...fields }`.
+records/objects with public DTO-compatible fields, structural records, and named
+enum/union variants represented in JS as `{ tag: "Variant", ...fields }`.
 `f32` and `f64` values accept any JavaScript number, including `NaN` and
 `Infinity`; integer values must be finite and in range.
-Unsupported public functions are skipped in automatic mode. Explicit requests
-can surface diagnostics:
+Unsupported public functions are skipped in automatic mode. Use
+`boundaryExports` only when you need explicit compile-time control over which
+typed host wrappers are emitted:
 
 ```ts
 await sdk.compile({
@@ -129,7 +130,8 @@ pub fn call_callback(callback: fn() -> i32) -> i32
 });
 ```
 
-Disable automatic wrappers when Wasm size or compile-time overhead matters.
+Disable automatic typed host wrappers when Wasm size or compile-time overhead
+matters.
 
 ```ts
 const result = await sdk.compile({
@@ -138,9 +140,10 @@ const result = await sdk.compile({
 });
 ```
 
-Raw Wasm exports remain available through `host.instance.exports`. Existing
-raw MsgPack interop still works; MsgPack is an internal codec detail for typed
-boundary exports, not a stable WIT/component-model replacement.
+Raw Wasm exports remain available through `host.instance.exports`. Existing raw
+serializer interop still works for low-level hosts; the current codec is an
+internal implementation detail for typed host exports, not a stable
+WIT/component-model replacement.
 
 ## Module roots and package resolution
 

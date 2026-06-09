@@ -78,13 +78,24 @@ fn save_label(saved: bool) -> String
 
 `app` is the public VX entrypoint. `init` creates the first model. `view` turns
 the model into HTML. `update` receives messages from events, commands, and
-subscriptions and returns the next model.
+subscriptions and returns the next model. The lifecycle functions are ordinary
+Voyd functions; VX keeps their retained callback ids internally.
 
-Typed lifecycle values must be boundary-compatible DTOs: primitives, `String`,
+The compact form below is the intended API shape once generic inference for
+function-valued object fields lands:
+
+```voyd
+pub fn app() -> Program<Model, Msg>
+  program({ init, update, view })
+```
+
+For now, use the explicit generic labeled call shown above.
+
+Typed lifecycle values must be host-callable DTOs: primitives, `String`,
 records/objects with public DTO fields, named message variants, and arrays of
 heap-stored DTO values. Inline aggregate arrays, arbitrary dictionaries,
 functions, trait objects, and recursive object graphs are not part of the typed
-VX boundary yet.
+VX host contract yet.
 
 ## Views
 
@@ -260,8 +271,8 @@ await mountVxApp({
 ```
 
 Typed apps should export `app() -> Program<Model, Msg>`. Custom lifecycle
-export names are still available for raw interop, but everyday VX apps do not
-need boundary annotations or export adapters.
+export names are still available for advanced host integration, but everyday VX
+apps do not need boundary annotations, serializer types, or export adapters.
 
 ## Server Rendering
 
@@ -269,11 +280,12 @@ Use `renderVxToString` or `renderNodeToString` from `@voyd-lang/vx-dom/server`
 to render HTML on the server. Use `hydrateVxApp` in the browser to attach
 events without replacing matching server-rendered DOM.
 
-## Raw MsgPack Interop
+## Advanced Host Interop
 
-VX still uses MsgPack as its current runtime wire codec. Most apps should use
-native `Model` and `Msg` types, but raw interop remains available when a custom
-host boundary or dynamic payload needs it:
+Most apps should use native `Model` and `Msg` types. VX also keeps a raw host
+interop path for custom runtimes or dynamic payloads. That path currently uses
+`std::msgpack`, but the codec is an implementation detail rather than the API
+ordinary app code should model itself around:
 
 ```voyd
 use std::msgpack::MsgPack
@@ -291,10 +303,10 @@ pub fn raw_command() -> Cmd<MsgPack>
   Cmd<MsgPack>::message_serialized(msgpack::make_string("host-message"))
 ```
 
-Raw event helpers such as `on_click_message`, `event_payload`, and
-serialized command/subscription helpers such as `message_serialized`,
-`delay_serialized`, `every_serialized`, and `map_serialized` are intentionally
-explicit so ordinary app code can stay typed.
+Raw event helpers such as `on_click_message`, `event_payload`, and serialized
+command/subscription helpers such as `message_serialized`, `delay_serialized`,
+`every_serialized`, and `map_serialized` are intentionally explicit so ordinary
+app code can stay typed.
 
 ## What To Reach For
 

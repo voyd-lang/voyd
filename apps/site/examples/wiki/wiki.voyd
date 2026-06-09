@@ -166,9 +166,6 @@ fn view(model: WikiModel) -> Html<WikiMsg>
     <Editor model={model} />
   </main>
 
-pub fn main() -> MsgPack
-  view(init())
-
 pub fn component_state_init() -> MsgPack
   text("")
 
