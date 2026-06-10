@@ -286,12 +286,12 @@ describe("smoke: compiled VX DOM rendering", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("rejects unsupported typed message variant fields at compile time", async () => {
+  it("marshals typed message variants with omitted optional fields", async () => {
     const sdk = createSdk();
-    const result = await sdk.compile({
+    const result = expectCompileSuccess(await sdk.compile({
       source: `
 use std::enums::{ enum }
-use std::optional::types::Optional
+use std::optional::types::{ Optional, Some, None }
 use std::string::type::String
 use std::vx::all
 
@@ -311,19 +311,44 @@ fn init() -> Model
   Model { count: 0 }
 
 fn update(model: Model, msg: Msg) -> Program<Model, Msg>
-  program<Model, Msg>(model: model)
+  match(msg)
+    Msg::Save { value }:
+      program<Model, Msg>(model: Model { count: model.count + optional_bonus(value) })
 
 fn view(model: Model) -> Html<Msg>
-  <button on_click={Msg::Save {}}>Save</button>
-`,
-      entryPath: "invalid-vx-message.voyd",
-    });
+  <button on_click={Msg::Save {}}>Count: {count_label(model.count)}</button>
 
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    expect(result.diagnostics.some((diagnostic) =>
-      diagnostic.message.includes("optional object fields are not supported at the boundary yet"),
-    )).toBe(true);
+fn optional_bonus(value: Optional<String>) -> i32
+  match(value)
+    Some<String> { value: _present }: 10
+    None: 1
+
+fn count_label(value: i32) -> String
+  if
+    value == 0: "0"
+    value == 1: "1"
+    else: "many"
+`,
+      entryPath: "optional-vx-message.voyd",
+    }));
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+    const app = createVoydVxAppRuntime({ host });
+
+    const container = document.createElement("div");
+    const mounted = await mountVxApp({ container, app });
+
+    expect(container.querySelector("button")?.textContent).toContain("Count: 0");
+
+    container.querySelector<HTMLButtonElement>("button")?.click();
+    await nextTurn();
+
+    expect(container.querySelector("button")?.textContent).toContain("Count: 1");
+
+    mounted.dispose();
+    expect(container.innerHTML).toBe("");
   });
 
   it("does not apply std::vx ABI shortcuts to user types with VX-like names", async () => {
