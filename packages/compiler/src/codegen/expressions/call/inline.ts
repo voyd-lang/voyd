@@ -126,7 +126,7 @@ export const tryInlineResolvedCall = ({
 }: {
   meta: FunctionMetadata;
   args: readonly (binaryen.ExpressionRef | undefined)[];
-  parameterBindings?: ReadonlyMap<number, LocalBinding>;
+  parameterBindings: ReadonlyMap<number, LocalBinding>;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;

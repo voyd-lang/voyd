@@ -10,6 +10,7 @@ export type BoundaryPrimitiveSchema =
 export type BoundaryArraySchema = {
   kind: "array";
   typeId?: number;
+  aliases?: readonly number[];
   elementTypeId?: number;
   element: BoundarySchema;
 };
@@ -18,11 +19,13 @@ export type BoundaryFieldSchema = {
   name: string;
   typeId?: number;
   schema: BoundarySchema;
+  optional?: boolean;
 };
 
 export type BoundaryRecordSchema = {
   kind: "record";
   typeId?: number;
+  aliases?: readonly number[];
   name?: string;
   tag?: string;
   fields: readonly BoundaryFieldSchema[];
@@ -37,15 +40,22 @@ export type BoundaryVariantSchema = {
 export type BoundaryUnionSchema = {
   kind: "union";
   typeId?: number;
+  aliases?: readonly number[];
   name?: string;
   variants: readonly BoundaryVariantSchema[];
+};
+
+export type BoundaryRefSchema = {
+  kind: "ref";
+  typeId: number;
 };
 
 export type BoundarySchema =
   | BoundaryPrimitiveSchema
   | BoundaryArraySchema
   | BoundaryRecordSchema
-  | BoundaryUnionSchema;
+  | BoundaryUnionSchema
+  | BoundaryRefSchema;
 
 export type ExportAbiEntry =
   | {

@@ -13,6 +13,7 @@ export type BoundaryPrimitiveSchema =
 export type BoundaryArraySchema = {
   kind: "array";
   typeId: TypeId;
+  aliases?: readonly TypeId[];
   elementTypeId: TypeId;
   element: BoundarySchema;
 };
@@ -21,11 +22,13 @@ export type BoundaryFieldSchema = {
   name: string;
   typeId: TypeId;
   schema: BoundarySchema;
+  optional?: boolean;
 };
 
 export type BoundaryRecordSchema = {
   kind: "record";
   typeId: TypeId;
+  aliases?: readonly TypeId[];
   name: string;
   tag?: string;
   fields: readonly BoundaryFieldSchema[];
@@ -40,15 +43,22 @@ export type BoundaryVariantSchema = {
 export type BoundaryUnionSchema = {
   kind: "union";
   typeId: TypeId;
+  aliases?: readonly TypeId[];
   name: string;
   variants: readonly BoundaryVariantSchema[];
+};
+
+export type BoundaryRefSchema = {
+  kind: "ref";
+  typeId: TypeId;
 };
 
 export type BoundarySchema =
   | BoundaryPrimitiveSchema
   | BoundaryArraySchema
   | BoundaryRecordSchema
-  | BoundaryUnionSchema;
+  | BoundaryUnionSchema
+  | BoundaryRefSchema;
 
 export class BoundarySchemaError extends Error {
   constructor(message: string) {
@@ -197,7 +207,7 @@ const deriveBoundarySchemaInternal = ({
   options: BoundarySchemaOptions;
 }): BoundarySchema => {
   if (active.has(typeId)) {
-    unsupported({ typeId, ctx, path, reason: "recursive object graphs are not supported" });
+    return { kind: "ref", typeId };
   }
 
   const primitive = primitiveSchema({ typeId, ctx });
@@ -237,16 +247,19 @@ const deriveBoundarySchemaInternal = ({
         desc.body,
         new Map([[desc.binder, typeId]]),
       );
-      return deriveBoundarySchemaInternal({
-        typeId: unfolded,
-        ctx,
-        path,
-        active,
-        options,
+      return withSchemaAlias({
+        schema: deriveBoundarySchemaInternal({
+          typeId: unfolded,
+          ctx,
+          path,
+          active,
+          options,
+        }),
+        typeId,
       });
     }
     if (desc.kind === "union") {
-      return deriveUnionSchema({ typeId, ctx, path, active });
+      return deriveUnionSchema({ typeId, ctx, path, active, options });
     }
     if (desc.kind === "intersection") {
       if (typeof desc.nominal === "number") {
@@ -381,14 +394,6 @@ const deriveBoundaryFields = ({
   options: BoundarySchemaOptions;
 }): BoundaryFieldSchema[] =>
   fields.map((field) => {
-    if (field.optional) {
-      unsupported({
-        typeId: field.typeId,
-        ctx,
-        path: `${path}.${field.name}`,
-        reason: "optional object fields are not supported at the boundary yet",
-      });
-    }
     const sourceField = recordFieldFor({
       ownerTypeId,
       fieldName: field.name,
@@ -402,11 +407,16 @@ const deriveBoundaryFields = ({
         reason: "private fields are not included in boundary DTOs",
       });
     }
+    const optionalInfo = field.optional
+      ? ctx.program.optionals.getOptionalInfo(ctx.moduleId, field.typeId)
+      : undefined;
+    const fieldTypeId = optionalInfo?.innerType ?? field.typeId;
     return {
       name: field.name,
-      typeId: field.typeId,
+      typeId: fieldTypeId,
+      optional: field.optional ? true : undefined,
       schema: deriveBoundarySchemaInternal({
-        typeId: field.typeId,
+        typeId: fieldTypeId,
         ctx,
         path: `${path}.${field.name}`,
         active,
@@ -420,11 +430,13 @@ const deriveUnionSchema = ({
   ctx,
   path,
   active,
+  options,
 }: {
   typeId: TypeId;
   ctx: CodegenContext;
   path: string;
   active: Set<TypeId>;
+  options: BoundarySchemaOptions;
 }): BoundaryUnionSchema => {
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "union") {
@@ -472,7 +484,7 @@ const deriveUnionSchema = ({
         ctx,
         path: `${path}.${name}`,
         active,
-        options: { tagStandaloneVariants: true },
+        options: { ...options, tagStandaloneVariants: true },
       }),
     };
   });
@@ -481,6 +493,30 @@ const deriveUnionSchema = ({
     typeId,
     name: formatBoundaryType({ typeId, ctx }),
     variants,
+  };
+};
+
+const withSchemaAlias = ({
+  schema,
+  typeId,
+}: {
+  schema: BoundarySchema;
+  typeId: TypeId;
+}): BoundarySchema => {
+  if (schema.kind === "ref") return schema;
+  if (
+    schema.kind !== "array" &&
+    schema.kind !== "record" &&
+    schema.kind !== "union"
+  ) {
+    return schema;
+  }
+  if (schema.typeId === typeId || schema.aliases?.includes(typeId)) {
+    return schema;
+  }
+  return {
+    ...schema,
+    aliases: [...(schema.aliases ?? []), typeId],
   };
 };
 

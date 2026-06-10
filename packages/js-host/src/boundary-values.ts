@@ -8,6 +8,8 @@ const I32_MIN = -2147483648;
 const I32_MAX = 2147483647;
 const I64_MIN = -(1n << 63n);
 const I64_MAX = (1n << 63n) - 1n;
+const BOUNDARY_PACK_CYCLE_ERROR =
+  "__voyd_boundary_error: cannot encode cyclic object graph or boundary object graph exceeds maximum depth";
 
 export const encodeBoundaryArgs = ({
   exportName,
@@ -23,12 +25,16 @@ export const encodeBoundaryArgs = ({
       `typed export ${exportName} expected ${schemas.length} args, got ${args.length}`,
     );
   }
+  const registry = buildSchemaRegistry(schemas);
+  const ancestors = new WeakSet<object>();
   return schemas.map((schema, index) =>
     encodeBoundaryValue({
       exportName,
       schema,
       value: args[index],
       path: `arg${index}`,
+      registry,
+      ancestors,
     }),
   );
 };
@@ -47,6 +53,7 @@ export const decodeBoundaryResult = ({
     schema,
     value,
     path: "result",
+    registry: buildSchemaRegistry([schema]),
   });
 
 const encodeBoundaryValue = ({
@@ -54,12 +61,26 @@ const encodeBoundaryValue = ({
   schema,
   value,
   path,
+  registry,
+  ancestors,
 }: {
   exportName: string;
   schema: BoundarySchema;
   value: unknown;
   path: string;
+  registry: ReadonlyMap<number, BoundarySchema>;
+  ancestors: WeakSet<object>;
 }): unknown => {
+  if (schema.kind === "ref") {
+    return encodeBoundaryValue({
+      exportName,
+      schema: resolveSchemaRef({ schema, registry, path }),
+      value,
+      path,
+      registry,
+      ancestors,
+    });
+  }
   switch (schema.kind) {
     case "bool":
       return expectType({ exportName, path, expected: "bool", value, guard: isBool });
@@ -84,13 +105,17 @@ const encodeBoundaryValue = ({
       if (!Array.isArray(value)) {
         throw typeError({ exportName, path, expected: "array", value });
       }
-      return value.map((item, index) =>
-        encodeBoundaryValue({
-          exportName,
-          schema: schema.element,
-          value: item,
-          path: `${path}[${index}]`,
-        }),
+      return withCycleCheck({ exportName, path, value, ancestors }, () =>
+        value.map((item, index) =>
+          encodeBoundaryValue({
+            exportName,
+            schema: schema.element,
+            value: item,
+            path: `${path}[${index}]`,
+            registry,
+            ancestors,
+          }),
+        ),
       );
     case "record":
       return encodeRecord({
@@ -99,9 +124,11 @@ const encodeBoundaryValue = ({
         tag: schema.tag,
         value,
         path,
+        registry,
+        ancestors,
       });
     case "union":
-      return encodeUnion({ exportName, schema, value, path });
+      return encodeUnion({ exportName, schema, value, path, registry, ancestors });
   }
 };
 
@@ -110,12 +137,26 @@ const decodeBoundaryValue = ({
   schema,
   value,
   path,
+  registry,
 }: {
   exportName: string;
   schema: BoundarySchema;
   value: unknown;
   path: string;
+  registry: ReadonlyMap<number, BoundarySchema>;
 }): unknown => {
+  if (schema.kind === "ref") {
+    if (value === BOUNDARY_PACK_CYCLE_ERROR) {
+      throw cycleError({ exportName, path });
+    }
+    return decodeBoundaryValue({
+      exportName,
+      schema: resolveSchemaRef({ schema, registry, path }),
+      value,
+      path,
+      registry,
+    });
+  }
   switch (schema.kind) {
     case "void":
       return undefined;
@@ -129,6 +170,7 @@ const decodeBoundaryValue = ({
           schema: schema.element,
           value: item,
           path: `${path}[${index}]`,
+          registry,
         }),
       );
     case "record":
@@ -138,11 +180,19 @@ const decodeBoundaryValue = ({
         tag: schema.tag,
         value,
         path,
+        registry,
       });
     case "union":
-      return decodeUnion({ exportName, schema, value, path });
+      return decodeUnion({ exportName, schema, value, path, registry });
     default:
-      return encodeBoundaryValue({ exportName, schema, value, path });
+      return encodeBoundaryValue({
+        exportName,
+        schema,
+        value,
+        path,
+        registry,
+        ancestors: new WeakSet<object>(),
+      });
   }
 };
 
@@ -152,33 +202,47 @@ const encodeRecord = ({
   tag,
   value,
   path,
+  registry,
+  ancestors,
 }: {
   exportName: string;
   fields: readonly BoundaryFieldSchema[];
   tag?: string;
   value: unknown;
   path: string;
+  registry: ReadonlyMap<number, BoundarySchema>;
+  ancestors: WeakSet<object>;
 }): Record<string, unknown> => {
-  const record = toRecord({ exportName, path, value });
-  if (tag) {
-    const actualTag = record.tag ?? record.$variant;
-    if (actualTag !== tag) {
-      throw new Error(
-        `typed export ${exportName} ${path} expected variant tag ${tag}`,
-      );
+  return withCycleCheck({ exportName, path, value: toCycleObject(value), ancestors }, () => {
+    const record = toRecord({ exportName, path, value });
+    if (tag) {
+      const actualTag = record.tag ?? record.$variant;
+      if (actualTag !== tag) {
+        throw new Error(
+          `typed export ${exportName} ${path} expected variant tag ${tag}`,
+        );
+      }
     }
-  }
-  return Object.fromEntries(
-    fields.map((field) => [
-      field.name,
-      encodeBoundaryValue({
-        exportName,
-        schema: field.schema,
-        value: record[field.name],
-        path: `${path}.${field.name}`,
+    return Object.fromEntries(
+      fields.flatMap((field) => {
+        const fieldValue = record[field.name];
+        if (field.optional && (fieldValue === undefined || fieldValue === null)) {
+          return [];
+        }
+        return [[
+          field.name,
+          encodeBoundaryValue({
+            exportName,
+            schema: field.schema,
+            value: fieldValue,
+            path: `${path}.${field.name}`,
+            registry,
+            ancestors,
+          }),
+        ]];
       }),
-    ]),
-  );
+    );
+  });
 };
 
 const decodeRecord = ({
@@ -187,25 +251,33 @@ const decodeRecord = ({
   tag,
   value,
   path,
+  registry,
 }: {
   exportName: string;
   fields: readonly BoundaryFieldSchema[];
   tag?: string;
   value: unknown;
   path: string;
+  registry: ReadonlyMap<number, BoundarySchema>;
 }): Record<string, unknown> => {
   const record = toRecord({ exportName, path, value });
   return {
     ...Object.fromEntries(
-      fields.map((field) => [
-        field.name,
-        decodeBoundaryValue({
-          exportName,
-          schema: field.schema,
-          value: record[field.name],
-          path: `${path}.${field.name}`,
-        }),
-      ]),
+      fields.flatMap((field) => {
+        if (field.optional && !(field.name in record)) {
+          return [];
+        }
+        return [[
+          field.name,
+          decodeBoundaryValue({
+            exportName,
+            schema: field.schema,
+            value: record[field.name],
+            path: `${path}.${field.name}`,
+            registry,
+          }),
+        ]];
+      }),
     ),
     ...(tag ? { tag } : {}),
   };
@@ -216,11 +288,15 @@ const encodeUnion = ({
   schema,
   value,
   path,
+  registry,
+  ancestors,
 }: {
   exportName: string;
   schema: BoundaryUnionSchema;
   value: unknown;
   path: string;
+  registry: ReadonlyMap<number, BoundarySchema>;
+  ancestors: WeakSet<object>;
 }): Record<string, unknown> => {
   const record = toRecord({ exportName, path, value });
   const tag = record.tag ?? record.$variant;
@@ -237,6 +313,8 @@ const encodeUnion = ({
       fields: variant.fields,
       value: record,
       path,
+      registry,
+      ancestors,
     }),
     $variant: tag,
   };
@@ -247,11 +325,13 @@ const decodeUnion = ({
   schema,
   value,
   path,
+  registry,
 }: {
   exportName: string;
   schema: BoundaryUnionSchema;
   value: unknown;
   path: string;
+  registry: ReadonlyMap<number, BoundarySchema>;
 }): Record<string, unknown> => {
   const record = toRecord({ exportName, path, value });
   const tag = record.$variant ?? record.tag;
@@ -268,9 +348,102 @@ const decodeUnion = ({
       fields: variant.fields,
       value: record,
       path,
+      registry,
     }),
     tag,
   };
+};
+
+const buildSchemaRegistry = (
+  schemas: readonly BoundarySchema[],
+): ReadonlyMap<number, BoundarySchema> => {
+  const registry = new Map<number, BoundarySchema>();
+  const visit = (schema: BoundarySchema): void => {
+    if (typeof schema.typeId === "number" && !registry.has(schema.typeId)) {
+      registry.set(schema.typeId, schema);
+    }
+    if (
+      schema.kind === "array" ||
+      schema.kind === "record" ||
+      schema.kind === "union"
+    ) {
+      schema.aliases?.forEach((alias) => registry.set(alias, schema));
+    }
+    switch (schema.kind) {
+      case "array":
+        visit(schema.element);
+        return;
+      case "record":
+        schema.fields.forEach((field) => visit(field.schema));
+        return;
+      case "union":
+        schema.variants.forEach((variant) =>
+          variant.fields.forEach((field) => visit(field.schema)),
+        );
+        return;
+      default:
+        return;
+    }
+  };
+  schemas.forEach(visit);
+  return registry;
+};
+
+const resolveSchemaRef = ({
+  schema,
+  registry,
+  path,
+}: {
+  schema: Extract<BoundarySchema, { kind: "ref" }>;
+  registry: ReadonlyMap<number, BoundarySchema>;
+  path: string;
+}): BoundarySchema => {
+  const resolved = registry.get(schema.typeId);
+  if (!resolved || resolved.kind === "ref") {
+    throw new Error(`typed export ${path} has unresolved recursive schema ref ${schema.typeId}`);
+  }
+  return resolved;
+};
+
+const withCycleCheck = <T>(
+  {
+    exportName,
+    path,
+    value,
+    ancestors,
+  }: {
+    exportName: string;
+    path: string;
+    value: object;
+    ancestors: WeakSet<object>;
+  },
+  run: () => T,
+): T => {
+  if (ancestors.has(value)) {
+    throw cycleError({ exportName, path });
+  }
+  ancestors.add(value);
+  try {
+    return run();
+  } finally {
+    ancestors.delete(value);
+  }
+};
+
+const cycleError = ({
+  exportName,
+  path,
+}: {
+  exportName: string;
+  path: string;
+}): Error =>
+  new Error(
+    `typed export ${exportName} ${formatErrorPath(path)} cannot encode cyclic object graph`,
+  );
+
+const formatErrorPath = (path: string): string => {
+  const maxLength = 160;
+  return path.length <= maxLength ? path : `${path.slice(0, maxLength)}...`;
 };
 
 const expectI32 = ({
@@ -371,6 +544,12 @@ const toRecord = ({
     return value as Record<string, unknown>;
   }
   throw typeError({ exportName, path, expected: "object", value });
+};
+
+const toCycleObject = (value: unknown): object => {
+  if (value instanceof Map) return value;
+  if (typeof value === "object" && value !== null) return value;
+  return {};
 };
 
 const variantTagError = ({
