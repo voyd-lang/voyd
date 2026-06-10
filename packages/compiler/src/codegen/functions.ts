@@ -74,6 +74,11 @@ import {
   takePendingStaticEffectSpecializations,
   type StaticEffectSpecialization,
 } from "./effects/static-specialization.js";
+import {
+  markReceiverSpecializationCompiled,
+  takePendingReceiverSpecializations,
+  type ReceiverSpecialization,
+} from "./receiver-specialization.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -1009,6 +1014,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           paramTypeIds: descriptor.parameters.map((param) => param.type),
           parameters: descriptor.parameters.map((param, index) => ({
             typeId: param.type,
+            symbol: item.parameters[index]?.symbol,
             label: param.label,
             optional: param.optional,
             name:
@@ -1128,6 +1134,7 @@ export const compileFunctions = ({
     });
   }
   compiledCount += compilePendingStaticEffectSpecializations(ctx);
+  compiledCount += compilePendingReceiverSpecializations(ctx);
   return compiledCount;
 };
 
@@ -1260,6 +1267,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         ),
         parameters: instantiatedTypeDesc.parameters.map((param, index) => ({
           typeId: param.type,
+          symbol: signature.parameters[index]?.symbol,
           label: param.label,
           optional: param.optional,
           name: signature.parameters[index]?.name,
@@ -1643,6 +1651,7 @@ const compileFunctionItem = (
       typeInstanceId: meta.instanceId,
       effectful: true,
       currentHandler: { index: 0, type: handlerParamType },
+      exactParameterTypes: ctx.optimization?.exactParameterTypes.get(meta.instanceId),
     };
     if (meta.resultAbiKind === "out_ref") {
       implCtx.returnOutPointer = createStorageRefBinding({
@@ -1774,6 +1783,7 @@ const compileFunctionItem = (
     instanceId: meta.instanceId,
     typeInstanceId: meta.instanceId,
     effectful: meta.effectful,
+    exactParameterTypes: ctx.optimization?.exactParameterTypes.get(meta.instanceId),
   };
   if (meta.effectful) {
     fnCtx.currentHandler = {
@@ -1915,6 +1925,7 @@ const compileStaticEffectSpecialization = (
     typeInstanceId: meta.instanceId,
     effectful: meta.effectful,
     staticEffectContext: context,
+    exactParameterTypes: meta.exactParameterTypes,
   };
   if (meta.effectful) {
     fnCtx.currentHandler = {
@@ -2028,6 +2039,311 @@ const compilePendingStaticEffectSpecializations = (
   const pending = takePendingStaticEffectSpecializations(ctx);
   pending.forEach((specialization) =>
     compileStaticEffectSpecialization(specialization, ctx)
+  );
+  return pending.length;
+};
+
+const compileReceiverSpecialization = (
+  specialization: ReceiverSpecialization,
+  ctx: CodegenContext,
+): void => {
+  const { item: fn, meta, exactParameterTypes } = specialization;
+  if (ctx.mod.getFunction(meta.wasmName) !== 0) {
+    markReceiverSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+    return;
+  }
+
+  const effectInfo = effectsFacade(ctx).functionAbi(fn.symbol);
+  if (!effectInfo) {
+    throw new Error(
+      `codegen missing effect information for receiver specialization ${fn.symbol}`,
+    );
+  }
+  const needsWrapper =
+    effectInfo.abiEffectful && effectInfo.typeEffectful === false;
+  const handlerParamType = ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
+  if (needsWrapper) {
+    const implSignature = ctx.effectsBackend.abi.widenSignature({
+      ctx,
+      effectful: true,
+      userParamTypes: meta.paramTypes,
+      userResultType: meta.resultType,
+    });
+    const implName = `${meta.wasmName}__effectful_impl`;
+    const implCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [],
+      nextLocalIndex: implSignature.paramTypes.length,
+      returnTypeId: meta.resultTypeId,
+      returnWasmType: ctx.effectsBackend.abi.effectfulResultType(ctx),
+      returnAbiKind: meta.resultAbiKind,
+      instanceId: meta.instanceId,
+      typeInstanceId: meta.instanceId,
+      effectful: true,
+      currentHandler: { index: 0, type: handlerParamType },
+      exactParameterTypes,
+    };
+    if (meta.resultAbiKind === "out_ref") {
+      implCtx.returnOutPointer = createStorageRefBinding({
+        index: implSignature.userParamOffset,
+        typeId: meta.resultTypeId,
+        mutable: true,
+        ctx,
+      });
+    }
+
+    const paramInitOps = bindRawFunctionParameters({
+      fn,
+      meta,
+      ctx,
+      fnCtx: implCtx,
+      handlerOffset:
+        implSignature.userParamOffset + (meta.outParamType ? 1 : 0),
+    });
+    const defaultInitOps = compileDefaultParameterInitialization({
+      fn,
+      meta,
+      ctx,
+      fnCtx: implCtx,
+    });
+    const implBody = compileExpression({
+      exprId: fn.body,
+      ctx,
+      fnCtx: implCtx,
+      tailPosition: false,
+      expectedResultTypeId: implCtx.returnTypeId,
+      outResultStorageRef:
+        meta.resultAbiKind === "out_ref" && implCtx.returnOutPointer
+          ? ctx.mod.local.get(
+              implCtx.returnOutPointer.index,
+              implCtx.returnOutPointer.storageType,
+            )
+          : undefined,
+    });
+    const implBodyExpr =
+      defaultInitOps.length > 0
+        ? ctx.mod.block(
+            null,
+            [...paramInitOps, ...defaultInitOps, implBody.expr],
+            binaryen.getExpressionType(implBody.expr),
+          )
+        : paramInitOps.length > 0
+          ? ctx.mod.block(
+              null,
+              [...paramInitOps, implBody.expr],
+              binaryen.getExpressionType(implBody.expr),
+            )
+          : implBody.expr;
+    const implFunctionBody =
+      meta.resultAbiKind === "out_ref" && implCtx.returnOutPointer
+        ? (binaryen.getExpressionType(implBodyExpr) === binaryen.none ||
+            binaryen.getExpressionType(implBodyExpr) === binaryen.unreachable
+            ? implBodyExpr
+            : ctx.mod.block(
+                null,
+                [
+                  storeValueIntoStorageRef({
+                    pointer: () =>
+                      ctx.mod.local.get(
+                        implCtx.returnOutPointer!.index,
+                        implCtx.returnOutPointer!.storageType,
+                      ),
+                    value: implBodyExpr,
+                    typeId: meta.resultTypeId,
+                    ctx,
+                    fnCtx: implCtx,
+                  }),
+                ],
+                binaryen.none,
+              ))
+        : implBodyExpr;
+    const wrappedValueType =
+      meta.resultAbiKind === "out_ref"
+        ? binaryen.none
+        : wasmTypeFor(meta.resultTypeId, ctx);
+    const implExprType = binaryen.getExpressionType(implFunctionBody);
+    const functionBody = !isOutcomeCarrierType({
+      wasmType: implExprType,
+      ctx,
+    })
+      ? wrapValueInOutcome({
+          valueExpr: implFunctionBody,
+          valueType: wrappedValueType,
+          typeId: meta.resultTypeId,
+          ctx,
+          fnCtx: implCtx,
+        })
+      : implFunctionBody;
+
+    ctx.mod.addFunction(
+      implName,
+      binaryen.createType(implSignature.paramTypes as number[]),
+      ctx.effectsBackend.abi.effectfulResultType(ctx),
+      implCtx.locals,
+      functionBody,
+    );
+
+    emitPureSurfaceWrapper({
+      ctx,
+      wrapperName: meta.wasmName,
+      wrapperParamTypes: meta.paramTypes as number[],
+      wrapperResultType: meta.resultType,
+      wrapperResultTypeId: meta.resultTypeId,
+      wrapperStoresResultByRef: meta.resultAbiKind === "out_ref",
+      implName,
+      buildImplCallArgs: () => [
+        ctx.effectsBackend.abi.hiddenHandlerValue(ctx),
+        ...meta.paramTypes.map((type, index) =>
+          ctx.mod.local.get(index, type as number),
+        ),
+      ],
+    });
+    markReceiverSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+    return;
+  }
+
+  const fnCtx: FunctionContext = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals: [],
+    nextLocalIndex: meta.paramTypes.length,
+    returnTypeId: meta.resultTypeId,
+    returnWasmType: meta.resultType,
+    returnAbiKind: meta.resultAbiKind,
+    instanceId: meta.instanceId,
+    typeInstanceId: meta.instanceId,
+    effectful: meta.effectful,
+    exactParameterTypes,
+  };
+  if (meta.effectful) {
+    fnCtx.currentHandler = {
+      index: 0,
+      type: ctx.effectsBackend.abi.hiddenHandlerParamType(ctx),
+    };
+  }
+  if (meta.resultAbiKind === "out_ref") {
+    fnCtx.returnOutPointer = createStorageRefBinding({
+      index: userParamOffsetFor(meta),
+      typeId: meta.resultTypeId,
+      mutable: true,
+      ctx,
+    });
+  }
+
+  const paramInitOps = bindRawFunctionParameters({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+    handlerOffset: firstUserParamIndexFor(meta),
+  });
+  const defaultInitOps = compileDefaultParameterInitialization({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+  });
+  const body = compileExpression({
+    exprId: fn.body,
+    ctx,
+    fnCtx,
+    tailPosition: !meta.effectful,
+    expectedResultTypeId: fnCtx.returnTypeId,
+    outResultStorageRef:
+      meta.resultAbiKind === "out_ref" && fnCtx.returnOutPointer
+        ? ctx.mod.local.get(
+            fnCtx.returnOutPointer.index,
+            fnCtx.returnOutPointer.storageType,
+          )
+        : undefined,
+  });
+  const bodyExpr =
+    defaultInitOps.length > 0
+      ? ctx.mod.block(
+          null,
+          [...paramInitOps, ...defaultInitOps, body.expr],
+          binaryen.getExpressionType(body.expr),
+        )
+      : paramInitOps.length > 0
+        ? ctx.mod.block(
+            null,
+            [...paramInitOps, body.expr],
+            binaryen.getExpressionType(body.expr),
+          )
+        : body.expr;
+  const functionBodyBeforeWrap =
+    meta.resultAbiKind === "out_ref" && fnCtx.returnOutPointer
+      ? (binaryen.getExpressionType(bodyExpr) === binaryen.none ||
+          binaryen.getExpressionType(bodyExpr) === binaryen.unreachable
+          ? bodyExpr
+          : ctx.mod.block(
+              null,
+              [
+                storeValueIntoStorageRef({
+                  pointer: () =>
+                    ctx.mod.local.get(
+                      fnCtx.returnOutPointer!.index,
+                      fnCtx.returnOutPointer!.storageType,
+                    ),
+                  value: bodyExpr,
+                  typeId: meta.resultTypeId,
+                  ctx,
+                  fnCtx,
+                }),
+              ],
+              binaryen.none,
+            ))
+      : bodyExpr;
+  const bodyExprType = binaryen.getExpressionType(functionBodyBeforeWrap);
+  const wrappedValueType =
+    meta.resultAbiKind === "out_ref"
+      ? binaryen.none
+      : wasmTypeFor(meta.resultTypeId, ctx);
+  const shouldWrapOutcome =
+    meta.effectful &&
+    !isOutcomeCarrierType({
+      wasmType: bodyExprType,
+      ctx,
+    });
+  const rawFunctionBody = shouldWrapOutcome
+    ? wrapValueInOutcome({
+        valueExpr: functionBodyBeforeWrap,
+        valueType: wrappedValueType,
+        typeId: meta.resultTypeId,
+        ctx,
+        fnCtx,
+      })
+    : functionBodyBeforeWrap;
+  const functionBody =
+    !meta.effectful &&
+    meta.resultTypeId !== ctx.program.primitives.void &&
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.none &&
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.unreachable
+      ? boxSignatureSpillValue({
+          value: rawFunctionBody,
+          typeId: meta.resultTypeId,
+          ctx,
+          fnCtx,
+        })
+      : rawFunctionBody;
+
+  ctx.mod.addFunction(
+    meta.wasmName,
+    binaryen.createType(meta.paramTypes as number[]),
+    meta.resultType,
+    fnCtx.locals,
+    functionBody,
+  );
+  markReceiverSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+};
+
+const compilePendingReceiverSpecializations = (
+  ctx: CodegenContext,
+): number => {
+  const pending = takePendingReceiverSpecializations(ctx);
+  pending.forEach((specialization) =>
+    compileReceiverSpecialization(specialization, ctx)
   );
   return pending.length;
 };

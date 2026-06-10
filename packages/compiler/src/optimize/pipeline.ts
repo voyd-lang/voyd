@@ -62,6 +62,18 @@ type MutableOptimizationIr = {
     reachableFunctionSymbols: Set<ProgramSymbolId>;
     reachableModuleLets: Map<string, Set<SymbolId>>;
     usedTraitDispatchSignatures: Set<string>;
+    receiverSpecializationRequests: Map<
+      string,
+      Map<string, Map<SymbolId, TypeId>>
+    >;
+    exactParameterTypes: Map<
+      ProgramFunctionInstanceId,
+      Map<SymbolId, TypeId>
+    >;
+    knownParameterTypes: Map<
+      ProgramFunctionInstanceId,
+      Map<SymbolId, Set<TypeId>>
+    >;
     codegenPlan: ProgramCodegenOptimizationPlan;
   };
 };
@@ -292,6 +304,9 @@ const buildOptimizationIr = ({
       reachableFunctionSymbols: new Set(),
       reachableModuleLets: new Map(),
       usedTraitDispatchSignatures: new Set(),
+      receiverSpecializationRequests: new Map(),
+      exactParameterTypes: new Map(),
+      knownParameterTypes: new Map(),
       codegenPlan: { representations: {} },
     },
   };
@@ -656,6 +671,45 @@ const resolveCallTypeArgs = ({
     return callInfo.typeArgs.get(callerInstanceId) ?? [];
   }
   return callInfo.typeArgs?.size === 1 ? callInfo.typeArgs.values().next().value ?? [] : [];
+};
+
+const resolveCallArgPlan = ({
+  callInfo,
+  callerInstanceId,
+}: {
+  callInfo: OptimizedCallInfo;
+  callerInstanceId?: ProgramFunctionInstanceId;
+}) => {
+  if (
+    typeof callerInstanceId === "number" &&
+    callInfo.argPlans?.has(callerInstanceId)
+  ) {
+    return callInfo.argPlans.get(callerInstanceId);
+  }
+  return callInfo.argPlans?.size === 1
+    ? callInfo.argPlans.values().next().value
+    : undefined;
+};
+
+const callArgumentExprIdForParameter = ({
+  argExprIds,
+  callInfo,
+  callerInstanceId,
+  parameterIndex,
+}: {
+  argExprIds: readonly HirExprId[];
+  callInfo: OptimizedCallInfo | undefined;
+  callerInstanceId: ProgramFunctionInstanceId;
+  parameterIndex: number;
+}): HirExprId | undefined => {
+  const argPlan = callInfo
+    ? resolveCallArgPlan({ callInfo, callerInstanceId })
+    : undefined;
+  if (!argPlan) {
+    return argExprIds[parameterIndex];
+  }
+  const entry = argPlan[parameterIndex];
+  return entry?.kind === "direct" ? argExprIds[entry.argIndex] : undefined;
 };
 
 const isPureHelperCandidate = ({
@@ -1075,65 +1129,141 @@ const constructorKnownSimplificationPass: ProgramOptimizationPass = {
   run(ctx) {
     let changed = false;
 
-    ctx.ir.modules.forEach((moduleView) => {
-      const rootExprIds = collectModuleRootExprIds({ moduleView });
-      rootExprIds.forEach((rootExprId) => {
-        collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
-          const expr = moduleView.hir.expressions.get(exprId);
-          if (!expr || expr.exprKind !== "match") {
-            return;
-          }
+    const exactDiscriminantType = ({
+      moduleView,
+      expr,
+      functionItem,
+    }: {
+      moduleView: OptimizedModuleView;
+      expr: Extract<HirExpression, { exprKind: "match" }>;
+      functionItem?: HirFunction;
+    }): TypeId | undefined => {
+      const staticType = exactNominalForType({
+        typeId: exprTypeFor({ moduleView, exprId: expr.discriminant }),
+        program: ctx.ir.baseProgram,
+      });
+      if (typeof staticType === "number") {
+        return staticType;
+      }
+      if (!functionItem) {
+        return undefined;
+      }
 
-          const discriminantType = exactNominalForType({
-            typeId: exprTypeFor({ moduleView, exprId: expr.discriminant }),
-            program: ctx.ir.baseProgram,
-          });
-          if (typeof discriminantType !== "number") {
-            return;
-          }
-
-          const selectedArm = expr.arms.find((arm) => {
-            if (
-              arm.pattern.kind === "type" &&
-              arm.pattern.binding
-            ) {
-              return false;
-            }
-            if (arm.pattern.kind !== "wildcard" && arm.pattern.kind !== "type") {
-              return false;
-            }
-            if (arm.pattern.kind === "wildcard") {
-              return true;
-            }
-            const patternTypeId =
-              typeof arm.pattern.typeId === "number" ? arm.pattern.typeId : undefined;
-            if (typeof patternTypeId !== "number") {
-              return false;
-            }
-            const nominals = new Set<TypeId>();
-            collectNominals({
-              typeId: patternTypeId,
-              program: ctx.ir.baseProgram,
-              nominals,
-            });
-            return nominals.has(discriminantType);
-          });
-
-          if (!selectedArm) {
-            return;
-          }
-
-          mutableExpressions({ moduleView }).set(
-            exprId,
-            toEvaluatedValueBlockExpr({
-              original: expr,
-              moduleView,
-              exprId: expr.discriminant,
-              value: selectedArm.value,
-            }),
-          );
-          changed = true;
+      const instanceTypes = new Set<TypeId>();
+      for (const instanceId of ctx.ir.facts.reachableFunctionInstances) {
+        const instance = ctx.ir.baseProgram.functions.getInstance(instanceId);
+        if (
+          instance.symbolRef.moduleId !== moduleView.moduleId ||
+          instance.symbolRef.symbol !== functionItem.symbol
+        ) {
+          continue;
+        }
+        const exactType = exactNominalForExpr({
+          moduleView,
+          exprId: expr.discriminant,
+          callerInstanceId: instanceId,
+          program: ctx.ir.baseProgram,
+          exactParameterTypes: ctx.ir.facts.exactParameterTypes,
         });
+        if (typeof exactType !== "number") {
+          return undefined;
+        }
+        instanceTypes.add(exactType);
+        if (instanceTypes.size > 1) {
+          return undefined;
+        }
+      }
+
+      return instanceTypes.size === 1
+        ? instanceTypes.values().next().value
+        : undefined;
+    };
+
+    const simplifyRoot = ({
+      moduleView,
+      rootExprId,
+      functionItem,
+    }: {
+      moduleView: OptimizedModuleView;
+      rootExprId: HirExprId;
+      functionItem?: HirFunction;
+    }): void => {
+      collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
+        const expr = moduleView.hir.expressions.get(exprId);
+        if (!expr || expr.exprKind !== "match") {
+          return;
+        }
+
+        const discriminantType = exactDiscriminantType({
+          moduleView,
+          expr,
+          functionItem,
+        });
+        if (typeof discriminantType !== "number") {
+          return;
+        }
+
+        const selectedArm = expr.arms.find((arm) => {
+          if (
+            arm.pattern.kind === "type" &&
+            arm.pattern.binding
+          ) {
+            return false;
+          }
+          if (arm.pattern.kind !== "wildcard" && arm.pattern.kind !== "type") {
+            return false;
+          }
+          if (arm.pattern.kind === "wildcard") {
+            return true;
+          }
+          const patternTypeId =
+            typeof arm.pattern.typeId === "number" ? arm.pattern.typeId : undefined;
+          if (typeof patternTypeId !== "number") {
+            return false;
+          }
+          const nominals = new Set<TypeId>();
+          collectNominals({
+            typeId: patternTypeId,
+            program: ctx.ir.baseProgram,
+            nominals,
+          });
+          return nominals.has(discriminantType);
+        });
+
+        if (!selectedArm) {
+          return;
+        }
+
+        mutableExpressions({ moduleView }).set(
+          exprId,
+          toEvaluatedValueBlockExpr({
+            original: expr,
+            moduleView,
+            exprId: expr.discriminant,
+            value: selectedArm.value,
+          }),
+        );
+        changed = true;
+      });
+    };
+
+    ctx.ir.modules.forEach((moduleView) => {
+      moduleView.hir.items.forEach((item) => {
+        if (item.kind === "function") {
+          [
+            item.body,
+            ...item.parameters.flatMap((param) =>
+              typeof param.defaultValue === "number" ? [param.defaultValue] : [],
+            ),
+          ].forEach((rootExprId) =>
+            simplifyRoot({ moduleView, rootExprId, functionItem: item })
+          );
+          return;
+        }
+        if (item.kind !== "module-let") {
+          return;
+        }
+        simplifyRoot({ moduleView, rootExprId: item.initializer });
       });
     });
 
@@ -1199,16 +1329,225 @@ const effectFastPathEliminationPass: ProgramOptimizationPass = {
   },
 };
 
+const exactNominalForExpr = ({
+  moduleView,
+  exprId,
+  callerInstanceId,
+  program,
+  exactParameterTypes,
+}: {
+  moduleView: ModuleCodegenView;
+  exprId: HirExprId;
+  callerInstanceId?: ProgramFunctionInstanceId;
+  program: ProgramCodegenView;
+  exactParameterTypes?: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
+}): TypeId | undefined => {
+  const typeId =
+    typeof callerInstanceId === "number"
+      ? program.functions.getInstanceExprType(callerInstanceId, exprId) ??
+        exprTypeFor({ moduleView, exprId })
+      : exprTypeFor({ moduleView, exprId });
+  const exactStaticType = exactNominalForType({ typeId, program });
+  if (typeof exactStaticType === "number") {
+    return exactStaticType;
+  }
+
+  const expr = moduleView.hir.expressions.get(exprId);
+  if (
+    expr?.exprKind === "object-literal" &&
+    expr.literalKind === "nominal" &&
+    typeof expr.targetSymbol === "number"
+  ) {
+    const template = program.objects.getTemplate(
+      program.symbols.idOf({
+        moduleId: moduleView.moduleId,
+        symbol: expr.targetSymbol,
+      }),
+    );
+    if (typeof template?.nominal === "number") {
+      return template.nominal;
+    }
+  }
+
+  if (
+    expr?.exprKind === "identifier" &&
+    typeof callerInstanceId === "number"
+  ) {
+    const exactParam = exactParameterTypes?.get(callerInstanceId)?.get(expr.symbol);
+    if (typeof exactParam === "number") {
+      return exactParam;
+    }
+  }
+
+  return undefined;
+};
+
+const traitMethodKey = ({
+  traitSymbol,
+  traitMethodSymbol,
+}: {
+  traitSymbol: ProgramSymbolId;
+  traitMethodSymbol: ProgramSymbolId;
+}): string => `${traitSymbol}:${traitMethodSymbol}`;
+
+const functionTypeSubstitution = ({
+  signature,
+  typeArgs,
+  program,
+}: {
+  signature: NonNullable<ReturnType<ProgramCodegenView["functions"]["getSignature"]>>;
+  typeArgs: readonly TypeId[];
+  program: ProgramCodegenView;
+}) => {
+  if (typeArgs.length === 0) {
+    return undefined;
+  }
+  const paramIds =
+    signature.typeParams.length > 0
+      ? signature.typeParams.map((param) => param.typeParam)
+      : program.types.getScheme(signature.scheme).params;
+  return paramIds.length === typeArgs.length
+    ? new Map(paramIds.map((param, index) => [param, typeArgs[index]!] as const))
+    : undefined;
+};
+
+const receiverParamNominalForTypeArgs = ({
+  signature,
+  typeArgs,
+  program,
+}: {
+  signature: NonNullable<ReturnType<ProgramCodegenView["functions"]["getSignature"]>>;
+  typeArgs: readonly TypeId[];
+  program: ProgramCodegenView;
+}): TypeId | undefined => {
+  const receiverType = signature.parameters[0]?.typeId;
+  if (typeof receiverType !== "number") {
+    return undefined;
+  }
+  const substitution = functionTypeSubstitution({ signature, typeArgs, program });
+  const resolvedReceiverType = substitution
+    ? program.types.substitute(receiverType, substitution)
+    : receiverType;
+  return exactNominalForType({ typeId: resolvedReceiverType, program });
+};
+
+const exactReceiverTraitTarget = ({
+  callInfo,
+  callerInstanceId,
+  exactReceiver,
+  program,
+}: {
+  callInfo: OptimizedCallInfo;
+  callerInstanceId: ProgramFunctionInstanceId;
+  exactReceiver: TypeId;
+  program: ProgramCodegenView;
+}): { functionId: ProgramFunctionId; typeArgs: readonly TypeId[] } | undefined => {
+  if (program.types.getTypeDesc(exactReceiver).kind !== "nominal-object") {
+    return undefined;
+  }
+  const candidateTargets = new Set(
+    Array.from(callInfo.targets?.values() ?? []),
+  );
+  if (candidateTargets.size === 0) {
+    return undefined;
+  }
+
+  const candidateTraitMethods = new Set<string>();
+  candidateTargets.forEach((target) => {
+    const mapping = program.traits.getTraitMethodImpl(target as ProgramSymbolId);
+    if (!mapping) {
+      return;
+    }
+    candidateTraitMethods.add(traitMethodKey(mapping));
+  });
+
+  const matches = new Set<ProgramFunctionId>();
+  program.traits.getImplsByNominal(exactReceiver).forEach((impl) => {
+    impl.methods.forEach((method) => {
+      const methodKey = traitMethodKey({
+        traitSymbol: impl.traitSymbol,
+        traitMethodSymbol: method.traitMethod,
+      });
+      if (
+        candidateTargets.has(method.implMethod) ||
+        candidateTargets.has(method.traitMethod) ||
+        candidateTraitMethods.has(methodKey)
+      ) {
+        matches.add(method.implMethod as ProgramFunctionId);
+      }
+    });
+  });
+
+  if (matches.size !== 1) {
+    return undefined;
+  }
+
+  const functionId = matches.values().next().value;
+  if (typeof functionId !== "number") {
+    return undefined;
+  }
+  const targetRef = program.symbols.refOf(functionId as ProgramSymbolId);
+  const signature = program.functions.getSignature(
+    targetRef.moduleId,
+    targetRef.symbol,
+  );
+  if (!signature) {
+    return undefined;
+  }
+
+  const existingTypeArgs = resolveCallTypeArgs({ callInfo, callerInstanceId });
+  const existingInstanceId = program.functions.getInstanceId(
+    targetRef.moduleId,
+    targetRef.symbol,
+    existingTypeArgs,
+  );
+  if (
+    typeof existingInstanceId === "number" &&
+    receiverParamNominalForTypeArgs({
+      signature,
+      typeArgs: existingTypeArgs,
+      program,
+    }) === exactReceiver
+  ) {
+    return { functionId, typeArgs: existingTypeArgs };
+  }
+
+  const matchingInstantiations = Array.from(
+    program.functions
+      .getInstantiationInfo(targetRef.moduleId, targetRef.symbol)
+      ?.values() ?? [],
+  ).filter(
+    (typeArgs) =>
+      receiverParamNominalForTypeArgs({ signature, typeArgs, program }) ===
+      exactReceiver,
+  );
+  if (matchingInstantiations.length !== 1) {
+    return undefined;
+  }
+  return {
+    functionId,
+    typeArgs: matchingInstantiations[0]!,
+  };
+};
+
 const devirtualizedCallInfo = ({
   moduleView,
   exprId,
   callInfo,
   program,
+  exactParameterTypes,
 }: {
   moduleView: OptimizedModuleView;
   exprId: HirExprId;
   callInfo: OptimizedCallInfo;
   program: ProgramCodegenView;
+  exactParameterTypes?: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
 }): OptimizedCallInfo | undefined => {
   if (!callInfo.traitDispatch || !callInfo.targets || callInfo.targets.size === 0) {
     return undefined;
@@ -1222,16 +1561,51 @@ const devirtualizedCallInfo = ({
   if (typeof receiverExprId !== "number") {
     return undefined;
   }
-  const uniqueTargets = new Set(callInfo.targets.values());
+  const narrowedTargets = new Map(callInfo.targets);
+  const narrowedTypeArgs = new Map(callInfo.typeArgs ?? []);
+  let failedNarrowing = false;
+  narrowedTargets.forEach((_target, callerInstanceId) => {
+    const exactReceiver = exactNominalForExpr({
+      moduleView,
+      exprId: receiverExprId,
+      callerInstanceId,
+      program,
+      exactParameterTypes,
+    });
+    if (typeof exactReceiver !== "number") {
+      return;
+    }
+    const exactTarget = exactReceiverTraitTarget({
+      callInfo,
+      callerInstanceId,
+      exactReceiver,
+      program,
+    });
+    if (!exactTarget) {
+      failedNarrowing = true;
+      return;
+    }
+    narrowedTargets.set(callerInstanceId, exactTarget.functionId);
+    narrowedTypeArgs.set(callerInstanceId, exactTarget.typeArgs);
+  });
+  if (failedNarrowing) {
+    return undefined;
+  }
+
+  const uniqueTargets = new Set(narrowedTargets.values());
   if (uniqueTargets.size !== 1) {
     return undefined;
   }
-  const hasConcreteReceiver = Array.from(callInfo.targets.keys()).every((callerInstanceId) => {
-    const receiverType =
-      program.functions.getInstanceExprType(callerInstanceId, receiverExprId) ??
-      exprTypeFor({ moduleView, exprId: receiverExprId });
-    return typeof exactNominalForType({ typeId: receiverType, program }) === "number";
-  });
+  const hasConcreteReceiver = Array.from(narrowedTargets.keys()).every(
+    (callerInstanceId) =>
+      typeof exactNominalForExpr({
+        moduleView,
+        exprId: receiverExprId,
+        callerInstanceId,
+        program,
+        exactParameterTypes,
+      }) === "number",
+  );
   if (!hasConcreteReceiver) {
     return undefined;
   }
@@ -1245,6 +1619,8 @@ const devirtualizedCallInfo = ({
   }
   return {
     ...callInfo,
+    targets: narrowedTargets,
+    typeArgs: narrowedTypeArgs,
     traitDispatch: false,
   };
 };
@@ -1265,6 +1641,7 @@ const traitDispatchDevirtualizationPass: ProgramOptimizationPass = {
           exprId,
           callInfo,
           program: ctx.ir.baseProgram,
+          exactParameterTypes: ctx.ir.facts.exactParameterTypes,
         });
         if (!next) {
           return;
@@ -1405,6 +1782,1327 @@ const functionItemBySymbol = ({
   Array.from(moduleView.hir.items.values()).find(
     (item): item is HirFunction => item.kind === "function" && item.symbol === symbol,
   );
+
+type ExactParameterCandidate = TypeId | "conflict";
+
+const callArgumentExprIds = (
+  expr: HirExpression,
+): readonly HirExprId[] =>
+  expr.exprKind === "call"
+    ? expr.args.map((arg) => arg.expr)
+    : expr.exprKind === "method-call"
+      ? [expr.target, ...expr.args.map((arg) => arg.expr)]
+      : [];
+
+const mergeExactParameterCandidate = ({
+  candidates,
+  instanceId,
+  symbol,
+  exactType,
+}: {
+  candidates: Map<
+    ProgramFunctionInstanceId,
+    Map<SymbolId, ExactParameterCandidate>
+  >;
+  instanceId: ProgramFunctionInstanceId;
+  symbol: SymbolId;
+  exactType: TypeId;
+}): void => {
+  const bySymbol = candidates.get(instanceId) ?? new Map<SymbolId, ExactParameterCandidate>();
+  const existing = bySymbol.get(symbol);
+  bySymbol.set(
+    symbol,
+    existing === undefined || existing === exactType ? exactType : "conflict",
+  );
+  candidates.set(instanceId, bySymbol);
+};
+
+const resolveTargetsForExactPropagation = ({
+  moduleView,
+  exprId,
+  expr,
+  callerInstanceId,
+  ir,
+}: {
+  moduleView: OptimizedModuleView;
+  exprId: HirExprId;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
+  callerInstanceId: ProgramFunctionInstanceId;
+  ir: MutableOptimizationIr;
+}): readonly { functionId: ProgramFunctionId; instanceId?: ProgramFunctionInstanceId }[] => {
+  const resolvedTargets = resolveTargetsForCaller({
+    moduleId: moduleView.moduleId,
+    exprId,
+    callerInstanceId,
+    ir,
+  });
+  if (resolvedTargets.length > 0 || expr.exprKind !== "call") {
+    return resolvedTargets;
+  }
+  const callee = moduleView.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return [];
+  }
+  const resolved = resolveImportedSymbol({
+    moduleId: moduleView.moduleId,
+    symbol: callee.symbol,
+    ir,
+  });
+  const module = ir.modules.get(resolved.moduleId);
+  if (!module || !functionItemBySymbol({ moduleView: module, symbol: resolved.symbol })) {
+    return [];
+  }
+  const functionId = canonicalProgramSymbolIdOf({
+    moduleId: resolved.moduleId,
+    symbol: resolved.symbol,
+    ir,
+  });
+  const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+  const typeArgs = callInfo
+    ? resolveCallTypeArgs({ callInfo, callerInstanceId })
+    : [];
+  return [
+    {
+      functionId,
+      instanceId: ir.baseProgram.functions.getInstanceId(
+        resolved.moduleId,
+        resolved.symbol,
+        typeArgs,
+      ),
+    },
+  ];
+};
+
+const externallyCallableFunctionInstances = (
+  ir: MutableOptimizationIr,
+): Set<ProgramFunctionInstanceId> => {
+  const external = new Set<ProgramFunctionInstanceId>();
+  const addFunctionSymbolInstances = ({
+    moduleId,
+    symbol,
+  }: {
+    moduleId: string;
+    symbol: SymbolId;
+  }): void => {
+    const instantiations = ir.functionInstantiations.get(moduleId)?.get(symbol);
+    if (instantiations) {
+      instantiations.forEach((_typeArgs, instanceId) => {
+        external.add(instanceId);
+      });
+      return;
+    }
+    const instanceId = ir.baseProgram.functions.getInstanceId(
+      moduleId,
+      symbol,
+      [],
+    );
+    if (typeof instanceId === "number") {
+      external.add(instanceId);
+    }
+  };
+
+  const externalModuleIds =
+    ir.options.testMode && ir.options.testScope === "all"
+      ? new Set(ir.modules.keys())
+      : new Set([ir.entryModuleId]);
+  externalModuleIds.forEach((moduleId) => {
+    const moduleView = ir.modules.get(moduleId);
+    if (!moduleView) {
+      return;
+    }
+    moduleView.hir.module.exports.forEach((entry) => {
+      const resolved = resolveImportedSymbol({
+        moduleId,
+        symbol: entry.symbol,
+        ir,
+      });
+      const resolvedModule = ir.modules.get(resolved.moduleId);
+      if (
+        !resolvedModule ||
+        !functionItemBySymbol({
+          moduleView: resolvedModule,
+          symbol: resolved.symbol,
+        })
+      ) {
+        return;
+      }
+      addFunctionSymbolInstances(resolved);
+    });
+  });
+
+  const markEscapedFunctionValues = ({
+    moduleView,
+    rootExprId,
+  }: {
+    moduleView: OptimizedModuleView;
+    rootExprId: HirExprId;
+  }): void => {
+    const directCallCallees = new Set<HirExprId>();
+    const exprIds = collectPostOrderExprIds({ rootExprId, moduleView });
+    exprIds.forEach((exprId) => {
+      const expr = moduleView.hir.expressions.get(exprId);
+      if (expr?.exprKind === "call") {
+        directCallCallees.add(expr.callee);
+      }
+    });
+
+    exprIds.forEach((exprId) => {
+      if (directCallCallees.has(exprId)) {
+        return;
+      }
+      const expr = moduleView.hir.expressions.get(exprId);
+      if (expr?.exprKind !== "identifier") {
+        return;
+      }
+      const resolved = resolveImportedSymbol({
+        moduleId: moduleView.moduleId,
+        symbol: expr.symbol,
+        ir,
+      });
+      const resolvedModule = ir.modules.get(resolved.moduleId);
+      if (
+        !resolvedModule ||
+        !functionItemBySymbol({
+          moduleView: resolvedModule,
+          symbol: resolved.symbol,
+        })
+      ) {
+        return;
+      }
+      addFunctionSymbolInstances(resolved);
+    });
+  };
+
+  ir.facts.reachableFunctionInstances.forEach((instanceId) => {
+    const instance = ir.baseProgram.functions.getInstance(instanceId);
+    const moduleView = ir.modules.get(instance.symbolRef.moduleId);
+    const item = moduleView
+      ? functionItemBySymbol({
+          moduleView,
+          symbol: instance.symbolRef.symbol,
+        })
+      : undefined;
+    if (!moduleView || !item) {
+      return;
+    }
+    [
+      item.body,
+      ...item.parameters.flatMap((parameter) =>
+        typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+      ),
+    ].forEach((rootExprId) => {
+      markEscapedFunctionValues({ moduleView, rootExprId });
+    });
+  });
+
+  ir.facts.reachableModuleLets.forEach((symbols, moduleId) => {
+    const moduleView = ir.modules.get(moduleId);
+    if (!moduleView) {
+      return;
+    }
+    symbols.forEach((symbol) => {
+      const moduleLet = moduleLetBySymbol({ moduleView, symbol });
+      if (!moduleLet) {
+        return;
+      }
+      markEscapedFunctionValues({
+        moduleView,
+        rootExprId: moduleLet.initializer,
+      });
+    });
+  });
+  return external;
+};
+
+const collectExactParameterCandidates = ({
+  ir,
+  seedFacts,
+  externallyCallableInstances,
+}: {
+  ir: MutableOptimizationIr;
+  seedFacts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
+  externallyCallableInstances: ReadonlySet<ProgramFunctionInstanceId>;
+}): Map<ProgramFunctionInstanceId, Map<SymbolId, ExactParameterCandidate>> => {
+  const candidates = new Map<
+    ProgramFunctionInstanceId,
+    Map<SymbolId, ExactParameterCandidate>
+  >();
+
+  ir.facts.reachableFunctionInstances.forEach((callerInstanceId) => {
+    const caller = ir.baseProgram.functions.getInstance(callerInstanceId);
+    const moduleView = ir.modules.get(caller.symbolRef.moduleId);
+    if (!moduleView) {
+      return;
+    }
+    const item = functionItemBySymbol({
+      moduleView,
+      symbol: caller.symbolRef.symbol,
+    });
+    if (!item) {
+      return;
+    }
+
+    const roots = [
+      item.body,
+      ...item.parameters.flatMap((parameter) =>
+        typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+      ),
+    ];
+    roots.forEach((rootExprId) => {
+      collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
+        const expr = moduleView.hir.expressions.get(exprId);
+        if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+          return;
+        }
+        const argExprIds = callArgumentExprIds(expr);
+        const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+        const targets = resolveTargetsForExactPropagation({
+          moduleView,
+          exprId,
+          expr,
+          callerInstanceId,
+          ir,
+        });
+        targets.forEach(({ instanceId }) => {
+          if (typeof instanceId !== "number") {
+            return;
+          }
+          if (externallyCallableInstances.has(instanceId)) {
+            return;
+          }
+          const target = ir.baseProgram.functions.getInstance(instanceId);
+          const signature = ir.baseProgram.functions.getSignature(
+            target.symbolRef.moduleId,
+            target.symbolRef.symbol,
+          );
+          if (!signature) {
+            return;
+          }
+          signature.parameters.forEach((parameter, index) => {
+            if (typeof parameter.symbol !== "number") {
+              return;
+            }
+            const argExprId = callArgumentExprIdForParameter({
+              argExprIds,
+              callInfo,
+              callerInstanceId,
+              parameterIndex: index,
+            });
+            if (typeof argExprId !== "number") {
+              return;
+            }
+            const exactType = exactNominalForExpr({
+              moduleView,
+              exprId: argExprId,
+              callerInstanceId,
+              program: ir.baseProgram,
+              exactParameterTypes: seedFacts,
+            });
+            if (typeof exactType !== "number") {
+              return;
+            }
+            mergeExactParameterCandidate({
+              candidates,
+              instanceId,
+              symbol: parameter.symbol,
+              exactType,
+            });
+          });
+        });
+      });
+    });
+  });
+
+  return candidates;
+};
+
+const materializeExactParameterFacts = (
+  candidates: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, ExactParameterCandidate>
+  >,
+): Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>> => {
+  const facts = new Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>>();
+  candidates.forEach((bySymbol, instanceId) => {
+    const exactBySymbol = new Map<SymbolId, TypeId>();
+    bySymbol.forEach((candidate, symbol) => {
+      if (candidate !== "conflict") {
+        exactBySymbol.set(symbol, candidate);
+      }
+    });
+    if (exactBySymbol.size > 0) {
+      facts.set(instanceId, exactBySymbol);
+    }
+  });
+  return facts;
+};
+
+const cloneExactParameterFacts = (
+  facts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >,
+): Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>> =>
+  new Map(
+    Array.from(facts.entries()).map(([instanceId, bySymbol]) => [
+      instanceId,
+      new Map(bySymbol),
+    ]),
+  );
+
+type KnownParameterCandidate = {
+  types: Set<TypeId>;
+  unknown: boolean;
+};
+
+const cloneKnownParameterFacts = (
+  facts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, ReadonlySet<TypeId>>
+  >,
+): Map<ProgramFunctionInstanceId, Map<SymbolId, Set<TypeId>>> =>
+  new Map(
+    Array.from(facts.entries()).map(([instanceId, bySymbol]) => [
+      instanceId,
+      new Map(
+        Array.from(bySymbol.entries()).map(([symbol, types]) => [
+          symbol,
+          new Set(types),
+        ]),
+      ),
+    ]),
+  );
+
+const MAX_RECEIVER_SPECIALIZATIONS_PER_FUNCTION = 4;
+const MAX_EXACT_PARAMETERS_PER_RECEIVER_SPECIALIZATION = 2;
+
+const receiverSpecializationCallSiteKey = ({
+  moduleId,
+  exprId,
+}: {
+  moduleId: string;
+  exprId: HirExprId;
+}): string => `${moduleId}:${exprId}`;
+
+const receiverSpecializationContextKey = ({
+  instanceId,
+  exactParameterTypes,
+}: {
+  instanceId: ProgramFunctionInstanceId;
+  exactParameterTypes: ReadonlyMap<SymbolId, TypeId> | undefined;
+}): string => {
+  const serializedFacts = Array.from(exactParameterTypes?.entries() ?? [])
+    .sort(([left], [right]) => left - right)
+    .map(([symbol, type]) => `${symbol}=${type}`)
+    .join(",");
+  return `${instanceId}:${serializedFacts}`;
+};
+
+const cloneReceiverSpecializationRequests = (
+  requests: ReadonlyMap<
+    string,
+    ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>
+  >,
+): Map<string, Map<string, Map<SymbolId, TypeId>>> =>
+  new Map(
+    Array.from(requests.entries()).map(([callSiteKey, byContext]) => [
+      callSiteKey,
+      new Map(
+        Array.from(byContext.entries()).map(([contextKey, exactTypes]) => [
+          contextKey,
+          new Map(exactTypes),
+        ]),
+      ),
+    ]),
+  );
+
+const serializeReceiverSpecializationRequests = (
+  requests: ReadonlyMap<
+    string,
+    ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>
+  >,
+): string =>
+  JSON.stringify(
+    Array.from(requests.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([callSiteKey, byContext]) => [
+        callSiteKey,
+        Array.from(byContext.entries())
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([contextKey, exactTypes]) => [
+            contextKey,
+            Array.from(exactTypes.entries()).sort(
+              ([left], [right]) => left - right,
+            ),
+          ]),
+      ]),
+  );
+
+const knownNominalsForExpr = ({
+  moduleView,
+  exprId,
+  callerInstanceId,
+  program,
+  exactParameterTypes,
+  knownParameterTypes,
+}: {
+  moduleView: ModuleCodegenView;
+  exprId: HirExprId;
+  callerInstanceId?: ProgramFunctionInstanceId;
+  program: ProgramCodegenView;
+  exactParameterTypes: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
+  knownParameterTypes: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, ReadonlySet<TypeId>>
+  >;
+}): ReadonlySet<TypeId> | undefined => {
+  const exact = exactNominalForExpr({
+    moduleView,
+    exprId,
+    callerInstanceId,
+    program,
+    exactParameterTypes,
+  });
+  if (typeof exact === "number") {
+    return new Set([exact]);
+  }
+  if (typeof callerInstanceId !== "number") {
+    return undefined;
+  }
+  const expr = moduleView.hir.expressions.get(exprId);
+  if (expr?.exprKind !== "identifier") {
+    return undefined;
+  }
+  return knownParameterTypes.get(callerInstanceId)?.get(expr.symbol);
+};
+
+const mergeKnownParameterCandidate = ({
+  candidates,
+  instanceId,
+  symbol,
+  knownTypes,
+}: {
+  candidates: Map<
+    ProgramFunctionInstanceId,
+    Map<SymbolId, KnownParameterCandidate>
+  >;
+  instanceId: ProgramFunctionInstanceId;
+  symbol: SymbolId;
+  knownTypes?: ReadonlySet<TypeId>;
+}): void => {
+  const bySymbol =
+    candidates.get(instanceId) ?? new Map<SymbolId, KnownParameterCandidate>();
+  const existing =
+    bySymbol.get(symbol) ?? { types: new Set<TypeId>(), unknown: false };
+  if (!knownTypes || knownTypes.size === 0) {
+    existing.unknown = true;
+  } else {
+    knownTypes.forEach((type) => existing.types.add(type));
+  }
+  bySymbol.set(symbol, existing);
+  candidates.set(instanceId, bySymbol);
+};
+
+const collectKnownParameterCandidates = ({
+  ir,
+  exactParameterTypes,
+  seedFacts,
+  externallyCallableInstances,
+}: {
+  ir: MutableOptimizationIr;
+  exactParameterTypes: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
+  seedFacts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, ReadonlySet<TypeId>>
+  >;
+  externallyCallableInstances: ReadonlySet<ProgramFunctionInstanceId>;
+}): Map<ProgramFunctionInstanceId, Map<SymbolId, KnownParameterCandidate>> => {
+  const candidates = new Map<
+    ProgramFunctionInstanceId,
+    Map<SymbolId, KnownParameterCandidate>
+  >();
+
+  ir.facts.reachableFunctionInstances.forEach((callerInstanceId) => {
+    const caller = ir.baseProgram.functions.getInstance(callerInstanceId);
+    const moduleView = ir.modules.get(caller.symbolRef.moduleId);
+    if (!moduleView) {
+      return;
+    }
+    const item = functionItemBySymbol({
+      moduleView,
+      symbol: caller.symbolRef.symbol,
+    });
+    if (!item) {
+      return;
+    }
+
+    const roots = [
+      item.body,
+      ...item.parameters.flatMap((parameter) =>
+        typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+      ),
+    ];
+    roots.forEach((rootExprId) => {
+      collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
+        const expr = moduleView.hir.expressions.get(exprId);
+        if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+          return;
+        }
+        const argExprIds = callArgumentExprIds(expr);
+        const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+        const targets = resolveTargetsForExactPropagation({
+          moduleView,
+          exprId,
+          expr,
+          callerInstanceId,
+          ir,
+        });
+        targets.forEach(({ instanceId }) => {
+          if (typeof instanceId !== "number") {
+            return;
+          }
+          if (externallyCallableInstances.has(instanceId)) {
+            return;
+          }
+          const target = ir.baseProgram.functions.getInstance(instanceId);
+          const signature = ir.baseProgram.functions.getSignature(
+            target.symbolRef.moduleId,
+            target.symbolRef.symbol,
+          );
+          if (!signature) {
+            return;
+          }
+          signature.parameters.forEach((parameter, index) => {
+            if (typeof parameter.symbol !== "number") {
+              return;
+            }
+            const argExprId = callArgumentExprIdForParameter({
+              argExprIds,
+              callInfo,
+              callerInstanceId,
+              parameterIndex: index,
+            });
+            const knownTypes =
+              typeof argExprId === "number"
+                ? knownNominalsForExpr({
+                    moduleView,
+                    exprId: argExprId,
+                    callerInstanceId,
+                    program: ir.baseProgram,
+                    exactParameterTypes,
+                    knownParameterTypes: seedFacts,
+                  })
+                : undefined;
+            mergeKnownParameterCandidate({
+              candidates,
+              instanceId,
+              symbol: parameter.symbol,
+              knownTypes,
+            });
+          });
+        });
+      });
+    });
+  });
+
+  return candidates;
+};
+
+const materializeKnownParameterFacts = (
+  candidates: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, KnownParameterCandidate>
+  >,
+): Map<ProgramFunctionInstanceId, Map<SymbolId, Set<TypeId>>> => {
+  const facts = new Map<ProgramFunctionInstanceId, Map<SymbolId, Set<TypeId>>>();
+  candidates.forEach((bySymbol, instanceId) => {
+    const knownBySymbol = new Map<SymbolId, Set<TypeId>>();
+    bySymbol.forEach((candidate, symbol) => {
+      if (!candidate.unknown && candidate.types.size > 0) {
+        knownBySymbol.set(symbol, new Set(candidate.types));
+      }
+    });
+    if (knownBySymbol.size > 0) {
+      facts.set(instanceId, knownBySymbol);
+    }
+  });
+  return facts;
+};
+
+const setContainsAll = (
+  expected: ReadonlySet<TypeId>,
+  actual: ReadonlySet<TypeId>,
+): boolean => Array.from(actual).every((type) => expected.has(type));
+
+const validateKnownParameterFacts = ({
+  ir,
+  exactParameterTypes,
+  facts,
+}: {
+  ir: MutableOptimizationIr;
+  exactParameterTypes: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
+  facts: Map<ProgramFunctionInstanceId, Map<SymbolId, Set<TypeId>>>;
+}): Map<ProgramFunctionInstanceId, Map<SymbolId, Set<TypeId>>> => {
+  const validated = cloneKnownParameterFacts(facts);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    ir.facts.reachableFunctionInstances.forEach((callerInstanceId) => {
+      const caller = ir.baseProgram.functions.getInstance(callerInstanceId);
+      const moduleView = ir.modules.get(caller.symbolRef.moduleId);
+      if (!moduleView) {
+        return;
+      }
+      const item = functionItemBySymbol({
+        moduleView,
+        symbol: caller.symbolRef.symbol,
+      });
+      if (!item) {
+        return;
+      }
+      const roots = [
+        item.body,
+        ...item.parameters.flatMap((parameter) =>
+          typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+        ),
+      ];
+      roots.forEach((rootExprId) => {
+        collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
+          const expr = moduleView.hir.expressions.get(exprId);
+          if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+            return;
+          }
+          const argExprIds = callArgumentExprIds(expr);
+          const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+          resolveTargetsForExactPropagation({
+            moduleView,
+            exprId,
+            expr,
+            callerInstanceId,
+            ir,
+          }).forEach(({ instanceId }) => {
+            if (typeof instanceId !== "number") {
+              return;
+            }
+            const factsBySymbol = validated.get(instanceId);
+            if (!factsBySymbol || factsBySymbol.size === 0) {
+              return;
+            }
+            const target = ir.baseProgram.functions.getInstance(instanceId);
+            const signature = ir.baseProgram.functions.getSignature(
+              target.symbolRef.moduleId,
+              target.symbolRef.symbol,
+            );
+            signature?.parameters.forEach((parameter, index) => {
+              if (typeof parameter.symbol !== "number") {
+                return;
+              }
+              const expected = factsBySymbol.get(parameter.symbol);
+              if (!expected) {
+                return;
+              }
+              const argExprId = callArgumentExprIdForParameter({
+                argExprIds,
+                callInfo,
+                callerInstanceId,
+                parameterIndex: index,
+              });
+              const actual =
+                typeof argExprId === "number"
+                  ? knownNominalsForExpr({
+                      moduleView,
+                      exprId: argExprId,
+                      callerInstanceId,
+                      program: ir.baseProgram,
+                      exactParameterTypes,
+                      knownParameterTypes: validated,
+                    })
+                  : undefined;
+              if (actual && setContainsAll(expected, actual)) {
+                return;
+              }
+              factsBySymbol.delete(parameter.symbol);
+              changed = true;
+            });
+            if (factsBySymbol.size === 0) {
+              validated.delete(instanceId);
+            }
+          });
+        });
+      });
+    });
+  }
+
+  return validated;
+};
+
+const serializeKnownParameterFacts = (
+  facts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, ReadonlySet<TypeId>>
+  >,
+): string =>
+  JSON.stringify(
+    Array.from(facts.entries())
+      .sort(([left], [right]) => left - right)
+      .map(([instanceId, bySymbol]) => [
+        instanceId,
+        Array.from(bySymbol.entries())
+          .sort(([left], [right]) => left - right)
+          .map(([symbol, types]) => [
+            symbol,
+            Array.from(types).sort((left, right) => left - right),
+          ]),
+      ]),
+  );
+
+const validateExactParameterFacts = ({
+  ir,
+  facts,
+}: {
+  ir: MutableOptimizationIr;
+  facts: Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>>;
+}): Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>> => {
+  const validated = cloneExactParameterFacts(facts);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    ir.facts.reachableFunctionInstances.forEach((callerInstanceId) => {
+      const caller = ir.baseProgram.functions.getInstance(callerInstanceId);
+      const moduleView = ir.modules.get(caller.symbolRef.moduleId);
+      if (!moduleView) {
+        return;
+      }
+      const item = functionItemBySymbol({
+        moduleView,
+        symbol: caller.symbolRef.symbol,
+      });
+      if (!item) {
+        return;
+      }
+      const roots = [
+        item.body,
+        ...item.parameters.flatMap((parameter) =>
+          typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+        ),
+      ];
+      roots.forEach((rootExprId) => {
+        collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
+          const expr = moduleView.hir.expressions.get(exprId);
+          if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+            return;
+          }
+          const argExprIds = callArgumentExprIds(expr);
+          const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+          resolveTargetsForExactPropagation({
+            moduleView,
+            exprId,
+            expr,
+            callerInstanceId,
+            ir,
+          }).forEach(({ instanceId }) => {
+            if (typeof instanceId !== "number") {
+              return;
+            }
+            const factsBySymbol = validated.get(instanceId);
+            if (!factsBySymbol || factsBySymbol.size === 0) {
+              return;
+            }
+            const target = ir.baseProgram.functions.getInstance(instanceId);
+            const signature = ir.baseProgram.functions.getSignature(
+              target.symbolRef.moduleId,
+              target.symbolRef.symbol,
+            );
+            signature?.parameters.forEach((parameter, index) => {
+              if (typeof parameter.symbol !== "number") {
+                return;
+              }
+              const expected = factsBySymbol.get(parameter.symbol);
+              if (typeof expected !== "number") {
+                return;
+              }
+              const argExprId = callArgumentExprIdForParameter({
+                argExprIds,
+                callInfo,
+                callerInstanceId,
+                parameterIndex: index,
+              });
+              const actual =
+                typeof argExprId === "number"
+                  ? exactNominalForExpr({
+                      moduleView,
+                      exprId: argExprId,
+                      callerInstanceId,
+                      program: ir.baseProgram,
+                      exactParameterTypes: validated,
+                    })
+                  : undefined;
+              if (actual === expected) {
+                return;
+              }
+              factsBySymbol.delete(parameter.symbol);
+              changed = true;
+            });
+            if (factsBySymbol.size === 0) {
+              validated.delete(instanceId);
+            }
+          });
+        });
+      });
+    });
+  }
+
+  return validated;
+};
+
+const serializeExactParameterFacts = (
+  facts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >,
+): string =>
+  JSON.stringify(
+    Array.from(facts.entries())
+      .sort(([left], [right]) => left - right)
+      .map(([instanceId, bySymbol]) => [
+        instanceId,
+        Array.from(bySymbol.entries()).sort(([left], [right]) => left - right),
+      ]),
+  );
+
+type ReceiverSpecializationContext = {
+  instanceId: ProgramFunctionInstanceId;
+  exactParameterTypes: Map<SymbolId, TypeId>;
+};
+
+const exactParameterFactsForContext = ({
+  facts,
+  context,
+}: {
+  facts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
+  context: ReceiverSpecializationContext;
+}): Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>> => {
+  const merged = cloneExactParameterFacts(facts);
+  if (context.exactParameterTypes.size === 0) {
+    return merged;
+  }
+  const existing = new Map(merged.get(context.instanceId) ?? []);
+  context.exactParameterTypes.forEach((type, symbol) => {
+    existing.set(symbol, type);
+  });
+  merged.set(context.instanceId, existing);
+  return merged;
+};
+
+const functionParamCanReachTraitDispatch = ({
+  ir,
+  functionInstanceId,
+  parameterSymbol,
+  seen,
+}: {
+  ir: MutableOptimizationIr;
+  functionInstanceId: ProgramFunctionInstanceId;
+  parameterSymbol: SymbolId;
+  seen: Set<string>;
+}): boolean => {
+  const key = `${functionInstanceId}:${parameterSymbol}`;
+  if (seen.has(key)) {
+    return false;
+  }
+  seen.add(key);
+
+  const instance = ir.baseProgram.functions.getInstance(functionInstanceId);
+  const moduleView = ir.modules.get(instance.symbolRef.moduleId);
+  if (!moduleView) {
+    return false;
+  }
+  const item = functionItemBySymbol({
+    moduleView,
+    symbol: instance.symbolRef.symbol,
+  });
+  if (!item) {
+    return false;
+  }
+
+  const roots = [
+    item.body,
+    ...item.parameters.flatMap((parameter) =>
+      typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+    ),
+  ];
+  return roots.some((rootExprId) =>
+    collectPostOrderExprIds({ rootExprId, moduleView }).some((exprId) => {
+      const expr = moduleView.hir.expressions.get(exprId);
+      if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+        return false;
+      }
+
+      const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+      if (callInfo?.traitDispatch) {
+        const receiverExprId =
+          expr.exprKind === "method-call" ? expr.target : expr.args[0]?.expr;
+        const receiverExpr =
+          typeof receiverExprId === "number"
+            ? moduleView.hir.expressions.get(receiverExprId)
+            : undefined;
+        if (
+          receiverExpr?.exprKind === "identifier" &&
+          receiverExpr.symbol === parameterSymbol
+        ) {
+          return true;
+        }
+      }
+
+      const argExprIds = callArgumentExprIds(expr);
+      return resolveTargetsForExactPropagation({
+        moduleView,
+        exprId,
+        expr,
+        callerInstanceId: functionInstanceId,
+        ir,
+      }).some(({ instanceId }) => {
+        if (typeof instanceId !== "number") {
+          return false;
+        }
+        const target = ir.baseProgram.functions.getInstance(instanceId);
+        const signature = ir.baseProgram.functions.getSignature(
+          target.symbolRef.moduleId,
+          target.symbolRef.symbol,
+        );
+        return signature?.parameters.some((targetParam, paramIndex) => {
+          if (typeof targetParam.symbol !== "number") {
+            return false;
+          }
+          if (ir.baseProgram.types.getTypeDesc(targetParam.typeId).kind !== "trait") {
+            return false;
+          }
+          const argExprId = callArgumentExprIdForParameter({
+            argExprIds,
+            callInfo,
+            callerInstanceId: functionInstanceId,
+            parameterIndex: paramIndex,
+          });
+          const argExpr =
+            typeof argExprId === "number"
+              ? moduleView.hir.expressions.get(argExprId)
+              : undefined;
+          return (
+            argExpr?.exprKind === "identifier" &&
+            argExpr.symbol === parameterSymbol &&
+            functionParamCanReachTraitDispatch({
+              ir,
+              functionInstanceId: instanceId,
+              parameterSymbol: targetParam.symbol,
+              seen,
+            })
+          );
+        }) ?? false;
+      });
+    }),
+  );
+};
+
+const collectReceiverSpecializationRequests = ({
+  ir,
+  exactParameterTypes,
+}: {
+  ir: MutableOptimizationIr;
+  exactParameterTypes: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
+}): Map<string, Map<string, Map<SymbolId, TypeId>>> => {
+  const requests = new Map<string, Map<string, Map<SymbolId, TypeId>>>();
+  const queued: ReceiverSpecializationContext[] = [];
+  const queuedKeys = new Set<string>();
+  const seen = new Set<string>();
+  const specializationKeysByFunction = new Map<
+    ProgramFunctionInstanceId,
+    Set<string>
+  >();
+
+  const enqueueContext = ({
+    instanceId,
+    exactTypes,
+    countsAsSpecialization,
+  }: {
+    instanceId: ProgramFunctionInstanceId;
+    exactTypes?: ReadonlyMap<SymbolId, TypeId>;
+    countsAsSpecialization: boolean;
+  }): void => {
+    const exactParameterMap = new Map(exactTypes ?? []);
+    const contextKey = receiverSpecializationContextKey({
+      instanceId,
+      exactParameterTypes: exactParameterMap,
+    });
+    if (seen.has(contextKey) || queuedKeys.has(contextKey)) {
+      return;
+    }
+    if (countsAsSpecialization) {
+      if (
+        exactParameterMap.size === 0 ||
+        exactParameterMap.size > MAX_EXACT_PARAMETERS_PER_RECEIVER_SPECIALIZATION
+      ) {
+        return;
+      }
+      const knownKeys =
+        specializationKeysByFunction.get(instanceId) ?? new Set<string>();
+      if (
+        !knownKeys.has(contextKey) &&
+        knownKeys.size >= MAX_RECEIVER_SPECIALIZATIONS_PER_FUNCTION
+      ) {
+        return;
+      }
+      knownKeys.add(contextKey);
+      specializationKeysByFunction.set(instanceId, knownKeys);
+    }
+    queuedKeys.add(contextKey);
+    queued.push({
+      instanceId,
+      exactParameterTypes: exactParameterMap,
+    });
+  };
+
+  ir.facts.reachableFunctionInstances.forEach((instanceId) => {
+    enqueueContext({
+      instanceId,
+      exactTypes: exactParameterTypes.get(instanceId),
+      countsAsSpecialization: false,
+    });
+  });
+
+  while (queued.length > 0) {
+    const context = queued.pop()!;
+    const callerContextKey = receiverSpecializationContextKey({
+      instanceId: context.instanceId,
+      exactParameterTypes: context.exactParameterTypes,
+    });
+    queuedKeys.delete(callerContextKey);
+    if (seen.has(callerContextKey)) {
+      continue;
+    }
+    seen.add(callerContextKey);
+
+    const caller = ir.baseProgram.functions.getInstance(context.instanceId);
+    const moduleView = ir.modules.get(caller.symbolRef.moduleId);
+    if (!moduleView) {
+      continue;
+    }
+    const item = functionItemBySymbol({
+      moduleView,
+      symbol: caller.symbolRef.symbol,
+    });
+    if (!item) {
+      continue;
+    }
+    const contextExactFacts = exactParameterFactsForContext({
+      facts: exactParameterTypes,
+      context,
+    });
+    const roots = [
+      item.body,
+      ...item.parameters.flatMap((parameter) =>
+        typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+      ),
+    ];
+    roots.forEach((rootExprId) => {
+      collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
+        const expr = moduleView.hir.expressions.get(exprId);
+        if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+          return;
+        }
+        const targets = resolveTargetsForExactPropagation({
+          moduleView,
+          exprId,
+          expr,
+          callerInstanceId: context.instanceId,
+          ir,
+        });
+        if (targets.length !== 1 || typeof targets[0]?.instanceId !== "number") {
+          return;
+        }
+
+        const targetInstanceId = targets[0].instanceId;
+        const target = ir.baseProgram.functions.getInstance(targetInstanceId);
+        const signature = ir.baseProgram.functions.getSignature(
+          target.symbolRef.moduleId,
+          target.symbolRef.symbol,
+        );
+        if (!signature) {
+          return;
+        }
+        const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+        const argExprIds = callArgumentExprIds(expr);
+        const requestedExactTypes = new Map<SymbolId, TypeId>();
+        signature.parameters.forEach((parameter, paramIndex) => {
+          if (typeof parameter.symbol !== "number") {
+            return;
+          }
+          if (ir.baseProgram.types.getTypeDesc(parameter.typeId).kind !== "trait") {
+            return;
+          }
+          const argExprId = callArgumentExprIdForParameter({
+            argExprIds,
+            callInfo,
+            callerInstanceId: context.instanceId,
+            parameterIndex: paramIndex,
+          });
+          if (typeof argExprId !== "number") {
+            return;
+          }
+          const exactType = exactNominalForExpr({
+            moduleView,
+            exprId: argExprId,
+            callerInstanceId: context.instanceId,
+            program: ir.baseProgram,
+            exactParameterTypes: contextExactFacts,
+          });
+          if (typeof exactType !== "number") {
+            return;
+          }
+          const existingExact = exactParameterTypes
+            .get(targetInstanceId)
+            ?.get(parameter.symbol);
+          if (existingExact === exactType) {
+            return;
+          }
+          if (
+            !functionParamCanReachTraitDispatch({
+              ir,
+              functionInstanceId: targetInstanceId,
+              parameterSymbol: parameter.symbol,
+              seen: new Set(),
+            })
+          ) {
+            return;
+          }
+          requestedExactTypes.set(parameter.symbol, exactType);
+        });
+
+        if (
+          requestedExactTypes.size === 0 ||
+          requestedExactTypes.size > MAX_EXACT_PARAMETERS_PER_RECEIVER_SPECIALIZATION
+        ) {
+          return;
+        }
+
+        const callSiteKey = receiverSpecializationCallSiteKey({
+          moduleId: moduleView.moduleId,
+          exprId,
+        });
+        const byContext =
+          requests.get(callSiteKey) ?? new Map<string, Map<SymbolId, TypeId>>();
+        byContext.set(callerContextKey, requestedExactTypes);
+        requests.set(callSiteKey, byContext);
+
+        const targetContextExactTypes = new Map(
+          exactParameterTypes.get(targetInstanceId) ?? [],
+        );
+        requestedExactTypes.forEach((type, symbol) => {
+          targetContextExactTypes.set(symbol, type);
+        });
+        enqueueContext({
+          instanceId: targetInstanceId,
+          exactTypes: targetContextExactTypes,
+          countsAsSpecialization: true,
+        });
+      });
+    });
+  }
+
+  return requests;
+};
+
+const exactReceiverPropagationPass: ProgramOptimizationPass = {
+  name: "exact-receiver-propagation",
+  run(ctx) {
+    const externallyCallableInstances = externallyCallableFunctionInstances(
+      ctx.ir as MutableOptimizationIr,
+    );
+    let exactFacts = new Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>>();
+    let changed = true;
+
+    while (changed) {
+      const candidates = collectExactParameterCandidates({
+        ir: ctx.ir as MutableOptimizationIr,
+        seedFacts: exactFacts,
+        externallyCallableInstances,
+      });
+      const nextFacts = materializeExactParameterFacts(candidates);
+      changed =
+        serializeExactParameterFacts(nextFacts) !==
+        serializeExactParameterFacts(exactFacts);
+      exactFacts = nextFacts;
+    }
+
+    const validatedExact = validateExactParameterFacts({
+      ir: ctx.ir as MutableOptimizationIr,
+      facts: exactFacts,
+    });
+
+    let knownFacts = new Map<ProgramFunctionInstanceId, Map<SymbolId, Set<TypeId>>>();
+    changed = true;
+    while (changed) {
+      const candidates = collectKnownParameterCandidates({
+        ir: ctx.ir as MutableOptimizationIr,
+        exactParameterTypes: validatedExact,
+        seedFacts: knownFacts,
+        externallyCallableInstances,
+      });
+      const nextFacts = materializeKnownParameterFacts(candidates);
+      changed =
+        serializeKnownParameterFacts(nextFacts) !==
+        serializeKnownParameterFacts(knownFacts);
+      knownFacts = nextFacts;
+    }
+
+    const validatedKnown = validateKnownParameterFacts({
+      ir: ctx.ir as MutableOptimizationIr,
+      exactParameterTypes: validatedExact,
+      facts: knownFacts,
+    });
+    const receiverSpecializationRequests =
+      collectReceiverSpecializationRequests({
+        ir: ctx.ir as MutableOptimizationIr,
+        exactParameterTypes: validatedExact,
+      });
+    const previousExact = ctx.ir.facts.exactParameterTypes;
+    const previousKnown = ctx.ir.facts.knownParameterTypes;
+    const previousReceiverSpecializationRequests =
+      ctx.ir.facts.receiverSpecializationRequests;
+    const unchanged =
+      serializeExactParameterFacts(previousExact) ===
+        serializeExactParameterFacts(validatedExact) &&
+      serializeKnownParameterFacts(previousKnown) ===
+        serializeKnownParameterFacts(validatedKnown) &&
+      serializeReceiverSpecializationRequests(
+        previousReceiverSpecializationRequests,
+      ) ===
+        serializeReceiverSpecializationRequests(receiverSpecializationRequests);
+    (ctx.ir as MutableOptimizationIr).facts.exactParameterTypes = validatedExact;
+    (ctx.ir as MutableOptimizationIr).facts.knownParameterTypes = validatedKnown;
+    (ctx.ir as MutableOptimizationIr).facts.receiverSpecializationRequests =
+      receiverSpecializationRequests;
+    return { changed: !unchanged };
+  },
+};
 
 const moduleLetItems = ({
   moduleView,
@@ -1702,6 +3400,210 @@ const traitDispatchSignatureKey = ({
   traitSymbol: ProgramSymbolId;
   traitMethodSymbol: ProgramSymbolId;
 }): string => `${traitSymbol}:${traitMethodSymbol}`;
+
+const MAX_DIRECT_TRAIT_SWITCH_IMPLS = 4;
+
+const isPrimitiveDirectSwitchType = ({
+  typeId,
+  ir,
+}: {
+  typeId: TypeId;
+  ir: MutableOptimizationIr;
+}): boolean =>
+  typeId !== ir.baseProgram.primitives.void &&
+  ir.baseProgram.types.getTypeDesc(typeId).kind === "primitive";
+
+const isPureSignature = ({
+  effectRow,
+  ir,
+}: {
+  effectRow: number;
+  ir: MutableOptimizationIr;
+}): boolean => ir.baseProgram.effects.getRow(effectRow).operations.length === 0;
+
+const traitMethodMatches = ({
+  traitMethod,
+  implMethod,
+  traitMethodImpl,
+  ir,
+}: {
+  traitMethod: ProgramSymbolId;
+  implMethod: ProgramSymbolId;
+  traitMethodImpl: {
+    traitSymbol: ProgramSymbolId;
+    traitMethodSymbol: ProgramSymbolId;
+  };
+  ir: MutableOptimizationIr;
+}): boolean => {
+  const mapping = ir.baseProgram.traits.getTraitMethodImpl(implMethod);
+  const mappedTraitSymbol = mapping?.traitSymbol ?? traitMethodImpl.traitSymbol;
+  const mappedTraitMethod = mapping?.traitMethodSymbol ?? traitMethod;
+  return (
+    mappedTraitSymbol === traitMethodImpl.traitSymbol &&
+    mappedTraitMethod === traitMethodImpl.traitMethodSymbol
+  );
+};
+
+const directSwitchOmittedMethodTableImpls = ({
+  moduleView,
+  expr,
+  callerInstanceId,
+  functionId,
+  traitMethodImpl,
+  ir,
+}: {
+  moduleView: OptimizedModuleView;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
+  callerInstanceId: ProgramFunctionInstanceId;
+  functionId: ProgramFunctionId;
+  traitMethodImpl: {
+    traitSymbol: ProgramSymbolId;
+    traitMethodSymbol: ProgramSymbolId;
+  };
+  ir: MutableOptimizationIr;
+}): readonly { moduleId: string; symbol: SymbolId }[] | undefined => {
+  const targetRef = ir.baseProgram.symbols.refOf(functionId as ProgramSymbolId);
+  if (targetRef.moduleId !== moduleView.moduleId) {
+    return undefined;
+  }
+  const traitSignature = ir.baseProgram.functions.getSignature(
+    targetRef.moduleId,
+    targetRef.symbol,
+  );
+  if (!traitSignature || !isPureSignature({ effectRow: traitSignature.effectRow, ir })) {
+    return undefined;
+  }
+  if (!isPrimitiveDirectSwitchType({ typeId: traitSignature.returnType, ir })) {
+    return undefined;
+  }
+  if (
+    traitSignature.parameters
+      .slice(1)
+      .some((parameter) => !isPrimitiveDirectSwitchType({ typeId: parameter.typeId, ir }))
+  ) {
+    return undefined;
+  }
+
+  const receiverExprId =
+    expr.exprKind === "method-call" ? expr.target : expr.args[0]?.expr;
+  if (typeof receiverExprId !== "number") {
+    return undefined;
+  }
+  const knownReceiverTypes = knownNominalsForExpr({
+    moduleView,
+    exprId: receiverExprId,
+    callerInstanceId,
+    program: ir.baseProgram,
+    exactParameterTypes: ir.facts.exactParameterTypes,
+    knownParameterTypes: ir.facts.knownParameterTypes,
+  });
+  if (
+    !knownReceiverTypes ||
+    knownReceiverTypes.size === 0 ||
+    knownReceiverTypes.size > MAX_DIRECT_TRAIT_SWITCH_IMPLS
+  ) {
+    return undefined;
+  }
+  if (
+    Array.from(knownReceiverTypes).some(
+      (receiverType) =>
+        ir.baseProgram.types.getTypeDesc(receiverType).kind !== "nominal-object",
+    )
+  ) {
+    return undefined;
+  }
+
+  const seenImpls = new Set<ProgramSymbolId>();
+  const impls = Array.from(knownReceiverTypes).flatMap((receiverType) =>
+    ir.baseProgram.traits
+      .getImplsByNominal(receiverType)
+      .filter((impl) => impl.traitSymbol === traitMethodImpl.traitSymbol)
+      .filter((impl) => {
+        if (seenImpls.has(impl.implSymbol)) {
+          return false;
+        }
+        seenImpls.add(impl.implSymbol);
+        return true;
+      }),
+  );
+  if (impls.length === 0 || impls.length > MAX_DIRECT_TRAIT_SWITCH_IMPLS) {
+    return undefined;
+  }
+
+  const implMethods = impls.map((impl) => {
+    const method = impl.methods.find(({ traitMethod, implMethod }) =>
+      traitMethodMatches({
+        traitMethod,
+        implMethod,
+        traitMethodImpl,
+        ir,
+      }),
+    );
+    if (!method) {
+      return undefined;
+    }
+    const implRef = ir.baseProgram.symbols.refOf(
+      method.implMethod as ProgramSymbolId,
+    );
+    const resolvedImpl = resolveImportedSymbol({
+      moduleId: implRef.moduleId,
+      symbol: implRef.symbol,
+      ir,
+    });
+    const implSignature = ir.baseProgram.functions.getSignature(
+      resolvedImpl.moduleId,
+      resolvedImpl.symbol,
+    );
+    const supported = Boolean(
+      implSignature &&
+        isPureSignature({ effectRow: implSignature.effectRow, ir }) &&
+        isPrimitiveDirectSwitchType({ typeId: implSignature.returnType, ir }) &&
+        implSignature.parameters.length === traitSignature.parameters.length &&
+        implSignature.parameters
+          .slice(1)
+          .every((parameter, index) =>
+            isPrimitiveDirectSwitchType({ typeId: parameter.typeId, ir }) &&
+            parameter.typeId === traitSignature.parameters[index + 1]?.typeId,
+          ),
+    );
+    return supported ? resolvedImpl : undefined;
+  });
+
+  return implMethods.every(Boolean)
+    ? (implMethods as { moduleId: string; symbol: SymbolId }[])
+    : undefined;
+};
+
+const traitDispatchOmittedMethodTableImpls = ({
+  callerInstanceId,
+  functionId,
+  moduleView,
+  expr,
+  traitMethodImpl,
+  ir,
+}: {
+  moduleView: OptimizedModuleView;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
+  callerInstanceId?: ProgramFunctionInstanceId;
+  functionId: ProgramFunctionId;
+  traitMethodImpl: {
+    traitSymbol: ProgramSymbolId;
+    traitMethodSymbol: ProgramSymbolId;
+  };
+  ir: MutableOptimizationIr;
+}): readonly { moduleId: string; symbol: SymbolId }[] | undefined => {
+  if (typeof callerInstanceId !== "number") {
+    return undefined;
+  }
+  return directSwitchOmittedMethodTableImpls({
+    moduleView,
+    expr,
+    callerInstanceId,
+    functionId,
+    traitMethodImpl,
+    ir,
+  });
+};
 
 const resolveTargetsForCaller = ({
   moduleId,
@@ -2010,6 +3912,20 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
               functionId as ProgramSymbolId,
             );
             if (!traitMethodImpl) {
+              return;
+            }
+            const omittedMethodTableImpls = traitDispatchOmittedMethodTableImpls({
+              moduleView,
+              expr,
+              callerInstanceId,
+              functionId,
+              traitMethodImpl,
+              ir: ctx.ir as MutableOptimizationIr,
+            });
+            if (omittedMethodTableImpls) {
+              omittedMethodTableImpls.forEach((impl) =>
+                enqueueKnownFunctionInstances(impl)
+              );
               return;
             }
             usedTraitDispatchSignatures.add(
@@ -2358,6 +4274,27 @@ const finalizeOptimization = ({
         ]),
       ),
       usedTraitDispatchSignatures: new Set(ir.facts.usedTraitDispatchSignatures),
+      receiverSpecializationRequests: cloneReceiverSpecializationRequests(
+        ir.facts.receiverSpecializationRequests,
+      ),
+      exactParameterTypes: new Map(
+        Array.from(ir.facts.exactParameterTypes.entries()).map(
+          ([instanceId, bySymbol]) => [instanceId, new Map(bySymbol)],
+        ),
+      ),
+      knownParameterTypes: new Map(
+        Array.from(ir.facts.knownParameterTypes.entries()).map(
+          ([instanceId, bySymbol]) => [
+            instanceId,
+            new Map(
+              Array.from(bySymbol.entries()).map(([symbol, types]) => [
+                symbol,
+                new Set(types),
+              ]),
+            ),
+          ],
+        ),
+      ),
       codegenPlan,
     },
   };
@@ -2369,8 +4306,15 @@ const OPTIMIZATION_PASSES: readonly ProgramOptimizationPass[] = [
   constructorKnownSimplificationPass,
   effectFastPathEliminationPass,
   closureEnvironmentShrinkingPass,
-  traitDispatchDevirtualizationPass,
   continuationAndHandlerEnvironmentShrinkingPass,
+  wholeProgramSpecializationPruningPass,
+  exactReceiverPropagationPass,
+  constructorKnownSimplificationPass,
+  traitDispatchDevirtualizationPass,
+  wholeProgramSpecializationPruningPass,
+  exactReceiverPropagationPass,
+  constructorKnownSimplificationPass,
+  traitDispatchDevirtualizationPass,
   wholeProgramSpecializationPruningPass,
 ];
 

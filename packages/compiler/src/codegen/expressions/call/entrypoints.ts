@@ -4,6 +4,7 @@ import type {
   CompileCallOptions,
   ExpressionCompiler,
   FunctionContext,
+  FunctionMetadata,
   HirCallExpr,
   HirExpression,
   HirMethodCallExpr,
@@ -12,6 +13,7 @@ import type {
 import type {
   ProgramFunctionInstanceId,
   ProgramSymbolId,
+  SymbolId,
 } from "../../../semantics/ids.js";
 import { compileIntrinsicCall } from "../../intrinsics.js";
 import { effectsFacade } from "../../effects/facade.js";
@@ -22,6 +24,7 @@ import { getFunctionMetadataForCall } from "./metadata.js";
 import { emitResolvedCall } from "./resolved-call.js";
 import { compileTraitDispatchCall } from "./trait-dispatch.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
+import { getOrCreateReceiverSpecialization } from "../../receiver-specialization.js";
 
 export const compileCallExpr = (
   expr: HirCallExpr,
@@ -188,15 +191,21 @@ export const compileCallExpr = (
       typeInstanceId,
     });
     if (meta) {
+      const resolvedMeta = receiverSpecializedMetaForCall({
+        expr,
+        meta,
+        ctx,
+        fnCtx,
+      });
       const args = compileCallArguments({
         call: expr,
-        meta,
+        meta: resolvedMeta,
         ctx,
         fnCtx,
         compileExpr,
       });
       return emitResolvedCall({
-        meta,
+        meta: resolvedMeta,
         args,
         callId: expr.id,
         ctx,
@@ -296,16 +305,22 @@ export const compileMethodCallExpr = (
   if (!meta) {
     throw new Error(`codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`);
   }
+  const resolvedMeta = receiverSpecializedMetaForCall({
+    expr: callView,
+    meta,
+    ctx,
+    fnCtx,
+  });
 
   const args = compileCallArguments({
     call: callView,
-    meta,
+    meta: resolvedMeta,
     ctx,
     fnCtx,
     compileExpr,
   });
   return emitResolvedCall({
-    meta,
+    meta: resolvedMeta,
     args,
     callId: expr.id,
     ctx,
@@ -329,6 +344,65 @@ const toMethodCallView = (expr: HirMethodCallExpr): HirCallExpr => ({
   args: [{ expr: expr.target }, ...expr.args],
   typeArguments: expr.typeArguments,
 });
+
+const receiverSpecializationCallSiteKey = ({
+  moduleId,
+  exprId,
+}: {
+  moduleId: string;
+  exprId: number;
+}): string => `${moduleId}:${exprId}`;
+
+const receiverSpecializationContextKey = ({
+  instanceId,
+  exactParameterTypes,
+}: {
+  instanceId: ProgramFunctionInstanceId;
+  exactParameterTypes: ReadonlyMap<SymbolId, TypeId> | undefined;
+}): string => {
+  const serializedFacts = Array.from(exactParameterTypes?.entries() ?? [])
+    .sort(([left], [right]) => left - right)
+    .map(([symbol, type]) => `${symbol}=${type}`)
+    .join(",");
+  return `${instanceId}:${serializedFacts}`;
+};
+
+const receiverSpecializedMetaForCall = ({
+  expr,
+  meta,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirCallExpr;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): FunctionMetadata => {
+  if (!ctx.optimization || typeof fnCtx.instanceId !== "number") {
+    return meta;
+  }
+
+  const callSiteKey = receiverSpecializationCallSiteKey({
+    moduleId: ctx.moduleId,
+    exprId: expr.id,
+  });
+  const callerContextKey = receiverSpecializationContextKey({
+    instanceId: fnCtx.instanceId,
+    exactParameterTypes: fnCtx.exactParameterTypes,
+  });
+  const exactParameterTypes = ctx.optimization.receiverSpecializationRequests
+    .get(callSiteKey)
+    ?.get(callerContextKey);
+  if (!exactParameterTypes || exactParameterTypes.size === 0) {
+    return meta;
+  }
+
+  return getOrCreateReceiverSpecialization({
+    ctx,
+    meta,
+    exactParameterTypes,
+  }) ?? meta;
+};
 
 const compileResolvedSymbolCall = ({
   expr,
@@ -421,16 +495,22 @@ const compileResolvedSymbolCall = ({
   if (!targetMeta) {
     throw new Error(`codegen cannot call symbol ${moduleId}::${symbol}`);
   }
+  const resolvedMeta = receiverSpecializedMetaForCall({
+    expr,
+    meta: targetMeta,
+    ctx,
+    fnCtx,
+  });
 
   const args = compileCallArguments({
     call: expr,
-    meta: targetMeta,
+    meta: resolvedMeta,
     ctx,
     fnCtx,
     compileExpr,
   });
   return emitResolvedCall({
-    meta: targetMeta,
+    meta: resolvedMeta,
     args,
     callId: expr.id,
     ctx,

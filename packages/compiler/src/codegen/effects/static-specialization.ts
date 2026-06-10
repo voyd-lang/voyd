@@ -277,7 +277,7 @@ export const getOrCreateStaticEffectSpecialization = ({
   }
 
   const state = stateOf(ctx);
-  const key = `${meta.moduleId}:${meta.instanceId}:${context.key}`;
+  const key = `${meta.moduleId}:${meta.instanceId}:${meta.wasmName}:${context.key}`;
   const existing = state.byKey.get(key);
   if (existing) {
     return existing.meta;

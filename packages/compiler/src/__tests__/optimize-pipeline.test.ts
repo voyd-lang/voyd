@@ -124,6 +124,26 @@ const findModuleLet = ({
       program.symbols.getName(program.symbols.idOf({ moduleId, symbol: item.symbol })) === name,
   );
 
+const findObjectNominal = ({
+  moduleId,
+  name,
+  program,
+}: {
+  moduleId: string;
+  name: string;
+  program: ReturnType<typeof buildProgramCodegenView>;
+}) => {
+  const item = Array.from(program.modules.get(moduleId)?.hir.items.values() ?? [])
+    .find((candidate) => candidate.kind === "object" && program.symbols.getName(
+      program.symbols.idOf({ moduleId, symbol: candidate.symbol }),
+    ) === name);
+  return item?.kind === "object"
+    ? program.objects.getTemplate(
+        program.symbols.idOf({ moduleId, symbol: item.symbol }),
+      )?.nominal
+    : undefined;
+};
+
 const getFunctionBodyValueExpr = ({
   moduleId,
   symbol,
@@ -299,6 +319,757 @@ pub fn main() -> i32
     if (!callExpr || callExpr.exprKind !== "method-call") return;
     const callInfo = optimized.program.calls.getCallInfo("src::main", callExpr.id);
     expect(callInfo.traitDispatch).toBe(false);
+  });
+
+  it("propagates exact receiver facts across monomorphic trait-typed call edges", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self) -> i32
+    self.value
+
+impl Runner for Alt
+  fn run(self) -> i32
+    self.value + 1
+
+fn helper(runner: Runner) -> i32
+  runner.run()
+
+fn invoke(runner: Runner) -> i32
+  helper(runner)
+
+pub fn main() -> i32
+  invoke(Box { value: 4 })
+`,
+      },
+    });
+
+    const moduleId = "src::main";
+    const program = optimized.program;
+    const boxItem = Array.from(program.modules.get(moduleId)?.hir.items.values() ?? [])
+      .find((item) => item.kind === "object" && program.symbols.getName(
+        program.symbols.idOf({ moduleId, symbol: item.symbol }),
+      ) === "Box");
+    const boxType =
+      boxItem?.kind === "object"
+        ? program.objects.getTemplate(
+            program.symbols.idOf({ moduleId, symbol: boxItem.symbol }),
+          )?.nominal
+        : undefined;
+    expect(typeof boxType).toBe("number");
+    if (typeof boxType !== "number") return;
+
+    for (const name of ["invoke", "helper"]) {
+      const fn = findFunction({ moduleId, name, program });
+      expect(fn?.kind, name).toBe("function");
+      if (!fn || fn.kind !== "function") continue;
+      const instanceId = program.functions.getInstanceId(moduleId, fn.symbol, []);
+      expect(typeof instanceId, name).toBe("number");
+      if (typeof instanceId !== "number") continue;
+      expect(
+        optimized.facts.exactParameterTypes
+          .get(instanceId)
+          ?.get(fn.parameters[0]!.symbol),
+        name,
+      ).toBe(boxType);
+    }
+  });
+
+  it("maps labeled call arguments when propagating exact receiver facts", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self, offset: i32) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self, offset: i32) -> i32
+    self.value + offset
+
+impl Runner for Alt
+  fn run(self, offset: i32) -> i32
+    self.value + offset + 1
+
+fn helper({ offset: i32, runner: Runner }) -> i32
+  runner.run(offset)
+
+fn invoke({ offset: i32, runner: Runner }) -> i32
+  helper(runner: runner, offset: offset)
+
+pub fn main() -> i32
+  invoke(runner: Box { value: 4 }, offset: 2)
+`,
+      },
+    });
+
+    const moduleId = "src::main";
+    const program = optimized.program;
+    const boxType = findObjectNominal({ moduleId, name: "Box", program });
+    expect(typeof boxType).toBe("number");
+    if (typeof boxType !== "number") return;
+
+    for (const name of ["invoke", "helper"]) {
+      const fn = findFunction({ moduleId, name, program });
+      expect(fn?.kind, name).toBe("function");
+      if (!fn || fn.kind !== "function") continue;
+      const runner = fn.parameters.find((parameter) => parameter.label === "runner");
+      expect(runner, name).toBeDefined();
+      if (!runner) continue;
+      const instanceId = program.functions.getInstanceId(moduleId, fn.symbol, []);
+      expect(typeof instanceId, name).toBe("number");
+      if (typeof instanceId !== "number") continue;
+      expect(
+        optimized.facts.exactParameterTypes
+          .get(instanceId)
+          ?.get(runner.symbol),
+        name,
+      ).toBe(boxType);
+    }
+  });
+
+  it("devirtualizes monomorphic trait-typed callees using propagated exact receiver facts", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self) -> i32
+    self.value
+
+impl Runner for Alt
+  fn run(self) -> i32
+    self.value + 1
+
+fn invoke(runner: Runner) -> i32
+  runner.run()
+
+pub fn main() -> i32
+  invoke(Box { value: 4 })
+`,
+      },
+    });
+
+    const invokeFn = findFunction({
+      moduleId: "src::main",
+      name: "invoke",
+      program: optimized.program,
+    });
+    expect(invokeFn?.kind).toBe("function");
+    if (!invokeFn || invokeFn.kind !== "function") return;
+    const moduleView = optimized.program.modules.get("src::main");
+    const callExpr = (() => {
+      if (!moduleView) {
+        return undefined;
+      }
+      let found: HirMethodCallExpr | undefined;
+      walkExpression({
+        exprId: invokeFn.body,
+        hir: moduleView.hir,
+        onEnterExpression: (_exprId, expr) => {
+          if (expr.exprKind !== "method-call") {
+            return;
+          }
+          found = expr;
+          return { stop: true };
+        },
+      });
+      return found;
+    })();
+    expect(callExpr?.exprKind).toBe("method-call");
+    if (!callExpr || callExpr.exprKind !== "method-call") return;
+    const callInfo = optimized.program.calls.getCallInfo("src::main", callExpr.id);
+    expect(callInfo.traitDispatch).toBe(false);
+    expect(new Set(callInfo.targets?.values()).size).toBe(1);
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: true,
+        runtimeDiagnostics: false,
+      },
+    });
+    const wasmText = module.emitText();
+    expect(wasmText).toContain("call $src__main__run_");
+    expect(wasmText).not.toContain("call $__lookup_method_accessor");
+  });
+
+  it("does not specialize externally callable trait-parameter exports from internal edges", async () => {
+    const { optimized } = await buildOptimized({
+      optimizeOptions: { boundaryExports: "auto" },
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self) -> i32
+    self.value
+
+impl Runner for Alt
+  fn run(self) -> i32
+    self.value + 1
+
+pub fn score(runner: Runner) -> i32
+  runner.run()
+
+fn internal() -> i32
+  score(Box { value: 4 })
+
+pub fn main() -> i32
+  internal()
+`,
+      },
+    });
+
+    const moduleId = "src::main";
+    const program = optimized.program;
+    const scoreFn = findFunction({ moduleId, name: "score", program });
+    expect(scoreFn?.kind).toBe("function");
+    if (!scoreFn || scoreFn.kind !== "function") return;
+    const scoreInstanceId = program.functions.getInstanceId(
+      moduleId,
+      scoreFn.symbol,
+      [],
+    );
+    expect(typeof scoreInstanceId).toBe("number");
+    if (typeof scoreInstanceId !== "number") return;
+
+    expect(
+      optimized.facts.exactParameterTypes
+        .get(scoreInstanceId)
+        ?.get(scoreFn.parameters[0]!.symbol),
+    ).toBeUndefined();
+    expect(
+      optimized.facts.knownParameterTypes
+        .get(scoreInstanceId)
+        ?.get(scoreFn.parameters[0]!.symbol),
+    ).toBeUndefined();
+
+    const moduleView = program.modules.get(moduleId);
+    expect(moduleView).toBeDefined();
+    if (!moduleView) return;
+    let dispatchCall: HirMethodCallExpr | undefined;
+    walkExpression({
+      exprId: scoreFn.body,
+      hir: moduleView.hir,
+      onEnterExpression: (_exprId, expr) => {
+        if (expr.exprKind !== "method-call") {
+          return;
+        }
+        dispatchCall = expr;
+        return { stop: true };
+      },
+    });
+    expect(dispatchCall?.exprKind).toBe("method-call");
+    if (!dispatchCall) return;
+    expect(program.calls.getCallInfo(moduleId, dispatchCall.id).traitDispatch).toBe(
+      true,
+    );
+  });
+
+  it("treats entry-module re-exported trait-parameter functions as externally callable", async () => {
+    const { optimized } = await buildOptimized({
+      entryFile: "pkg.voyd",
+      optimizeOptions: { boundaryExports: "auto" },
+      files: {
+        "pkg.voyd": `
+use src::util::internal
+pub use src::util::score
+
+pub fn main() -> i32
+  internal()
+`,
+        "util.voyd": `
+trait Runner
+  fn run(self) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self) -> i32
+    self.value
+
+impl Runner for Alt
+  fn run(self) -> i32
+    self.value + 1
+
+pub fn score(runner: Runner) -> i32
+  runner.run()
+
+pub fn internal() -> i32
+  score(Box { value: 4 })
+`,
+      },
+    });
+
+    const moduleId = "src::util";
+    const program = optimized.program;
+    const scoreFn = findFunction({ moduleId, name: "score", program });
+    expect(scoreFn?.kind).toBe("function");
+    if (!scoreFn || scoreFn.kind !== "function") return;
+    const scoreInstanceId = program.functions.getInstanceId(
+      moduleId,
+      scoreFn.symbol,
+      [],
+    );
+    expect(typeof scoreInstanceId).toBe("number");
+    if (typeof scoreInstanceId !== "number") return;
+
+    expect(
+      optimized.facts.exactParameterTypes
+        .get(scoreInstanceId)
+        ?.get(scoreFn.parameters[0]!.symbol),
+    ).toBeUndefined();
+    expect(
+      optimized.facts.knownParameterTypes
+        .get(scoreInstanceId)
+        ?.get(scoreFn.parameters[0]!.symbol),
+    ).toBeUndefined();
+
+    const moduleView = program.modules.get(moduleId);
+    expect(moduleView).toBeDefined();
+    if (!moduleView) return;
+    let dispatchCall: HirMethodCallExpr | undefined;
+    walkExpression({
+      exprId: scoreFn.body,
+      hir: moduleView.hir,
+      onEnterExpression: (_exprId, expr) => {
+        if (expr.exprKind !== "method-call") {
+          return;
+        }
+        dispatchCall = expr;
+        return { stop: true };
+      },
+    });
+    expect(dispatchCall?.exprKind).toBe("method-call");
+    if (!dispatchCall) return;
+    expect(program.calls.getCallInfo(moduleId, dispatchCall.id).traitDispatch).toBe(
+      true,
+    );
+  });
+
+  it("keeps functions used as values open for exact receiver facts", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self) -> i32
+    self.value
+
+impl Runner for Alt
+  fn run(self) -> i32
+    self.value + 1
+
+fn score(runner: Runner) -> i32
+  runner.run()
+
+fn apply(cb: fn(Runner) -> i32, runner: Runner) -> i32
+  cb(runner)
+
+fn internal() -> i32
+  score(Box { value: 4 }) + apply(score, Alt { value: 5 })
+
+pub fn main() -> i32
+  internal()
+`,
+      },
+    });
+
+    const moduleId = "src::main";
+    const program = optimized.program;
+    const scoreFn = findFunction({ moduleId, name: "score", program });
+    expect(scoreFn?.kind).toBe("function");
+    if (!scoreFn || scoreFn.kind !== "function") return;
+    const scoreInstanceId = program.functions.getInstanceId(
+      moduleId,
+      scoreFn.symbol,
+      [],
+    );
+    expect(typeof scoreInstanceId).toBe("number");
+    if (typeof scoreInstanceId !== "number") return;
+
+    expect(
+      optimized.facts.exactParameterTypes
+        .get(scoreInstanceId)
+        ?.get(scoreFn.parameters[0]!.symbol),
+    ).toBeUndefined();
+    expect(
+      optimized.facts.knownParameterTypes
+        .get(scoreInstanceId)
+        ?.get(scoreFn.parameters[0]!.symbol),
+    ).toBeUndefined();
+
+    const moduleView = program.modules.get(moduleId);
+    expect(moduleView).toBeDefined();
+    if (!moduleView) return;
+    let dispatchCall: HirMethodCallExpr | undefined;
+    walkExpression({
+      exprId: scoreFn.body,
+      hir: moduleView.hir,
+      onEnterExpression: (_exprId, expr) => {
+        if (expr.exprKind !== "method-call") {
+          return;
+        }
+        dispatchCall = expr;
+        return { stop: true };
+      },
+    });
+    expect(dispatchCall?.exprKind).toBe("method-call");
+    if (!dispatchCall) return;
+    expect(program.calls.getCallInfo(moduleId, dispatchCall.id).traitDispatch).toBe(
+      true,
+    );
+  });
+
+  it("still propagates exact facts for non-entry public helper exports", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+use src::util::run_box
+
+pub fn main() -> i32
+  run_box()
+`,
+        "util.voyd": `
+trait Runner
+  fn run(self) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self) -> i32
+    self.value
+
+impl Runner for Alt
+  fn run(self) -> i32
+    self.value + 1
+
+pub fn score(runner: Runner) -> i32
+  runner.run()
+
+pub fn run_box() -> i32
+  score(Box { value: 4 })
+`,
+      },
+    });
+
+    const moduleId = "src::util";
+    const program = optimized.program;
+    const boxType = findObjectNominal({ moduleId, name: "Box", program });
+    expect(typeof boxType).toBe("number");
+    if (typeof boxType !== "number") return;
+    const scoreFn = findFunction({ moduleId, name: "score", program });
+    expect(scoreFn?.kind).toBe("function");
+    if (!scoreFn || scoreFn.kind !== "function") return;
+    const scoreInstanceId = program.functions.getInstanceId(
+      moduleId,
+      scoreFn.symbol,
+      [],
+    );
+    expect(typeof scoreInstanceId).toBe("number");
+    if (typeof scoreInstanceId !== "number") return;
+    expect(
+      optimized.facts.exactParameterTypes
+        .get(scoreInstanceId)
+        ?.get(scoreFn.parameters[0]!.symbol),
+    ).toBe(boxType);
+  });
+
+  it("creates receiver-specialized clones for exact method call edges", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self, offset: i32) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self, offset: i32) -> i32
+    self.value + offset
+
+impl Runner for Alt
+  fn run(self, offset: i32) -> i32
+    self.value + offset + 1
+
+fn helper(runner: Runner, offset: i32) -> i32
+  runner.run(offset)
+
+obj Service {
+  base: i32
+}
+
+impl Service
+  fn invoke(self, runner: Runner, offset: i32) -> i32
+    helper(runner, offset) + self.base
+
+pub fn main() -> i32
+  use_box() + use_alt()
+
+fn use_box() -> i32
+  Service { base: 1 }.invoke(Box { value: 4 }, 2)
+
+fn use_alt() -> i32
+  Service { base: 1 }.invoke(Alt { value: 5 }, 3)
+`,
+      },
+    });
+
+    expect(optimized.facts.receiverSpecializationRequests.size).toBeGreaterThan(0);
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    const wasmText = module.emitText();
+    expect(wasmText).toMatch(/call \$src__main__invoke_\d+__receiver_/);
+    expect(wasmText).toMatch(/call \$src__main__helper_\d+__receiver_/);
+    expect(wasmText).not.toContain("call $__lookup_method_accessor");
+  });
+
+  it("uses global exact facts when ordinary functions request downstream receiver clones", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self, offset: i32) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self, offset: i32) -> i32
+    self.value + offset
+
+impl Runner for Alt
+  fn run(self, offset: i32) -> i32
+    self.value + offset + 1
+
+fn leaf(runner: Runner, offset: i32) -> i32
+  runner.run(offset)
+
+fn exact_forward(runner: Runner, offset: i32) -> i32
+  leaf(runner, offset)
+
+fn use_box() -> i32
+  exact_forward(Box { value: 4 }, 2)
+
+fn use_alt() -> i32
+  leaf(Alt { value: 5 }, 3)
+
+pub fn main() -> i32
+  use_box() + use_alt()
+`,
+      },
+    });
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    const wasmText = module.emitText();
+    expect(wasmText).toMatch(/call \$src__main__leaf_\d+__receiver_/);
+    expect(wasmText).not.toContain("call $__lookup_method_accessor");
+  });
+
+  it("narrows direct trait switches to known receiver sets from multiple monomorphic call edges", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self, offset: i32) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+obj ExtraA {
+  value: i32
+}
+
+obj ExtraB {
+  value: i32
+}
+
+obj ExtraC {
+  value: i32
+}
+
+impl Runner for Box
+  fn run(self, offset: i32) -> i32
+    self.value + offset
+
+impl Runner for Alt
+  fn run(self, offset: i32) -> i32
+    self.value + offset + 1
+
+impl Runner for ExtraA
+  fn run(self, offset: i32) -> i32
+    self.value + offset + 2
+
+impl Runner for ExtraB
+  fn run(self, offset: i32) -> i32
+    self.value + offset + 3
+
+impl Runner for ExtraC
+  fn run(self, offset: i32) -> i32
+    self.value + offset + 4
+
+fn helper(runner: Runner, offset: i32) -> i32
+  runner.run(offset)
+
+fn invoke(runner: Runner, offset: i32) -> i32
+  helper(runner, offset)
+
+fn use_box() -> i32
+  invoke(Box { value: 4 }, 2)
+
+fn use_alt() -> i32
+  invoke(Alt { value: 5 }, 3)
+
+pub fn main() -> i32
+  use_box() + use_alt()
+`,
+      },
+    });
+
+    const moduleId = "src::main";
+    const program = optimized.program;
+    const boxType = findObjectNominal({ moduleId, name: "Box", program });
+    const altType = findObjectNominal({ moduleId, name: "Alt", program });
+    expect(typeof boxType).toBe("number");
+    expect(typeof altType).toBe("number");
+    if (typeof boxType !== "number" || typeof altType !== "number") return;
+
+    const invokeFn = findFunction({ moduleId, name: "invoke", program });
+    expect(invokeFn?.kind).toBe("function");
+    if (!invokeFn || invokeFn.kind !== "function") return;
+    const invokeInstanceId = program.functions.getInstanceId(
+      moduleId,
+      invokeFn.symbol,
+      [],
+    );
+    expect(typeof invokeInstanceId).toBe("number");
+    if (typeof invokeInstanceId !== "number") return;
+
+    expect(
+      optimized.facts.exactParameterTypes
+        .get(invokeInstanceId)
+        ?.get(invokeFn.parameters[0]!.symbol),
+    ).toBeUndefined();
+    expect(
+      optimized.facts.knownParameterTypes
+        .get(invokeInstanceId)
+        ?.get(invokeFn.parameters[0]!.symbol),
+    ).toEqual(new Set([boxType, altType]));
+
+    const { module } = codegenProgram({
+      program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: true,
+        runtimeDiagnostics: false,
+      },
+    });
+    const wasmText = module.emitText();
+    expect(wasmText).toContain("__receiver_");
+    expect(wasmText).toMatch(/call \$src__main__invoke_\d+__receiver_/);
+    expect(wasmText).toMatch(/call \$src__main__helper_\d+__receiver_/);
+    expect(wasmText).not.toContain("call $__lookup_method_accessor");
+    expect(wasmText).not.toMatch(/\(func \$.*__method_\d+_/);
   });
 
   it("tracks reachable cross-module module lets and prunes unrelated specializations", async () => {
@@ -570,6 +1341,57 @@ pub fn main(): Log -> i32
     expect(discriminant?.exprKind).toBe("call");
   });
 
+  it("uses exact parameter facts to simplify constructor matches", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+type Runner = Box | Alt
+
+fn classify(runner: Runner) -> i32
+  match(runner)
+    Box: 7
+    else: 8
+
+fn invoke(runner: Runner) -> i32
+  classify(runner)
+
+pub fn main() -> i32
+  invoke(Box { value: 4 })
+`,
+      },
+    });
+
+    const moduleId = "src::main";
+    const program = optimized.program;
+    const classifyFn = findFunction({ moduleId, name: "classify", program });
+    expect(classifyFn?.kind).toBe("function");
+    if (!classifyFn || classifyFn.kind !== "function") return;
+    const moduleView = program.modules.get(moduleId);
+    expect(moduleView).toBeDefined();
+    if (!moduleView) return;
+
+    let sawMatch = false;
+    walkExpression({
+      exprId: classifyFn.body,
+      hir: moduleView.hir,
+      onEnterExpression: (_exprId, expr) => {
+        if (expr.exprKind === "match") {
+          sawMatch = true;
+          return { stop: true };
+        }
+      },
+    });
+    expect(sawMatch).toBe(false);
+  });
+
   it("keeps non-entry test exports reachable in optimized all-module test builds", async () => {
     const { optimized, entryModuleId, tests } = await buildOptimized({
       files: {
@@ -681,7 +1503,7 @@ pub fn main() -> i32
       files: {
         "main.voyd": `
 trait Runner
-  fn run(self) -> i32
+  fn run(self, offset: i32) -> i32
 
 obj Box {
   value: i32
@@ -692,18 +1514,31 @@ obj Alt {
 }
 
 impl Runner for Box
-  fn run(self) -> i32
-    self.value
+  fn run(self, offset: i32) -> i32
+    self.value + offset
 
 impl Runner for Alt
-  fn run(self) -> i32
-    self.value + 1
+  fn run(self, offset: i32) -> i32
+    self.value + offset + 1
 
-fn invoke(runner: Runner) -> i32
-  runner.run()
+fn box_runner(value: i32) -> Runner
+  Box { value }
+
+fn alt_runner(value: i32) -> Runner
+  Alt { value }
+
+fn choose(flag: bool) -> Runner
+  if
+    flag:
+      box_runner(4)
+    else:
+      alt_runner(5)
+
+fn invoke(runner: Runner, offset: i32) -> i32
+  runner.run(offset)
 
 pub fn main() -> i32
-  invoke(Box { value: 4 })
+  invoke(choose(true), 2)
 `,
       },
     });
