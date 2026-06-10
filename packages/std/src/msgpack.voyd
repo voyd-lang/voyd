@@ -169,6 +169,9 @@ fn msgpack_map_get(map: Dict<String, MsgPack>, key: String): () -> MsgPack
     None:
       make_null()
 
+fn msgpack_map_has(map: Dict<String, MsgPack>, key: String): () -> bool
+  map.contains(key)
+
 fn msgpack_map_tag_is(map: Dict<String, MsgPack>, expected: String): () -> bool
   match(map.get("$variant"))
     Some<MsgPack> { value }:

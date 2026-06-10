@@ -25,11 +25,18 @@ pub fn main(): Async -> i32
 `;
 const BOUNDARY_EXPORTS_SOURCE = `use std::array::Array
 use std::enums::{ enum }
+use std::optional::all
 use std::string::type::String
 
 obj Point {
   x: i32,
   y: i32
+}
+
+obj TreeNode {
+  val: i32,
+  l?: TreeNode,
+  r?: TreeNode
 }
 
 enum LookupResult
@@ -85,6 +92,37 @@ pub fn nested_found() -> NestedResult
 
 pub fn nested_found_value(wrapped: NestedResult::Wrapped) -> String
   wrapped.inner.value
+
+fn optional_tree_sum(node?: TreeNode) -> i32
+  match(node)
+    Some<TreeNode> { value }:
+      tree_sum(value)
+    None:
+      0
+
+pub fn tree_sum(node: TreeNode) -> i32
+  node.val + optional_tree_sum(node.l) + optional_tree_sum(node.r)
+
+pub fn get_tree() -> TreeNode
+  TreeNode {
+    val: 1,
+    l: TreeNode { val: 2 },
+    r: TreeNode { val: 3 }
+  }
+
+pub fn cyclic_tree() -> TreeNode
+  let ~node = TreeNode { val: 1 }
+  node.l = Some<TreeNode> { value: node }
+  node
+
+fn make_chain(depth: i32) -> TreeNode
+  if depth == 0 then:
+    TreeNode { val: 0 }
+  else:
+    TreeNode { val: depth, l: make_chain(depth - 1) }
+
+pub fn deep_tree() -> TreeNode
+  make_chain(600)
 
 pub fn long_text() -> String
   "this result is intentionally longer than a tiny host buffer"
@@ -253,6 +291,39 @@ describe("node sdk", () => {
     await expect(
       host.run("translate", [{ x: "bad", y: 2 }, 10, 20]),
     ).rejects.toThrow("typed export translate arg0.x expected i32, got string");
+    await expect(host.run("get_tree")).resolves.toEqual({
+      val: 1,
+      l: { val: 2 },
+      r: { val: 3 },
+    });
+    await expect(
+      host.run("tree_sum", [{ val: 1, l: { val: 2 }, r: { val: 3 } }]),
+    ).resolves.toBe(6);
+    await expect(
+      host.run("tree_sum", [{ val: 1, l: null, r: { val: 3 } }]),
+    ).resolves.toBe(4);
+    await expect(host.run("cyclic_tree")).rejects.toThrow(
+      /typed export cyclic_tree result.*cannot encode cyclic object graph/,
+    );
+    const deepTree = await host.run<{ val: number; l?: any }>("deep_tree");
+    let node = deepTree;
+    let depth = 0;
+    while (node.l) {
+      depth += 1;
+      node = node.l;
+    }
+    expect(depth).toBe(600);
+    expect(node).toEqual({ val: 0 });
+    const cyclicTree: { val: number; l?: unknown } = { val: 1 };
+    cyclicTree.l = cyclicTree;
+    await expect(host.run("tree_sum", [cyclicTree])).rejects.toThrow(
+      "typed export tree_sum arg0.l cannot encode cyclic object graph",
+    );
+    const cyclicTreeMap = new Map<string, unknown>([["val", 1]]);
+    cyclicTreeMap.set("l", cyclicTreeMap);
+    await expect(host.run("tree_sum", [cyclicTreeMap])).rejects.toThrow(
+      "typed export tree_sum arg0.l cannot encode cyclic object graph",
+    );
 
     const tinyBufferHost = await createVoydHost({
       wasm: result.wasm,
