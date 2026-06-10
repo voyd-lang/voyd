@@ -69,6 +69,11 @@ import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
 import { boxSignatureSpillValue, unboxSignatureSpillValue } from "./signature-spill.js";
 import { createSerializedExportSpecialCaseResolver } from "./serialized-export-special-cases.js";
+import {
+  markStaticEffectSpecializationCompiled,
+  takePendingStaticEffectSpecializations,
+  type StaticEffectSpecialization,
+} from "./effects/static-specialization.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -1122,6 +1127,7 @@ export const compileFunctions = ({
       compiledCount += 1;
     });
   }
+  compiledCount += compilePendingStaticEffectSpecializations(ctx);
   return compiledCount;
 };
 
@@ -1885,6 +1891,121 @@ const compileFunctionItem = (
     fnCtx.locals,
     functionBody,
   );
+};
+
+const compileStaticEffectSpecialization = (
+  specialization: StaticEffectSpecialization,
+  ctx: CodegenContext,
+): void => {
+  const { item: fn, meta, context } = specialization;
+  if (ctx.mod.getFunction(meta.wasmName) !== 0) {
+    markStaticEffectSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+    return;
+  }
+
+  const fnCtx: FunctionContext = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals: [],
+    nextLocalIndex: meta.paramTypes.length,
+    returnTypeId: meta.resultTypeId,
+    returnWasmType: meta.resultType,
+    returnAbiKind: meta.resultAbiKind,
+    instanceId: meta.instanceId,
+    typeInstanceId: meta.instanceId,
+    effectful: false,
+    staticEffectContext: context,
+  };
+  const paramInitOps = bindRawFunctionParameters({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+    handlerOffset: 0,
+  });
+  const captureStart = fn.parameters.reduce(
+    (offset, _param, index) => offset + (meta.paramAbiTypes[index]?.length ?? 0),
+    0,
+  );
+  context.captures.forEach((capture, index) => {
+    const paramIndex = captureStart + index;
+    if (capture.mode === "storage-ref") {
+      fnCtx.bindings.set(
+        capture.symbol,
+        createStorageRefBinding({
+          index: paramIndex,
+          typeId: capture.typeId,
+          mutable: capture.mutable,
+          ctx,
+        }),
+      );
+      return;
+    }
+    fnCtx.bindings.set(capture.symbol, {
+      kind: "local",
+      index: paramIndex,
+      type: capture.wasmType,
+      storageType: capture.paramType,
+      typeId: capture.typeId,
+    });
+  });
+  const defaultInitOps = compileDefaultParameterInitialization({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+  });
+  const body = compileExpression({
+    exprId: fn.body,
+    ctx,
+    fnCtx,
+    tailPosition: true,
+    expectedResultTypeId: fnCtx.returnTypeId,
+  });
+  const bodyExpr =
+    defaultInitOps.length > 0
+      ? ctx.mod.block(
+          null,
+          [...paramInitOps, ...defaultInitOps, body.expr],
+          binaryen.getExpressionType(body.expr),
+        )
+      : paramInitOps.length > 0
+        ? ctx.mod.block(
+            null,
+            [...paramInitOps, body.expr],
+            binaryen.getExpressionType(body.expr),
+          )
+        : body.expr;
+  const functionBody =
+    meta.resultTypeId !== ctx.program.primitives.void &&
+    binaryen.getExpressionType(bodyExpr) !== binaryen.none &&
+    binaryen.getExpressionType(bodyExpr) !== binaryen.unreachable
+      ? boxSignatureSpillValue({
+          value: bodyExpr,
+          typeId: meta.resultTypeId,
+          ctx,
+          fnCtx,
+        })
+      : bodyExpr;
+
+  ctx.mod.addFunction(
+    meta.wasmName,
+    binaryen.createType(meta.paramTypes as number[]),
+    meta.resultType,
+    fnCtx.locals,
+    functionBody,
+  );
+  markStaticEffectSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+};
+
+const compilePendingStaticEffectSpecializations = (
+  ctx: CodegenContext,
+): number => {
+  const pending = takePendingStaticEffectSpecializations(ctx);
+  pending.forEach((specialization) =>
+    compileStaticEffectSpecialization(specialization, ctx)
+  );
+  return pending.length;
 };
 
 const makeFunctionName = (

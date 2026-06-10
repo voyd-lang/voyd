@@ -1,0 +1,43 @@
+eff Local
+  next(tail) -> i32
+  next(tail, max: i32) -> i32
+
+fn helper(): Local -> i32
+  Local::next(4) + Local::next()
+
+fn big_helper(): Local -> i32
+  var total = 0
+  total = total + Local::next(0)
+  total = total + Local::next(1)
+  total = total + Local::next(2)
+  total = total + Local::next(3)
+  total = total + Local::next(4)
+  total = total + Local::next(5)
+  total = total + Local::next(6)
+  total = total + Local::next(7)
+  total = total + Local::next(8)
+  total
+
+pub fn direct_local(): () -> i32
+  try
+    Local::next()
+  Local::next(tail):
+    tail(7)
+  Local::next(tail, max: i32):
+    tail(max + 1)
+
+pub fn helper_local(): () -> i32
+  try
+    helper()
+  Local::next(tail):
+    tail(5)
+  Local::next(tail, max: i32):
+    tail(max + 1)
+
+pub fn big_local(): () -> i32
+  try
+    big_helper()
+  Local::next(tail):
+    tail(5)
+  Local::next(tail, max: i32):
+    tail(max + 1)
