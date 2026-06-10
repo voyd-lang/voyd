@@ -34,6 +34,7 @@ export type MsgPackFunctions = {
   mapNew: FunctionMetadata;
   mapSet: FunctionMetadata;
   mapGet: FunctionMetadata;
+  mapHas: FunctionMetadata;
   mapTagIs: FunctionMetadata;
 };
 
@@ -238,6 +239,12 @@ export const ensureMsgPackFunctions = (
         name: "msgpack_map_get",
         paramCount: 2,
       }),
+      mapHas: requireFunctionMetaByName({
+        ctx,
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "msgpack_map_has",
+        paramCount: 2,
+      }),
       mapTagIs: requireFunctionMetaByName({
         ctx,
         moduleId: PUBLIC_MSGPACK_MODULE_ID,
@@ -273,6 +280,7 @@ export const ensureMsgPackFunctions = (
       msgpack.mapNew,
       msgpack.mapSet,
       msgpack.mapGet,
+      msgpack.mapHas,
       msgpack.mapTagIs,
     ].forEach((meta) =>
       markReachable({
