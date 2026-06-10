@@ -21,7 +21,7 @@ import { monomorphizeProgram } from "../../semantics/linking.js";
 import { codegenProgram } from "../codegen.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
-import type { TypeId } from "../../semantics/ids.js";
+import type { ProgramSymbolId, TypeId } from "../../semantics/ids.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -47,6 +47,11 @@ const localTailStdlibRngFixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
   "effects-local-tail-stdlib-rng.voyd"
+);
+const tailResumeArgEffectfulFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-tail-resume-arg-effectful.voyd"
 );
 
 const compileEffectFixtureWithCompilerOptimization = async (
@@ -75,18 +80,39 @@ const compileEffectFixtureWithCompilerOptimization = async (
       reachableFunctionInstances: undefined as never,
       reachableFunctionSymbols: undefined as never,
       reachableModuleLets: new Map(),
-      usedTraitDispatchSignatures: new Set(),
-      codegenPlan: {
-        representations: {
-          scalarObjectLocals: new Map(),
-        },
-      },
+      usedTraitDispatchSignatures: usedTraitDispatchSignaturesFor(program),
+      codegenPlan: { representations: {} },
     },
   });
   if (!result.wasm) {
     throw new Error("expected validated codegen to emit wasm bytes");
   }
   return { ...result, wasm: result.wasm };
+};
+
+const usedTraitDispatchSignaturesFor = (
+  program: ReturnType<typeof buildProgramCodegenView>,
+): Set<string> => {
+  const signatures = new Set<string>();
+  program.modules.forEach((moduleView, moduleId) => {
+    moduleView.hir.expressions.forEach((expr, exprId) => {
+      if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
+        return;
+      }
+      const callInfo = program.calls.getCallInfo(moduleId, exprId);
+      if (!callInfo.traitDispatch) {
+        return;
+      }
+      callInfo.targets?.forEach((target) => {
+        const mapping = program.traits.getTraitMethodImpl(target as ProgramSymbolId);
+        if (!mapping) {
+          return;
+        }
+        signatures.add(`${mapping.traitSymbol}:${mapping.traitMethodSymbol}`);
+      });
+    });
+  });
+  return signatures;
 };
 
 const loadSemantics = () =>
@@ -274,6 +300,7 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     expect(text).toMatch(/loop_sum_\d+__handled/);
     expect(text).toMatch(/match_value_\d+__handled/);
     expect(text).toMatch(/open_sum_\d+__handled/);
+    expect(text).toMatch(/local_then_dynamic_\d+__handled/);
 
     const host = await createVoydHost({ wasm: specialized.wasm });
     await expect(host.run<number>("triple_sum")).resolves.toBe(6);
@@ -292,6 +319,14 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
       },
     });
     expect(openResult.value).toBe(26);
+    const dynamicResult = await runEffectfulExport<number>({
+      wasm: hostBoundary.wasm,
+      entryName: "dynamic_trait_residual",
+      handlersByLabelSuffix: {
+        "Other::bump": (_request, value) => (value as number) + 20,
+      },
+    });
+    expect(dynamicResult.value).toBe(27);
   });
 
   it("preserves mutable std value captures in static local tail handlers", async () => {
@@ -317,6 +352,17 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
       expect(expected).toBe(expectedValue);
       await expect(specializedHost.run<number>(entry)).resolves.toBe(expected);
     }
+  });
+
+  it("captures effectful tail resume arguments inside handler clauses", async () => {
+    const { wasm } = await compileEffectFixture({
+      entryPath: tailResumeArgEffectfulFixturePath,
+      codegenOptions: { effectsHostBoundary: "off" },
+    });
+    const host = await createVoydHost({ wasm });
+
+    await expect(host.run<number>("tail_resume_arg_effectful_internal")).resolves.toBe(41);
+    await expect(host.run<number>("effectful_resume_arg_internal")).resolves.toBe(41);
   });
 
   it("does not re-evaluate guards when resuming after a perform", async () => {

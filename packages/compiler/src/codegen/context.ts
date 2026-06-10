@@ -46,7 +46,6 @@ import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
 import type { ProgramOptimizationFacts } from "../optimize/ir.js";
-import type { ScalarObjectLocalRepresentationPlan } from "../optimize/codegen-plan.js";
 import type { ProgramSymbolId } from "../semantics/ids.js";
 
 export interface CodegenOptions {
@@ -303,18 +302,11 @@ export interface LocalBindingProjectedElement extends LocalBindingBase {
   arrayTypeId: TypeId;
 }
 
-export interface LocalBindingScalarObject extends LocalBindingBase {
-  kind: "scalar-object";
-  plan: ScalarObjectLocalRepresentationPlan;
-  fields: ReadonlyMap<string, LocalBindingLocal>;
-}
-
 export type LocalBinding =
   | LocalBindingLocal
   | LocalBindingCapture
   | LocalBindingStorageRef
-  | LocalBindingProjectedElement
-  | LocalBindingScalarObject;
+  | LocalBindingProjectedElement;
 
 export interface HandlerScope {
   prevHandler: LocalBindingLocal;
@@ -354,6 +346,7 @@ export interface FunctionContext {
   handlerStack?: HandlerScope[];
   loopStack?: LoopScope[];
   continuations?: Map<SymbolId, ContinuationBinding>;
+  suppressTailResumptionExitChecks?: boolean;
   staticEffectContext?: StaticEffectHandlerContext;
   continuation?: {
     cfg: GroupContinuationCfg;

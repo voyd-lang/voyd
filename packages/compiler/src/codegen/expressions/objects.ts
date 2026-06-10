@@ -42,7 +42,6 @@ import {
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import { maybeReportValueBoxingNote } from "../value-boxing-notes.js";
 import { tryCompileProjectedFieldAccess } from "../projected-element-views.js";
-import { tryCompileScalarObjectFieldAccess } from "../scalar-objects.js";
 import { compileCallArgExpressionsWithTemps } from "./call/shared.js";
 
 export const compileObjectLiteralExpr = (
@@ -570,15 +569,6 @@ export const compileFieldAccessExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
-  const scalarObjectField = tryCompileScalarObjectFieldAccess({
-    expr,
-    ctx,
-    fnCtx,
-  });
-  if (scalarObjectField) {
-    return scalarObjectField;
-  }
-
   const projected = tryCompileProjectedFieldAccess({
     expr,
     ctx,

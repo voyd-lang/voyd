@@ -226,38 +226,6 @@ const expressionContainsResidualEffect = ({
   return found;
 };
 
-const expressionContainsMethodCall = ({
-  exprId,
-  ctx,
-}: {
-  exprId: number;
-  ctx: CodegenContext;
-}): boolean => {
-  let found = false;
-  walkHirExpression({
-    exprId,
-    ctx,
-    visitLambdaBodies: false,
-    visitHandlerBodies: false,
-    visitor: {
-      onExpr: (_nestedExprId, node) => {
-        if (node.exprKind === "method-call") {
-          found = true;
-          return "stop";
-        }
-        if (node.exprKind === "call") {
-          const callee = ctx.module.hir.expressions.get(node.callee);
-          if (callee?.exprKind !== "identifier") {
-            found = true;
-            return "stop";
-          }
-        }
-      },
-    },
-  });
-  return found;
-};
-
 const collectClauseCaptureSymbols = ({
   expr,
   fnCtx,
@@ -312,9 +280,6 @@ const buildStaticEffectContext = ({
   fnCtx: FunctionContext;
 }): StaticEffectHandlerContext | undefined => {
   if (!ctx.optimization || typeof expr.finallyBranch === "number") {
-    return undefined;
-  }
-  if (expressionContainsMethodCall({ exprId: expr.body, ctx })) {
     return undefined;
   }
 

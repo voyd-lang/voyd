@@ -38,6 +38,7 @@ export const compileWithLoader = async ({
   includeTests,
   testsOnly,
   runtimeDiagnostics,
+  optimize,
   loadModuleGraph,
   testScope,
   boundaryExports,
@@ -48,6 +49,7 @@ export const compileWithLoader = async ({
   includeTests?: boolean;
   testsOnly?: boolean;
   runtimeDiagnostics?: boolean;
+  optimize?: boolean;
   loadModuleGraph: LoadModuleGraphFn;
   testScope?: TestScope;
   boundaryExports?: BoundaryExportsOption;
@@ -78,11 +80,15 @@ export const compileWithLoader = async ({
     typeof runtimeDiagnostics === "boolean"
       ? { runtimeDiagnostics, emitEffectHelpers: true }
       : { emitEffectHelpers: true };
+  const optimizationCodegenOption =
+    typeof optimize === "boolean" ? { optimize } : {};
   const codegenOption = {
+    ...optimizationCodegenOption,
     ...runtimeDiagnosticsCodegenOption,
     boundaryExports: boundaryExports ?? "auto",
   } as const;
   const testCodegenOption = {
+    ...optimizationCodegenOption,
     ...runtimeDiagnosticsCodegenOption,
     boundaryExports: false,
   } as const;

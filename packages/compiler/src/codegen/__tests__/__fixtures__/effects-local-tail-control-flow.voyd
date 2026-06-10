@@ -17,6 +17,20 @@ obj Right { value: i32 }
 
 type Choice = Left | Right
 
+trait DynamicRunner
+  fn run(self) -> i32
+
+obj PureRunner { value: i32 }
+obj OtherRunner { value: i32 }
+
+impl DynamicRunner for PureRunner
+  fn run(self) -> i32
+    self.value + 1
+
+impl DynamicRunner for OtherRunner
+  fn run(self) -> i32
+    self.value + Other::bump(3)
+
 fn make_triple(): Local -> Triple
   Triple {
     x: Local::next(),
@@ -39,6 +53,9 @@ fn match_value(choice: Choice): Local -> i32
 
 fn open_sum(): (Local, Other) -> i32
   Local::next() + Other::bump(4)
+
+fn local_then_dynamic(runner: DynamicRunner): (Local, Other) -> i32
+  Local::next() + runner.run()
 
 pub fn triple_sum(): () -> i32
   try
@@ -74,6 +91,16 @@ pub fn match_local(): () -> i32
 pub fn open_local(): Other -> i32
   try open
     open_sum()
+  Local::next(tail):
+    tail(2)
+  Local::next(tail, max: i32):
+    tail(max + 1)
+  Local::ping(tail, value: i32):
+    tail(value + 1)
+
+pub fn dynamic_trait_residual(): Other -> i32
+  try open
+    local_then_dynamic(OtherRunner { value: 4 })
   Local::next(tail):
     tail(2)
   Local::next(tail, max: i32):

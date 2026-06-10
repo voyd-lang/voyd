@@ -36,7 +36,6 @@ import {
 } from "../types.js";
 import { refCast, structSetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
-import { tryCompileScalarObjectFieldAssignment } from "../scalar-objects.js";
 
 const storeIntoBinding = ({
   binding,
@@ -88,9 +87,6 @@ const storeIntoBinding = ({
   }
   if (binding.kind === "projected-element-ref") {
     throw new Error("cannot assign to a projected element binding");
-  }
-  if (binding.kind === "scalar-object") {
-    throw new Error("cannot assign to a scalar-replaced object binding");
   }
 
   return storeLocalValue({ binding, value: coerced, ctx, fnCtx });
@@ -386,19 +382,6 @@ export const compileAssignExpr = (
       ctx,
       fnCtx,
     });
-    const scalarObjectFieldStore = tryCompileScalarObjectFieldAssignment({
-      targetExpr,
-      value: coerced,
-      valueTypeId: targetTypeId,
-      ctx,
-      fnCtx,
-    });
-    if (scalarObjectFieldStore) {
-      return {
-        expr: scalarObjectFieldStore,
-        usedReturnCall: false,
-      };
-    }
     return {
       expr: compileFieldAssignment({
         targetExpr,
@@ -474,9 +457,6 @@ export const compileAssignExpr = (
   }
   if (binding.kind === "projected-element-ref") {
     throw new Error("cannot assign to a projected element binding");
-  }
-  if (binding.kind === "scalar-object") {
-    throw new Error("cannot assign to a scalar-replaced object binding");
   }
 
   return {

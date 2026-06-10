@@ -1,9 +1,7 @@
 import type {
   HirExpression,
   HirFunction,
-  HirLetStatement,
   HirModuleLet,
-  HirObjectLiteralExpr,
 } from "../semantics/hir/index.js";
 import { walkExpression } from "../semantics/hir/index.js";
 import type {
@@ -38,11 +36,7 @@ import type {
   OptimizedModuleView,
   ProgramOptimizationResult,
 } from "./ir.js";
-import type {
-  ProgramCodegenOptimizationPlan,
-  ScalarObjectLocalRepresentationPlan,
-  ScalarObjectMethodReceiverInlinePlan,
-} from "./codegen-plan.js";
+import type { ProgramCodegenOptimizationPlan } from "./codegen-plan.js";
 
 type MutableOptimizationIr = {
   baseProgram: ProgramCodegenView;
@@ -50,6 +44,7 @@ type MutableOptimizationIr = {
   options: {
     testMode: boolean;
     testScope: "all" | "entry";
+    boundaryExports?: CodegenOptions["boundaryExports"];
   };
   modules: Map<string, OptimizedModuleView>;
   calls: Map<string, Map<HirExprId, OptimizedCallInfo>>;
@@ -67,11 +62,7 @@ type MutableOptimizationIr = {
     reachableFunctionSymbols: Set<ProgramSymbolId>;
     reachableModuleLets: Map<string, Set<SymbolId>>;
     usedTraitDispatchSignatures: Set<string>;
-    codegenPlan: {
-      representations: {
-        scalarObjectLocals: Map<string, Map<SymbolId, ScalarObjectLocalRepresentationPlan>>;
-      };
-    };
+    codegenPlan: ProgramCodegenOptimizationPlan;
   };
 };
 
@@ -289,6 +280,7 @@ const buildOptimizationIr = ({
     options: {
       testMode: options?.testMode ?? false,
       testScope: options?.testScope ?? "all",
+      boundaryExports: options?.boundaryExports,
     },
     modules: optimizedModules,
     calls: normalizeCalls({ program }),
@@ -300,11 +292,7 @@ const buildOptimizationIr = ({
       reachableFunctionSymbols: new Set(),
       reachableModuleLets: new Map(),
       usedTraitDispatchSignatures: new Set(),
-      codegenPlan: {
-        representations: {
-          scalarObjectLocals: new Map(),
-        },
-      },
+      codegenPlan: { representations: {} },
     },
   };
 };
@@ -1407,851 +1395,6 @@ const continuationAndHandlerEnvironmentShrinkingPass: ProgramOptimizationPass = 
   },
 };
 
-type ExpressionParent =
-  | { kind: "expr"; exprId: HirExprId; role: string }
-  | { kind: "stmt"; stmtId: number; role: string };
-
-const expressionChildren = (expr: HirExpression): readonly { id: HirExprId; role: string }[] => {
-  switch (expr.exprKind) {
-    case "literal":
-    case "identifier":
-    case "overload-set":
-    case "continue":
-      return [];
-    case "break":
-      return typeof expr.value === "number" ? [{ id: expr.value, role: "value" }] : [];
-    case "lambda":
-      return [{ id: expr.body, role: "body" }];
-    case "effect-handler":
-      return [
-        { id: expr.body, role: "body" },
-        ...expr.handlers.map((handler, index) => ({
-          id: handler.body,
-          role: `handler:${index}`,
-        })),
-        ...(typeof expr.finallyBranch === "number"
-          ? [{ id: expr.finallyBranch, role: "finally" }]
-          : []),
-      ];
-    case "block":
-      return typeof expr.value === "number" ? [{ id: expr.value, role: "value" }] : [];
-    case "call":
-      return [
-        { id: expr.callee, role: "callee" },
-        ...expr.args.map((arg, index) => ({ id: arg.expr, role: `arg:${index}` })),
-      ];
-    case "method-call":
-      return [
-        { id: expr.target, role: "target" },
-        ...expr.args.map((arg, index) => ({ id: arg.expr, role: `arg:${index}` })),
-      ];
-    case "tuple":
-      return expr.elements.map((id, index) => ({ id, role: `element:${index}` }));
-    case "loop":
-      return [{ id: expr.body, role: "body" }];
-    case "while":
-      return [
-        { id: expr.condition, role: "condition" },
-        { id: expr.body, role: "body" },
-      ];
-    case "cond":
-    case "if":
-      return [
-        ...expr.branches.flatMap((branch, index) => [
-          { id: branch.condition, role: `branch:${index}:condition` },
-          { id: branch.value, role: `branch:${index}:value` },
-        ]),
-        ...(typeof expr.defaultBranch === "number"
-          ? [{ id: expr.defaultBranch, role: "default" }]
-          : []),
-      ];
-    case "match":
-      return [
-        { id: expr.discriminant, role: "discriminant" },
-        ...expr.arms.flatMap((arm, index) => [
-          ...(typeof arm.guard === "number"
-            ? [{ id: arm.guard, role: `arm:${index}:guard` }]
-            : []),
-          { id: arm.value, role: `arm:${index}:value` },
-        ]),
-      ];
-    case "object-literal":
-      return expr.entries.map((entry, index) => ({
-        id: entry.value,
-        role: `entry:${index}`,
-      }));
-    case "field-access":
-      return [{ id: expr.target, role: "target" }];
-    case "assign":
-      return [
-        ...(typeof expr.target === "number"
-          ? [{ id: expr.target, role: "target" }]
-          : []),
-        { id: expr.value, role: "value" },
-      ];
-  }
-};
-
-const buildExpressionParents = ({
-  moduleView,
-}: {
-  moduleView: ModuleCodegenView;
-}): Map<HirExprId, ExpressionParent> => {
-  const parents = new Map<HirExprId, ExpressionParent>();
-  moduleView.hir.expressions.forEach((expr, exprId) => {
-    expressionChildren(expr).forEach((child) => {
-      parents.set(child.id, { kind: "expr", exprId, role: child.role });
-    });
-  });
-  moduleView.hir.statements.forEach((stmt, stmtId) => {
-    if (stmt.kind === "let") {
-      parents.set(stmt.initializer, { kind: "stmt", stmtId, role: "initializer" });
-      return;
-    }
-    if (stmt.kind === "expr-stmt") {
-      parents.set(stmt.expr, { kind: "stmt", stmtId, role: "expr" });
-      return;
-    }
-    if (stmt.kind === "return" && typeof stmt.value === "number") {
-      parents.set(stmt.value, { kind: "stmt", stmtId, role: "value" });
-    }
-  });
-  return parents;
-};
-
-const expressionContainsSymbol = ({
-  exprId,
-  symbol,
-  moduleView,
-}: {
-  exprId: HirExprId;
-  symbol: SymbolId;
-  moduleView: ModuleCodegenView;
-}): boolean => {
-  let found = false;
-  walkExpression({
-    exprId,
-    hir: moduleView.hir,
-    options: {
-      skipLambdas: false,
-      visitHandlerBodies: true,
-    },
-    onEnterExpression: (_id, expr) => {
-      if (expr.exprKind === "identifier" && expr.symbol === symbol) {
-        found = true;
-        return { stop: true };
-      }
-      return undefined;
-    },
-  });
-  return found;
-};
-
-const expressionContainsEffectHandler = ({
-  exprId,
-  moduleView,
-}: {
-  exprId: HirExprId;
-  moduleView: ModuleCodegenView;
-}): boolean => {
-  let found = false;
-  walkExpression({
-    exprId,
-    hir: moduleView.hir,
-    options: {
-      skipLambdas: false,
-      visitHandlerBodies: true,
-    },
-    onEnterExpression: (_id, expr) => {
-      if (expr.exprKind === "effect-handler") {
-        found = true;
-        return { stop: true };
-      }
-      return undefined;
-    },
-  });
-  return found;
-};
-
-const expressionContainsEffectfulCall = ({
-  exprId,
-  moduleView,
-}: {
-  exprId: HirExprId;
-  moduleView: ModuleCodegenView;
-}): boolean => {
-  let found = false;
-  walkExpression({
-    exprId,
-    hir: moduleView.hir,
-    options: {
-      skipLambdas: true,
-      visitHandlerBodies: false,
-    },
-    onEnterExpression: (_id, expr) => {
-      if (
-        (expr.exprKind === "call" || expr.exprKind === "method-call") &&
-        moduleView.effectsIr.calls.get(expr.id)?.kind !== "pure-call"
-      ) {
-        found = true;
-        return { stop: true };
-      }
-      return undefined;
-    },
-  });
-  return found;
-};
-
-const expressionIsAssignmentTarget = ({
-  exprId,
-  parents,
-  moduleView,
-}: {
-  exprId: HirExprId;
-  parents: ReadonlyMap<HirExprId, ExpressionParent>;
-  moduleView: ModuleCodegenView;
-}): boolean => {
-  let current = exprId;
-  while (true) {
-    const parent = parents.get(current);
-    if (!parent || parent.kind !== "expr") {
-      return false;
-    }
-    const parentExpr = moduleView.hir.expressions.get(parent.exprId);
-    if (parentExpr?.exprKind === "assign" && parent.role === "target") {
-      return true;
-    }
-    if (parentExpr?.exprKind !== "field-access" || parent.role !== "target") {
-      return false;
-    }
-    current = parent.exprId;
-  }
-};
-
-const expressionIsDirectAssignmentTarget = ({
-  exprId,
-  parents,
-  moduleView,
-}: {
-  exprId: HirExprId;
-  parents: ReadonlyMap<HirExprId, ExpressionParent>;
-  moduleView: ModuleCodegenView;
-}): boolean => {
-  const parent = parents.get(exprId);
-  if (!parent || parent.kind !== "expr" || parent.role !== "target") {
-    return false;
-  }
-  return moduleView.hir.expressions.get(parent.exprId)?.exprKind === "assign";
-};
-
-const buildScalarObjectInitializerPlan = ({
-  moduleId,
-  symbol,
-  expr,
-  typeId,
-  program,
-}: {
-  moduleId: string;
-  symbol: SymbolId;
-  expr: HirObjectLiteralExpr;
-  typeId?: TypeId;
-  program: ProgramCodegenView;
-}): Pick<
-  ScalarObjectLocalRepresentationPlan,
-  | "kind"
-  | "moduleId"
-  | "symbol"
-  | "initializerExpr"
-  | "typeId"
-  | "representation"
-  | "fields"
-  | "initializerFields"
-> | undefined => {
-  if (expr.literalKind !== "nominal") {
-    return undefined;
-  }
-  const nominalTypeId = exactNominalForType({ typeId, program });
-  const desc =
-    typeof nominalTypeId === "number"
-      ? program.types.getTypeDesc(nominalTypeId)
-      : undefined;
-  if (desc && desc.kind !== "nominal-object") {
-    return undefined;
-  }
-  const owner =
-    desc?.owner ??
-    (typeof expr.targetSymbol === "number"
-      ? program.symbols.canonicalIdOf(moduleId, expr.targetSymbol)
-      : undefined);
-  const objectInfo =
-    typeof nominalTypeId === "number"
-      ? program.objects.getInfoByNominal(nominalTypeId)
-      : undefined;
-  const objectTemplate =
-    !objectInfo && typeof owner === "number"
-      ? program.objects.getTemplate(owner)
-      : undefined;
-  if (!objectInfo && !objectTemplate) {
-    return undefined;
-  }
-  const targetTypeArgs =
-    expr.target?.typeKind === "named"
-      ? expr.target.typeArguments?.map((arg) => arg.typeId)
-      : undefined;
-  const templateTypeArgs =
-    desc?.typeArgs ??
-    (targetTypeArgs?.every((arg): arg is TypeId => typeof arg === "number")
-      ? targetTypeArgs
-      : undefined);
-  const templateSubstitution =
-    objectTemplate &&
-    templateTypeArgs &&
-    objectTemplate.params.length === templateTypeArgs.length
-      ? new Map(
-          objectTemplate.params.map(
-            (param, index) => [param.typeParam, templateTypeArgs[index]!] as const,
-          ),
-        )
-      : undefined;
-  const structuralId = objectInfo
-    ? objectInfo.structural
-    : objectTemplate && templateSubstitution
-      ? program.types.substitute(objectTemplate.structural, templateSubstitution)
-      : objectTemplate?.structural;
-  if (typeof structuralId !== "number") {
-    return undefined;
-  }
-  const structuralLayout = program.types.getStructuralLayout(structuralId);
-  if (structuralLayout?.kind !== "structural-object") {
-    return undefined;
-  }
-  const fieldNames = new Set(structuralLayout.fields.map((field) => field.name));
-  const entries = new Set<string>();
-  for (const entry of expr.entries) {
-    if (entry.kind !== "field" || !fieldNames.has(entry.name)) {
-      return undefined;
-    }
-    entries.add(entry.name);
-  }
-  if (entries.size !== fieldNames.size) {
-    return undefined;
-  }
-  const planTypeId =
-    typeof typeId === "number"
-      ? typeId
-      : objectTemplate && templateSubstitution
-        ? program.types.substitute(objectTemplate.nominal, templateSubstitution)
-        : objectTemplate?.nominal;
-  if (typeof planTypeId !== "number") {
-    return undefined;
-  }
-
-  return {
-    kind: "scalar-object-local",
-    moduleId,
-    symbol,
-    initializerExpr: expr.id,
-    typeId: planTypeId,
-    representation: "field-locals",
-    fields: structuralLayout.fields.map((field) => ({
-      name: field.name,
-      typeId: field.typeId,
-    })),
-    initializerFields: expr.entries.map((entry) => {
-      if (entry.kind !== "field") {
-        throw new Error("scalar object plan cannot include spread initializers");
-      }
-      return {
-        name: entry.name,
-        valueExpr: entry.value,
-      };
-    }),
-  };
-};
-
-const symbolTypeFor = ({
-  symbol,
-  moduleView,
-}: {
-  symbol: SymbolId;
-  moduleView: OptimizedModuleView;
-}): TypeId | undefined => {
-  const schemeId = moduleView.semantics.typing.table.getSymbolScheme(symbol);
-  return typeof schemeId === "number"
-    ? moduleView.semantics.typing.arena.getScheme(schemeId).body
-    : undefined;
-};
-
-const SCALAR_METHOD_INLINE_EXPR_LIMIT = 24;
-const SCALAR_METHOD_INLINE_STMT_LIMIT = 8;
-
-const simpleDirectSignatureType = ({
-  typeId,
-  program,
-}: {
-  typeId: TypeId;
-  program: ProgramCodegenView;
-}): boolean => {
-  const desc = program.types.getTypeDesc(typeId);
-  return desc.kind === "primitive" || desc.kind === "function";
-};
-
-const singletonMethodTarget = ({
-  expr,
-  moduleId,
-  program,
-}: {
-  expr: Extract<HirExpression, { exprKind: "method-call" }>;
-  moduleId: string;
-  program: ProgramCodegenView;
-}): { moduleId: string; symbol: SymbolId } | undefined => {
-  const callInfo = program.calls.getCallInfo(moduleId, expr.id);
-  if (callInfo.traitDispatch || callInfo.targets?.size !== 1) {
-    return undefined;
-  }
-  const functionId = callInfo.targets.values().next().value;
-  return typeof functionId === "number"
-    ? program.functions.getFunctionRef(functionId)
-    : undefined;
-};
-
-const isScalarLeafIntrinsicCall = ({
-  expr,
-  moduleId,
-  ownerModule,
-  program,
-}: {
-  expr: Extract<HirExpression, { exprKind: "call" }>;
-  moduleId: string;
-  ownerModule: ModuleCodegenView;
-  program: ProgramCodegenView;
-}): boolean => {
-  const callee = ownerModule.hir.expressions.get(expr.callee);
-  if (callee?.exprKind === "identifier") {
-    const localId = program.symbols.tryIdOf({
-      moduleId,
-      symbol: callee.symbol,
-    });
-    if (
-      typeof localId === "number" &&
-      program.symbols.getIntrinsicFunctionFlags(localId).intrinsic === true
-    ) {
-      return true;
-    }
-  }
-
-  const targets = program.calls.getCallInfo(moduleId, expr.id).targets;
-  if (!targets || targets.size === 0) {
-    return false;
-  }
-  return Array.from(targets.values()).every((target) =>
-    program.symbols.getIntrinsicFunctionFlags(target as ProgramSymbolId).intrinsic === true
-  );
-};
-
-const scalarInlineableMethodReceiverPlan = ({
-  expr,
-  moduleId,
-  program,
-}: {
-  expr: Extract<HirExpression, { exprKind: "method-call" }>;
-  moduleId: string;
-  program: ProgramCodegenView;
-}): ScalarObjectMethodReceiverInlinePlan | undefined => {
-  const target = singletonMethodTarget({ expr, moduleId, program });
-  if (!target) {
-    return undefined;
-  }
-
-  const ownerModule = program.modules.get(target.moduleId);
-  if (!ownerModule) {
-    return undefined;
-  }
-  const fn = functionItemBySymbol({
-    moduleView: ownerModule,
-    symbol: target.symbol,
-  });
-  const signature = program.functions.getSignature(target.moduleId, target.symbol);
-  if (!fn || !signature || !program.effects.isEmpty(signature.effectRow)) {
-    return undefined;
-  }
-  if (fn.parameters.some((parameter) => typeof parameter.defaultValue === "number")) {
-    return undefined;
-  }
-  if (
-    signature.parameters.length === 0 ||
-    signature.parameters.some((parameter) => (parameter.bindingKind ?? "value") !== "value") ||
-    !signature.parameters.slice(1).every((parameter) =>
-      simpleDirectSignatureType({ typeId: parameter.typeId, program }),
-    ) ||
-    !simpleDirectSignatureType({ typeId: signature.returnType, program })
-  ) {
-    return undefined;
-  }
-
-  const receiverSymbol = fn.parameters[0]?.symbol;
-  if (typeof receiverSymbol !== "number") {
-    return undefined;
-  }
-  const parents = buildExpressionParents({ moduleView: ownerModule });
-  let exprCount = 0;
-  let stmtCount = 0;
-  let allowed = true;
-  walkExpression({
-    exprId: fn.body,
-    hir: ownerModule.hir,
-    options: {
-      skipLambdas: false,
-      visitHandlerBodies: true,
-    },
-    onEnterExpression: (exprId, bodyExpr) => {
-      exprCount += 1;
-      if (exprCount > SCALAR_METHOD_INLINE_EXPR_LIMIT) {
-        allowed = false;
-        return { stop: true };
-      }
-
-      if (bodyExpr.exprKind === "identifier" && bodyExpr.symbol === receiverSymbol) {
-        const parent = parents.get(exprId);
-        const parentExpr =
-          parent?.kind === "expr"
-            ? ownerModule.hir.expressions.get(parent.exprId)
-            : undefined;
-        if (
-          parent?.kind !== "expr" ||
-          parentExpr?.exprKind !== "field-access" ||
-          parent.role !== "target" ||
-          expressionIsAssignmentTarget({
-            exprId: parent.exprId,
-            parents,
-            moduleView: ownerModule,
-          })
-        ) {
-          allowed = false;
-          return { stop: true };
-        }
-      }
-
-      switch (bodyExpr.exprKind) {
-        case "literal":
-        case "identifier":
-          return undefined;
-        case "call":
-          if (
-            isScalarLeafIntrinsicCall({
-              expr: bodyExpr,
-              moduleId: target.moduleId,
-              ownerModule,
-              program,
-            })
-          ) {
-            return undefined;
-          }
-          allowed = false;
-          return { stop: true };
-        case "block":
-        case "tuple":
-        case "cond":
-        case "if":
-        case "object-literal":
-        case "field-access":
-          return undefined;
-        default:
-          allowed = false;
-          return { stop: true };
-      }
-    },
-    onEnterStatement: (_stmtId, stmt) => {
-      stmtCount += 1;
-      if (stmtCount > SCALAR_METHOD_INLINE_STMT_LIMIT || stmt.kind === "return") {
-        allowed = false;
-        return { stop: true };
-      }
-      return undefined;
-    },
-  });
-
-  return allowed
-    ? {
-        callExpr: expr.id,
-        targetModuleId: target.moduleId,
-        targetSymbol: target.symbol,
-      }
-    : undefined;
-};
-
-const localIsLiveAcrossEffectfulExpression = ({
-  block,
-  stmtIndex,
-  symbol,
-  moduleView,
-}: {
-  block: Extract<HirExpression, { exprKind: "block" }>;
-  stmtIndex: number;
-  symbol: SymbolId;
-  moduleView: ModuleCodegenView;
-}): boolean => {
-  let seenEffectful = false;
-  const laterStatements = block.statements.slice(stmtIndex + 1);
-  for (const stmtId of laterStatements) {
-    const stmt = moduleView.hir.statements.get(stmtId);
-    const exprId =
-      stmt?.kind === "let"
-        ? stmt.initializer
-        : stmt?.kind === "expr-stmt"
-          ? stmt.expr
-          : stmt?.kind === "return" && typeof stmt.value === "number"
-            ? stmt.value
-            : undefined;
-    if (typeof exprId !== "number") {
-      continue;
-    }
-
-    const hasSymbol = expressionContainsSymbol({ exprId, symbol, moduleView });
-    const hasEffect = expressionContainsEffectfulCall({ exprId, moduleView });
-    if ((seenEffectful && hasSymbol) || (hasEffect && hasSymbol)) {
-      return true;
-    }
-    seenEffectful = seenEffectful || hasEffect;
-  }
-
-  if (typeof block.value !== "number") {
-    return false;
-  }
-  const valueHasSymbol = expressionContainsSymbol({
-    exprId: block.value,
-    symbol,
-    moduleView,
-  });
-  const valueHasEffect = expressionContainsEffectfulCall({
-    exprId: block.value,
-    moduleView,
-  });
-  return (seenEffectful && valueHasSymbol) || (valueHasEffect && valueHasSymbol);
-};
-
-const buildScalarObjectLocalRepresentationPlan = ({
-  stmt,
-  block,
-  stmtIndex,
-  functionBody,
-  moduleId,
-  moduleView,
-  parents,
-  program,
-}: {
-  stmt: HirLetStatement;
-  block: Extract<HirExpression, { exprKind: "block" }>;
-  stmtIndex: number;
-  functionBody: HirExprId;
-  moduleId: string;
-  moduleView: OptimizedModuleView;
-  parents: ReadonlyMap<HirExprId, ExpressionParent>;
-  program: ProgramCodegenView;
-}): ScalarObjectLocalRepresentationPlan | undefined => {
-  if (stmt.pattern.kind !== "identifier") {
-    return undefined;
-  }
-  const initializer = moduleView.hir.expressions.get(stmt.initializer);
-  if (!initializer || initializer.exprKind !== "object-literal") {
-    return undefined;
-  }
-  if (
-    expressionContainsEffectfulCall({
-      exprId: stmt.initializer,
-      moduleView,
-    }) ||
-    localIsLiveAcrossEffectfulExpression({
-      block,
-      stmtIndex,
-      symbol: stmt.pattern.symbol,
-      moduleView,
-    })
-  ) {
-    return undefined;
-  }
-  const typeId =
-    symbolTypeFor({
-      symbol: stmt.pattern.symbol,
-      moduleView,
-    }) ??
-    exprTypeFor({
-      moduleView,
-      exprId: stmt.initializer,
-    });
-  const initializerPlan = buildScalarObjectInitializerPlan({
-    moduleId,
-    symbol: stmt.pattern.symbol,
-    expr: initializer,
-    typeId,
-    program,
-  });
-  if (!initializerPlan) {
-    return undefined;
-  }
-
-  const symbol = stmt.pattern.symbol;
-  const methodReceiverInline: ScalarObjectMethodReceiverInlinePlan[] = [];
-  let allowed = true;
-  walkExpression({
-    exprId: functionBody,
-    hir: moduleView.hir,
-    options: {
-      skipLambdas: false,
-      visitHandlerBodies: true,
-    },
-    onEnterExpression: (exprId, expr) => {
-      if (expr.exprKind === "lambda" && expr.captures.some((capture) => capture.symbol === symbol)) {
-        allowed = false;
-        return { stop: true };
-      }
-      if (expr.exprKind === "effect-handler") {
-        const handlerUsesSymbol = expr.handlers.some((handler) =>
-          expressionContainsSymbol({
-            exprId: handler.body,
-            symbol,
-            moduleView,
-          }),
-        );
-        if (handlerUsesSymbol) {
-          allowed = false;
-          return { stop: true };
-        }
-      }
-      if (expr.exprKind !== "identifier" || expr.symbol !== symbol) {
-        return undefined;
-      }
-      const parent = parents.get(exprId);
-      const parentExpr =
-        parent?.kind === "expr"
-          ? moduleView.hir.expressions.get(parent.exprId)
-          : undefined;
-      const allowedFieldUse =
-        parent?.kind === "expr" &&
-        parentExpr?.exprKind === "field-access" &&
-        parent.role === "target" &&
-        (!expressionIsAssignmentTarget({
-          exprId: parent.exprId,
-          parents,
-          moduleView,
-        }) ||
-          expressionIsDirectAssignmentTarget({
-            exprId: parent.exprId,
-            parents,
-            moduleView,
-          }));
-      const methodReceiverPlan =
-        parent?.kind === "expr" &&
-        parentExpr?.exprKind === "method-call" &&
-        parent.role === "target" &&
-        !expressionIsAssignmentTarget({
-          exprId: parent.exprId,
-          parents,
-          moduleView,
-        })
-          ? scalarInlineableMethodReceiverPlan({
-          expr: parentExpr,
-          moduleId,
-          program,
-            })
-          : undefined;
-      if (!allowedFieldUse && !methodReceiverPlan) {
-        allowed = false;
-        return { stop: true };
-      }
-      if (methodReceiverPlan) {
-        methodReceiverInline.push(methodReceiverPlan);
-      }
-      return undefined;
-    },
-  });
-
-  if (!allowed) {
-    return undefined;
-  }
-
-  return {
-    ...initializerPlan,
-    operations: {
-      fieldRead: "local",
-      fieldWrite: "local",
-      methodReceiverInline,
-      wholeValueMaterialization: { allowed: false },
-    },
-    verified: {
-      directFieldInitializers: true,
-      noUnsafeEscapes: true,
-      noContinuationCapture: true,
-      sourceOrderInitializers: true,
-    },
-  };
-};
-
-const scalarReplacementOfObjectLocalsPass: ProgramOptimizationPass = {
-  name: "scalar-replacement-of-object-locals",
-  run(ctx) {
-    let changed = false;
-
-    ctx.ir.modules.forEach((moduleView, moduleId) => {
-      const parents = buildExpressionParents({ moduleView });
-      const plans = new Map<SymbolId, ScalarObjectLocalRepresentationPlan>();
-      moduleView.hir.items.forEach((item) => {
-        if (item.kind !== "function") {
-          return;
-        }
-        if (
-          expressionContainsEffectHandler({
-            exprId: item.body,
-            moduleView,
-          })
-        ) {
-          return;
-        }
-        collectPostOrderExprIds({
-          rootExprId: item.body,
-          moduleView,
-        }).forEach((exprId) => {
-          const expr = moduleView.hir.expressions.get(exprId);
-          if (!expr || expr.exprKind !== "block") {
-            return;
-          }
-          expr.statements.forEach((stmtId, stmtIndex) => {
-            const stmt = moduleView.hir.statements.get(stmtId);
-            const plan =
-              stmt?.kind === "let" &&
-              stmt.pattern.kind === "identifier" &&
-              buildScalarObjectLocalRepresentationPlan({
-                stmt,
-                block: expr,
-                stmtIndex,
-                functionBody: item.body,
-                moduleId,
-                moduleView,
-                parents,
-                program: ctx.ir.baseProgram,
-              });
-            if (plan) {
-              plans.set(plan.symbol, plan);
-            }
-          });
-        });
-      });
-
-      const existing =
-        ctx.ir.facts.codegenPlan.representations.scalarObjectLocals.get(moduleId);
-      if (!existing || !scalarObjectPlanMapEquals(existing, plans)) {
-        (ctx.ir as MutableOptimizationIr).facts.codegenPlan.representations.scalarObjectLocals.set(
-          moduleId,
-          plans,
-        );
-        changed = true;
-      }
-    });
-
-    return { changed };
-  },
-};
-
 const functionItemBySymbol = ({
   moduleView,
   symbol,
@@ -2332,18 +1475,215 @@ const canonicalProgramSymbolIdOf = ({
 }): ProgramSymbolId =>
   ir.baseProgram.symbols.canonicalIdOf(moduleId, symbol) as ProgramSymbolId;
 
+const resolveIntrinsicFunction = ({
+  ir,
+  intrinsicName,
+}: {
+  ir: MutableOptimizationIr;
+  intrinsicName: string;
+}): { moduleId: string; symbol: SymbolId } | undefined => {
+  let matched: { moduleId: string; symbol: SymbolId } | undefined;
+
+  ir.modules.forEach((moduleView, moduleId) => {
+    moduleView.hir.items.forEach((item) => {
+      if (item.kind !== "function") {
+        return;
+      }
+      const symbolId = ir.baseProgram.symbols.canonicalIdOf(
+        moduleId,
+        item.symbol,
+      ) as ProgramSymbolId;
+      if (ir.baseProgram.symbols.getIntrinsicName(symbolId) !== intrinsicName) {
+        return;
+      }
+      if (
+        matched &&
+        (matched.moduleId !== moduleId || matched.symbol !== item.symbol)
+      ) {
+        throw new Error(
+          `ambiguous optimizer function dependency ${intrinsicName}`,
+        );
+      }
+      matched = { moduleId, symbol: item.symbol };
+    });
+  });
+
+  return matched;
+};
+
+const findFunctionSymbolByName = ({
+  ir,
+  moduleId,
+  name,
+  paramCount,
+}: {
+  ir: MutableOptimizationIr;
+  moduleId: string;
+  name: string;
+  paramCount?: number;
+}): SymbolId | undefined => {
+  const moduleView = ir.modules.get(moduleId);
+  if (!moduleView) {
+    return undefined;
+  }
+
+  for (const item of moduleView.hir.items.values()) {
+    if (item.kind !== "function") {
+      continue;
+    }
+    const symbolId = ir.baseProgram.symbols.canonicalIdOf(
+      moduleId,
+      item.symbol,
+    ) as ProgramSymbolId;
+    if (ir.baseProgram.symbols.getName(symbolId) !== name) {
+      continue;
+    }
+    if (typeof paramCount === "number") {
+      const signature = ir.baseProgram.functions.getSignature(
+        moduleId,
+        item.symbol,
+      );
+      if (!signature || signature.parameters.length !== paramCount) {
+        continue;
+      }
+    }
+    return item.symbol;
+  }
+
+  return undefined;
+};
+
+const serializerForType = ({
+  ir,
+  typeId,
+}: {
+  ir: MutableOptimizationIr;
+  typeId: TypeId;
+}): ReturnType<ProgramCodegenView["symbols"]["getSerializer"]> => {
+  const serializers = [
+    ...ir.baseProgram.types
+      .getAliasSymbols(typeId)
+      .map((symbol) => ir.baseProgram.symbols.getSerializer(symbol)),
+    (() => {
+      const owner = ir.baseProgram.types.getNominalOwner(typeId);
+      return typeof owner === "number"
+        ? ir.baseProgram.symbols.getSerializer(owner)
+        : undefined;
+    })(),
+  ].filter((serializer): serializer is NonNullable<typeof serializer> =>
+    Boolean(serializer),
+  );
+  if (serializers.length === 0) {
+    return undefined;
+  }
+  const reference = serializers[0]!;
+  const mismatch = serializers.find(
+    (serializer) =>
+      serializer.formatId !== reference.formatId ||
+      serializer.encode.moduleId !== reference.encode.moduleId ||
+      serializer.encode.symbol !== reference.encode.symbol ||
+      serializer.decode.moduleId !== reference.decode.moduleId ||
+      serializer.decode.symbol !== reference.decode.symbol,
+  );
+  if (mismatch) {
+    throw new Error(`conflicting serializers for type ${typeId}`);
+  }
+  return reference;
+};
+
+const serializerForTypes = ({
+  ir,
+  typeIds,
+}: {
+  ir: MutableOptimizationIr;
+  typeIds: readonly TypeId[];
+}): ReturnType<ProgramCodegenView["symbols"]["getSerializer"]> => {
+  const serializers = typeIds
+    .map((typeId) => serializerForType({ ir, typeId }))
+    .filter((serializer): serializer is NonNullable<typeof serializer> =>
+      Boolean(serializer),
+    );
+  if (serializers.length === 0) {
+    return undefined;
+  }
+  const reference = serializers[0]!;
+  const mismatch = serializers.find(
+    (serializer) =>
+      serializer.formatId !== reference.formatId ||
+      serializer.encode.moduleId !== reference.encode.moduleId ||
+      serializer.encode.symbol !== reference.encode.symbol ||
+      serializer.decode.moduleId !== reference.decode.moduleId ||
+      serializer.decode.symbol !== reference.decode.symbol,
+  );
+  if (mismatch) {
+    throw new Error(`conflicting serializers for exported type list`);
+  }
+  return reference;
+};
+
+const shouldConsiderBoundaryExportForOptimization = ({
+  exportName,
+  boundaryExports,
+}: {
+  exportName: string;
+  boundaryExports: CodegenOptions["boundaryExports"] | undefined;
+}): boolean => {
+  if (!boundaryExports || boundaryExports === "off") {
+    return false;
+  }
+  if (boundaryExports === "auto") {
+    return true;
+  }
+  if (boundaryExports.mode === "off") {
+    return false;
+  }
+  if (boundaryExports.include && !boundaryExports.include.includes(exportName)) {
+    return false;
+  }
+  if (boundaryExports.mode === "only") {
+    return boundaryExports.include?.includes(exportName) ?? false;
+  }
+  return true;
+};
+
+const MSGPACK_FUNCTIONS: readonly {
+  moduleId: string;
+  name: string;
+  paramCount: number;
+}[] = [
+  { moduleId: "std::msgpack::fns", name: "encode_value", paramCount: 3 },
+  { moduleId: "std::msgpack::fns", name: "decode_value", paramCount: 2 },
+  { moduleId: "std::msgpack", name: "make_null", paramCount: 0 },
+  { moduleId: "std::msgpack", name: "make_bool", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_make_string", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_array", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_i32", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_i64", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_f32", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_f64", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_map", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_bool", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_string", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_array", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_i32", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_i64", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_f32", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_f64", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_map", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_array_with_capacity", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_array_push", paramCount: 2 },
+  { moduleId: "std::msgpack", name: "msgpack_array_length", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_array_raw_storage", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_map_new", paramCount: 0 },
+  { moduleId: "std::msgpack", name: "msgpack_map_set", paramCount: 3 },
+  { moduleId: "std::msgpack", name: "msgpack_map_get", paramCount: 2 },
+  { moduleId: "std::msgpack", name: "msgpack_map_has", paramCount: 2 },
+  { moduleId: "std::msgpack", name: "msgpack_map_tag_is", paramCount: 2 },
+  { moduleId: "std::string", name: "new_string", paramCount: 1 },
+];
+
 const setEquals = <T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean =>
   left.size === right.size && Array.from(left).every((value) => right.has(value));
-
-const scalarObjectPlanMapEquals = (
-  left: ReadonlyMap<SymbolId, ScalarObjectLocalRepresentationPlan>,
-  right: ReadonlyMap<SymbolId, ScalarObjectLocalRepresentationPlan>,
-): boolean =>
-  left.size === right.size &&
-  Array.from(left.entries()).every(([symbol, plan]) => {
-    const other = right.get(symbol);
-    return other ? JSON.stringify(plan) === JSON.stringify(other) : false;
-  });
 
 const mapOfSetEquals = <K, V>(
   left: ReadonlyMap<K, ReadonlySet<V>>,
@@ -2354,6 +1694,14 @@ const mapOfSetEquals = <K, V>(
     const other = right.get(key);
     return other ? setEquals(values, other) : false;
   });
+
+const traitDispatchSignatureKey = ({
+  traitSymbol,
+  traitMethodSymbol,
+}: {
+  traitSymbol: ProgramSymbolId;
+  traitMethodSymbol: ProgramSymbolId;
+}): string => `${traitSymbol}:${traitMethodSymbol}`;
 
 const resolveTargetsForCaller = ({
   moduleId,
@@ -2416,7 +1764,11 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
     const queuedModuleLets: { moduleId: string; symbol: SymbolId }[] = [];
 
     const enqueueInstance = (instanceId: ProgramFunctionInstanceId | undefined): void => {
-      if (typeof instanceId !== "number" || reachableInstances.has(instanceId)) {
+      if (
+        typeof instanceId !== "number" ||
+        reachableInstances.has(instanceId) ||
+        queuedInstances.includes(instanceId)
+      ) {
         return;
       }
       queuedInstances.push(instanceId);
@@ -2450,7 +1802,13 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       moduleId: string;
       symbol: SymbolId;
     }): void => {
-      reachableSymbols.add(canonicalProgramSymbolIdOf({ moduleId, symbol, ir: ctx.ir as MutableOptimizationIr }));
+      reachableSymbols.add(
+        canonicalProgramSymbolIdOf({
+          moduleId,
+          symbol,
+          ir: ctx.ir as MutableOptimizationIr,
+        }),
+      );
       const knownInstances =
         ctx.ir.functionInstantiations.get(moduleId)?.get(symbol);
       if (knownInstances && knownInstances.size > 0) {
@@ -2460,6 +1818,123 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       enqueueInstance(
         ctx.ir.baseProgram.functions.getInstanceId(moduleId, symbol, []),
       );
+    };
+
+    const enqueueFunctionByName = ({
+      moduleId,
+      name,
+      paramCount,
+    }: {
+      moduleId: string;
+      name: string;
+      paramCount: number;
+    }): void => {
+      const symbol = findFunctionSymbolByName({
+        ir: ctx.ir as MutableOptimizationIr,
+        moduleId,
+        name,
+        paramCount,
+      });
+      if (typeof symbol !== "number") {
+        return;
+      }
+      enqueueKnownFunctionInstances({ moduleId, symbol });
+    };
+
+    const enqueueMsgPackFunctions = (): void => {
+      MSGPACK_FUNCTIONS.forEach((entry) => enqueueFunctionByName(entry));
+    };
+
+    const enqueueSerializersForTypes = (typeIds: readonly TypeId[]): void => {
+      typeIds.forEach((typeId) => {
+        const serializer = serializerForType({
+          ir: ctx.ir as MutableOptimizationIr,
+          typeId,
+        });
+        if (!serializer) {
+          return;
+        }
+        enqueueKnownFunctionInstances(serializer.encode);
+        enqueueKnownFunctionInstances(serializer.decode);
+      });
+    };
+
+    const exportedFunctionTypeLists = ({
+      moduleId,
+      symbol,
+    }: {
+      moduleId: string;
+      symbol: SymbolId;
+    }): readonly (readonly TypeId[])[] => {
+      const resolved = resolveImportedSymbol({
+        moduleId,
+        symbol,
+        ir: ctx.ir as MutableOptimizationIr,
+      });
+      const signature = ctx.ir.baseProgram.functions.getSignature(
+        resolved.moduleId,
+        resolved.symbol,
+      );
+      if (!signature) {
+        return [];
+      }
+      const scheme = ctx.ir.baseProgram.types.getScheme(signature.scheme);
+      const instantiations =
+        ctx.ir.functionInstantiations.get(resolved.moduleId)?.get(resolved.symbol);
+      const typeArgLists =
+        instantiations && instantiations.size > 0
+          ? Array.from(instantiations.values())
+          : scheme.params.length === 0
+            ? [[] as readonly TypeId[]]
+            : [];
+
+      return typeArgLists.flatMap((typeArgs) => {
+        const typeId = ctx.ir.baseProgram.types.instantiate(
+          signature.scheme,
+          typeArgs,
+        );
+        const desc = ctx.ir.baseProgram.types.getTypeDesc(typeId);
+        if (desc.kind !== "function") {
+          return [];
+        }
+        return [[
+          ...desc.parameters.map((param) => param.type),
+          desc.returnType,
+        ]];
+      });
+    };
+
+    const enqueueSerializedExportDependencies = ({
+      moduleId,
+      symbol,
+    }: {
+      moduleId: string;
+      symbol: SymbolId;
+    }): void => {
+      exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
+        const serializer = serializerForTypes({
+          ir: ctx.ir as MutableOptimizationIr,
+          typeIds,
+        });
+        if (!serializer) {
+          return;
+        }
+        enqueueMsgPackFunctions();
+        enqueueSerializersForTypes(typeIds);
+      });
+    };
+
+    const enqueueBoundaryExportDependencies = ({
+      moduleId,
+      symbol,
+    }: {
+      moduleId: string;
+      symbol: SymbolId;
+    }): void => {
+      enqueueMsgPackFunctions();
+      exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
+        enqueueSerializersForTypes(typeIds);
+      });
     };
 
     const recordResolvedSymbolReachability = ({
@@ -2538,7 +2013,10 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
               return;
             }
             usedTraitDispatchSignatures.add(
-              `${traitMethodImpl.traitSymbol}:${traitMethodImpl.traitMethodSymbol}`,
+              traitDispatchSignatureKey({
+                traitSymbol: traitMethodImpl.traitSymbol,
+                traitMethodSymbol: traitMethodImpl.traitMethodSymbol,
+              }),
             );
           });
 
@@ -2559,6 +2037,16 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
             symbol: expr.symbol,
           });
         }
+
+        if (expr.exprKind === "literal" && expr.literalKind === "string") {
+          const dependency = resolveIntrinsicFunction({
+            ir: ctx.ir as MutableOptimizationIr,
+            intrinsicName: "__string_new",
+          });
+          if (dependency) {
+            enqueueKnownFunctionInstances(dependency);
+          }
+        }
       });
     };
 
@@ -2575,6 +2063,32 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
           moduleId: rootModule.moduleId,
           symbol: entry.symbol,
         });
+        enqueueSerializedExportDependencies({
+          moduleId: rootModule.moduleId,
+          symbol: entry.symbol,
+        });
+        const exportName =
+          entry.alias ??
+          ctx.ir.baseProgram.symbols.getName(
+            canonicalProgramSymbolIdOf({
+              moduleId: rootModule.moduleId,
+              symbol: entry.symbol,
+              ir: ctx.ir as MutableOptimizationIr,
+            }),
+          ) ??
+          `${entry.symbol}`;
+        if (
+          !ctx.ir.options.testMode &&
+          shouldConsiderBoundaryExportForOptimization({
+            exportName,
+            boundaryExports: ctx.ir.options.boundaryExports,
+          })
+        ) {
+          enqueueBoundaryExportDependencies({
+            moduleId: rootModule.moduleId,
+            symbol: entry.symbol,
+          });
+        }
       });
     });
 
@@ -2601,87 +2115,107 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       });
     }
 
-    while (queuedInstances.length > 0 || queuedModuleLets.length > 0) {
-      const instanceId = queuedInstances.pop();
-      if (typeof instanceId === "number") {
-        if (reachableInstances.has(instanceId)) {
-          continue;
-        }
-        reachableInstances.add(instanceId);
-        const instance = ctx.ir.baseProgram.functions.getInstance(instanceId);
-        reachableSymbols.add(
-          canonicalProgramSymbolIdOf({
-            moduleId: instance.symbolRef.moduleId,
-            symbol: instance.symbolRef.symbol,
-            ir: ctx.ir as MutableOptimizationIr,
-          }),
-        );
-        const moduleView = ctx.ir.modules.get(instance.symbolRef.moduleId);
-        if (!moduleView) {
-          continue;
-        }
-        const item = functionItemBySymbol({
-          moduleView,
-          symbol: instance.symbolRef.symbol,
+    const enqueueUsedTraitDispatchInstances = (): boolean => {
+      let enqueued = false;
+      ctx.ir.functionInstantiations.forEach((bySymbol) => {
+        bySymbol.forEach((instantiations) => {
+          instantiations.forEach((_, instanceId) => {
+            const info = ctx.ir.baseProgram.functions.getInstance(instanceId);
+            const traitMethodImpl = ctx.ir.baseProgram.traits.getTraitMethodImpl(
+              info.functionId as ProgramSymbolId,
+            );
+            if (!traitMethodImpl) {
+              return;
+            }
+            const key = traitDispatchSignatureKey({
+              traitSymbol: traitMethodImpl.traitSymbol,
+              traitMethodSymbol: traitMethodImpl.traitMethodSymbol,
+            });
+            if (!usedTraitDispatchSignatures.has(key)) {
+              return;
+            }
+            const before = queuedInstances.length;
+            enqueueInstance(instanceId);
+            enqueued = enqueued || queuedInstances.length > before;
+          });
         });
-        if (!item) {
+      });
+      return enqueued;
+    };
+
+    while (true) {
+      while (queuedInstances.length > 0 || queuedModuleLets.length > 0) {
+        const instanceId = queuedInstances.pop();
+        if (typeof instanceId === "number") {
+          if (reachableInstances.has(instanceId)) {
+            continue;
+          }
+          reachableInstances.add(instanceId);
+          const instance = ctx.ir.baseProgram.functions.getInstance(instanceId);
+          reachableSymbols.add(
+            canonicalProgramSymbolIdOf({
+              moduleId: instance.symbolRef.moduleId,
+              symbol: instance.symbolRef.symbol,
+              ir: ctx.ir as MutableOptimizationIr,
+            }),
+          );
+          const moduleView = ctx.ir.modules.get(instance.symbolRef.moduleId);
+          if (!moduleView) {
+            continue;
+          }
+          const item = functionItemBySymbol({
+            moduleView,
+            symbol: instance.symbolRef.symbol,
+          });
+          if (!item) {
+            continue;
+          }
+
+          const walkRoots = [item.body, ...item.parameters.flatMap((parameter) =>
+            typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+          )];
+          walkRoots.forEach((rootExprId) =>
+            walkReachabilityRoot({
+              moduleId: moduleView.moduleId,
+              rootExprId,
+              callerInstanceId: instanceId,
+            }),
+          );
           continue;
         }
 
-        const walkRoots = [item.body, ...item.parameters.flatMap((parameter) =>
-          typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
-        )];
-        walkRoots.forEach((rootExprId) =>
-          walkReachabilityRoot({
-            moduleId: moduleView.moduleId,
-            rootExprId,
-            callerInstanceId: instanceId,
-          }),
-        );
-        continue;
+        const nextModuleLet = queuedModuleLets.pop();
+        if (!nextModuleLet) {
+          continue;
+        }
+        const knownModuleLets =
+          reachableModuleLets.get(nextModuleLet.moduleId) ?? new Set<SymbolId>();
+        if (knownModuleLets.has(nextModuleLet.symbol)) {
+          continue;
+        }
+        knownModuleLets.add(nextModuleLet.symbol);
+        reachableModuleLets.set(nextModuleLet.moduleId, knownModuleLets);
+
+        const moduleView = ctx.ir.modules.get(nextModuleLet.moduleId);
+        const moduleLet = moduleView
+          ? moduleLetBySymbol({
+              moduleView,
+              symbol: nextModuleLet.symbol,
+            })
+          : undefined;
+        if (!moduleView || !moduleLet) {
+          continue;
+        }
+        walkReachabilityRoot({
+          moduleId: nextModuleLet.moduleId,
+          rootExprId: moduleLet.initializer,
+        });
       }
 
-      const nextModuleLet = queuedModuleLets.pop();
-      if (!nextModuleLet) {
-        continue;
+      if (!enqueueUsedTraitDispatchInstances()) {
+        break;
       }
-      const knownModuleLets =
-        reachableModuleLets.get(nextModuleLet.moduleId) ?? new Set<SymbolId>();
-      if (knownModuleLets.has(nextModuleLet.symbol)) {
-        continue;
-      }
-      knownModuleLets.add(nextModuleLet.symbol);
-      reachableModuleLets.set(nextModuleLet.moduleId, knownModuleLets);
-
-      const moduleView = ctx.ir.modules.get(nextModuleLet.moduleId);
-      const moduleLet = moduleView
-        ? moduleLetBySymbol({
-            moduleView,
-            symbol: nextModuleLet.symbol,
-          })
-        : undefined;
-      if (!moduleView || !moduleLet) {
-        continue;
-      }
-      walkReachabilityRoot({
-        moduleId: nextModuleLet.moduleId,
-        rootExprId: moduleLet.initializer,
-      });
     }
-
-    ctx.ir.baseProgram.instances.getAll().forEach((instance) => {
-      const info = ctx.ir.baseProgram.functions.getInstance(instance.instanceId);
-      const traitMethodImpl = ctx.ir.baseProgram.traits.getTraitMethodImpl(
-        info.functionId as ProgramSymbolId,
-      );
-      if (!traitMethodImpl) {
-        return;
-      }
-      const key = `${traitMethodImpl.traitSymbol}:${traitMethodImpl.traitMethodSymbol}`;
-      if (usedTraitDispatchSignatures.has(key)) {
-        reachableInstances.add(instance.instanceId);
-      }
-    });
 
     const survivingInstances = ctx.ir.baseProgram.instances
       .getAll()
@@ -2798,13 +2332,7 @@ const finalizeOptimization = ({
   };
 
   const codegenPlan: ProgramCodegenOptimizationPlan = {
-    representations: {
-      scalarObjectLocals: new Map(
-        Array.from(ir.facts.codegenPlan.representations.scalarObjectLocals.entries()).map(
-          ([moduleId, plans]) => [moduleId, new Map(plans)],
-        ),
-      ),
-    },
+    representations: {},
   };
 
   return {
@@ -2842,7 +2370,6 @@ const OPTIMIZATION_PASSES: readonly ProgramOptimizationPass[] = [
   effectFastPathEliminationPass,
   closureEnvironmentShrinkingPass,
   traitDispatchDevirtualizationPass,
-  scalarReplacementOfObjectLocalsPass,
   continuationAndHandlerEnvironmentShrinkingPass,
   wholeProgramSpecializationPruningPass,
 ];

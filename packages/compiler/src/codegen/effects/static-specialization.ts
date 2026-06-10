@@ -11,6 +11,7 @@ import {
   getSignatureWasmType,
 } from "../types.js";
 import { walkHirExpression } from "../hir-walk.js";
+import { isTraitDispatchMethodEffectful } from "../trait-dispatch-abi.js";
 
 export interface StaticEffectSpecialization {
   base: FunctionMetadata;
@@ -107,6 +108,25 @@ const mergeSupport = (
   residualEffectful: left.residualEffectful || right.residualEffectful,
 });
 
+const dynamicTraitDispatchRequiresEffectfulAbi = ({
+  ctx,
+  targets,
+}: {
+  ctx: CodegenContext;
+  targets: readonly ProgramSymbolId[];
+}): boolean =>
+  targets.some((target) => {
+    const mapping = ctx.program.traits.getTraitMethodImpl(target);
+    if (!mapping) {
+      return true;
+    }
+    return isTraitDispatchMethodEffectful({
+      traitSymbol: mapping.traitSymbol,
+      traitMethodSymbol: mapping.traitMethodSymbol,
+      ctx,
+    });
+  });
+
 const analyzeSpecializationSupport = ({
   ctx,
   item,
@@ -138,17 +158,8 @@ const analyzeSpecializationSupport = ({
         if (!support.supported) {
           return "stop";
         }
-        if (expr.exprKind === "method-call") {
-          support = { ...support, supported: false };
-          return "stop";
-        }
-        if (expr.exprKind !== "call") {
+        if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
           return;
-        }
-        const callee = ctx.module.hir.expressions.get(expr.callee);
-        if (callee?.exprKind !== "identifier") {
-          support = { ...support, supported: false };
-          return "stop";
         }
         const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
         if (effectsFacade(ctx).callKind(exprId) === "perform") {
@@ -172,12 +183,22 @@ const analyzeSpecializationSupport = ({
           support = { ...support, residualEffectful: true };
           return;
         }
+        const targets = callInfo.targets
+          ? Array.from(callInfo.targets.values()).map((target) => target as ProgramSymbolId)
+          : [];
+        if (
+          callInfo.traitDispatch &&
+          (targets.length === 0 ||
+            dynamicTraitDispatchRequiresEffectfulAbi({
+              ctx,
+              targets,
+            }))
+        ) {
+          support = { ...support, residualEffectful: true };
+        }
         if (effectsFacade(ctx).callKind(exprId) !== "effectful-call") {
           return;
         }
-        const targets = callInfo.targets
-          ? Array.from(callInfo.targets.values())
-          : [];
         if (targets.length === 0) {
           if (
             !unresolvedCallRequiresSpecialization({
@@ -193,7 +214,7 @@ const analyzeSpecializationSupport = ({
         const effectfulTargets = targets.filter((target) =>
           targetRequiresSpecialization({
             ctx,
-            target: target as ProgramSymbolId,
+            target,
           })
         );
         if (effectfulTargets.length === 0) {
@@ -211,11 +232,11 @@ const analyzeSpecializationSupport = ({
             continue;
           }
           const nested = analyzeSpecializationSupport({
-              ctx,
-              item: targetItem,
-              context,
-              seen,
-            });
+            ctx,
+            item: targetItem,
+            context,
+            seen,
+          });
           support = mergeSupport(support, nested);
           if (!support.supported) {
             return "stop";

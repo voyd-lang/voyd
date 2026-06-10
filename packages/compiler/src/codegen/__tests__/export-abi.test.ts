@@ -150,6 +150,15 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     expect(result).toEqual(["a", "b", "c"]);
   });
 
+  it("keeps serialized export helpers reachable under optimization without boundary exports", async () => {
+    const wasm = await buildModule({
+      codegenOptions: { optimize: true, boundaryExports: false },
+    });
+    const host = await createVoydHost({ wasm });
+    const result = await host.runPure("fetch_items", []);
+    expect(result).toEqual(["a", "b", "c"]);
+  });
+
   it("exports memory for serialized wrappers under linearMemoryExport: auto", async () => {
     const wasm = await buildModule({
       codegenOptions: { linearMemoryExport: "auto" },
@@ -251,6 +260,27 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         result: expect.objectContaining({ kind: "record" }),
       }),
     ]);
+  });
+
+  it("keeps typed boundary export helpers reachable under optimization", async () => {
+    const wasm = await buildModule({
+      entryFile: "boundary-export.voyd",
+      codegenOptions: { boundaryExports: "auto", optimize: true },
+    });
+    const module = new WebAssembly.Module(wasmBufferSource(wasm));
+    const abi = parseExportAbi(module);
+    const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);
+
+    expect(exports).toContain("__voyd_serialized_export_translate");
+    expect(abi.exports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "translate",
+          abi: "serialized",
+          wrapperName: "__voyd_serialized_export_translate",
+        }),
+      ]),
+    );
   });
 
   it.each([false, "off"] as const)(

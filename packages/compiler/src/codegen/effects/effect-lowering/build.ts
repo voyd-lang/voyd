@@ -343,7 +343,16 @@ export const buildEffectLoweringEir = ({
         exprId: clause.body,
         ctx,
       });
-      const analysis = analyzeExpr({ exprId: clause.body, liveAfter: new Set(), ctx });
+      const skipCalleeSymbols =
+        clause.parameters[0]
+          ? new Set<SymbolId>([clause.parameters[0].symbol])
+          : undefined;
+      const analysis = analyzeExpr({
+        exprId: clause.body,
+        liveAfter: new Set(),
+        ctx,
+        skipCalleeSymbols,
+      });
       const fnName = `handler_${expr.id}_${clauseIndex}`;
       const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}`;
 

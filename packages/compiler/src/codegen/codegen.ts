@@ -1,4 +1,5 @@
 import binaryen from "binaryen";
+import { VOYD_BINARYEN_FEATURES } from "@voyd-lang/lib/binaryen-features.js";
 import { optimizeBinaryenModule } from "@voyd-lang/lib/binaryen-optimize.js";
 import type {
   CodegenContext,
@@ -219,22 +220,26 @@ export const codegenProgram = ({
     entryCtx.programHelpers.ensureEffectHelpers(entryCtx);
   }
 
+  const outputModule = mergedOptions.optimize
+    ? binaryen.readBinary(emitWasmBytes(mod))
+    : mod;
   if (mergedOptions.optimize) {
+    outputModule.setFeatures(VOYD_BINARYEN_FEATURES);
     optimizeBinaryenModule({
-      module: mod,
+      module: outputModule,
       profile: mergedOptions.optimizationProfile,
     });
   }
 
-  const wasm = mergedOptions.validate ? emitWasmBytes(mod) : undefined;
+  const wasm = mergedOptions.validate ? emitWasmBytes(outputModule) : undefined;
   if (wasm) {
     if (!WebAssembly.validate(wasm as BufferSource)) {
-      mod.validate();
+      outputModule.validate();
     }
   }
 
   return {
-    module: mod,
+    module: outputModule,
     wasm,
     effectTable,
     diagnostics: [...diagnostics.diagnostics],

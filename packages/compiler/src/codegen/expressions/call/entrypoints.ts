@@ -22,7 +22,6 @@ import { getFunctionMetadataForCall } from "./metadata.js";
 import { emitResolvedCall } from "./resolved-call.js";
 import { compileTraitDispatchCall } from "./trait-dispatch.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
-import { tryCompileScalarObjectMethodCall } from "../../scalar-objects.js";
 
 export const compileCallExpr = (
   expr: HirCallExpr,
@@ -104,14 +103,13 @@ export const compileCallExpr = (
       });
     }
 
-    const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
     const targetFunctionId = resolveTargetFunctionId({
       targets: callInfo.targets,
       callInstanceId,
       typeInstanceId,
     });
 
-    if (typeof targetFunctionId === "number" && targetFunctionId !== calleeId) {
+    if (typeof targetFunctionId === "number") {
       const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
       return compileResolvedSymbolCall({
         expr,
@@ -129,6 +127,7 @@ export const compileCallExpr = (
       });
     }
 
+    const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
     const traitDispatch = expectTraitDispatch
       ? compileTraitDispatchCall({
           expr,
@@ -296,23 +295,6 @@ export const compileMethodCallExpr = (
   });
   if (!meta) {
     throw new Error(`codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`);
-  }
-
-  const scalarObjectCall = tryCompileScalarObjectMethodCall({
-    expr,
-    meta,
-    ctx,
-    fnCtx,
-    compileExpr,
-    options: {
-      tailPosition,
-      expectedResultTypeId,
-      typeInstanceId,
-      outResultStorageRef,
-    },
-  });
-  if (scalarObjectCall) {
-    return scalarObjectCall;
   }
 
   const args = compileCallArguments({
