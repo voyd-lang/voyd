@@ -1913,19 +1913,26 @@ const compileStaticEffectSpecialization = (
     returnAbiKind: meta.resultAbiKind,
     instanceId: meta.instanceId,
     typeInstanceId: meta.instanceId,
-    effectful: false,
+    effectful: meta.effectful,
     staticEffectContext: context,
   };
+  if (meta.effectful) {
+    fnCtx.currentHandler = {
+      index: 0,
+      type: ctx.effectsBackend.abi.hiddenHandlerParamType(ctx),
+    };
+  }
   const paramInitOps = bindRawFunctionParameters({
     fn,
     meta,
     ctx,
     fnCtx,
-    handlerOffset: 0,
+    handlerOffset: firstUserParamIndexFor(meta),
   });
   const captureStart = fn.parameters.reduce(
-    (offset, _param, index) => offset + (meta.paramAbiTypes[index]?.length ?? 0),
-    0,
+    (offset, _param, index) =>
+      offset + (meta.paramAbiTypes[index]?.length ?? 0),
+    firstUserParamIndexFor(meta),
   );
   context.captures.forEach((capture, index) => {
     const paramIndex = captureStart + index;
@@ -1959,7 +1966,7 @@ const compileStaticEffectSpecialization = (
     exprId: fn.body,
     ctx,
     fnCtx,
-    tailPosition: true,
+    tailPosition: !meta.effectful,
     expectedResultTypeId: fnCtx.returnTypeId,
   });
   const bodyExpr =
@@ -1976,17 +1983,34 @@ const compileStaticEffectSpecialization = (
             binaryen.getExpressionType(body.expr),
           )
         : body.expr;
+  const bodyExprType = binaryen.getExpressionType(bodyExpr);
+  const shouldWrapOutcome =
+    meta.effectful &&
+    !isOutcomeCarrierType({
+      wasmType: bodyExprType,
+      ctx,
+    });
+  const rawFunctionBody = shouldWrapOutcome
+    ? wrapValueInOutcome({
+        valueExpr: bodyExpr,
+        valueType: wasmTypeFor(meta.resultTypeId, ctx),
+        typeId: meta.resultTypeId,
+        ctx,
+        fnCtx,
+      })
+    : bodyExpr;
   const functionBody =
+    !meta.effectful &&
     meta.resultTypeId !== ctx.program.primitives.void &&
-    binaryen.getExpressionType(bodyExpr) !== binaryen.none &&
-    binaryen.getExpressionType(bodyExpr) !== binaryen.unreachable
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.none &&
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.unreachable
       ? boxSignatureSpillValue({
-          value: bodyExpr,
+          value: rawFunctionBody,
           typeId: meta.resultTypeId,
           ctx,
           fnCtx,
         })
-      : bodyExpr;
+      : rawFunctionBody;
 
   ctx.mod.addFunction(
     meta.wasmName,

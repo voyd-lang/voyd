@@ -724,4 +724,53 @@ pub fn main() -> i32
     expect(wasmText).toContain("call $__has_type");
     expect(wasmText).not.toContain("call $__lookup_method_accessor");
   });
+
+  it("keeps dependencies reached only through dynamic trait impl bodies", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self) -> i32
+
+obj Box {
+  value: i32
+}
+
+obj Alt {
+  value: i32
+}
+
+fn finish(value: i32) -> i32
+  value + 2
+
+impl Runner for Box
+  fn run(self) -> i32
+    finish(self.value)
+
+impl Runner for Alt
+  fn run(self) -> i32
+    finish(self.value + 1)
+
+fn invoke(runner: Runner) -> i32
+  runner.run()
+
+pub fn main() -> i32
+  invoke(Box { value: 4 })
+`,
+      },
+    });
+
+    const { diagnostics } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+
+    expect(diagnostics).toHaveLength(0);
+  });
 });

@@ -103,14 +103,13 @@ export const compileCallExpr = (
       });
     }
 
-    const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
     const targetFunctionId = resolveTargetFunctionId({
       targets: callInfo.targets,
       callInstanceId,
       typeInstanceId,
     });
 
-    if (typeof targetFunctionId === "number" && targetFunctionId !== calleeId) {
+    if (typeof targetFunctionId === "number") {
       const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
       return compileResolvedSymbolCall({
         expr,
@@ -128,6 +127,7 @@ export const compileCallExpr = (
       });
     }
 
+    const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
     const traitDispatch = expectTraitDispatch
       ? compileTraitDispatchCall({
           expr,

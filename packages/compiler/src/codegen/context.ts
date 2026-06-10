@@ -122,6 +122,7 @@ export interface StaticEffectHandlerCapture {
 export interface StaticEffectHandlerClause {
   operation: ProgramSymbolId;
   resumeValueExpr?: HirExprId;
+  residualEffectful: boolean;
   paramSymbols: readonly SymbolId[];
   returnTypeId: TypeId;
 }
@@ -345,6 +346,7 @@ export interface FunctionContext {
   handlerStack?: HandlerScope[];
   loopStack?: LoopScope[];
   continuations?: Map<SymbolId, ContinuationBinding>;
+  suppressTailResumptionExitChecks?: boolean;
   staticEffectContext?: StaticEffectHandlerContext;
   continuation?: {
     cfg: GroupContinuationCfg;

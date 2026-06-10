@@ -2615,6 +2615,16 @@ const createMethodLookupEntries = ({
       );
       const hashTraitSymbol = traitMethodImpl?.traitSymbol ?? impl.traitSymbol;
       const hashTraitMethod = traitMethodImpl?.traitMethodSymbol ?? traitMethod;
+      const dispatchSignatureKey = traitDispatchSignatureKey({
+        traitSymbol: hashTraitSymbol,
+        traitMethodSymbol: hashTraitMethod,
+      });
+      if (
+        ctx.optimization &&
+        !ctx.optimization.usedTraitDispatchSignatures.has(dispatchSignatureKey)
+      ) {
+        return;
+      }
       const resolvedImplRef = resolveImportedFunctionSymbol({
         ctx,
         moduleId: implRef.moduleId,
@@ -2672,16 +2682,6 @@ const createMethodLookupEntries = ({
         throw new Error(
           `codegen malformed parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
         );
-      }
-      const dispatchSignatureKey = traitDispatchSignatureKey({
-        traitSymbol: hashTraitSymbol,
-        traitMethodSymbol: hashTraitMethod,
-      });
-      if (
-        ctx.optimization &&
-        !ctx.optimization.usedTraitDispatchSignatures.has(dispatchSignatureKey)
-      ) {
-        return;
       }
       const dispatchEffectful =
         dispatchEffectfulBySignature.get(dispatchSignatureKey) ??

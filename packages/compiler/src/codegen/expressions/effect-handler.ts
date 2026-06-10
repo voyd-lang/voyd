@@ -23,6 +23,7 @@ import { ensureEffectArgsType } from "../effects/args-type.js";
 import { signatureHashFor } from "../effects/effect-registry.js";
 import {
   allocateTempLocal,
+  loadBindingStorageRef,
   loadBindingValue,
   loadLocalValue,
   storeLocalValue,
@@ -109,6 +110,7 @@ type ClauseEnvField = {
   wasmType: binaryen.Type;
   storageType: binaryen.Type;
   fieldIndex: number;
+  mutable: boolean;
 };
 
 const sanitize = (value: string): string =>
@@ -198,7 +200,7 @@ const tailResumeValueExpr = ({
   return body.args[0]?.expr;
 };
 
-const expressionContainsPerform = ({
+const expressionContainsResidualEffect = ({
   exprId,
   ctx,
 }: {
@@ -213,7 +215,8 @@ const expressionContainsPerform = ({
     visitHandlerBodies: false,
     visitor: {
       onExpr: (nestedExprId) => {
-        if (effectsFacade(ctx).callKind(nestedExprId) === "perform") {
+        const kind = effectsFacade(ctx).callKind(nestedExprId);
+        if (kind === "perform" || kind === "effectful-call") {
           found = true;
           return "stop";
         }
@@ -286,21 +289,19 @@ const buildStaticEffectContext = ({
     if (resumeValueExpr === false) {
       continue;
     }
-    if (
-      typeof resumeValueExpr === "number" &&
-      expressionContainsPerform({ exprId: resumeValueExpr, ctx })
-    ) {
-      continue;
-    }
     const clause = expr.handlers[index]!;
     const signature = ctx.program.functions.getSignature(ctx.moduleId, clause.operation);
     if (!signature || signature.typeParams.length > 0) {
       continue;
     }
+    const residualEffectful =
+      typeof resumeValueExpr === "number" &&
+      expressionContainsResidualEffect({ exprId: resumeValueExpr, ctx });
     const operation = canonicalEffectOperation(ctx, clause.operation);
     handlers.set(operation, {
       operation,
       resumeValueExpr,
+      residualEffectful,
       paramSymbols: clause.parameters.slice(1).map((param) => param.symbol),
       returnTypeId: signature.returnType,
     });
@@ -315,7 +316,7 @@ const buildStaticEffectContext = ({
     wasmType: field.wasmType,
     paramType: field.storageType,
     mode: staticCaptureMode({ field, ctx }),
-    mutable: true,
+    mutable: field.mutable,
   }));
   const instanceKey = handlerInstanceKey(fnCtx);
   const key = [
@@ -383,6 +384,7 @@ const buildClauseEnv = ({
             symbol,
             typeId,
             wasmType: binding.type,
+            mutable: binding.kind === "storage-ref" ? binding.mutable : true,
             storageType:
               binding.kind === "local"
                 ? wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime")
@@ -426,6 +428,10 @@ const buildClauseEnv = ({
       const binding = fnCtx.bindings.get(field.symbol);
       if (!binding) {
         throw new Error("missing handler env binding");
+      }
+      const storageRef = loadBindingStorageRef(binding, ctx);
+      if (typeof storageRef === "number") {
+        return storageRef;
       }
       const value = loadBindingValue(binding, ctx);
       return field.storageType === field.wasmType
@@ -584,6 +590,25 @@ const emitClauseFunction = ({
   };
 
   env.fields.forEach((field) => {
+    const inlineBoxType = getInlineHeapBoxType({
+      typeId: field.typeId,
+      ctx,
+      mode: "runtime",
+    });
+    if (typeof inlineBoxType === "number" && field.storageType === inlineBoxType) {
+      fnCtx.bindings.set(field.symbol, {
+        kind: "capture",
+        envIndex: 1,
+        envType: env.envType,
+        envSuperType: binaryen.anyref,
+        fieldIndex: field.fieldIndex,
+        type: field.wasmType,
+        storageType: field.storageType,
+        typeId: field.typeId,
+        mutable: field.mutable,
+      });
+      return;
+    }
     const local = allocateTempLocal(field.wasmType, fnCtx, field.typeId, ctx);
     fnCtx.bindings.set(field.symbol, {
       ...local,
@@ -592,10 +617,13 @@ const emitClauseFunction = ({
     });
   });
 
-  const initOps: binaryen.ExpressionRef[] = env.fields.map((field) => {
+  const initOps: binaryen.ExpressionRef[] = env.fields.flatMap((field) => {
     const binding = fnCtx.bindings.get(field.symbol);
-    if (!binding || binding.kind !== "local") {
+    if (!binding) {
       throw new Error("missing local binding for handler env field");
+    }
+    if (binding.kind !== "local") {
+      return [];
     }
     const stored = structGetFieldValue({
       mod: ctx.mod,
@@ -615,7 +643,7 @@ const emitClauseFunction = ({
             typeId: field.typeId,
             ctx,
           });
-    return storeLocalValue({ binding, value, ctx, fnCtx });
+    return [storeLocalValue({ binding, value, ctx, fnCtx })];
   });
 
   const requestLocal = allocateTempLocal(

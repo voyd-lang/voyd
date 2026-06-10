@@ -10,6 +10,7 @@ import { createEffectRuntime } from "../effects/runtime-abi.js";
 import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
 import type { CodegenContext } from "../context.js";
+import type { CodegenOptions } from "../context.js";
 import {
   compileEffectFixture,
   runEffectfulExport,
@@ -20,7 +21,7 @@ import { monomorphizeProgram } from "../../semantics/linking.js";
 import { codegenProgram } from "../codegen.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
-import type { TypeId } from "../../semantics/ids.js";
+import type { ProgramSymbolId, TypeId } from "../../semantics/ids.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -37,13 +38,29 @@ const localFastPathFixturePath = resolve(
   "__fixtures__",
   "effects-local-fast-path.voyd"
 );
+const localTailControlFlowFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-local-tail-control-flow.voyd"
+);
+const localTailStdlibRngFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-local-tail-stdlib-rng.voyd"
+);
+const tailResumeArgEffectfulFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-tail-resume-arg-effectful.voyd"
+);
 
 const compileEffectFixtureWithCompilerOptimization = async (
   entryPath: string,
+  codegenOptions: CodegenOptions = { effectsHostBoundary: "off" },
 ) => {
   const base = await compileEffectFixture({
     entryPath,
-    codegenOptions: { effectsHostBoundary: "off" },
+    codegenOptions,
   });
   const modules = Array.from(base.semantics.values());
   const monomorphized = monomorphizeProgram({
@@ -57,13 +74,13 @@ const compileEffectFixtureWithCompilerOptimization = async (
   const result = codegenProgram({
     program,
     entryModuleId: base.entryModuleId,
-    options: { validate: true, effectsHostBoundary: "off" },
+    options: { ...codegenOptions, validate: true },
     optimization: {
       handlerClauseCaptures: new Map(),
       reachableFunctionInstances: undefined as never,
       reachableFunctionSymbols: undefined as never,
       reachableModuleLets: new Map(),
-      usedTraitDispatchSignatures: new Set(),
+      usedTraitDispatchSignatures: usedTraitDispatchSignaturesFor(program),
       codegenPlan: { representations: {} },
     },
   });
@@ -71,6 +88,31 @@ const compileEffectFixtureWithCompilerOptimization = async (
     throw new Error("expected validated codegen to emit wasm bytes");
   }
   return { ...result, wasm: result.wasm };
+};
+
+const usedTraitDispatchSignaturesFor = (
+  program: ReturnType<typeof buildProgramCodegenView>,
+): Set<string> => {
+  const signatures = new Set<string>();
+  program.modules.forEach((moduleView, moduleId) => {
+    moduleView.hir.expressions.forEach((expr, exprId) => {
+      if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
+        return;
+      }
+      const callInfo = program.calls.getCallInfo(moduleId, exprId);
+      if (!callInfo.traitDispatch) {
+        return;
+      }
+      callInfo.targets?.forEach((target) => {
+        const mapping = program.traits.getTraitMethodImpl(target as ProgramSymbolId);
+        if (!mapping) {
+          return;
+        }
+        signatures.add(`${mapping.traitSymbol}:${mapping.traitMethodSymbol}`);
+      });
+    });
+  });
+  return signatures;
 };
 
 const loadSemantics = () =>
@@ -234,6 +276,93 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     await expect(host.run<number>("direct_local")).resolves.toBe(7);
     await expect(host.run<number>("helper_local")).resolves.toBe(10);
     await expect(host.run<number>("big_local")).resolves.toBe(45);
+  });
+
+  it("preserves local tail continuations through value construction and control flow", async () => {
+    const compiled = await compileEffectFixture({
+      entryPath: localTailControlFlowFixturePath,
+      codegenOptions: { effectsHostBoundary: "off" },
+    });
+
+    const host = await createVoydHost({ wasm: compiled.wasm });
+    await expect(host.run<number>("triple_sum")).resolves.toBe(6);
+    await expect(host.run<number>("loop_local")).resolves.toBe(10);
+    await expect(host.run<number>("match_local")).resolves.toBe(14);
+  });
+
+  it("specializes locally handled tail effects through value construction and control flow", async () => {
+    const specialized = await compileEffectFixtureWithCompilerOptimization(
+      localTailControlFlowFixturePath,
+    );
+
+    const text = specialized.module.emitText();
+    expect(text).toMatch(/make_triple_\d+__handled/);
+    expect(text).toMatch(/loop_sum_\d+__handled/);
+    expect(text).toMatch(/match_value_\d+__handled/);
+    expect(text).toMatch(/open_sum_\d+__handled/);
+    expect(text).toMatch(/local_then_dynamic_\d+__handled/);
+
+    const host = await createVoydHost({ wasm: specialized.wasm });
+    await expect(host.run<number>("triple_sum")).resolves.toBe(6);
+    await expect(host.run<number>("loop_local")).resolves.toBe(10);
+    await expect(host.run<number>("match_local")).resolves.toBe(14);
+
+    const hostBoundary = await compileEffectFixtureWithCompilerOptimization(
+      localTailControlFlowFixturePath,
+      {},
+    );
+    const openResult = await runEffectfulExport<number>({
+      wasm: hostBoundary.wasm,
+      entryName: "open_local",
+      handlersByLabelSuffix: {
+        "Other::bump": (_request, value) => (value as number) + 20,
+      },
+    });
+    expect(openResult.value).toBe(26);
+    const dynamicResult = await runEffectfulExport<number>({
+      wasm: hostBoundary.wasm,
+      entryName: "dynamic_trait_residual",
+      handlersByLabelSuffix: {
+        "Other::bump": (_request, value) => (value as number) + 20,
+      },
+    });
+    expect(dynamicResult.value).toBe(27);
+  });
+
+  it("preserves mutable std value captures in static local tail handlers", async () => {
+    const unoptimized = await compileEffectFixture({
+      entryPath: localTailStdlibRngFixturePath,
+      codegenOptions: { effectsHostBoundary: "off" },
+    });
+    const specialized = await compileEffectFixtureWithCompilerOptimization(
+      localTailStdlibRngFixturePath,
+    );
+    const specializedText = specialized.module.emitText();
+    expect(specializedText).toMatch(/random_triple_\d+__handled/);
+
+    const unoptimizedHost = await createVoydHost({ wasm: unoptimized.wasm });
+    const specializedHost = await createVoydHost({ wasm: specialized.wasm });
+    const expectedValues = new Map([
+      ["rand_plain", 0.000005046497183913701],
+      ["rand_range", 0.0000025232485919568504],
+      ["rand_triple_sum", 0.4670804432993078],
+    ]);
+    for (const [entry, expectedValue] of expectedValues) {
+      const expected = await unoptimizedHost.run<number>(entry);
+      expect(expected).toBe(expectedValue);
+      await expect(specializedHost.run<number>(entry)).resolves.toBe(expected);
+    }
+  });
+
+  it("captures effectful tail resume arguments inside handler clauses", async () => {
+    const { wasm } = await compileEffectFixture({
+      entryPath: tailResumeArgEffectfulFixturePath,
+      codegenOptions: { effectsHostBoundary: "off" },
+    });
+    const host = await createVoydHost({ wasm });
+
+    await expect(host.run<number>("tail_resume_arg_effectful_internal")).resolves.toBe(41);
+    await expect(host.run<number>("effectful_resume_arg_internal")).resolves.toBe(41);
   });
 
   it("does not re-evaluate guards when resuming after a perform", async () => {

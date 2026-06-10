@@ -12,6 +12,8 @@ import { boxOutcomeValue } from "../outcome-values.js";
 import { coerceValueToType } from "../../structural.js";
 import { getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { functionRefType } from "./shared.js";
+import { RESUME_KIND } from "../runtime-abi.js";
+import { allocateTempLocal } from "../../locals.js";
 
 export const compileContinuationCall = ({
   expr,
@@ -47,7 +49,17 @@ export const compileContinuationCall = ({
             throw new Error("continuation calls accept at most one argument");
           }
           const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
-          const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+          const previousSuppressTailChecks = fnCtx.suppressTailResumptionExitChecks;
+          fnCtx.suppressTailResumptionExitChecks =
+            continuation.resumeKind === RESUME_KIND.tail ||
+            previousSuppressTailChecks === true;
+          const value = (() => {
+            try {
+              return compileExpr({ exprId: arg.expr, ctx, fnCtx });
+            } finally {
+              fnCtx.suppressTailResumptionExitChecks = previousSuppressTailChecks;
+            }
+          })();
           return coerceValueToType({
             value: value.expr,
             actualType: actualTypeId,
@@ -77,7 +89,7 @@ export const compileContinuationCall = ({
     ctx.effectsRuntime.bumpTailGuardObserved(guardRef),
   ];
 
-  const resumeBox =
+  const resumeBoxValue =
     resumeWasmType === binaryen.none
       ? ctx.mod.ref.null(binaryen.eqref)
       : boxOutcomeValue({
@@ -87,6 +99,13 @@ export const compileContinuationCall = ({
           ctx,
           fnCtx,
         });
+  const resumeBoxLocal =
+    resumeWasmType === binaryen.none
+      ? undefined
+      : allocateTempLocal(binaryen.eqref, fnCtx, ctx.program.primitives.unknown, ctx);
+  const resumeBox = resumeBoxLocal
+    ? ctx.mod.local.get(resumeBoxLocal.index, resumeBoxLocal.type)
+    : resumeBoxValue;
   const callArgs = [ctx.effectsRuntime.continuationEnv(contRef), resumeBox];
   const fnRefType = functionRefType({
     params: [binaryen.anyref, binaryen.eqref],
@@ -100,9 +119,24 @@ export const compileContinuationCall = ({
     ctx.effectsRuntime.outcomeType
   );
   const callExpr =
-    guardOps.length === 0
+    guardOps.length === 0 && !resumeBoxLocal
       ? continuationCall
-      : ctx.mod.block(null, [...guardOps, continuationCall], ctx.effectsRuntime.outcomeType);
+      : ctx.mod.block(
+          null,
+          [
+            ...(resumeBoxLocal
+              ? [
+                  ctx.mod.local.set(
+                    resumeBoxLocal.index,
+                    resumeBoxValue,
+                  ),
+                ]
+              : []),
+            ...guardOps,
+            continuationCall,
+          ],
+          ctx.effectsRuntime.outcomeType,
+        );
 
   // Semantics: calling a resumption does not return to the handler clause body.
   return {

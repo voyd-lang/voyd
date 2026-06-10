@@ -12,6 +12,7 @@ import type {
 } from "../semantics/ids.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { ProgramCodegenOptimizationPlan } from "./codegen-plan.js";
+import type { CodegenOptions } from "../codegen/context.js";
 
 export type OptimizedCallInfo = CallLoweringInfo;
 
@@ -37,6 +38,7 @@ export type ProgramOptimizationIR = {
   options: {
     testMode: boolean;
     testScope: "all" | "entry";
+    boundaryExports?: CodegenOptions["boundaryExports"];
   };
   modules: ReadonlyMap<string, OptimizedModuleView>;
   calls: ReadonlyMap<string, ReadonlyMap<HirExprId, OptimizedCallInfo>>;

@@ -44,6 +44,7 @@ type MutableOptimizationIr = {
   options: {
     testMode: boolean;
     testScope: "all" | "entry";
+    boundaryExports?: CodegenOptions["boundaryExports"];
   };
   modules: Map<string, OptimizedModuleView>;
   calls: Map<string, Map<HirExprId, OptimizedCallInfo>>;
@@ -279,6 +280,7 @@ const buildOptimizationIr = ({
     options: {
       testMode: options?.testMode ?? false,
       testScope: options?.testScope ?? "all",
+      boundaryExports: options?.boundaryExports,
     },
     modules: optimizedModules,
     calls: normalizeCalls({ program }),
@@ -1473,6 +1475,213 @@ const canonicalProgramSymbolIdOf = ({
 }): ProgramSymbolId =>
   ir.baseProgram.symbols.canonicalIdOf(moduleId, symbol) as ProgramSymbolId;
 
+const resolveIntrinsicFunction = ({
+  ir,
+  intrinsicName,
+}: {
+  ir: MutableOptimizationIr;
+  intrinsicName: string;
+}): { moduleId: string; symbol: SymbolId } | undefined => {
+  let matched: { moduleId: string; symbol: SymbolId } | undefined;
+
+  ir.modules.forEach((moduleView, moduleId) => {
+    moduleView.hir.items.forEach((item) => {
+      if (item.kind !== "function") {
+        return;
+      }
+      const symbolId = ir.baseProgram.symbols.canonicalIdOf(
+        moduleId,
+        item.symbol,
+      ) as ProgramSymbolId;
+      if (ir.baseProgram.symbols.getIntrinsicName(symbolId) !== intrinsicName) {
+        return;
+      }
+      if (
+        matched &&
+        (matched.moduleId !== moduleId || matched.symbol !== item.symbol)
+      ) {
+        throw new Error(
+          `ambiguous optimizer function dependency ${intrinsicName}`,
+        );
+      }
+      matched = { moduleId, symbol: item.symbol };
+    });
+  });
+
+  return matched;
+};
+
+const findFunctionSymbolByName = ({
+  ir,
+  moduleId,
+  name,
+  paramCount,
+}: {
+  ir: MutableOptimizationIr;
+  moduleId: string;
+  name: string;
+  paramCount?: number;
+}): SymbolId | undefined => {
+  const moduleView = ir.modules.get(moduleId);
+  if (!moduleView) {
+    return undefined;
+  }
+
+  for (const item of moduleView.hir.items.values()) {
+    if (item.kind !== "function") {
+      continue;
+    }
+    const symbolId = ir.baseProgram.symbols.canonicalIdOf(
+      moduleId,
+      item.symbol,
+    ) as ProgramSymbolId;
+    if (ir.baseProgram.symbols.getName(symbolId) !== name) {
+      continue;
+    }
+    if (typeof paramCount === "number") {
+      const signature = ir.baseProgram.functions.getSignature(
+        moduleId,
+        item.symbol,
+      );
+      if (!signature || signature.parameters.length !== paramCount) {
+        continue;
+      }
+    }
+    return item.symbol;
+  }
+
+  return undefined;
+};
+
+const serializerForType = ({
+  ir,
+  typeId,
+}: {
+  ir: MutableOptimizationIr;
+  typeId: TypeId;
+}): ReturnType<ProgramCodegenView["symbols"]["getSerializer"]> => {
+  const serializers = [
+    ...ir.baseProgram.types
+      .getAliasSymbols(typeId)
+      .map((symbol) => ir.baseProgram.symbols.getSerializer(symbol)),
+    (() => {
+      const owner = ir.baseProgram.types.getNominalOwner(typeId);
+      return typeof owner === "number"
+        ? ir.baseProgram.symbols.getSerializer(owner)
+        : undefined;
+    })(),
+  ].filter((serializer): serializer is NonNullable<typeof serializer> =>
+    Boolean(serializer),
+  );
+  if (serializers.length === 0) {
+    return undefined;
+  }
+  const reference = serializers[0]!;
+  const mismatch = serializers.find(
+    (serializer) =>
+      serializer.formatId !== reference.formatId ||
+      serializer.encode.moduleId !== reference.encode.moduleId ||
+      serializer.encode.symbol !== reference.encode.symbol ||
+      serializer.decode.moduleId !== reference.decode.moduleId ||
+      serializer.decode.symbol !== reference.decode.symbol,
+  );
+  if (mismatch) {
+    throw new Error(`conflicting serializers for type ${typeId}`);
+  }
+  return reference;
+};
+
+const serializerForTypes = ({
+  ir,
+  typeIds,
+}: {
+  ir: MutableOptimizationIr;
+  typeIds: readonly TypeId[];
+}): ReturnType<ProgramCodegenView["symbols"]["getSerializer"]> => {
+  const serializers = typeIds
+    .map((typeId) => serializerForType({ ir, typeId }))
+    .filter((serializer): serializer is NonNullable<typeof serializer> =>
+      Boolean(serializer),
+    );
+  if (serializers.length === 0) {
+    return undefined;
+  }
+  const reference = serializers[0]!;
+  const mismatch = serializers.find(
+    (serializer) =>
+      serializer.formatId !== reference.formatId ||
+      serializer.encode.moduleId !== reference.encode.moduleId ||
+      serializer.encode.symbol !== reference.encode.symbol ||
+      serializer.decode.moduleId !== reference.decode.moduleId ||
+      serializer.decode.symbol !== reference.decode.symbol,
+  );
+  if (mismatch) {
+    throw new Error(`conflicting serializers for exported type list`);
+  }
+  return reference;
+};
+
+const shouldConsiderBoundaryExportForOptimization = ({
+  exportName,
+  boundaryExports,
+}: {
+  exportName: string;
+  boundaryExports: CodegenOptions["boundaryExports"] | undefined;
+}): boolean => {
+  if (!boundaryExports || boundaryExports === "off") {
+    return false;
+  }
+  if (boundaryExports === "auto") {
+    return true;
+  }
+  if (boundaryExports.mode === "off") {
+    return false;
+  }
+  if (boundaryExports.include && !boundaryExports.include.includes(exportName)) {
+    return false;
+  }
+  if (boundaryExports.mode === "only") {
+    return boundaryExports.include?.includes(exportName) ?? false;
+  }
+  return true;
+};
+
+const MSGPACK_FUNCTIONS: readonly {
+  moduleId: string;
+  name: string;
+  paramCount: number;
+}[] = [
+  { moduleId: "std::msgpack::fns", name: "encode_value", paramCount: 3 },
+  { moduleId: "std::msgpack::fns", name: "decode_value", paramCount: 2 },
+  { moduleId: "std::msgpack", name: "make_null", paramCount: 0 },
+  { moduleId: "std::msgpack", name: "make_bool", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_make_string", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_array", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_i32", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_i64", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_f32", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_f64", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "make_map", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_bool", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_string", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_array", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_i32", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_i64", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_f32", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_f64", paramCount: 1 },
+  { moduleId: "std::msgpack::fns", name: "unpack_map", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_array_with_capacity", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_array_push", paramCount: 2 },
+  { moduleId: "std::msgpack", name: "msgpack_array_length", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_array_raw_storage", paramCount: 1 },
+  { moduleId: "std::msgpack", name: "msgpack_map_new", paramCount: 0 },
+  { moduleId: "std::msgpack", name: "msgpack_map_set", paramCount: 3 },
+  { moduleId: "std::msgpack", name: "msgpack_map_get", paramCount: 2 },
+  { moduleId: "std::msgpack", name: "msgpack_map_has", paramCount: 2 },
+  { moduleId: "std::msgpack", name: "msgpack_map_tag_is", paramCount: 2 },
+  { moduleId: "std::string", name: "new_string", paramCount: 1 },
+];
+
 const setEquals = <T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean =>
   left.size === right.size && Array.from(left).every((value) => right.has(value));
 
@@ -1485,6 +1694,14 @@ const mapOfSetEquals = <K, V>(
     const other = right.get(key);
     return other ? setEquals(values, other) : false;
   });
+
+const traitDispatchSignatureKey = ({
+  traitSymbol,
+  traitMethodSymbol,
+}: {
+  traitSymbol: ProgramSymbolId;
+  traitMethodSymbol: ProgramSymbolId;
+}): string => `${traitSymbol}:${traitMethodSymbol}`;
 
 const resolveTargetsForCaller = ({
   moduleId,
@@ -1547,7 +1764,11 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
     const queuedModuleLets: { moduleId: string; symbol: SymbolId }[] = [];
 
     const enqueueInstance = (instanceId: ProgramFunctionInstanceId | undefined): void => {
-      if (typeof instanceId !== "number" || reachableInstances.has(instanceId)) {
+      if (
+        typeof instanceId !== "number" ||
+        reachableInstances.has(instanceId) ||
+        queuedInstances.includes(instanceId)
+      ) {
         return;
       }
       queuedInstances.push(instanceId);
@@ -1581,7 +1802,13 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       moduleId: string;
       symbol: SymbolId;
     }): void => {
-      reachableSymbols.add(canonicalProgramSymbolIdOf({ moduleId, symbol, ir: ctx.ir as MutableOptimizationIr }));
+      reachableSymbols.add(
+        canonicalProgramSymbolIdOf({
+          moduleId,
+          symbol,
+          ir: ctx.ir as MutableOptimizationIr,
+        }),
+      );
       const knownInstances =
         ctx.ir.functionInstantiations.get(moduleId)?.get(symbol);
       if (knownInstances && knownInstances.size > 0) {
@@ -1591,6 +1818,123 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       enqueueInstance(
         ctx.ir.baseProgram.functions.getInstanceId(moduleId, symbol, []),
       );
+    };
+
+    const enqueueFunctionByName = ({
+      moduleId,
+      name,
+      paramCount,
+    }: {
+      moduleId: string;
+      name: string;
+      paramCount: number;
+    }): void => {
+      const symbol = findFunctionSymbolByName({
+        ir: ctx.ir as MutableOptimizationIr,
+        moduleId,
+        name,
+        paramCount,
+      });
+      if (typeof symbol !== "number") {
+        return;
+      }
+      enqueueKnownFunctionInstances({ moduleId, symbol });
+    };
+
+    const enqueueMsgPackFunctions = (): void => {
+      MSGPACK_FUNCTIONS.forEach((entry) => enqueueFunctionByName(entry));
+    };
+
+    const enqueueSerializersForTypes = (typeIds: readonly TypeId[]): void => {
+      typeIds.forEach((typeId) => {
+        const serializer = serializerForType({
+          ir: ctx.ir as MutableOptimizationIr,
+          typeId,
+        });
+        if (!serializer) {
+          return;
+        }
+        enqueueKnownFunctionInstances(serializer.encode);
+        enqueueKnownFunctionInstances(serializer.decode);
+      });
+    };
+
+    const exportedFunctionTypeLists = ({
+      moduleId,
+      symbol,
+    }: {
+      moduleId: string;
+      symbol: SymbolId;
+    }): readonly (readonly TypeId[])[] => {
+      const resolved = resolveImportedSymbol({
+        moduleId,
+        symbol,
+        ir: ctx.ir as MutableOptimizationIr,
+      });
+      const signature = ctx.ir.baseProgram.functions.getSignature(
+        resolved.moduleId,
+        resolved.symbol,
+      );
+      if (!signature) {
+        return [];
+      }
+      const scheme = ctx.ir.baseProgram.types.getScheme(signature.scheme);
+      const instantiations =
+        ctx.ir.functionInstantiations.get(resolved.moduleId)?.get(resolved.symbol);
+      const typeArgLists =
+        instantiations && instantiations.size > 0
+          ? Array.from(instantiations.values())
+          : scheme.params.length === 0
+            ? [[] as readonly TypeId[]]
+            : [];
+
+      return typeArgLists.flatMap((typeArgs) => {
+        const typeId = ctx.ir.baseProgram.types.instantiate(
+          signature.scheme,
+          typeArgs,
+        );
+        const desc = ctx.ir.baseProgram.types.getTypeDesc(typeId);
+        if (desc.kind !== "function") {
+          return [];
+        }
+        return [[
+          ...desc.parameters.map((param) => param.type),
+          desc.returnType,
+        ]];
+      });
+    };
+
+    const enqueueSerializedExportDependencies = ({
+      moduleId,
+      symbol,
+    }: {
+      moduleId: string;
+      symbol: SymbolId;
+    }): void => {
+      exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
+        const serializer = serializerForTypes({
+          ir: ctx.ir as MutableOptimizationIr,
+          typeIds,
+        });
+        if (!serializer) {
+          return;
+        }
+        enqueueMsgPackFunctions();
+        enqueueSerializersForTypes(typeIds);
+      });
+    };
+
+    const enqueueBoundaryExportDependencies = ({
+      moduleId,
+      symbol,
+    }: {
+      moduleId: string;
+      symbol: SymbolId;
+    }): void => {
+      enqueueMsgPackFunctions();
+      exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
+        enqueueSerializersForTypes(typeIds);
+      });
     };
 
     const recordResolvedSymbolReachability = ({
@@ -1669,7 +2013,10 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
               return;
             }
             usedTraitDispatchSignatures.add(
-              `${traitMethodImpl.traitSymbol}:${traitMethodImpl.traitMethodSymbol}`,
+              traitDispatchSignatureKey({
+                traitSymbol: traitMethodImpl.traitSymbol,
+                traitMethodSymbol: traitMethodImpl.traitMethodSymbol,
+              }),
             );
           });
 
@@ -1690,6 +2037,16 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
             symbol: expr.symbol,
           });
         }
+
+        if (expr.exprKind === "literal" && expr.literalKind === "string") {
+          const dependency = resolveIntrinsicFunction({
+            ir: ctx.ir as MutableOptimizationIr,
+            intrinsicName: "__string_new",
+          });
+          if (dependency) {
+            enqueueKnownFunctionInstances(dependency);
+          }
+        }
       });
     };
 
@@ -1706,6 +2063,32 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
           moduleId: rootModule.moduleId,
           symbol: entry.symbol,
         });
+        enqueueSerializedExportDependencies({
+          moduleId: rootModule.moduleId,
+          symbol: entry.symbol,
+        });
+        const exportName =
+          entry.alias ??
+          ctx.ir.baseProgram.symbols.getName(
+            canonicalProgramSymbolIdOf({
+              moduleId: rootModule.moduleId,
+              symbol: entry.symbol,
+              ir: ctx.ir as MutableOptimizationIr,
+            }),
+          ) ??
+          `${entry.symbol}`;
+        if (
+          !ctx.ir.options.testMode &&
+          shouldConsiderBoundaryExportForOptimization({
+            exportName,
+            boundaryExports: ctx.ir.options.boundaryExports,
+          })
+        ) {
+          enqueueBoundaryExportDependencies({
+            moduleId: rootModule.moduleId,
+            symbol: entry.symbol,
+          });
+        }
       });
     });
 
@@ -1732,87 +2115,107 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       });
     }
 
-    while (queuedInstances.length > 0 || queuedModuleLets.length > 0) {
-      const instanceId = queuedInstances.pop();
-      if (typeof instanceId === "number") {
-        if (reachableInstances.has(instanceId)) {
-          continue;
-        }
-        reachableInstances.add(instanceId);
-        const instance = ctx.ir.baseProgram.functions.getInstance(instanceId);
-        reachableSymbols.add(
-          canonicalProgramSymbolIdOf({
-            moduleId: instance.symbolRef.moduleId,
-            symbol: instance.symbolRef.symbol,
-            ir: ctx.ir as MutableOptimizationIr,
-          }),
-        );
-        const moduleView = ctx.ir.modules.get(instance.symbolRef.moduleId);
-        if (!moduleView) {
-          continue;
-        }
-        const item = functionItemBySymbol({
-          moduleView,
-          symbol: instance.symbolRef.symbol,
+    const enqueueUsedTraitDispatchInstances = (): boolean => {
+      let enqueued = false;
+      ctx.ir.functionInstantiations.forEach((bySymbol) => {
+        bySymbol.forEach((instantiations) => {
+          instantiations.forEach((_, instanceId) => {
+            const info = ctx.ir.baseProgram.functions.getInstance(instanceId);
+            const traitMethodImpl = ctx.ir.baseProgram.traits.getTraitMethodImpl(
+              info.functionId as ProgramSymbolId,
+            );
+            if (!traitMethodImpl) {
+              return;
+            }
+            const key = traitDispatchSignatureKey({
+              traitSymbol: traitMethodImpl.traitSymbol,
+              traitMethodSymbol: traitMethodImpl.traitMethodSymbol,
+            });
+            if (!usedTraitDispatchSignatures.has(key)) {
+              return;
+            }
+            const before = queuedInstances.length;
+            enqueueInstance(instanceId);
+            enqueued = enqueued || queuedInstances.length > before;
+          });
         });
-        if (!item) {
+      });
+      return enqueued;
+    };
+
+    while (true) {
+      while (queuedInstances.length > 0 || queuedModuleLets.length > 0) {
+        const instanceId = queuedInstances.pop();
+        if (typeof instanceId === "number") {
+          if (reachableInstances.has(instanceId)) {
+            continue;
+          }
+          reachableInstances.add(instanceId);
+          const instance = ctx.ir.baseProgram.functions.getInstance(instanceId);
+          reachableSymbols.add(
+            canonicalProgramSymbolIdOf({
+              moduleId: instance.symbolRef.moduleId,
+              symbol: instance.symbolRef.symbol,
+              ir: ctx.ir as MutableOptimizationIr,
+            }),
+          );
+          const moduleView = ctx.ir.modules.get(instance.symbolRef.moduleId);
+          if (!moduleView) {
+            continue;
+          }
+          const item = functionItemBySymbol({
+            moduleView,
+            symbol: instance.symbolRef.symbol,
+          });
+          if (!item) {
+            continue;
+          }
+
+          const walkRoots = [item.body, ...item.parameters.flatMap((parameter) =>
+            typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+          )];
+          walkRoots.forEach((rootExprId) =>
+            walkReachabilityRoot({
+              moduleId: moduleView.moduleId,
+              rootExprId,
+              callerInstanceId: instanceId,
+            }),
+          );
           continue;
         }
 
-        const walkRoots = [item.body, ...item.parameters.flatMap((parameter) =>
-          typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
-        )];
-        walkRoots.forEach((rootExprId) =>
-          walkReachabilityRoot({
-            moduleId: moduleView.moduleId,
-            rootExprId,
-            callerInstanceId: instanceId,
-          }),
-        );
-        continue;
+        const nextModuleLet = queuedModuleLets.pop();
+        if (!nextModuleLet) {
+          continue;
+        }
+        const knownModuleLets =
+          reachableModuleLets.get(nextModuleLet.moduleId) ?? new Set<SymbolId>();
+        if (knownModuleLets.has(nextModuleLet.symbol)) {
+          continue;
+        }
+        knownModuleLets.add(nextModuleLet.symbol);
+        reachableModuleLets.set(nextModuleLet.moduleId, knownModuleLets);
+
+        const moduleView = ctx.ir.modules.get(nextModuleLet.moduleId);
+        const moduleLet = moduleView
+          ? moduleLetBySymbol({
+              moduleView,
+              symbol: nextModuleLet.symbol,
+            })
+          : undefined;
+        if (!moduleView || !moduleLet) {
+          continue;
+        }
+        walkReachabilityRoot({
+          moduleId: nextModuleLet.moduleId,
+          rootExprId: moduleLet.initializer,
+        });
       }
 
-      const nextModuleLet = queuedModuleLets.pop();
-      if (!nextModuleLet) {
-        continue;
+      if (!enqueueUsedTraitDispatchInstances()) {
+        break;
       }
-      const knownModuleLets =
-        reachableModuleLets.get(nextModuleLet.moduleId) ?? new Set<SymbolId>();
-      if (knownModuleLets.has(nextModuleLet.symbol)) {
-        continue;
-      }
-      knownModuleLets.add(nextModuleLet.symbol);
-      reachableModuleLets.set(nextModuleLet.moduleId, knownModuleLets);
-
-      const moduleView = ctx.ir.modules.get(nextModuleLet.moduleId);
-      const moduleLet = moduleView
-        ? moduleLetBySymbol({
-            moduleView,
-            symbol: nextModuleLet.symbol,
-          })
-        : undefined;
-      if (!moduleView || !moduleLet) {
-        continue;
-      }
-      walkReachabilityRoot({
-        moduleId: nextModuleLet.moduleId,
-        rootExprId: moduleLet.initializer,
-      });
     }
-
-    ctx.ir.baseProgram.instances.getAll().forEach((instance) => {
-      const info = ctx.ir.baseProgram.functions.getInstance(instance.instanceId);
-      const traitMethodImpl = ctx.ir.baseProgram.traits.getTraitMethodImpl(
-        info.functionId as ProgramSymbolId,
-      );
-      if (!traitMethodImpl) {
-        return;
-      }
-      const key = `${traitMethodImpl.traitSymbol}:${traitMethodImpl.traitMethodSymbol}`;
-      if (usedTraitDispatchSignatures.has(key)) {
-        reachableInstances.add(instance.instanceId);
-      }
-    });
 
     const survivingInstances = ctx.ir.baseProgram.instances
       .getAll()
