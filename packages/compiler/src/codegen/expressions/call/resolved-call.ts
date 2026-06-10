@@ -8,7 +8,13 @@ import type {
   FunctionMetadata,
   HirExprId,
 } from "../../context.js";
-import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../../locals.js";
+import {
+  allocateTempLocal,
+  loadBindingStorageRef,
+  loadBindingValue,
+  loadLocalValue,
+  storeLocalValue,
+} from "../../locals.js";
 import {
   abiTypeFor,
   getExprBinaryenType,
@@ -28,6 +34,7 @@ import {
   boxSignatureSpillValue,
   unboxSignatureSpillValue,
 } from "../../signature-spill.js";
+import { getOrCreateStaticEffectSpecialization } from "../../effects/static-specialization.js";
 
 export const emitResolvedCall = ({
   meta,
@@ -139,33 +146,60 @@ export const emitResolvedCall = ({
   const callResultWasmType = wasmTypeFor(expectedTypeId, ctx);
   const callerReturnWasmType =
     fnCtx.returnWasmType ?? wasmTypeFor(fnCtx.returnTypeId, ctx);
+  const staticSpecializedMeta =
+    fnCtx.staticEffectContext
+      ? getOrCreateStaticEffectSpecialization({
+          ctx,
+          meta,
+          context: fnCtx.staticEffectContext,
+        })
+      : undefined;
+  const resolvedMeta = staticSpecializedMeta ?? meta;
+  const staticCaptureArgs =
+    staticSpecializedMeta && fnCtx.staticEffectContext
+      ? fnCtx.staticEffectContext.captures.map((capture) => {
+          const binding = fnCtx.bindings.get(capture.symbol);
+          if (!binding) {
+            throw new Error("missing static effect capture binding");
+          }
+          if (capture.mode === "storage-ref") {
+            const storageRef = loadBindingStorageRef(binding, ctx);
+            if (!storageRef) {
+              throw new Error("missing static effect capture storage ref");
+            }
+            return storageRef;
+          }
+          return loadBindingValue(binding, ctx);
+        })
+      : [];
 
   const argSetups: binaryen.ExpressionRef[] = [];
-  const userArgs = args.flatMap((arg, index) => {
+  const allArgs = [...args, ...staticCaptureArgs];
+  const userArgs = allArgs.flatMap((arg, index) => {
     const flattened = flattenAbiArgument(
       arg,
-      meta.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
-      meta.paramTypeIds[index],
+      resolvedMeta.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
+      resolvedMeta.paramTypeIds[index],
     );
     argSetups.push(...flattened.setup);
     return flattened.args;
   });
   const usingProvidedWideResultStorage =
-    !meta.effectful &&
-    meta.resultAbiKind === "out_ref" &&
+    !resolvedMeta.effectful &&
+    resolvedMeta.resultAbiKind === "out_ref" &&
     typeof outResultStorageRef === "number";
   const wideResultStorage =
-    meta.resultAbiKind === "out_ref"
+    resolvedMeta.resultAbiKind === "out_ref"
       ? (() => {
           if (usingProvidedWideResultStorage) {
             return undefined;
           }
-          if (typeof meta.outParamType !== "number") {
+          if (typeof resolvedMeta.outParamType !== "number") {
             throw new Error(
-              `codegen missing out param storage for ${meta.wasmName}`,
+              `codegen missing out param storage for ${resolvedMeta.wasmName}`,
             );
           }
-          return allocateTempLocal(meta.outParamType, fnCtx);
+          return allocateTempLocal(resolvedMeta.outParamType, fnCtx);
         })()
       : undefined;
   const initializedWideResultStorage = usingProvidedWideResultStorage
@@ -177,7 +211,7 @@ export const emitResolvedCall = ({
           wideResultStorage.type,
         )
       : undefined;
-  const callArgs = meta.effectful
+  const callArgs = resolvedMeta.effectful
     ? [
         currentHandlerValue(ctx, fnCtx),
         ...(initializedWideResultStorage
@@ -185,22 +219,26 @@ export const emitResolvedCall = ({
           : []),
         ...userArgs,
       ]
-    : [
+      : [
         ...(initializedWideResultStorage
           ? [initializedWideResultStorage]
           : []),
         ...userArgs,
       ];
 
-  if (meta.effectful) {
-    const rawCall = ctx.mod.call(meta.wasmName, callArgs as number[], meta.resultType);
+  if (resolvedMeta.effectful) {
+    const rawCall = ctx.mod.call(
+      resolvedMeta.wasmName,
+      callArgs as number[],
+      resolvedMeta.resultType,
+    );
     const callExpr =
       argSetups.length === 0
         ? rawCall
         : ctx.mod.block(
             null,
             [...argSetups, rawCall],
-            meta.resultType,
+            resolvedMeta.resultType,
           );
     return ctx.effectsBackend.lowerEffectfulCallResult({
       callExpr,
@@ -215,20 +253,20 @@ export const emitResolvedCall = ({
   }
 
   const allowReturnCall =
-    meta.resultAbiKind === "direct" &&
+    resolvedMeta.resultAbiKind === "direct" &&
     argSetups.length === 0 &&
     tailPosition &&
     !fnCtx.effectful &&
-    meta.resultTypeId === expectedTypeId &&
+    resolvedMeta.resultTypeId === expectedTypeId &&
     returnTypeId === expectedTypeId &&
-    meta.resultType === callerReturnWasmType &&
+    resolvedMeta.resultType === callerReturnWasmType &&
     intrinsicResultWasmType === callerReturnWasmType &&
     !requiresStructuralConversion(returnTypeId, expectedTypeId, ctx);
 
   if (allowReturnCall) {
     return {
       expr: ctx.mod.return_call(
-        meta.wasmName,
+        resolvedMeta.wasmName,
         callArgs as number[],
         intrinsicResultWasmType
       ),
@@ -236,7 +274,11 @@ export const emitResolvedCall = ({
     };
   }
 
-  const rawCall = ctx.mod.call(meta.wasmName, callArgs as number[], meta.resultType);
+  const rawCall = ctx.mod.call(
+    resolvedMeta.wasmName,
+    callArgs as number[],
+    resolvedMeta.resultType,
+  );
   if (usingProvidedWideResultStorage) {
     const ops =
       argSetups.length === 0
@@ -248,21 +290,21 @@ export const emitResolvedCall = ({
       usedOutResultStorageRef: true,
     };
   }
-  if (meta.resultAbiKind === "out_ref" && wideResultStorage) {
+  if (resolvedMeta.resultAbiKind === "out_ref" && wideResultStorage) {
     const reloaded = liftHeapValueToInline({
       value: ctx.mod.local.get(
         wideResultStorage.index,
         wideResultStorage.type,
       ),
-      typeId: meta.resultTypeId,
+      typeId: resolvedMeta.resultTypeId,
       ctx,
     });
     const coerced =
-      meta.resultTypeId === expectedTypeId
+      resolvedMeta.resultTypeId === expectedTypeId
         ? reloaded
         : coerceValueToType({
             value: reloaded,
-            actualType: meta.resultTypeId,
+            actualType: resolvedMeta.resultTypeId,
             targetType: expectedTypeId,
             ctx,
             fnCtx,
@@ -282,13 +324,14 @@ export const emitResolvedCall = ({
   }
   const stabilizedCall = stabilizeMultivalueResult(
     rawCall,
-    meta.resultAbiTypes,
+    resolvedMeta.resultAbiTypes,
   );
   const decodedCall =
-    getSignatureSpillBoxType({ typeId: meta.resultTypeId, ctx }) === meta.resultType
+    getSignatureSpillBoxType({ typeId: resolvedMeta.resultTypeId, ctx }) ===
+    resolvedMeta.resultType
       ? unboxSignatureSpillValue({
           value: stabilizedCall,
-          typeId: meta.resultTypeId,
+          typeId: resolvedMeta.resultTypeId,
           ctx,
         })
       : stabilizedCall;
@@ -301,11 +344,11 @@ export const emitResolvedCall = ({
           binaryen.getExpressionType(decodedCall),
         );
   const coercedCall =
-    meta.resultTypeId === expectedTypeId
+    resolvedMeta.resultTypeId === expectedTypeId
       ? callExpr
       : coerceValueToType({
           value: callExpr,
-          actualType: meta.resultTypeId,
+          actualType: resolvedMeta.resultTypeId,
           targetType: expectedTypeId,
           ctx,
           fnCtx,

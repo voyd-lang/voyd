@@ -159,6 +159,7 @@ export const tryInlineResolvedCall = ({
     instanceId: meta.instanceId,
     typeInstanceId: meta.instanceId,
     effectful: false,
+    staticEffectContext: fnCtx.staticEffectContext,
   };
 
   const setupOps = meta.parameters.flatMap((_parameter, index) => {
