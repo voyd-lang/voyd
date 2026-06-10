@@ -64,11 +64,7 @@ const compileEffectFixtureWithCompilerOptimization = async (
       reachableFunctionSymbols: undefined as never,
       reachableModuleLets: new Map(),
       usedTraitDispatchSignatures: new Set(),
-      codegenPlan: {
-        representations: {
-          scalarObjectLocals: new Map(),
-        },
-      },
+      codegenPlan: { representations: {} },
     },
   });
   if (!result.wasm) {

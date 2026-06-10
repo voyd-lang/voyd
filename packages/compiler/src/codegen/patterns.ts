@@ -104,9 +104,6 @@ const storeIntoBinding = ({
   if (binding.kind === "projected-element-ref") {
     throw new Error("cannot assign to a projected element binding");
   }
-  if (binding.kind === "scalar-object") {
-    throw new Error("cannot assign to a scalar-replaced object binding");
-  }
   return storeLocalValue({ binding, value: coerced, ctx, fnCtx });
 };
 

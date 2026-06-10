@@ -280,9 +280,6 @@ export const loadBindingValue = (
   if (binding.kind === "projected-element-ref") {
     return loadProjectedElementBindingValue(binding, ctx);
   }
-  if (binding.kind === "scalar-object") {
-    throw new Error("scalar object binding cannot be loaded without materialization");
-  }
   if (binding.kind === "local") {
     return loadLocalValue(binding, ctx);
   }
@@ -331,9 +328,6 @@ export const loadBindingStorageRef = (
   if (binding.kind === "projected-element-ref") {
     return loadProjectedElementBindingStorageRef(binding, ctx);
   }
-  if (binding.kind === "scalar-object") {
-    return undefined;
-  }
   if (binding.kind === "local") {
     if (
       typeof binding.typeId !== "number" ||
@@ -380,9 +374,6 @@ export const materializeOwnedBinding = ({
   }
   if (existing.kind === "capture") {
     throw new Error("cannot materialize capture binding into owned local storage");
-  }
-  if (existing.kind === "scalar-object") {
-    throw new Error("cannot materialize scalar object binding in locals");
   }
   const typeId = existing.typeId;
   if (typeof typeId !== "number") {
