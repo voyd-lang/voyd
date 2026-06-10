@@ -25,6 +25,11 @@ type StaticEffectSpecializationState = {
   compiled: Set<string>;
 };
 
+type SpecializationSupport = {
+  supported: boolean;
+  residualEffectful: boolean;
+};
+
 const STATIC_EFFECT_SPECIALIZATION_STATE = Symbol(
   "voyd.effects.staticSpecializationState",
 );
@@ -94,7 +99,15 @@ const unresolvedCallRequiresSpecialization = ({
   return calleeInfo?.abiEffectful === true || calleeInfo?.typeEffectful === true;
 };
 
-const canSpecializeFunction = ({
+const mergeSupport = (
+  left: SpecializationSupport,
+  right: SpecializationSupport,
+): SpecializationSupport => ({
+  supported: left.supported && right.supported,
+  residualEffectful: left.residualEffectful || right.residualEffectful,
+});
+
+const analyzeSpecializationSupport = ({
   ctx,
   item,
   context,
@@ -104,14 +117,17 @@ const canSpecializeFunction = ({
   item: HirFunction;
   context: StaticEffectHandlerContext;
   seen: Set<ProgramSymbolId>;
-}): boolean => {
+}): SpecializationSupport => {
   const canonical = canonicalEffectOperation(ctx, item.symbol);
   if (seen.has(canonical)) {
-    return true;
+    return { supported: true, residualEffectful: true };
   }
   seen.add(canonical);
 
-  let supported = true;
+  let support: SpecializationSupport = {
+    supported: true,
+    residualEffectful: false,
+  };
   walkHirExpression({
     exprId: item.body,
     ctx,
@@ -119,19 +135,20 @@ const canSpecializeFunction = ({
     visitHandlerBodies: false,
     visitor: {
       onExpr: (exprId, expr) => {
-        if (!supported) {
+        if (!support.supported) {
           return "stop";
         }
-        if (
-          expr.exprKind === "while" ||
-          expr.exprKind === "loop" ||
-          expr.exprKind === "match"
-        ) {
-          supported = false;
+        if (expr.exprKind === "method-call") {
+          support = { ...support, supported: false };
           return "stop";
         }
-        if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
+        if (expr.exprKind !== "call") {
           return;
+        }
+        const callee = ctx.module.hir.expressions.get(expr.callee);
+        if (callee?.exprKind !== "identifier") {
+          support = { ...support, supported: false };
+          return "stop";
         }
         const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
         if (effectsFacade(ctx).callKind(exprId) === "perform") {
@@ -140,10 +157,19 @@ const canSpecializeFunction = ({
             site?.kind === "perform"
               ? canonicalEffectOperation(ctx, site.effectSymbol)
               : undefined;
-          if (typeof operation !== "number" || !context.handlers.has(operation)) {
-            supported = false;
-            return "stop";
+          const handler =
+            typeof operation === "number"
+              ? context.handlers.get(operation)
+              : undefined;
+          if (handler) {
+            support = {
+              ...support,
+              residualEffectful:
+                support.residualEffectful || handler.residualEffectful,
+            };
+            return;
           }
+          support = { ...support, residualEffectful: true };
           return;
         }
         if (effectsFacade(ctx).callKind(exprId) !== "effectful-call") {
@@ -161,8 +187,8 @@ const canSpecializeFunction = ({
           ) {
             return;
           }
-          supported = false;
-          return "stop";
+          support = { ...support, residualEffectful: true };
+          return;
         }
         const effectfulTargets = targets.filter((target) =>
           targetRequiresSpecialization({
@@ -176,27 +202,29 @@ const canSpecializeFunction = ({
         for (const target of effectfulTargets) {
           const targetRef = ctx.program.symbols.refOf(target as ProgramSymbolId);
           if (targetRef.moduleId !== ctx.moduleId) {
-            supported = false;
-            return "stop";
+            support = { ...support, residualEffectful: true };
+            continue;
           }
           const targetItem = functionItemFor({ ctx, symbol: targetRef.symbol });
-          if (
-            !targetItem ||
-            !canSpecializeFunction({
+          if (!targetItem) {
+            support = { ...support, residualEffectful: true };
+            continue;
+          }
+          const nested = analyzeSpecializationSupport({
               ctx,
               item: targetItem,
               context,
               seen,
-            })
-          ) {
-            supported = false;
+            });
+          support = mergeSupport(support, nested);
+          if (!support.supported) {
             return "stop";
           }
         }
       },
     },
   });
-  return supported;
+  return support;
 };
 
 export const getOrCreateStaticEffectSpecialization = ({
@@ -217,14 +245,13 @@ export const getOrCreateStaticEffectSpecialization = ({
   if (!item) {
     return undefined;
   }
-  if (
-    !canSpecializeFunction({
-      ctx,
-      item,
-      context,
-      seen: new Set(),
-    })
-  ) {
+  const support = analyzeSpecializationSupport({
+    ctx,
+    item,
+    context,
+    seen: new Set(),
+  });
+  if (!support.supported) {
     return undefined;
   }
 
@@ -237,21 +264,28 @@ export const getOrCreateStaticEffectSpecialization = ({
 
   const captureParamTypes = context.captures.map((capture) => capture.paramType);
   const captureTypeIds = context.captures.map((capture) => capture.typeId);
+  const userParamTypes = [
+    ...meta.paramAbiTypes.flat(),
+    ...captureParamTypes,
+  ];
   const resultAbiTypes = getAbiTypesForSignature(meta.resultTypeId, ctx);
+  const widened = ctx.effectsBackend.abi.widenSignature({
+    ctx,
+    effectful: support.residualEffectful,
+    userParamTypes,
+    userResultType: getSignatureWasmType(meta.resultTypeId, ctx),
+  });
   const specializedMeta: FunctionMetadata = {
     ...meta,
     wasmName: `${meta.wasmName}__handled_${sanitize(context.key)}`,
-    paramTypes: [
-      ...meta.paramAbiTypes.flat(),
-      ...captureParamTypes,
-    ],
+    paramTypes: widened.paramTypes,
     paramAbiTypes: [
       ...meta.paramAbiTypes,
       ...captureParamTypes.map((type) => [type] as const),
     ],
-    userParamOffset: 0,
-    firstUserParamIndex: 0,
-    resultType: getSignatureWasmType(meta.resultTypeId, ctx),
+    userParamOffset: widened.userParamOffset,
+    firstUserParamIndex: widened.userParamOffset,
+    resultType: widened.resultType,
     resultAbiTypes,
     paramTypeIds: [...meta.paramTypeIds, ...captureTypeIds],
     parameters: [
@@ -267,8 +301,8 @@ export const getOrCreateStaticEffectSpecialization = ({
     ],
     resultAbiKind: "direct",
     outParamType: undefined,
-    effectful: false,
-    effectRow: undefined,
+    effectful: support.residualEffectful,
+    effectRow: support.residualEffectful ? meta.effectRow : undefined,
   };
   const specialization: StaticEffectSpecialization = {
     base: meta,
@@ -286,9 +320,15 @@ export const takePendingStaticEffectSpecializations = (
 ): StaticEffectSpecialization[] => {
   const state = stateOf(ctx);
   const pending = state.pending.filter(
-    (specialization) => !state.compiled.has(specialization.meta.wasmName),
+    (specialization) =>
+      specialization.meta.moduleId === ctx.moduleId &&
+      !state.compiled.has(specialization.meta.wasmName),
   );
-  state.pending = [];
+  state.pending = state.pending.filter(
+    (specialization) =>
+      specialization.meta.moduleId !== ctx.moduleId &&
+      !state.compiled.has(specialization.meta.wasmName),
+  );
   return pending;
 };
 

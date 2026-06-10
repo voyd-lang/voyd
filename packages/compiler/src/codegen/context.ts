@@ -123,6 +123,7 @@ export interface StaticEffectHandlerCapture {
 export interface StaticEffectHandlerClause {
   operation: ProgramSymbolId;
   resumeValueExpr?: HirExprId;
+  residualEffectful: boolean;
   paramSymbols: readonly SymbolId[];
   returnTypeId: TypeId;
 }

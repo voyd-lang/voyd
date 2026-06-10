@@ -18,7 +18,11 @@ import {
   refCast,
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
-import { allocateTempLocal, storeLocalValue } from "../../locals.js";
+import {
+  allocateAddressableLocal,
+  allocateTempLocal,
+  storeLocalValue,
+} from "../../locals.js";
 import { getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { walkHirExpression, walkHirPattern } from "../../hir-walk.js";
 import { buildGroupContinuationCfg } from "../continuation-cfg.js";
@@ -420,8 +424,7 @@ export const ensureContinuationFunction = ({
     const typeId = substitution
       ? ctx.program.types.substitute(valueType, substitution)
       : valueType;
-    const wasmType = wasmTypeFor(typeId, ctx);
-    const seeded = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
+    const seeded = allocateAddressableLocal({ typeId, ctx, fnCtx });
     fnCtx.bindings.set(symbol, { ...seeded, kind: "local", typeId });
   });
 
