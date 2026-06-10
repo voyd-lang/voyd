@@ -7,18 +7,21 @@ import type {
   HirCallExpr,
   SymbolId,
 } from "../../context.js";
+import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 import {
   initStruct,
   refFunc,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import {
   allocateTempLocal,
+  storeLocalValue,
 } from "../../locals.js";
 import { coerceValueToType, lowerValueForHeapField } from "../../structural.js";
 import {
   getExprBinaryenType,
   getRequiredExprType,
   wasmHeapFieldTypeFor,
+  wasmTypeFor,
 } from "../../types.js";
 import { handlerCleanupOps } from "../handler-stack.js";
 import { captureContinuationEnvFieldValue } from "./shared.js";
@@ -33,6 +36,103 @@ import { ensureEffectsMemory } from "../host-boundary/imports.js";
 import { LINEAR_MEMORY_INTERNAL } from "../host-boundary/constants.js";
 import { ensureEffectHandleTable } from "../handle-table.js";
 import { tailResumptionExitChecks } from "../tail-resumptions.js";
+import { canonicalEffectOperation } from "../static-specialization.js";
+
+const tryCompileStaticHandledPerform = ({
+  expr,
+  calleeSymbol,
+  signatureTypes,
+  ctx,
+  fnCtx,
+  compileExpr,
+  typeInstanceId,
+}: {
+  expr: HirCallExpr;
+  calleeSymbol: SymbolId;
+  signatureTypes: { params: readonly number[]; returnType: number };
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  typeInstanceId?: ProgramFunctionInstanceId;
+}): CompiledExpression | undefined => {
+  const staticContext = fnCtx.staticEffectContext;
+  const handled = staticContext?.handlers.get(
+    canonicalEffectOperation(ctx, calleeSymbol),
+  );
+  if (!handled) {
+    return undefined;
+  }
+
+  const savedBindings = new Map(
+    handled.paramSymbols.map((symbol) => [symbol, fnCtx.bindings.get(symbol)]),
+  );
+  const setup: binaryen.ExpressionRef[] = expr.args.map((arg, index) => {
+    const typeId = signatureTypes.params[index];
+    if (typeof typeId !== "number") {
+      throw new Error("static effect specialization missing argument type");
+    }
+    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
+    const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
+    const coerced = coerceValueToType({
+      value: value.expr,
+      actualType: actualTypeId,
+      targetType: typeId,
+      ctx,
+      fnCtx,
+    });
+    const local = allocateTempLocal(
+      wasmTypeFor(typeId, ctx),
+      fnCtx,
+      typeId,
+      ctx,
+    );
+    const symbol = handled.paramSymbols[index];
+    if (typeof symbol === "number") {
+      fnCtx.bindings.set(symbol, { ...local, kind: "local", typeId });
+    }
+    return storeLocalValue({ binding: local, value: coerced, ctx, fnCtx });
+  });
+
+  const value =
+    typeof handled.resumeValueExpr === "number"
+      ? compileExpr({
+          exprId: handled.resumeValueExpr,
+          ctx,
+          fnCtx,
+          expectedResultTypeId: signatureTypes.returnType,
+        }).expr
+      : ctx.mod.nop();
+  savedBindings.forEach((binding, symbol) => {
+    if (binding) {
+      fnCtx.bindings.set(symbol, binding);
+    } else {
+      fnCtx.bindings.delete(symbol);
+    }
+  });
+
+  const actualType =
+    typeof handled.resumeValueExpr === "number"
+      ? getRequiredExprType(handled.resumeValueExpr, ctx, typeInstanceId)
+      : ctx.program.primitives.void;
+  const coerced =
+    actualType === signatureTypes.returnType
+      ? value
+      : coerceValueToType({
+          value,
+          actualType,
+          targetType: signatureTypes.returnType,
+          ctx,
+          fnCtx,
+        });
+  return {
+    expr: ctx.mod.block(
+      null,
+      [...setup, coerced],
+      wasmTypeFor(signatureTypes.returnType, ctx),
+    ),
+    usedReturnCall: false,
+  };
+};
 
 export const compileEffectOpCall = ({
   expr,
@@ -74,8 +174,25 @@ export const compileEffectOpCall = ({
     typeInstanceId,
     registry,
   });
+  const signatureTypes = resolvePerformSignature({
+    site,
+    ctx,
+    typeInstanceId,
+  });
+  const staticHandled = tryCompileStaticHandledPerform({
+    expr,
+    calleeSymbol,
+    signatureTypes,
+    ctx,
+    fnCtx,
+    compileExpr,
+    typeInstanceId,
+  });
+  if (staticHandled) {
+    return staticHandled;
+  }
   const args = expr.args.map((arg, index) => {
-    const expectedTypeId = signature.parameters[index]?.typeId;
+    const expectedTypeId = signatureTypes.params[index] ?? signature.parameters[index]?.typeId;
     const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
     const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
     return coerceValueToType({
@@ -108,11 +225,6 @@ export const compileEffectOpCall = ({
     fnRef: contRef,
     env,
     site: ctx.mod.i32.const(site.siteOrder),
-  });
-  const signatureTypes = resolvePerformSignature({
-    site,
-    ctx,
-    typeInstanceId,
   });
   const argsType = ensureEffectArgsType({
     ctx,

@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import binaryen from "binaryen";
+import { createVoydHost } from "@voyd-lang/js-host";
 import { parse } from "../../parser/parser.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { createRttContext } from "../rtt/index.js";
@@ -15,6 +16,8 @@ import {
   parseEffectTable,
 } from "./support/effects-harness.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
+import { monomorphizeProgram } from "../../semantics/linking.js";
+import { codegenProgram } from "../codegen.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
 import type { TypeId } from "../../semantics/ids.js";
@@ -29,6 +32,46 @@ const guardFixturePath = resolve(
   "__fixtures__",
   "effects-perform-guard.voyd"
 );
+const localFastPathFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-local-fast-path.voyd"
+);
+
+const compileEffectFixtureWithCompilerOptimization = async (
+  entryPath: string,
+) => {
+  const base = await compileEffectFixture({
+    entryPath,
+    codegenOptions: { effectsHostBoundary: "off" },
+  });
+  const modules = Array.from(base.semantics.values());
+  const monomorphized = monomorphizeProgram({
+    modules,
+    semantics: base.semantics,
+  });
+  const program = buildProgramCodegenView(modules, {
+    instances: monomorphized.instances,
+    moduleTyping: monomorphized.moduleTyping,
+  });
+  const result = codegenProgram({
+    program,
+    entryModuleId: base.entryModuleId,
+    options: { validate: true, effectsHostBoundary: "off" },
+    optimization: {
+      handlerClauseCaptures: new Map(),
+      reachableFunctionInstances: undefined as never,
+      reachableFunctionSymbols: undefined as never,
+      reachableModuleLets: new Map(),
+      usedTraitDispatchSignatures: new Set(),
+      codegenPlan: { representations: {} },
+    },
+  });
+  if (!result.wasm) {
+    throw new Error("expected validated codegen to emit wasm bytes");
+  }
+  return { ...result, wasm: result.wasm };
+};
 
 const loadSemantics = () =>
   semanticsPipeline(parse(readFileSync(fixturePath, "utf8"), "/proj/src/effects-perform.voyd"));
@@ -170,6 +213,28 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     },
     60_000,
   );
+
+  it("specializes simple locally handled tail effects in optimized builds", async () => {
+    const unoptimized = await compileEffectFixture({
+      entryPath: localFastPathFixturePath,
+      codegenOptions: { effectsHostBoundary: "off" },
+    });
+    const specialized = await compileEffectFixtureWithCompilerOptimization(
+      localFastPathFixturePath,
+    );
+
+    const unoptimizedText = unoptimized.module.emitText();
+    const specializedText = specialized.module.emitText();
+
+    expect(unoptimizedText).not.toContain("__handled_");
+    expect(specializedText).toContain("__handled_");
+    expect(specializedText).not.toContain("__handler_fast_");
+
+    const host = await createVoydHost({ wasm: specialized.wasm });
+    await expect(host.run<number>("direct_local")).resolves.toBe(7);
+    await expect(host.run<number>("helper_local")).resolves.toBe(10);
+    await expect(host.run<number>("big_local")).resolves.toBe(45);
+  });
 
   it("does not re-evaluate guards when resuming after a perform", async () => {
     const { module } = await compileEffectFixture({ entryPath: guardFixturePath });

@@ -46,6 +46,7 @@ import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
 import type { ProgramOptimizationFacts } from "../optimize/ir.js";
+import type { ProgramSymbolId } from "../semantics/ids.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -107,6 +108,28 @@ export interface FunctionMetadata {
   instanceId: ProgramFunctionInstanceId;
   effectful: boolean;
   effectRow?: EffectRowId;
+}
+
+export interface StaticEffectHandlerCapture {
+  symbol: SymbolId;
+  typeId: TypeId;
+  wasmType: binaryen.Type;
+  paramType: binaryen.Type;
+  mode: "value" | "storage-ref";
+  mutable: boolean;
+}
+
+export interface StaticEffectHandlerClause {
+  operation: ProgramSymbolId;
+  resumeValueExpr?: HirExprId;
+  paramSymbols: readonly SymbolId[];
+  returnTypeId: TypeId;
+}
+
+export interface StaticEffectHandlerContext {
+  key: string;
+  handlers: ReadonlyMap<ProgramSymbolId, StaticEffectHandlerClause>;
+  captures: readonly StaticEffectHandlerCapture[];
 }
 
 export interface ModuleLetGetterMetadata {
@@ -322,6 +345,7 @@ export interface FunctionContext {
   handlerStack?: HandlerScope[];
   loopStack?: LoopScope[];
   continuations?: Map<SymbolId, ContinuationBinding>;
+  staticEffectContext?: StaticEffectHandlerContext;
   continuation?: {
     cfg: GroupContinuationCfg;
     startedLocal: LocalBindingLocal;
