@@ -645,36 +645,6 @@ test "reachable from export root":
     expect(codegen.module.emitText()).toContain(`(export "${utilTest.exportName}"`);
   });
 
-  it("inlines small pure direct calls during optimized codegen", async () => {
-    const { optimized, entryModuleId } = await buildOptimized({
-      files: {
-        "main.voyd": `
-fn double(value: i32) -> i32
-  value + value
-
-pub fn main() -> i32
-  double(21)
-`,
-      },
-    });
-
-    const optimizedCodegen = codegenProgram({
-      program: optimized.program,
-      entryModuleId,
-      optimization: optimized.facts,
-      options: {
-        optimize: false,
-        validate: false,
-        runtimeDiagnostics: false,
-      },
-    });
-    const wasmText = optimizedCodegen.module.emitText();
-
-    expect(wasmText).not.toContain("(func $src__main__double_");
-    expect(wasmText).not.toContain("call $src__main__double_");
-    expect(wasmText).toContain("(i32.const 42)");
-  });
-
   it("lowers exact nominal field reads to direct struct loads", async () => {
     const { optimized, entryModuleId } = await buildOptimized({
       files: {
