@@ -27,15 +27,25 @@ import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 export const typeObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  expectedType?: TypeId,
 ): TypeId => {
   if (expr.literalKind === "nominal") {
     return typeNominalObjectLiteral(expr, ctx, state);
   }
 
+  const expectedFields =
+    typeof expectedType === "number" && expectedType !== ctx.primitives.unknown
+      ? new Map(
+          (getStructuralFields(expectedType, ctx, state) ?? []).map((field) => [
+            field.name,
+            field,
+          ]),
+        )
+      : undefined;
   const fields = new Map<string, TypeId>();
   expr.entries.forEach((entry) =>
-    mergeObjectLiteralEntry(entry, fields, ctx, state)
+    mergeObjectLiteralEntry(entry, fields, ctx, state, expectedFields),
   );
 
   const orderedFields = Array.from(fields.entries()).map(([name, type]) => ({
@@ -44,7 +54,7 @@ export const typeObjectLiteralExpr = (
   }));
   const effectRow = composeEffectRows(
     ctx.effects,
-    expr.entries.map((entry) => getExprEffectRow(entry.value, ctx))
+    expr.entries.map((entry) => getExprEffectRow(entry.value, ctx)),
   );
   ctx.effects.setExprEffect(expr.id, effectRow);
   return ctx.arena.internStructuralObject({ fields: orderedFields });
@@ -54,10 +64,14 @@ const mergeObjectLiteralEntry = (
   entry: HirObjectLiteralEntry,
   fields: Map<string, TypeId>,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
+  expectedFields?: ReadonlyMap<string, ObjectField>,
 ): void => {
   if (entry.kind === "field") {
-    const valueType = typeExpression(entry.value, ctx, state);
+    const expectedField = expectedFields?.get(entry.name);
+    const valueType = typeExpression(entry.value, ctx, state, {
+      expectedType: expectedField?.type,
+    });
     fields.set(entry.name, valueType);
     return;
   }
@@ -71,15 +85,13 @@ const mergeObjectLiteralEntry = (
     return;
   }
 
-  spreadFields.forEach((field) =>
-    fields.set(field.name, field.type)
-  );
+  spreadFields.forEach((field) => fields.set(field.name, field.type));
 };
 
 const typeNominalObjectLiteral = (
   expr: HirObjectLiteralExpr,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): TypeId => {
   const namedTarget =
     expr.target?.typeKind === "named" ? expr.target : undefined;
@@ -98,18 +110,18 @@ const typeNominalObjectLiteral = (
 
   const typeName = getSymbolName(targetSymbol, ctx);
   const templateFields = new Map<string, ObjectField>(
-    template.fields.map((field) => [field.name, field])
+    template.fields.map((field) => [field.name, field]),
   );
   const explicitTypeArgs =
     namedTarget?.typeArguments?.map((arg) =>
-      resolveTypeExpr(arg, ctx, state, ctx.primitives.unknown)
+      resolveTypeExpr(arg, ctx, state, ctx.primitives.unknown),
     ) ?? [];
   const hasExplicitTypeArgsForAllParams =
     template.params.length > 0 &&
     template.params.every(
       (_, index) =>
         typeof explicitTypeArgs[index] === "number" &&
-        explicitTypeArgs[index] !== ctx.primitives.unknown
+        explicitTypeArgs[index] !== ctx.primitives.unknown,
     );
   const typeParamBindings = new Map<TypeParamId, TypeId>();
 
@@ -123,7 +135,7 @@ const typeNominalObjectLiteral = (
           ctx,
           state,
           typeName,
-        })
+        }),
       );
     });
   }
@@ -143,7 +155,7 @@ const typeNominalObjectLiteral = (
   }
 
   const declaredFields = new Map<string, ObjectField>(
-    objectInfo.fields.map((field) => [field.name, field])
+    objectInfo.fields.map((field) => [field.name, field]),
   );
   const provided = new Set<string>();
 
@@ -155,7 +167,7 @@ const typeNominalObjectLiteral = (
       ctx,
       state,
       typeName,
-    })
+    }),
   );
 
   declaredFields.forEach((field, name) => {
@@ -187,29 +199,27 @@ const typeNominalObjectLiteral = (
 
   const effectRow = composeEffectRows(
     ctx.effects,
-    expr.entries.map((entry) => getExprEffectRow(entry.value, ctx))
+    expr.entries.map((entry) => getExprEffectRow(entry.value, ctx)),
   );
   ctx.effects.setExprEffect(expr.id, effectRow);
   return objectInfo.type;
 };
 
-const bindNominalObjectEntry = (
-  {
-    entry,
-    declared,
-    bindings,
-    ctx,
-    state,
-    typeName,
-  }: {
-    entry: HirObjectLiteralEntry;
-    declared: Map<string, ObjectField>;
-    bindings: Map<TypeParamId, TypeId>;
-    ctx: TypingContext;
-    state: TypingState;
-    typeName: string;
-  }
-): void =>
+const bindNominalObjectEntry = ({
+  entry,
+  declared,
+  bindings,
+  ctx,
+  state,
+  typeName,
+}: {
+  entry: HirObjectLiteralEntry;
+  declared: Map<string, ObjectField>;
+  bindings: Map<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+  typeName: string;
+}): void =>
   forEachNominalObjectEntryField({
     entry,
     declared,
@@ -217,27 +227,31 @@ const bindNominalObjectEntry = (
     state,
     typeName,
     onField: ({ expectedField, valueType }) => {
-      bindTypeParamsFromType(expectedField.type, valueType, bindings, ctx, state);
+      bindTypeParamsFromType(
+        expectedField.type,
+        valueType,
+        bindings,
+        ctx,
+        state,
+      );
     },
   });
 
-const mergeNominalObjectEntry = (
-  {
-    entry,
-    declared,
-    provided,
-    ctx,
-    state,
-    typeName,
-  }: {
-    entry: HirObjectLiteralEntry;
-    declared: Map<string, ObjectField>;
-    provided: Set<string>;
-    ctx: TypingContext;
-    state: TypingState;
-    typeName: string;
-  }
-): void =>
+const mergeNominalObjectEntry = ({
+  entry,
+  declared,
+  provided,
+  ctx,
+  state,
+  typeName,
+}: {
+  entry: HirObjectLiteralEntry;
+  declared: Map<string, ObjectField>;
+  provided: Set<string>;
+  ctx: TypingContext;
+  state: TypingState;
+  typeName: string;
+}): void =>
   forEachNominalObjectEntryField({
     entry,
     declared,
@@ -290,8 +304,7 @@ const forEachNominalObjectEntryField = ({
       span: entry.span,
       ctx,
     });
-    const valueSpan =
-      ctx.hir.expressions.get(entry.value)?.span ?? entry.span;
+    const valueSpan = ctx.hir.expressions.get(entry.value)?.span ?? entry.span;
     assertFieldAccess({
       field: expectedField,
       ctx,
@@ -367,12 +380,17 @@ const resolveAccessibleObjectSpreadFields = ({
       params: {
         kind: "type-mismatch",
         expected: "structural object",
-        actual: typeDescriptorToUserString(ctx.arena.get(spreadType), ctx.arena),
+        actual: typeDescriptorToUserString(
+          ctx.arena.get(spreadType),
+          ctx.arena,
+        ),
       },
       span: normalizeSpan(entry.span),
     });
   }
-  return filterAccessibleFields(spreadFields, ctx, state, { allowOwnerPrivate });
+  return filterAccessibleFields(spreadFields, ctx, state, {
+    allowOwnerPrivate,
+  });
 };
 
 const resolveExpectedNominalField = ({
