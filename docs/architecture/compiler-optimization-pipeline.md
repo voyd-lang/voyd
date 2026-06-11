@@ -1,342 +1,347 @@
 # Compiler Optimization Pipeline
 
-Status: Proposed
+Status: Current
 Owner: Compiler Architecture Working Group
-Scope: `packages/compiler/src/pipeline-shared.ts`, new `packages/compiler/src/optimize/*`, `packages/compiler/src/codegen/*`, `packages/sdk/src/node.ts`
+Scope: `packages/compiler/src/pipeline-shared.ts`, `packages/compiler/src/optimize/*`, `packages/compiler/src/codegen/*`, `packages/lib/src/lib/binaryen-optimize.ts`
 
-## Goal
+## Purpose
 
-Introduce a compiler-owned optimization layer before Wasm codegen, while keeping Binaryen responsible for Wasm-level and Binaryen-IR-level optimization.
+Voyd has a compiler-owned optimization layer between semantic linking and Wasm
+codegen. Its job is to use Voyd semantic information while that information is
+still explicit: types, effects, trait resolution, monomorphized instances,
+call-shape metadata, capture sets, and constructor facts.
 
-The design goal is not "replace Binaryen". The goal is to do the optimizations that require Voyd semantic information before that information is erased by lowering to Wasm.
+Binaryen remains responsible for Wasm-level cleanup and optimization after
+Voyd has lowered the program. The compiler optimizer should not duplicate
+Binaryen's generic local cleanup, CFG cleanup, Wasm peepholes, low-level
+inlining, or Binaryen GC passes.
 
-## Current Pipeline
+## Optimized Pipeline
 
-Today the relevant whole-program pipeline is:
+The optimized whole-program path is:
 
-1. Analyze modules.
-2. `monomorphizeProgram(...)`
-3. `buildProgramCodegenView(...)`
-4. `codegen.codegenProgram(...)`
-5. Binaryen `module.optimize()` when `CodegenOptions.optimize` is enabled
-6. In `@voyd-lang/sdk`, read emitted wasm back into Binaryen and run another `module.optimize()`
+1. Load and analyze modules.
+2. Lower analyzed modules into ordered semantic modules.
+3. `monomorphizeProgram(...)` builds callable instance metadata.
+4. `buildProgramCodegenView(...)` builds the stable codegen-facing semantic
+   view.
+5. `optimizeProgram(...)` runs when `CodegenOptions.optimize` is enabled.
+6. `codegenProgram(...)` receives the optimized program plus optimization facts.
+7. Codegen emits a Binaryen module and, when optimized, runs the configured
+   Binaryen optimization profile.
 
-The current call sites are:
+The optimization layer is invoked from both public emission paths in
+`packages/compiler/src/pipeline-shared.ts`:
 
-- `packages/compiler/src/pipeline-shared.ts`
-  - `emitProgram(...)`
-  - `emitProgramWithContinuationFallback(...)`
-- `packages/compiler/src/codegen/codegen.ts`
-  - `mod.optimize()`
-- `packages/sdk/src/node.ts`
-  - `binaryen.setShrinkLevel(3)`
-  - `binaryen.setOptimizeLevel(3)`
-  - `module.optimize()`
+- `emitProgram(...)`
+- `emitProgramWithContinuationFallback(...)`
 
-This means Voyd currently relies on Binaryen for all optimization after language lowering. There is no compiler-owned optimization stage between semantic linking and Wasm emission.
+Both paths build the same `ProgramCodegenView`, optionally call
+`optimizeProgram(...)`, and pass `optimized?.program` plus `optimized?.facts`
+into codegen.
 
-## What Binaryen Already Does
+## Ownership Boundary
 
-This repository currently depends on `binaryen` `^125.0.0` (`packages/sdk/package.json`, `packages/lib/package.json`).
+The boundary between compiler optimization and codegen is
+`ProgramCodegenView` plus `ProgramOptimizationFacts`.
 
-Research basis:
+The optimizer may:
 
-- Official Binaryen README: [`WebAssembly/binaryen/README.md`](https://github.com/WebAssembly/binaryen/blob/main/README.md)
-- Local Binaryen package docs: `node_modules/binaryen/README.md`
-- Local Binaryen tool inventory: `node_modules/binaryen/bin/wasm-opt --help`
-- Verified default `-O` pipeline via `node_modules/binaryen/bin/wasm-opt /tmp/min.wat -O --debug`
+- clone and mutate HIR in its own `ProgramOptimizationIR`
+- rewrite compiler-level call metadata
+- prune monomorphized instances and other semantic artifacts before codegen
+- compute facts that tell codegen to choose a more direct lowering
 
-Important confirmed facts:
+The optimizer must not:
 
-- `Module#optimize()` runs Binaryen's default optimization passes.
-- The Binaryen JS defaults are currently:
-  - `optimizeLevel = 2`
-  - `shrinkLevel = 1`
-- In Binaryen's CLI, `-O` is equivalent to `-Os`.
+- mutate typing internals directly
+- transform Binaryen IR
+- perform generic Wasm-level peepholes
+- infer broad escape/scalar-replacement behavior unless that is explicitly
+  owned by a dedicated semantic pass
 
-### Default Binaryen Passes Already Observed In The Pipeline
+Codegen may consume optimization facts when choosing a lowering, but it should
+still validate local preconditions at the use site. Facts are a guide to avoid
+rediscovering semantic information, not permission to emit unsafe Wasm.
 
-The default `-O`/`-Os` pipeline already runs the following pass names on a minimal module:
+## Core Files
 
-- `duplicate-function-elimination`
-- `remove-unused-module-elements`
-- `memory-packing`
-- `once-reduction`
-- `ssa-nomerge`
-- `dce`
-- `remove-unused-names`
-- `remove-unused-brs`
-- `optimize-instructions`
-- `pick-load-signs`
-- `precompute`
-- `code-pushing`
-- `simplify-locals-nostructure`
-- `vacuum`
-- `reorder-locals`
-- `coalesce-locals`
-- `local-cse`
-- `simplify-locals`
-- `code-folding`
-- `merge-blocks`
-- `rse`
-- `dae-optimizing`
-- `inlining-optimizing`
-- `duplicate-import-elimination`
-- `simplify-globals-optimizing`
-- `reorder-globals`
-- `directize`
-
-### Binaryen Also Already Provides Additional Optimization Passes
-
-`wasm-opt --help` also exposes many non-default passes that are still clearly Binaryen territory:
-
-- `licm`
-- `optimize-added-constants`
-- `merge-locals`
-- `merge-similar-functions`
-- `signature-pruning`
-- `signature-refining`
-- `global-refining`
-- `gto`
-- `gufa`
-- `heap-store-optimization`
-- `heap2local`
-- `type-refining`
-- `tuple-optimization`
-
-### Implication
-
-Voyd should not duplicate:
-
-- Wasm peepholes
-- local/temp cleanup
-- generic DCE/CSE/RSE/SSA passes
-- low-level inlining
-- block merging / CFG cleanup at Binaryen IR granularity
-- load/store offset folding
-- import/function deduplication
-- memory/data-segment packing
-- directization of Wasm indirect calls
-- GC heap/store optimizations that Binaryen already models directly
-
-If a pass can be expressed purely as a Wasm or Binaryen-IR transform, Binaryen should remain the owner.
-
-## What Voyd Should Optimize Before Codegen
-
-The compiler-owned layer should focus on transformations that need typed, effect-aware, trait-aware Voyd semantics.
-
-### Tier 1: High-value passes to implement first
-
-- Trait dispatch devirtualization
-  - Rewrite trait-method calls to direct calls when the concrete impl is known from `ProgramCodegenView`.
-  - This is not the same as Binaryen `directize`, which only turns constant table indexes into direct Wasm calls after lowering.
-
-- Effect fast-path elimination
-  - Remove effect-handler scaffolding when the callee is statically pure or when the effect row proves an operation cannot occur.
-  - Specialize handler lowering for resume-only / tail-resume-only cases.
-
-- Closure environment shrinking
-  - Remove uncaptured values from closure environments before any closure struct type is emitted.
-  - This reduces generated Wasm GC field counts and helper code, which Binaryen cannot recover once the extra fields exist.
-
-- Continuation / handler environment shrinking
-  - Prune captured state from effect trampolines and continuation environments using effect-lowering facts.
-
-- Constructor-known simplification
-  - Fold `Option`/union/intersection/tag-style checks when the constructor or exact nominal head is already proven.
-  - Example: eliminate branches after inlining overload resolution or monomorphization has made the variant exact.
-
-- Whole-program specialization pruning
-  - Drop unreachable monomorphized instances, trait impl wrappers, and helper stubs before Wasm emission.
-  - Binaryen can remove unused emitted functions, but it cannot prevent us from generating unnecessary type metadata, helper bodies, or GC shapes in the first place.
-
-- Pure compile-time evaluation
-  - Evaluate a tightly controlled set of compiler-known pure intrinsics and annotated library helpers when all inputs are compile-time constants.
-  - Keep this at the semantic layer, not as a generic arithmetic peephole pass.
-
-### Tier 2: Good follow-on passes
-
-- Call-shape specialization
-  - Specialize resolved calls based on labels/default-argument plans already computed by semantics so codegen emits smaller direct call sequences.
-
-- Redundant runtime type-check elimination
-  - Remove casts/tests that are semantically proven by the type arena, trait resolution, or constructor propagation before they become Wasm `ref.test` / `ref.cast`.
-
-- Semantic copy forwarding
-  - Forward fields out of freshly constructed aggregates when the aggregate is immediately destructured and does not escape.
-  - This should stay narrowly focused on semantic constructs, not devolve into a generic local-value optimizer.
-
-- Addressable wide-local scratch lowering
-  - Reuse already-addressable local/out-result storage for wide aggregate construction and mutation when the storage stays within the current lowering region.
-  - This is intentionally narrower than future escape-analysis (`V-325`) or scalar-replacement (`V-326`) work: it does not infer reusable whole-program escape facts and it does not split aggregates into scalar locals.
-
-### Explicit non-goals for the compiler pass layer
-
-- Arithmetic peepholes
-- local.get/local.set cleanup
-- generic inlining heuristics
-- loop-invariant code motion
-- Wasm CFG cleanup
-- stack-machine shaping
-- low-level GC heap store optimization
-
-## Proposed Architecture
-
-Add a new compiler package area:
-
-- `packages/compiler/src/optimize/`
-
-Recommended top-level files:
-
-- `packages/compiler/src/optimize/pipeline.ts`
 - `packages/compiler/src/optimize/ir.ts`
+  - defines `ProgramOptimizationIR`, `ProgramOptimizationFacts`, and
+    `ProgramOptimizationResult`
 - `packages/compiler/src/optimize/pass.ts`
-- `packages/compiler/src/optimize/analysis/*`
-- `packages/compiler/src/optimize/passes/*`
+  - defines the pass interface and cached analysis API
+- `packages/compiler/src/optimize/pipeline.ts`
+  - builds the optimization IR, runs the pass list, and finalizes the optimized
+    program/facts
+- `packages/compiler/src/optimize/codegen-plan.ts`
+  - contains longer-lived codegen planning data
+- `packages/compiler/src/codegen/optimization/*`
+  - contains small codegen helpers that consume optimizer facts
+- `packages/lib/src/lib/binaryen-optimize.ts`
+  - owns the shared Binaryen optimization profiles
 
-### IR Boundary
+## Optimization IR
 
-Do not run optimization passes directly on Binaryen IR.
+`ProgramOptimizationIR` is built from `ProgramCodegenView` and the semantic
+pipeline results. It keeps cloned module views so passes can mutate optimized
+HIR without changing the original semantics-owned data.
 
-Do not run them by mutating typing internals either.
+The IR currently tracks:
 
-Instead:
+- the original `ProgramCodegenView`
+- the entry module id and selected codegen options
+- optimized module views with cloned HIR/effect data
+- normalized call lowering info per module/expression
+- function instantiation metadata
+- surviving monomorphized instances
+- accumulated optimization facts
 
-1. Keep `ProgramCodegenView` as the stable semantics-owned boundary.
-2. Build a compiler-owned `ProgramOptimizationIR` from that view.
-3. Run optimization passes on `ProgramOptimizationIR`.
-4. Feed optimized function bodies plus optimization facts into codegen.
+`ProgramOptimizationFacts` currently includes:
 
-### `ProgramOptimizationIR`
+- reachable function instances and function symbols
+- reachable module lets
+- effect handler clause capture sets
+- used trait-dispatch signatures
+- receiver specialization requests
+- exact and known parameter type facts
+- runtime type-check elision candidates for field access
+- semantic copy-forwarding candidates for field access
+- a codegen optimization plan
 
-`ProgramOptimizationIR` should contain only the data that is useful for code generation and optimization:
+## Pass API
 
-- reachable `ProgramFunctionInstanceId`s only
-- normalized, explicit control-flow expressions
-- resolved direct-call targets
-- explicit trait-dispatch nodes
-- effect rows on expressions/functions
-- closure and continuation capture sets
-- constructor / nominal-head facts
-- exact value type ids
-
-It should not re-expose general binding internals or parser shapes.
-
-### Pass API
-
-Use a small pass manager with explicit analysis invalidation:
+Optimization passes implement this interface:
 
 ```ts
 type ProgramOptimizationPass = {
   name: string;
   run(ctx: ProgramOptimizationContext): ProgramOptimizationPassResult;
 };
-
-type ProgramOptimizationPassResult = {
-  changed: boolean;
-  invalidates?: readonly OptimizationAnalysisKey[];
-};
 ```
 
-Analyses should be cached and recomputed on demand:
+`ProgramOptimizationContext` gives passes access to the IR and a small cached
+analysis mechanism. Analyses are invalidated explicitly by returning
+`invalidates` from a pass.
 
-- call graph
-- effect reachability
-- escape analysis
-- capture analysis
-- constructor-known facts
-- exact-impl / exact-target facts
+Current cached analysis keys are:
 
-### Codegen Integration
+- `reachable-function-instances`
+- `handler-captures`
+- `trait-dispatch-signatures`
 
-In the short term, codegen can consume:
+## Current Pass Order
 
-- `ProgramCodegenView` for type/layout metadata
-- optimized per-instance bodies from `ProgramOptimizationIR`
-- optimization facts that affect lowering decisions
+The optimizer intentionally runs some passes more than once because earlier
+rewrites can expose new exact-receiver, constructor, trait-dispatch, or
+reachability facts.
 
-That lets us introduce the optimization layer without rewriting every codegen index at once.
+The current pass list is:
 
-Long-term, function-body codegen should consume optimized IR directly, while the non-body indexes remain semantics-owned via `ProgramCodegenView`.
+1. `pure-compile-time-evaluation`
+2. `simplify-boolean-branch`
+3. `constructor-known-simplification`
+4. `effect-fast-path-elimination`
+5. `closure-environment-shrinking`
+6. `continuation-and-handler-environment-shrinking`
+7. `whole-program-specialization-pruning`
+8. `exact-receiver-propagation`
+9. `constructor-known-simplification`
+10. `trait-dispatch-devirtualization`
+11. `whole-program-specialization-pruning`
+12. `exact-receiver-propagation`
+13. `constructor-known-simplification`
+14. `trait-dispatch-devirtualization`
+15. `whole-program-specialization-pruning`
+16. `redundant-runtime-type-check-elimination`
+17. `semantic-copy-forwarding`
 
-## Proposed Pipeline Placement
+## Implemented Semantic Optimizations
 
-The optimization pass should run in:
+### Pure Compile-Time Evaluation
 
-- `packages/compiler/src/pipeline-shared.ts`
+Evaluates a controlled set of compiler-known pure expressions and intrinsics
+when all inputs are compile-time constants. This is semantic constant
+evaluation, not a generic arithmetic peephole pass.
 
-Specifically:
+### Boolean Branch Simplification
 
-- in `emitProgram(...)`
-- in `emitProgramWithContinuationFallback(...)`
-- immediately after `buildProgramCodegenView(...)`
-- immediately before `codegen.codegenProgram(...)` / `codegenProgramWithContinuationFallback(...)`
+Simplifies branches whose condition is already known from earlier semantic
+rewrites or constant evaluation.
 
-The intended pipeline becomes:
+### Constructor-Known Simplification
 
-1. `analyzeModules(...)`
-2. `monomorphizeProgram(...)`
-3. `buildProgramCodegenView(...)`
-4. `optimizeProgram(...)`
-5. `codegen.codegenProgram(...)`
-6. Binaryen `module.optimize()`
+Uses constructor and exact nominal facts to simplify `Option`,
+union/intersection, and tag-style checks before they lower into runtime
+dispatch or type tests.
 
-This is the right boundary because:
+### Effect Fast-Path Elimination
 
-- monomorphization has already exposed whole-program callable instances
-- the stable semantics/codegen contract already exists here
-- codegen stays focused on Wasm emission
-- Binaryen remains the final Wasm optimizer instead of becoming the place where language-level policy lives
+Uses effect information to remove effect scaffolding when the compiler can
+prove a callee is pure or an effect operation cannot be performed on a path.
 
-## Optimization Policy
+### Closure Environment Shrinking
 
-Public SDK policy should stay intentionally narrow for now:
+Shrinks closure environments before closure struct types are emitted, so unused
+captures never become Wasm GC fields.
 
-- `optimize?: boolean` remains the public SDK switch.
-- `optimize: true` should mean the most aggressive validated optimization behavior.
-- Less aggressive behavior should be opt-in through compiler-internal or codegen-internal profiles, not through public Binaryen pass configuration in `@voyd-lang/sdk`.
+### Continuation And Handler Environment Shrinking
 
-Current aggressive Binaryen policy should include safe non-default passes,
-especially heap-focused passes such as `heap-store-optimization` and
-`heap2local`.
+Prunes captured state from continuation and handler environments using
+effect-lowering and handler capture facts.
 
-Current aggressive Binaryen policy should exclude high-risk categories such as:
+### Whole-Program Specialization Pruning
 
-- passes that require `closed-world` assumptions
-- JS-lowering / ABI-legalization passes
-- instrumentation passes
-- semantic mode-changing passes such as trap-mode rewrites
-- unvalidated whole-program GC/type-global refinement passes
+Drops unreachable monomorphized instances, function symbols, module lets, trait
+dispatch signatures, and helper artifacts before codegen emits them. Binaryen
+can remove unused functions after emission, but it cannot prevent Voyd from
+emitting unnecessary type metadata and helper shapes.
 
-In other words, "aggressive" should mean "strongest profile we have validated on
-real Voyd output", not "enable every Binaryen flag blindly".
+### Exact Receiver Propagation
 
-Important rule:
+Propagates exact and known parameter type facts across reachable call contexts.
+These facts feed trait dispatch devirtualization, receiver specialization, and
+runtime type-check elision.
 
-- Voyd compiler passes decide semantic rewrites.
-- Binaryen remains the Wasm optimizer, but its exact pass settings should be compiler policy, not a public SDK configuration surface.
+### Trait Dispatch Devirtualization
 
-That means:
+Rewrites trait-method calls to direct calls when the concrete implementation is
+known. This is not the same as Binaryen `directize`; Voyd is resolving language
+trait dispatch before it becomes lower-level Wasm call/table behavior.
 
-- do not expose raw Binaryen optimize/shrink/pass lists through the SDK yet
-- keep the canonical optimization policy in compiler code, not SDK post-processing
-- allow a coarse internal profile such as `"standard"` vs `"aggressive"` if the compiler needs it
-- keep the reusable Binaryen execution helper in a shared low-level package so compiler and SDK can invoke the same validated pass bundle
+### Redundant Runtime Type-Check Elimination
 
-## Suggested Implementation Order
+Marks field accesses whose target type is semantically exact enough for codegen
+to avoid guarded nominal field fast paths. Codegen still checks the exact
+nominal precondition before emitting a direct field load.
 
-1. Add `packages/compiler/src/optimize/pipeline.ts` with a no-op `optimizeProgram(...)`.
-2. Call it from both `emitProgram(...)` and `emitProgramWithContinuationFallback(...)`.
-3. Introduce `ProgramOptimizationIR` for reachable function instances only.
-4. Land `trait dispatch devirtualization`.
-5. Land `effect fast-path elimination`.
-6. Land `closure/continuation environment shrinking`.
-7. Keep Binaryen optimization policy compiler-owned, with aggressive as the default optimized profile.
+### Semantic Copy Forwarding
 
-## Success Criteria
+Marks direct object-literal field access opportunities where fields can be
+forwarded out of a freshly constructed aggregate without materializing the
+aggregate. Codegen keeps this intentionally narrow: direct object-literal field
+access without spreads, with all field initializers still evaluated in source
+order.
 
-- Language-level optimization decisions happen before Wasm emission.
-- Binaryen remains responsible for Wasm/IR cleanup and final optimization.
-- Codegen does not need to rediscover semantic facts during lowering.
-- New optimizations are testable in compiler/smoke layers without diffing Binaryen internals.
-- The compiler generates fewer unnecessary helper functions, dispatch stubs, and GC fields before Binaryen ever runs.
+This pass should remain separate from broader escape analysis and scalar
+replacement. General non-escaping aggregate analysis belongs to `V-325` and
+`V-326`, not this pass.
+
+## Codegen-Owned Lowering Optimizations
+
+Some performance-sensitive lowering choices belong in codegen instead of the
+optimization pass manager because the needed facts are local to lowering state.
+
+### Addressable Wide-Local Scratch Lowering
+
+Addressable wide-local scratch lowering is handled as codegen lowering, tracked
+by `V-331`, not as a `V-309` optimizer pass.
+
+The implemented shape is:
+
+- `compilePatternInitialization(...)` detects when a binding has reusable
+  addressable storage.
+- Wide value-object, tuple, optional, and compatible call construction can
+  receive an `outResultStorageRef` and store directly into that storage.
+- Control-flow and call lowering can forward the same out-result storage through
+  compatible regions.
+- Mutable-ref call arguments materialize addressable local storage when needed.
+
+This covers the narrow intent from the original architecture plan: reuse
+already-addressable local or out-result storage for wide value/inline aggregate
+construction and mutation within the current lowering region.
+
+It does not own reusable whole-program escape facts, and it does not split
+aggregates into scalar locals. It also does not remove allocation for arbitrary
+nominal `obj` locals. Those responsibilities belong to the broader value-like
+workload roadmap: `V-325` for escape facts and `V-326` for scalar replacement.
+
+## Binaryen Optimization
+
+After Voyd codegen emits the Binaryen module, `CodegenOptions.optimize` runs
+the shared helper in `@voyd-lang/lib/binaryen-optimize`.
+
+The compiler supports two profiles:
+
+- `standard`
+  - Binaryen optimize level 2
+  - Binaryen shrink level 1
+  - `module.optimize()`
+- `aggressive`
+  - Binaryen optimize level 3
+  - Binaryen shrink level 2
+  - `module.optimize()`
+  - extra validated passes
+  - a second `module.optimize()`
+
+The current aggressive extra passes are:
+
+- `const-hoisting`
+- `heap-store-optimization`
+- `heap2local`
+- `licm`
+- `merge-locals`
+- `merge-similar-functions`
+- `optimize-casts`
+- `precompute-propagate`
+- `tuple-optimization`
+
+`aggressive` is the default optimized profile in codegen. The SDK exposes the
+coarse `optimize?: boolean` switch, not raw Binaryen pass configuration.
+
+## Explicit Non-Goals
+
+The compiler optimizer should not own:
+
+- arithmetic peepholes
+- generic local.get/local.set cleanup
+- generic inlining heuristics
+- loop-invariant code motion unless it depends on Voyd-only semantics
+- Wasm CFG cleanup
+- stack-machine shaping
+- low-level GC heap store optimization
+- generic scalar replacement without a dedicated semantic pass
+
+If a transform can be expressed purely as a Wasm or Binaryen-IR pass, Binaryen
+or the shared Binaryen optimization profile should own it.
+
+## Known Open Work
+
+- `V-316`: call-shape specialization remains a backlog optimizer pass. Current
+  codegen already consumes resolved call lowering metadata, but there is no
+  standalone optimizer pass that specializes call shapes beyond the existing
+  call info and receiver-specialization facts.
+- `V-325`: reusable whole-program escape facts remain outside this optimizer
+  layer until a benchmark justifies the added analysis surface.
+- `V-326`: broad scalar replacement for non-escaping aggregates remains
+  separate from semantic copy forwarding and addressable storage reuse.
+
+## Testing Guidance
+
+Use the narrowest layer that owns the behavior:
+
+- `packages/compiler/src/__tests__/optimize-pipeline.test.ts`
+  - optimizer facts, optimized call metadata, pruned instances, and codegen
+    effects of optimizer facts
+- `packages/compiler/src/codegen/__tests__`
+  - local lowering behavior such as out-result storage and addressable scratch
+    paths
+- `apps/smoke`
+  - end-to-end public behavior and realistic integration checks
+- benchmark scripts
+  - performance/code-size decisions for optimizations whose value is uncertain
+
+Avoid tests that only assert Binaryen's internal text output unless the test is
+protecting a Voyd-owned lowering decision that would otherwise be invisible.
+
+## Maintenance Rules
+
+- Keep new optimizer facts explicit in `ProgramOptimizationFacts`.
+- Keep codegen fact consumers local and removable.
+- Re-run meaningful benchmarks before adding broad or complex passes.
+- Prefer a narrow semantic pass over general data-flow machinery until a real
+  benchmark shows the broader machinery pays for itself.
+- Keep `V-318`-style immediate forwarding separate from `V-325`/`V-326` escape
+  analysis and scalar replacement.
+- Keep `V-331`-style addressable storage reuse in codegen unless it needs
+  reusable semantic facts that belong in the optimizer.
