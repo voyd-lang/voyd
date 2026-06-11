@@ -94,6 +94,7 @@ export interface FunctionMetadata {
   paramTypeIds: readonly TypeId[];
   parameters: readonly {
     typeId: TypeId;
+    symbol?: SymbolId;
     label?: string;
     optional?: boolean;
     name?: string;
@@ -108,6 +109,7 @@ export interface FunctionMetadata {
   instanceId: ProgramFunctionInstanceId;
   effectful: boolean;
   effectRow?: EffectRowId;
+  exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
 }
 
 export interface StaticEffectHandlerCapture {
@@ -348,6 +350,7 @@ export interface FunctionContext {
   continuations?: Map<SymbolId, ContinuationBinding>;
   suppressTailResumptionExitChecks?: boolean;
   staticEffectContext?: StaticEffectHandlerContext;
+  exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
   continuation?: {
     cfg: GroupContinuationCfg;
     startedLocal: LocalBindingLocal;

@@ -54,6 +54,7 @@ import {
   boxSignatureSpillValue,
   unboxSignatureSpillValue,
 } from "../../signature-spill.js";
+import { wrapValueInOutcome } from "../../effects/outcome-values.js";
 
 const MAX_DIRECT_TRAIT_SWITCH_IMPLS = 4;
 
@@ -135,6 +136,8 @@ const flattenTraitDispatchArgument = ({
 
 type DirectTraitDispatchCandidate = {
   meta: FunctionMetadata;
+  implName: string;
+  receiverType: binaryen.Type;
   runtimeTypeId: number;
   wrapperName: string;
 };
@@ -162,7 +165,7 @@ const resolveDirectTraitDispatchCandidate = ({
   }
 
   const structInfo = getStructuralTypeInfo(impl.target, ctx);
-  if (!structInfo) {
+  if (!structInfo || structInfo.layoutKind !== "heap-object") {
     return undefined;
   }
 
@@ -196,15 +199,113 @@ const resolveDirectTraitDispatchCandidate = ({
     runtimeType: ctx.rtt.baseType,
     ctx,
   });
-  if (!meta || meta.effectful) {
+  if (!meta) {
+    return undefined;
+  }
+  const receiverType = meta.paramTypes[meta.firstUserParamIndex];
+  if (typeof receiverType !== "number") {
     return undefined;
   }
 
   return {
     meta,
+    implName: meta.wasmName,
+    receiverType,
     runtimeTypeId: structInfo.runtimeTypeId,
     wrapperName: `${structInfo.typeLabel}__method_${mapping.traitSymbol}_${mapping.traitMethodSymbol}_${method.implMethod}`,
   };
+};
+
+const exactNominalTypeId = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId | undefined;
+  ctx: CodegenContext;
+}): TypeId | undefined => {
+  if (typeof typeId !== "number") {
+    return undefined;
+  }
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
+    return typeId;
+  }
+  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+    return desc.nominal;
+  }
+  return undefined;
+};
+
+const knownReceiverTypesForDirectSwitch = ({
+  expr,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirCallExpr;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): ReadonlySet<TypeId> | undefined => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const receiverExprId = expr.args[0]?.expr;
+  if (typeof receiverExprId !== "number") {
+    return undefined;
+  }
+  const exact = exactNominalTypeId({
+    typeId: getRequiredExprType(receiverExprId, ctx, typeInstanceId),
+    ctx,
+  });
+  if (typeof exact === "number") {
+    return new Set([exact]);
+  }
+  if (!ctx.optimization || typeof fnCtx.instanceId !== "number") {
+    return undefined;
+  }
+  const receiverExpr = ctx.module.hir.expressions.get(receiverExprId);
+  if (receiverExpr?.exprKind !== "identifier") {
+    return undefined;
+  }
+  const specializedExact = fnCtx.exactParameterTypes?.get(receiverExpr.symbol);
+  if (typeof specializedExact === "number") {
+    return new Set([specializedExact]);
+  }
+  return ctx.optimization.knownParameterTypes
+    .get(fnCtx.instanceId)
+    ?.get(receiverExpr.symbol);
+};
+
+const directSwitchImpls = ({
+  expr,
+  mapping,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirCallExpr;
+  mapping: NonNullable<ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): readonly CodegenTraitImplInstance[] => {
+  const knownReceiverTypes = knownReceiverTypesForDirectSwitch({
+    expr,
+    ctx,
+    fnCtx,
+  });
+  if (!knownReceiverTypes) {
+    return ctx.program.traits.getImplsByTrait(mapping.traitSymbol);
+  }
+
+  const seen = new Set<ProgramSymbolId>();
+  return Array.from(knownReceiverTypes).flatMap((receiverType) =>
+    ctx.program.traits
+      .getImplsByNominal(receiverType)
+      .filter((impl) => impl.traitSymbol === mapping.traitSymbol)
+      .filter((impl) => {
+        if (seen.has(impl.implSymbol)) {
+          return false;
+        }
+        seen.add(impl.implSymbol);
+        return true;
+      }),
+  );
 };
 
 const compileDirectTraitDispatchSwitch = ({
@@ -215,6 +316,8 @@ const compileDirectTraitDispatchSwitch = ({
   ctx,
   fnCtx,
   compileExpr,
+  tailPosition,
+  expectedResultTypeId,
 }: {
   expr: HirCallExpr;
   meta: FunctionMetadata;
@@ -223,22 +326,30 @@ const compileDirectTraitDispatchSwitch = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
+  tailPosition: boolean;
+  expectedResultTypeId?: TypeId;
 }): CompiledExpression | undefined => {
-  if (meta.effectful || resolvedModuleId !== ctx.moduleId) {
+  if (resolvedModuleId !== ctx.moduleId) {
     return undefined;
   }
 
-  if (
+  const dispatchEffectful =
+    meta.effectful ||
     isTraitDispatchMethodEffectful({
       traitSymbol: mapping.traitSymbol,
       traitMethodSymbol: mapping.traitMethodSymbol,
       ctx,
-    })
-  ) {
+    });
+  if (meta.resultAbiKind === "out_ref") {
     return undefined;
   }
 
-  const impls = ctx.program.traits.getImplsByTrait(mapping.traitSymbol);
+  const impls = directSwitchImpls({
+    expr,
+    mapping,
+    ctx,
+    fnCtx,
+  });
   if (impls.length === 0 || impls.length > MAX_DIRECT_TRAIT_SWITCH_IMPLS) {
     return undefined;
   }
@@ -255,28 +366,37 @@ const compileDirectTraitDispatchSwitch = ({
   if (candidates.length === 0) {
     return undefined;
   }
+  if (candidates.some((candidate) => candidate.meta.resultAbiKind === "out_ref")) {
+    return undefined;
+  }
+  if (dispatchEffectful && !exhaustive) {
+    return undefined;
+  }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const returnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const resultWasmType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   if (
-    ctx.program.types.getTypeDesc(returnTypeId).kind !== "primitive" ||
-    binaryen.expandType(resultWasmType).length !== 1
+    !dispatchEffectful &&
+    (ctx.program.types.getTypeDesc(returnTypeId).kind !== "primitive" ||
+      binaryen.expandType(resultWasmType).length !== 1)
   ) {
     return undefined;
   }
 
-  const baselineUserParamTypes = meta.paramTypes.slice(meta.firstUserParamIndex + 1);
-  if (baselineUserParamTypes.length !== 0) {
+  const baselineUserParamAbiTypes = meta.paramAbiTypes.slice(1);
+  if (baselineUserParamAbiTypes.some((types) => types.length !== 1)) {
     return undefined;
   }
+  const baselineUserParamTypes = baselineUserParamAbiTypes.map((types) => types[0]!);
   const consistentUserParams = candidates.every((candidate) => {
-    const candidateUserParamTypes = candidate.meta.paramTypes.slice(
-      candidate.meta.firstUserParamIndex + 1,
-    );
+    const candidateUserParamAbiTypes = candidate.meta.paramAbiTypes.slice(1);
     return (
-      candidateUserParamTypes.length === baselineUserParamTypes.length &&
-      candidateUserParamTypes.every((type, index) => type === baselineUserParamTypes[index])
+      candidateUserParamAbiTypes.length === baselineUserParamAbiTypes.length &&
+      candidateUserParamAbiTypes.every(
+        (types, index) =>
+          types.length === 1 && types[0] === baselineUserParamTypes[index],
+      )
     );
   });
   if (!consistentUserParams) {
@@ -333,14 +453,30 @@ const compileDirectTraitDispatchSwitch = ({
   const emitCandidateCall = (
     candidate: DirectTraitDispatchCandidate,
   ): binaryen.ExpressionRef => {
+    const implResultType =
+      dispatchEffectful && candidate.meta.effectful
+        ? ctx.effectsBackend.abi.effectfulResultType(ctx)
+        : candidate.meta.resultType;
     const rawCall = ctx.mod.call(
-      candidate.wrapperName,
+      candidate.implName,
       [
-        makeReceiver(),
+        ...(candidate.meta.effectful ? [currentHandlerValue(ctx, fnCtx)] : []),
+        refCast(ctx.mod, makeReceiver(), candidate.receiverType),
         ...userArgTemps.map((temp) => ctx.mod.local.get(temp.index, temp.type)),
       ],
-      candidate.meta.resultType,
+      implResultType,
     );
+    if (dispatchEffectful) {
+      return candidate.meta.effectful
+        ? rawCall
+        : wrapValueInOutcome({
+            valueExpr: rawCall,
+            valueType: candidate.meta.resultType,
+            typeId: candidate.meta.resultTypeId,
+            ctx,
+            fnCtx,
+          });
+    }
     const coerced =
       candidate.meta.resultTypeId === returnTypeId
         ? rawCall
@@ -358,21 +494,21 @@ const compileDirectTraitDispatchSwitch = ({
     });
   };
 
-  const fallback = compileIndirectTraitDispatchCall({
-    expr,
-    meta,
-    mapping,
-    receiverTemp,
-    userArgTemps,
-    ctx,
-    fnCtx,
-    compileExpr,
-  });
-
   const fallbackExpr =
     exhaustive && candidates.length > 0
       ? emitCandidateCall(candidates[candidates.length - 1]!)
-      : fallback.expr;
+      : compileIndirectTraitDispatchCall({
+          expr,
+          meta,
+          mapping,
+          receiverTemp,
+          userArgTemps,
+          ctx,
+          fnCtx,
+          compileExpr,
+          tailPosition,
+          expectedResultTypeId,
+        }).expr;
   const branchCandidates =
     exhaustive && candidates.length > 0 ? candidates.slice(0, -1) : candidates;
   const switchedExpr = branchCandidates.reduceRight(
@@ -388,19 +524,35 @@ const compileDirectTraitDispatchSwitch = ({
       ),
     fallbackExpr,
   );
+  const switchedBlock = ctx.mod.block(
+    null,
+    [
+      ctx.mod.local.set(receiverTemp.index, receiverValue.expr),
+      ...userArgTemps.map((temp, index) =>
+        ctx.mod.local.set(temp.index, userArgValues[index]!),
+      ),
+      switchedExpr,
+    ],
+    dispatchEffectful
+      ? ctx.effectsBackend.abi.effectfulResultType(ctx)
+      : resultWasmType,
+  );
+
+  if (dispatchEffectful) {
+    return ctx.effectsBackend.lowerEffectfulCallResult({
+      callExpr: switchedBlock,
+      callId: expr.id,
+      returnTypeId,
+      expectedResultTypeId,
+      tailPosition,
+      typeInstanceId,
+      ctx,
+      fnCtx,
+    });
+  }
 
   return {
-    expr: ctx.mod.block(
-      null,
-      [
-        ctx.mod.local.set(receiverTemp.index, receiverValue.expr),
-        ...userArgTemps.map((temp, index) =>
-          ctx.mod.local.set(temp.index, userArgValues[index]!),
-        ),
-        switchedExpr,
-      ],
-      resultWasmType,
-    ),
+    expr: switchedBlock,
     usedReturnCall: false,
   };
 };
@@ -471,6 +623,8 @@ export const compileTraitDispatchCall = ({
     ctx,
     fnCtx,
     compileExpr,
+    tailPosition,
+    expectedResultTypeId,
   });
   if (directDispatch) {
     return directDispatch;

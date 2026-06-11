@@ -81,6 +81,9 @@ const compileEffectFixtureWithCompilerOptimization = async (
       reachableFunctionSymbols: undefined as never,
       reachableModuleLets: new Map(),
       usedTraitDispatchSignatures: usedTraitDispatchSignaturesFor(program),
+      receiverSpecializationRequests: new Map(),
+      exactParameterTypes: new Map(),
+      knownParameterTypes: new Map(),
       codegenPlan: { representations: {} },
     },
   });
@@ -300,7 +303,7 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     expect(text).toMatch(/loop_sum_\d+__handled/);
     expect(text).toMatch(/match_value_\d+__handled/);
     expect(text).toMatch(/open_sum_\d+__handled/);
-    expect(text).toMatch(/local_then_dynamic_\d+__handled/);
+    expect(text).toMatch(/local_then_dynamic_\d+(?:__receiver_[^\s)]*)?__handled/);
 
     const host = await createVoydHost({ wasm: specialized.wasm });
     await expect(host.run<number>("triple_sum")).resolves.toBe(6);

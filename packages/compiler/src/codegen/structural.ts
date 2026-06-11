@@ -2009,6 +2009,13 @@ export const coerceValueToType = ({
   const actualInfo = getStructuralTypeInfo(actualType, ctx);
   if (!actualInfo) {
     const actualDesc = ctx.program.types.getTypeDesc(actualType);
+    if (actualDesc.kind === "trait") {
+      return coerceExprToWasmType({
+        expr: value,
+        targetType: wasmTypeFor(targetType, ctx),
+        ctx,
+      });
+    }
     const targetDesc = ctx.program.types.getTypeDesc(targetType);
     throw new Error(
       `cannot coerce non-structural value to structural type (actual=${actualType}:${actualDesc.kind}, target=${targetType}:${targetDesc.kind})`,

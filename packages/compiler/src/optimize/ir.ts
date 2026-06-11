@@ -9,6 +9,7 @@ import type {
   ProgramFunctionInstanceId,
   ProgramSymbolId,
   SymbolId,
+  TypeId,
 } from "../semantics/ids.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { ProgramCodegenOptimizationPlan } from "./codegen-plan.js";
@@ -29,6 +30,18 @@ export type ProgramOptimizationFacts = {
   reachableFunctionSymbols: ReadonlySet<ProgramSymbolId>;
   reachableModuleLets: ReadonlyMap<string, ReadonlySet<SymbolId>>;
   usedTraitDispatchSignatures: ReadonlySet<string>;
+  receiverSpecializationRequests: ReadonlyMap<
+    string,
+    ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>
+  >;
+  exactParameterTypes: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
+  knownParameterTypes: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, ReadonlySet<TypeId>>
+  >;
   codegenPlan: ProgramCodegenOptimizationPlan;
 };
 
