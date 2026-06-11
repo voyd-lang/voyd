@@ -4567,6 +4567,13 @@ const localParameterAliasesForSymbol = ({
   symbol: SymbolId;
 }): ReadonlySet<SymbolId> | undefined => state.localParameterAliases.get(symbol);
 
+const unionInto = <T>(target: Set<T>, values: Iterable<T> | undefined): void => {
+  if (!values) {
+    return;
+  }
+  Array.from(values).forEach((value) => target.add(value));
+};
+
 const parameterAliasesForInitializer = ({
   state,
   exprId,
@@ -4575,13 +4582,63 @@ const parameterAliasesForInitializer = ({
   exprId: HirExprId;
 }): Set<SymbolId> => {
   const expr = state.moduleView.hir.expressions.get(exprId);
-  if (expr?.exprKind !== "identifier") {
+  if (!expr) {
     return new Set();
   }
-  return new Set([
-    ...(state.parameterSymbols.has(expr.symbol) ? [expr.symbol] : []),
-    ...(localParameterAliasesForSymbol({ state, symbol: expr.symbol }) ?? []),
-  ]);
+  if (expr.exprKind === "identifier") {
+    return new Set([
+      ...(state.parameterSymbols.has(expr.symbol) ? [expr.symbol] : []),
+      ...(localParameterAliasesForSymbol({ state, symbol: expr.symbol }) ?? []),
+    ]);
+  }
+  if (expr.exprKind === "block") {
+    return typeof expr.value === "number"
+      ? parameterAliasesForInitializer({ state, exprId: expr.value })
+      : new Set();
+  }
+  if (expr.exprKind === "if" || expr.exprKind === "cond") {
+    const aliases = new Set<SymbolId>();
+    expr.branches.forEach((branch) => {
+      unionInto(
+        aliases,
+        parameterAliasesForInitializer({ state, exprId: branch.value }),
+      );
+    });
+    if (typeof expr.defaultBranch === "number") {
+      unionInto(
+        aliases,
+        parameterAliasesForInitializer({ state, exprId: expr.defaultBranch }),
+      );
+    }
+    return aliases;
+  }
+  if (expr.exprKind === "match") {
+    const aliases = new Set<SymbolId>();
+    expr.arms.forEach((arm) => {
+      unionInto(
+        aliases,
+        parameterAliasesForInitializer({ state, exprId: arm.value }),
+      );
+    });
+    return aliases;
+  }
+  if (expr.exprKind === "effect-handler") {
+    const aliases = parameterAliasesForInitializer({ state, exprId: expr.body });
+    expr.handlers.forEach((handler) => {
+      unionInto(
+        aliases,
+        parameterAliasesForInitializer({ state, exprId: handler.body }),
+      );
+    });
+    if (typeof expr.finallyBranch === "number") {
+      unionInto(
+        aliases,
+        parameterAliasesForInitializer({ state, exprId: expr.finallyBranch }),
+      );
+    }
+    return aliases;
+  }
+  return new Set();
 };
 
 const bindLocalParameterAliases = ({
@@ -4664,25 +4721,69 @@ const markSymbolSetUse = ({
   );
 };
 
-const originExprIdForInitializer = ({
+const originExprIdsForInitializer = ({
   state,
   exprId,
 }: {
   state: EscapeAnalysisState;
   exprId: HirExprId;
-}): HirExprId | undefined => {
+}): Set<HirExprId> => {
   const expr = state.moduleView.hir.expressions.get(exprId);
   if (!expr) {
-    return undefined;
+    return new Set();
+  }
+  if (expr.exprKind === "effect-handler") {
+    const origins = new Set<HirExprId>([exprId]);
+    unionInto(origins, originExprIdsForInitializer({ state, exprId: expr.body }));
+    expr.handlers.forEach((handler) => {
+      unionInto(
+        origins,
+        originExprIdsForInitializer({ state, exprId: handler.body }),
+      );
+    });
+    if (typeof expr.finallyBranch === "number") {
+      unionInto(
+        origins,
+        originExprIdsForInitializer({ state, exprId: expr.finallyBranch }),
+      );
+    }
+    return origins;
   }
   if (originKindForExpr({ moduleView: state.moduleView, exprId, ir: state.ir })) {
-    return exprId;
+    return new Set([exprId]);
   }
   if (expr.exprKind === "identifier") {
-    const origins = localOriginsForSymbol({ state, symbol: expr.symbol });
-    return origins?.size === 1 ? origins.values().next().value : undefined;
+    return new Set(localOriginsForSymbol({ state, symbol: expr.symbol }) ?? []);
   }
-  return undefined;
+  if (expr.exprKind === "block") {
+    return typeof expr.value === "number"
+      ? originExprIdsForInitializer({ state, exprId: expr.value })
+      : new Set();
+  }
+  if (expr.exprKind === "if" || expr.exprKind === "cond") {
+    const origins = new Set<HirExprId>();
+    expr.branches.forEach((branch) => {
+      unionInto(
+        origins,
+        originExprIdsForInitializer({ state, exprId: branch.value }),
+      );
+    });
+    if (typeof expr.defaultBranch === "number") {
+      unionInto(
+        origins,
+        originExprIdsForInitializer({ state, exprId: expr.defaultBranch }),
+      );
+    }
+    return origins;
+  }
+  if (expr.exprKind === "match") {
+    const origins = new Set<HirExprId>();
+    expr.arms.forEach((arm) => {
+      unionInto(origins, originExprIdsForInitializer({ state, exprId: arm.value }));
+    });
+    return origins;
+  }
+  return new Set();
 };
 
 const isTraitType = ({
@@ -5047,33 +5148,33 @@ const analyzeEscapeStatement = ({
   }
 
   if (statement.pattern.kind === "identifier") {
-    const boundOrigin = originExprIdForInitializer({
+    const boundSymbol = statement.pattern.symbol;
+    analyzeEscapeExpression({
+      exprId: statement.initializer,
+      context: emptyEscapeUseContext,
+      state,
+    });
+
+    const boundOrigins = originExprIdsForInitializer({
       state,
       exprId: statement.initializer,
     });
-    if (typeof boundOrigin === "number") {
+    boundOrigins.forEach((originExprId) => {
       bindLocalOrigin({
         state,
-        symbol: statement.pattern.symbol,
-        originExprId: boundOrigin,
+        symbol: boundSymbol,
+        originExprId,
       });
-    }
+    });
     bindLocalParameterAliases({
       state,
-      symbol: statement.pattern.symbol,
+      symbol: boundSymbol,
       parameterSymbols: parameterAliasesForInitializer({
         state,
         exprId: statement.initializer,
       }),
     });
-    if (typeof boundOrigin === "number") {
-      analyzeEscapeExpression({
-        exprId: statement.initializer,
-        context: emptyEscapeUseContext,
-        state,
-      });
-      return;
-    }
+    return;
   }
 
   analyzeEscapeExpression({

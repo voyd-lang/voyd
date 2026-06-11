@@ -1591,6 +1591,119 @@ pub fn main(): () -> i32
     });
   });
 
+  it("tracks aliases through value-producing initializers", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Vec2 {
+  x: i32,
+  y: i32
+}
+
+fn if_alias(vec: Vec2, flag: bool) -> Vec2
+  let alias =
+    if flag:
+      vec
+    else:
+      vec
+  alias
+
+fn block_alias(vec: Vec2) -> Vec2
+  let alias =
+    let inner = vec
+    inner
+  alias
+
+fn aggregate_if(flag: bool) -> Vec2
+  let alias =
+    if flag:
+      Vec2 { x: 1, y: 2 }
+    else:
+      Vec2 { x: 3, y: 4 }
+  alias
+
+fn aggregate_block() -> Vec2
+  let alias =
+    let inner = Vec2 { x: 5, y: 6 }
+    inner
+  alias
+
+pub fn main() -> i32
+  if_alias(Vec2 { x: 7, y: 8 }, true).x +
+    block_alias(Vec2 { x: 9, y: 10 }).x +
+    aggregate_if(false).x +
+    aggregate_block().x
+`,
+      },
+    });
+
+    const moduleId = "src::main";
+    const program = optimized.program;
+    const parameterFact = (name: string) => {
+      const fn = findFunction({ moduleId, name, program });
+      expect(fn?.kind, name).toBe("function");
+      if (!fn || fn.kind !== "function") {
+        return undefined;
+      }
+      const instanceId = program.functions.getInstanceId(moduleId, fn.symbol, []);
+      expect(typeof instanceId, name).toBe("number");
+      if (typeof instanceId !== "number") {
+        return undefined;
+      }
+      return optimized.facts.escapeAnalysis.parameters
+        .get(instanceId)
+        ?.get(fn.parameters[0]!.symbol);
+    };
+    const aggregateFactsForFunction = (name: string) => {
+      const fn = findFunction({ moduleId, name, program });
+      expect(fn?.kind, name).toBe("function");
+      if (!fn || fn.kind !== "function") {
+        return [];
+      }
+      const moduleView = program.modules.get(moduleId);
+      const facts = optimized.facts.escapeAnalysis.origins.get(moduleId);
+      const exprIds: number[] = [];
+      if (!moduleView || !facts) {
+        return [];
+      }
+      walkExpression({
+        exprId: fn.body,
+        hir: moduleView.hir,
+        onEnterExpression: (exprId, expr) => {
+          if (expr.exprKind === "object-literal") {
+            exprIds.push(exprId);
+          }
+        },
+      });
+      return exprIds.map((exprId) => facts.get(exprId));
+    };
+
+    expect(parameterFact("if_alias")).toMatchObject({
+      escapes: true,
+      escapeReasons: ["return"],
+    });
+    expect(parameterFact("block_alias")).toMatchObject({
+      escapes: true,
+      escapeReasons: ["return"],
+    });
+    expect(aggregateFactsForFunction("aggregate_if")).toEqual([
+      expect.objectContaining({
+        escapes: true,
+        escapeReasons: ["return"],
+      }),
+      expect.objectContaining({
+        escapes: true,
+        escapeReasons: ["return"],
+      }),
+    ]);
+    expect(aggregateFactsForFunction("aggregate_block")).toEqual([
+      expect.objectContaining({
+        escapes: true,
+        escapeReasons: ["return"],
+      }),
+    ]);
+  });
+
   it("treats exported aggregate parameters as public-boundary escapes", async () => {
     const { optimized } = await buildOptimized({
       files: {
