@@ -274,6 +274,15 @@ const compileArrayAtFastPath = ({
       null,
       [
         setupTarget,
+        ctx.mod.local.set(
+          indexLocal.index,
+          compileExpr({
+            exprId: expr.args[0]!.expr,
+            ctx,
+            fnCtx,
+            expectedResultTypeId: ctx.program.primitives.i32,
+          }).expr,
+        ),
         storeLocalValue({
           binding: storageLocal,
           value: directArrayFieldLoad({
@@ -293,15 +302,6 @@ const compileArrayAtFastPath = ({
             field: info.countField,
             ctx,
           }),
-        ),
-        ctx.mod.local.set(
-          indexLocal.index,
-          compileExpr({
-            exprId: expr.args[0]!.expr,
-            ctx,
-            fnCtx,
-            expectedResultTypeId: ctx.program.primitives.i32,
-          }).expr,
         ),
         ctx.mod.local.set(
           computedIndexLocal.index,

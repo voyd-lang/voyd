@@ -50,6 +50,7 @@ describe("std::array compile smoke", () => {
     const host = await createVoydHost({ wasm: result.wasm });
     await expect(host.run<number>("direct_len_at_sum")).resolves.toBe(43);
     await expect(host.run<number>("direct_value_len_at_sum")).resolves.toBe(20);
+    await expect(host.run<number>("direct_at_index_side_effect")).resolves.toBe(20);
   });
 
   it("traps optimized direct at access when out of bounds", async () => {
