@@ -105,6 +105,9 @@ The IR currently tracks:
 - used trait-dispatch signatures
 - receiver specialization requests
 - exact and known parameter type facts
+- whole-program escape facts for aggregate origins, trait-object receiver
+  temporaries, closure environments, effect handler environments, and parameter
+  boundary behavior
 - runtime type-check elision candidates for field access
 - semantic copy-forwarding candidates for field access
 - a codegen optimization plan
@@ -155,6 +158,7 @@ The current pass list is:
 15. `whole-program-specialization-pruning`
 16. `redundant-runtime-type-check-elimination`
 17. `semantic-copy-forwarding`
+18. `whole-program-escape-analysis`
 
 ## Implemented Semantic Optimizations
 
@@ -227,6 +231,22 @@ This pass should remain separate from broader escape analysis and scalar
 replacement. General non-escaping aggregate analysis belongs to `V-325` and
 `V-326`, not this pass.
 
+### Whole-Program Escape Analysis
+
+Records conservative, reusable escape facts after reachability, exact receiver
+propagation, and trait-dispatch devirtualization have stabilized. The facts are
+available through `ProgramOptimizationFacts.escapeAnalysis` and cover:
+
+- aggregate origins such as object literals and tuples
+- trait-object receiver temporaries at direct call boundaries
+- closure environment origins and captured aggregate escapes
+- effect handler environment origins and captured aggregate escapes
+- per-function-instance parameter escape behavior
+
+The pass intentionally does not scalar-replace aggregates or skip
+materialization by itself. Downstream codegen and SROA work must consume these
+facts and re-check local lowering preconditions before changing representation.
+
 ## Codegen-Owned Lowering Optimizations
 
 Some performance-sensitive lowering choices belong in codegen instead of the
@@ -251,10 +271,10 @@ This covers the narrow intent from the original architecture plan: reuse
 already-addressable local or out-result storage for wide value/inline aggregate
 construction and mutation within the current lowering region.
 
-It does not own reusable whole-program escape facts, and it does not split
-aggregates into scalar locals. It also does not remove allocation for arbitrary
-nominal `obj` locals. Those responsibilities belong to the broader value-like
-workload roadmap: `V-325` for escape facts and `V-326` for scalar replacement.
+It does not compute whole-program escape facts, and it does not split
+aggregates into scalar locals. Reusable escape facts are owned by the
+whole-program escape-analysis pass; broad scalar replacement and allocation
+elision remain separate `V-326` work.
 
 ## Binaryen Optimization
 
@@ -311,8 +331,10 @@ or the shared Binaryen optimization profile should own it.
   codegen already consumes resolved call lowering metadata, but there is no
   standalone optimizer pass that specializes call shapes beyond the existing
   call info and receiver-specialization facts.
-- `V-325`: reusable whole-program escape facts remain outside this optimizer
-  layer until a benchmark justifies the added analysis surface.
+- `V-325`: reusable whole-program escape facts are present. Downstream
+  representation changes must consume those facts through
+  `ProgramOptimizationFacts.escapeAnalysis` rather than rediscovering typing
+  internals.
 - `V-326`: broad scalar replacement for non-escaping aggregates remains
   separate from semantic copy forwarding and addressable storage reuse.
 

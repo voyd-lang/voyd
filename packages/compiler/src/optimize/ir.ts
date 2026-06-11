@@ -21,6 +21,50 @@ export type OptimizedModuleView = ModuleCodegenView & {
   semantics: SemanticsPipelineResult;
 };
 
+export type EscapeAnalysisOriginKind =
+  | "aggregate"
+  | "trait-object"
+  | "closure-environment"
+  | "effect-environment";
+
+export type EscapeAnalysisEscapeReason =
+  | "public-boundary"
+  | "return"
+  | "module-let"
+  | "stored-in-aggregate"
+  | "call-boundary"
+  | "dynamic-dispatch"
+  | "effectful-call"
+  | "mutable-call-argument"
+  | "closure-capture"
+  | "effect-handler-capture"
+  | "handler-resumption-escape"
+  | "assignment"
+  | "unknown";
+
+export type EscapeAnalysisOriginFact = {
+  originKind: EscapeAnalysisOriginKind;
+  typeId?: TypeId;
+  escapes: boolean;
+  escapeReasons: readonly EscapeAnalysisEscapeReason[];
+  directLocalSymbols: readonly SymbolId[];
+  useExprIds: readonly HirExprId[];
+};
+
+export type EscapeAnalysisParameterFact = {
+  escapes: boolean;
+  escapeReasons: readonly EscapeAnalysisEscapeReason[];
+  useExprIds: readonly HirExprId[];
+};
+
+export type ProgramEscapeAnalysisFacts = {
+  origins: ReadonlyMap<string, ReadonlyMap<HirExprId, EscapeAnalysisOriginFact>>;
+  parameters: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, EscapeAnalysisParameterFact>
+  >;
+};
+
 export type ProgramOptimizationFacts = {
   handlerClauseCaptures: ReadonlyMap<
     string,
@@ -42,6 +86,7 @@ export type ProgramOptimizationFacts = {
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, ReadonlySet<TypeId>>
   >;
+  escapeAnalysis: ProgramEscapeAnalysisFacts;
   runtimeTypeCheckElisionFieldAccesses: ReadonlyMap<string, ReadonlySet<HirExprId>>;
   semanticCopyForwardingFieldAccesses: ReadonlyMap<string, ReadonlySet<HirExprId>>;
   codegenPlan: ProgramCodegenOptimizationPlan;

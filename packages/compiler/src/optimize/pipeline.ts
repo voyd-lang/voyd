@@ -32,6 +32,10 @@ import {
   type OptimizationAnalysisKey,
 } from "./pass.js";
 import type {
+  EscapeAnalysisEscapeReason,
+  EscapeAnalysisOriginFact,
+  EscapeAnalysisOriginKind,
+  EscapeAnalysisParameterFact,
   OptimizedCallInfo,
   OptimizedModuleView,
   ProgramOptimizationResult,
@@ -74,6 +78,13 @@ type MutableOptimizationIr = {
       ProgramFunctionInstanceId,
       Map<SymbolId, Set<TypeId>>
     >;
+    escapeAnalysis: {
+      origins: Map<string, Map<HirExprId, EscapeAnalysisOriginFact>>;
+      parameters: Map<
+        ProgramFunctionInstanceId,
+        Map<SymbolId, EscapeAnalysisParameterFact>
+      >;
+    };
     runtimeTypeCheckElisionFieldAccesses: Map<string, Set<HirExprId>>;
     semanticCopyForwardingFieldAccesses: Map<string, Set<HirExprId>>;
     codegenPlan: ProgramCodegenOptimizationPlan;
@@ -309,6 +320,10 @@ const buildOptimizationIr = ({
       receiverSpecializationRequests: new Map(),
       exactParameterTypes: new Map(),
       knownParameterTypes: new Map(),
+      escapeAnalysis: {
+        origins: new Map(),
+        parameters: new Map(),
+      },
       runtimeTypeCheckElisionFieldAccesses: new Map(),
       semanticCopyForwardingFieldAccesses: new Map(),
       codegenPlan: { representations: {} },
@@ -4259,6 +4274,979 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
   },
 };
 
+type MutableEscapeOriginFact = {
+  originKind: EscapeAnalysisOriginKind;
+  typeId?: TypeId;
+  escapes: boolean;
+  escapeReasons: Set<EscapeAnalysisEscapeReason>;
+  directLocalSymbols: Set<SymbolId>;
+  useExprIds: Set<HirExprId>;
+};
+
+type MutableEscapeParameterFact = {
+  escapes: boolean;
+  escapeReasons: Set<EscapeAnalysisEscapeReason>;
+  useExprIds: Set<HirExprId>;
+};
+
+type EscapeUseContext = {
+  reason?: EscapeAnalysisEscapeReason;
+  traitBoundary?: boolean;
+};
+
+type EscapeAnalysisState = {
+  ir: MutableOptimizationIr;
+  moduleView: OptimizedModuleView;
+  callerInstanceId?: ProgramFunctionInstanceId;
+  parameterSymbols: ReadonlySet<SymbolId>;
+  parameterFacts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, MutableEscapeParameterFact>
+  >;
+  mutableParameterFacts?: Map<SymbolId, MutableEscapeParameterFact>;
+  mutableOriginFacts?: Map<string, Map<HirExprId, MutableEscapeOriginFact>>;
+  localOrigins: Map<SymbolId, Set<HirExprId>>;
+};
+
+const emptyEscapeUseContext: EscapeUseContext = {};
+
+const cloneMutableParameterFacts = (
+  facts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, MutableEscapeParameterFact>
+  >,
+): Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>> =>
+  new Map(
+    Array.from(facts.entries()).map(([instanceId, bySymbol]) => [
+      instanceId,
+      new Map(
+        Array.from(bySymbol.entries()).map(([symbol, fact]) => [
+          symbol,
+          {
+            escapes: fact.escapes,
+            escapeReasons: new Set(fact.escapeReasons),
+            useExprIds: new Set(fact.useExprIds),
+          },
+        ]),
+      ),
+    ]),
+  );
+
+const serializeMutableParameterFacts = (
+  facts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, MutableEscapeParameterFact>
+  >,
+): string =>
+  JSON.stringify(
+    Array.from(facts.entries())
+      .sort(([left], [right]) => left - right)
+      .map(([instanceId, bySymbol]) => [
+        instanceId,
+        Array.from(bySymbol.entries())
+          .sort(([left], [right]) => left - right)
+          .map(([symbol, fact]) => [
+            symbol,
+            fact.escapes,
+            Array.from(fact.escapeReasons).sort(),
+            Array.from(fact.useExprIds).sort((left, right) => left - right),
+          ]),
+      ]),
+  );
+
+const toImmutableParameterFacts = (
+  facts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, MutableEscapeParameterFact>
+  >,
+): Map<ProgramFunctionInstanceId, Map<SymbolId, EscapeAnalysisParameterFact>> =>
+  new Map(
+    Array.from(facts.entries()).map(([instanceId, bySymbol]) => [
+      instanceId,
+      new Map(
+        Array.from(bySymbol.entries()).map(([symbol, fact]) => [
+          symbol,
+          {
+            escapes: fact.escapes,
+            escapeReasons: Array.from(fact.escapeReasons).sort(),
+            useExprIds: Array.from(fact.useExprIds).sort((left, right) => left - right),
+          },
+        ]),
+      ),
+    ]),
+  );
+
+const toImmutableOriginFacts = (
+  facts: ReadonlyMap<string, ReadonlyMap<HirExprId, MutableEscapeOriginFact>>,
+): Map<string, Map<HirExprId, EscapeAnalysisOriginFact>> =>
+  new Map(
+    Array.from(facts.entries()).map(([moduleId, byExpr]) => [
+      moduleId,
+      new Map(
+        Array.from(byExpr.entries()).map(([exprId, fact]) => [
+          exprId,
+          {
+            originKind: fact.originKind,
+            typeId: fact.typeId,
+            escapes: fact.escapes,
+            escapeReasons: Array.from(fact.escapeReasons).sort(),
+            directLocalSymbols: Array.from(fact.directLocalSymbols).sort(
+              (left, right) => left - right,
+            ),
+            useExprIds: Array.from(fact.useExprIds).sort((left, right) => left - right),
+          },
+        ]),
+      ),
+    ]),
+  );
+
+const mutableParameterFactFor = ({
+  facts,
+  instanceId,
+  symbol,
+}: {
+  facts: Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>>;
+  instanceId: ProgramFunctionInstanceId;
+  symbol: SymbolId;
+}): MutableEscapeParameterFact => {
+  const bySymbol = facts.get(instanceId) ?? new Map<SymbolId, MutableEscapeParameterFact>();
+  const fact =
+    bySymbol.get(symbol) ?? {
+      escapes: false,
+      escapeReasons: new Set<EscapeAnalysisEscapeReason>(),
+      useExprIds: new Set<HirExprId>(),
+    };
+  bySymbol.set(symbol, fact);
+  facts.set(instanceId, bySymbol);
+  return fact;
+};
+
+const markParameterUse = ({
+  fact,
+  exprId,
+  reason,
+}: {
+  fact: MutableEscapeParameterFact;
+  exprId: HirExprId;
+  reason?: EscapeAnalysisEscapeReason;
+}): void => {
+  fact.useExprIds.add(exprId);
+  if (!reason) {
+    return;
+  }
+  fact.escapes = true;
+  fact.escapeReasons.add(reason);
+};
+
+const markOriginUse = ({
+  fact,
+  exprId,
+  reason,
+  traitBoundary,
+}: {
+  fact: MutableEscapeOriginFact;
+  exprId: HirExprId;
+  reason?: EscapeAnalysisEscapeReason;
+  traitBoundary?: boolean;
+}): void => {
+  fact.useExprIds.add(exprId);
+  if (traitBoundary && fact.originKind === "aggregate") {
+    fact.originKind = "trait-object";
+  }
+  const effectiveReason =
+    fact.originKind === "effect-environment" && reason !== "handler-resumption-escape"
+      ? undefined
+      : reason;
+  if (!effectiveReason) {
+    return;
+  }
+  fact.escapes = true;
+  fact.escapeReasons.add(effectiveReason);
+};
+
+const originKindForExpr = ({
+  moduleView,
+  exprId,
+  ir,
+}: {
+  moduleView: OptimizedModuleView;
+  exprId: HirExprId;
+  ir: MutableOptimizationIr;
+}): EscapeAnalysisOriginKind | undefined => {
+  const expr = moduleView.hir.expressions.get(exprId);
+  if (!expr) {
+    return undefined;
+  }
+  if (expr.exprKind === "lambda") {
+    return "closure-environment";
+  }
+  if (expr.exprKind === "effect-handler") {
+    return "effect-environment";
+  }
+  if (expr.exprKind !== "object-literal" && expr.exprKind !== "tuple") {
+    return undefined;
+  }
+
+  const typeId = exprTypeFor({ moduleView, exprId });
+  if (typeof typeId !== "number") {
+    return "aggregate";
+  }
+  const desc = ir.baseProgram.types.getTypeDesc(typeId);
+  return desc.kind === "trait" ||
+    (desc.kind === "intersection" && (desc.traits?.length ?? 0) > 0)
+    ? "trait-object"
+    : "aggregate";
+};
+
+const ensureOriginFact = ({
+  state,
+  exprId,
+}: {
+  state: EscapeAnalysisState;
+  exprId: HirExprId;
+}): MutableEscapeOriginFact | undefined => {
+  const originKind = originKindForExpr({
+    moduleView: state.moduleView,
+    exprId,
+    ir: state.ir,
+  });
+  if (!originKind || !state.mutableOriginFacts) {
+    return undefined;
+  }
+  const byModule =
+    state.mutableOriginFacts.get(state.moduleView.moduleId) ??
+    new Map<HirExprId, MutableEscapeOriginFact>();
+  const existing = byModule.get(exprId);
+  if (existing) {
+    return existing;
+  }
+  const typeId = exprTypeFor({ moduleView: state.moduleView, exprId });
+  const fact: MutableEscapeOriginFact = {
+    originKind,
+    typeId,
+    escapes: false,
+    escapeReasons: new Set(),
+    directLocalSymbols: new Set(),
+    useExprIds: new Set(),
+  };
+  byModule.set(exprId, fact);
+  state.mutableOriginFacts.set(state.moduleView.moduleId, byModule);
+  return fact;
+};
+
+const localOriginsForSymbol = ({
+  state,
+  symbol,
+}: {
+  state: EscapeAnalysisState;
+  symbol: SymbolId;
+}): ReadonlySet<HirExprId> | undefined => state.localOrigins.get(symbol);
+
+const bindLocalOrigin = ({
+  state,
+  symbol,
+  originExprId,
+}: {
+  state: EscapeAnalysisState;
+  symbol: SymbolId;
+  originExprId: HirExprId;
+}): void => {
+  const origins = state.localOrigins.get(symbol) ?? new Set<HirExprId>();
+  origins.add(originExprId);
+  state.localOrigins.set(symbol, origins);
+  const fact = ensureOriginFact({ state, exprId: originExprId });
+  fact?.directLocalSymbols.add(symbol);
+};
+
+const markSymbolUse = ({
+  state,
+  symbol,
+  exprId,
+  context,
+}: {
+  state: EscapeAnalysisState;
+  symbol: SymbolId;
+  exprId: HirExprId;
+  context: EscapeUseContext;
+}): void => {
+  const origins = localOriginsForSymbol({ state, symbol });
+  origins?.forEach((originExprId) => {
+    const fact = ensureOriginFact({ state, exprId: originExprId });
+    if (!fact) {
+      return;
+    }
+    markOriginUse({
+      fact,
+      exprId,
+      reason: context.reason,
+      traitBoundary: context.traitBoundary,
+    });
+  });
+
+  if (!state.parameterSymbols.has(symbol)) {
+    return;
+  }
+  const fact = state.mutableParameterFacts?.get(symbol);
+  if (!fact) {
+    return;
+  }
+  markParameterUse({
+    fact,
+    exprId,
+    reason: context.reason,
+  });
+};
+
+const markSymbolSetUse = ({
+  state,
+  symbols,
+  exprId,
+  reason,
+}: {
+  state: EscapeAnalysisState;
+  symbols: Iterable<SymbolId>;
+  exprId: HirExprId;
+  reason: EscapeAnalysisEscapeReason;
+}): void => {
+  Array.from(symbols).forEach((symbol) =>
+    markSymbolUse({
+      state,
+      symbol,
+      exprId,
+      context: { reason },
+    })
+  );
+};
+
+const originExprIdForInitializer = ({
+  state,
+  exprId,
+}: {
+  state: EscapeAnalysisState;
+  exprId: HirExprId;
+}): HirExprId | undefined => {
+  const expr = state.moduleView.hir.expressions.get(exprId);
+  if (!expr) {
+    return undefined;
+  }
+  if (originKindForExpr({ moduleView: state.moduleView, exprId, ir: state.ir })) {
+    return exprId;
+  }
+  if (expr.exprKind === "identifier") {
+    const origins = localOriginsForSymbol({ state, symbol: expr.symbol });
+    return origins?.size === 1 ? origins.values().next().value : undefined;
+  }
+  return undefined;
+};
+
+const isTraitType = ({
+  typeId,
+  ir,
+}: {
+  typeId: TypeId | undefined;
+  ir: MutableOptimizationIr;
+}): boolean => {
+  if (typeof typeId !== "number") {
+    return false;
+  }
+  const desc = ir.baseProgram.types.getTypeDesc(typeId);
+  return desc.kind === "trait" ||
+    (desc.kind === "intersection" && (desc.traits?.length ?? 0) > 0);
+};
+
+const contextForCallArgument = ({
+  moduleView,
+  exprId,
+  expr,
+  argExprId,
+  argIndex,
+  state,
+}: {
+  moduleView: OptimizedModuleView;
+  exprId: HirExprId;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
+  argExprId: HirExprId;
+  argIndex: number;
+  state: EscapeAnalysisState;
+}): EscapeUseContext => {
+  const callInfo = state.ir.calls.get(moduleView.moduleId)?.get(exprId);
+  if (callInfo?.traitDispatch) {
+    return {
+      reason: argIndex === 0 ? "dynamic-dispatch" : "call-boundary",
+      traitBoundary: argIndex === 0,
+    };
+  }
+
+  const targets =
+    typeof state.callerInstanceId === "number"
+      ? resolveTargetsForExactPropagation({
+          moduleView,
+          exprId,
+          expr,
+          callerInstanceId: state.callerInstanceId,
+          ir: state.ir,
+        })
+      : resolveTargetsForCaller({
+          moduleId: moduleView.moduleId,
+          exprId,
+          callerInstanceId: state.callerInstanceId,
+          ir: state.ir,
+        });
+  if (targets.length === 0) {
+    return { reason: "unknown" };
+  }
+
+  let traitBoundary = false;
+  let unsafeReason: EscapeAnalysisEscapeReason | undefined;
+  targets.forEach(({ instanceId }) => {
+    if (unsafeReason || typeof instanceId !== "number") {
+      unsafeReason = unsafeReason ?? "unknown";
+      return;
+    }
+    const target = state.ir.baseProgram.functions.getInstance(instanceId);
+    const signature = state.ir.baseProgram.functions.getSignature(
+      target.symbolRef.moduleId,
+      target.symbolRef.symbol,
+    );
+    if (!signature) {
+      unsafeReason = "unknown";
+      return;
+    }
+    if (!state.ir.baseProgram.effects.isEmpty(signature.effectRow)) {
+      unsafeReason = "effectful-call";
+      return;
+    }
+
+    const parameterIndex =
+      typeof state.callerInstanceId === "number"
+        ? signature.parameters.findIndex((_parameter, index) => {
+            const mappedArgExprId = callArgumentExprIdForParameter({
+              argExprIds: callArgumentExprIds(expr),
+              callInfo,
+              callerInstanceId: state.callerInstanceId!,
+              parameterIndex: index,
+            });
+            return mappedArgExprId === argExprId;
+          })
+        : argIndex;
+    const parameter = signature.parameters[parameterIndex];
+    if (!parameter || typeof parameter.symbol !== "number") {
+      unsafeReason = "unknown";
+      return;
+    }
+    traitBoundary = traitBoundary || isTraitType({ typeId: parameter.typeId, ir: state.ir });
+    if (parameter.bindingKind === "mutable-ref") {
+      unsafeReason = "mutable-call-argument";
+      return;
+    }
+    const targetFact = state.parameterFacts.get(instanceId)?.get(parameter.symbol);
+    if (!targetFact || targetFact.escapes) {
+      unsafeReason = "call-boundary";
+    }
+  });
+
+  return unsafeReason ? { reason: unsafeReason, traitBoundary } : { traitBoundary };
+};
+
+const analyzeEscapeExpression = ({
+  exprId,
+  context,
+  state,
+}: {
+  exprId: HirExprId;
+  context: EscapeUseContext;
+  state: EscapeAnalysisState;
+}): void => {
+  const expr = state.moduleView.hir.expressions.get(exprId);
+  if (!expr) {
+    return;
+  }
+
+  const originFact = ensureOriginFact({ state, exprId });
+  if (originFact) {
+    markOriginUse({
+      fact: originFact,
+      exprId,
+      reason: context.reason,
+      traitBoundary: context.traitBoundary,
+    });
+  }
+
+  switch (expr.exprKind) {
+    case "literal":
+    case "overload-set":
+    case "continue":
+      return;
+    case "identifier":
+      markSymbolUse({ state, symbol: expr.symbol, exprId, context });
+      return;
+    case "block": {
+      expr.statements.forEach((statementId) =>
+        analyzeEscapeStatement({ statementId, state })
+      );
+      if (typeof expr.value === "number") {
+        analyzeEscapeExpression({ exprId: expr.value, context, state });
+      }
+      return;
+    }
+    case "tuple":
+      expr.elements.forEach((element) =>
+        analyzeEscapeExpression({
+          exprId: element,
+          context: { reason: "stored-in-aggregate" },
+          state,
+        })
+      );
+      return;
+    case "object-literal":
+      expr.entries.forEach((entry) =>
+        analyzeEscapeExpression({
+          exprId: entry.value,
+          context: { reason: "stored-in-aggregate" },
+          state,
+        })
+      );
+      return;
+    case "field-access":
+      analyzeEscapeExpression({
+        exprId: expr.target,
+        context: emptyEscapeUseContext,
+        state,
+      });
+      return;
+    case "assign": {
+      if (typeof expr.target === "number") {
+        const target = state.moduleView.hir.expressions.get(expr.target);
+        if (target?.exprKind === "field-access") {
+          analyzeEscapeExpression({
+            exprId: target.target,
+            context: emptyEscapeUseContext,
+            state,
+          });
+        } else {
+          analyzeEscapeExpression({
+            exprId: expr.target,
+            context: { reason: "assignment" },
+            state,
+          });
+        }
+      }
+      analyzeEscapeExpression({
+        exprId: expr.value,
+        context: { reason: "assignment" },
+        state,
+      });
+      return;
+    }
+    case "call":
+    case "method-call": {
+      if (expr.exprKind === "call") {
+        analyzeEscapeExpression({
+          exprId: expr.callee,
+          context: emptyEscapeUseContext,
+          state,
+        });
+      }
+      callArgumentExprIds(expr).forEach((argExprId, argIndex) =>
+        analyzeEscapeExpression({
+          exprId: argExprId,
+          context: contextForCallArgument({
+            moduleView: state.moduleView,
+            exprId,
+            expr,
+            argExprId,
+            argIndex,
+            state,
+          }),
+          state,
+        })
+      );
+      return;
+    }
+    case "lambda":
+      markSymbolSetUse({
+        state,
+        symbols: expr.captures.map((capture) => capture.symbol),
+        exprId,
+        reason: "closure-capture",
+      });
+      return;
+    case "effect-handler": {
+      analyzeEscapeExpression({ exprId: expr.body, context, state });
+      const captures = collectHandlerCaptures({ moduleView: state.moduleView }).get(expr.id);
+      captures?.forEach((symbols) =>
+        markSymbolSetUse({
+          state,
+          symbols,
+          exprId: expr.id,
+          reason: "effect-handler-capture",
+        })
+      );
+      expr.handlers.forEach((handler) => {
+        if (handler.tailResumption?.escapes) {
+          const fact = ensureOriginFact({ state, exprId: expr.id });
+          if (fact) {
+            markOriginUse({
+              fact,
+              exprId: expr.id,
+              reason: "handler-resumption-escape",
+            });
+          }
+        }
+        analyzeEscapeExpression({
+          exprId: handler.body,
+          context: emptyEscapeUseContext,
+          state,
+        });
+      });
+      if (typeof expr.finallyBranch === "number") {
+        analyzeEscapeExpression({
+          exprId: expr.finallyBranch,
+          context: emptyEscapeUseContext,
+          state,
+        });
+      }
+      return;
+    }
+    case "loop":
+      analyzeEscapeExpression({
+        exprId: expr.body,
+        context: emptyEscapeUseContext,
+        state,
+      });
+      return;
+    case "while":
+      analyzeEscapeExpression({
+        exprId: expr.condition,
+        context: emptyEscapeUseContext,
+        state,
+      });
+      analyzeEscapeExpression({
+        exprId: expr.body,
+        context: emptyEscapeUseContext,
+        state,
+      });
+      return;
+    case "if":
+    case "cond":
+      expr.branches.forEach((branch) => {
+        analyzeEscapeExpression({
+          exprId: branch.condition,
+          context: emptyEscapeUseContext,
+          state,
+        });
+        analyzeEscapeExpression({ exprId: branch.value, context, state });
+      });
+      if (typeof expr.defaultBranch === "number") {
+        analyzeEscapeExpression({ exprId: expr.defaultBranch, context, state });
+      }
+      return;
+    case "match":
+      analyzeEscapeExpression({
+        exprId: expr.discriminant,
+        context: emptyEscapeUseContext,
+        state,
+      });
+      expr.arms.forEach((arm) => {
+        if (typeof arm.guard === "number") {
+          analyzeEscapeExpression({
+            exprId: arm.guard,
+            context: emptyEscapeUseContext,
+            state,
+          });
+        }
+        analyzeEscapeExpression({ exprId: arm.value, context, state });
+      });
+      return;
+    case "break":
+      if (typeof expr.value === "number") {
+        analyzeEscapeExpression({
+          exprId: expr.value,
+          context: emptyEscapeUseContext,
+          state,
+        });
+      }
+      return;
+  }
+};
+
+const analyzeEscapeStatement = ({
+  statementId,
+  state,
+}: {
+  statementId: number;
+  state: EscapeAnalysisState;
+}): void => {
+  const statement = state.moduleView.hir.statements.get(statementId);
+  if (!statement) {
+    return;
+  }
+  if (statement.kind === "expr-stmt") {
+    analyzeEscapeExpression({
+      exprId: statement.expr,
+      context: emptyEscapeUseContext,
+      state,
+    });
+    return;
+  }
+  if (statement.kind === "return") {
+    if (typeof statement.value === "number") {
+      analyzeEscapeExpression({
+        exprId: statement.value,
+        context: { reason: "return" },
+        state,
+      });
+    }
+    return;
+  }
+
+  const boundOrigin = originExprIdForInitializer({
+    state,
+    exprId: statement.initializer,
+  });
+  if (statement.pattern.kind === "identifier" && typeof boundOrigin === "number") {
+    bindLocalOrigin({
+      state,
+      symbol: statement.pattern.symbol,
+      originExprId: boundOrigin,
+    });
+    analyzeEscapeExpression({
+      exprId: statement.initializer,
+      context: emptyEscapeUseContext,
+      state,
+    });
+    return;
+  }
+
+  analyzeEscapeExpression({
+    exprId: statement.initializer,
+    context: emptyEscapeUseContext,
+    state,
+  });
+};
+
+const parameterSymbolsForFunction = (item: HirFunction): Set<SymbolId> =>
+  new Set(item.parameters.map((parameter) => parameter.symbol));
+
+const seedParameterFacts = ({
+  ir,
+  externalInstances,
+}: {
+  ir: MutableOptimizationIr;
+  externalInstances: ReadonlySet<ProgramFunctionInstanceId>;
+}): Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>> => {
+  const facts = new Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>>();
+  ir.facts.reachableFunctionInstances.forEach((instanceId) => {
+    const instance = ir.baseProgram.functions.getInstance(instanceId);
+    const signature = ir.baseProgram.functions.getSignature(
+      instance.symbolRef.moduleId,
+      instance.symbolRef.symbol,
+    );
+    signature?.parameters.forEach((parameter) => {
+      if (typeof parameter.symbol !== "number") {
+        return;
+      }
+      const fact = mutableParameterFactFor({ facts, instanceId, symbol: parameter.symbol });
+      if (externalInstances.has(instanceId)) {
+        fact.escapes = true;
+        fact.escapeReasons.add("public-boundary");
+      }
+    });
+  });
+  return facts;
+};
+
+const analyzeParameterEscapes = ({
+  ir,
+  seedFacts,
+}: {
+  ir: MutableOptimizationIr;
+  seedFacts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, MutableEscapeParameterFact>
+  >;
+}): Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>> => {
+  const facts = cloneMutableParameterFacts(seedFacts);
+  ir.facts.reachableFunctionInstances.forEach((instanceId) => {
+    const instance = ir.baseProgram.functions.getInstance(instanceId);
+    const moduleView = ir.modules.get(instance.symbolRef.moduleId);
+    const item = moduleView
+      ? functionItemBySymbol({
+          moduleView,
+          symbol: instance.symbolRef.symbol,
+        })
+      : undefined;
+    if (!moduleView || !item) {
+      return;
+    }
+    const mutableParameterFacts = facts.get(instanceId);
+    if (!mutableParameterFacts) {
+      return;
+    }
+    analyzeEscapeExpression({
+      exprId: item.body,
+      context: { reason: "return" },
+      state: {
+        ir,
+        moduleView,
+        callerInstanceId: instanceId,
+        parameterSymbols: parameterSymbolsForFunction(item),
+        parameterFacts: seedFacts,
+        mutableParameterFacts,
+        localOrigins: new Map(),
+      },
+    });
+  });
+  return facts;
+};
+
+const computeParameterEscapeFacts = ({
+  ir,
+}: {
+  ir: MutableOptimizationIr;
+}): Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>> => {
+  const externalInstances = externallyCallableFunctionInstances(ir);
+  const seedFacts = seedParameterFacts({ ir, externalInstances });
+  let facts = seedFacts;
+  let changed = true;
+
+  while (changed) {
+    const next = analyzeParameterEscapes({ ir, seedFacts: facts });
+    changed =
+      serializeMutableParameterFacts(next) !==
+      serializeMutableParameterFacts(facts);
+    facts = next;
+  }
+
+  return facts;
+};
+
+const computeOriginEscapeFacts = ({
+  ir,
+  parameterFacts,
+}: {
+  ir: MutableOptimizationIr;
+  parameterFacts: ReadonlyMap<
+    ProgramFunctionInstanceId,
+    ReadonlyMap<SymbolId, MutableEscapeParameterFact>
+  >;
+}): Map<string, Map<HirExprId, MutableEscapeOriginFact>> => {
+  const originFacts = new Map<string, Map<HirExprId, MutableEscapeOriginFact>>();
+
+  ir.facts.reachableFunctionInstances.forEach((instanceId) => {
+    const instance = ir.baseProgram.functions.getInstance(instanceId);
+    const moduleView = ir.modules.get(instance.symbolRef.moduleId);
+    const item = moduleView
+      ? functionItemBySymbol({
+          moduleView,
+          symbol: instance.symbolRef.symbol,
+        })
+      : undefined;
+    if (!moduleView || !item) {
+      return;
+    }
+    analyzeEscapeExpression({
+      exprId: item.body,
+      context: { reason: "return" },
+      state: {
+        ir,
+        moduleView,
+        callerInstanceId: instanceId,
+        parameterSymbols: parameterSymbolsForFunction(item),
+        parameterFacts,
+        mutableOriginFacts: originFacts,
+        localOrigins: new Map(),
+      },
+    });
+  });
+
+  ir.facts.reachableModuleLets.forEach((symbols, moduleId) => {
+    const moduleView = ir.modules.get(moduleId);
+    if (!moduleView) {
+      return;
+    }
+    symbols.forEach((symbol) => {
+      const moduleLet = moduleLetBySymbol({ moduleView, symbol });
+      if (!moduleLet) {
+        return;
+      }
+      analyzeEscapeExpression({
+        exprId: moduleLet.initializer,
+        context: { reason: "module-let" },
+        state: {
+          ir,
+          moduleView,
+          parameterSymbols: new Set(),
+          parameterFacts,
+          mutableOriginFacts: originFacts,
+          localOrigins: new Map(),
+        },
+      });
+    });
+  });
+
+  return originFacts;
+};
+
+const serializeOriginFacts = (
+  facts: ReadonlyMap<string, ReadonlyMap<HirExprId, EscapeAnalysisOriginFact>>,
+): string =>
+  JSON.stringify(
+    Array.from(facts.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([moduleId, byExpr]) => [
+        moduleId,
+        Array.from(byExpr.entries())
+          .sort(([left], [right]) => left - right)
+          .map(([exprId, fact]) => [
+            exprId,
+            fact.originKind,
+            fact.typeId,
+            fact.escapes,
+            fact.escapeReasons,
+            fact.directLocalSymbols,
+            fact.useExprIds,
+          ]),
+      ]),
+  );
+
+const escapeAnalysisPass: ProgramOptimizationPass = {
+  name: "whole-program-escape-analysis",
+  run(ctx) {
+    const ir = ctx.ir as MutableOptimizationIr;
+    const parameterFacts = computeParameterEscapeFacts({ ir });
+    const originFacts = computeOriginEscapeFacts({ ir, parameterFacts });
+    const immutableParameters = toImmutableParameterFacts(parameterFacts);
+    const immutableOrigins = toImmutableOriginFacts(originFacts);
+    const previous = ir.facts.escapeAnalysis;
+    const changed =
+      serializeMutableParameterFacts(parameterFacts) !==
+        JSON.stringify(
+          Array.from(previous.parameters.entries())
+            .sort(([left], [right]) => left - right)
+            .map(([instanceId, bySymbol]) => [
+              instanceId,
+              Array.from(bySymbol.entries())
+                .sort(([left], [right]) => left - right)
+                .map(([symbol, fact]) => [
+                  symbol,
+                  fact.escapes,
+                  fact.escapeReasons,
+                  fact.useExprIds,
+                ]),
+            ]),
+        ) ||
+      serializeOriginFacts(immutableOrigins) !== serializeOriginFacts(previous.origins);
+
+    ir.facts.escapeAnalysis = {
+      origins: immutableOrigins,
+      parameters: immutableParameters,
+    };
+
+    return { changed };
+  },
+};
+
 const rebuildEffectsInfo = ({
   moduleView,
 }: {
@@ -4378,6 +5366,43 @@ const finalizeOptimization = ({
           ],
         ),
       ),
+      escapeAnalysis: {
+        origins: new Map(
+          Array.from(ir.facts.escapeAnalysis.origins.entries()).map(
+            ([moduleId, byExpr]) => [
+              moduleId,
+              new Map(
+                Array.from(byExpr.entries()).map(([exprId, fact]) => [
+                  exprId,
+                  {
+                    ...fact,
+                    escapeReasons: [...fact.escapeReasons],
+                    directLocalSymbols: [...fact.directLocalSymbols],
+                    useExprIds: [...fact.useExprIds],
+                  },
+                ]),
+              ),
+            ],
+          ),
+        ),
+        parameters: new Map(
+          Array.from(ir.facts.escapeAnalysis.parameters.entries()).map(
+            ([instanceId, bySymbol]) => [
+              instanceId,
+              new Map(
+                Array.from(bySymbol.entries()).map(([symbol, fact]) => [
+                  symbol,
+                  {
+                    ...fact,
+                    escapeReasons: [...fact.escapeReasons],
+                    useExprIds: [...fact.useExprIds],
+                  },
+                ]),
+              ),
+            ],
+          ),
+        ),
+      },
       runtimeTypeCheckElisionFieldAccesses: new Map(
         Array.from(ir.facts.runtimeTypeCheckElisionFieldAccesses.entries()).map(
           ([moduleId, exprIds]) => [moduleId, new Set(exprIds)],
@@ -4411,6 +5436,7 @@ const OPTIMIZATION_PASSES: readonly ProgramOptimizationPass[] = [
   wholeProgramSpecializationPruningPass,
   redundantRuntimeTypeCheckEliminationPass,
   semanticCopyForwardingPass,
+  escapeAnalysisPass,
 ];
 
 export const optimizeProgram = ({
