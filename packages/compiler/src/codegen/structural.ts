@@ -2495,11 +2495,13 @@ export const loadStructuralField = ({
   structInfo,
   field,
   pointer,
+  exactNominalTypeId,
   ctx,
 }: {
   structInfo: StructuralTypeInfo;
   field: StructuralTypeInfo["fields"][number];
   pointer: () => binaryen.ExpressionRef;
+  exactNominalTypeId?: TypeId;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   if (structInfo.layoutKind === "value-object") {
@@ -2517,6 +2519,17 @@ export const loadStructuralField = ({
   });
   if (!shouldUseNominalFieldFastPath(structInfo, ctx)) {
     return dynamicLoad;
+  }
+  if (
+    typeof exactNominalTypeId === "number" &&
+    exactNominalTypeId === structInfo.nominalId
+  ) {
+    return makeDirectStructuralFieldLoad({
+      structInfo,
+      field,
+      pointer,
+      ctx,
+    });
   }
 
   const exactTypeMatch = ctx.mod.call(

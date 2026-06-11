@@ -20,7 +20,10 @@ import type {
   ModuleHost,
   ModuleNode,
 } from "../../modules/types.js";
-import type { ModuleExportTable } from "../modules.js";
+import type {
+  ModuleExportSurfaceTable,
+  ModuleExportTable,
+} from "../modules.js";
 import { resolve, sep } from "node:path";
 import {
   packageVisibility,
@@ -640,6 +643,260 @@ fn main(value: util::Thing): util::Fx -> util::Thing
         diag.message.includes("Cannot import compare as value"),
     );
     expect(conflict).toBeDefined();
+  });
+
+  it("does not import effect ops from wildcard imports in full export tables", () => {
+    const source = "use self::log\nuse self::assertions::all";
+    const ast = parse(source, "pkg.voyd");
+    const useForm = ast.rest.find((entry) => isForm(entry) && entry.calls("use")) as
+      | Form
+      | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const logPath = {
+      namespace: "src" as const,
+      segments: ["main", "log"] as const,
+    };
+    const assertionsPath = {
+      namespace: "src" as const,
+      segments: ["main", "assertions"] as const,
+    };
+    const assertionsId = modulePathToString(assertionsPath);
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "pkg.voyd" },
+      ast,
+      source,
+      dependencies: [
+        { kind: "use", path: logPath, span },
+        { kind: "use", path: assertionsPath, span },
+      ],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "pkg.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        assertionsId,
+        new Map([
+          [
+            "log",
+            {
+              name: "log",
+              symbol: 99,
+              moduleId: assertionsId,
+              modulePath: assertionsPath,
+              packageId: packageIdFromPath(assertionsPath),
+              kind: "effect-op",
+              visibility: packageVisibility(),
+            },
+          ],
+          [
+            "assert",
+            {
+              name: "assert",
+              symbol: 100,
+              moduleId: assertionsId,
+              modulePath: assertionsPath,
+              packageId: packageIdFromPath(assertionsPath),
+              kind: "value",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    expect(binding.diagnostics).toHaveLength(0);
+    const logSymbols = Array.from(symbolTable.symbolsInScope(symbolTable.rootScope))
+      .filter((symbol) => symbolTable.getSymbol(symbol).name === "log")
+      .map((symbol) => symbolTable.getSymbol(symbol).kind);
+    expect(logSymbols).toEqual(["module"]);
+    const assertSymbol = symbolTable.resolve("assert", symbolTable.rootScope);
+    expect(typeof assertSymbol).toBe("number");
+    if (typeof assertSymbol === "number") {
+      expect(symbolTable.getSymbol(assertSymbol).kind).toBe("value");
+    }
+  });
+
+  it("does not import effect ops from wildcard imports in cyclic export surfaces", () => {
+    const source = "use self::log\nuse self::assertions::all";
+    const ast = parse(source, "pkg.voyd");
+    const useForm = ast.rest.find((entry) => isForm(entry) && entry.calls("use")) as
+      | Form
+      | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const logPath = {
+      namespace: "src" as const,
+      segments: ["main", "log"] as const,
+    };
+    const assertionsPath = {
+      namespace: "src" as const,
+      segments: ["main", "assertions"] as const,
+    };
+    const assertionsId = modulePathToString(assertionsPath);
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "pkg.voyd" },
+      ast,
+      source,
+      dependencies: [
+        { kind: "use", path: logPath, span },
+        { kind: "use", path: assertionsPath, span },
+      ],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "pkg.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const moduleExportSurfaces: Map<string, ModuleExportSurfaceTable> = new Map([
+      [
+        assertionsId,
+        new Map([
+          [
+            "log",
+            {
+              name: "log",
+              moduleId: assertionsId,
+              modulePath: assertionsPath,
+              packageId: packageIdFromPath(assertionsPath),
+              kind: "effect-op",
+              visibility: packageVisibility(),
+            },
+          ],
+          [
+            "assert",
+            {
+              name: "assert",
+              moduleId: assertionsId,
+              modulePath: assertionsPath,
+              packageId: packageIdFromPath(assertionsPath),
+              kind: "value",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExportSurfaces,
+    });
+
+    expect(binding.diagnostics).toHaveLength(0);
+    const logSymbols = Array.from(symbolTable.symbolsInScope(symbolTable.rootScope))
+      .filter((symbol) => symbolTable.getSymbol(symbol).name === "log")
+      .map((symbol) => symbolTable.getSymbol(symbol).kind);
+    expect(logSymbols).toEqual(["module"]);
+    const assertSymbol = symbolTable.resolve("assert", symbolTable.rootScope);
+    expect(typeof assertSymbol).toBe("number");
+    if (typeof assertSymbol === "number") {
+      expect(symbolTable.getSymbol(assertSymbol).kind).toBe("value");
+    }
+  });
+
+  it("preserves explicit named effect-op imports", () => {
+    const source = "use self::assertions::log";
+    const ast = parse(source, "pkg.voyd");
+    const useForm = ast.rest.find((entry) => isForm(entry) && entry.calls("use")) as
+      | Form
+      | undefined;
+    const span = toSourceSpan(useForm ?? ast);
+    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
+    const moduleId = modulePathToString(modulePath);
+    const assertionsPath = {
+      namespace: "src" as const,
+      segments: ["main", "assertions"] as const,
+    };
+    const assertionsId = modulePathToString(assertionsPath);
+    const moduleNode: ModuleNode = {
+      id: moduleId,
+      path: modulePath,
+      origin: { kind: "file", filePath: "pkg.voyd" },
+      ast,
+      source,
+      dependencies: [{ kind: "use", path: assertionsPath, span }],
+    };
+    const graph: ModuleGraph = {
+      entry: moduleId,
+      modules: new Map([[moduleId, moduleNode]]),
+      diagnostics: [],
+    };
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "pkg.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const moduleExports: Map<string, ModuleExportTable> = new Map([
+      [
+        assertionsId,
+        new Map([
+          [
+            "log",
+            {
+              name: "log",
+              symbol: 99,
+              moduleId: assertionsId,
+              modulePath: assertionsPath,
+              packageId: packageIdFromPath(assertionsPath),
+              kind: "effect-op",
+              visibility: packageVisibility(),
+            },
+          ],
+        ]),
+      ],
+    ]);
+
+    const binding = runBindingPipeline({
+      moduleForm: ast,
+      symbolTable,
+      module: moduleNode,
+      graph,
+      moduleExports,
+    });
+
+    expect(binding.diagnostics).toHaveLength(0);
+    const logSymbol = symbolTable.resolve("log", symbolTable.rootScope);
+    expect(typeof logSymbol).toBe("number");
+    if (typeof logSymbol === "number") {
+      expect(symbolTable.getSymbol(logSymbol).kind).toBe("effect-op");
+    }
   });
 
   it("reports overload-name collisions for top-level non-function declarations", () => {

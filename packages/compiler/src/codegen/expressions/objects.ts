@@ -42,6 +42,8 @@ import {
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import { maybeReportValueBoxingNote } from "../value-boxing-notes.js";
 import { tryCompileProjectedFieldAccess } from "../projected-element-views.js";
+import { exactNominalForRuntimeTypeCheckElision } from "../optimization/runtime-type-checks.js";
+import { tryCompileSemanticCopyForwardedFieldAccess } from "../optimization/semantic-copy-forwarding.js";
 import { compileCallArgExpressionsWithTemps } from "./call/shared.js";
 
 export const compileObjectLiteralExpr = (
@@ -582,6 +584,18 @@ export const compileFieldAccessExpr = (
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const expectedFieldTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const expectedFieldWasmType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const copyForwarded = tryCompileSemanticCopyForwardedFieldAccess({
+    expr,
+    expectedFieldTypeId,
+    expectedFieldWasmType,
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
+  if (copyForwarded) {
+    return copyForwarded;
+  }
+
   const targetExpr = ctx.module.hir.expressions.get(expr.target);
 
   const actualTargetTypeId = getUnresolvedExprType(expr.target, ctx, typeInstanceId);
@@ -632,6 +646,12 @@ export const compileFieldAccessExpr = (
     throw new Error("field access requires a structural object");
   }
   const targetTypeId = requiredStructInfo ? requiredTargetTypeId : actualTargetTypeId;
+  const exactNominalTypeId = exactNominalForRuntimeTypeCheckElision({
+    expr,
+    targetTypeId,
+    ctx,
+    fnCtx,
+  });
 
   const actualField = structInfo.fieldMap.get(expr.field);
   if (!actualField) {
@@ -919,6 +939,7 @@ export const compileFieldAccessExpr = (
     structInfo,
     field: actualField,
     pointer: () => directPointer ?? loadLocalValue(pointerTemp, ctx),
+    exactNominalTypeId,
     ctx,
   });
 
