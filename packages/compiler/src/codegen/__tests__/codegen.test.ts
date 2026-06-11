@@ -498,7 +498,7 @@ describe("next codegen", () => {
     expect(nextField.heapWasmType).not.toBe(ctx.rtt.baseType);
   });
 
-  it("stores single-lane value elements inline in FixedArray", () => {
+  it("stores value elements in plain FixedArray storage", () => {
     const semantics = loadSemanticsWithTyping(
       "single_lane_value_fixed_array.voyd",
       {
@@ -527,8 +527,7 @@ describe("next codegen", () => {
     const fixedArrayType = resolveAliasType("ScalarBoxes");
     const wasmTypes = getFixedArrayWasmTypes(fixedArrayType, ctx);
 
-    expect(wasmTypes.kind).toBe("inline-aggregate");
-    expect(wasmTypes.laneTypes).toEqual([binaryen.i32]);
+    expect(wasmTypes.kind).toBe("plain-array");
   });
 
   it("runs recursive heap types fixture", () => {

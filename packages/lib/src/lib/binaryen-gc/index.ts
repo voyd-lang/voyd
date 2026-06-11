@@ -113,6 +113,11 @@ export const refCast = (
   type: TypeRef
 ): ExpressionRef => bin._BinaryenRefCast(mod.ptr, ref, type);
 
+export const refAsNonNull = (
+  mod: binaryen.Module,
+  ref: ExpressionRef
+): ExpressionRef => bin._BinaryenRefAs(mod.ptr, binaryen.RefAsNonNull, ref);
+
 export const refTest = (
   mod: binaryen.Module,
   ref: ExpressionRef,

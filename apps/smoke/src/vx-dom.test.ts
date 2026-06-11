@@ -22,9 +22,9 @@ const explicitStateIdEntryPath = path.join(
   fixtureRoot,
   "vx-state-explicit-id-rejected.voyd",
 );
-const inlineAggregateArrayEntryPath = path.join(
+const valueArrayModelEntryPath = path.join(
   fixtureRoot,
-  "vx-inline-aggregate-array.voyd",
+  "vx-value-array-model.voyd",
 );
 const typedMouseEventEntryPath = path.join(fixtureRoot, "vx-typed-mouse-event.voyd");
 const userProgramNameEntryPath = path.join(fixtureRoot, "vx-user-program-name.voyd");
@@ -200,10 +200,10 @@ describe("smoke: compiled VX DOM rendering", () => {
     expect(container.innerHTML).toBe("");
   });
 
-  it("marshals inline aggregate arrays through typed VX export wrappers", async () => {
+  it("marshals value arrays through typed VX export wrappers", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: inlineAggregateArrayEntryPath }),
+      await sdk.compile({ entryPath: valueArrayModelEntryPath }),
     );
     const host = await createVoydHost({
       wasm: result.wasm,

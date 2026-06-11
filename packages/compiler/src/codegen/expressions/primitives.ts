@@ -130,7 +130,7 @@ export const compileIdentifierExpr = (
   if (binding) {
     if (binding.kind === "projected-element-ref") {
       if (preserveStorageRefs) {
-        const value = loadBindingValue(binding, ctx);
+        const value = loadBindingValue(binding, ctx, fnCtx);
         return {
           expr:
             typeof expectedResultTypeId === "number"
@@ -174,7 +174,7 @@ export const compileIdentifierExpr = (
         usedReturnCall: false,
       };
     }
-    const value = loadBindingValue(binding, ctx);
+    const value = loadBindingValue(binding, ctx, fnCtx);
     if (
       typeof expectedResultTypeId === "number" &&
       typeof binding.typeId === "number"

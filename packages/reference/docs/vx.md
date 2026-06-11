@@ -82,7 +82,7 @@ subscriptions and returns the next model.
 
 Typed lifecycle values must be boundary-compatible DTOs: primitives, `String`,
 records/objects with public DTO fields, named message variants, and arrays of
-heap-stored DTO values. Inline aggregate arrays, arbitrary dictionaries,
+boundary-compatible DTO values, including value objects. Arbitrary dictionaries,
 functions, trait objects, and recursive object graphs are not part of the typed
 VX boundary yet.
 
