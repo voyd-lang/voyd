@@ -22,3 +22,15 @@ pub fn enumerate_length() -> i32
   arr.push(1)
   arr.push(2)
   arr.enumerate().len()
+
+pub fn direct_len_at_sum() -> i32
+  let ~arr = Array<i32>::with_capacity(3)
+  arr.push(10)
+  arr.push(20)
+  arr.push(30)
+  arr.len() + arr.at(0) + arr.at(-1)
+
+pub fn direct_at_out_of_bounds() -> i32
+  let ~arr = Array<i32>::with_capacity(1)
+  arr.push(10)
+  arr.at(1)

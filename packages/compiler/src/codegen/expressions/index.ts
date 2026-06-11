@@ -21,6 +21,7 @@ import {
 } from "./objects.js";
 import { compileLambdaExpr } from "./lambdas.js";
 import { tryCompileProjectedElementValueExpr } from "../projected-element-views.js";
+import { tryCompileArrayMethodFastPath } from "../optimization/array-fast-paths.js";
 import {
   compileIdentifierExpr,
   compileLiteralExpr,
@@ -80,6 +81,16 @@ export const compileExpression: ExpressionCompiler = ({
       });
       if (projected) {
         return projected;
+      }
+      const arrayFastPath = tryCompileArrayMethodFastPath({
+        expr,
+        expectedResultTypeId,
+        ctx,
+        fnCtx,
+        compileExpr: compileExpression,
+      });
+      if (arrayFastPath) {
+        return arrayFastPath;
       }
       return compileMethodCallExpr(expr, ctx, fnCtx, compileExpression, {
         tailPosition,

@@ -16,6 +16,7 @@ type Scenario = {
 
 type ScenarioResult = {
   name: string;
+  compileMs: number;
   wasmBytes: number;
   gzipBytes: number;
   medianMs: number;
@@ -49,6 +50,32 @@ pub fn semantic_copy_forwarding() -> i32
   total
 `;
 
+const arrayFastPathSource = `
+use std::array::Array
+use std::number::all
+
+fn build_values(count: i32) -> Array<i32>
+  let ~values = Array<i32>::with_capacity(count)
+  var index = 0
+  while index < count:
+    values.push((index % 17) + 1)
+    index = index + 1
+  values
+
+pub fn std_array_len_at_loop() -> i32
+  let values = build_values(4096)
+  let length = values.len()
+  var total = 0
+  var round = 0
+  while round < 1500:
+    var index = 0
+    while index < length:
+      total = total + values.at(index)
+      index = index + 1
+    round = round + 1
+  total
+`;
+
 const defaultIterations = Number.parseInt(process.env.VOYD_BENCH_ITERATIONS ?? "9", 10);
 const vtraceIterations = Number.parseInt(process.env.VOYD_BENCH_VTRACE_ITERATIONS ?? "3", 10);
 
@@ -68,6 +95,14 @@ const scenarios: Scenario[] = [
     iterations: defaultIterations,
     warmups: 2,
     expected: 200_010_000,
+  },
+  {
+    name: "focused/std-array-len-at-loop",
+    source: arrayFastPathSource,
+    entryName: "std_array_len_at_loop",
+    iterations: defaultIterations,
+    warmups: 2,
+    expected: 55_284_000,
   },
   {
     name: "realistic/vtrace-main",
@@ -111,6 +146,7 @@ const median = (values: number[]): number => {
 
 const runScenario = async (scenario: Scenario): Promise<ScenarioResult> => {
   const sdk = createSdk();
+  const compileStartedAt = performance.now();
   const compiled = expectCompileSuccess(
     await sdk.compile({
       entryPath: scenario.entryPath,
@@ -119,6 +155,7 @@ const runScenario = async (scenario: Scenario): Promise<ScenarioResult> => {
     }),
     scenario.name
   );
+  const compileMs = performance.now() - compileStartedAt;
   const host = await createVoydHost({ wasm: compiled.wasm });
 
   for (let warmup = 0; warmup < scenario.warmups; warmup += 1) {
@@ -145,6 +182,7 @@ const runScenario = async (scenario: Scenario): Promise<ScenarioResult> => {
 
   return {
     name: scenario.name,
+    compileMs,
     wasmBytes: compiled.wasm.byteLength,
     gzipBytes: gzipSync(compiled.wasm).byteLength,
     medianMs: median(samplesMs),
@@ -153,11 +191,12 @@ const runScenario = async (scenario: Scenario): Promise<ScenarioResult> => {
 };
 
 const printResults = (results: readonly ScenarioResult[]): void => {
-  console.log("name,wasmBytes,gzipBytes,medianMs,samplesMs");
+  console.log("name,compileMs,wasmBytes,gzipBytes,medianMs,samplesMs");
   for (const result of results) {
     console.log(
       [
         result.name,
+        result.compileMs.toFixed(3),
         result.wasmBytes.toString(),
         result.gzipBytes.toString(),
         result.medianMs.toFixed(3),
