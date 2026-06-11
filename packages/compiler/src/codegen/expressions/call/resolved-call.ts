@@ -169,7 +169,7 @@ export const emitResolvedCall = ({
             }
             return storageRef;
           }
-          return loadBindingValue(binding, ctx);
+          return loadBindingValue(binding, ctx, fnCtx);
         })
       : [];
 

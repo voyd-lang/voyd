@@ -420,7 +420,7 @@ const compileDefaultParameterInitialization = ({
         `codegen missing bound parameter for optional default symbol ${param.symbol}`,
       );
     }
-    const rawParamExpr = () => loadBindingValue(rawBinding, ctx);
+    const rawParamExpr = () => loadBindingValue(rawBinding, ctx, fnCtx);
     const rawAbiTypes = binaryen.expandType(rawBinding.type);
     const [isSome, extractedSomeValue] = shouldInlineUnionLayout(rawTypeId, ctx)
       ? (() => {

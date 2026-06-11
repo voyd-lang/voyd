@@ -821,7 +821,7 @@ const lowerCallArgumentForAbi = ({
             })
           : undefined;
       const ownedValue = materialized
-        ? loadBindingValue(materialized.binding, ctx)
+        ? loadBindingValue(materialized.binding, ctx, fnCtx)
         : argValue;
       const owned = allocateAddressableLocal({
         typeId: paramTypeId,
@@ -1030,7 +1030,7 @@ const tryLoadContainerPointer = ({
     if (storageRef) {
       return storageRef;
     }
-    const bindingValue = loadBindingValue(binding, ctx);
+    const bindingValue = loadBindingValue(binding, ctx, fnCtx);
     const bindingValueType = binaryen.getExpressionType(bindingValue);
     if (
       binaryen.expandType(bindingValueType).length === 1 &&

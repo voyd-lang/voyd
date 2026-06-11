@@ -187,11 +187,9 @@ export type RuntimeTypeIdState = {
 };
 
 export interface FixedArrayWasmType {
-  kind: "plain-array" | "inline-aggregate";
+  kind: "plain-array";
   type: binaryen.Type;
   heapType: HeapTypeRef;
-  laneTypes?: readonly binaryen.Type[];
-  laneArrayTypes?: readonly binaryen.Type[];
 }
 
 export interface ClosureTypeInfo {

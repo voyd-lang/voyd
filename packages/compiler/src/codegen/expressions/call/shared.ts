@@ -12,7 +12,7 @@ import type {
 import { coerceValueToType } from "../../structural.js";
 import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../../locals.js";
 import {
-  getRequiredExprType,
+  getUnresolvedExprType,
   wasmTypeFor,
 } from "../../types.js";
 import { resolveTempCaptureTypeId } from "../../effects/temp-capture-types.js";
@@ -141,7 +141,12 @@ export const compileCallArgExpressionsWithTemps = ({
 
   return args.map((arg, index) => {
     const expectedTypeId = expectedTypeIdAt(index);
-    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
+    const expr = ctx.module.hir.expressions.get(arg.expr);
+    const actualTypeId =
+      expr?.exprKind === "identifier"
+        ? (fnCtx.bindings.get(expr.symbol)?.typeId ??
+          getUnresolvedExprType(arg.expr, ctx, typeInstanceId))
+        : getUnresolvedExprType(arg.expr, ctx, typeInstanceId);
     const tempId = tempsByIndex.get(index + offset);
 
     if (typeof tempId !== "number") {

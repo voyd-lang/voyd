@@ -320,9 +320,7 @@ const assertSupportedArrayStorage = ({
     });
     return;
   }
-  const storageTypes = getFixedArrayWasmTypes(storage.typeId, ctx);
-  if (storageTypes.kind === "plain-array") return;
-  if (storageTypes.kind === "inline-aggregate") return;
+  getFixedArrayWasmTypes(storage.typeId, ctx);
 };
 
 const deriveRecordSchema = ({

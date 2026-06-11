@@ -505,7 +505,7 @@ export const compileLambdaExpr = (
         throw new Error(`missing lambda capture metadata for symbol ${capture.symbol}`);
       }
       return coerceValueToType({
-        value: loadBindingValue(binding, ctx),
+        value: loadBindingValue(binding, ctx, fnCtx),
         actualType: captureInfo.typeId,
         targetType: captureInfo.typeId,
         ctx,

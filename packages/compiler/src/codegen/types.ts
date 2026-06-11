@@ -12,7 +12,6 @@ import { ensureClosureTypeInfo } from "./closure-types.js";
 import {
   ensureFixedArrayWasmTypes,
   ensureFixedArrayWasmTypesByElement,
-  ensureInlineFixedArrayWasmTypes,
 } from "./fixed-array-types.js";
 import { MAX_MULTIVALUE_INLINE_LANES } from "./multivalue.js";
 import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
@@ -939,25 +938,6 @@ export const getFixedArrayWasmTypes = (
     }
   }
 
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  if (desc.kind !== "fixed-array") {
-    throw new Error("intrinsic requires a fixed-array type");
-  }
-  const laneTypes = flattenTypeToAbiTypes(desc.element, ctx, seen, "signature");
-  const inlineElementBox = getInlineHeapBoxType({
-    typeId: desc.element,
-    ctx,
-    seen: new Set(seen),
-    mode: "signature",
-  });
-  if (typeof inlineElementBox === "number" || laneTypes.length > 1) {
-    return ensureInlineFixedArrayWasmTypes({
-      key: `${runtimeTypeKeyFor({ typeId: desc.element, ctx })}:${laneTypes.join(",")}`,
-      laneTypes,
-      ctx,
-    });
-  }
-
   return ensureFixedArrayWasmTypes({
     typeId,
     ctx,
@@ -966,6 +946,7 @@ export const getFixedArrayWasmTypes = (
     // Wasm GC arrays are invariant, so fixed-array element heap types must stay
     // concrete even when the caller is lowering a signature.
     lowerType: (id, ctx, seen) =>
+      getInlineHeapBoxType({ typeId: id, ctx, seen, mode: "runtime" }) ??
       wasmHeapFieldTypeFor(id, ctx, seen, "runtime"),
   });
 };
@@ -984,12 +965,19 @@ export const wasmTypeFor = (
       return binaryen.funcref;
     }
     if (desc.kind === "fixed-array") {
-      const elementType = wasmHeapFieldTypeFor(
-        desc.element,
-        ctx,
-        seen,
-        "runtime",
-      );
+      const elementType =
+        getInlineHeapBoxType({
+          typeId: desc.element,
+          ctx,
+          seen,
+          mode: "runtime",
+        }) ??
+        wasmHeapFieldTypeFor(
+          desc.element,
+          ctx,
+          seen,
+          "runtime",
+        );
       return ensureFixedArrayWasmTypesByElement({ elementType, ctx }).type;
     }
     if (desc.kind === "value-object") {
