@@ -74,6 +74,8 @@ type MutableOptimizationIr = {
       ProgramFunctionInstanceId,
       Map<SymbolId, Set<TypeId>>
     >;
+    runtimeTypeCheckElisionFieldAccesses: Map<string, Set<HirExprId>>;
+    semanticCopyForwardingFieldAccesses: Map<string, Set<HirExprId>>;
     codegenPlan: ProgramCodegenOptimizationPlan;
   };
 };
@@ -307,6 +309,8 @@ const buildOptimizationIr = ({
       receiverSpecializationRequests: new Map(),
       exactParameterTypes: new Map(),
       knownParameterTypes: new Map(),
+      runtimeTypeCheckElisionFieldAccesses: new Map(),
+      semanticCopyForwardingFieldAccesses: new Map(),
       codegenPlan: { representations: {} },
     },
   };
@@ -3104,6 +3108,85 @@ const exactReceiverPropagationPass: ProgramOptimizationPass = {
   },
 };
 
+const redundantRuntimeTypeCheckEliminationPass: ProgramOptimizationPass = {
+  name: "redundant-runtime-type-check-elimination",
+  run(ctx) {
+    const ir = ctx.ir as MutableOptimizationIr;
+    let changed = false;
+
+    ir.modules.forEach((moduleView, moduleId) => {
+      const candidates =
+        ir.facts.runtimeTypeCheckElisionFieldAccesses.get(moduleId) ?? new Set<HirExprId>();
+
+      moduleView.hir.expressions.forEach((expr, exprId) => {
+        if (expr.exprKind !== "field-access") {
+          return;
+        }
+
+        const targetTypeId = exprTypeFor({ moduleView, exprId: expr.target });
+        if (
+          typeof exactNominalForType({
+            typeId: targetTypeId,
+            program: ir.baseProgram,
+          }) !== "number"
+        ) {
+          return;
+        }
+
+        if (!candidates.has(exprId)) {
+          candidates.add(exprId);
+          changed = true;
+        }
+      });
+
+      if (candidates.size > 0) {
+        ir.facts.runtimeTypeCheckElisionFieldAccesses.set(moduleId, candidates);
+      }
+    });
+
+    return { changed };
+  },
+};
+
+const semanticCopyForwardingPass: ProgramOptimizationPass = {
+  name: "semantic-copy-forwarding",
+  run(ctx) {
+    const ir = ctx.ir as MutableOptimizationIr;
+    let changed = false;
+
+    ir.modules.forEach((moduleView, moduleId) => {
+      const candidates =
+        ir.facts.semanticCopyForwardingFieldAccesses.get(moduleId) ?? new Set<HirExprId>();
+
+      moduleView.hir.expressions.forEach((expr, exprId) => {
+        if (expr.exprKind !== "field-access") {
+          return;
+        }
+
+        const target = moduleView.hir.expressions.get(expr.target);
+        if (
+          target?.exprKind !== "object-literal" ||
+          target.entries.some((entry) => entry.kind !== "field") ||
+          !target.entries.some((entry) => entry.kind === "field" && entry.name === expr.field)
+        ) {
+          return;
+        }
+
+        if (!candidates.has(exprId)) {
+          candidates.add(exprId);
+          changed = true;
+        }
+      });
+
+      if (candidates.size > 0) {
+        ir.facts.semanticCopyForwardingFieldAccesses.set(moduleId, candidates);
+      }
+    });
+
+    return { changed };
+  },
+};
+
 const moduleLetItems = ({
   moduleView,
 }: {
@@ -4295,6 +4378,16 @@ const finalizeOptimization = ({
           ],
         ),
       ),
+      runtimeTypeCheckElisionFieldAccesses: new Map(
+        Array.from(ir.facts.runtimeTypeCheckElisionFieldAccesses.entries()).map(
+          ([moduleId, exprIds]) => [moduleId, new Set(exprIds)],
+        ),
+      ),
+      semanticCopyForwardingFieldAccesses: new Map(
+        Array.from(ir.facts.semanticCopyForwardingFieldAccesses.entries()).map(
+          ([moduleId, exprIds]) => [moduleId, new Set(exprIds)],
+        ),
+      ),
       codegenPlan,
     },
   };
@@ -4316,6 +4409,8 @@ const OPTIMIZATION_PASSES: readonly ProgramOptimizationPass[] = [
   constructorKnownSimplificationPass,
   traitDispatchDevirtualizationPass,
   wholeProgramSpecializationPruningPass,
+  redundantRuntimeTypeCheckEliminationPass,
+  semanticCopyForwardingPass,
 ];
 
 export const optimizeProgram = ({

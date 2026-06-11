@@ -1472,6 +1472,9 @@ pub fn main() -> i32
       },
     });
 
+    const candidates = optimized.facts.runtimeTypeCheckElisionFieldAccesses.get("src::main");
+    expect(candidates?.size).toBeGreaterThanOrEqual(2);
+
     const optimizedCodegen = codegenProgram({
       program: optimized.program,
       entryModuleId,
@@ -1494,8 +1497,43 @@ pub fn main() -> i32
     const optimizedWasmText = optimizedCodegen.module.emitText();
     const baselineWasmText = baselineCodegen.module.emitText();
 
-    expect(optimizedWasmText).toContain("call $__has_type");
-    expect(baselineWasmText).not.toContain("call $__has_type");
+    expect(optimizedWasmText).not.toContain("call $__has_type");
+    expect(optimizedWasmText).not.toContain("call $__lookup_field_accessor");
+    expect(baselineWasmText).toContain("call $__lookup_field_accessor");
+  });
+
+  it("marks direct object-literal field accesses for semantic copy forwarding", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Vec2 {
+  x: i32,
+  y: i32
+}
+
+fn bump(value: i32) -> i32
+  value + 1
+
+pub fn main() -> i32
+  (Vec2 { x: bump(1), y: bump(2) }).y
+`,
+      },
+    });
+
+    const candidates = optimized.facts.semanticCopyForwardingFieldAccesses.get("src::main");
+    expect(candidates?.size).toBe(1);
+
+    const codegen = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: false,
+        runtimeDiagnostics: false,
+      },
+    });
+    expect(codegen.diagnostics).toHaveLength(0);
   });
 
   it("lowers small trait-dispatch sets to direct type switches", async () => {

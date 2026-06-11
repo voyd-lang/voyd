@@ -42,6 +42,8 @@ export type ProgramOptimizationFacts = {
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, ReadonlySet<TypeId>>
   >;
+  runtimeTypeCheckElisionFieldAccesses: ReadonlyMap<string, ReadonlySet<HirExprId>>;
+  semanticCopyForwardingFieldAccesses: ReadonlyMap<string, ReadonlySet<HirExprId>>;
   codegenPlan: ProgramCodegenOptimizationPlan;
 };
 
