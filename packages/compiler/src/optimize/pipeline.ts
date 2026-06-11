@@ -4306,6 +4306,7 @@ type EscapeAnalysisState = {
   mutableParameterFacts?: Map<SymbolId, MutableEscapeParameterFact>;
   mutableOriginFacts?: Map<string, Map<HirExprId, MutableEscapeOriginFact>>;
   localOrigins: Map<SymbolId, Set<HirExprId>>;
+  localParameterAliases: Map<SymbolId, Set<SymbolId>>;
 };
 
 const emptyEscapeUseContext: EscapeUseContext = {};
@@ -4558,6 +4559,48 @@ const bindLocalOrigin = ({
   fact?.directLocalSymbols.add(symbol);
 };
 
+const localParameterAliasesForSymbol = ({
+  state,
+  symbol,
+}: {
+  state: EscapeAnalysisState;
+  symbol: SymbolId;
+}): ReadonlySet<SymbolId> | undefined => state.localParameterAliases.get(symbol);
+
+const parameterAliasesForInitializer = ({
+  state,
+  exprId,
+}: {
+  state: EscapeAnalysisState;
+  exprId: HirExprId;
+}): Set<SymbolId> => {
+  const expr = state.moduleView.hir.expressions.get(exprId);
+  if (expr?.exprKind !== "identifier") {
+    return new Set();
+  }
+  return new Set([
+    ...(state.parameterSymbols.has(expr.symbol) ? [expr.symbol] : []),
+    ...(localParameterAliasesForSymbol({ state, symbol: expr.symbol }) ?? []),
+  ]);
+};
+
+const bindLocalParameterAliases = ({
+  state,
+  symbol,
+  parameterSymbols,
+}: {
+  state: EscapeAnalysisState;
+  symbol: SymbolId;
+  parameterSymbols: ReadonlySet<SymbolId>;
+}): void => {
+  if (parameterSymbols.size === 0) {
+    return;
+  }
+  const aliases = state.localParameterAliases.get(symbol) ?? new Set<SymbolId>();
+  parameterSymbols.forEach((parameterSymbol) => aliases.add(parameterSymbol));
+  state.localParameterAliases.set(symbol, aliases);
+};
+
 const markSymbolUse = ({
   state,
   symbol,
@@ -4583,17 +4626,20 @@ const markSymbolUse = ({
     });
   });
 
-  if (!state.parameterSymbols.has(symbol)) {
-    return;
-  }
-  const fact = state.mutableParameterFacts?.get(symbol);
-  if (!fact) {
-    return;
-  }
-  markParameterUse({
-    fact,
-    exprId,
-    reason: context.reason,
+  const parameterSymbols = new Set([
+    ...(state.parameterSymbols.has(symbol) ? [symbol] : []),
+    ...(localParameterAliasesForSymbol({ state, symbol }) ?? []),
+  ]);
+  parameterSymbols.forEach((parameterSymbol) => {
+    const fact = state.mutableParameterFacts?.get(parameterSymbol);
+    if (!fact) {
+      return;
+    }
+    markParameterUse({
+      fact,
+      exprId,
+      reason: context.reason,
+    });
   });
 };
 
@@ -5000,22 +5046,34 @@ const analyzeEscapeStatement = ({
     return;
   }
 
-  const boundOrigin = originExprIdForInitializer({
-    state,
-    exprId: statement.initializer,
-  });
-  if (statement.pattern.kind === "identifier" && typeof boundOrigin === "number") {
-    bindLocalOrigin({
+  if (statement.pattern.kind === "identifier") {
+    const boundOrigin = originExprIdForInitializer({
+      state,
+      exprId: statement.initializer,
+    });
+    if (typeof boundOrigin === "number") {
+      bindLocalOrigin({
+        state,
+        symbol: statement.pattern.symbol,
+        originExprId: boundOrigin,
+      });
+    }
+    bindLocalParameterAliases({
       state,
       symbol: statement.pattern.symbol,
-      originExprId: boundOrigin,
+      parameterSymbols: parameterAliasesForInitializer({
+        state,
+        exprId: statement.initializer,
+      }),
     });
-    analyzeEscapeExpression({
-      exprId: statement.initializer,
-      context: emptyEscapeUseContext,
-      state,
-    });
-    return;
+    if (typeof boundOrigin === "number") {
+      analyzeEscapeExpression({
+        exprId: statement.initializer,
+        context: emptyEscapeUseContext,
+        state,
+      });
+      return;
+    }
   }
 
   analyzeEscapeExpression({
@@ -5094,6 +5152,7 @@ const analyzeParameterEscapes = ({
         parameterFacts: seedFacts,
         mutableParameterFacts,
         localOrigins: new Map(),
+        localParameterAliases: new Map(),
       },
     });
   });
@@ -5156,6 +5215,7 @@ const computeOriginEscapeFacts = ({
         parameterFacts,
         mutableOriginFacts: originFacts,
         localOrigins: new Map(),
+        localParameterAliases: new Map(),
       },
     });
   });
@@ -5180,6 +5240,7 @@ const computeOriginEscapeFacts = ({
           parameterFacts,
           mutableOriginFacts: originFacts,
           localOrigins: new Map(),
+          localParameterAliases: new Map(),
         },
       });
     });

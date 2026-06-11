@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { gzipSync } from "node:zlib";
@@ -21,6 +22,7 @@ type ScenarioResult = {
   compileMs: number;
   wasmBytes: number;
   gzipBytes: number;
+  wasmSha256: string;
   medianMs?: number;
   samplesMs: number[];
 };
@@ -88,6 +90,19 @@ const representativeIterations = Number.parseInt(
   process.env.VOYD_BENCH_REPRESENTATIVE_ITERATIONS ?? "1",
   10,
 );
+const optimizeModes = (process.env.VOYD_BENCH_OPTIMIZE_MODES ?? "false,true")
+  .split(",")
+  .map((value) => value.trim().toLowerCase())
+  .filter((value) => value.length > 0)
+  .map((value) => {
+    if (value === "true" || value === "1") {
+      return true;
+    }
+    if (value === "false" || value === "0") {
+      return false;
+    }
+    throw new Error(`invalid VOYD_BENCH_OPTIMIZE_MODES entry ${value}`);
+  });
 
 const maybeFileScenario = (scenario: Scenario): Scenario[] =>
   scenario.entryPath && !fs.existsSync(scenario.entryPath) ? [] : [scenario];
@@ -222,13 +237,14 @@ const runScenario = async ({
     compileMs,
     wasmBytes: compiled.wasm.byteLength,
     gzipBytes: gzipSync(compiled.wasm).byteLength,
+    wasmSha256: createHash("sha256").update(compiled.wasm).digest("hex"),
     medianMs: median(samplesMs),
     samplesMs,
   };
 };
 
 const printResults = (results: readonly ScenarioResult[]): void => {
-  console.log("name,optimize,compileMs,wasmBytes,gzipBytes,medianMs,samplesMs");
+  console.log("name,optimize,compileMs,wasmBytes,gzipBytes,wasmSha256,medianMs,samplesMs");
   results.forEach((result) => {
     console.log(
       [
@@ -237,6 +253,7 @@ const printResults = (results: readonly ScenarioResult[]): void => {
         result.compileMs.toFixed(3),
         result.wasmBytes.toString(),
         result.gzipBytes.toString(),
+        result.wasmSha256,
         result.medianMs === undefined ? "" : result.medianMs.toFixed(3),
         result.samplesMs.map((sample) => sample.toFixed(3)).join("|"),
       ].join(","),
@@ -247,8 +264,9 @@ const printResults = (results: readonly ScenarioResult[]): void => {
 const main = async (): Promise<void> => {
   const results: ScenarioResult[] = [];
   for (const scenario of scenarios) {
-    results.push(await runScenario({ scenario, optimize: false }));
-    results.push(await runScenario({ scenario, optimize: true }));
+    for (const optimize of optimizeModes) {
+      results.push(await runScenario({ scenario, optimize }));
+    }
   }
   printResults(results);
 };

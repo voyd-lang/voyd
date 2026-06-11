@@ -1499,6 +1499,98 @@ pub fn main() -> i32
     });
   });
 
+  it("tracks local aliases back to parameter escape facts", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+eff Log
+  info(resume, x: i32) -> i32
+
+obj Vec2 {
+  x: i32,
+  y: i32
+}
+
+fn worker(): Log -> i32
+  Log::info(5)
+
+fn escaping_identity(vec: Vec2) -> Vec2
+  vec
+
+fn identity_alias(vec: Vec2) -> Vec2
+  let alias = vec
+  alias
+
+fn alias_to_escaping_callee(vec: Vec2) -> Vec2
+  let alias = vec
+  escaping_identity(alias)
+
+fn alias_closure_capture(vec: Vec2) -> i32
+  let alias = vec
+  let cb = () => alias.x
+  cb()
+
+fn alias_effect_capture(vec: Vec2): () -> i32
+  let alias = vec
+  try
+    worker()
+  Log::info(resume, x):
+    alias.x + x
+
+fn alias_non_escape(vec: Vec2) -> i32
+  let alias = vec
+  alias.x + alias.y
+
+pub fn main(): () -> i32
+  identity_alias(Vec2 { x: 1, y: 2 }).x +
+    alias_to_escaping_callee(Vec2 { x: 3, y: 4 }).x +
+    alias_closure_capture(Vec2 { x: 5, y: 6 }) +
+    alias_effect_capture(Vec2 { x: 7, y: 8 }) +
+    alias_non_escape(Vec2 { x: 9, y: 10 })
+`,
+      },
+    });
+
+    const moduleId = "src::main";
+    const program = optimized.program;
+    const parameterFact = (name: string) => {
+      const fn = findFunction({ moduleId, name, program });
+      expect(fn?.kind, name).toBe("function");
+      if (!fn || fn.kind !== "function") {
+        return undefined;
+      }
+      const instanceId = program.functions.getInstanceId(moduleId, fn.symbol, []);
+      expect(typeof instanceId, name).toBe("number");
+      if (typeof instanceId !== "number") {
+        return undefined;
+      }
+      return optimized.facts.escapeAnalysis.parameters
+        .get(instanceId)
+        ?.get(fn.parameters[0]!.symbol);
+    };
+
+    expect(parameterFact("identity_alias")).toMatchObject({
+      escapes: true,
+      escapeReasons: ["return"],
+    });
+    expect(parameterFact("alias_to_escaping_callee")).toMatchObject({
+      escapes: true,
+      escapeReasons: ["call-boundary"],
+    });
+    expect(parameterFact("alias_closure_capture")).toMatchObject({
+      escapes: true,
+      escapeReasons: ["closure-capture"],
+    });
+    expect(parameterFact("alias_effect_capture")).toMatchObject({
+      escapes: true,
+      escapeReasons: ["effect-handler-capture"],
+    });
+    expect(parameterFact("alias_non_escape")).toMatchObject({
+      escapes: false,
+      escapeReasons: [],
+    });
+  });
+
   it("treats exported aggregate parameters as public-boundary escapes", async () => {
     const { optimized } = await buildOptimized({
       files: {
