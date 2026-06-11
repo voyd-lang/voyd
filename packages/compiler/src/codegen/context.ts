@@ -326,6 +326,11 @@ export interface LoopScope {
   label?: string;
 }
 
+export interface SafeArrayLoopScope {
+  arraySymbol: SymbolId;
+  indexSymbol: SymbolId;
+}
+
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
   tempLocals: Map<number, LocalBindingLocal>;
@@ -345,6 +350,8 @@ export interface FunctionContext {
   effectful: boolean;
   handlerStack?: HandlerScope[];
   loopStack?: LoopScope[];
+  safeArrayLoopScopes?: readonly SafeArrayLoopScope[];
+  safeArrayLengthSymbols?: ReadonlyMap<SymbolId, SymbolId>;
   continuations?: Map<SymbolId, ContinuationBinding>;
   suppressTailResumptionExitChecks?: boolean;
   staticEffectContext?: StaticEffectHandlerContext;

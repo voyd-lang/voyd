@@ -54,11 +54,29 @@ const arrayFastPathSource = `
 use std::array::Array
 use std::number::all
 
+val BenchVec3 {
+  x: i32,
+  y: i32,
+  z: i32
+}
+
 fn build_values(count: i32) -> Array<i32>
   let ~values = Array<i32>::with_capacity(count)
   var index = 0
   while index < count:
     values.push((index % 17) + 1)
+    index = index + 1
+  values
+
+fn build_vectors(count: i32) -> Array<BenchVec3>
+  let ~values = Array<BenchVec3>::with_capacity(count)
+  var index = 0
+  while index < count:
+    values.push(BenchVec3 {
+      x: (index % 7) + 1,
+      y: (index % 5) + 2,
+      z: (index % 3) + 3
+    })
     index = index + 1
   values
 
@@ -72,6 +90,41 @@ pub fn std_array_len_at_loop() -> i32
     while index < length:
       total = total + values.at(index)
       index = index + 1
+    round = round + 1
+  total
+
+pub fn std_array_for_len_at_loop() -> i32
+  let values = build_values(4096)
+  var total = 0
+  var round = 0
+  while round < 1500:
+    for index in 0..values.len():
+      total = total + values.at(index)
+    round = round + 1
+  total
+
+pub fn std_array_value_len_at_loop() -> i32
+  let values = build_vectors(2048)
+  let length = values.len()
+  var total = 0
+  var round = 0
+  while round < 1000:
+    var index = 0
+    while index < length:
+      let value = values.at(index)
+      total = total + value.x + value.y + value.z
+      index = index + 1
+    round = round + 1
+  total
+
+pub fn std_array_value_for_len_at_loop() -> i32
+  let values = build_vectors(2048)
+  var total = 0
+  var round = 0
+  while round < 1000:
+    for index in 0..values.len():
+      let value = values.at(index)
+      total = total + value.x + value.y + value.z
     round = round + 1
   total
 `;
@@ -103,6 +156,30 @@ const scenarios: Scenario[] = [
     iterations: defaultIterations,
     warmups: 2,
     expected: 55_284_000,
+  },
+  {
+    name: "focused/std-array-for-len-at-loop",
+    source: arrayFastPathSource,
+    entryName: "std_array_for_len_at_loop",
+    iterations: defaultIterations,
+    warmups: 2,
+    expected: 55_284_000,
+  },
+  {
+    name: "focused/std-array-value-len-at-loop",
+    source: arrayFastPathSource,
+    entryName: "std_array_value_len_at_loop",
+    iterations: defaultIterations,
+    warmups: 2,
+    expected: 24_566_000,
+  },
+  {
+    name: "focused/std-array-value-for-len-at-loop",
+    source: arrayFastPathSource,
+    entryName: "std_array_value_for_len_at_loop",
+    iterations: defaultIterations,
+    warmups: 2,
+    expected: 24_566_000,
   },
   {
     name: "realistic/vtrace-main",
