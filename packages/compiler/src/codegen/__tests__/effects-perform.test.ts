@@ -84,6 +84,7 @@ const compileEffectFixtureWithCompilerOptimization = async (
       receiverSpecializationRequests: new Map(),
       exactParameterTypes: new Map(),
       knownParameterTypes: new Map(),
+      escapeAnalysis: { origins: new Map(), parameters: new Map() },
       runtimeTypeCheckElisionFieldAccesses: new Map(),
       semanticCopyForwardingFieldAccesses: new Map(),
       codegenPlan: { representations: {} },
