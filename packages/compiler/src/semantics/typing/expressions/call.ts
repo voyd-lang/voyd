@@ -800,7 +800,9 @@ export const typeMethodCallExpr = (
   }
 
   const selectedRef = selected.symbolRef
-    ? canonicalSymbolRefInTypingContext(selected.symbolRef, ctx)
+    ? selected.symbolRef.moduleId === ctx.moduleId
+      ? canonicalSymbolRefInTypingContext(selected.symbolRef, ctx)
+      : selected.symbolRef
     : canonicalSymbolRefForTypingContext(selected.symbol, ctx);
   const targets =
     ctx.callResolution.targets.get(expr.id) ?? new Map<string, SymbolRef>();
@@ -2738,7 +2740,11 @@ const instantiationRefKeyForCall = ({
   calleeModuleId?: string;
   ctx: TypingContext;
 }): string => {
-  const imported = ctx.importsByLocal.get(calleeSymbol);
+  const imported = importedCalleeRefForCall({
+    calleeSymbol,
+    calleeModuleId,
+    ctx,
+  });
   if (imported) {
     return symbolRefKey(imported);
   }
@@ -2746,6 +2752,25 @@ const instantiationRefKeyForCall = ({
     return symbolRefKey({ moduleId: calleeModuleId, symbol: calleeSymbol });
   }
   return symbolRefKey(canonicalSymbolRefForTypingContext(calleeSymbol, ctx));
+};
+
+const importedCalleeRefForCall = ({
+  calleeSymbol,
+  calleeModuleId,
+  ctx,
+}: {
+  calleeSymbol: SymbolId;
+  calleeModuleId?: string;
+  ctx: TypingContext;
+}): SymbolRef | undefined => {
+  const imported = ctx.importsByLocal.get(calleeSymbol);
+  if (!imported) {
+    return undefined;
+  }
+  if (!calleeModuleId || calleeModuleId === ctx.moduleId) {
+    return imported;
+  }
+  return imported.moduleId === calleeModuleId ? imported : undefined;
 };
 
 const getTraitMethodTypeBindings = ({
@@ -4550,22 +4575,28 @@ const typeFunctionCall = ({
     });
     const callKey = formatFunctionInstanceKey(calleeSymbol, appliedTypeArgs);
     if (typeof calleeExprId === "number") {
-      // Avoid re-canonicalizing external overload symbols.
-      // Some call paths resolve directly to dependency symbols (methods, operator overloads, etc).
-      // Those symbols are not guaranteed to exist in the caller's symbol table, so fall back to
-      // the provided `calleeModuleId` when we can't canonicalize via local import metadata.
-      const imported = ctx.importsByLocal.get(calleeSymbol);
-      const calleeRef =
-        imported ??
-        (calleeModuleId && calleeModuleId !== ctx.moduleId
+      // Direct identifier calls use caller-local symbols. Imported callees must
+      // therefore resolve through the local import map before falling back to an
+      // external module id supplied by overload resolution.
+      const importedCalleeRef = importedCalleeRefForCall({
+        calleeSymbol,
+        calleeModuleId,
+        ctx,
+      });
+      const externalCalleeRef =
+        calleeModuleId && calleeModuleId !== ctx.moduleId
           ? { moduleId: calleeModuleId, symbol: calleeSymbol }
-          : (() => {
-              try {
-                return canonicalSymbolRefForTypingContext(calleeSymbol, ctx);
-              } catch {
-                return { moduleId: ctx.moduleId, symbol: calleeSymbol };
-              }
-            })());
+          : undefined;
+      const calleeRef =
+        importedCalleeRef ??
+        externalCalleeRef ??
+        (() => {
+          try {
+            return canonicalSymbolRefForTypingContext(calleeSymbol, ctx);
+          } catch {
+            return { moduleId: ctx.moduleId, symbol: calleeSymbol };
+          }
+        })();
       const existingTargets =
         ctx.callResolution.targets.get(callId) ?? new Map();
       existingTargets.set(callerInstanceKey, calleeRef);

@@ -125,6 +125,7 @@ describe("smoke: std input/output", () => {
 
     await expect(host.run<number>("print_text")).resolves.toBe(1);
     await expect(host.run<number>("print_number")).resolves.toBe(1);
+    await expect(host.run<number>("prelude_log_module_with_assertions_all")).resolves.toBe(1);
 
     expect(writes).toEqual([
       { target: "stdout", value: "hello\n" },
