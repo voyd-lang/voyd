@@ -16,14 +16,14 @@ import type {
 import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../locals.js";
 import {
   coerceValueToType,
+  fixedArrayStorageElementType,
+  liftFixedArrayElementValue,
   liftHeapValueToInline,
 } from "../structural.js";
 import {
   getExprBinaryenType,
-  getFixedArrayWasmTypes,
   getRequiredExprType,
   getStructuralTypeInfo,
-  wasmHeapFieldTypeFor,
   wasmTypeFor,
 } from "../types.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
@@ -204,21 +204,15 @@ const compileArrayAtFastPath = ({
   if (storageDesc.kind !== "fixed-array") {
     return undefined;
   }
-  const storageWasmTypes = getFixedArrayWasmTypes(info.storageField.typeId, ctx);
-  if (storageWasmTypes.kind !== "plain-array") {
-    return undefined;
-  }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const returnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const resultTypeId = expectedResultTypeId ?? returnTypeId;
   const resultWasmType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
-  const elementHeapType = wasmHeapFieldTypeFor(
-    storageDesc.element,
+  const elementStorageType = fixedArrayStorageElementType({
+    typeId: storageDesc.element,
     ctx,
-    new Set(),
-    "runtime",
-  );
+  });
   const storageLocal = allocateTempLocal(
     wasmTypeFor(info.storageField.typeId, ctx),
     fnCtx,
@@ -251,13 +245,14 @@ const compileArrayAtFastPath = ({
     ctx.mod,
     storage(),
     computedIndex(),
-    elementHeapType,
+    elementStorageType,
     false,
   );
-  const inlineValue = liftHeapValueToInline({
+  const inlineValue = liftFixedArrayElementValue({
     value: rawValue,
     typeId: storageDesc.element,
     ctx,
+    fnCtx,
   });
   const coerced = coerceExprToWasmType({
     expr:
