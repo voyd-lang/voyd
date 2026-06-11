@@ -36,6 +36,14 @@ const compileStdArrayFixture = async (
     },
   });
 
+const watForExport = (wat: string, exportName: string): string => {
+  const exportMatch = wat.match(
+    new RegExp(`\\(export "${exportName}" \\(func \\$([^\\s\\)]+)\\)\\)`),
+  );
+  expect(exportMatch).not.toBeNull();
+  return extractWatFunction(wat, exportMatch?.[1] ?? "");
+};
+
 describe("std::array compile smoke", () => {
   it("compiles std::array helpers with wasm validation", async () => {
     const result = await compileStdArrayFixture();
@@ -51,6 +59,16 @@ describe("std::array compile smoke", () => {
     await expect(host.run<number>("direct_len_at_sum")).resolves.toBe(43);
     await expect(host.run<number>("direct_value_len_at_sum")).resolves.toBe(20);
     await expect(host.run<number>("direct_at_index_side_effect")).resolves.toBe(20);
+    await expect(host.run<number>("safe_while_sum")).resolves.toBe(10);
+    await expect(host.run<number>("safe_while_cached_len_sum")).resolves.toBe(10);
+    await expect(host.run<number>("safe_while_value_sum")).resolves.toBe(18);
+    await expect(host.run<number>("safe_for_sum")).resolves.toBe(10);
+    await expect(host.run<number>("while_non_zero_start_sum")).resolves.toBe(9);
+    await expect(host.run<number>("while_non_unit_step_sum")).resolves.toBe(4);
+    await expect(host.run<number>("while_unknown_bound_sum")).resolves.toBe(3);
+    await expect(host.run<number>("while_mutates_array_sum")).resolves.toBe(3);
+    await expect(host.run<number>("while_alias_mutation_sum")).resolves.toBe(3);
+    await expect(host.run<number>("while_stale_length_sum")).resolves.toBe(3);
   });
 
   it("traps optimized direct at access when out of bounds", async () => {
@@ -64,16 +82,53 @@ describe("std::array compile smoke", () => {
 
   it("lowers optimized direct len/at access without dynamic dispatch", async () => {
     const result = await compileStdArrayFixture({
-      optimize: true,
       boundaryExports: false,
     });
     const wat = result.module.emitText();
-    const exportMatch = wat.match(/\(export "direct_len_at_sum" \(func \$(\d+)\)\)/);
-    expect(exportMatch).not.toBeNull();
-    const functionWat = extractWatFunction(wat, exportMatch?.[1] ?? "");
+    const functionWat = watForExport(wat, "direct_len_at_sum");
 
     expect(functionWat).toContain("struct.get");
     expect(functionWat).toContain("array.get");
     expect(functionWat).not.toContain("call_ref");
+  });
+
+  it("elides loop-proven Array.at checks in safe counted loops", async () => {
+    const result = await compileStdArrayFixture({
+      boundaryExports: false,
+    });
+    const wat = result.module.emitText();
+
+    for (const exportName of [
+      "safe_while_sum",
+      "safe_while_cached_len_sum",
+      "safe_while_value_sum",
+      "safe_for_sum",
+    ]) {
+      const functionWat = watForExport(wat, exportName);
+      expect(functionWat).toContain("array.get");
+      expect(functionWat).not.toContain("unreachable");
+      expect(functionWat).not.toContain("call_ref");
+      expect(functionWat).not.toContain("call_indirect");
+    }
+  });
+
+  it("keeps Array.at checks when loop safety proof is invalid", async () => {
+    const result = await compileStdArrayFixture({
+      boundaryExports: false,
+    });
+    const wat = result.module.emitText();
+
+    for (const exportName of [
+      "while_non_zero_start_sum",
+      "while_non_unit_step_sum",
+      "while_unknown_bound_sum",
+      "while_mutates_array_sum",
+      "while_alias_mutation_sum",
+      "while_stale_length_sum",
+    ]) {
+      const functionWat = watForExport(wat, exportName);
+      expect(functionWat).toContain("array.get");
+      expect(functionWat).toContain("unreachable");
+    }
   });
 });
