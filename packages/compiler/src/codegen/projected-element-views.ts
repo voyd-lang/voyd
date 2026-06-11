@@ -14,27 +14,25 @@ import type {
   TypeId,
 } from "./context.js";
 import type { ProgramSymbolId } from "../semantics/ids.js";
-import {
-  arrayGet,
-  arrayLen,
-  structGetFieldValue,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
+import { arrayGet, arrayLen } from "@voyd-lang/lib/binaryen-gc/index.js";
 import {
   allocateTempLocal,
   loadProjectedElementBindingValue,
   storeLocalValue,
 } from "./locals.js";
 import { walkHirExpression } from "./hir-walk.js";
-import { coerceValueToType, loadStructuralField } from "./structural.js";
+import {
+  coerceValueToType,
+  fixedArrayStorageElementType,
+  liftFixedArrayElementValue,
+  loadStructuralField,
+} from "./structural.js";
 import {
   getDeclaredSymbolTypeId,
   getExprBinaryenType,
-  getFixedArrayWasmTypes,
   getRequiredExprType,
   getStructuralTypeInfo,
-  getWideValueStorageType,
   isWideValueType,
-  wasmHeapFieldTypeFor,
   wasmTypeFor,
 } from "./types.js";
 
@@ -123,6 +121,7 @@ export const tryCompileProjectedFieldAccess = ({
     structInfo,
     field,
     ctx,
+    fnCtx,
   });
   const coerced = coerceValueToType({
     value: raw,
@@ -177,7 +176,7 @@ export const tryCompileProjectedElementValueExpr = ({
     indexIndex: projected.indexLocal.index,
     arrayTypeId: projected.arrayTypeId,
   };
-  const value = loadProjectedElementBindingValue(binding, ctx);
+  const value = loadProjectedElementBindingValue(binding, ctx, fnCtx);
   const exprValue =
     typeof expectedResultTypeId === "number"
       ? coerceValueToType({
@@ -217,7 +216,7 @@ export const materializeProjectedElementBinding = ({
   const setup = [
     storeLocalValue({
       binding: owned,
-      value: loadProjectedElementBindingValue(binding, ctx),
+      value: loadProjectedElementBindingValue(binding, ctx, fnCtx),
       ctx,
       fnCtx,
     }),
@@ -253,22 +252,7 @@ export const tryCompileProjectedElementStorageRefExpr = ({
     return undefined;
   }
 
-  const storageType = getWideValueStorageType({ typeId: projected.elementTypeId, ctx });
-  const arrayTypes = getFixedArrayWasmTypes(projected.arrayTypeId, ctx);
-  if (typeof storageType !== "number" || arrayTypes.kind !== "plain-array") {
-    return undefined;
-  }
-
-  const pointer = arrayGet(
-    ctx.mod,
-    ctx.mod.local.get(projected.arrayLocal.index, projected.arrayLocal.type),
-    ctx.mod.local.get(projected.indexLocal.index, binaryen.i32),
-    storageType,
-    false,
-  );
-  return projected.setup.length === 0
-    ? pointer
-    : ctx.mod.block(null, [...projected.setup, pointer], storageType);
+  return undefined;
 };
 
 export const tryResolveProjectedElementRootSymbol = ({
@@ -902,73 +886,36 @@ const loadProjectedField = ({
   structInfo,
   field,
   ctx,
+  fnCtx,
 }: {
   projected: ProjectedElementView;
   structInfo: NonNullable<ReturnType<typeof getStructuralTypeInfo>>;
   field: NonNullable<ReturnType<typeof getStructuralTypeInfo>>["fields"][number];
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   const arrayRef = () =>
     ctx.mod.local.get(projected.arrayLocal.index, projected.arrayLocal.type);
   const indexRef = () =>
     ctx.mod.local.get(projected.indexLocal.index, binaryen.i32);
-  const wasmTypes = getFixedArrayWasmTypes(projected.arrayTypeId, ctx);
 
-  if (wasmTypes.kind === "inline-aggregate" && wasmTypes.laneTypes) {
-    const lanes = field.inlineWasmTypes.map((laneType, offset) =>
-      arrayGet(
-        ctx.mod,
-        fixedArrayLaneField({
-          array: arrayRef(),
-          wasmTypes,
-          laneIndex: field.inlineStart + offset,
-          ctx,
-        }),
-        indexRef(),
-        laneType,
-        false,
-      ),
-    );
-    return makeInlineValue(lanes, ctx);
-  }
-
-  const element = arrayGet(
-    ctx.mod,
-    arrayRef(),
-    indexRef(),
-    wasmHeapFieldTypeFor(projected.elementTypeId, ctx, new Set(), "runtime"),
-    false,
-  );
+  const element = liftFixedArrayElementValue({
+    value: arrayGet(
+      ctx.mod,
+      arrayRef(),
+      indexRef(),
+      fixedArrayStorageElementType({ typeId: projected.elementTypeId, ctx }),
+      false,
+    ),
+    typeId: projected.elementTypeId,
+    ctx,
+    fnCtx,
+  });
   return loadStructuralField({
     structInfo,
     field,
     pointer: () => element,
     ctx,
-  });
-};
-
-const fixedArrayLaneField = ({
-  array,
-  wasmTypes,
-  laneIndex,
-  ctx,
-}: {
-  array: binaryen.ExpressionRef;
-  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
-  laneIndex: number;
-  ctx: CodegenContext;
-}): binaryen.ExpressionRef => {
-  if (
-    wasmTypes.kind !== "inline-aggregate" ||
-    !wasmTypes.laneArrayTypes?.[laneIndex]
-  ) {
-    throw new Error("inline aggregate fixed array metadata is missing lane arrays");
-  }
-  return structGetFieldValue({
-    mod: ctx.mod,
-    fieldIndex: laneIndex + 1,
-    fieldType: wasmTypes.laneArrayTypes[laneIndex]!,
-    exprRef: array,
   });
 };
 
@@ -1356,17 +1303,4 @@ const isSafeProjectedRootAliasAssignment = ({
 
   const targetExpr = ctx.module.hir.expressions.get(expr.target);
   return targetExpr?.exprKind === "identifier" && !symbols.has(targetExpr.symbol);
-};
-
-const makeInlineValue = (
-  values: readonly binaryen.ExpressionRef[],
-  ctx: CodegenContext,
-): binaryen.ExpressionRef => {
-  if (values.length === 0) {
-    return ctx.mod.nop();
-  }
-  if (values.length === 1) {
-    return values[0]!;
-  }
-  return ctx.mod.tuple.make(values as binaryen.ExpressionRef[]);
 };

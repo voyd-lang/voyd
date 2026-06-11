@@ -5,7 +5,6 @@ import {
   arraySet,
   binaryenTypeToHeapType,
   defineArrayType,
-  initStruct,
   refCast,
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
@@ -20,19 +19,19 @@ import type {
 import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../locals.js";
 import {
   coerceValueToType,
+  defaultFixedArrayElementValue,
+  fixedArrayStorageElementType,
   initStructuralValue,
-  liftHeapValueToInline,
+  liftFixedArrayElementValue,
   loadStructuralField,
+  lowerFixedArrayElementValue,
   lowerValueForHeapField,
-  makeInlineValue,
 } from "../structural.js";
-import { captureMultivalueLanes } from "../multivalue.js";
 import {
   getFixedArrayWasmTypes,
   getInlineUnionLayout,
   getStructuralTypeInfo,
   shouldInlineUnionLayout,
-  wasmHeapFieldTypeFor,
   wasmTypeFor,
 } from "../types.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
@@ -708,7 +707,6 @@ const packArray = ({
                   packBoundaryValueAsMsgPackInternal({
                     value: fixedArrayGet({
                       array: storageRef(),
-                      arrayTypeId: storageField.typeId,
                       elementTypeId: schema.elementTypeId,
                       index: indexRef(),
                       ctx,
@@ -859,7 +857,6 @@ const unpackArray = ({
           ctx.mod.block(null, [
             fixedArraySet({
               array: targetStorageRef(),
-              arrayTypeId: storageField.typeId,
               elementTypeId: schema.elementTypeId,
               index: indexRef(),
               value: unpackBoundaryValueFromMsgPackInternal({
@@ -1480,75 +1477,43 @@ const fixedArrayNew = ({
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-  if (wasmTypes.kind === "inline-aggregate") {
-    const laneTypes = wasmTypes.laneTypes ?? [];
-    const laneArrayTypes = wasmTypes.laneArrayTypes ?? [];
-    return initStruct(ctx.mod, wasmTypes.type, [
-      length,
-      ...laneTypes.map((laneType, index) =>
-        arrayNew(
-          ctx.mod,
-          binaryenTypeToHeapType(laneArrayTypes[index]!),
-          length,
-          defaultValueForWasmType(laneType, ctx),
-        ),
-      ),
-    ]);
-  }
-  const elementType = wasmHeapFieldTypeFor(elementTypeId, ctx, new Set(), "runtime");
   return arrayNew(
     ctx.mod,
     wasmTypes.heapType,
     length,
-    defaultValueForWasmType(elementType, ctx),
+    defaultFixedArrayElementValue({ typeId: elementTypeId, ctx }),
   );
 };
 
 const fixedArrayGet = ({
   array,
-  arrayTypeId,
   elementTypeId,
   index,
   ctx,
+  fnCtx,
 }: {
   array: binaryen.ExpressionRef;
-  arrayTypeId: TypeId;
   elementTypeId: TypeId;
   index: binaryen.ExpressionRef;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-  if (wasmTypes.kind === "inline-aggregate") {
-    const laneTypes = wasmTypes.laneTypes ?? [];
-    const laneArrayTypes = wasmTypes.laneArrayTypes ?? [];
-    const lanes = laneTypes.map((laneType, laneIndex) =>
-      arrayGet(
-        ctx.mod,
-        structGetFieldValue({
-          mod: ctx.mod,
-          fieldIndex: laneIndex + 1,
-          fieldType: laneArrayTypes[laneIndex]!,
-          exprRef: array,
-        }),
-        index,
-        laneType,
-        false,
-      ),
-    );
-    return makeInlineValue({ values: lanes, ctx });
-  }
-  const elementType = wasmHeapFieldTypeFor(elementTypeId, ctx, new Set(), "runtime");
-  return liftHeapValueToInline({
-    value: arrayGet(ctx.mod, array, index, elementType, false),
+  return liftFixedArrayElementValue({
+    value: arrayGet(
+      ctx.mod,
+      array,
+      index,
+      fixedArrayStorageElementType({ typeId: elementTypeId, ctx }),
+      false,
+    ),
     typeId: elementTypeId,
     ctx,
+    fnCtx,
   });
 };
 
 const fixedArraySet = ({
   array,
-  arrayTypeId,
   elementTypeId,
   index,
   value,
@@ -1556,49 +1521,19 @@ const fixedArraySet = ({
   fnCtx,
 }: {
   array: binaryen.ExpressionRef;
-  arrayTypeId: TypeId;
   elementTypeId: TypeId;
   index: binaryen.ExpressionRef;
   value: binaryen.ExpressionRef;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-  if (wasmTypes.kind === "inline-aggregate") {
-    const laneTypes = wasmTypes.laneTypes ?? [];
-    const laneArrayTypes = wasmTypes.laneArrayTypes ?? [];
-    const captured = captureMultivalueLanes({
-      value,
-      abiTypes: laneTypes,
-      ctx,
-      fnCtx,
-    });
-    return ctx.mod.block(null, [
-      ...captured.setup,
-      ...captured.lanes.map((lane, laneIndex) =>
-        arraySet(
-          ctx.mod,
-          structGetFieldValue({
-            mod: ctx.mod,
-            fieldIndex: laneIndex + 1,
-            fieldType: laneArrayTypes[laneIndex]!,
-            exprRef: array,
-          }),
-          index,
-          lane,
-        ),
-      ),
-    ]);
-  }
-  const elementType = wasmHeapFieldTypeFor(elementTypeId, ctx, new Set(), "runtime");
   return arraySet(
     ctx.mod,
     array,
     index,
-    lowerValueForHeapField({
+    lowerFixedArrayElementValue({
       value,
       typeId: elementTypeId,
-      targetType: elementType,
       ctx,
       fnCtx,
     }),
@@ -1689,17 +1624,6 @@ const stringMsgPack = (value: string, ctx: CodegenContext): binaryen.ExpressionR
 
 const boundaryPackCycleErrorMsgPack = (ctx: CodegenContext): binaryen.ExpressionRef =>
   stringMsgPack(BOUNDARY_PACK_CYCLE_ERROR, ctx);
-
-const defaultValueForWasmType = (
-  wasmType: binaryen.Type,
-  ctx: CodegenContext,
-): binaryen.ExpressionRef => {
-  if (wasmType === binaryen.i32) return ctx.mod.i32.const(0);
-  if (wasmType === binaryen.i64) return ctx.mod.i64.const(0, 0);
-  if (wasmType === binaryen.f32) return ctx.mod.f32.const(0);
-  if (wasmType === binaryen.f64) return ctx.mod.f64.const(0);
-  return ctx.mod.ref.null(wasmType);
-};
 
 let labelCounter = 0;
 

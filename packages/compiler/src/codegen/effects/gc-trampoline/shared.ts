@@ -67,7 +67,7 @@ export const captureContinuationEnvFieldValue = ({
             })();
       const actualTypeId =
         typeof binding.typeId === "number" ? binding.typeId : field.typeId;
-      const inlineValue = loadBindingValue(binding, ctx);
+      const inlineValue = loadBindingValue(binding, ctx, fnCtx);
       const coercedValue =
         actualTypeId === field.typeId
           ? inlineValue

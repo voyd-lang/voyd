@@ -433,7 +433,7 @@ const buildClauseEnv = ({
       if (typeof storageRef === "number") {
         return storageRef;
       }
-      const value = loadBindingValue(binding, ctx);
+      const value = loadBindingValue(binding, ctx, fnCtx);
       return field.storageType === field.wasmType
         ? value
         : lowerValueForHeapField({

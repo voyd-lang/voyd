@@ -13,15 +13,16 @@ import {
   getRequiredExprType,
   getStructuralTypeInfo,
   getFixedArrayWasmTypes,
-  wasmHeapFieldTypeFor,
   wasmTypeFor,
 } from "./types.js";
 import { allocateTempLocal } from "./locals.js";
 import {
   coerceValueToType,
-  liftHeapValueToInline,
+  defaultFixedArrayElementValue,
+  fixedArrayStorageElementType,
+  liftFixedArrayElementValue,
   loadStructuralField,
-  lowerValueForHeapField,
+  lowerFixedArrayElementValue,
 } from "./structural.js";
 import {
   arrayCopy,
@@ -30,9 +31,7 @@ import {
   arrayNew,
   arrayNewFixed,
   arraySet,
-  binaryenTypeToHeapType,
   callRef,
-  initStruct,
   modBinaryenTypeToHeapType,
   refCast,
   structGetFieldValue,
@@ -42,12 +41,10 @@ import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { ensureDispatcher } from "./effects/dispatcher.js";
 import { ensureMsgPackFunctions } from "./effects/host-boundary/msgpack.js";
 import { unboxOutcomeValue, wrapValueInOutcome } from "./effects/outcome-values.js";
-import { captureMultivalueLanes } from "./multivalue.js";
 import {
   lowerSerializedAbiArg,
   stabilizeSerializedAbiResult,
 } from "./exports/serialized-abi.js";
-import { ensureFixedArrayWasmTypesByElement } from "./fixed-array-types.js";
 import { ensureLinearMemoryExport } from "./memory-exports.js";
 import { deriveBoundarySchema } from "./boundary/schema.js";
 import {
@@ -614,281 +611,13 @@ const ensureRetainedCallbackHelper = ({
   return exportName;
 };
 
-const makeInlineValue = ({
-  values,
-  ctx,
-}: {
-  values: readonly binaryen.ExpressionRef[];
-  ctx: CodegenContext;
-}): binaryen.ExpressionRef => {
-  if (values.length === 0) {
-    return ctx.mod.nop();
-  }
-  if (values.length === 1) {
-    return values[0]!;
-  }
-  return ctx.mod.tuple.make(values as binaryen.ExpressionRef[]);
-};
-
-const defaultValueForWasmType = ({
-  wasmType,
-  ctx,
-}: {
-  wasmType: binaryen.Type;
-  ctx: CodegenContext;
-}): binaryen.ExpressionRef => {
-  if (wasmType === binaryen.i32) return ctx.mod.i32.const(0);
-  if (wasmType === binaryen.i64) return ctx.mod.i64.const(0, 0);
-  if (wasmType === binaryen.f32) return ctx.mod.f32.const(0);
-  if (wasmType === binaryen.f64) return ctx.mod.f64.const(0);
-  return ctx.mod.ref.null(wasmType);
-};
-
 const fixedArrayLengthExpr = ({
   array,
-  wasmTypes,
-  ctx,
-  fnCtx,
-}: {
-  array: binaryen.ExpressionRef;
-  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef =>
-  wasmTypes.kind === "plain-array"
-    ? arrayLen(ctx.mod, array)
-    : (() => {
-        const arrayTemp = allocateTempLocal(wasmTypes.type, fnCtx);
-        const stableArray = ctx.mod.local.get(arrayTemp.index, arrayTemp.type);
-        return ctx.mod.block(
-          null,
-          [
-            ctx.mod.local.set(arrayTemp.index, array),
-            wasmTypes.laneArrayTypes?.[0]
-              ? arrayLen(
-                  ctx.mod,
-                  fixedArrayLaneField({
-                    array: stableArray,
-                    wasmTypes,
-                    laneIndex: 0,
-                    ctx,
-                  }),
-                )
-              : structGetFieldValue({
-                  mod: ctx.mod,
-                  fieldIndex: 0,
-                  fieldType: binaryen.i32,
-                  exprRef: stableArray,
-                }),
-          ],
-          binaryen.i32,
-        );
-      })();
-
-const fixedArrayLaneField = ({
-  array,
-  wasmTypes,
-  laneIndex,
   ctx,
 }: {
   array: binaryen.ExpressionRef;
-  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
-  laneIndex: number;
   ctx: CodegenContext;
-}): binaryen.ExpressionRef => {
-  if (
-    wasmTypes.kind !== "inline-aggregate" ||
-    !wasmTypes.laneArrayTypes?.[laneIndex]
-  ) {
-    throw new Error("inline aggregate fixed array metadata is missing lane arrays");
-  }
-  return structGetFieldValue({
-    mod: ctx.mod,
-    fieldIndex: laneIndex + 1,
-    fieldType: wasmTypes.laneArrayTypes[laneIndex]!,
-    exprRef: array,
-  });
-};
-
-const inlineAggregateArrayGet = ({
-  array,
-  index,
-  wasmTypes,
-  ctx,
-  fnCtx,
-}: {
-  array: binaryen.ExpressionRef;
-  index: binaryen.ExpressionRef;
-  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef => {
-  if (wasmTypes.kind !== "inline-aggregate" || !wasmTypes.laneTypes) {
-    throw new Error("inline aggregate fixed array metadata is missing lane types");
-  }
-  const arrayTemp = allocateTempLocal(wasmTypes.type, fnCtx);
-  const indexTemp = allocateTempLocal(binaryen.i32, fnCtx);
-  const stableArray = ctx.mod.local.get(arrayTemp.index, arrayTemp.type);
-  const stableIndex = ctx.mod.local.get(indexTemp.index, binaryen.i32);
-  const lanes = wasmTypes.laneTypes.map((laneType, laneIndex) =>
-    arrayGet(
-      ctx.mod,
-      fixedArrayLaneField({ array: stableArray, wasmTypes, laneIndex, ctx }),
-      stableIndex,
-      laneType,
-      false,
-    ),
-  );
-  const result = makeInlineValue({ values: lanes, ctx });
-  return ctx.mod.block(
-    null,
-    [
-      ctx.mod.local.set(arrayTemp.index, array),
-      ctx.mod.local.set(indexTemp.index, index),
-      result,
-    ],
-    binaryen.getExpressionType(result),
-  );
-};
-
-const emitInlineAggregateArraySet = ({
-  array,
-  index,
-  value,
-  valueTypeId,
-  desc,
-  wasmTypes,
-  ctx,
-  fnCtx,
-}: {
-  array: binaryen.ExpressionRef;
-  index: binaryen.ExpressionRef;
-  value: binaryen.ExpressionRef;
-  valueTypeId: TypeId;
-  desc: { kind: "fixed-array"; element: TypeId };
-  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef => {
-  if (wasmTypes.kind !== "inline-aggregate" || !wasmTypes.laneTypes) {
-    throw new Error("inline aggregate fixed array metadata is missing lane types");
-  }
-
-  const arrayTemp = allocateTempLocal(wasmTypes.type, fnCtx);
-  const indexTemp = allocateTempLocal(binaryen.i32, fnCtx);
-  const coerced = coerceValueToType({
-    value,
-    actualType: valueTypeId,
-    targetType: desc.element,
-    ctx,
-    fnCtx,
-  });
-  const captured = captureMultivalueLanes({
-    value: coerced,
-    abiTypes: wasmTypes.laneTypes,
-    ctx,
-    fnCtx,
-  });
-  const target = ctx.mod.local.get(arrayTemp.index, arrayTemp.type);
-  const targetIndex = ctx.mod.local.get(indexTemp.index, binaryen.i32);
-
-  return ctx.mod.block(
-    null,
-    [
-      ctx.mod.local.set(arrayTemp.index, array),
-      ctx.mod.local.set(indexTemp.index, index),
-      ...captured.setup,
-      ...wasmTypes.laneTypes.map((_, laneIndex) =>
-        arraySet(
-          ctx.mod,
-          fixedArrayLaneField({ array: target, wasmTypes, laneIndex, ctx }),
-          targetIndex,
-          captured.lanes[laneIndex]!,
-        ),
-      ),
-      ctx.mod.local.get(arrayTemp.index, arrayTemp.type),
-    ],
-    wasmTypes.type,
-  );
-};
-
-const emitInlineAggregateArrayCopy = ({
-  target,
-  toIndex,
-  source,
-  fromIndex,
-  count,
-  wasmTypes,
-  ctx,
-}: {
-  target: binaryen.ExpressionRef;
-  toIndex: binaryen.ExpressionRef;
-  source: binaryen.ExpressionRef;
-  fromIndex: binaryen.ExpressionRef;
-  count: binaryen.ExpressionRef;
-  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
-  ctx: CodegenContext;
-}): binaryen.ExpressionRef => {
-  if (wasmTypes.kind !== "inline-aggregate" || !wasmTypes.laneTypes) {
-    throw new Error("inline aggregate fixed array metadata is missing lane types");
-  }
-  return ctx.mod.block(
-    null,
-    wasmTypes.laneTypes.map((_, laneIndex) =>
-      arrayCopy(
-        ctx.mod,
-        fixedArrayLaneField({ array: target, wasmTypes, laneIndex, ctx }),
-        toIndex,
-        fixedArrayLaneField({ array: source, wasmTypes, laneIndex, ctx }),
-        fromIndex,
-        count,
-      ),
-    ),
-    binaryen.none,
-  );
-};
-
-const emitInlineAggregateArrayNew = ({
-  length,
-  wasmTypes,
-  ctx,
-  fnCtx,
-}: {
-  length: binaryen.ExpressionRef;
-  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef => {
-  if (wasmTypes.kind !== "inline-aggregate" || !wasmTypes.laneTypes) {
-    throw new Error("inline aggregate fixed array metadata is missing lane types");
-  }
-
-  const lengthTemp = allocateTempLocal(binaryen.i32, fnCtx);
-  const size = ctx.mod.local.get(lengthTemp.index, binaryen.i32);
-  return ctx.mod.block(
-    null,
-    [
-      ctx.mod.local.set(lengthTemp.index, length),
-      initStruct(ctx.mod, wasmTypes.type, [
-        size,
-        ...wasmTypes.laneTypes.map((laneType) =>
-          arrayNew(
-            ctx.mod,
-            binaryenTypeToHeapType(
-              ensureFixedArrayWasmTypesByElement({
-                elementType: laneType,
-                ctx,
-              }).type,
-            ),
-            size,
-            defaultValueForWasmType({ wasmType: laneType, ctx }),
-          ),
-        ),
-      ]),
-    ],
-    wasmTypes.type,
-  );
-};
+}): binaryen.ExpressionRef => arrayLen(ctx.mod, array);
 
 export const compileIntrinsicCall = ({
   name,
@@ -908,61 +637,18 @@ export const compileIntrinsicCall = ({
       const arrayType = getRequiredExprType(call.id, ctx, instanceId);
       const descriptor = getFixedArrayDescriptor(arrayType, ctx);
       const wasmTypes = getFixedArrayWasmTypes(arrayType, ctx);
-      if (wasmTypes.kind === "inline-aggregate" && wasmTypes.laneTypes) {
-        return emitInlineAggregateArrayNew({
-          length: args[0]!,
-          wasmTypes,
-          ctx,
-          fnCtx,
-        });
-      }
-      const init = defaultValueForType(descriptor.element, ctx);
+      const init = defaultFixedArrayElementValue({
+        typeId: descriptor.element,
+        ctx,
+      });
       return arrayNew(ctx.mod, wasmTypes.heapType, args[0]!, init);
     }
     case "__array_new_fixed": {
       const arrayType = getRequiredExprType(call.id, ctx, instanceId);
       const wasmTypes = getFixedArrayWasmTypes(arrayType, ctx);
       const desc = getFixedArrayDescriptor(arrayType, ctx);
-      if (wasmTypes.kind === "inline-aggregate" && wasmTypes.laneTypes) {
-        const laneTypes = wasmTypes.laneTypes;
-        const laneValues = args.map((value, index) =>
-          captureMultivalueLanes({
-            value: coerceValueToType({
-              value: value!,
-              actualType: getRequiredExprType(call.args[index]!.expr, ctx, instanceId),
-              targetType: desc.element,
-              ctx,
-              fnCtx,
-            }),
-            abiTypes: laneTypes,
-            ctx,
-            fnCtx,
-          }),
-        );
-        const setup = laneValues.flatMap((entry) => entry.setup);
-        const created = initStruct(ctx.mod, wasmTypes.type, [
-          ctx.mod.i32.const(args.length),
-          ...laneTypes.map((laneType, laneIndex) =>
-            arrayNewFixed(
-              ctx.mod,
-              binaryenTypeToHeapType(
-                ensureFixedArrayWasmTypesByElement({
-                  elementType: laneType,
-                  ctx,
-                }).type,
-              ),
-              laneValues.map((entry) => entry.lanes[laneIndex]!) as number[],
-            ),
-          ),
-        ]);
-        if (setup.length === 0) {
-          return created;
-        }
-        return ctx.mod.block(null, [...setup, created], wasmTypes.type);
-      }
-      const elementType = wasmHeapFieldTypeFor(desc.element, ctx, new Set(), "runtime");
       const values = args.map((value, index) =>
-        lowerValueForHeapField({
+        lowerFixedArrayElementValue({
           value: coerceValueToType({
             value: value!,
             actualType: getRequiredExprType(call.args[index]!.expr, ctx, instanceId),
@@ -971,7 +657,6 @@ export const compileIntrinsicCall = ({
             fnCtx,
           }),
           typeId: desc.element,
-          targetType: elementType,
           ctx,
           fnCtx,
         }),
@@ -982,21 +667,17 @@ export const compileIntrinsicCall = ({
       if (args.length === 2) {
         const arrayTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
         const arrayDesc = getFixedArrayDescriptor(arrayTypeId, ctx);
-        const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-        if (wasmTypes.kind === "inline-aggregate") {
-          return inlineAggregateArrayGet({
-            array: args[0]!,
-            index: args[1]!,
-            wasmTypes,
-            ctx,
-            fnCtx,
-          });
-        }
-        const elementType = wasmHeapFieldTypeFor(arrayDesc.element, ctx, new Set(), "runtime");
-        return liftHeapValueToInline({
-          value: arrayGet(ctx.mod, args[0]!, args[1]!, elementType, false),
+        return liftFixedArrayElementValue({
+          value: arrayGet(
+            ctx.mod,
+            args[0]!,
+            args[1]!,
+            fixedArrayStorageElementType({ typeId: arrayDesc.element, ctx }),
+            false,
+          ),
           typeId: arrayDesc.element,
           ctx,
+          fnCtx,
         });
       }
       assertArgCount(name, args, 4);
@@ -1039,24 +720,9 @@ export const compileIntrinsicCall = ({
       );
       const arrayTypeId = getRequiredExprType(call.id, ctx, instanceId);
       const desc = getFixedArrayDescriptor(arrayTypeId, ctx);
-      const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-      if (wasmTypes.kind === "inline-aggregate") {
-        return emitInlineAggregateArraySet({
-          array: args[0]!,
-          index: args[1]!,
-          value: args[2]!,
-          valueTypeId: getRequiredExprType(call.args[2]!.expr, ctx, instanceId),
-          desc,
-          wasmTypes,
-          ctx,
-          fnCtx,
-        });
-      }
-      const elementType = wasmHeapFieldTypeFor(desc.element, ctx, new Set(), "runtime");
-      const value = lowerValueForHeapField({
+      const value = lowerFixedArrayElementValue({
         value: args[2]!,
         typeId: desc.element,
-        targetType: elementType,
         ctx,
         fnCtx,
       });
@@ -1076,12 +742,7 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 1);
       return fixedArrayLengthExpr({
         array: args[0]!,
-        wasmTypes: getFixedArrayWasmTypes(
-          getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
-          ctx,
-        ),
         ctx,
-        fnCtx,
       });
     }
     case "__array_copy": {
@@ -1100,33 +761,8 @@ export const compileIntrinsicCall = ({
         ctx,
         instanceId
       );
-      const arrayTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
-      const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
       const temp = allocateTempLocal(arrayType, fnCtx);
       const target = ctx.mod.local.get(temp.index, arrayType);
-      if (wasmTypes.kind === "inline-aggregate") {
-        const sourceType = getExprBinaryenType(call.args[2]!.expr, ctx, instanceId);
-        const sourceTemp = allocateTempLocal(sourceType, fnCtx);
-        const source = ctx.mod.local.get(sourceTemp.index, sourceType);
-        return ctx.mod.block(
-          null,
-          [
-            ctx.mod.local.set(temp.index, args[0]!),
-            ctx.mod.local.set(sourceTemp.index, args[2]!),
-            emitInlineAggregateArrayCopy({
-              target,
-              toIndex: args[1]!,
-              source,
-              fromIndex: args[3]!,
-              count: args[4]!,
-              wasmTypes,
-              ctx,
-            }),
-            ctx.mod.local.get(temp.index, arrayType),
-          ],
-          getExprBinaryenType(call.id, ctx, instanceId)
-        );
-      }
       return ctx.mod.block(
         null,
         [
@@ -2101,8 +1737,6 @@ const emitArrayCopyFromOptions = ({
     throw new Error("array.copy intrinsic missing options argument");
   }
   const arrayType = getExprBinaryenType(call.args[0]!.expr, ctx, instanceId);
-  const arrayTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
-  const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
   const optsType = getRequiredExprType(opts.expr, ctx, instanceId);
   const structInfo = getStructuralTypeInfo(optsType, ctx);
   if (!structInfo) {
@@ -2137,73 +1771,17 @@ const emitArrayCopyFromOptions = ({
     loadField(fields[2]!),
     loadField(fields[3]!)
   );
-  const inlineCopyExpr =
-    wasmTypes.kind === "inline-aggregate"
-      ? emitInlineAggregateArrayCopy({
-          target,
-          toIndex: loadField(fields[0]!),
-          source: loadField(fields[1]!),
-          fromIndex: loadField(fields[2]!),
-          count: loadField(fields[3]!),
-          wasmTypes,
-          ctx,
-        })
-      : undefined;
 
   return ctx.mod.block(
     null,
     [
       ctx.mod.local.set(destTemp.index, args[0]!),
       ctx.mod.local.set(temp.index, args[1]!),
-      inlineCopyExpr ?? copyExpr,
+      copyExpr,
       ctx.mod.local.get(destTemp.index, arrayType),
     ],
     getExprBinaryenType(call.id, ctx, instanceId)
   );
-};
-
-const defaultValueForType = (
-  typeId: TypeId,
-  ctx: CodegenContext
-): binaryen.ExpressionRef => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  switch (desc.kind) {
-    case "primitive":
-      switch (desc.name) {
-        case "i32":
-        case "bool":
-        case "boolean":
-        case "unknown":
-          return ctx.mod.i32.const(0);
-        case "i64":
-          return ctx.mod.i64.const(0, 0);
-        case "f32":
-          return ctx.mod.f32.const(0);
-        case "f64":
-          return ctx.mod.f64.const(0);
-      }
-      break;
-    case "fixed-array": {
-      const { type } = getFixedArrayWasmTypes(typeId, ctx);
-      return ctx.mod.ref.null(type);
-    }
-    case "structural-object":
-    case "nominal-object":
-    case "value-object":
-    case "trait":
-    case "intersection":
-    case "union":
-    case "recursive": {
-      const wasmType = wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime");
-      if (wasmType === binaryen.i32) return ctx.mod.i32.const(0);
-      if (wasmType === binaryen.i64) return ctx.mod.i64.const(0, 0);
-      if (wasmType === binaryen.f32) return ctx.mod.f32.const(0);
-      if (wasmType === binaryen.f64) return ctx.mod.f64.const(0);
-
-      return ctx.mod.ref.null(wasmType);
-    }
-  }
-  throw new Error(`unsupported intrinsic default value for ${desc.kind}`);
 };
 
 const getBooleanLiteralArg = ({

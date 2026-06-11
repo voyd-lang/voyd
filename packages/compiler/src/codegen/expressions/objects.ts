@@ -670,7 +670,11 @@ export const compileFieldAccessExpr = (
       const storePointer = storeLocalValue({
         binding: pointerTemp,
         value: coerceValueToType({
-          value: loadBindingValue(getRequiredBinding(targetExpr.symbol, ctx, fnCtx), ctx),
+          value: loadBindingValue(
+            getRequiredBinding(targetExpr.symbol, ctx, fnCtx),
+            ctx,
+            fnCtx,
+          ),
           actualType: bindingActualTargetTypeId ?? optionalInfo.someType,
           targetType: optionalInfo.someType,
           ctx,
@@ -717,7 +721,7 @@ export const compileFieldAccessExpr = (
     }
     const targetValue =
       targetExpr?.exprKind === "identifier"
-        ? loadBindingValue(getRequiredBinding(targetExpr.symbol, ctx, fnCtx), ctx)
+        ? loadBindingValue(getRequiredBinding(targetExpr.symbol, ctx, fnCtx), ctx, fnCtx)
         : (() => {
             const targetTemp = allocateTempLocal(
               wasmTypeFor(sourceTargetTypeId, ctx),
@@ -800,7 +804,7 @@ export const compileFieldAccessExpr = (
     const inlineTarget =
       targetExpr?.exprKind === "identifier"
         ? coerceValueToType({
-            value: loadBindingValue(targetBinding!, ctx),
+            value: loadBindingValue(targetBinding!, ctx, fnCtx),
             actualType: sourceTargetTypeId,
             targetType: targetTypeId,
             ctx,
@@ -890,7 +894,7 @@ export const compileFieldAccessExpr = (
         binding: pointerTemp,
         value: targetExpr?.exprKind === "identifier"
           ? coerceValueToType({
-              value: loadBindingValue(targetBinding!, ctx),
+              value: loadBindingValue(targetBinding!, ctx, fnCtx),
               actualType: sourceTargetTypeId,
               targetType: targetTypeId,
               ctx,

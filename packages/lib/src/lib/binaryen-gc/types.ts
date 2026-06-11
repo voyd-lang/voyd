@@ -44,6 +44,11 @@ export type AugmentedBinaryen = typeof binaryen & {
     ref: ExpressionRef,
     type: TypeRef
   ): ExpressionRef;
+  _BinaryenRefAs(
+    module: ModuleRef,
+    op: binaryen.Operations,
+    ref: ExpressionRef
+  ): ExpressionRef;
   _BinaryenRefFunc(
     module: ModuleRef,
     funcName: number,
