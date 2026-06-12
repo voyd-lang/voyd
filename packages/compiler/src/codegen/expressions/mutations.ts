@@ -12,6 +12,7 @@ import type {
   TypeId,
 } from "../context.js";
 import { compilePatternInitialization } from "../patterns.js";
+import { tryStoreScalarAggregateExpression } from "../optimization/scalar-aggregates.js";
 import {
   coerceValueToType,
   initStructuralValue,
@@ -25,6 +26,8 @@ import {
   getRequiredBinding,
   loadLocalValue,
   materializeOwnedBinding,
+  storeScalarAggregateBindingField,
+  storeScalarAggregateBindingValue,
   storeStorageRefBindingValue,
   storeLocalValue,
 } from "../locals.js";
@@ -87,6 +90,14 @@ const storeIntoBinding = ({
   }
   if (binding.kind === "projected-element-ref") {
     throw new Error("cannot assign to a projected element binding");
+  }
+  if (binding.kind === "scalar-aggregate") {
+    return storeScalarAggregateBindingValue({
+      binding,
+      value: coerced,
+      ctx,
+      fnCtx,
+    });
   }
 
   return storeLocalValue({ binding, value: coerced, ctx, fnCtx });
@@ -207,26 +218,59 @@ const compileFieldAssignment = ({
     ctx,
     typeInstanceId,
   });
-  const rootTypeId = getRequiredExprType(rootExprId, ctx, typeInstanceId);
-  const rootTemp = allocateTempLocal(
-    wasmTypeFor(rootTypeId, ctx),
-    fnCtx,
-    rootTypeId,
-    ctx,
-  );
-  const ops: binaryen.ExpressionRef[] = [
-    storeLocalValue({
-      binding: rootTemp,
-      value: compileExpr({
-        exprId: rootExprId,
+  const rootExpr = ctx.module.hir.expressions.get(rootExprId);
+  const rootBinding =
+    rootExpr?.exprKind === "identifier"
+      ? fnCtx.bindings.get(rootExpr.symbol)
+      : undefined;
+  if (rootBinding?.kind === "scalar-aggregate" && segments.length === 1) {
+    const field = rootBinding.structInfo.fieldMap.get(targetExpr.field);
+    if (!field) {
+      throw new Error(`object does not contain field ${targetExpr.field}`);
+    }
+    return storeScalarAggregateBindingField({
+      binding: rootBinding,
+      fieldName: targetExpr.field,
+      value: coerceValueToType({
+        value,
+        actualType: valueTypeId,
+        targetType: field.typeId,
         ctx,
         fnCtx,
-        expectedResultTypeId: rootTypeId,
-      }).expr,
+      }),
       ctx,
       fnCtx,
-    }),
-  ];
+    });
+  }
+  const rootTypeId = getRequiredExprType(rootExprId, ctx, typeInstanceId);
+  const materializedRoot =
+    rootBinding?.kind === "scalar-aggregate" &&
+    rootExpr?.exprKind === "identifier" &&
+    segments.length > 1
+      ? materializeOwnedBinding({
+          symbol: rootExpr.symbol,
+          ctx,
+          fnCtx,
+        })
+      : undefined;
+  const rootTemp =
+    materializedRoot?.binding ??
+    allocateTempLocal(wasmTypeFor(rootTypeId, ctx), fnCtx, rootTypeId, ctx);
+  const ops: binaryen.ExpressionRef[] = materializedRoot
+    ? [...materializedRoot.setup]
+    : [
+        storeLocalValue({
+          binding: rootTemp,
+          value: compileExpr({
+            exprId: rootExprId,
+            ctx,
+            fnCtx,
+            expectedResultTypeId: rootTypeId,
+          }).expr,
+          ctx,
+          fnCtx,
+        }),
+      ];
 
   const ownerTemps = [rootTemp];
   segments.slice(0, -1).forEach((segment, index) => {
@@ -296,7 +340,6 @@ const compileFieldAssignment = ({
     replacementTypeId = segment.ownerTypeId;
   }
 
-  const rootExpr = ctx.module.hir.expressions.get(rootExprId);
   if (rootExpr?.exprKind !== "identifier") {
     throw new Error(
       "inline value-object field assignment requires an addressable root binding",
@@ -401,6 +444,60 @@ export const compileAssignExpr = (
 
   const binding = getRequiredBinding(targetExpr.symbol, ctx, fnCtx);
   const targetTypeId = getSymbolTypeId(targetExpr.symbol, ctx, typeInstanceId);
+  if (binding.kind === "scalar-aggregate") {
+    const scalarStore = tryStoreScalarAggregateExpression({
+      binding,
+      exprId: expr.value,
+      targetTypeId,
+      ctx,
+      fnCtx,
+      compileExpr,
+    });
+    if (scalarStore) {
+      return {
+        expr: scalarStore.length === 1
+          ? scalarStore[0]!
+          : ctx.mod.block(null, scalarStore, binaryen.none),
+        usedReturnCall: false,
+      };
+    }
+    if (binding.structInfo.layoutKind === "heap-object") {
+      const materialized = materializeOwnedBinding({
+        symbol: targetExpr.symbol,
+        ctx,
+        fnCtx,
+      });
+      const valueExpr = compileExpr({
+        exprId: expr.value,
+        ctx,
+        fnCtx,
+        expectedResultTypeId: targetTypeId,
+      });
+      const coerced = coerceValueToType({
+        value: valueExpr.expr,
+        actualType: valueTypeId,
+        targetType: targetTypeId,
+        ctx,
+        fnCtx,
+      });
+      return {
+        expr: ctx.mod.block(
+          null,
+          [
+            ...materialized.setup,
+            storeLocalValue({
+              binding: materialized.binding,
+              value: coerced,
+              ctx,
+              fnCtx,
+            }),
+          ],
+          binaryen.none,
+        ),
+        usedReturnCall: false,
+      };
+    }
+  }
   const valueExpr = compileExpr({
     exprId: expr.value,
     ctx,
@@ -457,6 +554,17 @@ export const compileAssignExpr = (
   }
   if (binding.kind === "projected-element-ref") {
     throw new Error("cannot assign to a projected element binding");
+  }
+  if (binding.kind === "scalar-aggregate") {
+    return {
+      expr: storeScalarAggregateBindingValue({
+        binding,
+        value: coerced,
+        ctx,
+        fnCtx,
+      }),
+      usedReturnCall: false,
+    };
   }
 
   return {

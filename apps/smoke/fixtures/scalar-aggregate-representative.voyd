@@ -1,0 +1,23 @@
+obj Vec3 {
+  x: i32,
+  y: i32,
+  z: i32
+}
+
+fn energy(vec: Vec3) -> i32
+  vec.x + vec.y * 3 + vec.z * 5
+
+fn step_particle(seed: i32) -> i32
+  let ~velocity = Vec3 { x: seed, y: seed + 1, z: seed + 2 }
+  velocity.x = velocity.x + 3
+  velocity.y = velocity.y + velocity.x
+  velocity.z = velocity.z + velocity.y
+  energy(velocity)
+
+pub fn main() -> i32
+  var i = 0
+  var total = 0
+  while i < 10000:
+    total = total + step_particle(i)
+    i = i + 1
+  total

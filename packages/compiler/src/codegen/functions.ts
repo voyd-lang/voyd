@@ -16,6 +16,7 @@ import {
   allocateTempLocal,
   createStorageRefBinding,
   loadBindingValue,
+  storeScalarAggregateBindingValue,
   storeLocalValue,
 } from "./locals.js";
 import {
@@ -79,6 +80,17 @@ import {
   takePendingReceiverSpecializations,
   type ReceiverSpecialization,
 } from "./receiver-specialization.js";
+import {
+  createScalarAggregateTempBinding,
+  loadScalarAggregateBindingAbiValue,
+  tryBindScalarAggregateParameter,
+  tryStoreScalarAggregateExpression,
+} from "./optimization/scalar-aggregates.js";
+import {
+  markScalarAggregateCallSpecializationCompiled,
+  takePendingScalarAggregateCallSpecializations,
+  type ScalarAggregateCallSpecialization,
+} from "./optimization/scalar-aggregate-calls.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -309,6 +321,24 @@ const bindRawFunctionParameters = ({
         }),
       );
     } else {
+      if (typeof typeId === "number") {
+        const scalarized = tryBindScalarAggregateParameter({
+          symbol: param.symbol,
+          typeId,
+          mutable: param.mutable,
+          abiValues,
+          scalarAggregateAbi:
+            meta.scalarAggregateParamIndexes?.includes(index) ?? false,
+          ctx,
+          fnCtx,
+        });
+        if (scalarized) {
+          ops.push(...scalarized);
+          abiIndex += abiTypes.length;
+          return;
+        }
+      }
+
       const localType = wasmTypeFor(typeId!, ctx);
       const binding = allocateTempLocal(
         localType,
@@ -957,17 +987,20 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           );
         }
 
+        const parameterBindingKind = (index: number) =>
+          signature.parameters[index]?.bindingKind ??
+          (item.parameters[index]?.mutable ? "mutable-ref" : undefined);
         const paramAbiKinds = descriptor.parameters.map((param, index) =>
           getOptimizedParamAbiKind({
             typeId: param.type,
-            bindingKind: signature.parameters[index]?.bindingKind,
+            bindingKind: parameterBindingKind(index),
             ctx,
           }),
         );
         const paramAbiTypes = descriptor.parameters.map((param, index) =>
           getOptimizedAbiTypesForParam({
             typeId: param.type,
-            bindingKind: signature.parameters[index]?.bindingKind,
+            bindingKind: parameterBindingKind(index),
             ctx,
           }),
         );
@@ -1021,7 +1054,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
               typeof item.parameters[index]?.symbol === "number"
                 ? symbolName(ctx, ctx.moduleId, item.parameters[index]!.symbol)
                 : undefined,
-            bindingKind: signature.parameters[index]?.bindingKind,
+            bindingKind: parameterBindingKind(index),
             synthetic: signature.parameters[index]?.synthetic,
           })),
           paramAbiKinds,
@@ -1135,6 +1168,7 @@ export const compileFunctions = ({
   }
   compiledCount += compilePendingStaticEffectSpecializations(ctx);
   compiledCount += compilePendingReceiverSpecializations(ctx);
+  compiledCount += compilePendingScalarAggregateCallSpecializations(ctx);
   return compiledCount;
 };
 
@@ -1813,6 +1847,24 @@ const compileFunctionItem = (
     ctx,
     fnCtx,
   });
+  const scalarResultBody = compileScalarAggregateFunctionResult({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+    paramInitOps,
+    defaultInitOps,
+  });
+  if (scalarResultBody) {
+    ctx.mod.addFunction(
+      meta.wasmName,
+      binaryen.createType(meta.paramTypes as number[]),
+      meta.resultType,
+      fnCtx.locals,
+      scalarResultBody,
+    );
+    return;
+  }
 
   const body = compileExpression({
     exprId: fn.body,
@@ -1900,6 +1952,64 @@ const compileFunctionItem = (
     meta.resultType,
     fnCtx.locals,
     functionBody,
+  );
+};
+
+const compileScalarAggregateFunctionResult = ({
+  fn,
+  meta,
+  ctx,
+  fnCtx,
+  paramInitOps,
+  defaultInitOps,
+}: {
+  fn: HirFunction;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  paramInitOps: readonly binaryen.ExpressionRef[];
+  defaultInitOps: readonly binaryen.ExpressionRef[];
+}): binaryen.ExpressionRef | undefined => {
+  if (!meta.scalarAggregateResult) {
+    return undefined;
+  }
+  const structInfo = getStructuralTypeInfo(meta.resultTypeId, ctx);
+  if (!structInfo) {
+    return undefined;
+  }
+  const binding = createScalarAggregateTempBinding({
+    typeId: meta.resultTypeId,
+    structInfo,
+    ctx,
+    fnCtx,
+  });
+  const scalarStores = tryStoreScalarAggregateExpression({
+    binding,
+    exprId: fn.body,
+    targetTypeId: meta.resultTypeId,
+    ctx,
+    fnCtx,
+    compileExpr: compileExpression,
+  });
+  const setup = scalarStores ?? [
+    storeScalarAggregateBindingValue({
+      binding,
+      value: compileExpression({
+        exprId: fn.body,
+        ctx,
+        fnCtx,
+        tailPosition: false,
+        expectedResultTypeId: meta.resultTypeId,
+      }).expr,
+      ctx,
+      fnCtx,
+    }),
+  ];
+  const result = loadScalarAggregateBindingAbiValue({ binding, ctx });
+  return ctx.mod.block(
+    null,
+    [...paramInitOps, ...defaultInitOps, ...setup, result],
+    meta.resultType,
   );
 };
 
@@ -2344,6 +2454,30 @@ const compilePendingReceiverSpecializations = (
   const pending = takePendingReceiverSpecializations(ctx);
   pending.forEach((specialization) =>
     compileReceiverSpecialization(specialization, ctx)
+  );
+  return pending.length;
+};
+
+const compileScalarAggregateCallSpecialization = (
+  specialization: ScalarAggregateCallSpecialization,
+  ctx: CodegenContext,
+): void => {
+  const { item, meta } = specialization;
+  if (ctx.mod.getFunction(meta.wasmName) === 0) {
+    compileFunctionItem(item, meta, ctx);
+  }
+  markScalarAggregateCallSpecializationCompiled({
+    ctx,
+    wasmName: meta.wasmName,
+  });
+};
+
+const compilePendingScalarAggregateCallSpecializations = (
+  ctx: CodegenContext,
+): number => {
+  const pending = takePendingScalarAggregateCallSpecializations(ctx);
+  pending.forEach((specialization) =>
+    compileScalarAggregateCallSpecialization(specialization, ctx),
   );
   return pending.length;
 };

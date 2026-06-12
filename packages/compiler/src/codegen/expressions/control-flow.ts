@@ -175,6 +175,18 @@ const normalizeOutResultStorageForwarding = ({
   return compiled;
 };
 
+const withRestoredBindings = <T>(
+  fnCtx: FunctionContext,
+  run: () => T,
+): T => {
+  const previousBindings = new Map(fnCtx.bindings);
+  try {
+    return run();
+  } finally {
+    fnCtx.bindings = previousBindings;
+  }
+};
+
 const lowerToOutResultStorageIfNeeded = ({
   compiled,
   exprId,
@@ -260,14 +272,16 @@ export const compileIfExpr = (
   };
   let fallback =
     typeof expr.defaultBranch === "number"
-      ? compileExpr({
-          exprId: expr.defaultBranch,
-          ctx,
-          fnCtx,
-          tailPosition,
-          expectedResultTypeId: resultTypeId,
-          outResultStorageRef,
-        })
+      ? withRestoredBindings(fnCtx, () =>
+          compileExpr({
+            exprId: expr.defaultBranch!,
+            ctx,
+            fnCtx,
+            tailPosition,
+            expectedResultTypeId: resultTypeId,
+            outResultStorageRef,
+          }),
+        )
       : undefined;
 
   if (!fallback && resultType !== binaryen.none) {
@@ -309,14 +323,16 @@ export const compileIfExpr = (
       ctx,
       fnCtx,
     }).expr;
-    const value = compileExpr({
-      exprId: branch.value,
-      ctx,
-      fnCtx,
-      tailPosition,
-      expectedResultTypeId: resultTypeId,
-      outResultStorageRef,
-    });
+    const value = withRestoredBindings(fnCtx, () =>
+      compileExpr({
+        exprId: branch.value,
+        ctx,
+        fnCtx,
+        tailPosition,
+        expectedResultTypeId: resultTypeId,
+        outResultStorageRef,
+      }),
+    );
     const loweredValue = lowerToOutResultStorageIfNeeded({
       compiled: value,
       exprId: branch.value,
@@ -485,22 +501,18 @@ export const compileMatchExpr = (
   let chain: CompiledExpression | undefined;
   for (let index = expr.arms.length - 1; index >= 0; index -= 1) {
     const arm = expr.arms[index]!;
-    if (arm.pattern.kind === "type" && arm.pattern.binding) {
-      declarePatternLocals(arm.pattern.binding, ctx, fnCtx);
-    } else if (arm.pattern.kind !== "wildcard") {
-      declarePatternLocals(arm.pattern, ctx, fnCtx);
-    }
-
     if (arm.pattern.kind === "wildcard") {
       const armValue = normalizeOutResultStorageForwarding({
-        compiled: compileExpr({
-          exprId: arm.value,
-          ctx,
-          fnCtx,
-          tailPosition,
-          expectedResultTypeId: resultTypeId,
-          outResultStorageRef,
-        }),
+        compiled: withRestoredBindings(fnCtx, () =>
+          compileExpr({
+            exprId: arm.value,
+            ctx,
+            fnCtx,
+            tailPosition,
+            expectedResultTypeId: resultTypeId,
+            outResultStorageRef,
+          }),
+        ),
       });
       if (armValue.usedOutResultStorageRef) {
         chain = {
@@ -581,7 +593,6 @@ export const compileMatchExpr = (
             );
           })()
         : undefined;
-    const bindingOps: binaryen.ExpressionRef[] = [];
     const narrowedDiscriminant = (): binaryen.ExpressionRef =>
       shouldInlineUnionLayout(discriminantTypeId, ctx)
         ? coerceValueToType({
@@ -596,52 +607,72 @@ export const compileMatchExpr = (
             targetType: wasmTypeFor(patternTypeId, ctx),
             ctx,
           });
-    if (arm.pattern.kind === "type" && arm.pattern.binding) {
-      const projectedOptionalPayloadOps =
-        typeof optionalSomePayload !== "undefined"
-          ? tryCompileProjectedOptionalPayloadBinding({
-              pattern: arm.pattern.binding,
-              optionalExprId: expr.discriminant,
-              armValueExprId: arm.value,
-              ctx,
-              fnCtx,
-              compileExpr,
-            })
-          : undefined;
-      if (projectedOptionalPayloadOps) {
-        bindingOps.push(...projectedOptionalPayloadOps);
-      } else if (
-        typeof optionalSomePayload !== "undefined" &&
-        arm.pattern.binding.kind === "identifier"
-      ) {
+
+    const armExpr = withRestoredBindings(fnCtx, () => {
+      if (arm.pattern.kind === "type" && arm.pattern.binding) {
+        declarePatternLocals(arm.pattern.binding, ctx, fnCtx);
+      } else if (arm.pattern.kind !== "wildcard") {
+        declarePatternLocals(arm.pattern, ctx, fnCtx);
+      }
+
+      const bindingOps: binaryen.ExpressionRef[] = [];
+      if (arm.pattern.kind === "type" && arm.pattern.binding) {
+        const projectedOptionalPayloadOps =
+          typeof optionalSomePayload !== "undefined"
+            ? tryCompileProjectedOptionalPayloadBinding({
+                pattern: arm.pattern.binding,
+                optionalExprId: expr.discriminant,
+                armValueExprId: arm.value,
+                ctx,
+                fnCtx,
+                compileExpr,
+              })
+            : undefined;
+        if (projectedOptionalPayloadOps) {
+          bindingOps.push(...projectedOptionalPayloadOps);
+        } else if (
+          typeof optionalSomePayload !== "undefined" &&
+          arm.pattern.binding.kind === "identifier"
+        ) {
+          compilePatternInitializationFromValue({
+            pattern: arm.pattern.binding,
+            value: optionalSomePayload,
+            valueTypeId: discriminantOptionalInfo!.innerType,
+            ctx,
+            fnCtx,
+            ops: bindingOps,
+            options: { declare: true },
+          });
+        } else if (
+          typeof optionalSomePayload !== "undefined" &&
+          arm.pattern.binding.kind === "destructure" &&
+          !arm.pattern.binding.spread &&
+          arm.pattern.binding.fields.length === 1 &&
+          arm.pattern.binding.fields[0]!.name === "value"
+        ) {
+          compilePatternInitializationFromValue({
+            pattern: arm.pattern.binding.fields[0]!.pattern,
+            value: optionalSomePayload,
+            valueTypeId: discriminantOptionalInfo!.innerType,
+            ctx,
+            fnCtx,
+            ops: bindingOps,
+            options: { declare: true },
+          });
+        } else {
+          compilePatternInitializationFromValue({
+            pattern: arm.pattern.binding,
+            value: narrowedDiscriminant(),
+            valueTypeId: patternTypeId,
+            ctx,
+            fnCtx,
+            ops: bindingOps,
+            options: { declare: true },
+          });
+        }
+      } else if (arm.pattern.kind !== "type") {
         compilePatternInitializationFromValue({
-          pattern: arm.pattern.binding,
-          value: optionalSomePayload,
-          valueTypeId: discriminantOptionalInfo!.innerType,
-          ctx,
-          fnCtx,
-          ops: bindingOps,
-          options: { declare: true },
-        });
-      } else if (
-        typeof optionalSomePayload !== "undefined" &&
-        arm.pattern.binding.kind === "destructure" &&
-        !arm.pattern.binding.spread &&
-        arm.pattern.binding.fields.length === 1 &&
-        arm.pattern.binding.fields[0]!.name === "value"
-      ) {
-        compilePatternInitializationFromValue({
-          pattern: arm.pattern.binding.fields[0]!.pattern,
-          value: optionalSomePayload,
-          valueTypeId: discriminantOptionalInfo!.innerType,
-          ctx,
-          fnCtx,
-          ops: bindingOps,
-          options: { declare: true },
-        });
-      } else {
-        compilePatternInitializationFromValue({
-          pattern: arm.pattern.binding,
+          pattern: arm.pattern,
           value: narrowedDiscriminant(),
           valueTypeId: patternTypeId,
           ctx,
@@ -650,79 +681,51 @@ export const compileMatchExpr = (
           options: { declare: true },
         });
       }
-    } else if (arm.pattern.kind !== "type") {
-      compilePatternInitializationFromValue({
-        pattern: arm.pattern,
-        value: narrowedDiscriminant(),
-        valueTypeId: patternTypeId,
-        ctx,
-        fnCtx,
-        ops: bindingOps,
-        options: { declare: true },
-      });
-    }
 
-    let restoreDiscriminantBinding: (() => void) | undefined;
-    if (typeof discriminantSymbol === "number") {
-      const narrowedBinding = allocateTempLocal(
-        wasmTypeFor(patternTypeId, ctx),
-        fnCtx,
-        patternTypeId,
-        ctx,
-      );
-      bindingOps.push(
-        storeLocalValue({
-          binding: narrowedBinding,
-          value: coerceValueToType({
-            value: narrowedDiscriminant(),
-            actualType: patternTypeId,
-            targetType: patternTypeId,
+      if (typeof discriminantSymbol === "number") {
+        const narrowedBinding = allocateTempLocal(
+          wasmTypeFor(patternTypeId, ctx),
+          fnCtx,
+          patternTypeId,
+          ctx,
+        );
+        bindingOps.push(
+          storeLocalValue({
+            binding: narrowedBinding,
+            value: coerceValueToType({
+              value: narrowedDiscriminant(),
+              actualType: patternTypeId,
+              targetType: patternTypeId,
+              ctx,
+              fnCtx,
+            }),
             ctx,
             fnCtx,
           }),
-          ctx,
-          fnCtx,
-        }),
-      );
-      const originalBinding = fnCtx.bindings.get(discriminantSymbol);
-      fnCtx.bindings.set(discriminantSymbol, {
-        ...narrowedBinding,
-        kind: "local",
-        typeId: patternTypeId,
-      });
-      restoreDiscriminantBinding = () => {
-        if (originalBinding) {
-          fnCtx.bindings.set(discriminantSymbol, originalBinding);
-          return;
-        }
-        fnCtx.bindings.delete(discriminantSymbol);
-      };
-    }
-
-    const armValue = (() => {
-      try {
-        return lowerToOutResultStorageIfNeeded({
-          compiled: compileExpr({
-            exprId: arm.value,
-            ctx,
-            fnCtx,
-            tailPosition,
-            expectedResultTypeId: resultTypeId,
-            outResultStorageRef,
-          }),
-          exprId: arm.value,
-          resultTypeId,
-          outResultStorageRef,
-          ctx,
-          fnCtx,
+        );
+        fnCtx.bindings.set(discriminantSymbol, {
+          ...narrowedBinding,
+          kind: "local",
+          typeId: patternTypeId,
         });
-      } finally {
-        restoreDiscriminantBinding?.();
       }
-    })();
 
-    const armExpr =
-      bindingOps.length === 0
+      const armValue = lowerToOutResultStorageIfNeeded({
+        compiled: compileExpr({
+          exprId: arm.value,
+          ctx,
+          fnCtx,
+          tailPosition,
+          expectedResultTypeId: resultTypeId,
+          outResultStorageRef,
+        }),
+        exprId: arm.value,
+        resultTypeId,
+        outResultStorageRef,
+        ctx,
+        fnCtx,
+      });
+      return bindingOps.length === 0
         ? armValue
         : {
             expr: ctx.mod.block(
@@ -733,6 +736,7 @@ export const compileMatchExpr = (
             usedReturnCall: armValue.usedReturnCall,
             usedOutResultStorageRef: armValue.usedOutResultStorageRef,
           };
+    });
 
     const fallback =
       chain ??

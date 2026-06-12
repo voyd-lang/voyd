@@ -601,6 +601,33 @@ pub fn main() -> i32
     }
   });
 
+  it("runs optimized serialized exports after scalar aggregate lowering", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        optimize: true,
+        source: `
+obj Pair {
+  x: i32,
+  y: i32
+}
+
+pub fn main() -> i32
+  var i = 0
+  var total = 0
+  while i < 20:
+    let pair = Pair { x: i, y: i + 1 }
+    total = total + pair.x + pair.y
+    i = i + 1
+  total
+`,
+      }),
+    );
+    const host = await createVoydHost({ wasm: result.wasm });
+
+    await expect(host.run<number>("main")).resolves.toBe(400);
+  });
+
   it("omits runtime diagnostics by default", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(

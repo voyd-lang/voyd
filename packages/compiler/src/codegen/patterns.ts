@@ -5,6 +5,7 @@ import type {
   FunctionContext,
   HirExprId,
   HirPattern,
+  LocalBindingScalarAggregate,
   TypeId,
 } from "./context.js";
 import {
@@ -12,8 +13,12 @@ import {
   declareLocal,
   declareLocalWithTypeId,
   getRequiredBinding,
+  loadBindingValue,
   loadBindingStorageRef,
   loadLocalValue,
+  loadScalarAggregateBindingField,
+  materializeOwnedBinding,
+  storeScalarAggregateBindingValue,
   storeStorageRefBindingValue,
   storeLocalValue,
 } from "./locals.js";
@@ -34,9 +39,15 @@ import {
   refCast,
   structSetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
+import {
+  tryScalarizeAggregateInitializer,
+  type ScalarAggregateBlockInitializerCompiler,
+  type ScalarAggregateStatementCompiler,
+} from "./optimization/scalar-aggregates.js";
 
 export interface PatternInitOptions {
   declare: boolean;
+  mutable?: boolean;
 }
 
 interface PatternInitParams {
@@ -46,6 +57,8 @@ interface PatternInitParams {
   fnCtx: FunctionContext;
   ops: binaryen.ExpressionRef[];
   compileExpr: ExpressionCompiler;
+  compileStatement?: ScalarAggregateStatementCompiler;
+  compileBlockInitializer?: ScalarAggregateBlockInitializerCompiler;
   options: PatternInitOptions;
 }
 
@@ -103,6 +116,14 @@ const storeIntoBinding = ({
   }
   if (binding.kind === "projected-element-ref") {
     throw new Error("cannot assign to a projected element binding");
+  }
+  if (binding.kind === "scalar-aggregate") {
+    return storeScalarAggregateBindingValue({
+      binding,
+      value: coerced,
+      ctx,
+      fnCtx,
+    });
   }
   return storeLocalValue({ binding, value: coerced, ctx, fnCtx });
 };
@@ -228,6 +249,8 @@ export const compilePatternInitialization = ({
   fnCtx,
   ops,
   compileExpr,
+  compileStatement,
+  compileBlockInitializer,
   options,
 }: PatternInitParams): void => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
@@ -279,6 +302,34 @@ export const compilePatternInitialization = ({
   const targetTypeId = options.declare
     ? getDeclaredSymbolTypeId(pattern.symbol, ctx, typeInstanceId)
     : getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
+  const mutableBinding =
+    options.mutable === true || pattern.bindingKind === "mutable-ref";
+  const scalarized = options.declare
+    ? tryScalarizeAggregateInitializer({
+        symbol: pattern.symbol,
+        initializer,
+        targetTypeId,
+        mutable: mutableBinding,
+        ctx,
+        fnCtx,
+        compileExpr,
+        compileStatement,
+        compileBlockInitializer,
+      })
+    : undefined;
+  if (scalarized) {
+    ops.push(...scalarized);
+    return;
+  }
+
+  ops.push(
+    ...materializeScalarHeapInitializerAlias({
+      initializer,
+      ctx,
+      fnCtx,
+    }),
+  );
+
   const binding = options.declare
     ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
@@ -423,6 +474,23 @@ const compileTuplePattern = ({
     ctx,
     typeInstanceId
   );
+  const scalarBinding = getScalarAggregateInitializerBinding({
+    initializer,
+    ctx,
+    fnCtx,
+  });
+  if (scalarBinding) {
+    compilePatternFromScalarAggregate({
+      pattern,
+      binding: scalarBinding,
+      typeId: initializerType,
+      ctx,
+      fnCtx,
+      ops,
+      options,
+    });
+    return;
+  }
   const initializerTemp = allocateTempLocal(
     wasmTypeFor(initializerType, ctx),
     fnCtx,
@@ -491,6 +559,23 @@ const compileDestructurePattern = ({
     ctx,
     typeInstanceId
   );
+  const scalarBinding = getScalarAggregateInitializerBinding({
+    initializer,
+    ctx,
+    fnCtx,
+  });
+  if (scalarBinding) {
+    compilePatternFromScalarAggregate({
+      pattern,
+      binding: scalarBinding,
+      typeId: initializerType,
+      ctx,
+      fnCtx,
+      ops,
+      options,
+    });
+    return;
+  }
   const initializerTemp = allocateTempLocal(
     wasmTypeFor(initializerType, ctx),
     fnCtx,
@@ -542,6 +627,204 @@ const compileDestructurePattern = ({
       })
     );
   });
+};
+
+const getScalarAggregateInitializerBinding = ({
+  initializer,
+  ctx,
+  fnCtx,
+}: {
+  initializer: HirExprId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): LocalBindingScalarAggregate | undefined => {
+  const expr = ctx.module.hir.expressions.get(initializer);
+  if (expr?.exprKind !== "identifier") {
+    return undefined;
+  }
+  const binding = fnCtx.bindings.get(expr.symbol);
+  return binding?.kind === "scalar-aggregate" ? binding : undefined;
+};
+
+const materializeScalarHeapInitializerAlias = ({
+  initializer,
+  ctx,
+  fnCtx,
+}: {
+  initializer: HirExprId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): readonly binaryen.ExpressionRef[] => {
+  const expr = ctx.module.hir.expressions.get(initializer);
+  if (expr?.exprKind !== "identifier") {
+    return [];
+  }
+  const binding = fnCtx.bindings.get(expr.symbol);
+  if (
+    binding?.kind !== "scalar-aggregate" ||
+    binding.structInfo.layoutKind !== "heap-object"
+  ) {
+    return [];
+  }
+  return materializeOwnedBinding({
+    symbol: expr.symbol,
+    ctx,
+    fnCtx,
+  }).setup;
+};
+
+const compilePatternFromScalarAggregate = ({
+  pattern,
+  binding,
+  typeId,
+  ctx,
+  fnCtx,
+  ops,
+  options,
+}: {
+  pattern: HirPattern;
+  binding: LocalBindingScalarAggregate;
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  ops: binaryen.ExpressionRef[];
+  options: PatternInitOptions;
+}): void => {
+  const pending = collectAssignmentsFromScalarAggregate({
+    pattern,
+    binding,
+    typeId,
+    ctx,
+    fnCtx,
+    ops,
+  });
+  pending.forEach(({ pattern: subPattern, temp, typeId: subPatternTypeId }) => {
+    const targetTypeId = subPatternTypeId;
+    const targetBinding = options.declare
+      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
+      : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
+    ops.push(
+      storeIntoBinding({
+        binding: targetBinding,
+        value: loadLocalValue(temp, ctx),
+        targetTypeId,
+        actualTypeId: subPatternTypeId,
+        ctx,
+        fnCtx,
+      }),
+    );
+  });
+};
+
+const collectAssignmentsFromScalarAggregate = ({
+  pattern,
+  binding,
+  typeId,
+  ctx,
+  fnCtx,
+  ops,
+}: {
+  pattern: HirPattern;
+  binding: LocalBindingScalarAggregate;
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  ops: binaryen.ExpressionRef[];
+}): PendingPatternAssignment[] => {
+  const structInfo = getStructuralTypeInfo(typeId, ctx);
+  if (!structInfo) {
+    throw new Error("scalar aggregate pattern requires a structural value");
+  }
+  const fieldPatterns =
+    pattern.kind === "tuple"
+      ? pattern.elements.map((subPattern, index) => ({
+          name: `${index}`,
+          pattern: subPattern,
+        }))
+      : pattern.kind === "destructure"
+        ? pattern.fields
+        : undefined;
+  if (!fieldPatterns) {
+    return collectAssignmentsFromScalarAggregateValue({
+      pattern,
+      binding,
+      typeId,
+      ctx,
+      fnCtx,
+      ops,
+    });
+  }
+  if (pattern.kind === "destructure" && pattern.spread && pattern.spread.kind !== "wildcard") {
+    throw new Error("destructure spread bindings are not supported yet");
+  }
+  if (pattern.kind === "tuple" && fieldPatterns.length !== structInfo.fields.length) {
+    throw new Error("tuple pattern arity mismatch");
+  }
+
+  return fieldPatterns.flatMap(({ name, pattern: subPattern }) => {
+    const field = structInfo.fieldMap.get(name);
+    if (!field) {
+      throw new Error(`structural value is missing field ${name}`);
+    }
+    const value = loadScalarAggregateBindingField({
+      binding,
+      fieldName: name,
+      ctx,
+    });
+    if (typeof value !== "number") {
+      throw new Error(`scalar aggregate missing field ${name}`);
+    }
+    const fieldTemp = allocateTempLocal(field.wasmType, fnCtx, field.typeId, ctx);
+    ops.push(
+      storeLocalValue({
+        binding: fieldTemp,
+        value,
+        ctx,
+        fnCtx,
+      }),
+    );
+    return collectAssignmentsFromValue({
+      pattern: subPattern,
+      temp: fieldTemp,
+      typeId: field.typeId,
+      ctx,
+      fnCtx,
+      ops,
+    });
+  });
+};
+
+const collectAssignmentsFromScalarAggregateValue = ({
+  pattern,
+  binding,
+  typeId,
+  ctx,
+  fnCtx,
+  ops,
+}: {
+  pattern: HirPattern;
+  binding: LocalBindingScalarAggregate;
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  ops: binaryen.ExpressionRef[];
+}): PendingPatternAssignment[] => {
+  if (pattern.kind === "wildcard") {
+    return [];
+  }
+  if (pattern.kind !== "identifier") {
+    throw new Error(`unsupported pattern kind ${pattern.kind}`);
+  }
+  const temp = allocateTempLocal(wasmTypeFor(typeId, ctx), fnCtx, typeId, ctx);
+  ops.push(
+    storeLocalValue({
+      binding: temp,
+      value: loadBindingValue(binding, ctx, fnCtx),
+      ctx,
+      fnCtx,
+    }),
+  );
+  return [{ pattern, temp, typeId }];
 };
 
 const collectAssignmentsFromValue = ({
