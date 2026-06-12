@@ -83,6 +83,16 @@ objects. Voyd code should show that it needs outbound HTTP by declaring
 `HttpClient` in its effect row and inbound server access by declaring
 `HttpServer`.
 
+### Semantic Modifiers Use Labels
+
+Immutable value modifiers should prefer overloaded semantic names with labels
+over type-encoded names. For example, use `request.with(header: ..., value: ...)`
+and `response.with(status: ...)` instead of `with_header` or `with_status`.
+
+Keep distinct verbs when the verb is the behavior. `Headers::append` and
+`Headers::set` should remain separate because repeated headers make append vs
+replace semantically meaningful.
+
 ### Wire Format Is An Implementation Detail
 
 Internal std helpers may encode/decode host payloads, but the public API should
@@ -220,8 +230,12 @@ Recommended methods:
 - `Headers::empty() -> Headers`
 - `Headers::from(entries: Array<Header>) -> Result<Headers, HttpError>`
 - `headers() -> Headers`
-- `Headers::append(self, { name, value }) -> Headers`
-- `Headers::set(self, { name, value }) -> Headers`
+- `Headers::append(self, { header: Header }) -> Headers`
+- `Headers::append(self, { header name: StringSlice, value: StringSlice }) -> Headers`
+- `Headers::append(self, { header name: String, value: String }) -> Headers`
+- `Headers::set(self, { header: Header }) -> Headers`
+- `Headers::set(self, { header name: StringSlice, value: StringSlice }) -> Headers`
+- `Headers::set(self, { header name: String, value: String }) -> Headers`
 - `Headers::remove(self, name) -> Headers`
 - `Headers::get(self, name) -> Option<String>`
 - `Headers::get_all(self, name) -> Array<String>`
@@ -335,9 +349,12 @@ Recommended methods:
 - `Response::not_found() -> Response`
 - `Response::method_not_allowed() -> Response`
 - `Response::internal_server_error() -> Response`
-- `Response::with_status(self, status: Status) -> Response`
-- `Response::with_header(self, { name, value }) -> Response`
-- `Response::with_headers(self, headers: Headers) -> Response`
+- `Response::with(self, { status: Status }) -> Response`
+- `Response::with(self, { header: Header }) -> Response`
+- `Response::with(self, { header name: StringSlice, value: StringSlice }) -> Response`
+- `Response::with(self, { header name: String, value: String }) -> Response`
+- `Response::with(self, { headers: Headers }) -> Response`
+- `Response::with(self, { body: Body }) -> Response`
 - `Response::text(self, value: StringSlice) -> Response`
 - `Response::bytes(self, value: Bytes) -> Response`
 - `Response::json(self, value: JsonValue) -> Response`
@@ -468,7 +485,7 @@ The custom path should remain explicit:
 let request = ClientRequest::custom(
   method: http::Method::Other { value: "PROPFIND" },
   url: "https://example.com/files",
-  headers: http::headers().append(name: "depth", value: "1")
+  headers: http::headers().append(header: "depth", value: "1")
 )
 ```
 
@@ -478,11 +495,13 @@ Recommended modifiers:
 
 ```voyd
 impl ClientRequest
-  api fn with_header(self, { name: StringSlice, value: StringSlice }) -> ClientRequest
-  api fn with_headers(self, headers: http::Headers) -> ClientRequest
-  api fn with_body(self, body: http::Body) -> ClientRequest
-  api fn with_timeout(self, millis: i32) -> ClientRequest
-  api fn with_redirect_policy(self, policy: RedirectPolicy) -> ClientRequest
+  api fn with(self, { header: http::Header }) -> ClientRequest
+  api fn with(self, { header name: StringSlice, value: StringSlice }) -> ClientRequest
+  api fn with(self, { header name: String, value: String }) -> ClientRequest
+  api fn with(self, { headers: http::Headers }) -> ClientRequest
+  api fn with(self, { body: http::Body }) -> ClientRequest
+  api fn with(self, { timeout_millis: i32 }) -> ClientRequest
+  api fn with(self, { redirect_policy: RedirectPolicy }) -> ClientRequest
 ```
 
 These should return new request values. If mutating variants are later useful,
@@ -543,8 +562,8 @@ fn create_user(payload: String): client::HttpClient -> Result<http::Response, Ho
     url: "https://api.example.com/users",
     body: http::Body::text(payload)
   )
-    .with_header(name: "content-type", value: "application/json")
-    .with_timeout(5000)
+    .with(header: "content-type", value: "application/json")
+    .with(timeout_millis: 5000)
 
   client::send(request)
 ```
