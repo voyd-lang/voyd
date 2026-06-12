@@ -63,6 +63,27 @@ describe("getConfigFromCli", () => {
     expect(config.docFormat).toBe("json");
   });
 
+  it("supports `voyd bootstrap` with the default vx-spa template", () => {
+    const config = runWithArgv(["node", "voyd", "bootstrap", "demo-app"]);
+    expect(config.bootstrap).toBe(true);
+    expect(config.bootstrapDir).toBe("demo-app");
+    expect(config.bootstrapTemplate).toBe("vx-spa");
+  });
+
+  it("supports bootstrap dry-run and force flags", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "bootstrap",
+      "--dry-run",
+      "--force",
+    ]);
+    expect(config.bootstrap).toBe(true);
+    expect(config.bootstrapDir).toBe(".");
+    expect(config.bootstrapDryRun).toBe(true);
+    expect(config.bootstrapForce).toBe(true);
+  });
+
   it("parses `voyd test` when global options come first", () => {
     const config = runWithArgv([
       "node",
