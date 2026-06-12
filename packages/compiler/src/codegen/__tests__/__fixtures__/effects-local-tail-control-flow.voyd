@@ -1,0 +1,109 @@
+eff Local
+  next(tail) -> i32
+  next(tail, max: i32) -> i32
+  ping(tail, value: i32) -> i32
+
+eff Other
+  bump(tail, value: i32) -> i32
+
+val Triple {
+  x: i32,
+  y: i32,
+  z: i32
+}
+
+obj Left { value: i32 }
+obj Right { value: i32 }
+
+type Choice = Left | Right
+
+trait DynamicRunner
+  fn run(self) -> i32
+
+obj PureRunner { value: i32 }
+obj OtherRunner { value: i32 }
+
+impl DynamicRunner for PureRunner
+  fn run(self) -> i32
+    self.value + 1
+
+impl DynamicRunner for OtherRunner
+  fn run(self) -> i32
+    self.value + Other::bump(3)
+
+fn make_triple(): Local -> Triple
+  Triple {
+    x: Local::next(),
+    y: Local::next(),
+    z: Local::next()
+  }
+
+fn loop_sum(count: i32): Local -> i32
+  var index = 0
+  var total = 0
+  while index < count:
+    total = total + Local::next(index)
+    index = index + 1
+  total
+
+fn match_value(choice: Choice): Local -> i32
+  match(choice)
+    Left { value }: Local::ping(value)
+    Right { value }: Local::ping(value + 10)
+
+fn open_sum(): (Local, Other) -> i32
+  Local::next() + Other::bump(4)
+
+fn local_then_dynamic(runner: DynamicRunner): (Local, Other) -> i32
+  Local::next() + runner.run()
+
+pub fn triple_sum(): () -> i32
+  try
+    let v = make_triple()
+    v.x + v.y + v.z
+  Local::next(tail):
+    tail(2)
+  Local::next(tail, max: i32):
+    tail(max + 1)
+  Local::ping(tail, value: i32):
+    tail(value + 1)
+
+pub fn loop_local(): () -> i32
+  try
+    loop_sum(4)
+  Local::next(tail):
+    tail(2)
+  Local::next(tail, max: i32):
+    tail(max + 1)
+  Local::ping(tail, value: i32):
+    tail(value + 1)
+
+pub fn match_local(): () -> i32
+  try
+    match_value(Right { value: 3 })
+  Local::next(tail):
+    tail(2)
+  Local::next(tail, max: i32):
+    tail(max + 1)
+  Local::ping(tail, value: i32):
+    tail(value + 1)
+
+pub fn open_local(): Other -> i32
+  try open
+    open_sum()
+  Local::next(tail):
+    tail(2)
+  Local::next(tail, max: i32):
+    tail(max + 1)
+  Local::ping(tail, value: i32):
+    tail(value + 1)
+
+pub fn dynamic_trait_residual(): Other -> i32
+  try open
+    local_then_dynamic(OtherRunner { value: 4 })
+  Local::next(tail):
+    tail(2)
+  Local::next(tail, max: i32):
+    tail(max + 1)
+  Local::ping(tail, value: i32):
+    tail(value + 1)

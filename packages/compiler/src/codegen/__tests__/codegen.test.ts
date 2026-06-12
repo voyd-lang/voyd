@@ -483,7 +483,9 @@ describe("next codegen", () => {
 
     const infoNode = getStructuralTypeInfo(typeNode, ctx);
     if (!infoNode) {
-      throw new Error("missing structural type info for FixedArray recursion test");
+      throw new Error(
+        "missing structural type info for FixedArray recursion test",
+      );
     }
 
     const nextField = infoNode.fieldMap.get("next");
@@ -496,7 +498,7 @@ describe("next codegen", () => {
     expect(nextField.heapWasmType).not.toBe(ctx.rtt.baseType);
   });
 
-  it("stores single-lane value elements inline in FixedArray", () => {
+  it("stores value elements in plain FixedArray storage", () => {
     const semantics = loadSemanticsWithTyping(
       "single_lane_value_fixed_array.voyd",
       {
@@ -525,8 +527,7 @@ describe("next codegen", () => {
     const fixedArrayType = resolveAliasType("ScalarBoxes");
     const wasmTypes = getFixedArrayWasmTypes(fixedArrayType, ctx);
 
-    expect(wasmTypes.kind).toBe("inline-aggregate");
-    expect(wasmTypes.laneTypes).toEqual([binaryen.i32]);
+    expect(wasmTypes.kind).toBe("plain-array");
   });
 
   it("runs recursive heap types fixture", () => {
@@ -621,6 +622,17 @@ describe("next codegen", () => {
     expect((test9_closure_without_arg as () => number)()).toBe(1);
     expect((test10_optional_spread_wraps_some as () => number)()).toBe(5);
     expect((main as () => number)()).toBe(25);
+  });
+
+  it("infers generic labeled params from function-valued structural objects", () => {
+    const instance = loadWasmInstance("generic_labeled_function_object.voyd");
+    const { explicit_structural, inferred_structural, inferred_labeled, main } =
+      instance.exports as Record<string, unknown>;
+
+    expect((explicit_structural as () => number)()).toBe(7);
+    expect((inferred_structural as () => number)()).toBe(7);
+    expect((inferred_labeled as () => number)()).toBe(7);
+    expect((main as () => number)()).toBe(21);
   });
 
   it("supports default function parameters with and without annotations", () => {
@@ -846,7 +858,9 @@ describe("next codegen", () => {
   });
 
   it("emits wasm for trait object dispatch on generic impl instantiations", () => {
-    const instance = loadWasmInstance("trait_object_generic_impl_dispatch.voyd");
+    const instance = loadWasmInstance(
+      "trait_object_generic_impl_dispatch.voyd",
+    );
     const main = instance.exports.main;
     const mainF64 = instance.exports.main_f64;
     expect(typeof main).toBe("function");
@@ -1059,9 +1073,9 @@ describe("next codegen", () => {
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line.startsWith("(type"));
-    expect(
-      typeLines.some((line) => line.includes("voyd__closure_base_")),
-    ).toBe(true);
+    expect(typeLines.some((line) => line.includes("voyd__closure_base_"))).toBe(
+      true,
+    );
     expect(
       typeLines.some(
         (line) =>

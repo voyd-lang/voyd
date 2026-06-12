@@ -2134,91 +2134,125 @@ export const getObjectTemplate = (
       });
     }
 
-    const baseType =
-      decl.objectKind === "value"
-        ? ctx.objects.base.type
-        : resolveTypeExpr(
-            decl.base,
-            ctx,
-            state,
-            ctx.objects.base.type,
-            paramMap,
-          );
-    const baseFields = (
-      decl.objectKind === "value"
-        ? []
-        : (getStructuralFields(baseType, ctx, state, {
-            includeInaccessible: true,
-            allowOwnerPrivate: true,
-          }) ?? [])
-    ).map((field) => ({
-      ...field,
-      declaringParams: declaringParamsForField(field.type, templateParams, ctx),
-      packageId: field.packageId ?? ctx.packageId,
-    }));
-    const baseNominal =
-      decl.objectKind === "value" ? undefined : getNominalComponent(baseType, ctx);
-
-    const ownFields = decl.fields.map((field) => {
-      const type = resolveTypeExpr(
-        field.type,
-        ctx,
-        state,
-        ctx.primitives.unknown,
-        paramMap,
-      );
-      return {
-        name: field.name,
-        type,
-        optional: field.optional,
-        declaringParams: declaringParamsForField(type, templateParams, ctx),
-        visibility: field.visibility,
-        owner: decl.symbol,
-        packageId: ctx.packageId,
-      };
-    });
-
-    if (baseFields.length > 0) {
-      const declaredFields = new Map(
-        ownFields.map((field) => [field.name, field]),
-      );
-      baseFields.forEach((baseField) => {
-        const declared = declaredFields.get(baseField.name);
-        if (!declared) {
-          throw new Error(
-            `object ${objectName} must redeclare inherited field ${baseField.name}`,
-          );
-        }
-        const compatibility = unifyWithBudget({
-          actual: declared.type,
-          expected: baseField.type,
-          options: {
-            location: ctx.hir.module.ast,
-            reason: `field ${baseField.name} compatibility with base object`,
-          },
-          ctx,
-          span: decl.span,
-        });
-        if (!compatibility.ok) {
-          throw new Error(
-            `field ${baseField.name} in object ${objectName} must match base object type`,
-          );
-        }
-      });
-    }
-
-    const fields = mergeDeclaredFields(baseFields, ownFields);
-    const structural = ctx.arena.internStructuralObject({ fields });
     const nominal = nominalObjectTypeFor({
       objectKind: decl.objectKind,
       symbol,
       ctx,
       typeArgs: params.map((param) => paramMap.get(param.symbol)!),
     });
-    const type = ctx.arena.internIntersection({
-      nominal,
-      structural,
+
+    let baseNominal: TypeId | undefined;
+    let fields: readonly ObjectField[] = [];
+    const activeKey = makeObjectInstanceKey(
+      symbol,
+      params.map((param) => paramMap.get(param.symbol)!),
+    );
+
+    const type = ctx.arena.createRecursiveType((self) => {
+      ctx.objects.beginActiveResolution(activeKey, {
+        objectKind: decl.objectKind,
+        nominal,
+        structural: ctx.primitives.unknown,
+        type: self,
+        fields: [],
+        visibility: decl.visibility,
+      });
+
+      try {
+        const baseType =
+          decl.objectKind === "value"
+            ? ctx.objects.base.type
+            : resolveTypeExpr(
+                decl.base,
+                ctx,
+                state,
+                ctx.objects.base.type,
+                paramMap,
+              );
+        const baseFields = (
+          decl.objectKind === "value"
+            ? []
+            : (getStructuralFields(baseType, ctx, state, {
+                includeInaccessible: true,
+                allowOwnerPrivate: true,
+              }) ?? [])
+        ).map((field) => ({
+          ...field,
+          declaringParams: declaringParamsForField(
+            field.type,
+            templateParams,
+            ctx,
+          ),
+          packageId: field.packageId ?? ctx.packageId,
+        }));
+        baseNominal =
+          decl.objectKind === "value"
+            ? undefined
+            : getNominalComponent(baseType, ctx);
+
+        const ownFields = decl.fields.map((field) => {
+          const type = resolveTypeExpr(
+            field.type,
+            ctx,
+            state,
+            ctx.primitives.unknown,
+            paramMap,
+          );
+          return {
+            name: field.name,
+            type,
+            optional: field.optional,
+            declaringParams: declaringParamsForField(type, templateParams, ctx),
+            visibility: field.visibility,
+            owner: decl.symbol,
+            packageId: ctx.packageId,
+          };
+        });
+
+        if (baseFields.length > 0) {
+          const declaredFields = new Map(
+            ownFields.map((field) => [field.name, field]),
+          );
+          baseFields.forEach((baseField) => {
+            const declared = declaredFields.get(baseField.name);
+            if (!declared) {
+              throw new Error(
+                `object ${objectName} must redeclare inherited field ${baseField.name}`,
+              );
+            }
+            const compatibility = unifyWithBudget({
+              actual: declared.type,
+              expected: baseField.type,
+              options: {
+                location: ctx.hir.module.ast,
+                reason: `field ${baseField.name} compatibility with base object`,
+              },
+              ctx,
+              span: decl.span,
+            });
+            if (!compatibility.ok) {
+              throw new Error(
+                `field ${baseField.name} in object ${objectName} must match base object type`,
+              );
+            }
+          });
+        }
+
+        fields = mergeDeclaredFields(baseFields, ownFields);
+        const structural = ctx.arena.internStructuralObject({ fields });
+        return {
+          kind: "intersection",
+          nominal,
+          structural,
+        };
+      } finally {
+        ctx.objects.endActiveResolution(activeKey);
+      }
     });
+    const structural = ctx.arena.structuralComponent(type);
+    if (typeof structural !== "number") {
+      throw new Error(`object ${objectName} missing structural type`);
+    }
 
     const template: ObjectTemplate = {
       symbol,
@@ -2255,7 +2289,9 @@ export const ensureObjectType = (
   typeArgs: readonly TypeId[] = [],
 ): ObjectTypeInfo | undefined => {
   if (ctx.objects.isResolving(symbol)) {
-    return undefined;
+    return ctx.objects.getActiveResolution(
+      makeObjectInstanceKey(symbol, typeArgs),
+    );
   }
 
   const template = getObjectTemplate(symbol, ctx, state);

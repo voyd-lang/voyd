@@ -12,7 +12,7 @@ import type {
 import { coerceValueToType } from "../../structural.js";
 import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../../locals.js";
 import {
-  getRequiredExprType,
+  getUnresolvedExprType,
   wasmTypeFor,
 } from "../../types.js";
 import { resolveTempCaptureTypeId } from "../../effects/temp-capture-types.js";
@@ -95,6 +95,7 @@ export const compileCallArgExpressionsWithTemps = ({
   allArgExprIds,
   expectedTypeIdAt,
   preserveStorageRefsAt,
+  compileOverrideAt,
   ctx,
   fnCtx,
   compileExpr,
@@ -105,6 +106,10 @@ export const compileCallArgExpressionsWithTemps = ({
   allArgExprIds?: readonly HirExprId[];
   expectedTypeIdAt: (index: number) => TypeId | undefined;
   preserveStorageRefsAt?: (index: number) => boolean;
+  compileOverrideAt?: (
+    arg: { expr: HirExprId },
+    index: number,
+  ) => { expr: binaryen.ExpressionRef; skipCoercion?: boolean } | undefined;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -141,10 +146,27 @@ export const compileCallArgExpressionsWithTemps = ({
 
   return args.map((arg, index) => {
     const expectedTypeId = expectedTypeIdAt(index);
-    const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
     const tempId = tempsByIndex.get(index + offset);
+    const compileValue = (): binaryen.ExpressionRef => {
+      const override = compileOverrideAt?.(arg, index);
+      if (override) {
+        return override.skipCoercion
+          ? override.expr
+          : coerceValueToType({
+              value: override.expr,
+              actualType: getUnresolvedExprType(arg.expr, ctx, typeInstanceId),
+              targetType: expectedTypeId,
+              ctx,
+              fnCtx,
+            });
+      }
 
-    if (typeof tempId !== "number") {
+      const expr = ctx.module.hir.expressions.get(arg.expr);
+      const actualTypeId =
+        expr?.exprKind === "identifier"
+          ? (fnCtx.bindings.get(expr.symbol)?.typeId ??
+            getUnresolvedExprType(arg.expr, ctx, typeInstanceId))
+          : getUnresolvedExprType(arg.expr, ctx, typeInstanceId);
       const value = compileExpr({
         exprId: arg.expr,
         ctx,
@@ -158,27 +180,19 @@ export const compileCallArgExpressionsWithTemps = ({
         ctx,
         fnCtx,
       });
+    };
+
+    if (typeof tempId !== "number") {
+      return compileValue();
     }
 
     const tempLocal = getOrCreateTempLocal({ tempId, ctx, fnCtx });
-    const value = compileExpr({
-      exprId: arg.expr,
-      ctx,
-      fnCtx,
-      preserveStorageRefs: preserveStorageRefsAt?.(index) ?? false,
-    });
-    const coerced = coerceValueToType({
-      value: value.expr,
-      actualType: actualTypeId,
-      targetType: expectedTypeId,
-      ctx,
-      fnCtx,
-    });
+    const value = compileValue();
 
     const compute = ctx.mod.block(
       null,
       [
-        storeLocalValue({ binding: tempLocal, value: coerced, ctx, fnCtx }),
+        storeLocalValue({ binding: tempLocal, value, ctx, fnCtx }),
         loadLocalValue(tempLocal, ctx),
       ],
       tempLocal.type

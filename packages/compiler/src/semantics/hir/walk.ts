@@ -206,6 +206,7 @@ export const walkExpression = ({
         case "match":
           if (visitExpression(expr.discriminant)) return true;
           for (const arm of expr.arms) {
+            if (shouldVisitPatterns && visitPattern(arm.pattern)) return true;
             if (typeof arm.guard === "number") {
               if (visitExpression(arm.guard)) return true;
             }

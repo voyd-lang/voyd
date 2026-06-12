@@ -2,6 +2,11 @@ use std::array::Array
 use std::fixed_array::fns::{ get, length }
 use std::optional::fns::{ unwrap_or }
 
+pub val Vec2 {
+  x: i32,
+  y: i32
+}
+
 pub fn entry_tail() -> i32
   let ~arr = Array<i32>::with_capacity(2)
   arr.push(1)
@@ -22,3 +27,174 @@ pub fn enumerate_length() -> i32
   arr.push(1)
   arr.push(2)
   arr.enumerate().len()
+
+pub fn direct_len_at_sum() -> i32
+  let ~arr = Array<i32>::with_capacity(3)
+  arr.push(10)
+  arr.push(20)
+  arr.push(30)
+  arr.len() + arr.at(0) + arr.at(-1)
+
+pub fn direct_value_len_at_sum() -> i32
+  let ~arr = Array<Vec2>::with_capacity(2)
+  arr.push(Vec2 { x: 3, y: 4 })
+  arr.push(Vec2 { x: 5, y: 6 })
+  let first = arr.at(0)
+  let last = arr.at(-1)
+  arr.len() + first.x + first.y + last.x + last.y
+
+fn push_and_choose(~arr: Array<i32>) -> i32
+  arr.push(20)
+  1
+
+pub fn direct_at_index_side_effect() -> i32
+  let ~arr = Array<i32>::with_capacity(1)
+  arr.push(10)
+  arr.at(push_and_choose(arr))
+
+pub fn direct_at_out_of_bounds() -> i32
+  let ~arr = Array<i32>::with_capacity(1)
+  arr.push(10)
+  arr.at(1)
+
+fn build_ints() -> Array<i32>
+  let ~arr = Array<i32>::with_capacity(4)
+  arr.push(1)
+  arr.push(2)
+  arr.push(3)
+  arr.push(4)
+  arr
+
+fn build_sparse_ints() -> Array<i32>
+  let ~arr = Array<i32>::with_capacity(4)
+  arr.push(1)
+  arr.push(2)
+  arr.push(3)
+  arr
+
+pub fn safe_while_sum() -> i32
+  let values = build_ints()
+  var index = 0
+  var total = 0
+  while index < values.len():
+    total = total + values.at(index)
+    index = index + 1
+  total
+
+pub fn safe_while_cached_len_sum() -> i32
+  let values = build_ints()
+  let length = values.len()
+  var index = 0
+  var total = 0
+  while index < length:
+    total = total + values.at(index)
+    index = index + 1
+  total
+
+pub fn safe_while_value_sum() -> i32
+  let ~values = Array<Vec2>::with_capacity(2)
+  values.push(Vec2 { x: 3, y: 4 })
+  values.push(Vec2 { x: 5, y: 6 })
+  var index = 0
+  var total = 0
+  while index < values.len():
+    let value = values.at(index)
+    total = total + value.x + value.y
+    index = index + 1
+  total
+
+pub fn safe_for_sum() -> i32
+  let values = build_ints()
+  var total = 0
+  for index in 0..values.len():
+    total = total + values.at(index)
+  total
+
+pub fn while_non_zero_start_sum() -> i32
+  let values = build_ints()
+  var index = 1
+  var total = 0
+  while index < values.len():
+    total = total + values.at(index)
+    index = index + 1
+  total
+
+pub fn while_non_unit_step_sum() -> i32
+  let values = build_ints()
+  var index = 0
+  var total = 0
+  while index < values.len():
+    total = total + values.at(index)
+    index = index + 2
+  total
+
+pub fn while_unknown_bound_sum() -> i32
+  let values = build_ints()
+  let limit = 2
+  var index = 0
+  var total = 0
+  while index < limit:
+    total = total + values.at(index)
+    index = index + 1
+  total
+
+pub fn while_mutates_array_sum() -> i32
+  let ~values = Array<i32>::with_capacity(4)
+  values.push(1)
+  values.push(2)
+  let length = values.len()
+  var index = 0
+  var total = 0
+  while index < length:
+    total = total + values.at(index)
+    values.push(9)
+    index = index + 1
+  total
+
+pub fn while_alias_mutation_sum() -> i32
+  let ~values = Array<i32>::with_capacity(4)
+  values.push(1)
+  values.push(2)
+  let ~alias = values
+  let length = values.len()
+  var index = 0
+  var total = 0
+  while index < length:
+    total = total + values.at(index)
+    alias.push(9)
+    index = index + 1
+  total
+
+pub fn while_stale_length_sum() -> i32
+  let ~values = Array<i32>::with_capacity(4)
+  values.push(1)
+  values.push(2)
+  let length = values.len()
+  values.push(3)
+  var index = 0
+  var total = 0
+  while index < length:
+    total = total + values.at(index)
+    index = index + 1
+  total
+
+pub fn while_increment_before_at_trap() -> i32
+  let values = build_sparse_ints()
+  var index = 0
+  var total = 0
+  while index < values.len():
+    index = index + 1
+    total = total + values.at(index)
+  total
+
+pub fn while_captured_call_mutation_trap() -> i32
+  let ~values = build_sparse_ints()
+  let clear_values = () -> void =>
+    values.clear()
+  var index = 0
+  var total = 0
+  while index < values.len():
+    clear_values()
+    total = total + values.at(index)
+    index = index + 1
+  total

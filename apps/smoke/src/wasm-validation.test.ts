@@ -117,7 +117,7 @@ describe("smoke: wasm validation", { timeout: 120_000 }, () => {
     const wasm = assertRunnableWasm(module);
     const instance = getWasmInstance(wasm);
     const exports = instance.exports as Record<string, unknown>;
-    expect((exports.main as () => number)()).toBe(12);
+    expect((exports.main as () => number)()).toBe(13);
   });
 
   it("supports module-qualified return type annotations", async () => {

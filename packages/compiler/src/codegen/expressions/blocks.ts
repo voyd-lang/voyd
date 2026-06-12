@@ -29,8 +29,11 @@ import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { handlerCleanupOps } from "../effects/handler-stack.js";
 import { tailResumptionExitChecks } from "../effects/tail-resumptions.js";
 import { boxSignatureSpillValue } from "../signature-spill.js";
-import { tryCompileScalarObjectBinding } from "../scalar-objects.js";
-import { getScalarObjectLocalPlan } from "../../optimize/codegen-plan.js";
+import {
+  arrayLengthBindingForStatement,
+  tryCompileArraySafeForStatement,
+  tryCompileArraySafeWhileStatement,
+} from "../optimization/array-fast-paths.js";
 
 const expressionUsesExpectedResultType = ({
   exprId,
@@ -74,6 +77,7 @@ export const withBlockScope = <T>({
     next: collectSimpleIdentifierAliases({ expr, ctx }),
   });
   const previousNonBorrowable = fnCtx.nonBorrowableProjectedSymbols;
+  const previousSafeArrayLengthSymbols = fnCtx.safeArrayLengthSymbols;
   fnCtx.simpleIdentifierAliases = aliasSets;
   fnCtx.nonBorrowableProjectedSymbols = collectNonBorrowableProjectedSymbols({
     expr,
@@ -86,6 +90,7 @@ export const withBlockScope = <T>({
   } finally {
     fnCtx.simpleIdentifierAliases = previousAliases;
     fnCtx.nonBorrowableProjectedSymbols = previousNonBorrowable;
+    fnCtx.safeArrayLengthSymbols = previousSafeArrayLengthSymbols;
   }
 };
 
@@ -108,8 +113,45 @@ export const compileBlockExpr = (
     ctx,
     fnCtx,
     run: () => {
-      expr.statements.forEach((stmtId) => {
-        statements.push(compileStatement(stmtId, ctx, fnCtx, compileExpr));
+      expr.statements.forEach((stmtId, statementIndex) => {
+        statements.push(
+          tryCompileArraySafeWhileStatement({
+            block: expr,
+            statementIndex,
+            ctx,
+            fnCtx,
+            compileExpr,
+          }) ??
+            tryCompileArraySafeForStatement({
+              block: expr,
+              statementIndex,
+              ctx,
+              fnCtx,
+              compileExpr,
+              compileStatement: (nestedStmtId) =>
+                compileStatement(nestedStmtId, ctx, fnCtx, compileExpr),
+            }) ??
+            compileStatement(stmtId, ctx, fnCtx, compileExpr),
+        );
+        const lengthBinding = arrayLengthBindingForStatement({
+          stmtId,
+          ctx,
+          fnCtx,
+        });
+        if (lengthBinding) {
+          fnCtx.safeArrayLengthSymbols = new Map([
+            ...(fnCtx.safeArrayLengthSymbols?.entries() ?? []),
+            [lengthBinding.lengthSymbol, lengthBinding.arraySymbol],
+          ]);
+          return;
+        }
+        const stmt = ctx.module.hir.statements.get(stmtId);
+        const initializer = stmt?.kind === "let"
+          ? ctx.module.hir.expressions.get(stmt.initializer)
+          : undefined;
+        if (stmt?.kind !== "let" || initializer?.exprKind !== "literal") {
+          fnCtx.safeArrayLengthSymbols = undefined;
+        }
       });
       if (typeof expr.value === "number") {
         const value = compileExpr({
@@ -412,27 +454,6 @@ const compileLetStatement = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef => {
-  if (stmt.pattern.kind === "identifier") {
-    const scalarObjectPlan = getScalarObjectLocalPlan({
-      plan: ctx.optimization?.codegenPlan,
-      moduleId: ctx.moduleId,
-      symbol: stmt.pattern.symbol,
-    });
-    if (scalarObjectPlan?.initializerExpr === stmt.initializer) {
-      const scalarOps = tryCompileScalarObjectBinding({
-        plan: scalarObjectPlan,
-        ctx,
-        fnCtx,
-        compileExpr,
-      });
-      if (scalarOps) {
-        return scalarOps.length === 0
-          ? ctx.mod.nop()
-          : ctx.mod.block(null, [...scalarOps], binaryen.none);
-      }
-    }
-  }
-
   if (stmt.pattern.kind === "identifier" && !stmt.mutable) {
     if (fnCtx.nonBorrowableProjectedSymbols?.has(stmt.pattern.symbol)) {
       return compileDefaultLetStatement(stmt, ctx, fnCtx, compileExpr);
@@ -473,7 +494,16 @@ const compileDefaultLetStatement = (
     fnCtx,
     ops,
     compileExpr,
-    options: { declare: true },
+    compileStatement: (nestedStmtId) =>
+      compileStatement(nestedStmtId, ctx, fnCtx, compileExpr),
+    compileBlockInitializer: (blockExpr, compileBody) =>
+      withBlockScope({
+        expr: blockExpr,
+        ctx,
+        fnCtx,
+        run: compileBody,
+      }),
+    options: { declare: true, mutable: stmt.mutable },
   });
   if (ops.length === 0) {
     return ctx.mod.nop();

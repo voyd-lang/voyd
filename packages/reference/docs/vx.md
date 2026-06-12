@@ -79,7 +79,7 @@ Voyd functions; VX keeps their retained callback ids internally.
 
 Typed lifecycle values must be host-callable DTOs: primitives, `String`,
 records/objects with public DTO fields, named message variants, and arrays of
-heap-stored DTO values. Inline aggregate arrays, arbitrary dictionaries,
+boundary-compatible DTO values, including value objects. Arbitrary dictionaries,
 functions, trait objects, and recursive object graphs are not part of the typed
 VX host contract yet.
 

@@ -109,7 +109,7 @@ describe("smoke: std input/output", () => {
     expect(writes).toEqual([{ target: "stdout", value: "A\nB\n" }]);
   });
 
-  it("supports bare print from the implicit prelude", async () => {
+  it("supports bare print and enum from the implicit prelude", async () => {
     const writes: Array<{ target: string; value: string }> = [];
     const host = await createVoydHost({
       wasm: compiled.wasm,
@@ -125,6 +125,8 @@ describe("smoke: std input/output", () => {
 
     await expect(host.run<number>("print_text")).resolves.toBe(1);
     await expect(host.run<number>("print_number")).resolves.toBe(1);
+    await expect(host.run<number>("prelude_log_module_with_assertions_all")).resolves.toBe(1);
+    await expect(host.run<number>("prelude_enum_macro")).resolves.toBe(5);
 
     expect(writes).toEqual([
       { target: "stdout", value: "hello\n" },

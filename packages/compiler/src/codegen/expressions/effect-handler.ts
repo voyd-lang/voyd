@@ -14,12 +14,16 @@ import type {
   CompiledExpression,
   ExpressionCompiler,
   FunctionContext,
+  StaticEffectHandlerCapture,
+  StaticEffectHandlerClause,
+  StaticEffectHandlerContext,
 } from "../context.js";
 import { effectsFacade } from "../effects/facade.js";
 import { ensureEffectArgsType } from "../effects/args-type.js";
 import { signatureHashFor } from "../effects/effect-registry.js";
 import {
   allocateTempLocal,
+  loadBindingStorageRef,
   loadBindingValue,
   loadLocalValue,
   storeLocalValue,
@@ -41,7 +45,11 @@ import {
 } from "../effects/outcome-values.js";
 import { RESUME_KIND, type ResumeKind } from "../effects/runtime-abi.js";
 import type { HirEffectHandlerExpr } from "../../semantics/hir/index.js";
-import type { ProgramFunctionInstanceId, TypeId } from "../../semantics/ids.js";
+import type {
+  ProgramFunctionInstanceId,
+  ProgramSymbolId,
+  TypeId,
+} from "../../semantics/ids.js";
 import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
@@ -52,6 +60,7 @@ import {
   resolveEffectSignatureTypes,
 } from "../effects/effect-signature.js";
 import { walkHirExpression } from "../hir-walk.js";
+import { canonicalEffectOperation } from "../effects/static-specialization.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -101,6 +110,7 @@ type ClauseEnvField = {
   wasmType: binaryen.Type;
   storageType: binaryen.Type;
   fieldIndex: number;
+  mutable: boolean;
 };
 
 const sanitize = (value: string): string =>
@@ -140,6 +150,82 @@ const currentHandlerValue = (
   return ctx.mod.local.get(fnCtx.currentHandler.index, fnCtx.currentHandler.type);
 };
 
+const unwrapValueOnlyBlock = ({
+  exprId,
+  ctx,
+}: {
+  exprId: number;
+  ctx: CodegenContext;
+}): number => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (
+    expr?.exprKind === "block" &&
+    expr.statements.length === 0 &&
+    typeof expr.value === "number"
+  ) {
+    return unwrapValueOnlyBlock({ exprId: expr.value, ctx });
+  }
+  return exprId;
+};
+
+const tailResumeValueExpr = ({
+  expr,
+  clauseIndex,
+  ctx,
+}: {
+  expr: HirEffectHandlerExpr;
+  clauseIndex: number;
+  ctx: CodegenContext;
+}): number | undefined | false => {
+  if (!ctx.optimization || typeof expr.finallyBranch === "number") {
+    return false;
+  }
+  const clause = expr.handlers[clauseIndex];
+  const continuation = clause?.parameters[0];
+  if (!clause || clause.resumable !== "fn" || !continuation) {
+    return false;
+  }
+  const bodyExprId = unwrapValueOnlyBlock({ exprId: clause.body, ctx });
+  const body = ctx.module.hir.expressions.get(bodyExprId);
+  if (!body || body.exprKind !== "call") {
+    return false;
+  }
+  const callee = ctx.module.hir.expressions.get(body.callee);
+  if (callee?.exprKind !== "identifier" || callee.symbol !== continuation.symbol) {
+    return false;
+  }
+  if (body.args.length > 1) {
+    return false;
+  }
+  return body.args[0]?.expr;
+};
+
+const expressionContainsResidualEffect = ({
+  exprId,
+  ctx,
+}: {
+  exprId: number;
+  ctx: CodegenContext;
+}): boolean => {
+  let found = false;
+  walkHirExpression({
+    exprId,
+    ctx,
+    visitLambdaBodies: false,
+    visitHandlerBodies: false,
+    visitor: {
+      onExpr: (nestedExprId) => {
+        const kind = effectsFacade(ctx).callKind(nestedExprId);
+        if (kind === "perform" || kind === "effectful-call") {
+          found = true;
+          return "stop";
+        }
+      },
+    },
+  });
+  return found;
+};
+
 const collectClauseCaptureSymbols = ({
   expr,
   fnCtx,
@@ -169,6 +255,77 @@ const collectClauseCaptureSymbols = ({
     });
   });
   return symbols;
+};
+
+const staticCaptureMode = ({
+  field,
+  ctx,
+}: {
+  field: ClauseEnvField;
+  ctx: CodegenContext;
+}): "value" | "storage-ref" =>
+  field.storageType === getInlineHeapBoxType({ typeId: field.typeId, ctx })
+    ? "storage-ref"
+    : "value";
+
+const buildStaticEffectContext = ({
+  expr,
+  env,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirEffectHandlerExpr;
+  env: ReturnType<typeof buildClauseEnv>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): StaticEffectHandlerContext | undefined => {
+  if (!ctx.optimization || typeof expr.finallyBranch === "number") {
+    return undefined;
+  }
+
+  const handlers = new Map<ProgramSymbolId, StaticEffectHandlerClause>();
+  for (let index = 0; index < expr.handlers.length; index += 1) {
+    const resumeValueExpr = tailResumeValueExpr({ expr, clauseIndex: index, ctx });
+    if (resumeValueExpr === false) {
+      continue;
+    }
+    const clause = expr.handlers[index]!;
+    const signature = ctx.program.functions.getSignature(ctx.moduleId, clause.operation);
+    if (!signature || signature.typeParams.length > 0) {
+      continue;
+    }
+    const residualEffectful =
+      typeof resumeValueExpr === "number" &&
+      expressionContainsResidualEffect({ exprId: resumeValueExpr, ctx });
+    const operation = canonicalEffectOperation(ctx, clause.operation);
+    handlers.set(operation, {
+      operation,
+      resumeValueExpr,
+      residualEffectful,
+      paramSymbols: clause.parameters.slice(1).map((param) => param.symbol),
+      returnTypeId: signature.returnType,
+    });
+  }
+  if (handlers.size === 0) {
+    return undefined;
+  }
+
+  const captures: StaticEffectHandlerCapture[] = env.fields.map((field) => ({
+    symbol: field.symbol,
+    typeId: field.typeId,
+    wasmType: field.wasmType,
+    paramType: field.storageType,
+    mode: staticCaptureMode({ field, ctx }),
+    mutable: field.mutable,
+  }));
+  const instanceKey = handlerInstanceKey(fnCtx);
+  const key = [
+    `h${expr.id}`,
+    `i${instanceKey}`,
+    ...[...handlers.keys()].sort((a, b) => a - b).map((operation) => `o${operation}`),
+    ...captures.map((capture) => `c${capture.symbol}_${capture.typeId}_${capture.mode}`),
+  ].join("_");
+  return { key, handlers, captures };
 };
 
 const buildClauseEnv = ({
@@ -227,6 +384,7 @@ const buildClauseEnv = ({
             symbol,
             typeId,
             wasmType: binding.type,
+            mutable: binding.kind === "storage-ref" ? binding.mutable : true,
             storageType:
               binding.kind === "local"
                 ? wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime")
@@ -271,7 +429,11 @@ const buildClauseEnv = ({
       if (!binding) {
         throw new Error("missing handler env binding");
       }
-      const value = loadBindingValue(binding, ctx);
+      const storageRef = loadBindingStorageRef(binding, ctx);
+      if (typeof storageRef === "number") {
+        return storageRef;
+      }
+      const value = loadBindingValue(binding, ctx, fnCtx);
       return field.storageType === field.wasmType
         ? value
         : lowerValueForHeapField({
@@ -428,6 +590,25 @@ const emitClauseFunction = ({
   };
 
   env.fields.forEach((field) => {
+    const inlineBoxType = getInlineHeapBoxType({
+      typeId: field.typeId,
+      ctx,
+      mode: "runtime",
+    });
+    if (typeof inlineBoxType === "number" && field.storageType === inlineBoxType) {
+      fnCtx.bindings.set(field.symbol, {
+        kind: "capture",
+        envIndex: 1,
+        envType: env.envType,
+        envSuperType: binaryen.anyref,
+        fieldIndex: field.fieldIndex,
+        type: field.wasmType,
+        storageType: field.storageType,
+        typeId: field.typeId,
+        mutable: field.mutable,
+      });
+      return;
+    }
     const local = allocateTempLocal(field.wasmType, fnCtx, field.typeId, ctx);
     fnCtx.bindings.set(field.symbol, {
       ...local,
@@ -436,10 +617,13 @@ const emitClauseFunction = ({
     });
   });
 
-  const initOps: binaryen.ExpressionRef[] = env.fields.map((field) => {
+  const initOps: binaryen.ExpressionRef[] = env.fields.flatMap((field) => {
     const binding = fnCtx.bindings.get(field.symbol);
-    if (!binding || binding.kind !== "local") {
+    if (!binding) {
       throw new Error("missing local binding for handler env field");
+    }
+    if (binding.kind !== "local") {
+      return [];
     }
     const stored = structGetFieldValue({
       mod: ctx.mod,
@@ -459,7 +643,7 @@ const emitClauseFunction = ({
             typeId: field.typeId,
             ctx,
           });
-    return storeLocalValue({ binding, value, ctx, fnCtx });
+    return [storeLocalValue({ binding, value, ctx, fnCtx })];
   });
 
   const requestLocal = allocateTempLocal(
@@ -696,6 +880,7 @@ export const compileEffectHandlerExpr = (
   const handlerResultTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
 
   const env = buildClauseEnv({ expr, ctx, fnCtx });
+  const staticEffectContext = buildStaticEffectContext({ expr, env, ctx, fnCtx });
   const prevHandlerLocal = allocateTempLocal(
     ctx.effectsRuntime.handlerFrameType,
     fnCtx
@@ -779,6 +964,10 @@ export const compileEffectHandlerExpr = (
   );
   pushHandlerScope(fnCtx, { prevHandler: prevHandlerLocal, label: expr.id });
 
+  const previousStaticEffectContext = fnCtx.staticEffectContext;
+  if (staticEffectContext) {
+    fnCtx.staticEffectContext = staticEffectContext;
+  }
   const body = compileExpr({
     exprId: expr.body,
     ctx,
@@ -786,6 +975,7 @@ export const compileEffectHandlerExpr = (
     tailPosition,
     expectedResultTypeId,
   });
+  fnCtx.staticEffectContext = previousStaticEffectContext;
   const resultType = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const resultWasmType = wasmTypeFor(resultType, ctx);
   const resultLocal =
