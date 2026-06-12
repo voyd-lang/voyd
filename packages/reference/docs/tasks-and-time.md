@@ -13,7 +13,7 @@ threads.
 ```voyd
 use std::async::types::{ Cancelled }
 use std::error::panic
-use std::task::self as task
+use std::task
 
 pub fn main(): task::TaskRuntime -> i32
   let child = task::spawn(() =>
@@ -49,7 +49,7 @@ through the runtime's unhandled-task sink instead of failing the creator.
 `time::sleep(...)` suspends the current task. It does not spawn a new task.
 
 ```voyd
-use std::time::self as time
+use std::time
 
 pub fn main(): time::Time -> i32
   let _ = time::sleep(250)
@@ -63,9 +63,9 @@ Timer helpers build on the same task model.
 ```voyd
 use std::async::types::{ Cancelled }
 use std::error::panic
-use std::task::self as task
+use std::task
 use std::time::{ Duration, Overlap }
-use std::time::self as time
+use std::time
 
 pub fn main(): (task::TaskRuntime, time::Time) -> i32
   let timeout = time::set_timeout(

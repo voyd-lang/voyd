@@ -1,10 +1,14 @@
 {
   "name": "@voyd-lang/reference",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Voyd language reference documentation",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voyd-lang/voyd"
+  },
   "files": [
     "dist",
     "index.d.ts"

@@ -27,6 +27,7 @@ import {
   compileBreakExpr,
   compileContinueExpr,
   compileIfExpr,
+  compileKnownMatchArmValue,
   compileLoopExpr,
   compileMatchExpr,
   compileWhileExpr,
@@ -407,10 +408,12 @@ const compileGroupedContinuationMatchExpr = ({
       activeSiteOrder,
       ctx,
     });
-    const armExpr = compileExpr({
-      exprId: arm.value,
+    const armExpr = compileKnownMatchArmValue({
+      expr,
+      arm,
       ctx,
       fnCtx,
+      compileExpr,
       tailPosition,
       expectedResultTypeId,
     });

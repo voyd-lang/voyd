@@ -4,6 +4,187 @@ order: 5
 
 # Releases
 
+## Voyd v0.2.0 - M87*
+
+This first minor release since launch brings a few new features and a whole ton
+of backend compiler polish. This includes tasks, timers, open effects, trailing
+callback clauses, compiler optimization work, and a set of bug fixes around
+typing and lowering.
+
+### Highlights
+
+- Same-run task concurrency is now part of the standard library and JS host
+  runtime. Programs can spawn, await, cancel, and yield tasks while leveraging
+  Voyd's effect model.
+- Timer APIs now build on the task model, including `time::sleep`,
+  `time::set_timeout`, and `time::set_interval`.
+- Trailing callback clauses make callback-heavy calls read like ordinary Voyd
+  blocks instead of nested inline lambdas.
+- `try forward` is now `try open`, and open effect row syntax is clearer.
+- Compiler optimization improved with scalar replacement for non-escaping object
+  locals and a cleaner codegen plan.
+- Bug fixes landed for mutable value receiver lowering, object init signature
+  hints, structural field metadata, and singleton union inference.
+
+### Tasks
+
+The biggest new runtime feature in `0.2.0` is tasks. Voyd programs can now spawn
+work, await its result, cancel it, yield cooperatively, and suspend with timers
+through APIs in `std::task` and `std::time`.
+
+Tasks are same-run and same-event-loop. Spawning a task does not create a new
+thread. It schedules another piece of Voyd work inside the current run, and the
+runtime moves between tasks when they complete, await, yield, or suspend on
+time. That gives Voyd a concurrency model that fits the JS host and browser
+event loop while still giving programs a real language-level handle for
+scheduled work.
+
+```voyd
+use std::async::types::{ Cancelled }
+use std::error::panic
+use std::task
+
+pub fn main(): task::TaskRuntime -> i32
+  let child = task::spawn do:
+    41
+
+  match(child.await())
+    Ok { value }:
+      value
+    Err { error }:
+      panic(error.message.as_slice())
+    Cancelled:
+      0
+```
+
+Timers use the same model. `time::sleep` suspends the current task, while
+`time::set_timeout` schedules new task work and returns a task you can await or
+cancel.
+
+```voyd
+use std::async::types::{ Cancelled }
+use std::task
+use std::time::{ Duration }
+use std::time
+
+pub fn main(): (task::TaskRuntime, time::Time) -> i32
+  let timeout = time::set_timeout(Duration::from_millis(5)) do:
+    7
+
+  match(timeout.await())
+    Ok { value }:
+      value
+    Err { error }:
+      0
+    Cancelled:
+      0
+```
+
+With tasks, a Voyd program can start background work, wait for a result, model
+cancellation, build timer-based APIs, and keep those operations visible in
+ordinary function signatures. Attached child tasks also participate in
+structured concurrency, so owner cancellation and unobserved child failures have
+defined behavior.
+
+Tasks mark one of the first real use cases where the languages effect system
+starts to shine. I'm very excited to see how they play out in practice.
+
+### Open effects
+
+The language now supports defining explicit open effect rows in function and
+callback types. With this change, a function can now require a callback to
+explicitly have some effects, without preventing it from having others.
+
+```voyd
+// `cb` must be allowed to perform Async. Any other callback effects remain open to the caller.
+fn call_open<T>(cb: fn() : (Async, open) -> T) : (open) -> T
+  try open
+    cb()
+  Async::await(tail, value):
+    tail(value + 1)
+```
+
+To make `open` effects more ergonomic, `try forward` was renamed to `try open`.
+This is a breaking change, so existing code will need to be updated before
+upgrading to `0.2.0`.
+
+### Trailing callback clauses
+
+The release also adds full trailing callback clauses. Callback-heavy APIs can
+now read as indented Voyd code, which is especially useful for task and timer
+work.
+
+```voyd
+// Before
+let timeout = time::set_timeout(
+  Duration::from_millis(5),
+  () =>
+    let frame = get_next_frame()
+    render_world(frame)
+)
+
+// After
+let timeout = time::set_timeout(Duration::from_millis(5)) do:
+  let frame = get_next_frame()
+  render_world(frame)
+
+// Parens can be omitted if the closure is the only arg
+let worker = task::spawn do:
+  let _ = time::sleep(Duration::from_millis(10))
+  sync_once()
+```
+
+The clause head can name callback parameters too:
+
+```voyd
+stream::fold(init: 0) do(acc, item):
+  // `acc` and `item` are parameters of the callback lambda.
+  acc + item
+```
+
+And labeled callback arguments can use the same clause style:
+
+```voyd
+stream::fold(init: 0)
+  // This passes the lambda to the labeled `step` argument of fold.
+  step(acc, item):
+    acc + item
+```
+
+### Compiler polish
+
+The compiler also gets a round of optimization and correctness work. Scalar
+replacement lets codegen avoid materializing some non-escaping object locals,
+and codegen is preloaded during graph loading so compilation starts from a
+warmer path.
+
+Several fixes should make everyday code less surprising: mutable value receivers
+lower correctly again, object init signature hints are clearer, structural field
+metadata is preserved more consistently, and singleton unions collapse before
+they leak awkward inferred shapes into later compiler stages.
+
+### Breaking changes
+
+- `try forward` has been renamed to `try open`.
+- Code using the previous open effect row spelling should be updated to the new
+  open row syntax.
+
+### Upgrade notes
+
+Install the new CLI with:
+
+```bash
+npm i -g @voyd-lang/cli@0.2.0
+```
+
+If you are updating existing code, the main syntax migration is changing `try
+forward` to `try open` and updating any code that used the previous open effect
+row spelling.
+
+All published Voyd packages now move together at `0.2.0`, including the
+compiler, SDK, JS host, standard library, reference package, language server,
+CLI, and VS Code extension.
+
 ## Voyd v0.1.0 - Sagittarius A*
 
 Introducing Voyd.
@@ -19,10 +200,10 @@ In a lot of ways, Voyd is my love letter to programming languages.
 It is heavily inspired by Rust, Swift, Koka, TypeScript, and a bunch of other
 languages that shaped how I think about software. The place Voyd lands is
 somewhere between Rust and TypeScript in abstraction level. I wanted something
-more explicit and type-driven than JavaScript or TypeScript, but less
-ceremonial than a traditional systems language. Something that reads like a
-high-level language, compiles to WebAssembly, and still gives me confidence in
-what the program is allowed to do.
+more explicit and type-driven than JavaScript or TypeScript, but less ceremonial
+than a traditional systems language. Something that reads like a high-level
+language, compiles to WebAssembly, and still gives me confidence in what the
+program is allowed to do.
 
 That is the purpose Voyd serves for me: it is a language for building real
 applications with a strong type system, explicit effects, a practical runtime
@@ -90,8 +271,8 @@ Nominal types are great when identity matters. If something is a `UserId` or a
 `Money` or a `Session`, I want the type system to preserve that meaning.
 
 Structural types are great when shape matters more than identity. If a function
-just needs something with a `name` and an `email`, I do not want to invent a
-new named wrapper every time.
+just needs something with a `name` and an `email`, I do not want to invent a new
+named wrapper every time.
 
 Voyd lets those two styles coexist.
 
@@ -123,8 +304,8 @@ design programs.
 Voyd also includes a few features that I think should be normal:
 
 - Traits for shared behavior, default methods, and generic constraints
-- A built-in doc generator so source code can become real API docs with
-  `voyd doc`
+- A built-in doc generator so source code can become real API docs with `voyd
+  doc`
 - A CLI, SDK, language server, docs site, and VSCode extension that are all
   designed together
 - WebAssembly-first compilation instead of treating Wasm like a secondary target

@@ -12,6 +12,7 @@ export type MsgPackFunctions = {
   decodeValue: FunctionMetadata;
   makeNull: FunctionMetadata;
   makeBool: FunctionMetadata;
+  makeString: FunctionMetadata;
   makeArray: FunctionMetadata;
   makeI32: FunctionMetadata;
   makeI64: FunctionMetadata;
@@ -19,6 +20,7 @@ export type MsgPackFunctions = {
   makeF64: FunctionMetadata;
   makeMap: FunctionMetadata;
   unpackBool: FunctionMetadata;
+  unpackString: FunctionMetadata;
   unpackArray: FunctionMetadata;
   unpackI32: FunctionMetadata;
   unpackI64: FunctionMetadata;
@@ -31,6 +33,9 @@ export type MsgPackFunctions = {
   arrayRawStorage: FunctionMetadata;
   mapNew: FunctionMetadata;
   mapSet: FunctionMetadata;
+  mapGet: FunctionMetadata;
+  mapHas: FunctionMetadata;
+  mapTagIs: FunctionMetadata;
 };
 
 const MSGPACK_FUNCS_KEY = Symbol("voyd.effects.hostBoundary.msgpackFunctions");
@@ -102,6 +107,12 @@ export const ensureMsgPackFunctions = (
         name: "make_bool",
         paramCount: 1,
       }),
+      makeString: requireFunctionMetaByName({
+        ctx,
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "msgpack_make_string",
+        paramCount: 1,
+      }),
       makeArray: requireFunctionMetaByName({
         ctx,
         moduleId: PUBLIC_MSGPACK_MODULE_ID,
@@ -142,6 +153,12 @@ export const ensureMsgPackFunctions = (
         ctx,
         moduleId: RAW_MSGPACK_MODULE_ID,
         name: "unpack_bool",
+        paramCount: 1,
+      }),
+      unpackString: requireFunctionMetaByName({
+        ctx,
+        moduleId: RAW_MSGPACK_MODULE_ID,
+        name: "unpack_string",
         paramCount: 1,
       }),
       unpackArray: requireFunctionMetaByName({
@@ -216,6 +233,24 @@ export const ensureMsgPackFunctions = (
         name: "msgpack_map_set",
         paramCount: 3,
       }),
+      mapGet: requireFunctionMetaByName({
+        ctx,
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "msgpack_map_get",
+        paramCount: 2,
+      }),
+      mapHas: requireFunctionMetaByName({
+        ctx,
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "msgpack_map_has",
+        paramCount: 2,
+      }),
+      mapTagIs: requireFunctionMetaByName({
+        ctx,
+        moduleId: PUBLIC_MSGPACK_MODULE_ID,
+        name: "msgpack_map_tag_is",
+        paramCount: 2,
+      }),
     };
 
     [
@@ -223,6 +258,7 @@ export const ensureMsgPackFunctions = (
       msgpack.decodeValue,
       msgpack.makeNull,
       msgpack.makeBool,
+      msgpack.makeString,
       msgpack.makeArray,
       msgpack.makeI32,
       msgpack.makeI64,
@@ -230,6 +266,7 @@ export const ensureMsgPackFunctions = (
       msgpack.makeF64,
       msgpack.makeMap,
       msgpack.unpackBool,
+      msgpack.unpackString,
       msgpack.unpackArray,
       msgpack.unpackI32,
       msgpack.unpackI64,
@@ -242,6 +279,9 @@ export const ensureMsgPackFunctions = (
       msgpack.arrayRawStorage,
       msgpack.mapNew,
       msgpack.mapSet,
+      msgpack.mapGet,
+      msgpack.mapHas,
+      msgpack.mapTagIs,
     ].forEach((meta) =>
       markReachable({
         ctx,

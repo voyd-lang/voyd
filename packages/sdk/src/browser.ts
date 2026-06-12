@@ -27,18 +27,6 @@ export const createSdk = (): VoydSdk => ({
 const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
   const fallbackFile = options.entryPath ?? "index.voyd";
 
-  if (options.optimize) {
-    return {
-      success: false,
-      diagnostics: [
-        createUnexpectedDiagnostic({
-          message: "optimize is not supported in the browser SDK",
-          file: fallbackFile,
-        }),
-      ],
-    };
-  }
-
   if (options.emitWasmText) {
     return {
       success: false,
@@ -91,7 +79,9 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       testsOnly: options.testsOnly,
       testScope: options.testScope ?? "entry",
       runtimeDiagnostics: options.runtimeDiagnostics,
+      optimize: options.optimize,
       loadModuleGraph,
+      boundaryExports: options.boundaryExports,
     });
     if (!result.success) {
       return result;

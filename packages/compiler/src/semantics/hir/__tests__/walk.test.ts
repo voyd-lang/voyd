@@ -102,6 +102,23 @@ const createTestBuilder = () => {
       captures: [],
     });
 
+  const addMatch = (
+    discriminant: number,
+    arms: readonly {
+      pattern: HirPattern;
+      guard?: number;
+      value: number;
+    }[],
+  ) =>
+    builder.addExpression({
+      kind: "expr",
+      exprKind: "match",
+      ast: nextAst(),
+      span,
+      discriminant,
+      arms,
+    });
+
   const addEffectHandler = (
     body: number,
     handlerBody: number,
@@ -135,6 +152,7 @@ const createTestBuilder = () => {
     addBlock,
     addAssign,
     addLambda,
+    addMatch,
     addEffectHandler,
   };
 };
@@ -297,6 +315,46 @@ describe("hir walk", () => {
       "identifier",
       "type",
       "identifier",
+    ]);
+  });
+
+  it("walks match arm patterns before guard and value expressions", () => {
+    const { builder, addIdentifier, addLiteral, addMatch } = createTestBuilder();
+    const discriminantId = addIdentifier(10);
+    const guardId = addIdentifier(20);
+    const valueId = addLiteral("1");
+    const pattern: HirPattern = {
+      kind: "destructure",
+      fields: [{ name: "value", pattern: { kind: "identifier", symbol: 30 } }],
+    };
+    const matchId = addMatch(discriminantId, [
+      {
+        pattern,
+        guard: guardId,
+        value: valueId,
+      },
+    ]);
+    const hir = builder.finalize();
+    const events: string[] = [];
+
+    walkExpression({
+      exprId: matchId,
+      hir,
+      onEnterExpression: (id, expr) => {
+        events.push(`expr:${expr.exprKind}:${id}`);
+      },
+      onEnterPattern: (node) => {
+        events.push(`pattern:${node.kind}`);
+      },
+    });
+
+    expect(events).toEqual([
+      `expr:match:${matchId}`,
+      `expr:identifier:${discriminantId}`,
+      "pattern:destructure",
+      "pattern:identifier",
+      `expr:identifier:${guardId}`,
+      `expr:literal:${valueId}`,
     ]);
   });
 

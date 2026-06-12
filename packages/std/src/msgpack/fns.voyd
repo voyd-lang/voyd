@@ -178,6 +178,10 @@ pub fn unpack_f32(value: MsgPack): () -> f32
       decoded.value
     F64:
       cast::to_f32(decoded.value)
+    I32:
+      cast::to_f32(decoded.value)
+    I64:
+      cast::to_f32(decoded.value)
     else:
       cast::reinterpret_f32(0)
 
@@ -187,6 +191,10 @@ pub fn unpack_f64(value: MsgPack): () -> f64
     F64:
       decoded.value
     F32:
+      cast::to_f64(decoded.value)
+    I32:
+      cast::to_f64(decoded.value)
+    I64:
       cast::to_f64(decoded.value)
     else:
       0.0

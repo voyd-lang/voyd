@@ -91,7 +91,10 @@ describe("effect table + harness", () => {
   }, 30_000);
 
   it("emits runtime trap diagnostics function metadata", async () => {
-    const { wasm } = await loadSmokeModule();
+    const { wasm } = await compileCachedEffectFixture({
+      entryPath: smokeFixturePath,
+      codegenOptions: { emitEffectHelpers: true, runtimeDiagnostics: true },
+    });
     const wasmBuffer =
       wasm.buffer instanceof ArrayBuffer &&
       wasm.byteOffset === 0 &&

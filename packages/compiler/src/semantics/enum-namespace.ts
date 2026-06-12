@@ -185,6 +185,14 @@ export const enumVariantTypeNamesFromAliasTarget = (
   return dedupeEnumNamespaceMembers(collected).map((entry) => entry.name);
 };
 
+export const enumNamespaceMemberNamesFromMetadata = (
+  source?: Record<string, unknown>,
+): string[] | undefined => {
+  const meta = source as { enumNamespaceMembers?: unknown } | undefined;
+  const members = enumNamespaceMembersFromUnknown(meta?.enumNamespaceMembers);
+  return members?.map((entry) => entry.name);
+};
+
 const collectUnionNominalMembers = (
   expr: Expr | undefined,
 ): EnumNamespaceMember[] | undefined => {

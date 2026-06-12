@@ -2,7 +2,6 @@ import binaryen from "binaryen";
 import {
   binaryenTypeToHeapType,
   defineArrayType,
-  defineStructType,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { CodegenContext, FixedArrayWasmType, TypeId } from "./context.js";
 
@@ -12,11 +11,7 @@ const FIXED_ARRAY_TYPE_STATE = Symbol.for("voyd.codegen.fixedArrayTypesByTypeId"
 
 type FixedArrayTypeState = {
   byTypeId?: Map<TypeId, FixedArrayWasmType>;
-  inlineByKey?: Map<string, FixedArrayWasmType>;
 };
-
-const sanitize = (value: string): string =>
-  value.replace(/[^a-zA-Z0-9_]/g, "_");
 
 export const ensureFixedArrayWasmTypesByElement = ({
   elementType,
@@ -40,53 +35,6 @@ export const ensureFixedArrayWasmTypesByElement = ({
     heapType,
   };
   ctx.fixedArrayTypes.set(elementType, fixedArrayType);
-  return fixedArrayType;
-};
-
-export const ensureInlineFixedArrayWasmTypes = ({
-  key,
-  laneTypes,
-  ctx,
-}: {
-  key: string;
-  laneTypes: readonly binaryen.Type[];
-  ctx: CodegenContext;
-}): FixedArrayWasmType => {
-  const state = ctx.programHelpers.getHelperState<FixedArrayTypeState>(
-    FIXED_ARRAY_TYPE_STATE,
-    () => ({ byTypeId: new Map<TypeId, FixedArrayWasmType>(), inlineByKey: new Map() }),
-  );
-  const inlineByKey = state.inlineByKey ?? new Map<string, FixedArrayWasmType>();
-  state.inlineByKey = inlineByKey;
-  const cached = inlineByKey.get(key);
-  if (cached) {
-    return cached;
-  }
-
-  const laneArrayTypes = laneTypes.map((laneType) =>
-    ensureFixedArrayWasmTypesByElement({ elementType: laneType, ctx }).type,
-  );
-  const type = defineStructType(ctx.mod, {
-    name: `voydInlineFixedArray_${sanitize(key)}`,
-    fields: [
-      { name: "length", type: binaryen.i32, mutable: false },
-      ...laneArrayTypes.map((laneArrayType, index) => ({
-        name: `lane_${index}`,
-        type: laneArrayType,
-        mutable: false,
-      })),
-    ],
-    supertype: binaryenTypeToHeapType(ctx.rtt.rootType),
-    final: true,
-  });
-  const fixedArrayType: FixedArrayWasmType = {
-    kind: "inline-aggregate",
-    type,
-    heapType: binaryenTypeToHeapType(type),
-    laneTypes,
-    laneArrayTypes,
-  };
-  inlineByKey.set(key, fixedArrayType);
   return fixedArrayType;
 };
 

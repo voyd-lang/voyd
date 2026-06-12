@@ -174,7 +174,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               "color-mix(in srgb, var(--site-surface) 86%, transparent)",
           }}
         >
-          <div className="mx-auto w-full max-w-6xl px-4 py-3 sm:py-4">
+          <div className="site-header-shell mx-auto w-full max-w-6xl px-4">
             <div className="flex items-center justify-between gap-3">
               <Link
                 to="/"

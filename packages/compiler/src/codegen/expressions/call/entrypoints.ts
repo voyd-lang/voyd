@@ -4,6 +4,7 @@ import type {
   CompileCallOptions,
   ExpressionCompiler,
   FunctionContext,
+  FunctionMetadata,
   HirCallExpr,
   HirExpression,
   HirMethodCallExpr,
@@ -12,18 +13,21 @@ import type {
 import type {
   ProgramFunctionInstanceId,
   ProgramSymbolId,
+  SymbolId,
 } from "../../../semantics/ids.js";
 import { compileIntrinsicCall } from "../../intrinsics.js";
 import { effectsFacade } from "../../effects/facade.js";
 import { getRequiredExprType } from "../../types.js";
-import { compileCallArguments } from "./arguments.js";
+import {
+  compileCallArgumentsWithMetadata,
+} from "./arguments.js";
 import { compileClosureCall, compileCurriedClosureCall } from "./closure.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
 import { emitResolvedCall } from "./resolved-call.js";
 import { compileTraitDispatchCall } from "./trait-dispatch.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
-import { tryInlineResolvedCall } from "./inline.js";
-import { tryCompileScalarObjectMethodCall } from "../../scalar-objects.js";
+import { getOrCreateReceiverSpecialization } from "../../receiver-specialization.js";
+import { getOrCreateScalarAggregateCallSpecialization } from "../../optimization/scalar-aggregate-calls.js";
 
 export const compileCallExpr = (
   expr: HirCallExpr,
@@ -87,6 +91,7 @@ export const compileCallExpr = (
       expectedResultTypeId,
       typeInstanceId,
       outResultStorageRef,
+      scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
     });
   }
 
@@ -105,14 +110,13 @@ export const compileCallExpr = (
       });
     }
 
-    const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
     const targetFunctionId = resolveTargetFunctionId({
       targets: callInfo.targets,
       callInstanceId,
       typeInstanceId,
     });
 
-    if (typeof targetFunctionId === "number" && targetFunctionId !== calleeId) {
+    if (typeof targetFunctionId === "number") {
       const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
       return compileResolvedSymbolCall({
         expr,
@@ -127,9 +131,11 @@ export const compileCallExpr = (
         expectedResultTypeId,
         typeInstanceId,
         outResultStorageRef,
+        scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
       });
     }
 
+    const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
     const traitDispatch = expectTraitDispatch
       ? compileTraitDispatchCall({
           expr,
@@ -150,9 +156,16 @@ export const compileCallExpr = (
     }
 
     const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+    const intrinsicName =
+      ctx.program.symbols.getIntrinsicName(calleeId) ??
+      ctx.program.symbols.getName(calleeId) ??
+      `${callee.symbol}`;
     const shouldCompileIntrinsic =
       intrinsicMetadata.intrinsic === true &&
-      intrinsicMetadata.intrinsicUsesSignature !== true;
+      shouldCompileIntrinsicCall({
+        intrinsicName,
+        usesSignature: intrinsicMetadata.intrinsicUsesSignature,
+      });
 
     if (shouldCompileIntrinsic) {
       const args = compileCallArgExpressionsWithTemps({
@@ -165,10 +178,7 @@ export const compileCallExpr = (
       });
       return {
         expr: compileIntrinsicCall({
-          name:
-            ctx.program.symbols.getIntrinsicName(calleeId) ??
-            ctx.program.symbols.getName(calleeId) ??
-            `${callee.symbol}`,
+          name: intrinsicName,
           call: expr,
           args,
           ctx,
@@ -186,32 +196,27 @@ export const compileCallExpr = (
       typeInstanceId,
     });
     if (meta) {
-    const args = compileCallArguments({
-      call: expr,
-      meta,
-      ctx,
-      fnCtx,
-      compileExpr,
-    });
-    const inlined = tryInlineResolvedCall({
-      meta,
-      args,
-      ctx,
-      fnCtx,
-      compileExpr,
-      options: {
-        tailPosition,
-        expectedResultTypeId,
-        typeInstanceId,
-        outResultStorageRef,
-      },
-    });
-    if (inlined) {
-      return inlined;
-    }
-    return emitResolvedCall({
-      meta,
-      args,
+      const resolvedMeta = receiverSpecializedMetaForCall({
+        expr,
+        meta,
+        ctx,
+        fnCtx,
+      });
+      const compiledArgs = compileCallArgumentsWithMetadata({
+        call: expr,
+        meta: resolvedMeta,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
+      const callMeta = scalarResultSpecializedMetaForCall({
+        meta: compiledArgs.meta,
+        scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
+        ctx,
+      });
+      return emitResolvedCall({
+        meta: callMeta,
+        args: compiledArgs.args,
         callId: expr.id,
         ctx,
         fnCtx,
@@ -310,50 +315,28 @@ export const compileMethodCallExpr = (
   if (!meta) {
     throw new Error(`codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`);
   }
-
-  const scalarObjectCall = tryCompileScalarObjectMethodCall({
-    expr,
+  const resolvedMeta = receiverSpecializedMetaForCall({
+    expr: callView,
     meta,
     ctx,
     fnCtx,
-    compileExpr,
-    options: {
-      tailPosition,
-      expectedResultTypeId,
-      typeInstanceId,
-      outResultStorageRef,
-    },
   });
-  if (scalarObjectCall) {
-    return scalarObjectCall;
-  }
 
-  const args = compileCallArguments({
+  const compiledArgs = compileCallArgumentsWithMetadata({
     call: callView,
-    meta,
+    meta: resolvedMeta,
     ctx,
     fnCtx,
     compileExpr,
   });
-  const inlined = tryInlineResolvedCall({
-    meta,
-    args,
+  const callMeta = scalarResultSpecializedMetaForCall({
+    meta: compiledArgs.meta,
+    scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
     ctx,
-    fnCtx,
-    compileExpr,
-    options: {
-      tailPosition,
-      expectedResultTypeId,
-      typeInstanceId,
-      outResultStorageRef,
-    },
   });
-  if (inlined) {
-    return inlined;
-  }
   return emitResolvedCall({
-    meta,
-    args,
+    meta: callMeta,
+    args: compiledArgs.args,
     callId: expr.id,
     ctx,
     fnCtx,
@@ -377,6 +360,65 @@ const toMethodCallView = (expr: HirMethodCallExpr): HirCallExpr => ({
   typeArguments: expr.typeArguments,
 });
 
+const receiverSpecializationCallSiteKey = ({
+  moduleId,
+  exprId,
+}: {
+  moduleId: string;
+  exprId: number;
+}): string => `${moduleId}:${exprId}`;
+
+const receiverSpecializationContextKey = ({
+  instanceId,
+  exactParameterTypes,
+}: {
+  instanceId: ProgramFunctionInstanceId;
+  exactParameterTypes: ReadonlyMap<SymbolId, TypeId> | undefined;
+}): string => {
+  const serializedFacts = Array.from(exactParameterTypes?.entries() ?? [])
+    .sort(([left], [right]) => left - right)
+    .map(([symbol, type]) => `${symbol}=${type}`)
+    .join(",");
+  return `${instanceId}:${serializedFacts}`;
+};
+
+const receiverSpecializedMetaForCall = ({
+  expr,
+  meta,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirCallExpr;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): FunctionMetadata => {
+  if (!ctx.optimization || typeof fnCtx.instanceId !== "number") {
+    return meta;
+  }
+
+  const callSiteKey = receiverSpecializationCallSiteKey({
+    moduleId: ctx.moduleId,
+    exprId: expr.id,
+  });
+  const callerContextKey = receiverSpecializationContextKey({
+    instanceId: fnCtx.instanceId,
+    exactParameterTypes: fnCtx.exactParameterTypes,
+  });
+  const exactParameterTypes = ctx.optimization.receiverSpecializationRequests
+    .get(callSiteKey)
+    ?.get(callerContextKey);
+  if (!exactParameterTypes || exactParameterTypes.size === 0) {
+    return meta;
+  }
+
+  return getOrCreateReceiverSpecialization({
+    ctx,
+    meta,
+    exactParameterTypes,
+  }) ?? meta;
+};
+
 const compileResolvedSymbolCall = ({
   expr,
   symbol,
@@ -390,6 +432,7 @@ const compileResolvedSymbolCall = ({
   expectedResultTypeId,
   typeInstanceId,
   outResultStorageRef,
+  scalarAggregateResultTypeId,
 }: {
   expr: HirCallExpr;
   symbol: number;
@@ -403,6 +446,7 @@ const compileResolvedSymbolCall = ({
   expectedResultTypeId?: TypeId;
   typeInstanceId: ProgramFunctionInstanceId | undefined;
   outResultStorageRef?: CompileCallOptions["outResultStorageRef"];
+  scalarAggregateResultTypeId?: TypeId;
 }): CompiledExpression => {
   const traitDispatch = traitDispatchEnabled
     ? compileTraitDispatchCall({
@@ -426,9 +470,16 @@ const compileResolvedSymbolCall = ({
 
   const calleeId = ctx.program.symbols.canonicalIdOf(moduleId, symbol);
   const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+  const intrinsicName =
+    ctx.program.symbols.getIntrinsicName(calleeId) ??
+    ctx.program.symbols.getName(calleeId) ??
+    `${symbol}`;
   const shouldCompileIntrinsic =
     intrinsicMetadata.intrinsic === true &&
-    intrinsicMetadata.intrinsicUsesSignature !== true;
+    shouldCompileIntrinsicCall({
+      intrinsicName,
+      usesSignature: intrinsicMetadata.intrinsicUsesSignature,
+    });
   if (shouldCompileIntrinsic) {
     const args = compileCallArgExpressionsWithTemps({
       callId: expr.id,
@@ -440,10 +491,7 @@ const compileResolvedSymbolCall = ({
     });
     return {
       expr: compileIntrinsicCall({
-        name:
-          ctx.program.symbols.getIntrinsicName(calleeId) ??
-          ctx.program.symbols.getName(calleeId) ??
-          `${symbol}`,
+        name: intrinsicName,
         call: expr,
       args,
       ctx,
@@ -464,33 +512,28 @@ const compileResolvedSymbolCall = ({
   if (!targetMeta) {
     throw new Error(`codegen cannot call symbol ${moduleId}::${symbol}`);
   }
+  const resolvedMeta = receiverSpecializedMetaForCall({
+    expr,
+    meta: targetMeta,
+    ctx,
+    fnCtx,
+  });
 
-  const args = compileCallArguments({
+  const compiledArgs = compileCallArgumentsWithMetadata({
     call: expr,
-    meta: targetMeta,
+    meta: resolvedMeta,
     ctx,
     fnCtx,
     compileExpr,
   });
-  const inlined = tryInlineResolvedCall({
-    meta: targetMeta,
-    args,
+  const callMeta = scalarResultSpecializedMetaForCall({
+    meta: compiledArgs.meta,
+    scalarAggregateResultTypeId,
     ctx,
-    fnCtx,
-    compileExpr,
-    options: {
-      tailPosition,
-      expectedResultTypeId,
-      typeInstanceId,
-      outResultStorageRef,
-    },
   });
-  if (inlined) {
-    return inlined;
-  }
   return emitResolvedCall({
-    meta: targetMeta,
-    args,
+    meta: callMeta,
+    args: compiledArgs.args,
     callId: expr.id,
     ctx,
     fnCtx,
@@ -501,6 +544,26 @@ const compileResolvedSymbolCall = ({
       outResultStorageRef,
     },
   });
+};
+
+const scalarResultSpecializedMetaForCall = ({
+  meta,
+  scalarAggregateResultTypeId,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  scalarAggregateResultTypeId?: TypeId;
+  ctx: CodegenContext;
+}): FunctionMetadata => {
+  if (typeof scalarAggregateResultTypeId !== "number") {
+    return meta;
+  }
+  return getOrCreateScalarAggregateCallSpecialization({
+    ctx,
+    meta,
+    paramIndexes: new Set(meta.scalarAggregateParamIndexes ?? []),
+    scalarResultTypeId: scalarAggregateResultTypeId,
+  }) ?? meta;
 };
 
 const getCalleeTypeId = ({
@@ -524,6 +587,17 @@ const getCalleeTypeId = ({
 
   return getRequiredExprType(expr.callee, ctx, typeInstanceId);
 };
+
+const shouldCompileIntrinsicCall = ({
+  intrinsicName,
+  usesSignature,
+}: {
+  intrinsicName: string;
+  usesSignature: boolean;
+}): boolean =>
+  usesSignature !== true ||
+  intrinsicName === "__retain_callback" ||
+  intrinsicName === "__boundary_retain_callback";
 
 const resolveTargetFunctionId = ({
   targets,

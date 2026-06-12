@@ -5,7 +5,15 @@ obj Worker {
   value: i32,
 }
 
+obj Assistant {
+  value: i32,
+}
+
 impl Runner for Worker
+  fn run(self) -> i32
+    effectful_value()
+
+impl Runner for Assistant
   fn run(self) -> i32
     effectful_value()
 

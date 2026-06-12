@@ -30,6 +30,7 @@ export const bindObjectDecl = (
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
+  const boundaryMetadata = boundaryMetadataFromAttribute(decl.form.attributes?.boundary);
   reportOverloadNameCollision({
     name: decl.name.value,
     scope: tracker.current(),
@@ -41,7 +42,12 @@ export const bindObjectDecl = (
     name: decl.name.value,
     kind: "type",
     declaredAt: decl.form.syntaxId,
-    metadata: { entity: "object", objectKind: decl.objectKind, ...intrinsicTypeMetadata },
+    metadata: {
+      entity: "object",
+      objectKind: decl.objectKind,
+      ...intrinsicTypeMetadata,
+      ...(boundaryMetadata ? { boundary: boundaryMetadata } : {}),
+    },
   });
 
   const objectScope = ctx.symbolTable.createScope({
@@ -100,6 +106,20 @@ export const bindObjectDecl = (
     moduleIndex: ctx.nextModuleIndex++,
     documentation: declarationDocForSyntax(decl.name, ctx),
   });
+};
+
+const boundaryMetadataFromAttribute = (value: unknown): unknown | undefined => {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as { type?: unknown; field?: unknown };
+  if (record.type !== "value" && record.type !== "payload") {
+    return undefined;
+  }
+  return {
+    type: record.type,
+    ...(typeof record.field === "string" ? { field: record.field } : {}),
+  };
 };
 
 export const resolveObjectDecl = (

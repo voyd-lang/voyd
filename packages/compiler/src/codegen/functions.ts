@@ -16,6 +16,7 @@ import {
   allocateTempLocal,
   createStorageRefBinding,
   loadBindingValue,
+  storeScalarAggregateBindingValue,
   storeLocalValue,
 } from "./locals.js";
 import {
@@ -58,11 +59,38 @@ import {
   emitExportAbiSection,
   type ExportAbiEntry,
 } from "./exports/export-abi.js";
+import {
+  BoundarySchemaError,
+  deriveBoundarySchema,
+  type BoundarySchema,
+} from "./boundary/schema.js";
 import { resolveSerializerForTypes } from "./serializer.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
 import { boxSignatureSpillValue, unboxSignatureSpillValue } from "./signature-spill.js";
+import { createSerializedExportSpecialCaseResolver } from "./serialized-export-special-cases.js";
+import {
+  markStaticEffectSpecializationCompiled,
+  takePendingStaticEffectSpecializations,
+  type StaticEffectSpecialization,
+} from "./effects/static-specialization.js";
+import {
+  markReceiverSpecializationCompiled,
+  takePendingReceiverSpecializations,
+  type ReceiverSpecialization,
+} from "./receiver-specialization.js";
+import {
+  createScalarAggregateTempBinding,
+  loadScalarAggregateBindingAbiValue,
+  tryBindScalarAggregateParameter,
+  tryStoreScalarAggregateExpression,
+} from "./optimization/scalar-aggregates.js";
+import {
+  markScalarAggregateCallSpecializationCompiled,
+  takePendingScalarAggregateCallSpecializations,
+  type ScalarAggregateCallSpecialization,
+} from "./optimization/scalar-aggregate-calls.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -75,6 +103,12 @@ type ReachabilityState = {
 
 type FunctionMetadataRegistrationState = {
   active?: boolean;
+};
+
+type ResolvedBoundaryExportOptions = {
+  mode: "auto" | "off" | "only";
+  include?: ReadonlySet<string>;
+  onUnsupported: "skip" | "diagnostic";
 };
 
 const debugEffects = (): boolean =>
@@ -129,6 +163,114 @@ const userParamOffsetFor = (meta: FunctionMetadata): number => meta.userParamOff
 const firstUserParamIndexFor = (meta: FunctionMetadata): number =>
   meta.firstUserParamIndex;
 
+const resolveBoundaryExportOptions = (
+  ctx: CodegenContext,
+): ResolvedBoundaryExportOptions => {
+  const option = ctx.options.boundaryExports;
+  if (option === false || option === "off") {
+    return { mode: "off", onUnsupported: "skip" };
+  }
+  if (option === "auto") {
+    return { mode: "auto", onUnsupported: "skip" };
+  }
+  const mode = option.mode ?? (option.include ? "only" : "auto");
+  return {
+    mode,
+    include: option.include ? new Set(option.include) : undefined,
+    onUnsupported:
+      option.onUnsupported ??
+      (mode === "only" || option.include ? "diagnostic" : "skip"),
+  };
+};
+
+const shouldConsiderBoundaryExport = ({
+  exportName,
+  options,
+}: {
+  exportName: string;
+  options: ResolvedBoundaryExportOptions;
+}): boolean => {
+  if (options.mode === "off") return false;
+  if (options.include && !options.include.has(exportName)) return false;
+  if (options.mode === "only") return options.include?.has(exportName) ?? false;
+  return true;
+};
+
+const boundarySchemasForExport = ({
+  ctx,
+  meta,
+  exportName,
+}: {
+  ctx: CodegenContext;
+  meta: FunctionMetadata;
+  exportName: string;
+}): { params: BoundarySchema[]; result: BoundarySchema } => ({
+  params: meta.paramTypeIds.map((typeId, index) =>
+    deriveBoundarySchema({
+      typeId,
+      ctx,
+      label: `${exportName} arg${index}`,
+      options: { tagStandaloneVariants: true },
+    }),
+  ),
+  result: deriveBoundarySchema({
+    typeId: meta.resultTypeId,
+    ctx,
+    label: `${exportName} result`,
+    options: { tagStandaloneVariants: true },
+  }),
+});
+
+const reportBoundaryExportUnsupported = ({
+  ctx,
+  entry,
+  exportName,
+  error,
+}: {
+  ctx: CodegenContext;
+  entry: HirExportEntry;
+  exportName: string;
+  error: unknown;
+}): void => {
+  const message =
+    error instanceof BoundarySchemaError || error instanceof Error
+      ? error.message
+      : String(error);
+  ctx.diagnostics.report(
+    diagnosticFromCode({
+      code: "CG0001",
+      params: {
+        kind: "codegen-error",
+        message: `typed boundary export ${exportName} is not supported: ${message}`,
+      },
+      span: entry.span,
+    }),
+  );
+};
+
+const allocateBoundaryWrapperExportName = ({
+  ctx,
+  exportName,
+  reservedExportNames,
+}: {
+  ctx: CodegenContext;
+  exportName: string;
+  reservedExportNames: ReadonlySet<string>;
+}): string => {
+  const baseName = `__voyd_serialized_export_${sanitizeIdentifier(exportName)}`;
+  let index = 0;
+  while (true) {
+    const candidate = index === 0 ? baseName : `${baseName}_${index}`;
+    index += 1;
+    if (reservedExportNames.has(candidate)) {
+      continue;
+    }
+    if (ctx.programHelpers.registerExportName(candidate)) {
+      return candidate;
+    }
+  }
+};
+
 const makeAbiValue = (
   values: readonly binaryen.ExpressionRef[],
   ctx: CodegenContext,
@@ -179,6 +321,24 @@ const bindRawFunctionParameters = ({
         }),
       );
     } else {
+      if (typeof typeId === "number") {
+        const scalarized = tryBindScalarAggregateParameter({
+          symbol: param.symbol,
+          typeId,
+          mutable: param.mutable,
+          abiValues,
+          scalarAggregateAbi:
+            meta.scalarAggregateParamIndexes?.includes(index) ?? false,
+          ctx,
+          fnCtx,
+        });
+        if (scalarized) {
+          ops.push(...scalarized);
+          abiIndex += abiTypes.length;
+          return;
+        }
+      }
+
       const localType = wasmTypeFor(typeId!, ctx);
       const binding = allocateTempLocal(
         localType,
@@ -290,7 +450,7 @@ const compileDefaultParameterInitialization = ({
         `codegen missing bound parameter for optional default symbol ${param.symbol}`,
       );
     }
-    const rawParamExpr = () => loadBindingValue(rawBinding, ctx);
+    const rawParamExpr = () => loadBindingValue(rawBinding, ctx, fnCtx);
     const rawAbiTypes = binaryen.expandType(rawBinding.type);
     const [isSome, extractedSomeValue] = shouldInlineUnionLayout(rawTypeId, ctx)
       ? (() => {
@@ -543,6 +703,14 @@ const collectReachableFunctionSymbols = ({
           }
           return;
         }
+        if (expr.exprKind === "identifier") {
+          enqueueReferencedFunctionIdentifier({
+            ctx: ownerCtx,
+            symbol: expr.symbol,
+            enqueue,
+          });
+          return;
+        }
         if (expr.exprKind !== "method-call") {
           return;
         }
@@ -617,6 +785,38 @@ const markStringLiteralCtorReachable = ({
     dependency: "string-literal-constructor",
     reachable,
   });
+};
+
+const enqueueReferencedFunctionIdentifier = ({
+  ctx,
+  symbol,
+  enqueue,
+}: {
+  ctx: CodegenContext;
+  symbol: number;
+  enqueue: (symbolId: ProgramSymbolId) => void;
+}): boolean => {
+  if (!ctx.program.functions.getSignature(ctx.moduleId, symbol)) {
+    return false;
+  }
+  const targetId = ctx.program.imports.getTarget(ctx.moduleId, symbol);
+  if (typeof targetId === "number") {
+    const targetRef = ctx.program.symbols.refOf(targetId);
+    enqueue(
+      ctx.program.symbols.canonicalIdOf(
+        targetRef.moduleId,
+        targetRef.symbol,
+      ) as ProgramSymbolId,
+    );
+    return true;
+  }
+  enqueue(
+    ctx.program.symbols.canonicalIdOf(
+      ctx.moduleId,
+      symbol,
+    ) as ProgramSymbolId,
+  );
+  return true;
 };
 
 const walkFunctionReachabilityExpressions = ({
@@ -787,17 +987,21 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           );
         }
 
+        const parameterBindingKind = (index: number) =>
+          signature.parameters[index]?.bindingKind ??
+          item.parameters[index]?.pattern.bindingKind ??
+          (item.parameters[index]?.mutable ? "mutable-ref" : undefined);
         const paramAbiKinds = descriptor.parameters.map((param, index) =>
           getOptimizedParamAbiKind({
             typeId: param.type,
-            bindingKind: signature.parameters[index]?.bindingKind,
+            bindingKind: parameterBindingKind(index),
             ctx,
           }),
         );
         const paramAbiTypes = descriptor.parameters.map((param, index) =>
           getOptimizedAbiTypesForParam({
             typeId: param.type,
-            bindingKind: signature.parameters[index]?.bindingKind,
+            bindingKind: parameterBindingKind(index),
             ctx,
           }),
         );
@@ -844,13 +1048,15 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           paramTypeIds: descriptor.parameters.map((param) => param.type),
           parameters: descriptor.parameters.map((param, index) => ({
             typeId: param.type,
+            symbol: item.parameters[index]?.symbol,
             label: param.label,
             optional: param.optional,
             name:
               typeof item.parameters[index]?.symbol === "number"
                 ? symbolName(ctx, ctx.moduleId, item.parameters[index]!.symbol)
                 : undefined,
-            bindingKind: signature.parameters[index]?.bindingKind,
+            bindingKind: parameterBindingKind(index),
+            synthetic: signature.parameters[index]?.synthetic,
           })),
           paramAbiKinds,
           resultTypeId: descriptor.returnType,
@@ -932,6 +1138,14 @@ export const compileFunctions = ({
           }
           return;
         }
+        if (expr.exprKind === "identifier") {
+          enqueueReferencedFunctionIdentifier({
+            ctx,
+            symbol: expr.symbol,
+            enqueue: (symbolId) => reachableFunctions.add(symbolId),
+          });
+          return;
+        }
         if (expr.exprKind === "literal" && expr.literalKind === "string") {
           markStringLiteralCtorReachable({ ctx, reachable: reachableFunctions });
           return;
@@ -953,6 +1167,9 @@ export const compileFunctions = ({
       compiledCount += 1;
     });
   }
+  compiledCount += compilePendingStaticEffectSpecializations(ctx);
+  compiledCount += compilePendingReceiverSpecializations(ctx);
+  compiledCount += compilePendingScalarAggregateCallSpecializations(ctx);
   return compiledCount;
 };
 
@@ -1085,10 +1302,12 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         ),
         parameters: instantiatedTypeDesc.parameters.map((param, index) => ({
           typeId: param.type,
+          symbol: signature.parameters[index]?.symbol,
           label: param.label,
           optional: param.optional,
           name: signature.parameters[index]?.name,
           bindingKind: signature.parameters[index]?.bindingKind,
+          synthetic: signature.parameters[index]?.synthetic,
         })),
         paramAbiKinds,
         resultTypeId: instantiatedTypeDesc.returnType,
@@ -1113,6 +1332,8 @@ export const emitModuleExports = (
 ): void => {
   const effectfulExports: EffectfulExportTarget[] = [];
   const exportAbiEntries: ExportAbiEntry[] = [];
+  const boundaryExportOptions = resolveBoundaryExportOptions(ctx);
+  const emittedBoundaryExports = new Set<string>();
 
   const emitEffectfulWasmExportWrapper = ({
     ctx: exportCtx,
@@ -1146,8 +1367,36 @@ export const emitModuleExports = (
   const testScope = ctx.options.testScope ?? "all";
   const exportContexts =
     ctx.options.testMode && testScope === "all" ? contexts : [ctx];
+  const reservedExportNames = new Set<string>();
   exportContexts.forEach((exportCtx) => {
     const exportEntries = getModuleExportEntries(exportCtx);
+    exportEntries.forEach((entry) => {
+      const baseExportName =
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol);
+      reservedExportNames.add(
+        exportCtx.options.testMode
+          ? formatTestExportName({
+              moduleId: exportCtx.moduleId,
+              testId: baseExportName,
+            })
+          : baseExportName,
+      );
+    });
+    const metaForEntry = (entry: HirExportEntry): FunctionMetadata | undefined => {
+      const metas = getFunctionMetas(
+        exportCtx,
+        exportCtx.moduleId,
+        entry.symbol,
+      );
+      return metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
+    };
+    const resolveSpecialSerializedExport = createSerializedExportSpecialCaseResolver({
+      entries: exportEntries,
+      exportNameForEntry: (entry) =>
+        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol),
+      metaForEntry,
+      ctx: exportCtx,
+    });
 
     exportEntries.forEach((entry) => {
       const intrinsicMetadata =
@@ -1160,14 +1409,7 @@ export const emitModuleExports = (
       ) {
         return;
       }
-      const metas = getFunctionMetas(
-        exportCtx,
-        exportCtx.moduleId,
-        entry.symbol,
-      );
-      const meta =
-        metas?.find((candidate) => candidate.typeArgs.length === 0) ??
-        metas?.[0];
+      const meta = metaForEntry(entry);
       if (!meta) {
         reportMissingExportedGenericInstantiation({ ctx: exportCtx, entry });
         return;
@@ -1183,13 +1425,13 @@ export const emitModuleExports = (
       if (!exportCtx.programHelpers.registerExportName(exportName)) {
         return;
       }
-      if (meta.effectful) {
-        emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
+        if (meta.effectful) {
+          emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
 
         if (meta.paramTypes.length > firstUserParamIndexFor(meta)) {
           return;
         }
-        const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
+          const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
         const serializer = resolveSerializerForTypes(
           [meta.resultTypeId],
           exportCtx,
@@ -1241,15 +1483,36 @@ export const emitModuleExports = (
         return;
       }
 
-      if (serializer) {
-        markSerializerReachable({ ctx: exportCtx, serializer });
+      const specialSerializedExport = resolveSpecialSerializedExport({
+        exportName,
+        meta,
+      });
+
+      if (serializer || specialSerializedExport) {
+        if (serializer) {
+          markSerializerReachable({ ctx: exportCtx, serializer });
+        }
         try {
-          emitSerializedExportWrapper({ ctx: exportCtx, meta, exportName });
+          emitSerializedExportWrapper({
+            ctx: exportCtx,
+            meta,
+            exportName,
+            typeAdapter: specialSerializedExport?.typeAdapter,
+          });
           exportAbiEntries.push({
             name: exportName,
             abi: "serialized",
-            formatId: serializer.formatId,
+            formatId: "msgpack",
+            ...(specialSerializedExport?.params
+              ? { params: specialSerializedExport.params }
+              : {}),
+            ...(specialSerializedExport?.result
+              ? { result: specialSerializedExport.result }
+              : {}),
           });
+          if (specialSerializedExport) {
+            emittedBoundaryExports.add(exportName);
+          }
         } catch (error) {
           exportCtx.diagnostics.report(
             diagnosticFromCode({
@@ -1266,9 +1529,73 @@ export const emitModuleExports = (
       }
 
       exportCtx.mod.addFunctionExport(meta.wasmName, exportName);
+      if (
+        !exportCtx.options.testMode &&
+        shouldConsiderBoundaryExport({
+          exportName,
+          options: boundaryExportOptions,
+        })
+      ) {
+        try {
+          const schemas = boundarySchemasForExport({
+            ctx: exportCtx,
+            meta,
+            exportName,
+          });
+          const wrapperExportName = allocateBoundaryWrapperExportName({
+            ctx: exportCtx,
+            exportName,
+            reservedExportNames,
+          });
+          const wrapper = emitSerializedExportWrapper({
+            ctx: exportCtx,
+            meta,
+            exportName,
+            wrapperExportName,
+          });
+          exportAbiEntries.push({
+            name: exportName,
+            abi: "serialized",
+            wrapperName: wrapper.wrapperName,
+            formatId: wrapper.formatId,
+            params: schemas.params,
+            result: schemas.result,
+          });
+          emittedBoundaryExports.add(exportName);
+          return;
+        } catch (error) {
+          if (
+            boundaryExportOptions.mode === "only" ||
+            boundaryExportOptions.onUnsupported === "diagnostic"
+          ) {
+            reportBoundaryExportUnsupported({
+              ctx: exportCtx,
+              entry,
+              exportName,
+              error,
+            });
+          }
+        }
+      }
       exportAbiEntries.push({ name: exportName, abi: "direct" });
     });
   });
+
+  if (boundaryExportOptions.include) {
+    boundaryExportOptions.include?.forEach((name) => {
+      if (emittedBoundaryExports.has(name)) return;
+      ctx.diagnostics.report(
+        diagnosticFromCode({
+          code: "CG0001",
+          params: {
+            kind: "codegen-error",
+            message: `typed boundary export ${name} was requested but was not emitted`,
+          },
+          span: ctx.module.hir.module.span,
+        }),
+      );
+    });
+  }
 
   if (exportAbiEntries.length > 0) {
     emitExportAbiSection({ mod: ctx.mod, entries: exportAbiEntries });
@@ -1359,6 +1686,7 @@ const compileFunctionItem = (
       typeInstanceId: meta.instanceId,
       effectful: true,
       currentHandler: { index: 0, type: handlerParamType },
+      exactParameterTypes: ctx.optimization?.exactParameterTypes.get(meta.instanceId),
     };
     if (meta.resultAbiKind === "out_ref") {
       implCtx.returnOutPointer = createStorageRefBinding({
@@ -1490,6 +1818,7 @@ const compileFunctionItem = (
     instanceId: meta.instanceId,
     typeInstanceId: meta.instanceId,
     effectful: meta.effectful,
+    exactParameterTypes: ctx.optimization?.exactParameterTypes.get(meta.instanceId),
   };
   if (meta.effectful) {
     fnCtx.currentHandler = {
@@ -1519,6 +1848,24 @@ const compileFunctionItem = (
     ctx,
     fnCtx,
   });
+  const scalarResultBody = compileScalarAggregateFunctionResult({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+    paramInitOps,
+    defaultInitOps,
+  });
+  if (scalarResultBody) {
+    ctx.mod.addFunction(
+      meta.wasmName,
+      binaryen.createType(meta.paramTypes as number[]),
+      meta.resultType,
+      fnCtx.locals,
+      scalarResultBody,
+    );
+    return;
+  }
 
   const body = compileExpression({
     exprId: fn.body,
@@ -1607,6 +1954,533 @@ const compileFunctionItem = (
     fnCtx.locals,
     functionBody,
   );
+};
+
+const compileScalarAggregateFunctionResult = ({
+  fn,
+  meta,
+  ctx,
+  fnCtx,
+  paramInitOps,
+  defaultInitOps,
+}: {
+  fn: HirFunction;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  paramInitOps: readonly binaryen.ExpressionRef[];
+  defaultInitOps: readonly binaryen.ExpressionRef[];
+}): binaryen.ExpressionRef | undefined => {
+  if (!meta.scalarAggregateResult) {
+    return undefined;
+  }
+  const structInfo = getStructuralTypeInfo(meta.resultTypeId, ctx);
+  if (!structInfo) {
+    return undefined;
+  }
+  const binding = createScalarAggregateTempBinding({
+    typeId: meta.resultTypeId,
+    structInfo,
+    ctx,
+    fnCtx,
+  });
+  const scalarStores = tryStoreScalarAggregateExpression({
+    binding,
+    exprId: fn.body,
+    targetTypeId: meta.resultTypeId,
+    ctx,
+    fnCtx,
+    compileExpr: compileExpression,
+  });
+  const setup = scalarStores ?? [
+    storeScalarAggregateBindingValue({
+      binding,
+      value: compileExpression({
+        exprId: fn.body,
+        ctx,
+        fnCtx,
+        tailPosition: false,
+        expectedResultTypeId: meta.resultTypeId,
+      }).expr,
+      ctx,
+      fnCtx,
+    }),
+  ];
+  const result = loadScalarAggregateBindingAbiValue({ binding, ctx });
+  return ctx.mod.block(
+    null,
+    [...paramInitOps, ...defaultInitOps, ...setup, result],
+    meta.resultType,
+  );
+};
+
+const compileStaticEffectSpecialization = (
+  specialization: StaticEffectSpecialization,
+  ctx: CodegenContext,
+): void => {
+  const { item: fn, meta, context } = specialization;
+  if (ctx.mod.getFunction(meta.wasmName) !== 0) {
+    markStaticEffectSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+    return;
+  }
+
+  const fnCtx: FunctionContext = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals: [],
+    nextLocalIndex: meta.paramTypes.length,
+    returnTypeId: meta.resultTypeId,
+    returnWasmType: meta.resultType,
+    returnAbiKind: meta.resultAbiKind,
+    instanceId: meta.instanceId,
+    typeInstanceId: meta.instanceId,
+    effectful: meta.effectful,
+    staticEffectContext: context,
+    exactParameterTypes: meta.exactParameterTypes,
+  };
+  if (meta.effectful) {
+    fnCtx.currentHandler = {
+      index: 0,
+      type: ctx.effectsBackend.abi.hiddenHandlerParamType(ctx),
+    };
+  }
+  const paramInitOps = bindRawFunctionParameters({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+    handlerOffset: firstUserParamIndexFor(meta),
+  });
+  const captureStart = fn.parameters.reduce(
+    (offset, _param, index) =>
+      offset + (meta.paramAbiTypes[index]?.length ?? 0),
+    firstUserParamIndexFor(meta),
+  );
+  context.captures.forEach((capture, index) => {
+    const paramIndex = captureStart + index;
+    if (capture.mode === "storage-ref") {
+      fnCtx.bindings.set(
+        capture.symbol,
+        createStorageRefBinding({
+          index: paramIndex,
+          typeId: capture.typeId,
+          mutable: capture.mutable,
+          ctx,
+        }),
+      );
+      return;
+    }
+    fnCtx.bindings.set(capture.symbol, {
+      kind: "local",
+      index: paramIndex,
+      type: capture.wasmType,
+      storageType: capture.paramType,
+      typeId: capture.typeId,
+    });
+  });
+  const defaultInitOps = compileDefaultParameterInitialization({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+  });
+  const body = compileExpression({
+    exprId: fn.body,
+    ctx,
+    fnCtx,
+    tailPosition: !meta.effectful,
+    expectedResultTypeId: fnCtx.returnTypeId,
+  });
+  const bodyExpr =
+    defaultInitOps.length > 0
+      ? ctx.mod.block(
+          null,
+          [...paramInitOps, ...defaultInitOps, body.expr],
+          binaryen.getExpressionType(body.expr),
+        )
+      : paramInitOps.length > 0
+        ? ctx.mod.block(
+            null,
+            [...paramInitOps, body.expr],
+            binaryen.getExpressionType(body.expr),
+          )
+        : body.expr;
+  const bodyExprType = binaryen.getExpressionType(bodyExpr);
+  const shouldWrapOutcome =
+    meta.effectful &&
+    !isOutcomeCarrierType({
+      wasmType: bodyExprType,
+      ctx,
+    });
+  const rawFunctionBody = shouldWrapOutcome
+    ? wrapValueInOutcome({
+        valueExpr: bodyExpr,
+        valueType: wasmTypeFor(meta.resultTypeId, ctx),
+        typeId: meta.resultTypeId,
+        ctx,
+        fnCtx,
+      })
+    : bodyExpr;
+  const functionBody =
+    !meta.effectful &&
+    meta.resultTypeId !== ctx.program.primitives.void &&
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.none &&
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.unreachable
+      ? boxSignatureSpillValue({
+          value: rawFunctionBody,
+          typeId: meta.resultTypeId,
+          ctx,
+          fnCtx,
+        })
+      : rawFunctionBody;
+
+  ctx.mod.addFunction(
+    meta.wasmName,
+    binaryen.createType(meta.paramTypes as number[]),
+    meta.resultType,
+    fnCtx.locals,
+    functionBody,
+  );
+  markStaticEffectSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+};
+
+const compilePendingStaticEffectSpecializations = (
+  ctx: CodegenContext,
+): number => {
+  const pending = takePendingStaticEffectSpecializations(ctx);
+  pending.forEach((specialization) =>
+    compileStaticEffectSpecialization(specialization, ctx)
+  );
+  return pending.length;
+};
+
+const compileReceiverSpecialization = (
+  specialization: ReceiverSpecialization,
+  ctx: CodegenContext,
+): void => {
+  const { item: fn, meta, exactParameterTypes } = specialization;
+  if (ctx.mod.getFunction(meta.wasmName) !== 0) {
+    markReceiverSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+    return;
+  }
+
+  const effectInfo = effectsFacade(ctx).functionAbi(fn.symbol);
+  if (!effectInfo) {
+    throw new Error(
+      `codegen missing effect information for receiver specialization ${fn.symbol}`,
+    );
+  }
+  const needsWrapper =
+    effectInfo.abiEffectful && effectInfo.typeEffectful === false;
+  const handlerParamType = ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
+  if (needsWrapper) {
+    const implSignature = ctx.effectsBackend.abi.widenSignature({
+      ctx,
+      effectful: true,
+      userParamTypes: meta.paramTypes,
+      userResultType: meta.resultType,
+    });
+    const implName = `${meta.wasmName}__effectful_impl`;
+    const implCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [],
+      nextLocalIndex: implSignature.paramTypes.length,
+      returnTypeId: meta.resultTypeId,
+      returnWasmType: ctx.effectsBackend.abi.effectfulResultType(ctx),
+      returnAbiKind: meta.resultAbiKind,
+      instanceId: meta.instanceId,
+      typeInstanceId: meta.instanceId,
+      effectful: true,
+      currentHandler: { index: 0, type: handlerParamType },
+      exactParameterTypes,
+    };
+    if (meta.resultAbiKind === "out_ref") {
+      implCtx.returnOutPointer = createStorageRefBinding({
+        index: implSignature.userParamOffset,
+        typeId: meta.resultTypeId,
+        mutable: true,
+        ctx,
+      });
+    }
+
+    const paramInitOps = bindRawFunctionParameters({
+      fn,
+      meta,
+      ctx,
+      fnCtx: implCtx,
+      handlerOffset:
+        implSignature.userParamOffset + (meta.outParamType ? 1 : 0),
+    });
+    const defaultInitOps = compileDefaultParameterInitialization({
+      fn,
+      meta,
+      ctx,
+      fnCtx: implCtx,
+    });
+    const implBody = compileExpression({
+      exprId: fn.body,
+      ctx,
+      fnCtx: implCtx,
+      tailPosition: false,
+      expectedResultTypeId: implCtx.returnTypeId,
+      outResultStorageRef:
+        meta.resultAbiKind === "out_ref" && implCtx.returnOutPointer
+          ? ctx.mod.local.get(
+              implCtx.returnOutPointer.index,
+              implCtx.returnOutPointer.storageType,
+            )
+          : undefined,
+    });
+    const implBodyExpr =
+      defaultInitOps.length > 0
+        ? ctx.mod.block(
+            null,
+            [...paramInitOps, ...defaultInitOps, implBody.expr],
+            binaryen.getExpressionType(implBody.expr),
+          )
+        : paramInitOps.length > 0
+          ? ctx.mod.block(
+              null,
+              [...paramInitOps, implBody.expr],
+              binaryen.getExpressionType(implBody.expr),
+            )
+          : implBody.expr;
+    const implFunctionBody =
+      meta.resultAbiKind === "out_ref" && implCtx.returnOutPointer
+        ? (binaryen.getExpressionType(implBodyExpr) === binaryen.none ||
+            binaryen.getExpressionType(implBodyExpr) === binaryen.unreachable
+            ? implBodyExpr
+            : ctx.mod.block(
+                null,
+                [
+                  storeValueIntoStorageRef({
+                    pointer: () =>
+                      ctx.mod.local.get(
+                        implCtx.returnOutPointer!.index,
+                        implCtx.returnOutPointer!.storageType,
+                      ),
+                    value: implBodyExpr,
+                    typeId: meta.resultTypeId,
+                    ctx,
+                    fnCtx: implCtx,
+                  }),
+                ],
+                binaryen.none,
+              ))
+        : implBodyExpr;
+    const wrappedValueType =
+      meta.resultAbiKind === "out_ref"
+        ? binaryen.none
+        : wasmTypeFor(meta.resultTypeId, ctx);
+    const implExprType = binaryen.getExpressionType(implFunctionBody);
+    const functionBody = !isOutcomeCarrierType({
+      wasmType: implExprType,
+      ctx,
+    })
+      ? wrapValueInOutcome({
+          valueExpr: implFunctionBody,
+          valueType: wrappedValueType,
+          typeId: meta.resultTypeId,
+          ctx,
+          fnCtx: implCtx,
+        })
+      : implFunctionBody;
+
+    ctx.mod.addFunction(
+      implName,
+      binaryen.createType(implSignature.paramTypes as number[]),
+      ctx.effectsBackend.abi.effectfulResultType(ctx),
+      implCtx.locals,
+      functionBody,
+    );
+
+    emitPureSurfaceWrapper({
+      ctx,
+      wrapperName: meta.wasmName,
+      wrapperParamTypes: meta.paramTypes as number[],
+      wrapperResultType: meta.resultType,
+      wrapperResultTypeId: meta.resultTypeId,
+      wrapperStoresResultByRef: meta.resultAbiKind === "out_ref",
+      implName,
+      buildImplCallArgs: () => [
+        ctx.effectsBackend.abi.hiddenHandlerValue(ctx),
+        ...meta.paramTypes.map((type, index) =>
+          ctx.mod.local.get(index, type as number),
+        ),
+      ],
+    });
+    markReceiverSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+    return;
+  }
+
+  const fnCtx: FunctionContext = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals: [],
+    nextLocalIndex: meta.paramTypes.length,
+    returnTypeId: meta.resultTypeId,
+    returnWasmType: meta.resultType,
+    returnAbiKind: meta.resultAbiKind,
+    instanceId: meta.instanceId,
+    typeInstanceId: meta.instanceId,
+    effectful: meta.effectful,
+    exactParameterTypes,
+  };
+  if (meta.effectful) {
+    fnCtx.currentHandler = {
+      index: 0,
+      type: ctx.effectsBackend.abi.hiddenHandlerParamType(ctx),
+    };
+  }
+  if (meta.resultAbiKind === "out_ref") {
+    fnCtx.returnOutPointer = createStorageRefBinding({
+      index: userParamOffsetFor(meta),
+      typeId: meta.resultTypeId,
+      mutable: true,
+      ctx,
+    });
+  }
+
+  const paramInitOps = bindRawFunctionParameters({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+    handlerOffset: firstUserParamIndexFor(meta),
+  });
+  const defaultInitOps = compileDefaultParameterInitialization({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+  });
+  const body = compileExpression({
+    exprId: fn.body,
+    ctx,
+    fnCtx,
+    tailPosition: !meta.effectful,
+    expectedResultTypeId: fnCtx.returnTypeId,
+    outResultStorageRef:
+      meta.resultAbiKind === "out_ref" && fnCtx.returnOutPointer
+        ? ctx.mod.local.get(
+            fnCtx.returnOutPointer.index,
+            fnCtx.returnOutPointer.storageType,
+          )
+        : undefined,
+  });
+  const bodyExpr =
+    defaultInitOps.length > 0
+      ? ctx.mod.block(
+          null,
+          [...paramInitOps, ...defaultInitOps, body.expr],
+          binaryen.getExpressionType(body.expr),
+        )
+      : paramInitOps.length > 0
+        ? ctx.mod.block(
+            null,
+            [...paramInitOps, body.expr],
+            binaryen.getExpressionType(body.expr),
+          )
+        : body.expr;
+  const functionBodyBeforeWrap =
+    meta.resultAbiKind === "out_ref" && fnCtx.returnOutPointer
+      ? (binaryen.getExpressionType(bodyExpr) === binaryen.none ||
+          binaryen.getExpressionType(bodyExpr) === binaryen.unreachable
+          ? bodyExpr
+          : ctx.mod.block(
+              null,
+              [
+                storeValueIntoStorageRef({
+                  pointer: () =>
+                    ctx.mod.local.get(
+                      fnCtx.returnOutPointer!.index,
+                      fnCtx.returnOutPointer!.storageType,
+                    ),
+                  value: bodyExpr,
+                  typeId: meta.resultTypeId,
+                  ctx,
+                  fnCtx,
+                }),
+              ],
+              binaryen.none,
+            ))
+      : bodyExpr;
+  const bodyExprType = binaryen.getExpressionType(functionBodyBeforeWrap);
+  const wrappedValueType =
+    meta.resultAbiKind === "out_ref"
+      ? binaryen.none
+      : wasmTypeFor(meta.resultTypeId, ctx);
+  const shouldWrapOutcome =
+    meta.effectful &&
+    !isOutcomeCarrierType({
+      wasmType: bodyExprType,
+      ctx,
+    });
+  const rawFunctionBody = shouldWrapOutcome
+    ? wrapValueInOutcome({
+        valueExpr: functionBodyBeforeWrap,
+        valueType: wrappedValueType,
+        typeId: meta.resultTypeId,
+        ctx,
+        fnCtx,
+      })
+    : functionBodyBeforeWrap;
+  const functionBody =
+    !meta.effectful &&
+    meta.resultTypeId !== ctx.program.primitives.void &&
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.none &&
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.unreachable
+      ? boxSignatureSpillValue({
+          value: rawFunctionBody,
+          typeId: meta.resultTypeId,
+          ctx,
+          fnCtx,
+        })
+      : rawFunctionBody;
+
+  ctx.mod.addFunction(
+    meta.wasmName,
+    binaryen.createType(meta.paramTypes as number[]),
+    meta.resultType,
+    fnCtx.locals,
+    functionBody,
+  );
+  markReceiverSpecializationCompiled({ ctx, wasmName: meta.wasmName });
+};
+
+const compilePendingReceiverSpecializations = (
+  ctx: CodegenContext,
+): number => {
+  const pending = takePendingReceiverSpecializations(ctx);
+  pending.forEach((specialization) =>
+    compileReceiverSpecialization(specialization, ctx)
+  );
+  return pending.length;
+};
+
+const compileScalarAggregateCallSpecialization = (
+  specialization: ScalarAggregateCallSpecialization,
+  ctx: CodegenContext,
+): void => {
+  const { item, meta } = specialization;
+  if (ctx.mod.getFunction(meta.wasmName) === 0) {
+    compileFunctionItem(item, meta, ctx);
+  }
+  markScalarAggregateCallSpecializationCompiled({
+    ctx,
+    wasmName: meta.wasmName,
+  });
+};
+
+const compilePendingScalarAggregateCallSpecializations = (
+  ctx: CodegenContext,
+): number => {
+  const pending = takePendingScalarAggregateCallSpecializations(ctx);
+  pending.forEach((specialization) =>
+    compileScalarAggregateCallSpecialization(specialization, ctx),
+  );
+  return pending.length;
 };
 
 const makeFunctionName = (

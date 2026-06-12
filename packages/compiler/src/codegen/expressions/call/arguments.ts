@@ -10,17 +10,23 @@ import type {
   FunctionMetadata,
   HirCallExpr,
   HirExprId,
+  LocalBindingScalarAggregate,
   SymbolId,
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 import type { CallArgumentPlanEntry } from "../../../semantics/typing/types.js";
-import { compileOptionalNoneValue } from "../../optionals.js";
+import {
+  compileOptionalNoneValue,
+  compileOptionalSomeValue,
+} from "../../optionals.js";
+import { stableCallsiteIdFor } from "../../../stable-callsite-id.js";
 import {
   coerceValueToType,
   loadStructuralField,
 } from "../../structural.js";
 import {
+  abiTypeFor,
   getInlineHeapBoxType,
   getRequiredExprType,
   getStructuralTypeInfo,
@@ -33,19 +39,76 @@ import {
   loadLocalValue,
   loadBindingValue,
   loadBindingStorageRef,
+  materializeOwnedBinding,
   storeLocalValue,
+  loadScalarAggregateBindingField,
+  storeScalarAggregateBindingValue,
 } from "../../locals.js";
 import {
   materializeProjectedElementBinding,
   tryCompileProjectedElementStorageRefExpr,
 } from "../../projected-element-views.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
+import { captureMultivalueLanes } from "../../multivalue.js";
+import {
+  getOrCreateScalarAggregateCallSpecialization,
+  scalarAggregateParameterCanUseSpecializedAbi,
+} from "../../optimization/scalar-aggregate-calls.js";
+import {
+  canStoreScalarAggregateExpression,
+  createScalarAggregateTempBinding,
+  tryStoreScalarAggregateExpression,
+} from "../../optimization/scalar-aggregates.js";
 import type {
   CallParam,
   CompileCallArgumentOptions,
   CompiledCallArgumentsForParams,
   PlannedCallArguments,
 } from "./types.js";
+
+type ScalarAggregateCallArg =
+  | { kind: "binding"; symbol: SymbolId; typeId: TypeId }
+  | { kind: "expression"; exprId: HirExprId; typeId: TypeId };
+
+const heapObjectScalarArgumentNeedsProducerSpecialization = ({
+  exprId,
+  ctx,
+}: {
+  exprId: HirExprId;
+  ctx: CodegenContext;
+}): boolean => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (!expr) {
+    return true;
+  }
+  if (expr.exprKind === "call" || expr.exprKind === "method-call") {
+    return true;
+  }
+  if (expr.exprKind === "block") {
+    return typeof expr.value !== "number"
+      ? false
+      : heapObjectScalarArgumentNeedsProducerSpecialization({
+          exprId: expr.value,
+          ctx,
+        });
+  }
+  if (expr.exprKind === "if" || expr.exprKind === "cond") {
+    return (
+      expr.branches.some((branch) =>
+        heapObjectScalarArgumentNeedsProducerSpecialization({
+          exprId: branch.value,
+          ctx,
+        }),
+      ) ||
+      (typeof expr.defaultBranch === "number" &&
+        heapObjectScalarArgumentNeedsProducerSpecialization({
+          exprId: expr.defaultBranch,
+          ctx,
+        }))
+    );
+  }
+  return false;
+};
 
 export const compileCallArguments = ({
   call,
@@ -60,6 +123,28 @@ export const compileCallArguments = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): binaryen.ExpressionRef[] => {
+  return compileCallArgumentsWithMetadata({
+    call,
+    meta,
+    ctx,
+    fnCtx,
+    compileExpr,
+  }).args;
+};
+
+export const compileCallArgumentsWithMetadata = ({
+  call,
+  meta,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  call: HirCallExpr;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): { args: binaryen.ExpressionRef[]; meta: FunctionMetadata } => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typedPlan = resolveTypedCallArgumentPlan({
     callId: call.id,
@@ -67,10 +152,11 @@ export const compileCallArguments = ({
     ctx,
   });
 
-  return compileCallArgumentsForParams({
+  const compiled = compileCallArgumentsForParamsWithDetails({
     call,
     params: meta.parameters,
     paramAbiKinds: meta.paramAbiKinds,
+    meta,
     ctx,
     fnCtx,
     compileExpr,
@@ -79,12 +165,14 @@ export const compileCallArguments = ({
       typedPlan,
     },
   });
+  return { args: compiled.args, meta: compiled.meta ?? meta };
 };
 
 export const compileCallArgumentsForParams = ({
   call,
   params,
   paramAbiKinds,
+  meta,
   ctx,
   fnCtx,
   compileExpr,
@@ -93,6 +181,7 @@ export const compileCallArgumentsForParams = ({
   call: HirCallExpr;
   params: readonly CallParam[];
   paramAbiKinds?: readonly string[];
+  meta?: FunctionMetadata;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -102,6 +191,7 @@ export const compileCallArgumentsForParams = ({
     call,
     params,
     paramAbiKinds,
+    meta,
     ctx,
     fnCtx,
     compileExpr,
@@ -112,6 +202,7 @@ export const compileCallArgumentsForParamsWithDetails = ({
   call,
   params,
   paramAbiKinds,
+  meta,
   ctx,
   fnCtx,
   compileExpr,
@@ -120,6 +211,7 @@ export const compileCallArgumentsForParamsWithDetails = ({
   call: HirCallExpr;
   params: readonly CallParam[];
   paramAbiKinds?: readonly string[];
+  meta?: FunctionMetadata;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -158,6 +250,57 @@ export const compileCallArgumentsForParamsWithDetails = ({
         argIndexOffset,
       });
 
+  const scalarAggregateArgs = meta
+    ? collectScalarAggregateCallArgs({
+        plan: planned.plan,
+        callArgs: call.args,
+        meta,
+        ctx,
+        fnCtx,
+      })
+    : new Map<number, ScalarAggregateCallArg>();
+  const tempArgIndexes = new Set(
+    (ctx.effectLowering.callArgTemps.get(call.id) ?? [])
+      .filter((entry) => entry.argIndex >= 0)
+      .map((entry) => entry.argIndex),
+  );
+  const eligibleScalarAggregateArgs = new Map(
+    Array.from(scalarAggregateArgs.entries()).filter(([paramIndex]) => {
+      const entry = planned.plan[paramIndex];
+      return (
+        entry?.kind === "direct" &&
+        !tempArgIndexes.has(entry.argIndex + argIndexOffset)
+      );
+    }),
+  );
+  const resolvedMeta =
+    meta && eligibleScalarAggregateArgs.size > 0
+      ? getOrCreateScalarAggregateCallSpecialization({
+          ctx,
+          meta,
+          paramIndexes: new Set(eligibleScalarAggregateArgs.keys()),
+        }) ?? meta
+      : meta;
+  const selectedScalarParams = new Set(
+    resolvedMeta?.scalarAggregateParamIndexes ?? [],
+  );
+  const selectedScalarArgs = new Map(
+    Array.from(eligibleScalarAggregateArgs.entries()).filter(([paramIndex]) =>
+      selectedScalarParams.has(paramIndex),
+    ),
+  );
+  const selectedScalarArgsByArgIndex = new Map<number, ScalarAggregateCallArg>();
+  planned.plan.forEach((entry, paramIndex) => {
+    if (entry.kind !== "direct") {
+      return;
+    }
+    const scalarArg = selectedScalarArgs.get(paramIndex);
+    if (scalarArg) {
+      selectedScalarArgsByArgIndex.set(entry.argIndex, scalarArg);
+    }
+  });
+  const scalarOverrideArgIndexes = new Set(selectedScalarArgsByArgIndex.keys());
+
   const consumedArgs = call.args.slice(0, planned.consumedArgCount);
   const preservedArgIndexes = collectPreservedStorageRefArgIndexes({
     plan: planned.plan,
@@ -170,6 +313,21 @@ export const compileCallArgumentsForParamsWithDetails = ({
     allArgExprIds: allCallArgExprIds ?? call.args.map((arg) => arg.expr),
     expectedTypeIdAt: (index) => planned.expectedTypeByArgIndex.get(index),
     preserveStorageRefsAt: (index) => preservedArgIndexes.has(index + argIndexOffset),
+    compileOverrideAt: (_arg, index) => {
+      const scalarArg = selectedScalarArgsByArgIndex.get(index);
+      if (!scalarArg) {
+        return undefined;
+      }
+      return {
+        expr: scalarAggregateArgumentValueForCallArg({
+          arg: scalarArg,
+          ctx,
+          fnCtx,
+          compileExpr,
+        }),
+        skipCoercion: true,
+      };
+    },
     ctx,
     fnCtx,
     compileExpr,
@@ -179,15 +337,210 @@ export const compileCallArgumentsForParamsWithDetails = ({
     plan: planned.plan,
     compiledArgs,
     callArgs: call.args,
-    paramTypeIds: params.map((param) => param.typeId),
-    paramAbiKinds,
+    paramTypeIds: resolvedMeta?.paramTypeIds ?? params.map((param) => param.typeId),
+    paramAbiKinds: resolvedMeta?.paramAbiKinds ?? paramAbiKinds,
+    scalarOverrideArgIndexes,
     typeInstanceId,
     ctx,
     fnCtx,
     compileExpr,
   });
 
-  return { args, consumedArgCount: planned.consumedArgCount };
+  return {
+    args,
+    consumedArgCount: planned.consumedArgCount,
+    meta: resolvedMeta ?? meta,
+  };
+};
+
+const collectScalarAggregateCallArgs = ({
+  plan,
+  callArgs,
+  meta,
+  ctx,
+  fnCtx,
+}: {
+  plan: readonly CallArgumentPlanEntry[];
+  callArgs: readonly HirCallExpr["args"][number][];
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): Map<number, ScalarAggregateCallArg> => {
+  const bindings = new Map<number, ScalarAggregateCallArg>();
+  plan.forEach((entry, paramIndex) => {
+    if (
+      entry.kind !== "direct" ||
+      entry.argIndex !== 0 ||
+      meta.paramAbiKinds[paramIndex] !== "direct" ||
+      !scalarAggregateParameterCanUseSpecializedAbi({ meta, paramIndex, ctx })
+    ) {
+      return;
+    }
+    const argExprId = callArgs[entry.argIndex]?.expr;
+    const argExpr = ctx.module.hir.expressions.get(argExprId);
+    if (!argExpr) {
+      return;
+    }
+    if (argExpr.exprKind === "identifier") {
+      const binding = fnCtx.bindings.get(argExpr.symbol);
+      if (
+        binding?.kind === "scalar-aggregate" &&
+        binding.typeId === meta.paramTypeIds[paramIndex]
+      ) {
+        bindings.set(paramIndex, {
+          kind: "binding",
+          symbol: argExpr.symbol,
+          typeId: meta.paramTypeIds[paramIndex]!,
+        });
+      }
+      return;
+    }
+    const typeId = meta.paramTypeIds[paramIndex];
+    const structInfo =
+      typeof typeId === "number" ? getStructuralTypeInfo(typeId, ctx) : undefined;
+    if (
+      typeof argExprId !== "number" ||
+      typeof typeId !== "number" ||
+      !structInfo ||
+      (structInfo.layoutKind === "heap-object" &&
+        heapObjectScalarArgumentNeedsProducerSpecialization({
+          exprId: argExprId,
+          ctx,
+        })) ||
+      !canStoreScalarAggregateExpression({
+        exprId: argExprId,
+        targetTypeId: typeId,
+        structInfo,
+        ctx,
+      })
+    ) {
+      return;
+    }
+    bindings.set(paramIndex, { kind: "expression", exprId: argExprId, typeId });
+  });
+  return bindings;
+};
+
+const scalarAggregateArgumentValueForCallArg = ({
+  arg,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  arg: ScalarAggregateCallArg;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): binaryen.ExpressionRef => {
+  if (arg.kind === "binding") {
+    const binding = getRequiredBinding(arg.symbol, ctx, fnCtx);
+    if (binding.kind === "scalar-aggregate" && binding.typeId === arg.typeId) {
+      return scalarAggregateArgumentValue({ binding, ctx, fnCtx });
+    }
+    const structInfo = getStructuralTypeInfo(arg.typeId, ctx);
+    if (!structInfo) {
+      throw new Error("scalar aggregate binding argument requires a structural type");
+    }
+    const scalarBinding = createScalarAggregateTempBinding({
+      typeId: arg.typeId,
+      structInfo,
+      ctx,
+      fnCtx,
+    });
+    const setup = [
+      storeScalarAggregateBindingValue({
+        binding: scalarBinding,
+        value: loadBindingValue(binding, ctx, fnCtx),
+        ctx,
+        fnCtx,
+      }),
+    ];
+    const value = scalarAggregateArgumentValue({
+      binding: scalarBinding,
+      ctx,
+      fnCtx,
+    });
+    return ctx.mod.block(
+      null,
+      [...setup, value],
+      binaryen.getExpressionType(value),
+    );
+  }
+  const structInfo = getStructuralTypeInfo(arg.typeId, ctx);
+  if (!structInfo) {
+    throw new Error("scalar aggregate call argument requires a structural type");
+  }
+  const binding = createScalarAggregateTempBinding({
+    typeId: arg.typeId,
+    structInfo,
+    ctx,
+    fnCtx,
+  });
+  const setup = tryStoreScalarAggregateExpression({
+    binding,
+    exprId: arg.exprId,
+    targetTypeId: arg.typeId,
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
+  if (!setup) {
+    throw new Error("scalar aggregate call argument is not scalarizable");
+  }
+  const value = scalarAggregateArgumentValue({ binding, ctx, fnCtx });
+  return ctx.mod.block(
+    null,
+    [...setup, value],
+    binaryen.getExpressionType(value),
+  );
+};
+
+const scalarAggregateArgumentValue = ({
+  binding,
+  ctx,
+  fnCtx,
+}: {
+  binding: LocalBindingScalarAggregate;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const setup: binaryen.ExpressionRef[] = [];
+  const lanes: binaryen.ExpressionRef[] = [];
+  const laneTypes: binaryen.Type[] = [];
+
+  binding.structInfo.fields.forEach((field) => {
+    const value = loadScalarAggregateBindingField({
+      binding,
+      fieldName: field.name,
+      ctx,
+    });
+    if (typeof value !== "number") {
+      throw new Error(`scalar aggregate missing field ${field.name}`);
+    }
+    const fieldAbiTypes = [...binaryen.expandType(field.wasmType)];
+    laneTypes.push(...fieldAbiTypes);
+    if (fieldAbiTypes.length <= 1) {
+      lanes.push(value);
+      return;
+    }
+    const captured = captureMultivalueLanes({
+      value,
+      abiTypes: fieldAbiTypes,
+      ctx,
+      fnCtx,
+    });
+    setup.push(...captured.setup);
+    lanes.push(...captured.lanes);
+  });
+
+  const value =
+    lanes.length === 1
+      ? lanes[0]!
+      : ctx.mod.tuple.make(lanes as binaryen.ExpressionRef[]);
+  if (setup.length === 0) {
+    return value;
+  }
+  return ctx.mod.block(null, [...setup, value], abiTypeFor(laneTypes));
 };
 
 export const resolveTypedCallArgumentPlan = ({
@@ -249,6 +602,14 @@ export const sliceTypedCallArgumentPlan = ({
         containerArgIndex: entry.containerArgIndex - argOffset,
         fieldName: entry.fieldName,
         targetTypeId: entry.targetTypeId,
+      };
+    }
+
+    if (entry.kind === "stable-callsite-id") {
+      return {
+        kind: "stable-callsite-id",
+        targetTypeId: entry.targetTypeId,
+        value: entry.value,
       };
     }
 
@@ -344,6 +705,17 @@ const planCallArgumentsForParamsFallback = ({
   const allowsOmittedArgument = (param: CallParam): boolean =>
     param.optional === true ||
     ctx.program.optionals.getOptionalInfo(ctx.moduleId, param.typeId) !== undefined;
+  const omittedArgumentPlanEntry = (
+    param: CallParam,
+    paramIndex: number,
+  ): CallArgumentPlanEntry =>
+    param.synthetic === "stable-callsite-id"
+      ? {
+          kind: "stable-callsite-id",
+          targetTypeId: param.typeId,
+          value: stableCallsiteIdFor(call.span, `${paramIndex}`),
+        }
+      : { kind: "missing", targetTypeId: param.typeId };
 
   const plan: CallArgumentPlanEntry[] = [];
   const expectedTypeByArgIndex = new Map<number, TypeId>();
@@ -356,7 +728,7 @@ const planCallArgumentsForParamsFallback = ({
 
     if (!arg) {
       if (allowsOmittedArgument(param)) {
-        plan.push({ kind: "missing", targetTypeId: param.typeId });
+        plan.push(omittedArgumentPlanEntry(param, paramIndex));
         paramIndex += 1;
         continue;
       }
@@ -387,7 +759,7 @@ const planCallArgumentsForParamsFallback = ({
           }
 
           if (allowsOmittedArgument(runParam)) {
-            plan.push({ kind: "missing", targetTypeId: runParam.typeId });
+            plan.push(omittedArgumentPlanEntry(runParam, cursor));
             cursor += 1;
             continue;
           }
@@ -412,7 +784,7 @@ const planCallArgumentsForParamsFallback = ({
     }
 
     if (allowsOmittedArgument(param)) {
-      plan.push({ kind: "missing", targetTypeId: param.typeId });
+      plan.push(omittedArgumentPlanEntry(param, paramIndex));
       paramIndex += 1;
       continue;
     }
@@ -477,6 +849,15 @@ const planCallArgumentsFromTypedPlan = ({
       return;
     }
 
+    if (entry.kind === "stable-callsite-id") {
+      plan.push({
+        kind: "stable-callsite-id",
+        targetTypeId: currentParam.typeId,
+        value: entry.value,
+      });
+      return;
+    }
+
     if (entry.containerArgIndex < 0 || entry.containerArgIndex >= call.args.length) {
       fail(
         `typed plan container arg index ${entry.containerArgIndex} is out of range`
@@ -509,6 +890,7 @@ const materializeCallArgumentPlan = ({
   callArgs,
   paramTypeIds,
   paramAbiKinds,
+  scalarOverrideArgIndexes,
   typeInstanceId,
   ctx,
   fnCtx,
@@ -519,6 +901,7 @@ const materializeCallArgumentPlan = ({
   callArgs: readonly HirCallExpr["args"][number][];
   paramTypeIds: readonly TypeId[];
   paramAbiKinds?: readonly string[];
+  scalarOverrideArgIndexes?: ReadonlySet<number>;
   typeInstanceId: ProgramFunctionInstanceId | undefined;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
@@ -543,6 +926,7 @@ const materializeCallArgumentPlan = ({
         argValue: compiledArgs[entry.argIndex]!,
         paramTypeId,
         abiKind,
+        scalarOverride: scalarOverrideArgIndexes?.has(entry.argIndex) ?? false,
         ctx,
         fnCtx,
         compileExpr,
@@ -553,6 +937,23 @@ const materializeCallArgumentPlan = ({
       return lowerCallArgumentForAbi({
         argValue: compileOptionalNoneValue({
           targetTypeId: entry.targetTypeId,
+          ctx,
+          fnCtx,
+        }),
+        paramTypeId,
+        abiKind,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
+    }
+
+    if (entry.kind === "stable-callsite-id") {
+      return lowerCallArgumentForAbi({
+        argValue: compileOptionalSomeValue({
+          targetTypeId: entry.targetTypeId,
+          value: ctx.mod.i32.const(entry.value),
+          valueTypeId: ctx.program.primitives.i32,
           ctx,
           fnCtx,
         }),
@@ -578,6 +979,32 @@ const materializeCallArgumentPlan = ({
     const field = containerInfo.fieldMap.get(entry.fieldName);
     if (!field) {
       throw new Error(`missing field ${entry.fieldName} in labeled-argument container`);
+    }
+
+    const scalarFieldValue =
+      abiKind === "mutable_ref"
+        ? undefined
+        : loadScalarContainerFieldValue({
+            containerExprId: containerArg.expr,
+            fieldName: entry.fieldName,
+            ctx,
+            fnCtx,
+          });
+    if (typeof scalarFieldValue === "number") {
+      return lowerCallArgumentForAbi({
+        argValue: coerceValueToType({
+          value: scalarFieldValue,
+          actualType: field.typeId,
+          targetType: entry.targetTypeId,
+          ctx,
+          fnCtx,
+        }),
+        paramTypeId,
+        abiKind,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
     }
 
     const existingTemp = containerTemps.get(entry.containerArgIndex);
@@ -698,6 +1125,32 @@ const materializeCallArgumentPlan = ({
   });
 };
 
+const loadScalarContainerFieldValue = ({
+  containerExprId,
+  fieldName,
+  ctx,
+  fnCtx,
+}: {
+  containerExprId: HirExprId;
+  fieldName: string;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef | undefined => {
+  const expr = ctx.module.hir.expressions.get(containerExprId);
+  if (expr?.exprKind !== "identifier") {
+    return undefined;
+  }
+  const binding = fnCtx.bindings.get(expr.symbol);
+  if (binding?.kind !== "scalar-aggregate") {
+    return undefined;
+  }
+  return loadScalarAggregateBindingField({
+    binding,
+    fieldName,
+    ctx,
+  });
+};
+
 const collectPreservedStorageRefArgIndexes = ({
   plan,
   paramAbiKinds,
@@ -729,6 +1182,7 @@ const lowerCallArgumentForAbi = ({
   addressableValue,
   paramTypeId,
   abiKind,
+  scalarOverride = false,
   ctx,
   fnCtx,
   compileExpr,
@@ -738,11 +1192,36 @@ const lowerCallArgumentForAbi = ({
   addressableValue?: binaryen.ExpressionRef;
   paramTypeId?: TypeId;
   abiKind?: string;
+  scalarOverride?: boolean;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): binaryen.ExpressionRef => {
   if (abiKind !== "readonly_ref" && abiKind !== "mutable_ref") {
+    if (!scalarOverride && typeof argExprId === "number") {
+      const argExpr = ctx.module.hir.expressions.get(argExprId);
+      if (argExpr?.exprKind === "identifier") {
+        const binding = fnCtx.bindings.get(argExpr.symbol);
+        if (
+          binding?.kind === "scalar-aggregate" &&
+          binding.structInfo.layoutKind === "heap-object"
+        ) {
+          const materialized = materializeOwnedBinding({
+            symbol: argExpr.symbol,
+            ctx,
+            fnCtx,
+          });
+          const value = loadBindingValue(materialized.binding, ctx, fnCtx);
+          return materialized.setup.length === 0
+            ? value
+            : ctx.mod.block(
+                null,
+                [...materialized.setup, value],
+                binaryen.getExpressionType(value),
+              );
+        }
+      }
+    }
     return argValue;
   }
   if (typeof paramTypeId !== "number") {
@@ -770,9 +1249,30 @@ const lowerCallArgumentForAbi = ({
               ctx,
               fnCtx,
             })
+          : existing.kind === "scalar-aggregate"
+            ? materializeOwnedBinding({
+                symbol: addressableSymbol,
+                ctx,
+                fnCtx,
+              })
           : undefined;
+      if (existing.kind === "scalar-aggregate" && materialized) {
+        const materializedPointer = loadBindingStorageRef(materialized.binding, ctx);
+        if (!materializedPointer) {
+          throw new Error(
+            `mutable ref call argument requires addressable temp storage (type ${paramTypeId})`,
+          );
+        }
+        return materialized.setup.length === 0
+          ? materializedPointer
+          : ctx.mod.block(
+              null,
+              [...materialized.setup, materializedPointer],
+              materialized.binding.storageType,
+            );
+      }
       const ownedValue = materialized
-        ? loadBindingValue(materialized.binding, ctx)
+        ? loadBindingValue(materialized.binding, ctx, fnCtx)
         : argValue;
       const owned = allocateAddressableLocal({
         typeId: paramTypeId,
@@ -981,7 +1481,7 @@ const tryLoadContainerPointer = ({
     if (storageRef) {
       return storageRef;
     }
-    const bindingValue = loadBindingValue(binding, ctx);
+    const bindingValue = loadBindingValue(binding, ctx, fnCtx);
     const bindingValueType = binaryen.getExpressionType(bindingValue);
     if (
       binaryen.expandType(bindingValueType).length === 1 &&

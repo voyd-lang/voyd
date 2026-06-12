@@ -6,6 +6,11 @@ use std::output::Output
 use std::optional::types::all
 use std::output::{ write, write_line, flush, is_tty as output_is_tty, StdErr }
 use std::result::types::all
+use std::test::assertions::all
+
+enum PreludeColor
+  Red
+  Blue { score: i32 }
 
 fn sum_bytes(bytes: Bytes): () -> i32
   let values = bytes.to_array()
@@ -164,3 +169,15 @@ pub fn print_text(): Output -> i32
 pub fn print_number(): Output -> i32
   print(42)
   1
+
+pub fn prelude_log_module_with_assertions_all() -> i32
+  let _ = log::LogInfo {}
+  1
+
+pub fn prelude_enum_macro() -> i32
+  let color: PreludeColor = PreludeColor::Blue { score: 5 }
+  match(color)
+    PreludeColor::Red:
+      0
+    PreludeColor::Blue { score }:
+      score

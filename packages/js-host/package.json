@@ -1,9 +1,13 @@
 {
   "name": "@voyd-lang/js-host",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Voyd JS host runtime",
   "type": "module",
   "main": "./dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voyd-lang/voyd"
+  },
   "files": [
     "dist"
   ],

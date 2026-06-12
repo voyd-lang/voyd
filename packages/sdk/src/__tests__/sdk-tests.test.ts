@@ -12,6 +12,23 @@ const expectCompileSuccess = (
 };
 
 describe("sdk tests collection", { timeout: 120_000 }, () => {
+  it("keeps explicit boundary export includes scoped to the runnable module", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(await sdk.compile({
+      includeTests: true,
+      boundaryExports: { include: ["main"] },
+      source: `pub fn main() -> i32
+  42
+
+test "passes":
+  1
+`,
+    }));
+
+    expect(result.tests?.cases.length).toBe(1);
+    await expect(result.run({ entryName: "main" })).resolves.toBe(42);
+  });
+
   it("discovers and runs tests", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(await sdk.compile({

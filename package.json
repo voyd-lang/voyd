@@ -19,14 +19,8 @@
     "lint": "turbo run lint --affected --parallel",
     "dev": "turbo run dev --affected --parallel",
     "clean": "turbo run clean --affected --parallel",
-    "release:list": "node ./scripts/release/list.mjs",
-    "release:cut": "node ./scripts/release/cut.mjs",
-    "release:version": "node ./scripts/release/version.mjs",
-    "release:version:all": "node ./scripts/release/version.mjs --all",
-    "release:check": "node ./scripts/release/check.mjs",
-    "release:github": "node ./scripts/release/github-release.mjs",
-    "release:publish": "node ./scripts/release/publish.mjs",
-    "release:publish:all": "node ./scripts/release/publish.mjs --all"
+    "release:prepare": "node ./scripts/release/prepare.mjs",
+    "release:publish": "node ./scripts/release/publish.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.5.1",

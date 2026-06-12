@@ -7,7 +7,7 @@ import {
 const options = parseSharedArgs(process.argv.slice(2));
 
 if (!options.bump && !options.version) {
-  throw new Error("release:version requires --bump patch|minor|major or --version <x.y.z>.");
+  throw new Error("Versioning requires --bump patch|minor|major or --version <x.y.z>.");
 }
 
 if (!options.allowDirty) {

@@ -46,6 +46,31 @@ import {
 } from "./trait-method-matcher.js";
 import { registerTraitMethodImplMapping } from "./trait-method-impl-mapping.js";
 
+const defaultValueIsStableCallsiteId = ({
+  exprId,
+  ctx,
+}: {
+  exprId: number | undefined;
+  ctx: TypingContext;
+}): boolean => {
+  if (typeof exprId !== "number") {
+    return false;
+  }
+  const expr = ctx.hir.expressions.get(exprId);
+  if (expr?.exprKind !== "call" || expr.args.length !== 0) {
+    return false;
+  }
+  const callee = ctx.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return false;
+  }
+  const metadata = (ctx.symbolTable.getSymbol(callee.symbol).metadata ?? {}) as {
+    intrinsic?: unknown;
+    intrinsicName?: unknown;
+  };
+  return metadata.intrinsic === true && metadata.intrinsicName === "__stable_callsite_id";
+};
+
 type ConstraintTypeParameterDecl = {
   symbol: SymbolId;
   constraint?: HirTypeExpr;
@@ -436,6 +461,9 @@ export const registerFunctionSignatures = (
         symbol: param.symbol,
         optional,
         defaultValue: param.defaultValue,
+        ...(defaultValueIsStableCallsiteId({ exprId: param.defaultValue, ctx })
+          ? { synthetic: "stable-callsite-id" as const }
+          : {}),
       };
     });
 

@@ -30,6 +30,9 @@ const findFirstCall = (
   return undefined;
 };
 
+const containsNode = (root: unknown, expected: unknown): boolean =>
+  JSON.stringify(root).includes(JSON.stringify(expected));
+
 test("parses lambdas inside HTML interpolation expressions", (t) => {
   const code = `
 use std::all
@@ -51,3 +54,78 @@ pub fn main() -> MsgPack
   t.expect(lambda[1]).toBe("f");
 });
 
+test("lowers built-in HTML elements to HTML helpers", (t) => {
+  const code = `
+use std::all
+use std::vx::all
+
+pub fn main()
+  <button class="primary" disabled on_click={7}>Save</button>
+`;
+
+  const ast = toPlain(code);
+  t.expect(findFirstCall(ast, "html_element")).toBeDefined();
+  t.expect(findFirstCall(ast, "create_element")).toBeUndefined();
+  t.expect(findFirstCall(ast, "class")).toBeDefined();
+  t.expect(findFirstCall(ast, "disabled")).toBeDefined();
+  t.expect(findFirstCall(ast, "html_event_message")).toBeDefined();
+  t.expect(findFirstCall(ast, "html_event_handler")).toBeUndefined();
+});
+
+test("lowers closure-valued HTML events to retained HTML event helpers", (t) => {
+  const code = `
+use std::msgpack
+use std::msgpack::MsgPack
+use std::vx::all
+
+fn clicked(payload: MsgPack) -> MsgPack
+  payload
+
+pub fn main() -> MsgPack
+  <button on_click={(payload: MsgPack) -> MsgPack => clicked(payload)}>Click</button>
+`;
+
+  const ast = toPlain(code);
+  t.expect(findFirstCall(ast, "html_event_payload_handler")).toBeDefined();
+  t.expect(findFirstCall(ast, "html_event_handler")).toBeUndefined();
+  t.expect(findFirstCall(ast, "html_event_message")).toBeUndefined();
+});
+
+test("lowers non-click HTML event values to message and payload helpers", (t) => {
+  const code = `
+use std::msgpack
+use std::msgpack::MsgPack
+use std::vx::all
+
+pub fn main() -> MsgPack
+  <form on_submit={msgpack::make_string("save")}>
+    <input on_input={(payload: MsgPack) -> MsgPack => payload} />
+  </form>
+`;
+
+  const ast = toPlain(code);
+  t.expect(findFirstCall(ast, "html_event_message")).toBeDefined();
+  t.expect(findFirstCall(ast, "html_event_handler")).toBeUndefined();
+  t.expect(findFirstCall(ast, "html_event_payload_handler")).toBeDefined();
+});
+
+test("lowers empty built-in HTML children to a typed HTML node array", (t) => {
+  const code = `
+use std::array::Array
+use std::msgpack::MsgPack
+use std::vx::all
+
+pub fn main() -> MsgPack
+  <form>
+    <input type="text" />
+    <button></button>
+  </form>
+`;
+
+  const ast = toPlain(code);
+  t.expect(containsNode(ast, [
+    "::",
+    ["Array", ["generics", "HtmlNode"]],
+    ["init"],
+  ])).toBe(true);
+});

@@ -9,6 +9,7 @@ import {
   type LoadModuleGraphFn,
   type TestScope,
 } from "@voyd-lang/compiler/pipeline-shared.js";
+import type { BoundaryExportsOption } from "@voyd-lang/compiler/codegen/context.js";
 import type { TestCase } from "./types.js";
 import { diagnosticsFromUnknownError } from "./diagnostics.js";
 
@@ -37,8 +38,10 @@ export const compileWithLoader = async ({
   includeTests,
   testsOnly,
   runtimeDiagnostics,
+  optimize,
   loadModuleGraph,
   testScope,
+  boundaryExports,
 }: {
   entryPath: string;
   roots: ModuleRoots;
@@ -46,8 +49,10 @@ export const compileWithLoader = async ({
   includeTests?: boolean;
   testsOnly?: boolean;
   runtimeDiagnostics?: boolean;
+  optimize?: boolean;
   loadModuleGraph: LoadModuleGraphFn;
   testScope?: TestScope;
+  boundaryExports?: BoundaryExportsOption;
 }): Promise<CompileArtifacts> => {
   const shouldIncludeTests = includeTests || testsOnly;
   const codegenLoadPromise = preloadCodegen();
@@ -75,6 +80,18 @@ export const compileWithLoader = async ({
     typeof runtimeDiagnostics === "boolean"
       ? { runtimeDiagnostics, emitEffectHelpers: true }
       : { emitEffectHelpers: true };
+  const optimizationCodegenOption =
+    typeof optimize === "boolean" ? { optimize } : {};
+  const codegenOption = {
+    ...optimizationCodegenOption,
+    ...runtimeDiagnosticsCodegenOption,
+    boundaryExports: boundaryExports ?? "auto",
+  } as const;
+  const testCodegenOption = {
+    ...optimizationCodegenOption,
+    ...runtimeDiagnosticsCodegenOption,
+    boundaryExports: false,
+  } as const;
   const { semantics, diagnostics: semanticDiagnostics, tests } = analyzeModules({
     graph,
     includeTests: shouldIncludeTests,
@@ -98,7 +115,7 @@ export const compileWithLoader = async ({
         codegenOptions: {
           testMode: true,
           testScope: scopedTestScope,
-          ...runtimeDiagnosticsCodegenOption,
+          ...testCodegenOption,
         },
       });
       const allDiagnostics = [...diagnostics, ...testResult.diagnostics];
@@ -117,7 +134,7 @@ export const compileWithLoader = async ({
     const wasmResult = await emitProgram({
       graph,
       semantics,
-      codegenOptions: runtimeDiagnosticsCodegenOption,
+      codegenOptions: codegenOption,
     });
     const baseDiagnostics = [...diagnostics, ...wasmResult.diagnostics];
     if (hasErrorDiagnostics(baseDiagnostics)) {
@@ -133,7 +150,7 @@ export const compileWithLoader = async ({
         codegenOptions: {
           testMode: true,
           testScope: scopedTestScope,
-          ...runtimeDiagnosticsCodegenOption,
+          ...testCodegenOption,
         },
       });
       const allDiagnostics = [...baseDiagnostics, ...testResult.diagnostics];

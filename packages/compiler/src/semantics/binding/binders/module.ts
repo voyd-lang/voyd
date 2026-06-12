@@ -735,8 +735,15 @@ const bindImportsFromExportTable = ({
     return true;
   };
 
+  const includeInWildcardImport = (
+    exported: Pick<ModuleExportEntry, "kind">,
+  ): boolean => exported.kind !== "effect-op";
+
   if (entry.selectionKind === "all") {
     const allowed = Array.from(exports.values()).filter((item) => {
+      if (!includeInWildcardImport(item)) {
+        return false;
+      }
       const accessible = canAccessExport({
         exported: item,
         moduleId,
@@ -869,8 +876,13 @@ const bindImportsFromExportSurface = ({
       ctx,
     });
 
+  const includeInWildcardImport = (
+    exported: Pick<ModuleExportSurfaceEntry, "kind">,
+  ): boolean => exported.kind !== "effect-op";
+
   if (entry.selectionKind === "all") {
     return Array.from(exportSurface.values())
+      .filter((item) => includeInWildcardImport(item))
       .filter((item) => isAccessible(item))
       .flatMap((item) =>
         declareSurfaceImportedSymbol({

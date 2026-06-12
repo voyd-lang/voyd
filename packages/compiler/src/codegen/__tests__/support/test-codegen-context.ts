@@ -97,6 +97,7 @@ export const createTestCodegenContext = (): {
         getNominalAncestry: () => [],
         getStructuralLayout: () => undefined,
         getRuntimeTypeId: (typeId: number) => typeId,
+        getStandaloneVariantTag: () => undefined,
       },
       symbols: {
         getName: () => undefined,
@@ -161,6 +162,7 @@ export const createTestCodegenContext = (): {
       effectsHostBoundary: "off",
       linearMemoryExport: "always",
       effectsMemoryExport: "auto",
+      boundaryExports: false,
       testScope: "all",
     },
     programHelpers,

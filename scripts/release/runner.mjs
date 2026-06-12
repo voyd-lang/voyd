@@ -99,6 +99,7 @@ const validateExactVersion = (version) => {
 
 const stdVersionSourcePath = path.join(repoRoot, "packages/std/src/version.voyd");
 const releaseNpmCache = process.env.NPM_CONFIG_CACHE ?? path.join(os.tmpdir(), "voyd-release-npm-cache");
+const provenanceRepositoryUrl = "https://github.com/voyd-lang/voyd";
 
 const resolveVersionPlan = ({ targetNames, bump, version }) => {
   if (!bump && !version) {
@@ -314,6 +315,30 @@ const validatePackContents = (targetName) => {
   }
 };
 
+const readRepositoryUrl = (packageJson) => {
+  if (typeof packageJson.repository === "string") {
+    return packageJson.repository;
+  }
+
+  return packageJson.repository?.url;
+};
+
+const validateNpmPackageMetadata = (targetName) => {
+  const target = getTarget(targetName);
+  if (target.kind !== "npm") {
+    return;
+  }
+
+  const packageJson = readTargetPackageJson(targetName);
+  const repositoryUrl = readRepositoryUrl(packageJson);
+
+  if (repositoryUrl !== provenanceRepositoryUrl) {
+    throw new Error(
+      `${targetName} package.json repository.url must be ${provenanceRepositoryUrl} for npm provenance publishing.`,
+    );
+  }
+};
+
 const runOwnChecks = (targetNames) => {
   targetNames.forEach((targetName) => {
     const target = getTarget(targetName);
@@ -382,6 +407,7 @@ const runVscodePackageCheck = (targetNames) => {
 };
 
 export const runReleaseCheck = ({ targetNames }) => {
+  targetNames.forEach(validateNpmPackageMetadata);
   runTurboClean(targetNames);
   runTurboBuild(targetNames);
   runOwnChecks(targetNames);
@@ -480,14 +506,14 @@ export const parseSharedArgs = (argv) => {
   return options;
 };
 
-export const assertCleanWorktree = () => {
+export const assertCleanWorktree = ({ purpose = "release publish" } = {}) => {
   const status = readStdout({
     command: "git",
     args: ["status", "--short"],
   }).trim();
 
   if (status.length > 0) {
-    throw new Error("Release publish requires a clean git worktree. Commit or stash changes first.");
+    throw new Error(`${purpose} requires a clean git worktree. Commit or stash changes first.`);
   }
 };
 
@@ -518,6 +544,47 @@ export const sortNpmTargetsForPublish = (targetNames) => {
 
   npmTargetNames.forEach(visit);
   return sorted;
+};
+
+export const assertNpmTargetsAlreadyPublished = ({
+  targetNames,
+  dryRun,
+  allowTokenBootstrap = false,
+}) => {
+  if (dryRun) {
+    return;
+  }
+
+  const npmTargetNames = sortNpmTargetsForPublish(targetNames);
+  const missingTargets = npmTargetNames.filter((targetName) => {
+    const target = getTarget(targetName);
+    try {
+      readStdout({
+        command: "npm",
+        args: ["view", target.workspace, "version"],
+        env: {
+          NPM_CONFIG_CACHE: releaseNpmCache,
+        },
+      });
+      return false;
+    } catch {
+      return true;
+    }
+  });
+
+  const hasTokenBootstrap =
+    allowTokenBootstrap && Boolean(process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN);
+  if (missingTargets.length === 0 || hasTokenBootstrap) {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Trusted publishing cannot bootstrap unpublished npm packages in this release flow.",
+      `Bootstrap or configure these packages before publishing: ${missingTargets.join(", ")}`,
+      "Run a one-time bootstrap publish before using release:publish.",
+    ].join(" "),
+  );
 };
 
 export const publishNpmTargets = ({ targetNames, dryRun, tag, otp }) => {

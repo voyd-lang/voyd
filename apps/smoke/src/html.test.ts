@@ -25,20 +25,25 @@ describe("smoke: html.voyd", () => {
     });
 
     expect(output).toEqual({
-      attributes: [
-        ["class", "greeting"],
-        ["visible", "true"],
-      ],
-      name: "div",
+      attrs: {
+        class: "greeting",
+        visible: true,
+      },
+      kind: "element",
+      tag: "div",
       children: [
         "Hi there ",
         {
-          attributes: [["class", "big"]],
-          name: "span",
+          attrs: {
+            class: "big",
+          },
+          kind: "element",
+          tag: "span",
           children: ["hi"],
         },
         {
-          name: "i",
+          kind: "element",
+          tag: "i",
           children: ["This is italic"],
         },
       ],

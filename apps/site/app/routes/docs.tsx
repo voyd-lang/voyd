@@ -18,7 +18,13 @@ import {
   type ChangeEvent,
   type ReactNode,
 } from "react";
-import { Link, useHref, useNavigate, useSearchParams } from "react-router";
+import {
+  Link,
+  useHref,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router";
 
 export const prerender = true;
 
@@ -340,10 +346,29 @@ const buildDocHref = ({
   hash?: string;
 }) => `${slug ? `${docsPath}?p=${encodeURIComponent(slug)}` : docsPath}${hash}`;
 
+const safeDecodeHashId = (hash: string) => {
+  const rawId = hash.startsWith("#") ? hash.slice(1) : hash;
+
+  try {
+    return decodeURIComponent(rawId);
+  } catch {
+    return rawId;
+  }
+};
+
+const findHashTarget = (hash: string) => {
+  if (!hash) return null;
+
+  const rawId = hash.startsWith("#") ? hash.slice(1) : hash;
+  const decodedId = safeDecodeHashId(hash);
+  return document.getElementById(decodedId) ?? document.getElementById(rawId);
+};
+
 export default function Docs() {
   const [headings, setHeadings] = useState<Heading[]>([]);
   const navRef = useRef<HTMLDivElement>(null);
   const articleRef = useRef<HTMLDivElement>(null);
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const docsPath = useHref("/docs");
@@ -430,6 +455,22 @@ export default function Docs() {
       return next;
     });
   }, [doc.slug]);
+
+  useEffect(() => {
+    if (!location.hash) return;
+
+    const scrollToHashTarget = () => {
+      findHashTarget(location.hash)?.scrollIntoView();
+    };
+
+    const frameId = window.requestAnimationFrame(scrollToHashTarget);
+    const timeoutId = window.setTimeout(scrollToHashTarget, 0);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [doc.body, location.hash]);
 
   const components: Components = {
     code({ className, children }) {
@@ -720,7 +761,7 @@ export default function Docs() {
 
         <article
           ref={articleRef}
-          className="prose rounded-xl bg-[var(--site-surface)] p-6 max-w-3xl min-w-0 space-y-8 text-[var(--foreground)] prose-headings:text-[var(--foreground)] prose-p:text-[var(--foreground)] prose-li:text-[var(--foreground)] prose-strong:text-[var(--foreground)] prose-a:text-[var(--foreground)] prose-a:underline prose-a:decoration-[var(--site-text-muted)] prose-blockquote:text-[var(--site-text-muted)] prose-hr:border-[var(--site-border)] prose-code:text-[var(--foreground)] prose-code:before:content-none prose-code:after:content-none"
+          className="docs-article prose rounded-xl bg-[var(--site-surface)] p-6 max-w-3xl min-w-0 space-y-8 text-[var(--foreground)] prose-headings:text-[var(--foreground)] prose-p:text-[var(--foreground)] prose-li:text-[var(--foreground)] prose-strong:text-[var(--foreground)] prose-a:text-[var(--foreground)] prose-a:underline prose-a:decoration-[var(--site-text-muted)] prose-blockquote:text-[var(--site-text-muted)] prose-hr:border-[var(--site-border)] prose-code:text-[var(--foreground)] prose-code:before:content-none prose-code:after:content-none"
         >
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}

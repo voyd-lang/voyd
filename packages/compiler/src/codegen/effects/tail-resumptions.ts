@@ -22,6 +22,10 @@ export const tailResumptionExitChecks = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef[] => {
+  if (fnCtx.suppressTailResumptionExitChecks) {
+    return [];
+  }
+
   const continuations = fnCtx.continuations
     ? [...fnCtx.continuations.values()]
     : [];

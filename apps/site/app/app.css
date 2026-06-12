@@ -345,6 +345,13 @@ body {
 }
 
 :root {
+  --site-header-logo-size: 1.75rem;
+  --site-header-block-padding: 0.75rem;
+  --site-anchor-gap: 2rem;
+  --site-header-height: calc(
+    var(--site-header-logo-size) + (var(--site-header-block-padding) * 2) + 1px
+  );
+  --site-anchor-offset: calc(var(--site-header-height) + var(--site-anchor-gap));
   --site-page-bg: #f6f7fb;
   --site-surface: #ffffff;
   --site-surface-soft: #f1f4f9;
@@ -358,6 +365,20 @@ body {
   --site-button-solid-bg: #131f38;
   --site-button-solid-fg: #f4f7ff;
   --site-button-ghost-border: rgba(15, 23, 42, 0.2);
+}
+
+@media (min-width: 640px) {
+  :root {
+    --site-header-block-padding: 1rem;
+  }
+}
+
+.site-header-shell {
+  padding-block: var(--site-header-block-padding);
+}
+
+.docs-article :is(h1, h2, h3, h4, h5, h6) {
+  scroll-margin-top: var(--site-anchor-offset);
 }
 
 @media (prefers-color-scheme: dark) {

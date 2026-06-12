@@ -80,7 +80,7 @@ export const typeExpression = (
   exprId: HirExprId,
   ctx: TypingContext,
   state: TypingState,
-  options: TypeExpressionOptions = {}
+  options: TypeExpressionOptions = {},
 ): TypeId => {
   const expr = ctx.hir.expressions.get(exprId);
   if (!expr) {
@@ -102,10 +102,7 @@ export const typeExpression = (
     }
     const applied = applyCurrentSubstitution(cached.type, ctx, state);
     const span = normalizeSpan(ctx.hir.expressions.get(exprId)?.span);
-    if (
-      hasConcreteExpected &&
-      typeof appliedExpected === "number"
-    ) {
+    if (hasConcreteExpected && typeof appliedExpected === "number") {
       try {
         ensureTypeMatches(
           applied,
@@ -175,7 +172,7 @@ const resolveExpressionType = (
   expr: HirExpression,
   ctx: TypingContext,
   state: TypingState,
-  options: TypeExpressionOptions
+  options: TypeExpressionOptions,
 ): TypeId => {
   const expectedType = options.expectedType;
   switch (expr.exprKind) {
@@ -200,7 +197,7 @@ const resolveExpressionType = (
     case "tuple":
       return typeTupleExpr(expr, ctx, state);
     case "object-literal":
-      return typeObjectLiteralExpr(expr, ctx, state);
+      return typeObjectLiteralExpr(expr, ctx, state, expectedType);
     case "field-access":
       return typeFieldAccessExpr(expr, ctx, state);
     case "while":

@@ -4,8 +4,18 @@ obj OptionalBox {
   v?: i32
 }
 
+obj Node {
+  val: i32,
+  l?: Node,
+  r?: Node
+}
+
 fn sum(v?: i32) -> i32
   unwrap_or(v, 0)
+
+fn recursive_optional_node_value() -> i32
+  let node = Node { val: 1 }
+  node.val
 
 pub fn main() -> i32
   let b1 = OptionalBox { v: 5 }
@@ -13,5 +23,4 @@ pub fn main() -> i32
   let s = { v: 7 }
   let b3 = OptionalBox { ...s }
 
-  sum(b1.v) + sum(b2.v) + sum() + sum(b3.v)
-
+  sum(b1.v) + sum(b2.v) + sum() + sum(b3.v) + recursive_optional_node_value()

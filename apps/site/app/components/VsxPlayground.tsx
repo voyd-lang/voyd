@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import VoydEditor from "./VoydEditor";
-import { renderMsgPackNode } from "@voyd-lang/lib/vsx-dom/client";
+
+type DisposableRenderer = {
+  dispose(): void;
+};
 
 export const VsxPlayground = ({ value }: { value: string }) => {
   const renderRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<Worker | null>(null);
+  const rendererRef = useRef<DisposableRenderer | null>(null);
   const workerReadyRef = useRef(false);
   const readyWaitersRef = useRef<Array<(w: Worker) => void>>([]);
   const [isCompiling, setIsCompiling] = useState(false);
@@ -15,12 +19,13 @@ export const VsxPlayground = ({ value }: { value: string }) => {
   const pendingRef = useRef(new Map<number, (payload: any) => void>());
 
   useEffect(() => {
-    // Cleanup on unmount if a worker was created
     return () => {
       if (workerRef.current) {
         workerRef.current.terminate();
         workerRef.current = null;
       }
+      rendererRef.current?.dispose();
+      rendererRef.current = null;
       pendingRef.current.clear();
     };
   }, []);
@@ -42,11 +47,11 @@ export const VsxPlayground = ({ value }: { value: string }) => {
         for (const fn of waiters) fn(worker);
         return;
       }
-      const { id, ok, tree, error } = data;
+      const { id, ok, wasm, error } = data;
       const resolve = pendingRef.current.get(id);
       if (!resolve) return;
       pendingRef.current.delete(id);
-      resolve({ ok, tree, error });
+      resolve({ ok, wasm, error });
     };
     worker.onerror = (ev: ErrorEvent) => {
       const err = new Error(ev.message || "Worker error");
@@ -76,8 +81,8 @@ export const VsxPlayground = ({ value }: { value: string }) => {
     return worker;
   };
 
-  const compileAndRunInWorker = (code: string) => {
-    return new Promise<any>((resolve, reject) => {
+  const compileInWorker = (code: string) => {
+    return new Promise<Uint8Array>((resolve, reject) => {
       const worker = getOrCreateWorker();
       const send = () => {
         setStage("compiling");
@@ -88,7 +93,7 @@ export const VsxPlayground = ({ value }: { value: string }) => {
         };
         pendingRef.current.set(id, (payload: any) => {
           clear();
-          if (payload.ok) resolve(payload.tree);
+          if (payload.ok) resolve(payload.wasm);
           else reject(new Error(payload.error || "Compile failed"));
         });
         worker.postMessage({ id, code });
@@ -109,9 +114,26 @@ export const VsxPlayground = ({ value }: { value: string }) => {
       setIsCompiling(true);
       setStage(workerReadyRef.current ? "compiling" : "loadingCompiler");
       if (!renderRef.current) return;
-      const tree = await compileAndRunInWorker(code);
+      const wasm = await compileInWorker(code);
+      const [{ createVoydHost }, { createVoydVxAppRuntime, mountVxApp }] =
+        await Promise.all([
+          import("@voyd-lang/sdk/js-host"),
+          import("@voyd-lang/vx-dom/browser"),
+        ]);
+      const host = await createVoydHost({
+        wasm,
+        bufferSize: 256 * 1024,
+      });
+      const app = createVoydVxAppRuntime({
+        host,
+      });
 
-      renderMsgPackNode(tree, renderRef.current);
+      rendererRef.current?.dispose();
+      renderRef.current.textContent = "";
+      rendererRef.current = await mountVxApp({
+        container: renderRef.current,
+        app,
+      });
     } catch (err) {
       // TODO: Optional: surface compile errors in the UI
       console.error("Compile error:", err);
