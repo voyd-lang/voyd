@@ -989,6 +989,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
 
         const parameterBindingKind = (index: number) =>
           signature.parameters[index]?.bindingKind ??
+          item.parameters[index]?.pattern.bindingKind ??
           (item.parameters[index]?.mutable ? "mutable-ref" : undefined);
         const paramAbiKinds = descriptor.parameters.map((param, index) =>
           getOptimizedParamAbiKind({

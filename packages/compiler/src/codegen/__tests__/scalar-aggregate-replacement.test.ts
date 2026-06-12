@@ -162,6 +162,90 @@ pub fn main() -> i32
     );
   });
 
+  it("preserves mutable value-object locals passed by mutable reference", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+pub val Vec3 {
+  x: i32,
+  y: i32,
+  z: i32
+}
+
+impl Vec3
+  fn empty() -> Vec3
+    Vec3 { x: 0, y: 0, z: 0 }
+
+fn fill(~out: Vec3) -> bool
+  out.x = 1
+  out.y = 2
+  out.z = 3
+  true
+
+pub fn main() -> i32
+  let ~out = Vec3::empty()
+  if fill(out):
+    return out.x + out.y + out.z
+  0
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(6);
+    expect(runMain(optimizedCodegen.module)()).toBe(6);
+  });
+
+  it("preserves multiple mutable value-object call outputs after value arguments", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+pub val Vec3 {
+  x: i32,
+  y: i32,
+  z: i32
+}
+
+pub val Ray {
+  origin: Vec3,
+  direction: Vec3
+}
+
+impl Vec3
+  fn empty() -> Vec3
+    Vec3 { x: 0, y: 0, z: 0 }
+
+  fn '*'(self, other: Vec3) -> Vec3
+    Vec3 { x: self.x * other.x, y: self.y * other.y, z: self.z * other.z }
+
+  fn apply(~self, vec: Vec3)
+    self.x = vec.x
+    self.y = vec.y
+    self.z = vec.z
+
+impl Ray
+  fn empty() -> Ray
+    Ray { origin: Vec3::empty(), direction: Vec3::empty() }
+
+fn fill(ray: Ray, ~out: Vec3, ~scattered: Ray) -> bool
+  out.apply(Vec3 { x: 1, y: 2, z: 3 })
+  scattered.direction.x = ray.origin.x + 4
+  true
+
+fn color(ray: Ray, depth: i32) -> Vec3
+  if depth <= 0:
+    return Vec3 { x: 1, y: 1, z: 1 }
+
+  let ~out = Vec3::empty()
+  let ~scattered = Ray::empty()
+  if fill(ray, out, scattered):
+    return out * color(scattered, depth - 1)
+
+  Vec3::empty()
+
+pub fn main() -> i32
+  let ray = Ray { origin: Vec3 { x: 5, y: 0, z: 0 }, direction: Vec3::empty() }
+  let result = color(ray, 1)
+  result.x + result.y + result.z
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(6);
+    expect(runMain(optimizedCodegen.module)()).toBe(6);
+  });
+
   it("materializes scalar heap roots before nested value field mutation", () => {
     const { optimizedCodegen } = compileOptimized(`
 type Inner = { x: i32, y: i32 }
