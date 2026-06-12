@@ -11,9 +11,13 @@ import { detectHostRuntime } from "../runtime/environment.js";
 
 export type {
   DefaultAdapterCapability,
-  DefaultAdapterFetchHeader,
-  DefaultAdapterFetchRequest,
-  DefaultAdapterFetchResponse,
+  DefaultAdapterHttpClientRequest,
+  DefaultAdapterHttpClientResponse,
+  DefaultAdapterHttpHeader,
+  DefaultAdapterHttpRedirectPolicy,
+  DefaultAdapterHttpRequest,
+  DefaultAdapterHttpResponse,
+  DefaultAdapterHttpServerConfig,
   DefaultAdapterHost,
   DefaultAdapterOptions,
   DefaultAdapterOutputFlush,

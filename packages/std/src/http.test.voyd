@@ -1,0 +1,110 @@
+use std::bytes::ByteBuffer
+use std::http::{
+  Body,
+  HeaderName,
+  Headers,
+  HttpError,
+  Response,
+  Status,
+  headers,
+  method,
+  method_as_string
+}
+use std::number::cast::to_i64
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+test "http methods statuses headers and bodies":
+  assert(method_as_string(method("get".as_slice())).equals("GET"), eq: true)
+  assert(method_as_string(method("PROPFIND".as_slice())).equals("PROPFIND"), eq: true)
+
+  match(Status::from(201))
+    Ok<Status> { value }:
+      assert(value.code(), eq: 201)
+      assert(value.reason().equals("Created"), eq: true)
+      assert(value.is_success(), eq: true)
+    Err<HttpError>:
+      assert(false, eq: true)
+
+  match(Status::from(99))
+    Ok<Status>:
+      assert(false, eq: true)
+    Err<HttpError> { error }:
+      assert(error.code, eq: 1)
+
+  let values = headers()
+    .append(header: "Accept".as_slice(), value: "text/plain".as_slice())
+    .append(header: "accept".as_slice(), value: "application/json".as_slice())
+    .set(header: "Content-Length".as_slice(), value: "12".as_slice())
+
+  match(values.get("ACCEPT".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("text/plain"), eq: true)
+    None:
+      assert(false, eq: true)
+  assert(values.get_all("accept".as_slice()).len(), eq: 2)
+  assert(values.contains("content-length".as_slice()), eq: true)
+  match(values.content_length())
+    Some<i64> { value }:
+      assert(value, eq: to_i64(12))
+    None:
+      assert(false, eq: true)
+  let invalid_length = headers()
+    .set(header: "content-length".as_slice(), value: "-1".as_slice())
+  match(invalid_length.content_length())
+    Some<i64>:
+      assert(false, eq: true)
+    None:
+      assert(true, eq: true)
+
+  let text_body = Body::text("hello".as_slice())
+  assert(text_body.len(), eq: 5)
+  match(text_body.as_text())
+    Ok<String> { value }:
+      assert(value.equals("hello"), eq: true)
+    Err<HttpError>:
+      assert(false, eq: true)
+
+  let ~buffer = ByteBuffer::with_capacity(2)
+  buffer.push(111)
+  buffer.push(107)
+  let byte_body = Body::bytes(buffer.as_bytes())
+  match(byte_body.as_text())
+    Ok<String> { value }:
+      assert(value.equals("ok"), eq: true)
+    Err<HttpError>:
+      assert(false, eq: true)
+
+test "response builders set default content type without replacing explicit values":
+  let text_response = Response::ok().text("hello".as_slice())
+  assert(text_response.status.code(), eq: 200)
+  match(text_response.header("content-type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("text/plain; charset=utf-8"), eq: true)
+    None:
+      assert(false, eq: true)
+
+  let explicit = Response::created()
+    .with(header: "content-type".as_slice(), value: "application/custom".as_slice())
+    .text("created".as_slice())
+  assert(explicit.status.code(), eq: 201)
+  match(explicit.header("Content-Type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("application/custom"), eq: true)
+    None:
+      assert(false, eq: true)
+
+test "header names reject invalid tokens":
+  match(HeaderName::from("content type".as_slice()))
+    Ok<HeaderName>:
+      assert(false, eq: true)
+    Err<HttpError> { error }:
+      assert(error.code, eq: 2)
+
+  match(HeaderName::from("x-voyd".as_slice()))
+    Ok<HeaderName> { value }:
+      assert(value.normalized().equals("x-voyd"), eq: true)
+    Err<HttpError>:
+      assert(false, eq: true)

@@ -190,24 +190,26 @@ Capabilities are represented by registered handlers over effect ops.
 Adapters MUST NOT silently remap an unavailable capability to a different
 handler.
 
-## Standard Capability Contracts (Fetch/Input)
+## Standard Capability Contracts (HTTP Client/HTTP Server/Input)
 
-Default adapter conformance for `std::fetch::Fetch` and `std::input::Input`
-uses MessagePack DTO payloads with these stable fields:
+Default adapter conformance for `std::http::client::HttpClient`,
+`std::http::server::HttpServer`, and `std::input::Input` uses MessagePack DTO
+payloads with these stable fields:
 
-### `std::fetch::Fetch.request`
+### `std::http::client::HttpClient.request`
 
 Request payload (`tail` op argument):
 
 - `method: string` (defaults to `GET` when empty/missing)
 - `url: string` (required, non-empty)
 - `headers: Array<{ name: string, value: string }>`
-- `body: string | null`
+- `body: Array<i32>` byte values
 - `timeout_millis: i32 | null`
+- `redirect_policy: { kind: "follow", max_redirects: i32 } | { kind: "manual" } | { kind: "error" }`
 
 Success response payload (`tail` op return):
 
-- `{ ok: true, value: { status: i32, status_text: string, headers: Array<{ name: string, value: string }>, body: string } }`
+- `{ ok: true, value: { status: i32, reason: string, headers: Array<{ name: string, value: string }>, body: Array<i32> } }`
 
 Error response payload:
 
@@ -223,6 +225,85 @@ Cancellation semantics:
   error DTO (not hang or silently ignore timeout intent).
 - Run-level cancellation semantics from this spec still apply: if a run is
   cancelled while fetch is in flight, late completions are dropped.
+
+### `std::http::server::HttpServer.listen_raw`
+
+Request payload (`tail` op argument):
+
+- `port: i32` (required)
+- `host: string | null`
+- `max_body_bytes: i32 | null` (default adapter default: `1048576`)
+- `max_pending_requests: i32 | null` (default adapter default: `100`)
+- `response_timeout_millis: i32 | null` (default adapter default: `30000`)
+
+Success response payload:
+
+- `{ ok: true, value: i32 }`, where `value` is the opaque server id.
+
+Error response payload:
+
+- `{ ok: false, code: i32, message: string }`
+
+### `std::http::server::HttpServer.accept_raw`
+
+Request payload (`resume` op argument):
+
+- `server_id: i32`
+
+Success response payload:
+
+- `{ ok: true, value: { request_id: i32, method: string, path: string, query: string | null, headers: Array<{ name: string, value: string }>, body: Array<i32> } }`
+
+Error response payload:
+
+- `{ ok: false, code: i32, message: string }`
+
+Lifecycle semantics:
+
+- `accept_raw` suspends until a request is available or the server closes.
+- Each `request_id` may be answered exactly once through `respond_raw`.
+- Requests whose bodies exceed `max_body_bytes` are rejected with a host response
+  before they are accepted.
+- Requests beyond `max_pending_requests` are rejected by the default adapter with
+  `503`.
+- Accepted requests not completed before `response_timeout_millis` receive a
+  host-managed `500` and are released. A later `respond_raw` for that request
+  returns a host error.
+
+### `std::http::server::HttpServer.respond_raw`
+
+Request payload (`tail` op argument):
+
+- `{ request_id: i32, response: { status: i32, reason: string, headers: Array<{ name: string, value: string }>, body: Array<i32> } }`
+
+Success response payload:
+
+- `{ ok: true }`
+
+Error response payload:
+
+- `{ ok: false, code: i32, message: string }`
+
+### `std::http::server::HttpServer.close_raw`
+
+Request payload (`tail` op argument):
+
+- `server_id: i32`
+
+Success response payload:
+
+- `{ ok: true }`
+
+Error response payload:
+
+- `{ ok: false, code: i32, message: string }`
+
+Lifecycle semantics:
+
+- `close_raw` stops new accepts and releases host resources.
+- Pending accepts resume with a host error.
+- Pending accepted responses receive a host-managed `500` before the adapter
+  waits for the underlying server to close.
 
 ### `std::input::Input.read_line`
 
@@ -298,4 +379,5 @@ continuation call is applied.
 `@voyd-lang/js-host` implements scheduler-driven ordering, cancellation outcomes,
 fairness-budget controls, deterministic conformance coverage (virtual clock +
 controlled queues), and default adapter contracts for std capabilities
-including `std::fetch::Fetch` and `std::input::Input`.
+including `std::http::client::HttpClient`, `std::http::server::HttpServer`, and
+`std::input::Input`.

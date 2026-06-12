@@ -2,6 +2,7 @@ import {
   globalRecord,
   hostError,
   hostOk,
+  isNodeCompatibleRuntime,
   readField,
   toStringOrUndefined,
 } from "../helpers.js";
@@ -33,7 +34,7 @@ export const envCapabilityDefinition: CapabilityDefinition = {
     const processRecord = globalRecord.process as
       | { env?: Record<string, string | undefined> }
       | undefined;
-    const processEnv = runtime === "node" ? processRecord?.env : undefined;
+    const processEnv = isNodeCompatibleRuntime(runtime) ? processRecord?.env : undefined;
 
     const hasEnv = !!processEnv || (!!denoEnv?.get && !!denoEnv?.set);
     if (!hasEnv) {

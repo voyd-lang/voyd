@@ -14,7 +14,8 @@ const result = await host.run("main");
 
 `createVoydHost` installs default std capability adapters by default
 (`voyd.std.fs`, `voyd.std.time`, `voyd.std.env`, `voyd.std.random`,
-`voyd.std.log`, `voyd.std.fetch`, `voyd.std.input`).
+`voyd.std.log`, `voyd.std.http.client`, `voyd.std.http.server`,
+`voyd.std.input`).
 Disable with `defaultAdapters: false` if you want full manual handler control.
 
 Advanced control (fairness + cancellation):

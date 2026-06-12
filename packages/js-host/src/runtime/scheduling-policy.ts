@@ -1,4 +1,4 @@
-export type RuntimeSchedulingKind = "node" | "deno" | "browser" | "unknown";
+export type RuntimeSchedulingKind = "node" | "deno" | "bun" | "browser" | "unknown";
 
 const queueMicrotaskOrPromise = (task: () => void): void => {
   if (typeof queueMicrotask === "function") {

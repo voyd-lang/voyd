@@ -34,7 +34,7 @@ pub self::log
 pub self::time
 pub self::random
 pub self::env
-pub self::fetch
+pub self::http
 pub self::input
 pub self::output
 pub self::path

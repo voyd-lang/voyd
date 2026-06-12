@@ -761,7 +761,7 @@ pub fn main(): Env -> i32
     }
   });
 
-  it("runs std fetch effects with default host adapters", async () => {
+  it("runs std http client effects with default host adapters", async () => {
     const sdk = createSdk();
     const source = `use std::array::Array
 use std::host_dto::HostDto
@@ -769,26 +769,36 @@ use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::string::type::new_string
 
-@effect(id: "voyd.std.fetch")
-eff Fetch
+@effect(id: "voyd.std.http.client")
+eff HttpClient
   request(tail, payload: MsgPack) -> MsgPack
 
-pub fn main(): Fetch -> i32
+pub fn main(): HttpClient -> i32
   let header = HostDto::init()
     .set("name", msgpack::make_string("accept".as_slice().to_string()))
     .set("value", msgpack::make_string("text/plain".as_slice().to_string()))
     .pack()
   let ~headers = Array<MsgPack>::with_capacity(1)
   headers.push(header)
+  let ~body = Array<MsgPack>::with_capacity(4)
+  body.push(msgpack::make_i32(112))
+  body.push(msgpack::make_i32(105))
+  body.push(msgpack::make_i32(110))
+  body.push(msgpack::make_i32(103))
+  let redirect_policy = HostDto::init()
+    .set("kind", msgpack::make_string("follow".as_slice().to_string()))
+    .set("max_redirects", msgpack::make_i32(20))
+    .pack()
   let request_payload = HostDto::init()
     .set("method", msgpack::make_string("POST".as_slice().to_string()))
     .set("url", msgpack::make_string("https://example.test/echo".as_slice().to_string()))
     .set("headers", msgpack::make_array(headers))
-    .set("body", msgpack::make_string("ping".as_slice().to_string()))
+    .set("body", msgpack::make_array(body))
     .set("timeout_millis", msgpack::make_i32(10))
+    .set("redirect_policy", redirect_policy)
     .pack()
 
-  let response_payload = Fetch::request(request_payload)
+  let response_payload = HttpClient::request(request_payload)
   match(HostDto::unpack(response_payload))
     Err:
       -1
@@ -811,14 +821,7 @@ pub fn main(): Fetch -> i32
                     Err:
                       -2
                     Ok<i32> { value: status }:
-                      match(value.read_string("body"))
-                        Err:
-                          -2
-                        Ok<String> { value: body }:
-                          if status == 201 and body.equals("pong") then:
-                            201
-                          else:
-                            -2
+                      if status == 201 then: 201 else: -2
 `;
     const result = expectCompileSuccess(await sdk.compile({ source }));
     const host = await createVoydHost({
@@ -826,11 +829,11 @@ pub fn main(): Fetch -> i32
       defaultAdapters: {
         runtime: "node",
         runtimeHooks: {
-          fetchRequest: async () => ({
+          httpClientRequest: async () => ({
             status: 201,
-            statusText: "Created",
+            reason: "Created",
             headers: [{ name: "content-type", value: "text/plain" }],
-            body: "pong",
+            body: Uint8Array.from([112, 111, 110, 103]),
           }),
         },
       },

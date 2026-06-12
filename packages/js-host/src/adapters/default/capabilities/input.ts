@@ -3,6 +3,7 @@ import {
   globalRecord,
   hostError,
   inputSuccessPayload,
+  isNodeCompatibleRuntime,
   readBytesFromNodeStream,
   readField,
   toNumberOrUndefined,
@@ -60,7 +61,7 @@ const createInputSource = async ({
     };
   }
 
-  if (runtime === "node") {
+  if (isNodeCompatibleRuntime(runtime)) {
     const processValue = globalRecord.process as
       | {
           stdin?: NodeJS.ReadableStream;

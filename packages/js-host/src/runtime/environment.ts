@@ -13,8 +13,13 @@ export const detectHostRuntime = (): HostRuntimeKind => {
   }
 
   const processRecord = globalRecord.process as
-    | { versions?: { node?: string } }
+    | { versions?: { node?: string; bun?: string } }
     | undefined;
+  const bun = globalRecord.Bun as { version?: string } | undefined;
+  if (bun?.version || processRecord?.versions?.bun) {
+    return "bun";
+  }
+
   if (processRecord?.versions?.node) {
     return "node";
   }

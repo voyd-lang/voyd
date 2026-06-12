@@ -1,0 +1,61 @@
+use std::env::self as env
+use std::error::HostError
+use std::http::{ Response, method_as_string }
+use std::http::client::self as client
+use std::http::client::{ ClientRequest, HttpClient }
+use std::http::server::self as server
+use std::http::server::{ HttpServer, PendingRequest, Server, ServerConfig }
+use std::optional::types::all
+use std::result::types::all
+
+fn status_or_error(result: Result<Response, HostError>): () -> i32
+  match(result)
+    Ok<Response> { value }:
+      value.status.code()
+    Err<HostError> { error }:
+      -error.code
+
+pub fn module_get_probe(): HttpClient -> i32
+  status_or_error(client::get("https://example.test/module".as_slice()))
+
+pub fn request_factory_probe(): HttpClient -> i32
+  status_or_error(client::send(ClientRequest::get("https://example.test/factory".as_slice())))
+
+pub fn serve_once_from_env(): (HttpServer, env::Env) -> i32
+  let port = smoke_port()
+  if port <= 0:
+    return -10
+
+  let config = ServerConfig::init(
+    port: port,
+    host: "127.0.0.1".as_slice().to_string(),
+    max_body_bytes: 1024,
+    max_pending_requests: 8
+  )
+  match(server::listen(config))
+    Err<HostError> { error }:
+      -error.code
+    Ok<Server> { value: srv }:
+      match(server::accept(srv))
+        Err<HostError> { error }:
+          let _ = server::close(srv)
+          -error.code
+        Ok<PendingRequest> { value: pending }:
+          let method = method_as_string(pending.request.method)
+          let response = Response::ok()
+            .text("served".as_slice())
+            .with(header: "x-voyd-method".as_slice(), value: method.as_slice())
+          match(server::respond(pending.handle, response))
+            Err<HostError> { error }:
+              let _ = server::close(srv)
+              -error.code
+            Ok<Unit>:
+              let _ = server::close(srv)
+              200
+
+fn smoke_port(): env::Env -> i32
+  match(env::get_int("VOYD_HTTP_SMOKE_PORT".as_slice()))
+    Some<i32> { value }:
+      value
+    None:
+      -1

@@ -4,9 +4,13 @@ export type { HostInitOptions, VoydHost } from "./host.js";
 export { registerDefaultHostAdapters } from "./adapters/default.js";
 export type {
   DefaultAdapterCapability,
-  DefaultAdapterFetchHeader,
-  DefaultAdapterFetchRequest,
-  DefaultAdapterFetchResponse,
+  DefaultAdapterHttpClientRequest,
+  DefaultAdapterHttpClientResponse,
+  DefaultAdapterHttpHeader,
+  DefaultAdapterHttpRedirectPolicy,
+  DefaultAdapterHttpRequest,
+  DefaultAdapterHttpResponse,
+  DefaultAdapterHttpServerConfig,
   DefaultAdapterHost,
   DefaultAdapterOptions,
   DefaultAdapterRegistration,

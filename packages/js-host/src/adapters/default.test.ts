@@ -1,3 +1,5 @@
+import http from "node:http";
+import net from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EffectContinuation,
@@ -86,6 +88,38 @@ const tailContinuation: EffectContinuation = {
   end: (value?: unknown) => continuationCall("end", value),
 };
 
+const findFreePort = async (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close(() => reject(new Error("failed to allocate tcp port")));
+        return;
+      }
+      const port = address.port;
+      server.close(() => resolve(port));
+    });
+  });
+
+const httpGet = (
+  url: string
+): Promise<{ status: number; body: string }> =>
+  new Promise((resolve, reject) => {
+    const request = http.get(url, (response) => {
+      response.setEncoding("utf8");
+      let body = "";
+      response.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      response.on("end", () => {
+        resolve({ status: response.statusCode ?? 0, body });
+      });
+    });
+    request.once("error", reject);
+  });
+
 describe("registerDefaultHostAdapters", () => {
   const envKey = "VOYD_JS_HOST_DEFAULT_ADAPTER_TEST_KEY";
   const originalEnvValue = process.env[envKey];
@@ -127,6 +161,41 @@ describe("registerDefaultHostAdapters", () => {
     const getResult = await getEnvHandler(tailContinuation, envKey);
     expect(getResult.kind).toBe("tail");
     expect(getResult.value).toBe("hello");
+  });
+
+  it("registers bun env handlers through node-compatible process env", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.env", opName: "get", opId: 0 },
+      { effectId: "voyd.std.env", opName: "set", opId: 1 },
+    ]);
+    const env: Record<string, string | undefined> = {};
+    vi.stubGlobal("process", {
+      env,
+      versions: { node: "20.0.0", bun: "1.0.0" },
+    });
+    const { host, getHandler } = createFakeHost(table);
+
+    const report = await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "bun" },
+    });
+    expect(report.capabilities[0]?.supported).toBe(true);
+
+    expect(
+      getHandler("voyd.std.env", "set")(tailContinuation, {
+        key: "VOYD_BUN_ENV_TEST",
+        value: "ok",
+      })
+    ).toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(
+      getHandler("voyd.std.env", "get")(tailContinuation, "VOYD_BUN_ENV_TEST")
+    ).toEqual({
+      kind: "tail",
+      value: "ok",
+    });
   });
 
   it("registers random/time/log handlers on node", async () => {
@@ -446,9 +515,9 @@ describe("registerDefaultHostAdapters", () => {
     ).toMatch(/list_dir response exceeds effect transport buffer/i);
   });
 
-  it("registers fetch handlers and maps DTO payloads", async () => {
+  it("registers http-client handlers and maps DTO payloads", async () => {
     const table = buildTable([
-      { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
+      { effectId: "voyd.std.http.client", opName: "request", opId: 0 },
     ]);
     const seenRequests: unknown[] = [];
     const { host, getHandler } = createFakeHost(table);
@@ -458,27 +527,35 @@ describe("registerDefaultHostAdapters", () => {
       options: {
         runtime: "node",
         runtimeHooks: {
-          fetchRequest: async (request) => {
-            seenRequests.push(request);
+          httpClientRequest: async (request) => {
+            seenRequests.push({
+              method: request.method,
+              url: request.url,
+              headers: request.headers,
+              body: Array.from(request.body.values()),
+              timeoutMillis: request.timeoutMillis,
+              redirectPolicy: request.redirectPolicy,
+            });
             return {
               status: 201,
-              statusText: "Created",
+              reason: "Created",
               headers: [{ name: "content-type", value: "text/plain" }],
-              body: request.body ?? "",
+              body: request.body,
             };
           },
         },
       },
     });
 
-    const result = await getHandler("voyd.std.fetch", "request")(
+    const result = await getHandler("voyd.std.http.client", "request")(
       tailContinuation,
       {
-        method: "post",
+        method: "POST",
         url: "https://example.test/echo",
         headers: [{ name: "accept", value: "text/plain" }],
-        body: "hello",
+        body: [104, 101, 108, 108, 111],
         timeout_millis: 15,
+        redirect_policy: { kind: "follow", max_redirects: 20 },
       }
     );
 
@@ -487,8 +564,9 @@ describe("registerDefaultHostAdapters", () => {
         method: "POST",
         url: "https://example.test/echo",
         headers: [{ name: "accept", value: "text/plain" }],
-        body: "hello",
+        body: [104, 101, 108, 108, 111],
         timeoutMillis: 15,
+        redirectPolicy: { kind: "follow", maxRedirects: 20 },
       },
     ]);
     expect(result).toEqual({
@@ -497,17 +575,17 @@ describe("registerDefaultHostAdapters", () => {
         ok: true,
         value: {
           status: 201,
-          status_text: "Created",
+          reason: "Created",
           headers: [{ name: "content-type", value: "text/plain" }],
-          body: "hello",
+          body: [104, 101, 108, 108, 111],
         },
       },
     });
   });
 
-  it("returns host timeout errors when fetch aborts", async () => {
+  it("returns host timeout errors when http-client aborts", async () => {
     const table = buildTable([
-      { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
+      { effectId: "voyd.std.http.client", opName: "request", opId: 0 },
     ]);
     vi.stubGlobal(
       "fetch",
@@ -542,12 +620,14 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "node" },
     });
 
-    const result = await getHandler("voyd.std.fetch", "request")(
+    const result = await getHandler("voyd.std.http.client", "request")(
       tailContinuation,
       {
         method: "GET",
         url: "https://example.test/timeout",
         headers: [],
+        body: [],
+        redirect_policy: { kind: "follow", max_redirects: 20 },
         timeout_millis: 5,
       }
     );
@@ -561,9 +641,245 @@ describe("registerDefaultHostAdapters", () => {
     });
   });
 
-  it("preserves fetch timeout capability errors when abort support is unavailable", async () => {
+  it("enforces explicit http-client max redirect limits", async () => {
     const table = buildTable([
-      { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
+      { effectId: "voyd.std.http.client", opName: "request", opId: 0 },
+    ]);
+    const fetchCalls: Array<{ url: string; redirect?: unknown }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: Record<string, unknown>) => {
+        fetchCalls.push({ url, redirect: init?.redirect });
+        if (url.endsWith("/first")) {
+          return {
+            status: 302,
+            statusText: "Found",
+            headers: [{ name: "location", value: "/second" }],
+            arrayBuffer: async () => new Uint8Array().buffer,
+          };
+        }
+        return {
+          status: 302,
+          statusText: "Found",
+          headers: [{ name: "location", value: "/third" }],
+          arrayBuffer: async () => new Uint8Array().buffer,
+        };
+      })
+    );
+    const { getHandler, host } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    const result = await getHandler("voyd.std.http.client", "request")(
+      tailContinuation,
+      {
+        method: "GET",
+        url: "https://example.test/first",
+        headers: [],
+        body: [],
+        redirect_policy: { kind: "follow", max_redirects: 1 },
+      }
+    );
+
+    expect(fetchCalls).toEqual([
+      { url: "https://example.test/first", redirect: "manual" },
+      { url: "https://example.test/second", redirect: "manual" },
+    ]);
+    expect(result).toEqual({
+      kind: "tail",
+      value: {
+        ok: false,
+        code: 1,
+        message: "http redirect limit exceeded (1)",
+      },
+    });
+  });
+
+  it("preserves HEAD method across explicit 303 redirect following", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.client", opName: "request", opId: 0 },
+    ]);
+    const fetchCalls: Array<{ url: string; method?: unknown; redirect?: unknown }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: Record<string, unknown>) => {
+        fetchCalls.push({ url, method: init?.method, redirect: init?.redirect });
+        if (url.endsWith("/first")) {
+          return {
+            status: 303,
+            statusText: "See Other",
+            headers: [{ name: "location", value: "/second" }],
+            arrayBuffer: async () => new Uint8Array().buffer,
+          };
+        }
+        return {
+          status: 200,
+          statusText: "OK",
+          headers: [],
+          arrayBuffer: async () => new Uint8Array().buffer,
+        };
+      })
+    );
+    const { getHandler, host } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    await expect(
+      getHandler("voyd.std.http.client", "request")(tailContinuation, {
+        method: "HEAD",
+        url: "https://example.test/first",
+        headers: [],
+        body: [],
+        redirect_policy: { kind: "follow", max_redirects: 2 },
+      })
+    ).resolves.toMatchObject({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(fetchCalls).toEqual([
+      {
+        url: "https://example.test/first",
+        method: "HEAD",
+        redirect: "manual",
+      },
+      {
+        url: "https://example.test/second",
+        method: "HEAD",
+        redirect: "manual",
+      },
+    ]);
+  });
+
+  it("sanitizes explicit cross-origin redirects when replaying requests", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.client", opName: "request", opId: 0 },
+    ]);
+    const fetchCalls: Array<{
+      body?: unknown;
+      headers?: unknown;
+      method?: unknown;
+      url: string;
+    }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: Record<string, unknown>) => {
+        fetchCalls.push({
+          body: init?.body,
+          headers: init?.headers,
+          method: init?.method,
+          url,
+        });
+        if (url.endsWith("/first")) {
+          return {
+            status: 302,
+            statusText: "Found",
+            headers: [{ name: "location", value: "https://other.test/second" }],
+            arrayBuffer: async () => new Uint8Array().buffer,
+          };
+        }
+        return {
+          status: 200,
+          statusText: "OK",
+          headers: [],
+          arrayBuffer: async () => new Uint8Array().buffer,
+        };
+      })
+    );
+    const { getHandler, host } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    await expect(
+      getHandler("voyd.std.http.client", "request")(tailContinuation, {
+        method: "POST",
+        url: "https://example.test/first",
+        headers: [
+          { name: "authorization", value: "Bearer secret" },
+          { name: "cookie", value: "sid=secret" },
+          { name: "content-length", value: "3" },
+          { name: "content-type", value: "text/plain" },
+          { name: "x-keep", value: "yes" },
+        ],
+        body: [1, 2, 3],
+        redirect_policy: { kind: "follow", max_redirects: 2 },
+      })
+    ).resolves.toMatchObject({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(fetchCalls).toEqual([
+      {
+        body: new Uint8Array([1, 2, 3]),
+        headers: [
+          ["authorization", "Bearer secret"],
+          ["cookie", "sid=secret"],
+          ["content-length", "3"],
+          ["content-type", "text/plain"],
+          ["x-keep", "yes"],
+        ],
+        method: "POST",
+        url: "https://example.test/first",
+      },
+      {
+        body: undefined,
+        headers: [["x-keep", "yes"]],
+        method: "GET",
+        url: "https://other.test/second",
+      },
+    ]);
+  });
+
+  it("preserves custom http-client method casing for fetch requests", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.client", opName: "request", opId: 0 },
+    ]);
+    const seenMethods: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, init?: Record<string, unknown>) => {
+        seenMethods.push(init?.method);
+        return {
+          status: 200,
+          statusText: "OK",
+          headers: [],
+          arrayBuffer: async () => new Uint8Array().buffer,
+        };
+      })
+    );
+    const { getHandler, host } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    await expect(
+      getHandler("voyd.std.http.client", "request")(tailContinuation, {
+        method: "foo",
+        url: "https://example.test/custom",
+        headers: [],
+        body: [],
+        redirect_policy: { kind: "manual" },
+      })
+    ).resolves.toMatchObject({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(seenMethods).toEqual(["foo"]);
+  });
+
+  it("preserves http-client timeout capability errors when abort support is unavailable", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.client", opName: "request", opId: 0 },
     ]);
     vi.stubGlobal(
       "fetch",
@@ -571,7 +887,7 @@ describe("registerDefaultHostAdapters", () => {
         status: 200,
         statusText: "OK",
         headers: [],
-        text: async () => "",
+        arrayBuffer: async () => new Uint8Array().buffer,
       }))
     );
     vi.stubGlobal("AbortController", undefined);
@@ -582,12 +898,14 @@ describe("registerDefaultHostAdapters", () => {
       options: { runtime: "node" },
     });
 
-    const result = await getHandler("voyd.std.fetch", "request")(
+    const result = await getHandler("voyd.std.http.client", "request")(
       tailContinuation,
       {
         method: "GET",
         url: "https://example.test/timeout",
         headers: [],
+        body: [],
+        redirect_policy: { kind: "follow", max_redirects: 20 },
         timeout_millis: 5,
       }
     );
@@ -596,9 +914,424 @@ describe("registerDefaultHostAdapters", () => {
       value: {
         ok: false,
         code: 1,
-        message: "fetch timeout_millis requires AbortController support",
+        message: "http client timeout_millis requires AbortController support",
       },
     });
+  });
+
+  it("releases accepted but unanswered http-server requests during close", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 2 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    const port = await findFreePort();
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port, host: "127.0.0.1" }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const acceptPromise = getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const requestPromise = httpGet(`http://127.0.0.1:${port}/pending`);
+
+    await expect(acceptPromise).resolves.toMatchObject({
+      kind: "resume",
+      value: {
+        ok: true,
+        value: {
+          method: "GET",
+          path: "/pending",
+        },
+      },
+    });
+
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    await expect(requestPromise).resolves.toEqual({
+      status: 500,
+      body: "server closed before response",
+    });
+  });
+
+  it("allows exactly max_pending_requests queued http-server requests", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 1 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    const port = await findFreePort();
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      {
+        port,
+        host: "127.0.0.1",
+        max_pending_requests: 2,
+      }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+
+    const first = httpGet(`http://127.0.0.1:${port}/one`);
+    const second = httpGet(`http://127.0.0.1:${port}/two`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await expect(httpGet(`http://127.0.0.1:${port}/three`)).resolves.toEqual({
+      status: 503,
+      body: "server pending request limit reached",
+    });
+
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    await expect(first).resolves.toEqual({
+      status: 500,
+      body: "server closed before response",
+    });
+    await expect(second).resolves.toEqual({
+      status: 500,
+      body: "server closed before response",
+    });
+  });
+
+  it("returns HostError and responds 413 when accepted request exceeds effect transport", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 0 },
+    ]);
+    const responses: unknown[] = [];
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "unknown",
+        effectBufferSize: 512,
+        runtimeHooks: {
+          httpServerListen: async () => 1,
+          httpServerAccept: async () => ({
+            requestId: 9,
+            method: "POST",
+            path: "/large",
+            headers: [],
+            body: Uint8Array.from({ length: 1_024 }, () => 65),
+          }),
+          httpServerRespond: async (response) => {
+            responses.push({
+              requestId: response.requestId,
+              status: response.status,
+              reason: response.reason,
+              body: Array.from(response.body.values()),
+            });
+          },
+          httpServerClose: async () => {},
+        },
+      },
+    });
+
+    await expect(
+      getHandler("voyd.std.http.server", "accept_raw")(tailContinuation, 1)
+    ).resolves.toMatchObject({
+      kind: "resume",
+      value: {
+        ok: false,
+        code: 1,
+      },
+    });
+    expect(responses).toEqual([
+      {
+        requestId: 9,
+        status: 413,
+        reason: "Payload Too Large",
+        body: Array.from(new TextEncoder().encode("request exceeds effect transport buffer")),
+      },
+    ]);
+  });
+
+  it("returns host-managed 500 for dropped http-server request handles", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 2 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    const port = await findFreePort();
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      {
+        port,
+        host: "127.0.0.1",
+        response_timeout_millis: 25,
+      }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const acceptPromise = getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const requestPromise = httpGet(`http://127.0.0.1:${port}/dropped`);
+
+    await expect(acceptPromise).resolves.toMatchObject({
+      kind: "resume",
+      value: {
+        ok: true,
+        value: {
+          method: "GET",
+          path: "/dropped",
+        },
+      },
+    });
+    await expect(requestPromise).resolves.toEqual({
+      status: 500,
+      body: "server response timeout",
+    });
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+  });
+
+  it("serves requests through Deno.serve when runtime is deno", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "respond_raw", opId: 2 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 3 },
+    ]);
+    let serveHandler: ((request: Request) => Promise<Response>) | undefined;
+    const shutdown = vi.fn();
+    const serve = vi.fn((_options: unknown, handler: typeof serveHandler) => {
+      serveHandler = handler;
+      return { shutdown };
+    });
+    vi.stubGlobal("Deno", { serve });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "deno" },
+    });
+
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port: 4545, host: "127.0.0.1" }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const requestPromise = serveHandler!(
+      new Request("http://127.0.0.1:4545/deno?x=1", {
+        method: "POST",
+        headers: { "x-test": "yes" },
+        body: "hi",
+      })
+    );
+    const acceptResult = await getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+
+    expect(acceptResult).toMatchObject({
+      kind: "resume",
+      value: {
+        ok: true,
+        value: {
+          method: "POST",
+          path: "/deno",
+          query: "x=1",
+          body: [104, 105],
+        },
+      },
+    });
+    await expect(
+      getHandler("voyd.std.http.server", "respond_raw")(tailContinuation, {
+        request_id: requestId,
+        response: {
+          status: 202,
+          reason: "Accepted",
+          headers: [{ name: "x-runtime", value: "deno" }],
+          body: [111, 107],
+        },
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    const response = await requestPromise;
+    expect(response.status).toBe(202);
+    await expect(response.text()).resolves.toBe("ok");
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits Deno/Bun web response bodies for null-body statuses", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "respond_raw", opId: 2 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 3 },
+    ]);
+    let serveHandler: ((request: Request) => Promise<Response>) | undefined;
+    const serve = vi.fn((_options: unknown, handler: typeof serveHandler) => {
+      serveHandler = handler;
+      return { shutdown: vi.fn() };
+    });
+    vi.stubGlobal("Deno", { serve });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "deno" },
+    });
+
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port: 4547, host: "127.0.0.1" }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const requestPromise = serveHandler!(
+      new Request("http://127.0.0.1:4547/no-content")
+    );
+    const acceptResult = await getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+
+    await expect(
+      getHandler("voyd.std.http.server", "respond_raw")(tailContinuation, {
+        request_id: requestId,
+        response: {
+          status: 204,
+          reason: "No Content",
+          headers: [],
+          body: [],
+        },
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    const response = await requestPromise;
+    expect(response.status).toBe(204);
+    await expect(response.text()).resolves.toBe("");
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+  });
+
+  it("serves requests through Bun.serve when runtime is bun", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "respond_raw", opId: 2 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 3 },
+    ]);
+    let serveHandler: ((request: Request) => Promise<Response>) | undefined;
+    const stop = vi.fn();
+    const serve = vi.fn((options: { fetch: typeof serveHandler }) => {
+      serveHandler = options.fetch;
+      return { stop };
+    });
+    vi.stubGlobal("Bun", { version: "1.0.0", serve });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "bun" },
+    });
+
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port: 4546, host: "127.0.0.1" }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const requestPromise = serveHandler!(
+      new Request("http://127.0.0.1:4546/bun", {
+        method: "GET",
+      })
+    );
+    const acceptResult = await getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+
+    expect(acceptResult).toMatchObject({
+      kind: "resume",
+      value: {
+        ok: true,
+        value: {
+          method: "GET",
+          path: "/bun",
+          body: [],
+        },
+      },
+    });
+    await expect(
+      getHandler("voyd.std.http.server", "respond_raw")(tailContinuation, {
+        request_id: requestId,
+        response: {
+          status: 200,
+          reason: "OK",
+          headers: [{ name: "x-runtime", value: "bun" }],
+          body: [98, 117, 110],
+        },
+      })
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    const response = await requestPromise;
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe("bun");
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(tailContinuation, serverId)
+    ).resolves.toEqual({
+      kind: "tail",
+      value: { ok: true },
+    });
+    expect(stop).toHaveBeenCalledWith(true);
   });
 
   it("registers input handlers from runtime hooks", async () => {

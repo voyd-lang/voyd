@@ -1,0 +1,739 @@
+//! Shared HTTP protocol values and helpers.
+//!
+//! `std::http` is pure: it defines methods, statuses, headers, bodies,
+//! inbound requests, and responses used by client and server effects.
+
+use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
+use std::enums::{ enum }
+use std::json::{ JsonError, JsonValue, parse as parse_json, stringify as stringify_json }
+use std::number::cast::to_i64
+use std::optional::all
+use std::result::types::all
+use std::string::type::{ ParseIntError, String, StringSlice, Utf8Error, from_utf8 }
+
+pub self::client
+pub self::server
+pub self::wire
+
+pub enum Method
+  Get
+  Head
+  Post
+  Put
+  Patch
+  Delete
+  Options
+  Trace
+  Connect
+  Other { value: String }
+
+pub obj Status {
+  pri code_value: i32,
+  pri reason_value: String
+}
+
+pub obj HeaderName {
+  pri original: String,
+  pri normalized_value: String
+}
+
+pub type Header = {
+  name: HeaderName,
+  value: String
+}
+
+pub obj Headers {
+  pri entries_value: Array<Header>
+}
+
+pub obj Body {
+  pri kind: i32,
+  pri bytes_value?: Bytes,
+  pri text_value?: String
+}
+
+pub obj QueryString {
+  api raw: String
+}
+
+pub enum RequestTarget
+  Origin { path: String, query?: QueryString }
+  Absolute { url: String }
+
+pub obj IncomingRequest {
+  api method: Method,
+  api path: String,
+  api query?: QueryString,
+  api headers: Headers,
+  api body: Body
+}
+
+pub obj Response {
+  api status: Status,
+  api headers: Headers,
+  api body: Body
+}
+
+pub obj HttpError {
+  api code: i32,
+  api message: String
+}
+
+impl Status
+  /// Creates a status from a standard code.
+  api fn from(code: i32) -> Result<Status, HttpError>
+    if not is_valid_status_code(code):
+      return Err<HttpError> { error: invalid_status_code_error(code) }
+    Ok<Status> { value: status_unchecked(code, default_reason(code)) }
+
+  /// Creates a status from a code and custom reason phrase.
+  api fn custom({ code: i32, reason: String }) -> Result<Status, HttpError>
+    if not is_valid_status_code(code):
+      return Err<HttpError> { error: invalid_status_code_error(code) }
+    Ok<Status> { value: status_unchecked(code, reason) }
+
+  /// Creates a status from a code and custom reason phrase.
+  api fn custom({ code: i32, reason: StringSlice }) -> Result<Status, HttpError>
+    Status::custom(code: code, reason: reason.to_string())
+
+  /// Returns the numeric HTTP status code.
+  api fn code(self) -> i32
+    self.code_value
+
+  /// Returns the reason phrase.
+  api fn reason(self) -> String
+    self.reason_value
+
+  /// Returns true for 2xx status codes.
+  api fn is_success(self) -> bool
+    self.code_value >= 200 and self.code_value < 300
+
+  /// Returns true for 4xx status codes.
+  api fn is_client_error(self) -> bool
+    self.code_value >= 400 and self.code_value < 500
+
+  /// Returns true for 5xx status codes.
+  api fn is_server_error(self) -> bool
+    self.code_value >= 500 and self.code_value < 600
+
+  api fn ok() -> Status
+    status_unchecked(200, "OK".as_slice().to_string())
+
+  api fn created() -> Status
+    status_unchecked(201, "Created".as_slice().to_string())
+
+  api fn no_content() -> Status
+    status_unchecked(204, "No Content".as_slice().to_string())
+
+  api fn bad_request() -> Status
+    status_unchecked(400, "Bad Request".as_slice().to_string())
+
+  api fn unauthorized() -> Status
+    status_unchecked(401, "Unauthorized".as_slice().to_string())
+
+  api fn forbidden() -> Status
+    status_unchecked(403, "Forbidden".as_slice().to_string())
+
+  api fn not_found() -> Status
+    status_unchecked(404, "Not Found".as_slice().to_string())
+
+  api fn method_not_allowed() -> Status
+    status_unchecked(405, "Method Not Allowed".as_slice().to_string())
+
+  api fn internal_server_error() -> Status
+    status_unchecked(500, "Internal Server Error".as_slice().to_string())
+
+impl HeaderName
+  /// Builds a case-insensitive HTTP header name.
+  api fn from(value: StringSlice) -> Result<HeaderName, HttpError>
+    let original = value.to_string()
+    if not is_valid_header_name(original):
+      return Err<HttpError> {
+        error: HttpError {
+          code: 2,
+          message: "http header name must be a non-empty token".as_slice().to_string()
+        }
+      }
+    Ok<HeaderName> {
+      value: HeaderName {
+        original: original,
+        normalized_value: original.lowered()
+      }
+    }
+
+  /// Builds a case-insensitive HTTP header name.
+  api fn from(value: String) -> Result<HeaderName, HttpError>
+    HeaderName::from(value.as_slice())
+
+  /// Returns the name with caller-provided casing.
+  api fn as_string(self) -> String
+    self.original
+
+  /// Returns the lowercase lookup key.
+  api fn normalized(self) -> String
+    self.normalized_value
+
+impl Headers
+  fn unchecked(entries: Array<Header>) -> Headers
+    Headers { entries_value: entries }
+
+  /// Creates an empty header collection.
+  api fn empty() -> Headers
+    Headers::unchecked(Array<Header>::init())
+
+  /// Builds headers from existing header values.
+  api fn from(entries: Array<Header>) -> Result<Headers, HttpError>
+    Ok<Headers> { value: Headers::unchecked(entries) }
+
+  /// Returns a copy with one header appended.
+  api fn append(self, { header: Header }) -> Headers
+    let ~next = self.entries_value.copied(1)
+    next.push(header)
+    Headers::unchecked(next)
+
+  /// Returns a copy with one header appended.
+  api fn append(self, { header name: StringSlice, value: StringSlice }) -> Headers
+    match(HeaderName::from(name))
+      Ok<HeaderName> { value: parsed }:
+        self.append(header: { name: parsed, value: value.to_string() })
+      Err<HttpError>:
+        self
+
+  /// Returns a copy with one header appended.
+  api fn append(self, { header name: String, value: String }) -> Headers
+    self.append(header: name.as_slice(), value: value.as_slice())
+
+  /// Returns a copy with all existing values for the header name replaced.
+  api fn set(self, { header: Header }) -> Headers
+    self.remove(header.name).append(header: header)
+
+  /// Returns a copy with all existing values for the header name replaced.
+  api fn set(self, { header name: StringSlice, value: StringSlice }) -> Headers
+    match(HeaderName::from(name))
+      Ok<HeaderName> { value: parsed }:
+        self.set(header: { name: parsed, value: value.to_string() })
+      Err<HttpError>:
+        self
+
+  /// Returns a copy with all existing values for the header name replaced.
+  api fn set(self, { header name: String, value: String }) -> Headers
+    self.set(header: name.as_slice(), value: value.as_slice())
+
+  /// Returns a copy without values matching `name`.
+  api fn remove(self, name: HeaderName) -> Headers
+    remove_normalized_header(self, name.normalized())
+
+  /// Returns a copy without values matching `name`.
+  api fn remove(self, name: StringSlice) -> Headers
+    let normalized = name.to_string().lowered()
+    remove_normalized_header(self, normalized)
+
+  /// Returns a copy without values matching `name`.
+  api fn remove(self, name: String) -> Headers
+    self.remove(name.as_slice())
+
+  /// Returns the first value matching `name`.
+  api fn get(self, name: HeaderName) -> Option<String>
+    get_normalized_header(self, name.normalized())
+
+  /// Returns the first value matching `name`.
+  api fn get(self, name: StringSlice) -> Option<String>
+    get_normalized_header(self, name.to_string().lowered())
+
+  /// Returns the first value matching `name`.
+  api fn get(self, name: String) -> Option<String>
+    self.get(name.as_slice())
+
+  /// Returns every value matching `name`.
+  api fn get_all(self, name: HeaderName) -> Array<String>
+    get_all_normalized_headers(self, name.normalized())
+
+  /// Returns every value matching `name`.
+  api fn get_all(self, name: StringSlice) -> Array<String>
+    get_all_normalized_headers(self, name.to_string().lowered())
+
+  /// Returns every value matching `name`.
+  api fn get_all(self, name: String) -> Array<String>
+    self.get_all(name.as_slice())
+
+  /// Returns true when any value exists for `name`.
+  api fn contains(self, name: HeaderName) -> bool
+    match(self.get(name))
+      Some<String>:
+        true
+      None:
+        false
+
+  /// Returns true when any value exists for `name`.
+  api fn contains(self, name: StringSlice) -> bool
+    match(self.get(name))
+      Some<String>:
+        true
+      None:
+        false
+
+  /// Returns true when any value exists for `name`.
+  api fn contains(self, name: String) -> bool
+    self.contains(name.as_slice())
+
+  /// Returns copied header entries in wire order.
+  api fn entries(self) -> Array<Header>
+    self.entries_value.copied()
+
+  /// Returns the first `content-type` value.
+  api fn content_type(self) -> Option<String>
+    self.get("content-type".as_slice())
+
+  /// Returns parsed `content-length` when present and valid.
+  api fn content_length(self) -> Option<i64>
+    match(self.get("content-length".as_slice()))
+      Some<String> { value }:
+        match(value.as_slice().parse_i64())
+          Ok<i64> { value }:
+            if value >= to_i64(0):
+              Some<i64> { value }
+            else:
+              None {}
+          Err<ParseIntError>:
+            None {}
+      None:
+        None {}
+
+impl Body
+  /// Creates an empty body.
+  api fn empty() -> Body
+    Body { kind: 0, bytes_value: None {}, text_value: None {} }
+
+  /// Creates a byte body.
+  api fn bytes(value: Bytes) -> Body
+    Body {
+      kind: 1,
+      bytes_value: Some<Bytes> { value },
+      text_value: None {}
+    }
+
+  /// Creates a UTF-8 text body.
+  api fn text(value: StringSlice) -> Body
+    Body {
+      kind: 2,
+      bytes_value: None {},
+      text_value: Some<String> { value: value.to_string() }
+    }
+
+  /// Creates a UTF-8 text body.
+  api fn text(value: String) -> Body
+    Body::text(value.as_slice())
+
+  /// Returns the buffered byte length.
+  api fn len(self) -> i32
+    if self.kind == 1:
+      match(self.bytes_value)
+        Some<Bytes> { value }:
+          return value.len()
+        None:
+          return 0
+    if self.kind == 2:
+      match(self.text_value)
+        Some<String> { value }:
+          return value.byte_len()
+        None:
+          return 0
+    0
+
+  /// Returns true when no bytes are stored.
+  api fn is_empty(self) -> bool
+    self.len() == 0
+
+  /// Returns this body as bytes.
+  api fn as_bytes(self) -> Bytes
+    if self.kind == 1:
+      match(self.bytes_value)
+        Some<Bytes> { value }:
+          return value
+        None:
+          return ByteBuffer::init().as_bytes()
+    if self.kind == 2:
+      match(self.text_value)
+        Some<String> { value }:
+          return bytes_from_text(value)
+        None:
+          return ByteBuffer::init().as_bytes()
+    ByteBuffer::init().as_bytes()
+
+  /// Returns this body as UTF-8 text.
+  api fn as_text(self) -> Result<String, HttpError>
+    if self.kind == 2:
+      match(self.text_value)
+        Some<String> { value }:
+          return Ok<String> { value: value }
+        None:
+          return Ok<String> { value: String::init() }
+    if self.kind == 1:
+      match(self.bytes_value)
+        Some<Bytes> { value }:
+          match(from_utf8(value.to_array()))
+            Ok<String> { value }:
+              return Ok<String> { value: value }
+            Err<Utf8Error> { error }:
+              return Err<HttpError> { error: utf8_error_to_http_error(error) }
+        None:
+          return Ok<String> { value: String::init() }
+    Ok<String> { value: String::init() }
+
+impl IncomingRequest
+  /// Returns the first header matching `name`.
+  api fn header(self, name: StringSlice) -> Option<String>
+    self.headers.get(name)
+
+  /// Returns the first header matching `name`.
+  api fn header(self, name: String) -> Option<String>
+    self.header(name.as_slice())
+
+  /// Returns the raw query string.
+  api fn query_string(self) -> Option<String>
+    match(self.query)
+      Some<QueryString> { value }:
+        Some<String> { value: value.raw }
+      None:
+        None {}
+
+  /// Returns the request body as bytes.
+  api fn body_bytes(self) -> Bytes
+    self.body.as_bytes()
+
+  /// Returns the request body as UTF-8 text.
+  api fn text(self) -> Result<String, HttpError>
+    self.body.as_text()
+
+  /// Parses the request body as JSON.
+  api fn json(self) -> Result<JsonValue, HttpError>
+    parse_body_json(self.body)
+
+impl Response
+  /// Creates a response with optional headers and body.
+  api fn new({ status: Status, headers?: Headers, body?: Body }) -> Response
+    Response {
+      status: status,
+      headers: headers ?? Headers::empty(),
+      body: body ?? Body::empty()
+    }
+
+  api fn ok() -> Response
+    Response::new(status: Status::ok())
+
+  api fn created() -> Response
+    Response::new(status: Status::created())
+
+  api fn no_content() -> Response
+    Response::new(status: Status::no_content())
+
+  api fn bad_request() -> Response
+    Response::new(status: Status::bad_request())
+
+  api fn unauthorized() -> Response
+    Response::new(status: Status::unauthorized())
+
+  api fn forbidden() -> Response
+    Response::new(status: Status::forbidden())
+
+  api fn not_found() -> Response
+    Response::new(status: Status::not_found())
+
+  api fn method_not_allowed() -> Response
+    Response::new(status: Status::method_not_allowed())
+
+  api fn internal_server_error() -> Response
+    Response::new(status: Status::internal_server_error())
+
+  /// Returns true for 2xx status codes.
+  api fn is_success(self) -> bool
+    self.status.is_success()
+
+  /// Returns the first header matching `name`.
+  api fn header(self, name: StringSlice) -> Option<String>
+    self.headers.get(name)
+
+  /// Returns the first header matching `name`.
+  api fn header(self, name: String) -> Option<String>
+    self.header(name.as_slice())
+
+  /// Returns the body as bytes.
+  api fn bytes(self) -> Bytes
+    self.body.as_bytes()
+
+  /// Returns the body as UTF-8 text.
+  api fn text(self) -> Result<String, HttpError>
+    self.body.as_text()
+
+  /// Parses the body as JSON.
+  api fn json(self) -> Result<JsonValue, HttpError>
+    parse_body_json(self.body)
+
+  /// Returns a copy with a different status.
+  api fn with(self, { status: Status }) -> Response
+    Response { status: status, headers: self.headers, body: self.body }
+
+  /// Returns a copy with one header appended.
+  api fn with(self, { header: Header }) -> Response
+    Response { status: self.status, headers: self.headers.append(header: header), body: self.body }
+
+  /// Returns a copy with one header appended.
+  api fn with(self, { header name: StringSlice, value: StringSlice }) -> Response
+    Response { status: self.status, headers: self.headers.append(header: name, value: value), body: self.body }
+
+  /// Returns a copy with one header appended.
+  api fn with(self, { header name: String, value: String }) -> Response
+    self.with(header: name.as_slice(), value: value.as_slice())
+
+  /// Returns a copy with replaced headers.
+  api fn with(self, { headers: Headers }) -> Response
+    Response { status: self.status, headers: headers, body: self.body }
+
+  /// Returns a copy with a different body.
+  api fn with(self, { body: Body }) -> Response
+    Response { status: self.status, headers: self.headers, body: body }
+
+  /// Returns a text response and sets `content-type` when missing.
+  api fn text(self, value: StringSlice) -> Response
+    Response {
+      status: self.status,
+      headers: with_default_content_type(self.headers, "text/plain; charset=utf-8".as_slice()),
+      body: Body::text(value)
+    }
+
+  /// Returns a text response and sets `content-type` when missing.
+  api fn text(self, value: String) -> Response
+    self.text(value.as_slice())
+
+  /// Returns a byte response and sets `content-type` when missing.
+  api fn bytes(self, value: Bytes) -> Response
+    Response {
+      status: self.status,
+      headers: with_default_content_type(self.headers, "application/octet-stream".as_slice()),
+      body: Body::bytes(value)
+    }
+
+  /// Returns a JSON response and sets `content-type` when missing.
+  api fn json(self, value: JsonValue) -> Response
+    match(stringify_json(value))
+      Ok<String> { value }:
+        Response {
+          status: self.status,
+          headers: with_default_content_type(self.headers, "application/json".as_slice()),
+          body: Body::text(value)
+        }
+      Err<JsonError> { error }:
+        Response {
+          status: Status::internal_server_error(),
+          headers: with_default_content_type(self.headers, "text/plain; charset=utf-8".as_slice()),
+          body: Body::text(error.message)
+        }
+
+  /// Returns a response with an empty body.
+  api fn empty(self) -> Response
+    Response { status: self.status, headers: self.headers, body: Body::empty() }
+
+/// Parses a standard HTTP method or preserves an extension method.
+pub fn method(value: StringSlice) -> Method
+  let normalized = value.to_string().uppered()
+  if normalized.equals("GET"):
+    return Method::Get {}
+  if normalized.equals("HEAD"):
+    return Method::Head {}
+  if normalized.equals("POST"):
+    return Method::Post {}
+  if normalized.equals("PUT"):
+    return Method::Put {}
+  if normalized.equals("PATCH"):
+    return Method::Patch {}
+  if normalized.equals("DELETE"):
+    return Method::Delete {}
+  if normalized.equals("OPTIONS"):
+    return Method::Options {}
+  if normalized.equals("TRACE"):
+    return Method::Trace {}
+  if normalized.equals("CONNECT"):
+    return Method::Connect {}
+  Method::Other { value: value.to_string() }
+
+/// Parses a standard HTTP method or preserves an extension method.
+pub fn method(value: String) -> Method
+  method(value.as_slice())
+
+/// Returns the method token as a string.
+pub fn method_as_string(value: Method) -> String
+  match(value)
+    Method::Get:
+      "GET".as_slice().to_string()
+    Method::Head:
+      "HEAD".as_slice().to_string()
+    Method::Post:
+      "POST".as_slice().to_string()
+    Method::Put:
+      "PUT".as_slice().to_string()
+    Method::Patch:
+      "PATCH".as_slice().to_string()
+    Method::Delete:
+      "DELETE".as_slice().to_string()
+    Method::Options:
+      "OPTIONS".as_slice().to_string()
+    Method::Trace:
+      "TRACE".as_slice().to_string()
+    Method::Connect:
+      "CONNECT".as_slice().to_string()
+    Method::Other { value }:
+      value
+
+/// Creates an empty header collection.
+pub fn headers() -> Headers
+  Headers::empty()
+
+fn status_unchecked(code: i32, reason: String) -> Status
+  Status { code_value: code, reason_value: reason }
+
+fn is_valid_status_code(code: i32) -> bool
+  code >= 100 and code <= 599
+
+fn invalid_status_code_error(code: i32): () -> HttpError
+  HttpError {
+    code: 1,
+    message: "http status code must be between 100 and 599".as_slice().to_string()
+  }
+
+fn default_reason(code: i32): () -> String
+  if code == 100:
+    return "Continue".as_slice().to_string()
+  if code == 101:
+    return "Switching Protocols".as_slice().to_string()
+  if code == 200:
+    return "OK".as_slice().to_string()
+  if code == 201:
+    return "Created".as_slice().to_string()
+  if code == 202:
+    return "Accepted".as_slice().to_string()
+  if code == 204:
+    return "No Content".as_slice().to_string()
+  if code == 301:
+    return "Moved Permanently".as_slice().to_string()
+  if code == 302:
+    return "Found".as_slice().to_string()
+  if code == 304:
+    return "Not Modified".as_slice().to_string()
+  if code == 400:
+    return "Bad Request".as_slice().to_string()
+  if code == 401:
+    return "Unauthorized".as_slice().to_string()
+  if code == 403:
+    return "Forbidden".as_slice().to_string()
+  if code == 404:
+    return "Not Found".as_slice().to_string()
+  if code == 405:
+    return "Method Not Allowed".as_slice().to_string()
+  if code == 409:
+    return "Conflict".as_slice().to_string()
+  if code == 500:
+    return "Internal Server Error".as_slice().to_string()
+  if code == 502:
+    return "Bad Gateway".as_slice().to_string()
+  if code == 503:
+    return "Service Unavailable".as_slice().to_string()
+  String::init()
+
+fn is_valid_header_name(name: String) -> bool
+  if name.is_empty():
+    return false
+  let source = name.raw_bytes()
+  var index = 0
+  while index < name.byte_len():
+    if not is_header_token_byte(__array_get(source, index)):
+      return false
+    index = index + 1
+  true
+
+fn is_header_token_byte(value: i32) -> bool
+  if value >= 48 and value <= 57:
+    return true
+  if value >= 65 and value <= 90:
+    return true
+  if value >= 97 and value <= 122:
+    return true
+  if value == 33 or value == 35 or value == 36 or value == 37:
+    return true
+  if value == 38 or value == 39 or value == 42 or value == 43:
+    return true
+  if value == 45 or value == 46 or value == 94 or value == 95:
+    return true
+  value == 96 or value == 124 or value == 126
+
+fn remove_normalized_header(headers: Headers, normalized: String) -> Headers
+  let source = headers.entries()
+  let ~next = Array<Header>::with_capacity(source.len())
+  var index = 0
+  while index < source.len():
+    match(source.get(index))
+      Some<Header> { value }:
+        if not value.name.normalized().equals(normalized):
+          next.push(value)
+      None:
+        void
+    index = index + 1
+  Headers::unchecked(next)
+
+fn get_normalized_header(headers: Headers, normalized: String) -> Option<String>
+  let source = headers.entries()
+  var index = 0
+  while index < source.len():
+    match(source.get(index))
+      Some<Header> { value }:
+        if value.name.normalized().equals(normalized):
+          return Some<String> { value: value.value }
+      None:
+        void
+    index = index + 1
+  None {}
+
+fn get_all_normalized_headers(headers: Headers, normalized: String) -> Array<String>
+  let source = headers.entries()
+  let ~out = Array<String>::init()
+  var index = 0
+  while index < source.len():
+    match(source.get(index))
+      Some<Header> { value }:
+        if value.name.normalized().equals(normalized):
+          out.push(value.value)
+      None:
+        void
+    index = index + 1
+  out
+
+fn bytes_from_text(value: String) -> Bytes
+  let ~buffer = ByteBuffer::with_capacity(value.byte_len())
+  let source = value.raw_bytes()
+  var index = 0
+  while index < value.byte_len():
+    buffer.push(__array_get(source, index))
+    index = index + 1
+  buffer.as_bytes()
+
+fn utf8_error_to_http_error(error: Utf8Error): () -> HttpError
+  HttpError { code: error.code, message: error.message }
+
+fn json_error_to_http_error(error: JsonError): () -> HttpError
+  HttpError { code: error.code, message: error.message }
+
+fn parse_body_json(body: Body): () -> Result<JsonValue, HttpError>
+  match(body.as_text())
+    Ok<String> { value }:
+      match(parse_json(value))
+        Ok<JsonValue> { value }:
+          Ok<JsonValue> { value: value }
+        Err<JsonError> { error }:
+          Err<HttpError> { error: json_error_to_http_error(error) }
+    Err<HttpError> { error }:
+      Err<HttpError> { error: error }
+
+fn with_default_content_type(headers: Headers, content_type: StringSlice) -> Headers
+  if headers.contains("content-type".as_slice()):
+    return headers
+  headers.set(header: "content-type".as_slice(), value: content_type)
