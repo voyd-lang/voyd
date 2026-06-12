@@ -1,4 +1,5 @@
 export type DocumentationFormat = "html" | "json";
+export type BootstrapTemplate = "vx-spa";
 
 export type VoydConfig = {
   /** Write raw parser AST to stdout */
@@ -35,4 +36,14 @@ export type VoydConfig = {
   docOut?: string;
   /** Documentation output format */
   docFormat?: DocumentationFormat;
+  /** Scaffold a new Voyd project */
+  bootstrap?: boolean;
+  /** Bootstrap target directory */
+  bootstrapDir?: string;
+  /** Bootstrap starter template */
+  bootstrapTemplate?: BootstrapTemplate;
+  /** Print bootstrap actions without writing files */
+  bootstrapDryRun?: boolean;
+  /** Allow bootstrap to write into a non-empty directory */
+  bootstrapForce?: boolean;
 };

@@ -27,6 +27,18 @@ type TestFailurePhase = "discovery" | "typing" | "execution";
 
 async function main() {
   const config = getConfig();
+  if (config.bootstrap) {
+    const { printBootstrapResult, runBootstrap } =
+      await import("./bootstrap/index.js");
+    const result = await runBootstrap({
+      dir: config.bootstrapDir ?? ".",
+      template: config.bootstrapTemplate ?? "vx-spa",
+      dryRun: config.bootstrapDryRun,
+      force: config.bootstrapForce,
+    });
+    return printBootstrapResult(result);
+  }
+
   if (config.test) {
     const { runTests } = await import("./test-runner.js");
     return runTests({

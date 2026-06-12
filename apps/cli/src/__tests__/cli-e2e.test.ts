@@ -803,6 +803,31 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   });
 });
 
+describe("voyd cli bootstrap command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
+  // Bootstrap file contents are covered by bootstrap unit tests. CLI e2e validates command wiring and exit/reporting.
+  it("scaffolds a vx-spa project", async () => {
+    assertCliRunnerAvailable();
+
+    const root = await createFixture();
+    try {
+      const result = runCli(root, ["bootstrap", "demo-app"]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      if (result.status !== 0) {
+        throw new Error(`voyd bootstrap failed: ${output}`);
+      }
+
+      expect(output).toContain("Created vx-spa project");
+      expect(output).toContain("npm run dev");
+      const packageJson = JSON.parse(
+        await readFile(resolve(root, "demo-app", "package.json"), "utf8"),
+      ) as { scripts: Record<string, string> };
+      expect(packageJson.scripts.build).toBe("vite build");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("voyd cli diagnostics output", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it("suppresses duplicate diagnostics and prints a summary", async () => {
     assertCliRunnerAvailable();

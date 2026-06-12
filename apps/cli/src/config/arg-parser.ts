@@ -1,11 +1,16 @@
 import { Command, InvalidArgumentError } from "commander";
 import { createRequire } from "node:module";
-import type { DocumentationFormat, VoydConfig } from "./types.js";
+import type {
+  BootstrapTemplate,
+  DocumentationFormat,
+  VoydConfig,
+} from "./types.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
 
 const DOC_FORMATS = ["html", "json"] as const;
+const BOOTSTRAP_TEMPLATES = ["vx-spa"] as const;
 const MAIN_OPTIONS_WITH_VALUES = ["--pkg-dir", "--entry"] as const;
 
 const appendOptionValue = (value: string, previous: string[]): string[] => [
@@ -20,6 +25,16 @@ const parseDocFormat = (value: string): DocumentationFormat => {
   }
   throw new InvalidArgumentError(
     `invalid documentation format "${value}" (allowed: ${DOC_FORMATS.join(", ")})`,
+  );
+};
+
+const parseBootstrapTemplate = (value: string): BootstrapTemplate => {
+  const normalized = value.toLowerCase();
+  if (normalized === "vx-spa") {
+    return normalized;
+  }
+  throw new InvalidArgumentError(
+    `invalid bootstrap template "${value}" (allowed: ${BOOTSTRAP_TEMPLATES.join(", ")})`,
   );
 };
 
@@ -106,6 +121,7 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
         "  test [index]         run voyd tests",
         "  doc [index]          generate API documentation",
         "  docs [index]         alias for `doc`",
+        "  bootstrap [dir]      scaffold a new Voyd project",
       ].join("\n"),
     );
 
@@ -128,6 +144,39 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
     runWasm: opts.runWasm,
     entry: opts.entry,
     pkgDirs: opts.pkgDir,
+    doc: false,
+    docFormat: "html",
+  };
+};
+
+const parseBootstrapConfig = (argv: readonly string[]): VoydConfig => {
+  const program = createBaseCommand({
+    name: "voyd bootstrap",
+    description: "Scaffold a new Voyd project",
+  });
+
+  program
+    .argument("[dir]", "project directory (default: .)")
+    .option(
+      "--template <name>",
+      `starter template (${BOOTSTRAP_TEMPLATES.join("|")})`,
+      parseBootstrapTemplate,
+      "vx-spa",
+    )
+    .option("--dry-run", "print files that would be created without writing")
+    .option("-f, --force", "allow writing into a non-empty directory");
+
+  program.parse(["node", "voyd bootstrap", ...argv]);
+  const opts = program.opts();
+  const [dirArg] = program.args as [string?];
+
+  return {
+    index: "./src",
+    bootstrap: true,
+    bootstrapDir: dirArg ?? ".",
+    bootstrapTemplate: opts.template,
+    bootstrapDryRun: opts.dryRun,
+    bootstrapForce: opts.force,
     doc: false,
     docFormat: "html",
   };
@@ -206,7 +255,12 @@ const findSubcommandIndex = (args: readonly string[]): number => {
   let index = 0;
   while (index < args.length) {
     const arg = args[index]!;
-    if (arg === "test" || arg === "doc" || arg === "docs") {
+    if (
+      arg === "test" ||
+      arg === "doc" ||
+      arg === "docs" ||
+      arg === "bootstrap"
+    ) {
       return index;
     }
 
@@ -248,6 +302,9 @@ export const getConfigFromCli = (): VoydConfig => {
   }
   if (command === "doc" || command === "docs") {
     return parseDocConfig(rest);
+  }
+  if (command === "bootstrap") {
+    return parseBootstrapConfig(rest);
   }
   return parseMainConfig(args);
 };
