@@ -78,6 +78,12 @@ describe("std::array compile smoke", () => {
     });
     const host = await createVoydHost({ wasm: result.wasm });
     await expect(host.run<number>("direct_at_out_of_bounds")).rejects.toThrow();
+    await expect(
+      host.run<number>("while_increment_before_at_trap"),
+    ).rejects.toThrow();
+    await expect(
+      host.run<number>("while_captured_call_mutation_trap"),
+    ).rejects.toThrow();
   });
 
   it("lowers optimized direct len/at access without dynamic dispatch", async () => {
@@ -125,6 +131,8 @@ describe("std::array compile smoke", () => {
       "while_mutates_array_sum",
       "while_alias_mutation_sum",
       "while_stale_length_sum",
+      "while_increment_before_at_trap",
+      "while_captured_call_mutation_trap",
     ]) {
       const functionWat = watForExport(wat, exportName);
       expect(functionWat).toContain("array.get");
