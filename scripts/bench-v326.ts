@@ -29,6 +29,8 @@ type ScenarioResult = {
   structNewCount: number;
   structNewDefaultCount: number;
   tupleMakeCount: number;
+  tupleExtractCount: number;
+  structGetCount: number;
   medianMs?: number;
   samplesMs: number[];
 };
@@ -45,8 +47,32 @@ val Vec3 {
   z: i32
 }
 
+type Vec3Record = {
+  x: i32,
+  y: i32,
+  z: i32
+}
+
 fn sum_vec(vec: Vec3) -> i32
   vec.x + vec.y + vec.z
+
+fn add_vec(seed: i32, vec: Vec3) -> i32
+  seed + vec.x + vec.y + vec.z
+
+fn add_record(seed: i32, vec: Vec3Record) -> i32
+  seed + vec.x + vec.y + vec.z
+
+fn make_vec_copy(seed: i32) -> Vec3
+  let first = Vec3 { x: seed, y: seed + 1, z: seed + 2 }
+  let second = first
+  second
+
+fn make_record_field_copy(seed: i32) -> Vec3Record
+  let pair = {
+    first: { x: seed, y: seed + 1, z: seed + 2 },
+    second: { x: seed + 3, y: seed + 4, z: seed + 5 }
+  }
+  pair.first
 
 fn identity(pair: Pair) -> Pair
   pair
@@ -81,6 +107,91 @@ pub fn direct_value_call_argument() -> i32
   var total = 0
   while i < 20000:
     total = total + sum_vec(Vec3 { x: i, y: i + 1, z: i + 2 })
+    i = i + 1
+  total
+
+pub fn value_lane_local_copy() -> i32
+  var i = 0
+  var total = 0
+  while i < 20000:
+    let first = Vec3 { x: i, y: i + 1, z: i + 2 }
+    let second = first
+    total = total + second.x + second.y + second.z
+    i = i + 1
+  total
+
+pub fn value_lane_block_copy() -> i32
+  var i = 0
+  var total = 0
+  while i < 20000:
+    let first = Vec3 { x: i, y: i + 1, z: i + 2 }
+    let second = block
+      total = total + 1
+      first
+    total = total + second.x + second.y + second.z
+    i = i + 1
+  total
+
+pub fn value_lane_reassignment() -> i32
+  var i = 0
+  var total = 0
+  while i < 20000:
+    var target = Vec3 { x: 0, y: 0, z: 0 }
+    let source = Vec3 { x: i, y: i + 1, z: i + 2 }
+    target = source
+    total = total + target.x + target.y + target.z
+    i = i + 1
+  total
+
+pub fn value_lane_direct_call_local() -> i32
+  var i = 0
+  var total = 0
+  while i < 20000:
+    let vec = Vec3 { x: i, y: i + 1, z: i + 2 }
+    total = total + add_vec(1, vec)
+    i = i + 1
+  total
+
+pub fn value_lane_direct_return() -> i32
+  var i = 0
+  var total = 0
+  while i < 20000:
+    let vec = make_vec_copy(i)
+    total = total + vec.x + vec.y + vec.z
+    i = i + 1
+  total
+
+pub fn value_lane_field_copy() -> i32
+  var i = 0
+  var total = 0
+  while i < 20000:
+    let pair = {
+      first: { x: i, y: i + 1, z: i + 2 },
+      second: { x: i + 3, y: i + 4, z: i + 5 }
+    }
+    let vec = pair.first
+    total = total + vec.x + vec.y + vec.z
+    i = i + 1
+  total
+
+pub fn value_lane_field_direct_call() -> i32
+  var i = 0
+  var total = 0
+  while i < 20000:
+    let pair = {
+      first: { x: i, y: i + 1, z: i + 2 },
+      second: { x: i + 3, y: i + 4, z: i + 5 }
+    }
+    total = total + add_record(1, pair.first)
+    i = i + 1
+  total
+
+pub fn value_lane_field_direct_return() -> i32
+  var i = 0
+  var total = 0
+  while i < 20000:
+    let vec = make_record_field_copy(i)
+    total = total + vec.x + vec.y + vec.z
     i = i + 1
   total
 
@@ -138,6 +249,10 @@ const optimizeModes = (process.env.VOYD_BENCH_OPTIMIZE_MODES ?? "false,true")
     throw new Error(`invalid VOYD_BENCH_OPTIMIZE_MODES entry ${value}`);
   });
 const revisionLabel = process.env.VOYD_BENCH_REVISION ?? "worktree";
+const scenarioFilters = (process.env.VOYD_BENCH_FILTER ?? "")
+  .split(",")
+  .map((filter) => filter.trim())
+  .filter((filter) => filter.length > 0);
 
 const maybeFileScenario = (scenario: Scenario): Scenario[] =>
   scenario.entryPath && !fs.existsSync(scenario.entryPath) ? [] : [scenario];
@@ -163,6 +278,70 @@ const scenarios: Scenario[] = [
     name: "focused/direct-value-call-argument",
     source: focusedSource,
     entryName: "direct_value_call_argument",
+    expected: 600_030_000,
+    iterations: defaultIterations,
+    warmups: 2,
+  },
+  {
+    name: "focused/value-lane-local-copy",
+    source: focusedSource,
+    entryName: "value_lane_local_copy",
+    expected: 600_030_000,
+    iterations: defaultIterations,
+    warmups: 2,
+  },
+  {
+    name: "focused/value-lane-block-copy",
+    source: focusedSource,
+    entryName: "value_lane_block_copy",
+    expected: 600_050_000,
+    iterations: defaultIterations,
+    warmups: 2,
+  },
+  {
+    name: "focused/value-lane-reassignment",
+    source: focusedSource,
+    entryName: "value_lane_reassignment",
+    expected: 600_030_000,
+    iterations: defaultIterations,
+    warmups: 2,
+  },
+  {
+    name: "focused/value-lane-direct-call-local",
+    source: focusedSource,
+    entryName: "value_lane_direct_call_local",
+    expected: 600_050_000,
+    iterations: defaultIterations,
+    warmups: 2,
+  },
+  {
+    name: "focused/value-lane-direct-return",
+    source: focusedSource,
+    entryName: "value_lane_direct_return",
+    expected: 600_030_000,
+    iterations: defaultIterations,
+    warmups: 2,
+  },
+  {
+    name: "focused/value-lane-field-copy",
+    source: focusedSource,
+    entryName: "value_lane_field_copy",
+    expected: 600_030_000,
+    iterations: defaultIterations,
+    warmups: 2,
+  },
+  {
+    name: "focused/value-lane-field-direct-call",
+    source: focusedSource,
+    entryName: "value_lane_field_direct_call",
+    expected: 600_050_000,
+    iterations: defaultIterations,
+    warmups: 2,
+  },
+  {
+    name: "focused/value-lane-field-direct-return",
+    source: focusedSource,
+    entryName: "value_lane_field_direct_return",
     expected: 600_030_000,
     iterations: defaultIterations,
     warmups: 2,
@@ -237,6 +416,13 @@ const scenarios: Scenario[] = [
     warmups: 0,
   }),
 ];
+
+const selectedScenarios =
+  scenarioFilters.length === 0
+    ? scenarios
+    : scenarios.filter((scenario) =>
+        scenarioFilters.some((filter) => scenario.name.includes(filter)),
+      );
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -325,6 +511,8 @@ const runScenario = async ({
       /\(struct\.new_default /g,
     ),
     tupleMakeCount: countMatches(compiled.wasmText ?? "", /\(tuple\.make/g),
+    tupleExtractCount: countMatches(compiled.wasmText ?? "", /\(tuple\.extract/g),
+    structGetCount: countMatches(compiled.wasmText ?? "", /\(struct\.get/g),
     medianMs: median(samplesMs),
     samplesMs,
   };
@@ -332,7 +520,7 @@ const runScenario = async ({
 
 const printResults = (results: readonly ScenarioResult[]): void => {
   console.log(
-    "revision,name,optimize,compileMs,wasmBytes,gzipBytes,wasmTextBytes,structNewCount,structNewDefaultCount,tupleMakeCount,wasmSha256,medianMs,samplesMs",
+    "revision,name,optimize,compileMs,wasmBytes,gzipBytes,wasmTextBytes,structNewCount,structNewDefaultCount,tupleMakeCount,tupleExtractCount,structGetCount,wasmSha256,medianMs,samplesMs",
   );
   results.forEach((result) => {
     console.log(
@@ -347,6 +535,8 @@ const printResults = (results: readonly ScenarioResult[]): void => {
         result.structNewCount.toString(),
         result.structNewDefaultCount.toString(),
         result.tupleMakeCount.toString(),
+        result.tupleExtractCount.toString(),
+        result.structGetCount.toString(),
         result.wasmSha256,
         result.medianMs === undefined ? "" : result.medianMs.toFixed(3),
         result.samplesMs.map((sample) => sample.toFixed(3)).join("|"),
@@ -372,6 +562,10 @@ const parseResultsCsv = (filePath: string): ScenarioResult[] => {
     }
     return columnIndex;
   };
+  const optionalIndex = (column: string): number | undefined => {
+    const columnIndex = header.indexOf(column);
+    return columnIndex < 0 ? undefined : columnIndex;
+  };
 
   const revisionIndex = revisionColumn ? index("revision") : undefined;
   const nameIndex = index("name");
@@ -383,6 +577,8 @@ const parseResultsCsv = (filePath: string): ScenarioResult[] => {
   const structNewCountIndex = index("structNewCount");
   const structNewDefaultCountIndex = index("structNewDefaultCount");
   const tupleMakeCountIndex = index("tupleMakeCount");
+  const tupleExtractCountIndex = optionalIndex("tupleExtractCount");
+  const structGetCountIndex = optionalIndex("structGetCount");
   const wasmSha256Index = index("wasmSha256");
   const medianMsIndex = index("medianMs");
   const samplesMsIndex = index("samplesMs");
@@ -404,6 +600,18 @@ const parseResultsCsv = (filePath: string): ScenarioResult[] => {
         10,
       ),
       tupleMakeCount: Number.parseInt(columns[tupleMakeCountIndex] ?? "0", 10),
+      tupleExtractCount: Number.parseInt(
+        typeof tupleExtractCountIndex === "number"
+          ? columns[tupleExtractCountIndex] ?? "0"
+          : "0",
+        10,
+      ),
+      structGetCount: Number.parseInt(
+        typeof structGetCountIndex === "number"
+          ? columns[structGetCountIndex] ?? "0"
+          : "0",
+        10,
+      ),
       wasmSha256: columns[wasmSha256Index] ?? "",
       medianMs:
         columns[medianMsIndex] && columns[medianMsIndex]!.length > 0
@@ -444,7 +652,7 @@ const printComparison = ({
     );
 
   console.log(
-    "name,optimize,baseRevision,headRevision,compileMsBase,compileMsHead,compileMsDeltaPct,medianMsBase,medianMsHead,medianMsDeltaPct,wasmBytesBase,wasmBytesHead,wasmBytesDeltaPct,gzipBytesBase,gzipBytesHead,gzipBytesDeltaPct,wasmTextBytesBase,wasmTextBytesHead,wasmTextBytesDeltaPct,structNewBase,structNewHead,structNewDelta,structNewDefaultBase,structNewDefaultHead,structNewDefaultDelta,tupleMakeBase,tupleMakeHead,tupleMakeDelta,baseWasmSha256,headWasmSha256",
+    "name,optimize,baseRevision,headRevision,compileMsBase,compileMsHead,compileMsDeltaPct,medianMsBase,medianMsHead,medianMsDeltaPct,wasmBytesBase,wasmBytesHead,wasmBytesDeltaPct,gzipBytesBase,gzipBytesHead,gzipBytesDeltaPct,wasmTextBytesBase,wasmTextBytesHead,wasmTextBytesDeltaPct,structNewBase,structNewHead,structNewDelta,structNewDefaultBase,structNewDefaultHead,structNewDefaultDelta,tupleMakeBase,tupleMakeHead,tupleMakeDelta,tupleExtractBase,tupleExtractHead,tupleExtractDelta,structGetBase,structGetHead,structGetDelta,baseWasmSha256,headWasmSha256",
   );
   matched.forEach(({ base, head }) => {
     console.log(
@@ -479,6 +687,12 @@ const printComparison = ({
         base.tupleMakeCount.toString(),
         head.tupleMakeCount.toString(),
         (head.tupleMakeCount - base.tupleMakeCount).toString(),
+        base.tupleExtractCount.toString(),
+        head.tupleExtractCount.toString(),
+        (head.tupleExtractCount - base.tupleExtractCount).toString(),
+        base.structGetCount.toString(),
+        head.structGetCount.toString(),
+        (head.structGetCount - base.structGetCount).toString(),
         base.wasmSha256,
         head.wasmSha256,
       ].join(","),
@@ -502,8 +716,12 @@ const main = async (): Promise<void> => {
     throw new Error(`unknown command ${command}`);
   }
 
+  if (selectedScenarios.length === 0) {
+    throw new Error(`no scenarios match VOYD_BENCH_FILTER=${scenarioFilters.join(",")}`);
+  }
+
   const results: ScenarioResult[] = [];
-  for (const scenario of scenarios) {
+  for (const scenario of selectedScenarios) {
     for (const optimize of optimizeModes) {
       try {
         results.push(await runScenario({ scenario, optimize }));
@@ -515,6 +733,9 @@ const main = async (): Promise<void> => {
         console.warn(`skipping optional scenario ${scenario.name}: ${message}`);
       }
     }
+  }
+  if (results.length === 0) {
+    throw new Error("no benchmark results were produced");
   }
   printResults(results);
 };

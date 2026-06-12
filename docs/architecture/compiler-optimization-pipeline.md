@@ -374,6 +374,62 @@ scenario is included in the script when present, but the current local checkout
 uses older `while ... do:` syntax and is skipped with a warning by this
 compiler.
 
+### V-370 Value-Lane Forwarding Rejection
+
+V-370 prototyped a narrow scalar aggregate extension: when an initializer,
+assignment, direct-call argument, or direct function result was already available
+as scalarized value-object lanes with the same target shape, codegen forwarded
+those lanes instead of rebuilding a full aggregate only to split it again. The
+prototype targeted local copies, block/conditional wrappers, field reads from
+scalar locals, direct value-object call arguments, and direct value-object
+returns. During review, side-effecting block wrappers in direct call/result
+contexts were still identified as additional implementation surface, which
+reinforced the decision not to land the prototype without stronger benchmark
+evidence.
+
+The prototype did not land because it failed the ticket's complexity bar. It
+added new call-lowering metadata for flattened arguments, new scalar source
+classification in `scalar-aggregates.ts`, and a direct-result path in function
+codegen. Those concepts increased call/codegen coupling and evaluation-order
+risk, but optimized PR-base vs PR-head measurements did not show repeatable
+representative wins.
+
+The benchmark harness remains useful for future attempts:
+
+- `scripts/bench-v326.ts` includes focused V-370 scenarios for scalar local
+  copy, block-wrapped copy, reassignment, direct-call local arguments, direct
+  returns, field copy, field direct-call forwarding, and field direct-return
+  forwarding.
+- The script records `tuple.extract` and `struct.get` counts in addition to
+  `struct.new`, `tuple.make`, wasm size, gzip size, WAT size, compile time, and
+  runtime.
+- `VOYD_BENCH_FILTER=<substring>` can run only selected scenarios for longer
+  repeatability checks.
+
+The removed prototype produced useful shape changes in narrow compiler tests,
+but optimized focused benchmarks showed no final wasm/WAT size movement after
+Binaryen cleanup. In a short full comparison
+(`VOYD_BENCH_ITERATIONS=5`, representative scenarios at one iteration), the
+focused module stayed at 22,065 wasm bytes and 204,836 WAT bytes, with gzip only
+moving from 7079 to 7081 bytes.
+
+Representative measurements did not justify the added complexity:
+
+- `representative/vtrace-compute-main`, 7 iterations, run 1: 266.700 ms to
+  266.185 ms median (-0.2%), 60,613 to 60,662 wasm bytes (+0.1%),
+  `struct.new` 767 to 765, `tuple.extract` 269 to 266.
+- `representative/vtrace-compute-main`, 7 iterations, run 2: 266.622 ms to
+  266.831 ms median (+0.1%) with the same size and shape deltas.
+- `representative/scalar-aggregate-particle-step`, 7 iterations, run 1:
+  0.128 ms to 0.115 ms median; run 2: 0.142 ms to 0.130 ms median. Both runs
+  kept identical wasm hashes and WAT shape counts, so the timing deltas were
+  noise rather than evidence for the optimization.
+
+Conclusion: keep V-326's scalar aggregate/materialization rules as the active
+implementation. A future V-370 retry should first identify a representative
+workload with stable post-Binaryen runtime or wasm-size movement, then implement
+only the smallest codegen concept needed for that workload.
+
 ## Binaryen Optimization
 
 After Voyd codegen emits the Binaryen module, `CodegenOptions.optimize` runs
