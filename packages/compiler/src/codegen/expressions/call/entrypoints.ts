@@ -18,13 +18,16 @@ import type {
 import { compileIntrinsicCall } from "../../intrinsics.js";
 import { effectsFacade } from "../../effects/facade.js";
 import { getRequiredExprType } from "../../types.js";
-import { compileCallArguments } from "./arguments.js";
+import {
+  compileCallArgumentsWithMetadata,
+} from "./arguments.js";
 import { compileClosureCall, compileCurriedClosureCall } from "./closure.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
 import { emitResolvedCall } from "./resolved-call.js";
 import { compileTraitDispatchCall } from "./trait-dispatch.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
 import { getOrCreateReceiverSpecialization } from "../../receiver-specialization.js";
+import { getOrCreateScalarAggregateCallSpecialization } from "../../optimization/scalar-aggregate-calls.js";
 
 export const compileCallExpr = (
   expr: HirCallExpr,
@@ -88,6 +91,7 @@ export const compileCallExpr = (
       expectedResultTypeId,
       typeInstanceId,
       outResultStorageRef,
+      scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
     });
   }
 
@@ -127,6 +131,7 @@ export const compileCallExpr = (
         expectedResultTypeId,
         typeInstanceId,
         outResultStorageRef,
+        scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
       });
     }
 
@@ -197,16 +202,21 @@ export const compileCallExpr = (
         ctx,
         fnCtx,
       });
-      const args = compileCallArguments({
+      const compiledArgs = compileCallArgumentsWithMetadata({
         call: expr,
         meta: resolvedMeta,
         ctx,
         fnCtx,
         compileExpr,
       });
+      const callMeta = scalarResultSpecializedMetaForCall({
+        meta: compiledArgs.meta,
+        scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
+        ctx,
+      });
       return emitResolvedCall({
-        meta: resolvedMeta,
-        args,
+        meta: callMeta,
+        args: compiledArgs.args,
         callId: expr.id,
         ctx,
         fnCtx,
@@ -312,16 +322,21 @@ export const compileMethodCallExpr = (
     fnCtx,
   });
 
-  const args = compileCallArguments({
+  const compiledArgs = compileCallArgumentsWithMetadata({
     call: callView,
     meta: resolvedMeta,
     ctx,
     fnCtx,
     compileExpr,
   });
+  const callMeta = scalarResultSpecializedMetaForCall({
+    meta: compiledArgs.meta,
+    scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
+    ctx,
+  });
   return emitResolvedCall({
-    meta: resolvedMeta,
-    args,
+    meta: callMeta,
+    args: compiledArgs.args,
     callId: expr.id,
     ctx,
     fnCtx,
@@ -417,6 +432,7 @@ const compileResolvedSymbolCall = ({
   expectedResultTypeId,
   typeInstanceId,
   outResultStorageRef,
+  scalarAggregateResultTypeId,
 }: {
   expr: HirCallExpr;
   symbol: number;
@@ -430,6 +446,7 @@ const compileResolvedSymbolCall = ({
   expectedResultTypeId?: TypeId;
   typeInstanceId: ProgramFunctionInstanceId | undefined;
   outResultStorageRef?: CompileCallOptions["outResultStorageRef"];
+  scalarAggregateResultTypeId?: TypeId;
 }): CompiledExpression => {
   const traitDispatch = traitDispatchEnabled
     ? compileTraitDispatchCall({
@@ -502,16 +519,21 @@ const compileResolvedSymbolCall = ({
     fnCtx,
   });
 
-  const args = compileCallArguments({
+  const compiledArgs = compileCallArgumentsWithMetadata({
     call: expr,
     meta: resolvedMeta,
     ctx,
     fnCtx,
     compileExpr,
   });
+  const callMeta = scalarResultSpecializedMetaForCall({
+    meta: compiledArgs.meta,
+    scalarAggregateResultTypeId,
+    ctx,
+  });
   return emitResolvedCall({
-    meta: resolvedMeta,
-    args,
+    meta: callMeta,
+    args: compiledArgs.args,
     callId: expr.id,
     ctx,
     fnCtx,
@@ -522,6 +544,26 @@ const compileResolvedSymbolCall = ({
       outResultStorageRef,
     },
   });
+};
+
+const scalarResultSpecializedMetaForCall = ({
+  meta,
+  scalarAggregateResultTypeId,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  scalarAggregateResultTypeId?: TypeId;
+  ctx: CodegenContext;
+}): FunctionMetadata => {
+  if (typeof scalarAggregateResultTypeId !== "number") {
+    return meta;
+  }
+  return getOrCreateScalarAggregateCallSpecialization({
+    ctx,
+    meta,
+    paramIndexes: new Set(meta.scalarAggregateParamIndexes ?? []),
+    scalarResultTypeId: scalarAggregateResultTypeId,
+  }) ?? meta;
 };
 
 const getCalleeTypeId = ({

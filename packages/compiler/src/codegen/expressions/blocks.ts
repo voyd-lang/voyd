@@ -494,7 +494,16 @@ const compileDefaultLetStatement = (
     fnCtx,
     ops,
     compileExpr,
-    options: { declare: true },
+    compileStatement: (nestedStmtId) =>
+      compileStatement(nestedStmtId, ctx, fnCtx, compileExpr),
+    compileBlockInitializer: (blockExpr, compileBody) =>
+      withBlockScope({
+        expr: blockExpr,
+        ctx,
+        fnCtx,
+        run: compileBody,
+      }),
+    options: { declare: true, mutable: stmt.mutable },
   });
   if (ops.length === 0) {
     return ctx.mod.nop();

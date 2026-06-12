@@ -13,6 +13,7 @@ import {
   loadBindingStorageRef,
   loadBindingValue,
   loadLocalValue,
+  materializeOwnedBinding,
   storeLocalValue,
 } from "../../locals.js";
 import {
@@ -155,6 +156,7 @@ export const emitResolvedCall = ({
         })
       : undefined;
   const resolvedMeta = staticSpecializedMeta ?? meta;
+  const argSetups: binaryen.ExpressionRef[] = [];
   const staticCaptureArgs =
     staticSpecializedMeta && fnCtx.staticEffectContext
       ? fnCtx.staticEffectContext.captures.map((capture) => {
@@ -163,23 +165,34 @@ export const emitResolvedCall = ({
             throw new Error("missing static effect capture binding");
           }
           if (capture.mode === "storage-ref") {
-            const storageRef = loadBindingStorageRef(binding, ctx);
+            let storageRef = loadBindingStorageRef(binding, ctx);
+            if (!storageRef && binding.kind === "scalar-aggregate") {
+              const materialized = materializeOwnedBinding({
+                symbol: capture.symbol,
+                ctx,
+                fnCtx,
+              });
+              argSetups.push(...materialized.setup);
+              storageRef = loadBindingStorageRef(materialized.binding, ctx);
+            }
             if (!storageRef) {
               throw new Error("missing static effect capture storage ref");
             }
             return storageRef;
           }
           return loadBindingValue(binding, ctx, fnCtx);
-        })
+      })
       : [];
 
-  const argSetups: binaryen.ExpressionRef[] = [];
   const allArgs = [...args, ...staticCaptureArgs];
   const userArgs = allArgs.flatMap((arg, index) => {
+    const typeId = resolvedMeta.scalarAggregateParamIndexes?.includes(index)
+      ? undefined
+      : resolvedMeta.paramTypeIds[index];
     const flattened = flattenAbiArgument(
       arg,
       resolvedMeta.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
-      resolvedMeta.paramTypeIds[index],
+      typeId,
     );
     argSetups.push(...flattened.setup);
     return flattened.args;
@@ -326,6 +339,21 @@ export const emitResolvedCall = ({
     rawCall,
     resolvedMeta.resultAbiTypes,
   );
+  if (resolvedMeta.scalarAggregateResult) {
+    const callExpr =
+      argSetups.length === 0
+        ? stabilizedCall
+        : ctx.mod.block(
+            null,
+            [...argSetups, stabilizedCall],
+            binaryen.getExpressionType(stabilizedCall),
+          );
+    return {
+      expr: callExpr,
+      usedReturnCall: false,
+      usedScalarAggregateResult: true,
+    };
+  }
   const decodedCall =
     getSignatureSpillBoxType({ typeId: resolvedMeta.resultTypeId, ctx }) ===
     resolvedMeta.resultType

@@ -22,6 +22,7 @@ import {
   compileBreakExpr,
   compileContinueExpr,
   compileIfExpr,
+  compileKnownMatchArmValue,
   compileLoopExpr,
   compileMatchExpr,
   compileWhileExpr,
@@ -251,10 +252,12 @@ const compileContinuationMatchExpr = ({
 
   const armWithTarget = expr.arms.find((arm) => exprContainsTarget(arm.value, resumeTarget, ctx));
   if (armWithTarget) {
-    const armExpr = compileExpr({
-      exprId: armWithTarget.value,
+    const armExpr = compileKnownMatchArmValue({
+      expr,
+      arm: armWithTarget,
       ctx,
       fnCtx,
+      compileExpr,
       tailPosition,
       expectedResultTypeId,
     });

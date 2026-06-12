@@ -110,6 +110,8 @@ export interface FunctionMetadata {
   effectful: boolean;
   effectRow?: EffectRowId;
   exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
+  scalarAggregateParamIndexes?: readonly number[];
+  scalarAggregateResult?: boolean;
 }
 
 export interface StaticEffectHandlerCapture {
@@ -279,6 +281,13 @@ export interface LocalBindingLocal extends LocalBindingBase {
   index: number;
 }
 
+export interface LocalBindingScalarAggregate extends LocalBindingBase {
+  kind: "scalar-aggregate";
+  mutable: boolean;
+  structInfo: StructuralTypeInfo;
+  fields: ReadonlyMap<string, LocalBindingLocal>;
+}
+
 export interface LocalBindingCapture extends LocalBindingBase {
   kind: "capture";
   envIndex: number;
@@ -304,6 +313,7 @@ export interface LocalBindingProjectedElement extends LocalBindingBase {
 
 export type LocalBinding =
   | LocalBindingLocal
+  | LocalBindingScalarAggregate
   | LocalBindingCapture
   | LocalBindingStorageRef
   | LocalBindingProjectedElement;
@@ -367,6 +377,7 @@ export interface CompiledExpression {
   expr: binaryen.ExpressionRef;
   usedReturnCall: boolean;
   usedOutResultStorageRef?: boolean;
+  usedScalarAggregateResult?: boolean;
 }
 
 export interface CompileCallOptions {
@@ -374,6 +385,7 @@ export interface CompileCallOptions {
   expectedResultTypeId?: TypeId;
   typeInstanceId?: ProgramFunctionInstanceId;
   outResultStorageRef?: binaryen.ExpressionRef;
+  scalarAggregateResultTypeId?: TypeId;
 }
 
 export interface ExpressionCompilerParams {
@@ -384,6 +396,7 @@ export interface ExpressionCompilerParams {
   expectedResultTypeId?: TypeId;
   preserveStorageRefs?: boolean;
   outResultStorageRef?: binaryen.ExpressionRef;
+  scalarAggregateResultTypeId?: TypeId;
 }
 
 export type ExpressionCompiler = (

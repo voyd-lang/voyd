@@ -5,6 +5,7 @@ import type {
 } from "../semantics/hir/index.js";
 import { walkExpression } from "../semantics/hir/index.js";
 import type {
+  CodegenFunctionSignature,
   CallLoweringInfo,
   ModuleCodegenView,
   MonomorphizedInstanceInfo,
@@ -1836,6 +1837,50 @@ const mergeExactParameterCandidate = ({
   candidates.set(instanceId, bySymbol);
 };
 
+const resolveDirectIdentifierCallTarget = ({
+  moduleView,
+  expr,
+  typeArgs,
+  ir,
+}: {
+  moduleView: OptimizedModuleView;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
+  typeArgs: readonly TypeId[];
+  ir: MutableOptimizationIr;
+}): readonly { functionId: ProgramFunctionId; instanceId?: ProgramFunctionInstanceId }[] => {
+  if (expr.exprKind !== "call") {
+    return [];
+  }
+  const callee = moduleView.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return [];
+  }
+  const resolved = resolveImportedSymbol({
+    moduleId: moduleView.moduleId,
+    symbol: callee.symbol,
+    ir,
+  });
+  const module = ir.modules.get(resolved.moduleId);
+  if (!module || !functionItemBySymbol({ moduleView: module, symbol: resolved.symbol })) {
+    return [];
+  }
+  const functionId = canonicalProgramSymbolIdOf({
+    moduleId: resolved.moduleId,
+    symbol: resolved.symbol,
+    ir,
+  });
+  return [
+    {
+      functionId,
+      instanceId: ir.baseProgram.functions.getInstanceId(
+        resolved.moduleId,
+        resolved.symbol,
+        typeArgs,
+      ),
+    },
+  ];
+};
+
 const resolveTargetsForExactPropagation = ({
   moduleView,
   exprId,
@@ -1858,38 +1903,11 @@ const resolveTargetsForExactPropagation = ({
   if (resolvedTargets.length > 0 || expr.exprKind !== "call") {
     return resolvedTargets;
   }
-  const callee = moduleView.hir.expressions.get(expr.callee);
-  if (callee?.exprKind !== "identifier") {
-    return [];
-  }
-  const resolved = resolveImportedSymbol({
-    moduleId: moduleView.moduleId,
-    symbol: callee.symbol,
-    ir,
-  });
-  const module = ir.modules.get(resolved.moduleId);
-  if (!module || !functionItemBySymbol({ moduleView: module, symbol: resolved.symbol })) {
-    return [];
-  }
-  const functionId = canonicalProgramSymbolIdOf({
-    moduleId: resolved.moduleId,
-    symbol: resolved.symbol,
-    ir,
-  });
   const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
   const typeArgs = callInfo
     ? resolveCallTypeArgs({ callInfo, callerInstanceId })
     : [];
-  return [
-    {
-      functionId,
-      instanceId: ir.baseProgram.functions.getInstanceId(
-        resolved.moduleId,
-        resolved.symbol,
-        typeArgs,
-      ),
-    },
-  ];
+  return resolveDirectIdentifierCallTarget({ moduleView, expr, typeArgs, ir });
 };
 
 const externallyCallableFunctionInstances = (
@@ -4294,6 +4312,12 @@ type EscapeUseContext = {
   traitBoundary?: boolean;
 };
 
+type StructuralEscapeField = {
+  name: string;
+  typeId: TypeId;
+  optional: boolean;
+};
+
 type EscapeAnalysisState = {
   ir: MutableOptimizationIr;
   moduleView: OptimizedModuleView;
@@ -4801,6 +4825,238 @@ const isTraitType = ({
     (desc.kind === "intersection" && (desc.traits?.length ?? 0) > 0);
 };
 
+const targetParameterIsMutable = ({
+  state,
+  moduleId,
+  symbol,
+  parameterIndex,
+  parameter,
+}: {
+  state: EscapeAnalysisState;
+  moduleId: string;
+  symbol: SymbolId;
+  parameterIndex: number;
+  parameter: CodegenFunctionSignature["parameters"][number];
+}): boolean => {
+  if (parameter.bindingKind === "mutable-ref") {
+    return true;
+  }
+  const moduleView = state.ir.modules.get(moduleId);
+  const item = moduleView
+    ? functionItemBySymbol({ moduleView, symbol })
+    : undefined;
+  return item?.parameters[parameterIndex]?.mutable === true;
+};
+
+const structuralEscapeFieldsForType = ({
+  typeId,
+  state,
+  seen = new Set<TypeId>(),
+}: {
+  typeId: TypeId;
+  state: EscapeAnalysisState;
+  seen?: Set<TypeId>;
+}): readonly StructuralEscapeField[] | undefined => {
+  if (seen.has(typeId)) {
+    return undefined;
+  }
+  seen.add(typeId);
+
+  const layout = state.ir.baseProgram.types.getStructuralLayout(typeId);
+  if (layout?.kind === "structural-object") {
+    return layout.fields;
+  }
+
+  const objectInfo = state.ir.baseProgram.objects.getInfoByNominal(typeId);
+  if (objectInfo) {
+    return objectInfo.fields.map((field) => ({
+      name: field.name,
+      typeId: field.type,
+      optional: field.optional === true,
+    }));
+  }
+
+  const desc = state.ir.baseProgram.types.getTypeDesc(typeId);
+  if (desc.kind === "intersection") {
+    const structural =
+      typeof desc.structural === "number"
+        ? structuralEscapeFieldsForType({
+            typeId: desc.structural,
+            state,
+            seen,
+          })
+        : undefined;
+    if (structural) {
+      return structural;
+    }
+    return typeof desc.nominal === "number"
+      ? structuralEscapeFieldsForType({ typeId: desc.nominal, state, seen })
+      : undefined;
+  }
+
+  return undefined;
+};
+
+const parameterCanBeOmittedAtCallSite = ({
+  parameter,
+  moduleId,
+  state,
+}: {
+  parameter: CodegenFunctionSignature["parameters"][number];
+  moduleId: string;
+  state: EscapeAnalysisState;
+}): boolean =>
+  parameter.optional === true ||
+  parameter.synthetic === "stable-callsite-id" ||
+  state.ir.baseProgram.optionals.getOptionalInfo(moduleId, parameter.typeId) !==
+    undefined;
+
+const callLabelsCompatible = ({
+  parameter,
+  argLabel,
+}: {
+  parameter: CodegenFunctionSignature["parameters"][number];
+  argLabel: string | undefined;
+}): boolean => (parameter.label ? argLabel === parameter.label : argLabel === undefined);
+
+const fallbackContainerFieldParameterIndexesForCallArgument = ({
+  expr,
+  argIndex,
+  signature,
+  moduleId,
+  state,
+}: {
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
+  argIndex: number;
+  signature: CodegenFunctionSignature;
+  moduleId: string;
+  state: EscapeAnalysisState;
+}): readonly number[] | undefined => {
+  if (expr.exprKind !== "call") {
+    return undefined;
+  }
+
+  const targetArg = expr.args[argIndex];
+  if (!targetArg || targetArg.label !== undefined) {
+    return undefined;
+  }
+
+  const targetArgTypeId = exprTypeFor({
+    moduleView: state.moduleView,
+    exprId: targetArg.expr,
+  });
+  if (typeof targetArgTypeId !== "number") {
+    return undefined;
+  }
+
+  const targetFields = structuralEscapeFieldsForType({
+    typeId: targetArgTypeId,
+    state,
+  });
+  if (!targetFields) {
+    return undefined;
+  }
+  const fieldsByName = new Map(targetFields.map((field) => [field.name, field]));
+
+  const parameterIndexes: number[] = [];
+  let cursorArgIndex = 0;
+  let cursorParameterIndex = 0;
+
+  while (cursorParameterIndex < signature.parameters.length) {
+    const parameter = signature.parameters[cursorParameterIndex]!;
+    const arg = expr.args[cursorArgIndex];
+
+    if (!arg) {
+      if (parameterCanBeOmittedAtCallSite({ parameter, moduleId, state })) {
+        cursorParameterIndex += 1;
+        continue;
+      }
+      return undefined;
+    }
+
+    if (parameter.label && arg.label === undefined) {
+      const argTypeId = exprTypeFor({
+        moduleView: state.moduleView,
+        exprId: arg.expr,
+      });
+      if (typeof argTypeId !== "number") {
+        return undefined;
+      }
+
+      const fields = structuralEscapeFieldsForType({ typeId: argTypeId, state });
+      const fieldMap = fields
+        ? new Map(fields.map((field) => [field.name, field]))
+        : undefined;
+      if (fieldMap) {
+        let nextParameterIndex = cursorParameterIndex;
+        const containerParameterIndexes: number[] = [];
+        while (nextParameterIndex < signature.parameters.length) {
+          const runParameter = signature.parameters[nextParameterIndex]!;
+          if (!runParameter.label) {
+            break;
+          }
+
+          if (fieldMap.has(runParameter.label)) {
+            containerParameterIndexes.push(nextParameterIndex);
+            nextParameterIndex += 1;
+            continue;
+          }
+
+          if (
+            parameterCanBeOmittedAtCallSite({
+              parameter: runParameter,
+              moduleId,
+              state,
+            })
+          ) {
+            nextParameterIndex += 1;
+            continue;
+          }
+
+          return undefined;
+        }
+
+        if (nextParameterIndex > cursorParameterIndex) {
+          if (cursorArgIndex === argIndex) {
+            if (containerParameterIndexes.length === 0) {
+              return undefined;
+            }
+            parameterIndexes.push(...containerParameterIndexes);
+          }
+          cursorParameterIndex = nextParameterIndex;
+          cursorArgIndex += 1;
+          continue;
+        }
+      }
+    }
+
+    if (callLabelsCompatible({ parameter, argLabel: arg.label })) {
+      if (cursorArgIndex === argIndex) {
+        return undefined;
+      }
+      cursorParameterIndex += 1;
+      cursorArgIndex += 1;
+      continue;
+    }
+
+    if (parameterCanBeOmittedAtCallSite({ parameter, moduleId, state })) {
+      cursorParameterIndex += 1;
+      continue;
+    }
+
+    return undefined;
+  }
+
+  if (cursorArgIndex < expr.args.length) {
+    return undefined;
+  }
+
+  return parameterIndexes.length > 0 &&
+      parameterIndexes.every((index) => fieldsByName.has(signature.parameters[index]!.label!))
+    ? parameterIndexes
+    : undefined;
+};
+
 const contextForCallArgument = ({
   moduleView,
   exprId,
@@ -4824,7 +5080,7 @@ const contextForCallArgument = ({
     };
   }
 
-  const targets =
+  const resolvedTargets =
     typeof state.callerInstanceId === "number"
       ? resolveTargetsForExactPropagation({
           moduleView,
@@ -4839,8 +5095,145 @@ const contextForCallArgument = ({
           callerInstanceId: state.callerInstanceId,
           ir: state.ir,
         });
+  const targets =
+    resolvedTargets.length > 0
+      ? resolvedTargets
+      : resolveDirectIdentifierCallTarget({
+          moduleView,
+          expr,
+          typeArgs: callInfo
+            ? resolveCallTypeArgs({
+                callInfo,
+                callerInstanceId: state.callerInstanceId,
+              })
+            : [],
+          ir: state.ir,
+        });
   if (targets.length === 0) {
     return { reason: "unknown" };
+  }
+
+  const argPlan = callInfo
+    ? resolveCallArgPlan({ callInfo, callerInstanceId: state.callerInstanceId })
+    : undefined;
+  const containerFieldEntries =
+    argPlan?.flatMap((entry, parameterIndex) =>
+      entry.kind === "container-field" && entry.containerArgIndex === argIndex
+        ? [{ entry, parameterIndex }]
+        : [],
+    ) ?? [];
+  const argIsOnlyContainerFields =
+    containerFieldEntries.length > 0 &&
+    argPlan?.every((entry) =>
+      entry.kind === "container-field"
+        ? entry.containerArgIndex === argIndex || entry.containerArgIndex !== argIndex
+        : entry.kind !== "direct" || entry.argIndex !== argIndex,
+    ) === true;
+  if (argIsOnlyContainerFields) {
+    let unsafeReason: EscapeAnalysisEscapeReason | undefined;
+    targets.forEach(({ instanceId }) => {
+      if (unsafeReason || typeof instanceId !== "number") {
+        unsafeReason = unsafeReason ?? "unknown";
+        return;
+      }
+      const target = state.ir.baseProgram.functions.getInstance(instanceId);
+      const signature = state.ir.baseProgram.functions.getSignature(
+        target.symbolRef.moduleId,
+        target.symbolRef.symbol,
+      );
+      if (!signature) {
+        unsafeReason = "unknown";
+        return;
+      }
+      if (!state.ir.baseProgram.effects.isEmpty(signature.effectRow)) {
+        unsafeReason = "effectful-call";
+        return;
+      }
+      containerFieldEntries.forEach(({ parameterIndex }) => {
+        if (unsafeReason) {
+          return;
+        }
+        const parameter = signature.parameters[parameterIndex];
+        if (!parameter || typeof parameter.symbol !== "number") {
+          unsafeReason = "unknown";
+          return;
+        }
+        if (
+          targetParameterIsMutable({
+            state,
+            moduleId: target.symbolRef.moduleId,
+            symbol: target.symbolRef.symbol,
+            parameterIndex,
+            parameter,
+          })
+        ) {
+          unsafeReason = "mutable-call-argument";
+          return;
+        }
+      });
+    });
+    if (!unsafeReason) {
+      return {};
+    }
+  }
+  if (!argPlan) {
+    let unsafeReason: EscapeAnalysisEscapeReason | undefined;
+    targets.forEach(({ instanceId }) => {
+      if (unsafeReason || typeof instanceId !== "number") {
+        unsafeReason = unsafeReason ?? "unknown";
+        return;
+      }
+      const target = state.ir.baseProgram.functions.getInstance(instanceId);
+      const signature = state.ir.baseProgram.functions.getSignature(
+        target.symbolRef.moduleId,
+        target.symbolRef.symbol,
+      );
+      if (!signature) {
+        unsafeReason = "unknown";
+        return;
+      }
+      if (!state.ir.baseProgram.effects.isEmpty(signature.effectRow)) {
+        unsafeReason = "effectful-call";
+        return;
+      }
+      const parameterIndexes =
+        fallbackContainerFieldParameterIndexesForCallArgument({
+          expr,
+          argIndex,
+          signature,
+          moduleId: target.symbolRef.moduleId,
+          state,
+        });
+      if (!parameterIndexes) {
+        unsafeReason = "unknown";
+        return;
+      }
+      parameterIndexes.forEach((parameterIndex) => {
+        if (unsafeReason) {
+          return;
+        }
+        const parameter = signature.parameters[parameterIndex];
+        if (!parameter || typeof parameter.symbol !== "number") {
+          unsafeReason = "unknown";
+          return;
+        }
+        if (
+          targetParameterIsMutable({
+            state,
+            moduleId: target.symbolRef.moduleId,
+            symbol: target.symbolRef.symbol,
+            parameterIndex,
+            parameter,
+          })
+        ) {
+          unsafeReason = "mutable-call-argument";
+          return;
+        }
+      });
+    });
+    if (!unsafeReason) {
+      return {};
+    }
   }
 
   let traitBoundary = false;
@@ -4882,7 +5275,15 @@ const contextForCallArgument = ({
       return;
     }
     traitBoundary = traitBoundary || isTraitType({ typeId: parameter.typeId, ir: state.ir });
-    if (parameter.bindingKind === "mutable-ref") {
+    if (
+      targetParameterIsMutable({
+        state,
+        moduleId: target.symbolRef.moduleId,
+        symbol: target.symbolRef.symbol,
+        parameterIndex,
+        parameter,
+      })
+    ) {
       unsafeReason = "mutable-call-argument";
       return;
     }

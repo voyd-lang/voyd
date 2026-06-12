@@ -276,6 +276,104 @@ aggregates into scalar locals. Reusable escape facts are owned by the
 whole-program escape-analysis pass; broad scalar replacement and allocation
 elision remain separate `V-326` work.
 
+### Scalar Aggregate Replacement
+
+Scalar aggregate replacement is a codegen-owned consumer of
+`ProgramOptimizationFacts.escapeAnalysis`. It does not mutate optimized HIR and
+does not infer escape behavior from local syntax alone. Codegen may split a
+local aggregate into field locals only when all of these checks pass:
+
+- the origin fact exists, is an `aggregate`, has the expected type id, does not
+  escape, and names the local symbol as a direct local symbol
+- the initializer is a direct object literal without spreads, a tuple literal, a
+  block/conditional expression whose branch values meet these same checks, or a
+  small value-object direct-call result
+- the structural layout is small enough for local lane storage
+- all fields are initialized directly or are optional fields that can receive
+  the normal `None` value
+
+The scalar binding rematerializes through `initStructuralValue` when a full
+value is needed, and mutable-ref or storage boundaries continue to use the
+existing materialization paths. Direct value-object parameters whose parameter
+escape facts are non-escaping can bind incoming ABI lanes directly to field
+locals. Direct calls with scalarized heap-object identifier arguments, direct
+heap-object literal arguments, or simple heap-object factory returns may also
+use a private callee specialization whose selected parameters or result receive
+field lanes instead of a heap reference, leaving the original public ABI
+unchanged. Whole-object heap assignment remains a materialization boundary to
+preserve object identity; value-object reassignment may stay scalar.
+
+Unsupported shapes deliberately fall back to the existing materialized
+aggregate path. This keeps the implementation removable and avoids coupling
+codegen to typing internals beyond the codegen-view and optimization-facts
+contracts.
+
+The complexity added by this path is:
+
+- one new local binding representation for scalar aggregate lanes
+- localized field load/store/rematerialization helpers
+- a private direct-call specialization path for selected small heap-object
+  parameters and fresh heap-object results
+- additional local rechecks for mutable method receivers, effectful functions,
+  effect-handler captures, aliasing, and storage-ref capture boundaries
+
+It avoids a separate optimizer rewrite pass and keeps the public function ABI
+unchanged, but it does add coupling between escape facts, call metadata, and
+codegen lowering. The main maintenance risks are stale lane values after
+mutation/capture boundaries and accidentally specializing alias-returning heap
+objects. The implementation pays a compile-time cost in the affected scenarios
+for extra fact checks and specialization metadata, but the hot aggregate cases
+below show runtime and code-size wins where Binaryen alone did not remove the
+semantic allocation pattern. Effectful functions deliberately fall back to
+materialized values until storage/capture semantics can be proven more tightly.
+
+Rejected simpler alternatives:
+
+- local-only pattern matching was too fragile around aliases, method receivers,
+  effect handlers, and public boundary wrappers
+- relying only on Binaryen missed mutable object temporaries and selected direct
+  call shapes
+- a broad optimizer rewrite pass would duplicate codegen ownership of storage
+  refs, projected elements, and ABI lowering
+- doing nothing left aggregate-heavy mutable/direct-call code dependent on GC
+  allocation patterns in hot loops
+
+`scripts/bench-v326.ts` emits revision-tagged raw CSV and can compare two runs:
+
+```sh
+VOYD_BENCH_OPTIMIZE_MODES=true VOYD_BENCH_REVISION=base-484fcd76 \
+  node --conditions=development --import tsx scripts/bench-v326.ts > /tmp/v326-base.csv
+VOYD_BENCH_OPTIMIZE_MODES=true VOYD_BENCH_REVISION=head-worktree \
+  node --conditions=development --import tsx scripts/bench-v326.ts > /tmp/v326-head.csv
+node --conditions=development --import tsx scripts/bench-v326.ts \
+  compare /tmp/v326-base.csv /tmp/v326-head.csv
+```
+
+PR-base (`484fcd76`) vs PR-head validation. Shape columns are whole-module WAT
+counts; runtime is median host-run time:
+
+| Scenario | Runtime ms base -> head | Runtime delta | Compile ms delta | Wasm bytes delta | WAT bytes delta | `struct.new` delta | `tuple.make` delta |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| focused/non-escaping-object-local | 0.082 -> 0.067 | -18.3% | +5.3% | -0.3% | -0.2% | -3 | 0 |
+| focused/mutable-object-temporary | 0.104 -> 0.053 | -49.0% | +17.7% | -0.3% | -0.2% | -3 | 0 |
+| focused/direct-value-call-argument | 0.057 -> 0.049 | -14.0% | +7.8% | -0.3% | -0.2% | -3 | 0 |
+| focused/direct-heap-call-argument | 0.060 -> 0.047 | -21.7% | +18.4% | -0.3% | -0.2% | -3 | 0 |
+| focused/direct-heap-call-literal | 0.046 -> 0.050 | +8.7% | +4.7% | -0.3% | -0.2% | -3 | 0 |
+| focused/direct-heap-call-return | 0.054 -> 0.047 | -13.0% | -0.0% | -0.3% | -0.2% | -3 | 0 |
+| focused/escape-boundary-rematerialization | 0.047 -> 0.047 | 0.0% | +2.0% | -0.3% | -0.2% | -3 | 0 |
+| representative/scalar-aggregate-particle-step | 0.547 -> 0.033 | -94.0% | +0.4% | -1.9% | -1.3% | -4 | 0 |
+| representative/vtrace-compute-main | 271.129 -> 264.969 | -2.3% | +6.1% | +0.9% | +1.5% | +11 | +4 |
+
+The particle-step fixture is the in-repo representative aggregate-heavy
+workload affected by this optimization. `vtrace-compute-main` is retained as a
+broader guardrail; after effectful-function bailouts it shows small runtime
+movement and code-size growth while the aggregate-heavy representative case
+improves. The
+optional `/Users/drew/projects/voyd_examples`
+scenario is included in the script when present, but the current local checkout
+uses older `while ... do:` syntax and is skipped with a warning by this
+compiler.
+
 ## Binaryen Optimization
 
 After Voyd codegen emits the Binaryen module, `CodegenOptions.optimize` runs
@@ -335,8 +433,11 @@ or the shared Binaryen optimization profile should own it.
   representation changes must consume those facts through
   `ProgramOptimizationFacts.escapeAnalysis` rather than rediscovering typing
   internals.
-- `V-326`: broad scalar replacement for non-escaping aggregates remains
-  separate from semantic copy forwarding and addressable storage reuse.
+- Heap-object direct-call scalar ABI specialization is private to selected
+  direct calls and preserves the original function metadata for public exports,
+  trait dispatch, closure values, imports, and other non-specialized calls. It
+  is used only when object identity is not exposed across the optimized
+  boundary.
 
 ## Testing Guidance
 

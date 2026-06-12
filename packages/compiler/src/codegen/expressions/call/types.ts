@@ -2,6 +2,7 @@ import type binaryen from "binaryen";
 import type {
   HirCallExpr,
   HirExprId,
+  FunctionMetadata,
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
@@ -26,6 +27,7 @@ export type CompileCallArgumentOptions = {
 export type CompiledCallArgumentsForParams = {
   args: binaryen.ExpressionRef[];
   consumedArgCount: number;
+  meta?: FunctionMetadata;
 };
 
 export type PlannedCallArguments = {

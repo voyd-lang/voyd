@@ -13,6 +13,7 @@ import type {
 import {
   allocateTempLocal,
   getRequiredBinding,
+  loadScalarAggregateBindingField,
   loadBindingStorageRef,
   loadBindingValue,
   loadLocalValue,
@@ -597,6 +598,37 @@ export const compileFieldAccessExpr = (
   }
 
   const targetExpr = ctx.module.hir.expressions.get(expr.target);
+  const scalarTargetBinding =
+    targetExpr?.exprKind === "identifier"
+      ? fnCtx.bindings.get(targetExpr.symbol)
+      : undefined;
+  if (scalarTargetBinding?.kind === "scalar-aggregate") {
+    const scalarField = scalarTargetBinding.structInfo.fieldMap.get(expr.field);
+    const scalarValue = scalarField
+      ? loadScalarAggregateBindingField({
+          binding: scalarTargetBinding,
+          fieldName: expr.field,
+          ctx,
+        })
+      : undefined;
+    if (scalarField && scalarValue) {
+      const coerced = coerceValueToType({
+        value: scalarValue,
+        actualType: scalarField.typeId,
+        targetType: expectedFieldTypeId,
+        ctx,
+        fnCtx,
+      });
+      return {
+        expr: coerceExprToWasmType({
+          expr: coerced,
+          targetType: expectedFieldWasmType,
+          ctx,
+        }),
+        usedReturnCall: false,
+      };
+    }
+  }
 
   const actualTargetTypeId = getUnresolvedExprType(expr.target, ctx, typeInstanceId);
   const bindingActualTargetTypeId =

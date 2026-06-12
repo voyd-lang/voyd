@@ -86,6 +86,44 @@ const declarePatternLocals = (
   }
 };
 
+const ensurePatternLocals = (
+  pattern: HirPattern,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+): void => {
+  switch (pattern.kind) {
+    case "wildcard":
+      return;
+    case "identifier":
+      if (!fnCtx.bindings.has(pattern.symbol)) {
+        declareLocal(pattern.symbol, ctx, fnCtx);
+      }
+      return;
+    case "tuple":
+      pattern.elements.forEach((entry) =>
+        ensurePatternLocals(entry, ctx, fnCtx),
+      );
+      return;
+    case "destructure":
+      pattern.fields.forEach((field) =>
+        ensurePatternLocals(field.pattern, ctx, fnCtx),
+      );
+      if (pattern.spread) {
+        ensurePatternLocals(pattern.spread, ctx, fnCtx);
+      }
+      return;
+    case "type":
+      if (pattern.binding) {
+        ensurePatternLocals(pattern.binding, ctx, fnCtx);
+      }
+      return;
+    default: {
+      const unknownPattern = pattern as { kind: string };
+      throw new Error(`unsupported pattern kind ${unknownPattern.kind}`);
+    }
+  }
+};
+
 const getNominalComponent = (
   type: TypeId,
   ctx: CodegenContext,
@@ -175,6 +213,18 @@ const normalizeOutResultStorageForwarding = ({
   return compiled;
 };
 
+const withRestoredBindings = <T>(
+  fnCtx: FunctionContext,
+  run: () => T,
+): T => {
+  const previousBindings = new Map(fnCtx.bindings);
+  try {
+    return run();
+  } finally {
+    fnCtx.bindings = previousBindings;
+  }
+};
+
 const lowerToOutResultStorageIfNeeded = ({
   compiled,
   exprId,
@@ -224,154 +274,45 @@ const lowerToOutResultStorageIfNeeded = ({
   };
 };
 
-export const compileIfExpr = (
-  expr: HirIfExpr,
+const getMatchPatternTypeIdForPattern = (
+  pattern: HirPattern,
   ctx: CodegenContext,
-  fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler,
-  tailPosition: boolean,
-  expectedResultTypeId?: TypeId,
-  outResultStorageRef?: binaryen.ExpressionRef,
-): CompiledExpression => {
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultTypeId =
-    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
-  const resultType = wasmTypeFor(resultTypeId, ctx);
-  const coerceBranchValue = ({
-    compiled,
-    exprId,
-  }: {
-    compiled: CompiledExpression;
-    exprId: number;
-  }): binaryen.ExpressionRef => {
-    const actualTypeId = expressionUsesExpectedResultType({
-      exprId,
-      ctx,
-    })
-      ? resultTypeId
-      : getValueSourceTypeId(exprId, ctx, typeInstanceId);
-    return coerceValueToType({
-      value: compiled.expr,
-      actualType: actualTypeId,
-      targetType: resultTypeId,
-      ctx,
-      fnCtx,
-    });
-  };
-  let fallback =
-    typeof expr.defaultBranch === "number"
-      ? compileExpr({
-          exprId: expr.defaultBranch,
-          ctx,
-          fnCtx,
-          tailPosition,
-          expectedResultTypeId: resultTypeId,
-          outResultStorageRef,
-        })
-      : undefined;
-
-  if (!fallback && resultType !== binaryen.none) {
-    throw new Error("non-void if expressions require an else branch");
+): TypeId | undefined => {
+  if (pattern.kind === "wildcard") return undefined;
+  if (pattern.kind === "type") {
+    return getMatchPatternTypeId(pattern, ctx);
   }
-
-  if (!fallback) {
-    fallback = { expr: ctx.mod.nop(), usedReturnCall: false };
-  } else {
-    fallback = lowerToOutResultStorageIfNeeded({
-      compiled: fallback,
-      exprId: expr.defaultBranch!,
-      resultTypeId,
-      outResultStorageRef,
-      ctx,
-      fnCtx,
-    });
-    if (!fallback.usedOutResultStorageRef && typeof expr.defaultBranch === "number") {
-      const coercedFallback = coerceBranchValue({
-        compiled: fallback,
-        exprId: expr.defaultBranch,
-      });
-      fallback = {
-        expr: coerceToBinaryenType(
-          ctx,
-          coercedFallback,
-          resultType,
-          fnCtx,
-        ),
-        usedReturnCall: fallback.usedReturnCall,
-      };
-    }
+  if (typeof pattern.typeId === "number") {
+    return pattern.typeId;
   }
-
-  for (let index = expr.branches.length - 1; index >= 0; index -= 1) {
-    const branch = expr.branches[index]!;
-    const condition = compileExpr({
-      exprId: branch.condition,
-      ctx,
-      fnCtx,
-    }).expr;
-    const value = compileExpr({
-      exprId: branch.value,
-      ctx,
-      fnCtx,
-      tailPosition,
-      expectedResultTypeId: resultTypeId,
-      outResultStorageRef,
-    });
-    const loweredValue = lowerToOutResultStorageIfNeeded({
-      compiled: value,
-      exprId: branch.value,
-      resultTypeId,
-      outResultStorageRef,
-      ctx,
-      fnCtx,
-    });
-    if (
-      loweredValue.usedOutResultStorageRef &&
-      fallback.usedOutResultStorageRef
-    ) {
-      fallback = {
-        expr: ctx.mod.if(condition, loweredValue.expr, fallback.expr),
-        usedReturnCall: loweredValue.usedReturnCall && fallback.usedReturnCall,
-        usedOutResultStorageRef: true,
-      };
-      continue;
-    }
-    if (loweredValue.usedOutResultStorageRef || fallback.usedOutResultStorageRef) {
-      throw new Error("mixed out-result forwarding in if expression");
-    }
-    const coercedThen = coerceBranchValue({
-      compiled: value,
-      exprId: branch.value,
-    });
-    const typedThen = coerceToBinaryenType(
-      ctx,
-      coercedThen,
-      resultType,
-      fnCtx,
-    );
-    const typedElse: binaryen.ExpressionRef = fallback.expr;
-    fallback = {
-      expr: ctx.mod.if(condition, typedThen, typedElse),
-      usedReturnCall: value.usedReturnCall && fallback.usedReturnCall,
-    };
-  }
-  return fallback;
+  return undefined;
 };
 
-export const compileMatchExpr = (
-  expr: HirMatchExpr,
-  ctx: CodegenContext,
-  fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler,
-  tailPosition: boolean,
-  expectedResultTypeId?: TypeId,
-  outResultStorageRef?: binaryen.ExpressionRef,
-): CompiledExpression => {
+interface MatchDiscriminantState {
+  typeId: TypeId;
+  temp: LocalBindingLocal;
+  init: binaryen.ExpressionRef;
+  load: () => binaryen.ExpressionRef;
+  symbol?: number;
+}
+
+const prepareMatchDiscriminant = ({
+  expr,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  expr: HirMatchExpr;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): MatchDiscriminantState => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const resultTypeId =
-    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
-  const resultType = wasmTypeFor(resultTypeId, ctx);
-  const discriminantTypeId = getRequiredExprType(expr.discriminant, ctx, typeInstanceId);
+  const discriminantTypeId = getRequiredExprType(
+    expr.discriminant,
+    ctx,
+    typeInstanceId,
+  );
   const discriminantType = wasmTypeFor(discriminantTypeId, ctx);
   const discriminantTemp = allocateTempLocal(
     discriminantType,
@@ -411,39 +352,6 @@ export const compileMatchExpr = (
     }
     return loadLocalValue(discriminantTemp, ctx);
   };
-
-  const patternTypeIdFor = (pattern: HirPattern): TypeId | undefined => {
-    if (pattern.kind === "wildcard") return undefined;
-    if (pattern.kind === "type") {
-      return getMatchPatternTypeId(pattern, ctx);
-    }
-    if (typeof pattern.typeId === "number") {
-      return pattern.typeId;
-    }
-    return undefined;
-  };
-
-  const duplicateNominals = (() => {
-    const seen = new Set<TypeId>();
-    const dupes = new Set<TypeId>();
-    expr.arms.forEach((arm) => {
-      const typeId = patternTypeIdFor(arm.pattern);
-      if (typeof typeId !== "number") {
-        return;
-      }
-      const nominals = new Set<TypeId>();
-      collectNominalComponents(typeId, ctx, nominals);
-      nominals.forEach((nominal) => {
-        if (seen.has(nominal)) {
-          dupes.add(nominal);
-        } else {
-          seen.add(nominal);
-        }
-      });
-    });
-    return dupes;
-  })();
-
   const initDiscriminant = discriminantLaneTemps
     ? (() => {
         const captured = captureMultivalueLanes({
@@ -482,89 +390,59 @@ export const compileMatchExpr = (
   const discriminantSymbol =
     discriminantExpr?.exprKind === "identifier" ? discriminantExpr.symbol : undefined;
 
-  let chain: CompiledExpression | undefined;
-  for (let index = expr.arms.length - 1; index >= 0; index -= 1) {
-    const arm = expr.arms[index]!;
+  return {
+    typeId: discriminantTypeId,
+    temp: discriminantTemp,
+    init: initDiscriminant,
+    load: loadStoredDiscriminant,
+    symbol: discriminantSymbol,
+  };
+};
+
+const compileMatchArmValueWithBindings = ({
+  matchExpr,
+  arm,
+  resultTypeId,
+  patternTypeId,
+  discriminant,
+  ctx,
+  fnCtx,
+  compileExpr,
+  tailPosition,
+  outResultStorageRef,
+}: {
+  matchExpr: HirMatchExpr;
+  arm: HirMatchExpr["arms"][number];
+  resultTypeId: TypeId;
+  patternTypeId: TypeId;
+  discriminant: MatchDiscriminantState;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  tailPosition: boolean;
+  outResultStorageRef?: binaryen.ExpressionRef;
+}): CompiledExpression =>
+  withRestoredBindings(fnCtx, () => {
     if (arm.pattern.kind === "type" && arm.pattern.binding) {
       declarePatternLocals(arm.pattern.binding, ctx, fnCtx);
     } else if (arm.pattern.kind !== "wildcard") {
       declarePatternLocals(arm.pattern, ctx, fnCtx);
     }
 
-    if (arm.pattern.kind === "wildcard") {
-      const armValue = normalizeOutResultStorageForwarding({
-        compiled: compileExpr({
-          exprId: arm.value,
-          ctx,
-          fnCtx,
-          tailPosition,
-          expectedResultTypeId: resultTypeId,
-          outResultStorageRef,
-        }),
-      });
-      if (armValue.usedOutResultStorageRef) {
-        chain = {
-          expr: armValue.expr,
-          usedReturnCall: armValue.usedReturnCall,
-          usedOutResultStorageRef: true,
-        };
-        continue;
-      }
-      const armValueExpr = armValue;
-      const armTypeId = expressionUsesExpectedResultType({
-        exprId: arm.value,
-        ctx,
-      })
-        ? resultTypeId
-        : getValueSourceTypeId(arm.value, ctx, typeInstanceId);
-      chain = {
-        expr: coerceToBinaryenType(
-          ctx,
-          coerceValueToType({
-            value: armValueExpr.expr,
-            actualType: armTypeId,
-            targetType: resultTypeId,
-            ctx,
-            fnCtx,
-          }),
-          resultType,
-          fnCtx,
-        ),
-        usedReturnCall: armValueExpr.usedReturnCall,
-      };
-      continue;
-    }
-
-    const patternTypeId = patternTypeIdFor(arm.pattern);
-    if (typeof patternTypeId !== "number") {
-      throw new Error(
-        `match pattern missing type annotation (${arm.pattern.kind})`,
-      );
-    }
-
-    const condition = compileMatchCondition(
-      patternTypeId,
-      discriminantTypeId,
-      loadStoredDiscriminant,
-      discriminantTemp,
-      ctx,
-      duplicateNominals,
-    );
-
-    const discriminantOptionalInfo = shouldInlineUnionLayout(discriminantTypeId, ctx)
-      ? getOptionalLayoutInfo(discriminantTypeId, ctx)
+    const discriminantOptionalInfo = shouldInlineUnionLayout(discriminant.typeId, ctx)
+      ? getOptionalLayoutInfo(discriminant.typeId, ctx)
       : undefined;
     const optionalSomePayload =
       discriminantOptionalInfo &&
       patternTypeId === discriminantOptionalInfo.someType
         ? (() => {
-            const someLayout = getInlineUnionLayout(discriminantTypeId, ctx).members.find(
+            const someLayout = getInlineUnionLayout(discriminant.typeId, ctx).members.find(
               (member) => member.typeId === discriminantOptionalInfo.someType,
             );
             if (!someLayout) {
               throw new Error("inline optional layout is missing Some member");
             }
-            const discriminantValue = loadStoredDiscriminant();
+            const discriminantValue = discriminant.load();
             if (someLayout.abiTypes.length === 0) {
               return ctx.mod.nop();
             }
@@ -581,27 +459,28 @@ export const compileMatchExpr = (
             );
           })()
         : undefined;
-    const bindingOps: binaryen.ExpressionRef[] = [];
     const narrowedDiscriminant = (): binaryen.ExpressionRef =>
-      shouldInlineUnionLayout(discriminantTypeId, ctx)
+      shouldInlineUnionLayout(discriminant.typeId, ctx)
         ? coerceValueToType({
-            value: loadStoredDiscriminant(),
-            actualType: discriminantTypeId,
+            value: discriminant.load(),
+            actualType: discriminant.typeId,
             targetType: patternTypeId,
             ctx,
             fnCtx,
           })
         : coerceExprToWasmType({
-            expr: loadStoredDiscriminant(),
+            expr: discriminant.load(),
             targetType: wasmTypeFor(patternTypeId, ctx),
             ctx,
           });
+
+    const bindingOps: binaryen.ExpressionRef[] = [];
     if (arm.pattern.kind === "type" && arm.pattern.binding) {
       const projectedOptionalPayloadOps =
         typeof optionalSomePayload !== "undefined"
           ? tryCompileProjectedOptionalPayloadBinding({
               pattern: arm.pattern.binding,
-              optionalExprId: expr.discriminant,
+              optionalExprId: matchExpr.discriminant,
               armValueExprId: arm.value,
               ctx,
               fnCtx,
@@ -662,8 +541,7 @@ export const compileMatchExpr = (
       });
     }
 
-    let restoreDiscriminantBinding: (() => void) | undefined;
-    if (typeof discriminantSymbol === "number") {
+    if (typeof discriminant.symbol === "number") {
       const narrowedBinding = allocateTempLocal(
         wasmTypeFor(patternTypeId, ctx),
         fnCtx,
@@ -684,25 +562,263 @@ export const compileMatchExpr = (
           fnCtx,
         }),
       );
-      const originalBinding = fnCtx.bindings.get(discriminantSymbol);
-      fnCtx.bindings.set(discriminantSymbol, {
+      fnCtx.bindings.set(discriminant.symbol, {
         ...narrowedBinding,
         kind: "local",
         typeId: patternTypeId,
       });
-      restoreDiscriminantBinding = () => {
-        if (originalBinding) {
-          fnCtx.bindings.set(discriminantSymbol, originalBinding);
-          return;
-        }
-        fnCtx.bindings.delete(discriminantSymbol);
-      };
     }
 
-    const armValue = (() => {
-      try {
-        return lowerToOutResultStorageIfNeeded({
-          compiled: compileExpr({
+    const armValue = lowerToOutResultStorageIfNeeded({
+      compiled: compileExpr({
+        exprId: arm.value,
+        ctx,
+        fnCtx,
+        tailPosition,
+        expectedResultTypeId: resultTypeId,
+        outResultStorageRef,
+      }),
+      exprId: arm.value,
+      resultTypeId,
+      outResultStorageRef,
+      ctx,
+      fnCtx,
+    });
+    return bindingOps.length === 0
+      ? armValue
+      : {
+          expr: ctx.mod.block(
+            null,
+            [...bindingOps, armValue.expr],
+            binaryen.getExpressionType(armValue.expr),
+          ),
+          usedReturnCall: armValue.usedReturnCall,
+          usedOutResultStorageRef: armValue.usedOutResultStorageRef,
+        };
+  });
+
+export const compileKnownMatchArmValue = ({
+  expr,
+  arm,
+  ctx,
+  fnCtx,
+  compileExpr,
+  tailPosition,
+  expectedResultTypeId,
+}: {
+  expr: HirMatchExpr;
+  arm: HirMatchExpr["arms"][number];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  tailPosition: boolean;
+  expectedResultTypeId?: TypeId;
+}): CompiledExpression => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+
+  return normalizeOutResultStorageForwarding({
+    compiled: withRestoredBindings(fnCtx, () => {
+      if (arm.pattern.kind === "type" && arm.pattern.binding) {
+        ensurePatternLocals(arm.pattern.binding, ctx, fnCtx);
+      } else if (arm.pattern.kind !== "wildcard") {
+        ensurePatternLocals(arm.pattern, ctx, fnCtx);
+      }
+
+      return compileExpr({
+        exprId: arm.value,
+        ctx,
+        fnCtx,
+        tailPosition,
+        expectedResultTypeId: resultTypeId,
+      });
+    }),
+  });
+};
+
+export const compileIfExpr = (
+  expr: HirIfExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  compileExpr: ExpressionCompiler,
+  tailPosition: boolean,
+  expectedResultTypeId?: TypeId,
+  outResultStorageRef?: binaryen.ExpressionRef,
+): CompiledExpression => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultType = wasmTypeFor(resultTypeId, ctx);
+  const coerceBranchValue = ({
+    compiled,
+    exprId,
+  }: {
+    compiled: CompiledExpression;
+    exprId: number;
+  }): binaryen.ExpressionRef => {
+    const actualTypeId = expressionUsesExpectedResultType({
+      exprId,
+      ctx,
+    })
+      ? resultTypeId
+      : getValueSourceTypeId(exprId, ctx, typeInstanceId);
+    return coerceValueToType({
+      value: compiled.expr,
+      actualType: actualTypeId,
+      targetType: resultTypeId,
+      ctx,
+      fnCtx,
+    });
+  };
+  let fallback =
+    typeof expr.defaultBranch === "number"
+      ? withRestoredBindings(fnCtx, () =>
+          compileExpr({
+            exprId: expr.defaultBranch!,
+            ctx,
+            fnCtx,
+            tailPosition,
+            expectedResultTypeId: resultTypeId,
+            outResultStorageRef,
+          }),
+        )
+      : undefined;
+
+  if (!fallback && resultType !== binaryen.none) {
+    throw new Error("non-void if expressions require an else branch");
+  }
+
+  if (!fallback) {
+    fallback = { expr: ctx.mod.nop(), usedReturnCall: false };
+  } else {
+    fallback = lowerToOutResultStorageIfNeeded({
+      compiled: fallback,
+      exprId: expr.defaultBranch!,
+      resultTypeId,
+      outResultStorageRef,
+      ctx,
+      fnCtx,
+    });
+    if (!fallback.usedOutResultStorageRef && typeof expr.defaultBranch === "number") {
+      const coercedFallback = coerceBranchValue({
+        compiled: fallback,
+        exprId: expr.defaultBranch,
+      });
+      fallback = {
+        expr: coerceToBinaryenType(
+          ctx,
+          coercedFallback,
+          resultType,
+          fnCtx,
+        ),
+        usedReturnCall: fallback.usedReturnCall,
+      };
+    }
+  }
+
+  for (let index = expr.branches.length - 1; index >= 0; index -= 1) {
+    const branch = expr.branches[index]!;
+    const condition = compileExpr({
+      exprId: branch.condition,
+      ctx,
+      fnCtx,
+    }).expr;
+    const value = withRestoredBindings(fnCtx, () =>
+      compileExpr({
+        exprId: branch.value,
+        ctx,
+        fnCtx,
+        tailPosition,
+        expectedResultTypeId: resultTypeId,
+        outResultStorageRef,
+      }),
+    );
+    const loweredValue = lowerToOutResultStorageIfNeeded({
+      compiled: value,
+      exprId: branch.value,
+      resultTypeId,
+      outResultStorageRef,
+      ctx,
+      fnCtx,
+    });
+    if (
+      loweredValue.usedOutResultStorageRef &&
+      fallback.usedOutResultStorageRef
+    ) {
+      fallback = {
+        expr: ctx.mod.if(condition, loweredValue.expr, fallback.expr),
+        usedReturnCall: loweredValue.usedReturnCall && fallback.usedReturnCall,
+        usedOutResultStorageRef: true,
+      };
+      continue;
+    }
+    if (loweredValue.usedOutResultStorageRef || fallback.usedOutResultStorageRef) {
+      throw new Error("mixed out-result forwarding in if expression");
+    }
+    const coercedThen = coerceBranchValue({
+      compiled: value,
+      exprId: branch.value,
+    });
+    const typedThen = coerceToBinaryenType(
+      ctx,
+      coercedThen,
+      resultType,
+      fnCtx,
+    );
+    const typedElse: binaryen.ExpressionRef = fallback.expr;
+    fallback = {
+      expr: ctx.mod.if(condition, typedThen, typedElse),
+      usedReturnCall: value.usedReturnCall && fallback.usedReturnCall,
+    };
+  }
+  return fallback;
+};
+
+export const compileMatchExpr = (
+  expr: HirMatchExpr,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+  compileExpr: ExpressionCompiler,
+  tailPosition: boolean,
+  expectedResultTypeId?: TypeId,
+  outResultStorageRef?: binaryen.ExpressionRef,
+): CompiledExpression => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resultTypeId =
+    expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultType = wasmTypeFor(resultTypeId, ctx);
+  const discriminant = prepareMatchDiscriminant({ expr, ctx, fnCtx, compileExpr });
+  const discriminantTypeId = discriminant.typeId;
+
+  const duplicateNominals = (() => {
+    const seen = new Set<TypeId>();
+    const dupes = new Set<TypeId>();
+    expr.arms.forEach((arm) => {
+      const typeId = getMatchPatternTypeIdForPattern(arm.pattern, ctx);
+      if (typeof typeId !== "number") {
+        return;
+      }
+      const nominals = new Set<TypeId>();
+      collectNominalComponents(typeId, ctx, nominals);
+      nominals.forEach((nominal) => {
+        if (seen.has(nominal)) {
+          dupes.add(nominal);
+        } else {
+          seen.add(nominal);
+        }
+      });
+    });
+    return dupes;
+  })();
+
+  let chain: CompiledExpression | undefined;
+  for (let index = expr.arms.length - 1; index >= 0; index -= 1) {
+    const arm = expr.arms[index]!;
+    if (arm.pattern.kind === "wildcard") {
+      const armValue = normalizeOutResultStorageForwarding({
+        compiled: withRestoredBindings(fnCtx, () =>
+          compileExpr({
             exprId: arm.value,
             ctx,
             fnCtx,
@@ -710,29 +826,69 @@ export const compileMatchExpr = (
             expectedResultTypeId: resultTypeId,
             outResultStorageRef,
           }),
-          exprId: arm.value,
-          resultTypeId,
-          outResultStorageRef,
-          ctx,
-          fnCtx,
-        });
-      } finally {
-        restoreDiscriminantBinding?.();
+        ),
+      });
+      if (armValue.usedOutResultStorageRef) {
+        chain = {
+          expr: armValue.expr,
+          usedReturnCall: armValue.usedReturnCall,
+          usedOutResultStorageRef: true,
+        };
+        continue;
       }
-    })();
+      const armValueExpr = armValue;
+      const armTypeId = expressionUsesExpectedResultType({
+        exprId: arm.value,
+        ctx,
+      })
+        ? resultTypeId
+        : getValueSourceTypeId(arm.value, ctx, typeInstanceId);
+      chain = {
+        expr: coerceToBinaryenType(
+          ctx,
+          coerceValueToType({
+            value: armValueExpr.expr,
+            actualType: armTypeId,
+            targetType: resultTypeId,
+            ctx,
+            fnCtx,
+          }),
+          resultType,
+          fnCtx,
+        ),
+        usedReturnCall: armValueExpr.usedReturnCall,
+      };
+      continue;
+    }
 
-    const armExpr =
-      bindingOps.length === 0
-        ? armValue
-        : {
-            expr: ctx.mod.block(
-              null,
-              [...bindingOps, armValue.expr],
-              binaryen.getExpressionType(armValue.expr),
-            ),
-            usedReturnCall: armValue.usedReturnCall,
-            usedOutResultStorageRef: armValue.usedOutResultStorageRef,
-          };
+    const patternTypeId = getMatchPatternTypeIdForPattern(arm.pattern, ctx);
+    if (typeof patternTypeId !== "number") {
+      throw new Error(
+        `match pattern missing type annotation (${arm.pattern.kind})`,
+      );
+    }
+
+    const condition = compileMatchCondition(
+      patternTypeId,
+      discriminantTypeId,
+      discriminant.load,
+      discriminant.temp,
+      ctx,
+      duplicateNominals,
+    );
+
+    const armExpr = compileMatchArmValueWithBindings({
+      matchExpr: expr,
+      arm,
+      resultTypeId,
+      patternTypeId,
+      discriminant,
+      ctx,
+      fnCtx,
+      compileExpr,
+      tailPosition,
+      outResultStorageRef,
+    });
 
     const fallback =
       chain ??
@@ -785,7 +941,7 @@ export const compileMatchExpr = (
   return {
     expr: ctx.mod.block(
       null,
-      [initDiscriminant, finalExpr.expr],
+      [discriminant.init, finalExpr.expr],
       finalExpr.usedOutResultStorageRef ? binaryen.none : resultType,
     ),
     usedReturnCall: finalExpr.usedReturnCall,

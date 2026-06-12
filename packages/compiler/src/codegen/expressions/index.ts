@@ -35,6 +35,7 @@ export const compileExpression: ExpressionCompiler = ({
   expectedResultTypeId,
   preserveStorageRefs = false,
   outResultStorageRef,
+  scalarAggregateResultTypeId,
 }: ExpressionCompilerParams): CompiledExpression => {
   const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr) {
@@ -69,6 +70,7 @@ export const compileExpression: ExpressionCompiler = ({
         tailPosition,
         expectedResultTypeId,
         outResultStorageRef,
+        scalarAggregateResultTypeId,
       });
     }
     case "method-call": {
@@ -96,6 +98,7 @@ export const compileExpression: ExpressionCompiler = ({
         tailPosition,
         expectedResultTypeId,
         outResultStorageRef,
+        scalarAggregateResultTypeId,
       });
     }
     case "block":
