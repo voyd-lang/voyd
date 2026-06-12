@@ -1,8 +1,75 @@
-export type ExportAbiEntry = {
-  name: string;
-  abi: "direct" | "serialized";
-  formatId?: string;
+export type BoundaryPrimitiveSchema =
+  | { kind: "bool"; typeId?: number }
+  | { kind: "i32"; typeId?: number }
+  | { kind: "i64"; typeId?: number }
+  | { kind: "f32"; typeId?: number }
+  | { kind: "f64"; typeId?: number }
+  | { kind: "void"; typeId?: number }
+  | { kind: "string"; typeId?: number };
+
+export type BoundaryArraySchema = {
+  kind: "array";
+  typeId?: number;
+  aliases?: readonly number[];
+  elementTypeId?: number;
+  element: BoundarySchema;
 };
+
+export type BoundaryFieldSchema = {
+  name: string;
+  typeId?: number;
+  schema: BoundarySchema;
+  optional?: boolean;
+};
+
+export type BoundaryRecordSchema = {
+  kind: "record";
+  typeId?: number;
+  aliases?: readonly number[];
+  name?: string;
+  tag?: string;
+  fields: readonly BoundaryFieldSchema[];
+};
+
+export type BoundaryVariantSchema = {
+  name: string;
+  typeId?: number;
+  fields: readonly BoundaryFieldSchema[];
+};
+
+export type BoundaryUnionSchema = {
+  kind: "union";
+  typeId?: number;
+  aliases?: readonly number[];
+  name?: string;
+  variants: readonly BoundaryVariantSchema[];
+};
+
+export type BoundaryRefSchema = {
+  kind: "ref";
+  typeId: number;
+};
+
+export type BoundarySchema =
+  | BoundaryPrimitiveSchema
+  | BoundaryArraySchema
+  | BoundaryRecordSchema
+  | BoundaryUnionSchema
+  | BoundaryRefSchema;
+
+export type ExportAbiEntry =
+  | {
+      name: string;
+      abi: "direct";
+    }
+  | {
+      name: string;
+      abi: "serialized";
+      formatId?: string;
+      wrapperName?: string;
+      params?: readonly BoundarySchema[];
+      result?: BoundarySchema;
+    };
 
 export type ParsedExportAbi = {
   version: number;

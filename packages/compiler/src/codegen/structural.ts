@@ -8,6 +8,7 @@ import {
   defineStructType,
   initStruct,
   binaryenTypeToHeapType,
+  refAsNonNull,
   refCast,
   refFunc,
   structGetFieldValue,
@@ -157,12 +158,14 @@ const emitInlineFieldValue = ({
     return ctx.mod.nop();
   }
   if (typeof storageBoxType === "number") {
+    const boxRef = () =>
+      refAsNonNull(ctx.mod, refCast(ctx.mod, value, storageBoxType));
     if (field.inlineWasmTypes.length === 1) {
       return structGetFieldValue({
         mod: ctx.mod,
         fieldIndex: field.runtimeIndex,
         fieldType: field.heapWasmType,
-        exprRef: refCast(ctx.mod, value, storageBoxType),
+        exprRef: boxRef(),
       });
     }
     const lanes = field.inlineWasmTypes.map((laneType, index) =>
@@ -170,7 +173,7 @@ const emitInlineFieldValue = ({
         mod: ctx.mod,
         fieldIndex: field.runtimeIndex + index,
         fieldType: laneType,
-        exprRef: refCast(ctx.mod, value, storageBoxType),
+        exprRef: boxRef(),
       }),
     );
     return makeInlineValue({ values: lanes, ctx });
@@ -539,12 +542,14 @@ const unboxInlineValue = ({
   const unionBoxType = getInlineHeapBoxType({ typeId, ctx });
   if (desc.kind === "union" && unionBoxType) {
     const layout = getInlineUnionLayout(typeId, ctx);
+    const boxRef = () =>
+      refAsNonNull(ctx.mod, refCast(ctx.mod, value, unionBoxType));
     const lanes = layout.abiTypes.map((abiType, index) =>
       structGetFieldValue({
         mod: ctx.mod,
         fieldType: abiType,
         fieldIndex: index,
-        exprRef: refCast(ctx.mod, value, unionBoxType),
+        exprRef: boxRef(),
       }),
     );
     return makeInlineValue({ values: lanes, ctx });
@@ -554,13 +559,15 @@ const unboxInlineValue = ({
   if (!structInfo || structInfo.layoutKind !== "value-object") {
     return value;
   }
+  const boxRef = () =>
+    refAsNonNull(ctx.mod, refCast(ctx.mod, value, structInfo.runtimeType));
   const lanes = structInfo.fields.flatMap((field) =>
     field.inlineWasmTypes.map((abiType, index) =>
       structGetFieldValue({
         mod: ctx.mod,
         fieldType: abiType,
         fieldIndex: field.runtimeIndex + index,
-        exprRef: refCast(ctx.mod, value, structInfo.runtimeType),
+        exprRef: boxRef(),
       }),
     ),
   );
@@ -618,6 +625,102 @@ export const liftHeapValueToInline = ({
     targetType: wasmTypeFor(typeId, ctx),
     ctx,
   });
+};
+
+const defaultInlineValueForType = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  const abiTypes = [...binaryen.expandType(wasmTypeFor(typeId, ctx))];
+  if (abiTypes.length === 0) {
+    return ctx.mod.nop();
+  }
+  if (abiTypes.length === 1) {
+    return defaultValueForWasmType(abiTypes[0]!, ctx);
+  }
+  return ctx.mod.tuple.make(
+    abiTypes.map((abiType) => defaultValueForWasmType(abiType, ctx)),
+  );
+};
+
+export const fixedArrayStorageElementType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.Type =>
+  getInlineHeapBoxType({ typeId, ctx, mode: "runtime" }) ??
+  wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime");
+
+export const defaultFixedArrayElementValue = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef =>
+  defaultValueForWasmType(fixedArrayStorageElementType({ typeId, ctx }), ctx);
+
+export const lowerFixedArrayElementValue = ({
+  value,
+  typeId,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef =>
+  lowerValueForHeapField({
+    value,
+    typeId,
+    targetType: fixedArrayStorageElementType({ typeId, ctx }),
+    ctx,
+    fnCtx,
+  });
+
+export const liftFixedArrayElementValue = ({
+  value,
+  typeId,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const inlineBoxType = getInlineHeapBoxType({ typeId, ctx });
+  if (!inlineBoxType) {
+    return liftHeapValueToInline({ value, typeId, ctx });
+  }
+
+  const temp = allocateTempLocal(inlineBoxType, fnCtx);
+  const stored = () => ctx.mod.local.get(temp.index, inlineBoxType);
+  const defaultBox = boxInlineValue({
+    value: defaultInlineValueForType(typeId, ctx),
+    typeId,
+    ctx,
+    fnCtx,
+  });
+  return ctx.mod.block(
+    null,
+    [
+      ctx.mod.local.set(temp.index, value),
+      ctx.mod.local.set(
+        temp.index,
+        ctx.mod.if(
+          ctx.mod.ref.is_null(stored()),
+          defaultBox,
+          stored(),
+        ),
+      ),
+      liftHeapValueToInline({ value: stored(), typeId, ctx }),
+    ],
+    wasmTypeFor(typeId, ctx),
+  );
 };
 
 export const storeValueIntoStorageRef = ({
@@ -728,6 +831,11 @@ const cloneTransferredValue = ({
 }): binaryen.ExpressionRef => {
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "fixed-array") {
+    return value;
+  }
+
+  const valueType = binaryen.getExpressionType(value);
+  if (valueType === wasmTypeFor(typeId, ctx) || valueType === binaryen.unreachable) {
     return value;
   }
 
@@ -1854,16 +1962,6 @@ export const coerceValueToType = ({
   if (targetDesc.kind === "fixed-array" && actualDesc.kind === "fixed-array") {
     const targetElementType = targetDesc.element;
     const actualElementType = actualDesc.element;
-    const compatible = ctx.program.types.unify(actualElementType, targetElementType, {
-      location: ctx.module.hir.module.ast,
-      reason: "fixed-array coercion",
-      variance: "covariant",
-      allowUnknown: true,
-    });
-    if (!compatible.ok) {
-      return value;
-    }
-
     const actualArrayType = wasmTypeFor(actualType, ctx);
     const targetArrayType = wasmTypeFor(targetType, ctx);
     if (actualArrayType === targetArrayType) {
@@ -1877,19 +1975,6 @@ export const coerceValueToType = ({
         ctx,
       });
     }
-
-    const actualElementWasmType = wasmHeapFieldTypeFor(
-      actualElementType,
-      ctx,
-      new Set(),
-      "runtime",
-    );
-    const targetElementWasmType = wasmHeapFieldTypeFor(
-      targetElementType,
-      ctx,
-      new Set(),
-      "runtime",
-    );
 
     const actualTemp = allocateTempLocal(binaryen.eqref, fnCtx);
     const targetTemp = allocateTempLocal(binaryen.eqref, fnCtx);
@@ -1916,7 +2001,7 @@ export const coerceValueToType = ({
     const breakLabel = `coerce_fixed_array_break_${actualType}_${targetType}_${targetTemp.index}`;
     const loopLabel = `coerce_fixed_array_loop_${actualType}_${targetType}_${targetTemp.index}`;
 
-    const init = defaultValueForWasmType(targetElementWasmType, ctx);
+    const init = defaultFixedArrayElementValue({ typeId: targetElementType, ctx });
     const buildTarget = ctx.mod.local.set(
       targetTemp.index,
       arrayNew(
@@ -1927,7 +2012,19 @@ export const coerceValueToType = ({
       ),
     );
 
-    const element = arrayGet(ctx.mod, actualRef(), idx(), actualElementWasmType, false);
+    const storedSourceElement = arrayGet(
+      ctx.mod,
+      actualRef(),
+      idx(),
+      fixedArrayStorageElementType({ typeId: actualElementType, ctx }),
+      false,
+    );
+    const element = liftFixedArrayElementValue({
+      value: storedSourceElement,
+      typeId: actualElementType,
+      ctx,
+      fnCtx,
+    });
     const coercedElement = coerceValueToType({
       value: element,
       actualType: actualElementType,
@@ -1935,10 +2032,9 @@ export const coerceValueToType = ({
       ctx,
       fnCtx,
     });
-    const storedElement = lowerValueForHeapField({
+    const storedElement = lowerFixedArrayElementValue({
       value: coercedElement,
       typeId: targetElementType,
-      targetType: targetElementWasmType,
       ctx,
       fnCtx,
     });
@@ -2009,6 +2105,13 @@ export const coerceValueToType = ({
   const actualInfo = getStructuralTypeInfo(actualType, ctx);
   if (!actualInfo) {
     const actualDesc = ctx.program.types.getTypeDesc(actualType);
+    if (actualDesc.kind === "trait") {
+      return coerceExprToWasmType({
+        expr: value,
+        targetType: wasmTypeFor(targetType, ctx),
+        ctx,
+      });
+    }
     const targetDesc = ctx.program.types.getTypeDesc(targetType);
     throw new Error(
       `cannot coerce non-structural value to structural type (actual=${actualType}:${actualDesc.kind}, target=${targetType}:${targetDesc.kind})`,
@@ -2392,11 +2495,13 @@ export const loadStructuralField = ({
   structInfo,
   field,
   pointer,
+  exactNominalTypeId,
   ctx,
 }: {
   structInfo: StructuralTypeInfo;
   field: StructuralTypeInfo["fields"][number];
   pointer: () => binaryen.ExpressionRef;
+  exactNominalTypeId?: TypeId;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   if (structInfo.layoutKind === "value-object") {
@@ -2414,6 +2519,17 @@ export const loadStructuralField = ({
   });
   if (!shouldUseNominalFieldFastPath(structInfo, ctx)) {
     return dynamicLoad;
+  }
+  if (
+    typeof exactNominalTypeId === "number" &&
+    exactNominalTypeId === structInfo.nominalId
+  ) {
+    return makeDirectStructuralFieldLoad({
+      structInfo,
+      field,
+      pointer,
+      ctx,
+    });
   }
 
   const exactTypeMatch = ctx.mod.call(

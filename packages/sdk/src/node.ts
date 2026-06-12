@@ -1,7 +1,5 @@
 import path from "node:path";
 import binaryen from "binaryen";
-import { VOYD_BINARYEN_FEATURES } from "@voyd-lang/lib/binaryen-features.js";
-import { optimizeBinaryenModule } from "@voyd-lang/lib/binaryen-optimize.js";
 import { createFsModuleHost } from "@voyd-lang/compiler/modules/fs-host.js";
 import { createMemoryModuleHost } from "@voyd-lang/compiler/modules/memory-host.js";
 import { createNodePathAdapter } from "@voyd-lang/compiler/modules/node-path-adapter.js";
@@ -73,7 +71,6 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
 
     const testScope = options.testScope ?? (options.source ? "entry" : "all");
     const runtimeDiagnostics = resolveRuntimeDiagnostics({
-      optimize: options.optimize,
       runtimeDiagnostics: options.runtimeDiagnostics,
     });
     const result = await compileWithLoader({
@@ -83,8 +80,10 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       includeTests: options.includeTests,
       testsOnly: options.testsOnly,
       testScope,
+      optimize: options.optimize,
       runtimeDiagnostics,
       loadModuleGraph,
+      boundaryExports: options.boundaryExports,
     });
 
     if (!result.success) {
@@ -105,12 +104,10 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
 };
 
 const resolveRuntimeDiagnostics = ({
-  optimize,
   runtimeDiagnostics,
 }: {
-  optimize?: boolean;
   runtimeDiagnostics?: boolean;
-}): boolean => runtimeDiagnostics ?? !optimize;
+}): boolean => runtimeDiagnostics ?? false;
 
 const resolveSrcRoot = ({
   roots,
@@ -253,44 +250,14 @@ const finalizeCompile = ({
   options: CompileOptions;
   result: CompileArtifactsSuccess;
 }): CompileArtifactsSuccess => {
-  if (!options.optimize && !options.emitWasmText) {
+  if (!options.emitWasmText) {
     return result;
   }
 
   const module = binaryen.readBinary(result.wasm);
-  module.setFeatures(VOYD_BINARYEN_FEATURES);
-  if (options.optimize) {
-    optimizeBinaryenModule({
-      module,
-      profile: "aggressive",
-    });
-  }
   const wasmText = options.emitWasmText ? module.emitText() : undefined;
 
-  const wasm = options.optimize ? emitBinary(module) : result.wasm;
-  let testsWasm = result.testsWasm;
-  if (options.optimize && result.testsWasm) {
-    const testsModule = binaryen.readBinary(result.testsWasm);
-    testsModule.setFeatures(VOYD_BINARYEN_FEATURES);
-    optimizeBinaryenModule({
-      module: testsModule,
-      profile: "aggressive",
-    });
-    testsWasm = emitBinary(testsModule);
-  }
-
-  const updated = { ...result, wasm, testsWasm };
-  return wasmText ? { ...updated, wasmText } : updated;
-};
-
-const emitBinary = (module: binaryen.Module): Uint8Array => {
-  const emitted = module.emitBinary();
-  if (emitted instanceof Uint8Array) return emitted;
-  return (
-    (emitted as { output?: Uint8Array }).output ??
-    (emitted as { binary?: Uint8Array }).binary ??
-    new Uint8Array()
-  );
+  return wasmText ? { ...result, wasmText } : result;
 };
 
 const createOverlayModuleHost = ({

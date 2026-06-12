@@ -52,7 +52,12 @@ describe("smoke: runtime trap diagnostics", () => {
 
   beforeAll(async () => {
     const sdk = createSdk();
-    compiled = expectCompileSuccess(await sdk.compile({ entryPath: fixtureEntryPath }));
+    compiled = expectCompileSuccess(
+      await sdk.compile({
+        entryPath: fixtureEntryPath,
+        runtimeDiagnostics: true,
+      }),
+    );
   });
 
   it("does not require a custom panic import to instantiate the module", async () => {

@@ -1,0 +1,13 @@
+obj Point {
+  x: i32,
+  y: i32
+}
+
+pub fn translate(point: Point, dx: i32, dy: i32) -> Point
+  Point {
+    x: point.x + dx,
+    y: point.y + dy
+  }
+
+pub fn __voyd_serialized_export_translate() -> i32
+  7

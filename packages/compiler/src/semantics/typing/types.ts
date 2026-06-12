@@ -131,6 +131,7 @@ export interface ParamSignature {
   symbol?: SymbolId;
   optional?: boolean;
   defaultValue?: HirExprId;
+  synthetic?: "stable-callsite-id";
 }
 
 export interface FunctionTypeParam {
@@ -149,6 +150,7 @@ export interface Arg {
 export type CallArgumentPlanEntry =
   | { kind: "direct"; argIndex: number }
   | { kind: "missing"; targetTypeId: TypeId }
+  | { kind: "stable-callsite-id"; targetTypeId: TypeId; value: number }
   | {
       kind: "container-field";
       containerArgIndex: number;
@@ -298,6 +300,7 @@ export interface BaseObjectInfo {
 export class ObjectStore {
   #templates = new Map<SymbolId, ObjectTemplate>();
   #instances = new Map<string, ObjectTypeInfo>();
+  #activeResolutions = new Map<string, ObjectTypeInfo>();
   #byName = new Map<string, SymbolId>();
   #byNominal = new Map<TypeId, ObjectTypeInfo>();
   #decls = new Map<SymbolId, HirObjectDecl>();
@@ -339,6 +342,18 @@ export class ObjectStore {
 
   getInstanceByNominal(nominal: TypeId): ObjectTypeInfo | undefined {
     return this.#byNominal.get(nominal);
+  }
+
+  beginActiveResolution(key: string, info: ObjectTypeInfo): void {
+    this.#activeResolutions.set(key, info);
+  }
+
+  getActiveResolution(key: string): ObjectTypeInfo | undefined {
+    return this.#activeResolutions.get(key);
+  }
+
+  endActiveResolution(key: string): void {
+    this.#activeResolutions.delete(key);
   }
 
   hasNominal(nominal: TypeId): boolean {

@@ -1,0 +1,47 @@
+eff TailFx
+  finish(tail) -> i32
+
+eff OtherFx
+  value(resume) -> i32
+
+eff LocalExact
+  next(tail) -> i32
+
+eff OtherTail
+  bump(tail, value: i32) -> i32
+
+fn worker(): TailFx -> i32
+  TailFx::finish()
+
+fn resume_value(): OtherFx -> i32
+  OtherFx::value()
+
+fn exact_resume_value(): OtherTail -> i32
+  OtherTail::bump(1)
+
+fn exact_resume_arg(): LocalExact -> i32
+  LocalExact::next()
+
+pub fn tail_resume_arg_effectful(): OtherFx -> i32
+  try
+    worker()
+  TailFx::finish(tail):
+    tail(resume_value())
+
+pub fn tail_resume_arg_effectful_internal(): () -> i32
+  try
+    tail_resume_arg_effectful()
+  OtherFx::value(resume):
+    resume(41)
+
+pub fn effectful_resume_arg(): OtherTail -> i32
+  try open
+    exact_resume_arg()
+  LocalExact::next(tail):
+    tail(exact_resume_value())
+
+pub fn effectful_resume_arg_internal(): () -> i32
+  try
+    effectful_resume_arg()
+  OtherTail::bump(tail, value):
+    tail(value + 40)

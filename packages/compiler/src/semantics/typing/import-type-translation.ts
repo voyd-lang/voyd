@@ -136,6 +136,8 @@ export const translateFunctionSignature = ({
     bindingKind: param.bindingKind,
     span: param.span,
     name: param.name,
+    optional: param.optional,
+    synthetic: param.synthetic,
   }));
 
   const returnType = translation(signature.returnType);

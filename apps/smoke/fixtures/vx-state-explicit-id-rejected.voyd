@@ -1,0 +1,13 @@
+use std::msgpack
+use std::msgpack::MsgPack
+use std::vx::all
+
+pub fn init() -> MsgPack
+  msgpack::make_null()
+
+pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
+  model
+
+pub fn view(): Component -> MsgPack
+  let (count, set_count) = state({ id: 1, initial: 0 })
+  <button on_click={() => set_count(count + 1)}>Count</button>

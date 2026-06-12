@@ -15,6 +15,16 @@ pub val Vec2 {
   y: i32
 }
 
+pub obj HeapBox {
+  value: i32
+}
+
+pub val HeapCarrier {
+  cell: HeapBox
+}
+
+type ValueOrHeap = Vec2 | HeapCarrier
+
 fn normalize_index(index: i32, length: i32) -> i32
   if index < 0 then: length + index else: index
 
@@ -206,6 +216,20 @@ pub fn value_direct_get_single() -> i32
   let only = __array_get(arr, 0)
   only.x + only.y
 
+pub fn value_default_direct_get() -> i32
+  let arr = new_fixed_array<Vec2>(1)
+  let only = __array_get(arr, 0)
+  only.x + only.y
+
+pub fn value_default_optional_get() -> i32
+  let arr = new_fixed_array<Vec2>(1)
+  let only = arr.get<Vec2>(0)
+  match(only)
+    Some<Vec2> { value: vec }:
+      vec.x + vec.y
+    None:
+      -100
+
 pub fn value_optional_destructure_single() -> i32
   var arr = new_fixed_array<Vec2>(1)
   arr = arr.set<Vec2>(0, Vec2 { x: 3, y: 4 })
@@ -239,6 +263,22 @@ pub fn value_copy_clamps() -> i32
   let second = __array_get(dest, 1)
   first.y + second.x
 
+pub fn value_copy_self_overlap() -> i32
+  var arr = new_fixed_array<Vec2>(3)
+  arr = arr.set<Vec2>(0, Vec2 { x: 1, y: 10 })
+  arr = arr.set<Vec2>(1, Vec2 { x: 2, y: 20 })
+  arr = arr.set<Vec2>(2, Vec2 { x: 3, y: 30 })
+  arr = arr.copy<Vec2>({
+    from: arr,
+    to_index: 1,
+    from_index: 0,
+    count: 2
+  })
+  let first = __array_get(arr, 0)
+  let second = __array_get(arr, 1)
+  let third = __array_get(arr, 2)
+  first.x + second.x * 10 + third.x * 100
+
 pub fn value_optional_match_binding() -> i32
   var arr = new_fixed_array<Vec2>(1)
   arr = arr.set<Vec2>(0, Vec2 { x: 3, y: 4 })
@@ -248,6 +288,23 @@ pub fn value_optional_match_binding() -> i32
       first.value.x
     None:
       -100
+
+pub fn mixed_union_value_heap_set_get() -> i32
+  var arr = new_fixed_array<ValueOrHeap>(2)
+  arr = arr.set<ValueOrHeap>(0, Vec2 { x: 3, y: 4 })
+  arr = arr.set<ValueOrHeap>(1, HeapCarrier { cell: HeapBox { value: 11 } })
+  let first = __array_get(arr, 0)
+  let second = __array_get(arr, 1)
+  let first_sum = match(first)
+    Vec2 { x, y }:
+      x + y
+    HeapCarrier:
+      -100
+  match(second)
+    Vec2:
+      first_sum - 200
+    HeapCarrier { cell }:
+      first_sum + cell.value
 `;
 
 const loadExports = (): Record<string, CallableFunction> => {
@@ -292,8 +349,12 @@ describe("std FixedArray runtime behavior", () => {
     expect(exports.value_length_after_set()).toBe(2);
     expect(exports.value_direct_get()).toBe(9);
     expect(exports.value_direct_get_single()).toBe(7);
+    expect(exports.value_default_direct_get()).toBe(0);
+    expect(exports.value_default_optional_get()).toBe(0);
     expect(exports.value_optional_destructure_single()).toBe(7);
     expect(exports.value_copy_clamps()).toBe(13);
+    expect(exports.value_copy_self_overlap()).toBe(211);
     expect(exports.value_optional_match_binding()).toBe(3);
+    expect(exports.mixed_union_value_heap_set_get()).toBe(18);
   });
 });

@@ -19,7 +19,8 @@ Use VX when you want:
 
 ## A Small App
 
-A VX app usually has three exported functions:
+A VX app exports an `app` value that wires ordinary lifecycle functions into
+VX:
 
 ```voyd
 use std::enums::{ enum }
@@ -42,19 +43,26 @@ type TextInput = {
   checked: bool
 }
 
-pub fn init() -> Model
+pub fn app() -> Program<Model, Msg>
+  program<Model, Msg>(
+    init: init,
+    update: update,
+    view: view
+  )
+
+fn init() -> Model
   Model { title: "Draft", saved: false }
 
-pub fn update(model: Model, message: Msg) -> Model
+fn update(model: Model, message: Msg) -> Program<Model, Msg>
   match(message)
     Msg::Edit { value }:
-      Model { title: value, saved: false }
+      program<Model, Msg>(model: Model { title: value, saved: false })
     Msg::Save:
-      Model { title: model.title, saved: false }
+      program<Model, Msg>(model: Model { title: model.title, saved: false })
     Msg::Saved:
-      Model { title: model.title, saved: true }
+      program<Model, Msg>(model: Model { title: model.title, saved: true })
 
-pub fn view(model: Model) -> Html<Msg>
+fn view(model: Model) -> Html<Msg>
   <main>
     <input
       value={model.title}
@@ -68,13 +76,13 @@ fn save_label(saved: bool) -> String
   if saved then: "Saved" else: "Unsaved"
 ```
 
-`init` creates the first model. `view` turns the model into HTML. `update`
-receives messages from events, commands, and subscriptions and returns the next
-model.
+`app` is the public VX entrypoint. `init` creates the first model. `view` turns
+the model into HTML. `update` receives messages from events, commands, and
+subscriptions and returns the next model.
 
 Typed lifecycle values must be boundary-compatible DTOs: primitives, `String`,
 records/objects with public DTO fields, named message variants, and arrays of
-heap-stored DTO values. Inline aggregate arrays, arbitrary dictionaries,
+boundary-compatible DTO values, including value objects. Arbitrary dictionaries,
 functions, trait objects, and recursive object graphs are not part of the typed
 VX boundary yet.
 
@@ -120,7 +128,9 @@ fn Editor()
 Use `class`, `id`, `role`, `name`, `placeholder`, `input_type`, `value`,
 `checked`, `disabled`, `style`, and `styles` for common attributes and
 properties. Use `keyed(key:, child:)` when list items should keep their DOM
-identity while reordering.
+identity while reordering. If the keyed child creates component state, use
+`keyed(key:, body:)` so the state is scoped to that key before the child is
+evaluated.
 
 ## Events
 
@@ -173,7 +183,7 @@ VX also exposes component-local state for small UI details that do not belong in
 the app model:
 
 ```voyd
-let (panel, set_panel) = state(id: 1, initial: "closed")
+let (panel, set_panel) = state(initial: "closed")
 
 <button on_click={() => set_panel("open")}>Open</button>
 ```
@@ -185,7 +195,7 @@ read or update the same value.
 Use `state_handle` when you need the advanced handle API:
 
 ```voyd
-let panel_state = state_handle(id: 1, initial: "closed")
+let panel_state = state_handle(initial: "closed")
 
 <button on_click={() => panel_state.set("open")}>Open</button>
 ```
@@ -234,18 +244,14 @@ Sub<Msg>::every(key: "clock", millis: 1000i64, value: Msg::Tick {})
 
 ## Mounting
 
-In the browser, compile the Voyd module, create a host, adapt the Voyd exports,
-and mount:
+In the browser, compile the Voyd module, create a host, and mount:
 
 ```ts
 import { createVoydHost } from "@voyd-lang/js-host";
 import { createVoydVxAppRuntime, mountVxApp } from "@voyd-lang/vx-dom";
 
 const host = await createVoydHost({ wasm });
-const app = createVoydVxAppRuntime({
-  host,
-  exports: { subscriptions: "subscriptions" },
-});
+const app = createVoydVxAppRuntime({ host });
 
 await mountVxApp({
   container: document.getElementById("root")!,
@@ -253,10 +259,9 @@ await mountVxApp({
 });
 ```
 
-Typed apps should export lifecycle functions with the canonical names `init`,
-`update`, and `view`. Add `subscriptions` in the adapter when your app exports
-one. Custom lifecycle names are still available for raw interop exports, but
-typed lifecycle wrappers are generated for the canonical app surface.
+Typed apps should export `app() -> Program<Model, Msg>`. Custom lifecycle
+export names are still available for raw interop, but everyday VX apps do not
+need boundary annotations or export adapters.
 
 ## Server Rendering
 
@@ -297,7 +302,7 @@ explicit so ordinary app code can stay typed.
 - Event payload: `on_input={(event: TextInput) -> Msg => ...}`
 - Reusable component action: pass `fn() -> Msg` into a component
 - App state: keep it in the model and return the next model from `update`
-- Component-local UI state: use `let (value, set_value) = state(id:, initial:)`
+- Component-local UI state: use `let (value, set_value) = state(initial:)`
   inside component-runtime views for small `String` or `i32` values
 - Later work: return a `Cmd`
 - Outside events: return a `Sub`

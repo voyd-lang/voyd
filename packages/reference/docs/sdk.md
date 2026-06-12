@@ -49,6 +49,99 @@ In the SDK, `optimize: true` selects Voyd's aggressive validated optimization
 profile.
 Binaryen pass configuration is intentionally not exposed as public SDK API.
 
+## Typed JavaScript boundary exports
+
+SDK builds automatically expose boundary-compatible public Voyd functions
+through the existing host and compiled-result run APIs. JavaScript callers pass
+plain JS values; the host validates and encodes them at the Wasm boundary.
+
+```ts
+const result = await sdk.compile({
+  source: `use std::array::Array
+use std::enums::{ enum }
+use std::string::type::String
+
+obj Point {
+  x: i32,
+  y: i32
+}
+
+enum LookupResult
+  Found { value: String }
+  Missing
+
+pub fn translate(point: Point, dx: i32, dy: i32) -> Point
+  Point { x: point.x + dx, y: point.y + dy }
+
+pub fn get_point() -> { x: i32, y: i32 }
+  { x: 1, y: 2 }
+
+pub fn lookup(key: String) -> LookupResult
+  if key == "name" then:
+    LookupResult::Found { value: "Ada" }
+  else:
+    LookupResult::Missing {}
+
+pub fn sum_values(values: Array<i32>) -> i32
+  var index = 0
+  var total = 0
+  while index < values.len():
+    total = total + values.at(index)
+    index = index + 1
+  total
+`,
+});
+
+if (result.success) {
+  await result.run({ entryName: "translate", args: [{ x: 1, y: 2 }, 10, 20] });
+  // { x: 11, y: 22 }
+
+  await result.run({ entryName: "get_point" });
+  // { x: 1, y: 2 }
+
+  await result.run({ entryName: "lookup", args: ["name"] });
+  // { tag: "Found", value: "Ada" }
+
+  await result.run({ entryName: "sum_values", args: [[1, 2, 3]] });
+  // 6
+}
+```
+
+Supported DTO shapes include booleans, numeric primitives, strings, arrays,
+records/objects with public boundary-compatible fields, structural records, and
+named enum/union variants represented in JS as `{ tag: "Variant", ...fields }`.
+`f32` and `f64` values accept any JavaScript number, including `NaN` and
+`Infinity`; integer values must be finite and in range.
+Unsupported public functions are skipped in automatic mode. Explicit requests
+can surface diagnostics:
+
+```ts
+await sdk.compile({
+  source: `${source}
+pub fn call_callback(callback: fn() -> i32) -> i32
+  callback()
+`,
+  boundaryExports: {
+    mode: "only",
+    include: ["call_callback"],
+    onUnsupported: "diagnostic",
+  },
+});
+```
+
+Disable automatic wrappers when Wasm size or compile-time overhead matters.
+
+```ts
+const result = await sdk.compile({
+  source,
+  boundaryExports: false,
+});
+```
+
+Raw Wasm exports remain available through `host.instance.exports`. Existing
+raw MsgPack interop still works; MsgPack is an internal codec detail for typed
+boundary exports, not a stable WIT/component-model replacement.
+
 ## Module roots and package resolution
 
 `createSdk().compile(...)` accepts `roots` when you need to override module

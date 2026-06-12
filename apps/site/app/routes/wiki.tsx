@@ -72,7 +72,6 @@ export default function WikiDemoRoute() {
         });
         const app = createVoydVxAppRuntime({
           host,
-          exports: { subscriptions: "subscriptions" },
         });
         const componentStateApp = createVoydVxAppRuntime({
           host,

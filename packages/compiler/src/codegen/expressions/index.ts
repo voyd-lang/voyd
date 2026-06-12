@@ -21,6 +21,7 @@ import {
 } from "./objects.js";
 import { compileLambdaExpr } from "./lambdas.js";
 import { tryCompileProjectedElementValueExpr } from "../projected-element-views.js";
+import { tryCompileArrayMethodFastPath } from "../optimization/array-fast-paths.js";
 import {
   compileIdentifierExpr,
   compileLiteralExpr,
@@ -34,6 +35,7 @@ export const compileExpression: ExpressionCompiler = ({
   expectedResultTypeId,
   preserveStorageRefs = false,
   outResultStorageRef,
+  scalarAggregateResultTypeId,
 }: ExpressionCompilerParams): CompiledExpression => {
   const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr) {
@@ -68,6 +70,7 @@ export const compileExpression: ExpressionCompiler = ({
         tailPosition,
         expectedResultTypeId,
         outResultStorageRef,
+        scalarAggregateResultTypeId,
       });
     }
     case "method-call": {
@@ -81,10 +84,21 @@ export const compileExpression: ExpressionCompiler = ({
       if (projected) {
         return projected;
       }
+      const arrayFastPath = tryCompileArrayMethodFastPath({
+        expr,
+        expectedResultTypeId,
+        ctx,
+        fnCtx,
+        compileExpr: compileExpression,
+      });
+      if (arrayFastPath) {
+        return arrayFastPath;
+      }
       return compileMethodCallExpr(expr, ctx, fnCtx, compileExpression, {
         tailPosition,
         expectedResultTypeId,
         outResultStorageRef,
+        scalarAggregateResultTypeId,
       });
     }
     case "block":

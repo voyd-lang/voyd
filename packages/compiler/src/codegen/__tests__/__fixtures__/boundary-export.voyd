@@ -1,0 +1,38 @@
+use std::array::Array
+use std::enums::{ enum }
+use std::string::type::String
+
+obj Point {
+  x: i32,
+  y: i32
+}
+
+enum LookupResult
+  Found { value: String }
+  Missing
+
+pub fn translate(point: Point, dx: i32, dy: i32) -> Point
+  Point {
+    x: point.x + dx,
+    y: point.y + dy
+  }
+
+pub fn get_point() -> { x: i32, y: i32 }
+  { x: 1, y: 2 }
+
+pub fn lookup(key: String) -> LookupResult
+  if key == "name" then:
+    LookupResult::Found { value: "Ada" }
+  else:
+    LookupResult::Missing {}
+
+pub fn sum_values(values: Array<i32>) -> i32
+  var index = 0
+  var total = 0
+  while index < values.len():
+    total = total + values.at(index)
+    index = index + 1
+  total
+
+pub fn call_callback(callback: fn() -> i32) -> i32
+  callback()

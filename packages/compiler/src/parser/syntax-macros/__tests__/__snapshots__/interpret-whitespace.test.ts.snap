@@ -1011,7 +1011,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
         [
           "block",
           [
-            "element",
+            "html_element",
             [
               ":",
               "tag",
@@ -1096,7 +1096,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                   [
                     "fixed_array_literal",
                     [
-                      "element",
+                      "html_element",
                       [
                         ":",
                         "tag",
@@ -1190,7 +1190,7 @@ exports[`it correctly handles the kitchen sink 1`] = `
                       ],
                     ],
                     [
-                      "element",
+                      "html_element",
                       [
                         ":",
                         "tag",

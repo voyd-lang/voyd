@@ -1,0 +1,28 @@
+use std::enums::{ enum }
+use std::vx::all
+
+obj CallbackModel {
+  apply: fn() -> i32
+}
+
+enum Msg
+  Noop
+
+pub fn app() -> Program<CallbackModel, Msg>
+  program<CallbackModel, Msg>(
+    init: init,
+    update: update,
+    view: view
+  )
+
+fn init() -> CallbackModel
+  CallbackModel { apply: read_value }
+
+fn update(model: CallbackModel, _msg: Msg) -> Program<CallbackModel, Msg>
+  program<CallbackModel, Msg>(model: model)
+
+fn view(_model: CallbackModel) -> Html<Msg>
+  <div></div>
+
+fn read_value() -> i32
+  1

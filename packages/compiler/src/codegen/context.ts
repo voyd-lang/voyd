@@ -46,7 +46,7 @@ import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
 import type { ProgramOptimizationFacts } from "../optimize/ir.js";
-import type { ScalarObjectLocalRepresentationPlan } from "../optimize/codegen-plan.js";
+import type { ProgramSymbolId } from "../semantics/ids.js";
 
 export interface CodegenOptions {
   optimize?: boolean;
@@ -57,13 +57,25 @@ export interface CodegenOptions {
   effectsHostBoundary?: "msgpack" | "off";
   linearMemoryExport?: "always" | "auto" | "off";
   effectsMemoryExport?: "auto" | "always" | "off";
+  boundaryExports?: BoundaryExportsOption;
   continuationBackend?: ContinuationBackendOptions;
   testMode?: boolean;
   testScope?: "all" | "entry";
 }
 
+export type BoundaryExportsOption =
+  | "auto"
+  | "off"
+  | false
+  | {
+      mode?: "auto" | "off" | "only";
+      include?: string[];
+      onUnsupported?: "skip" | "diagnostic";
+    };
+
 export interface CodegenResult {
   module: binaryen.Module;
+  wasm?: Uint8Array;
   effectTable?: EffectTableSidecar;
   diagnostics: Diagnostic[];
   continuationBackendKind: "gc-trampoline" | "stack-switch";
@@ -82,10 +94,12 @@ export interface FunctionMetadata {
   paramTypeIds: readonly TypeId[];
   parameters: readonly {
     typeId: TypeId;
+    symbol?: SymbolId;
     label?: string;
     optional?: boolean;
     name?: string;
     bindingKind?: HirBindingKind;
+    synthetic?: "stable-callsite-id";
   }[];
   paramAbiKinds: readonly OptimizedValueAbiKind[];
   resultTypeId: TypeId;
@@ -95,6 +109,32 @@ export interface FunctionMetadata {
   instanceId: ProgramFunctionInstanceId;
   effectful: boolean;
   effectRow?: EffectRowId;
+  exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
+  scalarAggregateParamIndexes?: readonly number[];
+  scalarAggregateResult?: boolean;
+}
+
+export interface StaticEffectHandlerCapture {
+  symbol: SymbolId;
+  typeId: TypeId;
+  wasmType: binaryen.Type;
+  paramType: binaryen.Type;
+  mode: "value" | "storage-ref";
+  mutable: boolean;
+}
+
+export interface StaticEffectHandlerClause {
+  operation: ProgramSymbolId;
+  resumeValueExpr?: HirExprId;
+  residualEffectful: boolean;
+  paramSymbols: readonly SymbolId[];
+  returnTypeId: TypeId;
+}
+
+export interface StaticEffectHandlerContext {
+  key: string;
+  handlers: ReadonlyMap<ProgramSymbolId, StaticEffectHandlerClause>;
+  captures: readonly StaticEffectHandlerCapture[];
 }
 
 export interface ModuleLetGetterMetadata {
@@ -149,11 +189,9 @@ export type RuntimeTypeIdState = {
 };
 
 export interface FixedArrayWasmType {
-  kind: "plain-array" | "inline-aggregate";
+  kind: "plain-array";
   type: binaryen.Type;
   heapType: HeapTypeRef;
-  laneTypes?: readonly binaryen.Type[];
-  laneArrayTypes?: readonly binaryen.Type[];
 }
 
 export interface ClosureTypeInfo {
@@ -243,6 +281,13 @@ export interface LocalBindingLocal extends LocalBindingBase {
   index: number;
 }
 
+export interface LocalBindingScalarAggregate extends LocalBindingBase {
+  kind: "scalar-aggregate";
+  mutable: boolean;
+  structInfo: StructuralTypeInfo;
+  fields: ReadonlyMap<string, LocalBindingLocal>;
+}
+
 export interface LocalBindingCapture extends LocalBindingBase {
   kind: "capture";
   envIndex: number;
@@ -266,18 +311,12 @@ export interface LocalBindingProjectedElement extends LocalBindingBase {
   arrayTypeId: TypeId;
 }
 
-export interface LocalBindingScalarObject extends LocalBindingBase {
-  kind: "scalar-object";
-  plan: ScalarObjectLocalRepresentationPlan;
-  fields: ReadonlyMap<string, LocalBindingLocal>;
-}
-
 export type LocalBinding =
   | LocalBindingLocal
+  | LocalBindingScalarAggregate
   | LocalBindingCapture
   | LocalBindingStorageRef
-  | LocalBindingProjectedElement
-  | LocalBindingScalarObject;
+  | LocalBindingProjectedElement;
 
 export interface HandlerScope {
   prevHandler: LocalBindingLocal;
@@ -295,6 +334,11 @@ export interface LoopScope {
   breakLabel: string;
   continueLabel: string;
   label?: string;
+}
+
+export interface SafeArrayLoopScope {
+  arraySymbol: SymbolId;
+  indexSymbol: SymbolId;
 }
 
 export interface FunctionContext {
@@ -316,7 +360,12 @@ export interface FunctionContext {
   effectful: boolean;
   handlerStack?: HandlerScope[];
   loopStack?: LoopScope[];
+  safeArrayLoopScopes?: readonly SafeArrayLoopScope[];
+  safeArrayLengthSymbols?: ReadonlyMap<SymbolId, SymbolId>;
   continuations?: Map<SymbolId, ContinuationBinding>;
+  suppressTailResumptionExitChecks?: boolean;
+  staticEffectContext?: StaticEffectHandlerContext;
+  exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
   continuation?: {
     cfg: GroupContinuationCfg;
     startedLocal: LocalBindingLocal;
@@ -328,6 +377,7 @@ export interface CompiledExpression {
   expr: binaryen.ExpressionRef;
   usedReturnCall: boolean;
   usedOutResultStorageRef?: boolean;
+  usedScalarAggregateResult?: boolean;
 }
 
 export interface CompileCallOptions {
@@ -335,6 +385,7 @@ export interface CompileCallOptions {
   expectedResultTypeId?: TypeId;
   typeInstanceId?: ProgramFunctionInstanceId;
   outResultStorageRef?: binaryen.ExpressionRef;
+  scalarAggregateResultTypeId?: TypeId;
 }
 
 export interface ExpressionCompilerParams {
@@ -345,6 +396,7 @@ export interface ExpressionCompilerParams {
   expectedResultTypeId?: TypeId;
   preserveStorageRefs?: boolean;
   outResultStorageRef?: binaryen.ExpressionRef;
+  scalarAggregateResultTypeId?: TypeId;
 }
 
 export type ExpressionCompiler = (

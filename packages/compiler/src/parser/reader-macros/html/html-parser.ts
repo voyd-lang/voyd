@@ -97,9 +97,9 @@ export class HTMLParser {
 
     // Built-in element: element(tag: "div", attrs: [...], children: [...])
     const attributes = propsOrAttrs.map(({ name, value }) =>
-      this.lowerVxAttribute(name, value),
+      this.lowerHtmlAttribute(name, value),
     );
-    const children = selfClosing ? emptyVxChildren() : this.parseChildren(tagName);
+    const children = selfClosing ? emptyHtmlChildren() : this.parseChildren(tagName);
     const args = [label("tag", string(tagName))];
 
     if (attributes.length) {
@@ -108,7 +108,7 @@ export class HTMLParser {
 
     args.push(label("children", children));
 
-    return surfaceCall("element", ...args).setLocation(
+    return surfaceCall("html_element", ...args).setLocation(
       this.stream.currentSourceLocation(),
     );
   }
@@ -188,20 +188,20 @@ export class HTMLParser {
     return string(text);
   }
 
-  private lowerVxAttribute(name: string, value: Expr): Expr {
+  private lowerHtmlAttribute(name: string, value: Expr): Expr {
     if (name.startsWith("on_")) {
       const eventValue = unwrapInlineLambdaExpr(value);
-      const eventName = domEventNameForVxAttribute(name);
+      const eventName = domEventNameForHtmlAttribute(name);
       if (!isLambdaExpr(eventValue)) {
         return surfaceCall(
-          "event_message",
+          "html_event_message",
           label("name", string(eventName)),
           label("message", eventValue),
         ).setLocation(this.stream.currentSourceLocation());
       }
       const eventHelper = eventLambdaAcceptsPayload(eventValue)
-        ? "event_payload_handler"
-        : "event_handler";
+        ? "html_event_payload_handler"
+        : "html_event_handler";
       return surfaceCall(
         eventHelper,
         label("name", string(eventName)),
@@ -281,7 +281,7 @@ export class HTMLParser {
       });
     }
 
-    const result = children.length > 0 ? arrayLiteral(...children) : emptyVxChildren();
+    const result = children.length > 0 ? arrayLiteral(...children) : emptyHtmlChildren();
 
     // Restore mode on exiting children
     this.whitespaceMode = prevMode;
@@ -404,16 +404,16 @@ const eventLambdaAcceptsPayload = (expr: Expr): boolean => {
     );
 };
 
-const domEventNameForVxAttribute = (name: string): string => {
+const domEventNameForHtmlAttribute = (name: string): string => {
   const eventName = name.slice("on_".length);
   if (eventName === "double_click") return "dblclick";
   return eventName.replaceAll("_", "");
 };
 
-const emptyVxChildren = (): Expr =>
+const emptyHtmlChildren = (): Expr =>
   surfaceCall(
     "::",
-    surfaceCall("Array", call("generics", identifier("MsgPack"))),
+    surfaceCall("Array", call("generics", identifier("HtmlNode"))),
     surfaceCall("init"),
   );
 

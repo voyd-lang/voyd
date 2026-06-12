@@ -42,6 +42,7 @@ export const bindTypeAlias = (
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
+  const boundaryMetadata = boundaryMetadataFromAttribute(decl.form.attributes?.boundary);
   const enumNamespaceMetadata = enumNamespaceMetadataFromAliasTarget({
     target: decl.target,
     typeParameterNames: decl.typeParameters.map((entry) => entry.name.value),
@@ -70,6 +71,7 @@ export const bindTypeAlias = (
     metadata: {
       entity: "type-alias",
       ...intrinsicTypeMetadata,
+      ...(boundaryMetadata ? { boundary: boundaryMetadata } : {}),
       ...(enumNamespaceMetadata ?? {}),
       ...(nominalTargetMetadata ?? {}),
     },
@@ -101,6 +103,19 @@ export const bindTypeAlias = (
     moduleIndex: ctx.nextModuleIndex++,
     documentation: declarationDocForSyntax(decl.name, ctx),
   });
+};
+
+const boundaryMetadataFromAttribute = (value: unknown): unknown | undefined => {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const record = value as { type?: unknown; field?: unknown };
+  if (record.type !== "value") {
+    return undefined;
+  }
+  return {
+    type: record.type,
+  };
 };
 
 const reportDuplicateTypeAlias = ({

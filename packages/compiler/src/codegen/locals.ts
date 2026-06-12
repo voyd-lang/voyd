@@ -14,16 +14,17 @@ import {
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import {
+  fixedArrayStorageElementType,
+  initStructuralValue,
+  liftFixedArrayElementValue,
   liftHeapValueToInline,
   lowerValueForHeapField,
+  loadStructuralField,
   storeValueIntoStorageRef,
 } from "./structural.js";
 import {
-  getFixedArrayWasmTypes,
   getInlineHeapBoxType,
   getSymbolTypeId,
-  getWideValueStorageType,
-  wasmHeapFieldTypeFor,
   wasmTypeFor,
 } from "./types.js";
 import { coerceExprToWasmType } from "./wasm-type-coercions.js";
@@ -268,7 +269,8 @@ export const storeLocalValue = ({
 
 export const loadBindingValue = (
   binding: LocalBinding,
-  ctx: CodegenContext
+  ctx: CodegenContext,
+  fnCtx?: FunctionContext,
 ): binaryen.ExpressionRef => {
   if (binding.kind === "storage-ref") {
     return liftHeapValueToInline({
@@ -277,11 +279,11 @@ export const loadBindingValue = (
       ctx,
     });
   }
-  if (binding.kind === "projected-element-ref") {
-    return loadProjectedElementBindingValue(binding, ctx);
+  if (binding.kind === "scalar-aggregate") {
+    return loadScalarAggregateBindingValue({ binding, ctx, fnCtx });
   }
-  if (binding.kind === "scalar-object") {
-    throw new Error("scalar object binding cannot be loaded without materialization");
+  if (binding.kind === "projected-element-ref") {
+    return loadProjectedElementBindingValue(binding, ctx, fnCtx);
   }
   if (binding.kind === "local") {
     return loadLocalValue(binding, ctx);
@@ -328,11 +330,11 @@ export const loadBindingStorageRef = (
   if (binding.kind === "storage-ref") {
     return ctx.mod.local.get(binding.index, binding.storageType);
   }
+  if (binding.kind === "scalar-aggregate") {
+    return undefined;
+  }
   if (binding.kind === "projected-element-ref") {
     return loadProjectedElementBindingStorageRef(binding, ctx);
-  }
-  if (binding.kind === "scalar-object") {
-    return undefined;
   }
   if (binding.kind === "local") {
     if (
@@ -378,11 +380,33 @@ export const materializeOwnedBinding = ({
   if (existing.kind === "local") {
     return { binding: existing, setup: [] };
   }
+  if (existing.kind === "scalar-aggregate") {
+    const owned =
+      typeof existing.typeId === "number" &&
+      typeof getInlineHeapBoxType({ typeId: existing.typeId, ctx }) === "number"
+        ? allocateAddressableLocal({
+            typeId: existing.typeId,
+            ctx,
+            fnCtx,
+          })
+        : allocateTempLocal(existing.type, fnCtx, existing.typeId, ctx);
+    const setup = [
+      storeLocalValue({
+        binding: owned,
+        value: loadBindingValue(existing, ctx, fnCtx),
+        ctx,
+        fnCtx,
+      }),
+    ];
+    fnCtx.bindings.set(symbol, {
+      ...owned,
+      kind: "local",
+      typeId: existing.typeId,
+    });
+    return { binding: owned, setup };
+  }
   if (existing.kind === "capture") {
     throw new Error("cannot materialize capture binding into owned local storage");
-  }
-  if (existing.kind === "scalar-object") {
-    throw new Error("cannot materialize scalar object binding in locals");
   }
   const typeId = existing.typeId;
   if (typeof typeId !== "number") {
@@ -392,7 +416,7 @@ export const materializeOwnedBinding = ({
   const setup = [
     storeLocalValue({
       binding: owned,
-      value: loadBindingValue(existing, ctx),
+      value: loadBindingValue(existing, ctx, fnCtx),
       ctx,
       fnCtx,
     }),
@@ -406,104 +430,40 @@ export const materializeOwnedBinding = ({
 };
 
 export const loadProjectedElementBindingStorageRef = (
-  binding: LocalBindingProjectedElement,
-  ctx: CodegenContext,
+  _binding: LocalBindingProjectedElement,
+  _ctx: CodegenContext,
 ): binaryen.ExpressionRef | undefined => {
-  const storageType = getWideValueStorageType({ typeId: binding.typeId!, ctx });
-  if (typeof storageType !== "number") {
-    return undefined;
-  }
-
-  const wasmTypes = getFixedArrayWasmTypes(binding.arrayTypeId, ctx);
-  if (wasmTypes.kind !== "plain-array") {
-    return undefined;
-  }
-
-  return arrayGet(
-    ctx.mod,
-    ctx.mod.local.get(binding.arrayIndex, wasmTypeFor(binding.arrayTypeId, ctx)),
-    ctx.mod.local.get(binding.indexIndex, binaryen.i32),
-    storageType,
-    false,
-  );
+  return undefined;
 };
 
 export const loadProjectedElementBindingValue = (
   binding: LocalBindingProjectedElement,
   ctx: CodegenContext,
+  fnCtx?: FunctionContext,
 ): binaryen.ExpressionRef => {
   const arrayRef = () =>
     ctx.mod.local.get(binding.arrayIndex, wasmTypeFor(binding.arrayTypeId, ctx));
   const indexRef = () => ctx.mod.local.get(binding.indexIndex, binaryen.i32);
-  const wasmTypes = getFixedArrayWasmTypes(binding.arrayTypeId, ctx);
-
-  if (wasmTypes.kind === "inline-aggregate" && wasmTypes.laneTypes) {
-    const lanes = wasmTypes.laneTypes.map((laneType, laneIndex) =>
-      arrayGet(
-        ctx.mod,
-        fixedArrayLaneField({
-          array: arrayRef(),
-          wasmTypes,
-          laneIndex,
-          ctx,
-        }),
-        indexRef(),
-        laneType,
-        false,
-      ),
-    );
-    return makeInlineValue(lanes, ctx);
+  const loaded = arrayGet(
+    ctx.mod,
+    arrayRef(),
+    indexRef(),
+    fixedArrayStorageElementType({ typeId: binding.typeId!, ctx }),
+    false,
+  );
+  if (fnCtx) {
+    return liftFixedArrayElementValue({
+      value: loaded,
+      typeId: binding.typeId!,
+      ctx,
+      fnCtx,
+    });
   }
-
   return liftHeapValueToInline({
-    value: arrayGet(
-      ctx.mod,
-      arrayRef(),
-      indexRef(),
-      wasmHeapFieldTypeFor(binding.typeId!, ctx, new Set(), "runtime"),
-      false,
-    ),
+    value: loaded,
     typeId: binding.typeId!,
     ctx,
   });
-};
-
-const fixedArrayLaneField = ({
-  array,
-  wasmTypes,
-  laneIndex,
-  ctx,
-}: {
-  array: binaryen.ExpressionRef;
-  wasmTypes: ReturnType<typeof getFixedArrayWasmTypes>;
-  laneIndex: number;
-  ctx: CodegenContext;
-}): binaryen.ExpressionRef => {
-  if (
-    wasmTypes.kind !== "inline-aggregate" ||
-    !wasmTypes.laneArrayTypes?.[laneIndex]
-  ) {
-    throw new Error("inline aggregate fixed array metadata is missing lane arrays");
-  }
-  return structGetFieldValue({
-    mod: ctx.mod,
-    fieldIndex: laneIndex + 1,
-    fieldType: wasmTypes.laneArrayTypes[laneIndex]!,
-    exprRef: array,
-  });
-};
-
-const makeInlineValue = (
-  values: readonly binaryen.ExpressionRef[],
-  ctx: CodegenContext,
-): binaryen.ExpressionRef => {
-  if (values.length === 0) {
-    return ctx.mod.nop();
-  }
-  if (values.length === 1) {
-    return values[0]!;
-  }
-  return ctx.mod.tuple.make(values as binaryen.ExpressionRef[]);
 };
 
 export const storeStorageRefBindingValue = ({
@@ -529,5 +489,128 @@ export const storeStorageRefBindingValue = ({
     typeId: binding.typeId,
     ctx,
     fnCtx,
+  });
+};
+
+export const loadScalarAggregateBindingField = ({
+  binding,
+  fieldName,
+  ctx,
+}: {
+  binding: Extract<LocalBinding, { kind: "scalar-aggregate" }>;
+  fieldName: string;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef | undefined => {
+  const fieldBinding = binding.fields.get(fieldName);
+  return fieldBinding ? loadLocalValue(fieldBinding, ctx) : undefined;
+};
+
+export const storeScalarAggregateBindingField = ({
+  binding,
+  fieldName,
+  value,
+  ctx,
+  fnCtx,
+}: {
+  binding: Extract<LocalBinding, { kind: "scalar-aggregate" }>;
+  fieldName: string;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  if (!binding.mutable) {
+    throw new Error("cannot assign to immutable scalar aggregate binding");
+  }
+  const fieldBinding = binding.fields.get(fieldName);
+  if (!fieldBinding) {
+    throw new Error(`scalar aggregate missing field ${fieldName}`);
+  }
+  return storeLocalValue({
+    binding: fieldBinding,
+    value,
+    ctx,
+    fnCtx,
+  });
+};
+
+export const storeScalarAggregateBindingValue = ({
+  binding,
+  value,
+  ctx,
+  fnCtx,
+}: {
+  binding: Extract<LocalBinding, { kind: "scalar-aggregate" }>;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const temp = allocateTempLocal(binding.type, fnCtx, binding.typeId, ctx);
+  const ops: binaryen.ExpressionRef[] = [
+    storeLocalValue({
+      binding: temp,
+      value,
+      ctx,
+      fnCtx,
+    }),
+  ];
+  binding.structInfo.fields.forEach((field) => {
+    const fieldBinding = binding.fields.get(field.name);
+    if (!fieldBinding) {
+      throw new Error(`scalar aggregate missing field ${field.name}`);
+    }
+    ops.push(
+      storeLocalValue({
+        binding: fieldBinding,
+        value: loadStructuralField({
+          structInfo: binding.structInfo,
+          field,
+          pointer: () => loadLocalValue(temp, ctx),
+          ctx,
+        }),
+        ctx,
+        fnCtx,
+      }),
+    );
+  });
+  return ctx.mod.block(null, ops, binaryen.none);
+};
+
+const loadScalarAggregateBindingValue = ({
+  binding,
+  ctx,
+  fnCtx,
+}: {
+  binding: Extract<LocalBinding, { kind: "scalar-aggregate" }>;
+  ctx: CodegenContext;
+  fnCtx?: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const fieldValues = binding.structInfo.fields.map((field) => {
+    const fieldBinding = binding.fields.get(field.name);
+    if (!fieldBinding) {
+      throw new Error(`scalar aggregate missing field ${field.name}`);
+    }
+    const value = loadLocalValue(fieldBinding, ctx);
+    if (binding.structInfo.layoutKind === "value-object") {
+      return coerceExprToWasmType({
+        expr: value,
+        targetType: field.wasmType,
+        ctx,
+      });
+    }
+    if (!fnCtx) {
+      throw new Error("heap scalar aggregate rematerialization requires a function context");
+    }
+    return lowerValueForHeapField({
+      value,
+      typeId: field.typeId,
+      targetType: field.heapWasmType,
+      ctx,
+      fnCtx,
+    });
+  });
+  return initStructuralValue({
+    structInfo: binding.structInfo,
+    fieldValues,
+    ctx,
   });
 };

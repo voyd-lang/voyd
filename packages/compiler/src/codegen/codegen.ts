@@ -1,4 +1,5 @@
 import binaryen from "binaryen";
+import { VOYD_BINARYEN_FEATURES } from "@voyd-lang/lib/binaryen-features.js";
 import { optimizeBinaryenModule } from "@voyd-lang/lib/binaryen-optimize.js";
 import type {
   CodegenContext,
@@ -56,12 +57,13 @@ import { applyConfiguredMemoryExports } from "./memory-exports.js";
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimize: false,
   optimizationProfile: "aggressive",
-  validate: true,
-  runtimeDiagnostics: true,
+  validate: false,
+  runtimeDiagnostics: false,
   emitEffectHelpers: false,
   effectsHostBoundary: "msgpack",
   linearMemoryExport: "always",
   effectsMemoryExport: "auto",
+  boundaryExports: false,
   continuationBackend: {},
   testMode: false,
   testScope: "all",
@@ -218,22 +220,27 @@ export const codegenProgram = ({
     entryCtx.programHelpers.ensureEffectHelpers(entryCtx);
   }
 
+  const outputModule = mergedOptions.optimize
+    ? binaryen.readBinary(emitWasmBytes(mod))
+    : mod;
   if (mergedOptions.optimize) {
+    outputModule.setFeatures(VOYD_BINARYEN_FEATURES);
     optimizeBinaryenModule({
-      module: mod,
+      module: outputModule,
       profile: mergedOptions.optimizationProfile,
     });
   }
 
-  if (mergedOptions.validate) {
-    const wasm = emitWasmBytes(mod);
+  const wasm = mergedOptions.validate ? emitWasmBytes(outputModule) : undefined;
+  if (wasm) {
     if (!WebAssembly.validate(wasm as BufferSource)) {
-      mod.validate();
+      outputModule.validate();
     }
   }
 
   return {
-    module: mod,
+    module: outputModule,
+    wasm,
     effectTable,
     diagnostics: [...diagnostics.diagnostics],
     continuationBackendKind: entryCtx.effectsBackend.kind,
@@ -310,6 +317,7 @@ const normalizeCodegenOptions = (
     options.linearMemoryExport ?? DEFAULT_OPTIONS.linearMemoryExport,
   effectsMemoryExport:
     options.effectsMemoryExport ?? DEFAULT_OPTIONS.effectsMemoryExport,
+  boundaryExports: options.boundaryExports ?? DEFAULT_OPTIONS.boundaryExports,
   continuationBackend: {
     ...DEFAULT_OPTIONS.continuationBackend,
     ...(options.continuationBackend ?? {}),

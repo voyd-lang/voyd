@@ -57,15 +57,18 @@ export const analyzeExpr = ({
   exprId,
   liveAfter,
   ctx,
+  skipCalleeSymbols,
 }: {
   exprId: HirExprId;
   liveAfter: ReadonlySet<SymbolId>;
   ctx: CodegenContext;
+  skipCalleeSymbols?: ReadonlySet<SymbolId>;
 }): LiveResult => {
   const { nodes, entry, siteNodeIds } = buildCfg({
     exprId,
     liveAfter,
     ctx,
+    skipCalleeSymbols,
   });
   const reachable = computeReachable({ nodes, entry });
   const { liveInById, liveOutById } = computeLiveness({ nodes, reachable });
@@ -297,10 +300,12 @@ const buildCfg = ({
   exprId,
   liveAfter,
   ctx,
+  skipCalleeSymbols = new Set<SymbolId>(),
 }: {
   exprId: HirExprId;
   liveAfter: ReadonlySet<SymbolId>;
   ctx: CodegenContext;
+  skipCalleeSymbols?: ReadonlySet<SymbolId>;
 }): {
   nodes: CfgNode[];
   entry: NodeId;
@@ -675,7 +680,8 @@ const buildCfg = ({
         const callHasResolvedTargets = (callInfo.targets?.size ?? 0) > 0;
         const skipCalleeIdentifierUse =
           calleeExpr?.exprKind === "identifier"
-            ? shouldSkipCalleeIdentifierUse({
+            ? skipCalleeSymbols.has(calleeExpr.symbol) ||
+              shouldSkipCalleeIdentifierUse({
                 symbol: calleeExpr.symbol,
                 callHasResolvedTargets,
                 ctx,

@@ -4,7 +4,8 @@ import {
   arrayNew,
   arraySet,
   binaryenTypeToHeapType,
-  initStruct,
+  defineArrayType,
+  refCast,
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
@@ -18,25 +19,29 @@ import type {
 import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../locals.js";
 import {
   coerceValueToType,
+  defaultFixedArrayElementValue,
+  fixedArrayStorageElementType,
   initStructuralValue,
-  liftHeapValueToInline,
+  liftFixedArrayElementValue,
   loadStructuralField,
+  lowerFixedArrayElementValue,
   lowerValueForHeapField,
-  makeInlineValue,
 } from "../structural.js";
-import { captureMultivalueLanes } from "../multivalue.js";
 import {
   getFixedArrayWasmTypes,
   getInlineUnionLayout,
   getStructuralTypeInfo,
   shouldInlineUnionLayout,
-  wasmHeapFieldTypeFor,
   wasmTypeFor,
 } from "../types.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import { emitStringLiteral } from "../expressions/primitives.js";
 import { ensureMsgPackFunctions } from "../effects/host-boundary/msgpack.js";
 import { RTT_METADATA_SLOTS } from "../rtt/index.js";
+import {
+  compileOptionalNoneValue,
+  compileOptionalSomeValue,
+} from "../optionals.js";
 import type {
   BoundaryArraySchema,
   BoundaryFieldSchema,
@@ -45,6 +50,19 @@ import type {
   BoundaryUnionSchema,
   BoundaryVariantSchema,
 } from "./schema.js";
+import { deriveBoundarySchema } from "./schema.js";
+
+type BoundaryCodecState = {
+  registry: Map<TypeId, BoundarySchema>;
+  packHelpers: Map<TypeId, string>;
+  activePackHelpers: Set<TypeId>;
+  unpackHelpers: Map<TypeId, string>;
+  activeUnpackHelpers: Set<TypeId>;
+  ancestorStackType?: binaryen.Type;
+};
+
+const BOUNDARY_PACK_CYCLE_ERROR =
+  "__voyd_boundary_error: cannot encode cyclic object graph or boundary object graph exceeds maximum depth";
 
 export const packBoundaryValueAsMsgPack = ({
   value,
@@ -57,6 +75,44 @@ export const packBoundaryValueAsMsgPack = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
+  const state = createBoundaryCodecState(schema);
+  const ancestorStack = emptyBoundaryAncestorStack({ ctx, state });
+  return packBoundaryValueAsMsgPackInternal({
+    value,
+    schema,
+    ctx,
+    fnCtx,
+    state,
+    packAncestors: ancestorStack,
+    packAncestorCount: ctx.mod.i32.const(0),
+  });
+};
+
+const packBoundaryValueAsMsgPackInternal = ({
+  value,
+  schema,
+  ctx,
+  fnCtx,
+  state,
+  packAncestors,
+  packAncestorCount,
+}: {
+  value: binaryen.ExpressionRef;
+  schema: BoundarySchema;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+  packAncestors: binaryen.ExpressionRef;
+  packAncestorCount: binaryen.ExpressionRef;
+}): binaryen.ExpressionRef => {
+  if (schema.kind === "ref") {
+    const helper = ensurePackHelper({ schema, ctx, state });
+    return ctx.mod.call(
+      helper,
+      [value, packAncestors, packAncestorCount],
+      wasmTypeFor(ensureMsgPackFunctions(ctx).msgPackTypeId, ctx),
+    );
+  }
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   switch (schema.kind) {
@@ -70,12 +126,18 @@ export const packBoundaryValueAsMsgPack = ({
       return ctx.mod.call(msgpack.makeF32.wasmName, [value], msgPackType);
     case "f64":
       return ctx.mod.call(msgpack.makeF64.wasmName, [value], msgPackType);
-    case "void":
+    case "void": {
+      const valueType = binaryen.getExpressionType(value);
+      const valueOp =
+        valueType === binaryen.none || valueType === binaryen.unreachable
+          ? value
+          : ctx.mod.drop(value);
       return ctx.mod.block(
         null,
-        [ctx.mod.drop(value), ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType)],
+        [valueOp, ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType)],
         msgPackType,
       );
+    }
     case "string":
       return ctx.mod.call(
         msgpack.makeString.wasmName,
@@ -91,11 +153,35 @@ export const packBoundaryValueAsMsgPack = ({
         msgPackType,
       );
     case "array":
-      return packArray({ value, schema, ctx, fnCtx });
+      return packArray({
+        value,
+        schema,
+        ctx,
+        fnCtx,
+        state,
+        packAncestors,
+        packAncestorCount,
+      });
     case "record":
-      return packRecord({ value, schema, ctx, fnCtx });
+      return packRecord({
+        value,
+        schema,
+        ctx,
+        fnCtx,
+        state,
+        packAncestors,
+        packAncestorCount,
+      });
     case "union":
-      return packUnion({ value, schema, ctx, fnCtx });
+      return packUnion({
+        value,
+        schema,
+        ctx,
+        fnCtx,
+        state,
+        packAncestors,
+        packAncestorCount,
+      });
   }
 };
 
@@ -110,6 +196,27 @@ export const unpackBoundaryValueFromMsgPack = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
+  const state = createBoundaryCodecState(schema);
+  return unpackBoundaryValueFromMsgPackInternal({ value, schema, ctx, fnCtx, state });
+};
+
+const unpackBoundaryValueFromMsgPackInternal = ({
+  value,
+  schema,
+  ctx,
+  fnCtx,
+  state,
+}: {
+  value: binaryen.ExpressionRef;
+  schema: BoundarySchema;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+}): binaryen.ExpressionRef => {
+  if (schema.kind === "ref") {
+    const helper = ensureUnpackHelper({ schema, ctx, state });
+    return ctx.mod.call(helper, [value], wasmTypeFor(schema.typeId, ctx));
+  }
   const msgpack = ensureMsgPackFunctions(ctx);
   switch (schema.kind) {
     case "bool":
@@ -137,12 +244,387 @@ export const unpackBoundaryValueFromMsgPack = ({
         fnCtx,
       });
     case "array":
-      return unpackArray({ value, schema, ctx, fnCtx });
+      return unpackArray({ value, schema, ctx, fnCtx, state });
     case "record":
-      return unpackRecord({ value, schema, ctx, fnCtx });
+      return unpackRecord({ value, schema, ctx, fnCtx, state });
     case "union":
-      return unpackUnion({ value, schema, ctx, fnCtx });
+      return unpackUnion({ value, schema, ctx, fnCtx, state });
   }
+};
+
+const createBoundaryCodecState = (schema: BoundarySchema): BoundaryCodecState => {
+  const registry = new Map<TypeId, BoundarySchema>();
+  registerBoundarySchema({ schema, registry });
+  return {
+    registry,
+    packHelpers: new Map(),
+    activePackHelpers: new Set(),
+    unpackHelpers: new Map(),
+    activeUnpackHelpers: new Set(),
+  };
+};
+
+const registerBoundarySchema = ({
+  schema,
+  registry,
+}: {
+  schema: BoundarySchema;
+  registry: Map<TypeId, BoundarySchema>;
+}): void => {
+  if (schema.kind !== "ref" && !registry.has(schema.typeId)) {
+    registry.set(schema.typeId, schema);
+  }
+  if (
+    schema.kind === "array" ||
+    schema.kind === "record" ||
+    schema.kind === "union"
+  ) {
+    schema.aliases?.forEach((alias) => registry.set(alias, schema));
+  }
+  switch (schema.kind) {
+    case "array":
+      registerBoundarySchema({ schema: schema.element, registry });
+      return;
+    case "record":
+      schema.fields.forEach((field) =>
+        registerBoundarySchema({ schema: field.schema, registry }),
+      );
+      return;
+    case "union":
+      schema.variants.forEach((variant) =>
+        variant.fields.forEach((field) =>
+          registerBoundarySchema({ schema: field.schema, registry }),
+        ),
+      );
+      return;
+    default:
+      return;
+  }
+};
+
+const resolveSchemaRef = ({
+  schema,
+  ctx,
+  state,
+}: {
+  schema: Extract<BoundarySchema, { kind: "ref" }>;
+  ctx: CodegenContext;
+  state: BoundaryCodecState;
+}): BoundarySchema => {
+  const existing = state.registry.get(schema.typeId);
+  const resolved =
+    existing ??
+    deriveBoundarySchema({
+      typeId: schema.typeId,
+      ctx,
+    });
+  if (!existing) {
+    registerBoundarySchema({
+      schema: resolved,
+      registry: state.registry,
+    });
+  }
+  if (!resolved || resolved.kind === "ref") {
+    throw new Error(`boundary schema has unresolved recursive ref ${schema.typeId}`);
+  }
+  return resolved;
+};
+
+const ensurePackHelper = ({
+  schema,
+  ctx,
+  state,
+}: {
+  schema: Extract<BoundarySchema, { kind: "ref" }>;
+  ctx: CodegenContext;
+  state: BoundaryCodecState;
+}): string => {
+  const existing = state.packHelpers.get(schema.typeId);
+  if (existing) return existing;
+
+  const name = freshLabel(`__voyd_boundary_pack_${schema.typeId}`);
+  state.packHelpers.set(schema.typeId, name);
+  if (state.activePackHelpers.has(schema.typeId)) return name;
+
+  state.activePackHelpers.add(schema.typeId);
+  const msgpack = ensureMsgPackFunctions(ctx);
+  const ancestorStackType = boundaryAncestorStackType({ ctx, state });
+  const valueType = wasmTypeFor(schema.typeId, ctx);
+  const params = binaryen.createType([valueType, ancestorStackType, binaryen.i32]);
+  const result = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+  const locals: binaryen.Type[] = [];
+  const fnCtx: FunctionContext = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals,
+    nextLocalIndex: binaryen.expandType(params).length,
+    returnTypeId: msgpack.msgPackTypeId,
+    effectful: false,
+  };
+  const nextAncestors = allocateTempLocal(ancestorStackType, fnCtx);
+  const body = packBoundaryValueAsMsgPackInternal({
+    value: ctx.mod.local.get(0, valueType),
+    schema: resolveSchemaRef({ schema, ctx, state }),
+    ctx,
+    fnCtx,
+    state,
+    packAncestors: loadLocalValue(nextAncestors, ctx),
+    packAncestorCount: ctx.mod.i32.add(ctx.mod.local.get(2, binaryen.i32), ctx.mod.i32.const(1)),
+  });
+  ctx.mod.addFunction(
+    name,
+    params,
+    result,
+    locals,
+    ctx.mod.if(
+      boundaryAncestorStackContains({
+        value: ctx.mod.local.get(0, valueType),
+        ancestors: ctx.mod.local.get(1, ancestorStackType),
+        count: ctx.mod.local.get(2, binaryen.i32),
+        ctx,
+        fnCtx,
+        state,
+      }),
+      boundaryPackCycleErrorMsgPack(ctx),
+      ctx.mod.block(
+        null,
+        [
+          storeLocalValue({
+            binding: nextAncestors,
+            value: boundaryAncestorStackWithValue({
+              value: ctx.mod.local.get(0, valueType),
+              ancestors: ctx.mod.local.get(1, ancestorStackType),
+              count: ctx.mod.local.get(2, binaryen.i32),
+              ctx,
+              fnCtx,
+              state,
+            }),
+            ctx,
+            fnCtx,
+          }),
+          body,
+        ],
+        result,
+      ),
+    ),
+  );
+  state.activePackHelpers.delete(schema.typeId);
+  return name;
+};
+
+const ensureUnpackHelper = ({
+  schema,
+  ctx,
+  state,
+}: {
+  schema: Extract<BoundarySchema, { kind: "ref" }>;
+  ctx: CodegenContext;
+  state: BoundaryCodecState;
+}): string => {
+  const existing = state.unpackHelpers.get(schema.typeId);
+  if (existing) return existing;
+
+  const name = freshLabel(`__voyd_boundary_unpack_${schema.typeId}`);
+  state.unpackHelpers.set(schema.typeId, name);
+  if (state.activeUnpackHelpers.has(schema.typeId)) return name;
+
+  state.activeUnpackHelpers.add(schema.typeId);
+  const msgpack = ensureMsgPackFunctions(ctx);
+  const params = binaryen.createType([wasmTypeFor(msgpack.msgPackTypeId, ctx)]);
+  const result = wasmTypeFor(schema.typeId, ctx);
+  const locals: binaryen.Type[] = [];
+  const fnCtx: FunctionContext = {
+    bindings: new Map(),
+    tempLocals: new Map(),
+    locals,
+    nextLocalIndex: binaryen.expandType(params).length,
+    returnTypeId: schema.typeId,
+    effectful: false,
+  };
+  const body = unpackBoundaryValueFromMsgPackInternal({
+    value: ctx.mod.local.get(0, wasmTypeFor(msgpack.msgPackTypeId, ctx)),
+    schema: resolveSchemaRef({ schema, ctx, state }),
+    ctx,
+    fnCtx,
+    state,
+  });
+  ctx.mod.addFunction(name, params, result, locals, body);
+  state.activeUnpackHelpers.delete(schema.typeId);
+  return name;
+};
+
+const boundaryAncestorStackType = ({
+  ctx,
+  state,
+}: {
+  ctx: CodegenContext;
+  state: BoundaryCodecState;
+}): binaryen.Type => {
+  if (typeof state.ancestorStackType === "number") {
+    return state.ancestorStackType;
+  }
+  state.ancestorStackType = defineArrayType(
+    ctx.mod,
+    binaryen.eqref,
+    true,
+    "__voyd_boundary_ancestor_stack",
+  );
+  return state.ancestorStackType;
+};
+
+const emptyBoundaryAncestorStack = ({
+  ctx,
+  state,
+}: {
+  ctx: CodegenContext;
+  state: BoundaryCodecState;
+}): binaryen.ExpressionRef => {
+  const stackType = boundaryAncestorStackType({ ctx, state });
+  return arrayNew(
+    ctx.mod,
+    binaryenTypeToHeapType(stackType),
+    ctx.mod.i32.const(0),
+    ctx.mod.ref.null(binaryen.eqref),
+  );
+};
+
+const boundaryAncestorStackContains = ({
+  value,
+  ancestors,
+  count,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  ancestors: binaryen.ExpressionRef;
+  count: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+}): binaryen.ExpressionRef => {
+  const index = allocateTempLocal(binaryen.i32, fnCtx);
+  const found = allocateTempLocal(binaryen.i32, fnCtx);
+  const indexRef = () => loadLocalValue(index, ctx);
+  const foundRef = () => loadLocalValue(found, ctx);
+  const loopLabel = freshLabel("boundary_ancestor_scan");
+  return ctx.mod.block(
+    null,
+    [
+      storeLocalValue({
+        binding: index,
+        value: ctx.mod.i32.const(0),
+        ctx,
+        fnCtx,
+      }),
+      storeLocalValue({
+        binding: found,
+        value: ctx.mod.i32.const(0),
+        ctx,
+        fnCtx,
+      }),
+      ctx.mod.loop(
+        loopLabel,
+        ctx.mod.if(
+          ctx.mod.i32.and(
+            ctx.mod.i32.lt_s(indexRef(), count),
+            ctx.mod.i32.eq(foundRef(), ctx.mod.i32.const(0)),
+          ),
+          ctx.mod.block(null, [
+            ctx.mod.if(
+              ctx.mod.ref.eq(
+                arrayGet(ctx.mod, ancestors, indexRef(), binaryen.eqref, false),
+                value,
+              ),
+              storeLocalValue({
+                binding: found,
+                value: ctx.mod.i32.const(1),
+                ctx,
+                fnCtx,
+              }),
+            ),
+            storeLocalValue({
+              binding: index,
+              value: ctx.mod.i32.add(indexRef(), ctx.mod.i32.const(1)),
+              ctx,
+              fnCtx,
+            }),
+            ctx.mod.br(loopLabel),
+          ]),
+        ),
+      ),
+      foundRef(),
+    ],
+    binaryen.i32,
+  );
+};
+
+const boundaryAncestorStackWithValue = ({
+  value,
+  ancestors,
+  count,
+  ctx,
+  fnCtx,
+  state,
+}: {
+  value: binaryen.ExpressionRef;
+  ancestors: binaryen.ExpressionRef;
+  count: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+}): binaryen.ExpressionRef => {
+  const stackType = boundaryAncestorStackType({ ctx, state });
+  const next = allocateTempLocal(stackType, fnCtx);
+  const index = allocateTempLocal(binaryen.i32, fnCtx);
+  const nextRef = () => loadLocalValue(next, ctx);
+  const indexRef = () => loadLocalValue(index, ctx);
+  const loopLabel = freshLabel("boundary_ancestor_copy");
+  return ctx.mod.block(
+    null,
+    [
+      storeLocalValue({
+        binding: next,
+        value: arrayNew(
+          ctx.mod,
+          binaryenTypeToHeapType(stackType),
+          ctx.mod.i32.add(count, ctx.mod.i32.const(1)),
+          ctx.mod.ref.null(binaryen.eqref),
+        ),
+        ctx,
+        fnCtx,
+      }),
+      storeLocalValue({
+        binding: index,
+        value: ctx.mod.i32.const(0),
+        ctx,
+        fnCtx,
+      }),
+      ctx.mod.loop(
+        loopLabel,
+        ctx.mod.if(
+          ctx.mod.i32.lt_s(indexRef(), count),
+          ctx.mod.block(null, [
+            arraySet(
+              ctx.mod,
+              nextRef(),
+              indexRef(),
+              arrayGet(ctx.mod, ancestors, indexRef(), binaryen.eqref, false),
+            ),
+            storeLocalValue({
+              binding: index,
+              value: ctx.mod.i32.add(indexRef(), ctx.mod.i32.const(1)),
+              ctx,
+              fnCtx,
+            }),
+            ctx.mod.br(loopLabel),
+          ]),
+        ),
+      ),
+      arraySet(ctx.mod, nextRef(), count, value),
+      nextRef(),
+    ],
+    stackType,
+  );
 };
 
 const packArray = ({
@@ -150,11 +632,17 @@ const packArray = ({
   schema,
   ctx,
   fnCtx,
+  state,
+  packAncestors,
+  packAncestorCount,
 }: {
   value: binaryen.ExpressionRef;
   schema: BoundaryArraySchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+  packAncestors: binaryen.ExpressionRef;
+  packAncestorCount: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
@@ -216,10 +704,9 @@ const packArray = ({
                 msgpack.arrayPush.wasmName,
                 [
                   outRef(),
-                  packBoundaryValueAsMsgPack({
+                  packBoundaryValueAsMsgPackInternal({
                     value: fixedArrayGet({
                       array: storageRef(),
-                      arrayTypeId: storageField.typeId,
                       elementTypeId: schema.elementTypeId,
                       index: indexRef(),
                       ctx,
@@ -228,6 +715,9 @@ const packArray = ({
                     schema: schema.element,
                     ctx,
                     fnCtx,
+                    state,
+                    packAncestors,
+                    packAncestorCount,
                   }),
                 ],
                 out.type,
@@ -256,11 +746,13 @@ const unpackArray = ({
   schema,
   ctx,
   fnCtx,
+  state,
 }: {
   value: binaryen.ExpressionRef;
   schema: BoundaryArraySchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  state: BoundaryCodecState;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
@@ -365,14 +857,14 @@ const unpackArray = ({
           ctx.mod.block(null, [
             fixedArraySet({
               array: targetStorageRef(),
-              arrayTypeId: storageField.typeId,
               elementTypeId: schema.elementTypeId,
               index: indexRef(),
-              value: unpackBoundaryValueFromMsgPack({
+              value: unpackBoundaryValueFromMsgPackInternal({
                 value: arrayGet(ctx.mod, sourceStorageRef(), indexRef(), msgPackType, false),
                 schema: schema.element,
                 ctx,
                 fnCtx,
+                state,
               }),
               ctx,
               fnCtx,
@@ -398,11 +890,17 @@ const packRecord = ({
   schema,
   ctx,
   fnCtx,
+  state,
+  packAncestors,
+  packAncestorCount,
 }: {
   value: binaryen.ExpressionRef;
   schema: BoundaryRecordSchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+  packAncestors: binaryen.ExpressionRef;
+  packAncestorCount: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef =>
   packRecordMap({
     value,
@@ -411,6 +909,9 @@ const packRecord = ({
     tag: schema.tag,
     ctx,
     fnCtx,
+    state,
+    packAncestors,
+    packAncestorCount,
   });
 
 const unpackRecord = ({
@@ -418,11 +919,13 @@ const unpackRecord = ({
   schema,
   ctx,
   fnCtx,
+  state,
 }: {
   value: binaryen.ExpressionRef;
   schema: BoundaryRecordSchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  state: BoundaryCodecState;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const map = allocateTempLocal(msgpack.unpackMap.resultType, fnCtx);
@@ -441,6 +944,7 @@ const unpackRecord = ({
         fields: schema.fields,
         ctx,
         fnCtx,
+        state,
       }),
     ],
     wasmTypeFor(schema.typeId, ctx),
@@ -452,11 +956,17 @@ const packUnion = ({
   schema,
   ctx,
   fnCtx,
+  state,
+  packAncestors,
+  packAncestorCount,
 }: {
   value: binaryen.ExpressionRef;
   schema: BoundaryUnionSchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+  packAncestors: binaryen.ExpressionRef;
+  packAncestorCount: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
@@ -476,6 +986,9 @@ const packUnion = ({
       tag: variant.name,
       ctx,
       fnCtx,
+      state,
+      packAncestors,
+      packAncestorCount,
     });
   const branches = schema.variants.reduceRight<binaryen.ExpressionRef>(
     (fallback, variant) =>
@@ -503,11 +1016,13 @@ const unpackUnion = ({
   schema,
   ctx,
   fnCtx,
+  state,
 }: {
   value: binaryen.ExpressionRef;
   schema: BoundaryUnionSchema;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  state: BoundaryCodecState;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const map = allocateTempLocal(msgpack.unpackMap.resultType, fnCtx);
@@ -520,6 +1035,7 @@ const unpackUnion = ({
         fields: variant.fields,
         ctx,
         fnCtx,
+        state,
       }),
       actualType: variant.typeId,
       targetType: schema.typeId,
@@ -562,6 +1078,9 @@ const packRecordMap = ({
   tag,
   ctx,
   fnCtx,
+  state,
+  packAncestors,
+  packAncestorCount,
 }: {
   value: binaryen.ExpressionRef;
   typeId: TypeId;
@@ -569,6 +1088,9 @@ const packRecordMap = ({
   tag?: string;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+  packAncestors: binaryen.ExpressionRef;
+  packAncestorCount: binaryen.ExpressionRef;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
@@ -602,31 +1124,47 @@ const packRecordMap = ({
   }
   fields.forEach((field) => {
     const structuralField = requiredField(info.fieldMap, field.name, typeId);
+    const fieldValue = loadStructuralField({
+      structInfo: info,
+      field: structuralField,
+      pointer: sourceRef,
+      ctx,
+    });
     ops.push(
-      storeLocalValue({
-        binding: map,
-        value: ctx.mod.call(
-          msgpack.mapSet.wasmName,
-          [
-            mapRef(),
-            stringValue(field.name, ctx),
-            packBoundaryValueAsMsgPack({
-              value: loadStructuralField({
-                structInfo: info,
-                field: structuralField,
-                pointer: sourceRef,
-                ctx,
-              }),
-              schema: field.schema,
-              ctx,
-              fnCtx,
-            }),
-          ],
-          map.type,
-        ),
-        ctx,
-        fnCtx,
-      }),
+      field.optional
+        ? packOptionalRecordField({
+            map,
+            field,
+            value: fieldValue,
+            optionalTypeId: structuralField.typeId,
+            ctx,
+            fnCtx,
+            state,
+            packAncestors,
+            packAncestorCount,
+          })
+        : storeLocalValue({
+            binding: map,
+            value: ctx.mod.call(
+              msgpack.mapSet.wasmName,
+              [
+                mapRef(),
+                stringValue(field.name, ctx),
+                packBoundaryValueAsMsgPackInternal({
+                  value: fieldValue,
+                  schema: field.schema,
+                  ctx,
+                  fnCtx,
+                  state,
+                  packAncestors,
+                  packAncestorCount,
+                }),
+              ],
+              map.type,
+            ),
+            ctx,
+            fnCtx,
+          }),
     );
   });
   ops.push(ctx.mod.call(msgpack.makeMap.wasmName, [mapRef()], msgPackType));
@@ -639,12 +1177,14 @@ const unpackRecordFromMap = ({
   fields,
   ctx,
   fnCtx,
+  state,
 }: {
   map: LocalBindingLocal;
   typeId: TypeId;
   fields: readonly BoundaryFieldSchema[];
   ctx: CodegenContext;
   fnCtx: FunctionContext;
+  state: BoundaryCodecState;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const info = requiredStructuralInfo(typeId, ctx);
@@ -653,24 +1193,233 @@ const unpackRecordFromMap = ({
     if (!schemaField) {
       throw new Error(`boundary schema missing field ${field.name}`);
     }
+    const value = schemaField.optional
+      ? unpackOptionalRecordField({
+          map,
+          field: schemaField,
+          optionalTypeId: field.typeId,
+          ctx,
+          fnCtx,
+          state,
+        })
+      : unpackBoundaryValueFromMsgPackInternal({
+          value: ctx.mod.call(
+            msgpack.mapGet.wasmName,
+            [loadLocalValue(map, ctx), stringValue(field.name, ctx)],
+            wasmTypeFor(msgpack.msgPackTypeId, ctx),
+          ),
+          schema: schemaField.schema,
+          ctx,
+          fnCtx,
+          state,
+        });
     return lowerFieldValueForInit({
       structInfo: info,
       field,
-      value: unpackBoundaryValueFromMsgPack({
-        value: ctx.mod.call(
-          msgpack.mapGet.wasmName,
-          [loadLocalValue(map, ctx), stringValue(field.name, ctx)],
-          wasmTypeFor(msgpack.msgPackTypeId, ctx),
-        ),
-        schema: schemaField.schema,
-        ctx,
-        fnCtx,
-      }),
+      value,
       ctx,
       fnCtx,
     });
   });
   return initStructuralValue({ structInfo: info, fieldValues, ctx });
+};
+
+const packOptionalRecordField = ({
+  map,
+  field,
+  value,
+  optionalTypeId,
+  ctx,
+  fnCtx,
+  state,
+  packAncestors,
+  packAncestorCount,
+}: {
+  map: LocalBindingLocal;
+  field: BoundaryFieldSchema;
+  value: binaryen.ExpressionRef;
+  optionalTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+  packAncestors: binaryen.ExpressionRef;
+  packAncestorCount: binaryen.ExpressionRef;
+}): binaryen.ExpressionRef => {
+  const msgpack = ensureMsgPackFunctions(ctx);
+  const optional = allocateTempLocal(
+    wasmTypeFor(optionalTypeId, ctx),
+    fnCtx,
+    optionalTypeId,
+    ctx,
+  );
+  const optionalRef = () => loadLocalValue(optional, ctx);
+  const [isSome, someValue] = unpackOptionalSomePayload({
+    value: optionalRef,
+    optionalTypeId,
+    ctx,
+    fnCtx,
+  });
+  const setField = storeLocalValue({
+    binding: map,
+    value: ctx.mod.call(
+      msgpack.mapSet.wasmName,
+      [
+        loadLocalValue(map, ctx),
+        stringValue(field.name, ctx),
+        packBoundaryValueAsMsgPackInternal({
+          value: someValue,
+          schema: field.schema,
+          ctx,
+          fnCtx,
+          state,
+          packAncestors,
+          packAncestorCount,
+        }),
+      ],
+      map.type,
+    ),
+    ctx,
+    fnCtx,
+  });
+  return ctx.mod.block(
+    null,
+    [
+      storeLocalValue({ binding: optional, value, ctx, fnCtx }),
+      ctx.mod.if(isSome, setField),
+    ],
+  );
+};
+
+const unpackOptionalRecordField = ({
+  map,
+  field,
+  optionalTypeId,
+  ctx,
+  fnCtx,
+  state,
+}: {
+  map: LocalBindingLocal;
+  field: BoundaryFieldSchema;
+  optionalTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  state: BoundaryCodecState;
+}): binaryen.ExpressionRef => {
+  const msgpack = ensureMsgPackFunctions(ctx);
+  return ctx.mod.if(
+    ctx.mod.call(
+      msgpack.mapHas.wasmName,
+      [loadLocalValue(map, ctx), stringValue(field.name, ctx)],
+      binaryen.i32,
+    ),
+    compileOptionalSomeValue({
+      targetTypeId: optionalTypeId,
+      value: unpackBoundaryValueFromMsgPackInternal({
+        value: ctx.mod.call(
+          msgpack.mapGet.wasmName,
+          [loadLocalValue(map, ctx), stringValue(field.name, ctx)],
+          wasmTypeFor(msgpack.msgPackTypeId, ctx),
+        ),
+        schema: field.schema,
+        ctx,
+        fnCtx,
+        state,
+      }),
+      valueTypeId: field.typeId,
+      ctx,
+      fnCtx,
+    }),
+    compileOptionalNoneValue({
+      targetTypeId: optionalTypeId,
+      ctx,
+      fnCtx,
+    }),
+  );
+};
+
+const unpackOptionalSomePayload = ({
+  value,
+  optionalTypeId,
+  ctx,
+  fnCtx,
+}: {
+  value: () => binaryen.ExpressionRef;
+  optionalTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): readonly [binaryen.ExpressionRef, binaryen.ExpressionRef] => {
+  const optionalInfo = ctx.program.optionals.getOptionalInfo(
+    ctx.moduleId,
+    optionalTypeId,
+  );
+  if (!optionalInfo) {
+    throw new Error("optional boundary field requires an Optional type");
+  }
+  const someInfo = requiredStructuralInfo(optionalInfo.someType, ctx);
+  const someField = someInfo.fields[0];
+  if (!someField || someInfo.fields.length !== 1) {
+    throw new Error("optional boundary Some type must declare one field");
+  }
+
+  const someVariant: BoundaryVariantSchema = {
+    name: "Some",
+    typeId: optionalInfo.someType,
+    fields: [],
+  };
+  const isSome = variantMatches({
+    unionValue: value(),
+    unionTypeId: optionalTypeId,
+    variant: someVariant,
+    ctx,
+  });
+
+  if (shouldInlineUnionLayout(optionalTypeId, ctx)) {
+    const layout = getInlineUnionLayout(optionalTypeId, ctx);
+    const someLayout = layout.members.find(
+      (member) => member.typeId === optionalInfo.someType,
+    );
+    if (!someLayout) {
+      throw new Error("optional boundary layout is missing Some member");
+    }
+    const abiTypes = binaryen.expandType(binaryen.getExpressionType(value()));
+    const payloadValues = someLayout.abiTypes.map((_, index) =>
+      abiTypes.length === 1
+        ? value()
+        : ctx.mod.tuple.extract(value(), someLayout.abiStart + index),
+    );
+    const payload =
+      payloadValues.length === 0
+        ? ctx.mod.nop()
+        : payloadValues.length === 1
+          ? payloadValues[0]!
+          : ctx.mod.tuple.make(payloadValues);
+    return [
+      isSome,
+      coerceValueToType({
+        value: payload,
+        actualType: someField.typeId,
+        targetType: optionalInfo.innerType,
+        ctx,
+        fnCtx,
+      }),
+    ];
+  }
+
+  return [
+    isSome,
+    coerceValueToType({
+      value: loadStructuralField({
+        structInfo: someInfo,
+        field: someField,
+        pointer: () => refCast(ctx.mod, value(), someInfo.runtimeType),
+        ctx,
+      }),
+      actualType: someField.typeId,
+      targetType: optionalInfo.innerType,
+      ctx,
+      fnCtx,
+    }),
+  ];
 };
 
 const variantMatches = ({
@@ -728,75 +1477,43 @@ const fixedArrayNew = ({
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-  if (wasmTypes.kind === "inline-aggregate") {
-    const laneTypes = wasmTypes.laneTypes ?? [];
-    const laneArrayTypes = wasmTypes.laneArrayTypes ?? [];
-    return initStruct(ctx.mod, wasmTypes.type, [
-      length,
-      ...laneTypes.map((laneType, index) =>
-        arrayNew(
-          ctx.mod,
-          binaryenTypeToHeapType(laneArrayTypes[index]!),
-          length,
-          defaultValueForWasmType(laneType, ctx),
-        ),
-      ),
-    ]);
-  }
-  const elementType = wasmHeapFieldTypeFor(elementTypeId, ctx, new Set(), "runtime");
   return arrayNew(
     ctx.mod,
     wasmTypes.heapType,
     length,
-    defaultValueForWasmType(elementType, ctx),
+    defaultFixedArrayElementValue({ typeId: elementTypeId, ctx }),
   );
 };
 
 const fixedArrayGet = ({
   array,
-  arrayTypeId,
   elementTypeId,
   index,
   ctx,
+  fnCtx,
 }: {
   array: binaryen.ExpressionRef;
-  arrayTypeId: TypeId;
   elementTypeId: TypeId;
   index: binaryen.ExpressionRef;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-  if (wasmTypes.kind === "inline-aggregate") {
-    const laneTypes = wasmTypes.laneTypes ?? [];
-    const laneArrayTypes = wasmTypes.laneArrayTypes ?? [];
-    const lanes = laneTypes.map((laneType, laneIndex) =>
-      arrayGet(
-        ctx.mod,
-        structGetFieldValue({
-          mod: ctx.mod,
-          fieldIndex: laneIndex + 1,
-          fieldType: laneArrayTypes[laneIndex]!,
-          exprRef: array,
-        }),
-        index,
-        laneType,
-        false,
-      ),
-    );
-    return makeInlineValue({ values: lanes, ctx });
-  }
-  const elementType = wasmHeapFieldTypeFor(elementTypeId, ctx, new Set(), "runtime");
-  return liftHeapValueToInline({
-    value: arrayGet(ctx.mod, array, index, elementType, false),
+  return liftFixedArrayElementValue({
+    value: arrayGet(
+      ctx.mod,
+      array,
+      index,
+      fixedArrayStorageElementType({ typeId: elementTypeId, ctx }),
+      false,
+    ),
     typeId: elementTypeId,
     ctx,
+    fnCtx,
   });
 };
 
 const fixedArraySet = ({
   array,
-  arrayTypeId,
   elementTypeId,
   index,
   value,
@@ -804,49 +1521,19 @@ const fixedArraySet = ({
   fnCtx,
 }: {
   array: binaryen.ExpressionRef;
-  arrayTypeId: TypeId;
   elementTypeId: TypeId;
   index: binaryen.ExpressionRef;
   value: binaryen.ExpressionRef;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const wasmTypes = getFixedArrayWasmTypes(arrayTypeId, ctx);
-  if (wasmTypes.kind === "inline-aggregate") {
-    const laneTypes = wasmTypes.laneTypes ?? [];
-    const laneArrayTypes = wasmTypes.laneArrayTypes ?? [];
-    const captured = captureMultivalueLanes({
-      value,
-      abiTypes: laneTypes,
-      ctx,
-      fnCtx,
-    });
-    return ctx.mod.block(null, [
-      ...captured.setup,
-      ...captured.lanes.map((lane, laneIndex) =>
-        arraySet(
-          ctx.mod,
-          structGetFieldValue({
-            mod: ctx.mod,
-            fieldIndex: laneIndex + 1,
-            fieldType: laneArrayTypes[laneIndex]!,
-            exprRef: array,
-          }),
-          index,
-          lane,
-        ),
-      ),
-    ]);
-  }
-  const elementType = wasmHeapFieldTypeFor(elementTypeId, ctx, new Set(), "runtime");
   return arraySet(
     ctx.mod,
     array,
     index,
-    lowerValueForHeapField({
+    lowerFixedArrayElementValue({
       value,
       typeId: elementTypeId,
-      targetType: elementType,
       ctx,
       fnCtx,
     }),
@@ -935,16 +1622,8 @@ const stringMsgPack = (value: string, ctx: CodegenContext): binaryen.ExpressionR
   );
 };
 
-const defaultValueForWasmType = (
-  wasmType: binaryen.Type,
-  ctx: CodegenContext,
-): binaryen.ExpressionRef => {
-  if (wasmType === binaryen.i32) return ctx.mod.i32.const(0);
-  if (wasmType === binaryen.i64) return ctx.mod.i64.const(0, 0);
-  if (wasmType === binaryen.f32) return ctx.mod.f32.const(0);
-  if (wasmType === binaryen.f64) return ctx.mod.f64.const(0);
-  return ctx.mod.ref.null(wasmType);
-};
+const boundaryPackCycleErrorMsgPack = (ctx: CodegenContext): binaryen.ExpressionRef =>
+  stringMsgPack(BOUNDARY_PACK_CYCLE_ERROR, ctx);
 
 let labelCounter = 0;
 

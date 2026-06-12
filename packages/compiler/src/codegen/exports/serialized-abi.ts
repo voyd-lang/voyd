@@ -4,15 +4,14 @@ import type {
   CodegenContext,
   FunctionContext,
   FunctionMetadata,
-  StructuralFieldInfo,
   TypeId,
 } from "../context.js";
-import type { ProgramSymbolId } from "../../semantics/ids.js";
 import { findSerializerForType } from "../serializer.js";
 import {
   coerceValueToType,
+  initStructuralValue,
   liftHeapValueToInline,
-  loadStructuralField,
+  lowerValueForHeapField,
   storeValueIntoStorageRef,
 } from "../structural.js";
 import {
@@ -38,18 +37,41 @@ import {
   boxSignatureSpillValue,
   unboxSignatureSpillValue,
 } from "../signature-spill.js";
+import {
+  boundaryMsgPackPayloadField,
+  isBoundaryMsgPackValue,
+} from "../boundary-metadata.js";
+import { compileOptionalNoneValue } from "../optionals.js";
+
+export type SerializedExportTypeAdapter = {
+  acceptsType?: (params: {
+    typeId: TypeId;
+    ctx: CodegenContext;
+  }) => boolean;
+  packResultValue?: (params: {
+    value: binaryen.ExpressionRef;
+    typeId: TypeId;
+    ctx: CodegenContext;
+    fnCtx: FunctionContext;
+    exportName: string;
+  }) => binaryen.ExpressionRef | undefined;
+};
 
 export const emitSerializedExportWrapper = ({
   ctx,
   meta,
   exportName,
+  wrapperExportName = exportName,
+  typeAdapter,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
+  wrapperExportName?: string;
+  typeAdapter?: SerializedExportTypeAdapter;
 }): { wrapperName: string; formatId: "msgpack" } => {
   ensureLinearMemoryExport(ctx);
-  validateExportTypes({ ctx, meta, exportName });
+  validateExportTypes({ ctx, meta, exportName, typeAdapter });
 
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
@@ -145,6 +167,26 @@ export const emitSerializedExportWrapper = ({
         fnCtx,
       });
     }
+    if (isBoundaryMsgPackValue(typeId, ctx)) {
+      return coerceValueToType({
+        value: element,
+        actualType: msgpack.msgPackTypeId,
+        targetType: typeId,
+        ctx,
+        fnCtx,
+      });
+    }
+    const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
+    if (payloadField) {
+      return buildPayloadEnvelopeParamExpr({
+        value: element,
+        typeId,
+        payloadField,
+        ctx,
+        fnCtx,
+        label: `${exportName} arg${index}`,
+      });
+    }
     return unpackBoundaryValueFromMsgPack({
       ctx,
       value: element,
@@ -172,6 +214,7 @@ export const emitSerializedExportWrapper = ({
     ctx,
     fnCtx,
     exportName,
+    typeAdapter,
   });
   const encodedLength = ctx.mod.call(
     msgpack.encodeValue.wasmName,
@@ -199,8 +242,73 @@ export const emitSerializedExportWrapper = ({
     ])
   );
 
-  ctx.mod.addFunctionExport(wrapperName, exportName);
-  return { wrapperName, formatId: "msgpack" };
+  ctx.mod.addFunctionExport(wrapperName, wrapperExportName);
+  return { wrapperName: wrapperExportName, formatId: "msgpack" };
+};
+
+const buildPayloadEnvelopeParamExpr = ({
+  value,
+  typeId,
+  payloadField,
+  ctx,
+  fnCtx,
+  label,
+}: {
+  value: binaryen.ExpressionRef;
+  typeId: TypeId;
+  payloadField: NonNullable<ReturnType<typeof boundaryMsgPackPayloadField>>;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  label: string;
+}): binaryen.ExpressionRef => {
+  const msgpack = ensureMsgPackFunctions(ctx);
+  const structInfo = getStructuralTypeInfo(typeId, ctx);
+  if (!structInfo) {
+    throw new Error(`boundary payload envelope ${label} is missing structural info`);
+  }
+
+  const fieldValues = structInfo.fields.map((field) => {
+    if (field.name === payloadField.name) {
+      const payload = coerceValueToType({
+        value,
+        actualType: msgpack.msgPackTypeId,
+        targetType: field.typeId,
+        ctx,
+        fnCtx,
+      });
+      return structInfo.layoutKind === "value-object"
+        ? payload
+        : lowerValueForHeapField({
+            value: payload,
+            typeId: field.typeId,
+            targetType: field.heapWasmType,
+            ctx,
+            fnCtx,
+          });
+    }
+
+    if (!field.optional) {
+      throw new Error(
+        `boundary payload envelope ${label} has non-payload field ${field.name}`
+      );
+    }
+    const none = compileOptionalNoneValue({
+      targetTypeId: field.typeId,
+      ctx,
+      fnCtx,
+    });
+    return structInfo.layoutKind === "value-object"
+      ? none
+      : lowerValueForHeapField({
+          value: none,
+          typeId: field.typeId,
+          targetType: field.heapWasmType,
+          ctx,
+          fnCtx,
+        });
+  });
+
+  return initStructuralValue({ structInfo, fieldValues, ctx });
 };
 
 const lowerSerializedExportCall = ({
@@ -433,10 +541,12 @@ const validateExportTypes = ({
   ctx,
   meta,
   exportName,
+  typeAdapter,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
+  typeAdapter?: SerializedExportTypeAdapter;
 }): void => {
   const allTypes = [...meta.paramTypeIds, meta.resultTypeId];
   allTypes.forEach((typeId, index) => {
@@ -449,7 +559,7 @@ const validateExportTypes = ({
       }
       return;
     }
-    if (isVxMsgPackAlias(typeId, ctx) || vxPayloadField(typeId, ctx)) {
+    if (typeAdapter?.acceptsType?.({ typeId, ctx }) === true) {
       return;
     }
     const target = index < meta.paramTypeIds.length ? `parameter ${index + 1}` : "return";
@@ -467,12 +577,14 @@ const packSerializedResultValue = ({
   ctx,
   fnCtx,
   exportName,
+  typeAdapter,
 }: {
   value: binaryen.ExpressionRef;
   typeId: TypeId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   exportName: string;
+  typeAdapter?: SerializedExportTypeAdapter;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const serializer = findSerializerForType(typeId, ctx);
@@ -490,21 +602,15 @@ const packSerializedResultValue = ({
       fnCtx,
     });
   }
-  if (isVxMsgPackAlias(typeId, ctx)) {
-    return value;
-  }
-  const payloadField = vxPayloadField(typeId, ctx);
-  if (payloadField) {
-    const info = getStructuralTypeInfo(typeId, ctx);
-    if (!info) {
-      throw new Error(`VX payload envelope ${typeId} is missing structural info`);
-    }
-    return loadStructuralField({
-      structInfo: info,
-      field: payloadField,
-      pointer: () => value,
-      ctx,
-    });
+  const adapted = typeAdapter?.packResultValue?.({
+    value,
+    typeId,
+    ctx,
+    fnCtx,
+    exportName,
+  });
+  if (adapted) {
+    return adapted;
   }
   return packBoundaryValueAsMsgPack({
     value,
@@ -516,69 +622,6 @@ const packSerializedResultValue = ({
     ctx,
     fnCtx,
   });
-};
-
-const VX_MSGPACK_ALIAS_NAMES = new Set(["Html", "Attr", "Program"]);
-const VX_PAYLOAD_ENVELOPE_NAMES = new Set(["Cmd", "Sub"]);
-const VX_STD_MODULE_ID = "std::vx";
-
-const isStdVxSymbolNamed = (
-  symbol: ProgramSymbolId,
-  names: ReadonlySet<string>,
-  ctx: CodegenContext,
-): boolean =>
-  ctx.program.symbols.refOf(symbol).moduleId === VX_STD_MODULE_ID &&
-  names.has(ctx.program.symbols.getName(symbol) ?? "");
-
-const isVxMsgPackAlias = (typeId: TypeId, ctx: CodegenContext): boolean =>
-  ctx.program.types
-    .getAliasSymbols(typeId)
-    .some((symbol) => isStdVxSymbolNamed(symbol, VX_MSGPACK_ALIAS_NAMES, ctx));
-
-const vxPayloadField = (
-  typeId: TypeId,
-  ctx: CodegenContext,
-): StructuralFieldInfo | undefined => {
-  if (!nominalTypeSymbolIsStdVxNamed(typeId, VX_PAYLOAD_ENVELOPE_NAMES, ctx)) {
-    return undefined;
-  }
-  const info = getStructuralTypeInfo(typeId, ctx);
-  const payload = info?.fieldMap.get("payload");
-  if (!payload) {
-    return undefined;
-  }
-  const serializer = findSerializerForType(payload.typeId, ctx);
-  return serializer?.formatId === "msgpack" ? payload : undefined;
-};
-
-const nominalTypeName = (
-  typeId: TypeId,
-  ctx: CodegenContext,
-): string | undefined => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  if (desc.kind === "nominal-object" || desc.kind === "value-object") {
-    return desc.name;
-  }
-  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
-    return nominalTypeName(desc.nominal, ctx);
-  }
-  return undefined;
-};
-
-const nominalTypeSymbolIsStdVxNamed = (
-  typeId: TypeId,
-  names: ReadonlySet<string>,
-  ctx: CodegenContext,
-): boolean => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  const nominal =
-    desc.kind === "intersection" && typeof desc.nominal === "number"
-      ? ctx.program.types.getTypeDesc(desc.nominal)
-      : desc;
-  if (nominal.kind !== "nominal-object" && nominal.kind !== "value-object") {
-    return false;
-  }
-  return isStdVxSymbolNamed(nominal.owner, names, ctx);
 };
 
 const sanitizeIdentifier = (value: string): string =>

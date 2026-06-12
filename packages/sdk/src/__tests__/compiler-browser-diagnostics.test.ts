@@ -1,7 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { compile } from "@voyd-lang/sdk/browser";
+import { compile, createSdk } from "@voyd-lang/sdk/browser";
 
 describe("browser compiler diagnostics", () => {
+  it("emits runnable optimized wasm through the browser SDK surface", async () => {
+    const sdk = createSdk();
+    const result = await sdk.compile({
+      source: `
+pub fn main() -> i32
+  42
+`,
+      optimize: true,
+      boundaryExports: false,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error(result.diagnostics.map((diag) => diag.message).join("\n"));
+    }
+
+    await expect(result.run<number>({ entryName: "main" })).resolves.toBe(42);
+  });
+
   it("preserves structured codegen diagnostics without throwing", async () => {
     const source = `
 pub fn identity<T>(value: T) -> T

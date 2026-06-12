@@ -35,9 +35,11 @@ export const bindFunctionDecl = (
   const declarationScope = options.declarationScope ?? tracker.current();
   rememberSyntax(decl.form, ctx);
   const intrinsicMetadata = decl.intrinsic;
+  const boundaryMetadata = boundaryMetadataFromAttribute(decl.form.attributes?.boundary);
   const symbolMetadata: Record<string, unknown> = {
     entity: "function",
     ...options.metadata,
+    ...(boundaryMetadata ? { boundary: boundaryMetadata } : {}),
   };
   if (decl.signature.name.isQuoted) {
     symbolMetadata.quotedName = true;
@@ -97,6 +99,10 @@ export const bindFunctionDecl = (
 
   recordFunctionOverload(fnDecl, declarationScope, ctx);
   return fnDecl;
+};
+
+const boundaryMetadataFromAttribute = (_value: unknown): unknown | undefined => {
+  return undefined;
 };
 
 const bindFunctionTypeParameters = (

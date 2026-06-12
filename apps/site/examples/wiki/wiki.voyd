@@ -33,7 +33,15 @@ type TextInputEvent = {
   checked: bool
 }
 
-pub fn init() -> WikiModel
+pub fn app() -> Program<WikiModel, WikiMsg>
+  program<WikiModel, WikiMsg>(
+    init: init,
+    update: update,
+    view: view,
+    subscriptions: subscriptions
+  )
+
+fn init() -> WikiModel
   WikiModel {
     selected: "intro",
     query: String::init(),
@@ -45,7 +53,7 @@ pub fn init() -> WikiModel
     status: "Ready"
   }
 
-pub fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
+fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
   match(message)
     WikiMsg::Select { page }:
       next(WikiModel {
@@ -149,10 +157,10 @@ pub fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         panel: toggled_panel(model.panel),
         status: "Panel toggled"
       })
-pub fn subscriptions(model: WikiModel) -> Sub<WikiMsg>
+fn subscriptions(model: WikiModel) -> Sub<WikiMsg>
   keyboard_on_key_down<WikiMsg>(key: "Escape", value: WikiMsg::Cancel {})
 
-pub fn view(model: WikiModel) -> Html<WikiMsg>
+fn view(model: WikiModel) -> Html<WikiMsg>
   <main class="wiki-demo-shell" tabindex="0" data-vx-ref="wiki-shell">
     <Sidebar model={model} />
     <Editor model={model} />
@@ -168,7 +176,7 @@ pub fn component_state_update(model: MsgPack, message: MsgPack) -> MsgPack
   model
 
 pub fn component_state_view(): Component -> MsgPack
-  let (local_clicks, set_local_clicks) = state(id: 1, initial: 0)
+  let (local_clicks, set_local_clicks) = state(initial: 0)
 
   <section class="wiki-demo-inspector wiki-demo-component-state">
     <h3>Component state</h3>

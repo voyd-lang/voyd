@@ -81,6 +81,14 @@ const loadModuleText = (): string => {
   return module.emitText();
 };
 
+const emittedFunction = (text: string, name: string): string => {
+  const match = text.match(
+    new RegExp(`\\(func \\$[^\\s)]*${name}[^\\n]*[\\s\\S]*?\\n \\)`, "m")
+  );
+  expect(match, name).not.toBeNull();
+  return match?.[0] ?? "";
+};
+
 describe("effectful call convention lowering", () => {
   it("widens effectful functions with handler params and $Outcome results", () => {
     const text = loadModuleText();
@@ -97,18 +105,19 @@ describe("effectful call convention lowering", () => {
     expect(text).toMatch(
       /\(func \$[^\s)]*call_direct[\s\S]*call \$[^\s)]*effectful_value[^\)]*\(ref\.null none\)/
     );
-    expect(text).toMatch(
-      /\(func \$[^\s)]*call_closure[\s\S]*call_ref[^\)]*ref\.null none/
-    );
+    const callClosure = emittedFunction(text, "call_closure");
+    expect(callClosure).toMatch(/call_ref[\s\S]*\(ref\.null none\)/);
   });
 
-  it("threads handler locals through effectful and trait-dispatched calls", () => {
+  it("threads handler locals through effectful and direct trait-dispatched calls", () => {
     const text = loadModuleText();
     expect(text).toMatch(
       /\(func \$[^\s)]*effectful_forward[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)\)[\s\S]*call \$[^\s)]*effectful_value[^\)]*\(local\.get \$0\)/
     );
-    expect(text).toMatch(
-      /\(func \$[^\s)]*call_trait[\s\S]*call_ref[^\)]*ref\.null none/
-    );
+    const callTrait = emittedFunction(text, "call_trait");
+    expect(callTrait).toContain("call $__has_type");
+    expect(callTrait).toMatch(/call \$[^\s)]*run_[\s\S]*\(ref\.null none\)/);
+    expect(callTrait).not.toContain("__method_");
+    expect(callTrait).not.toContain("call $__lookup_method_accessor");
   });
 });
