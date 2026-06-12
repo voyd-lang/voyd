@@ -70,6 +70,23 @@ const symbolIsUsedAsMethodReceiver = ({
     return target?.exprKind === "identifier" && target.symbol === symbol;
   });
 
+const symbolIsUsedAsCallArgument = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: CodegenContext;
+}): boolean =>
+  Array.from(ctx.module.hir.expressions.values()).some((expr) => {
+    if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
+      return false;
+    }
+    return expr.args.some((arg) => {
+      const argExpr = ctx.module.hir.expressions.get(arg.expr);
+      return argExpr?.exprKind === "identifier" && argExpr.symbol === symbol;
+    });
+  });
+
 const symbolIsCapturedByEffectHandler = ({
   symbol,
   ctx,
@@ -831,7 +848,8 @@ export const tryScalarizeAggregateInitializer = ({
   }
   if (
     mutable &&
-    symbolIsUsedAsMethodReceiver({ symbol, ctx })
+    (symbolIsUsedAsMethodReceiver({ symbol, ctx }) ||
+      symbolIsUsedAsCallArgument({ symbol, ctx }))
   ) {
     return undefined;
   }

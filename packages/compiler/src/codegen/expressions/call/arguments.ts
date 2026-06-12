@@ -1249,7 +1249,28 @@ const lowerCallArgumentForAbi = ({
               ctx,
               fnCtx,
             })
+          : existing.kind === "scalar-aggregate"
+            ? materializeOwnedBinding({
+                symbol: addressableSymbol,
+                ctx,
+                fnCtx,
+              })
           : undefined;
+      if (existing.kind === "scalar-aggregate" && materialized) {
+        const materializedPointer = loadBindingStorageRef(materialized.binding, ctx);
+        if (!materializedPointer) {
+          throw new Error(
+            `mutable ref call argument requires addressable temp storage (type ${paramTypeId})`,
+          );
+        }
+        return materialized.setup.length === 0
+          ? materializedPointer
+          : ctx.mod.block(
+              null,
+              [...materialized.setup, materializedPointer],
+              materialized.binding.storageType,
+            );
+      }
       const ownedValue = materialized
         ? loadBindingValue(materialized.binding, ctx, fnCtx)
         : argValue;

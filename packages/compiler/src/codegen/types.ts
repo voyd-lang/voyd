@@ -2320,17 +2320,22 @@ const synthesizeConcreteFunctionMeta = ({
       return;
     }
 
+    const parameterBindingKind = (index: number) =>
+      signature.parameters[index]?.bindingKind ??
+      functionItem.parameters[index]?.pattern.bindingKind ??
+      (functionItem.parameters[index]?.mutable ? "mutable-ref" : undefined);
+
     const paramAbiKinds = instantiatedTypeDesc.parameters.map((param, index) =>
       getOptimizedParamAbiKind({
         typeId: param.type,
-        bindingKind: signature.parameters[index]?.bindingKind,
+        bindingKind: parameterBindingKind(index),
         ctx,
       }),
     );
     const paramAbiTypes = instantiatedTypeDesc.parameters.map((param, index) =>
       getOptimizedAbiTypesForParam({
         typeId: param.type,
-        bindingKind: signature.parameters[index]?.bindingKind,
+        bindingKind: parameterBindingKind(index),
         ctx,
       }),
     );
@@ -2394,7 +2399,7 @@ const synthesizeConcreteFunctionMeta = ({
                 ctx,
               })
             : undefined,
-        bindingKind: signature.parameters[index]?.bindingKind,
+        bindingKind: parameterBindingKind(index),
       })),
       paramAbiKinds,
       resultTypeId: instantiatedTypeDesc.returnType,
