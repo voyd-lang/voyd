@@ -87,10 +87,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe.each(["node", "deno", "browser", "unknown"] as const)(
+describe.each(["node", "deno", "bun", "browser", "unknown"] as const)(
   "default adapter conformance (%s)",
   (runtimeKind) => {
-    it("keeps timer/random behavior deterministic and validates fetch/input/output contracts", async () => {
+    it("keeps timer/random behavior deterministic and validates http-client/input/output contracts", async () => {
       const table = buildTable([
         { effectId: "voyd.std.time", opName: "monotonic_now_millis", opId: 0 },
         { effectId: "voyd.std.time", opName: "system_now_millis", opId: 1 },
@@ -98,7 +98,7 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         { effectId: "voyd.std.random", opName: "next_i64", opId: 0 },
         { effectId: "voyd.std.random", opName: "next_u64", opId: 1 },
         { effectId: "voyd.std.random", opName: "fill_bytes", opId: 2 },
-        { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
+        { effectId: "voyd.std.http.client", opName: "request", opId: 0 },
         { effectId: "voyd.std.input", opName: "read_line", opId: 0 },
         { effectId: "voyd.std.input", opName: "read_bytes", opId: 1 },
         { effectId: "voyd.std.input", opName: "is_tty", opId: 2 },
@@ -112,11 +112,13 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         startSystemMs: 1_000,
       });
       const { host, getHandler } = createFakeHost(table);
-      const seenFetchRequests: Array<{
+      const seenHttpClientRequests: Array<{
         method: string;
         url: string;
-        body?: string;
+        headers: Array<{ name: string; value: string }>;
+        body: number[];
         timeoutMillis?: number;
+        redirectPolicy: unknown;
       }> = [];
       const seenWrites: Array<{ target: string; value: string }> = [];
       const seenByteWrites: Array<{ target: string; bytes: number[] }> = [];
@@ -133,8 +135,15 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
               Uint8Array.from(
                 Array.from({ length }, (_, index) => (index + 1) % 256)
               ),
-            fetchRequest: async (request) => {
-              seenFetchRequests.push(request);
+            httpClientRequest: async (request) => {
+              seenHttpClientRequests.push({
+                method: request.method,
+                url: request.url,
+                headers: request.headers,
+                body: Array.from(request.body.values()),
+                timeoutMillis: request.timeoutMillis,
+                redirectPolicy: request.redirectPolicy,
+              });
               if (request.url.endsWith("/timeout")) {
                 const error = new Error("deadline exceeded");
                 error.name = "AbortError";
@@ -142,11 +151,13 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
               }
               return {
                 status: 200,
-                statusText: "OK",
+                reason: "OK",
                 headers: [{ name: "content-type", value: "text/plain" }],
-                body: request.url.endsWith("/echo")
-                  ? request.body ?? ""
-                  : "voyd",
+                body: Uint8Array.from(
+                  request.url.endsWith("/echo")
+                    ? Array.from(request.body.values())
+                    : [118, 111, 121, 100]
+                ),
               };
             },
             readLine: async (prompt) => {
@@ -186,9 +197,7 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       expect(capabilitiesByEffect.get("voyd.std.random")?.supported).toBe(
         true
       );
-      expect(capabilitiesByEffect.get("voyd.std.fetch")?.supported).toBe(
-        true
-      );
+      expect(capabilitiesByEffect.get("voyd.std.http.client")?.supported).toBe(true);
       expect(capabilitiesByEffect.get("voyd.std.input")?.supported).toBe(
         true
       );
@@ -254,7 +263,7 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
         value: [1, 2, 3, 4],
       });
 
-      const fetchHandler = getHandler("voyd.std.fetch", "request");
+      const httpClientHandler = getHandler("voyd.std.http.client", "request");
       const inputLineHandler = getHandler("voyd.std.input", "read_line");
       const inputReadBytesHandler = getHandler("voyd.std.input", "read_bytes");
       const inputTtyHandler = getHandler("voyd.std.input", "is_tty");
@@ -264,12 +273,13 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
       const outputTtyHandler = getHandler("voyd.std.output", "is_tty");
 
       await expect(
-        invokeHandler(fetchHandler, {
-          method: "post",
+        invokeHandler(httpClientHandler, {
+          method: "POST",
           url: "https://example.test/echo",
           headers: [{ name: "accept", value: "text/plain" }],
-          body: "hello",
+          body: [104, 101, 108, 108, 111],
           timeout_millis: 25,
+          redirect_policy: { kind: "follow", max_redirects: 20 },
         })
       ).resolves.toEqual({
         kind: "tail",
@@ -277,27 +287,30 @@ describe.each(["node", "deno", "browser", "unknown"] as const)(
           ok: true,
           value: {
             status: 200,
-            status_text: "OK",
+            reason: "OK",
             headers: [{ name: "content-type", value: "text/plain" }],
-            body: "hello",
+            body: [104, 101, 108, 108, 111],
           },
         },
       });
-      expect(seenFetchRequests).toEqual([
+      expect(seenHttpClientRequests).toEqual([
         {
           method: "POST",
           url: "https://example.test/echo",
           headers: [{ name: "accept", value: "text/plain" }],
-          body: "hello",
+          body: [104, 101, 108, 108, 111],
           timeoutMillis: 25,
+          redirectPolicy: { kind: "follow", maxRedirects: 20 },
         },
       ]);
 
       await expect(
-        invokeHandler(fetchHandler, {
+        invokeHandler(httpClientHandler, {
           method: "GET",
           url: "https://example.test/timeout",
           headers: [],
+          body: [],
+          redirect_policy: { kind: "follow", max_redirects: 20 },
         })
       ).resolves.toEqual({
         kind: "tail",
@@ -428,7 +441,8 @@ describe("default adapter conformance (unsupported capabilities)", () => {
     vi.stubGlobal("fetch", undefined);
     vi.stubGlobal("prompt", undefined);
     const table = buildTable([
-      { effectId: "voyd.std.fetch", opName: "request", opId: 0 },
+      { effectId: "voyd.std.http.client", opName: "request", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
       { effectId: "voyd.std.input", opName: "read_line", opId: 0 },
       { effectId: "voyd.std.output", opName: "write", opId: 0 },
     ]);
@@ -441,15 +455,21 @@ describe("default adapter conformance (unsupported capabilities)", () => {
     const capabilitiesByEffect = new Map(
       report.capabilities.map((capability) => [capability.effectId, capability])
     );
-    expect(capabilitiesByEffect.get("voyd.std.fetch")?.supported).toBe(
+    expect(capabilitiesByEffect.get("voyd.std.http.client")?.supported).toBe(
+      false
+    );
+    expect(capabilitiesByEffect.get("voyd.std.http.server")?.supported).toBe(
       false
     );
     expect(capabilitiesByEffect.get("voyd.std.input")?.supported).toBe(true);
     expect(capabilitiesByEffect.get("voyd.std.output")?.supported).toBe(true);
 
     await expect(
-      invokeHandler(getHandler("voyd.std.fetch", "request"), {})
-    ).rejects.toThrow(/default fetch adapter is unavailable/i);
+      invokeHandler(getHandler("voyd.std.http.client", "request"), {})
+    ).rejects.toThrow(/default http-client adapter is unavailable/i);
+    await expect(
+      invokeHandler(getHandler("voyd.std.http.server", "listen_raw"), {})
+    ).rejects.toThrow(/default http-server adapter is unavailable/i);
     await expect(
       invokeHandler(getHandler("voyd.std.input", "read_line"), {})
     ).rejects.toThrow(/does not implement op read_line/i);

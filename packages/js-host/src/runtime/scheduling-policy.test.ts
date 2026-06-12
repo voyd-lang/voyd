@@ -39,7 +39,7 @@ describe("scheduleTaskForRuntimePolicy", () => {
     vi.stubGlobal("setTimeout", setTimeoutSpy);
     vi.stubGlobal("setImmediate", setImmediateSpy);
 
-    (["browser", "deno", "unknown"] as RuntimeSchedulingKind[]).forEach(
+    (["browser", "deno", "bun", "unknown"] as RuntimeSchedulingKind[]).forEach(
       (runtime) => {
         const schedule = scheduleTaskForRuntimePolicy(runtime);
         schedule(() => {
@@ -48,8 +48,8 @@ describe("scheduleTaskForRuntimePolicy", () => {
       }
     );
 
-    expect(trace).toEqual(["browser", "deno", "unknown"]);
-    expect(setTimeoutSpy).toHaveBeenCalledTimes(3);
+    expect(trace).toEqual(["browser", "deno", "bun", "unknown"]);
+    expect(setTimeoutSpy).toHaveBeenCalledTimes(4);
     expect(setImmediateSpy).not.toHaveBeenCalled();
     expect(setTimeoutSpy.mock.calls.every((call) => call[1] === 0)).toBe(true);
   });

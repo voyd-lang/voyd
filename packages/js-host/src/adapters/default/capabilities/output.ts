@@ -4,6 +4,7 @@ import {
   globalRecord,
   hostError,
   hostOk,
+  isNodeCompatibleRuntime,
   normalizeByte,
   readField,
   toStringOrUndefined,
@@ -77,7 +78,7 @@ const createOutputSource = ({
 }): OutputSource => {
   let stdout: NodeWritableWithWrite | undefined;
   let stderr: NodeWritableWithWrite | undefined;
-  if (runtime === "node") {
+  if (isNodeCompatibleRuntime(runtime)) {
     const processValue = globalRecord.process as
       | {
           stdout?: NodeJS.WritableStream;

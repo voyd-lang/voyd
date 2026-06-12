@@ -10,7 +10,8 @@ export const TIME_EFFECT_ID = "voyd.std.time";
 export const ENV_EFFECT_ID = "voyd.std.env";
 export const RANDOM_EFFECT_ID = "voyd.std.random";
 export const LOG_EFFECT_ID = "voyd.std.log";
-export const FETCH_EFFECT_ID = "voyd.std.fetch";
+export const HTTP_CLIENT_EFFECT_ID = "voyd.std.http.client";
+export const HTTP_SERVER_EFFECT_ID = "voyd.std.http.server";
 export const INPUT_EFFECT_ID = "voyd.std.input";
 export const OUTPUT_EFFECT_ID = "voyd.std.output";
 
@@ -26,24 +27,55 @@ export type DefaultAdapterHost = {
   ) => void;
 };
 
-export type DefaultAdapterFetchHeader = {
+export type DefaultAdapterHttpHeader = {
   name: string;
   value: string;
 };
 
-export type DefaultAdapterFetchRequest = {
+export type DefaultAdapterHttpRedirectPolicy =
+  | { kind: "follow"; maxRedirects: number }
+  | { kind: "manual" }
+  | { kind: "error" };
+
+export type DefaultAdapterHttpClientRequest = {
   method: string;
   url: string;
-  headers: DefaultAdapterFetchHeader[];
-  body?: string;
+  headers: DefaultAdapterHttpHeader[];
+  body: Uint8Array;
   timeoutMillis?: number;
+  redirectPolicy: DefaultAdapterHttpRedirectPolicy;
 };
 
-export type DefaultAdapterFetchResponse = {
+export type DefaultAdapterHttpClientResponse = {
   status: number;
-  statusText: string;
-  headers: DefaultAdapterFetchHeader[];
-  body: string;
+  reason: string;
+  headers: DefaultAdapterHttpHeader[];
+  body: Uint8Array;
+};
+
+export type DefaultAdapterHttpServerConfig = {
+  port: number;
+  host?: string;
+  maxBodyBytes?: number;
+  maxPendingRequests?: number;
+  responseTimeoutMillis?: number;
+};
+
+export type DefaultAdapterHttpRequest = {
+  requestId: number;
+  method: string;
+  path: string;
+  query?: string;
+  headers: DefaultAdapterHttpHeader[];
+  body: Uint8Array;
+};
+
+export type DefaultAdapterHttpResponse = {
+  requestId: number;
+  status: number;
+  reason: string;
+  headers: DefaultAdapterHttpHeader[];
+  body: Uint8Array;
 };
 
 export type DefaultAdapterOutputTarget = "stdout" | "stderr";
@@ -68,9 +100,17 @@ export type DefaultAdapterRuntimeHooks = {
   sleepMillis?: (ms: number) => Promise<void>;
   clearTimer?: (timerId: bigint) => Promise<void> | void;
   randomBytes?: (length: number) => Uint8Array;
-  fetchRequest?: (
-    request: DefaultAdapterFetchRequest
-  ) => Promise<DefaultAdapterFetchResponse>;
+  httpClientRequest?: (
+    request: DefaultAdapterHttpClientRequest
+  ) => Promise<DefaultAdapterHttpClientResponse>;
+  httpServerListen?: (
+    config: DefaultAdapterHttpServerConfig
+  ) => Promise<number>;
+  httpServerAccept?: (serverId: number) => Promise<DefaultAdapterHttpRequest>;
+  httpServerRespond?: (
+    response: DefaultAdapterHttpResponse
+  ) => Promise<void>;
+  httpServerClose?: (serverId: number) => Promise<void>;
   readLine?: (prompt: string | null) => Promise<string | null>;
   readBytes?: (maxBytes: number) => Promise<Uint8Array | null>;
   isInputTty?: () => boolean;
@@ -95,7 +135,8 @@ export type DefaultAdapterCapability = {
     | "env"
     | "random"
     | "log"
-    | "fetch"
+    | "http-client"
+    | "http-server"
     | "input"
     | "output";
   effectId: string;

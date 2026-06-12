@@ -25,32 +25,56 @@ const createProject = async (
   };
 };
 
+const withStdRoot = async <T>(
+  rootDir: string,
+  callback: () => Promise<T>,
+): Promise<T> => {
+  const previousStdRoot = process.env.VOYD_STD_ROOT;
+
+  try {
+    process.env.VOYD_STD_ROOT = rootDir;
+    return await callback();
+  } finally {
+    if (previousStdRoot === undefined) {
+      delete process.env.VOYD_STD_ROOT;
+    } else {
+      process.env.VOYD_STD_ROOT = previousStdRoot;
+    }
+  }
+};
+
 describe("analysis coordinator", () => {
   it("publishes diagnostics for standalone test files", async () => {
     const project = await createProject({
       "src/main.voyd": `fn main() -> i32\n  1\n`,
       "src/math.test.voyd": `fn broken() -> i32\n  missing_symbol\n`,
     });
+    const std = await createProject({
+      "pkg.voyd": "",
+    });
 
     try {
-      const testPath = project.filePathFor("src/math.test.voyd");
-      const testUri = toFileUri(testPath);
-      const coordinator = new AnalysisCoordinator();
-      const document = TextDocument.create(
-        testUri,
-        "voyd",
-        1,
-        `fn broken() -> i32\n  missing_symbol\n`,
-      );
+      await withStdRoot(std.rootDir, async () => {
+        const testPath = project.filePathFor("src/math.test.voyd");
+        const testUri = toFileUri(testPath);
+        const coordinator = new AnalysisCoordinator();
+        const document = TextDocument.create(
+          testUri,
+          "voyd",
+          1,
+          `fn broken() -> i32\n  missing_symbol\n`,
+        );
 
-      coordinator.updateDocument(document);
+        coordinator.updateDocument(document);
 
-      const { analysis } = await coordinator.getCoreForUri(testUri);
-      const diagnostics = analysis.diagnosticsByUri.get(testUri) ?? [];
+        const { analysis } = await coordinator.getCoreForUri(testUri);
+        const diagnostics = analysis.diagnosticsByUri.get(testUri) ?? [];
 
-      expect(diagnostics.length).toBeGreaterThan(0);
+        expect(diagnostics.length).toBeGreaterThan(0);
+      });
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
+      await rm(std.rootDir, { recursive: true, force: true });
     }
   }, 15_000);
 
@@ -67,8 +91,6 @@ describe("analysis coordinator", () => {
       "math.voyd": `pub fn forty_two() -> i32\n  42\n`,
     });
 
-    const previousStdRoot = process.env.VOYD_STD_ROOT;
-
     try {
       const entryPath = project.filePathFor("src/main.voyd");
       const entryUri = toFileUri(entryPath);
@@ -76,23 +98,21 @@ describe("analysis coordinator", () => {
       const coordinator = new AnalysisCoordinator();
       const document = TextDocument.create(entryUri, "voyd", 1, source);
 
-      process.env.VOYD_STD_ROOT = missingStd.rootDir;
-      coordinator.updateDocument(document);
-      const { analysis: missingStdAnalysis } = await coordinator.getCoreForUri(entryUri);
+      const { analysis: missingStdAnalysis } = await withStdRoot(missingStd.rootDir, async () => {
+        coordinator.updateDocument(document);
+        return await coordinator.getCoreForUri(entryUri);
+      });
       const missingStdDiagnostics = missingStdAnalysis.diagnosticsByUri.get(entryUri) ?? [];
 
-      process.env.VOYD_STD_ROOT = completeStd.rootDir;
-      const { analysis: completeStdAnalysis } = await coordinator.getCoreForUri(entryUri);
+      const { analysis: completeStdAnalysis } = await withStdRoot(
+        completeStd.rootDir,
+        async () => await coordinator.getCoreForUri(entryUri),
+      );
       const completeStdDiagnostics = completeStdAnalysis.diagnosticsByUri.get(entryUri) ?? [];
 
       expect(missingStdDiagnostics.length).toBeGreaterThan(0);
       expect(completeStdDiagnostics).toHaveLength(0);
     } finally {
-      if (previousStdRoot === undefined) {
-        delete process.env.VOYD_STD_ROOT;
-      } else {
-        process.env.VOYD_STD_ROOT = previousStdRoot;
-      }
       await rm(project.rootDir, { recursive: true, force: true });
       await rm(missingStd.rootDir, { recursive: true, force: true });
       await rm(completeStd.rootDir, { recursive: true, force: true });
@@ -164,30 +184,36 @@ describe("analysis coordinator", () => {
         `${Array.from({ length: moduleCount }, (_entry, index) => `use src::mod_${index}::value_${index}`).join("\n")}\n\npub fn total() -> i32\n  ${Array.from({ length: moduleCount }, (_entry, index) => `value_${index}()`).join(" + ")}\n`,
       "src/main.voyd": `use src::core::total\n\nfn main() -> i32\n  total()\n`,
     });
+    const std = await createProject({
+      "pkg.voyd": "",
+    });
 
     try {
-      const mainUri = toFileUri(project.filePathFor("src/main.voyd"));
-      const mod0Path = project.filePathFor("src/mod_0.voyd");
-      const mod0Uri = toFileUri(mod0Path);
-      const coordinator = new AnalysisCoordinator();
+      await withStdRoot(std.rootDir, async () => {
+        const mainUri = toFileUri(project.filePathFor("src/main.voyd"));
+        const mod0Path = project.filePathFor("src/mod_0.voyd");
+        const mod0Uri = toFileUri(mod0Path);
+        const coordinator = new AnalysisCoordinator();
 
-      const firstRun = coordinator.getCoreForUri(mainUri);
-      coordinator.updateDocument(
-        TextDocument.create(
-          mod0Uri,
-          "voyd",
-          2,
-          `pub fn value_0() -> i32\n  9999\n`,
-        ),
-      );
-      const secondRun = coordinator.getCoreForUri(mainUri);
+        const firstRun = coordinator.getCoreForUri(mainUri);
+        coordinator.updateDocument(
+          TextDocument.create(
+            mod0Uri,
+            "voyd",
+            2,
+            `pub fn value_0() -> i32\n  9999\n`,
+          ),
+        );
+        const secondRun = coordinator.getCoreForUri(mainUri);
 
-      const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
-      const expectedUpdatedSource = `pub fn value_0() -> i32\n  9999\n`;
-      expect(firstResult.analysis.sourceByFile.get(mod0Path)).toBe(expectedUpdatedSource);
-      expect(secondResult.analysis.sourceByFile.get(mod0Path)).toBe(expectedUpdatedSource);
+        const [firstResult, secondResult] = await Promise.all([firstRun, secondRun]);
+        const expectedUpdatedSource = `pub fn value_0() -> i32\n  9999\n`;
+        expect(firstResult.analysis.sourceByFile.get(mod0Path)).toBe(expectedUpdatedSource);
+        expect(secondResult.analysis.sourceByFile.get(mod0Path)).toBe(expectedUpdatedSource);
+      });
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
+      await rm(std.rootDir, { recursive: true, force: true });
     }
   }, 25_000);
 });

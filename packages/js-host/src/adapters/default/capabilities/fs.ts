@@ -3,6 +3,7 @@ import {
   globalRecord,
   hostError,
   isRecord,
+  isNodeCompatibleRuntime,
   joinListDirChildPath,
   normalizeByte,
   readField,
@@ -28,7 +29,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       return 0;
     }
 
-    const nodeFs = runtime === "node" ? await maybeNodeFs() : undefined;
+    const nodeFs = isNodeCompatibleRuntime(runtime) ? await maybeNodeFs() : undefined;
     const deno =
       runtime === "deno" ? (globalRecord.Deno as Record<string, unknown>) : undefined;
     const denoReadFile = deno?.readFile as

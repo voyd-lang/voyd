@@ -1,0 +1,202 @@
+//! Host-backed inbound HTTP server capability.
+//!
+//! The low-level API exposes explicit listen/accept/respond/close lifecycle
+//! operations. `serve_each` provides a small safe request loop with an explicit
+//! request task policy.
+
+use std::error::{ HostError, panic }
+use std::host_dto::HostDto
+use std::http::self as http
+use std::http::wire::self as wire
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+use std::task::self as task
+
+pub obj Server {
+  pri id: i32
+}
+
+pub obj RequestHandle {
+  pri id: i32
+}
+
+pub obj ServerConfig {
+  api port: i32,
+  api host?: String,
+  api max_body_bytes?: i32,
+  api max_pending_requests?: i32,
+  api response_timeout_millis?: i32
+}
+
+pub obj PendingRequest {
+  api handle: RequestHandle,
+  api request: http::IncomingRequest
+}
+
+pub obj ServeTaskPolicy {
+  kind: i32
+}
+
+impl Server
+  fn raw_id(self) -> i32
+    self.id
+
+impl RequestHandle
+  fn raw_id(self) -> i32
+    self.id
+
+impl ServeTaskPolicy
+  /// Handles one request at a time before accepting the next request.
+  api fn sequential() -> ServeTaskPolicy
+    ServeTaskPolicy { kind: 0 }
+
+  /// Handles each request in a detached task before accepting the next request.
+  api fn detached() -> ServeTaskPolicy
+    ServeTaskPolicy { kind: 1 }
+
+/// Host HTTP server effect.
+@effect(id: "voyd.std.http.server")
+pub eff HttpServer
+  /// Starts a server and returns a server id.
+  listen_raw(tail, payload: MsgPack) -> MsgPack
+  /// Suspends until a request is available or the server closes.
+  accept_raw(resume, server_id: i32) -> MsgPack
+  /// Sends one response for a request handle.
+  respond_raw(tail, payload: MsgPack) -> MsgPack
+  /// Closes a server and releases host resources.
+  close_raw(tail, server_id: i32) -> MsgPack
+
+impl ServerConfig
+  /// Creates a server configuration with common defaults.
+  api fn init({
+    port: i32,
+    host?: String,
+    max_body_bytes?: i32,
+    max_pending_requests?: i32,
+    response_timeout_millis?: i32
+  }) -> ServerConfig
+    ServerConfig {
+      port: port,
+      host: host,
+      max_body_bytes: max_body_bytes,
+      max_pending_requests: max_pending_requests,
+      response_timeout_millis: response_timeout_millis
+    }
+
+/// Starts a host HTTP server.
+pub fn listen(config: ServerConfig): HttpServer -> Result<Server, HostError>
+  match(wire::decode_i32_result(HttpServer::listen_raw(encode_config(config))))
+    Ok<i32> { value }:
+      Ok<Server> { value: Server { id: value } }
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+
+/// Accepts the next pending request.
+pub fn accept(server: Server): HttpServer -> Result<PendingRequest, HostError>
+  match(wire::decode_pending_request_result(HttpServer::accept_raw(server.raw_id())))
+    Ok<(i32, http::IncomingRequest)> { value }:
+      Ok<PendingRequest> {
+        value: PendingRequest {
+          handle: RequestHandle { id: value.0 },
+          request: value.1
+        }
+      }
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+
+/// Responds to one pending request.
+pub fn respond(
+  handle: RequestHandle,
+  response: http::Response
+): HttpServer -> Result<Unit, HostError>
+  wire::decode_unit_result(HttpServer::respond_raw(encode_respond_payload(handle, response)))
+
+/// Closes a server.
+pub fn close(server: Server): HttpServer -> Result<Unit, HostError>
+  wire::decode_unit_result(HttpServer::close_raw(server.raw_id()))
+
+/// Listens and handles each accepted request according to `policy`.
+///
+/// Each accepted request is responded to exactly once by this helper. Sequential
+/// policy returns accept/respond host errors directly. Detached policy reports
+/// per-request respond failures through the task runtime's detached failure
+/// diagnostics and keeps accepting new requests.
+pub fn serve_each({
+  config: ServerConfig,
+  policy: ServeTaskPolicy,
+  handle: fn(http::IncomingRequest) : (open) -> http::Response
+}): (HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  if policy.kind == 1:
+    return serve_each_detached(config: config, handle: handle)
+  serve_each_sequential(config: config, handle: handle)
+
+fn serve_each_sequential({
+  config: ServerConfig,
+  handle: fn(http::IncomingRequest) : (open) -> http::Response
+}): (HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  match(listen(config))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<Server> { value: server }:
+      while true:
+        match(accept(server))
+          Err<HostError> { error }:
+            let _ = close(server)
+            return Err<HostError> { error: error }
+          Ok<PendingRequest> { value: pending }:
+            let response = handle(pending.request)
+            match(respond(pending.handle, response))
+              Err<HostError> { error }:
+                let _ = close(server)
+                return Err<HostError> { error: error }
+              Ok<Unit>:
+                let _ = task::yield_now()
+      Ok<Unit> { value: Unit {} }
+
+fn serve_each_detached({
+  config: ServerConfig,
+  handle: fn(http::IncomingRequest) : (open) -> http::Response
+}): (HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  match(listen(config))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<Server> { value: server }:
+      while true:
+        match(accept(server))
+          Err<HostError> { error }:
+            let _ = close(server)
+            return Err<HostError> { error: error }
+          Ok<PendingRequest> { value: pending }:
+            let _ = task::detach do:
+              respond_or_panic(pending.handle, handle(pending.request))
+            let _ = task::yield_now()
+      Ok<Unit> { value: Unit {} }
+
+fn respond_or_panic(
+  handle: RequestHandle,
+  response: http::Response
+): HttpServer -> Unit
+  match(respond(handle, response))
+    Ok<Unit>:
+      Unit {}
+    Err<HostError> { error }:
+      panic(error.message)
+      Unit {}
+
+fn encode_config(config: ServerConfig): () -> MsgPack
+  HostDto::init()
+    .set("port", msgpack::make_i32(config.port))
+    .set("host", wire::encode_optional_string(config.host))
+    .set("max_body_bytes", wire::encode_optional_i32(config.max_body_bytes))
+    .set("max_pending_requests", wire::encode_optional_i32(config.max_pending_requests))
+    .set("response_timeout_millis", wire::encode_optional_i32(config.response_timeout_millis))
+    .pack()
+
+fn encode_respond_payload(handle: RequestHandle, response: http::Response): () -> MsgPack
+  HostDto::init()
+    .set("request_id", msgpack::make_i32(handle.raw_id()))
+    .set("response", wire::encode_response(response))
+    .pack()

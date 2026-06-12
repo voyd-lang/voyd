@@ -1,7 +1,8 @@
 import { encode } from "@msgpack/msgpack";
 import { MIN_EFFECT_BUFFER_SIZE } from "../../runtime/constants.js";
 import type {
-  DefaultAdapterFetchResponse,
+  DefaultAdapterHttpClientResponse,
+  DefaultAdapterHttpRequest,
   NodeReadableWithRead,
 } from "./types.js";
 
@@ -19,6 +20,9 @@ const MSGPACK_MAX_BYTES_PER_BYTE_VALUE = 2;
 const MSGPACK_OPTS = { useBigInt64: true } as const;
 
 export const globalRecord = globalThis as Record<string, unknown>;
+
+export const isNodeCompatibleRuntime = (runtime: string): boolean =>
+  runtime === "node" || runtime === "bun";
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -190,35 +194,68 @@ export const fsSuccessPayload = ({
   return fsTransportOverflowError({ opName, effectBufferSize });
 };
 
-export const fetchTransportOverflowError = ({
+export const httpClientTransportOverflowError = ({
   effectBufferSize,
 }: {
   effectBufferSize: number;
 }): Record<string, unknown> =>
   hostError(
-    `Default fetch adapter request response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or request a smaller payload.`
+    `Default http-client adapter response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or request a smaller payload.`
   );
 
-export const fetchSuccessPayload = ({
+export const httpClientSuccessPayload = ({
   response,
   effectBufferSize,
 }: {
-  response: DefaultAdapterFetchResponse;
+  response: DefaultAdapterHttpClientResponse;
   effectBufferSize: number;
 }): Record<string, unknown> => {
   const payload = hostOk({
     status: response.status,
-    status_text: response.statusText,
+    reason: response.reason,
     headers: response.headers.map((header) => ({
       name: header.name,
       value: header.value,
     })),
-    body: response.body,
+    body: Array.from(response.body.values()),
   });
   if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
     return payload;
   }
-  return fetchTransportOverflowError({ effectBufferSize });
+  return httpClientTransportOverflowError({ effectBufferSize });
+};
+
+export const httpServerAcceptTransportOverflowError = ({
+  effectBufferSize,
+}: {
+  effectBufferSize: number;
+}): Record<string, unknown> =>
+  hostError(
+    `Default http-server adapter accept response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or configure max_body_bytes lower.`
+  );
+
+export const httpServerAcceptSuccessPayload = ({
+  request,
+  effectBufferSize,
+}: {
+  request: DefaultAdapterHttpRequest;
+  effectBufferSize: number;
+}): Record<string, unknown> => {
+  const payload = hostOk({
+    request_id: request.requestId,
+    method: request.method,
+    path: request.path,
+    query: request.query ?? null,
+    headers: request.headers.map((header) => ({
+      name: header.name,
+      value: header.value,
+    })),
+    body: Array.from(request.body.values()),
+  });
+  if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
+    return payload;
+  }
+  return httpServerAcceptTransportOverflowError({ effectBufferSize });
 };
 
 export const inputTransportOverflowError = ({

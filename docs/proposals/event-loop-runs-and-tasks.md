@@ -45,7 +45,7 @@ helpers from the launch surface. Those APIs need a task model underneath them.
 - Keep the model event-loop driven and host-independent.
 - Align the language surface with the existing runtime event loop spec.
 - Make ownership, cancellation, and failure semantics explicit.
-- Provide a clear foundation for `std::time`, `std::fetch`, and future
+- Provide a clear foundation for `std::time`, `std::http::client`, and future
   background I/O APIs.
 - Preserve room for later worker/thread models without coupling this design to
   them.

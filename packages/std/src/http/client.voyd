@@ -1,0 +1,303 @@
+//! Host-backed outbound HTTP client capability.
+//!
+//! Requests are built with typed HTTP values and cross the host boundary as
+//! internal MessagePack DTOs.
+
+use std::error::HostError
+use std::enums::{ enum }
+use std::host_dto::HostDto
+use std::http::{ Body, Header, Headers, Method, Response, method, method_as_string }
+use std::http::wire::self as wire
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::optional::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+
+pub obj ClientRequest {
+  api method: Method,
+  api url: String,
+  api headers: Headers,
+  api body: Body,
+  api options: RequestOptions
+}
+
+pub obj RequestOptions {
+  api timeout_millis?: i32,
+  api redirect_policy: RedirectPolicy
+}
+
+pub enum RedirectPolicy
+  Follow { max_redirects: i32 }
+  Manual
+  Error
+
+/// Host HTTP client effect.
+@effect(id: "voyd.std.http.client")
+pub eff HttpClient
+  /// Sends an HTTP request DTO and returns a host result DTO.
+  request(tail, payload: MsgPack) -> MsgPack
+
+impl RequestOptions
+  /// Returns the default request policy.
+  api fn default() -> RequestOptions
+    RequestOptions {
+      timeout_millis: None {},
+      redirect_policy: RedirectPolicy::Follow { max_redirects: 20 }
+    }
+
+  /// Returns a copy with a timeout budget.
+  api fn with(self, { timeout_millis: i32 }) -> RequestOptions
+    RequestOptions {
+      timeout_millis: Some<i32> { value: timeout_millis },
+      redirect_policy: self.redirect_policy
+    }
+
+  /// Returns a copy with a redirect policy.
+  api fn with(self, { redirect_policy: RedirectPolicy }) -> RequestOptions
+    RequestOptions {
+      timeout_millis: self.timeout_millis,
+      redirect_policy: redirect_policy
+    }
+
+impl ClientRequest
+  /// Builds a `GET` request.
+  api fn get(url: StringSlice) -> ClientRequest
+    ClientRequest::custom(method: method("GET".as_slice()), url: url)
+
+  /// Builds a `GET` request.
+  api fn get(url: String) -> ClientRequest
+    ClientRequest::get(url.as_slice())
+
+  /// Builds a `HEAD` request.
+  api fn head(url: StringSlice) -> ClientRequest
+    ClientRequest::custom(method: method("HEAD".as_slice()), url: url)
+
+  /// Builds a `HEAD` request.
+  api fn head(url: String) -> ClientRequest
+    ClientRequest::head(url.as_slice())
+
+  /// Builds a `DELETE` request.
+  api fn delete(url: StringSlice) -> ClientRequest
+    ClientRequest::custom(method: method("DELETE".as_slice()), url: url)
+
+  /// Builds a `DELETE` request.
+  api fn delete(url: String) -> ClientRequest
+    ClientRequest::delete(url.as_slice())
+
+  /// Builds a `POST` request.
+  api fn post({ url: StringSlice, body: Body }) -> ClientRequest
+    ClientRequest::custom(method: method("POST".as_slice()), url: url, body: body)
+
+  /// Builds a `POST` request.
+  api fn post({ url: String, body: Body }) -> ClientRequest
+    ClientRequest::post(url: url.as_slice(), body: body)
+
+  /// Builds a `PUT` request.
+  api fn put({ url: StringSlice, body: Body }) -> ClientRequest
+    ClientRequest::custom(method: method("PUT".as_slice()), url: url, body: body)
+
+  /// Builds a `PUT` request.
+  api fn put({ url: String, body: Body }) -> ClientRequest
+    ClientRequest::put(url: url.as_slice(), body: body)
+
+  /// Builds a `PATCH` request.
+  api fn patch({ url: StringSlice, body: Body }) -> ClientRequest
+    ClientRequest::custom(method: method("PATCH".as_slice()), url: url, body: body)
+
+  /// Builds a `PATCH` request.
+  api fn patch({ url: String, body: Body }) -> ClientRequest
+    ClientRequest::patch(url: url.as_slice(), body: body)
+
+  /// Builds a request from explicit values.
+  api fn custom({
+    method: Method,
+    url: StringSlice,
+    body?: Body,
+    headers?: Headers,
+    options?: RequestOptions
+  }) -> ClientRequest
+    let final_headers = match(headers)
+      Some<Headers> { value }:
+        value
+      None:
+        Headers::empty()
+    let final_body = match(body)
+      Some<Body> { value }:
+        value
+      None:
+        Body::empty()
+    let final_options = match(options)
+      Some<RequestOptions> { value }:
+        value
+      None:
+        RequestOptions::default()
+    ClientRequest {
+      method: method,
+      url: url.to_string(),
+      headers: final_headers,
+      body: final_body,
+      options: final_options
+    }
+
+  /// Builds a request from explicit values.
+  api fn custom({
+    method: Method,
+    url: String,
+    body?: Body,
+    headers?: Headers,
+    options?: RequestOptions
+  }) -> ClientRequest
+    ClientRequest::custom(
+      method: method,
+      url: url.as_slice(),
+      body: body,
+      headers: headers,
+      options: options
+    )
+
+  /// Returns a copy with one header appended.
+  api fn with(self, { header: Header }) -> ClientRequest
+    ClientRequest {
+      method: self.method,
+      url: self.url,
+      headers: self.headers.append(header: header),
+      body: self.body,
+      options: self.options
+    }
+
+  /// Returns a copy with one header appended.
+  api fn with(self, { header name: StringSlice, value: StringSlice }) -> ClientRequest
+    ClientRequest {
+      method: self.method,
+      url: self.url,
+      headers: self.headers.append(header: name, value: value),
+      body: self.body,
+      options: self.options
+    }
+
+  /// Returns a copy with one header appended.
+  api fn with(self, { header name: String, value: String }) -> ClientRequest
+    self.with(header: name.as_slice(), value: value.as_slice())
+
+  /// Returns a copy with replaced headers.
+  api fn with(self, { headers: Headers }) -> ClientRequest
+    ClientRequest {
+      method: self.method,
+      url: self.url,
+      headers: headers,
+      body: self.body,
+      options: self.options
+    }
+
+  /// Returns a copy with a different body.
+  api fn with(self, { body: Body }) -> ClientRequest
+    ClientRequest {
+      method: self.method,
+      url: self.url,
+      headers: self.headers,
+      body: body,
+      options: self.options
+    }
+
+  /// Returns a copy with a timeout budget.
+  api fn with(self, { timeout_millis: i32 }) -> ClientRequest
+    ClientRequest {
+      method: self.method,
+      url: self.url,
+      headers: self.headers,
+      body: self.body,
+      options: self.options.with(timeout_millis: timeout_millis)
+    }
+
+  /// Returns a copy with a redirect policy.
+  api fn with(self, { redirect_policy: RedirectPolicy }) -> ClientRequest
+    ClientRequest {
+      method: self.method,
+      url: self.url,
+      headers: self.headers,
+      body: self.body,
+      options: self.options.with(redirect_policy: redirect_policy)
+    }
+
+/// Sends a prebuilt request.
+pub fn send(request: ClientRequest): HttpClient -> Result<Response, HostError>
+  wire::decode_response_result(HttpClient::request(encode_request_payload(request)))
+
+/// Alias for `send`.
+pub fn request(request: ClientRequest): HttpClient -> Result<Response, HostError>
+  send(request)
+
+/// Sends a `GET` request.
+pub fn get(url: StringSlice): HttpClient -> Result<Response, HostError>
+  send(ClientRequest::get(url))
+
+/// Sends a `GET` request.
+pub fn get(url: String): HttpClient -> Result<Response, HostError>
+  get(url.as_slice())
+
+/// Sends a `HEAD` request.
+pub fn head(url: StringSlice): HttpClient -> Result<Response, HostError>
+  send(ClientRequest::head(url))
+
+/// Sends a `HEAD` request.
+pub fn head(url: String): HttpClient -> Result<Response, HostError>
+  head(url.as_slice())
+
+/// Sends a `DELETE` request.
+pub fn delete(url: StringSlice): HttpClient -> Result<Response, HostError>
+  send(ClientRequest::delete(url))
+
+/// Sends a `DELETE` request.
+pub fn delete(url: String): HttpClient -> Result<Response, HostError>
+  delete(url.as_slice())
+
+/// Sends a `POST` request.
+pub fn post({ url: StringSlice, body: Body }): HttpClient -> Result<Response, HostError>
+  send(ClientRequest::post(url: url, body: body))
+
+/// Sends a `POST` request.
+pub fn post({ url: String, body: Body }): HttpClient -> Result<Response, HostError>
+  post(url: url.as_slice(), body: body)
+
+/// Sends a `PUT` request.
+pub fn put({ url: StringSlice, body: Body }): HttpClient -> Result<Response, HostError>
+  send(ClientRequest::put(url: url, body: body))
+
+/// Sends a `PUT` request.
+pub fn put({ url: String, body: Body }): HttpClient -> Result<Response, HostError>
+  put(url: url.as_slice(), body: body)
+
+/// Sends a `PATCH` request.
+pub fn patch({ url: StringSlice, body: Body }): HttpClient -> Result<Response, HostError>
+  send(ClientRequest::patch(url: url, body: body))
+
+/// Sends a `PATCH` request.
+pub fn patch({ url: String, body: Body }): HttpClient -> Result<Response, HostError>
+  patch(url: url.as_slice(), body: body)
+
+fn encode_request_payload(request: ClientRequest): () -> MsgPack
+  HostDto::init()
+    .set("method", msgpack::make_string(method_as_string(request.method)))
+    .set("url", msgpack::make_string(request.url))
+    .set("headers", wire::encode_headers(request.headers))
+    .set("body", wire::encode_body(request.body))
+    .set("timeout_millis", wire::encode_optional_i32(request.options.timeout_millis))
+    .set("redirect_policy", encode_redirect_policy(request.options.redirect_policy))
+    .pack()
+
+fn encode_redirect_policy(policy: RedirectPolicy): () -> MsgPack
+  policy.match(active)
+    Follow:
+      HostDto::init()
+        .set("kind", msgpack::make_string("follow".as_slice().to_string()))
+        .set("max_redirects", msgpack::make_i32(active.max_redirects))
+        .pack()
+    Manual:
+      HostDto::init()
+        .set("kind", msgpack::make_string("manual".as_slice().to_string()))
+        .pack()
+    Error:
+      HostDto::init()
+        .set("kind", msgpack::make_string("error".as_slice().to_string()))
+        .pack()

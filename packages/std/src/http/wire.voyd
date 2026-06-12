@@ -1,0 +1,369 @@
+//! MessagePack codecs for std HTTP host effects.
+//!
+//! This module is intentionally low-level. User code should prefer
+//! `std::http`, `std::http::client`, and `std::http::server` typed APIs.
+
+use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
+use std::error::HostError
+use std::host_dto::HostDto
+use std::http::self as http
+use std::http::{
+  Body,
+  Header,
+  HeaderName,
+  Headers,
+  IncomingRequest,
+  Method,
+  QueryString,
+  Response,
+  Status
+}
+use std::msgpack::{ MsgPack, MsgPackError }
+use std::msgpack::self as msgpack
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+
+/// Encodes HTTP headers as host DTO entries.
+pub fn encode_headers(headers: Headers) -> MsgPack
+  let entries = headers.entries()
+  let ~encoded = Array<MsgPack>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<Header> { value }:
+        encoded.push(encode_header(value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_array(encoded)
+
+/// Decodes HTTP headers from host DTO entries.
+pub fn decode_headers(payload: MsgPack) -> Result<Headers, HostError>
+  match(msgpack::unpack_array(payload))
+    Err<MsgPackError> { error }:
+      Err<HostError> { error: msgpack_error_to_host_error(error) }
+    Ok<Array<MsgPack>> { value: source }:
+      var headers = Headers::empty()
+      var index = 0
+      while index < source.len():
+        match(source.get(index))
+          Some<MsgPack> { value }:
+            match(decode_header(value))
+              Ok<Header> { value }:
+                headers = headers.append(header: value)
+              Err<HostError> { error }:
+                return Err<HostError> { error: error }
+          None:
+            void
+        index = index + 1
+      Ok<Headers> { value: headers }
+
+/// Encodes an HTTP body as byte values.
+pub fn encode_body(body: Body) -> MsgPack
+  encode_bytes(body.as_bytes())
+
+/// Decodes an HTTP body from byte values.
+pub fn decode_body(payload: MsgPack) -> Result<Body, HostError>
+  match(decode_bytes(payload))
+    Ok<Bytes> { value }:
+      if value.is_empty():
+        Ok<Body> { value: Body::empty() }
+      else:
+        Ok<Body> { value: Body::bytes(value) }
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+
+/// Encodes an HTTP response for the server host effect.
+pub fn encode_response(response: Response) -> MsgPack
+  HostDto::init()
+    .set("status", msgpack::make_i32(response.status.code()))
+    .set("reason", msgpack::make_string(response.status.reason()))
+    .set("headers", encode_headers(response.headers))
+    .set("body", encode_body(response.body))
+    .pack()
+
+/// Decodes a host result containing an HTTP response.
+pub fn decode_response_result(payload: MsgPack) -> Result<Response, HostError>
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<bool> { value }:
+          if value == false:
+            decode_host_error_result<Response>(decoded)
+          else:
+            match(decoded.read_msgpack("value".as_slice().to_string()))
+              Err<HostError> { error }:
+                Err<HostError> { error: error }
+              Ok<MsgPack> { value }:
+                decode_response(value)
+
+/// Decodes a host result containing an integer id.
+pub fn decode_i32_result(payload: MsgPack) -> Result<i32, HostError>
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<bool> { value }:
+          if value == false:
+            decode_host_error_result<i32>(decoded)
+          else:
+            decoded.read_i32("value".as_slice().to_string())
+
+/// Decodes a host result with no payload.
+pub fn decode_unit_result(payload: MsgPack) -> Result<Unit, HostError>
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<bool> { value }:
+          if value:
+            Ok<Unit> { value: Unit {} }
+          else:
+            decode_host_error_result<Unit>(decoded)
+
+/// Decodes an inbound pending request host result.
+pub fn decode_pending_request_result(payload: MsgPack) -> Result<(i32, IncomingRequest), HostError>
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_bool("ok".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<bool> { value }:
+          if value == false:
+            decode_host_error_result<(i32, IncomingRequest)>(decoded)
+          else:
+            match(decoded.read_msgpack("value".as_slice().to_string()))
+              Err<HostError> { error }:
+                Err<HostError> { error: error }
+              Ok<MsgPack> { value }:
+                decode_pending_request(value)
+
+/// Encodes an optional string as a host DTO field value.
+pub fn encode_optional_string(value: Option<String>) -> MsgPack
+  match(value)
+    Some<String> { value }:
+      msgpack::make_string(value)
+    None:
+      msgpack::make_null()
+
+/// Encodes an optional integer as a host DTO field value.
+pub fn encode_optional_i32(value: Option<i32>) -> MsgPack
+  match(value)
+    Some<i32> { value }:
+      msgpack::make_i32(value)
+    None:
+      msgpack::make_null()
+
+fn encode_header(value: Header): () -> MsgPack
+  HostDto::init()
+    .set("name", msgpack::make_string(value.name.as_string()))
+    .set("value", msgpack::make_string(value.value))
+    .pack()
+
+fn decode_header(payload: MsgPack): () -> Result<Header, HostError>
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_string("name".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<String> { value: name }:
+          match(decoded.read_string("value".as_slice().to_string()))
+            Err<HostError> { error }:
+              Err<HostError> { error: error }
+            Ok<String> { value }:
+              match(HeaderName::from(name))
+                Ok<HeaderName> { value: parsed }:
+                  Ok<Header> { value: { name: parsed, value: value } }
+                Err:
+                  Err<HostError> {
+                    error: HostError {
+                      code: 2,
+                      message: "host returned invalid http header name".as_slice().to_string()
+                    }
+                  }
+
+fn encode_bytes(bytes: Bytes): () -> MsgPack
+  let source = bytes.to_array()
+  let ~encoded = Array<MsgPack>::with_capacity(source.len())
+  var index = 0
+  while index < source.len():
+    match(source.get(index))
+      Some<i32> { value }:
+        encoded.push(msgpack::make_i32(value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_array(encoded)
+
+fn decode_bytes(payload: MsgPack): () -> Result<Bytes, HostError>
+  match(msgpack::unpack_array(payload))
+    Err<MsgPackError> { error }:
+      Err<HostError> { error: msgpack_error_to_host_error(error) }
+    Ok<Array<MsgPack>> { value: source }:
+      let ~buffer = ByteBuffer::with_capacity(source.len())
+      var index = 0
+      while index < source.len():
+        match(source.get(index))
+          Some<MsgPack> { value }:
+            match(msgpack::unpack_i32(value))
+              Ok<i32> { value }:
+                buffer.push(normalize_byte(value))
+              Err<MsgPackError> { error }:
+                return Err<HostError> { error: msgpack_error_to_host_error(error) }
+          None:
+            void
+        index = index + 1
+      Ok<Bytes> { value: buffer.as_bytes() }
+
+fn decode_response(payload: MsgPack): () -> Result<Response, HostError>
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_i32("status".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<i32> { value: status_code }:
+          match(decoded.read_string("reason".as_slice().to_string()))
+            Err<HostError> { error }:
+              Err<HostError> { error: error }
+            Ok<String> { value: reason }:
+              match(status_from_host(status_code, reason))
+                Err<HostError> { error }:
+                  Err<HostError> { error: error }
+                Ok<Status> { value: status }:
+                  match(decoded.read_msgpack("headers".as_slice().to_string()))
+                    Err<HostError> { error }:
+                      Err<HostError> { error: error }
+                    Ok<MsgPack> { value: headers_payload }:
+                      match(decode_headers(headers_payload))
+                        Err<HostError> { error }:
+                          Err<HostError> { error: error }
+                        Ok<Headers> { value: headers }:
+                          match(decoded.read_msgpack("body".as_slice().to_string()))
+                            Err<HostError> { error }:
+                              Err<HostError> { error: error }
+                            Ok<MsgPack> { value: body_payload }:
+                              match(decode_body(body_payload))
+                                Err<HostError> { error }:
+                                  Err<HostError> { error: error }
+                                Ok<Body> { value: body }:
+                                  Ok<Response> {
+                                    value: Response {
+                                      status: status,
+                                      headers: headers,
+                                      body: body
+                                    }
+                                  }
+
+fn decode_pending_request(payload: MsgPack): () -> Result<(i32, IncomingRequest), HostError>
+  match(HostDto::unpack(payload))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<HostDto> { value: decoded }:
+      match(decoded.read_i32("request_id".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<i32> { value: request_id }:
+          match(decoded.read_string("method".as_slice().to_string()))
+            Err<HostError> { error }:
+              Err<HostError> { error: error }
+            Ok<String> { value: method }:
+              match(decoded.read_string("path".as_slice().to_string()))
+                Err<HostError> { error }:
+                  Err<HostError> { error: error }
+                Ok<String> { value: path }:
+                  match(decode_optional_query(decoded))
+                    Err<HostError> { error }:
+                      Err<HostError> { error: error }
+                    Ok<Option<QueryString>> { value: query }:
+                      match(decoded.read_msgpack("headers".as_slice().to_string()))
+                        Err<HostError> { error }:
+                          Err<HostError> { error: error }
+                        Ok<MsgPack> { value: headers_payload }:
+                          match(decode_headers(headers_payload))
+                            Err<HostError> { error }:
+                              Err<HostError> { error: error }
+                            Ok<Headers> { value: headers }:
+                              match(decoded.read_msgpack("body".as_slice().to_string()))
+                                Err<HostError> { error }:
+                                  Err<HostError> { error: error }
+                                Ok<MsgPack> { value: body_payload }:
+                                  match(decode_body(body_payload))
+                                    Err<HostError> { error }:
+                                      Err<HostError> { error: error }
+                                    Ok<Body> { value: body }:
+                                      Ok<(i32, IncomingRequest)> {
+                                        value: (
+                                          request_id,
+                                          IncomingRequest {
+                                            method: http_method(method),
+                                            path: path,
+                                            query: query,
+                                            headers: headers,
+                                            body: body
+                                          }
+                                        )
+                                      }
+
+fn decode_optional_query(payload: HostDto): () -> Result<Option<QueryString>, HostError>
+  match(payload.read_msgpack("query".as_slice().to_string()))
+    Err<HostError>:
+      Ok<Option<QueryString>> { value: None {} }
+    Ok<MsgPack> { value }:
+      value.match(active)
+        String:
+          Ok<Option<QueryString>> { value: Some<QueryString> { value: QueryString { raw: active } } }
+        else:
+          Ok<Option<QueryString>> { value: None {} }
+
+fn status_from_host(code: i32, reason: String): () -> Result<Status, HostError>
+  match(Status::custom(code: code, reason: reason))
+    Ok<Status> { value }:
+      Ok<Status> { value: value }
+    Err:
+      Err<HostError> {
+        error: HostError {
+          code: 1,
+          message: "host returned invalid http status code".as_slice().to_string()
+        }
+      }
+
+fn http_method(value: String): () -> Method
+  http::method(value)
+
+fn decode_host_error_result<T>(payload: HostDto): () -> Result<T, HostError>
+  match(payload.read_i32("code".as_slice().to_string()))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<i32> { value: code }:
+      match(payload.read_string("message".as_slice().to_string()))
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<String> { value: message }:
+          Err<HostError> {
+            error: HostError { code: code, message: message }
+          }
+
+fn msgpack_error_to_host_error(error: MsgPackError): () -> HostError
+  HostError { code: error.code, message: error.message }
+
+fn normalize_byte(value: i32): () -> i32
+  let wrapped = value - (value / 256) * 256
+  if wrapped < 0 then: wrapped + 256 else: wrapped
