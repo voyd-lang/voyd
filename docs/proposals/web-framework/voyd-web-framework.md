@@ -234,7 +234,7 @@ Sketch:
 eff AppBuild
   add_route(tail, route: RouteDefinition) -> void
   add_middleware(tail, middleware: MiddlewareDefinition) -> void
-  with_group(tail, prefix: String, build: fn() : (AppBuild, open) -> void) -> void
+  group(tail, { prefix: String, routes build: fn() : (AppBuild, open) -> void }) -> void
 ```
 
 DSL helpers are thin wrappers:
@@ -247,7 +247,7 @@ pub fn group(
   prefix: StringSlice,
   { routes build: fn() : (AppBuild, open) -> void }
 ): (AppBuild, open) -> void
-  AppBuild::with_group(prefix.to_string(), build)
+  AppBuild::group(prefix: prefix.to_string(), routes: build)
 ```
 
 `serve` handles `AppBuild`, creates a router, then runs it through
@@ -489,7 +489,7 @@ Response builders live on the canonical response type:
 
 ```voyd
 Response::ok()
-  .with_header(name: "cache-control", value: "no-store")
+  .with(header: "cache-control", value: "no-store")
   .text("hello")
 
 Response::created().json(user)
@@ -512,9 +512,12 @@ Recommended builders:
 - `Response::forbidden()`
 - `Response::not_found()`
 - `Response::internal_server_error()`
-- `with_status(status)`
-- `with_header(name:, value:)`
-- `with_cookie(cookie)`
+- `with(status:)`
+- `with(header:)`
+- `with(header:, value:)`
+- `with(headers:)`
+- `with(body:)`
+- `with(cookie:)`
 - `text(value)`
 - `json(value)`
 - `bytes(value)`
@@ -733,7 +736,7 @@ serve(port: 3000) routes():
     Response::not_found().html(not_found_page(ctx.path()))
 
   on_rejection() do(rejection, ctx):
-    rejection.into_response().with_header(name: "x-error", value: "request")
+    rejection.into_response().with(header: "x-error", value: "request")
 ```
 
 ## Tasks, Timeouts, And Cancellation
