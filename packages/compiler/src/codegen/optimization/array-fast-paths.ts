@@ -209,6 +209,7 @@ const callHasName = ({
   name: string;
   ctx: CodegenContext;
 }): boolean => {
+  const intrinsicName = callIntrinsicName({ expr, ctx });
   const callee = ctx.module.hir.expressions.get(expr.callee);
   if (callee?.exprKind !== "identifier") {
     return false;
@@ -216,8 +217,30 @@ const callHasName = ({
   const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
   return (
     ctx.program.symbols.getName(calleeId) === name ||
-    ctx.program.symbols.getIntrinsicName(calleeId) === name
+    intrinsicName === name
   );
+};
+
+const callIntrinsicName = ({
+  expr,
+  ctx,
+}: {
+  expr: HirCallExpr;
+  ctx: CodegenContext;
+}): string | undefined => {
+  const callee = ctx.module.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return undefined;
+  }
+  const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+  const intrinsicName = ctx.program.symbols.getIntrinsicName(calleeId);
+  if (typeof intrinsicName === "string") {
+    return intrinsicName;
+  }
+  const intrinsicFlags = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+  return intrinsicFlags.intrinsic
+    ? ctx.program.symbols.getName(calleeId)
+    : undefined;
 };
 
 const isCallNamed = ({
@@ -323,6 +346,129 @@ const isSafeArrayLoopRead = ({
   return expressionSymbol({ exprId: expr.args[0]!.expr, ctx }) === indexSymbol;
 };
 
+const safeLoopIntrinsicCalls = new Set([
+  "+",
+  "-",
+  "*",
+  "/",
+  "%",
+  "<",
+  "<=",
+  ">",
+  ">=",
+  "==",
+  "!=",
+  "and",
+  "or",
+  "xor",
+  "not",
+]);
+
+const isSafeLoopIntrinsicCall = ({
+  expr,
+  ctx,
+  fnCtx,
+}: {
+  expr: HirCallExpr;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): boolean => {
+  const callee = ctx.module.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return false;
+  }
+  const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+  const callName =
+    ctx.program.symbols.getIntrinsicName(calleeId) ??
+    ctx.program.symbols.getName(calleeId);
+  if (typeof callName !== "string" || !safeLoopIntrinsicCalls.has(callName)) {
+    return false;
+  }
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  return (
+    isSafeLoopPrimitiveType({
+      typeId: getRequiredExprType(expr.id, ctx, typeInstanceId),
+      ctx,
+    }) &&
+    expr.args.every((arg) =>
+      isSafeLoopPrimitiveType({
+        typeId: getRequiredExprType(arg.expr, ctx, typeInstanceId),
+        ctx,
+      }),
+    )
+  );
+};
+
+const isSafeLoopPrimitiveType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): boolean =>
+  typeId === ctx.program.primitives.bool ||
+  typeId === ctx.program.primitives.i32 ||
+  typeId === ctx.program.primitives.i64 ||
+  typeId === ctx.program.primitives.f32 ||
+  typeId === ctx.program.primitives.f64;
+
+const isIndexIncrementAssignment = ({
+  exprId,
+  indexSymbol,
+  ctx,
+}: {
+  exprId: HirExprId;
+  indexSymbol: SymbolId;
+  ctx: CodegenContext;
+}): boolean => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (expr?.exprKind !== "assign") {
+    return false;
+  }
+  const targetSymbol = targetIdentifierSymbol({
+    exprId: expr.target,
+    ctx,
+  });
+  return (
+    targetSymbol === indexSymbol &&
+    exprIsIndexIncrement({ exprId: expr.value, indexSymbol, ctx })
+  );
+};
+
+const bodyHasFinalIndexIncrement = ({
+  bodyExprId,
+  indexSymbol,
+  ctx,
+}: {
+  bodyExprId: HirExprId;
+  indexSymbol: SymbolId;
+  ctx: CodegenContext;
+}): boolean => {
+  const body = ctx.module.hir.expressions.get(bodyExprId);
+  if (body?.exprKind !== "block" || body.statements.length === 0) {
+    return false;
+  }
+  if (typeof body.value === "number") {
+    return isIndexIncrementAssignment({
+      exprId: body.value,
+      indexSymbol,
+      ctx,
+    });
+  }
+  const lastStatementId = body.statements.at(-1);
+  const lastStatement = typeof lastStatementId === "number"
+    ? ctx.module.hir.statements.get(lastStatementId)
+    : undefined;
+  return (
+    lastStatement?.kind === "expr-stmt" &&
+    isIndexIncrementAssignment({
+      exprId: lastStatement.expr,
+      indexSymbol,
+      ctx,
+    })
+  );
+};
+
 const bodyPreservesArrayLoopProof = ({
   bodyExprId,
   indexSymbol,
@@ -381,14 +527,18 @@ const bodyPreservesArrayLoopProof = ({
           if (
             typeof targetSymbol === "number" &&
             arrayAliases.has(targetSymbol) &&
-            !isSafeArrayLoopRead({ expr, indexSymbol, ctx })
+            isSafeArrayLoopRead({ expr, indexSymbol, ctx })
           ) {
+            return undefined;
+          }
+          valid = false;
+          return "stop";
+        }
+        if (expr.exprKind === "call") {
+          if (!isSafeLoopIntrinsicCall({ expr, ctx, fnCtx })) {
             valid = false;
             return "stop";
           }
-          return undefined;
-        }
-        if (expr.exprKind === "call") {
           if (
             expr.args.some((arg) => {
               const argSymbol = expressionSymbol({ exprId: arg.expr, ctx });
@@ -613,6 +763,15 @@ const tryAnalyzeSafeArrayWhileLoop = ({
     ctx,
   });
   if (!indexInit) {
+    return undefined;
+  }
+  if (
+    !bodyHasFinalIndexIncrement({
+      bodyExprId: whileExpr.body,
+      indexSymbol: indexInit.indexSymbol,
+      ctx,
+    })
+  ) {
     return undefined;
   }
 

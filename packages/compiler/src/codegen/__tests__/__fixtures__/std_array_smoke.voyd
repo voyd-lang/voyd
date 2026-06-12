@@ -65,6 +65,13 @@ fn build_ints() -> Array<i32>
   arr.push(4)
   arr
 
+fn build_sparse_ints() -> Array<i32>
+  let ~arr = Array<i32>::with_capacity(4)
+  arr.push(1)
+  arr.push(2)
+  arr.push(3)
+  arr
+
 pub fn safe_while_sum() -> i32
   let values = build_ints()
   var index = 0
@@ -167,6 +174,27 @@ pub fn while_stale_length_sum() -> i32
   var index = 0
   var total = 0
   while index < length:
+    total = total + values.at(index)
+    index = index + 1
+  total
+
+pub fn while_increment_before_at_trap() -> i32
+  let values = build_sparse_ints()
+  var index = 0
+  var total = 0
+  while index < values.len():
+    index = index + 1
+    total = total + values.at(index)
+  total
+
+pub fn while_captured_call_mutation_trap() -> i32
+  let ~values = build_sparse_ints()
+  let clear_values = () -> void =>
+    values.clear()
+  var index = 0
+  var total = 0
+  while index < values.len():
+    clear_values()
     total = total + values.at(index)
     index = index + 1
   total
