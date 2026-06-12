@@ -1,142 +1,321 @@
-# HTTP Stdlib and Host Server Support
+# Std HTTP and Host Server Support
 
 Status: Proposed
 Owner: Std + Runtime + SDK
-Scope: `packages/std/src/http*`, `packages/js-host`, `packages/js-host/src/runtime/*`, optional SDK helper package
+Scope: `packages/std/src/http*`, `packages/js-host`, optional SDK/server helper package
 
 ## Summary
 
-To support a first-class Voyd web framework, we should add a small HTTP-focused
-stdlib surface and one host-backed server capability.
+Voyd should have a small, canonical HTTP foundation in `std`, a host-backed
+client effect for outbound requests, and a host-backed server effect for inbound
+requests.
 
-The most important conclusion is:
+The library's job is to define the portable protocol values and host capability
+contracts that every higher-level library can share:
 
-- no new core language semantics are required for the MVP
-- we do need new std/runtime support
+- `std::http`: pure HTTP values and helpers
+- `std::http::client`: outbound HTTP client capability
+- `std::http::server`: inbound server capability
 
-The framework can prototype without these additions, but it will not feel
-native or maintainable until the stdlib exposes canonical HTTP values and the
-host runtime can deliver inbound requests.
+This proposal should remove `std::fetch`. There is no need to preserve backward
+compatibility yet, and keeping both `std::fetch` and `std::http::client` would
+leave two names for the same capability before the API has stabilized.
 
-## Current Gaps
+## Goals
 
-Today we have:
+- Provide one canonical HTTP value model for std, clients, servers, and web
+  frameworks.
+- Replace `std::fetch` with `std::http::client`.
+- Make common code read naturally in Voyd: labeled parameters, overloads,
+  `Result`/`Option`, nominal types for values with invariants, and structural
+  records where shape compatibility is the point.
+- Keep host capabilities explicit through effects.
+- Keep request and response bodies fully buffered for the MVP.
+- Normalize Node, Deno, Bun, browser, and custom host differences inside the JS
+  host adapter layer.
 
-- `std::fetch` for outbound HTTP
-- `std::json` for JSON values
-- `std::bytes` for raw payloads
-- `std::task` and `std::time` for concurrency and timers
-- `std::log` for structured logging
-- MessagePack-backed host DTO patterns
+## Non-Goals
 
-What we do not have:
+- No routing, middleware, sessions, auth, or static-file policy in `std::http`.
+- No streaming body API in the MVP.
+- No runtime-specific Voyd APIs.
+- No dependency from `std::http` to `std::vx`.
+- No `std::fetch` compatibility shim.
 
-- canonical shared HTTP request/response types
-- inbound HTTP server support
-- binary/body-aware HTTP primitives suitable for both client and server
-- a documented host path for serving Voyd handlers over Node/Bun/Deno
+## Design Principles
 
-## Recommendation
+### Protocol Values Are Shared
 
-Add two layers:
+HTTP values such as methods, statuses, headers, and bodies should have one home.
+`std::http::client`, `std::http::server`, and `packages/web` should all depend
+on that home instead of duplicating small incompatible models.
+
+### Client And Server Requests Are Different
+
+Do not force inbound server requests and outbound client requests into one
+struct. They share method, headers, and body, but their targets differ:
+
+- clients send an absolute URL
+- servers receive an origin-form path/query target
+
+The shared model should make that distinction explicit.
+
+### Nominal Types Should Guard Invariants
+
+Use nominal types for values with behavior or invariants:
+
+- `Headers`
+- `HeaderName`
+- `Status`
+- `Body`
+- `Server`
+- `RequestHandle`
+
+Use structural records for simple configuration and user data:
+
+- `ServerConfig`
+- DTO-compatible route params/query/body values in higher layers
+
+### Effects Model Capabilities
+
+Outbound HTTP and inbound serving are host capabilities, not ambient runtime
+objects. Voyd code should show that it needs outbound HTTP by declaring
+`HttpClient` in its effect row and inbound server access by declaring
+`HttpServer`.
+
+### Wire Format Is An Implementation Detail
+
+Internal std helpers may encode/decode host payloads, but the public API should
+talk in terms of `IncomingRequest`, `client::ClientRequest`, `Response`,
+`Body`, and `Result`.
+
+If a low-level escape hatch is needed, put it in an explicitly named internal or
+advanced module such as `std::http::wire`.
+
+## Layering
+
+Recommended module split:
 
 1. `std::http`
-2. `std::http::server`
+   Pure values and helpers.
+2. `std::http::client`
+   Host-backed outbound HTTP client effect and request helpers.
+3. `std::http::server`
+   Host-backed inbound server effect and safe request lifecycle helpers.
+4. `packages/web`
+   Router, middleware, extractors, policies, response conversion, static files.
 
-Then refactor `std::fetch` to reuse `std::http` instead of owning its own
-private HTTP value model.
+This keeps the standard library stable and narrow while allowing the framework
+to evolve quickly.
 
-Breaking changes are acceptable here. We should optimize for the best long-term
-HTTP surface, not for preserving the current `std::fetch` API shape.
+## `std::http`
 
-## Success Criteria
+`std::http` should be pure. It should not listen on sockets or call host effects.
 
-This proposal is successful when all of the following are true:
-
-- `std::http` exists as the canonical shared HTTP value model.
-- `std::fetch` has been refactored to use `std::http` types internally and
-  publicly where appropriate.
-- `std::fetch` no longer defines the ecosystem's primary HTTP request/response
-  model.
-- `std::vx` no longer exposes raw `MsgPack` as its primary public render-tree
-  type.
-- `std::vx` exposes a typed nominal render-tree model suitable for HTML
-  templating and server rendering.
-- the existing HTML reader macro lowers directly into the redesigned typed
-  `std::vx` surface.
-- `std::http::server` exists as the canonical inbound HTTP server effect.
-- `@voyd-lang/js-host` can host `voyd.std.http.server` with consistent DTO
-  semantics across supported runtimes.
-- runtime differences are normalized in adapters rather than leaking into Voyd
-  APIs.
-- `apps/smoke` proves end-to-end request handling through the public runtime.
-
-## 1. New `std::http` Module
-
-`std::http` should be pure. It should not listen on sockets or depend on the
-host runtime.
-
-Recommended contents:
+Recommended public contents:
 
 - `Method`
 - `Status`
 - `Header`
+- `HeaderName`
 - `Headers`
-- `Request`
-- `Response`
 - `Body`
-- `Cookie` later, not required for MVP
-- MessagePack encode/decode helpers for host boundaries
+- `IncomingRequest`
+- `Response`
+- `RequestTarget`
+- `QueryString`
+- `HttpError`
 
-### Proposed Types
+Cookies can come later. They are important, but they should be designed as
+their own focused layer once headers and response builders are settled.
+
+### Methods
+
+HTTP methods are mostly a closed vocabulary with an extension point. Model that
+directly.
 
 ```voyd
-pub obj Header {
-  api name: String,
-  api value: String
+pub enum Method
+  Get
+  Head
+  Post
+  Put
+  Patch
+  Delete
+  Options
+  Trace
+  Connect
+  Other { value: String }
+```
+
+Recommended helpers:
+
+- `Method::from(value: StringSlice) -> Method`
+- `Method::as_string(self) -> String`
+- `method(value: StringSlice) -> Method`
+
+Provide `String` and `StringSlice` overloads for public string-taking helpers.
+
+### Status
+
+Status codes have a constrained valid range and common constructors. A nominal
+type is the right fit.
+
+```voyd
+pub obj Status {
+  pri code_value: i32,
+  pri reason_value: String
 }
 
-pub type Headers = Array<Header>
+impl Status
+  api fn from(code: i32) -> Result<Status, HttpError>
+  api fn custom({ code: i32, reason: String }) -> Result<Status, HttpError>
+  api fn code(self) -> i32
+  api fn reason(self) -> String
+  api fn is_success(self) -> bool
+  api fn is_client_error(self) -> bool
+  api fn is_server_error(self) -> bool
 
-pub obj MethodGet {}
-pub obj MethodPost {}
-pub obj MethodPut {}
-pub obj MethodPatch {}
-pub obj MethodDelete {}
-pub obj MethodOptions {}
-pub obj MethodHead {}
-pub obj MethodOther {
-  api value: String
+  api fn ok() -> Status
+  api fn created() -> Status
+  api fn no_content() -> Status
+  api fn bad_request() -> Status
+  api fn unauthorized() -> Status
+  api fn forbidden() -> Status
+  api fn not_found() -> Status
+  api fn method_not_allowed() -> Status
+  api fn internal_server_error() -> Status
+```
+
+The constructor should reject codes outside `100..599`. Common constructors can
+avoid returning `Result` because their values are known valid.
+
+### Headers
+
+Headers need behavior: case-insensitive lookup, repeated values, append vs set,
+and future `Set-Cookie` support. Use a nominal collection rather than exposing
+`Array<Header>` as the primary type.
+
+```voyd
+pub obj HeaderName {
+  pri original: String,
+  pri normalized: String
 }
 
-pub type Method =
-  MethodGet
-  | MethodPost
-  | MethodPut
-  | MethodPatch
-  | MethodDelete
-  | MethodOptions
-  | MethodHead
-  | MethodOther
-
-pub obj BodyEmpty {}
-pub obj BodyText {
-  api value: String
-}
-pub obj BodyBytes {
-  api value: Bytes
+pub type Header = {
+  name: HeaderName,
+  value: String
 }
 
-pub type Body = BodyEmpty | BodyText | BodyBytes
+pub obj Headers {
+  pri entries: Array<Header>
+}
+```
 
-pub obj Request {
+Recommended methods:
+
+- `HeaderName::from(value: StringSlice) -> Result<HeaderName, HttpError>`
+- `HeaderName::as_string(self) -> String`
+- `HeaderName::normalized(self) -> String`
+- `Headers::empty() -> Headers`
+- `Headers::from(entries: Array<Header>) -> Result<Headers, HttpError>`
+- `headers() -> Headers`
+- `Headers::append(self, { name, value }) -> Headers`
+- `Headers::set(self, { name, value }) -> Headers`
+- `Headers::remove(self, name) -> Headers`
+- `Headers::get(self, name) -> Option<String>`
+- `Headers::get_all(self, name) -> Array<String>`
+- `Headers::contains(self, name) -> bool`
+- `Headers::entries(self) -> Array<Header>`
+- `Headers::content_type(self) -> Option<String>`
+- `Headers::content_length(self) -> Option<i64>`
+
+Header mutation methods should return new `Headers` values. If a mutating
+variant is later useful for performance, it can be an explicit `~self` method.
+
+### Body
+
+The MVP should buffer bodies fully. The type should still avoid text-only
+assumptions.
+
+```voyd
+pub enum Body
+  Empty
+  Bytes { value: Bytes }
+  Text { value: String }
+```
+
+Recommended helpers:
+
+- `Body::empty() -> Body`
+- `Body::bytes(value: Bytes) -> Body`
+- `Body::text(value: StringSlice) -> Body`
+- `Body::len(self) -> i32`
+- `Body::is_empty(self) -> bool`
+- `Body::as_bytes(self) -> Bytes`
+- `Body::as_text(self) -> Result<String, HttpError>`
+
+JSON is a response/content concern layered on top of bytes or text. For the MVP,
+`std::http` can provide `Response::json(value: JsonValue)`. Generic DTO-to-JSON
+support should use a proper JSON encoding trait or compiler-supported DTO
+serialization when that exists; it should not expose MessagePack as the user API.
+
+### Request Targets
+
+Keep client and server request targets distinct.
+
+```voyd
+pub obj QueryString {
+  api raw: String
+}
+
+pub enum RequestTarget
+  Origin { path: String, query?: QueryString }
+  Absolute { url: String }
+```
+
+`IncomingRequest` should use `RequestTarget::Origin`. `client::ClientRequest`
+can use `RequestTarget::Absolute`, or simply keep a dedicated `url` field for
+clarity.
+
+### Incoming Requests
+
+Inbound server requests should be shaped for server code.
+
+```voyd
+pub obj IncomingRequest {
   api method: Method,
   api path: String,
-  api query?: String,
+  api query?: QueryString,
   api headers: Headers,
   api body: Body
 }
+```
 
+Recommended helpers:
+
+- `IncomingRequest::header(self, name) -> Option<String>`
+- `IncomingRequest::query_string(self) -> Option<String>`
+- `IncomingRequest::body_bytes(self) -> Bytes`
+- `IncomingRequest::text(self) -> Result<String, HttpError>`
+- `IncomingRequest::json(self) -> Result<JsonValue, HttpError>`
+
+Parsed query maps should probably live in `packages/web`, where typed extractors
+can turn query strings into structural DTOs.
+
+### Client Requests Belong To `std::http::client`
+
+Outbound requests need absolute URLs and client-specific policy. Those types
+should live in `std::http::client`, not in the pure root module. The root module
+should still own the shared values those requests use: `Method`, `Headers`,
+`Body`, `Status`, and `Response`.
+
+### Responses
+
+`Response` should be canonical across std, `std::http::client`,
+`std::http::server`, and the web framework.
+
+```voyd
 pub obj Response {
   api status: Status,
   api headers: Headers,
@@ -144,135 +323,288 @@ pub obj Response {
 }
 ```
 
-For the MVP, request bodies can be fully buffered. Streaming can come later.
+Recommended methods:
 
-### Pure Helpers
-
-Recommended helpers:
-
-- `Request::header(name) -> Option<String>`
+- `Response::new({ status, headers?, body? }) -> Response`
 - `Response::ok() -> Response`
+- `Response::created() -> Response`
+- `Response::no_content() -> Response`
 - `Response::bad_request() -> Response`
+- `Response::unauthorized() -> Response`
+- `Response::forbidden() -> Response`
 - `Response::not_found() -> Response`
-- `Response::with_header(name, value) -> Response`
-- `Response::text(value) -> Response`
-- `Response::json(value: JsonValue) -> Response`
-- `Response::bytes(value: Bytes) -> Response`
-- `method_from_string(...)`
-- `status(code, text?)`
+- `Response::method_not_allowed() -> Response`
+- `Response::internal_server_error() -> Response`
+- `Response::with_status(self, status: Status) -> Response`
+- `Response::with_header(self, { name, value }) -> Response`
+- `Response::with_headers(self, headers: Headers) -> Response`
+- `Response::text(self, value: StringSlice) -> Response`
+- `Response::bytes(self, value: Bytes) -> Response`
+- `Response::json(self, value: JsonValue) -> Response`
+- `Response::empty(self) -> Response`
 
-Every public string-taking helper should provide both `String` and
-`StringSlice` overloads, matching existing std conventions.
+`Response::text`, `Response::bytes`, and `Response::json` should set a sensible
+`content-type` unless one is already present.
 
-### Host Boundary Codecs
+The higher-level framework can re-export this type and add `IntoResponse`
+implementations. It should not define a competing response model.
 
-`std::http` should own the canonical MessagePack DTO encoding/decoding used by
-the runtime boundary.
+## `std::http::client`
 
-Recommended functions:
+`std::http::client` should replace `std::fetch` as the outbound HTTP API.
 
-- `encode_request(request: Request) -> MsgPack`
-- `decode_request(payload: MsgPack) -> Result<Request, HttpError>`
-- `encode_response(response: Response) -> MsgPack`
-- `decode_response(payload: MsgPack) -> Result<Response, HttpError>`
+The name is intentionally protocol-level rather than JavaScript-specific:
 
-This should follow the same maintainable pattern already used by `std::fetch`,
-`std::fs`, `std::env`, and `std::input`:
+- `client` pairs cleanly with `server`
+- the same API can work in Node, Deno, Bun, browsers, and custom hosts
+- the module can grow into redirects, timeouts, and body policy without carrying
+  browser `fetch` naming assumptions
 
-- stable effect ids
-- explicit DTO encoding/decoding
-- typed wrappers around `MsgPack`
+### Removal Of `std::fetch`
 
-## 2. Refactor `std::fetch`
+This proposal requires removing `std::fetch`.
 
-We should change `std::fetch` to depend on `std::http`, not the other way
-around.
+Required work:
 
-### Why
+- delete `packages/std/src/fetch.voyd`
+- remove `std::fetch` from `packages/std/src/pkg.voyd`
+- remove any prelude/package-root exports for `fetch`
+- remove `voyd.std.fetch` host capability registration
+- remove or rewrite existing `fetch` tests against `std::http::client`
+- update smoke fixtures and docs to import `std::http::client`
 
-Right now `std::fetch` owns:
+No compatibility facade should be added. The API is still young enough that a
+clean break is better than carrying a duplicate name.
 
-- headers
-- request structure
-- response structure
-- text-body assumptions
+### Effect
 
-That is enough for a client helper, but it is the wrong place to define the
-shared HTTP model the rest of the ecosystem should use.
+Recommended effect id:
 
-### Direction
+```voyd
+@effect(id: "voyd.std.http.client")
+```
 
-Keep `std::fetch` as the outbound client API, but refactor it to reuse:
+Raw effect operation:
 
-- `std::http::Header`
-- `std::http::Headers`
-- `std::http::Request`
-- `std::http::Response`
-- `std::http::Body`
+```voyd
+pub eff HttpClient
+  request(tail, payload: MsgPack) -> MsgPack
+```
 
-`std::fetch` can then add only client-specific concerns:
+As with server support, raw `MsgPack` payloads are std implementation details.
+Application code should call the typed helpers below.
 
-- timeout budget
-- redirect policy later
-- client convenience helpers like `get` and `post`
+### Public Types
 
-This is the biggest stdlib shape change I would recommend.
+```voyd
+pub obj ClientRequest {
+  api method: http::Method,
+  api url: String,
+  api headers: http::Headers,
+  api body: http::Body,
+  api options: RequestOptions
+}
 
-### Concrete Refactor Sketch
+pub obj RequestOptions {
+  api timeout_millis?: i32,
+  api redirect_policy: RedirectPolicy
+}
 
-Recommended end state:
+pub enum RedirectPolicy
+  Follow { max_redirects: i32 }
+  Manual
+  Error
+```
+
+`ClientRequest` should be nominal because it carries policy and should have
+constructor defaults. `RequestOptions` can be nominal as well because redirect
+and timeout behavior will grow over time.
+
+Default request options:
+
+- no timeout unless explicitly set
+- redirect policy: `Follow { max_redirects: 20 }`
+- empty body
+- empty headers
+- method defaults only through named constructors, not through a vague
+  all-purpose initializer
+
+### Request Builders
+
+Recommended constructors:
+
+```voyd
+impl ClientRequest
+  api fn get(url: StringSlice) -> ClientRequest
+  api fn head(url: StringSlice) -> ClientRequest
+  api fn delete(url: StringSlice) -> ClientRequest
+  api fn post({ url: StringSlice, body: http::Body }) -> ClientRequest
+  api fn put({ url: StringSlice, body: http::Body }) -> ClientRequest
+  api fn patch({ url: StringSlice, body: http::Body }) -> ClientRequest
+
+  api fn custom({
+    method: http::Method,
+    url: StringSlice,
+    body?: http::Body,
+    headers?: http::Headers,
+    options?: RequestOptions
+  }) -> ClientRequest
+```
+
+Provide `String` overloads for every public `StringSlice`-taking constructor.
+
+The common methods should be easy:
+
+```voyd
+let request = ClientRequest::post(
+  url: "https://api.example.com/users",
+  body: http::Body::text(payload)
+)
+```
+
+The custom path should remain explicit:
+
+```voyd
+let request = ClientRequest::custom(
+  method: http::Method::Other { value: "PROPFIND" },
+  url: "https://example.com/files",
+  headers: http::headers().append(name: "depth", value: "1")
+)
+```
+
+### Immutable Modifiers
+
+Recommended modifiers:
+
+```voyd
+impl ClientRequest
+  api fn with_header(self, { name: StringSlice, value: StringSlice }) -> ClientRequest
+  api fn with_headers(self, headers: http::Headers) -> ClientRequest
+  api fn with_body(self, body: http::Body) -> ClientRequest
+  api fn with_timeout(self, millis: i32) -> ClientRequest
+  api fn with_redirect_policy(self, policy: RedirectPolicy) -> ClientRequest
+```
+
+These should return new request values. If mutating variants are later useful,
+make them explicit `~self` APIs.
+
+### Send Functions
+
+Recommended module functions:
+
+```voyd
+pub fn send(request: ClientRequest): HttpClient -> Result<http::Response, HostError>
+
+pub fn request(request: ClientRequest): HttpClient -> Result<http::Response, HostError>
+
+pub fn get(url: StringSlice): HttpClient -> Result<http::Response, HostError>
+
+pub fn head(url: StringSlice): HttpClient -> Result<http::Response, HostError>
+
+pub fn delete(url: StringSlice): HttpClient -> Result<http::Response, HostError>
+
+pub fn post({
+  url: StringSlice,
+  body: http::Body
+}): HttpClient -> Result<http::Response, HostError>
+
+pub fn put({
+  url: StringSlice,
+  body: http::Body
+}): HttpClient -> Result<http::Response, HostError>
+
+pub fn patch({
+  url: StringSlice,
+  body: http::Body
+}): HttpClient -> Result<http::Response, HostError>
+```
+
+`send` is the clearest name for prebuilt requests. `request` can exist as an
+alias if that reads better in protocol-heavy code, but docs should prefer
+`send`.
+
+Provide `String` overloads for every public URL-taking module function.
+
+Example:
 
 ```voyd
 use std::http
+use std::http::client
 
-pub obj FetchRequest {
-  api request: http::Request,
-  api timeout_millis?: i32
-}
-
-pub type FetchResponse = http::Response
+fn load_user(id: String): client::HttpClient -> Result<http::Response, HostError>
+  client::get("https://api.example.com/users/".concat(id))
 ```
 
-Recommended body model changes:
-
-- stop treating request/response bodies as text-only in the shared model
-- make `http::Body` the canonical body type
-- let `std::fetch` provide text-oriented convenience helpers on top
-
-Recommended API shape:
+More deliberate request construction:
 
 ```voyd
-pub fn request(request: FetchRequest): Fetch -> Result<FetchResponse, HostError>
+fn create_user(payload: String): client::HttpClient -> Result<http::Response, HostError>
+  let request = client::ClientRequest::post(
+    url: "https://api.example.com/users",
+    body: http::Body::text(payload)
+  )
+    .with_header(name: "content-type", value: "application/json")
+    .with_timeout(5000)
 
-pub fn get(url: String): Fetch -> Result<FetchResponse, HostError>
-pub fn post({ url: String, body: http::Body }): Fetch -> Result<FetchResponse, HostError>
+  client::send(request)
 ```
 
-Recommended convenience methods:
+### Response Helpers
 
-- `FetchRequest::from_get(url)`
-- `FetchRequest::from_post({ url, body })`
-- `FetchRequest::with_header(...)`
-- `FetchRequest::with_timeout(...)`
-- body decoding helpers layered on `http::Body`, not embedded into the shared
-  response shape
+Response body helpers should live on `http::Response` or in `std::http`, not in
+the client module. A response from `std::http::server` and a response from
+`std::http::client` are the same protocol value.
 
-### Breaking Changes We Should Accept
+Recommended helpers:
 
-These are worth taking:
+- `Response::is_success(self) -> bool`
+- `Response::header(self, name) -> Option<String>`
+- `Response::text(self) -> Result<String, HttpError>`
+- `Response::bytes(self) -> Bytes`
+- `Response::json(self) -> Result<JsonValue, HttpError>`
 
-- replace `FetchResponse.body: String` with `http::Body`
-- replace `FetchRequest.body?: String` with `http::Body`
-- move header/request/response canonical definitions into `std::http`
-- remove duplication between `std::fetch` DTO codecs and `std::http` DTO codecs
+### Host DTO Shape
 
-If compatibility shims are helpful during migration, they should be thin and
-temporary.
+The host adapter can normalize outbound requests internally as:
 
-## 3. New `std::http::server` Effect
+```ts
+type DefaultAdapterHttpClientRequest = {
+  method: string;
+  url: string;
+  headers: Array<{ name: string; value: string }>;
+  body: Uint8Array;
+  timeoutMillis?: number;
+  redirectPolicy: { kind: "follow"; maxRedirects: number } | { kind: "manual" } | { kind: "error" };
+};
 
-The framework needs a host-owned inbound HTTP capability. This should live in a
-dedicated effect rather than being smuggled through unrelated APIs.
+type DefaultAdapterHttpClientResponse = {
+  status: number;
+  reason: string;
+  headers: Array<{ name: string; value: string }>;
+  body: Uint8Array;
+};
+```
+
+This is not public Voyd API.
+
+### Runtime Behavior
+
+Runtime adapters should implement `std::http::client` with the best available
+native primitive:
+
+- Node: `globalThis.fetch`
+- Deno: `globalThis.fetch`
+- Bun: `globalThis.fetch`
+- Browser: `globalThis.fetch`
+- Unknown: `runtimeHooks.httpClientRequest`, otherwise unsupported
+
+Adapters should normalize response bodies as bytes. Text decoding belongs in
+`http::Body::as_text` / `Response::text`, where errors can be represented in
+Voyd.
+
+## `std::http::server`
+
+`std::http::server` should own inbound HTTP as a host capability.
 
 Recommended effect id:
 
@@ -280,23 +612,55 @@ Recommended effect id:
 @effect(id: "voyd.std.http.server")
 ```
 
-### Proposed Surface
+### Public Types
 
 ```voyd
 pub obj Server {
-  api id: i32
+  pri id: i32
+}
+
+pub obj RequestHandle {
+  pri id: i32
 }
 
 pub obj ServerConfig {
   api port: i32,
-  api host?: String
+  api host?: String,
+  api max_body_bytes?: i32,
+  api max_pending_requests?: i32
 }
 
 pub obj PendingRequest {
-  api request_id: i32,
-  api request: http::Request
+  api handle: RequestHandle,
+  api request: http::IncomingRequest
 }
+```
 
+`RequestHandle` should be nominal and opaque. Application code should not pass
+raw request ids around.
+
+### Public Functions
+
+```voyd
+pub fn listen(config: ServerConfig): HttpServer -> Result<Server, HostError>
+
+pub fn accept(server: Server): HttpServer -> Result<PendingRequest, HostError>
+
+pub fn respond(
+  handle: RequestHandle,
+  response: http::Response
+): HttpServer -> Result<Unit, HostError>
+
+pub fn close(server: Server): HttpServer -> Result<Unit, HostError>
+```
+
+Every public effectful function must spell its effect row explicitly.
+
+### Raw Effect Operations
+
+The raw operations can stay DTO-shaped internally:
+
+```voyd
 pub eff HttpServer
   listen(tail, payload: MsgPack) -> MsgPack
   accept(resume, server_id: i32) -> MsgPack
@@ -304,222 +668,66 @@ pub eff HttpServer
   close(tail, server_id: i32) -> MsgPack
 ```
 
-Voyd-facing helpers:
+Those operations are implementation details of the std wrapper. They should not
+be the documented user API.
 
-- `listen(config: ServerConfig): HttpServer -> Result<Server, HostError>`
-- `accept(server: Server): HttpServer -> Result<PendingRequest, HostError>`
-- `respond(request_id: i32, response: http::Response): HttpServer -> Result<Unit, HostError>`
-- `close(server: Server): HttpServer -> Result<Unit, HostError>`
+### Lifecycle Semantics
 
-### Why This Shape Fits Voyd
+The proposal should pin down these rules before implementation:
 
-- the host still owns sockets and the event loop
-- Voyd code owns routing and response construction
-- `accept(resume, ...)` suspends naturally until work arrives
-- request handling can spawn child tasks explicitly
-- cancellation can propagate through the task runtime
+- `accept` suspends until a request is available or the server closes.
+- each `RequestHandle` may be responded to exactly once.
+- responding twice returns `HostError`.
+- dropping a request without responding should produce a host-managed `500` or a
+  closed connection; the exact behavior must be documented.
+- `close` stops new accepts and releases host resources.
+- if the client disconnects before `respond`, the result is `HostError`.
+- request bodies are buffered up to `max_body_bytes`.
+- requests beyond `max_pending_requests` are rejected or backpressured by the
+  adapter according to documented runtime policy.
 
-### Request Loop Example
+### Managed Loop Helper
 
-```voyd
-use std::http::server::self as server
-use std::task::self as task
-
-pub fn main(): (server::HttpServer, task::TaskRuntime) -> i32
-  let active = server::listen({ port: 3000 })
-  match(active)
-    Err<HostError>:
-      1
-    Ok<Server> { value }:
-      run_server(value)
-
-fn run_server(listener: server::Server): (server::HttpServer, task::TaskRuntime) -> i32
-  while true:
-    match(server::accept(listener))
-      Ok<PendingRequest> { value }:
-        let _ = task::detach(() => handle_request(value))
-      Err<HostError>:
-        break
-  0
-```
-
-## 4. Break `std::vx` Toward A Typed Render Tree
-
-If VX is going to be the canonical HTML/template story for Voyd web work, we
-should fix it in std instead of hiding the problem in the framework.
-
-Today `std::vx` is effectively a thin MsgPack construction helper. That is too
-low-level for a long-term templating/rendering surface.
-
-### Recommendation
-
-Take a breaking change in `std::vx` so its primary public API is a typed render
-tree rather than raw `MsgPack`.
-
-Recommended direction:
+The lower-level API should expose `listen`/`accept`/`respond`, but a safe helper
+is useful even before the full web framework exists.
 
 ```voyd
-pub obj VxText {
-  api value: String
-}
-
-pub obj VxElement {
-  api name: String,
-  api attributes: VxAttributes,
-  api children: Array<VxNode>
-}
-
-pub type VxNode = VxText | VxElement
+pub fn serve_each({
+  config: ServerConfig,
+  handle: fn(http::IncomingRequest) : (open) -> http::Response
+}): (HttpServer, TaskRuntime, open) -> Result<Unit, HostError>
 ```
 
-Suggested supporting types:
+This helper should:
 
-- `VxNode`
-- `VxElement`
-- `VxText`
-- `VxAttributeValue`
-- `VxAttributes`
+- listen
+- accept in a loop
+- spawn or detach request tasks according to an explicit policy
+- call the handler
+- respond exactly once
+- convert uncaught host/request lifecycle errors into useful diagnostics
+- close the server on shutdown
 
-Then make MsgPack conversion an implementation detail or an explicit interop
-helper:
+`packages/web` can use this helper or own a more advanced loop, but the std
+server module should make the safe path obvious.
 
-- `vx::to_msgpack(node: VxNode) -> MsgPack`
-- `vx::from_msgpack(...)` only if genuinely needed
+## Host Adapter Support
 
-The existing HTML reader macro should be updated as part of this work so HTML
-syntax lowers into the new typed VX model rather than into raw MsgPack-shaped
-construction helpers.
+`@voyd-lang/js-host` should provide default adapter capabilities for
+`voyd.std.http.client` and `voyd.std.http.server`.
 
-### Current Reader Macro Behavior To Preserve Or Intentionally Change
+Recommended additions:
 
-The implementor should not need to rediscover the current parser behavior.
-Today the HTML reader macro:
+- `HTTP_CLIENT_EFFECT_ID = "voyd.std.http.client"`
+- `HTTP_SERVER_EFFECT_ID = "voyd.std.http.server"`
+- capability name: `"http-client"`
+- capability name: `"http-server"`
+- `packages/js-host/src/adapters/default/capabilities/http-client.ts`
+- `packages/js-host/src/adapters/default/capabilities/http-server.ts`
+- runtime hook types for client request and server listen/accept/respond/close
+- conformance tests for capability registration and unsupported runtimes
 
-- only triggers when `<` appears after whitespace and the next character is a
-  letter
-- avoids stealing parses from numeric comparisons and generic angle brackets
-- lowers built-in tags to `create_element(...)`
-- lowers capitalized tags as component calls
-- lowers namespaced components like `UI::Card` through nested `::` surface
-  calls
-- parses `{...}` interpolation by delegating back into the ordinary reader
-- unwraps single-expression interpolations
-- collapses text-node whitespace in normal mode
-- preserves literal whitespace inside `<pre>` and `<textarea>`
-- lowers boolean attributes as the string `"true"`
-- requires quoted string attribute values unless the value is an interpolated
-  `{...}` expression
-
-Those rules currently live in:
-
-- `packages/compiler/src/parser/reader-macros/html/html.ts`
-- `packages/compiler/src/parser/reader-macros/html/html-parser.ts`
-
-### Reader Macro Update Required By This Proposal
-
-The redesign should preserve the good parsing behavior above, but change the
-lowering target.
-
-Specifically:
-
-- built-in tags should no longer lower to `create_element(...)` returning raw
-  MsgPack
-- built-in tags should lower to the new typed VX constructors
-- component lowering should continue to work, but `children` should become
-  typed `Array<VxNode>` values
-- interpolated text and child expressions should lower into typed VX nodes or
-  typed child arrays rather than ad hoc MsgPack payloads
-
-Recommended lowering direction:
-
-- built-in element: `vx::element({ name, attributes, children })`
-- text node: `vx::text("...")`
-- component: function call with a typed props object, including typed
-  `children`
-
-### Specific Migration Work
-
-At minimum, the implementation should:
-
-- update `html-parser.ts` built-in element lowering away from `create_element`
-- update child-array construction away from MsgPack-shaped arrays
-- update attribute lowering away from `Array<Array<MsgPack>>`
-- update parser tests and snapshots that currently assert `create_element`
-- add dedicated tests for typed VX output from HTML syntax
-- keep inline-lambda interpolation behavior working
-- keep `<pre>` / `<textarea>` whitespace preservation working
-- keep namespaced component parsing working
-
-### Breaking Changes We Should Accept
-
-These are worth taking:
-
-- change `vx::create_element(...)` to return `VxNode` or `VxElement`
-- stop exposing raw `MsgPack` as the canonical VX node type
-- change children and attributes to typed VX values instead of ad hoc MsgPack
-  arrays
-
-### Why This Belongs In Std
-
-The framework should decide how HTML becomes an HTTP response.
-
-It should not have to compensate for std exposing the wrong render-tree shape.
-
-The better layering is:
-
-- `std::vx`: typed render tree / template authoring
-- `std::http`: typed HTTP values
-- framework: routing, middleware, response conversion, HTML response helpers
-
-### Sketch
-
-Recommended end state:
-
-```voyd
-use std::vx
-
-fn home_page(): vx::VxNode
-  vx::element({
-    name: "main",
-    children: [
-      vx::element({
-        name: "h1",
-        children: [vx::text("Voyd Web")]
-      }),
-      vx::element({
-        name: "p",
-        children: [vx::text("Typed HTML templates.")]
-      })
-    ]
-  })
-```
-
-The web framework can then provide:
-
-- `Response::html(node: vx::VxNode) -> Response`
-- `html::render(node: vx::VxNode) -> String`
-
-That is a much better split than making framework users manipulate raw MsgPack.
-
-## 5. Host-Side Support
-
-If we add a new std module and server effect, we should support it in the host
-layer the same way we support `fs`, `fetch`, `time`, and `log`.
-
-Short answer: yes, we do need to update host adapters for this proposal.
-
-### JS Host Changes
-
-Add a new default adapter capability:
-
-- file: `packages/js-host/src/adapters/default/capabilities/http-server.ts`
-- capability id: `"http-server"`
-- effect id: `"voyd.std.http.server"`
-
-Add matching runtime-hook support in
-`packages/js-host/src/adapters/default/types.ts`.
-
-Suggested runtime hook family:
+Normalized host DTOs should be TypeScript implementation details:
 
 ```ts
 type DefaultAdapterHttpRequest = {
@@ -539,48 +747,14 @@ type DefaultAdapterHttpResponse = {
 };
 ```
 
-The adapter should manage:
+The Voyd API should expose `IncomingRequest`, `Response`, `Headers`, and `Body`,
+not this DTO shape.
 
-- a server registry keyed by `server_id`
-- a queue of pending inbound requests
-- pending host response resolvers keyed by `request_id`
-- cancellation when the client disconnects
+## Runtime Policy
 
-### Existing Adapter Changes
+Runtime differences belong in adapters.
 
-This proposal also requires changes to existing host adapters, not just a new
-one.
-
-Required updates:
-
-- update `voyd.std.fetch` adapter inputs/outputs to use the new shared
-  `std::http` DTO shape
-- add `http-server` to the default capability registration list
-- extend capability reporting to include HTTP server support
-- add runtime hooks for server listen/accept/respond/close
-- extend conformance tests to cover the new server capability
-
-## 6. Runtime Strategy in `js-host`
-
-We should handle runtime differences with a normalized capability layer, not by
-forking the Voyd API per runtime.
-
-### Current State
-
-`js-host` currently models these runtimes:
-
-- `node`
-- `deno`
-- `browser`
-- `unknown`
-
-It does not currently expose a first-class `bun` runtime kind.
-
-### Proposed Runtime Policy
-
-Add `bun` as an explicit `HostRuntimeKind` in `packages/js-host/src/runtime/*`.
-
-Recommended runtime kinds after this proposal:
+Recommended runtime kinds:
 
 - `node`
 - `deno`
@@ -588,134 +762,31 @@ Recommended runtime kinds after this proposal:
 - `browser`
 - `unknown`
 
-Even if Bun is Node-compatible for some APIs, making it explicit gives us:
+Node should be the reference implementation:
 
-- accurate diagnostics
-- runtime-specific adapter choices when they matter
-- room for Bun-native HTTP serving without pretending it is just Node
+- outbound HTTP client: `globalThis.fetch`
+- inbound: `node:http`
 
-### Capability-First Normalization
+Deno and Bun should use native serve APIs when available:
 
-Each runtime should normalize into the same internal DTOs:
+- Deno: `Deno.serve`
+- Bun: `Bun.serve`
 
-- `DefaultAdapterHttpRequest`
-- `DefaultAdapterHttpResponse`
-- `DefaultAdapterFetchRequest`
-- `DefaultAdapterFetchResponse`
+Browser should support `http-client` and report `http-server` as unsupported.
 
-Voyd code should never branch on runtime.
+Unknown runtimes can support HTTP server only when the host provides explicit
+runtime hooks. They can support HTTP client only when `globalThis.fetch` exists
+or the host provides an explicit client request hook.
 
-The adapter layer should choose the backend.
+## SDK And CLI Support
 
-### Runtime Backends
+Provide one easy Node-oriented entrypoint for common server usage after the std
+and host pieces exist.
 
-#### Node
+Possible package:
 
-Use:
-
-- `globalThis.fetch` for outbound client requests
-- `node:http` for inbound HTTP server support
-
-Node should be the reference implementation and the first runtime we fully
-prove in smoke tests.
-
-#### Deno
-
-Use:
-
-- `globalThis.fetch` for outbound client requests
-- `Deno.serve` for inbound HTTP server support when available
-
-The adapter should buffer request bodies and translate Deno request/response
-objects into the normalized DTOs.
-
-#### Bun
-
-Use:
-
-- `globalThis.fetch` for outbound client requests
-- `Bun.serve` for inbound HTTP server support when available
-
-This is the main reason to add an explicit `bun` runtime kind. Bun's server
-APIs are close in spirit to web-standard fetch objects, but operationally they
-are not the same thing as Node's `node:http`.
-
-#### Browser
-
-Use:
-
-- `globalThis.fetch` for outbound client requests
-- mark `http-server` as unsupported
-
-That should be reported cleanly through capability registration, just like the
-current `fs` browser behavior.
-
-#### Unknown
-
-Policy:
-
-- use `runtimeHooks.fetchRequest` if provided
-- use `runtimeHooks.httpServer*` hooks if provided
-- otherwise register `fetch` or `http-server` as unsupported
-
-This keeps the runtime extensible for custom embeddings.
-
-### Recommended Runtime Hook Shape
-
-I recommend expanding `DefaultAdapterRuntimeHooks` with an HTTP server hook
-family instead of overfitting to one runtime:
-
-```ts
-type DefaultAdapterHttpServerHandle = {
-  serverId: number;
-};
-
-type DefaultAdapterRuntimeHooks = {
-  fetchRequest?: (
-    request: DefaultAdapterFetchRequest
-  ) => Promise<DefaultAdapterFetchResponse>;
-  httpServerListen?: (
-    config: { host?: string; port: number }
-  ) => Promise<DefaultAdapterHttpServerHandle>;
-  httpServerAccept?: (
-    handle: DefaultAdapterHttpServerHandle
-  ) => Promise<DefaultAdapterHttpRequest>;
-  httpServerRespond?: (
-    response: DefaultAdapterHttpResponse
-  ) => Promise<void>;
-  httpServerClose?: (
-    handle: DefaultAdapterHttpServerHandle
-  ) => Promise<void>;
-};
-```
-
-The default adapters can provide native implementations per runtime, while
-custom hosts can override them all with hooks.
-
-## 7. Node Reference Implementation
-
-The first-class reference should be Node-based.
-
-Implementation direction:
-
-- use `node:http`
-- buffer the full request body into `Uint8Array`
-- normalize headers into repeated `{ name, value }` entries
-- hand the DTO into Voyd through `accept`
-- wait for Voyd to call `respond`
-- write the buffered response back to `ServerResponse`
-
-That is enough for an MVP and keeps the adapter small.
-
-## 8. SDK / Package Support
-
-We should also provide a high-level helper so users do not need to manually wire
-hosts for common server cases.
-
-Recommended direction:
-
-- new package: `packages/http-node`
-- published entrypoint such as `@voyd-lang/http-node`
+- `packages/http-node`
+- published as `@voyd-lang/http-node`
 
 Example:
 
@@ -728,72 +799,76 @@ await serveVoydApp({
 });
 ```
 
-This package can compile the source, create the JS host, register default
-adapters including `voyd.std.http.server`, and run the chosen entrypoint.
+This package can compile the app, create the host, register default adapters,
+and run the entrypoint. It should be a convenience wrapper, not a second HTTP
+runtime design.
 
-## 9. Do We Need Language Changes?
+## Relationship To VX And HTML
 
-For the MVP: no.
+`std::http` should not depend on `std::vx`.
 
-Effects, tasks, objects, traits, overloads, and MessagePack host interop are
-already enough.
+The web framework can provide:
 
-### Optional Language / Tooling Follow-Ups
+- extension-style `html(response, node) -> Response`, usable as
+  `Response::ok().html(node)` when imported
+- `html::render(node) -> String`
 
-These are useful, but not blockers:
+Those helpers should use the current VX server-rendering path and evolve with
+future VX typing improvements. A fully nominal VX render tree is valuable, but
+the first HTTP/server milestone should not be blocked on a VX redesign.
 
-- document and stabilize public `@serializer(...)` usage for user-facing types
-- add derive-like serializer generation for MsgPack DTOs
-- consider macro helpers for reducing HTTP DTO boilerplate
+The only hard requirement is that web authors should not need to manipulate raw
+MessagePack to return HTML.
 
-Those would improve ergonomics, but the framework should not wait on them.
+## Phasing
 
-## 10. A Small Additional Std Improvement
+### Phase 1: HTTP Foundation
 
-I would also consider a modest refactor to reduce duplicated DTO decoding logic
-across std modules.
+- add `std::http` values and pure helpers
+- add hidden host codecs for HTTP values
+- remove `std::fetch`
+- add `std::http::client`
+- add `std::http::server` wrappers
+- implement outbound client support in `js-host`
+- implement Node server support in `js-host`
+- add public smoke coverage for a single request/response round trip
 
-Candidate direction:
+### Phase 2: Runtime Coverage And Ergonomics
 
-- add a few more `HostDto` read helpers for optional values and arrays
+- add Bun as an explicit runtime kind
+- add Deno and Bun server backends
+- add SDK/server helper package
+- add managed loop helpers and shutdown tests
+- add body limits and pending queue policy tests
 
-That is not required for the web framework, but it would make `std::http`,
-`std::fetch`, and other host-backed modules easier to maintain.
+### Phase 3: Advanced HTTP
 
-## 11. Phasing
-
-### Phase 1
-
-- land `std::http` pure value types and codecs
-- refactor `std::fetch` onto `std::http`
-- redesign `std::vx` around a typed render tree
-- accept breaking changes to fetch body/response types
-- add `bun` as an explicit host runtime kind
-- land `voyd.std.http.server` in `js-host` for Node first
-
-### Phase 2
-
-- add Deno and Bun native server backends
-- add SDK/server package helpers
-- expand smoke coverage across supported runtimes where practical
+- streaming bodies
+- typed cookies
+- multipart/form support
+- richer content negotiation
+- generic DTO-to-JSON encoding if the language/runtime exposes a stable path
 
 ## Testing Direction
 
-Keep ownership clean:
+Follow `docs/testing/test-layer-ownership.md`.
 
-- `packages/std`: HTTP types, codecs, helpers
-- `packages/std`: VX typed render-tree APIs and HTML rendering helpers
-- `packages/js-host`: adapter contract and runtime behavior
-- `packages/http-node` or SDK helper: wiring tests
-- `apps/smoke`: full request/response round trips through public APIs
+- `packages/std`: pure HTTP values, builders, header behavior, codecs
+- `packages/std`: HTTP client request builders and body behavior
+- `packages/js-host`: adapter registration, Node server lifecycle, unsupported
+  runtime behavior
+- `packages/sdk` or helper package: server wiring
+- `apps/smoke`: public end-to-end server request/response behavior
 
-Canonical request-serving behavior should be proven in `apps/smoke`.
+Canonical end-to-end serving behavior should live in `apps/smoke`.
 
 ## Recommendation
 
-Add `std::http`, add `std::http::server`, and refactor `std::fetch` onto the
-shared HTTP model. Break `std::vx` toward a typed render tree at the same time
-so HTML rendering has the right foundation in std. Yes, this proposal requires
-host-adapter changes. Runtime differences should be handled in `js-host` via
-explicit runtime profiles and normalized DTOs, with `bun` promoted to a
-first-class runtime kind rather than being treated implicitly.
+Build `std::http` as a small but serious protocol foundation: nominal where HTTP
+has invariants, structural where configuration should stay lightweight, and
+effectful only at the host boundary. Remove `std::fetch`, add
+`std::http::client`, add `std::http::server`, and keep MessagePack as hidden
+implementation machinery.
+
+That gives the higher-level web framework a clean base without forcing framework
+concerns into the standard library.
