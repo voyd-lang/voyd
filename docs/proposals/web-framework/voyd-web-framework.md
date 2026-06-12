@@ -80,28 +80,38 @@ obj CreateUser {
   api email: String
 }
 
+obj Session {
+  api user_id: String
+}
+
 pub fn main(): (HttpServer, TaskRuntime, Db, Log) -> Result<Unit, ServeError>
   serve(port: 3000) routes():
-    use(request_logger)
+    adopt(request_logger)
 
     get("/health") do:
       "ok"
 
     group("/users") routes():
-      get("/:id", params: UserParams, query: UserQuery) do(params, query, ctx):
+      get("/:id") do(params: UserParams, query: UserQuery):
         load_user(id: params.id, verbose: query.verbose)
 
-      post("/", body: json<CreateUser>(), auth: required_session()) do(input, session, ctx):
+      post(
+        "/",
+        body: json(),
+        auth: required_session()
+      ) do(input: CreateUser, session: Session):
         create_user(input, by: session.user_id)
 ```
 
 Important details:
 
-- route options are labeled
-- extractor values become handler parameters in declaration order
+- handler parameter names and types drive extraction
+- route options are labeled when they configure policy, format, or ambiguity
 - `ctx` is available last when requested
 - return values are converted through `IntoResponse`
-- effects such as `Db` and `Log` remain visible on `main`
+- `Db` is a user-defined application effect and `Log` is the std logging effect
+- effect rows can be inferred; explicit annotations are useful when documenting
+  capability boundaries
 
 ## Design Principles
 
@@ -114,7 +124,7 @@ receive a mutable response writer.
 fn health() -> String
   "ok"
 
-fn show_user(params: UserParams): Db -> Result<UserDto, AppError>
+fn show_user(params: UserParams) -> Result<UserDto, AppError>
   users::find(params.id)
 ```
 
@@ -123,32 +133,55 @@ The framework turns the return value into `std::http::Response`.
 ### Effects Stay Honest
 
 The framework must not erase application effects behind an ambient runtime.
+It also should not require every handler to spell out effects that Voyd can
+infer.
 
-A handler that uses a database should say so:
+Most route handlers should be able to rely on inference:
+
+```voyd
+fn show_user(params: UserParams) -> Result<UserDto, AppError>
+  users::find(params.id)
+```
+
+When the docs need to explain capability flow, they can show the inferred row
+explicitly:
 
 ```voyd
 fn show_user(params: UserParams): Db -> Result<UserDto, AppError>
   users::find(params.id)
 ```
 
-A route tree containing that handler should require `Db` at the serving
-boundary. Framework-owned effects should stay narrow: build-time route
-registration and host HTTP serving.
+Here `Db` is a user-defined application effect, not a framework effect. A route
+tree containing that handler should infer and require `Db` at the serving
+boundary whether the handler wrote the row explicitly or not. `Log` is similar
+from the framework's perspective even though it comes from `std::log`: it should
+remain visible as a required capability instead of being hidden in `Context`.
+Framework-owned effects should stay narrow: build-time route registration and
+host HTTP serving.
 
-### Labels Describe Extraction And Policy
+### Handler Types Describe Extraction
 
-Route declarations should use labels where they communicate meaning:
+Route declarations should infer ordinary request data from typed handler
+parameters:
 
-- `params:`
-- `query:`
-- `body:`
-- `headers:`
-- `auth:`
+```voyd
+get("/users/:id") do(params: UserParams, query: UserQuery):
+  load_user(id: params.id, verbose: query.verbose)
+```
+
+Use labels when they configure behavior, select a format, or resolve ambiguity:
+
+- `body: json()`
+- `body: text()`
+- `auth: required_session()`
+- `auth: optional_session()`
 - `timeout:`
 - `limit:`
+- `method:`
 
-This makes request handling policy visible at the route declaration instead of
-hiding it in an untyped middleware chain.
+This keeps request shape in normal Voyd types while keeping request handling
+policy visible at the route declaration instead of hiding it in an untyped
+middleware chain.
 
 ### Structural DTOs For Data, Nominal Types For Behavior
 
@@ -161,10 +194,10 @@ type SearchQuery = {
 }
 ```
 
-Use nominal types for extractors, policies, routers, apps, and contexts:
+Use nominal types for policies, routers, apps, and contexts:
 
 ```voyd
-pub obj Json<T> { ... }
+pub obj JsonBody { ... }
 pub obj RequiredSession { ... }
 pub obj Router { ... }
 pub obj Context { ... }
@@ -201,7 +234,11 @@ serve(port: 3000) routes():
   get("/health") do:
     "ok"
 
-  post("/sessions", body: json<LoginInput>(), auth: optional_session()) do(input, session, ctx):
+  post(
+    "/sessions",
+    body: json(),
+    auth: optional_session()
+  ) do(input: LoginInput, session: Option<Session>):
     create_session(input, existing: session)
 ```
 
@@ -215,7 +252,7 @@ Recommended top-level functions:
 - `delete(path, ...)`
 - `route(path, method: Method, ...)`
 - `group(prefix, routes:)`
-- `use(middleware)`
+- `adopt(middleware)`
 - `not_found(handler)`
 - `on_error(handler)`
 
@@ -262,10 +299,10 @@ The secondary builder surface should mirror the DSL:
 
 ```voyd
 let app = web::app()
-  .use(request_logger)
+  .adopt(request_logger)
   .get("/health", handler: health)
   .group("/users") routes(router):
-    router.get("/:id", params: UserParams, handler: show_user)
+    router.get("/:id", handler: show_user)
 
 web::serve(app, port: 3000)
 ```
@@ -274,7 +311,7 @@ Recommended primitives:
 
 - `web::app() -> App`
 - `web::router() -> Router`
-- `App::use(self, middleware) -> App`
+- `App::adopt(self, middleware) -> App`
 - `App::get(self, path, ...) -> App`
 - `App::post(self, path, ...) -> App`
 - `App::route(self, path, method: Method, ...) -> App`
@@ -291,7 +328,7 @@ performance or generated code needs them.
 Canonical handler style:
 
 ```voyd
-fn show_user(params: UserParams, ctx: Context): Db -> Result<UserDto, AppError>
+fn show_user(params: UserParams, query: UserQuery) -> Result<UserDto, AppError>
   users::find(params.id)
 ```
 
@@ -301,31 +338,31 @@ The framework should support three ergonomic shapes:
 get("/health") do:
   "ok"
 
-get("/users/:id", params: UserParams) do(params):
+get("/users/:id") do(params: UserParams):
   users::find(params.id)
 
-get("/debug") do(ctx):
+get("/debug") do(ctx: Context):
   ctx.request
 ```
 
 Rules:
 
-- extracted values are passed first, in route declaration order
-- `ctx` may be requested as the final parameter
+- handler parameter names and types choose extractors
+- explicit route labels configure policies and resolve ambiguous handler shapes
+- `ctx: Context` may be requested as the final parameter
 - handler return type only needs to implement `IntoResponse`
 - handler effects remain part of the surrounding app effect row
 
 ## Effect-Polymorphic Handler Contracts
 
 The proposal should not use pure function aliases for effectful callbacks.
-Handlers and middleware need open effect rows.
+Handlers and middleware need open effect rows. A route handler also should not
+be forced through a single `fn(Context) -> Response` shape before typing, because
+its typed parameters are part of the extraction contract.
 
 Conceptual shape:
 
 ```voyd
-pub type Handler<Out> =
-  fn(Context) : (open) -> Out
-
 pub type Next =
   fn(Context) : (open) -> http::Response
 
@@ -333,9 +370,13 @@ pub type Middleware =
   fn(Context, next: Next) : (open) -> http::Response
 ```
 
+Each route can keep its ordinary typed handler during type checking, derive an
+extraction plan from the handler parameter list, and only then wrap it in an
+internal erased representation for router storage.
+
 The exact generic encoding may need an implementation spike, especially because
-routes with different extractors and effects are stored together. The design
-requirement is clear:
+routes with different extractors, handler arities, and effects are stored
+together. The design requirement is clear:
 
 - route registration remains effect-polymorphic
 - middleware can perform effects
@@ -349,48 +390,68 @@ ordinary handler.
 ## Extractors
 
 Extractors are where Voyd can feel meaningfully better than Express. They make
-request shape and policy explicit at the route.
+request shape and policy explicit without turning the request into a dynamic
+bag.
 
-Recommended route labels:
+Recommended route declarations should infer extraction from handler parameter
+names and types:
 
 ```voyd
-get(
-  "/users/:id",
-  params: UserParams,
-  query: UserQuery,
-  headers: RequestHeaders
-) do(params, query, headers, ctx):
+get("/users/:id") do(params: UserParams, query: UserQuery, headers: RequestHeaders, ctx: Context):
   ...
 
 post(
   "/users",
-  body: json<CreateUser>(),
+  body: json(),
   auth: required_session(),
   timeout: Duration::from_millis(500)
-) do(input, session, ctx):
+) do(input: CreateUser, session: Session, ctx: Context):
   ...
 ```
 
+These examples are call sites. The `get` and `post` definitions should use
+ordinary labeled parameter groups with `{ ... }` for route policy and a trailing
+callback for the handler. The framework should inspect the typed handler
+signature after type checking to build the extraction plan.
+
+This requires typed trailing callback clause parameters such as
+`do(params: UserParams):`. If the current parser only accepts untyped clause
+heads, the framework proposal should include the small language/compiler change
+to support typed callback clause parameters. Named handler functions can be a
+Phase 1 fallback because their parameter types are already available from the
+function signature.
+
 ### Extractor Kinds
 
-Initial extractors:
+Initial inferred handler parameters:
 
 - `params: T`
 - `query: T`
-- `body: json<T>()`
-- `body: text()`
-- `body: bytes()`
 - `headers: T`
-- `auth: required_session()`
-- `auth: optional_session()`
+- `ctx: Context`
+
+Initial route policies that supply handler parameters:
+
+- `body: json()` plus one typed body parameter
+- `body: text()` plus one `String` body parameter
+- `body: bytes()` plus one `Bytes` body parameter
+- `auth: required_session()` plus one `Session` parameter
+- `auth: optional_session()` plus one `Option<Session>` parameter
 
 Later extractors:
 
-- `body: form<T>()`
+- `body: form()` plus one typed body parameter
 - `body: multipart(...)`
 - `cookies: T`
 - `state: AppState`
 - `limit: body_limit(...)`
+
+Parameter names should be part of the matching rules because structural data
+often overlaps. A parameter named `params` maps to path params; `query` maps to
+query; `headers` maps to request headers; `ctx` maps to `Context`. Body and auth
+parameters are matched by the explicit route policy that introduces them. If a
+handler shape is ambiguous, the compiler should produce a targeted diagnostic
+asking for a route label, a parameter rename, or an explicit wrapper type.
 
 ### Extractor Traits
 
@@ -424,10 +485,10 @@ type PageQuery = {
 }
 ```
 
-Nominal extractor values are better for behavior:
+Nominal policy values are better for behavior:
 
 ```voyd
-pub obj Json<T> { ... }
+pub obj JsonBody { ... }
 pub obj RequiredSession { ... }
 ```
 
@@ -451,7 +512,9 @@ applications can override formatting consistently.
 
 ## Context
 
-`Context` should be small and predictable.
+`Context` should be small and predictable. It is requested explicitly with a
+`ctx: Context` handler parameter and should act as an escape hatch and
+middleware carrier, not as the main way to access application capabilities.
 
 ```voyd
 pub obj Context {
@@ -552,7 +615,7 @@ Initial implementations:
 For ordinary DTO-compatible objects, the desired DevX is:
 
 ```voyd
-fn show_user(params: UserParams): Db -> Result<UserDto, AppError>
+fn show_user(params: UserParams) -> Result<UserDto, AppError>
   users::find(params.id)
 ```
 
@@ -578,7 +641,7 @@ get("/version") do:
 get("/status") do:
   Response::ok().json(StatusDto { healthy: true })
 
-post("/users", body: json<CreateUser>()) do(input):
+post("/users", body: json()) do(input: CreateUser):
   create_user(input)
 ```
 
@@ -625,6 +688,35 @@ should not hand-assemble render trees unless they want to.
 Future VX improvements can make the render tree more nominal and less raw
 internally. The web framework should hide those details either way.
 
+### VX Hydration
+
+Static server-rendered HTML should remain the simplest path, but the framework
+should leave room for hydratable VX apps. A server route should be able to
+render the initial document and attach enough boot metadata for a browser-side
+VX runtime to hydrate the same app without authors hand-writing host interop.
+
+Conceptual API shape:
+
+```voyd
+fn home(model: HomeModel) -> Response
+  Response::ok().html(
+    html::document(
+      view: home_page(model),
+      hydrate: html::hydrate(
+        target: "#app",
+        entry: "/assets/home.js",
+        model: model
+      )
+    )
+  )
+```
+
+Hydration should be opt-in. The initial model should be a normal DTO-compatible
+value, with any encoding details hidden by the framework/runtime. Server effects
+used to render the first response and browser effects used after hydration
+should stay separate so the server route does not appear to require browser-only
+capabilities.
+
 ## Middleware
 
 Middleware should be ordinary value-returning Voyd code.
@@ -651,9 +743,9 @@ Middleware registration:
 
 ```voyd
 serve(port: 3000) routes():
-  use(request_logger)
+  adopt(request_logger)
 
-  use() do(ctx, next):
+  adopt() do(ctx, next):
     match(ctx.header("x-request-id"))
       Some<String>:
         next(ctx)
@@ -663,13 +755,13 @@ serve(port: 3000) routes():
 
 Middleware ordering should be deterministic:
 
-- outer `use` runs before routes in its scope
+- outer `adopt` runs before routes in its scope
 - group middleware wraps routes inside the group
-- route-local policies/extractors run before the handler
+- route-local policies and inferred extractors run before the handler
 - `next(ctx)` decides whether downstream middleware and the handler run
 
-Typed auth and body policy should prefer extractors over middleware when the
-handler needs the resulting value.
+Typed auth and body policy should prefer handler parameters over middleware
+when the handler needs the resulting value.
 
 ## Routing Semantics
 
@@ -695,10 +787,10 @@ serve(port: 3000) routes():
   get("/users") do:
     list_users()
 
-  get("/users/:id", params: UserParams) do(params):
+  get("/users/:id") do(params: UserParams):
     show_user(params.id)
 
-  route("/posts/:id", method: Method::Delete {}) do(ctx):
+  route("/posts/:id", method: Method::Delete {}) do(ctx: Context):
     delete_post(ctx.param("id").unwrap_or(""))
 ```
 
@@ -719,7 +811,7 @@ impl IntoResponse for AppError
   fn into_response(self) -> Response
     Response::new(status: self.status).json(ErrorDto { message: self.message })
 
-fn show_user(params: UserParams): Db -> Result<UserDto, AppError>
+fn show_user(params: UserParams) -> Result<UserDto, AppError>
   users::find(params.id)
 ```
 
@@ -732,16 +824,19 @@ Framework-level error hooks are still useful:
 
 ```voyd
 serve(port: 3000) routes():
-  not_found() do(ctx):
+  not_found() do(ctx: Context):
     Response::not_found().html(not_found_page(ctx.path()))
 
-  on_rejection() do(rejection, ctx):
+  on_rejection() do(rejection: Rejection, ctx: Context):
     rejection.into_response().with(header: "x-error", value: "request")
 ```
 
 ## Tasks, Timeouts, And Cancellation
 
 Request concurrency should use `std::task` and `std::time`.
+
+This example writes the effect row explicitly to show the capabilities involved;
+ordinary handlers may rely on inference when that reads better.
 
 ```voyd
 fn dashboard(ctx: Context): (TaskRuntime, Time, Db) -> Result<DashboardDto, AppError>
@@ -771,7 +866,7 @@ fn dashboard(ctx: Context): (TaskRuntime, Time, Db) -> Result<DashboardDto, AppE
 Route-level timeout policy should be explicit:
 
 ```voyd
-get("/dashboard", timeout: Duration::from_millis(500)) do(ctx):
+get("/dashboard", timeout: Duration::from_millis(500)) do(ctx: Context):
   dashboard(ctx)
 ```
 
@@ -784,7 +879,7 @@ Static files should be an optional framework layer.
 
 ```voyd
 serve(port: 3000) routes():
-  use(web::serve_dir("/public"))
+  adopt(web::serve_dir("/public"))
 ```
 
 This layer should use `std::fs`, `std::path`, `Bytes`, and `Headers` under the
@@ -817,12 +912,15 @@ Escape hatches should still use the canonical `std::http` types.
 - implement `IntoResponse` for core types
 - implement params/query/body extractors
 - support `JsonValue` and explicit JSON response helpers
-- support HTML responses through current `std::vx` server rendering
+- support static HTML responses through current `std::vx` server rendering
+- keep the HTML response shape compatible with future VX hydration helpers
 - add smoke coverage for public request/response serving
 
 ### Phase 2: World-Class DevX
 
 - generic DTO-to-JSON response conversion
+- opt-in VX SSR hydration helpers for initial models, mount targets, and client
+  entries
 - typed auth/session extractors
 - typed cookies
 - route-level timeout/body-limit policies
