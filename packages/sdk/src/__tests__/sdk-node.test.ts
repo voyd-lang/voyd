@@ -517,6 +517,60 @@ pub fn main() -> i32
     }
   });
 
+  it("resolves scoped Voyd packages through bare pkg imports", async () => {
+    const sdk = createSdk();
+    const repoRoot = process.cwd();
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-scoped-node-modules-"),
+    );
+    const srcDir = path.join(projectRoot, "src");
+    const entryPath = path.join(srcDir, "main.voyd");
+    const packageSrcDir = path.join(
+      projectRoot,
+      "node_modules",
+      "@voyd-lang",
+      "web",
+      "src",
+    );
+
+    await fs.mkdir(srcDir, { recursive: true });
+    await fs.mkdir(packageSrcDir, { recursive: true });
+    await fs.writeFile(
+      entryPath,
+      `use pkg::web::all
+
+pub fn main() -> i32
+  status(code: 204, reason: "No Content".as_slice()).status.code()
+`,
+    );
+    await fs.writeFile(
+      path.join(packageSrcDir, "pkg.voyd"),
+      `pub use src::response::status
+`,
+    );
+    await fs.writeFile(
+      path.join(packageSrcDir, "response.voyd"),
+      `use std::http::{ Response, Status }
+use std::string::type::StringSlice
+
+pub fn status({ code: i32, reason: StringSlice }) -> Response
+  match(Status::custom(code: code, reason: reason))
+    Ok<Status> { value }:
+      Response::new(status: value)
+    Err:
+      Response::internal_server_error()
+`,
+    );
+
+    try {
+      const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+      const output = await result.run<number>({ entryName: "main" });
+      expect(output).toBe(204);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("resolves packages from additional configured pkgDirs", async () => {
     const sdk = createSdk();
     const repoRoot = process.cwd();

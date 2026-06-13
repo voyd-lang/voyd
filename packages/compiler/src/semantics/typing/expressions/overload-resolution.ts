@@ -7,7 +7,7 @@ import type {
   TypingContext,
   TypingState,
 } from "../types.js";
-import { getSymbolName } from "../type-system.js";
+import { getStructuralFields, getSymbolName } from "../type-system.js";
 import { satisfies as typeSatisfies } from "../type-relations.js";
 import {
   filterCandidatesByExpectedReturnType,
@@ -105,6 +105,7 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   state,
   matchesCandidate,
   argsForCandidate,
+  refineMatches,
 }: {
   name: string;
   candidates: readonly T[];
@@ -115,17 +116,204 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   state: TypingState;
   matchesCandidate: (candidate: T, args: readonly Arg[]) => boolean;
   argsForCandidate?: (candidate: T) => readonly Arg[];
+  refineMatches?: (matches: readonly T[]) => readonly T[];
 }): readonly T[] => {
+  const shapeCompatibleCandidates = candidates.filter((candidate) =>
+    signatureCallShapeCouldMatch({
+      args,
+      signature: candidate.signature,
+      ctx,
+      state,
+    }),
+  );
   enforceOverloadCandidateBudget({
     name,
-    candidateCount: candidates.length,
+    candidateCount: shapeCompatibleCandidates.length,
     ctx,
     span,
   });
-  const matches = candidates.filter((candidate) =>
+  const matches = shapeCompatibleCandidates.filter((candidate) =>
     matchesCandidate(candidate, argsForCandidate ? argsForCandidate(candidate) : args),
   );
-  return narrowOverloadMatches({ matches, typeArguments, ctx, state });
+  const refined = refineMatches ? refineMatches(matches) : matches;
+  return narrowOverloadMatches({ matches: refined, typeArguments, ctx, state });
+};
+
+const signatureCallShapeCouldMatch = ({
+  args,
+  signature,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  signature: FunctionSignature;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const positional = positionalCallShapeCouldMatch(args, signature.parameters);
+  if (typeof positional === "boolean") {
+    return positional;
+  }
+
+  return callShapeCouldMatch({
+    args,
+    params: publicCallParametersForShape(signature),
+    ctx,
+    state,
+  });
+};
+
+const publicCallParametersForShape = (
+  signature: FunctionSignature,
+): readonly ParamSignature[] =>
+  signature.parameters.filter((param) => param.synthetic !== "stable-callsite-id");
+
+const positionalCallShapeCouldMatch = (
+  args: readonly Arg[],
+  params: readonly ParamSignature[],
+): boolean | undefined => {
+  let required = 0;
+  let total = 0;
+
+  for (const arg of args) {
+    if (arg.label !== undefined) {
+      return undefined;
+    }
+  }
+
+  for (const param of params) {
+    if (param.synthetic === "stable-callsite-id") {
+      continue;
+    }
+    if (param.label !== undefined) {
+      return undefined;
+    }
+    total += 1;
+    if (!param.optional) {
+      required += 1;
+    }
+  }
+
+  return args.length >= required && args.length <= total;
+};
+
+const callShapeCouldMatch = ({
+  args,
+  params,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  if (
+    args.length > 0 &&
+    args.every((arg) => arg.label !== undefined) &&
+    params.length > 0 &&
+    params.every((param) => param.label !== undefined)
+  ) {
+    return allLabeledCallShapeCouldMatch({ args, params });
+  }
+
+  let argIndex = 0;
+  let paramIndex = 0;
+
+  while (paramIndex < params.length) {
+    const param = params[paramIndex]!;
+    const arg = args[argIndex];
+
+    if (!arg) {
+      for (let index = paramIndex; index < params.length; index += 1) {
+        if (!params[index]!.optional) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    if (param.label && arg.label === undefined) {
+      const structuralFields = getStructuralFields(arg.type, ctx, state);
+      if (!structuralFields) {
+        return false;
+      }
+
+      let cursor = paramIndex;
+      while (cursor < params.length) {
+        const runParam = params[cursor]!;
+        if (!runParam.label) {
+          break;
+        }
+        const hasField = structuralFields.some((field) => field.name === runParam.label);
+        if (hasField || runParam.optional) {
+          cursor += 1;
+          continue;
+        }
+        return false;
+      }
+
+      if (cursor === paramIndex) {
+        return false;
+      }
+
+      argIndex += 1;
+      paramIndex = cursor;
+      continue;
+    }
+
+    if (labelsCompatibleForShape(param, arg.label)) {
+      argIndex += 1;
+      paramIndex += 1;
+      continue;
+    }
+
+    if (param.optional) {
+      paramIndex += 1;
+      continue;
+    }
+
+    return false;
+  }
+
+  return argIndex === args.length;
+};
+
+const allLabeledCallShapeCouldMatch = ({
+  args,
+  params,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+}): boolean => {
+  const argLabels = new Set(
+    args
+      .map((arg) => arg.label)
+      .filter((label): label is string => typeof label === "string"),
+  );
+  const paramLabels = new Set(
+    params
+      .map((param) => param.label)
+      .filter((label): label is string => typeof label === "string"),
+  );
+
+  const hasUnknownArgLabel = [...argLabels].some((label) => !paramLabels.has(label));
+  if (hasUnknownArgLabel) {
+    return false;
+  }
+
+  return params.every((param) => param.optional || argLabels.has(param.label!));
+};
+
+const labelsCompatibleForShape = (
+  param: ParamSignature,
+  argLabel: string | undefined,
+): boolean => {
+  if (!param.label) {
+    return argLabel === undefined;
+  }
+
+  return argLabel === param.label;
 };
 
 export const applyExplicitTypeArguments = ({
@@ -247,6 +435,15 @@ const overloadDominates = ({
     ) {
       return false;
     }
+    const candidateBareTypeParam = isBareTypeParamRef(candidateParam.type, ctx);
+    const otherBareTypeParam = isBareTypeParamRef(otherParam.type, ctx);
+    if (!candidateBareTypeParam && otherBareTypeParam) {
+      strictlyMoreSpecific = true;
+      continue;
+    }
+    if (candidateBareTypeParam && !otherBareTypeParam) {
+      return false;
+    }
     if (!typeSatisfies(candidateParam.type, otherParam.type, ctx, state)) {
       return false;
     }
@@ -257,6 +454,9 @@ const overloadDominates = ({
 
   return strictlyMoreSpecific;
 };
+
+const isBareTypeParamRef = (type: TypeId, ctx: TypingContext): boolean =>
+  ctx.arena.get(type).kind === "type-param-ref";
 
 const unresolvedTypeParamPenalty = ({
   type,
@@ -349,8 +549,24 @@ const overloadGenericityPenalty = ({
     typeArguments,
     ctx,
   }).reduce(
-    (sum, param) => sum + unresolvedTypeParamPenalty({ type: param.type, ctx }),
+    (sum, param) =>
+      sum +
+      unresolvedTypeParamPenalty({ type: param.type, ctx }) +
+      bareFunctionReturnTypeParamPenalty(param.type, ctx),
     0,
+  );
+
+const bareFunctionReturnTypeParamPenalty = (type: TypeId, ctx: TypingContext): number => {
+  const desc = ctx.arena.get(type);
+  return desc.kind === "function" && isBareTypeParamRef(desc.returnType, ctx) ? 2 : 0;
+};
+
+const overloadConstraintSpecificity = (
+  candidate: OverloadResolutionCandidate
+): number =>
+  (candidate.signature.typeParams ?? []).reduce(
+    (sum, param) => sum + (param.constraint ? 1 : 0),
+    0
   );
 
 export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
@@ -404,5 +620,16 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
       }) === minPenalty,
   );
 
-  return leastGenericMatches.length === 1 ? leastGenericMatches : matches;
+  if (leastGenericMatches.length === 1) {
+    return leastGenericMatches;
+  }
+
+  const maxConstraintSpecificity = Math.max(
+    ...leastGenericMatches.map(overloadConstraintSpecificity)
+  );
+  const mostConstrainedMatches = leastGenericMatches.filter(
+    (candidate) => overloadConstraintSpecificity(candidate) === maxConstraintSpecificity
+  );
+
+  return mostConstrainedMatches.length === 1 ? mostConstrainedMatches : matches;
 };

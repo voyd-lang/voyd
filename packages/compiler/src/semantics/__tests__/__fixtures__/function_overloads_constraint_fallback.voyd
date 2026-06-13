@@ -1,0 +1,22 @@
+trait Marked
+  fn marker(self) -> i32
+
+obj MarkerValue {
+  value: i32
+}
+
+impl Marked for MarkerValue
+  fn marker(self) -> i32
+    self.value
+
+fn choose<T: Marked>(value: T) -> i32
+  value.marker()
+
+fn choose<T>(value: T) -> bool
+  value
+  true
+
+pub fn main() -> i32
+  let marked = choose(MarkerValue { value: 7 })
+  let fallback = choose(1)
+  if fallback then: marked else: 0

@@ -1,0 +1,290 @@
+use pkg::web::all
+use pkg::web::router
+use std::http::{ Body, Headers, HttpError, IncomingRequest, Method, QueryString, Response }
+use std::json::{ JsonBool, JsonValue }
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+
+type UserParams = {
+  id: String
+}
+
+type UserQuery = {
+  verbose: bool
+}
+
+type CreateUser = {
+  name: String,
+  active: bool
+}
+
+fn dsl_middleware(ctx: Context, next: Next) -> Response
+  next(ctx)
+
+fn serve_dsl_compile_probe()
+  serve(port: 3000) routes():
+    adopt(dsl_middleware)
+
+    get("/health") do:
+      "ok".as_slice().to_string()
+
+    group("/api") routes():
+      get("/nested") do:
+        "nested".as_slice().to_string()
+
+    get("/users/:id") do(params: UserParams, query: UserQuery):
+      let verbose = if query.verbose then: "true".as_slice().to_string() else: "false".as_slice().to_string()
+      params.id.concat(":".as_slice()).concat(verbose)
+
+    method_not_allowed() do(ctx: Context):
+      ctx
+      Response::method_not_allowed().text("custom method".as_slice())
+
+    on_rejection() do(rejection: Rejection, ctx: Context):
+      ctx
+      Response::new(status: rejection.status).text(rejection.message)
+
+    post("/echo", body: text_body()) do(input: String):
+      Response::ok().text(input)
+
+    post("/users", body: json_body()) do(input: CreateUser):
+      Response::ok().text(input.name)
+
+fn serve_options_dsl_compile_probe()
+  serve(port: 3001, host: "127.0.0.1", shutdown_timeout: 250) routes():
+    put("/replace", body: json_body()) do(input: CreateUser):
+      Response::ok().text(input.name)
+
+    patch("/update", body: text_body(), auth: required_session()) do(input: String, session: String):
+      Response::ok().text(session.concat(":".as_slice()).concat(input))
+
+    delete("/remove", body: text_body()) do(input: String):
+      Response::ok().text(input)
+
+    route("/manual", method: Method::Delete {}) do(ctx: Context):
+      ctx
+      Response::ok().text("manual".as_slice())
+
+    route("/manual-body", method: Method::Put {}, body: json_body()) do(input: CreateUser):
+      Response::ok().text(input.name)
+
+    route("/manual-query", method: Method::Get {}) do(query: UserQuery, ctx: Context):
+      ctx
+      if query.verbose then: "verbose".as_slice().to_string() else: "quiet".as_slice().to_string()
+
+    route("/manual-auth", method: Method::Get {}, auth: required_session()) do(session: String):
+      Response::ok().text(session)
+
+    get("/ctx-text") do(ctx: Context):
+      ctx.path()
+
+    get("/json") do:
+      let value: JsonValue = JsonBool { value: true }
+      value
+
+    get("/result") do:
+      let value: Result<String, Rejection> = Ok<String> { value: "result".as_slice().to_string() }
+      value
+
+    get("/option") do:
+      let value: Option<String> = Some<String> { value: "option".as_slice().to_string() }
+      value
+
+fn request(method: Method, path: String, { query?: QueryString }) -> IncomingRequest
+  IncomingRequest {
+    method: method,
+    path: path,
+    query: query,
+    headers: Headers::empty(),
+    body: Body::empty()
+  }
+
+fn request_with_body(method: Method, path: String, body: Body) -> IncomingRequest
+  IncomingRequest {
+    method: method,
+    path: path,
+    query: None {},
+    headers: Headers::empty(),
+    body: body
+  }
+
+fn response_text(response: Response): () -> String
+  match(response.text())
+    Ok<String> { value }:
+      value
+    Err<HttpError>:
+      "error".as_slice().to_string()
+
+pub fn route_probe() -> i32
+  let web_app = app()
+    .method_not_allowed((_ctx: Context) -> Response =>
+      Response::method_not_allowed().text("custom method".as_slice())
+    )
+    .get("/users/:id".as_slice(), handler: (ctx: Context) -> Response =>
+      let id = ctx.param("id".as_slice()) ?? "missing".as_slice().to_string()
+      let verbose = ctx.query_value("verbose".as_slice()) ?? "false".as_slice().to_string()
+      Response::ok().text(id.concat(":".as_slice()).concat(verbose))
+    )
+    .get("/users/new".as_slice(), handler: (_ctx: Context) -> Response =>
+      Response::ok().text("new".as_slice())
+    )
+    .get("/session".as_slice(), auth: required_session(), handler: (session: String) -> Response =>
+      Response::ok().text(session)
+    )
+
+  let static_response = web_app.handle(request(Method::Get {}, "/users/new".as_slice().to_string()))
+  if not response_text(static_response).equals("new"):
+    return -1
+
+  let params_response = web_app.handle(
+    request(
+      Method::Get {},
+      "/users/42".as_slice().to_string(),
+      query: QueryString { raw: "verbose=true".as_slice().to_string() }
+    )
+  )
+  if not response_text(params_response).equals("42:true"):
+    return -2
+
+  let authed = web_app.handle(
+    IncomingRequest {
+      method: Method::Get {},
+      path: "/session".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "ada".as_slice()),
+      body: Body::empty()
+    }
+  )
+  if not response_text(authed).equals("ada"):
+    return -8
+
+  let wrong_method = web_app.handle(request(Method::Post {}, "/users/42".as_slice().to_string()))
+  if not response_text(wrong_method).equals("custom method"):
+    return -9
+  wrong_method.status.code()
+
+pub fn builder_probe() -> i32
+  let built = build_app do(base):
+    let with_health = get_context(base, "/health".as_slice()) do(_ctx: Context):
+      Response::ok().text("ok".as_slice())
+
+    let with_item = get(with_health, "/items/:id".as_slice()) do(params: UserParams):
+      Response::ok().text(params.id)
+
+    let with_query = route_query_context(with_item, "/items/search".as_slice(), method: Method::Get {}) do(query: UserQuery, _ctx: Context):
+      if query.verbose then: Response::ok().text("verbose".as_slice()) else: Response::ok().text("quiet".as_slice())
+
+    let with_verbose = get_params_query(with_query, "/items/:id/verbose".as_slice()) do(params: UserParams, query: UserQuery):
+      let verbose = if query.verbose then: "true".as_slice().to_string() else: "false".as_slice().to_string()
+      Response::ok().text(params.id.concat(":".as_slice()).concat(verbose))
+
+    let with_auth = get(with_verbose, "/session".as_slice(), auth: required_session()) do(session: String):
+      Response::ok().text(session)
+
+    let with_route_auth = route_auth(with_auth, "/manual-session".as_slice(), method: Method::Get {}, auth: required_session()) do(session: String):
+      Response::ok().text(session)
+
+    post(
+      with_route_auth,
+      "/echo".as_slice(),
+      body: text_body(),
+      handler: (input: String) -> Response => Response::ok().text(input)
+    )
+
+  let health = built.handle(request(Method::Get {}, "/health".as_slice().to_string()))
+  if not response_text(health).equals("ok"):
+    return -3
+
+  let item = built.handle(request(Method::Get {}, "/items/book".as_slice().to_string()))
+  if not response_text(item).equals("book"):
+    return -4
+
+  let query_only = built.handle(
+    request(
+      Method::Get {},
+      "/items/search".as_slice().to_string(),
+      query: QueryString { raw: "verbose=true".as_slice().to_string() }
+    )
+  )
+  if not response_text(query_only).equals("verbose"):
+    return -10
+
+  let typed_query = built.handle(
+    request(
+      Method::Get {},
+      "/items/book/verbose".as_slice().to_string(),
+      query: QueryString { raw: "verbose=true".as_slice().to_string() }
+    )
+  )
+  if not response_text(typed_query).equals("book:true"):
+    return -6
+
+  let authed = built.handle(
+    IncomingRequest {
+      method: Method::Get {},
+      path: "/session".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "ada".as_slice()),
+      body: Body::empty()
+    }
+  )
+  if not response_text(authed).equals("ada"):
+    return -9
+
+  let route_authed = built.handle(
+    IncomingRequest {
+      method: Method::Get {},
+      path: "/manual-session".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "grace".as_slice()),
+      body: Body::empty()
+    }
+  )
+  if not response_text(route_authed).equals("grace"):
+    return -11
+
+  let echo = built.handle(
+    request_with_body(
+      Method::Post {},
+      "/echo".as_slice().to_string(),
+      Body::text("hello".as_slice())
+    )
+  )
+  if not response_text(echo).equals("hello"):
+    return -5
+
+  echo.status.code()
+
+pub fn all_json_response_probe() -> i32
+  let value: JsonValue = JsonBool { value: true }
+  let response = response_json(value)
+  let header = response.header("content-type".as_slice()) ?? "missing".as_slice().to_string()
+  if not header.equals("application/json"):
+    return -7
+
+  response.status.code()
+
+pub fn option_response_probe() -> i32
+  let some_value: Option<String> = Some<String> { value: "some".as_slice().to_string() }
+  let some_response = to_response(some_value)
+  if some_response.status.code() != 200:
+    return some_response.status.code()
+  if not response_text(some_response).equals("some".as_slice().to_string()):
+    return -9
+
+  let none_value: Option<String> = None {}
+  let none_response = to_response(none_value)
+  none_response.status.code()
+
+pub fn router_export_probe() -> i32
+  let api = router::Router::init()
+    .get_unit("/health".as_slice().to_string(), handler: () -> Response =>
+      Response::ok().text("router".as_slice())
+    )
+  let built = app().mount("/api".as_slice(), api)
+  let response = built.handle(request(Method::Get {}, "/api/health".as_slice().to_string()))
+  if not response_text(response).equals("router"):
+    return -8
+
+  response.status.code()

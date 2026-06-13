@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { HirCallExpr, HirLambdaExpr } from "../../hir/index.js";
+import type {
+  HirCallExpr,
+  HirLambdaExpr,
+  HirMethodCallExpr,
+} from "../../hir/index.js";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 
@@ -75,5 +79,46 @@ describe("overload lambda return hint", () => {
     expect(call).toBeDefined();
     if (!call) return;
     expect(typing.table.getExprType(call.id)).toBe(bool);
+  });
+
+  it("uses callback return types to disambiguate overloads before generic constraints", () => {
+    expect(() =>
+      semanticsPipeline(
+        loadAst("overload_lambda_callback_return_disambiguation.voyd"),
+      ),
+    ).not.toThrow();
+  });
+
+  it("uses named callback return types to reject incompatible generic overloads", () => {
+    expect(() =>
+      semanticsPipeline(
+        loadAst("overload_named_callback_return_disambiguation.voyd"),
+      ),
+    ).not.toThrow();
+  });
+
+  it("uses inline lambda parameter shape to disambiguate method overloads", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_method_parameter_shape_disambiguation.voyd"),
+    );
+    const { hir, typing } = semantics;
+
+    const calls = Array.from(hir.expressions.values())
+      .filter(
+        (expr): expr is HirMethodCallExpr =>
+          expr.exprKind === "method-call" && expr.method === "get",
+      )
+      .sort((left, right) => (left.span?.start ?? 0) - (right.span?.start ?? 0));
+
+    expect(calls).toHaveLength(3);
+    const selectedTypeParamCounts = calls.map((call) => {
+      const targets = typing.callTargets.get(call.id);
+      const target = targets?.values().next().value;
+      expect(target).toBeDefined();
+      if (!target) return undefined;
+      return typing.functions.getSignature(target.symbol)?.typeParams?.length ?? 0;
+    });
+
+    expect(selectedTypeParamCounts).toEqual([1, 2, 3]);
   });
 });

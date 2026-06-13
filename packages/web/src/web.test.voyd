@@ -1,0 +1,1013 @@
+use src::router::{
+  AppBuild,
+  Context,
+  Next,
+  app,
+  build_app,
+  ignore_trailing_slash,
+  Router
+}
+use src::routes::{
+  get,
+  get_context,
+  get_params_query,
+  method_not_allowed,
+  on_rejection,
+  post,
+  route_auth,
+  route_params,
+  route_params_context,
+  route_headers_context,
+  route_params_query_headers_context,
+  route_query_context
+}
+use src::extract::{
+  extract_query,
+  parse_query,
+  QueryParams,
+  Rejection,
+  json as json_body_policy,
+  optional_session,
+  RouteParams,
+  required_session,
+  text as text_body_policy
+}
+use src::html::{ html, render }
+use src::response::{ json as json_response, response_json, to_response }
+use src::static_files::serve_dir
+use std::error::IoError
+use std::fs::write_string
+use std::http::{ Body, Headers, IncomingRequest, Method, QueryString, Response, Status }
+use std::json::{ JsonBool, JsonValue }
+use std::msgpack::MsgPack
+use std::optional::types::all
+use std::path::Path
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+use std::vx::all
+
+@effect(id: "voyd.web.test.log")
+eff WebTestLog
+  info(resume, value: i32) -> void
+
+fn request(method: Method, path: String) -> IncomingRequest
+  IncomingRequest {
+    method: method,
+    path: path,
+    query: None {},
+    headers: Headers::empty(),
+    body: Body::empty()
+  }
+
+fn request_with_query(method: Method, path: String, query: String) -> IncomingRequest
+  IncomingRequest {
+    method: method,
+    path: path,
+    query: Some<QueryString> { value: QueryString { raw: query } },
+    headers: Headers::empty(),
+    body: Body::empty()
+  }
+
+fn request_with_body(method: Method, path: String, body: Body) -> IncomingRequest
+  IncomingRequest {
+    method: method,
+    path: path,
+    query: None {},
+    headers: Headers::empty(),
+    body: body
+  }
+
+fn request_with_headers_and_body(method: Method, path: String, headers: Headers, body: Body) -> IncomingRequest
+  IncomingRequest {
+    method: method,
+    path: path,
+    query: None {},
+    headers: headers,
+    body: body
+  }
+
+fn request_with_query_and_headers(method: Method, path: String, query: String, headers: Headers) -> IncomingRequest
+  IncomingRequest {
+    method: method,
+    path: path,
+    query: Some<QueryString> { value: QueryString { raw: query } },
+    headers: headers,
+    body: Body::empty()
+  }
+
+fn response_text(response: Response) -> String
+  match(response.text())
+    Ok<String> { value }:
+      value
+    Err:
+      "error".as_slice().to_string()
+
+fn append_header(ctx: Context, next: Next) -> Response
+  next(ctx).with(header: "x-web-test".as_slice(), value: "seen".as_slice())
+
+fn append_child_header(ctx: Context, next: Next) -> Response
+  next(ctx).with(header: "x-child-test".as_slice(), value: "seen".as_slice())
+
+fn custom_rejection(error: Rejection, ctx: Context) -> Response
+  ctx
+  Response::new(status: error.status)
+    .with(header: "x-error".as_slice(), value: "custom".as_slice())
+    .text(error.message)
+
+obj TestSession {
+  api user: String
+}
+
+type TestUserParams = {
+  id: String
+}
+
+type TestUserQuery = {
+  verbose: bool
+}
+
+type TestStringQuery = {
+  q: String
+}
+
+type TestCreateUser = {
+  name: String,
+  active: bool
+}
+
+type TestCreateCount = {
+  count: i32
+}
+
+type TestHeaders = {
+  authorization: String
+}
+
+fn extract_test_session(request: IncomingRequest) -> Result<TestSession, Rejection>
+  match(request.header("authorization".as_slice()))
+    Some<String> { value }:
+      Ok<TestSession> { value: TestSession { user: value } }
+    None:
+      Err<Rejection> { error: Rejection::unauthorized("missing auth".as_slice()) }
+
+fn auth_label(session: Option<String>) -> String
+  match(session)
+    Some<String> { value }:
+      value
+    None:
+      "anonymous".as_slice().to_string()
+
+fn params_query_bool_app() -> AppBuild
+  build_app do(base):
+    get_params_query(base, "/users/:id".as_slice()) do(params: TestUserParams, query: TestUserQuery):
+      let verbose = if query.verbose then: "true".as_slice().to_string() else: "false".as_slice().to_string()
+      Response::ok().text(params.id.concat(":".as_slice()).concat(verbose))
+
+fn structural_dto_app() -> AppBuild
+  build_app do(base):
+    let with_search = route_query_context(base, "/search".as_slice(), method: Method::Get {}) do(query: TestUserQuery, _ctx: Context):
+      let verbose = if query.verbose then: "true".as_slice().to_string() else: "false".as_slice().to_string()
+      Response::ok().text(verbose)
+
+    let with_string_query = get_params_query(with_search, "/query-string/:id".as_slice()) do(_params: TestUserParams, query: TestStringQuery):
+      Response::ok().text(query.q)
+
+    let with_user = get_params_query(with_string_query, "/users/:id".as_slice()) do(params: TestUserParams, query: TestUserQuery):
+      let verbose = if query.verbose then: "true".as_slice().to_string() else: "false".as_slice().to_string()
+      Response::ok().text(params.id.concat(":".as_slice()).concat(verbose))
+
+    let with_created = post(with_user, "/users".as_slice(), body: json_body_policy()) do(input: TestCreateUser):
+      let active = if input.active then: "active".as_slice().to_string() else: "inactive".as_slice().to_string()
+      Response::ok().text(input.name.concat(":".as_slice()).concat(active))
+
+    let with_context = post(with_created, "/users/context".as_slice(), body: json_body_policy()) do(input: TestCreateUser, ctx: Context):
+      Response::ok().text(input.name.concat(":".as_slice()).concat(ctx.path()))
+
+    post(with_context, "/counts".as_slice(), body: json_body_policy()) do(input: TestCreateCount):
+      if input.count == 3:
+        Response::ok().text("count:3".as_slice())
+      else:
+        Response::ok().text("bad-count".as_slice())
+
+test "query extraction decodes bool fields":
+  match(extract_query<TestUserQuery>(parse_query("verbose=true".as_slice())))
+    Ok<TestUserQuery> { value }:
+      assert(value.verbose, eq: true)
+    Err:
+      assert(false, eq: true)
+
+test "query context route extracts bool query DTOs":
+  let built = build_app do(base):
+    route_query_context(base, "/search".as_slice(), method: Method::Get {}) do(query: TestUserQuery, _ctx: Context):
+      if query.verbose then: Response::ok().text("true".as_slice()) else: Response::ok().text("false".as_slice())
+
+  let response = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/search".as_slice().to_string(),
+      "verbose=true".as_slice().to_string()
+    )
+  )
+  assert(response_text(response).equals("true"), eq: true)
+
+test "params query route extracts bool query DTOs":
+  let built = params_query_bool_app()
+  let response = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/users/ada".as_slice().to_string(),
+      "verbose=true".as_slice().to_string()
+    )
+  )
+  assert(response_text(response).equals("ada:true"), eq: true)
+
+test "builder routes match methods static segments params and query":
+  let web_app = app()
+    .get_unit("/ping".as_slice().to_string(), handler: () -> Response =>
+      Response::ok().text("pong".as_slice())
+    )
+    .get("/users/:id".as_slice(), handler: (ctx: Context) -> Response =>
+      let id = ctx.param("id".as_slice()) ?? "missing".as_slice().to_string()
+      let verbose = ctx.query_value("verbose".as_slice()) ?? "false".as_slice().to_string()
+      Response::ok().text(id.concat(":".as_slice()).concat(verbose))
+    )
+    .get("/users/new".as_slice(), handler: (_ctx: Context) -> Response =>
+      Response::ok().text("new".as_slice())
+    )
+
+  let static_response = web_app.handle(request(Method::Get {}, "/users/new".as_slice().to_string()))
+  assert(response_text(static_response).equals("new"), eq: true)
+
+  let unit_response = web_app.handle(request(Method::Get {}, "/ping".as_slice().to_string()))
+  assert(response_text(unit_response).equals("pong"), eq: true)
+
+  let param_response = web_app.handle(
+    request_with_query(
+      Method::Get {},
+      "/users/42".as_slice().to_string(),
+      "verbose=true".as_slice().to_string()
+    )
+  )
+  assert(response_text(param_response).equals("42:true"), eq: true)
+
+  let wrong_method = web_app.handle(request(Method::Post {}, "/users/42".as_slice().to_string()))
+  assert(wrong_method.status.code(), eq: 405)
+
+test "strict trailing slash policy distinguishes path variants":
+  let strict_app = app()
+    .get("/users".as_slice(), handler: (_ctx: Context) -> Response =>
+      Response::ok().text("users".as_slice())
+    )
+
+  let strict_response = strict_app.handle(request(Method::Get {}, "/users/".as_slice().to_string()))
+  assert(strict_response.status.code(), eq: 404)
+
+  let ignore_response = strict_app
+    .with(trailing_slash: ignore_trailing_slash())
+    .handle(request(Method::Get {}, "/users/".as_slice().to_string()))
+  assert(ignore_response.status.code(), eq: 200)
+  assert(response_text(ignore_response).equals("users"), eq: true)
+
+  let slash_route_app = app()
+    .with(trailing_slash: ignore_trailing_slash())
+    .get("/projects/".as_slice(), handler: (_ctx: Context) -> Response =>
+      Response::ok().text("projects".as_slice())
+    )
+
+  let slashless_response = slash_route_app.handle(request(Method::Get {}, "/projects".as_slice().to_string()))
+  assert(slashless_response.status.code(), eq: 200)
+  assert(response_text(slashless_response).equals("projects"), eq: true)
+
+  let slash_response = slash_route_app.handle(request(Method::Get {}, "/projects/".as_slice().to_string()))
+  assert(slash_response.status.code(), eq: 200)
+  assert(response_text(slash_response).equals("projects"), eq: true)
+
+  let param_app = app()
+    .get("/users/:id".as_slice(), handler: (ctx: Context) -> Response =>
+      let id = ctx.param("id".as_slice()) ?? "missing".as_slice().to_string()
+      Response::ok().text(id)
+    )
+  let empty_param_response = param_app.handle(request(Method::Get {}, "/users/".as_slice().to_string()))
+  assert(empty_param_response.status.code(), eq: 404)
+
+test "middleware wraps matched routes in declaration order":
+  let web_app = app()
+    .adopt(append_header)
+    .get("/health".as_slice(), handler: (_ctx: Context) -> Response =>
+      Response::ok().text("ok".as_slice())
+    )
+
+  let response = web_app.handle(request(Method::Get {}, "/health".as_slice().to_string()))
+  assert(response_text(response).equals("ok"), eq: true)
+  match(response.header("x-web-test".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("seen"), eq: true)
+    None:
+      assert(false, eq: true)
+
+test "handlers can return ordinary IntoResponse values":
+  let web_app = app()
+    .get("/health".as_slice(), handler: (_ctx: Context) -> Response =>
+      Response::ok().text("ok".as_slice())
+    )
+
+  let response = web_app.handle(request(Method::Get {}, "/health".as_slice().to_string()))
+  assert(response.status.code(), eq: 200)
+  assert(response_text(response).equals("ok"), eq: true)
+
+test "typed handlers may require application effects":
+  let web_app = app()
+    .get("/log".as_slice(), handler: (_ctx: Context) -> Response =>
+      WebTestLog::info(1)
+      Response::ok().text("ok".as_slice())
+    )
+  web_app
+  assert(true, eq: true)
+
+test "on_error customizes extractor rejections":
+  let web_app = build_app do(base):
+    let with_errors = base.on_error(custom_rejection)
+    get_context(with_errors, "/typed".as_slice()) do(ctx: Context):
+      ctx.reject(Rejection::bad_request("missing typed param".as_slice()))
+
+  let response = web_app.handle(request(Method::Get {}, "/typed".as_slice().to_string()))
+  assert(response.status.code(), eq: 400)
+  assert(response_text(response).equals("missing typed param"), eq: true)
+  match(response.header("x-error".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("custom"), eq: true)
+    None:
+      assert(false, eq: true)
+
+test "error hooks customize rejections and method not allowed":
+  let web_app = build_app do(base):
+    let with_rejections = on_rejection(base, custom_rejection)
+    let with_method = method_not_allowed(with_rejections, (_ctx: Context) -> Response =>
+      Response::new(status: Status::method_not_allowed()).text("custom method".as_slice())
+    )
+    get_context(with_method, "/typed".as_slice()) do(ctx: Context):
+      ctx.reject(Rejection::bad_request("missing typed param".as_slice()))
+
+  let rejection = web_app.handle(request(Method::Get {}, "/typed".as_slice().to_string()))
+  assert(rejection.status.code(), eq: 400)
+  match(rejection.header("x-error".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("custom"), eq: true)
+    None:
+      assert(false, eq: true)
+
+  let wrong_method = web_app.handle(request(Method::Post {}, "/typed".as_slice().to_string()))
+  assert(wrong_method.status.code(), eq: 405)
+  assert(response_text(wrong_method).equals("custom method"), eq: true)
+
+test "mount prefixes routes and preserves parent and child middleware":
+  let child = app()
+    .adopt(append_child_header)
+    .get("/health".as_slice(), handler: (_ctx: Context) -> Response =>
+      Response::ok().text("mounted".as_slice())
+    )
+  let web_app = app()
+    .adopt(append_header)
+    .mount("/api".as_slice(), child)
+
+  let response = web_app.handle(request(Method::Get {}, "/api/health".as_slice().to_string()))
+  assert(response_text(response).equals("mounted"), eq: true)
+  match(response.header("x-web-test".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("seen"), eq: true)
+    None:
+      assert(false, eq: true)
+  match(response.header("x-child-test".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("seen"), eq: true)
+    None:
+      assert(false, eq: true)
+
+test "router builder mirrors app composition":
+  let built = Router::init()
+    .adopt(append_header)
+    .get("/health".as_slice(), handler: (_ctx: Context) -> Response =>
+      Response::ok().text("router".as_slice())
+    )
+    .group("/api".as_slice(), routes: (child: Router) -> Router =>
+      child.get("/nested".as_slice(), handler: (_ctx: Context) -> Response =>
+        Response::ok().text("nested".as_slice())
+      )
+    )
+
+  let health = built.handle(request(Method::Get {}, "/health".as_slice().to_string()))
+  assert(response_text(health).equals("router"), eq: true)
+  match(health.header("x-web-test".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("seen"), eq: true)
+    None:
+      assert(false, eq: true)
+
+  let nested = built.handle(request(Method::Get {}, "/api/nested".as_slice().to_string()))
+  assert(response_text(nested).equals("nested"), eq: true)
+
+test "builder exposes typed params query and json body":
+  let built = app()
+    .get_params_query("/users/:id".as_slice(), handler: (params: TestUserParams, query: TestUserQuery) -> Response =>
+      let verbose = if query.verbose then: "true".as_slice().to_string() else: "false".as_slice().to_string()
+      Response::ok().text(params.id.concat(":".as_slice()).concat(verbose))
+    )
+    .get("/builder-session".as_slice(), auth: required_session(), handler: (session: String, ctx: Context) -> Response =>
+      Response::ok().text(session.concat(":".as_slice()).concat(ctx.path()))
+    )
+    .post("/users".as_slice(), body: json_body_policy(), handler: (input: TestCreateUser) -> Response =>
+      Response::ok().text(input.name)
+    )
+
+  let user = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/users/lin".as_slice().to_string(),
+      "verbose=true".as_slice().to_string()
+    )
+  )
+  assert(response_text(user).equals("lin:true"), eq: true)
+
+  let created = built.handle(
+    request_with_body(
+      Method::Post {},
+      "/users".as_slice().to_string(),
+      Body::text("{\"name\":\"Builder\",\"active\":true}".as_slice())
+    )
+  )
+  assert(response_text(created).equals("Builder"), eq: true)
+
+  let builder_session = built.handle(
+    IncomingRequest {
+      method: Method::Get {},
+      path: "/builder-session".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "lin".as_slice()),
+      body: Body::empty()
+    }
+  )
+  assert(response_text(builder_session).equals("lin:/builder-session"), eq: true)
+
+test "build_app helper builds routes and supports typed params":
+  let built = build_app do(base):
+    let with_health = get_context(base, "/health".as_slice()) do(_ctx: Context):
+      Response::ok().text("ok".as_slice())
+
+    get(with_health, "/users/:id".as_slice()) do(params: TestUserParams):
+      Response::ok().text(params.id)
+
+  let health = built.handle(request(Method::Get {}, "/health".as_slice().to_string()))
+  assert(response_text(health).equals("ok"), eq: true)
+
+  let user = built.handle(request(Method::Get {}, "/users/alice".as_slice().to_string()))
+  assert(response_text(user).equals("alice"), eq: true)
+
+test "structural DTO app handles params and bool query":
+  let built = structural_dto_app()
+  let user = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/users/ada".as_slice().to_string(),
+      "verbose=true".as_slice().to_string()
+    )
+  )
+  assert(response_text(user).equals("ada:true"), eq: true)
+
+test "structural DTO app handles query-only and string query":
+  let built = structural_dto_app()
+  let search = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/search".as_slice().to_string(),
+      "verbose=true".as_slice().to_string()
+    )
+  )
+  assert(response_text(search).equals("true"), eq: true)
+
+  let string_query = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/query-string/ignored".as_slice().to_string(),
+      "q=true".as_slice().to_string()
+    )
+  )
+  assert(response_text(string_query).equals("true"), eq: true)
+
+  let leading_zero_query = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/query-string/ignored".as_slice().to_string(),
+      "q=00123".as_slice().to_string()
+    )
+  )
+  assert(response_text(leading_zero_query).equals("00123"), eq: true)
+
+  let decimal_query = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/query-string/ignored".as_slice().to_string(),
+      "q=1.0".as_slice().to_string()
+    )
+  )
+  assert(response_text(decimal_query).equals("1.0"), eq: true)
+
+test "structural DTO app handles json body DTO":
+  let built = structural_dto_app()
+  let created = built.handle(
+    request_with_body(
+      Method::Post {},
+      "/users".as_slice().to_string(),
+      Body::text("{\"name\":\"Grace\",\"active\":true}".as_slice())
+    )
+  )
+  assert(response_text(created).equals("Grace:active"), eq: true)
+
+test "json body policy rejects unsupported content type":
+  let built = structural_dto_app()
+  let rejected = built.handle(
+    request_with_headers_and_body(
+      Method::Post {},
+      "/users".as_slice().to_string(),
+      Headers::empty().append(header: "content-type".as_slice(), value: "text/plain".as_slice()),
+      Body::text("{\"name\":\"Grace\",\"active\":true}".as_slice())
+    )
+  )
+  assert(rejected.status.code(), eq: 415)
+  assert(response_text(rejected).equals("expected application/json request body"), eq: true)
+
+test "structural DTO app handles json body DTO with context":
+  let built = structural_dto_app()
+  let created_with_context = built.handle(
+    request_with_body(
+      Method::Post {},
+      "/users/context".as_slice().to_string(),
+      Body::text("{\"name\":\"Ada\",\"active\":true}".as_slice())
+    )
+  )
+  assert(response_text(created_with_context).equals("Ada:/users/context"), eq: true)
+
+test "structural DTO app handles json integer body DTO":
+  let built = structural_dto_app()
+  let created_count = built.handle(
+    request_with_body(
+      Method::Post {},
+      "/counts".as_slice().to_string(),
+      Body::text("{\"count\":3}".as_slice())
+    )
+  )
+  assert(response_text(created_count).equals("count:3"), eq: true)
+
+test "route helpers support query headers and final context extraction":
+  let built = build_app do(base):
+    let with_query = route_query_context(base, "/search".as_slice(), method: Method::Get {}) do(query: TestUserQuery, _ctx: Context):
+      let verbose = if query.verbose then: "true".as_slice().to_string() else: "false".as_slice().to_string()
+      Response::ok().text(verbose)
+
+    let with_headers = route_headers_context(with_query, "/headers".as_slice(), method: Method::Get {}) do(headers: TestHeaders, ctx: Context):
+      Response::ok().text(headers.authorization.concat(":".as_slice()).concat(ctx.path()))
+
+    let with_json = route_query_context(with_headers, "/json".as_slice(), method: Method::Get {}) do(query: TestUserQuery, _ctx: Context):
+      let value: JsonValue = JsonBool { value: query.verbose }
+      value
+
+    route_params_query_headers_context(with_json, "/users/:id/full".as_slice(), method: Method::Get {}) do(params: TestUserParams, query: TestUserQuery, headers: TestHeaders, ctx: Context):
+      let verbose = if query.verbose then: "true".as_slice().to_string() else: "false".as_slice().to_string()
+      let label = params.id.concat(":".as_slice()).concat(verbose)
+      let with_header = label.concat(":".as_slice()).concat(headers.authorization)
+      Response::ok().text(with_header.concat(":".as_slice()).concat(ctx.path()))
+
+  let headers = Headers::empty().append(header: "Authorization".as_slice(), value: "token".as_slice())
+  let query_only = built.handle(
+    request_with_query_and_headers(
+      Method::Get {},
+      "/search".as_slice().to_string(),
+      "verbose=true".as_slice().to_string(),
+      headers
+    )
+  )
+  assert(response_text(query_only).equals("true"), eq: true)
+
+  let headers_ctx = built.handle(
+    request_with_query_and_headers(
+      Method::Get {},
+      "/headers".as_slice().to_string(),
+      "verbose=false".as_slice().to_string(),
+      headers
+    )
+  )
+  assert(response_text(headers_ctx).equals("token:/headers"), eq: true)
+
+  let json_response = built.handle(
+    request_with_query_and_headers(
+      Method::Get {},
+      "/json".as_slice().to_string(),
+      "verbose=true".as_slice().to_string(),
+      headers
+    )
+  )
+  assert(json_response.status.code(), eq: 200)
+  match(json_response.header("content-type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("application/json"), eq: true)
+    None:
+      assert(false, eq: true)
+
+  let all_extractors = built.handle(
+    request_with_query_and_headers(
+      Method::Get {},
+      "/users/ada/full".as_slice().to_string(),
+      "verbose=true".as_slice().to_string(),
+      headers
+    )
+  )
+  assert(response_text(all_extractors).equals("ada:true:token:/users/ada/full"), eq: true)
+
+test "extracted route helpers convert status tuple responses":
+  let built = build_app do(base):
+    let with_params = route_params(base, "/tuple/:id".as_slice(), method: Method::Get {}) do(params: TestUserParams):
+      (Status::created(), params.id)
+
+    route_query_context(with_params, "/tuple-query".as_slice(), method: Method::Get {}) do(query: TestStringQuery, _ctx: Context):
+      (Status::created(), query.q)
+
+  let params_response = built.handle(request(Method::Get {}, "/tuple/ada".as_slice().to_string()))
+  assert(params_response.status.code(), eq: 201)
+  assert(response_text(params_response).equals("ada"), eq: true)
+
+  let query_response = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/tuple-query".as_slice().to_string(),
+      "q=grace".as_slice().to_string()
+    )
+  )
+  assert(query_response.status.code(), eq: 201)
+  assert(response_text(query_response).equals("grace"), eq: true)
+
+test "query context route helper converts result responses":
+  let built = build_app do(base):
+    route_query_context(base, "/tuple-result".as_slice(), method: Method::Get {}) do(query: TestStringQuery, _ctx: Context):
+      let value: Result<String, Rejection> = Ok<String> { value: query.q }
+      value
+
+  let result_response = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/tuple-result".as_slice().to_string(),
+      "q=result".as_slice().to_string()
+    )
+  )
+  assert(result_response.status.code(), eq: 200)
+  assert(response_text(result_response).equals("result"), eq: true)
+
+test "query context route helper converts status json tuple responses":
+  let built = build_app do(base):
+    route_query_context(base, "/tuple-json".as_slice(), method: Method::Get {}) do(query: TestUserQuery, _ctx: Context):
+      let value: JsonValue = JsonBool { value: query.verbose }
+      (Status::created(), value)
+
+  let json_tuple_response = built.handle(
+    request_with_query(
+      Method::Get {},
+      "/tuple-json".as_slice().to_string(),
+      "verbose=true".as_slice().to_string()
+    )
+  )
+  assert(json_tuple_response.status.code(), eq: 201)
+  match(json_tuple_response.header("content-type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("application/json"), eq: true)
+    None:
+      assert(false, eq: true)
+
+test "body policies extract text bodies":
+  let web_app = app()
+    .post("/echo".as_slice(), body: text_body_policy(), handler: (input: String) -> Response =>
+      Response::ok().text(input)
+    )
+
+  let response = web_app.handle(
+    request_with_body(
+      Method::Post {},
+      "/echo".as_slice().to_string(),
+      Body::text("hello".as_slice())
+    )
+  )
+  assert(response_text(response).equals("hello"), eq: true)
+
+test "body auth policies extract session values":
+  let web_app = build_app do(base):
+    let with_session = post(
+      base,
+      "/session".as_slice(),
+      body: text_body_policy(),
+      auth: required_session<TestSession>(extract: extract_test_session),
+      handler: (input: String, session: TestSession) -> Response =>
+        Response::ok().text(session.user.concat(":".as_slice()).concat(input))
+    )
+
+    post(with_session, "/session/context".as_slice(), body: text_body_policy(), auth: required_session<TestSession>(extract: extract_test_session)) do(input: String, session: TestSession, ctx: Context):
+      Response::ok().text(session.user.concat(":".as_slice()).concat(input).concat(":".as_slice()).concat(ctx.path()))
+
+  let authed = web_app.handle(
+    IncomingRequest {
+      method: Method::Post {},
+      path: "/session".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "ada".as_slice()),
+      body: Body::text("hello".as_slice())
+    }
+  )
+  assert(response_text(authed).equals("ada:hello"), eq: true)
+
+  let authed_context = web_app.handle(
+    IncomingRequest {
+      method: Method::Post {},
+      path: "/session/context".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "grace".as_slice()),
+      body: Body::text("hello".as_slice())
+    }
+  )
+  assert(response_text(authed_context).equals("grace:hello:/session/context"), eq: true)
+
+  let missing = web_app.handle(
+    request_with_body(
+      Method::Post {},
+      "/session".as_slice().to_string(),
+      Body::text("hello".as_slice())
+    )
+  )
+  assert(missing.status.code(), eq: 401)
+
+test "builder body auth handlers can request context":
+  let web_app = app()
+    .post(
+      "/session/context".as_slice(),
+      body: text_body_policy(),
+      auth: required_session<TestSession>(extract: extract_test_session),
+      handler: (input: String, session: TestSession, ctx: Context) -> Response =>
+        Response::ok().text(session.user.concat(":".as_slice()).concat(input).concat(":".as_slice()).concat(ctx.path()))
+    )
+
+  let authed = web_app.handle(
+    IncomingRequest {
+      method: Method::Post {},
+      path: "/session/context".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "ada".as_slice()),
+      body: Body::text("hello".as_slice())
+    }
+  )
+  assert(response_text(authed).equals("ada:hello:/session/context"), eq: true)
+
+test "auth-only routes extract required optional and typed sessions":
+  let web_app = build_app do(base):
+    let with_typed = get(
+      base,
+      "/me".as_slice(),
+      auth: required_session<TestSession>(extract: extract_test_session)
+    ) do(session: TestSession):
+      Response::ok().text(session.user)
+
+    let with_required = get(with_typed, "/required".as_slice(), auth: required_session()) do(session: String, ctx: Context):
+      Response::ok().text(session.concat(":".as_slice()).concat(ctx.path()))
+
+    let with_route_auth = route_auth(
+      with_required,
+      "/route-auth".as_slice(),
+      method: Method::Patch {},
+      auth: required_session<TestSession>(extract: extract_test_session)
+    ) do(session: TestSession):
+      Response::ok().text(session.user)
+
+    get(with_route_auth, "/optional".as_slice(), auth: optional_session()) do(session: Option<String>):
+      Response::ok().text(auth_label(session))
+
+  let typed = web_app.handle(
+    IncomingRequest {
+      method: Method::Get {},
+      path: "/me".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "ada".as_slice()),
+      body: Body::empty()
+    }
+  )
+  assert(response_text(typed).equals("ada"), eq: true)
+
+  let required = web_app.handle(
+    IncomingRequest {
+      method: Method::Get {},
+      path: "/required".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "grace".as_slice()),
+      body: Body::empty()
+    }
+  )
+  assert(response_text(required).equals("grace:/required"), eq: true)
+
+  let missing_required = web_app.handle(request(Method::Get {}, "/required".as_slice().to_string()))
+  assert(missing_required.status.code(), eq: 401)
+
+  let route_auth_response = web_app.handle(
+    IncomingRequest {
+      method: Method::Patch {},
+      path: "/route-auth".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "ada".as_slice()),
+      body: Body::empty()
+    }
+  )
+  assert(response_text(route_auth_response).equals("ada"), eq: true)
+
+  let optional = web_app.handle(request(Method::Get {}, "/optional".as_slice().to_string()))
+  assert(response_text(optional).equals("anonymous"), eq: true)
+
+test "no arg auth policies use authorization header strings":
+  let web_app = build_app do(base):
+    let with_required = post(
+      base,
+      "/required".as_slice(),
+      body: text_body_policy(),
+      auth: required_session()
+    ) do(input: String, session: String):
+      Response::ok().text(session.concat(":".as_slice()).concat(input))
+
+    let with_typed = post(
+      with_required,
+      "/typed".as_slice(),
+      body: text_body_policy(),
+      auth: required_session()
+    ) do(input: String, session: TestSession):
+      Response::ok().text(session.user.concat(":".as_slice()).concat(input))
+
+    post(
+      with_typed,
+      "/optional".as_slice(),
+      body: text_body_policy(),
+      auth: optional_session()
+    ) do(input: String, session: Option<String>):
+      Response::ok().text(auth_label(session).concat(":".as_slice()).concat(input))
+
+  let authed = web_app.handle(
+    IncomingRequest {
+      method: Method::Post {},
+      path: "/required".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "grace".as_slice()),
+      body: Body::text("hello".as_slice())
+    }
+  )
+  assert(response_text(authed).equals("grace:hello"), eq: true)
+
+  let typed = web_app.handle(
+    IncomingRequest {
+      method: Method::Post {},
+      path: "/typed".as_slice().to_string(),
+      query: None {},
+      headers: Headers::empty().append(header: "authorization".as_slice(), value: "{\"user\":\"ada\"}".as_slice()),
+      body: Body::text("hello".as_slice())
+    }
+  )
+  assert(response_text(typed).equals("ada:hello"), eq: true)
+
+  let missing = web_app.handle(
+    request_with_body(
+      Method::Post {},
+      "/required".as_slice().to_string(),
+      Body::text("hello".as_slice())
+    )
+  )
+  assert(missing.status.code(), eq: 401)
+
+  let anonymous = web_app.handle(
+    request_with_body(
+      Method::Post {},
+      "/optional".as_slice().to_string(),
+      Body::text("hello".as_slice())
+    )
+  )
+  assert(response_text(anonymous).equals("anonymous:hello"), eq: true)
+
+test "response helpers write json content type":
+  let value: JsonValue = JsonBool { value: true }
+  let json_result = json_response(value)
+  assert(json_result.status.code(), eq: 200)
+  match(json_result.header("content-type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("application/json"), eq: true)
+    None:
+      assert(false, eq: true)
+
+  let replaced = response_json(
+    Response::ok().with(header: "content-type".as_slice(), value: "text/plain".as_slice()),
+    value
+  )
+  match(replaced.header("content-type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("application/json"), eq: true)
+    None:
+      assert(false, eq: true)
+
+test "response helpers convert result values":
+  let ok_result: Result<String, Rejection> = Ok<String> { value: "ok".as_slice().to_string() }
+  assert(response_text(to_response(ok_result)).equals("ok"), eq: true)
+
+  let err_result: Result<String, Rejection> =
+    Err<Rejection> { error: Rejection::bad_request("bad".as_slice()) }
+  let err_response = to_response(err_result)
+  assert(err_response.status.code(), eq: 400)
+  assert(response_text(err_response).equals("bad"), eq: true)
+
+test "response helpers convert none values":
+  let none_value: Option<String> = None {}
+  assert(to_response<String>(none_value).status.code(), eq: 404)
+
+test "response helpers convert status text tuples":
+  let status_text = to_response((Status::created(), "created".as_slice().to_string()))
+  assert(status_text.status.code(), eq: 201)
+  assert(response_text(status_text).equals("created"), eq: true)
+
+test "static files middleware composes with app builder":
+  let web_app = app().adopt(serve_dir(Path::new("/tmp".as_slice())))
+  web_app
+  assert(true, eq: true)
+
+test "static files middleware accepts string roots":
+  let from_slice = serve_dir("/tmp".as_slice())
+  let from_string = serve_dir("/tmp".as_slice().to_string())
+  from_slice
+  from_string
+  assert(true, eq: true)
+
+test "static files middleware returns empty head responses":
+  match(write_string(Path::new("/tmp/voyd-web-static-asset.json".as_slice()), "ok".as_slice()))
+    Ok<Unit>:
+      void
+    Err<IoError>:
+      assert(false, eq: true)
+
+  let web_app = app().adopt(serve_dir(Path::new("/tmp".as_slice())))
+
+  let get_response = web_app.handle(request(Method::Get {}, "/voyd-web-static-asset.json".as_slice().to_string()))
+  assert(get_response.status.code(), eq: 200)
+  assert(response_text(get_response).equals("ok"), eq: true)
+  match(get_response.header("content-type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("application/json"), eq: true)
+    None:
+      assert(false, eq: true)
+
+  let head_response = web_app.handle(request(Method::Head {}, "/voyd-web-static-asset.json".as_slice().to_string()))
+  assert(head_response.status.code(), eq: 200)
+  assert(response_text(head_response).equals(""), eq: true)
+  match(head_response.header("content-type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("application/json"), eq: true)
+    None:
+      assert(false, eq: true)
+
+  let directory_head = app()
+    .adopt(serve_dir(Path::new("/".as_slice())))
+    .handle(request(Method::Head {}, "/tmp".as_slice().to_string()))
+  assert(directory_head.status.code(), eq: 404)
+
+  match(write_string(Path::new("/tmp/voyd-web-static-escape.txt".as_slice()), "escape".as_slice()))
+    Ok<Unit>:
+      void
+    Err<IoError>:
+      assert(false, eq: true)
+  let escaped = app()
+    .adopt(serve_dir(Path::new("/tmp/voyd-web-static-root".as_slice())))
+    .handle(request(Method::Get {}, "//tmp/voyd-web-static-escape.txt".as_slice().to_string()))
+  assert(escaped.status.code(), eq: 404)
+
+test "html rendering turns vx nodes into a text html response":
+  let page: MsgPack =
+    <main class="home">
+      <h1>Hello &amp; welcome</h1>
+      <p data-count="1">Voyd</p>
+    </main>
+
+  let rendered = render<MsgPack>(page)
+  assert(rendered.contains("<main".as_slice()), eq: true)
+  assert(rendered.contains("class=\"home\"".as_slice()), eq: true)
+  assert(rendered.contains("Hello &amp;amp; welcome".as_slice()), eq: true)
+
+  let response = Response::ok().html<MsgPack>(page)
+  assert(response.status.code(), eq: 200)
+  match(response.header("content-type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("text/html; charset=utf-8"), eq: true)
+    None:
+      assert(false, eq: true)
+
+  let replaced = Response::ok()
+    .with(header: "content-type".as_slice(), value: "text/plain".as_slice())
+    .html<MsgPack>(page)
+  match(replaced.header("content-type".as_slice()))
+    Some<String> { value }:
+      assert(value.equals("text/html; charset=utf-8"), eq: true)
+    None:
+      assert(false, eq: true)

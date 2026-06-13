@@ -1,0 +1,26 @@
+{
+  "name": "@voyd-lang/web",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Voyd web framework source package",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voyd-lang/voyd"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "build": "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/.placeholder','web framework source bundle');\"",
+    "clean": "rm -rf dist",
+    "typecheck": "echo 'no types for voyd web'",
+    "test": "VOYD_USE_SRC=1 node ../../scripts/voyd test ./src --fail-empty-tests",
+    "lint": "echo 'no lint configured'",
+    "prepack": "npm run clean && npm run build",
+    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
+  },
+  "dependencies": {
+    "@voyd-lang/std": "^0.2.0"
+  }
+}

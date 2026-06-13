@@ -17,6 +17,11 @@ const msgpackFixturePath = resolve(
   "__fixtures__",
   "effects-msgpack.voyd"
 );
+const openRowNoPerformFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-export-open-row-no-perform.voyd"
+);
 
 const compileFixture = async (fixture: string) => {
   const result = await compileEffectFixture({ entryPath: fixture });
@@ -87,6 +92,18 @@ describe("effectful exports & host boundary", () => {
     if (!effectTable) return;
     expect(asyncParsed.map((op) => op.resumeKind)).toEqual([1, 0]);
     expect(asyncTable?.map((op) => op.resumeKind)).toEqual([1, 0]);
+  });
+
+  it("emits init_effects for open-row exports without performs", async () => {
+    const { module } = await compileFixture(openRowNoPerformFixturePath);
+    const wat = module.emitText();
+    expect(wat).toContain(`(export "init_effects"`);
+    await expect(
+      runEffectfulExport<number>({
+        wasm: module,
+        entryName: "main_effectful",
+      })
+    ).resolves.toMatchObject({ value: 7 });
   });
 
   it("round-trips msgpack values for effect handlers", async () => {

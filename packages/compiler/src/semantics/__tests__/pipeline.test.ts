@@ -1410,6 +1410,12 @@ describe("semanticsPipeline", () => {
     ).toBe(true);
   });
 
+  it("allows overloads that differ by generic constraints and falls back when unsatisfied", () => {
+    const ast = loadAst("function_overloads_constraint_fallback.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("rejects impls that target structural types", () => {
     const ast = loadAst("impl_structural_target.voyd");
     expect(() => semanticsPipeline(ast)).toThrow(

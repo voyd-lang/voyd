@@ -972,6 +972,37 @@ export const compileIntrinsicCall = ({
         fnCtx,
       });
     }
+    case "__boundary_msgpack_to_value": {
+      assertArgCount(name, args, 1);
+      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      const serializer = findSerializerForType(returnTypeId, ctx);
+      if (serializer) {
+        if (serializer.formatId !== "msgpack") {
+          throw new Error(
+            `boundary value deserializer format ${serializer.formatId} is not supported`
+          );
+        }
+        const msgpack = ensureMsgPackFunctions(ctx);
+        return coerceValueToType({
+          value: args[0]!,
+          actualType: msgpack.msgPackTypeId,
+          targetType: returnTypeId,
+          ctx,
+          fnCtx,
+        });
+      }
+      return unpackBoundaryValueFromMsgPack({
+        value: args[0]!,
+        schema: deriveBoundarySchema({
+          typeId: returnTypeId,
+          ctx,
+          label: "__boundary_msgpack_to_value target",
+          options: { tagStandaloneVariants: true },
+        }),
+        ctx,
+        fnCtx,
+      });
+    }
     case "__shift_l":
     case "__shift_ru": {
       assertArgCount(name, args, 2);

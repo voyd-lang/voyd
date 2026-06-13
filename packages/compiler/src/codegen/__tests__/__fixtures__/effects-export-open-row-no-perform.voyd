@@ -1,0 +1,5 @@
+eff Async
+  await(tail) -> i32
+
+pub fn main(): Async -> i32
+  7

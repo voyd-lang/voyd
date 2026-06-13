@@ -55,18 +55,20 @@ type LambdaEnvInfo = NonNullable<
 
 const formatLambdaInstanceLabel = (
   exprId: number,
-  outerInstanceId?: ProgramFunctionInstanceId
+  outerInstanceId: ProgramFunctionInstanceId | undefined,
+  lambdaTypeId: number
 ): string =>
   typeof outerInstanceId === "number"
-    ? `inst${outerInstanceId}_lambda${exprId}`
-    : `lambda${exprId}`;
+    ? `inst${outerInstanceId}_type${lambdaTypeId}_lambda${exprId}`
+    : `type${lambdaTypeId}_lambda${exprId}`;
 
 const makeLambdaKey = (
   exprId: number,
   ctx: CodegenContext,
+  lambdaTypeId: number,
   outerInstanceId?: ProgramFunctionInstanceId
 ) =>
-  `${ctx.moduleId}::lambda${exprId}::${outerInstanceId ?? "root"}`;
+  `${ctx.moduleId}::lambda${exprId}::type${lambdaTypeId}::${outerInstanceId ?? "root"}`;
 
 const makeLambdaFunctionName = ({
   expr,
@@ -446,8 +448,12 @@ export const compileLambdaExpr = (
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const lambdaTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
   const base = getClosureTypeInfo(lambdaTypeId, ctx);
-  const lambdaInstanceLabel = formatLambdaInstanceLabel(expr.id, fnCtx.instanceId);
-  const key = makeLambdaKey(expr.id, ctx, fnCtx.instanceId);
+  const lambdaInstanceLabel = formatLambdaInstanceLabel(
+    expr.id,
+    typeInstanceId,
+    lambdaTypeId
+  );
+  const key = makeLambdaKey(expr.id, ctx, lambdaTypeId, typeInstanceId);
 
   let envInfo = ctx.lambdaEnvs.get(key);
   if (!envInfo) {

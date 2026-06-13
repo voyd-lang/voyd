@@ -1,0 +1,13 @@
+//! Common middleware helpers.
+
+use std::http::Response
+use std::optional::types::all
+use std::string::type::String
+use super::router::{ Context, Next }
+
+pub fn request_id_required(ctx: Context, next: Next) -> Response
+  match(ctx.header("x-request-id".as_slice()))
+    Some<String> { value }:
+      next(ctx)
+    None:
+      Response::bad_request().text("missing request id".as_slice())

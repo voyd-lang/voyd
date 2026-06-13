@@ -77,6 +77,10 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
     "__boundary_value_to_msgpack",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
+  [
+    "__boundary_msgpack_to_value",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
   ["__shift_l", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__shift_ru", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__bit_and", { intrinsicUsesSignature: false, access: "std-only" }],

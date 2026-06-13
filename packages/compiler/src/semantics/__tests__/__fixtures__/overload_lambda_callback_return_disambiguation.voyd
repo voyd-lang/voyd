@@ -1,0 +1,78 @@
+obj Response {
+  code: i32
+}
+
+obj JsonBool {
+  value: bool
+}
+
+obj JsonString {
+  value: string
+}
+
+obj Text {
+  value: i32
+}
+
+obj Problem {
+  code: i32
+}
+
+obj Ok<T> {
+  value: T
+}
+
+obj Err<E> {
+  error: E
+}
+
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type JsonValue = JsonBool | JsonString
+type Result<T, E> = Ok<T> | Err<E>
+type Option<T> = Some<T> | None
+
+trait IntoResponse<T>
+  fn into_response(self) -> Response
+
+impl IntoResponse<Text> for Text
+  fn into_response(self) -> Response
+    Response { code: 200 }
+
+impl IntoResponse<Problem> for Problem
+  fn into_response(self) -> Response
+    Response { code: 500 }
+
+fn route(handler: fn() -> JsonValue) -> Response
+  handler()
+  Response { code: 201 }
+
+fn route<T: IntoResponse<T>, E: IntoResponse<E>>(handler: fn() -> Result<T, E>) -> Response
+  handler()
+  Response { code: 202 }
+
+fn route<T: IntoResponse<T>>(handler: fn() -> Option<T>) -> Response
+  handler()
+  Response { code: 203 }
+
+fn route<R: IntoResponse<R>>(handler: fn() -> R) -> Response
+  handler().into_response()
+
+pub fn main() -> i32
+  let json_response = route do:
+    let value: JsonValue = JsonBool { value: true }
+    value
+
+  let result_response = route do:
+    let value: Result<Text, Problem> = Ok<Text> { value: Text { value: 1 } }
+    value
+
+  let option_response = route do:
+    let value: Option<Text> = Some<Text> { value: Text { value: 2 } }
+    value
+
+  json_response.code + result_response.code + option_response.code
