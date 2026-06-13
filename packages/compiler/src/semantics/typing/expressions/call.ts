@@ -883,6 +883,20 @@ const uniqueOverloadSymbols = (
     return undefined;
   }
 
+  let needsCanonicalization = false;
+  const localSeen = new Set<SymbolId>();
+  for (const symbol of symbols) {
+    if (localSeen.has(symbol) || ctx.importsByLocal.has(symbol)) {
+      needsCanonicalization = true;
+      break;
+    }
+    localSeen.add(symbol);
+  }
+
+  if (!needsCanonicalization) {
+    return symbols;
+  }
+
   const seen = new Set<string>();
   return symbols.filter((symbol) => {
     const key = symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx));

@@ -119,9 +119,9 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   refineMatches?: (matches: readonly T[]) => readonly T[];
 }): readonly T[] => {
   const shapeCompatibleCandidates = candidates.filter((candidate) =>
-    callShapeCouldMatch({
+    signatureCallShapeCouldMatch({
       args,
-      params: publicCallParametersForShape(candidate.signature),
+      signature: candidate.signature,
       ctx,
       state,
     }),
@@ -139,10 +139,63 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   return narrowOverloadMatches({ matches: refined, typeArguments, ctx, state });
 };
 
+const signatureCallShapeCouldMatch = ({
+  args,
+  signature,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  signature: FunctionSignature;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const positional = positionalCallShapeCouldMatch(args, signature.parameters);
+  if (typeof positional === "boolean") {
+    return positional;
+  }
+
+  return callShapeCouldMatch({
+    args,
+    params: publicCallParametersForShape(signature),
+    ctx,
+    state,
+  });
+};
+
 const publicCallParametersForShape = (
   signature: FunctionSignature,
 ): readonly ParamSignature[] =>
   signature.parameters.filter((param) => param.synthetic !== "stable-callsite-id");
+
+const positionalCallShapeCouldMatch = (
+  args: readonly Arg[],
+  params: readonly ParamSignature[],
+): boolean | undefined => {
+  let required = 0;
+  let total = 0;
+
+  for (const arg of args) {
+    if (arg.label !== undefined) {
+      return undefined;
+    }
+  }
+
+  for (const param of params) {
+    if (param.synthetic === "stable-callsite-id") {
+      continue;
+    }
+    if (param.label !== undefined) {
+      return undefined;
+    }
+    total += 1;
+    if (!param.optional) {
+      required += 1;
+    }
+  }
+
+  return args.length >= required && args.length <= total;
+};
 
 const callShapeCouldMatch = ({
   args,
@@ -172,7 +225,12 @@ const callShapeCouldMatch = ({
     const arg = args[argIndex];
 
     if (!arg) {
-      return params.slice(paramIndex).every((remaining) => remaining.optional);
+      for (let index = paramIndex; index < params.length; index += 1) {
+        if (!params[index]!.optional) {
+          return false;
+        }
+      }
+      return true;
     }
 
     if (param.label && arg.label === undefined) {
