@@ -4,6 +4,7 @@ import {
   compileEffectFixture,
   parseEffectTable,
 } from "./support/effects-harness.js";
+import { wasmBufferSource } from "./support/wasm-utils.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -21,5 +22,17 @@ describe("effects call imported callee", () => {
       throw new Error("missing Async.await op entry");
     }
     expect(awaitOp.opIndex).toBeGreaterThanOrEqual(0);
+  });
+
+  it("compiles handlers for imported effect ops used by imported callees", async () => {
+    const { wasm } = await compileEffectFixture({ entryPath: fixturePath });
+    const instance = new WebAssembly.Instance(
+      new WebAssembly.Module(wasmBufferSource(wasm)),
+      {},
+    );
+    const target = instance.exports
+      .handle_imported_effectful_call as CallableFunction;
+
+    expect(target()).toBe(15);
   });
 });
