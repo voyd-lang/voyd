@@ -1,0 +1,463 @@
+//! Request extractors and rejection values.
+
+use std::array::Array
+use std::bytes::Bytes
+use std::dict::Dict
+use std::http::self as http
+use std::http::{ Header, Headers, HttpError, IncomingRequest, QueryString, Response, Status }
+use std::json::{ JsonArray, JsonBool, JsonNull, JsonNumber, JsonObject, JsonString, JsonValue, parse as parse_json }
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::number::cast::self as cast
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice, from_utf8, ParseIntError, Utf8Error }
+use super::response::IntoResponse
+
+pub type NameValue = {
+  name: String,
+  value: String
+}
+
+pub obj RouteParams {
+  api entries: Array<NameValue>
+}
+
+pub obj QueryParams {
+  api entries: Array<NameValue>
+}
+
+pub obj Rejection {
+  api status: Status,
+  api message: String
+}
+
+pub obj BodyError {
+  api message: String
+}
+
+pub obj JsonBody {}
+pub obj TextBody {}
+pub obj BytesBody {}
+pub obj RequiredSession {}
+pub obj OptionalSession {}
+
+pub type AuthExtractor<T> = fn(IncomingRequest) : (open) -> Result<T, Rejection>
+
+pub obj AuthPolicy<T> {
+  extractor: AuthExtractor<T>
+}
+
+pub trait FromBody<T>
+  fn extract_body(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
+
+pub trait FromAuth<T>
+  fn extract_auth(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
+
+impl RouteParams
+  api fn empty() -> RouteParams
+    RouteParams { entries: Array<NameValue>::init() }
+
+  api fn append(self, { name: String, value: String }) -> RouteParams
+    let ~next = self.entries.copied(1)
+    next.push({ name: name, value: value })
+    RouteParams { entries: next }
+
+  api fn get(self, name: StringSlice) -> Option<String>
+    find_value(self.entries, name)
+
+  api fn get(self, name: String) -> Option<String>
+    self.get(name.as_slice())
+
+impl QueryParams
+  api fn empty() -> QueryParams
+    QueryParams { entries: Array<NameValue>::init() }
+
+  api fn append(self, { name: String, value: String }) -> QueryParams
+    let ~next = self.entries.copied(1)
+    next.push({ name: name, value: value })
+    QueryParams { entries: next }
+
+  api fn get(self, name: StringSlice) -> Option<String>
+    find_value(self.entries, name)
+
+  api fn get(self, name: String) -> Option<String>
+    self.get(name.as_slice())
+
+impl Rejection
+  api fn bad_request(message: StringSlice) -> Rejection
+    Rejection { status: Status::bad_request(), message: message.to_string() }
+
+  api fn not_found(message: StringSlice) -> Rejection
+    Rejection { status: Status::not_found(), message: message.to_string() }
+
+  api fn payload_too_large(message: StringSlice) -> Rejection
+    match(Status::from(413))
+      Ok<Status> { value }:
+        Rejection { status: value, message: message.to_string() }
+      Err:
+        Rejection::bad_request(message)
+
+  api fn unsupported_media_type(message: StringSlice) -> Rejection
+    match(Status::from(415))
+      Ok<Status> { value }:
+        Rejection { status: value, message: message.to_string() }
+      Err:
+        Rejection::bad_request(message)
+
+  api fn unauthorized(message: StringSlice) -> Rejection
+    Rejection { status: Status::unauthorized(), message: message.to_string() }
+
+  api fn forbidden(message: StringSlice) -> Rejection
+    Rejection { status: Status::forbidden(), message: message.to_string() }
+
+impl IntoResponse<Rejection> for Rejection
+  fn into_response(self) -> Response
+    Response::new(status: self.status).text(self.message)
+
+impl<T> AuthPolicy<T>
+  api fn extract(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
+    let extractor = self.extractor
+    extractor(request)
+
+impl FromBody<JsonValue> for JsonBody
+  fn extract_body(self, request: IncomingRequest) : (open) -> Result<JsonValue, Rejection>
+    self
+    json_body_value(request)
+
+impl FromBody<String> for TextBody
+  fn extract_body(self, request: IncomingRequest) : (open) -> Result<String, Rejection>
+    self
+    text_body(request)
+
+impl FromBody<Bytes> for BytesBody
+  fn extract_body(self, request: IncomingRequest) : (open) -> Result<Bytes, Rejection>
+    self
+    bytes_body(request)
+
+pub fn text_body(request: IncomingRequest) -> Result<String, Rejection>
+  match(request.text())
+    Ok<String> { value }:
+      Ok<String> { value: value }
+    Err<HttpError> { error }:
+      Err<Rejection> { error: Rejection::bad_request(error.message.as_slice()) }
+
+pub fn bytes_body(request: IncomingRequest) -> Result<Bytes, Rejection>
+  Ok<Bytes> { value: request.body_bytes() }
+
+pub fn extract_params<T>(params: RouteParams) -> Result<T, Rejection>
+  Ok<T> { value: decode_params<T>(params) }
+
+pub fn extract_query<T>(query: QueryParams) -> Result<T, Rejection>
+  Ok<T> { value: decode_query<T>(query) }
+
+pub fn extract_headers<T>(headers: Headers) -> Result<T, Rejection>
+  Ok<T> { value: decode_headers<T>(headers) }
+
+pub fn decode_params<T>(params: RouteParams) -> T
+  msgpack::unpack_boundary_value<T>(name_values_to_msgpack(params.entries))
+
+pub fn decode_query<T>(query: QueryParams) -> T
+  msgpack::unpack_boundary_value<T>(query_values_to_msgpack(query.entries))
+
+pub fn decode_headers<T>(headers: Headers) -> T
+  msgpack::unpack_boundary_value<T>(headers_to_msgpack(headers))
+
+pub fn decode_json_value<T>(value: JsonValue) -> T
+  msgpack::unpack_boundary_value<T>(json_to_msgpack(value))
+
+pub fn extract_json_body<T>(body: JsonBody, request: IncomingRequest) : (open) -> Result<T, Rejection>
+  body
+  match(json_body_value(request))
+    Ok<JsonValue> { value }:
+      Ok<T> { value: decode_json_value<T>(value) }
+    Err<Rejection> { error }:
+      Err<Rejection> { error: error }
+
+pub fn json_body_value(request: IncomingRequest) -> Result<JsonValue, Rejection>
+  match(json_content_type_rejection(request))
+    Some<Rejection> { value }:
+      Err<Rejection> { error: value }
+    None:
+      match(request.json())
+        Ok<JsonValue> { value }:
+          Ok<JsonValue> { value: value }
+        Err<HttpError> { error }:
+          Err<Rejection> { error: Rejection::bad_request(error.message.as_slice()) }
+
+pub fn json() -> JsonBody
+  JsonBody {}
+
+pub fn json_body() -> JsonBody
+  JsonBody {}
+
+pub fn text() -> TextBody
+  TextBody {}
+
+pub fn text_body() -> TextBody
+  TextBody {}
+
+pub fn bytes() -> BytesBody
+  BytesBody {}
+
+pub fn required_session<T>({ extract: AuthExtractor<T> }) -> AuthPolicy<T>
+  AuthPolicy<T> { extractor: extract }
+
+pub fn required_session() -> RequiredSession
+  RequiredSession {}
+
+pub fn optional_session<T>({ extract: AuthExtractor<Option<T>> }) -> AuthPolicy<Option<T>>
+  AuthPolicy<Option<T>> { extractor: extract }
+
+pub fn optional_session() -> OptionalSession
+  OptionalSession {}
+
+impl<T> FromAuth<T> for AuthPolicy<T>
+  fn extract_auth(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
+    self.extract(request)
+
+pub fn query_from(request: IncomingRequest) -> QueryParams
+  match(request.query)
+    Some<QueryString> { value }:
+      parse_query(value.raw)
+    None:
+      QueryParams::empty()
+
+pub fn parse_query(raw: String) -> QueryParams
+  parse_query(raw.as_slice())
+
+pub fn parse_query(raw: StringSlice) -> QueryParams
+  let parts = raw.split(on: 38, keep_empty: false)
+  var out = QueryParams::empty()
+  var index = 0
+  while index < parts.len():
+    match(parts.get(index))
+      Some<StringSlice> { value }:
+        out = append_query_part(out, value)
+      None:
+        void
+    index = index + 1
+  out
+
+pub fn percent_decode(value: StringSlice, { plus_as_space?: bool }) -> String
+  let plus = plus_as_space ?? false
+  let ~bytes = Array<i32>::with_capacity(value.byte_len())
+  var index = 0
+  while index < value.byte_len():
+    let current = byte_at(value, index)
+    if current == 37 and index + 2 < value.byte_len():
+      let high = hex_value(byte_at(value, index + 1))
+      let low = hex_value(byte_at(value, index + 2))
+      if high >= 0 and low >= 0:
+        bytes.push(high * 16 + low)
+        index = index + 3
+        continue
+    if plus and current == 43:
+      bytes.push(32)
+    else:
+      bytes.push(current)
+    index = index + 1
+
+  match(from_utf8(bytes))
+    Ok<String> { value }:
+      value
+    Err<Utf8Error>:
+      value.to_string()
+
+fn append_query_part(params: QueryParams, part: StringSlice): () -> QueryParams
+  match(part.split_once(on: 61))
+    Some<(StringSlice, StringSlice)> { value }:
+      params.append(
+        name: percent_decode(value.0, plus_as_space: true),
+        value: percent_decode(value.1, plus_as_space: true)
+      )
+    None:
+      params.append(
+        name: percent_decode(part, plus_as_space: true),
+        value: String::init()
+      )
+
+pub fn default_required_session(request: IncomingRequest) -> Result<String, Rejection>
+  match(request.header("authorization".as_slice()))
+    Some<String> { value }:
+      Ok<String> { value: value }
+    None:
+      Err<Rejection> { error: Rejection::unauthorized("missing auth".as_slice()) }
+
+pub fn default_required_session_as<T>(request: IncomingRequest) -> Result<T, Rejection>
+  match(request.header("authorization".as_slice()))
+    Some<String> { value }:
+      Ok<T> { value: msgpack::unpack_boundary_value<T>(authorization_to_msgpack(value)) }
+    None:
+      Err<Rejection> { error: Rejection::unauthorized("missing auth".as_slice()) }
+
+fn json_content_type_rejection(request: IncomingRequest): () -> Option<Rejection>
+  match(request.header("content-type".as_slice()))
+    Some<String> { value }:
+      if json_content_type_allowed(value):
+        None {}
+      else:
+        Some<Rejection> {
+          value: Rejection::unsupported_media_type("expected application/json request body".as_slice())
+        }
+    None:
+      None {}
+
+fn json_content_type_allowed(value: String): () -> bool
+  let normalized = value.lowered()
+  let parts = normalized.as_slice().split(on: 59, max_splits: 1)
+  match(parts.get(0))
+    Some<StringSlice> { value: media }:
+      let media_type = media.trimmed()
+      media_type.to_string().equals("application/json") or media_type.ends_with("+json")
+    None:
+      false
+
+fn name_values_to_msgpack(entries: Array<NameValue>): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<NameValue> { value }:
+        out.set(value.name, msgpack::make_string(value.value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_map(out)
+
+fn query_values_to_msgpack(entries: Array<NameValue>): () -> MsgPack
+  let ~out = Dict<String, MsgPack>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<NameValue> { value }:
+        out.set(value.name, query_value_to_msgpack(value.value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_map(out)
+
+fn query_value_to_msgpack(value: String): () -> MsgPack
+  if value.equals("true"):
+    return msgpack::make_bool(true)
+  if value.equals("false"):
+    return msgpack::make_bool(false)
+  match(value.as_slice().parse_i64())
+    Ok<i64> { value: parsed }:
+      if cast::to_string(parsed).equals(value):
+        return msgpack::make_i64(parsed)
+      else:
+        return msgpack::make_string(value)
+    Err<ParseIntError>:
+      msgpack::make_string(value)
+
+fn headers_to_msgpack(headers: Headers): () -> MsgPack
+  let entries = headers.entries()
+  let ~out = Dict<String, MsgPack>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<Header> { value }:
+        out.set(value.name.normalized(), msgpack::make_string(value.value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_map(out)
+
+fn json_to_msgpack(value: JsonValue): () -> MsgPack
+  value.match(decoded)
+    JsonNull:
+      msgpack::make_null()
+    JsonBool:
+      msgpack::make_bool(decoded.value)
+    JsonNumber:
+      json_number_to_msgpack(decoded.value)
+    JsonString:
+      msgpack::make_string(decoded.value)
+    JsonArray:
+      json_array_to_msgpack(decoded.value)
+    JsonObject:
+      json_object_to_msgpack(decoded.value)
+
+fn json_number_to_msgpack(value: f64): () -> MsgPack
+  match(cast::to_i64_checked(value))
+    Ok<i64> { value: integer }:
+      if cast::to_f64(integer) == value:
+        return msgpack::make_i64(integer)
+      msgpack::make_f64(value)
+    Err:
+      msgpack::make_f64(value)
+
+fn json_array_to_msgpack(values: Array<JsonValue>): () -> MsgPack
+  let ~out = Array<MsgPack>::with_capacity(values.len())
+  var index = 0
+  while index < values.len():
+    match(values.get(index))
+      Some<JsonValue> { value }:
+        out.push(json_to_msgpack(value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_array(out)
+
+fn json_object_to_msgpack(values: Dict<String, JsonValue>): () -> MsgPack
+  let entries = values.entries()
+  let ~out = Dict<String, MsgPack>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<(String, JsonValue)> { value }:
+        out.set(value.0, json_to_msgpack(value.1))
+      None:
+        void
+    index = index + 1
+  msgpack::make_map(out)
+
+pub fn default_optional_session(request: IncomingRequest) -> Result<Option<String>, Rejection>
+  Ok<Option<String>> { value: request.header("authorization".as_slice()) }
+
+pub fn default_optional_session_as<T>(request: IncomingRequest) -> Result<Option<T>, Rejection>
+  match(request.header("authorization".as_slice()))
+    Some<String> { value }:
+      Ok<Option<T>> {
+        value: Some<T> {
+          value: msgpack::unpack_boundary_value<T>(authorization_to_msgpack(value))
+        }
+      }
+    None:
+      Ok<Option<T>> { value: None {} }
+
+fn authorization_to_msgpack(value: String): () -> MsgPack
+  match(parse_json(value))
+    Ok<JsonValue> { value: parsed }:
+      json_to_msgpack(parsed)
+    Err:
+      msgpack::make_string(value)
+
+fn find_value(entries: Array<NameValue>, name: StringSlice): () -> Option<String>
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<NameValue> { value }:
+        if value.name.equals(name.to_string()):
+          return Some<String> { value: value.value }
+      None:
+        void
+    index = index + 1
+  None {}
+
+fn byte_at(value: StringSlice, index: i32): () -> i32
+  match(value.get_byte(index))
+    Some<i32> { value }:
+      value
+    None:
+      -1
+
+fn hex_value(byte: i32): () -> i32
+  if byte >= 48 and byte <= 57:
+    return byte - 48
+  if byte >= 65 and byte <= 70:
+    return byte - 55
+  if byte >= 97 and byte <= 102:
+    return byte - 87
+  -1

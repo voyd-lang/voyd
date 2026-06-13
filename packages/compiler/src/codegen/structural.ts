@@ -55,6 +55,7 @@ type StructuralMatchCache = {
   fieldTypes: Map<string, boolean>;
   layouts: Map<string, boolean>;
   conversions: Map<string, boolean>;
+  nextClosureCoercionWrapperIndex: number;
 };
 
 const structuralMatchCache = (ctx: CodegenContext): StructuralMatchCache =>
@@ -62,6 +63,7 @@ const structuralMatchCache = (ctx: CodegenContext): StructuralMatchCache =>
     fieldTypes: new Map(),
     layouts: new Map(),
     conversions: new Map(),
+    nextClosureCoercionWrapperIndex: 0,
   }));
 
 const symmetricTypePairKey = (left: TypeId, right: TypeId): string =>
@@ -2267,6 +2269,17 @@ const coerceClosureToTarget = ({
   if (actualDesc.kind !== "function" || targetDesc.kind !== "function") {
     throw new Error("expected function type for closure coercion");
   }
+  if (
+    !functionTypesCompatibleForClosureCoercion({
+      actualType,
+      targetType,
+      ctx,
+    })
+  ) {
+    throw new Error(
+      `cannot coerce incompatible function type ${actualType} to ${targetType}`,
+    );
+  }
   const actualEffectful =
     typeof actualDesc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(actualDesc.effectRow);
@@ -2276,7 +2289,9 @@ const coerceClosureToTarget = ({
   if (actualEffectful && !targetEffectful) {
     return value;
   }
-  const wrapperIndex = cache.size;
+  const structuralCache = structuralMatchCache(ctx);
+  const wrapperIndex = structuralCache.nextClosureCoercionWrapperIndex;
+  structuralCache.nextClosureCoercionWrapperIndex += 1;
   const fnName = `__voyd_effect_closure_wrap_${wrapperIndex}_${actualType}_${targetType}`;
   const envType = defineStructType(ctx.mod, {
     name: `__voydEffectClosureWrapEnv_${wrapperIndex}`,
@@ -2376,6 +2391,57 @@ const coerceClosureToTarget = ({
   cache.set(key, { envType, fnName, fnRefType });
 
   return initStruct(ctx.mod, envType, [refFunc(ctx.mod, fnName, fnRefType), value]);
+};
+
+const functionTypesCompatibleForClosureCoercion = ({
+  actualType,
+  targetType,
+  ctx,
+}: {
+  actualType: TypeId;
+  targetType: TypeId;
+  ctx: CodegenContext;
+}): boolean => {
+  const actualDesc = ctx.program.types.getTypeDesc(actualType);
+  const targetDesc = ctx.program.types.getTypeDesc(targetType);
+  if (actualDesc.kind !== "function" || targetDesc.kind !== "function") {
+    return false;
+  }
+  if (actualDesc.parameters.length !== targetDesc.parameters.length) {
+    return false;
+  }
+  const location = ctx.module.hir.module.ast;
+  for (let index = 0; index < actualDesc.parameters.length; index += 1) {
+    const actualParam = actualDesc.parameters[index]!;
+    const targetParam = targetDesc.parameters[index]!;
+    if (actualParam.optional !== targetParam.optional) {
+      return false;
+    }
+    const paramCompatible = ctx.program.types.unify(
+      targetParam.type,
+      actualParam.type,
+      {
+        location,
+        reason: "function parameter closure coercion",
+        variance: "covariant",
+        allowUnknown: true,
+      },
+    );
+    if (!paramCompatible.ok) {
+      return false;
+    }
+  }
+  const returnCompatible = ctx.program.types.unify(
+    actualDesc.returnType,
+    targetDesc.returnType,
+    {
+      location,
+      reason: "function return closure coercion",
+      variance: "covariant",
+      allowUnknown: true,
+    },
+  );
+  return returnCompatible.ok;
 };
 
 const closureReturnTypeId = (typeId: TypeId, ctx: CodegenContext): TypeId => {

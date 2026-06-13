@@ -56,6 +56,7 @@ import {
   bindCallArgumentTypeParams,
   buildCallArgumentHintSubstitution,
   expectedCallArgType,
+  type CallArgInput,
   typeCallArgsWithSignatureContext,
 } from "./call-arg-context.js";
 import {
@@ -67,9 +68,11 @@ import {
   applyExplicitTypeArguments,
   enforceOverloadCandidateBudget,
   findOverloadMatches,
+  narrowOverloadMatches,
   selectHintedOverloadCandidates,
+  specializeOverloadParameters,
 } from "./overload-resolution.js";
-import { typeExpression } from "../expressions.js";
+import { typeExpression, withSpeculativeExprTyping } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
 import { getValueType } from "./identifier.js";
 import { assertMutableObjectBinding, findBindingSymbol } from "./mutability.js";
@@ -872,6 +875,26 @@ export const typeMethodCallExpr = (
   });
 };
 
+const uniqueOverloadSymbols = (
+  symbols: readonly SymbolId[] | undefined,
+  ctx: TypingContext,
+): readonly SymbolId[] | undefined => {
+  if (!symbols) {
+    return undefined;
+  }
+
+  const seen = new Set<string>();
+  return symbols.filter((symbol) => {
+    const key = symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx));
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+};
+
 const getExpectedCallParameters = ({
   callee,
   typeArguments,
@@ -892,7 +915,7 @@ const getExpectedCallParameters = ({
     typeof expectedReturnType === "number" &&
     expectedReturnType !== ctx.primitives.unknown
   ) {
-    const overloads = ctx.overloads.get(callee.set);
+    const overloads = uniqueOverloadSymbols(ctx.overloads.get(callee.set), ctx);
     if (!overloads) {
       return {};
     }
@@ -916,6 +939,9 @@ const getExpectedCallParameters = ({
       ctx,
       state,
     });
+    if (matchingReturn.length === explicitTypeMatches.length) {
+      return {};
+    }
     enforceOverloadCandidateBudget({
       name: callee.name,
       candidateCount: matchingReturn.length,
@@ -1021,6 +1047,7 @@ const findMatchingOverloadCandidates = <
   state,
   typeArguments,
   argsForCandidate,
+  refineMatches,
 }: {
   candidates: readonly T[];
   args: readonly Arg[];
@@ -1028,8 +1055,9 @@ const findMatchingOverloadCandidates = <
   state: TypingState;
   typeArguments?: readonly TypeId[];
   argsForCandidate?: (candidate: T) => readonly Arg[];
-}): T[] =>
-  candidates.filter((candidate) =>
+  refineMatches?: (matches: readonly T[]) => readonly T[];
+}): readonly T[] => {
+  const matches = candidates.filter((candidate) =>
     matchesOverloadSignature(
       candidate.symbol,
       candidate.signature,
@@ -1039,6 +1067,9 @@ const findMatchingOverloadCandidates = <
       typeArguments,
     ),
   );
+  const refined = refineMatches ? refineMatches(matches) : matches;
+  return narrowOverloadMatches({ matches: refined, typeArguments, ctx, state });
+};
 
 const expectedCalleeType = (args: readonly Arg[], ctx: TypingContext): TypeId =>
   ctx.arena.internFunction({
@@ -1910,6 +1941,91 @@ const callArgumentsSatisfyParams = ({
           }) && typeSatisfies(match.matchedType, match.param.type, ctx, state),
     onSkipOptionalParam: () => true,
   }).kind === "ok";
+
+const callArgumentFunctionReturnsSatisfyParams = ({
+  args,
+  params,
+  signatureTypeParams,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  signatureTypeParams: readonly FunctionTypeParam[];
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const signatureTypeParamIds = new Set(
+    signatureTypeParams.map((param) => param.typeParam),
+  );
+  const result = walkCallArguments({
+    args,
+    params,
+    ctx,
+    state,
+    onMatch: (match) =>
+      functionReturnSatisfiesParameterReturn({
+        actual: match.matchedType,
+        expected: match.param.type,
+        signatureTypeParamIds,
+        ctx,
+        state,
+      }),
+    onSkipOptionalParam: () => true,
+  });
+  return result.kind === "ok";
+};
+
+const functionReturnSatisfiesParameterReturn = ({
+  actual,
+  expected,
+  signatureTypeParamIds,
+  ctx,
+  state,
+}: {
+  actual: TypeId;
+  expected: TypeId;
+  signatureTypeParamIds: ReadonlySet<TypeParamId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const actualDesc = ctx.arena.get(unfoldRecursiveTypeId(actual, ctx));
+  const expectedDesc = ctx.arena.get(unfoldRecursiveTypeId(expected, ctx));
+  if (actualDesc.kind !== "function" || expectedDesc.kind !== "function") {
+    return true;
+  }
+
+  const actualReturn = unfoldRecursiveTypeId(actualDesc.returnType, ctx);
+  const expectedReturn = unfoldRecursiveTypeId(expectedDesc.returnType, ctx);
+  if (
+    actualReturn === ctx.primitives.unknown ||
+    expectedReturn === ctx.primitives.unknown
+  ) {
+    return true;
+  }
+
+  if (!containsTypeParamRefFrom(expectedReturn, signatureTypeParamIds, ctx)) {
+    return typeSatisfies(actualReturn, expectedReturn, ctx, state);
+  }
+
+  const returnBindings = new Map<TypeParamId, TypeId>();
+  bindTypeParamsFromType(
+    expectedReturn,
+    actualReturn,
+    returnBindings,
+    ctx,
+    state,
+  );
+  const boundExpectedReturn = unfoldRecursiveTypeId(
+    ctx.arena.substitute(expectedReturn, returnBindings),
+    ctx,
+  );
+  if (containsTypeParamRefFrom(boundExpectedReturn, signatureTypeParamIds, ctx)) {
+    return false;
+  }
+
+  return typeSatisfies(actualReturn, boundExpectedReturn, ctx, state);
+};
 
 const MAX_OVERLOAD_DIAGNOSTIC_CANDIDATES = 12;
 
@@ -3177,6 +3293,15 @@ const selectMethodCallCandidate = ({
     state,
     typeArguments,
     argsForCandidate,
+    refineMatches: (rawMatches) =>
+      narrowOverloadMatchesByLambdaCompatibility({
+        matches: rawMatches,
+        args: probeArgs,
+        argsForCandidate,
+        typeArguments,
+        ctx,
+        state,
+      }),
   });
 
   let traitDispatch =
@@ -3229,6 +3354,15 @@ const selectMethodCallCandidate = ({
         state,
         typeArguments,
         argsForCandidate,
+        refineMatches: (rawMatches) =>
+          narrowOverloadMatchesByLambdaCompatibility({
+            matches: rawMatches,
+            args: probeArgs,
+            argsForCandidate,
+            typeArguments,
+            ctx,
+            state,
+          }),
       });
     }
   }
@@ -4417,6 +4551,7 @@ const typeFunctionCall = ({
   calleeExprId,
   calleeModuleId,
   nameForSymbol,
+  seedSubstitution,
 }: {
   args: readonly Arg[];
   signature: FunctionSignature;
@@ -4429,6 +4564,7 @@ const typeFunctionCall = ({
   calleeExprId?: HirExprId;
   calleeModuleId?: string;
   nameForSymbol?: SymbolNameResolver;
+  seedSubstitution?: ReadonlyMap<TypeParamId, TypeId>;
 }): { returnType: TypeId; effectRow: number } => {
   const callerInstanceKey = state.currentFunction?.instanceKey;
   if (!callerInstanceKey) {
@@ -4448,7 +4584,7 @@ const typeFunctionCall = ({
   const resolveName = (symbol: SymbolId): string =>
     resolveSymbolName(symbol, ctx, nameForSymbol);
   const hasTypeParams = signature.typeParams && signature.typeParams.length > 0;
-  const prefilledSubstitution =
+  const traitSubstitution =
     hasTypeParams && args.length > 0
       ? getTraitMethodTypeBindings({
           calleeSymbol,
@@ -4459,6 +4595,10 @@ const typeFunctionCall = ({
           state,
         })
       : undefined;
+  const prefilledSubstitution = mergeInitialCallSubstitutions(
+    seedSubstitution,
+    traitSubstitution,
+  );
   const instantiation = hasTypeParams
     ? instantiateFunctionCall({
         signature,
@@ -5218,7 +5358,7 @@ const typeOverloadedCall = (
   typeArguments?: readonly TypeId[],
   expectedReturnCandidates?: ReadonlySet<SymbolId>,
 ): { returnType: TypeId; effectRow: number } => {
-  const options = ctx.overloads.get(callee.set);
+  const options = uniqueOverloadSymbols(ctx.overloads.get(callee.set), ctx);
   if (!options) {
     throw new Error(
       `missing overload metadata for ${callee.name} (set ${callee.set})`,
@@ -5265,6 +5405,22 @@ const typeOverloadedCall = (
         state,
         typeArguments,
       ),
+    refineMatches: (rawMatches) => {
+      const lambdaCompatible = narrowOverloadMatchesByLambdaCompatibility({
+        matches: rawMatches,
+        args: probeArgs,
+        typeArguments,
+        ctx,
+        state,
+      });
+      return narrowOverloadMatchesByLambdaReturn({
+        matches: lambdaCompatible,
+        callArgs: call.args,
+        typeArguments,
+        ctx,
+        state,
+      });
+    },
   });
   if (matches.length === 0 && fallbackCandidates) {
     // Expected-return narrowing is a hint. If it removes all valid matches,
@@ -5287,6 +5443,22 @@ const typeOverloadedCall = (
           state,
           typeArguments,
         ),
+      refineMatches: (rawMatches) => {
+        const lambdaCompatible = narrowOverloadMatchesByLambdaCompatibility({
+          matches: rawMatches,
+          args: probeArgs,
+          typeArguments,
+          ctx,
+          state,
+        });
+        return narrowOverloadMatchesByLambdaReturn({
+          matches: lambdaCompatible,
+          callArgs: call.args,
+          typeArguments,
+          ctx,
+          state,
+        });
+      },
     });
   }
 
@@ -5392,6 +5564,13 @@ const typeOverloadedCall = (
     ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
   targets.set(instanceKey, selectedRef);
   ctx.callResolution.targets.set(call.id, targets);
+  const lambdaReturnSubstitution = inferLambdaReturnSubstitutionForCandidate({
+    candidate: selected,
+    callArgs: call.args,
+    typeArguments,
+    ctx,
+    state,
+  })?.substitution;
   const hintSubstitution = buildCallArgumentHintSubstitution({
     signature: selected.signature,
     probeArgs,
@@ -5400,6 +5579,7 @@ const typeOverloadedCall = (
       signature: selected.signature,
       typeArguments,
       calleeSymbol: selected.symbol,
+      seedSubstitution: lambdaReturnSubstitution,
       ctx,
     }),
     ctx,
@@ -5425,7 +5605,610 @@ const typeOverloadedCall = (
     state,
     calleeExprId: callee.id,
     calleeModuleId: selectedRef.moduleId,
+    seedSubstitution: lambdaReturnSubstitution,
   });
+};
+
+const mergeInitialCallSubstitutions = (
+  seed: ReadonlyMap<TypeParamId, TypeId> | undefined,
+  traitBindings: ReadonlyMap<TypeParamId, TypeId> | undefined,
+): ReadonlyMap<TypeParamId, TypeId> | undefined => {
+  if ((!seed || seed.size === 0) && (!traitBindings || traitBindings.size === 0)) {
+    return undefined;
+  }
+
+  const merged = new Map<TypeParamId, TypeId>();
+  seed?.forEach((value, key) => merged.set(key, value));
+  traitBindings?.forEach((value, key) => merged.set(key, value));
+  return merged;
+};
+
+const narrowOverloadMatchesByLambdaReturn = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  matches,
+  callArgs,
+  typeArguments,
+  ctx,
+  state,
+}: {
+  matches: readonly T[];
+  callArgs: readonly { expr: HirExprId; label?: string }[];
+  typeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly T[] => {
+  if (matches.length <= 1) {
+    return matches;
+  }
+
+  const lambdaArgIndexes = callArgs
+    .map((arg, index) => ({ arg, index }))
+    .filter(({ arg }) => ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda")
+    .map(({ index }) => index);
+  if (lambdaArgIndexes.length === 0) {
+    return matches;
+  }
+
+  const checkedMatches = matches
+    .map((candidate) => ({
+      candidate,
+      result: inferLambdaReturnSubstitutionForCandidate({
+        candidate,
+        callArgs,
+        typeArguments,
+        ctx,
+        state,
+      }),
+    }))
+    .filter(({ result }) => result?.checked === true && result.ok);
+
+  const concreteCheckedMatches = checkedMatches.filter(
+    ({ candidate }) => (candidate.signature.typeParams?.length ?? 0) === 0,
+  );
+  if (concreteCheckedMatches.length > 0) {
+    return concreteCheckedMatches.map(({ candidate }) => candidate);
+  }
+
+  if (
+    checkedMatches.length > 0 &&
+    checkedMatches.length < matches.length
+  ) {
+    return checkedMatches.map(({ candidate }) => candidate);
+  }
+  return matches;
+};
+
+const inferLambdaReturnSubstitutionForCandidate = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  candidate,
+  callArgs,
+  typeArguments,
+  ctx,
+  state,
+}: {
+  candidate: T;
+  callArgs: readonly { expr: HirExprId; label?: string }[];
+  typeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}):
+  | {
+      checked: true;
+      ok: boolean;
+      substitution: ReadonlyMap<TypeParamId, TypeId>;
+    }
+  | { checked: false; ok: true; substitution: undefined } => {
+  const substitution = new Map<TypeParamId, TypeId>(
+    applyExplicitTypeArguments({
+      signature: candidate.signature,
+      typeArguments,
+      calleeSymbol: candidate.symbol,
+      ctx,
+    }),
+  );
+  const lambdaArgIndexes = callArgs
+    .map((arg, index) => ({ arg, index }))
+    .filter(({ arg }) => ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda")
+    .map(({ index }) => index);
+
+  let checked = false;
+  for (const index of lambdaArgIndexes) {
+    const arg = callArgs[index];
+    if (!arg) {
+      continue;
+    }
+    const params = publicCallParametersFor({ signature: candidate.signature }).map(
+      (param) => ({
+        ...param,
+        type: ctx.arena.substitute(param.type, substitution),
+      }),
+    );
+    const expected = expectedCallArgType({
+      args: callArgs,
+      index,
+      argIndex: index,
+      params,
+      hintSubstitution: undefined,
+      ctx,
+    });
+    if (typeof expected !== "number") {
+      continue;
+    }
+    const expectedFunctionType = unfoldRecursiveTypeId(expected, ctx);
+    const expectedDesc = ctx.arena.get(expectedFunctionType);
+    if (expectedDesc.kind !== "function") {
+      continue;
+    }
+    const expectedReturnType = unfoldRecursiveTypeId(expectedDesc.returnType, ctx);
+    if (expectedReturnType === ctx.primitives.unknown) {
+      continue;
+    }
+    const actualReturnType = inferLambdaReturnType({
+      lambdaExpr: arg.expr,
+      expectedFunctionType,
+      ctx,
+      state,
+    });
+    if (actualReturnType === undefined) {
+      return { checked: true, ok: false, substitution };
+    }
+    checked = true;
+    bindTypeParamsFromType(
+      expectedReturnType,
+      actualReturnType,
+      substitution,
+      ctx,
+      state,
+    );
+    const boundExpectedReturnType = unfoldRecursiveTypeId(
+      ctx.arena.substitute(expectedReturnType, substitution),
+      ctx,
+    );
+    if (
+      !typeSatisfies(actualReturnType, boundExpectedReturnType, ctx, state) ||
+      !typeSatisfies(boundExpectedReturnType, actualReturnType, ctx, state)
+    ) {
+      return { checked: true, ok: false, substitution };
+    }
+  }
+
+  if (!checked) {
+    return { checked: false, ok: true, substitution: undefined };
+  }
+
+  try {
+    (candidate.signature.typeParams ?? []).forEach((param) =>
+      enforceTypeParamConstraint(param, substitution, ctx, state),
+    );
+  } catch {
+    return { checked: true, ok: false, substitution };
+  }
+
+  return { checked: true, ok: true, substitution };
+};
+
+const narrowOverloadMatchesByLambdaCompatibility = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  matches,
+  args,
+  argsForCandidate,
+  typeArguments,
+  ctx,
+  state,
+}: {
+  matches: readonly T[];
+  args: readonly Arg[];
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly T[] => {
+  if (matches.length <= 1) {
+    return matches;
+  }
+
+  const hasInlineLambda = args.some(
+    (arg) =>
+      typeof arg.exprId === "number" &&
+      ctx.hir.expressions.get(arg.exprId)?.exprKind === "lambda",
+  );
+  if (!hasInlineLambda) {
+    return matches;
+  }
+
+  const compatible = matches.filter((candidate) =>
+    candidateAcceptsInlineLambdas({
+      candidate,
+      args: argsForCandidate ? argsForCandidate(candidate) : args,
+      typeArguments,
+      ctx,
+      state,
+    }),
+  );
+  const candidatesForScoring = compatible.length > 0 ? compatible : matches;
+  if (candidatesForScoring.length === 1) {
+    return candidatesForScoring;
+  }
+  if (candidatesForScoring.length > 1) {
+    const scored = candidatesForScoring.map((candidate) => ({
+      candidate,
+      penalty: inlineLambdaExpectedTypeParamPenalty({
+        candidate,
+        args: argsForCandidate ? argsForCandidate(candidate) : args,
+        typeArguments,
+        ctx,
+        state,
+      }),
+    }));
+    const minPenalty = Math.min(...scored.map(({ penalty }) => penalty));
+    const leastGeneric = scored
+      .filter(({ penalty }) => penalty === minPenalty)
+      .map(({ candidate }) => candidate);
+    if (
+      leastGeneric.length > 0 &&
+      leastGeneric.length < candidatesForScoring.length
+    ) {
+      return leastGeneric;
+    }
+  }
+  return candidatesForScoring.length < matches.length
+    ? candidatesForScoring
+    : matches;
+};
+
+const candidateAcceptsInlineLambdas = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  candidate,
+  args,
+  typeArguments,
+  ctx,
+  state,
+}: {
+  candidate: T;
+  args: readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const params = specializeOverloadParameters({
+    symbol: candidate.symbol,
+    signature: candidate.signature,
+    typeArguments,
+    ctx,
+  }).filter((param) => !isStableCallsiteIdParam(param));
+  const callArgs = callArgInputsFromArgs(args);
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (typeof arg.exprId !== "number") {
+      continue;
+    }
+    const lambdaExpr = ctx.hir.expressions.get(arg.exprId);
+    if (!lambdaExpr || lambdaExpr.exprKind !== "lambda") {
+      continue;
+    }
+    const expected = expectedCallArgType({
+      args: callArgs,
+      index,
+      argIndex: index,
+      params,
+      hintSubstitution: undefined,
+      ctx,
+    });
+    if (typeof expected !== "number") {
+      continue;
+    }
+    const expectedDesc = ctx.arena.get(unfoldRecursiveTypeId(expected, ctx));
+    if (expectedDesc.kind !== "function") {
+      continue;
+    }
+    if (expectedDesc.parameters.length !== lambdaExpr.parameters.length) {
+      return false;
+    }
+    for (let paramIndex = 0; paramIndex < lambdaExpr.parameters.length; paramIndex += 1) {
+      const actualParam = lambdaExpr.parameters[paramIndex]!;
+      if (!actualParam.type) {
+        continue;
+      }
+      const expectedParam = expectedDesc.parameters[paramIndex];
+      if (!expectedParam || containsTypeParamRef(expectedParam.type, ctx)) {
+        continue;
+      }
+      let actualType: TypeId | undefined;
+      try {
+        actualType = resolveTypeExpr(
+          actualParam.type,
+          ctx,
+          state,
+          ctx.primitives.unknown,
+        );
+      } catch {
+        continue;
+      }
+      if (
+        typeof actualType === "number" &&
+        !typeSatisfies(actualType, expectedParam.type, ctx, state) &&
+        !typeSatisfies(expectedParam.type, actualType, ctx, state)
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+};
+
+const inlineLambdaExpectedTypeParamPenalty = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  candidate,
+  args,
+  typeArguments,
+  ctx,
+  state,
+}: {
+  candidate: T;
+  args: readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): number => {
+  const params = specializeOverloadParameters({
+    symbol: candidate.symbol,
+    signature: candidate.signature,
+    typeArguments,
+    ctx,
+  }).filter((param) => !isStableCallsiteIdParam(param));
+  const callArgs = callArgInputsFromArgs(args);
+
+  let penalty = 0;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (typeof arg.exprId !== "number") {
+      continue;
+    }
+    const lambdaExpr = ctx.hir.expressions.get(arg.exprId);
+    if (!lambdaExpr || lambdaExpr.exprKind !== "lambda") {
+      continue;
+    }
+    const expected = expectedCallArgType({
+      args: callArgs,
+      index,
+      argIndex: index,
+      params,
+      hintSubstitution: undefined,
+      ctx,
+    });
+    if (typeof expected !== "number") {
+      continue;
+    }
+    const expectedDesc = ctx.arena.get(unfoldRecursiveTypeId(expected, ctx));
+    if (expectedDesc.kind !== "function") {
+      continue;
+    }
+    expectedDesc.parameters.forEach((param, paramIndex) => {
+      const lambdaParam = lambdaExpr.parameters[paramIndex];
+      const annotationPenalty =
+        lambdaParam?.type !== undefined
+          ? inlineLambdaAnnotationPenalty({
+              expected: param.type,
+              annotation: lambdaParam.type,
+              ctx,
+              state,
+            })
+          : undefined;
+      if (typeof annotationPenalty === "number") {
+        penalty += annotationPenalty;
+        return;
+      }
+
+      const paramDesc = ctx.arena.get(unfoldRecursiveTypeId(param.type, ctx));
+      if (paramDesc.kind === "type-param-ref") {
+        penalty += 1;
+      }
+    });
+  }
+  return penalty;
+};
+
+const inlineLambdaAnnotationPenalty = ({
+  expected,
+  annotation,
+  ctx,
+  state,
+}: {
+  expected: TypeId;
+  annotation: HirTypeExpr;
+  ctx: TypingContext;
+  state: TypingState;
+}): number | undefined => {
+  let actualType: TypeId | undefined;
+  try {
+    actualType = resolveTypeExpr(
+      annotation,
+      ctx,
+      state,
+      ctx.primitives.unknown,
+    );
+  } catch {
+    return undefined;
+  }
+
+  const expectedType = unfoldRecursiveTypeId(expected, ctx);
+  const expectedDesc = ctx.arena.get(expectedType);
+  if (expectedDesc.kind === "type-param-ref") {
+    return 10;
+  }
+
+  if (
+    typeSatisfies(actualType, expected, ctx, state) ||
+    typeSatisfies(expected, actualType, ctx, state)
+  ) {
+    return 0;
+  }
+
+  return containsTypeParamRef(expected, ctx) ? 100 : 1_000;
+};
+
+const callArgInputsFromArgs = (args: readonly Arg[]): readonly CallArgInput[] =>
+  args.map((arg) => ({
+    label: arg.label,
+    expr:
+      typeof arg.exprId === "number"
+        ? arg.exprId
+        : (-1 as unknown as HirExprId),
+  }));
+
+const inferLambdaReturnType = ({
+  lambdaExpr,
+  expectedFunctionType,
+  ctx,
+  state,
+}: {
+  lambdaExpr: HirExprId;
+  expectedFunctionType: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): TypeId | undefined => {
+  const expectedDesc = ctx.arena.get(expectedFunctionType);
+  if (expectedDesc.kind !== "function") {
+    return undefined;
+  }
+  const parameterContext = ctx.arena.internFunction({
+    parameters: expectedDesc.parameters,
+    returnType: ctx.primitives.unknown,
+    effectRow: expectedDesc.effectRow,
+  });
+  try {
+    const actualFunction = withSpeculativeExprTyping(ctx, () =>
+      typeExpression(lambdaExpr, ctx, state, { expectedType: parameterContext }),
+    );
+    const actualDesc = ctx.arena.get(actualFunction);
+    const actualReturnType =
+      actualDesc.kind === "function"
+        ? unfoldRecursiveTypeId(actualDesc.returnType, ctx)
+        : ctx.primitives.unknown;
+    return actualDesc.kind === "function" &&
+      actualReturnType !== ctx.primitives.unknown
+      ? actualReturnType
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const containsTypeParamRef = (
+  type: TypeId,
+  ctx: TypingContext,
+  seen = new Set<TypeId>(),
+): boolean => {
+  if (seen.has(type)) {
+    return false;
+  }
+  seen.add(type);
+  const desc = ctx.arena.get(unfoldRecursiveTypeId(type, ctx));
+  switch (desc.kind) {
+    case "type-param-ref":
+      return true;
+    case "recursive":
+      return containsTypeParamRef(desc.body, ctx, seen);
+    case "fixed-array":
+      return containsTypeParamRef(desc.element, ctx, seen);
+    case "union":
+      return desc.members.some((member) => containsTypeParamRef(member, ctx, seen));
+    case "intersection":
+      return (
+        (typeof desc.nominal === "number" &&
+          containsTypeParamRef(desc.nominal, ctx, seen)) ||
+        (typeof desc.structural === "number" &&
+          containsTypeParamRef(desc.structural, ctx, seen)) ||
+        (desc.traits?.some((trait) => containsTypeParamRef(trait, ctx, seen)) ?? false)
+      );
+    case "trait":
+    case "nominal-object":
+    case "value-object":
+      return desc.typeArgs.some((arg) => containsTypeParamRef(arg, ctx, seen));
+    case "structural-object":
+      return desc.fields.some((field) => containsTypeParamRef(field.type, ctx, seen));
+    case "function":
+      return (
+        desc.parameters.some((param) => containsTypeParamRef(param.type, ctx, seen)) ||
+        containsTypeParamRef(desc.returnType, ctx, seen)
+      );
+    case "primitive":
+      return false;
+  }
+};
+
+const containsTypeParamRefFrom = (
+  type: TypeId,
+  targetParams: ReadonlySet<TypeParamId>,
+  ctx: TypingContext,
+  seen = new Set<TypeId>(),
+): boolean => {
+  if (seen.has(type)) {
+    return false;
+  }
+  seen.add(type);
+  const desc = ctx.arena.get(unfoldRecursiveTypeId(type, ctx));
+  switch (desc.kind) {
+    case "type-param-ref":
+      return targetParams.has(desc.param);
+    case "recursive":
+      return containsTypeParamRefFrom(desc.body, targetParams, ctx, seen);
+    case "fixed-array":
+      return containsTypeParamRefFrom(desc.element, targetParams, ctx, seen);
+    case "union":
+      return desc.members.some((member) =>
+        containsTypeParamRefFrom(member, targetParams, ctx, seen),
+      );
+    case "intersection":
+      return (
+        (typeof desc.nominal === "number" &&
+          containsTypeParamRefFrom(desc.nominal, targetParams, ctx, seen)) ||
+        (typeof desc.structural === "number" &&
+          containsTypeParamRefFrom(desc.structural, targetParams, ctx, seen)) ||
+        (desc.traits?.some((trait) =>
+          containsTypeParamRefFrom(trait, targetParams, ctx, seen),
+        ) ?? false)
+      );
+    case "trait":
+    case "nominal-object":
+    case "value-object":
+      return desc.typeArgs.some((arg) =>
+        containsTypeParamRefFrom(arg, targetParams, ctx, seen),
+      );
+    case "structural-object":
+      return desc.fields.some((field) =>
+        containsTypeParamRefFrom(field.type, targetParams, ctx, seen),
+      );
+    case "function":
+      return (
+        desc.parameters.some((param) =>
+          containsTypeParamRefFrom(param.type, targetParams, ctx, seen),
+        ) || containsTypeParamRefFrom(desc.returnType, targetParams, ctx, seen)
+      );
+    case "primitive":
+      return false;
+  }
+};
+
+const unfoldRecursiveTypeId = (
+  type: TypeId,
+  ctx: TypingContext,
+  seen = new Set<TypeId>(),
+): TypeId => {
+  if (seen.has(type)) {
+    return type;
+  }
+  seen.add(type);
+  const desc = ctx.arena.get(type);
+  return desc.kind === "recursive"
+    ? unfoldRecursiveTypeId(desc.body, ctx, seen)
+    : type;
 };
 
 const resolveTraitDispatchOverload = <
@@ -5641,6 +6424,18 @@ const matchesOverloadSignature = (
     return false;
   }
 
+  if (
+    !callArgumentFunctionReturnsSatisfyParams({
+      args,
+      params,
+      signatureTypeParams: signature.typeParams ?? [],
+      ctx,
+      state,
+    })
+  ) {
+    return false;
+  }
+
   params.forEach(({ type }) => {
     if (type === ctx.primitives.unknown) {
       throw new Error(
@@ -5822,6 +6617,11 @@ const typeIntrinsicCall = (
         ctx,
         typeArguments,
         expectedReturnType,
+      });
+    case "__boundary_msgpack_to_value":
+      return typeBoundaryMsgPackToValueIntrinsic({
+        args,
+        typeArguments,
       });
     case "__shift_l":
     case "__shift_ru":
@@ -6653,6 +7453,26 @@ const typeBoundaryValueToMsgPackIntrinsic = ({
   });
   assertNoIntrinsicTypeArgs("__boundary_value_to_msgpack", typeArguments);
   return expectedReturnType ?? ctx.primitives.unknown;
+};
+
+const typeBoundaryMsgPackToValueIntrinsic = ({
+  args,
+  typeArguments,
+}: {
+  args: readonly Arg[];
+  typeArguments?: readonly TypeId[];
+}): TypeId => {
+  assertIntrinsicArgCount({
+    name: "__boundary_msgpack_to_value",
+    args,
+    expected: 1,
+    detail: "MessagePack value",
+  });
+  return requireSingleTypeArgument({
+    name: "__boundary_msgpack_to_value",
+    typeArguments,
+    detail: "target type",
+  });
 };
 
 const typeTaskTakeValueIntrinsic = ({

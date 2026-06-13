@@ -1,6 +1,6 @@
 # Voyd Web Framework
 
-Status: Proposed
+Status: Implemented (Phase 1)
 Owner: Std + Runtime + Framework
 Scope: new framework package, recommended `packages/web`; smoke tests; SDK/server integration
 
@@ -84,7 +84,7 @@ obj Session {
   api user_id: String
 }
 
-pub fn main(): (HttpServer, TaskRuntime, Db, Log) -> Result<Unit, ServeError>
+pub fn main(): (HttpServer, TaskRuntime, Db, Log) -> Result<Unit, HostError>
   serve(port: 3000) routes():
     adopt(request_logger)
 
@@ -97,7 +97,7 @@ pub fn main(): (HttpServer, TaskRuntime, Db, Log) -> Result<Unit, ServeError>
 
       post(
         "/",
-        body: json(),
+        body: json_body(),
         auth: required_session()
       ) do(input: CreateUser, session: Session):
         create_user(input, by: session.user_id)
@@ -171,8 +171,8 @@ get("/users/:id") do(params: UserParams, query: UserQuery):
 
 Use labels when they configure behavior, select a format, or resolve ambiguity:
 
-- `body: json()`
-- `body: text()`
+- `body: json_body()`
+- `body: text_body()`
 - `auth: required_session()`
 - `auth: optional_session()`
 - `timeout:`
@@ -225,6 +225,14 @@ Recommended public modules:
 `all` should be convenient but not enormous. Advanced escape hatches should stay
 in their owning modules.
 
+The package root reserves `pkg::web::router` for the module path. Voyd's current
+package import resolver binds modules and values in one namespace at this
+boundary, so Phase 1 does not also expose a same-name free `router()` function.
+Use `pkg::web::router::Router::init()` or import `pkg::web::router` and call
+`router::Router::init()`. Root-level builder constructors such as `app()`,
+`build_app()`, and `serve()` stay re-exported from `pkg::web`, and
+`pkg::web::all` remains the ergonomic import for the route DSL.
+
 ## Route DSL
 
 The primary documented API should be a trailing-callback DSL.
@@ -236,7 +244,7 @@ serve(port: 3000) routes():
 
   post(
     "/sessions",
-    body: json(),
+    body: json_body(),
     auth: optional_session()
   ) do(input: LoginInput, session: Option<Session>):
     create_session(input, existing: session)
@@ -254,7 +262,9 @@ Recommended top-level functions:
 - `group(prefix, routes:)`
 - `adopt(middleware)`
 - `not_found(handler)`
+- `method_not_allowed(handler)`
 - `on_error(handler)`
+- `on_rejection(handler)`
 
 Prefer the route DSL in examples and docs. Keep the builder API available for
 composition, generated code, and cases where explicit app values read better.
@@ -295,14 +305,27 @@ route declarations should feel like ordinary Voyd calls with trailing closures.
 
 ## Builder API
 
-The secondary builder surface should mirror the DSL:
+The secondary builder surface should preserve the DSL's composition model while
+using explicit names for extracted handler shapes. This avoids relying on
+same-name builder overloads that the compiler cannot currently disambiguate when
+the handler is an inline lambda.
+
+Phase 1 extracted builder methods should accept `Response`-returning handlers.
+The route DSL and free route helper functions remain the richer surface for
+`IntoResponse` handler returns until the compiler can disambiguate those builder
+overloads without making inline lambda handlers ambiguous.
+
+Auth and body policies keep their explicit labels on the builder surface, so
+builder calls such as `app.get("/me", auth: required_session(), handler: ...)`
+and `app.route("/me", method: Method::Get {}, auth: required_session(),
+handler: ...)` are supported without relying on structural trait extraction.
 
 ```voyd
 let app = web::app()
   .adopt(request_logger)
-  .get("/health", handler: health)
+  .get_unit("/health", handler: health)
   .group("/users") routes(router):
-    router.get("/:id", handler: show_user)
+    router.get_params("/:id", handler: show_user)
 
 web::serve(app, port: 3000)
 ```
@@ -310,9 +333,13 @@ web::serve(app, port: 3000)
 Recommended primitives:
 
 - `web::app() -> App`
-- `web::router() -> Router`
+- `router::Router::init() -> Router` from `pkg::web::router`
 - `App::adopt(self, middleware) -> App`
 - `App::get(self, path, ...) -> App`
+- `App::get_unit(self, path, handler:) -> App`
+- `App::get_params(self, path, handler:) -> App`
+- `App::get_params_query(self, path, handler:) -> App`
+- `App::get(self, path, auth:, handler:) -> App`
 - `App::post(self, path, ...) -> App`
 - `App::route(self, path, method: Method, ...) -> App`
 - `App::group(self, prefix, build:) -> App`
@@ -402,7 +429,7 @@ get("/users/:id") do(params: UserParams, query: UserQuery, headers: RequestHeade
 
 post(
   "/users",
-  body: json(),
+  body: json_body(),
   auth: required_session(),
   timeout: Duration::from_millis(500)
 ) do(input: CreateUser, session: Session, ctx: Context):
@@ -432,8 +459,8 @@ Initial inferred handler parameters:
 
 Initial route policies that supply handler parameters:
 
-- `body: json()` plus one typed body parameter
-- `body: text()` plus one `String` body parameter
+- `body: json_body()` plus one typed body parameter
+- `body: text_body()` plus one `String` body parameter
 - `body: bytes()` plus one `Bytes` body parameter
 - `auth: required_session()` plus one `Session` parameter
 - `auth: optional_session()` plus one `Option<Session>` parameter
@@ -453,23 +480,43 @@ parameters are matched by the explicit route policy that introduces them. If a
 handler shape is ambiguous, the compiler should produce a targeted diagnostic
 asking for a route label, a parameter rename, or an explicit wrapper type.
 
-### Extractor Traits
+### Extractor Contracts
 
-Use traits to keep extraction extensible.
+Phase 1 should decode path params, query values, and headers into structural
+records through the same boundary-compatible machinery used for host DTOs. Body
+and auth extraction use nominal policy values because they carry behavior.
+Query-only structural route handlers should include `Context` in Phase 1, for
+example `route_query_context(app, "/search", method: Method::Get {}) do(query:
+SearchQuery, ctx: Context): ...`. The no-context query-only builder mirror is
+deferred because the compiler currently mis-lowers that generic function-value
+shape for inline structural DTO handlers; params+query routes such as
+`get_params_query` do not hit that path.
+
+Implementation note: the current route helpers also avoid wrapping structural
+params/query/header decodes in synthetic `Result<T, Rejection>` values. While
+working through Phase 1, generic route-builder closures inside some effectful
+test-entry shapes were mis-lowered when structural extraction was encoded as an
+always-`Ok` result and immediately matched. Phase 1 therefore decodes
+boundary-compatible structural values directly and reserves strict per-field
+fallible extraction for Phase 2.
 
 ```voyd
-pub trait FromParams<T>
-  fn from_params(params: RouteParams) -> Result<T, Rejection>
-
-pub trait FromQuery<T>
-  fn from_query(query: QueryParams) -> Result<T, Rejection>
-
 pub trait FromBody<T>
-  fn from_body(ctx: Context) -> Result<T, Rejection>
+  fn extract_body(self, request: IncomingRequest) -> Result<T, Rejection>
 
-pub trait FromHeaders<T>
-  fn from_headers(headers: http::Headers) -> Result<T, Rejection>
+pub trait FromAuth<T>
+  fn extract_auth(self, request: IncomingRequest) -> Result<T, Rejection>
 ```
+
+Custom trait-based params/query/header extraction is a Phase 2 feature unless the
+compiler gains precise generic trait dispatch for that shape. Do not emulate it
+by applying traits to structural DTOs.
+
+Phase 1 structural extraction should keep the route pipeline deterministic and
+boundary-compatible. Strict per-field missing or wrong-type validation for
+params, query, and headers can land in Phase 2 with fallible structural decoding;
+JSON parse failures and nominal body/auth policy failures should already produce
+typed rejections.
 
 Structural records are ideal targets for params and query because names matter
 more than identity:
@@ -507,6 +554,11 @@ Default mapping:
 - auth required but absent: `401`
 - auth present but insufficient: `403`
 
+Phase 1 only guarantees this mapping for implemented fallible paths such as route
+matching, JSON parsing, and nominal body/auth policies. Strict structural
+params/query/header field validation should follow with fallible structural
+decoding in Phase 2.
+
 Each extractor should return a `Rejection` that implements `IntoResponse`, so
 applications can override formatting consistently.
 
@@ -531,8 +583,8 @@ Recommended helpers:
 - `ctx.param(name) -> Option<String>`
 - `ctx.query_value(name) -> Option<String>`
 - `ctx.body_bytes() -> Bytes`
-- `ctx.text() -> Result<String, BodyError>`
-- `ctx.json() -> Result<JsonValue, BodyError>`
+- `ctx.text() -> Result<String, HttpError>`
+- `ctx.json() -> Result<JsonValue, HttpError>`
 
 Avoid a dynamic `locals` bag as the primary design. If an escape hatch is needed,
 make it visibly secondary, for example `ctx.extensions()`, and do not use it in
@@ -555,15 +607,15 @@ Response::ok()
   .with(header: "cache-control", value: "no-store")
   .text("hello")
 
-Response::created().json(user)
+response_json(Response::created(), user_json)
 Response::no_content()
 ```
 
 Because `Response` is owned by `std::http`, framework-specific helpers such as
 generic DTO JSON and VX HTML can be provided as extension-style free functions
-with `Response` as their first parameter. With `pkg::web::all` imported, users
-should still be able to write natural dot-call code such as
-`Response::ok().json(user)` and `Response::ok().html(page)`.
+with `Response` as their first parameter. Phase 1 keeps these helpers explicit
+(`response_json(response, value)` and `html_response(response, value)`) so it
+does not require trait implementations for non-nominal DTO or VX values.
 
 Recommended builders:
 
@@ -582,9 +634,10 @@ Recommended builders:
 - `with(body:)`
 - `with(cookie:)`
 - `text(value)`
-- `json(value)`
+- `json(value: JsonValue)`
 - `bytes(value)`
-- `html(value)`
+- `response_json(response, value: JsonValue)`
+- `html_response(response, value)`
 
 `html` can be provided by `pkg::web::html` if std should stay free of VX
 dependencies.
@@ -604,15 +657,19 @@ Initial implementations:
 - `String`
 - `StringSlice`
 - `Bytes`
-- `JsonValue`
-- `vx::Html<Msg>` or the current VX node type
 - `(Status, String)`
-- `(Status, JsonValue)`
 - `(Status, Bytes)`
 - `Result<T, E>` where `T: IntoResponse` and `E: IntoResponse`
 - `Option<T>` where `T: IntoResponse`, mapping `None` to `404`
 
-For ordinary DTO-compatible objects, the desired DevX is:
+Do not require trait implementations for structural or otherwise non-nominal
+objects. `JsonValue` and status tuples should be supported through concrete
+route/helper overloads and explicit response helpers such as
+`response_json(value)`, not by relaxing the compiler's nominal trait target rule.
+Likewise, VX HTML is returned through explicit `html_response`/`html` helpers in
+Phase 1 because the current VX value is not a nominal web response type.
+
+For ordinary DTO-compatible objects, the desired Phase 2 DevX is:
 
 ```voyd
 fn show_user(params: UserParams) -> Result<UserDto, AppError>
@@ -636,24 +693,26 @@ Route authors should be able to choose the level of explicitness:
 
 ```voyd
 get("/version") do:
-  VersionDto { version: "0.3.0" }
+  response_json(version_json(version: "0.3.0"))
 
 get("/status") do:
-  Response::ok().json(StatusDto { healthy: true })
+  response_json(Response::ok(), status_json(healthy: true))
 
-post("/users", body: json()) do(input: CreateUser):
+post("/users", body: json_body()) do(input: CreateUser):
   create_user(input)
 ```
 
-The framework should default DTO-compatible object returns to JSON, while
-strings remain `text/plain` and bytes remain `application/octet-stream`.
+Phase 1 should keep DTO JSON explicit through `JsonValue` and encoder helpers.
+Default JSON for arbitrary DTO-compatible object returns can come later once the
+language/runtime has a stable nominal or boundary-compatible JSON path that does
+not require structural trait implementations.
 
-If default JSON for arbitrary objects proves too implicit, keep the concise
-alternative:
+If default JSON for arbitrary objects proves too implicit, keep a concise
+explicit alternative:
 
 ```voyd
 get("/version") do:
-  json(VersionDto { version: "0.3.0" })
+  response_json(version_json(version: "0.3.0"))
 ```
 
 That still keeps users away from low-level encoding.
@@ -664,7 +723,7 @@ Server-rendered HTML should use `std::vx` as the authoring model.
 
 ```voyd
 use std::vx
-use pkg::web::Response
+use pkg::web::{ Response, html_response }
 
 fn home_page(name: String) -> vx::Html<AppMsg>
   <main>
@@ -673,14 +732,15 @@ fn home_page(name: String) -> vx::Html<AppMsg>
   </main>
 
 fn home() -> Response
-  Response::ok().html(home_page("friend"))
+  html_response(Response::ok(), home_page("friend"))
 ```
 
 Recommended helpers:
 
 - `html::render(value) -> String`
 - `html::document(value) -> String`
-- `Response::html(value) -> Response`
+- `html::html_response(response, value) -> Response`
+- `html::html(response, value) -> Response`
 
 The framework should treat HTML syntax as the primary authoring path. Users
 should not hand-assemble render trees unless they want to.
@@ -699,7 +759,8 @@ Conceptual API shape:
 
 ```voyd
 fn home(model: HomeModel) -> Response
-  Response::ok().html(
+  html_response(
+    Response::ok(),
     html::document(
       view: home_page(model),
       hydrate: html::hydrate(
@@ -809,7 +870,7 @@ obj AppError {
 
 impl IntoResponse for AppError
   fn into_response(self) -> Response
-    Response::new(status: self.status).json(ErrorDto { message: self.message })
+    Response::new(status: self.status).text(self.message)
 
 fn show_user(params: UserParams) -> Result<UserDto, AppError>
   users::find(params.id)
@@ -825,7 +886,10 @@ Framework-level error hooks are still useful:
 ```voyd
 serve(port: 3000) routes():
   not_found() do(ctx: Context):
-    Response::not_found().html(not_found_page(ctx.path()))
+    html_response(Response::not_found(), not_found_page(ctx.path()))
+
+  method_not_allowed() do(ctx: Context):
+    Response::method_not_allowed().text("wrong method")
 
   on_rejection() do(rejection: Rejection, ctx: Context):
     rejection.into_response().with(header: "x-error", value: "request")

@@ -1,0 +1,3759 @@
+//! Builder helper functions for apps assembled with `build_app`.
+
+use std::bytes::Bytes
+use std::http::{ Method, Response, Status }
+use std::json::JsonValue
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use super::extract::{
+  FromAuth,
+  FromBody,
+  JsonBody,
+  OptionalSession,
+  Rejection,
+  RequiredSession,
+  TextBody,
+  decode_json_value,
+  decode_params,
+  decode_query,
+  default_optional_session,
+  default_optional_session_as,
+  default_required_session,
+  default_required_session_as,
+  extract_headers,
+  extract_params,
+  extract_query,
+  json_body_value,
+  query_from,
+}
+use super::response::{ IntoResponse, json_value, to_response }
+use super::router::{ AppBuild, Context, ErrorHandler, Handler, Middleware }
+
+pub fn get_context(
+  app: AppBuild,
+  path: StringSlice,
+  handler: Handler
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: handler)
+
+pub fn get_context(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> String
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn get_context(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> StringSlice
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn get_context(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> Bytes
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn get_context(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    json_value(handler(ctx))
+  )
+
+pub fn get_context(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn get_context(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> (Status, StringSlice)
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn get_context(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn get_context(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn get_context<T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    to_response<T, E>(handler(ctx))
+  )
+
+pub fn get_context<T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(handler(ctx))
+      Some<T> { value }:
+        to_response<T>(value)
+      None:
+        Response::not_found().empty()
+  )
+
+pub fn get_unit(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn() : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (_ctx: Context) -> Response =>
+    handler()
+  )
+
+pub fn get_unit<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn() : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (_ctx: Context) -> Response =>
+    to_response<R>(handler())
+  )
+
+pub fn get<P>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        handler(value)
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<P>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        json_value(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<P>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> String
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<P>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> StringSlice
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<P>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> Bytes
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<P>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<P>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<P>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<P, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response<T, E>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<P, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        match(handler(value))
+          Some<T> { value }:
+            to_response<T>(value)
+          None:
+            Response::not_found().empty()
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get_params_query<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P, Q) : (open) -> Response
+) -> AppBuild
+  app.get_params_query<P, Q>(path, handler: handler)
+
+pub fn get<S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: A },
+  handler: fn(S) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(auth.extract_auth(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: A },
+  handler: fn(S, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(auth.extract_auth(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: RequiredSession },
+  handler: fn(S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(default_required_session_as<S>(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: RequiredSession },
+  handler: fn(S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(default_required_session_as<S>(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: OptionalSession },
+  handler: fn(Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(default_optional_session_as<S>(ctx.request))
+      Ok<Option<S>> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn get<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: OptionalSession },
+  handler: fn(Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    match(default_optional_session_as<S>(ctx.request))
+      Ok<Option<S>> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post_unit<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn() : (open) -> R
+) -> AppBuild
+  route_unit(app, path, method: Method::Post {}, handler)
+
+pub fn put_context<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  route_context(app, path, method: Method::Put {}, handler)
+
+pub fn put_unit<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn() : (open) -> R
+) -> AppBuild
+  route_unit(app, path, method: Method::Put {}, handler)
+
+pub fn put<P, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> R
+) -> AppBuild
+  route_params(app, path, method: Method::Put {}, handler)
+
+pub fn put_params_query<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P, Q) : (open) -> Response
+) -> AppBuild
+  app.put_params_query<P, Q>(path, handler: handler)
+
+pub fn put<I>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: Method::Put {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Ok<JsonValue> { value }:
+        handler(decode_json_value<I>(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn put<I>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, handler: fn(I) : (open) -> Response }
+) -> AppBuild
+  put(app, path, body: body, handler)
+
+pub fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, handler)
+
+pub fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, handler)
+
+pub fn put<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, handler)
+
+pub fn put<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, handler)
+
+pub fn put<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn patch_context<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  route_context(app, path, method: Method::Patch {}, handler)
+
+pub fn patch_unit<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn() : (open) -> R
+) -> AppBuild
+  route_unit(app, path, method: Method::Patch {}, handler)
+
+pub fn patch<P, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> R
+) -> AppBuild
+  route_params(app, path, method: Method::Patch {}, handler)
+
+pub fn patch_params_query<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P, Q) : (open) -> Response
+) -> AppBuild
+  app.patch_params_query<P, Q>(path, handler: handler)
+
+pub fn patch(
+  app: AppBuild,
+  path: StringSlice,
+  { body: TextBody, auth: RequiredSession },
+  handler: fn(String, String) : (open) -> Response
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Patch {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<String> { value: input }:
+        match(default_required_session(ctx.request))
+          Ok<String> { value: session }:
+            handler(input, session)
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn patch(
+  app: AppBuild,
+  path: StringSlice,
+  { body: TextBody, auth: RequiredSession, handler: fn(String, String) : (open) -> Response }
+) -> AppBuild
+  patch(app, path, body: body, auth: auth, handler)
+
+pub fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, handler)
+
+pub fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, handler)
+
+pub fn patch<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, handler)
+
+pub fn patch<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, handler)
+
+pub fn patch<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn delete_context<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  route_context(app, path, method: Method::Delete {}, handler)
+
+pub fn delete_unit<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn() : (open) -> R
+) -> AppBuild
+  route_unit(app, path, method: Method::Delete {}, handler)
+
+pub fn delete<P, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> R
+) -> AppBuild
+  route_params(app, path, method: Method::Delete {}, handler)
+
+pub fn delete_params_query<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P, Q) : (open) -> Response
+) -> AppBuild
+  app.delete_params_query<P, Q>(path, handler: handler)
+
+pub fn delete(
+  app: AppBuild,
+  path: StringSlice,
+  { body: TextBody },
+  handler: fn(String) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: Method::Delete {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Ok<String> { value }:
+        handler(value)
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn delete(
+  app: AppBuild,
+  path: StringSlice,
+  { body: TextBody, handler: fn(String) : (open) -> Response }
+) -> AppBuild
+  delete(app, path, body: body, handler)
+
+pub fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, handler)
+
+pub fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, handler)
+
+pub fn delete<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, handler)
+
+pub fn delete<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, handler)
+
+pub fn delete<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn post_context<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  route_context(app, path, method: Method::Post {}, handler)
+
+pub fn post<P, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P) : (open) -> R
+) -> AppBuild
+  route_params(app, path, method: Method::Post {}, handler)
+
+pub fn post_params_query<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn(P, Q) : (open) -> Response
+) -> AppBuild
+  app.post_params_query<P, Q>(path, handler: handler)
+
+pub fn post<I, P: FromBody<I>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P },
+  handler: fn(I) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Ok<I> { value }:
+        handler(value)
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Ok<I> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Ok<I> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, handler: fn(I) : (open) -> Response }
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Ok<I> { value }:
+        handler(value)
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, handler: fn(I) : (open) -> R }
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Ok<I> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Ok<JsonValue> { value }:
+        handler(decode_json_value<I>(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Ok<JsonValue> { value }:
+        to_response<R>(handler(decode_json_value<I>(value)))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Ok<JsonValue> { value }:
+        to_response<R>(handler(decode_json_value<I>(value), ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, handler: fn(I) : (open) -> Response }
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Ok<JsonValue> { value }:
+        handler(decode_json_value<I>(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, handler: fn(I) : (open) -> R }
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Ok<JsonValue> { value }:
+        to_response<R>(handler(decode_json_value<I>(value)))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, String) : (open) -> Response
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session(ctx.request))
+          Ok<String> { value: session }:
+            handler(input, session)
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, String) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session(ctx.request))
+          Ok<String> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, String, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session(ctx.request))
+          Ok<String> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, String) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_required_session(ctx.request))
+          Ok<String> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, String, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_required_session(ctx.request))
+          Ok<String> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> Response
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            handler(input, session)
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<String>) : (open) -> Response
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_optional_session(ctx.request))
+          Ok<Option<String>> { value: session }:
+            handler(input, session)
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<String>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_optional_session(ctx.request))
+          Ok<Option<String>> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<String>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_optional_session(ctx.request))
+          Ok<Option<String>> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<String>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_optional_session(ctx.request))
+          Ok<Option<String>> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<String>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_optional_session(ctx.request))
+          Ok<Option<String>> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A },
+  handler: fn(I, S) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            handler(input, session)
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, handler: fn(I, S) : (open) -> Response }
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            handler(input, session)
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, handler: fn(I, S) : (open) -> R }
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn post<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: JsonBody, auth: A, handler: fn(I, S) : (open) -> R }
+) -> AppBuild
+  app.route_context(path, method: Method::Post {}, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: TextBody },
+  handler: fn(String) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Ok<String> { value }:
+        handler(value)
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: TextBody, handler: fn(String) : (open) -> Response }
+) -> AppBuild
+  route(app, path, method: method, body: body, handler)
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  app.route<I, P, R>(path, method: method, body: body, handler: handler)
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  app.route<I, P, R>(path, method: method, body: body, handler: handler)
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, handler: fn(I) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, handler)
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, handler: fn(I, Context) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, handler)
+
+pub fn route<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  app.route<I, R>(path, method: method, body: body, handler: handler)
+
+pub fn route<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  app.route<I, R>(path, method: method, body: body, handler: handler)
+
+pub fn route<I>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody },
+  handler: fn(I) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Ok<JsonValue> { value }:
+        handler(decode_json_value<I>(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route<I>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, handler: fn(I) : (open) -> Response }
+) -> AppBuild
+  route(app, path, method: method, body: body, handler)
+
+pub fn route<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, handler: fn(I) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, handler)
+
+pub fn route<I, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, handler: fn(I, Context) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, handler)
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  app.route<I, P, S, A, R>(path, method: method, body: body, auth: auth, handler: handler)
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  app.route<I, P, S, A, R>(path, method: method, body: body, auth: auth, handler: handler)
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A, handler: fn(I, S) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A, handler: fn(I, S, Context) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: A },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  app.route<I, S, A, R>(path, method: method, body: body, auth: auth, handler: handler)
+
+pub fn route<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: A },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  app.route<I, S, A, R>(path, method: method, body: body, auth: auth, handler: handler)
+
+pub fn route<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: A, handler: fn(I, S) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: A, handler: fn(I, S, Context) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, handler: fn(I, S) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, handler: fn(I, S, Context) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: RequiredSession },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: RequiredSession, handler: fn(I, S) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: RequiredSession, handler: fn(I, S, Context) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, handler: fn(I, Option<S>) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, handler: fn(I, Option<S>, Context) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            to_response<R>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: OptionalSession },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    body
+    match(json_body_value(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<JsonValue> { value }:
+        let input = decode_json_value<I>(value)
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            to_response<R>(handler(input, session, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: OptionalSession, handler: fn(I, Option<S>) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<I, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: JsonBody, auth: OptionalSession, handler: fn(I, Option<S>, Context) : (open) -> R }
+) -> AppBuild
+  route(app, path, method: method, body: body, auth: auth, handler)
+
+pub fn route<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  route_context(app, path, method: method, handler)
+
+pub fn route_unit<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    to_response<R>(handler())
+  )
+
+pub fn route_unit(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    json_value(handler())
+  )
+
+pub fn route_unit(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    to_response(handler())
+  )
+
+pub fn route_unit(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> (Status, StringSlice)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    to_response(handler())
+  )
+
+pub fn route_unit(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    to_response(handler())
+  )
+
+pub fn route_unit(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    to_response(handler())
+  )
+
+pub fn route_unit<T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    to_response<T, E>(handler())
+  )
+
+pub fn route_unit<T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    match(handler())
+      Some<T> { value }:
+        to_response<T>(value)
+      None:
+        Response::not_found().empty()
+  )
+
+pub fn route_context<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    to_response<R>(handler(ctx))
+  )
+
+pub fn route_context(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    json_value(handler(ctx))
+  )
+
+pub fn route_context(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn route_context(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> (Status, StringSlice)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn route_context(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn route_context(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    to_response(handler(ctx))
+  )
+
+pub fn route_context<T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    to_response<T, E>(handler(ctx))
+  )
+
+pub fn route_context<T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(handler(ctx))
+      Some<T> { value }:
+        to_response<T>(value)
+      None:
+        Response::not_found().empty()
+  )
+
+pub fn route<S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: A },
+  handler: fn(S) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(auth.extract_auth(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route<S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: A },
+  handler: fn(S, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(auth.extract_auth(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: RequiredSession },
+  handler: fn(S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_required_session_as<S>(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: RequiredSession },
+  handler: fn(S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_required_session_as<S>(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: OptionalSession },
+  handler: fn(Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_optional_session_as<S>(ctx.request))
+      Ok<Option<S>> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: OptionalSession },
+  handler: fn(Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_optional_session_as<S>(ctx.request))
+      Ok<Option<S>> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth<S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: A },
+  handler: fn(S) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(auth.extract_auth(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth<S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: A },
+  handler: fn(S, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(auth.extract_auth(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: RequiredSession },
+  handler: fn(S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_required_session_as<S>(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: RequiredSession },
+  handler: fn(S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_required_session_as<S>(ctx.request))
+      Ok<S> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: OptionalSession },
+  handler: fn(Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_optional_session_as<S>(ctx.request))
+      Ok<Option<S>> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: OptionalSession },
+  handler: fn(Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_optional_session_as<S>(ctx.request))
+      Ok<Option<S>> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_query_context<Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(query_from(ctx.request)))
+      Ok<Q> { value }:
+        json_value(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_query_context<Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, Context) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(query_from(ctx.request)))
+      Ok<Q> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_query_context<Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, Context) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(query_from(ctx.request)))
+      Ok<Q> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_query_context<Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, Context) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(query_from(ctx.request)))
+      Ok<Q> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_query_context<Q, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(query_from(ctx.request)))
+      Ok<Q> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_query_context<Q, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(query_from(ctx.request)))
+      Ok<Q> { value }:
+        to_response<T, E>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_query_context<Q, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, Context) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(query_from(ctx.request)))
+      Ok<Q> { value }:
+        match(handler(value, ctx))
+          Some<T> { value }:
+            to_response<T>(value)
+          None:
+            Response::not_found().empty()
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers<H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        json_value(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers<H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers<H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers<H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers<H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers_context<H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H, Context) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        handler(value, ctx)
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers_context<H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H, Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        json_value(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers_context<H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H, Context) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers_context<H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H, Context) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers_context<H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H, Context) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers_context<H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers_context<H, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        to_response<T, E>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_headers_context<H, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(H, Context) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_headers<H>(ctx.request.headers))
+      Ok<H> { value }:
+        match(handler(value, ctx))
+          Some<T> { value }:
+            to_response<T>(value)
+          None:
+            Response::not_found().empty()
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params<P, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params<P>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        json_value(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params<P>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params<P>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params<P>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params<P, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response<T, E>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params<P, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        match(handler(value))
+          Some<T> { value }:
+            to_response<T>(value)
+          None:
+            Response::not_found().empty()
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_context<P>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        json_value(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_context<P>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Context) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_context<P>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Context) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_context<P>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Context) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_context<P, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response<T, E>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_context<P, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Context) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        match(handler(value, ctx))
+          Some<T> { value }:
+            to_response<T>(value)
+          None:
+            Response::not_found().empty()
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_context<P, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_query<P, Q, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response<R>(handler(params, query))
+  )
+
+pub fn route_params_query<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    json_value(handler(params, query))
+  )
+
+pub fn route_params_query<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response(handler(params, query))
+  )
+
+pub fn route_params_query<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response(handler(params, query))
+  )
+
+pub fn route_params_query<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response(handler(params, query))
+  )
+
+pub fn route_params_query<P, Q, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response<T, E>(handler(params, query))
+  )
+
+pub fn route_params_query<P, Q, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    match(handler(params, query))
+      Some<T> { value }:
+        to_response<T>(value)
+      None:
+        Response::not_found().empty()
+  )
+
+pub fn route_params_query_context<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    json_value(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, Context) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, Context) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context<P, Q>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, Context) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context<P, Q, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response<R>(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context<P, Q, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    to_response<T, E>(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context<P, Q, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, Context) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    let params = decode_params<P>(ctx.route.params)
+    let query = decode_query<Q>(ctx.query())
+    match(handler(params, query, ctx))
+      Some<T> { value }:
+        to_response<T>(value)
+      None:
+        Response::not_found().empty()
+  )
+
+pub fn route_params_headers<P, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response<R>(handler(params, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers<P, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            json_value(handler(params, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers<P, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(params, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers<P, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(params, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers<P, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(params, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers_context<P, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response<R>(handler(params, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers_context<P, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H, Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            json_value(handler(params, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers_context<P, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H, Context) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(params, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers_context<P, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H, Context) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(params, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers_context<P, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H, Context) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(params, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers_context<P, H, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response<T, E>(handler(params, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_headers_context<P, H, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, H, Context) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            match(handler(params, headers, ctx))
+              Some<T> { value }:
+                to_response<T>(value)
+              None:
+                Response::not_found().empty()
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers<Q, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response<R>(handler(query, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers<Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            json_value(handler(query, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers<Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(query, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers<Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(query, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers<Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(query, headers))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers_context<Q, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response<R>(handler(query, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers_context<Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H, Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            json_value(handler(query, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers_context<Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H, Context) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(query, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers_context<Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H, Context) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(query, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers_context<Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H, Context) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response(handler(query, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers_context<Q, H, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            to_response<T, E>(handler(query, headers, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_query_headers_context<Q, H, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, H, Context) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(ctx.query()))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<Q> { value: query }:
+        match(extract_headers<H>(ctx.request.headers))
+          Ok<H> { value: headers }:
+            match(handler(query, headers, ctx))
+              Some<T> { value }:
+                to_response<T>(value)
+              None:
+                Response::not_found().empty()
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_params_query_headers<P, Q, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                to_response<R>(handler(params, query, headers))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers<P, Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                json_value(handler(params, query, headers))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers<P, Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                to_response(handler(params, query, headers))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers<P, Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                to_response(handler(params, query, headers))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers<P, Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                to_response(handler(params, query, headers))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers_context<P, Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H, Context) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                handler(params, query, headers, ctx)
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers_context<P, Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H, Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                json_value(handler(params, query, headers, ctx))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers_context<P, Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H, Context) : (open) -> (Status, String)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                to_response(handler(params, query, headers, ctx))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers_context<P, Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H, Context) : (open) -> (Status, Bytes)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                to_response(handler(params, query, headers, ctx))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers_context<P, Q, H>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H, Context) : (open) -> (Status, JsonValue)
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                to_response(handler(params, query, headers, ctx))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers_context<P, Q, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                to_response<R>(handler(params, query, headers, ctx))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers_context<P, Q, H, T: IntoResponse<T>, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                to_response<T, E>(handler(params, query, headers, ctx))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route_params_query_headers_context<P, Q, H, T: IntoResponse<T>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, H, Context) : (open) -> Option<T>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<P> { value: params }:
+        match(extract_query<Q>(ctx.query()))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<Q> { value: query }:
+            match(extract_headers<H>(ctx.request.headers))
+              Ok<H> { value: headers }:
+                match(handler(params, query, headers, ctx))
+                  Some<T> { value }:
+                    to_response<T>(value)
+                  None:
+                    Response::not_found().empty()
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn adopt(app: AppBuild, middleware: Middleware) -> AppBuild
+  app.adopt(middleware)
+
+pub fn group(app: AppBuild, prefix: StringSlice, { routes build: fn(AppBuild) : (open) -> AppBuild }) -> AppBuild
+  app.group(prefix, routes: build)
+
+pub fn not_found(app: AppBuild, handler: Handler) -> AppBuild
+  app.not_found(handler)
+
+pub fn method_not_allowed(app: AppBuild, handler: Handler) -> AppBuild
+  app.method_not_allowed(handler)
+
+pub fn on_error(app: AppBuild, handler: ErrorHandler) -> AppBuild
+  app.on_error(handler)
+
+pub fn on_rejection(app: AppBuild, handler: ErrorHandler) -> AppBuild
+  app.on_rejection(handler)
+
+fn rejection_response(error: Rejection): () -> Response
+  Response::new(status: error.status).text(error.message)

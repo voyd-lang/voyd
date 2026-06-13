@@ -1,0 +1,146 @@
+//! Response conversion helpers for web handlers.
+
+use std::bytes::Bytes
+use std::http::{ Body, Response, Status }
+use std::json::{
+  JsonError,
+  JsonValue,
+  stringify as stringify_json
+}
+use std::optional::types::{ Option, Some, None }
+use std::result::types::{ Result, Ok, Err }
+use std::string::type::{ String, StringSlice }
+
+pub use std::http::{ Body, Header, HeaderName, Headers, HttpError, IncomingRequest, Method, QueryString, Response, Status }
+
+pub trait IntoResponse<T>
+  fn into_response(self) -> Response
+
+impl IntoResponse<Response> for Response
+  fn into_response(self) -> Response
+    self
+
+impl IntoResponse<String> for String
+  fn into_response(self) -> Response
+    Response::ok().text(self)
+
+impl IntoResponse<StringSlice> for StringSlice
+  fn into_response(self) -> Response
+    Response::ok().text(self)
+
+impl IntoResponse<Bytes> for Bytes
+  fn into_response(self) -> Response
+    Response::ok().bytes(self)
+
+pub fn to_response<T: IntoResponse<T>>(value: T) -> Response
+  into_response_value<T>(value)
+
+pub fn to_response(value: JsonValue) -> Response
+  json_value_response(Response::ok(), value)
+
+pub fn to_response(value: (Status, String)) -> Response
+  Response::new(status: value.0).text(value.1)
+
+pub fn to_response(value: (Status, StringSlice)) -> Response
+  Response::new(status: value.0).text(value.1)
+
+pub fn to_response(value: (Status, Bytes)) -> Response
+  Response::new(status: value.0).bytes(value.1)
+
+pub fn to_response(value: (Status, JsonValue)) -> Response
+  json_value_response(Response::new(status: value.0), value.1)
+
+pub fn to_response<T: IntoResponse<T>, E: IntoResponse<E>>(value: Result<T, E>) -> Response
+  match(value)
+    Ok<T> { value }:
+      into_response_value<T>(value)
+    Err<E> { error }:
+      into_response_value<E>(error)
+
+pub fn to_response(value: Option<Response>) -> Response
+  match(value)
+    Some<Response> { value: response }:
+      response
+    None:
+      Response::not_found().empty()
+
+pub fn to_response(value: Option<String>) -> Response
+  match(value)
+    Some<String> { value: inner }:
+      Response::ok().text(inner.as_slice())
+    None:
+      Response::not_found().empty()
+
+pub fn to_response(value: Option<StringSlice>) -> Response
+  match(value)
+    Some<StringSlice> { value: inner }:
+      Response::ok().text(inner)
+    None:
+      Response::not_found().empty()
+
+pub fn to_response(value: Option<Bytes>) -> Response
+  match(value)
+    Some<Bytes> { value: inner }:
+      Response::ok().bytes(inner)
+    None:
+      Response::not_found().empty()
+
+pub fn to_response(value: Option<JsonValue>) -> Response
+  match(value)
+    Some<JsonValue> { value: inner }:
+      json_value_response(Response::ok(), inner)
+    None:
+      Response::not_found().empty()
+
+pub fn to_response<T: IntoResponse<T>>(value: Option<T>) -> Response
+  match(value)
+    Some<T> { value: inner }:
+      into_response_value<T>(inner)
+    None:
+      Response::not_found().empty()
+
+pub fn text(value: StringSlice) -> Response
+  Response::ok().text(value)
+
+pub fn text(value: String) -> Response
+  Response::ok().text(value)
+
+pub fn json(value: JsonValue) -> Response
+  json_value_response(Response::ok(), value)
+
+pub fn response_json(value: JsonValue) -> Response
+  json_value_response(Response::ok(), value)
+
+pub fn json_value(value: JsonValue) -> Response
+  json_value_response(Response::ok(), value)
+
+pub fn json(response: Response, value: JsonValue) -> Response
+  json_value_response(response, value)
+
+pub fn response_json(response: Response, value: JsonValue) -> Response
+  json_value_response(response, value)
+
+pub fn bytes(value: Bytes) -> Response
+  Response::ok().bytes(value)
+
+pub fn status(status: Status) -> Response
+  Response::new(status: status)
+
+pub fn status({ code: i32, reason: StringSlice }) -> Response
+  match(Status::custom(code: code, reason: reason))
+    Ok<Status> { value }:
+      Response::new(status: value)
+    Err:
+      Response::internal_server_error()
+
+fn into_response_value<T: IntoResponse<T>>(value: T): () -> Response
+  value.into_response()
+
+fn json_value_response(response: Response, value: JsonValue): () -> Response
+  match(stringify_json(value))
+    Ok<String> { value }:
+      response
+        .with(headers: response.headers.set(header: "content-type".as_slice(), value: "application/json".as_slice()))
+        .with(body: Body::text(value))
+    Err<JsonError> { error }:
+      Response::internal_server_error().text(error.message)

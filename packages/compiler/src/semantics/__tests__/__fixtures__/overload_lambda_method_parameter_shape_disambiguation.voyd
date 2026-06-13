@@ -1,0 +1,39 @@
+obj App {}
+
+obj Context {
+  value: i32
+}
+
+type Params = {
+  id: i32
+}
+
+type Query = {
+  verbose: bool
+}
+
+impl App
+  api fn get<T>(self, path: i32, { handler: fn(Context) -> T }) -> i32
+    self
+    path
+    handler(Context { value: 1 })
+    1
+
+  api fn get<P, T>(self, path: i32, { handler: fn(P) -> T }) -> i32
+    self
+    path
+    2
+
+  api fn get<P, Q, T>(self, path: i32, { handler: fn(P, Q) -> T }) -> i32
+    self
+    path
+    3
+
+pub fn main() -> i32
+  let app = App {}
+  let context_route = app.get(1, handler: (ctx: Context) -> i32 => ctx.value)
+  let params_route = app.get(2, handler: (params: Params) -> i32 => params.id)
+  let query_route = app.get(3, handler: (params: Params, query: Query) -> i32 =>
+    if query.verbose then: params.id else: 0
+  )
+  context_route + params_route + query_route

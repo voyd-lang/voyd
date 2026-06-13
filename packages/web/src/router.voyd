@@ -1,0 +1,1835 @@
+//! Value-returning router and `std::http::server` integration.
+
+use std::array::Array
+use std::bytes::Bytes
+use std::error::HostError
+use std::http::self as http
+use std::http::{ IncomingRequest, Method, Response }
+use std::http::server::self as server
+use std::json::JsonValue
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::task
+use super::extract::{
+  FromAuth,
+  FromBody,
+  JsonBody,
+  OptionalSession,
+  QueryParams,
+  Rejection,
+  RequiredSession,
+  RouteParams,
+  decode_json_value,
+  decode_params,
+  decode_query,
+  default_optional_session_as,
+  default_required_session_as,
+  extract_params,
+  extract_query,
+  json_body_value,
+  percent_decode,
+  query_from
+}
+use super::response::{ IntoResponse, json_value, to_response }
+
+pub type Handler = fn(Context) : (open) -> Response
+pub type Next = fn(Context) : (open) -> Response
+pub type Middleware = fn(Context, Next) : (open) -> Response
+pub type ErrorHandler = fn(Rejection, Context) : (open) -> Response
+
+pub obj AuthError {
+  api message: String
+}
+
+pub obj MatchedRoute {
+  api path: String,
+  api params: RouteParams
+}
+
+pub obj Context {
+  api request: IncomingRequest,
+  api route: MatchedRoute,
+  error_handler: ErrorHandler
+}
+
+pub obj TrailingSlashPolicy {
+  kind: i32
+}
+
+obj RouteSegment {
+  kind: i32,
+  value: String
+}
+
+pub obj Route {
+  method: Method,
+  path: String,
+  segments: Array<RouteSegment>,
+  middleware: Array<Middleware>,
+  handler: Handler,
+  error_handler: ErrorHandler,
+  order: i32
+}
+
+obj RouteMatch {
+  route: Route,
+  params: RouteParams,
+  score: i32
+}
+
+pub obj App {
+  routes: Array<Route>,
+  current_middleware: Array<Middleware>,
+  prefix: String,
+  next_order: i32,
+  not_found_handler: Handler,
+  method_not_allowed_handler: Handler,
+  error_handler: ErrorHandler,
+  trailing_slash_policy: TrailingSlashPolicy
+}
+
+pub obj Router {
+  app: App
+}
+
+pub type AppBuild = App
+
+impl AuthError
+  api fn init(message: StringSlice) -> AuthError
+    AuthError { message: message.to_string() }
+
+impl Context
+  api fn method(self) -> Method
+    self.request.method
+
+  api fn path(self) -> String
+    self.request.path
+
+  api fn header(self, name: StringSlice) -> Option<String>
+    self.request.header(name)
+
+  api fn header(self, name: String) -> Option<String>
+    self.request.header(name)
+
+  api fn param(self, name: StringSlice) -> Option<String>
+    self.route.params.get(name)
+
+  api fn param(self, name: String) -> Option<String>
+    self.param(name.as_slice())
+
+  api fn query(self) -> QueryParams
+    query_from(self.request)
+
+  api fn query_value(self, name: StringSlice) -> Option<String>
+    self.query().get(name)
+
+  api fn query_value(self, name: String) -> Option<String>
+    self.query_value(name.as_slice())
+
+  api fn body_bytes(self) -> Bytes
+    self.request.body_bytes()
+
+  api fn text(self) -> Result<String, http::HttpError>
+    self.request.text()
+
+  api fn json(self) -> Result<JsonValue, http::HttpError>
+    self.request.json()
+
+  api fn reject(self, rejection: Rejection) -> Response
+    let handler = self.error_handler
+    handler(rejection, self)
+
+impl TrailingSlashPolicy
+  api fn strict() -> TrailingSlashPolicy
+    TrailingSlashPolicy { kind: 0 }
+
+  api fn ignore() -> TrailingSlashPolicy
+    TrailingSlashPolicy { kind: 1 }
+
+impl App
+  api fn init() -> App
+    App {
+      routes: Array<Route>::init(),
+      current_middleware: Array<Middleware>::init(),
+      prefix: String::init(),
+      next_order: 0,
+      not_found_handler: (ctx: Context) -> Response => default_not_found(ctx),
+      method_not_allowed_handler: (ctx: Context) -> Response => default_method_not_allowed(ctx),
+      error_handler: (rejection: Rejection, ctx: Context) -> Response => default_rejection(rejection, ctx),
+      trailing_slash_policy: TrailingSlashPolicy::strict()
+    }
+
+  api fn adopt(self, middleware: Middleware) -> App
+    let ~next_middleware = self.current_middleware.copied(1)
+    next_middleware.push(middleware)
+    App {
+      routes: self.routes,
+      current_middleware: next_middleware,
+      prefix: self.prefix,
+      next_order: self.next_order,
+      not_found_handler: self.not_found_handler,
+      method_not_allowed_handler: self.method_not_allowed_handler,
+      error_handler: self.error_handler,
+      trailing_slash_policy: self.trailing_slash_policy
+    }
+
+  api fn with(self, { trailing_slash: TrailingSlashPolicy }) -> App
+    App {
+      routes: self.routes,
+      current_middleware: self.current_middleware,
+      prefix: self.prefix,
+      next_order: self.next_order,
+      not_found_handler: self.not_found_handler,
+      method_not_allowed_handler: self.method_not_allowed_handler,
+      error_handler: self.error_handler,
+      trailing_slash_policy: trailing_slash
+    }
+
+  api fn get(self, path: StringSlice, { handler: Handler }) -> App
+    self.with_route(path, Method::Get {}, handler)
+
+  api fn get(self, path: String, { handler: Handler }) -> App
+    self.get(path.as_slice(), handler: handler)
+
+  api fn get_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
+    self.with_route(path, Method::Get {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+
+  api fn get_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Get {}, handler)
+
+  api fn get_unit(self, path: String, { handler: fn() : (open) -> Response }) -> App
+    self.get_unit(path.as_slice(), handler: handler)
+
+  api fn get_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> App
+    self.with_params_response_route(path, Method::Get {}, handler)
+
+  api fn get_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> App
+    self.get_params<P>(path.as_slice(), handler: handler)
+
+  api fn get_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.with_params_query_response_route(path, Method::Get {}, handler)
+
+  api fn get_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.get_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn get<S, A: FromAuth<S>>(self, path: StringSlice, { auth: A, handler: fn(S) : (open) -> Response }) -> App
+    self.with_route(path, Method::Get {}, (ctx: Context) -> Response =>
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn get<S, A: FromAuth<S>>(self, path: StringSlice, { auth: A, handler: fn(S, Context) : (open) -> Response }) -> App
+    self.with_route(path, Method::Get {}, (ctx: Context) -> Response =>
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          handler(value, ctx)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn get<S>(self, path: StringSlice, { auth: RequiredSession, handler: fn(S) : (open) -> Response }) -> App
+    auth
+    self.with_route(path, Method::Get {}, (ctx: Context) -> Response =>
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn get<S>(self, path: StringSlice, { auth: RequiredSession, handler: fn(S, Context) : (open) -> Response }) -> App
+    auth
+    self.with_route(path, Method::Get {}, (ctx: Context) -> Response =>
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          handler(value, ctx)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn get<S>(self, path: StringSlice, { auth: OptionalSession, handler: fn(Option<S>) : (open) -> Response }) -> App
+    auth
+    self.with_route(path, Method::Get {}, (ctx: Context) -> Response =>
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn get<S>(self, path: StringSlice, { auth: OptionalSession, handler: fn(Option<S>, Context) : (open) -> Response }) -> App
+    auth
+    self.with_route(path, Method::Get {}, (ctx: Context) -> Response =>
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          handler(value, ctx)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn post(self, path: StringSlice, { handler: Handler }) -> App
+    self.with_route(path, Method::Post {}, handler)
+
+  api fn post_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+
+  api fn post_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Post {}, handler)
+
+  api fn post_unit(self, path: String, { handler: fn() : (open) -> Response }) -> App
+    self.post_unit(path.as_slice(), handler: handler)
+
+  api fn post_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> App
+    self.with_params_response_route(path, Method::Post {}, handler)
+
+  api fn post_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> App
+    self.post_params<P>(path.as_slice(), handler: handler)
+
+  api fn post_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.with_params_query_response_route(path, Method::Post {}, handler)
+
+  api fn post_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.post_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn post<I, P: FromBody<I>>(
+    self,
+    path: StringSlice,
+    { body: P, handler: fn(I) : (open) -> Response }
+  ) -> App
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+      match(body.extract_body(ctx.request))
+        Ok<I> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn post<I, P: FromBody<I>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: P, handler: fn(I) : (open) -> T }
+  ) -> App
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+      match(body.extract_body(ctx.request))
+        Ok<I> { value }:
+          to_response<T>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn post<I>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, handler: fn(I) : (open) -> Response }
+  ) -> App
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          handler(decode_json_value<I>(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn post<I, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, handler: fn(I) : (open) -> T }
+  ) -> App
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          to_response<T>(handler(decode_json_value<I>(value)))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn post<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: P, auth: A, handler: fn(I, S) : (open) -> T }
+  ) -> App
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<T>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+    )
+
+  api fn post<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: P, auth: A, handler: fn(I, S, Context) : (open) -> T }
+  ) -> App
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<T>(handler(input, session, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+    )
+
+  api fn post<I, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, auth: A, handler: fn(I, S) : (open) -> T }
+  ) -> App
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<JsonValue> { value }:
+          let input = decode_json_value<I>(value)
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<T>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+    )
+
+  api fn post<I, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, auth: A, handler: fn(I, S, Context) : (open) -> T }
+  ) -> App
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<JsonValue> { value }:
+          let input = decode_json_value<I>(value)
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<T>(handler(input, session, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+    )
+
+  api fn put(self, path: StringSlice, { handler: Handler }) -> App
+    self.with_route(path, Method::Put {}, handler)
+
+  api fn put_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
+    self.with_route(path, Method::Put {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+
+  api fn put_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Put {}, handler)
+
+  api fn put_unit(self, path: String, { handler: fn() : (open) -> Response }) -> App
+    self.put_unit(path.as_slice(), handler: handler)
+
+  api fn put_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> App
+    self.with_params_response_route(path, Method::Put {}, handler)
+
+  api fn put_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> App
+    self.put_params<P>(path.as_slice(), handler: handler)
+
+  api fn put_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.with_params_query_response_route(path, Method::Put {}, handler)
+
+  api fn put_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.put_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn patch(self, path: StringSlice, { handler: Handler }) -> App
+    self.with_route(path, Method::Patch {}, handler)
+
+  api fn patch_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
+    self.with_route(path, Method::Patch {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+
+  api fn patch_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Patch {}, handler)
+
+  api fn patch_unit(self, path: String, { handler: fn() : (open) -> Response }) -> App
+    self.patch_unit(path.as_slice(), handler: handler)
+
+  api fn patch_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> App
+    self.with_params_response_route(path, Method::Patch {}, handler)
+
+  api fn patch_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> App
+    self.patch_params<P>(path.as_slice(), handler: handler)
+
+  api fn patch_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.with_params_query_response_route(path, Method::Patch {}, handler)
+
+  api fn patch_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.patch_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn delete(self, path: StringSlice, { handler: Handler }) -> App
+    self.with_route(path, Method::Delete {}, handler)
+
+  api fn delete_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
+    self.with_route(path, Method::Delete {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+
+  api fn delete_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Delete {}, handler)
+
+  api fn delete_unit(self, path: String, { handler: fn() : (open) -> Response }) -> App
+    self.delete_unit(path.as_slice(), handler: handler)
+
+  api fn delete_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> App
+    self.with_params_response_route(path, Method::Delete {}, handler)
+
+  api fn delete_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> App
+    self.delete_params<P>(path.as_slice(), handler: handler)
+
+  api fn delete_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.with_params_query_response_route(path, Method::Delete {}, handler)
+
+  api fn delete_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> App
+    self.delete_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn route<T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, handler: fn(Context) : (open) -> T }
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+
+  api fn route<T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, handler: fn() : (open) -> T }
+  ) -> App
+    self.with_unit_route(path, method, handler)
+
+  api fn route<S, A: FromAuth<S>>(self, path: StringSlice, { method: Method, auth: A, handler: fn(S) : (open) -> Response }) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn route<S, A: FromAuth<S>>(self, path: StringSlice, { method: Method, auth: A, handler: fn(S, Context) : (open) -> Response }) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          handler(value, ctx)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn route<S>(self, path: StringSlice, { method: Method, auth: RequiredSession, handler: fn(S) : (open) -> Response }) -> App
+    auth
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn route<S>(self, path: StringSlice, { method: Method, auth: RequiredSession, handler: fn(S, Context) : (open) -> Response }) -> App
+    auth
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          handler(value, ctx)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn route<S>(self, path: StringSlice, { method: Method, auth: OptionalSession, handler: fn(Option<S>) : (open) -> Response }) -> App
+    auth
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn route<S>(self, path: StringSlice, { method: Method, auth: OptionalSession, handler: fn(Option<S>, Context) : (open) -> Response }) -> App
+    auth
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          handler(value, ctx)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn route_context(
+    self,
+    path: StringSlice,
+    { method: Method, handler: Handler }
+  ) -> App
+    self.with_route(path, method, handler)
+
+  api fn route<I, P: FromBody<I>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: P, handler: fn(I) : (open) -> T }
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(body.extract_body(ctx.request))
+        Ok<I> { value }:
+          to_response<T>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn route<I, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: JsonBody, handler: fn(I) : (open) -> T }
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          to_response<T>(handler(decode_json_value<I>(value)))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  api fn route<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: P, auth: A, handler: fn(I, S) : (open) -> T }
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<T>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+    )
+
+  api fn route<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: P, auth: A, handler: fn(I, S, Context) : (open) -> T }
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<T>(handler(input, session, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+    )
+
+  api fn route<I, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: JsonBody, auth: A, handler: fn(I, S) : (open) -> T }
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<JsonValue> { value }:
+          let input = decode_json_value<I>(value)
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<T>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+    )
+
+  api fn route<I, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: JsonBody, auth: A, handler: fn(I, S, Context) : (open) -> T }
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<JsonValue> { value }:
+          let input = decode_json_value<I>(value)
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<T>(handler(input, session, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+    )
+
+  api fn group(self, prefix: StringSlice, { routes build: fn(App) : (open) -> App }) -> App
+    let child = App {
+      routes: Array<Route>::init(),
+      current_middleware: self.current_middleware.copied(),
+      prefix: join_route_paths(self.prefix.as_slice(), prefix),
+      next_order: self.next_order,
+      not_found_handler: self.not_found_handler,
+      method_not_allowed_handler: self.method_not_allowed_handler,
+      error_handler: self.error_handler,
+      trailing_slash_policy: self.trailing_slash_policy
+    }
+    let built = build(child)
+    self.merge_routes(built.routes, next_order: built.next_order)
+
+  api fn mount(self, prefix: StringSlice, router: Router) -> App
+    self.mount(prefix, router.app)
+
+  api fn mount(self, prefix: StringSlice, app: App) -> App
+    let routes = app.routes
+    var out = self
+    var index = 0
+    while index < routes.len():
+      match(routes.get(index))
+        Some<Route> { value }:
+          out = out.with_mounted_route(prefix, value)
+        None:
+          void
+      index = index + 1
+    out
+
+  api fn not_found(self, handler: Handler) -> App
+    App {
+      routes: self.routes,
+      current_middleware: self.current_middleware,
+      prefix: self.prefix,
+      next_order: self.next_order,
+      not_found_handler: handler,
+      method_not_allowed_handler: self.method_not_allowed_handler,
+      error_handler: self.error_handler,
+      trailing_slash_policy: self.trailing_slash_policy
+    }
+
+  api fn method_not_allowed(self, handler: Handler) -> App
+    App {
+      routes: self.routes,
+      current_middleware: self.current_middleware,
+      prefix: self.prefix,
+      next_order: self.next_order,
+      not_found_handler: self.not_found_handler,
+      method_not_allowed_handler: handler,
+      error_handler: self.error_handler,
+      trailing_slash_policy: self.trailing_slash_policy
+    }
+
+  api fn on_error(self, handler: ErrorHandler) -> App
+    App {
+      routes: self.routes,
+      current_middleware: self.current_middleware,
+      prefix: self.prefix,
+      next_order: self.next_order,
+      not_found_handler: self.not_found_handler,
+      method_not_allowed_handler: self.method_not_allowed_handler,
+      error_handler: handler,
+      trailing_slash_policy: self.trailing_slash_policy
+    }
+
+  api fn on_rejection(self, handler: ErrorHandler) -> App
+    self.on_error(handler)
+
+  api fn handle(self, request: IncomingRequest): (open) -> Response
+    let path = normalized_request_path(request.path, self.trailing_slash_policy)
+    match(best_match(self.routes, request.method, path.as_slice(), self.trailing_slash_policy))
+      Some<RouteMatch> { value }:
+        let ctx = Context {
+          request: request,
+          route: MatchedRoute { path: value.route.path, params: value.params },
+          error_handler: value.route.error_handler
+        }
+        run_middleware(value.route.middleware, 0, ctx, value.route.handler)
+      None:
+        let ctx = Context {
+          request: request,
+          route: MatchedRoute { path: path, params: RouteParams::empty() },
+          error_handler: self.error_handler
+        }
+        if path_matches_different_method(self.routes, path.as_slice(), self.trailing_slash_policy):
+          let handler = self.method_not_allowed_handler
+          run_middleware(self.current_middleware, 0, ctx, handler)
+        else:
+          let handler = self.not_found_handler
+          run_middleware(self.current_middleware, 0, ctx, handler)
+
+  fn with_params_route<P, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn(P) : (open) -> T
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(extract_params<P>(ctx.route.params))
+        Ok<P> { value }:
+          to_response<T>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  fn with_params_response_route<P>(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn(P) : (open) -> Response
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(extract_params<P>(ctx.route.params))
+        Ok<P> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  fn with_unit_route<T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn() : (open) -> T
+  ) -> App
+    self.with_route(path, method, (_ctx: Context) -> Response =>
+      to_response<T>(handler())
+    )
+
+  fn with_unit_response_route(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn() : (open) -> Response
+  ) -> App
+    self.with_route(path, method, (_ctx: Context) -> Response =>
+      handler()
+    )
+
+  fn with_params_query_route<P, Q, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn(P, Q) : (open) -> T
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      let params = decode_params<P>(ctx.route.params)
+      let query = decode_query<Q>(query_from(ctx.request))
+      to_response<T>(handler(params, query))
+    )
+
+  fn with_params_query_response_route<P, Q>(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn(P, Q) : (open) -> Response
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      let params = decode_params<P>(ctx.route.params)
+      let query = decode_query<Q>(query_from(ctx.request))
+      handler(params, query)
+    )
+
+  fn with_auth_response_route<S, A: FromAuth<S>>(
+    self,
+    path: StringSlice,
+    method: Method,
+    auth: A,
+    handler: fn(S) : (open) -> Response
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  fn with_auth_context_response_route<S, A: FromAuth<S>>(
+    self,
+    path: StringSlice,
+    method: Method,
+    auth: A,
+    handler: fn(S, Context) : (open) -> Response
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          handler(value, ctx)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  fn with_required_session_response_route<S>(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn(S) : (open) -> Response
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  fn with_required_session_context_response_route<S>(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn(S, Context) : (open) -> Response
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          handler(value, ctx)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  fn with_optional_session_response_route<S>(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn(Option<S>) : (open) -> Response
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          handler(value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  fn with_optional_session_context_response_route<S>(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: fn(Option<S>, Context) : (open) -> Response
+  ) -> App
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          handler(value, ctx)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    )
+
+  fn with_route(self, path: StringSlice, method: Method, handler: Handler) -> App
+    let full_path = join_route_paths(self.prefix.as_slice(), path)
+    let route = Route {
+      method: method,
+      path: full_path,
+      segments: parse_route_segments(full_path.as_slice()),
+      middleware: self.current_middleware.copied(),
+      handler: handler,
+      error_handler: self.error_handler,
+      order: self.next_order
+    }
+    let ~routes = self.routes.copied(1)
+    routes.push(route)
+    App {
+      routes: routes,
+      current_middleware: self.current_middleware,
+      prefix: self.prefix,
+      next_order: self.next_order + 1,
+      not_found_handler: self.not_found_handler,
+      method_not_allowed_handler: self.method_not_allowed_handler,
+      error_handler: self.error_handler,
+      trailing_slash_policy: self.trailing_slash_policy
+    }
+
+  fn merge_routes(self, routes: Array<Route>, { next_order: i32 }) -> App
+    let ~merged = self.routes.copied(routes.len())
+    var index = 0
+    while index < routes.len():
+      match(routes.get(index))
+        Some<Route> { value }:
+          merged.push(value)
+        None:
+          void
+      index = index + 1
+    App {
+      routes: merged,
+      current_middleware: self.current_middleware,
+      prefix: self.prefix,
+      next_order: next_order,
+      not_found_handler: self.not_found_handler,
+      method_not_allowed_handler: self.method_not_allowed_handler,
+      error_handler: self.error_handler,
+      trailing_slash_policy: self.trailing_slash_policy
+    }
+
+  fn with_mounted_route(self, prefix: StringSlice, route: Route) -> App
+    let full_path = join_route_paths(prefix, route.path.as_slice())
+    let mounted = Route {
+      method: route.method,
+      path: full_path,
+      segments: parse_route_segments(full_path.as_slice()),
+      middleware: combine_middleware(self.current_middleware, route.middleware),
+      handler: route.handler,
+      error_handler: route.error_handler,
+      order: self.next_order
+    }
+    let ~routes = self.routes.copied(1)
+    routes.push(mounted)
+    App {
+      routes: routes,
+      current_middleware: self.current_middleware,
+      prefix: self.prefix,
+      next_order: self.next_order + 1,
+      not_found_handler: self.not_found_handler,
+      method_not_allowed_handler: self.method_not_allowed_handler,
+      error_handler: self.error_handler,
+      trailing_slash_policy: self.trailing_slash_policy
+    }
+
+impl Router
+  api fn init() -> Router
+    Router { app: App::init() }
+
+  api fn to_app(self) -> App
+    self.app
+
+  api fn adopt(self, middleware: Middleware) -> Router
+    Router { app: self.app.adopt(middleware) }
+
+  api fn with(self, { trailing_slash: TrailingSlashPolicy }) -> Router
+    Router { app: self.app.with(trailing_slash: trailing_slash) }
+
+  api fn get(self, path: StringSlice, { handler: Handler }) -> Router
+    Router { app: self.app.get(path, handler: handler) }
+
+  api fn get(self, path: String, { handler: Handler }) -> Router
+    self.get(path.as_slice(), handler: handler)
+
+  api fn get_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
+    Router { app: self.app.get_context<T>(path, handler: handler) }
+
+  api fn get_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.with_unit_response_route(path, Method::Get {}, handler) }
+
+  api fn get_unit(self, path: String, { handler: fn() : (open) -> Response }) -> Router
+    self.get_unit(path.as_slice(), handler: handler)
+
+  api fn get_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_response_route(path, Method::Get {}, handler) }
+
+  api fn get_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> Router
+    self.get_params<P>(path.as_slice(), handler: handler)
+
+  api fn get_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_query_response_route(path, Method::Get {}, handler) }
+
+  api fn get_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    self.get_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn get<S, A: FromAuth<S>>(self, path: StringSlice, { auth: A, handler: fn(S) : (open) -> Response }) -> Router
+    Router { app: self.app.get<S, A>(path, auth: auth, handler: handler) }
+
+  api fn get<S, A: FromAuth<S>>(self, path: StringSlice, { auth: A, handler: fn(S, Context) : (open) -> Response }) -> Router
+    Router { app: self.app.get<S, A>(path, auth: auth, handler: handler) }
+
+  api fn get<S>(self, path: StringSlice, { auth: RequiredSession, handler: fn(S) : (open) -> Response }) -> Router
+    Router { app: self.app.get<S>(path, auth: auth, handler: handler) }
+
+  api fn get<S>(self, path: StringSlice, { auth: RequiredSession, handler: fn(S, Context) : (open) -> Response }) -> Router
+    Router { app: self.app.get<S>(path, auth: auth, handler: handler) }
+
+  api fn get<S>(self, path: StringSlice, { auth: OptionalSession, handler: fn(Option<S>) : (open) -> Response }) -> Router
+    Router { app: self.app.get<S>(path, auth: auth, handler: handler) }
+
+  api fn get<S>(self, path: StringSlice, { auth: OptionalSession, handler: fn(Option<S>, Context) : (open) -> Response }) -> Router
+    Router { app: self.app.get<S>(path, auth: auth, handler: handler) }
+
+  api fn post(self, path: StringSlice, { handler: Handler }) -> Router
+    Router { app: self.app.post(path, handler: handler) }
+
+  api fn post_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
+    Router { app: self.app.post_context<T>(path, handler: handler) }
+
+  api fn post_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.with_unit_response_route(path, Method::Post {}, handler) }
+
+  api fn post_unit(self, path: String, { handler: fn() : (open) -> Response }) -> Router
+    self.post_unit(path.as_slice(), handler: handler)
+
+  api fn post_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_response_route(path, Method::Post {}, handler) }
+
+  api fn post_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> Router
+    self.post_params<P>(path.as_slice(), handler: handler)
+
+  api fn post_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_query_response_route(path, Method::Post {}, handler) }
+
+  api fn post_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    self.post_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn post<I, P: FromBody<I>>(
+    self,
+    path: StringSlice,
+    { body: P, handler: fn(I) : (open) -> Response }
+  ) -> Router
+    Router { app: self.app.post<I, P>(path, body: body, handler: handler) }
+
+  api fn post<I, P: FromBody<I>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: P, handler: fn(I) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.post<I, P, T>(path, body: body, handler: handler) }
+
+  api fn post<I>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, handler: fn(I) : (open) -> Response }
+  ) -> Router
+    Router { app: self.app.post<I>(path, body: body, handler: handler) }
+
+  api fn post<I, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, handler: fn(I) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.post<I, T>(path, body: body, handler: handler) }
+
+  api fn post<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: P, auth: A, handler: fn(I, S) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.post<I, P, S, A, T>(path, body: body, auth: auth, handler: handler) }
+
+  api fn post<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: P, auth: A, handler: fn(I, S, Context) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.post<I, P, S, A, T>(path, body: body, auth: auth, handler: handler) }
+
+  api fn post<I, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, auth: A, handler: fn(I, S) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.post<I, S, A, T>(path, body: body, auth: auth, handler: handler) }
+
+  api fn post<I, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, auth: A, handler: fn(I, S, Context) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.post<I, S, A, T>(path, body: body, auth: auth, handler: handler) }
+
+  api fn put(self, path: StringSlice, { handler: Handler }) -> Router
+    Router { app: self.app.put(path, handler: handler) }
+
+  api fn put_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
+    Router { app: self.app.put_context<T>(path, handler: handler) }
+
+  api fn put_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.with_unit_response_route(path, Method::Put {}, handler) }
+
+  api fn put_unit(self, path: String, { handler: fn() : (open) -> Response }) -> Router
+    self.put_unit(path.as_slice(), handler: handler)
+
+  api fn put_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_response_route(path, Method::Put {}, handler) }
+
+  api fn put_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> Router
+    self.put_params<P>(path.as_slice(), handler: handler)
+
+  api fn put_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_query_response_route(path, Method::Put {}, handler) }
+
+  api fn put_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    self.put_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn patch(self, path: StringSlice, { handler: Handler }) -> Router
+    Router { app: self.app.patch(path, handler: handler) }
+
+  api fn patch_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
+    Router { app: self.app.patch_context<T>(path, handler: handler) }
+
+  api fn patch_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.with_unit_response_route(path, Method::Patch {}, handler) }
+
+  api fn patch_unit(self, path: String, { handler: fn() : (open) -> Response }) -> Router
+    self.patch_unit(path.as_slice(), handler: handler)
+
+  api fn patch_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_response_route(path, Method::Patch {}, handler) }
+
+  api fn patch_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> Router
+    self.patch_params<P>(path.as_slice(), handler: handler)
+
+  api fn patch_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_query_response_route(path, Method::Patch {}, handler) }
+
+  api fn patch_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    self.patch_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn delete(self, path: StringSlice, { handler: Handler }) -> Router
+    Router { app: self.app.delete(path, handler: handler) }
+
+  api fn delete_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
+    Router { app: self.app.delete_context<T>(path, handler: handler) }
+
+  api fn delete_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.with_unit_response_route(path, Method::Delete {}, handler) }
+
+  api fn delete_unit(self, path: String, { handler: fn() : (open) -> Response }) -> Router
+    self.delete_unit(path.as_slice(), handler: handler)
+
+  api fn delete_params<P>(self, path: StringSlice, { handler: fn(P) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_response_route(path, Method::Delete {}, handler) }
+
+  api fn delete_params<P>(self, path: String, { handler: fn(P) : (open) -> Response }) -> Router
+    self.delete_params<P>(path.as_slice(), handler: handler)
+
+  api fn delete_params_query<P, Q>(self, path: StringSlice, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    Router { app: self.app.with_params_query_response_route(path, Method::Delete {}, handler) }
+
+  api fn delete_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> Router
+    self.delete_params_query<P, Q>(path.as_slice(), handler: handler)
+
+  api fn route<T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, handler: fn(Context) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.route<T>(path, method: method, handler: handler) }
+
+  api fn route<T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, handler: fn() : (open) -> T }
+  ) -> Router
+    Router { app: self.app.with_unit_route(path, method, handler) }
+
+  api fn route<S, A: FromAuth<S>>(self, path: StringSlice, { method: Method, auth: A, handler: fn(S) : (open) -> Response }) -> Router
+    Router { app: self.app.route<S, A>(path, method: method, auth: auth, handler: handler) }
+
+  api fn route<S, A: FromAuth<S>>(self, path: StringSlice, { method: Method, auth: A, handler: fn(S, Context) : (open) -> Response }) -> Router
+    Router { app: self.app.route<S, A>(path, method: method, auth: auth, handler: handler) }
+
+  api fn route<S>(self, path: StringSlice, { method: Method, auth: RequiredSession, handler: fn(S) : (open) -> Response }) -> Router
+    Router { app: self.app.route<S>(path, method: method, auth: auth, handler: handler) }
+
+  api fn route<S>(self, path: StringSlice, { method: Method, auth: RequiredSession, handler: fn(S, Context) : (open) -> Response }) -> Router
+    Router { app: self.app.route<S>(path, method: method, auth: auth, handler: handler) }
+
+  api fn route<S>(self, path: StringSlice, { method: Method, auth: OptionalSession, handler: fn(Option<S>) : (open) -> Response }) -> Router
+    Router { app: self.app.route<S>(path, method: method, auth: auth, handler: handler) }
+
+  api fn route<S>(self, path: StringSlice, { method: Method, auth: OptionalSession, handler: fn(Option<S>, Context) : (open) -> Response }) -> Router
+    Router { app: self.app.route<S>(path, method: method, auth: auth, handler: handler) }
+
+  api fn route<I, P: FromBody<I>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: P, handler: fn(I) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.route<I, P, T>(path, method: method, body: body, handler: handler) }
+
+  api fn route<I, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: JsonBody, handler: fn(I) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.route<I, T>(path, method: method, body: body, handler: handler) }
+
+  api fn route<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: P, auth: A, handler: fn(I, S) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.route<I, P, S, A, T>(path, method: method, body: body, auth: auth, handler: handler) }
+
+  api fn route<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: P, auth: A, handler: fn(I, S, Context) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.route<I, P, S, A, T>(path, method: method, body: body, auth: auth, handler: handler) }
+
+  api fn route<I, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: JsonBody, auth: A, handler: fn(I, S) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.route<I, S, A, T>(path, method: method, body: body, auth: auth, handler: handler) }
+
+  api fn route<I, S, A: FromAuth<S>, T: IntoResponse<T>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: JsonBody, auth: A, handler: fn(I, S, Context) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.route<I, S, A, T>(path, method: method, body: body, auth: auth, handler: handler) }
+
+  api fn group(self, prefix: StringSlice, { routes build: fn(Router) : (open) -> Router }) -> Router
+    Router {
+      app: self.app.group(prefix, routes: (child: App) -> App =>
+        build(Router { app: child }).app
+      )
+    }
+
+  api fn mount(self, prefix: StringSlice, router: Router) -> Router
+    Router { app: self.app.mount(prefix, router) }
+
+  api fn mount(self, prefix: StringSlice, app: App) -> Router
+    Router { app: self.app.mount(prefix, app) }
+
+  api fn not_found(self, handler: Handler) -> Router
+    Router { app: self.app.not_found(handler) }
+
+  api fn method_not_allowed(self, handler: Handler) -> Router
+    Router { app: self.app.method_not_allowed(handler) }
+
+  api fn on_error(self, handler: ErrorHandler) -> Router
+    Router { app: self.app.on_error(handler) }
+
+  api fn on_rejection(self, handler: ErrorHandler) -> Router
+    Router { app: self.app.on_rejection(handler) }
+
+  api fn handle(self, request: IncomingRequest): (open) -> Response
+    self.app.handle(request)
+
+pub fn app() -> App
+  App::init()
+
+pub fn strict_trailing_slash() -> TrailingSlashPolicy
+  TrailingSlashPolicy::strict()
+
+pub fn ignore_trailing_slash() -> TrailingSlashPolicy
+  TrailingSlashPolicy::ignore()
+
+pub fn build_app(routes: fn(AppBuild) : (open) -> AppBuild) -> App
+  routes(App::init())
+
+pub fn serve({
+  port: i32,
+  host?: String,
+  shutdown_timeout?: i32,
+  routes: fn(AppBuild) : (open) -> AppBuild
+}): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  serve_build(
+    port: port,
+    host: host,
+    shutdown_timeout: shutdown_timeout,
+    routes: routes
+  )
+
+pub fn serve_build({
+  port: i32,
+  host?: String,
+  shutdown_timeout?: i32,
+  routes: fn(AppBuild) : (open) -> AppBuild
+}): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  serve(
+    build_app(routes),
+    port: port,
+    host: host,
+    shutdown_timeout: shutdown_timeout
+  )
+
+pub fn serve(
+  app: App,
+  { port: i32, host?: String, shutdown_timeout?: i32 }
+): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  serve_app(
+    app,
+    port: port,
+    host: host,
+    shutdown_timeout: shutdown_timeout
+  )
+
+pub fn serve_app(
+  app: App,
+  { port: i32, host?: String, shutdown_timeout?: i32 }
+): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  server::serve_each(
+    config: server::ServerConfig::init(
+      port: port,
+      host: host,
+      response_timeout_millis: shutdown_timeout
+    ),
+    policy: server::ServeTaskPolicy::detached(),
+    handle: (request: IncomingRequest) -> Response => app.handle(request)
+  )
+
+pub macro serve(first, second)
+  let all_args = body
+  let routes_arg = all_args.get(all_args.length - 1)
+  if is_list(routes_arg) and routes_arg.calls(:):
+    let routes_callback = routes_arg.get(2)
+    if is_list(routes_callback) and routes_callback.calls(=>):
+      let callback_params = routes_callback.get(1)
+      if is_list(callback_params) and callback_params.length == 0:
+        let serve_args = all_args.slice(0, all_args.length - 1)
+        let handler_param_count = (handler) =>
+          if is_list(handler) and handler.calls(=>):
+            let handler_params = handler.get(1)
+            if is_list(handler_params):
+              if handler_params.length == 0:
+                0
+              else:
+                if handler_params.calls(:) and handler_params.length == 3:
+                  1
+                else:
+                  handler_params.length
+            else:
+              0
+          else:
+            -1
+        let handler_param_at = (handler, index) =>
+          if is_list(handler) and handler.calls(=>):
+            let handler_params = handler.get(1)
+            if is_list(handler_params):
+              if handler_params.calls(:) and handler_params.length == 3:
+                if index == 0:
+                  handler_params
+                else:
+                  void
+              else:
+                handler_params.get(index)
+            else:
+              void
+          else:
+            void
+        let handler_param_name_at = (handler, index) =>
+          let param = handler_param_at(handler, index)
+          if is_list(param) and param.calls(:):
+            param.get(1)
+          else:
+            param
+        let is_context_handler = (handler) =>
+          if is_list(handler) and handler.calls(=>):
+            let handler_params = handler.get(1)
+            if is_list(handler_params) and handler_params.calls(:) and handler_params.length == 3:
+              handler_params.get(1) == ctx
+            else:
+              false
+          else:
+            false
+        let handler_has_final_ctx = (handler) =>
+          let count = handler_param_count(handler)
+          if count > 0:
+            handler_param_name_at(handler, count - 1) == ctx
+          else:
+            false
+        let lower_named_method_route = (builder, name, path, args, method_expr, handler) =>
+          let invalid_handler = () =>
+            panic("web route handler extractor parameters must be named params, query, headers, and optional final ctx")
+          let query_requires_context = () =>
+            panic("web query-only route handlers must include a final ctx parameter in Phase 1; use do(query: Query, ctx: Context): ...")
+          let count = handler_param_count(handler)
+          let final_ctx = handler_has_final_ctx(handler)
+          let extraction_count =
+            if final_ctx:
+              count - 1
+            else:
+              count
+          let first = handler_param_name_at(handler, 0)
+          let second = handler_param_name_at(handler, 1)
+          let third = handler_param_name_at(handler, 2)
+          if count == 0:
+            `(route_unit $builder ($path).as_slice() method: $method_expr $$args)
+          else:
+            if count == 1 and final_ctx:
+              `(route_context $builder ($path).as_slice() method: $method_expr $$args)
+            else:
+              if extraction_count == 1:
+                if first == params:
+                  if final_ctx:
+                    `(route_params_context $builder ($path).as_slice() method: $method_expr $$args)
+                  else:
+                    `(route_params $builder ($path).as_slice() method: $method_expr $$args)
+                else:
+                  if first == query:
+                    if final_ctx:
+                      `(route_query_context $builder ($path).as_slice() method: $method_expr $$args)
+                    else:
+                      query_requires_context()
+                  else:
+                    if first == headers:
+                      if final_ctx:
+                        `(route_headers_context $builder ($path).as_slice() method: $method_expr $$args)
+                      else:
+                        `(route_headers $builder ($path).as_slice() method: $method_expr $$args)
+                    else:
+                      invalid_handler()
+              else:
+                if extraction_count == 2:
+                  if first == params and second == query:
+                    if final_ctx:
+                      `(route_params_query_context $builder ($path).as_slice() method: $method_expr $$args)
+                    else:
+                      `(route_params_query $builder ($path).as_slice() method: $method_expr $$args)
+                  else:
+                    if first == params and second == headers:
+                      if final_ctx:
+                        `(route_params_headers_context $builder ($path).as_slice() method: $method_expr $$args)
+                      else:
+                        `(route_params_headers $builder ($path).as_slice() method: $method_expr $$args)
+                    else:
+                      if first == query and second == headers:
+                        if final_ctx:
+                          `(route_query_headers_context $builder ($path).as_slice() method: $method_expr $$args)
+                        else:
+                          `(route_query_headers $builder ($path).as_slice() method: $method_expr $$args)
+                      else:
+                        invalid_handler()
+                else:
+                  if extraction_count == 3 and first == params and second == query and third == headers and final_ctx:
+                    `(route_params_query_headers_context $builder ($path).as_slice() method: $method_expr $$args)
+                  else:
+                    if extraction_count == 3 and first == params and second == query and third == headers:
+                      `(route_params_query_headers $builder ($path).as_slice() method: $method_expr $$args)
+                    else:
+                      invalid_handler()
+        let lower_method_route = (builder, statement, method_expr) =>
+          let name = statement.get(0)
+          let path = statement.get(1)
+          let args = statement.slice(2)
+          let handler = statement.get(statement.length - 1)
+          if args.length == 1:
+            lower_named_method_route(builder, name, path, args, method_expr, handler)
+          else:
+            `($name $builder ($path).as_slice() $$args)
+        let lower_route = (builder, statement) =>
+          let invalid_handler = () =>
+            panic("web route handler extractor parameters must be named params, query, headers, and optional final ctx")
+          let query_requires_context = () =>
+            panic("web query-only route handlers must include a final ctx parameter in Phase 1; use do(query: Query, ctx: Context): ...")
+          let path = statement.get(1)
+          let args = statement.slice(2)
+          let handler = statement.get(statement.length - 1)
+          let count = handler_param_count(handler)
+          let final_ctx = handler_has_final_ctx(handler)
+          let extraction_count =
+            if final_ctx:
+              count - 1
+            else:
+              count
+          let first = handler_param_name_at(handler, 0)
+          let second = handler_param_name_at(handler, 1)
+          let third = handler_param_name_at(handler, 2)
+          if count == 0:
+            `(route_unit $builder ($path).as_slice() $$args)
+          else:
+            if count == 1 and final_ctx:
+              `(route_context $builder ($path).as_slice() $$args)
+            else:
+              if extraction_count == 1:
+                if first == params:
+                  if final_ctx:
+                    `(route_params_context $builder ($path).as_slice() $$args)
+                  else:
+                    `(route_params $builder ($path).as_slice() $$args)
+                else:
+                  if first == query:
+                    if final_ctx:
+                      `(route_query_context $builder ($path).as_slice() $$args)
+                    else:
+                      query_requires_context()
+                  else:
+                    if first == headers:
+                      if final_ctx:
+                        `(route_headers_context $builder ($path).as_slice() $$args)
+                      else:
+                        `(route_headers $builder ($path).as_slice() $$args)
+                    else:
+                      invalid_handler()
+              else:
+                if extraction_count == 2:
+                  if first == params and second == query:
+                    if final_ctx:
+                      `(route_params_query_context $builder ($path).as_slice() $$args)
+                    else:
+                      `(route_params_query $builder ($path).as_slice() $$args)
+                  else:
+                    if first == params and second == headers:
+                      if final_ctx:
+                        `(route_params_headers_context $builder ($path).as_slice() $$args)
+                      else:
+                        `(route_params_headers $builder ($path).as_slice() $$args)
+                    else:
+                      if first == query and second == headers:
+                        if final_ctx:
+                          `(route_query_headers_context $builder ($path).as_slice() $$args)
+                        else:
+                          `(route_query_headers $builder ($path).as_slice() $$args)
+                      else:
+                        invalid_handler()
+                else:
+                  if extraction_count == 3 and first == params and second == query and third == headers and final_ctx:
+                    `(route_params_query_headers_context $builder ($path).as_slice() $$args)
+                  else:
+                    if extraction_count == 3 and first == params and second == query and third == headers:
+                      `(route_params_query_headers $builder ($path).as_slice() $$args)
+                    else:
+                      invalid_handler()
+        let build_routes = (initial, route_statements) =>
+          route_statements.reduce(initial, (builder, statement) =>
+            if statement.calls(adopt):
+              let args = statement.slice(1)
+              `(adopt $builder $$args)
+            else:
+              if statement.calls(not_found) or statement.calls(method_not_allowed) or statement.calls(on_error) or statement.calls(on_rejection):
+                let args = statement.slice(1)
+                let name = statement.get(0)
+                `($name $builder $$args)
+              else:
+                if statement.calls(group):
+                  let prefix = statement.get(1)
+                  let group_routes_arg = statement.get(2)
+                  if is_list(group_routes_arg) and group_routes_arg.calls(:):
+                    let group_callback = group_routes_arg.get(2)
+                    if is_list(group_callback) and group_callback.calls(=>):
+                      let group_params = group_callback.get(1)
+                      if is_list(group_params) and group_params.length == 0:
+                        let group_body = group_callback.get(2)
+                        let group_statements = group_body.slice(1)
+                        `(group $builder ($prefix).as_slice() routes: (child: AppBuild) -> AppBuild =>
+                          $(build_routes(`(child), group_statements))
+                        )
+                      else:
+                        `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
+                    else:
+                      `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
+                  else:
+                    `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
+                else:
+                  if statement.calls(get):
+                    lower_method_route(builder, statement, `(Method::Get {}))
+                  else:
+                    if statement.calls(post):
+                      lower_method_route(builder, statement, `(Method::Post {}))
+                    else:
+                      if statement.calls(put):
+                        lower_method_route(builder, statement, `(Method::Put {}))
+                      else:
+                        if statement.calls(patch):
+                          lower_method_route(builder, statement, `(Method::Patch {}))
+                        else:
+                          if statement.calls(delete):
+                            lower_method_route(builder, statement, `(Method::Delete {}))
+                          else:
+                            if statement.calls(route):
+                              let path = statement.get(1)
+                              let args = statement.slice(2)
+                              if args.length > 2:
+                                `(route $builder ($path).as_slice() $$args)
+                              else:
+                                lower_route(builder, statement)
+                            else:
+                              let name = statement.get(0)
+                              let path = statement.get(1)
+                              let args = statement.slice(2)
+                              `($name $builder ($path).as_slice() $$args)
+          )
+        let route_body = routes_callback.get(2)
+        let statements = route_body.slice(1)
+        let app_expr = build_routes(`(app()), statements)
+        `(serve_app($app_expr, $$serve_args))
+      else:
+        if is_list(first) and first.calls(:):
+          `(serve_build($$all_args))
+        else:
+          `(serve_app($$all_args))
+    else:
+      if is_list(first) and first.calls(:):
+        `(serve_build($$all_args))
+      else:
+        `(serve_app($$all_args))
+  else:
+    if is_list(first) and first.calls(:):
+      `(serve_build($$all_args))
+    else:
+      `(serve_app($$all_args))
+
+
+pub fn make_route(path: StringSlice, method: Method, handler: Handler): () -> Route
+  let route_path = canonical_route_path(path)
+  Route {
+    method: method,
+    path: route_path,
+    segments: parse_route_segments(route_path.as_slice()),
+    middleware: Array<Middleware>::init(),
+    handler: handler,
+    error_handler: (rejection: Rejection, ctx: Context) -> Response => default_rejection(rejection, ctx),
+    order: 0
+  }
+
+fn run_middleware(middleware: Array<Middleware>, index: i32, ctx: Context, handler: Handler): (open) -> Response
+  if index >= middleware.len():
+    return handler(ctx)
+  match(middleware.get(index))
+    Some<Middleware> { value }:
+      value(ctx, (next_ctx: Context) -> Response => run_middleware(middleware, index + 1, next_ctx, handler))
+    None:
+      handler(ctx)
+
+fn combine_middleware(outer: Array<Middleware>, inner: Array<Middleware>): () -> Array<Middleware>
+  let ~combined = outer.copied(inner.len())
+  var index = 0
+  while index < inner.len():
+    match(inner.get(index))
+      Some<Middleware> { value }:
+        combined.push(value)
+      None:
+        void
+    index = index + 1
+  combined
+
+fn default_not_found(ctx: Context) -> Response
+  ctx
+  Response::not_found().text("not found".as_slice())
+
+fn default_method_not_allowed(ctx: Context) -> Response
+  ctx
+  Response::method_not_allowed().text("method not allowed".as_slice())
+
+fn default_rejection(rejection: Rejection, ctx: Context) -> Response
+  ctx
+  Response::new(status: rejection.status).text(rejection.message)
+
+fn rejection_response(error: Rejection): () -> Response
+  Response::new(status: error.status).text(error.message)
+
+fn best_match(routes: Array<Route>, method: Method, path: StringSlice, policy: TrailingSlashPolicy): () -> Option<RouteMatch>
+  var best_score = -1
+  var best_order = 2147483647
+  var best: Option<RouteMatch> = None<RouteMatch> {}
+  var index = 0
+  while index < routes.len():
+    match(routes.get(index))
+      Some<Route> { value }:
+        if methods_equal(value.method, method):
+          match(match_route(value, path, policy))
+            Some<RouteMatch> { value: candidate }:
+              if candidate.score > best_score or (candidate.score == best_score and candidate.route.order < best_order):
+                best_score = candidate.score
+                best_order = candidate.route.order
+                best = Some<RouteMatch> { value: candidate }
+            None:
+              void
+      None:
+        void
+    index = index + 1
+  best
+
+fn path_matches_different_method(routes: Array<Route>, path: StringSlice, policy: TrailingSlashPolicy): () -> bool
+  var index = 0
+  while index < routes.len():
+    match(routes.get(index))
+      Some<Route> { value }:
+        match(match_route(value, path, policy))
+          Some<RouteMatch> { value }:
+            return true
+          None:
+            void
+      None:
+        void
+    index = index + 1
+  false
+
+fn match_route(route: Route, path: StringSlice, policy: TrailingSlashPolicy): () -> Option<RouteMatch>
+  let request_segments = split_path(path)
+  let route_segments = route_segments_for_policy(route, policy)
+  if request_segments.len() != route_segments.len():
+    return None {}
+  var params = RouteParams::empty()
+  var score = 0
+  var index = 0
+  while index < route_segments.len():
+    let route_segment = route_segments.at(index)
+    let request_segment = request_segments.at(index)
+    if route_segment.kind == 0:
+      if not route_segment.value.equals(request_segment):
+        return None {}
+      score = score + 10
+    else:
+      if request_segment.is_empty():
+        return None {}
+      params = params.append(
+        name: route_segment.value,
+        value: percent_decode(request_segment.as_slice(), plus_as_space: false)
+      )
+      score = score + 1
+    index = index + 1
+  Some<RouteMatch> { value: RouteMatch { route: route, params: params, score: score } }
+
+fn route_segments_for_policy(route: Route, policy: TrailingSlashPolicy): () -> Array<RouteSegment>
+  if policy.kind == 0:
+    return route.segments
+  parse_route_segments(normalized_request_path(route.path, policy).as_slice())
+
+fn parse_route_segments(path: StringSlice): () -> Array<RouteSegment>
+  let source = split_path(path)
+  let ~segments = Array<RouteSegment>::with_capacity(source.len())
+  var index = 0
+  while index < source.len():
+    let value = source.at(index)
+    if value.as_slice().starts_with(":".as_slice()):
+      segments.push(RouteSegment { kind: 1, value: value.slice(bytes: 1, len: value.byte_len() - 1).to_string() })
+    else:
+      segments.push(RouteSegment { kind: 0, value: value })
+    index = index + 1
+  segments
+
+fn split_path(path: StringSlice): () -> Array<String>
+  let source = path.split(on: 47, keep_empty: true)
+  let ~segments = Array<String>::with_capacity(source.len())
+  var index = 0
+  while index < source.len():
+    let value = source.at(index)
+    if index == 0 and path.starts_with("/".as_slice()) and value.is_empty():
+      void
+    else:
+      segments.push(value.to_string())
+    index = index + 1
+  segments
+
+fn methods_equal(left: Method, right: Method): () -> bool
+  http::method_as_string(left).equals(http::method_as_string(right))
+
+fn normalized_request_path(path: String, policy: TrailingSlashPolicy): () -> String
+  if policy.kind == 0:
+    return path
+  if path.byte_len() > 1 and path.as_slice().ends_with("/".as_slice()):
+    return path.slice(bytes: 0, len: path.byte_len() - 1).to_string()
+  path
+
+fn canonical_route_path(path: StringSlice): () -> String
+  if path.is_empty():
+    return "/".as_slice().to_string()
+  if path.starts_with("/".as_slice()):
+    path.to_string()
+  else:
+    "/".as_slice().to_string().concat(path)
+
+fn join_route_paths(prefix: StringSlice, path: StringSlice): () -> String
+  let left = canonical_prefix(prefix)
+  let right = canonical_route_path(path)
+  if left.equals("/"):
+    return right
+  if right.equals("/"):
+    return left
+  if left.as_slice().ends_with("/".as_slice()):
+    left.concat(right.slice(bytes: 1, len: right.byte_len() - 1))
+  else:
+    left.concat(right)
+
+fn canonical_prefix(prefix: StringSlice): () -> String
+  if prefix.is_empty():
+    return "/".as_slice().to_string()
+  canonical_route_path(prefix)

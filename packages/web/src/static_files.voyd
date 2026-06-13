@@ -1,0 +1,72 @@
+//! Static file middleware.
+
+use std::error::IoError
+use std::fs::{ exists as path_exists, read_bytes as read_file_bytes }
+use std::bytes::Bytes
+use std::http::{ Method, Response, method_as_string }
+use std::optional::types::all
+use std::path::Path
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use super::router::{ Context, Middleware, Next }
+
+pub fn serve_dir(root: StringSlice) -> Middleware
+  serve_dir(Path::new(root))
+
+pub fn serve_dir(root: String) -> Middleware
+  serve_dir(root.as_slice())
+
+pub fn serve_dir(root: Path) -> Middleware
+  (ctx: Context, next: Next) -> Response =>
+    if not is_get_or_head(ctx.method()):
+      return next(ctx)
+
+    let request_path = clean_request_path(ctx.path())
+    if request_path.contains("..".as_slice()):
+      return Response::forbidden().text("forbidden".as_slice())
+
+    let path = root.join(request_path.as_slice())
+    if not path_exists(path):
+      return next(ctx)
+
+    match(read_file_bytes(path))
+      Ok<Bytes> { value }:
+        let response = Response::ok()
+          .with(header: "content-type".as_slice(), value: content_type(request_path).as_slice())
+        if is_head(ctx.method()) then: response.empty() else: response.bytes(value)
+      Err<IoError>:
+        next(ctx)
+
+fn is_get_or_head(method: Method): () -> bool
+  let name = method_as_string(method)
+  name.equals("GET") or name.equals("HEAD")
+
+fn is_head(method: Method): () -> bool
+  method_as_string(method).equals("HEAD")
+
+fn clean_request_path(path: String): () -> String
+  var start = 0
+  while start < path.byte_len() and path.slice(bytes: start, len: 1).starts_with("/".as_slice()):
+    start = start + 1
+  let len = path.byte_len() - start
+  if len <= 0:
+    return "index.html".as_slice().to_string()
+  let trimmed = path.slice(bytes: start, len: len).to_string()
+  if trimmed.is_empty() then: "index.html".as_slice().to_string() else: trimmed
+
+fn content_type(path: String): () -> String
+  if path.as_slice().ends_with(".html".as_slice()):
+    return "text/html; charset=utf-8".as_slice().to_string()
+  if path.as_slice().ends_with(".css".as_slice()):
+    return "text/css; charset=utf-8".as_slice().to_string()
+  if path.as_slice().ends_with(".js".as_slice()):
+    return "text/javascript; charset=utf-8".as_slice().to_string()
+  if path.as_slice().ends_with(".json".as_slice()):
+    return "application/json".as_slice().to_string()
+  if path.as_slice().ends_with(".png".as_slice()):
+    return "image/png".as_slice().to_string()
+  if path.as_slice().ends_with(".jpg".as_slice()) or path.as_slice().ends_with(".jpeg".as_slice()):
+    return "image/jpeg".as_slice().to_string()
+  if path.as_slice().ends_with(".svg".as_slice()):
+    return "image/svg+xml".as_slice().to_string()
+  "application/octet-stream".as_slice().to_string()

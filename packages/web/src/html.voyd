@@ -1,0 +1,195 @@
+//! Server-side rendering helpers for current `std::vx` HTML values.
+
+use std::array::Array
+use std::dict::Dict
+use std::http::Response
+use std::msgpack::{ MsgPack, MsgPackError }
+use std::msgpack::self as msgpack
+use std::number::cast::to_string
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use std::vx
+
+pub fn render<Msg>(value: vx::Html<Msg>) -> String
+  render_node(value)
+
+pub fn document<Msg>(value: vx::Html<Msg>) -> String
+  "<!doctype html>".as_slice().to_string().concat(render<Msg>(value))
+
+pub fn html_response<Msg>(response: Response, value: vx::Html<Msg>) -> Response
+  response
+    .with(headers: response.headers.set(header: "content-type".as_slice(), value: "text/html; charset=utf-8".as_slice()))
+    .text(render<Msg>(value))
+
+pub fn html<Msg>(response: Response, value: vx::Html<Msg>) -> Response
+  html_response<Msg>(response, value)
+
+fn render_node(value: MsgPack): () -> String
+  match(msgpack::unpack_string(value))
+    Ok<String> { value }:
+      return escape_text(value.as_slice())
+    Err<MsgPackError>:
+      void
+
+  match(msgpack::unpack_array(value))
+    Ok<Array<MsgPack>> { value }:
+      return render_children(value)
+    Err<MsgPackError>:
+      void
+
+  match(msgpack::unpack_map(value))
+    Ok<Dict<String, MsgPack>> { value: map }:
+      match(read_string(map, "kind".as_slice()))
+        Some<String> { value: kind }:
+          if kind.equals("element"):
+            return render_element(map)
+          if kind.equals("fragment"):
+            return render_node_children(map)
+          if kind.equals("text"):
+            match(read_string(map, "value".as_slice()))
+              Some<String> { value }:
+                return escape_text(value.as_slice())
+              None:
+                return String::init()
+          String::init()
+        None:
+          String::init()
+    Err<MsgPackError>:
+      String::init()
+
+fn render_element(map: Dict<String, MsgPack>): () -> String
+  let tag = read_string_or(map, "tag".as_slice(), "div".as_slice())
+  let attrs = render_attrs(map)
+  let children = render_node_children(map)
+  "<".as_slice()
+    .to_string()
+    .concat(tag)
+    .concat(attrs)
+    .concat(">".as_slice())
+    .concat(children)
+    .concat("</".as_slice())
+    .concat(tag)
+    .concat(">".as_slice())
+
+fn render_node_children(map: Dict<String, MsgPack>): () -> String
+  match(map.get("children".as_slice().to_string()))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_array(value))
+        Ok<Array<MsgPack>> { value }:
+          render_children(value)
+        Err<MsgPackError>:
+          String::init()
+    None:
+      String::init()
+
+fn render_children(children: Array<MsgPack>): () -> String
+  var out = String::init()
+  var index = 0
+  while index < children.len():
+    match(children.get(index))
+      Some<MsgPack> { value }:
+        out = out.concat(render_node(value))
+      None:
+        void
+    index = index + 1
+  out
+
+fn render_attrs(map: Dict<String, MsgPack>): () -> String
+  var out = String::init()
+  match(map.get("attrs".as_slice().to_string()))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_map(value))
+        Ok<Dict<String, MsgPack>> { value: attrs }:
+          let entries = attrs.entries()
+          var index = 0
+          while index < entries.len():
+            match(entries.get(index))
+              Some<(String, MsgPack)> { value }:
+                out = out.concat(render_attr(value.0, value.1))
+              None:
+                void
+            index = index + 1
+        Err<MsgPackError>:
+          void
+    None:
+      void
+  out
+
+fn render_attr(name: String, value: MsgPack): () -> String
+  match(msgpack::unpack_bool(value))
+    Ok<bool> { value }:
+      if value:
+        return " ".as_slice().to_string().concat(name)
+      return String::init()
+    Err<MsgPackError>:
+      void
+
+  match(msgpack::unpack_string(value))
+    Ok<String> { value }:
+      return " ".as_slice()
+        .to_string()
+        .concat(name)
+        .concat("=\"".as_slice())
+        .concat(escape_attr(value.as_slice()))
+        .concat("\"".as_slice())
+    Err<MsgPackError>:
+      void
+
+  match(msgpack::unpack_i32(value))
+    Ok<i32> { value }:
+      return " ".as_slice()
+        .to_string()
+        .concat(name)
+        .concat("=\"".as_slice())
+        .concat(to_string(value))
+        .concat("\"".as_slice())
+    Err<MsgPackError>:
+      String::init()
+
+fn read_string(map: Dict<String, MsgPack>, key: StringSlice): () -> Option<String>
+  match(map.get(key.to_string()))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_string(value))
+        Ok<String> { value }:
+          Some<String> { value: value }
+        Err<MsgPackError>:
+          None {}
+    None:
+      None {}
+
+fn read_string_or(map: Dict<String, MsgPack>, key: StringSlice, fallback: StringSlice): () -> String
+  match(read_string(map, key))
+    Some<String> { value }:
+      value
+    None:
+      fallback.to_string()
+
+fn escape_text(value: StringSlice): () -> String
+  escape(value, true)
+
+fn escape_attr(value: StringSlice): () -> String
+  escape(value, false)
+
+fn escape(value: StringSlice, text: bool): () -> String
+  var out = String::init()
+  var index = 0
+  while index < value.byte_len():
+    match(value.get_byte(index))
+      Some<i32> { value: byte }:
+        if byte == 38:
+          out = out.concat("&amp;".as_slice())
+        else:
+          if byte == 60:
+            out = out.concat("&lt;".as_slice())
+          else:
+            if byte == 62:
+              out = out.concat("&gt;".as_slice())
+            else:
+              if not text and byte == 34:
+                out = out.concat("&quot;".as_slice())
+              else:
+                out = out.concat(value.slice(bytes: index, len: 1))
+      None:
+        void
+    index = index + 1
+  out

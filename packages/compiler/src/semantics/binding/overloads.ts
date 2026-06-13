@@ -7,6 +7,7 @@ import type {
   OverloadBucket,
   BoundParameter,
 } from "./types.js";
+import type { TypeParameterDecl } from "../decls.js";
 import { findNonOverloadNameCollision } from "./name-collisions.js";
 
 const makeOverloadBucketKey = (scope: ScopeId, name: string): string =>
@@ -107,13 +108,58 @@ const createOverloadSignature = (
     };
   });
   const returnAnnotation = formatTypeAnnotation(fn.returnTypeExpr);
+  const typeParameterConstraints = typeParameterConstraintKey(fn);
+  const constraintLabel =
+    typeParameterConstraints.length > 0 ? ` where ${typeParameterConstraints}` : "";
   return {
-    key: overloadSignatureKeyFromParams(fn.params, { includeLabels: true }),
+    key: `${overloadSignatureKeyFromParams(fn.params, {
+      includeLabels: true,
+    })}|${typeParameterConstraints}`,
     label: `${fn.name}(${params
       .map((param) => param.label)
-      .join(", ")}) -> ${returnAnnotation}`,
+      .join(", ")}) -> ${returnAnnotation}${constraintLabel}`,
   };
 };
+
+const typeParameterConstraintKey = (fn: BoundFunction): string => {
+  const params = fn.typeParameters ?? [];
+  if (params.length === 0) {
+    return "";
+  }
+  const signatureAnnotations = [
+    ...fn.params.map((param) => formatTypeAnnotation(param.typeExpr)),
+    formatTypeAnnotation(fn.returnTypeExpr),
+  ];
+  return params
+    .filter((param) =>
+      signatureAnnotations.some((annotation) =>
+        referencesTypeParameter(annotation, param.name)
+      )
+    )
+    .map((param) => {
+      const normalizedIndex = params.indexOf(param);
+      return param.constraint
+        ? normalizeTypeParameterNames(formatTypeAnnotation(param.constraint), params)
+        : `$${normalizedIndex}:_`;
+    })
+    .join(",");
+};
+
+const referencesTypeParameter = (annotation: string, name: string): boolean =>
+  new RegExp(`\\b${escapeRegExp(name)}\\b`).test(annotation);
+
+const normalizeTypeParameterNames = (
+  value: string,
+  params: readonly TypeParameterDecl[]
+): string =>
+  params.reduce(
+    (out, param, index) =>
+      out.replace(new RegExp(`\\b${escapeRegExp(param.name)}\\b`, "g"), `$${index}`),
+    value
+  );
+
+const escapeRegExp = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const parameterLabel = (param: BoundParameter): string | undefined =>
   param.label;

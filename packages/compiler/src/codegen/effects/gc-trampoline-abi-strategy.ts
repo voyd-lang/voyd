@@ -25,6 +25,7 @@ import {
 } from "./host-boundary/operation-filter.js";
 import type { EffectOpSignature } from "./host-boundary/types.js";
 import type { EffectsAbiStrategy } from "./codegen-backend.js";
+import { ensureEffectHandleTable } from "./handle-table.js";
 
 const hiddenHandlerParamType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsRuntime.handlerFrameType;
@@ -187,6 +188,7 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
     });
     return;
   }
+  ensureEffectHandleTable(entryCtx);
   const handleOutcome = createHandleOutcomeDynamic({
     ctx: entryCtx,
     runtime: entryCtx.effectsRuntime,

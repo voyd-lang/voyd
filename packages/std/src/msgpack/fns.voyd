@@ -210,6 +210,19 @@ pub fn unpack_bool(value: MsgPack): () -> bool
 /// Extracts a string from a MessagePack value.
 pub fn unpack_string(value: MsgPack): () -> String
   value.match(decoded)
+    Bool:
+      if decoded.value:
+        "true".as_slice().to_string()
+      else:
+        "false".as_slice().to_string()
+    I32:
+      cast::to_string(decoded.value)
+    I64:
+      cast::to_string(decoded.value)
+    F32:
+      cast::to_string(decoded.value)
+    F64:
+      cast::to_string(decoded.value)
     String:
       decoded
     else:

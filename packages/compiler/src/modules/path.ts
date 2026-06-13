@@ -259,6 +259,15 @@ const resolvePackageSourceRoots = async ({
         pathAdapter,
       }),
     );
+
+    if (!packageName.startsWith("@")) {
+      candidates.push(
+        ...packageSourceRootCandidates({
+          packageRoot: pathAdapter.join(packagesDir, "@voyd-lang", packageName),
+          pathAdapter,
+        }),
+      );
+    }
   });
 
   return dedupePaths(candidates);

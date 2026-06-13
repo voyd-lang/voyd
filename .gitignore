@@ -10,6 +10,7 @@ output/
 /sb
 /*.sb.*
 .turbo
+**/.turbo
 .tmp-voyd-sdk-*
 /tmp/
 DS_Store
