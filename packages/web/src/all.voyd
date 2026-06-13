@@ -14,7 +14,12 @@ pub use super::extract::{
   AuthExtractor,
   AuthPolicy,
   BodyError,
+  BodyLimit,
   BytesBody,
+  CookieJar,
+  LimitedBytesBody,
+  LimitedJsonBody,
+  LimitedTextBody,
   extract_headers,
   extract_params,
   extract_query,
@@ -26,9 +31,13 @@ pub use super::extract::{
   Rejection,
   RequiredSession,
   RouteParams,
-  TextBody
+  TextBody,
+  cookies_from,
+  decode_cookies,
+  extract_cookies,
+  parse_cookies
 }
-pub use super::html::{ document, html, html_response, render }
+pub use super::html::{ Hydration, document, html, html_response, hydrate, render }
 pub use super::middleware::request_id_required
 pub use super::response::{
   Body,
@@ -42,6 +51,11 @@ pub use super::response::{
   QueryString,
   Response,
   Status,
+  dto_json,
+  json_dto,
+  response_dto_json,
+  result_dto_json,
+  option_dto_json,
   status,
   to_response
 }
@@ -94,21 +108,48 @@ pub use super::routes::{
   delete_unit,
   route,
   route_auth,
+  route_auth_dto,
+  route_auth_result_dto,
+  route_body_auth_dto,
+  route_body_auth_result_dto,
+  route_body_dto,
+  route_body_result_dto,
+  route_cookies,
+  route_cookies_dto,
+  route_cookies_result_dto,
+  route_cookies_context,
+  route_cookies_context_dto,
+  route_cookies_context_result_dto,
   route_context,
+  route_context_dto,
+  route_context_result_dto,
   route_headers,
   route_headers_context,
   route_params,
+  route_params_dto,
+  route_params_result_dto,
   route_params_context,
+  route_params_context_dto,
+  route_params_context_result_dto,
   route_params_headers,
   route_params_headers_context,
   route_params_query_headers,
   route_params_query_headers_context,
   route_unit,
   route_params_query,
+  route_params_query_dto,
+  route_params_query_result_dto,
   route_params_query_context,
+  route_params_query_context_dto,
+  route_params_query_context_result_dto,
   route_query_context,
+  route_query_context_dto,
+  route_query_context_result_dto,
   route_query_headers,
-  route_query_headers_context
+  route_query_headers_context,
+  TimeoutPolicy,
+  timeout,
+  timeout_millis
 }
 pub use super::static_files::serve_dir
 
@@ -132,6 +173,27 @@ pub fn text_body() -> TextBody
 
 pub fn bytes() -> BytesBody
   bytes_policy()
+
+pub fn body_limit(max_bytes: i32) -> BodyLimit
+  super::extract::body_limit(max_bytes)
+
+pub fn limit_body(body: JsonBody, { limit: BodyLimit }) -> LimitedJsonBody
+  super::extract::limit_body(body, limit: limit)
+
+pub fn limit_body(body: TextBody, { limit: BodyLimit }) -> LimitedTextBody
+  super::extract::limit_body(body, limit: limit)
+
+pub fn limit_body(body: BytesBody, { limit: BodyLimit }) -> LimitedBytesBody
+  super::extract::limit_body(body, limit: limit)
+
+pub fn limited(body: JsonBody, { limit: BodyLimit }) -> LimitedJsonBody
+  super::extract::limited(body, limit: limit)
+
+pub fn limited(body: TextBody, { limit: BodyLimit }) -> LimitedTextBody
+  super::extract::limited(body, limit: limit)
+
+pub fn limited(body: BytesBody, { limit: BodyLimit }) -> LimitedBytesBody
+  super::extract::limited(body, limit: limit)
 
 pub fn required_session<T>({ extract: AuthExtractor<T> }) -> AuthPolicy<T>
   required_session_policy<T>(extract: extract)

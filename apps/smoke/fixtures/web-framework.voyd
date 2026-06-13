@@ -19,6 +19,10 @@ type CreateUser = {
   active: bool
 }
 
+type CookieProbe = {
+  session: String
+}
+
 fn dsl_middleware(ctx: Context, next: Next) -> Response
   next(ctx)
 
@@ -48,18 +52,46 @@ fn serve_dsl_compile_probe()
     post("/echo", body: text_body()) do(input: String):
       Response::ok().text(input)
 
+    post("/echo-policy", body: text_body(), limit: body_limit(128), timeout: timeout_millis(5)) do(input: String):
+      Response::ok().text(input)
+
     post("/users", body: json_body()) do(input: CreateUser):
       Response::ok().text(input.name)
 
 fn serve_options_dsl_compile_probe()
-  serve(port: 3001, host: "127.0.0.1", shutdown_timeout: 250) routes():
+  serve(
+    port: 3001,
+    host: "127.0.0.1",
+    shutdown_timeout: 250,
+    max_body_bytes: 1024,
+    max_pending_requests: 8
+  ) routes():
     put("/replace", body: json_body()) do(input: CreateUser):
       Response::ok().text(input.name)
+
+    put("/replace-timeout", body: text_body(), timeout: timeout_millis(5)) do(input: String, ctx: Context):
+      Response::ok().text(ctx.path().concat(":".as_slice()).concat(input))
 
     patch("/update", body: text_body(), auth: required_session()) do(input: String, session: String):
       Response::ok().text(session.concat(":".as_slice()).concat(input))
 
+    patch("/update-timeout", body: text_body(), auth: required_session(), timeout: timeout_millis(5)) do(input: String, session: String, ctx: Context):
+      Response::ok().text(ctx.path().concat(":".as_slice()).concat(session).concat(input))
+
+    get("/cookie-session", timeout: timeout_millis(5)) do(cookies: CookieProbe, ctx: Context):
+      ctx
+      Response::ok().text(cookies.session)
+
+    get("/cookie-only") do(cookies: CookieProbe):
+      Response::ok().text(cookies.session)
+
+    get("/timed-health", timeout: timeout_millis(5)) do:
+      Response::ok().text("timed".as_slice())
+
     delete("/remove", body: text_body()) do(input: String):
+      Response::ok().text(input)
+
+    delete("/remove-limit", body: text_body(), limit: body_limit(128)) do(input: String):
       Response::ok().text(input)
 
     route("/manual", method: Method::Delete {}) do(ctx: Context):

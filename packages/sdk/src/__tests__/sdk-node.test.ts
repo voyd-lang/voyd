@@ -1,4 +1,6 @@
 import fs from "node:fs/promises";
+import http from "node:http";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -196,7 +198,107 @@ const buildFallbackHandlers = ({
       ]),
   ) as Record<string, EffectHandler>;
 
+const findFreePort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") {
+        server.close(() => reject(new Error("failed to allocate tcp port")));
+        return;
+      }
+      const { port } = address;
+      server.close(() => resolve(port));
+    });
+  });
+
+const httpGet = (
+  url: string,
+): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> =>
+  new Promise((resolve, reject) => {
+    const request = http.get(url, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+      response.on("end", () =>
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          body: Buffer.concat(chunks).toString("utf8"),
+        }),
+      );
+    });
+    request.on("error", reject);
+    request.setTimeout(2000, () => {
+      request.destroy(new Error(`timed out waiting for ${url}`));
+    });
+  });
+
 describe("node sdk", () => {
+  it("serves a web app entry through the SDK helper", async () => {
+    const sdk = createSdk();
+    const port = await findFreePort();
+    const result = await sdk.serveWebApp({
+      port,
+      readinessTimeoutMs: 10_000,
+      source: `
+use pkg::web::all
+use std::env::self as env
+use std::error::HostError
+use std::http::server::self as server
+use std::http::server::{ HttpServer, PendingRequest, Server, ServerConfig }
+use std::result::types::all
+
+pub fn main(): (HttpServer, env::Env) -> i32
+  let port = env::get_int("VOYD_WEB_PORT".as_slice()) ?? -1
+  let host = env::get("VOYD_WEB_HOST".as_slice()) ?? "127.0.0.1".as_slice().to_string()
+  if port <= 0:
+    return -10
+
+  let web_app = app().get("/hello".as_slice(), handler: (_ctx: Context) -> Response =>
+    Response::ok().text("served".as_slice())
+  )
+  let config = ServerConfig::init(
+    port: port,
+    host: host,
+    max_body_bytes: 1024,
+    max_pending_requests: 8
+  )
+  match(server::listen(config))
+    Err<HostError> { error }:
+      -error.code
+    Ok<Server> { value: srv }:
+      match(server::accept(srv))
+        Err<HostError> { error }:
+          let _ = server::close(srv)
+          -error.code
+        Ok<PendingRequest> { value: pending }:
+          let response = web_app.handle(pending.request)
+          match(server::respond(pending.handle, response))
+            Err<HostError> { error }:
+              let _ = server::close(srv)
+              -error.code
+            Ok<Unit>:
+              let _ = server::close(srv)
+              200
+`,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      return;
+    }
+    expect(result.host).toBe("127.0.0.1");
+    expect(result.port).toBe(port);
+    expect(result.url).toBe(`http://127.0.0.1:${port}`);
+    await expect(result.ready).resolves.toBeUndefined();
+
+    const response = await httpGet(`${result.url}/hello`);
+    expect(response.status).toBe(200);
+    expect(response.body).toBe("served");
+    await expect(result.closed).resolves.toBe(200);
+  }, 120_000);
+
   beforeAll(async () => {
     const sdk = createSdk();
     effectCompileResult = expectCompileSuccess(

@@ -16,6 +16,7 @@ use super::extract::{
   FromBody,
   JsonBody,
   OptionalSession,
+  CookieJar,
   QueryParams,
   Rejection,
   RequiredSession,
@@ -23,13 +24,16 @@ use super::extract::{
   decode_json_value,
   decode_params,
   decode_query,
+  cookies_from,
   default_optional_session_as,
   default_required_session_as,
   extract_params,
   extract_query,
   json_body_value,
   percent_decode,
-  query_from
+  query_from,
+  validate_params,
+  validate_query
 }
 use super::response::{ IntoResponse, json_value, to_response }
 
@@ -37,6 +41,21 @@ pub type Handler = fn(Context) : (open) -> Response
 pub type Next = fn(Context) : (open) -> Response
 pub type Middleware = fn(Context, Next) : (open) -> Response
 pub type ErrorHandler = fn(Rejection, Context) : (open) -> Response
+
+fn with_params_query<P, Q>(
+  ctx: Context,
+  work: fn(P, Q) : (open) -> Response
+): (open) -> Response
+  let query_source = ctx.query()
+  match(extract_params<P>(ctx.route.params))
+    Err<Rejection> { error }:
+      ctx.reject(error)
+    Ok<P> { value: params }:
+      match(extract_query<Q>(query_source))
+        Ok<Q> { value: query }:
+          work(params, query)
+        Err<Rejection> { error }:
+          ctx.reject(error)
 
 pub obj AuthError {
   api message: String
@@ -126,6 +145,15 @@ impl Context
 
   api fn query_value(self, name: String) -> Option<String>
     self.query_value(name.as_slice())
+
+  api fn cookies(self) -> CookieJar
+    cookies_from(self.request)
+
+  api fn cookie(self, name: StringSlice) -> Option<String>
+    self.cookies().get(name)
+
+  api fn cookie(self, name: String) -> Option<String>
+    self.cookie(name.as_slice())
 
   api fn body_bytes(self) -> Bytes
     self.request.body_bytes()
@@ -818,9 +846,22 @@ impl App
     handler: fn(P, Q) : (open) -> T
   ) -> App
     self.with_route(path, method, (ctx: Context) -> Response =>
-      let params = decode_params<P>(ctx.route.params)
-      let query = decode_query<Q>(query_from(ctx.request))
-      to_response<T>(handler(params, query))
+      let params_source = ctx.route.params
+      let query_source = ctx.query()
+      match(validate_params<P>(RouteParams { entries: params_source.entries.copied() }))
+        Some<Rejection> { value }:
+          ctx.reject(value)
+        None:
+          match(validate_query<Q>(QueryParams { entries: query_source.entries.copied() }))
+            Some<Rejection> { value }:
+              ctx.reject(value)
+            None:
+              to_response<T>(
+                handler(
+                  decode_params<P>(params_source),
+                  decode_query<Q>(query_source)
+                )
+              )
     )
 
   fn with_params_query_response_route<P, Q>(
@@ -830,9 +871,20 @@ impl App
     handler: fn(P, Q) : (open) -> Response
   ) -> App
     self.with_route(path, method, (ctx: Context) -> Response =>
-      let params = decode_params<P>(ctx.route.params)
-      let query = decode_query<Q>(query_from(ctx.request))
-      handler(params, query)
+      let params_source = ctx.route.params
+      let query_source = ctx.query()
+      match(validate_params<P>(RouteParams { entries: params_source.entries.copied() }))
+        Some<Rejection> { value }:
+          ctx.reject(value)
+        None:
+          match(validate_query<Q>(QueryParams { entries: query_source.entries.copied() }))
+            Some<Rejection> { value }:
+              ctx.reject(value)
+            None:
+              handler(
+                decode_params<P>(params_source),
+                decode_query<Q>(query_source)
+              )
     )
 
   fn with_auth_response_route<S, A: FromAuth<S>>(
@@ -1318,12 +1370,16 @@ pub fn serve({
   port: i32,
   host?: String,
   shutdown_timeout?: i32,
+  max_body_bytes?: i32,
+  max_pending_requests?: i32,
   routes: fn(AppBuild) : (open) -> AppBuild
 }): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
   serve_build(
     port: port,
     host: host,
     shutdown_timeout: shutdown_timeout,
+    max_body_bytes: max_body_bytes,
+    max_pending_requests: max_pending_requests,
     routes: routes
   )
 
@@ -1331,34 +1387,42 @@ pub fn serve_build({
   port: i32,
   host?: String,
   shutdown_timeout?: i32,
+  max_body_bytes?: i32,
+  max_pending_requests?: i32,
   routes: fn(AppBuild) : (open) -> AppBuild
 }): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
   serve(
     build_app(routes),
     port: port,
     host: host,
-    shutdown_timeout: shutdown_timeout
+    shutdown_timeout: shutdown_timeout,
+    max_body_bytes: max_body_bytes,
+    max_pending_requests: max_pending_requests
   )
 
 pub fn serve(
   app: App,
-  { port: i32, host?: String, shutdown_timeout?: i32 }
+  { port: i32, host?: String, shutdown_timeout?: i32, max_body_bytes?: i32, max_pending_requests?: i32 }
 ): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
   serve_app(
     app,
     port: port,
     host: host,
-    shutdown_timeout: shutdown_timeout
+    shutdown_timeout: shutdown_timeout,
+    max_body_bytes: max_body_bytes,
+    max_pending_requests: max_pending_requests
   )
 
 pub fn serve_app(
   app: App,
-  { port: i32, host?: String, shutdown_timeout?: i32 }
+  { port: i32, host?: String, shutdown_timeout?: i32, max_body_bytes?: i32, max_pending_requests?: i32 }
 ): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
   server::serve_each(
     config: server::ServerConfig::init(
       port: port,
       host: host,
+      max_body_bytes: max_body_bytes,
+      max_pending_requests: max_pending_requests,
       response_timeout_millis: shutdown_timeout
     ),
     policy: server::ServeTaskPolicy::detached(),
@@ -1427,7 +1491,7 @@ pub macro serve(first, second)
             false
         let lower_named_method_route = (builder, name, path, args, method_expr, handler) =>
           let invalid_handler = () =>
-            panic("web route handler extractor parameters must be named params, query, headers, and optional final ctx")
+            panic("web route handler extractor parameters must be named params, query, headers, cookies, and optional final ctx")
           let query_requires_context = () =>
             panic("web query-only route handlers must include a final ctx parameter in Phase 1; use do(query: Query, ctx: Context): ...")
           let count = handler_param_count(handler)
@@ -1465,7 +1529,13 @@ pub macro serve(first, second)
                       else:
                         `(route_headers $builder ($path).as_slice() method: $method_expr $$args)
                     else:
-                      invalid_handler()
+                      if first == cookies:
+                        if final_ctx:
+                          `(route_cookies_context $builder ($path).as_slice() method: $method_expr $$args)
+                        else:
+                          `(route_cookies $builder ($path).as_slice() method: $method_expr $$args)
+                      else:
+                        invalid_handler()
               else:
                 if extraction_count == 2:
                   if first == params and second == query:
@@ -1500,13 +1570,16 @@ pub macro serve(first, second)
           let path = statement.get(1)
           let args = statement.slice(2)
           let handler = statement.get(statement.length - 1)
-          if args.length == 1:
+          let first = handler_param_name_at(handler, 0)
+          let route_extractor_handler =
+            args.length == 1 or handler_param_count(handler) == 0 or first == params or first == query or first == headers or first == cookies or first == ctx
+          if route_extractor_handler:
             lower_named_method_route(builder, name, path, args, method_expr, handler)
           else:
             `($name $builder ($path).as_slice() $$args)
         let lower_route = (builder, statement) =>
           let invalid_handler = () =>
-            panic("web route handler extractor parameters must be named params, query, headers, and optional final ctx")
+            panic("web route handler extractor parameters must be named params, query, headers, cookies, and optional final ctx")
           let query_requires_context = () =>
             panic("web query-only route handlers must include a final ctx parameter in Phase 1; use do(query: Query, ctx: Context): ...")
           let path = statement.get(1)
@@ -1547,7 +1620,13 @@ pub macro serve(first, second)
                       else:
                         `(route_headers $builder ($path).as_slice() $$args)
                     else:
-                      invalid_handler()
+                      if first == cookies:
+                        if final_ctx:
+                          `(route_cookies_context $builder ($path).as_slice() $$args)
+                        else:
+                          `(route_cookies $builder ($path).as_slice() $$args)
+                      else:
+                        invalid_handler()
               else:
                 if extraction_count == 2:
                   if first == params and second == query:
@@ -1626,10 +1705,14 @@ pub macro serve(first, second)
                             if statement.calls(route):
                               let path = statement.get(1)
                               let args = statement.slice(2)
-                              if args.length > 2:
-                                `(route $builder ($path).as_slice() $$args)
-                              else:
+                              let handler = statement.get(statement.length - 1)
+                              let first = handler_param_name_at(handler, 0)
+                              let route_extractor_handler =
+                                args.length <= 2 or handler_param_count(handler) == 0 or first == params or first == query or first == headers or first == cookies or first == ctx
+                              if route_extractor_handler:
                                 lower_route(builder, statement)
+                              else:
+                                `(route $builder ($path).as_slice() $$args)
                             else:
                               let name = statement.get(0)
                               let path = statement.get(1)

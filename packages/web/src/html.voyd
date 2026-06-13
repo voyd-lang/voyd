@@ -3,12 +3,20 @@
 use std::array::Array
 use std::dict::Dict
 use std::http::Response
+use std::json::{ JsonError, stringify as stringify_json }
 use std::msgpack::{ MsgPack, MsgPackError }
 use std::msgpack::self as msgpack
 use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use std::vx
+use super::response::dto_json
+
+pub obj Hydration<Model> {
+  api target: String,
+  api entry: String,
+  api model: Model
+}
 
 pub fn render<Msg>(value: vx::Html<Msg>) -> String
   render_node(value)
@@ -16,13 +24,38 @@ pub fn render<Msg>(value: vx::Html<Msg>) -> String
 pub fn document<Msg>(value: vx::Html<Msg>) -> String
   "<!doctype html>".as_slice().to_string().concat(render<Msg>(value))
 
+pub fn document<Msg, Model>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
+  document<Msg>(view).concat(render_hydration<Model>(hydrate))
+
 pub fn html_response<Msg>(response: Response, value: vx::Html<Msg>) -> Response
   response
     .with(headers: response.headers.set(header: "content-type".as_slice(), value: "text/html; charset=utf-8".as_slice()))
     .text(render<Msg>(value))
 
+pub fn html_response<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  response
+    .with(headers: response.headers.set(header: "content-type".as_slice(), value: "text/html; charset=utf-8".as_slice()))
+    .text(document<Msg, Model>(view: view, hydrate: hydrate))
+
 pub fn html<Msg>(response: Response, value: vx::Html<Msg>) -> Response
   html_response<Msg>(response, value)
+
+pub fn html<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  html_response<Msg, Model>(response, view: view, hydrate: hydrate)
+
+pub fn hydrate<Model>({ target: StringSlice, entry: StringSlice, model: Model }) -> Hydration<Model>
+  Hydration<Model> {
+    target: target.to_string(),
+    entry: entry.to_string(),
+    model: model
+  }
+
+pub fn hydrate<Model>({ target: String, entry: String, model: Model }) -> Hydration<Model>
+  Hydration<Model> {
+    target: target,
+    entry: entry,
+    model: model
+  }
 
 fn render_node(value: MsgPack): () -> String
   match(msgpack::unpack_string(value))
@@ -163,6 +196,26 @@ fn read_string_or(map: Dict<String, MsgPack>, key: StringSlice, fallback: String
       value
     None:
       fallback.to_string()
+
+fn render_hydration<Model>(hydrate: Hydration<Model>): () -> String
+  let model_json = match(stringify_json(dto_json<Model>(hydrate.model)))
+    Ok<String> { value }:
+      escape_script_json(value)
+    Err<JsonError>:
+      "null".as_slice().to_string()
+  "<script type=\"application/json\" data-voyd-hydration=\"".as_slice()
+    .to_string()
+    .concat(escape_attr(hydrate.target.as_slice()))
+    .concat("\">".as_slice())
+    .concat(model_json)
+    .concat("</script><script type=\"module\" src=\"".as_slice())
+    .concat(escape_attr(hydrate.entry.as_slice()))
+    .concat("\"></script>".as_slice())
+
+fn escape_script_json(value: String): () -> String
+  value
+    .replaced(old: "</".as_slice().to_string(), with: "<\\/".as_slice().to_string())
+    .replaced(old: "<!--".as_slice().to_string(), with: "\\u003c!--".as_slice().to_string())
 
 fn escape_text(value: StringSlice): () -> String
   escape(value, true)

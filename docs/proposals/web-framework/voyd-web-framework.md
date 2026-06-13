@@ -1,6 +1,6 @@
 # Voyd Web Framework
 
-Status: Implemented (Phase 1)
+Status: Implemented (Phase 2 APIs, with noted compiler/runtime follow-ups)
 Owner: Std + Runtime + Framework
 Scope: new framework package, recommended `packages/web`; smoke tests; SDK/server integration
 
@@ -252,7 +252,7 @@ serve(port: 3000) routes():
 
 Recommended top-level functions:
 
-- `serve({ port, host?, shutdown_timeout?, routes })`
+- `serve({ port, host?, shutdown_timeout?, max_body_bytes?, max_pending_requests?, routes })`
 - `get(path, ...)`
 - `post(path, ...)`
 - `put(path, ...)`
@@ -431,7 +431,7 @@ post(
   "/users",
   body: json_body(),
   auth: required_session(),
-  timeout: Duration::from_millis(500)
+  timeout: timeout(Duration::from_millis(500))
 ) do(input: CreateUser, session: Session, ctx: Context):
   ...
 ```
@@ -930,12 +930,15 @@ fn dashboard(ctx: Context): (TaskRuntime, Time, Db) -> Result<DashboardDto, AppE
 Route-level timeout policy should be explicit:
 
 ```voyd
-get("/dashboard", timeout: Duration::from_millis(500)) do(ctx: Context):
+get("/dashboard", timeout: timeout(Duration::from_millis(500))) do(ctx: Context):
   dashboard(ctx)
 ```
 
 The timeout implementation can be a framework policy built on `std::task` and
 `std::time`. It should not require a hidden async runtime object in the handler.
+Timeout cancellation is cooperative: handlers that suspend through task/time or
+host effects can be cancelled promptly, while CPU-bound loops must yield to make
+progress observable to the runtime.
 
 ## Static Files
 
@@ -962,6 +965,9 @@ Recommended escape hatches:
 - `Response::new(...)`
 - `body: bytes()`
 - `route(path, method:)`
+- `web::serve` uses `std::http::server::serve_each` with detached per-request
+  tasks by default and forwards server backpressure knobs such as
+  `max_body_bytes` and `max_pending_requests`
 - direct `std::http::server` usage for custom loops
 
 Escape hatches should still use the canonical `std::http` types.
@@ -991,6 +997,20 @@ Escape hatches should still use the canonical `std::http` types.
 - better rejection customization
 - static-file layer
 - SDK helper for serving a web app from Node
+
+Phase 2 implementation notes:
+
+- DTO-to-JSON conversion is available through boundary-compatible helpers and
+  DTO-specific route helper variants. A blanket structural `IntoResponse`
+  fallback remains a compiler follow-up because it currently overlaps with
+  existing concrete response implementations such as `Response`, `String`, and
+  `Bytes`.
+- Route-level timeout policy is implemented with cooperative task cancellation:
+  route helpers run the handler in a worker task, schedule a timer task, and
+  return `504` when the timer cancels the still-running worker.
+- `serve` forwards `max_body_bytes` and `max_pending_requests` into
+  `std::http::server::ServerConfig` so applications can tune host-side request
+  buffering/backpressure without dropping to the low-level server API.
 
 ### Phase 3: Advanced Server Features
 

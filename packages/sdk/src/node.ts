@@ -1,4 +1,5 @@
 import path from "node:path";
+import net from "node:net";
 import binaryen from "binaryen";
 import { createFsModuleHost } from "@voyd-lang/compiler/modules/fs-host.js";
 import { createMemoryModuleHost } from "@voyd-lang/compiler/modules/memory-host.js";
@@ -7,7 +8,12 @@ import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.
 import { loadModuleGraph } from "@voyd-lang/compiler/pipeline.js";
 import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import { compileWithLoader } from "./shared/compile.js";
-import { runWithHandlers } from "./shared/host.js";
+import {
+  createHost,
+  registerHandlers,
+  registerHandlersByLabelSuffix,
+  runWithHandlers,
+} from "./shared/host.js";
 import { createCompileResult } from "./shared/result.js";
 import type { CompileArtifactsSuccess } from "./shared/compile.js";
 import {
@@ -15,7 +21,14 @@ import {
   diagnosticsFromUnknownError,
 } from "./shared/diagnostics.js";
 import { detectSrcRootForPath } from "./shared/source-root.js";
-import type { CompileOptions, CompileResult, VoydSdk } from "./shared/types.js";
+import type {
+  CompileOptions,
+  CompileResult,
+  DefaultAdapterOptions,
+  ServeWebAppOptions,
+  ServeWebAppResult,
+  VoydSdk,
+} from "./shared/types.js";
 
 export { detectSrcRootForPath } from "./shared/source-root.js";
 
@@ -25,7 +38,149 @@ const DEFAULT_VIRTUAL_ROOT = ".voyd";
 export const createSdk = (): VoydSdk => ({
   compile: compileSdk,
   run: runWithHandlers,
+  serveWebApp,
 });
+
+export const serveWebApp = async (
+  options: ServeWebAppOptions,
+): Promise<ServeWebAppResult> => {
+  const result = await compileSdk(options);
+  if (!result.success) {
+    return result;
+  }
+
+  const {
+    entryName = "main",
+    host = "127.0.0.1",
+    port,
+    readinessTimeoutMs = 5_000,
+    run = {},
+  } = options;
+  const previousPort = process.env.VOYD_WEB_PORT;
+  const previousHost = process.env.VOYD_WEB_HOST;
+  process.env.VOYD_WEB_PORT = String(port);
+  process.env.VOYD_WEB_HOST = host;
+  const hostRuntime = await createHost({
+    wasm: result.wasm,
+    imports: run.imports,
+    bufferSize: run.bufferSize,
+    defaultAdapters: webAppDefaultAdapters(run.defaultAdapters),
+  });
+  if (run.handlersByLabelSuffix) {
+    registerHandlersByLabelSuffix({
+      host: hostRuntime,
+      handlersByLabelSuffix: run.handlersByLabelSuffix,
+    });
+  }
+  if (run.handlers) {
+    registerHandlers({ host: hostRuntime, handlers: run.handlers });
+  }
+
+  const started = hostRuntime.runManaged(entryName, run.args);
+  const closed = started.outcome
+    .then((outcome) => {
+      if (outcome.kind === "value") {
+        return outcome.value;
+      }
+      if (outcome.kind === "failed") {
+        throw outcome.error;
+      }
+      return undefined;
+    })
+    .finally(() => {
+      restoreEnv("VOYD_WEB_PORT", previousPort);
+      restoreEnv("VOYD_WEB_HOST", previousHost);
+    });
+  const ready = waitForTcpPort({ host, port, timeoutMs: readinessTimeoutMs });
+
+  try {
+    await Promise.race([
+      ready,
+      closed.then(() => {
+        throw new Error("web app exited before it was ready");
+      }),
+    ]);
+  } catch (error) {
+    started.cancel(error);
+    await closed.catch(() => undefined);
+    throw error;
+  }
+
+  return {
+    success: true,
+    result,
+    host,
+    port,
+    url: `http://${host}:${port}`,
+    ready,
+    closed,
+    running: closed,
+  };
+};
+
+const webAppDefaultAdapters = (
+  defaultAdapters: boolean | DefaultAdapterOptions | undefined,
+): boolean | DefaultAdapterOptions => {
+  if (defaultAdapters === false) {
+    return false;
+  }
+  if (defaultAdapters === undefined || defaultAdapters === true) {
+    return { runtime: "node" };
+  }
+  return { runtime: "node", ...defaultAdapters };
+};
+
+const waitForTcpPort = async ({
+  host,
+  port,
+  timeoutMs,
+}: {
+  host: string;
+  port: number;
+  timeoutMs: number;
+}): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+
+  while (Date.now() < deadline) {
+    try {
+      await probeTcpPort({ host, port });
+      return;
+    } catch (error) {
+      lastError = error;
+      await delay(25);
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`timed out waiting for ${host}:${port}`);
+};
+
+const probeTcpPort = ({ host, port }: { host: string; port: number }): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host, port });
+    socket.once("connect", () => {
+      socket.end();
+      resolve();
+    });
+    socket.once("error", reject);
+    socket.setTimeout(1_000, () => {
+      socket.destroy(new Error(`timed out connecting to ${host}:${port}`));
+    });
+  });
+
+const delay = (millis: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, millis));
+
+const restoreEnv = (key: string, value: string | undefined): void => {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
+};
 
 const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
   if (!options.entryPath && options.source === undefined) {
@@ -306,6 +461,9 @@ export type {
   HostProtocolTable,
   ModuleRoots,
   RunOptions,
+  ServeWebAppOptions,
+  ServeWebAppResult,
+  ServeWebAppSuccessResult,
   SignatureHash,
   TestCase,
   TestCollection,
