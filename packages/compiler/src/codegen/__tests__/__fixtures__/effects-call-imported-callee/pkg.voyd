@@ -2,3 +2,9 @@ use src::dep::{ f, g, Async }
 
 pub fn main_effectful(): Async -> i32
   Async::await(f(g()))
+
+pub fn handle_imported_effectful_call(): () -> i32
+  try
+    f(4)
+  Async::await(resume, value):
+    resume(value + 10)
