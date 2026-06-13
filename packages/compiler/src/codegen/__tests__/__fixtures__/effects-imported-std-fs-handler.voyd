@@ -1,0 +1,19 @@
+use std::fs::{ Fs, exists as path_exists }
+use std::msgpack::MsgPack
+use std::path::Path
+
+pub fn handle_imported_std_fs_ops(): () -> i32
+  try
+    if path_exists(Path::new("/asset.txt".as_slice())) then: 28 else: 0
+  Fs::exists(tail, _path: MsgPack):
+    tail(true)
+  Fs::read_bytes(tail, _path: MsgPack):
+    tail(_path)
+  Fs::read_string(tail, _path: MsgPack):
+    tail(_path)
+  Fs::write_bytes(tail, _payload: MsgPack):
+    tail(_payload)
+  Fs::write_string(tail, _payload: MsgPack):
+    tail(_payload)
+  Fs::list_dir(tail, _path: MsgPack):
+    tail(_path)
