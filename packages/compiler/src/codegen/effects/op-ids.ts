@@ -2,6 +2,25 @@ import type { CodegenContext } from "../context.js";
 import type { SymbolId } from "../../semantics/ids.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
 import type { EffectIdInfo } from "./effect-registry.js";
+import type { EffectOperationRuntimeInfo } from "../../semantics/effects/analysis.js";
+
+const effectOpInfoFor = (
+  symbol: SymbolId,
+  ctx: CodegenContext
+): { info: EffectOperationRuntimeInfo; moduleId: string } | undefined => {
+  const localInfo = ctx.module.effectsInfo.operations.get(symbol);
+  if (localInfo) {
+    return { info: localInfo, moduleId: ctx.moduleId };
+  }
+
+  const canonical = ctx.program.symbols.canonicalIdOf(ctx.moduleId, symbol);
+  const ref = ctx.program.symbols.refOf(canonical);
+  const canonicalModule = ctx.program.modules.get(ref.moduleId);
+  const canonicalInfo = canonicalModule?.effectsInfo.operations.get(ref.symbol);
+  return canonicalInfo
+    ? { info: canonicalInfo, moduleId: ref.moduleId }
+    : undefined;
+};
 
 export const getEffectOpIds = (
   symbol: SymbolId,
@@ -12,10 +31,11 @@ export const getEffectOpIds = (
   resumeKind: ResumeKind;
   effectSymbol: SymbolId;
 } => {
-  const info = ctx.module.effectsInfo.operations.get(symbol);
-  if (!info) {
+  const resolved = effectOpInfoFor(symbol, ctx);
+  if (!resolved) {
     throw new Error(`codegen missing effect metadata for op ${symbol}`);
   }
+  const { info, moduleId } = resolved;
 
   const resumeKind =
     info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
@@ -23,7 +43,7 @@ export const getEffectOpIds = (
   if (!registry) {
     throw new Error("codegen missing effect registry");
   }
-  const sourceModuleId = info.sourceModuleId ?? ctx.moduleId;
+  const sourceModuleId = info.sourceModuleId ?? moduleId;
   const effectId = registry.getEffectId(sourceModuleId, info.localEffectIndex);
   if (!effectId) {
     throw new Error(

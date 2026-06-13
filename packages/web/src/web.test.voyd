@@ -35,15 +35,16 @@ use src::extract::{
 use src::html::{ html, render }
 use src::response::{ json as json_response, response_json, to_response }
 use src::static_files::serve_dir
-use std::error::IoError
-use std::fs::{ write_string, Fs }
+use std::array::Array
+use std::fs::Fs
 use std::http::{ Body, Headers, IncomingRequest, Method, QueryString, Response, Status }
 use std::json::{ JsonBool, JsonValue }
-use std::msgpack::MsgPack
+use std::msgpack::{ MsgPack, MsgPackError }
+use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::path::Path
 use std::result::types::all
-use std::string::type::String
+use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 use std::test::host_dto::self as host_dto_test
 use std::vx::all
@@ -103,6 +104,54 @@ fn response_text(response: Response) -> String
       value
     Err:
       "error".as_slice().to_string()
+
+fn static_next(_ctx: Context) -> Response
+  Response::not_found().text("next".as_slice())
+
+fn static_read_ok_payload(): () -> MsgPack
+  host_dto_test::host_ok_with_value(msgpack::make_array([msgpack::make_i32(111), msgpack::make_i32(107)]))
+
+fn handle_static_with_fs(
+  ~exists_paths: Array<String>,
+  ~read_paths: Array<String>,
+  method: Method,
+  path: String,
+  read_payload: MsgPack
+): () -> Response
+  let web_app = app()
+    .adopt(serve_dir(Path::new("/site/public".as_slice())))
+    .not_found(static_next)
+
+  try
+    web_app.handle(request(method, path))
+  Fs::exists(tail, path: MsgPack):
+    exists_paths.push(unpack_msgpack_string(path))
+    tail(true)
+  Fs::read_bytes(tail, path: MsgPack):
+    read_paths.push(unpack_msgpack_string(path))
+    tail(read_payload)
+  Fs::read_string(tail, _path: MsgPack):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_bytes(tail, _payload: MsgPack):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_string(tail, _payload: MsgPack):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::list_dir(tail, _path: MsgPack):
+    tail(host_dto_test::host_default_error_payload())
+
+fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
+  match(value)
+    Some<String> { value: present }:
+      present
+    None:
+      fallback.to_string()
+
+fn unpack_msgpack_string(payload: MsgPack): () -> String
+  match(msgpack::unpack_string(payload))
+    Ok<String> { value }:
+      value
+    Err<MsgPackError>:
+      "invalid".as_slice().to_string()
 
 fn append_header(ctx: Context, next: Next) -> Response
   next(ctx).with(header: "x-web-test".as_slice(), value: "seen".as_slice())
@@ -942,16 +991,16 @@ test "static files middleware accepts string roots":
   from_string
   assert(true, eq: true)
 
-test "static files middleware returns empty head responses":
-  match(write_string(Path::new("/tmp/voyd-web-static-asset.json".as_slice()), "ok".as_slice()))
-    Ok<Unit>:
-      void
-    Err<IoError>:
-      assert(false, eq: true)
-
-  let web_app = app().adopt(serve_dir(Path::new("/tmp".as_slice())))
-
-  let get_response = web_app.handle(request(Method::Get {}, "/voyd-web-static-asset.json".as_slice().to_string()))
+test "static files middleware returns mocked file responses":
+  let ~exists_paths = Array<String>::init()
+  let ~read_paths = Array<String>::init()
+  let get_response = handle_static_with_fs(
+    exists_paths,
+    read_paths,
+    Method::Get {},
+    "/asset.json".as_slice().to_string(),
+    static_read_ok_payload()
+  )
   assert(get_response.status.code(), eq: 200)
   assert(response_text(get_response).equals("ok"), eq: true)
   match(get_response.header("content-type".as_slice()))
@@ -959,8 +1008,46 @@ test "static files middleware returns empty head responses":
       assert(value.equals("application/json"), eq: true)
     None:
       assert(false, eq: true)
+  assert(optional_string_or(exists_paths.get(0), "missing".as_slice()).equals("/site/public/asset.json"), eq: true)
+  assert(optional_string_or(read_paths.get(0), "missing".as_slice()).equals("/site/public/asset.json"), eq: true)
 
-  let head_response = web_app.handle(request(Method::Head {}, "/voyd-web-static-asset.json".as_slice().to_string()))
+test "static files middleware falls through when mocked read fails":
+  let ~exists_paths = Array<String>::init()
+  let ~read_paths = Array<String>::init()
+  let response = handle_static_with_fs(
+    exists_paths,
+    read_paths,
+    Method::Get {},
+    "/asset.json".as_slice().to_string(),
+    host_dto_test::host_default_error_payload()
+  )
+  assert(response.status.code(), eq: 404)
+  assert(response_text(response).equals("next"), eq: true)
+  assert(optional_string_or(exists_paths.get(0), "missing".as_slice()).equals("/site/public/asset.json"), eq: true)
+  assert(optional_string_or(read_paths.get(0), "missing".as_slice()).equals("/site/public/asset.json"), eq: true)
+
+test "static files middleware gives get and head status parity":
+  let ~get_exists_paths = Array<String>::init()
+  let ~get_read_paths = Array<String>::init()
+  let get_response = handle_static_with_fs(
+    get_exists_paths,
+    get_read_paths,
+    Method::Get {},
+    "/asset.json".as_slice().to_string(),
+    static_read_ok_payload()
+  )
+
+  let ~head_exists_paths = Array<String>::init()
+  let ~head_read_paths = Array<String>::init()
+  let head_response = handle_static_with_fs(
+    head_exists_paths,
+    head_read_paths,
+    Method::Head {},
+    "/asset.json".as_slice().to_string(),
+    static_read_ok_payload()
+  )
+
+  assert(get_response.status.code(), eq: 200)
   assert(head_response.status.code(), eq: 200)
   assert(response_text(head_response).equals(""), eq: true)
   match(head_response.header("content-type".as_slice()))
@@ -968,40 +1055,22 @@ test "static files middleware returns empty head responses":
       assert(value.equals("application/json"), eq: true)
     None:
       assert(false, eq: true)
+  assert(optional_string_or(head_read_paths.get(0), "missing".as_slice()).equals("/site/public/asset.json"), eq: true)
 
-  let directory_head = app()
-    .adopt(serve_dir(Path::new("/".as_slice())))
-    .handle(request(Method::Head {}, "/tmp".as_slice().to_string()))
-  assert(directory_head.status.code(), eq: 404)
+test "static files middleware keeps absolute-looking paths under root":
+  let ~exists_paths = Array<String>::init()
+  let ~read_paths = Array<String>::init()
+  let response = handle_static_with_fs(
+    exists_paths,
+    read_paths,
+    Method::Get {},
+    "//absolute-looking/path.txt".as_slice().to_string(),
+    static_read_ok_payload()
+  )
 
-  match(write_string(Path::new("/tmp/voyd-web-static-escape.txt".as_slice()), "escape".as_slice()))
-    Ok<Unit>:
-      void
-    Err<IoError>:
-      assert(false, eq: true)
-  let escaped = app()
-    .adopt(serve_dir(Path::new("/tmp/voyd-web-static-root".as_slice())))
-    .handle(request(Method::Get {}, "//tmp/voyd-web-static-escape.txt".as_slice().to_string()))
-  assert(escaped.status.code(), eq: 404)
-
-test "static files middleware supports hermetic fs handlers":
-  let web_app = app().adopt(serve_dir(Path::new("/tmp".as_slice())))
-  let response = try
-    web_app.handle(request(Method::Head {}, "/asset.json".as_slice().to_string()))
-  Fs::exists(tail, _path: MsgPack):
-    tail(true)
-  Fs::read_bytes(tail, _path: MsgPack):
-    tail(host_dto_test::host_default_error_payload())
-  Fs::read_string(tail, _path: MsgPack):
-    tail(host_dto_test::host_default_error_payload())
-  Fs::write_bytes(tail, _payload: MsgPack):
-    tail(host_dto_test::host_default_error_payload())
-  Fs::write_string(tail, _payload: MsgPack):
-    tail(host_dto_test::host_default_error_payload())
-  Fs::list_dir(tail, _path: MsgPack):
-    tail(host_dto_test::host_default_error_payload())
-
-  assert(response.status.code(), eq: 404)
+  assert(response.status.code(), eq: 200)
+  assert(optional_string_or(exists_paths.get(0), "missing".as_slice()).equals("/site/public/absolute-looking/path.txt"), eq: true)
+  assert(optional_string_or(read_paths.get(0), "missing".as_slice()).equals("/site/public/absolute-looking/path.txt"), eq: true)
 
 test "html rendering turns vx nodes into a text html response":
   let page: MsgPack =
