@@ -3,3 +3,7 @@ public/assets
 dist
 .turbo
 .DS_Store
+data/articles/*.md
+!data/articles/home.md
+!data/articles/voyd.md
+!data/articles/webassembly.md

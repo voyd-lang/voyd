@@ -221,7 +221,10 @@ impl App
     self.get(path.as_slice(), handler: handler)
 
   api fn get_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
-    self.with_route(path, Method::Get {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+    self.with_route(path, Method::Get {}, (ctx: Context) -> Response =>
+      let result = handler(ctx)
+      to_response<T>(result)
+    )
 
   api fn get_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
     self.with_unit_response_route(path, Method::Get {}, handler)
@@ -303,7 +306,10 @@ impl App
     self.with_route(path, Method::Post {}, handler)
 
   api fn post_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
-    self.with_route(path, Method::Post {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+      let result = handler(ctx)
+      to_response<T>(result)
+    )
 
   api fn post_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
     self.with_unit_response_route(path, Method::Post {}, handler)
@@ -344,7 +350,8 @@ impl App
     self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
       match(body.extract_body(ctx.request))
         Ok<I> { value }:
-          to_response<T>(handler(value))
+          let result = handler(value)
+          to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
     )
@@ -372,7 +379,8 @@ impl App
       body
       match(json_body_value(ctx.request))
         Ok<JsonValue> { value }:
-          to_response<T>(handler(decode_json_value<I>(value)))
+          let result = handler(decode_json_value<I>(value))
+          to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
     )
@@ -389,7 +397,8 @@ impl App
         Ok<I> { value: input }:
           match(auth.extract_auth(ctx.request))
             Ok<S> { value: session }:
-              to_response<T>(handler(input, session))
+              let result = handler(input, session)
+              to_response<T>(result)
             Err<Rejection> { error }:
               ctx.reject(error)
     )
@@ -406,7 +415,8 @@ impl App
         Ok<I> { value: input }:
           match(auth.extract_auth(ctx.request))
             Ok<S> { value: session }:
-              to_response<T>(handler(input, session, ctx))
+              let result = handler(input, session, ctx)
+              to_response<T>(result)
             Err<Rejection> { error }:
               ctx.reject(error)
     )
@@ -425,7 +435,8 @@ impl App
           let input = decode_json_value<I>(value)
           match(auth.extract_auth(ctx.request))
             Ok<S> { value: session }:
-              to_response<T>(handler(input, session))
+              let result = handler(input, session)
+              to_response<T>(result)
             Err<Rejection> { error }:
               ctx.reject(error)
     )
@@ -444,7 +455,8 @@ impl App
           let input = decode_json_value<I>(value)
           match(auth.extract_auth(ctx.request))
             Ok<S> { value: session }:
-              to_response<T>(handler(input, session, ctx))
+              let result = handler(input, session, ctx)
+              to_response<T>(result)
             Err<Rejection> { error }:
               ctx.reject(error)
     )
@@ -453,7 +465,10 @@ impl App
     self.with_route(path, Method::Put {}, handler)
 
   api fn put_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
-    self.with_route(path, Method::Put {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+    self.with_route(path, Method::Put {}, (ctx: Context) -> Response =>
+      let result = handler(ctx)
+      to_response<T>(result)
+    )
 
   api fn put_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
     self.with_unit_response_route(path, Method::Put {}, handler)
@@ -477,7 +492,10 @@ impl App
     self.with_route(path, Method::Patch {}, handler)
 
   api fn patch_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
-    self.with_route(path, Method::Patch {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+    self.with_route(path, Method::Patch {}, (ctx: Context) -> Response =>
+      let result = handler(ctx)
+      to_response<T>(result)
+    )
 
   api fn patch_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
     self.with_unit_response_route(path, Method::Patch {}, handler)
@@ -501,7 +519,10 @@ impl App
     self.with_route(path, Method::Delete {}, handler)
 
   api fn delete_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
-    self.with_route(path, Method::Delete {}, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+    self.with_route(path, Method::Delete {}, (ctx: Context) -> Response =>
+      let result = handler(ctx)
+      to_response<T>(result)
+    )
 
   api fn delete_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
     self.with_unit_response_route(path, Method::Delete {}, handler)
@@ -526,7 +547,10 @@ impl App
     path: StringSlice,
     { method: Method, handler: fn(Context) : (open) -> T }
   ) -> App
-    self.with_route(path, method, (ctx: Context) -> Response => to_response<T>(handler(ctx)))
+    self.with_route(path, method, (ctx: Context) -> Response =>
+      let result = handler(ctx)
+      to_response<T>(result)
+    )
 
   api fn route<T: IntoResponse<T>>(
     self,
@@ -608,7 +632,8 @@ impl App
     self.with_route(path, method, (ctx: Context) -> Response =>
       match(body.extract_body(ctx.request))
         Ok<I> { value }:
-          to_response<T>(handler(value))
+          let result = handler(value)
+          to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
     )
@@ -622,7 +647,8 @@ impl App
       body
       match(json_body_value(ctx.request))
         Ok<JsonValue> { value }:
-          to_response<T>(handler(decode_json_value<I>(value)))
+          let result = handler(decode_json_value<I>(value))
+          to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
     )
@@ -639,7 +665,8 @@ impl App
         Ok<I> { value: input }:
           match(auth.extract_auth(ctx.request))
             Ok<S> { value: session }:
-              to_response<T>(handler(input, session))
+              let result = handler(input, session)
+              to_response<T>(result)
             Err<Rejection> { error }:
               ctx.reject(error)
     )
@@ -656,7 +683,8 @@ impl App
         Ok<I> { value: input }:
           match(auth.extract_auth(ctx.request))
             Ok<S> { value: session }:
-              to_response<T>(handler(input, session, ctx))
+              let result = handler(input, session, ctx)
+              to_response<T>(result)
             Err<Rejection> { error }:
               ctx.reject(error)
     )
@@ -675,7 +703,8 @@ impl App
           let input = decode_json_value<I>(value)
           match(auth.extract_auth(ctx.request))
             Ok<S> { value: session }:
-              to_response<T>(handler(input, session))
+              let result = handler(input, session)
+              to_response<T>(result)
             Err<Rejection> { error }:
               ctx.reject(error)
     )
@@ -694,7 +723,8 @@ impl App
           let input = decode_json_value<I>(value)
           match(auth.extract_auth(ctx.request))
             Ok<S> { value: session }:
-              to_response<T>(handler(input, session, ctx))
+              let result = handler(input, session, ctx)
+              to_response<T>(result)
             Err<Rejection> { error }:
               ctx.reject(error)
     )
@@ -800,7 +830,8 @@ impl App
     self.with_route(path, method, (ctx: Context) -> Response =>
       match(extract_params<P>(ctx.route.params))
         Ok<P> { value }:
-          to_response<T>(handler(value))
+          let result = handler(value)
+          to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
     )
@@ -826,7 +857,8 @@ impl App
     handler: fn() : (open) -> T
   ) -> App
     self.with_route(path, method, (_ctx: Context) -> Response =>
-      to_response<T>(handler())
+      let result = handler()
+      to_response<T>(result)
     )
 
   fn with_unit_response_route(
@@ -856,12 +888,11 @@ impl App
             Some<Rejection> { value }:
               ctx.reject(value)
             None:
-              to_response<T>(
-                handler(
-                  decode_params<P>(params_source),
-                  decode_query<Q>(query_source)
-                )
+              let result = handler(
+                decode_params<P>(params_source),
+                decode_query<Q>(query_source)
               )
+              to_response<T>(result)
     )
 
   fn with_params_query_response_route<P, Q>(

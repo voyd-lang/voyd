@@ -109,7 +109,7 @@ type ActiveTaskImportContext = {
   spawnTask: (params: {
     detached: boolean;
     starterExportName: string;
-    work: unknown;
+    workArgs: readonly unknown[];
   }) => number;
   cancelTask: (id: number) => boolean;
   takeTaskValue: (id: number) => unknown;
@@ -197,22 +197,22 @@ const buildTaskRuntimeImportModule = ({
 
       if (descriptor.name.startsWith("spawn_attached__")) {
         const starterExportName = descriptor.name.slice("spawn_attached__".length);
-        taskRuntimeImports[descriptor.name] = ((work: unknown): number =>
+        taskRuntimeImports[descriptor.name] = ((...workArgs: unknown[]): number =>
           currentContext().spawnTask({
             detached: false,
             starterExportName,
-            work,
+            workArgs,
           })) as CallableFunction;
         return;
       }
 
       if (descriptor.name.startsWith("spawn_detached__")) {
         const starterExportName = descriptor.name.slice("spawn_detached__".length);
-        taskRuntimeImports[descriptor.name] = ((work: unknown): number =>
+        taskRuntimeImports[descriptor.name] = ((...workArgs: unknown[]): number =>
           currentContext().spawnTask({
             detached: true,
             starterExportName,
-            work,
+            workArgs,
           })) as CallableFunction;
         return;
       }
@@ -1254,11 +1254,11 @@ export const createVoydHost = async ({
           spawnTask: ({
             detached,
             starterExportName,
-            work,
+            workArgs,
           }: {
             detached: boolean;
             starterExportName: string;
-            work: unknown;
+            workArgs: readonly unknown[];
           }): number => {
             const ownerId = currentActiveTaskId();
             const taskId = state.nextTaskId++;
@@ -1279,7 +1279,7 @@ export const createVoydHost = async ({
                   }),
                   () => {
                     try {
-                      return starter(work);
+                      return starter(...workArgs);
                     } catch (error) {
                       throw annotateTrap(error, {
                         transition: {

@@ -135,7 +135,7 @@ const callArgTempKey = ({
 
 const appendTempCaptures = (
   node: CfgNode,
-  captures: readonly TempCaptureDraft[]
+  captures: readonly TempCaptureDraft[],
 ): void => {
   if (captures.length === 0) return;
 
@@ -152,19 +152,26 @@ const appendTempCaptures = (
   });
 };
 
-const collectPatternSymbols = (pattern: HirPattern, into: Set<SymbolId>): void => {
+const collectPatternSymbols = (
+  pattern: HirPattern,
+  into: Set<SymbolId>,
+): void => {
   switch (pattern.kind) {
     case "identifier":
       into.add(pattern.symbol);
       return;
     case "destructure":
-      pattern.fields.forEach((field) => collectPatternSymbols(field.pattern, into));
+      pattern.fields.forEach((field) =>
+        collectPatternSymbols(field.pattern, into),
+      );
       if (pattern.spread) {
         collectPatternSymbols(pattern.spread, into);
       }
       return;
     case "tuple":
-      pattern.elements.forEach((element) => collectPatternSymbols(element, into));
+      pattern.elements.forEach((element) =>
+        collectPatternSymbols(element, into),
+      );
       return;
     case "type":
       if (pattern.binding) {
@@ -245,12 +252,12 @@ const computeLiveness = ({
     const out = union<SymbolId>(
       ...node.succ
         .filter((succId) => reachable.has(succId))
-        .map((succId) => liveInById.get(succId) ?? new Set<SymbolId>())
+        .map((succId) => liveInById.get(succId) ?? new Set<SymbolId>()),
     );
 
     const inSet = union<SymbolId>(
       node.uses,
-      new Set<SymbolId>([...out].filter((sym) => !node.defs.has(sym)))
+      new Set<SymbolId>([...out].filter((sym) => !node.defs.has(sym))),
     );
 
     const changed = !setsEqual(oldIn, inSet) || !setsEqual(oldOut, out);
@@ -286,7 +293,9 @@ const shouldSkipCalleeIdentifierUse = ({
   const importTarget = ctx.program.imports.getTarget(ctx.moduleId, symbol);
   if (importTarget) {
     const resolved = ctx.program.symbols.refOf(importTarget);
-    if (ctx.program.functions.getSignature(resolved.moduleId, resolved.symbol)) {
+    if (
+      ctx.program.functions.getSignature(resolved.moduleId, resolved.symbol)
+    ) {
       return true;
     }
   }
@@ -399,7 +408,7 @@ const buildCfg = ({
     }
 
     const tempCapturesByIndex: Array<TempCaptureDraft | undefined> = new Array(
-      argExprIds.length
+      argExprIds.length,
     ).fill(undefined);
     needsTemp.forEach((needed, argIndex) => {
       if (!needed) return;
@@ -449,7 +458,11 @@ const buildCfg = ({
         if (valueGraph.exits.length > 0) {
           valueGraph.exits.forEach((exit) => addEdge(exit, flow.returnTarget));
         }
-        return { entry: valueGraph.entry, exits: [], siteNodes: valueGraph.siteNodes };
+        return {
+          entry: valueGraph.entry,
+          exits: [],
+          siteNodes: valueGraph.siteNodes,
+        };
       }
       case "let": {
         const initGraph = buildExpr(stmt.initializer, flow);
@@ -482,7 +495,18 @@ const buildCfg = ({
         return { entry: nodeId, exits: [nodeId], siteNodes: [] };
       }
       case "lambda": {
-        return nop();
+        const uses = new Set<SymbolId>(
+          expr.captures
+            .map((capture) => capture.symbol)
+            .filter(
+              (symbol) =>
+                !ctx.program.symbols.isModuleScoped(
+                  ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol }),
+                ),
+            ),
+        );
+        const nodeId = addNode({ uses });
+        return { entry: nodeId, exits: [nodeId], siteNodes: [] };
       }
       case "continue": {
         const nodeId = addNode({});
@@ -494,10 +518,17 @@ const buildCfg = ({
       case "break": {
         const valueGraph =
           typeof expr.value === "number" ? buildExpr(expr.value, flow) : nop();
-        if (valueGraph.exits.length > 0 && typeof flow.breakTarget === "number") {
+        if (
+          valueGraph.exits.length > 0 &&
+          typeof flow.breakTarget === "number"
+        ) {
           valueGraph.exits.forEach((exit) => addEdge(exit, flow.breakTarget!));
         }
-        return { entry: valueGraph.entry, exits: [], siteNodes: valueGraph.siteNodes };
+        return {
+          entry: valueGraph.entry,
+          exits: [],
+          siteNodes: valueGraph.siteNodes,
+        };
       }
       case "tuple": {
         const graphs = expr.elements.map((element) => buildExpr(element, flow));
@@ -512,7 +543,9 @@ const buildCfg = ({
         return buildExpr(expr.target, flow);
       }
       case "object-literal": {
-        const graphs = expr.entries.map((entry) => buildExpr(entry.value, flow));
+        const graphs = expr.entries.map((entry) =>
+          buildExpr(entry.value, flow),
+        );
         attachPreEffectTempCaptures({
           ownerExprId: expr.id,
           argExprIds: expr.entries.map((entry) => entry.value),
@@ -522,7 +555,9 @@ const buildCfg = ({
       }
       case "assign": {
         const targetGraph =
-          typeof expr.target === "number" ? buildExpr(expr.target, flow) : nop();
+          typeof expr.target === "number"
+            ? buildExpr(expr.target, flow)
+            : nop();
         const valueGraph = buildExpr(expr.value, flow);
         const patternSymbols = new Set<SymbolId>();
         if (expr.pattern) {
@@ -538,8 +573,11 @@ const buildCfg = ({
         };
       }
       case "block": {
-        const stmtGraphs = expr.statements.map((stmtId) => buildStmt(stmtId, flow));
-        const valueGraph = typeof expr.value === "number" ? buildExpr(expr.value, flow) : nop();
+        const stmtGraphs = expr.statements.map((stmtId) =>
+          buildStmt(stmtId, flow),
+        );
+        const valueGraph =
+          typeof expr.value === "number" ? buildExpr(expr.value, flow) : nop();
         return sequence([...stmtGraphs, valueGraph]);
       }
       case "loop": {
@@ -581,7 +619,9 @@ const buildCfg = ({
       case "if": {
         const join = addNode({});
         const defaultGraph =
-          typeof expr.defaultBranch === "number" ? buildExpr(expr.defaultBranch, flow) : undefined;
+          typeof expr.defaultBranch === "number"
+            ? buildExpr(expr.defaultBranch, flow)
+            : undefined;
         const defaultEntry = defaultGraph ? defaultGraph.entry : join;
         defaultGraph?.exits.forEach((exit) => addEdge(exit, join));
 
@@ -589,21 +629,30 @@ const buildCfg = ({
           condition: buildExpr(branch.condition, flow),
           value: buildExpr(branch.value, flow),
         }));
-        branches.forEach((branch) => branch.value.exits.forEach((exit) => addEdge(exit, join)));
+        branches.forEach((branch) =>
+          branch.value.exits.forEach((exit) => addEdge(exit, join)),
+        );
 
         for (let index = branches.length - 1; index >= 0; index -= 1) {
           const branch = branches[index]!;
-          const nextEntry = index === branches.length - 1 ? defaultEntry : branches[index + 1]!.condition.entry;
+          const nextEntry =
+            index === branches.length - 1
+              ? defaultEntry
+              : branches[index + 1]!.condition.entry;
           branch.condition.exits.forEach((exit) => {
             addEdge(exit, branch.value.entry);
             addEdge(exit, nextEntry);
           });
         }
 
-        const entry = branches.length > 0 ? branches[0]!.condition.entry : defaultEntry;
+        const entry =
+          branches.length > 0 ? branches[0]!.condition.entry : defaultEntry;
         const siteNodes = [
           ...(defaultGraph ? defaultGraph.siteNodes : []),
-          ...branches.flatMap((branch) => [...branch.condition.siteNodes, ...branch.value.siteNodes]),
+          ...branches.flatMap((branch) => [
+            ...branch.condition.siteNodes,
+            ...branch.value.siteNodes,
+          ]),
         ];
 
         return { entry, exits: [join], siteNodes };
@@ -668,7 +717,9 @@ const buildCfg = ({
       case "effect-handler": {
         const bodyGraph = buildExpr(expr.body, flow);
         const finallyGraph =
-          typeof expr.finallyBranch === "number" ? buildExpr(expr.finallyBranch, flow) : undefined;
+          typeof expr.finallyBranch === "number"
+            ? buildExpr(expr.finallyBranch, flow)
+            : undefined;
         if (!finallyGraph) {
           return bodyGraph;
         }
@@ -741,7 +792,7 @@ const buildCfg = ({
                 ownerExprId: expr.id,
                 argExprIds: expr.args.map((arg) => arg.expr),
                 argGraphs,
-              }
+              },
         );
 
         const graph = sequence([calleeGraph, ...argGraphs]);
@@ -749,7 +800,10 @@ const buildCfg = ({
         return {
           entry: graph.entry,
           exits: [applyNode],
-          siteNodes: [...graph.siteNodes, ...(nodes[applyNode]!.site ? [applyNode] : [])],
+          siteNodes: [
+            ...graph.siteNodes,
+            ...(nodes[applyNode]!.site ? [applyNode] : []),
+          ],
         };
       }
       case "method-call": {
@@ -782,7 +836,10 @@ const buildCfg = ({
         return {
           entry: graph.entry,
           exits: [applyNode],
-          siteNodes: [...graph.siteNodes, ...(nodes[applyNode]!.site ? [applyNode] : [])],
+          siteNodes: [
+            ...graph.siteNodes,
+            ...(nodes[applyNode]!.site ? [applyNode] : []),
+          ],
         };
       }
     }

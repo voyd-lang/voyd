@@ -170,8 +170,10 @@ fn serve_each_detached({
             let _ = close(server)
             return Err<HostError> { error: error }
           Ok<PendingRequest> { value: pending }:
+            let request_handle = pending.handle
+            let request = pending.request
             let _ = task::detach do:
-              respond_or_panic(pending.handle, handle(pending.request))
+              respond_or_panic(request_handle, handle(request))
             let _ = task::yield_now()
       Ok<Unit> { value: Unit {} }
 

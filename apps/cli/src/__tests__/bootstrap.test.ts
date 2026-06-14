@@ -102,6 +102,25 @@ describe("runBootstrap", () => {
       const serverScript = await readFile(resolve(target, "scripts/serve.mjs"), "utf8");
       expect(serverScript).toContain("serveWebApp");
       expect(serverScript).toContain("bufferSize: 1024 * 1024");
+      expect(serverScript).toContain("optimize = true");
+
+      const readme = await readFile(resolve(target, "README.md"), "utf8");
+      expect(readme).toContain("npm run dev");
+      expect(readme).toContain("data/articles");
+      expect(readme).toContain("max_body_bytes");
+
+      const gitignore = await readFile(resolve(target, ".gitignore"), "utf8");
+      expect(gitignore).toContain("data/articles/*.md");
+      expect(gitignore).toContain("!data/articles/home.md");
+
+      const devScript = await readFile(resolve(target, "scripts/dev.mjs"), "utf8");
+      expect(devScript).toContain("watchTree(sourceDir)");
+      expect(devScript).toContain('filePath.endsWith(".voyd")');
+      expect(devScript).toContain("queueBuild();");
+      expect(devScript).toContain("queueRestart();");
+
+      const checkScript = await readFile(resolve(target, "scripts/check-voyd.mjs"), "utf8");
+      expect(checkScript).toContain("optimize: true");
 
       const viteConfig = await readFile(resolve(target, "vite.config.mjs"), "utf8");
       expect(viteConfig).toContain('entryFileNames: "assets/client.js"');
@@ -114,8 +133,12 @@ describe("runBootstrap", () => {
       const mainVoyd = await readFile(resolve(target, "src/main.voyd"), "utf8");
       expect(mainVoyd).toContain("pub fn main(): (server::HttpServer");
       expect(mainVoyd).toContain("tasks::TaskRuntime");
-      expect(mainVoyd).toContain('"/api/articles".as_slice()');
-      expect(mainVoyd).toContain("limit: body_limit(65536)");
+      expect(mainVoyd).toContain("serve(");
+      expect(mainVoyd).toContain("routes():");
+      expect(mainVoyd).toContain("max_body_bytes: 65536");
+      expect(mainVoyd).toContain('adopt(serve_dir("./public".as_slice()))');
+      expect(mainVoyd).toContain('"/api/articles"');
+      expect(mainVoyd).toContain("body: text_body()");
       expect(mainVoyd).toContain("write_file_string(article_path(slug), input)");
       expect(mainVoyd).toContain('href="/assets/client.css"');
 
@@ -123,6 +146,7 @@ describe("runBootstrap", () => {
       expectCompileSuccess(
         await sdk.compile({
           entryPath: resolve(target, "src/main.voyd"),
+          optimize: true,
           roots: {
             src: resolve(target, "src"),
             pkgDirs: [resolve(repoRoot, "packages")],
@@ -132,7 +156,7 @@ describe("runBootstrap", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 120_000);
 
   it("prints a dry run without writing files", async () => {
     const root = await createTempDir();

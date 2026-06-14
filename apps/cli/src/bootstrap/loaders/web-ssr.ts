@@ -68,6 +68,10 @@ export const webSsrLoader: BootstrapLoader = {
         content: gitIgnore,
       },
       {
+        path: "README.md",
+        content: readme(packageName),
+      },
+      {
         path: "scripts/check-voyd.mjs",
         content: checkVoydScript,
       },
@@ -142,7 +146,7 @@ const entryPath = resolve(rootDir, "src/main.voyd");
 const sdk = createSdk();
 const result = await sdk.compile({
   entryPath,
-  optimize: false,
+  optimize: true,
   runtimeDiagnostics: true,
 });
 
@@ -176,7 +180,7 @@ process.chdir(rootDir);
 export async function serve({
   host = process.env.HOST ?? process.env.VOYD_WEB_HOST ?? "127.0.0.1",
   port = readPort(),
-  optimize = false,
+  optimize = true,
 } = {}) {
   const sdk = createSdk();
   const result = await sdk.serveWebApp({
@@ -239,39 +243,58 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 `;
 
 const devScript = `import { spawn } from "node:child_process";
-import { watch } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, statSync, watch } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "./serve.mjs";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const sourceDir = resolve(rootDir, "src");
 const port = Number.parseInt(process.env.PORT ?? process.env.VOYD_WEB_PORT ?? "3000", 10);
-const vite = spawn(command("vite"), ["build", "--watch", "--mode", "development"], {
-  cwd: rootDir,
-  stdio: "inherit",
-});
 
 let app;
+let building = false;
 let restarting = false;
-let queued = false;
+let buildQueued = false;
+let restartQueued = false;
 
-await restart();
+await buildClient();
+await restartServer();
 
-const watcher = watch(sourceDir, { persistent: true }, (_event, filename) => {
-  if (!filename || !filename.endsWith(".voyd")) return;
-  queueRestart();
-});
+const watcher = watchSource();
 
-function queueRestart() {
-  queued = true;
-  if (restarting) return;
-  setTimeout(() => void restart(), 75);
+function queueBuild() {
+  buildQueued = true;
+  if (building) return;
+  setTimeout(() => void buildClient(), 75);
 }
 
-async function restart() {
-  if (!queued && app) return;
-  queued = false;
+function queueRestart() {
+  restartQueued = true;
+  if (restarting) return;
+  setTimeout(() => void restartServer(), 75);
+}
+
+async function buildClient() {
+  if (building) return;
+  buildQueued = false;
+  building = true;
+  try {
+    await run("vite", ["build", "--mode", "development"]);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+  } finally {
+    building = false;
+    if (buildQueued) {
+      setTimeout(() => void buildClient(), 75);
+    }
+  }
+}
+
+async function restartServer() {
+  if (restarting) return;
+  if (!restartQueued && app) return;
+  restartQueued = false;
   restarting = true;
   try {
     if (app) {
@@ -279,22 +302,21 @@ async function restart() {
     }
     app = await serve({
       port: Number.isFinite(port) ? port : 3000,
-      optimize: false,
+      optimize: process.env.NODE_ENV === "production",
     });
     console.log(\`Voyd wiki ready at \${app.url}\`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
   } finally {
     restarting = false;
-    if (queued) {
-      setTimeout(() => void restart(), 75);
+    if (restartQueued) {
+      setTimeout(() => void restartServer(), 75);
     }
   }
 }
 
 async function shutdown() {
-  watcher.close();
-  vite.kill("SIGTERM");
+  watcher?.close();
   if (app) {
     await app.close("shutdown").catch(() => undefined);
   }
@@ -303,11 +325,92 @@ async function shutdown() {
 
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
-vite.once("exit", (code) => {
-  if (code && code !== 0) {
-    process.exitCode = code;
+
+function run(name, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command(name), args, {
+      cwd: rootDir,
+      stdio: "inherit",
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(\`\${name} \${args.join(" ")} exited with code \${code}\`));
+    });
+  });
+}
+
+function watchSource() {
+  const watchers = new Map();
+
+  const watchTree = (dir) => {
+    watchDir(dir);
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        watchTree(join(dir, entry.name));
+      }
+    }
+  };
+
+  const watchDir = (dir) => {
+    if (watchers.has(dir)) return;
+    const sourceWatcher = watch(dir, { persistent: true }, (_event, filename) => {
+      if (!filename) {
+        queueBuild();
+        queueRestart();
+        return;
+      }
+
+      const filePath = join(dir, filename.toString());
+      if (isDirectory(filePath)) {
+        watchTree(filePath);
+        return;
+      }
+      handleSourceChange(filePath);
+    });
+    sourceWatcher.on("error", (error) => {
+      console.error(\`Source file watching stopped: \${error instanceof Error ? error.message : error}\`);
+    });
+    watchers.set(dir, sourceWatcher);
+  };
+
+  try {
+    watchTree(sourceDir);
+  } catch (error) {
+    console.error(\`Source file watching unavailable: \${error instanceof Error ? error.message : error}\`);
+    return undefined;
   }
-});
+  return {
+    close() {
+      for (const sourceWatcher of watchers.values()) {
+        sourceWatcher.close();
+      }
+      watchers.clear();
+    },
+  };
+}
+
+function handleSourceChange(filePath) {
+  if (filePath.endsWith(".voyd")) {
+    queueBuild();
+    queueRestart();
+    return;
+  }
+  if (filePath.endsWith(".css") || filePath.endsWith(".ts")) {
+    queueBuild();
+  }
+}
+
+function isDirectory(filePath) {
+  try {
+    return statSync(filePath).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 function command(name) {
   return process.platform === "win32" ? \`\${name}.cmd\` : name;
@@ -392,44 +495,28 @@ type Article = {
 pub fn main(): (server::HttpServer, tasks::TaskRuntime, env::Env, fs::Fs) -> i32
   let port = app_port()
   let host = app_host()
-  let result = server::serve_each(
-    config: server::ServerConfig::init(
-      port: port,
-      host: host,
-      max_body_bytes: 1048576,
-      max_pending_requests: 100,
-      response_timeout_millis: 30000
-    ),
-    policy: server::ServeTaskPolicy::sequential(),
-    handle: handle_request
-  )
+  let result = serve(
+    port: port,
+    host: host,
+    shutdown_timeout: 30000,
+    max_body_bytes: 65536
+  ) routes():
+    adopt(serve_dir("./public".as_slice()))
+
+    get("/") do:
+      article_page(load_article("home".as_slice().to_string()))
+
+    get("/wiki/:slug") do(params: ArticleParams):
+      article_page(load_article(safe_slug(params.slug)))
+
+    post("/api/articles", body: text_body()) do(input: String, ctx: Context):
+      save_article(input, ctx)
 
   match(result)
     Ok<Unit>:
       0
     Err<HostError> { error }:
       -error.code
-
-fn handle_request(request: IncomingRequest): fs::Fs -> Response
-  make_app().handle(request)
-
-fn make_app() -> App
-  build_app do(base):
-    let with_static = adopt(base, serve_dir("./public".as_slice()))
-
-    let with_home = get_unit(with_static, "/".as_slice()) do:
-      article_page(load_article("home".as_slice().to_string()))
-
-    let with_article = get(with_home, "/wiki/:slug".as_slice()) do(params: ArticleParams):
-      article_page(load_article(safe_slug(params.slug)))
-
-    post(
-      with_article,
-      "/api/articles".as_slice(),
-      body: text_body(),
-      limit: body_limit(65536),
-      (input: String, ctx: Context) -> Response => save_article(input, ctx)
-    )
 
 fn app_port(): env::Env -> i32
   match(env::get_int("VOYD_WEB_PORT".as_slice()))
@@ -615,4 +702,35 @@ public/assets
 dist
 .turbo
 .DS_Store
+data/articles/*.md
+!data/articles/home.md
+!data/articles/voyd.md
+!data/articles/webassembly.md
+`;
+
+const readme = (packageName: string) => `# ${packageName}
+
+Mini Voydpedia is a server-rendered Voyd app with Tailwind assets built by Vite.
+Articles are local markdown files in \`data/articles\`, so edits are easy to
+diff, seed, back up, or delete.
+
+## Scripts
+
+- \`npm run dev\` builds the client assets, starts the Voyd SSR server, rebuilds
+  assets when \`src/**/*.ts\` or \`src/**/*.css\` changes, and restarts the server
+  when \`src/**/*.voyd\` changes.
+- \`npm run build\` builds the Tailwind/client assets into \`public/assets\` and
+  checks the Voyd server with optimized compilation.
+- \`npm start\` runs the production-style SSR server.
+- \`npm run voyd:check\` compiles only the Voyd server.
+- \`npm run typecheck\` checks the TypeScript helper scripts and client code.
+
+## Configuration
+
+- \`PORT\` or \`VOYD_WEB_PORT\` changes the server port. The default is \`3000\`.
+- \`HOST\` or \`VOYD_WEB_HOST\` changes the bind host. The default is
+  \`127.0.0.1\`.
+
+The article save endpoint accepts request bodies up to 64 KiB by default. Adjust
+\`max_body_bytes\` in \`src/main.voyd\` if your app needs larger edits.
 `;

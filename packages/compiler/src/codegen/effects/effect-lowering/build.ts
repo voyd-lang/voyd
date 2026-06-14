@@ -31,7 +31,7 @@ const uniqueTempCaptures = (
     callExprId: HirExprId;
     argIndex: number;
     typeId: TypeId;
-  }[]
+  }[],
 ): readonly {
   key: TempCaptureKey;
   callExprId: HirExprId;
@@ -41,15 +41,23 @@ const uniqueTempCaptures = (
   captures
     .slice()
     .sort((a, b) =>
-      a.callExprId !== b.callExprId ? a.callExprId - b.callExprId : a.argIndex - b.argIndex
+      a.callExprId !== b.callExprId
+        ? a.callExprId - b.callExprId
+        : a.argIndex - b.argIndex,
     )
-    .filter((capture, index, all) => (index === 0 ? true : all[index - 1]!.key !== capture.key));
+    .filter((capture, index, all) =>
+      index === 0 ? true : all[index - 1]!.key !== capture.key,
+    );
 
 const resumeValueTypeIdForSite = ({
   site,
   ctx,
 }: {
-  site: { kind: "perform" | "call"; exprId: HirExprId; effectSymbol?: SymbolId };
+  site: {
+    kind: "perform" | "call";
+    exprId: HirExprId;
+    effectSymbol?: SymbolId;
+  };
   ctx: CodegenContext;
 }): TypeId => {
   const exprType =
@@ -59,8 +67,12 @@ const resumeValueTypeIdForSite = ({
     if (typeof site.effectSymbol !== "number") {
       throw new Error("perform site missing effect op symbol");
     }
-    const signature = ctx.program.functions.getSignature(ctx.moduleId, site.effectSymbol);
-    const fallbackType = signature?.returnType ?? ctx.program.primitives.unknown;
+    const signature = ctx.program.functions.getSignature(
+      ctx.moduleId,
+      site.effectSymbol,
+    );
+    const fallbackType =
+      signature?.returnType ?? ctx.program.primitives.unknown;
     if (typeof exprType !== "number") {
       return fallbackType;
     }
@@ -102,14 +114,16 @@ const captureFieldsForSite = ({
           symbolTypes.get(symbol) ??
           ctx.module.types.getValueType(symbol) ??
           ctx.program.primitives.unknown,
-      })
+      }),
     );
 
-  const tempFields: ContinuationCaptureField[] = tempCaptures.map((capture) => ({
-    sourceKind: "temp",
-    tempId: capture.tempId,
-    typeId: capture.typeId,
-  }));
+  const tempFields: ContinuationCaptureField[] = tempCaptures.map(
+    (capture) => ({
+      sourceKind: "temp",
+      tempId: capture.tempId,
+      typeId: capture.typeId,
+    }),
+  );
 
   return [...tempFields, ...symbolFields];
 };
@@ -128,20 +142,30 @@ const collectIdentifierSymbolTypes = ({
     visitLambdaBodies: false,
     visitor: {
       onExpr: (id, expr) => {
-        if (expr.exprKind !== "identifier") return;
-        const typeId =
-          ctx.module.types.getValueType(expr.symbol) ??
-          ctx.module.types.getResolvedExprType(id) ??
-          ctx.module.types.getExprType(id);
-        if (typeof typeId !== "number") return;
-        const existing = symbolTypes.get(expr.symbol);
-        if (
-          typeof existing === "number" &&
-          existing !== ctx.program.primitives.unknown
-        ) {
+        const setType = (symbol: SymbolId, typeId?: TypeId): void => {
+          const resolvedTypeId =
+            ctx.module.types.getValueType(symbol) ?? typeId;
+          if (typeof resolvedTypeId !== "number") return;
+          const existing = symbolTypes.get(symbol);
+          if (
+            typeof existing === "number" &&
+            existing !== ctx.program.primitives.unknown
+          ) {
+            return;
+          }
+          symbolTypes.set(symbol, resolvedTypeId);
+        };
+
+        if (expr.exprKind === "lambda") {
+          expr.captures.forEach((capture) => setType(capture.symbol));
           return;
         }
-        symbolTypes.set(expr.symbol, typeId);
+        if (expr.exprKind !== "identifier") return;
+        setType(
+          expr.symbol,
+          ctx.module.types.getResolvedExprType(id) ??
+            ctx.module.types.getExprType(id),
+        );
       },
     },
   });
@@ -178,7 +202,11 @@ export const buildEffectLoweringEir = ({
     tempTypeIds.set(next, capture.typeId);
 
     const list = callArgTemps.get(capture.callExprId) ?? [];
-    list.push({ argIndex: capture.argIndex, tempId: next, typeId: capture.typeId });
+    list.push({
+      argIndex: capture.argIndex,
+      tempId: next,
+      typeId: capture.typeId,
+    });
     callArgTemps.set(capture.callExprId, list);
     return next;
   };
@@ -213,10 +241,12 @@ export const buildEffectLoweringEir = ({
   }): void => {
     analysisSites.forEach((site) => {
       const resumeValueTypeId = resumeValueTypeIdForSite({ site, ctx });
-      const tempCaptures = uniqueTempCaptures(site.tempCaptures ?? []).map((capture) => ({
-        tempId: ensureTempId(capture),
-        typeId: capture.typeId,
-      }));
+      const tempCaptures = uniqueTempCaptures(site.tempCaptures ?? []).map(
+        (capture) => ({
+          tempId: ensureTempId(capture),
+          typeId: capture.typeId,
+        }),
+      );
       const captureFields = captureFieldsForSite({
         liveSymbols: site.liveAfter,
         params,
@@ -275,9 +305,18 @@ export const buildEffectLoweringEir = ({
       exprId: item.body,
       ctx,
     });
-    const analysis = analyzeExpr({ exprId: item.body, liveAfter: new Set(), ctx });
-    const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: item.symbol });
-    const fnName = sanitizeIdentifier(ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`);
+    const analysis = analyzeExpr({
+      exprId: item.body,
+      liveAfter: new Set(),
+      ctx,
+    });
+    const symbolId = ctx.program.symbols.idOf({
+      moduleId: ctx.moduleId,
+      symbol: item.symbol,
+    });
+    const fnName = sanitizeIdentifier(
+      ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`,
+    );
     const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
 
     emitSitesFor({
@@ -293,7 +332,8 @@ export const buildEffectLoweringEir = ({
       typeof process !== "undefined" &&
       process.env.DEBUG_EFFECTS === "1" &&
       ctx.moduleId === "std::time" &&
-      (ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`) === "run_timeout"
+      (ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`) ===
+        "run_timeout"
     ) {
       console.error(
         "[effects] run_timeout sites",
@@ -320,7 +360,11 @@ export const buildEffectLoweringEir = ({
     });
     const fnName = `lambda_${expr.id}`;
     const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${expr.id}`;
-    const analysis = analyzeExpr({ exprId: expr.body, liveAfter: new Set(), ctx });
+    const analysis = analyzeExpr({
+      exprId: expr.body,
+      liveAfter: new Set(),
+      ctx,
+    });
 
     emitSitesFor({
       analysisSites: analysis.sites,
@@ -343,10 +387,9 @@ export const buildEffectLoweringEir = ({
         exprId: clause.body,
         ctx,
       });
-      const skipCalleeSymbols =
-        clause.parameters[0]
-          ? new Set<SymbolId>([clause.parameters[0].symbol])
-          : undefined;
+      const skipCalleeSymbols = clause.parameters[0]
+        ? new Set<SymbolId>([clause.parameters[0].symbol])
+        : undefined;
       const analysis = analyzeExpr({
         exprId: clause.body,
         liveAfter: new Set(),
@@ -369,7 +412,10 @@ export const buildEffectLoweringEir = ({
   });
 
   callArgTemps.forEach((value, key) => {
-    const unique = new Map<number, { argIndex: number; tempId: number; typeId: TypeId }>();
+    const unique = new Map<
+      number,
+      { argIndex: number; tempId: number; typeId: TypeId }
+    >();
     value.forEach((entry) => unique.set(entry.argIndex, entry));
     const sorted = [...unique.values()].sort((a, b) => a.argIndex - b.argIndex);
     callArgTemps.set(key, sorted);

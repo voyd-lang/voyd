@@ -1,37 +1,56 @@
 import { spawn } from "node:child_process";
-import { watch } from "node:fs";
-import { resolve } from "node:path";
+import { readdirSync, statSync, watch } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "./serve.mjs";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const sourceDir = resolve(rootDir, "src");
 const port = Number.parseInt(process.env.PORT ?? process.env.VOYD_WEB_PORT ?? "3000", 10);
-const vite = spawn(command("vite"), ["build", "--watch", "--mode", "development"], {
-  cwd: rootDir,
-  stdio: "inherit",
-});
 
 let app;
+let building = false;
 let restarting = false;
-let queued = false;
+let buildQueued = false;
+let restartQueued = false;
 
-await restart();
+await buildClient();
+await restartServer();
 
-const watcher = watch(sourceDir, { persistent: true }, (_event, filename) => {
-  if (!filename || !filename.endsWith(".voyd")) return;
-  queueRestart();
-});
+const watcher = watchSource();
 
-function queueRestart() {
-  queued = true;
-  if (restarting) return;
-  setTimeout(() => void restart(), 75);
+function queueBuild() {
+  buildQueued = true;
+  if (building) return;
+  setTimeout(() => void buildClient(), 75);
 }
 
-async function restart() {
-  if (!queued && app) return;
-  queued = false;
+function queueRestart() {
+  restartQueued = true;
+  if (restarting) return;
+  setTimeout(() => void restartServer(), 75);
+}
+
+async function buildClient() {
+  if (building) return;
+  buildQueued = false;
+  building = true;
+  try {
+    await run("vite", ["build", "--mode", "development"]);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+  } finally {
+    building = false;
+    if (buildQueued) {
+      setTimeout(() => void buildClient(), 75);
+    }
+  }
+}
+
+async function restartServer() {
+  if (restarting) return;
+  if (!restartQueued && app) return;
+  restartQueued = false;
   restarting = true;
   try {
     if (app) {
@@ -39,22 +58,21 @@ async function restart() {
     }
     app = await serve({
       port: Number.isFinite(port) ? port : 3000,
-      optimize: false,
+      optimize: process.env.NODE_ENV === "production",
     });
     console.log(`Voyd wiki ready at ${app.url}`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
   } finally {
     restarting = false;
-    if (queued) {
-      setTimeout(() => void restart(), 75);
+    if (restartQueued) {
+      setTimeout(() => void restartServer(), 75);
     }
   }
 }
 
 async function shutdown() {
-  watcher.close();
-  vite.kill("SIGTERM");
+  watcher?.close();
   if (app) {
     await app.close("shutdown").catch(() => undefined);
   }
@@ -63,11 +81,92 @@ async function shutdown() {
 
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
-vite.once("exit", (code) => {
-  if (code && code !== 0) {
-    process.exitCode = code;
+
+function run(name, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command(name), args, {
+      cwd: rootDir,
+      stdio: "inherit",
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${name} ${args.join(" ")} exited with code ${code}`));
+    });
+  });
+}
+
+function watchSource() {
+  const watchers = new Map();
+
+  const watchTree = (dir) => {
+    watchDir(dir);
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        watchTree(join(dir, entry.name));
+      }
+    }
+  };
+
+  const watchDir = (dir) => {
+    if (watchers.has(dir)) return;
+    const sourceWatcher = watch(dir, { persistent: true }, (_event, filename) => {
+      if (!filename) {
+        queueBuild();
+        queueRestart();
+        return;
+      }
+
+      const filePath = join(dir, filename.toString());
+      if (isDirectory(filePath)) {
+        watchTree(filePath);
+        return;
+      }
+      handleSourceChange(filePath);
+    });
+    sourceWatcher.on("error", (error) => {
+      console.error(`Source file watching stopped: ${error instanceof Error ? error.message : error}`);
+    });
+    watchers.set(dir, sourceWatcher);
+  };
+
+  try {
+    watchTree(sourceDir);
+  } catch (error) {
+    console.error(`Source file watching unavailable: ${error instanceof Error ? error.message : error}`);
+    return undefined;
   }
-});
+  return {
+    close() {
+      for (const sourceWatcher of watchers.values()) {
+        sourceWatcher.close();
+      }
+      watchers.clear();
+    },
+  };
+}
+
+function handleSourceChange(filePath) {
+  if (filePath.endsWith(".voyd")) {
+    queueBuild();
+    queueRestart();
+    return;
+  }
+  if (filePath.endsWith(".css") || filePath.endsWith(".ts")) {
+    queueBuild();
+  }
+}
+
+function isDirectory(filePath) {
+  try {
+    return statSync(filePath).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 function command(name) {
   return process.platform === "win32" ? `${name}.cmd` : name;

@@ -139,7 +139,7 @@ const hasRuntimeDiagnosticsSection = (wasm: Uint8Array): boolean => {
   const module = new WebAssembly.Module(wasmBufferSource(wasm));
   const sections = WebAssembly.Module.customSections(
     module,
-    RUNTIME_DIAGNOSTICS_SECTION
+    RUNTIME_DIAGNOSTICS_SECTION,
   );
   return sections.length > 0;
 };
@@ -215,7 +215,12 @@ const findFreePort = (): Promise<number> =>
 
 const httpGet = (
   url: string,
-): Promise<{ status: number; headers: http.IncomingHttpHeaders; body: string }> =>
+  timeoutMs = 2000,
+): Promise<{
+  status: number;
+  headers: http.IncomingHttpHeaders;
+  body: string;
+}> =>
   new Promise((resolve, reject) => {
     const request = http.get(url, (response) => {
       const chunks: Buffer[] = [];
@@ -229,7 +234,7 @@ const httpGet = (
       );
     });
     request.on("error", reject);
-    request.setTimeout(2000, () => {
+    request.setTimeout(timeoutMs, () => {
       request.destroy(new Error(`timed out waiting for ${url}`));
     });
   });
@@ -267,9 +272,59 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
     expect(result.port).toBe(port);
     expect(result.url).toBe(`http://127.0.0.1:${port}`);
     await expect(result.ready).resolves.toBeUndefined();
+    await expect(httpGet(`${result.url}/hello`)).resolves.toMatchObject({
+      status: 200,
+      body: "served",
+    });
 
     await expect(result.close()).resolves.toBeUndefined();
     await expect(httpGet(`${result.url}/hello`)).rejects.toThrow();
+  }, 120_000);
+
+  it("serves high-level web route handlers without serializing unrelated requests", async () => {
+    const sdk = createSdk();
+    const port = await findFreePort();
+    const result = await sdk.serveWebApp({
+      port,
+      readinessTimeoutMs: 10_000,
+      source: `
+use pkg::web::all
+use std::env::self as env
+use std::http::server::HttpServer
+use std::number::cast::self as cast
+use std::task::self as task
+use std::time::self as time
+use std::time::Duration
+
+pub fn main(): (HttpServer, task::TaskRuntime, env::Env, time::Time) -> i32
+  let port = env::get_int("VOYD_WEB_PORT".as_slice()) ?? -1
+  let host = env::get("VOYD_WEB_HOST".as_slice()) ?? "127.0.0.1".as_slice().to_string()
+  let _ = serve(port: port, host: host, shutdown_timeout: 2000) routes():
+    get("/slow") do:
+      let _ = time::sleep(Duration::from_millis(cast::to_i64(200)))
+      "slow".as_slice().to_string()
+
+    get("/fast") do:
+      "fast".as_slice().to_string()
+  0
+`,
+      run: { bufferSize: 1024 * 1024, defaultAdapters: { runtime: "node" } },
+    });
+
+    if (!result.success) {
+      throw new Error(
+        result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+      );
+    }
+
+    const slow = httpGet(`${result.url}/slow`, 1000);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await expect(httpGet(`${result.url}/fast`, 100)).resolves.toMatchObject({
+      status: 200,
+      body: "fast",
+    });
+    await expect(slow).resolves.toMatchObject({ status: 200, body: "slow" });
+    await expect(result.close()).resolves.toBeUndefined();
   }, 120_000);
 
   beforeAll(async () => {
@@ -334,9 +389,9 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
       tag: "Missing",
     });
     await expect(host.run("sum_values", [[1, 2, 3]])).resolves.toBe(6);
-    await expect(host.run("add_float", [Number.POSITIVE_INFINITY])).resolves.toBe(
-      Number.POSITIVE_INFINITY,
-    );
+    await expect(
+      host.run("add_float", [Number.POSITIVE_INFINITY]),
+    ).resolves.toBe(Number.POSITIVE_INFINITY);
     const nanResult = await host.run<number>("nan_value");
     expect(Number.isNaN(nanResult)).toBe(true);
     await expect(host.run("found_only")).resolves.toEqual({
@@ -348,7 +403,9 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
     ).resolves.toBe("Grace");
     await expect(
       host.run("found_value", [{ tag: "Missing", value: "Grace" }]),
-    ).rejects.toThrow("typed export found_value arg0 expected variant tag Found");
+    ).rejects.toThrow(
+      "typed export found_value arg0 expected variant tag Found",
+    );
     await expect(host.run("nested_found")).resolves.toEqual({
       tag: "Wrapped",
       inner: { tag: "Found", value: "Ada" },
@@ -362,7 +419,9 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
       host.run("nested_found_value", [
         { tag: "Wrapped", inner: { tag: "Missing", value: "Grace" } },
       ]),
-    ).rejects.toThrow("typed export nested_found_value arg0.inner expected variant tag Found");
+    ).rejects.toThrow(
+      "typed export nested_found_value arg0.inner expected variant tag Found",
+    );
     await expect(
       host.run("translate", [{ x: "bad", y: 2 }, 10, 20]),
     ).rejects.toThrow("typed export translate arg0.x expected i32, got string");
@@ -405,10 +464,9 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
       bufferSize: 8,
     });
     await expect(
-      tinyBufferHost.run(
-        "sum_values",
-        [Array.from({ length: 32 }, (_, index) => index)],
-      ),
+      tinyBufferHost.run("sum_values", [
+        Array.from({ length: 32 }, (_, index) => index),
+      ]),
     ).rejects.toThrow("increase createVoydHost({ bufferSize })");
     await expect(tinyBufferHost.run("long_text")).rejects.toThrow(
       "increase createVoydHost({ bufferSize })",
@@ -449,7 +507,9 @@ pub fn shift(point: AliasPoint) -> AliasPoint
     );
     const module = new WebAssembly.Module(wasmBufferSource(result.wasm));
     const abi = parseExportAbi(module);
-    const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);
+    const exports = WebAssembly.Module.exports(module).map(
+      (entry) => entry.name,
+    );
 
     expect(exports).toContain("translate");
     expect(exports).not.toContain("__voyd_serialized_export_translate");
@@ -1119,10 +1179,15 @@ pub fn second(): Async -> i32
       wasm: result.wasm,
       defaultAdapters: false,
     });
-    host.registerHandler(op.effectId, op.opId, op.signatureHash, async ({ resume }, value) => {
-      await Promise.resolve();
-      return resume(value);
-    });
+    host.registerHandler(
+      op.effectId,
+      op.opId,
+      op.signatureHash,
+      async ({ resume }, value) => {
+        await Promise.resolve();
+        return resume(value);
+      },
+    );
     host.initEffects();
 
     const left = host.runManaged<number>("first");

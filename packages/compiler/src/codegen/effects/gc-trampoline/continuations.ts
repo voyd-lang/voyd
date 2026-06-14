@@ -8,7 +8,11 @@ import type {
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
-import type { HirFunction, HirLambdaExpr, HirPattern } from "../../../semantics/hir/index.js";
+import type {
+  HirFunction,
+  HirLambdaExpr,
+  HirPattern,
+} from "../../../semantics/hir/index.js";
 import type {
   ContinuationSite,
   ContinuationSiteOwner,
@@ -43,11 +47,14 @@ const bin = binaryen as unknown as AugmentedBinaryen;
 
 const findFunctionBySymbol = (
   symbol: SymbolId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
 ): { fn: HirFunction; returnTypeId: TypeId } => {
   for (const item of ctx.module.hir.items.values()) {
     if (item.kind === "function" && item.symbol === symbol) {
-      const signature = ctx.program.functions.getSignature(ctx.moduleId, symbol);
+      const signature = ctx.program.functions.getSignature(
+        ctx.moduleId,
+        symbol,
+      );
       if (!signature) {
         throw new Error("missing signature for continuation function");
       }
@@ -60,7 +67,7 @@ const findFunctionBySymbol = (
 const findLambdaByExprId = (
   exprId: HirExprId,
   ctx: CodegenContext,
-  typeInstanceId?: ProgramFunctionInstanceId
+  typeInstanceId?: ProgramFunctionInstanceId,
 ): { expr: HirLambdaExpr; returnTypeId: TypeId } => {
   const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr || expr.exprKind !== "lambda") {
@@ -89,14 +96,23 @@ const collectIdentifierExprTypes = ({
     ctx,
     visitor: {
       onExpr: (id, expr) => {
+        const setType = (symbol: SymbolId, typeId?: TypeId): void => {
+          if (!shouldCaptureIdentifierSymbol(symbol, ctx)) return;
+          if (types.has(symbol)) return;
+          types.set(
+            symbol,
+            ctx.module.types.getValueType(symbol) ??
+              typeId ??
+              ctx.program.primitives.unknown,
+          );
+        };
+
+        if (expr.exprKind === "lambda") {
+          expr.captures.forEach((capture) => setType(capture.symbol));
+          return;
+        }
         if (expr.exprKind !== "identifier") return;
-        if (!shouldCaptureIdentifierSymbol(expr.symbol, ctx)) return;
-        if (types.has(expr.symbol)) return;
-        types.set(
-          expr.symbol,
-          ctx.module.types.getValueType(expr.symbol) ??
-            getRequiredExprType(id, ctx, typeInstanceId)
-        );
+        setType(expr.symbol, getRequiredExprType(id, ctx, typeInstanceId));
       },
     },
     visitLambdaBodies: false,
@@ -104,7 +120,10 @@ const collectIdentifierExprTypes = ({
   return types;
 };
 
-const collectFunctionLocalSymbols = (fn: HirFunction, ctx: CodegenContext): Set<SymbolId> => {
+const collectFunctionLocalSymbols = (
+  fn: HirFunction,
+  ctx: CodegenContext,
+): Set<SymbolId> => {
   const symbols = new Set<SymbolId>();
   const visitor = {
     onPattern: (pattern: HirPattern) => {
@@ -113,12 +132,22 @@ const collectFunctionLocalSymbols = (fn: HirFunction, ctx: CodegenContext): Set<
     },
   };
 
-  fn.parameters.forEach((param) => walkHirPattern({ pattern: param.pattern, visitor }));
-  walkHirExpression({ exprId: fn.body, ctx, visitor, visitLambdaBodies: false });
+  fn.parameters.forEach((param) =>
+    walkHirPattern({ pattern: param.pattern, visitor }),
+  );
+  walkHirExpression({
+    exprId: fn.body,
+    ctx,
+    visitor,
+    visitLambdaBodies: false,
+  });
   return symbols;
 };
 
-const collectLambdaLocalSymbols = (expr: HirLambdaExpr, ctx: CodegenContext): Set<SymbolId> => {
+const collectLambdaLocalSymbols = (
+  expr: HirLambdaExpr,
+  ctx: CodegenContext,
+): Set<SymbolId> => {
   const symbols = new Set<SymbolId>();
   expr.captures.forEach((capture) => symbols.add(capture.symbol));
   expr.parameters.forEach((param) => symbols.add(param.symbol));
@@ -130,13 +159,18 @@ const collectLambdaLocalSymbols = (expr: HirLambdaExpr, ctx: CodegenContext): Se
     },
   };
 
-  walkHirExpression({ exprId: expr.body, ctx, visitor, visitLambdaBodies: false });
+  walkHirExpression({
+    exprId: expr.body,
+    ctx,
+    visitor,
+    visitLambdaBodies: false,
+  });
   return symbols;
 };
 
 const sameContinuationOwner = (
   a: ContinuationSiteOwner,
-  b: ContinuationSiteOwner
+  b: ContinuationSiteOwner,
 ): boolean => {
   if (a.kind !== b.kind) return false;
   switch (a.kind) {
@@ -159,7 +193,8 @@ const continuationKey = ({
   site: ContinuationSite;
   typeInstanceId?: ProgramFunctionInstanceId;
 }): string => {
-  const instanceKey = typeof typeInstanceId === "number" ? `${typeInstanceId}` : "base";
+  const instanceKey =
+    typeof typeInstanceId === "number" ? `${typeInstanceId}` : "base";
   return `${site.contBaseName}:${site.owner.kind}:${instanceKey}`;
 };
 
@@ -182,20 +217,22 @@ export const continuationFunctionName = ({
 }: {
   site: ContinuationSite;
   typeInstanceId?: ProgramFunctionInstanceId;
-}): string =>
-  continuationName({ baseName: site.contBaseName, typeInstanceId });
+}): string => continuationName({ baseName: site.contBaseName, typeInstanceId });
 
 const signatureMatches = (
   existing: { returnType: number; envTypes: number[] },
-  next: { returnType: number; envTypes: number[] }
+  next: { returnType: number; envTypes: number[] },
 ): boolean =>
   existing.returnType === next.returnType &&
   existing.envTypes.length === next.envTypes.length &&
   existing.envTypes.every((value, index) => value === next.envTypes[index]);
 
-const shouldCaptureIdentifierSymbol = (symbol: SymbolId, ctx: CodegenContext): boolean =>
+const shouldCaptureIdentifierSymbol = (
+  symbol: SymbolId,
+  ctx: CodegenContext,
+): boolean =>
   !ctx.program.symbols.isModuleScoped(
-    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
+    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol }),
   );
 
 const collectHandlerClauseLocalSymbols = ({
@@ -210,7 +247,9 @@ const collectHandlerClauseLocalSymbols = ({
   const symbols = new Set<SymbolId>();
   const handler = ctx.module.hir.expressions.get(handlerExprId);
   if (!handler || handler.exprKind !== "effect-handler") {
-    throw new Error(`could not find effect handler expression ${handlerExprId}`);
+    throw new Error(
+      `could not find effect handler expression ${handlerExprId}`,
+    );
   }
   const clause = handler.handlers[clauseIndex];
   if (!clause) {
@@ -254,13 +293,18 @@ const findHandlerClauseByOwner = ({
 } => {
   const handler = ctx.module.hir.expressions.get(handlerExprId);
   if (!handler || handler.exprKind !== "effect-handler") {
-    throw new Error(`could not find effect handler expression ${handlerExprId}`);
+    throw new Error(
+      `could not find effect handler expression ${handlerExprId}`,
+    );
   }
   const clause = handler.handlers[clauseIndex];
   if (!clause) {
     throw new Error(`missing handler clause ${handlerExprId}:${clauseIndex}`);
   }
-  const signature = ctx.program.functions.getSignature(ctx.moduleId, clause.operation);
+  const signature = ctx.program.functions.getSignature(
+    ctx.moduleId,
+    clause.operation,
+  );
   if (!signature) {
     throw new Error("missing signature for effect handler clause operation");
   }
@@ -307,7 +351,10 @@ export const ensureContinuationFunction = ({
 
   const continuationBody = (() => {
     if (specializedSite.owner.kind === "function") {
-      const { fn, returnTypeId } = findFunctionBySymbol(specializedSite.owner.symbol, ctx);
+      const { fn, returnTypeId } = findFunctionBySymbol(
+        specializedSite.owner.symbol,
+        ctx,
+      );
       return {
         bodyExprId: fn.body,
         cfgFn: fn,
@@ -318,11 +365,12 @@ export const ensureContinuationFunction = ({
       };
     }
     if (specializedSite.owner.kind === "handler-clause") {
-      const { bodyExprId, returnTypeId, resumeSymbol, resumeKind } = findHandlerClauseByOwner({
-        handlerExprId: specializedSite.owner.handlerExprId,
-        clauseIndex: specializedSite.owner.clauseIndex,
-        ctx,
-      });
+      const { bodyExprId, returnTypeId, resumeSymbol, resumeKind } =
+        findHandlerClauseByOwner({
+          handlerExprId: specializedSite.owner.handlerExprId,
+          clauseIndex: specializedSite.owner.clauseIndex,
+          ctx,
+        });
       return {
         bodyExprId,
         cfgFn: { body: bodyExprId } as HirFunction,
@@ -339,7 +387,7 @@ export const ensureContinuationFunction = ({
     const { expr, returnTypeId } = findLambdaByExprId(
       specializedSite.owner.exprId,
       ctx,
-      typeInstanceId
+      typeInstanceId,
     );
     return {
       bodyExprId: expr.body,
@@ -351,25 +399,33 @@ export const ensureContinuationFunction = ({
     };
   })();
 
-  const { cfgFn, returnTypeId, localsToSeed, bodyExprId, resumeSymbol, resumeKind } =
-    continuationBody;
+  const {
+    cfgFn,
+    returnTypeId,
+    localsToSeed,
+    bodyExprId,
+    resumeSymbol,
+    resumeKind,
+  } = continuationBody;
   const resolvedReturnTypeId = substitution
     ? ctx.program.types.substitute(returnTypeId, substitution)
     : returnTypeId;
   const params = [binaryen.anyref, resumeBoxType];
   const returnWasmType = wasmTypeFor(resolvedReturnTypeId, ctx);
 
-  const groupSites = ctx.effectLowering.sites.filter(
-    (candidate) =>
-      sameContinuationOwner(candidate.owner, specializedSite.owner) &&
-      candidate.contBaseName === specializedSite.contBaseName
-  ).map((candidate) =>
-    specializeContinuationSite({
-      site: candidate,
-      ctx,
-      typeInstanceId,
-    })
-  );
+  const groupSites = ctx.effectLowering.sites
+    .filter(
+      (candidate) =>
+        sameContinuationOwner(candidate.owner, specializedSite.owner) &&
+        candidate.contBaseName === specializedSite.contBaseName,
+    )
+    .map((candidate) =>
+      specializeContinuationSite({
+        site: candidate,
+        ctx,
+        typeInstanceId,
+      }),
+    );
   const signatureInfo = {
     returnType: returnWasmType,
     envTypes: groupSites.map((groupSite) => groupSite.envType),
@@ -378,7 +434,7 @@ export const ensureContinuationFunction = ({
   if (existingSignature) {
     if (!signatureMatches(existingSignature, signatureInfo)) {
       throw new Error(
-        `continuation signature mismatch for ${contName} (${contKey})`
+        `continuation signature mismatch for ${contName} (${contKey})`,
       );
     }
   } else {
@@ -428,7 +484,10 @@ export const ensureContinuationFunction = ({
     fnCtx.bindings.set(symbol, { ...seeded, kind: "local", typeId });
   });
 
-  const handlerLocal = allocateTempLocal(ctx.effectsRuntime.handlerFrameType, fnCtx);
+  const handlerLocal = allocateTempLocal(
+    ctx.effectsRuntime.handlerFrameType,
+    fnCtx,
+  );
   fnCtx.currentHandler = { index: handlerLocal.index, type: handlerLocal.type };
 
   const startedLocal = allocateTempLocal(
@@ -444,12 +503,18 @@ export const ensureContinuationFunction = ({
     ctx,
   );
 
-  const tempFields = new Map<number, { wasmType: binaryen.Type; typeId: TypeId }>();
+  const tempFields = new Map<
+    number,
+    { wasmType: binaryen.Type; typeId: TypeId }
+  >();
   groupSites.forEach((groupSite) => {
     groupSite.envFields.forEach((field) => {
       if (typeof field.tempId !== "number") return;
       if (tempFields.has(field.tempId)) return;
-      tempFields.set(field.tempId, { wasmType: field.wasmType, typeId: field.typeId });
+      tempFields.set(field.tempId, {
+        wasmType: field.wasmType,
+        typeId: field.typeId,
+      });
     });
   });
   tempFields.forEach((spec, tempId) => {
@@ -464,7 +529,7 @@ export const ensureContinuationFunction = ({
     refCast(
       ctx.mod,
       ctx.mod.local.get(envParamIndex, binaryen.anyref),
-      specializedSite.baseEnvType
+      specializedSite.baseEnvType,
     );
   const activeSiteFromEnv = structGetFieldValue({
     mod: ctx.mod,
@@ -472,41 +537,60 @@ export const ensureContinuationFunction = ({
     fieldType: binaryen.i32,
     exprRef: baseEnvRef(),
   });
-  const initActiveSite = ctx.mod.local.set(activeSiteLocal.index, activeSiteFromEnv);
-  const initStarted = ctx.mod.local.set(startedLocal.index, ctx.mod.i32.const(0));
+  const initActiveSite = ctx.mod.local.set(
+    activeSiteLocal.index,
+    activeSiteFromEnv,
+  );
+  const initStarted = ctx.mod.local.set(
+    startedLocal.index,
+    ctx.mod.i32.const(0),
+  );
 
   const cfgCache = ctx.effectsState.contCfgByName;
   const cfg =
     cfgCache.get(contKey) ??
     (() => {
-      const builtCfg = buildGroupContinuationCfg({ fn: cfgFn, groupSites, ctx });
+      const builtCfg = buildGroupContinuationCfg({
+        fn: cfgFn,
+        groupSites,
+        ctx,
+      });
       cfgCache.set(contKey, builtCfg);
       return builtCfg;
     })();
 
   fnCtx.continuation = { cfg, startedLocal, activeSiteLocal };
 
-  if (specializedSite.owner.kind === "handler-clause" && typeof resumeSymbol === "number") {
+  if (
+    specializedSite.owner.kind === "handler-clause" &&
+    typeof resumeSymbol === "number"
+  ) {
     if (resumeKind === undefined) {
-      throw new Error("missing handler clause resume kind for continuation function");
+      throw new Error(
+        "missing handler clause resume kind for continuation function",
+      );
     }
     const continuationLocal = fnCtx.tempLocals.get(
       handlerClauseContinuationTempId({
         handlerExprId: specializedSite.owner.handlerExprId,
         clauseIndex: specializedSite.owner.clauseIndex,
-      })
+      }),
     );
     if (!continuationLocal) {
-      throw new Error("missing handler clause continuation local for continuation function");
+      throw new Error(
+        "missing handler clause continuation local for continuation function",
+      );
     }
     const tailGuardLocal = fnCtx.tempLocals.get(
       handlerClauseTailGuardTempId({
         handlerExprId: specializedSite.owner.handlerExprId,
         clauseIndex: specializedSite.owner.clauseIndex,
-      })
+      }),
     );
     if (!tailGuardLocal) {
-      throw new Error("missing handler clause tail guard local for continuation function");
+      throw new Error(
+        "missing handler clause tail guard local for continuation function",
+      );
     }
     fnCtx.continuations = new Map([
       [
@@ -531,7 +615,8 @@ export const ensureContinuationFunction = ({
 
   const continuationCompiler = createGroupedContinuationExpressionCompiler({
     cfg,
-    activeSiteOrder: () => ctx.mod.local.get(activeSiteLocal.index, binaryen.i32),
+    activeSiteOrder: () =>
+      ctx.mod.local.get(activeSiteLocal.index, binaryen.i32),
     startedLocal,
     resumeLocal,
   });
@@ -557,14 +642,18 @@ export const ensureContinuationFunction = ({
   const bodyOutcomeExpr = coerceToBinaryenType(
     ctx,
     rawBodyOutcomeExpr,
-    ctx.effectsRuntime.outcomeType
+    ctx.effectsRuntime.outcomeType,
   );
 
   let restoreChain = ctx.mod.nop();
 
   [...groupSites].reverse().forEach((groupSite) => {
     const envLocalGetter = () =>
-      refCast(ctx.mod, ctx.mod.local.get(envParamIndex, binaryen.anyref), groupSite.envType);
+      refCast(
+        ctx.mod,
+        ctx.mod.local.get(envParamIndex, binaryen.anyref),
+        groupSite.envType,
+      );
     const initOps: binaryen.ExpressionRef[] = [];
     groupSite.envFields.forEach((field, fieldIndex) => {
       if (field.sourceKind === "site") return;
@@ -604,18 +693,26 @@ export const ensureContinuationFunction = ({
       initOps.push(storeLocalValue({ binding, value, ctx, fnCtx }));
     });
     const restoreBlock =
-      initOps.length === 0 ? ctx.mod.nop() : ctx.mod.block(null, initOps, binaryen.none);
+      initOps.length === 0
+        ? ctx.mod.nop()
+        : ctx.mod.block(null, initOps, binaryen.none);
     const matches = ctx.mod.i32.eq(
       ctx.mod.local.get(activeSiteLocal.index, binaryen.i32),
-      ctx.mod.i32.const(groupSite.siteOrder)
+      ctx.mod.i32.const(groupSite.siteOrder),
     );
     restoreChain = ctx.mod.if(matches, restoreBlock, restoreChain);
   });
 
-  const activeSiteGet = () => ctx.mod.local.get(activeSiteLocal.index, binaryen.i32);
+  const activeSiteGet = () =>
+    ctx.mod.local.get(activeSiteLocal.index, binaryen.i32);
   const matchAny = groupSites
-    .map((groupSite) => ctx.mod.i32.eq(activeSiteGet(), ctx.mod.i32.const(groupSite.siteOrder)))
-    .reduce((acc, exprRef) => ctx.mod.i32.or(acc, exprRef), ctx.mod.i32.const(0));
+    .map((groupSite) =>
+      ctx.mod.i32.eq(activeSiteGet(), ctx.mod.i32.const(groupSite.siteOrder)),
+    )
+    .reduce(
+      (acc, exprRef) => ctx.mod.i32.or(acc, exprRef),
+      ctx.mod.i32.const(0),
+    );
 
   const fnRef = ctx.mod.addFunction(
     contName,
@@ -631,11 +728,11 @@ export const ensureContinuationFunction = ({
         ctx.mod.if(
           matchAny,
           bodyOutcomeExpr,
-          ctx.mod.ref.null(ctx.effectsRuntime.outcomeType)
+          ctx.mod.ref.null(ctx.effectsRuntime.outcomeType),
         ),
       ],
-      ctx.effectsRuntime.outcomeType
-    )
+      ctx.effectsRuntime.outcomeType,
+    ),
   );
 
   const fnHeapType = bin._BinaryenFunctionGetType(fnRef);

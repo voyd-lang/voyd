@@ -52,13 +52,16 @@ const siteOrdersFromExpr = ({
     case "break":
       break;
     case "call":
-      unionInto(sites, siteOrdersFromExpr({
-        exprId: expr.callee,
-        ctx,
-        memo,
-        siteOrderByExpr,
-        visitStmt,
-      }));
+      unionInto(
+        sites,
+        siteOrdersFromExpr({
+          exprId: expr.callee,
+          ctx,
+          memo,
+          siteOrderByExpr,
+          visitStmt,
+        }),
+      );
       expr.args.forEach((arg) =>
         unionInto(
           sites,
@@ -68,8 +71,8 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
-        )
+          }),
+        ),
       );
       break;
     case "method-call":
@@ -81,7 +84,7 @@ const siteOrdersFromExpr = ({
           memo,
           siteOrderByExpr,
           visitStmt,
-        })
+        }),
       );
       expr.args.forEach((arg) =>
         unionInto(
@@ -92,14 +95,12 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
-        )
+          }),
+        ),
       );
       break;
     case "block":
-      expr.statements.forEach((stmtId) =>
-        unionInto(sites, visitStmt(stmtId))
-      );
+      expr.statements.forEach((stmtId) => unionInto(sites, visitStmt(stmtId)));
       if (typeof expr.value === "number") {
         unionInto(
           sites,
@@ -109,7 +110,7 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
+          }),
         );
       }
       break;
@@ -123,8 +124,8 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
-        )
+          }),
+        ),
       );
       break;
     case "loop":
@@ -136,7 +137,7 @@ const siteOrdersFromExpr = ({
           memo,
           siteOrderByExpr,
           visitStmt,
-        })
+        }),
       );
       break;
     case "while":
@@ -148,7 +149,7 @@ const siteOrdersFromExpr = ({
           memo,
           siteOrderByExpr,
           visitStmt,
-        })
+        }),
       );
       unionInto(
         sites,
@@ -158,7 +159,7 @@ const siteOrdersFromExpr = ({
           memo,
           siteOrderByExpr,
           visitStmt,
-        })
+        }),
       );
       break;
     case "cond":
@@ -172,7 +173,7 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
+          }),
         );
         unionInto(
           sites,
@@ -182,7 +183,7 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
+          }),
         );
       });
       if (typeof expr.defaultBranch === "number") {
@@ -194,7 +195,7 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
+          }),
         );
       }
       break;
@@ -207,7 +208,7 @@ const siteOrdersFromExpr = ({
           memo,
           siteOrderByExpr,
           visitStmt,
-        })
+        }),
       );
       expr.arms.forEach((arm) => {
         if (typeof arm.guard === "number") {
@@ -219,7 +220,7 @@ const siteOrdersFromExpr = ({
               memo,
               siteOrderByExpr,
               visitStmt,
-            })
+            }),
           );
         }
         unionInto(
@@ -230,7 +231,7 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
+          }),
         );
       });
       break;
@@ -244,8 +245,8 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
-        )
+          }),
+        ),
       );
       break;
     case "field-access":
@@ -257,7 +258,7 @@ const siteOrdersFromExpr = ({
           memo,
           siteOrderByExpr,
           visitStmt,
-        })
+        }),
       );
       break;
     case "assign":
@@ -270,7 +271,7 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
+          }),
         );
       }
       unionInto(
@@ -281,10 +282,20 @@ const siteOrdersFromExpr = ({
           memo,
           siteOrderByExpr,
           visitStmt,
-        })
+        }),
       );
       break;
     case "lambda":
+      unionInto(
+        sites,
+        siteOrdersFromExpr({
+          exprId: expr.body,
+          ctx,
+          memo,
+          siteOrderByExpr,
+          visitStmt,
+        }),
+      );
       break;
     case "effect-handler":
       unionInto(
@@ -295,7 +306,7 @@ const siteOrdersFromExpr = ({
           memo,
           siteOrderByExpr,
           visitStmt,
-        })
+        }),
       );
       if (typeof expr.finallyBranch === "number") {
         unionInto(
@@ -306,7 +317,7 @@ const siteOrdersFromExpr = ({
             memo,
             siteOrderByExpr,
             visitStmt,
-          })
+          }),
         );
       }
       break;
@@ -361,7 +372,9 @@ export const buildGroupContinuationCfg = ({
   ctx: CodegenContext;
 }): GroupContinuationCfg => {
   const siteOrderByExpr = new Map<HirExprId, number>();
-  groupSites.forEach((site) => siteOrderByExpr.set(site.exprId, site.siteOrder));
+  groupSites.forEach((site) =>
+    siteOrderByExpr.set(site.exprId, site.siteOrder),
+  );
   const siteByExprId = new Map<HirExprId, ContinuationSite>();
   groupSites.forEach((site) => siteByExprId.set(site.exprId, site));
 

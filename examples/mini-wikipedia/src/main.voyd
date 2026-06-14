@@ -25,44 +25,28 @@ type Article = {
 pub fn main(): (server::HttpServer, tasks::TaskRuntime, env::Env, fs::Fs) -> i32
   let port = app_port()
   let host = app_host()
-  let result = server::serve_each(
-    config: server::ServerConfig::init(
-      port: port,
-      host: host,
-      max_body_bytes: 1048576,
-      max_pending_requests: 100,
-      response_timeout_millis: 30000
-    ),
-    policy: server::ServeTaskPolicy::sequential(),
-    handle: handle_request
-  )
+  let result = serve(
+    port: port,
+    host: host,
+    shutdown_timeout: 30000,
+    max_body_bytes: 65536
+  ) routes():
+    adopt(serve_dir("./public".as_slice()))
+
+    get("/") do:
+      article_page(load_article("home".as_slice().to_string()))
+
+    get("/wiki/:slug") do(params: ArticleParams):
+      article_page(load_article(safe_slug(params.slug)))
+
+    post("/api/articles", body: text_body()) do(input: String, ctx: Context):
+      save_article(input, ctx)
 
   match(result)
     Ok<Unit>:
       0
     Err<HostError> { error }:
       -error.code
-
-fn handle_request(request: IncomingRequest): fs::Fs -> Response
-  make_app().handle(request)
-
-fn make_app() -> App
-  build_app do(base):
-    let with_static = adopt(base, serve_dir("./public".as_slice()))
-
-    let with_home = get_unit(with_static, "/".as_slice()) do:
-      article_page(load_article("home".as_slice().to_string()))
-
-    let with_article = get(with_home, "/wiki/:slug".as_slice()) do(params: ArticleParams):
-      article_page(load_article(safe_slug(params.slug)))
-
-    post(
-      with_article,
-      "/api/articles".as_slice(),
-      body: text_body(),
-      limit: body_limit(65536),
-      (input: String, ctx: Context) -> Response => save_article(input, ctx)
-    )
 
 fn app_port(): env::Env -> i32
   match(env::get_int("VOYD_WEB_PORT".as_slice()))

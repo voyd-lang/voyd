@@ -3736,17 +3736,40 @@ const resolveTargetsForCaller = ({
   if (!callInfo) {
     return [];
   }
+  const resolveTypeArgsForCaller = (typeArgs: readonly TypeId[]): readonly TypeId[] => {
+    if (typeof callerInstanceId !== "number" || typeArgs.length === 0) {
+      return typeArgs;
+    }
+    const caller = ir.baseProgram.functions.getInstance(callerInstanceId);
+    const signature = ir.baseProgram.functions.getSignature(
+      caller.symbolRef.moduleId,
+      caller.symbolRef.symbol,
+    );
+    if (!signature) {
+      return typeArgs;
+    }
+    const substitution = functionTypeSubstitution({
+      signature,
+      typeArgs: caller.typeArgs,
+      program: ir.baseProgram,
+    });
+    return substitution
+      ? typeArgs.map((typeArg) => ir.baseProgram.types.substitute(typeArg, substitution))
+      : typeArgs;
+  };
   const exactTarget =
     typeof callerInstanceId === "number" ? callInfo.targets?.get(callerInstanceId) : undefined;
   const exactTypeArgs =
     typeof callerInstanceId === "number" ? callInfo.typeArgs?.get(callerInstanceId) : undefined;
   const candidateEntries =
     typeof exactTarget === "number"
-      ? [{ functionId: exactTarget, typeArgs: exactTypeArgs ?? [] }]
+      ? [{ functionId: exactTarget, typeArgs: resolveTypeArgsForCaller(exactTypeArgs ?? []) }]
       : callInfo.targets
         ? Array.from(callInfo.targets.entries()).map(([targetCallerInstanceId, functionId]) => ({
             functionId,
-            typeArgs: callInfo.typeArgs?.get(targetCallerInstanceId) ?? [],
+            typeArgs: resolveTypeArgsForCaller(
+              callInfo.typeArgs?.get(targetCallerInstanceId) ?? [],
+            ),
           }))
         : [];
 
@@ -3828,6 +3851,7 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
         }),
       );
       const knownInstances =
+        ctx.ir.baseProgram.functions.getInstantiationInfo(moduleId, symbol) ??
         ctx.ir.functionInstantiations.get(moduleId)?.get(symbol);
       if (knownInstances && knownInstances.size > 0) {
         knownInstances.forEach((_, instanceId) => enqueueInstance(instanceId));
@@ -4257,7 +4281,7 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       string,
       Map<SymbolId, Map<ProgramFunctionInstanceId, readonly TypeId[]>>
     >();
-    ctx.ir.functionInstantiations.forEach((bySymbol, moduleId) => {
+    normalizeFunctionInstantiations({ program: ctx.ir.baseProgram }).forEach((bySymbol, moduleId) => {
       const nextBySymbol = new Map<SymbolId, Map<ProgramFunctionInstanceId, readonly TypeId[]>>();
       bySymbol.forEach((instantiations, symbol) => {
         const nextInstances = new Map<ProgramFunctionInstanceId, readonly TypeId[]>();

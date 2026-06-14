@@ -7,7 +7,7 @@ const entryPath = resolve(rootDir, "src/main.voyd");
 const sdk = createSdk();
 const result = await sdk.compile({
   entryPath,
-  optimize: false,
+  optimize: true,
   runtimeDiagnostics: true,
 });
 
