@@ -96,6 +96,8 @@ describe("runBootstrap", () => {
       expect(packageJson.scripts.dev).toBe("node scripts/dev.mjs");
       expect(packageJson.scripts.build).toBe("vite build && node scripts/check-voyd.mjs");
       expect(packageJson.dependencies["@voyd-lang/web"]).toMatch(/^\^/);
+      expect(packageJson.dependencies["@voyd-lang/vx-dom"]).toMatch(/^\^/);
+      expect(packageJson.devDependencies["@voyd-lang/cli"]).toMatch(/^\^/);
       expect(packageJson.devDependencies.tailwindcss).toBe("^4.3.0");
       expect(packageJson.devDependencies["@tailwindcss/vite"]).toBe("^4.3.0");
 
@@ -114,22 +116,33 @@ describe("runBootstrap", () => {
       const gitignore = await readFile(resolve(target, ".gitignore"), "utf8");
       expect(gitignore).toContain("data/articles/*.md");
       expect(gitignore).toContain("!data/articles/home.md");
+      expect(gitignore).toContain("src/generated");
 
       const devScript = await readFile(resolve(target, "scripts/dev.mjs"), "utf8");
       expect(devScript).toContain("watchTree(sourceDir)");
+      expect(devScript).toContain('filePath.endsWith("client.voyd")');
       expect(devScript).toContain('filePath.endsWith(".voyd")');
       expect(devScript).toContain("queueBuild();");
       expect(devScript).toContain("queueRestart();");
 
       const checkScript = await readFile(resolve(target, "scripts/check-voyd.mjs"), "utf8");
       expect(checkScript).toContain("optimize: true");
+      expect(checkScript).toContain("compileClientVoyd");
 
       const viteConfig = await readFile(resolve(target, "vite.config.mjs"), "utf8");
+      expect(viteConfig).toContain("compileClientVoyd");
       expect(viteConfig).toContain('entryFileNames: "assets/client.js"');
       expect(viteConfig).toContain('assetFileNames: "assets/[name][extname]"');
 
       const clientTs = await readFile(resolve(target, "src/client.ts"), "utf8");
-      expect(clientTs.trim()).toBe('import "./style.css";');
+      expect(clientTs).toContain("createVoydHost");
+      expect(clientTs).toContain("hydrateVxApp");
+      expect(clientTs).toContain("./generated/client.wasm?url");
+
+      const clientVoyd = await readFile(resolve(target, "src/client.voyd"), "utf8");
+      expect(clientVoyd).toContain("pub fn app() -> Program<ClientArticle, Msg>");
+      expect(clientVoyd).toContain("on_input={(event: InputEvent) -> Msg");
+      expect(clientVoyd).toContain("http_client::post");
 
       const css = await readFile(resolve(target, "src/style.css"), "utf8");
       expect(css).toContain('@import "tailwindcss";');
@@ -138,15 +151,16 @@ describe("runBootstrap", () => {
       const mainVoyd = await readFile(resolve(target, "src/main.voyd"), "utf8");
       expect(mainVoyd).toContain("pub fn main(): (server::HttpServer");
       expect(mainVoyd).toContain("tasks::TaskRuntime");
-      expect(mainVoyd).toContain("serve(");
-      expect(mainVoyd).toContain("routes():");
+      expect(mainVoyd).toContain("server::serve_each");
+      expect(mainVoyd).toContain("server::ServeTaskPolicy::sequential()");
       expect(mainVoyd).toContain("max_body_bytes: 65536");
       expect(mainVoyd).toContain('adopt(serve_dir("./public".as_slice()))');
       expect(mainVoyd).not.toContain('"/api/articles"');
-      expect(mainVoyd).toContain('get_context("/wiki")');
-      expect(mainVoyd).toContain('post("/wiki/:slug"');
-      expect(mainVoyd).toContain("body: text_body()");
-      expect(mainVoyd).toContain('form_article_body(input)');
+      expect(mainVoyd).toContain('.get_context("/wiki".as_slice()');
+      expect(mainVoyd).toContain('.post_context("/wiki/:slug/body".as_slice()');
+      expect(mainVoyd).toContain('.post_context("/wiki/:slug".as_slice()');
+      expect(mainVoyd).toContain("request_text_body(ctx)");
+      expect(mainVoyd).toContain('form_article_body(request_text_body(ctx))');
       expect(mainVoyd).toContain('parse_query(input).get("body".as_slice())');
       expect(mainVoyd).toContain("write_file_string(article_path(slug), body)");
       expect(mainVoyd).toContain("fn is_slug_rune(rune: i32) -> bool");
@@ -154,11 +168,22 @@ describe("runBootstrap", () => {
       expect(mainVoyd).toContain("{article.status}");
       expect(mainVoyd).not.toContain('>Saved</span>');
       expect(mainVoyd).toContain('href="/assets/client.css"');
+      expect(mainVoyd).toContain("document<MsgPack, ClientArticle>");
 
       const sdk = createSdk();
       expectCompileSuccess(
         await sdk.compile({
           entryPath: resolve(target, "src/main.voyd"),
+          optimize: true,
+          roots: {
+            src: resolve(target, "src"),
+            pkgDirs: [resolve(repoRoot, "packages")],
+          },
+        }),
+      );
+      expectCompileSuccess(
+        await sdk.compile({
+          entryPath: resolve(target, "src/client.voyd"),
           optimize: true,
           roots: {
             src: resolve(target, "src"),

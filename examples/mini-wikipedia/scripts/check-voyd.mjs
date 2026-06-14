@@ -1,6 +1,7 @@
 import { createSdk } from "@voyd-lang/sdk";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compileClientVoyd } from "./compile-client-voyd.mjs";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const entryPath = resolve(rootDir, "src/main.voyd");
@@ -16,6 +17,7 @@ if (!result.success) {
   process.exit(1);
 }
 
+await compileClientVoyd();
 console.log("Voyd server compiled successfully.");
 
 function formatDiagnostics(diagnostics) {

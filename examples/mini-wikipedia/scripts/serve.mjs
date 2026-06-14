@@ -59,14 +59,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 
   let closing = false;
+  const keepAlive = setInterval(() => undefined, 1_000_000_000);
   app.closed.catch((error) => {
     if (closing) return;
+    clearInterval(keepAlive);
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);
   });
 
   await waitForShutdown(async (signal) => {
     closing = true;
+    clearInterval(keepAlive);
     await app.close(signal).catch(() => undefined);
   });
 }

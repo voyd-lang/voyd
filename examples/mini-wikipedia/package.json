@@ -11,11 +11,13 @@
   },
   "dependencies": {
     "@voyd-lang/sdk": "^0.2.0",
+    "@voyd-lang/vx-dom": "^0.2.0",
     "@voyd-lang/web": "^0.2.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.0",
     "@types/node": "^22.5.1",
+    "@voyd-lang/cli": "^0.2.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.8.3",
     "vite": "^8.0.0"
