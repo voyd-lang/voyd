@@ -88,6 +88,7 @@ export type ServeWebAppSuccessResult = {
   ready: Promise<void>;
   closed: Promise<unknown>;
   running: Promise<unknown>;
+  close: (reason?: unknown) => Promise<unknown>;
 };
 
 export type ServeWebAppResult = ServeWebAppSuccessResult | CompileFailureResult;

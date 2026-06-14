@@ -92,6 +92,10 @@ export const serveWebApp = async (
       restoreEnv("VOYD_WEB_HOST", previousHost);
     });
   const ready = waitForTcpPort({ host, port, timeoutMs: readinessTimeoutMs });
+  const close = (reason: unknown = "serveWebApp closed"): Promise<unknown> => {
+    started.cancel(reason);
+    return closed;
+  };
 
   try {
     await Promise.race([
@@ -115,6 +119,7 @@ export const serveWebApp = async (
     ready,
     closed,
     running: closed,
+    close,
   };
 };
 

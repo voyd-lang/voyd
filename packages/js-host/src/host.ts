@@ -1,5 +1,6 @@
 import type {
   EffectHandler,
+  EffectResourceCleanup,
   HostProtocolTable,
   RunOutcome,
   SignatureHash,
@@ -903,6 +904,40 @@ export const createVoydHost = async ({
       requiredBytes: bufferPtr + bufferSize,
       label: LINEAR_MEMORY_EXPORT,
     });
+    const runResourceCleanups = new Set<EffectResourceCleanup>();
+    let runResourceCleanupPromise: Promise<void> | undefined;
+    let runResourceScopeClosed = false;
+    const reportResourceCleanupFailure = (reason: unknown): void => {
+      const error = toError(reason);
+      console.error(`[voyd] run resource cleanup failed: ${error.message}`);
+    };
+    const registerRunResourceCleanup = (cleanup: EffectResourceCleanup): void => {
+      if (runResourceScopeClosed) {
+        void Promise.resolve()
+          .then(cleanup)
+          .catch(reportResourceCleanupFailure);
+        return;
+      }
+      runResourceCleanups.add(cleanup);
+    };
+    const cleanupRunResources = (): Promise<void> => {
+      if (runResourceCleanupPromise) {
+        return runResourceCleanupPromise;
+      }
+      runResourceScopeClosed = true;
+      const cleanups = Array.from(runResourceCleanups);
+      runResourceCleanups.clear();
+      runResourceCleanupPromise = Promise.allSettled(
+        cleanups.map((cleanup) => Promise.resolve().then(cleanup))
+      ).then((results) => {
+        results.forEach((result) => {
+          if (result.status === "rejected") {
+            reportResourceCleanupFailure(result.reason);
+          }
+        });
+      });
+      return runResourceCleanupPromise;
+    };
 
     const rawEntryName = `${effectfulExportNameFor(entryName)}_raw`;
     const hasRawTaskRuntime =
@@ -961,6 +996,7 @@ export const createVoydHost = async ({
               msgpackMemory,
               bufferPtr,
               bufferSize,
+              registerResourceCleanup: registerRunResourceCleanup,
               annotateTrap,
               fallbackFunctionName: effectfulExportNameFor(entryName),
             });
@@ -980,13 +1016,14 @@ export const createVoydHost = async ({
         }
       })();
 
-      void outcome.finally(() => {
+      const managedOutcome = outcome.finally(async () => {
+        await cleanupRunResources();
         releaseEffectRunBufferPtr(bufferPtr);
       });
 
       return {
         id,
-        outcome,
+        outcome: managedOutcome,
         cancel: () => false,
       };
     }
@@ -1785,6 +1822,7 @@ export const createVoydHost = async ({
                 tail: (...args: unknown[]) =>
                   toContinuationCall("tail", args.length <= 1 ? args[0] : args),
                 end: (value: unknown) => toContinuationCall("end", value),
+                registerResourceCleanup: registerRunResourceCleanup,
               },
               ...(decodedEffect.args ?? [])
             );
@@ -1870,6 +1908,7 @@ export const createVoydHost = async ({
       cancel: (reason?: unknown): boolean => {
         const cancelled = run.cancel(reason);
         if (cancelled) {
+          void cleanupRunResources();
           const state = liveState;
           if (state) {
             Array.from(state.tasks.keys()).forEach((taskId) => {
@@ -1880,11 +1919,15 @@ export const createVoydHost = async ({
         return cancelled;
       },
     };
-    void managedRun.outcome.finally(() => {
+    const outcomeWithCleanup = managedRun.outcome.finally(async () => {
+      await cleanupRunResources();
       liveState = undefined;
       releaseEffectRunBufferPtr(bufferPtr);
     });
-    return managedRun;
+    return {
+      ...managedRun,
+      outcome: outcomeWithCleanup,
+    };
   };
 
   runEffectfulRetainedCallback = async ({

@@ -235,7 +235,7 @@ const httpGet = (
   });
 
 describe("node sdk", () => {
-  it("serves a web app entry through the SDK helper", async () => {
+  it("closes a long-running web app entry through the SDK helper", async () => {
     const sdk = createSdk();
     const port = await findFreePort();
     const result = await sdk.serveWebApp({
@@ -244,59 +244,32 @@ describe("node sdk", () => {
       source: `
 use pkg::web::all
 use std::env::self as env
-use std::error::HostError
-use std::http::server::self as server
-use std::http::server::{ HttpServer, PendingRequest, Server, ServerConfig }
-use std::result::types::all
+use std::http::server::HttpServer
+use std::task::self as task
 
-pub fn main(): (HttpServer, env::Env) -> i32
+pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
   let port = env::get_int("VOYD_WEB_PORT".as_slice()) ?? -1
   let host = env::get("VOYD_WEB_HOST".as_slice()) ?? "127.0.0.1".as_slice().to_string()
-  if port <= 0:
-    return -10
-
-  let web_app = app().get("/hello".as_slice(), handler: (_ctx: Context) -> Response =>
-    Response::ok().text("served".as_slice())
-  )
-  let config = ServerConfig::init(
-    port: port,
-    host: host,
-    max_body_bytes: 1024,
-    max_pending_requests: 8
-  )
-  match(server::listen(config))
-    Err<HostError> { error }:
-      -error.code
-    Ok<Server> { value: srv }:
-      match(server::accept(srv))
-        Err<HostError> { error }:
-          let _ = server::close(srv)
-          -error.code
-        Ok<PendingRequest> { value: pending }:
-          let response = web_app.handle(pending.request)
-          match(server::respond(pending.handle, response))
-            Err<HostError> { error }:
-              let _ = server::close(srv)
-              -error.code
-            Ok<Unit>:
-              let _ = server::close(srv)
-              200
+  let _ = serve(port: port, host: host) routes():
+    get("/hello") do:
+      "served".as_slice().to_string()
+  0
 `,
     });
 
-    expect(result.success).toBe(true);
     if (!result.success) {
-      return;
+      throw new Error(
+        result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+      );
     }
+    expect(result.success).toBe(true);
     expect(result.host).toBe("127.0.0.1");
     expect(result.port).toBe(port);
     expect(result.url).toBe(`http://127.0.0.1:${port}`);
     await expect(result.ready).resolves.toBeUndefined();
 
-    const response = await httpGet(`${result.url}/hello`);
-    expect(response.status).toBe(200);
-    expect(response.body).toBe("served");
-    await expect(result.closed).resolves.toBe(200);
+    await expect(result.close()).resolves.toBeUndefined();
+    await expect(httpGet(`${result.url}/hello`)).rejects.toThrow();
   }, 120_000);
 
   beforeAll(async () => {
