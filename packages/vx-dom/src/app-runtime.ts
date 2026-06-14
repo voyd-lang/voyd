@@ -51,6 +51,10 @@ type ProgramDescriptor = {
   subscriptionsHandlerId?: number;
 };
 
+type TaskObserver = (taskId: number) => Promise<unknown>;
+
+const taskObserverProperty = Symbol.for("voyd.taskObserver");
+
 const defaultExports = {
   init: "init",
   update: "update",
@@ -152,9 +156,14 @@ export function createVoydVxAppRuntime(
       ? runtimeResult?.subscriptions
       : await readSubscriptions();
 
+    const commands = attachTaskObserver(
+      runtimeResult?.commands,
+      readTaskObserver(result),
+    );
+
     return {
       frame,
-      commands: runtimeResult?.commands,
+      commands,
       subscriptions,
       snapshot: model,
     };
@@ -317,6 +326,22 @@ function eventPayloadFallback(payload: NormalizedEventPayload): unknown {
   return payload;
 }
 
+function readTaskObserver(input: unknown): TaskObserver | undefined {
+  if (!isRecord(input)) return undefined;
+  const observer = input[taskObserverProperty];
+  return typeof observer === "function" ? observer as TaskObserver : undefined;
+}
+
+function attachTaskObserver(input: unknown, observer: TaskObserver | undefined): unknown {
+  if (!observer || !isRecord(input)) return input;
+  Object.defineProperty(input, taskObserverProperty, {
+    configurable: true,
+    enumerable: false,
+    value: observer,
+  });
+  return input;
+}
+
 function isRuntimeResult(input: unknown): input is RuntimeResult {
   return (
     !!input &&
@@ -324,6 +349,10 @@ function isRuntimeResult(input: unknown): input is RuntimeResult {
     !Array.isArray(input) &&
     (input as { $vx?: unknown }).$vx === "runtime_result"
   );
+}
+
+function isRecord(input: unknown): input is Record<PropertyKey, unknown> {
+  return typeof input === "object" && input !== null;
 }
 
 function parseProgramDescriptor(input: unknown): ProgramDescriptor {

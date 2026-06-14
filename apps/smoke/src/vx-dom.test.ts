@@ -14,6 +14,10 @@ import {
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
 const siteExampleRoot = path.resolve(import.meta.dirname, "../../site/examples");
 const typedCounterEntryPath = path.join(fixtureRoot, "vx-typed-counter.voyd");
+const asyncTaskCommandEntryPath = path.join(
+  fixtureRoot,
+  "vx-async-task-command.voyd",
+);
 const effectfulComponentEventEntryPath = path.join(
   fixtureRoot,
   "vx-effectful-component-event.voyd",
@@ -172,6 +176,35 @@ describe("smoke: compiled VX DOM rendering", () => {
     await nextTurn();
 
     expect(container.querySelector("p")?.textContent).toBe("Typed VX");
+
+    mounted.dispose();
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("dispatches typed task command results from a mounted Voyd app", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({ entryPath: asyncTaskCommandEntryPath }),
+    );
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+    const app = createVoydVxAppRuntime({ host });
+
+    const container = document.createElement("div");
+    const mounted = await mountVxApp({ container, app });
+
+    expect(container.querySelector("button")?.textContent).toBe("Idle");
+
+    container.querySelector<HTMLButtonElement>("button")?.click();
+    await waitForTextContaining(container, "button", "Saving...");
+
+    expect(container.querySelector("button")?.textContent).toBe("Saving...");
+
+    await waitForTextContaining(container, "button", "Saved: 41");
+
+    expect(container.querySelector("button")?.textContent).toBe("Saved: 41");
 
     mounted.dispose();
     expect(container.innerHTML).toBe("");

@@ -110,6 +110,9 @@ const TASK_STARTERS_KEY = Symbol("voyd.task.starters");
 const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const CALLBACK_IMPORTS_KEY = Symbol("voyd.callback.imports");
 const CALLBACK_HELPERS_KEY = Symbol("voyd.callback.helpers");
+export const EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY = Symbol(
+  "voyd.effectfulRetainedCallbackTargets"
+);
 const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
 const BOUNDARY_CALLBACK_IMPORTS_KEY = Symbol("voyd.boundary.callback.imports");
 
@@ -496,6 +499,15 @@ const ensureRetainedCallbackHelper = ({
   const setup = loweredPayloads.flatMap((payload) => payload.setup);
   if (effectful) {
     const rawExportName = `${exportName}_effectful_raw`;
+    const retainedTargets = ctx.programHelpers.getHelperState(
+      EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY,
+      () => new Map<string, { meta: { effectRow?: number }; exportName: string; emitEntry: false }>(),
+    );
+    retainedTargets.set(exportName, {
+      meta: { effectRow: desc.effectRow },
+      exportName,
+      emitEntry: false,
+    });
     const dispatched = ctx.mod.call(
       ensureDispatcher(ctx),
       [callExpr],

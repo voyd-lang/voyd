@@ -13,6 +13,7 @@ export type VoydRunHandle<T = unknown> = {
   id: string;
   outcome: Promise<RunOutcome<T>>;
   cancel: (reason?: unknown) => boolean;
+  observeTask?: (taskId: number) => Promise<RunOutcome<unknown>>;
 };
 
 export type EffectContinuationKind = "resume" | "tail" | "end";

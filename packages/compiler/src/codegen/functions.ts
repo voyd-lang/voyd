@@ -80,6 +80,7 @@ import {
   takePendingReceiverSpecializations,
   type ReceiverSpecialization,
 } from "./receiver-specialization.js";
+import { EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY } from "./intrinsics.js";
 import {
   createScalarAggregateTempBinding,
   loadScalarAggregateBindingAbiValue,
@@ -1460,7 +1461,7 @@ export const emitModuleExports = (
           );
           return;
         }
-        effectfulExports.push({ meta, exportName });
+        effectfulExports.push({ meta, exportName, emitEntry: true });
         return;
       }
       let serializer: ReturnType<typeof resolveSerializerForTypes> | undefined;
@@ -1601,13 +1602,23 @@ export const emitModuleExports = (
     emitExportAbiSection({ mod: ctx.mod, entries: exportAbiEntries });
   }
 
-  if (effectfulExports.length === 0) {
+  const retainedCallbackTargets = Array.from(
+    ctx.programHelpers
+      .getHelperState(
+        EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY,
+        () => new Map<string, EffectfulExportTarget>(),
+      )
+      .values(),
+  );
+  const hostBoundaryTargets = [...effectfulExports, ...retainedCallbackTargets];
+
+  if (hostBoundaryTargets.length === 0) {
     return;
   }
   ctx.effectsBackend.abi.emitHostBoundary({
     entryCtx: ctx,
     contexts,
-    effectfulExports,
+    effectfulExports: hostBoundaryTargets,
   });
 };
 
