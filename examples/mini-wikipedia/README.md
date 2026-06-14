@@ -4,6 +4,9 @@ Mini Voydpedia is a server-rendered Voyd app with Tailwind assets built by Vite.
 Articles are local markdown files in `data/articles`, so edits are easy to
 diff, seed, back up, or delete.
 
+The browser entrypoint only loads Tailwind CSS. Routing, form handling, article
+lookup, validation, rendering, and filesystem writes all live in `src/main.voyd`.
+
 ## Scripts
 
 - `npm run dev` builds the client assets, starts the Voyd SSR server, rebuilds
@@ -13,7 +16,8 @@ diff, seed, back up, or delete.
   checks the Voyd server with optimized compilation.
 - `npm start` runs the production-style SSR server.
 - `npm run voyd:check` compiles only the Voyd server.
-- `npm run typecheck` checks the TypeScript helper scripts and client code.
+- `npm run typecheck` checks the TypeScript helper scripts and CSS-only client
+  entrypoint.
 
 ## Configuration
 
@@ -21,5 +25,5 @@ diff, seed, back up, or delete.
 - `HOST` or `VOYD_WEB_HOST` changes the bind host. The default is
   `127.0.0.1`.
 
-The article save endpoint accepts request bodies up to 64 KiB by default. Adjust
+Article form posts accept request bodies up to 64 KiB by default. Adjust
 `max_body_bytes` in `src/main.voyd` if your app needs larger edits.

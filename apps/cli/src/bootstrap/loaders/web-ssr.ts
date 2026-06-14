@@ -229,15 +229,29 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   }
 
-  const close = async () => {
-    await app.close("shutdown").catch(() => undefined);
-    process.exit(0);
-  };
-  process.once("SIGINT", close);
-  process.once("SIGTERM", close);
-  await app.closed.catch((error) => {
+  let closing = false;
+  app.closed.catch((error) => {
+    if (closing) return;
     console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
+    process.exit(1);
+  });
+
+  await waitForShutdown(async (signal) => {
+    closing = true;
+    await app.close(signal).catch(() => undefined);
+  });
+}
+
+function waitForShutdown(close) {
+  return new Promise((resolve) => {
+    let closing = false;
+    const shutdown = (signal) => {
+      if (closing) return;
+      closing = true;
+      void close(signal).finally(resolve);
+    };
+    process.once("SIGINT", () => shutdown("SIGINT"));
+    process.once("SIGTERM", () => shutdown("SIGTERM"));
   });
 }
 `;
@@ -418,54 +432,6 @@ function command(name) {
 `;
 
 const clientTs = `import "./style.css";
-
-const root = document.querySelector<HTMLElement>("[data-article-slug]");
-const editor = document.querySelector<HTMLTextAreaElement>("[data-article-body]");
-const jumpForm = document.querySelector<HTMLFormElement>("[data-jump-form]");
-const saveButton = document.querySelector<HTMLButtonElement>("[data-save-article]");
-const status = document.querySelector<HTMLElement>("[data-save-status]");
-
-if (jumpForm) {
-  jumpForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const form = new FormData(jumpForm);
-    const slug = String(form.get("slug") ?? "").trim().toLowerCase();
-    if (!slug) return;
-    window.location.assign(\`/wiki/\${encodeURIComponent(slug)}\`);
-  });
-}
-
-if (root && editor && saveButton && status) {
-  let clean = editor.value;
-  editor.addEventListener("input", () => {
-    status.textContent = editor.value === clean ? "Saved" : "Unsaved changes";
-  });
-
-  saveButton.addEventListener("click", async () => {
-    const slug = root.dataset.articleSlug ?? "home";
-    saveButton.disabled = true;
-    status.textContent = "Saving...";
-
-    try {
-      const response = await fetch(\`/api/articles?slug=\${encodeURIComponent(slug)}\`, {
-        method: "POST",
-        headers: { "content-type": "text/plain; charset=utf-8" },
-        body: editor.value,
-      });
-
-      if (!response.ok) {
-        throw new Error(await response.text());
-      }
-
-      clean = editor.value;
-      status.textContent = "Saved";
-    } catch (error) {
-      status.textContent = error instanceof Error ? error.message : "Save failed";
-    } finally {
-      saveButton.disabled = false;
-    }
-  });
-}
 `;
 
 const mainVoyd = `use pkg::web::all
@@ -489,7 +455,8 @@ type ArticleParams = {
 type Article = {
   slug: String,
   title: String,
-  body: String
+  body: String,
+  status: String
 }
 
 pub fn main(): (server::HttpServer, tasks::TaskRuntime, env::Env, fs::Fs) -> i32
@@ -506,11 +473,14 @@ pub fn main(): (server::HttpServer, tasks::TaskRuntime, env::Env, fs::Fs) -> i32
     get("/") do:
       article_page(load_article("home".as_slice().to_string()))
 
+    get_context("/wiki") do(ctx: Context):
+      article_page(load_article(article_slug_from(ctx)))
+
     get("/wiki/:slug") do(params: ArticleParams):
       article_page(load_article(safe_slug(params.slug)))
 
-    post("/api/articles", body: text_body()) do(input: String, ctx: Context):
-      save_article(input, ctx)
+    post("/wiki/:slug", body: text_body()) do(input: String, ctx: Context):
+      save_article(form_article_body(input), article_slug_from(ctx))
 
   match(result)
     Ok<Unit>:
@@ -539,33 +509,48 @@ fn load_article(slug: String): fs::Fs -> Article
       {
         slug: clean,
         title: title_for(clean),
-        body: value
+        body: value,
+        status: String::init()
       }
     Err<IoError>:
       {
         slug: clean,
         title: title_for(clean),
-        body: "# New article\\n\\nStart writing. Click Save to create the local file.".as_slice().to_string()
+        body: "# New article\\n\\nStart writing. Click Save to create the local file.".as_slice().to_string(),
+        status: String::init()
       }
 
-fn save_article(input: String, ctx: Context): fs::Fs -> Response
-  let slug = safe_slug(ctx.query_value("slug".as_slice()) ?? "home".as_slice().to_string())
-  match(write_file_string(article_path(slug), input))
+fn article_slug_from(ctx: Context) -> String
+  safe_slug(ctx.param("slug".as_slice()) ?? ctx.query_value("slug".as_slice()) ?? "home".as_slice().to_string())
+
+fn save_article(body: String, slug: String): fs::Fs -> Response
+  match(write_file_string(article_path(slug), body))
     Ok<Unit>:
-      Response::ok().text("saved".as_slice())
+      article_page({
+        slug: slug,
+        title: title_for(slug),
+        body: body,
+        status: "Saved".as_slice().to_string()
+      })
     Err<IoError> { error }:
       Response::internal_server_error().text(error.message)
+
+fn form_article_body(input: String) -> String
+  parse_query(input).get("body".as_slice()) ?? String::init()
 
 fn article_path(slug: String) -> Path
   Path::new("./data/articles".as_slice()).join(slug.concat(".md".as_slice()))
 
 fn safe_slug(value: String) -> String
-  let trimmed = value.as_slice().trimmed().to_string()
-  if trimmed.is_empty():
+  let lower = value.as_slice().trimmed().to_string().lowered()
+  if lower.is_empty():
     return "home".as_slice().to_string()
-  if trimmed.contains("/".as_slice()) or trimmed.contains("..".as_slice()):
+  if lower.contains(where: (rune: i32) -> bool => not is_slug_rune(rune)):
     return "home".as_slice().to_string()
-  trimmed.lowered()
+  lower
+
+fn is_slug_rune(rune: i32) -> bool
+  (rune >= 97 and rune <= 122) or (rune >= 48 and rune <= 57) or rune == 45 or rune == 95
 
 fn title_for(slug: String) -> String
   if slug.equals("home"):
@@ -598,7 +583,7 @@ fn page_view(article: Article) -> Html<MsgPack>
             <NavLink href="/wiki/voyd" label="Voyd" active={article.slug.equals("voyd")} />
             <NavLink href="/wiki/webassembly" label="WebAssembly" active={article.slug.equals("webassembly")} />
           </nav>
-          <form class="mt-8 flex gap-2" action="/wiki/home" method="get" data-jump-form="true">
+          <form class="mt-8 flex gap-2" action="/wiki" method="get">
             <input
               class="min-w-0 flex-1 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-600"
               name="slug"
@@ -607,7 +592,7 @@ fn page_view(article: Article) -> Html<MsgPack>
             <button class="rounded-md bg-zinc-950 px-3 py-2 text-sm font-medium text-white" type="submit">Open</button>
           </form>
         </aside>
-        <section class="mx-auto flex w-full max-w-5xl flex-col px-5 py-8 lg:px-10">
+        <form class="mx-auto flex w-full max-w-5xl flex-col px-5 py-8 lg:px-10" action={article_form_action(article.slug)} method="post">
           <header class="flex flex-col gap-4 border-b border-zinc-200 pb-6 md:flex-row md:items-end md:justify-between">
             <div>
               <p class="text-sm font-medium uppercase tracking-wide text-emerald-700">Local file article</p>
@@ -617,11 +602,10 @@ fn page_view(article: Article) -> Html<MsgPack>
               </p>
             </div>
             <div class="flex items-center gap-3">
-              <span class="text-sm text-zinc-500" data-save-status="true">Saved</span>
+              <span class="text-sm text-zinc-500">{article.status}</span>
               <button
                 class="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-wait disabled:bg-zinc-400"
-                type="button"
-                data-save-article="true"
+                type="submit"
               >
                 Save
               </button>
@@ -631,11 +615,11 @@ fn page_view(article: Article) -> Html<MsgPack>
             <span class="mb-3 text-sm font-medium text-zinc-700">Article body</span>
             <textarea
               class="min-h-[32rem] flex-1 resize-y rounded-md border border-zinc-300 bg-white p-5 font-mono text-sm leading-7 text-zinc-900 outline-none shadow-sm focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+              name="body"
               spellcheck="true"
-              data-article-body="true"
             >{article.body}</textarea>
           </label>
-        </section>
+        </form>
       </main>
       <script type="module" src="/assets/client.js"></script>
     </body>
@@ -651,6 +635,9 @@ fn nav_class(active: bool) -> String
     "rounded-md bg-emerald-50 px-3 py-2 font-medium text-emerald-800".as_slice().to_string()
   else:
     "rounded-md px-3 py-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950".as_slice().to_string()
+
+fn article_form_action(slug: String) -> String
+  "/wiki/".as_slice().to_string().concat(slug)
 `;
 
 const styleCss = `@import "tailwindcss";
@@ -714,6 +701,9 @@ Mini Voydpedia is a server-rendered Voyd app with Tailwind assets built by Vite.
 Articles are local markdown files in \`data/articles\`, so edits are easy to
 diff, seed, back up, or delete.
 
+The browser entrypoint only loads Tailwind CSS. Routing, form handling, article
+lookup, validation, rendering, and filesystem writes all live in \`src/main.voyd\`.
+
 ## Scripts
 
 - \`npm run dev\` builds the client assets, starts the Voyd SSR server, rebuilds
@@ -723,7 +713,8 @@ diff, seed, back up, or delete.
   checks the Voyd server with optimized compilation.
 - \`npm start\` runs the production-style SSR server.
 - \`npm run voyd:check\` compiles only the Voyd server.
-- \`npm run typecheck\` checks the TypeScript helper scripts and client code.
+- \`npm run typecheck\` checks the TypeScript helper scripts and CSS-only client
+  entrypoint.
 
 ## Configuration
 
@@ -731,6 +722,6 @@ diff, seed, back up, or delete.
 - \`HOST\` or \`VOYD_WEB_HOST\` changes the bind host. The default is
   \`127.0.0.1\`.
 
-The article save endpoint accepts request bodies up to 64 KiB by default. Adjust
+Article form posts accept request bodies up to 64 KiB by default. Adjust
 \`max_body_bytes\` in \`src/main.voyd\` if your app needs larger edits.
 `;

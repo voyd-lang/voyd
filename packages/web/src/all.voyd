@@ -35,7 +35,9 @@ pub use super::extract::{
   cookies_from,
   decode_cookies,
   extract_cookies,
-  parse_cookies
+  parse_cookies,
+  parse_query,
+  percent_decode
 }
 pub use super::html::{ Hydration, document, html, html_response, hydrate, render }
 pub use super::middleware::request_id_required

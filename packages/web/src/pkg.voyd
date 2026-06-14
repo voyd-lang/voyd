@@ -37,6 +37,8 @@ pub use src::extract::{
   decode_cookies,
   extract_cookies,
   parse_cookies,
+  parse_query,
+  percent_decode,
   json,
   json_body,
   limit_body,

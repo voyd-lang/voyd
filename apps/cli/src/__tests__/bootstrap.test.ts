@@ -103,6 +103,8 @@ describe("runBootstrap", () => {
       expect(serverScript).toContain("serveWebApp");
       expect(serverScript).toContain("bufferSize: 1024 * 1024");
       expect(serverScript).toContain("optimize = true");
+      expect(serverScript).toContain("await waitForShutdown");
+      expect(serverScript).toContain('process.once("SIGINT"');
 
       const readme = await readFile(resolve(target, "README.md"), "utf8");
       expect(readme).toContain("npm run dev");
@@ -126,6 +128,9 @@ describe("runBootstrap", () => {
       expect(viteConfig).toContain('entryFileNames: "assets/client.js"');
       expect(viteConfig).toContain('assetFileNames: "assets/[name][extname]"');
 
+      const clientTs = await readFile(resolve(target, "src/client.ts"), "utf8");
+      expect(clientTs.trim()).toBe('import "./style.css";');
+
       const css = await readFile(resolve(target, "src/style.css"), "utf8");
       expect(css).toContain('@import "tailwindcss";');
       expect(css).toContain('@source "./**/*.voyd";');
@@ -137,9 +142,17 @@ describe("runBootstrap", () => {
       expect(mainVoyd).toContain("routes():");
       expect(mainVoyd).toContain("max_body_bytes: 65536");
       expect(mainVoyd).toContain('adopt(serve_dir("./public".as_slice()))');
-      expect(mainVoyd).toContain('"/api/articles"');
+      expect(mainVoyd).not.toContain('"/api/articles"');
+      expect(mainVoyd).toContain('get_context("/wiki")');
+      expect(mainVoyd).toContain('post("/wiki/:slug"');
       expect(mainVoyd).toContain("body: text_body()");
-      expect(mainVoyd).toContain("write_file_string(article_path(slug), input)");
+      expect(mainVoyd).toContain('form_article_body(input)');
+      expect(mainVoyd).toContain('parse_query(input).get("body".as_slice())');
+      expect(mainVoyd).toContain("write_file_string(article_path(slug), body)");
+      expect(mainVoyd).toContain("fn is_slug_rune(rune: i32) -> bool");
+      expect(mainVoyd).toContain("not is_slug_rune(rune)");
+      expect(mainVoyd).toContain("{article.status}");
+      expect(mainVoyd).not.toContain('>Saved</span>');
       expect(mainVoyd).toContain('href="/assets/client.css"');
 
       const sdk = createSdk();

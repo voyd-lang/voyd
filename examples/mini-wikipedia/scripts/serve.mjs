@@ -58,14 +58,28 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exit(1);
   }
 
-  const close = async () => {
-    await app.close("shutdown").catch(() => undefined);
-    process.exit(0);
-  };
-  process.once("SIGINT", close);
-  process.once("SIGTERM", close);
-  await app.closed.catch((error) => {
+  let closing = false;
+  app.closed.catch((error) => {
+    if (closing) return;
     console.error(error instanceof Error ? error.message : error);
-    process.exitCode = 1;
+    process.exit(1);
+  });
+
+  await waitForShutdown(async (signal) => {
+    closing = true;
+    await app.close(signal).catch(() => undefined);
+  });
+}
+
+function waitForShutdown(close) {
+  return new Promise((resolve) => {
+    let closing = false;
+    const shutdown = (signal) => {
+      if (closing) return;
+      closing = true;
+      void close(signal).finally(resolve);
+    };
+    process.once("SIGINT", () => shutdown("SIGINT"));
+    process.once("SIGTERM", () => shutdown("SIGTERM"));
   });
 }
