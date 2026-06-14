@@ -70,6 +70,20 @@ describe("getConfigFromCli", () => {
     expect(config.bootstrapTemplate).toBe("vx-spa");
   });
 
+  it("supports `voyd bootstrap --template web-ssr`", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "bootstrap",
+      "demo-app",
+      "--template",
+      "web-ssr",
+    ]);
+    expect(config.bootstrap).toBe(true);
+    expect(config.bootstrapDir).toBe("demo-app");
+    expect(config.bootstrapTemplate).toBe("web-ssr");
+  });
+
   it("supports bootstrap dry-run and force flags", () => {
     const config = runWithArgv([
       "node",

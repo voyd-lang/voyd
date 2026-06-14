@@ -1,0 +1,5 @@
+node_modules
+public/assets
+dist
+.turbo
+.DS_Store

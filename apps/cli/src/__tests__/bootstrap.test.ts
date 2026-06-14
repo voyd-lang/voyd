@@ -2,10 +2,22 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 import { describe, expect, it, vi } from "vitest";
 import { printBootstrapResult, runBootstrap } from "../bootstrap/index.js";
 
 const createTempDir = () => mkdtemp(resolve(tmpdir(), "voyd-bootstrap-"));
+const repoRoot = resolve(import.meta.dirname, "../../../..");
+
+const expectCompileSuccess = (
+  result: CompileResult,
+): Extract<CompileResult, { success: true }> => {
+  if (!result.success) {
+    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+  }
+  expect(result.success).toBe(true);
+  return result;
+};
 
 describe("runBootstrap", () => {
   it("scaffolds the vx-spa starter", async () => {
@@ -52,6 +64,71 @@ describe("runBootstrap", () => {
       const mainVoyd = await readFile(resolve(target, "src/main.voyd"), "utf8");
       expect(mainVoyd).toContain("pub fn init() -> Model");
       expect(mainVoyd).toContain('class="min-h-screen');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("scaffolds the web-ssr starter", async () => {
+    const root = await createTempDir();
+    const target = resolve(root, "mini wiki");
+    try {
+      const result = await runBootstrap({
+        dir: target,
+        template: "web-ssr",
+      });
+
+      expect(result.targetDir).toBe(target);
+      expect(result.files).toContain("src/main.voyd");
+      expect(result.files).toContain("src/client.ts");
+      expect(result.files).toContain("data/articles/home.md");
+      expect(result.nextSteps).toEqual(["npm install", "npm run dev"]);
+
+      const packageJson = JSON.parse(
+        await readFile(resolve(target, "package.json"), "utf8"),
+      ) as {
+        name: string;
+        scripts: Record<string, string>;
+        dependencies: Record<string, string>;
+        devDependencies: Record<string, string>;
+      };
+      expect(packageJson.name).toBe("mini-wiki");
+      expect(packageJson.scripts.dev).toBe("node scripts/dev.mjs");
+      expect(packageJson.scripts.build).toBe("vite build && node scripts/check-voyd.mjs");
+      expect(packageJson.dependencies["@voyd-lang/web"]).toMatch(/^\^/);
+      expect(packageJson.devDependencies.tailwindcss).toBe("^4.3.0");
+      expect(packageJson.devDependencies["@tailwindcss/vite"]).toBe("^4.3.0");
+
+      const serverScript = await readFile(resolve(target, "scripts/serve.mjs"), "utf8");
+      expect(serverScript).toContain("serveWebApp");
+      expect(serverScript).toContain("bufferSize: 1024 * 1024");
+
+      const viteConfig = await readFile(resolve(target, "vite.config.mjs"), "utf8");
+      expect(viteConfig).toContain('entryFileNames: "assets/client.js"');
+      expect(viteConfig).toContain('assetFileNames: "assets/[name][extname]"');
+
+      const css = await readFile(resolve(target, "src/style.css"), "utf8");
+      expect(css).toContain('@import "tailwindcss";');
+      expect(css).toContain('@source "./**/*.voyd";');
+
+      const mainVoyd = await readFile(resolve(target, "src/main.voyd"), "utf8");
+      expect(mainVoyd).toContain("pub fn main(): (server::HttpServer");
+      expect(mainVoyd).toContain("tasks::TaskRuntime");
+      expect(mainVoyd).toContain('"/api/articles".as_slice()');
+      expect(mainVoyd).toContain("limit: body_limit(65536)");
+      expect(mainVoyd).toContain("write_file_string(article_path(slug), input)");
+      expect(mainVoyd).toContain('href="/assets/client.css"');
+
+      const sdk = createSdk();
+      expectCompileSuccess(
+        await sdk.compile({
+          entryPath: resolve(target, "src/main.voyd"),
+          roots: {
+            src: resolve(target, "src"),
+            pkgDirs: [resolve(repoRoot, "packages")],
+          },
+        }),
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }

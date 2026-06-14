@@ -1,5 +1,5 @@
 export type DocumentationFormat = "html" | "json";
-export type BootstrapTemplate = "vx-spa";
+export type BootstrapTemplate = "vx-spa" | "web-ssr";
 
 export type VoydConfig = {
   /** Write raw parser AST to stdout */
