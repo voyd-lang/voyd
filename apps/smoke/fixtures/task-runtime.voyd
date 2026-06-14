@@ -225,6 +225,60 @@ pub fn detached_callback_probe(): task::TaskRuntime -> i32
     Cancelled:
       -2
 
+pub fn detached_parameter_callback_probe(): task::TaskRuntime -> i32
+  run_detached_callback(() => 9)
+
+fn run_detached_callback(callback: fn() -> i32): task::TaskRuntime -> i32
+  let child = task::detach do:
+    callback()
+  match(task::join(child))
+    Ok { value }:
+      value
+    Err { error }:
+      let _ = error
+      -1
+    Cancelled:
+      -2
+
+pub fn detached_effectful_parameter_callback_probe(): (task::TaskRuntime, time::Time) -> i32
+  run_detached_effectful_callback do:
+    let _ = time::sleep(millis(5))
+    11
+
+fn run_detached_effectful_callback(callback: fn() : (open) -> i32): (task::TaskRuntime, open) -> i32
+  let child = task::detach do:
+    callback()
+  match(task::join(child))
+    Ok { value }:
+      value
+    Err { error }:
+      let _ = error
+      -1
+    Cancelled:
+      -2
+
+pub fn detached_preserves_pre_suspend_call_arg_probe(): (task::TaskRuntime, time::Time) -> i32
+  run_detached_pre_suspend_call_arg(31, after_sleep_value)
+
+fn run_detached_pre_suspend_call_arg(prefix: i32, callback: fn() : (open) -> i32): (task::TaskRuntime, open) -> i32
+  let child = task::detach do:
+    combine(prefix, callback())
+  match(task::join(child))
+    Ok { value }:
+      value
+    Err { error }:
+      let _ = error
+      -1
+    Cancelled:
+      -2
+
+fn after_sleep_value(): time::Time -> i32
+  let _ = time::sleep(millis(5))
+  12
+
+fn combine(left: i32, right: i32): () -> i32
+  left + right
+
 pub fn after_delay_probe(): (task::TaskRuntime, time::Time) -> i32
   time::after_delay(millis(5)) do: 7
 

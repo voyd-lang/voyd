@@ -10,12 +10,14 @@ import type {
   TypeId,
 } from "../../context.js";
 import { coerceValueToType } from "../../structural.js";
-import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../../locals.js";
 import {
-  getUnresolvedExprType,
-  wasmTypeFor,
-} from "../../types.js";
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../../locals.js";
+import { getUnresolvedExprType, wasmTypeFor } from "../../types.js";
 import { resolveTempCaptureTypeId } from "../../effects/temp-capture-types.js";
+import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
 
 export const handlerType = (ctx: CodegenContext): binaryen.Type =>
   ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
@@ -28,12 +30,12 @@ export const debugEffects = (): boolean =>
 
 export const currentHandlerValue = (
   ctx: CodegenContext,
-  fnCtx: FunctionContext
+  fnCtx: FunctionContext,
 ): binaryen.ExpressionRef => {
   if (fnCtx.currentHandler) {
     return ctx.mod.local.get(
       fnCtx.currentHandler.index,
-      fnCtx.currentHandler.type
+      fnCtx.currentHandler.type,
     );
   }
   return ctx.effectsBackend.abi.hiddenHandlerValue(ctx);
@@ -51,11 +53,11 @@ const activeSiteInSet = ({
   if (sites.size === 0) return ctx.mod.i32.const(0);
 
   const comparisons = [...sites].map((siteOrder) =>
-    ctx.mod.i32.eq(activeSiteOrder(), ctx.mod.i32.const(siteOrder))
+    ctx.mod.i32.eq(activeSiteOrder(), ctx.mod.i32.const(siteOrder)),
   );
   return comparisons.reduce(
     (acc, cmp) => ctx.mod.i32.or(acc, cmp),
-    ctx.mod.i32.const(0)
+    ctx.mod.i32.const(0),
   );
 };
 
@@ -88,6 +90,39 @@ const getOrCreateTempLocal = ({
   return local;
 };
 
+const storeAndLoadTempValue = ({
+  binding,
+  value,
+  ctx,
+  fnCtx,
+}: {
+  binding: ReturnType<typeof allocateTempLocal>;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  if (binding.storageType === binding.type) {
+    return ctx.mod.local.tee(
+      binding.index,
+      coerceExprToWasmType({
+        expr: value,
+        targetType: binding.storageType,
+        ctx,
+      }),
+      binding.type,
+    );
+  }
+
+  return ctx.mod.block(
+    null,
+    [
+      storeLocalValue({ binding, value, ctx, fnCtx }),
+      loadLocalValue(binding, ctx),
+    ],
+    binding.type,
+  );
+};
+
 export const compileCallArgExpressionsWithTemps = ({
   callId,
   args,
@@ -118,7 +153,7 @@ export const compileCallArgExpressionsWithTemps = ({
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const tempSpecs = ctx.effectLowering.callArgTemps.get(callId) ?? [];
   const tempsByIndex = new Map(
-    tempSpecs.map((entry) => [entry.argIndex, entry.tempId] as const)
+    tempSpecs.map((entry) => [entry.argIndex, entry.tempId] as const),
   );
 
   const continuationCfg = fnCtx.continuation?.cfg;
@@ -136,9 +171,10 @@ export const compileCallArgExpressionsWithTemps = ({
             nextIndex < sourceArgExprIds.length;
             nextIndex += 1
           ) {
-            (continuationCfg.sitesByExpr.get(sourceArgExprIds[nextIndex]!) ?? []).forEach(
-              (site) => sites.add(site)
-            );
+            (
+              continuationCfg.sitesByExpr.get(sourceArgExprIds[nextIndex]!) ??
+              []
+            ).forEach((site) => sites.add(site));
           }
           return sites;
         })
@@ -188,15 +224,12 @@ export const compileCallArgExpressionsWithTemps = ({
 
     const tempLocal = getOrCreateTempLocal({ tempId, ctx, fnCtx });
     const value = compileValue();
-
-    const compute = ctx.mod.block(
-      null,
-      [
-        storeLocalValue({ binding: tempLocal, value, ctx, fnCtx }),
-        loadLocalValue(tempLocal, ctx),
-      ],
-      tempLocal.type
-    );
+    const compute = storeAndLoadTempValue({
+      binding: tempLocal,
+      value,
+      ctx,
+      fnCtx,
+    });
 
     if (!laterSites || !startedLocal || !activeSiteLocal) {
       return compute;
@@ -209,14 +242,10 @@ export const compileCallArgExpressionsWithTemps = ({
         activeSiteOrder: () =>
           ctx.mod.local.get(activeSiteLocal.index, binaryen.i32),
         ctx,
-      })
+      }),
     );
 
-    return ctx.mod.if(
-      shouldSkip,
-      loadLocalValue(tempLocal, ctx),
-      compute
-    );
+    return ctx.mod.if(shouldSkip, loadLocalValue(tempLocal, ctx), compute);
   });
 };
 
@@ -233,7 +262,7 @@ export const compileCallCalleeExpressionWithTemp = ({
 }): CompiledExpression => {
   const calleeValue = compileExpr({ exprId: call.callee, ctx, fnCtx });
   const calleeTemp = (ctx.effectLowering.callArgTemps.get(call.id) ?? []).find(
-    (entry) => entry.argIndex === -1
+    (entry) => entry.argIndex === -1,
   );
 
   if (!calleeTemp) {
@@ -246,14 +275,12 @@ export const compileCallCalleeExpressionWithTemp = ({
     fnCtx,
   });
 
-  const compute = ctx.mod.block(
-    null,
-    [
-      storeLocalValue({ binding: tempLocal, value: calleeValue.expr, ctx, fnCtx }),
-      loadLocalValue(tempLocal, ctx),
-    ],
-    tempLocal.type
-  );
+  const compute = storeAndLoadTempValue({
+    binding: tempLocal,
+    value: calleeValue.expr,
+    ctx,
+    fnCtx,
+  });
 
   const continuationCfg = fnCtx.continuation?.cfg;
   const startedLocal = fnCtx.continuation?.startedLocal;
@@ -264,7 +291,7 @@ export const compileCallCalleeExpressionWithTemp = ({
 
   const laterSites = call.args.reduce((sites, arg) => {
     (continuationCfg.sitesByExpr.get(arg.expr) ?? []).forEach((site) =>
-      sites.add(site)
+      sites.add(site),
     );
     return sites;
   }, new Set<number>());
@@ -279,15 +306,11 @@ export const compileCallCalleeExpressionWithTemp = ({
       activeSiteOrder: () =>
         ctx.mod.local.get(activeSiteLocal.index, binaryen.i32),
       ctx,
-    })
+    }),
   );
 
   return {
-    expr: ctx.mod.if(
-      shouldSkip,
-      loadLocalValue(tempLocal, ctx),
-      compute
-    ),
+    expr: ctx.mod.if(shouldSkip, loadLocalValue(tempLocal, ctx), compute),
     usedReturnCall: false,
   };
 };

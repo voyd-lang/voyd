@@ -29,9 +29,7 @@ import {
   loadBindingValue,
   storeLocalValue,
 } from "../locals.js";
-import {
-  wrapValueInOutcome,
-} from "../effects/outcome-values.js";
+import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { effectsFacade } from "../effects/facade.js";
 import { emitPureSurfaceWrapper } from "../effects/abi-wrapper.js";
 import { coerceValueToType, lowerValueForHeapField } from "../structural.js";
@@ -39,6 +37,7 @@ import {
   boxSignatureSpillValue,
   unboxSignatureSpillValue,
 } from "../signature-spill.js";
+import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 
 type LambdaCaptureInfo = {
   symbol: number;
@@ -56,7 +55,7 @@ type LambdaEnvInfo = NonNullable<
 const formatLambdaInstanceLabel = (
   exprId: number,
   outerInstanceId: ProgramFunctionInstanceId | undefined,
-  lambdaTypeId: number
+  lambdaTypeId: number,
 ): string =>
   typeof outerInstanceId === "number"
     ? `inst${outerInstanceId}_type${lambdaTypeId}_lambda${exprId}`
@@ -66,7 +65,7 @@ const makeLambdaKey = (
   exprId: number,
   ctx: CodegenContext,
   lambdaTypeId: number,
-  outerInstanceId?: ProgramFunctionInstanceId
+  outerInstanceId?: ProgramFunctionInstanceId,
 ) =>
   `${ctx.moduleId}::lambda${exprId}::type${lambdaTypeId}::${outerInstanceId ?? "root"}`;
 
@@ -114,7 +113,8 @@ const sameTypes = (
   left: readonly binaryen.Type[],
   right: readonly binaryen.Type[],
 ): boolean =>
-  left.length === right.length && left.every((type, index) => type === right[index]);
+  left.length === right.length &&
+  left.every((type, index) => type === right[index]);
 
 const namedFunctionClosureKey = ({
   meta,
@@ -137,7 +137,10 @@ const makeNamedFunctionWrapperName = ({
   const safeKey = key.replace(/[^a-zA-Z0-9_]/g, "_");
   const symbolName =
     ctx.program.symbols.getName(
-      ctx.program.symbols.idOf({ moduleId: meta.moduleId, symbol: meta.symbol }),
+      ctx.program.symbols.idOf({
+        moduleId: meta.moduleId,
+        symbol: meta.symbol,
+      }),
     ) ?? `${meta.symbol}`;
   return `${ctx.moduleLabel}__fnref_${symbolName}_${safeKey}`;
 };
@@ -330,7 +333,7 @@ const emitLambdaFunction = ({
       binaryen.createType(implParams as number[]),
       ctx.effectsBackend.abi.effectfulResultType(ctx),
       implCtx.locals,
-      implFunctionBody
+      implFunctionBody,
     );
 
     emitPureSurfaceWrapper({
@@ -343,7 +346,7 @@ const emitLambdaFunction = ({
         ctx.mod.local.get(0, env.base.interfaceType),
         ctx.effectsBackend.abi.hiddenHandlerValue(ctx),
         ...env.base.paramTypes.map((type, index) =>
-          ctx.mod.local.get(index + 1, type)
+          ctx.mod.local.get(index + 1, type),
         ),
       ],
     });
@@ -411,7 +414,8 @@ const emitLambdaFunction = ({
   const shouldWrapOutcome =
     effectful &&
     (bodyExprType === returnWasmType ||
-      ((returnWasmType === ctx.rtt.baseType || returnWasmType === ctx.rtt.rootType) &&
+      ((returnWasmType === ctx.rtt.baseType ||
+        returnWasmType === ctx.rtt.rootType) &&
         bodyExprType !== binaryen.none &&
         bodyExprType !== binaryen.unreachable &&
         bodyExprType !== ctx.effectsBackend.abi.effectfulResultType(ctx)));
@@ -435,7 +439,7 @@ const emitLambdaFunction = ({
     binaryen.createType(params as number[]),
     env.base.resultType,
     lambdaCtx.locals,
-    functionBody
+    functionBody,
   );
 };
 
@@ -443,7 +447,7 @@ export const compileLambdaExpr = (
   expr: HirLambdaExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const lambdaTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
@@ -451,7 +455,7 @@ export const compileLambdaExpr = (
   const lambdaInstanceLabel = formatLambdaInstanceLabel(
     expr.id,
     typeInstanceId,
-    lambdaTypeId
+    lambdaTypeId,
   );
   const key = makeLambdaKey(expr.id, ctx, lambdaTypeId, typeInstanceId);
 
@@ -468,7 +472,8 @@ export const compileLambdaExpr = (
           symbol: capture.symbol,
           typeId,
           wasmType: wasmTypeFor(typeId, ctx),
-          storageType: getInlineHeapBoxType({ typeId, ctx }) ?? wasmTypeFor(typeId, ctx),
+          storageType:
+            getInlineHeapBoxType({ typeId, ctx }) ?? wasmTypeFor(typeId, ctx),
           mutable: capture.mutable,
           fieldIndex: index + 1,
         };
@@ -503,21 +508,29 @@ export const compileLambdaExpr = (
     ctx.lambdaFunctions.set(key, fnName);
   }
 
-  const captureValues =
-    expr.captures?.map((capture, index) => {
-      const binding = getRequiredBinding(capture.symbol, ctx, fnCtx);
-      const captureInfo = env.captures[index];
-      if (!captureInfo) {
-        throw new Error(`missing lambda capture metadata for symbol ${capture.symbol}`);
-      }
-      return coerceValueToType({
-        value: loadBindingValue(binding, ctx, fnCtx),
-        actualType: captureInfo.typeId,
-        targetType: captureInfo.typeId,
-        ctx,
-        fnCtx,
-      });
-    }) ?? [];
+  const exprCaptureSymbols = new Set(
+    expr.captures?.map((capture) => capture.symbol) ?? [],
+  );
+  const captureValues = env.captures.map((captureInfo) => {
+    if (!exprCaptureSymbols.has(captureInfo.symbol)) {
+      throw new Error(
+        `missing lambda capture metadata for symbol ${captureInfo.symbol}`,
+      );
+    }
+    const binding = getRequiredBinding(captureInfo.symbol, ctx, fnCtx);
+    const value = coerceValueToType({
+      value: loadBindingValue(binding, ctx, fnCtx),
+      actualType: captureInfo.typeId,
+      targetType: captureInfo.typeId,
+      ctx,
+      fnCtx,
+    });
+    return coerceExprToWasmType({
+      expr: value,
+      targetType: captureInfo.wasmType,
+      ctx,
+    });
+  });
 
   const closure = initStruct(ctx.mod, env.envType, [
     refFunc(ctx.mod, fnName, base.fnRefType),
@@ -553,9 +566,7 @@ export const compileNamedFunctionClosure = ({
     !sameTypes(meta.resultAbiTypes, base.resultAbiTypes) ||
     meta.resultType !== base.resultType
   ) {
-    throw new Error(
-      `named function closure ABI mismatch for ${meta.wasmName}`,
-    );
+    throw new Error(`named function closure ABI mismatch for ${meta.wasmName}`);
   }
 
   const key = namedFunctionClosureKey({ meta, functionTypeId });

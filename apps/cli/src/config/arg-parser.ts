@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 const { version } = require("../../package.json") as { version: string };
 
 const DOC_FORMATS = ["html", "json"] as const;
-const BOOTSTRAP_TEMPLATES = ["vx-spa"] as const;
+const BOOTSTRAP_TEMPLATES = ["vx-spa", "web-ssr"] as const;
 const MAIN_OPTIONS_WITH_VALUES = ["--pkg-dir", "--entry"] as const;
 
 const appendOptionValue = (value: string, previous: string[]): string[] => [
@@ -30,7 +30,7 @@ const parseDocFormat = (value: string): DocumentationFormat => {
 
 const parseBootstrapTemplate = (value: string): BootstrapTemplate => {
   const normalized = value.toLowerCase();
-  if (normalized === "vx-spa") {
+  if (normalized === "vx-spa" || normalized === "web-ssr") {
     return normalized;
   }
   throw new InvalidArgumentError(

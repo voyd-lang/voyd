@@ -1,20 +1,25 @@
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
-import { createDeterministicRuntime, createVoydHost } from "@voyd-lang/sdk/js-host";
+import {
+  createDeterministicRuntime,
+  createVoydHost,
+} from "@voyd-lang/sdk/js-host";
 
 const fixtureEntryPath = path.join(
   import.meta.dirname,
   "..",
   "fixtures",
-  "task-runtime.voyd"
+  "task-runtime.voyd",
 );
 
 const expectCompileSuccess = (
-  result: CompileResult
+  result: CompileResult,
 ): Extract<CompileResult, { success: true }> => {
   if (!result.success) {
-    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+    throw new Error(
+      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    );
   }
   expect(result.success).toBe(true);
   return result;
@@ -26,7 +31,10 @@ const createTaskHost = async ({
   imports,
 }: {
   compiled: Extract<CompileResult, { success: true }>;
-  onUnhandledTaskFailed?: (error: Error, details: { runId: string; taskId: number }) => void;
+  onUnhandledTaskFailed?: (
+    error: Error,
+    details: { runId: string; taskId: number },
+  ) => void;
   imports?: WebAssembly.Imports;
 }) => {
   const runtime = createDeterministicRuntime();
@@ -57,7 +65,10 @@ const createTaskHostWithCustomTime = async ({
 }: {
   compiled: Extract<CompileResult, { success: true }>;
   sleepHandler: (ms: number) => unknown;
-  onUnhandledTaskFailed?: (error: Error, details: { runId: string; taskId: number }) => void;
+  onUnhandledTaskFailed?: (
+    error: Error,
+    details: { runId: string; taskId: number },
+  ) => void;
 }) => {
   const runtime = createDeterministicRuntime();
   const host = await createVoydHost({
@@ -69,24 +80,30 @@ const createTaskHostWithCustomTime = async ({
     defaultAdapters: false,
   });
   const monotonicNow = compiled.effects.findUniqueOpByLabelSuffix(
-    "Time::monotonic_now_millis"
+    "Time::monotonic_now_millis",
   );
-  const systemNow = compiled.effects.findUniqueOpByLabelSuffix("Time::system_now_millis");
-  const sleep = compiled.effects.findUniqueOpByLabelSuffix("Time::sleep_millis");
+  const systemNow = compiled.effects.findUniqueOpByLabelSuffix(
+    "Time::system_now_millis",
+  );
+  const sleep =
+    compiled.effects.findUniqueOpByLabelSuffix("Time::sleep_millis");
   host.registerHandler(
     monotonicNow.effectId,
     monotonicNow.opId,
     monotonicNow.signatureHash,
-    ({ tail }) => tail(runtime.monotonicNowMillis())
+    ({ tail }) => tail(runtime.monotonicNowMillis()),
   );
   host.registerHandler(
     systemNow.effectId,
     systemNow.opId,
     systemNow.signatureHash,
-    ({ tail }) => tail(runtime.systemNowMillis())
+    ({ tail }) => tail(runtime.systemNowMillis()),
   );
-  host.registerHandler(sleep.effectId, sleep.opId, sleep.signatureHash, ({ tail }, ms) =>
-    tail(sleepHandler(Number(ms)))
+  host.registerHandler(
+    sleep.effectId,
+    sleep.opId,
+    sleep.signatureHash,
+    ({ tail }, ms) => tail(sleepHandler(Number(ms))),
   );
   host.initEffects();
 
@@ -95,7 +112,7 @@ const createTaskHostWithCustomTime = async ({
 
 const drainRuntime = async (
   runtime: ReturnType<typeof createDeterministicRuntime>,
-  passes = 3
+  passes = 3,
 ): Promise<void> => {
   for (let index = 0; index < passes; index += 1) {
     await runtime.runUntilIdle();
@@ -105,7 +122,7 @@ const drainRuntime = async (
 
 const advanceRuntime = async (
   runtime: ReturnType<typeof createDeterministicRuntime>,
-  steps: number[]
+  steps: number[],
 ): Promise<void> => {
   for (const step of steps) {
     await runtime.advanceBy(step);
@@ -118,7 +135,9 @@ describe("smoke: task runtime", () => {
 
   beforeAll(async () => {
     const sdk = createSdk();
-    compiled = expectCompileSuccess(await sdk.compile({ entryPath: fixtureEntryPath }));
+    compiled = expectCompileSuccess(
+      await sdk.compile({ entryPath: fixtureEntryPath }),
+    );
   }, 120_000);
 
   it("runs spawned work asynchronously and joins the result", async () => {
@@ -179,7 +198,9 @@ describe("smoke: task runtime", () => {
 
   it("finishes owners once an attached child is explicitly cancelled", async () => {
     const { host, runtime } = await createTaskHost({ compiled });
-    const outcome = host.run<number>("owner_completion_after_child_cancel_probe");
+    const outcome = host.run<number>(
+      "owner_completion_after_child_cancel_probe",
+    );
     await advanceRuntime(runtime, [5]);
     await expect(outcome).resolves.toBe(7);
   });
@@ -241,6 +262,31 @@ describe("smoke: task runtime", () => {
     await expect(outcome).resolves.toBe(7);
   });
 
+  it("runs detached tasks that call captured function parameters", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const outcome = host.run<number>("detached_parameter_callback_probe");
+    await drainRuntime(runtime);
+    await expect(outcome).resolves.toBe(9);
+  });
+
+  it("runs detached tasks that call captured effectful function parameters", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const outcome = host.run<number>(
+      "detached_effectful_parameter_callback_probe",
+    );
+    await advanceRuntime(runtime, [5]);
+    await expect(outcome).resolves.toBe(11);
+  });
+
+  it("preserves earlier call arguments when a later argument suspends in detached work", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const outcome = host.run<number>(
+      "detached_preserves_pre_suspend_call_arg_probe",
+    );
+    await advanceRuntime(runtime, [5]);
+    await expect(outcome).resolves.toBe(43);
+  });
+
   it("runs cross-module callbacks after sleeping without task detachment", async () => {
     const { host, runtime } = await createTaskHost({ compiled });
     const outcome = host.run<number>("after_delay_probe");
@@ -280,7 +326,9 @@ describe("smoke: task runtime", () => {
     const { host, runtime } = await createTaskHost({ compiled });
     const outcome = host.run<number>("attached_failure_probe");
     await drainRuntime(runtime);
-    await expect(outcome).rejects.toThrow(/unobserved child task failure|attached child failed/);
+    await expect(outcome).rejects.toThrow(
+      /unobserved child task failure|attached child failed/,
+    );
   });
 
   it("reports unobserved detached child failures without failing the root task", async () => {

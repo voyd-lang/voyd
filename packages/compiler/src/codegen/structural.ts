@@ -22,7 +22,11 @@ import type {
   StructuralTypeInfo,
   TypeId,
 } from "./context.js";
-import { allocateTempLocal, loadLocalValue, storeLocalValue } from "./locals.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "./locals.js";
 import {
   abiTypeFor,
   getClosureTypeInfo,
@@ -82,6 +86,13 @@ const defaultValueForWasmType = (
 
 const expandAbiTypes = (type: binaryen.Type): binaryen.Type[] =>
   type === binaryen.none ? [] : [...binaryen.expandType(type)];
+
+const sameWasmTypes = (
+  left: readonly binaryen.Type[],
+  right: readonly binaryen.Type[],
+): boolean =>
+  left.length === right.length &&
+  left.every((type, index) => type === right[index]);
 
 export const makeInlineValue = ({
   values,
@@ -365,13 +376,15 @@ const boxRefLikeUnionValue = ({
 }): binaryen.ExpressionRef | undefined => {
   const valueType = binaryen.getExpressionType(value);
   const isRefLike =
-    binaryen.expandType(valueType).length === 1 && !NON_REF_TYPES.has(valueType);
+    binaryen.expandType(valueType).length === 1 &&
+    !NON_REF_TYPES.has(valueType);
   if (!isRefLike) {
     return undefined;
   }
 
   const exactMember = layout.members.find(
-    (member) => getInlineHeapBoxType({ typeId: member.typeId, ctx }) === valueType,
+    (member) =>
+      getInlineHeapBoxType({ typeId: member.typeId, ctx }) === valueType,
   );
   if (exactMember) {
     const captured = captureAbiValue({
@@ -402,8 +415,13 @@ const boxRefLikeUnionValue = ({
       }
       return { memberLayout, memberInfo };
     })
-    .filter((entry): entry is { memberLayout: typeof layout.members[number]; memberInfo: StructuralTypeInfo } =>
-      entry !== undefined,
+    .filter(
+      (
+        entry,
+      ): entry is {
+        memberLayout: (typeof layout.members)[number];
+        memberInfo: StructuralTypeInfo;
+      } => entry !== undefined,
     );
   if (heapMembers.length === 0) {
     return undefined;
@@ -511,16 +529,25 @@ const boxInlineValue = ({
     return value;
   }
   const valueType = binaryen.getExpressionType(value);
-  if (valueType === structInfo.runtimeType || valueType === binaryen.unreachable) {
+  if (
+    valueType === structInfo.runtimeType ||
+    valueType === binaryen.unreachable
+  ) {
     return value;
   }
   const abiTypes = structInfo.fields.flatMap((field) => field.inlineWasmTypes);
   const captured = captureAbiValue({ value, abiTypes, ctx, fnCtx });
-  const boxed = initStruct(ctx.mod, structInfo.runtimeType, [...captured.lanes]);
+  const boxed = initStruct(ctx.mod, structInfo.runtimeType, [
+    ...captured.lanes,
+  ]);
   if (captured.setup.length === 0) {
     return boxed;
   }
-  return ctx.mod.block(null, [...captured.setup, boxed], structInfo.runtimeType);
+  return ctx.mod.block(
+    null,
+    [...captured.setup, boxed],
+    structInfo.runtimeType,
+  );
 };
 
 const unboxInlineValue = ({
@@ -713,11 +740,7 @@ export const liftFixedArrayElementValue = ({
       ctx.mod.local.set(temp.index, value),
       ctx.mod.local.set(
         temp.index,
-        ctx.mod.if(
-          ctx.mod.ref.is_null(stored()),
-          defaultBox,
-          stored(),
-        ),
+        ctx.mod.if(ctx.mod.ref.is_null(stored()), defaultBox, stored()),
       ),
       liftHeapValueToInline({ value: stored(), typeId, ctx }),
     ],
@@ -740,7 +763,9 @@ export const storeValueIntoStorageRef = ({
 }): binaryen.ExpressionRef => {
   const storageType = getInlineHeapBoxType({ typeId, ctx });
   if (!storageType) {
-    throw new Error(`cannot store non-inline value ${typeId} through a storage ref`);
+    throw new Error(
+      `cannot store non-inline value ${typeId} through a storage ref`,
+    );
   }
   const inlineValue =
     binaryen.getExpressionType(value) === storageType
@@ -792,7 +817,8 @@ const normalizeValueToInlineAbi = ({
   }
   const inlineBoxType = getInlineHeapBoxType({ typeId, ctx });
   const isRefLike =
-    binaryen.expandType(valueType).length === 1 && !NON_REF_TYPES.has(valueType);
+    binaryen.expandType(valueType).length === 1 &&
+    !NON_REF_TYPES.has(valueType);
   if (inlineBoxType && isRefLike) {
     if (valueType === inlineBoxType) {
       return unboxInlineValue({ value, typeId, ctx });
@@ -837,7 +863,10 @@ const cloneTransferredValue = ({
   }
 
   const valueType = binaryen.getExpressionType(value);
-  if (valueType === wasmTypeFor(typeId, ctx) || valueType === binaryen.unreachable) {
+  if (
+    valueType === wasmTypeFor(typeId, ctx) ||
+    valueType === binaryen.unreachable
+  ) {
     return value;
   }
 
@@ -849,12 +878,7 @@ const cloneTransferredValue = ({
     return value;
   }
 
-  const temp = allocateTempLocal(
-    structInfo.interfaceType,
-    fnCtx,
-    typeId,
-    ctx,
-  );
+  const temp = allocateTempLocal(structInfo.interfaceType, fnCtx, typeId, ctx);
   const fieldValues = structInfo.fields.map((field) => {
     const raw = loadStructuralField({
       structInfo,
@@ -881,12 +905,7 @@ const cloneTransferredValue = ({
   const clonedType = binaryen.getExpressionType(cloned);
   const resultTemp =
     binaryen.expandType(clonedType).length > 1
-      ? allocateTempLocal(
-          clonedType,
-          fnCtx,
-          typeId,
-          ctx,
-        )
+      ? allocateTempLocal(clonedType, fnCtx, typeId, ctx)
       : undefined;
 
   return ctx.mod.block(
@@ -950,7 +969,9 @@ const pickUnionCoercionTarget = ({
           collect(targetType, new Set<TypeId>());
           return collected;
         })()
-      : getInlineUnionLayout(targetType, ctx).members.map((member) => member.typeId);
+      : getInlineUnionLayout(targetType, ctx).members.map(
+          (member) => member.typeId,
+        );
 
   // Prefer exact matches to avoid "surprising" coercions when a value already
   // belongs to a specific union member but could also unify with other members
@@ -1093,20 +1114,22 @@ export const initStructuralValue = ({
     !structInfo.fieldTableGlobal ||
     !structInfo.methodTableGlobal
   ) {
-    throw new Error("heap-object structural type is missing RTT lookup globals");
+    throw new Error(
+      "heap-object structural type is missing RTT lookup globals",
+    );
   }
   return initStruct(ctx.mod, structInfo.runtimeType, [
     ctx.mod.global.get(
       structInfo.ancestorsGlobal,
-      ctx.rtt.extensionHelpers.i32Array
+      ctx.rtt.extensionHelpers.i32Array,
     ),
     ctx.mod.global.get(
       structInfo.fieldTableGlobal,
-      ctx.rtt.fieldLookupHelpers.lookupTableType
+      ctx.rtt.fieldLookupHelpers.lookupTableType,
     ),
     ctx.mod.global.get(
       structInfo.methodTableGlobal,
-      ctx.rtt.methodLookupHelpers.lookupTableType
+      ctx.rtt.methodLookupHelpers.lookupTableType,
     ),
     ...fieldValues,
   ]);
@@ -1185,7 +1208,7 @@ const makeDynamicStructuralFieldLoad = ({
 export const requiresStructuralConversion = (
   actualType: TypeId,
   targetType: TypeId | undefined,
-  ctx: CodegenContext
+  ctx: CodegenContext,
 ): boolean => {
   if (typeof targetType !== "number" || actualType === targetType) {
     return false;
@@ -1301,10 +1324,7 @@ export const coerceValueToType = ({
 
   const actualOptionalInfo = getOptionalLayoutInfo(actualType, ctx);
   const targetOptionalInfo = getOptionalLayoutInfo(targetType, ctx);
-  if (
-    targetOptionalInfo &&
-    shouldInlineUnionLayout(targetType, ctx)
-  ) {
+  if (targetOptionalInfo && shouldInlineUnionLayout(targetType, ctx)) {
     const targetInlineType = wasmTypeFor(targetType, ctx);
     const valueType = binaryen.getExpressionType(value);
     if (valueType === targetInlineType || valueType === binaryen.unreachable) {
@@ -1337,72 +1357,70 @@ export const coerceValueToType = ({
       const targetInlineOptional = shouldInlineUnionLayout(targetType, ctx);
 
       if (actualInlineOptional && targetInlineOptional) {
-      const actualLayout = getInlineUnionLayout(actualType, ctx);
-      const targetLayout = getInlineUnionLayout(targetType, ctx);
-      const actualSomeLayout = actualLayout.members.find(
-        (member) => member.typeId === actualOptionalInfo.someType,
-      );
-      const targetSomeLayout = targetLayout.members.find(
-        (member) => member.typeId === targetOptionalInfo.someType,
-      );
-      if (!actualSomeLayout || !targetSomeLayout) {
-        throw new Error("inline optional layout is missing Some member");
-      }
-      const actualInlineType = wasmTypeFor(actualType, ctx);
-      const actualBoxType = getInlineHeapBoxType({ typeId: actualType, ctx });
-      const valueType = binaryen.getExpressionType(value);
-      const directlyNormalizedActual = normalizeValueToInlineAbi({
-        value,
-        typeId: actualType,
-        ctx,
-        fnCtx,
-      });
-      const directlyNormalizedType = binaryen.getExpressionType(
-        directlyNormalizedActual,
-      );
-      const normalizedActual =
-        directlyNormalizedType === actualInlineType ||
-        directlyNormalizedType === binaryen.unreachable
-          ? directlyNormalizedActual
-          : normalizeValueToInlineAbi({
-              value: coerceValueToType({
-                value,
-                actualType: actualOptionalInfo.innerType,
-                targetType: actualType,
-                ctx,
-                fnCtx,
-              }),
-              typeId: actualType,
-              ctx,
-              fnCtx,
-            });
-      const boxedActual =
-        actualBoxType && valueType === actualBoxType
-          ? value
-          : actualBoxType
-            ? boxInlineValue({
-                value: normalizedActual,
+        const actualLayout = getInlineUnionLayout(actualType, ctx);
+        const targetLayout = getInlineUnionLayout(targetType, ctx);
+        const actualSomeLayout = actualLayout.members.find(
+          (member) => member.typeId === actualOptionalInfo.someType,
+        );
+        const targetSomeLayout = targetLayout.members.find(
+          (member) => member.typeId === targetOptionalInfo.someType,
+        );
+        if (!actualSomeLayout || !targetSomeLayout) {
+          throw new Error("inline optional layout is missing Some member");
+        }
+        const actualInlineType = wasmTypeFor(actualType, ctx);
+        const actualBoxType = getInlineHeapBoxType({ typeId: actualType, ctx });
+        const valueType = binaryen.getExpressionType(value);
+        const directlyNormalizedActual = normalizeValueToInlineAbi({
+          value,
+          typeId: actualType,
+          ctx,
+          fnCtx,
+        });
+        const directlyNormalizedType = binaryen.getExpressionType(
+          directlyNormalizedActual,
+        );
+        const normalizedActual =
+          directlyNormalizedType === actualInlineType ||
+          directlyNormalizedType === binaryen.unreachable
+            ? directlyNormalizedActual
+            : normalizeValueToInlineAbi({
+                value: coerceValueToType({
+                  value,
+                  actualType: actualOptionalInfo.innerType,
+                  targetType: actualType,
+                  ctx,
+                  fnCtx,
+                }),
                 typeId: actualType,
                 ctx,
                 fnCtx,
-              })
-            : undefined;
-      const canUseBoxedActual =
-        actualBoxType &&
-        boxedActual &&
-        binaryen.getExpressionType(boxedActual) === actualBoxType;
-      const boxedTemp =
-        canUseBoxedActual
+              });
+        const boxedActual =
+          actualBoxType && valueType === actualBoxType
+            ? value
+            : actualBoxType
+              ? boxInlineValue({
+                  value: normalizedActual,
+                  typeId: actualType,
+                  ctx,
+                  fnCtx,
+                })
+              : undefined;
+        const canUseBoxedActual =
+          actualBoxType &&
+          boxedActual &&
+          binaryen.getExpressionType(boxedActual) === actualBoxType;
+        const boxedTemp = canUseBoxedActual
           ? allocateTempLocal(actualBoxType, fnCtx, actualType, ctx)
           : undefined;
-      const boxedPointer = (): binaryen.ExpressionRef => {
-        if (!boxedTemp || !actualBoxType) {
-          throw new Error("inline optional box temp is missing");
-        }
-        return ctx.mod.local.get(boxedTemp.index, actualBoxType);
-      };
-      const tagValue =
-        canUseBoxedActual
+        const boxedPointer = (): binaryen.ExpressionRef => {
+          if (!boxedTemp || !actualBoxType) {
+            throw new Error("inline optional box temp is missing");
+          }
+          return ctx.mod.local.get(boxedTemp.index, actualBoxType);
+        };
+        const tagValue = canUseBoxedActual
           ? structGetFieldValue({
               mod: ctx.mod,
               fieldType: actualLayout.abiTypes[0]!,
@@ -1412,8 +1430,7 @@ export const coerceValueToType = ({
           : actualLayout.abiTypes.length === 1
             ? normalizedActual
             : ctx.mod.tuple.extract(normalizedActual, 0);
-      const payload =
-        canUseBoxedActual
+        const payload = canUseBoxedActual
           ? makeInlineValue({
               values: actualSomeLayout.abiTypes.map((abiType, index) =>
                 structGetFieldValue({
@@ -1436,84 +1453,98 @@ export const coerceValueToType = ({
               ),
               ctx,
             });
-      const inner = normalizeValueToInlineAbi({
-        value: coerceValueToType({
-          value: payload,
-          actualType: actualOptionalInfo.innerType,
-          targetType: targetOptionalInfo.innerType,
-          ctx,
-          fnCtx,
-        }),
-        typeId: targetOptionalInfo.innerType,
-        ctx,
-        fnCtx,
-      });
-      const innerAbiTypes = expandAbiTypes(binaryen.getExpressionType(inner));
-      const someValue = makeInlineValue({
-        values: targetLayout.abiTypes.map((abiType, index) => {
-          if (index === 0) {
-            return ctx.mod.i32.const(targetSomeLayout.tag);
-          }
-          const memberIndex = index - targetSomeLayout.abiStart;
-          if (
-            memberIndex >= 0 &&
-            memberIndex < innerAbiTypes.length &&
-            targetSomeLayout.abiStart + memberIndex === index
-          ) {
-            return extractAbiLane({
-              value: inner,
-              abiTypes: innerAbiTypes,
-              index: memberIndex,
-              ctx,
-            });
-          }
-          return defaultValueForWasmType(abiType, ctx);
-        }),
-        ctx,
-      });
-      const noneValue = makeInlineValue({
-        values: targetLayout.abiTypes.map((abiType, index) =>
-          index === 0
-            ? ctx.mod.i32.const(0)
-            : defaultValueForWasmType(abiType, ctx),
-        ),
-        ctx,
-      });
-      const coerced = ctx.mod.if(
-        ctx.mod.i32.eq(tagValue, ctx.mod.i32.const(0)),
-        noneValue,
-        someValue,
-      );
-      if (!boxedTemp || !canUseBoxedActual) {
-        return coerced;
-      }
-      return ctx.mod.block(
-        null,
-        [
-          storeLocalValue({
-            binding: boxedTemp,
-            value: boxedActual,
+        const inner = normalizeValueToInlineAbi({
+          value: coerceValueToType({
+            value: payload,
+            actualType: actualOptionalInfo.innerType,
+            targetType: targetOptionalInfo.innerType,
             ctx,
             fnCtx,
           }),
-          coerced,
-        ],
-        wasmTypeFor(targetType, ctx),
-      );
+          typeId: targetOptionalInfo.innerType,
+          ctx,
+          fnCtx,
+        });
+        const innerAbiTypes = expandAbiTypes(binaryen.getExpressionType(inner));
+        const someValue = makeInlineValue({
+          values: targetLayout.abiTypes.map((abiType, index) => {
+            if (index === 0) {
+              return ctx.mod.i32.const(targetSomeLayout.tag);
+            }
+            const memberIndex = index - targetSomeLayout.abiStart;
+            if (
+              memberIndex >= 0 &&
+              memberIndex < innerAbiTypes.length &&
+              targetSomeLayout.abiStart + memberIndex === index
+            ) {
+              return extractAbiLane({
+                value: inner,
+                abiTypes: innerAbiTypes,
+                index: memberIndex,
+                ctx,
+              });
+            }
+            return defaultValueForWasmType(abiType, ctx);
+          }),
+          ctx,
+        });
+        const noneValue = makeInlineValue({
+          values: targetLayout.abiTypes.map((abiType, index) =>
+            index === 0
+              ? ctx.mod.i32.const(0)
+              : defaultValueForWasmType(abiType, ctx),
+          ),
+          ctx,
+        });
+        const coerced = ctx.mod.if(
+          ctx.mod.i32.eq(tagValue, ctx.mod.i32.const(0)),
+          noneValue,
+          someValue,
+        );
+        if (!boxedTemp || !canUseBoxedActual) {
+          return coerced;
+        }
+        return ctx.mod.block(
+          null,
+          [
+            storeLocalValue({
+              binding: boxedTemp,
+              value: boxedActual,
+              ctx,
+              fnCtx,
+            }),
+            coerced,
+          ],
+          wasmTypeFor(targetType, ctx),
+        );
       }
 
       if (!actualInlineOptional && !targetInlineOptional) {
-        const actualSomeInfo = getStructuralTypeInfo(actualOptionalInfo.someType, ctx);
-        const actualNoneInfo = getStructuralTypeInfo(actualOptionalInfo.noneType, ctx);
-        const targetSomeInfo = getStructuralTypeInfo(targetOptionalInfo.someType, ctx);
-        const targetNoneInfo = getStructuralTypeInfo(targetOptionalInfo.noneType, ctx);
+        const actualSomeInfo = getStructuralTypeInfo(
+          actualOptionalInfo.someType,
+          ctx,
+        );
+        const actualNoneInfo = getStructuralTypeInfo(
+          actualOptionalInfo.noneType,
+          ctx,
+        );
+        const targetSomeInfo = getStructuralTypeInfo(
+          targetOptionalInfo.someType,
+          ctx,
+        );
+        const targetNoneInfo = getStructuralTypeInfo(
+          targetOptionalInfo.noneType,
+          ctx,
+        );
         if (
           !actualSomeInfo ||
           !actualNoneInfo ||
           !targetSomeInfo ||
           !targetNoneInfo
         ) {
-          throw new Error("heap optional coercion requires structural member info");
+          throw new Error(
+            "heap optional coercion requires structural member info",
+          );
         }
         if (
           actualSomeInfo.fields.length !== 1 ||
@@ -1521,11 +1552,18 @@ export const coerceValueToType = ({
           actualNoneInfo.fields.length !== 0 ||
           targetNoneInfo.fields.length !== 0
         ) {
-          throw new Error("heap optional coercion requires canonical Some/None members");
+          throw new Error(
+            "heap optional coercion requires canonical Some/None members",
+          );
         }
 
         const sourceType = wasmTypeFor(actualType, ctx);
-        const sourceTemp = allocateTempLocal(sourceType, fnCtx, actualType, ctx);
+        const sourceTemp = allocateTempLocal(
+          sourceType,
+          fnCtx,
+          actualType,
+          ctx,
+        );
         const sourceRef = () =>
           coerceExprToWasmType({
             expr: loadLocalValue(sourceTemp, ctx),
@@ -1612,7 +1650,9 @@ export const coerceValueToType = ({
     if (memberLayout) {
       const unionAbiTypes = layout.abiTypes;
       const sourceAbiTypes =
-        valueAbiTypes.length === unionAbiTypes.length ? unionAbiTypes : valueAbiTypes;
+        valueAbiTypes.length === unionAbiTypes.length
+          ? unionAbiTypes
+          : valueAbiTypes;
       const extracted = makeInlineValue({
         values: memberLayout.abiTypes.map((_, index) =>
           extractAbiLane({
@@ -1662,18 +1702,24 @@ export const coerceValueToType = ({
   if (optionalInfo) {
     const someInfo = getStructuralTypeInfo(optionalInfo.someType, ctx);
     if (!someInfo) {
-      throw new Error("Optional wrapping requires structural type info for Some member");
+      throw new Error(
+        "Optional wrapping requires structural type info for Some member",
+      );
     }
     if (someInfo.fields.length !== 1) {
       throw new Error("Optional Some member must contain exactly one field");
     }
 
-    const comparison = ctx.program.types.unify(actualType, optionalInfo.innerType, {
-      location: ctx.module.hir.module.ast,
-      reason: "optional Some coercion",
-      variance: "covariant",
-      allowUnknown: true,
-    });
+    const comparison = ctx.program.types.unify(
+      actualType,
+      optionalInfo.innerType,
+      {
+        location: ctx.module.hir.module.ast,
+        reason: "optional Some coercion",
+        variance: "covariant",
+        allowUnknown: true,
+      },
+    );
     if (comparison.ok) {
       const wrappedInnerValue =
         actualType === optionalInfo.innerType
@@ -1860,7 +1906,10 @@ export const coerceValueToType = ({
         );
       }
 
-      const targetSomeInfo = getStructuralTypeInfo(targetOptionalInfo.someType, ctx);
+      const targetSomeInfo = getStructuralTypeInfo(
+        targetOptionalInfo.someType,
+        ctx,
+      );
       if (!targetSomeInfo || targetSomeInfo.fields.length !== 1) {
         throw new Error("optional Some member must contain exactly one field");
       }
@@ -1924,7 +1973,9 @@ export const coerceValueToType = ({
       });
     }
     const payloadValue = memberValue;
-    const memberAbiTypes = expandAbiTypes(binaryen.getExpressionType(payloadValue));
+    const memberAbiTypes = expandAbiTypes(
+      binaryen.getExpressionType(payloadValue),
+    );
     if (memberAbiTypes.length !== memberLayout.abiTypes.length) {
       throw new Error(
         `inline union member ABI mismatch for ${targetType}/${memberTarget}: expected ${memberLayout.abiTypes.length}, got ${memberAbiTypes.length}`,
@@ -2003,15 +2054,13 @@ export const coerceValueToType = ({
     const breakLabel = `coerce_fixed_array_break_${actualType}_${targetType}_${targetTemp.index}`;
     const loopLabel = `coerce_fixed_array_loop_${actualType}_${targetType}_${targetTemp.index}`;
 
-    const init = defaultFixedArrayElementValue({ typeId: targetElementType, ctx });
+    const init = defaultFixedArrayElementValue({
+      typeId: targetElementType,
+      ctx,
+    });
     const buildTarget = ctx.mod.local.set(
       targetTemp.index,
-      arrayNew(
-        ctx.mod,
-        binaryenTypeToHeapType(targetArrayType),
-        len(),
-        init,
-      ),
+      arrayNew(ctx.mod, binaryenTypeToHeapType(targetArrayType), len(), init),
     );
 
     const storedSourceElement = arrayGet(
@@ -2044,7 +2093,10 @@ export const coerceValueToType = ({
     const loopBody = ctx.mod.block(null, [
       ctx.mod.if(ctx.mod.i32.ge_u(idx(), len()), ctx.mod.br(breakLabel)),
       arraySet(ctx.mod, targetRef(), idx(), storedElement),
-      ctx.mod.local.set(indexTemp.index, ctx.mod.i32.add(idx(), ctx.mod.i32.const(1))),
+      ctx.mod.local.set(
+        indexTemp.index,
+        ctx.mod.i32.add(idx(), ctx.mod.i32.const(1)),
+      ),
       ctx.mod.br(loopLabel),
     ]);
 
@@ -2083,10 +2135,16 @@ export const coerceValueToType = ({
     }
   }
 
-  if (actualDesc.kind === "union" && !shouldInlineUnionLayout(actualType, ctx)) {
+  if (
+    actualDesc.kind === "union" &&
+    !shouldInlineUnionLayout(actualType, ctx)
+  ) {
     const targetWasmType = wasmTypeFor(targetType, ctx);
     const actualWasmType = wasmTypeFor(actualType, ctx);
-    if (actualWasmType === targetWasmType || targetWasmType === ctx.rtt.baseType) {
+    if (
+      actualWasmType === targetWasmType ||
+      targetWasmType === ctx.rtt.baseType
+    ) {
       return coerceExprToWasmType({
         expr: value,
         targetType: targetWasmType,
@@ -2134,7 +2192,10 @@ export const coerceValueToType = ({
     if (actualInfo.fields.length !== 2 || targetInfo.fields.length !== 2) {
       return undefined;
     }
-    if (actualCount.wasmType !== binaryen.i32 || targetCount.wasmType !== binaryen.i32) {
+    if (
+      actualCount.wasmType !== binaryen.i32 ||
+      targetCount.wasmType !== binaryen.i32
+    ) {
       return undefined;
     }
 
@@ -2152,7 +2213,10 @@ export const coerceValueToType = ({
       );
       return isFixedArray(unfolded);
     };
-    if (!isFixedArray(actualStorage.typeId) || !isFixedArray(targetStorage.typeId)) {
+    if (
+      !isFixedArray(actualStorage.typeId) ||
+      !isFixedArray(targetStorage.typeId)
+    ) {
       return undefined;
     }
     const valueType = binaryen.getExpressionType(value);
@@ -2286,6 +2350,16 @@ const coerceClosureToTarget = ({
   const targetEffectful =
     typeof targetDesc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(targetDesc.effectRow);
+  if (
+    actualEffectful &&
+    targetEffectful &&
+    actualClosure.interfaceType === targetClosure.interfaceType &&
+    actualClosure.fnRefType === targetClosure.fnRefType &&
+    actualClosure.resultType === targetClosure.resultType &&
+    sameWasmTypes(actualClosure.paramTypes, targetClosure.paramTypes)
+  ) {
+    return value;
+  }
   if (actualEffectful && !targetEffectful) {
     return value;
   }
@@ -2310,7 +2384,11 @@ const coerceClosureToTarget = ({
   ] as number[]);
 
   const innerEnv = () =>
-    refCast(ctx.mod, ctx.mod.local.get(0, targetClosure.interfaceType), envType);
+    refCast(
+      ctx.mod,
+      ctx.mod.local.get(0, targetClosure.interfaceType),
+      envType,
+    );
   const innerClosure = () =>
     structGetFieldValue({
       mod: ctx.mod,
@@ -2332,7 +2410,8 @@ const coerceClosureToTarget = ({
   const forwardedParamTypes = actualEffectful
     ? targetClosure.paramTypes
     : targetClosure.paramTypes.slice(targetClosure.userParamOffset);
-  const forwardedArgsStart = 1 + (actualEffectful ? 0 : targetClosure.userParamOffset);
+  const forwardedArgsStart =
+    1 + (actualEffectful ? 0 : targetClosure.userParamOffset);
   const callArgs = [
     innerClosure(),
     ...forwardedParamTypes.map((type, index) =>
@@ -2343,7 +2422,7 @@ const coerceClosureToTarget = ({
     ctx.mod,
     innerTarget,
     callArgs as number[],
-    actualClosure.resultType
+    actualClosure.resultType,
   );
   const actualReturnTypeId = closureReturnTypeId(actualType, ctx);
   const targetReturnTypeId = closureReturnTypeId(targetType, ctx);
@@ -2371,7 +2450,8 @@ const coerceClosureToTarget = ({
           })
       : innerResult;
   const wrapped =
-    targetEffectful && binaryen.getExpressionType(innerValue) === targetValueType
+    targetEffectful &&
+    binaryen.getExpressionType(innerValue) === targetValueType
       ? wrapValueInOutcome({
           valueExpr: innerValue,
           valueType: targetValueType,
@@ -2386,11 +2466,14 @@ const coerceClosureToTarget = ({
     params,
     targetClosure.resultType,
     wrapperLocals,
-    wrapped
+    wrapped,
   );
   cache.set(key, { envType, fnName, fnRefType });
 
-  return initStruct(ctx.mod, envType, [refFunc(ctx.mod, fnName, fnRefType), value]);
+  return initStruct(ctx.mod, envType, [
+    refFunc(ctx.mod, fnName, fnRefType),
+    value,
+  ]);
 };
 
 const functionTypesCompatibleForClosureCoercion = ({
@@ -2468,7 +2551,7 @@ export const emitStructuralConversion = ({
   target.fields.forEach((field) => {
     if (!actual.fieldMap.has(field.name)) {
       throw new Error(
-        `structural value missing field ${field.name} required for conversion`
+        `structural value missing field ${field.name} required for conversion`,
       );
     }
   });
@@ -2487,8 +2570,7 @@ export const emitStructuralConversion = ({
       fnCtx,
     }),
   ];
-  const sourceRef = (): binaryen.ExpressionRef =>
-    loadLocalValue(temp, ctx);
+  const sourceRef = (): binaryen.ExpressionRef => loadLocalValue(temp, ctx);
 
   const shouldDirectFixedArrayLoad = (typeId: TypeId): boolean => {
     const desc = ctx.program.types.getTypeDesc(typeId);
@@ -2514,24 +2596,24 @@ export const emitStructuralConversion = ({
     const raw =
       actual.runtimeType !== ctx.rtt.baseType ||
       shouldDirectFixedArrayLoad(sourceField.typeId)
-      ? (() => {
-          const casted = refCast(ctx.mod, sourceRef(), actual.runtimeType);
-          const loaded = structGetFieldValue({
-            mod: ctx.mod,
-            fieldType: sourceField.heapWasmType,
-            fieldIndex: sourceField.runtimeIndex,
-            exprRef: casted,
+        ? (() => {
+            const casted = refCast(ctx.mod, sourceRef(), actual.runtimeType);
+            const loaded = structGetFieldValue({
+              mod: ctx.mod,
+              fieldType: sourceField.heapWasmType,
+              fieldIndex: sourceField.runtimeIndex,
+              exprRef: casted,
+            });
+            return sourceField.wasmType === sourceField.heapWasmType
+              ? loaded
+              : ctx.mod.block(null, [loaded], sourceField.wasmType);
+          })()
+        : loadStructuralField({
+            structInfo: actual,
+            field: sourceField,
+            pointer: sourceRef,
+            ctx,
           });
-          return sourceField.wasmType === sourceField.heapWasmType
-            ? loaded
-            : ctx.mod.block(null, [loaded], sourceField.wasmType);
-        })()
-      : loadStructuralField({
-          structInfo: actual,
-          field: sourceField,
-          pointer: sourceRef,
-          ctx,
-        });
     const coerced = coerceValueToType({
       value: raw,
       actualType: sourceField.typeId,
@@ -2634,7 +2716,9 @@ export const storeStructuralField = ({
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   if (structInfo.layoutKind === "value-object") {
-    throw new Error("storing directly into inline value-object fields is not supported");
+    throw new Error(
+      "storing directly into inline value-object fields is not supported",
+    );
   }
   if (!field.setterType) {
     throw new Error(`missing setter for structural field ${field.name}`);

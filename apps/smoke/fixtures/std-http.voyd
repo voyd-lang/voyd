@@ -1,12 +1,16 @@
 use std::env::self as env
 use std::error::HostError
-use std::http::{ Response, method_as_string }
+use std::http::{ IncomingRequest, Response, method_as_string }
 use std::http::client::self as client
 use std::http::client::{ ClientRequest, HttpClient }
 use std::http::server::self as server
-use std::http::server::{ HttpServer, PendingRequest, Server, ServerConfig }
+use std::http::server::{ HttpServer, PendingRequest, ServeTaskPolicy, Server, ServerConfig }
+use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
+use std::task::self as task
+use std::time::self as time
+use std::time::{ Duration, Time }
 
 fn status_or_error(result: Result<Response, HostError>): () -> i32
   match(result)
@@ -52,6 +56,57 @@ pub fn serve_once_from_env(): (HttpServer, env::Env) -> i32
             Ok<Unit>:
               let _ = server::close(srv)
               200
+
+pub fn serve_detached_from_env(): (HttpServer, task::TaskRuntime, env::Env, Time) -> i32
+  let port = smoke_port()
+  if port <= 0:
+    return -10
+
+  let result = server::serve_each(
+    config: ServerConfig::init(
+      port: port,
+      host: "127.0.0.1".as_slice().to_string(),
+      max_pending_requests: 8,
+      response_timeout_millis: 2000
+    ),
+    policy: ServeTaskPolicy::detached(),
+    handle: handle_detached_request
+  )
+  match(result)
+    Ok<Unit>:
+      0
+    Err<HostError> { error }:
+      -error.code
+
+pub fn serve_detached_static_from_env(): (HttpServer, task::TaskRuntime, env::Env) -> i32
+  let port = smoke_port()
+  if port <= 0:
+    return -10
+
+  let result = server::serve_each(
+    config: ServerConfig::init(
+      port: port,
+      host: "127.0.0.1".as_slice().to_string(),
+      max_pending_requests: 8,
+      response_timeout_millis: 2000
+    ),
+    policy: ServeTaskPolicy::detached(),
+    handle: handle_static_detached_request
+  )
+  match(result)
+    Ok<Unit>:
+      0
+    Err<HostError> { error }:
+      -error.code
+
+fn handle_detached_request(request: IncomingRequest): Time -> Response
+  if request.path.equals("/slow".as_slice().to_string()):
+    let _ = time::sleep(Duration::from_millis(cast::to_i64(200)))
+    return Response::ok().text("slow".as_slice())
+  Response::ok().text("fast".as_slice())
+
+fn handle_static_detached_request(request: IncomingRequest): () -> Response
+  Response::ok().text("static".as_slice())
 
 fn smoke_port(): env::Env -> i32
   match(env::get_int("VOYD_HTTP_SMOKE_PORT".as_slice()))

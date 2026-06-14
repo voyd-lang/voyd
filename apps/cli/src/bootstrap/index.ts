@@ -2,6 +2,7 @@ import { createRequire } from "node:module";
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import type { BootstrapTemplate } from "../config/types.js";
+import { webSsrLoader } from "./loaders/web-ssr.js";
 import { vxSpaLoader } from "./loaders/vx-spa.js";
 import type {
   BootstrapConfig,
@@ -16,6 +17,7 @@ const { version } = require("../../package.json") as { version: string };
 
 const loaders = new Map<BootstrapTemplate, BootstrapLoader>([
   [vxSpaLoader.id, vxSpaLoader],
+  [webSsrLoader.id, webSsrLoader],
 ]);
 
 export async function runBootstrap(

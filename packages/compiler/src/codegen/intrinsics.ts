@@ -57,6 +57,7 @@ import {
   boundaryMsgPackPayloadField,
   isBoundaryMsgPackValue,
 } from "./boundary-metadata.js";
+import { currentHandlerValue } from "./expressions/call/shared.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
@@ -274,7 +275,8 @@ const ensureTaskStarterHelper = ({
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
   const exportName = `__voyd_task_start_${sanitizeTaskKey(base.key)}`;
-  const params = binaryen.createType([base.interfaceType]);
+  const hiddenParamTypes = base.paramTypes.slice(0, base.userParamOffset);
+  const params = binaryen.createType([base.interfaceType, ...hiddenParamTypes]);
   const helperFnCtx = {
     locals: [] as binaryen.Type[],
     nextLocalIndex: 1,
@@ -292,9 +294,7 @@ const ensureTaskStarterHelper = ({
       : refCast(ctx.mod, fnField, base.fnRefType);
   const callArgs = [
     closureRef,
-    ...base.paramTypes
-      .slice(0, base.userParamOffset)
-      .map(() => ctx.effectsBackend.abi.hiddenHandlerValue(ctx)),
+    ...hiddenParamTypes.map((type, index) => ctx.mod.local.get(index + 1, type)),
   ];
   const callExpr = callRef(
     ctx.mod,
@@ -859,15 +859,26 @@ export const compileIntrinsicCall = ({
         ctx,
       });
       const closureInfo = getClosureTypeInfo(workTypeId, ctx);
+      const hiddenParamTypes = closureInfo.paramTypes.slice(
+        0,
+        closureInfo.userParamOffset
+      );
       const importName = `__voyd_${name}_${sanitizeTaskKey(starterExport)}`;
       const importFn = ensureTaskImport({
         name: importName,
         base: `${name === "__task_detach" ? "spawn_detached" : "spawn_attached"}__${starterExport}`,
-        params: [closureInfo.interfaceType],
+        params: [closureInfo.interfaceType, ...hiddenParamTypes],
         result: binaryen.i32,
         ctx,
       });
-      return ctx.mod.call(importFn, [args[0]!], binaryen.i32);
+      return ctx.mod.call(
+        importFn,
+        [
+          args[0]!,
+          ...hiddenParamTypes.map(() => currentHandlerValue(ctx, fnCtx)),
+        ],
+        binaryen.i32
+      );
     }
     case "__task_cancel": {
       assertArgCount(name, args, 1);

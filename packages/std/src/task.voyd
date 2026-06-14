@@ -39,10 +39,10 @@ pub eff TaskRuntime
   failure_message(tail, id: i32) -> MsgPack
 
 @intrinsic(name: "__task_spawn")
-fn spawn_attached_id<T>(work: fn() -> T): () -> i32 __task_spawn(work)
+fn spawn_attached_id<T>(work: fn() : (open) -> T): (open) -> i32 __task_spawn(work)
 
 @intrinsic(name: "__task_detach")
-fn spawn_detached_id<T>(work: fn() -> T): () -> i32 __task_detach(work)
+fn spawn_detached_id<T>(work: fn() : (open) -> T): (open) -> i32 __task_detach(work)
 
 @intrinsic(name: "__task_cancel")
 fn cancel_task_id(id: i32): () -> bool __task_cancel(id)
@@ -50,10 +50,10 @@ fn cancel_task_id(id: i32): () -> bool __task_cancel(id)
 @intrinsic(name: "__task_take_value")
 fn take_task_value<T>(id: i32): () -> T __task_take_value(id)
 
-pub fn spawn<T>(work: fn() -> T): TaskRuntime -> Task<T>
+pub fn spawn<T>(work: fn() : (open) -> T): (TaskRuntime, open) -> Task<T>
   Task<T> { id: spawn_attached_id(work) }
 
-pub fn detach<T>(work: fn() -> T): TaskRuntime -> Task<T>
+pub fn detach<T>(work: fn() : (open) -> T): (TaskRuntime, open) -> Task<T>
   Task<T> { id: spawn_detached_id(work) }
 
 pub fn join(task: Task<void>): TaskRuntime -> TaskOutcome<Unit>

@@ -120,7 +120,8 @@ pub fn get_context(
   handler: fn(Context) : (open) -> String
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn get_context(
@@ -129,7 +130,8 @@ pub fn get_context(
   handler: fn(Context) : (open) -> StringSlice
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn get_context(
@@ -138,7 +140,8 @@ pub fn get_context(
   handler: fn(Context) : (open) -> Bytes
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn get_context(
@@ -147,7 +150,8 @@ pub fn get_context(
   handler: fn(Context) : (open) -> JsonValue
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    json_value(handler(ctx))
+    let result = handler(ctx)
+    json_value(result)
   )
 
 pub fn get_context(
@@ -156,7 +160,8 @@ pub fn get_context(
   handler: fn(Context) : (open) -> (Status, String)
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn get_context(
@@ -165,7 +170,8 @@ pub fn get_context(
   handler: fn(Context) : (open) -> (Status, StringSlice)
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn get_context(
@@ -174,7 +180,8 @@ pub fn get_context(
   handler: fn(Context) : (open) -> (Status, Bytes)
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn get_context(
@@ -183,7 +190,8 @@ pub fn get_context(
   handler: fn(Context) : (open) -> (Status, JsonValue)
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn get_context<T: IntoResponse<T>, E: IntoResponse<E>>(
@@ -192,7 +200,8 @@ pub fn get_context<T: IntoResponse<T>, E: IntoResponse<E>>(
   handler: fn(Context) : (open) -> Result<T, E>
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    to_response<T, E>(handler(ctx))
+    let result = handler(ctx)
+    to_response<T, E>(result)
   )
 
 pub fn get_context<T: IntoResponse<T>>(
@@ -201,7 +210,8 @@ pub fn get_context<T: IntoResponse<T>>(
   handler: fn(Context) : (open) -> Option<T>
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
-    match(handler(ctx))
+    let result = handler(ctx)
+    match(result)
       Some<T> { value }:
         to_response<T>(value)
       None:
@@ -217,13 +227,34 @@ pub fn get_unit(
     handler()
   )
 
+pub fn get_unit(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn() : (open) -> String
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (_ctx: Context) -> Response =>
+    let result = handler()
+    to_response(result)
+  )
+
+pub fn get_unit(
+  app: AppBuild,
+  path: StringSlice,
+  handler: fn() : (open) -> StringSlice
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (_ctx: Context) -> Response =>
+    let result = handler()
+    to_response(result)
+  )
+
 pub fn get_unit<R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
   handler: fn() : (open) -> R
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: (_ctx: Context) -> Response =>
-    to_response<R>(handler())
+    let result = handler()
+    to_response<R>(result)
   )
 
 pub fn get<P>(
@@ -3722,6 +3753,28 @@ pub fn route<R: IntoResponse<R>>(
 ) -> AppBuild
   route_context(app, path, method: method, handler)
 
+pub fn route_unit(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> String
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    let result = handler()
+    to_response(result)
+  )
+
+pub fn route_unit(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn() : (open) -> StringSlice
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    let result = handler()
+    to_response(result)
+  )
+
 pub fn route_unit<R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -3729,7 +3782,8 @@ pub fn route_unit<R: IntoResponse<R>>(
   handler: fn() : (open) -> R
 ) -> AppBuild
   app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
-    to_response<R>(handler())
+    let result = handler()
+    to_response<R>(result)
   )
 
 pub fn route_unit<R: IntoResponse<R>>(
@@ -3740,7 +3794,8 @@ pub fn route_unit<R: IntoResponse<R>>(
 ) -> AppBuild
   app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
     run_with_timeout(timeout) do:
-      to_response<R>(handler())
+      let result = handler()
+      to_response<R>(result)
   )
 
 pub fn route_unit(
@@ -3750,7 +3805,8 @@ pub fn route_unit(
   handler: fn() : (open) -> JsonValue
 ) -> AppBuild
   app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
-    json_value(handler())
+    let result = handler()
+    json_value(result)
   )
 
 pub fn route_unit(
@@ -3760,7 +3816,8 @@ pub fn route_unit(
   handler: fn() : (open) -> (Status, String)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
-    to_response(handler())
+    let result = handler()
+    to_response(result)
   )
 
 pub fn route_unit(
@@ -3770,7 +3827,8 @@ pub fn route_unit(
   handler: fn() : (open) -> (Status, StringSlice)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
-    to_response(handler())
+    let result = handler()
+    to_response(result)
   )
 
 pub fn route_unit(
@@ -3780,7 +3838,8 @@ pub fn route_unit(
   handler: fn() : (open) -> (Status, Bytes)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
-    to_response(handler())
+    let result = handler()
+    to_response(result)
   )
 
 pub fn route_unit(
@@ -3790,7 +3849,8 @@ pub fn route_unit(
   handler: fn() : (open) -> (Status, JsonValue)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
-    to_response(handler())
+    let result = handler()
+    to_response(result)
   )
 
 pub fn route_unit<T: IntoResponse<T>, E: IntoResponse<E>>(
@@ -3800,7 +3860,8 @@ pub fn route_unit<T: IntoResponse<T>, E: IntoResponse<E>>(
   handler: fn() : (open) -> Result<T, E>
 ) -> AppBuild
   app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
-    to_response<T, E>(handler())
+    let result = handler()
+    to_response<T, E>(result)
   )
 
 pub fn route_unit<T: IntoResponse<T>>(
@@ -3810,7 +3871,8 @@ pub fn route_unit<T: IntoResponse<T>>(
   handler: fn() : (open) -> Option<T>
 ) -> AppBuild
   app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
-    match(handler())
+    let result = handler()
+    match(result)
       Some<T> { value }:
         to_response<T>(value)
       None:
@@ -3824,7 +3886,8 @@ pub fn route_context<R: IntoResponse<R>>(
   handler: fn(Context) : (open) -> R
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    to_response<R>(handler(ctx))
+    let result = handler(ctx)
+    to_response<R>(result)
   )
 
 pub fn route_context_dto<R>(
@@ -3834,7 +3897,8 @@ pub fn route_context_dto<R>(
   handler: fn(Context) : (open) -> R
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    json_dto<R>(handler(ctx))
+    let result = handler(ctx)
+    json_dto<R>(result)
   )
 
 pub fn route_context_dto<R>(
@@ -3845,7 +3909,8 @@ pub fn route_context_dto<R>(
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
     run_with_timeout(timeout) do:
-      json_dto<R>(handler(ctx))
+      let result = handler(ctx)
+      json_dto<R>(result)
   )
 
 pub fn route_context_result_dto<T, E: IntoResponse<E>>(
@@ -3855,7 +3920,8 @@ pub fn route_context_result_dto<T, E: IntoResponse<E>>(
   handler: fn(Context) : (open) -> Result<T, E>
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    result_dto_json<T, E>(handler(ctx))
+    let result = handler(ctx)
+    result_dto_json<T, E>(result)
   )
 
 pub fn route_context_result_dto<T, E: IntoResponse<E>>(
@@ -3866,7 +3932,8 @@ pub fn route_context_result_dto<T, E: IntoResponse<E>>(
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
     run_with_timeout(timeout) do:
-      result_dto_json<T, E>(handler(ctx))
+      let result = handler(ctx)
+      result_dto_json<T, E>(result)
   )
 
 pub fn route_context<R: IntoResponse<R>>(
@@ -3877,7 +3944,8 @@ pub fn route_context<R: IntoResponse<R>>(
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
     run_with_timeout(timeout) do:
-      to_response<R>(handler(ctx))
+      let result = handler(ctx)
+      to_response<R>(result)
   )
 
 pub fn route_context(
@@ -3887,7 +3955,8 @@ pub fn route_context(
   handler: fn(Context) : (open) -> JsonValue
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    json_value(handler(ctx))
+    let result = handler(ctx)
+    json_value(result)
   )
 
 pub fn route_context(
@@ -3897,7 +3966,8 @@ pub fn route_context(
   handler: fn(Context) : (open) -> (Status, String)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn route_context(
@@ -3907,7 +3977,8 @@ pub fn route_context(
   handler: fn(Context) : (open) -> (Status, StringSlice)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn route_context(
@@ -3917,7 +3988,8 @@ pub fn route_context(
   handler: fn(Context) : (open) -> (Status, Bytes)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn route_context(
@@ -3927,7 +3999,8 @@ pub fn route_context(
   handler: fn(Context) : (open) -> (Status, JsonValue)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    to_response(handler(ctx))
+    let result = handler(ctx)
+    to_response(result)
   )
 
 pub fn route_context<T: IntoResponse<T>, E: IntoResponse<E>>(
@@ -3937,7 +4010,8 @@ pub fn route_context<T: IntoResponse<T>, E: IntoResponse<E>>(
   handler: fn(Context) : (open) -> Result<T, E>
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    to_response<T, E>(handler(ctx))
+    let result = handler(ctx)
+    to_response<T, E>(result)
   )
 
 pub fn route_context<T: IntoResponse<T>>(
